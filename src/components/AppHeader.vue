@@ -35,6 +35,11 @@ function onHistory() {
 <template>
   <header class="app-header">
     <div class="brand">
+      <span class="brand-logo">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
+        </svg>
+      </span>
       <span class="brand-name">CODEX</span>
       <button
         v-if="cwd"
@@ -75,10 +80,11 @@ function onHistory() {
           />
         </svg>
       </button>
-      <button class="icon-btn" title="新建对话" @click="onNewChat()">
+      <button class="icon-btn newchat-btn" title="新建对话" @click="onNewChat()">
         <svg viewBox="0 0 24 24">
           <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
         </svg>
+        <span>新建对话</span>
       </button>
     </div>
   </header>
