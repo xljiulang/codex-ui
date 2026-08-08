@@ -1225,6 +1225,33 @@ select option {
   fill: currentColor;
 }
 
+.ctx-window {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--green);
+}
+
+.ctx-window.warn {
+  color: var(--accent);
+}
+
+.ctx-window.danger {
+  color: var(--red);
+}
+
+.ctx-window svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
 .send-btn {
   height: 26px;
   padding: 0 16px;

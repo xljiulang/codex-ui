@@ -187,6 +187,34 @@ function attachmentLabel(a: UserInput): string {
 
 const newChatCwdLabel = computed(() => store.newChatCwd ?? store.server.workspace);
 
+// 上下文窗口使用情况：window 未知时不显示
+const ctxUsage = computed(() => {
+  const u = store.threadTokenUsage;
+  if (!u || u.window == null || u.window <= 0) return null;
+  return {
+    pct: Math.min(100, Math.round((u.used / u.window) * 100)),
+    used: u.used,
+    window: u.window,
+  };
+});
+
+const ctxTooltip = computed(() => {
+  const u = ctxUsage.value;
+  if (!u) return "";
+  return `${u.pct}% 已用 ${formatTokens(u.used)} / 共 ${formatTokens(u.window)}`;
+});
+
+const ctxLevel = computed(() => {
+  const p = ctxUsage.value?.pct ?? 0;
+  return p >= 90 ? "danger" : p >= 70 ? "warn" : "";
+});
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 async function pickNewChatCwd() {
   try {
     const dir = await invoke<string | null>("pick_directory");
@@ -309,6 +337,17 @@ function openGoalDialog() {
         </div>
       </div>
       <div class="composer-right">
+        <span
+          v-if="ctxUsage"
+          class="ctx-window"
+          :class="ctxLevel"
+          :title="ctxTooltip"
+        >
+          <svg viewBox="0 0 24 24">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M3 9h18" />
+          </svg>
+        </span>
         <div class="menu-anchor">
           <button class="model-chip" title="模型" @click="store.modelOpen = !store.modelOpen">
           {{ modelChipLabel() }}

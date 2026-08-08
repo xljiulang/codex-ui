@@ -71,6 +71,7 @@ export const store = reactive({
   effort: null as string | null,
   models: [] as ModelInfo[],
   modelsLoaded: false,
+  threadTokenUsage: null as { used: number; window: number | null } | null,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
   newChatCwd: null as string | null,
   taskMode: "execute" as "execute" | "plan" | "goal",
@@ -464,6 +465,7 @@ export async function newEmptyChat() {
   store.resumedThreadId = null;
   store.turnInterrupted = false;
   store.currentTurnId = null;
+  store.threadTokenUsage = null;
   store.showHistory = false;
   store.goalText = null;
   await updateWindowTitle();
@@ -493,6 +495,7 @@ export async function openThread(threadId: string) {
     store.turnActive = false;
     store.turnInterrupted = false;
     store.currentTurnId = null;
+    store.threadTokenUsage = null;
     try {
       const g = await invoke<{ objective?: string; goal?: { objective?: string } }>(
         "goal_get",
@@ -580,6 +583,7 @@ export async function deleteThread(threadId: string) {
       store.currentThreadName = "";
       store.currentThreadCwd = null;
       store.resumedThreadId = null;
+      store.threadTokenUsage = null;
       await updateWindowTitle();
     }
   } catch (e) {
@@ -763,6 +767,21 @@ async function wireEvents() {
       if (store.currentThreadId === p.threadId && p.threadName) {
         store.currentThreadName = p.threadName;
         void updateWindowTitle();
+      }
+    }),
+    await listen("thread/tokenUsage/updated", (e) => {
+      const p = e.payload as {
+        threadId: string;
+        tokenUsage?: {
+          total?: { totalTokens?: number };
+          modelContextWindow?: number | null;
+        };
+      };
+      if (p.threadId === store.currentThreadId) {
+        store.threadTokenUsage = {
+          used: p.tokenUsage?.total?.totalTokens ?? 0,
+          window: p.tokenUsage?.modelContextWindow ?? null,
+        };
       }
     }),
     await listen("thread/status/changed", (e) => {
