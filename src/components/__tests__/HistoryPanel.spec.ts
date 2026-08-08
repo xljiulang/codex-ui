@@ -36,12 +36,14 @@ describe("HistoryPanel 删除确认", () => {
   });
 
   it("确认框弹出后聚焦「删除」按钮", async () => {
-    const wrapper = mount(HistoryPanel);
+    const wrapper = mount(HistoryPanel, { attachTo: document.body });
     await wrapper.find(".del-btn").trigger("click");
+    await wrapper.vm.$nextTick();
 
     const danger = wrapper.find(".modal-foot .btn.danger");
     expect((danger.element as HTMLElement).isConnected).toBe(true);
     expect(document.activeElement).toBe(danger.element);
+    wrapper.unmount();
   });
 
   it("点击「取消」关闭确认框且不删除", async () => {
