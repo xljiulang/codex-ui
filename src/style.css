@@ -233,18 +233,11 @@ select option {
 }
 
 .history-head {
-  padding: 10px 12px 6px;
-  font-size: 12px;
-  color: var(--text-dim);
+  position: relative;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-
-.history-search-row {
-  position: relative;
-  padding: 8px 10px 2px;
 }
 
 .history-search {
@@ -256,7 +249,8 @@ select option {
 .history-search-clear {
   position: absolute;
   right: 14px;
-  top: 11px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 20px;
   height: 20px;
   color: var(--text-dim);

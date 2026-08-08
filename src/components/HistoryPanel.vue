@@ -103,9 +103,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 <template>
   <aside class="history-panel">
     <div class="history-head">
-      历史记录
-    </div>
-    <div class="history-search-row">
       <input
         v-model="searchTerm"
         class="history-search"
