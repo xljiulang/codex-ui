@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { store } from "../composables/useCodex";
+import { baseName, toUserAttachment } from "../lib/mention";
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -83,19 +84,34 @@ async function loadPlugins() {
 
 onMounted(loadPlugins);
 
+function initialDir(): string {
+  return (
+    store.newChatCwd ?? store.currentThreadCwd ?? store.server.workspace ?? ""
+  );
+}
+
 async function pickFiles() {
   try {
-    const files = await invoke<string[]>("pick_files", { multiple: true });
+    const files = await invoke<string[]>("pick_files", {
+      multiple: true,
+      initialDir: initialDir(),
+    });
     for (const f of files) {
-      if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f)) {
-        store.attachments.push({ type: "localImage", path: f });
-      } else {
-        store.attachments.push({
-          type: "mention",
-          name: f.split(/[\\/]/).pop() ?? f,
-          path: f,
-        });
-      }
+      store.attachments.push(toUserAttachment(baseName(f), f));
+    }
+  } catch (e) {
+    store.toast = String(e);
+  }
+  emit("close");
+}
+
+async function pickFolder() {
+  try {
+    const dir = await invoke<string | null>("pick_directory", {
+      initialDir: initialDir(),
+    });
+    if (dir) {
+      store.attachments.push(toUserAttachment(baseName(dir), dir));
     }
   } catch (e) {
     store.toast = String(e);
@@ -126,8 +142,21 @@ function addSkill(s: SkillItem) {
           </svg>
         </span>
         <span>
-          <div class="menu-item-label">文件和文件夹</div>
-          <div class="menu-item-desc">添加本地文件或文件夹作为上下文</div>
+          <div class="menu-item-label">添加文件…</div>
+          <div class="menu-item-desc">从本地选择文件作为上下文</div>
+        </span>
+      </button>
+      <button class="menu-item" @click="pickFolder()">
+        <span class="menu-item-icon">
+          <svg viewBox="0 0 24 24" width="13" height="13" style="fill: currentColor">
+            <path
+              d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
+            />
+          </svg>
+        </span>
+        <span>
+          <div class="menu-item-label">添加文件夹…</div>
+          <div class="menu-item-desc">从本地选择文件夹作为上下文</div>
         </span>
       </button>
     </div>
