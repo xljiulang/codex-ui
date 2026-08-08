@@ -256,6 +256,15 @@ export function modelDisplayName(model: string | null): string {
   return def?.displayName || "默认模型";
 }
 
+/** 当前生效模型 id：显式选择 → 会话已知模型 → 默认模型 → 列表首个 → 空 */
+export function currentModelId(): string {
+  if (store.model) return store.model;
+  if (store.currentModel) return store.currentModel;
+  const def = store.models.find((m) => m.isDefault);
+  if (def) return def.model;
+  return store.models[0]?.model ?? "";
+}
+
 /** 当前生效的推理强度：显式值优先，否则用默认模型的默认强度 */
 export function effectiveEffort(): string {
   if (store.effort) return store.effort;
@@ -401,7 +410,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.currentThreadCwd = cwd;
     store.resumedThreadId = threadId;
     store.newChatCwd = null; // 本次新建已消费，恢复默认
-    store.currentModel = res.model ?? store.model ?? "";
+    store.currentModel = res.model ?? currentModelId();
     store.itemsByThread[threadId] = [];
     store.showHistory = false;
     const pendingGoal = store.goalText;
@@ -461,14 +470,18 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   params.effort = store.effort ?? null;
   // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
   // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
-  params.collaborationMode = {
-    mode: store.taskMode === "plan" ? "plan" : "default",
-    settings: {
-      model: store.model ?? store.currentModel ?? "",
-      reasoning_effort: store.effort ?? null,
-      developer_instructions: null,
-    },
-  };
+  // 模型未知时绝不发送空字符串（上游会报 invalid_request_error），此时省略该字段。
+  const collabModel = currentModelId();
+  if (collabModel) {
+    params.collaborationMode = {
+      mode: store.taskMode === "plan" ? "plan" : "default",
+      settings: {
+        model: collabModel,
+        reasoning_effort: store.effort ?? null,
+        developer_instructions: null,
+      },
+    };
+  }
   upsertItem(threadId, {
     id: clientId,
     clientId,
