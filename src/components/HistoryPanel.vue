@@ -30,6 +30,9 @@ import { formatRelativeTime } from "../lib/format";
       <div v-if="!store.threads.length && !store.loadingHistory" class="menu-note">
         暂无会话
       </div>
+      <div v-if="store.loadingHistory && !store.threads.length" class="menu-note">
+        加载中…
+      </div>
     </div>
     <button
       v-if="store.nextCursor"

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { clearGoal, setGoal, store } from "../composables/useCodex";
 
 const text = ref(store.goalText ?? "");
+const textareaEl = ref<HTMLTextAreaElement | null>(null);
+let lastFocus: HTMLElement | null = null;
 
 function save() {
   if (store.turnActive) return;
@@ -24,6 +26,21 @@ function cancel() {
   store.goalOpen = false;
   text.value = store.goalText ?? "";
 }
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") cancel();
+}
+
+onMounted(() => {
+  lastFocus = document.activeElement as HTMLElement | null;
+  void nextTick(() => textareaEl.value?.focus());
+  window.addEventListener("keydown", onKeydown);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+  lastFocus?.focus?.();
+});
 </script>
 
 <template>
@@ -35,6 +52,7 @@ function cancel() {
       </div>
       <div class="modal-body">
         <textarea
+          ref="textareaEl"
           v-model="text"
           rows="4"
           style="width: 100%"

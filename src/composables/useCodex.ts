@@ -54,6 +54,7 @@ export const store = reactive({
   interactions: [] as PendingInteraction[],
   settings: defaultSettings(),
   loadingHistory: false,
+  loadingThread: false,
   busy: false,
   currentModel: "",
   taskMode: "execute" as "execute" | "plan" | "goal",
@@ -386,6 +387,7 @@ export async function openThread(threadId: string) {
   store.currentThreadId = threadId;
   store.currentThreadOrigin = "history";
   store.showHistory = false;
+  store.loadingThread = true;
   try {
     const res = await invoke<{
       thread: {
@@ -420,6 +422,8 @@ export async function openThread(threadId: string) {
     } else {
       setToast(String(e));
     }
+  } finally {
+    store.loadingThread = false;
   }
 }
 
