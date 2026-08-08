@@ -28,6 +28,17 @@ const defaultSettings = (): AppSettings => ({
   followup_mode: "adjust",
 });
 
+interface ModelInfo {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  hidden: boolean;
+  isDefault: boolean;
+  supportedReasoningEfforts: { reasoningEffort: string; description: string }[];
+  defaultReasoningEffort: string;
+}
+
 export const store = reactive({
   server: {
     connected: false,
@@ -58,6 +69,8 @@ export const store = reactive({
   permissionMode: "ask-for-approval" as string,
   model: null as string | null,
   effort: null as string | null,
+  models: [] as ModelInfo[],
+  modelsLoaded: false,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
   newChatCwd: null as string | null,
   taskMode: "execute" as "execute" | "plan" | "goal",
@@ -213,6 +226,31 @@ export async function saveSettings(patch: Partial<AppSettings>) {
 export async function refreshServer() {
   const s = await invoke<ServerStatus>("server_status");
   store.server = { ...store.server, ...s };
+}
+
+/** 拉取可用模型列表（幂等），供模型菜单与输入区按钮共用 */
+export async function loadModels(force = false) {
+  if (store.modelsLoaded && !force) return;
+  try {
+    const res = await invoke<{ data: ModelInfo[] }>("codex_rpc", {
+      method: "model/list",
+      params: {},
+    });
+    store.models = (res.data ?? []).filter((m) => !m.hidden);
+    store.modelsLoaded = true;
+  } catch {
+    // 模型列表不可用时保持空，UI 回退
+  }
+}
+
+/** 解析模型的显示名：指定模型优先，否则用默认模型 */
+export function modelDisplayName(model: string | null): string {
+  if (model) {
+    const m = store.models.find((x) => x.model === model);
+    return m?.displayName || model;
+  }
+  const def = store.models.find((x) => x.isDefault);
+  return def?.displayName || "默认模型";
 }
 
 export async function refreshThreads(loadMore = false) {
@@ -744,6 +782,7 @@ export async function init() {
   // 先拿到工作目录：窗口标题与沙箱可写根需要它；历史列表有意展示全部目录的会话。
   await Promise.all([loadSettings(), refreshServer()]);
   await updateWindowTitle();
+  void loadModels();
   await refreshThreads();
   await wireEvents();
 }

@@ -1,29 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { store } from "../composables/useCodex";
+import { loadModels, store } from "../composables/useCodex";
 
 const emit = defineEmits<{ close: [] }>();
 const model = ref(store.model ?? "");
 const effort = ref(store.effort ?? "");
-const models = ref<ModelItem[]>([]);
-
-interface ModelItem {
-  id: string;
-  model: string;
-  displayName: string;
-  description: string;
-  hidden: boolean;
-  isDefault: boolean;
-  supportedReasoningEfforts: { reasoningEffort: string; description: string }[];
-  defaultReasoningEffort: string;
-}
 
 // 当前生效模型：显式选中优先，否则取 isDefault 模型
 const effectiveModel = computed(
   () =>
-    models.value.find((x) => x.model === model.value) ??
-    models.value.find((x) => x.isDefault) ??
+    store.models.find((x) => x.model === model.value) ??
+    store.models.find((x) => x.isDefault) ??
     null,
 );
 
@@ -42,7 +29,7 @@ const defaultEffort = computed(() => {
   return effectiveModel.value?.defaultReasoningEffort ?? "";
 });
 
-function selectModel(m: ModelItem) {
+function selectModel(m: (typeof store.models)[number]) {
   // 默认模型 = 服务端默认（model 置空）；其它模型显式选择
   model.value = m.isDefault ? "" : m.model;
   // 当前强度不在该模型支持范围内时，回到默认
@@ -54,19 +41,7 @@ function selectModel(m: ModelItem) {
   }
 }
 
-async function loadModels() {
-  try {
-    const res = await invoke<{ data: ModelItem[] }>("codex_rpc", {
-      method: "model/list",
-      params: {},
-    });
-    models.value = (res.data ?? []).filter((m) => !m.hidden);
-  } catch {
-    // 模型列表不可用时仅保留自定义输入
-  }
-}
-
-onMounted(loadModels);
+onMounted(() => void loadModels());
 
 function apply() {
   // 进程级生效，不写配置文件
@@ -80,9 +55,9 @@ function apply() {
   <div class="popup-menu right" @click.stop>
     <div class="menu-group">
       <div class="menu-group-title">模型</div>
-      <div v-if="models.length" class="question-options" style="padding: 0 8px 4px">
+      <div v-if="store.models.length" class="question-options" style="padding: 0 8px 4px">
         <button
-          v-for="m in models"
+          v-for="m in store.models"
           :key="m.id"
           class="option-btn"
           :class="{ selected: model === m.model || (model === '' && m.isDefault) }"
@@ -90,13 +65,9 @@ function apply() {
           :title="m.description || m.model"
         >
           <span>{{ m.displayName || m.model }}</span>
-          <span v-if="m.model !== (m.displayName || m.model)" class="model-slug">{{
-            m.model
-          }}</span>
           <span v-if="m.isDefault" class="model-default-tag">默认</span>
         </button>
       </div>
-      <input v-model="model" class="menu-search" placeholder="模型名称（留空使用默认）" />
       <div class="menu-group-title" style="margin-top: 10px">
         推理强度
         <span v-if="defaultEffort" style="color: var(--text-faint)">（默认 {{ defaultEffort }}）</span>

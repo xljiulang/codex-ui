@@ -8,6 +8,7 @@ import PlusMenu from "./PlusMenu.vue";
 import TaskModeMenu from "./TaskModeMenu.vue";
 import {
   interrupt,
+  modelDisplayName,
   permissionChip,
   sendPrompt,
   store,
@@ -203,13 +204,7 @@ function modelChipLabel(): string {
         : store.effort === "low"
           ? "低"
           : "";
-  if (store.model) {
-    const name = store.model.includes("/")
-      ? store.model.split("/").pop()
-      : store.model;
-    return `${name}${effortText ? ` ${effortText}` : ""}`;
-  }
-  return effortText ? `自定义 ${effortText}` : "自定义";
+  return `${modelDisplayName(store.model)}${effortText ? ` ${effortText}` : ""}`;
 }
 
 function taskModeLabel(): string {
