@@ -9,6 +9,9 @@ edition = "2021"
 name = "codex_ui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[lints.rust]
+linker_messages = "allow"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
