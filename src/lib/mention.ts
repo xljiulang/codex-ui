@@ -89,7 +89,7 @@ export function assemblePromptText(
 
 /** 组装一轮的协议输入：文件引用序列化进单条 text（VS Code 扩展同款），
  *  技能作为结构化 skill 项附带（fork 会把 SKILL.md 内容注入上下文），
- *  路径统一转正斜杠。 */
+ *  图片作为 localImage 项附带，路径统一转正斜杠。 */
 export function buildTurnInput(
   prompt: string,
   attachments: UserInput[],
@@ -99,10 +99,11 @@ export function buildTurnInput(
     text: assemblePromptText(prompt, attachments),
     text_elements: [],
   };
+  const images: UserInput[] = attachments.filter((a) => a.type === "localImage");
   const skills: UserInput[] = attachments
     .filter((a) => a.type === "skill")
     .map((a) => ({ type: "skill", name: a.name, path: toProtocolPath(a.path) }));
-  return [text, ...skills];
+  return [...images, text, ...skills];
 }
 
 /** 从回显文本中解析被引用文件列表，供界面渲染引用标签 */

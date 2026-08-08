@@ -150,6 +150,7 @@ describe("toUserAttachment / isImagePath / baseName", () => {
       { type: "localImage", path: "D:\\repo\\a.png" },
     ]);
     expect(input).toEqual([
+      { type: "localImage", path: "D:\\repo\\a.png" },
       {
         type: "text",
         text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$csharp-code-rules](C:/Users/x/.codex/skills/csharp-code-rules/SKILL.md) 按规则检查\n",
@@ -163,6 +164,17 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     ]);
     expect(buildTurnInput("hi", [])).toEqual([
       { type: "text", text: "hi\n", text_elements: [] },
+    ]);
+  });
+
+  it("buildTurnInput 保留图片附件作为 localImage 项", () => {
+    expect(
+      buildTurnInput("看这张图", [
+        { type: "localImage", path: "D:\\repo\\截图.png" },
+      ]),
+    ).toEqual([
+      { type: "localImage", path: "D:\\repo\\截图.png" },
+      { type: "text", text: "看这张图\n", text_elements: [] },
     ]);
   });
 
