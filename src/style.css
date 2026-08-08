@@ -1664,7 +1664,7 @@ select option {
   color: var(--text-faint);
 }
 
-.option-btn .model-default-tag {
+.option-btn .option-default-tag {
   font-size: 10px;
   color: var(--accent);
   border: 1px solid var(--accent-dim);

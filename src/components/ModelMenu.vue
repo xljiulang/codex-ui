@@ -65,13 +65,10 @@ function apply() {
           :title="m.description || m.model"
         >
           <span>{{ m.displayName || m.model }}</span>
-          <span v-if="m.isDefault" class="model-default-tag">默认</span>
+          <span v-if="m.isDefault" class="option-default-tag">默认</span>
         </button>
       </div>
-      <div class="menu-group-title" style="margin-top: 10px">
-        推理强度
-        <span v-if="defaultEffort" style="color: var(--text-faint)">（默认 {{ defaultEffort }}）</span>
-      </div>
+      <div class="menu-group-title" style="margin-top: 10px">推理强度</div>
       <div class="question-options" style="padding: 0 8px 4px">
         <button
           v-for="e in effortOptions"
@@ -86,6 +83,7 @@ function apply() {
           :title="e.description"
         >
           {{ e.reasoningEffort }}
+          <span v-if="e.reasoningEffort === defaultEffort" class="option-default-tag">默认</span>
         </button>
       </div>
       <div class="modal-foot" style="border-top: none; padding: 8px 8px 2px">
