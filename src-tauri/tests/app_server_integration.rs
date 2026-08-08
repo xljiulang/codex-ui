@@ -164,11 +164,15 @@ fn settings_roundtrip() {
     use codex_ui_lib::codex::settings;
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut s = settings::load(tmp.path());
-    assert_eq!(s.permission_mode, "ask-for-approval");
-    s.permission_mode = "ask-for-approval".into();
+    assert_eq!(s.followup_mode, "adjust");
+    assert!(s.enter_to_send);
+    assert!(s.sound_enabled);
+    s.followup_mode = "queue".into();
+    s.enter_to_send = false;
     s.sound_enabled = false;
     settings::save(tmp.path(), &s).expect("save");
     let loaded = settings::load(tmp.path());
-    assert_eq!(loaded.permission_mode, "ask-for-approval");
+    assert_eq!(loaded.followup_mode, "queue");
+    assert!(!loaded.enter_to_send);
     assert!(!loaded.sound_enabled);
 }

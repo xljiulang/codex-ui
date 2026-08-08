@@ -533,7 +533,32 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
       },
     });
   } catch (e) {
-    setToast(String(e));
+    const msg = String(e);
+    if (msg.includes("no active turn")) {
+      // 服务端在 turn/start 响应与 turn/started 事件之间可能尚未把回合
+      // 标记为可转向；短暂重试几次，避免“no active turn to steer”导致输入丢失。
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise((r) => setTimeout(r, 400));
+        try {
+          await invoke("turn_steer", {
+            params: {
+              threadId,
+              clientUserMessageId: clientId,
+              input,
+              expectedTurnId: store.currentTurnId,
+            },
+          });
+          return;
+        } catch (e2) {
+          const m2 = String(e2);
+          if (!m2.includes("no active turn")) {
+            setToast(m2);
+            return;
+          }
+        }
+      }
+    }
+    setToast(msg);
   }
 }
 
@@ -779,8 +804,11 @@ async function wireEvents() {
         threadId: string;
         completedAtMs?: number;
       };
-      let durationMs: number | undefined;
-      if (p.item.type === "reasoning") {
+      // 优先用服务端提供的耗时；缺失时用 startedAtMs→completedAtMs 推算，
+      // 覆盖命令执行/文件变更等所有工具类型的“耗时”展示。
+      let durationMs: number | undefined =
+        typeof p.item.durationMs === "number" ? p.item.durationMs : undefined;
+      if (durationMs === undefined) {
         const existing = findItem(p.threadId, p.item.id);
         const started = existing?.startedAtMs;
         if (
@@ -795,7 +823,7 @@ async function wireEvents() {
         ...p.item,
         completedAtMs: p.completedAtMs,
         streaming: false,
-        durationMs,
+        ...(durationMs !== undefined ? { durationMs } : {}),
       });
     }),
   );
