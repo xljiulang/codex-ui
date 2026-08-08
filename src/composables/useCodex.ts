@@ -47,8 +47,6 @@ export const store = reactive({
     logs: [] as string[],
   },
   threads: [] as ThreadSummary[],
-  threadsTotal: 0 as number | null,
-  threadsTotalExact: true,
   nextCursor: null as string | null,
   searchActive: false,
   searchSnippets: {} as Record<string, string>,
@@ -292,26 +290,6 @@ export async function refreshThreads(loadMore = false) {
       loadMore ? [...store.threads, ...res.data] : res.data,
     );
     store.nextCursor = res.nextCursor;
-    if (!loadMore) {
-      // 计算真实总数：分页遍历，上限 10 页（超出显示 1000+）
-      let total = res.data.length;
-      let cursor = res.nextCursor;
-      let exact = true;
-      for (let i = 0; i < 9 && cursor; i++) {
-        const page = await invoke<{ data: unknown[]; nextCursor: string | null }>(
-          "thread_list",
-          { limit: 100, cursor },
-        );
-        total += page.data.length;
-        cursor = page.nextCursor;
-      }
-      if (cursor) {
-        exact = false;
-        total = 1000;
-      }
-      store.threadsTotal = total;
-      store.threadsTotalExact = exact;
-    }
   } catch (e) {
     setToast(String(e));
   } finally {

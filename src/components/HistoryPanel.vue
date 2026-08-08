@@ -103,10 +103,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 <template>
   <aside class="history-panel">
     <div class="history-head">
-      <span>历史记录</span>
-      <span v-if="store.threadsTotal != null" class="history-count">
-        共 {{ store.threadsTotal }}{{ store.threadsTotalExact ? "" : "+" }} 条
-      </span>
+      历史记录
     </div>
     <div class="history-search-row">
       <input
@@ -144,7 +141,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             @blur="saveRename(t)"
           />
           <template v-else>
-            <span class="history-title">{{ threadTitle(t) }}</span>
+            <span class="history-title-row">
+              <span class="history-title">{{ threadTitle(t) }}</span>
+              <span v-if="t.isPinned" class="pin-badge">置顶</span>
+            </span>
             <span
               v-if="store.searchActive && store.searchSnippets[t.id]"
               class="history-snippet"
@@ -158,6 +158,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         <span class="history-actions">
           <button
             class="act-btn"
+            :class="{ pinned: t.isPinned }"
             :title="t.isPinned ? '取消固定' : '固定置顶'"
             @click.stop="togglePin(t.id, !t.isPinned)"
           >

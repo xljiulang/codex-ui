@@ -242,11 +242,6 @@ select option {
   justify-content: space-between;
 }
 
-.history-count {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
 .history-search-row {
   position: relative;
   padding: 8px 10px 2px;
@@ -307,6 +302,22 @@ select option {
   text-overflow: ellipsis;
 }
 
+.history-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pin-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
 .history-main {
   flex: 1;
   min-width: 0;
@@ -358,8 +369,9 @@ select option {
 }
 
 .history-actions .act-btn {
-  color: var(--text-dim);
+  color: var(--text-bright);
   background: var(--bg-active);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   width: 18px;
   height: 18px;
@@ -371,7 +383,11 @@ select option {
 }
 
 .history-actions .act-btn:hover {
-  color: var(--text-bright);
+  color: #ffffff;
+}
+
+.history-actions .act-btn.pinned {
+  color: var(--accent);
 }
 
 .history-actions .act-btn.del:hover {
