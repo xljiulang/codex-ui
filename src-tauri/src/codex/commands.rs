@@ -111,6 +111,31 @@ pub async fn thread_read(
         .await
 }
 
+/// 读取会话 .jsonl 文件并还原完整历史条目（含命令执行、推理、文件变更等）。
+/// app-server 的 thread/read 对历史只返回简化重建视图，完整数据需直接解析会话文件。
+#[tauri::command]
+pub async fn thread_full_items(
+    server: State<'_, Server>,
+    thread_id: String,
+) -> Result<Value, String> {
+    let read = server
+        .request(
+            "thread/read",
+            json!({ "threadId": thread_id, "includeTurns": false }),
+            Some(Duration::from_secs(60)),
+        )
+        .await?;
+    let path = read["thread"]["path"]
+        .as_str()
+        .ok_or_else(|| "thread/read 未返回会话文件路径".to_string())?;
+    // Windows 长路径前缀 \\?\ 需要去掉才能被 std::fs 读取
+    let path = path.strip_prefix("\\\\?\\").unwrap_or(path);
+    let cwd = read["thread"]["cwd"].as_str().unwrap_or("");
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("读取会话文件失败({path}): {e}"))?;
+    Ok(json!(crate::codex::session::parse_session_items(&text, cwd)))
+}
+
 #[tauri::command]
 pub async fn thread_resume(
     server: State<'_, Server>,

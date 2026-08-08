@@ -19,6 +19,7 @@ pub fn run() {
             codex::commands::thread_list,
             codex::commands::thread_start,
             codex::commands::thread_read,
+            codex::commands::thread_full_items,
             codex::commands::thread_resume,
             codex::commands::thread_delete,
             codex::commands::thread_set_name,
