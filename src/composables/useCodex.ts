@@ -58,6 +58,8 @@ export const store = reactive({
   permissionMode: "ask-for-approval" as string,
   model: null as string | null,
   effort: null as string | null,
+  // 新建对话时可选的项目目录（null = 使用启动工作目录）
+  newChatCwd: null as string | null,
   taskMode: "execute" as "execute" | "plan" | "goal",
   goalText: null as string | null,
   attachments: [] as UserInput[],
@@ -205,8 +207,9 @@ export async function refreshThreads(loadMore = false) {
 async function newChat(prompt: string, attachments: UserInput[]) {
   store.busy = true;
   try {
+    const cwd = store.newChatCwd ?? store.server.workspace;
     const params: Record<string, unknown> = {
-      cwd: store.server.workspace,
+      cwd,
       approvalPolicy: toApprovalPolicy(store.permissionMode),
       sandbox: toSandbox(store.permissionMode),
     };
@@ -222,8 +225,9 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.currentThreadId = threadId;
     store.currentThreadName = res.thread.name ?? "";
     store.currentThreadOrigin = "new";
-    store.currentThreadCwd = store.server.workspace;
+    store.currentThreadCwd = cwd;
     store.resumedThreadId = threadId;
+    store.newChatCwd = null; // 本次新建已消费，恢复默认
     store.currentModel = res.model ?? store.model ?? "";
     store.itemsByThread[threadId] = [];
     store.showHistory = false;

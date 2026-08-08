@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
@@ -183,6 +183,17 @@ function attachmentLabel(a: UserInput): string {
   return a.text;
 }
 
+const newChatCwdLabel = computed(() => store.newChatCwd ?? store.server.workspace);
+
+async function pickNewChatCwd() {
+  try {
+    const dir = await invoke<string | null>("pick_directory");
+    if (dir) store.newChatCwd = dir;
+  } catch (e) {
+    store.toast = String(e);
+  }
+}
+
 function effortLabel(): string {
   const e = store.effort;
   if (e === "high") return "高";
@@ -204,6 +215,29 @@ function openGoalDialog() {
 
 <template>
   <div class="composer">
+    <div v-if="!store.currentThreadId" class="newchat-cwd-row">
+      <svg viewBox="0 0 24 24">
+        <path
+          d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
+        />
+      </svg>
+      <span class="newchat-cwd-label">项目目录</span>
+      <button
+        class="newchat-cwd-value"
+        :title="newChatCwdLabel"
+        @click="pickNewChatCwd()"
+      >
+        {{ newChatCwdLabel }}
+      </button>
+      <button
+        v-if="store.newChatCwd"
+        class="newchat-cwd-reset"
+        title="恢复默认工作目录"
+        @click="store.newChatCwd = null"
+      >
+        ×
+      </button>
+    </div>
     <div class="composer-input-row">
       <div class="menu-anchor input-anchor">
         <textarea
