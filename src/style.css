@@ -153,6 +153,11 @@ select option {
   stroke-width: 1.8;
 }
 
+.brand-logo svg .logo-c {
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
 .brand-name {
   font-size: 14px;
   font-weight: 700;
@@ -208,32 +213,6 @@ select option {
 .icon-btn:hover {
   background: var(--bg-hover);
   color: var(--text-bright);
-}
-
-.newchat-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #f0a63c, #ff8f1f);
-  color: #1b1b1b;
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(240, 166, 60, 0.35);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.newchat-btn:hover {
-  transform: scale(1.04);
-  box-shadow: 0 3px 12px rgba(240, 166, 60, 0.5);
-}
-
-.newchat-btn svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
 }
 
 .icon-btn svg {
