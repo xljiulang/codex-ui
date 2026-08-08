@@ -343,10 +343,7 @@ function openGoalDialog() {
           :class="ctxLevel"
           :title="ctxTooltip"
         >
-          <svg viewBox="0 0 24 24">
-            <rect x="3" y="5" width="18" height="14" rx="2" />
-            <path d="M3 9h18" />
-          </svg>
+          {{ ctxUsage.pct }}%
         </span>
         <div class="menu-anchor">
           <button class="model-chip" title="模型" @click="store.modelOpen = !store.modelOpen">
