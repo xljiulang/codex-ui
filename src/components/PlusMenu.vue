@@ -134,26 +134,14 @@ function addSkill(s: SkillItem) {
     <div class="menu-group">
       <div class="menu-group-title">添加</div>
       <button class="menu-item" @click="pickFiles()">
-        <span class="menu-item-icon">
-          <svg viewBox="0 0 24 24" width="13" height="13" style="fill: currentColor">
-            <path
-              d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-            />
-          </svg>
-        </span>
+        <span class="menu-item-icon">F</span>
         <span>
           <div class="menu-item-label">添加文件…</div>
           <div class="menu-item-desc">从本地选择文件作为上下文</div>
         </span>
       </button>
       <button class="menu-item" @click="pickFolder()">
-        <span class="menu-item-icon">
-          <svg viewBox="0 0 24 24" width="13" height="13" style="fill: currentColor">
-            <path
-              d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-            />
-          </svg>
-        </span>
+        <span class="menu-item-icon">D</span>
         <span>
           <div class="menu-item-label">添加文件夹…</div>
           <div class="menu-item-desc">从本地选择文件夹作为上下文</div>
