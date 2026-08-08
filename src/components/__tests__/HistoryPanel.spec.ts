@@ -28,7 +28,7 @@ describe("HistoryPanel 删除确认", () => {
 
   it("点击 × 弹出确认框，且不直接删除", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".del-btn").trigger("click");
+    await wrapper.find(".history-actions .act-btn.del").trigger("click");
 
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
     expect(wrapper.text()).toContain("确定删除会话「会话一」吗？此操作不可恢复。");
@@ -37,7 +37,7 @@ describe("HistoryPanel 删除确认", () => {
 
   it("确认框弹出后聚焦「删除」按钮", async () => {
     const wrapper = mount(HistoryPanel, { attachTo: document.body });
-    await wrapper.find(".del-btn").trigger("click");
+    await wrapper.find(".history-actions .act-btn.del").trigger("click");
     await wrapper.vm.$nextTick();
 
     const danger = wrapper.find(".modal-foot .btn.danger");
@@ -48,7 +48,7 @@ describe("HistoryPanel 删除确认", () => {
 
   it("点击「取消」关闭确认框且不删除", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".del-btn").trigger("click");
+    await wrapper.find(".history-actions .act-btn.del").trigger("click");
     const cancel = wrapper
       .findAll(".modal-foot .btn")
       .find((b) => b.text().trim() === "取消");
@@ -60,7 +60,7 @@ describe("HistoryPanel 删除确认", () => {
 
   it("点击「删除」调用 deleteThread 并关闭确认框", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".del-btn").trigger("click");
+    await wrapper.find(".history-actions .act-btn.del").trigger("click");
     const del = wrapper
       .findAll(".modal-foot .btn")
       .find((b) => b.text().trim() === "删除");
@@ -73,7 +73,7 @@ describe("HistoryPanel 删除确认", () => {
 
   it("按 Escape 关闭确认框且不删除", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".del-btn").trigger("click");
+    await wrapper.find(".history-actions .act-btn.del").trigger("click");
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));

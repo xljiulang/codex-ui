@@ -16,6 +16,7 @@ export interface ThreadSummary {
   source?: string;
   cliVersion?: string;
   status?: { type: string };
+  isPinned?: boolean;
 }
 
 export interface Turn {

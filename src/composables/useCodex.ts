@@ -47,8 +47,12 @@ export const store = reactive({
     logs: [] as string[],
   },
   threads: [] as ThreadSummary[],
-  threadsTotal: 0,
+  threadsTotal: 0 as number | null,
+  threadsTotalExact: true,
   nextCursor: null as string | null,
+  searchActive: false,
+  searchSnippets: {} as Record<string, string>,
+  searchCursor: null as string | null,
   currentThreadId: null as string | null,
   currentThreadName: "",
   currentThreadOrigin: null as "new" | "history" | null,
@@ -263,6 +267,16 @@ export function effectiveEffort(): string {
   return m?.defaultReasoningEffort ?? "";
 }
 
+/** 固定优先，再按最近时间降序 */
+export function sortThreads(list: ThreadSummary[]): ThreadSummary[] {
+  return [...list].sort((a, b) => {
+    if (!!a.isPinned !== !!b.isPinned) return a.isPinned ? -1 : 1;
+    const ar = a.recencyAt ?? a.updatedAt ?? 0;
+    const br = b.recencyAt ?? b.updatedAt ?? 0;
+    return br - ar;
+  });
+}
+
 export async function refreshThreads(loadMore = false) {
   if (store.loadingHistory) return;
   store.loadingHistory = true;
@@ -271,16 +285,117 @@ export async function refreshThreads(loadMore = false) {
       data: ThreadSummary[];
       nextCursor: string | null;
     }>("thread_list", {
-      limit: loadMore ? 50 : 30,
+      limit: 50,
       cursor: loadMore ? store.nextCursor : null,
     });
-    store.threads = loadMore ? [...store.threads, ...res.data] : res.data;
+    store.threads = sortThreads(
+      loadMore ? [...store.threads, ...res.data] : res.data,
+    );
     store.nextCursor = res.nextCursor;
-    store.threadsTotal = store.threads.length;
+    if (!loadMore) {
+      // 计算真实总数：分页遍历，上限 10 页（超出显示 1000+）
+      let total = res.data.length;
+      let cursor = res.nextCursor;
+      let exact = true;
+      for (let i = 0; i < 9 && cursor; i++) {
+        const page = await invoke<{ data: unknown[]; nextCursor: string | null }>(
+          "thread_list",
+          { limit: 100, cursor },
+        );
+        total += page.data.length;
+        cursor = page.nextCursor;
+      }
+      if (cursor) {
+        exact = false;
+        total = 1000;
+      }
+      store.threadsTotal = total;
+      store.threadsTotalExact = exact;
+    }
   } catch (e) {
     setToast(String(e));
   } finally {
     store.loadingHistory = false;
+  }
+}
+
+/** 搜索历史会话（thread/search），结果写入 store.threads 并附带摘要 */
+export async function searchThreads(term: string, loadMore = false) {
+  const t = term.trim();
+  if (!t) {
+    clearSearch();
+    return;
+  }
+  if (store.loadingHistory) return;
+  store.loadingHistory = true;
+  try {
+    const res = await invoke<{
+      data: { thread: ThreadSummary; snippet: string }[];
+      nextCursor: string | null;
+    }>("codex_rpc", {
+      method: "thread/search",
+      params: {
+        searchTerm: t,
+        limit: 50,
+        cursor: loadMore ? store.searchCursor : null,
+        sourceKinds: ["cli", "vscode", "exec", "appServer", "unknown"],
+      },
+    });
+    const results = res.data ?? [];
+    const snippets: Record<string, string> = {};
+    for (const r of results) snippets[r.thread.id] = r.snippet ?? "";
+    store.searchSnippets = loadMore
+      ? { ...store.searchSnippets, ...snippets }
+      : snippets;
+    store.threads = sortThreads(
+      loadMore
+        ? [...store.threads, ...results.map((r) => r.thread)]
+        : results.map((r) => r.thread),
+    );
+    store.searchCursor = res.nextCursor ?? null;
+    store.searchActive = true;
+  } catch (e) {
+    setToast(String(e));
+  } finally {
+    store.loadingHistory = false;
+  }
+}
+
+/** 退出搜索，恢复常规列表 */
+export function clearSearch() {
+  store.searchActive = false;
+  store.searchSnippets = {};
+  store.searchCursor = null;
+  void refreshThreads();
+}
+
+/** 重命名会话 */
+export async function renameThread(threadId: string, name: string) {
+  const n = name.trim();
+  if (!n) return;
+  try {
+    await invoke("thread_set_name", { threadId, name: n });
+    const t = store.threads.find((x) => x.id === threadId);
+    if (t) t.name = n;
+    if (store.currentThreadId === threadId) {
+      store.currentThreadName = n;
+      void updateWindowTitle();
+    }
+  } catch (e) {
+    setToast(String(e));
+  }
+}
+
+/** 固定/取消固定会话（置顶） */
+export async function togglePin(threadId: string, pinned: boolean) {
+  try {
+    await invoke("codex_rpc", {
+      method: "thread/metadata/update",
+      params: { threadId, isPinned: pinned },
+    });
+    await refreshThreads();
+  } catch (e) {
+    setToast(String(e));
   }
 }
 

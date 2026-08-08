@@ -1,18 +1,67 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  clearSearch,
   deleteThread,
   openThread,
+  renameThread,
   refreshThreads,
+  searchThreads,
   store,
   threadTitle,
+  togglePin,
 } from "../composables/useCodex";
 import { formatRelativeTime } from "../lib/format";
 import type { ThreadSummary } from "../lib/types";
 
 const confirmThread = ref<ThreadSummary | null>(null);
 const confirmEl = ref<HTMLElement | null>(null);
+const searchTerm = ref("");
+const editingId = ref<string | null>(null);
+const editName = ref("");
+let searchTimer: number | undefined;
 let lastFocus: HTMLElement | null = null;
+
+function onSearchInput() {
+  if (searchTimer) window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    void searchThreads(searchTerm.value);
+  }, 300);
+}
+
+function clearSearchInput() {
+  searchTerm.value = "";
+  if (searchTimer) window.clearTimeout(searchTimer);
+  clearSearch();
+}
+
+function startRename(t: ThreadSummary) {
+  editingId.value = t.id;
+  editName.value = threadTitle(t);
+  void nextTick(() => {
+    (document.querySelector<HTMLInputElement>(".rename-input"))?.focus();
+  });
+}
+
+function saveRename(t: ThreadSummary) {
+  if (editingId.value !== t.id) return;
+  editingId.value = null;
+  if (editName.value.trim() && editName.value.trim() !== threadTitle(t)) {
+    void renameThread(t.id, editName.value.trim());
+  }
+}
+
+function cancelRename() {
+  editingId.value = null;
+}
+
+function loadMore() {
+  if (store.searchActive) {
+    void searchThreads(searchTerm.value, true);
+  } else {
+    void refreshThreads(true);
+  }
+}
 
 function askDelete(t: ThreadSummary) {
   confirmThread.value = t;
@@ -53,7 +102,29 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 
 <template>
   <aside class="history-panel">
-    <div class="history-head">历史记录</div>
+    <div class="history-head">
+      <span>历史记录</span>
+      <span v-if="store.threadsTotal != null" class="history-count">
+        共 {{ store.threadsTotal }}{{ store.threadsTotalExact ? "" : "+" }} 条
+      </span>
+    </div>
+    <div class="history-search-row">
+      <input
+        v-model="searchTerm"
+        class="history-search"
+        type="text"
+        placeholder="搜索历史…"
+        @input="onSearchInput()"
+      />
+      <button
+        v-if="searchTerm"
+        class="history-search-clear"
+        title="清除搜索"
+        @click="clearSearchInput()"
+      >
+        ×
+      </button>
+    </div>
     <div class="history-list">
       <div
         v-for="t in store.threads"
@@ -63,11 +134,51 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
         @click="openThread(t.id)"
       >
         <span class="history-main">
-          <span class="history-title">{{ threadTitle(t) }}</span>
-          <span v-if="t.cwd" class="history-cwd" :title="t.cwd">{{ t.cwd }}</span>
+          <input
+            v-if="editingId === t.id"
+            v-model="editName"
+            class="rename-input"
+            @click.stop
+            @keydown.enter="saveRename(t)"
+            @keydown.esc="cancelRename()"
+            @blur="saveRename(t)"
+          />
+          <template v-else>
+            <span class="history-title">{{ threadTitle(t) }}</span>
+            <span
+              v-if="store.searchActive && store.searchSnippets[t.id]"
+              class="history-snippet"
+            >
+              {{ store.searchSnippets[t.id] }}
+            </span>
+            <span v-if="t.cwd" class="history-cwd" :title="t.cwd">{{ t.cwd }}</span>
+          </template>
         </span>
         <span class="history-time">{{ formatRelativeTime(t.recencyAt ?? t.updatedAt) }}</span>
-        <button class="del-btn" title="删除会话" @click.stop="askDelete(t)">×</button>
+        <span class="history-actions">
+          <button
+            class="act-btn"
+            :title="t.isPinned ? '取消固定' : '固定置顶'"
+            @click.stop="togglePin(t.id, !t.isPinned)"
+          >
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M14 4h-4l1 7-3 2v2h8v-2l-3-2z"
+                :fill="t.isPinned ? 'currentColor' : 'none'"
+              />
+            </svg>
+          </button>
+          <button class="act-btn" title="重命名" @click.stop="startRename(t)">
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+              />
+            </svg>
+          </button>
+          <button class="act-btn del" title="删除会话" @click.stop="askDelete(t)">
+            ×
+          </button>
+        </span>
       </div>
       <div v-if="!store.threads.length && !store.loadingHistory" class="menu-note">
         暂无会话
@@ -77,12 +188,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </div>
     </div>
     <button
-      v-if="store.nextCursor"
+      v-if="store.searchActive ? store.searchCursor : store.nextCursor"
       class="history-more"
       :disabled="store.loadingHistory"
-      @click="refreshThreads(true)"
+      @click="loadMore()"
     >
-      查看全部（{{ store.threadsTotal }} 个）
+      加载更多
     </button>
   </aside>
 
