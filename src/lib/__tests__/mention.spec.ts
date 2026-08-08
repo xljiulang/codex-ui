@@ -3,7 +3,6 @@ import {
   baseName,
   isImagePath,
   matchMentionToken,
-  pushRecent,
   toUserAttachment,
 } from "../mention";
 
@@ -39,26 +38,6 @@ describe("matchMentionToken", () => {
 
   it("单独 @ 时 token 为空", () => {
     expect(matchMentionToken("@")).toEqual({ kind: "@", token: "", start: 0 });
-  });
-});
-
-describe("pushRecent", () => {
-  it("最新在前并按路径去重", () => {
-    const list = pushRecent([], { name: "a", path: "/a" });
-    const list2 = pushRecent(list, { name: "b", path: "/b" });
-    const list3 = pushRecent(list2, { name: "a2", path: "/a" });
-    expect(list3.map((r) => r.path)).toEqual(["/a", "/b"]);
-    expect(list3[0].name).toBe("a2");
-  });
-
-  it("超过上限时截断", () => {
-    let list: { name: string; path: string }[] = [];
-    for (let i = 0; i < 12; i++) {
-      list = pushRecent(list, { name: `f${i}`, path: `/f${i}` });
-    }
-    expect(list).toHaveLength(10);
-    expect(list[0].path).toBe("/f11");
-    expect(list[9].path).toBe("/f2");
   });
 });
 

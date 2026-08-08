@@ -273,9 +273,17 @@ pub fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn pick_files(multiple: bool) -> Result<Vec<String>, String> {
+pub async fn pick_files(
+    multiple: bool,
+    initial_dir: Option<String>,
+) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let dialog = rfd::FileDialog::new().add_filter("所有文件", &["*"]);
+        let mut dialog = rfd::FileDialog::new().add_filter("所有文件", &["*"]);
+        if let Some(d) = initial_dir.as_deref() {
+            if !d.is_empty() {
+                dialog = dialog.set_directory(d);
+            }
+        }
         let picked = if multiple {
             dialog.pick_files()
         } else {
@@ -292,11 +300,15 @@ pub async fn pick_files(multiple: bool) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-pub async fn pick_directory() -> Result<Option<String>, String> {
+pub async fn pick_directory(initial_dir: Option<String>) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        Ok(rfd::FileDialog::new()
-            .pick_folder()
-            .map(|p| p.to_string_lossy().into_owned()))
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(d) = initial_dir.as_deref() {
+            if !d.is_empty() {
+                dialog = dialog.set_directory(d);
+            }
+        }
+        Ok(dialog.pick_folder().map(|p| p.to_string_lossy().into_owned()))
     })
     .await
     .map_err(|e| e.to_string())?

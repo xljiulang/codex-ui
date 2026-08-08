@@ -6,12 +6,6 @@ export interface MentionToken {
   start: number;
 }
 
-/** 最近引用记录（仅内存） */
-export interface RecentRef {
-  name: string;
-  path: string;
-}
-
 /** fuzzyFileSearch 协议返回的文件/目录条目 */
 export interface FuzzyFileResult {
   root: string;
@@ -46,10 +40,4 @@ export function toUserAttachment(name: string, path: string): UserInput {
 
 export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
-}
-
-/** 最近引用：按 path 去重、最新在前、上限 max */
-export function pushRecent(list: RecentRef[], item: RecentRef, max = 10): RecentRef[] {
-  const rest = list.filter((r) => r.path !== item.path);
-  return [item, ...rest].slice(0, max);
 }

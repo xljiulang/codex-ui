@@ -5,13 +5,11 @@ import type { UserInput } from "../lib/types";
 import {
   toUserAttachment,
   type FuzzyFileResult,
-  type RecentRef,
 } from "../lib/mention";
 
 const props = defineProps<{
   kind: "@" | "$";
   token: string;
-  recent: RecentRef[];
   results: FuzzyFileResult[];
   searching: boolean;
 }>();
@@ -71,7 +69,6 @@ const filteredSkills = computed(() => {
 // ---------------- @ 分支：文件引用（键盘可导航的扁平行列表） ----------------
 type Row =
   | { kind: "file"; item: FuzzyFileResult }
-  | { kind: "recent"; item: RecentRef }
   | { kind: "native-file" }
   | { kind: "native-dir" };
 
@@ -79,8 +76,6 @@ const rows = computed<Row[]>(() => {
   const list: Row[] = [];
   if (props.token) {
     for (const r of props.results) list.push({ kind: "file", item: r });
-  } else {
-    for (const r of props.recent) list.push({ kind: "recent", item: r });
   }
   list.push({ kind: "native-file" });
   list.push({ kind: "native-dir" });
@@ -89,7 +84,7 @@ const rows = computed<Row[]>(() => {
 
 const highlight = ref(0);
 watch(
-  [() => props.token, () => props.results, () => props.recent],
+  [() => props.token, () => props.results],
   () => {
     highlight.value = 0;
   },
@@ -114,8 +109,6 @@ function selectRow(row: Row) {
       ? root + path
       : root + "\\" + path;
     emit("select-attachment", toUserAttachment(file_name, full));
-  } else if (row.kind === "recent") {
-    emit("select-attachment", toUserAttachment(row.item.name, row.item.path));
   } else if (row.kind === "native-file") {
     emit("pick-files");
   } else {
@@ -127,22 +120,18 @@ defineExpose({ move, selectHighlighted });
 
 function rowIcon(row: Row): string {
   if (row.kind === "file") return row.item.match_type === "directory" ? "D" : "F";
-  if (row.kind === "recent") return "R";
   return row.kind === "native-file" ? "F" : "D";
 }
 function rowLabel(row: Row): string {
   if (row.kind === "file") return row.item.file_name;
-  if (row.kind === "recent") return row.item.name;
   return row.kind === "native-file" ? "选择文件…" : "选择文件夹…";
 }
 function rowDesc(row: Row): string {
   if (row.kind === "file") return row.item.path;
-  if (row.kind === "recent") return row.item.path;
   return "";
 }
 function rowKey(row: Row): string {
   if (row.kind === "file") return "f:" + row.item.path;
-  if (row.kind === "recent") return "r:" + row.item.path;
   return row.kind;
 }
 </script>
@@ -152,7 +141,7 @@ function rowKey(row: Row): string {
     <template v-if="kind === '@'">
       <div class="menu-group-title">引用文件</div>
       <div v-if="!token" class="menu-note mention-hint">
-        继续输入文件名搜索，或选择最近引用
+        输入文件名搜索，或从本地选择
       </div>
       <div v-else class="menu-note mention-hint">搜索“{{ token }}”…</div>
 
@@ -175,7 +164,6 @@ function rowKey(row: Row): string {
         </button>
         <div v-if="token && searching" class="menu-note">搜索中…</div>
         <div v-else-if="token && !results.length" class="menu-note">无匹配文件</div>
-        <div v-else-if="!token && !recent.length" class="menu-note">暂无最近引用</div>
       </div>
     </template>
 

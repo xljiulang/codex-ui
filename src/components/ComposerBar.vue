@@ -18,10 +18,8 @@ import type { UserInput } from "../lib/types";
 import {
   baseName,
   matchMentionToken,
-  pushRecent,
   toUserAttachment,
   type FuzzyFileResult,
-  type RecentRef,
 } from "../lib/mention";
 
 const text = ref("");
@@ -31,8 +29,7 @@ const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
 
-// @ 文件引用：最近引用（仅内存）+ 模糊搜索结果
-const recentMentions = ref<RecentRef[]>([]);
+// @ 文件引用：模糊搜索结果
 const fileResults = ref<FuzzyFileResult[]>([]);
 const searchingFiles = ref(false);
 let searchSeq = 0;
@@ -65,8 +62,7 @@ function scheduleFileSearch(token: string) {
 
 async function runFileSearch(token: string) {
   const seq = ++searchSeq;
-  const root =
-    store.newChatCwd ?? store.currentThreadCwd ?? store.server.workspace;
+  const root = mentionRoot();
   if (!root) {
     searchingFiles.value = false;
     return;
@@ -97,20 +93,6 @@ watch(
   },
 );
 
-function rememberRecent(a: UserInput) {
-  if (a.type === "mention") {
-    recentMentions.value = pushRecent(recentMentions.value, {
-      name: a.name,
-      path: a.path,
-    });
-  } else if (a.type === "localImage") {
-    recentMentions.value = pushRecent(recentMentions.value, {
-      name: baseName(a.path),
-      path: a.path,
-    });
-  }
-}
-
 function removeMentionToken() {
   const m = mention.value;
   if (!m) return;
@@ -125,19 +107,26 @@ function refocusInput() {
 
 function onSelectAttachment(a: UserInput) {
   removeMentionToken();
-  rememberRecent(a);
   store.attachments.push(a);
   refocusInput();
+}
+
+function mentionRoot(): string {
+  return (
+    store.newChatCwd ?? store.currentThreadCwd ?? store.server.workspace ?? ""
+  );
 }
 
 function onPickFiles() {
   removeMentionToken();
   void (async () => {
     try {
-      const files = await invoke<string[]>("pick_files", { multiple: true });
+      const files = await invoke<string[]>("pick_files", {
+        multiple: true,
+        initialDir: mentionRoot(),
+      });
       for (const f of files) {
         const a = toUserAttachment(baseName(f), f);
-        rememberRecent(a);
         store.attachments.push(a);
       }
     } catch (e) {
@@ -152,10 +141,11 @@ function onPickDir() {
   removeMentionToken();
   void (async () => {
     try {
-      const dir = await invoke<string | null>("pick_directory");
+      const dir = await invoke<string | null>("pick_directory", {
+        initialDir: mentionRoot(),
+      });
       if (dir) {
         const a = toUserAttachment(baseName(dir), dir);
-        rememberRecent(a);
         store.attachments.push(a);
       }
     } catch (e) {
@@ -364,7 +354,6 @@ function openGoalDialog() {
           v-if="mention"
           :kind="mention.kind"
           :token="mention.token"
-          :recent="recentMentions"
           :results="fileResults"
           :searching="searchingFiles"
           @close="mention = null"
