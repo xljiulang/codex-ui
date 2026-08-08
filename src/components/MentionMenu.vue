@@ -128,6 +128,8 @@ function rowLabel(row: Row): string {
 }
 function rowDesc(row: Row): string {
   if (row.kind === "file") return row.item.path;
+  if (row.kind === "native-file") return "从本地选择文件作为上下文";
+  if (row.kind === "native-dir") return "从本地选择文件夹作为上下文";
   return "";
 }
 function rowKey(row: Row): string {
