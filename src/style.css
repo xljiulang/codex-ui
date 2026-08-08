@@ -1481,6 +1481,11 @@ select option {
   min-width: 320px;
 }
 
+.mention-menu .menu-item.active {
+  background: var(--bg-active);
+  box-shadow: inset 0 0 0 1px var(--border-light);
+}
+
 .menu-group {
   padding: 6px 4px;
 }

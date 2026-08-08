@@ -1,9 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { UserInput } from "../lib/types";
+import {
+  toUserAttachment,
+  type FuzzyFileResult,
+  type RecentRef,
+} from "../lib/mention";
 
-const props = defineProps<{ kind: "@" | "$"; token: string }>();
+const props = defineProps<{
+  kind: "@" | "$";
+  token: string;
+  recent: RecentRef[];
+  results: FuzzyFileResult[];
+  searching: boolean;
+}>();
+
 const emit = defineEmits<{
   close: [];
   "pick-files": [];
@@ -11,152 +23,162 @@ const emit = defineEmits<{
   "select-attachment": [attachment: UserInput];
 }>();
 
-interface Item {
+// ---------------- $ 分支：技能列表（保持原行为） ----------------
+interface SkillItem {
   name: string;
   key: string;
   path: string;
   desc: string;
 }
 
-const plugins = ref<Item[]>([]);
-const skills = ref<Item[]>([]);
-const loading = ref(true);
+const skills = ref<SkillItem[]>([]);
+const loadingSkills = ref(true);
 
-async function load() {
-  loading.value = true;
+async function loadSkills() {
+  loadingSkills.value = true;
   try {
-    try {
-      const res = await invoke<{
-        marketplaces?: {
-          plugins?: {
-            name: string;
-            installed?: boolean;
-            enabled?: boolean;
-            source?: { path?: string };
-            interface?: {
-              displayName?: string;
-              shortDescription?: string;
-              longDescription?: string;
-            };
-          }[];
-        }[];
-      }>("codex_rpc", { method: "plugin/list", params: {} });
-      const list = (res?.marketplaces ?? [])
-        .flatMap((mp) => mp.plugins ?? [])
-        .filter((p) => p.installed !== false && p.enabled !== false)
-        .map<Item>((p) => ({
-          name: p.interface?.displayName ?? p.name,
-          key: p.name,
-          path: p.source?.path ?? "",
-          desc:
-            p.interface?.shortDescription ?? p.interface?.longDescription ?? "",
-        }));
-      const seen = new Set<string>();
-      plugins.value = list.filter((p) => {
-        if (seen.has(p.key)) return false;
-        seen.add(p.key);
-        return true;
-      });
-    } catch {
-      // ignore
-    }
-    try {
-      const res = await invoke<{
-        data?: {
-          skills?: {
-            name: string;
-            description?: string;
-            path?: string;
-            enabled?: boolean;
-          }[];
-        }[];
-      }>("codex_rpc", { method: "skills/list", params: {} });
-      skills.value = (res?.data ?? [])
-        .flatMap((d) => d.skills ?? [])
-        .filter((s) => s.enabled !== false)
-        .map<Item>((s) => ({
-          name: s.name,
-          key: s.name,
-          path: s.path ?? "",
-          desc: s.description ?? "",
-        }));
-    } catch {
-      // ignore
-    }
+    const res = await invoke<{
+      data?: { skills?: SkillItem[] }[];
+    }>("codex_rpc", { method: "skills/list", params: {} });
+    skills.value = (res?.data ?? [])
+      .flatMap((d) => d.skills ?? [])
+      .filter((s) => (s as { enabled?: boolean }).enabled !== false)
+      .map<SkillItem>((s) => ({
+        name: s.name,
+        key: s.name,
+        path: s.path ?? "",
+        desc: s.desc ?? "",
+      }));
+  } catch {
+    // ignore
   } finally {
-    loading.value = false;
+    loadingSkills.value = false;
   }
 }
 
-onMounted(load);
+onMounted(loadSkills);
 
 const tokenLower = computed(() => props.token.toLowerCase());
-function match(item: Item): boolean {
-  if (!props.token) return true;
-  return (
-    item.name.toLowerCase().includes(tokenLower.value) ||
-    item.key.toLowerCase().includes(tokenLower.value)
+const filteredSkills = computed(() => {
+  if (!props.token) return skills.value;
+  return skills.value.filter(
+    (s) =>
+      s.name.toLowerCase().includes(tokenLower.value) ||
+      s.key.toLowerCase().includes(tokenLower.value),
   );
+});
+
+// ---------------- @ 分支：文件引用（键盘可导航的扁平行列表） ----------------
+type Row =
+  | { kind: "file"; item: FuzzyFileResult }
+  | { kind: "recent"; item: RecentRef }
+  | { kind: "native-file" }
+  | { kind: "native-dir" };
+
+const rows = computed<Row[]>(() => {
+  const list: Row[] = [];
+  if (props.token) {
+    for (const r of props.results) list.push({ kind: "file", item: r });
+  } else {
+    for (const r of props.recent) list.push({ kind: "recent", item: r });
+  }
+  list.push({ kind: "native-file" });
+  list.push({ kind: "native-dir" });
+  return list;
+});
+
+const highlight = ref(0);
+watch(
+  [() => props.token, () => props.results, () => props.recent],
+  () => {
+    highlight.value = 0;
+  },
+);
+
+function move(dir: -1 | 1) {
+  const len = rows.value.length;
+  if (!len) return;
+  highlight.value = (highlight.value + dir + len) % len;
 }
-const filteredPlugins = computed(() => plugins.value.filter(match));
-const filteredSkills = computed(() => skills.value.filter(match));
+
+function selectHighlighted() {
+  const row = rows.value[highlight.value];
+  if (!row) return;
+  selectRow(row);
+}
+
+function selectRow(row: Row) {
+  if (row.kind === "file") {
+    const { root, path, file_name } = row.item;
+    const full = root.endsWith("\\") || root.endsWith("/")
+      ? root + path
+      : root + "\\" + path;
+    emit("select-attachment", toUserAttachment(file_name, full));
+  } else if (row.kind === "recent") {
+    emit("select-attachment", toUserAttachment(row.item.name, row.item.path));
+  } else if (row.kind === "native-file") {
+    emit("pick-files");
+  } else {
+    emit("pick-dir");
+  }
+}
+
+defineExpose({ move, selectHighlighted });
+
+function rowIcon(row: Row): string {
+  if (row.kind === "file") return row.item.match_type === "directory" ? "D" : "F";
+  if (row.kind === "recent") return "R";
+  return row.kind === "native-file" ? "F" : "D";
+}
+function rowLabel(row: Row): string {
+  if (row.kind === "file") return row.item.file_name;
+  if (row.kind === "recent") return row.item.name;
+  return row.kind === "native-file" ? "选择文件…" : "选择文件夹…";
+}
+function rowDesc(row: Row): string {
+  if (row.kind === "file") return row.item.path;
+  if (row.kind === "recent") return row.item.path;
+  return "";
+}
+function rowKey(row: Row): string {
+  if (row.kind === "file") return "f:" + row.item.path;
+  if (row.kind === "recent") return "r:" + row.item.path;
+  return row.kind;
+}
 </script>
 
 <template>
   <div class="popup-menu mention-menu" @click.stop>
     <template v-if="kind === '@'">
-      <div class="menu-group">
-        <div class="menu-group-title">文件</div>
-        <button class="menu-item" @click="emit('pick-files')">
-          <span class="menu-item-icon">F</span>
-          <span>
-            <div class="menu-item-label">选择文件…</div>
-            <div class="menu-item-desc">从本地选择文件作为上下文</div>
-          </span>
-        </button>
-        <button class="menu-item" @click="emit('pick-dir')">
-          <span class="menu-item-icon">D</span>
-          <span>
-            <div class="menu-item-label">选择文件夹…</div>
-            <div class="menu-item-desc">从本地选择文件夹作为上下文</div>
-          </span>
-        </button>
+      <div class="menu-group-title">引用文件</div>
+      <div v-if="!token" class="menu-note mention-hint">
+        继续输入文件名搜索，或选择最近引用
       </div>
-      <div class="menu-group">
-        <div class="menu-group-title">插件</div>
+      <div v-else class="menu-note mention-hint">搜索“{{ token }}”…</div>
+
+      <div class="menu-results">
         <button
-          v-for="p in filteredPlugins"
-          :key="p.key"
+          v-for="(row, i) in rows"
+          :key="rowKey(row)"
           class="menu-item"
-          @click="emit('select-attachment', { type: 'skill', name: p.key, path: p.path })"
+          :class="{ active: highlight === i }"
+          @mouseenter="highlight = i"
+          @click="selectRow(row)"
         >
-          <span class="menu-item-icon">P</span>
+          <span class="menu-item-icon">
+            {{ rowIcon(row) }}
+          </span>
           <span>
-            <div class="menu-item-label">{{ p.name }}</div>
-            <div class="menu-item-desc">{{ p.desc }}</div>
+            <div class="menu-item-label">{{ rowLabel(row) }}</div>
+            <div v-if="rowDesc(row)" class="menu-item-desc">{{ rowDesc(row) }}</div>
           </span>
         </button>
-        <div v-if="loading" class="menu-note">加载中…</div>
-        <div v-else-if="!filteredPlugins.length" class="menu-note">无匹配插件</div>
-      </div>
-      <div class="menu-group">
-        <div class="menu-group-title">技能</div>
-        <button
-          v-for="s in filteredSkills"
-          :key="s.key"
-          class="menu-item"
-          @click="emit('select-attachment', { type: 'skill', name: s.key, path: s.path })"
-        >
-          <span class="menu-item-icon">S</span>
-          <span>
-            <div class="menu-item-label">{{ s.name }}</div>
-            <div class="menu-item-desc">{{ s.desc }}</div>
-          </span>
-        </button>
-        <div v-if="loading" class="menu-note">加载中…</div>
-        <div v-else-if="!filteredSkills.length" class="menu-note">无匹配技能</div>
+        <div v-if="token && searching" class="menu-note">搜索中…</div>
+        <div v-else-if="token && !results.length" class="menu-note">无匹配文件</div>
+        <div v-else-if="!token && !recent.length" class="menu-note">暂无最近引用</div>
       </div>
     </template>
+
     <template v-else>
       <div class="menu-group">
         <div class="menu-group-title">技能（使用 $ 调用 Skills）</div>
@@ -172,7 +194,7 @@ const filteredSkills = computed(() => skills.value.filter(match));
             <div class="menu-item-desc">{{ s.desc }}</div>
           </span>
         </button>
-        <div v-if="loading" class="menu-note">加载中…</div>
+        <div v-if="loadingSkills" class="menu-note">加载中…</div>
         <div v-else-if="!filteredSkills.length" class="menu-note">无匹配技能</div>
       </div>
     </template>

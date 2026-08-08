@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
@@ -15,30 +15,99 @@ import {
   store,
 } from "../composables/useCodex";
 import type { UserInput } from "../lib/types";
+import {
+  baseName,
+  matchMentionToken,
+  pushRecent,
+  toUserAttachment,
+  type FuzzyFileResult,
+  type RecentRef,
+} from "../lib/mention";
 
 const text = ref("");
 const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
   null,
 );
 const inputEl = ref<HTMLTextAreaElement | null>(null);
+const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
+
+// @ 文件引用：最近引用（仅内存）+ 模糊搜索结果
+const recentMentions = ref<RecentRef[]>([]);
+const fileResults = ref<FuzzyFileResult[]>([]);
+const searchingFiles = ref(false);
+let searchSeq = 0;
+let searchTimer: number | undefined;
 
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
 const sentHistory: string[] = [];
 let historyIndex = -1;
 
 function onInput() {
-  const t = text.value;
-  const m = /(?:^|\s)([@$])([\w-]*)$/.exec(t);
-  if (m) {
-    const triggerIdx =
-      m.index + (m[0].startsWith("@") || m[0].startsWith("$") ? 0 : 1);
-    mention.value = {
-      kind: m[1] as "@" | "$",
-      token: m[2],
-      start: triggerIdx,
-    };
-  } else if (mention.value) {
-    mention.value = null;
+  mention.value = matchMentionToken(text.value);
+  if (!mention.value) {
+    fileResults.value = [];
+    searchingFiles.value = false;
+  }
+}
+
+function scheduleFileSearch(token: string) {
+  if (searchTimer) window.clearTimeout(searchTimer);
+  if (!token) {
+    fileResults.value = [];
+    searchingFiles.value = false;
+    searchSeq++;
+    return;
+  }
+  searchTimer = window.setTimeout(() => {
+    void runFileSearch(token);
+  }, 250);
+}
+
+async function runFileSearch(token: string) {
+  const seq = ++searchSeq;
+  const root =
+    store.newChatCwd ?? store.currentThreadCwd ?? store.server.workspace;
+  if (!root) {
+    searchingFiles.value = false;
+    return;
+  }
+  searchingFiles.value = true;
+  try {
+    const res = await invoke<{ files?: FuzzyFileResult[] }>("codex_rpc", {
+      method: "fuzzyFileSearch",
+      params: { query: token, roots: [root], cancellationToken: null },
+    });
+    if (seq !== searchSeq) return;
+    fileResults.value = (res.files ?? []).slice(0, 50);
+  } catch (e) {
+    if (seq === searchSeq) {
+      fileResults.value = [];
+      store.toast = String(e);
+    }
+  } finally {
+    if (seq === searchSeq) searchingFiles.value = false;
+  }
+}
+
+watch(
+  () => mention.value,
+  (m) => {
+    if (m?.kind === "@") scheduleFileSearch(m.token);
+    else if (searchTimer) window.clearTimeout(searchTimer);
+  },
+);
+
+function rememberRecent(a: UserInput) {
+  if (a.type === "mention") {
+    recentMentions.value = pushRecent(recentMentions.value, {
+      name: a.name,
+      path: a.path,
+    });
+  } else if (a.type === "localImage") {
+    recentMentions.value = pushRecent(recentMentions.value, {
+      name: baseName(a.path),
+      path: a.path,
+    });
   }
 }
 
@@ -50,45 +119,51 @@ function removeMentionToken() {
   mention.value = null;
 }
 
+function refocusInput() {
+  void nextTick(() => inputEl.value?.focus());
+}
+
 function onSelectAttachment(a: UserInput) {
   removeMentionToken();
+  rememberRecent(a);
   store.attachments.push(a);
+  refocusInput();
 }
 
-async function onPickFiles() {
+function onPickFiles() {
   removeMentionToken();
-  try {
-    const files = await invoke<string[]>("pick_files", { multiple: true });
-    for (const f of files) {
-      if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f)) {
-        store.attachments.push({ type: "localImage", path: f });
-      } else {
-        store.attachments.push({
-          type: "mention",
-          name: f.split(/[\\/]/).pop() ?? f,
-          path: f,
-        });
+  void (async () => {
+    try {
+      const files = await invoke<string[]>("pick_files", { multiple: true });
+      for (const f of files) {
+        const a = toUserAttachment(baseName(f), f);
+        rememberRecent(a);
+        store.attachments.push(a);
       }
+    } catch (e) {
+      store.toast = String(e);
+    } finally {
+      refocusInput();
     }
-  } catch (e) {
-    store.toast = String(e);
-  }
+  })();
 }
 
-async function onPickDir() {
+function onPickDir() {
   removeMentionToken();
-  try {
-    const dir = await invoke<string | null>("pick_directory");
-    if (dir) {
-      store.attachments.push({
-        type: "mention",
-        name: dir.split(/[\\/]/).pop() ?? dir,
-        path: dir,
-      });
+  void (async () => {
+    try {
+      const dir = await invoke<string | null>("pick_directory");
+      if (dir) {
+        const a = toUserAttachment(baseName(dir), dir);
+        rememberRecent(a);
+        store.attachments.push(a);
+      }
+    } catch (e) {
+      store.toast = String(e);
+    } finally {
+      refocusInput();
     }
-  } catch (e) {
-    store.toast = String(e);
-  }
+  })();
 }
 
 function closeMenus() {
@@ -120,6 +195,19 @@ watch(
 function onKeydown(e: KeyboardEvent) {
   // 输入法组合中（如中文拼音选字）的按键不触发提交/历史选择
   if (e.isComposing || e.keyCode === 229) return;
+  // @ 文件引用菜单打开时：Enter 选中高亮项，↑↓ 移动高亮
+  if (
+    mention.value?.kind === "@" &&
+    (e.key === "Enter" || e.key === "ArrowUp" || e.key === "ArrowDown")
+  ) {
+    e.preventDefault();
+    if (e.key === "Enter") {
+      mentionMenu.value?.selectHighlighted();
+    } else {
+      mentionMenu.value?.move(e.key === "ArrowUp" ? -1 : 1);
+    }
+    return;
+  }
   if (e.key === "Enter") {
     // Enter 快捷发送：开启时 Enter 发送 / Shift+Enter 换行；
     // 关闭时 Enter 换行 / Ctrl+Enter 发送
@@ -272,9 +360,13 @@ function openGoalDialog() {
           @keydown="onKeydown"
         ></textarea>
         <MentionMenu
+          ref="mentionMenu"
           v-if="mention"
           :kind="mention.kind"
           :token="mention.token"
+          :recent="recentMentions"
+          :results="fileResults"
+          :searching="searchingFiles"
           @close="mention = null"
           @pick-files="onPickFiles()"
           @pick-dir="onPickDir()"
