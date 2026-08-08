@@ -19,10 +19,17 @@ interface ModelItem {
   defaultReasoningEffort: string;
 }
 
-// 跟随所选模型动态生成强度选项；未知模型回退到常用三档
+// 当前生效模型：显式选中优先，否则取 isDefault 模型
+const effectiveModel = computed(
+  () =>
+    models.value.find((x) => x.model === model.value) ??
+    models.value.find((x) => x.isDefault) ??
+    null,
+);
+
+// 跟随生效模型动态生成强度选项；未知模型回退到常用三档
 const effortOptions = computed(() => {
-  const m = models.value.find((x) => x.model === model.value);
-  const supported = m?.supportedReasoningEfforts ?? [];
+  const supported = effectiveModel.value?.supportedReasoningEfforts ?? [];
   if (supported.length) return supported;
   return [
     { reasoningEffort: "low", description: "低" },
@@ -32,18 +39,18 @@ const effortOptions = computed(() => {
 });
 
 const defaultEffort = computed(() => {
-  const m = models.value.find((x) => x.model === model.value);
-  return m?.defaultReasoningEffort ?? "";
+  return effectiveModel.value?.defaultReasoningEffort ?? "";
 });
 
 function selectModel(m: ModelItem) {
-  model.value = m.model;
-  // 当前强度不在该模型支持范围内时，跟随模型默认
+  // 默认模型 = 服务端默认（model 置空）；其它模型显式选择
+  model.value = m.isDefault ? "" : m.model;
+  // 当前强度不在该模型支持范围内时，回到默认
   if (
-    !effort.value ||
+    effort.value &&
     !m.supportedReasoningEfforts.some((s) => s.reasoningEffort === effort.value)
   ) {
-    effort.value = m.defaultReasoningEffort ?? "";
+    effort.value = "";
   }
 }
 
@@ -75,17 +82,10 @@ function apply() {
       <div class="menu-group-title">模型</div>
       <div v-if="models.length" class="question-options" style="padding: 0 8px 4px">
         <button
-          class="option-btn"
-          :class="{ selected: model === '' }"
-          @click="model = ''"
-        >
-          （默认）
-        </button>
-        <button
           v-for="m in models"
           :key="m.id"
           class="option-btn"
-          :class="{ selected: model === m.model }"
+          :class="{ selected: model === m.model || (model === '' && m.isDefault) }"
           @click="selectModel(m)"
           :title="m.description || m.model"
         >
@@ -93,6 +93,7 @@ function apply() {
           <span v-if="m.model !== (m.displayName || m.model)" class="model-slug">{{
             m.model
           }}</span>
+          <span v-if="m.isDefault" class="model-default-tag">默认</span>
         </button>
       </div>
       <input v-model="model" class="menu-search" placeholder="模型名称（留空使用默认）" />
@@ -105,18 +106,15 @@ function apply() {
           v-for="e in effortOptions"
           :key="e.reasoningEffort"
           class="option-btn"
-          :class="{ selected: effort === e.reasoningEffort }"
-          @click="effort = e.reasoningEffort"
+          :class="{
+            selected:
+              effort === e.reasoningEffort ||
+              (effort === '' && e.reasoningEffort === defaultEffort),
+          }"
+          @click="effort = e.reasoningEffort === defaultEffort ? '' : e.reasoningEffort"
           :title="e.description"
         >
           {{ e.reasoningEffort }}
-        </button>
-        <button
-          class="option-btn"
-          :class="{ selected: effort === '' }"
-          @click="effort = ''"
-        >
-          默认
         </button>
       </div>
       <div class="modal-foot" style="border-top: none; padding: 8px 8px 2px">

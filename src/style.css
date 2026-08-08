@@ -1664,6 +1664,16 @@ select option {
   color: var(--text-faint);
 }
 
+.option-btn .model-default-tag {
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent-dim);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
 /* 设置页 */
 .settings {
   flex: 1;
