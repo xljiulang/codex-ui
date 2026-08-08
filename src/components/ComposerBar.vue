@@ -194,12 +194,22 @@ async function pickNewChatCwd() {
   }
 }
 
-function effortLabel(): string {
-  const e = store.effort;
-  if (e === "high") return "高";
-  if (e === "medium") return "中";
-  if (e === "low") return "低";
-  return "";
+function modelChipLabel(): string {
+  const effortText =
+    store.effort === "high"
+      ? "高"
+      : store.effort === "medium"
+        ? "中"
+        : store.effort === "low"
+          ? "低"
+          : "";
+  if (store.model) {
+    const name = store.model.includes("/")
+      ? store.model.split("/").pop()
+      : store.model;
+    return `${name}${effortText ? ` ${effortText}` : ""}`;
+  }
+  return effortText ? `自定义 ${effortText}` : "自定义";
 }
 
 function taskModeLabel(): string {
@@ -311,7 +321,7 @@ function openGoalDialog() {
       <div class="composer-right">
         <div class="menu-anchor">
           <button class="model-chip" title="模型" @click="store.modelOpen = !store.modelOpen">
-            自定义{{ effortLabel() ? ` ${effortLabel()}` : "" }}
+          {{ modelChipLabel() }}
             <svg viewBox="0 0 16 16">
               <path d="M4 6l4 4 4-4z" />
             </svg>

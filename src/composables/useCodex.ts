@@ -123,6 +123,38 @@ function flattenTurns(turns?: Turn[]): ThreadItem[] {
   return out;
 }
 
+interface TurnsListPage {
+  data: Turn[];
+  nextCursor: string | null;
+}
+
+/** 用 thread/turns/list(itemsView=full) 拉取历史的完整工具/命令项 */
+async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
+  const turns: Turn[] = [];
+  let cursor: string | null = null;
+  try {
+    for (let i = 0; i < 30; i++) {
+      const res = (await invoke("codex_rpc", {
+        method: "thread/turns/list",
+        params: {
+          threadId,
+          cursor,
+          limit: 50,
+          sortDirection: "ascending",
+          itemsView: "full",
+        },
+      })) as TurnsListPage;
+      turns.push(...(res.data ?? []));
+      cursor = res.nextCursor ?? null;
+      if (!cursor) break;
+      if (turns.length > 2000) break; // 防超长会话
+    }
+  } catch {
+    return null; // 服务端不支持时回退到 thread_read 的摘要项
+  }
+  return flattenTurns(turns);
+}
+
 async function focusWindow() {
   try {
     const win = getCurrentWindow();
@@ -405,7 +437,9 @@ export async function openThread(threadId: string) {
         turns?: Turn[];
       };
     }>("thread_read", { threadId, includeTurns: true });
-    store.itemsByThread[threadId] = flattenTurns(res.thread.turns);
+    // 优先用全量 items（含命令/工具详情），失败则回退摘要
+    const fullItems = await loadFullItems(threadId);
+    store.itemsByThread[threadId] = fullItems ?? flattenTurns(res.thread.turns);
     store.currentThreadName = res.thread.name ?? "";
     store.currentThreadCwd = res.thread.cwd ?? null;
     store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
