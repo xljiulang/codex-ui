@@ -14,15 +14,9 @@ const effectiveModel = computed(
     null,
 );
 
-// 跟随生效模型动态生成强度选项；未知模型回退到常用三档
+// 跟随生效模型动态生成强度选项；无模型/无支持档位时为空，表示全部使用默认
 const effortOptions = computed(() => {
-  const supported = effectiveModel.value?.supportedReasoningEfforts ?? [];
-  if (supported.length) return supported;
-  return [
-    { reasoningEffort: "low", description: "低" },
-    { reasoningEffort: "medium", description: "中" },
-    { reasoningEffort: "high", description: "高" },
-  ];
+  return effectiveModel.value?.supportedReasoningEfforts ?? [];
 });
 
 const defaultEffort = computed(() => {
@@ -68,24 +62,27 @@ function apply() {
           <span v-if="m.isDefault" class="option-default-tag">默认</span>
         </button>
       </div>
-      <div class="menu-group-title" style="margin-top: 10px">推理强度</div>
-      <div class="question-options" style="padding: 0 8px 4px">
-        <button
-          v-for="e in effortOptions"
-          :key="e.reasoningEffort"
-          class="option-btn"
-          :class="{
-            selected:
-              effort === e.reasoningEffort ||
-              (effort === '' && e.reasoningEffort === defaultEffort),
-          }"
-          @click="effort = e.reasoningEffort === defaultEffort ? '' : e.reasoningEffort"
-          :title="e.description"
-        >
-          {{ e.reasoningEffort }}
-          <span v-if="e.reasoningEffort === defaultEffort" class="option-default-tag">默认</span>
-        </button>
-      </div>
+      <div v-else class="menu-note">无可用模型（使用默认）</div>
+      <template v-if="effortOptions.length">
+        <div class="menu-group-title" style="margin-top: 10px">推理强度</div>
+        <div class="question-options" style="padding: 0 8px 4px">
+          <button
+            v-for="e in effortOptions"
+            :key="e.reasoningEffort"
+            class="option-btn"
+            :class="{
+              selected:
+                effort === e.reasoningEffort ||
+                (effort === '' && e.reasoningEffort === defaultEffort),
+            }"
+            @click="effort = e.reasoningEffort === defaultEffort ? '' : e.reasoningEffort"
+            :title="e.description"
+          >
+            {{ e.reasoningEffort }}
+            <span v-if="e.reasoningEffort === defaultEffort" class="option-default-tag">默认</span>
+          </button>
+        </div>
+      </template>
       <div class="modal-foot" style="border-top: none; padding: 8px 8px 2px">
         <button class="btn primary" @click="apply()">应用</button>
       </div>

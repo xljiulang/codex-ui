@@ -1670,7 +1670,7 @@ select option {
   border: 1px solid var(--accent-dim);
   border-radius: 4px;
   padding: 0 4px;
-  margin-left: 6px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
