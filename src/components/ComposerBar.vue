@@ -8,6 +8,7 @@ import PlusMenu from "./PlusMenu.vue";
 import TaskModeMenu from "./TaskModeMenu.vue";
 import {
   interrupt,
+  effectiveEffort,
   modelDisplayName,
   permissionChip,
   sendPrompt,
@@ -196,15 +197,9 @@ async function pickNewChatCwd() {
 }
 
 function modelChipLabel(): string {
-  const effortText =
-    store.effort === "high"
-      ? "高"
-      : store.effort === "medium"
-        ? "中"
-        : store.effort === "low"
-          ? "低"
-          : "";
-  return `${modelDisplayName(store.model)}${effortText ? ` ${effortText}` : ""}`;
+  const name = modelDisplayName(store.model);
+  const effort = effectiveEffort();
+  return effort ? `${name}(${effort})` : name;
 }
 
 function taskModeLabel(): string {
@@ -334,6 +329,7 @@ function openGoalDialog() {
         <button
           class="send-btn"
           title="发送"
+          :class="{ lit: !!(text.trim() || store.attachments.length) }"
           :disabled="!text.trim() && store.attachments.length === 0"
           @click="submit()"
         >

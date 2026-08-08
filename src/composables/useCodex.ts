@@ -253,6 +253,15 @@ export function modelDisplayName(model: string | null): string {
   return def?.displayName || "默认模型";
 }
 
+/** 当前生效的推理强度：显式值优先，否则用默认模型的默认强度 */
+export function effectiveEffort(): string {
+  if (store.effort) return store.effort;
+  const m =
+    store.models.find((x) => x.model === store.model) ??
+    store.models.find((x) => x.isDefault);
+  return m?.defaultReasoningEffort ?? "";
+}
+
 export async function refreshThreads(loadMore = false) {
   if (store.loadingHistory) return;
   store.loadingHistory = true;
