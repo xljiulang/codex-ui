@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
@@ -106,6 +106,14 @@ onMounted(() => {
   inputEl.value?.focus();
 });
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydownGlobal));
+
+// 新建对话后输入框重新获得焦点（组件未卸载的情况，如聊天页直接点“新建对话”）
+watch(
+  () => store.currentThreadId,
+  (v) => {
+    if (!v) inputEl.value?.focus();
+  },
+);
 
 function onKeydown(e: KeyboardEvent) {
   // 输入法组合中（如中文拼音选字）的按键不触发提交/历史选择

@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick } from "vue";
 import { newEmptyChat, store } from "../composables/useCodex";
 
 const cwd = computed(() => store.currentThreadCwd ?? store.server.workspace);
+
+function onNewChat() {
+  void newEmptyChat();
+  // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
+  void nextTick(() => {
+    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  });
+}
 </script>
 
 <template>
@@ -36,7 +44,7 @@ const cwd = computed(() => store.currentThreadCwd ?? store.server.workspace);
           />
         </svg>
       </button>
-      <button class="icon-btn" title="新建对话" @click="newEmptyChat()">
+      <button class="icon-btn" title="新建对话" @click="onNewChat()">
         <svg viewBox="0 0 24 24">
           <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
         </svg>

@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -69,11 +69,22 @@ export const store = reactive({
 let unlisteners: UnlistenFn[] = [];
 let wired = false;
 
+// 任何地方给 store.toast 赋值都会在 5 秒后自动消失
+let toastTimer: number | undefined;
+watch(
+  () => store.toast,
+  (v) => {
+    if (toastTimer) window.clearTimeout(toastTimer);
+    if (v) {
+      toastTimer = window.setTimeout(() => {
+        store.toast = "";
+      }, 5000);
+    }
+  },
+);
+
 function setToast(msg: string) {
   store.toast = msg;
-  window.setTimeout(() => {
-    if (store.toast === msg) store.toast = "";
-  }, 5000);
 }
 
 function upsertItem(threadId: string, item: ThreadItem) {
