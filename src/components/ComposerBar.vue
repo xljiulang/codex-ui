@@ -204,11 +204,6 @@ const ctxTooltip = computed(() => {
   return `${u.pct}% 已用 ${formatTokens(u.used)} / 共 ${formatTokens(u.window)}`;
 });
 
-const ctxLevel = computed(() => {
-  const p = ctxUsage.value?.pct ?? 0;
-  return p >= 90 ? "danger" : p >= 70 ? "warn" : "";
-});
-
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
@@ -340,7 +335,6 @@ function openGoalDialog() {
         <span
           v-if="ctxUsage"
           class="ctx-window"
-          :class="ctxLevel"
           :title="ctxTooltip"
         >
           {{ ctxUsage.pct }}%
@@ -360,9 +354,13 @@ function openGoalDialog() {
           title="停止生成"
           @click="interrupt()"
         >
-          ■
+          <svg viewBox="0 0 24 24">
+            <rect x="6" y="6" width="12" height="12" rx="1.5" />
+          </svg>
+          停止
         </button>
         <button
+          v-else
           class="send-btn"
           title="发送"
           :class="{ lit: !!(text.trim() || store.attachments.length) }"
