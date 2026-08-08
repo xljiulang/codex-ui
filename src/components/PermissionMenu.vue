@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { PERMISSION_MODES } from "../lib/permissions";
-import { saveSettings, store } from "../composables/useCodex";
+import { store } from "../composables/useCodex";
 
 const emit = defineEmits<{ close: [] }>();
 
 function choose(id: string) {
   if (store.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
-  void saveSettings({ permission_mode: id });
+  store.permissionMode = id; // 进程级生效，不写配置文件
   emit("close");
 }
 </script>
@@ -20,7 +20,7 @@ function choose(id: string) {
       v-for="m in PERMISSION_MODES"
       :key="m.id"
       class="mode-menu-item"
-      :class="{ selected: store.settings.permission_mode === m.id }"
+      :class="{ selected: store.permissionMode === m.id }"
       @click="choose(m.id)"
     >
       <span class="mode-icon">
@@ -44,7 +44,7 @@ function choose(id: string) {
         <div class="mode-label">{{ m.label }}</div>
         <div class="mode-desc">{{ m.desc }}</div>
       </span>
-      <span v-if="store.settings.permission_mode === m.id" class="mode-check">✓</span>
+      <span v-if="store.permissionMode === m.id" class="mode-check">✓</span>
     </button>
   </div>
 </template>

@@ -1,16 +1,15 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { saveSettings, store } from "../composables/useCodex";
+import { store } from "../composables/useCodex";
 
 const emit = defineEmits<{ close: [] }>();
-const model = ref(store.settings.model ?? "");
-const effort = ref(store.settings.effort ?? "");
+const model = ref(store.model ?? "");
+const effort = ref(store.effort ?? "");
 
 function apply() {
-  void saveSettings({
-    model: model.value.trim() ? model.value.trim() : null,
-    effort: effort.value || null,
-  });
+  // 进程级生效，不写配置文件
+  store.model = model.value.trim() ? model.value.trim() : null;
+  store.effort = effort.value || null;
   emit("close");
 }
 </script>

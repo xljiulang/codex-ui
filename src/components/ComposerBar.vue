@@ -184,7 +184,7 @@ function attachmentLabel(a: UserInput): string {
 }
 
 function effortLabel(): string {
-  const e = store.settings.effort;
+  const e = store.effort;
   if (e === "high") return "高";
   if (e === "medium") return "中";
   if (e === "low") return "低";
@@ -239,7 +239,7 @@ function openGoalDialog() {
             :disabled="store.turnActive"
             @click="store.permOpen = !store.permOpen"
           >
-            <svg viewBox="0 0 24 24">
+            <svg v-if="store.permissionMode === 'full-access'" viewBox="0 0 24 24">
               <path
                 d="M12 2 4 5v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V5l-8-3zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"
               />

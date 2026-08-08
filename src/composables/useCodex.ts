@@ -22,9 +22,6 @@ import {
 import { playNotificationSound } from "../lib/sound";
 
 const defaultSettings = (): AppSettings => ({
-  permission_mode: "ask-for-approval",
-  model: null,
-  effort: null,
   codex_path: null,
   sound_enabled: true,
   enter_to_send: true,
@@ -57,6 +54,10 @@ export const store = reactive({
   loadingThread: false,
   busy: false,
   currentModel: "",
+  // 进程级设置：权限模式 / 模型 / 推理强度，仅当前运行期有效，不写入配置文件
+  permissionMode: "ask-for-approval" as string,
+  model: null as string | null,
+  effort: null as string | null,
   taskMode: "execute" as "execute" | "plan" | "goal",
   goalText: null as string | null,
   attachments: [] as UserInput[],
@@ -138,7 +139,7 @@ async function updateWindowTitle() {
       await win.setTitle("codex-ui");
       return;
     }
-    await win.setTitle(`codex-ui · ${currentThreadLabel()}`);
+    await win.setTitle(currentThreadLabel());
   } catch {
     // 非 Tauri 环境（如浏览器预览）忽略
   }
@@ -206,12 +207,12 @@ async function newChat(prompt: string, attachments: UserInput[]) {
   try {
     const params: Record<string, unknown> = {
       cwd: store.server.workspace,
-      approvalPolicy: toApprovalPolicy(store.settings.permission_mode),
-      sandbox: toSandbox(store.settings.permission_mode),
+      approvalPolicy: toApprovalPolicy(store.permissionMode),
+      sandbox: toSandbox(store.permissionMode),
     };
-    const reviewer = toApprovalsReviewer(store.settings.permission_mode);
+    const reviewer = toApprovalsReviewer(store.permissionMode);
     if (reviewer) params.approvalsReviewer = reviewer;
-    if (store.settings.model) params.model = store.settings.model;
+    if (store.model) params.model = store.model;
     const res = await invoke<{ thread: { id: string; name?: string | null }; model?: string }>(
       "thread_start",
       { params },
@@ -222,7 +223,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.currentThreadOrigin = "new";
     store.currentThreadCwd = store.server.workspace;
     store.resumedThreadId = threadId;
-    store.currentModel = res.model ?? store.settings.model ?? "";
+    store.currentModel = res.model ?? store.model ?? "";
     store.itemsByThread[threadId] = [];
     store.showHistory = false;
     const pendingGoal = store.goalText;
@@ -270,25 +271,25 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   ];
   const params: Record<string, unknown> = { threadId, input, clientUserMessageId: clientId };
   // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
-  params.approvalPolicy = toApprovalPolicy(store.settings.permission_mode);
+  params.approvalPolicy = toApprovalPolicy(store.permissionMode);
   params.sandboxPolicy = toSandboxPolicy(
-    store.settings.permission_mode,
+    store.permissionMode,
     store.currentThreadCwd ?? store.server.workspace,
   );
-  const reviewer = toApprovalsReviewer(store.settings.permission_mode);
+  const reviewer = toApprovalsReviewer(store.permissionMode);
   if (reviewer) params.approvalsReviewer = reviewer;
-  if (store.settings.model) params.model = store.settings.model;
-  if (store.settings.effort) params.effort = store.settings.effort;
-  if (store.taskMode === "plan") {
-    params.collaborationMode = {
-      mode: "plan",
-      settings: {
-        model: store.settings.model ?? store.currentModel ?? "",
-        reasoning_effort: store.settings.effort ?? null,
-        developer_instructions: null,
-      },
-    };
-  }
+  if (store.model) params.model = store.model;
+  if (store.effort) params.effort = store.effort;
+  // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
+  // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
+  params.collaborationMode = {
+    mode: store.taskMode === "plan" ? "plan" : "default",
+    settings: {
+      model: store.model ?? store.currentModel ?? "",
+      reasoning_effort: store.effort ?? null,
+      developer_instructions: null,
+    },
+  };
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -720,7 +721,7 @@ export function disposeEvents() {
 }
 
 export function permissionChip(): string {
-  return permissionMode(store.settings.permission_mode).chip;
+  return permissionMode(store.permissionMode).chip;
 }
 
 export function currentItems(): ThreadItem[] {

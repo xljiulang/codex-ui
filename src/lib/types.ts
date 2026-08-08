@@ -72,9 +72,6 @@ export interface PendingInteraction {
 }
 
 export interface AppSettings {
-  permission_mode: string;
-  model?: string | null;
-  effort?: string | null;
   codex_path?: string | null;
   sound_enabled: boolean;
   enter_to_send: boolean;

@@ -5,10 +5,6 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
-    /// "ask-for-approval" | "help-me-approve" | "full-access"
-    pub permission_mode: String,
-    pub model: Option<String>,
-    pub effort: Option<String>,
     pub codex_path: Option<String>,
     pub sound_enabled: bool,
     pub enter_to_send: bool,
@@ -18,9 +14,6 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            permission_mode: "ask-for-approval".into(),
-            model: None,
-            effort: None,
             codex_path: None,
             sound_enabled: true,
             enter_to_send: true,
