@@ -1892,6 +1892,34 @@ select option {
   animation: toast-in 0.18s ease;
 }
 
+/* 自定义右键菜单 */
+.ctx-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 140px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ctx-menu-item {
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--text);
+  width: 100%;
+}
+
+.ctx-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
