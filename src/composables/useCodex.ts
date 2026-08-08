@@ -156,7 +156,7 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
           threadId,
           cursor,
           limit: 50,
-          sortDirection: "asc",
+          sortDirection: "ascending",
           itemsView: "full",
         },
       })) as TurnsListPage;
@@ -617,18 +617,9 @@ export async function openThread(threadId: string) {
         turns?: Turn[];
       };
     }>("thread_read", { threadId, includeTurns: true });
-    // 优先用会话文件解析出的完整 items（含命令/工具/推理），失败则回退接口摘要。
-    // app-server 的历史读取接口只返回简化重建视图，完整数据需直接解析 .jsonl。
-    let fullItems: ThreadItem[] | null = null;
-    try {
-      const parsed = await invoke<ThreadItem[]>("thread_full_items", { threadId });
-      fullItems = Array.isArray(parsed) && parsed.length ? parsed : null;
-    } catch {
-      fullItems = null;
-    }
-    if (!fullItems) fullItems = await loadFullItems(threadId);
-    store.itemsByThread[threadId] =
-      fullItems && fullItems.length ? fullItems : flattenTurns(res.thread.turns);
+    // 优先用全量 items（含命令/工具详情），失败则回退摘要
+    const fullItems = await loadFullItems(threadId);
+    store.itemsByThread[threadId] = fullItems ?? flattenTurns(res.thread.turns);
     store.currentThreadName = res.thread.name ?? "";
     store.currentThreadCwd = res.thread.cwd ?? null;
     store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
