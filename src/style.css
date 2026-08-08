@@ -1226,7 +1226,7 @@ select option {
 }
 
 .send-btn {
-  height: 30px;
+  height: 26px;
   padding: 0 16px;
   gap: 5px;
   display: inline-flex;
@@ -1275,7 +1275,7 @@ select option {
 }
 
 .send-btn.stop {
-  width: 30px;
+  width: 26px;
   padding: 0;
   background: var(--bg-active);
   color: var(--text-bright);
