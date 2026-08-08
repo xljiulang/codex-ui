@@ -23,6 +23,7 @@ pub fn run() {
             codex::commands::thread_delete,
             codex::commands::thread_set_name,
             codex::commands::turn_start,
+            codex::commands::turn_steer,
             codex::commands::turn_interrupt,
             codex::commands::goal_set,
             codex::commands::goal_get,

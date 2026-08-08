@@ -78,6 +78,7 @@ export interface AppSettings {
   codex_path?: string | null;
   sound_enabled: boolean;
   enter_to_send: boolean;
+  followup_mode: string;
 }
 
 export interface AuthStatus {

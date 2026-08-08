@@ -157,6 +157,16 @@ pub async fn turn_start(
 }
 
 #[tauri::command]
+pub async fn turn_steer(
+    server: State<'_, Server>,
+    params: Value,
+) -> Result<Value, String> {
+    server
+        .request("turn/steer", params, Some(Duration::from_secs(60)))
+        .await
+}
+
+#[tauri::command]
 pub async fn turn_interrupt(
     server: State<'_, Server>,
     thread_id: String,

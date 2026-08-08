@@ -124,7 +124,7 @@ function onKeydown(e: KeyboardEvent) {
     const shouldSend = store.settings.enter_to_send ? !e.shiftKey : e.ctrlKey;
     if (shouldSend) {
       e.preventDefault();
-      submit();
+      submit(e.ctrlKey);
     }
     return;
   }
@@ -153,7 +153,7 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function submit() {
+function submit(flip = false) {
   closeMenus(); // 发送后关闭可能开着的菜单，避免回合中还能切换模式
   const t = text.value;
   text.value = "";
@@ -162,7 +162,7 @@ function submit() {
     if (sentHistory.length > 100) sentHistory.shift();
   }
   historyIndex = -1;
-  void sendPrompt(t);
+  void sendPrompt(t, flip);
 }
 
 function removeAttachment(i: number) {
@@ -295,7 +295,6 @@ function openGoalDialog() {
           ■
         </button>
         <button
-          v-else
           class="send-btn"
           title="发送"
           :disabled="!text.trim() && store.attachments.length === 0"

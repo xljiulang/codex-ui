@@ -12,6 +12,7 @@ pub struct AppSettings {
     pub codex_path: Option<String>,
     pub sound_enabled: bool,
     pub enter_to_send: bool,
+    pub followup_mode: String,
 }
 
 impl Default for AppSettings {
@@ -23,6 +24,7 @@ impl Default for AppSettings {
             codex_path: None,
             sound_enabled: true,
             enter_to_send: true,
+            followup_mode: "adjust".into(),
         }
     }
 }

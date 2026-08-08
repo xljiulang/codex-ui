@@ -28,6 +28,7 @@ const defaultSettings = (): AppSettings => ({
   codex_path: null,
   sound_enabled: true,
   enter_to_send: true,
+  followup_mode: "adjust",
 });
 
 export const store = reactive({
@@ -49,6 +50,7 @@ export const store = reactive({
   turnActive: false,
   turnInterrupted: false,
   currentTurnId: null as string | null,
+  followupQueue: [] as { text: string; attachments: UserInput[] }[],
   interactions: [] as PendingInteraction[],
   settings: defaultSettings(),
   loadingHistory: false,
@@ -232,10 +234,10 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     }
     store.goalText = pendingGoal;
     await refreshThreads();
-    await updateWindowTitle();
     if (prompt.trim() || attachments.length) {
       await continueTurn(prompt, attachments);
     }
+    await updateWindowTitle();
   } finally {
     store.busy = false;
   }
@@ -292,6 +294,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     type: "userMessage",
     content: input,
   });
+  await updateWindowTitle(); // 首条消息发送后窗口标题立即跟随
   try {
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
     store.turnActive = true;
@@ -308,9 +311,52 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   }
 }
 
-export async function sendPrompt(text: string) {
+/** 向进行中的回合追加输入（“调整方向”），协议 turn/steer */
+async function steerTurn(prompt: string, attachments: UserInput[]) {
+  const threadId = store.currentThreadId;
+  if (!threadId || !store.currentTurnId) {
+    setToast("当前没有进行中的回合");
+    return;
+  }
+  const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const input: UserInput[] = [
+    { type: "text", text: prompt, text_elements: [] },
+    ...attachments,
+  ];
+  upsertItem(threadId, {
+    id: clientId,
+    clientId,
+    type: "userMessage",
+    content: input,
+  });
+  try {
+    await invoke("turn_steer", {
+      params: {
+        threadId,
+        clientUserMessageId: clientId,
+        input,
+        expectedTurnId: store.currentTurnId,
+      },
+    });
+  } catch (e) {
+    setToast(String(e));
+  }
+}
+
+export async function sendPrompt(text: string, flip = false) {
   const attachments = store.attachments.splice(0);
   if (!text.trim() && attachments.length === 0) return;
+  // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
+  if (store.turnActive && store.currentThreadId) {
+    const base = store.settings.followup_mode;
+    const mode = flip ? (base === "adjust" ? "queue" : "adjust") : base;
+    if (mode === "adjust") {
+      await steerTurn(text, attachments);
+    } else {
+      store.followupQueue.push({ text, attachments });
+    }
+    return;
+  }
   try {
     if (!store.currentThreadId) {
       await newChat(text, attachments);
@@ -501,6 +547,15 @@ async function wireEvents() {
       store.turnInterrupted = p.turn?.status === "interrupted";
       store.currentTurnId = null;
       await refreshThreads();
+      // 处理“加入队列”的跟进消息
+      if (store.followupQueue.length) {
+        const next = store.followupQueue.shift()!;
+        if (store.currentThreadId) {
+          await continueTurn(next.text, next.attachments);
+        } else {
+          await newChat(next.text, next.attachments);
+        }
+      }
     }),
   );
 
@@ -615,6 +670,7 @@ async function wireEvents() {
       if (t) t.name = p.threadName ?? null;
       if (store.currentThreadId === p.threadId && p.threadName) {
         store.currentThreadName = p.threadName;
+        void updateWindowTitle();
       }
     }),
     await listen("thread/status/changed", (e) => {
