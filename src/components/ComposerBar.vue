@@ -333,7 +333,10 @@ function openGoalDialog() {
           :disabled="!text.trim() && store.attachments.length === 0"
           @click="submit()"
         >
-          ↑
+          <svg viewBox="0 0 24 24">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+          发送
         </button>
       </div>
     </div>
