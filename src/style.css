@@ -290,6 +290,80 @@ select option {
   min-width: 0;
 }
 
+/* 回合进行中的流光进度线 */
+.thinking-bar {
+  height: 2px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--accent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: light-sweep 1.4s linear infinite;
+}
+
+@keyframes light-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* “思考中”发光提示 */
+.thinking-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--accent);
+  background: rgba(240, 166, 60, 0.08);
+  border: 1px solid rgba(240, 166, 60, 0.35);
+  animation: chip-glow 1.2s ease-in-out infinite;
+  margin-top: 2px;
+}
+
+.thinking-chip .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dot-blink 1.2s ease-in-out infinite;
+}
+
+.thinking-chip .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-chip .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes dot-blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes chip-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(240, 166, 60, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 14px rgba(240, 166, 60, 0.35);
+  }
+}
+
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
