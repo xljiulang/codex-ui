@@ -212,7 +212,8 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     };
     const reviewer = toApprovalsReviewer(store.permissionMode);
     if (reviewer) params.approvalsReviewer = reviewer;
-    if (store.model) params.model = store.model;
+    // 显式携带（null 表示用默认），避免旧值在会话里粘滞；effort 由随后的 turn/start 携带
+    params.model = store.model ?? null;
     const res = await invoke<{ thread: { id: string; name?: string | null }; model?: string }>(
       "thread_start",
       { params },
@@ -278,8 +279,9 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   );
   const reviewer = toApprovalsReviewer(store.permissionMode);
   if (reviewer) params.approvalsReviewer = reviewer;
-  if (store.model) params.model = store.model;
-  if (store.effort) params.effort = store.effort;
+  // 显式携带（null 表示用默认），避免旧值在会话里粘滞
+  params.model = store.model ?? null;
+  params.effort = store.effort ?? null;
   // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
   // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
   params.collaborationMode = {

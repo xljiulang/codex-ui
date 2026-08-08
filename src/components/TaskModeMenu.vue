@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { store } from "../composables/useCodex";
+import { clearGoal, store } from "../composables/useCodex";
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -26,6 +26,10 @@ const TASK_MODES = [
 
 function choose(id: (typeof TASK_MODES)[number]["id"]) {
   if (store.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
+  if (store.taskMode === "goal" && id !== "goal") {
+    // 切出目标模式时清除目标：服务端不支持 paused 状态，否则目标会继续自动执行
+    void clearGoal();
+  }
   store.taskMode = id;
   if (id === "goal") {
     store.goalOpen = true;

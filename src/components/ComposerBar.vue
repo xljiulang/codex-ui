@@ -198,7 +198,6 @@ function taskModeLabel(): string {
 }
 
 function openGoalDialog() {
-  if (store.turnActive) return;
   store.goalOpen = true;
 }
 </script>
@@ -269,10 +268,9 @@ function openGoalDialog() {
           <button
             class="goal-chip"
             title="目标"
-            :disabled="store.turnActive"
             @click="openGoalDialog()"
           >
-          目标
+            目标
           </button>
         </div>
       </div>

@@ -7,12 +7,10 @@ const textareaEl = ref<HTMLTextAreaElement | null>(null);
 let lastFocus: HTMLElement | null = null;
 
 function save() {
-  if (store.turnActive) return;
   void setGoal(text.value.trim());
 }
 
 function clear() {
-  if (store.turnActive) return;
   void clearGoal();
   store.goalOpen = false;
   text.value = "";
