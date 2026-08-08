@@ -20,9 +20,8 @@ async function apply() {
 
 <template>
   <div class="settings">
-    <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between">
+    <div class="setting-row">
       <h2 style="margin: 0">设置</h2>
-      <button class="btn" @click="store.showSettings = false">返回聊天</button>
     </div>
 
     <div class="setting-row checkbox-row">
