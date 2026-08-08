@@ -43,7 +43,11 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === "Escape" && confirmThread.value) cancelDelete();
 }
 
-onMounted(() => window.addEventListener("keydown", onKeydown));
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
+  // 每次打开面板都重新拉取，避免显示已被删除/新增的过期数据
+  void refreshThreads();
+});
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
