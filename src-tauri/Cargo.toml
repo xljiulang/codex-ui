@@ -19,6 +19,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt-multi-thread", "time", "macros"] }
 thiserror = "2"
 rfd = "0.15"
+open = "5"
 
 [dev-dependencies]
 tempfile = "3"
