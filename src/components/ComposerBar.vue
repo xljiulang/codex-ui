@@ -267,7 +267,7 @@ function openGoalDialog() {
           ref="inputEl"
           v-model="text"
           rows="2"
-          placeholder="| 精心输入"
+          placeholder="输入消息，@ 引用文件 / $ 调用技能…"
           @input="onInput"
           @keydown="onKeydown"
         ></textarea>
