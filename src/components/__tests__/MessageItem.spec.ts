@@ -92,4 +92,29 @@ describe("用户消息中的图片附件", () => {
     });
     expect(wrapper.find("img.user-image").exists()).toBe(true);
   });
+
+  it("流式中的助手消息显示闪烁光标，完成后消失", () => {
+    const w1 = mount(MessageItem, {
+      props: {
+        item: {
+          id: "s1",
+          type: "agentMessage",
+          text: "正在生成…",
+          streaming: true,
+        } as ThreadItem,
+      },
+    });
+    expect(w1.find(".stream-cursor").exists()).toBe(true);
+    const w2 = mount(MessageItem, {
+      props: {
+        item: {
+          id: "s2",
+          type: "agentMessage",
+          text: "完成",
+          streaming: false,
+        } as ThreadItem,
+      },
+    });
+    expect(w2.find(".stream-cursor").exists()).toBe(false);
+  });
 });

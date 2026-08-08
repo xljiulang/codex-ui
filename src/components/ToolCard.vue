@@ -237,8 +237,9 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
       </span>
     </div>
 
-    <div v-if="effectiveExpanded" class="tool-card-body">
-      <template v-if="type === 'commandExecution'">
+    <Transition name="card-body">
+      <div v-if="effectiveExpanded" class="tool-card-body">
+        <template v-if="type === 'commandExecution'">
         <div class="tool-command">{{ commandText }}</div>
         <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
         <div
@@ -336,7 +337,8 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
         <div v-else-if="webResults.length" class="tool-json">
           {{ JSON.stringify(item.results) }}
         </div>
-      </template>
-    </div>
+        </template>
+      </div>
+    </Transition>
   </div>
 </template>

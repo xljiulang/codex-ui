@@ -76,6 +76,7 @@ const isTool =
   <div v-else-if="item.type === 'agentMessage' || item.type === 'plan'" class="msg msg-agent">
     <span v-if="item.phase === 'commentary' && item.streaming === true" class="phase-badge">进行中</span>
     <MarkdownText :text="String(item.text ?? '')" />
+    <span v-if="item.streaming === true" class="stream-cursor"></span>
     <div v-if="memoryEntries(item.memoryCitation).length" class="memory-citation">
       <span class="memory-citation-title">记忆引用：</span>
       <span
