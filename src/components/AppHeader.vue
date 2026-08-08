@@ -5,11 +5,23 @@ import { newEmptyChat, store } from "../composables/useCodex";
 const cwd = computed(() => store.currentThreadCwd ?? store.server.workspace);
 
 function onNewChat() {
+  store.showSettings = false;
+  store.showHistory = false;
   void newEmptyChat();
   // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
   void nextTick(() => {
     document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
   });
+}
+
+function onSettings() {
+  store.showHistory = false;
+  store.showSettings = true;
+}
+
+function onHistory() {
+  store.showSettings = false;
+  store.showHistory = !store.showHistory;
 }
 </script>
 
@@ -24,7 +36,7 @@ function onNewChat() {
         class="icon-btn"
         title="历史记录"
         :class="{ active: store.showHistory }"
-        @click="store.showHistory = !store.showHistory"
+        @click="onHistory()"
       >
         <svg viewBox="0 0 24 24">
           <path
@@ -36,7 +48,7 @@ function onNewChat() {
         class="icon-btn"
         title="设置"
         :class="{ active: store.showSettings }"
-        @click="store.showSettings = !store.showSettings"
+        @click="onSettings()"
       >
         <svg viewBox="0 0 24 24">
           <path
