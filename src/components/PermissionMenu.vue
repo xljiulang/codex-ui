@@ -5,6 +5,7 @@ import { saveSettings, store } from "../composables/useCodex";
 const emit = defineEmits<{ close: [] }>();
 
 function choose(id: string) {
+  if (store.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
   void saveSettings({ permission_mode: id });
   emit("close");
 }

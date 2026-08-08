@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { formatDuration, formatElapsed } from "../lib/format";
+import { ansiToHtml } from "../lib/ansi";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -38,6 +39,7 @@ const statusLabel = computed(() => {
   if (s === "failed" || s === "error") return "失败";
   if (s === "declined") return "已拒绝";
   if (s === "canceled" || s === "cancelled") return "已取消";
+  if (s === "interrupted") return "已中断";
   return typeof s === "string" ? s : "";
 });
 
@@ -101,6 +103,7 @@ const output = computed(() =>
   String(props.item.aggregatedOutput ?? props.item.output ?? ""),
 );
 const hasOutput = computed(() => output.value.trim().length > 0);
+const outputHtml = computed(() => ansiToHtml(output.value));
 
 /** webSearch 的结构化结果（协议为透明 JSON，尽力提取常见字段） */
 const webResults = computed(() => {
@@ -238,11 +241,26 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
       <template v-if="type === 'commandExecution'">
         <div class="tool-command">{{ commandText }}</div>
         <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
-        <div v-if="hasOutput" class="tool-output" :class="{ collapsed: !expanded }">
-          {{ output }}
+        <div
+          v-if="hasOutput"
+          class="tool-output"
+          :class="{ collapsed: !expanded }"
+          v-html="outputHtml"
+        ></div>
+        <div
+          v-if="!expanded && hasOutput"
+          class="tool-toggle"
+          @click="expanded = true"
+        >
+          展开完整输出
         </div>
-        <div v-if="!expanded && hasOutput" class="tool-toggle">展开完整输出</div>
-        <div v-if="expanded && hasOutput" class="tool-toggle">收起输出</div>
+        <div
+          v-if="expanded && hasOutput"
+          class="tool-toggle"
+          @click="expanded = false"
+        >
+          收起输出
+        </div>
         <div
           v-if="item.exitCode != null && item.status === 'failed'"
           class="tool-meta"

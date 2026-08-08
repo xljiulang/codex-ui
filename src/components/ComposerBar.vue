@@ -108,6 +108,8 @@ onMounted(() => {
 onBeforeUnmount(() => window.removeEventListener("keydown", onKeydownGlobal));
 
 function onKeydown(e: KeyboardEvent) {
+  // 输入法组合中（如中文拼音选字）的按键不触发提交/历史选择
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     submit();
@@ -139,6 +141,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 function submit() {
+  closeMenus(); // 发送后关闭可能开着的菜单，避免回合中还能切换模式
   const t = text.value;
   text.value = "";
   if (t.trim()) {

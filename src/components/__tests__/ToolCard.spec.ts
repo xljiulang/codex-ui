@@ -111,4 +111,27 @@ describe("ToolCard 实时耗时", () => {
     expect(titles).toContain("第二条");
     expect(wrapper.find(".web-result-snippet").text()).toContain("Rust 桌面框架");
   });
+
+  it("收起输出/展开完整输出可切换", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "in_progress",
+          startedAtMs: Date.now(),
+          aggregatedOutput: "line1\nline2\nline3\nline4\nline5\n",
+        }),
+      },
+    });
+    // 进行中且已有输出：卡片展开但输出折叠为摘要
+    expect(wrapper.find(".tool-output.collapsed").exists()).toBe(true);
+    expect(wrapper.find(".tool-toggle").text()).toContain("展开完整输出");
+    // 展开完整输出
+    await wrapper.find(".tool-toggle").trigger("click");
+    expect(wrapper.find(".tool-output.collapsed").exists()).toBe(false);
+    expect(wrapper.find(".tool-toggle").text()).toContain("收起输出");
+    // 再收起
+    await wrapper.find(".tool-toggle").trigger("click");
+    expect(wrapper.find(".tool-output.collapsed").exists()).toBe(true);
+    expect(wrapper.find(".tool-toggle").text()).toContain("展开完整输出");
+  });
 });

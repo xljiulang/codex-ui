@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { respondInteraction, store } from "../composables/useCodex";
 import type { PendingInteraction } from "../lib/types";
@@ -37,10 +37,22 @@ const selectedOptions = reactive<Record<string, string>>({});
 const otherInputs = reactive<Record<string, string>>({});
 const formValues = reactive<Record<string, string>>({});
 
+// 分步提问：一次只展示一道题
+const qIndex = ref(0);
+const questionList = computed(() => questions());
+const currentQuestion = computed(
+  () => questionList.value[qIndex.value] ?? null,
+);
+const hasMultipleQuestions = computed(() => questionList.value.length > 1);
+const isLastQuestion = computed(
+  () => qIndex.value >= questionList.value.length - 1,
+);
+
 watch(current, () => {
   for (const k of Object.keys(selectedOptions)) delete selectedOptions[k];
   for (const k of Object.keys(otherInputs)) delete otherInputs[k];
   for (const k of Object.keys(formValues)) delete formValues[k];
+  qIndex.value = 0;
 });
 
 function str(v: unknown): string {
@@ -144,6 +156,14 @@ function submitUserInput() {
   void respondInteraction(current.value, { answers });
 }
 
+function nextQuestion() {
+  if (qIndex.value < questionList.value.length - 1) qIndex.value++;
+}
+
+function prevQuestion() {
+  if (qIndex.value > 0) qIndex.value--;
+}
+
 async function handleElicitation() {
   if (!current.value) return;
   const mode = obj(params.value).mode ?? "form";
@@ -227,33 +247,57 @@ function schemaProperties(): [string, Record<string, unknown>][] {
 
         <!-- 用户输入 -->
         <template v-else-if="isUserInput">
-          <div v-for="q in questions()" :key="str(q.id)" class="question-row">
-            <div class="question-text">
-              {{ q.header ? `${str(q.header)}：` : "" }}{{ str(q.question) }}
+          <div v-if="hasMultipleQuestions" class="question-progress">
+            <span>第 {{ qIndex + 1 }} / {{ questionList.length }} 题</span>
+            <div class="question-progress-bar">
+              <div
+                class="question-progress-fill"
+                :style="{ width: `${((qIndex + 1) / questionList.length) * 100}%` }"
+              ></div>
             </div>
-            <div v-if="Array.isArray(q.options) && (q.options as unknown[]).length" class="question-options">
+          </div>
+          <div v-if="currentQuestion" class="question-row">
+            <div class="question-text">
+              {{ currentQuestion.header ? `${str(currentQuestion.header)}：` : "" }}{{
+                str(currentQuestion.question)
+              }}
+            </div>
+            <div
+              v-if="
+                Array.isArray(currentQuestion.options) &&
+                (currentQuestion.options as unknown[]).length
+              "
+              class="question-options"
+            >
               <button
-                v-for="opt in q.options as { label: string; description?: string }[]"
+                v-for="opt in currentQuestion.options as {
+                  label: string;
+                  description?: string;
+                }[]"
                 :key="opt.label"
                 class="option-btn"
-                :class="{ selected: selectedOptions[str(q.id)] === opt.label }"
-                @click="selectedOptions[str(q.id)] = opt.label"
+                :class="{ selected: selectedOptions[str(currentQuestion.id)] === opt.label }"
+                @click="selectedOptions[str(currentQuestion.id)] = opt.label"
               >
                 {{ opt.label }}
               </button>
               <button
-                v-if="q.isOther"
+                v-if="currentQuestion.isOther"
                 class="option-btn"
-                :class="{ selected: selectedOptions[str(q.id)] === '__other__' }"
-                @click="selectedOptions[str(q.id)] = '__other__'"
+                :class="{ selected: selectedOptions[str(currentQuestion.id)] === '__other__' }"
+                @click="selectedOptions[str(currentQuestion.id)] = '__other__'"
               >
                 其他…
               </button>
             </div>
             <input
-              v-if="selectedOptions[str(q.id)] === '__other__' || !Array.isArray(q.options) || !(q.options as unknown[]).length"
-              v-model="otherInputs[str(q.id)]"
-              :type="q.isSecret ? 'password' : 'text'"
+              v-if="
+                selectedOptions[str(currentQuestion.id)] === '__other__' ||
+                !Array.isArray(currentQuestion.options) ||
+                !(currentQuestion.options as unknown[]).length
+              "
+              v-model="otherInputs[str(currentQuestion.id)]"
+              :type="currentQuestion.isSecret ? 'password' : 'text'"
               placeholder="输入内容"
               style="width: 100%; margin-top: 6px"
             />
@@ -286,7 +330,14 @@ function schemaProperties(): [string, Record<string, unknown>][] {
       <div class="modal-foot">
         <template v-if="isUserInput">
           <button class="btn" @click="reject()">取消</button>
-          <button class="btn primary" @click="submitUserInput()">提交</button>
+          <template v-if="hasMultipleQuestions">
+            <button class="btn" :disabled="qIndex === 0" @click="prevQuestion()">上一题</button>
+            <button v-if="!isLastQuestion" class="btn primary" @click="nextQuestion()">
+              下一题
+            </button>
+            <button v-else class="btn primary" @click="submitUserInput()">提交</button>
+          </template>
+          <button v-else class="btn primary" @click="submitUserInput()">提交</button>
         </template>
         <template v-else-if="isElicitation">
           <button class="btn" @click="reject()">拒绝</button>

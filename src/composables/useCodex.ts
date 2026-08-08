@@ -373,7 +373,11 @@ export async function setGoal(objective: string) {
 }
 
 export async function clearGoal() {
-  if (!store.currentThreadId) return;
+  if (!store.currentThreadId) {
+    store.goalText = null;
+    if (store.taskMode === "goal") store.taskMode = "execute";
+    return;
+  }
   try {
     await invoke("goal_clear", { threadId: store.currentThreadId });
     store.goalText = null;
@@ -392,6 +396,9 @@ export async function deleteThread(threadId: string) {
     if (store.currentThreadId === threadId) {
       store.currentThreadId = null;
       store.currentThreadName = "";
+      store.currentThreadCwd = null;
+      store.resumedThreadId = null;
+      await updateWindowTitle();
     }
   } catch (e) {
     setToast(String(e));

@@ -52,7 +52,7 @@ function decorateLinks() {
     a.setAttribute("data-link-ready", "1");
     const href = a.getAttribute("href") ?? "";
     if (!a.getAttribute("title")) {
-      a.setAttribute("title", href);
+      a.setAttribute("title", linkTooltip(href));
     }
     a.addEventListener("click", (ev) => {
       ev.preventDefault();
@@ -62,6 +62,19 @@ function decorateLinks() {
         void invoke("open_url", { url: h }).catch(() => undefined);
       }
     });
+  }
+}
+
+/** 把链接地址转成可读的提示文本：Windows 文件路径或原 URL */
+function linkTooltip(href: string): string {
+  try {
+    let h = decodeURIComponent(href);
+    if (h.startsWith("file:///")) h = h.slice("file:///".length);
+    if (/^\/([a-zA-Z]:)/.test(h)) h = h.slice(1); // /D:/... -> D:/...
+    if (/^[a-zA-Z]:\//.test(h)) h = h.replace(/\//g, "\\");
+    return h;
+  } catch {
+    return href;
   }
 }
 

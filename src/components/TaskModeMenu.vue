@@ -25,6 +25,7 @@ const TASK_MODES = [
 ] as const;
 
 function choose(id: (typeof TASK_MODES)[number]["id"]) {
+  if (store.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
   store.taskMode = id;
   if (id === "goal") {
     store.goalOpen = true;
