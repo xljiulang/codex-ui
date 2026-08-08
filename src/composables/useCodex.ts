@@ -19,6 +19,10 @@ import {
   toSandbox,
   toSandboxPolicy,
 } from "../lib/permissions";
+import {
+  buildTurnInput,
+  stripMentionContext,
+} from "../lib/mention";
 import { playNotificationSound } from "../lib/sound";
 
 const defaultSettings = (): AppSettings => ({
@@ -452,10 +456,8 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     }
   }
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const input: UserInput[] = [
-    { type: "text", text: prompt, text_elements: [] },
-    ...attachments,
-  ];
+  // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入
+  const input = buildTurnInput(prompt, attachments);
   const params: Record<string, unknown> = { threadId, input, clientUserMessageId: clientId };
   // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
   params.approvalPolicy = toApprovalPolicy(store.permissionMode);
@@ -513,10 +515,7 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
     return;
   }
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const input: UserInput[] = [
-    { type: "text", text: prompt, text_elements: [] },
-    ...attachments,
-  ];
+  const input = buildTurnInput(prompt, attachments);
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -986,7 +985,7 @@ export function currentThreadLabel(): string {
     if (it.type === "userMessage") {
       const content = (it.content as UserInput[] | undefined) ?? [];
       const text = content
-        .map((c) => (c.type === "text" ? c.text : ""))
+        .map((c) => (c.type === "text" ? stripMentionContext(c.text) : ""))
         .join(" ")
         .trim();
       if (text) return text;

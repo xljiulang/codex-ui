@@ -258,7 +258,8 @@ function imageSrc(path: string): string {
 }
 
 function attachmentLabel(a: UserInput): string {
-  if (a.type === "mention" || a.type === "skill") return `@${a.name}`;
+  if (a.type === "mention") return `@${a.name}`;
+  if (a.type === "skill") return `$${a.name}`;
   if (a.type === "localImage") return a.path.split(/[\\/]/).pop() ?? a.path;
   return a.text;
 }

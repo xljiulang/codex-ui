@@ -4,6 +4,11 @@ import MarkdownText from "./MarkdownText.vue";
 import ReasoningBlock from "./ReasoningBlock.vue";
 import ToolCard from "./ToolCard.vue";
 import { formatDuration } from "../lib/format";
+import {
+  parseFileMentionSection,
+  parseSkillMentionLinks,
+  stripMentionContext,
+} from "../lib/mention";
 import type { ThreadItem, UserInput } from "../lib/types";
 
 const props = defineProps<{ item: ThreadItem }>();
@@ -20,11 +25,6 @@ function partType(c: unknown): string {
   return ((c as UserInput)?.type) ?? "";
 }
 
-function partText(c: unknown): string {
-  const u = c as UserInput;
-  return u.type === "text" ? u.text : "";
-}
-
 function partPath(c: unknown): string {
   const u = c as UserInput;
   return u.type === "localImage" ? u.path : "";
@@ -33,6 +33,28 @@ function partPath(c: unknown): string {
 function partName(c: unknown): string {
   const u = c as UserInput;
   return u.type === "mention" || u.type === "skill" ? u.name : "";
+}
+
+function partFiles(c: unknown): { name: string; path: string }[] {
+  const u = c as UserInput;
+  return u.type === "text" ? parseFileMentionSection(u.text) : [];
+}
+
+function partSkillLinks(c: unknown): { name: string; path: string }[] {
+  const u = c as UserInput;
+  return u.type === "text" ? parseSkillMentionLinks(u.text) : [];
+}
+
+/** 同一条消息里是否已有独立的结构化 skill 项（避免与文本链接重复渲染） */
+function hasSkillItem(content: unknown): boolean {
+  return ((content as unknown[]) ?? []).some(
+    (x) => (x as UserInput)?.type === "skill",
+  );
+}
+
+function partTextClean(c: unknown): string {
+  const u = c as UserInput;
+  return u.type === "text" ? stripMentionContext(u.text) : "";
 }
 
 function memoryEntries(
@@ -68,7 +90,23 @@ const isTool =
           :src="imageSrc(partPath(c))"
           alt="图片"
         />
-        <span v-else-if="partType(c) === 'text'" class="user-text">{{ partText(c) }}</span>
+        <template v-else-if="partType(c) === 'text'">
+          <span
+            v-for="(f, j) in partFiles(c)"
+            :key="'f' + j"
+            class="mention-inline"
+            :title="f.path"
+          >@{{ f.name }}</span>
+          <span
+            v-for="(s, k) in partSkillLinks(c)"
+            v-if="!hasSkillItem(item.content)"
+            :key="'s' + k"
+            class="mention-inline"
+            :title="s.path"
+          >${{ s.name }}</span>
+          <span class="user-text">{{ partTextClean(c) }}</span>
+        </template>
+        <span v-else-if="partType(c) === 'skill'" class="mention-inline">${{ partName(c) }}</span>
         <span v-else class="mention-inline">@{{ partName(c) }}</span>
       </template>
     </div>
