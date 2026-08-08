@@ -1,0 +1,24 @@
+[package]
+name = "codex-ui"
+version = "0.1.0"
+description = "Codex CLI desktop UI wrapper"
+authors = ["codex-ui"]
+edition = "2021"
+
+[lib]
+name = "codex_ui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["custom-protocol", "protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt-multi-thread", "time", "macros"] }
+thiserror = "2"
+rfd = "0.15"
+
+[dev-dependencies]
+tempfile = "3"

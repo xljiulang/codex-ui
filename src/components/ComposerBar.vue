@@ -1,0 +1,317 @@
+<script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import MentionMenu from "./MentionMenu.vue";
+import ModelMenu from "./ModelMenu.vue";
+import PermissionMenu from "./PermissionMenu.vue";
+import PlusMenu from "./PlusMenu.vue";
+import TaskModeMenu from "./TaskModeMenu.vue";
+import {
+  interrupt,
+  permissionChip,
+  sendPrompt,
+  store,
+} from "../composables/useCodex";
+import type { UserInput } from "../lib/types";
+
+const text = ref("");
+const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
+  null,
+);
+const inputEl = ref<HTMLTextAreaElement | null>(null);
+
+// 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
+const sentHistory: string[] = [];
+let historyIndex = -1;
+
+function onInput() {
+  const t = text.value;
+  const m = /(?:^|\s)([@$])([\w-]*)$/.exec(t);
+  if (m) {
+    const triggerIdx =
+      m.index + (m[0].startsWith("@") || m[0].startsWith("$") ? 0 : 1);
+    mention.value = {
+      kind: m[1] as "@" | "$",
+      token: m[2],
+      start: triggerIdx,
+    };
+  } else if (mention.value) {
+    mention.value = null;
+  }
+}
+
+function removeMentionToken() {
+  const m = mention.value;
+  if (!m) return;
+  text.value =
+    text.value.slice(0, m.start) + text.value.slice(m.start + 1 + m.token.length);
+  mention.value = null;
+}
+
+function onSelectAttachment(a: UserInput) {
+  removeMentionToken();
+  store.attachments.push(a);
+}
+
+async function onPickFiles() {
+  removeMentionToken();
+  try {
+    const files = await invoke<string[]>("pick_files", { multiple: true });
+    for (const f of files) {
+      if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f)) {
+        store.attachments.push({ type: "localImage", path: f });
+      } else {
+        store.attachments.push({
+          type: "mention",
+          name: f.split(/[\\/]/).pop() ?? f,
+          path: f,
+        });
+      }
+    }
+  } catch (e) {
+    store.toast = String(e);
+  }
+}
+
+async function onPickDir() {
+  removeMentionToken();
+  try {
+    const dir = await invoke<string | null>("pick_directory");
+    if (dir) {
+      store.attachments.push({
+        type: "mention",
+        name: dir.split(/[\\/]/).pop() ?? dir,
+        path: dir,
+      });
+    }
+  } catch (e) {
+    store.toast = String(e);
+  }
+}
+
+function closeMenus() {
+  store.plusOpen = false;
+  store.permOpen = false;
+  store.taskOpen = false;
+  store.modelOpen = false;
+  mention.value = null;
+}
+
+function onKeydownGlobal(e: KeyboardEvent) {
+  if (e.key === "Escape") closeMenus();
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onKeydownGlobal);
+  inputEl.value?.focus();
+});
+onBeforeUnmount(() => window.removeEventListener("keydown", onKeydownGlobal));
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    submit();
+    return;
+  }
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    const ta = e.target as HTMLTextAreaElement;
+    // 仅当光标位于第一行时触发历史选择，否则保留默认的上下移动光标
+    const firstLineEnd = ta.value.indexOf("\n");
+    const firstLineLen = firstLineEnd === -1 ? ta.value.length : firstLineEnd;
+    if (ta.selectionStart > firstLineLen) return;
+    e.preventDefault();
+    if (e.key === "ArrowUp") {
+      if (!sentHistory.length) return;
+      if (historyIndex === -1) historyIndex = sentHistory.length - 1;
+      else if (historyIndex > 0) historyIndex--;
+      text.value = sentHistory[historyIndex];
+    } else {
+      if (historyIndex === -1) return;
+      historyIndex++;
+      if (historyIndex >= sentHistory.length) {
+        historyIndex = -1;
+        text.value = "";
+      } else {
+        text.value = sentHistory[historyIndex];
+      }
+    }
+  }
+}
+
+function submit() {
+  const t = text.value;
+  text.value = "";
+  if (t.trim()) {
+    sentHistory.push(t);
+    if (sentHistory.length > 100) sentHistory.shift();
+  }
+  historyIndex = -1;
+  void sendPrompt(t);
+}
+
+function removeAttachment(i: number) {
+  store.attachments.splice(i, 1);
+}
+
+function imageSrc(path: string): string {
+  try {
+    return convertFileSrc(path);
+  } catch {
+    return path;
+  }
+}
+
+function attachmentLabel(a: UserInput): string {
+  if (a.type === "mention" || a.type === "skill") return `@${a.name}`;
+  if (a.type === "localImage") return a.path.split(/[\\/]/).pop() ?? a.path;
+  return a.text;
+}
+
+function effortLabel(): string {
+  const e = store.settings.effort;
+  if (e === "high") return "高";
+  if (e === "medium") return "中";
+  if (e === "low") return "低";
+  return "";
+}
+
+function taskModeLabel(): string {
+  if (store.taskMode === "plan") return "计划模式";
+  if (store.taskMode === "goal") return "目标模式";
+  return "执行模式";
+}
+
+function openGoalDialog() {
+  if (store.turnActive) return;
+  store.goalOpen = true;
+}
+</script>
+
+<template>
+  <div class="composer">
+    <div class="composer-input-row">
+      <div class="menu-anchor input-anchor">
+        <textarea
+          ref="inputEl"
+          v-model="text"
+          rows="2"
+          placeholder="| 精心输入"
+          @input="onInput"
+          @keydown="onKeydown"
+        ></textarea>
+        <MentionMenu
+          v-if="mention"
+          :kind="mention.kind"
+          :token="mention.token"
+          @close="mention = null"
+          @pick-files="onPickFiles()"
+          @pick-dir="onPickDir()"
+          @select-attachment="onSelectAttachment($event)"
+        />
+      </div>
+      <div class="composer-left">
+        <div class="menu-anchor">
+          <button class="plus-btn" title="添加内容" @click="store.plusOpen = !store.plusOpen">
+            +
+          </button>
+          <PlusMenu v-if="store.plusOpen" @close="store.plusOpen = false" />
+        </div>
+        <div class="menu-anchor">
+          <button
+            class="perm-chip"
+            title="权限模式"
+            :disabled="store.turnActive"
+            @click="store.permOpen = !store.permOpen"
+          >
+            <svg viewBox="0 0 24 24">
+              <path
+                d="M12 2 4 5v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V5l-8-3zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"
+              />
+            </svg>
+            {{ permissionChip() }}
+            <svg class="chevron" viewBox="0 0 16 16">
+              <path d="M4 6l4 4 4-4z" />
+            </svg>
+          </button>
+          <PermissionMenu v-if="store.permOpen" @close="store.permOpen = false" />
+        </div>
+        <div class="menu-anchor">
+          <button
+            class="task-chip"
+            title="任务模式"
+            :disabled="store.turnActive"
+            @click="store.taskOpen = !store.taskOpen"
+          >
+            {{ taskModeLabel() }}
+            <svg viewBox="0 0 16 16">
+              <path d="M4 6l4 4 4-4z" />
+            </svg>
+          </button>
+          <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
+        </div>
+        <div v-if="store.goalText" class="menu-anchor">
+          <button
+            class="goal-chip"
+            title="目标"
+            :disabled="store.turnActive"
+            @click="openGoalDialog()"
+          >
+          目标
+          </button>
+        </div>
+      </div>
+      <div class="composer-right">
+        <div class="menu-anchor">
+          <button class="model-chip" title="模型" @click="store.modelOpen = !store.modelOpen">
+            自定义{{ effortLabel() ? ` ${effortLabel()}` : "" }}
+            <svg viewBox="0 0 16 16">
+              <path d="M4 6l4 4 4-4z" />
+            </svg>
+          </button>
+          <ModelMenu v-if="store.modelOpen" @close="store.modelOpen = false" />
+        </div>
+        <button
+          v-if="store.turnActive"
+          class="send-btn stop"
+          title="停止生成"
+          @click="interrupt()"
+        >
+          ■
+        </button>
+        <button
+          v-else
+          class="send-btn"
+          title="发送"
+          :disabled="!text.trim() && store.attachments.length === 0"
+          @click="submit()"
+        >
+          ↑
+        </button>
+      </div>
+    </div>
+    <div v-if="store.attachments.length" class="attachment-row">
+      <span v-for="(a, i) in store.attachments" :key="i" class="attachment-chip">
+        <img
+          v-if="a.type === 'localImage'"
+          class="attachment-thumb"
+          :src="imageSrc(a.path)"
+          alt=""
+        />
+        {{ attachmentLabel(a) }}
+        <button title="移除" @click="removeAttachment(i)">×</button>
+      </span>
+    </div>
+
+    <div
+      v-if="
+        store.plusOpen ||
+        store.permOpen ||
+        store.taskOpen ||
+        store.modelOpen ||
+        mention
+      "
+      class="menu-backdrop"
+      @click="closeMenus()"
+    ></div>
+  </div>
+</template>
