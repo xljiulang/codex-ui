@@ -1,8 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { newEmptyChat, store } from "../composables/useCodex";
 
 const cwd = computed(() => store.currentThreadCwd ?? store.server.workspace);
+
+// 只读展示；点击在资源管理器中打开
+function openInExplorer() {
+  if (!cwd.value) return;
+  void invoke("open_url", { url: cwd.value }).catch(() => undefined);
+}
 
 function onNewChat() {
   store.showSettings = false;
@@ -29,7 +36,19 @@ function onHistory() {
   <header class="app-header">
     <div class="brand">
       <span class="brand-name">CODEX</span>
-      <span v-if="cwd" class="brand-cwd" :title="cwd">{{ cwd }}</span>
+      <button
+        v-if="cwd"
+        class="brand-cwd"
+        :title="`在资源管理器中打开：${cwd}`"
+        @click="openInExplorer()"
+      >
+        <svg viewBox="0 0 24 24">
+          <path
+            d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
+          />
+        </svg>
+        {{ cwd }}
+      </button>
     </div>
     <div class="header-actions">
       <button

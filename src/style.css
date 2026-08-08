@@ -143,12 +143,33 @@ select option {
 }
 
 .brand-cwd {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: 6px;
   font-size: 12px;
   color: var(--text-dim);
   max-width: 520px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.brand-cwd svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.brand-cwd:hover {
+  color: var(--text-bright);
+  background: var(--bg-hover);
 }
 
 .header-actions {

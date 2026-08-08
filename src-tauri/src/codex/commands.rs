@@ -269,7 +269,10 @@ pub fn workspace_dir(server: State<'_, Server>) -> String {
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
     let mut cmd = std::process::Command::new("cmd");
-    cmd.args(["/c", "start", "", &url]);
+    // 加引号以支持含空格的路径（目录会直接用资源管理器打开）
+    cmd.args(["/c", "start", ""]);
+    let quoted = format!("\"{}\"", url);
+    cmd.arg(&quoted);
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
