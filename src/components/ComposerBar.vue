@@ -118,9 +118,14 @@ watch(
 function onKeydown(e: KeyboardEvent) {
   // 输入法组合中（如中文拼音选字）的按键不触发提交/历史选择
   if (e.isComposing || e.keyCode === 229) return;
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    submit();
+  if (e.key === "Enter") {
+    // Enter 快捷发送：开启时 Enter 发送 / Shift+Enter 换行；
+    // 关闭时 Enter 换行 / Ctrl+Enter 发送
+    const shouldSend = store.settings.enter_to_send ? !e.shiftKey : e.ctrlKey;
+    if (shouldSend) {
+      e.preventDefault();
+      submit();
+    }
     return;
   }
   if (e.key === "ArrowUp" || e.key === "ArrowDown") {

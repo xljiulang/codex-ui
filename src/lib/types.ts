@@ -77,6 +77,7 @@ export interface AppSettings {
   effort?: string | null;
   codex_path?: string | null;
   sound_enabled: boolean;
+  enter_to_send: boolean;
 }
 
 export interface AuthStatus {

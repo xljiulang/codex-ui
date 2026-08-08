@@ -27,6 +27,7 @@ const defaultSettings = (): AppSettings => ({
   effort: null,
   codex_path: null,
   sound_enabled: true,
+  enter_to_send: true,
 });
 
 export const store = reactive({
@@ -140,6 +141,23 @@ async function updateWindowTitle() {
   }
 }
 
+function isThreadNotFound(e: unknown): boolean {
+  return String(e).toLowerCase().includes("thread not found");
+}
+
+/** 当前会话已不存在（被删除等）时重置回新对话，避免继续发送一直报错 */
+function resetToNewChat() {
+  store.currentThreadId = null;
+  store.currentThreadName = "";
+  store.currentThreadOrigin = null;
+  store.currentThreadCwd = null;
+  store.resumedThreadId = null;
+  store.currentTurnId = null;
+  store.turnActive = false;
+  store.turnInterrupted = false;
+  void updateWindowTitle();
+}
+
 export async function loadSettings() {
   try {
     const s = await invoke<AppSettings>("settings_get");
@@ -233,7 +251,12 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
       await invoke("thread_resume", { params: { threadId } });
       store.resumedThreadId = threadId;
     } catch (e) {
-      setToast(String(e));
+      if (isThreadNotFound(e)) {
+        resetToNewChat();
+        setToast("会话已不存在，已切换为新对话");
+      } else {
+        setToast(String(e));
+      }
       return;
     }
   }
@@ -275,7 +298,12 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     // 立即记录回合 id，供 turn/interrupt 使用（turn/started 事件可能稍后才到）
     if (res?.turn?.id) store.currentTurnId = res.turn.id;
   } catch (e) {
-    setToast(String(e));
+    if (isThreadNotFound(e)) {
+      resetToNewChat();
+      setToast("会话已不存在，已切换为新对话");
+    } else {
+      setToast(String(e));
+    }
     store.turnActive = false;
   }
 }
@@ -340,7 +368,12 @@ export async function openThread(threadId: string) {
     }
     await updateWindowTitle();
   } catch (e) {
-    setToast(String(e));
+    if (isThreadNotFound(e)) {
+      resetToNewChat();
+      setToast("会话已不存在，已切换为新对话");
+    } else {
+      setToast(String(e));
+    }
   }
 }
 

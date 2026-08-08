@@ -11,6 +11,7 @@ pub struct AppSettings {
     pub effort: Option<String>,
     pub codex_path: Option<String>,
     pub sound_enabled: bool,
+    pub enter_to_send: bool,
 }
 
 impl Default for AppSettings {
@@ -21,6 +22,7 @@ impl Default for AppSettings {
             effort: None,
             codex_path: None,
             sound_enabled: true,
+            enter_to_send: true,
         }
     }
 }
