@@ -19,17 +19,6 @@ interface ModelItem {
   defaultReasoningEffort: string;
 }
 
-const EFFORT_LABELS: Record<string, string> = {
-  none: "无",
-  minimal: "极低",
-  low: "低",
-  medium: "中",
-  high: "高",
-  xhigh: "极高",
-  max: "最高",
-  ultra: "极速",
-};
-
 // 跟随所选模型动态生成强度选项；未知模型回退到常用三档
 const effortOptions = computed(() => {
   const m = models.value.find((x) => x.model === model.value);
@@ -109,9 +98,7 @@ function apply() {
       <input v-model="model" class="menu-search" placeholder="模型名称（留空使用默认）" />
       <div class="menu-group-title" style="margin-top: 10px">
         推理强度
-        <span v-if="defaultEffort" style="color: var(--text-faint)">
-          （默认 {{ EFFORT_LABELS[defaultEffort] ?? defaultEffort }}）
-        </span>
+        <span v-if="defaultEffort" style="color: var(--text-faint)">（默认 {{ defaultEffort }}）</span>
       </div>
       <div class="question-options" style="padding: 0 8px 4px">
         <button
@@ -122,7 +109,7 @@ function apply() {
           @click="effort = e.reasoningEffort"
           :title="e.description"
         >
-          {{ EFFORT_LABELS[e.reasoningEffort] ?? e.reasoningEffort }}
+          {{ e.reasoningEffort }}
         </button>
         <button
           class="option-btn"
