@@ -365,6 +365,13 @@ select option {
   }
 }
 
+.chat-scroll-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
@@ -373,8 +380,8 @@ select option {
 
 .scroll-bottom-btn {
   position: absolute;
-  right: 18px;
-  bottom: 86px;
+  right: 14px;
+  bottom: 10px;
   z-index: 20;
   padding: 5px 12px;
   border-radius: 999px;
