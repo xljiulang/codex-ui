@@ -1228,7 +1228,7 @@ select option {
 .send-btn {
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: linear-gradient(135deg, #f0a63c, #ff8f1f);
   color: #1b1b1b;
   font-size: 15px;
