@@ -61,6 +61,8 @@ export const store = reactive({
   currentThreadCwd: null as string | null,
   resumedThreadId: null as string | null,
   itemsByThread: {} as Record<string, ThreadItem[]>,
+  // 每个线程“进行中工作”计数（流式文本/进行中工具），避免渲染时全量扫描
+  activeWorkByThread: {} as Record<string, number>,
   turnActive: false,
   turnInterrupted: false,
   currentTurnId: null as string | null,
@@ -124,6 +126,22 @@ export function toastError(e: unknown): string {
   return String(e);
 }
 
+function isActiveItem(item: ThreadItem): boolean {
+  return (
+    item.streaming === true ||
+    ["in_progress", "inProgress", "pending", "started"].includes(
+      String(item.status ?? ""),
+    )
+  );
+}
+
+function bumpActive(threadId: string, delta: number) {
+  store.activeWorkByThread[threadId] = Math.max(
+    0,
+    (store.activeWorkByThread[threadId] ?? 0) + delta,
+  );
+}
+
 function upsertItem(threadId: string, item: ThreadItem) {
   const arr = (store.itemsByThread[threadId] ??= []);
   let idx = arr.findIndex((x) => x.id === item.id);
@@ -133,11 +151,14 @@ function upsertItem(threadId: string, item: ThreadItem) {
       (x) => x.type === "userMessage" && x.clientId === item.clientId,
     );
   }
+  const merged = idx >= 0 ? { ...arr[idx], ...item } : item;
   if (idx >= 0) {
-    arr[idx] = { ...arr[idx], ...item };
+    if (isActiveItem(arr[idx])) bumpActive(threadId, -1);
+    arr[idx] = merged;
   } else {
     arr.push(item);
   }
+  if (isActiveItem(merged)) bumpActive(threadId, 1);
 }
 
 function findItem(threadId: string, itemId: string): ThreadItem | undefined {
@@ -426,6 +447,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.newChatCwd = null; // 本次新建已消费，恢复默认
     store.currentModel = res.model ?? currentModelId();
     store.itemsByThread[threadId] = [];
+    store.activeWorkByThread[threadId] = 0;
     store.showHistory = false;
     const pendingGoal = store.goalText;
     if (pendingGoal) {
@@ -632,6 +654,9 @@ export async function openThread(threadId: string) {
     // 优先用全量 items（含命令/工具详情），失败则回退摘要
     const fullItems = await loadFullItems(threadId);
     store.itemsByThread[threadId] = fullItems ?? flattenTurns(res.thread.turns);
+    store.activeWorkByThread[threadId] = (
+      store.itemsByThread[threadId] ?? []
+    ).filter((x) => isActiveItem(x)).length;
     store.currentThreadName = res.thread.name ?? "";
     store.currentThreadCwd = res.thread.cwd ?? null;
     store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
@@ -849,7 +874,10 @@ async function wireEvents() {
         upsertItem(p.threadId, item);
       }
       item.text = (item.text ?? "") + p.delta;
-      item.streaming = true;
+      if (!item.streaming) {
+        item.streaming = true;
+        bumpActive(p.threadId, 1);
+      }
     }),
   );
 
@@ -876,7 +904,10 @@ async function wireEvents() {
       if (typeof item.startedAtMs !== "number") {
         item.startedAtMs = Date.now();
       }
-      item.streaming = true;
+      if (!item.streaming) {
+        item.streaming = true;
+        bumpActive(p.threadId, 1);
+      }
       const content = (item.content as string[] | undefined) ?? [];
       const idx = p.contentIndex ?? content.length - 1;
       if (idx >= 0 && idx < content.length) {

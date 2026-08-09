@@ -26,6 +26,8 @@ describe("用户消息中的图片附件", () => {
     const img = wrapper.find("img.user-image");
     expect(img.exists()).toBe(true);
     expect(img.attributes("src")).toContain("asset://mock/");
+    expect(img.attributes("loading")).toBe("lazy");
+    expect(img.attributes("decoding")).toBe("async");
     expect(wrapper.text()).toContain("里面只有一个人吗");
     expect(wrapper.text()).not.toContain("[图片:");
     expect(wrapper.text()).not.toContain("out_0003.png");
@@ -91,7 +93,9 @@ describe("用户消息中的图片附件", () => {
         item: { id: "v1", type: "imageView", path: "C:\\x\\y.png" } as ThreadItem,
       },
     });
-    expect(wrapper.find("img.user-image").exists()).toBe(true);
+    const img = wrapper.find("img.user-image");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("loading")).toBe("lazy");
   });
 
   it("流式中的助手消息显示闪烁光标，完成后消失", () => {

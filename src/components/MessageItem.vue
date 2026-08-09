@@ -165,6 +165,8 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
             class="user-image clickable"
             :src="imageSrc(partPath(c))"
             alt="图片"
+            loading="lazy"
+            decoding="async"
             @click="openLightbox(imageSrc(partPath(c)))"
             @error="markImgError(i)"
           />
@@ -239,6 +241,8 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
         class="user-image clickable"
         :src="imageSrc(String(item.path ?? ''))"
         alt="图片"
+        loading="lazy"
+        decoding="async"
         @click="openLightbox(imageSrc(String(item.path ?? '')))"
         @error="markImgErr()"
       />

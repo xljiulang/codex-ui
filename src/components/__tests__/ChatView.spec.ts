@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
-import { reactive } from "vue";
+import { nextTick, reactive } from "vue";
 
 vi.mock("../../composables/useCodex", () => ({
   currentItems: vi.fn(),
@@ -8,6 +8,9 @@ vi.mock("../../composables/useCodex", () => ({
     turnActive: false,
     busy: false,
     loadingThread: false,
+    turnInterrupted: false,
+    currentThreadId: null,
+    activeWorkByThread: {},
   }),
 }));
 
@@ -106,5 +109,29 @@ describe("ChatView 日期分隔线", () => {
     expect(vrows[1].attributes("style")).toContain("top: 34px");
     expect(vrows[2].attributes("style")).toContain("214px");
     expect(wrapper.findAll(".msg-stub")).toHaveLength(8);
+  });
+
+  it("思考中提示随进行中计数显示/隐藏", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.activeWorkByThread = { t1: 0 };
+    mockedItems.mockReturnValue([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    expect(wrapper.find(".thinking-chip").exists()).toBe(true);
+    store.activeWorkByThread.t1 = 1;
+    await nextTick();
+    expect(wrapper.find(".thinking-chip").exists()).toBe(false);
+    store.turnActive = false;
+    store.currentThreadId = null;
+    store.activeWorkByThread = {};
   });
 });

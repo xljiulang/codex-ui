@@ -5,7 +5,7 @@ import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
 import { formatDuration, formatElapsed } from "../lib/format";
-import { ansiToHtml } from "../lib/ansi";
+import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { workspaceRoot } from "../lib/links";
 
 const props = defineProps<{ item: ThreadItem }>();
@@ -122,7 +122,50 @@ watch(
     if (!running.value) flushOutput();
   },
 );
-const outputHtml = computed(() => ansiToHtml(shownOutput.value));
+// ---------- 命令输出增量渲染 ----------
+const outputRoot = ref<HTMLElement | null>(null);
+let renderedLen = 0;
+let ansiState: AnsiStyle = {};
+let committedPrefix = "";
+let lastTruncated = false;
+
+function renderOutput(t: string) {
+  const el = outputRoot.value;
+  if (!el) {
+    renderedLen = 0;
+    ansiState = {};
+    committedPrefix = "";
+    return;
+  }
+  const truncated = outputTruncated.value;
+  if (!t.startsWith(committedPrefix) || truncated !== lastTruncated) {
+    // 条目替换/文本回退/截断切换：重置并整段重渲染
+    renderedLen = 0;
+    ansiState = {};
+    committedPrefix = "";
+    el.innerHTML = "";
+  }
+  lastTruncated = truncated;
+  const delta = t.slice(renderedLen);
+  let cut = delta.length;
+  const esc = delta.lastIndexOf("\x1b");
+  // 尾部转义序列不完整时暂缓渲染，等下一段补齐
+  if (esc >= 0 && !/^\[[0-9;?]*[a-zA-Z]$/.test(delta.slice(esc))) cut = esc;
+  const safe = delta.slice(0, cut);
+  renderedLen += safe.length;
+  committedPrefix = t.slice(0, renderedLen);
+  if (safe) {
+    const { html, style } = ansiToHtmlWithState(ansiState, safe);
+    ansiState = style;
+    el.insertAdjacentHTML("beforeend", html);
+  }
+}
+
+watch(shownOutput, (t) => renderOutput(t), { immediate: true });
+// 输出容器随 v-if 挂载/展开而出现，挂载后补一次渲染
+watch(outputRoot, (el) => {
+  if (el) renderOutput(shownOutput.value);
+});
 
 const copied = ref(false);
 async function copyCommand() {
@@ -317,9 +360,9 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
         </div>
         <div
           v-if="hasOutput"
+          ref="outputRoot"
           class="tool-output"
           :class="{ collapsed: !expanded }"
-          v-html="outputHtml"
         ></div>
         <div
           v-if="!expanded && hasOutput"

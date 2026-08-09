@@ -586,6 +586,7 @@ select option {
 .msg-agent .md {
   line-height: 1.6;
   user-select: text;
+  overflow-wrap: anywhere;
 }
 
 .msg-agent .md p {

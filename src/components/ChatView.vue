@@ -73,15 +73,9 @@ function topFor(i: number): number {
 
 // 是否吸附在底部：用户上滑查看历史时暂停自动滚动
 const stickToBottom = ref(true);
-// 是否有正在流式输出或进行中的工具/命令
-const hasActiveWork = computed(() =>
-  items.value.some(
-    (i) =>
-      i.streaming === true ||
-      ["in_progress", "inProgress", "pending", "started"].includes(
-        String(i.status ?? ""),
-      ),
-  ),
+// 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护，避免全量扫描）
+const hasActiveWork = computed(
+  () => (store.activeWorkByThread[store.currentThreadId ?? ""] ?? 0) > 0,
 );
 
 function scrollToBottom() {

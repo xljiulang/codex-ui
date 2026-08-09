@@ -27,7 +27,7 @@ const BRIGHT_COLORS = [
   "#ffffff",
 ];
 
-interface Style {
+export interface AnsiStyle {
   color?: string;
   bg?: string;
   bold?: boolean;
@@ -64,7 +64,7 @@ function xterm256(n: number): string {
   return `rgb(${g},${g},${g})`;
 }
 
-function applySgr(style: Style, p: number[]): void {
+function applySgr(style: AnsiStyle, p: number[]): void {
   for (let i = 0; i < p.length; i++) {
     const c = p[i];
     if (c === 0) {
@@ -108,9 +108,12 @@ function applySgr(style: Style, p: number[]): void {
   }
 }
 
-export function ansiToHtml(text: string): string {
-  if (!text) return "";
-  const style: Style = {};
+export function ansiToHtmlWithState(
+  initial: AnsiStyle,
+  text: string,
+): { html: string; style: AnsiStyle } {
+  if (!text) return { html: "", style: { ...initial } };
+  const style: AnsiStyle = { ...initial };
   let out = "";
   let last = 0;
   let m: RegExpExecArray | null;
@@ -149,5 +152,9 @@ export function ansiToHtml(text: string): string {
     }
   }
   flush(text.length);
-  return out;
+  return { html: out, style };
+}
+
+export function ansiToHtml(text: string): string {
+  return ansiToHtmlWithState({}, text).html;
 }

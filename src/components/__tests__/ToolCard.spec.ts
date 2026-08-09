@@ -248,3 +248,60 @@ describe("文件变更：打开独立 diff 窗口", () => {
     );
   });
 });
+
+describe("命令输出增量渲染", () => {
+  const wait = () => new Promise((r) => setTimeout(r, 120));
+
+  it("流式追加只追加尾部，不重复旧内容", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "in_progress",
+          startedAtMs: Date.now(),
+          aggregatedOutput: "line1",
+        }),
+      },
+    });
+    await wait();
+    expect(wrapper.find(".tool-output").text()).toContain("line1");
+
+    await wrapper.setProps({
+      item: makeItem({
+        status: "in_progress",
+        startedAtMs: Date.now(),
+        aggregatedOutput: "line1\nline2",
+      }),
+    });
+    await wait();
+    const text = wrapper.find(".tool-output").text();
+    expect(text).toContain("line2");
+    expect(text.match(/line1/g)).toHaveLength(1);
+  });
+
+  it("条目整体替换后重置，不残留旧内容", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "completed",
+          durationMs: 100,
+          aggregatedOutput: "AAA",
+        }),
+      },
+    });
+    await wrapper.find(".tool-card-header").trigger("click");
+    await wait();
+    expect(wrapper.find(".tool-output").text()).toContain("AAA");
+
+    await wrapper.setProps({
+      item: makeItem({
+        status: "completed",
+        durationMs: 100,
+        aggregatedOutput: "BBB",
+      }),
+    });
+    await wait();
+    const text = wrapper.find(".tool-output").text();
+    expect(text).toContain("BBB");
+    expect(text).not.toContain("AAA");
+  });
+});
