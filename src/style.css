@@ -2259,6 +2259,23 @@ select option {
   margin: 4px 0;
 }
 
+/* 聊天超长会话虚拟化 */
+.virtual-wrap {
+  position: relative;
+}
+.vrow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding-bottom: 14px;
+}
+.vrow > .msg {
+  margin-bottom: 0;
+}
+.vrow .date-sep {
+  margin: 10px 0 0;
+}
+
 /* 文件变更完整差异预览 */
 .change-row.clickable {
   cursor: pointer;

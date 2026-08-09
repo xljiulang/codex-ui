@@ -72,4 +72,39 @@ describe("ChatView 日期分隔线", () => {
     expect(wrapper.find(".empty-stub").exists()).toBe(true);
     store.turnActive = false;
   });
+
+  it("虚拟化结构：总高 spacer + 绝对定位行 + 稳定 key", () => {
+    const day = new Date(2026, 7, 9, 10, 0).getTime();
+    mockedItems.mockReturnValue(
+      Array.from(
+        { length: 8 },
+        (_, i) =>
+          ({
+            id: "m" + i,
+            type: "agentMessage",
+            text: "x" + i,
+            startedAtMs: day,
+          }) as ThreadItem,
+      ),
+    );
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const wrap = wrapper.find(".virtual-wrap");
+    expect(wrap.exists()).toBe(true);
+    expect(wrap.attributes("style")).toContain("height:");
+    const vrows = wrapper.findAll(".vrow");
+    // happy-dom 视口尺寸为 0 → 退化为全量渲染
+    expect(vrows).toHaveLength(9); // 1 条日期分隔 + 8 条消息
+    expect(vrows[0].attributes("data-key")).toContain("sep-");
+    expect(vrows[1].attributes("data-key")).toBe("m0");
+    expect(vrows[1].attributes("style")).toContain("top: 34px");
+    expect(vrows[2].attributes("style")).toContain("214px");
+    expect(wrapper.findAll(".msg-stub")).toHaveLength(8);
+  });
 });

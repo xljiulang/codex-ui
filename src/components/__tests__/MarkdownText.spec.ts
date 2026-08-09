@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { store } from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
+const origWorker = globalThis.Worker;
 
 describe("MarkdownText 流式渲染与代码高亮", () => {
   afterEach(() => {
@@ -19,6 +20,12 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
   beforeEach(() => {
     mockedInvoke.mockClear();
     store.server.workspace = "D:/repo";
+    // 测试环境固定走同步回退解析，避免 happy-dom Worker 挂起
+    (globalThis as Record<string, unknown>).Worker = undefined;
+  });
+
+  afterEach(() => {
+    (globalThis as Record<string, unknown>).Worker = origWorker;
   });
 
   it("静态文本立即渲染 Markdown", async () => {
@@ -114,6 +121,42 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     await wrapper.find("a").trigger("click");
     await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalled();
+  });
+
+  it("流式追加只替换尾部节点，保留前面块的 DOM 引用", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: {
+        text: "第一段\n\nhello **world**",
+        streaming: true,
+      },
+    });
+    await flushPromises();
+    const firstP = wrapper.find(".md > p").element;
+    expect(wrapper.text()).toContain("world");
+
+    await wrapper.setProps({
+      text: "第一段\n\nhello **world** 更多",
+      streaming: false,
+    });
+    await flushPromises();
+    expect(wrapper.find(".md > p").element).toBe(firstP); // 未整段替换
+    expect(wrapper.text()).toContain("更多");
+    expect(wrapper.find(".md strong").text()).toBe("world");
+  });
+
+  it("代码块闭合等结构重排时回退整段替换", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "```js\nconst x = 1;", streaming: true },
+    });
+    await flushPromises();
+    await wrapper.setProps({
+      text: "```js\nconst x = 1;\n```",
+      streaming: false,
+    });
+    await flushPromises();
+    const code = wrapper.find("pre code.language-js");
+    expect(code.exists()).toBe(true);
+    expect(code.classes()).toContain("hljs");
   });
 
   it("反斜杠盘符路径链接保留 href 并可点击定位（marked 编码为 %5C）", async () => {
