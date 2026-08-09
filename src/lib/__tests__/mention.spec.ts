@@ -14,6 +14,7 @@ import {
   toProtocolPath,
   toUserAttachment,
 } from "../mention";
+import type { UserInput } from "../types";
 
 describe("matchMentionToken", () => {
   it("匹配行首 @ 及带扩展名/下划线的文件名", () => {
@@ -47,6 +48,111 @@ describe("matchMentionToken", () => {
 
   it("单独 @ 时 token 为空", () => {
     expect(matchMentionToken("@")).toEqual({ kind: "@", token: "", start: 0 });
+  });
+
+  it("词中 @ 不触发（前面必须有空格或行首）", () => {
+    expect(matchMentionToken("看下@file")).toBeNull();
+    expect(matchMentionToken("x@y")).toBeNull();
+  });
+
+  it("@ 后还有内容时不触发（触发词必须在文本末尾）", () => {
+    expect(matchMentionToken("@file 更多文字")).toBeNull();
+    expect(matchMentionToken("@file ")).toBeNull();
+  });
+
+  it("空格后 @ 触发并记录起始位置", () => {
+    expect(matchMentionToken("看下 @file.txt")).toEqual({
+      kind: "@",
+      token: "file.txt",
+      start: 3,
+    });
+  });
+
+  it("文件名含空格：空格一输入菜单即关闭（token 必须是文本末尾）", () => {
+    expect(matchMentionToken("@my file.txt")).toBeNull();
+    expect(matchMentionToken("@my")).toEqual({
+      kind: "@",
+      token: "my",
+      start: 0,
+    });
+  });
+
+  it("$ 技能名允许冒号：插件技能全名可触发", () => {
+    expect(matchMentionToken("$ida-pro-mcp:idapython")).toEqual({
+      kind: "$",
+      token: "ida-pro-mcp:idapython",
+      start: 0,
+    });
+    expect(matchMentionToken("使用 $documents:documents")).toEqual({
+      kind: "$",
+      token: "documents:documents",
+      start: 3,
+    });
+  });
+
+  it("@ 文件引用不允许冒号（Windows 文件名不含冒号）", () => {
+    expect(matchMentionToken("@a:b")).toBeNull();
+    expect(matchMentionToken("$ida-pro-mcp")).toEqual({
+      kind: "$",
+      token: "ida-pro-mcp",
+      start: 0,
+    });
+  });
+
+  it("换行后 $ 触发", () => {
+    expect(matchMentionToken("第一行\n$skill")).toEqual({
+      kind: "$",
+      token: "skill",
+      start: 4,
+    });
+  });
+
+  it("单独 $ 时 token 为空", () => {
+    expect(matchMentionToken("$")).toEqual({ kind: "$", token: "", start: 0 });
+  });
+});
+
+describe("混合使用 @ 文件引用与 $ 技能引用", () => {
+  const mixedAttachments: UserInput[] = [
+    { type: "mention", name: "a.cs", path: "D:/repo/a.cs" },
+    { type: "mention", name: "b.txt", path: "D:/repo/b.txt" },
+    { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
+    { type: "skill", name: "s2", path: "C:/x/s2/SKILL.md" },
+    { type: "localImage", path: "D:/repo/p.png" },
+  ];
+
+  it("assemblePromptText 顺序：文件段 + My request + 技能链接 + 用户输入", () => {
+    expect(assemblePromptText("混合测试", mixedAttachments)).toBe(
+      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.txt: D:/repo/b.txt\n\n## My request:\n[$s1](C:/x/s1/SKILL.md) [$s2](C:/x/s2/SKILL.md) 混合测试\n",
+    );
+  });
+
+  it("buildTurnInput 混合附件顺序：图片、文本、技能项", () => {
+    const input = buildTurnInput("混合测试", mixedAttachments);
+    expect(input).toEqual([
+      { type: "localImage", path: "D:/repo/p.png" },
+      {
+        type: "text",
+        text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.txt: D:/repo/b.txt\n\n## My request:\n[$s1](C:/x/s1/SKILL.md) [$s2](C:/x/s2/SKILL.md) 混合测试\n",
+        text_elements: [],
+      },
+      { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
+      { type: "skill", name: "s2", path: "C:/x/s2/SKILL.md" },
+    ]);
+  });
+
+  it("混合文本可分别解析出文件引用与技能链接，stripMentionContext 还原用户输入", () => {
+    const text = assemblePromptText("混合测试", [
+      { type: "mention", name: "a.cs", path: "D:/repo/a.cs" },
+      { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
+    ]);
+    expect(parseFileMentionSection(text)).toEqual([
+      { name: "a.cs", path: "D:/repo/a.cs" },
+    ]);
+    expect(parseSkillMentionLinks(text)).toEqual([
+      { name: "s1", path: "C:/x/s1/SKILL.md" },
+    ]);
+    expect(stripMentionContext(text)).toBe("混合测试");
   });
 });
 

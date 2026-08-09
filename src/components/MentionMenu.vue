@@ -84,22 +84,29 @@ const rows = computed<Row[]>(() => {
 
 const highlight = ref(0);
 watch(
-  [() => props.token, () => props.results],
+  [() => props.token, () => props.results, filteredSkills],
   () => {
     highlight.value = 0;
   },
 );
 
 function move(dir: -1 | 1) {
-  const len = rows.value.length;
+  const len =
+    props.kind === "@" ? rows.value.length : filteredSkills.value.length;
   if (!len) return;
   highlight.value = (highlight.value + dir + len) % len;
 }
 
 function selectHighlighted() {
-  const row = rows.value[highlight.value];
-  if (!row) return;
-  selectRow(row);
+  if (props.kind === "@") {
+    const row = rows.value[highlight.value];
+    if (!row) return;
+    selectRow(row);
+    return;
+  }
+  const s = filteredSkills.value[highlight.value];
+  if (!s) return;
+  emit("select-attachment", { type: "skill", name: s.key, path: s.path });
 }
 
 function selectRow(row: Row) {
@@ -173,9 +180,11 @@ function rowKey(row: Row): string {
       <div class="menu-group">
         <div class="menu-group-title">技能（使用 $ 调用 Skills）</div>
         <button
-          v-for="s in filteredSkills"
+          v-for="(s, i) in filteredSkills"
           :key="s.key"
           class="menu-item"
+          :class="{ active: highlight === i }"
+          @mouseenter="highlight = i"
           @click="emit('select-attachment', { type: 'skill', name: s.key, path: s.path })"
         >
           <span class="menu-item-icon">S</span>

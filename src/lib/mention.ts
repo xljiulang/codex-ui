@@ -18,14 +18,24 @@ export interface FuzzyFileResult {
 
 /**
  * 解析输入框中光标处的 @ / $ 触发词。
- * token 允许字母数字、下划线、点号、连字符与中文，避免文件名（含扩展名/中文）被截断。
+ * 先按「行首或空格 + 触发符 + 到行尾的非空白串」截取候选，再按类型校验字符集：
+ * - @ 文件引用：字母数字、下划线、点号、连字符与中文（不含冒号，Windows 文件名不含冒号）；
+ * - $ 技能引用：额外允许冒号（插件技能名如 ida-pro-mcp:idapython 可整名触发）。
+ * token 必须延伸到文本末尾，输入空格/非法字符后菜单随即关闭。
  */
 export function matchMentionToken(text: string): MentionToken | null {
-  const m = /(?:^|\s)([@$])([\w.\u4e00-\u9fff-]*)$/.exec(text);
+  const m = /(?:^|\s)([@$])(\S*)$/.exec(text);
   if (!m) return null;
+  const kind = m[1] as "@" | "$";
+  const token = m[2];
+  const allowed =
+    kind === "$"
+      ? /^[\w.:\u4e00-\u9fff-]*$/
+      : /^[\w.\u4e00-\u9fff-]*$/;
+  if (!allowed.test(token)) return null;
   const triggerIdx =
     m.index + (m[0].startsWith("@") || m[0].startsWith("$") ? 0 : 1);
-  return { kind: m[1] as "@" | "$", token: m[2], start: triggerIdx };
+  return { kind, token, start: triggerIdx };
 }
 
 export function isImagePath(path: string): boolean {

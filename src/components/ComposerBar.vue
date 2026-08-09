@@ -185,9 +185,9 @@ watch(
 function onKeydown(e: KeyboardEvent) {
   // 输入法组合中（如中文拼音选字）的按键不触发提交/历史选择
   if (e.isComposing || e.keyCode === 229) return;
-  // @ 文件引用菜单打开时：Enter 选中高亮项，↑↓ 移动高亮
+  // @ / $ 菜单打开时：Enter 选中高亮项，↑↓ 移动高亮
   if (
-    mention.value?.kind === "@" &&
+    mention.value &&
     (e.key === "Enter" || e.key === "ArrowUp" || e.key === "ArrowDown")
   ) {
     e.preventDefault();

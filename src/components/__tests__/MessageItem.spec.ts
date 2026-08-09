@@ -117,4 +117,63 @@ describe("用户消息中的图片附件", () => {
     });
     expect(w2.find(".stream-cursor").exists()).toBe(false);
   });
+
+  it("同一条消息混合 @ 与 $：文件段与技能链接都渲染为引用标签", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$csharp-code-rules](C:/x/SKILL.md) 按规则检查\n",
+            text_elements: [],
+          },
+          {
+            type: "skill",
+            name: "csharp-code-rules",
+            path: "C:/x/SKILL.md",
+          },
+        ]),
+      },
+    });
+    expect(wrapper.text()).toContain("@a.cs");
+    expect(wrapper.text()).toContain("$csharp-code-rules");
+    expect(wrapper.text()).toContain("按规则检查");
+    // 结构化 skill 项存在时文本链接不重复渲染
+    expect(wrapper.text().split("$csharp-code-rules").length - 1).toBe(1);
+  });
+
+  it("只有文本技能链接（无结构化项）时也能渲染 $ 标签", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$csharp-code-rules](C:/x/SKILL.md) 按规则检查\n",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    expect(wrapper.text()).toContain("@a.cs");
+    expect(wrapper.text()).toContain("$csharp-code-rules");
+  });
+
+  it("多个文件引用渲染多个 @ 标签，正文不含协议段落", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.txt: D:/repo/b.txt\n\n## My request:\n看看这两个文件\n",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    expect(wrapper.text()).toContain("@a.cs");
+    expect(wrapper.text()).toContain("@b.txt");
+    expect(wrapper.text()).toContain("看看这两个文件");
+    expect(wrapper.text()).not.toContain("# Files mentioned by the user:");
+    expect(wrapper.text()).not.toContain("## My request:");
+  });
 });
