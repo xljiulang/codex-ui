@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import ToolCard from "../ToolCard.vue";
 import type { ThreadItem } from "../../lib/types";
+import { store } from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -185,7 +186,7 @@ describe("ToolCard 实时耗时", () => {
   });
 });
 
-describe("文件变更完整差异预览", () => {
+describe("文件变更：打开独立 diff 窗口", () => {
   const REPLACE_DIFF = [
     "@@ -1,3 +1,3 @@",
     " a",
@@ -196,10 +197,8 @@ describe("文件变更完整差异预览", () => {
 
   beforeEach(() => {
     mockedInvoke.mockReset();
-    mockedInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "read_file") return "a\nX\nc";
-      return null;
-    });
+    mockedInvoke.mockResolvedValue(null);
+    store.server.workspace = "D:/repo";
   });
 
   function changeItem(
@@ -215,54 +214,23 @@ describe("文件变更完整差异预览", () => {
     } as ThreadItem;
   }
 
-  it("点击文件路径弹出内联完整 diff 预览", async () => {
+  it("点击变更行调用 open_diff_window 并传参", async () => {
     const wrapper = mount(ToolCard, {
       props: { item: changeItem(REPLACE_DIFF, "D:\\repo\\a.cs", "update") },
     });
     await wrapper.find(".change-row").trigger("click");
     await flushPromises();
-    const modal = wrapper.find(".diff-modal");
-    expect(modal.exists()).toBe(true);
-    expect(modal.text()).toContain("D:\\repo\\a.cs");
-    expect(modal.text()).toContain("修改");
-    expect(modal.text()).toContain("旧 | 新");
-    expect(wrapper.findAll(".diff-row.del")).toHaveLength(1);
-    expect(wrapper.findAll(".diff-row.add")).toHaveLength(1);
-  });
-
-  it("点击遮罩关闭预览", async () => {
-    const wrapper = mount(ToolCard, {
-      props: { item: changeItem(REPLACE_DIFF) },
+    expect(mockedInvoke).toHaveBeenCalledWith("open_diff_window", {
+      params: {
+        path: "D:\\repo\\a.cs",
+        kind: "update",
+        diff: REPLACE_DIFF,
+        workspace_root: "D:/repo",
+      },
     });
-    await wrapper.find(".change-row").trigger("click");
-    await flushPromises();
-    expect(wrapper.find(".diff-modal").exists()).toBe(true);
-    await wrapper.find(".diff-modal-mask").trigger("click");
-    expect(wrapper.find(".diff-modal").exists()).toBe(false);
   });
 
-  it("按 Esc 关闭预览", async () => {
-    const wrapper = mount(ToolCard, {
-      props: { item: changeItem(REPLACE_DIFF) },
-    });
-    await wrapper.find(".change-row").trigger("click");
-    await flushPromises();
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    await flushPromises();
-    expect(wrapper.find(".diff-modal").exists()).toBe(false);
-  });
-
-  it("点 × 关闭预览", async () => {
-    const wrapper = mount(ToolCard, {
-      props: { item: changeItem(REPLACE_DIFF) },
-    });
-    await wrapper.find(".change-row").trigger("click");
-    await flushPromises();
-    await wrapper.find(".modal-close").trigger("click");
-    expect(wrapper.find(".diff-modal").exists()).toBe(false);
-  });
-
-  it("无 diff 的行点击不弹窗", async () => {
+  it("无 diff 的行点击不打开窗口", async () => {
     const wrapper = mount(ToolCard, {
       props: {
         item: {
@@ -274,6 +242,9 @@ describe("文件变更完整差异预览", () => {
       },
     });
     await wrapper.find(".change-row").trigger("click");
-    expect(wrapper.find(".diff-modal").exists()).toBe(false);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "open_diff_window",
+      expect.anything(),
+    );
   });
 });

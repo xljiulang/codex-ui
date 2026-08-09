@@ -1,113 +1,41 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted } from "vue";
 import AppHeader from "./components/AppHeader.vue";
 import HistoryPanel from "./components/HistoryPanel.vue";
 import ChatView from "./components/ChatView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
 import GoalDialog from "./components/GoalDialog.vue";
+import DiffWindowView from "./components/DiffWindowView.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
-import { openLink } from "./lib/links";
+import { useContextMenu } from "./composables/useContextMenu";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
-interface CtxItem {
-  label: string;
-  action: () => void;
+// 独立 diff 窗口：按窗口 label 识别（不依赖 localStorage，避免标志残留污染下次启动）
+let isDiffWindow = false;
+try {
+  isDiffWindow = getCurrentWindow().label === "diff-preview";
+} catch {
+  // 非 Tauri 环境（如单测）按普通窗口处理
 }
 
-const ctxMenu = ref<{ x: number; y: number; items: CtxItem[] } | null>(null);
-
-async function copyText(t: string) {
-  try {
-    await navigator.clipboard.writeText(t);
-  } catch {
-    // 剪贴板 API 不可用时回退
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = t;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    } catch {
-      // ignore
-    }
-  }
-}
-
-function onContextMenu(e: MouseEvent) {
-  e.preventDefault(); // 屏蔽默认菜单（含“刷新”），避免页面重载
-  const target = e.target as HTMLElement;
-  const editable =
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target.isContentEditable;
-  const selection = window.getSelection()?.toString() ?? "";
-  const link = target.closest("a") as HTMLAnchorElement | null;
-  const items: CtxItem[] = [];
-
-  if (editable) {
-    items.push(
-      { label: "剪切", action: () => document.execCommand("cut") },
-      { label: "复制", action: () => document.execCommand("copy") },
-      { label: "粘贴", action: () => document.execCommand("paste") },
-      { label: "全选", action: () => document.execCommand("selectAll") },
-    );
-  } else if (selection) {
-    items.push({ label: "复制", action: () => void copyText(selection) });
-  }
-  if (link) {
-    items.push({
-      label: "打开链接",
-      action: () => openLink(link.href),
-    });
-    items.push({
-      label: "复制链接地址",
-      action: () => void copyText(link.href),
-    });
-  }
-
-  if (!items.length) {
-    ctxMenu.value = null;
-    return;
-  }
-  const x = Math.min(e.clientX, window.innerWidth - 160);
-  const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
-  ctxMenu.value = { x, y, items };
-}
-
-function onGlobalClick() {
-  ctxMenu.value = null;
-}
-
-function onGlobalKeydown(e: KeyboardEvent) {
-  if (e.key === "Escape") ctxMenu.value = null;
-}
-
-function onGlobalScroll() {
-  ctxMenu.value = null;
-}
+// 主窗口注册自定义右键菜单（diff 窗口由 DiffWindowView 自行注册）
+const { ctxMenu } = useContextMenu(!isDiffWindow);
 
 onMounted(() => {
+  if (isDiffWindow) return;
   void init();
-  window.addEventListener("contextmenu", onContextMenu);
-  window.addEventListener("click", onGlobalClick);
-  window.addEventListener("keydown", onGlobalKeydown);
-  window.addEventListener("scroll", onGlobalScroll, true);
 });
 
 onBeforeUnmount(() => {
+  if (isDiffWindow) return;
   disposeEvents();
-  window.removeEventListener("contextmenu", onContextMenu);
-  window.removeEventListener("click", onGlobalClick);
-  window.removeEventListener("keydown", onGlobalKeydown);
-  window.removeEventListener("scroll", onGlobalScroll, true);
 });
 </script>
 
 <template>
-  <div class="app">
+  <DiffWindowView v-if="isDiffWindow" />
+  <div v-else class="app">
     <AppHeader />
     <div class="app-body">
       <HistoryPanel v-if="store.showHistory" />

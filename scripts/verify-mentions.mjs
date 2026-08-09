@@ -29,9 +29,7 @@ const evidenceDir = fs.mkdtempSync(
 
 const results = [];
 let child = null;
-let ws = null;
-let seq = 0;
-const pending = new Map();
+let cdp = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -108,66 +106,80 @@ async function waitForCdp(timeoutMs = 90000) {
   throw new Error("CDP 连接超时，请确认 9222 端口未被占用且应用已启动");
 }
 
-function cdpSend(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const id = ++seq;
-    pending.set(id, { resolve, reject });
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-}
-
-async function connectCdp(url) {
-  ws = new WebSocket(url);
+async function createClient(wsUrl) {
+  const client = { seq: 0, pending: new Map(), ws: null };
   await new Promise((resolve, reject) => {
-    ws.onopen = resolve;
-    ws.onerror = () => reject(new Error("WebSocket 连接失败"));
+    client.ws = new WebSocket(wsUrl);
+    client.ws.onopen = resolve;
+    client.ws.onerror = () => reject(new Error("WebSocket 连接失败"));
   });
-  ws.onmessage = (ev) => {
+  client.ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (!msg.id) return;
-    const p = pending.get(msg.id);
+    const p = client.pending.get(msg.id);
     if (!p) return;
-    pending.delete(msg.id);
+    client.pending.delete(msg.id);
     if (msg.error) p.reject(new Error(JSON.stringify(msg.error)));
     else p.resolve(msg.result);
   };
-  await cdpSend("Runtime.enable");
-  await cdpSend("Page.enable");
+  client.send = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      const id = ++client.seq;
+      client.pending.set(id, { resolve, reject });
+      client.ws.send(JSON.stringify({ id, method, params }));
+    });
+  client.evalJs = async (expression) => {
+    const r = await client.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (r.exceptionDetails) {
+      throw new Error(
+        "页面脚本异常: " + JSON.stringify(r.exceptionDetails).slice(0, 500),
+      );
+    }
+    return r.result.value;
+  };
+  client.waitFor = async (desc, expr, timeoutMs = 15000) => {
+    const deadline = Date.now() + timeoutMs;
+    let last;
+    while (Date.now() < deadline) {
+      last = await client.evalJs(expr);
+      if (last) return last;
+      await sleep(300);
+    }
+    throw new Error(`等待超时: ${desc}，最后结果: ${JSON.stringify(last)}`);
+  };
+  client.screenshot = async (name) => {
+    try {
+      const r = await client.send("Page.captureScreenshot", { format: "png" });
+      const p = path.join(evidenceDir, name);
+      fs.writeFileSync(p, Buffer.from(r.data, "base64"));
+      log(`截图已保存: ${p}`);
+    } catch (e) {
+      log(`截图失败 ${name}: ${e.message}`);
+    }
+  };
+  client.close = () => {
+    try {
+      client.ws.close();
+    } catch {}
+  };
+  await client.send("Runtime.enable");
+  await client.send("Page.enable");
+  return client;
 }
 
-async function evalJs(expression) {
-  const r = await cdpSend("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-  });
-  if (r.exceptionDetails) {
-    throw new Error("页面脚本异常: " + JSON.stringify(r.exceptionDetails).slice(0, 500));
-  }
-  return r.result.value;
+async function connectCdp(url) {
+  cdp = await createClient(url);
 }
 
-async function screenshot(name) {
-  try {
-    const r = await cdpSend("Page.captureScreenshot", { format: "png" });
-    const p = path.join(evidenceDir, name);
-    fs.writeFileSync(p, Buffer.from(r.data, "base64"));
-    log(`截图已保存: ${p}`);
-  } catch (e) {
-    log(`截图失败 ${name}: ${e.message}`);
-  }
-}
-
-async function waitFor(desc, expr, timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    last = await evalJs(expr);
-    if (last) return last;
-    await sleep(300);
-  }
-  throw new Error(`等待超时: ${desc}，最后结果: ${JSON.stringify(last)}`);
-}
+const cdpSend = (method, params = {}) => cdp.send(method, params);
+const evalJs = (expression) => cdp.evalJs(expression);
+const screenshot = (name) => cdp.screenshot(name);
+const waitFor = (desc, expr, timeoutMs) =>
+  cdp.waitFor(desc, expr, timeoutMs);
 
 async function setInput(text) {
   await evalJs(`(() => {
@@ -301,6 +313,7 @@ async function main() {
   log("应用已启动，等待 CDP…");
 
   const page = await waitForCdp();
+  const mainPageId = page.id;
   await connectCdp(page.webSocketDebuggerUrl);
   await waitFor("输入框加载", `!!document.querySelector("textarea")`, 60000);
   log("UI 就绪");
@@ -519,94 +532,137 @@ async function main() {
   await screenshot("7-links.png");
   await evalJs(`window.__CODEX_UI_TEST__ = false;`);
 
-  // ---------- 场景 6: 文件变更完整 diff 预览（真实 apply_patch） ----------
+  // ---------- 场景 6: 文件变更完整 diff 预览（真实 apply_patch，多文件） ----------
   log("场景 6: 文件变更 diff 预览");
   await setInput(
-    `${TEST_TAG} 请用 apply_patch 工具修改文件 ${testDir}\\hello.txt：把第一行"标记词: ${MARKER}"改为"标记词已修改: ${MARKER}"。不要用其它工具。`,
+    `${TEST_TAG} 请用 apply_patch 工具：1) 修改文件 ${testDir}\\hello.txt，把第一行"标记词: ${MARKER}"改为"标记词已修改: ${MARKER}"；2) 新建文件 ${testDir}\\sample.ts，内容为一行 "const answer: number = 42;"。不要用其它工具。`,
   );
   const send6 = await clickSend();
   if (!send6.ok) throw new Error("场景6 发送失败: " + send6.reason);
   await waitTurnDone();
-  const rowFound = await evalJs(
-    `!!document.querySelector(".tool-card .change-row.clickable")`,
+  const rowsFound = await evalJs(
+    `Array.from(document.querySelectorAll(".tool-card .change-row.clickable")).map((r) => r.textContent.trim())`,
   );
-  record("文件变更: 出现可点击的变更行", rowFound);
-  if (rowFound) {
+  record(
+    "文件变更: 出现可点击的变更行",
+    rowsFound.length > 0,
+    JSON.stringify(rowsFound),
+  );
+
+  async function openDiffWindowAndWait(targetText) {
     await evalJs(
-      `document.querySelector(".tool-card .change-row.clickable").click()`,
-    );
-    await waitFor("diff 弹窗出现", `!!document.querySelector(".diff-modal")`, 10000);
-    const renderState = await waitFor(
-      "内联 diff 渲染完成",
       `(() => {
+        const rows = Array.from(document.querySelectorAll(".tool-card .change-row.clickable"));
+        const row = rows.find((r) => r.textContent.includes(${JSON.stringify(
+          targetText,
+        )}));
+        if (row) row.click();
+      })()`,
+    );
+    let diffTarget = null;
+    for (let i = 0; i < 40; i++) {
+      const list = await (await fetch(`${CDP_BASE}/json/list`)).json();
+      diffTarget = list.find(
+        (t) => t.type === "page" && t.id !== mainPageId,
+      );
+      if (diffTarget) break;
+      await sleep(500);
+    }
+    if (!diffTarget) return null;
+    const d = await createClient(diffTarget.webSocketDebuggerUrl);
+    // 复用窗口时 target id 不变，等待内容切到目标文件
+    await d.waitFor(
+      "diff 窗口内容就绪",
+      `(() => {
+        const path = document.querySelector(".diff-window-path")?.textContent ?? "";
+        if (!path.includes(${JSON.stringify(targetText)})) return false;
         const loading = !!document.querySelector(".diff-loading");
-        const fallback = !!document.querySelector(".diff-fallback-note");
         const rows = document.querySelectorAll(".diff-row").length;
-        if (!loading && (rows > 0 || fallback)) {
-          return JSON.stringify({
-            loading,
-            fallback,
-            rows,
-            note:
-              document.querySelector(".diff-fallback-note")?.textContent?.trim() ??
-              "",
-          });
-        }
-        return false;
+        return !loading && (rows > 0 || !!document.querySelector(".diff-fallback-note"));
       })()`,
       15000,
     );
-    log("diff 渲染状态: " + renderState);
-    const diag = await evalJs(`(async () => {
-      const row = document.querySelector(".change-row");
-      const pre = document.querySelector(".diff-preview");
-      const rowPath = (row?.textContent ?? "").replace(/^修改/, "").trim();
-      let invokeRes = null;
-      try {
-        invokeRes = {
-          ok: true,
-          len: (await window.__TAURI_INTERNALS__.invoke("read_file", { path: rowPath })).length,
+    return d;
+  }
+
+  async function checkNoContextMenu(d) {
+    return d.evalJs(`(() => {
+      const el = document.querySelector(".diff-text");
+      if (!el) return { ok: false, reason: "no diff-text" };
+      const ev = new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 60,
+        clientY: 60,
+      });
+      el.dispatchEvent(
+        ev,
+      );
+      return new Promise((r) =>
+        setTimeout(() => {
+          r({
+            ok: ev.defaultPrevented && !document.querySelector(".ctx-menu"),
+          });
+        }, 150),
+      );
+    })()`);
+  }
+
+  if (rowsFound.length > 0) {
+    // hello.txt：旧/新/分隔 + 右键无菜单
+    const d1 = await openDiffWindowAndWait("hello.txt");
+    record("文件变更: hello.txt diff 窗口打开", !!d1);
+    if (d1) {
+      const inline = await d1.evalJs(`(() => {
+        const rows = Array.from(document.querySelectorAll(".diff-row"));
+        return {
+          hasOld: rows.some(
+            (r) => r.classList.contains("del") && r.textContent.includes("标记词:"),
+          ),
+          hasNew: rows.some(
+            (r) =>
+              r.classList.contains("add") &&
+              r.textContent.includes("标记词已修改"),
+          ),
+          hasSep: rows.some(
+            (r) => r.classList.contains("sep") && r.textContent.includes("旧 | 新"),
+          ),
         };
-      } catch (e) {
-        invokeRes = { ok: false, err: String(e) };
-      }
-      return {
-        path: rowPath,
-        invoke: invokeRes,
-        note:
-          document.querySelector(".diff-fallback-note")?.textContent?.trim() ??
-          "",
-        diff: pre?.innerText?.slice(0, 600) ?? "",
-      };
-    })()`);
-    log("diff 诊断: " + JSON.stringify(diag));
-    const inline = await evalJs(`(() => {
-      const rows = Array.from(document.querySelectorAll(".diff-row"));
-      return {
-        hasOld: rows.some(
-          (r) =>
-            r.classList.contains("del") &&
-            r.textContent.includes("标记词:"),
-        ),
-        hasNew: rows.some(
-          (r) =>
-            r.classList.contains("add") &&
-            r.textContent.includes("标记词已修改"),
-        ),
-        hasSep: rows.some(
-          (r) =>
-            r.classList.contains("sep") &&
-            r.textContent.includes("旧 | 新"),
-        ),
-      };
-    })()`);
-    record(
-      "文件变更: 旧行在上、新行在下并含“旧 | 新”分隔",
-      inline.hasOld && inline.hasNew && inline.hasSep,
-      JSON.stringify(inline),
-    );
-    await screenshot("8-diff-preview.png");
-    await evalJs(`document.querySelector(".modal-close").click()`);
+      })()`);
+      record(
+        "文件变更: 旧行在上、新行在下并含“旧 | 新”分隔",
+        inline.hasOld && inline.hasNew && inline.hasSep,
+        JSON.stringify(inline),
+      );
+      const ctx1 = await checkNoContextMenu(d1);
+      record("文件变更: 右键无菜单（阻止默认）", ctx1.ok, JSON.stringify(ctx1));
+      await d1.screenshot("8-diff-preview.png");
+      d1.close();
+    }
+
+    // sample.ts：代码语法高亮
+    const d2 = await openDiffWindowAndWait("sample.ts");
+    record("文件变更: sample.ts diff 窗口打开（语法高亮）", !!d2);
+    if (d2) {
+      const hl = await d2.evalJs(`(() => {
+        const kw = document.querySelectorAll(".diff-text .hljs-keyword").length;
+        return {
+          kw,
+          has: kw > 0,
+          text: document.querySelector(".diff-text")?.textContent ?? "",
+          path: document.querySelector(".diff-window-path")?.textContent ?? "",
+        };
+      })()`);
+      record("文件变更: 代码文件语法高亮", hl.has, JSON.stringify(hl));
+      const ctx2 = await checkNoContextMenu(d2);
+      record(
+        "文件变更: 代码窗口右键无菜单",
+        ctx2.ok,
+        JSON.stringify(ctx2),
+      );
+      await d2.screenshot("9-diff-highlight.png");
+      d2.close();
+    }
   }
 
   // ---------- UI 边界抽查（不发真实模型） ----------

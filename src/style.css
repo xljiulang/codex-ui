@@ -2269,31 +2269,6 @@ select option {
 .change-row.clickable:hover {
   background: var(--bg-hover);
 }
-.diff-modal-mask {
-  z-index: 200;
-}
-.diff-modal {
-  width: min(92vw, 1100px);
-  height: min(86vh, 720px);
-  max-height: none;
-}
-.diff-modal-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-.diff-modal-path {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-  word-break: break-all;
-}
-.diff-modal-body {
-  padding: 0;
-  overflow: auto;
-}
 .diff-preview {
   max-height: none;
   min-height: 100%;
@@ -2320,6 +2295,7 @@ select option {
   font-size: 12px;
   line-height: 1.55;
   min-width: max-content;
+  position: relative;
 }
 .diff-row {
   display: flex;
@@ -2363,4 +2339,89 @@ select option {
   width: 100%;
   text-align: center;
   font-size: 10.5px;
+}
+
+/* 独立 diff 窗口布局与滚动条变更指示 */
+.diff-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+.diff-window-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.diff-window-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.diff-window-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+.diff-window-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  padding: 8px 12px;
+}
+
+/* diff 内联行语法高亮配色（与聊天区 hljs 配色一致） */
+.diff-text .hljs-comment,
+.diff-text .hljs-quote {
+  color: #6a9955;
+}
+.diff-text .hljs-keyword,
+.diff-text .hljs-selector-tag,
+.diff-text .hljs-literal {
+  color: #569cd6;
+}
+.diff-text .hljs-string,
+.diff-text .hljs-regexp,
+.diff-text .hljs-addition {
+  color: #ce9178;
+}
+.diff-text .hljs-number,
+.diff-text .hljs-meta {
+  color: #b5cea8;
+}
+.diff-text .hljs-title,
+.diff-text .hljs-section {
+  color: #dcdcaa;
+}
+.diff-text .hljs-attr,
+.diff-text .hljs-attribute,
+.diff-text .hljs-variable,
+.diff-text .hljs-template-variable,
+.diff-text .hljs-type,
+.diff-text .hljs-class .hljs-title {
+  color: #9cdcfe;
+}
+.diff-text .hljs-built_in,
+.diff-text .hljs-builtin-name {
+  color: #4ec9b0;
+}
+.diff-text .hljs-symbol,
+.diff-text .hljs-bullet {
+  color: #d19a66;
+}
+.diff-text .hljs-deletion {
+  color: #f44747;
+}
+.diff-text .hljs-emphasis {
+  font-style: italic;
+}
+.diff-text .hljs-strong {
+  font-weight: 600;
 }

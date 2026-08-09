@@ -153,6 +153,13 @@ export interface TodoListItem {
   items: { text: string; completed: boolean }[];
 }
 
+/** diff 预览内联行（Rust build_diff_preview 返回，字段 camelCase） */
+export type DiffRow =
+  | { kind: "ctx"; oldNo: number; newNo: number; text: string }
+  | { kind: "del"; oldNo: number; text: string }
+  | { kind: "add"; newNo: number; text: string }
+  | { kind: "sep" };
+
 export interface UserMessageItem {
   id: string;
   type: "userMessage";

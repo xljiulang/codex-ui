@@ -35,7 +35,9 @@ pub fn run() {
             codex::commands::workspace_dir,
             codex::commands::open_url,
             codex::commands::reveal_path,
-            codex::commands::read_file,
+            codex::diff::build_diff_preview,
+            codex::diff::open_diff_window,
+            codex::diff::take_diff_params,
             codex::commands::pick_files,
             codex::commands::pick_directory,
             codex::commands::settings_get,
@@ -46,6 +48,7 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
+            app.manage(codex::diff::DiffParamsState(std::sync::Mutex::new(None)));
             server_handle.ensure_running();
             Ok(())
         })
