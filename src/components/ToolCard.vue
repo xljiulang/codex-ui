@@ -265,7 +265,8 @@ const effectiveExpanded = computed(
   () =>
     expanded.value ||
     type.value === "fileChange" ||
-    ((running.value || statusLabel.value === "失败" || statusLabel.value === "已拒绝") &&
+    running.value ||
+    ((statusLabel.value === "失败" || statusLabel.value === "已拒绝") &&
       hasOutput.value),
 );
 
@@ -327,7 +328,14 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
 </script>
 
 <template>
-  <div class="tool-card" :class="{ expanded: effectiveExpanded }">
+  <div
+    class="tool-card"
+    :class="{
+      expanded: effectiveExpanded,
+      'tool-card--minimal':
+        type === 'commandExecution' || type === 'fileChange',
+    }"
+  >
     <div class="tool-card-header" @click="expanded = !expanded">
       <span class="tool-card-title">{{ title }}</span>
       <span class="tool-card-sub">{{ sub }}</span>

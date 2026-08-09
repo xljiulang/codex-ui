@@ -902,6 +902,24 @@ select option {
   border-bottom-color: var(--border);
 }
 
+/* “命令 / 文件变更”卡片去线条：去掉外框、展开分隔线与内部框线，其余工具卡保持原样 */
+.tool-card--minimal {
+  border: none;
+}
+
+.tool-card--minimal .tool-card-header {
+  border-bottom-color: transparent;
+}
+
+.tool-card--minimal .tool-output,
+.tool-card--minimal .diff-view {
+  border: none;
+}
+
+.tool-card--minimal .tool-command .copy-btn {
+  border: none;
+}
+
 .card-body-enter-active,
 .card-body-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
