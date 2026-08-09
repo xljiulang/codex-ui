@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { flushPromises } from "@vue/test-utils";
 
@@ -9,12 +9,23 @@ vi.mock("@tauri-apps/api/core", () => ({
 import MessageItem from "../MessageItem.vue";
 import type { ThreadItem } from "../../lib/types";
 
+const origWorker = globalThis.Worker;
+
 function userItem(content: unknown[]): ThreadItem {
   return { id: "u1", type: "userMessage", content } as ThreadItem;
 }
 
 describe("用户消息中的图片附件", () => {
-  it("localImage 渲染为图片而不是路径文本", () => {
+  beforeEach(() => {
+    // 走同步回退解析，避免 happy-dom Worker 挂起
+    (globalThis as Record<string, unknown>).Worker = undefined;
+  });
+
+  afterEach(() => {
+    (globalThis as Record<string, unknown>).Worker = origWorker;
+  });
+
+  it("localImage 渲染为图片而不是路径文本", async () => {
     const wrapper = mount(MessageItem, {
       props: {
         item: userItem([
@@ -23,6 +34,7 @@ describe("用户消息中的图片附件", () => {
         ]),
       },
     });
+    await flushPromises();
     const img = wrapper.find("img.user-image");
     expect(img.exists()).toBe(true);
     expect(img.attributes("src")).toContain("asset://mock/");
@@ -123,7 +135,7 @@ describe("用户消息中的图片附件", () => {
     expect(w2.find(".stream-cursor").exists()).toBe(false);
   });
 
-  it("同一条消息混合 @ 与 $：文件段与技能链接都渲染为引用标签", () => {
+  it("同一条消息混合 @ 与 $：文件段与技能链接都渲染为引用标签", async () => {
     const wrapper = mount(MessageItem, {
       props: {
         item: userItem([
@@ -140,6 +152,7 @@ describe("用户消息中的图片附件", () => {
         ]),
       },
     });
+    await flushPromises();
     expect(wrapper.text()).toContain("@a.cs");
     expect(wrapper.text()).toContain("$csharp-code-rules");
     expect(wrapper.text()).toContain("按规则检查");
@@ -163,7 +176,7 @@ describe("用户消息中的图片附件", () => {
     expect(wrapper.text()).toContain("$csharp-code-rules");
   });
 
-  it("多个文件引用渲染多个 @ 标签，正文不含协议段落", () => {
+  it("多个文件引用渲染多个 @ 标签，正文不含协议段落", async () => {
     const wrapper = mount(MessageItem, {
       props: {
         item: userItem([
@@ -175,11 +188,25 @@ describe("用户消息中的图片附件", () => {
         ]),
       },
     });
+    await flushPromises();
     expect(wrapper.text()).toContain("@a.cs");
     expect(wrapper.text()).toContain("@b.txt");
     expect(wrapper.text()).toContain("看看这两个文件");
     expect(wrapper.text()).not.toContain("# Files mentioned by the user:");
     expect(wrapper.text()).not.toContain("## My request:");
+  });
+
+  it("用户消息文本按 Markdown 渲染", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          { type: "text", text: "# 标题\n\n**加粗**", text_elements: [] },
+        ]),
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".msg-user .md h1").text()).toBe("标题");
+    expect(wrapper.find(".msg-user .md strong").text()).toBe("加粗");
   });
 
   it("用户消息不显示时间戳，助手最终答复显示时间戳", () => {

@@ -186,7 +186,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
             class="mention-inline"
             :title="s.path"
           >${{ s.name }}</span>
-          <span class="user-text">{{ partTextClean(c) }}</span>
+          <MarkdownText :text="partTextClean(c)" />
         </template>
         <span v-else-if="partType(c) === 'skill'" class="mention-inline">${{ partName(c) }}</span>
         <span v-else class="mention-inline">@{{ partName(c) }}</span>

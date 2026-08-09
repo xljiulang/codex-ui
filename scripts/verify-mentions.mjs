@@ -425,6 +425,27 @@ async function main() {
   );
   await screenshot("3-mixed-reply.png");
 
+  // ---------- 场景 3b: 用户消息 Markdown 渲染 ----------
+  log("场景 3b: 用户消息 Markdown 渲染");
+  await setInput(`${TEST_TAG}\n# 测试标题\n\n**加粗内容** 只回复"好的"`);
+  const send3b = await clickSend();
+  if (!send3b.ok) throw new Error("场景3b 发送失败: " + send3b.reason);
+  await waitTurnDone();
+  const userMd = await evalJs(`(() => {
+    const users = Array.from(document.querySelectorAll(".msg-user"));
+    const last = users[users.length - 1];
+    return {
+      h1: last?.querySelector(".md h1")?.textContent ?? "",
+      strong: last?.querySelector(".md strong")?.textContent ?? "",
+    };
+  })()`);
+  record(
+    "用户消息 Markdown 渲染",
+    userMd.h1 === "测试标题" && userMd.strong === "加粗内容",
+    JSON.stringify(userMd),
+  );
+  await screenshot("3b-user-md.png");
+
   // ---------- 场景 4: 渲染抽查（代码块 pre/高亮/复制按钮/语言徽标） ----------
   log("场景 4: 渲染抽查");
   await setInput(

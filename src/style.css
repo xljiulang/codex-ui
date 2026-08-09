@@ -557,8 +557,9 @@ select option {
 
 .msg-user .bubble {
   max-width: 86%;
-  background: #264f78;
-  color: #e8e8e8;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  color: var(--text-bright);
   padding: 8px 12px;
   border-radius: 10px;
   white-space: pre-wrap;
@@ -583,17 +584,17 @@ select option {
   font-size: 12px;
 }
 
-.msg-agent .md {
+.md {
   line-height: 1.6;
   user-select: text;
   overflow-wrap: anywhere;
 }
 
-.msg-agent .md p {
+.md p {
   margin-bottom: 8px;
 }
 
-.msg-agent .md pre {
+.md pre {
   background: #121212;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -622,7 +623,7 @@ select option {
   cursor: pointer;
 }
 
-.msg-agent .md pre:hover .code-copy-btn,
+.md pre:hover .code-copy-btn,
 .code-copy-btn:hover,
 .code-copy-btn:focus {
   opacity: 1;
@@ -633,7 +634,7 @@ select option {
   border-color: var(--text-dim);
 }
 
-.msg-agent .md code {
+.md code {
   font-family: var(--mono);
   font-size: 12px;
   background: #2a2a2a;
@@ -641,42 +642,42 @@ select option {
   border-radius: 4px;
 }
 
-.msg-agent .md pre code {
+.md pre code {
   background: none;
   padding: 0;
 }
 
-.msg-agent .md ul,
-.msg-agent .md ol {
+.md ul,
+.md ol {
   padding-left: 20px;
   margin-bottom: 8px;
 }
 
-.msg-agent .md h1,
-.msg-agent .md h2,
-.msg-agent .md h3 {
+.md h1,
+.md h2,
+.md h3 {
   color: var(--text-bright);
   margin: 10px 0 6px;
 }
 
-.msg-agent .md a {
+.md a {
   color: var(--blue);
 }
 
-.msg-agent .md blockquote {
+.md blockquote {
   border-left: 3px solid var(--border-light);
   padding-left: 10px;
   color: var(--text-dim);
   margin: 6px 0;
 }
 
-.msg-agent .md img {
+.md img {
   max-width: 100%;
   border-radius: 6px;
   margin: 6px 0;
 }
 
-.msg-agent .md input[type="checkbox"] {
+.md input[type="checkbox"] {
   accent-color: var(--accent);
   margin-right: 6px;
   vertical-align: -2px;
@@ -774,7 +775,7 @@ select option {
   line-height: 1.5;
 }
 
-.msg-agent .md table {
+.md table {
   border-collapse: collapse;
   width: 100%;
   margin: 8px 0;
@@ -785,15 +786,15 @@ select option {
   border-radius: 6px;
 }
 
-.msg-agent .md th,
-.msg-agent .md td {
+.md th,
+.md td {
   border: 1px solid var(--border);
   padding: 6px 10px;
   text-align: left;
   white-space: nowrap;
 }
 
-.msg-agent .md th {
+.md th {
   background: #2d2d30;
   color: var(--text-bright);
   font-weight: 600;
@@ -801,16 +802,16 @@ select option {
   top: 0;
 }
 
-.msg-agent .md tr:nth-child(even) td {
+.md tr:nth-child(even) td {
   background: #262626;
 }
 
-.msg-agent .md tr:hover td {
+.md tr:hover td {
   background: #2a2d2e;
 }
 
-.msg-agent .md td code,
-.msg-agent .md th code {
+.md td code,
+.md th code {
   background: rgba(86, 156, 214, 0.15);
   color: var(--blue);
   padding: 1px 5px;
@@ -819,11 +820,23 @@ select option {
   font-size: 11px;
 }
 
-.msg-agent .md table .md-caption {
+.md table .md-caption {
   display: block;
   color: var(--text-faint);
   font-size: 11px;
   margin-top: 4px;
+}
+
+/* 用户气泡内的 Markdown（布局适配，配色沿用共享 .md） */
+.msg-user .bubble .md {
+  white-space: normal;
+  line-height: 1.5;
+}
+.msg-user .bubble .md p {
+  margin-bottom: 6px;
+}
+.msg-user .bubble .md pre {
+  margin: 6px 0;
 }
 
 .msg-error {
@@ -2062,55 +2075,55 @@ select option {
 }
 
 /* highlight.js 暗色配色（对齐现有 VS Code 风格变量） */
-.msg-agent .md pre code.hljs {
+.md pre code.hljs {
   background: transparent;
   padding: 0;
 }
-.msg-agent .md .hljs-comment,
-.msg-agent .md .hljs-quote {
+.md .hljs-comment,
+.md .hljs-quote {
   color: #6a9955;
 }
-.msg-agent .md .hljs-keyword,
-.msg-agent .md .hljs-selector-tag,
-.msg-agent .md .hljs-literal {
+.md .hljs-keyword,
+.md .hljs-selector-tag,
+.md .hljs-literal {
   color: #569cd6;
 }
-.msg-agent .md .hljs-string,
-.msg-agent .md .hljs-regexp,
-.msg-agent .md .hljs-addition {
+.md .hljs-string,
+.md .hljs-regexp,
+.md .hljs-addition {
   color: #ce9178;
 }
-.msg-agent .md .hljs-number,
-.msg-agent .md .hljs-meta {
+.md .hljs-number,
+.md .hljs-meta {
   color: #b5cea8;
 }
-.msg-agent .md .hljs-title,
-.msg-agent .md .hljs-section {
+.md .hljs-title,
+.md .hljs-section {
   color: #dcdcaa;
 }
-.msg-agent .md .hljs-attr,
-.msg-agent .md .hljs-attribute,
-.msg-agent .md .hljs-variable,
-.msg-agent .md .hljs-template-variable,
-.msg-agent .md .hljs-type,
-.msg-agent .md .hljs-class .hljs-title {
+.md .hljs-attr,
+.md .hljs-attribute,
+.md .hljs-variable,
+.md .hljs-template-variable,
+.md .hljs-type,
+.md .hljs-class .hljs-title {
   color: #9cdcfe;
 }
-.msg-agent .md .hljs-built_in,
-.msg-agent .md .hljs-builtin-name {
+.md .hljs-built_in,
+.md .hljs-builtin-name {
   color: #4ec9b0;
 }
-.msg-agent .md .hljs-symbol,
-.msg-agent .md .hljs-bullet {
+.md .hljs-symbol,
+.md .hljs-bullet {
   color: #d19a66;
 }
-.msg-agent .md .hljs-deletion {
+.md .hljs-deletion {
   color: #f44747;
 }
-.msg-agent .md .hljs-emphasis {
+.md .hljs-emphasis {
   font-style: italic;
 }
-.msg-agent .md .hljs-strong {
+.md .hljs-strong {
   font-weight: 600;
 }
 
