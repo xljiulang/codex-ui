@@ -2040,3 +2040,221 @@ select option {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ===== 对话渲染改进 ===== */
+
+/* 代码块语言徽标（与复制按钮同层，互不重叠） */
+.code-lang {
+  position: absolute;
+  top: 7px;
+  left: 10px;
+  z-index: 1;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* highlight.js 暗色配色（对齐现有 VS Code 风格变量） */
+.msg-agent .md pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+.msg-agent .md .hljs-comment,
+.msg-agent .md .hljs-quote {
+  color: #6a9955;
+}
+.msg-agent .md .hljs-keyword,
+.msg-agent .md .hljs-selector-tag,
+.msg-agent .md .hljs-literal {
+  color: #569cd6;
+}
+.msg-agent .md .hljs-string,
+.msg-agent .md .hljs-regexp,
+.msg-agent .md .hljs-addition {
+  color: #ce9178;
+}
+.msg-agent .md .hljs-number,
+.msg-agent .md .hljs-meta {
+  color: #b5cea8;
+}
+.msg-agent .md .hljs-title,
+.msg-agent .md .hljs-section {
+  color: #dcdcaa;
+}
+.msg-agent .md .hljs-attr,
+.msg-agent .md .hljs-attribute,
+.msg-agent .md .hljs-variable,
+.msg-agent .md .hljs-template-variable,
+.msg-agent .md .hljs-type,
+.msg-agent .md .hljs-class .hljs-title {
+  color: #9cdcfe;
+}
+.msg-agent .md .hljs-built_in,
+.msg-agent .md .hljs-builtin-name {
+  color: #4ec9b0;
+}
+.msg-agent .md .hljs-symbol,
+.msg-agent .md .hljs-bullet {
+  color: #d19a66;
+}
+.msg-agent .md .hljs-deletion {
+  color: #f44747;
+}
+.msg-agent .md .hljs-emphasis {
+  font-style: italic;
+}
+.msg-agent .md .hljs-strong {
+  font-weight: 600;
+}
+
+/* 消息时间戳与日期分隔线 */
+.msg-time {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-align: right;
+}
+.msg-agent .msg-time {
+  text-align: left;
+}
+.date-sep {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 11px;
+  margin: 10px 0 14px;
+}
+
+/* 消息 hover 操作（复制/重试） */
+.msg-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.msg-agent:hover .msg-actions {
+  opacity: 1;
+}
+.msg-agent .msg-actions {
+  margin-bottom: 4px;
+}
+.msg-action-btn {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: var(--bg-active);
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.msg-action-btn:hover:not(:disabled) {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+}
+.msg-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 图片灯箱与加载失败占位 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: fadeIn 0.15s ease;
+}
+.lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  cursor: default;
+}
+.user-image.clickable {
+  cursor: zoom-in;
+}
+.img-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  min-width: 120px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  background: var(--bg-active);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+/* 未知类型兜底 */
+.unknown-toggle {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.unknown-toggle:hover {
+  color: var(--text-bright);
+}
+.unknown-raw {
+  max-height: 240px;
+  overflow: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: #121212;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 6px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 工具卡：命令复制按钮、输出截断提示 */
+.tool-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tool-command-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+.tool-command .copy-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-active);
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.tool-command .copy-btn:hover {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+}
+.tool-output-cap {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: 4px 0;
+}

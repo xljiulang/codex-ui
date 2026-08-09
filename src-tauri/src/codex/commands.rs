@@ -273,6 +273,23 @@ pub fn open_url(url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn reveal_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if p.is_dir() {
+        return open::that(p).map_err(|e| e.to_string());
+    }
+    if p.is_file() {
+        // explorer /select 在资源管理器中定位文件
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", p.display()))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    Err(format!("文件或目录不存在: {}", path))
+}
+
+#[tauri::command]
 pub async fn pick_files(
     multiple: bool,
     initial_dir: Option<String>,

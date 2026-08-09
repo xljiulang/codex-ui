@@ -412,6 +412,113 @@ async function main() {
   );
   await screenshot("3-mixed-reply.png");
 
+  // ---------- 场景 4: 渲染抽查（代码块 pre/高亮/复制按钮/语言徽标） ----------
+  log("场景 4: 渲染抽查");
+  await setInput(
+    `${TEST_TAG} 只回复一个包含 const answer = 42 的 javascript 代码块，不要其它文字。`,
+  );
+  const send4 = await clickSend();
+  if (!send4.ok) throw new Error("场景4 发送失败: " + send4.reason);
+  await waitTurnDone();
+  const codeBlock = await evalJs(`(() => {
+    const codes = Array.from(document.querySelectorAll(".msg-agent pre code.hljs"));
+    const copyBtn = !!document.querySelector(".msg-agent .code-copy-btn");
+    const langChip = Array.from(
+      document.querySelectorAll(".msg-agent .code-lang"),
+    ).map((x) => x.textContent.trim());
+    return { highlighted: codes.length > 0, copyBtn, langChip };
+  })()`);
+  record(
+    "渲染: 代码块保留 pre 且有语法高亮",
+    codeBlock.highlighted,
+    JSON.stringify(codeBlock),
+  );
+  record(
+    "渲染: 代码块有复制按钮与语言徽标",
+    codeBlock.copyBtn &&
+      codeBlock.langChip.some((l) => ["js", "javascript"].includes(l)),
+    JSON.stringify(codeBlock),
+  );
+  await screenshot("6-codeblock.png");
+
+  // ---------- 场景 5: 链接分发抽查（拦截 invoke，避免真实弹出浏览器/资源管理器） ----------
+  log("场景 5: 链接分发抽查");
+  const localLink =
+    "file:///" + testDir.replace(/\\/g, "/") + "/hello.txt";
+  const driveLink = testDir.replace(/\\/g, "/") + "/hello.txt";
+  await setInput(
+    `${TEST_TAG} 只回复一行 Markdown 链接文本：[网页](https://example.com)，不要代码块、不要其它内容。`,
+  );
+  const send5a = await clickSend();
+  if (!send5a.ok) throw new Error("场景5a 发送失败: " + send5a.reason);
+  await waitTurnDone();
+  await setInput(
+    `${TEST_TAG} 只回复一行 Markdown 链接文本：[hello.txt](${localLink})，不要代码块、不要其它内容。`,
+  );
+  const send5b = await clickSend();
+  if (!send5b.ok) throw new Error("场景5b 发送失败: " + send5b.reason);
+  await waitTurnDone();
+  await setInput(
+    `${TEST_TAG} 只回复一行 Markdown 链接文本：[hello.txt](${driveLink})，不要代码块、不要其它内容。`,
+  );
+  const send5c = await clickSend();
+  if (!send5c.ok) throw new Error("场景5c 发送失败: " + send5c.reason);
+  await waitTurnDone();
+
+  const linkFound = await evalJs(`(() => {
+    const links = Array.from(document.querySelectorAll(".msg-agent .md a"));
+    return {
+      web: links.some((a) => a.getAttribute("href")?.startsWith("https://")),
+      local: links.some((a) => a.getAttribute("href")?.startsWith("file://")),
+      drive: links.some((a) => a.getAttribute("href")?.startsWith("C:")),
+      ready: links.every((a) => a.getAttribute("data-link-ready") === "1"),
+    };
+  })()`);
+  record(
+    "链接: 回复中包含网页与本地 file:// 链接",
+    linkFound.web && linkFound.local && linkFound.ready,
+    JSON.stringify(linkFound),
+  );
+  record(
+    "链接: 盘符路径链接保留 href（不再被 DOMPurify 剥离）",
+    linkFound.drive,
+    JSON.stringify(linkFound),
+  );
+  // 通过应用内置测试钩子记录 openLink 分发（__TAURI_INTERNALS__.invoke 不可配置，无法拦截）
+  await evalJs(`(() => {
+    window.__CODEX_UI_TEST__ = true;
+    window.__CODEX_UI_TEST_LOG__ = [];
+    const links = Array.from(document.querySelectorAll(".msg-agent .md a"));
+    links.filter((a) => a.getAttribute("href")?.startsWith("https://")).forEach((a) => a.click());
+    links.filter((a) => a.getAttribute("href")?.startsWith("file://")).forEach((a) => a.click());
+    links.filter((a) => a.getAttribute("href")?.startsWith("C:")).forEach((a) => a.click());
+  })()`);
+  await sleep(400);
+  const invokeLog = await evalJs(`window.__CODEX_UI_TEST_LOG__`);
+  record(
+    "链接: 网页链接调用 open_url",
+    invokeLog.some(
+      (l) => l.cmd === "open_url" && l.args?.url === "https://example.com",
+    ),
+    JSON.stringify(invokeLog),
+  );
+  record(
+    "链接: 本地链接调用 reveal_path 定位文件",
+    invokeLog.some(
+      (l) =>
+        l.cmd === "reveal_path" &&
+        l.args?.path === testDir + "\\hello.txt",
+    ),
+    JSON.stringify(invokeLog),
+  );
+  record(
+    "链接: file:// 与盘符路径两种本地形式均分发 reveal_path",
+    invokeLog.filter((l) => l.cmd === "reveal_path").length >= 2,
+    JSON.stringify(invokeLog),
+  );
+  await screenshot("7-links.png");
+  await evalJs(`window.__CODEX_UI_TEST__ = false;`);
+
   // ---------- UI 边界抽查（不发真实模型） ----------
   log("UI 边界抽查");
   await setInput("$ida-pro-mcp:idapython");

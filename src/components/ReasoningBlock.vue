@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { watch } from "vue";
 import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
+import { useThrottledRef } from "../composables/useThrottledRef";
 import { formatDuration, formatElapsed } from "../lib/format";
 
 const props = defineProps<{ item: ThreadItem }>();
@@ -41,11 +42,26 @@ const text = computed(() => {
   const parts = content.length ? content : summary;
   return parts.join("\n");
 });
+
+// 流式期间最多每 80ms 刷新一次内容，结束时立即刷净
+const { ref: shownText, flush: flushText } = useThrottledRef(text, 80);
+watch(
+  () => props.item.streaming,
+  (s) => {
+    if (!s) flushText();
+  },
+);
+
 </script>
 
 <template>
   <div class="reasoning-block">
-    <button class="reasoning-toggle" @click="open = !open">
+    <button
+      class="reasoning-toggle"
+      :aria-expanded="open"
+      :aria-label="'思考过程'"
+      @click="open = !open"
+    >
       <svg
         viewBox="0 0 16 16"
         width="10"
@@ -58,6 +74,6 @@ const text = computed(() => {
       <span>{{ open ? "收起思考过程" : "显示思考过程" }}</span>
       <span v-if="timeLabel" class="reasoning-time">{{ timeLabel }}</span>
     </button>
-    <div v-if="open" class="reasoning-content">{{ text }}</div>
+    <div v-if="open" class="reasoning-content">{{ shownText }}</div>
   </div>
 </template>

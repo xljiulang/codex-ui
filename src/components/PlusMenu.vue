@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { store } from "../composables/useCodex";
+import { store, toastError } from "../composables/useCodex";
 import { baseName, toUserAttachment } from "../lib/mention";
 
 const emit = defineEmits<{ close: [] }>();
@@ -100,7 +100,7 @@ async function pickFiles() {
       store.attachments.push(toUserAttachment(baseName(f), f));
     }
   } catch (e) {
-    store.toast = String(e);
+    store.toast = toastError(e);
   }
   emit("close");
 }
@@ -114,7 +114,7 @@ async function pickFolder() {
       store.attachments.push(toUserAttachment(baseName(dir), dir));
     }
   } catch (e) {
-    store.toast = String(e);
+    store.toast = toastError(e);
   }
   emit("close");
 }

@@ -34,6 +34,7 @@ pub fn run() {
             codex::commands::auth_logout,
             codex::commands::workspace_dir,
             codex::commands::open_url,
+            codex::commands::reveal_path,
             codex::commands::pick_files,
             codex::commands::pick_directory,
             codex::commands::settings_get,

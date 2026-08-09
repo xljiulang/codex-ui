@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { mount } from "@vue/test-utils";
+import { describe, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
 import ToolCard from "../ToolCard.vue";
 import type { ThreadItem } from "../../lib/types";
 
@@ -21,7 +21,10 @@ describe("ToolCard 实时耗时", () => {
     const wrapper = mount(ToolCard, {
       props: { item: makeItem({ startedAtMs: Date.now() }) },
     });
-    expect(wrapper.text()).toMatch(/进行中 · \d\d:\d\d\.\d/);
+    // 运行中状态文本只出现一次“进行中”，时间标签仅显示秒表
+    expect(wrapper.text()).toMatch(/进行中/);
+    expect(wrapper.text()).toMatch(/\d\d:\d\d\.\d/);
+    expect(wrapper.text().match(/进行中/g)).toHaveLength(1);
 
     await wrapper.setProps({
       item: makeItem({
@@ -133,5 +136,43 @@ describe("ToolCard 实时耗时", () => {
     await wrapper.find(".tool-toggle").trigger("click");
     expect(wrapper.find(".tool-output.collapsed").exists()).toBe(true);
     expect(wrapper.find(".tool-toggle").text()).toContain("展开完整输出");
+  });
+
+  it("超长输出截断为末尾 5000 行并提示", async () => {
+    const lines = Array.from({ length: 6000 }, (_, i) => `line-${i}`);
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "completed",
+          durationMs: 100,
+          aggregatedOutput: lines.join("\n") + "\n",
+        }),
+      },
+    });
+    await wrapper.find(".tool-card-header").trigger("click");
+    expect(wrapper.find(".tool-output-cap").text()).toContain("5000");
+    const text = wrapper.find(".tool-output").text();
+    expect(text).toContain("line-5999");
+    expect(text).not.toContain("line-0");
+  });
+
+  it("复制命令按钮写入剪贴板并反馈", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({ status: "completed", durationMs: 100 }),
+      },
+    });
+    await wrapper.find(".tool-card-header").trigger("click");
+    const btn = wrapper.find(".tool-command .copy-btn");
+    expect(btn.exists()).toBe(true);
+    await btn.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("echo hi");
+    expect(btn.text()).toBe("已复制");
   });
 });

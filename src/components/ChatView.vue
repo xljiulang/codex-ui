@@ -4,9 +4,38 @@ import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import MessageItem from "./MessageItem.vue";
 import { currentItems, store } from "../composables/useCodex";
+import type { ThreadItem } from "../lib/types";
 
 const scroller = ref<HTMLElement | null>(null);
 const items = computed(() => currentItems());
+
+type Row = { kind: "sep"; date: string } | { kind: "msg"; item: ThreadItem };
+
+function formatDay(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear()
+    ? `${d.getMonth() + 1}月${d.getDate()}日`
+    : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+// 跨天时插入日期分隔线（时间戳缺失的消息不产生分隔）
+const rows = computed<Row[]>(() => {
+  const out: Row[] = [];
+  let lastDay = "";
+  for (const item of items.value) {
+    const ts = item.startedAtMs as number | undefined;
+    if (typeof ts === "number") {
+      const day = formatDay(ts);
+      if (day !== lastDay) {
+        out.push({ kind: "sep", date: day });
+        lastDay = day;
+      }
+    }
+    out.push({ kind: "msg", item });
+  }
+  return out;
+});
 // 是否吸附在底部：用户上滑查看历史时暂停自动滚动
 const stickToBottom = ref(true);
 // 是否有正在流式输出或进行中的工具/命令
@@ -64,7 +93,13 @@ onBeforeUnmount(() => {
         <div v-if="items.length === 0" class="chat-empty">
           <EmptyState :busy="store.turnActive || store.busy" />
         </div>
-        <MessageItem v-for="item in items" :key="item.id" :item="item" />
+        <template
+          v-for="row in rows"
+          :key="row.kind === 'sep' ? 'sep-' + row.date : row.item.id"
+        >
+          <div v-if="row.kind === 'sep'" class="date-sep">{{ row.date }}</div>
+          <MessageItem v-else :item="row.item" />
+        </template>
         <div
           v-if="store.turnActive && !hasActiveWork && items.length"
           class="thinking-chip"

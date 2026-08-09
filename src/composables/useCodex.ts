@@ -114,6 +114,16 @@ function setToast(msg: string) {
   store.toast = msg;
 }
 
+/** 把错误对象转成可读提示：优先取 error.error.message / error.message，避免显示原始 JSON */
+export function toastError(e: unknown): string {
+  if (e && typeof e === "object") {
+    const err = e as { error?: { message?: unknown }; message?: unknown };
+    if (typeof err.error?.message === "string") return err.error.message;
+    if (typeof err.message === "string") return err.message;
+  }
+  return String(e);
+}
+
 function upsertItem(threadId: string, item: ThreadItem) {
   const arr = (store.itemsByThread[threadId] ??= []);
   let idx = arr.findIndex((x) => x.id === item.id);
@@ -450,7 +460,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
         resetToNewChat();
         setToast("会话已不存在，已切换为新对话");
       } else {
-        setToast(String(e));
+        setToast(toastError(e));
       }
       return;
     }
@@ -489,6 +499,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     clientId,
     type: "userMessage",
     content: input,
+    startedAtMs: Date.now(),
   });
   await updateWindowTitle(); // 首条消息发送后窗口标题立即跟随
   try {
@@ -501,7 +512,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
       resetToNewChat();
       setToast("会话已不存在，已切换为新对话");
     } else {
-      setToast(String(e));
+      setToast(toastError(e));
     }
     store.turnActive = false;
   }
@@ -521,6 +532,7 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
     clientId,
     type: "userMessage",
     content: input,
+    startedAtMs: Date.now(),
   });
   try {
     await invoke("turn_steer", {
@@ -551,13 +563,13 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
         } catch (e2) {
           const m2 = String(e2);
           if (!m2.includes("no active turn")) {
-            setToast(m2);
+            setToast(toastError(e2));
             return;
           }
         }
       }
     }
-    setToast(msg);
+    setToast(toastError(e));
   }
 }
 
@@ -572,6 +584,7 @@ export async function sendPrompt(text: string, flip = false) {
       await steerTurn(text, attachments);
     } else {
       store.followupQueue.push({ text, attachments });
+      setToast("已加入队列，回合结束后自动发送");
     }
     return;
   }
@@ -582,7 +595,7 @@ export async function sendPrompt(text: string, flip = false) {
       await continueTurn(text, attachments);
     }
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
     store.busy = false;
   }
 }

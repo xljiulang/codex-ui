@@ -1,0 +1,146 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import MarkdownText from "../MarkdownText.vue";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(() => Promise.resolve(null)),
+}));
+
+import { invoke } from "@tauri-apps/api/core";
+import { store } from "../../composables/useCodex";
+
+const mockedInvoke = vi.mocked(invoke);
+
+describe("MarkdownText 流式渲染与代码高亮", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  beforeEach(() => {
+    mockedInvoke.mockClear();
+    store.server.workspace = "D:/repo";
+  });
+
+  it("静态文本立即渲染 Markdown", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "hello **world**" },
+    });
+    await flushPromises();
+    expect(wrapper.find(".md strong").text()).toBe("world");
+  });
+
+  it("流式期间最多每 80ms 刷新一次，结束时立即刷净", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(MarkdownText, {
+      props: { text: "abc", streaming: true },
+    });
+    await flushPromises();
+
+    await wrapper.setProps({ text: "abc def" });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("def");
+
+    vi.advanceTimersByTime(80);
+    await flushPromises();
+    expect(wrapper.text()).toContain("def");
+
+    await wrapper.setProps({ text: "abc def ghi", streaming: false });
+    await flushPromises();
+    expect(wrapper.text()).toContain("ghi");
+  });
+
+  it("带语言标记的代码块注入高亮与语言徽标", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "```js\nconst x = 1;\n```" },
+    });
+    await flushPromises();
+    const code = wrapper.find("pre code.language-js");
+    expect(code.exists()).toBe(true);
+    expect(code.classes()).toContain("hljs");
+    expect(wrapper.find(".code-lang").text()).toBe("js");
+    expect(wrapper.find(".code-copy-btn").exists()).toBe(true);
+  });
+
+  it("无语言标记的代码块显示 code 徽标且不强制高亮", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "```\nplain\n```" },
+    });
+    await flushPromises();
+    expect(wrapper.find(".code-lang").text()).toBe("code");
+    expect(wrapper.find("pre code").classes()).not.toContain("hljs");
+  });
+
+  it("点击网页链接调用 open_url（外置浏览器）", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[示例](https://example.com/path)" },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
+      url: "https://example.com/path",
+    });
+  });
+
+  it("点击 file:/// 本地链接调用 reveal_path", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[本地](file:///D:/a%20b.txt)" },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\a b.txt",
+    });
+  });
+
+  it("点击相对链接按工作目录解析后调用 reveal_path", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[源码](src/a.ts)" },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\repo\\src\\a.ts",
+    });
+  });
+
+  it("mailto 链接点击不调用任何命令", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[邮件](mailto:a@b.c)" },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalled();
+  });
+
+  it("反斜杠盘符路径链接保留 href 并可点击定位（marked 编码为 %5C）", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[计划.md](D:\\codex\\codex-ui\\docs\\计划.md)" },
+    });
+    await flushPromises();
+    const a = wrapper.find("a");
+    expect(a.attributes("href")).toContain("D:");
+    await a.trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\codex\\codex-ui\\docs\\计划.md",
+    });
+  });
+
+  it("正斜杠盘符路径链接点击调用 reveal_path", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[a.md](D:/codex/a.md)" },
+    });
+    await flushPromises();
+    const a = wrapper.find("a");
+    expect(a.attributes("href")).toBe("D:/codex/a.md");
+    await a.trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\codex\\a.md",
+    });
+  });
+});

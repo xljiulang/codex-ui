@@ -13,6 +13,7 @@ import {
   permissionChip,
   sendPrompt,
   store,
+  toastError,
 } from "../composables/useCodex";
 import type { UserInput } from "../lib/types";
 import {
@@ -78,7 +79,7 @@ async function runFileSearch(token: string) {
   } catch (e) {
     if (seq === searchSeq) {
       fileResults.value = [];
-      store.toast = String(e);
+      store.toast = toastError(e);
     }
   } finally {
     if (seq === searchSeq) searchingFiles.value = false;
@@ -130,7 +131,7 @@ function onPickFiles() {
         store.attachments.push(a);
       }
     } catch (e) {
-      store.toast = String(e);
+      store.toast = toastError(e);
     } finally {
       refocusInput();
     }
@@ -149,7 +150,7 @@ function onPickDir() {
         store.attachments.push(a);
       }
     } catch (e) {
-      store.toast = String(e);
+      store.toast = toastError(e);
     } finally {
       refocusInput();
     }
@@ -294,7 +295,7 @@ async function pickNewChatCwd() {
     const dir = await invoke<string | null>("pick_directory");
     if (dir) store.newChatCwd = dir;
   } catch (e) {
-    store.toast = String(e);
+    store.toast = toastError(e);
   }
 }
 

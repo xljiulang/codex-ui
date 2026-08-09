@@ -2,21 +2,44 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { invoke } from "@tauri-apps/api/core";
+import { useThrottledRef } from "../composables/useThrottledRef";
+import hljs from "../lib/highlight";
+import { displayHref, openLink, workspaceRoot } from "../lib/links";
 
-const props = defineProps<{ text: string }>();
+const props = defineProps<{ text: string; streaming?: boolean }>();
 const root = ref<HTMLElement | null>(null);
 
+// 流式期间最多每 80ms 刷新一次展示文本，避免每个 delta 全量重解析；
+// streaming=false 时立即刷净。
+const source = computed(() => props.text);
+const { ref: shownText, flush: flushText } = useThrottledRef(source, 80);
+watch(
+  () => props.streaming,
+  (s) => {
+    if (!s) flushText();
+  },
+);
+
 const html = computed(() => {
-  const raw = marked.parse(props.text, { async: false, breaks: true, gfm: true }) as string;
-  return DOMPurify.sanitize(raw);
+  const raw = marked.parse(shownText.value, {
+    async: false,
+    breaks: true,
+    gfm: true,
+  }) as string;
+  // 包一层 div 再 sanitize：DOMPurify 会把作为文档根元素的 <pre> 剥离
+  // （消息以代码块开头时代码块会失去 pre/复制按钮），包一层后根元素为 div，pre 正常保留。
+  // 同时放行 file: 协议（默认白名单不含 file:，会导致本地文件链接 href 被剥掉）。
+  return DOMPurify.sanitize(`<div>${raw}</div>`, {
+    ALLOWED_URI_REGEXP:
+      /^(?:(?:https?|file|mailto|tel|callto|sms|cid|xmpp|matrix):|[a-z]:(?:[\\/]|%5[cC]|%2[fF])|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  });
 });
 
 watch(
   html,
   () => {
     void nextTick(() => {
-      injectCopyButtons();
+      decorateCodeBlocks();
       decorateLinks();
     });
   },
@@ -24,19 +47,39 @@ watch(
 );
 
 onMounted(() => {
-  injectCopyButtons();
+  decorateCodeBlocks();
   decorateLinks();
 });
 
-function injectCopyButtons() {
+/** 代码块：语法高亮 + 语言徽标 + 复制按钮 */
+function decorateCodeBlocks() {
   if (!root.value) return;
-  const pres = root.value.querySelectorAll<HTMLPreElement>("pre:not([data-copy-ready])");
+  const pres = root.value.querySelectorAll<HTMLPreElement>(
+    "pre:not([data-decorated])",
+  );
   for (const pre of pres) {
-    pre.setAttribute("data-copy-ready", "1");
+    pre.setAttribute("data-decorated", "1");
+    const code = pre.querySelector("code");
+    const lang = code
+      ? /language-([\w-]+)/.exec(code.className)?.[1] ?? ""
+      : "";
+    if (code && lang && !code.dataset.highlighted) {
+      try {
+        hljs.highlightElement(code);
+        code.dataset.highlighted = "1";
+      } catch {
+        // 高亮失败不影响展示
+      }
+    }
+    const chip = document.createElement("span");
+    chip.className = "code-lang";
+    chip.textContent = lang || "code";
+    pre.appendChild(chip);
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "code-copy-btn";
     btn.textContent = "复制";
+    btn.setAttribute("aria-label", "复制代码");
     btn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       void copyCode(pre, btn);
@@ -52,29 +95,14 @@ function decorateLinks() {
     a.setAttribute("data-link-ready", "1");
     const href = a.getAttribute("href") ?? "";
     if (!a.getAttribute("title")) {
-      a.setAttribute("title", linkTooltip(href));
+      a.setAttribute("title", displayHref(href, workspaceRoot()));
     }
     a.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       const h = a.getAttribute("href") ?? "";
-      if (/^(https?|file):\/\//i.test(h)) {
-        void invoke("open_url", { url: h }).catch(() => undefined);
-      }
+      openLink(h, workspaceRoot());
     });
-  }
-}
-
-/** 把链接地址转成可读的提示文本：Windows 文件路径或原 URL */
-function linkTooltip(href: string): string {
-  try {
-    let h = decodeURIComponent(href);
-    if (h.startsWith("file:///")) h = h.slice("file:///".length);
-    if (/^\/([a-zA-Z]:)/.test(h)) h = h.slice(1); // /D:/... -> D:/...
-    if (/^[a-zA-Z]:\//.test(h)) h = h.replace(/\//g, "\\");
-    return h;
-  } catch {
-    return href;
   }
 }
 

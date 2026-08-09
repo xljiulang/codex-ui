@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import AppHeader from "./components/AppHeader.vue";
 import HistoryPanel from "./components/HistoryPanel.vue";
 import ChatView from "./components/ChatView.vue";
@@ -8,6 +7,7 @@ import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
 import GoalDialog from "./components/GoalDialog.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
+import { openLink } from "./lib/links";
 
 interface CtxItem {
   label: string;
@@ -60,7 +60,7 @@ function onContextMenu(e: MouseEvent) {
   if (link) {
     items.push({
       label: "打开链接",
-      action: () => void invoke("open_url", { url: link.href }),
+      action: () => openLink(link.href),
     });
     items.push({
       label: "复制链接地址",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
+import { flushPromises } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (p: string) => "asset://mock/" + encodeURIComponent(p),
@@ -176,4 +177,97 @@ describe("用户消息中的图片附件", () => {
     expect(wrapper.text()).not.toContain("# Files mentioned by the user:");
     expect(wrapper.text()).not.toContain("## My request:");
   });
+
+  it("用户消息不显示时间戳，助手最终答复显示时间戳", () => {
+    const ts = new Date(2026, 7, 9, 14, 5).getTime();
+    const user = mount(MessageItem, {
+      props: {
+        item: {
+          id: "u2",
+          type: "userMessage",
+          startedAtMs: ts,
+          content: [{ type: "text", text: "hi", text_elements: [] }],
+        } as ThreadItem,
+      },
+    });
+    expect(user.find(".msg-time").exists()).toBe(false);
+
+    const agent = mount(MessageItem, {
+      props: {
+        item: {
+          id: "a2",
+          type: "agentMessage",
+          phase: "final_answer",
+          streaming: false,
+          startedAtMs: ts,
+          text: "答案",
+        } as ThreadItem,
+      },
+    });
+    expect(agent.find(".msg-time").exists()).toBe(true);
+    expect(agent.find(".msg-time").text()).toBe("14:05");
+  });
+
+  it("图片点击打开灯箱，Esc 关闭", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          { type: "text", text: "看这张图", text_elements: [] },
+          { type: "localImage", path: "C:\\x\\a.png" },
+        ]),
+      },
+    });
+    await wrapper.find(".user-image").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".lightbox").exists()).toBe(true);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(wrapper.find(".lightbox").exists()).toBe(false);
+  });
+
+  it("图片加载失败显示占位", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([{ type: "localImage", path: "C:\\x\\bad.png" }]),
+      },
+    });
+    await wrapper.find(".user-image").trigger("error");
+    await flushPromises();
+    expect(wrapper.find(".img-fallback").text()).toBe("图片加载失败");
+  });
+
+  it("未知消息类型显示友好提示并可展开原始数据", async () => {
+    const wrapper = mount(MessageItem, {
+      props: { item: { id: "x1", type: "weirdType" } as ThreadItem },
+    });
+    expect(wrapper.text()).toContain("暂不支持显示的项目类型：weirdType");
+    await wrapper.find(".unknown-toggle").trigger("click");
+    expect(wrapper.find(".unknown-raw").exists()).toBe(true);
+  });
+
+  it("助手最终答复可复制全文", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: {
+          id: "a1",
+          type: "agentMessage",
+          phase: "final_answer",
+          streaming: false,
+          text: "完整答案",
+        } as ThreadItem,
+      },
+    });
+    const btn = wrapper.find(".agent-actions .msg-action-btn");
+    expect(btn.attributes("aria-label")).toBe("复制回复");
+    await btn.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("完整答案");
+    expect(btn.text()).toBe("已复制");
+  });
+
 });

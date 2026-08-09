@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
+import { useThrottledRef } from "../composables/useThrottledRef";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtml } from "../lib/ansi";
 
@@ -27,7 +28,7 @@ const durationMs = computed(() =>
 );
 
 const timeLabel = computed(() => {
-  if (running.value) return `进行中 · ${formatElapsed(elapsed.value)}`;
+  if (running.value) return formatElapsed(elapsed.value);
   if (durationMs.value != null) return `耗时 ${formatDuration(durationMs.value)}`;
   return "";
 });
@@ -103,7 +104,52 @@ const output = computed(() =>
   String(props.item.aggregatedOutput ?? props.item.output ?? ""),
 );
 const hasOutput = computed(() => output.value.trim().length > 0);
-const outputHtml = computed(() => ansiToHtml(output.value));
+// 渲染输入截断为最后 5000 行，避免超长输出流式期间 O(n^2)；状态里仍保留完整输出
+const OUTPUT_LINE_CAP = 5000;
+const outputTruncated = computed(
+  () => output.value.split("\n").length > OUTPUT_LINE_CAP,
+);
+const cappedOutput = computed(() => {
+  const lines = output.value.split("\n");
+  if (lines.length <= OUTPUT_LINE_CAP) return output.value;
+  return lines.slice(-OUTPUT_LINE_CAP).join("\n");
+});
+const { ref: shownOutput, flush: flushOutput } = useThrottledRef(cappedOutput, 80);
+watch(
+  () => props.item.status,
+  () => {
+    if (!running.value) flushOutput();
+  },
+);
+const outputHtml = computed(() => ansiToHtml(shownOutput.value));
+
+const copied = ref(false);
+async function copyCommand() {
+  const text = commandText.value;
+  if (!text) return;
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch {
+      ok = false;
+    }
+  }
+  copied.value = ok;
+  window.setTimeout(() => {
+    copied.value = false;
+  }, 1500);
+}
 
 /** webSearch 的结构化结果（协议为透明 JSON，尽力提取常见字段） */
 const webResults = computed(() => {
@@ -240,8 +286,21 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
     <Transition name="card-body">
       <div v-if="effectiveExpanded" class="tool-card-body">
         <template v-if="type === 'commandExecution'">
-        <div class="tool-command">{{ commandText }}</div>
+        <div class="tool-command">
+          <span class="tool-command-text">{{ commandText }}</span>
+          <button
+            v-if="commandText"
+            class="copy-btn"
+            :aria-label="'复制命令'"
+            @click.stop="copyCommand()"
+          >
+            {{ copied ? "已复制" : "复制命令" }}
+          </button>
+        </div>
         <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
+        <div v-if="outputTruncated" class="tool-output-cap">
+          输出过长，仅显示末尾 {{ OUTPUT_LINE_CAP }} 行
+        </div>
         <div
           v-if="hasOutput"
           class="tool-output"
