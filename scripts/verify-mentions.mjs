@@ -519,6 +519,96 @@ async function main() {
   await screenshot("7-links.png");
   await evalJs(`window.__CODEX_UI_TEST__ = false;`);
 
+  // ---------- 场景 6: 文件变更完整 diff 预览（真实 apply_patch） ----------
+  log("场景 6: 文件变更 diff 预览");
+  await setInput(
+    `${TEST_TAG} 请用 apply_patch 工具修改文件 ${testDir}\\hello.txt：把第一行"标记词: ${MARKER}"改为"标记词已修改: ${MARKER}"。不要用其它工具。`,
+  );
+  const send6 = await clickSend();
+  if (!send6.ok) throw new Error("场景6 发送失败: " + send6.reason);
+  await waitTurnDone();
+  const rowFound = await evalJs(
+    `!!document.querySelector(".tool-card .change-row.clickable")`,
+  );
+  record("文件变更: 出现可点击的变更行", rowFound);
+  if (rowFound) {
+    await evalJs(
+      `document.querySelector(".tool-card .change-row.clickable").click()`,
+    );
+    await waitFor("diff 弹窗出现", `!!document.querySelector(".diff-modal")`, 10000);
+    const renderState = await waitFor(
+      "内联 diff 渲染完成",
+      `(() => {
+        const loading = !!document.querySelector(".diff-loading");
+        const fallback = !!document.querySelector(".diff-fallback-note");
+        const rows = document.querySelectorAll(".diff-row").length;
+        if (!loading && (rows > 0 || fallback)) {
+          return JSON.stringify({
+            loading,
+            fallback,
+            rows,
+            note:
+              document.querySelector(".diff-fallback-note")?.textContent?.trim() ??
+              "",
+          });
+        }
+        return false;
+      })()`,
+      15000,
+    );
+    log("diff 渲染状态: " + renderState);
+    const diag = await evalJs(`(async () => {
+      const row = document.querySelector(".change-row");
+      const pre = document.querySelector(".diff-preview");
+      const rowPath = (row?.textContent ?? "").replace(/^修改/, "").trim();
+      let invokeRes = null;
+      try {
+        invokeRes = {
+          ok: true,
+          len: (await window.__TAURI_INTERNALS__.invoke("read_file", { path: rowPath })).length,
+        };
+      } catch (e) {
+        invokeRes = { ok: false, err: String(e) };
+      }
+      return {
+        path: rowPath,
+        invoke: invokeRes,
+        note:
+          document.querySelector(".diff-fallback-note")?.textContent?.trim() ??
+          "",
+        diff: pre?.innerText?.slice(0, 600) ?? "",
+      };
+    })()`);
+    log("diff 诊断: " + JSON.stringify(diag));
+    const inline = await evalJs(`(() => {
+      const rows = Array.from(document.querySelectorAll(".diff-row"));
+      return {
+        hasOld: rows.some(
+          (r) =>
+            r.classList.contains("del") &&
+            r.textContent.includes("标记词:"),
+        ),
+        hasNew: rows.some(
+          (r) =>
+            r.classList.contains("add") &&
+            r.textContent.includes("标记词已修改"),
+        ),
+        hasSep: rows.some(
+          (r) =>
+            r.classList.contains("sep") &&
+            r.textContent.includes("旧 | 新"),
+        ),
+      };
+    })()`);
+    record(
+      "文件变更: 旧行在上、新行在下并含“旧 | 新”分隔",
+      inline.hasOld && inline.hasNew && inline.hasSep,
+      JSON.stringify(inline),
+    );
+    await screenshot("8-diff-preview.png");
+    await evalJs(`document.querySelector(".modal-close").click()`);
+  }
+
   // ---------- UI 边界抽查（不发真实模型） ----------
   log("UI 边界抽查");
   await setInput("$ida-pro-mcp:idapython");

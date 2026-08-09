@@ -290,6 +290,12 @@ pub fn reveal_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn read_file(path: String) -> Result<String, String> {
+    // 仅支持 UTF-8 文本：二进制/非 UTF-8 文件读取失败由调用方回退统一 diff
+    std::fs::read_to_string(&path).map_err(|e| format!("无法读取文件 {}: {}", path, e))
+}
+
+#[tauri::command]
 pub async fn pick_files(
     multiple: bool,
     initial_dir: Option<String>,
@@ -341,4 +347,26 @@ pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
 pub fn settings_set(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     settings::save(&dir, &settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_file;
+
+    #[test]
+    fn read_file_reads_utf8_text() {
+        let dir = std::env::temp_dir().join(format!("codexui-read-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.txt");
+        std::fs::write(&p, "line1\nline2\n").unwrap();
+        let got = read_file(p.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(got, "line1\nline2\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_missing_returns_error() {
+        let p = std::env::temp_dir().join("codexui-definitely-missing-file.txt");
+        assert!(read_file(p.to_string_lossy().into_owned()).is_err());
+    }
 }

@@ -6,6 +6,8 @@ import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtml } from "../lib/ansi";
+import FileDiffPreview from "./FileDiffPreview.vue";
+import { workspaceRoot } from "../lib/links";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -267,6 +269,22 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
     return { text: l, cls: "" };
   });
 }
+
+// ---------- 文件变更完整差异预览 ----------
+const preview = ref<{ path: string; kind: string; diff: string } | null>(null);
+
+function openPreview(c: { path: string; kind: unknown; diff?: string }) {
+  if (!c.diff) return;
+  preview.value = {
+    path: c.path,
+    kind: kindOf(c.kind),
+    diff: c.diff,
+  };
+}
+
+function closePreview() {
+  preview.value = null;
+}
 </script>
 
 <template>
@@ -352,7 +370,12 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
 
       <template v-else-if="type === 'fileChange'">
         <div v-for="c in changes" :key="c.path" class="change-block">
-          <div class="change-row">
+          <div
+            class="change-row"
+            :class="{ clickable: !!c.diff }"
+            :title="c.diff ? '点击查看完整差异' : ''"
+            @click="openPreview(c)"
+          >
             <span class="change-kind" :class="kindOf(c.kind)">{{ kindLabel(c.kind) }}</span>
             <span>{{ c.path }}</span>
           </div>
@@ -400,4 +423,13 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
       </div>
     </Transition>
   </div>
+
+  <FileDiffPreview
+    v-if="preview"
+    :path="preview.path"
+    :kind="preview.kind"
+    :diff="preview.diff"
+    :workspace-root="workspaceRoot()"
+    @close="closePreview"
+  />
 </template>

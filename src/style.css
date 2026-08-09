@@ -2258,3 +2258,109 @@ select option {
   color: var(--text-faint);
   margin: 4px 0;
 }
+
+/* 文件变更完整差异预览 */
+.change-row.clickable {
+  cursor: pointer;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+}
+.change-row.clickable:hover {
+  background: var(--bg-hover);
+}
+.diff-modal-mask {
+  z-index: 200;
+}
+.diff-modal {
+  width: min(92vw, 1100px);
+  height: min(86vh, 720px);
+  max-height: none;
+}
+.diff-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.diff-modal-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+.diff-modal-body {
+  padding: 0;
+  overflow: auto;
+}
+.diff-preview {
+  max-height: none;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  margin: 0;
+}
+
+/* 内联完整 diff（旧 | 新） */
+.diff-loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.diff-fallback-note {
+  padding: 10px 12px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.diff-inline {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  min-width: max-content;
+}
+.diff-row {
+  display: flex;
+  align-items: stretch;
+  white-space: pre;
+}
+.diff-no {
+  width: 48px;
+  flex-shrink: 0;
+  text-align: right;
+  padding: 0 8px 0 4px;
+  color: var(--text-faint);
+  user-select: none;
+}
+.diff-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  border-left: 1px solid var(--border);
+}
+.diff-row.del {
+  background: rgba(241, 76, 76, 0.14);
+}
+.diff-row.del .diff-text {
+  color: #f0a0a0;
+}
+.diff-row.add {
+  background: rgba(78, 201, 176, 0.14);
+}
+.diff-row.add .diff-text {
+  color: #9fe3d4;
+}
+.diff-row.sep {
+  background: var(--bg-active);
+  color: var(--text-faint);
+  border-top: 1px dashed var(--border-light);
+  border-bottom: 1px dashed var(--border-light);
+  padding: 2px 0;
+}
+.diff-sep-text {
+  width: 100%;
+  text-align: center;
+  font-size: 10.5px;
+}
