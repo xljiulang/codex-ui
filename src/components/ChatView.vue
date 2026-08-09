@@ -47,6 +47,16 @@ const hasActiveWork = computed(
   () => (store.activeWorkByThread[store.currentThreadId ?? ""] ?? 0) > 0,
 );
 
+// ---------- 无障碍播报（回合开始/结束） ----------
+const liveAnnouncement = ref("");
+watch(
+  () => store.turnActive,
+  (v, old) => {
+    if (v && !old) liveAnnouncement.value = "正在生成回复";
+    else if (!v && old) liveAnnouncement.value = "回复完成";
+  },
+);
+
 function scrollToBottom() {
   if (!stickToBottom.value) return;
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
@@ -112,5 +122,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <ComposerBar />
+    <div class="sr-only" aria-live="polite">{{ liveAnnouncement }}</div>
   </div>
 </template>

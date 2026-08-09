@@ -99,4 +99,25 @@ describe("ChatView 日期分隔线", () => {
     store.currentThreadId = null;
     store.activeWorkByThread = {};
   });
+
+  it("无障碍播报区域随回合状态更新", async () => {
+    mockedItems.mockReturnValue([]);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+          EmptyState: { template: "<div />" },
+        },
+      },
+    });
+    const live = wrapper.find('.sr-only[aria-live="polite"]');
+    expect(live.exists()).toBe(true);
+    store.turnActive = true;
+    await nextTick();
+    expect(live.text()).toBe("正在生成回复");
+    store.turnActive = false;
+    await nextTick();
+    expect(live.text()).toBe("回复完成");
+  });
 });
