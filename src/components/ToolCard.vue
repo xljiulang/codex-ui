@@ -10,6 +10,7 @@ import { workspaceRoot } from "../lib/links";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
+const outputExpanded = ref(false);
 const type = computed(() => props.item.type);
 
 const running = computed(() => {
@@ -261,14 +262,8 @@ const todos = computed(
     [],
 );
 
-const effectiveExpanded = computed(
-  () =>
-    expanded.value ||
-    type.value === "fileChange" ||
-    running.value ||
-    ((statusLabel.value === "失败" || statusLabel.value === "已拒绝") &&
-      hasOutput.value),
-);
+// 默认折叠：不再因运行中/失败/文件变更自动展开，点击头部才展开
+const effectiveExpanded = computed(() => expanded.value);
 
 function kindOf(kind: unknown): string {
   if (typeof kind === "string") return kind;
@@ -370,19 +365,19 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
           v-if="hasOutput"
           ref="outputRoot"
           class="tool-output"
-          :class="{ collapsed: !expanded }"
+          :class="{ collapsed: !outputExpanded }"
         ></div>
         <div
-          v-if="!expanded && hasOutput"
+          v-if="!outputExpanded && hasOutput"
           class="tool-toggle"
-          @click="expanded = true"
+          @click="outputExpanded = true"
         >
           展开完整输出
         </div>
         <div
-          v-if="expanded && hasOutput"
+          v-if="outputExpanded && hasOutput"
           class="tool-toggle"
-          @click="expanded = false"
+          @click="outputExpanded = false"
         >
           收起输出
         </div>

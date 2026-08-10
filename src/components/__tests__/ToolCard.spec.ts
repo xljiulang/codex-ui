@@ -48,7 +48,7 @@ describe("ToolCard 实时耗时", () => {
     expect(wrapper.text()).not.toContain("进行中");
   });
 
-  it("失败状态显示退出码", () => {
+  it("失败状态显示退出码", async () => {
     const wrapper = mount(
       ToolCard,
       {
@@ -64,6 +64,8 @@ describe("ToolCard 实时耗时", () => {
       },
     );
     expect(wrapper.text()).toContain("失败");
+    // 卡片默认折叠，展开后显示退出码
+    await wrapper.find(".tool-card-header").trigger("click");
     expect(wrapper.text()).toContain("退出码：1");
   });
 
@@ -134,7 +136,10 @@ describe("ToolCard 实时耗时", () => {
         }),
       },
     });
-    // 进行中且已有输出：卡片展开但输出折叠为摘要
+    // 默认折叠：不渲染输出区
+    expect(wrapper.find(".tool-output").exists()).toBe(false);
+    // 点击头部展开卡片，输出折叠为摘要
+    await wrapper.find(".tool-card-header").trigger("click");
     expect(wrapper.find(".tool-output.collapsed").exists()).toBe(true);
     expect(wrapper.find(".tool-toggle").text()).toContain("展开完整输出");
     // 展开完整输出
@@ -218,6 +223,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
     const wrapper = mount(ToolCard, {
       props: { item: changeItem(REPLACE_DIFF, "D:\\repo\\a.cs", "update") },
     });
+    await wrapper.find(".tool-card-header").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("open_diff_window", {
@@ -241,6 +247,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
         } as ThreadItem,
       },
     });
+    await wrapper.find(".tool-card-header").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "open_diff_window",
@@ -262,6 +269,7 @@ describe("命令输出增量渲染", () => {
         }),
       },
     });
+    await wrapper.find(".tool-card-header").trigger("click");
     await wait();
     expect(wrapper.find(".tool-output").text()).toContain("line1");
 

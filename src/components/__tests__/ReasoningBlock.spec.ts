@@ -20,9 +20,11 @@ describe("ReasoningBlock 完整展示", () => {
       props: { item: reasoningItem(20) },
     });
     await flushPromises();
+    // 默认折叠，点击后展开
     expect(wrapper.find(".reasoning-toggle").attributes("aria-expanded")).toBe(
-      "true",
+      "false",
     );
+    await wrapper.find(".reasoning-toggle").trigger("click");
     const content = wrapper.find(".reasoning-content");
     expect(content.classes()).not.toContain("capped");
     expect(wrapper.find(".reasoning-expand").exists()).toBe(false);

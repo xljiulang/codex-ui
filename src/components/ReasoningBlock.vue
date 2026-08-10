@@ -9,15 +9,6 @@ import { formatDuration, formatElapsed } from "../lib/format";
 const props = defineProps<{ item: ThreadItem }>();
 const open = ref(false);
 
-// 思考过程中默认展开，完成后自动折叠
-watch(
-  () => props.item.streaming,
-  (streaming) => {
-    open.value = streaming === true;
-  },
-  { immediate: true },
-);
-
 const streaming = computed(() => props.item.streaming === true);
 const startedAt = computed(() =>
   typeof props.item.startedAtMs === "number"
