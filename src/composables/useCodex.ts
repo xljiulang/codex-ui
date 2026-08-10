@@ -43,6 +43,21 @@ interface ModelInfo {
   defaultReasoningEffort: string;
 }
 
+/** @ 菜单中展示的插件条目（plugin/list 归一化结果） */
+export interface PluginItem {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  path: string;
+  iconPath: string;
+  iconUrl: string;
+  brandColor: string;
+}
+
+/** 未创建会话（新对话编辑态）的插件缓存 key */
+export const NEW_CHAT_PLUGIN_KEY = "__new__";
+
 export const store = reactive({
   server: {
     connected: false,
@@ -79,6 +94,11 @@ export const store = reactive({
   effort: null as string | null,
   models: [] as ModelInfo[],
   modelsLoaded: false,
+  // 对话级插件缓存：key 为 currentThreadId（未创建会话时为 NEW_CHAT_PLUGIN_KEY）
+  threadPlugins: {} as Record<
+    string,
+    { plugins: PluginItem[]; loaded: boolean }
+  >,
   threadTokenUsage: null as { used: number; window: number | null } | null,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
   newChatCwd: null as string | null,
@@ -87,7 +107,6 @@ export const store = reactive({
   attachments: [] as UserInput[],
   showHistory: false,
   showSettings: false,
-  plusOpen: false,
   permOpen: false,
   taskOpen: false,
   modelOpen: false,
@@ -281,6 +300,61 @@ export async function loadModels(force = false) {
   }
 }
 
+/** 确保指定对话的插件缓存已加载（对话级缓存：已加载直接返回，不回退 skills/list） */
+export async function ensureThreadPlugins(threadId: string) {
+  if (store.threadPlugins[threadId]?.loaded) return;
+  store.threadPlugins[threadId] = { plugins: [], loaded: false };
+  try {
+    const res = await invoke<{
+      marketplaces?: {
+        plugins?: {
+          id?: string;
+          name: string;
+          installed?: boolean;
+          enabled?: boolean;
+          source?: { path?: string };
+          interface?: {
+            displayName?: string;
+            shortDescription?: string;
+            longDescription?: string;
+            composerIcon?: string;
+            composerIconUrl?: string | null;
+            brandColor?: string;
+          };
+        }[];
+      }[];
+    }>("codex_rpc", {
+      method: "plugin/list",
+      params: {},
+    });
+    const list: PluginItem[] = [];
+    const seen = new Set<string>();
+    for (const mp of res?.marketplaces ?? []) {
+      for (const p of mp.plugins ?? []) {
+        if (p.installed === false || p.enabled === false) continue;
+        const id = p.id ?? p.name;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        list.push({
+          id,
+          name: p.name,
+          displayName: p.interface?.displayName ?? p.name,
+          description:
+            p.interface?.shortDescription ?? p.interface?.longDescription ?? "",
+          path: p.source?.path ?? "",
+          iconPath: p.interface?.composerIcon ?? "",
+          iconUrl: p.interface?.composerIconUrl ?? "",
+          brandColor: p.interface?.brandColor ?? "",
+        });
+      }
+    }
+    store.threadPlugins[threadId] = { plugins: list, loaded: true };
+  } catch {
+    // 插件列表不可用时保持空，不回退 skills/list
+    store.threadPlugins[threadId] = { plugins: [], loaded: false };
+  }
+}
+
 /** 解析模型的显示名：指定模型优先，否则用默认模型 */
 export function modelDisplayName(model: string | null): string {
   if (model) {
@@ -446,6 +520,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.resumedThreadId = threadId;
     store.newChatCwd = null; // 本次新建已消费，恢复默认
     store.currentModel = res.model ?? currentModelId();
+    void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;
     store.showHistory = false;
@@ -624,6 +699,7 @@ export async function sendPrompt(text: string, flip = false) {
 
 export async function newEmptyChat() {
   store.currentThreadId = null;
+  void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 进入新对话编辑态即预初始化插件缓存
   store.currentThreadName = "";
   store.currentThreadOrigin = null;
   store.currentThreadCwd = null;
@@ -638,6 +714,7 @@ export async function newEmptyChat() {
 
 export async function openThread(threadId: string) {
   store.currentThreadId = threadId;
+  void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
   store.currentThreadOrigin = "history";
   store.showHistory = false;
   store.loadingThread = true;
@@ -988,6 +1065,7 @@ export async function init() {
   await Promise.all([loadSettings(), refreshServer()]);
   await updateWindowTitle();
   void loadModels();
+  void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动的初始新对话即预初始化插件缓存
   await refreshThreads();
   await wireEvents();
 }

@@ -4,7 +4,6 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
-import PlusMenu from "./PlusMenu.vue";
 import TaskModeMenu from "./TaskModeMenu.vue";
 import {
   interrupt,
@@ -158,7 +157,6 @@ function onPickDir() {
 }
 
 function closeMenus() {
-  store.plusOpen = false;
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
@@ -347,7 +345,7 @@ function openGoalDialog() {
           ref="inputEl"
           v-model="text"
           rows="2"
-          placeholder="输入消息，@ 引用文件 / $ 调用技能…"
+          placeholder="输入消息，@ 引用文件或插件 / $ 调用技能…"
           @input="onInput"
           @keydown="onKeydown"
         ></textarea>
@@ -365,12 +363,6 @@ function openGoalDialog() {
         />
       </div>
       <div class="composer-left">
-        <div class="menu-anchor">
-          <button class="plus-btn" title="添加内容" @click="store.plusOpen = !store.plusOpen">
-            +
-          </button>
-          <PlusMenu v-if="store.plusOpen" @close="store.plusOpen = false" />
-        </div>
         <div class="menu-anchor">
           <button
             class="perm-chip"
@@ -472,7 +464,6 @@ function openGoalDialog() {
 
     <div
       v-if="
-        store.plusOpen ||
         store.permOpen ||
         store.taskOpen ||
         store.modelOpen ||

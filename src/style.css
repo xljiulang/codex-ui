@@ -1261,22 +1261,6 @@ select option {
   right: 8px;
 }
 
-.plus-btn {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  font-size: 17px;
-  line-height: 1;
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-}
-
-.plus-btn:hover {
-  color: var(--text-bright);
-  border-color: var(--border-light);
-}
-
 .perm-chip {
   display: inline-flex;
   align-items: center;
@@ -1578,6 +1562,27 @@ select option {
   border-radius: 5px;
   font-size: 12px;
   color: var(--text-dim);
+  background: var(--bg-active);
+}
+
+.menu-item-icon img {
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  object-fit: cover;
+  display: block;
+}
+
+.menu-item-icon .plugin-icon-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
   background: var(--bg-active);
 }
 

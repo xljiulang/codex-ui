@@ -1,4 +1,4 @@
-// codex-ui @ / $ 单独与混合使用 E2E 验证
+// codex-ui @ 文件 / 插件（技能）与 $ 技能 E2E 验证
 // 通过 WebView2 远程调试（CDP 9222）驱动真实 release UI + 少量真实模型调用。
 // 用法: node scripts/verify-mentions.mjs
 import { spawn, execFileSync } from "node:child_process";
@@ -271,6 +271,35 @@ async function selectMention(input, target, kind) {
   await sleep(300);
 }
 
+async function selectPluginByEnter(input, target) {
+  await setInput(input);
+  await waitFor(
+    `@ 菜单出现`,
+    `document.querySelector(".mention-menu") ? true : false`,
+    10000,
+  );
+  await waitFor(
+    `插件项 ${target} 出现`,
+    `(() => {
+      const btns = Array.from(document.querySelectorAll(".mention-menu .menu-item"));
+      return btns.some((x) => x.textContent.includes(${JSON.stringify(target)}));
+    })()`,
+    20000,
+  );
+  // 固定行（选择文件/文件夹）在前，用 ↓ 把高亮移动到目标插件后 Enter 选中（不发送）
+  await evalJs(`(async () => {
+    const ta = document.querySelector("textarea");
+    for (let i = 0; i < 12; i++) {
+      const active = document.querySelector(".mention-menu .menu-item.active");
+      if (active && active.textContent.includes(${JSON.stringify(target)})) break;
+      ta.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      await new Promise((r) => setTimeout(r, 60));
+    }
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  })()`);
+  await sleep(300);
+}
+
 async function selectSkillByEnter(input, target) {
   await setInput(input);
   await waitFor(
@@ -286,7 +315,7 @@ async function selectSkillByEnter(input, target) {
     })()`,
     20000,
   );
-  // 修复验证：$ 菜单支持键盘导航，Enter 选中高亮技能（不再直接发送）
+  // $ 菜单首项即高亮技能，Enter 选中（不再直接发送）
   await evalJs(`(() => {
     const ta = document.querySelector("textarea");
     ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -381,7 +410,9 @@ async function main() {
   record(
     "$ 单独: 回显渲染 $csharp-code-rules 标签",
     bubble2.includes("$csharp-code-rules"),
-    bubble2.includes("$csharp-code-rules") ? "" : "用户气泡未见 $csharp-code-rules",
+    bubble2.includes("$csharp-code-rules")
+      ? ""
+      : "用户气泡未见 $csharp-code-rules",
   );
   record(
     "$ 单独: 模型回复体现技能内容（SKILL.md 注入生效）",
@@ -389,6 +420,50 @@ async function main() {
     reply2.slice(0, 200),
   );
   await screenshot("2-skill-reply.png");
+
+  // ---------- 场景 2b: @ 联合搜索选择插件 ----------
+  log("场景 2b: @ 联合搜索选择插件");
+  const msgCountBeforeB = await evalJs(
+    `document.querySelectorAll(".msg-user").length`,
+  );
+  await selectPluginByEnter("@doc", "Documents");
+  const chip2b = await chipLabels();
+  record(
+    "插件: 选中后出现 $documents 附件标签且触发词被移除",
+    chip2b.some((l) => l.includes("$documents")),
+    chip2b.some((l) => l.includes("$documents"))
+      ? ""
+      : "附件标签: " + JSON.stringify(chip2b),
+  );
+  await sleep(1500);
+  const msgCountAfterB = await evalJs(
+    `document.querySelectorAll(".msg-user").length`,
+  );
+  record(
+    "插件: Enter 选中插件而未发送消息",
+    msgCountAfterB === msgCountBeforeB,
+    `消息数 ${msgCountBeforeB} -> ${msgCountAfterB}`,
+  );
+  await screenshot("2b-plugin-chip.png");
+
+  await setInput(
+    `${TEST_TAG} 只回答：注入给你的技能的名称，以及它的第一条规则的一句话要点，不要展开。`,
+  );
+  const send2b = await clickSend();
+  if (!send2b.ok) throw new Error("场景2b 发送失败: " + send2b.reason);
+  const reply2b = await waitTurnDone();
+  const bubble2b = await userBubbleText();
+  record(
+    "插件: 回显渲染 $documents 标签（序列化与回显前缀保持现状）",
+    bubble2b.includes("$documents"),
+    bubble2b.includes("$documents") ? "" : "用户气泡未见 $documents",
+  );
+  record(
+    "插件: 模型回复体现技能内容（SKILL.md 注入生效）",
+    reply2b.toLowerCase().includes("documents"),
+    reply2b.slice(0, 200),
+  );
+  await screenshot("2b-plugin-reply.png");
 
   // ---------- 场景 3: @ + $ 混合 ----------
   log("场景 3: @ + $ 混合");
@@ -698,9 +773,24 @@ async function main() {
     })()`,
     15000,
   );
-  const colonSkill = true;
-  record("边界: $ 技能名含冒号可整名触发菜单并命中", colonSkill);
+  record("边界: $ 技能名含冒号可整名触发菜单并命中", true);
   await screenshot("5-dollar-colon.png");
+  await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
+  await sleep(300);
+
+  await setInput("@ida");
+  await waitFor("插件搜索菜单", `!!document.querySelector(".mention-menu")`, 10000);
+  await waitFor(
+    "插件项出现",
+    `(() => {
+      const btns = Array.from(document.querySelectorAll(".mention-menu .menu-item"));
+      return btns.some((x) => x.textContent.includes("IDA Pro MCP"));
+    })()`,
+    15000,
+  );
+  const pluginSearch = true;
+  record("边界: @ 联合搜索命中无图标插件（品牌色首字母占位）", pluginSearch);
+  await screenshot("5-plugin-search.png");
   await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
   await sleep(300);
 
@@ -712,10 +802,20 @@ async function main() {
   await setInput("@");
   await waitFor("@ 空 token 菜单", `!!document.querySelector(".mention-menu")`, 5000);
   const emptyRows = await evalJs(`(() => {
-    const t = document.querySelector(".mention-menu").innerText;
-    return t.includes("选择文件…") && t.includes("选择文件夹…");
+    const labels = Array.from(
+      document.querySelectorAll(".mention-menu .menu-item .menu-item-label"),
+    ).map((x) => x.textContent.trim());
+    const first = labels.indexOf("选择文件…");
+    const second = labels.indexOf("选择文件夹…");
+    const plugin = labels.findIndex((l) => l === "Documents");
+    return (
+      first >= 0 &&
+      second > first &&
+      plugin > second &&
+      !document.querySelector(".plus-btn")
+    );
   })()`);
-  record("边界: @ 空 token 显示本地选择文件/文件夹行", emptyRows);
+  record("边界: @ 空 token 固定行在前、插件在后，且 + 按钮已移除", emptyRows);
   await screenshot("4-at-empty.png");
 
   await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
