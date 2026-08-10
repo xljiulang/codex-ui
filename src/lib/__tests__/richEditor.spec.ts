@@ -77,9 +77,9 @@ describe("docToRuns / runsToText", () => {
 });
 
 describe("runsToWireText 内联链接序列化", () => {
-  it("文件输出相对路径、插件输出 plugin:// URI、技能保持绝对路径，顺序交织", () => {
+  it("纯内联：插件/技能链接内联在文本原位，文件节点忽略", () => {
     const refs = new Map<string, UserInput>([
-      ["r1", { type: "mention", name: "a.cs", path: "D:\\repo\\src\\a.cs" }],
+      ["r1", { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" }],
       [
         "r2",
         {
@@ -101,18 +101,26 @@ describe("runsToWireText 内联链接序列化", () => {
       { kind: "ref", refId: "r3", refKind: "skill", label: "csharp-code-rules" },
       { kind: "text", text: "结尾" },
     ] as const;
-    expect(runsToWireText(runs as never, refs, "D:/repo")).toBe(
-      "先 [a.cs](src/a.cs) 中间 [@documents](plugin://documents@openai-primary-runtime) 再 [$csharp-code-rules](C:/x/SKILL.md) 结尾",
+    expect(runsToWireText(runs as never, refs)).toBe(
+      "先 中间 [@documents](plugin://documents@openai-primary-runtime) 再 [$csharp-code-rules](C:/x/SKILL.md) 结尾",
     );
   });
 
-  it("文件不在工作目录下时回退绝对路径", () => {
+  it("文件节点不参与内联文本", () => {
     const refs = new Map<string, UserInput>([
-      ["r1", { type: "mention", name: "x.txt", path: "C:/other/x.txt" }],
+      ["r1", { type: "mention", name: "a.txt", path: "D:/repo/a.txt" }],
+      ["r2", { type: "mention", name: "b.txt", path: "D:/repo/b.txt" }],
     ]);
-    const runs = [{ kind: "ref", refId: "r1", refKind: "file", label: "x.txt" }] as const;
-    expect(runsToWireText(runs as never, refs, "D:/repo")).toBe(
-      "[x.txt](C:/other/x.txt) ",
+    const runs = [
+      { kind: "ref", refId: "r1", refKind: "file", label: "a.txt" },
+      { kind: "text", text: "看下" },
+      { kind: "ref", refId: "r2", refKind: "file", label: "b.txt" },
+    ] as const;
+    expect(runsToWireText(runs as never, refs)).toBe(
+      "看下",
+    );
+    expect(runsToWireText([{ kind: "text", text: "纯文本" }] as never, new Map())).toBe(
+      "纯文本",
     );
   });
 
@@ -128,7 +136,7 @@ describe("runsToWireText 内联链接序列化", () => {
       { kind: "text", text: "第二行" },
     ] as const;
     expect(runsToWireText(runs as never, refs)).toBe(
-      "第一行\n[a.cs](D:/repo/a.cs) 第二行",
+      "第一行\n第二行",
     );
   });
 });

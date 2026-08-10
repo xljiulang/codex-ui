@@ -8,11 +8,9 @@ import ToolCard from "./ToolCard.vue";
 import { formatDuration } from "../lib/format";
 import {
   FILE_MENTION_HEADING,
+  MY_REQUEST_MARKER,
   parseInlineMentions,
   parseFileMentionSection,
-  parsePluginMentionLinks,
-  parseSkillMentionLinks,
-  stripMentionContext,
   type InlineSegment,
 } from "../lib/mention";
 import type { ThreadItem, UserInput } from "../lib/types";
@@ -31,11 +29,6 @@ function partType(c: unknown): string {
   return ((c as UserInput)?.type) ?? "";
 }
 
-function partPath(c: unknown): string {
-  const u = c as UserInput;
-  return u.type === "localImage" ? u.path : "";
-}
-
 function partName(c: unknown): string {
   const u = c as UserInput;
   return u.type === "mention" || u.type === "skill" ? u.name : "";
@@ -46,28 +39,42 @@ function partRefPath(c: unknown): string {
   return u.type === "mention" || u.type === "skill" ? u.path : "";
 }
 
-function partFiles(c: unknown): { name: string; path: string }[] {
+/** 文本项正文：含 Files 段时取 `## My request:` 之后，否则整段 */
+function bodyText(c: unknown): string {
   const u = c as UserInput;
-  return u.type === "text" ? parseFileMentionSection(u.text) : [];
+  if (u.type !== "text") return "";
+  const marker = `\n${MY_REQUEST_MARKER}\n`;
+  const idx = u.text.indexOf(marker);
+  if (idx >= 0 && u.text.includes(FILE_MENTION_HEADING)) {
+    return u.text.slice(idx + marker.length);
+  }
+  return u.text;
 }
 
-function partSkillLinks(c: unknown): { name: string; path: string }[] {
-  const u = c as UserInput;
-  return u.type === "text" ? parseSkillMentionLinks(u.text) : [];
-}
-
-function partPluginLinks(c: unknown): { name: string; path: string }[] {
-  const u = c as UserInput;
-  return u.type === "text" ? parsePluginMentionLinks(u.text) : [];
-}
-
-/** 解析文本项中的内联引用片段；含旧 Files 段的历史消息视为 legacy，不走内联路径 */
+/** 解析文本项正文中的内联引用片段（Files 段文件不在此，由附件区渲染） */
 function partInline(c: unknown): InlineSegment[] {
   const u = c as UserInput;
   if (u.type !== "text") return [];
-  if (u.text.includes(FILE_MENTION_HEADING)) return [];
-  return parseInlineMentions(u.text);
+  return parseInlineMentions(bodyText(u));
 }
+
+/** 附件区文件：跨 text 项解析 Files 段、保序合并 */
+const bubbleFiles = computed(() => {
+  const out: { name: string; path: string }[] = [];
+  for (const c of (props.item.content as unknown[]) ?? []) {
+    const u = c as UserInput;
+    if (u.type === "text") out.push(...parseFileMentionSection(u.text));
+  }
+  return out;
+});
+
+/** 附件区图片：localImage 项 */
+const bubbleImages = computed(
+  () =>
+    ((props.item.content as unknown[]) ?? []).filter(
+      (x) => (x as UserInput).type === "localImage",
+    ) as Extract<UserInput, { type: "localImage" }>[],
+);
 
 function hasInlineRefs(c: unknown): boolean {
   return partInline(c).some((s) => s.type === "ref");
@@ -105,41 +112,9 @@ function inlinePrefixFor(content: unknown, name: string): string | null {
   return null;
 }
 
-/** 同一条消息里结构化 skill 项的名称集合 */
-function structuredSkillNames(content: unknown): Set<string> {
-  const names = new Set<string>();
-  for (const x of (content as unknown[]) ?? []) {
-    const u = x as UserInput;
-    if (u?.type === "skill") names.add(u.name);
-  }
-  return names;
-}
-
-/** 同一条消息里插件链接（[@name]）的名称集合 */
-function pluginLinkNames(content: unknown): Set<string> {
-  const names = new Set<string>();
-  for (const x of (content as unknown[]) ?? []) {
-    for (const p of partPluginLinks(x)) names.add(p.name);
-  }
-  return names;
-}
-
-/** 是否已有同名的结构化 skill 项（避免与文本链接重复渲染） */
-function hasStructuredItemNamed(content: unknown, name: string): boolean {
-  return structuredSkillNames(content).has(name);
-}
-
 /** 结构化 skill 项的前缀：同消息内存在同名插件链接（[@name]）时按插件渲染 @，否则按技能渲染 $ */
 function skillPrefixFor(content: unknown, name: string): string {
-  return (
-    inlinePrefixFor(content, name) ??
-    (pluginLinkNames(content).has(name) ? "@" : "$")
-  );
-}
-
-function partTextClean(c: unknown): string {
-  const u = c as UserInput;
-  return u.type === "text" ? stripMentionContext(u.text) : "";
+  return inlinePrefixFor(content, name) ?? "$";
 }
 
 function memoryEntries(
@@ -209,7 +184,7 @@ async function copyAgentMessage() {
 
 // ---------- 图片灯箱 / 加载失败占位 ----------
 const lightboxSrc = ref("");
-const imgErrors = ref(new Set<number>());
+const attachmentImgErrors = ref(new Set<number>());
 const imgErr = ref(false);
 function openLightbox(src: string) {
   lightboxSrc.value = src;
@@ -220,10 +195,10 @@ function closeLightbox() {
 function onLightboxKey(e: KeyboardEvent) {
   if (e.key === "Escape") closeLightbox();
 }
-function markImgError(i: number) {
-  const s = new Set(imgErrors.value);
-  s.add(i);
-  imgErrors.value = s;
+function markAttachmentImgError(k: number) {
+  const s = new Set(attachmentImgErrors.value);
+  s.add(k);
+  attachmentImgErrors.value = s;
 }
 function markImgErr() {
   imgErr.value = true;
@@ -242,26 +217,38 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
 <template>
   <div v-if="item.type === 'userMessage'" class="msg msg-user">
     <div class="bubble">
-      <template v-for="(c, i) in (item.content as unknown[]) ?? []" :key="i">
-        <template v-if="partType(c) === 'localImage'">
+      <div
+        v-if="bubbleFiles.length || bubbleImages.length"
+        class="bubble-attachments"
+      >
+        <RefChip
+          v-for="(f, j) in bubbleFiles"
+          :key="'fa' + j"
+          :path="f.path"
+          :label="'@' + f.name"
+          kind="file"
+        />
+        <template v-for="(img, k) in bubbleImages" :key="'img' + k">
           <img
-            v-if="!imgErrors.has(i)"
-            class="user-image clickable"
-            :src="imageSrc(partPath(c))"
+            v-if="!attachmentImgErrors.has(k)"
+            class="user-image attachment-image clickable"
+            :src="imageSrc(img.path)"
             alt="图片"
             loading="lazy"
             decoding="async"
-            @click="openLightbox(imageSrc(partPath(c)))"
-            @error="markImgError(i)"
+            @click="openLightbox(imageSrc(img.path))"
+            @error="markAttachmentImgError(k)"
           />
           <div v-else class="img-fallback">图片加载失败</div>
         </template>
+      </div>
+      <template v-for="(c, i) in (item.content as unknown[]) ?? []" :key="i">
+        <template v-if="partType(c) === 'localImage'">
+          <!-- 图片已渲染到附件区 -->
+        </template>
         <template v-else-if="partType(c) === 'text'">
           <template v-if="hasInlineRefs(c)">
-            <template
-              v-for="(seg, j) in partInline(c)"
-              :key="'seg' + j"
-            >
+            <template v-for="(seg, j) in partInline(c)" :key="'seg' + j">
               <RefChip
                 v-if="seg.type === 'ref'"
                 :path="seg.path"
@@ -273,32 +260,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
               </span>
             </template>
           </template>
-          <template v-else>
-            <RefChip
-              v-for="(f, j) in partFiles(c)"
-              :key="'f' + j"
-              :path="f.path"
-              :label="'@' + f.name"
-              kind="file"
-            />
-            <template v-for="(p, j) in partPluginLinks(c)" :key="'p' + j">
-              <RefChip
-                v-if="!hasStructuredItemNamed(item.content, p.name)"
-                :path="p.path"
-                :label="'@' + p.name"
-                kind="plugin"
-              />
-            </template>
-            <template v-for="(s, k) in partSkillLinks(c)" :key="'s' + k">
-              <RefChip
-                v-if="!hasStructuredItemNamed(item.content, s.name)"
-                :path="s.path"
-                :label="'$' + s.name"
-                kind="skill"
-              />
-            </template>
-            <MarkdownText :text="partTextClean(c)" />
-          </template>
+          <MarkdownText v-else :text="bodyText(c)" />
         </template>
         <template v-else-if="partType(c) === 'skill'">
           <RefChip

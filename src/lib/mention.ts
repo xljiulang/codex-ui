@@ -61,7 +61,7 @@ export function toUserAttachment(name: string, path: string): UserInput {
  * 而是把文件引用序列化成文本段落，作为单条 text input 发送。
  */
 export const FILE_MENTION_HEADING = "# Files mentioned by the user:";
-const MY_REQUEST_MARKER = "## My request:";
+export const MY_REQUEST_MARKER = "## My request:";
 
 /** 文件引用段落：`# Files mentioned by the user:` + 每行 `## 名称: 路径` */
 export function fileMentionSection(attachments: UserInput[]): string {

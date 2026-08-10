@@ -1,0 +1,5 @@
+"input": [
+  { "type": "text", "text": "\n# Files mentioned by the user:\n\n## README.md: d:\\codex\\codex-proxy\\README.md\n\n## skill.png: d:/codex/codex-ui/docs/素材/skill.png\n\n## My request:\n你好， [@pdf](plugin://pdf@openai-primary-runtime) 这是啥插件？ [$gmail:gmail](C:\\Users\\Admin\\.codex\\plugins\\cache\\openai-curated\\gmail\\11c74d6b\\skills\\gmail\\SKILL.md) 这是啥技能 附件有哪些文件\n", "text_elements": [] },
+  { "type": "localImage", "path": "d:\\codex\\codex-ui\\docs\\素材\\skill.png" }
+],
+"attachments": [ { "label": "README.md", "path": "d:\\codex\\codex-proxy\\README.md", "fsPath": "d:\\codex\\codex-proxy\\README.md" }, { "label": "skill.png", "path": "d:/codex/codex-ui/docs/素材/skill.png", "fsPath": "d:/codex/codex-ui/docs/素材/skill.png" } ]

@@ -1,7 +1,6 @@
 import { mergeAttributes, Node, type JSONContent } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { UserInput } from "./types";
-import { toProtocolPath } from "./mention";
 
 /** 编辑器内的有序内容单元：文本 run 或引用 chip run */
 export type EditorRun =
@@ -92,62 +91,34 @@ export function runsToText(runs: EditorRun[]): string {
     .join("");
 }
 
-/** 计算绝对路径相对工作目录的路径（正斜杠，Windows 前缀比较不区分大小写）；不在根下时回退绝对路径 */
-export function relativePath(root: string, abs: string): string {
-  if (!root) return toProtocolPath(abs);
-  const norm = (p: string) =>
-    toProtocolPath(p)
-      .replace(/^\/+/, "")
-      .replace(/\/+$/, "")
-      .split("/");
-  const rootParts = norm(root);
-  const absParts = norm(abs);
-  let i = 0;
-  while (
-    i < rootParts.length &&
-    i < absParts.length &&
-    rootParts[i].toLowerCase() === absParts[i].toLowerCase()
-  ) {
-    i++;
-  }
-  if (i === 0) return toProtocolPath(abs);
-  const rel = [
-    ...Array(rootParts.length - i).fill(".."),
-    ...absParts.slice(i),
-  ];
-  return rel.length ? rel.join("/") : toProtocolPath(abs);
-}
-
 /**
- * 把编辑器 runs 序列化为单条发送文本：引用以内联链接写在原位置
- * 文件 `[名称](相对路径)`、插件 `[@名称](plugin://pluginId)`、技能 `[$名称](路径)`。
+ * 把编辑器 runs 序列化为内联文本：插件 `[@名称](plugin://pluginId)` 与技能 `[$名称](路径)`
+ * 内联在文本原位；文件不再内联（由调用方经附件区进入 Files 段）。
  */
 export function runsToWireText(
   runs: EditorRun[],
   refsById: ReadonlyMap<string, UserInput>,
-  root = "",
 ): string {
-  let out = "";
+  let inline = "";
   for (const r of runs) {
     if (r.kind === "text") {
-      out += r.text;
+      inline += r.text;
       continue;
     }
     const a = refsById.get(r.refId);
     if (!a) continue;
     if (a.type !== "mention" && a.type !== "skill") continue;
     const name = a.name;
+    if (r.refKind === "file") continue; // 文件不进内联文本
     if (r.refKind === "skill") {
-      out += `[$${name}](${toProtocolPath(a.path)}) `;
+      inline += `[$${name}](${a.path}) `;
     } else if (r.refKind === "plugin" && a.type === "skill" && a.pluginId) {
-      out += `[@${name}](plugin://${a.pluginId}) `;
+      inline += `[@${name}](plugin://${a.pluginId}) `;
     } else if (r.refKind === "plugin") {
-      out += `[@${name}](${toProtocolPath(a.path)}) `;
-    } else {
-      out += `[${name}](${relativePath(root, a.path)}) `;
+      inline += `[@${name}](${a.path}) `;
     }
   }
-  return out;
+  return inline;
 }
 
 /**

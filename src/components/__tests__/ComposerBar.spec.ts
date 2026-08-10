@@ -190,7 +190,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(labels.indexOf("Documents")).toBeLessThan(labels.indexOf("a.cs"));
   });
 
-  it("选中文件生成内联 @chip，触发词被移除且附件同步", async () => {
+  it("选中文件进附件区（不内联），触发词被移除且附件同步", async () => {
     mockRpc(true);
     await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
     wrapper = mount(ComposerBar);
@@ -199,9 +199,10 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     await clickMenuRow("a.cs");
     const ed = getEditor();
     expect(ed.getText().replace(/\s+/g, " ").trim()).toBe("看");
-    const chip = wrapper.find(".ref-chip");
-    expect(chip.exists()).toBe(true);
-    expect(chip.text()).toBe("@a.cs");
+    expect(wrapper.find(".ref-chip").exists()).toBe(false);
+    const rowChip = wrapper.find(".attachment-chip");
+    expect(rowChip.exists()).toBe(true);
+    expect(rowChip.text()).toContain("@a.cs");
     expect(store.attachments).toEqual([
       { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" },
     ]);
@@ -245,7 +246,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     ]);
   });
 
-  it("混编：文件 chip + 文本 + 技能 chip 按顺序序列化", async () => {
+  it("混编：文件进附件区、技能内联，按顺序序列化", async () => {
     mockRpc(true);
     await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
     wrapper = mount(ComposerBar);
@@ -260,11 +261,15 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     await typeInEditor("结尾");
     const ed = getEditor();
     expect(ed.getText().replace(/\s+/g, " ").trim()).toBe("先 中间 结尾");
+    // 编辑器只内联技能；文件在附件区
     expect(wrapper.findAll(".ref-chip").map((x) => x.text())).toEqual([
-      "@a.cs",
       "$csharp-code-rules",
     ]);
-    expect(store.attachments.map((a) => a.type)).toEqual(["mention", "skill"]);
+    const rowTexts = wrapper
+      .findAll(".attachment-chip")
+      .map((x) => x.text().replace("×", "").trim());
+    expect(rowTexts).toEqual(["@a.cs"]);
+    expect(store.attachments.map((a) => a.type)).toEqual(["skill", "mention"]);
   });
 
   it("发送时把内联引用写入 store.attachments 并调用 sendPrompt", async () => {
@@ -277,7 +282,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     await typeInEditor("检查一下");
     await wrapper.find("button.send-btn").trigger("click");
     expect(mockedSendPrompt).toHaveBeenCalledWith(
-      expect.stringContaining("[a.cs](src/a.cs)"),
+      expect.stringContaining("## a.cs: D:/repo/src/a.cs"),
       false,
     );
     expect(mockedSendPrompt.mock.calls[0][0]).toContain("检查一下");
@@ -323,7 +328,8 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     await wrapper.find(".ProseMirror").trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(mockedSendPrompt).not.toHaveBeenCalled();
-    expect(wrapper.find(".ref-chip").exists()).toBe(true);
+    expect(wrapper.find(".ref-chip").exists()).toBe(false);
+    expect(wrapper.find(".attachment-chip").exists()).toBe(true);
   });
 
   it("词中 @ 不弹菜单，空格后 @ 弹菜单", async () => {

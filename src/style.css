@@ -608,6 +608,22 @@ select option {
   background: rgba(255, 255, 255, 0.24);
 }
 
+.msg-user .bubble .bubble-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.msg-user .bubble .bubble-attachments .attachment-image {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
 .ref-tooltip {
   position: fixed;
   z-index: 100;

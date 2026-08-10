@@ -20,7 +20,9 @@ import {
 import type { UserInput } from "../lib/types";
 import {
   baseName,
+  fileMentionSection,
   matchMentionToken,
+  MY_REQUEST_MARKER,
   toUserAttachment,
   type FuzzyFileResult,
 } from "../lib/mention";
@@ -45,9 +47,9 @@ const searchingFiles = ref(false);
 let searchSeq = 0;
 let searchTimer: number | undefined;
 
-// 编辑器内联引用：chip id → 附件；图片仍走下方附件区
+// 编辑器内联引用：chip id → 附件（仅插件/技能）；文件与图片走下方附件区
 const refsById = ref(new Map<string, UserInput>());
-const rowImages = ref<Extract<UserInput, { type: "localImage" }>[]>([]);
+const rowAttachments = ref<UserInput[]>([]);
 const hasText = ref(false);
 
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
@@ -131,7 +133,7 @@ function syncAttachments() {
     .filter((r) => r.kind === "ref")
     .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
     .filter((a): a is UserInput => !!a);
-  store.attachments = [...refs, ...rowImages.value];
+  store.attachments = [...refs, ...rowAttachments.value];
 }
 
 function scheduleFileSearch(token: string) {
@@ -183,26 +185,7 @@ function refNameOf(a: UserInput): string {
   return "";
 }
 
-/** 在光标处插入一个引用 chip（并追加空格以便继续输入） */
-function insertReferenceChip(a: UserInput) {
-  const ed = editor.value;
-  if (!ed) return;
-  const id = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  refsById.value.set(id, a);
-  ed.chain()
-    .focus()
-    .insertContent([
-      {
-        type: "reference",
-        attrs: { refId: id, kind: refKindOfAttachment(a), label: refNameOf(a) },
-      },
-      { type: "text", text: " " },
-    ])
-    .run();
-  syncAttachments();
-}
-
-/** 菜单选中引用：删除触发词后插入 chip */
+/** 菜单选中引用：插件/技能删除触发词后插入内联 chip；文件/图片删除触发词后进附件区 */
 function onSelectAttachment(a: UserInput) {
   const ed = editor.value;
   if (!ed) return;
@@ -211,6 +194,17 @@ function onSelectAttachment(a: UserInput) {
   const from = m
     ? tokenStartPos(ed.state.doc, caretPos, m.token.length)
     : caretPos;
+  if (a.type === "mention" || a.type === "localImage") {
+    ed.chain().focus().deleteRange({ from, to: caretPos }).run();
+    mention.value = null;
+    if (searchTimer) window.clearTimeout(searchTimer);
+    fileResults.value = [];
+    searchingFiles.value = false;
+    rowAttachments.value.push(a);
+    syncAttachments();
+    void nextTick(() => ed.commands.focus());
+    return;
+  }
   const id = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   refsById.value.set(id, a);
   ed.chain()
@@ -256,11 +250,7 @@ function onPickFiles() {
       });
       for (const f of files) {
         const a = toUserAttachment(baseName(f), f);
-        if (a.type === "localImage") {
-          rowImages.value.push(a);
-        } else {
-          insertReferenceChip(a);
-        }
+        rowAttachments.value.push(a);
       }
       syncAttachments();
     } catch (e) {
@@ -280,11 +270,7 @@ function onPickDir() {
       });
       if (dir) {
         const a = toUserAttachment(baseName(dir), dir);
-        if (a.type === "localImage") {
-          rowImages.value.push(a);
-        } else {
-          insertReferenceChip(a);
-        }
+        rowAttachments.value.push(a);
       }
       syncAttachments();
     } catch (e) {
@@ -394,17 +380,22 @@ function setEditorPlainText(text: string) {
 function submit(flip = false) {
   closeMenus(); // 发送后关闭可能开着的菜单，避免回合中还能切换模式
   const runs = currentRuns();
-  const wireText = runsToWireText(runs, refsById.value, mentionRoot());
+  const wireInline = runsToWireText(runs, refsById.value);
   const plainText = runsToText(runs);
   const refs = runs
     .filter((r) => r.kind === "ref")
     .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
     .filter((a): a is UserInput => !!a);
+  const rowItems = rowAttachments.value;
+  const files = rowItems.filter((a) => a.type === "mention");
+  const fileSection = fileMentionSection(files);
+  const marker = files.length ? `\n${MY_REQUEST_MARKER}\n` : "";
+  const wireText = `${fileSection}${marker}${wireInline}`;
   // 先清空编辑器（onUpdate 会同步 store.attachments 为空），再写入本次附件
   editor.value?.commands.setContent("");
   refsById.value = new Map();
-  rowImages.value = [];
-  store.attachments = [...refs];
+  rowAttachments.value = [];
+  store.attachments = [...refs, ...rowItems];
   if (plainText.trim()) {
     sentHistory.push(plainText);
     if (sentHistory.length > 100) sentHistory.shift();
@@ -413,8 +404,8 @@ function submit(flip = false) {
   void sendPrompt(wireText, flip);
 }
 
-function removeImage(i: number) {
-  rowImages.value.splice(i, 1);
+function removeRowAttachment(i: number) {
+  rowAttachments.value.splice(i, 1);
   syncAttachments();
 }
 
@@ -424,6 +415,14 @@ function imageSrc(path: string): string {
   } catch {
     return path;
   }
+}
+
+function rowAttPath(a: UserInput): string {
+  return a.type === "mention" || a.type === "localImage" ? a.path : "";
+}
+
+function rowAttName(a: UserInput): string {
+  return a.type === "mention" || a.type === "skill" ? a.name : "";
 }
 
 const newChatCwdLabel = computed(() => store.newChatCwd ?? store.server.workspace);
@@ -601,11 +600,24 @@ function openGoalDialog() {
         </button>
       </div>
     </div>
-    <div v-if="rowImages.length" class="attachment-row">
-      <span v-for="(a, i) in rowImages" :key="i" class="attachment-chip">
-        <img class="attachment-thumb" :src="imageSrc(a.path)" alt="" />
-        {{ a.path.split(/[\\/]/).pop() ?? a.path }}
-        <button title="移除" @click="removeImage(i)">×</button>
+    <div v-if="rowAttachments.length" class="attachment-row">
+      <span
+        v-for="(a, i) in rowAttachments"
+        :key="i"
+        class="attachment-chip"
+        :title="rowAttPath(a)"
+      >
+        <img
+          v-if="a.type === 'localImage'"
+          class="attachment-thumb"
+          :src="imageSrc(a.path)"
+          alt=""
+        />
+        <template v-if="a.type === 'localImage'">
+          {{ a.path.split(/[\\/]/).pop() ?? a.path }}
+        </template>
+        <template v-else>@{{ rowAttName(a) }}</template>
+        <button title="移除" @click="removeRowAttachment(i)">×</button>
       </span>
     </div>
 
