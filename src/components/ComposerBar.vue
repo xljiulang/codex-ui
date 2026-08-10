@@ -391,6 +391,10 @@ function submit(flip = false) {
   const fileSection = fileMentionSection(files);
   const marker = files.length ? `\n${MY_REQUEST_MARKER}\n` : "";
   const wireText = `${fileSection}${marker}${wireInline}`;
+  // 目标模式：首条消息的纯文本即目标（后续回合完成/终止时清除）
+  if (store.taskMode === "goal" && plainText.trim()) {
+    store.goalText = plainText.trim();
+  }
   // 先清空编辑器（onUpdate 会同步 store.attachments 为空），再写入本次附件
   editor.value?.commands.setContent("");
   refsById.value = new Map();
@@ -471,9 +475,6 @@ function taskModeLabel(): string {
   return "执行模式";
 }
 
-function openGoalDialog() {
-  store.goalOpen = true;
-}
 </script>
 
 <template>
@@ -550,11 +551,6 @@ function openGoalDialog() {
             </svg>
           </button>
           <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
-        </div>
-        <div v-if="store.goalText" class="menu-anchor">
-          <button class="goal-chip" title="目标" @click="openGoalDialog()">
-            目标
-          </button>
         </div>
       </div>
       <div class="composer-right">

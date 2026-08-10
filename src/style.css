@@ -1457,16 +1457,6 @@ select option {
   fill: currentColor;
 }
 
-.goal-chip {
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 11.5px;
-  color: var(--purple);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-}
-
 .model-chip {
   display: inline-flex;
   align-items: center;
@@ -1600,7 +1590,6 @@ select option {
 
   .perm-chip,
   .task-chip,
-  .goal-chip,
   .model-chip {
     padding: 0 6px;
     font-size: 11px;

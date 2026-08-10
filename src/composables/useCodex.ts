@@ -117,13 +117,14 @@ export const store = reactive({
   newChatCwd: null as string | null,
   taskMode: "execute" as "execute" | "plan" | "goal",
   goalText: null as string | null,
+  /** 目标模式下用户首条消息对应回合的 id，完成/终止时据此清除目标并退回执行 */
+  goalTurnId: null as string | null,
   attachments: [] as UserInput[],
   showHistory: false,
   showSettings: false,
   permOpen: false,
   taskOpen: false,
   modelOpen: false,
-  goalOpen: false,
   toast: "",
 });
 
@@ -644,10 +645,20 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   });
   await updateWindowTitle(); // 首条消息发送后窗口标题立即跟随
   try {
+    // 目标模式：以本条消息的纯文本为目标（已有会话在此同步设置）
+    if (store.taskMode === "goal" && store.goalText) {
+      try {
+        await invoke("goal_set", { threadId, objective: store.goalText });
+      } catch {
+        // 目标设置失败不阻塞回合
+      }
+    }
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
     store.turnActive = true;
     // 立即记录回合 id，供 turn/interrupt 使用（turn/started 事件可能稍后才到）
     if (res?.turn?.id) store.currentTurnId = res.turn.id;
+    // 目标模式：用户回合 id 以 turn/started 事件为准（与 turn/completed 一致，
+    // 注意响应里的 turn.id 与事件 id 不同），在事件监听中记录
   } catch (e) {
     if (isThreadNotFound(e)) {
       resetToNewChat();
@@ -656,6 +667,10 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
       setToast(toastError(e));
     }
     store.turnActive = false;
+    // 目标回合启动失败：清除目标并退回执行，避免目标悬挂自动续跑
+    if (store.taskMode === "goal") {
+      await clearGoal();
+    }
   }
 }
 
@@ -809,6 +824,13 @@ export async function openThread(threadId: string) {
 
 export async function interrupt() {
   if (!store.currentThreadId) return;
+  const goalMode = store.taskMode === "goal";
+  // 目标模式：先清除目标切断自动续跑（目标循环回合极快，回合中断可能追不上；
+  // 清除目标后当前回合自然结束、不再有新回合）
+  if (goalMode) {
+    store.goalTurnId = null;
+    await clearGoal();
+  }
   if (!store.currentTurnId) return;
   // 服务端可能在 turn/started 事件之后才把回合标记为 active；
   // 若用户点得过早会收到 “no active turn”，短暂重试几次。
@@ -821,6 +843,12 @@ export async function interrupt() {
       return;
     } catch (e) {
       const msg = String(e);
+      // 回合 id 不一致时，错误里的 “but found X” 是服务端当前活跃回合 id，用它重试
+      const found = /but found ([0-9a-fA-F-]+)/i.exec(msg);
+      if (found && found[1] !== store.currentTurnId) {
+        store.currentTurnId = found[1];
+        continue;
+      }
       if (msg.includes("no active turn")) {
         await new Promise((r) => setTimeout(r, 400));
         continue;
@@ -831,22 +859,8 @@ export async function interrupt() {
   }
 }
 
-export async function setGoal(objective: string) {
-  if (!store.currentThreadId) {
-    store.goalText = objective;
-    store.goalOpen = false;
-    return;
-  }
-  try {
-    await invoke("goal_set", { threadId: store.currentThreadId, objective });
-    store.goalText = objective;
-    store.goalOpen = false;
-  } catch (e) {
-    setToast(String(e));
-  }
-}
-
 export async function clearGoal() {
+  store.goalTurnId = null;
   if (!store.currentThreadId) {
     store.goalText = null;
     if (store.taskMode === "goal") store.taskMode = "execute";
@@ -924,13 +938,24 @@ async function wireEvents() {
       const p = e.payload as { turn?: { id?: string } };
       store.turnActive = true;
       store.turnInterrupted = false;
-      if (p.turn?.id) store.currentTurnId = p.turn.id;
+      // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
+      // 事件 id 仅在响应缺失时兜底。
+      if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
+      // 目标模式兜底：若响应未携带 id，以首个 turn/started 作为用户回合
+      if (store.taskMode === "goal" && !store.goalTurnId && p.turn?.id) {
+        store.goalTurnId = p.turn.id;
+      }
     }),
     await listen("turn/completed", async (e) => {
-      const p = e.payload as { turn?: { status?: string } };
+      const p = e.payload as { turn?: { id?: string; status?: string } };
       store.turnActive = false;
       store.turnInterrupted = p.turn?.status === "interrupted";
       store.currentTurnId = null;
+      // 目标模式：用户回合完成/被终止 → 清除目标并退回执行
+      if (store.taskMode === "goal" && store.goalTurnId && p.turn?.id === store.goalTurnId) {
+        store.goalTurnId = null;
+        await clearGoal();
+      }
       await refreshThreads();
       // 处理“加入队列”的跟进消息
       if (store.followupQueue.length) {

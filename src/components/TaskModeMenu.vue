@@ -31,9 +31,6 @@ function choose(id: (typeof TASK_MODES)[number]["id"]) {
     void clearGoal();
   }
   store.taskMode = id;
-  if (id === "goal") {
-    store.goalOpen = true;
-  }
   emit("close");
 }
 </script>

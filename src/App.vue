@@ -5,7 +5,6 @@ import HistoryPanel from "./components/HistoryPanel.vue";
 import ChatView from "./components/ChatView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
-import GoalDialog from "./components/GoalDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
 import { useContextMenu } from "./composables/useContextMenu";
@@ -43,7 +42,6 @@ onBeforeUnmount(() => {
       <ChatView v-else />
     </div>
     <InteractionDialog />
-    <GoalDialog v-if="store.goalOpen" />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
     <div
       v-if="ctxMenu"
