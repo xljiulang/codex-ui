@@ -1072,12 +1072,17 @@ async function wireEvents() {
         threadId: string;
         tokenUsage?: {
           total?: { totalTokens?: number };
+          last?: { totalTokens?: number };
           modelContextWindow?: number | null;
         };
       };
       if (p.threadId === store.currentThreadId) {
         store.threadTokenUsage = {
-          used: p.tokenUsage?.total?.totalTokens ?? 0,
+          // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
+          used:
+            p.tokenUsage?.last?.totalTokens ??
+            p.tokenUsage?.total?.totalTokens ??
+            0,
           window: p.tokenUsage?.modelContextWindow ?? null,
         };
       }
