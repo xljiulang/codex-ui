@@ -113,7 +113,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       <button
         v-if="searchTerm"
         class="history-search-clear"
-        title="清除搜索"
+        aria-label="清除搜索"
+        v-tooltip="'清除搜索'"
         @click="clearSearchInput()"
       >
         ×
@@ -148,7 +149,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
             >
               {{ store.searchSnippets[t.id] }}
             </span>
-            <span v-if="t.cwd" class="history-cwd" :title="t.cwd">{{ t.cwd }}</span>
+            <span v-if="t.cwd" class="history-cwd" v-tooltip="t.cwd">{{ t.cwd }}</span>
           </template>
         </span>
         <span class="history-time">{{ formatRelativeTime(t.recencyAt ?? t.updatedAt) }}</span>
@@ -156,7 +157,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           <button
             class="act-btn"
             :class="{ pinned: t.isPinned }"
-            :title="t.isPinned ? '取消固定' : '固定置顶'"
+            :aria-label="t.isPinned ? '取消固定' : '固定置顶'"
+            v-tooltip="t.isPinned ? '取消固定' : '固定置顶'"
             @click.stop="togglePin(t.id, !t.isPinned)"
           >
             <svg viewBox="0 0 24 24">
@@ -166,14 +168,24 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
               />
             </svg>
           </button>
-          <button class="act-btn" title="重命名" @click.stop="startRename(t)">
+          <button
+            class="act-btn"
+            aria-label="重命名"
+            v-tooltip="'重命名'"
+            @click.stop="startRename(t)"
+          >
             <svg viewBox="0 0 24 24">
               <path
                 d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
               />
             </svg>
           </button>
-          <button class="act-btn del" title="删除会话" @click.stop="askDelete(t)">
+          <button
+            class="act-btn del"
+            aria-label="删除会话"
+            v-tooltip="'删除会话'"
+            @click.stop="askDelete(t)"
+          >
             ×
           </button>
         </span>

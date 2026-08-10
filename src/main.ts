@@ -1,5 +1,8 @@
 import { createApp } from "vue";
 import App from "./App.vue";
+import { tooltipDirective } from "./directives/tooltip";
 import "./style.css";
 
-createApp(App).mount("#app");
+const app = createApp(App);
+app.directive("tooltip", tooltipDirective);
+app.mount("#app");

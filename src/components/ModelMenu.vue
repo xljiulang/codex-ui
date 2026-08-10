@@ -56,7 +56,7 @@ function apply() {
           class="option-btn"
           :class="{ selected: model === m.model || (model === '' && m.isDefault) }"
           @click="selectModel(m)"
-          :title="m.description || m.model"
+          v-tooltip="m.description || m.model"
         >
           <span>{{ m.displayName || m.model }}</span>
           <span v-if="m.isDefault" class="option-default-tag">默认</span>
@@ -76,7 +76,7 @@ function apply() {
                 (effort === '' && e.reasoningEffort === defaultEffort),
             }"
             @click="effort = e.reasoningEffort === defaultEffort ? '' : e.reasoningEffort"
-            :title="e.description"
+            v-tooltip="e.description"
           >
             {{ e.reasoningEffort }}
             <span v-if="e.reasoningEffort === defaultEffort" class="option-default-tag">默认</span>

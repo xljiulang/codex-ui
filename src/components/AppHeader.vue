@@ -45,7 +45,7 @@ function onHistory() {
       <button
         v-if="cwd"
         class="brand-cwd"
-        :title="`在资源管理器中打开：${cwd}`"
+        v-tooltip="`在资源管理器中打开：${cwd}`"
         @click="openInExplorer()"
       >
         <svg viewBox="0 0 24 24">
@@ -59,7 +59,8 @@ function onHistory() {
     <div class="header-actions">
       <button
         class="icon-btn"
-        title="历史记录"
+        aria-label="历史记录"
+        v-tooltip="'历史记录'"
         :class="{ active: store.showHistory }"
         @click="onHistory()"
       >
@@ -71,7 +72,8 @@ function onHistory() {
       </button>
       <button
         class="icon-btn"
-        title="设置"
+        aria-label="设置"
+        v-tooltip="'设置'"
         :class="{ active: store.showSettings }"
         @click="onSettings()"
       >
@@ -81,7 +83,12 @@ function onHistory() {
           />
         </svg>
       </button>
-      <button class="icon-btn" title="新建对话" @click="onNewChat()">
+      <button
+        class="icon-btn"
+        aria-label="新建对话"
+        v-tooltip="'新建对话'"
+        @click="onNewChat()"
+      >
         <svg viewBox="0 0 24 24">
           <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
         </svg>

@@ -4,6 +4,10 @@ import { useThrottledRef } from "../composables/useThrottledRef";
 import hljs from "../lib/highlight";
 import { displayHref, openLink, workspaceRoot } from "../lib/links";
 import { renderMarkdown } from "../lib/markdownRenderer";
+import {
+  hideTooltip,
+  showTooltip,
+} from "../composables/useTooltip";
 
 const props = defineProps<{ text: string; streaming?: boolean }>();
 const root = ref<HTMLElement | null>(null);
@@ -146,9 +150,10 @@ function decorateLinks() {
   for (const a of links) {
     a.setAttribute("data-link-ready", "1");
     const href = a.getAttribute("href") ?? "";
-    if (!a.getAttribute("title")) {
-      a.setAttribute("title", displayHref(href, workspaceRoot()));
-    }
+    // 悬停显示完整 URL：使用全局自定义 tooltip，而非原生 title
+    const tip = displayHref(href, workspaceRoot());
+    a.addEventListener("mouseenter", () => showTooltip(tip, a.getBoundingClientRect()));
+    a.addEventListener("mouseleave", () => hideTooltip());
     a.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();

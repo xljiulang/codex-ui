@@ -6,6 +6,7 @@ import ChatView from "./components/ChatView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
+import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
 import { useContextMenu } from "./composables/useContextMenu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -43,6 +44,7 @@ onBeforeUnmount(() => {
     </div>
     <InteractionDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
+    <TooltipLayer />
     <div
       v-if="ctxMenu"
       class="ctx-menu"

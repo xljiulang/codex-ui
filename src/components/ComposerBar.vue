@@ -488,7 +488,7 @@ function taskModeLabel(): string {
       <span class="newchat-cwd-label">项目目录</span>
       <button
         class="newchat-cwd-value"
-        :title="newChatCwdLabel"
+        v-tooltip="newChatCwdLabel"
         @click="pickNewChatCwd()"
       >
         {{ newChatCwdLabel }}
@@ -496,7 +496,8 @@ function taskModeLabel(): string {
       <button
         v-if="store.newChatCwd"
         class="newchat-cwd-reset"
-        title="恢复默认工作目录"
+        aria-label="恢复默认工作目录"
+        v-tooltip="'恢复默认工作目录'"
         @click="store.newChatCwd = null"
       >
         ×
@@ -522,7 +523,7 @@ function taskModeLabel(): string {
         <div class="menu-anchor">
           <button
             class="perm-chip"
-            title="权限模式"
+            v-tooltip="'权限模式'"
             :disabled="store.turnActive"
             @click="store.permOpen = !store.permOpen"
           >
@@ -541,7 +542,7 @@ function taskModeLabel(): string {
         <div class="menu-anchor">
           <button
             class="task-chip"
-            title="任务模式"
+            v-tooltip="'任务模式'"
             :disabled="store.turnActive"
             @click="store.taskOpen = !store.taskOpen"
           >
@@ -554,15 +555,20 @@ function taskModeLabel(): string {
         </div>
       </div>
       <div class="composer-right">
-        <span v-if="ctxUsage" class="ctx-window" :title="ctxTooltip">
+        <span v-if="ctxUsage" class="ctx-window" v-tooltip="ctxTooltip">
           {{ ctxUsage.pct }}%
         </span>
         <div class="menu-anchor">
           <button
             class="model-chip"
-            title="模型"
+            v-tooltip="'模型'"
             @click="store.modelOpen = !store.modelOpen"
           >
+            <svg class="model-chip-icon" viewBox="0 0 24 24">
+              <path
+                d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"
+              />
+            </svg>
             {{ modelChipLabel() }}
             <svg viewBox="0 0 16 16">
               <path d="M4 6l4 4 4-4z" />
@@ -573,7 +579,7 @@ function taskModeLabel(): string {
         <button
           v-if="store.turnActive"
           class="send-btn stop"
-          title="停止生成"
+          v-tooltip="'停止生成'"
           @click="interrupt()"
         >
           <svg viewBox="0 0 24 24">
@@ -584,7 +590,7 @@ function taskModeLabel(): string {
         <button
           v-else
           class="send-btn"
-          title="发送"
+          v-tooltip="'发送'"
           :class="{ lit: !!(hasText || store.attachments.length) }"
           :disabled="!hasText && store.attachments.length === 0"
           @click="submit()"
@@ -601,7 +607,7 @@ function taskModeLabel(): string {
         v-for="(a, i) in rowAttachments"
         :key="i"
         class="attachment-chip"
-        :title="rowAttPath(a)"
+        v-tooltip="rowAttPath(a)"
       >
         <img
           v-if="a.type === 'localImage'"
@@ -613,7 +619,13 @@ function taskModeLabel(): string {
           {{ a.path.split(/[\\/]/).pop() ?? a.path }}
         </template>
         <template v-else>@{{ rowAttName(a) }}</template>
-        <button title="移除" @click="removeRowAttachment(i)">×</button>
+        <button
+          aria-label="移除附件"
+          v-tooltip="'移除附件'"
+          @click="removeRowAttachment(i)"
+        >
+          ×
+        </button>
       </span>
     </div>
 

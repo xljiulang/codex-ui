@@ -415,7 +415,7 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
           <div
             class="change-row"
             :class="{ clickable: !!c.diff }"
-            :title="c.diff ? '点击查看完整差异' : ''"
+            v-tooltip="c.diff ? '点击查看完整差异' : ''"
             @click="openPreview(c)"
           >
             <span class="change-kind" :class="kindOf(c.kind)">{{ kindLabel(c.kind) }}</span>
