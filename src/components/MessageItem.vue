@@ -3,12 +3,17 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import MarkdownText from "./MarkdownText.vue";
 import ReasoningBlock from "./ReasoningBlock.vue";
+import RefChip from "./RefChip.vue";
 import ToolCard from "./ToolCard.vue";
 import { formatDuration } from "../lib/format";
 import {
+  FILE_MENTION_HEADING,
+  parseInlineMentions,
   parseFileMentionSection,
+  parsePluginMentionLinks,
   parseSkillMentionLinks,
   stripMentionContext,
+  type InlineSegment,
 } from "../lib/mention";
 import type { ThreadItem, UserInput } from "../lib/types";
 
@@ -36,6 +41,11 @@ function partName(c: unknown): string {
   return u.type === "mention" || u.type === "skill" ? u.name : "";
 }
 
+function partRefPath(c: unknown): string {
+  const u = c as UserInput;
+  return u.type === "mention" || u.type === "skill" ? u.path : "";
+}
+
 function partFiles(c: unknown): { name: string; path: string }[] {
   const u = c as UserInput;
   return u.type === "text" ? parseFileMentionSection(u.text) : [];
@@ -46,10 +56,84 @@ function partSkillLinks(c: unknown): { name: string; path: string }[] {
   return u.type === "text" ? parseSkillMentionLinks(u.text) : [];
 }
 
-/** 同一条消息里是否已有独立的结构化 skill 项（避免与文本链接重复渲染） */
-function hasSkillItem(content: unknown): boolean {
-  return ((content as unknown[]) ?? []).some(
-    (x) => (x as UserInput)?.type === "skill",
+function partPluginLinks(c: unknown): { name: string; path: string }[] {
+  const u = c as UserInput;
+  return u.type === "text" ? parsePluginMentionLinks(u.text) : [];
+}
+
+/** 解析文本项中的内联引用片段；含旧 Files 段的历史消息视为 legacy，不走内联路径 */
+function partInline(c: unknown): InlineSegment[] {
+  const u = c as UserInput;
+  if (u.type !== "text") return [];
+  if (u.text.includes(FILE_MENTION_HEADING)) return [];
+  return parseInlineMentions(u.text);
+}
+
+function hasInlineRefs(c: unknown): boolean {
+  return partInline(c).some((s) => s.type === "ref");
+}
+
+function segRefKind(
+  seg: Extract<InlineSegment, { type: "ref" }>,
+): "file" | "plugin" | "skill" {
+  if (seg.prefix === "$") return "skill";
+  return seg.path.startsWith("plugin://") ? "plugin" : "file";
+}
+
+/** 同一条消息里内联引用（[@name]/[$name]）的名称集合 */
+function inlineRefNameSet(content: unknown): Set<string> {
+  const names = new Set<string>();
+  for (const x of (content as unknown[]) ?? []) {
+    for (const s of partInline(x)) {
+      if (s.type === "ref") names.add(s.name);
+    }
+  }
+  return names;
+}
+
+function hasInlineRefNamed(content: unknown, name: string): boolean {
+  return inlineRefNameSet(content).has(name);
+}
+
+/** 同名内联引用的前缀（@/$），用于结构化 skill 项的渲染前缀 */
+function inlinePrefixFor(content: unknown, name: string): string | null {
+  for (const x of (content as unknown[]) ?? []) {
+    for (const s of partInline(x)) {
+      if (s.type === "ref" && s.name === name) return s.prefix;
+    }
+  }
+  return null;
+}
+
+/** 同一条消息里结构化 skill 项的名称集合 */
+function structuredSkillNames(content: unknown): Set<string> {
+  const names = new Set<string>();
+  for (const x of (content as unknown[]) ?? []) {
+    const u = x as UserInput;
+    if (u?.type === "skill") names.add(u.name);
+  }
+  return names;
+}
+
+/** 同一条消息里插件链接（[@name]）的名称集合 */
+function pluginLinkNames(content: unknown): Set<string> {
+  const names = new Set<string>();
+  for (const x of (content as unknown[]) ?? []) {
+    for (const p of partPluginLinks(x)) names.add(p.name);
+  }
+  return names;
+}
+
+/** 是否已有同名的结构化 skill 项（避免与文本链接重复渲染） */
+function hasStructuredItemNamed(content: unknown, name: string): boolean {
+  return structuredSkillNames(content).has(name);
+}
+
+/** 结构化 skill 项的前缀：同消息内存在同名插件链接（[@name]）时按插件渲染 @，否则按技能渲染 $ */
+function skillPrefixFor(content: unknown, name: string): string {
+  return (
+    inlinePrefixFor(content, name) ??
+    (pluginLinkNames(content).has(name) ? "@" : "$")
   );
 }
 
@@ -173,23 +257,63 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           <div v-else class="img-fallback">图片加载失败</div>
         </template>
         <template v-else-if="partType(c) === 'text'">
-          <span
-            v-for="(f, j) in partFiles(c)"
-            :key="'f' + j"
-            class="mention-inline"
-            :title="f.path"
-          >@{{ f.name }}</span>
-          <span
-            v-for="(s, k) in partSkillLinks(c)"
-            v-if="!hasSkillItem(item.content)"
-            :key="'s' + k"
-            class="mention-inline"
-            :title="s.path"
-          >${{ s.name }}</span>
-          <MarkdownText :text="partTextClean(c)" />
+          <template v-if="hasInlineRefs(c)">
+            <template
+              v-for="(seg, j) in partInline(c)"
+              :key="'seg' + j"
+            >
+              <RefChip
+                v-if="seg.type === 'ref'"
+                :path="seg.path"
+                :label="seg.prefix + seg.name"
+                :kind="segRefKind(seg)"
+              />
+              <span v-else-if="seg.text" class="md-inline">
+                <MarkdownText :text="seg.text" />
+              </span>
+            </template>
+          </template>
+          <template v-else>
+            <RefChip
+              v-for="(f, j) in partFiles(c)"
+              :key="'f' + j"
+              :path="f.path"
+              :label="'@' + f.name"
+              kind="file"
+            />
+            <template v-for="(p, j) in partPluginLinks(c)" :key="'p' + j">
+              <RefChip
+                v-if="!hasStructuredItemNamed(item.content, p.name)"
+                :path="p.path"
+                :label="'@' + p.name"
+                kind="plugin"
+              />
+            </template>
+            <template v-for="(s, k) in partSkillLinks(c)" :key="'s' + k">
+              <RefChip
+                v-if="!hasStructuredItemNamed(item.content, s.name)"
+                :path="s.path"
+                :label="'$' + s.name"
+                kind="skill"
+              />
+            </template>
+            <MarkdownText :text="partTextClean(c)" />
+          </template>
         </template>
-        <span v-else-if="partType(c) === 'skill'" class="mention-inline">${{ partName(c) }}</span>
-        <span v-else class="mention-inline">@{{ partName(c) }}</span>
+        <template v-else-if="partType(c) === 'skill'">
+          <RefChip
+            v-if="!hasInlineRefNamed(item.content, partName(c))"
+            :path="partRefPath(c)"
+            :label="skillPrefixFor(item.content, partName(c)) + partName(c)"
+            kind="skill"
+          />
+        </template>
+        <RefChip
+          v-else
+          :path="partRefPath(c)"
+          :label="'@' + partName(c)"
+          kind="file"
+        />
       </template>
     </div>
   </div>

@@ -55,6 +55,17 @@ export interface PluginItem {
   brandColor: string;
 }
 
+/** $ 菜单与回显悬浮提示共用的技能条目（skills/list 归一化结果） */
+export interface SkillItem {
+  name: string;
+  key: string;
+  path: string;
+  /** 长描述（悬浮提示用） */
+  desc: string;
+  /** 短描述（$ 菜单展示用，优先 interface.shortDescription） */
+  shortDesc: string;
+}
+
 /** 未创建会话（新对话编辑态）的插件缓存 key */
 export const NEW_CHAT_PLUGIN_KEY = "__new__";
 
@@ -99,6 +110,8 @@ export const store = reactive({
     string,
     { plugins: PluginItem[]; loaded: boolean }
   >,
+  skills: [] as SkillItem[],
+  skillsLoaded: false,
   threadTokenUsage: null as { used: number; window: number | null } | null,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
   newChatCwd: null as string | null,
@@ -352,6 +365,37 @@ export async function ensureThreadPlugins(threadId: string) {
   } catch {
     // 插件列表不可用时保持空，不回退 skills/list
     store.threadPlugins[threadId] = { plugins: [], loaded: false };
+  }
+}
+
+/** 拉取技能列表（全局缓存，幂等），供 $ 菜单与回显悬浮提示使用 */
+export async function ensureSkills(force = false) {
+  if (store.skillsLoaded && !force) return;
+  try {
+    const res = await invoke<{
+      data?: {
+        skills?: (SkillItem & {
+          description?: string;
+          interface?: { shortDescription?: string };
+        })[];
+      }[];
+    }>("codex_rpc", { method: "skills/list", params: {} });
+    const list = (res?.data ?? [])
+      .flatMap((d) => d.skills ?? [])
+      .filter((s) => (s as { enabled?: boolean }).enabled !== false)
+      .map<SkillItem>((s) => ({
+        name: s.name,
+        key: s.name,
+        path: s.path ?? "",
+        desc: s.description ?? s.interface?.shortDescription ?? s.desc ?? "",
+        shortDesc:
+          s.interface?.shortDescription ?? s.description ?? s.desc ?? "",
+      }));
+    store.skills = list;
+    store.skillsLoaded = true;
+  } catch {
+    // 技能列表不可用时保持空
+    store.skills = [];
   }
 }
 
@@ -1066,6 +1110,7 @@ export async function init() {
   await updateWindowTitle();
   void loadModels();
   void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动的初始新对话即预初始化插件缓存
+  void ensureSkills(); // 应用启动预加载技能列表（$ 菜单与回显悬浮提示共用）
   await refreshThreads();
   await wireEvents();
 }

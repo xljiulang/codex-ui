@@ -60,7 +60,7 @@ export function toUserAttachment(name: string, path: string): UserInput {
  * 参考 VS Code Codex 扩展：普通聊天主链不发送独立结构化 mention 项，
  * 而是把文件引用序列化成文本段落，作为单条 text input 发送。
  */
-const FILE_MENTION_HEADING = "# Files mentioned by the user:";
+export const FILE_MENTION_HEADING = "# Files mentioned by the user:";
 const MY_REQUEST_MARKER = "## My request:";
 
 /** 文件引用段落：`# Files mentioned by the user:` + 每行 `## 名称: 路径` */
@@ -73,13 +73,16 @@ export function fileMentionSection(attachments: UserInput[]): string {
 }
 
 /**
- * 技能引用文本：VS Code 扩展同款 Markdown 链接 `[$name](path)`，
- * 拼在 `## My request:` 之后、用户输入之前。
+ * 插件/技能引用文本：Markdown 链接拼在 `## My request:` 之后、用户输入之前。
+ * 插件（source="plugin"）生成 `[@name](path)`，技能生成 `[$name](path)`。
  */
 export function skillMentionLinks(attachments: UserInput[]): string {
   const links = attachments
     .filter((a) => a.type === "skill")
-    .map((a) => `[$${a.name}](${toProtocolPath(a.path)})`)
+    .map((a) => {
+      const prefix = a.source === "plugin" ? "@" : "$";
+      return `[${prefix}${a.name}](${toProtocolPath(a.path)})`;
+    })
     .join(" ");
   return links ? `${links} ` : "";
 }
@@ -97,7 +100,7 @@ export function assemblePromptText(
   return `${section ? `${section}\n${MY_REQUEST_MARKER}\n` : ""}${links}${prompt}\n`;
 }
 
-/** 组装一轮的协议输入：文件引用序列化进单条 text（VS Code 扩展同款），
+/** 组装一轮的协议输入：text 项直接使用传入的 prompt（引用已由调用方以内联链接写进文本原位），
  *  技能作为结构化 skill 项附带（fork 会把 SKILL.md 内容注入上下文），
  *  图片作为 localImage 项附带，路径统一转正斜杠。 */
 export function buildTurnInput(
@@ -106,7 +109,7 @@ export function buildTurnInput(
 ): UserInput[] {
   const text: UserInput = {
     type: "text",
-    text: assemblePromptText(prompt, attachments),
+    text: `${prompt}\n`,
     text_elements: [],
   };
   const images: UserInput[] = attachments.filter((a) => a.type === "localImage");
@@ -114,6 +117,53 @@ export function buildTurnInput(
     .filter((a) => a.type === "skill")
     .map((a) => ({ type: "skill", name: a.name, path: toProtocolPath(a.path) }));
   return [...images, text, ...skills];
+}
+
+/** 内联引用解析结果：文本片段与引用片段按原顺序交错 */
+export type InlineSegment =
+  | { type: "text"; text: string }
+  | { type: "ref"; prefix: "@" | "$"; name: string; path: string };
+
+/** 判断路径是否为本地引用路径（排除 URL scheme 与锚点） */
+export function isLocalRefPath(path: string): boolean {
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(path)) return false;
+  if (/^[a-zA-Z]+:/.test(path) && !/^[a-zA-Z]:[\\/]/.test(path)) return false;
+  if (path.startsWith("#")) return false;
+  return true;
+}
+
+/**
+ * 按顺序解析文本中的内联引用链接：
+ * - `[@name](path)` → 插件/文件引用（@）
+ * - `[$name](path)` → 技能引用（$）
+ * - `[name](path)` 且 path 为本地路径 → 文件引用（@，VS Code 同款无前缀格式）
+ * 其余 markdown 链接保留为文本片段。
+ */
+export function parseInlineMentions(text: string): InlineSegment[] {
+  const segments: InlineSegment[] = [];
+  const re = /\[([@$]?)([^\]]+)\]\(([^)]+)\)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const prefixChar = m[1] as "" | "@" | "$";
+    const rawPath = m[3];
+    if (prefixChar || isLocalRefPath(rawPath)) {
+      if (m.index > last) {
+        segments.push({ type: "text", text: text.slice(last, m.index) });
+      }
+      segments.push({
+        type: "ref",
+        prefix: prefixChar === "$" ? "$" : "@",
+        name: m[2],
+        path: rawPath,
+      });
+      last = m.index + m[0].length;
+    }
+  }
+  if (last < text.length) {
+    segments.push({ type: "text", text: text.slice(last) });
+  }
+  return segments;
 }
 
 /** 从回显文本中解析被引用文件列表，供界面渲染引用标签 */
@@ -146,9 +196,22 @@ export function parseSkillMentionLinks(
   return out;
 }
 
-/** 移除文本开头的技能引用链接（assemblePromptText 自动生成的部分） */
+/** 从文本中解析插件引用链接 `[@name](path)`，供界面渲染 `@name` 标签 */
+export function parsePluginMentionLinks(
+  text: string,
+): { name: string; path: string }[] {
+  const out: { name: string; path: string }[] = [];
+  const re = /\[@([^\]]+)\]\(([^)]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ name: m[1], path: m[2] });
+  }
+  return out;
+}
+
+/** 移除文本开头的插件/技能引用链接（assemblePromptText 自动生成的部分） */
 export function stripSkillLinks(text: string): string {
-  return text.replace(/^(?:\[\$[^\]]+\]\([^)]+\)\s*)+/, "");
+  return text.replace(/^(?:\[[@$][^\]]+\]\([^)]+\)\s*)+/, "");
 }
 
 /**
@@ -162,7 +225,11 @@ export function stripMentionContext(text: string): string {
     idx >= 0 && text.slice(0, idx).includes(FILE_MENTION_HEADING)
       ? text.slice(idx + marker.length)
       : text;
-  return stripSkillLinks(request).replace(/\n$/, "");
+  const noInline = request.replace(/\[[^\]]+\]\([^)]+\)/g, "");
+  return stripSkillLinks(noInline)
+    .replace(/\n$/, "")
+    .replace(/ {2,}/g, " ")
+    .trim();
 }
 
 export function baseName(path: string): string {

@@ -50,7 +50,9 @@ export function localPathFromHref(
   if (/^[A-Za-z]:[\\/]/.test(local)) {
     return { kind: "local", path: toBackslash(local) };
   }
-  if (/^(mailto:|javascript:|data:|tel:|#)/i.test(local)) return null;
+  if (local.startsWith("#")) return null;
+  // 其它 scheme（plugin://、mailto:、javascript: 等）不作为本地路径，避免误解析为相对路径
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(local)) return null;
   if (workspaceRoot) {
     return { kind: "local", path: resolveWindowsPath(workspaceRoot, local) };
   }

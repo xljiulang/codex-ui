@@ -58,6 +58,10 @@ export interface SkillInput {
   type: "skill";
   name: string;
   path: string;
+  /** 客户端标记：来自 @ 菜单的插件（source="plugin"）或 $ 菜单的技能（source="skill"）；协议发送时不含该字段 */
+  source?: "plugin" | "skill";
+  /** 客户端标记：插件在 plugin/list 中的 pluginId（如 documents@openai-primary-runtime），用于生成 plugin:// URI；协议发送时不含该字段 */
+  pluginId?: string;
 }
 export interface LocalImageInput {
   type: "localImage";

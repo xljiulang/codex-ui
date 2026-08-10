@@ -82,6 +82,15 @@ describe("localPathFromHref 链接分类", () => {
     expect(localPathFromHref("", "D:/repo")).toBeNull();
     expect(localPathFromHref("javascript:alert(1)", "D:/repo")).toBeNull();
   });
+
+  it("plugin:// URI 不作为本地路径", () => {
+    expect(
+      localPathFromHref(
+        "plugin://documents@openai-primary-runtime",
+        "D:/repo",
+      ),
+    ).toBeNull();
+  });
 });
 
 describe("openLink 分发", () => {

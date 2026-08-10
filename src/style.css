@@ -600,6 +600,94 @@ select option {
   font-size: 12px;
 }
 
+.msg-user .bubble .mention-inline.clickable {
+  cursor: pointer;
+}
+
+.msg-user .bubble .mention-inline.clickable:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.ref-tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: var(--bg-active);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  color: var(--text-bright);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease-out, transform 0.12s ease-out;
+  pointer-events: none;
+  word-break: break-word;
+}
+
+.ref-tooltip--below {
+  transform: translateY(-4px);
+}
+
+.ref-tooltip--placed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ref-tooltip-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.ref-tooltip-kind {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ref-tooltip-desc {
+  margin-top: 3px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.ref-tooltip-arrow {
+  position: absolute;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  background: var(--bg-active);
+  border-right: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.ref-tooltip--below .ref-tooltip-arrow {
+  top: -5px;
+  bottom: auto;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid var(--border-light);
+  border-top: 1px solid var(--border-light);
+}
+
+.msg-user .bubble .md-inline {
+  display: inline-block;
+  vertical-align: baseline;
+  max-width: 100%;
+}
+
+.msg-user .bubble .md-inline .md > :last-child {
+  margin-bottom: 0;
+}
+
 .md {
   line-height: 1.6;
   user-select: text;
@@ -1235,13 +1323,54 @@ select option {
   position: relative;
 }
 
-.composer textarea {
+.rich-editor {
+  width: 100%;
+}
+
+.rich-editor .ProseMirror {
   display: block;
   width: 100%;
-  min-height: 46px;
+  min-height: 92px;
   max-height: 130px;
   line-height: 1.5;
   padding: 11px 12px 40px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rich-editor .ProseMirror:focus {
+  border-color: var(--accent-dim);
+}
+
+.rich-editor .ProseMirror p {
+  margin: 0;
+}
+
+.rich-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-faint);
+  pointer-events: none;
+  height: 0;
+}
+
+.ref-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  border-radius: 4px;
+  padding: 0 6px;
+  margin: 0 1px;
+  font-size: 12px;
+  line-height: 1.7;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--blue);
+  cursor: default;
+  user-select: none;
 }
 
 .composer-left,

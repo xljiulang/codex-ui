@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import {
+  ensureSkills,
   ensureThreadPlugins,
   sendPrompt,
   store,
@@ -15,6 +16,31 @@ import {
 } from "../useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
+
+const SKILLS_RESPONSE = {
+  data: [
+    {
+      skills: [
+        {
+          name: "csharp-code-rules",
+          key: "csharp-code-rules",
+          path: "C:/x/skills/csharp-code-rules/SKILL.md",
+          description: "C# 代码规范长描述",
+          interface: {
+            shortDescription: "C# 代码规范短描述",
+          },
+        },
+        {
+          name: "disabled-skill",
+          key: "disabled-skill",
+          path: "C:/x/disabled/SKILL.md",
+          desc: "已禁用",
+          enabled: false,
+        },
+      ],
+    },
+  ],
+};
 
 const PLUGINS_RESPONSE = {
   marketplaces: [
@@ -175,5 +201,46 @@ describe("ensureThreadPlugins 对话级插件缓存", () => {
         (args as { method?: string } | undefined)?.method === "skills/list",
     );
     expect(skillsCalls).toHaveLength(0);
+  });
+});
+
+describe("ensureSkills 技能全局缓存", () => {
+  beforeEach(() => {
+    store.skills = [];
+    store.skillsLoaded = false;
+    mockedInvoke.mockReset();
+  });
+
+  it("归一化 skills/list：过滤禁用项并缓存", async () => {
+    mockedInvoke.mockResolvedValue(SKILLS_RESPONSE);
+    await ensureSkills();
+    expect(store.skillsLoaded).toBe(true);
+    expect(store.skills).toEqual([
+      {
+        name: "csharp-code-rules",
+        key: "csharp-code-rules",
+        path: "C:/x/skills/csharp-code-rules/SKILL.md",
+        desc: "C# 代码规范长描述",
+        shortDesc: "C# 代码规范短描述",
+      },
+    ]);
+    const calls = mockedInvoke.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "skills/list",
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("幂等：第二次调用不重复请求", async () => {
+    mockedInvoke.mockResolvedValue(SKILLS_RESPONSE);
+    await ensureSkills();
+    await ensureSkills();
+    const calls = mockedInvoke.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "skills/list",
+    );
+    expect(calls).toHaveLength(1);
   });
 });

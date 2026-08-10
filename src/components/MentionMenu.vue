@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { UserInput } from "../lib/types";
 import {
   toUserAttachment,
@@ -8,6 +8,7 @@ import {
 } from "../lib/mention";
 import {
   NEW_CHAT_PLUGIN_KEY,
+  ensureSkills,
   store,
   type PluginItem,
 } from "../composables/useCodex";
@@ -27,44 +28,19 @@ const emit = defineEmits<{
 }>();
 
 // ---------------- $ 分支：技能列表（保持原行为） ----------------
-interface SkillItem {
-  name: string;
-  key: string;
-  path: string;
-  desc: string;
-}
+/** 首次打开时确保技能缓存已加载（幂等，之后复用） */
+onMounted(() => {
+  void ensureSkills();
+});
 
-const skills = ref<SkillItem[]>([]);
-const loadingSkills = ref(true);
-
-async function loadSkills() {
-  loadingSkills.value = true;
-  try {
-    const res = await invoke<{
-      data?: { skills?: SkillItem[] }[];
-    }>("codex_rpc", { method: "skills/list", params: {} });
-    skills.value = (res?.data ?? [])
-      .flatMap((d) => d.skills ?? [])
-      .filter((s) => (s as { enabled?: boolean }).enabled !== false)
-      .map<SkillItem>((s) => ({
-        name: s.name,
-        key: s.name,
-        path: s.path ?? "",
-        desc: s.desc ?? "",
-      }));
-  } catch {
-    // ignore
-  } finally {
-    loadingSkills.value = false;
-  }
-}
-
-onMounted(loadSkills);
+const loadingSkills = computed(
+  () => !store.skillsLoaded && store.skills.length === 0,
+);
 
 const tokenLower = computed(() => props.token.toLowerCase());
 const filteredSkills = computed(() => {
-  if (!props.token) return skills.value;
-  return skills.value.filter(
+  if (!props.token) return store.skills;
+  return store.skills.filter(
     (s) =>
       s.name.toLowerCase().includes(tokenLower.value) ||
       s.key.toLowerCase().includes(tokenLower.value),
@@ -144,7 +120,12 @@ function selectHighlighted() {
   }
   const s = filteredSkills.value[highlight.value];
   if (!s) return;
-  emit("select-attachment", { type: "skill", name: s.key, path: s.path });
+  emit("select-attachment", {
+    type: "skill",
+    name: s.key,
+    path: s.path,
+    source: "skill",
+  });
 }
 
 defineExpose({ move, selectHighlighted });
@@ -165,6 +146,8 @@ function selectRow(row: Row) {
       type: "skill",
       name: row.plugin.name,
       path: row.plugin.path,
+      source: "plugin",
+      pluginId: row.plugin.id,
     });
   }
 }
@@ -297,13 +280,14 @@ function pluginInitial(p: PluginItem): string {
               type: 'skill',
               name: s.key,
               path: s.path,
+              source: 'skill',
             })
           "
         >
           <span class="menu-item-icon">S</span>
           <span>
             <div class="menu-item-label">{{ s.name }}</div>
-            <div class="menu-item-desc">{{ s.desc }}</div>
+            <div class="menu-item-desc">{{ s.shortDesc }}</div>
           </span>
         </button>
         <div v-if="loadingSkills" class="menu-note">加载中…</div>

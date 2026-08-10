@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import MessageItem from "../MessageItem.vue";
+import { NEW_CHAT_PLUGIN_KEY, store } from "../../composables/useCodex";
 import type { ThreadItem } from "../../lib/types";
 
 const origWorker = globalThis.Worker;
@@ -174,6 +175,259 @@ describe("用户消息中的图片附件", () => {
     });
     expect(wrapper.text()).toContain("@a.cs");
     expect(wrapper.text()).toContain("$csharp-code-rules");
+  });
+
+  it("插件链接 [@documents](path) 渲染 @documents 标签", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "[@documents](C:/x/plugins/documents) 看下\n",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    expect(wrapper.text()).toContain("@documents");
+    expect(wrapper.text()).not.toContain("$documents");
+  });
+
+  it("无前缀本地路径链接 [a.cs](src/a.cs) 渲染为 @a.cs 文件 chip", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "[a.cs](src/a.cs) 看下",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    expect(wrapper.text()).toContain("@a.cs");
+    expect(wrapper.find(".mention-inline").exists()).toBe(true);
+  });
+
+  it("插件链接 [@documents](plugin://...) 渲染 @documents 标签", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "[@documents](plugin://documents@openai-primary-runtime) 看下",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    expect(wrapper.text()).toContain("@documents");
+    expect(wrapper.text()).not.toContain("$documents");
+  });
+
+  it("插件链接 + 同名结构化项去重：只渲染一个 @documents", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "[@documents](C:/x/plugins/documents) 看下\n",
+            text_elements: [],
+          },
+          {
+            type: "skill",
+            name: "documents",
+            path: "C:/x/plugins/documents",
+          },
+        ]),
+      },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("@documents");
+    expect(wrapper.text().split("@documents").length - 1).toBe(1);
+    expect(wrapper.text()).not.toContain("$documents");
+  });
+
+  it("技能链接与同名结构化项去重：只渲染一个 $csharp-code-rules", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "[$csharp-code-rules](C:/x/SKILL.md) 看下\n",
+            text_elements: [],
+          },
+          {
+            type: "skill",
+            name: "csharp-code-rules",
+            path: "C:/x/SKILL.md",
+          },
+        ]),
+      },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("$csharp-code-rules");
+    expect(wrapper.text().split("$csharp-code-rules").length - 1).toBe(1);
+  });
+
+  it("内联链接回显顺序与输入一致：文本-文件-文本-技能-文本", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "先 [@a.cs](D:/repo/a.cs) 中间 [$csharp-code-rules](C:/x/SKILL.md) 结尾",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    await flushPromises();
+    const bubble = wrapper.find(".bubble");
+    const text = bubble.text();
+    expect(text).toContain("先");
+    expect(text).toContain("中间");
+    expect(text).toContain("结尾");
+    expect(text.indexOf("先")).toBeLessThan(text.indexOf("@a.cs"));
+    expect(text.indexOf("@a.cs")).toBeLessThan(text.indexOf("中间"));
+    expect(text.indexOf("中间")).toBeLessThan(
+      text.indexOf("$csharp-code-rules"),
+    );
+    expect(text.indexOf("$csharp-code-rules")).toBeLessThan(
+      text.indexOf("结尾"),
+    );
+    expect(wrapper.findAll(".mention-inline").length).toBe(2);
+  });
+
+  it("混编回显片段为内联盒子：气泡直接子节点无块级 .md", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "先 [@a.cs](D:/repo/a.cs) 中间 [$csharp-code-rules](C:/x/SKILL.md) 结尾",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    await flushPromises();
+    const bubble = wrapper.find(".bubble").element as HTMLElement;
+    const directChildren = Array.from(bubble.children);
+    // 直接子节点只允许 chip（.mention-inline）与内联包装（.md-inline），不存在块级 .md
+    expect(
+      directChildren.some(
+        (el) =>
+          el.classList.contains("md") && !el.classList.contains("md-inline"),
+      ),
+    ).toBe(false);
+    expect(wrapper.findAll(".bubble > .md-inline").length).toBe(3);
+    expect(wrapper.findAll(".bubble > .mention-inline").length).toBe(2);
+    const texts = wrapper
+      .findAll(".bubble > .md-inline")
+      .map((x) => x.text().trim());
+    expect(texts).toEqual(["先", "中间", "结尾"]);
+  });
+
+  it("文件/技能 chip 可点击触发 reveal_path，插件 chip 不可点击", async () => {
+    store.server.workspace = "D:/repo";
+    store.currentThreadId = null;
+    store.threadPlugins[NEW_CHAT_PLUGIN_KEY] = {
+      loaded: true,
+      plugins: [
+        {
+          id: "documents@openai-primary-runtime",
+          name: "documents",
+          displayName: "Documents",
+          description: "文档处理插件",
+          path: "C:/x/documents",
+          iconPath: "",
+          iconUrl: "",
+          brandColor: "",
+        },
+      ],
+    };
+    store.skills = [
+      {
+        name: "csharp-code-rules",
+        key: "csharp-code-rules",
+        path: "C:/x/SKILL.md",
+        desc: "C# 代码规范技能",
+        shortDesc: "C# 代码规范短说明",
+      },
+    ];
+    (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = true;
+    (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "[a.cs](src/a.cs) 与 [$csharp-code-rules](C:/x/SKILL.md) 与 [@documents](plugin://documents@openai-primary-runtime)",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    await flushPromises();
+    const chips = wrapper.findAll(".mention-inline");
+    const fileChip = chips.find((c) => c.text() === "@a.cs");
+    const skillChip = chips.find((c) => c.text() === "$csharp-code-rules");
+    const pluginChip = chips.find((c) => c.text() === "@documents");
+    expect(fileChip?.classes()).toContain("clickable");
+    expect(skillChip?.classes()).toContain("clickable");
+    expect(pluginChip?.classes()).not.toContain("clickable");
+    expect(fileChip?.attributes("title")).toBeUndefined();
+    // 悬浮卡片：文件显示路径、技能/插件显示说明
+    await fileChip!.trigger("mouseenter");
+    await new Promise((r) => setTimeout(r, 160));
+    expect(
+      document.body.querySelector(".ref-tooltip")?.textContent,
+    ).toContain("src/a.cs");
+    await fileChip!.trigger("mouseleave");
+    await skillChip!.trigger("mouseenter");
+    await new Promise((r) => setTimeout(r, 160));
+    expect(
+      document.body.querySelector(".ref-tooltip")?.textContent,
+    ).toContain("C# 代码规范技能");
+    await skillChip!.trigger("mouseleave");
+    await pluginChip!.trigger("mouseenter");
+    await new Promise((r) => setTimeout(r, 160));
+    expect(
+      document.body.querySelector(".ref-tooltip")?.textContent,
+    ).toContain("文档处理插件");
+    await pluginChip!.trigger("mouseleave");
+    await fileChip!.trigger("click");
+    await skillChip!.trigger("click");
+    await pluginChip!.trigger("click");
+    await flushPromises();
+    const log = (window as unknown as Record<string, unknown>)
+      .__CODEX_UI_TEST_LOG__ as { cmd: string; args: { path: string } }[];
+    expect(
+      log
+        .filter((l) => l.cmd === "reveal_path")
+        .map((l) => l.args.path),
+    ).toEqual(["D:\\repo\\src\\a.cs", "C:\\x\\SKILL.md"]);
+    (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = false;
+    (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
+  });
+
+  it("含 Files 段的旧消息（无内联链接）仍按 legacy 路径渲染", async () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: userItem([
+          {
+            type: "text",
+            text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n看看这个\n",
+            text_elements: [],
+          },
+        ]),
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".bubble").text()).toContain("@a.cs");
+    expect(wrapper.find(".bubble").text()).toContain("看看这个");
+    expect(wrapper.find(".bubble").text()).not.toContain("Files mentioned");
   });
 
   it("多个文件引用渲染多个 @ 标签，正文不含协议段落", async () => {

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { EditorContent, useEditor } from "@tiptap/vue-3";
+import StarterKit from "@tiptap/starter-kit";
+import Placeholder from "@tiptap/extension-placeholder";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
@@ -21,12 +24,19 @@ import {
   toUserAttachment,
   type FuzzyFileResult,
 } from "../lib/mention";
+import {
+  Reference,
+  docToRuns,
+  refKindOfAttachment,
+  runsToText,
+  runsToWireText,
+  tokenStartPos,
+  type EditorRun,
+} from "../lib/richEditor";
 
-const text = ref("");
 const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
   null,
 );
-const inputEl = ref<HTMLTextAreaElement | null>(null);
 const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
 
 // @ 文件引用：模糊搜索结果
@@ -35,16 +45,93 @@ const searchingFiles = ref(false);
 let searchSeq = 0;
 let searchTimer: number | undefined;
 
+// 编辑器内联引用：chip id → 附件；图片仍走下方附件区
+const refsById = ref(new Map<string, UserInput>());
+const rowImages = ref<Extract<UserInput, { type: "localImage" }>[]>([]);
+const hasText = ref(false);
+
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
 const sentHistory: string[] = [];
 let historyIndex = -1;
 
-function onInput() {
-  mention.value = matchMentionToken(text.value);
-  if (!mention.value) {
+const editor = useEditor({
+  extensions: [
+    StarterKit,
+    Placeholder.configure({
+      placeholder: "输入消息，@ 引用文件或插件 / $ 调用技能…",
+    }),
+    Reference,
+  ],
+  editorProps: {
+    attributes: {
+      class: "rich-input",
+      role: "textbox",
+      "aria-multiline": "true",
+    },
+    handleKeyDown: (_view, event) => handleKeydown(event),
+  },
+  onCreate: () => {
+    syncAfterChange();
+    exposeEditor();
+  },
+  onUpdate: () => {
+    syncAfterChange();
+  },
+  onSelectionUpdate: () => {
+    updateMentionFromCaret();
+  },
+});
+
+function exposeEditor() {
+  try {
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
+      editor.value;
+  } catch {
+    // 非浏览器环境忽略
+  }
+}
+
+function currentRuns(): EditorRun[] {
+  const ed = editor.value;
+  if (!ed) return [];
+  return docToRuns(ed.getJSON());
+}
+
+function plainTextBeforeCaret(): string {
+  const ed = editor.value;
+  if (!ed) return "";
+  const pos = ed.state.selection.from;
+  return ed.state.doc.textBetween(0, pos, "\n", () => "");
+}
+
+function updateMentionFromCaret() {
+  const textBefore = plainTextBeforeCaret();
+  const m = matchMentionToken(textBefore);
+  mention.value = m;
+  if (!m) {
     fileResults.value = [];
     searchingFiles.value = false;
+    if (searchTimer) window.clearTimeout(searchTimer);
+    searchSeq++;
+    return;
   }
+  if (m.kind === "@") scheduleFileSearch(m.token);
+}
+
+function syncAfterChange() {
+  updateMentionFromCaret();
+  const runs = currentRuns();
+  hasText.value = runsToText(runs).trim().length > 0;
+  syncAttachments();
+}
+
+function syncAttachments() {
+  const runs = currentRuns();
+  const refs = runs
+    .filter((r) => r.kind === "ref")
+    .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
+    .filter((a): a is UserInput => !!a);
+  store.attachments = [...refs, ...rowImages.value];
 }
 
 function scheduleFileSearch(token: string) {
@@ -85,40 +172,82 @@ async function runFileSearch(token: string) {
   }
 }
 
-watch(
-  () => mention.value,
-  (m) => {
-    if (m?.kind === "@") scheduleFileSearch(m.token);
-    else if (searchTimer) window.clearTimeout(searchTimer);
-  },
-);
-
-function removeMentionToken() {
-  const m = mention.value;
-  if (!m) return;
-  text.value =
-    text.value.slice(0, m.start) + text.value.slice(m.start + 1 + m.token.length);
-  mention.value = null;
-}
-
-function refocusInput() {
-  void nextTick(() => inputEl.value?.focus());
-}
-
-function onSelectAttachment(a: UserInput) {
-  removeMentionToken();
-  store.attachments.push(a);
-  refocusInput();
-}
-
 function mentionRoot(): string {
   return (
     store.newChatCwd ?? store.currentThreadCwd ?? store.server.workspace ?? ""
   );
 }
 
+function refNameOf(a: UserInput): string {
+  if (a.type === "mention" || a.type === "skill") return a.name;
+  return "";
+}
+
+/** 在光标处插入一个引用 chip（并追加空格以便继续输入） */
+function insertReferenceChip(a: UserInput) {
+  const ed = editor.value;
+  if (!ed) return;
+  const id = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  refsById.value.set(id, a);
+  ed.chain()
+    .focus()
+    .insertContent([
+      {
+        type: "reference",
+        attrs: { refId: id, kind: refKindOfAttachment(a), label: refNameOf(a) },
+      },
+      { type: "text", text: " " },
+    ])
+    .run();
+  syncAttachments();
+}
+
+/** 菜单选中引用：删除触发词后插入 chip */
+function onSelectAttachment(a: UserInput) {
+  const ed = editor.value;
+  if (!ed) return;
+  const m = mention.value;
+  const caretPos = ed.state.selection.from;
+  const from = m
+    ? tokenStartPos(ed.state.doc, caretPos, m.token.length)
+    : caretPos;
+  const id = `ref-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  refsById.value.set(id, a);
+  ed.chain()
+    .focus()
+    .deleteRange({ from, to: caretPos })
+    .insertContent([
+      {
+        type: "reference",
+        attrs: { refId: id, kind: refKindOfAttachment(a), label: refNameOf(a) },
+      },
+      { type: "text", text: " " },
+    ])
+    .run();
+  mention.value = null;
+  if (searchTimer) window.clearTimeout(searchTimer);
+  fileResults.value = [];
+  searchingFiles.value = false;
+  syncAttachments();
+  void nextTick(() => ed.commands.focus());
+}
+
+/** 删除当前触发词（用于打开本地文件/文件夹选择器前） */
+function removeMentionTokenInEditor() {
+  const ed = editor.value;
+  const m = mention.value;
+  if (!ed || !m) return;
+  const caretPos = ed.state.selection.from;
+  const from = tokenStartPos(ed.state.doc, caretPos, m.token.length);
+  ed.chain().focus().deleteRange({ from, to: caretPos }).run();
+  mention.value = null;
+  if (searchTimer) window.clearTimeout(searchTimer);
+  fileResults.value = [];
+  searchingFiles.value = false;
+}
+
 function onPickFiles() {
-  removeMentionToken();
+  removeMentionTokenInEditor();
   void (async () => {
     try {
       const files = await invoke<string[]>("pick_files", {
@@ -127,18 +256,23 @@ function onPickFiles() {
       });
       for (const f of files) {
         const a = toUserAttachment(baseName(f), f);
-        store.attachments.push(a);
+        if (a.type === "localImage") {
+          rowImages.value.push(a);
+        } else {
+          insertReferenceChip(a);
+        }
       }
+      syncAttachments();
     } catch (e) {
       store.toast = toastError(e);
     } finally {
-      refocusInput();
+      void nextTick(() => editor.value?.commands.focus());
     }
   })();
 }
 
 function onPickDir() {
-  removeMentionToken();
+  removeMentionTokenInEditor();
   void (async () => {
     try {
       const dir = await invoke<string | null>("pick_directory", {
@@ -146,12 +280,17 @@ function onPickDir() {
       });
       if (dir) {
         const a = toUserAttachment(baseName(dir), dir);
-        store.attachments.push(a);
+        if (a.type === "localImage") {
+          rowImages.value.push(a);
+        } else {
+          insertReferenceChip(a);
+        }
       }
+      syncAttachments();
     } catch (e) {
       store.toast = toastError(e);
     } finally {
-      refocusInput();
+      void nextTick(() => editor.value?.commands.focus());
     }
   })();
 }
@@ -169,21 +308,31 @@ function onKeydownGlobal(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydownGlobal);
-  inputEl.value?.focus();
+  exposeEditor();
+  void nextTick(() => editor.value?.commands.focus());
 });
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeydownGlobal));
+watch(editor, exposeEditor);
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydownGlobal);
+  try {
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
+      undefined;
+  } catch {
+    // ignore
+  }
+});
 
 // 新建对话后输入框重新获得焦点（组件未卸载的情况，如聊天页直接点“新建对话”）
 watch(
   () => store.currentThreadId,
   (v) => {
-    if (!v) inputEl.value?.focus();
+    if (!v) void nextTick(() => editor.value?.commands.focus());
   },
 );
 
-function onKeydown(e: KeyboardEvent) {
+function handleKeydown(e: KeyboardEvent): boolean {
   // 输入法组合中（如中文拼音选字）的按键不触发提交/历史选择
-  if (e.isComposing || e.keyCode === 229) return;
+  if (e.isComposing || e.keyCode === 229) return false;
   // @ / $ 菜单打开时：Enter 选中高亮项，↑↓ 移动高亮
   if (
     mention.value &&
@@ -195,7 +344,7 @@ function onKeydown(e: KeyboardEvent) {
     } else {
       mentionMenu.value?.move(e.key === "ArrowUp" ? -1 : 1);
     }
-    return;
+    return true;
   }
   if (e.key === "Enter") {
     // Enter 快捷发送：开启时 Enter 发送 / Shift+Enter 换行；
@@ -204,48 +353,69 @@ function onKeydown(e: KeyboardEvent) {
     if (shouldSend) {
       e.preventDefault();
       submit(e.ctrlKey);
+      return true;
     }
-    return;
+    return false;
   }
   if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-    const ta = e.target as HTMLTextAreaElement;
-    // 仅当光标位于第一行时触发历史选择，否则保留默认的上下移动光标
-    const firstLineEnd = ta.value.indexOf("\n");
-    const firstLineLen = firstLineEnd === -1 ? ta.value.length : firstLineEnd;
-    if (ta.selectionStart > firstLineLen) return;
+    // 仅当光标位于文档开头时触发历史选择，否则保留默认的光标移动
+    const sel = editor.value?.state.selection;
+    if (!sel || !sel.empty || sel.from > 1) return false;
     e.preventDefault();
     if (e.key === "ArrowUp") {
-      if (!sentHistory.length) return;
+      if (!sentHistory.length) return true;
       if (historyIndex === -1) historyIndex = sentHistory.length - 1;
       else if (historyIndex > 0) historyIndex--;
-      text.value = sentHistory[historyIndex];
+      setEditorPlainText(sentHistory[historyIndex]);
     } else {
-      if (historyIndex === -1) return;
+      if (historyIndex === -1) return true;
       historyIndex++;
       if (historyIndex >= sentHistory.length) {
         historyIndex = -1;
-        text.value = "";
+        setEditorPlainText("");
       } else {
-        text.value = sentHistory[historyIndex];
+        setEditorPlainText(sentHistory[historyIndex]);
       }
     }
+    return true;
+  }
+  return false;
+}
+
+function setEditorPlainText(text: string) {
+  editor.value?.commands.setContent(text);
+  const ed = editor.value;
+  if (ed) {
+    const end = ed.state.doc.content.size;
+    ed.chain().focus().setTextSelection(end).run();
   }
 }
 
 function submit(flip = false) {
   closeMenus(); // 发送后关闭可能开着的菜单，避免回合中还能切换模式
-  const t = text.value;
-  text.value = "";
-  if (t.trim()) {
-    sentHistory.push(t);
+  const runs = currentRuns();
+  const wireText = runsToWireText(runs, refsById.value, mentionRoot());
+  const plainText = runsToText(runs);
+  const refs = runs
+    .filter((r) => r.kind === "ref")
+    .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
+    .filter((a): a is UserInput => !!a);
+  // 先清空编辑器（onUpdate 会同步 store.attachments 为空），再写入本次附件
+  editor.value?.commands.setContent("");
+  refsById.value = new Map();
+  rowImages.value = [];
+  store.attachments = [...refs];
+  if (plainText.trim()) {
+    sentHistory.push(plainText);
     if (sentHistory.length > 100) sentHistory.shift();
   }
   historyIndex = -1;
-  void sendPrompt(t, flip);
+  void sendPrompt(wireText, flip);
 }
 
-function removeAttachment(i: number) {
-  store.attachments.splice(i, 1);
+function removeImage(i: number) {
+  rowImages.value.splice(i, 1);
+  syncAttachments();
 }
 
 function imageSrc(path: string): string {
@@ -254,13 +424,6 @@ function imageSrc(path: string): string {
   } catch {
     return path;
   }
-}
-
-function attachmentLabel(a: UserInput): string {
-  if (a.type === "mention") return `@${a.name}`;
-  if (a.type === "skill") return `$${a.name}`;
-  if (a.type === "localImage") return a.path.split(/[\\/]/).pop() ?? a.path;
-  return a.text;
 }
 
 const newChatCwdLabel = computed(() => store.newChatCwd ?? store.server.workspace);
@@ -341,14 +504,7 @@ function openGoalDialog() {
     </div>
     <div class="composer-input-row">
       <div class="menu-anchor input-anchor">
-        <textarea
-          ref="inputEl"
-          v-model="text"
-          rows="2"
-          placeholder="输入消息，@ 引用文件或插件 / $ 调用技能…"
-          @input="onInput"
-          @keydown="onKeydown"
-        ></textarea>
+        <EditorContent :editor="editor" class="rich-editor" />
         <MentionMenu
           ref="mentionMenu"
           v-if="mention"
@@ -397,26 +553,22 @@ function openGoalDialog() {
           <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
         </div>
         <div v-if="store.goalText" class="menu-anchor">
-          <button
-            class="goal-chip"
-            title="目标"
-            @click="openGoalDialog()"
-          >
+          <button class="goal-chip" title="目标" @click="openGoalDialog()">
             目标
           </button>
         </div>
       </div>
       <div class="composer-right">
-        <span
-          v-if="ctxUsage"
-          class="ctx-window"
-          :title="ctxTooltip"
-        >
+        <span v-if="ctxUsage" class="ctx-window" :title="ctxTooltip">
           {{ ctxUsage.pct }}%
         </span>
         <div class="menu-anchor">
-          <button class="model-chip" title="模型" @click="store.modelOpen = !store.modelOpen">
-          {{ modelChipLabel() }}
+          <button
+            class="model-chip"
+            title="模型"
+            @click="store.modelOpen = !store.modelOpen"
+          >
+            {{ modelChipLabel() }}
             <svg viewBox="0 0 16 16">
               <path d="M4 6l4 4 4-4z" />
             </svg>
@@ -438,8 +590,8 @@ function openGoalDialog() {
           v-else
           class="send-btn"
           title="发送"
-          :class="{ lit: !!(text.trim() || store.attachments.length) }"
-          :disabled="!text.trim() && store.attachments.length === 0"
+          :class="{ lit: !!(hasText || store.attachments.length) }"
+          :disabled="!hasText && store.attachments.length === 0"
           @click="submit()"
         >
           <svg viewBox="0 0 24 24">
@@ -449,16 +601,11 @@ function openGoalDialog() {
         </button>
       </div>
     </div>
-    <div v-if="store.attachments.length" class="attachment-row">
-      <span v-for="(a, i) in store.attachments" :key="i" class="attachment-chip">
-        <img
-          v-if="a.type === 'localImage'"
-          class="attachment-thumb"
-          :src="imageSrc(a.path)"
-          alt=""
-        />
-        {{ attachmentLabel(a) }}
-        <button title="移除" @click="removeAttachment(i)">×</button>
+    <div v-if="rowImages.length" class="attachment-row">
+      <span v-for="(a, i) in rowImages" :key="i" class="attachment-chip">
+        <img class="attachment-thumb" :src="imageSrc(a.path)" alt="" />
+        {{ a.path.split(/[\\/]/).pop() ?? a.path }}
+        <button title="移除" @click="removeImage(i)">×</button>
       </span>
     </div>
 

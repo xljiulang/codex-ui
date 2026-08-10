@@ -7,6 +7,8 @@ import {
   isImagePath,
   matchMentionToken,
   parseFileMentionSection,
+  parseInlineMentions,
+  parsePluginMentionLinks,
   parseSkillMentionLinks,
   skillMentionLinks,
   stripMentionContext,
@@ -133,7 +135,7 @@ describe("混合使用 @ 文件引用与 $ 技能引用", () => {
       { type: "localImage", path: "D:/repo/p.png" },
       {
         type: "text",
-        text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.txt: D:/repo/b.txt\n\n## My request:\n[$s1](C:/x/s1/SKILL.md) [$s2](C:/x/s2/SKILL.md) 混合测试\n",
+        text: "混合测试\n",
         text_elements: [],
       },
       { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
@@ -235,6 +237,67 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     expect(skillMentionLinks([])).toBe("");
   });
 
+  it("skillMentionLinks：插件生成 [@name](path)，技能生成 [$name](path)", () => {
+    expect(
+      skillMentionLinks([
+        {
+          type: "skill",
+          name: "documents",
+          path: "C:/x/plugins/documents",
+          source: "plugin",
+        },
+      ]),
+    ).toBe("[@documents](C:/x/plugins/documents) ");
+    expect(
+      skillMentionLinks([
+        {
+          type: "skill",
+          name: "csharp-code-rules",
+          path: "C:/x/skills/csharp-code-rules/SKILL.md",
+          source: "skill",
+        },
+      ]),
+    ).toBe("[$csharp-code-rules](C:/x/skills/csharp-code-rules/SKILL.md) ");
+    expect(
+      skillMentionLinks([
+        {
+          type: "skill",
+          name: "documents",
+          path: "C:/x/plugins/documents",
+          source: "plugin",
+        },
+        { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
+      ]),
+    ).toBe(
+      "[@documents](C:/x/plugins/documents) [$s1](C:/x/s1/SKILL.md) ",
+    );
+  });
+
+  it("parsePluginMentionLinks 解析 [@name](path)，stripMentionContext 同时剥离 @ 与 $ 链接", () => {
+    const text =
+      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[@documents](C:/x/plugins/documents) [$csharp-code-rules](C:/x/skills/csharp-code-rules/SKILL.md) 混合测试\n";
+    expect(parsePluginMentionLinks(text)).toEqual([
+      { name: "documents", path: "C:/x/plugins/documents" },
+    ]);
+    expect(parseSkillMentionLinks(text)).toEqual([
+      {
+        name: "csharp-code-rules",
+        path: "C:/x/skills/csharp-code-rules/SKILL.md",
+      },
+    ]);
+    expect(stripMentionContext(text)).toBe("混合测试");
+    expect(
+      stripMentionContext(
+        "[@documents](C:/x/plugins/documents) 看下\n",
+      ),
+    ).toBe("看下");
+    expect(
+      stripMentionContext(
+        "[@documents](C:/x/plugins/documents) [$csharp-code-rules](C:/x/SKILL.md) 看下\n",
+      ),
+    ).toBe("看下");
+  });
+
   it("assemblePromptText 文件段 + My request + 技能链接 + 用户输入", () => {
     const text = assemblePromptText("逆向分析", [
       { type: "mention", name: "a.exe", path: "D:/repo/a.exe" },
@@ -259,7 +322,7 @@ describe("toUserAttachment / isImagePath / baseName", () => {
       { type: "localImage", path: "D:\\repo\\a.png" },
       {
         type: "text",
-        text: "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$csharp-code-rules](C:/Users/x/.codex/skills/csharp-code-rules/SKILL.md) 按规则检查\n",
+        text: "按规则检查\n",
         text_elements: [],
       },
       {
@@ -271,6 +334,84 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     expect(buildTurnInput("hi", [])).toEqual([
       { type: "text", text: "hi\n", text_elements: [] },
     ]);
+  });
+
+  it("parseInlineMentions 按顺序解析 [@name]/[$name] 链接与文本片段", () => {
+    const text =
+      "先 [@a.cs](D:/repo/a.cs) 中间 [$csharp-code-rules](C:/x/SKILL.md) 结尾";
+    expect(parseInlineMentions(text)).toEqual([
+      { type: "text", text: "先 " },
+      { type: "ref", prefix: "@", name: "a.cs", path: "D:/repo/a.cs" },
+      { type: "text", text: " 中间 " },
+      {
+        type: "ref",
+        prefix: "$",
+        name: "csharp-code-rules",
+        path: "C:/x/SKILL.md",
+      },
+      { type: "text", text: " 结尾" },
+    ]);
+    expect(parseInlineMentions("纯文本")).toEqual([
+      { type: "text", text: "纯文本" },
+    ]);
+    expect(parseInlineMentions("")).toEqual([]);
+  });
+
+  it("parseInlineMentions 无前缀本地路径链接识别为文件引用，URL/锚点保留为文本", () => {
+    const text =
+      "[a.cs](src/a.cs) 和 [lib-toml.json](.fingerprint/toml-1/lib-toml.json) 与 [百度](https://baidu.com) 还有 [节](#a)";
+    expect(parseInlineMentions(text)).toEqual([
+      { type: "ref", prefix: "@", name: "a.cs", path: "src/a.cs" },
+      { type: "text", text: " 和 " },
+      {
+        type: "ref",
+        prefix: "@",
+        name: "lib-toml.json",
+        path: ".fingerprint/toml-1/lib-toml.json",
+      },
+      { type: "text", text: " 与 [百度](https://baidu.com) 还有 [节](#a)" },
+    ]);
+    expect(
+      parseInlineMentions(
+        "[@documents](plugin://documents@openai-primary-runtime) 看下",
+      ),
+    ).toEqual([
+      {
+        type: "ref",
+        prefix: "@",
+        name: "documents",
+        path: "plugin://documents@openai-primary-runtime",
+      },
+      { type: "text", text: " 看下" },
+    ]);
+  });
+
+  it("stripMentionContext 剥离任意位置的内联引用链接", () => {
+    expect(
+      stripMentionContext(
+        "先 [@a.cs](D:/repo/a.cs) 中间 [$csharp-code-rules](C:/x/SKILL.md) 结尾",
+      ),
+    ).toBe("先 中间 结尾");
+    expect(
+      stripMentionContext("[@documents](C:/x/documents) 看下"),
+    ).toBe("看下");
+    expect(stripMentionContext("先 [a.cs](src/a.cs) 看下")).toBe("先 看下");
+  });
+
+  it("buildTurnInput 结构化 skill 项不携带 source 标记", () => {
+    const input = buildTurnInput("看下", [
+      {
+        type: "skill",
+        name: "documents",
+        path: "C:\\x\\plugins\\documents",
+        source: "plugin",
+      },
+    ]);
+    expect(input[input.length - 1]).toEqual({
+      type: "skill",
+      name: "documents",
+      path: "C:/x/plugins/documents",
+    });
   });
 
   it("buildTurnInput 保留图片附件作为 localImage 项", () => {

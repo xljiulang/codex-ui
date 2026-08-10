@@ -183,12 +183,20 @@ const waitFor = (desc, expr, timeoutMs) =>
 
 async function setInput(text) {
   await evalJs(`(() => {
-    const ta = document.querySelector("textarea");
-    if (!ta) throw new Error("textarea 不存在");
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-    setter.call(ta, ${JSON.stringify(text)});
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    return ta.value;
+    const ed = window.__CODEX_UI_EDITOR__;
+    if (!ed) throw new Error("编辑器实例未暴露");
+    // 光标移到末尾后插入文本，触发 TipTap onUpdate / selectionUpdate 检测 @ / $ token
+    ed.commands.setTextSelection(ed.state.doc.content.size);
+    ed.commands.insertContent(${JSON.stringify(text)});
+    return ed.getText();
+  })()`);
+}
+
+async function clearInput() {
+  await evalJs(`(() => {
+    const ed = window.__CODEX_UI_EDITOR__;
+    if (!ed) return;
+    ed.commands.setContent("");
   })()`);
 }
 
@@ -198,8 +206,25 @@ async function bodyText() {
 
 async function chipLabels() {
   return evalJs(
-    `Array.from(document.querySelectorAll(".attachment-chip")).map((x) => x.textContent.trim())`,
+    `Array.from(document.querySelectorAll(".ref-chip")).map((x) => x.textContent.trim())`,
   );
+}
+
+async function hoverChipTooltip(selectorText) {
+  return evalJs(`(async () => {
+    const bubbles = document.querySelectorAll(".msg-user .bubble");
+    const b = bubbles[bubbles.length - 1];
+    const chip = Array.from(b.querySelectorAll(".mention-inline")).find((x) =>
+      x.textContent.trim().includes(${JSON.stringify(selectorText)}),
+    );
+    if (!chip) return null;
+    chip.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 250));
+    const tip = document.querySelector(".ref-tooltip");
+    const text = tip ? tip.textContent.trim() : null;
+    chip.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+    return text;
+  })()`);
 }
 
 async function clickMenuButton(text) {
@@ -288,14 +313,14 @@ async function selectPluginByEnter(input, target) {
   );
   // 固定行（选择文件/文件夹）在前，用 ↓ 把高亮移动到目标插件后 Enter 选中（不发送）
   await evalJs(`(async () => {
-    const ta = document.querySelector("textarea");
+    const el = document.querySelector(".ProseMirror");
     for (let i = 0; i < 12; i++) {
       const active = document.querySelector(".mention-menu .menu-item.active");
       if (active && active.textContent.includes(${JSON.stringify(target)})) break;
-      ta.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
       await new Promise((r) => setTimeout(r, 60));
     }
-    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   })()`);
   await sleep(300);
 }
@@ -317,8 +342,8 @@ async function selectSkillByEnter(input, target) {
   );
   // $ 菜单首项即高亮技能，Enter 选中（不再直接发送）
   await evalJs(`(() => {
-    const ta = document.querySelector("textarea");
-    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const el = document.querySelector(".ProseMirror");
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   })()`);
   await sleep(300);
 }
@@ -344,7 +369,11 @@ async function main() {
   const page = await waitForCdp();
   const mainPageId = page.id;
   await connectCdp(page.webSocketDebuggerUrl);
-  await waitFor("输入框加载", `!!document.querySelector("textarea")`, 60000);
+  await waitFor(
+    "编辑器加载",
+    `!!document.querySelector(".ProseMirror")`,
+    60000,
+  );
   log("UI 就绪");
 
   // ---------- 场景 1: @ 单独 ----------
@@ -367,6 +396,12 @@ async function main() {
     "@ 单独: 回显渲染 @hello.txt 标签",
     bubble1.includes("@hello.txt"),
     bubble1.includes("@hello.txt") ? "" : "用户气泡未见 @hello.txt",
+  );
+  const fileTip = await hoverChipTooltip("@hello.txt");
+  record(
+    "悬浮: 文件 chip 悬浮显示路径",
+    !!fileTip && fileTip.includes("hello.txt") && fileTip.includes("文件"),
+    JSON.stringify(fileTip),
   );
   record(
     "@ 单独: 模型回复包含文件标记词（文件可被读取）",
@@ -414,6 +449,12 @@ async function main() {
       ? ""
       : "用户气泡未见 $csharp-code-rules",
   );
+  const skillTip = await hoverChipTooltip("$csharp-code-rules");
+  record(
+    "悬浮: 技能 chip 悬浮显示说明",
+    !!skillTip && skillTip.includes("C#") && skillTip.includes("技能"),
+    JSON.stringify(skillTip),
+  );
   record(
     "$ 单独: 模型回复体现技能内容（SKILL.md 注入生效）",
     reply2.toLowerCase().includes("csharp-code-rules"),
@@ -429,11 +470,11 @@ async function main() {
   await selectPluginByEnter("@doc", "Documents");
   const chip2b = await chipLabels();
   record(
-    "插件: 选中后出现 $documents 附件标签且触发词被移除",
-    chip2b.some((l) => l.includes("$documents")),
-    chip2b.some((l) => l.includes("$documents"))
+    "插件: 选中后出现 @documents 内联 chip 且触发词被移除",
+    chip2b.some((l) => l.includes("@documents")),
+    chip2b.some((l) => l.includes("@documents"))
       ? ""
-      : "附件标签: " + JSON.stringify(chip2b),
+      : "内联 chip: " + JSON.stringify(chip2b),
   );
   await sleep(1500);
   const msgCountAfterB = await evalJs(
@@ -454,9 +495,49 @@ async function main() {
   const reply2b = await waitTurnDone();
   const bubble2b = await userBubbleText();
   record(
-    "插件: 回显渲染 $documents 标签（序列化与回显前缀保持现状）",
-    bubble2b.includes("$documents"),
-    bubble2b.includes("$documents") ? "" : "用户气泡未见 $documents",
+    "插件: 回显渲染 @documents 标签（插件 @ 前缀）",
+    bubble2b.includes("@documents"),
+    bubble2b.includes("@documents") ? "" : "用户气泡未见 @documents",
+  );
+  const pluginTip = await hoverChipTooltip("@documents");
+  record(
+    "悬浮: 插件 chip 悬浮显示说明",
+    !!pluginTip &&
+      pluginTip.includes("document") &&
+      !pluginTip.startsWith("plugin://") &&
+      pluginTip.includes("插件"),
+    JSON.stringify(pluginTip),
+  );
+  await evalJs(`(async () => {
+    const bubbles = document.querySelectorAll(".msg-user .bubble");
+    const b = bubbles[bubbles.length - 1];
+    const chip = Array.from(b.querySelectorAll(".mention-inline")).find((x) =>
+      x.textContent.trim().includes("@documents"),
+    );
+    if (chip) chip.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 250));
+  })()`);
+  await screenshot("2b-plugin-tooltip.png");
+  await evalJs(`(() => {
+    const bubbles = document.querySelectorAll(".msg-user .bubble");
+    const b = bubbles[bubbles.length - 1];
+    const chip = Array.from(b.querySelectorAll(".mention-inline")).find((x) =>
+      x.textContent.trim().includes("@documents"),
+    );
+    if (chip) chip.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+  })()`);
+  const pluginChipClickable = await evalJs(`(() => {
+    const bubbles = document.querySelectorAll(".msg-user .bubble");
+    const b = bubbles[bubbles.length - 1];
+    const chip = Array.from(b.querySelectorAll(".mention-inline")).find((x) =>
+      x.textContent.trim().includes("@documents"),
+    );
+    return chip ? chip.classList.contains("clickable") : null;
+  })()`);
+  record(
+    "插件: @documents chip 不可点击（plugin:// 无本地路径）",
+    pluginChipClickable === false,
+    JSON.stringify(pluginChipClickable),
   );
   record(
     "插件: 模型回复体现技能内容（SKILL.md 注入生效）",
@@ -465,36 +546,82 @@ async function main() {
   );
   await screenshot("2b-plugin-reply.png");
 
-  // ---------- 场景 3: @ + $ 混合 ----------
-  log("场景 3: @ + $ 混合");
+  // ---------- 场景 3: 混编顺序（文本-文件-文本-技能-文本） ----------
+  log("场景 3: 混编顺序");
+  await clearInput();
+  await setInput("先 ");
   await selectMention("@hello", "hello.txt", "@");
+  await setInput("中间 ");
   await selectMention("$csharp-code-rules", "csharp-code-rules", "$");
+  await setInput(
+    `结尾 ${TEST_TAG} 两件事：1) 引用文件里的标记词；2) 注入技能的名称。只列这两项。`,
+  );
   const chip3 = await chipLabels();
   record(
-    "混合: 同一消息同时挂 @hello.txt 与 $csharp-code-rules 两个附件",
-    chip3.some((l) => l.includes("@hello.txt")) &&
-      chip3.some((l) => l.includes("$csharp-code-rules")),
-    chip3.some((l) => l.includes("@hello.txt")) &&
-      chip3.some((l) => l.includes("$csharp-code-rules"))
+    "混编: 编辑器内 chip 顺序为 @hello.txt → $csharp-code-rules",
+    chip3.indexOf("@hello.txt") >= 0 &&
+      chip3.indexOf("$csharp-code-rules") > chip3.indexOf("@hello.txt"),
+    chip3.length === 0
       ? ""
-      : "附件标签: " + JSON.stringify(chip3),
+      : "内联 chip: " + JSON.stringify(chip3),
   );
   await screenshot("3-mixed-chips.png");
 
-  await setInput(
-    `${TEST_TAG} 两件事：1) 引用文件里的标记词；2) 注入技能的名称。只列这两项。`,
-  );
   const send3 = await clickSend();
   if (!send3.ok) throw new Error("场景3 发送失败: " + send3.reason);
-  const reply3 = await waitTurnDone();
   const bubble3 = await userBubbleText();
   record(
-    "混合: 回显同时渲染 @hello.txt 与 $csharp-code-rules",
-    bubble3.includes("@hello.txt") && bubble3.includes("$csharp-code-rules"),
-    bubble3.slice(0, 200),
+    "混编: 回显顺序与输入一致（先 @hello.txt 中间 $csharp-code-rules 结尾）",
+    bubble3.indexOf("先") < bubble3.indexOf("@hello.txt") &&
+      bubble3.indexOf("@hello.txt") < bubble3.indexOf("中间") &&
+      bubble3.indexOf("中间") < bubble3.indexOf("$csharp-code-rules") &&
+      bubble3.indexOf("$csharp-code-rules") < bubble3.indexOf("结尾"),
+    bubble3.slice(0, 160),
   );
   record(
-    "混合: 模型回复同时覆盖文件标记词与技能名称",
+    "混编: 回显同时渲染 @hello.txt 与 $csharp-code-rules",
+    bubble3.includes("@hello.txt") && bubble3.includes("$csharp-code-rules"),
+    bubble3.slice(0, 160),
+  );
+  const inlineLayout = await evalJs(`(() => {
+    const bubbles = document.querySelectorAll(".msg-user .bubble");
+    const b = bubbles[bubbles.length - 1];
+    if (!b) return { ok: false, reason: "no bubble" };
+    const direct = Array.from(b.children);
+    return {
+      ok:
+        !direct.some((el) => el.classList.contains("md") && !el.classList.contains("md-inline")) &&
+        b.querySelectorAll(":scope > .md-inline").length === 3,
+      blocks: direct.filter((el) => el.classList.contains("md") && !el.classList.contains("md-inline")).length,
+      inlineCount: b.querySelectorAll(":scope > .md-inline").length,
+      chipCount: b.querySelectorAll(":scope > .mention-inline").length,
+    };
+  })()`);
+  record("混编: 回显文本片段为内联盒子（无块级 .md，保持单行）", inlineLayout.ok, JSON.stringify(inlineLayout));
+  // 点击回显文件 chip → reveal_path 定位（测试钩子只记录不真开资源管理器）
+  await evalJs(`(() => {
+    window.__CODEX_UI_TEST__ = true;
+    window.__CODEX_UI_TEST_LOG__ = [];
+    const bubbles = document.querySelectorAll(".msg-user .bubble");
+    const b = bubbles[bubbles.length - 1];
+    const chip = Array.from(b.querySelectorAll(".mention-inline.clickable")).find((x) =>
+      x.textContent.includes("@hello.txt"),
+    );
+    if (chip) chip.click();
+  })()`);
+  await sleep(400);
+  const fileChipLog = await evalJs(`window.__CODEX_UI_TEST_LOG__`);
+  record(
+    "混编: 点击回显文件 chip 触发 reveal_path 定位文件",
+    fileChipLog.some(
+      (l) => l.cmd === "reveal_path" && l.args?.path === testDir + "\\hello.txt",
+    ),
+    JSON.stringify(fileChipLog),
+  );
+  await evalJs(`window.__CODEX_UI_TEST__ = false;`);
+  const reply3 = await waitTurnDone();
+  record(
+    "混编: 模型回复同时覆盖文件标记词与技能名称",
     reply3.includes(MARKER) && reply3.toLowerCase().includes("csharp-code-rules"),
     reply3.slice(0, 200),
   );
@@ -778,6 +905,7 @@ async function main() {
   await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
   await sleep(300);
 
+  await clearInput();
   await setInput("@ida");
   await waitFor("插件搜索菜单", `!!document.querySelector(".mention-menu")`, 10000);
   await waitFor(
@@ -794,11 +922,13 @@ async function main() {
   await evalJs(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))`);
   await sleep(300);
 
+  await clearInput();
   await setInput("看下@file");
   await sleep(800);
   const noMenu = await evalJs(`!document.querySelector(".mention-menu")`);
   record("边界: 词中 @（前面无空格）不弹菜单", noMenu);
 
+  await clearInput();
   await setInput("@");
   await waitFor("@ 空 token 菜单", `!!document.querySelector(".mention-menu")`, 5000);
   const emptyRows = await evalJs(`(() => {
@@ -823,19 +953,35 @@ async function main() {
   const closed = await evalJs(`!document.querySelector(".mention-menu")`);
   record("边界: Esc 关闭菜单", closed);
 
+  await clearInput();
   await selectMention("@hello", "hello.txt", "@");
   const sendEnabled = await evalJs(`(() => {
     const b = document.querySelector("button.send-btn");
     return b ? !b.disabled : false;
   })()`);
   record("边界: 仅附件无文本时发送按钮可用", sendEnabled);
+  // 内联 chip 移除：定位 chip 节点，选中后用 deleteSelection 删除
   const removed = await evalJs(`(() => {
-    const btn = document.querySelector(".attachment-chip button");
-    if (!btn) return false;
-    btn.click();
-    return true;
+    const ed = window.__CODEX_UI_EDITOR__;
+    if (!ed) return false;
+    let chipPos = -1;
+    let chipSize = 0;
+    ed.state.doc.descendants((node, pos) => {
+      if (node.type.name === "reference") {
+        chipPos = pos;
+        chipSize = node.nodeSize;
+        return false;
+      }
+      return true;
+    });
+    if (chipPos < 0) return false;
+    ed.chain()
+      .setTextSelection({ from: chipPos, to: chipPos + chipSize })
+      .deleteSelection()
+      .run();
+    return document.querySelectorAll(".ref-chip").length === 0;
   })()`);
-  record("边界: 附件标签可移除", removed);
+  record("边界: 内联引用 chip 可移除", removed);
 
   // ---------- 汇总 ----------
   const pass = results.filter((r) => r.ok).length;
