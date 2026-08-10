@@ -1721,22 +1721,27 @@ select option {
   border-radius: 999px;
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--purple);
-  background: rgba(199, 146, 234, 0.09);
-  border: 1px solid rgba(199, 146, 234, 0.28);
+  color: var(--accent);
+  background: rgba(77, 166, 255, 0.09);
+  border: 1px solid rgba(77, 166, 255, 0.28);
   backdrop-filter: blur(6px);
 }
 
 .task-chip:hover:not(:disabled) {
-  border-color: var(--purple);
-  background: rgba(199, 146, 234, 0.15);
-  box-shadow: 0 0 12px rgba(199, 146, 234, 0.16);
+  border-color: var(--accent);
+  background: rgba(77, 166, 255, 0.15);
+  box-shadow: 0 0 12px rgba(77, 166, 255, 0.18);
 }
 
 .task-chip svg {
   width: 10px;
   height: 10px;
   fill: currentColor;
+}
+
+.task-chip .chip-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .model-chip {

@@ -26,6 +26,7 @@ import {
   toUserAttachment,
   type FuzzyFileResult,
 } from "../lib/mention";
+import { permissionMode } from "../lib/permissions";
 import {
   Reference,
   docToRuns,
@@ -35,6 +36,7 @@ import {
   tokenStartPos,
   type EditorRun,
 } from "../lib/richEditor";
+import { taskMode } from "../lib/tasks";
 
 const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
   null,
@@ -527,10 +529,8 @@ function taskModeLabel(): string {
             :disabled="store.turnActive"
             @click="store.permOpen = !store.permOpen"
           >
-            <svg v-if="store.permissionMode === 'full-access'" viewBox="0 0 24 24">
-              <path
-                d="M12 2 4 5v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V5l-8-3zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"
-              />
+            <svg class="chip-icon" viewBox="0 0 24 24">
+              <path :d="permissionMode(store.permissionMode).icon" />
             </svg>
             {{ permissionChip() }}
             <svg class="chevron" viewBox="0 0 16 16">
@@ -546,6 +546,9 @@ function taskModeLabel(): string {
             :disabled="store.turnActive"
             @click="store.taskOpen = !store.taskOpen"
           >
+            <svg class="chip-icon" viewBox="0 0 24 24">
+              <path :d="taskMode(store.taskMode).icon" />
+            </svg>
             {{ taskModeLabel() }}
             <svg viewBox="0 0 16 16">
               <path d="M4 6l4 4 4-4z" />
@@ -565,9 +568,9 @@ function taskModeLabel(): string {
             @click="store.modelOpen = !store.modelOpen"
           >
             <svg class="model-chip-icon" viewBox="0 0 24 24">
-              <path
-                d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"
-              />
+              <rect x="5" y="5" width="14" height="14" rx="2" />
+              <rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+              <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
             </svg>
             {{ modelChipLabel() }}
             <svg viewBox="0 0 16 16">
