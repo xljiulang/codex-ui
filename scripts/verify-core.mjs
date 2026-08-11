@@ -381,6 +381,43 @@ async function scenarioCtrlEnter() {
   await clearInput();
 }
 
+// ---------- 场景 2b: 粘贴图片添加附件 ----------
+async function scenarioPasteImage() {
+  log("场景 2b: 粘贴图片添加附件");
+  await evalJs(`(() => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const file = new File([bytes], "e2e-clip.png", { type: "image/png" });
+    const dt = {
+      items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+      files: [file],
+      types: ["Files"],
+      getData: () => "",
+    };
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: dt });
+    document.querySelector(".ProseMirror").dispatchEvent(ev);
+  })()`);
+  await waitFor(
+    "粘贴后图片缩略图出现",
+    `!!document.querySelector(".attachment-thumb")`,
+    15000,
+  );
+  const thumbSrc = await evalJs(
+    `document.querySelector(".attachment-thumb")?.getAttribute("src") ?? ""`,
+  );
+  record(
+    "粘贴: 图片进入附件区并渲染缩略图（落盘成功）",
+    thumbSrc.includes("asset.localhost"),
+    thumbSrc.slice(0, 120),
+  );
+  const hasThumb = await evalJs(
+    `!!document.querySelector(".attachment-chip .attachment-thumb")`,
+  );
+  record("粘贴: 附件区存在图片缩略图 chip", hasThumb);
+  await screenshot("2b-paste-image.png");
+  await clearInput();
+}
+
 // ---------- 场景 3: 置顶（Pinned 分区）+ 徽章对齐 + 持久化 ----------
 async function scenarioPin() {
   log("场景 3: 置顶 / 取消置顶 / 徽章对齐 / 持久化");
@@ -420,13 +457,31 @@ async function scenarioPin() {
   );
 
   const top = await firstRowsText();
+  const pinLayout = await evalJs(`(() => {
+    const rows = Array.from(document.querySelectorAll(".history-item"));
+    const badges = rows.map((r) => !!r.querySelector(".pin-badge"));
+    const firstPinned = badges.indexOf(true);
+    const lastPinned = badges.lastIndexOf(true);
+    const contiguous =
+      firstPinned === 0 &&
+      badges.slice(firstPinned, lastPinned + 1).every(Boolean) &&
+      badges.slice(lastPinned + 1).every((b) => !b);
+    const idxA = rows.findIndex((r) => r.innerText.includes(${JSON.stringify(
+      TAG_A,
+    )}));
+    const idxB = rows.findIndex((r) => r.innerText.includes(${JSON.stringify(
+      TAG_B,
+    )}));
+    return { contiguous, idxA, idxB, lastPinned, rows: rows.length };
+  })()`);
   record(
     "置顶: 置顶会话排在列表最前（固定优先排序）",
-    (top[0]?.includes(TAG_A) || top[0]?.includes(TAG_B)) &&
-      (top[1]?.includes(TAG_A) || top[1]?.includes(TAG_B)) &&
-      top[0]?.includes(TAG_A) !== top[0]?.includes(TAG_B) &&
-      top[1]?.includes(TAG_A) !== top[1]?.includes(TAG_B),
-    JSON.stringify(top),
+    pinLayout.contiguous &&
+      pinLayout.idxA >= 0 &&
+      pinLayout.idxB >= 0 &&
+      pinLayout.idxA <= pinLayout.lastPinned &&
+      pinLayout.idxB <= pinLayout.lastPinned,
+    `${JSON.stringify(pinLayout)} top=${JSON.stringify(top)}`,
   );
   const edges = await pinBadgeEdges();
   const aligned =
@@ -523,6 +578,7 @@ async function main() {
 
   await scenarioSettingsToggle();
   await scenarioCtrlEnter();
+  await scenarioPasteImage();
   await scenarioPin();
   await scenarioStopOnSwitch();
 

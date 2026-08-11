@@ -54,6 +54,9 @@ const refsById = ref(new Map<string, UserInput>());
 const rowAttachments = ref<UserInput[]>([]);
 const hasText = ref(false);
 
+// 粘贴的截图/位图最大字节数（原路径文件不受限）
+const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
+
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
 const sentHistory: string[] = [];
 let historyIndex = -1;
@@ -73,6 +76,7 @@ const editor = useEditor({
       "aria-multiline": "true",
     },
     handleKeyDown: (_view, event) => handleKeydown(event),
+    handlePaste: (_view, event) => handlePasteDom(event),
   },
   onCreate: () => {
     syncAfterChange();
@@ -383,6 +387,89 @@ function handleKeydown(e: KeyboardEvent): boolean {
     return true;
   }
   return false;
+}
+
+/** 从剪贴板 MIME/文件名推断图片扩展名（白名单与后端 save_pasted_image 一致） */
+function imageExtFromType(type: string, fallbackName: string): string {
+  const norm = (ext: string) => (ext === "jpeg" ? "jpg" : ext);
+  const m = /^image\/(png|jpe?g|gif|webp|bmp)$/i.exec(type);
+  if (m) return norm(m[1].toLowerCase());
+  const fn = /\.(png|jpe?g|gif|webp|bmp)$/i.exec(fallbackName);
+  if (fn) return norm(fn[1].toLowerCase());
+  return "png";
+}
+
+/**
+ * 粘贴图片/文件 → 附件区：
+ * - 图片项：优先用剪贴板原始路径（资源管理器复制的图片文件），读不到（截图/网页位图）则落盘；
+ * - 非图片文件项：仅支持原始路径（CF_HDROP），读不到提示暂不支持；
+ * - 纯文本粘贴不受影响（返回 false 走默认）。
+ */
+async function handlePastedFiles(files: File[]) {
+  let originalPaths: string[] = [];
+  try {
+    originalPaths = await invoke<string[]>("clipboard_file_paths");
+  } catch {
+    originalPaths = [];
+  }
+  const originalByBase = new Map<string, string>();
+  for (const p of originalPaths) {
+    const b = baseName(p).toLowerCase();
+    if (b && !originalByBase.has(b)) originalByBase.set(b, p);
+  }
+
+  let added = 0;
+  for (const f of files) {
+    const name = f.name || "pasted";
+    const orig = originalByBase.get(name.toLowerCase());
+    if (f.type.startsWith("image/")) {
+      if (orig) {
+        rowAttachments.value.push(toUserAttachment(name, orig));
+        added++;
+        continue;
+      }
+      if (f.size > MAX_PASTED_IMAGE_BYTES) {
+        store.toast = "粘贴的图片过大（>20MB），已跳过";
+        continue;
+      }
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const saved = await invoke<string>("save_pasted_image", {
+          bytes: Array.from(bytes),
+          name: `pasted.${imageExtFromType(f.type, name)}`,
+        });
+        rowAttachments.value.push({ type: "localImage", path: saved });
+        added++;
+      } catch (e) {
+        store.toast = toastError(e);
+      }
+    } else if (orig) {
+      rowAttachments.value.push(toUserAttachment(name, orig));
+      added++;
+    } else {
+      store.toast = `暂不支持该粘贴（无法获取原始路径）: ${name}`;
+    }
+  }
+  if (added) {
+    syncAttachments();
+    await nextTick();
+  }
+}
+
+/** ProseMirror paste 入口：有文件/图片项则消费事件，否则走默认（文本粘贴） */
+function handlePasteDom(e: ClipboardEvent): boolean {
+  const fileItems = Array.from(e.clipboardData?.items ?? []).filter(
+    (it) => it.kind === "file",
+  );
+  if (!fileItems.length) return false;
+  e.preventDefault();
+  // DataTransferItem 只在 paste 事件同步阶段有效：先取出 File，再异步处理
+  const files = fileItems
+    .map((it) => it.getAsFile())
+    .filter((f): f is File => !!f);
+  if (!files.length) return false;
+  void handlePastedFiles(files);
+  return true;
 }
 
 function setEditorPlainText(text: string) {

@@ -331,6 +331,85 @@ pub async fn pick_directory(initial_dir: Option<String>) -> Result<Option<String
     .map_err(|e| e.to_string())?
 }
 
+/// 图片扩展名白名单（来自粘贴文件名/剪贴板类型）
+fn image_extension(name: &str) -> Result<String, String> {
+    let ext = name
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp") {
+        Ok(ext)
+    } else {
+        Err(format!("不支持的图片格式: {name}"))
+    }
+}
+
+fn pasted_file_name(ext: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PASTE_SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = PASTE_SEQ.fetch_add(1, Ordering::Relaxed);
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("pasted-{}-{ms}-{seq}.{ext}", std::process::id())
+}
+
+/// 把图片字节写入指定目录，返回绝对路径
+fn save_image_bytes(
+    dir: &std::path::Path,
+    name: &str,
+    bytes: &[u8],
+) -> Result<String, String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("创建目录失败 {}: {e}", dir.display()))?;
+    let path = dir.join(name);
+    std::fs::write(&path, bytes)
+        .map_err(|e| format!("写入图片失败 {}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// 粘贴的图片落盘：优先临时目录 `%TEMP%\codex-ui-paste`，失败回退应用数据目录
+#[tauri::command]
+pub async fn save_pasted_image(
+    app: AppHandle,
+    bytes: Vec<u8>,
+    name: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let ext = image_extension(&name)?;
+        let file_name = pasted_file_name(&ext);
+        let primary = std::env::temp_dir().join("codex-ui-paste");
+        if let Ok(p) = save_image_bytes(&primary, &file_name, &bytes) {
+            return Ok(p);
+        }
+        let fallback = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("获取应用数据目录失败: {e}"))?
+            .join("attachments");
+        save_image_bytes(&fallback, &file_name, &bytes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 读取剪贴板中资源管理器复制的文件原始路径（CF_HDROP）
+#[tauri::command]
+pub async fn clipboard_file_paths() -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(|| {
+        let mut files: Vec<String> = Vec::new();
+        clipboard_win::raw::open().map_err(|e| format!("打开剪贴板失败: {e}"))?;
+        let r = clipboard_win::raw::get_file_list(&mut files);
+        let _ = clipboard_win::raw::close();
+        r.map_err(|e| format!("读取剪贴板文件失败: {e}"))?;
+        Ok(files)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -341,4 +420,35 @@ pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
 pub fn settings_set(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     settings::save(&dir, &settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_extension_whitelist() {
+        assert_eq!(image_extension("shot.png").unwrap(), "png");
+        assert_eq!(image_extension("a.JPEG").unwrap(), "jpeg");
+        assert_eq!(image_extension("x.webp").unwrap(), "webp");
+        assert!(image_extension("a.txt").is_err());
+        assert!(image_extension("noext").is_err());
+    }
+
+    #[test]
+    fn save_image_bytes_writes_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = save_image_bytes(dir.path(), "pasted-1-123.png", b"img").unwrap();
+        assert!(std::path::Path::new(&p).is_file());
+        assert_eq!(std::fs::read(&p).unwrap(), b"img");
+        assert!(p.contains("pasted-1-123.png"));
+    }
+
+    #[test]
+    fn pasted_file_name_unique_per_call() {
+        let a = pasted_file_name("png");
+        let b = pasted_file_name("png");
+        assert_ne!(a, b);
+        assert!(a.ends_with(".png"));
+    }
 }

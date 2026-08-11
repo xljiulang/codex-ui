@@ -425,3 +425,174 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(wrapper.findAll(".ref-chip").length).toBe(0);
   });
 });
+
+describe("ComposerBar 粘贴图片/文件", () => {
+  let wrapper: VueWrapper | null = null;
+
+  beforeEach(() => {
+    store.attachments.splice(0);
+    store.toast = "";
+    store.threadPlugins = {};
+    store.currentThreadId = null;
+    store.server.workspace = "D:/repo";
+    store.settings.enter_to_send = true;
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  function makeFileItem(name: string, type: string, size = 8) {
+    return {
+      kind: "file",
+      type,
+      getAsFile: () =>
+        ({
+          name,
+          type,
+          size,
+          arrayBuffer: async () => new Uint8Array(size).buffer,
+        }) as unknown as File,
+    };
+  }
+
+  function makeDataTransfer(items: unknown[]) {
+    return {
+      items,
+      files: [],
+      types: [],
+      getData: () => "",
+      setData: () => {},
+    } as unknown as DataTransfer;
+  }
+
+  async function pasteItems(items: unknown[]) {
+    await flushPromises();
+    const dt = makeDataTransfer(items);
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: dt });
+    wrapper!.find(".ProseMirror").element.dispatchEvent(ev);
+    await flushPromises();
+  }
+
+  it("粘贴截图位图（无原始路径）：落盘并生成 localImage 附件", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "clipboard_file_paths") return [];
+      if (cmd === "save_pasted_image") return "C:/tmp/paste/pasted-1-1.png";
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await pasteItems([makeFileItem("clip.png", "image/png")]);
+
+    expect(mockedInvoke).toHaveBeenCalledWith("save_pasted_image", {
+      bytes: expect.any(Array),
+      name: "pasted.png",
+    });
+    expect(store.attachments).toEqual([
+      { type: "localImage", path: "C:/tmp/paste/pasted-1-1.png" },
+    ]);
+    expect(wrapper.find(".attachment-thumb").exists()).toBe(true);
+    expect(getEditor().getText()).toBe("");
+  });
+
+  it("粘贴图片文件（原始路径可解析）：直接用原路径，不落盘", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "clipboard_file_paths") return ["D:/repo/shot.png"];
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await pasteItems([makeFileItem("shot.png", "image/png")]);
+
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "save_pasted_image",
+      expect.anything(),
+    );
+    expect(store.attachments).toEqual([
+      { type: "localImage", path: "D:/repo/shot.png" },
+    ]);
+  });
+
+  it("粘贴非图片文件（原始路径可解析）：生成 mention 附件", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "clipboard_file_paths") return ["D:/repo/report.pdf"];
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await pasteItems([makeFileItem("report.pdf", "application/pdf")]);
+
+    expect(store.attachments).toEqual([
+      { type: "mention", name: "report.pdf", path: "D:/repo/report.pdf" },
+    ]);
+    expect(wrapper.find(".attachment-chip").text()).toContain("@report.pdf");
+  });
+
+  it("粘贴非图片文件（无原始路径）：提示暂不支持且不加附件", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "clipboard_file_paths") return [];
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await pasteItems([makeFileItem("report.pdf", "application/pdf")]);
+
+    expect(store.toast).toContain("暂不支持该粘贴");
+    expect(store.attachments).toEqual([]);
+  });
+
+  it("粘贴超大图片（>20MB）：提示跳过且不加附件", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "clipboard_file_paths") return [];
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await pasteItems([
+      makeFileItem("huge.png", "image/png", 21 * 1024 * 1024),
+    ]);
+
+    expect(store.toast).toContain("图片过大");
+    expect(store.attachments).toEqual([]);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "save_pasted_image",
+      expect.anything(),
+    );
+  });
+
+  it("纯文本粘贴：走默认行为，不触发附件逻辑", async () => {
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    const dt = makeDataTransfer([
+      { kind: "string", type: "text/plain" },
+    ]);
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: dt });
+    wrapper.find(".ProseMirror").element.dispatchEvent(ev);
+    await flushPromises();
+
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "clipboard_file_paths",
+      expect.anything(),
+    );
+    expect(store.attachments).toEqual([]);
+  });
+
+  it("混合粘贴：截图位图落盘 + 文件原路径，一次全部处理", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "clipboard_file_paths") return ["D:/repo/a.txt"];
+      if (cmd === "save_pasted_image") return "C:/tmp/paste/pasted-2-2.png";
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await pasteItems([
+      makeFileItem("clip.png", "image/png"),
+      makeFileItem("a.txt", "text/plain"),
+    ]);
+
+    expect(store.attachments).toEqual([
+      { type: "localImage", path: "C:/tmp/paste/pasted-2-2.png" },
+      { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
+    ]);
+    expect(mockedInvoke).toHaveBeenCalledTimes(2);
+  });
+});

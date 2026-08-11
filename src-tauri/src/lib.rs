@@ -40,6 +40,8 @@ pub fn run() {
             codex::diff::take_diff_params,
             codex::commands::pick_files,
             codex::commands::pick_directory,
+            codex::commands::save_pasted_image,
+            codex::commands::clipboard_file_paths,
             codex::commands::settings_get,
             codex::commands::settings_set,
         ])
