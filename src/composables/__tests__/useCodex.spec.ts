@@ -386,6 +386,38 @@ describe("切换会话自动标准停止旧回合", () => {
     );
     expect(interruptCalls).toHaveLength(0);
     expect(store.confirm).toBeNull();
+    // 点击当前会话不重载、不重置运行状态
+    expect(store.turnActive).toBe(true);
+    expect(store.currentTurnId).toBe("turn-1");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_read",
+      expect.anything(),
+    );
+  });
+
+  it("空闲时点击当前会话同样不重载、不改动任何状态", async () => {
+    store.turnActive = false;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-9";
+    store.currentThreadName = "会话一";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t1", name: "改过的名字", turns: [] },
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await openThread("t1");
+
+    expect(store.currentThreadId).toBe("t1");
+    expect(store.currentThreadName).toBe("会话一");
+    expect(store.turnActive).toBe(false);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_read",
+      expect.anything(),
+    );
   });
 
   it("会话进行中取消切换：新建对话不中断、不切换", async () => {

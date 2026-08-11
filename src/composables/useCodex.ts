@@ -899,6 +899,8 @@ export async function newEmptyChat() {
 }
 
 export async function openThread(threadId: string) {
+  // 点击当前会话不产生任何影响（不重载、不重置运行状态，含进行中场景）
+  if (threadId === store.currentThreadId) return;
   // 会话进行中切到其它会话：先让用户确认（点当前会话不算切换，不弹窗）
   if (
     store.turnActive &&
