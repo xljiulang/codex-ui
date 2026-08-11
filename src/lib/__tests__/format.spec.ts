@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatElapsed } from "../format";
+import { formatDuration, formatElapsed, formatRelativeTime } from "../format";
 
 describe("耗时格式化", () => {
   it("进行中计时 mm:ss.s", () => {
@@ -20,5 +20,10 @@ describe("耗时格式化", () => {
 
   it("超过 10 分钟沿用 mm:ss", () => {
     expect(formatDuration(10 * 60 * 1000)).toBe("10:00");
+  });
+
+  it("超过 30 天显示两位数年份的紧凑日期（适配固定时间列）", () => {
+    const past = Date.now() / 1000 - 40 * 86400;
+    expect(formatRelativeTime(past)).toMatch(/^\d{2}\/\d{1,2}\/\d{1,2}$/);
   });
 });

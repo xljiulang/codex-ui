@@ -23,5 +23,10 @@ export function formatRelativeTime(ts?: number | null): string {
   if (abs < 3600) return `${Math.floor(abs / 60)} 分`;
   if (abs < 86400) return `${Math.floor(abs / 3600)} 小时`;
   if (abs < 86400 * 30) return `${Math.floor(abs / 86400)} 天`;
-  return new Date(ts * 1000).toLocaleDateString("zh-CN");
+  // 固定宽度时间列：超过 30 天用两位数年份的紧凑日期，避免撑宽列导致徽章错位
+  return new Date(ts * 1000).toLocaleDateString("zh-CN", {
+    year: "2-digit",
+    month: "numeric",
+    day: "numeric",
+  });
 }

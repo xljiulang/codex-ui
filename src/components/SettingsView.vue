@@ -32,7 +32,7 @@ async function apply() {
     <div class="setting-row checkbox-row">
       <input id="enter" v-model="enterToSend" type="checkbox" />
       <label for="enter" style="margin: 0">
-        Enter 快捷发送（关闭后 Enter 换行，Ctrl+Enter 发送）
+        Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
       </label>
     </div>
 

@@ -23,7 +23,7 @@ function onNewChat() {
 
 function onSettings() {
   store.showHistory = false;
-  store.showSettings = true;
+  store.showSettings = !store.showSettings;
 }
 
 function onHistory() {

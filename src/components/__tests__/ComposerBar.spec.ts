@@ -133,6 +133,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     store.server.workspace = "D:/repo";
     store.currentThreadCwd = null;
     store.newChatCwd = null;
+    store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
     mockRpc(false);
@@ -357,5 +358,70 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await flushPromises();
     expect(wrapper.find(".mention-menu").exists()).toBe(false);
+  });
+
+  it("快捷发送开启：Ctrl+Enter 插入硬换行且不发送", async () => {
+    wrapper = mount(ComposerBar);
+    await typeInEditor("abc");
+    await wrapper
+      .find(".ProseMirror")
+      .trigger("keydown", { key: "Enter", ctrlKey: true });
+    await flushPromises();
+    expect(JSON.stringify(getEditor().getJSON())).toContain("hardBreak");
+    expect(mockedSendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("快捷发送开启：Shift+Enter 无操作，普通 Enter 发送", async () => {
+    wrapper = mount(ComposerBar);
+    await typeInEditor("abc");
+    await wrapper
+      .find(".ProseMirror")
+      .trigger("keydown", { key: "Enter", shiftKey: true });
+    await flushPromises();
+    expect(JSON.stringify(getEditor().getJSON())).not.toContain("hardBreak");
+    expect(getEditor().getText()).toBe("abc");
+    expect(mockedSendPrompt).not.toHaveBeenCalled();
+    await wrapper.find(".ProseMirror").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(mockedSendPrompt).toHaveBeenCalledWith(
+      expect.stringContaining("abc"),
+      false,
+    );
+  });
+
+  it("快捷发送关闭：Enter 换行不发送，Ctrl+Enter 发送并翻转", async () => {
+    store.settings.enter_to_send = false;
+    wrapper = mount(ComposerBar);
+    await typeInEditor("abc");
+    await wrapper.find(".ProseMirror").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(mockedSendPrompt).not.toHaveBeenCalled();
+    const doc = getEditor().getJSON() as { content?: unknown[] };
+    expect((doc.content ?? []).length).toBeGreaterThan(1);
+    await wrapper
+      .find(".ProseMirror")
+      .trigger("keydown", { key: "Enter", ctrlKey: true });
+    await flushPromises();
+    expect(mockedSendPrompt).toHaveBeenCalledWith(
+      expect.stringContaining("abc"),
+      true,
+    );
+  });
+
+  it("@ 菜单打开时 Ctrl+Enter 插入换行而非选中高亮项", async () => {
+    mockRpc(true);
+    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+    wrapper = mount(ComposerBar);
+    await typeInEditor("@doc");
+    await waitSearch();
+    expect(wrapper.find(".mention-menu").exists()).toBe(true);
+    await wrapper
+      .find(".ProseMirror")
+      .trigger("keydown", { key: "Enter", ctrlKey: true });
+    await flushPromises();
+    expect(JSON.stringify(getEditor().getJSON())).toContain("hardBreak");
+    expect(mockedSendPrompt).not.toHaveBeenCalled();
+    expect(wrapper.findAll(".attachment-chip").length).toBe(0);
+    expect(wrapper.findAll(".ref-chip").length).toBe(0);
   });
 });

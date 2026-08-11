@@ -428,14 +428,57 @@ export function effectiveEffort(): string {
   return m?.defaultReasoningEffort ?? "";
 }
 
+/** 新版协议内置的 “Pinned” 分区，作为置顶的持久化位置（可用 threadSection/list 发现） */
+const PINNED_SECTION_NAME = "Pinned";
+/** 兜底：该内置分区 id 在所有安装中固定（实测与 CODEX_HOME 无关） */
+const FALLBACK_PINNED_SECTION_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
+let pinnedSectionIdCache: string | null = null;
+
+/** 线程是否置顶：优先看服务端返回的 section 是否指向内置 Pinned 分区 */
+function isPinnedThread(t: ThreadSummary): boolean {
+  if (t.isPinned) return true;
+  const sid = t.section?.id;
+  return (
+    sid === pinnedSectionIdCache ||
+    sid === FALLBACK_PINNED_SECTION_ID ||
+    t.section?.name === PINNED_SECTION_NAME
+  );
+}
+
+/** 把服务端 section 状态物化为 isPinned 字段，供现有 UI 与排序直接使用 */
+function normalizeThreadPins(list: ThreadSummary[]): ThreadSummary[] {
+  return list.map((t) => ({ ...t, isPinned: isPinnedThread(t) }));
+}
+
 /** 固定优先，再按最近时间降序 */
 export function sortThreads(list: ThreadSummary[]): ThreadSummary[] {
-  return [...list].sort((a, b) => {
-    if (!!a.isPinned !== !!b.isPinned) return a.isPinned ? -1 : 1;
+  return normalizeThreadPins(list).sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
     const ar = a.recencyAt ?? a.updatedAt ?? 0;
     const br = b.recencyAt ?? b.updatedAt ?? 0;
     return br - ar;
   });
+}
+
+/** 获取内置 “Pinned” 分区的 id（首次调用后缓存） */
+async function getPinnedSectionId(): Promise<string | null> {
+  if (pinnedSectionIdCache) return pinnedSectionIdCache;
+  try {
+    const res = await invoke<{ data: { id: string; name: string }[] }>(
+      "codex_rpc",
+      {
+        method: "threadSection/list",
+        params: { limit: 50 },
+      },
+    );
+    const found =
+      res.data?.find((s) => s.name === PINNED_SECTION_NAME)?.id ??
+      res.data?.find((s) => s.id === FALLBACK_PINNED_SECTION_ID)?.id;
+    pinnedSectionIdCache = found ?? FALLBACK_PINNED_SECTION_ID;
+  } catch {
+    pinnedSectionIdCache = FALLBACK_PINNED_SECTION_ID;
+  }
+  return pinnedSectionIdCache;
 }
 
 export async function refreshThreads(loadMore = false) {
@@ -529,13 +572,22 @@ export async function renameThread(threadId: string, name: string) {
 
 /** 固定/取消固定会话（置顶） */
 export async function togglePin(threadId: string, pinned: boolean) {
+  const t = store.threads.find((x) => x.id === threadId);
+  const prev = t?.isPinned;
   try {
+    const sectionId = pinned ? await getPinnedSectionId() : null;
+    if (pinned && !sectionId) {
+      setToast("当前 Codex 版本不支持置顶");
+      return;
+    }
+    if (t) t.isPinned = pinned;
     await invoke("codex_rpc", {
       method: "thread/metadata/update",
-      params: { threadId, isPinned: pinned },
+      params: { threadId, sectionId },
     });
     await refreshThreads();
   } catch (e) {
+    if (t) t.isPinned = prev;
     setToast(String(e));
   }
 }
@@ -757,6 +809,13 @@ export async function sendPrompt(text: string, flip = false) {
 }
 
 export async function newEmptyChat() {
+  // 标准停止旧回合（与停止按钮一致，含目标模式清目标），再切换到新对话；
+  // 显式传入旧线程/回合 id，避免切换后 store 已复位导致中断丢失。
+  const oldThreadId = store.currentThreadId;
+  const oldTurnId = store.currentTurnId;
+  if (store.turnActive && oldThreadId) {
+    void interrupt(oldThreadId, oldTurnId);
+  }
   store.currentThreadId = null;
   void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 进入新对话编辑态即预初始化插件缓存
   store.currentThreadName = "";
@@ -772,6 +831,13 @@ export async function newEmptyChat() {
 }
 
 export async function openThread(threadId: string) {
+  // 切换到其他会话前，标准停止旧回合（与停止按钮一致，含目标模式清目标）；
+  // 点击当前正在进行的会话不算切换，不中断。
+  const oldThreadId = store.currentThreadId;
+  const oldTurnId = store.currentTurnId;
+  if (store.turnActive && oldThreadId && oldThreadId !== threadId) {
+    void interrupt(oldThreadId, oldTurnId);
+  }
   store.currentThreadId = threadId;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
   store.currentThreadOrigin = "history";
@@ -822,31 +888,40 @@ export async function openThread(threadId: string) {
   }
 }
 
-export async function interrupt() {
-  if (!store.currentThreadId) return;
+/** 标准停止回合：与停止按钮一致，目标模式先清目标再 turn/interrupt；
+ * 可显式传入线程/回合 id（切换会话时用），缺省时操作当前会话。 */
+export async function interrupt(
+  threadId?: string | null,
+  turnId?: string | null,
+) {
+  const tid = threadId ?? store.currentThreadId;
+  if (!tid) return;
   const goalMode = store.taskMode === "goal";
   // 目标模式：先清除目标切断自动续跑（目标循环回合极快，回合中断可能追不上；
   // 清除目标后当前回合自然结束、不再有新回合）
   if (goalMode) {
     store.goalTurnId = null;
-    await clearGoal();
+    await clearGoal(tid);
   }
-  if (!store.currentTurnId) return;
+  let target = turnId ?? store.currentTurnId;
+  if (!target) return;
   // 服务端可能在 turn/started 事件之后才把回合标记为 active；
   // 若用户点得过早会收到 “no active turn”，短暂重试几次。
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       await invoke("turn_interrupt", {
-        threadId: store.currentThreadId,
-        turnId: store.currentTurnId,
+        threadId: tid,
+        turnId: target,
       });
       return;
     } catch (e) {
       const msg = String(e);
       // 回合 id 不一致时，错误里的 “but found X” 是服务端当前活跃回合 id，用它重试
       const found = /but found ([0-9a-fA-F-]+)/i.exec(msg);
-      if (found && found[1] !== store.currentTurnId) {
-        store.currentTurnId = found[1];
+      if (found && found[1] !== target) {
+        target = found[1];
+        // 仅在操作当前会话时同步 store，避免切换会话后把旧回合 id 写进新会话
+        if (threadId === undefined) store.currentTurnId = target;
         continue;
       }
       if (msg.includes("no active turn")) {
@@ -859,15 +934,16 @@ export async function interrupt() {
   }
 }
 
-export async function clearGoal() {
+export async function clearGoal(threadId?: string | null) {
   store.goalTurnId = null;
-  if (!store.currentThreadId) {
+  const tid = threadId ?? store.currentThreadId;
+  if (!tid) {
     store.goalText = null;
     if (store.taskMode === "goal") store.taskMode = "execute";
     return;
   }
   try {
-    await invoke("goal_clear", { threadId: store.currentThreadId });
+    await invoke("goal_clear", { threadId: tid });
     store.goalText = null;
     if (store.taskMode === "goal") {
       store.taskMode = "execute";

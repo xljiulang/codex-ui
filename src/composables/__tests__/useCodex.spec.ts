@@ -10,6 +10,9 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   ensureSkills,
   ensureThreadPlugins,
+  interrupt,
+  newEmptyChat,
+  openThread,
   sendPrompt,
   store,
   toastError,
@@ -242,5 +245,150 @@ describe("ensureSkills 技能全局缓存", () => {
         (args as { method?: string } | undefined)?.method === "skills/list",
     );
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("切换会话自动标准停止旧回合", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.threadPlugins = {};
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentThreadId = null;
+    store.currentThreadName = "";
+    store.currentTurnId = null;
+    store.currentThreadOrigin = null;
+    store.currentThreadCwd = null;
+    store.resumedThreadId = null;
+    store.threadTokenUsage = null;
+    store.goalText = null;
+    store.taskMode = "execute";
+  });
+
+  it("新建对话时标准停止旧回合（turn_interrupt），再复位到新对话", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    await newEmptyChat();
+    expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    expect(store.currentThreadId).toBeNull();
+    expect(store.currentTurnId).toBeNull();
+  });
+
+  it("目标模式下新建对话：先清旧会话目标，再中断旧回合", async () => {
+    store.turnActive = true;
+    store.taskMode = "goal";
+    store.goalText = "旧目标";
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    await newEmptyChat();
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
+      threadId: "t1",
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    expect(store.currentThreadId).toBeNull();
+  });
+
+  it("切换到其他历史会话时标准停止旧回合，并打开目标会话", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    await openThread("t2");
+    expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    expect(store.currentThreadId).toBe("t2");
+  });
+
+  it("点击当前正在进行的会话不算切换，不中断", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t1", name: "会话1", turns: [] },
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    await openThread("t1");
+    const interruptCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "turn_interrupt",
+    );
+    expect(interruptCalls).toHaveLength(0);
+  });
+
+  it("目标模式标准停止：先清目标再 turn/interrupt（默认操作当前会话）", async () => {
+    store.turnActive = true;
+    store.taskMode = "goal";
+    store.goalText = "目标";
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    await interrupt();
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
+      threadId: "t1",
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    expect(store.goalText).toBeNull();
+    expect(store.taskMode).toBe("execute");
+  });
+
+  it("显式传入旧线程/回合 id 时：目标清除作用于旧线程，且不污染新会话的回合 id", async () => {
+    store.taskMode = "goal";
+    store.goalText = "旧目标";
+    store.currentThreadId = "t2"; // 模拟 store 已切到新会话
+    store.currentTurnId = null;
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "turn_interrupt") {
+        const turnId = (args as { turnId?: string })?.turnId;
+        if (turnId === "turn-1") {
+          return Promise.reject(
+            new Error("turn not found but found abc-123"),
+          );
+        }
+      }
+      return Promise.resolve(undefined);
+    });
+    await interrupt("t1", "turn-1");
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
+      threadId: "t1",
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    // 重试用服务端返回的活跃回合 id，但不写进 store（那是新会话的状态）
+    expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
+      threadId: "t1",
+      turnId: "abc-123",
+    });
+    expect(store.currentTurnId).toBeNull();
   });
 });

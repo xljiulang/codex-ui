@@ -324,7 +324,9 @@ function handleKeydown(e: KeyboardEvent): boolean {
   // @ / $ 菜单打开时：Enter 选中高亮项，↑↓ 移动高亮
   if (
     mention.value &&
-    (e.key === "Enter" || e.key === "ArrowUp" || e.key === "ArrowDown")
+    (e.key === "ArrowUp" ||
+      e.key === "ArrowDown" ||
+      (e.key === "Enter" && !e.ctrlKey))
   ) {
     e.preventDefault();
     if (e.key === "Enter") {
@@ -335,12 +337,25 @@ function handleKeydown(e: KeyboardEvent): boolean {
     return true;
   }
   if (e.key === "Enter") {
-    // Enter 快捷发送：开启时 Enter 发送 / Shift+Enter 换行；
+    // Enter 快捷发送：开启时 Enter 发送 / Ctrl+Enter 换行 / Shift+Enter 无操作；
     // 关闭时 Enter 换行 / Ctrl+Enter 发送
-    const shouldSend = store.settings.enter_to_send ? !e.shiftKey : e.ctrlKey;
-    if (shouldSend) {
+    if (store.settings.enter_to_send) {
+      if (e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        editor.value?.commands.setHardBreak();
+        return true;
+      }
+      if (e.shiftKey) {
+        e.preventDefault();
+        return true;
+      }
       e.preventDefault();
-      submit(e.ctrlKey);
+      submit(false);
+      return true;
+    }
+    if (e.ctrlKey) {
+      e.preventDefault();
+      submit(true);
       return true;
     }
     return false;

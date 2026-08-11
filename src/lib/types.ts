@@ -16,6 +16,8 @@ export interface ThreadSummary {
   source?: string;
   cliVersion?: string;
   status?: { type: string };
+  /** 服务端持久化的分区（新版协议用内置 “Pinned” 分区表示置顶） */
+  section?: { id: string; name: string } | null;
   isPinned?: boolean;
 }
 
