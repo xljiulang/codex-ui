@@ -4,6 +4,8 @@ import { EditorContent, useEditor } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
@@ -349,12 +351,14 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydownGlobal);
   window.addEventListener("resize", clampEditorHeightOnResize);
   exposeEditor();
+  void setupDragDrop();
   void nextTick(() => editor.value?.commands.focus());
 });
 watch(editor, exposeEditor);
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
   window.removeEventListener("resize", clampEditorHeightOnResize);
+  dropUnlisten?.();
   endResize();
   try {
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
@@ -450,18 +454,15 @@ function imageExtFromType(type: string, fallbackName: string): string {
 }
 
 /**
- * 粘贴图片/文件 → 附件区：
- * - 图片项：优先用剪贴板原始路径（资源管理器复制的图片文件），读不到（截图/网页位图）则落盘；
- * - 非图片文件项：仅支持原始路径（CF_HDROP），读不到提示暂不支持；
- * - 纯文本粘贴不受影响（返回 false 走默认）。
+ * 图片/文件 → 附件区（粘贴与拖放共用核心逻辑）：
+ * - 图片项：优先用原始路径，读不到（截图/网页位图）则落盘；
+ * - 非图片文件项：仅支持原始路径，读不到提示暂不支持。
  */
-async function handlePastedFiles(files: File[]) {
-  let originalPaths: string[] = [];
-  try {
-    originalPaths = await invoke<string[]>("clipboard_file_paths");
-  } catch {
-    originalPaths = [];
-  }
+async function addFilesWithPaths(
+  files: File[],
+  originalPaths: string[],
+  source: "粘贴" | "拖放",
+) {
   const originalByBase = new Map<string, string>();
   for (const p of originalPaths) {
     const b = baseName(p).toLowerCase();
@@ -479,7 +480,7 @@ async function handlePastedFiles(files: File[]) {
         continue;
       }
       if (f.size > MAX_PASTED_IMAGE_BYTES) {
-        store.toast = "粘贴的图片过大（>20MB），已跳过";
+        store.toast = `${source}的图片过大（>20MB），已跳过`;
         continue;
       }
       try {
@@ -497,13 +498,24 @@ async function handlePastedFiles(files: File[]) {
       rowAttachments.value.push(toUserAttachment(name, orig));
       added++;
     } else {
-      store.toast = `暂不支持该粘贴（无法获取原始路径）: ${name}`;
+      store.toast = `暂不支持该${source}（无法获取原始路径）: ${name}`;
     }
   }
   if (added) {
     syncAttachments();
     await nextTick();
   }
+}
+
+/** 粘贴图片/文件 → 附件区（原始路径来自剪贴板 CF_HDROP） */
+async function handlePastedFiles(files: File[]) {
+  let originalPaths: string[] = [];
+  try {
+    originalPaths = await invoke<string[]>("clipboard_file_paths");
+  } catch {
+    originalPaths = [];
+  }
+  await addFilesWithPaths(files, originalPaths, "粘贴");
 }
 
 /** ProseMirror paste 入口：有文件/图片项则消费事件，否则走默认（文本粘贴） */
@@ -520,6 +532,65 @@ function handlePasteDom(e: ClipboardEvent): boolean {
   if (!files.length) return false;
   void handlePastedFiles(files);
   return true;
+}
+
+const dragging = ref(false);
+let dropUnlisten: UnlistenFn | undefined;
+
+/** Tauri 拖放事件：drop 时直接拿到绝对路径数组（WebView2 下 HTML5 dataTransfer.files 为空） */
+async function setupDragDrop() {
+  try {
+    dropUnlisten = await getCurrentWebview().onDragDropEvent((event) => {
+      const p = event.payload;
+      if (p.type === "enter" || p.type === "over") {
+        dragging.value = true;
+      } else if (p.type === "leave") {
+        dragging.value = false;
+      } else if (p.type === "drop") {
+        dragging.value = false;
+        const paths = p.paths ?? [];
+        if (paths.length) void addDroppedPaths(paths);
+      }
+    });
+  } catch {
+    // 非 Tauri 环境（浏览器/单测）忽略，走 HTML5 drop 兜底
+  }
+}
+
+/** 拖放路径 → 附件区：图片按扩展名 → localImage，其它 → mention */
+async function addDroppedPaths(paths: string[]) {
+  let added = 0;
+  for (const path of paths) {
+    rowAttachments.value.push(toUserAttachment(baseName(path) || "dropped", path));
+    added++;
+  }
+  if (added) {
+    syncAttachments();
+    await nextTick();
+  }
+}
+
+function onDragOver() {
+  dragging.value = true;
+}
+
+function onDragLeave(e: DragEvent) {
+  const current = e.currentTarget as HTMLElement | null;
+  if (!current || !current.contains(e.relatedTarget as Node | null)) {
+    dragging.value = false;
+  }
+}
+
+/** 拖放图片/文件 → 附件区（原始路径来自拖放 File.path），纯文本拖放放行 */
+function onDrop(e: DragEvent) {
+  dragging.value = false;
+  const files = Array.from(e.dataTransfer?.files ?? []);
+  if (!files.length) return;
+  e.preventDefault();
+  const paths = files
+    .map((f) => (f as File & { path?: string }).path)
+    .filter((p): p is string => !!p);
+  void addFilesWithPaths(files, paths, "拖放");
 }
 
 function setEditorPlainText(text: string) {
@@ -621,7 +692,13 @@ function taskModeLabel(): string {
 </script>
 
 <template>
-  <div class="composer">
+  <div
+    class="composer"
+    :class="{ dragover: dragging }"
+    @dragover.prevent="onDragOver()"
+    @dragleave="onDragLeave($event)"
+    @drop="onDrop($event)"
+  >
     <div
       class="composer-input-row"
       :style="editorHeight ? { '--editor-h': `${editorHeight}px` } : undefined"

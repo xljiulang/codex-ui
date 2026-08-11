@@ -6,6 +6,21 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (p: string) => "asset://mock/" + p,
 }));
 
+const mockDragDropHandlers: Array<
+  (event: { payload: { type: string; paths?: string[]; position?: unknown } }) => void
+> = [];
+
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: vi.fn(
+      async (handler: (event: { payload: { type: string; paths?: string[]; position?: unknown } }) => void) => {
+        mockDragDropHandlers.push(handler);
+        return () => {};
+      },
+    ),
+  }),
+}));
+
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, sendPrompt: vi.fn() };
@@ -600,6 +615,137 @@ describe("ComposerBar 粘贴图片/文件", () => {
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
     ]);
     expect(mockedInvoke).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ComposerBar 拖放图片/文件", () => {
+  let wrapper: VueWrapper | null = null;
+
+  beforeEach(() => {
+    store.attachments.splice(0);
+    store.toast = "";
+    store.threadPlugins = {};
+    store.currentThreadId = null;
+    store.server.workspace = "D:/repo";
+    store.settings.enter_to_send = true;
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+    mockRpc(false);
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  function makeDropFile(name: string, type: string, size = 8, path?: string) {
+    const f = {
+      name,
+      type,
+      size,
+      arrayBuffer: async () => new Uint8Array(size).buffer,
+    } as unknown as File;
+    if (path) Object.defineProperty(f, "path", { value: path });
+    return f;
+  }
+
+  function dropFiles(files: File[]) {
+    const dt = { files, items: [], types: [] } as unknown as DataTransfer;
+    const ev = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "dataTransfer", { value: dt });
+    wrapper!.find(".composer").element.dispatchEvent(ev);
+  }
+
+  async function dropAndFlush(files: File[]) {
+    await flushPromises();
+    dropFiles(files);
+    await flushPromises();
+  }
+
+  it("拖入带路径的图片：直接用原路径生成 localImage 附件", async () => {
+    mockedInvoke.mockResolvedValue({});
+    wrapper = mount(ComposerBar);
+    await dropAndFlush([makeDropFile("shot.png", "image/png", 8, "D:/repo/shot.png")]);
+
+    expect(store.attachments).toEqual([
+      { type: "localImage", path: "D:/repo/shot.png" },
+    ]);
+  });
+
+  it("拖入无路径的图片：落盘生成 localImage 附件", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "save_pasted_image") return "C:/tmp/drop/pasted-1-1.png";
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await dropAndFlush([makeDropFile("clip.png", "image/png")]);
+
+    expect(mockedInvoke).toHaveBeenCalledWith("save_pasted_image", {
+      bytes: expect.any(Array),
+      name: "pasted.png",
+    });
+    expect(store.attachments).toEqual([
+      { type: "localImage", path: "C:/tmp/drop/pasted-1-1.png" },
+    ]);
+  });
+
+  it("拖入带路径的非图片：生成 mention 附件", async () => {
+    mockedInvoke.mockResolvedValue({});
+    wrapper = mount(ComposerBar);
+    await dropAndFlush([makeDropFile("a.txt", "text/plain", 8, "D:/repo/a.txt")]);
+
+    expect(store.attachments).toEqual([
+      { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
+    ]);
+  });
+
+  it("拖入无路径的非图片：提示暂不支持拖放且不加附件", async () => {
+    mockedInvoke.mockResolvedValue({});
+    wrapper = mount(ComposerBar);
+    await dropAndFlush([makeDropFile("a.txt", "text/plain")]);
+
+    expect(store.toast).toContain("暂不支持该拖放");
+    expect(store.attachments).toEqual([]);
+  });
+
+  it("纯文本拖放：不阻止默认行为，不生成附件", async () => {
+    mockedInvoke.mockResolvedValue({});
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    const ev = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "dataTransfer", {
+      value: { files: [], items: [], types: [] },
+    });
+    wrapper!.find(".composer").element.dispatchEvent(ev);
+
+    expect(ev.defaultPrevented).toBe(false);
+    expect(store.attachments).toEqual([]);
+  });
+
+  it("Tauri 拖放事件：over 高亮、drop 路径生成附件（图片 localImage、文件 mention）", async () => {
+    mockedInvoke.mockResolvedValue({});
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    const handler = mockDragDropHandlers[mockDragDropHandlers.length - 1];
+
+    handler({ payload: { type: "over", position: {} as never } });
+    await flushPromises();
+    expect(wrapper.find(".composer").classes()).toContain("dragover");
+
+    handler({
+      payload: {
+        type: "drop",
+        paths: ["D:/repo/shot.png", "D:/repo/a.txt"],
+        position: {} as never,
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".composer").classes()).not.toContain("dragover");
+    expect(store.attachments).toEqual([
+      { type: "localImage", path: "D:/repo/shot.png" },
+      { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
+    ]);
   });
 });
 

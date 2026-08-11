@@ -128,10 +128,34 @@ export const store = reactive({
   taskOpen: false,
   modelOpen: false,
   toast: "",
+  /** 全局确认弹窗（会话切换等需用户选择） */
+  confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,
 });
 
 let unlisteners: UnlistenFn[] = [];
 let wired = false;
+
+export interface ConfirmRequest {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+}
+
+/** 弹出全局确认框，返回用户选择（true=确认） */
+export function askConfirm(req: ConfirmRequest): Promise<boolean> {
+  return new Promise((resolve) => {
+    store.confirm = { ...req, resolve };
+  });
+}
+
+/** 用户做出选择后关闭确认框并回传结果 */
+export function settleConfirm(ok: boolean) {
+  const c = store.confirm;
+  if (!c) return;
+  store.confirm = null;
+  c.resolve(ok);
+}
 
 // 任何地方给 store.toast 赋值都会在 5 秒后自动消失
 let toastTimer: number | undefined;
@@ -844,6 +868,16 @@ export async function sendPrompt(text: string, flip = false) {
 }
 
 export async function newEmptyChat() {
+  // 会话进行中切换：先让用户确认（确认才停止旧回合并切换）
+  if (store.turnActive && store.currentThreadId) {
+    const ok = await askConfirm({
+      title: "切换会话",
+      message: "当前对话仍在进行中，切换将停止当前回合。是否继续？",
+      confirmLabel: "停止并切换",
+      cancelLabel: "取消",
+    });
+    if (!ok) return;
+  }
   // 标准停止旧回合（与停止按钮一致，含目标模式清目标），再切换到新对话；
   // 显式传入旧线程/回合 id，避免切换后 store 已复位导致中断丢失。
   const oldThreadId = store.currentThreadId;
@@ -865,6 +899,20 @@ export async function newEmptyChat() {
 }
 
 export async function openThread(threadId: string) {
+  // 会话进行中切到其它会话：先让用户确认（点当前会话不算切换，不弹窗）
+  if (
+    store.turnActive &&
+    store.currentThreadId &&
+    store.currentThreadId !== threadId
+  ) {
+    const ok = await askConfirm({
+      title: "切换会话",
+      message: "当前对话仍在进行中，切换将停止当前回合。是否继续？",
+      confirmLabel: "停止并切换",
+      cancelLabel: "取消",
+    });
+    if (!ok) return;
+  }
   // 切换到其他会话前，标准停止旧回合（与停止按钮一致，含目标模式清目标）；
   // 点击当前正在进行的会话不算切换，不中断。
   const oldThreadId = store.currentThreadId;

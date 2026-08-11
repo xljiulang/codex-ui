@@ -5,6 +5,7 @@ import HistoryPanel from "./components/HistoryPanel.vue";
 import ChatView from "./components/ChatView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
+import ConfirmDialog from "./components/ConfirmDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
@@ -43,6 +44,7 @@ onBeforeUnmount(() => {
     </div>
     <SettingsView v-if="store.showSettings" />
     <InteractionDialog />
+    <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
     <TooltipLayer />
     <div

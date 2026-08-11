@@ -872,10 +872,14 @@ select option {
 }
 
 .history-more {
+  font-family: "Segoe UI", "Microsoft YaHei", -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  width: 100%;
   padding: 12px;
   text-align: center;
   color: var(--blue);
-  font-size: 12px;
   border-top: 1px solid var(--border);
 }
 
@@ -1917,6 +1921,12 @@ select option {
   position: relative;
   flex-shrink: 0;
   box-shadow: var(--footer-shadow);
+}
+
+.composer.dragover {
+  outline: 2px dashed var(--accent-dim);
+  outline-offset: -6px;
+  border-radius: 12px;
 }
 
 .composer-input-row {

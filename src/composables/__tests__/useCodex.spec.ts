@@ -16,6 +16,7 @@ import {
   openThread,
   refreshServer,
   sendPrompt,
+  settleConfirm,
   sortThreads,
   store,
   togglePin,
@@ -293,6 +294,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.threadTokenUsage = null;
     store.goalText = null;
     store.taskMode = "execute";
+    store.confirm = null;
   });
 
   it("新建对话时标准停止旧回合（turn_interrupt），再复位到新对话", async () => {
@@ -300,7 +302,10 @@ describe("切换会话自动标准停止旧回合", () => {
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
     store.showHistory = true;
-    await newEmptyChat();
+    const p = newEmptyChat();
+    expect(store.confirm?.title).toBe("切换会话");
+    settleConfirm(true);
+    await p;
     expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
       threadId: "t1",
       turnId: "turn-1",
@@ -317,7 +322,9 @@ describe("切换会话自动标准停止旧回合", () => {
     store.goalText = "旧目标";
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
-    await newEmptyChat();
+    const p = newEmptyChat();
+    settleConfirm(true);
+    await p;
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
       threadId: "t1",
     });
@@ -349,7 +356,9 @@ describe("切换会话自动标准停止旧回合", () => {
       if (cmd === "goal_get") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
-    await openThread("t2");
+    const p = openThread("t2");
+    settleConfirm(true);
+    await p;
     expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
       threadId: "t1",
       turnId: "turn-1",
@@ -376,6 +385,35 @@ describe("切换会话自动标准停止旧回合", () => {
       ([cmd]) => cmd === "turn_interrupt",
     );
     expect(interruptCalls).toHaveLength(0);
+    expect(store.confirm).toBeNull();
+  });
+
+  it("会话进行中取消切换：新建对话不中断、不切换", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    const p = newEmptyChat();
+    settleConfirm(false);
+    await p;
+    const interruptCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "turn_interrupt",
+    );
+    expect(interruptCalls).toHaveLength(0);
+    expect(store.currentThreadId).toBe("t1");
+  });
+
+  it("会话进行中取消切换：历史会话不打开、不中断", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    const p = openThread("t2");
+    settleConfirm(false);
+    await p;
+    const interruptCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "turn_interrupt",
+    );
+    expect(interruptCalls).toHaveLength(0);
+    expect(store.currentThreadId).toBe("t1");
   });
 
   it("目标模式标准停止：先清目标再 turn/interrupt（默认操作当前会话）", async () => {

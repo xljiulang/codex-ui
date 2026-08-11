@@ -34,7 +34,6 @@ function onCwdClick() {
 
 function onNewChat() {
   store.showSettings = false;
-  store.showHistory = false;
   void newEmptyChat();
   // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
   void nextTick(focusComposer);
@@ -55,12 +54,10 @@ function focusComposer() {
 }
 
 function onSettings() {
-  store.showHistory = false;
   store.showSettings = !store.showSettings;
 }
 
 function onHistory() {
-  store.showSettings = false;
   store.showHistory = !store.showHistory;
 }
 </script>
@@ -117,7 +114,6 @@ function onHistory() {
         class="icon-btn"
         aria-label="设置"
         v-tooltip="'设置'"
-        :class="{ active: store.showSettings }"
         @click="onSettings()"
       >
         <svg viewBox="0 0 24 24">

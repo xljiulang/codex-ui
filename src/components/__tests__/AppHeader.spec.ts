@@ -31,23 +31,23 @@ describe("AppHeader 导航", () => {
     mockedNewChat.mockClear();
   });
 
-  it("聊天页点设置打开设置页，且关闭历史面板", async () => {
+  it("点设置打开设置页，历史面板不受影响", async () => {
     store.showHistory = true;
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="设置"]').trigger("click");
     expect(store.showSettings).toBe(true);
-    expect(store.showHistory).toBe(false);
+    expect(store.showHistory).toBe(true);
   });
 
-  it("历史记录按钮手动 toggle，设置面板互斥隐藏", async () => {
+  it("历史记录按钮手动 toggle，不受设置影响", async () => {
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="历史记录"]').trigger("click");
     expect(store.showHistory).toBe(true);
     await wrapper.find('button[aria-label="历史记录"]').trigger("click");
     expect(store.showHistory).toBe(false);
-    store.showHistory = true;
-    await wrapper.find('button[aria-label="设置"]').trigger("click");
-    expect(store.showHistory).toBe(false);
+    store.showSettings = true;
+    await wrapper.find('button[aria-label="历史记录"]').trigger("click");
+    expect(store.showHistory).toBe(true);
     expect(store.showSettings).toBe(true);
   });
 
@@ -61,22 +61,37 @@ describe("AppHeader 导航", () => {
     expect(mockedNewChat).not.toHaveBeenCalled();
   });
 
-  it("历史面板打开时点设置进设置页，再点一次回到对话", async () => {
+  it("历史面板打开时点设置：两者可同时为 true，关设置后历史仍打开", async () => {
     store.showHistory = true;
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="设置"]').trigger("click");
     expect(store.showSettings).toBe(true);
-    expect(store.showHistory).toBe(false);
+    expect(store.showHistory).toBe(true);
     await wrapper.find('button[aria-label="设置"]').trigger("click");
     expect(store.showSettings).toBe(false);
+    expect(store.showHistory).toBe(true);
   });
 
-  it("设置打开时点新建对话：关闭设置并新建", async () => {
+  it("设置打开时点新建对话：关闭设置并新建，历史不受影响", async () => {
     store.showSettings = true;
+    store.showHistory = true;
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建对话"]').trigger("click");
     expect(store.showSettings).toBe(false);
+    expect(store.showHistory).toBe(true);
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("设置按钮无 active 态，历史按钮有 active 态", async () => {
+    store.showSettings = true;
+    store.showHistory = true;
+    const wrapper = mountHeader();
+    expect(wrapper.find('button[aria-label="设置"]').classes()).not.toContain(
+      "active",
+    );
+    expect(wrapper.find('button[aria-label="历史记录"]').classes()).toContain(
+      "active",
+    );
   });
 });
 
