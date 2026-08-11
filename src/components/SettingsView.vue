@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { saveSettings, store, toastError } from "../composables/useCodex";
+import { applyTheme, THEMES, type ThemeId } from "../composables/useTheme";
 
 const codexPath = ref(store.settings.codex_path ?? "");
 const sound = ref(store.settings.sound_enabled);
@@ -32,12 +33,41 @@ async function apply() {
   });
   store.toast = "设置已保存";
 }
+
+async function selectTheme(id: ThemeId) {
+  store.settings.theme = id;
+  applyTheme(id);
+  try {
+    await saveSettings({ theme: id });
+  } catch (e) {
+    store.toast = toastError(e);
+  }
+}
 </script>
 
 <template>
   <div class="settings">
     <div class="setting-row">
       <h2 style="margin: 0">设置</h2>
+    </div>
+
+    <div class="setting-row">
+      <label>主题外观</label>
+      <div class="theme-picker">
+        <button
+          v-for="t in THEMES"
+          :key="t.id"
+          class="theme-card"
+          :class="{ selected: store.settings.theme === t.id }"
+          :data-theme-id="t.id"
+          :aria-pressed="store.settings.theme === t.id"
+          @click="selectTheme(t.id)"
+        >
+          <span class="theme-swatch"></span>
+          <span class="theme-name">{{ t.name }}</span>
+          <span class="theme-desc">{{ t.desc }}</span>
+        </button>
+      </div>
     </div>
 
     <div class="setting-row checkbox-row">

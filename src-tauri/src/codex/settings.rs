@@ -9,6 +9,7 @@ pub struct AppSettings {
     pub sound_enabled: bool,
     pub enter_to_send: bool,
     pub followup_mode: String,
+    pub theme: String,
 }
 
 impl Default for AppSettings {
@@ -18,6 +19,7 @@ impl Default for AppSettings {
             sound_enabled: true,
             enter_to_send: true,
             followup_mode: "adjust".into(),
+            theme: "blue".into(),
         }
     }
 }

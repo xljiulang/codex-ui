@@ -83,6 +83,8 @@ export interface AppSettings {
   sound_enabled: boolean;
   enter_to_send: boolean;
   followup_mode: string;
+  /** 界面主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光） */
+  theme: string;
 }
 
 export interface AuthStatus {

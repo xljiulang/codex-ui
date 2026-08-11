@@ -24,12 +24,14 @@ import {
   stripMentionContext,
 } from "../lib/mention";
 import { playNotificationSound } from "../lib/sound";
+import { applyTheme } from "./useTheme";
 
 const defaultSettings = (): AppSettings => ({
   codex_path: null,
   sound_enabled: true,
   enter_to_send: true,
   followup_mode: "adjust",
+  theme: "blue",
 });
 
 interface ModelInfo {
@@ -287,11 +289,13 @@ export async function loadSettings() {
   } catch {
     store.settings = defaultSettings();
   }
+  applyTheme(store.settings.theme);
 }
 
 export async function saveSettings(patch: Partial<AppSettings>) {
   store.settings = { ...store.settings, ...patch };
   await invoke("settings_set", { settings: store.settings });
+  applyTheme(store.settings.theme);
 }
 
 export async function refreshServer() {
