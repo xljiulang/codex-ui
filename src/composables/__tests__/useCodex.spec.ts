@@ -272,6 +272,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.turnActive = true;
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
+    store.showHistory = true;
     await newEmptyChat();
     expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
       threadId: "t1",
@@ -279,6 +280,8 @@ describe("切换会话自动标准停止旧回合", () => {
     });
     expect(store.currentThreadId).toBeNull();
     expect(store.currentTurnId).toBeNull();
+    // 历史面板只由头部按钮控制，新建对话不自动关闭
+    expect(store.showHistory).toBe(true);
   });
 
   it("目标模式下新建对话：先清旧会话目标，再中断旧回合", async () => {
@@ -302,6 +305,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.turnActive = true;
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
+    store.showHistory = true;
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -324,6 +328,8 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "turn-1",
     });
     expect(store.currentThreadId).toBe("t2");
+    // 点击历史会话不关闭历史面板（手动触发）
+    expect(store.showHistory).toBe(true);
   });
 
   it("点击当前正在进行的会话不算切换，不中断", async () => {

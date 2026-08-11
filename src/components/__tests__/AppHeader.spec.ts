@@ -30,6 +30,18 @@ describe("AppHeader 导航", () => {
     expect(store.showHistory).toBe(false);
   });
 
+  it("历史记录按钮手动 toggle，设置面板互斥隐藏", async () => {
+    const wrapper = mount(AppHeader);
+    await wrapper.find('button[aria-label="历史记录"]').trigger("click");
+    expect(store.showHistory).toBe(true);
+    await wrapper.find('button[aria-label="历史记录"]').trigger("click");
+    expect(store.showHistory).toBe(false);
+    store.showHistory = true;
+    await wrapper.find('button[aria-label="设置"]').trigger("click");
+    expect(store.showHistory).toBe(false);
+    expect(store.showSettings).toBe(true);
+  });
+
   it("设置页再点设置关闭设置，回到原对话且不新建/不中断", async () => {
     store.showSettings = true;
     store.currentThreadId = "t1";

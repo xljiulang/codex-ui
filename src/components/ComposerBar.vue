@@ -57,6 +57,53 @@ const hasText = ref(false);
 // 粘贴的截图/位图最大字节数（原路径文件不受限）
 const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
 
+// 输入框可拖拽高度：最低为现有自动高度，最高为窗口一半
+const MIN_EDITOR_HEIGHT = 96;
+const editorHeight = ref<number | null>(null);
+const resizingEditor = ref(false);
+let resizeStartY = 0;
+let resizeStartH = MIN_EDITOR_HEIGHT;
+
+function maxEditorHeight(): number {
+  return Math.max(MIN_EDITOR_HEIGHT, Math.round(window.innerHeight / 2));
+}
+
+function currentEditorHeight(): number {
+  const el = document.querySelector<HTMLElement>(".rich-editor .ProseMirror");
+  return el ? Math.round(el.getBoundingClientRect().height) : MIN_EDITOR_HEIGHT;
+}
+
+function startResize(e: PointerEvent) {
+  e.preventDefault();
+  resizingEditor.value = true;
+  resizeStartY = e.clientY;
+  resizeStartH = editorHeight.value ?? currentEditorHeight();
+  window.addEventListener("pointermove", onResizeMove);
+  window.addEventListener("pointerup", endResize);
+  document.body.classList.add("resizing-editor");
+}
+
+function onResizeMove(e: PointerEvent) {
+  const h = resizeStartH + (resizeStartY - e.clientY);
+  editorHeight.value = Math.min(
+    maxEditorHeight(),
+    Math.max(MIN_EDITOR_HEIGHT, Math.round(h)),
+  );
+}
+
+function endResize() {
+  resizingEditor.value = false;
+  window.removeEventListener("pointermove", onResizeMove);
+  window.removeEventListener("pointerup", endResize);
+  document.body.classList.remove("resizing-editor");
+}
+
+function clampEditorHeightOnResize() {
+  if (editorHeight.value != null) {
+    editorHeight.value = Math.min(editorHeight.value, maxEditorHeight());
+  }
+}
+
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
 const sentHistory: string[] = [];
 let historyIndex = -1;
@@ -300,12 +347,15 @@ function onKeydownGlobal(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydownGlobal);
+  window.addEventListener("resize", clampEditorHeightOnResize);
   exposeEditor();
   void nextTick(() => editor.value?.commands.focus());
 });
 watch(editor, exposeEditor);
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
+  window.removeEventListener("resize", clampEditorHeightOnResize);
+  endResize();
   try {
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
       undefined;
@@ -607,7 +657,19 @@ function taskModeLabel(): string {
         ×
       </button>
     </div>
-    <div class="composer-input-row">
+    <div
+      class="composer-input-row"
+      :style="editorHeight ? { '--editor-h': `${editorHeight}px` } : undefined"
+    >
+      <div
+        class="editor-resize-handle"
+        :class="{ active: resizingEditor }"
+        aria-label="调整输入框高度"
+        v-tooltip="'拖动调整输入框高度'"
+        @pointerdown="startResize"
+      >
+        <span class="editor-resize-grip"></span>
+      </div>
       <div class="menu-anchor input-anchor">
         <EditorContent :editor="editor" class="rich-editor" />
         <MentionMenu

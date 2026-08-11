@@ -418,6 +418,49 @@ async function scenarioPasteImage() {
   await clearInput();
 }
 
+// ---------- 场景 2c: 输入框高度拖拽 ----------
+async function scenarioEditorResize() {
+  log("场景 2c: 输入框高度拖拽调节");
+  await evalJs(`(() => {
+    const handle = document.querySelector(".editor-resize-handle");
+    handle.dispatchEvent(new PointerEvent("pointerdown", { clientY: 300, bubbles: true }));
+  })()`);
+  await evalJs(`(() => {
+    window.dispatchEvent(new PointerEvent("pointermove", { clientY: 100 }));
+    window.dispatchEvent(new PointerEvent("pointerup", {}));
+  })()`);
+  await sleep(300);
+  const style1 = await evalJs(
+    `document.querySelector(".composer-input-row").getAttribute("style") ?? ""`,
+  );
+  const h1 = await evalJs(
+    `Math.round(document.querySelector(".ProseMirror").getBoundingClientRect().height)`,
+  );
+  record(
+    "输入框: 向上拖拽后设置内联高度并增高",
+    style1.includes("--editor-h") && h1 >= 96,
+    `style=${style1} h=${h1}`,
+  );
+  // 拖回最低高度
+  await evalJs(`(() => {
+    const handle = document.querySelector(".editor-resize-handle");
+    handle.dispatchEvent(new PointerEvent("pointerdown", { clientY: 100, bubbles: true }));
+  })()`);
+  await evalJs(`(() => {
+    window.dispatchEvent(new PointerEvent("pointermove", { clientY: 10000 }));
+    window.dispatchEvent(new PointerEvent("pointerup", {}));
+  })()`);
+  await sleep(300);
+  const style2 = await evalJs(
+    `document.querySelector(".composer-input-row").getAttribute("style") ?? ""`,
+  );
+  record(
+    "输入框: 向下拖拽夹紧到最低高度 96px",
+    /--editor-h:\s*96px/.test(style2),
+    style2,
+  );
+}
+
 // ---------- 场景 3: 置顶（Pinned 分区）+ 徽章对齐 + 持久化 ----------
 async function scenarioPin() {
   log("场景 3: 置顶 / 取消置顶 / 徽章对齐 / 持久化");
@@ -573,14 +616,43 @@ async function scenarioStopOnSwitch() {
   );
 }
 
+// ---------- 场景 5: 历史面板手动保持 ----------
+async function scenarioHistoryStaysOpen() {
+  log("场景 5: 历史面板手动保持（点击会话不自动关闭）");
+  await openHistory();
+  await waitFor(
+    "历史行出现",
+    `document.querySelectorAll(".history-item").length > 0`,
+    15000,
+  );
+  const clicked = await evalJs(`(() => {
+    const rows = Array.from(document.querySelectorAll(".history-item"));
+    const r = rows.find((x) => x.innerText.includes(${JSON.stringify(TAG_A)}));
+    if (!r) return false;
+    r.click();
+    return true;
+  })()`);
+  await sleep(1200);
+  const stillOpen = await evalJs(
+    `!!document.querySelector(".history-panel")`,
+  );
+  record(
+    "历史: 点击历史会话后面板保持显示（仅按钮手动开关）",
+    clicked && stillOpen,
+  );
+  await closeHistory();
+}
+
 async function main() {
   await launchApp();
 
   await scenarioSettingsToggle();
   await scenarioCtrlEnter();
   await scenarioPasteImage();
+  await scenarioEditorResize();
   await scenarioPin();
   await scenarioStopOnSwitch();
+  await scenarioHistoryStaysOpen();
 
   const pass = results.filter((r) => r.ok).length;
   log(`\n===== 结果汇总: ${pass}/${results.length} 通过 =====`);

@@ -625,7 +625,6 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;
-    store.showHistory = false;
     const pendingGoal = store.goalText;
     if (pendingGoal) {
       try {
@@ -830,7 +829,6 @@ export async function newEmptyChat() {
   store.turnInterrupted = false;
   store.currentTurnId = null;
   store.threadTokenUsage = null;
-  store.showHistory = false;
   store.goalText = null;
   await updateWindowTitle();
 }
@@ -846,7 +844,6 @@ export async function openThread(threadId: string) {
   store.currentThreadId = threadId;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
   store.currentThreadOrigin = "history";
-  store.showHistory = false;
   store.loadingThread = true;
   try {
     const res = await invoke<{

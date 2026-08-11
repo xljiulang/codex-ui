@@ -596,3 +596,78 @@ describe("ComposerBar 粘贴图片/文件", () => {
     expect(mockedInvoke).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("ComposerBar 输入框高度拖拽调节", () => {
+  let wrapper: VueWrapper | null = null;
+  const realInnerHeight = window.innerHeight;
+
+  beforeEach(() => {
+    Object.defineProperty(window, "innerHeight", {
+      value: 600,
+      configurable: true,
+    });
+    store.attachments.splice(0);
+    store.threadPlugins = {};
+    store.currentThreadId = null;
+    store.server.workspace = "D:/repo";
+    store.settings.enter_to_send = true;
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+    mockRpc(false);
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerHeight", {
+      value: realInnerHeight,
+      configurable: true,
+    });
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  function rowStyle(): string {
+    return wrapper!.find(".composer-input-row").attributes("style") ?? "";
+  }
+
+  async function dragTo(clientY: number) {
+    await flushPromises();
+    const handle = wrapper!.find(".editor-resize-handle").element;
+    handle.dispatchEvent(
+      new PointerEvent("pointerdown", { clientY: 200, bubbles: true }),
+    );
+    window.dispatchEvent(new PointerEvent("pointermove", { clientY }));
+    window.dispatchEvent(new PointerEvent("pointerup", {}));
+    await flushPromises();
+  }
+
+  it("未拖拽时无内联高度；拖拽后设置高度，可继续以当前高度为基准增长", async () => {
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    expect(rowStyle()).toBe("");
+
+    await dragTo(100);
+    const h1 = Number(
+      /--editor-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
+    );
+    expect(h1).toBeGreaterThanOrEqual(96);
+
+    await dragTo(50);
+    const h2 = Number(
+      /--editor-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
+    );
+    // 第二次拖拽以当前高度为基准继续增长
+    expect(h2).toBeGreaterThan(h1);
+  });
+
+  it("向上拖超过窗口一半被夹紧到半屏（innerHeight/2 = 300）", async () => {
+    wrapper = mount(ComposerBar);
+    await dragTo(200 - 10000);
+    expect(rowStyle()).toContain("--editor-h: 300px");
+  });
+
+  it("向下拖低于最低高度被夹紧到 96px", async () => {
+    wrapper = mount(ComposerBar);
+    await dragTo(200 + 10000);
+    expect(rowStyle()).toContain("--editor-h: 96px");
+  });
+});

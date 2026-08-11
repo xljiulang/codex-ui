@@ -1613,6 +1613,42 @@ select option {
   position: relative;
 }
 
+.editor-resize-handle {
+  height: 8px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  border-radius: 6px;
+  user-select: none;
+  touch-action: none;
+  transition: background-color 0.14s ease;
+}
+
+.editor-resize-handle:hover,
+.editor-resize-handle.active {
+  background: rgba(77, 166, 255, 0.09);
+}
+
+.editor-resize-grip {
+  width: 30px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-light);
+  transition: background-color 0.14s ease;
+}
+
+.editor-resize-handle:hover .editor-resize-grip,
+.editor-resize-handle.active .editor-resize-grip {
+  background: var(--accent-dim);
+}
+
+body.resizing-editor {
+  user-select: none;
+  cursor: ns-resize;
+}
+
 .rich-editor {
   width: 100%;
 }
@@ -1620,8 +1656,9 @@ select option {
 .rich-editor .ProseMirror {
   display: block;
   width: 100%;
+  height: var(--editor-h, auto);
   min-height: 96px;
-  max-height: 132px;
+  max-height: var(--editor-h, 132px);
   line-height: 1.55;
   padding: 13px 14px 42px;
   background: linear-gradient(180deg, #1d242e, #181e27);
