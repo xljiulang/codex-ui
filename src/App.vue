@@ -39,9 +39,9 @@ onBeforeUnmount(() => {
     <AppHeader />
     <div class="app-body">
       <HistoryPanel v-if="store.showHistory" />
-      <SettingsView v-if="store.showSettings" />
-      <ChatView v-else />
+      <ChatView />
     </div>
+    <SettingsView v-if="store.showSettings" />
     <InteractionDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
     <TooltipLayer />

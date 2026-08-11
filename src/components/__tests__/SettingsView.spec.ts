@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -73,5 +73,68 @@ describe("SettingsView codex 可执行文件选择", () => {
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ codex_path: null }),
     );
+  });
+});
+
+describe("SettingsView 模态框行为", () => {
+  let wrapper: ReturnType<typeof mount> | undefined;
+
+  beforeEach(() => {
+    store.showSettings = true;
+    store.toast = "";
+    mockedSave.mockClear();
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = undefined;
+  });
+
+  it("渲染模态结构：遮罩、对话框、标题与关闭按钮", () => {
+    wrapper = mount(SettingsView);
+    expect(wrapper.find(".modal-mask").exists()).toBe(true);
+    expect(wrapper.find(".modal.settings-modal").exists()).toBe(true);
+    expect(wrapper.find(".modal-title").text()).toContain("设置");
+    expect(wrapper.find('button[aria-label="关闭设置"]').exists()).toBe(true);
+    expect(wrapper.find(".modal-body .settings").exists()).toBe(true);
+  });
+
+  it("按 Escape 关闭设置", async () => {
+    wrapper = mount(SettingsView);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+    expect(store.showSettings).toBe(false);
+  });
+
+  it("点击关闭 X 关闭设置", async () => {
+    wrapper = mount(SettingsView);
+    await wrapper.find('button[aria-label="关闭设置"]').trigger("click");
+    expect(store.showSettings).toBe(false);
+  });
+
+  it("点击「取消」关闭设置且不保存", async () => {
+    wrapper = mount(SettingsView);
+    const cancel = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "取消");
+    expect(cancel).toBeDefined();
+    await cancel!.trigger("click");
+    expect(store.showSettings).toBe(false);
+    expect(mockedSave).not.toHaveBeenCalled();
+  });
+
+  it("点击「保存」成功后关闭设置并提示已保存", async () => {
+    wrapper = mount(SettingsView);
+    await wrapper.find("button.btn.primary").trigger("click");
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledTimes(1);
+    expect(store.showSettings).toBe(false);
+    expect(store.toast).toContain("设置已保存");
+  });
+
+  it("点击遮罩不关闭（防误触丢改动）", async () => {
+    wrapper = mount(SettingsView);
+    await wrapper.find(".modal-mask").trigger("click");
+    expect(store.showSettings).toBe(true);
   });
 });

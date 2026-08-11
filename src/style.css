@@ -2578,6 +2578,9 @@ body.resizing-editor {
   width: 24px;
   height: 24px;
   border-radius: 7px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
 }
 
 .modal-close:hover {
@@ -2782,23 +2785,12 @@ body.resizing-editor {
 
 /* 设置页 */
 .settings {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 28px;
-  min-width: 0;
-  max-width: 760px;
-}
-
-.settings h2 {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--text-bright);
-  margin-bottom: 18px;
-  letter-spacing: 0.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .setting-row {
-  margin-bottom: 14px;
   background: rgba(var(--overlay-rgb), 0.02);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2808,12 +2800,6 @@ body.resizing-editor {
 
 .setting-row:hover {
   border-color: var(--border-light);
-}
-
-.settings .setting-row:first-child {
-  background: none;
-  border: none;
-  padding: 0;
 }
 
 .setting-row label {
@@ -3540,19 +3526,24 @@ body.resizing-editor {
 /* 设置页主题选择器 */
 .theme-picker {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .theme-card {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 150px;
+  min-width: 120px;
   text-align: left;
   padding: 9px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--bg-input);
   transition: border-color 0.15s ease, box-shadow 0.15s ease,
-    transform 0.15s ease;
+  transform 0.15s ease;
+}
+
+.modal.settings-modal {
+  width: min(620px, 94vw);
 }
 
 .theme-card:hover {

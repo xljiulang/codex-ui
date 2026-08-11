@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -144,4 +144,39 @@ describe("AppHeader 工作目录选择", () => {
     );
   });
 
+});
+
+describe("AppHeader 新建对话聚焦输入框", () => {
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
+    document.body.innerHTML = "";
+  });
+
+  it("优先通过 Tiptap 编辑器实例聚焦", async () => {
+    const focus = vi.fn();
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
+      commands: { focus },
+    };
+    const wrapper = mountHeader();
+
+    await wrapper.find('button[aria-label="新建对话"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("无编辑器实例时兜底聚焦 .ProseMirror 元素", async () => {
+    const composer = document.createElement("div");
+    composer.className = "composer";
+    const editor = document.createElement("div");
+    editor.className = "ProseMirror";
+    composer.appendChild(editor);
+    document.body.appendChild(composer);
+    const wrapper = mountHeader();
+
+    await wrapper.find('button[aria-label="新建对话"]').trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(document.activeElement).toBe(editor);
+  });
 });
