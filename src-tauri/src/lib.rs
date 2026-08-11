@@ -15,6 +15,7 @@ pub fn run() {
             codex::commands::server_logs,
             codex::commands::codex_rpc,
             codex::commands::codex_rpc_long,
+            codex::commands::codex_pin_capability,
             codex::commands::interaction_respond,
             codex::commands::thread_list,
             codex::commands::thread_start,

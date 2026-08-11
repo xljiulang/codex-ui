@@ -56,6 +56,12 @@ pub async fn codex_rpc_long(
         .await
 }
 
+/// 探测当前 codex 的置顶协议能力（只读，不修改任何线程状态）。
+#[tauri::command]
+pub async fn codex_pin_capability(server: State<'_, Server>) -> Result<Value, String> {
+    server.pin_capability().await
+}
+
 /// Respond to a server-initiated request (approval / user input / elicitation).
 #[tauri::command]
 pub async fn interaction_respond(

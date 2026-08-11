@@ -89,6 +89,16 @@ cargo test --manifest-path src-tauri\Cargo.toml   # Rust 集成测试（真实 c
 codex app-server generate-ts --out <dir> --experimental
 ```
 
+**置顶协议随 codex 版本变化**，应用启动后首次点击置顶时自动探测并选择对应协议：
+
+| codex 时代 | 版本示例 | 使用的协议 |
+| --- | --- | --- |
+| `isPinned` 元数据 | 0.146.0-alpha.9.2 | `thread/metadata/update { isPinned }` |
+| 分区 + `sectionId` | 0.147.0-alpha.1.2 | `thread/metadata/update { sectionId }` |
+| 分区 + `threadSection/move` | v0.147.0 及更新 | `threadSection/move { sectionId }` |
+
+探测逻辑（`codex_pin_capability`）：先试 `threadSection/list`，存在分区则继续试 `threadSection/move`（方法不存在则回退 `metadata/update { sectionId }`）；无分区接口则试 `metadata/update { isPinned }`，字段不被认（报 "must include at least one field"）时视为不支持置顶。探测仅读取能力、不修改任何会话状态。
+
 ## 常见问题
 
 - **启动后“localhost 拒绝连接”**：生产构建缺少 `tauri/custom-protocol` 特性（或前端未构建）。确认 `Cargo.toml` 已启用该特性并重新 `cargo build --release`。

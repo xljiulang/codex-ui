@@ -432,23 +432,36 @@ export function effectiveEffort(): string {
   return m?.defaultReasoningEffort ?? "";
 }
 
+/** 置顶协议能力（由 codex_pin_capability 探测，覆盖三代 codex 协议） */
+export type PinProtocol =
+  | "section_move" // 新版：threadSection/move { sectionId }
+  | "metadata_section" // 分区时代：thread/metadata/update { sectionId }
+  | "metadata_is_pinned" // 旧版：thread/metadata/update { isPinned }
+  | "unsupported";
+
+export interface PinCapability {
+  protocol: PinProtocol;
+  pinnedSectionId: string | null;
+}
+
 /** 新版协议内置的 “Pinned” 分区，作为置顶的持久化位置（可用 threadSection/list 发现） */
 const PINNED_SECTION_NAME = "Pinned";
-/** 兜底：该内置分区 id 在所有安装中固定（实测与 CODEX_HOME 无关） */
+/** 兜底：该内置分区 id 在所有安装中固定（与 codex 源码常量一致） */
 const FALLBACK_PINNED_SECTION_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
-let pinnedSectionIdCache: string | null = null;
+let pinCapabilityCache: PinCapability | null = null;
 
-/** 仅测试用：重置 Pinned 分区 id 缓存 */
+/** 仅测试用：重置置顶能力缓存 */
 export function __resetPinnedSectionForTest() {
-  pinnedSectionIdCache = null;
+  pinCapabilityCache = null;
 }
 
 /** 线程是否置顶：优先看服务端返回的 section 是否指向内置 Pinned 分区 */
 function isPinnedThread(t: ThreadSummary): boolean {
   if (t.isPinned) return true;
   const sid = t.section?.id;
+  if (!sid) return false;
   return (
-    sid === pinnedSectionIdCache ||
+    sid === pinCapabilityCache?.pinnedSectionId ||
     sid === FALLBACK_PINNED_SECTION_ID ||
     t.section?.name === PINNED_SECTION_NAME
   );
@@ -469,25 +482,16 @@ export function sortThreads(list: ThreadSummary[]): ThreadSummary[] {
   });
 }
 
-/** 获取内置 “Pinned” 分区的 id（首次调用后缓存） */
-async function getPinnedSectionId(): Promise<string | null> {
-  if (pinnedSectionIdCache) return pinnedSectionIdCache;
+/** 获取当前 codex 的置顶协议能力（首次调用后缓存；探测失败返回 null 以便重试） */
+async function getPinCapability(): Promise<PinCapability | null> {
+  if (pinCapabilityCache) return pinCapabilityCache;
   try {
-    const res = await invoke<{ data: { id: string; name: string }[] }>(
-      "codex_rpc",
-      {
-        method: "threadSection/list",
-        params: { limit: 50 },
-      },
-    );
-    const found =
-      res.data?.find((s) => s.name === PINNED_SECTION_NAME)?.id ??
-      res.data?.find((s) => s.id === FALLBACK_PINNED_SECTION_ID)?.id;
-    pinnedSectionIdCache = found ?? FALLBACK_PINNED_SECTION_ID;
+    const cap = await invoke<PinCapability>("codex_pin_capability");
+    pinCapabilityCache = cap;
+    return cap;
   } catch {
-    pinnedSectionIdCache = FALLBACK_PINNED_SECTION_ID;
+    return null;
   }
-  return pinnedSectionIdCache;
 }
 
 export async function refreshThreads(loadMore = false) {
@@ -584,16 +588,39 @@ export async function togglePin(threadId: string, pinned: boolean) {
   const t = store.threads.find((x) => x.id === threadId);
   const prev = t?.isPinned;
   try {
-    const sectionId = pinned ? await getPinnedSectionId() : null;
-    if (pinned && !sectionId) {
+    const cap = await getPinCapability();
+    if (!cap || cap.protocol === "unsupported") {
       setToast("当前 Codex 版本不支持置顶");
       return;
     }
     if (t) t.isPinned = pinned;
-    await invoke("codex_rpc", {
-      method: "thread/metadata/update",
-      params: { threadId, sectionId },
-    });
+    if (cap.protocol === "metadata_is_pinned") {
+      // 旧版协议：isPinned 布尔元数据
+      await invoke("codex_rpc", {
+        method: "thread/metadata/update",
+        params: { threadId, isPinned: pinned },
+      });
+    } else {
+      const sectionId = pinned ? cap.pinnedSectionId : null;
+      if (pinned && !sectionId) {
+        if (t) t.isPinned = prev;
+        setToast("当前 Codex 版本不支持置顶");
+        return;
+      }
+      if (cap.protocol === "section_move") {
+        // 新版协议：threadSection/move
+        await invoke("codex_rpc", {
+          method: "threadSection/move",
+          params: { threadId, sectionId },
+        });
+      } else {
+        // 分区时代协议：metadata/update 携带 sectionId
+        await invoke("codex_rpc", {
+          method: "thread/metadata/update",
+          params: { threadId, sectionId },
+        });
+      }
+    }
     await refreshThreads();
   } catch (e) {
     if (t) t.isPinned = prev;

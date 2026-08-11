@@ -430,45 +430,66 @@ describe("切换会话自动标准停止旧回合", () => {
 });
 
 describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
-  const FALLBACK_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
-
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetPinnedSectionForTest();
     store.threads = [];
     store.loadingHistory = false;
+    store.toast = "";
   });
 
-  function metadataCalls() {
+  function rpcCalls(method: string) {
     return mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string })?.method === "thread/metadata/update",
+        (args as { method?: string })?.method === method,
     );
   }
 
-  it("置顶：从 threadSection/list 发现 Pinned 分区并用其 id 调用 metadata/update", async () => {
-    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "threadSection/list") {
-        return Promise.resolve({ data: [{ id: "sec-1", name: "Pinned" }] });
+  function capabilityCalls() {
+    return mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "codex_pin_capability",
+    );
+  }
+
+  function mockCapability(
+    protocol: string,
+    pinnedSectionId: string | null,
+    refreshedPinned = true,
+  ) {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_pin_capability") {
+        return Promise.resolve({ protocol, pinnedSectionId });
       }
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+      if (cmd === "codex_rpc") {
         return Promise.resolve({ thread: { id: "t1" } });
       }
       if (cmd === "thread_list") {
         return Promise.resolve({
-          data: [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0, isPinned: true }],
+          data: [
+            {
+              id: "t1",
+              name: "会话",
+              createdAt: 0,
+              recencyAt: 0,
+              isPinned: refreshedPinned,
+            },
+          ],
           nextCursor: null,
         });
       }
       return Promise.resolve(undefined);
     });
+  }
+
+  it("metadata_section 置顶：探测到分区协议后用 Pinned 分区 id 调用 metadata/update", async () => {
+    mockCapability("metadata_section", "sec-1", true);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
     await togglePin("t1", true);
 
-    expect(metadataCalls()).toHaveLength(1);
-    expect(metadataCalls()[0][1]).toEqual({
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
+    expect(rpcCalls("thread/metadata/update")[0][1]).toEqual({
       method: "thread/metadata/update",
       params: { threadId: "t1", sectionId: "sec-1" },
     });
@@ -479,14 +500,40 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     });
   });
 
-  it("取消置顶：sectionId 传 null", async () => {
-    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+  it("metadata_section 取消置顶：sectionId 传 null", async () => {
+    mockCapability("metadata_section", "sec-1", false);
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", false);
+
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
+    expect(rpcCalls("thread/metadata/update")[0][1]).toEqual({
+      method: "thread/metadata/update",
+      params: { threadId: "t1", sectionId: null },
+    });
+    expect(store.threads[0].isPinned).toBe(false);
+  });
+
+  it("section_move 置顶/取消：走新版 threadSection/move 协议", async () => {
+    let refreshedPinned = true;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_pin_capability") {
+        return Promise.resolve({ protocol: "section_move", pinnedSectionId: "sec-1" });
+      }
+      if (cmd === "codex_rpc") {
         return Promise.resolve({ thread: { id: "t1" } });
       }
       if (cmd === "thread_list") {
         return Promise.resolve({
-          data: [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0, isPinned: false }],
+          data: [
+            {
+              id: "t1",
+              name: "会话",
+              createdAt: 0,
+              recencyAt: 0,
+              isPinned: refreshedPinned,
+            },
+          ],
           nextCursor: null,
         });
       }
@@ -494,26 +541,48 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     });
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
+    await togglePin("t1", true);
+
+    expect(rpcCalls("threadSection/move")).toHaveLength(1);
+    expect(rpcCalls("threadSection/move")[0][1]).toEqual({
+      method: "threadSection/move",
+      params: { threadId: "t1", sectionId: "sec-1" },
+    });
+    expect(store.threads[0].isPinned).toBe(true);
+
+    refreshedPinned = false;
     await togglePin("t1", false);
 
-    expect(metadataCalls()).toHaveLength(1);
-    expect(metadataCalls()[0][1]).toEqual({
-      method: "thread/metadata/update",
+    expect(rpcCalls("threadSection/move")).toHaveLength(2);
+    expect(rpcCalls("threadSection/move")[1][1]).toEqual({
+      method: "threadSection/move",
       params: { threadId: "t1", sectionId: null },
     });
     expect(store.threads[0].isPinned).toBe(false);
   });
 
-  it("threadSection/list 失败时回退固定内置分区 id", async () => {
-    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "threadSection/list") {
-        return Promise.reject(new Error("unknown method"));
+  it("metadata_is_pinned 置顶/取消：旧版走 metadata/update isPinned 布尔", async () => {
+    let refreshedPinned = true;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_pin_capability") {
+        return Promise.resolve({ protocol: "metadata_is_pinned", pinnedSectionId: null });
       }
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+      if (cmd === "codex_rpc") {
         return Promise.resolve({ thread: { id: "t1" } });
       }
       if (cmd === "thread_list") {
-        return Promise.resolve({ data: [], nextCursor: null });
+        return Promise.resolve({
+          data: [
+            {
+              id: "t1",
+              name: "会话",
+              createdAt: 0,
+              recencyAt: 0,
+              isPinned: refreshedPinned,
+            },
+          ],
+          nextCursor: null,
+        });
       }
       return Promise.resolve(undefined);
     });
@@ -521,16 +590,67 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
 
     await togglePin("t1", true);
 
-    expect(metadataCalls()[0][1]).toEqual({
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
+    expect(rpcCalls("thread/metadata/update")[0][1]).toEqual({
       method: "thread/metadata/update",
-      params: { threadId: "t1", sectionId: FALLBACK_ID },
+      params: { threadId: "t1", isPinned: true },
     });
+    expect(store.threads[0].isPinned).toBe(true);
+
+    refreshedPinned = false;
+    await togglePin("t1", false);
+
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(2);
+    expect(rpcCalls("thread/metadata/update")[1][1]).toEqual({
+      method: "thread/metadata/update",
+      params: { threadId: "t1", isPinned: false },
+    });
+    expect(store.threads[0].isPinned).toBe(false);
   });
 
-  it("metadata/update 失败时回滚本地置顶状态并提示", async () => {
+  it("unsupported：只弹提示不发请求，本地状态不变", async () => {
+    mockCapability("unsupported", null);
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(0);
+    expect(rpcCalls("threadSection/move")).toHaveLength(0);
+    expect(store.threads[0].isPinned).toBeUndefined();
+    expect(store.toast).toContain("不支持置顶");
+  });
+
+  it("探测失败：提示且不发起置顶请求，便于下次重试", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_pin_capability") {
+        return Promise.reject(new Error("server not ready"));
+      }
+      return Promise.resolve(undefined);
+    });
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(0);
+    expect(rpcCalls("threadSection/move")).toHaveLength(0);
+    expect(store.threads[0].isPinned).toBeUndefined();
+    expect(store.toast).toContain("不支持置顶");
+  });
+
+  it("探测结果缓存：连续两次置顶只探测一次", async () => {
+    mockCapability("metadata_is_pinned", null);
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+    await togglePin("t1", false);
+
+    expect(capabilityCalls()).toHaveLength(1);
+  });
+
+  it("写失败时回滚本地置顶状态并提示", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "threadSection/list") {
-        return Promise.resolve({ data: [{ id: "sec-1", name: "Pinned" }] });
+      if (cmd === "codex_pin_capability") {
+        return Promise.resolve({ protocol: "metadata_section", pinnedSectionId: "sec-1" });
       }
       if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
         return Promise.reject(new Error("update failed"));
@@ -542,7 +662,7 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     await togglePin("t1", true);
 
     expect(store.threads[0].isPinned).toBeUndefined();
-    expect(metadataCalls()).toHaveLength(1);
+    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
   });
 
   it("sortThreads 从 section 推导置顶：固定优先，再按最近时间降序", () => {

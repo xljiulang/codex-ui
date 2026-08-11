@@ -16,6 +16,13 @@ use crate::codex::settings::{self, AppSettings};
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
 
+/// JSON-RPC 错误；`code` 为 `None` 时表示本地传输层错误（未就绪/超时/断连）。
+#[derive(Debug, Clone)]
+pub struct RpcError {
+    pub code: Option<i64>,
+    pub message: String,
+}
+
 pub struct CodexServer {
     app: AppHandle,
     shared: Arc<Shared>,
@@ -32,7 +39,7 @@ struct Shared {
 struct Inner {
     stdin: Option<ChildStdin>,
     child: Option<Child>,
-    pending: HashMap<u64, oneshot::Sender<Result<Value, String>>>,
+    pending: HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>,
     connected: bool,
     ready: bool,
     logs: Vec<String>,
@@ -267,11 +274,13 @@ impl CodexServer {
             }
             // response to one of our requests
             let result = if v.get("error").is_some() {
-                let msg = v["error"]
+                let code = v["error"].get("code").and_then(|c| c.as_i64());
+                let message = v["error"]
                     .get("message")
                     .and_then(|m| m.as_str())
-                    .unwrap_or("codex 请求失败");
-                Err(msg.to_string())
+                    .unwrap_or("codex 请求失败")
+                    .to_string();
+                Err(RpcError { code, message })
             } else {
                 Ok(v.get("result").cloned().unwrap_or(Value::Null))
             };
@@ -293,6 +302,18 @@ impl CodexServer {
         params: Value,
         timeout: Option<Duration>,
     ) -> Result<Value, String> {
+        self.request_verbose(method, params, timeout)
+            .await
+            .map_err(|e| e.message)
+    }
+
+    /// 保留 JSON-RPC error code 的请求变体，供能力探测等需要区分错误类型的场景使用。
+    pub async fn request_verbose(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Option<Duration>,
+    ) -> Result<Value, RpcError> {
         // 等待握手完成（初始化失败/断线重连时最多等 10 秒）
         let ready_deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -303,7 +324,10 @@ impl CodexServer {
                 }
             }
             if Instant::now() > ready_deadline {
-                return Err("codex app-server 未就绪，请稍后重试".into());
+                return Err(RpcError {
+                    code: None,
+                    message: "codex app-server 未就绪，请稍后重试".into(),
+                });
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
@@ -314,24 +338,113 @@ impl CodexServer {
         {
             let mut inner = self.shared.inner.lock().await;
             if !inner.connected {
-                return Err("codex app-server 未连接，正在重连，请稍候".into());
+                return Err(RpcError {
+                    code: None,
+                    message: "codex app-server 未连接，正在重连，请稍候".into(),
+                });
             }
             let stdin = inner
                 .stdin
                 .as_mut()
-                .ok_or_else(|| "codex app-server stdin 不可用".to_string())?;
+                .ok_or_else(|| RpcError {
+                    code: None,
+                    message: "codex app-server stdin 不可用".to_string(),
+                })?;
             let line = format!("{}\n", msg);
             stdin
                 .write_all(line.as_bytes())
                 .await
-                .map_err(|e| format!("写入 app-server 失败: {e}"))?;
+                .map_err(|e| RpcError {
+                    code: None,
+                    message: format!("写入 app-server 失败: {e}"),
+                })?;
             inner.pending.insert(id, tx);
         }
         let t = timeout.unwrap_or(Duration::from_secs(30));
         tokio::time::timeout(t, rx)
             .await
-            .map_err(|_| format!("请求 {method} 超时"))?
-            .map_err(|_| "codex app-server 连接中断".to_string())?
+            .map_err(|_| RpcError {
+                code: None,
+                message: format!("请求 {method} 超时"),
+            })?
+            .map_err(|_| RpcError {
+                code: None,
+                message: "codex app-server 连接中断".to_string(),
+            })?
+    }
+
+    /// 稳定内置 Pinned 分区 id（与 codex 源码常量一致，与 CODEX_HOME 无关）。
+    const PINNED_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
+    /// 探测用假线程 id：合法 UUID 格式，任何真实 codex 都会在字段校验后报 thread not found。
+    const PROBE_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
+
+    fn method_unavailable(e: &RpcError) -> bool {
+        e.code == Some(-32601) || e.message.contains("unknown variant")
+    }
+
+    /// 探测当前 codex 的置顶协议能力（只读，不修改任何线程状态）。
+    /// 返回 `{ protocol, pinnedSectionId }`：
+    /// - `section_move`：新版分区协议 `threadSection/move`；
+    /// - `metadata_section`：分区时代 `thread/metadata/update { sectionId }`；
+    /// - `metadata_is_pinned`：旧版 `thread/metadata/update { isPinned }`；
+    /// - `unsupported`：完全不支持置顶。
+    pub async fn pin_capability(&self) -> Result<Value, String> {
+        match self
+            .request_verbose("threadSection/list", json!({ "limit": 50 }), None)
+            .await
+        {
+            Ok(resp) => {
+                let section_id = resp["data"]
+                    .as_array()
+                    .and_then(|arr| {
+                        arr.iter()
+                            .find(|s| s["name"].as_str() == Some("Pinned"))
+                            .or_else(|| {
+                                arr.iter()
+                                    .find(|s| s["id"].as_str() == Some(Self::PINNED_SECTION_ID))
+                            })
+                            .and_then(|s| s["id"].as_str().map(|x| x.to_string()))
+                    })
+                    .unwrap_or_else(|| Self::PINNED_SECTION_ID.to_string());
+                match self
+                    .request_verbose(
+                        "threadSection/move",
+                        json!({ "threadId": Self::PROBE_THREAD_ID, "sectionId": null }),
+                        None,
+                    )
+                    .await
+                {
+                    Err(e) if Self::method_unavailable(&e) => Ok(json!({
+                        "protocol": "metadata_section",
+                        "pinnedSectionId": section_id,
+                    })),
+                    Err(e) if e.code.is_none() => Err(e.message),
+                    _ => Ok(json!({
+                        "protocol": "section_move",
+                        "pinnedSectionId": section_id,
+                    })),
+                }
+            }
+            Err(e) if Self::method_unavailable(&e) => match self
+                .request_verbose(
+                    "thread/metadata/update",
+                    json!({ "threadId": Self::PROBE_THREAD_ID, "isPinned": true }),
+                    None,
+                )
+                .await
+            {
+                Err(e) if e.message.contains("must include at least one field") => Ok(json!({
+                    "protocol": "unsupported",
+                    "pinnedSectionId": null,
+                })),
+                Err(e) if e.code.is_none() => Err(e.message),
+                _ => Ok(json!({
+                    "protocol": "metadata_is_pinned",
+                    "pinnedSectionId": null,
+                })),
+            },
+            Err(e) => Err(e.message),
+        }
     }
 
     pub async fn send_response(&self, id: u64, result: Value) -> Result<(), String> {
@@ -374,7 +487,10 @@ impl CodexServer {
         }
         let pending = std::mem::take(&mut inner.pending);
         for (_, tx) in pending {
-            let _ = tx.send(Err("codex app-server 连接中断".into()));
+            let _ = tx.send(Err(RpcError {
+                code: None,
+                message: "codex app-server 连接中断".into(),
+            }));
         }
         inner.push_log_locked("codex app-server 已断开，正在重连…".into());
     }
