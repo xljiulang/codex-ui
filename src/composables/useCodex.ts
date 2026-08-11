@@ -655,13 +655,13 @@ export function sanitizeTitle(raw: string): string {
 }
 
 /**
- * 仿 VS Code：临时线程 + gpt-5.4-mini 总结首条消息，为会话生成短标题。
+ * 仿 VS Code：临时线程总结首条消息，为会话生成短标题（不指定模型，用默认模型）。
  * 与主回合并行执行、失败静默（保留默认标题）；支持 experimentalApi 才执行，
  * 不支持 ephemeral 时退化为普通线程总结后删除。
  */
 export async function autoTitleThread(threadId: string, firstMessagePlain: string) {
   const text = firstMessagePlain.replace(/\s+/g, " ").trim();
-  if (!text || text.length <= 30) return; // 短文保持默认标题，不消耗模型
+  if (!text || text.length <= 15) return; // 短文保持默认标题，不消耗模型
   const t = store.threads.find((x) => x.id === threadId);
   if (t?.name || store.currentThreadName) return; // 已被命名（手动/其它客户端）
   const cap = await getTitleHelperCapability();
@@ -725,12 +725,10 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     const startParams: Record<string, unknown> = {
       cwd: store.currentThreadCwd ?? store.server.workspace,
       approvalPolicy: "never",
-      sandbox: "readOnly",
-      model: "gpt-5.4-mini",
+      sandbox: "read-only",
     };
     if (cap.ephemeral) {
       startParams.ephemeral = true;
-      startParams.allowProviderModelFallback = true;
     }
     const started = await invoke<{ thread?: { id?: string } }>("thread_start", {
       params: startParams,
@@ -799,7 +797,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
         threadId: helperThreadId,
         input,
         approvalPolicy: "never",
-        sandbox: "readOnly",
+        sandboxPolicy: { type: "readOnly", networkAccess: false },
       },
     });
   } catch {

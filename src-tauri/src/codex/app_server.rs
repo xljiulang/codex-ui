@@ -447,8 +447,8 @@ impl CodexServer {
         }
     }
 
-    /// 探测当前 codex 的“临时线程标题总结”能力（仿 VS Code：ephemeral 线程 +
-    /// gpt-5.4-mini 总结首条消息）。探测本身只创建一个内存线程并立即释放，不落盘。
+    /// 探测当前 codex 的“临时线程标题总结”能力（仿 VS Code：ephemeral 线程
+    /// 总结首条消息，使用默认模型）。探测本身只创建一个内存线程并立即释放，不落盘。
     /// 返回 `{ experimentalApi, ephemeral }`：
     /// - `{ experimentalApi: true, ephemeral: true }`：支持临时线程 + 实验字段回退；
     /// - `{ experimentalApi: true, ephemeral: false }`：支持实验 API 但不支持临时线程；
@@ -462,7 +462,7 @@ impl CodexServer {
                     "ephemeral": true,
                     "allowProviderModelFallback": true,
                     "approvalPolicy": "never",
-                    "sandbox": "readOnly",
+                    "sandbox": "read-only",
                 }),
                 Some(Duration::from_secs(30)),
             )

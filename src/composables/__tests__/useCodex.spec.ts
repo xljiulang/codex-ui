@@ -820,6 +820,37 @@ describe("autoTitleThread 临时线程标题总结", () => {
     expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
   });
 
+  it("阈值边界：纯文本 15 字不触发，16 字触发", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: true });
+      }
+      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      return Promise.resolve(undefined);
+    });
+
+    await autoTitleThread("t1", "一二三四五六七八九十一二三四五"); // 15 字
+    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+
+    mockedInvoke.mockClear();
+    const p = autoTitleThread("t1", "一二三四五六七八九十一二三四五六"); // 16 字
+    await p;
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_start", expect.anything());
+
+    // 结算临时回合并清理，避免 30s 兜底定时器悬空
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "interrupted" },
+    });
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+        method: "thread/unsubscribe",
+        params: { threadId: "helper1" },
+      });
+    }, { timeout: 3000, interval: 20 });
+  });
+
   it("线程已有名称时不覆盖", async () => {
     store.currentThreadName = "手动标题";
     await autoTitleThread("t1", LONG_TEXT);
@@ -834,12 +865,18 @@ describe("autoTitleThread 临时线程标题总结", () => {
       if (cmd === "thread_start") {
         const params = (args as { params?: Record<string, unknown> }).params ?? {};
         expect(params.ephemeral).toBe(true);
-        expect(params.allowProviderModelFallback).toBe(true);
-        expect(params.model).toBe("gpt-5.4-mini");
+        expect(params.model).toBeUndefined();
+        expect(params.sandbox).toBe("read-only");
         expect(params.cwd).toBe("D:/repo");
         return Promise.resolve({ thread: { id: "helper1" } });
       }
-      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      if (cmd === "turn_start") {
+        const params = (args as { params?: Record<string, unknown> }).params ?? {};
+        expect(
+          (params.sandboxPolicy as { type?: string } | undefined)?.type,
+        ).toBe("readOnly");
+        return Promise.resolve({ turn: { id: "ht1" } });
+      }
       if (cmd === "thread_set_name") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
@@ -866,13 +903,13 @@ describe("autoTitleThread 临时线程标题总结", () => {
         threadId: "t1",
         name: "修复登录页面报错问题",
       });
-    });
+    }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
         method: "thread/unsubscribe",
         params: { threadId: "helper1" },
       });
-    });
+    }, { timeout: 3000, interval: 20 });
   });
 
   it("不支持 ephemeral：普通线程总结后删除", async () => {
@@ -883,6 +920,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
       if (cmd === "thread_start") {
         const params = (args as { params?: Record<string, unknown> }).params ?? {};
         expect(params.ephemeral).toBeUndefined();
+        expect(params.model).toBeUndefined();
+        expect(params.sandbox).toBe("read-only");
         return Promise.resolve({ thread: { id: "helper1" } });
       }
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
@@ -907,12 +946,12 @@ describe("autoTitleThread 临时线程标题总结", () => {
         threadId: "t1",
         name: "重构模块",
       });
-    });
+    }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("thread_delete", {
         threadId: "helper1",
       });
-    });
+    }, { timeout: 3000, interval: 20 });
   });
 
   it("回合失败：不写回标题，仍清理临时线程", async () => {
@@ -937,7 +976,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
         method: "thread/unsubscribe",
         params: { threadId: "helper1" },
       });
-    });
+    }, { timeout: 3000, interval: 20 });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "thread_set_name",
       expect.anything(),
@@ -982,7 +1021,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
         threadId: "t1",
         name: expect.any(String),
       });
-    });
+    }, { timeout: 3000, interval: 20 });
     expect(store.turnActive).toBe(false);
 
     // 主线程事件照常工作
@@ -992,6 +1031,9 @@ describe("autoTitleThread 临时线程标题总结", () => {
       threadId: "t1",
       turn: { id: "mt1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false));
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
   });
 });
