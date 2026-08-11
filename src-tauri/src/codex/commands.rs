@@ -331,6 +331,38 @@ pub async fn pick_directory(initial_dir: Option<String>) -> Result<Option<String
     .map_err(|e| e.to_string())?
 }
 
+/// 文件名（大小写不敏感）必须为 codex.exe
+fn is_codex_exe(p: &std::path::Path) -> bool {
+    p.file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase() == "codex.exe")
+        .unwrap_or(false)
+}
+
+/// 选择 codex 可执行文件：对话框仅显示 .exe，且只能选择名为 codex.exe 的文件
+#[tauri::command]
+pub async fn pick_codex_file(initial_dir: Option<String>) -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut dialog = rfd::FileDialog::new().add_filter("Codex 可执行文件", &["exe"]);
+        if let Some(d) = initial_dir.as_deref() {
+            if !d.is_empty() {
+                dialog = dialog.set_directory(d);
+            }
+        }
+        let Some(picked) = dialog.pick_file() else {
+            return Ok(None);
+        };
+        if !is_codex_exe(&picked) {
+            return Err(format!(
+                "请选择名为 codex.exe 的文件（当前选择：{}）",
+                picked.display()
+            ));
+        }
+        Ok(Some(picked.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 图片扩展名白名单（来自粘贴文件名/剪贴板类型）
 fn image_extension(name: &str) -> Result<String, String> {
     let ext = name
@@ -450,5 +482,16 @@ mod tests {
         let b = pasted_file_name("png");
         assert_ne!(a, b);
         assert!(a.ends_with(".png"));
+    }
+
+    #[test]
+    fn is_codex_exe_name_check() {
+        use std::path::Path;
+        assert!(is_codex_exe(Path::new("C:/tools/codex.exe")));
+        assert!(is_codex_exe(Path::new("C:/tools/CODEX.EXE")));
+        assert!(is_codex_exe(Path::new("codex.exe")));
+        assert!(!is_codex_exe(Path::new("C:/tools/other.exe")));
+        assert!(!is_codex_exe(Path::new("C:/tools/codex.cmd")));
+        assert!(!is_codex_exe(Path::new("C:/tools/")));
     }
 }

@@ -1,14 +1,35 @@
 <script setup lang="ts">
 import { computed, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { newEmptyChat, store } from "../composables/useCodex";
+import { newEmptyChat, store, toastError } from "../composables/useCodex";
 
-const cwd = computed(() => store.currentThreadCwd ?? store.server.workspace);
+// 新对话态显示已选择目录；会话态显示线程固定目录；兜底启动工作目录
+const cwd = computed(() =>
+  store.currentThreadId
+    ? store.currentThreadCwd ?? store.server.workspace
+    : store.newChatCwd ?? store.server.workspace,
+);
+// 会话未开始（新对话态）目录可修改；会话进行中线程目录已固定，只读
+const isNewChat = computed(() => !store.currentThreadId);
 
 // 只读展示；点击在资源管理器中打开
 function openInExplorer() {
   if (!cwd.value) return;
   void invoke("open_url", { url: cwd.value }).catch(() => undefined);
+}
+
+async function pickNewChatCwd() {
+  try {
+    const dir = await invoke<string | null>("pick_directory");
+    if (dir) store.newChatCwd = dir;
+  } catch (e) {
+    store.toast = toastError(e);
+  }
+}
+
+function onCwdClick() {
+  if (isNewChat.value) void pickNewChatCwd();
+  else openInExplorer();
 }
 
 function onNewChat() {
@@ -45,8 +66,9 @@ function onHistory() {
       <button
         v-if="cwd"
         class="brand-cwd"
-        v-tooltip="`在资源管理器中打开：${cwd}`"
-        @click="openInExplorer()"
+        :class="{ pickable: isNewChat }"
+        v-tooltip="isNewChat ? '点击可修改工作目录' : `在资源管理器中打开：${cwd}`"
+        @click="onCwdClick()"
       >
         <svg viewBox="0 0 24 24">
           <path
@@ -54,6 +76,15 @@ function onHistory() {
           />
         </svg>
         {{ cwd }}
+      </button>
+      <button
+        v-if="isNewChat && store.newChatCwd"
+        class="brand-cwd-reset"
+        aria-label="恢复默认工作目录"
+        v-tooltip="'恢复默认工作目录'"
+        @click="store.newChatCwd = null"
+      >
+        ×
       </button>
     </div>
     <div class="header-actions">

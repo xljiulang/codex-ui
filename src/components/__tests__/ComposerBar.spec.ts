@@ -166,6 +166,12 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(wrapper.find("button.plus-btn").exists()).toBe(false);
   });
 
+  it("新对话态不再渲染输入框上方的项目目录行", () => {
+    wrapper = mount(ComposerBar);
+    expect(wrapper.find(".newchat-cwd-row").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("项目目录");
+  });
+
   it("@ 空 token：菜单固定行在前、插件列表在后", async () => {
     await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
     wrapper = mount(ComposerBar);

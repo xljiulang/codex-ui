@@ -14,6 +14,7 @@ import {
   interrupt,
   newEmptyChat,
   openThread,
+  refreshServer,
   sendPrompt,
   sortThreads,
   store,
@@ -106,6 +107,32 @@ describe("toastError 错误提示提取", () => {
     expect(toastError("raw string")).toBe("raw string");
     expect(toastError(42)).toBe("42");
     expect(toastError(null)).toBe("null");
+  });
+});
+
+describe("refreshServer 服务状态同步", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.server = {
+      connected: false,
+      workspace: "",
+      codexPath: null,
+      logs: [],
+    };
+  });
+
+  it("server_status 返回 codexPath 后写入 store.server.codexPath", async () => {
+    mockedInvoke.mockResolvedValue({
+      connected: true,
+      workspace: "D:/repo",
+      codexPath: "D:/codex/codex.exe",
+      logs: [],
+    });
+    await refreshServer();
+    expect(mockedInvoke).toHaveBeenCalledWith("server_status");
+    expect(store.server.codexPath).toBe("D:/codex/codex.exe");
+    expect(store.server.connected).toBe(true);
+    expect(store.server.workspace).toBe("D:/repo");
   });
 });
 

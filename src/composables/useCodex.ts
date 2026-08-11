@@ -1221,6 +1221,8 @@ export async function init() {
   void ensureSkills(); // 应用启动预加载技能列表（$ 菜单与回显悬浮提示共用）
   await refreshThreads();
   await wireEvents();
+  // 监听注册后补取一次状态：避免后端启动成功的首次推送早于监听注册被丢弃
+  void refreshServer().catch(() => undefined);
 }
 
 export function disposeEvents() {

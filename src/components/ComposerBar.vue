@@ -583,8 +583,6 @@ function rowAttName(a: UserInput): string {
   return a.type === "mention" || a.type === "skill" ? a.name : "";
 }
 
-const newChatCwdLabel = computed(() => store.newChatCwd ?? store.server.workspace);
-
 // 上下文窗口使用情况：window 未知时不显示
 const ctxUsage = computed(() => {
   const u = store.threadTokenUsage;
@@ -608,15 +606,6 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-async function pickNewChatCwd() {
-  try {
-    const dir = await invoke<string | null>("pick_directory");
-    if (dir) store.newChatCwd = dir;
-  } catch (e) {
-    store.toast = toastError(e);
-  }
-}
-
 function modelChipLabel(): string {
   const name = modelDisplayName(store.model);
   const effort = effectiveEffort();
@@ -633,30 +622,6 @@ function taskModeLabel(): string {
 
 <template>
   <div class="composer">
-    <div v-if="!store.currentThreadId" class="newchat-cwd-row">
-      <svg viewBox="0 0 24 24">
-        <path
-          d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-        />
-      </svg>
-      <span class="newchat-cwd-label">项目目录</span>
-      <button
-        class="newchat-cwd-value"
-        v-tooltip="newChatCwdLabel"
-        @click="pickNewChatCwd()"
-      >
-        {{ newChatCwdLabel }}
-      </button>
-      <button
-        v-if="store.newChatCwd"
-        class="newchat-cwd-reset"
-        aria-label="恢复默认工作目录"
-        v-tooltip="'恢复默认工作目录'"
-        @click="store.newChatCwd = null"
-      >
-        ×
-      </button>
-    </div>
     <div
       class="composer-input-row"
       :style="editorHeight ? { '--editor-h': `${editorHeight}px` } : undefined"

@@ -1,11 +1,27 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { saveSettings, store } from "../composables/useCodex";
+import { invoke } from "@tauri-apps/api/core";
+import { saveSettings, store, toastError } from "../composables/useCodex";
 
 const codexPath = ref(store.settings.codex_path ?? "");
 const sound = ref(store.settings.sound_enabled);
 const enterToSend = ref(store.settings.enter_to_send);
 const followupMode = ref(store.settings.followup_mode);
+
+async function pickCodexFile() {
+  try {
+    const current = codexPath.value.trim();
+    const initialDir = current
+      ? current.replace(/[\\/][^\\/]*$/, "")
+      : undefined;
+    const dir = await invoke<string | null>("pick_codex_file", {
+      initialDir,
+    });
+    if (dir) codexPath.value = dir;
+  } catch (e) {
+    store.toast = toastError(e);
+  }
+}
 
 async function apply() {
   await saveSettings({
@@ -45,8 +61,16 @@ async function apply() {
     </div>
 
     <div class="setting-row">
-      <label>codex 可执行文件路径（留空使用 PATH）</label>
-      <input v-model="codexPath" type="text" placeholder="例如 C:\Users\you\.local\bin\codex.exe" />
+      <label>codex 可执行文件（留空使用 PATH）</label>
+      <div class="setting-path-row">
+        <div class="setting-value">
+          {{ codexPath || "未设置（使用 PATH 查找）" }}
+        </div>
+        <button class="btn" @click="pickCodexFile()">选择文件…</button>
+        <button v-if="codexPath" class="btn danger" @click="codexPath = ''">
+          清除
+        </button>
+      </div>
     </div>
 
     <div class="setting-row">
