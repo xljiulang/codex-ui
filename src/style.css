@@ -667,6 +667,63 @@ select option {
   padding: 6px;
 }
 
+.history-folder {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  margin-top: 4px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.history-folder:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.history-folder .folder-chevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-dim);
+  transform: rotate(90deg);
+  transition: transform 0.14s ease;
+}
+
+.history-folder.collapsed .folder-chevron {
+  transform: rotate(0deg);
+}
+
+.history-folder .folder-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-folder .folder-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.history-item.folder-item {
+  margin-left: 14px;
+}
+
 .history-item {
   display: flex;
   align-items: flex-start;
@@ -730,14 +787,6 @@ select option {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.history-cwd {
-  font-size: 11px;
-  color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .history-snippet {

@@ -113,3 +113,96 @@ describe("HistoryPanel 置顶", () => {
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", false);
   });
 });
+
+describe("HistoryPanel 目录分组", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.loadingHistory = false;
+    store.nextCursor = null;
+    store.searchActive = false;
+    store.searchSnippets = {};
+  });
+
+  const dirThreads = [
+    {
+      id: "t1",
+      name: "会话一",
+      createdAt: now,
+      recencyAt: 3,
+      cwd: "D:\\codex\\codex-ui",
+    },
+    {
+      id: "t2",
+      name: "会话二",
+      createdAt: now,
+      recencyAt: 2,
+      cwd: "D:\\codex\\codex-ui",
+    },
+    {
+      id: "t3",
+      name: "会话三",
+      createdAt: now,
+      recencyAt: 1,
+      cwd: "D:\\codex\\codex-proxy",
+    },
+  ];
+
+  it("相同 cwd 合并为目录行：显示目录名与数量，仅 1 条也建目录", async () => {
+    store.threads = dirThreads.map((t) => ({ ...t }));
+    const wrapper = mount(HistoryPanel);
+
+    const folders = wrapper.findAll(".history-folder");
+    expect(folders).toHaveLength(2);
+    expect(folders[0].find(".folder-name").text()).toBe("codex-ui");
+    expect(folders[0].find(".folder-count").text()).toBe("2");
+    expect(folders[1].find(".folder-name").text()).toBe("codex-proxy");
+    expect(folders[1].find(".folder-count").text()).toBe("1");
+    // 默认收起：目录内会话均不可见
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+  });
+
+  it("目录默认收起，点击目录行展开/再点收起", async () => {
+    store.threads = dirThreads.map((t) => ({ ...t }));
+    const wrapper = mount(HistoryPanel);
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
+
+    await wrapper.findAll(".history-folder")[0].trigger("click");
+    expect(wrapper.findAll(".history-item")).toHaveLength(2);
+    expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
+
+    await wrapper.findAll(".history-folder")[0].trigger("click");
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
+  });
+
+  it("含置顶会话的目录排最前，置顶会话仍留在目录内", async () => {
+    store.threads = [
+      { ...dirThreads[2] },
+      { ...dirThreads[0], isPinned: true },
+      { ...dirThreads[1] },
+    ];
+    const wrapper = mount(HistoryPanel);
+
+    const names = wrapper
+      .findAll(".folder-name")
+      .map((n) => n.text());
+    expect(names).toEqual(["codex-ui", "codex-proxy"]);
+    // 展开置顶目录后，置顶徽章仍显示在目录内的会话上
+    await wrapper.findAll(".history-folder")[0].trigger("click");
+    expect(wrapper.findAll(".pin-badge")).toHaveLength(1);
+  });
+
+  it("无 cwd 的会话平铺显示，不建目录", async () => {
+    store.threads = [
+      { id: "x", name: "平铺", createdAt: now, recencyAt: 5 },
+      { id: "y", name: "目录内", createdAt: now, recencyAt: 4, cwd: "D:\\repo" },
+    ];
+    const wrapper = mount(HistoryPanel);
+
+    expect(wrapper.findAll(".history-folder")).toHaveLength(1);
+    // 目录默认收起，仅平铺会话可见
+    expect(wrapper.findAll(".history-item")).toHaveLength(1);
+    expect(wrapper.findAll(".history-item:not(.folder-item)")).toHaveLength(1);
+  });
+});

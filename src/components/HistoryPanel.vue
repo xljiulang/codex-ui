@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
   clearSearch,
   deleteThread,
@@ -12,6 +12,8 @@ import {
   togglePin,
 } from "../composables/useCodex";
 import { formatRelativeTime } from "../lib/format";
+import { groupThreads } from "../lib/historyGroup";
+import type { HistoryGroup } from "../lib/historyGroup";
 import type { ThreadSummary } from "../lib/types";
 
 const confirmThread = ref<ThreadSummary | null>(null);
@@ -19,8 +21,38 @@ const confirmEl = ref<HTMLElement | null>(null);
 const searchTerm = ref("");
 const editingId = ref<string | null>(null);
 const editName = ref("");
+/** 默认收起；记录用户展开过的目录 */
+const expandedDirs = reactive(new Set<string>());
 let searchTimer: number | undefined;
 let lastFocus: HTMLElement | null = null;
+
+type RenderRow =
+  | { kind: "folder"; group: HistoryGroup; collapsed: boolean }
+  | { kind: "item"; thread: ThreadSummary; inFolder: boolean };
+
+function toggleDir(key: string) {
+  if (expandedDirs.has(key)) expandedDirs.delete(key);
+  else expandedDirs.add(key);
+}
+
+/** 按目录分组后的渲染行：目录行 + （展开时）内部会话行 + 平铺会话行 */
+const historyRows = computed<RenderRow[]>(() => {
+  const rows: RenderRow[] = [];
+  for (const row of groupThreads(store.threads)) {
+    if (row.kind === "group") {
+      const collapsed = !expandedDirs.has(row.group.key);
+      rows.push({ kind: "folder", group: row.group, collapsed });
+      if (!collapsed) {
+        for (const t of row.group.threads) {
+          rows.push({ kind: "item", thread: t, inFolder: true });
+        }
+      }
+    } else {
+      rows.push({ kind: "item", thread: row.thread, inFolder: false });
+    }
+  }
+  return rows;
+});
 
 function onSearchInput() {
   if (searchTimer) window.clearTimeout(searchTimer);
@@ -121,75 +153,96 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       </button>
     </div>
     <div class="history-list">
-      <div
-        v-for="t in store.threads"
-        :key="t.id"
-        class="history-item"
-        :class="{ active: t.id === store.currentThreadId }"
-        @click="openThread(t.id)"
+      <template
+        v-for="row in historyRows"
+        :key="row.kind === 'folder' ? 'folder:' + row.group.key : row.thread.id"
       >
-        <span class="history-main">
-          <input
-            v-if="editingId === t.id"
-            v-model="editName"
-            class="rename-input"
-            @click.stop
-            @keydown.enter="saveRename(t)"
-            @keydown.esc="cancelRename()"
-            @blur="saveRename(t)"
-          />
-          <template v-else>
-            <span class="history-title-row">
-              <span class="history-title">{{ threadTitle(t) }}</span>
-              <span v-if="t.isPinned" class="pin-badge">置顶</span>
-            </span>
-            <span
-              v-if="store.searchActive && store.searchSnippets[t.id]"
-              class="history-snippet"
-            >
-              {{ store.searchSnippets[t.id] }}
-            </span>
-            <span v-if="t.cwd" class="history-cwd" v-tooltip="t.cwd">{{ t.cwd }}</span>
+        <div
+          v-if="row.kind === 'folder'"
+          class="history-folder"
+          :class="{ collapsed: row.collapsed }"
+          role="button"
+          :aria-expanded="!row.collapsed"
+          v-tooltip="row.group.path"
+          @click="toggleDir(row.group.key)"
+        >
+          <span class="folder-chevron">▸</span>
+          <span class="folder-name">{{ row.group.label }}</span>
+          <span class="folder-count">{{ row.group.threads.length }}</span>
+        </div>
+        <div
+          v-else
+          class="history-item"
+          :class="{
+            active: row.thread.id === store.currentThreadId,
+            'folder-item': row.inFolder,
+          }"
+          @click="openThread(row.thread.id)"
+        >
+          <span class="history-main">
+            <input
+              v-if="editingId === row.thread.id"
+              v-model="editName"
+              class="rename-input"
+              @click.stop
+              @keydown.enter="saveRename(row.thread)"
+              @keydown.esc="cancelRename()"
+              @blur="saveRename(row.thread)"
+            />
+            <template v-else>
+              <span class="history-title-row">
+                <span class="history-title">{{ threadTitle(row.thread) }}</span>
+                <span v-if="row.thread.isPinned" class="pin-badge">置顶</span>
+              </span>
+              <span
+                v-if="store.searchActive && store.searchSnippets[row.thread.id]"
+                class="history-snippet"
+              >
+                {{ store.searchSnippets[row.thread.id] }}
+              </span>
           </template>
-        </span>
-        <span class="history-time">{{ formatRelativeTime(t.recencyAt ?? t.updatedAt) }}</span>
-        <span class="history-actions">
-          <button
-            class="act-btn"
-            :class="{ pinned: t.isPinned }"
-            :aria-label="t.isPinned ? '取消固定' : '固定置顶'"
-            v-tooltip="t.isPinned ? '取消固定' : '固定置顶'"
-            @click.stop="togglePin(t.id, !t.isPinned)"
-          >
-            <svg viewBox="0 0 24 24">
-              <path
-                d="M14 4h-4l1 7-3 2v2h8v-2l-3-2z"
-                :fill="t.isPinned ? 'currentColor' : 'none'"
-              />
-            </svg>
-          </button>
-          <button
-            class="act-btn"
-            aria-label="重命名"
-            v-tooltip="'重命名'"
-            @click.stop="startRename(t)"
-          >
-            <svg viewBox="0 0 24 24">
-              <path
-                d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
-              />
-            </svg>
-          </button>
-          <button
-            class="act-btn del"
-            aria-label="删除会话"
-            v-tooltip="'删除会话'"
-            @click.stop="askDelete(t)"
-          >
-            ×
-          </button>
-        </span>
-      </div>
+          </span>
+          <span class="history-time">{{
+            formatRelativeTime(row.thread.recencyAt ?? row.thread.updatedAt)
+          }}</span>
+          <span class="history-actions">
+            <button
+              class="act-btn"
+              :class="{ pinned: row.thread.isPinned }"
+              :aria-label="row.thread.isPinned ? '取消固定' : '固定置顶'"
+              v-tooltip="row.thread.isPinned ? '取消固定' : '固定置顶'"
+              @click.stop="togglePin(row.thread.id, !row.thread.isPinned)"
+            >
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M14 4h-4l1 7-3 2v2h8v-2l-3-2z"
+                  :fill="row.thread.isPinned ? 'currentColor' : 'none'"
+                />
+              </svg>
+            </button>
+            <button
+              class="act-btn"
+              aria-label="重命名"
+              v-tooltip="'重命名'"
+              @click.stop="startRename(row.thread)"
+            >
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+                />
+              </svg>
+            </button>
+            <button
+              class="act-btn del"
+              aria-label="删除会话"
+              v-tooltip="'删除会话'"
+              @click.stop="askDelete(row.thread)"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      </template>
       <div v-if="!store.threads.length && !store.loadingHistory" class="menu-note">
         暂无会话
       </div>
