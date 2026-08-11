@@ -62,6 +62,14 @@ pub async fn codex_pin_capability(server: State<'_, Server>) -> Result<Value, St
     server.pin_capability().await
 }
 
+/// 探测当前 codex 的临时线程标题总结能力（创建内存线程后立即释放）。
+#[tauri::command]
+pub async fn codex_title_helper_capability(
+    server: State<'_, Server>,
+) -> Result<Value, String> {
+    server.title_helper_capability().await
+}
+
 /// Respond to a server-initiated request (approval / user input / elicitation).
 #[tauri::command]
 pub async fn interaction_respond(

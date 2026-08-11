@@ -135,6 +135,17 @@ export const store = reactive({
 let unlisteners: UnlistenFn[] = [];
 let wired = false;
 
+/**
+ * 后台临时线程 id 集合（如标题总结用的 ephemeral 线程）。
+ * 这些线程的事件只由各自的一次性监听处理，不得进入全局 UI 状态，
+ * 否则临时线程的 turn/completed 会把主对话的进行中状态误置为结束。
+ */
+const backgroundThreadIds = new Set<string>();
+
+function isBackgroundThread(threadId: string | undefined | null): boolean {
+  return !!threadId && backgroundThreadIds.has(threadId);
+}
+
 export interface ConfirmRequest {
   title: string;
   message: string;
@@ -518,6 +529,31 @@ async function getPinCapability(): Promise<PinCapability | null> {
   }
 }
 
+/** 标题总结能力（codex_title_helper_capability 探测结果，覆盖版本差异） */
+export interface TitleHelperCapability {
+  experimentalApi: boolean;
+  ephemeral: boolean;
+}
+
+let titleHelperCapabilityCache: TitleHelperCapability | null = null;
+
+/** 仅测试用：重置标题总结能力缓存 */
+export function __resetTitleHelperCapabilityForTest() {
+  titleHelperCapabilityCache = null;
+}
+
+/** 获取当前 codex 的标题总结能力（首次调用后缓存；探测失败返回 null） */
+async function getTitleHelperCapability(): Promise<TitleHelperCapability | null> {
+  if (titleHelperCapabilityCache) return titleHelperCapabilityCache;
+  try {
+    const cap = await invoke<TitleHelperCapability>("codex_title_helper_capability");
+    titleHelperCapabilityCache = cap;
+    return cap;
+  } catch {
+    return null;
+  }
+}
+
 export async function refreshThreads(loadMore = false) {
   if (store.loadingHistory) return;
   store.loadingHistory = true;
@@ -607,6 +643,172 @@ export async function renameThread(threadId: string, name: string) {
   }
 }
 
+/** 清洗模型生成的标题：去引号/Markdown 标记、折叠空白、截断 50 字 */
+export function sanitizeTitle(raw: string): string {
+  const t = raw
+    .replace(/[`*_#>]/g, "")
+    .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return "";
+  return t.length > 50 ? t.slice(0, 50) : t;
+}
+
+/**
+ * 仿 VS Code：临时线程 + gpt-5.4-mini 总结首条消息，为会话生成短标题。
+ * 与主回合并行执行、失败静默（保留默认标题）；支持 experimentalApi 才执行，
+ * 不支持 ephemeral 时退化为普通线程总结后删除。
+ */
+export async function autoTitleThread(threadId: string, firstMessagePlain: string) {
+  const text = firstMessagePlain.replace(/\s+/g, " ").trim();
+  if (!text || text.length <= 30) return; // 短文保持默认标题，不消耗模型
+  const t = store.threads.find((x) => x.id === threadId);
+  if (t?.name || store.currentThreadName) return; // 已被命名（手动/其它客户端）
+  const cap = await getTitleHelperCapability();
+  if (!cap?.experimentalApi) return; // 不支持 experimentalApi：不总结
+
+  let helperThreadId: string | null = null;
+  let helperTurnId: string | null = null;
+  let settled = false;
+  const oneOff: UnlistenFn[] = [];
+  let titleText = "";
+  const titleByItem = new Map<string, string>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const releaseOneOff = () => {
+    for (const un of oneOff) {
+      try {
+        un();
+      } catch {
+        // 忽略注销失败
+      }
+    }
+    oneOff.length = 0;
+  };
+
+  const cleanup = async () => {
+    if (!helperThreadId) return;
+    backgroundThreadIds.delete(helperThreadId);
+    try {
+      if (cap.ephemeral) {
+        await invoke("codex_rpc", {
+          method: "thread/unsubscribe",
+          params: { threadId: helperThreadId },
+        });
+      } else {
+        await invoke("thread_delete", { threadId: helperThreadId });
+      }
+    } catch {
+      // 清理失败不影响主会话
+    }
+  };
+
+  const finish = async (status?: string) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    releaseOneOff();
+    if (status === "completed") {
+      const title = sanitizeTitle(titleText);
+      if (title) {
+        // 目标线程若已在总结期间被命名（如用户手动改名），不再覆盖
+        const cur = store.threads.find((x) => x.id === threadId);
+        if (!cur?.name && !store.currentThreadName) {
+          await renameThread(threadId, title);
+        }
+      }
+    }
+    await cleanup();
+  };
+
+  try {
+    const startParams: Record<string, unknown> = {
+      cwd: store.currentThreadCwd ?? store.server.workspace,
+      approvalPolicy: "never",
+      sandbox: "readOnly",
+      model: "gpt-5.4-mini",
+    };
+    if (cap.ephemeral) {
+      startParams.ephemeral = true;
+      startParams.allowProviderModelFallback = true;
+    }
+    const started = await invoke<{ thread?: { id?: string } }>("thread_start", {
+      params: startParams,
+    });
+    helperThreadId = started?.thread?.id ?? null;
+    if (!helperThreadId) return;
+    backgroundThreadIds.add(helperThreadId);
+
+    oneOff.push(
+      await listen("item/agentMessage/delta", (e) => {
+        const p = e.payload as {
+          threadId?: string;
+          itemId?: string;
+          delta?: string;
+        };
+        if (p.threadId !== helperThreadId || !p.itemId) return;
+        titleByItem.set(
+          p.itemId,
+          (titleByItem.get(p.itemId) ?? "") + (p.delta ?? ""),
+        );
+        // 标题取最后一个 agentMessage 的累积文本
+        titleText = [...titleByItem.values()].pop() ?? titleText;
+      }),
+      await listen("turn/started", (e) => {
+        const p = e.payload as {
+          threadId?: string;
+          turn?: { id?: string };
+        };
+        if (p.threadId !== helperThreadId) return;
+        helperTurnId = p.turn?.id ?? null;
+      }),
+      await listen("turn/completed", (e) => {
+        const p = e.payload as {
+          threadId?: string;
+          turn?: { id?: string; status?: string };
+        };
+        if (p.threadId !== helperThreadId) return;
+        void finish(p.turn?.status);
+      }),
+    );
+
+    // 超时兜底：尽力中断临时回合并清理，标题保持默认
+    timer = setTimeout(() => {
+      if (settled) return;
+      void (async () => {
+        if (helperThreadId && helperTurnId) {
+          try {
+            await invoke("turn_interrupt", {
+              threadId: helperThreadId,
+              turnId: helperTurnId,
+            });
+          } catch {
+            // 中断失败不阻塞清理
+          }
+        }
+        await finish();
+      })();
+    }, 30_000);
+
+    const input = buildTurnInput(
+      `给下面用户消息生成一个不超过 30 字的中文会话标题，只输出标题本身，不要任何解释、引号或 Markdown。\n\n用户消息：\n${text}`,
+      [],
+    );
+    await invoke("turn_start", {
+      params: {
+        threadId: helperThreadId,
+        input,
+        approvalPolicy: "never",
+        sandbox: "readOnly",
+      },
+    });
+  } catch {
+    settled = true;
+    releaseOneOff();
+    await cleanup();
+  }
+}
+
 /** 固定/取消固定会话（置顶） */
 export async function togglePin(threadId: string, pinned: boolean) {
   const t = store.threads.find((x) => x.id === threadId);
@@ -691,6 +893,8 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.goalText = pendingGoal;
     await refreshThreads();
     if (prompt.trim() || attachments.length) {
+      // 仿 VS Code：后台临时线程总结首条消息生成短标题（不阻塞主回合）
+      void autoTitleThread(threadId, stripMentionContext(prompt));
       await continueTurn(prompt, attachments);
     }
     await updateWindowTitle();
@@ -1066,7 +1270,7 @@ export async function respondInteraction(interaction: PendingInteraction, result
   }
 }
 
-async function wireEvents() {
+export async function wireEvents() {
   if (wired) return;
   wired = true;
 
@@ -1094,7 +1298,8 @@ async function wireEvents() {
 
   unlisteners.push(
     await listen("turn/started", (e) => {
-      const p = e.payload as { turn?: { id?: string } };
+      const p = e.payload as { threadId?: string; turn?: { id?: string } };
+      if (isBackgroundThread(p.threadId)) return; // 后台临时线程事件不进入全局状态
       store.turnActive = true;
       store.turnInterrupted = false;
       // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
@@ -1106,7 +1311,11 @@ async function wireEvents() {
       }
     }),
     await listen("turn/completed", async (e) => {
-      const p = e.payload as { turn?: { id?: string; status?: string } };
+      const p = e.payload as {
+        threadId?: string;
+        turn?: { id?: string; status?: string };
+      };
+      if (isBackgroundThread(p.threadId)) return; // 后台临时线程完成不影响主对话
       store.turnActive = false;
       store.turnInterrupted = p.turn?.status === "interrupted";
       store.currentTurnId = null;
@@ -1135,6 +1344,7 @@ async function wireEvents() {
         threadId: string;
         startedAtMs?: number;
       };
+      if (isBackgroundThread(p.threadId)) return;
       upsertItem(p.threadId, {
         ...p.item,
         startedAtMs: p.startedAtMs ?? Date.now(),
@@ -1146,6 +1356,7 @@ async function wireEvents() {
         threadId: string;
         completedAtMs?: number;
       };
+      if (isBackgroundThread(p.threadId)) return;
       // 优先用服务端提供的耗时；缺失时用 startedAtMs→completedAtMs 推算，
       // 覆盖命令执行/文件变更等所有工具类型的“耗时”展示。
       let durationMs: number | undefined =
@@ -1173,6 +1384,7 @@ async function wireEvents() {
   unlisteners.push(
     await listen("item/agentMessage/delta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string };
+      if (isBackgroundThread(p.threadId)) return;
       let item = findItem(p.threadId, p.itemId);
       if (!item) {
         item = { id: p.itemId, type: "agentMessage", text: "", streaming: true };
@@ -1276,8 +1488,10 @@ async function wireEvents() {
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.status = p.status;
     }),
-    await listen("thread/started", async () => {
-      await refreshThreads();
+    await listen("thread/started", (e) => {
+      const p = e.payload as { thread?: { id?: string } };
+      if (isBackgroundThread(p?.thread?.id)) return; // 临时线程不触发历史刷新
+      void refreshThreads();
     }),
   );
 

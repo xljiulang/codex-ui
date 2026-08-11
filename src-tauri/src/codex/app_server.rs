@@ -447,6 +447,53 @@ impl CodexServer {
         }
     }
 
+    /// 探测当前 codex 的“临时线程标题总结”能力（仿 VS Code：ephemeral 线程 +
+    /// gpt-5.4-mini 总结首条消息）。探测本身只创建一个内存线程并立即释放，不落盘。
+    /// 返回 `{ experimentalApi, ephemeral }`：
+    /// - `{ experimentalApi: true, ephemeral: true }`：支持临时线程 + 实验字段回退；
+    /// - `{ experimentalApi: true, ephemeral: false }`：支持实验 API 但不支持临时线程；
+    /// - `{ experimentalApi: false }`：不支持实验 API，标题总结整体跳过。
+    pub async fn title_helper_capability(&self) -> Result<Value, String> {
+        match self
+            .request_verbose(
+                "thread/start",
+                json!({
+                    "cwd": self.workspace,
+                    "ephemeral": true,
+                    "allowProviderModelFallback": true,
+                    "approvalPolicy": "never",
+                    "sandbox": "readOnly",
+                }),
+                Some(Duration::from_secs(30)),
+            )
+            .await
+        {
+            Ok(resp) => {
+                let thread_id = resp["thread"]["id"]
+                    .as_str()
+                    .map(|s| s.to_string());
+                if let Some(tid) = thread_id {
+                    let _ = self
+                        .request("thread/unsubscribe", json!({ "threadId": tid }), None)
+                        .await;
+                }
+                Ok(json!({ "experimentalApi": true, "ephemeral": true }))
+            }
+            Err(e) if e.code.is_none() => Err(e.message),
+            Err(e) => {
+                let msg = e.message.to_lowercase();
+                if msg.contains("experimentalapi") {
+                    Ok(json!({ "experimentalApi": false, "ephemeral": false }))
+                } else if msg.contains("unknown field") || msg.contains("ephemeral") {
+                    Ok(json!({ "experimentalApi": true, "ephemeral": false }))
+                } else {
+                    // 其它错误（如字段被拒/参数不识别）：保守按不支持处理
+                    Ok(json!({ "experimentalApi": false, "ephemeral": false }))
+                }
+            }
+        }
+    }
+
     pub async fn send_response(&self, id: u64, result: Value) -> Result<(), String> {
         let msg = json!({ "jsonrpc": "2.0", "id": id, "result": result });
         let mut inner = self.shared.inner.lock().await;

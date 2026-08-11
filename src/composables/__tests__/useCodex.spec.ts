@@ -6,24 +6,53 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (p: string) => "asset://mock/" + p,
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(),
+}));
+
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   __resetPinnedSectionForTest,
+  __resetTitleHelperCapabilityForTest,
+  autoTitleThread,
   ensureSkills,
   ensureThreadPlugins,
   interrupt,
   newEmptyChat,
   openThread,
   refreshServer,
+  sanitizeTitle,
   sendPrompt,
   settleConfirm,
   sortThreads,
   store,
   togglePin,
   toastError,
+  wireEvents,
 } from "../useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedListen = vi.mocked(listen);
+
+/** 每个事件名可注册多个回调（wireEvents 与 autoTitleThread 会同时监听） */
+const capturedListeners: Record<string, Array<(ev: { payload?: unknown }) => void>> =
+  {};
+
+function mockListenCapture() {
+  mockedListen.mockImplementation(async (event, cb) => {
+    (capturedListeners[event] ??= []).push(
+      cb as unknown as (ev: { payload?: unknown }) => void,
+    );
+    return () => {};
+  });
+}
+
+function fireListen(event: string, payload: unknown) {
+  for (const cb of capturedListeners[event] ?? []) {
+    cb({ payload });
+  }
+}
 
 const SKILLS_RESPONSE = {
   data: [
@@ -744,5 +773,225 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     const sorted = sortThreads(list);
     expect(sorted.map((t) => t.id)).toEqual(["a", "c", "b"]);
     expect(sorted[0].isPinned).toBe(true);
+  });
+});
+
+describe("sanitizeTitle 标题清洗", () => {
+  it("去掉引号与 Markdown 标记、折叠空白", () => {
+    expect(sanitizeTitle('  "修复 **登录** 页报错" ')).toBe("修复 登录 页报错");
+    expect(sanitizeTitle("`重构` 模块\n\n换行\t空白")).toBe("重构 模块 换行 空白");
+    expect(sanitizeTitle("标题。")).toBe("标题。");
+  });
+
+  it("空输入返回空串，超长截断 50 字", () => {
+    expect(sanitizeTitle("   \n ")).toBe("");
+    expect(sanitizeTitle("很".repeat(60))).toHaveLength(50);
+  });
+});
+
+describe("autoTitleThread 临时线程标题总结", () => {
+  const LONG_TEXT = "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(2);
+
+  beforeEach(() => {
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    __resetTitleHelperCapabilityForTest();
+    store.currentThreadId = "t1";
+    store.currentThreadName = "";
+    store.currentThreadCwd = "D:/repo";
+    store.server.workspace = "D:/repo";
+    store.threads = [{ id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 }];
+  });
+
+  it("不支持 experimentalApi：完全不发起临时线程", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: false, ephemeral: false });
+      }
+      return Promise.resolve(undefined);
+    });
+    await autoTitleThread("t1", LONG_TEXT);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+  });
+
+  it("短文保持默认标题，不消耗模型", async () => {
+    await autoTitleThread("t1", "短消息");
+    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+  });
+
+  it("线程已有名称时不覆盖", async () => {
+    store.currentThreadName = "手动标题";
+    await autoTitleThread("t1", LONG_TEXT);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+  });
+
+  it("ephemeral 路径：模型标题写回，临时线程注销", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: true });
+      }
+      if (cmd === "thread_start") {
+        const params = (args as { params?: Record<string, unknown> }).params ?? {};
+        expect(params.ephemeral).toBe(true);
+        expect(params.allowProviderModelFallback).toBe(true);
+        expect(params.model).toBe("gpt-5.4-mini");
+        expect(params.cwd).toBe("D:/repo");
+        return Promise.resolve({ thread: { id: "helper1" } });
+      }
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    const p = autoTitleThread("t1", LONG_TEXT);
+    await p;
+    fireListen("item/agentMessage/delta", {
+      threadId: "helper1",
+      itemId: "m1",
+      delta: "修复登录",
+    });
+    fireListen("item/agentMessage/delta", {
+      threadId: "helper1",
+      itemId: "m1",
+      delta: "页面报错问题",
+    });
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "completed" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+        threadId: "t1",
+        name: "修复登录页面报错问题",
+      });
+    });
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+        method: "thread/unsubscribe",
+        params: { threadId: "helper1" },
+      });
+    });
+  });
+
+  it("不支持 ephemeral：普通线程总结后删除", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: false });
+      }
+      if (cmd === "thread_start") {
+        const params = (args as { params?: Record<string, unknown> }).params ?? {};
+        expect(params.ephemeral).toBeUndefined();
+        return Promise.resolve({ thread: { id: "helper1" } });
+      }
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    const p = autoTitleThread("t1", LONG_TEXT);
+    await p;
+    fireListen("item/agentMessage/delta", {
+      threadId: "helper1",
+      itemId: "m1",
+      delta: "重构模块",
+    });
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "completed" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+        threadId: "t1",
+        name: "重构模块",
+      });
+    });
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("thread_delete", {
+        threadId: "helper1",
+      });
+    });
+  });
+
+  it("回合失败：不写回标题，仍清理临时线程", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: true });
+      }
+      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      return Promise.resolve(undefined);
+    });
+
+    const p = autoTitleThread("t1", LONG_TEXT);
+    await p;
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "failed" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+        method: "thread/unsubscribe",
+        params: { threadId: "helper1" },
+      });
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_set_name",
+      expect.anything(),
+    );
+  });
+
+  it("后台临时线程事件被隔离：不影响全局进行中状态", async () => {
+    store.turnActive = false;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: true });
+      }
+      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await wireEvents();
+    const p = autoTitleThread("t1", LONG_TEXT);
+    await p;
+
+    // 后台线程 turn/started：不置为进行中
+    fireListen("turn/started", { threadId: "helper1", turn: { id: "ht1" } });
+    expect(store.turnActive).toBe(false);
+
+    // 后台线程 turn/completed：不结束全局状态、不触发历史刷新
+    fireListen("item/agentMessage/delta", {
+      threadId: "helper1",
+      itemId: "m1",
+      delta: "后台标题",
+    });
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "completed" },
+    });
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+        threadId: "t1",
+        name: expect.any(String),
+      });
+    });
+    expect(store.turnActive).toBe(false);
+
+    // 主线程事件照常工作
+    fireListen("turn/started", { threadId: "t1", turn: { id: "mt1" } });
+    expect(store.turnActive).toBe(true);
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "mt1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false));
   });
 });
