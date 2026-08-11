@@ -138,3 +138,52 @@ describe("SettingsView 模态框行为", () => {
     expect(store.showSettings).toBe(true);
   });
 });
+
+describe("SettingsView 主题保存后生效", () => {
+  beforeEach(() => {
+    store.settings.theme = "blue";
+    store.toast = "";
+    mockedSave.mockClear();
+  });
+
+  it("点主题卡片只更新选中态，不即时保存或修改 store", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
+
+    expect(mockedSave).not.toHaveBeenCalled();
+    expect(store.settings.theme).toBe("blue");
+    expect(
+      wrapper.find('.theme-card[data-theme-id="dark"]').classes(),
+    ).toContain("selected");
+    expect(
+      wrapper.find('.theme-card[data-theme-id="blue"]').classes(),
+    ).not.toContain("selected");
+  });
+
+  it("选主题后点保存：saveSettings 收到新主题并关闭", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find('.theme-card[data-theme-id="light"]').trigger("click");
+    await wrapper.find("button.btn.primary").trigger("click");
+    await flushPromises();
+
+    expect(mockedSave).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: "light" }),
+    );
+    expect(store.showSettings).toBe(false);
+  });
+
+  it("未保存取消后重开：主题选中态回到已保存值", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
+    wrapper.unmount();
+
+    const reopened = mount(SettingsView);
+    expect(
+      reopened.find('.theme-card[data-theme-id="dark"]').classes(),
+    ).not.toContain("selected");
+    expect(
+      reopened.find('.theme-card[data-theme-id="blue"]').classes(),
+    ).toContain("selected");
+    reopened.unmount();
+  });
+});

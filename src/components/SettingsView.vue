@@ -2,13 +2,14 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { saveSettings, store, toastError } from "../composables/useCodex";
-import { applyTheme, THEMES, type ThemeId } from "../composables/useTheme";
+import { THEMES, type ThemeId } from "../composables/useTheme";
 
 const closeBtn = ref<HTMLButtonElement | null>(null);
 const codexPath = ref(store.settings.codex_path ?? "");
 const sound = ref(store.settings.sound_enabled);
 const enterToSend = ref(store.settings.enter_to_send);
 const followupMode = ref(store.settings.followup_mode);
+const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 
 function close() {
   store.showSettings = false;
@@ -48,19 +49,15 @@ async function apply() {
     sound_enabled: sound.value,
     enter_to_send: enterToSend.value,
     followup_mode: followupMode.value,
+    theme: theme.value,
   });
   store.toast = "设置已保存";
   close();
 }
 
 async function selectTheme(id: ThemeId) {
-  store.settings.theme = id;
-  applyTheme(id);
-  try {
-    await saveSettings({ theme: id });
-  } catch (e) {
-    store.toast = toastError(e);
-  }
+  // 仅更新本地暂存，保存时才生效
+  theme.value = id;
 }
 </script>
 
@@ -92,9 +89,9 @@ async function selectTheme(id: ThemeId) {
                 v-for="t in THEMES"
                 :key="t.id"
                 class="theme-card"
-                :class="{ selected: store.settings.theme === t.id }"
+                :class="{ selected: theme === t.id }"
                 :data-theme-id="t.id"
-                :aria-pressed="store.settings.theme === t.id"
+                :aria-pressed="theme === t.id"
                 @click="selectTheme(t.id)"
               >
                 <span class="theme-swatch"></span>
