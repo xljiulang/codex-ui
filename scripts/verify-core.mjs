@@ -17,8 +17,9 @@ const CDP_BASE = `http://127.0.0.1:${CDP_PORT}`;
 const TAG_A = "[测试核心A]";
 const TAG_B = "[测试核心B]";
 const MARKER = "CORE_" + crypto.randomBytes(4).toString("hex").toUpperCase();
-const PROMPT_A = `${TAG_A} ${MARKER} 只回复 OK 两个字母，不要解释。`;
-const PROMPT_B = `${TAG_B} ${MARKER} 只回复 OK 两个字母，不要解释。`;
+// 提示需 ≤15 字：避免触发“标题自动总结”改写会话名，保证历史行仍含 TAG 文本
+const PROMPT_A = `${TAG_A} 只回 OK`;
+const PROMPT_B = `${TAG_B} 只回 OK`;
 const LONG_PROMPT = `[测试核心L] ${MARKER} 请每秒输出一行数字，循环 12 次后输出 DONE 结束。`;
 
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-ui-core-test-"));
@@ -70,7 +71,13 @@ function cleanupSessions() {
   let removed = 0;
   for (const f of files) {
     try {
-      if (fs.readFileSync(f, "utf8").includes(MARKER)) {
+      const content = fs.readFileSync(f, "utf8");
+      if (
+        content.includes(MARKER) ||
+        content.includes(TAG_A) ||
+        content.includes(TAG_B) ||
+        content.includes("[测试核心L]")
+      ) {
         fs.unlinkSync(f);
         removed++;
       }
@@ -261,14 +268,35 @@ async function sendPrompt(text) {
 }
 
 async function openHistory() {
-  await evalJs(
-    `document.querySelector('button[aria-label="历史记录"]').click()`,
+  const clickOpen = async () => {
+    await evalJs(
+      `document.querySelector('button[aria-label="历史记录"]').click()`,
+    );
+    await waitFor(
+      "历史面板出现",
+      `!!document.querySelector(".history-panel")`,
+      10000,
+    );
+  };
+  await clickOpen();
+  await expandAllFolders();
+  const hasRows = await evalJs(
+    `document.querySelectorAll(".history-item, .history-folder").length > 0`,
   );
-  await waitFor(
-    "历史面板出现",
-    `!!document.querySelector(".history-panel")`,
-    10000,
-  );
+  if (!hasRows) {
+    // 面板挂载可能早于 app-server 握手完成，列表为空；关闭重开触发重新拉取
+    await evalJs(
+      `document.querySelector('button[aria-label="历史记录"]').click()`,
+    );
+    await waitFor(
+      "历史面板关闭",
+      `!document.querySelector(".history-panel")`,
+      10000,
+    );
+    await sleep(500);
+    await clickOpen();
+    await expandAllFolders();
+  }
 }
 
 async function closeHistory() {
@@ -280,6 +308,31 @@ async function closeHistory() {
     `!document.querySelector(".history-panel")`,
     10000,
   );
+}
+
+/** 历史目录默认收起；轮询等待列表渲染完成，并把全部折叠目录展开 */
+async function expandAllFolders() {
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const state = await evalJs(`(() => {
+      const collapsed = document.querySelectorAll(
+        '.history-folder[aria-expanded="false"]',
+      );
+      const total = document.querySelectorAll(".history-folder").length;
+      return { collapsed: collapsed.length, total };
+    })()`);
+    if (state.total > 0 && state.collapsed === 0) return;
+    if (state.collapsed > 0) {
+      await evalJs(`(() => {
+        const fs = Array.from(
+          document.querySelectorAll('.history-folder[aria-expanded="false"]'),
+        );
+        for (const f of fs) f.click();
+        return fs.length;
+      })()`);
+    }
+    await sleep(500);
+  }
 }
 
 async function clickNewChat() {
@@ -503,27 +556,26 @@ async function scenarioPin() {
   const pinLayout = await evalJs(`(() => {
     const rows = Array.from(document.querySelectorAll(".history-item"));
     const badges = rows.map((r) => !!r.querySelector(".pin-badge"));
-    const firstPinned = badges.indexOf(true);
-    const lastPinned = badges.lastIndexOf(true);
-    const contiguous =
-      firstPinned === 0 &&
-      badges.slice(firstPinned, lastPinned + 1).every(Boolean) &&
-      badges.slice(lastPinned + 1).every((b) => !b);
     const idxA = rows.findIndex((r) => r.innerText.includes(${JSON.stringify(
       TAG_A,
     )}));
     const idxB = rows.findIndex((r) => r.innerText.includes(${JSON.stringify(
       TAG_B,
     )}));
-    return { contiguous, idxA, idxB, lastPinned, rows: rows.length };
+    return {
+      idxA,
+      idxB,
+      badgeA: idxA >= 0 ? badges[idxA] : false,
+      badgeB: idxB >= 0 ? badges[idxB] : false,
+      rows: rows.length,
+    };
   })()`);
   record(
-    "置顶: 置顶会话排在列表最前（固定优先排序）",
-    pinLayout.contiguous &&
-      pinLayout.idxA >= 0 &&
-      pinLayout.idxB >= 0 &&
-      pinLayout.idxA <= pinLayout.lastPinned &&
-      pinLayout.idxB <= pinLayout.lastPinned,
+    "置顶: 测试会话已置顶且排在列表最前",
+    pinLayout.idxA === 0 &&
+      pinLayout.idxB === 1 &&
+      pinLayout.badgeA &&
+      pinLayout.badgeB,
     `${JSON.stringify(pinLayout)} top=${JSON.stringify(top)}`,
   );
   const edges = await pinBadgeEdges();
@@ -538,11 +590,29 @@ async function scenarioPin() {
 
   await relaunchApp();
   await openHistory();
-  await waitFor(
-    "重启后徽章出现",
-    `document.querySelectorAll(".history-item .pin-badge").length >= 2`,
-    30000,
-  );
+  let badgeCount = 0;
+  const badgeDeadline = Date.now() + 30000;
+  while (Date.now() < badgeDeadline) {
+    badgeCount = await evalJs(
+      `document.querySelectorAll(".history-item .pin-badge").length`,
+    );
+    if (badgeCount >= 2) break;
+    await sleep(1000);
+  }
+  if (badgeCount < 2) {
+    const dump = await evalJs(`(() => ({
+      panel: !!document.querySelector(".history-panel"),
+      items: document.querySelectorAll(".history-item").length,
+      folders: document.querySelectorAll(".history-folder").length,
+      rows: Array.from(document.querySelectorAll(".history-item")).slice(0, 8).map((r) => ({
+        t: r.querySelector(".history-title")?.innerText ?? "",
+        p: !!r.querySelector(".pin-badge"),
+      })),
+      body: document.body.innerText.slice(0, 300),
+    }))()`);
+    log("重启后徽章不足，当前历史列表: " + JSON.stringify(dump));
+  }
+  record("置顶: 重启后徽章出现（≥2）", badgeCount >= 2, `badges=${badgeCount}`);
   const persisted = await evalJs(
     `(() => { const rows = Array.from(document.querySelectorAll(".history-item")); const a = rows.find((x) => x.innerText.includes(${JSON.stringify(
       TAG_A,
@@ -598,6 +668,18 @@ async function scenarioStopOnSwitch() {
     60000,
   );
   await clickNewChat();
+  // 会话进行中切换需先确认（今晚新增的会话切换确认）
+  await waitFor(
+    "切换确认框出现",
+    `!!document.querySelector(".modal .btn.danger")`,
+    10000,
+  );
+  await evalJs(`document.querySelector(".modal .btn.danger").click()`);
+  await waitFor(
+    "切换确认框关闭",
+    `!document.querySelector(".modal")`,
+    10000,
+  );
   await waitFor(
     "切换后旧回合被自动停止（停止按钮消失）",
     `!document.querySelector(".send-btn.stop")`,
@@ -619,6 +701,19 @@ async function scenarioStopOnSwitch() {
 // ---------- 场景 5: 历史面板手动保持 ----------
 async function scenarioHistoryStaysOpen() {
   log("场景 5: 历史面板手动保持（点击会话不自动关闭）");
+  // 场景 3 结束时面板可能仍开着：先关掉，保证 openHistory 是“打开”动作
+  const panelOpen = await evalJs(`!!document.querySelector(".history-panel")`);
+  if (panelOpen) {
+    await evalJs(
+      `document.querySelector('button[aria-label="历史记录"]').click()`,
+    );
+    await waitFor(
+      "历史面板关闭",
+      `!document.querySelector(".history-panel")`,
+      10000,
+    );
+    await sleep(300);
+  }
   await openHistory();
   await waitFor(
     "历史行出现",
