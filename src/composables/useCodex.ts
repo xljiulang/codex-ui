@@ -291,7 +291,7 @@ async function updateWindowTitle() {
   try {
     const win = getCurrentWindow();
     if (!store.currentThreadId) {
-      await win.setTitle("codex-ui");
+      await win.setTitle("Codex UI");
       return;
     }
     await win.setTitle(currentThreadLabel());
