@@ -149,14 +149,15 @@ async function main() {
   const mainPage = await waitForCdp();
   const mainPageId = mainPage.id;
   cdp = await createClient(mainPage.webSocketDebuggerUrl);
-  await cdp.waitFor("输入框就绪", `!!document.querySelector("textarea")`, 60000);
+  await cdp.waitFor("输入框就绪", `!!document.querySelector(".ProseMirror")`, 60000);
 
   const setInput = (text) =>
     cdp.evalJs(`(() => {
-      const ta = document.querySelector("textarea");
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-      setter.call(ta, ${JSON.stringify(text)});
-      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      const ed = window.__CODEX_UI_EDITOR__;
+      if (!ed) throw new Error("编辑器实例未暴露");
+      ed.commands.setTextSelection(ed.state.doc.content.size);
+      ed.commands.insertContent(${JSON.stringify(text)});
+      return ed.getText();
     })()`);
   const clickSend = () =>
     cdp.evalJs(`(() => {
@@ -181,6 +182,15 @@ async function main() {
     if (!st.stop && st.last) break;
     await sleep(1000);
   }
+
+  // ToolCard 默认折叠：先展开“文件变更”卡片，变更行才会出现在 DOM
+  await cdp.evalJs(`(() => {
+    const cards = Array.from(document.querySelectorAll(".tool-card"));
+    const c = cards.find((x) => x.querySelector(".tool-card-title")?.textContent.trim() === "文件变更");
+    const header = c?.querySelector(".tool-card-header");
+    if (header) header.click();
+  })()`);
+  await sleep(500);
 
   const rowsFound = await cdp.evalJs(
     `Array.from(document.querySelectorAll(".tool-card .change-row.clickable")).map((r) => r.textContent.trim())`,

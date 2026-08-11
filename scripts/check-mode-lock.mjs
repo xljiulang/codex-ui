@@ -73,7 +73,9 @@ ws.onopen = async () => {
     }
 
     // 新建对话，避免受历史会话影响
-    await evalJs(`document.querySelector('.icon-btn[title="新建对话"]')?.click()`);
+    await evalJs(
+      `document.querySelector('button[aria-label="新建对话"]')?.click()`,
+    );
     await sleep(400);
     st = JSON.parse(await chipState());
     console.log("NEW_CHAT:", JSON.stringify(st));
@@ -83,10 +85,10 @@ ws.onopen = async () => {
 
     // 发送一条简单消息进入回合
     await evalJs(`(() => {
-      const ta = document.querySelector('.composer textarea');
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, '回复一个词：好的');
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      const ed = window.__CODEX_UI_EDITOR__;
+      if (!ed) throw new Error("编辑器实例未暴露");
+      ed.commands.setTextSelection(ed.state.doc.content.size);
+      ed.commands.insertContent('回复一个词：好的');
     })()`);
     await evalJs(`document.querySelector('.composer-right .send-btn').click()`);
 

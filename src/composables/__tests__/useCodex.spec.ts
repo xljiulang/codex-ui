@@ -8,13 +8,16 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import {
+  __resetPinnedSectionForTest,
   ensureSkills,
   ensureThreadPlugins,
   interrupt,
   newEmptyChat,
   openThread,
   sendPrompt,
+  sortThreads,
   store,
+  togglePin,
   toastError,
 } from "../useCodex";
 
@@ -390,5 +393,133 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "abc-123",
     });
     expect(store.currentTurnId).toBeNull();
+  });
+});
+
+describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
+  const FALLBACK_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
+
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    __resetPinnedSectionForTest();
+    store.threads = [];
+    store.loadingHistory = false;
+  });
+
+  function metadataCalls() {
+    return mockedInvoke.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string })?.method === "thread/metadata/update",
+    );
+  }
+
+  it("置顶：从 threadSection/list 发现 Pinned 分区并用其 id 调用 metadata/update", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "threadSection/list") {
+        return Promise.resolve({ data: [{ id: "sec-1", name: "Pinned" }] });
+      }
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+        return Promise.resolve({ thread: { id: "t1" } });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({
+          data: [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0, isPinned: true }],
+          nextCursor: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+
+    expect(metadataCalls()).toHaveLength(1);
+    expect(metadataCalls()[0][1]).toEqual({
+      method: "thread/metadata/update",
+      params: { threadId: "t1", sectionId: "sec-1" },
+    });
+    expect(store.threads[0].isPinned).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_list", {
+      limit: 50,
+      cursor: null,
+    });
+  });
+
+  it("取消置顶：sectionId 传 null", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+        return Promise.resolve({ thread: { id: "t1" } });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({
+          data: [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0, isPinned: false }],
+          nextCursor: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", false);
+
+    expect(metadataCalls()).toHaveLength(1);
+    expect(metadataCalls()[0][1]).toEqual({
+      method: "thread/metadata/update",
+      params: { threadId: "t1", sectionId: null },
+    });
+    expect(store.threads[0].isPinned).toBe(false);
+  });
+
+  it("threadSection/list 失败时回退固定内置分区 id", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "threadSection/list") {
+        return Promise.reject(new Error("unknown method"));
+      }
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+        return Promise.resolve({ thread: { id: "t1" } });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+
+    expect(metadataCalls()[0][1]).toEqual({
+      method: "thread/metadata/update",
+      params: { threadId: "t1", sectionId: FALLBACK_ID },
+    });
+  });
+
+  it("metadata/update 失败时回滚本地置顶状态并提示", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "threadSection/list") {
+        return Promise.resolve({ data: [{ id: "sec-1", name: "Pinned" }] });
+      }
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+        return Promise.reject(new Error("update failed"));
+      }
+      return Promise.resolve(undefined);
+    });
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+
+    expect(store.threads[0].isPinned).toBeUndefined();
+    expect(metadataCalls()).toHaveLength(1);
+  });
+
+  it("sortThreads 从 section 推导置顶：固定优先，再按最近时间降序", () => {
+    const list = [
+      { id: "b", name: "未置顶新", createdAt: 0, recencyAt: 2 },
+      { id: "a", name: "置顶旧", createdAt: 0, recencyAt: 1, section: { id: "sec-1", name: "Pinned" } },
+      { id: "c", name: "未置顶更新", createdAt: 0, recencyAt: 3 },
+    ];
+    const sorted = sortThreads(list);
+    expect(sorted.map((t) => t.id)).toEqual(["a", "c", "b"]);
+    expect(sorted[0].isPinned).toBe(true);
   });
 });

@@ -434,6 +434,11 @@ const PINNED_SECTION_NAME = "Pinned";
 const FALLBACK_PINNED_SECTION_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
 let pinnedSectionIdCache: string | null = null;
 
+/** 仅测试用：重置 Pinned 分区 id 缓存 */
+export function __resetPinnedSectionForTest() {
+  pinnedSectionIdCache = null;
+}
+
 /** 线程是否置顶：优先看服务端返回的 section 是否指向内置 Pinned 分区 */
 function isPinnedThread(t: ThreadSummary): boolean {
   if (t.isPinned) return true;

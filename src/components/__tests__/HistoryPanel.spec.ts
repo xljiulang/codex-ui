@@ -3,13 +3,14 @@ import { mount } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
-  return { ...mod, deleteThread: vi.fn() };
+  return { ...mod, deleteThread: vi.fn(), togglePin: vi.fn() };
 });
 
 import HistoryPanel from "../HistoryPanel.vue";
-import { deleteThread, store } from "../../composables/useCodex";
+import { deleteThread, togglePin, store } from "../../composables/useCodex";
 
 const mockedDelete = vi.mocked(deleteThread);
+const mockedTogglePin = vi.mocked(togglePin);
 
 const now = Date.now() / 1000;
 const threads = [
@@ -81,5 +82,34 @@ describe("HistoryPanel 删除确认", () => {
 
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
     expect(mockedDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("HistoryPanel 置顶", () => {
+  beforeEach(() => {
+    store.threads = threads.map((t) => ({ ...t }));
+    store.loadingHistory = false;
+    store.nextCursor = null;
+    mockedTogglePin.mockClear();
+    mockedTogglePin.mockResolvedValue(undefined);
+  });
+
+  it("未置顶会话不显示徽章，点击图钉调用 togglePin(id, true)", async () => {
+    const wrapper = mount(HistoryPanel);
+    expect(wrapper.find(".pin-badge").exists()).toBe(false);
+    await wrapper.find('[aria-label="固定置顶"]').trigger("click");
+    expect(mockedTogglePin).toHaveBeenCalledWith("t1", true);
+  });
+
+  it("置顶会话显示“置顶”徽章，点击图钉调用 togglePin(id, false)", async () => {
+    store.threads = [
+      { ...threads[0], isPinned: true },
+      { ...threads[1] },
+    ];
+    const wrapper = mount(HistoryPanel);
+    expect(wrapper.find(".pin-badge").exists()).toBe(true);
+    expect(wrapper.find(".pin-badge").text()).toContain("置顶");
+    await wrapper.find('[aria-label="取消固定"]').trigger("click");
+    expect(mockedTogglePin).toHaveBeenCalledWith("t1", false);
   });
 });

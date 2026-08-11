@@ -47,18 +47,20 @@ const sleep = (ms) => evalJs(`new Promise(r => setTimeout(r, ${ms}))`);
 ws.onopen = async () => {
   try {
     // 先新建对话，避免沿用已被删除的会话
-    await evalJs(`document.querySelector('.icon-btn[title="新建对话"]').click()`);
+    await evalJs(
+      `document.querySelector('button[aria-label="新建对话"]').click()`,
+    );
     await sleep(400);
     await evalJs(`(() => {
-      const ta = document.querySelector('.composer textarea');
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, ${JSON.stringify(PROMPT)});
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      const ed = window.__CODEX_UI_EDITOR__;
+      if (!ed) throw new Error("编辑器实例未暴露");
+      ed.commands.setTextSelection(ed.state.doc.content.size);
+      ed.commands.insertContent(${JSON.stringify(PROMPT)});
     })()`);
     for (let i = 0; i < 20; i++) {
       await sleep(200);
       const st = await evalJs(
-        `(() => { const b = document.querySelector('.composer-right .send-btn'); return JSON.stringify({ val: document.querySelector('.composer textarea').value.slice(0, 8), disabled: b ? b.disabled : 'no-btn' }); })()`,
+        `(() => { const b = document.querySelector('.composer-right .send-btn'); const ed = window.__CODEX_UI_EDITOR__; return JSON.stringify({ val: (ed ? ed.getText() : "").slice(0, 8), disabled: b ? b.disabled : 'no-btn' }); })()`,
       );
       const s = JSON.parse(st);
       if (s.val && s.disabled === false) break;
