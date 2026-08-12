@@ -63,6 +63,9 @@ const stickToBottom = ref(true);
 // 用户可信滚动相对该位置向上移动即视为“上滑看历史”，一次正常上滑立即解除；
 // 向下（追赶窗口内）或程序化滚动不会误解除。
 let lastStickScrollTop = 0;
+// 解除吸底所需的最小距底距离：轻微误触/抖动（< 32px）不解除，
+// 单次正常滚轮（约 80-100px）一次即解除
+const UNPIN_DIST_PX = 32;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
   () => (store.activeWorkByThread[store.currentThreadId ?? ""] ?? 0) > 0,
@@ -82,11 +85,13 @@ function onScroll(e: Event) {
   const el = scroller.value;
   if (!el) return;
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-  if (dist < 60) {
-    stickToBottom.value = true;
-  } else if (e.isTrusted && dist > 60 && el.scrollTop < lastStickScrollTop - 4) {
-    // 一次正常上滑即解除；程序化吸底写入与追赶窗口内的向下滚动不会误判
+  if (e.isTrusted && dist > UNPIN_DIST_PX && el.scrollTop < lastStickScrollTop - 2) {
+    // 用户向上滚动且距底部超过阈值才解除：
+    // 轻微误触/抖动（< 32px）不会在流式期间误解除，单次正常滚轮一次即生效；
+    // 程序化吸底写入与追赶窗口内的向下滚动不会误判
     stickToBottom.value = false;
+  } else if (dist < 60) {
+    stickToBottom.value = true;
   }
   lastStickScrollTop = el.scrollTop;
 }

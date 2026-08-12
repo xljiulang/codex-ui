@@ -212,6 +212,66 @@ describe("ChatView 日期分隔线", () => {
     expect(scroller.scrollTop).toBe(900); // 已解除，不再被拉回
   });
 
+  it("轻微上滑（不足解除阈值）不解除，新内容到达仍吸底跟随", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000
+    // 用户仅上滑 20px（dist = 20 < 32 阈值）→ 不解除
+    scroller.scrollTop = 980;
+    const scrollEv = new Event("scroll");
+    Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(scrollEv);
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000); // 仍吸底并跟随
+  });
+
+  it("上滑超过解除阈值（50px）一次即解除", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000
+    // 用户上滑 50px（dist = 50 > 32 阈值）→ 一次解除
+    scroller.scrollTop = 950;
+    const scrollEv = new Event("scroll");
+    Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(scrollEv);
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(950); // 已解除，不再被拉回
+  });
+
   it("追赶窗口内向下滚动不解除吸底", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
