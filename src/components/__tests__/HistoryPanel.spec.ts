@@ -136,7 +136,7 @@ describe("HistoryPanel 置顶", () => {
     const wrapper = mount(HistoryPanel);
     expect(wrapper.find(".pin-badge").exists()).toBe(false);
     await openCtxMenu(wrapper);
-    await clickCtxItem(wrapper, "置顶");
+    await clickCtxItem(wrapper, "置顶固定");
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", true);
   });
 
@@ -156,7 +156,7 @@ describe("HistoryPanel 置顶", () => {
       "pin-badge",
     );
     await openCtxMenu(wrapper);
-    await clickCtxItem(wrapper, "取消置顶");
+    await clickCtxItem(wrapper, "取消固定");
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", false);
   });
 });
@@ -169,16 +169,16 @@ describe("HistoryPanel 右键菜单", () => {
     mockedOpen.mockClear();
   });
 
-  it("右键会话行显示四项菜单：打开/置顶/重命名/删除会话", async () => {
+  it("右键会话行显示四项菜单：打开/重命名/置顶固定/删除会话", async () => {
     const wrapper = mount(HistoryPanel);
     await openCtxMenu(wrapper);
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["打开", "置顶", "重命名", "删除会话"]);
+    expect(labels).toEqual(["打开", "重命名", "置顶固定", "删除会话"]);
   });
 
-  it("置顶会话右键菜单显示“取消置顶”", async () => {
+  it("置顶会话右键菜单显示“取消固定”", async () => {
     store.threads = [
       { ...threads[0], isPinned: true },
       { ...threads[1] },
@@ -188,7 +188,7 @@ describe("HistoryPanel 右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toContain("取消置顶");
+    expect(labels).toContain("取消固定");
   });
 
   it("菜单每项都带图标，删除项保留 danger 类", async () => {
