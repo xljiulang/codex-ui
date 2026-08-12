@@ -408,6 +408,10 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
             | gix::diff::tree_with_rewrites::Change::Modification { location, .. } => location,
             _ => continue,
         };
+        // 目录级（tree）条目在索引中没有对应条目，且真实碰撞由文件级变化逐条校验，跳过
+        if change.entry_mode().is_tree() {
+            continue;
+        }
         if workdir.join(path_str(location.as_ref())).exists()
             && old_index.entry_by_path(location.as_ref()).is_none()
         {
@@ -1236,5 +1240,61 @@ mod tests {
         std::fs::write(root.join("x.txt"), "local").unwrap();
         let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
         assert!(err.message.contains("未跟踪文件将被覆盖"));
+    }
+
+    #[test]
+    fn branch_switch_allows_differing_directory_between_branches() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/a.txt"), "one").unwrap();
+        init_committed_repo(root);
+        // other 分支修改 docs/a.txt，形成目录级树差异
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "other"]).0, 0);
+        std::fs::write(root.join("docs/a.txt"), "two").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "main"]).0, 0);
+
+        // 进程内切换到 other：docs 目录不应被误判为未跟踪文件
+        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        assert_eq!(st.branch, "other");
+        assert_eq!(std::fs::read_to_string(root.join("docs/a.txt")).unwrap(), "two");
+
+        // 切回 main
+        let st = switch_branch_sync(root.to_str().unwrap(), "main").unwrap();
+        assert_eq!(st.branch, "main");
+        assert_eq!(std::fs::read_to_string(root.join("docs/a.txt")).unwrap(), "one");
+    }
+
+    #[test]
+    fn branch_switch_refuses_untracked_file_inside_new_directory() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        // other 分支新增 newdir/x.txt
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "other"]).0, 0);
+        std::fs::create_dir_all(root.join("newdir")).unwrap();
+        std::fs::write(root.join("newdir/x.txt"), "committed").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "newdir"]).0, 0);
+        assert_eq!(git(root, &["switch", "main"]).0, 0);
+        // main 工作区出现未跟踪 newdir/x.txt，切换将覆盖 → 拒绝
+        std::fs::create_dir_all(root.join("newdir")).unwrap();
+        std::fs::write(root.join("newdir/x.txt"), "local").unwrap();
+        let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
+        assert!(err.message.contains("未跟踪文件将被覆盖"));
+        assert!(err.message.contains("newdir/x.txt"));
     }
 }
