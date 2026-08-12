@@ -195,7 +195,10 @@ function onWindowClick() {
   ctxMenu.value = null;
 }
 
-function onWindowScroll() {
+function onWindowScroll(e: Event) {
+  // 仅面板自身滚动时关闭；聊天区等外部滚动（会话流式更新的吸底滚动）不影响菜单
+  if (!(e.target instanceof HTMLElement)) return;
+  if (!e.target.closest(".history-view")) return;
   ctxMenu.value = null;
 }
 

@@ -36,6 +36,11 @@ fn is_dot_dir(name: &str) -> bool {
     name.starts_with('.') && name.len() > 1
 }
 
+/// 需要无条件忽略的目录：点目录或 node_modules（任意深度，大小写不敏感）
+fn is_noise_dir(name: &str) -> bool {
+    is_dot_dir(name) || name.eq_ignore_ascii_case("node_modules")
+}
+
 /// 规范化路径键：统一反斜杠、去尾部分隔符、小写（Windows 大小写不敏感）
 fn norm_key(p: &Path) -> String {
     p.to_string_lossy()
@@ -143,7 +148,7 @@ fn visible_child_count(dir: &Path) -> u64 {
                 .filter(|e| {
                     let name = e.file_name().to_string_lossy().into_owned();
                     let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                    !(is_dir && is_dot_dir(&name))
+                    !(is_dir && is_noise_dir(&name))
                 })
                 .count() as u64
         })
@@ -195,7 +200,7 @@ fn list_impl(root: &Path, dir: &Path) -> Result<Vec<FsEntry>, String> {
         let path = item.path();
         let name = item.file_name().to_string_lossy().into_owned();
         let is_dir = item.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if is_dir && is_dot_dir(&name) {
+        if is_dir && is_noise_dir(&name) {
             continue;
         }
         if let Ok(e) = entry_from_path(root, &path) {
@@ -226,7 +231,7 @@ fn search_impl(root: &Path, query: &str, limit: usize) -> Result<Vec<FsEntry>, S
             let name = item.file_name().to_string_lossy().into_owned();
             let is_dir = item.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if is_dir {
-                if is_dot_dir(&name) {
+                if is_noise_dir(&name) {
                     continue;
                 }
                 stack.push(path.clone());
@@ -448,7 +453,7 @@ fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
             rel.components().any(|c| {
                 matches!(c, Component::Normal(n) if {
                     let s = n.to_string_lossy();
-                    is_dot_dir(&s)
+                    is_noise_dir(&s)
                 })
             })
         })
@@ -627,8 +632,8 @@ mod tests {
         let (_tmp, root) = tree();
         let entries = list_impl(&root, &root).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        // 目录优先、A-Z；.git 被过滤；点文件 .gitignore 保留
-        assert_eq!(names, vec!["node_modules", "src", ".gitignore", "a.txt", "b.txt"]);
+        // 目录优先、A-Z；.git 与 node_modules 被过滤；点文件 .gitignore 保留
+        assert_eq!(names, vec!["src", ".gitignore", "a.txt", "b.txt"]);
         let src = entries.iter().find(|e| e.name == "src").unwrap();
         assert!(src.is_dir);
         assert_eq!(src.child_count, Some(1));
@@ -645,9 +650,28 @@ mod tests {
         std::fs::write(root.join(".git").join("secret.txt"), "x").unwrap();
         let hits = search_impl(&root, "secret", 100).unwrap();
         assert!(hits.is_empty());
+        // node_modules 无条件忽略：目录本身与其内容均不参与搜索
+        std::fs::write(root.join("node_modules").join("secret.js"), "x").unwrap();
+        let hits = search_impl(&root, "secret", 100).unwrap();
+        assert!(hits.is_empty());
+        let hits = search_impl(&root, "node_modules", 100).unwrap();
+        assert!(hits.is_empty());
         // 空查询与上限
         assert!(search_impl(&root, "  ", 100).unwrap().is_empty());
         assert!(search_impl(&root, "a", 1).unwrap().len() <= 1);
+    }
+
+    #[test]
+    fn watcher_filter_excludes_dot_dirs_and_node_modules() {
+        let (_tmp, root) = tree();
+        std::fs::create_dir_all(root.join("node_modules").join("pkg")).unwrap();
+        std::fs::create_dir_all(root.join("src").join("nested")).unwrap();
+        assert!(path_under_dot_dir(&root, &root.join(".git").join("index")));
+        assert!(path_under_dot_dir(&root, &root.join(".vs").join("x")));
+        assert!(path_under_dot_dir(&root, &root.join("node_modules").join("pkg").join("index.js")));
+        assert!(path_under_dot_dir(&root, &root.join("src").join("nested").join("node_modules").join("a.js")));
+        assert!(!path_under_dot_dir(&root, &root.join("src").join("nested").join("a.js")));
+        assert!(!path_under_dot_dir(&root, &root.join("a.txt")));
     }
 
     #[test]

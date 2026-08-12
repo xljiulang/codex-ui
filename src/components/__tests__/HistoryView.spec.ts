@@ -236,6 +236,27 @@ describe("HistoryView 右键菜单", () => {
 
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });
+
+  it("外部滚动不关闭菜单，面板内滚动关闭菜单", async () => {
+    const wrapper = mount(HistoryView, { attachTo: document.body });
+    await openCtxMenu(wrapper);
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+
+    // 模拟聊天区吸底滚动：非面板元素上的 scroll 事件不应关闭菜单
+    const chatEl = document.createElement("div");
+    chatEl.className = "chat-scroll";
+    document.body.appendChild(chatEl);
+    chatEl.dispatchEvent(new Event("scroll"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+    chatEl.remove();
+
+    // 面板列表自身滚动仍应关闭菜单
+    wrapper.find(".history-list").element.dispatchEvent(new Event("scroll"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
 });
 
 describe("HistoryView 搜索刷新", () => {

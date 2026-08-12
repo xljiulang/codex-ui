@@ -244,6 +244,31 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
+  it("外部滚动不关闭菜单，面板内滚动关闭菜单", async () => {
+    const wrapper = mount(ResourceView, {
+      props: { active: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    await openRowCtx(wrapper, ".resource-row.resource-file");
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+
+    // 模拟聊天区吸底滚动：非面板元素上的 scroll 事件不应关闭菜单
+    const chatEl = document.createElement("div");
+    chatEl.className = "chat-scroll";
+    document.body.appendChild(chatEl);
+    chatEl.dispatchEvent(new Event("scroll"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+    chatEl.remove();
+
+    // 面板列表自身滚动仍应关闭菜单
+    wrapper.find(".resource-list").element.dispatchEvent(new Event("scroll"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("重命名：内联输入回车调用 session_fs_rename", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");

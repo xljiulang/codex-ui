@@ -102,6 +102,11 @@ fn path_str(p: &BStr) -> String {
     p.to_str_lossy().into_owned()
 }
 
+/// 路径是否包含 node_modules 组件（任意深度，大小写不敏感）
+fn has_node_modules_component(path: &str) -> bool {
+    path.split('/').any(|c| c.eq_ignore_ascii_case("node_modules"))
+}
+
 // ---------- 状态 ----------
 
 /// 合并同一路径的多个状态（暂存 + 未暂存），与 `git status` 的 XY 合并规则一致：
@@ -210,6 +215,8 @@ fn status_sync(path: &str) -> Result<GitStatus, GitError> {
         }
     }
 
+    // 无条件忽略 node_modules（即使已被跟踪也隐藏）
+    files.retain(|f| !has_node_modules_component(&f.path));
     files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
     Ok(GitStatus {
         repo_root: clean_path(workdir),
@@ -363,6 +370,9 @@ fn path_under_excluded_dot_dir(root: &Path, p: &Path) -> bool {
             acc.push(n);
             let s = n.to_string_lossy();
             if s.starts_with('.') && s.len() > 1 && s != ".git" && acc.is_dir() {
+                return true;
+            }
+            if s.eq_ignore_ascii_case("node_modules") && acc.is_dir() {
                 return true;
             }
         }
@@ -661,6 +671,27 @@ mod tests {
     }
 
     #[test]
+    fn status_ignores_node_modules_unconditionally() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::fs::write(root.join("node_modules").join("tracked.txt"), "v1").unwrap();
+        init_committed_repo(root);
+        // 未 gitignore 的未跟踪文件 + 已被跟踪文件的修改，都无条件隐藏
+        std::fs::write(root.join("node_modules").join("new.js"), "x").unwrap();
+        std::fs::write(root.join("node_modules").join("tracked.txt"), "v2").unwrap();
+        std::fs::write(root.join("a.txt"), "hello2").unwrap();
+        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.txt"]);
+    }
+
+    #[test]
     fn init_creates_repo_without_commit() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
@@ -770,6 +801,8 @@ mod tests {
         std::fs::create_dir_all(root.join(".vs")).unwrap();
         std::fs::create_dir_all(root.join(".vscode")).unwrap();
         std::fs::create_dir_all(root.join("src/.cache")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::fs::create_dir_all(root.join("src/node_modules")).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join(".gitignore"), "x").unwrap();
         std::fs::write(root.join("src/a.txt"), "x").unwrap();
@@ -778,6 +811,8 @@ mod tests {
         assert!(path_under_excluded_dot_dir(root, &root.join(".vs/foo")));
         assert!(path_under_excluded_dot_dir(root, &root.join("src/.cache/x")));
         assert!(path_under_excluded_dot_dir(root, &root.join(".vscode/settings.json")));
+        assert!(path_under_excluded_dot_dir(root, &root.join("node_modules/pkg/index.js")));
+        assert!(path_under_excluded_dot_dir(root, &root.join("src/node_modules/a.js")));
         assert!(!path_under_excluded_dot_dir(root, &root.join(".git/index")));
         assert!(!path_under_excluded_dot_dir(root, &root.join(".gitignore")));
         assert!(!path_under_excluded_dot_dir(root, &root.join("src/a.txt")));
