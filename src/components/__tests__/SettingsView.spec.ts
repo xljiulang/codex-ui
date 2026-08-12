@@ -144,6 +144,7 @@ describe("SettingsView 主题保存后生效", () => {
     store.settings.theme = "blue";
     store.toast = "";
     mockedSave.mockClear();
+    document.documentElement.dataset.theme = "blue";
   });
 
   it("点主题卡片只更新选中态，不即时保存或修改 store", async () => {
@@ -185,5 +186,40 @@ describe("SettingsView 主题保存后生效", () => {
       reopened.find('.theme-card[data-theme-id="blue"]').classes(),
     ).toContain("selected");
     reopened.unmount();
+  });
+
+  it("选主题卡片即时预览到根节点，但不写入 store", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(store.settings.theme).toBe("blue");
+    expect(mockedSave).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("未保存取消后还原根节点主题", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    const cancel = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "取消");
+    await cancel!.trigger("click");
+    expect(store.showSettings).toBe(false);
+    expect(document.documentElement.dataset.theme).toBe("blue");
+    wrapper.unmount();
+  });
+
+  it("保存后保留预览主题不回退", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find('.theme-card[data-theme-id="light"]').trigger("click");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    await wrapper.find("button.btn.primary").trigger("click");
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: "light" }),
+    );
+    expect(document.documentElement.dataset.theme).toBe("light");
+    wrapper.unmount();
   });
 });

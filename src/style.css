@@ -11,6 +11,8 @@
   --radius-lg: 14px;
   --radius-xl: 20px;
   --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  /* 代码块容器：全主题保持深色“终端”质感 */
+  --code-bg: linear-gradient(180deg, #161c25 0%, #0e1218 100%);
 }
 
 /* 主题一：蓝夜（默认） */
@@ -33,7 +35,7 @@
   --text: #c6cdd8;
   --text-bright: #eef2f8;
   --text-dim: #8b95a7;
-  --text-faint: #626d80;
+  --text-faint: #76819a;
 
   /* 主色：蓝色 */
   --accent: #4da6ff;
@@ -103,7 +105,7 @@
   --code-text: #c6cdd8;
 
   --brand-grad: linear-gradient(90deg, #f2f7ff, #9db8dd);
-  --btn-grad: linear-gradient(135deg, #4da6ff, #2f81f7);
+  --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
   --link-hover: #9ccbff;
   --diff-del-text: #f0a0a0;
   --diff-add-text: #9fe3d4;
@@ -136,7 +138,7 @@
   --text: #c9c7d6;
   --text-bright: #f1effc;
   --text-dim: #9492a6;
-  --text-faint: #666479;
+  --text-faint: #868399;
 
   --accent: #a78bfa;
   --accent-dim: #7b5df0;
@@ -203,7 +205,7 @@
   --code-text: #cdcbe0;
 
   --brand-grad: linear-gradient(90deg, #f4f1ff, #b9aee6);
-  --btn-grad: linear-gradient(135deg, #a78bfa, #6d54e8);
+  --btn-grad: linear-gradient(135deg, #7557ec, #6d54e8);
   --link-hover: #c5b6fd;
   --diff-del-text: #f2a3a9;
   --diff-add-text: #8fe6c8;
@@ -235,8 +237,8 @@
 
   --text: #3e4756;
   --text-bright: #151b26;
-  --text-dim: #6b7686;
-  --text-faint: #9aa4b4;
+  --text-dim: #626e7d;
+  --text-faint: #5f6b7a;
 
   --accent: #2563eb;
   --accent-dim: #1d5fc4;
@@ -245,10 +247,10 @@
   --accent-soft: rgba(var(--accent-rgb), 0.1);
   --accent-glow: rgba(var(--accent-rgb), 0.28);
 
-  --green: #0f9d70;
-  --green-rgb: 15, 157, 112;
-  --red: #d64550;
-  --red-rgb: 214, 69, 80;
+  --green: #0e7a58;
+  --green-rgb: 14, 122, 88;
+  --red: #c23a45;
+  --red-rgb: 194, 58, 69;
   --yellow: #a16207;
   --blue: #2563eb;
   --purple: #7c3aed;
@@ -297,16 +299,16 @@
   --menu-bg: rgba(255, 255, 255, 0.97);
   --tooltip-bg: rgba(255, 255, 255, 0.97);
 
-  --console-bg: rgba(233, 237, 244, 0.92);
-  --console-bg-deep: rgba(225, 231, 240, 0.94);
-  --console-text: #4b5566;
-  --code-text: #c8ced8;
+  --console-bg: rgba(10, 14, 19, 0.92);
+  --console-bg-deep: rgba(12, 16, 22, 0.9);
+  --console-text: #c6cdd8;
+  --code-text: #c6cdd8;
 
   --brand-grad: linear-gradient(90deg, #202a3a, #64748b);
-  --btn-grad: linear-gradient(135deg, #2f80ed, #1d5fc4);
+  --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
   --link-hover: #1a56c4;
-  --diff-del-text: #c0392b;
-  --diff-add-text: #0e7a58;
+  --diff-del-text: #f0a0a0;
+  --diff-add-text: #9fe3d4;
 
   --overlay-rgb: 25, 35, 52;
   --header-shadow: 0 1px 12px rgba(30, 40, 60, 0.08);
@@ -1235,7 +1237,7 @@ select option {
 }
 
 .md pre {
-  background: linear-gradient(180deg, #161c25 0%, #0e1218 100%);
+  background: var(--code-bg);
   color: var(--code-text);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -3566,47 +3568,25 @@ body.resizing-editor {
   font-weight: 600;
 }
 
-/* 晨光主题下 diff 语法改用浅色高亮（代码块仍保持深色终端配色） */
-:root[data-theme="light"] .diff-text .hljs-comment,
-:root[data-theme="light"] .diff-text .hljs-quote {
-  color: #6e7781;
+/* 晨光主题：diff 随控制台统一为深色终端，内部行号/分隔/强调改用浅色 */
+:root[data-theme="light"] .diff-window-body {
+  background: var(--console-bg-deep);
 }
-:root[data-theme="light"] .diff-text .hljs-keyword,
-:root[data-theme="light"] .diff-text .hljs-selector-tag,
-:root[data-theme="light"] .diff-text .hljs-literal {
-  color: #cf222e;
+:root[data-theme="light"] .diff-loading,
+:root[data-theme="light"] .diff-fallback-note,
+:root[data-theme="light"] .diff-no,
+:root[data-theme="light"] .diff-sep-text,
+:root[data-theme="light"] .diff-file {
+  color: #8b95a7;
 }
-:root[data-theme="light"] .diff-text .hljs-string,
-:root[data-theme="light"] .diff-text .hljs-regexp,
-:root[data-theme="light"] .diff-text .hljs-addition {
-  color: #0a3069;
+:root[data-theme="light"] .diff-hunk {
+  color: #9ecbff;
+  background: rgba(37, 99, 235, 0.16);
 }
-:root[data-theme="light"] .diff-text .hljs-number,
-:root[data-theme="light"] .diff-text .hljs-meta {
-  color: #0550ae;
-}
-:root[data-theme="light"] .diff-text .hljs-title,
-:root[data-theme="light"] .diff-text .hljs-section {
-  color: #8250df;
-}
-:root[data-theme="light"] .diff-text .hljs-attr,
-:root[data-theme="light"] .diff-text .hljs-attribute,
-:root[data-theme="light"] .diff-text .hljs-variable,
-:root[data-theme="light"] .diff-text .hljs-template-variable,
-:root[data-theme="light"] .diff-text .hljs-type,
-:root[data-theme="light"] .diff-text .hljs-class .hljs-title {
-  color: #953800;
-}
-:root[data-theme="light"] .diff-text .hljs-built_in,
-:root[data-theme="light"] .diff-text .hljs-builtin-name {
-  color: #0550ae;
-}
-:root[data-theme="light"] .diff-text .hljs-symbol,
-:root[data-theme="light"] .diff-text .hljs-bullet {
-  color: #953800;
-}
-:root[data-theme="light"] .diff-text .hljs-deletion {
-  color: #cf222e;
+:root[data-theme="light"] .diff-row.sep {
+  background: rgba(255, 255, 255, 0.06);
+  border-top: 1px dashed rgba(255, 255, 255, 0.14);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
 }
 
 /* 设置页主题选择器 */
@@ -3639,7 +3619,7 @@ body.resizing-editor {
 
 .theme-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent);
 }
 
 .theme-swatch {

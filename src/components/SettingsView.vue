@@ -2,7 +2,12 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { saveSettings, store, toastError } from "../composables/useCodex";
-import { THEMES, type ThemeId } from "../composables/useTheme";
+import {
+  THEMES,
+  applyTheme,
+  previewTheme,
+  type ThemeId,
+} from "../composables/useTheme";
 
 const closeBtn = ref<HTMLButtonElement | null>(null);
 const codexPath = ref(store.settings.codex_path ?? "");
@@ -11,7 +16,10 @@ const enterToSend = ref(store.settings.enter_to_send);
 const followupMode = ref(store.settings.followup_mode);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 
-function close() {
+function close(restore = true) {
+  if (restore && theme.value !== store.settings.theme) {
+    applyTheme(store.settings.theme);
+  }
   store.showSettings = false;
 }
 
@@ -26,6 +34,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
+  if (theme.value !== store.settings.theme) {
+    applyTheme(store.settings.theme);
+  }
 });
 
 async function pickCodexFile() {
@@ -52,12 +63,13 @@ async function apply() {
     theme: theme.value,
   });
   store.toast = "设置已保存";
-  close();
+  close(false);
 }
 
-async function selectTheme(id: ThemeId) {
-  // 仅更新本地暂存，保存时才生效
+function selectTheme(id: ThemeId) {
+  // 更新本地暂存并即时预览（保存才持久化，取消/关闭时还原）
   theme.value = id;
+  previewTheme(id);
 }
 </script>
 

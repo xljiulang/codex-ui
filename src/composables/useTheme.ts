@@ -40,3 +40,10 @@ export function applyTheme(theme: string | null | undefined): ThemeId {
   }
   return id;
 }
+
+/** 预览主题：仅即时切换根节点 data-theme，不写入本地缓存（取消时还原） */
+export function previewTheme(theme: string | null | undefined): ThemeId {
+  const id = normalizeTheme(theme);
+  document.documentElement.dataset.theme = id;
+  return id;
+}
