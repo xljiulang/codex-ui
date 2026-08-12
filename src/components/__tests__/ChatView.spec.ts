@@ -272,6 +272,42 @@ describe("ChatView 日期分隔线", () => {
     expect(scroller.scrollTop).toBe(950); // 已解除，不再被拉回
   });
 
+  it("切换会话后重置吸底状态", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000
+    // 用户上滑 50px（dist 50 > 32）→ 解除吸底
+    scroller.scrollTop = 950;
+    const scrollEv = new Event("scroll");
+    Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(scrollEv);
+    // 切换到新会话 → 重置吸底并回到底部
+    store.currentThreadId = "t2";
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+    // 新内容到达后继续吸底
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+    store.currentThreadId = null;
+  });
+
   it("追赶窗口内向下滚动不解除吸底", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,

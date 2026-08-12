@@ -130,6 +130,17 @@ watch(
   },
 );
 
+// 切换会话（新建/打开历史/会话失效重置）后重置吸底状态，
+// 避免旧会话的上滑状态残留导致新对话默认不吸底
+watch(
+  () => store.currentThreadId,
+  () => {
+    stickToBottom.value = true;
+    lastStickScrollTop = 0;
+    scheduleScroll();
+  },
+);
+
 // 懒加载/异步图片加载后高度变化没有 DOM 结构变更，补一次跟随
 function onImageLoad(e: Event) {
   if ((e.target as Element | null)?.tagName === "IMG") scheduleScroll();
