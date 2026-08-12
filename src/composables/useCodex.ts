@@ -1,7 +1,7 @@
 import { reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 
 import type {
   AppSettings,
@@ -167,6 +167,26 @@ export function settleConfirm(ok: boolean) {
   store.confirm = null;
   c.resolve(ok);
 }
+
+/** 回合进行中时在任务栏显示不确定进度条，结束后隐藏（非 Tauri 环境静默忽略） */
+async function updateTaskbarProgress() {
+  try {
+    const win = getCurrentWindow();
+    await win.setProgressBar({
+      status: store.turnActive
+        ? ProgressBarStatus.Indeterminate
+        : ProgressBarStatus.None,
+    });
+  } catch {
+    // 非 Tauri 环境（如浏览器预览）忽略
+  }
+}
+
+watch(
+  () => store.turnActive,
+  () => void updateTaskbarProgress(),
+  { immediate: true },
+);
 
 // 任何地方给 store.toast 赋值都会在 5 秒后自动消失
 let toastTimer: number | undefined;
