@@ -665,16 +665,25 @@ select option {
   align-items: center;
 }
 
+.history-search-group {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+}
+
 .history-search {
   width: 100%;
   padding-right: 30px;
   font-size: 12px;
-  border-radius: 999px;
+  border-radius: 999px 0 0 999px;
+  border-right: none;
 }
 
 .history-search-clear {
   position: absolute;
-  right: 14px;
+  right: 38px;
   top: 50%;
   transform: translateY(-50%);
   width: 22px;
@@ -688,6 +697,32 @@ select option {
 .history-search-clear:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
+}
+
+.history-refresh {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.history-refresh:hover {
+  color: var(--text-bright);
+  background: var(--bg-hover);
+}
+
+.history-refresh svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 .history-list {

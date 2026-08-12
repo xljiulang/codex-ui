@@ -8,6 +8,8 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     deleteThread: vi.fn(),
     togglePin: vi.fn(),
     openThread: vi.fn(),
+    refreshThreads: vi.fn(),
+    searchThreads: vi.fn(),
   };
 });
 
@@ -15,6 +17,8 @@ import HistoryPanel from "../HistoryPanel.vue";
 import {
   deleteThread,
   openThread,
+  refreshThreads,
+  searchThreads,
   store,
   togglePin,
 } from "../../composables/useCodex";
@@ -22,6 +26,8 @@ import {
 const mockedDelete = vi.mocked(deleteThread);
 const mockedTogglePin = vi.mocked(togglePin);
 const mockedOpen = vi.mocked(openThread);
+const mockedRefresh = vi.mocked(refreshThreads);
+const mockedSearch = vi.mocked(searchThreads);
 
 const now = Date.now() / 1000;
 const threads = [
@@ -266,6 +272,42 @@ describe("HistoryPanel 宽度调节", () => {
 
     window.dispatchEvent(new PointerEvent("pointerup"));
     wrapper.unmount();
+  });
+});
+
+describe("HistoryPanel 搜索刷新", () => {
+  beforeEach(() => {
+    mockBasicHistory();
+    store.searchActive = false;
+    store.searchSnippets = {};
+    mockedRefresh.mockClear();
+    mockedSearch.mockClear();
+  });
+
+  it("普通态点击刷新调用 refreshThreads", async () => {
+    const wrapper = mount(HistoryPanel);
+    mockedRefresh.mockClear();
+    await wrapper.find('button[aria-label="刷新"]').trigger("click");
+    expect(mockedRefresh).toHaveBeenCalledTimes(1);
+    expect(mockedSearch).not.toHaveBeenCalled();
+  });
+
+  it("搜索态点击刷新重新执行当前搜索词", async () => {
+    store.searchActive = true;
+    const wrapper = mount(HistoryPanel);
+    mockedRefresh.mockClear();
+    mockedSearch.mockClear();
+    await wrapper.find(".history-search").setValue("codex");
+    await wrapper.find('button[aria-label="刷新"]').trigger("click");
+    expect(mockedSearch).toHaveBeenCalledWith("codex");
+    expect(mockedRefresh).not.toHaveBeenCalled();
+  });
+
+  it("搜索框与刷新按钮组成胶囊组", () => {
+    const wrapper = mount(HistoryPanel);
+    const group = wrapper.find(".history-search-group");
+    expect(group.find("input.history-search").exists()).toBe(true);
+    expect(group.find('button[aria-label="刷新"]').exists()).toBe(true);
   });
 });
 

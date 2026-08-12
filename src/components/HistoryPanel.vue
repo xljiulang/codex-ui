@@ -83,6 +83,15 @@ function clearSearchInput() {
   clearSearch();
 }
 
+/** 刷新历史：搜索态重跑当前搜索，否则重新全量拉取 */
+function onRefresh() {
+  if (store.searchActive) {
+    void searchThreads(searchTerm.value);
+  } else {
+    void refreshThreads();
+  }
+}
+
 function startRename(t: ThreadSummary) {
   editingId.value = t.id;
   editName.value = threadTitle(t);
@@ -229,22 +238,36 @@ onBeforeUnmount(() => {
       @pointerdown="startResize"
     ></div>
     <div class="history-head">
-      <input
-        v-model="searchTerm"
-        class="history-search"
-        type="text"
-        placeholder="搜索会话…"
-        @input="onSearchInput()"
-      />
-      <button
-        v-if="searchTerm"
-        class="history-search-clear"
-        aria-label="清除搜索"
-        v-tooltip="'清除搜索'"
-        @click="clearSearchInput()"
-      >
-        ×
-      </button>
+      <div class="history-search-group">
+        <input
+          v-model="searchTerm"
+          class="history-search"
+          type="text"
+          placeholder="搜索会话…"
+          @input="onSearchInput()"
+        />
+        <button
+          v-if="searchTerm"
+          class="history-search-clear"
+          aria-label="清除搜索"
+          v-tooltip="'清除搜索'"
+          @click="clearSearchInput()"
+        >
+          ×
+        </button>
+        <button
+          class="history-refresh"
+          aria-label="刷新"
+          v-tooltip="'刷新'"
+          @click="onRefresh()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
     <div class="history-list">
       <template
