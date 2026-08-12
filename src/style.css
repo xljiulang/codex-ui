@@ -872,7 +872,6 @@ select option {
 }
 
 .history-time {
-  width: 48px;
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
