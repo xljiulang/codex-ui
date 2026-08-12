@@ -8,7 +8,6 @@ vi.mock("../../composables/useCodex", () => ({
     turnActive: false,
     busy: false,
     loadingThread: false,
-    turnInterrupted: false,
     currentThreadId: null,
     activeWorkByThread: {},
     itemsRev: 0,

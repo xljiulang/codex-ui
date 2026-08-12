@@ -171,7 +171,6 @@ onBeforeUnmount(() => {
           <span class="dot"></span>
         </div>
         <div v-if="store.loadingThread" class="loading-thread-note">加载会话…</div>
-        <div v-if="store.turnInterrupted" class="stop-note">已停止生成</div>
       </div>
       <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
         ↓ 回到底部

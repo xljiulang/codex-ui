@@ -1450,16 +1450,11 @@ select option {
 }
 
 .context-compaction-note,
-.stop-note,
 .unknown-item {
   text-align: center;
   color: var(--text-faint);
   font-size: 11.5px;
   padding: 6px 0;
-}
-
-.stop-note {
-  color: var(--red);
 }
 
 .loading-thread-note {
