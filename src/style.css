@@ -1231,6 +1231,38 @@ select option {
   fill: currentColor;
 }
 
+.git-section {
+  padding-top: 6px;
+}
+
+.git-section-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.git-section-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.git-section-empty {
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
 .git-file-list {
   list-style: none;
   margin: 0;
@@ -1290,6 +1322,60 @@ select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.git-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.git-tree-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+
+.git-dir-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.55;
+}
+
+.git-dir-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  color: var(--text-dim);
+}
+
+.git-dir-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-dir-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
 }
 
 .git-confirm-path {

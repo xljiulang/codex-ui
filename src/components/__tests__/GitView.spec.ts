@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import GitView from "../GitView.vue";
 import { tooltipDirective } from "../../directives/tooltip";
-import { store } from "../../composables/useCodex";
+import { settleConfirm, store } from "../../composables/useCodex";
 import { __resetGitChangesForTest } from "../../composables/useGitChanges";
 import type { GitStatus } from "../../lib/gitChanges";
 
@@ -31,8 +31,8 @@ const okStatus: GitStatus = {
   repoRoot: rootPath,
   branch: "main",
   files: [
-    { path: "a.txt", status: "modified" },
-    { path: "b.txt", status: "untracked" },
+    { path: "a.txt", status: "modified", staged: false, worktree: true },
+    { path: "b.txt", status: "untracked", staged: false, worktree: true },
   ],
 };
 
@@ -408,6 +408,519 @@ describe("GitView 分支管理", () => {
     wrapper.find(".git-file-list").element.dispatchEvent(new Event("scroll"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 变更文件右键菜单", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  function mockFileRepo(status: GitStatus) {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(status);
+      if (
+        cmd === "git_changes_stage" ||
+        cmd === "git_changes_unstage" ||
+        cmd === "git_changes_restore" ||
+        cmd === "git_changes_delete" ||
+        cmd === "git_changes_ignore" ||
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(status);
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  function menuLabels(wrapper: ReturnType<typeof mountGitView>) {
+    return wrapper.findAll(".ctx-menu-item").map((i) => i.text());
+  }
+
+  it("更改区 modified：显示查看更改/暂存/撤消更改，无取消暂存", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["查看更改", "暂存", "撤消更改"]);
+    expect(wrapper.find(".ctx-menu-item.danger").text()).toBe("撤消更改");
+    wrapper.unmount();
+  });
+
+  it("暂存更改区 modified：显示取消暂存，无暂存", async () => {
+    mockFileRepo({
+      ...okStatus,
+      files: [
+        { path: "a.txt", status: "modified", staged: true, worktree: false },
+      ],
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["查看更改", "取消暂存", "撤消更改"]);
+    wrapper.unmount();
+  });
+
+  it("untracked：显示暂存/忽略此本地项/删除文件（danger）", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.findAll(".git-file")[1].trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual([
+      "查看更改",
+      "暂存",
+      "忽略此本地项",
+      "删除文件",
+    ]);
+    expect(wrapper.find(".ctx-menu-item.danger").text()).toBe("删除文件");
+    wrapper.unmount();
+  });
+
+  it("added：显示取消暂存与删除文件", async () => {
+    mockFileRepo({
+      ...okStatus,
+      files: [
+        { path: "new.txt", status: "added", staged: true, worktree: false },
+      ],
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["查看更改", "取消暂存", "删除文件"]);
+    wrapper.unmount();
+  });
+
+  it("点击暂存调用 git_changes_stage 并关闭菜单", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "暂存")!
+      .trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_stage",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "a.txt" });
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("点击取消暂存调用 git_changes_unstage", async () => {
+    mockFileRepo({
+      ...okStatus,
+      files: [
+        { path: "a.txt", status: "modified", staged: true, worktree: false },
+      ],
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "取消暂存")!
+      .trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_unstage",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "a.txt" });
+    wrapper.unmount();
+  });
+
+  it("点击忽略此本地项调用 git_changes_ignore", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.findAll(".git-file")[1].trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "忽略此本地项")!
+      .trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_ignore",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "b.txt" });
+    wrapper.unmount();
+  });
+
+  it("撤消更改需要确认，取消不调用命令", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "撤消更改")!
+      .trigger("click");
+    await flushPromises();
+    expect(store.confirm?.title).toBe("撤消更改");
+    settleConfirm(false);
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_restore"),
+    ).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("撤消更改确认后调用 git_changes_restore", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "撤消更改")!
+      .trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_restore",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "a.txt" });
+    wrapper.unmount();
+  });
+
+  it("删除文件确认后调用 git_changes_delete", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.findAll(".git-file")[1].trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "删除文件")!
+      .trigger("click");
+    await flushPromises();
+    expect(store.confirm?.title).toBe("删除文件");
+    settleConfirm(true);
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_delete",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "b.txt" });
+    wrapper.unmount();
+  });
+
+  it("外部点击与 Escape 关闭右键菜单", async () => {
+    mockFileRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+
+    window.dispatchEvent(new MouseEvent("click"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+
+    await wrapper.find(".git-file").trigger("contextmenu");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 变更文件树形目录", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  const treeStatus: GitStatus = {
+    repoRoot: rootPath,
+    branch: "main",
+    files: [
+      { path: "a.txt", status: "modified", staged: false, worktree: true },
+      { path: "src/b.txt", status: "untracked", staged: false, worktree: true },
+      {
+        path: "src/deep/c.txt",
+        status: "modified",
+        staged: true,
+        worktree: false,
+      },
+      { path: "src2/d.txt", status: "untracked", staged: false, worktree: true },
+    ],
+  };
+
+  function mockTreeRepo() {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(treeStatus);
+      if (
+        cmd === "git_changes_stage" ||
+        cmd === "git_changes_unstage" ||
+        cmd === "git_changes_restore" ||
+        cmd === "git_changes_ignore" ||
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(treeStatus);
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  function menuLabels(wrapper: ReturnType<typeof mountGitView>) {
+    return wrapper.findAll(".ctx-menu-item").map((i) => i.text());
+  }
+
+  function dirRow(wrapper: ReturnType<typeof mountGitView>, name: string) {
+    return wrapper
+      .findAll(".git-dir")
+      .find((r) => r.find(".git-dir-name").text() === name)!;
+  }
+
+  function dirRows(wrapper: ReturnType<typeof mountGitView>, name: string) {
+    return wrapper
+      .findAll(".git-dir")
+      .filter((r) => r.find(".git-dir-name").text() === name);
+  }
+
+  it("渲染更改/暂存更改两个分区并分别构建树", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const heads = wrapper.findAll(".git-section-head");
+    expect(heads).toHaveLength(2);
+    expect(heads[0].find("span").text()).toBe("更改");
+    expect(heads[0].find(".git-section-count").text()).toBe("5");
+    expect(heads[1].find("span").text()).toBe("暂存更改");
+    expect(heads[1].find(".git-section-count").text()).toBe("3");
+
+    // 更改区：src(1) → b.txt → src2(1) → d.txt → 根文件 a.txt
+    const sections = wrapper.findAll(".git-section");
+    const changesRows = sections[0].findAll(".git-tree-row");
+    expect(changesRows).toHaveLength(5);
+    expect(changesRows[0].find(".git-dir-name").text()).toBe("src");
+    expect(changesRows[0].find(".git-dir-count").text()).toBe("1");
+    expect(changesRows[1].text()).toContain("src/b.txt");
+    expect(changesRows[2].find(".git-dir-name").text()).toBe("src2");
+    expect(changesRows[4].text()).toContain("a.txt");
+
+    // 暂存更改区：src → deep → c.txt
+    const stagedRows = sections[1].findAll(".git-tree-row");
+    expect(stagedRows).toHaveLength(3);
+    expect(stagedRows[0].find(".git-dir-name").text()).toBe("src");
+    expect(stagedRows[1].find(".git-dir-name").text()).toBe("deep");
+    expect(stagedRows[2].text()).toContain("src/deep/c.txt");
+    wrapper.unmount();
+  });
+
+  it("空分区显示占位文案", async () => {
+    mockTreeRepo();
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({ ...treeStatus, files: [] });
+      }
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    const text = wrapper.find(".git-view").text();
+    expect(text).toContain("无更改");
+    expect(text).toContain("无暂存更改");
+    wrapper.unmount();
+  });
+
+  it("同时有暂存+工作区更改的文件出现在两个分区，菜单按分区区分", async () => {
+    mockTreeRepo();
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({
+          ...treeStatus,
+          files: [
+            {
+              path: "src/deep/c.txt",
+              status: "modified",
+              staged: true,
+              worktree: true,
+            },
+          ],
+        });
+      }
+      if (
+        cmd === "git_changes_stage" ||
+        cmd === "git_changes_unstage" ||
+        cmd === "git_changes_restore" ||
+        cmd === "git_changes_ignore" ||
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(treeStatus);
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const sections = wrapper.findAll(".git-section");
+    expect(sections[0].text()).toContain("src/deep/c.txt");
+    expect(sections[1].text()).toContain("src/deep/c.txt");
+
+    await sections[0].find(".git-file").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["查看更改", "暂存", "撤消更改"]);
+
+    window.dispatchEvent(new MouseEvent("click"));
+    await wrapper.vm.$nextTick();
+    await sections[1].find(".git-file").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["查看更改", "取消暂存", "撤消更改"]);
+    wrapper.unmount();
+  });
+
+  it("点击目录行折叠/展开子项，折叠状态跨分区共享", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    expect(wrapper.findAll(".git-tree-row")).toHaveLength(8);
+
+    await dirRow(wrapper, "src").trigger("click");
+    await wrapper.vm.$nextTick();
+    // 更改区 src 收起（隐藏 b.txt），暂存区 src 同步收起（隐藏 deep/c.txt）
+    expect(wrapper.findAll(".git-tree-row")).toHaveLength(5);
+
+    await dirRow(wrapper, "src").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-tree-row")).toHaveLength(8);
+    wrapper.unmount();
+  });
+
+  it("目录菜单按分区显隐：更改区=暂存/忽略此本地项/撤消更改", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await dirRow(wrapper, "src").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual([
+      "暂存",
+      "忽略此本地项",
+      "撤消更改",
+    ]);
+    expect(wrapper.find(".ctx-menu-item.danger").text()).toBe("撤消更改");
+
+    window.dispatchEvent(new MouseEvent("click"));
+    await wrapper.vm.$nextTick();
+    await dirRow(wrapper, "src2").trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["暂存", "忽略此本地项", "撤消更改"]);
+    wrapper.unmount();
+  });
+
+  it("暂存更改区目录菜单：取消暂存/撤消更改", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await dirRows(wrapper, "src")[1].trigger("contextmenu");
+    expect(menuLabels(wrapper)).toEqual(["取消暂存", "撤消更改"]);
+    wrapper.unmount();
+  });
+
+  it("更改区目录“暂存”调用 git_changes_stage（路径为目录）", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await dirRow(wrapper, "src2").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "暂存")!
+      .trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_stage",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "src2" });
+    wrapper.unmount();
+  });
+
+  it("目录撤消更改需确认：取消不调用，确认后调用 git_changes_restore", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await dirRow(wrapper, "src").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "撤消更改")!
+      .trigger("click");
+    await flushPromises();
+    expect(store.confirm?.title).toBe("撤消更改");
+    settleConfirm(false);
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_restore"),
+    ).toBe(false);
+
+    await dirRow(wrapper, "src").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "撤消更改")!
+      .trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_restore",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "src" });
+    wrapper.unmount();
+  });
+
+  it("目录“忽略此本地项”调用 git_changes_ignore", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await dirRow(wrapper, "src").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "忽略此本地项")!
+      .trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_ignore",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, path: "src" });
+    wrapper.unmount();
+  });
+
+  it("刷新后保留手动折叠状态", async () => {
+    mockTreeRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await dirRow(wrapper, "src").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-tree-row")).toHaveLength(5);
+
+    await wrapper.find(".git-refresh").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".git-tree-row")).toHaveLength(5);
+    expect(wrapper.find(".git-view").text()).not.toContain("src/deep/c.txt");
     wrapper.unmount();
   });
 });

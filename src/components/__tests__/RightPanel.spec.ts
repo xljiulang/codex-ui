@@ -93,7 +93,9 @@ function mockFs() {
       return Promise.resolve({
         repoRoot: rootPath,
         branch: "main",
-        files: [{ path: "src/a.ts", status: "modified" }],
+        files: [
+          { path: "src/a.ts", status: "modified", staged: false, worktree: true },
+        ],
       });
     }
     if (

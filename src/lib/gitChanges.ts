@@ -14,6 +14,10 @@ export interface GitFile {
   /** 相对仓库根的路径（正斜杠分隔） */
   path: string;
   status: GitFileStatus;
+  /** 是否已有暂存区变化（HEAD → 索引） */
+  staged: boolean;
+  /** 是否含工作区侧变化（索引 → 工作区，含未跟踪文件） */
+  worktree: boolean;
 }
 
 export interface GitStatus {

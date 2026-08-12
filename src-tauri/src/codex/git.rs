@@ -49,6 +49,10 @@ pub struct GitFile {
     pub path: String,
     /// added | modified | deleted | untracked
     pub status: String,
+    /// 是否已有暂存区变化（HEAD → 索引）
+    pub staged: bool,
+    /// 是否含工作区侧变化（索引 → 工作区，含未跟踪文件）
+    pub worktree: bool,
 }
 
 /// Git 状态（供前端展示）
@@ -116,6 +120,8 @@ fn merge_file(
     index_of: &mut HashMap<String, usize>,
     path: String,
     status: &str,
+    staged: bool,
+    worktree: bool,
 ) {
     let prio = |s: &str| match s {
         "deleted" => 4,
@@ -129,11 +135,15 @@ fn merge_file(
         if prio(status) > prio(&files[i].status) {
             files[i].status = status.to_string();
         }
+        files[i].staged |= staged;
+        files[i].worktree |= worktree;
     } else {
         index_of.insert(norm, files.len());
         files.push(GitFile {
             path,
             status: status.to_string(),
+            staged,
+            worktree,
         });
     }
 }
@@ -168,13 +178,34 @@ fn status_sync(path: &str) -> Result<GitStatus, GitError> {
                 use gix::diff::index::Change;
                 match change {
                     Change::Addition { location, .. } => {
-                        merge_file(&mut files, &mut index_of, path_str(&location), "added");
+                        merge_file(
+                            &mut files,
+                            &mut index_of,
+                            path_str(&location),
+                            "added",
+                            true,
+                            false,
+                        );
                     }
                     Change::Deletion { location, .. } => {
-                        merge_file(&mut files, &mut index_of, path_str(&location), "deleted");
+                        merge_file(
+                            &mut files,
+                            &mut index_of,
+                            path_str(&location),
+                            "deleted",
+                            true,
+                            false,
+                        );
                     }
                     Change::Modification { location, .. } => {
-                        merge_file(&mut files, &mut index_of, path_str(&location), "modified");
+                        merge_file(
+                            &mut files,
+                            &mut index_of,
+                            path_str(&location),
+                            "modified",
+                            true,
+                            false,
+                        );
                     }
                     // 重命名检测已关闭，理论上不会出现
                     Change::Rewrite { .. } => continue,
@@ -196,7 +227,14 @@ fn status_sync(path: &str) -> Result<GitStatus, GitError> {
                             EntryStatus::NeedsUpdate(_) => continue,
                             EntryStatus::IntentToAdd => "added",
                         };
-                        merge_file(&mut files, &mut index_of, path_str(rela_path.as_ref()), status);
+                        merge_file(
+                            &mut files,
+                            &mut index_of,
+                            path_str(rela_path.as_ref()),
+                            status,
+                            false,
+                            true,
+                        );
                     }
                     IwItem::DirectoryContents { entry, .. } => {
                         if matches!(entry.status, gix::dir::entry::Status::Untracked) {
@@ -205,6 +243,8 @@ fn status_sync(path: &str) -> Result<GitStatus, GitError> {
                                 &mut index_of,
                                 path_str(entry.rela_path.as_ref()),
                                 "untracked",
+                                false,
+                                true,
                             );
                         }
                     }
@@ -446,17 +486,7 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
                     std::fs::remove_file(&p)
                         .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&p))))?;
                 }
-                // 逐级清理空的父目录
-                let mut parent = p.parent();
-                while let Some(d) = parent {
-                    if d == workdir {
-                        break;
-                    }
-                    if std::fs::remove_dir(d).is_err() {
-                        break;
-                    }
-                    parent = d.parent();
-                }
+                remove_empty_parents(&workdir, &p);
             }
             gix::diff::tree_with_rewrites::Change::Rewrite { .. } => continue,
         }
@@ -482,6 +512,320 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
     })
     .map_err(|e| git_err(format!("切换分支失败: {e}")))?;
 
+    status_sync(path)
+}
+
+// ---------- 变更文件操作 ----------
+
+/// 校验并规范化仓库相对路径：拒绝绝对路径、`.`/`..`、盘符前缀、`.git` 与 node_modules 组件
+fn validate_rel_path(rel: &str) -> Result<String, GitError> {
+    let rel = rel.replace('\\', "/");
+    if rel.is_empty() {
+        return Err(git_err("文件路径不能为空"));
+    }
+    for c in Path::new(&rel).components() {
+        match c {
+            Component::Normal(n) => {
+                let s = n.to_string_lossy();
+                if s == ".git" {
+                    return Err(git_err("不支持对 .git 内文件操作"));
+                }
+                if s.eq_ignore_ascii_case("node_modules") {
+                    return Err(git_err("不支持对 node_modules 内文件操作"));
+                }
+            }
+            _ => return Err(git_err("文件路径不合法")),
+        }
+    }
+    Ok(rel)
+}
+
+/// 从 `p` 的父目录开始逐级删除空目录，直到仓库根 `workdir`
+fn remove_empty_parents(workdir: &Path, p: &Path) {
+    let mut parent = p.parent();
+    while let Some(d) = parent {
+        if d == workdir {
+            break;
+        }
+        if std::fs::remove_dir(d).is_err() {
+            break;
+        }
+        parent = d.parent();
+    }
+}
+
+/// 从索引移除指定路径的所有条目（含冲突各阶段）并写回；无对应条目时不写文件
+fn remove_index_entry(repo: &gix::Repository, rel: &str) -> Result<(), GitError> {
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    let mut index = index.into_owned_or_cloned();
+    let rel_b = BStr::new(rel.as_bytes());
+    let before = index.entries().len();
+    index.remove_entries(|_, p, _| p == rel_b);
+    if index.entries().len() != before {
+        index.remove_tree();
+        index.remove_resolve_undo();
+        index
+            .write(gix::index::write::Options::default())
+            .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
+    }
+    Ok(())
+}
+
+/// 取 HEAD 树中 `path` 的条目（blob id + mode）；HEAD 未出生或无此路径 → None
+fn head_entry(
+    repo: &gix::Repository,
+    path: &str,
+) -> Result<Option<(gix::hash::ObjectId, gix::index::entry::Mode)>, GitError> {
+    let tree_id = repo
+        .head_tree_id_or_empty()
+        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
+    let tree = tree_id
+        .object()
+        .map_err(|e| git_err(format!("读取 HEAD 树失败: {e}")))?
+        .into_tree();
+    let Some(entry) = tree
+        .lookup_entry_by_path(path)
+        .map_err(|e| git_err(format!("在 HEAD 中查找 {path} 失败: {e}")))?
+    else {
+        return Ok(None);
+    };
+    Ok(Some((
+        entry.object_id(),
+        gix::index::entry::Mode::from(entry.mode().kind()),
+    )))
+}
+
+/// 将索引中该路径重置为 HEAD 状态（等价 `git restore --staged <path>`）：
+/// HEAD 有该路径 → 索引条目更新为 HEAD 的 blob/mode；HEAD 无 → 移除条目。工作区不变。
+fn reset_index_entry(repo: &gix::Repository, rel: &str) -> Result<(), GitError> {
+    let head = head_entry(repo, rel)?;
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    let mut index = index.into_owned_or_cloned();
+    let rel_b = BStr::new(rel.as_bytes());
+    index.remove_entries(|_, p, _| p == rel_b);
+    if let Some((id, mode)) = head {
+        index.dangerously_push_entry(
+            gix::index::entry::Stat::default(),
+            id,
+            gix::index::entry::Flags::empty(),
+            mode,
+            rel_b,
+        );
+        index.sort_entries();
+    }
+    index.remove_tree();
+    index.remove_resolve_undo();
+    index
+        .write(gix::index::write::Options::default())
+        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
+    Ok(())
+}
+
+/// HEAD 树中是否存在 `path`（未出生 HEAD 视为不存在）
+fn head_has_path(repo: &gix::Repository, path: &str) -> Result<bool, GitError> {
+    Ok(head_entry(repo, path)?.is_some())
+}
+
+/// 目录前缀下的变更文件（含精确匹配；大小写不敏感，与 Windows 路径规则一致）
+fn files_under(files: &[GitFile], dir: &str) -> Vec<GitFile> {
+    let dir_l = dir.trim_end_matches('/').to_lowercase();
+    let prefix_l = format!("{dir_l}/");
+    files
+        .iter()
+        .filter(|f| {
+            let p = f.path.to_lowercase();
+            p == dir_l || p.starts_with(&prefix_l)
+        })
+        .cloned()
+        .collect()
+}
+
+/// 单文件暂存：工作区文件存在 → 写入 blob 并登记/更新索引条目；已删除 → 索引移除（暂存删除）。
+/// 与 `git add` 语义一致：先移除旧条目（含冲突各阶段）再登记新条目。
+fn stage_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    let abs = workdir.join(&rel);
+
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    let mut index = index.into_owned_or_cloned();
+    let rel_b = BStr::new(rel.as_bytes());
+    index.remove_entries(|_, p, _| p == rel_b);
+
+    match std::fs::symlink_metadata(&abs) {
+        Ok(meta) if !meta.is_dir() => {
+            let data = std::fs::read(&abs)
+                .map_err(|e| git_err(format!("读取文件失败 {}: {e}", clean_path(&abs))))?;
+            let id = repo
+                .write_blob(&data)
+                .map_err(|e| git_err(format!("写入对象失败: {e}")))?;
+            let stat = gix::index::fs::Metadata::from_path_no_follow(&abs)
+                .ok()
+                .and_then(|m| gix::index::entry::Stat::from_fs(&m).ok())
+                .unwrap_or_default();
+            let mode = if meta.file_type().is_symlink() {
+                gix::index::entry::Mode::SYMLINK
+            } else {
+                gix::index::entry::Mode::FILE
+            };
+            index.dangerously_push_entry(
+                stat,
+                id.detach(),
+                gix::index::entry::Flags::empty(),
+                mode,
+                rel_b,
+            );
+            index.sort_entries();
+            index.remove_tree();
+            index.remove_resolve_undo();
+        }
+        Ok(_) => return Err(git_err("暂存目标不是文件")),
+        Err(_) => {
+            // 工作区文件已不存在：暂存删除，索引条目已在上方移除
+            index.remove_tree();
+            index.remove_resolve_undo();
+        }
+    }
+
+    index
+        .write(gix::index::write::Options::default())
+        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
+    Ok(())
+}
+
+/// 暂存：支持文件或目录；目录 = 递归暂存其下所有变更文件（未跟踪即“添加跟踪”），
+/// 目录内已删除的已跟踪文件同样暂存删除
+fn stage_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    if workdir.join(&rel).is_dir() {
+        let st = status_sync(path)?;
+        for f in files_under(&st.files, &rel) {
+            stage_file_sync(path, &f.path)?;
+        }
+    } else {
+        stage_file_sync(path, &rel)?;
+    }
+    status_sync(path)
+}
+
+/// 单文件取消暂存：索引条目重置为 HEAD 状态，工作区不变
+fn unstage_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
+    let repo = open_repo(path)?;
+    let rel = validate_rel_path(rel)?;
+    reset_index_entry(&repo, &rel)
+}
+
+/// 取消暂存：支持文件或目录；目录 = 其下所有变更文件索引重置为 HEAD
+fn unstage_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    if workdir.join(&rel).is_dir() {
+        let st = status_sync(path)?;
+        for f in files_under(&st.files, &rel) {
+            unstage_file_sync(path, &f.path)?;
+        }
+    } else {
+        unstage_file_sync(path, &rel)?;
+    }
+    status_sync(path)
+}
+
+/// 单文件还原：完全丢弃该文件本地更改——先取消暂存，工作区恢复为 HEAD 内容；
+/// HEAD 无此文件（未跟踪/新增）则删除工作区文件
+fn restore_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    reset_index_entry(&repo, &rel)?;
+
+    let abs = workdir.join(&rel);
+    if head_has_path(&repo, &rel)? {
+        let data = head_blob(&repo, &rel)?;
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| git_err(format!("创建目录失败 {}: {e}", clean_path(parent))))?;
+        }
+        std::fs::write(&abs, data)
+            .map_err(|e| git_err(format!("写入文件失败 {}: {e}", clean_path(&abs))))?;
+    } else if abs.is_file() || abs.is_symlink() {
+        std::fs::remove_file(&abs)
+            .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&abs))))?;
+        remove_empty_parents(&workdir, &abs);
+    }
+    Ok(())
+}
+
+/// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）
+fn restore_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    if workdir.join(&rel).is_dir() {
+        let st = status_sync(path)?;
+        for f in files_under(&st.files, &rel) {
+            restore_file_sync(path, &f.path)?;
+        }
+    } else {
+        restore_file_sync(path, &rel)?;
+    }
+    status_sync(path)
+}
+
+/// 删除文件：移除工作区文件并从索引移除（等价 `git rm`），逐级清理空目录；不支持目录
+fn delete_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    let abs = workdir.join(&rel);
+    if abs.is_dir() {
+        return Err(git_err("不支持删除目录"));
+    }
+    if abs.is_file() || abs.is_symlink() {
+        std::fs::remove_file(&abs)
+            .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&abs))))?;
+        remove_empty_parents(&workdir, &abs);
+    }
+    remove_index_entry(&repo, &rel)?;
+    status_sync(path)
+}
+
+/// 添加到 .gitignore：文件追加 `/路径`，目录追加 `/路径/`（不存在则创建，幂等跳过重复条目）
+fn ignore_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let rel = validate_rel_path(rel)?;
+    let pattern = if workdir.join(&rel).is_dir() {
+        format!("/{}/", rel.trim_end_matches('/'))
+    } else {
+        format!("/{rel}")
+    };
+    let plain = pattern.trim_start_matches('/');
+    let gitignore = workdir.join(".gitignore");
+    let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    let already = existing.lines().any(|l| {
+        let l = l.strip_suffix('\r').unwrap_or(l);
+        l == pattern || l == plain
+    });
+    if !already {
+        let mut out = existing;
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str(&pattern);
+        out.push('\n');
+        std::fs::write(&gitignore, out)
+            .map_err(|e| git_err(format!("写入 .gitignore 失败: {e}")))?;
+    }
     status_sync(path)
 }
 
@@ -603,6 +947,31 @@ pub async fn git_changes_branch_switch(path: String, name: String) -> Result<Git
 #[tauri::command]
 pub async fn git_changes_diff(root: String, path: String, kind: String) -> Result<String, GitError> {
     run_blocking(move || diff_sync(&root, &path, &kind)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_stage(root: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || stage_sync(&root, &path)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_unstage(root: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || unstage_sync(&root, &path)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_restore(root: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || restore_sync(&root, &path)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_delete(root: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || delete_sync(&root, &path)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_ignore(root: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || ignore_sync(&root, &path)).await
 }
 
 // ---------- .git / 工作区监听 ----------
@@ -898,6 +1267,7 @@ mod tests {
                 ("c.txt".to_string(), "untracked".to_string()),
             ]
         );
+        assert!(st.files.iter().all(|f| !f.staged && f.worktree));
     }
 
     #[test]
@@ -918,6 +1288,37 @@ mod tests {
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
         assert_eq!(st.files[0].status, "modified");
+        assert!(st.files[0].staged);
+        assert!(st.files[0].worktree);
+    }
+
+    #[test]
+    fn status_flags_staged_and_worktree_independently() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("b.txt"), "x\n").unwrap();
+        init_committed_repo(root);
+        // b.txt：仅工作区修改
+        std::fs::write(root.join("b.txt"), "y\n").unwrap();
+        // a.txt：先暂存再修改 → 同一条记录同时有 staged 与 worktree
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
+        std::fs::write(root.join("c.txt"), "new\n").unwrap();
+
+        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let a = st.files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert!(a.staged && a.worktree);
+        let b = st.files.iter().find(|f| f.path == "b.txt").unwrap();
+        assert!(!b.staged && b.worktree);
+        let c = st.files.iter().find(|f| f.path == "c.txt").unwrap();
+        assert!(!c.staged && c.worktree);
+        assert_eq!(st.files.len(), 3);
     }
 
     #[test]
@@ -971,6 +1372,8 @@ mod tests {
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
         assert_eq!(st.files[0].status, "untracked");
+        assert!(!st.files[0].staged);
+        assert!(st.files[0].worktree);
         // 仅初始化，不应产生任何提交（HEAD 未出生）
         let repo = open_repo(root.to_str().unwrap()).unwrap();
         assert!(repo.head().unwrap().is_unborn());
@@ -1296,5 +1699,361 @@ mod tests {
         let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
         assert!(err.message.contains("未跟踪文件将被覆盖"));
         assert!(err.message.contains("newdir/x.txt"));
+    }
+
+    #[test]
+    fn stage_then_unstage_untracked_file() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("c.txt"), "hello\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        // 暂存 → added 且 staged=true
+        let st = stage_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, "c.txt");
+        assert_eq!(st.files[0].status, "added");
+        assert!(st.files[0].staged);
+        assert!(!st.files[0].worktree);
+
+        // 取消暂存 → 回到 untracked 且 staged=false，工作区内容保留
+        let st = unstage_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, "c.txt");
+        assert_eq!(st.files[0].status, "untracked");
+        assert!(!st.files[0].staged);
+        assert!(st.files[0].worktree);
+        assert_eq!(std::fs::read_to_string(root.join("c.txt")).unwrap(), "hello\n");
+    }
+
+    #[test]
+    fn stage_modified_then_unstage_keeps_worktree() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+
+        let st = stage_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].status, "modified");
+        assert!(st.files[0].staged);
+        assert!(!st.files[0].worktree);
+
+        let st = unstage_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].status, "modified");
+        assert!(!st.files[0].staged);
+        assert!(st.files[0].worktree);
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two\n");
+    }
+
+    #[test]
+    fn stage_deleted_file_records_deletion() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+
+        let st = stage_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, "a.txt");
+        assert_eq!(st.files[0].status, "deleted");
+        assert!(st.files[0].staged);
+        assert!(!st.files[0].worktree);
+    }
+
+    #[test]
+    fn restore_discards_worktree_and_staged_changes() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        // 暂存新内容后再修改工作区：同一路径 staged + worktree 都有变化
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
+
+        let st = restore_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        assert!(st.files.is_empty());
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn restore_untracked_file_deletes_it() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("c.txt"), "hello\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        let st = restore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        assert!(st.files.is_empty());
+        assert!(!root.join("c.txt").exists());
+    }
+
+    #[test]
+    fn delete_removes_file_and_index_entry() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        // 先暂存修改，再删除：等价 git rm（工作区 + 索引同时移除）
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+
+        let st = delete_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        // 等价 git rm：删除工作区文件并在暂存区记录删除
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, "a.txt");
+        assert_eq!(st.files[0].status, "deleted");
+        assert!(st.files[0].staged);
+        assert!(!st.files[0].worktree);
+        assert!(!root.join("a.txt").exists());
+    }
+
+    #[test]
+    fn ignore_adds_gitignore_entry_idempotently() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("c.txt"), "hello\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        let st = ignore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        // c.txt 已被忽略，仅 .gitignore 自身作为新文件出现
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, ".gitignore");
+        assert!(!st.files[0].staged);
+        assert!(st.files[0].worktree);
+        let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(ig, "/c.txt\n");
+
+        // 重复忽略幂等：条目不重复
+        let _ = ignore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(ig, "/c.txt\n");
+    }
+
+    #[test]
+    fn ignore_appends_to_existing_gitignore_without_trailing_newline() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("c.txt"), "hello\n").unwrap();
+        std::fs::write(root.join("d.txt"), "world\n").unwrap();
+        std::fs::write(root.join(".gitignore"), "*.log").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        let st = ignore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        // c.txt 被忽略；d.txt 与 .gitignore 仍为未跟踪
+        let mut paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec![".gitignore", "d.txt"]);
+        let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(ig, "*.log\n/c.txt\n");
+    }
+
+    #[test]
+    fn file_ops_reject_unsafe_paths() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        assert!(stage_sync(root.to_str().unwrap(), "../outside").is_err());
+        assert!(stage_sync(root.to_str().unwrap(), r"C:\outside").is_err());
+        assert!(stage_sync(root.to_str().unwrap(), "node_modules/x.js").is_err());
+        assert!(stage_sync(root.to_str().unwrap(), ".git/config").is_err());
+        assert!(restore_sync(root.to_str().unwrap(), "a/../b").is_err());
+        assert!(delete_sync(root.to_str().unwrap(), "/abs").is_err());
+        assert!(ignore_sync(root.to_str().unwrap(), "").is_err());
+    }
+
+    #[test]
+    fn stage_untracked_directory_recursively() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
+        std::fs::create_dir_all(root.join("newdir/sub")).unwrap();
+        std::fs::write(root.join("newdir/a.txt"), "x\n").unwrap();
+        std::fs::write(root.join("newdir/sub/b.txt"), "y\n").unwrap();
+        std::fs::write(root.join("newdir/x.log"), "ignored\n").unwrap();
+
+        let st = stage_sync(root.to_str().unwrap(), "newdir").unwrap();
+        let mut by_path: Vec<(String, String, bool, bool)> = st
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.status.clone(), f.staged, f.worktree))
+            .collect();
+        by_path.sort();
+        assert_eq!(
+            by_path,
+            vec![
+                (
+                    ".gitignore".to_string(),
+                    "untracked".to_string(),
+                    false,
+                    true
+                ),
+                (
+                    "newdir/a.txt".to_string(),
+                    "added".to_string(),
+                    true,
+                    false
+                ),
+                (
+                    "newdir/sub/b.txt".to_string(),
+                    "added".to_string(),
+                    true,
+                    false
+                ),
+            ]
+        );
+        // 已忽略文件不应被加入索引
+        let repo = open_repo(root.to_str().unwrap()).unwrap();
+        let index = repo.index_or_empty().unwrap();
+        assert!(index.entry_by_path(BStr::new("newdir/x.log")).is_none());
+    }
+
+    #[test]
+    fn stage_directory_matches_only_exact_prefix() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("src2")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "x\n").unwrap();
+        std::fs::write(root.join("src2/b.txt"), "y\n").unwrap();
+
+        let st = stage_sync(root.to_str().unwrap(), "src").unwrap();
+        let mut by_path: Vec<(String, String, bool, bool)> = st
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.status.clone(), f.staged, f.worktree))
+            .collect();
+        by_path.sort();
+        assert_eq!(
+            by_path,
+            vec![
+                ("src/a.txt".to_string(), "added".to_string(), true, false),
+                (
+                    "src2/b.txt".to_string(),
+                    "untracked".to_string(),
+                    false,
+                    true
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn unstage_directory_resets_all() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("src/b.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("src/a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("src/b.txt"), "two\n").unwrap();
+
+        let st = stage_sync(root.to_str().unwrap(), "src").unwrap();
+        assert_eq!(st.files.len(), 2);
+        assert!(st.files.iter().all(|f| f.staged));
+        assert!(st.files.iter().all(|f| !f.worktree));
+
+        let st = unstage_sync(root.to_str().unwrap(), "src").unwrap();
+        assert_eq!(st.files.len(), 2);
+        assert!(st.files.iter().all(|f| !f.staged));
+        assert!(st.files.iter().all(|f| f.worktree));
+        assert_eq!(std::fs::read_to_string(root.join("src/a.txt")).unwrap(), "two\n");
+        assert_eq!(std::fs::read_to_string(root.join("src/b.txt")).unwrap(), "two\n");
+    }
+
+    #[test]
+    fn restore_directory_discards_all() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("src/b.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("src/a.txt"), "two\n").unwrap();
+        std::fs::remove_file(root.join("src/b.txt")).unwrap();
+        std::fs::write(root.join("src/c.txt"), "new\n").unwrap();
+
+        let st = restore_sync(root.to_str().unwrap(), "src").unwrap();
+        assert!(st.files.is_empty());
+        assert_eq!(std::fs::read_to_string(root.join("src/a.txt")).unwrap(), "one\n");
+        assert_eq!(std::fs::read_to_string(root.join("src/b.txt")).unwrap(), "one\n");
+        assert!(!root.join("src/c.txt").exists());
+    }
+
+    #[test]
+    fn ignore_directory_appends_slash_pattern() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("newdir")).unwrap();
+        std::fs::write(root.join("newdir/a.txt"), "x\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        let st = ignore_sync(root.to_str().unwrap(), "newdir").unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, ".gitignore");
+        assert!(!st.files[0].staged);
+        assert!(st.files[0].worktree);
+        let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(ig, "/newdir/\n");
+
+        // 重复忽略幂等
+        let _ = ignore_sync(root.to_str().unwrap(), "newdir").unwrap();
+        let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(ig, "/newdir/\n");
+    }
+
+    #[test]
+    fn delete_directory_rejected() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("newdir")).unwrap();
+        std::fs::write(root.join("newdir/a.txt"), "x\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+
+        let err = delete_sync(root.to_str().unwrap(), "newdir").unwrap_err();
+        assert!(err.message.contains("不支持删除目录"));
     }
 }
