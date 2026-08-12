@@ -12,6 +12,8 @@ const cwd = computed(() =>
 );
 /** 芯片显示目录最后一段（根路径原样显示），完整路径放在 tooltip */
 const cwdLabel = computed(() => (cwd.value ? dirLabel(cwd.value) : ""));
+/** 工作目录 tooltip：前缀 + 完整路径 */
+const cwdTip = computed(() => (cwd.value ? `会话工作目录：${cwd.value}` : ""));
 // 会话未开始（新对话态）目录可修改；会话进行中线程目录已固定，只读
 const isNewChat = computed(() => !store.currentThreadId);
 
@@ -72,7 +74,7 @@ function onSettings() {
           v-if="cwd"
           class="brand-cwd"
           :class="{ pickable: isNewChat, readonly: !isNewChat }"
-          v-tooltip="cwd"
+          v-tooltip="cwdTip"
           @click="onCwdClick()"
         >
           <svg viewBox="0 0 24 24">
@@ -83,7 +85,7 @@ function onSettings() {
           {{ cwdLabel }}
         </button>
         <button
-          class="icon-btn"
+          class="icon-btn new-chat-btn"
           :class="{ 'cwd-attach': !!cwd }"
           aria-label="新建会话"
           v-tooltip="'新建会话'"

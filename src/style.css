@@ -630,6 +630,42 @@ select option {
   fill: currentColor;
 }
 
+/* 新建会话：强调色渐变主按钮（独立形态） */
+.icon-btn.new-chat-btn {
+  background: var(--btn-grad);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.icon-btn.new-chat-btn:hover {
+  background: var(--btn-grad);
+  color: #ffffff;
+  filter: brightness(1.08);
+  transform: scale(1.05);
+  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.icon-btn.new-chat-btn:active {
+  transform: scale(0.94);
+}
+
+/* 新建会话：与工作目录黏连胶囊的右半边 */
+.icon-btn.new-chat-btn.cwd-attach {
+  background: var(--btn-grad);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.icon-btn.new-chat-btn.cwd-attach:hover {
+  background: var(--btn-grad);
+  color: #ffffff;
+  filter: brightness(1.08);
+  box-shadow: none;
+}
+
 /* 历史面板 */
 .history-panel {
   flex-shrink: 0;

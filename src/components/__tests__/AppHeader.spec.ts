@@ -80,7 +80,7 @@ describe("AppHeader 工作目录选择", () => {
     const chip = wrapper.find("button.brand-cwd");
     // 芯片只显示文件夹名，完整路径在 tooltip
     expect(chip.text()).toContain("repo");
-    expect(chip.attributes("data-tip")).toBe("D:/repo");
+    expect(chip.attributes("data-tip")).toBe("会话工作目录：D:/repo");
     await chip.trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
     expect(store.newChatCwd).toBe("D:/project");
@@ -90,7 +90,7 @@ describe("AppHeader 工作目录选择", () => {
   it("新会话态 cwd tooltip 显示完整路径且带 pickable 样式", () => {
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
-    expect(chip.attributes("data-tip")).toBe("D:/repo");
+    expect(chip.attributes("data-tip")).toBe("会话工作目录：D:/repo");
     expect(chip.classes()).toContain("pickable");
   });
 
@@ -111,7 +111,7 @@ describe("AppHeader 工作目录选择", () => {
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
     expect(chip.text()).toContain("C:/");
-    expect(chip.attributes("data-tip")).toBe("C:/");
+    expect(chip.attributes("data-tip")).toBe("会话工作目录：C:/");
   });
 
   it("会话进行中点击 cwd 无任何行为（只读展示）", async () => {
@@ -121,7 +121,7 @@ describe("AppHeader 工作目录选择", () => {
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
     expect(chip.text()).toContain("thread");
-    expect(chip.attributes("data-tip")).toBe("D:/thread");
+    expect(chip.attributes("data-tip")).toBe("会话工作目录：D:/thread");
     expect(chip.classes()).toContain("readonly");
     expect(chip.classes()).not.toContain("pickable");
     mockedInvoke.mockResolvedValue(undefined);
