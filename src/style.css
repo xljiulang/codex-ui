@@ -1016,6 +1016,7 @@ select option {
 }
 
 .git-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1024,13 +1025,178 @@ select option {
 }
 
 .git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 140px;
+  padding: 2px 5px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--text-bright);
   overflow: hidden;
+}
+
+.git-branch:hover {
+  background: var(--bg-hover);
+}
+
+.git-branch:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.git-branch .git-branch-name-text {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 130px;
+}
+
+.git-branch svg {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+/* 分支管理下拉弹层 */
+.git-branch-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 12px;
+  z-index: 300;
+  width: 210px;
+  max-width: calc(100% - 24px);
+  background: var(--menu-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(var(--overlay-rgb), 0.05);
+  backdrop-filter: blur(14px);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  animation: menu-in 0.12s ease;
+}
+
+.git-branch-menu-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.git-branch-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-bright);
+}
+
+.git-branch-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.git-branch-menu-item.current {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.git-branch-check {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+}
+
+.git-branch-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-branch-delete {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.git-branch-delete:hover {
+  color: #e06666;
+  background: rgba(224, 102, 102, 0.14);
+}
+
+.git-branch-delete:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.git-branch-menu-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.git-branch-create {
+  display: flex;
+  gap: 6px;
+  padding: 6px 2px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.git-branch-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+}
+
+.git-branch-input:focus {
+  border-color: var(--accent);
+}
+
+.git-branch-create-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.git-branch-create-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .git-count {
