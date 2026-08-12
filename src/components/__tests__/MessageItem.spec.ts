@@ -463,7 +463,7 @@ describe("用户消息中的图片附件", () => {
     expect(wrapper.find(".msg-user .md strong").text()).toBe("加粗");
   });
 
-  it("用户消息不显示时间戳，助手最终答复显示时间戳", () => {
+  it("用户消息与助手最终答复都显示时间戳", () => {
     const ts = new Date(2026, 7, 9, 14, 5).getTime();
     const user = mount(MessageItem, {
       props: {
@@ -475,7 +475,8 @@ describe("用户消息中的图片附件", () => {
         } as ThreadItem,
       },
     });
-    expect(user.find(".msg-time").exists()).toBe(false);
+    expect(user.find(".msg-time").exists()).toBe(true);
+    expect(user.find(".msg-time").text()).toBe("14:05");
 
     const agent = mount(MessageItem, {
       props: {
@@ -491,6 +492,49 @@ describe("用户消息中的图片附件", () => {
     });
     expect(agent.find(".msg-time").exists()).toBe(true);
     expect(agent.find(".msg-time").text()).toBe("14:05");
+  });
+
+  it("仅最终答复（非流式）包 agent-final 卡片，流式与 commentary 不包", async () => {
+    const final = mount(MessageItem, {
+      props: {
+        item: {
+          id: "f1",
+          type: "agentMessage",
+          phase: "final_answer",
+          streaming: false,
+          text: "最终答案",
+        } as ThreadItem,
+      },
+    });
+    await flushPromises();
+    expect(final.find(".agent-final").exists()).toBe(true);
+    expect(final.find(".agent-final").text()).toContain("最终答案");
+
+    const streaming = mount(MessageItem, {
+      props: {
+        item: {
+          id: "s1",
+          type: "agentMessage",
+          phase: "final_answer",
+          streaming: true,
+          text: "正在生成…",
+        } as ThreadItem,
+      },
+    });
+    expect(streaming.find(".agent-final").exists()).toBe(false);
+
+    const commentary = mount(MessageItem, {
+      props: {
+        item: {
+          id: "c1",
+          type: "agentMessage",
+          phase: "commentary",
+          streaming: false,
+          text: "中间过程",
+        } as ThreadItem,
+      },
+    });
+    expect(commentary.find(".agent-final").exists()).toBe(false);
   });
 
   it("图片点击打开灯箱，Esc 关闭", async () => {

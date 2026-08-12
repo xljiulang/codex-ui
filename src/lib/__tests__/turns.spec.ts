@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+import { buildTurns, createTurnsBuilder } from "../turns";
+import type { ThreadItem } from "../types";
+
+function msg(id: string, type: string, ts?: number): ThreadItem {
+  return { id, type, ...(ts === undefined ? {} : { startedAtMs: ts }) } as ThreadItem;
+}
+
+function formatDay(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+describe("buildTurns 回合分组", () => {
+  it("userMessage 起始新回合，后续条目归入当前回合", () => {
+    const turns = buildTurns(
+      [
+        msg("u1", "userMessage"),
+        msg("r1", "reasoning"),
+        msg("t1", "commandExecution"),
+        msg("a1", "agentMessage"),
+        msg("u2", "userMessage"),
+        msg("a2", "agentMessage"),
+      ],
+      formatDay,
+    );
+    expect(turns.map((t) => t.key)).toEqual(["turn-u1", "turn-u2"]);
+    expect(turns[0].rows.map((r) => r.key)).toEqual(["u1", "r1", "t1", "a1"]);
+    expect(turns[1].rows.map((r) => r.key)).toEqual(["u2", "a2"]);
+  });
+
+  it("首个用户消息之前的条目归入单一伪回合", () => {
+    const turns = buildTurns(
+      [
+        msg("a0", "agentMessage"),
+        msg("t0", "fileChange"),
+        msg("u1", "userMessage"),
+        msg("a1", "agentMessage"),
+      ],
+      formatDay,
+    );
+    expect(turns.map((t) => t.key)).toEqual(["pre-a0", "turn-u1"]);
+    expect(turns[0].rows.map((r) => r.key)).toEqual(["a0", "t0"]);
+    expect(turns[1].rows.map((r) => r.key)).toEqual(["u1", "a1"]);
+  });
+
+  it("连续 userMessage 各自成回合", () => {
+    const turns = buildTurns(
+      [msg("u1", "userMessage"), msg("u2", "userMessage"), msg("a1", "agentMessage")],
+      formatDay,
+    );
+    expect(turns.map((t) => t.key)).toEqual(["turn-u1", "turn-u2"]);
+    expect(turns[1].rows.map((r) => r.key)).toEqual(["u2", "a1"]);
+  });
+
+  it("空列表返回空回合", () => {
+    expect(buildTurns([], formatDay)).toEqual([]);
+  });
+
+  it("跨天分隔线插入所属回合：首个用户回合与 pre 回合各带一条", () => {
+    const day1 = new Date(2026, 7, 9, 10, 0).getTime();
+    const day2 = new Date(2026, 7, 10, 9, 0).getTime();
+    const turns = buildTurns(
+      [
+        msg("a0", "agentMessage", day1),
+        msg("u1", "userMessage", day2),
+        msg("a1", "agentMessage", day2),
+      ],
+      formatDay,
+    );
+    expect(turns[0].rows.map((r) => r.kind)).toEqual(["sep", "msg"]);
+    expect(turns[0].rows[0]).toMatchObject({ kind: "sep", date: "2026-8-9" });
+    expect(turns[1].rows.map((r) => r.kind)).toEqual(["sep", "msg", "msg"]);
+    expect(turns[1].rows[0]).toMatchObject({ kind: "sep", date: "2026-8-10" });
+  });
+
+  it("同一天不重复插入分隔线，缺少时间戳时不插入", () => {
+    const day1 = new Date(2026, 7, 9, 10, 0).getTime();
+    const turns = buildTurns(
+      [
+        msg("u1", "userMessage", day1),
+        msg("a1", "agentMessage", day1),
+        msg("a2", "agentMessage"),
+      ],
+      formatDay,
+    );
+    expect(turns.flatMap((t) => t.rows).filter((r) => r.kind === "sep")).toHaveLength(1);
+  });
+
+  it("builder 行对象按 key 复用，未变化条目引用不变", () => {
+    const builder = createTurnsBuilder(formatDay);
+    const items = [msg("u1", "userMessage"), msg("a1", "agentMessage")];
+    const first = builder.build(items);
+    const second = builder.build(items);
+    expect(first[0].rows[1]).toBe(second[0].rows[1]);
+    // 切换会话后清缓存
+    builder.clear();
+    const third = builder.build(items);
+    expect(third[0].rows[1]).not.toBe(first[0].rows[1]);
+  });
+});

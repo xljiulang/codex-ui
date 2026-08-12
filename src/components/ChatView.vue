@@ -4,14 +4,10 @@ import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import MessageItem from "./MessageItem.vue";
 import { currentItems, store } from "../composables/useCodex";
-import type { ThreadItem } from "../lib/types";
+import { createTurnsBuilder, type Turn } from "../lib/turns";
 
 const scroller = ref<HTMLElement | null>(null);
 const items = computed(() => currentItems());
-
-type Row =
-  | { key: string; kind: "sep"; date: string }
-  | { key: string; kind: "msg"; item: ThreadItem };
 
 function formatDay(ts: number): string {
   const d = new Date(ts);
@@ -21,41 +17,13 @@ function formatDay(ts: number): string {
     : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-// 跨天时插入日期分隔线（时间戳缺失的消息不产生分隔）；每行带稳定 key
-// 行对象按 key 缓存复用，未变化的消息不再重复分配（降低大对话下的 GC 抖动）
-const rowCache = new Map<string, Row>();
+// 按回合分组：userMessage 起始新回合，行对象按 key 缓存复用
+const turnsBuilder = createTurnsBuilder(formatDay);
 watch(
   () => store.currentThreadId,
-  () => rowCache.clear(),
+  () => turnsBuilder.clear(),
 );
-const rows = computed<Row[]>(() => {
-  const out: Row[] = [];
-  let lastDay = "";
-  let sepCount = 0;
-  for (const item of items.value) {
-    const ts = item.startedAtMs as number | undefined;
-    if (typeof ts === "number") {
-      const day = formatDay(ts);
-      if (day !== lastDay) {
-        const key = `sep-${day}-${sepCount++}`;
-        let row = rowCache.get(key);
-        if (!row) {
-          row = { key, kind: "sep", date: day };
-          rowCache.set(key, row);
-        }
-        out.push(row);
-        lastDay = day;
-      }
-    }
-    let row = rowCache.get(item.id);
-    if (!row || row.kind !== "msg" || row.item !== item) {
-      row = { key: item.id, kind: "msg", item };
-      rowCache.set(item.id, row);
-    }
-    out.push(row);
-  }
-  return out;
-});
+const turns = computed<Turn[]>(() => turnsBuilder.build(items.value));
 
 // 是否吸附在底部：用户上滑查看历史时暂停自动滚动
 const stickToBottom = ref(true);
@@ -185,9 +153,13 @@ onBeforeUnmount(() => {
         <div v-if="items.length === 0" class="chat-empty">
           <EmptyState :busy="store.turnActive || store.busy" />
         </div>
-        <template v-for="row in rows" :key="row.key">
-          <div v-if="row.kind === 'sep'" class="date-sep">{{ row.date }}</div>
-          <MessageItem v-else :item="row.item" />
+        <template v-for="turn in turns" :key="turn.key">
+          <section class="turn">
+            <template v-for="row in turn.rows" :key="row.key">
+              <div v-if="row.kind === 'sep'" class="date-sep">{{ row.date }}</div>
+              <MessageItem v-else :item="row.item" />
+            </template>
+          </section>
         </template>
         <div
           v-if="store.turnActive && !hasActiveWork && items.length"

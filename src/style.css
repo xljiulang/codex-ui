@@ -1033,6 +1033,26 @@ select option {
   justify-content: center;
 }
 
+/* 回合分组：用户消息起始新回合，组内间距统一由 flex gap 控制 */
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.turn + .turn {
+  margin-top: 24px;
+}
+
+/* 回合内条目间距交给 gap，中和各自 legacy 底部 margin */
+.turn .msg {
+  margin-bottom: 0;
+}
+
+.turn .tool-card {
+  margin-bottom: 0;
+}
+
 /* 消息 */
 .msg {
   margin-bottom: 16px;
@@ -1592,24 +1612,6 @@ select option {
   border-bottom-color: var(--border);
 }
 
-/* “命令 / 文件变更”卡片去线条：去掉外框、展开分隔线与内部框线，其余工具卡保持原样 */
-.tool-card--minimal {
-  border: none;
-}
-
-.tool-card--minimal .tool-card-header {
-  border-bottom-color: transparent;
-}
-
-.tool-card--minimal .tool-output,
-.tool-card--minimal .diff-view {
-  border: none;
-}
-
-.tool-card--minimal .tool-command .copy-btn {
-  border: none;
-}
-
 .card-body-enter-active,
 .card-body-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -1899,6 +1901,21 @@ select option {
   color: var(--text-faint);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
+}
+
+.reasoning-preview {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  user-select: none;
+}
+
+.reasoning-preview:hover {
+  color: var(--text-bright);
 }
 
 .reasoning-content {
@@ -3210,6 +3227,16 @@ body.resizing-editor {
 .msg-agent .msg-time {
   text-align: left;
 }
+
+/* 助手最终答复卡片：与工具卡同语言，左侧强调条突出“这一轮的回答” */
+.agent-final {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 12px;
+  background: rgba(var(--accent-rgb), 0.04);
+  padding: 12px 14px;
+}
+
 .date-sep {
   display: flex;
   align-items: center;
@@ -3236,7 +3263,8 @@ body.resizing-editor {
   opacity: 0;
   transition: opacity 0.12s ease;
 }
-.msg-agent:hover .msg-actions {
+.msg-agent:hover .msg-actions,
+.msg-agent:focus-within .msg-actions {
   opacity: 1;
 }
 .msg-agent .msg-actions {

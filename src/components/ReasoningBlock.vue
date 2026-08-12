@@ -34,6 +34,13 @@ const text = computed(() => {
   return parts.join("\n");
 });
 
+// 折叠态单行预览：取首行非空内容
+const previewLine = computed(() => {
+  const t = shownText.value;
+  if (!t) return "";
+  return t.split("\n").find((l) => l.trim())?.trim() ?? "";
+});
+
 // 流式期间最多每 80ms 刷新一次内容，结束时立即刷净
 const { ref: shownText, flush: flushText } = useThrottledRef(text, 80);
 watch(
@@ -65,6 +72,14 @@ watch(
       <span>{{ open ? "收起思考过程" : "显示思考过程" }}</span>
       <span v-if="timeLabel" class="reasoning-time">{{ timeLabel }}</span>
     </button>
+    <div
+      v-if="!open && previewLine"
+      class="reasoning-preview"
+      title="点击展开思考过程"
+      @click="open = true"
+    >
+      {{ previewLine }}
+    </div>
     <div v-if="open" class="reasoning-content">{{ shownText }}</div>
   </div>
 </template>

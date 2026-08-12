@@ -71,6 +71,42 @@ describe("ChatView 日期分隔线", () => {
     expect(wrapper.findAll(".msg-stub")).toHaveLength(3);
   });
 
+  it("按回合分组渲染：userMessage 起始新回合，历史续接归入伪回合", () => {
+    mockedItems.mockReturnValue([
+      { id: "a0", type: "agentMessage", text: "历史" },
+      { id: "u1", type: "userMessage", text: "问题1" },
+      { id: "r1", type: "reasoning", content: ["思考"] },
+      { id: "a1", type: "agentMessage", text: "回答1" },
+      { id: "u2", type: "userMessage", text: "问题2" },
+      { id: "a2", type: "agentMessage", text: "回答2" },
+    ] as ThreadItem[]);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: {
+            props: ["item"],
+            template: "<div class='msg-stub'>{{ item.type }}</div>",
+          },
+        },
+      },
+    });
+    const turns = wrapper.findAll(".turn");
+    expect(turns).toHaveLength(3);
+    expect(turns[0].findAll(".msg-stub").map((x) => x.text())).toEqual([
+      "agentMessage",
+    ]);
+    expect(turns[1].findAll(".msg-stub").map((x) => x.text())).toEqual([
+      "userMessage",
+      "reasoning",
+      "agentMessage",
+    ]);
+    expect(turns[2].findAll(".msg-stub").map((x) => x.text())).toEqual([
+      "userMessage",
+      "agentMessage",
+    ]);
+  });
+
   it("无消息时显示空状态", () => {
     mockedItems.mockReturnValue([]);
     const wrapper = mount(ChatView, {

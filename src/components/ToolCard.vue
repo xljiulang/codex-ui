@@ -325,8 +325,6 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
     class="tool-card"
     :class="{
       expanded: effectiveExpanded,
-      'tool-card--minimal':
-        type === 'commandExecution' || type === 'fileChange',
     }"
   >
     <div class="tool-card-header" @click="expanded = !expanded">

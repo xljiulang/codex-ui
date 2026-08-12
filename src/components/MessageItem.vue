@@ -152,6 +152,7 @@ const time = computed(() =>
     : "",
 );
 const isFinalAnswer = computed(() => props.item.phase === "final_answer");
+const memoryList = computed(() => memoryEntries(props.item.memoryCitation));
 
 // ---------- 复制 / 重试 ----------
 async function copyText(t: string): Promise<boolean> {
@@ -242,7 +243,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           <div v-else class="img-fallback">图片加载失败</div>
         </template>
       </div>
-      <template v-for="(c, i) in (item.content as unknown[]) ?? []" :key="i">
+        <template v-for="(c, i) in (item.content as unknown[]) ?? []" :key="i">
         <template v-if="partType(c) === 'localImage'">
           <!-- 图片已渲染到附件区 -->
         </template>
@@ -277,6 +278,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           kind="file"
         />
       </template>
+      <span v-if="time" class="msg-time">{{ time }}</span>
     </div>
   </div>
   <div v-else-if="item.type === 'agentMessage' || item.type === 'plan'" class="msg msg-agent">
@@ -293,20 +295,36 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
         {{ copiedAgent ? "已复制" : "复制" }}
       </button>
     </div>
-    <MarkdownText :text="String(item.text ?? '')" :streaming="item.streaming === true" />
-    <span v-if="item.streaming === true" class="stream-cursor"></span>
-    <span v-if="isFinalAnswer && time" class="msg-time">{{ time }}</span>
-    <div v-if="memoryEntries(item.memoryCitation).length" class="memory-citation">
-      <span class="memory-citation-title">记忆引用：</span>
-      <span
-        v-for="(e, i) in memoryEntries(item.memoryCitation)"
-        :key="i"
-        class="memory-citation-entry"
-      >
-        {{ e.path }}:{{ e.lineStart }}-{{ e.lineEnd
-        }}{{ e.note ? `（${e.note}）` : "" }}
-      </span>
+    <div v-if="isFinalAnswer && !item.streaming" class="agent-final">
+      <MarkdownText :text="String(item.text ?? '')" />
+      <span v-if="time" class="msg-time">{{ time }}</span>
+      <div v-if="memoryList.length" class="memory-citation">
+        <span class="memory-citation-title">记忆引用：</span>
+        <span
+          v-for="(e, i) in memoryList"
+          :key="i"
+          class="memory-citation-entry"
+        >
+          {{ e.path }}:{{ e.lineStart }}-{{ e.lineEnd
+          }}{{ e.note ? `（${e.note}）` : "" }}
+        </span>
+      </div>
     </div>
+    <template v-else>
+      <MarkdownText :text="String(item.text ?? '')" :streaming="item.streaming === true" />
+      <span v-if="item.streaming === true" class="stream-cursor"></span>
+      <div v-if="memoryList.length" class="memory-citation">
+        <span class="memory-citation-title">记忆引用：</span>
+        <span
+          v-for="(e, i) in memoryList"
+          :key="i"
+          class="memory-citation-entry"
+        >
+          {{ e.path }}:{{ e.lineStart }}-{{ e.lineEnd
+          }}{{ e.note ? `（${e.note}）` : "" }}
+        </span>
+      </div>
+    </template>
   </div>
   <div v-else-if="item.type === 'reasoning'" class="msg">
     <ReasoningBlock :item="item" />

@@ -46,4 +46,22 @@ describe("ReasoningBlock 完整展示", () => {
     );
     expect(wrapper.find(".reasoning-content").exists()).toBe(true);
   });
+
+  it("折叠态显示首行预览，点击预览展开", async () => {
+    const wrapper = mount(ReasoningBlock, {
+      props: { item: reasoningItem(3, false) },
+    });
+    await flushPromises();
+    const preview = wrapper.find(".reasoning-preview");
+    expect(preview.exists()).toBe(true);
+    expect(preview.text()).toBe("第 1 行思考内容");
+    await preview.trigger("click");
+    expect(wrapper.find(".reasoning-toggle").attributes("aria-expanded")).toBe(
+      "true",
+    );
+    expect(wrapper.find(".reasoning-content").text()).toContain(
+      "第 3 行思考内容",
+    );
+    expect(wrapper.find(".reasoning-preview").exists()).toBe(false);
+  });
 });
