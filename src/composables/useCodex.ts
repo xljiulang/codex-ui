@@ -45,6 +45,13 @@ interface ModelInfo {
   defaultReasoningEffort: string;
 }
 
+/** 计划模式回合完成后的“计划已就绪”确认弹窗数据（纯前端 UX，非协议交互） */
+export interface PlanPrompt {
+  threadId: string;
+  turnId: string;
+  planText: string;
+}
+
 /** @ 菜单中展示的插件条目（plugin/list 归一化结果） */
 export interface PluginItem {
   id: string;
@@ -129,6 +136,8 @@ export const store = reactive({
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,
+  /** 计划模式回合完成后待用户确认的“计划已就绪”弹窗 */
+  planPrompt: null as PlanPrompt | null,
 });
 
 let unlisteners: UnlistenFn[] = [];
@@ -1087,6 +1096,37 @@ export async function sendPrompt(text: string, flip = false) {
   }
 }
 
+/** “待在计划”：关闭“计划已就绪”弹窗，保持计划模式，不发消息（Esc 同此行为） */
+export function dismissPlanPrompt() {
+  store.planPrompt = null;
+}
+
+/** “退出计划模式”：切回执行模式并关闭弹窗，不发消息 */
+export function exitPlanMode() {
+  store.planPrompt = null;
+  store.taskMode = "execute";
+}
+
+/** “执行计划”：仿 VS Code —— 发送 `PLEASE IMPLEMENT THIS PLAN:` 消息并切到执行模式 */
+export async function executePlan() {
+  const prompt = store.planPrompt;
+  if (!prompt) return;
+  store.planPrompt = null;
+  // 先切模式，使本轮 turn/start 显式携带 collaborationMode default（计划模式粘滞，需显式退出）
+  store.taskMode = "execute";
+  const text = `PLEASE IMPLEMENT THIS PLAN:\n${prompt.planText}`;
+  try {
+    if (store.currentThreadId) {
+      await continueTurn(text, []);
+    } else {
+      await newChat(text, []);
+    }
+  } catch (e) {
+    setToast(toastError(e));
+    store.busy = false;
+  }
+}
+
 export async function newEmptyChat() {
   // 会话进行中切换：先让用户确认（确认才停止旧回合并切换）
   if (store.turnActive && store.currentThreadId) {
@@ -1317,6 +1357,7 @@ export async function wireEvents() {
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程事件不进入全局状态
       store.turnActive = true;
       store.turnInterrupted = false;
+      store.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
       // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
       // 事件 id 仅在响应缺失时兜底。
       if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
@@ -1368,6 +1409,30 @@ export async function wireEvents() {
       if (store.taskMode === "goal" && store.goalTurnId && p.turn?.id === store.goalTurnId) {
         store.goalTurnId = null;
         await clearGoal();
+      }
+      // 计划模式：回合正常完成且产出 plan 内容 → 弹出“计划已就绪”确认（仿 VS Code/CLI，
+      // 纯客户端 UX：协议层没有计划确认交互，由客户端在计划 item 完成后自行询问）
+      if (
+        store.taskMode === "plan" &&
+        !store.turnInterrupted &&
+        store.followupQueue.length === 0 &&
+        p.turn?.id &&
+        tid &&
+        store.planPrompt?.turnId !== p.turn.id
+      ) {
+        const threadItems = store.itemsByThread[tid] ?? [];
+        let planText = "";
+        for (let i = threadItems.length - 1; i >= 0; i--) {
+          const it = threadItems[i];
+          if (it?.type === "plan" && typeof it.text === "string" && it.text.trim()) {
+            planText = it.text;
+            break;
+          }
+        }
+        if (planText) {
+          store.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
+          if (store.settings.sound_enabled) playNotificationSound();
+        }
       }
       await refreshThreads();
       // 处理“加入队列”的跟进消息

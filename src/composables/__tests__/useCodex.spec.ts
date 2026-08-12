@@ -28,9 +28,12 @@ import {
   __resetPinnedSectionForTest,
   __resetTitleHelperCapabilityForTest,
   autoTitleThread,
+  dismissPlanPrompt,
   disposeEvents,
   ensureSkills,
   ensureThreadPlugins,
+  executePlan,
+  exitPlanMode,
   interrupt,
   newEmptyChat,
   openThread,
@@ -1209,6 +1212,166 @@ describe("消息变更计数器与回合结束清扫", () => {
 
     expect(store.itemsByThread["t1"][0].status).toBe("canceled");
     expect(store.activeWorkByThread["t1"]).toBe(0);
+  });
+});
+
+describe("计划完成确认弹窗", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，确保本组用例重新注册监听
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.currentThreadId = "t1";
+    store.resumedThreadId = "t1";
+    store.taskMode = "plan";
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentTurnId = null;
+    store.followupQueue = [];
+    store.planPrompt = null;
+    store.itemsByThread = {};
+  });
+
+  it("计划模式回合正常完成且含 plan 内容 → 弹出计划确认", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "# 修复方案\n1. 改代码", status: "completed" },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.planPrompt).not.toBeNull(), {
+      timeout: 3000,
+      interval: 20,
+    });
+
+    expect(store.planPrompt).toEqual({
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 修复方案\n1. 改代码",
+    });
+  });
+
+  it("取最后一条 plan item 的文本", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "旧计划", status: "completed" },
+      { id: "p2", type: "plan", text: "新计划", status: "completed" },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.planPrompt?.planText).toBe("新计划"), {
+      timeout: 3000,
+      interval: 20,
+    });
+  });
+
+  it("中断回合不弹窗", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "# 计划", status: "completed" },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "interrupted" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
+    expect(store.planPrompt).toBeNull();
+  });
+
+  it("回合内无 plan item 不弹窗", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "m1", type: "agentMessage", text: "没有计划", status: "completed" },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
+    expect(store.planPrompt).toBeNull();
+  });
+
+  it("非计划模式回合完成不弹窗", async () => {
+    await wireEvents();
+    store.taskMode = "execute";
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "# 计划", status: "completed" },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
+    expect(store.planPrompt).toBeNull();
+  });
+
+  it("新回合开始（turn/started）关闭计划确认弹窗", async () => {
+    await wireEvents();
+    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+
+    fireListen("turn/started", { threadId: "t1", turn: { id: "turn-2" } });
+    expect(store.planPrompt).toBeNull();
+  });
+
+  it("executePlan 发送 PLEASE IMPLEMENT THIS PLAN 消息并切到执行模式", async () => {
+    await wireEvents();
+    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 修复\n1. 步骤" };
+    store.currentModel = "gpt-5.2-codex"; // 使 turn/start 携带 collaborationMode
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await executePlan();
+
+    expect(store.taskMode).toBe("execute");
+    expect(store.planPrompt).toBeNull();
+    const call = mockedInvoke.mock.calls.find(([c]) => c === "turn_start");
+    expect(call).toBeTruthy();
+    const params = (call![1] as { params: Record<string, unknown> }).params;
+    expect(params.threadId).toBe("t1");
+    expect(params.collaborationMode).toMatchObject({ mode: "default" });
+    const input = params.input as { type: string; text: string }[];
+    expect(input[0].text.startsWith("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤")).toBe(true);
+  });
+
+  it("dismissPlanPrompt 保持计划模式、exitPlanMode 切回执行", () => {
+    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+    dismissPlanPrompt();
+    expect(store.planPrompt).toBeNull();
+    expect(store.taskMode).toBe("plan");
+
+    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+    exitPlanMode();
+    expect(store.planPrompt).toBeNull();
+    expect(store.taskMode).toBe("execute");
   });
 });
 

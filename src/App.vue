@@ -5,6 +5,7 @@ import RightPanel from "./components/RightPanel.vue";
 import ChatView from "./components/ChatView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
+import PlanDialog from "./components/PlanDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
@@ -49,6 +50,7 @@ onBeforeUnmount(() => {
     </div>
     <SettingsView v-if="store.showSettings" />
     <InteractionDialog />
+    <PlanDialog />
     <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
     <TooltipLayer />
