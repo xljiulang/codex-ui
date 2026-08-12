@@ -91,6 +91,8 @@ export const store = reactive({
   itemsByThread: {} as Record<string, ThreadItem[]>,
   // 每个线程“进行中工作”计数（流式文本/进行中工具），避免渲染时全量扫描
   activeWorkByThread: {} as Record<string, number>,
+  // 任意消息变更（新增/完成/流式增量）都会递增，供吸底滚动等做 O(1) 变更感知
+  itemsRev: 0,
   turnActive: false,
   turnInterrupted: false,
   currentTurnId: null as string | null,
@@ -249,6 +251,7 @@ function upsertItem(threadId: string, item: ThreadItem) {
     arr.push(item);
   }
   if (isActiveItem(merged)) bumpActive(threadId, 1);
+  store.itemsRev++;
 }
 
 function findItem(threadId: string, itemId: string): ThreadItem | undefined {
@@ -1337,6 +1340,36 @@ export async function wireEvents() {
       store.turnActive = false;
       store.turnInterrupted = p.turn?.status === "interrupted";
       store.currentTurnId = null;
+      // 回合结束：把仍处于进行中/流式状态的 item 收敛为终态并补算耗时，
+      // 避免手动停止后最后一张工具卡的实时计时持续跳动
+      const tid = p.threadId ?? store.currentThreadId;
+      if (tid) {
+        const threadItems = store.itemsByThread[tid] ?? [];
+        const interrupted = store.turnInterrupted;
+        const now = Date.now();
+        let touched = false;
+        for (const it of threadItems) {
+          const s = String(it.status ?? "");
+          if (
+            it.streaming === true ||
+            s === "in_progress" ||
+            s === "inProgress" ||
+            s === "pending" ||
+            s === "started"
+          ) {
+            if (isActiveItem(it)) bumpActive(tid, -1);
+            it.streaming = false;
+            it.status = interrupted ? "interrupted" : "canceled";
+            if (typeof it.durationMs !== "number") {
+              const started =
+                typeof it.startedAtMs === "number" ? (it.startedAtMs as number) : now;
+              it.durationMs = now - started;
+            }
+            touched = true;
+          }
+        }
+        if (touched) store.itemsRev++;
+      }
       // 目标模式：用户回合完成/被终止 → 清除目标并退回执行
       if (store.taskMode === "goal" && store.goalTurnId && p.turn?.id === store.goalTurnId) {
         store.goalTurnId = null;
@@ -1413,6 +1446,7 @@ export async function wireEvents() {
         item.streaming = true;
         bumpActive(p.threadId, 1);
       }
+      store.itemsRev++;
     }),
   );
 
@@ -1425,6 +1459,7 @@ export async function wireEvents() {
         upsertItem(p.threadId, item);
       }
       item.aggregatedOutput = (item.aggregatedOutput ?? "") + p.delta;
+      store.itemsRev++;
     }),
   );
 
@@ -1451,6 +1486,7 @@ export async function wireEvents() {
         content.push(p.delta);
       }
       item.content = content;
+      store.itemsRev++;
     }),
   );
 

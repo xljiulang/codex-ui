@@ -64,34 +64,6 @@ function onScroll() {
   stickToBottom.value = dist < 60;
 }
 
-/** 最后一条消息的变更指纹：只跟踪末尾消息的流式/状态与内容增长，历史消息变更零开销 */
-function contentSize(it: ThreadItem): number {
-  let n = 0;
-  const add = (v: unknown) => {
-    if (typeof v === "string") n += v.length;
-    else if (typeof v === "number") n += v;
-    else if (Array.isArray(v)) for (const x of v) add(x);
-  };
-  // 覆盖普通回复 text、命令输出 aggregatedOutput/output、思考过程 content/summary
-  add(it.text);
-  add(it.aggregatedOutput);
-  add(it.output);
-  add(it.content);
-  add(it.summary);
-  return n;
-}
-
-const lastItemKey = computed(() => {
-  const it = items.value[items.value.length - 1];
-  if (!it) return "";
-  return [
-    it.id,
-    it.streaming ? 1 : 0,
-    String(it.status ?? ""),
-    contentSize(it),
-  ].join(":");
-});
-
 // 吸底滚动合并到每帧一次：流式高频变更时避免每次都强制整块布局
 let scrollRaf: number | undefined;
 function scheduleScroll() {
@@ -109,20 +81,29 @@ function jumpToBottom() {
 }
 
 watch(
-  [() => items.value.length, lastItemKey],
+  [() => items.value.length, () => store.itemsRev],
   () => {
     scheduleScroll();
   },
 );
 
+// DOM 高度兜底：worker 渲染 markdown / 命令输出 HTML 落地晚于数据变更，
+// 结构变化时同样触发吸底（rAF 合并，不会逐节点布局）
+let scrollObserver: MutationObserver | undefined;
 onMounted(() => {
   stickToBottom.value = true;
+  if (scroller.value && typeof MutationObserver !== "undefined") {
+    scrollObserver = new MutationObserver(() => scheduleScroll());
+    scrollObserver.observe(scroller.value, { childList: true, subtree: true });
+  }
   scheduleScroll();
 });
 
 onBeforeUnmount(() => {
   if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
   scrollRaf = undefined;
+  scrollObserver?.disconnect();
+  scrollObserver = undefined;
   // 避免切换视图后残留滚动状态
   stickToBottom.value = true;
 });

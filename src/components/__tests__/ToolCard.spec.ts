@@ -48,6 +48,21 @@ describe("ToolCard 实时耗时", () => {
     expect(wrapper.text()).not.toContain("进行中");
   });
 
+  it("中断后显示已中断与固定耗时，不再实时跳动", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "interrupted",
+          durationMs: 1_234,
+          exitCode: null,
+        }),
+      },
+    });
+    expect(wrapper.text()).toContain("已中断");
+    expect(wrapper.text()).toContain("耗时 1.2s");
+    expect(wrapper.text()).not.toMatch(/\d\d:\d\d\.\d/);
+  });
+
   it("失败状态显示退出码", async () => {
     const wrapper = mount(
       ToolCard,

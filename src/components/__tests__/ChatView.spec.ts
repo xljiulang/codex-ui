@@ -11,6 +11,7 @@ vi.mock("../../composables/useCodex", () => ({
     turnInterrupted: false,
     currentThreadId: null,
     activeWorkByThread: {},
+    itemsRev: 0,
   }),
 }));
 
@@ -154,7 +155,7 @@ describe("ChatView 日期分隔线", () => {
     expect(scroller.scrollTop).toBe(1000);
   });
 
-  it("修改历史消息不再触发吸底滚动", async () => {
+  it("任意消息变更（itemsRev 增长）时吸底滚动", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
@@ -174,7 +175,33 @@ describe("ChatView 日期分隔线", () => {
       value: 1000,
     });
     scroller.scrollTop = 0;
-    arr[0].text = "changed";
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
+  it("上滑暂停后 itemsRev 增长不再滚动", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+      { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    // 模拟用户上滑：滚动距离超过阈值后 stickToBottom 变 false
+    scroller.dispatchEvent(new Event("scroll"));
+    store.itemsRev++;
     await nextTick();
     expect(scroller.scrollTop).toBe(0);
   });
@@ -204,6 +231,7 @@ describe("ChatView 日期分隔线", () => {
     });
     scroller.scrollTop = 0;
     arr[0].text = "x appended";
+    store.itemsRev++;
     await nextTick();
     expect(scroller.scrollTop).toBe(1000);
   });
@@ -233,7 +261,35 @@ describe("ChatView 日期分隔线", () => {
     });
     scroller.scrollTop = 0;
     arr[0].content = ["第一段", "第二段"];
+    store.itemsRev++;
     await nextTick();
     expect(scroller.scrollTop).toBe(1000);
+  });
+
+  it("DOM 结构变化（如 worker 渲染落地）时吸底滚动", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+    // 模拟 markdown/输出 HTML 直接插入导致的 DOM 高度增长
+    scroller.appendChild(document.createElement("div"));
+    await vi.waitFor(() => expect(scroller.scrollTop).toBe(1000), {
+      timeout: 2000,
+      interval: 10,
+    });
   });
 });

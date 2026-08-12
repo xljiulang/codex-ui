@@ -16,6 +16,7 @@ import {
   __resetPinnedSectionForTest,
   __resetTitleHelperCapabilityForTest,
   autoTitleThread,
+  disposeEvents,
   ensureSkills,
   ensureThreadPlugins,
   interrupt,
@@ -1035,5 +1036,133 @@ describe("autoTitleThread 临时线程标题总结", () => {
       timeout: 3000,
       interval: 20,
     });
+  });
+});
+
+describe("消息变更计数器与回合结束清扫", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，确保本组用例重新注册监听
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.itemsRev = 0;
+    store.currentThreadId = "t1";
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentTurnId = null;
+    store.activeWorkByThread = {};
+  });
+
+  it("流式增量事件（文本/命令输出/思考过程）递增 itemsRev", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "a1", type: "agentMessage", text: "", streaming: true },
+      {
+        id: "c1",
+        type: "commandExecution",
+        command: "",
+        status: "in_progress",
+        aggregatedOutput: "",
+      },
+      { id: "r1", type: "reasoning", content: [] },
+    ];
+
+    fireListen("item/agentMessage/delta", {
+      threadId: "t1",
+      itemId: "a1",
+      delta: "你好",
+    });
+    expect(store.itemsRev).toBe(1);
+
+    fireListen("item/commandExecution/outputDelta", {
+      threadId: "t1",
+      itemId: "c1",
+      delta: "out",
+    });
+    expect(store.itemsRev).toBe(2);
+
+    fireListen("item/reasoning/textDelta", {
+      threadId: "t1",
+      itemId: "r1",
+      delta: "思考",
+      contentIndex: 0,
+    });
+    expect(store.itemsRev).toBe(3);
+  });
+
+  it("回合结束清扫：进行中/流式 item 置为 interrupted 并补算耗时", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      {
+        id: "c1",
+        type: "commandExecution",
+        command: "npm run build",
+        status: "in_progress",
+        streaming: true,
+        startedAtMs: 1000,
+      },
+      {
+        id: "m1",
+        type: "agentMessage",
+        text: "已完成",
+        status: "completed",
+        durationMs: 5,
+      },
+    ];
+    store.activeWorkByThread["t1"] = 1;
+    const before = store.itemsRev;
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "interrupted" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
+
+    const c1 = store.itemsByThread["t1"][0];
+    expect(c1.status).toBe("interrupted");
+    expect(c1.streaming).toBe(false);
+    expect(typeof c1.durationMs).toBe("number");
+    expect(c1.durationMs).toBeGreaterThanOrEqual(0);
+    // 已完成的 item 不受影响
+    expect(store.itemsByThread["t1"][1].status).toBe("completed");
+    // 进行中计数同步归零，变更计数递增
+    expect(store.activeWorkByThread["t1"]).toBe(0);
+    expect(store.itemsRev).toBe(before + 1);
+  });
+
+  it("非中断完成时对残留进行中项兜底标为 canceled", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      {
+        id: "c1",
+        type: "commandExecution",
+        command: "x",
+        status: "in_progress",
+        streaming: true,
+        startedAtMs: 1000,
+      },
+    ];
+    store.activeWorkByThread["t1"] = 1;
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
+
+    expect(store.itemsByThread["t1"][0].status).toBe("canceled");
+    expect(store.activeWorkByThread["t1"]).toBe(0);
   });
 });
