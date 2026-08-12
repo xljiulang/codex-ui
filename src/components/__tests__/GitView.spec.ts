@@ -713,7 +713,6 @@ describe("GitView 变更文件树形目录", () => {
     const changesRows = sections[0].findAll(".git-tree-row");
     expect(changesRows).toHaveLength(5);
     expect(changesRows[0].find(".git-dir-name").text()).toBe("src");
-    expect(changesRows[0].find(".git-dir-count").text()).toBe("1");
     expect(changesRows[1].text()).toContain("src/b.txt");
     expect(changesRows[2].find(".git-dir-name").text()).toBe("src2");
     expect(changesRows[4].text()).toContain("a.txt");

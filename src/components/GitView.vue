@@ -666,7 +666,6 @@ async function restoreDir(node: GitDirNode) {
                 <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
               </svg>
               <span class="git-dir-name">{{ row.name }}</span>
-              <span class="git-dir-count">{{ row.childCount }}</span>
             </template>
             <template v-else>
               <span
@@ -715,7 +714,6 @@ async function restoreDir(node: GitDirNode) {
                 <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
               </svg>
               <span class="git-dir-name">{{ row.name }}</span>
-              <span class="git-dir-count">{{ row.childCount }}</span>
             </template>
             <template v-else>
               <span

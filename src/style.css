@@ -683,20 +683,64 @@ select option {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 5px;
+  width: 7px;
   cursor: ew-resize;
   z-index: 5;
   touch-action: none;
+  transition: background-color 0.14s ease;
 }
 
-.history-resize-handle:hover {
-  background: rgba(var(--accent-rgb), 0.22);
+/* 拖拽条中的分隔细线：默认隐现，悬停/拖动时点亮 */
+.history-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  transition: background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+/* 拖拽条中部的抓握手感点 */
+.history-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.28);
+  opacity: 0;
+  transition: opacity 0.14s ease, background-color 0.14s ease;
+}
+
+.history-resize-handle:hover,
+.history-resize-handle.dragging {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.16),
+    rgba(var(--accent-rgb), 0.02)
+  );
+}
+
+.history-resize-handle:hover::before,
+.history-resize-handle.dragging::before {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.history-resize-handle:hover::after,
+.history-resize-handle.dragging::after {
+  opacity: 1;
 }
 
 .history-head {
   position: relative;
-  height: 47px;
-  padding: 10px 12px;
+  height: 46px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -708,21 +752,36 @@ select option {
   align-items: stretch;
   gap: 0;
   width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.history-search-group:focus-within {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
 .history-search {
   width: 100%;
-  height: 26px;
-  padding: 0 8px;
+  height: 28px;
+  padding: 0 10px;
   padding-right: 30px;
   font-size: 12px;
-  border-radius: 999px 0 0 999px;
-  border-right: none;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.history-search:focus {
+  border: none;
+  box-shadow: none;
 }
 
 .history-search-clear {
   position: absolute;
-  right: 38px;
+  right: 32px;
   top: 50%;
   transform: translateY(-50%);
   width: 22px;
@@ -745,12 +804,13 @@ select option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border);
-  border-left: none;
-  border-radius: 0 999px 999px 0;
-  background: var(--bg-input);
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: transparent;
   color: var(--text-dim);
   cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease;
 }
 
 .history-refresh:hover {
@@ -949,6 +1009,10 @@ select option {
 
 .panel-tab {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   padding: 9px 0 10px;
   font-size: 12px;
   font-weight: 600;
@@ -960,6 +1024,20 @@ select option {
   transition: color 0.14s ease, border-color 0.14s ease;
 }
 
+.panel-tab svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  opacity: 0.82;
+}
+
+.panel-tab span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .panel-tab:hover {
   color: var(--text-bright);
 }
@@ -967,6 +1045,15 @@ select option {
 .panel-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.panel-tab.active svg {
+  opacity: 1;
+}
+
+.panel-tab:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: -1px;
 }
 
 /* Git 更改 */
@@ -1020,33 +1107,37 @@ select option {
 
 .git-head {
   position: relative;
-  height: 47px;
+  height: 46px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
 }
 
 .git-branch {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
   max-width: 140px;
-  padding: 2px 5px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
   cursor: pointer;
   font-size: 12.5px;
   font-weight: 700;
   color: var(--text-bright);
   overflow: hidden;
+  transition: color 0.14s ease, background-color 0.14s ease,
+    border-color 0.14s ease;
 }
 
 .git-branch:hover {
+  color: var(--accent);
   background: var(--bg-hover);
+  border-color: rgba(var(--accent-rgb), 0.35);
 }
 
 .git-branch:disabled {
@@ -1212,21 +1303,24 @@ select option {
 
 .git-refresh {
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease,
+    border-color 0.14s ease;
 }
 
 .git-refresh:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
+  border-color: var(--border-light);
 }
 
 .git-refresh svg {
@@ -1242,11 +1336,22 @@ select option {
 .git-section-head {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 8px 14px 4px;
+  gap: 8px;
+  padding: 10px 14px 5px;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-bright);
+}
+
+.git-section-head::before {
+  content: "";
+  flex-shrink: 0;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.75;
+  box-shadow: 0 0 6px var(--accent-glow);
 }
 
 .git-section-empty {
@@ -1358,17 +1463,6 @@ select option {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.git-dir-count {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-faint);
-  background: var(--bg-active);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px 8px;
 }
 
 .git-confirm-path {

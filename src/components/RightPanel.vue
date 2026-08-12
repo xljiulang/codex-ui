@@ -10,8 +10,12 @@ const DEFAULT_PANEL_WIDTH = 264;
 const activeTab = ref<"history" | "resources" | "git">("history");
 /** 面板宽度：仅本次运行生效，不持久化 */
 const panelWidth = ref(DEFAULT_PANEL_WIDTH);
+const isDragging = ref(false);
 let resizeStartX = 0;
 let resizeStartW = DEFAULT_PANEL_WIDTH;
+
+/** Tab 顺序：供方向键切换使用 */
+const TAB_ORDER = ["history", "resources", "git"] as const;
 
 /** 面板宽度钳制：最小为默认宽度，最大为半个窗口宽度 */
 function clampPanelWidth(w: number) {
@@ -21,6 +25,7 @@ function clampPanelWidth(w: number) {
 
 function startResize(e: PointerEvent) {
   e.preventDefault();
+  isDragging.value = true;
   resizeStartX = e.clientX;
   resizeStartW = panelWidth.value;
   window.addEventListener("pointermove", onResizeMove);
@@ -33,12 +38,28 @@ function onResizeMove(e: PointerEvent) {
 }
 
 function onResizeUp() {
+  isDragging.value = false;
   window.removeEventListener("pointermove", onResizeMove);
   window.removeEventListener("pointerup", onResizeUp);
 }
 
 function onWindowResize() {
   panelWidth.value = clampPanelWidth(panelWidth.value);
+}
+
+/** Tab 栏方向键切换：左右箭头循环移动焦点 */
+function moveTab(e: KeyboardEvent) {
+  const idx = TAB_ORDER.indexOf(activeTab.value);
+  let next = idx;
+  if (e.key === "ArrowRight") {
+    next = (idx + 1) % TAB_ORDER.length;
+  } else if (e.key === "ArrowLeft") {
+    next = (idx - 1 + TAB_ORDER.length) % TAB_ORDER.length;
+  } else {
+    return;
+  }
+  e.preventDefault();
+  activeTab.value = TAB_ORDER[next];
 }
 
 onMounted(() => {
@@ -54,6 +75,7 @@ onBeforeUnmount(() => {
   <aside class="history-panel" :style="{ width: panelWidth + 'px' }">
     <div
       class="history-resize-handle"
+      :class="{ dragging: isDragging }"
       aria-hidden="true"
       @pointerdown="startResize"
     ></div>
@@ -65,33 +87,51 @@ onBeforeUnmount(() => {
       />
       <GitView v-show="activeTab === 'git'" :active="activeTab === 'git'" />
     </div>
-    <div class="panel-tabs" role="tablist">
+    <div class="panel-tabs" role="tablist" @keydown="moveTab">
       <button
         class="panel-tab"
         :class="{ active: activeTab === 'history' }"
         role="tab"
+        :tabindex="activeTab === 'history' ? 0 : -1"
         :aria-selected="activeTab === 'history'"
         @click="activeTab = 'history'"
       >
-        历史会话
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"
+          />
+        </svg>
+        <span>会话</span>
       </button>
       <button
         class="panel-tab"
         :class="{ active: activeTab === 'resources' }"
         role="tab"
+        :tabindex="activeTab === 'resources' ? 0 : -1"
         :aria-selected="activeTab === 'resources'"
         @click="activeTab = 'resources'"
       >
-        会话资源
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"
+          />
+        </svg>
+        <span>资源</span>
       </button>
       <button
         class="panel-tab"
         :class="{ active: activeTab === 'git' }"
         role="tab"
+        :tabindex="activeTab === 'git' ? 0 : -1"
         :aria-selected="activeTab === 'git'"
         @click="activeTab = 'git'"
       >
-        Git 更改
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M14 5.5C14 4.121 12.879 3 11.5 3C10.121 3 9 4.121 9 5.5C9 6.682 9.826 7.669 10.93 7.928C10.744 8.546 10.177 9 9.5 9H6.5C5.935 9 5.419 9.195 5 9.512V4.949C6.14 4.717 7 3.707 7 2.5C7 1.121 5.879 0 4.5 0C3.121 0 2 1.121 2 2.5C2 3.708 2.86 4.717 4 4.949V11.05C2.86 11.282 2 12.292 2 13.499C2 14.878 3.121 15.999 4.5 15.999C5.879 15.999 7 14.878 7 13.499C7 12.317 6.174 11.33 5.07 11.071C5.256 10.453 5.823 9.999 6.5 9.999H9.5C10.723 9.999 11.74 9.115 11.954 7.953C13.116 7.738 14 6.723 14 5.5ZM3 2.5C3 1.673 3.673 1 4.5 1C5.327 1 6 1.673 6 2.5C6 3.327 5.327 4 4.5 4C3.673 4 3 3.327 3 2.5ZM6 13.5C6 14.327 5.327 15 4.5 15C3.673 15 3 14.327 3 13.5C3 12.673 3.673 12 4.5 12C5.327 12 6 12.673 6 13.5ZM11.5 7C10.673 7 10 6.327 10 5.5C10 4.673 10.673 4 11.5 4C12.327 4 13 4.673 13 5.5C13 6.327 12.327 7 11.5 7Z"
+          />
+        </svg>
+        <span>Git</span>
       </button>
     </div>
   </aside>

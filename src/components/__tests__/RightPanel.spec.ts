@@ -130,9 +130,9 @@ describe("RightPanel Tab 栏", () => {
     const tabs = wrapper.findAll(".panel-tab");
     expect(tabs).toHaveLength(3);
     expect(tabs.map((t) => t.text().trim())).toEqual([
-      "历史会话",
-      "会话资源",
-      "Git 更改",
+      "会话",
+      "资源",
+      "Git",
     ]);
     expect(tabs[0].classes()).toContain("active");
     // v-show 单根化后互斥生效（happy-dom 的 isVisible 不可靠，直接断言 inline style）
