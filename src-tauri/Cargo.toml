@@ -26,6 +26,7 @@ open = "5"
 clipboard-win = "5"
 toml = "0.9"
 notify = "8"
+gix = "0.86"
 
 [dev-dependencies]
 tempfile = "3"

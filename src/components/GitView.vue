@@ -12,7 +12,12 @@ import {
   setGitChangesActive,
 } from "../composables/useGitChanges";
 import { sessionRoot } from "../composables/useSessionFs";
-import { gitDiffKind, gitStatusLabel, type GitFile } from "../lib/gitChanges";
+import {
+  gitDiffKind,
+  gitStatusIcon,
+  gitStatusLabel,
+  type GitFile,
+} from "../lib/gitChanges";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -68,13 +73,6 @@ async function openDiff(file: GitFile) {
   <div class="git-view">
     <div v-if="gitState === 'loading'" class="git-note">正在检查 Git 状态…</div>
 
-    <div v-else-if="gitState === 'no_git'" class="git-empty">
-      <p class="git-empty-title">未检测到 Git</p>
-      <p class="git-empty-desc">
-        当前环境未安装 Git，无法查看文件更改。请安装 Git 后重试。
-      </p>
-    </div>
-
     <div v-else-if="gitState === 'not_repo'" class="git-empty">
       <p class="git-empty-title">当前目录不是 Git 仓库</p>
       <p class="git-empty-desc">
@@ -121,8 +119,14 @@ async function openDiff(file: GitFile) {
           :title="`查看 ${file.path} 的更改`"
           @click="openDiff(file)"
         >
-          <span class="git-badge" :class="`git-badge-${file.status}`">
-            {{ gitStatusLabel(file.status) }}
+          <span
+            class="git-status-icon"
+            :class="`git-status-${file.status}`"
+            :title="gitStatusLabel(file.status)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="gitStatusIcon(file.status)" />
+            </svg>
           </span>
           <span class="git-path">{{ file.path }}</span>
         </li>

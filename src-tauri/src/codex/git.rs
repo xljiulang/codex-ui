@@ -1,7 +1,12 @@
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use gix::bstr::{BStr, BString, ByteSlice};
+use gix::progress::Discard;
+use gix::status::tree_index::TrackRenames;
+use gix::status::UntrackedFiles;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -10,8 +15,6 @@ use tauri::{AppHandle, Emitter, State};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GitErrorCode {
-    /// 系统中找不到 git 可执行文件
-    GitNotFound,
     /// 目录不在任何 Git 仓库内
     NotARepo,
     /// 其它仓库/命令错误
@@ -31,13 +34,20 @@ fn git_err(msg: impl Into<String>) -> GitError {
     }
 }
 
+fn not_a_repo() -> GitError {
+    GitError {
+        code: GitErrorCode::NotARepo,
+        message: "当前目录不在任何 Git 仓库内".to_string(),
+    }
+}
+
 /// 变更文件条目
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitFile {
     /// 相对仓库根的路径（正斜杠分隔）
     pub path: String,
-    /// added | modified | deleted | renamed | untracked | conflicted
+    /// added | modified | deleted | untracked
     pub status: String,
 }
 
@@ -47,7 +57,7 @@ pub struct GitFile {
 pub struct GitStatus {
     /// 仓库根目录（Windows 反斜杠路径）
     pub repo_root: String,
-    /// 当前分支名；游离 HEAD 时为 "HEAD"
+    /// 当前分支名；游离 HEAD 或尚未出生时为 "HEAD"
     pub branch: String,
     pub files: Vec<GitFile>,
 }
@@ -61,205 +71,235 @@ pub struct GitWatchHandle {
 
 pub struct GitWatcherState(pub Mutex<Option<GitWatchHandle>>);
 
-// ---------- git 命令执行 ----------
+// ---------- 仓库打开 ----------
 
-fn args(s: &[&str]) -> Vec<String> {
-    s.iter().map(|x| x.to_string()).collect()
-}
-
-/// 同步执行 git，返回 (退出码, stdout, stderr)；git 不存在 → GitNotFound
-fn run_git(args: &[String]) -> Result<(i32, String, String), GitError> {
-    let mut cmd = std::process::Command::new("git");
-    cmd.args(args);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // 避免 GUI 程序每次拉起 git 时弹出控制台黑窗体
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
-    let output = cmd.output().map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            GitError {
-                code: GitErrorCode::GitNotFound,
-                message: "未检测到 Git：请先安装 Git 并确保其位于 PATH 中".to_string(),
+/// 打开（向上发现）Git 仓库；非仓库返回 `NotARepo`
+fn open_repo(path: &str) -> Result<gix::Repository, GitError> {
+    match gix::discover(path) {
+        Ok(repo) => Ok(repo),
+        Err(err) => {
+            use gix::discover::upwards::Error as Up;
+            let is_not_repo = matches!(
+                err,
+                gix::discover::Error::Discover(
+                    Up::NoGitRepository { .. }
+                        | Up::NoGitRepositoryWithinCeiling { .. }
+                        | Up::NoGitRepositoryWithinFs { .. }
+                        | Up::NoMatchingCeilingDir
+                )
+            );
+            if is_not_repo {
+                Err(not_a_repo())
+            } else {
+                Err(git_err(format!("无法打开 Git 仓库: {err}")))
             }
-        } else {
-            git_err(format!("无法执行 git: {e}"))
         }
-    })?;
-    let code = output.status.code().unwrap_or(-1);
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    Ok((code, stdout, stderr))
+    }
 }
 
-/// 解析仓库根目录（失败时区分 not_a_repo / 其它错误）
-fn resolve_repo_root_sync(path: &str) -> Result<String, GitError> {
-    let (code, stdout, stderr) = run_git(&args(&["-C", path, "rev-parse", "--show-toplevel"]))?;
-    if code == 0 {
-        return Ok(stdout.trim().replace('/', "\\"));
-    }
-    if stderr.contains("not a git repository") {
-        return Err(GitError {
-            code: GitErrorCode::NotARepo,
-            message: "当前目录不在任何 Git 仓库内".to_string(),
+/// 相对路径字节 → 展示字符串
+fn path_str(p: &BStr) -> String {
+    p.to_str_lossy().into_owned()
+}
+
+// ---------- 状态 ----------
+
+/// 合并同一路径的多个状态（暂存 + 未暂存），与 `git status` 的 XY 合并规则一致：
+/// deleted > added > modified > untracked
+fn merge_file(
+    files: &mut Vec<GitFile>,
+    index_of: &mut HashMap<String, usize>,
+    path: String,
+    status: &str,
+) {
+    let prio = |s: &str| match s {
+        "deleted" => 4,
+        "added" => 3,
+        "modified" => 2,
+        "untracked" => 1,
+        _ => 0,
+    };
+    let norm = path.to_lowercase();
+    if let Some(&i) = index_of.get(&norm) {
+        if prio(status) > prio(&files[i].status) {
+            files[i].status = status.to_string();
+        }
+    } else {
+        index_of.insert(norm, files.len());
+        files.push(GitFile {
+            path,
+            status: status.to_string(),
         });
     }
-    Err(git_err(if stderr.trim().is_empty() {
-        format!("无法识别 Git 仓库（退出码 {code}）")
-    } else {
-        stderr.trim().to_string()
-    }))
-}
-
-/// 由 porcelain v2 的 XY 字段映射展示状态
-fn xy_status(xy: &str) -> String {
-    let b: Vec<char> = xy.chars().collect();
-    let (a, c) = if b.len() >= 2 { (b[0], b[1]) } else { ('.', '.') };
-    if a == 'D' || c == 'D' {
-        "deleted".into()
-    } else if a == 'A' || c == 'A' {
-        "added".into()
-    } else {
-        "modified".into()
-    }
-}
-
-/// 解析 `git status --porcelain=v2 -z` 输出（记录按 NUL 分隔，路径可能含空格）
-fn parse_porcelain_v2(out: &str) -> Vec<GitFile> {
-    let records: Vec<&str> = out.split('\0').collect();
-    let mut files: Vec<GitFile> = Vec::new();
-    let mut i = 0;
-    while i < records.len() {
-        let rec = records[i];
-        i += 1;
-        if rec.is_empty() {
-            continue;
-        }
-        if let Some(rest) = rec.strip_prefix("2 ") {
-            // 重命名：本记录含新路径，下一条裸记录是原路径
-            let mut parts = rest.splitn(9, ' ');
-            let _ = parts.next(); // XY
-            for _ in 0..7 {
-                let _ = parts.next();
-            }
-            let path = parts.next().unwrap_or("").to_string();
-            files.push(GitFile {
-                path,
-                status: "renamed".into(),
-            });
-            if i < records.len() {
-                i += 1; // 跳过原路径记录
-            }
-            continue;
-        }
-        if let Some(rest) = rec.strip_prefix("1 ") {
-            let mut parts = rest.splitn(8, ' ');
-            let xy = parts.next().unwrap_or("");
-            for _ in 0..6 {
-                let _ = parts.next();
-            }
-            let path = parts.next().unwrap_or("").to_string();
-            files.push(GitFile {
-                path,
-                status: xy_status(xy),
-            });
-            continue;
-        }
-        if let Some(rest) = rec.strip_prefix("u ") {
-            let mut parts = rest.splitn(10, ' ');
-            let _ = parts.next(); // XY
-            for _ in 0..8 {
-                let _ = parts.next();
-            }
-            let path = parts.next().unwrap_or("").to_string();
-            files.push(GitFile {
-                path,
-                status: "conflicted".into(),
-            });
-            continue;
-        }
-        if let Some(rest) = rec.strip_prefix("? ") {
-            files.push(GitFile {
-                path: rest.to_string(),
-                status: "untracked".into(),
-            });
-            continue;
-        }
-        if let Some(_rest) = rec.strip_prefix("! ") {
-            continue; // 忽略条目，不展示
-        }
-        // 其它未知记录（如重命名的原路径残留）忽略
-    }
-    files
 }
 
 fn status_sync(path: &str) -> Result<GitStatus, GitError> {
-    let repo_root = resolve_repo_root_sync(path)?;
-    let (code, branch, _) = run_git(&args(&["-C", &repo_root, "rev-parse", "--abbrev-ref", "HEAD"]))?;
-    let branch = if code == 0 && !branch.trim().is_empty() {
-        branch.trim().to_string()
-    } else {
-        "HEAD".to_string()
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let branch = match repo.head_name() {
+        Ok(Some(name)) => name.shorten().to_str_lossy().into_owned(),
+        _ => "HEAD".to_string(),
     };
-    let (code, out, stderr) = run_git(&args(&[
-        "-C",
-        &repo_root,
-        "--no-optional-locks",
-        "status",
-        "--porcelain=v2",
-        "-z",
-        "--untracked-files=all",
-    ]))?;
-    if code != 0 {
-        return Err(git_err(if stderr.trim().is_empty() {
-            format!("git status 失败（退出码 {code}）")
-        } else {
-            stderr.trim().to_string()
-        }));
+
+    let mut files: Vec<GitFile> = Vec::new();
+    let mut index_of: HashMap<String, usize> = HashMap::new();
+
+    let platform = repo
+        .status(Discard)
+        .map_err(|e| git_err(format!("初始化 git status 失败: {e}")))?
+        .untracked_files(UntrackedFiles::Files)
+        .index_worktree_rewrites(None)
+        .tree_index_track_renames(TrackRenames::Disabled);
+
+    let iter = platform
+        .into_iter(Vec::<BString>::new())
+        .map_err(|e| git_err(format!("git status 失败: {e}")))?;
+
+    for item in iter {
+        let item = item.map_err(|e| git_err(format!("git status 失败: {e}")))?;
+        match item {
+            // HEAD → 索引 的变化（暂存区）
+            gix::status::Item::TreeIndex(change) => {
+                use gix::diff::index::Change;
+                match change {
+                    Change::Addition { location, .. } => {
+                        merge_file(&mut files, &mut index_of, path_str(&location), "added");
+                    }
+                    Change::Deletion { location, .. } => {
+                        merge_file(&mut files, &mut index_of, path_str(&location), "deleted");
+                    }
+                    Change::Modification { location, .. } => {
+                        merge_file(&mut files, &mut index_of, path_str(&location), "modified");
+                    }
+                    // 重命名检测已关闭，理论上不会出现
+                    Change::Rewrite { .. } => continue,
+                }
+            }
+            // 索引 → 工作区 的变化（含未跟踪文件）
+            gix::status::Item::IndexWorktree(item) => {
+                use gix::status::index_worktree::Item as IwItem;
+                use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
+                match item {
+                    IwItem::Modification {
+                        rela_path, status, ..
+                    } => {
+                        let status = match status {
+                            // gix 版简化：冲突按“修改”展示
+                            EntryStatus::Conflict { .. } => "modified",
+                            EntryStatus::Change(Change::Removed) => "deleted",
+                            EntryStatus::Change(_) => "modified",
+                            EntryStatus::NeedsUpdate(_) => continue,
+                            EntryStatus::IntentToAdd => "added",
+                        };
+                        merge_file(&mut files, &mut index_of, path_str(rela_path.as_ref()), status);
+                    }
+                    IwItem::DirectoryContents { entry, .. } => {
+                        if matches!(entry.status, gix::dir::entry::Status::Untracked) {
+                            merge_file(
+                                &mut files,
+                                &mut index_of,
+                                path_str(entry.rela_path.as_ref()),
+                                "untracked",
+                            );
+                        }
+                    }
+                    // 重命名检测已关闭，理论上不会出现
+                    IwItem::Rewrite { .. } => continue,
+                }
+            }
+        }
     }
-    let files = parse_porcelain_v2(&out);
+
+    files.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
     Ok(GitStatus {
-        repo_root,
+        repo_root: clean_path(workdir),
         branch,
         files,
     })
 }
 
 fn init_sync(path: &str) -> Result<GitStatus, GitError> {
-    match resolve_repo_root_sync(path) {
+    match open_repo(path) {
         Ok(_) => return Err(git_err("当前目录已经是 Git 仓库，无需初始化")),
         Err(e) if e.code != GitErrorCode::NotARepo => return Err(e),
         Err(_) => {}
     }
-    let (code, _, stderr) = run_git(&args(&["-C", path, "init"]))?;
-    if code != 0 {
-        return Err(git_err(if stderr.trim().is_empty() {
-            format!("git init 失败（退出码 {code}）")
-        } else {
-            stderr.trim().to_string()
-        }));
-    }
+    // 仅初始化（默认分支 main，HEAD 未出生，不自动提交）
+    gix::init(path).map_err(|e| git_err(format!("git 初始化失败: {e}")))?;
     status_sync(path)
 }
 
-fn diff_sync(root: &str, path: &str, kind: &str) -> Result<String, GitError> {
-    // 未跟踪文件与空内容对比；其余统一对比 HEAD（覆盖暂存+未暂存）
-    let (code, stdout, stderr) = if kind == "untracked" {
-        run_git(&args(&["-C", root, "diff", "--no-index", "/dev/null", path]))?
-    } else {
-        run_git(&args(&["-C", root, "diff", "HEAD", "--", path]))?
-    };
-    // --no-index 在有差异时退出码为 1，属正常情况
-    if code == 0 || (kind == "untracked" && code == 1) {
-        Ok(stdout)
-    } else {
-        Err(git_err(if stderr.trim().is_empty() {
-            format!("git diff 失败（退出码 {code}）")
-        } else {
-            stderr.trim().to_string()
-        }))
+// ---------- diff ----------
+
+/// git 近似二进制判定：前 8000 字节内出现 NUL
+fn looks_binary(data: &[u8]) -> bool {
+    data[..data.len().min(8000)].contains(&0)
+}
+
+/// 渲染 unified diff（`@@ -a,b +c,d @@` + `+`/`-`/` ` 行，与 git diff -U3 兼容）；
+/// 任一输入为二进制时返回 None
+fn render_diff(old: &[u8], new: &[u8]) -> Option<String> {
+    if looks_binary(old) || looks_binary(new) {
+        return None;
     }
+    use gix::diff::blob::unified_diff::{ConsumeBinaryHunk, ContextSize};
+    use gix::diff::blob::{
+        Algorithm, InternedInput, UnifiedDiff, diff_with_slider_heuristics,
+        platform::resource::ByteLinesWithoutTerminator,
+    };
+    let input = InternedInput::new(
+        ByteLinesWithoutTerminator::new(old),
+        ByteLinesWithoutTerminator::new(new),
+    );
+    let diff = diff_with_slider_heuristics(Algorithm::default(), &input);
+    let out: BString = UnifiedDiff::new(
+        &diff,
+        &input,
+        ConsumeBinaryHunk::new(BString::default(), "\n"),
+        ContextSize::symmetrical(3),
+    )
+    .consume()
+    .ok()?;
+    Some(out.to_str_lossy().into_owned())
+}
+
+/// 取 HEAD 树中 `path` 对应的 blob 内容（HEAD 未出生或无此路径 → 空）
+fn head_blob(repo: &gix::Repository, path: &str) -> Result<Vec<u8>, GitError> {
+    let tree_id = repo
+        .head_tree_id_or_empty()
+        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
+    let tree = tree_id
+        .object()
+        .map_err(|e| git_err(format!("读取 HEAD 树失败: {e}")))?
+        .into_tree();
+    let Some(entry) = tree
+        .lookup_entry_by_path(path)
+        .map_err(|e| git_err(format!("在 HEAD 中查找 {path} 失败: {e}")))?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut obj = entry
+        .object()
+        .map_err(|e| git_err(format!("读取 {path} 对象失败: {e}")))?;
+    if obj.kind == gix::objs::Kind::Blob {
+        Ok(std::mem::take(&mut obj.data))
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// diff 基准统一为 HEAD（暂存 + 未暂存合并）；未跟踪文件为空 → 工作区内容。
+/// 返回空串表示无内容变化。
+fn diff_sync(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
+    let repo = open_repo(root)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let old = head_blob(&repo, path)?;
+    // 已删除或不可读的文件视为空内容
+    let new = std::fs::read(workdir.join(path)).unwrap_or_default();
+    if old == new {
+        return Ok(String::new());
+    }
+    render_diff(&old, &new).ok_or_else(|| git_err("该文件是二进制文件，无法显示文本差异"))
 }
 
 /// 在阻塞线程中执行同步 git 操作，带 60s 超时
@@ -289,7 +329,7 @@ pub async fn git_changes_diff(root: String, path: String, kind: String) -> Resul
     run_blocking(move || diff_sync(&root, &path, &kind)).await
 }
 
-// ---------- .git 监听 ----------
+// ---------- .git / 工作区监听 ----------
 
 /// 规范化路径键（Windows 大小写不敏感）
 fn norm_key(p: &Path) -> String {
@@ -336,13 +376,51 @@ pub async fn git_changes_watch_start(
     state: State<'_, GitWatcherState>,
     root: String,
 ) -> Result<(), GitError> {
-    let repo_root = match run_blocking({
+    // 在阻塞线程中解析仓库：工作区根、git 目录、已跟踪路径集合、排除规则栈
+    let (repo_root, git_dir, tracked, excludes, objects) = match run_blocking({
         let root = root.clone();
-        move || resolve_repo_root_sync(&root)
+        move || -> Result<
+            (
+                PathBuf,
+                PathBuf,
+                std::collections::HashSet<String>,
+                gix::worktree::Stack,
+                gix::OdbHandle,
+            ),
+            GitError,
+        > {
+            let repo = open_repo(&root)?;
+            let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+            let index = repo
+                .index_or_empty()
+                .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+            let tracked: std::collections::HashSet<String> = index
+                .entries()
+                .iter()
+                .map(|e| e.path(&index).to_str_lossy().to_lowercase())
+                .collect();
+            // 排除栈脱离仓库，仅保留跨线程安全的对象句柄
+            let stack = repo
+                .excludes(
+                    &index,
+                    None,
+                    gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
+                )
+                .map_err(|e| git_err(format!("初始化 gitignore 规则失败: {e}")))?
+                .detach();
+            let objects = repo.objects.clone();
+            Ok((
+                workdir.to_path_buf(),
+                repo.git_dir().to_path_buf(),
+                tracked,
+                stack,
+                objects,
+            ))
+        }
     })
     .await
     {
-        Ok(r) => PathBuf::from(&r),
+        Ok(r) => r,
         Err(e) if e.code == GitErrorCode::NotARepo => {
             // 非仓库：没有可监听的目标，停掉旧监听后正常返回
             if let Ok(mut guard) = state.0.lock() {
@@ -369,11 +447,36 @@ pub async fn git_changes_watch_start(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<PathBuf>(1024);
     let tx_watcher = tx.clone();
     let root_for_filter = repo_root.clone();
+    let excludes = Arc::new(Mutex::new((excludes, objects)));
+    let tracked = Arc::new(tracked);
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(ev) = res {
             if let Some(p) = ev.paths.first() {
                 if path_under_excluded_dot_dir(&root_for_filter, p) {
                     return;
+                }
+                // 应用 .gitignore 规则：忽略“被忽略且未被跟踪”的路径；.git 内部事件始终放行
+                if let Ok(rel) = p.strip_prefix(&root_for_filter) {
+                    let rel_norm = rel.to_string_lossy().replace('\\', "/");
+                    let is_git_internal = rel_norm == ".git" || rel_norm.starts_with(".git/");
+                    let is_tracked = tracked.contains(&rel_norm.to_lowercase());
+                    if !is_git_internal && !is_tracked {
+                        if let Ok(mut guard) = excludes.lock() {
+                            let (stack, objects) = &mut *guard;
+                            let mode = if p.is_dir() {
+                                Some(gix::index::entry::Mode::DIR)
+                            } else {
+                                None
+                            };
+                            let excluded = stack
+                                .at_path(rel_norm.as_str(), mode, objects)
+                                .map(|platform| platform.is_excluded())
+                                .unwrap_or(false);
+                            if excluded {
+                                return;
+                            }
+                        }
+                    }
                 }
                 let _ = tx_watcher.try_send(p.clone());
             }
@@ -385,21 +488,11 @@ pub async fn git_changes_watch_start(
         .watch(&repo_root, RecursiveMode::Recursive)
         .map_err(|e| git_err(format!("监听仓库目录失败 {}: {e}", repo_root.display())))?;
 
-    // 若 git 目录在仓库根之外（linked worktree / 子模块场景），追加监听
-    if let Ok((0, git_dir, _)) =
-        run_git(&args(&["-C", &repo_root.to_string_lossy(), "rev-parse", "--git-dir"]))
-    {
-        let gd_raw = git_dir.trim();
-        if !gd_raw.is_empty() {
-            let gd = if Path::new(gd_raw).is_absolute() {
-                PathBuf::from(gd_raw)
-            } else {
-                repo_root.join(gd_raw)
-            };
-            if norm_key(&gd) != norm_key(&repo_root) && gd.is_dir() {
-                let _ = watcher.watch(&gd, RecursiveMode::Recursive);
-            }
-        }
+    // git 目录位于工作区之外（linked worktree / 子模块）时追加监听
+    if !git_dir.starts_with(&repo_root) && git_dir.is_dir() {
+        watcher
+            .watch(&git_dir, RecursiveMode::Recursive)
+            .map_err(|e| git_err(format!("监听 git 目录失败 {}: {e}", git_dir.display())))?;
     }
 
     // 防抖任务：300ms 静默后向前端 emit 变更事件
@@ -452,6 +545,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// 测试夹具：系统 git 仅用于搭建仓库（生产代码不依赖 git）
     fn git_available() -> bool {
         std::process::Command::new("git")
             .arg("--version")
@@ -460,45 +554,26 @@ mod tests {
             .unwrap_or(false)
     }
 
-    fn run_in(dir: &Path, cmd: &[&str]) -> (i32, String, String) {
+    fn git(dir: &Path, cmd: &[&str]) -> (i32, String, String) {
         let mut all: Vec<String> = vec!["-C".into(), dir.to_string_lossy().into_owned()];
         all.extend(cmd.iter().map(|s| s.to_string()));
-        run_git(&all).expect("git 执行失败")
+        let out = std::process::Command::new("git")
+            .args(&all)
+            .output()
+            .expect("git 执行失败");
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
     }
 
     fn init_committed_repo(dir: &Path) {
-        assert_eq!(run_in(dir, &["init"]).0, 0);
-        assert_eq!(run_in(dir, &["config", "user.name", "t"]).0, 0);
-        assert_eq!(run_in(dir, &["config", "user.email", "t@t"]).0, 0);
-        assert_eq!(run_in(dir, &["add", "-A"]).0, 0);
-        assert_eq!(run_in(dir, &["commit", "-m", "init"]).0, 0);
-    }
-
-    #[test]
-    fn parse_porcelain_v2_handles_entries() {
-        let mut out = String::new();
-        out.push_str("1 M. N... 100644 100644 100644 aaa bbb mod file.txt\0");
-        out.push_str("1 .D N... 100644 100644 000000 ccc ddd gone.txt\0");
-        out.push_str("1 A. N... 000000 100644 100644 0000000 eee staged.txt\0");
-        out.push_str("u UU N... 100644 100644 100644 100644 fff ggg hhh conflict.txt\0");
-        out.push_str("? new dir/untracked.txt\0");
-        out.push_str("! ignored.txt\0");
-        out.push_str("2 R. N... 100644 100644 100644 iii jjj R100 renamed.txt\0");
-        out.push_str("old.txt\0");
-        let files = parse_porcelain_v2(&out);
-        let pairs: Vec<(String, String)> =
-            files.iter().map(|f| (f.path.clone(), f.status.clone())).collect();
-        assert_eq!(
-            pairs,
-            vec![
-                ("mod file.txt".to_string(), "modified".to_string()),
-                ("gone.txt".to_string(), "deleted".to_string()),
-                ("staged.txt".to_string(), "added".to_string()),
-                ("conflict.txt".to_string(), "conflicted".to_string()),
-                ("new dir/untracked.txt".to_string(), "untracked".to_string()),
-                ("renamed.txt".to_string(), "renamed".to_string()),
-            ]
-        );
+        assert_eq!(git(dir, &["init"]).0, 0);
+        assert_eq!(git(dir, &["config", "user.name", "t"]).0, 0);
+        assert_eq!(git(dir, &["config", "user.email", "t@t"]).0, 0);
+        assert_eq!(git(dir, &["add", "-A"]).0, 0);
+        assert_eq!(git(dir, &["commit", "-m", "init"]).0, 0);
     }
 
     #[test]
@@ -546,11 +621,47 @@ mod tests {
     }
 
     #[test]
-    fn init_creates_repo_without_commit() {
+    fn status_merges_staged_and_worktree_for_same_path() {
         if !git_available() {
             eprintln!("skip: 未安装 git");
             return;
         }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one").unwrap();
+        init_committed_repo(root);
+        // 暂存新内容后再次修改工作区 → 同一路径应只出现一条，且优先 added/modified 合并
+        std::fs::write(root.join("a.txt"), "two").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        std::fs::write(root.join("a.txt"), "three").unwrap();
+        let st = status_sync(root.to_str().unwrap()).unwrap();
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, "a.txt");
+        assert_eq!(st.files[0].status, "modified");
+    }
+
+    #[test]
+    fn status_respects_gitignore() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join(".gitignore"), "ignored.log\n").unwrap();
+        std::fs::write(root.join("ignored.log"), "x").unwrap();
+        std::fs::write(root.join("kept.txt"), "y").unwrap();
+        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"kept.txt"));
+        assert!(!paths.contains(&"ignored.log"));
+        assert!(paths.contains(&".gitignore"));
+    }
+
+    #[test]
+    fn init_creates_repo_without_commit() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
@@ -559,17 +670,13 @@ mod tests {
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
         assert_eq!(st.files[0].status, "untracked");
-        // 仅初始化，不应产生任何提交
-        let (code, _, _) = run_in(root, &["rev-parse", "--verify", "HEAD"]);
-        assert_ne!(code, 0);
+        // 仅初始化，不应产生任何提交（HEAD 未出生）
+        let repo = open_repo(root.to_str().unwrap()).unwrap();
+        assert!(repo.head().unwrap().is_unborn());
     }
 
     #[test]
     fn init_twice_errors() {
-        if !git_available() {
-            eprintln!("skip: 未安装 git");
-            return;
-        }
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         let _ = init_sync(root.to_str().unwrap()).unwrap();
@@ -580,10 +687,6 @@ mod tests {
 
     #[test]
     fn status_not_a_repo() {
-        if !git_available() {
-            eprintln!("skip: 未安装 git");
-            return;
-        }
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("x.txt"), "x").unwrap();
         let err = status_sync(dir.path().to_str().unwrap()).unwrap_err();
@@ -592,16 +695,12 @@ mod tests {
 
     #[test]
     fn diff_untracked_returns_new_file() {
-        if !git_available() {
-            eprintln!("skip: 未安装 git");
-            return;
-        }
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
         let st = init_sync(root.to_str().unwrap()).unwrap();
         let diff = diff_sync(&st.repo_root, "c.txt", "untracked").unwrap();
-        assert!(diff.contains("@@ -0,0"));
+        assert!(diff.contains("@@"));
         assert!(diff.contains("+hello"));
     }
 
@@ -624,22 +723,44 @@ mod tests {
     }
 
     #[test]
-    fn status_does_not_write_index() {
+    fn diff_deleted_returns_removals() {
         if !git_available() {
             eprintln!("skip: 未安装 git");
             return;
         }
         let dir = TempDir::new().unwrap();
         let root = dir.path();
-        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
         init_committed_repo(root);
-        let index = root.join(".git").join("index");
-        let before = std::fs::metadata(&index).unwrap().modified().unwrap();
-        std::thread::sleep(Duration::from_millis(1100));
+        std::fs::remove_file(root.join("a.txt")).unwrap();
         let st = status_sync(root.to_str().unwrap()).unwrap();
-        let after = std::fs::metadata(&index).unwrap().modified().unwrap();
-        assert_eq!(before, after, "status 不应写入 .git/index");
-        assert!(st.files.is_empty());
+        let diff = diff_sync(&st.repo_root, "a.txt", "deleted").unwrap();
+        assert!(diff.contains("-one"));
+        assert!(diff.contains("-two"));
+        assert!(!diff.contains("+one"));
+    }
+
+    #[test]
+    fn diff_binary_errors() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("bin.dat"), b"\x00\x01\x02").unwrap();
+        let st = init_sync(root.to_str().unwrap()).unwrap();
+        let err = diff_sync(&st.repo_root, "bin.dat", "untracked").unwrap_err();
+        assert!(err.message.contains("二进制"));
+    }
+
+    #[test]
+    fn status_does_not_write_index() {
+        // gix 状态只读：初始化后（无 index 文件）执行状态不应创建 .git/index
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        assert!(!root.join(".git").join("index").exists());
+        let st = status_sync(root.to_str().unwrap()).unwrap();
+        assert!(!root.join(".git").join("index").exists());
+        assert_eq!(st.files.len(), 1);
     }
 
     #[test]

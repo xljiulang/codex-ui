@@ -96,21 +96,6 @@ describe("GitView 空状态与初始化", () => {
     expect(wrapper.find(".git-view").text()).toContain("a.txt");
   });
 
-  it("未安装 Git：显示提示且无初始化按钮", async () => {
-    mockedInvoke.mockImplementation((cmd) => {
-      if (cmd === "git_changes_status") {
-        return Promise.reject({ code: "git_not_found", message: "未检测到 Git" });
-      }
-      return Promise.resolve(undefined);
-    });
-
-    const wrapper = mount(GitView, { props: { active: true } });
-    await flushPromises();
-
-    expect(wrapper.find(".git-view").text()).toContain("未检测到 Git");
-    expect(wrapper.find(".git-init-btn").exists()).toBe(false);
-  });
-
   it("其它错误：显示错误信息与重试按钮", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") {
@@ -145,8 +130,13 @@ describe("GitView 文件列表与 diff", () => {
     await flushPromises();
 
     expect(wrapper.findAll(".git-file")).toHaveLength(2);
-    expect(wrapper.find(".git-view").text()).toContain("修改");
-    expect(wrapper.find(".git-view").text()).toContain("未跟踪");
+    const modifiedIcon = wrapper.find(".git-status-icon.git-status-modified");
+    const untrackedIcon = wrapper.find(".git-status-icon.git-status-untracked");
+    expect(modifiedIcon.exists()).toBe(true);
+    expect(modifiedIcon.attributes("title")).toBe("修改");
+    expect(untrackedIcon.exists()).toBe(true);
+    expect(untrackedIcon.attributes("title")).toBe("未跟踪");
+    expect(untrackedIcon.find("svg path").attributes("d")).toBeTruthy();
 
     await wrapper.findAll(".git-file")[0].trigger("click");
     await flushPromises();

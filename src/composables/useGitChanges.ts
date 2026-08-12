@@ -5,7 +5,7 @@ import { store, toastError } from "./useCodex";
 import { sessionRoot } from "./useSessionFs";
 import type { GitErrorCode, GitStatus } from "../lib/gitChanges";
 
-export type GitViewState = "loading" | "ok" | "not_repo" | "no_git" | "error";
+export type GitViewState = "loading" | "ok" | "not_repo" | "error";
 
 export const gitState = ref<GitViewState>("loading");
 export const gitStatus = ref<GitStatus | null>(null);
@@ -56,8 +56,6 @@ async function refresh() {
       const code = errorCodeOf(e);
       if (code === "not_a_repo") {
         gitState.value = "not_repo";
-      } else if (code === "git_not_found") {
-        gitState.value = "no_git";
       } else {
         gitState.value = "error";
         gitErrorMsg.value = toastError(e);
