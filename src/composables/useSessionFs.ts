@@ -1,0 +1,389 @@
+import { computed, nextTick, reactive, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { store, toastError } from "./useCodex";
+import { toUserAttachment } from "../lib/mention";
+import type { UserInput } from "../lib/types";
+import {
+  flattenResourceTree,
+  joinFsPath,
+  type FsEntry,
+  type ResourceRow,
+} from "../lib/sessionFs";
+
+const SEARCH_LIMIT = 200;
+
+/** 当前会话工作目录：会话 cwd → 新会话已选目录 → 启动工作目录（跳过空字符串） */
+export const sessionRoot = computed(() =>
+  store.currentThreadCwd?.trim() ||
+  store.newChatCwd?.trim() ||
+  store.server.workspace?.trim() ||
+  "",
+);
+
+export const rootEntry = ref<FsEntry | null>(null);
+export const rootError = ref("");
+export const loadingRoot = ref(false);
+/** 目录路径 → 已加载的直接子项（懒加载缓存） */
+export const childrenByPath = reactive<Record<string, FsEntry[]>>({});
+/** 展开中的目录路径集合（含根） */
+export const expanded = reactive(new Set<string>());
+export const loadingByPath = reactive<Record<string, boolean>>({});
+
+export const searchTerm = ref("");
+export const searchResults = ref<FsEntry[]>([]);
+export const searching = ref(false);
+export const selectedPath = ref("");
+/** 内部复制记录：粘贴时优先使用，为空回退系统剪贴板 */
+export const copyBuffer = ref<string[]>([]);
+
+export const searchActive = computed(() => searchTerm.value.trim().length > 0);
+
+export const treeRows = computed<ResourceRow[]>(() => {
+  if (!rootEntry.value) return [];
+  return flattenResourceTree(rootEntry.value, childrenByPath, expanded);
+});
+
+let active = false;
+/** 已加载的根路径：同根重新激活时保留展开状态，仅刷新数据 */
+let loadedRoot = "";
+let searchSeq = 0;
+let searchTimer: number | undefined;
+let unlistenFsEvent: UnlistenFn | null = null;
+let watcherStarted = false;
+
+function setToast(msg: string) {
+  store.toast = msg;
+}
+
+function resetTree() {
+  for (const k of Object.keys(childrenByPath)) delete childrenByPath[k];
+  for (const k of Object.keys(loadingByPath)) delete loadingByPath[k];
+  expanded.clear();
+  rootEntry.value = null;
+  rootError.value = "";
+  searchResults.value = [];
+  selectedPath.value = "";
+  copyBuffer.value = [];
+}
+
+/** 兜底：从后端直接取启动工作目录（store 尚未就绪时用） */
+async function resolveFallbackRoot(): Promise<string> {
+  try {
+    const w = await invoke<string>("workspace_dir");
+    if (w && w.trim()) return w.trim();
+  } catch {
+    // 忽略，沿用空根
+  }
+  return "";
+}
+
+/** 拉取一个目录的直接子项（懒加载；已缓存且非强制时直接返回） */
+export async function loadDir(path: string, force = false): Promise<void> {
+  const root = sessionRoot.value;
+  if (!root) return;
+  if (!force && childrenByPath[path] !== undefined) return;
+  loadingByPath[path] = true;
+  try {
+    childrenByPath[path] = await invoke<FsEntry[]>("session_fs_list", {
+      root,
+      dir: path,
+    });
+  } catch (e) {
+    if (childrenByPath[path] === undefined) childrenByPath[path] = [];
+    setToast(toastError(e));
+  } finally {
+    loadingByPath[path] = false;
+  }
+}
+
+/** 加载根节点元信息 + 第一层子项（root 为已解析的绝对路径） */
+async function loadRoot(root: string) {
+  loadingRoot.value = true;
+  rootError.value = "";
+  try {
+    rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
+      root,
+      path: root,
+    });
+    expanded.add(root);
+    await loadDir(root);
+  } catch (e) {
+    rootError.value = toastError(e);
+  } finally {
+    loadingRoot.value = false;
+  }
+}
+
+/** 展开/折叠目录；首次展开时懒加载子项 */
+export function toggleDir(path: string) {
+  if (expanded.has(path)) expanded.delete(path);
+  else {
+    expanded.add(path);
+    void loadDir(path);
+  }
+}
+
+/** 刷新根 + 所有已加载目录，保留展开状态 */
+export async function refreshAll() {
+  const root = sessionRoot.value;
+  if (!root) return;
+  if (searchActive.value) {
+    await runSearchNow();
+    return;
+  }
+  loadingRoot.value = true;
+  try {
+    rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
+      root,
+      path: root,
+    });
+    expanded.add(root);
+  } catch (e) {
+    rootError.value = toastError(e);
+  } finally {
+    loadingRoot.value = false;
+  }
+  const paths = [root, ...Object.keys(childrenByPath)];
+  for (const p of paths) {
+    await loadDir(p, true);
+  }
+}
+
+export function onSearchInput() {
+  if (searchTimer) window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => {
+    void runSearchNow();
+  }, 300);
+}
+
+export async function runSearchNow() {
+  const q = searchTerm.value.trim();
+  if (!q) {
+    searchSeq++;
+    searchResults.value = [];
+    searching.value = false;
+    return;
+  }
+  const root = sessionRoot.value;
+  if (!root) return;
+  const seq = ++searchSeq;
+  searching.value = true;
+  try {
+    const res = await invoke<FsEntry[]>("session_fs_search", {
+      root,
+      query: q,
+      limit: SEARCH_LIMIT,
+    });
+    if (seq === searchSeq) searchResults.value = res;
+  } catch (e) {
+    if (seq === searchSeq) {
+      searchResults.value = [];
+      setToast(toastError(e));
+    }
+  } finally {
+    if (seq === searchSeq) searching.value = false;
+  }
+}
+
+export function clearSearch() {
+  searchTerm.value = "";
+  if (searchTimer) window.clearTimeout(searchTimer);
+  searchSeq++;
+  searchResults.value = [];
+  searching.value = false;
+}
+
+/** 点击搜索结果：展开祖先目录、清除搜索、选中并滚动到树中该行 */
+export async function revealInTree(entry: FsEntry) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  const parts = entry.relPath.split("/").filter(Boolean);
+  const dirs = entry.isDir ? parts : parts.slice(0, -1);
+  let cur = root;
+  for (const part of dirs) {
+    cur = joinFsPath(cur, part);
+    expanded.add(cur);
+    await loadDir(cur);
+  }
+  selectedPath.value = entry.path;
+  clearSearch();
+  await nextTick();
+  document
+    .querySelector(`[data-fs-path="${CSS.escape(entry.path)}"]`)
+    ?.scrollIntoView({ block: "center" });
+}
+
+export function copyEntry(entry: FsEntry) {
+  copyBuffer.value = [entry.path];
+  setToast(`已复制「${entry.name}」，可在目录上右键粘贴`);
+}
+
+async function readClipboardPaths(): Promise<string[]> {
+  try {
+    return await invoke<string[]>("clipboard_file_paths");
+  } catch {
+    return [];
+  }
+}
+
+/** 把内部复制记录（或系统剪贴板文件）粘贴进目标目录 */
+export async function pasteInto(targetDir: string) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  const sources = copyBuffer.value.length
+    ? [...copyBuffer.value]
+    : await readClipboardPaths();
+  if (!sources.length) {
+    setToast("剪贴板中没有可粘贴的文件或文件夹");
+    return;
+  }
+  try {
+    const created = await invoke<FsEntry[]>("session_fs_paste", {
+      root,
+      destDir: targetDir,
+      sources,
+    });
+    copyBuffer.value = [];
+    setToast(`已粘贴 ${created.length} 项`);
+    await refreshAll();
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+export async function renameEntry(path: string, newName: string) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  try {
+    await invoke<FsEntry>("session_fs_rename", { root, path, newName });
+    await refreshAll();
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+export async function deleteEntry(path: string) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  try {
+    await invoke("session_fs_delete", { root, path });
+    await refreshAll();
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+export function revealInExplorer(path: string) {
+  void invoke("reveal_path", { path }).catch((e) => setToast(toastError(e)));
+}
+
+export function openFile(path: string) {
+  void invoke("open_url", { url: path }).catch((e) => setToast(toastError(e)));
+}
+
+/** 添加为会话附件：优先走 ComposerBar 全局入口，缺失时兜底 push store */
+export function addAsAttachment(entry: FsEntry) {
+  const a = toUserAttachment(entry.name, entry.path);
+  const w = window as unknown as {
+    __CODEX_UI_ADD_ATTACHMENT__?: (a: UserInput) => void;
+  };
+  if (typeof w.__CODEX_UI_ADD_ATTACHMENT__ === "function") {
+    w.__CODEX_UI_ADD_ATTACHMENT__(a);
+  } else {
+    store.attachments.push(a);
+  }
+  setToast(`已添加「${entry.name}」为会话附件`);
+}
+
+async function syncWatcher() {
+  const root = sessionRoot.value;
+  if (active && root) {
+    if (!unlistenFsEvent) {
+      try {
+        unlistenFsEvent = await listen("session-fs/changed", () => {
+          if (active) void refreshAll();
+        });
+      } catch {
+        // 非 Tauri 环境（如单测）忽略
+      }
+    }
+    try {
+      await invoke("session_fs_watch_start", { root });
+      watcherStarted = true;
+    } catch (e) {
+      setToast(toastError(e));
+    }
+  } else {
+    unlistenFsEvent?.();
+    unlistenFsEvent = null;
+    if (watcherStarted) {
+      try {
+        await invoke("session_fs_watch_stop");
+      } catch {
+        // 忽略停止失败
+      }
+      watcherStarted = false;
+    }
+  }
+}
+
+/** 激活资源 Tab：解析根目录（含 workspace_dir 兜底）后加载树 */
+async function activate() {
+  const root = sessionRoot.value || (await resolveFallbackRoot());
+  if (!root) {
+    rootError.value = "暂无工作目录";
+    return;
+  }
+  if (!sessionRoot.value) {
+    // 兜底结果回写全局，让头部等其它读取点保持一致
+    store.server.workspace = root;
+  }
+  if (loadedRoot !== root) {
+    loadedRoot = root;
+    resetTree();
+    await loadRoot(root);
+  } else {
+    await refreshAll();
+  }
+}
+
+/** 会话资源 Tab 激活状态：激活时启动监听并加载树，切走时停止监听 */
+export function setSessionFsActive(v: boolean) {
+  if (active === v) return;
+  active = v;
+  void syncWatcher();
+  if (v) void activate();
+}
+
+// 根目录切换（切换会话/新建会话选目录）：重置并重新加载，监听跟随新根
+watch(sessionRoot, (r, old) => {
+  if (r === old) return;
+  if (!active) return;
+  if (r) {
+    if (loadedRoot !== r) {
+      loadedRoot = r;
+      resetTree();
+      void loadRoot(r);
+    }
+  } else {
+    resetTree();
+    rootError.value = "暂无工作目录";
+  }
+  void syncWatcher();
+});
+
+/** 仅测试用：清空模块状态 */
+export function __resetSessionFsForTest() {
+  active = false;
+  loadedRoot = "";
+  resetTree();
+  searchTerm.value = "";
+  searching.value = false;
+  if (searchTimer) window.clearTimeout(searchTimer);
+  searchTimer = undefined;
+  searchSeq++;
+  unlistenFsEvent?.();
+  unlistenFsEvent = null;
+  watcherStarted = false;
+}

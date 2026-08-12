@@ -918,6 +918,191 @@ select option {
   font-variant-numeric: tabular-nums;
 }
 
+/* 右侧面板外壳内容区与底部 Tab 栏 */
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-view,
+.resource-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-tabs {
+  flex-shrink: 0;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--panel-bg);
+  padding: 0 6px;
+}
+
+.panel-tab {
+  flex: 1;
+  padding: 9px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.panel-tab:hover {
+  color: var(--text-bright);
+}
+
+.panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* 会话资源树 */
+.resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease,
+    box-shadow 0.14s ease;
+  position: relative;
+}
+
+.resource-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.resource-row.active {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.11),
+    rgba(var(--accent-rgb), 0.03)
+  );
+  border-color: rgba(var(--accent-rgb), 0.24);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.resource-root {
+  font-weight: 600;
+}
+
+.resource-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.resource-row.resource-file .resource-icon {
+  color: var(--text-faint);
+}
+
+.resource-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.resource-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.resource-name {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-relpath {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-side {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 45%;
+}
+
+.resource-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.resource-error {
+  color: var(--red);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.resource-props {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resource-prop {
+  display: flex;
+  gap: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.resource-prop-key {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--text-dim);
+}
+
+.resource-prop-value {
+  min-width: 0;
+  color: var(--text-bright);
+  word-break: break-all;
+}
+
 /* 聊天区 */
 .chat {
   display: flex;

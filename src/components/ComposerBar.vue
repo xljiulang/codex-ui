@@ -130,6 +130,7 @@ const editor = useEditor({
   onCreate: () => {
     syncAfterChange();
     exposeEditor();
+    exposeAddAttachment();
   },
   onUpdate: () => {
     syncAfterChange();
@@ -143,6 +144,20 @@ function exposeEditor() {
   try {
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
       editor.value;
+  } catch {
+    // 非浏览器环境忽略
+  }
+}
+
+/** 会话资源面板“添加为会话附件”的全局入口：追加到附件行并同步 store */
+function exposeAddAttachment() {
+  try {
+    (window as unknown as Record<string, unknown>).__CODEX_UI_ADD_ATTACHMENT__ =
+      (a: UserInput) => {
+        rowAttachments.value.push(a);
+        syncAttachments();
+        void nextTick(() => editor.value?.commands.focus());
+      };
   } catch {
     // 非浏览器环境忽略
   }
@@ -354,7 +369,10 @@ onMounted(() => {
   void setupDragDrop();
   void nextTick(() => editor.value?.commands.focus());
 });
-watch(editor, exposeEditor);
+watch(editor, () => {
+  exposeEditor();
+  exposeAddAttachment();
+});
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
   window.removeEventListener("resize", clampEditorHeightOnResize);

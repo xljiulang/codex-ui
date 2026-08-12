@@ -7,8 +7,8 @@ import { dirLabel } from "../lib/historyGroup";
 // 新对话态显示已选择目录；会话态显示线程固定目录；兜底启动工作目录
 const cwd = computed(() =>
   store.currentThreadId
-    ? store.currentThreadCwd ?? store.server.workspace
-    : store.newChatCwd ?? store.server.workspace,
+    ? store.currentThreadCwd?.trim() || store.server.workspace
+    : store.newChatCwd?.trim() || store.server.workspace,
 );
 /** 芯片显示目录最后一段（根路径原样显示），完整路径放在 tooltip */
 const cwdLabel = computed(() => (cwd.value ? dirLabel(cwd.value) : ""));

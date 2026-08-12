@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
 import AppHeader from "./components/AppHeader.vue";
-import HistoryPanel from "./components/HistoryPanel.vue";
+import RightPanel from "./components/RightPanel.vue";
 import ChatView from "./components/ChatView.vue";
 import SettingsView from "./components/SettingsView.vue";
 import InteractionDialog from "./components/InteractionDialog.vue";
@@ -45,7 +45,7 @@ onBeforeUnmount(() => {
     <AppHeader />
     <div class="app-body">
       <ChatView />
-      <HistoryPanel />
+      <RightPanel />
     </div>
     <SettingsView v-if="store.showSettings" />
     <InteractionDialog />

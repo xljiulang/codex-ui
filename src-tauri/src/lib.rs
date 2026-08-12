@@ -47,6 +47,15 @@ pub fn run() {
             codex::commands::clipboard_file_paths,
             codex::commands::settings_get,
             codex::commands::settings_set,
+            codex::session_fs::session_fs_list,
+            codex::session_fs::session_fs_search,
+            codex::session_fs::session_fs_metadata,
+            codex::session_fs::session_fs_rename,
+            codex::session_fs::session_fs_delete,
+            codex::session_fs::session_fs_copy,
+            codex::session_fs::session_fs_paste,
+            codex::session_fs::session_fs_watch_start,
+            codex::session_fs::session_fs_watch_stop,
         ])
         .setup(|app| {
             let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -54,6 +63,7 @@ pub fn run() {
             let server_handle = server.clone();
             app.manage(server);
             app.manage(codex::diff::DiffParamsState(std::sync::Mutex::new(None)));
+            app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
             server_handle.ensure_running();
             Ok(())
         })
