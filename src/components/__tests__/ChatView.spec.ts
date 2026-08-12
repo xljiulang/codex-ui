@@ -207,4 +207,33 @@ describe("ChatView 日期分隔线", () => {
     await nextTick();
     expect(scroller.scrollTop).toBe(1000);
   });
+
+  it("末尾思考过程内容增长时仍吸底滚动", async () => {
+    const arr = reactive([
+      {
+        id: "r1",
+        type: "reasoning",
+        content: ["第一段"],
+        streaming: true,
+      } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+    arr[0].content = ["第一段", "第二段"];
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+  });
 });

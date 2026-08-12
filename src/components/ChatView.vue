@@ -64,7 +64,23 @@ function onScroll() {
   stickToBottom.value = dist < 60;
 }
 
-/** 最后一条消息的变更指纹：只跟踪末尾消息的流式/状态变化，历史消息变更零开销 */
+/** 最后一条消息的变更指纹：只跟踪末尾消息的流式/状态与内容增长，历史消息变更零开销 */
+function contentSize(it: ThreadItem): number {
+  let n = 0;
+  const add = (v: unknown) => {
+    if (typeof v === "string") n += v.length;
+    else if (typeof v === "number") n += v;
+    else if (Array.isArray(v)) for (const x of v) add(x);
+  };
+  // 覆盖普通回复 text、命令输出 aggregatedOutput/output、思考过程 content/summary
+  add(it.text);
+  add(it.aggregatedOutput);
+  add(it.output);
+  add(it.content);
+  add(it.summary);
+  return n;
+}
+
 const lastItemKey = computed(() => {
   const it = items.value[items.value.length - 1];
   if (!it) return "";
@@ -72,8 +88,7 @@ const lastItemKey = computed(() => {
     it.id,
     it.streaming ? 1 : 0,
     String(it.status ?? ""),
-    ((it.text as string | undefined)?.length ?? 0) +
-      ((it.aggregatedOutput as string | undefined)?.length ?? 0),
+    contentSize(it),
   ].join(":");
 });
 
