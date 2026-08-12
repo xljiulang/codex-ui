@@ -268,46 +268,21 @@ async function sendPrompt(text) {
 }
 
 async function openHistory() {
-  const clickOpen = async () => {
-    await evalJs(
-      `document.querySelector('button[aria-label="历史记录"]').click()`,
-    );
-    await waitFor(
-      "历史面板出现",
-      `!!document.querySelector(".history-panel")`,
-      10000,
-    );
-  };
-  await clickOpen();
+  // 面板常驻右侧：只需等待挂载
+  await waitFor(
+    "历史面板出现",
+    `!!document.querySelector(".history-panel")`,
+    10000,
+  );
   await expandAllFolders();
   const hasRows = await evalJs(
     `document.querySelectorAll(".history-item, .history-folder").length > 0`,
   );
   if (!hasRows) {
-    // 面板挂载可能早于 app-server 握手完成，列表为空；关闭重开触发重新拉取
-    await evalJs(
-      `document.querySelector('button[aria-label="历史记录"]').click()`,
-    );
-    await waitFor(
-      "历史面板关闭",
-      `!document.querySelector(".history-panel")`,
-      10000,
-    );
-    await sleep(500);
-    await clickOpen();
+    // 面板无法靠开关重挂载；重启应用触发启动时全量拉取
+    await relaunchApp();
     await expandAllFolders();
   }
-}
-
-async function closeHistory() {
-  await evalJs(
-    `document.querySelector('button[aria-label="历史记录"]').click()`,
-  );
-  await waitFor(
-    "历史面板关闭",
-    `!document.querySelector(".history-panel")`,
-    10000,
-  );
 }
 
 /** 历史目录默认收起；轮询等待列表渲染完成，并把全部折叠目录展开 */
@@ -337,7 +312,7 @@ async function expandAllFolders() {
 
 async function clickNewChat() {
   await evalJs(
-    `document.querySelector('button[aria-label="新建对话"]').click()`,
+    `document.querySelector('button[aria-label="新建会话"]').click()`,
   );
 }
 
@@ -347,23 +322,23 @@ async function historyRowCount() {
   );
 }
 
-async function rowByText(text) {
-  return evalJs(`(() => {
-    const rows = Array.from(document.querySelectorAll(".history-item"));
-    const r = rows.find((x) => x.innerText.includes(${JSON.stringify(text)}));
-    if (!r) return null;
-    return {
-      hasBadge: !!r.querySelector(".pin-badge"),
-      pinLabel: r.querySelector('[aria-label="固定置顶"], [aria-label="取消固定"]')?.getAttribute("aria-label") ?? null,
-    };
-  })()`);
-}
-
 async function clickPinInRow(text) {
   return evalJs(`(() => {
     const rows = Array.from(document.querySelectorAll(".history-item"));
     const r = rows.find((x) => x.innerText.includes(${JSON.stringify(text)}));
-    const b = r?.querySelector('[aria-label="固定置顶"], [aria-label="取消固定"]');
+    if (!r) return false;
+    r.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 300,
+      clientY: 300,
+    }));
+    const menu = document.querySelector(".ctx-menu");
+    const b = menu
+      ? Array.from(menu.querySelectorAll(".ctx-menu-item")).find(
+          (x) => x.innerText.trim() === "置顶" || x.innerText.trim() === "取消置顶",
+        )
+      : null;
     if (!b) return false;
     b.click();
     return true;
@@ -371,9 +346,14 @@ async function clickPinInRow(text) {
 }
 
 async function pinBadgeEdges() {
-  return evalJs(
-    `Array.from(document.querySelectorAll(".history-item .pin-badge")).map((b) => Math.round(b.getBoundingClientRect().right))`,
-  );
+  return evalJs(`(() => {
+    const groups = { folder: [], flat: [] };
+    for (const b of Array.from(document.querySelectorAll(".history-item .pin-badge"))) {
+      const key = b.closest(".folder-item") ? "folder" : "flat";
+      groups[key].push(Math.round(b.getBoundingClientRect().left));
+    }
+    return groups;
+  })()`);
 }
 
 async function firstRowsText() {
@@ -384,24 +364,20 @@ async function firstRowsText() {
 
 // ---------- 场景 1: 设置面板 toggle ----------
 async function scenarioSettingsToggle() {
-  log("场景 1: 设置面板 toggle");
+  log("场景 1: 设置面板 toggle（历史面板常驻右侧）");
   await evalJs(`document.querySelector('button[aria-label="设置"]').click()`);
   await waitFor("设置面板出现", `!!document.querySelector(".settings")`, 10000);
   const opened = await evalJs(
-    `!!document.querySelector(".settings") && !document.querySelector(".history-panel")`,
+    `!!document.querySelector(".settings") && !!document.querySelector(".history-panel")`,
   );
-  record("设置: 点击打开设置面板，且历史面板隐藏", opened);
+  record("设置: 点击打开设置面板，历史面板保持显示", opened);
 
   await evalJs(`document.querySelector('button[aria-label="设置"]').click()`);
   await waitFor("设置面板关闭", `!document.querySelector(".settings")`, 10000);
-  record("设置: 再次点击关闭设置面板", true);
-
-  await openHistory();
-  const exclusive = await evalJs(
-    `!!document.querySelector(".history-panel") && !document.querySelector(".settings")`,
+  const historyKept = await evalJs(
+    `!!document.querySelector(".history-panel")`,
   );
-  record("设置: 打开历史时设置面板互斥隐藏", exclusive);
-  await closeHistory();
+  record("设置: 再次点击关闭设置面板，历史面板仍显示", historyKept);
 }
 
 // ---------- 场景 2: Ctrl+Enter 换行 ----------
@@ -520,7 +496,7 @@ async function scenarioPin() {
   await sendPrompt(PROMPT_A);
   await waitTurnDone();
   await clickNewChat();
-  await waitFor("新对话就绪", `!!document.querySelector(".ProseMirror")`, 15000);
+  await waitFor("新会话就绪", `!!document.querySelector(".ProseMirror")`, 15000);
   await sendPrompt(PROMPT_B);
   await waitTurnDone();
 
@@ -571,18 +547,20 @@ async function scenarioPin() {
     };
   })()`);
   record(
-    "置顶: 测试会话已置顶且排在列表最前",
-    pinLayout.idxA === 0 &&
-      pinLayout.idxB === 1 &&
+    "置顶: 测试会话已置顶且同目录内相邻",
+    pinLayout.idxA >= 0 &&
+      pinLayout.idxB >= 0 &&
+      Math.abs(pinLayout.idxA - pinLayout.idxB) === 1 &&
       pinLayout.badgeA &&
       pinLayout.badgeB,
     `${JSON.stringify(pinLayout)} top=${JSON.stringify(top)}`,
   );
   const edges = await pinBadgeEdges();
-  const aligned =
-    edges.length >= 2 && Math.max(...edges) - Math.min(...edges) <= 1;
+  const aligned = Object.values(edges).every(
+    (arr) => arr.length < 2 || Math.max(...arr) - Math.min(...arr) <= 1,
+  );
   record(
-    "置顶: 多行置顶徽章右缘垂直对齐（≤1px）",
+    "置顶: 置顶图标垂直对齐（同缩进内 ≤1px）",
     aligned,
     `edges=${JSON.stringify(edges)}`,
   );
@@ -693,27 +671,14 @@ async function scenarioStopOnSwitch() {
     `document.querySelectorAll(".msg-user").length === 0`,
   );
   record(
-    "切换停止: 新建对话后旧回合自动中断，无残留进行中状态",
+    "切换停止: 新建会话后旧回合自动中断，无残留进行中状态",
     stillIdle && newChatEmpty,
   );
 }
 
-// ---------- 场景 5: 历史面板手动保持 ----------
-async function scenarioHistoryStaysOpen() {
-  log("场景 5: 历史面板手动保持（点击会话不自动关闭）");
-  // 场景 3 结束时面板可能仍开着：先关掉，保证 openHistory 是“打开”动作
-  const panelOpen = await evalJs(`!!document.querySelector(".history-panel")`);
-  if (panelOpen) {
-    await evalJs(
-      `document.querySelector('button[aria-label="历史记录"]').click()`,
-    );
-    await waitFor(
-      "历史面板关闭",
-      `!document.querySelector(".history-panel")`,
-      10000,
-    );
-    await sleep(300);
-  }
+// ---------- 场景 5: 历史面板常驻 ----------
+async function scenarioHistoryAlwaysVisible() {
+  log("场景 5: 历史面板常驻右侧（点击会话不关闭）");
   await openHistory();
   await waitFor(
     "历史行出现",
@@ -732,10 +697,9 @@ async function scenarioHistoryStaysOpen() {
     `!!document.querySelector(".history-panel")`,
   );
   record(
-    "历史: 点击历史会话后面板保持显示（仅按钮手动开关）",
+    "历史: 点击历史会话后面板保持显示（面板常驻右侧）",
     clicked && stillOpen,
   );
-  await closeHistory();
 }
 
 async function main() {
@@ -747,7 +711,7 @@ async function main() {
   await scenarioEditorResize();
   await scenarioPin();
   await scenarioStopOnSwitch();
-  await scenarioHistoryStaysOpen();
+  await scenarioHistoryAlwaysVisible();
 
   const pass = results.filter((r) => r.ok).length;
   log(`\n===== 结果汇总: ${pass}/${results.length} 通过 =====`);

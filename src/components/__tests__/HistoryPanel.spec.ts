@@ -1,16 +1,27 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
+import { mount, type VueWrapper } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
-  return { ...mod, deleteThread: vi.fn(), togglePin: vi.fn() };
+  return {
+    ...mod,
+    deleteThread: vi.fn(),
+    togglePin: vi.fn(),
+    openThread: vi.fn(),
+  };
 });
 
 import HistoryPanel from "../HistoryPanel.vue";
-import { deleteThread, togglePin, store } from "../../composables/useCodex";
+import {
+  deleteThread,
+  openThread,
+  store,
+  togglePin,
+} from "../../composables/useCodex";
 
 const mockedDelete = vi.mocked(deleteThread);
 const mockedTogglePin = vi.mocked(togglePin);
+const mockedOpen = vi.mocked(openThread);
 
 const now = Date.now() / 1000;
 const threads = [
@@ -18,18 +29,37 @@ const threads = [
   { id: "t2", name: null, preview: "仅预览", createdAt: now, recencyAt: now },
 ];
 
+async function openCtxMenu(wrapper: VueWrapper, index = 0) {
+  await wrapper.findAll(".history-item")[index].trigger("contextmenu", {
+    clientX: 200,
+    clientY: 200,
+  });
+}
+
+async function clickCtxItem(wrapper: VueWrapper, label: string) {
+  const btn = wrapper
+    .findAll(".ctx-menu-item")
+    .find((b) => b.text().trim() === label);
+  expect(btn).toBeTruthy();
+  await btn!.trigger("click");
+}
+
+function mockBasicHistory() {
+  store.threads = threads.map((t) => ({ ...t }));
+  store.loadingHistory = false;
+}
+
 describe("HistoryPanel 删除确认", () => {
   beforeEach(() => {
-    store.threads = threads.map((t) => ({ ...t }));
-    store.loadingHistory = false;
-    store.nextCursor = null;
+    mockBasicHistory();
     mockedDelete.mockClear();
     mockedDelete.mockResolvedValue(undefined);
   });
 
-  it("点击 × 弹出确认框，且不直接删除", async () => {
+  it("右键菜单点删除弹出确认框，且不直接删除", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".history-actions .act-btn.del").trigger("click");
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "删除会话");
 
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
     expect(wrapper.text()).toContain("确定删除会话「会话一」吗？此操作不可恢复。");
@@ -38,7 +68,8 @@ describe("HistoryPanel 删除确认", () => {
 
   it("确认框弹出后聚焦「删除」按钮", async () => {
     const wrapper = mount(HistoryPanel, { attachTo: document.body });
-    await wrapper.find(".history-actions .act-btn.del").trigger("click");
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "删除会话");
     await wrapper.vm.$nextTick();
 
     const danger = wrapper.find(".modal-foot .btn.danger");
@@ -49,7 +80,8 @@ describe("HistoryPanel 删除确认", () => {
 
   it("点击「取消」关闭确认框且不删除", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".history-actions .act-btn.del").trigger("click");
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "删除会话");
     const cancel = wrapper
       .findAll(".modal-foot .btn")
       .find((b) => b.text().trim() === "取消");
@@ -61,7 +93,8 @@ describe("HistoryPanel 删除确认", () => {
 
   it("点击「删除」调用 deleteThread 并关闭确认框", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".history-actions .act-btn.del").trigger("click");
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "删除会话");
     const del = wrapper
       .findAll(".modal-foot .btn")
       .find((b) => b.text().trim() === "删除");
@@ -74,7 +107,8 @@ describe("HistoryPanel 删除确认", () => {
 
   it("按 Escape 关闭确认框且不删除", async () => {
     const wrapper = mount(HistoryPanel);
-    await wrapper.find(".history-actions .act-btn.del").trigger("click");
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "删除会话");
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
@@ -87,30 +121,151 @@ describe("HistoryPanel 删除确认", () => {
 
 describe("HistoryPanel 置顶", () => {
   beforeEach(() => {
-    store.threads = threads.map((t) => ({ ...t }));
-    store.loadingHistory = false;
-    store.nextCursor = null;
+    mockBasicHistory();
     mockedTogglePin.mockClear();
     mockedTogglePin.mockResolvedValue(undefined);
   });
 
-  it("未置顶会话不显示徽章，点击图钉调用 togglePin(id, true)", async () => {
+  it("未置顶会话不显示徽章，右键点置顶调用 togglePin(id, true)", async () => {
     const wrapper = mount(HistoryPanel);
     expect(wrapper.find(".pin-badge").exists()).toBe(false);
-    await wrapper.find('[aria-label="固定置顶"]').trigger("click");
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "置顶");
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", true);
   });
 
-  it("置顶会话显示“置顶”徽章，点击图钉调用 togglePin(id, false)", async () => {
+  it("置顶会话显示置顶图标，右键点取消置顶调用 togglePin(id, false)", async () => {
     store.threads = [
       { ...threads[0], isPinned: true },
       { ...threads[1] },
     ];
     const wrapper = mount(HistoryPanel);
-    expect(wrapper.find(".pin-badge").exists()).toBe(true);
-    expect(wrapper.find(".pin-badge").text()).toContain("置顶");
-    await wrapper.find('[aria-label="取消固定"]').trigger("click");
+    const badge = wrapper.find(".pin-badge");
+    expect(badge.exists()).toBe(true);
+    expect(badge.find("svg").exists()).toBe(true);
+    expect(badge.attributes("aria-label")).toBe("已置顶");
+    expect(badge.text()).not.toContain("置顶");
+    // 置顶图标位于标题行最左侧，与标题同一行垂直居中
+    expect(wrapper.find(".history-title-row :first-child").classes()).toContain(
+      "pin-badge",
+    );
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "取消置顶");
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", false);
+  });
+});
+
+describe("HistoryPanel 右键菜单", () => {
+  beforeEach(() => {
+    mockBasicHistory();
+    store.searchActive = false;
+    store.searchSnippets = {};
+    mockedOpen.mockClear();
+  });
+
+  it("右键会话行显示四项菜单：打开/置顶/重命名/删除会话", async () => {
+    const wrapper = mount(HistoryPanel);
+    await openCtxMenu(wrapper);
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(labels).toEqual(["打开", "置顶", "重命名", "删除会话"]);
+  });
+
+  it("置顶会话右键菜单显示“取消置顶”", async () => {
+    store.threads = [
+      { ...threads[0], isPinned: true },
+      { ...threads[1] },
+    ];
+    const wrapper = mount(HistoryPanel);
+    await openCtxMenu(wrapper);
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(labels).toContain("取消置顶");
+  });
+
+  it("菜单每项都带图标，删除项保留 danger 类", async () => {
+    const wrapper = mount(HistoryPanel);
+    await openCtxMenu(wrapper);
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items).toHaveLength(4);
+    for (const it of items) {
+      expect(it.find("svg").exists()).toBe(true);
+    }
+    expect(wrapper.findAll(".ctx-menu-item.danger")).toHaveLength(1);
+  });
+
+  it("点击“打开”调用 openThread 并关闭菜单", async () => {
+    const wrapper = mount(HistoryPanel);
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "打开");
+    expect(mockedOpen).toHaveBeenCalledWith("t1");
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+  });
+
+  it("按 Escape 关闭菜单", async () => {
+    const wrapper = mount(HistoryPanel);
+    await openCtxMenu(wrapper);
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+  });
+
+  it("点击外部关闭菜单", async () => {
+    const wrapper = mount(HistoryPanel);
+    await openCtxMenu(wrapper);
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+
+    window.dispatchEvent(new MouseEvent("click"));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+  });
+});
+
+describe("HistoryPanel 宽度调节", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.loadingHistory = false;
+  });
+
+  it("向左拖拽加宽面板，并钳制在半个窗口宽度内", async () => {
+    const wrapper = mount(HistoryPanel);
+    const handle = wrapper.find(".history-resize-handle");
+    await handle.trigger("pointerdown", { clientX: 500 });
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 300 }));
+    await wrapper.vm.$nextTick();
+    // 264 + (500 - 300) = 464，未超过 window.innerWidth / 2（happy-dom 默认 1024）
+    expect(wrapper.find(".history-panel").attributes("style")).toContain(
+      "width: 464px",
+    );
+
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: -1000 }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".history-panel").attributes("style")).toContain(
+      "width: 512px",
+    );
+
+    window.dispatchEvent(new PointerEvent("pointerup"));
+    wrapper.unmount();
+  });
+
+  it("向右拖拽不窄于默认宽度 264px", async () => {
+    const wrapper = mount(HistoryPanel);
+    const handle = wrapper.find(".history-resize-handle");
+    await handle.trigger("pointerdown", { clientX: 100 });
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000 }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".history-panel").attributes("style")).toContain(
+      "width: 264px",
+    );
+
+    window.dispatchEvent(new PointerEvent("pointerup"));
+    wrapper.unmount();
   });
 });
 
@@ -118,7 +273,6 @@ describe("HistoryPanel 目录分组", () => {
   beforeEach(() => {
     store.threads = [];
     store.loadingHistory = false;
-    store.nextCursor = null;
     store.searchActive = false;
     store.searchSnippets = {};
   });
@@ -153,10 +307,11 @@ describe("HistoryPanel 目录分组", () => {
 
     const folders = wrapper.findAll(".history-folder");
     expect(folders).toHaveLength(2);
-    expect(folders[0].find(".folder-name").text()).toBe("codex-ui");
-    expect(folders[0].find(".folder-count").text()).toBe("2");
-    expect(folders[1].find(".folder-name").text()).toBe("codex-proxy");
-    expect(folders[1].find(".folder-count").text()).toBe("1");
+    // 目录按名称 A-Z：codex-proxy 在 codex-ui 之前
+    expect(folders[0].find(".folder-name").text()).toBe("codex-proxy");
+    expect(folders[0].find(".folder-count").text()).toBe("1");
+    expect(folders[1].find(".folder-name").text()).toBe("codex-ui");
+    expect(folders[1].find(".folder-count").text()).toBe("2");
     // 默认收起：目录内会话均不可见
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
   });
@@ -167,16 +322,16 @@ describe("HistoryPanel 目录分组", () => {
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
     expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
 
-    await wrapper.findAll(".history-folder")[0].trigger("click");
+    await wrapper.findAll(".history-folder")[1].trigger("click");
     expect(wrapper.findAll(".history-item")).toHaveLength(2);
-    expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".history-folder")[1].classes()).not.toContain("collapsed");
 
-    await wrapper.findAll(".history-folder")[0].trigger("click");
+    await wrapper.findAll(".history-folder")[1].trigger("click");
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
-    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".history-folder")[1].classes()).toContain("collapsed");
   });
 
-  it("含置顶会话的目录排最前，置顶会话仍留在目录内", async () => {
+  it("目录按名称 A-Z 排序，置顶会话仍留在目录内", async () => {
     store.threads = [
       { ...dirThreads[2] },
       { ...dirThreads[0], isPinned: true },
@@ -187,9 +342,9 @@ describe("HistoryPanel 目录分组", () => {
     const names = wrapper
       .findAll(".folder-name")
       .map((n) => n.text());
-    expect(names).toEqual(["codex-ui", "codex-proxy"]);
-    // 展开置顶目录后，置顶徽章仍显示在目录内的会话上
-    await wrapper.findAll(".history-folder")[0].trigger("click");
+    expect(names).toEqual(["codex-proxy", "codex-ui"]);
+    // 展开 codex-ui（第二个目录）后，置顶图标仍显示在目录内的会话上
+    await wrapper.findAll(".history-folder")[1].trigger("click");
     expect(wrapper.findAll(".pin-badge")).toHaveLength(1);
   });
 
@@ -204,5 +359,11 @@ describe("HistoryPanel 目录分组", () => {
     // 目录默认收起，仅平铺会话可见
     expect(wrapper.findAll(".history-item")).toHaveLength(1);
     expect(wrapper.findAll(".history-item:not(.folder-item)")).toHaveLength(1);
+  });
+
+  it("目录行带文件夹图标", async () => {
+    store.threads = dirThreads.map((t) => ({ ...t }));
+    const wrapper = mount(HistoryPanel);
+    expect(wrapper.findAll(".history-folder .folder-icon svg")).toHaveLength(2);
   });
 });

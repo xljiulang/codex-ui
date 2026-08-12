@@ -72,9 +72,9 @@ ws.onopen = async () => {
       console.log("AFTER_STOP:", JSON.stringify(st));
     }
 
-    // 新建对话，避免受历史会话影响
+    // 新建会话，避免受历史会话影响
     await evalJs(
-      `document.querySelector('button[aria-label="新建对话"]')?.click()`,
+      `document.querySelector('button[aria-label="新建会话"]')?.click()`,
     );
     await sleep(400);
     st = JSON.parse(await chipState());

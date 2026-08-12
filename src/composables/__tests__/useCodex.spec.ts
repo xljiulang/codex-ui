@@ -34,8 +34,10 @@ import {
   interrupt,
   newEmptyChat,
   openThread,
+  refreshThreads,
   refreshServer,
   sanitizeTitle,
+  searchThreads,
   sendPrompt,
   settleConfirm,
   sortThreads,
@@ -368,11 +370,10 @@ describe("切换会话自动标准停止旧回合", () => {
     store.confirm = null;
   });
 
-  it("新建对话时标准停止旧回合（turn_interrupt），再复位到新对话", async () => {
+  it("新建会话时标准停止旧回合（turn_interrupt），再复位到新会话", async () => {
     store.turnActive = true;
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
-    store.showHistory = true;
     const p = newEmptyChat();
     expect(store.confirm?.title).toBe("切换会话");
     settleConfirm(true);
@@ -383,11 +384,9 @@ describe("切换会话自动标准停止旧回合", () => {
     });
     expect(store.currentThreadId).toBeNull();
     expect(store.currentTurnId).toBeNull();
-    // 历史面板只由头部按钮控制，新建对话不自动关闭
-    expect(store.showHistory).toBe(true);
   });
 
-  it("目标模式下新建对话：先清旧会话目标，再中断旧回合", async () => {
+  it("目标模式下新建会话：先清旧会话目标，再中断旧回合", async () => {
     store.turnActive = true;
     store.taskMode = "goal";
     store.goalText = "旧目标";
@@ -410,7 +409,6 @@ describe("切换会话自动标准停止旧回合", () => {
     store.turnActive = true;
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
-    store.showHistory = true;
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -435,8 +433,6 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "turn-1",
     });
     expect(store.currentThreadId).toBe("t2");
-    // 点击历史会话不关闭历史面板（手动触发）
-    expect(store.showHistory).toBe(true);
   });
 
   it("点击当前正在进行的会话不算切换，不中断", async () => {
@@ -491,7 +487,7 @@ describe("切换会话自动标准停止旧回合", () => {
     );
   });
 
-  it("会话进行中取消切换：新建对话不中断、不切换", async () => {
+  it("会话进行中取消切换：新建会话不中断、不切换", async () => {
     store.turnActive = true;
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
@@ -948,7 +944,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
       });
     }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
-      expect(store.toast).toContain("当前对话的标题已简化");
+      expect(store.toast).toContain("当前会话的标题已简化");
     }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
@@ -994,7 +990,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
       });
     }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
-      expect(store.toast).toContain("当前对话的标题已简化");
+      expect(store.toast).toContain("当前会话的标题已简化");
     }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("thread_delete", {
@@ -1030,7 +1026,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
       "thread_set_name",
       expect.anything(),
     );
-    expect(store.toast).not.toContain("当前对话的标题已简化");
+    expect(store.toast).not.toContain("当前会话的标题已简化");
   });
 
   it("后台临时线程事件被隔离：不影响全局进行中状态", async () => {
@@ -1213,5 +1209,110 @@ describe("消息变更计数器与回合结束清扫", () => {
 
     expect(store.itemsByThread["t1"][0].status).toBe("canceled");
     expect(store.activeWorkByThread["t1"]).toBe(0);
+  });
+});
+
+describe("历史全量加载（逐页拉取）", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.threads = [];
+    store.searchActive = false;
+    store.searchSnippets = {};
+    store.loadingHistory = false;
+    store.toast = "";
+  });
+
+  it("refreshThreads 逐页累加直至 cursor 为空", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd !== "thread_list") return Promise.resolve(undefined);
+      const cursor = (args as { cursor?: string | null } | undefined)?.cursor;
+      if (!cursor) {
+        return Promise.resolve({
+          data: [
+            { id: "t1", name: "会话一", createdAt: 0, recencyAt: 0 },
+            { id: "t2", name: "会话二", createdAt: 0, recencyAt: 0 },
+          ],
+          nextCursor: "page2",
+        });
+      }
+      return Promise.resolve({
+        data: [{ id: "t3", name: "会话三", createdAt: 0, recencyAt: 0 }],
+        nextCursor: null,
+      });
+    });
+
+    await refreshThreads();
+
+    expect(mockedInvoke).toHaveBeenCalledTimes(2);
+    expect(mockedInvoke).toHaveBeenNthCalledWith(1, "thread_list", {
+      limit: 50,
+      cursor: null,
+    });
+    expect(mockedInvoke).toHaveBeenNthCalledWith(2, "thread_list", {
+      limit: 50,
+      cursor: "page2",
+    });
+    expect(store.threads.map((t) => t.id)).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("首页为空时立即停止，避免死循环", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd !== "thread_list") return Promise.resolve(undefined);
+      return Promise.resolve({
+        data: [],
+        nextCursor: "page2",
+      });
+    });
+
+    await refreshThreads();
+
+    expect(mockedInvoke).toHaveBeenCalledTimes(1);
+    expect(store.threads).toEqual([]);
+  });
+
+  it("searchThreads 逐页累加并汇总摘要", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd !== "codex_rpc") return Promise.resolve(undefined);
+      const cursor = (args as { params?: { cursor?: string | null } })
+        ?.params?.cursor;
+      if (!cursor) {
+        return Promise.resolve({
+          data: [
+            {
+              thread: { id: "t1", name: "会话一", createdAt: 0, recencyAt: 0 },
+              snippet: "摘要一",
+            },
+          ],
+          nextCursor: "page2",
+        });
+      }
+      return Promise.resolve({
+        data: [
+          {
+            thread: { id: "t2", name: "会话二", createdAt: 0, recencyAt: 0 },
+            snippet: "摘要二",
+          },
+        ],
+        nextCursor: null,
+      });
+    });
+
+    await searchThreads("测试");
+
+    expect(mockedInvoke).toHaveBeenCalledTimes(2);
+    expect(store.threads.map((t) => t.id)).toEqual(["t1", "t2"]);
+    expect(store.searchSnippets).toEqual({ t1: "摘要一", t2: "摘要二" });
+    expect(store.searchActive).toBe(true);
+    const searchCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "codex_rpc",
+    );
+    expect(searchCalls[0][1]).toMatchObject({
+      method: "thread/search",
+      params: { searchTerm: "测试", limit: 50, cursor: null },
+    });
+    expect(searchCalls[1][1]).toMatchObject({
+      method: "thread/search",
+      params: { searchTerm: "测试", limit: 50, cursor: "page2" },
+    });
   });
 });

@@ -336,7 +336,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     <ToolCard :item="item" />
   </div>
   <div v-else-if="item.type === 'contextCompaction'" class="msg">
-    <div class="context-compaction-note">上下文已压缩（长对话自动精简）</div>
+    <div class="context-compaction-note">上下文已压缩（长会话自动精简）</div>
   </div>
   <div v-else-if="item.type === 'imageView'" class="msg msg-user">
     <div class="bubble">

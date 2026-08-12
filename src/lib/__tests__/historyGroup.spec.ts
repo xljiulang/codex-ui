@@ -30,7 +30,7 @@ describe("historyGroup 目录分组", () => {
     expect(rows[0].kind).toBe("group");
     expect(rows[1].kind).toBe("group");
     if (rows[0].kind === "group" && rows[1].kind === "group") {
-      // 都未置顶时按组内最近时间降序：codex-proxy(3) 在前，codex-ui(2) 在后
+      // 目录按名称 A-Z：codex-proxy 在 codex-ui 之前
       expect(rows[0].group.threads.map((x) => x.id)).toEqual(["c"]);
       expect(rows[1].group.threads.map((x) => x.id)).toEqual(["a", "b"]);
     }
@@ -69,7 +69,7 @@ describe("historyGroup 目录分组", () => {
     }
   });
 
-  it("顶层排序：含置顶的目录排最前，其余按最近时间降序", () => {
+  it("顶层排序：目录按名称 A-Z（置顶不影响目录顺序）", () => {
     const rows = groupThreads([
       t("old", { cwd: "D:\\a", recencyAt: 100 }),
       t("new", { cwd: "D:\\b", recencyAt: 200 }),
@@ -79,19 +79,33 @@ describe("historyGroup 目录分组", () => {
     const labels = rows.map((r) =>
       r.kind === "group" ? r.group.label : r.thread.id,
     );
-    expect(labels).toEqual(["pin-dir", "b", "a"]);
+    expect(labels).toEqual(["a", "b", "pin-dir"]);
   });
 
-  it("组内顺序沿用入参顺序（置顶优先 + 最近时间）", () => {
+  it("组内对话按置顶优先 + 最近时间倒序（与入参顺序无关）", () => {
     const rows = groupThreads([
+      t("n2", { cwd: "D:\\x", recencyAt: 3 }),
       t("p1", { cwd: "D:\\x", recencyAt: 1, isPinned: true }),
       t("n1", { cwd: "D:\\x", recencyAt: 5 }),
-      t("n2", { cwd: "D:\\x", recencyAt: 3 }),
     ]);
 
     expect(rows).toHaveLength(1);
     if (rows[0].kind === "group") {
       expect(rows[0].group.threads.map((x) => x.id)).toEqual(["p1", "n1", "n2"]);
     }
+  });
+
+  it("目录行按 A-Z 在前，平铺会话在后按置顶/时间排序", () => {
+    const rows = groupThreads([
+      t("s1", { recencyAt: 100 }),
+      t("a1", { cwd: "D:\\zeta", recencyAt: 5 }),
+      t("b1", { cwd: "D:\\alpha", recencyAt: 5 }),
+      t("sp", { recencyAt: 50, isPinned: true }),
+    ]);
+
+    const labels = rows.map((r) =>
+      r.kind === "group" ? r.group.label : r.thread.id,
+    );
+    expect(labels).toEqual(["alpha", "zeta", "sp", "s1"]);
   });
 });

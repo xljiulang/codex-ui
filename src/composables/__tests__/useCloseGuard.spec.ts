@@ -135,7 +135,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     const resolve = vi.fn();
     const existing = {
       title: "切换会话",
-      message: "当前对话仍在进行中，切换将停止当前回合。是否继续？",
+      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
       confirmLabel: "停止并切换",
       cancelLabel: "取消",
       resolve,

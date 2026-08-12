@@ -18,7 +18,7 @@ export async function registerCloseGuard(): Promise<UnlistenFn> {
       if (store.confirm) return;
       const ok = await askConfirm({
         title: "关闭应用",
-        message: "当前对话仍在进行中，关闭将停止当前回合。是否继续？",
+        message: "当前会话仍在进行中，关闭将停止当前回合。是否继续？",
         confirmLabel: "停止并关闭",
         cancelLabel: "取消",
       });

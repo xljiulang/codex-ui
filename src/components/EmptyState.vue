@@ -11,6 +11,6 @@ defineProps<{ busy: boolean }>();
       </svg>
     </div>
     <span v-if="busy">正在处理请求…</span>
-    <span v-else>输入消息开始新的对话</span>
+    <span v-else>输入消息开始新的会话</span>
   </div>
 </template>

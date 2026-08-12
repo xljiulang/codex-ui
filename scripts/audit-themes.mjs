@@ -315,11 +315,10 @@ async function phaseStatic() {
     await closeSettings();
   }
   await setTheme("blue");
-  await evalJs(`document.querySelector('button[aria-label="历史记录"]').click()`);
+  // 历史面板常驻右侧，直接等待挂载后截图
   await waitFor("历史面板", `!!document.querySelector(".history-panel")`, 5000);
   await sleep(600);
   await shot("05-history-shared.png");
-  await evalJs(`document.querySelector('button[aria-label="历史记录"]').click()`);
 }
 
 async function phaseChat() {

@@ -29,16 +29,18 @@ function recencyOf(t: ThreadSummary): number {
   return t.recencyAt ?? t.updatedAt ?? 0;
 }
 
-function groupRecency(group: HistoryGroup): number {
-  return group.threads.reduce((max, t) => Math.max(max, recencyOf(t)), 0);
+/** 会话排序：置顶优先，其余按最近时间倒序 */
+function byPinThenRecency(a: ThreadSummary, b: ThreadSummary): number {
+  if (!!a.isPinned !== !!b.isPinned) return a.isPinned ? -1 : 1;
+  return recencyOf(b) - recencyOf(a);
 }
 
 /**
  * 把已排序的会话列表按 cwd 分组为目录行 + 平铺行：
  * - 相同 cwd 归入同一目录（仅 1 条也建目录）；
- * - cwd 缺失/空串的会话保持平铺；
- * - 顶层排序：含置顶会话的目录/条目排最前，其余按最近时间降序；
- * - 组内顺序沿用入参顺序（外部已按置顶优先 + 最近时间排序）。
+ * - cwd 缺失/空串的会话保持平铺，排在所有目录之后；
+ * - 目录行按目录名 A-Z（忽略大小写、数字自然序），同名按规范化 key 兜底；
+ * - 目录内与平铺会话均按置顶优先 + 最近时间倒序。
  */
 export function groupThreads(list: ThreadSummary[]): HistoryRow[] {
   const groups = new Map<string, HistoryGroup>();
@@ -59,23 +61,24 @@ export function groupThreads(list: ThreadSummary[]): HistoryRow[] {
     group.threads.push(t);
   }
 
-  const rows: HistoryRow[] = [
-    ...[...groups.values()].map((group): HistoryRow => ({ kind: "group", group })),
-    ...singles.map((thread): HistoryRow => ({ kind: "item", thread })),
-  ];
+  for (const group of groups.values()) {
+    group.threads.sort(byPinThenRecency);
+  }
 
-  return rows.sort((a, b) => {
-    const aPinned =
-      a.kind === "group"
-        ? a.group.threads.some((t) => !!t.isPinned)
-        : !!a.thread.isPinned;
-    const bPinned =
-      b.kind === "group"
-        ? b.group.threads.some((t) => !!t.isPinned)
-        : !!b.thread.isPinned;
-    if (aPinned !== bPinned) return aPinned ? -1 : 1;
-    const ar = a.kind === "group" ? groupRecency(a.group) : recencyOf(a.thread);
-    const br = b.kind === "group" ? groupRecency(b.group) : recencyOf(b.thread);
-    return br - ar;
-  });
+  const folderRows: HistoryRow[] = [...groups.values()]
+    .sort((a, b) => {
+      const byLabel = a.label.localeCompare(b.label, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+      return byLabel || a.key.localeCompare(b.key);
+    })
+    .map((group): HistoryRow => ({ kind: "group", group }));
+
+  singles.sort(byPinThenRecency);
+  const singleRows: HistoryRow[] = singles.map(
+    (thread): HistoryRow => ({ kind: "item", thread }),
+  );
+
+  return [...folderRows, ...singleRows];
 }

@@ -46,9 +46,9 @@ const sleep = (ms) => evalJs(`new Promise(r => setTimeout(r, ${ms}))`);
 
 ws.onopen = async () => {
   try {
-    // 先新建对话，避免沿用已被删除的会话
+    // 先新建会话，避免沿用已被删除的会话
     await evalJs(
-      `document.querySelector('button[aria-label="新建对话"]').click()`,
+      `document.querySelector('button[aria-label="新建会话"]').click()`,
     );
     await sleep(400);
     await evalJs(`(() => {

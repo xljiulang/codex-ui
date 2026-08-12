@@ -21,7 +21,7 @@ describe("ConfirmDialog 全局确认框", () => {
   function setConfirm(resolve: (ok: boolean) => void) {
     store.confirm = {
       title: "切换会话",
-      message: "当前对话仍在进行中，切换将停止当前回合。是否继续？",
+      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
       confirmLabel: "停止并切换",
       cancelLabel: "取消",
       resolve,
@@ -37,7 +37,7 @@ describe("ConfirmDialog 全局确认框", () => {
     setConfirm(vi.fn());
     wrapper = mount(ConfirmDialog);
     expect(wrapper.find(".modal-title").text()).toContain("切换会话");
-    expect(wrapper.text()).toContain("当前对话仍在进行中");
+    expect(wrapper.text()).toContain("当前会话仍在进行中");
     expect(wrapper.text()).toContain("停止并切换");
     expect(wrapper.text()).toContain("取消");
   });

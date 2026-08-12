@@ -24,30 +24,15 @@ function mountHeader() {
 describe("AppHeader 导航", () => {
   beforeEach(() => {
     store.showSettings = false;
-    store.showHistory = false;
     store.currentThreadId = null;
     store.currentThreadCwd = null;
     store.server.workspace = "";
     mockedNewChat.mockClear();
   });
 
-  it("点设置打开设置页，历史面板不受影响", async () => {
-    store.showHistory = true;
+  it("点设置打开设置页", async () => {
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="设置"]').trigger("click");
-    expect(store.showSettings).toBe(true);
-    expect(store.showHistory).toBe(true);
-  });
-
-  it("历史记录按钮手动 toggle，不受设置影响", async () => {
-    const wrapper = mountHeader();
-    await wrapper.find('button[aria-label="历史记录"]').trigger("click");
-    expect(store.showHistory).toBe(true);
-    await wrapper.find('button[aria-label="历史记录"]').trigger("click");
-    expect(store.showHistory).toBe(false);
-    store.showSettings = true;
-    await wrapper.find('button[aria-label="历史记录"]').trigger("click");
-    expect(store.showHistory).toBe(true);
     expect(store.showSettings).toBe(true);
   });
 
@@ -61,35 +46,18 @@ describe("AppHeader 导航", () => {
     expect(mockedNewChat).not.toHaveBeenCalled();
   });
 
-  it("历史面板打开时点设置：两者可同时为 true，关设置后历史仍打开", async () => {
-    store.showHistory = true;
-    const wrapper = mountHeader();
-    await wrapper.find('button[aria-label="设置"]').trigger("click");
-    expect(store.showSettings).toBe(true);
-    expect(store.showHistory).toBe(true);
-    await wrapper.find('button[aria-label="设置"]').trigger("click");
-    expect(store.showSettings).toBe(false);
-    expect(store.showHistory).toBe(true);
-  });
-
-  it("设置打开时点新建对话：关闭设置并新建，历史不受影响", async () => {
+  it("设置打开时点新建会话：关闭设置并新建", async () => {
     store.showSettings = true;
-    store.showHistory = true;
     const wrapper = mountHeader();
-    await wrapper.find('button[aria-label="新建对话"]').trigger("click");
+    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(store.showSettings).toBe(false);
-    expect(store.showHistory).toBe(true);
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("设置按钮无 active 态，历史按钮有 active 态", async () => {
+  it("设置按钮无 active 态", async () => {
     store.showSettings = true;
-    store.showHistory = true;
     const wrapper = mountHeader();
     expect(wrapper.find('button[aria-label="设置"]').classes()).not.toContain(
-      "active",
-    );
-    expect(wrapper.find('button[aria-label="历史记录"]').classes()).toContain(
       "active",
     );
   });
@@ -104,53 +72,64 @@ describe("AppHeader 工作目录选择", () => {
     mockedInvoke.mockReset();
   });
 
-  it("新对话态点击工作目录打开目录选择器，选中后更新显示", async () => {
+  it("新会话态点击工作目录打开目录选择器，选中后更新显示", async () => {
     mockedInvoke.mockImplementation(async (cmd: string) =>
       cmd === "pick_directory" ? "D:/project" : undefined,
     );
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
-    expect(chip.text()).toContain("D:/repo");
+    // 芯片只显示文件夹名，完整路径在 tooltip
+    expect(chip.text()).toContain("repo");
+    expect(chip.attributes("data-tip")).toBe("D:/repo");
     await chip.trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
     expect(store.newChatCwd).toBe("D:/project");
-    expect(wrapper.find("button.brand-cwd").text()).toContain("D:/project");
+    expect(wrapper.find("button.brand-cwd").text()).toContain("project");
   });
 
-  it("新对话态 cwd tooltip 提示点击可修改且带 pickable 样式", () => {
+  it("新会话态 cwd tooltip 显示完整路径且带 pickable 样式", () => {
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
-    expect(chip.attributes("data-tip")).toBe("点击可修改工作目录");
+    expect(chip.attributes("data-tip")).toBe("D:/repo");
     expect(chip.classes()).toContain("pickable");
   });
 
-  it("自定义目录后显示 × 恢复按钮，点击恢复默认", async () => {
-    store.newChatCwd = "D:/custom";
+  it("工作目录与新建会话黏连成组，设置按钮靠最右", () => {
     const wrapper = mountHeader();
-    const reset = wrapper.find(
-      'button.brand-cwd-reset[aria-label="恢复默认工作目录"]',
+    const group = wrapper.find(".cwd-group");
+    expect(group.find("button.brand-cwd").exists()).toBe(true);
+    expect(group.find('button[aria-label="新建会话"]').exists()).toBe(true);
+    expect(group.find('button[aria-label="新建会话"]').classes()).toContain(
+      "cwd-attach",
     );
-    expect(reset.exists()).toBe(true);
-    expect(reset.attributes("data-tip")).toBe("恢复默认工作目录");
-    await reset.trigger("click");
-    expect(store.newChatCwd).toBeNull();
+    const actions = wrapper.findAll(".header-actions > *");
+    expect(actions[actions.length - 1].attributes("aria-label")).toBe("设置");
   });
 
-  it("会话进行中点击 cwd 在资源管理器中打开，不弹选择器、无 ×", async () => {
+  it("根路径原样显示为工作目录文本", () => {
+    store.server.workspace = "C:/";
+    const wrapper = mountHeader();
+    const chip = wrapper.find("button.brand-cwd");
+    expect(chip.text()).toContain("C:/");
+    expect(chip.attributes("data-tip")).toBe("C:/");
+  });
+
+  it("会话进行中点击 cwd 无任何行为（只读展示）", async () => {
     store.currentThreadId = "t1";
     store.currentThreadCwd = "D:/thread";
     store.newChatCwd = "D:/custom"; // 会话态应忽略残留的新对话目录
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
-    expect(chip.text()).toContain("D:/thread");
-    expect(chip.attributes("data-tip")).toBe("在资源管理器中打开");
+    expect(chip.text()).toContain("thread");
+    expect(chip.attributes("data-tip")).toBe("D:/thread");
+    expect(chip.classes()).toContain("readonly");
     expect(chip.classes()).not.toContain("pickable");
-    expect(wrapper.find("button.brand-cwd-reset").exists()).toBe(false);
     mockedInvoke.mockResolvedValue(undefined);
     await chip.trigger("click");
-    expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
-      url: "D:/thread",
-    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "open_url",
+      expect.anything(),
+    );
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "pick_directory",
       expect.anything(),
@@ -159,7 +138,7 @@ describe("AppHeader 工作目录选择", () => {
 
 });
 
-describe("AppHeader 新建对话聚焦输入框", () => {
+describe("AppHeader 新建会话聚焦输入框", () => {
   afterEach(() => {
     delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
     document.body.innerHTML = "";
@@ -172,7 +151,7 @@ describe("AppHeader 新建对话聚焦输入框", () => {
     };
     const wrapper = mountHeader();
 
-    await wrapper.find('button[aria-label="新建对话"]').trigger("click");
+    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     await wrapper.vm.$nextTick();
 
     expect(focus).toHaveBeenCalledTimes(1);
@@ -187,7 +166,7 @@ describe("AppHeader 新建对话聚焦输入框", () => {
     document.body.appendChild(composer);
     const wrapper = mountHeader();
 
-    await wrapper.find('button[aria-label="新建对话"]').trigger("click");
+    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     await wrapper.vm.$nextTick();
 
     expect(document.activeElement).toBe(editor);

@@ -79,10 +79,8 @@ export const store = reactive({
     logs: [] as string[],
   },
   threads: [] as ThreadSummary[],
-  nextCursor: null as string | null,
   searchActive: false,
   searchSnippets: {} as Record<string, string>,
-  searchCursor: null as string | null,
   currentThreadId: null as string | null,
   currentThreadName: "",
   currentThreadOrigin: null as "new" | "history" | null,
@@ -124,7 +122,6 @@ export const store = reactive({
   /** 目标模式下用户首条消息对应回合的 id，完成/终止时据此清除目标并退回执行 */
   goalTurnId: null as string | null,
   attachments: [] as UserInput[],
-  showHistory: false,
   showSettings: false,
   permOpen: false,
   taskOpen: false,
@@ -566,21 +563,27 @@ async function getTitleHelperCapability(): Promise<TitleHelperCapability | null>
   }
 }
 
-export async function refreshThreads(loadMore = false) {
+/** 全量加载历史会话：逐页拉取直至 cursor 为空（防死循环上限 200 页） */
+export async function refreshThreads() {
   if (store.loadingHistory) return;
   store.loadingHistory = true;
+  const all: ThreadSummary[] = [];
+  let cursor: string | null = null;
   try {
-    const res = await invoke<{
-      data: ThreadSummary[];
-      nextCursor: string | null;
-    }>("thread_list", {
-      limit: 50,
-      cursor: loadMore ? store.nextCursor : null,
-    });
-    store.threads = sortThreads(
-      loadMore ? [...store.threads, ...res.data] : res.data,
-    );
-    store.nextCursor = res.nextCursor;
+    for (let i = 0; i < 200; i++) {
+      const res: {
+        data: ThreadSummary[];
+        nextCursor: string | null;
+      } = await invoke("thread_list", {
+        limit: 50,
+        cursor,
+      });
+      const page = res.data ?? [];
+      all.push(...page);
+      cursor = res.nextCursor ?? null;
+      if (!cursor || page.length === 0) break;
+    }
+    store.threads = sortThreads(all);
   } catch (e) {
     setToast(String(e));
   } finally {
@@ -588,8 +591,8 @@ export async function refreshThreads(loadMore = false) {
   }
 }
 
-/** 搜索历史会话（thread/search），结果写入 store.threads 并附带摘要 */
-export async function searchThreads(term: string, loadMore = false) {
+/** 搜索历史会话（thread/search）：全量翻页，结果写入 store.threads 并附带摘要 */
+export async function searchThreads(term: string) {
   const t = term.trim();
   if (!t) {
     clearSearch();
@@ -597,31 +600,31 @@ export async function searchThreads(term: string, loadMore = false) {
   }
   if (store.loadingHistory) return;
   store.loadingHistory = true;
+  const all: { thread: ThreadSummary; snippet: string }[] = [];
+  let cursor: string | null = null;
   try {
-    const res = await invoke<{
-      data: { thread: ThreadSummary; snippet: string }[];
-      nextCursor: string | null;
-    }>("codex_rpc", {
-      method: "thread/search",
-      params: {
-        searchTerm: t,
-        limit: 50,
-        cursor: loadMore ? store.searchCursor : null,
-        sourceKinds: ["cli", "vscode", "exec", "appServer", "unknown"],
-      },
-    });
-    const results = res.data ?? [];
+    for (let i = 0; i < 200; i++) {
+      const res: {
+        data: { thread: ThreadSummary; snippet: string }[];
+        nextCursor: string | null;
+      } = await invoke("codex_rpc", {
+        method: "thread/search",
+        params: {
+          searchTerm: t,
+          limit: 50,
+          cursor,
+          sourceKinds: ["cli", "vscode", "exec", "appServer", "unknown"],
+        },
+      });
+      const page = res.data ?? [];
+      all.push(...page);
+      cursor = res.nextCursor ?? null;
+      if (!cursor || page.length === 0) break;
+    }
     const snippets: Record<string, string> = {};
-    for (const r of results) snippets[r.thread.id] = r.snippet ?? "";
-    store.searchSnippets = loadMore
-      ? { ...store.searchSnippets, ...snippets }
-      : snippets;
-    store.threads = sortThreads(
-      loadMore
-        ? [...store.threads, ...results.map((r) => r.thread)]
-        : results.map((r) => r.thread),
-    );
-    store.searchCursor = res.nextCursor ?? null;
+    for (const r of all) snippets[r.thread.id] = r.snippet ?? "";
+    store.searchSnippets = snippets;
+    store.threads = sortThreads(all.map((r) => r.thread));
     store.searchActive = true;
   } catch (e) {
     setToast(String(e));
@@ -634,7 +637,6 @@ export async function searchThreads(term: string, loadMore = false) {
 export function clearSearch() {
   store.searchActive = false;
   store.searchSnippets = {};
-  store.searchCursor = null;
   void refreshThreads();
 }
 
@@ -729,7 +731,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
         const cur = store.threads.find((x) => x.id === threadId);
         if (!cur?.name && !store.currentThreadName) {
           if (await renameThread(threadId, title)) {
-            setToast("当前对话的标题已简化");
+            setToast("当前会话的标题已简化");
           }
         }
       }
@@ -929,7 +931,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     } catch (e) {
       if (isThreadNotFound(e)) {
         resetToNewChat();
-        setToast("会话已不存在，已切换为新对话");
+        setToast("会话已不存在，已切换为新会话");
       } else {
         setToast(toastError(e));
       }
@@ -991,7 +993,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   } catch (e) {
     if (isThreadNotFound(e)) {
       resetToNewChat();
-      setToast("会话已不存在，已切换为新对话");
+      setToast("会话已不存在，已切换为新会话");
     } else {
       setToast(toastError(e));
     }
@@ -1090,7 +1092,7 @@ export async function newEmptyChat() {
   if (store.turnActive && store.currentThreadId) {
     const ok = await askConfirm({
       title: "切换会话",
-      message: "当前对话仍在进行中，切换将停止当前回合。是否继续？",
+      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
       confirmLabel: "停止并切换",
       cancelLabel: "取消",
     });
@@ -1127,7 +1129,7 @@ export async function openThread(threadId: string) {
   ) {
     const ok = await askConfirm({
       title: "切换会话",
-      message: "当前对话仍在进行中，切换将停止当前回合。是否继续？",
+      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
       confirmLabel: "停止并切换",
       cancelLabel: "取消",
     });
@@ -1180,7 +1182,7 @@ export async function openThread(threadId: string) {
   } catch (e) {
     if (isThreadNotFound(e)) {
       resetToNewChat();
-      setToast("会话已不存在，已切换为新对话");
+      setToast("会话已不存在，已切换为新会话");
     } else {
       setToast(String(e));
     }
@@ -1587,15 +1589,15 @@ export function currentItems(): ThreadItem[] {
 }
 
 export function threadTitle(t: ThreadSummary): string {
-  return t.name || t.preview || "新对话";
+  return t.name || t.preview || "新会话";
 }
 
 export function currentThreadLabel(): string {
-  if (!store.currentThreadId) return "新对话";
+  if (!store.currentThreadId) return "新会话";
   if (store.currentThreadName) return store.currentThreadName;
   const summary = store.threads.find((t) => t.id === store.currentThreadId);
   if (summary?.name || summary?.preview) {
-    return summary.name || summary.preview || "新对话";
+    return summary.name || summary.preview || "新会话";
   }
   const items = store.itemsByThread[store.currentThreadId] ?? [];
   for (let i = items.length - 1; i >= 0; i--) {
@@ -1609,11 +1611,11 @@ export function currentThreadLabel(): string {
       if (text) return text;
     }
   }
-  return "新对话";
+  return "新会话";
 }
 
 export function currentOriginLabel(): string {
   if (store.currentThreadOrigin === "history") return "历史会话";
   if (store.currentThreadOrigin === "new") return "新会话";
-  return "新对话";
+  return "新会话";
 }

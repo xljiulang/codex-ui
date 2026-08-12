@@ -44,8 +44,8 @@ onBeforeUnmount(() => {
   <div v-else class="app">
     <AppHeader />
     <div class="app-body">
-      <HistoryPanel v-if="store.showHistory" />
       <ChatView />
+      <HistoryPanel />
     </div>
     <SettingsView v-if="store.showSettings" />
     <InteractionDialog />
