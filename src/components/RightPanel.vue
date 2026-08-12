@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import GitView from "./GitView.vue";
 import HistoryView from "./HistoryView.vue";
 import ResourceView from "./ResourceView.vue";
 
 /** 右侧面板默认/最小宽度（px） */
 const DEFAULT_PANEL_WIDTH = 264;
 
-const activeTab = ref<"history" | "resources">("history");
+const activeTab = ref<"history" | "resources" | "git">("history");
 /** 面板宽度：仅本次运行生效，不持久化 */
 const panelWidth = ref(DEFAULT_PANEL_WIDTH);
 let resizeStartX = 0;
@@ -62,6 +63,7 @@ onBeforeUnmount(() => {
         v-show="activeTab === 'resources'"
         :active="activeTab === 'resources'"
       />
+      <GitView v-show="activeTab === 'git'" :active="activeTab === 'git'" />
     </div>
     <div class="panel-tabs" role="tablist">
       <button
@@ -81,6 +83,15 @@ onBeforeUnmount(() => {
         @click="activeTab = 'resources'"
       >
         会话资源
+      </button>
+      <button
+        class="panel-tab"
+        :class="{ active: activeTab === 'git' }"
+        role="tab"
+        :aria-selected="activeTab === 'git'"
+        @click="activeTab = 'git'"
+      >
+        Git 更改
       </button>
     </div>
   </aside>

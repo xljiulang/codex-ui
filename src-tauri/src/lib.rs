@@ -56,6 +56,11 @@ pub fn run() {
             codex::session_fs::session_fs_paste,
             codex::session_fs::session_fs_watch_start,
             codex::session_fs::session_fs_watch_stop,
+            codex::git::git_changes_status,
+            codex::git::git_changes_init,
+            codex::git::git_changes_diff,
+            codex::git::git_changes_watch_start,
+            codex::git::git_changes_watch_stop,
         ])
         .setup(|app| {
             let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -64,6 +69,7 @@ pub fn run() {
             app.manage(server);
             app.manage(codex::diff::DiffParamsState(std::sync::Mutex::new(None)));
             app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
+            app.manage(codex::git::GitWatcherState(std::sync::Mutex::new(None)));
             server_handle.ensure_running();
             Ok(())
         })

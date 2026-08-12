@@ -21,8 +21,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import RightPanel from "../RightPanel.vue";
 import ResourceView from "../ResourceView.vue";
+import GitView from "../GitView.vue";
 import { store } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
+import { __resetGitChangesForTest } from "../../composables/useGitChanges";
 
 const mockedInvoke = vi.mocked(invoke);
 const rootPath = "D:\\codex\\codex-ui";
@@ -87,6 +89,21 @@ function mockFs() {
     ) {
       return Promise.resolve(undefined);
     }
+    if (cmd === "git_changes_status") {
+      return Promise.resolve({
+        repoRoot: rootPath,
+        branch: "main",
+        files: [{ path: "src/a.ts", status: "modified" }],
+      });
+    }
+    if (
+      cmd === "git_changes_watch_start" ||
+      cmd === "git_changes_watch_stop" ||
+      cmd === "git_changes_init" ||
+      cmd === "git_changes_diff"
+    ) {
+      return Promise.resolve(cmd === "git_changes_diff" ? "diff" : undefined);
+    }
     return Promise.resolve(undefined);
   });
 }
@@ -101,6 +118,7 @@ describe("RightPanel Tab 栏", () => {
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
+    __resetGitChangesForTest();
   });
 
   it("默认显示历史会话 Tab，资源面板隐藏", async () => {
@@ -108,8 +126,12 @@ describe("RightPanel Tab 栏", () => {
     await flushPromises();
 
     const tabs = wrapper.findAll(".panel-tab");
-    expect(tabs).toHaveLength(2);
-    expect(tabs.map((t) => t.text().trim())).toEqual(["历史会话", "会话资源"]);
+    expect(tabs).toHaveLength(3);
+    expect(tabs.map((t) => t.text().trim())).toEqual([
+      "历史会话",
+      "会话资源",
+      "Git 更改",
+    ]);
     expect(tabs[0].classes()).toContain("active");
     // v-show 单根化后互斥生效（happy-dom 的 isVisible 不可靠，直接断言 inline style）
     expect(
@@ -117,6 +139,9 @@ describe("RightPanel Tab 栏", () => {
     ).toBe("");
     expect(
       (wrapper.find(".resource-view").element as HTMLElement).style.display,
+    ).toBe("none");
+    expect(
+      (wrapper.find(".git-view").element as HTMLElement).style.display,
     ).toBe("none");
     // 资源 Tab 未激活时不加载文件树
     expect(wrapper.find(".resource-root").exists()).toBe(false);
@@ -141,6 +166,27 @@ describe("RightPanel Tab 栏", () => {
     expect(
       mockedInvoke.mock.calls.some(([cmd]) => cmd === "session_fs_list"),
     ).toBe(true);
+  });
+
+  it("切换到 Git 更改 Tab：底部高亮切换、加载 git 状态", async () => {
+    const wrapper = mount(RightPanel);
+    await flushPromises();
+
+    await wrapper.findAll(".panel-tab")[2].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".panel-tab")[2].classes()).toContain("active");
+    expect(
+      (wrapper.find(".git-view").element as HTMLElement).style.display,
+    ).toBe("");
+    expect(
+      (wrapper.find(".history-view").element as HTMLElement).style.display,
+    ).toBe("none");
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_status"),
+    ).toBe(true);
+    expect(wrapper.findComponent(GitView).exists()).toBe(true);
+    expect(wrapper.find(".git-view").text()).toContain("src/a.ts");
   });
 
   it("Tab 切换保留资源树展开状态（v-show）", async () => {
@@ -174,6 +220,7 @@ describe("RightPanel 宽度调节", () => {
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
+    __resetGitChangesForTest();
   });
 
   it("向左拖拽加宽面板，并钳制在半个窗口宽度内", async () => {
