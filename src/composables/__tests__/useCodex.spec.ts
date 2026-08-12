@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -10,8 +10,20 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => ({
+    isMinimized: vi.fn().mockResolvedValue(false),
+    unminimize: vi.fn(),
+    setFocus: vi.fn(),
+    setTitle: vi.fn(),
+    setProgressBar: vi.fn(),
+  })),
+  ProgressBarStatus: { Indeterminate: "Indeterminate", None: "None" },
+}));
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   __resetPinnedSectionForTest,
   __resetTitleHelperCapabilityForTest,
@@ -164,6 +176,35 @@ describe("refreshServer 服务状态同步", () => {
     expect(store.server.codexPath).toBe("D:/codex/codex.exe");
     expect(store.server.connected).toBe(true);
     expect(store.server.workspace).toBe("D:/repo");
+  });
+});
+
+describe("interaction:request 弹窗请求不抢窗口焦点", () => {
+  beforeEach(() => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    store.interactions = [];
+    store.settings.sound_enabled = false;
+    vi.mocked(getCurrentWindow).mockClear();
+  });
+
+  afterEach(() => {
+    disposeEvents();
+  });
+
+  it("请求正确入队，且不调用任何窗口聚焦 API", async () => {
+    await wireEvents();
+    fireListen("interaction:request", {
+      requestId: 99,
+      method: "item/tool/requestUserInput",
+      params: { questions: [{ id: "q1", question: "继续？", options: [] }] },
+    });
+    expect(store.interactions).toHaveLength(1);
+    expect(store.interactions[0].requestId).toBe(99);
+    expect(store.interactions[0].method).toBe("item/tool/requestUserInput");
+    expect(getCurrentWindow).not.toHaveBeenCalled();
   });
 });
 

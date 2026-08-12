@@ -108,3 +108,66 @@ describe("requestUserInput 响应格式", () => {
     expect(result).toEqual({ answers: expectedAnswers });
   });
 });
+
+describe("审批/询问弹窗信息层级", () => {
+  beforeEach(() => {
+    store.interactions = [];
+    mockedRespond.mockClear();
+  });
+
+  it("命令审批：标题与命令/原因置顶，详细信息默认折叠，展开后展示次要元数据", async () => {
+    store.interactions.push({
+      requestId: 10,
+      method: "item/commandExecution/requestApproval",
+      params: {
+        command: "npm run build",
+        cwd: "D:/repo",
+        reason: "构建前端产物",
+        additionalPermissions: { type: "workspaceWrite", writableRoots: ["D:/repo"] },
+      },
+      at: Date.now(),
+    });
+    const wrapper = mount(InteractionDialog);
+    expect(wrapper.text()).toContain("批准执行命令");
+    expect(wrapper.text()).toContain("npm run build");
+    expect(wrapper.text()).toContain("构建前端产物");
+
+    const details = wrapper.find(".approval-details");
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    await details.find("summary").trigger("click");
+    expect((details.element as HTMLDetailsElement).open).toBe(true);
+    expect(details.text()).toContain("D:/repo");
+    expect(details.text()).toContain("type：workspaceWrite");
+    expect(details.text()).not.toContain("{");
+  });
+
+  it("权限审批：无原因时显示兜底文案，权限为可读文本", async () => {
+    store.interactions.push({
+      requestId: 11,
+      method: "item/permissions/requestApproval",
+      params: {
+        grantRoot: "D:/repo",
+        permissions: { type: "workspaceWrite", writableRoots: ["D:/repo", "D:/tmp"] },
+      },
+      at: Date.now(),
+    });
+    const wrapper = mount(InteractionDialog);
+    expect(wrapper.text()).toContain("是否允许此操作？");
+    const details = wrapper.find(".approval-details");
+    (details.element as HTMLDetailsElement).open = true;
+    expect(details.text()).toContain("writableRoots：D:/repo；D:/tmp");
+    expect(details.text()).not.toContain("{");
+  });
+
+  it("文件变更审批无任何元数据时只显示兜底文案，不出现详细信息折叠区", async () => {
+    store.interactions.push({
+      requestId: 12,
+      method: "item/fileChange/requestApproval",
+      params: {},
+      at: Date.now(),
+    });
+    const wrapper = mount(InteractionDialog);
+    expect(wrapper.text()).toContain("是否允许此操作？");
+    expect(wrapper.find(".approval-details").exists()).toBe(false);
+  });
+});

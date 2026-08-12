@@ -33,6 +33,12 @@ const isReviewApproval = computed(
 );
 const isUserInput = computed(() => current.value?.method === "item/tool/requestUserInput");
 const isElicitation = computed(() => current.value?.method === "mcpServer/elicitation/request");
+const hasCommandDetails = computed(
+  () =>
+    Boolean(params.value.cwd) ||
+    commandActions().length > 0 ||
+    Boolean(params.value.additionalPermissions),
+);
 
 const selectedOptions = reactive<Record<string, string>>({});
 const otherInputs = reactive<Record<string, string>>({});
@@ -124,6 +130,25 @@ function commandActions(): string[] {
 
 function questions(): Record<string, unknown>[] {
   return list(params.value.questions) as Record<string, unknown>[];
+}
+
+/** 把权限对象/数组转成易读文本（对象渲染为 `键：值`，数组用“；”连接） */
+function permText(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) {
+    return v
+      .map((x) => permText(x))
+      .filter(Boolean)
+      .join("；");
+  }
+  if (typeof v === "object") {
+    return Object.entries(v as Record<string, unknown>)
+      .map(([k, val]) => `${k}：${permText(val)}`)
+      .join("；");
+  }
+  return String(v);
 }
 
 function approve() {
@@ -224,7 +249,9 @@ function schemaProperties(): [string, Record<string, unknown>][] {
               ? "Codex 需要输入"
               : isElicitation
                 ? "MCP 工具请求"
-                : "需要你的确认"
+                : isCommandApproval
+                  ? "批准执行命令"
+                  : "批准操作"
           }}
         </span>
         <span v-if="store.interactions.length > 1" class="modal-title" style="font-size: 11px">
@@ -235,39 +262,46 @@ function schemaProperties(): [string, Record<string, unknown>][] {
       <div class="modal-body">
         <!-- 命令审批 -->
         <template v-if="isCommandApproval">
-          <div class="approval-command">{{ commandText() }}</div>
-          <div class="approval-meta">
-            <div v-if="params.cwd">
-              <b>工作目录：</b>{{ params.cwd }}
-            </div>
-            <div v-if="params.reason">
-              <b>原因：</b>{{ params.reason }}
-            </div>
-            <div v-if="commandActions().length">
-              <b>操作：</b>{{ commandActions().join("；") }}
-            </div>
-            <div v-if="params.additionalPermissions">
-              <b>额外权限：</b>{{ JSON.stringify(params.additionalPermissions) }}
-            </div>
+          <div class="approval-hero">
+            <div class="approval-label">将执行命令</div>
+            <div class="approval-command">{{ commandText() }}</div>
+            <div v-if="params.reason" class="approval-reason">{{ params.reason }}</div>
           </div>
+          <details v-if="hasCommandDetails" class="approval-details">
+            <summary>详细信息</summary>
+            <div class="approval-meta">
+              <div v-if="params.cwd">
+                <b>工作目录：</b>{{ params.cwd }}
+              </div>
+              <div v-if="commandActions().length">
+                <b>操作：</b>{{ commandActions().join("；") }}
+              </div>
+              <div v-if="params.additionalPermissions">
+                <b>额外权限：</b>{{ permText(params.additionalPermissions) }}
+              </div>
+            </div>
+          </details>
         </template>
 
         <!-- 其他审批（文件变更/权限） -->
         <template v-else-if="isReviewApproval">
-          <div class="approval-meta">
-            <div v-if="params.reason">
-              <b>原因：</b>{{ params.reason }}
-            </div>
-            <div v-if="params.grantRoot">
-              <b>授权目录：</b>{{ params.grantRoot }}
-            </div>
-            <div v-if="params.permissions">
-              <b>请求的权限：</b>{{ JSON.stringify(params.permissions) }}
-            </div>
-            <div v-if="!params.reason && !params.grantRoot && !params.permissions">
-              是否允许此操作？
+          <div class="approval-hero">
+            <div class="approval-label">请求的操作</div>
+            <div class="approval-reason">
+              {{ params.reason ?? "是否允许此操作？" }}
             </div>
           </div>
+          <details v-if="params.grantRoot || params.permissions" class="approval-details">
+            <summary>详细信息</summary>
+            <div class="approval-meta">
+              <div v-if="params.grantRoot">
+                <b>授权目录：</b>{{ params.grantRoot }}
+              </div>
+              <div v-if="params.permissions">
+                <b>请求的权限：</b>{{ permText(params.permissions) }}
+              </div>
+            </div>
+          </details>
         </template>
 
         <!-- 用户输入 -->
@@ -331,9 +365,9 @@ function schemaProperties(): [string, Record<string, unknown>][] {
 
         <!-- MCP elicitation -->
         <template v-else-if="isElicitation">
-          <div class="approval-meta">
-            <div><b>服务器：</b>{{ params.serverName }}</div>
-            <div v-if="params.message"><b>说明：</b>{{ params.message }}</div>
+          <div class="approval-hero">
+            <div class="approval-label">来自 {{ params.serverName }} 的请求</div>
+            <div v-if="params.message" class="approval-reason">{{ params.message }}</div>
           </div>
           <template v-if="obj(params).mode !== 'url'">
             <div v-for="[key, prop] in schemaProperties()" :key="key" class="question-row">

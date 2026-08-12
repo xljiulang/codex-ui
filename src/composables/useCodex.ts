@@ -299,17 +299,6 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
   return flattenTurns(turns);
 }
 
-async function focusWindow() {
-  try {
-    const win = getCurrentWindow();
-    const minimized = await win.isMinimized();
-    if (minimized) await win.unminimize();
-    await win.setFocus();
-  } catch {
-    // 非 Tauri 环境（如浏览器预览）忽略
-  }
-}
-
 async function updateWindowTitle() {
   try {
     const win = getCurrentWindow();
@@ -1306,7 +1295,6 @@ export async function wireEvents() {
       const p = e.payload as { requestId: number; method: string; params: Record<string, unknown> };
       store.interactions.push({ ...p, at: Date.now() });
       if (store.settings.sound_enabled) playNotificationSound();
-      await focusWindow();
     }),
   );
 

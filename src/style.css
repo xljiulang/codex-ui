@@ -2656,7 +2656,8 @@ body.resizing-editor {
 
 .approval-command {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13.5px;
+  font-weight: 600;
   background: var(--console-bg-deep);
   color: var(--console-text);
   border: 1px solid var(--border);
@@ -2668,6 +2669,53 @@ body.resizing-editor {
   margin: 10px 0;
   line-height: 1.5;
   box-shadow: var(--inset-shadow);
+}
+
+.approval-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.approval-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.03em;
+}
+
+.approval-reason {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-bright);
+  line-height: 1.55;
+  word-break: break-word;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent-dim);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-radius: 6px;
+}
+
+.approval-details {
+  margin-top: 12px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+
+.approval-details summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  user-select: none;
+  outline: none;
+}
+
+.approval-details summary:hover {
+  color: var(--text-bright);
+}
+
+.approval-details .approval-meta {
+  margin-top: 8px;
 }
 
 .approval-meta {
@@ -2697,10 +2745,10 @@ body.resizing-editor {
 }
 
 .question-text {
-  font-size: 12.5px;
+  font-size: 14px;
   color: var(--text-bright);
   margin-bottom: 6px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .question-progress {
