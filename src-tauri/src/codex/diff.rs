@@ -348,11 +348,10 @@ pub async fn open_diff_window(
             tauri::WebviewUrl::App("index.html".into()),
         )
         .title("文件差异预览")
-        .inner_size(1200.0, 800.0)
-        .min_inner_size(600.0, 400.0)
+        .inner_size(1280.0, 720.0)
+        .min_inner_size(400.0, 560.0)
         .center()
         .resizable(true)
-        .maximized(true)
         .build()
         {
             eprintln!("open diff window failed: {e}");

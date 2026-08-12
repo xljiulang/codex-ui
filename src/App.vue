@@ -9,6 +9,7 @@ import ConfirmDialog from "./components/ConfirmDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
+import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -23,12 +24,16 @@ try {
 // 主窗口注册自定义右键菜单（diff 窗口由 DiffWindowView 自行注册）
 const { ctxMenu } = useContextMenu(!isDiffWindow);
 
-onMounted(() => {
+let unlistenClose: (() => void) | undefined;
+
+onMounted(async () => {
   if (isDiffWindow) return;
+  unlistenClose = await registerCloseGuard();
   void init();
 });
 
 onBeforeUnmount(() => {
+  unlistenClose?.();
   if (isDiffWindow) return;
   disposeEvents();
 });
