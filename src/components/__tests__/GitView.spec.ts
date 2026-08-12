@@ -146,6 +146,9 @@ describe("GitView 文件列表与 diff", () => {
     await flushPromises();
 
     expect(wrapper.findAll(".git-file")).toHaveLength(2);
+    for (const row of wrapper.findAll(".git-file")) {
+      expect(row.attributes("data-tip")).toBeUndefined();
+    }
     const modifiedIcon = wrapper.find(".git-status-icon.git-status-modified");
     const untrackedIcon = wrapper.find(".git-status-icon.git-status-untracked");
     expect(modifiedIcon.exists()).toBe(true);
