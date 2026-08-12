@@ -66,42 +66,33 @@ describe("useContextMenu 自定义右键菜单", () => {
     document.body.innerHTML = "";
   });
 
-  it("可编辑元素右键显示剪切/复制/粘贴/全选", async () => {
+  it("可编辑元素右键不拦截（交给原生菜单处理粘贴）", async () => {
     const wrapper = mountHost();
     await flushPromises();
-    wrapper
-      .find("textarea")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    const ev = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 50,
+      clientY: 50,
+    });
+    wrapper.find("textarea").element.dispatchEvent(ev);
     await flushPromises();
-    const menu = wrapper.find(".ctx-menu");
-    expect(menu.exists()).toBe(true);
-    expect(menu.text()).toContain("剪切");
-    expect(menu.text()).toContain("复制");
-    expect(menu.text()).toContain("粘贴");
-    expect(menu.text()).toContain("全选");
+    expect(ev.defaultPrevented).toBe(false);
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });
 
   it("链接右键显示打开链接与复制链接地址", async () => {
     const wrapper = mountHost();
     await flushPromises();
-    wrapper
-      .find("a")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    const ev = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 50,
+      clientY: 50,
+    });
+    wrapper.find("a").element.dispatchEvent(ev);
     await flushPromises();
+    expect(ev.defaultPrevented).toBe(true);
     const menu = wrapper.find(".ctx-menu");
     expect(menu.exists()).toBe(true);
     expect(menu.text()).toContain("打开链接");
@@ -112,7 +103,7 @@ describe("useContextMenu 自定义右键菜单", () => {
     const wrapper = mountHost();
     await flushPromises();
     wrapper
-      .find("textarea")
+      .find("a")
       .element.dispatchEvent(
         new MouseEvent("contextmenu", {
           bubbles: true,
@@ -131,17 +122,15 @@ describe("useContextMenu 自定义右键菜单", () => {
   it("alwaysCopy 时非编辑区右键也提供复制", async () => {
     const wrapper = mount(HostAlwaysCopy, { attachTo: document.body });
     await flushPromises();
-    wrapper
-      .find("#plain")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    const ev = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 50,
+      clientY: 50,
+    });
+    wrapper.find("#plain").element.dispatchEvent(ev);
     await flushPromises();
+    expect(ev.defaultPrevented).toBe(true);
     const menu = wrapper.find(".ctx-menu");
     expect(menu.exists()).toBe(true);
     expect(menu.text()).toContain("复制");
