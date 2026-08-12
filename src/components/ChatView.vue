@@ -57,11 +57,17 @@ watch(
   },
 );
 
-function onScroll() {
+function onScroll(e: Event) {
   const el = scroller.value;
   if (!el) return;
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-  stickToBottom.value = dist < 60;
+  if (dist < 60) {
+    stickToBottom.value = true;
+  } else if (e.isTrusted) {
+    // 仅用户主动滚动解除吸底；程序化吸底写入触发的 scroll 事件忽略，
+    // 避免正文首段大幅增长时被误判为上滑
+    stickToBottom.value = false;
+  }
 }
 
 // 吸底滚动合并到每帧一次：流式高频变更时避免每次都强制整块布局

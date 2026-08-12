@@ -200,10 +200,38 @@ describe("ChatView 日期分隔线", () => {
       value: 1000,
     });
     // 模拟用户上滑：滚动距离超过阈值后 stickToBottom 变 false
-    scroller.dispatchEvent(new Event("scroll"));
+    const scrollEv = new Event("scroll");
+    Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(scrollEv);
     store.itemsRev++;
     await nextTick();
     expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("程序化未信任 scroll 事件不解除吸底", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+    // 模拟程序化吸底写入后派发的 scroll 事件（isTrusted=false，dist>60）
+    scroller.dispatchEvent(new Event("scroll"));
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
   });
 
   it("末尾消息流式追加时仍吸底滚动", async () => {
