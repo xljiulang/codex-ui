@@ -19,7 +19,14 @@ const { ref: shownText, flush: flushText } = useThrottledRef(source, 80);
 watch(
   () => props.streaming,
   (s) => {
-    if (!s) flushText();
+    if (!s) {
+      flushText();
+      // 结束后补齐装饰：流式期间跳过的代码块高亮在此一次性完成
+      void nextTick(() => {
+        decorateCodeBlocks();
+        decorateLinks();
+      });
+    }
   },
 );
 
@@ -39,6 +46,8 @@ watch(
 
 // ---------- 增量 DOM 更新 ----------
 const lastHtml = ref("");
+// 顶层节点的 HTML 缓存：公共前缀比较时避免每次把整段旧 HTML 重新 parse + 字符串化
+let renderedNodeHtml: string[] = [];
 
 function parseNodes(html: string): ChildNode[] {
   const tmp = document.createElement("div");
@@ -46,7 +55,7 @@ function parseNodes(html: string): ChildNode[] {
   return Array.from(tmp.childNodes);
 }
 
-function nodeHtml(n: ChildNode): string {
+function nodeHtml(n: Node): string {
   return n.nodeType === Node.TEXT_NODE
     ? (n.textContent ?? "")
     : (n as Element).outerHTML;
@@ -66,29 +75,39 @@ function applyHtml(h: string) {
   }
   const prev = lastHtml.value;
   if (h === prev) {
-    if (!el.firstChild) el.innerHTML = h;
+    if (!el.firstChild) {
+      el.innerHTML = h;
+      renderedNodeHtml = parseNodes(h).map(nodeHtml);
+    }
   } else if (prev && h.startsWith(prev)) {
-    el.insertAdjacentHTML("beforeend", h.slice(prev.length));
+    const added = parseNodes(h.slice(prev.length));
+    for (const n of added) {
+      el.appendChild(n);
+      renderedNodeHtml.push(nodeHtml(n));
+    }
   } else if (prev) {
-    const oldNodes = parseNodes(prev);
     const newNodes = parseNodes(h);
     let common = 0;
     while (
-      common < oldNodes.length &&
+      common < renderedNodeHtml.length &&
       common < newNodes.length &&
-      nodeHtml(oldNodes[common]) === nodeHtml(newNodes[common])
+      renderedNodeHtml[common] === nodeHtml(newNodes[common])
     ) {
       common++;
     }
-    if (common < oldNodes.length || common < newNodes.length) {
+    if (common < renderedNodeHtml.length || common < newNodes.length) {
       const keep = Math.min(common, el.childNodes.length);
       while (el.childNodes.length > keep) el.removeChild(el.lastChild!);
+      renderedNodeHtml.length = keep;
       for (let i = common; i < newNodes.length; i++) {
-        el.appendChild(newNodes[i].cloneNode(true));
+        const n = newNodes[i].cloneNode(true);
+        el.appendChild(n);
+        renderedNodeHtml.push(nodeHtml(n));
       }
     }
   } else {
     el.innerHTML = h;
+    renderedNodeHtml = parseNodes(h).map(nodeHtml);
   }
   lastHtml.value = h;
   void nextTick(() => {
@@ -107,19 +126,20 @@ onMounted(() => {
   }
 });
 
-/** 代码块：语法高亮 + 语言徽标 + 复制按钮 */
+/** 代码块：语言徽标 + 复制按钮；语法高亮仅在非流式时执行，
+ *  避免流式期间对增长中的代码块每 tick 全量重高亮（O(n²)） */
 function decorateCodeBlocks() {
   if (!root.value) return;
+  const streamingNow = props.streaming === true;
   const pres = root.value.querySelectorAll<HTMLPreElement>(
-    "pre:not([data-decorated])",
+    streamingNow ? "pre:not([data-decorated])" : "pre:not([data-highlighted])",
   );
   for (const pre of pres) {
-    pre.setAttribute("data-decorated", "1");
     const code = pre.querySelector("code");
     const lang = code
       ? /language-([\w-]+)/.exec(code.className)?.[1] ?? ""
       : "";
-    if (code && lang && !code.dataset.highlighted) {
+    if (!streamingNow && code && lang && !code.dataset.highlighted) {
       try {
         hljs.highlightElement(code);
         code.dataset.highlighted = "1";
@@ -127,6 +147,8 @@ function decorateCodeBlocks() {
         // 高亮失败不影响展示
       }
     }
+    if (pre.dataset.decorated) continue;
+    pre.setAttribute("data-decorated", "1");
     const chip = document.createElement("span");
     chip.className = "code-lang";
     chip.textContent = lang || "code";

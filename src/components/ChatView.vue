@@ -59,6 +59,10 @@ const rows = computed<Row[]>(() => {
 
 // 是否吸附在底部：用户上滑查看历史时暂停自动滚动
 const stickToBottom = ref(true);
+// 最近一次用户（可信）滚动事件时的底部距离；Infinity=尚无用户滚动。
+// 首个事件只记录基线，由后续事件的方向（dist 持续增大）确认“明确上滑”，
+// 避免正文 chunk 落地后视图尚未追上时的轻微滚动被误判为离开底部。
+let lastTrustedDist = Infinity;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
   () => (store.activeWorkByThread[store.currentThreadId ?? ""] ?? 0) > 0,
@@ -80,22 +84,43 @@ function onScroll(e: Event) {
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
   if (dist < 60) {
     stickToBottom.value = true;
-  } else if (e.isTrusted) {
-    // 仅用户主动滚动解除吸底；程序化吸底写入触发的 scroll 事件忽略，
-    // 避免正文首段大幅增长时被误判为上滑
+  } else if (e.isTrusted && dist > 120 && dist > lastTrustedDist) {
+    // 仅用户明确持续朝远离底部方向滚动（dist 增大）才解除吸底；
+    // 程序化吸底写入与追赶窗口内的一次性滚动不会误判
     stickToBottom.value = false;
   }
+  if (e.isTrusted) lastTrustedDist = dist;
 }
 
 // 吸底滚动合并到每帧一次：流式高频变更时避免每次都强制整块布局
 let scrollRaf: number | undefined;
 function scheduleScroll() {
-  if (!stickToBottom.value || scrollRaf !== undefined) return;
+  if (scrollRaf !== undefined) return;
+  if (!stickToBottom.value) {
+    // 已解除吸底：若用户仍贴近底部（追赶窗口内的误判），按当前位置自动恢复
+    maybeRestick();
+    if (!stickToBottom.value) return;
+  }
   scrollRaf = requestAnimationFrame(() => {
     scrollRaf = undefined;
     if (!stickToBottom.value) return;
     if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
+    // 次帧再跟一次：content-visibility 解除跳过渲染后 scrollHeight 才更新，
+    // 避免吸底落在估算高度之上
+    requestAnimationFrame(() => {
+      if (stickToBottom.value && scroller.value) {
+        scroller.value.scrollTop = scroller.value.scrollHeight;
+      }
+    });
   });
+}
+
+/** 距底部不足一个视口高度时恢复吸底（新消息追加/内容增长路径共用） */
+function maybeRestick() {
+  const el = scroller.value;
+  if (!el) return;
+  const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+  if (dist < el.clientHeight) stickToBottom.value = true;
 }
 
 function jumpToBottom() {
@@ -110,14 +135,33 @@ watch(
   },
 );
 
+// 新消息/新 item 追加：用户仅轻微上翻时自动回到底部
+watch(
+  () => items.value.length,
+  (len, old) => {
+    if (len > old) maybeRestick();
+  },
+);
+
+// 懒加载/异步图片加载后高度变化没有 DOM 结构变更，补一次跟随
+function onImageLoad(e: Event) {
+  if ((e.target as Element | null)?.tagName === "IMG") scheduleScroll();
+}
+
 // DOM 高度兜底：worker 渲染 markdown / 命令输出 HTML 落地晚于数据变更，
-// 结构变化时同样触发吸底（rAF 合并，不会逐节点布局）
+// 结构变化时在微任务内立即吸底（不等下一帧），再以 rAF 合并高频变更
 let scrollObserver: MutationObserver | undefined;
 onMounted(() => {
   stickToBottom.value = true;
   if (scroller.value && typeof MutationObserver !== "undefined") {
-    scrollObserver = new MutationObserver(() => scheduleScroll());
+    scrollObserver = new MutationObserver(() => {
+      if (stickToBottom.value && scroller.value) {
+        scroller.value.scrollTop = scroller.value.scrollHeight;
+      }
+      scheduleScroll();
+    });
     scrollObserver.observe(scroller.value, { childList: true, subtree: true });
+    scroller.value.addEventListener("load", onImageLoad, true);
   }
   scheduleScroll();
 });
@@ -127,6 +171,7 @@ onBeforeUnmount(() => {
   scrollRaf = undefined;
   scrollObserver?.disconnect();
   scrollObserver = undefined;
+  scroller.value?.removeEventListener("load", onImageLoad, true);
   // 避免切换视图后残留滚动状态
   stickToBottom.value = true;
 });

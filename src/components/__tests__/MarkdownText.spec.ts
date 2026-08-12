@@ -68,6 +68,21 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     expect(wrapper.find(".code-copy-btn").exists()).toBe(true);
   });
 
+  it("流式期间代码块不高亮，结束后一次性高亮", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "```js\nconst x = 1;\n```", streaming: true },
+    });
+    await flushPromises();
+    const code = wrapper.find("pre code.language-js");
+    expect(code.exists()).toBe(true);
+    // 流式中跳过语法高亮，避免每 tick 全量重高亮；徽标仍即时渲染
+    expect(code.classes()).not.toContain("hljs");
+    expect(wrapper.find(".code-lang").text()).toBe("js");
+    await wrapper.setProps({ streaming: false });
+    await flushPromises();
+    expect(wrapper.find("pre code.language-js").classes()).toContain("hljs");
+  });
+
   it("无语言标记的代码块显示 code 徽标且不强制高亮", async () => {
     const wrapper = mount(MarkdownText, {
       props: { text: "```\nplain\n```" },
