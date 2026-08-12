@@ -1,21 +1,13 @@
-import { onBeforeUnmount, ref } from "vue";
+import { computed, ref } from "vue";
+import { useClock } from "./useClock";
 
 /**
- * 实时计时器：从 startAtMs 开始每 250ms 刷新，返回 mm:ss.s 格式。
- * 组件卸载时自动清理。
+ * 实时计时：基于全局共享时钟（250ms 一跳），返回毫秒数。
+ * 组件卸载后自动取消对共享时钟的订阅，不再持有独立定时器。
  */
 export function useElapsed(startAtMs: number) {
-  const elapsed = ref(0);
   const started = ref(startAtMs);
-
-  const tick = () => {
-    elapsed.value = Date.now() - started.value;
-  };
-
-  const timer = setInterval(tick, 250);
-  tick();
-
-  onBeforeUnmount(() => clearInterval(timer));
-
+  const now = useClock();
+  const elapsed = computed(() => Math.max(0, now.value - started.value));
   return { elapsed };
 }

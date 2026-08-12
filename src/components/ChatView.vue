@@ -22,6 +22,12 @@ function formatDay(ts: number): string {
 }
 
 // 跨天时插入日期分隔线（时间戳缺失的消息不产生分隔）；每行带稳定 key
+// 行对象按 key 缓存复用，未变化的消息不再重复分配（降低大对话下的 GC 抖动）
+const rowCache = new Map<string, Row>();
+watch(
+  () => store.currentThreadId,
+  () => rowCache.clear(),
+);
 const rows = computed<Row[]>(() => {
   const out: Row[] = [];
   let lastDay = "";
@@ -31,11 +37,22 @@ const rows = computed<Row[]>(() => {
     if (typeof ts === "number") {
       const day = formatDay(ts);
       if (day !== lastDay) {
-        out.push({ key: `sep-${day}-${sepCount++}`, kind: "sep", date: day });
+        const key = `sep-${day}-${sepCount++}`;
+        let row = rowCache.get(key);
+        if (!row) {
+          row = { key, kind: "sep", date: day };
+          rowCache.set(key, row);
+        }
+        out.push(row);
         lastDay = day;
       }
     }
-    out.push({ key: item.id, kind: "msg", item });
+    let row = rowCache.get(item.id);
+    if (!row || row.kind !== "msg" || row.item !== item) {
+      row = { key: item.id, kind: "msg", item };
+      rowCache.set(item.id, row);
+    }
+    out.push(row);
   }
   return out;
 });

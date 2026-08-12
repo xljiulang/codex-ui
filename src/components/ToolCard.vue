@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
+import { useTailWindow } from "../composables/useTailWindow";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { workspaceRoot } from "../lib/links";
@@ -105,17 +106,14 @@ const sub = computed(() => {
 const output = computed(() =>
   String(props.item.aggregatedOutput ?? props.item.output ?? ""),
 );
-const hasOutput = computed(() => output.value.trim().length > 0);
 // 渲染输入截断为最后 5000 行，避免超长输出流式期间 O(n^2)；状态里仍保留完整输出
 const OUTPUT_LINE_CAP = 5000;
-const outputTruncated = computed(
-  () => output.value.split("\n").length > OUTPUT_LINE_CAP,
+const { ref: cappedOutput, truncated: outputTruncated } = useTailWindow(
+  output,
+  OUTPUT_LINE_CAP,
+  () => props.item,
 );
-const cappedOutput = computed(() => {
-  const lines = output.value.split("\n");
-  if (lines.length <= OUTPUT_LINE_CAP) return output.value;
-  return lines.slice(-OUTPUT_LINE_CAP).join("\n");
-});
+const hasOutput = computed(() => cappedOutput.value.trim().length > 0);
 const { ref: shownOutput, flush: flushOutput } = useThrottledRef(cappedOutput, 80);
 watch(
   () => props.item.status,
