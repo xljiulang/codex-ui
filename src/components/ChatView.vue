@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import MessageItem from "./MessageItem.vue";
@@ -57,11 +57,6 @@ watch(
   },
 );
 
-function scrollToBottom() {
-  if (!stickToBottom.value) return;
-  if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
-}
-
 function onScroll() {
   const el = scroller.value;
   if (!el) return;
@@ -69,25 +64,50 @@ function onScroll() {
   stickToBottom.value = dist < 60;
 }
 
+/** 最后一条消息的变更指纹：只跟踪末尾消息的流式/状态变化，历史消息变更零开销 */
+const lastItemKey = computed(() => {
+  const it = items.value[items.value.length - 1];
+  if (!it) return "";
+  return [
+    it.id,
+    it.streaming ? 1 : 0,
+    String(it.status ?? ""),
+    ((it.text as string | undefined)?.length ?? 0) +
+      ((it.aggregatedOutput as string | undefined)?.length ?? 0),
+  ].join(":");
+});
+
+// 吸底滚动合并到每帧一次：流式高频变更时避免每次都强制整块布局
+let scrollRaf: number | undefined;
+function scheduleScroll() {
+  if (!stickToBottom.value || scrollRaf !== undefined) return;
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = undefined;
+    if (!stickToBottom.value) return;
+    if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
+  });
+}
+
 function jumpToBottom() {
   stickToBottom.value = true;
-  void nextTick(scrollToBottom);
+  scheduleScroll();
 }
 
 watch(
-  items,
+  [() => items.value.length, lastItemKey],
   () => {
-    void nextTick(scrollToBottom);
+    scheduleScroll();
   },
-  { deep: true },
 );
 
 onMounted(() => {
   stickToBottom.value = true;
-  void nextTick(scrollToBottom);
+  scheduleScroll();
 });
 
 onBeforeUnmount(() => {
+  if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
+  scrollRaf = undefined;
   // 避免切换视图后残留滚动状态
   stickToBottom.value = true;
 });

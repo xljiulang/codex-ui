@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
 
@@ -21,6 +21,15 @@ import type { ThreadItem } from "../../lib/types";
 const mockedItems = vi.mocked(currentItems);
 
 describe("ChatView 日期分隔线", () => {
+  beforeEach(() => {
+    // happy-dom 用同步 rAF 简化吸底滚动测试（返回 undefined，避免 scrollRaf 守卫卡死）
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return undefined;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  });
+
   it("跨天消息之间插入日期分隔线", () => {
     const day1 = new Date(2026, 7, 9, 10, 0).getTime();
     const day2 = new Date(2026, 7, 10, 9, 0).getTime();
@@ -119,5 +128,83 @@ describe("ChatView 日期分隔线", () => {
     store.turnActive = false;
     await nextTick();
     expect(live.text()).toBe("回复完成");
+  });
+
+  it("新增消息时仍自动吸底滚动", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+    arr.push({ id: "a2", type: "agentMessage", text: "y" } as ThreadItem);
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
+  it("修改历史消息不再触发吸底滚动", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+      { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+    arr[0].text = "changed";
+    await nextTick();
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("末尾消息流式追加时仍吸底滚动", async () => {
+    const arr = reactive([
+      {
+        id: "a1",
+        type: "agentMessage",
+        text: "x",
+        streaming: true,
+      } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+    arr[0].text = "x appended";
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
   });
 });
