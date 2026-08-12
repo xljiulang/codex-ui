@@ -180,7 +180,7 @@ describe("ChatView 日期分隔线", () => {
     expect(scroller.scrollTop).toBe(1000);
   });
 
-  it("上滑暂停后 itemsRev 增长不再滚动", async () => {
+  it("单次正常上滑即解除吸底，itemsRev 增长不再滚动", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
@@ -199,57 +199,20 @@ describe("ChatView 日期分隔线", () => {
       configurable: true,
       value: 1000,
     });
-    // 模拟用户连续上滑：首个事件记录基线，dist 继续增大才确认离开
-    const trustedScroll = () => {
-      const ev = new Event("scroll");
-      Object.defineProperty(ev, "isTrusted", { get: () => true });
-      scroller.dispatchEvent(ev);
-    };
-    scroller.scrollTop = 0; // dist = 1000
-    trustedScroll();
-    Object.defineProperty(scroller, "scrollHeight", {
-      configurable: true,
-      value: 1500,
-    });
-    trustedScroll(); // dist = 1500 > 基线 → 解除吸底
+    // 先让吸底写入一次，建立“程序化吸底位置”基线
     store.itemsRev++;
     await nextTick();
-    expect(scroller.scrollTop).toBe(0);
-  });
-
-  it("首个可信滚动事件（追赶窗口内）不解除吸底", async () => {
-    const arr = reactive([
-      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
-      global: {
-        stubs: {
-          ComposerBar: true,
-          MessageItem: true,
-        },
-      },
-    });
-    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
-    Object.defineProperty(scroller, "scrollHeight", {
-      configurable: true,
-      value: 1000,
-    });
-    Object.defineProperty(scroller, "clientHeight", {
-      configurable: true,
-      value: 600,
-    });
-    // 正文 chunk 刚落地、视图尚未追上：dist = 300，用户仅轻微滚动
-    scroller.scrollTop = 100;
+    // 用户正常上滑 100px（dist = 100 > 60，scrollTop 低于基线）→ 一次解除
+    scroller.scrollTop = 900;
     const scrollEv = new Event("scroll");
     Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
     scroller.dispatchEvent(scrollEv);
     store.itemsRev++;
     await nextTick();
-    expect(scroller.scrollTop).toBe(1000);
+    expect(scroller.scrollTop).toBe(900); // 已解除，不再被拉回
   });
 
-  it("轻微滚动（距底部 60-120px）不解除吸底", async () => {
+  it("追赶窗口内向下滚动不解除吸底", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
@@ -267,20 +230,23 @@ describe("ChatView 日期分隔线", () => {
       configurable: true,
       value: 1000,
     });
-    Object.defineProperty(scroller, "clientHeight", {
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000
+    // 内容 chunk 落地，用户向下滚进新内容（scrollTop 高于基线）→ 不解除
+    Object.defineProperty(scroller, "scrollHeight", {
       configurable: true,
-      value: 600,
+      value: 1400,
     });
-    scroller.scrollTop = 300; // dist = 100，处于保护带内
+    scroller.scrollTop = 1100;
     const scrollEv = new Event("scroll");
     Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
     scroller.dispatchEvent(scrollEv);
     store.itemsRev++;
     await nextTick();
-    expect(scroller.scrollTop).toBe(1000);
+    expect(scroller.scrollTop).toBe(1400); // 仍吸底并跟随到新底部
   });
 
-  it("解除吸底后仍贴近底部时内容增长自动恢复", async () => {
+  it("解除吸底后滚回底部附近自动恢复", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
@@ -298,62 +264,19 @@ describe("ChatView 日期分隔线", () => {
       configurable: true,
       value: 1000,
     });
-    Object.defineProperty(scroller, "clientHeight", {
-      configurable: true,
-      value: 600,
-    });
-    const trustedScroll = () => {
-      const ev = new Event("scroll");
-      Object.defineProperty(ev, "isTrusted", { get: () => true });
-      scroller.dispatchEvent(ev);
-    };
-    scroller.scrollTop = 100; // dist = 300
-    trustedScroll(); // 基线
-    scroller.scrollTop = 50; // dist = 350，继续上滑 → 解除吸底
-    trustedScroll();
-    // 内容继续增长，但用户仍在底部附近（dist 450 < 视口 600）→ 自动恢复
-    Object.defineProperty(scroller, "scrollHeight", {
-      configurable: true,
-      value: 1100,
-    });
     store.itemsRev++;
-    await nextTick();
-    expect(scroller.scrollTop).toBe(1100);
-  });
-
-  it("新增消息时轻微上翻自动回底", async () => {
-    const arr = reactive([
-      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
-      global: {
-        stubs: {
-          ComposerBar: true,
-          MessageItem: { template: "<div class='msg-stub' />" },
-        },
-      },
-    });
-    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
-    Object.defineProperty(scroller, "scrollHeight", {
-      configurable: true,
-      value: 1000,
-    });
-    Object.defineProperty(scroller, "clientHeight", {
-      configurable: true,
-      value: 600,
-    });
-    const trustedScroll = () => {
-      const ev = new Event("scroll");
-      Object.defineProperty(ev, "isTrusted", { get: () => true });
-      scroller.dispatchEvent(ev);
-    };
-    scroller.scrollTop = 100; // dist = 300
-    trustedScroll(); // 基线
-    scroller.scrollTop = 50; // dist = 350 → 解除吸底
-    trustedScroll();
-    // 用户仅轻微上翻：新消息追加时自动回到底部
-    arr.push({ id: "a2", type: "agentMessage", text: "y" } as ThreadItem);
+    await nextTick(); // 基线：scrollTop = 1000
+    // 先上滑解除
+    scroller.scrollTop = 900;
+    const ev1 = new Event("scroll");
+    Object.defineProperty(ev1, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(ev1);
+    // 滚回距底部 60px 内（dist = 50）→ 恢复吸底
+    scroller.scrollTop = 950;
+    const ev2 = new Event("scroll");
+    Object.defineProperty(ev2, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(ev2);
+    store.itemsRev++;
     await nextTick();
     expect(scroller.scrollTop).toBe(1000);
   });

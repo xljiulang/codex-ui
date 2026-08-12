@@ -59,10 +59,10 @@ const rows = computed<Row[]>(() => {
 
 // 是否吸附在底部：用户上滑查看历史时暂停自动滚动
 const stickToBottom = ref(true);
-// 最近一次用户（可信）滚动事件时的底部距离；Infinity=尚无用户滚动。
-// 首个事件只记录基线，由后续事件的方向（dist 持续增大）确认“明确上滑”，
-// 避免正文 chunk 落地后视图尚未追上时的轻微滚动被误判为离开底部。
-let lastTrustedDist = Infinity;
+// 最近一次程序化吸底写入/滚动事件后的 scrollTop：
+// 用户可信滚动相对该位置向上移动即视为“上滑看历史”，一次正常上滑立即解除；
+// 向下（追赶窗口内）或程序化滚动不会误解除。
+let lastStickScrollTop = 0;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
   () => (store.activeWorkByThread[store.currentThreadId ?? ""] ?? 0) > 0,
@@ -84,43 +84,33 @@ function onScroll(e: Event) {
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
   if (dist < 60) {
     stickToBottom.value = true;
-  } else if (e.isTrusted && dist > 120 && dist > lastTrustedDist) {
-    // 仅用户明确持续朝远离底部方向滚动（dist 增大）才解除吸底；
-    // 程序化吸底写入与追赶窗口内的一次性滚动不会误判
+  } else if (e.isTrusted && dist > 60 && el.scrollTop < lastStickScrollTop - 4) {
+    // 一次正常上滑即解除；程序化吸底写入与追赶窗口内的向下滚动不会误判
     stickToBottom.value = false;
   }
-  if (e.isTrusted) lastTrustedDist = dist;
+  lastStickScrollTop = el.scrollTop;
 }
 
 // 吸底滚动合并到每帧一次：流式高频变更时避免每次都强制整块布局
 let scrollRaf: number | undefined;
 function scheduleScroll() {
-  if (scrollRaf !== undefined) return;
-  if (!stickToBottom.value) {
-    // 已解除吸底：若用户仍贴近底部（追赶窗口内的误判），按当前位置自动恢复
-    maybeRestick();
-    if (!stickToBottom.value) return;
-  }
+  if (!stickToBottom.value || scrollRaf !== undefined) return;
   scrollRaf = requestAnimationFrame(() => {
     scrollRaf = undefined;
     if (!stickToBottom.value) return;
-    if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
+    if (scroller.value) {
+      scroller.value.scrollTop = scroller.value.scrollHeight;
+      lastStickScrollTop = scroller.value.scrollTop;
+    }
     // 次帧再跟一次：content-visibility 解除跳过渲染后 scrollHeight 才更新，
     // 避免吸底落在估算高度之上
     requestAnimationFrame(() => {
       if (stickToBottom.value && scroller.value) {
         scroller.value.scrollTop = scroller.value.scrollHeight;
+        lastStickScrollTop = scroller.value.scrollTop;
       }
     });
   });
-}
-
-/** 距底部不足一个视口高度时恢复吸底（新消息追加/内容增长路径共用） */
-function maybeRestick() {
-  const el = scroller.value;
-  if (!el) return;
-  const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-  if (dist < el.clientHeight) stickToBottom.value = true;
 }
 
 function jumpToBottom() {
@@ -132,14 +122,6 @@ watch(
   [() => items.value.length, () => store.itemsRev],
   () => {
     scheduleScroll();
-  },
-);
-
-// 新消息/新 item 追加：用户仅轻微上翻时自动回到底部
-watch(
-  () => items.value.length,
-  (len, old) => {
-    if (len > old) maybeRestick();
   },
 );
 
@@ -157,11 +139,13 @@ onMounted(() => {
     scrollObserver = new MutationObserver(() => {
       if (stickToBottom.value && scroller.value) {
         scroller.value.scrollTop = scroller.value.scrollHeight;
+        lastStickScrollTop = scroller.value.scrollTop;
       }
       scheduleScroll();
     });
     scrollObserver.observe(scroller.value, { childList: true, subtree: true });
     scroller.value.addEventListener("load", onImageLoad, true);
+    lastStickScrollTop = scroller.value.scrollTop;
   }
   scheduleScroll();
 });
