@@ -839,6 +839,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
     mockListenCapture();
     mockedInvoke.mockReset();
     __resetTitleHelperCapabilityForTest();
+    store.toast = "";
     store.currentThreadId = "t1";
     store.currentThreadName = "";
     store.currentThreadCwd = "D:/repo";
@@ -947,6 +948,9 @@ describe("autoTitleThread 临时线程标题总结", () => {
       });
     }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
+      expect(store.toast).toContain("当前对话的标题已简化");
+    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
         method: "thread/unsubscribe",
         params: { threadId: "helper1" },
@@ -990,6 +994,9 @@ describe("autoTitleThread 临时线程标题总结", () => {
       });
     }, { timeout: 3000, interval: 20 });
     await vi.waitFor(() => {
+      expect(store.toast).toContain("当前对话的标题已简化");
+    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(() => {
       expect(mockedInvoke).toHaveBeenCalledWith("thread_delete", {
         threadId: "helper1",
       });
@@ -1023,6 +1030,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
       "thread_set_name",
       expect.anything(),
     );
+    expect(store.toast).not.toContain("当前对话的标题已简化");
   });
 
   it("后台临时线程事件被隔离：不影响全局进行中状态", async () => {

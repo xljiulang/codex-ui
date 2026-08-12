@@ -76,7 +76,7 @@ function onHistory() {
         v-if="cwd"
         class="brand-cwd"
         :class="{ pickable: isNewChat }"
-        v-tooltip="isNewChat ? '点击可修改工作目录' : `在资源管理器中打开：${cwd}`"
+        v-tooltip="isNewChat ? '点击可修改工作目录' : '在资源管理器中打开'"
         @click="onCwdClick()"
       >
         <svg viewBox="0 0 24 24">

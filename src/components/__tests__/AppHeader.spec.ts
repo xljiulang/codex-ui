@@ -143,9 +143,7 @@ describe("AppHeader 工作目录选择", () => {
     const wrapper = mountHeader();
     const chip = wrapper.find("button.brand-cwd");
     expect(chip.text()).toContain("D:/thread");
-    expect(chip.attributes("data-tip")).toBe(
-      "在资源管理器中打开：D:/thread",
-    );
+    expect(chip.attributes("data-tip")).toBe("在资源管理器中打开");
     expect(chip.classes()).not.toContain("pickable");
     expect(wrapper.find("button.brand-cwd-reset").exists()).toBe(false);
     mockedInvoke.mockResolvedValue(undefined);

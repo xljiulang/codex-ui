@@ -638,10 +638,10 @@ export function clearSearch() {
   void refreshThreads();
 }
 
-/** 重命名会话 */
-export async function renameThread(threadId: string, name: string) {
+/** 重命名会话；返回是否成功（手动重命名与自动标题写回共用） */
+export async function renameThread(threadId: string, name: string): Promise<boolean> {
   const n = name.trim();
-  if (!n) return;
+  if (!n) return false;
   try {
     await invoke("thread_set_name", { threadId, name: n });
     const t = store.threads.find((x) => x.id === threadId);
@@ -650,8 +650,10 @@ export async function renameThread(threadId: string, name: string) {
       store.currentThreadName = n;
       void updateWindowTitle();
     }
+    return true;
   } catch (e) {
     setToast(String(e));
+    return false;
   }
 }
 
@@ -726,7 +728,9 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
         // 目标线程若已在总结期间被命名（如用户手动改名），不再覆盖
         const cur = store.threads.find((x) => x.id === threadId);
         if (!cur?.name && !store.currentThreadName) {
-          await renameThread(threadId, title);
+          if (await renameThread(threadId, title)) {
+            setToast("当前对话的标题已简化");
+          }
         }
       }
     }
