@@ -705,9 +705,8 @@ describe("GitView 变更文件树形目录", () => {
     const heads = wrapper.findAll(".git-section-head");
     expect(heads).toHaveLength(2);
     expect(heads[0].find("span").text()).toBe("更改");
-    expect(heads[0].find(".git-section-count").text()).toBe("5");
     expect(heads[1].find("span").text()).toBe("暂存更改");
-    expect(heads[1].find(".git-section-count").text()).toBe("3");
+    expect(wrapper.find(".git-section-count").exists()).toBe(false);
 
     // 更改区：src(1) → b.txt → src2(1) → d.txt → 根文件 a.txt
     const sections = wrapper.findAll(".git-section");

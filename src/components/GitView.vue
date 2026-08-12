@@ -639,7 +639,6 @@ async function restoreDir(node: GitDirNode) {
       <div class="git-section">
         <div class="git-section-head">
           <span>更改</span>
-          <span class="git-section-count">{{ worktreeRows.length }}</span>
         </div>
         <div v-if="worktreeRows.length" class="git-file-list">
           <div
@@ -689,7 +688,6 @@ async function restoreDir(node: GitDirNode) {
       <div class="git-section">
         <div class="git-section-head">
           <span>暂存更改</span>
-          <span class="git-section-count">{{ stagedRows.length }}</span>
         </div>
         <div v-if="stagedRows.length" class="git-file-list">
           <div
