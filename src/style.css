@@ -1117,13 +1117,17 @@ select option {
 }
 
 .git-init-ok {
-  border-color: var(--accent);
+  border-color: transparent;
   color: #ffffff;
-  background: var(--btn-grad);
+  background: var(--accent);
+}
+
+.git-init-ok:hover:not(:disabled) {
+  background: var(--accent-dim);
 }
 
 .git-init-ok:disabled {
-  opacity: 0.6;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -3566,17 +3570,16 @@ body.resizing-editor {
 }
 
 .btn.primary {
-  background: var(--btn-grad);
-  border-color: rgba(var(--accent-rgb), 0.6);
+  background: var(--accent);
+  border-color: transparent;
   color: #ffffff;
   font-weight: 700;
-  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: none;
+  transition: background-color 0.14s ease;
 }
 
 .btn.primary:hover {
-  filter: brightness(1.06);
-  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.42);
+  background: var(--accent-dim);
 }
 
 .btn.danger {
