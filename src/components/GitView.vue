@@ -540,7 +540,7 @@ async function restoreDir(node: GitDirNode) {
         点击下方按钮可将当前工作目录初始化为 Git 仓库（仅初始化，不会自动提交）。
       </p>
       <button
-        class="btn git-init-btn"
+        class="send-btn git-init-btn"
         :disabled="gitInitBusy"
         @click="startInit"
       >
