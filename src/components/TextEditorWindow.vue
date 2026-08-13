@@ -19,6 +19,7 @@ import {
 } from "../lib/editorFile";
 import { languageFromPath } from "../lib/highlight";
 import { formatFileSize } from "../lib/sessionFs";
+import { pathBaseName } from "../lib/format";
 
 interface TextEditorParams {
   root: string;
@@ -111,6 +112,12 @@ async function loadFile(root: string, path: string) {
   error.value = "";
   status.value = "";
   dirty.value = false;
+  // 窗口标题栏显示文件名（不含路径），切换文件时同步
+  try {
+    await getCurrentWindow().setTitle(pathBaseName(path));
+  } catch {
+    // 非 Tauri 环境（单测/浏览器）忽略
+  }
   try {
     const info = await invoke<TextFileContent>("session_fs_read", {
       root,

@@ -190,8 +190,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
       icon: ICON_PLUS,
       action: () => {
         store.showSettings = false;
-        store.newChatCwd = group.path;
-        void newEmptyChat();
+        void newEmptyChat(group.path);
         // 与头部「新建会话」一致：进入新对话后聚焦输入框
         void nextTick(focusComposer);
         // 与头部「新建会话」一致：右侧面板切回资源管理器 Tab

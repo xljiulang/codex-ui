@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,13 @@ pub async fn open_text_editor(
     path: String,
 ) -> Result<(), String> {
     let params = TextEditorParams { root, path };
+    // 标题取文件名（不含路径），提取失败回退默认值，避免首开时闪现旧标题
+    let title = Path::new(&params.path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("文本编辑")
+        .to_string();
     if let Some(state) = app.try_state::<TextEditorParamsState>() {
         *state.0.lock().unwrap() = Some(params.clone());
     }
@@ -38,7 +46,7 @@ pub async fn open_text_editor(
             "text-editor",
             tauri::WebviewUrl::App("index.html".into()),
         )
-        .title("文本编辑")
+        .title(title)
         .inner_size(1280.0, 720.0)
         .min_inner_size(400.0, 560.0)
         .center()

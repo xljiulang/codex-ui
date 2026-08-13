@@ -18,14 +18,13 @@ async function onNewChat() {
   try {
     // 先选目录（用户取消也继续新建），选中则作为本次新建会话的工作目录
     const dir = await invoke<string | null>("pick_directory");
-    if (dir) store.newChatCwd = dir;
+    void newEmptyChat(dir);
   } catch (e) {
     store.toast = toastError(e);
   } finally {
     picking.value = false;
   }
   store.showSettings = false;
-  void newEmptyChat();
   // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
   void nextTick(focusComposer);
   // 新建会话后右侧面板切回资源管理器 Tab

@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   listen: vi.fn(),
   onCloseRequested: vi.fn(),
   destroy: vi.fn(),
+  setTitle: vi.fn(),
   closeHandler: undefined as
     | undefined
     | ((event: { preventDefault: () => void }) => void | Promise<void>),
@@ -28,6 +29,7 @@ vi.mock("@tauri-apps/api/window", () => ({
     label: "text-editor",
     onCloseRequested: h.onCloseRequested,
     destroy: h.destroy,
+    setTitle: h.setTitle,
   }),
 }));
 
@@ -65,6 +67,8 @@ describe("TextEditorWindow 文本编辑器", () => {
     });
     h.destroy.mockReset();
     h.destroy.mockResolvedValue(undefined);
+    h.setTitle.mockReset();
+    h.setTitle.mockResolvedValue(undefined);
     h.closeHandler = undefined;
     h.openHandler = undefined;
   });
@@ -89,6 +93,7 @@ describe("TextEditorWindow 文本编辑器", () => {
     expect(wrapper.find(".cm-content").exists()).toBe(true);
     expect(getView(wrapper).state.doc.toString()).toBe("hello");
     expect(wrapper.find(".text-editor-dirty").exists()).toBe(false);
+    expect(h.setTitle).toHaveBeenCalledWith("a.txt");
     wrapper.unmount();
   });
 
@@ -223,6 +228,7 @@ describe("TextEditorWindow 文本编辑器", () => {
       path: bTxt,
     });
     expect(wrapper.find(".text-editor-path").text()).toBe(bTxt);
+    expect(h.setTitle).toHaveBeenCalledWith("b.txt");
     wrapper.unmount();
   });
 });

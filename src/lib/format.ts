@@ -30,3 +30,10 @@ export function formatRelativeTime(ts?: number | null): string {
     day: "numeric",
   });
 }
+
+/** 取路径最后一段（兼容 / 与 \），先去除末尾分隔符；空路径返回原值 */
+export function pathBaseName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+}

@@ -81,7 +81,7 @@ describe("AppHeader 新建会话选择工作目录", () => {
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
-    expect(store.newChatCwd).toBe("D:/project");
+    expect(mockedNewChat).toHaveBeenCalledWith("D:/project");
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
     expect(store.panelTab).toBe("resources");
   });
@@ -91,7 +91,7 @@ describe("AppHeader 新建会话选择工作目录", () => {
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
-    expect(store.newChatCwd).toBeNull();
+    expect(mockedNewChat).toHaveBeenCalledWith(null);
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
     expect(store.panelTab).toBe("resources");
   });

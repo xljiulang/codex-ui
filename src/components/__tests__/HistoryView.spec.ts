@@ -471,7 +471,7 @@ describe("HistoryView 文件夹右键菜单", () => {
       clientY: 200,
     });
     await clickCtxItem(wrapper, "新建会话");
-    expect(store.newChatCwd).toBe("D:\\codex\\codex-ui");
+    expect(mockedNewEmptyChat).toHaveBeenCalledWith("D:\\codex\\codex-ui");
     expect(mockedNewEmptyChat).toHaveBeenCalledTimes(1);
     expect(store.panelTab).toBe("resources");
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);

@@ -1,8 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
+const h = vi.hoisted(() => ({
+  setTitle: vi.fn(),
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(() => Promise.resolve(null)),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ setTitle: h.setTitle }),
 }));
 
 import { invoke } from "@tauri-apps/api/core";
@@ -37,6 +45,8 @@ function mockOk(path = PARAMS.path, rows: DiffRow[] = ROWS) {
 describe("DiffWindowView 独立窗口", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
+    h.setTitle.mockReset();
+    h.setTitle.mockResolvedValue(undefined);
   });
 
   it("取参数并渲染内联行与头部", async () => {
@@ -45,6 +55,7 @@ describe("DiffWindowView 独立窗口", () => {
     await flushPromises();
     expect(wrapper.find(".diff-window-path").text()).toContain("a.txt");
     expect(wrapper.find(".change-kind").text()).toBe("修改");
+    expect(h.setTitle).toHaveBeenCalledWith("a.txt");
     const rows = wrapper.findAll(".diff-row");
     expect(rows.map((r) => r.classes()[1])).toEqual([
       "ctx",

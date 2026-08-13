@@ -25,6 +25,7 @@ import {
   stripMentionContext,
 } from "../lib/mention";
 import { playNotificationSound } from "../lib/sound";
+import { pathBaseName } from "../lib/format";
 import { applyTheme } from "./useTheme";
 
 const defaultSettings = (): AppSettings => ({
@@ -320,14 +321,55 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
 async function updateWindowTitle() {
   try {
     const win = getCurrentWindow();
-    if (!store.currentThreadId) {
-      await win.setTitle("Codex UI");
-      return;
-    }
-    await win.setTitle(currentThreadLabel());
+    // 有会话时以会话 cwd 为准（残留的 newChatCwd 不串味）；
+    // 无会话（新建会话中）优先待新建目录 newChatCwd，其次 workspace。
+    const cwd =
+      store.currentThreadCwd ??
+      (store.currentThreadId ? null : store.newChatCwd) ??
+      store.server.workspace;
+    const folder = cwd ? pathBaseName(cwd) : "";
+    const threadTitle = currentThreadTitle();
+    const title = threadTitle
+      ? folder
+        ? `${folder} - ${threadTitle}`
+        : threadTitle
+      : folder || "Codex UI";
+    await win.setTitle(title);
   } catch {
     // 非 Tauri 环境（如浏览器预览）忽略
   }
+}
+
+/** 当前会话的对话标题：仅取已生成的名称（自动生成或手动重命名），不含 preview/首条消息回退 */
+function currentThreadTitle(): string {
+  if (store.currentThreadName) return store.currentThreadName;
+  const summary = store.threads.find((t) => t.id === store.currentThreadId);
+  return summary?.name || "";
+}
+
+function isMainWindow(): boolean {
+  try {
+    return getCurrentWindow().label === "main";
+  } catch {
+    // 非 Tauri 环境（浏览器预览/单测）按主窗口处理，由 updateWindowTitle 内部兜底
+    return true;
+  }
+}
+
+// 标题自动跟随工作目录/会话状态（仅主窗口生效）；
+// 即使未来新增入口漏调用 updateWindowTitle，标题也不会滞后。
+if (isMainWindow()) {
+  watch(
+    () => [
+      store.currentThreadId,
+      store.currentThreadName,
+      store.currentThreadCwd,
+      store.newChatCwd,
+      store.server.workspace,
+      store.threads.find((t) => t.id === store.currentThreadId)?.name,
+    ],
+    () => void updateWindowTitle(),
+  );
 }
 
 function isThreadNotFound(e: unknown): boolean {
@@ -1146,7 +1188,13 @@ export async function executePlan() {
   }
 }
 
-export async function newEmptyChat() {
+/**
+ * 新建空会话（所有 UI 入口的统一函数）：可预置本次会话的工作目录 cwd。
+ * 头部「新建会话」与历史目录右键「新建会话」都调用本函数，
+ * 避免各入口各自处理 newChatCwd / 标题刷新导致遗漏。
+ */
+export async function newEmptyChat(cwd?: string | null) {
+  if (cwd) store.newChatCwd = cwd;
   // 会话进行中切换：先让用户确认（确认才停止旧回合并切换）
   if (store.turnActive && store.currentThreadId) {
     const ok = await askConfirm({
@@ -1674,28 +1722,6 @@ export function currentItems(): ThreadItem[] {
 
 export function threadTitle(t: ThreadSummary): string {
   return t.name || t.preview || "新会话";
-}
-
-export function currentThreadLabel(): string {
-  if (!store.currentThreadId) return "新会话";
-  if (store.currentThreadName) return store.currentThreadName;
-  const summary = store.threads.find((t) => t.id === store.currentThreadId);
-  if (summary?.name || summary?.preview) {
-    return summary.name || summary.preview || "新会话";
-  }
-  const items = store.itemsByThread[store.currentThreadId] ?? [];
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    if (it.type === "userMessage") {
-      const content = (it.content as UserInput[] | undefined) ?? [];
-      const text = content
-        .map((c) => (c.type === "text" ? stripMentionContext(c.text) : ""))
-        .join(" ")
-        .trim();
-      if (text) return text;
-    }
-  }
-  return "新会话";
 }
 
 export function currentOriginLabel(): string {

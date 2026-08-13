@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { vi } from "vitest";
+import { flushPromises } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -10,14 +11,19 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: vi.fn(() => ({
+const { mockWin } = vi.hoisted(() => ({
+  mockWin: {
+    label: "main",
     isMinimized: vi.fn().mockResolvedValue(false),
     unminimize: vi.fn(),
     setFocus: vi.fn(),
     setTitle: vi.fn(),
     setProgressBar: vi.fn(),
-  })),
+  },
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: vi.fn(() => mockWin),
   ProgressBarStatus: { Indeterminate: "Indeterminate", None: "None" },
 }));
 
@@ -38,6 +44,7 @@ import {
   loadSettings,
   newEmptyChat,
   openThread,
+  renameThread,
   refreshThreads,
   refreshServer,
   sanitizeTitle,
@@ -182,6 +189,150 @@ describe("refreshServer 服务状态同步", () => {
     expect(store.server.codexPath).toBe("D:/codex/codex.exe");
     expect(store.server.connected).toBe(true);
     expect(store.server.workspace).toBe("D:/repo");
+  });
+});
+
+describe("updateWindowTitle 窗口标题", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    mockWin.setTitle.mockClear();
+    store.server = {
+      connected: false,
+      workspace: "D:/repo",
+      codexPath: null,
+      logs: [],
+    };
+    store.currentThreadId = null;
+    store.currentThreadName = "";
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.currentThreadOrigin = null;
+    store.threads = [];
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentTurnId = null;
+    store.resumedThreadId = null;
+    store.threadTokenUsage = null;
+    store.goalText = null;
+    store.threadPlugins = {};
+  });
+
+  it("无会话：显示工作目录文件夹名", async () => {
+    await newEmptyChat();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo");
+  });
+
+  it("无会话且工作目录未知：回退 Codex UI", async () => {
+    store.server.workspace = "";
+    await newEmptyChat();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI");
+  });
+
+  it("新建会话选中目录后、会话未开始：显示所选目录文件夹名", async () => {
+    store.newChatCwd = "D:/projects/B";
+    await newEmptyChat();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("B");
+  });
+
+  it("newEmptyChat 传入 cwd：写入 newChatCwd 并更新标题", async () => {
+    await newEmptyChat("D:/projects/B");
+    expect(store.newChatCwd).toBe("D:/projects/B");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("B");
+  });
+
+  it("直接修改 newChatCwd（不经入口函数）：watch 自动刷新标题", async () => {
+    store.newChatCwd = "D:/projects/B";
+    await flushPromises();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("B");
+  });
+
+  it("有会话但尚无标题：只显示文件夹名", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: null, cwd: null, turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    await openThread("t2");
+    expect(store.currentThreadId).toBe("t2");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo");
+  });
+
+  it("有会话标题：显示 文件夹名 - 对话标题", async () => {
+    store.currentThreadId = "t1";
+    store.threads = [
+      { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
+    ];
+    mockedInvoke.mockResolvedValue(undefined);
+    await renameThread("t1", "我的标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 我的标题");
+  });
+
+  it("线程 cwd 与工作区不同：取线程 cwd 文件夹名", async () => {
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = "D:/projects/other-app";
+    store.currentThreadName = "标题";
+    store.threads = [
+      { id: "t1", name: "标题", preview: "", createdAt: 0, recencyAt: 0 },
+    ];
+    mockedInvoke.mockResolvedValue(undefined);
+    await renameThread("t1", "标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("other-app - 标题");
+  });
+
+  it("有会话且有 cwd：残留的 newChatCwd 不串味", async () => {
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = "D:/repo/sub";
+    store.currentThreadName = "标题";
+    store.newChatCwd = "D:/projects/B";
+    store.threads = [
+      { id: "t1", name: "标题", preview: "", createdAt: 0, recencyAt: 0 },
+    ];
+    mockedInvoke.mockResolvedValue(undefined);
+    await renameThread("t1", "标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("sub - 标题");
+  });
+
+  it("有会话但 cwd 缺失：回退 workspace，不采用残留的 newChatCwd", async () => {
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = null;
+    store.currentThreadName = "标题";
+    store.newChatCwd = "D:/projects/B";
+    store.threads = [
+      { id: "t1", name: "标题", preview: "", createdAt: 0, recencyAt: 0 },
+    ];
+    mockedInvoke.mockResolvedValue(undefined);
+    await renameThread("t1", "标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 标题");
+  });
+
+  it("thread/name/updated 事件产生标题后更新为 文件夹名 - 新名", async () => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockResolvedValue(undefined);
+    store.currentThreadId = "t1";
+    store.threads = [
+      { id: "t1", name: null, preview: "", createdAt: 0, recencyAt: 0 },
+    ];
+    await wireEvents();
+    fireListen("thread/name/updated", {
+      threadId: "t1",
+      threadName: "新名",
+    });
+    expect(store.currentThreadName).toBe("新名");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 新名");
+    disposeEvents();
   });
 });
 
