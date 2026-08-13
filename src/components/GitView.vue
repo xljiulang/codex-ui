@@ -620,7 +620,7 @@ async function restoreDir(node: GitDirNode) {
         点击下方按钮可将当前工作目录初始化为 Git 仓库（仅初始化，不会自动提交）。
       </p>
       <button
-        class="send-btn git-init-btn"
+        class="btn primary git-init-btn"
         :disabled="gitInitBusy"
         @click="startInit"
       >
@@ -655,7 +655,7 @@ async function restoreDir(node: GitDirNode) {
           </svg>
         </button>
         <button
-          class="git-pull"
+          class="git-icon-btn git-pull"
           :class="{ busy: pullBusy }"
           :disabled="pullBusy || branchLabel === 'HEAD'"
           :aria-label="pullBusy ? '拉取中…' : '拉取'"
@@ -677,7 +677,7 @@ async function restoreDir(node: GitDirNode) {
         </button>
         <span class="git-count">{{ fileCount }} 个更改</span>
         <button
-          class="git-refresh"
+          class="git-icon-btn git-refresh"
           aria-label="刷新"
           v-tooltip="'刷新'"
           @click="refreshGitChanges()"
@@ -741,7 +741,7 @@ async function restoreDir(node: GitDirNode) {
         <div class="git-section-head">
           <span>更改</span>
           <button
-            class="git-section-action"
+            class="git-icon-btn git-section-action"
             aria-label="全部暂存"
             v-tooltip="'全部暂存'"
             :disabled="gitActionBusy || !worktreeRows.length"
@@ -803,7 +803,7 @@ async function restoreDir(node: GitDirNode) {
         <div class="git-section-head">
           <span>暂存更改</span>
           <button
-            class="git-section-action"
+            class="git-icon-btn git-section-action"
             aria-label="全部取消暂存"
             v-tooltip="'全部取消暂存'"
             :disabled="gitActionBusy || !stagedRows.length"

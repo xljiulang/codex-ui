@@ -1099,8 +1099,7 @@ select option {
   background: var(--btn-grad);
 }
 
-.git-init-ok:disabled,
-.git-init-btn:disabled {
+.git-init-ok:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
@@ -1121,9 +1120,10 @@ select option {
   gap: 4px;
   min-width: 0;
   max-width: 140px;
-  padding: 3px 8px;
+  height: 28px;
+  padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: var(--bg-input);
   cursor: pointer;
   font-size: 12.5px;
@@ -1142,7 +1142,7 @@ select option {
 
 .git-branch:disabled {
   cursor: default;
-  opacity: 0.7;
+  opacity: 0.45;
 }
 
 .git-branch .git-branch-name-text {
@@ -1153,8 +1153,8 @@ select option {
 
 .git-branch svg {
   flex-shrink: 0;
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   fill: currentColor;
 }
 
@@ -1222,13 +1222,13 @@ select option {
 
 .git-branch-delete {
   flex-shrink: 0;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 5px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-dim);
   font-size: 13px;
@@ -1279,14 +1279,26 @@ select option {
 
 .git-branch-create-btn {
   flex-shrink: 0;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  border: none;
-  border-radius: 7px;
+  height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--btn-grad);
+  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
   cursor: pointer;
+  transition: filter 0.14s ease, box-shadow 0.14s ease;
+}
+
+.git-branch-create-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.42);
 }
 
 .git-branch-create-btn:disabled {
@@ -1301,15 +1313,13 @@ select option {
   white-space: nowrap;
 }
 
-.git-refresh {
+.git-icon-btn {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
@@ -1317,50 +1327,36 @@ select option {
     border-color 0.14s ease;
 }
 
-.git-refresh:hover {
+.git-icon-btn:hover:not(:disabled) {
   color: var(--text-bright);
   background: var(--bg-hover);
   border-color: var(--border-light);
 }
 
-.git-refresh svg {
-  width: 13px;
-  height: 13px;
+.git-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.git-icon-btn svg {
+  width: 14px;
+  height: 14px;
   fill: currentColor;
+}
+
+.git-refresh {
+  width: 28px;
+  height: 28px;
 }
 
 .git-pull {
-  flex-shrink: 0;
   min-width: 28px;
   height: 28px;
   padding: 0 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: color 0.14s ease, background-color 0.14s ease,
-    border-color 0.14s ease;
 }
 
-.git-pull:hover:not(:disabled) {
-  color: var(--text-bright);
-  background: var(--bg-hover);
-  border-color: var(--border-light);
-}
-
-.git-pull:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.git-pull svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
+.git-pull.busy:disabled {
+  opacity: 0.75;
 }
 
 .git-pull-text {
@@ -1410,14 +1406,26 @@ select option {
 
 .git-commit-btn {
   flex-shrink: 0;
-  padding: 4px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent);
-  border: none;
-  border-radius: 7px;
+  height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--btn-grad);
+  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
   cursor: pointer;
+  transition: filter 0.14s ease, box-shadow 0.14s ease;
+}
+
+.git-commit-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.42);
 }
 
 .git-commit-btn:disabled {
@@ -1503,7 +1511,7 @@ select option {
   font-weight: 700;
   line-height: 1;
   border: 1px solid currentColor;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .git-status-added,
@@ -1534,37 +1542,9 @@ select option {
 }
 
 .git-section-action {
-  flex-shrink: 0;
   margin-left: auto;
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: color 0.14s ease, background-color 0.14s ease,
-    border-color 0.14s ease;
-}
-
-.git-section-action:hover:not(:disabled) {
-  color: var(--text-bright);
-  background: var(--bg-hover);
-  border-color: var(--border-light);
-}
-
-.git-section-action:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.git-section-action svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
+  width: 24px;
+  height: 24px;
 }
 
 .git-tree-row {
