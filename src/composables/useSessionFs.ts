@@ -278,11 +278,11 @@ export function revealInExplorer(path: string) {
   void invoke("reveal_path", { path }).catch((e) => setToast(toastError(e)));
 }
 
-/** 应用内打开文本文件：独立预览窗口读取并高亮展示 */
-export function openTextPreview(entry: FsEntry) {
+/** 应用内打开文本文件：独立编辑窗口编辑并高亮展示 */
+export function openTextEditor(entry: FsEntry) {
   const root = sessionRoot.value;
   if (!root) return;
-  void invoke("open_text_preview", { root, path: entry.path }).catch((e) =>
+  void invoke("open_text_editor", { root, path: entry.path }).catch((e) =>
     setToast(toastError(e)),
   );
 }

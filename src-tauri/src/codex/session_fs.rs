@@ -422,23 +422,42 @@ pub async fn session_fs_paste(
     .await
 }
 
-/// 文本预览最大读取字节数（1 MiB）
-const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
+/// 文本编辑器最大读写字节数（5 MiB）
+const MAX_EDIT_BYTES: u64 = 5 * 1024 * 1024;
 
-/// 单文件内容读取（文本预览用）：路径包含校验、仅文件、大小上限、UTF-8 lossy
-fn read_impl(root: &Path, path: &Path) -> Result<String, String> {
+/// 文本文件内容（供文本编辑器使用；camelCase 序列化）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextFileContent {
+    pub content: String,
+    /// 内容是否为合法 UTF-8；false 表示仅 lossy 展示，应只读
+    pub valid_utf8: bool,
+    pub byte_size: u64,
+}
+
+/// 单文件内容读取（文本编辑器用）：路径包含校验、仅文件、大小上限、
+/// UTF-8 合法性标记（非法编码以 lossy 展示，由前端置为只读）
+fn read_impl(root: &Path, path: &Path) -> Result<TextFileContent, String> {
     let target = ensure_inside(root, path)?;
     let meta = std::fs::metadata(&target)
         .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
     if !meta.is_file() {
         return Err(format!("不是文件: {}", clean_path(&target)));
     }
-    if meta.len() > MAX_PREVIEW_BYTES {
-        return Err("文件过大，暂不支持预览".into());
+    if meta.len() > MAX_EDIT_BYTES {
+        return Err("文件过大，暂不支持编辑".into());
     }
     let bytes = std::fs::read(&target)
         .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    let (content, valid_utf8) = match String::from_utf8(bytes) {
+        Ok(s) => (s, true),
+        Err(e) => (String::from_utf8_lossy(e.as_bytes()).into_owned(), false),
+    };
+    Ok(TextFileContent {
+        content,
+        valid_utf8,
+        byte_size: meta.len(),
+    })
 }
 
 /// 在阻塞线程中执行同步文件操作，带超时（秒）
@@ -455,10 +474,44 @@ async fn run_blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn session_fs_read(root: String, path: String) -> Result<String, String> {
+pub async fn session_fs_read(root: String, path: String) -> Result<TextFileContent, String> {
     run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         read_impl(&root_p, Path::new(&path))
+    })
+    .await
+}
+
+/// 单文件内容写入（文本编辑器用）：路径包含校验、仅文件、大小上限、
+/// NUL 检测，UTF-8 直写；返回写入后的文件条目
+fn write_impl(root: &Path, path: &Path, content: &str) -> Result<FsEntry, String> {
+    let target = ensure_inside(root, path)?;
+    let meta = std::fs::metadata(&target)
+        .map_err(|e| format!("无法写入文件 {}: {e}", clean_path(&target)))?;
+    if !meta.is_file() {
+        return Err(format!("不是文件: {}", clean_path(&target)));
+    }
+    let bytes = content.as_bytes();
+    if bytes.len() as u64 > MAX_EDIT_BYTES {
+        return Err("文件过大，暂不支持保存".into());
+    }
+    if bytes.contains(&0) {
+        return Err("内容包含二进制数据，已拒绝保存".into());
+    }
+    std::fs::write(&target, bytes)
+        .map_err(|e| format!("写入文件失败 {}: {e}", clean_path(&target)))?;
+    entry_from_path(root, &target)
+}
+
+#[tauri::command]
+pub async fn session_fs_write(
+    root: String,
+    path: String,
+    content: String,
+) -> Result<FsEntry, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_root(&root)?;
+        write_impl(&root_p, Path::new(&path), &content)
     })
     .await
 }
@@ -783,12 +836,14 @@ mod tests {
     #[test]
     fn read_file_with_guards() {
         let (tmp, root) = tree();
-        // 正常读取：内容原样返回
-        assert_eq!(read_impl(&root, &root.join("a.txt")).unwrap(), "a");
-        assert_eq!(
-            read_impl(&root, &root.join("src").join("main.ts")).unwrap(),
-            "x"
-        );
+        // 正常读取：内容原样返回 + UTF-8 标记与字节数
+        let c = read_impl(&root, &root.join("a.txt")).unwrap();
+        assert_eq!(c.content, "a");
+        assert!(c.valid_utf8);
+        assert_eq!(c.byte_size, 1);
+        let c = read_impl(&root, &root.join("src").join("main.ts")).unwrap();
+        assert_eq!(c.content, "x");
+        assert!(c.valid_utf8);
         // 目录拒绝
         assert!(read_impl(&root, &root.join("src")).is_err());
         // 越界拒绝（ensure_inside 先行拦截）
@@ -796,9 +851,43 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         assert!(read_impl(&root, &outside).is_err());
         let _ = std::fs::remove_file(&outside);
-        // 超过 1 MiB 拒绝
-        std::fs::write(root.join("big.bin"), vec![0u8; (1024 * 1024) + 1]).unwrap();
+        // 超过 5 MiB 拒绝
+        std::fs::write(root.join("big.bin"), vec![0u8; (5 * 1024 * 1024) + 1]).unwrap();
         assert!(read_impl(&root, &root.join("big.bin")).is_err());
+    }
+
+    #[test]
+    fn read_invalid_utf8_marks_readonly() {
+        let (_tmp, root) = tree();
+        std::fs::write(root.join("bad.dat"), [0xffu8, 0xfeu8]).unwrap();
+        let c = read_impl(&root, &root.join("bad.dat")).unwrap();
+        assert!(!c.valid_utf8);
+        assert_eq!(c.byte_size, 2);
+    }
+
+    #[test]
+    fn write_file_roundtrip_with_guards() {
+        let (tmp, root) = tree();
+        // 正常写入：UTF-8 多字节 + 返回刷新后的条目
+        let e = write_impl(&root, &root.join("a.txt"), "你好，Codex！\nline2").unwrap();
+        assert_eq!(e.name, "a.txt");
+        let c = read_impl(&root, &root.join("a.txt")).unwrap();
+        assert_eq!(c.content, "你好，Codex！\nline2");
+        assert!(c.valid_utf8);
+        // 目录拒绝
+        assert!(write_impl(&root, &root.join("src"), "x").is_err());
+        // 越界拒绝
+        let outside = tmp.path().parent().unwrap().join("outside-write.txt");
+        std::fs::write(&outside, "x").unwrap();
+        assert!(write_impl(&root, &outside, "y").is_err());
+        let _ = std::fs::remove_file(&outside);
+        // 不存在的文件拒绝（ensure_inside canonicalize 失败）
+        assert!(write_impl(&root, &root.join("missing.txt"), "y").is_err());
+        // 含 NUL 拒绝
+        assert!(write_impl(&root, &root.join("a.txt"), "a\u{0}b").is_err());
+        // 超过 5 MiB 拒绝
+        let big = "x".repeat((5 * 1024 * 1024) + 1);
+        assert!(write_impl(&root, &root.join("a.txt"), &big).is_err());
     }
 
     #[test]

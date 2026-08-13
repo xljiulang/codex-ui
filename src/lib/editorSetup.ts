@@ -1,0 +1,315 @@
+import {
+  Compartment,
+  EditorState,
+  type Extension,
+  type Text,
+} from "@codemirror/state";
+import {
+  EditorView,
+  drawSelection,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+} from "@codemirror/commands";
+import { search, searchKeymap } from "@codemirror/search";
+import {
+  HighlightStyle,
+  LanguageSupport,
+  StreamLanguage,
+  indentUnit,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { tags } from "@lezer/highlight";
+
+import { css } from "@codemirror/lang-css";
+import { cpp } from "@codemirror/lang-cpp";
+import { go } from "@codemirror/lang-go";
+import { html } from "@codemirror/lang-html";
+import { java } from "@codemirror/lang-java";
+import { javascript } from "@codemirror/lang-javascript";
+import { json } from "@codemirror/lang-json";
+import { markdown } from "@codemirror/lang-markdown";
+import { php } from "@codemirror/lang-php";
+import { python } from "@codemirror/lang-python";
+import { rust } from "@codemirror/lang-rust";
+import { sql } from "@codemirror/lang-sql";
+import { xml } from "@codemirror/lang-xml";
+import { yaml } from "@codemirror/lang-yaml";
+
+import {
+  csharp,
+  kotlin,
+} from "@codemirror/legacy-modes/mode/clike";
+import { diff } from "@codemirror/legacy-modes/mode/diff";
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
+import { properties } from "@codemirror/legacy-modes/mode/properties";
+import { ruby } from "@codemirror/legacy-modes/mode/ruby";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+
+/** 语法高亮配色：与 diff/聊天区 hljs 调色板一致，三套主题下编辑区保持深色终端 */
+export const editorHighlightStyle = HighlightStyle.define([
+  { tag: tags.comment, color: "#6a9955" },
+  {
+    tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword],
+    color: "#569cd6",
+  },
+  {
+    tag: [tags.string, tags.special(tags.string), tags.regexp, tags.attributeValue],
+    color: "#ce9178",
+  },
+  {
+    tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null, tags.meta],
+    color: "#b5cea8",
+  },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.labelName],
+    color: "#dcdcaa",
+  },
+  {
+    tag: [
+      tags.typeName,
+      tags.className,
+      tags.namespace,
+      tags.propertyName,
+      tags.attributeName,
+      tags.variableName,
+    ],
+    color: "#9cdcfe",
+  },
+  {
+    tag: [tags.standard(tags.variableName)],
+    color: "#4ec9b0",
+  },
+  { tag: tags.emphasis, fontStyle: "italic" },
+  { tag: tags.strong, fontWeight: "600" },
+]);
+
+/** 编辑器外观：CSS 变量驱动，深色终端质感（与旧预览一致） */
+export const editorTheme = EditorView.theme(
+  {
+    "&": {
+      height: "100%",
+      fontSize: "12px",
+      backgroundColor: "var(--console-bg-deep)",
+      color: "var(--console-text)",
+    },
+    ".cm-scroller": {
+      fontFamily: "var(--mono)",
+      lineHeight: "1.55",
+      overflow: "auto",
+    },
+    ".cm-content": {
+      caretColor: "var(--accent)",
+      padding: "10px 0",
+    },
+    ".cm-line": {
+      padding: "0 12px 0 8px",
+    },
+    ".cm-gutters": {
+      backgroundColor: "transparent",
+      color: "var(--text-faint)",
+      border: "none",
+      paddingLeft: "8px",
+    },
+    ".cm-activeLine": {
+      backgroundColor: "rgba(var(--accent-rgb), 0.07)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "rgba(var(--accent-rgb), 0.09)",
+      color: "var(--text-dim)",
+    },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+      backgroundColor: "rgba(var(--accent-rgb), 0.28)",
+    },
+    ".cm-cursor, .cm-dropCursor": {
+      borderLeftColor: "var(--accent)",
+    },
+    ".cm-panels": {
+      backgroundColor: "var(--bg-panel)",
+      color: "var(--text)",
+    },
+    ".cm-panels.cm-panels-top": {
+      borderBottom: "1px solid var(--border)",
+    },
+    ".cm-panels .cm-textfield": {
+      backgroundColor: "var(--bg-input)",
+      color: "var(--text)",
+      border: "1px solid var(--border)",
+      borderRadius: "6px",
+      fontFamily: "var(--mono)",
+      fontSize: "12px",
+    },
+    ".cm-panels .cm-button": {
+      backgroundColor: "var(--bg-active)",
+      color: "var(--text-bright)",
+      border: "1px solid var(--border)",
+      borderRadius: "6px",
+      cursor: "pointer",
+      fontSize: "12px",
+    },
+    ".cm-panels label": {
+      color: "var(--text-dim)",
+      fontSize: "12px",
+    },
+    ".cm-searchMatch": {
+      backgroundColor: "rgba(var(--accent-rgb), 0.32)",
+      outline: "none",
+    },
+    ".cm-searchMatch.cm-searchMatch-selected": {
+      backgroundColor: "rgba(229, 214, 160, 0.45)",
+    },
+  },
+  { dark: true },
+);
+
+/** 扩展名 → CodeMirror 语言扩展；无法识别返回 null（纯文本） */
+export function languageForPath(path: string): Extension | null {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  switch (ext) {
+    case "ts":
+    case "mts":
+    case "cts":
+    case "tsx":
+      return javascript({ typescript: true, jsx: ext === "tsx" });
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return javascript({ jsx: ext === "jsx" });
+    case "py":
+    case "pyw":
+      return python();
+    case "rs":
+      return rust();
+    case "cs":
+      return new LanguageSupport(StreamLanguage.define(csharp));
+    case "c":
+    case "h":
+    case "cpp":
+    case "cc":
+    case "cxx":
+    case "hpp":
+    case "hh":
+    case "hxx":
+      return cpp();
+    case "go":
+      return go();
+    case "java":
+      return java();
+    case "kt":
+    case "kts":
+      return new LanguageSupport(StreamLanguage.define(kotlin));
+    case "json":
+      return json();
+    case "md":
+    case "markdown":
+      return markdown();
+    case "yml":
+    case "yaml":
+      return yaml();
+    case "sh":
+    case "bash":
+    case "zsh":
+      return new LanguageSupport(StreamLanguage.define(shell));
+    case "ps1":
+    case "psm1":
+      return new LanguageSupport(StreamLanguage.define(powerShell));
+    case "sql":
+      return sql();
+    case "css":
+      return css();
+    case "html":
+    case "htm":
+      return html();
+    case "xml":
+    case "svg":
+      return xml();
+    case "ini":
+    case "cfg":
+      return new LanguageSupport(StreamLanguage.define(properties));
+    case "php":
+      return php();
+    case "rb":
+      return new LanguageSupport(StreamLanguage.define(ruby));
+    case "diff":
+    case "patch":
+      return new LanguageSupport(StreamLanguage.define(diff));
+    default:
+      return null;
+  }
+}
+
+export interface EditorExtensionsOptions {
+  language: Extension | null;
+  readOnly: boolean;
+  wrap: boolean;
+  wrapCompartment: Compartment;
+  /** 返回当前“已保存”文档（Text 不可变，保存成功后被替换） */
+  savedText: () => Text | null;
+  onDirtyChange: (dirty: boolean) => void;
+  onCursorChange: (line: number, col: number) => void;
+  onSave: () => void;
+}
+
+/** 组装编辑器扩展：行号、活动行、历史、查找/替换、快捷键、主题、高亮、脏状态监听 */
+export function buildEditorExtensions(
+  opts: EditorExtensionsOptions,
+): Extension[] {
+  return [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightActiveLine(),
+    drawSelection(),
+    history(),
+    EditorState.readOnly.of(opts.readOnly),
+    syntaxHighlighting(editorHighlightStyle),
+    editorTheme,
+    indentUnit.of("    "),
+    ...(opts.language ? [opts.language] : []),
+    opts.wrapCompartment.of(opts.wrap ? EditorView.lineWrapping : []),
+    search({ top: true }),
+    EditorView.contentAttributes.of({
+      spellcheck: "false",
+      autocapitalize: "off",
+      autocomplete: "off",
+    }),
+    keymap.of([
+      { key: "Mod-s", run: () => {
+        opts.onSave();
+        return true;
+      } },
+      indentWithTab,
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...searchKeymap,
+    ]),
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        const saved = opts.savedText();
+        opts.onDirtyChange(saved ? !update.state.doc.eq(saved) : false);
+      }
+      if (update.selectionSet || update.docChanged) {
+        const head = update.state.selection.main.head;
+        const line = update.state.doc.lineAt(head);
+        opts.onCursorChange(line.number, head - line.from + 1);
+      }
+    }),
+  ];
+}
+
+/** 创建编辑器状态 */
+export function createEditorState(
+  doc: string,
+  extensions: Extension[],
+): EditorState {
+  return EditorState.create({ doc, extensions });
+}

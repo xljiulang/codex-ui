@@ -8,7 +8,7 @@ import {
   deleteEntry,
   expanded,
   onSearchInput,
-  openTextPreview,
+  openTextEditor,
   pasteInto,
   probeTextEntry,
   refreshAll,
@@ -198,7 +198,7 @@ async function requestOpen(entry: FsEntry) {
   const ok = await probeTextEntry(entry);
   if (ok === null) return; // 探测失败：错误信息已 toast
   if (ok) {
-    openTextPreview(entry);
+    openTextEditor(entry);
     return;
   }
   store.toast = "该文件不是文本文件，无法打开";

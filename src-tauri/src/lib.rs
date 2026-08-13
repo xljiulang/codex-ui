@@ -57,9 +57,10 @@ pub fn run() {
             codex::session_fs::session_fs_watch_start,
             codex::session_fs::session_fs_watch_stop,
             codex::session_fs::session_fs_read,
+            codex::session_fs::session_fs_write,
             codex::session_fs::session_fs_probe_text,
-            codex::text_preview::open_text_preview,
-            codex::text_preview::take_text_preview_params,
+            codex::text_editor::open_text_editor,
+            codex::text_editor::take_text_editor_params,
             codex::git::git_changes_status,
             codex::git::git_changes_init,
             codex::git::git_changes_commit,
@@ -86,7 +87,7 @@ pub fn run() {
             app.manage(server);
             app.manage(codex::diff::DiffParamsState(std::sync::Mutex::new(None)));
             app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
-            app.manage(codex::text_preview::TextPreviewParamsState(std::sync::Mutex::new(None)));
+            app.manage(codex::text_editor::TextEditorParamsState(std::sync::Mutex::new(None)));
             app.manage(codex::git::GitWatcherState(std::sync::Mutex::new(None)));
             server_handle.ensure_running();
             Ok(())

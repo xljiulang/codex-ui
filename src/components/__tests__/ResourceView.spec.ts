@@ -274,11 +274,11 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("文本文件「打开」：调用 open_text_preview 打开预览窗口", async () => {
+  it("文本文件「打开」：调用 open_text_editor 打开编辑窗口", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "打开");
-    expect(mockedInvoke).toHaveBeenCalledWith("open_text_preview", {
+    expect(mockedInvoke).toHaveBeenCalledWith("open_text_editor", {
       root: rootPath,
       path: aTxt.path,
     });
@@ -311,11 +311,11 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("单击文本文件行调用 open_text_preview 打开预览", async () => {
+  it("单击文本文件行调用 open_text_editor 打开编辑器", async () => {
     const wrapper = await mountPanel();
     await wrapper.find(".resource-row.resource-file").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("open_text_preview", {
+    expect(mockedInvoke).toHaveBeenCalledWith("open_text_editor", {
       root: rootPath,
       path: aTxt.path,
     });
@@ -334,7 +334,7 @@ describe("ResourceView 文件树", () => {
     await flushPromises();
     expect(store.toast).toContain("该文件不是文本文件，无法打开");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "open_text_preview",
+      "open_text_editor",
       expect.anything(),
     );
     wrapper.unmount();
@@ -353,7 +353,7 @@ describe("ResourceView 文件树", () => {
     await flushPromises();
     expect(store.toast).toContain("probe error");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "open_text_preview",
+      "open_text_editor",
       expect.anything(),
     );
     wrapper.unmount();
@@ -544,7 +544,7 @@ describe("ResourceView 文件树", () => {
 
     await wrapper.find(".resource-result").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("open_text_preview", {
+    expect(mockedInvoke).toHaveBeenCalledWith("open_text_editor", {
       root: rootPath,
       path: mainTs.path,
     });

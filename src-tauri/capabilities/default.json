@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "codex-ui default capability",
-  "windows": ["main"],
+  "windows": ["main", "text-editor"],
   "permissions": [
     "core:default",
     "core:event:default",

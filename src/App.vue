@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from "vue";
+import { defineAsyncComponent, onBeforeUnmount, onMounted } from "vue";
 import AppHeader from "./components/AppHeader.vue";
 import RightPanel from "./components/RightPanel.vue";
 import ChatView from "./components/ChatView.vue";
@@ -8,12 +8,16 @@ import InteractionDialog from "./components/InteractionDialog.vue";
 import PlanDialog from "./components/PlanDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
-import TextViewWindow from "./components/TextViewWindow.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+
+// 文本编辑器（CodeMirror）按需加载：仅打开编辑器窗口时才下载对应 chunk
+const TextEditorWindow = defineAsyncComponent(
+  () => import("./components/TextEditorWindow.vue"),
+);
 
 // 独立窗口（diff / 文本预览）：按窗口 label 识别（不依赖 localStorage，避免标志残留污染下次启动）
 let isDiffWindow = false;
@@ -21,7 +25,7 @@ let isTextWindow = false;
 try {
   const label = getCurrentWindow().label;
   isDiffWindow = label === "diff-preview";
-  isTextWindow = label === "text-preview";
+  isTextWindow = label === "text-editor";
 } catch {
   // 非 Tauri 环境（如单测）按普通窗口处理
 }
@@ -46,7 +50,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <TextViewWindow v-if="isTextWindow" />
+  <TextEditorWindow v-if="isTextWindow" />
   <DiffWindowView v-else-if="isDiffWindow" />
   <div v-else class="app">
     <AppHeader />
@@ -59,7 +63,6 @@ onBeforeUnmount(() => {
     <PlanDialog />
     <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
-    <TooltipLayer />
     <div
       v-if="ctxMenu"
       class="ctx-menu"
@@ -76,4 +79,5 @@ onBeforeUnmount(() => {
       </button>
     </div>
   </div>
+  <TooltipLayer />
 </template>
