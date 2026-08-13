@@ -278,8 +278,13 @@ export function revealInExplorer(path: string) {
   void invoke("reveal_path", { path }).catch((e) => setToast(toastError(e)));
 }
 
-export function openFile(path: string) {
-  void invoke("open_url", { url: path }).catch((e) => setToast(toastError(e)));
+/** 应用内打开文本文件：独立预览窗口读取并高亮展示 */
+export function openTextPreview(entry: FsEntry) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  void invoke("open_text_preview", { root, path: entry.path }).catch((e) =>
+    setToast(toastError(e)),
+  );
 }
 
 /** 添加为会话附件：优先走 ComposerBar 全局入口，缺失时兜底 push store */

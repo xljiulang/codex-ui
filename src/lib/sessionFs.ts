@@ -76,3 +76,42 @@ export function flattenResourceTree(
 export function joinFsPath(base: string, name: string): string {
   return base.replace(/[\\/]+$/, "") + "\\" + name;
 }
+
+/** 视为文本/代码文件、可应用内预览的扩展名（小写，含 highlight.ts 全部代码扩展名） */
+const TEXT_EXTENSIONS = new Set([
+  // 代码（与 highlight.ts EXT_TO_LANG 对齐）
+  "ts", "mts", "cts", "js", "jsx", "mjs", "cjs", "py", "rs", "cs",
+  "c", "h", "cpp", "cc", "cxx", "hpp", "go", "java", "kt", "kts",
+  "json", "md", "markdown", "yml", "yaml", "sh", "bash", "zsh",
+  "ps1", "psm1", "sql", "css", "html", "htm", "xml", "svg", "ini",
+  "cfg", "php", "rb", "diff", "patch",
+  // 纯文本 / 文档 / 配置
+  "txt", "text", "log", "csv", "tsv", "toml", "conf", "env",
+  "scss", "less", "vue", "svelte", "astro", "graphql", "proto",
+  "prisma", "tf", "gradle", "lock", "properties", "editorconfig",
+  "npmrc", "yarnrc", "babelrc", "eslintrc", "prettierrc",
+  "gitignore", "gitattributes", "dockerignore", "gitmodules",
+]);
+
+/** 无扩展名/点文件也视为文本（小写匹配） */
+const TEXT_FILE_NAMES = new Set([
+  "dockerfile", "makefile", "license", "readme", "env",
+  "gitignore", "gitattributes", "npmrc", "yarnrc", "editorconfig",
+  "babelrc", "eslintrc", "prettierrc", "gitmodules", "gitkeep",
+]);
+
+/** 是否为文本/代码文件（扩展名或文件名白名单，大小写不敏感） */
+export function isTextFile(name: string): boolean {
+  const base = name.trim();
+  if (!base) return false;
+  const lower = base.toLowerCase();
+  if (
+    TEXT_FILE_NAMES.has(lower) ||
+    TEXT_FILE_NAMES.has(lower.replace(/^\./, ""))
+  ) {
+    return true;
+  }
+  const dot = lower.lastIndexOf(".");
+  if (dot <= 0) return false;
+  return TEXT_EXTENSIONS.has(lower.slice(dot + 1));
+}

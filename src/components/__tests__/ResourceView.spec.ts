@@ -73,6 +73,16 @@ const mainTs: FsEntry = {
   createdAtMs: 0,
   childCount: null,
 };
+const picPng: FsEntry = {
+  name: "pic.png",
+  path: rootPath + "\\src\\pic.png",
+  relPath: "src/pic.png",
+  isDir: false,
+  size: 2048,
+  modifiedAtMs: 0,
+  createdAtMs: 0,
+  childCount: null,
+};
 
 function mockFs() {
   mockedInvoke.mockImplementation((cmd, args) => {
@@ -84,7 +94,7 @@ function mockFs() {
     if (cmd === "session_fs_list") {
       const dir = (args as { dir?: string }).dir;
       if (dir === rootPath) return Promise.resolve([srcDir, nodeModules, aTxt]);
-      if (dir === srcDir.path) return Promise.resolve([mainTs]);
+      if (dir === srcDir.path) return Promise.resolve([mainTs, picPng]);
       return Promise.resolve([]);
     }
     if (cmd === "session_fs_search") {
@@ -211,6 +221,7 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-file");
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).toEqual([
+      "打开",
       "复制",
       "属性",
       "删除",
@@ -218,6 +229,43 @@ describe("ResourceView 文件树", () => {
       "添加为会话附件",
       "在资源管理器中打开",
     ]);
+    wrapper.unmount();
+  });
+
+  it("文本文件「打开」：调用 open_text_preview 打开预览窗口", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-file");
+    await clickCtxItem(wrapper, "打开");
+    expect(mockedInvoke).toHaveBeenCalledWith("open_text_preview", {
+      root: rootPath,
+      path: aTxt.path,
+    });
+    wrapper.unmount();
+  });
+
+  it("非文本文件右键菜单不显示打开", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
+    await flushPromises();
+    const picRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((w) => w.text().includes("pic.png"));
+    expect(picRow).toBeTruthy();
+    await picRow!.trigger("contextmenu", { clientX: 200, clientY: 200 });
+    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    expect(labels).not.toContain("打开");
+    wrapper.unmount();
+  });
+
+  it("双击文件行不触发任何打开调用", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.find(".resource-row.resource-file").trigger("dblclick");
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith("open_url", expect.anything());
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "open_text_preview",
+      expect.anything(),
+    );
     wrapper.unmount();
   });
 

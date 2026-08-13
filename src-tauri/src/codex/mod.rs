@@ -4,3 +4,4 @@ pub mod diff;
 pub mod git;
 pub mod session_fs;
 pub mod settings;
+pub mod text_preview;

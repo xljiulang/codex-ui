@@ -8,40 +8,46 @@ import InteractionDialog from "./components/InteractionDialog.vue";
 import PlanDialog from "./components/PlanDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import DiffWindowView from "./components/DiffWindowView.vue";
+import TextViewWindow from "./components/TextViewWindow.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-// 独立 diff 窗口：按窗口 label 识别（不依赖 localStorage，避免标志残留污染下次启动）
+// 独立窗口（diff / 文本预览）：按窗口 label 识别（不依赖 localStorage，避免标志残留污染下次启动）
 let isDiffWindow = false;
+let isTextWindow = false;
 try {
-  isDiffWindow = getCurrentWindow().label === "diff-preview";
+  const label = getCurrentWindow().label;
+  isDiffWindow = label === "diff-preview";
+  isTextWindow = label === "text-preview";
 } catch {
   // 非 Tauri 环境（如单测）按普通窗口处理
 }
+const isStandaloneWindow = isDiffWindow || isTextWindow;
 
-// 主窗口注册自定义右键菜单（diff 窗口由 DiffWindowView 自行注册）
-const { ctxMenu } = useContextMenu(!isDiffWindow);
+// 主窗口注册自定义右键菜单（独立窗口由各自组件自行注册）
+const { ctxMenu } = useContextMenu(!isStandaloneWindow);
 
 let unlistenClose: (() => void) | undefined;
 
 onMounted(async () => {
-  if (isDiffWindow) return;
+  if (isStandaloneWindow) return;
   unlistenClose = await registerCloseGuard();
   void init();
 });
 
 onBeforeUnmount(() => {
   unlistenClose?.();
-  if (isDiffWindow) return;
+  if (isStandaloneWindow) return;
   disposeEvents();
 });
 </script>
 
 <template>
-  <DiffWindowView v-if="isDiffWindow" />
+  <TextViewWindow v-if="isTextWindow" />
+  <DiffWindowView v-else-if="isDiffWindow" />
   <div v-else class="app">
     <AppHeader />
     <div class="app-body">

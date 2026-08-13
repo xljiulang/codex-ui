@@ -447,6 +447,35 @@ pub async fn session_fs_paste(
     .map_err(|e| e.to_string())?
 }
 
+/// 文本预览最大读取字节数（1 MiB）
+const MAX_PREVIEW_BYTES: u64 = 1024 * 1024;
+
+/// 单文件内容读取（文本预览用）：路径包含校验、仅文件、大小上限、UTF-8 lossy
+fn read_impl(root: &Path, path: &Path) -> Result<String, String> {
+    let target = ensure_inside(root, path)?;
+    let meta = std::fs::metadata(&target)
+        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    if !meta.is_file() {
+        return Err(format!("不是文件: {}", clean_path(&target)));
+    }
+    if meta.len() > MAX_PREVIEW_BYTES {
+        return Err("文件过大，暂不支持预览".into());
+    }
+    let bytes = std::fs::read(&target)
+        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tauri::command]
+pub async fn session_fs_read(root: String, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let root_p = resolve_root(&root)?;
+        read_impl(&root_p, Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
     p.strip_prefix(root)
         .map(|rel| {
@@ -710,5 +739,26 @@ mod tests {
         assert!(root.join("src").join("b.txt").exists());
         // 防止粘贴到自身
         assert!(paste_impl(&root, &root.join("src"), &[root.join("src").to_string_lossy().into_owned()]).is_err());
+    }
+
+    #[test]
+    fn read_file_with_guards() {
+        let (tmp, root) = tree();
+        // 正常读取：内容原样返回
+        assert_eq!(read_impl(&root, &root.join("a.txt")).unwrap(), "a");
+        assert_eq!(
+            read_impl(&root, &root.join("src").join("main.ts")).unwrap(),
+            "x"
+        );
+        // 目录拒绝
+        assert!(read_impl(&root, &root.join("src")).is_err());
+        // 越界拒绝（ensure_inside 先行拦截）
+        let outside = tmp.path().parent().unwrap().join("outside-read.txt");
+        std::fs::write(&outside, "x").unwrap();
+        assert!(read_impl(&root, &outside).is_err());
+        let _ = std::fs::remove_file(&outside);
+        // 超过 1 MiB 拒绝
+        std::fs::write(root.join("big.bin"), vec![0u8; (1024 * 1024) + 1]).unwrap();
+        assert!(read_impl(&root, &root.join("big.bin")).is_err());
     }
 }

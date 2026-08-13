@@ -8,7 +8,7 @@ import {
   deleteEntry,
   expanded,
   onSearchInput,
-  openFile,
+  openTextPreview,
   pasteInto,
   refreshAll,
   renameEntry,
@@ -32,6 +32,7 @@ import {
 import {
   formatFileSize,
   formatFileTime,
+  isTextFile,
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
@@ -58,6 +59,8 @@ const ICON_ATTACH =
   "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-1.93-1.57-3.5-3.5-3.5S8 3.07 8 5v12.5c0 2.76 2.24 5 5 5s5-2.24 5-5V6h-1.5z";
 const ICON_INFO =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z";
+const ICON_OPEN =
+  "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
 
 interface CtxItem {
   label: string;
@@ -149,7 +152,15 @@ function openDirMenu(entry: FsEntry, e: MouseEvent) {
 }
 
 function openFileMenu(entry: FsEntry, e: MouseEvent) {
-  openCtx(e, [
+  const items: CtxItem[] = [];
+  if (isTextFile(entry.name)) {
+    items.push({
+      label: "打开",
+      icon: ICON_OPEN,
+      action: () => openTextPreview(entry),
+    });
+  }
+  items.push(
     { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
     {
       label: "属性",
@@ -177,7 +188,8 @@ function openFileMenu(entry: FsEntry, e: MouseEvent) {
       icon: ICON_REVEAL,
       action: () => revealInExplorer(entry.path),
     },
-  ]);
+  );
+  openCtx(e, items);
 }
 
 function openEntryMenu(entry: FsEntry, e: MouseEvent) {
@@ -380,7 +392,6 @@ const deleteLabel = computed(() => {
               ? (selectedPath = row.entry.path)
               : toggleDir(row.entry.path)
           "
-          @dblclick="row.kind === 'file' && openFile(row.entry.path)"
           @contextmenu="onRowContext(row, $event)"
         >
           <span class="resource-icon">

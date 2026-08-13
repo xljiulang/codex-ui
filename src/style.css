@@ -4453,52 +4453,79 @@ body.resizing-editor {
   padding: 12px 16px;
 }
 
-/* diff 内联行语法高亮配色（与聊天区 hljs 配色一致） */
+/* diff 内联行/文本预览语法高亮配色（与聊天区 hljs 配色一致） */
 .diff-text .hljs-comment,
-.diff-text .hljs-quote {
+.text-preview-text .hljs-comment,
+.diff-text .hljs-quote,
+.text-preview-text .hljs-quote {
   color: #6a9955;
 }
 .diff-text .hljs-keyword,
+.text-preview-text .hljs-keyword,
 .diff-text .hljs-selector-tag,
-.diff-text .hljs-literal {
+.text-preview-text .hljs-selector-tag,
+.diff-text .hljs-literal,
+.text-preview-text .hljs-literal {
   color: #569cd6;
 }
 .diff-text .hljs-string,
+.text-preview-text .hljs-string,
 .diff-text .hljs-regexp,
-.diff-text .hljs-addition {
+.text-preview-text .hljs-regexp,
+.diff-text .hljs-addition,
+.text-preview-text .hljs-addition {
   color: #ce9178;
 }
 .diff-text .hljs-number,
-.diff-text .hljs-meta {
+.text-preview-text .hljs-number,
+.diff-text .hljs-meta,
+.text-preview-text .hljs-meta {
   color: #b5cea8;
 }
 .diff-text .hljs-title,
-.diff-text .hljs-section {
+.text-preview-text .hljs-title,
+.diff-text .hljs-section,
+.text-preview-text .hljs-section {
   color: #dcdcaa;
 }
 .diff-text .hljs-attr,
+.text-preview-text .hljs-attr,
 .diff-text .hljs-attribute,
+.text-preview-text .hljs-attribute,
 .diff-text .hljs-variable,
+.text-preview-text .hljs-variable,
 .diff-text .hljs-template-variable,
+.text-preview-text .hljs-template-variable,
 .diff-text .hljs-type,
-.diff-text .hljs-class .hljs-title {
+.text-preview-text .hljs-type,
+.diff-text .hljs-class .hljs-title,
+.text-preview-text .hljs-class .hljs-title {
   color: #9cdcfe;
 }
 .diff-text .hljs-built_in,
-.diff-text .hljs-builtin-name {
+.text-preview-text .hljs-built_in,
+.diff-text .hljs-builtin-name,
+.text-preview-text .hljs-builtin-name {
   color: #4ec9b0;
 }
 .diff-text .hljs-symbol,
-.diff-text .hljs-bullet {
+.text-preview-text .hljs-symbol,
+.diff-text .hljs-bullet,
+.text-preview-text .hljs-bullet {
   color: #d19a66;
 }
 .diff-text .hljs-deletion {
   color: #f44747;
 }
-.diff-text .hljs-emphasis {
+.text-preview-text .hljs-deletion {
+  color: #f44747;
+}
+.diff-text .hljs-emphasis,
+.text-preview-text .hljs-emphasis {
   font-style: italic;
 }
-.diff-text .hljs-strong {
+.diff-text .hljs-strong,
+.text-preview-text .hljs-strong {
   font-weight: 600;
 }
 
@@ -4521,6 +4548,104 @@ body.resizing-editor {
   background: rgba(255, 255, 255, 0.06);
   border-top: 1px dashed rgba(255, 255, 255, 0.14);
   border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+/* 独立文本预览窗口布局（与 diff 窗口同风格） */
+.text-preview-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  background-image: radial-gradient(
+    900px 320px at 50% -140px,
+    rgba(var(--accent-rgb), 0.05),
+    transparent 70%
+  );
+}
+.text-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--diff-head-bg);
+}
+.text-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.text-preview-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-bright);
+  word-break: break-all;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 11px;
+}
+.text-preview-lang {
+  font-size: 11px;
+  color: var(--text-faint);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+}
+.text-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  padding: 12px 16px;
+}
+.text-preview-loading,
+.text-preview-note {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.text-preview-view {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  min-width: max-content;
+}
+.text-preview-line {
+  display: flex;
+  gap: 12px;
+  white-space: pre;
+}
+.text-preview-line:hover {
+  background: rgba(var(--accent-rgb), 0.06);
+}
+.text-preview-no {
+  flex-shrink: 0;
+  width: 42px;
+  text-align: right;
+  color: var(--text-faint);
+  user-select: none;
+  opacity: 0.65;
+}
+.text-preview-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--console-text);
+}
+
+/* 晨光主题：正文随控制台统一为深色终端 */
+:root[data-theme="light"] .text-preview-body {
+  background: var(--console-bg-deep);
+}
+:root[data-theme="light"] .text-preview-loading,
+:root[data-theme="light"] .text-preview-note,
+:root[data-theme="light"] .text-preview-no {
+  color: #8b95a7;
 }
 
 /* 设置页主题选择器 */

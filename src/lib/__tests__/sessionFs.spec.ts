@@ -3,6 +3,7 @@ import {
   flattenResourceTree,
   formatFileSize,
   formatFileTime,
+  isTextFile,
   joinFsPath,
   type FsEntry,
 } from "../sessionFs";
@@ -105,5 +106,32 @@ describe("joinFsPath", () => {
   it("拼接 Windows 路径并去尾分隔符", () => {
     expect(joinFsPath("D:\\repo", "src")).toBe("D:\\repo\\src");
     expect(joinFsPath("D:\\repo\\", "a.txt")).toBe("D:\\repo\\a.txt");
+  });
+});
+
+describe("isTextFile", () => {
+  it("文本/代码扩展名与常见文件名命中", () => {
+    expect(isTextFile("a.txt")).toBe(true);
+    expect(isTextFile("README.md")).toBe(true);
+    expect(isTextFile("main.ts")).toBe(true);
+    expect(isTextFile("Dockerfile")).toBe(true);
+    expect(isTextFile(".gitignore")).toBe(true);
+    expect(isTextFile("Makefile")).toBe(true);
+    expect(isTextFile("config.yaml")).toBe(true);
+    expect(isTextFile("LICENSE")).toBe(true);
+  });
+
+  it("二进制/媒体/未知无扩展名文件不命中", () => {
+    expect(isTextFile("pic.png")).toBe(false);
+    expect(isTextFile("a.zip")).toBe(false);
+    expect(isTextFile("app.exe")).toBe(false);
+    expect(isTextFile("notes")).toBe(false);
+    expect(isTextFile("")).toBe(false);
+  });
+
+  it("大小写不敏感", () => {
+    expect(isTextFile("A.TXT")).toBe(true);
+    expect(isTextFile("Main.TS")).toBe(true);
+    expect(isTextFile("DOCKERFILE")).toBe(true);
   });
 });
