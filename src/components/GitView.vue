@@ -21,6 +21,7 @@ import {
   type GitPullResult,
   type GitStatus,
 } from "../lib/gitChanges";
+import { clampMenuPos } from "../lib/ctxMenu";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -546,9 +547,13 @@ function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
     });
   }
   // conflicted / renamed 仅保留“打开”
-  const x = Math.min(e.clientX, window.innerWidth - 190);
-  const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
-  ctxMenu.value = { x, y, items };
+  const pos = clampMenuPos(
+    e.clientX,
+    e.clientY,
+    190,
+    items.length * 30 + 12,
+  );
+  ctxMenu.value = { x: pos.x, y: pos.y, items };
 }
 
 function toggleDirRow(node: GitDirNode) {
@@ -588,9 +593,13 @@ function openDirCtx(section: GitSection, node: GitDirNode, e: MouseEvent) {
     danger: true,
     action: () => void restoreDir(node),
   });
-  const x = Math.min(e.clientX, window.innerWidth - 190);
-  const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
-  ctxMenu.value = { x, y, items };
+  const pos = clampMenuPos(
+    e.clientX,
+    e.clientY,
+    190,
+    items.length * 30 + 12,
+  );
+  ctxMenu.value = { x: pos.x, y: pos.y, items };
 }
 
 async function runGitOp(cmd: string, relPath: string) {

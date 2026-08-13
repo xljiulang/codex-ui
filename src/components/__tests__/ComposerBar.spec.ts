@@ -544,6 +544,25 @@ describe("ComposerBar 粘贴图片/文件", () => {
     expect(getEditor().getText()).toBe("");
   });
 
+  it("粘贴项取不到 File 时放行默认粘贴（不 preventDefault）", async () => {
+    wrapper = mount(ComposerBar);
+    await flushPromises(); // 等 TipTap 创建 .ProseMirror
+    const dt = makeDataTransfer([
+      { kind: "file", type: "image/png", getAsFile: () => null },
+    ]);
+    const ev = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clipboardData", { value: dt });
+    wrapper!.find(".ProseMirror").element.dispatchEvent(ev);
+    await flushPromises();
+
+    expect(ev.defaultPrevented).toBe(false);
+    expect(store.attachments).toHaveLength(0);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "save_pasted_image",
+      expect.anything(),
+    );
+  });
+
   it("粘贴图片文件（原始路径可解析）：直接用原路径，不落盘", async () => {
     mockedInvoke.mockImplementation(async (cmd: string) => {
       if (cmd === "clipboard_file_paths") return ["D:/repo/shot.png"];

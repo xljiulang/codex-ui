@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { openLink } from "../lib/links";
+import { clampMenuPos } from "../lib/ctxMenu";
 
 export interface CtxItem {
   label: string;
@@ -86,9 +87,13 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
       ctxMenu.value = null;
       return;
     }
-    const x = Math.min(e.clientX, window.innerWidth - 160);
-    const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
-    ctxMenu.value = { x, y, items };
+    const pos = clampMenuPos(
+      e.clientX,
+      e.clientY,
+      160,
+      items.length * 30 + 12,
+    );
+    ctxMenu.value = { x: pos.x, y: pos.y, items };
   }
 
   function onGlobalClick() {

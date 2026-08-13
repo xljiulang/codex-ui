@@ -36,6 +36,7 @@ import {
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
+import { clampMenuPos } from "../lib/ctxMenu";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -101,9 +102,13 @@ function fileMeta(entry: FsEntry): string {
 function openCtx(e: MouseEvent, items: CtxItem[]) {
   e.preventDefault();
   e.stopPropagation();
-  const x = Math.min(e.clientX, window.innerWidth - 190);
-  const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
-  ctxMenu.value = { x, y, items };
+  const pos = clampMenuPos(
+    e.clientX,
+    e.clientY,
+    190,
+    items.length * 30 + 12,
+  );
+  ctxMenu.value = { x: pos.x, y: pos.y, items };
 }
 
 function openRootMenu(e: MouseEvent) {

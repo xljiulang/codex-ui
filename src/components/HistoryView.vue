@@ -20,6 +20,7 @@ import { groupThreads } from "../lib/historyGroup";
 import type { HistoryGroup } from "../lib/historyGroup";
 import type { ThreadSummary } from "../lib/types";
 import { focusComposer } from "../lib/composerFocus";
+import { clampMenuPos } from "../lib/ctxMenu";
 
 /** 文件夹行图标：收起=闭合文件夹，展开=打开文件夹 */
 const FOLDER_CLOSED =
@@ -66,6 +67,13 @@ type RenderRow =
 function toggleDir(key: string) {
   if (expandedDirs.has(key)) expandedDirs.delete(key);
   else expandedDirs.add(key);
+}
+
+/** 目录行键盘操作：Enter/Space 与点击一致（Space 阻止默认滚动） */
+function onFolderKeydown(key: string, e: KeyboardEvent) {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  toggleDir(key);
 }
 
 /** 按目录分组后的渲染行：目录行 + （展开时）内部会话行 + 平铺会话行 */
@@ -159,9 +167,13 @@ async function doDelete() {
 function openCtx(e: MouseEvent, items: CtxItem[]) {
   e.preventDefault();
   e.stopPropagation();
-  const x = Math.min(e.clientX, window.innerWidth - 180);
-  const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
-  ctxMenu.value = { x, y, items };
+  const pos = clampMenuPos(
+    e.clientX,
+    e.clientY,
+    180,
+    items.length * 30 + 12,
+  );
+  ctxMenu.value = { x: pos.x, y: pos.y, items };
 }
 
 /** 打开会话行右键菜单；重命名输入框内右键放行给全局编辑菜单 */
@@ -288,9 +300,11 @@ onBeforeUnmount(() => {
           class="history-folder"
           :class="{ collapsed: row.collapsed }"
           role="button"
+          tabindex="0"
           :aria-expanded="!row.collapsed"
           v-tooltip="row.group.path"
           @click="toggleDir(row.group.key)"
+          @keydown="onFolderKeydown(row.group.key, $event)"
           @contextmenu="openFolderCtxMenu(row.group, $event)"
         >
           <svg class="folder-arrow" viewBox="0 0 24 24" aria-hidden="true">

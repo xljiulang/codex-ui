@@ -98,4 +98,22 @@ describe("buildTurns 回合分组", () => {
     const third = builder.build(items);
     expect(third[0].rows[1]).not.toBe(first[0].rows[1]);
   });
+
+  it("跨次 build 日期分隔线 key 稳定复用，缓存不随构建次数增长", () => {
+    const builder = createTurnsBuilder(formatDay);
+    const day = new Date(2026, 7, 9, 10, 0).getTime();
+    const items = [msg("u1", "userMessage", day), msg("a1", "agentMessage", day)];
+
+    const seps = (b: ReturnType<typeof createTurnsBuilder>) =>
+      b
+        .build(items)
+        .flatMap((t) => t.rows)
+        .filter((r) => r.kind === "sep");
+
+    const firstSep = seps(builder)[0];
+    const secondSep = seps(builder)[0];
+    // 同一位置的分隔线复用同一行对象/key（旧实现每次 build 生成新 key 并缓存）
+    expect(secondSep).toBe(firstSep);
+    expect(secondSep?.key).toBe(firstSep?.key);
+  });
 });

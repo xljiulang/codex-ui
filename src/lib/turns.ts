@@ -24,6 +24,9 @@ export function createTurnsBuilder(formatDay: DayFormatter) {
     build(items: readonly ThreadItem[]): Turn[] {
       const turns: Turn[] = [];
       let lastDay = "";
+      // 每轮 build 内计数：同一日期在同一次构建中出现多次时 key 仍唯一；
+      // 跨 build 计数重置，保证同一位置的日期分隔线复用同一行对象与 key，
+      // 避免流式重算期间缓存条目随构建次数无限增长。
       let sepCount = 0;
 
       // 前置伪回合（首个用户消息之前的条目）：先收集，确定 key 后再入列
@@ -44,12 +47,13 @@ export function createTurnsBuilder(formatDay: DayFormatter) {
       };
 
       const sepRow = (day: string): TurnRow => {
-        const key = `sep-${day}-${sepCount++}`;
+        const key = `sep-${day}-${sepCount}`;
         let row = rowCache.get(key);
         if (!row) {
           row = { key, kind: "sep", date: day };
           rowCache.set(key, row);
         }
+        sepCount++;
         return row;
       };
 

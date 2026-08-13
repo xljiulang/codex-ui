@@ -542,12 +542,13 @@ function handlePasteDom(e: ClipboardEvent): boolean {
     (it) => it.kind === "file",
   );
   if (!fileItems.length) return false;
-  e.preventDefault();
   // DataTransferItem 只在 paste 事件同步阶段有效：先取出 File，再异步处理
   const files = fileItems
     .map((it) => it.getAsFile())
     .filter((f): f is File => !!f);
+  // 取不到 File（如已失效的 DataTransferItem）：放行默认粘贴，避免吞掉文本
   if (!files.length) return false;
+  e.preventDefault();
   void handlePastedFiles(files);
   return true;
 }

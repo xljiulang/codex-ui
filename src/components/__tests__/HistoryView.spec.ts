@@ -376,6 +376,30 @@ describe("HistoryView 目录分组", () => {
     expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
   });
 
+  it("目录行可聚焦，Enter/Space 键展开与收起", async () => {
+    store.threads = dirThreads.map((t) => ({ ...t }));
+    const wrapper = mount(HistoryView);
+    const folder = wrapper.findAll(".history-folder")[0];
+
+    expect(folder.attributes("role")).toBe("button");
+    expect(folder.attributes("tabindex")).toBe("0");
+    expect(folder.attributes("aria-expanded")).toBe("false");
+
+    await folder.trigger("keydown", { key: "Enter" });
+    expect(wrapper.findAll(".history-item")).toHaveLength(2);
+    expect(wrapper.findAll(".history-folder")[0].attributes("aria-expanded")).toBe(
+      "true",
+    );
+
+    await wrapper
+      .findAll(".history-folder")[0]
+      .trigger("keydown", { key: " ", code: "Space" });
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    expect(wrapper.findAll(".history-folder")[0].attributes("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   it("目录按组内第一会话排序（置顶优先），置顶会话仍留在目录内", async () => {
     store.threads = [
       { ...dirThreads[2] },
