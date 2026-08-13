@@ -922,3 +922,195 @@ describe("GitView 变更文件树形目录", () => {
     wrapper.unmount();
   });
 });
+
+describe("GitView 提交", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  const stagedStatus: GitStatus = {
+    repoRoot: rootPath,
+    branch: "main",
+    files: [
+      { path: "a.txt", status: "modified", staged: true, worktree: false },
+      { path: "b.txt", status: "added", staged: true, worktree: false },
+    ],
+  };
+
+  it("有暂存时提示文件数；消息为空时提交按钮禁用", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(stagedStatus);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    expect(wrapper.find(".git-commit-hint").text()).toBe("将提交 2 个文件");
+    expect(
+      (wrapper.find(".git-commit-btn").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("填写消息后提交：调用 git_changes_commit、清空消息并 toast", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(stagedStatus);
+      if (cmd === "git_changes_commit") {
+        return Promise.resolve({ ...stagedStatus, files: [] });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-commit-input").setValue("feat: 提交 a");
+    await wrapper.find(".git-commit-btn").trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_commit",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, message: "feat: 提交 a" });
+    expect(
+      (wrapper.find(".git-commit-input").element as HTMLTextAreaElement).value,
+    ).toBe("");
+    expect(store.toast).toBe("提交成功");
+    wrapper.unmount();
+  });
+
+  it("Ctrl+Enter 提交", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(stagedStatus);
+      if (cmd === "git_changes_commit") {
+        return Promise.resolve({ ...stagedStatus, files: [] });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-commit-input").setValue("feat: x");
+    await wrapper.find(".git-commit-input").trigger("keydown.ctrl.enter");
+    await flushPromises();
+
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_commit"),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("无暂存更改时提示先暂存，提交按钮禁用", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    expect(wrapper.find(".git-commit-hint").text()).toBe("先在上方暂存更改");
+    await wrapper.find(".git-commit-input").setValue("msg");
+    expect(
+      (wrapper.find(".git-commit-btn").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("提交失败时 toast 展示后端错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(stagedStatus);
+      if (cmd === "git_changes_commit") {
+        return Promise.reject({ message: "没有已暂存的更改" });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-commit-input").setValue("msg");
+    await wrapper.find(".git-commit-btn").trigger("click");
+    await flushPromises();
+    expect(store.toast).toBe("没有已暂存的更改");
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 拉取", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  it("点击拉取调用 git_changes_pull 并更新状态与 toast", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_pull") {
+        return Promise.resolve({
+          status: okStatus,
+          kind: "fast_forward",
+          message: "已快进更新到远端 origin/main",
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-pull").trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_pull",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath });
+    expect(store.toast).toBe("已快进更新到远端 origin/main");
+    wrapper.unmount();
+  });
+
+  it("拉取失败时 toast 展示后端错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_pull") {
+        return Promise.reject({ message: "连接远端失败" });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-pull").trigger("click");
+    await flushPromises();
+    expect(store.toast).toBe("连接远端失败");
+    wrapper.unmount();
+  });
+
+  it("游离 HEAD 时拉取按钮禁用", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({ ...okStatus, branch: "HEAD" });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    expect(
+      (wrapper.find(".git-pull").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+    wrapper.unmount();
+  });
+});

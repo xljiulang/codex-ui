@@ -17,6 +17,7 @@ import {
   gitStatusIcon,
   gitStatusLabel,
   type GitFile,
+  type GitPullResult,
   type GitStatus,
 } from "../lib/gitChanges";
 
@@ -37,6 +38,9 @@ const branchMenuOpen = ref(false);
 const branches = ref<string[]>([]);
 const newBranchName = ref("");
 const branchBusy = ref(false);
+const pullBusy = ref(false);
+const commitMessage = ref("");
+const commitBusy = ref(false);
 
 const ICON_DIFF =
   "M11.5 9a2.5 2.5 0 0 0 0 5 2.5 2.5 0 0 0 0-5zM20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-3.21 14.21l-2.91-2.91c-.69.44-1.51.7-2.39.7C9.01 16 7 13.99 7 11.5S9.01 7 11.5 7 16 9.01 16 11.5c0 .88-.26 1.69-.7 2.39l2.91 2.9-1.42 1.42z";
@@ -186,6 +190,56 @@ const stagedFiles = computed(() =>
 );
 const worktreeRows = computed(() => flattenRows(buildGitTree(worktreeFiles.value)));
 const stagedRows = computed(() => flattenRows(buildGitTree(stagedFiles.value)));
+const stagedCount = computed(() => stagedFiles.value.length);
+const canCommit = computed(
+  () =>
+    !commitBusy.value &&
+    !!commitMessage.value.trim() &&
+    stagedCount.value > 0,
+);
+const commitHint = computed(() =>
+  stagedCount.value > 0
+    ? `将提交 ${stagedCount.value} 个文件`
+    : "先在上方暂存更改",
+);
+
+/** 提交已暂存更改；成功后清空消息并刷新状态 */
+async function doCommit() {
+  if (!canCommit.value) return;
+  const root = gitStatus.value?.repoRoot;
+  if (!root) return;
+  commitBusy.value = true;
+  try {
+    const st = await invoke<GitStatus>("git_changes_commit", {
+      root,
+      message: commitMessage.value.trim(),
+    });
+    gitStatus.value = st;
+    commitMessage.value = "";
+    store.toast = "提交成功";
+  } catch (e) {
+    store.toast = toastError(e);
+  } finally {
+    commitBusy.value = false;
+  }
+}
+
+/** 拉取远端更新；游离 HEAD 或忙碌时禁用 */
+async function doPull() {
+  if (pullBusy.value || branchLabel.value === "HEAD") return;
+  const root = repoRoot.value;
+  if (!root) return;
+  pullBusy.value = true;
+  try {
+    const res = await invoke<GitPullResult>("git_changes_pull", { root });
+    gitStatus.value = res.status;
+    store.toast = res.message;
+  } catch (e) {
+    store.toast = toastError(e);
+  } finally {
+    pullBusy.value = false;
+  }
+}
 
 function startInit() {
   confirmInit.value = true;
@@ -574,6 +628,27 @@ async function restoreDir(node: GitDirNode) {
             />
           </svg>
         </button>
+        <button
+          class="git-pull"
+          :class="{ busy: pullBusy }"
+          :disabled="pullBusy || branchLabel === 'HEAD'"
+          :aria-label="pullBusy ? '拉取中…' : '拉取'"
+          v-tooltip="
+            branchLabel === 'HEAD'
+              ? '游离 HEAD 无法拉取'
+              : pullBusy
+                ? '拉取中…'
+                : '拉取'
+          "
+          @click="doPull()"
+        >
+          <svg v-if="!pullBusy" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
+            />
+          </svg>
+          <span v-else class="git-pull-text">拉取中…</span>
+        </button>
         <span class="git-count">{{ fileCount }} 个更改</span>
         <button
           class="git-refresh"
@@ -687,6 +762,26 @@ async function restoreDir(node: GitDirNode) {
       <div class="git-section">
         <div class="git-section-head">
           <span>暂存更改</span>
+        </div>
+        <div class="git-commit-bar">
+          <textarea
+            v-model="commitMessage"
+            class="git-commit-input"
+            rows="2"
+            placeholder="提交消息（Ctrl+Enter 提交）"
+            :disabled="commitBusy"
+            @keydown.ctrl.enter="doCommit()"
+          ></textarea>
+          <div class="git-commit-row">
+            <button
+              class="btn git-commit-btn"
+              :disabled="!canCommit"
+              @click="doCommit()"
+            >
+              {{ commitBusy ? "提交中…" : "提交" }}
+            </button>
+            <span class="git-commit-hint">{{ commitHint }}</span>
+          </div>
         </div>
         <div v-if="stagedRows.length" class="git-file-list">
           <div

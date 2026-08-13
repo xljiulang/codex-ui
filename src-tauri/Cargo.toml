@@ -26,7 +26,12 @@ open = "5"
 clipboard-win = "5"
 toml = "0.9"
 notify = "8"
-gix = "0.86"
+gix = { version = "0.86", features = [
+    "tree-editor",
+    "merge",
+    "blocking-network-client",
+    "blocking-http-transport-reqwest-rust-tls",
+] }
 
 [dev-dependencies]
 tempfile = "3"

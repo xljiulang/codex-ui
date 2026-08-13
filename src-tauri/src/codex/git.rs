@@ -66,6 +66,18 @@ pub struct GitStatus {
     pub files: Vec<GitFile>,
 }
 
+/// 拉取结果（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPullResult {
+    /// 拉取后的最新状态
+    pub status: GitStatus,
+    /// up_to_date | fast_forward | merged
+    pub kind: String,
+    /// 给用户的中文结果提示
+    pub message: String,
+}
+
 /// 文件监听句柄（sender 被 drop 时防抖任务随 rx 关闭退出）
 pub struct GitWatchHandle {
     _watcher: RecommendedWatcher,
@@ -829,6 +841,478 @@ fn ignore_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
     status_sync(path)
 }
 
+// ---------- 提交与拉取 ----------
+
+/// 从索引全量条目构建树（等价 `git write-tree`）：以空树为起点逐条 upsert。
+/// 提交树由索引决定，未暂存的工作区改动不会进入树。
+fn index_tree_id(repo: &gix::Repository) -> Result<gix::hash::ObjectId, GitError> {
+    use gix::object::tree::{Editor, EntryKind};
+    let index = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    let empty_tree = repo
+        .find_object(gix::hash::ObjectId::empty_tree(repo.object_hash()))
+        .map_err(|e| git_err(format!("读取空树失败: {e}")))?
+        .into_tree();
+    let mut editor = Editor::new(&empty_tree)
+        .map_err(|e| git_err(format!("初始化树编辑器失败: {e}")))?;
+    for entry in index.entries() {
+        let kind = match entry.mode {
+            gix::index::entry::Mode::FILE => EntryKind::Blob,
+            gix::index::entry::Mode::FILE_EXECUTABLE => EntryKind::BlobExecutable,
+            gix::index::entry::Mode::SYMLINK => EntryKind::Link,
+            gix::index::entry::Mode::COMMIT => EntryKind::Commit,
+            gix::index::entry::Mode::DIR => continue,
+            _ => continue,
+        };
+        editor
+            .upsert(entry.path(&index), kind, entry.id)
+            .map_err(|e| git_err(format!("构建提交树失败: {e}")))?;
+    }
+    editor
+        .write()
+        .map(|id| id.detach())
+        .map_err(|e| git_err(format!("写入提交树失败: {e}")))
+}
+
+/// 提交已暂存更改（等价 `git commit`）：索引全量条目构建树，创建提交并更新 HEAD，
+/// 成功后重建索引为提交树。未暂存更改保留在工作区。
+fn commit_sync(path: &str, message: &str) -> Result<GitStatus, GitError> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err(git_err("提交消息不能为空"));
+    }
+    let repo = open_repo(path)?;
+    let st = status_sync(path)?;
+    if !st.files.iter().any(|f| f.staged) {
+        return Err(git_err("没有已暂存的更改，请先暂存文件"));
+    }
+    if repo.author().is_none() || repo.committer().is_none() {
+        return Err(git_err("未配置 Git 用户信息（user.name / user.email），请先在仓库配置后重试"));
+    }
+    let tree_id = index_tree_id(&repo)?;
+    let parents: Vec<gix::hash::ObjectId> = match repo.head_id() {
+        Ok(id) => vec![id.detach()],
+        Err(_) => Vec::new(),
+    };
+    repo.commit("HEAD", message, tree_id, parents)
+        .map_err(|e| git_err(format!("提交失败: {e}")))?;
+    // 提交后索引重置为提交树（等价 git commit 后的索引状态）
+    let mut index = repo
+        .index_from_tree(&tree_id)
+        .map_err(|e| git_err(format!("重建索引失败: {e}")))?;
+    index
+        .write(gix::index::write::Options::default())
+        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
+    status_sync(path)
+}
+
+/// 解析当前分支的上游（remote + 远端跟踪 ref）：优先 `branch.<name>.remote/merge` 配置，
+/// 无配置时以默认 fetch 远端（origin）同名分支兜底。
+fn resolve_upstream<'a>(
+    repo: &'a gix::Repository,
+    branch: &'a str,
+) -> Result<(gix::Remote<'a>, gix::refs::FullName), GitError> {
+    let branch_full = gix::refs::Category::LocalBranch
+        .to_full_name(BStr::new(branch))
+        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
+    if let Some(Ok(tracking)) = repo
+        .branch_remote_tracking_ref_name(branch_full.as_ref(), gix::remote::Direction::Fetch)
+    {
+        if let Some(remote) = repo.branch_remote(branch, gix::remote::Direction::Fetch) {
+            return Ok((remote.map_err(|e| git_err(format!("读取远端失败: {e}")))?, tracking));
+        }
+    }
+    let remote = repo
+        .find_fetch_remote(None)
+        .map_err(|e| git_err(format!("未找到可拉取的远端: {e}")))?;
+    let remote_name = remote
+        .name()
+        .ok_or_else(|| git_err("远端没有名称，无法确定跟踪分支"))?
+        .as_bstr()
+        .to_str_lossy()
+        .into_owned();
+    let tracking_short = format!("{remote_name}/{branch}");
+    let tracking = gix::refs::Category::RemoteBranch
+        .to_full_name(tracking_short.as_str())
+        .map_err(|e| git_err(format!("跟踪分支名不合法: {e}")))?;
+    Ok((remote, tracking))
+}
+
+/// 计算 旧树 → 新树 的变更路径（add/mod/delete；跳过 rewrite 与目录条目）
+fn diff_changed_paths(
+    repo: &gix::Repository,
+    old_tree_id: &gix::hash::oid,
+    new_tree_id: &gix::hash::oid,
+) -> Result<Vec<String>, GitError> {
+    let old_tree = repo
+        .find_object(old_tree_id)
+        .map_err(|e| git_err(format!("读取旧树失败: {e}")))?
+        .into_tree();
+    let new_tree = repo
+        .find_object(new_tree_id)
+        .map_err(|e| git_err(format!("读取新树失败: {e}")))?
+        .into_tree();
+    let changes = repo
+        .diff_tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            gix::diff::Options::default().with_rewrites(None),
+        )
+        .map_err(|e| git_err(format!("计算树差异失败: {e}")))?;
+    let mut paths = Vec::new();
+    for change in &changes {
+        if change.entry_mode().is_tree() {
+            continue;
+        }
+        let location = match change {
+            gix::diff::tree_with_rewrites::Change::Addition { location, .. }
+            | gix::diff::tree_with_rewrites::Change::Modification { location, .. }
+            | gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => location,
+            gix::diff::tree_with_rewrites::Change::Rewrite { .. } => continue,
+        };
+        paths.push(path_str(location.as_ref()));
+    }
+    Ok(paths)
+}
+
+/// 把 旧树 → 新树 的变更同步到工作区文件（写/删），不重建索引；
+/// 目标路径已存在但未被跟踪时拒绝，避免覆盖未跟踪文件。
+fn sync_worktree_files(
+    repo: &gix::Repository,
+    workdir: &Path,
+    old_tree_id: &gix::hash::oid,
+    new_tree_id: &gix::hash::oid,
+) -> Result<(), GitError> {
+    let old_tree = repo
+        .find_object(old_tree_id)
+        .map_err(|e| git_err(format!("读取旧树失败: {e}")))?
+        .into_tree();
+    let new_tree = repo
+        .find_object(new_tree_id)
+        .map_err(|e| git_err(format!("读取新树失败: {e}")))?
+        .into_tree();
+    let changes = repo
+        .diff_tree_to_tree(
+            Some(&old_tree),
+            Some(&new_tree),
+            gix::diff::Options::default().with_rewrites(None),
+        )
+        .map_err(|e| git_err(format!("计算树差异失败: {e}")))?;
+
+    // 守卫：目标路径已存在但未被跟踪（未跟踪文件将被覆盖）
+    let old_index = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    for change in &changes {
+        let location = match change {
+            gix::diff::tree_with_rewrites::Change::Addition { location, .. }
+            | gix::diff::tree_with_rewrites::Change::Modification { location, .. } => location,
+            _ => continue,
+        };
+        if change.entry_mode().is_tree() {
+            continue;
+        }
+        if workdir.join(path_str(location.as_ref())).exists()
+            && old_index.entry_by_path(location.as_ref()).is_none()
+        {
+            return Err(git_err(format!(
+                "未跟踪文件将被覆盖: {}",
+                path_str(location.as_ref())
+            )));
+        }
+    }
+
+    for change in &changes {
+        match change {
+            gix::diff::tree_with_rewrites::Change::Addition { location, id, .. }
+            | gix::diff::tree_with_rewrites::Change::Modification { location, id, .. } => {
+                let rel = path_str(location.as_ref());
+                let dest = workdir.join(&rel);
+                let obj = repo
+                    .find_object(*id)
+                    .map_err(|e| git_err(format!("读取对象失败: {e}")))?;
+                if obj.kind != gix::objs::Kind::Blob {
+                    continue;
+                }
+                let mut obj = obj;
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| git_err(format!("创建目录失败 {}: {e}", clean_path(parent))))?;
+                }
+                std::fs::write(&dest, std::mem::take(&mut obj.data))
+                    .map_err(|e| git_err(format!("写入文件失败 {}: {e}", clean_path(&dest))))?;
+            }
+            gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => {
+                let p = workdir.join(path_str(location.as_ref()));
+                if p.is_file() || p.is_symlink() {
+                    std::fs::remove_file(&p)
+                        .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&p))))?;
+                }
+                remove_empty_parents(workdir, &p);
+            }
+            gix::diff::tree_with_rewrites::Change::Rewrite { .. } => continue,
+        }
+    }
+    Ok(())
+}
+
+/// 重建索引为 `new_tree_id`，并保留未被拉取触达的已暂存条目：
+/// 有条目则重新登记旧 blob/mode，已暂存删除则保持移除。
+fn rebuild_index_preserving_staged(
+    repo: &gix::Repository,
+    new_tree_id: &gix::hash::oid,
+    staged_paths: &[String],
+    pull_changed: &[String],
+) -> Result<(), GitError> {
+    let old_index = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    let mut new_index = repo
+        .index_from_tree(new_tree_id)
+        .map_err(|e| git_err(format!("重建索引失败: {e}")))?;
+    for path in staged_paths {
+        // 被拉取触达的已暂存路径已在冲突判定阶段拒绝，这里防御性跳过
+        if pull_changed.iter().any(|p| p == path) {
+            continue;
+        }
+        let rel_b = BStr::new(path.as_bytes());
+        new_index.remove_entries(|_, p, _| p == rel_b);
+        if let Some(entry) = old_index.entry_by_path(rel_b) {
+            new_index.dangerously_push_entry(entry.stat, entry.id, entry.flags, entry.mode, rel_b);
+        }
+    }
+    new_index.sort_entries();
+    new_index.remove_tree();
+    new_index.remove_resolve_undo();
+    new_index
+        .write(gix::index::write::Options::default())
+        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
+    Ok(())
+}
+
+/// 更新本地分支引用指向 `target`（用于快进）
+fn update_branch_ref(
+    repo: &gix::Repository,
+    branch: &str,
+    target: gix::hash::ObjectId,
+) -> Result<(), GitError> {
+    let full = gix::refs::Category::LocalBranch
+        .to_full_name(BStr::new(branch))
+        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
+    repo.edit_reference(gix::refs::transaction::RefEdit {
+        change: gix::refs::transaction::Change::Update {
+            log: Default::default(),
+            expected: gix::refs::transaction::PreviousValue::Any,
+            new: gix::refs::Target::Object(target),
+        },
+        name: full,
+        deref: false,
+    })
+    .map_err(|e| git_err(format!("更新分支失败: {e}")))?;
+    Ok(())
+}
+
+/// 提取冲突路径（ours/theirs 任一非 Rewrite 侧的位置）
+fn conflict_path(c: &gix::merge::tree::Conflict) -> String {
+    use gix::diff::tree_with_rewrites::Change;
+    for change in [&c.ours, &c.theirs] {
+        let loc = match change {
+            Change::Addition { location, .. }
+            | Change::Modification { location, .. }
+            | Change::Deletion { location, .. } => location,
+            Change::Rewrite { .. } => continue,
+        };
+        return path_str(loc.as_ref());
+    }
+    "<未知路径>".to_string()
+}
+
+/// 拉取：先 fetch 更新远端跟踪 ref，再按本地/远端关系快进或合并。
+/// 仅当拉取会改到的路径与本地已暂存/未暂存改动重叠时拒绝（列文件），
+/// 不重叠的本地改动保留（已暂存内容在拉取后仍在暂存区）；分叉合并遇到提交级
+/// 冲突时中止，不改动工作区与索引。
+fn pull_sync(path: &str) -> Result<GitPullResult, GitError> {
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let branch = current_branch(&repo);
+    if branch == "HEAD" {
+        return Err(git_err("游离 HEAD 状态无法拉取，请先切换到某个分支"));
+    }
+    // 本地风险路径：已暂存（HEAD→索引）+ 已跟踪的工作区修改；
+    // 未跟踪文件不纳入（由 sync_worktree_files 的覆盖守卫保护，不触碰时自然保留）。
+    let st = status_sync(path)?;
+    let staged_paths: Vec<String> = st
+        .files
+        .iter()
+        .filter(|f| f.staged)
+        .map(|f| f.path.clone())
+        .collect();
+    let local_risk_paths: Vec<String> = st
+        .files
+        .iter()
+        .filter(|f| f.worktree && f.status != "untracked")
+        .map(|f| f.path.clone())
+        .collect();
+
+    let (remote, tracking_ref) = resolve_upstream(&repo, &branch)?;
+    let remote_label = remote
+        .name()
+        .map(|n| n.as_bstr().to_str_lossy().into_owned())
+        .unwrap_or_else(|| branch.clone());
+
+    // ① fetch：更新远端跟踪 ref
+    let connection = remote
+        .connect(gix::remote::Direction::Fetch)
+        .map_err(|e| git_err(format!("连接远端失败: {e}")))?;
+    let prepare = connection
+        .prepare_fetch(gix::progress::Discard, Default::default())
+        .map_err(|e| git_err(format!("准备拉取失败: {e}")))?;
+    prepare
+        .receive(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED)
+        .map_err(|e| git_err(format!("拉取失败: {e}")))?;
+
+    let remote_id = repo
+        .find_reference(&tracking_ref)
+        .map_err(|_| git_err(format!("远端 {remote_label} 没有分支 {branch}，无法拉取")))?
+        .peel_to_id()
+        .map_err(|e| git_err(format!("解析远端分支失败: {e}")))?;
+    let remote_tree_id = remote_id
+        .object()
+        .map_err(|e| git_err(format!("读取远端提交失败: {e}")))?
+        .into_commit()
+        .tree_id()
+        .map_err(|e| git_err(format!("读取远端提交失败: {e}")))?;
+    let remote_oid = remote_id.detach();
+    let remote_tree_oid = remote_tree_id.detach();
+
+    // ② 本地状态
+    let local_oid = repo.head_id().ok().map(|id| id.detach());
+    let local_tree_id = repo
+        .head_tree_id_or_empty()
+        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
+    let local_tree_oid = local_tree_id.detach();
+
+    // ③ 判定拉取类型与目标树（只读计算，不写入）
+    let mut target_tree_oid: Option<gix::hash::ObjectId> = None;
+    let (kind, message) = match local_oid {
+        None => {
+            // 本地无提交：快进到远端
+            target_tree_oid = Some(remote_tree_oid);
+            (
+                "fast_forward".to_string(),
+                format!("已更新到远端 {remote_label}/{branch}"),
+            )
+        }
+        Some(local) if local == remote_oid => {
+            ("up_to_date".to_string(), "本地已是最新".to_string())
+        }
+        Some(local) => {
+            let labels = gix::merge::blob::builtin_driver::text::Labels {
+                ancestor: Some(BStr::new("ancestor")),
+                current: Some(BStr::new("ours")),
+                other: Some(BStr::new("theirs")),
+            };
+            let options = repo
+                .tree_merge_options()
+                .map_err(|e| git_err(format!("初始化合并选项失败: {e}")))?
+                .into();
+            let mut outcome = repo
+                .merge_commits(local, remote_oid, labels, options)
+                .map_err(|e| git_err(format!("合并远端更改失败: {e}")))?;
+            let merge_bases: Vec<gix::hash::ObjectId> = outcome
+                .merge_bases
+                .iter()
+                .flat_map(|nb| nb.iter().copied())
+                .collect();
+            if merge_bases.contains(&remote_oid) {
+                // 远端是本地祖先 → 本地已是最新
+                ("up_to_date".to_string(), "本地已是最新".to_string())
+            } else if merge_bases.contains(&local) {
+                // 本地是远端祖先 → 快进
+                target_tree_oid = Some(remote_tree_oid);
+                (
+                    "fast_forward".to_string(),
+                    format!("已快进更新到远端 {remote_label}/{branch}"),
+                )
+            } else {
+                // 分叉：真实合并，提交级冲突则中止
+                if !outcome.tree_merge.conflicts.is_empty() {
+                    let paths: Vec<String> = outcome
+                        .tree_merge
+                        .conflicts
+                        .iter()
+                        .map(conflict_path)
+                        .collect();
+                    return Err(git_err(format!(
+                        "拉取合并存在冲突，已中止（未修改任何文件）。冲突文件：{}",
+                        paths.join("、")
+                    )));
+                }
+                let merged_tree_oid = outcome
+                    .tree_merge
+                    .tree
+                    .write()
+                    .map(|id| id.detach())
+                    .map_err(|e| git_err(format!("写入合并树失败: {e}")))?;
+                target_tree_oid = Some(merged_tree_oid);
+                (
+                    "merged".to_string(),
+                    format!("已合并远端 {remote_label}/{branch} 的更改"),
+                )
+            }
+        }
+    };
+
+    // ④ 冲突判定：拉取触达的路径与本地风险路径重叠 → 在任何写入之前拒绝
+    if let Some(target) = target_tree_oid {
+        let pull_changed = diff_changed_paths(&repo, &local_tree_oid, &target)?;
+        let mut overlap: Vec<&String> = local_risk_paths
+            .iter()
+            .chain(staged_paths.iter())
+            .filter(|p| pull_changed.iter().any(|c| c == *p))
+            .collect();
+        overlap.sort();
+        overlap.dedup();
+        if !overlap.is_empty() {
+            let names: Vec<&str> = overlap.iter().map(|s| s.as_str()).collect();
+            return Err(git_err(format!(
+                "本地更改会被拉取覆盖，请先提交或还原后再拉取：{}",
+                names.join("、")
+            )));
+        }
+
+        // ⑤ 应用：同步工作区 → 重建索引并保留未触达的暂存项
+        sync_worktree_files(&repo, &workdir, &local_tree_oid, &target)?;
+        rebuild_index_preserving_staged(&repo, &target, &staged_paths, &pull_changed)?;
+    }
+
+    // ⑥ 更新分支引用 / 创建合并提交
+    match kind.as_str() {
+        "fast_forward" => update_branch_ref(&repo, &branch, remote_oid)?,
+        "merged" => {
+            let merge_msg = format!(
+                "Merge remote-tracking branch '{remote_label}/{branch}' into {branch}"
+            );
+            let local_oid = local_oid.expect("合并必有本地提交");
+            repo.commit(
+                "HEAD",
+                merge_msg,
+                target_tree_oid.expect("合并必有目标树"),
+                vec![local_oid, remote_oid],
+            )
+            .map_err(|e| git_err(format!("创建合并提交失败: {e}")))?;
+        }
+        _ => {}
+    }
+
+    Ok(GitPullResult {
+        status: status_sync(path)?,
+        kind,
+        message,
+    })
+}
+
 // ---------- diff ----------
 
 /// git 近似二进制判定：前 8000 字节内出现 NUL
@@ -902,21 +1386,40 @@ fn diff_sync(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
     render_diff(&old, &new).ok_or_else(|| git_err("该文件是二进制文件，无法显示文本差异"))
 }
 
+/// 在阻塞线程中执行同步 git 操作，带指定超时（秒）
+async fn run_blocking_with_timeout<T: Send + 'static>(
+    timeout_secs: u64,
+    f: impl FnOnce() -> Result<T, GitError> + Send + 'static,
+) -> Result<T, GitError> {
+    let task = tokio::task::spawn_blocking(f);
+    match tokio::time::timeout(Duration::from_secs(timeout_secs), task).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => Err(git_err(format!("git 任务异常: {e}"))),
+        Err(_) => Err(git_err(format!("git 操作超时（{timeout_secs} 秒）"))),
+    }
+}
+
 /// 在阻塞线程中执行同步 git 操作，带 60s 超时
 async fn run_blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, GitError> + Send + 'static,
 ) -> Result<T, GitError> {
-    let task = tokio::task::spawn_blocking(f);
-    match tokio::time::timeout(Duration::from_secs(60), task).await {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => Err(git_err(format!("git 任务异常: {e}"))),
-        Err(_) => Err(git_err("git 操作超时（60 秒）")),
-    }
+    run_blocking_with_timeout(60, f).await
 }
 
 #[tauri::command]
 pub async fn git_changes_status(path: String) -> Result<GitStatus, GitError> {
     run_blocking(move || status_sync(&path)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_commit(root: String, message: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || commit_sync(&root, &message)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_pull(root: String) -> Result<GitPullResult, GitError> {
+    // 拉取涉及网络传输，放宽超时到 10 分钟
+    run_blocking_with_timeout(600, move || pull_sync(&root)).await
 }
 
 #[tauri::command]
@@ -2055,5 +2558,409 @@ mod tests {
 
         let err = delete_sync(root.to_str().unwrap(), "newdir").unwrap_err();
         assert!(err.message.contains("不支持删除目录"));
+    }
+
+    // ---------- 提交 ----------
+
+    #[test]
+    fn commit_creates_commit_and_clears_staged() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        // 未跟踪文件保持未提交
+        std::fs::write(root.join("c.txt"), "new\n").unwrap();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+
+        let st = commit_sync(root.to_str().unwrap(), "feat: update a").unwrap();
+        assert!(st.files.iter().all(|f| !f.staged));
+        assert_eq!(st.files.len(), 1);
+        assert_eq!(st.files[0].path, "c.txt");
+        assert_eq!(st.files[0].status, "untracked");
+        // CLI 验证提交内容与工作区一致
+        assert_eq!(
+            git(root, &["log", "-1", "--format=%s"]).1.trim(),
+            "feat: update a"
+        );
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two\n");
+        assert!(!git(root, &["ls-files", "c.txt"]).1.contains("c.txt"));
+    }
+
+    #[test]
+    fn commit_initial_commit_without_parent() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        assert_eq!(git(root, &["config", "user.name", "t"]).0, 0);
+        assert_eq!(git(root, &["config", "user.email", "t@t"]).0, 0);
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+
+        let st = commit_sync(root.to_str().unwrap(), "first").unwrap();
+        assert!(st.files.is_empty());
+        assert_eq!(git(root, &["log", "-1", "--format=%s"]).1.trim(), "first");
+    }
+
+    #[test]
+    fn commit_empty_message_errors() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let err = commit_sync(root.to_str().unwrap(), "   ").unwrap_err();
+        assert!(err.message.contains("提交消息不能为空"));
+    }
+
+    #[test]
+    fn commit_without_staged_errors() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        let err = commit_sync(root.to_str().unwrap(), "msg").unwrap_err();
+        assert!(err.message.contains("没有已暂存的更改"));
+    }
+
+    #[test]
+    fn commit_without_user_config_errors() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        // gix 会按 git 规则回退到全局/系统配置与身份环境变量；存在可解析身份时
+        // 无法构造“缺失”场景，优雅跳过，避免屏蔽全局配置的正当回退行为。
+        let dir_probe = TempDir::new().unwrap();
+        let probe = dir_probe.path();
+        let has_identity = !git(probe, &["config", "user.name"]).1.trim().is_empty()
+            || !git(probe, &["config", "user.email"]).1.trim().is_empty()
+            || std::env::var_os("GIT_AUTHOR_NAME").is_some()
+            || std::env::var_os("GIT_AUTHOR_EMAIL").is_some()
+            || std::env::var_os("GIT_COMMITTER_NAME").is_some()
+            || std::env::var_os("GIT_COMMITTER_EMAIL").is_some();
+        if has_identity {
+            eprintln!("skip: 已配置 git 用户身份（含全局配置回退），跳过缺失场景");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x\n").unwrap();
+        assert_eq!(git(root, &["init", "-b", "main"]).0, 0);
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        let err = commit_sync(root.to_str().unwrap(), "msg").unwrap_err();
+        assert!(err.message.contains("user.name"));
+    }
+
+    // ---------- 拉取 ----------
+
+    /// 构造 pull 测试环境：bare 远端来自 work1（含 init 提交），work2 为远端克隆。
+    fn setup_pull_repo(bare: &Path, work1: &Path, work2: &Path) {
+        assert_eq!(git(work1, &["init", "-b", "main"]).0, 0);
+        assert_eq!(git(work1, &["config", "user.name", "t"]).0, 0);
+        assert_eq!(git(work1, &["config", "user.email", "t@t"]).0, 0);
+        std::fs::write(work1.join("a.txt"), "v1\n").unwrap();
+        std::fs::write(work1.join("b.txt"), "vb\n").unwrap();
+        assert_eq!(git(work1, &["add", "a.txt", "b.txt"]).0, 0);
+        assert_eq!(git(work1, &["commit", "-m", "init"]).0, 0);
+        assert_eq!(
+            git(work1, &["clone", "--bare", ".", bare.to_str().unwrap()]).0,
+            0
+        );
+        assert_eq!(git(work2, &["clone", bare.to_str().unwrap(), "."]).0, 0);
+        assert_eq!(git(work2, &["config", "user.name", "t"]).0, 0);
+        assert_eq!(git(work2, &["config", "user.email", "t@t"]).0, 0);
+    }
+
+    #[test]
+    fn pull_fast_forwards_when_behind() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work1 提交 v2 并推送到 bare → work2 落后
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+
+        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "fast_forward");
+        assert!(res.status.files.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "v2\n"
+        );
+        assert_eq!(git(work2.path(), &["log", "-1", "--format=%s"]).1.trim(), "v2");
+    }
+
+    #[test]
+    fn pull_merges_when_diverged() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work2 本地新增 b.txt 并提交（分叉）
+        std::fs::write(work2.path().join("b.txt"), "local\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "b.txt"]).0, 0);
+        assert_eq!(git(work2.path(), &["commit", "-m", "local"]).0, 0);
+        // work1 修改 a.txt 并推送到 bare
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+
+        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "merged");
+        assert!(res.status.files.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "v2\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("b.txt")).unwrap(),
+            "local\n"
+        );
+        // HEAD 为合并提交
+        let head_subject = git(work2.path(), &["log", "-1", "--format=%s"]).1;
+        assert!(head_subject.contains("Merge remote-tracking branch"));
+    }
+
+    #[test]
+    fn pull_conflict_aborts_without_changes() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work2 本地修改 a.txt 并提交
+        std::fs::write(work2.path().join("a.txt"), "w2\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work2.path(), &["commit", "-m", "w2"]).0, 0);
+        // work1 也修改 a.txt 并推送（同路径不同内容 → 冲突）
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+
+        let before_head = git(work2.path(), &["rev-parse", "HEAD"]).1;
+        let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
+        assert!(err.message.contains("冲突"));
+        assert!(err.message.contains("a.txt"));
+        // 中止后工作区与 HEAD 不变
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "w2\n"
+        );
+        assert_eq!(git(work2.path(), &["rev-parse", "HEAD"]).1, before_head);
+    }
+
+    #[test]
+    fn pull_refuses_when_unstaged_overlaps() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work1 推送 a.txt 修改
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+        // work2 未暂存修改同一文件 → 重叠拒绝
+        std::fs::write(work2.path().join("a.txt"), "dirty\n").unwrap();
+        let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
+        assert!(err.message.contains("会被拉取覆盖"));
+        assert!(err.message.contains("a.txt"));
+        // 拒绝后工作区与 HEAD 不变
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "dirty\n"
+        );
+        assert_eq!(git(work2.path(), &["log", "-1", "--format=%s"]).1.trim(), "init");
+    }
+
+    #[test]
+    fn pull_refuses_when_staged_overlaps() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work1 推送 a.txt 修改
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+        // work2 暂存同一文件 → 重叠拒绝，索引/工作区/HEAD 均不变
+        std::fs::write(work2.path().join("a.txt"), "staged\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
+        let before_head = git(work2.path(), &["rev-parse", "HEAD"]).1;
+        let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
+        assert!(err.message.contains("会被拉取覆盖"));
+        assert!(err.message.contains("a.txt"));
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "staged\n"
+        );
+        assert_eq!(git(work2.path(), &["rev-parse", "HEAD"]).1, before_head);
+        let st = status_sync(work2.path().to_str().unwrap()).unwrap();
+        let a = st.files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert!(a.staged);
+    }
+
+    #[test]
+    fn pull_allows_staged_when_not_overlapping() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work1 推送 a.txt 修改；work2 暂存 b.txt 修改（不重叠）
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+        std::fs::write(work2.path().join("b.txt"), "staged\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "b.txt"]).0, 0);
+
+        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "fast_forward");
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "v2\n"
+        );
+        // b.txt 的暂存修改仍在暂存区
+        let b = res
+            .status
+            .files
+            .iter()
+            .find(|f| f.path == "b.txt")
+            .unwrap();
+        assert_eq!(b.status, "modified");
+        assert!(b.staged);
+        assert!(!b.worktree);
+        let (code, _, _) = git(work2.path(), &["diff", "--cached", "--quiet", "b.txt"]);
+        assert_ne!(code, 0);
+    }
+
+    #[test]
+    fn pull_allows_unstaged_when_not_overlapping() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work1 推送 a.txt 修改；work2 未暂存修改 b.txt（不重叠）
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+        std::fs::write(work2.path().join("b.txt"), "local\n").unwrap();
+        // 未跟踪文件也应放行并保留
+        std::fs::write(work2.path().join("c.txt"), "untracked\n").unwrap();
+
+        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "fast_forward");
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
+            "v2\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("b.txt")).unwrap(),
+            "local\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(work2.path().join("c.txt")).unwrap(),
+            "untracked\n"
+        );
+        // b.txt 仍为已跟踪工作区修改；c.txt 仍为未跟踪
+        let b = res
+            .status
+            .files
+            .iter()
+            .find(|f| f.path == "b.txt")
+            .unwrap();
+        assert_eq!(b.status, "modified");
+        assert!(!b.staged);
+        assert!(b.worktree);
+        assert!(res
+            .status
+            .files
+            .iter()
+            .any(|f| f.path == "c.txt" && f.status == "untracked"));
+        let (code, _, _) = git(work2.path(), &["diff", "--quiet", "b.txt"]);
+        assert_ne!(code, 0);
+    }
+
+    #[test]
+    fn pull_up_to_date() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "up_to_date");
+        assert!(res.status.files.is_empty());
     }
 }

@@ -58,6 +58,8 @@ pub fn run() {
             codex::session_fs::session_fs_watch_stop,
             codex::git::git_changes_status,
             codex::git::git_changes_init,
+            codex::git::git_changes_commit,
+            codex::git::git_changes_pull,
             codex::git::git_changes_branches,
             codex::git::git_changes_branch_create,
             codex::git::git_changes_branch_delete,

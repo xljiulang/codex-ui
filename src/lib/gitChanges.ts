@@ -28,6 +28,16 @@ export interface GitStatus {
   files: GitFile[];
 }
 
+/** Rust git_changes_pull 返回值（字段 camelCase） */
+export interface GitPullResult {
+  /** 拉取后的最新状态 */
+  status: GitStatus;
+  /** up_to_date | fast_forward | merged */
+  kind: "up_to_date" | "fast_forward" | "merged";
+  /** 给用户的中文结果提示 */
+  message: string;
+}
+
 export function gitStatusLabel(status: GitFileStatus): string {
   switch (status) {
     case "added":
