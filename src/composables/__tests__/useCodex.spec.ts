@@ -47,6 +47,7 @@ import {
   renameThread,
   refreshThreads,
   refreshServer,
+  resolveCwd,
   sanitizeTitle,
   searchThreads,
   sendPrompt,
@@ -246,7 +247,10 @@ describe("updateWindowTitle 窗口标题", () => {
     expect(mockWin.setTitle).toHaveBeenCalledWith("B");
   });
 
-  it("有会话但尚无标题：只显示文件夹名", async () => {
+  it("有会话但尚无标题：回退显示 文件夹名 - 首条消息预览", async () => {
+    store.threads = [
+      { id: "t2", name: null, preview: "预览文本", createdAt: 0, recencyAt: 0 },
+    ];
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -265,7 +269,32 @@ describe("updateWindowTitle 窗口标题", () => {
     });
     await openThread("t2");
     expect(store.currentThreadId).toBe("t2");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 预览文本");
+  });
+
+  it("有会话且无名称无预览：回退显示 文件夹名 - 新会话", async () => {
+    store.threads = [
+      { id: "t2", name: null, preview: "", createdAt: 0, recencyAt: 0 },
+    ];
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: null, cwd: null, turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    await openThread("t2");
+    expect(store.currentThreadId).toBe("t2");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 新会话");
   });
 
   it("有会话标题：显示 文件夹名 - 对话标题", async () => {
@@ -333,6 +362,44 @@ describe("updateWindowTitle 窗口标题", () => {
     expect(store.currentThreadName).toBe("新名");
     expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 新名");
     disposeEvents();
+  });
+});
+
+describe("resolveCwd 工作目录解析", () => {
+  beforeEach(() => {
+    store.server = {
+      connected: false,
+      workspace: "D:/repo",
+      codexPath: null,
+      logs: [],
+    };
+    store.currentThreadId = null;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+  });
+
+  it("有会话：取会话 cwd", () => {
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = "D:/projects/other";
+    store.newChatCwd = "D:/projects/B";
+    expect(resolveCwd()).toBe("D:/projects/other");
+  });
+
+  it("有会话但 cwd 缺失：回退 workspace，不读残留的 newChatCwd", () => {
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = null;
+    store.newChatCwd = "D:/projects/B";
+    expect(resolveCwd()).toBe("D:/repo");
+  });
+
+  it("无会话：优先 newChatCwd", () => {
+    store.newChatCwd = "D:/projects/B";
+    expect(resolveCwd()).toBe("D:/projects/B");
+  });
+
+  it("全部为空时返回空串", () => {
+    store.server.workspace = "";
+    expect(resolveCwd()).toBe("");
   });
 });
 

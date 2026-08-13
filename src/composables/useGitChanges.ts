@@ -1,7 +1,7 @@
 import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { store, toastError } from "./useCodex";
+import { setToast, toastError } from "./useCodex";
 import { sessionRoot } from "./useSessionFs";
 import type { GitErrorCode, GitStatus } from "../lib/gitChanges";
 
@@ -110,7 +110,7 @@ async function syncWatcher() {
       await invoke("git_changes_watch_start", { root });
       watcherStarted = true;
     } catch (e) {
-      store.toast = toastError(e);
+      setToast(toastError(e));
     }
   } else {
     unlistenGitEvent?.();

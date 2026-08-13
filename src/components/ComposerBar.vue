@@ -15,11 +15,14 @@ import {
   effectiveEffort,
   modelDisplayName,
   permissionChip,
+  resolveCwd,
   sendPrompt,
+  setToast,
   store,
   toastError,
 } from "../composables/useCodex";
 import type { UserInput } from "../lib/types";
+import { debounce } from "../lib/debounce";
 import {
   baseName,
   fileMentionSection,
@@ -29,6 +32,7 @@ import {
   type FuzzyFileResult,
 } from "../lib/mention";
 import { permissionMode } from "../lib/permissions";
+import { ICON_CHEVRON_DOWN } from "../lib/icons";
 import {
   Reference,
   docToRuns,
@@ -49,7 +53,10 @@ const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
 const fileResults = ref<FuzzyFileResult[]>([]);
 const searchingFiles = ref(false);
 let searchSeq = 0;
-let searchTimer: number | undefined;
+const debouncedFileSearch = debounce(
+  (token: string) => void runFileSearch(token),
+  250,
+);
 
 // 编辑器内联引用：chip id → 附件（仅插件/技能）；文件与图片走下方附件区
 const refsById = ref(new Map<string, UserInput>());
@@ -179,14 +186,14 @@ function plainTextBeforeCaret(): string {
 function updateMentionFromCaret() {
   const textBefore = plainTextBeforeCaret();
   const m = matchMentionToken(textBefore);
-  mention.value = m;
-  if (!m) {
-    fileResults.value = [];
-    searchingFiles.value = false;
-    if (searchTimer) window.clearTimeout(searchTimer);
-    searchSeq++;
-    return;
-  }
+    mention.value = m;
+    if (!m) {
+      fileResults.value = [];
+      searchingFiles.value = false;
+      debouncedFileSearch.cancel();
+      searchSeq++;
+      return;
+    }
   if (m.kind === "@") scheduleFileSearch(m.token);
 }
 
@@ -207,16 +214,14 @@ function syncAttachments() {
 }
 
 function scheduleFileSearch(token: string) {
-  if (searchTimer) window.clearTimeout(searchTimer);
   if (!token) {
     fileResults.value = [];
     searchingFiles.value = false;
+    debouncedFileSearch.cancel();
     searchSeq++;
     return;
   }
-  searchTimer = window.setTimeout(() => {
-    void runFileSearch(token);
-  }, 250);
+  debouncedFileSearch.run(token);
 }
 
 async function runFileSearch(token: string) {
@@ -237,7 +242,7 @@ async function runFileSearch(token: string) {
   } catch (e) {
     if (seq === searchSeq) {
       fileResults.value = [];
-      store.toast = toastError(e);
+      setToast(toastError(e));
     }
   } finally {
     if (seq === searchSeq) searchingFiles.value = false;
@@ -245,9 +250,7 @@ async function runFileSearch(token: string) {
 }
 
 function mentionRoot(): string {
-  return (
-    store.newChatCwd ?? store.currentThreadCwd ?? store.server.workspace ?? ""
-  );
+  return resolveCwd();
 }
 
 function refNameOf(a: UserInput): string {
@@ -267,7 +270,7 @@ function onSelectAttachment(a: UserInput) {
   if (a.type === "mention" || a.type === "localImage") {
     ed.chain().focus().deleteRange({ from, to: caretPos }).run();
     mention.value = null;
-    if (searchTimer) window.clearTimeout(searchTimer);
+    debouncedFileSearch.cancel();
     fileResults.value = [];
     searchingFiles.value = false;
     rowAttachments.value.push(a);
@@ -289,7 +292,7 @@ function onSelectAttachment(a: UserInput) {
     ])
     .run();
   mention.value = null;
-  if (searchTimer) window.clearTimeout(searchTimer);
+  debouncedFileSearch.cancel();
   fileResults.value = [];
   searchingFiles.value = false;
   syncAttachments();
@@ -305,7 +308,7 @@ function removeMentionTokenInEditor() {
   const from = tokenStartPos(ed.state.doc, caretPos, m.token.length);
   ed.chain().focus().deleteRange({ from, to: caretPos }).run();
   mention.value = null;
-  if (searchTimer) window.clearTimeout(searchTimer);
+  debouncedFileSearch.cancel();
   fileResults.value = [];
   searchingFiles.value = false;
 }
@@ -324,7 +327,7 @@ function onPickFiles() {
       }
       syncAttachments();
     } catch (e) {
-      store.toast = toastError(e);
+      setToast(toastError(e));
     } finally {
       void nextTick(() => editor.value?.commands.focus());
     }
@@ -344,7 +347,7 @@ function onPickDir() {
       }
       syncAttachments();
     } catch (e) {
-      store.toast = toastError(e);
+      setToast(toastError(e));
     } finally {
       void nextTick(() => editor.value?.commands.focus());
     }
@@ -378,6 +381,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", clampEditorHeightOnResize);
   dropUnlisten?.();
   endResize();
+  debouncedFileSearch.cancel();
   try {
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
       undefined;
@@ -498,7 +502,7 @@ async function addFilesWithPaths(
         continue;
       }
       if (f.size > MAX_PASTED_IMAGE_BYTES) {
-        store.toast = `${source}的图片过大（>20MB），已跳过`;
+        setToast(`${source}的图片过大（>20MB），已跳过`);
         continue;
       }
       try {
@@ -510,13 +514,13 @@ async function addFilesWithPaths(
         rowAttachments.value.push({ type: "localImage", path: saved });
         added++;
       } catch (e) {
-        store.toast = toastError(e);
+        setToast(toastError(e));
       }
     } else if (orig) {
       rowAttachments.value.push(toUserAttachment(name, orig));
       added++;
     } else {
-      store.toast = `暂不支持该${source}（无法获取原始路径）: ${name}`;
+      setToast(`暂不支持该${source}（无法获取原始路径）: ${name}`);
     }
   }
   if (added) {
@@ -759,7 +763,7 @@ function taskModeLabel(): string {
             </svg>
             {{ permissionChip() }}
             <svg class="chevron" viewBox="0 0 16 16">
-              <path d="M4 6l4 4 4-4z" />
+              <path :d="ICON_CHEVRON_DOWN" />
             </svg>
           </button>
           <PermissionMenu v-if="store.permOpen" @close="store.permOpen = false" />
@@ -776,7 +780,7 @@ function taskModeLabel(): string {
             </svg>
             {{ taskModeLabel() }}
             <svg viewBox="0 0 16 16">
-              <path d="M4 6l4 4 4-4z" />
+            <path :d="ICON_CHEVRON_DOWN" />
             </svg>
           </button>
           <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
@@ -799,7 +803,7 @@ function taskModeLabel(): string {
             </svg>
             {{ modelChipLabel() }}
             <svg viewBox="0 0 16 16">
-              <path d="M4 6l4 4 4-4z" />
+              <path :d="ICON_CHEVRON_DOWN" />
             </svg>
           </button>
           <ModelMenu v-if="store.modelOpen" @close="store.modelOpen = false" />

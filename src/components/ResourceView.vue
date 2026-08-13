@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { store, toastError } from "../composables/useCodex";
+import { setToast, toastError } from "../composables/useCodex";
+import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
   clearSearch,
   copyEntry,
@@ -36,45 +37,39 @@ import {
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
-import { clampMenuPos } from "../lib/ctxMenu";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
+  ICON_DELETE,
+  ICON_FOLDER_CLOSED,
+  ICON_FOLDER_OPEN,
+  ICON_OPEN,
+  ICON_REFRESH,
+  ICON_RENAME,
+} from "../lib/icons";
 
 const props = defineProps<{ active: boolean }>();
 
-const ICON_FOLDER_CLOSED =
-  "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
-const ICON_FOLDER_OPEN =
-  "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
-/** 目录行折叠/展开箭头：收起=右箭头，展开=下箭头 */
-const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
-const ICON_ARROW_DOWN =
-  "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
 const ICON_FILE =
   "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 const ICON_PASTE =
   "M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm2 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z";
 const ICON_COPY =
   "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
-const ICON_DELETE =
-  "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z";
-const ICON_RENAME =
-  "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
 const ICON_REVEAL =
   "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
 const ICON_ATTACH =
   "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-1.93-1.57-3.5-3.5-3.5S8 3.07 8 5v12.5c0 2.76 2.24 5 5 5s5-2.24 5-5V6h-1.5z";
 const ICON_INFO =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z";
-const ICON_OPEN =
-  "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
 
-interface CtxItem {
-  label: string;
-  icon: string;
-  danger?: boolean;
-  action: () => void;
-}
-
-const ctxMenu = ref<{ x: number; y: number; items: CtxItem[] } | null>(null);
+const {
+  ctxMenu,
+  openCtx,
+  onWindowClick,
+  onWindowScroll,
+  onKeydown: onMenuKeydown,
+} = useActionMenu({ width: 190, scrollScope: ".resource-view" });
 const confirmDelete = ref<FsEntry | null>(null);
 const propsEntry = ref<FsEntry | null>(null);
 const propsLoading = ref(false);
@@ -97,18 +92,6 @@ function entryIcon(entry: FsEntry): string {
 function fileMeta(entry: FsEntry): string {
   const parts = [formatFileSize(entry.size), formatFileTime(entry.modifiedAtMs)];
   return parts.filter(Boolean).join(" · ");
-}
-
-function openCtx(e: MouseEvent, items: CtxItem[]) {
-  e.preventDefault();
-  e.stopPropagation();
-  const pos = clampMenuPos(
-    e.clientX,
-    e.clientY,
-    190,
-    items.length * 30 + 12,
-  );
-  ctxMenu.value = { x: pos.x, y: pos.y, items };
 }
 
 function openRootMenu(e: MouseEvent) {
@@ -206,7 +189,7 @@ async function requestOpen(entry: FsEntry) {
     openTextEditor(entry);
     return;
   }
-  store.toast = "该文件不是文本文件，无法打开";
+  setToast("该文件不是文本文件，无法打开");
 }
 
 function openEntryMenu(entry: FsEntry, e: MouseEvent) {
@@ -284,7 +267,7 @@ async function openProps(entry: FsEntry) {
     });
     propsEntry.value = meta;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     propsLoading.value = false;
   }
@@ -306,21 +289,10 @@ function onRefresh() {
   else void refreshAll();
 }
 
-function onWindowClick() {
-  ctxMenu.value = null;
-}
-
-function onWindowScroll(e: Event) {
-  // 仅面板自身滚动时关闭；聊天区等外部滚动（会话流式更新的吸底滚动）不影响菜单
-  if (!(e.target instanceof HTMLElement)) return;
-  if (!e.target.closest(".resource-view")) return;
-  ctxMenu.value = null;
-}
-
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
-  if (ctxMenu.value) ctxMenu.value = null;
-  else if (confirmDelete.value) cancelDelete();
+  if (onMenuKeydown(e)) return;
+  if (confirmDelete.value) cancelDelete();
   else if (propsEntry.value) propsEntry.value = null;
   else if (editingPath.value) cancelRename();
 }
@@ -372,9 +344,7 @@ const deleteLabel = computed(() => {
           @click="onRefresh()"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
-            />
+            <path :d="ICON_REFRESH" />
           </svg>
         </button>
       </div>

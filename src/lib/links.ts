@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { store, toastError } from "../composables/useCodex";
+import { resolveCwd, setToast, toastError } from "../composables/useCodex";
 
 export type LinkClassification =
   | { kind: "web"; url: string }
@@ -66,7 +66,7 @@ export function displayHref(href: string, workspaceRoot: string): string {
 }
 
 export function workspaceRoot(): string {
-  return store.currentThreadCwd ?? store.server.workspace ?? "";
+  return resolveCwd();
 }
 
 interface TestHookWindow {
@@ -94,6 +94,6 @@ export function openLink(href: string, root: string = workspaceRoot()) {
     return;
   }
   void invoke("reveal_path", { path: cls.path }).catch((e) => {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   });
 }

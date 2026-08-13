@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { askConfirm, store, toastError } from "../composables/useCodex";
+import { askConfirm, setToast, toastError } from "../composables/useCodex";
+import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
   gitErrorMsg,
   gitInitBusy,
@@ -21,7 +22,16 @@ import {
   type GitPullResult,
   type GitStatus,
 } from "../lib/gitChanges";
-import { clampMenuPos } from "../lib/ctxMenu";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
+  ICON_DELETE,
+  ICON_FOLDER_CLOSED,
+  ICON_FOLDER_OPEN,
+  ICON_OPEN,
+  ICON_PLUS,
+  ICON_REFRESH,
+} from "../lib/icons";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -49,8 +59,6 @@ const commits = ref<GitCommitEntry[]>([]);
 const logBusy = ref(false);
 const LOG_LIMIT = 50;
 
-const ICON_OPEN =
-  "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
 const ICON_STAGE =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
 const ICON_UNSTAGE =
@@ -59,39 +67,25 @@ const ICON_RESTORE =
   "M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z";
 const ICON_IGNORE =
   "M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z";
-const ICON_DELETE =
-  "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z";
-const ICON_FOLDER_CLOSED =
-  "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
-const ICON_FOLDER_OPEN =
-  "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
-const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
-const ICON_ARROW_DOWN =
-  "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
 const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
 const ICON_CHECK =
   "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z";
-const ICON_PLUS =
-  "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
 const ICON_CLOSE =
   "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 const ICON_MERGE =
   "M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z";
-const ICON_REFRESH =
-  "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
-
-interface CtxItem {
-  label: string;
-  icon: string;
-  danger?: boolean;
-  action: () => void;
-}
 
 /** 分区：更改（工作区侧） / 暂存更改（HEAD→索引侧） */
 type GitSection = "changes" | "staged";
 
-const ctxMenu = ref<{ x: number; y: number; items: CtxItem[] } | null>(null);
+const {
+  ctxMenu,
+  openCtx,
+  onWindowClick: onMenuWindowClick,
+  onWindowScroll: onMenuWindowScroll,
+  onKeydown: onMenuKeydown,
+} = useActionMenu({ width: 190, scrollScope: ".git-view" });
 const gitActionBusy = ref(false);
 
 interface GitFileNode {
@@ -248,9 +242,9 @@ async function doCommit() {
     });
     gitStatus.value = st;
     commitMessage.value = "";
-    store.toast = "提交成功";
+    setToast("提交成功");
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     commitBusy.value = false;
   }
@@ -265,9 +259,9 @@ async function doPull() {
   try {
     const res = await invoke<GitPullResult>("git_changes_pull", { root });
     gitStatus.value = res.status;
-    store.toast = res.message;
+    setToast(res.message);
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     pullBusy.value = false;
   }
@@ -294,7 +288,7 @@ async function openBranchMenu() {
     branches.value = res.branches;
     branchMenuOpen.value = true;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     branchBusy.value = false;
   }
@@ -319,7 +313,7 @@ async function switchBranch(name: string) {
     gitStatus.value = st;
     branchMenuOpen.value = false;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     branchBusy.value = false;
   }
@@ -343,7 +337,7 @@ async function createBranch() {
     );
     branches.value = res.branches;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     branchBusy.value = false;
   }
@@ -360,7 +354,7 @@ async function deleteBranch(name: string) {
     gitStatus.value = st;
     branches.value = branches.value.filter((b) => b !== name);
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     branchBusy.value = false;
   }
@@ -376,10 +370,10 @@ async function mergeBranch(name: string) {
       name,
     });
     gitStatus.value = res.status;
-    store.toast = res.message;
+    setToast(res.message);
     branchMenuOpen.value = false;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     mergeBusy.value = false;
   }
@@ -421,7 +415,7 @@ function onWindowClick(e: MouseEvent) {
   // 用 Element 而非 HTMLElement：点击 svg/path 等 SVG 目标也应正确判断
   if (!(e.target instanceof Element)) {
     branchMenuOpen.value = false;
-    ctxMenu.value = null;
+    onMenuWindowClick();
     return;
   }
   if (
@@ -432,13 +426,13 @@ function onWindowClick(e: MouseEvent) {
     return;
   }
   branchMenuOpen.value = false;
-  ctxMenu.value = null;
+  onMenuWindowClick();
 }
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   branchMenuOpen.value = false;
-  ctxMenu.value = null;
+  onMenuKeydown(e);
 }
 
 function onWindowScroll(e: Event) {
@@ -446,7 +440,7 @@ function onWindowScroll(e: Event) {
   if (!(e.target instanceof Element)) return;
   if (!e.target.closest(".git-view")) return;
   branchMenuOpen.value = false;
-  ctxMenu.value = null;
+  onMenuWindowScroll(e);
 }
 
 onMounted(() => {
@@ -470,7 +464,7 @@ async function openDiff(file: GitFile) {
       kind: file.status,
     });
     if (!diff) {
-      store.toast = "该文件无内容变化（可能仅为重命名）";
+      setToast("该文件无内容变化（可能仅为重命名）");
       return;
     }
     await invoke("open_diff_window", {
@@ -482,7 +476,7 @@ async function openDiff(file: GitFile) {
       },
     });
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   }
 }
 
@@ -547,13 +541,7 @@ function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
     });
   }
   // conflicted / renamed 仅保留“打开”
-  const pos = clampMenuPos(
-    e.clientX,
-    e.clientY,
-    190,
-    items.length * 30 + 12,
-  );
-  ctxMenu.value = { x: pos.x, y: pos.y, items };
+  openCtx(e, items);
 }
 
 function toggleDirRow(node: GitDirNode) {
@@ -593,13 +581,7 @@ function openDirCtx(section: GitSection, node: GitDirNode, e: MouseEvent) {
     danger: true,
     action: () => void restoreDir(node),
   });
-  const pos = clampMenuPos(
-    e.clientX,
-    e.clientY,
-    190,
-    items.length * 30 + 12,
-  );
-  ctxMenu.value = { x: pos.x, y: pos.y, items };
+  openCtx(e, items);
 }
 
 async function runGitOp(cmd: string, relPath: string) {
@@ -611,7 +593,7 @@ async function runGitOp(cmd: string, relPath: string) {
     const st = await invoke<GitStatus>(cmd, { root, path: relPath });
     gitStatus.value = st;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     gitActionBusy.value = false;
   }
@@ -669,7 +651,7 @@ async function runGitAllOp(cmd: string) {
     const st = await invoke<GitStatus>(cmd, { root });
     gitStatus.value = st;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     gitActionBusy.value = false;
   }

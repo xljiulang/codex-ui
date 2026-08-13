@@ -8,6 +8,7 @@ import { useTailWindow } from "../composables/useTailWindow";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { workspaceRoot } from "../lib/links";
+import { copyText } from "../lib/clipboard";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -184,25 +185,7 @@ const copied = ref(false);
 async function copyCommand() {
   const text = commandText.value;
   if (!text) return;
-  let ok = false;
-  try {
-    await navigator.clipboard.writeText(text);
-    ok = true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-    } catch {
-      ok = false;
-    }
-  }
-  copied.value = ok;
+  copied.value = await copyText(text);
   window.setTimeout(() => {
     copied.value = false;
   }, 1500);

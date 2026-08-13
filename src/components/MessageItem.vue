@@ -6,6 +6,7 @@ import ReasoningBlock from "./ReasoningBlock.vue";
 import RefChip from "./RefChip.vue";
 import ToolCard from "./ToolCard.vue";
 import { formatDuration } from "../lib/format";
+import { copyText } from "../lib/clipboard";
 import {
   FILE_MENTION_HEADING,
   MY_REQUEST_MARKER,
@@ -155,27 +156,6 @@ const isFinalAnswer = computed(() => props.item.phase === "final_answer");
 const memoryList = computed(() => memoryEntries(props.item.memoryCitation));
 
 // ---------- 复制 / 重试 ----------
-async function copyText(t: string): Promise<boolean> {
-  if (!t) return false;
-  try {
-    await navigator.clipboard.writeText(t);
-    return true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = t;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
 
 const copiedAgent = ref(false);
 async function copyAgentMessage() {

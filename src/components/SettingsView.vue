@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { saveSettings, store, toastError } from "../composables/useCodex";
+import {
+  saveSettings,
+  setToast,
+  store,
+  toastError,
+} from "../composables/useCodex";
 import {
   THEMES,
   applyTheme,
@@ -52,7 +57,7 @@ async function pickCodexFile() {
     });
     if (dir) codexPath.value = dir;
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   }
 }
 
@@ -65,7 +70,7 @@ async function apply() {
     theme: theme.value,
     default_permission: defaultPermission.value,
   });
-  store.toast = "设置已保存";
+  setToast("设置已保存");
   close(false);
 }
 

@@ -1,9 +1,10 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { store, toastError } from "./useCodex";
+import { resolveCwd, setToast, store, toastError } from "./useCodex";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
+import { debounce } from "../lib/debounce";
 import {
   flattenResourceTree,
   joinFsPath,
@@ -13,13 +14,8 @@ import {
 
 const SEARCH_LIMIT = 200;
 
-/** 当前会话工作目录：会话 cwd → 新会话已选目录 → 启动工作目录（跳过空字符串） */
-export const sessionRoot = computed(() =>
-  store.currentThreadCwd?.trim() ||
-  store.newChatCwd?.trim() ||
-  store.server.workspace?.trim() ||
-  "",
-);
+/** 当前会话工作目录：统一走 resolveCwd 规范优先级 */
+export const sessionRoot = computed(() => resolveCwd());
 
 export const rootEntry = ref<FsEntry | null>(null);
 export const rootError = ref("");
@@ -48,13 +44,10 @@ let active = false;
 /** 已加载的根路径：同根重新激活时保留展开状态，仅刷新数据 */
 let loadedRoot = "";
 let searchSeq = 0;
-let searchTimer: number | undefined;
 let unlistenFsEvent: UnlistenFn | null = null;
 let watcherStarted = false;
 
-function setToast(msg: string) {
-  store.toast = msg;
-}
+const debouncedSearch = debounce(() => void runSearchNow(), 300);
 
 function resetTree() {
   for (const k of Object.keys(childrenByPath)) delete childrenByPath[k];
@@ -151,10 +144,7 @@ export async function refreshAll() {
 }
 
 export function onSearchInput() {
-  if (searchTimer) window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => {
-    void runSearchNow();
-  }, 300);
+  debouncedSearch.run();
 }
 
 export async function runSearchNow() {
@@ -188,7 +178,7 @@ export async function runSearchNow() {
 
 export function clearSearch() {
   searchTerm.value = "";
-  if (searchTimer) window.clearTimeout(searchTimer);
+  debouncedSearch.cancel();
   searchSeq++;
   searchResults.value = [];
   searching.value = false;
@@ -405,8 +395,7 @@ export function __resetSessionFsForTest() {
   resetTree();
   searchTerm.value = "";
   searching.value = false;
-  if (searchTimer) window.clearTimeout(searchTimer);
-  searchTimer = undefined;
+  debouncedSearch.cancel();
   searchSeq++;
   unlistenFsEvent?.();
   unlistenFsEvent = null;

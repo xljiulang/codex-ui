@@ -223,7 +223,7 @@ watch(
   },
 );
 
-function setToast(msg: string) {
+export function setToast(msg: string) {
   store.toast = msg;
 }
 
@@ -318,15 +318,20 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
   return flattenTurns(turns);
 }
 
+/**
+ * 规范的工作目录解析（所有入口共用，避免各调用点优先级不一致）：
+ * 有会话时以会话 cwd 为准（忽略残留的 newChatCwd），
+ * 无会话（新建会话中）优先待新建目录 newChatCwd，其次 workspace；均跳过空串。
+ */
+export function resolveCwd(): string {
+  const cwd = store.currentThreadId ? store.currentThreadCwd : store.newChatCwd;
+  return cwd?.trim() || store.server.workspace?.trim() || "";
+}
+
 async function updateWindowTitle() {
   try {
     const win = getCurrentWindow();
-    // 有会话时以会话 cwd 为准（残留的 newChatCwd 不串味）；
-    // 无会话（新建会话中）优先待新建目录 newChatCwd，其次 workspace。
-    const cwd =
-      store.currentThreadCwd ??
-      (store.currentThreadId ? null : store.newChatCwd) ??
-      store.server.workspace;
+    const cwd = resolveCwd();
     const folder = cwd ? pathBaseName(cwd) : "";
     const threadTitle = currentThreadTitle();
     const title = threadTitle
@@ -340,11 +345,12 @@ async function updateWindowTitle() {
   }
 }
 
-/** 当前会话的对话标题：仅取已生成的名称（自动生成或手动重命名），不含 preview/首条消息回退 */
+/** 当前会话的对话标题：优先已生成的名称（自动生成或手动重命名），
+ * 名称缺失时回退到摘要预览/“新会话”，与历史列表 threadTitle 显示一致 */
 function currentThreadTitle(): string {
   if (store.currentThreadName) return store.currentThreadName;
   const summary = store.threads.find((t) => t.id === store.currentThreadId);
-  return summary?.name || "";
+  return summary ? threadTitle(summary) : "";
 }
 
 function isMainWindow(): boolean {
@@ -811,7 +817,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
 
   try {
     const startParams: Record<string, unknown> = {
-      cwd: store.currentThreadCwd ?? store.server.workspace,
+      cwd: resolveCwd(),
       approvalPolicy: "never",
       sandbox: "read-only",
     };
@@ -943,7 +949,8 @@ export async function togglePin(threadId: string, pinned: boolean) {
 async function newChat(prompt: string, attachments: UserInput[]) {
   store.busy = true;
   try {
-    const cwd = store.newChatCwd ?? store.server.workspace;
+    // newChat 仅在无当前会话时被调用，resolveCwd 走 newChatCwd → workspace 分支
+    const cwd = resolveCwd();
     const params: Record<string, unknown> = {
       cwd,
       approvalPolicy: toApprovalPolicy(store.permissionMode),
@@ -1016,7 +1023,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   params.approvalPolicy = toApprovalPolicy(store.permissionMode);
   params.sandboxPolicy = toSandboxPolicy(
     store.permissionMode,
-    store.currentThreadCwd ?? store.server.workspace,
+    resolveCwd(),
   );
   const reviewer = toApprovalsReviewer(store.permissionMode);
   if (reviewer) params.approvalsReviewer = reviewer;

@@ -10,43 +10,31 @@ import {
   renameThread,
   refreshThreads,
   searchThreads,
+  setToast,
   store,
   threadTitle,
   toastError,
   togglePin,
 } from "../composables/useCodex";
+import { useActionMenu } from "../composables/useActionMenu";
 import { formatRelativeTime } from "../lib/format";
 import { groupThreads } from "../lib/historyGroup";
 import type { HistoryGroup } from "../lib/historyGroup";
 import type { ThreadSummary } from "../lib/types";
 import { focusComposer } from "../lib/composerFocus";
-import { clampMenuPos } from "../lib/ctxMenu";
-
-/** 文件夹行图标：收起=闭合文件夹，展开=打开文件夹 */
-const FOLDER_CLOSED =
-  "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
-const FOLDER_OPEN =
-  "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
-/** 目录行折叠/展开箭头：收起=右箭头，展开=下箭头 */
-const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
-const ICON_ARROW_DOWN =
-  "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
-const ICON_OPEN =
-  "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
-const ICON_RENAME =
-  "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
-const ICON_PIN =
-  "M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z";
-const ICON_DELETE =
-  "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z";
-const ICON_PLUS = "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z";
-
-interface CtxItem {
-  label: string;
-  icon: string;
-  danger?: boolean;
-  action: () => void;
-}
+import { debounce } from "../lib/debounce";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
+  ICON_DELETE,
+  ICON_FOLDER_CLOSED,
+  ICON_FOLDER_OPEN,
+  ICON_OPEN,
+  ICON_PIN,
+  ICON_PLUS,
+  ICON_REFRESH,
+  ICON_RENAME,
+} from "../lib/icons";
 
 const confirmThread = ref<ThreadSummary | null>(null);
 const confirmEl = ref<HTMLElement | null>(null);
@@ -54,10 +42,16 @@ const searchTerm = ref("");
 const editingId = ref<string | null>(null);
 const editName = ref("");
 /** 右键操作菜单：记录菜单项与位置 */
-const ctxMenu = ref<{ x: number; y: number; items: CtxItem[] } | null>(null);
+const {
+  ctxMenu,
+  openCtx,
+  onWindowClick,
+  onWindowScroll,
+  onKeydown: onMenuKeydown,
+} = useActionMenu({ width: 180, scrollScope: ".history-view" });
 /** 默认收起；记录用户展开过的目录 */
 const expandedDirs = reactive(new Set<string>());
-let searchTimer: number | undefined;
+const debouncedSearch = debounce(() => void searchThreads(searchTerm.value), 300);
 let lastFocus: HTMLElement | null = null;
 
 type RenderRow =
@@ -96,15 +90,12 @@ const historyRows = computed<RenderRow[]>(() => {
 });
 
 function onSearchInput() {
-  if (searchTimer) window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => {
-    void searchThreads(searchTerm.value);
-  }, 300);
+  debouncedSearch.run();
 }
 
 function clearSearchInput() {
   searchTerm.value = "";
-  if (searchTimer) window.clearTimeout(searchTimer);
+  debouncedSearch.cancel();
   clearSearch();
 }
 
@@ -112,7 +103,7 @@ function clearSearchInput() {
 function onRefresh() {
   if (store.searchActive) {
     // 清掉未触发的防抖定时器，避免与手动刷新重复搜索
-    if (searchTimer) window.clearTimeout(searchTimer);
+    debouncedSearch.cancel();
     void searchThreads(searchTerm.value);
   } else {
     void refreshThreads();
@@ -164,18 +155,6 @@ async function doDelete() {
   await deleteThread(t.id);
 }
 
-function openCtx(e: MouseEvent, items: CtxItem[]) {
-  e.preventDefault();
-  e.stopPropagation();
-  const pos = clampMenuPos(
-    e.clientX,
-    e.clientY,
-    180,
-    items.length * 30 + 12,
-  );
-  ctxMenu.value = { x: pos.x, y: pos.y, items };
-}
-
 /** 打开会话行右键菜单；重命名输入框内右键放行给全局编辑菜单 */
 function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.(".rename-input")) return;
@@ -213,7 +192,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
     },
     {
       label: "在资源管理器中打开",
-      icon: FOLDER_OPEN,
+      icon: ICON_FOLDER_OPEN,
       action: () => revealInExplorer(group.path),
     },
   ]);
@@ -221,25 +200,14 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
 
 function revealInExplorer(path: string) {
   void invoke("reveal_path", { path }).catch((e) => {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   });
-}
-
-function onWindowClick() {
-  ctxMenu.value = null;
-}
-
-function onWindowScroll(e: Event) {
-  // 仅面板自身滚动时关闭；聊天区等外部滚动（会话流式更新的吸底滚动）不影响菜单
-  if (!(e.target instanceof HTMLElement)) return;
-  if (!e.target.closest(".history-view")) return;
-  ctxMenu.value = null;
 }
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
-  if (ctxMenu.value) ctxMenu.value = null;
-  else if (confirmThread.value) cancelDelete();
+  if (onMenuKeydown(e)) return;
+  if (confirmThread.value) cancelDelete();
 }
 
 onMounted(() => {
@@ -253,6 +221,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("click", onWindowClick);
   window.removeEventListener("scroll", onWindowScroll, true);
+  debouncedSearch.cancel();
 });
 </script>
 
@@ -283,9 +252,7 @@ onBeforeUnmount(() => {
           @click="onRefresh()"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
-            />
+            <path :d="ICON_REFRESH" />
           </svg>
         </button>
       </div>
@@ -312,7 +279,9 @@ onBeforeUnmount(() => {
           </svg>
           <span class="folder-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="row.collapsed ? FOLDER_CLOSED : FOLDER_OPEN" />
+              <path
+                :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN"
+              />
             </svg>
           </span>
           <span class="folder-name">{{ row.group.label }}</span>
@@ -346,9 +315,7 @@ onBeforeUnmount(() => {
                   aria-label="已置顶"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"
-                    />
+                    <path :d="ICON_PIN" />
                   </svg>
                 </span>
                 <span class="history-title">{{ threadTitle(row.thread) }}</span>

@@ -12,6 +12,10 @@ vi.mock("../../composables/useCodex", () => ({
     toast: "",
   }),
   toastError: (e: unknown) => String(e),
+  resolveCwd: () => "D:/repo",
+  setToast: (msg: string) => {
+    store.toast = msg;
+  },
 }));
 
 import { invoke } from "@tauri-apps/api/core";

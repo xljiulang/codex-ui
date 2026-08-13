@@ -4,6 +4,7 @@ import { useThrottledRef } from "../composables/useThrottledRef";
 import hljs from "../lib/highlight";
 import { displayHref, openLink, workspaceRoot } from "../lib/links";
 import { renderMarkdown } from "../lib/markdownRenderer";
+import { copyText } from "../lib/clipboard";
 import {
   hideTooltip,
   showTooltip,
@@ -187,24 +188,7 @@ function decorateLinks() {
 
 async function copyCode(pre: HTMLPreElement, btn: HTMLButtonElement) {
   const code = (pre.querySelector("code")?.textContent ?? pre.textContent ?? "").replace(/\n$/, "");
-  let ok = false;
-  try {
-    await navigator.clipboard.writeText(code);
-    ok = true;
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = code;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      ok = document.execCommand("copy");
-      document.body.removeChild(ta);
-    } catch {
-      ok = false;
-    }
-  }
+  const ok = await copyText(code);
   btn.textContent = ok ? "已复制" : "复制失败";
   window.setTimeout(() => {
     btn.textContent = "复制";

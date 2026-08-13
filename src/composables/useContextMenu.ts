@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { openLink } from "../lib/links";
 import { clampMenuPos } from "../lib/ctxMenu";
+import { copyText } from "../lib/clipboard";
 
 export interface CtxItem {
   label: string;
@@ -11,25 +12,6 @@ export interface CtxMenuState {
   x: number;
   y: number;
   items: CtxItem[];
-}
-
-async function copyText(t: string) {
-  try {
-    await navigator.clipboard.writeText(t);
-  } catch {
-    try {
-      const ta = document.createElement("textarea");
-      ta.value = t;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-    } catch {
-      // ignore
-    }
-  }
 }
 
 /**

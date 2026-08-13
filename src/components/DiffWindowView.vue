@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import hljs, { languageFromPath } from "../lib/highlight";
 import type { DiffRow } from "../lib/types";
-import { pathBaseName } from "../lib/format";
+import { setWindowTitleFromPath } from "../lib/windowTitle";
 
 interface DiffPreviewParams {
   path: string;
@@ -82,11 +81,7 @@ async function load() {
     }
     params.value = p;
     // 窗口标题栏显示文件名（不含路径）
-    try {
-      await getCurrentWindow().setTitle(pathBaseName(p.path));
-    } catch {
-      // 非 Tauri 环境（单测/浏览器）忽略
-    }
+    await setWindowTitleFromPath(p.path);
     rows.value = await invoke<DiffRow[]>("build_diff_preview", { params: p });
   } catch (e) {
     error.value = String(e);

@@ -4,10 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   activateResourcesTab,
   newEmptyChat,
+  setToast,
   store,
   toastError,
 } from "../composables/useCodex";
 import { focusComposer } from "../lib/composerFocus";
+import { ICON_PLUS } from "../lib/icons";
 
 // 选择文件夹对话框打开中：禁止重复触发，避免同时弹多个系统对话框
 const picking = ref(false);
@@ -20,7 +22,7 @@ async function onNewChat() {
     const dir = await invoke<string | null>("pick_directory");
     void newEmptyChat(dir);
   } catch (e) {
-    store.toast = toastError(e);
+    setToast(toastError(e));
   } finally {
     picking.value = false;
   }
@@ -56,7 +58,7 @@ function onSettings() {
         @click="onNewChat()"
       >
         <svg viewBox="0 0 24 24">
-          <path d="M10.5 4.25h3v6h6v3h-6v6h-3v-6h-6v-3h6z" />
+          <path :d="ICON_PLUS" />
         </svg>
       </button>
       <button
