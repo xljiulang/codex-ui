@@ -1,38 +1,24 @@
 <script setup lang="ts">
-import { computed, nextTick } from "vue";
+import { nextTick, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { newEmptyChat, store, toastError } from "../composables/useCodex";
-import { dirLabel } from "../lib/historyGroup";
 import { focusComposer } from "../lib/composerFocus";
 
-// 新对话态显示已选择目录；会话态显示线程固定目录；兜底启动工作目录
-const cwd = computed(() =>
-  store.currentThreadId
-    ? store.currentThreadCwd?.trim() || store.server.workspace
-    : store.newChatCwd?.trim() || store.server.workspace,
-);
-/** 芯片显示目录最后一段（根路径原样显示），完整路径放在 tooltip */
-const cwdLabel = computed(() => (cwd.value ? dirLabel(cwd.value) : ""));
-/** 工作目录 tooltip：前缀 + 完整路径 */
-const cwdTip = computed(() => (cwd.value ? `会话工作目录：${cwd.value}` : ""));
-// 会话未开始（新对话态）目录可修改；会话进行中线程目录已固定，只读
-const isNewChat = computed(() => !store.currentThreadId);
+// 选择文件夹对话框打开中：禁止重复触发，避免同时弹多个系统对话框
+const picking = ref(false);
 
-// 新对话态可点击选择目录；会话/历史态为只读展示
-async function pickNewChatCwd() {
+async function onNewChat() {
+  if (picking.value) return;
+  picking.value = true;
   try {
+    // 先选目录（用户取消也继续新建），选中则作为本次新建会话的工作目录
     const dir = await invoke<string | null>("pick_directory");
     if (dir) store.newChatCwd = dir;
   } catch (e) {
     store.toast = toastError(e);
+  } finally {
+    picking.value = false;
   }
-}
-
-function onCwdClick() {
-  if (isNewChat.value) void pickNewChatCwd();
-}
-
-function onNewChat() {
   store.showSettings = false;
   void newEmptyChat();
   // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
@@ -56,33 +42,17 @@ function onSettings() {
       <span class="brand-name">CODEX</span>
     </div>
     <div class="header-actions">
-      <div class="cwd-group">
-        <button
-          v-if="cwd"
-          class="brand-cwd"
-          :class="{ pickable: isNewChat, readonly: !isNewChat }"
-          v-tooltip="cwdTip"
-          @click="onCwdClick()"
-        >
-          <svg viewBox="0 0 24 24">
-            <path
-              d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"
-            />
-          </svg>
-          {{ cwdLabel }}
-        </button>
-        <button
-          class="icon-btn new-chat-btn"
-          :class="{ 'cwd-attach': !!cwd }"
-          aria-label="新建会话"
-          v-tooltip="'新建会话'"
-          @click="onNewChat()"
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
-          </svg>
-        </button>
-      </div>
+      <button
+        class="icon-btn new-chat-btn"
+        aria-label="新建会话"
+        :disabled="picking"
+        v-tooltip="picking ? '正在选择文件夹…' : '新建会话（选择工作目录）'"
+        @click="onNewChat()"
+      >
+        <svg viewBox="0 0 24 24">
+          <path d="M10.5 4.25h3v6h6v3h-6v6h-3v-6h-6v-3h6z" />
+        </svg>
+      </button>
       <button
         class="icon-btn"
         aria-label="设置"

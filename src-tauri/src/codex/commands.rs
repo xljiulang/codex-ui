@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -8,6 +8,14 @@ use crate::codex::app_server::{CodexServer, find_codex_sync};
 use crate::codex::settings::{self, AppSettings};
 
 type Server = Arc<CodexServer>;
+
+/// 全局串行化系统“选择文件夹”对话框：任何入口（头部新建会话、输入框目录附件等）
+/// 同一时刻只允许弹出一个，避免多个原生对话框叠加。
+static PICK_DIRECTORY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn pick_directory_lock() -> &'static Mutex<()> {
+    PICK_DIRECTORY_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 #[tauri::command]
 pub async fn server_status(server: State<'_, Server>) -> Result<Value, String> {
@@ -339,6 +347,9 @@ pub async fn pick_files(
 #[tauri::command]
 pub async fn pick_directory(initial_dir: Option<String>) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
+        // 锁在阻塞任务内获取并持有到对话框关闭：与 git_op_lock 同模式，
+        // 保证排队等待的后续调用在对话框真正关闭前不会并发弹窗。
+        let _guard = pick_directory_lock().lock().unwrap_or_else(|e| e.into_inner());
         let mut dialog = rfd::FileDialog::new();
         if let Some(d) = initial_dir.as_deref() {
             if !d.is_empty() {
@@ -544,5 +555,16 @@ mod tests {
         assert!(!is_codex_exe(Path::new("C:/tools/other.exe")));
         assert!(!is_codex_exe(Path::new("C:/tools/codex.cmd")));
         assert!(!is_codex_exe(Path::new("C:/tools/")));
+    }
+
+    #[test]
+    fn pick_directory_lock_serializes_entries() {
+        // 锁可重入获取（同一线程）且互斥：同时只有一个调用持有
+        let lock = pick_directory_lock();
+        let g1 = lock.lock().unwrap();
+        let g2 = lock.try_lock();
+        assert!(g2.is_err(), "已持有时再获取必须失败，防止并发弹窗");
+        drop(g1);
+        assert!(lock.try_lock().is_ok(), "释放后应可再次获取");
     }
 }

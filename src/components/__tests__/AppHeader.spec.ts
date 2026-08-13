@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
@@ -63,79 +63,66 @@ describe("AppHeader 导航", () => {
   });
 });
 
-describe("AppHeader 工作目录选择", () => {
+describe("AppHeader 新建会话选择工作目录", () => {
   beforeEach(() => {
     store.currentThreadId = null;
     store.currentThreadCwd = null;
     store.server.workspace = "D:/repo";
     store.newChatCwd = null;
     mockedInvoke.mockReset();
+    mockedNewChat.mockClear();
   });
 
-  it("新会话态点击工作目录打开目录选择器，选中后更新显示", async () => {
-    mockedInvoke.mockImplementation(async (cmd: string) =>
-      cmd === "pick_directory" ? "D:/project" : undefined,
-    );
+  it("点击新建会话先弹文件夹选择器，选中目录后写入并新建", async () => {
+    mockedInvoke.mockResolvedValue("D:/project");
     const wrapper = mountHeader();
-    const chip = wrapper.find("button.brand-cwd");
-    // 芯片只显示文件夹名，完整路径在 tooltip
-    expect(chip.text()).toContain("repo");
-    expect(chip.attributes("data-tip")).toBe("会话工作目录：D:/repo");
-    await chip.trigger("click");
+    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
     expect(store.newChatCwd).toBe("D:/project");
-    expect(wrapper.find("button.brand-cwd").text()).toContain("project");
+    expect(mockedNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("新会话态 cwd tooltip 显示完整路径且带 pickable 样式", () => {
+  it("取消选择文件夹仍新建会话，沿用当前工作目录", async () => {
+    mockedInvoke.mockResolvedValue(null);
     const wrapper = mountHeader();
-    const chip = wrapper.find("button.brand-cwd");
-    expect(chip.attributes("data-tip")).toBe("会话工作目录：D:/repo");
-    expect(chip.classes()).toContain("pickable");
+    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
+    expect(store.newChatCwd).toBeNull();
+    expect(mockedNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("工作目录与新建会话黏连成组，设置按钮靠最右", () => {
-    const wrapper = mountHeader();
-    const group = wrapper.find(".cwd-group");
-    expect(group.find("button.brand-cwd").exists()).toBe(true);
-    expect(group.find('button[aria-label="新建会话"]').exists()).toBe(true);
-    expect(group.find('button[aria-label="新建会话"]').classes()).toContain(
-      "cwd-attach",
+  it("选择器打开期间按钮禁用，重复点击不会再次弹窗", async () => {
+    let resolveDir!: (v: string | null) => void;
+    mockedInvoke.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveDir = resolve;
+        }),
     );
+    const wrapper = mountHeader();
+    const btn = wrapper.find('button[aria-label="新建会话"]');
+    await btn.trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(btn.attributes("disabled")).toBeDefined();
+    await btn.trigger("click");
+    expect(mockedInvoke).toHaveBeenCalledTimes(1);
+    expect(mockedNewChat).not.toHaveBeenCalled();
+    resolveDir(null);
+    await flushPromises();
+    expect(btn.attributes("disabled")).toBeUndefined();
+    expect(mockedNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("工作目录按钮已移除，头部只剩新建会话与设置两个图标按钮", () => {
+    const wrapper = mountHeader();
+    expect(wrapper.find("button.brand-cwd").exists()).toBe(false);
+    expect(wrapper.find(".cwd-group").exists()).toBe(false);
     const actions = wrapper.findAll(".header-actions > *");
-    expect(actions[actions.length - 1].attributes("aria-label")).toBe("设置");
+    expect(actions.map((a) => a.attributes("aria-label"))).toEqual([
+      "新建会话",
+      "设置",
+    ]);
   });
-
-  it("根路径原样显示为工作目录文本", () => {
-    store.server.workspace = "C:/";
-    const wrapper = mountHeader();
-    const chip = wrapper.find("button.brand-cwd");
-    expect(chip.text()).toContain("C:/");
-    expect(chip.attributes("data-tip")).toBe("会话工作目录：C:/");
-  });
-
-  it("会话进行中点击 cwd 无任何行为（只读展示）", async () => {
-    store.currentThreadId = "t1";
-    store.currentThreadCwd = "D:/thread";
-    store.newChatCwd = "D:/custom"; // 会话态应忽略残留的新对话目录
-    const wrapper = mountHeader();
-    const chip = wrapper.find("button.brand-cwd");
-    expect(chip.text()).toContain("thread");
-    expect(chip.attributes("data-tip")).toBe("会话工作目录：D:/thread");
-    expect(chip.classes()).toContain("readonly");
-    expect(chip.classes()).not.toContain("pickable");
-    mockedInvoke.mockResolvedValue(undefined);
-    await chip.trigger("click");
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "open_url",
-      expect.anything(),
-    );
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "pick_directory",
-      expect.anything(),
-    );
-  });
-
 });
 
 describe("AppHeader 新建会话聚焦输入框", () => {
