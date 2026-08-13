@@ -155,7 +155,7 @@ describe("GitView 文件列表与 diff", () => {
     expect(modifiedIcon.attributes("data-tip")).toBe("修改");
     expect(untrackedIcon.exists()).toBe(true);
     expect(untrackedIcon.attributes("data-tip")).toBe("未跟踪");
-    expect(untrackedIcon.find("svg path").attributes("d")).toBeTruthy();
+    expect(untrackedIcon.text().trim()).toBe("U");
 
     await wrapper.findAll(".git-file")[0].trigger("click");
     await flushPromises();
@@ -1111,6 +1111,151 @@ describe("GitView 拉取", () => {
     expect(
       (wrapper.find(".git-pull").element as HTMLButtonElement).disabled,
     ).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 状态字母与全部暂存/取消暂存", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  const letterStatus: GitStatus = {
+    repoRoot: rootPath,
+    branch: "main",
+    files: [
+      { path: "added.txt", status: "added", staged: true, worktree: false },
+      { path: "mod.txt", status: "modified", staged: true, worktree: false },
+      { path: "del.txt", status: "deleted", staged: true, worktree: false },
+      { path: "ren.txt", status: "renamed", staged: true, worktree: false },
+      { path: "unt.txt", status: "untracked", staged: false, worktree: true },
+      { path: "conf.txt", status: "conflicted", staged: true, worktree: false },
+    ],
+  };
+
+  const stagedStatus: GitStatus = {
+    repoRoot: rootPath,
+    branch: "main",
+    files: [
+      { path: "a.txt", status: "modified", staged: true, worktree: false },
+      { path: "b.txt", status: "added", staged: true, worktree: false },
+    ],
+  };
+
+  function mockRepo(status: GitStatus) {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(status);
+      if (
+        cmd === "git_changes_stage_all" ||
+        cmd === "git_changes_unstage_all" ||
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(status);
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it("各状态渲染对应字母徽标，删除行路径加删除线", async () => {
+    mockRepo(letterStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const letterByPath: Record<string, string> = {};
+    for (const row of wrapper.findAll(".git-file")) {
+      const path = row.find(".git-path").text();
+      letterByPath[path] = row.find(".git-status-icon").text().trim();
+    }
+    expect(letterByPath["added.txt"]).toBe("A");
+    expect(letterByPath["mod.txt"]).toBe("M");
+    expect(letterByPath["del.txt"]).toBe("D");
+    expect(letterByPath["ren.txt"]).toBe("R");
+    expect(letterByPath["unt.txt"]).toBe("U");
+    expect(letterByPath["conf.txt"]).toBe("C");
+
+    const deletedRow = wrapper
+      .findAll(".git-file")
+      .find((r) => r.find(".git-path").text() === "del.txt")!;
+    expect(deletedRow.find(".git-path").classes()).toContain(
+      "git-path-strike",
+    );
+    const modifiedRow = wrapper
+      .findAll(".git-file")
+      .find((r) => r.find(".git-path").text() === "mod.txt")!;
+    expect(modifiedRow.find(".git-path").classes()).not.toContain(
+      "git-path-strike",
+    );
+    wrapper.unmount();
+  });
+
+  it("更改区标题向下按钮点击调用 git_changes_stage_all", async () => {
+    mockRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const sections = wrapper.findAll(".git-section");
+    const stageBtn = sections[0].find(".git-section-action");
+    expect(stageBtn.exists()).toBe(true);
+    expect(stageBtn.attributes("aria-label")).toBe("全部暂存");
+    await stageBtn.trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_stage_all",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath });
+    wrapper.unmount();
+  });
+
+  it("暂存更改区标题向上按钮点击调用 git_changes_unstage_all", async () => {
+    mockRepo(stagedStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const sections = wrapper.findAll(".git-section");
+    const unstageBtn = sections[1].find(".git-section-action");
+    expect(unstageBtn.exists()).toBe(true);
+    expect(unstageBtn.attributes("aria-label")).toBe("全部取消暂存");
+    await unstageBtn.trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_unstage_all",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath });
+    wrapper.unmount();
+  });
+
+  it("对应分区无文件时按钮禁用", async () => {
+    mockRepo({ ...okStatus, files: [] });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    for (const btn of wrapper.findAll(".git-section-action")) {
+      expect((btn.element as HTMLButtonElement).disabled).toBe(true);
+    }
+    wrapper.unmount();
+  });
+
+  it("暂存区为空时向上按钮禁用，更改区有文件时向下按钮可用", async () => {
+    mockRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const buttons = wrapper.findAll(".git-section-action");
+    expect(buttons).toHaveLength(2);
+    expect((buttons[0].element as HTMLButtonElement).disabled).toBe(false);
+    expect((buttons[1].element as HTMLButtonElement).disabled).toBe(true);
     wrapper.unmount();
   });
 });

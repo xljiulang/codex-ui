@@ -14,8 +14,8 @@ import {
 import { sessionRoot } from "../composables/useSessionFs";
 import {
   gitDiffKind,
-  gitStatusIcon,
   gitStatusLabel,
+  gitStatusLetter,
   type GitFile,
   type GitPullResult,
   type GitStatus,
@@ -61,6 +61,8 @@ const ICON_FOLDER_OPEN =
 const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
 const ICON_ARROW_DOWN =
   "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z";
+const ICON_ARROW_UP =
+  "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z";
 
 interface CtxItem {
   label: string;
@@ -568,6 +570,30 @@ function unstageDir(node: GitDirNode) {
   void runGitOp("git_changes_unstage", node.relPath);
 }
 
+/** 全部操作：暂存全部工作区变更 / 取消暂存全部已暂存变更 */
+async function runGitAllOp(cmd: string) {
+  if (gitActionBusy.value) return;
+  const root = gitStatus.value?.repoRoot;
+  if (!root) return;
+  gitActionBusy.value = true;
+  try {
+    const st = await invoke<GitStatus>(cmd, { root });
+    gitStatus.value = st;
+  } catch (e) {
+    store.toast = toastError(e);
+  } finally {
+    gitActionBusy.value = false;
+  }
+}
+
+function stageAll() {
+  void runGitAllOp("git_changes_stage_all");
+}
+
+function unstageAll() {
+  void runGitAllOp("git_changes_unstage_all");
+}
+
 function ignoreDir(node: GitDirNode) {
   void runGitOp("git_changes_ignore", node.relPath);
 }
@@ -714,6 +740,17 @@ async function restoreDir(node: GitDirNode) {
       <div class="git-section">
         <div class="git-section-head">
           <span>更改</span>
+          <button
+            class="git-section-action"
+            aria-label="全部暂存"
+            v-tooltip="'全部暂存'"
+            :disabled="gitActionBusy || !worktreeRows.length"
+            @click="stageAll()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="ICON_ARROW_DOWN" />
+            </svg>
+          </button>
         </div>
         <div v-if="worktreeRows.length" class="git-file-list">
           <div
@@ -748,11 +785,14 @@ async function restoreDir(node: GitDirNode) {
                 :class="`git-status-${row.file.status}`"
                 v-tooltip="gitStatusLabel(row.file.status)"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="gitStatusIcon(row.file.status)" />
-                </svg>
+                {{ gitStatusLetter(row.file.status) }}
               </span>
-              <span class="git-path">{{ row.file.path }}</span>
+              <span
+                class="git-path"
+                :class="{ 'git-path-strike': row.file.status === 'deleted' }"
+              >
+                {{ row.file.path }}
+              </span>
             </template>
           </div>
         </div>
@@ -762,6 +802,17 @@ async function restoreDir(node: GitDirNode) {
       <div class="git-section">
         <div class="git-section-head">
           <span>暂存更改</span>
+          <button
+            class="git-section-action"
+            aria-label="全部取消暂存"
+            v-tooltip="'全部取消暂存'"
+            :disabled="gitActionBusy || !stagedRows.length"
+            @click="unstageAll()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="ICON_ARROW_UP" />
+            </svg>
+          </button>
         </div>
         <div class="git-commit-bar">
           <textarea
@@ -774,7 +825,7 @@ async function restoreDir(node: GitDirNode) {
           ></textarea>
           <div class="git-commit-row">
             <button
-              class="btn git-commit-btn"
+              class="git-commit-btn"
               :disabled="!canCommit"
               @click="doCommit()"
             >
@@ -816,11 +867,14 @@ async function restoreDir(node: GitDirNode) {
                 :class="`git-status-${row.file.status}`"
                 v-tooltip="gitStatusLabel(row.file.status)"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="gitStatusIcon(row.file.status)" />
-                </svg>
+                {{ gitStatusLetter(row.file.status) }}
               </span>
-              <span class="git-path">{{ row.file.path }}</span>
+              <span
+                class="git-path"
+                :class="{ 'git-path-strike': row.file.status === 'deleted' }"
+              >
+                {{ row.file.path }}
+              </span>
             </template>
           </div>
         </div>

@@ -67,6 +67,8 @@ pub fn run() {
             codex::git::git_changes_diff,
             codex::git::git_changes_stage,
             codex::git::git_changes_unstage,
+            codex::git::git_changes_stage_all,
+            codex::git::git_changes_unstage_all,
             codex::git::git_changes_restore,
             codex::git::git_changes_delete,
             codex::git::git_changes_ignore,

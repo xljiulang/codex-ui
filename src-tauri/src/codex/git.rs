@@ -752,6 +752,25 @@ fn unstage_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
     status_sync(path)
 }
 
+/// 全部暂存：等价 `git add -A`，将当前所有工作区侧变更暂存
+/// （含未跟踪、删除与冲突文件，冲突按当前工作区内容暂存即标记已解决）
+fn stage_all_sync(path: &str) -> Result<GitStatus, GitError> {
+    let st = status_sync(path)?;
+    for f in st.files.iter().filter(|f| f.worktree) {
+        stage_file_sync(path, &f.path)?;
+    }
+    status_sync(path)
+}
+
+/// 全部取消暂存：所有已暂存文件索引重置为 HEAD（HEAD 无则移除），工作区不变
+fn unstage_all_sync(path: &str) -> Result<GitStatus, GitError> {
+    let st = status_sync(path)?;
+    for f in st.files.iter().filter(|f| f.staged) {
+        unstage_file_sync(path, &f.path)?;
+    }
+    status_sync(path)
+}
+
 /// 单文件还原：完全丢弃该文件本地更改——先取消暂存，工作区恢复为 HEAD 内容；
 /// HEAD 无此文件（未跟踪/新增）则删除工作区文件
 fn restore_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
@@ -1460,6 +1479,16 @@ pub async fn git_changes_stage(root: String, path: String) -> Result<GitStatus, 
 #[tauri::command]
 pub async fn git_changes_unstage(root: String, path: String) -> Result<GitStatus, GitError> {
     run_blocking(move || unstage_sync(&root, &path)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_stage_all(root: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || stage_all_sync(&root)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_unstage_all(root: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || unstage_all_sync(&root)).await
 }
 
 #[tauri::command]
@@ -2273,6 +2302,85 @@ mod tests {
         assert_eq!(st.files[0].status, "deleted");
         assert!(st.files[0].staged);
         assert!(!st.files[0].worktree);
+    }
+
+    #[test]
+    fn stage_all_moves_all_worktree_changes_to_staged() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("c.txt"), "gone\n").unwrap();
+        init_committed_repo(root);
+        // 工作区侧：修改 + 未跟踪 + 删除
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("new.txt"), "hello\n").unwrap();
+        std::fs::remove_file(root.join("c.txt")).unwrap();
+
+        let st = stage_all_sync(root.to_str().unwrap()).unwrap();
+        assert_eq!(st.files.len(), 3);
+        for f in &st.files {
+            assert!(f.staged, "{} 应已暂存", f.path);
+            assert!(!f.worktree, "{} 不应再有工作区侧变更", f.path);
+        }
+        let by_path = |p: &str| {
+            st.files
+                .iter()
+                .find(|f| f.path == p)
+                .map(|f| f.status.as_str())
+                .unwrap()
+        };
+        assert_eq!(by_path("a.txt"), "modified");
+        assert_eq!(by_path("new.txt"), "added");
+        assert_eq!(by_path("c.txt"), "deleted");
+    }
+
+    #[test]
+    fn unstage_all_returns_files_to_worktree() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("new.txt"), "hello\n").unwrap();
+
+        let st = stage_all_sync(root.to_str().unwrap()).unwrap();
+        assert!(st.files.iter().all(|f| f.staged));
+
+        let st = unstage_all_sync(root.to_str().unwrap()).unwrap();
+        assert_eq!(st.files.len(), 2);
+        for f in &st.files {
+            assert!(!f.staged, "{} 应已取消暂存", f.path);
+            assert!(f.worktree, "{} 应回到工作区侧", f.path);
+        }
+        // 工作区内容原样保留
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two\n");
+        assert_eq!(std::fs::read_to_string(root.join("new.txt")).unwrap(), "hello\n");
+    }
+
+    #[test]
+    fn stage_all_and_unstage_all_are_noop_when_clean() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+
+        assert!(stage_all_sync(root.to_str().unwrap()).unwrap().files.is_empty());
+        assert!(unstage_all_sync(root.to_str().unwrap())
+            .unwrap()
+            .files
+            .is_empty());
     }
 
     #[test]
