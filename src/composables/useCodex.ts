@@ -655,7 +655,7 @@ export async function refreshThreads() {
     }
     store.threads = sortThreads(all);
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
   } finally {
     store.loadingHistory = false;
   }
@@ -697,7 +697,7 @@ export async function searchThreads(term: string) {
     store.threads = sortThreads(all.map((r) => r.thread));
     store.searchActive = true;
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
   } finally {
     store.loadingHistory = false;
   }
@@ -724,7 +724,7 @@ export async function renameThread(threadId: string, name: string): Promise<bool
     }
     return true;
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
     return false;
   }
 }
@@ -936,7 +936,7 @@ export async function togglePin(threadId: string, pinned: boolean) {
     await refreshThreads();
   } catch (e) {
     if (t) t.isPinned = prev;
-    setToast(String(e));
+    setToast(toastError(e));
   }
 }
 
@@ -1291,7 +1291,7 @@ export async function openThread(threadId: string) {
       resetToNewChat();
       setToast("会话已不存在，已切换为新会话");
     } else {
-      setToast(String(e));
+      setToast(toastError(e));
     }
   } finally {
     store.loadingThread = false;
@@ -1359,7 +1359,7 @@ export async function clearGoal(threadId?: string | null) {
       store.taskMode = "execute";
     }
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
   }
 }
 
@@ -1367,6 +1367,9 @@ export async function deleteThread(threadId: string) {
   try {
     await invoke("thread_delete", { threadId });
     store.threads = store.threads.filter((t) => t.id !== threadId);
+    // 释放该会话的本地缓存，避免历史列表长期累积内存
+    delete store.itemsByThread[threadId];
+    delete store.activeWorkByThread[threadId];
     if (store.currentThreadId === threadId) {
       store.currentThreadId = null;
       store.currentThreadName = "";
@@ -1376,7 +1379,7 @@ export async function deleteThread(threadId: string) {
       await updateWindowTitle();
     }
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
   }
 }
 
@@ -1387,7 +1390,7 @@ export async function respondInteraction(interaction: PendingInteraction, result
       result,
     });
   } catch (e) {
-    setToast(String(e));
+    setToast(toastError(e));
   } finally {
     store.interactions = store.interactions.filter((i) => i.requestId !== interaction.requestId);
   }
@@ -1422,6 +1425,9 @@ export async function wireEvents() {
     await listen("turn/started", (e) => {
       const p = e.payload as { threadId?: string; turn?: { id?: string } };
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程事件不进入全局状态
+      // 仅处理当前会话的事件：切换会话后，旧会话迟到的 turn/started
+      // 不应把新会话误置为进行中
+      if (p.threadId && p.threadId !== store.currentThreadId) return;
       store.turnActive = true;
       store.turnInterrupted = false;
       store.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
@@ -1439,6 +1445,9 @@ export async function wireEvents() {
         turn?: { id?: string; status?: string };
       };
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程完成不影响主对话
+      // 仅处理当前会话的完成事件：切换会话后，旧会话的 turn/completed
+      // 不应触发新会话的队列发送、计划弹窗或状态复位
+      if (p.threadId && p.threadId !== store.currentThreadId) return;
       store.turnActive = false;
       store.turnInterrupted = p.turn?.status === "interrupted";
       store.currentTurnId = null;
@@ -1579,6 +1588,7 @@ export async function wireEvents() {
   unlisteners.push(
     await listen("item/commandExecution/outputDelta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string };
+      if (isBackgroundThread(p.threadId)) return;
       let item = findItem(p.threadId, p.itemId);
       if (!item) {
         item = { id: p.itemId, type: "commandExecution", command: "", status: "in_progress", aggregatedOutput: "" };
@@ -1592,6 +1602,7 @@ export async function wireEvents() {
   unlisteners.push(
     await listen("item/reasoning/textDelta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string; contentIndex: number };
+      if (isBackgroundThread(p.threadId)) return;
       let item = findItem(p.threadId, p.itemId);
       if (!item) {
         item = { id: p.itemId, type: "reasoning", content: [] };
@@ -1623,6 +1634,7 @@ export async function wireEvents() {
         itemId: string;
         changes?: { path: string; kind: string; diff?: string }[];
       };
+      if (isBackgroundThread(p.threadId)) return;
       upsertItem(p.threadId, {
         id: p.itemId,
         type: "fileChange",

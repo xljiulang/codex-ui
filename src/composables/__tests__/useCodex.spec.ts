@@ -1367,6 +1367,135 @@ describe("消息变更计数器与回合结束清扫", () => {
   });
 });
 
+describe("旧会话 turn 事件不串扰新会话", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，确保本组用例重新注册监听
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.currentThreadId = "t2";
+    store.resumedThreadId = "t2";
+    store.taskMode = "execute";
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentTurnId = null;
+    store.planPrompt = null;
+    store.followupQueue = [];
+    store.itemsByThread = {};
+    store.activeWorkByThread = {};
+  });
+
+  afterEach(() => {
+    disposeEvents();
+  });
+
+  it("旧线程 turn/completed：不复位状态、不弹计划确认、不消费队列", async () => {
+    await wireEvents();
+    store.turnActive = true; // 模拟新会话正在运行
+    store.taskMode = "plan";
+    store.followupQueue.push({ text: "队列消息", attachments: [] });
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "旧会话计划", status: "completed" },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "old-turn", status: "completed" },
+    });
+    await flushPromises();
+
+    expect(store.turnActive).toBe(true);
+    expect(store.currentTurnId).toBeNull();
+    expect(store.planPrompt).toBeNull();
+    expect(store.followupQueue).toHaveLength(1);
+  });
+
+  it("旧线程 turn/started：不把新会话置为进行中", async () => {
+    await wireEvents();
+    fireListen("turn/started", { threadId: "t1", turn: { id: "old-turn" } });
+    expect(store.turnActive).toBe(false);
+    expect(store.currentTurnId).toBeNull();
+  });
+});
+
+describe("后台临时线程 delta 事件隔离", () => {
+  const LONG_TEXT = "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(2);
+
+  beforeEach(() => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    __resetTitleHelperCapabilityForTest();
+    store.toast = "";
+    store.currentThreadId = "t1";
+    store.currentThreadName = "";
+    store.currentThreadCwd = "D:/repo";
+    store.server.workspace = "D:/repo";
+    store.threads = [
+      { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
+    ];
+    store.itemsByThread = {};
+    store.activeWorkByThread = {};
+    store.itemsRev = 0;
+  });
+
+  afterEach(() => {
+    disposeEvents();
+  });
+
+  it("命令输出/思考/文件变更 delta 不进入全局状态", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: true });
+      }
+      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      return Promise.resolve(undefined);
+    });
+
+    await wireEvents();
+    const p = autoTitleThread("t1", LONG_TEXT);
+    await p;
+    expect(store.itemsRev).toBe(0);
+
+    fireListen("item/commandExecution/outputDelta", {
+      threadId: "helper1",
+      itemId: "c1",
+      delta: "out",
+    });
+    fireListen("item/reasoning/textDelta", {
+      threadId: "helper1",
+      itemId: "r1",
+      delta: "思考",
+      contentIndex: 0,
+    });
+    fireListen("item/fileChange/patchUpdated", {
+      threadId: "helper1",
+      itemId: "f1",
+      changes: [{ path: "a.txt", kind: "add", diff: "+x" }],
+    });
+    await flushPromises();
+
+    expect(store.itemsByThread["helper1"]).toBeUndefined();
+    expect(store.activeWorkByThread["helper1"]).toBeUndefined();
+    expect(store.itemsRev).toBe(0);
+
+    // 结算临时回合并清理，避免 30s 兜底定时器悬空
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "interrupted" },
+    });
+    await flushPromises();
+  });
+});
+
 describe("计划完成确认弹窗", () => {
   beforeEach(() => {
     disposeEvents(); // 重置 wired，确保本组用例重新注册监听

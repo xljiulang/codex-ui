@@ -52,7 +52,8 @@ type Row =
   | { kind: "file"; item: FuzzyFileResult }
   | { kind: "native-file" }
   | { kind: "native-dir" }
-  | { kind: "plugin"; plugin: PluginItem };
+  | { kind: "plugin"; plugin: PluginItem }
+  | { kind: "title"; label: string };
 
 /** 当前对话的插件缓存（未创建会话用 NEW_CHAT_PLUGIN_KEY） */
 const currentThreadPlugins = computed(() => {
@@ -75,20 +76,23 @@ const filteredPlugins = computed(() => {
 /**
  * 固定行始终在最前；有 token 时命中插件在前、命中文件在后（联合搜索）；
  * 无 token 时固定行后直接接全部插件。
+ * 组标题作为行内元素（title 行）插入，保证「行索引 = 渲染位置」一一对应，
+ * 避免标题占位导致首条文件结果不可见、键盘高亮与点击错位。
  */
 const rows = computed<Row[]>(() => {
   const list: Row[] = [{ kind: "native-file" }, { kind: "native-dir" }];
-  for (const p of filteredPlugins.value) {
+  const plugins = filteredPlugins.value;
+  const files = props.token ? props.results : [];
+  if (plugins.length) list.push({ kind: "title", label: "插件" });
+  for (const p of plugins) {
     list.push({ kind: "plugin", plugin: p });
   }
-  if (props.token) {
-    for (const r of props.results) list.push({ kind: "file", item: r });
+  if (files.length) list.push({ kind: "title", label: "文件" });
+  for (const r of files) {
+    list.push({ kind: "file", item: r });
   }
   return list;
 });
-
-/** 插件区行数（固定行之后），用于在扁平列表里插入“文件”分组标题 */
-const pluginRowCount = computed(() => filteredPlugins.value.length);
 
 const highlight = ref(0);
 watch(
@@ -108,13 +112,21 @@ function move(dir: -1 | 1) {
   const len =
     props.kind === "@" ? rows.value.length : filteredSkills.value.length;
   if (!len) return;
-  highlight.value = (highlight.value + dir + len) % len;
+  let next = (highlight.value + dir + len) % len;
+  // 标题行不可选中：连续跳过（兜底上限为行数，保证必然落回可选行）
+  if (props.kind === "@") {
+    let guard = len;
+    while (guard-- > 0 && rows.value[next]?.kind === "title") {
+      next = (next + dir + len) % len;
+    }
+  }
+  highlight.value = next;
 }
 
 function selectHighlighted() {
   if (props.kind === "@") {
     const row = rows.value[highlight.value];
-    if (!row) return;
+    if (!row || row.kind === "title") return;
     selectRow(row);
     return;
   }
@@ -131,6 +143,7 @@ function selectHighlighted() {
 defineExpose({ move, selectHighlighted });
 
 function selectRow(row: Row) {
+  if (row.kind === "title") return; // 组标题不可选中
   if (row.kind === "file") {
     const { root, path, file_name } = row.item;
     const full = root.endsWith("\\") || root.endsWith("/")
@@ -172,6 +185,7 @@ function rowDesc(row: Row): string {
 }
 
 function rowKey(row: Row): string {
+  if (row.kind === "title") return "title:" + row.label;
   if (row.kind === "file") return "f:" + row.item.path;
   if (row.kind === "plugin") return "p:" + row.plugin.id;
   return row.kind;
@@ -209,42 +223,37 @@ function pluginInitial(p: PluginItem): string {
 
       <div class="menu-results">
         <template v-for="(row, i) in rows" :key="rowKey(row)">
-          <div v-if="i === 2 && pluginRowCount > 0" class="menu-group-title">
-            插件
-          </div>
-          <div
-            v-else-if="
-              i === 2 + pluginRowCount && token && results.length > 0
-            "
-            class="menu-group-title"
-          >
-            文件
+          <div v-if="row.kind === 'title'" class="menu-group-title">
+            {{ row.label }}
           </div>
           <button
+            v-else
             class="menu-item"
             :class="{ active: highlight === i }"
             @mouseenter="highlight = i"
             @click="selectRow(row)"
           >
-            <span v-if="row.kind === 'plugin'" class="menu-item-icon plugin-icon">
-              <img
-                v-if="pluginIconSrc(row.plugin)"
-                :src="pluginIconSrc(row.plugin)"
-                alt=""
-                @error="markIconError(row.plugin.id)"
-              />
-              <span
-                v-else
-                class="plugin-icon-fallback"
-                :style="
-                  row.plugin.brandColor
-                    ? { background: row.plugin.brandColor }
-                    : undefined
-                "
-              >
-                {{ pluginInitial(row.plugin) }}
+            <template v-if="row.kind === 'plugin'">
+              <span class="menu-item-icon plugin-icon">
+                <img
+                  v-if="pluginIconSrc(row.plugin)"
+                  :src="pluginIconSrc(row.plugin)"
+                  alt=""
+                  @error="markIconError(row.plugin.id)"
+                />
+                <span
+                  v-else
+                  class="plugin-icon-fallback"
+                  :style="
+                    row.plugin.brandColor
+                      ? { background: row.plugin.brandColor }
+                      : undefined
+                  "
+                >
+                  {{ pluginInitial(row.plugin) }}
+                </span>
               </span>
-            </span>
+            </template>
             <span v-else class="menu-item-icon">
               {{ rowIcon(row) }}
             </span>

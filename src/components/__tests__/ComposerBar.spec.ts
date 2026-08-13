@@ -212,6 +212,28 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(labels.indexOf("Documents")).toBeLessThan(labels.indexOf("a.cs"));
   });
 
+  it("@ 无插件时文件结果完整展示：组标题不吞首条结果，可点击选中", async () => {
+    mockRpc(true);
+    // 不预加载插件缓存，模拟当前会话无可用插件
+    wrapper = mount(ComposerBar);
+    await typeInEditor("@a");
+    await waitSearch();
+    const labels = menuLabels();
+    expect(labels).toContain("a.cs");
+    const firstFile = wrapper!
+      .findAll(".mention-menu button.menu-item .menu-item-label")
+      .find((b) => b.text().trim() === "a.cs");
+    expect(firstFile).toBeTruthy();
+    await firstFile!.trigger("click");
+    await flushPromises();
+    const rowChip = wrapper!.find(".attachment-chip");
+    expect(rowChip.exists()).toBe(true);
+    expect(rowChip.text()).toContain("@a.cs");
+    expect(store.attachments).toEqual([
+      { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" },
+    ]);
+  });
+
   it("选中文件进附件区（不内联），触发词被移除且附件同步", async () => {
     mockRpc(true);
     await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);

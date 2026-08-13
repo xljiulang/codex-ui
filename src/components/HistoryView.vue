@@ -103,6 +103,8 @@ function clearSearchInput() {
 /** 刷新历史：搜索态重跑当前搜索，否则重新全量拉取 */
 function onRefresh() {
   if (store.searchActive) {
+    // 清掉未触发的防抖定时器，避免与手动刷新重复搜索
+    if (searchTimer) window.clearTimeout(searchTimer);
     void searchThreads(searchTerm.value);
   } else {
     void refreshThreads();
