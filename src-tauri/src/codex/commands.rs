@@ -293,6 +293,12 @@ pub fn reveal_path(path: String) -> Result<(), String> {
         return open::that(p).map_err(|e| e.to_string());
     }
     if p.is_file() {
+        // explorer 的 /select 参数无法处理路径含逗号的情况，退化为打开所在目录
+        if p.to_string_lossy().contains(',') {
+            if let Some(parent) = p.parent() {
+                return open::that(parent).map_err(|e| e.to_string());
+            }
+        }
         // explorer /select 在资源管理器中定位文件
         std::process::Command::new("explorer")
             .arg(format!("/select,{}", p.display()))
@@ -416,6 +422,31 @@ fn save_image_bytes(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// 清理目录中超过 `max_age` 的旧文件（粘贴图片临时目录防无限累积；尽力而为）
+fn cleanup_old_files(dir: &std::path::Path, max_age: std::time::Duration) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for e in rd.flatten() {
+        let Ok(meta) = e.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let too_old = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .map(|d| d > max_age)
+            .unwrap_or(false);
+        if too_old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// 粘贴的图片落盘：优先临时目录 `%TEMP%\codex-ui-paste`，失败回退应用数据目录
 #[tauri::command]
 pub async fn save_pasted_image(
@@ -423,10 +454,16 @@ pub async fn save_pasted_image(
     bytes: Vec<u8>,
     name: String,
 ) -> Result<String, String> {
+    const MAX_PASTE_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+    if bytes.len() > MAX_PASTE_IMAGE_BYTES {
+        return Err("图片过大（超过 50 MB），无法粘贴".into());
+    }
     tokio::task::spawn_blocking(move || {
         let ext = image_extension(&name)?;
         let file_name = pasted_file_name(&ext);
         let primary = std::env::temp_dir().join("codex-ui-paste");
+        // 顺手清理 7 天前的残留粘贴图片，避免临时目录无限增长
+        cleanup_old_files(&primary, std::time::Duration::from_secs(7 * 24 * 3600));
         if let Ok(p) = save_image_bytes(&primary, &file_name, &bytes) {
             return Ok(p);
         }

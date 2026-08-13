@@ -6,6 +6,8 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::codex::path_util::{clean_path, is_inside_path, norm_key};
+
 /// 会话资源条目（camelCase 序列化，供前端直接使用）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,25 +44,6 @@ fn is_noise_dir(name: &str) -> bool {
 }
 
 /// 规范化路径键：统一反斜杠、去尾部分隔符、小写（Windows 大小写不敏感）
-fn norm_key(p: &Path) -> String {
-    p.to_string_lossy()
-        .replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_lowercase()
-}
-
-/// Windows 规范化路径转标准显示路径：`\\?\UNC\...` → `\\...`，`\\?\C:\...` → `C:\...`
-fn clean_path(p: &Path) -> String {
-    let s = p.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        format!("\\\\{rest}")
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        rest.to_string()
-    } else {
-        s.into_owned()
-    }
-}
-
 /// 相对 root 的相对路径（. 表示根）；对规范化/原始路径混用做大小写不敏感匹配，
 /// 输出保留原始大小写、统一正斜杠分隔。
 fn rel_path_of(root: &Path, path: &Path) -> String {
@@ -72,18 +55,12 @@ fn rel_path_of(root: &Path, path: &Path) -> String {
         return ".".to_string();
     }
     if let Some(rest) = path_l.strip_prefix(&root_l) {
-        if let Some(r) = rest.strip_prefix('\\') {
+        if rest.starts_with('\\') {
             let orig_rest = &path_s[root_l.len() + 1..];
             return orig_rest.replace('\\', "/");
         }
     }
     path_s.replace('\\', "/")
-}
-
-fn is_inside_path(parent: &Path, child: &Path) -> bool {
-    let p = norm_key(parent);
-    let c = norm_key(child);
-    c == p || (c.starts_with(&p) && c[p.len()..].starts_with('\\'))
 }
 
 /// target 必须位于 root 内（规范化后，Windows 大小写不敏感）
@@ -217,10 +194,14 @@ fn search_impl(root: &Path, query: &str, limit: usize) -> Result<Vec<FsEntry>, S
         return Ok(Vec::new());
     }
     let max = limit.min(500);
+    // 遍历上限：防止超大目录下长时间占用阻塞线程
+    const MAX_VISITED_DIRS: usize = 50_000;
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
+    let mut visited = 0usize;
     while let Some(dir) = stack.pop() {
-        if out.len() >= max {
+        visited += 1;
+        if out.len() >= max || visited > MAX_VISITED_DIRS {
             break;
         }
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -363,12 +344,11 @@ fn paste_impl(root: &Path, dest_dir: &Path, sources: &[String]) -> Result<Vec<Fs
 
 #[tauri::command]
 pub async fn session_fs_list(root: String, dir: String) -> Result<Vec<FsEntry>, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         list_impl(&root_p, Path::new(&dir))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -377,22 +357,20 @@ pub async fn session_fs_search(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<FsEntry>, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(120, move || {
         let root_p = resolve_root(&root)?;
         search_impl(&root_p, &query, limit.unwrap_or(200))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn session_fs_metadata(root: String, path: String) -> Result<FsEntry, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         metadata_impl(&root_p, Path::new(&path))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -401,22 +379,20 @@ pub async fn session_fs_rename(
     path: String,
     new_name: String,
 ) -> Result<FsEntry, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         rename_impl(&root_p, Path::new(&path), &new_name)
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn session_fs_delete(root: String, path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         delete_impl(&root_p, Path::new(&path))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -425,12 +401,11 @@ pub async fn session_fs_copy(
     src: String,
     dest_dir: String,
 ) -> Result<FsEntry, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         copy_impl(&root_p, Path::new(&src), Path::new(&dest_dir))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -439,12 +414,11 @@ pub async fn session_fs_paste(
     dest_dir: String,
     sources: Vec<String>,
 ) -> Result<Vec<FsEntry>, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         paste_impl(&root_p, Path::new(&dest_dir), &sources)
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 /// 文本预览最大读取字节数（1 MiB）
@@ -466,14 +440,26 @@ fn read_impl(root: &Path, path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// 在阻塞线程中执行同步文件操作，带超时（秒）
+async fn run_blocking<T: Send + 'static>(
+    timeout_secs: u64,
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let task = tokio::task::spawn_blocking(f);
+    match tokio::time::timeout(Duration::from_secs(timeout_secs), task).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => Err(format!("文件操作任务异常: {e}")),
+        Err(_) => Err(format!("文件操作超时（{timeout_secs} 秒）")),
+    }
+}
+
 #[tauri::command]
 pub async fn session_fs_read(root: String, path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         read_impl(&root_p, Path::new(&path))
     })
     .await
-    .map_err(|e| e.to_string())?
 }
 
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {

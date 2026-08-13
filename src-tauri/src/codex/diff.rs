@@ -157,6 +157,49 @@ fn validate_hunks(
                 return Err("diff hunk 超出旧内容范围".to_string());
             }
         }
+        validate_hunk_content(h, old_lines, new_lines)?;
+    }
+    Ok(())
+}
+
+/// 校验 hunk 的上下文/删除/新增行与新旧文件内容逐行一致，
+/// 防止 diff 过期时静默重建出错误内容。
+fn validate_hunk_content(
+    h: &DiffHunk,
+    old_lines: Option<&[String]>,
+    new_lines: &[String],
+) -> Result<(), String> {
+    let mut oi = h.old_start.saturating_sub(1);
+    let mut ni = h.new_start.saturating_sub(1);
+    for (kind, text) in &h.lines {
+        match kind {
+            DiffLineKind::Ctx => {
+                if let Some(old) = old_lines {
+                    if oi >= old.len() || old[oi] != *text {
+                        return Err("diff 上下文与旧文件内容不一致（diff 可能已过期）".into());
+                    }
+                }
+                if ni >= new_lines.len() || new_lines[ni] != *text {
+                    return Err("diff 上下文与新文件内容不一致（diff 可能已过期）".into());
+                }
+                oi += 1;
+                ni += 1;
+            }
+            DiffLineKind::Del => {
+                if let Some(old) = old_lines {
+                    if oi >= old.len() || old[oi] != *text {
+                        return Err("diff 删除行与旧文件内容不一致（diff 可能已过期）".into());
+                    }
+                }
+                oi += 1;
+            }
+            DiffLineKind::Add => {
+                if ni >= new_lines.len() || new_lines[ni] != *text {
+                    return Err("diff 新增行与新文件内容不一致（diff 可能已过期）".into());
+                }
+                ni += 1;
+            }
+        }
     }
     Ok(())
 }
@@ -282,29 +325,30 @@ pub fn build_inline_rows(
     Ok(rows)
 }
 
-fn is_abs_path(h: &str) -> bool {
-    let b = h.as_bytes();
-    b.len() >= 3 && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
-}
-
-/// Windows 路径解析：绝对盘符路径直接返回，相对路径按工作目录拼接
-fn resolve_path(p: &str, root: &str) -> String {
+/// Windows 路径解析：绝对盘符路径/UNC 直接返回，相对路径按工作目录拼接；
+/// drive-relative（`C:foo`）无法确定驱动器当前目录，直接报错。
+fn resolve_path(p: &str, root: &str) -> Result<String, String> {
     let h = p.replace('\\', "/");
-    if is_abs_path(&h) {
-        return h.replace('/', "\\");
+    let bytes = h.as_bytes();
+    let is_drive_abs = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'/';
+    if is_drive_abs || h.starts_with("//") {
+        return Ok(h.replace('/', "\\"));
+    }
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return Err(format!("不支持驱动器相对路径: {p}"));
     }
     let trimmed = h.trim_start_matches('/');
-    if trimmed.len() >= 2 && trimmed.as_bytes()[1] == b':' {
-        return trimmed.replace('/', "\\");
-    }
     let base = root.replace('\\', "/").trim_end_matches('/').to_string();
-    format!("{}/{}", base, trimmed).replace('/', "\\")
+    Ok(format!("{}/{}", base, trimmed).replace('/', "\\"))
 }
 
 /// 一次 IPC 完成：路径解析 + 读文件 + 反向重建 + 内联行生成
 #[tauri::command]
 pub fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
-    let abs = resolve_path(&params.path, &params.workspace_root);
+    let abs = resolve_path(&params.path, &params.workspace_root)?;
     let new_content = if params.kind == "delete" {
         String::new()
     } else {
@@ -464,6 +508,37 @@ mod tests {
     #[test]
     fn invalid_hunk_counts_errors() {
         assert!(build_inline_rows("a", "x", "@@ -1,99 +1,1 @@\n+x").is_err());
+    }
+
+    #[test]
+    fn stale_diff_content_errors() {
+        // diff 上下文/新增行与当前文件内容不一致（文件在生成 diff 后又改动）→ 报错而非静默重建
+        let diff = "@@ -1,3 +1,3 @@\n a\n-b\n+X\n c";
+        assert!(build_inline_rows("a\nb\nc", "a\nY\nc", diff).is_err());
+        assert!(apply_reverse_unified_diff("a\nY\nc", diff).is_err());
+        assert!(apply_reverse_unified_diff("a\nX\nc", diff).is_ok());
+    }
+
+    #[test]
+    fn resolve_path_rules() {
+        // 绝对盘符路径原样返回（反斜杠）
+        assert_eq!(resolve_path("C:/a/b.txt", "D:\\root").unwrap(), "C:\\a\\b.txt");
+        // UNC 路径原样返回
+        assert_eq!(
+            resolve_path(r"\\srv\share\f.txt", "D:\\root").unwrap(),
+            "\\\\srv\\share\\f.txt"
+        );
+        // 相对路径按 root 拼接，根目录尾分隔符不产生双斜杠
+        assert_eq!(
+            resolve_path("src/a.txt", "D:\\root").unwrap(),
+            "D:\\root\\src\\a.txt"
+        );
+        assert_eq!(
+            resolve_path("a.txt", "D:\\root\\").unwrap(),
+            "D:\\root\\a.txt"
+        );
+        // drive-relative（C:foo）无法确定基准，直接拒绝
+        assert!(resolve_path("C:foo", "D:\\root").is_err());
     }
 
     #[test]

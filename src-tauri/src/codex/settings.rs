@@ -50,7 +50,13 @@ pub fn save(app_dir: &Path, s: &AppSettings) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
-    fs::write(&p, text).map_err(|e| e.to_string())
+    // 先写临时文件再替换，避免写入中途崩溃留下截断的 settings.json
+    let tmp = p.with_extension("json.tmp");
+    fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    if p.exists() {
+        fs::remove_file(&p).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -75,11 +81,17 @@ mod tests {
     #[test]
     fn save_load_roundtrip_preserves_default_permission() {
         let dir = TempDir::new().unwrap();
-        let mut s = AppSettings::default();
-        s.default_permission = "full-access".into();
+        let s = AppSettings {
+            default_permission: "full-access".into(),
+            ..AppSettings::default()
+        };
 
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
         assert_eq!(loaded.default_permission, "full-access");
+        // 原子写不应残留临时文件
+        assert!(!settings_path(dir.path())
+            .with_extension("json.tmp")
+            .exists());
     }
 }

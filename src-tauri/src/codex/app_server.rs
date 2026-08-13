@@ -901,7 +901,6 @@ mod tests {
 
     #[cfg(windows)]
     fn set_modified(p: &Path, t: std::time::SystemTime) -> std::io::Result<()> {
-        use std::os::windows::fs::FileTimesExt;
         let f = std::fs::File::options().write(true).open(p)?;
         f.set_times(std::fs::FileTimes::new().set_modified(t))?;
         Ok(())

@@ -20,7 +20,6 @@ tauri = { version = "2", features = ["custom-protocol", "protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "rt-multi-thread", "time", "macros"] }
-thiserror = "2"
 rfd = "0.15"
 open = "5"
 clipboard-win = "5"
