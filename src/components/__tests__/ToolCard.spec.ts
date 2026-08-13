@@ -271,6 +271,46 @@ describe("文件变更：打开独立 diff 窗口", () => {
   });
 });
 
+describe("文件变更：折叠标题显示文件名", () => {
+  function changeItem(changes: { path: string; kind: string; diff?: string }[]): ThreadItem {
+    return {
+      id: "f3",
+      type: "fileChange",
+      changes,
+      status: "completed",
+    } as ThreadItem;
+  }
+
+  it("单文件时折叠标题显示完整路径", () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: changeItem([{ path: "D:\\repo\\a.cs", kind: "update", diff: "x" }]),
+      },
+    });
+    expect(wrapper.find(".tool-card-sub").text()).toBe("D:\\repo\\a.cs");
+  });
+
+  it("多文件时折叠标题显示第一个路径和文件总数", () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: changeItem([
+          { path: "D:\\repo\\a.cs", kind: "update", diff: "x" },
+          { path: "D:\\repo\\b.ts", kind: "add", diff: "y" },
+          { path: "D:\\repo\\c.rs", kind: "delete", diff: "z" },
+        ]),
+      },
+    });
+    expect(wrapper.find(".tool-card-sub").text()).toBe("D:\\repo\\a.cs (等3个)");
+  });
+
+  it("无变更时折叠标题为空", () => {
+    const wrapper = mount(ToolCard, {
+      props: { item: changeItem([]) },
+    });
+    expect(wrapper.find(".tool-card-sub").text()).toBe("");
+  });
+});
+
 describe("命令输出增量渲染", () => {
   const wait = () => new Promise((r) => setTimeout(r, 120));
 

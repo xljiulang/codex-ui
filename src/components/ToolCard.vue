@@ -95,10 +95,24 @@ const commandText = computed(() => {
   return String(props.item.command ?? "");
 });
 
+const changes = computed(
+  () =>
+    (props.item.changes as
+      | { path: string; kind: string | { type: string }; diff?: string }[]
+      | undefined) ?? [],
+);
+
 const sub = computed(() => {
   if (type.value === "commandExecution") return commandText.value;
   if (type.value === "webSearch") {
     return String(props.item.query ?? "");
+  }
+  if (type.value === "fileChange") {
+    if (!changes.value.length) return "";
+    const first = changes.value[0].path;
+    return changes.value.length > 1
+      ? `${first} (等${changes.value.length}个)`
+      : first;
   }
   return "";
 });
@@ -246,13 +260,6 @@ const errorText = computed(() => {
   const e = props.item.error as { message?: string } | null | undefined;
   return e?.message ?? "";
 });
-
-const changes = computed(
-  () =>
-    (props.item.changes as
-      | { path: string; kind: string | { type: string }; diff?: string }[]
-      | undefined) ?? [],
-);
 
 const todos = computed(
   () =>
