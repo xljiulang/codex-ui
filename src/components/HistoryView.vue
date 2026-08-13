@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   clearSearch,
   deleteThread,
+  newEmptyChat,
   openThread,
   renameThread,
   refreshThreads,
@@ -17,6 +18,7 @@ import { formatRelativeTime } from "../lib/format";
 import { groupThreads } from "../lib/historyGroup";
 import type { HistoryGroup } from "../lib/historyGroup";
 import type { ThreadSummary } from "../lib/types";
+import { focusComposer } from "../lib/composerFocus";
 
 /** 文件夹行图标：收起=闭合文件夹，展开=打开文件夹 */
 const FOLDER_CLOSED =
@@ -35,6 +37,7 @@ const ICON_PIN =
   "M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z";
 const ICON_DELETE =
   "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z";
+const ICON_PLUS = "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z";
 
 interface CtxItem {
   label: string;
@@ -178,9 +181,20 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   ]);
 }
 
-/** 历史目录行右键菜单：在资源管理器中打开该目录 */
+/** 历史目录行右键菜单：创建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
 function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
   openCtx(e, [
+    {
+      label: "创建会话",
+      icon: ICON_PLUS,
+      action: () => {
+        store.showSettings = false;
+        store.newChatCwd = group.path;
+        void newEmptyChat();
+        // 与头部「新建会话」一致：进入新对话后聚焦输入框
+        void nextTick(focusComposer);
+      },
+    },
     {
       label: "在资源管理器中打开",
       icon: FOLDER_OPEN,

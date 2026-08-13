@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
@@ -6,6 +6,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   return {
     ...mod,
     deleteThread: vi.fn(),
+    newEmptyChat: vi.fn(),
     togglePin: vi.fn(),
     openThread: vi.fn(),
     refreshThreads: vi.fn(),
@@ -21,6 +22,7 @@ import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
 import {
   deleteThread,
+  newEmptyChat,
   openThread,
   refreshThreads,
   searchThreads,
@@ -29,6 +31,7 @@ import {
 } from "../../composables/useCodex";
 
 const mockedDelete = vi.mocked(deleteThread);
+const mockedNewEmptyChat = vi.mocked(newEmptyChat);
 const mockedTogglePin = vi.mocked(togglePin);
 const mockedOpen = vi.mocked(openThread);
 const mockedRefresh = vi.mocked(refreshThreads);
@@ -447,7 +450,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     mockedInvoke.mockClear();
   });
 
-  it("文件夹行右键显示“在资源管理器中打开”", async () => {
+  it("文件夹行右键显示“创建会话”与“在资源管理器中打开”", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
       clientX: 200,
@@ -456,7 +459,20 @@ describe("HistoryView 文件夹右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["在资源管理器中打开"]);
+    expect(labels).toEqual(["创建会话", "在资源管理器中打开"]);
+    wrapper.unmount();
+  });
+
+  it("点击“创建会话”预置分组目录并进入新对话", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "创建会话");
+    expect(store.newChatCwd).toBe("D:\\codex\\codex-ui");
+    expect(mockedNewEmptyChat).toHaveBeenCalledTimes(1);
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -471,6 +487,64 @@ describe("HistoryView 文件夹右键菜单", () => {
       path: "D:\\codex\\codex-ui",
     });
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("HistoryView 创建会话聚焦输入框", () => {
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
+    document.body.innerHTML = "";
+  });
+
+  beforeEach(() => {
+    store.threads = [
+      {
+        id: "t1",
+        name: "会话一",
+        createdAt: now,
+        recencyAt: 3,
+        cwd: "D:\\codex\\codex-ui",
+      },
+    ];
+    store.loadingHistory = false;
+    store.searchActive = false;
+    store.searchSnippets = {};
+    store.newChatCwd = null;
+    mockedNewEmptyChat.mockClear();
+  });
+
+  it("点击“创建会话”后优先通过 Tiptap 实例聚焦输入框", async () => {
+    const focus = vi.fn();
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
+      commands: { focus },
+    };
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "创建会话");
+    await wrapper.vm.$nextTick();
+    expect(focus).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("无编辑器实例时兜底聚焦 .ProseMirror 元素", async () => {
+    const composer = document.createElement("div");
+    composer.className = "composer";
+    const editor = document.createElement("div");
+    editor.className = "ProseMirror";
+    composer.appendChild(editor);
+    document.body.appendChild(composer);
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "创建会话");
+    await wrapper.vm.$nextTick();
+    expect(document.activeElement).toBe(editor);
     wrapper.unmount();
   });
 });

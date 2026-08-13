@@ -10,6 +10,7 @@ import {
   onSearchInput,
   openTextPreview,
   pasteInto,
+  probeTextEntry,
   refreshAll,
   renameEntry,
   revealInExplorer,
@@ -32,7 +33,6 @@ import {
 import {
   formatFileSize,
   formatFileTime,
-  isTextFile,
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
@@ -156,15 +156,12 @@ function openDirMenu(entry: FsEntry, e: MouseEvent) {
 }
 
 function openFileMenu(entry: FsEntry, e: MouseEvent) {
-  const items: CtxItem[] = [];
-  if (isTextFile(entry.name)) {
-    items.push({
+  const items: CtxItem[] = [
+    {
       label: "打开",
       icon: ICON_OPEN,
-      action: () => openTextPreview(entry),
-    });
-  }
-  items.push(
+      action: () => void requestOpen(entry),
+    },
     { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
     {
       label: "属性",
@@ -192,8 +189,19 @@ function openFileMenu(entry: FsEntry, e: MouseEvent) {
       icon: ICON_REVEAL,
       action: () => revealInExplorer(entry.path),
     },
-  );
+  ];
   openCtx(e, items);
+}
+
+/** 打开前先探测内容：文本→打开预览；非文本/探测失败→提示无法打开并结束 */
+async function requestOpen(entry: FsEntry) {
+  const ok = await probeTextEntry(entry);
+  if (ok === null) return; // 探测失败：错误信息已 toast
+  if (ok) {
+    openTextPreview(entry);
+    return;
+  }
+  store.toast = "该文件不是文本文件，无法打开";
 }
 
 function openEntryMenu(entry: FsEntry, e: MouseEvent) {
@@ -210,19 +218,19 @@ function onRowContext(row: ResourceRow, e: MouseEvent) {
 function onTreeRowClick(row: ResourceRow) {
   if (row.kind === "file") {
     selectedPath.value = row.entry.path;
-    if (isTextFile(row.entry.name)) openTextPreview(row.entry);
+    void requestOpen(row.entry);
     return;
   }
   toggleDir(row.entry.path);
 }
 
-/** 搜索态结果单击：目录 → 定位回树；文本文件 → 打开预览 */
+/** 搜索态结果单击：目录 → 定位回树；文件 → 探测后打开预览 */
 function onSearchResultClick(entry: FsEntry) {
   if (entry.isDir) {
     void revealInTree(entry);
     return;
   }
-  if (isTextFile(entry.name)) openTextPreview(entry);
+  void requestOpen(entry);
 }
 
 function startRename(entry: FsEntry) {
@@ -410,6 +418,7 @@ const deleteLabel = computed(() => {
           }"
           :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
           :data-fs-path="row.entry.path"
+          v-tooltip="row.kind === 'root' ? row.entry.path : undefined"
           @click="onTreeRowClick(row)"
           @contextmenu="onRowContext(row, $event)"
         >

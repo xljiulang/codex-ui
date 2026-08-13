@@ -1,6 +1,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::io::Read;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -462,6 +463,58 @@ pub async fn session_fs_read(root: String, path: String) -> Result<String, Strin
     .await
 }
 
+/// 文本探测采样字节数（与 git 二进制判定窗口一致，覆盖常见文件头）
+const TEXT_PROBE_BYTES: usize = 8000;
+
+/// 内容级文本判定：前 8000 字节内出现 NUL → 二进制；无 NUL 且为空或
+/// 合法 UTF-8（仅采样末尾多字节序列被截断视为合法）→ 文本。
+fn looks_text(data: &[u8]) -> bool {
+    if data.contains(&0) {
+        return false;
+    }
+    if data.is_empty() {
+        return true;
+    }
+    match std::str::from_utf8(data) {
+        Ok(_) => true,
+        // error_len() == None 表示仅末尾存在未完成的多字节序列（采样截断），仍视为文本
+        Err(e) => e.error_len().is_none(),
+    }
+}
+
+/// 打开前探测文件内容是否为文本：路径包含校验、仅文件、采样前 8000 字节
+fn probe_text_impl(root: &Path, path: &Path) -> Result<bool, String> {
+    let target = ensure_inside(root, path)?;
+    let meta = std::fs::metadata(&target)
+        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    if !meta.is_file() {
+        return Err(format!("不是文件: {}", clean_path(&target)));
+    }
+    let mut buf = vec![0u8; TEXT_PROBE_BYTES];
+    let mut file = std::fs::File::open(&target)
+        .map_err(|e| format!("无法打开文件 {}: {e}", clean_path(&target)))?;
+    let mut n = 0;
+    while n < buf.len() {
+        let read = file
+            .read(&mut buf[n..])
+            .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+        if read == 0 {
+            break;
+        }
+        n += read;
+    }
+    Ok(looks_text(&buf[..n]))
+}
+
+#[tauri::command]
+pub async fn session_fs_probe_text(root: String, path: String) -> Result<bool, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_root(&root)?;
+        probe_text_impl(&root_p, Path::new(&path))
+    })
+    .await
+}
+
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
     p.strip_prefix(root)
         .map(|rel| {
@@ -746,5 +799,39 @@ mod tests {
         // 超过 1 MiB 拒绝
         std::fs::write(root.join("big.bin"), vec![0u8; (1024 * 1024) + 1]).unwrap();
         assert!(read_impl(&root, &root.join("big.bin")).is_err());
+    }
+
+    #[test]
+    fn probe_text_detects_content() {
+        let (tmp, root) = tree();
+        // 文本：ASCII
+        assert!(probe_text_impl(&root, &root.join("a.txt")).unwrap());
+        // 文本：UTF-8 中文
+        std::fs::write(root.join("zh.txt"), "你好，Codex！").unwrap();
+        assert!(probe_text_impl(&root, &root.join("zh.txt")).unwrap());
+        // 空文件
+        std::fs::write(root.join("empty.txt"), "").unwrap();
+        assert!(probe_text_impl(&root, &root.join("empty.txt")).unwrap());
+        // 超过采样窗口的 UTF-8 文本：采样边界截断多字节序列不误判为二进制
+        std::fs::write(root.join("long.txt"), "中".repeat(4000)).unwrap();
+        assert!(probe_text_impl(&root, &root.join("long.txt")).unwrap());
+        // 含 NUL 的二进制
+        std::fs::write(root.join("bin.dat"), [0u8; 100]).unwrap();
+        assert!(!probe_text_impl(&root, &root.join("bin.dat")).unwrap());
+        // 无 NUL 但非法 UTF-8
+        std::fs::write(root.join("bad.dat"), [0xffu8, 0xfeu8]).unwrap();
+        assert!(!probe_text_impl(&root, &root.join("bad.dat")).unwrap());
+        // NUL 位于采样窗口之外时不误判（记录窗口限制）
+        let mut late = vec![b'a'; 8100];
+        late.push(0);
+        std::fs::write(root.join("late-nul.dat"), late).unwrap();
+        assert!(probe_text_impl(&root, &root.join("late-nul.dat")).unwrap());
+        // 目录拒绝
+        assert!(probe_text_impl(&root, &root.join("src")).is_err());
+        // 越界拒绝
+        let outside = tmp.path().parent().unwrap().join("outside-probe.dat");
+        std::fs::write(&outside, "x").unwrap();
+        assert!(probe_text_impl(&root, &outside).is_err());
+        let _ = std::fs::remove_file(&outside);
     }
 }

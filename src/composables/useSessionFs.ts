@@ -287,6 +287,26 @@ export function openTextPreview(entry: FsEntry) {
   );
 }
 
+/**
+ * 打开前探测文件内容是否为文本：true=文本、false=二进制/非文本、
+ * null=探测失败（已 toast 错误；无工作目录时静默返回 null）
+ */
+export async function probeTextEntry(
+  entry: FsEntry,
+): Promise<boolean | null> {
+  const root = sessionRoot.value;
+  if (!root) return null;
+  try {
+    return await invoke<boolean>("session_fs_probe_text", {
+      root,
+      path: entry.path,
+    });
+  } catch (e) {
+    setToast(toastError(e));
+    return null;
+  }
+}
+
 /** 添加为会话附件：优先走 ComposerBar 全局入口，缺失时兜底 push store */
 export function addAsAttachment(entry: FsEntry) {
   const a = toUserAttachment(entry.name, entry.path);

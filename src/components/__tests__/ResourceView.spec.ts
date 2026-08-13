@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
 import { store } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
+import { tooltipDirective } from "../../directives/tooltip";
 import type { FsEntry } from "../../lib/sessionFs";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -102,6 +103,10 @@ function mockFs() {
       if (query.toLowerCase().includes("main")) return Promise.resolve([mainTs]);
       if (query.toLowerCase().includes("src")) return Promise.resolve([srcDir]);
       return Promise.resolve([]);
+    }
+    if (cmd === "session_fs_probe_text") {
+      const path = (args as { path?: string }).path;
+      return Promise.resolve(path !== picPng.path);
     }
     if (cmd === "workspace_dir") return Promise.resolve(rootPath);
     if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
@@ -280,7 +285,7 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("非文本文件右键菜单不显示打开", async () => {
+  it("非文本文件右键菜单也显示“打开”", async () => {
     const wrapper = await mountPanel();
     await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
     await flushPromises();
@@ -290,7 +295,19 @@ describe("ResourceView 文件树", () => {
     expect(picRow).toBeTruthy();
     await picRow!.trigger("contextmenu", { clientX: 200, clientY: 200 });
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
-    expect(labels).not.toContain("打开");
+    expect(labels[0]).toBe("打开");
+    wrapper.unmount();
+  });
+
+  it("根节点 tooltip 显示完整路径", async () => {
+    const wrapper = mount(ResourceView, {
+      props: { active: true },
+      global: { directives: { tooltip: tooltipDirective } },
+    });
+    await flushPromises();
+    expect(wrapper.find(".resource-root").attributes("data-tip")).toBe(
+      rootPath,
+    );
     wrapper.unmount();
   });
 
@@ -305,7 +322,7 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("单击非文本文件行不触发打开", async () => {
+  it("单击非文本文件行：提示无法打开且不触发预览", async () => {
     const wrapper = await mountPanel();
     await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
     await flushPromises();
@@ -315,6 +332,26 @@ describe("ResourceView 文件树", () => {
     expect(picRow).toBeTruthy();
     await picRow!.trigger("click");
     await flushPromises();
+    expect(store.toast).toContain("该文件不是文本文件，无法打开");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "open_text_preview",
+      expect.anything(),
+    );
+    wrapper.unmount();
+  });
+
+  it("探测失败：toast 错误且不触发预览", async () => {
+    const wrapper = await mountPanel();
+    const base = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_probe_text") {
+        return Promise.reject("probe error");
+      }
+      return base(cmd, args);
+    });
+    await wrapper.find(".resource-row.resource-file").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("probe error");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "open_text_preview",
       expect.anything(),

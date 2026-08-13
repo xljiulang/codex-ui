@@ -3,6 +3,7 @@ import { computed, nextTick } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { newEmptyChat, store, toastError } from "../composables/useCodex";
 import { dirLabel } from "../lib/historyGroup";
+import { focusComposer } from "../lib/composerFocus";
 
 // 新对话态显示已选择目录；会话态显示线程固定目录；兜底启动工作目录
 const cwd = computed(() =>
@@ -36,20 +37,6 @@ function onNewChat() {
   void newEmptyChat();
   // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
   void nextTick(focusComposer);
-}
-
-/** 聚焦输入框：优先用 ComposerBar 暴露的 Tiptap 实例（可正确放置光标），兜底聚焦 ProseMirror DOM */
-function focusComposer() {
-  const ed = (
-    window as unknown as {
-      __CODEX_UI_EDITOR__?: { commands?: { focus?: () => void } };
-    }
-  ).__CODEX_UI_EDITOR__;
-  if (ed?.commands?.focus) {
-    ed.commands.focus();
-    return;
-  }
-  document.querySelector<HTMLElement>(".composer .ProseMirror")?.focus();
 }
 
 function onSettings() {

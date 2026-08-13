@@ -57,6 +57,7 @@ pub fn run() {
             codex::session_fs::session_fs_watch_start,
             codex::session_fs::session_fs_watch_stop,
             codex::session_fs::session_fs_read,
+            codex::session_fs::session_fs_probe_text,
             codex::text_preview::open_text_preview,
             codex::text_preview::take_text_preview_params,
             codex::git::git_changes_status,
