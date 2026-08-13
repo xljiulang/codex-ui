@@ -1479,8 +1479,8 @@ select option {
 
 .git-status-icon {
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
