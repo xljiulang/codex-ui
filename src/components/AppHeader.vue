@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { newEmptyChat, store, toastError } from "../composables/useCodex";
+import {
+  activateResourcesTab,
+  newEmptyChat,
+  store,
+  toastError,
+} from "../composables/useCodex";
 import { focusComposer } from "../lib/composerFocus";
 
 // 选择文件夹对话框打开中：禁止重复触发，避免同时弹多个系统对话框
@@ -23,6 +28,8 @@ async function onNewChat() {
   void newEmptyChat();
   // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
   void nextTick(focusComposer);
+  // 新建会话后右侧面板切回资源管理器 Tab
+  activateResourcesTab();
 }
 
 function onSettings() {

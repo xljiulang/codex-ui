@@ -117,6 +117,7 @@ describe("RightPanel Tab 栏", () => {
     store.server.workspace = rootPath;
     store.currentThreadCwd = null;
     store.newChatCwd = null;
+    store.panelTab = "resources";
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
@@ -248,6 +249,34 @@ describe("RightPanel Tab 栏", () => {
     expect(wrapper.findComponent(ResourceView).exists()).toBe(true);
     expect(wrapper.find(".resource-view").text()).toContain("main.ts");
   });
+
+  it("新建会话后激活资源 Tab：从会话 Tab 切回资源并显示资源树", async () => {
+    const wrapper = mount(RightPanel);
+    await flushPromises();
+
+    // 先切到会话 Tab，模拟新建会话前停留的位置
+    await wrapper.findAll(".panel-tab")[1].trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".panel-tab")[1].classes()).toContain("active");
+    expect(
+      (wrapper.find(".resource-view").element as HTMLElement).style.display,
+    ).toBe("none");
+
+    // 模拟新建会话：全局 store 将 tab 置回资源
+    store.panelTab = "resources";
+    await flushPromises();
+
+    expect(wrapper.findAll(".panel-tab")[0].classes()).toContain("active");
+    expect(wrapper.findAll(".panel-tab")[1].classes()).not.toContain("active");
+    expect(
+      (wrapper.find(".resource-view").element as HTMLElement).style.display,
+    ).toBe("");
+    expect(
+      (wrapper.find(".history-view").element as HTMLElement).style.display,
+    ).toBe("none");
+    expect(wrapper.find(".resource-root").exists()).toBe(true);
+    wrapper.unmount();
+  });
 });
 
 describe("RightPanel 宽度调节", () => {
@@ -255,6 +284,7 @@ describe("RightPanel 宽度调节", () => {
     store.threads = [];
     store.loadingHistory = false;
     store.server.workspace = rootPath;
+    store.panelTab = "resources";
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();

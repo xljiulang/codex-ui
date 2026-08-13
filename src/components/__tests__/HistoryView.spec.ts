@@ -447,6 +447,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     store.loadingHistory = false;
     store.searchActive = false;
     store.searchSnippets = {};
+    store.panelTab = "history";
     mockedInvoke.mockClear();
   });
 
@@ -472,6 +473,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     await clickCtxItem(wrapper, "新建会话");
     expect(store.newChatCwd).toBe("D:\\codex\\codex-ui");
     expect(mockedNewEmptyChat).toHaveBeenCalledTimes(1);
+    expect(store.panelTab).toBe("resources");
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
@@ -511,6 +513,7 @@ describe("HistoryView 新建会话聚焦输入框", () => {
     store.searchActive = false;
     store.searchSnippets = {};
     store.newChatCwd = null;
+    store.panelTab = "history";
     mockedNewEmptyChat.mockClear();
   });
 
@@ -527,6 +530,7 @@ describe("HistoryView 新建会话聚焦输入框", () => {
     await clickCtxItem(wrapper, "新建会话");
     await wrapper.vm.$nextTick();
     expect(focus).toHaveBeenCalledTimes(1);
+    expect(store.panelTab).toBe("resources");
     wrapper.unmount();
   });
 

@@ -80,6 +80,9 @@ export interface SkillItem {
 /** 未创建会话（新对话编辑态）的插件缓存 key */
 export const NEW_CHAT_PLUGIN_KEY = "__new__";
 
+/** 右侧面板 Tab：资源管理器 / 会话历史 / Git */
+export type PanelTab = "history" | "resources" | "git";
+
 export const store = reactive({
   server: {
     connected: false,
@@ -132,6 +135,8 @@ export const store = reactive({
   goalTurnId: null as string | null,
   attachments: [] as UserInput[],
   showSettings: false,
+  /** 右侧面板当前激活 Tab；新建会话后由 activateResourcesTab 切回资源 */
+  panelTab: "resources" as PanelTab,
   permOpen: false,
   taskOpen: false,
   modelOpen: false,
@@ -141,6 +146,11 @@ export const store = reactive({
   /** 计划模式回合完成后待用户确认的“计划已就绪”弹窗 */
   planPrompt: null as PlanPrompt | null,
 });
+
+/** 新建会话后统一入口：把右侧面板切回资源管理器 Tab */
+export function activateResourcesTab() {
+  store.panelTab = "resources";
+}
 
 let unlisteners: UnlistenFn[] = [];
 let wired = false;

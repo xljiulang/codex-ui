@@ -4,11 +4,13 @@ import GitView from "./GitView.vue";
 import HistoryView from "./HistoryView.vue";
 import ResourceView from "./ResourceView.vue";
 import { gitStatus } from "../composables/useGitChanges";
+import { store, type PanelTab } from "../composables/useCodex";
 
 /** 右侧面板默认/最小宽度（px） */
 const DEFAULT_PANEL_WIDTH = 264;
 
-const activeTab = ref<"history" | "resources" | "git">("resources");
+/** 激活 Tab：全局 store 状态，新建会话入口可统一切回资源 */
+const activeTab = computed<PanelTab>(() => store.panelTab);
 /** 面板宽度：仅本次运行生效，不持久化 */
 const panelWidth = ref(DEFAULT_PANEL_WIDTH);
 /** Git Tab 角标：更改文件数（未加载/非仓库/出错/为 0 时不显示） */
@@ -62,7 +64,7 @@ function moveTab(e: KeyboardEvent) {
     return;
   }
   e.preventDefault();
-  activeTab.value = TAB_ORDER[next];
+  store.panelTab = TAB_ORDER[next];
 }
 
 onMounted(() => {
@@ -97,7 +99,7 @@ onBeforeUnmount(() => {
         role="tab"
         :tabindex="activeTab === 'resources' ? 0 : -1"
         :aria-selected="activeTab === 'resources'"
-        @click="activeTab = 'resources'"
+        @click="store.panelTab = 'resources'"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -112,7 +114,7 @@ onBeforeUnmount(() => {
         role="tab"
         :tabindex="activeTab === 'history' ? 0 : -1"
         :aria-selected="activeTab === 'history'"
-        @click="activeTab = 'history'"
+        @click="store.panelTab = 'history'"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -127,7 +129,7 @@ onBeforeUnmount(() => {
         role="tab"
         :tabindex="activeTab === 'git' ? 0 : -1"
         :aria-selected="activeTab === 'git'"
-        @click="activeTab = 'git'"
+        @click="store.panelTab = 'git'"
       >
         <svg viewBox="0 0 16 16" aria-hidden="true">
           <path

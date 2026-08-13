@@ -27,6 +27,7 @@ describe("AppHeader 导航", () => {
     store.currentThreadId = null;
     store.currentThreadCwd = null;
     store.server.workspace = "";
+    store.panelTab = "history";
     mockedNewChat.mockClear();
   });
 
@@ -52,6 +53,7 @@ describe("AppHeader 导航", () => {
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(store.showSettings).toBe(false);
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
+    expect(store.panelTab).toBe("resources");
   });
 
   it("设置按钮无 active 态", async () => {
@@ -69,6 +71,7 @@ describe("AppHeader 新建会话选择工作目录", () => {
     store.currentThreadCwd = null;
     store.server.workspace = "D:/repo";
     store.newChatCwd = null;
+    store.panelTab = "history";
     mockedInvoke.mockReset();
     mockedNewChat.mockClear();
   });
@@ -80,6 +83,7 @@ describe("AppHeader 新建会话选择工作目录", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
     expect(store.newChatCwd).toBe("D:/project");
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
+    expect(store.panelTab).toBe("resources");
   });
 
   it("取消选择文件夹仍新建会话，沿用当前工作目录", async () => {
@@ -89,6 +93,7 @@ describe("AppHeader 新建会话选择工作目录", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
     expect(store.newChatCwd).toBeNull();
     expect(mockedNewChat).toHaveBeenCalledTimes(1);
+    expect(store.panelTab).toBe("resources");
   });
 
   it("选择器打开期间按钮禁用，重复点击不会再次弹窗", async () => {

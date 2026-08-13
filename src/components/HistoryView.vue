@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  activateResourcesTab,
   clearSearch,
   deleteThread,
   newEmptyChat,
@@ -193,6 +194,8 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
         void newEmptyChat();
         // 与头部「新建会话」一致：进入新对话后聚焦输入框
         void nextTick(focusComposer);
+        // 与头部「新建会话」一致：右侧面板切回资源管理器 Tab
+        activateResourcesTab();
       },
     },
     {
