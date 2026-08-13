@@ -100,6 +100,7 @@ function mockFs() {
     if (cmd === "session_fs_search") {
       const query = (args as { query?: string }).query ?? "";
       if (query.toLowerCase().includes("main")) return Promise.resolve([mainTs]);
+      if (query.toLowerCase().includes("src")) return Promise.resolve([srcDir]);
       return Promise.resolve([]);
     }
     if (cmd === "workspace_dir") return Promise.resolve(rootPath);
@@ -293,11 +294,27 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("双击文件行不触发任何打开调用", async () => {
+  it("单击文本文件行调用 open_text_preview 打开预览", async () => {
     const wrapper = await mountPanel();
-    await wrapper.find(".resource-row.resource-file").trigger("dblclick");
+    await wrapper.find(".resource-row.resource-file").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).not.toHaveBeenCalledWith("open_url", expect.anything());
+    expect(mockedInvoke).toHaveBeenCalledWith("open_text_preview", {
+      root: rootPath,
+      path: aTxt.path,
+    });
+    wrapper.unmount();
+  });
+
+  it("单击非文本文件行不触发打开", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
+    await flushPromises();
+    const picRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((w) => w.text().includes("pic.png"));
+    expect(picRow).toBeTruthy();
+    await picRow!.trigger("click");
+    await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "open_text_preview",
       expect.anything(),
@@ -464,7 +481,7 @@ describe("ResourceView 文件树", () => {
   it("点击搜索结果：回树定位（展开祖先、清除搜索）", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("main");
+    await wrapper.find(".history-search").setValue("src");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
@@ -475,7 +492,25 @@ describe("ResourceView 文件树", () => {
     ).toBe("");
     expect(wrapper.find(".resource-result").exists()).toBe(false);
     expect(wrapper.text()).toContain("main.ts");
-    expect(wrapper.find(".resource-row.resource-file.active").exists()).toBe(true);
+    expect(
+      wrapper.find(".resource-row.resource-dir.active").exists(),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("搜索态单击文件结果打开预览", async () => {
+    vi.useFakeTimers();
+    const wrapper = await mountPanel();
+    await wrapper.find(".history-search").setValue("main");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    await wrapper.find(".resource-result").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("open_text_preview", {
+      root: rootPath,
+      path: mainTs.path,
+    });
     wrapper.unmount();
   });
 });

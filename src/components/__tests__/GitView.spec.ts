@@ -129,7 +129,7 @@ describe("GitView 空状态与初始化", () => {
 });
 
 describe("GitView 文件列表与 diff", () => {
-  it("展示变更文件，单击文件行不打开 diff", async () => {
+  it("展示变更文件与状态图标", async () => {
     mockWatcherAndDefaults();
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
@@ -157,16 +157,56 @@ describe("GitView 文件列表与 diff", () => {
     expect(untrackedIcon.exists()).toBe(true);
     expect(untrackedIcon.attributes("data-tip")).toBeUndefined();
     expect(untrackedIcon.text().trim()).toBe("U");
+  });
+
+  it("单击文件行打开 diff 窗口", async () => {
+    mockWatcherAndDefaults();
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_diff") {
+        return Promise.resolve(
+          "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-hello\n+hello2\n",
+        );
+      }
+      if (cmd === "open_diff_window") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
 
     await wrapper.findAll(".git-file")[0].trigger("click");
     await flushPromises();
 
-    expect(
-      mockedInvoke.mock.calls.some(([cmd]) => cmd === "open_diff_window"),
-    ).toBe(false);
-    expect(
-      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_diff"),
-    ).toBe(false);
+    const diffCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_diff",
+    );
+    expect(diffCall).toBeTruthy();
+    expect(diffCall?.[1]).toEqual({
+      root: rootPath,
+      path: "a.txt",
+      kind: "modified",
+    });
+
+    const openCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "open_diff_window",
+    );
+    expect(openCall).toBeTruthy();
+    const params = (
+      openCall?.[1] as {
+        params: {
+          path: string;
+          kind: string;
+          diff: string;
+          workspace_root: string;
+        };
+      }
+    ).params;
+    expect(params.path).toBe("a.txt");
+    expect(params.kind).toBe("modify");
+    expect(params.workspace_root).toBe(rootPath);
+    expect(params.diff).toContain("@@");
+    wrapper.unmount();
   });
 
   it("事件冷却：1s 内重复事件只触发一次刷新", async () => {

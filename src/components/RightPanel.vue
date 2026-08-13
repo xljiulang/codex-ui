@@ -8,7 +8,7 @@ import { gitStatus } from "../composables/useGitChanges";
 /** 右侧面板默认/最小宽度（px） */
 const DEFAULT_PANEL_WIDTH = 264;
 
-const activeTab = ref<"history" | "resources" | "git">("history");
+const activeTab = ref<"history" | "resources" | "git">("resources");
 /** 面板宽度：仅本次运行生效，不持久化 */
 const panelWidth = ref(DEFAULT_PANEL_WIDTH);
 /** Git Tab 角标：更改文件数（未加载/非仓库/出错/为 0 时不显示） */
@@ -17,8 +17,8 @@ const isDragging = ref(false);
 let resizeStartX = 0;
 let resizeStartW = DEFAULT_PANEL_WIDTH;
 
-/** Tab 顺序：供方向键切换使用 */
-const TAB_ORDER = ["history", "resources", "git"] as const;
+/** Tab 顺序：资源为第一个/默认 tab；供方向键切换使用 */
+const TAB_ORDER = ["resources", "history", "git"] as const;
 
 /** 面板宽度钳制：最小为默认宽度，最大为半个窗口宽度 */
 function clampPanelWidth(w: number) {
@@ -93,21 +93,6 @@ onBeforeUnmount(() => {
     <div class="panel-tabs" role="tablist" @keydown="moveTab">
       <button
         class="panel-tab"
-        :class="{ active: activeTab === 'history' }"
-        role="tab"
-        :tabindex="activeTab === 'history' ? 0 : -1"
-        :aria-selected="activeTab === 'history'"
-        @click="activeTab = 'history'"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"
-          />
-        </svg>
-        <span>会话</span>
-      </button>
-      <button
-        class="panel-tab"
         :class="{ active: activeTab === 'resources' }"
         role="tab"
         :tabindex="activeTab === 'resources' ? 0 : -1"
@@ -120,6 +105,21 @@ onBeforeUnmount(() => {
           />
         </svg>
         <span>资源</span>
+      </button>
+      <button
+        class="panel-tab"
+        :class="{ active: activeTab === 'history' }"
+        role="tab"
+        :tabindex="activeTab === 'history' ? 0 : -1"
+        :aria-selected="activeTab === 'history'"
+        @click="activeTab = 'history'"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"
+          />
+        </svg>
+        <span>会话</span>
       </button>
       <button
         class="panel-tab"

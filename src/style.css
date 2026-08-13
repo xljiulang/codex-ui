@@ -2894,6 +2894,11 @@ select option {
   background: var(--footer-bg);
   backdrop-filter: blur(12px);
   position: relative;
+  /* backdrop-filter 会创建独立层叠上下文：菜单（z-index 40）被困在内部、
+     整体低于 .app-header（z-index 30）。提升整个 composer 层即可让
+     @/$ 等弹出菜单显示在头部之上；menu-backdrop 已 Teleport 到 body，
+     仍保持 z-index 29 位于头部之下，头部保持可点击。 */
+  z-index: 31;
   flex-shrink: 0;
   box-shadow: var(--footer-shadow);
 }

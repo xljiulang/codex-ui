@@ -856,15 +856,17 @@ function taskModeLabel(): string {
       </span>
     </div>
 
-    <div
-      v-if="
-        store.permOpen ||
-        store.taskOpen ||
-        store.modelOpen ||
-        mention
-      "
-      class="menu-backdrop"
-      @click="closeMenus()"
-    ></div>
+    <Teleport to="body">
+      <div
+        v-if="
+          store.permOpen ||
+          store.taskOpen ||
+          store.modelOpen ||
+          mention
+        "
+        class="menu-backdrop"
+        @click="closeMenus()"
+      ></div>
+    </Teleport>
   </div>
 </template>

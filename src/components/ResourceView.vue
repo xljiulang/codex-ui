@@ -206,6 +206,25 @@ function onRowContext(row: ResourceRow, e: MouseEvent) {
   else openEntryMenu(row.entry, e);
 }
 
+/** 文件树行单击：文件 → 选中并在文本文件时打开预览；目录 → 折叠/展开 */
+function onTreeRowClick(row: ResourceRow) {
+  if (row.kind === "file") {
+    selectedPath.value = row.entry.path;
+    if (isTextFile(row.entry.name)) openTextPreview(row.entry);
+    return;
+  }
+  toggleDir(row.entry.path);
+}
+
+/** 搜索态结果单击：目录 → 定位回树；文本文件 → 打开预览 */
+function onSearchResultClick(entry: FsEntry) {
+  if (entry.isDir) {
+    void revealInTree(entry);
+    return;
+  }
+  if (isTextFile(entry.name)) openTextPreview(entry);
+}
+
 function startRename(entry: FsEntry) {
   editingPath.value = entry.path;
   editName.value = entry.name;
@@ -357,7 +376,7 @@ const deleteLabel = computed(() => {
           class="resource-row resource-result"
           :class="{ active: selectedPath === entry.path }"
           :data-fs-path="entry.path"
-          @click="revealInTree(entry)"
+          @click="onSearchResultClick(entry)"
           @contextmenu="openEntryMenu(entry, $event)"
         >
           <span class="resource-icon">
@@ -391,11 +410,7 @@ const deleteLabel = computed(() => {
           }"
           :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
           :data-fs-path="row.entry.path"
-          @click="
-            row.kind === 'file'
-              ? (selectedPath = row.entry.path)
-              : toggleDir(row.entry.path)
-          "
+          @click="onTreeRowClick(row)"
           @contextmenu="onRowContext(row, $event)"
         >
           <svg

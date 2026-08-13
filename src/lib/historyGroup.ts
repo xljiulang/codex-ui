@@ -39,9 +39,24 @@ function byPinThenRecency(a: ThreadSummary, b: ThreadSummary): number {
  * 把已排序的会话列表按 cwd 分组为目录行 + 平铺行：
  * - 相同 cwd 归入同一目录（仅 1 条也建目录）；
  * - cwd 缺失/空串的会话保持平铺，排在所有目录之后；
- * - 目录行按目录名 A-Z（忽略大小写、数字自然序），同名按规范化 key 兜底；
+ * - 目录行按组内第一会话排序：置顶优先、时间倒序，并列按目录名 A-Z 兜底；
  * - 目录内与平铺会话均按置顶优先 + 最近时间倒序。
  */
+/** 目录行排序：按组内第一会话（置顶优先 + 时间倒序），并列按目录名 A-Z、key 兜底 */
+function byGroupFirstThenLabel(a: HistoryGroup, b: HistoryGroup): number {
+  const firstA = a.threads[0];
+  const firstB = b.threads[0];
+  if (firstA && firstB) {
+    const byFirst = byPinThenRecency(firstA, firstB);
+    if (byFirst !== 0) return byFirst;
+  }
+  const byLabel = a.label.localeCompare(b.label, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  return byLabel || a.key.localeCompare(b.key);
+}
+
 export function groupThreads(list: ThreadSummary[]): HistoryRow[] {
   const groups = new Map<string, HistoryGroup>();
   const singles: ThreadSummary[] = [];
@@ -66,13 +81,7 @@ export function groupThreads(list: ThreadSummary[]): HistoryRow[] {
   }
 
   const folderRows: HistoryRow[] = [...groups.values()]
-    .sort((a, b) => {
-      const byLabel = a.label.localeCompare(b.label, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      });
-      return byLabel || a.key.localeCompare(b.key);
-    })
+    .sort(byGroupFirstThenLabel)
     .map((group): HistoryRow => ({ kind: "group", group }));
 
   singles.sort(byPinThenRecency);

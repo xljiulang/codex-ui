@@ -770,7 +770,7 @@ async function restoreDir(node: GitDirNode) {
             class="git-tree-row"
             :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
             :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-            @click="row.kind === 'dir' && toggleDirRow(row)"
+            @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
             @contextmenu="
               row.kind === 'dir'
                 ? openDirCtx('changes', row, $event)
@@ -850,7 +850,7 @@ async function restoreDir(node: GitDirNode) {
             class="git-tree-row"
             :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
             :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-            @click="row.kind === 'dir' && toggleDirRow(row)"
+            @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
             @contextmenu="
               row.kind === 'dir'
                 ? openDirCtx('staged', row, $event)

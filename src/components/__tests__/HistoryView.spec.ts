@@ -259,6 +259,23 @@ describe("HistoryView 右键菜单", () => {
   });
 });
 
+describe("HistoryView 单击打开会话", () => {
+  beforeEach(() => {
+    mockBasicHistory();
+    store.searchActive = false;
+    store.searchSnippets = {};
+    mockedOpen.mockClear();
+  });
+
+  it("单击会话行调用 openThread", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.findAll(".history-item")[0].trigger("click");
+
+    expect(mockedOpen).toHaveBeenCalledWith("t1");
+    wrapper.unmount();
+  });
+});
+
 describe("HistoryView 搜索刷新", () => {
   beforeEach(() => {
     mockBasicHistory();
@@ -333,10 +350,11 @@ describe("HistoryView 目录分组", () => {
 
     const folders = wrapper.findAll(".history-folder");
     expect(folders).toHaveLength(2);
-    expect(folders[0].find(".folder-name").text()).toBe("codex-proxy");
-    expect(folders[0].find(".folder-count").text()).toBe("1");
-    expect(folders[1].find(".folder-name").text()).toBe("codex-ui");
-    expect(folders[1].find(".folder-count").text()).toBe("2");
+    // 组内第一会话时间倒序：codex-ui（3）在 codex-proxy（1）之前
+    expect(folders[0].find(".folder-name").text()).toBe("codex-ui");
+    expect(folders[0].find(".folder-count").text()).toBe("2");
+    expect(folders[1].find(".folder-name").text()).toBe("codex-proxy");
+    expect(folders[1].find(".folder-count").text()).toBe("1");
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
   });
 
@@ -346,16 +364,16 @@ describe("HistoryView 目录分组", () => {
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
     expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
 
-    await wrapper.findAll(".history-folder")[1].trigger("click");
+    await wrapper.findAll(".history-folder")[0].trigger("click");
     expect(wrapper.findAll(".history-item")).toHaveLength(2);
-    expect(wrapper.findAll(".history-folder")[1].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
 
-    await wrapper.findAll(".history-folder")[1].trigger("click");
+    await wrapper.findAll(".history-folder")[0].trigger("click");
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
-    expect(wrapper.findAll(".history-folder")[1].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
   });
 
-  it("目录按名称 A-Z 排序，置顶会话仍留在目录内", async () => {
+  it("目录按组内第一会话排序（置顶优先），置顶会话仍留在目录内", async () => {
     store.threads = [
       { ...dirThreads[2] },
       { ...dirThreads[0], isPinned: true },
@@ -364,8 +382,9 @@ describe("HistoryView 目录分组", () => {
     const wrapper = mount(HistoryView);
 
     const names = wrapper.findAll(".folder-name").map((n) => n.text());
-    expect(names).toEqual(["codex-proxy", "codex-ui"]);
-    await wrapper.findAll(".history-folder")[1].trigger("click");
+    // codex-ui 组内第一会话已置顶 → 目录排最前
+    expect(names).toEqual(["codex-ui", "codex-proxy"]);
+    await wrapper.findAll(".history-folder")[0].trigger("click");
     expect(wrapper.findAll(".pin-badge")).toHaveLength(1);
   });
 
