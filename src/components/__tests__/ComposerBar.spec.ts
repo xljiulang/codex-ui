@@ -497,6 +497,9 @@ describe("ComposerBar 粘贴图片/文件", () => {
     Object.defineProperty(ev, "clipboardData", { value: dt });
     wrapper!.find(".ProseMirror").element.dispatchEvent(ev);
     await flushPromises();
+    // 排空宏任务：避免上一用例残留的异步 invoke 计入当前用例调用历史
+    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
   }
 
   it("粘贴截图位图（无原始路径）：落盘并生成 localImage 附件", async () => {
@@ -614,7 +617,14 @@ describe("ComposerBar 粘贴图片/文件", () => {
       { type: "localImage", path: "C:/tmp/paste/pasted-2-2.png" },
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
     ]);
-    expect(mockedInvoke).toHaveBeenCalledTimes(2);
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_file_paths");
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "save_pasted_image",
+      expect.objectContaining({ name: "pasted.png" }),
+    );
+    expect(
+      mockedInvoke.mock.calls.filter(([cmd]) => cmd === "save_pasted_image"),
+    ).toHaveLength(1);
   });
 });
 
