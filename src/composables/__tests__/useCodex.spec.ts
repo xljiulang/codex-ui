@@ -35,6 +35,7 @@ import {
   executePlan,
   exitPlanMode,
   interrupt,
+  loadSettings,
   newEmptyChat,
   openThread,
   refreshThreads,
@@ -1477,5 +1478,44 @@ describe("历史全量加载（逐页拉取）", () => {
       method: "thread/search",
       params: { searchTerm: "测试", limit: 50, cursor: "page2" },
     });
+  });
+});
+
+describe("loadSettings 默认权限初始值", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.permissionMode = "ask-for-approval";
+  });
+
+  it("启动时按持久化的默认权限设置权限模式初始值", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      default_permission: "full-access",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.default_permission).toBe("full-access");
+    expect(store.permissionMode).toBe("full-access");
+  });
+
+  it("持久化值非法时回退 ask-for-approval", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      default_permission: "bogus-mode",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.default_permission).toBe("ask-for-approval");
+    expect(store.permissionMode).toBe("ask-for-approval");
   });
 });

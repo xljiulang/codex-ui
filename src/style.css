@@ -515,6 +515,7 @@ select option {
   align-items: center;
   align-self: center;
   gap: 6px;
+  height: 28px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   padding: 3px 10px;
@@ -578,7 +579,7 @@ select option {
 
 .icon-btn.cwd-attach {
   width: 28px;
-  height: 24px;
+  height: 28px;
   border: 1px solid var(--border);
   border-left: none;
   border-radius: 0 var(--radius) var(--radius) 0;
@@ -632,6 +633,7 @@ select option {
 
 /* 新建会话：强调色渐变主按钮（独立形态） */
 .icon-btn.new-chat-btn {
+  height: 28px;
   background: var(--btn-grad);
   color: #ffffff;
   box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
@@ -861,6 +863,15 @@ select option {
   fill: currentColor;
 }
 
+/* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
+.history-folder .folder-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.55;
+}
+
 .history-folder .folder-name {
   min-width: 0;
   flex: 1;
@@ -1036,6 +1047,23 @@ select option {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.panel-tab .tab-badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #ffffff;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.5);
 }
 
 .panel-tab:hover {
@@ -1349,13 +1377,6 @@ select option {
   cursor: default;
 }
 
-.git-count {
-  flex: 1;
-  font-size: 11.5px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
 .git-icon-btn {
   flex-shrink: 0;
   display: inline-flex;
@@ -1388,6 +1409,7 @@ select option {
 }
 
 .git-refresh {
+  margin-left: auto;
   width: 28px;
   height: 28px;
 }
@@ -1732,6 +1754,15 @@ select option {
   width: 14px;
   height: 14px;
   fill: currentColor;
+}
+
+/* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
+.resource-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.55;
 }
 
 .resource-main {

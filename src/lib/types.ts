@@ -85,6 +85,8 @@ export interface AppSettings {
   followup_mode: string;
   /** 界面主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光） */
   theme: string;
+  /** 权限模式的启动初始值：ask-for-approval｜help-me-approve｜full-access */
+  default_permission: string;
 }
 
 export interface AuthStatus {

@@ -129,7 +129,7 @@ describe("GitView 空状态与初始化", () => {
 });
 
 describe("GitView 文件列表与 diff", () => {
-  it("展示变更文件，点击行调用 open_diff_window", async () => {
+  it("展示变更文件，单击文件行不打开 diff", async () => {
     mockWatcherAndDefaults();
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
@@ -152,32 +152,21 @@ describe("GitView 文件列表与 diff", () => {
     const modifiedIcon = wrapper.find(".git-status-icon.git-status-modified");
     const untrackedIcon = wrapper.find(".git-status-icon.git-status-untracked");
     expect(modifiedIcon.exists()).toBe(true);
-    expect(modifiedIcon.attributes("data-tip")).toBe("修改");
+    // 文件状态图标不再带 tooltip
+    expect(modifiedIcon.attributes("data-tip")).toBeUndefined();
     expect(untrackedIcon.exists()).toBe(true);
-    expect(untrackedIcon.attributes("data-tip")).toBe("未跟踪");
+    expect(untrackedIcon.attributes("data-tip")).toBeUndefined();
     expect(untrackedIcon.text().trim()).toBe("U");
 
     await wrapper.findAll(".git-file")[0].trigger("click");
     await flushPromises();
 
-    const call = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "open_diff_window",
-    );
-    expect(call).toBeTruthy();
-    const params = (
-      call?.[1] as {
-        params: {
-          path: string;
-          kind: string;
-          diff: string;
-          workspace_root: string;
-        };
-      }
-    ).params;
-    expect(params.path).toBe("a.txt");
-    expect(params.kind).toBe("modify");
-    expect(params.workspace_root).toBe(rootPath);
-    expect(params.diff).toContain("@@");
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "open_diff_window"),
+    ).toBe(false);
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_diff"),
+    ).toBe(false);
   });
 
   it("事件冷却：1s 内重复事件只触发一次刷新", async () => {
@@ -445,12 +434,12 @@ describe("GitView 变更文件右键菜单", () => {
     return wrapper.findAll(".ctx-menu-item").map((i) => i.text());
   }
 
-  it("更改区 modified：显示查看更改/暂存/撤消更改，无取消暂存", async () => {
+  it("更改区 modified：显示打开/暂存/撤消更改，无取消暂存", async () => {
     mockFileRepo(okStatus);
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
     await wrapper.find(".git-file").trigger("contextmenu");
-    expect(menuLabels(wrapper)).toEqual(["查看更改", "暂存", "撤消更改"]);
+    expect(menuLabels(wrapper)).toEqual(["打开", "暂存", "撤消更改"]);
     expect(wrapper.find(".ctx-menu-item.danger").text()).toBe("撤消更改");
     wrapper.unmount();
   });
@@ -465,7 +454,7 @@ describe("GitView 变更文件右键菜单", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
     await wrapper.find(".git-file").trigger("contextmenu");
-    expect(menuLabels(wrapper)).toEqual(["查看更改", "取消暂存", "撤消更改"]);
+    expect(menuLabels(wrapper)).toEqual(["打开", "取消暂存", "撤消更改"]);
     wrapper.unmount();
   });
 
@@ -475,7 +464,7 @@ describe("GitView 变更文件右键菜单", () => {
     await flushPromises();
     await wrapper.findAll(".git-file")[1].trigger("contextmenu");
     expect(menuLabels(wrapper)).toEqual([
-      "查看更改",
+      "打开",
       "暂存",
       "忽略此本地项",
       "删除文件",
@@ -494,7 +483,49 @@ describe("GitView 变更文件右键菜单", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
     await wrapper.find(".git-file").trigger("contextmenu");
-    expect(menuLabels(wrapper)).toEqual(["查看更改", "取消暂存", "删除文件"]);
+    expect(menuLabels(wrapper)).toEqual(["打开", "取消暂存", "删除文件"]);
+    wrapper.unmount();
+  });
+
+  it("点击打开调用 open_diff_window 并关闭菜单", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_diff") {
+        return Promise.resolve(
+          "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-hello\n+hello2\n",
+        );
+      }
+      if (cmd === "open_diff_window") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-file").trigger("contextmenu");
+    await wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text() === "打开")!
+      .trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "open_diff_window",
+    );
+    expect(call).toBeTruthy();
+    const params = (
+      call?.[1] as {
+        params: {
+          path: string;
+          kind: string;
+          diff: string;
+          workspace_root: string;
+        };
+      }
+    ).params;
+    expect(params.path).toBe("a.txt");
+    expect(params.kind).toBe("modify");
+    expect(params.workspace_root).toBe(rootPath);
+    expect(params.diff).toContain("@@");
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -784,12 +815,12 @@ describe("GitView 变更文件树形目录", () => {
     expect(sections[1].text()).toContain("src/deep/c.txt");
 
     await sections[0].find(".git-file").trigger("contextmenu");
-    expect(menuLabels(wrapper)).toEqual(["查看更改", "暂存", "撤消更改"]);
+    expect(menuLabels(wrapper)).toEqual(["打开", "暂存", "撤消更改"]);
 
     window.dispatchEvent(new MouseEvent("click"));
     await wrapper.vm.$nextTick();
     await sections[1].find(".git-file").trigger("contextmenu");
-    expect(menuLabels(wrapper)).toEqual(["查看更改", "取消暂存", "撤消更改"]);
+    expect(menuLabels(wrapper)).toEqual(["打开", "取消暂存", "撤消更改"]);
     wrapper.unmount();
   });
 

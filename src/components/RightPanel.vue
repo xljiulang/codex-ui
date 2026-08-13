@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import GitView from "./GitView.vue";
 import HistoryView from "./HistoryView.vue";
 import ResourceView from "./ResourceView.vue";
+import { gitStatus } from "../composables/useGitChanges";
 
 /** 右侧面板默认/最小宽度（px） */
 const DEFAULT_PANEL_WIDTH = 264;
@@ -10,6 +11,8 @@ const DEFAULT_PANEL_WIDTH = 264;
 const activeTab = ref<"history" | "resources" | "git">("history");
 /** 面板宽度：仅本次运行生效，不持久化 */
 const panelWidth = ref(DEFAULT_PANEL_WIDTH);
+/** Git Tab 角标：更改文件数（未加载/非仓库/出错/为 0 时不显示） */
+const gitChangeCount = computed(() => gitStatus.value?.files.length ?? 0);
 const isDragging = ref(false);
 let resizeStartX = 0;
 let resizeStartW = DEFAULT_PANEL_WIDTH;
@@ -132,6 +135,9 @@ onBeforeUnmount(() => {
           />
         </svg>
         <span>Git</span>
+        <span v-if="gitChangeCount > 0" class="tab-badge">{{
+          gitChangeCount
+        }}</span>
       </button>
     </div>
   </aside>

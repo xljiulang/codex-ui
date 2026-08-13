@@ -223,3 +223,52 @@ describe("SettingsView 主题保存后生效", () => {
     wrapper.unmount();
   });
 });
+
+describe("SettingsView 默认权限", () => {
+  beforeEach(() => {
+    store.settings.default_permission = "ask-for-approval";
+    store.toast = "";
+    mockedSave.mockClear();
+  });
+
+  it("渲染默认权限下拉并选中已保存值", () => {
+    const wrapper = mount(SettingsView);
+    const select = wrapper.find("select.default-permission-select");
+    expect(select.exists()).toBe(true);
+    expect((select.element as HTMLSelectElement).value).toBe("ask-for-approval");
+    const labels = wrapper
+      .findAll("select.default-permission-select option")
+      .map((o) => o.text());
+    expect(labels).toEqual(
+      expect.arrayContaining(["请求批准", "帮我批准", "完全访问权限"]),
+    );
+    wrapper.unmount();
+  });
+
+  it("保存时 patch 包含所选默认权限", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper
+      .find("select.default-permission-select")
+      .setValue("full-access");
+    await wrapper.find("button.btn.primary").trigger("click");
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith(
+      expect.objectContaining({ default_permission: "full-access" }),
+    );
+    wrapper.unmount();
+  });
+
+  it("取消不保存默认权限", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper
+      .find("select.default-permission-select")
+      .setValue("help-me-approve");
+    const cancel = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "取消");
+    expect(cancel).toBeDefined();
+    await cancel!.trigger("click");
+    expect(mockedSave).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+});

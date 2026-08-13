@@ -23,8 +23,12 @@ const FOLDER_CLOSED =
   "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
 const FOLDER_OPEN =
   "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
-const ICON_LOAD =
-  "M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z";
+/** 目录行折叠/展开箭头：收起=右箭头，展开=下箭头 */
+const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
+const ICON_ARROW_DOWN =
+  "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
+const ICON_OPEN =
+  "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
 const ICON_RENAME =
   "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
 const ICON_PIN =
@@ -158,7 +162,7 @@ function openCtx(e: MouseEvent, items: CtxItem[]) {
 function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.(".rename-input")) return;
   openCtx(e, [
-    { label: "加载", icon: ICON_LOAD, action: () => void openThread(t.id) },
+    { label: "打开", icon: ICON_OPEN, action: () => void openThread(t.id) },
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
     {
       label: t.isPinned ? "取消固定" : "置顶固定",
@@ -271,6 +275,9 @@ onBeforeUnmount(() => {
           @click="toggleDir(row.group.key)"
           @contextmenu="openFolderCtxMenu(row.group, $event)"
         >
+          <svg class="folder-arrow" viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
+          </svg>
           <span class="folder-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path :d="row.collapsed ? FOLDER_CLOSED : FOLDER_OPEN" />

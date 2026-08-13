@@ -8,6 +8,7 @@ import {
   previewTheme,
   type ThemeId,
 } from "../composables/useTheme";
+import { PERMISSION_MODES } from "../lib/permissions";
 
 const closeBtn = ref<HTMLButtonElement | null>(null);
 const codexPath = ref(store.settings.codex_path ?? "");
@@ -15,6 +16,7 @@ const sound = ref(store.settings.sound_enabled);
 const enterToSend = ref(store.settings.enter_to_send);
 const followupMode = ref(store.settings.followup_mode);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
+const defaultPermission = ref(store.settings.default_permission);
 
 function close(restore = true) {
   if (restore && theme.value !== store.settings.theme) {
@@ -61,6 +63,7 @@ async function apply() {
     enter_to_send: enterToSend.value,
     followup_mode: followupMode.value,
     theme: theme.value,
+    default_permission: defaultPermission.value,
   });
   store.toast = "设置已保存";
   close(false);
@@ -130,6 +133,15 @@ function selectTheme(id: ThemeId) {
             <select v-model="followupMode">
               <option value="adjust">调整方向</option>
               <option value="queue">加入队列</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label>默认权限</label>
+            <select v-model="defaultPermission" class="default-permission-select">
+              <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
+                {{ m.label }}
+              </option>
             </select>
           </div>
 

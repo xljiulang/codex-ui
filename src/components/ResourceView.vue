@@ -43,6 +43,10 @@ const ICON_FOLDER_CLOSED =
   "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
 const ICON_FOLDER_OPEN =
   "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
+/** 目录行折叠/展开箭头：收起=右箭头，展开=下箭头 */
+const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
+const ICON_ARROW_DOWN =
+  "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
 const ICON_FILE =
   "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 const ICON_PASTE =
@@ -394,6 +398,14 @@ const deleteLabel = computed(() => {
           "
           @contextmenu="onRowContext(row, $event)"
         >
+          <svg
+            v-if="row.kind !== 'file'"
+            class="resource-arrow"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
+          </svg>
           <span class="resource-icon">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path :d="entryIcon(row.entry)" />

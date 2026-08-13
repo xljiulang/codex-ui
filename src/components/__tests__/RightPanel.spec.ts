@@ -134,6 +134,8 @@ describe("RightPanel Tab 栏", () => {
       "资源",
       "Git",
     ]);
+    // git 状态未加载时角标不显示
+    expect(tabs[2].find(".tab-badge").exists()).toBe(false);
     expect(tabs[0].classes()).toContain("active");
     // v-show 单根化后互斥生效（happy-dom 的 isVisible 不可靠，直接断言 inline style）
     expect(
@@ -189,6 +191,33 @@ describe("RightPanel Tab 栏", () => {
     ).toBe(true);
     expect(wrapper.findComponent(GitView).exists()).toBe(true);
     expect(wrapper.find(".git-view").text()).toContain("src/a.ts");
+    // Git Tab 角标显示更改文件数
+    const gitTab = wrapper.findAll(".panel-tab")[2];
+    expect(gitTab.find(".tab-badge").exists()).toBe(true);
+    expect(gitTab.find(".tab-badge").text()).toBe("1");
+  });
+
+  it("Git 更改数角标：0 个文件时不渲染", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({
+          repoRoot: rootPath,
+          branch: "main",
+          files: [],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(RightPanel);
+    await flushPromises();
+
+    await wrapper.findAll(".panel-tab")[2].trigger("click");
+    await flushPromises();
+
+    expect(
+      wrapper.findAll(".panel-tab")[2].find(".tab-badge").exists(),
+    ).toBe(false);
+    wrapper.unmount();
   });
 
   it("Tab 切换保留资源树展开状态（v-show）", async () => {

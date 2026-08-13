@@ -10,6 +10,13 @@ pub struct AppSettings {
     pub enter_to_send: bool,
     pub followup_mode: String,
     pub theme: String,
+    /// 权限模式的启动初始值：ask-for-approval｜help-me-approve｜full-access
+    #[serde(default = "default_permission")]
+    pub default_permission: String,
+}
+
+fn default_permission() -> String {
+    "ask-for-approval".into()
 }
 
 impl Default for AppSettings {
@@ -20,6 +27,7 @@ impl Default for AppSettings {
             enter_to_send: true,
             followup_mode: "adjust".into(),
             theme: "blue".into(),
+            default_permission: default_permission(),
         }
     }
 }
@@ -43,4 +51,35 @@ pub fn save(app_dir: &Path, s: &AppSettings) -> Result<(), String> {
     }
     let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
     fs::write(&p, text).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn load_missing_default_permission_falls_back() {
+        let dir = TempDir::new().unwrap();
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+
+        let s = load(dir.path());
+        assert_eq!(s.default_permission, "ask-for-approval");
+    }
+
+    #[test]
+    fn save_load_roundtrip_preserves_default_permission() {
+        let dir = TempDir::new().unwrap();
+        let mut s = AppSettings::default();
+        s.default_permission = "full-access".into();
+
+        save(dir.path(), &s).unwrap();
+        let loaded = load(dir.path());
+        assert_eq!(loaded.default_permission, "full-access");
+    }
 }

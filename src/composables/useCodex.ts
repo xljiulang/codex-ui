@@ -13,6 +13,7 @@ import type {
   UserInput,
 } from "../lib/types";
 import {
+  PERMISSION_MODES,
   permissionMode,
   toApprovalPolicy,
   toApprovalsReviewer,
@@ -32,6 +33,7 @@ const defaultSettings = (): AppSettings => ({
   enter_to_send: true,
   followup_mode: "adjust",
   theme: "blue",
+  default_permission: "ask-for-approval",
 });
 
 interface ModelInfo {
@@ -342,6 +344,13 @@ export async function loadSettings() {
   } catch {
     store.settings = defaultSettings();
   }
+  // 持久化值非法时回退默认；默认权限作为权限模式的启动初始值（运行期切换不写回配置）
+  if (
+    !PERMISSION_MODES.some((m) => m.id === store.settings.default_permission)
+  ) {
+    store.settings.default_permission = "ask-for-approval";
+  }
+  store.permissionMode = store.settings.default_permission;
   applyTheme(store.settings.theme);
 }
 

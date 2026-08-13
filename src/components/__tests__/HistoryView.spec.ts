@@ -174,13 +174,13 @@ describe("HistoryView 右键菜单", () => {
     mockedOpen.mockClear();
   });
 
-  it("右键会话行显示四项菜单：加载/重命名/置顶固定/删除会话", async () => {
+  it("右键会话行显示四项菜单：打开/重命名/置顶固定/删除会话", async () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["加载", "重命名", "置顶固定", "删除会话"]);
+    expect(labels).toEqual(["打开", "重命名", "置顶固定", "删除会话"]);
   });
 
   it("置顶会话右键菜单显示“取消固定”", async () => {
@@ -207,10 +207,10 @@ describe("HistoryView 右键菜单", () => {
     expect(wrapper.findAll(".ctx-menu-item.danger")).toHaveLength(1);
   });
 
-  it("点击“加载”调用 openThread 并关闭菜单", async () => {
+  it("点击“打开”调用 openThread 并关闭菜单", async () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
-    await clickCtxItem(wrapper, "加载");
+    await clickCtxItem(wrapper, "打开");
     expect(mockedOpen).toHaveBeenCalledWith("t1");
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });
@@ -385,6 +385,22 @@ describe("HistoryView 目录分组", () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(HistoryView);
     expect(wrapper.findAll(".history-folder .folder-icon svg")).toHaveLength(2);
+  });
+
+  it("目录行带折叠/展开箭头：默认收起为右箭头，点击展开后为下箭头", async () => {
+    store.threads = dirThreads.map((t) => ({ ...t }));
+    const wrapper = mount(HistoryView);
+    const folder = () => wrapper.findAll(".history-folder")[0];
+
+    expect(folder().find(".folder-arrow").exists()).toBe(true);
+    expect(folder().find(".folder-arrow path").attributes("d")).toBe(
+      "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z",
+    );
+
+    await folder().trigger("click");
+    expect(folder().find(".folder-arrow path").attributes("d")).toBe(
+      "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z",
+    );
   });
 });
 

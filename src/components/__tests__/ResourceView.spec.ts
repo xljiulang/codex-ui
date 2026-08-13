@@ -216,6 +216,42 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
+  it("目录/根行带折叠箭头：根行展开为下箭头、子目录收起为右箭头；文件行无箭头", async () => {
+    const wrapper = await mountPanel();
+    expect(
+      wrapper.find(".resource-root .resource-arrow path").attributes("d"),
+    ).toBe("M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z");
+    expect(
+      wrapper
+        .findAll(".resource-row.resource-dir")[0]
+        .find(".resource-arrow path")
+        .attributes("d"),
+    ).toBe("M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z");
+    expect(
+      wrapper.find(".resource-row.resource-file .resource-arrow").exists(),
+    ).toBe(false);
+
+    await wrapper.find(".resource-row.resource-root").trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.find(".resource-root .resource-arrow path").attributes("d"),
+    ).toBe("M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z");
+    wrapper.unmount();
+  });
+
+  it("搜索态结果行不带折叠箭头", async () => {
+    vi.useFakeTimers();
+    const wrapper = await mountPanel();
+    await wrapper.find(".history-search").setValue("main");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(wrapper.find(".resource-result .resource-arrow").exists()).toBe(
+      false,
+    );
+    wrapper.unmount();
+  });
+
   it("文件右键菜单项与顺序", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");

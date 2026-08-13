@@ -14,7 +14,6 @@ import {
 import { sessionRoot } from "../composables/useSessionFs";
 import {
   gitDiffKind,
-  gitStatusLabel,
   gitStatusLetter,
   type GitFile,
   type GitPullResult,
@@ -33,7 +32,6 @@ const confirmInit = ref(false);
 
 const branchLabel = computed(() => gitStatus.value?.branch ?? "");
 const repoRoot = computed(() => gitStatus.value?.repoRoot ?? "");
-const fileCount = computed(() => gitStatus.value?.files.length ?? 0);
 const branchMenuOpen = ref(false);
 const branches = ref<string[]>([]);
 const newBranchName = ref("");
@@ -42,8 +40,8 @@ const pullBusy = ref(false);
 const commitMessage = ref("");
 const commitBusy = ref(false);
 
-const ICON_DIFF =
-  "M11.5 9a2.5 2.5 0 0 0 0 5 2.5 2.5 0 0 0 0-5zM20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-3.21 14.21l-2.91-2.91c-.69.44-1.51.7-2.39.7C9.01 16 7 13.99 7 11.5S9.01 7 11.5 7 16 9.01 16 11.5c0 .88-.26 1.69-.7 2.39l2.91 2.9-1.42 1.42z";
+const ICON_OPEN =
+  "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
 const ICON_STAGE =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
 const ICON_UNSTAGE =
@@ -416,8 +414,8 @@ function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
   e.stopPropagation();
   const items: CtxItem[] = [
     {
-      label: "查看更改",
-      icon: ICON_DIFF,
+      label: "打开",
+      icon: ICON_OPEN,
       action: () => void openDiff(file),
     },
   ];
@@ -471,7 +469,7 @@ function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
       action: () => void deleteFile(file),
     });
   }
-  // conflicted / renamed 仅保留查看更改
+  // conflicted / renamed 仅保留“打开”
   const x = Math.min(e.clientX, window.innerWidth - 190);
   const y = Math.min(e.clientY, window.innerHeight - items.length * 30 - 12);
   ctxMenu.value = { x, y, items };
@@ -684,7 +682,6 @@ async function restoreDir(node: GitDirNode) {
           </svg>
           <span v-else class="git-pull-text">拉取中…</span>
         </button>
-        <span class="git-count">{{ fileCount }} 个更改</span>
         <button
           class="git-icon-btn git-refresh"
           aria-label="刷新"
@@ -773,11 +770,7 @@ async function restoreDir(node: GitDirNode) {
             class="git-tree-row"
             :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
             :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-            @click="
-              row.kind === 'dir'
-                ? toggleDirRow(row)
-                : openDiff(row.file)
-            "
+            @click="row.kind === 'dir' && toggleDirRow(row)"
             @contextmenu="
               row.kind === 'dir'
                 ? openDirCtx('changes', row, $event)
@@ -797,7 +790,6 @@ async function restoreDir(node: GitDirNode) {
               <span
                 class="git-status-icon"
                 :class="`git-status-${row.file.status}`"
-                v-tooltip="gitStatusLabel(row.file.status)"
               >
                 {{ gitStatusLetter(row.file.status) }}
               </span>
@@ -858,11 +850,7 @@ async function restoreDir(node: GitDirNode) {
             class="git-tree-row"
             :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
             :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-            @click="
-              row.kind === 'dir'
-                ? toggleDirRow(row)
-                : openDiff(row.file)
-            "
+            @click="row.kind === 'dir' && toggleDirRow(row)"
             @contextmenu="
               row.kind === 'dir'
                 ? openDirCtx('staged', row, $event)
@@ -882,7 +870,6 @@ async function restoreDir(node: GitDirNode) {
               <span
                 class="git-status-icon"
                 :class="`git-status-${row.file.status}`"
-                v-tooltip="gitStatusLabel(row.file.status)"
               >
                 {{ gitStatusLetter(row.file.status) }}
               </span>
