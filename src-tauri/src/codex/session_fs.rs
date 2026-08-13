@@ -133,14 +133,19 @@ fn visible_child_count(dir: &Path) -> u64 {
         .unwrap_or(0)
 }
 
+/// 条目显示名：普通路径取末段文件名；根目录（无文件名）回退到 clean_path，
+/// 避免 Windows canonicalize 产生的 `\\?\` 前缀泄漏到界面。
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| clean_path(path))
+}
+
 fn entry_from_path(root: &Path, path: &Path) -> Result<FsEntry, String> {
     let meta = std::fs::symlink_metadata(path)
         .map_err(|e| format!("读取元信息失败 {}: {e}", clean_path(path)))?;
     let is_dir = meta.file_type().is_dir();
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let name = display_name(path);
     let rel_path = rel_path_of(root, path);
     Ok(FsEntry {
         name,
@@ -734,6 +739,18 @@ mod tests {
         let meta = metadata_impl(&root, &root.join("src").join("main.ts")).unwrap();
         assert!(!meta.path.starts_with(r"\\?\"));
         assert_eq!(meta.rel_path, "src/main.ts");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn root_display_name_uses_clean_path() {
+        // 盘符根目录没有 file_name，回退必须去掉 canonicalize 的 \\?\ 前缀
+        assert_eq!(display_name(Path::new(r"\\?\C:\")), "C:\\");
+        assert_eq!(display_name(Path::new(r"\\?\C:\codex\ui")), "ui");
+        // UNC 根同样没有 file_name，回退结果必须与 path 字段（clean_path）一致
+        let unc = Path::new(r"\\?\UNC\srv\share\");
+        assert_eq!(display_name(unc), clean_path(unc));
+        assert_eq!(display_name(Path::new(r"\\?\UNC\srv\share\f.txt")), "f.txt");
     }
 
     #[test]
