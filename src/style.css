@@ -1091,6 +1091,29 @@ select option {
 
 .git-init-btn {
   margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.git-init-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.git-init-btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.git-init-btn.primary:hover {
+  background: var(--accent-dim);
+  filter: none;
+  box-shadow: none;
 }
 
 .git-init-ok {
@@ -1156,6 +1179,11 @@ select option {
   width: 14px;
   height: 14px;
   fill: currentColor;
+}
+
+.git-branch-icon {
+  color: var(--accent);
+  opacity: 0.9;
 }
 
 /* 分支管理下拉弹层 */
@@ -1236,9 +1264,15 @@ select option {
   cursor: pointer;
 }
 
+.git-branch-delete svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
 .git-branch-delete:hover {
-  color: #e06666;
-  background: rgba(224, 102, 102, 0.14);
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.14);
 }
 
 .git-branch-delete:disabled {
@@ -1284,21 +1318,26 @@ select option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  gap: 5px;
+  border: none;
   border-radius: 8px;
   font-size: 12.5px;
   font-weight: 700;
   color: #ffffff;
-  background: var(--btn-grad);
-  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background: var(--accent);
   cursor: pointer;
-  transition: filter 0.14s ease, box-shadow 0.14s ease;
+  transition: background-color 0.14s ease;
+}
+
+.git-branch-create-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
 }
 
 .git-branch-create-btn:hover:not(:disabled) {
-  filter: brightness(1.06);
-  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.42);
+  background: var(--accent-dim);
 }
 
 .git-branch-create-btn:disabled {
@@ -1353,6 +1392,13 @@ select option {
   min-width: 28px;
   height: 28px;
   padding: 0 7px;
+  color: var(--accent);
+}
+
+.git-pull:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: rgba(var(--accent-rgb), 0.45);
 }
 
 .git-pull.busy:disabled {
@@ -1362,6 +1408,7 @@ select option {
 .git-pull-text {
   font-size: 11px;
   white-space: nowrap;
+  color: var(--text-bright);
 }
 
 .git-commit-bar {
@@ -1411,21 +1458,26 @@ select option {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  gap: 5px;
+  border: none;
   border-radius: 8px;
   font-size: 12.5px;
   font-weight: 700;
   color: #ffffff;
-  background: var(--btn-grad);
-  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background: var(--accent);
   cursor: pointer;
-  transition: filter 0.14s ease, box-shadow 0.14s ease;
+  transition: background-color 0.14s ease;
+}
+
+.git-commit-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
 }
 
 .git-commit-btn:hover:not(:disabled) {
-  filter: brightness(1.06);
-  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.42);
+  background: var(--accent-dim);
 }
 
 .git-commit-btn:disabled {
@@ -1516,17 +1568,17 @@ select option {
 
 .git-status-added,
 .git-status-untracked {
-  color: #3fb56b;
+  color: var(--green);
 }
 
 .git-status-modified,
 .git-status-renamed {
-  color: #e0a63c;
+  color: var(--yellow);
 }
 
 .git-status-deleted,
 .git-status-conflicted {
-  color: #e06666;
+  color: var(--red);
 }
 
 .git-path {
@@ -1545,6 +1597,26 @@ select option {
   margin-left: auto;
   width: 24px;
   height: 24px;
+}
+
+.git-section-stage {
+  color: var(--green);
+}
+
+.git-section-stage:hover:not(:disabled) {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  border-color: color-mix(in srgb, var(--green) 42%, transparent);
+}
+
+.git-section-unstage {
+  color: var(--yellow);
+}
+
+.git-section-unstage:hover:not(:disabled) {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+  border-color: color-mix(in srgb, var(--yellow) 42%, transparent);
 }
 
 .git-tree-row {

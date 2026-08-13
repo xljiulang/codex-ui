@@ -60,9 +60,15 @@ const ICON_FOLDER_OPEN =
   "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
 const ICON_ARROW_RIGHT = "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z";
 const ICON_ARROW_DOWN =
-  "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z";
+  "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
 const ICON_ARROW_UP =
-  "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z";
+  "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
+const ICON_CHECK =
+  "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z";
+const ICON_PLUS =
+  "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
+const ICON_CLOSE =
+  "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 
 interface CtxItem {
   label: string;
@@ -624,7 +630,10 @@ async function restoreDir(node: GitDirNode) {
         :disabled="gitInitBusy"
         @click="startInit"
       >
-        {{ gitInitBusy ? "初始化中…" : "添加到 Git" }}
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="ICON_PLUS" />
+        </svg>
+        <span>{{ gitInitBusy ? "初始化中…" : "添加到 Git" }}</span>
       </button>
     </div>
 
@@ -710,7 +719,9 @@ async function restoreDir(node: GitDirNode) {
                 :disabled="branchBusy"
                 @click.stop="deleteBranch(b)"
               >
-                ×
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_CLOSE" />
+                </svg>
               </button>
             </div>
             <div v-if="!branches.length" class="git-branch-menu-empty">
@@ -731,7 +742,10 @@ async function restoreDir(node: GitDirNode) {
               :disabled="branchBusy || !newBranchName.trim()"
               @click="createBranch()"
             >
-              新建
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_PLUS" />
+              </svg>
+              <span>新建</span>
             </button>
           </div>
         </div>
@@ -741,7 +755,7 @@ async function restoreDir(node: GitDirNode) {
         <div class="git-section-head">
           <span>更改</span>
           <button
-            class="git-icon-btn git-section-action"
+            class="git-icon-btn git-section-action git-section-stage"
             aria-label="全部暂存"
             v-tooltip="'全部暂存'"
             :disabled="gitActionBusy || !worktreeRows.length"
@@ -803,7 +817,7 @@ async function restoreDir(node: GitDirNode) {
         <div class="git-section-head">
           <span>暂存更改</span>
           <button
-            class="git-icon-btn git-section-action"
+            class="git-icon-btn git-section-action git-section-unstage"
             aria-label="全部取消暂存"
             v-tooltip="'全部取消暂存'"
             :disabled="gitActionBusy || !stagedRows.length"
@@ -829,7 +843,10 @@ async function restoreDir(node: GitDirNode) {
               :disabled="!canCommit"
               @click="doCommit()"
             >
-              {{ commitBusy ? "提交中…" : "提交" }}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_CHECK" />
+              </svg>
+              <span>{{ commitBusy ? "提交中…" : "提交" }}</span>
             </button>
             <span class="git-commit-hint">{{ commitHint }}</span>
           </div>
