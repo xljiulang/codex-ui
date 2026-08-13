@@ -1,6 +1,7 @@
 pub mod app_server;
 pub mod commands;
 pub mod diff;
+pub mod file_icon;
 pub mod git;
 pub mod path_util;
 pub mod session_fs;

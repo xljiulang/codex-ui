@@ -7,7 +7,9 @@ import {
   clearSearch,
   copyEntry,
   deleteEntry,
+  ensureEntryIcons,
   expanded,
+  iconFor,
   onSearchInput,
   openTextEditor,
   pasteInto,
@@ -82,11 +84,24 @@ watch(
   { immediate: true },
 );
 
+// 可见行变化时懒加载缺失的文件系统图标（目录不在范围，仍用 SVG）
+watch(treeRows, (rows) => {
+  void ensureEntryIcons(rows.map((r) => r.entry));
+});
+watch(searchResults, (results) => {
+  void ensureEntryIcons(results);
+});
+
 function entryIcon(entry: FsEntry): string {
   if (entry.isDir) {
     return expanded.has(entry.path) ? ICON_FOLDER_OPEN : ICON_FOLDER_CLOSED;
   }
   return ICON_FILE;
+}
+
+/** 文件系统图标（仅文件）；未缓存/取不到返回 undefined，渲染层回退 SVG */
+function fileIcon(entry: FsEntry): string | undefined {
+  return iconFor(entry) ?? undefined;
 }
 
 function fileMeta(entry: FsEntry): string {
@@ -363,7 +378,13 @@ const deleteLabel = computed(() => {
           @contextmenu="openEntryMenu(entry, $event)"
         >
           <span class="resource-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
+            <img
+              v-if="fileIcon(entry)"
+              class="resource-icon-img"
+              :src="fileIcon(entry)"
+              alt=""
+            />
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
               <path :d="entryIcon(entry)" />
             </svg>
           </span>
@@ -406,7 +427,13 @@ const deleteLabel = computed(() => {
             <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
           </svg>
           <span class="resource-icon">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
+            <img
+              v-if="fileIcon(row.entry)"
+              class="resource-icon-img"
+              :src="fileIcon(row.entry)"
+              alt=""
+            />
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
               <path :d="entryIcon(row.entry)" />
             </svg>
           </span>

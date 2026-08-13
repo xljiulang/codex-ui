@@ -4,10 +4,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::Read;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::codex::path_util::{clean_path, is_inside_path, norm_key};
+use crate::codex::file_icon::icon_data_uri;
 
 /// 会话资源条目（camelCase 序列化，供前端直接使用）
 #[derive(Debug, Clone, Serialize)]
@@ -573,6 +574,54 @@ pub async fn session_fs_probe_text(root: String, path: String) -> Result<bool, S
     .await
 }
 
+/// 图标请求：path 为会话内文件绝对路径（仅文件；文件夹图标不在范围）
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IconRequest {
+    pub path: String,
+}
+
+/// 图标结果：data_uri 为空表示该条目取不到系统图标（前端回退 SVG）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IconResult {
+    pub path: String,
+    pub data_uri: Option<String>,
+}
+
+/// 批量取系统图标：逐条路径包含校验；单条越界/失效路径返回 data_uri=None，
+/// 不中断整批（root 本身无效才整体失败）。
+fn icons_impl(root: &Path, requests: &[IconRequest], size: u32) -> Vec<IconResult> {
+    requests
+        .iter()
+        .map(|r| {
+            let data_uri = ensure_inside(root, Path::new(&r.path))
+                .ok()
+                // SHGetFileInfo 无法处理 canonicalize 的 \\?\ 前缀路径，先清洗为标准路径
+                .and_then(|p| {
+                    icon_data_uri(Path::new(&clean_path(&p)), size).ok().flatten()
+                });
+            IconResult {
+                path: r.path.clone(),
+                data_uri,
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn session_fs_icons(
+    root: String,
+    requests: Vec<IconRequest>,
+    size: Option<u32>,
+) -> Result<Vec<IconResult>, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_root(&root)?;
+        Ok(icons_impl(&root_p, &requests, size.unwrap_or(16)))
+    })
+    .await
+}
+
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
     p.strip_prefix(root)
         .map(|rel| {
@@ -701,6 +750,32 @@ mod tests {
         std::fs::write(root.join("src").join("main.ts"), "x").unwrap();
         std::fs::write(root.join(".gitignore"), "node_modules").unwrap();
         (tmp, root)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn icons_impl_batch_and_fallback() {
+        let (tmp, root) = tree();
+        let req = vec![
+            IconRequest {
+                path: root.join("a.txt").to_string_lossy().into_owned(),
+            },
+            // 不存在/越界的路径：单条回退 None，不中断整批
+            IconRequest {
+                path: "C:\\Windows\\System32\\no-such-outside.exe".into(),
+            },
+        ];
+        let out = icons_impl(&root, &req, 16);
+        assert_eq!(out.len(), 2);
+        assert!(
+            out[0]
+                .data_uri
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("data:image/png;base64,")
+        );
+        assert!(out[1].data_uri.is_none());
+        let _ = tmp;
     }
 
     #[test]

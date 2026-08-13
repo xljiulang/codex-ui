@@ -20,6 +20,17 @@ export type ResourceRow =
   | { kind: "dir"; entry: FsEntry; depth: number; collapsed: boolean }
   | { kind: "file"; entry: FsEntry; depth: number };
 
+/** 系统图标请求（session_fs_icons 命令入参，仅文件；camelCase 直传） */
+export interface IconRequest {
+  path: string;
+}
+
+/** 系统图标结果：dataUri 为空表示该文件取不到系统图标（前端回退 SVG） */
+export interface IconResult {
+  path: string;
+  dataUri: string | null;
+}
+
 /** 文件大小人类可读格式：B / KB / MB / GB / TB */
 export function formatFileSize(bytes: number | null): string {
   if (bytes == null || bytes < 0) return "";

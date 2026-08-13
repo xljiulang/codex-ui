@@ -1787,6 +1787,14 @@ select option {
   fill: currentColor;
 }
 
+/* 系统文件图标（PNG data URI）：与内置 SVG 图标同尺寸，避免行高跳动 */
+.resource-icon-img {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
 /* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
 .resource-arrow {
   flex-shrink: 0;

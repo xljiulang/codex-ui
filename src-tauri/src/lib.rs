@@ -59,6 +59,7 @@ pub fn run() {
             codex::session_fs::session_fs_read,
             codex::session_fs::session_fs_write,
             codex::session_fs::session_fs_probe_text,
+            codex::session_fs::session_fs_icons,
             codex::text_editor::open_text_editor,
             codex::text_editor::take_text_editor_params,
             codex::git::git_changes_status,

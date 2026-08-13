@@ -104,6 +104,7 @@ function mockFs() {
       if (query.toLowerCase().includes("src")) return Promise.resolve([srcDir]);
       return Promise.resolve([]);
     }
+    if (cmd === "session_fs_icons") return Promise.resolve([]);
     if (cmd === "session_fs_probe_text") {
       const path = (args as { path?: string }).path;
       return Promise.resolve(path !== picPng.path);
@@ -255,6 +256,32 @@ describe("ResourceView 文件树", () => {
     expect(wrapper.find(".resource-result .resource-arrow").exists()).toBe(
       false,
     );
+    wrapper.unmount();
+  });
+
+  it("文件行渲染系统图标 img，目录/根行保留 SVG", async () => {
+    const base = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_icons") {
+        const req = (args as { requests: { path: string }[] }).requests;
+        return Promise.resolve(
+          req.map((r) => ({ path: r.path, dataUri: "data:image/png;base64,ICON" })),
+        );
+      }
+      return base(cmd, args);
+    });
+    const wrapper = await mountPanel();
+    await flushPromises();
+
+    const img = wrapper.find(".resource-row.resource-file .resource-icon-img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("data:image/png;base64,ICON");
+    expect(
+      wrapper.find(".resource-row.resource-dir .resource-icon svg").exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find(".resource-row.resource-root .resource-icon svg").exists(),
+    ).toBe(true);
     wrapper.unmount();
   });
 

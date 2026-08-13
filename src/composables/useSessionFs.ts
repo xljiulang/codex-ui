@@ -9,10 +9,14 @@ import {
   flattenResourceTree,
   joinFsPath,
   type FsEntry,
+  type IconRequest,
+  type IconResult,
   type ResourceRow,
 } from "../lib/sessionFs";
 
 const SEARCH_LIMIT = 200;
+/** 图标缓存上限：超限按插入顺序淘汰最旧 */
+const ICON_CACHE_MAX = 1000;
 
 /** 当前会话工作目录：统一走 resolveCwd 规范优先级 */
 export const sessionRoot = computed(() => resolveCwd());
@@ -32,6 +36,12 @@ export const searching = ref(false);
 export const selectedPath = ref("");
 /** 内部复制记录：粘贴时优先使用，为空回退系统剪贴板 */
 export const copyBuffer = ref<string[]>([]);
+/**
+ * 文件类型图标缓存：键为 `ext:<小写扩展名>`（如 ext:.rs）或无扩展名文件的
+ * `file:<relPath>`；值为 PNG data URI，null 表示取不到（不再重试）。
+ * 目录不在范围，继续使用内置 SVG 文件夹图标。
+ */
+export const iconCache = reactive(new Map<string, string | null>());
 
 export const searchActive = computed(() => searchTerm.value.trim().length > 0);
 
@@ -58,6 +68,67 @@ function resetTree() {
   searchResults.value = [];
   selectedPath.value = "";
   copyBuffer.value = [];
+  iconCache.clear();
+}
+
+/** 图标缓存键：目录返回 null（不在范围）；文件按扩展名/无扩展名路径 */
+export function iconCacheKey(entry: FsEntry): string | null {
+  if (entry.isDir) return null;
+  const dot = entry.name.lastIndexOf(".");
+  if (dot > 0 && dot < entry.name.length - 1) {
+    return `ext:${entry.name.slice(dot).toLowerCase()}`;
+  }
+  return `file:${entry.relPath}`;
+}
+
+/** 读取缓存图标：未缓存或目录返回 null（渲染层回退 SVG） */
+export function iconFor(entry: FsEntry): string | null {
+  const key = iconCacheKey(entry);
+  return key ? (iconCache.get(key) ?? null) : null;
+}
+
+function setIconCache(key: string, value: string | null) {
+  iconCache.delete(key); // 重新插入，保持 LRU 顺序
+  iconCache.set(key, value);
+  if (iconCache.size > ICON_CACHE_MAX) {
+    const oldest = iconCache.keys().next().value;
+    if (oldest !== undefined) iconCache.delete(oldest);
+  }
+}
+
+/**
+ * 按可见行懒加载缺失的文件图标：同扩展名只发一个代表路径，结果回填缓存；
+ * 单个失败缓存 null 不重试；整批失败（如 root 无效）不缓存，待下次可见行变化重试。
+ */
+export async function ensureEntryIcons(entries: FsEntry[]): Promise<void> {
+  const root = sessionRoot.value;
+  if (!root || !entries.length) return;
+  const byKey = new Map<string, FsEntry>();
+  for (const e of entries) {
+    const key = iconCacheKey(e);
+    if (key && !iconCache.has(key) && !byKey.has(key)) byKey.set(key, e);
+  }
+  if (!byKey.size) return;
+
+  const pathToKey = new Map<string, string>();
+  const requests: IconRequest[] = [];
+  for (const e of byKey.values()) {
+    pathToKey.set(e.path, iconCacheKey(e)!);
+    requests.push({ path: e.path });
+  }
+  try {
+    const results = await invoke<IconResult[]>("session_fs_icons", { root, requests });
+    for (const r of results) {
+      const key = pathToKey.get(r.path);
+      if (key) setIconCache(key, r.dataUri);
+    }
+    // 请求了但未返回的键置 null，避免反复请求
+    for (const key of byKey.keys()) {
+      if (!iconCache.has(key)) setIconCache(key, null);
+    }
+  } catch {
+    // 整批失败：保持未缓存状态，稍后重试
+  }
 }
 
 /** 兜底：从后端直接取启动工作目录（store 尚未就绪时用） */
