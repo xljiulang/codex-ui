@@ -103,6 +103,34 @@ pub struct GitPullResult {
     pub message: String,
 }
 
+/// 分支合并结果（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMergeResult {
+    /// 合并后的最新状态
+    pub status: GitStatus,
+    /// up_to_date | fast_forward | merged
+    pub kind: String,
+    /// 给用户的中文结果提示
+    pub message: String,
+}
+
+/// 提交历史条目（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitEntry {
+    /// 完整提交哈希
+    pub hash: String,
+    /// 7 位短哈希
+    pub short_hash: String,
+    /// 提交标题（首行，空白折叠）
+    pub subject: String,
+    /// 作者名
+    pub author: String,
+    /// UNIX 秒时间戳（作者时区）
+    pub time_secs: i64,
+}
+
 /// 文件监听句柄（sender 被 drop 时防抖任务随 rx 关闭退出）
 pub struct GitWatchHandle {
     _watcher: RecommendedWatcher,
@@ -1152,6 +1180,53 @@ fn commit_sync(path: &str, message: &str) -> Result<GitStatus, GitError> {
     status_sync(path)
 }
 
+/// 从 HEAD 沿第一父链遍历提交历史（最多 `limit` 条，最新在前）；
+/// 合并提交会顺带展开其其它父提交。仓库尚无提交时返回空列表。
+fn commit_log_sync(path: &str, limit: usize) -> Result<Vec<GitCommitEntry>, GitError> {
+    let repo = open_repo(path)?;
+    let limit = limit.clamp(1, 200);
+    let mut out: Vec<GitCommitEntry> = Vec::new();
+    let mut stack: Vec<gix::hash::ObjectId> = match repo.head_id() {
+        Ok(id) => vec![id.detach()],
+        Err(_) => return Ok(out),
+    };
+    let mut seen: std::collections::HashSet<gix::hash::ObjectId> = std::collections::HashSet::new();
+    while let Some(id) = stack.pop() {
+        if out.len() >= limit {
+            break;
+        }
+        if !seen.insert(id) {
+            continue;
+        }
+        let commit = repo
+            .find_object(id)
+            .map_err(|e| git_err(format!("读取提交失败: {e}")))?
+            .into_commit();
+        let subject = commit
+            .message()
+            .map(|m| m.summary().to_str_lossy().into_owned())
+            .unwrap_or_default();
+        let author = commit
+            .author()
+            .map(|a| a.name.to_str_lossy().into_owned())
+            .unwrap_or_default();
+        let time_secs = commit.time().map(|t| t.seconds).unwrap_or(0);
+        out.push(GitCommitEntry {
+            hash: id.to_string(),
+            short_hash: id.to_string().chars().take(7).collect(),
+            subject,
+            author,
+            time_secs,
+        });
+        // 先处理第一父（栈逆序压入），近似 git log 的第一父优先顺序
+        let parents: Vec<gix::hash::ObjectId> = commit.parent_ids().map(|p| p.detach()).collect();
+        for p in parents.into_iter().rev() {
+            stack.push(p);
+        }
+    }
+    Ok(out)
+}
+
 /// 解析当前分支的上游（remote + 远端跟踪 ref）：优先 `branch.<name>.remote/merge` 配置，
 /// 无配置时以默认 fetch 远端（origin）同名分支兜底。
 fn resolve_upstream<'a>(
@@ -1601,6 +1676,214 @@ fn pull_sync(path: &str) -> Result<GitPullResult, GitError> {
     })
 }
 
+/// 将本地分支 `name` 合并到当前分支（等价 `git merge <name>`）：
+/// 快进或三路合并（创建合并提交）。与拉取相同，仅当合并触达的路径与本地
+/// 已暂存/未暂存改动重叠时拒绝（列文件）；提交级冲突时中止，不改动工作区与索引。
+fn merge_branch_sync(path: &str, name: &str) -> Result<GitMergeResult, GitError> {
+    let name = name.trim();
+    let repo = open_repo(path)?;
+    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+    let branch = current_branch(&repo);
+    if branch == "HEAD" {
+        return Err(git_err("游离 HEAD 状态无法合并，请先切换到某个分支"));
+    }
+    if branch == name {
+        return Err(git_err("不能将当前分支合并到自身"));
+    }
+    let full = gix::refs::Category::LocalBranch
+        .to_full_name(BStr::new(name))
+        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
+    let source_id = repo
+        .find_reference(&full)
+        .map_err(|_| git_err(format!("分支 {name} 不存在")))?
+        .peel_to_id()
+        .map_err(|e| git_err(format!("解析分支 {name} 失败: {e}")))?;
+    let source_oid = source_id.detach();
+    let source_tree_oid = source_id
+        .object()
+        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
+        .into_commit()
+        .tree_id()
+        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
+        .detach();
+
+    // 本地风险路径：已暂存（HEAD→索引）+ 已跟踪的工作区修改；
+    // 未跟踪文件不纳入（由 sync_worktree_files 的覆盖守卫保护）。
+    let st = status_sync(path)?;
+    let staged_paths: Vec<String> = st
+        .files
+        .iter()
+        .filter(|f| f.staged)
+        .map(|f| f.path.clone())
+        .collect();
+    let local_risk_paths: Vec<String> = st
+        .files
+        .iter()
+        .filter(|f| f.worktree && f.status != FileStatus::Untracked)
+        .map(|f| f.path.clone())
+        .collect();
+
+    // 本地状态
+    let local_oid = repo.head_id().ok().map(|id| id.detach());
+    let local_tree_id = repo
+        .head_tree_id_or_empty()
+        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
+    let local_tree_oid = local_tree_id.detach();
+
+    // 判定合并类型与目标树（只读计算，不写入）
+    let mut target_tree_oid: Option<gix::hash::ObjectId> = None;
+    let (kind, message) = match local_oid {
+        None => return Err(git_err("仓库还没有任何提交，无法合并")),
+        Some(local) if local == source_oid => {
+            ("up_to_date".to_string(), "分支已是最新，无需合并".to_string())
+        }
+        Some(local) => {
+            let labels = gix::merge::blob::builtin_driver::text::Labels {
+                ancestor: Some(BStr::new("ancestor")),
+                current: Some(BStr::new("ours")),
+                other: Some(BStr::new("theirs")),
+            };
+            let options = repo
+                .tree_merge_options()
+                .map_err(|e| git_err(format!("初始化合并选项失败: {e}")))?
+                .into();
+            let mut outcome = repo
+                .merge_commits(local, source_oid, labels, options)
+                .map_err(|e| git_err(format!("合并分支 {name} 失败: {e}")))?;
+            let merge_bases: Vec<gix::hash::ObjectId> = outcome
+                .merge_bases
+                .iter()
+                .flat_map(|nb| nb.iter().copied())
+                .collect();
+            if merge_bases.contains(&source_oid) {
+                // 源分支是本地祖先 → 本地已包含其全部提交
+                ("up_to_date".to_string(), "分支已是最新，无需合并".to_string())
+            } else if merge_bases.contains(&local) {
+                // 本地是源分支祖先 → 快进
+                target_tree_oid = Some(source_tree_oid);
+                (
+                    "fast_forward".to_string(),
+                    format!("已将分支 {name} 快进合并到 {branch}"),
+                )
+            } else {
+                // 分叉：真实合并，提交级冲突则中止
+                if !outcome.tree_merge.conflicts.is_empty() {
+                    let paths: Vec<String> = outcome
+                        .tree_merge
+                        .conflicts
+                        .iter()
+                        .map(conflict_path)
+                        .collect();
+                    return Err(git_err(format!(
+                        "合并 {name} 存在冲突，已中止（未修改任何文件）。冲突文件：{}",
+                        paths.join("、")
+                    )));
+                }
+                let merged_tree_oid = outcome
+                    .tree_merge
+                    .tree
+                    .write()
+                    .map(|id| id.detach())
+                    .map_err(|e| git_err(format!("写入合并树失败: {e}")))?;
+                target_tree_oid = Some(merged_tree_oid);
+                (
+                    "merged".to_string(),
+                    format!("已将分支 {name} 合并到 {branch}"),
+                )
+            }
+        }
+    };
+
+    // 冲突判定：合并触达的路径与本地风险路径重叠 → 在任何写入之前拒绝
+    let merge_changed: Vec<String> = if let Some(target) = target_tree_oid {
+        let changed = diff_changed_paths(&repo, &local_tree_oid, &target)?;
+        let mut overlap: Vec<&String> = local_risk_paths
+            .iter()
+            .chain(staged_paths.iter())
+            .filter(|p| changed.iter().any(|c| c == *p))
+            .collect();
+        overlap.sort();
+        overlap.dedup();
+        if !overlap.is_empty() {
+            let names: Vec<&str> = overlap.iter().map(|s| s.as_str()).collect();
+            return Err(git_err(format!(
+                "本地更改会被合并覆盖，请先提交或还原后再合并：{}",
+                names.join("、")
+            )));
+        }
+        changed
+    } else {
+        Vec::new()
+    };
+
+    // 写阶段前置状态捕获（用于失败回滚）
+    let old_index_owned = repo
+        .index_or_empty()
+        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+    let mut old_index_owned = old_index_owned.into_owned_or_cloned();
+    let local_tree = local_tree_id
+        .object()
+        .map_err(|e| git_err(format!("读取本地树失败: {e}")))?
+        .into_tree();
+
+    // 应用：同步工作区 → 重建索引 → 更新分支/创建合并提交。
+    // 任一步失败都回滚到写前状态，避免留下半合并状态。
+    let apply_result = (|| -> Result<(), GitError> {
+        if let Some(target) = target_tree_oid {
+            sync_worktree_files(&repo, workdir, &local_tree_oid, &target)?;
+            rebuild_index_preserving_staged(&repo, &target, &staged_paths, &merge_changed)?;
+        }
+        match kind.as_str() {
+            "fast_forward" => update_branch_ref(&repo, &branch, source_oid)?,
+            "merged" => {
+                let merge_msg = format!("Merge branch '{name}' into {branch}");
+                let local_oid = *local_oid.as_ref().expect("合并必有本地提交");
+                repo.commit(
+                    "HEAD",
+                    merge_msg,
+                    target_tree_oid.expect("合并必有目标树"),
+                    vec![local_oid, source_oid],
+                )
+                .map_err(|e| git_err(format!("创建合并提交失败: {e}")))?;
+            }
+            _ => {}
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = apply_result {
+        // 尽最大努力回滚：工作区 → 旧索引 → 分支引用回到本地提交
+        let _ = restore_paths_from_tree(workdir, &local_tree, &merge_changed);
+        let _ = old_index_owned.write(gix::index::write::Options::default());
+        let branch_full = gix::refs::Category::LocalBranch
+            .to_full_name(BStr::new(&branch))
+            .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
+        let restore_change = match &local_oid {
+            Some(oid) => gix::refs::transaction::Change::Update {
+                log: Default::default(),
+                expected: gix::refs::transaction::PreviousValue::Any,
+                new: gix::refs::Target::Object(*oid),
+            },
+            None => gix::refs::transaction::Change::Delete {
+                expected: gix::refs::transaction::PreviousValue::Any,
+                log: gix::refs::transaction::RefLog::AndReference,
+            },
+        };
+        let _ = repo.edit_reference(gix::refs::transaction::RefEdit {
+            change: restore_change,
+            name: branch_full,
+            deref: false,
+        });
+        return Err(e);
+    }
+
+    Ok(GitMergeResult {
+        status: status_sync(path)?,
+        kind,
+        message,
+    })
+}
+
 // ---------- diff ----------
 
 /// git 近似二进制判定：前 8000 字节内出现 NUL
@@ -1752,6 +2035,16 @@ pub async fn git_changes_branch_delete(path: String, name: String) -> Result<Git
 #[tauri::command]
 pub async fn git_changes_branch_switch(path: String, name: String) -> Result<GitStatus, GitError> {
     run_blocking(move || switch_branch_sync(&path, &name)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_branch_merge(path: String, name: String) -> Result<GitMergeResult, GitError> {
+    run_blocking(move || merge_branch_sync(&path, &name)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_log(root: String, limit: usize) -> Result<Vec<GitCommitEntry>, GitError> {
+    run_blocking(move || commit_log_sync(&root, limit)).await
 }
 
 #[tauri::command]
@@ -3431,5 +3724,201 @@ mod tests {
         let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "up_to_date");
         assert!(res.status.files.is_empty());
+    }
+
+    // ---------- 分支合并 ----------
+
+    /// main 提交 base 后切出 feature 分支并提交 feat（main 停在 base）
+    fn setup_merge_repo(root: &Path) {
+        std::fs::write(root.join("a.txt"), "base\n").unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["checkout", "-b", "feature"]).0, 0);
+        std::fs::write(root.join("b.txt"), "feat\n").unwrap();
+        assert_eq!(git(root, &["add", "b.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "feat"]).0, 0);
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+    }
+
+    #[test]
+    fn merge_branch_fast_forwards_when_ahead() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        setup_merge_repo(root);
+
+        let res = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        assert_eq!(res.kind, "fast_forward");
+        assert!(res.status.files.is_empty());
+        // feature 新增的文件进入工作区，main 快进到 feature 提交
+        assert_eq!(std::fs::read_to_string(root.join("b.txt")).unwrap(), "feat\n");
+        assert_eq!(git(root, &["log", "-1", "--format=%s"]).1.trim(), "feat");
+    }
+
+    #[test]
+    fn merge_branch_creates_merge_commit_when_diverged() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        setup_merge_repo(root);
+        // main 侧新增 c.txt 并提交 → 分叉
+        std::fs::write(root.join("c.txt"), "main\n").unwrap();
+        assert_eq!(git(root, &["add", "c.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "main-side"]).0, 0);
+
+        let res = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        assert_eq!(res.kind, "merged");
+        assert!(res.status.files.is_empty());
+        // 双方内容都在
+        assert_eq!(std::fs::read_to_string(root.join("b.txt")).unwrap(), "feat\n");
+        assert_eq!(std::fs::read_to_string(root.join("c.txt")).unwrap(), "main\n");
+        // HEAD 为合并提交
+        let head_subject = git(root, &["log", "-1", "--format=%s"]).1;
+        assert!(head_subject.contains("Merge branch 'feature'"));
+        // 合并后再次合并 → up to date
+        let res = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        assert_eq!(res.kind, "up_to_date");
+    }
+
+    #[test]
+    fn merge_branch_conflict_aborts_without_changes() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "base\n").unwrap();
+        init_committed_repo(root);
+        // side 分支修改 a.txt
+        assert_eq!(git(root, &["checkout", "-b", "side"]).0, 0);
+        std::fs::write(root.join("a.txt"), "side\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "side"]).0, 0);
+        // main 分支也修改 a.txt → 合并冲突
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+        std::fs::write(root.join("a.txt"), "main\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "main-side"]).0, 0);
+
+        let before_head = git(root, &["rev-parse", "HEAD"]).1;
+        let err = merge_branch_sync(root.to_str().unwrap(), "side").unwrap_err();
+        assert!(err.message.contains("冲突"));
+        assert!(err.message.contains("a.txt"));
+        // 中止后工作区与 HEAD 不变
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "main\n");
+        assert_eq!(git(root, &["rev-parse", "HEAD"]).1, before_head);
+        assert_eq!(git(root, &["status", "--porcelain"]).1.trim(), "");
+    }
+
+    #[test]
+    fn merge_branch_guards() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        setup_merge_repo(root);
+
+        // 不能合并当前分支到自身
+        let err = merge_branch_sync(root.to_str().unwrap(), "main").unwrap_err();
+        assert!(err.message.contains("自身"));
+        // 不存在的分支
+        let err = merge_branch_sync(root.to_str().unwrap(), "nope").unwrap_err();
+        assert!(err.message.contains("不存在"));
+        // 游离 HEAD 无法合并
+        assert_eq!(git(root, &["checkout", "--detach", "main"]).0, 0);
+        let err = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap_err();
+        assert!(err.message.contains("游离 HEAD"));
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+    }
+
+    #[test]
+    fn merge_branch_refuses_when_local_changes_overlap() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "base\n").unwrap();
+        init_committed_repo(root);
+        // feature 修改 a.txt 并提交；main 未提交修改同一文件 → 重叠拒绝
+        assert_eq!(git(root, &["checkout", "-b", "feature"]).0, 0);
+        std::fs::write(root.join("a.txt"), "feat\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "feat"]).0, 0);
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+        std::fs::write(root.join("a.txt"), "dirty\n").unwrap();
+
+        let err = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap_err();
+        assert!(err.message.contains("会被合并覆盖"));
+        assert!(err.message.contains("a.txt"));
+        // 拒绝后工作区与 HEAD 不变
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "dirty\n");
+        assert_eq!(git(root, &["log", "-1", "--format=%s"]).1.trim(), "init");
+    }
+
+    // ---------- 提交历史 ----------
+
+    #[test]
+    fn commit_log_lists_commits_newest_first() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root); // init
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "second"]).0, 0);
+        assert_eq!(git(root, &["commit", "--allow-empty", "-m", "third"]).0, 0);
+
+        let log = commit_log_sync(root.to_str().unwrap(), 10).unwrap();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[0].subject, "third");
+        assert_eq!(log[1].subject, "second");
+        assert_eq!(log[2].subject, "init");
+        assert_eq!(log[0].short_hash.len(), 7);
+        assert_eq!(log[0].hash.len(), 40);
+        assert!(!log[0].author.is_empty());
+        assert!(log[0].time_secs > 0);
+    }
+
+    #[test]
+    fn commit_log_respects_limit() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        for i in 0..5 {
+            assert_eq!(git(root, &["commit", "--allow-empty", "-m", &format!("c{i}")]).0, 0);
+        }
+        let log = commit_log_sync(root.to_str().unwrap(), 3).unwrap();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[0].subject, "c4");
+        assert_eq!(log[2].subject, "c2");
+    }
+
+    #[test]
+    fn commit_log_empty_when_no_commits() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x\n").unwrap();
+        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let log = commit_log_sync(root.to_str().unwrap(), 10).unwrap();
+        assert!(log.is_empty());
     }
 }

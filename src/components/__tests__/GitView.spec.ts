@@ -21,7 +21,7 @@ import GitView from "../GitView.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import { settleConfirm, store } from "../../composables/useCodex";
 import { __resetGitChangesForTest } from "../../composables/useGitChanges";
-import type { GitStatus } from "../../lib/gitChanges";
+import type { GitCommitEntry, GitStatus } from "../../lib/gitChanges";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
@@ -269,6 +269,16 @@ describe("GitView 分支管理", () => {
       if (cmd === "git_changes_branch_create" || cmd === "git_changes_branch_delete") {
         return Promise.resolve({ ...okStatus, branch: current });
       }
+      if (cmd === "git_changes_branch_merge") {
+        return Promise.resolve({
+          status: { ...okStatus, branch: current },
+          kind: "merged",
+          message: "已将分支 feature 合并到 main",
+        });
+      }
+      if (cmd === "git_changes_log") {
+        return Promise.resolve([]);
+      }
       if (
         cmd === "git_changes_watch_start" ||
         cmd === "git_changes_watch_stop"
@@ -302,8 +312,12 @@ describe("GitView 分支管理", () => {
     expect(current.find(".git-branch-name").text()).toBe("main");
     expect(current.find(".git-branch-check").text()).toContain("✓");
     expect(current.find(".git-branch-delete").exists()).toBe(false);
+    expect(current.find(".git-branch-merge").exists()).toBe(false);
     expect(
       items.filter((i) => i.find(".git-branch-delete").exists()),
+    ).toHaveLength(2);
+    expect(
+      items.filter((i) => i.find(".git-branch-merge").exists()),
     ).toHaveLength(2);
     wrapper.unmount();
   });
@@ -395,6 +409,38 @@ describe("GitView 分支管理", () => {
     wrapper.unmount();
   });
 
+  it("合并分支调用合并接口、提示结果并关闭弹层", async () => {
+    mockBranchRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    const feature = wrapper
+      .findAll(".git-branch-menu-item")
+      .find((i) => i.find(".git-branch-name").text() === "feature")!;
+    // 合并按钮位于删除按钮之前
+    const mergeBtn = feature.find(".git-branch-merge");
+    expect(mergeBtn.exists()).toBe(true);
+    const deleteBtn = feature.find(".git-branch-delete");
+    expect(deleteBtn.exists()).toBe(true);
+    expect(
+      mergeBtn.element.compareDocumentPosition(deleteBtn.element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await mergeBtn.trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_branch_merge",
+    );
+    expect(call).toBeTruthy();
+    expect((call?.[1] as { path: string; name: string }).name).toBe("feature");
+    expect(store.toast).toContain("已将分支 feature 合并到 main");
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("外部点击与 Escape 关闭弹层", async () => {
     mockBranchRepo();
     const wrapper = mountGitView({ props: { active: true } });
@@ -437,6 +483,234 @@ describe("GitView 分支管理", () => {
     wrapper.find(".git-file-list").element.dispatchEvent(new Event("scroll"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 提交历史", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  function mockRepoWithLog(entries: GitCommitEntry[]) {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_log") return Promise.resolve(entries);
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it("展示提交历史（主题/作者/时间/短哈希），位于暂存区之后", async () => {
+    mockRepoWithLog([
+      {
+        hash: "a".repeat(40),
+        shortHash: "aaaaaaa",
+        subject: "feat: 初始化",
+        author: "tester",
+        timeSecs: 1700000000,
+      },
+      {
+        hash: "b".repeat(40),
+        shortHash: "bbbbbbb",
+        subject: "fix: bug",
+        author: "tester",
+        timeSecs: 1700003600,
+      },
+    ]);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    // 提交历史区位于暂存区之后
+    const heads = wrapper.findAll(".git-section-head");
+    expect(heads.map((h) => h.find("span").text())).toEqual([
+      "更改",
+      "暂存更改",
+      "提交历史",
+    ]);
+    // 历史区默认折叠，先展开再断言内容
+    expect(wrapper.findAll(".git-section")[2].classes()).toContain("collapsed");
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    const items = wrapper.findAll(".git-log-item");
+    expect(items).toHaveLength(2);
+    expect(items[0].find(".git-log-subject").text()).toBe("feat: 初始化");
+    expect(items[0].find(".git-log-meta").text()).toContain("tester");
+    expect(items[0].find(".git-log-meta").text()).toContain("2023-");
+    expect(items[0].find(".git-log-hash").text()).toBe("aaaaaaa");
+    expect(items[0].find(".git-log-hash").attributes("title")).toBe(
+      "a".repeat(40),
+    );
+    expect(items[1].find(".git-log-subject").text()).toBe("fix: bug");
+    wrapper.unmount();
+  });
+
+  it("无提交时显示空状态", async () => {
+    mockRepoWithLog([]);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    // 历史区默认折叠，先展开
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".git-view").text()).toContain("暂无提交记录");
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 分区折叠", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  function mockRepo(status: GitStatus, commits: GitCommitEntry[] = []) {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(status);
+      if (cmd === "git_changes_log") return Promise.resolve(commits);
+      if (
+        cmd === "git_changes_stage_all" ||
+        cmd === "git_changes_unstage_all" ||
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(status);
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it("更改/暂存默认展开，提交历史默认折叠，点击标题可切换", async () => {
+    mockRepo(okStatus, [
+      {
+        hash: "a".repeat(40),
+        shortHash: "aaaaaaa",
+        subject: "feat: init",
+        author: "t",
+        timeSecs: 1700000000,
+      },
+    ]);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const sections = wrapper.findAll(".git-section");
+    expect(sections).toHaveLength(3);
+    // 更改/暂存默认展开
+    expect(sections[0].find(".git-file-list").exists()).toBe(true);
+    expect(sections[1].find(".git-commit-bar").exists()).toBe(true);
+    expect(
+      sections[0].find(".git-section-head").attributes("aria-expanded"),
+    ).toBe("true");
+    // 提交历史默认折叠
+    expect(sections[2].find(".git-log-list").exists()).toBe(false);
+    expect(sections[2].classes()).toContain("collapsed");
+    expect(
+      sections[2].find(".git-section-head").attributes("aria-expanded"),
+    ).toBe("false");
+
+    // 展开「提交历史」区
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-section")[2].find(".git-log-list").exists()).toBe(
+      true,
+    );
+    expect(wrapper.findAll(".git-section")[2].classes()).not.toContain(
+      "collapsed",
+    );
+
+    // 折叠「更改」区
+    await wrapper
+      .findAll(".git-section")[0]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
+      false,
+    );
+    expect(
+      wrapper
+        .findAll(".git-section")[0]
+        .find(".git-section-head")
+        .attributes("aria-expanded"),
+    ).toBe("false");
+    expect(wrapper.findAll(".git-section")[0].classes()).toContain("collapsed");
+
+    // 再次点击展开「更改」区
+    await wrapper
+      .findAll(".git-section")[0]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
+      true,
+    );
+    expect(wrapper.findAll(".git-section")[0].classes()).not.toContain("collapsed");
+    wrapper.unmount();
+  });
+
+  it("折叠状态跨刷新保留", async () => {
+    mockRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-section-head").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
+      false,
+    );
+
+    // 点刷新按钮触发状态刷新，折叠状态应保留
+    await wrapper.find(".git-refresh").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
+      false,
+    );
+    expect(wrapper.findAll(".git-section")[0].classes()).toContain("collapsed");
+    wrapper.unmount();
+  });
+
+  it("点击分区内动作按钮不触发折叠", async () => {
+    mockRepo(okStatus);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper
+      .findAll(".git-section")[0]
+      .find(".git-section-action")
+      .trigger("click");
+    await flushPromises();
+    // 仍为展开状态，且操作正常执行
+    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
+      true,
+    );
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_stage_all",
+    );
+    expect(call).toBeTruthy();
     wrapper.unmount();
   });
 });
@@ -774,9 +1048,10 @@ describe("GitView 变更文件树形目录", () => {
     await flushPromises();
 
     const heads = wrapper.findAll(".git-section-head");
-    expect(heads).toHaveLength(2);
+    expect(heads).toHaveLength(3);
     expect(heads[0].find("span").text()).toBe("更改");
     expect(heads[1].find("span").text()).toBe("暂存更改");
+    expect(heads[2].find("span").text()).toBe("提交历史");
     expect(wrapper.find(".git-section-count").exists()).toBe(false);
 
     // 更改区：src(1) → b.txt → src2(1) → d.txt → 根文件 a.txt
@@ -1312,7 +1587,10 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
 
-    for (const btn of wrapper.findAll(".git-section-action")) {
+    const sections = wrapper.findAll(".git-section");
+    for (const s of sections.slice(0, 2)) {
+      const btn = s.find(".git-section-action");
+      expect(btn.exists()).toBe(true);
       expect((btn.element as HTMLButtonElement).disabled).toBe(true);
     }
     wrapper.unmount();
@@ -1323,10 +1601,13 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
 
-    const buttons = wrapper.findAll(".git-section-action");
-    expect(buttons).toHaveLength(2);
-    expect((buttons[0].element as HTMLButtonElement).disabled).toBe(false);
-    expect((buttons[1].element as HTMLButtonElement).disabled).toBe(true);
+    const sections = wrapper.findAll(".git-section");
+    const stageBtn = sections[0].find(".git-section-action");
+    const unstageBtn = sections[1].find(".git-section-action");
+    expect(stageBtn.exists()).toBe(true);
+    expect(unstageBtn.exists()).toBe(true);
+    expect((stageBtn.element as HTMLButtonElement).disabled).toBe(false);
+    expect((unstageBtn.element as HTMLButtonElement).disabled).toBe(true);
     wrapper.unmount();
   });
 });

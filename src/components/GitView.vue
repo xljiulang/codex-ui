@@ -15,7 +15,9 @@ import { sessionRoot } from "../composables/useSessionFs";
 import {
   gitDiffKind,
   gitStatusLetter,
+  type GitCommitEntry,
   type GitFile,
+  type GitMergeResult,
   type GitPullResult,
   type GitStatus,
 } from "../lib/gitChanges";
@@ -36,9 +38,15 @@ const branchMenuOpen = ref(false);
 const branches = ref<string[]>([]);
 const newBranchName = ref("");
 const branchBusy = ref(false);
+const mergeBusy = ref(false);
 const pullBusy = ref(false);
 const commitMessage = ref("");
 const commitBusy = ref(false);
+
+/** 提交历史（最新在前），git_changes_log 返回 */
+const commits = ref<GitCommitEntry[]>([]);
+const logBusy = ref(false);
+const LOG_LIMIT = 50;
 
 const ICON_OPEN =
   "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
@@ -67,6 +75,10 @@ const ICON_PLUS =
   "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
 const ICON_CLOSE =
   "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
+const ICON_MERGE =
+  "M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z";
+const ICON_REFRESH =
+  "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
 
 interface CtxItem {
   label: string;
@@ -111,6 +123,19 @@ interface DirAcc {
 
 /** 手动折叠的目录集合；未记录 = 默认展开，折叠状态跨刷新保留 */
 const collapsedDirs = reactive(new Set<string>());
+
+/** 可折叠分区 key：changes | staged | history；未记录 = 默认展开。
+ * 历史记录默认折叠（内容较多），更改/暂存区默认展开。折叠状态跨刷新保留。 */
+const collapsedSections = reactive(new Set<string>(["history"]));
+
+function isSectionCollapsed(key: string): boolean {
+  return collapsedSections.has(key);
+}
+
+function toggleSection(key: string) {
+  if (collapsedSections.has(key)) collapsedSections.delete(key);
+  else collapsedSections.add(key);
+}
 
 function buildGitTree(files: GitFile[]): GitTreeNode[] {
   const root: DirAcc = { dirs: new Map(), files: [] };
@@ -339,6 +364,57 @@ async function deleteBranch(name: string) {
     branchBusy.value = false;
   }
 }
+
+/** 将分支合并到当前分支；成功后关闭弹层并提示结果 */
+async function mergeBranch(name: string) {
+  if (branchBusy.value || mergeBusy.value || name === branchLabel.value) return;
+  mergeBusy.value = true;
+  try {
+    const res = await invoke<GitMergeResult>("git_changes_branch_merge", {
+      path: repoRoot.value,
+      name,
+    });
+    gitStatus.value = res.status;
+    store.toast = res.message;
+    branchMenuOpen.value = false;
+  } catch (e) {
+    store.toast = toastError(e);
+  } finally {
+    mergeBusy.value = false;
+  }
+}
+
+/** 加载提交历史（最新在前） */
+async function loadCommitLog() {
+  const root = repoRoot.value;
+  if (!root || logBusy.value) return;
+  logBusy.value = true;
+  try {
+    const res = await invoke<GitCommitEntry[]>("git_changes_log", {
+      root,
+      limit: LOG_LIMIT,
+    });
+    commits.value = Array.isArray(res) ? res : [];
+  } catch {
+    commits.value = [];
+  } finally {
+    logBusy.value = false;
+  }
+}
+
+/** UNIX 秒 → 本地时间字符串 */
+function formatCommitTime(secs: number): string {
+  if (!secs) return "";
+  const d = new Date(secs * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// gitStatus 每次刷新（含提交/合并/拉取/切分支）后同步刷新提交历史
+watch(
+  () => gitStatus.value,
+  () => void loadCommitLog(),
+);
 
 function onWindowClick(e: MouseEvent) {
   // 用 Element 而非 HTMLElement：点击 svg/path 等 SVG 目标也应正确判断
@@ -689,9 +765,7 @@ async function restoreDir(node: GitDirNode) {
           @click="refreshGitChanges()"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
-            />
+            <path :d="ICON_REFRESH" />
           </svg>
         </button>
         <!-- 分支弹层作为 .git-head 子节点，absolute 定位相对头部，避免被面板 overflow 裁掉 -->
@@ -709,6 +783,17 @@ async function restoreDir(node: GitDirNode) {
                 {{ b === branchLabel ? "✓" : "" }}
               </span>
               <span class="git-branch-name">{{ b }}</span>
+              <button
+                v-if="b !== branchLabel"
+                class="git-branch-merge"
+                v-tooltip="`将 ${b} 合并到 ${branchLabel}`"
+                :disabled="branchBusy || mergeBusy"
+                @click.stop="mergeBranch(b)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_MERGE" />
+                </svg>
+              </button>
               <button
                 v-if="b !== branchLabel"
                 class="git-branch-delete"
@@ -748,141 +833,226 @@ async function restoreDir(node: GitDirNode) {
         </div>
       </div>
 
-      <div class="git-section">
-        <div class="git-section-head">
+      <div class="git-section" :class="{ collapsed: isSectionCollapsed('changes') }">
+        <div
+          class="git-section-head"
+          role="button"
+          tabindex="0"
+          :aria-expanded="!isSectionCollapsed('changes')"
+          @click="toggleSection('changes')"
+          @keydown.enter="toggleSection('changes')"
+        >
+          <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              :d="
+                isSectionCollapsed('changes')
+                  ? ICON_ARROW_RIGHT
+                  : ICON_ARROW_DOWN
+              "
+            />
+          </svg>
           <span>更改</span>
           <button
             class="git-icon-btn git-section-action git-section-stage"
             aria-label="全部暂存"
             v-tooltip="'全部暂存'"
             :disabled="gitActionBusy || !worktreeRows.length"
-            @click="stageAll()"
+            @click.stop="stageAll()"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path :d="ICON_ARROW_DOWN" />
             </svg>
           </button>
         </div>
-        <div v-if="worktreeRows.length" class="git-file-list">
-          <div
-            v-for="row in worktreeRows"
-            :key="`changes:${row.kind}:${row.relPath}`"
-            class="git-tree-row"
-            :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
-            :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-            @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
-            @contextmenu="
-              row.kind === 'dir'
-                ? openDirCtx('changes', row, $event)
-                : openFileCtx('changes', row.file, $event)
-            "
-          >
-            <template v-if="row.kind === 'dir'">
-              <svg class="git-dir-arrow" viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
-              </svg>
-              <svg class="git-dir-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
-              </svg>
-              <span class="git-dir-name">{{ row.name }}</span>
-            </template>
-            <template v-else>
-              <span
-                class="git-status-icon"
-                :class="`git-status-${row.file.status}`"
-              >
-                {{ gitStatusLetter(row.file.status) }}
-              </span>
-              <span
-                class="git-path"
-                :class="{ 'git-path-strike': row.file.status === 'deleted' }"
-              >
-                {{ row.file.path }}
-              </span>
-            </template>
+        <template v-if="!isSectionCollapsed('changes')">
+          <div v-if="worktreeRows.length" class="git-file-list">
+            <div
+              v-for="row in worktreeRows"
+              :key="`changes:${row.kind}:${row.relPath}`"
+              class="git-tree-row"
+              :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
+              :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
+              @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
+              @contextmenu="
+                row.kind === 'dir'
+                  ? openDirCtx('changes', row, $event)
+                  : openFileCtx('changes', row.file, $event)
+              "
+            >
+              <template v-if="row.kind === 'dir'">
+                <svg class="git-dir-arrow" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
+                </svg>
+                <svg class="git-dir-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
+                </svg>
+                <span class="git-dir-name">{{ row.name }}</span>
+              </template>
+              <template v-else>
+                <span
+                  class="git-status-icon"
+                  :class="`git-status-${row.file.status}`"
+                >
+                  {{ gitStatusLetter(row.file.status) }}
+                </span>
+                <span
+                  class="git-path"
+                  :class="{ 'git-path-strike': row.file.status === 'deleted' }"
+                >
+                  {{ row.file.path }}
+                </span>
+              </template>
+            </div>
           </div>
-        </div>
-        <div v-else class="git-section-empty">无更改</div>
+          <div v-else class="git-section-empty">无更改</div>
+        </template>
       </div>
 
-      <div class="git-section">
-        <div class="git-section-head">
+      <div class="git-section" :class="{ collapsed: isSectionCollapsed('staged') }">
+        <div
+          class="git-section-head"
+          role="button"
+          tabindex="0"
+          :aria-expanded="!isSectionCollapsed('staged')"
+          @click="toggleSection('staged')"
+          @keydown.enter="toggleSection('staged')"
+        >
+          <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              :d="
+                isSectionCollapsed('staged')
+                  ? ICON_ARROW_RIGHT
+                  : ICON_ARROW_DOWN
+              "
+            />
+          </svg>
           <span>暂存更改</span>
           <button
             class="git-icon-btn git-section-action git-section-unstage"
             aria-label="全部取消暂存"
             v-tooltip="'全部取消暂存'"
             :disabled="gitActionBusy || !stagedRows.length"
-            @click="unstageAll()"
+            @click.stop="unstageAll()"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path :d="ICON_ARROW_UP" />
             </svg>
           </button>
         </div>
-        <div class="git-commit-bar">
-          <textarea
-            v-model="commitMessage"
-            class="git-commit-input"
-            rows="2"
-            placeholder="提交消息（Ctrl+Enter 提交）"
-            :disabled="commitBusy"
-            @keydown.ctrl.enter="doCommit()"
-          ></textarea>
-          <div class="git-commit-row">
-            <button
-              class="git-commit-btn"
-              :disabled="!canCommit"
-              @click="doCommit()"
+        <template v-if="!isSectionCollapsed('staged')">
+          <div class="git-commit-bar">
+            <textarea
+              v-model="commitMessage"
+              class="git-commit-input"
+              rows="2"
+              placeholder="提交消息（Ctrl+Enter 提交）"
+              :disabled="commitBusy"
+              @keydown.ctrl.enter="doCommit()"
+            ></textarea>
+            <div class="git-commit-row">
+              <button
+                class="git-commit-btn"
+                :disabled="!canCommit"
+                @click="doCommit()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_CHECK" />
+                </svg>
+                <span>{{ commitBusy ? "提交中…" : "提交" }}</span>
+              </button>
+              <span class="git-commit-hint">{{ commitHint }}</span>
+            </div>
+          </div>
+          <div v-if="stagedRows.length" class="git-file-list">
+            <div
+              v-for="row in stagedRows"
+              :key="`staged:${row.kind}:${row.relPath}`"
+              class="git-tree-row"
+              :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
+              :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
+              @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
+              @contextmenu="
+                row.kind === 'dir'
+                  ? openDirCtx('staged', row, $event)
+                  : openFileCtx('staged', row.file, $event)
+              "
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_CHECK" />
-              </svg>
-              <span>{{ commitBusy ? "提交中…" : "提交" }}</span>
-            </button>
-            <span class="git-commit-hint">{{ commitHint }}</span>
+              <template v-if="row.kind === 'dir'">
+                <svg class="git-dir-arrow" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
+                </svg>
+                <svg class="git-dir-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
+                </svg>
+                <span class="git-dir-name">{{ row.name }}</span>
+              </template>
+              <template v-else>
+                <span
+                  class="git-status-icon"
+                  :class="`git-status-${row.file.status}`"
+                >
+                  {{ gitStatusLetter(row.file.status) }}
+                </span>
+                <span
+                  class="git-path"
+                  :class="{ 'git-path-strike': row.file.status === 'deleted' }"
+                >
+                  {{ row.file.path }}
+                </span>
+              </template>
+            </div>
           </div>
-        </div>
-        <div v-if="stagedRows.length" class="git-file-list">
-          <div
-            v-for="row in stagedRows"
-            :key="`staged:${row.kind}:${row.relPath}`"
-            class="git-tree-row"
-            :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
-            :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-            @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
-            @contextmenu="
-              row.kind === 'dir'
-                ? openDirCtx('staged', row, $event)
-                : openFileCtx('staged', row.file, $event)
-            "
+          <div v-else class="git-section-empty">无暂存更改</div>
+        </template>
+      </div>
+
+      <div class="git-section" :class="{ collapsed: isSectionCollapsed('history') }">
+        <div
+          class="git-section-head"
+          role="button"
+          tabindex="0"
+          :aria-expanded="!isSectionCollapsed('history')"
+          @click="toggleSection('history')"
+          @keydown.enter="toggleSection('history')"
+        >
+          <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              :d="
+                isSectionCollapsed('history')
+                  ? ICON_ARROW_RIGHT
+                  : ICON_ARROW_DOWN
+              "
+            />
+          </svg>
+          <span>提交历史</span>
+          <button
+            class="git-icon-btn git-section-action git-section-log"
+            aria-label="刷新提交历史"
+            v-tooltip="'刷新提交历史'"
+            :disabled="logBusy"
+            @click.stop="loadCommitLog()"
           >
-            <template v-if="row.kind === 'dir'">
-              <svg class="git-dir-arrow" viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
-              </svg>
-              <svg class="git-dir-icon" viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
-              </svg>
-              <span class="git-dir-name">{{ row.name }}</span>
-            </template>
-            <template v-else>
-              <span
-                class="git-status-icon"
-                :class="`git-status-${row.file.status}`"
-              >
-                {{ gitStatusLetter(row.file.status) }}
-              </span>
-              <span
-                class="git-path"
-                :class="{ 'git-path-strike': row.file.status === 'deleted' }"
-              >
-                {{ row.file.path }}
-              </span>
-            </template>
-          </div>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="ICON_REFRESH" />
+            </svg>
+          </button>
         </div>
-        <div v-else class="git-section-empty">无暂存更改</div>
+        <template v-if="!isSectionCollapsed('history')">
+          <div v-if="commits.length" class="git-log-list">
+            <div v-for="c in commits" :key="c.hash" class="git-log-item">
+              <span class="git-log-dot" aria-hidden="true"></span>
+              <div class="git-log-main">
+                <span class="git-log-subject">{{ c.subject }}</span>
+                <span class="git-log-meta">
+                  {{ c.author }} · {{ formatCommitTime(c.timeSecs) }}
+                </span>
+              </div>
+              <span class="git-log-hash" :title="c.hash">{{ c.shortHash }}</span>
+            </div>
+          </div>
+          <div v-else-if="logBusy" class="git-section-empty">加载中…</div>
+          <div v-else class="git-section-empty">暂无提交记录</div>
+        </template>
       </div>
     </template>
 

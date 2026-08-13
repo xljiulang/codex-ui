@@ -38,6 +38,23 @@ export interface GitPullResult {
   message: string;
 }
 
+/** Rust git_changes_branch_merge 返回值（与拉取结果同构） */
+export type GitMergeResult = GitPullResult;
+
+/** Rust git_changes_log 单条提交记录（字段 camelCase） */
+export interface GitCommitEntry {
+  /** 完整提交哈希 */
+  hash: string;
+  /** 7 位短哈希 */
+  shortHash: string;
+  /** 提交标题（首行） */
+  subject: string;
+  /** 作者名 */
+  author: string;
+  /** UNIX 秒时间戳（作者时区） */
+  timeSecs: number;
+}
+
 export function gitStatusLabel(status: GitFileStatus): string {
   switch (status) {
     case "added":
