@@ -450,7 +450,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     mockedInvoke.mockClear();
   });
 
-  it("文件夹行右键显示“创建会话”与“在资源管理器中打开”", async () => {
+  it("文件夹行右键显示“新建会话”与“在资源管理器中打开”", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
       clientX: 200,
@@ -459,17 +459,17 @@ describe("HistoryView 文件夹右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["创建会话", "在资源管理器中打开"]);
+    expect(labels).toEqual(["新建会话", "在资源管理器中打开"]);
     wrapper.unmount();
   });
 
-  it("点击“创建会话”预置分组目录并进入新对话", async () => {
+  it("点击“新建会话”预置分组目录并进入新对话", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
-    await clickCtxItem(wrapper, "创建会话");
+    await clickCtxItem(wrapper, "新建会话");
     expect(store.newChatCwd).toBe("D:\\codex\\codex-ui");
     expect(mockedNewEmptyChat).toHaveBeenCalledTimes(1);
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
@@ -491,7 +491,7 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 });
 
-describe("HistoryView 创建会话聚焦输入框", () => {
+describe("HistoryView 新建会话聚焦输入框", () => {
   afterEach(() => {
     delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
     document.body.innerHTML = "";
@@ -514,7 +514,7 @@ describe("HistoryView 创建会话聚焦输入框", () => {
     mockedNewEmptyChat.mockClear();
   });
 
-  it("点击“创建会话”后优先通过 Tiptap 实例聚焦输入框", async () => {
+  it("点击“新建会话”后优先通过 Tiptap 实例聚焦输入框", async () => {
     const focus = vi.fn();
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
       commands: { focus },
@@ -524,7 +524,7 @@ describe("HistoryView 创建会话聚焦输入框", () => {
       clientX: 200,
       clientY: 200,
     });
-    await clickCtxItem(wrapper, "创建会话");
+    await clickCtxItem(wrapper, "新建会话");
     await wrapper.vm.$nextTick();
     expect(focus).toHaveBeenCalledTimes(1);
     wrapper.unmount();
@@ -542,7 +542,7 @@ describe("HistoryView 创建会话聚焦输入框", () => {
       clientX: 200,
       clientY: 200,
     });
-    await clickCtxItem(wrapper, "创建会话");
+    await clickCtxItem(wrapper, "新建会话");
     await wrapper.vm.$nextTick();
     expect(document.activeElement).toBe(editor);
     wrapper.unmount();

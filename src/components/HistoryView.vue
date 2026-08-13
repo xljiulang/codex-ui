@@ -181,11 +181,11 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   ]);
 }
 
-/** 历史目录行右键菜单：创建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
+/** 历史目录行右键菜单：新建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
 function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
   openCtx(e, [
     {
-      label: "创建会话",
+      label: "新建会话",
       icon: ICON_PLUS,
       action: () => {
         store.showSettings = false;
