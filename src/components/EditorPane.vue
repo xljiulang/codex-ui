@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, watch } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import ChatView from "./ChatView.vue";
 import {
   activeTab,
@@ -53,6 +61,51 @@ const activeTerminalTabs = computed(() =>
 
 /** 会话标签常驻，存在任何文件/diff 标签时才显示标签栏 */
 const showTabBar = computed(() => tabs.length > 1);
+
+/** Tab 横向滚动：新标签/激活标签自动滚入视野，溢出时显示左右箭头 */
+const tabScroller = ref<HTMLElement | null>(null);
+const canScrollLeft = ref(false);
+const canScrollRight = ref(false);
+
+function updateTabScrollState() {
+  const el = tabScroller.value;
+  if (!el) return;
+  canScrollLeft.value = el.scrollLeft > 2;
+  canScrollRight.value = el.scrollLeft < el.scrollWidth - el.clientWidth - 2;
+}
+
+function scrollActiveTabIntoView() {
+  const el = tabScroller.value;
+  const activeEl = el?.querySelector<HTMLElement>(".editor-tab.active");
+  if (!el || !activeEl) return;
+  const pad = 8;
+  const left = activeEl.offsetLeft;
+  const right = left + activeEl.offsetWidth;
+  if (left < el.scrollLeft) {
+    el.scrollTo({ left: Math.max(0, left - pad), behavior: "smooth" });
+  } else if (right > el.scrollLeft + el.clientWidth) {
+    el.scrollTo({ left: right - el.clientWidth + pad, behavior: "smooth" });
+  }
+}
+
+function scrollTabs(dir: -1 | 1) {
+  const el = tabScroller.value;
+  if (!el) return;
+  el.scrollBy({
+    left: dir * Math.max(120, Math.round(el.clientWidth * 0.7)),
+    behavior: "smooth",
+  });
+}
+
+watch(
+  [activeTabId, () => tabs.length],
+  () => {
+    void nextTick(() => {
+      scrollActiveTabIntoView();
+      updateTabScrollState();
+    });
+  },
+);
 
 /** 待关闭确认的脏文件标签 */
 const pendingTab = computed<EditorTab | null>(
@@ -125,12 +178,14 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("click", onWindowClick);
   window.addEventListener("scroll", onWindowScroll, true);
+  window.addEventListener("resize", updateTabScrollState);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("click", onWindowClick);
   window.removeEventListener("scroll", onWindowScroll, true);
+  window.removeEventListener("resize", updateTabScrollState);
 });
 
 // 打开/关闭标签时按 root 分组懒加载缺失的文件图标（命中资源面板同一缓存）
@@ -159,81 +214,115 @@ watch(
 
 <template>
   <div class="editor-pane">
-    <div v-if="showTabBar" class="editor-tabs" role="tablist" aria-label="编辑标签">
+    <div v-if="showTabBar" class="editor-tabs-bar">
       <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        class="editor-tab"
-        :class="{
-          active: tab.id === activeTabId,
-          pinned: tab.kind === 'chat',
-          'is-diff': tab.kind === 'diff',
-        }"
-        role="tab"
-        :aria-selected="tab.id === activeTabId"
-        :aria-label="tab.kind === 'chat' ? '会话' : tab.title"
-        :tabindex="tab.id === activeTabId ? 0 : -1"
-        v-tooltip="tabTooltip(tab)"
-        @click="activateTab(tab.id)"
-        @contextmenu="openChatTabMenu($event, tab)"
-        @mousedown.middle.prevent="closeTab(tab.id)"
+        v-if="canScrollLeft"
+        class="editor-tab-scroll editor-tab-scroll-left"
+        aria-label="向左滚动标签"
+        @click="scrollTabs(-1)"
       >
-        <span v-if="tab.kind === 'chat'" class="editor-tab-logo" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
-            <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
-          </svg>
-        </span>
-        <span
-          v-else-if="tab.kind === 'terminal'"
-          class="editor-tab-icon"
-          aria-hidden="true"
-        >
-          <svg viewBox="0 0 24 24">
-            <path :d="ICON_TERMINAL" />
-          </svg>
-        </span>
-        <span v-else class="editor-tab-icon" aria-hidden="true">
-          <img
-            v-if="tabIcon(tab)"
-            class="editor-tab-icon-img"
-            :src="tabIcon(tab)"
-            alt=""
-            draggable="false"
-          />
-          <svg v-else viewBox="0 0 24 24">
-            <path :d="ICON_FILE" />
-          </svg>
-        </span>
-        <span
-          v-if="tab.kind === 'chat' && store.turnActive"
-          class="editor-tab-run"
-          aria-hidden="true"
-        ></span>
-        <span v-if="tab.kind !== 'chat'" class="editor-tab-label">
-          {{ tab.title }}
-        </span>
-        <span
-          v-if="tab.kind === 'file' && tab.dirty"
-          class="editor-tab-dirty"
-          title="未保存"
-        ></span>
-        <span v-else-if="tab.kind === 'diff'" class="editor-tab-kind">
-          {{ kindLabel(tab.changeKind) }}
-        </span>
-        <span v-else-if="tab.kind === 'preview'" class="editor-tab-kind">预览</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+        </svg>
+      </button>
+      <div
+        ref="tabScroller"
+        class="editor-tabs"
+        role="tablist"
+        aria-label="编辑标签"
+        @scroll.passive="updateTabScrollState"
+      >
         <button
-          v-if="tab.kind !== 'chat'"
-          class="editor-tab-close"
-          :aria-label="'关闭 ' + tab.title"
-          @click.stop="closeTab(tab.id)"
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="editor-tab"
+          :class="{
+            active: tab.id === activeTabId,
+            pinned: tab.kind === 'chat',
+            'is-diff': tab.kind === 'diff',
+          }"
+          role="tab"
+          :aria-selected="tab.id === activeTabId"
+          :aria-label="tab.kind === 'chat' ? '会话' : tab.title"
+          :tabindex="tab.id === activeTabId ? 0 : -1"
+          v-tooltip="tabTooltip(tab)"
+          @click="activateTab(tab.id)"
+          @contextmenu="openChatTabMenu($event, tab)"
+          @mousedown.middle.prevent="closeTab(tab.id)"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"
+          <span
+            v-if="tab.kind === 'chat'"
+            class="editor-tab-logo"
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
+              <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
+            </svg>
+          </span>
+          <span
+            v-else-if="tab.kind === 'terminal'"
+            class="editor-tab-icon"
+            aria-hidden="true"
+          >
+            <svg viewBox="0 0 24 24">
+              <path :d="ICON_TERMINAL" />
+            </svg>
+          </span>
+          <span v-else class="editor-tab-icon" aria-hidden="true">
+            <img
+              v-if="tabIcon(tab)"
+              class="editor-tab-icon-img"
+              :src="tabIcon(tab)"
+              alt=""
+              draggable="false"
             />
-          </svg>
+            <svg v-else viewBox="0 0 24 24">
+              <path :d="ICON_FILE" />
+            </svg>
+          </span>
+          <span
+            v-if="tab.kind === 'chat' && store.turnActive"
+            class="editor-tab-run"
+            aria-hidden="true"
+          ></span>
+          <span v-if="tab.kind !== 'chat'" class="editor-tab-label">
+            {{ tab.title }}
+          </span>
+          <span
+            v-if="tab.kind === 'file' && tab.dirty"
+            class="editor-tab-dirty"
+            title="未保存"
+          ></span>
+          <span v-else-if="tab.kind === 'diff'" class="editor-tab-kind">
+            {{ kindLabel(tab.changeKind) }}
+          </span>
+          <span v-else-if="tab.kind === 'preview'" class="editor-tab-kind">
+            预览
+          </span>
+          <button
+            v-if="tab.kind !== 'chat'"
+            class="editor-tab-close"
+            :aria-label="'关闭 ' + tab.title"
+            @click.stop="closeTab(tab.id)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"
+              />
+            </svg>
+          </button>
         </button>
+      </div>
+      <button
+        v-if="canScrollRight"
+        class="editor-tab-scroll editor-tab-scroll-right"
+        aria-label="向右滚动标签"
+        @click="scrollTabs(1)"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z" />
+        </svg>
       </button>
     </div>
     <div class="editor-pane-body">

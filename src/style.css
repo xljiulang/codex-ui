@@ -4959,7 +4959,7 @@ body.resizing-editor {
   background: var(--bg);
 }
 
-.editor-tabs {
+.editor-tabs-bar {
   display: flex;
   align-items: flex-end;
   gap: 2px;
@@ -4968,12 +4968,47 @@ body.resizing-editor {
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
   flex-shrink: 0;
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 32px;
+  min-width: 0;
+  flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
 }
 .editor-tabs::-webkit-scrollbar {
   display: none;
+}
+
+.editor-tab-scroll {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.editor-tab-scroll:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.editor-tab-scroll svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .editor-tab {

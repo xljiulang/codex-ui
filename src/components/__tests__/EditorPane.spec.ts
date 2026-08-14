@@ -170,6 +170,118 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("激活标签超出可视区时自动滚动到可视区", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    await openFileTab(root, bTxt);
+    await settle();
+
+    const scroller = wrapper.find(".editor-tabs").element as HTMLElement;
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, "scrollTo", {
+      value: scrollTo,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "clientWidth", {
+      value: 300,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "scrollLeft", {
+      value: 0,
+      configurable: true,
+    });
+    const bTab = tabs.find((t) => t.title === "b.txt")!;
+    const bEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("b.txt"))!
+      .element as HTMLElement;
+    Object.defineProperty(bEl, "offsetLeft", {
+      value: 1200,
+      configurable: true,
+    });
+    Object.defineProperty(bEl, "offsetWidth", {
+      value: 120,
+      configurable: true,
+    });
+
+    activateTab("chat");
+    await settle();
+    activateTab(bTab.id);
+    await settle();
+    await nextTick();
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      left: 1028,
+      behavior: "smooth",
+    });
+    wrapper.unmount();
+  });
+
+  it("标签溢出时显示左右箭头，点击按可视宽度翻页", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+
+    const scroller = wrapper.find(".editor-tabs").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollWidth", {
+      value: 1200,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "clientWidth", {
+      value: 300,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "scrollLeft", {
+      value: 0,
+      configurable: true,
+    });
+    const scrollBy = vi.fn();
+    Object.defineProperty(scroller, "scrollBy", {
+      value: scrollBy,
+      configurable: true,
+    });
+
+    scroller.dispatchEvent(new Event("scroll"));
+    await nextTick();
+    expect(wrapper.find(".editor-tab-scroll-right").exists()).toBe(true);
+    expect(wrapper.find(".editor-tab-scroll-left").exists()).toBe(false);
+
+    await wrapper.find(".editor-tab-scroll-right").trigger("click");
+    expect(scrollBy).toHaveBeenCalledWith({
+      left: 210,
+      behavior: "smooth",
+    });
+
+    Object.defineProperty(scroller, "scrollLeft", {
+      value: 900,
+      configurable: true,
+    });
+    scroller.dispatchEvent(new Event("scroll"));
+    await nextTick();
+    expect(wrapper.find(".editor-tab-scroll-left").exists()).toBe(true);
+    expect(wrapper.find(".editor-tab-scroll-right").exists()).toBe(false);
+
+    await wrapper.find(".editor-tab-scroll-left").trigger("click");
+    expect(scrollBy).toHaveBeenCalledWith({
+      left: -210,
+      behavior: "smooth",
+    });
+    wrapper.unmount();
+  });
+
   it("会话标签右键菜单：关闭其它所有标签，未保存的跳过并提示", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
