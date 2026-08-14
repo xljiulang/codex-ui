@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import hljs, { languageFromPath } from "../lib/highlight";
+import { ICON_SUMMARY } from "../lib/icons";
 import type { DiffRow } from "../lib/types";
 import type { DiffEditorTab } from "../composables/useEditorTabs";
 
@@ -56,6 +57,19 @@ function highlightLine(r: DiffRow): string | null {
 const renderedRows = computed(() =>
   props.tab.rows.map((r) => ({ ...r, html: highlightLine(r) })),
 );
+
+const brief = computed(() => props.tab.brief);
+
+/** 简要模式：仅显示变更行与新旧分隔，隐藏未变化上下文 */
+const displayedRows = computed(() =>
+  brief.value
+    ? renderedRows.value.filter((r) => r.kind !== "ctx")
+    : renderedRows.value,
+);
+
+function toggleBrief() {
+  props.tab.brief = !props.tab.brief;
+}
 </script>
 
 <template>
@@ -66,6 +80,20 @@ const renderedRows = computed(() =>
         <span class="change-kind" :class="tab.changeKind">
           {{ kindLabel(tab.changeKind) }}
         </span>
+      </span>
+      <span class="diff-window-actions">
+        <button
+          v-if="!tab.loading && !tab.error && tab.rows.length"
+          class="text-editor-icon-btn"
+          :class="{ active: brief }"
+          :aria-label="brief ? '完整显示' : '简要显示'"
+          v-tooltip="brief ? '完整显示' : '简要显示'"
+          @click="toggleBrief"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="ICON_SUMMARY" />
+          </svg>
+        </button>
       </span>
     </div>
     <div class="diff-window-body">
@@ -89,7 +117,7 @@ const renderedRows = computed(() =>
       </template>
       <div v-else class="diff-inline">
         <div
-          v-for="(r, i) in renderedRows"
+          v-for="(r, i) in displayedRows"
           :key="i"
           class="diff-row"
           :class="r.kind"

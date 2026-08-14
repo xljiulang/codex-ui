@@ -81,6 +81,8 @@ export interface DiffEditorTab {
   rows: DiffRow[];
   /** 原始 unified diff，行解析失败时回退展示 */
   fallback: string;
+  /** 简要模式：仅显示变更行（隐藏未变化上下文） */
+  brief: boolean;
 }
 
 export interface PreviewEditorTab {
@@ -339,6 +341,7 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
     error: "",
     rows: [],
     fallback: params.diff,
+    brief: false,
   }) as unknown as DiffEditorTab;
   tabs.push(tab);
   activeTabId.value = id;

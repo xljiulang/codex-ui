@@ -423,7 +423,12 @@ describe("useEditorTabs 标签状态", () => {
     expect(tabs).toHaveLength(2);
     const diffTabs = tabs.filter((t) => t.kind === "diff");
     expect(diffTabs).toHaveLength(1);
-    expect(diffTabs[0]).toMatchObject({ kind: "diff", loading: false, rows });
+    expect(diffTabs[0]).toMatchObject({
+      kind: "diff",
+      loading: false,
+      rows,
+      brief: false,
+    });
     expect(activeTabId.value).toBe(diffTabs[0].id);
 
     await openDiffTab({

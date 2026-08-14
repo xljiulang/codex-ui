@@ -181,7 +181,9 @@ function decorateLinks() {
     const href = a.getAttribute("href") ?? "";
     // 悬停显示完整 URL：使用全局自定义 tooltip，而非原生 title
     const tip = displayHref(href, workspaceRoot());
-    a.addEventListener("mouseenter", () => showTooltip(tip, a.getBoundingClientRect()));
+    a.addEventListener("mouseenter", () =>
+      showTooltip(tip, a.getBoundingClientRect(), a),
+    );
     a.addEventListener("mouseleave", () => hideTooltip());
     a.addEventListener("click", (ev) => {
       ev.preventDefault();

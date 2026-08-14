@@ -4734,6 +4734,12 @@ body.resizing-editor {
   border-radius: 999px;
   padding: 3px 11px;
 }
+.diff-window-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .diff-window-body {
   flex: 1;
   min-height: 0;
