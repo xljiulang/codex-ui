@@ -511,6 +511,38 @@ describe("GitView 提交历史", () => {
     });
   }
 
+  /** 分页 mock：按 before 游标返回每批 50 条，记录每次调用的游标参数 */
+  function mockPagedLog(total: number) {
+    const all: GitCommitEntry[] = Array.from({ length: total }, (_, i) => ({
+      hash: String(i).padStart(40, "0"),
+      shortHash: String(i).padStart(7, "0"),
+      subject: `commit ${total - 1 - i}`,
+      author: "tester",
+      timeSecs: 1700000000 + i,
+    }));
+    const logCalls: Array<{ before: string | null }> = [];
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_log") {
+        const before =
+          (args as unknown as { before?: string | null } | undefined)
+            ?.before ?? null;
+        logCalls.push({ before });
+        const start =
+          before == null ? 0 : all.findIndex((e) => e.hash === before) + 1;
+        return Promise.resolve(all.slice(start, start + 50));
+      }
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    return { all, logCalls };
+  }
+
   it("展示提交历史（主题/作者/时间/短哈希），位于暂存区之后", async () => {
     mockRepoWithLog([
       {
@@ -545,6 +577,8 @@ describe("GitView 提交历史", () => {
       .find(".git-section-head")
       .trigger("click");
     await wrapper.vm.$nextTick();
+    // 冗余的「刷新提交历史」按钮已移除
+    expect(wrapper.find(".git-section-log").exists()).toBe(false);
     const items = wrapper.findAll(".git-log-item");
     expect(items).toHaveLength(2);
     expect(items[0].find(".git-log-subject").text()).toBe("feat: 初始化");
@@ -570,6 +604,76 @@ describe("GitView 提交历史", () => {
       .trigger("click");
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-view").text()).toContain("暂无提交记录");
+    wrapper.unmount();
+  });
+
+  it("首批 50 条显示加载更多，点击追加第二批并携带 before 游标", async () => {
+    const { all, logCalls } = mockPagedLog(120);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.findAll(".git-log-item")).toHaveLength(50);
+    expect(wrapper.find(".git-log-more").exists()).toBe(true);
+    expect(wrapper.find(".git-log-more").attributes("aria-label")).toBe("加载更多");
+    expect(wrapper.find(".git-log-more").attributes("data-tip")).toBe("加载更多");
+    expect(logCalls.some((c) => c.before === null)).toBe(true);
+
+    await wrapper.find(".git-log-more").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".git-log-item")).toHaveLength(100);
+    expect(logCalls.some((c) => c.before === all[49].hash)).toBe(true);
+    expect(wrapper.find(".git-log-more").attributes("aria-label")).toBe("加载更多");
+    wrapper.unmount();
+  });
+
+  it("返回不足 50 条时加载更多按钮消失", async () => {
+    const { all, logCalls } = mockPagedLog(60);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".git-log-more").exists()).toBe(true);
+    expect(logCalls.some((c) => c.before === null)).toBe(true);
+
+    await wrapper.find(".git-log-more").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".git-log-item")).toHaveLength(60);
+    expect(logCalls.some((c) => c.before === all[49].hash)).toBe(true);
+    expect(wrapper.find(".git-log-more").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("空批时按钮消失且列表保持不变", async () => {
+    const { all, logCalls } = mockPagedLog(100);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-log-item")).toHaveLength(50);
+
+    await wrapper.find(".git-log-more").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".git-log-item")).toHaveLength(100);
+    expect(wrapper.find(".git-log-more").exists()).toBe(true);
+
+    await wrapper.find(".git-log-more").trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".git-log-item")).toHaveLength(100);
+    expect(wrapper.find(".git-log-more").exists()).toBe(false);
+    expect(logCalls.some((c) => c.before === all[99].hash)).toBe(true);
     wrapper.unmount();
   });
 });

@@ -1182,15 +1182,25 @@ fn commit_sync(path: &str, message: &str) -> Result<GitStatus, GitError> {
 
 /// 从 HEAD 沿第一父链遍历提交历史（最多 `limit` 条，最新在前）；
 /// 合并提交会顺带展开其其它父提交。仓库尚无提交时返回空列表。
-fn commit_log_sync(path: &str, limit: usize) -> Result<Vec<GitCommitEntry>, GitError> {
+/// `before` 为续页游标（上一批最后一条的完整 hash）：命中前只遍历不输出，
+/// 命中后继续输出下一批，保证顺序与首次加载一致；游标无效或不可达时返回空列表。
+fn commit_log_sync(
+    path: &str,
+    limit: usize,
+    before: Option<String>,
+) -> Result<Vec<GitCommitEntry>, GitError> {
     let repo = open_repo(path)?;
     let limit = limit.clamp(1, 200);
+    let before = before
+        .as_deref()
+        .and_then(|s| gix::hash::ObjectId::from_hex(s.as_bytes()).ok());
     let mut out: Vec<GitCommitEntry> = Vec::new();
     let mut stack: Vec<gix::hash::ObjectId> = match repo.head_id() {
         Ok(id) => vec![id.detach()],
         Err(_) => return Ok(out),
     };
     let mut seen: std::collections::HashSet<gix::hash::ObjectId> = std::collections::HashSet::new();
+    let mut reached = before.is_none();
     while let Some(id) = stack.pop() {
         if out.len() >= limit {
             break;
@@ -1202,6 +1212,17 @@ fn commit_log_sync(path: &str, limit: usize) -> Result<Vec<GitCommitEntry>, GitE
             .find_object(id)
             .map_err(|e| git_err(format!("读取提交失败: {e}")))?
             .into_commit();
+        // 先处理第一父（栈逆序压入），近似 git log 的第一父优先顺序
+        let parents: Vec<gix::hash::ObjectId> = commit.parent_ids().map(|p| p.detach()).collect();
+        if !reached {
+            if before.as_ref() == Some(&id) {
+                reached = true;
+            }
+            for p in parents.into_iter().rev() {
+                stack.push(p);
+            }
+            continue;
+        }
         let subject = commit
             .message()
             .map(|m| m.summary().to_str_lossy().into_owned())
@@ -1218,8 +1239,6 @@ fn commit_log_sync(path: &str, limit: usize) -> Result<Vec<GitCommitEntry>, GitE
             author,
             time_secs,
         });
-        // 先处理第一父（栈逆序压入），近似 git log 的第一父优先顺序
-        let parents: Vec<gix::hash::ObjectId> = commit.parent_ids().map(|p| p.detach()).collect();
         for p in parents.into_iter().rev() {
             stack.push(p);
         }
@@ -2043,8 +2062,12 @@ pub async fn git_changes_branch_merge(path: String, name: String) -> Result<GitM
 }
 
 #[tauri::command]
-pub async fn git_changes_log(root: String, limit: usize) -> Result<Vec<GitCommitEntry>, GitError> {
-    run_blocking(move || commit_log_sync(&root, limit)).await
+pub async fn git_changes_log(
+    root: String,
+    limit: usize,
+    before: Option<String>,
+) -> Result<Vec<GitCommitEntry>, GitError> {
+    run_blocking(move || commit_log_sync(&root, limit, before)).await
 }
 
 #[tauri::command]
@@ -3882,7 +3905,7 @@ mod tests {
         assert_eq!(git(root, &["commit", "-m", "second"]).0, 0);
         assert_eq!(git(root, &["commit", "--allow-empty", "-m", "third"]).0, 0);
 
-        let log = commit_log_sync(root.to_str().unwrap(), 10).unwrap();
+        let log = commit_log_sync(root.to_str().unwrap(), 10, None).unwrap();
         assert_eq!(log.len(), 3);
         assert_eq!(log[0].subject, "third");
         assert_eq!(log[1].subject, "second");
@@ -3906,7 +3929,7 @@ mod tests {
         for i in 0..5 {
             assert_eq!(git(root, &["commit", "--allow-empty", "-m", &format!("c{i}")]).0, 0);
         }
-        let log = commit_log_sync(root.to_str().unwrap(), 3).unwrap();
+        let log = commit_log_sync(root.to_str().unwrap(), 3, None).unwrap();
         assert_eq!(log.len(), 3);
         assert_eq!(log[0].subject, "c4");
         assert_eq!(log[2].subject, "c2");
@@ -3918,7 +3941,43 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "x\n").unwrap();
         let _ = init_sync(root.to_str().unwrap()).unwrap();
-        let log = commit_log_sync(root.to_str().unwrap(), 10).unwrap();
+        let log = commit_log_sync(root.to_str().unwrap(), 10, None).unwrap();
         assert!(log.is_empty());
+    }
+
+    #[test]
+    fn commit_log_paginates_with_before() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        for i in 0..8 {
+            assert_eq!(git(root, &["commit", "--allow-empty", "-m", &format!("c{i}")]).0, 0);
+        }
+        // 共 9 条：init、c0..c7（最新在前 c7..c0、init）
+        let first = commit_log_sync(root.to_str().unwrap(), 3, None).unwrap();
+        assert_eq!(first.len(), 3);
+        assert_eq!(first[0].subject, "c7");
+        assert_eq!(first[2].subject, "c5");
+        let second =
+            commit_log_sync(root.to_str().unwrap(), 3, Some(first[2].hash.clone())).unwrap();
+        assert_eq!(second.len(), 3);
+        assert_eq!(second[0].subject, "c4");
+        assert_eq!(second[2].subject, "c2");
+        let third =
+            commit_log_sync(root.to_str().unwrap(), 3, Some(second[2].hash.clone())).unwrap();
+        assert_eq!(third.len(), 3);
+        assert_eq!(third[0].subject, "c1");
+        assert_eq!(third[2].subject, "init");
+        // 游标为最后一条时返回空
+        let tail = commit_log_sync(root.to_str().unwrap(), 3, Some(third[2].hash.clone())).unwrap();
+        assert!(tail.is_empty());
+        // 无效游标返回空，避免前端重复追加
+        let bogus = commit_log_sync(root.to_str().unwrap(), 3, Some("0".repeat(40))).unwrap();
+        assert!(bogus.is_empty());
     }
 }

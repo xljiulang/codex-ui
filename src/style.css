@@ -1599,14 +1599,6 @@ select option {
   border-color: color-mix(in srgb, var(--yellow) 42%, transparent);
 }
 
-.git-section-log {
-  color: var(--text-dim);
-}
-
-.git-section-log:hover:not(:disabled) {
-  color: var(--text-bright);
-}
-
 /* 提交历史列表 */
 .git-log-list {
   list-style: none;
@@ -1674,6 +1666,29 @@ select option {
   color: var(--text-dim);
   opacity: 0.85;
   cursor: default;
+}
+
+.git-log-more {
+  margin: 4px auto 2px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+}
+
+.git-log-more:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.git-log-more:disabled svg {
+  animation: git-log-more-spin 0.9s linear infinite;
+}
+
+@keyframes git-log-more-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .git-tree-row {
