@@ -4163,6 +4163,13 @@ body.resizing-editor {
   background: transparent;
 }
 
+/* 加宽滚动条：仅 diff 查看器与文本编辑器（其余窗口保持 8px） */
+.diff-window-body::-webkit-scrollbar,
+.text-editor-host .cm-scroller::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
 /* ===== 对话渲染改进 ===== */
 
 /* 代码块语言徽标（与复制按钮同层，互不重叠） */
