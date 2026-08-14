@@ -104,27 +104,89 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     });
   });
 
-  it("点击 file:/// 本地链接调用 reveal_path", async () => {
+  it("点击 file:/// 本地文本链接在应用内打开（工作区外以父目录为根）", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(null);
+    });
     const wrapper = mount(MarkdownText, {
       props: { text: "[本地](file:///D:/a%20b.txt)" },
     });
     await flushPromises();
     await wrapper.find("a").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
-      path: "D:\\a b.txt",
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      root: "D:\\",
+      path: "a b.txt",
     });
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
+      root: "D:\\",
+      path: "a b.txt",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "reveal_path",
+      expect.anything(),
+    );
   });
 
-  it("点击相对链接按工作目录解析后调用 reveal_path", async () => {
+  it("点击相对文本链接按工作目录解析后在应用内打开", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(null);
+    });
     const wrapper = mount(MarkdownText, {
       props: { text: "[源码](src/a.ts)" },
     });
     await flushPromises();
     await wrapper.find("a").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      root: "D:/repo",
       path: "D:\\repo\\src\\a.ts",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "reveal_path",
+      expect.anything(),
+    );
+  });
+
+  it("本地链接为二进制文件时降级调用 reveal_path", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(false);
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[二进制](D:/repo/data.bin)" },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\repo\\data.bin",
+    });
+  });
+
+  it("本地链接探测失败（目录/缺失）时降级调用 reveal_path", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") {
+        return Promise.reject(new Error("不是文件"));
+      }
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[目录](D:/repo/src)" },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\repo\\src",
     });
   });
 
@@ -174,7 +236,14 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     expect(code.classes()).toContain("hljs");
   });
 
-  it("反斜杠盘符路径链接保留 href 并可点击定位（marked 编码为 %5C）", async () => {
+  it("反斜杠盘符路径链接保留 href 并在应用内打开（marked 编码为 %5C）", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(null);
+    });
     const wrapper = mount(MarkdownText, {
       props: { text: "[计划.md](D:\\codex\\codex-ui\\docs\\计划.md)" },
     });
@@ -183,12 +252,24 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     expect(a.attributes("href")).toContain("D:");
     await a.trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
-      path: "D:\\codex\\codex-ui\\docs\\计划.md",
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      root: "D:\\codex\\codex-ui\\docs",
+      path: "计划.md",
     });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "reveal_path",
+      expect.anything(),
+    );
   });
 
-  it("正斜杠盘符路径链接点击调用 reveal_path", async () => {
+  it("正斜杠盘符路径文本链接点击在应用内打开", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(null);
+    });
     const wrapper = mount(MarkdownText, {
       props: { text: "[a.md](D:/codex/a.md)" },
     });
@@ -197,8 +278,13 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     expect(a.attributes("href")).toBe("D:/codex/a.md");
     await a.trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
-      path: "D:\\codex\\a.md",
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      root: "D:\\codex",
+      path: "a.md",
     });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "reveal_path",
+      expect.anything(),
+    );
   });
 });

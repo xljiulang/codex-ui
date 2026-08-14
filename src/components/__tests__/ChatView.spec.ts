@@ -4,6 +4,7 @@ import { nextTick, reactive } from "vue";
 
 vi.mock("../../composables/useCodex", () => ({
   currentItems: vi.fn(),
+  resolveCwd: () => "",
   store: reactive({
     turnActive: false,
     busy: false,

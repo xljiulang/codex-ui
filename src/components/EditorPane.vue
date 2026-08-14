@@ -29,8 +29,12 @@ import {
   type PreviewEditorTab,
   type TerminalEditorTab,
 } from "../composables/useEditorTabs";
-import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
-import type { FsEntry } from "../lib/sessionFs";
+import {
+  ensureEntryIcons,
+  iconFor,
+  revealInExplorer,
+} from "../composables/useSessionFs";
+import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { setToast, store } from "../composables/useCodex";
 import { relPathOf } from "../lib/format";
@@ -38,6 +42,7 @@ import {
   ICON_CLOSE_ALL,
   ICON_CLOSE_LEFT,
   ICON_CLOSE_RIGHT,
+  ICON_REVEAL,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -176,6 +181,13 @@ function titleTooltip(tab: EditorTab): string {
   return tab.title !== path ? path : "";
 }
 
+/** 文件型标签（file/preview）的磁盘绝对路径：兼容工作区内绝对路径与外部文件（root=父目录+文件名） */
+function fileTabAbsPath(tab: FileEditorTab | PreviewEditorTab): string {
+  return /^[A-Za-z]:[\\/]/.test(tab.path)
+    ? tab.path
+    : joinFsPath(tab.root, tab.path);
+}
+
 /**
  * 标签右键菜单：所有标签统一提供关闭所有/左边/右边（未保存的跳过并提示）。
  * 会话主标签固定在首位且不可关闭：左边项天然隐藏（idx=0），关闭所有天然
@@ -207,6 +219,14 @@ function openTabMenu(e: MouseEvent, tab: EditorTab) {
       label: "关闭右边所有标签",
       icon: ICON_CLOSE_RIGHT,
       action: () => closeWithToast(closeTabsToRight(tab.id)),
+    });
+  }
+  // 文件/预览标签（含对话打开的工作区外文件）可直达所在目录，置于菜单末尾
+  if (tab.kind === "file" || tab.kind === "preview") {
+    items.push({
+      label: "在资源管理器中打开",
+      icon: ICON_REVEAL,
+      action: () => revealInExplorer(fileTabAbsPath(tab)),
     });
   }
   openCtx(e, items);

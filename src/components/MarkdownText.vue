@@ -2,7 +2,13 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useThrottledRef } from "../composables/useThrottledRef";
 import hljs from "../lib/highlight";
-import { displayHref, openLink, workspaceRoot } from "../lib/links";
+import {
+  displayHref,
+  localPathFromHref,
+  openLink,
+  workspaceRoot,
+} from "../lib/links";
+import { openPathInApp } from "../composables/useSessionFs";
 import { renderMarkdown } from "../lib/markdownRenderer";
 import { copyText } from "../lib/clipboard";
 import {
@@ -181,7 +187,17 @@ function decorateLinks() {
       ev.preventDefault();
       ev.stopPropagation();
       const h = a.getAttribute("href") ?? "";
-      openLink(h, workspaceRoot());
+      const root = workspaceRoot();
+      const cls = localPathFromHref(h, root);
+      // 网页/无法分类：保持原 openLink 行为（浏览器/忽略）
+      if (!cls || cls.kind === "web") {
+        openLink(h, root);
+        return;
+      }
+      // 本地：支持则在应用内 tab 打开，否则降级资源管理器（原行为）
+      void openPathInApp(cls.path).then((opened) => {
+        if (!opened) openLink(h, root);
+      });
     });
   }
 }

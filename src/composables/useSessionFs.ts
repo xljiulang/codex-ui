@@ -6,6 +6,8 @@ import { openFileTab, openPreviewTab } from "./useEditorTabs";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
+import { pathBaseName } from "../lib/format";
+import { previewTypeForName } from "../lib/preview";
 import {
   flattenResourceTree,
   joinFsPath,
@@ -380,6 +382,64 @@ export async function probeTextEntry(
   } catch (e) {
     setToast(toastError(e));
     return null;
+  }
+}
+
+/** Windows 路径 dirname：取最后一个分隔符前的部分（去尾分隔符）；无分隔符返回空串 */
+function dirNameOf(path: string): string {
+  const norm = path.replace(/\//g, "\\");
+  const idx = norm.lastIndexOf("\\");
+  if (idx < 0) return "";
+  const dir = norm.slice(0, idx).replace(/\\+$/, "");
+  return /^[A-Za-z]:$/.test(dir) ? dir + "\\" : dir;
+}
+
+/** 路径是否位于根目录之内（Windows 大小写不敏感，按分隔符边界判定） */
+function isPathUnderRoot(root: string, path: string): boolean {
+  const a = root.replace(/\//g, "\\").toLowerCase().replace(/\\+$/, "");
+  const b = path.replace(/\//g, "\\").toLowerCase();
+  if (!a) return false;
+  return b === a || b.startsWith(a + "\\");
+}
+
+/**
+ * 对话本地链接：支持则在应用内 tab 打开（PDF/图片 → 预览标签，文本 → 编辑器），
+ * 返回 true；否则返回 false，由调用方降级为资源管理器。
+ * 工作区外文件以父目录作为根（仅本次读取/打开，不改变会话工作区）。
+ * 测试钩子（__CODEX_UI_TEST__）开启时直接返回 false，保持 E2E 现有
+ * reveal_path 分发记录不回归。
+ */
+export async function openPathInApp(path: string): Promise<boolean> {
+  const testWin = window as unknown as { __CODEX_UI_TEST__?: boolean };
+  if (testWin.__CODEX_UI_TEST__) return false;
+  const session = sessionRoot.value;
+  if (!session) return false;
+  const underSession = isPathUnderRoot(session, path);
+  const root = underSession ? session : dirNameOf(path);
+  const relPath = underSession ? path : pathBaseName(path);
+  if (!root || !relPath) return false;
+
+  const type = previewTypeForName(relPath);
+  if (type === "pdf") {
+    void openPreviewTab("pdf", root, relPath);
+    return true;
+  }
+  if (type === "image") {
+    // 图片走 asset 协议，需要绝对路径；root 仅作标签元数据
+    void openPreviewTab("image", root, path);
+    return true;
+  }
+  try {
+    const isText = await invoke<boolean>("session_fs_probe_text", {
+      root,
+      path: relPath,
+    });
+    if (!isText) return false;
+    void openFileTab(root, relPath);
+    return true;
+  } catch {
+    // 目录/缺失/不可读：降级为资源管理器（原行为），不额外 toast
+    return false;
   }
 }
 

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  convertFileSrc: vi.fn((p: string) => `asset://${p}`),
+}));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
@@ -12,7 +15,13 @@ import {
   ensureEntryIcons,
   iconCacheKey,
   iconFor,
+  openPathInApp,
 } from "../useSessionFs";
+import {
+  __resetEditorTabsForTest,
+  tabs,
+  type FileEditorTab,
+} from "../useEditorTabs";
 import type { FsEntry } from "../../lib/sessionFs";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -102,5 +111,122 @@ describe("useSessionFs 文件图标缓存", () => {
 
     await ensureEntryIcons([a]);
     expect(iconFor(a)).toBeNull();
+  });
+});
+
+describe("openPathInApp 对话链接应用内打开", () => {
+  beforeEach(() => {
+    __resetEditorTabsForTest();
+    store.server.workspace = root;
+    store.toast = "";
+    mockedInvoke.mockClear();
+  });
+
+  it("工作区内文本文件：probe 后打开文件标签", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const path = root + "\\a.txt";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      root,
+      path,
+    });
+    const tab = tabs.find(
+      (t): t is FileEditorTab => t.kind === "file" && t.path === path,
+    );
+    expect(tab).toBeTruthy();
+    expect(tab?.root).toBe(root);
+  });
+
+  it("工作区内 PDF：打开 PDF 预览标签", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: btoa("x"), size: 1 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const path = root + "\\a.pdf";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    const tab = tabs.find((t) => t.kind === "preview" && t.path === path);
+    expect(tab).toBeTruthy();
+    expect((tab as { previewType?: string } | undefined)?.previewType).toBe(
+      "pdf",
+    );
+  });
+
+  it("工作区内图像：打开图像预览标签（asset 协议）", async () => {
+    const path = root + "\\a.png";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    const tab = tabs.find((t) => t.kind === "preview" && t.path === path);
+    expect(tab).toBeTruthy();
+    expect((tab as { previewType?: string } | undefined)?.previewType).toBe(
+      "image",
+    );
+  });
+
+  it("二进制文件：返回 false 且不打开标签", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(false);
+      return Promise.resolve(undefined);
+    });
+    const ok = await openPathInApp(root + "\\a.bin");
+    expect(ok).toBe(false);
+    expect(
+      tabs.some((t) => t.kind === "file" || t.kind === "preview"),
+    ).toBe(false);
+  });
+
+  it("探测失败（目录/缺失）：返回 false 且不 toast", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") {
+        return Promise.reject(new Error("不是文件"));
+      }
+      return Promise.resolve(undefined);
+    });
+    const ok = await openPathInApp(root + "\\src");
+    expect(ok).toBe(false);
+    expect(store.toast).toBe("");
+  });
+
+  it("工作区外文件：以父目录为根打开", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hi", validUtf8: true, byteSize: 2 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const path = "D:\\other\\x.txt";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      root: "D:\\other",
+      path: "x.txt",
+    });
+    const tab = tabs.find(
+      (t): t is FileEditorTab => t.kind === "file" && t.path === "x.txt",
+    );
+    expect(tab).toBeTruthy();
+    expect(tab?.root).toBe("D:\\other");
+  });
+
+  it("测试钩子开启时短路返回 false 且不调 IPC", async () => {
+    const w = window as unknown as { __CODEX_UI_TEST__?: boolean };
+    w.__CODEX_UI_TEST__ = true;
+    try {
+      const ok = await openPathInApp(root + "\\a.txt");
+      expect(ok).toBe(false);
+      expect(mockedInvoke).not.toHaveBeenCalled();
+    } finally {
+      w.__CODEX_UI_TEST__ = false;
+    }
   });
 });

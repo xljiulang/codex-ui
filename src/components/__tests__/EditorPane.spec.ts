@@ -368,7 +368,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("非会话标签右键菜单：中间标签显示关闭所有/左边/右边三项", async () => {
+  it("非会话标签右键菜单：中间文件标签显示打开+关闭所有/左边/右边四项", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("x"));
@@ -395,6 +395,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       "关闭所有标签",
       "关闭左边所有标签",
       "关闭右边所有标签",
+      "在资源管理器中打开",
     ]);
     wrapper.unmount();
   });
@@ -423,7 +424,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await aEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
-    ).toEqual(["关闭所有标签", "关闭右边所有标签"]);
+    ).toEqual(["关闭所有标签", "关闭右边所有标签", "在资源管理器中打开"]);
 
     const cEl = wrapper
       .findAll(".editor-tab")
@@ -431,7 +432,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await cEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
-    ).toEqual(["关闭所有标签", "关闭左边所有标签"]);
+    ).toEqual(["关闭所有标签", "关闭左边所有标签", "在资源管理器中打开"]);
     wrapper.unmount();
   });
 
@@ -496,6 +497,131 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await items[1].trigger("click");
     await flushPromises();
     expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
+    wrapper.unmount();
+  });
+
+  it("文件标签右键「在资源管理器中打开」：reveal 文件绝对路径", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "reveal_path") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    const aEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await aEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "关闭所有标签",
+      "在资源管理器中打开",
+    ]);
+    await items[1].trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", { path: aTxt });
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("外部文件标签右键「在资源管理器中打开」：按 root+文件名拼接", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "reveal_path") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab("D:\\other", "x.txt");
+    await settle();
+    const xEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("x.txt"))!;
+    await xEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "关闭所有标签",
+      "在资源管理器中打开",
+    ]);
+    await items[1].trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\other\\x.txt",
+    });
+    wrapper.unmount();
+  });
+
+  it("预览标签右键菜单含「在资源管理器中打开」并正确 reveal", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      if (cmd === "reveal_path") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openPreviewTab("image", root, "pic.png");
+    await settle();
+    const pEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("pic.png"))!;
+    await pEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "关闭所有标签",
+      "在资源管理器中打开",
+    ]);
+    await items[1].trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: root + "\\pic.png",
+    });
+    wrapper.unmount();
+  });
+
+  it("diff/终端标签右键菜单不含「在资源管理器中打开」", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "build_diff_preview") return Promise.resolve([]);
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openDiffTab({
+      path: "a.txt",
+      kind: "modify",
+      diff: "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-x\n+y",
+      workspace_root: root,
+    });
+    await settle();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const diffEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await diffEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).not.toContain("在资源管理器中打开");
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("src"))!;
+    await termEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).not.toContain("在资源管理器中打开");
     wrapper.unmount();
   });
 
