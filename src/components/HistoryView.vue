@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   clearSearch,
@@ -49,6 +57,21 @@ const {
 } = useActionMenu({ width: 180, scrollScope: ".history-view" });
 /** 默认收起；记录用户展开过的目录 */
 const expandedDirs = reactive(new Set<string>());
+/** 首个目录仅首次载入时自动展开一次；之后完全由用户控制（含刷新后不重置） */
+let firstFolderAutoExpanded = false;
+watch(
+  () => store.threads,
+  () => {
+    if (firstFolderAutoExpanded) return;
+    const first = groupThreads(store.threads).find(
+      (r): r is Extract<typeof r, { kind: "group" }> => r.kind === "group",
+    );
+    if (!first) return;
+    expandedDirs.add(first.group.key);
+    firstFolderAutoExpanded = true;
+  },
+  { immediate: true },
+);
 const debouncedSearch = debounce(() => void searchThreads(searchTerm.value), 300);
 let lastFocus: HTMLElement | null = null;
 

@@ -401,6 +401,12 @@ const deleteLabel = computed(() => {
           @click="onSearchResultClick(entry)"
           @contextmenu="openEntryMenu(entry, $event)"
         >
+          <button
+            class="resource-add"
+            :aria-label="`添加 ${entry.name} 为会话附件`"
+            v-tooltip="'添加为会话附件'"
+            @click.stop="addAsAttachment(entry)"
+          >@</button>
           <span class="resource-icon">
             <img
               v-if="fileIcon(entry)"
@@ -442,6 +448,13 @@ const deleteLabel = computed(() => {
           @click="onTreeRowClick(row)"
           @contextmenu="onRowContext(row, $event)"
         >
+          <button
+            v-if="row.kind !== 'root'"
+            class="resource-add"
+            :aria-label="`添加 ${row.entry.name} 为会话附件`"
+            v-tooltip="'添加为会话附件'"
+            @click.stop="addAsAttachment(row.entry)"
+          >@</button>
           <svg
             v-if="row.kind !== 'file'"
             class="resource-arrow"

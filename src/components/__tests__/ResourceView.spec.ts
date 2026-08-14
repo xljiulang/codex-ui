@@ -146,7 +146,10 @@ function mockFs() {
 }
 
 async function mountPanel(active = true) {
-  const wrapper = mount(ResourceView, { props: { active } });
+  const wrapper = mount(ResourceView, {
+    props: { active },
+    global: { directives: { tooltip: tooltipDirective } },
+  });
   await flushPromises();
   return wrapper;
 }
@@ -608,6 +611,72 @@ describe("ResourceView 文件树", () => {
       name: "a.txt",
       path: "D:/codex/codex-ui/a.txt",
     });
+    wrapper.unmount();
+  });
+
+  it("文件/目录行有 @ 添加附件按钮，根目录行没有", async () => {
+    const wrapper = await mountPanel();
+    expect(wrapper.find(".resource-root .resource-add").exists()).toBe(false);
+    expect(
+      wrapper.findAll(".resource-row.resource-dir .resource-add").length,
+    ).toBeGreaterThan(0);
+    expect(
+      wrapper.findAll(".resource-row.resource-file .resource-add").length,
+    ).toBeGreaterThan(0);
+    // @ 按钮位于行首（首个元素子节点）
+    expect(
+      wrapper
+        .find(".resource-row.resource-file")
+        .element.firstElementChild?.classList.contains("resource-add"),
+    ).toBe(true);
+    expect(
+      wrapper
+        .findAll(".resource-row.resource-dir")[0]
+        .element.firstElementChild?.classList.contains("resource-add"),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("点击 @ 按钮调用全局附件入口，且不触发行点击", async () => {
+    const addAttachment = vi.fn();
+    (window as unknown as { __CODEX_UI_ADD_ATTACHMENT__?: unknown }).__CODEX_UI_ADD_ATTACHMENT__ =
+      addAttachment;
+    const wrapper = await mountPanel();
+
+    // 文件行：只添加附件，不打开文件（不触发内容探测）
+    await wrapper.find(".resource-row.resource-file .resource-add").trigger("click");
+    expect(addAttachment).toHaveBeenCalledWith({
+      type: "mention",
+      name: "a.txt",
+      path: "D:/codex/codex-ui/a.txt",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_probe_text",
+      expect.anything(),
+    );
+
+    // 目录行：只添加附件，不切换展开状态
+    const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
+    const wasCollapsed = dirRow.classes().includes("collapsed");
+    await dirRow.find(".resource-add").trigger("click");
+    expect(dirRow.classes().includes("collapsed")).toBe(wasCollapsed);
+    wrapper.unmount();
+  });
+
+  it("搜索结果行同样有 @ 添加附件按钮", async () => {
+    vi.useFakeTimers();
+    const wrapper = await mountPanel();
+    await wrapper.find(".history-search").setValue("main");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(wrapper.find(".resource-result .resource-add").exists()).toBe(true);
+    // 搜索结果行同样为行首元素
+    expect(
+      wrapper
+        .find(".resource-result")
+        .element.firstElementChild?.classList.contains("resource-add"),
+    ).toBe(true);
     wrapper.unmount();
   });
 

@@ -358,22 +358,26 @@ describe("HistoryView 目录分组", () => {
     expect(folders[0].find(".folder-count").text()).toBe("2");
     expect(folders[1].find(".folder-name").text()).toBe("codex-proxy");
     expect(folders[1].find(".folder-count").text()).toBe("1");
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    // 首个目录（codex-ui）默认展开，其余目录仍收起
+    expect(folders[0].classes()).not.toContain("collapsed");
+    expect(folders[1].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".history-item")).toHaveLength(2);
   });
 
-  it("目录默认收起，点击目录行展开/再点收起", async () => {
+  it("第一个文件夹默认展开，点击可收起/再展开", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(HistoryView);
+    expect(wrapper.findAll(".history-item")).toHaveLength(2);
+    expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".history-folder")[1].classes()).toContain("collapsed");
+
+    await wrapper.findAll(".history-folder")[0].trigger("click");
     expect(wrapper.findAll(".history-item")).toHaveLength(0);
     expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
 
     await wrapper.findAll(".history-folder")[0].trigger("click");
     expect(wrapper.findAll(".history-item")).toHaveLength(2);
     expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
-
-    await wrapper.findAll(".history-folder")[0].trigger("click");
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
-    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
   });
 
   it("目录行可聚焦，Enter/Space 键展开与收起", async () => {
@@ -383,20 +387,20 @@ describe("HistoryView 目录分组", () => {
 
     expect(folder.attributes("role")).toBe("button");
     expect(folder.attributes("tabindex")).toBe("0");
-    expect(folder.attributes("aria-expanded")).toBe("false");
+    expect(folder.attributes("aria-expanded")).toBe("true");
 
     await folder.trigger("keydown", { key: "Enter" });
-    expect(wrapper.findAll(".history-item")).toHaveLength(2);
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
     expect(wrapper.findAll(".history-folder")[0].attributes("aria-expanded")).toBe(
-      "true",
+      "false",
     );
 
     await wrapper
       .findAll(".history-folder")[0]
       .trigger("keydown", { key: " ", code: "Space" });
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    expect(wrapper.findAll(".history-item")).toHaveLength(2);
     expect(wrapper.findAll(".history-folder")[0].attributes("aria-expanded")).toBe(
-      "false",
+      "true",
     );
   });
 
@@ -411,7 +415,7 @@ describe("HistoryView 目录分组", () => {
     const names = wrapper.findAll(".folder-name").map((n) => n.text());
     // codex-ui 组内第一会话已置顶 → 目录排最前
     expect(names).toEqual(["codex-ui", "codex-proxy"]);
-    await wrapper.findAll(".history-folder")[0].trigger("click");
+    // 首个目录默认展开，置顶徽章直接可见
     expect(wrapper.findAll(".pin-badge")).toHaveLength(1);
   });
 
@@ -423,7 +427,8 @@ describe("HistoryView 目录分组", () => {
     const wrapper = mount(HistoryView);
 
     expect(wrapper.findAll(".history-folder")).toHaveLength(1);
-    expect(wrapper.findAll(".history-item")).toHaveLength(1);
+    // 目录默认展开：目录内会话 + 平铺会话
+    expect(wrapper.findAll(".history-item")).toHaveLength(2);
     expect(wrapper.findAll(".history-item:not(.folder-item)")).toHaveLength(1);
   });
 
@@ -433,20 +438,34 @@ describe("HistoryView 目录分组", () => {
     expect(wrapper.findAll(".history-folder .folder-icon svg")).toHaveLength(2);
   });
 
-  it("目录行带折叠/展开箭头：默认收起为右箭头，点击展开后为下箭头", async () => {
+  it("目录行带折叠/展开箭头：首个目录默认为下箭头，点击收起为右箭头", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(HistoryView);
     const folder = () => wrapper.findAll(".history-folder")[0];
 
     expect(folder().find(".folder-arrow").exists()).toBe(true);
     expect(folder().find(".folder-arrow path").attributes("d")).toBe(
-      "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z",
+      "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z",
     );
 
     await folder().trigger("click");
     expect(folder().find(".folder-arrow path").attributes("d")).toBe(
-      "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z",
+      "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z",
     );
+  });
+
+  it("仅首载展开一次：手动收起后刷新列表不再自动展开", async () => {
+    store.threads = dirThreads.map((t) => ({ ...t }));
+    const wrapper = mount(HistoryView);
+    await wrapper.findAll(".history-folder")[0].trigger("click");
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+
+    // 模拟列表刷新（store.threads 换成新数组）
+    store.threads = dirThreads.map((t) => ({ ...t, recencyAt: t.recencyAt + 10 }));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".history-item")).toHaveLength(0);
   });
 });
 

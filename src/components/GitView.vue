@@ -230,6 +230,8 @@ const stagedFiles = computed(() =>
 const worktreeRows = computed(() => flattenRows(buildGitTree(worktreeFiles.value)));
 const stagedRows = computed(() => flattenRows(buildGitTree(stagedFiles.value)));
 const stagedCount = computed(() => stagedFiles.value.length);
+/** 更改总数（每个文件计一次，含已暂存 + 工作区 + 未跟踪） */
+const changeCount = computed(() => gitStatus.value?.files.length ?? 0);
 const canCommit = computed(
   () =>
     !commitBusy.value &&
@@ -803,54 +805,57 @@ async function restoreDir(node: GitDirNode) {
             />
           </svg>
         </button>
-        <button
-          class="git-icon-btn git-pull"
-          :class="{ busy: pullBusy }"
-          :disabled="!gitAvailable || pullBusy || pushBusy || branchLabel === 'HEAD'"
-          :aria-label="pullBusy ? '拉取中…' : '拉取'"
-          v-tooltip="
-            !gitAvailable
-              ? '未检测到 git，无法拉取'
-              : branchLabel === 'HEAD'
-              ? '游离 HEAD 无法拉取'
-              : pullBusy
-                ? '拉取中…'
-                : pushBusy
-                  ? '推送中…'
-                  : '拉取'
-          "
-          @click="doPull()"
-        >
-          <svg v-if="!pullBusy" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
-            />
-          </svg>
-          <span v-else class="git-pull-text">拉取中…</span>
-        </button>
-        <button
-          class="git-icon-btn git-push"
-          :class="{ busy: pushBusy }"
-          :disabled="!gitAvailable || pushBusy || pullBusy || branchLabel === 'HEAD'"
-          :aria-label="pushBusy ? '推送中…' : '推送'"
-          v-tooltip="
-            !gitAvailable
-              ? '未检测到 git，无法推送'
-              : branchLabel === 'HEAD'
-                ? '游离 HEAD 无法推送'
-                : pushBusy
-                  ? '推送中…'
+        <div class="git-pull-push">
+          <button
+            class="git-icon-btn git-pull"
+            :class="{ busy: pullBusy }"
+            :disabled="!gitAvailable || pullBusy || pushBusy || branchLabel === 'HEAD'"
+            :aria-label="pullBusy ? '拉取中…' : '拉取'"
+            v-tooltip="
+              !gitAvailable
+                ? '未检测到 git，无法拉取'
+                : branchLabel === 'HEAD'
+                  ? '游离 HEAD 无法拉取'
                   : pullBusy
                     ? '拉取中…'
-                    : '推送'
-          "
-          @click="doPush()"
-        >
-          <svg v-if="!pushBusy" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z" />
-          </svg>
-          <span v-else class="git-push-text">推送中…</span>
-        </button>
+                    : pushBusy
+                      ? '推送中…'
+                      : '拉取'
+            "
+            @click="doPull()"
+          >
+            <svg v-if="!pullBusy" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
+              />
+            </svg>
+            <span v-else class="git-pull-text">拉取中…</span>
+          </button>
+          <span class="git-pull-push-divider" aria-hidden="true"></span>
+          <button
+            class="git-icon-btn git-push"
+            :class="{ busy: pushBusy }"
+            :disabled="!gitAvailable || pushBusy || pullBusy || branchLabel === 'HEAD'"
+            :aria-label="pushBusy ? '推送中…' : '推送'"
+            v-tooltip="
+              !gitAvailable
+                ? '未检测到 git，无法推送'
+                : branchLabel === 'HEAD'
+                  ? '游离 HEAD 无法推送'
+                  : pushBusy
+                    ? '推送中…'
+                    : pullBusy
+                      ? '拉取中…'
+                      : '推送'
+            "
+            @click="doPush()"
+          >
+            <svg v-if="!pushBusy" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z" />
+            </svg>
+            <span v-else class="git-push-text">推送中…</span>
+          </button>
+        </div>
         <button
           class="git-icon-btn git-refresh"
           aria-label="刷新"
@@ -945,17 +950,22 @@ async function restoreDir(node: GitDirNode) {
             />
           </svg>
           <span>更改</span>
-          <button
-            class="git-icon-btn git-section-action git-section-stage"
-            aria-label="全部暂存"
-            v-tooltip="'全部暂存'"
-            :disabled="gitActionBusy || !worktreeRows.length"
-            @click.stop="stageAll()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="ICON_ARROW_DOWN" />
-            </svg>
-          </button>
+          <span class="git-section-actions">
+            <span v-if="changeCount > 0" class="git-section-count">{{
+              changeCount
+            }}</span>
+            <button
+              class="git-icon-btn git-section-action git-section-stage"
+              aria-label="全部暂存"
+              v-tooltip="'全部暂存'"
+              :disabled="gitActionBusy || !worktreeRows.length"
+              @click.stop="stageAll()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_ARROW_DOWN" />
+              </svg>
+            </button>
+          </span>
         </div>
         <template v-if="!isSectionCollapsed('changes')">
           <div v-if="worktreeRows.length" class="git-file-list">
@@ -1020,17 +1030,22 @@ async function restoreDir(node: GitDirNode) {
             />
           </svg>
           <span>暂存更改</span>
-          <button
-            class="git-icon-btn git-section-action git-section-unstage"
-            aria-label="全部取消暂存"
-            v-tooltip="'全部取消暂存'"
-            :disabled="gitActionBusy || !stagedRows.length"
-            @click.stop="unstageAll()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="ICON_ARROW_UP" />
-            </svg>
-          </button>
+          <span class="git-section-actions">
+            <span v-if="stagedCount > 0" class="git-section-count">{{
+              stagedCount
+            }}</span>
+            <button
+              class="git-icon-btn git-section-action git-section-unstage"
+              aria-label="全部取消暂存"
+              v-tooltip="'全部取消暂存'"
+              :disabled="gitActionBusy || !stagedRows.length"
+              @click.stop="unstageAll()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_ARROW_UP" />
+              </svg>
+            </button>
+          </span>
         </div>
         <template v-if="!isSectionCollapsed('staged')">
           <div class="git-commit-bar">

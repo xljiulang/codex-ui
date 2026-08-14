@@ -1170,7 +1170,26 @@ describe("GitView 变更文件树形目录", () => {
     expect(heads[0].find("span").text()).toBe("更改");
     expect(heads[1].find("span").text()).toBe("暂存更改");
     expect(heads[2].find("span").text()).toBe("提交历史");
-    expect(wrapper.find(".git-section-count").exists()).toBe(false);
+    // 分区徽章：更改总数 4（每个文件计一次），暂存数 1
+    expect(heads[0].find(".git-section-count").text()).toBe("4");
+    expect(heads[1].find(".git-section-count").text()).toBe("1");
+    // 徽章位于 .git-section-actions 内、排在操作按钮之前
+    const actions0 = heads[0].find(".git-section-actions");
+    expect(actions0.exists()).toBe(true);
+    expect(
+      actions0.element.children[0].classList.contains("git-section-count"),
+    ).toBe(true);
+    expect(
+      actions0.element.children[1].classList.contains("git-section-stage"),
+    ).toBe(true);
+    const actions1 = heads[1].find(".git-section-actions");
+    expect(actions1.exists()).toBe(true);
+    expect(
+      actions1.element.children[0].classList.contains("git-section-count"),
+    ).toBe(true);
+    expect(
+      actions1.element.children[1].classList.contains("git-section-unstage"),
+    ).toBe(true);
 
     // 更改区：src(1) → b.txt → src2(1) → d.txt → 根文件 a.txt
     const sections = wrapper.findAll(".git-section");
@@ -1187,6 +1206,24 @@ describe("GitView 变更文件树形目录", () => {
     expect(stagedRows[0].find(".git-dir-name").text()).toBe("src");
     expect(stagedRows[1].find(".git-dir-name").text()).toBe("deep");
     expect(stagedRows[2].text()).toContain("src/deep/c.txt");
+    wrapper.unmount();
+  });
+
+  it("0 个更改时分区徽章不渲染", async () => {
+    mockTreeRepo();
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({ ...treeStatus, files: [] });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    expect(wrapper.find(".git-section-count").exists()).toBe(false);
+    // 操作按钮仍在 actions 容器内，保持右对齐结构
+    const actions = wrapper.find(".git-section-actions");
+    expect(actions.exists()).toBe(true);
+    expect(actions.find(".git-section-stage").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -1516,6 +1553,22 @@ describe("GitView 拉取", () => {
     store.toast = "";
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
+  });
+
+  it("拉取/推送合并为胶囊：容器包含两按钮与分隔线", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    const capsule = wrapper.find(".git-pull-push");
+    expect(capsule.exists()).toBe(true);
+    expect(capsule.find(".git-pull").exists()).toBe(true);
+    expect(capsule.find(".git-push").exists()).toBe(true);
+    expect(capsule.find(".git-pull-push-divider").exists()).toBe(true);
+    wrapper.unmount();
   });
 
   it("点击拉取调用 git_changes_pull 并更新状态与 toast", async () => {
