@@ -1,7 +1,7 @@
 /* ===== 主题系统 =====
  * 三套主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光）。
  * 根节点 data-theme 决定当前主题，未设置时回退 blue。
- * 代码块/命令输出保持深色“终端”质感（--console-*），其余表面随主题切换。
+ * 代码块/命令输出等控制台表面随主题切换（--console-* / --code-* / --syntax-* 按主题定义）。
  */
 
 /* 跨主题共享的几何/字体令牌 */
@@ -98,11 +98,23 @@
   --menu-bg: rgba(23, 28, 36, 0.97);
   --tooltip-bg: rgba(28, 34, 44, 0.97);
 
-  /* 终端质感：代码块与命令输出（明亮主题下保持深色容器、浅色文字） */
+  /* 终端质感：代码块与命令输出（深色容器、浅色文字） */
   --console-bg: rgba(10, 14, 19, 0.92);
   --console-bg-deep: rgba(12, 16, 22, 0.9);
   --console-text: #c6cdd8;
   --code-text: #c6cdd8;
+
+  /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
+  --syntax-comment: #6a9955;
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-function: #dcdcaa;
+  --syntax-type: #9cdcfe;
+  --syntax-const: #4ec9b0;
+  --syntax-symbol: #d19a66;
+  --syntax-deletion: #f44747;
+  --code-head-tint: rgba(255, 255, 255, 0.03);
 
   --brand-grad: linear-gradient(90deg, #f2f7ff, #9db8dd);
   --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
@@ -204,6 +216,18 @@
   --console-text: #b9b8c9;
   --code-text: #cdcbe0;
 
+  /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
+  --syntax-comment: #6a9955;
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-function: #dcdcaa;
+  --syntax-type: #9cdcfe;
+  --syntax-const: #4ec9b0;
+  --syntax-symbol: #d19a66;
+  --syntax-deletion: #f44747;
+  --code-head-tint: rgba(255, 255, 255, 0.03);
+
   --brand-grad: linear-gradient(90deg, #f4f1ff, #b9aee6);
   --btn-grad: linear-gradient(135deg, #7557ec, #6d54e8);
   --link-hover: #c5b6fd;
@@ -299,16 +323,30 @@
   --menu-bg: rgba(255, 255, 255, 0.97);
   --tooltip-bg: rgba(255, 255, 255, 0.97);
 
-  --console-bg: rgba(10, 14, 19, 0.92);
-  --console-bg-deep: rgba(12, 16, 22, 0.9);
-  --console-text: #c6cdd8;
-  --code-text: #c6cdd8;
+  /* 控制台表面：晨光主题下为浅色容器、深色文字 */
+  --console-bg: rgba(238, 243, 250, 0.95);
+  --console-bg-deep: rgba(231, 236, 244, 0.95);
+  --console-text: #3e4756;
+  --code-text: #3e4756;
+  --code-bg: linear-gradient(180deg, #ffffff 0%, #eef2f9 100%);
+
+  /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
+  --syntax-comment: #6a737d;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-function: #8250df;
+  --syntax-type: #953800;
+  --syntax-const: #116329;
+  --syntax-symbol: #953800;
+  --syntax-deletion: #b62324;
+  --code-head-tint: rgba(0, 0, 0, 0.04);
 
   --brand-grad: linear-gradient(90deg, #202a3a, #64748b);
   --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
   --link-hover: #1a56c4;
-  --diff-del-text: #f0a0a0;
-  --diff-add-text: #9fe3d4;
+  --diff-del-text: #c23a45;
+  --diff-add-text: #0e7a58;
 
   --overlay-rgb: 25, 35, 52;
   --header-shadow: 0 1px 12px rgba(30, 40, 60, 0.08);
@@ -2274,7 +2312,7 @@ select option {
   left: 0;
   right: 0;
   height: 30px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--code-head-tint);
   border-bottom: 1px solid var(--border);
   border-radius: 10px 10px 0 0;
   pointer-events: none;
@@ -4199,25 +4237,25 @@ body.resizing-editor {
 }
 .md .hljs-comment,
 .md .hljs-quote {
-  color: #6a9955;
+  color: var(--syntax-comment);
 }
 .md .hljs-keyword,
 .md .hljs-selector-tag,
 .md .hljs-literal {
-  color: #569cd6;
+  color: var(--syntax-keyword);
 }
 .md .hljs-string,
 .md .hljs-regexp,
 .md .hljs-addition {
-  color: #ce9178;
+  color: var(--syntax-string);
 }
 .md .hljs-number,
 .md .hljs-meta {
-  color: #b5cea8;
+  color: var(--syntax-number);
 }
 .md .hljs-title,
 .md .hljs-section {
-  color: #dcdcaa;
+  color: var(--syntax-function);
 }
 .md .hljs-attr,
 .md .hljs-attribute,
@@ -4225,18 +4263,18 @@ body.resizing-editor {
 .md .hljs-template-variable,
 .md .hljs-type,
 .md .hljs-class .hljs-title {
-  color: #9cdcfe;
+  color: var(--syntax-type);
 }
 .md .hljs-built_in,
 .md .hljs-builtin-name {
-  color: #4ec9b0;
+  color: var(--syntax-const);
 }
 .md .hljs-symbol,
 .md .hljs-bullet {
-  color: #d19a66;
+  color: var(--syntax-symbol);
 }
 .md .hljs-deletion {
-  color: #f44747;
+  color: var(--syntax-deletion);
 }
 .md .hljs-emphasis {
   font-style: italic;
@@ -4545,30 +4583,31 @@ body.resizing-editor {
   overflow: auto;
   position: relative;
   padding: 12px 16px;
+  background: var(--console-bg-deep);
 }
 
 /* diff 内联行语法高亮配色（与聊天区 hljs 配色一致；文本编辑器用 CodeMirror 主题） */
 .diff-text .hljs-comment,
 .diff-text .hljs-quote {
-  color: #6a9955;
+  color: var(--syntax-comment);
 }
 .diff-text .hljs-keyword,
 .diff-text .hljs-selector-tag,
 .diff-text .hljs-literal {
-  color: #569cd6;
+  color: var(--syntax-keyword);
 }
 .diff-text .hljs-string,
 .diff-text .hljs-regexp,
 .diff-text .hljs-addition {
-  color: #ce9178;
+  color: var(--syntax-string);
 }
 .diff-text .hljs-number,
 .diff-text .hljs-meta {
-  color: #b5cea8;
+  color: var(--syntax-number);
 }
 .diff-text .hljs-title,
 .diff-text .hljs-section {
-  color: #dcdcaa;
+  color: var(--syntax-function);
 }
 .diff-text .hljs-attr,
 .diff-text .hljs-attribute,
@@ -4576,45 +4615,24 @@ body.resizing-editor {
 .diff-text .hljs-template-variable,
 .diff-text .hljs-type,
 .diff-text .hljs-class .hljs-title {
-  color: #9cdcfe;
+  color: var(--syntax-type);
 }
 .diff-text .hljs-built_in,
 .diff-text .hljs-builtin-name {
-  color: #4ec9b0;
+  color: var(--syntax-const);
 }
 .diff-text .hljs-symbol,
 .diff-text .hljs-bullet {
-  color: #d19a66;
+  color: var(--syntax-symbol);
 }
 .diff-text .hljs-deletion {
-  color: #f44747;
+  color: var(--syntax-deletion);
 }
 .diff-text .hljs-emphasis {
   font-style: italic;
 }
 .diff-text .hljs-strong {
   font-weight: 600;
-}
-
-/* 晨光主题：diff 随控制台统一为深色终端，内部行号/分隔/强调改用浅色 */
-:root[data-theme="light"] .diff-window-body {
-  background: var(--console-bg-deep);
-}
-:root[data-theme="light"] .diff-loading,
-:root[data-theme="light"] .diff-fallback-note,
-:root[data-theme="light"] .diff-no,
-:root[data-theme="light"] .diff-sep-text,
-:root[data-theme="light"] .diff-file {
-  color: #8b95a7;
-}
-:root[data-theme="light"] .diff-hunk {
-  color: #9ecbff;
-  background: rgba(37, 99, 235, 0.16);
-}
-:root[data-theme="light"] .diff-row.sep {
-  background: rgba(255, 255, 255, 0.06);
-  border-top: 1px dashed rgba(255, 255, 255, 0.14);
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.14);
 }
 
 /* 独立文本编辑器窗口布局（与 diff 窗口同风格） */
@@ -4949,6 +4967,7 @@ body.resizing-editor {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  position: relative;
   height: 32px;
   max-width: 220px;
   min-width: 0;
@@ -5004,6 +5023,32 @@ body.resizing-editor {
 .editor-tab-logo svg .logo-c {
   stroke-width: 2;
   stroke-linecap: round;
+}
+
+/* 会话标签呼吸灯：回合进行中右上角呼吸圆点 */
+.editor-tab-run {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: breathe 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
 }
 
 /* 文件/diff 标签：文件系统图标（无缓存时回退通用文件 SVG） */

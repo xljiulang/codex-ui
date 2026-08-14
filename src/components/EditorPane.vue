@@ -19,7 +19,7 @@ import {
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import type { FsEntry } from "../lib/sessionFs";
 import { useActionMenu } from "../composables/useActionMenu";
-import { setToast } from "../composables/useCodex";
+import { setToast, store } from "../composables/useCodex";
 import { relPathOf } from "../lib/format";
 import { ICON_CLOSE_ALL } from "../lib/icons";
 
@@ -75,7 +75,9 @@ function tabIcon(tab: FileEditorTab | DiffEditorTab): string {
 
 /** 标签悬停提示：文件/diff 显示相对工作区根的路径 */
 function tabTooltip(tab: EditorTab): string {
-  if (tab.kind === "chat") return "会话";
+  if (tab.kind === "chat") {
+    return store.turnActive ? "会话（进行中）" : "会话";
+  }
   const root = tab.kind === "file" ? tab.root : tab.workspaceRoot;
   return relPathOf(root, tab.path);
 }
@@ -174,6 +176,11 @@ watch(
             <path :d="ICON_FILE" />
           </svg>
         </span>
+        <span
+          v-if="tab.kind === 'chat' && store.turnActive"
+          class="editor-tab-run"
+          aria-hidden="true"
+        ></span>
         <span v-if="tab.kind !== 'chat'" class="editor-tab-label">
           {{ tab.title }}
         </span>

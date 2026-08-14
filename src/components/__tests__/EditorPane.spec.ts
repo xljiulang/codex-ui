@@ -171,6 +171,36 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("会话进行中：对话标签显示呼吸灯并提示进行中，结束后隐藏", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    store.turnActive = false;
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+
+    const chatTab = () => wrapper.findAll(".editor-tab")[0];
+    expect(chatTab().find(".editor-tab-run").exists()).toBe(false);
+    expect(chatTab().attributes("data-tip")).toBe("会话");
+
+    store.turnActive = true;
+    await nextTick();
+    expect(chatTab().find(".editor-tab-run").exists()).toBe(true);
+    expect(chatTab().attributes("data-tip")).toBe("会话（进行中）");
+
+    store.turnActive = false;
+    await nextTick();
+    expect(chatTab().find(".editor-tab-run").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("打开文本文件：新增文件标签、渲染编辑器并激活", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {

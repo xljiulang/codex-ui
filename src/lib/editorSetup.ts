@@ -53,24 +53,24 @@ import { properties } from "@codemirror/legacy-modes/mode/properties";
 import { ruby } from "@codemirror/legacy-modes/mode/ruby";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 
-/** 语法高亮配色：与 diff/聊天区 hljs 调色板一致，三套主题下编辑区保持深色终端 */
+/** 语法高亮配色：与 diff/聊天区 hljs 调色板共用 --syntax-* 令牌，随主题切换 */
 export const editorHighlightStyle = HighlightStyle.define([
-  { tag: tags.comment, color: "#6a9955" },
+  { tag: tags.comment, color: "var(--syntax-comment)" },
   {
     tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword],
-    color: "#569cd6",
+    color: "var(--syntax-keyword)",
   },
   {
     tag: [tags.string, tags.special(tags.string), tags.regexp, tags.attributeValue],
-    color: "#ce9178",
+    color: "var(--syntax-string)",
   },
   {
     tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null, tags.meta],
-    color: "#b5cea8",
+    color: "var(--syntax-number)",
   },
   {
     tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.labelName],
-    color: "#dcdcaa",
+    color: "var(--syntax-function)",
   },
   {
     tag: [
@@ -81,11 +81,11 @@ export const editorHighlightStyle = HighlightStyle.define([
       tags.attributeName,
       tags.variableName,
     ],
-    color: "#9cdcfe",
+    color: "var(--syntax-type)",
   },
   {
     tag: [tags.standard(tags.variableName)],
-    color: "#4ec9b0",
+    color: "var(--syntax-const)",
   },
   { tag: tags.emphasis, fontStyle: "italic" },
   { tag: tags.strong, fontWeight: "600" },
