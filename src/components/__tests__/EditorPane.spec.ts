@@ -282,7 +282,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("会话标签右键菜单：关闭其它所有标签，未保存的跳过并提示", async () => {
+  it("会话标签右键菜单：统一三项（无关闭左边），关闭所有跳过未保存并提示", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -305,14 +305,147 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const chatTab = wrapper.findAll(".editor-tab")[0];
     await chatTab.trigger("contextmenu", { clientX: 100, clientY: 100 });
     const items = wrapper.findAll(".ctx-menu-item");
-    expect(items).toHaveLength(1);
-    expect(items[0].text().trim()).toBe("关闭其它所有标签");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "关闭所有标签",
+      "关闭右边所有标签",
+    ]);
 
     await items[0].trigger("click");
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
     expect(store.toast).toContain("已跳过 1 个未保存的标签");
+    wrapper.unmount();
+  });
+
+  it("非会话标签右键菜单：中间标签显示关闭所有/左边/右边三项", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    await openFileTab(root, bTxt);
+    await settle();
+    await openFileTab(root, root + "\\c.txt");
+    await settle();
+
+    const bEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("b.txt"))!;
+    await bEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "关闭所有标签",
+      "关闭左边所有标签",
+      "关闭右边所有标签",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("非会话标签右键菜单：首个标签不显示关闭左边，末个标签不显示关闭右边", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    await openFileTab(root, bTxt);
+    await settle();
+    await openFileTab(root, root + "\\c.txt");
+    await settle();
+
+    const aEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await aEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).toEqual(["关闭所有标签", "关闭右边所有标签"]);
+
+    const cEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("c.txt"))!;
+    await cEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).toEqual(["关闭所有标签", "关闭左边所有标签"]);
+    wrapper.unmount();
+  });
+
+  it("非会话标签右键「关闭所有标签」：关闭全部可关闭标签，跳过脏并提示", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    await openFileTab(root, bTxt);
+    await settle();
+    // 当前激活 b.txt：改成脏标记后从 b 的菜单关闭所有
+    (await viewOf(wrapper)).dispatch({ changes: { from: 0, insert: "x" } });
+    await flushPromises();
+    expect(wrapper.findAll(".editor-tab-dirty")).toHaveLength(1);
+
+    const bEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("b.txt"))!;
+    await bEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items[0].text().trim()).toBe("关闭所有标签");
+    await items[0].trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
+    expect(store.toast).toContain("已跳过 1 个未保存的标签");
+    wrapper.unmount();
+  });
+
+  it("非会话标签右键「关闭右边所有标签」：仅关右侧，保留目标与左侧", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    await openFileTab(root, bTxt);
+    await settle();
+    await openFileTab(root, root + "\\c.txt");
+    await settle();
+
+    const aEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await aEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items[1].text().trim()).toBe("关闭右边所有标签");
+    await items[1].trigger("click");
+    await flushPromises();
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
     wrapper.unmount();
   });
 

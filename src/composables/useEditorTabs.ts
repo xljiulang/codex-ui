@@ -11,6 +11,11 @@ import {
 import { pathBaseName } from "../lib/format";
 import { base64ToBytes, type PreviewType } from "../lib/preview";
 import type { DiffRow } from "../lib/types";
+import {
+  attachTerminal,
+  ensureTerminalListeners,
+  releaseTerminal,
+} from "./useTerminalEvents";
 
 /** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
 interface TextFileContent {
@@ -173,6 +178,10 @@ export async function openTerminalTab(cwd: string): Promise<void> {
   tabs.push(tab);
   activeTabId.value = id;
   try {
+    // 先注册全局事件监听并建立缓冲，再 spawn，避免启动输出（含 ConPTY DSR
+    // 查询）在懒加载面板挂载前丢失导致首个终端空白。
+    await ensureTerminalListeners();
+    attachTerminal(id);
     await invoke("terminal_spawn", { id, cwd });
   } catch (e) {
     tab.error = String(e);
@@ -428,13 +437,15 @@ export function discardTabAndClose(id: string): void {
 }
 
 /**
- * 关闭其它所有标签（保留会话主标签）：
- * 未保存（脏）的文件标签跳过不关、终端直接结束进程，返回跳过的数量。
+ * 按谓词批量关闭标签：脏文件跳过计数、终端结束进程、其余直接移除。
+ * 谓词基于遍历时的快照索引判定；快照遍历 + 按 id 移除，删除过程安全。
  */
-export function closeAllOtherTabs(): number {
+function closeTabsMatching(
+  pred: (tab: EditorTab, idx: number) => boolean,
+): number {
   let skipped = 0;
-  for (const tab of [...tabs]) {
-    if (tab.id === "chat") continue;
+  for (const [idx, tab] of [...tabs].entries()) {
+    if (!pred(tab, idx)) continue;
     if (tab.kind === "file" && tab.dirty) {
       skipped++;
       continue;
@@ -445,11 +456,32 @@ export function closeAllOtherTabs(): number {
   return skipped;
 }
 
+/** 关闭其它所有标签（保留会话主标签）；返回跳过的未保存标签数量 */
+export function closeAllOtherTabs(): number {
+  return closeTabsMatching((tab) => tab.id !== "chat");
+}
+
+/** 关闭目标标签左侧所有可关闭标签（不含会话与目标本身）；返回跳过的未保存标签数量 */
+export function closeTabsToLeft(id: string): number {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx < 0) return 0;
+  return closeTabsMatching((tab, i) => i < idx && tab.id !== "chat");
+}
+
+/** 关闭目标标签右侧所有可关闭标签（不含会话与目标本身）；返回跳过的未保存标签数量 */
+export function closeTabsToRight(id: string): number {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx < 0) return 0;
+  return closeTabsMatching((tab, i) => i > idx && tab.id !== "chat");
+}
+
 function removeTab(id: string): void {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
+  const kind = tabs[idx].kind;
   const wasActive = activeTabId.value === id;
   tabs.splice(idx, 1);
+  if (kind === "terminal") releaseTerminal(id);
   if (wasActive) {
     const next = tabs[Math.max(0, idx - 1)] ?? tabs[0];
     activeTabId.value = next ? next.id : "chat";

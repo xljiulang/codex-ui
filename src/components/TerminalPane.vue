@@ -1,31 +1,23 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalEditorTab } from "../composables/useEditorTabs";
+import {
+  attachTerminal,
+  type TerminalHandle,
+} from "../composables/useTerminalEvents";
 
 const props = defineProps<{ tab: TerminalEditorTab }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
 
-interface TerminalOutputPayload {
-  id: string;
-  data: string;
-}
-
-interface TerminalExitPayload {
-  id: string;
-  exitCode: number;
-}
-
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
-let unlistenOutput: UnlistenFn | null = null;
-let unlistenExit: UnlistenFn | null = null;
 let resizeObserver: ResizeObserver | null = null;
+let handle: TerminalHandle | null = null;
 let disposed = false;
 
 /** 把 xterm 当前尺寸同步给后端 ConPTY */
@@ -40,7 +32,7 @@ function syncSize() {
   }).catch(() => {});
 }
 
-onMounted(async () => {
+onMounted(() => {
   const host = hostRef.value;
   if (!host) return;
 
@@ -67,14 +59,26 @@ onMounted(async () => {
     void invoke("terminal_write", { id: props.tab.id, data }).catch(() => {});
   });
 
-  unlistenOutput = await listen<TerminalOutputPayload>("terminal/output", (e) => {
-    if (disposed || e.payload.id !== props.tab.id) return;
-    term?.write(e.payload.data);
-  });
-  unlistenExit = await listen<TerminalExitPayload>("terminal/exit", (e) => {
-    if (disposed || e.payload.id !== props.tab.id) return;
+  // 挂载前 openTerminalTab 已通过事件桥缓冲启动输出（含 ConPTY DSR 查询，
+  // xterm 写入后会自动应答，提示符才能渲染），这里先回放再转实时。
+  handle = attachTerminal(props.tab.id);
+  for (const chunk of handle.flush()) {
+    if (disposed) break;
+    term?.write(chunk);
+  }
+  const bufferedExit = handle.exitCode;
+  if (bufferedExit !== null && !disposed) {
     props.tab.exited = true;
-    props.tab.exitCode = e.payload.exitCode;
+    props.tab.exitCode = bufferedExit;
+  }
+  handle.onData((data) => {
+    if (disposed) return;
+    term?.write(data);
+  });
+  handle.onExit((exitCode) => {
+    if (disposed) return;
+    props.tab.exited = true;
+    props.tab.exitCode = exitCode;
   });
 
   // 面板尺寸变化（窗口缩放/切回标签）时重新 fit 并同步 ConPTY
@@ -89,10 +93,21 @@ onMounted(async () => {
   term.focus();
 });
 
+// spawn 完成（loading 置 false）后补一次 fit/resize，消除挂载时 resize
+// 早于 spawn 完成、被后端“终端不存在”拒绝的竞态。
+watch(
+  () => props.tab.loading,
+  (loading) => {
+    if (loading || disposed || props.tab.exited || props.tab.error) return;
+    fitAddon?.fit();
+    syncSize();
+  },
+);
+
 onBeforeUnmount(() => {
   disposed = true;
-  unlistenOutput?.();
-  unlistenExit?.();
+  handle?.detach();
+  handle = null;
   resizeObserver?.disconnect();
   term?.dispose();
   term = null;

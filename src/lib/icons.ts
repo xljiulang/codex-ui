@@ -30,6 +30,14 @@ export const ICON_CLOSE_ALL =
   "M5 3h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 3v8h8V6H5z" +
   "M10 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zm0 3v7h7v-7h-7z" +
   "M11.5 12.5l1-1 5 5-1 1zM16.5 12.5l1-1-5 5-1-1z";
+export const ICON_CLOSE_LEFT =
+  "M11.41 7.41 10 6l-6 6 6 6 1.41-1.41L6.83 12z" +
+  "M14.5 12.5l1-1 5 5-1 1z" +
+  "M19.5 12.5l1-1-5 5-1-1z";
+export const ICON_CLOSE_RIGHT =
+  "M12.59 16.59 14 18l6-6-6-6-1.41 1.41L17.17 12z" +
+  "M3.5 12.5l1-1 5 5-1 1z" +
+  "M8.5 12.5l1-1-5 5-1-1z";
 
 /** 文本编辑器右键菜单与 Markdown 预览切换图标 */
 export const ICON_UNDO =

@@ -6,12 +6,28 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: vi.fn((p: string) => `asset://${p}`),
 }));
 
+const terminalEventsMock = vi.hoisted(() => ({
+  ensureTerminalListeners: vi.fn(() => Promise.resolve()),
+  attachTerminal: vi.fn(() => ({
+    flush: () => [],
+    exitCode: null,
+    onData: vi.fn(),
+    onExit: vi.fn(),
+    detach: vi.fn(),
+  })),
+  releaseTerminal: vi.fn(),
+}));
+
+vi.mock("../useTerminalEvents", () => terminalEventsMock);
+
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   __resetEditorTabsForTest,
   activeTabId,
   activateTab,
   closeAllOtherTabs,
+  closeTabsToLeft,
+  closeTabsToRight,
   closeTab,
   discardTabAndClose,
   openDiffTab,
@@ -26,9 +42,17 @@ import {
   type PreviewEditorTab,
   type TerminalEditorTab,
 } from "../useEditorTabs";
+import {
+  attachTerminal,
+  ensureTerminalListeners,
+  releaseTerminal,
+} from "../useTerminalEvents";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
+const mockedEnsureTerminalListeners = vi.mocked(ensureTerminalListeners);
+const mockedAttachTerminal = vi.mocked(attachTerminal);
+const mockedReleaseTerminal = vi.mocked(releaseTerminal);
 const root = "D:\\repo";
 
 function fileContent(content: string, validUtf8 = true) {
@@ -57,6 +81,9 @@ function mountView(tab: FileEditorTab): { view: EditorView; host: HTMLDivElement
 describe("useEditorTabs 标签状态", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
+    mockedEnsureTerminalListeners.mockReset();
+    mockedAttachTerminal.mockReset();
+    mockedReleaseTerminal.mockReset();
     __resetEditorTabsForTest();
   });
 
@@ -264,6 +291,115 @@ describe("useEditorTabs 标签状态", () => {
     host.remove();
   });
 
+  it("关闭左边所有标签：仅关目标左侧，跳过脏标签并返回计数", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    const dirtyTab = fileTab(activeTabId.value);
+    const { view, host } = mountView(dirtyTab);
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(dirtyTab.dirty).toBe(true);
+    await openFileTab(root, "c.txt");
+    const cTab = tabs.find((t) => t.title === "c.txt")!;
+
+    const skipped = closeTabsToLeft(cTab.id);
+    expect(skipped).toBe(1);
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt", "c.txt"]);
+    view.destroy();
+    host.remove();
+  });
+
+  it("关闭右边所有标签：仅关目标右侧，保留目标本身", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    await openFileTab(root, "c.txt");
+    const aTab = tabs.find((t) => t.title === "a.txt")!;
+
+    const skipped = closeTabsToRight(aTab.id);
+    expect(skipped).toBe(0);
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
+  });
+
+  it("关闭右边：以会话标签为目标等于关闭全部其它标签，跳过脏标签并计数", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    const dirtyTab = fileTab(activeTabId.value);
+    const { view, host } = mountView(dirtyTab);
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(dirtyTab.dirty).toBe(true);
+    await openFileTab(root, "c.txt");
+
+    const skipped = closeTabsToRight("chat");
+    expect(skipped).toBe(1);
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
+    expect(tabs.some((t) => t.id === dirtyTab.id)).toBe(true);
+    view.destroy();
+    host.remove();
+  });
+
+  it("关闭右边所有标签：右侧终端标签一并结束进程", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openTerminalTab(root);
+    const aTab = tabs.find((t) => t.title === "a.txt")!;
+
+    const skipped = closeTabsToRight(aTab.id);
+    expect(skipped).toBe(0);
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: expect.any(String),
+    });
+  });
+
+  it("关闭左边：首个非会话标签返回 0 且无变化", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    const aTab = tabs.find((t) => t.title === "a.txt")!;
+
+    expect(closeTabsToLeft(aTab.id)).toBe(0);
+    expect(tabs).toHaveLength(3);
+  });
+
+  it("关闭左边/右边：未知 id 返回 0", () => {
+    expect(closeTabsToLeft("nope")).toBe(0);
+    expect(closeTabsToRight("nope")).toBe(0);
+  });
+
   it("activateTab 忽略不存在的 id", () => {
     activateTab("nope");
     expect(activeTabId.value).toBe("chat");
@@ -398,6 +534,26 @@ describe("useEditorTabs 标签状态", () => {
     });
   });
 
+  it("打开终端：先建立全局监听/缓冲，再发起 spawn", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t).toBeTruthy();
+    expect(mockedEnsureTerminalListeners).toHaveBeenCalledTimes(1);
+    expect(mockedAttachTerminal).toHaveBeenCalledWith(t!.id);
+    const orderEnsure = mockedEnsureTerminalListeners.mock.invocationCallOrder[0];
+    const orderAttach = mockedAttachTerminal.mock.invocationCallOrder[0];
+    const orderSpawn = mockedInvoke.mock.invocationCallOrder[0];
+    expect(orderEnsure).toBeLessThan(orderSpawn);
+    expect(orderAttach).toBeLessThan(orderSpawn);
+  });
+
   it("同目录连续打开生成不同 id（支持多开）", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "terminal_spawn") return Promise.resolve({});
@@ -444,6 +600,21 @@ describe("useEditorTabs 标签状态", () => {
     expect(tabs.some((x) => x.id === t!.id)).toBe(false);
   });
 
+  it("关闭终端标签：释放事件桥缓冲", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    closeTab(t!.id);
+    expect(mockedReleaseTerminal).toHaveBeenCalledWith(t!.id);
+  });
+
   it("关闭其它所有标签：终端一并结束进程", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "terminal_spawn") return Promise.resolve({});
@@ -473,6 +644,8 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     const pending = openTerminalTab(root);
+    // openTerminalTab 现在先 await 事件桥监听再 spawn，需让微任务队列推进一次
+    await Promise.resolve();
     const t = tabs.find(
       (x): x is TerminalEditorTab => x.kind === "terminal",
     );

@@ -2,8 +2,15 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
 
-const { listeners, xtermState } = vi.hoisted(() => ({
-  listeners: new Map<string, (e: { payload: unknown }) => void>(),
+const { bridgeState, xtermState } = vi.hoisted(() => ({
+  bridgeState: {
+    attached: [] as string[],
+    detached: [] as string[],
+    dataHandlers: new Map<string, (data: string) => void>(),
+    exitHandlers: new Map<string, (exitCode: number) => void>(),
+    buffered: new Map<string, string[]>(),
+    bufferedExit: new Map<string, number>(),
+  },
   xtermState: {
     onData: null as null | ((d: string) => void),
     writeCalls: [] as string[],
@@ -39,13 +46,33 @@ vi.mock("@xterm/addon-fit", () => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn().mockImplementation(
-    (event: string, cb: (e: { payload: unknown }) => void) => {
-      listeners.set(event, cb);
-      return Promise.resolve(() => listeners.delete(event));
-    },
-  ),
+vi.mock("../../composables/useTerminalEvents", () => ({
+  ensureTerminalListeners: vi.fn(() => Promise.resolve()),
+  attachTerminal: vi.fn((id: string) => {
+    bridgeState.attached.push(id);
+    return {
+      flush: () => {
+        const buf = bridgeState.buffered.get(id) ?? [];
+        bridgeState.buffered.delete(id);
+        return buf;
+      },
+      get exitCode() {
+        return bridgeState.bufferedExit.get(id) ?? null;
+      },
+      onData: (cb: (data: string) => void) => {
+        bridgeState.dataHandlers.set(id, cb);
+      },
+      onExit: (cb: (exitCode: number) => void) => {
+        bridgeState.exitHandlers.set(id, cb);
+      },
+      detach: () => {
+        bridgeState.detached.push(id);
+        bridgeState.dataHandlers.delete(id);
+        bridgeState.exitHandlers.delete(id);
+      },
+    };
+  }),
+  releaseTerminal: vi.fn(),
 }));
 
 class ResizeObserverStub {
@@ -77,7 +104,12 @@ function makeTab(over: Partial<TerminalEditorTab> = {}): TerminalEditorTab {
 
 describe("TerminalPane", () => {
   beforeEach(() => {
-    listeners.clear();
+    bridgeState.attached.length = 0;
+    bridgeState.detached.length = 0;
+    bridgeState.dataHandlers.clear();
+    bridgeState.exitHandlers.clear();
+    bridgeState.buffered.clear();
+    bridgeState.bufferedExit.clear();
     xtermState.onData = null;
     xtermState.writeCalls.length = 0;
     xtermState.disposed = 0;
@@ -88,18 +120,42 @@ describe("TerminalPane", () => {
     vi.unstubAllGlobals();
   });
 
-  it("挂载后创建 xterm、注册事件监听并同步初始尺寸", async () => {
+  it("挂载后创建 xterm、经事件桥订阅并同步初始尺寸", async () => {
     mockedInvoke.mockResolvedValue(undefined);
     const tab = makeTab();
     const wrapper = mount(TerminalPane, { props: { tab } });
     await flushPromises();
-    expect(listeners.has("terminal/output")).toBe(true);
-    expect(listeners.has("terminal/exit")).toBe(true);
+    expect(bridgeState.attached).toContain(tab.id);
+    expect(bridgeState.dataHandlers.has(tab.id)).toBe(true);
+    expect(bridgeState.exitHandlers.has(tab.id)).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_resize", {
       id: tab.id,
       cols: 100,
       rows: 30,
     });
+    wrapper.unmount();
+  });
+
+  it("挂载即回放事件桥缓冲输出（首个终端的 DSR 启动输出不丢失）", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab();
+    bridgeState.buffered.set(tab.id, ["\x1b[6nPS D:\\repo>"]);
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    expect(xtermState.writeCalls).toEqual(["\x1b[6nPS D:\\repo>"]);
+    wrapper.unmount();
+  });
+
+  it("挂载前进程已退出：缓冲退出码直接显示已退出覆盖层", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab();
+    bridgeState.bufferedExit.set(tab.id, 1);
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    await nextTick();
+    expect(tab.exited).toBe(true);
+    expect(tab.exitCode).toBe(1);
+    expect(wrapper.find(".terminal-overlay").text()).toContain("进程已退出");
     wrapper.unmount();
   });
 
@@ -116,21 +172,17 @@ describe("TerminalPane", () => {
     wrapper.unmount();
   });
 
-  it("terminal/output 只写入匹配 id 的 xterm，忽略其它终端输出", async () => {
+  it("事件桥实时输出写入 xterm（订阅按本标签 id 建立）", async () => {
     mockedInvoke.mockResolvedValue(undefined);
     const tab = makeTab();
     const wrapper = mount(TerminalPane, { props: { tab } });
     await flushPromises();
 
-    listeners.get("terminal/output")!({
-      payload: { id: "terminal:other", data: "noise" },
-    });
-    expect(xtermState.writeCalls).toHaveLength(0);
-
-    listeners.get("terminal/output")!({
-      payload: { id: tab.id, data: "hi" },
-    });
+    expect(bridgeState.dataHandlers.has("terminal:other")).toBe(false);
+    bridgeState.dataHandlers.get(tab.id)!("hi");
     expect(xtermState.writeCalls).toEqual(["hi"]);
+    bridgeState.dataHandlers.get(tab.id)!(" again");
+    expect(xtermState.writeCalls).toEqual(["hi", " again"]);
     wrapper.unmount();
   });
 
@@ -140,9 +192,7 @@ describe("TerminalPane", () => {
     const wrapper = mount(TerminalPane, { props: { tab } });
     await flushPromises();
 
-    listeners.get("terminal/exit")!({
-      payload: { id: tab.id, exitCode: 0 },
-    });
+    bridgeState.exitHandlers.get(tab.id)!(0);
     await nextTick();
     expect(tab.exited).toBe(true);
     expect(tab.exitCode).toBe(0);
@@ -150,12 +200,38 @@ describe("TerminalPane", () => {
     wrapper.unmount();
   });
 
-  it("卸载时取消监听并销毁 xterm", async () => {
+  it("spawn 完成（loading 置 false）后再次 fit 并同步尺寸", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab({ loading: true });
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_resize", {
+      id: tab.id,
+      cols: 100,
+      rows: 30,
+    });
+    const resizeCalls = mockedInvoke.mock.calls.filter(
+      (c) => c[0] === "terminal_resize",
+    ).length;
+    expect(resizeCalls).toBe(1);
+
+    tab.loading = false;
+    await nextTick();
+    expect(mockedInvoke).toHaveBeenCalledTimes(resizeCalls + 1);
+    expect(mockedInvoke).toHaveBeenLastCalledWith("terminal_resize", {
+      id: tab.id,
+      cols: 100,
+      rows: 30,
+    });
+    wrapper.unmount();
+  });
+
+  it("卸载时 detach 事件桥并销毁 xterm", async () => {
     mockedInvoke.mockResolvedValue(undefined);
     const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
     await flushPromises();
     wrapper.unmount();
+    expect(bridgeState.detached).toHaveLength(1);
     expect(xtermState.disposed).toBe(1);
-    expect(listeners.size).toBe(0);
   });
 });

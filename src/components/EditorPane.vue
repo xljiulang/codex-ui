@@ -15,6 +15,8 @@ import {
   activateTab,
   cancelClose,
   closeAllOtherTabs,
+  closeTabsToLeft,
+  closeTabsToRight,
   closeTab,
   discardTabAndClose,
   pendingCloseId,
@@ -28,10 +30,15 @@ import {
 } from "../composables/useEditorTabs";
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import type { FsEntry } from "../lib/sessionFs";
-import { useActionMenu } from "../composables/useActionMenu";
+import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { setToast, store } from "../composables/useCodex";
 import { relPathOf } from "../lib/format";
-import { ICON_CLOSE_ALL, ICON_TERMINAL } from "../lib/icons";
+import {
+  ICON_CLOSE_ALL,
+  ICON_CLOSE_LEFT,
+  ICON_CLOSE_RIGHT,
+  ICON_TERMINAL,
+} from "../lib/icons";
 
 // CodeMirror / diff 渲染较重，仍按需加载，避免拖累主窗口首屏
 const TextEditorPane = defineAsyncComponent(
@@ -151,19 +158,40 @@ function tabTooltip(tab: EditorTab): string {
   return relPathOf(root, tab.path);
 }
 
-/** 会话主标签右键菜单：关闭其它所有标签（未保存的跳过） */
-function openChatTabMenu(e: MouseEvent, tab: EditorTab) {
-  if (tab.kind !== "chat" || tabs.length <= 1) return;
-  openCtx(e, [
+/**
+ * 标签右键菜单：所有标签统一提供关闭所有/左边/右边（未保存的跳过并提示）。
+ * 会话主标签固定在首位且不可关闭：左边项天然隐藏（idx=0），关闭所有天然
+ * 排除会话标签（closeAllOtherTabs），无需特判。
+ */
+function openTabMenu(e: MouseEvent, tab: EditorTab) {
+  const closeWithToast = (skipped: number) => {
+    if (skipped > 0) setToast(`已跳过 ${skipped} 个未保存的标签`);
+  };
+  const idx = tabs.findIndex((t) => t.id === tab.id);
+  const hasLeft = tabs.slice(0, idx).some((t) => t.kind !== "chat");
+  const hasRight = tabs.slice(idx + 1).some((t) => t.kind !== "chat");
+  const items: CtxItem[] = [
     {
-      label: "关闭其它所有标签",
+      label: "关闭所有标签",
       icon: ICON_CLOSE_ALL,
-      action: () => {
-        const skipped = closeAllOtherTabs();
-        if (skipped > 0) setToast(`已跳过 ${skipped} 个未保存的标签`);
-      },
+      action: () => closeWithToast(closeAllOtherTabs()),
     },
-  ]);
+  ];
+  if (hasLeft) {
+    items.push({
+      label: "关闭左边所有标签",
+      icon: ICON_CLOSE_LEFT,
+      action: () => closeWithToast(closeTabsToLeft(tab.id)),
+    });
+  }
+  if (hasRight) {
+    items.push({
+      label: "关闭右边所有标签",
+      icon: ICON_CLOSE_RIGHT,
+      action: () => closeWithToast(closeTabsToRight(tab.id)),
+    });
+  }
+  openCtx(e, items);
 }
 
 const { ctxMenu, openCtx, onWindowClick, onWindowScroll, onKeydown: onMenuKeydown } =
@@ -247,7 +275,7 @@ watch(
           :tabindex="tab.id === activeTabId ? 0 : -1"
           v-tooltip="tabTooltip(tab)"
           @click="activateTab(tab.id)"
-          @contextmenu="openChatTabMenu($event, tab)"
+          @contextmenu="openTabMenu($event, tab)"
           @mousedown.middle.prevent="closeTab(tab.id)"
         >
           <span
