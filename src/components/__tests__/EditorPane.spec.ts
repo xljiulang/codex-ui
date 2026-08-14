@@ -151,6 +151,56 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("会话标签固定在滚动区外，其它标签在滚动区内滚动", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+
+    const track = wrapper.find(".editor-tabs-track");
+    expect(track.exists()).toBe(true);
+    expect(track.attributes("role")).toBe("tablist");
+    expect(track.attributes("aria-label")).toBe("编辑标签");
+
+    const tabEls = wrapper.findAll(".editor-tab");
+    expect(tabEls).toHaveLength(2);
+    expect(tabEls[0].classes()).toContain("pinned");
+    expect(tabEls[0].attributes("aria-label")).toBe("会话");
+    // 会话 tab 是固定区包裹层的直接子节点，不在滚动区内部
+    expect(
+      tabEls[0].element.parentElement?.classList.contains("editor-tabs-track"),
+    ).toBe(true);
+
+    const scrollerTabs = wrapper.find(".editor-tabs").findAll(".editor-tab");
+    expect(scrollerTabs).toHaveLength(1);
+    expect(scrollerTabs[0].text()).toContain("a.txt");
+    expect(scrollerTabs[0].classes()).not.toContain("pinned");
+    wrapper.unmount();
+  });
+
+  it("标签栏 tablist 角色由固定区包裹层承担", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+
+    const scroller = wrapper.find(".editor-tabs");
+    expect(scroller.attributes("role")).toBeUndefined();
+    expect(scroller.attributes("aria-label")).toBeUndefined();
+    expect(wrapper.find(".editor-tabs-track").attributes("role")).toBe("tablist");
+    wrapper.unmount();
+  });
+
   it("关闭最后一个文件标签后标签栏再次隐藏", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
@@ -497,13 +547,35 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(labels[0].text()).toContain("a.txt");
     expect(wrapper.find(".editor-tab-icon").exists()).toBe(true);
     expect(wrapper.find(".editor-tab-icon svg").exists()).toBe(true);
-    expect(wrapper.findAll(".editor-tab")[1].attributes("data-tip")).toBe(
-      "a.txt",
-    );
+    // 根目录文件：标题与相对路径相同，header 与标题均不显示 tooltip
+    const fileTabEl = wrapper.findAll(".editor-tab")[1];
+    expect(fileTabEl.attributes("data-tip")).toBe("");
+    expect(fileTabEl.find(".editor-tab-label").attributes("data-tip")).toBe("");
     await waitForEl(wrapper, ".text-editor-path");
     expect(wrapper.find(".text-editor-path").text()).toBe("a.txt");
     expect((await viewOf(wrapper)).state.doc.toString()).toBe("hello");
     expect(wrapper.find(".text-editor-dirty").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("子目录文件：标题与相对路径不同，标题上显示路径 tooltip", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, root + "\\src\\a.txt");
+    await settle();
+    await settle();
+
+    const fileTabEl = wrapper.findAll(".editor-tab")[1];
+    expect(fileTabEl.find(".editor-tab-label").text()).toBe("a.txt");
+    expect(fileTabEl.attributes("data-tip")).toBe("");
+    expect(fileTabEl.find(".editor-tab-label").attributes("data-tip")).toBe(
+      "src\\a.txt",
+    );
     wrapper.unmount();
   });
 
@@ -766,7 +838,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(tabEls).toHaveLength(2);
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("pic.png");
     expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
-    expect(tabEls[1].attributes("data-tip")).toBe("pic.png");
+    // 根目录文件：标题与相对路径相同，header 与标题均不显示 tooltip
+    expect(tabEls[1].attributes("data-tip")).toBe("");
+    expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     await waitForEl(wrapper, ".preview-pane");
     wrapper.unmount();
   });
@@ -807,7 +881,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("src");
-    expect(tabEls[1].attributes("data-tip")).toBe(root + "\\src");
+    // 标题（目录名）与 cwd 不同：标题上显示完整 cwd，header 无 tooltip
+    expect(tabEls[1].attributes("data-tip")).toBe("");
+    expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe(
+      root + "\\src",
+    );
     expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
     await waitForEl(wrapper, ".terminal-pane");
     wrapper.unmount();

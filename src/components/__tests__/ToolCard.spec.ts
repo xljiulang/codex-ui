@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ToolCard from "../ToolCard.vue";
 import type { ThreadItem } from "../../lib/types";
 import { store } from "../../composables/useCodex";
+import { __resetEditorTabsForTest } from "../../composables/useEditorTabs";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -219,6 +220,8 @@ describe("文件变更：打开独立 diff 窗口", () => {
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue(null);
     store.server.workspace = "D:/repo";
+    store.toast = "";
+    __resetEditorTabsForTest();
   });
 
   function changeItem(
@@ -234,40 +237,56 @@ describe("文件变更：打开独立 diff 窗口", () => {
     } as ThreadItem;
   }
 
-  it("点击变更行调用 build_diff_preview 打开 diff 标签", async () => {
+  function openCallParams() {
+    const openCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "build_diff_preview",
+    );
+    return openCall?.[1] as
+      | {
+          params: {
+            path: string;
+            kind: string;
+            diff: string;
+            workspace_root: string;
+          };
+        }
+      | undefined;
+  }
+
+  it("点击变更行（自带 diff）直接打开 diff 标签，不依赖 git", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "build_diff_preview") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
     const wrapper = mount(ToolCard, {
       props: { item: changeItem(REPLACE_DIFF, "D:\\repo\\a.cs", "update") },
     });
     await wrapper.find(".tool-card-header").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("build_diff_preview", {
-      params: {
-        path: "D:\\repo\\a.cs",
-        kind: "update",
-        diff: REPLACE_DIFF,
-        workspace_root: "D:/repo",
-      },
-    });
+
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "git_changes_diff",
+      expect.anything(),
+    );
+    const params = openCallParams()?.params;
+    expect(params?.path).toBe("D:\\repo\\a.cs");
+    expect(params?.kind).toBe("modify");
+    expect(params?.workspace_root).toBe("D:/repo");
+    expect(params?.diff).toBe(REPLACE_DIFF);
+    wrapper.unmount();
   });
 
   it("无 diff 的行点击不打开窗口", async () => {
     const wrapper = mount(ToolCard, {
-      props: {
-        item: {
-          id: "f2",
-          type: "fileChange",
-          changes: [{ path: "D:\\repo\\empty.cs", kind: "update", diff: "" }],
-          status: "completed",
-        } as ThreadItem,
-      },
+      props: { item: changeItem("", "D:\\repo\\empty.cs", "update") },
     });
     await wrapper.find(".tool-card-header").trigger("click");
     await wrapper.find(".change-row").trigger("click");
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "build_diff_preview",
-      expect.anything(),
-    );
+    await flushPromises();
+
+    expect(openCallParams()).toBeUndefined();
+    wrapper.unmount();
   });
 });
 

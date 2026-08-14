@@ -540,7 +540,7 @@ async function openDiff(file: GitFile) {
     const diff = await invoke<string>("git_changes_diff", {
       root,
       path: file.path,
-      kind: file.status,
+      kind: gitDiffKind(file.status),
     });
     if (!diff) {
       setToast("该文件无内容变化（可能仅为重命名）");

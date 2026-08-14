@@ -5071,6 +5071,15 @@ body.resizing-editor {
   flex-shrink: 0;
 }
 
+/* 会话主标签固定区：与右侧滚动区同排，自身不滚动 */
+.editor-tabs-track {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
 .editor-tabs {
   display: flex;
   align-items: flex-end;
@@ -5145,6 +5154,16 @@ body.resizing-editor {
 
 .editor-tab.pinned.active .editor-tab-label {
   color: var(--accent);
+}
+
+/* 会话主标签固定在滚动区外：不收缩，右侧细分隔线（active 时已有边框，避免双线） */
+.editor-tab.pinned {
+  flex-shrink: 0;
+  box-shadow: 1px 0 0 var(--border);
+}
+
+.editor-tab.pinned.active {
+  box-shadow: none;
 }
 
 .editor-tab-label {
@@ -5282,14 +5301,14 @@ body.resizing-editor {
   flex-direction: column;
 }
 
-/* 终端标签：xterm 填满编辑区，深色控制台底色（与 --console-bg-deep 一致） */
+/* 终端标签：xterm 填满编辑区，控制台底色随主题切换（与代码块共用 --console-*） */
 .terminal-pane {
   flex: 1;
   min-height: 0;
   position: relative;
   display: flex;
   flex-direction: column;
-  background: #0c1016;
+  background: var(--console-bg-deep);
 }
 
 .terminal-host {
@@ -5311,7 +5330,7 @@ body.resizing-editor {
   justify-content: center;
   gap: 8px;
   padding: 16px;
-  background: rgba(12, 16, 22, 0.92);
+  background: var(--console-bg);
   color: var(--text-dim);
   text-align: center;
   pointer-events: none;

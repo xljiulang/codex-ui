@@ -65,6 +65,9 @@ export interface GitCommitEntry {
   timeSecs: number;
 }
 
+/** diff 预览类型（与 DiffPreviewParams.kind 一致） */
+export type DiffPreviewKind = "add" | "delete" | "modify";
+
 export function gitStatusLabel(status: GitFileStatus): string {
   switch (status) {
     case "added":
@@ -101,7 +104,7 @@ export function gitStatusLetter(status: GitFileStatus): string {
 }
 
 /** 映射到现有 diff 窗口的 kind 取值 */
-export function gitDiffKind(status: GitFileStatus): string {
+export function gitDiffKind(status: GitFileStatus): DiffPreviewKind {
   if (status === "added" || status === "untracked") return "add";
   if (status === "deleted") return "delete";
   return "modify";

@@ -10,6 +10,7 @@ import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { workspaceRoot } from "../lib/links";
 import { copyText } from "../lib/clipboard";
 import { openDiffTab } from "../composables/useEditorTabs";
+import type { DiffPreviewKind } from "../lib/gitChanges";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -297,12 +298,21 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
   });
 }
 
-// ---------- 文件变更：在主窗口打开 diff 标签 ----------
+// ---------- 文件变更：用条目自带的内联 diff 直接打开 ----------
+
+/** 变更 kind 归一为 diff 预览类型（非 add/delete 一律按修改处理） */
+function diffKindOf(kind: unknown): DiffPreviewKind {
+  const k = kindOf(kind);
+  if (k === "add") return "add";
+  if (k === "delete") return "delete";
+  return "modify";
+}
+
 function openPreview(c: { path: string; kind: unknown; diff?: string }) {
   if (!c.diff) return;
   void openDiffTab({
     path: c.path,
-    kind: kindOf(c.kind),
+    kind: diffKindOf(c.kind),
     diff: c.diff,
     workspace_root: workspaceRoot(),
   });

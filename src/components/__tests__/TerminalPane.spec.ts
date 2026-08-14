@@ -15,11 +15,17 @@ const { bridgeState, xtermState } = vi.hoisted(() => ({
     onData: null as null | ((d: string) => void),
     writeCalls: [] as string[],
     disposed: 0,
+    constructorOptions: null as Record<string, unknown> | null,
+    options: {} as { theme?: Record<string, unknown> },
   },
 }));
 
 vi.mock("@xterm/xterm", () => {
   class TerminalMock {
+    constructor(options: Record<string, unknown> = {}) {
+      xtermState.constructorOptions = options;
+      xtermState.options = { ...options };
+    }
     loadAddon() {}
     open() {}
     onData(cb: (d: string) => void) {
@@ -31,6 +37,12 @@ vi.mock("@xterm/xterm", () => {
     focus() {}
     dispose() {
       xtermState.disposed++;
+    }
+    get options() {
+      return xtermState.options;
+    }
+    set options(v: Record<string, unknown>) {
+      xtermState.options = { ...v };
     }
   }
   return { Terminal: TerminalMock };
@@ -113,6 +125,8 @@ describe("TerminalPane", () => {
     xtermState.onData = null;
     xtermState.writeCalls.length = 0;
     xtermState.disposed = 0;
+    xtermState.constructorOptions = null;
+    xtermState.options = {};
     mockedInvoke.mockReset();
   });
 
@@ -233,5 +247,62 @@ describe("TerminalPane", () => {
     wrapper.unmount();
     expect(bridgeState.detached).toHaveLength(1);
     expect(xtermState.disposed).toBe(1);
+  });
+
+  it("按当前主题 CSS 变量初始化 xterm 基础配色", async () => {
+    document.documentElement.style.setProperty(
+      "--console-bg-deep",
+      "rgba(1, 2, 3, 0.9)",
+    );
+    document.documentElement.style.setProperty("--console-text", "#aabbcc");
+    document.documentElement.style.setProperty("--accent", "#123456");
+    document.documentElement.style.setProperty("--accent-rgb", "18, 52, 86");
+    mockedInvoke.mockResolvedValue(undefined);
+    const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
+    await flushPromises();
+
+    expect(xtermState.constructorOptions?.allowTransparency).toBe(true);
+    expect(xtermState.constructorOptions?.theme).toEqual({
+      background: "rgba(1, 2, 3, 0.9)",
+      foreground: "#aabbcc",
+      cursor: "#123456",
+      selectionBackground: "rgba(18, 52, 86, 0.35)",
+    });
+
+    document.documentElement.style.removeProperty("--console-bg-deep");
+    document.documentElement.style.removeProperty("--console-text");
+    document.documentElement.style.removeProperty("--accent");
+    document.documentElement.style.removeProperty("--accent-rgb");
+    wrapper.unmount();
+  });
+
+  it("data-theme 变化后同步更新 xterm 配色", async () => {
+    document.documentElement.style.setProperty(
+      "--console-bg-deep",
+      "rgba(1, 2, 3, 0.9)",
+    );
+    document.documentElement.style.setProperty("--console-text", "#aabbcc");
+    document.documentElement.style.setProperty("--accent", "#123456");
+    document.documentElement.style.setProperty("--accent-rgb", "18, 52, 86");
+    mockedInvoke.mockResolvedValue(undefined);
+    const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
+    await flushPromises();
+    expect(xtermState.options.theme?.background).toBe("rgba(1, 2, 3, 0.9)");
+
+    document.documentElement.style.setProperty(
+      "--console-bg-deep",
+      "rgba(9, 9, 9, 0.95)",
+    );
+    document.documentElement.setAttribute("data-theme", "light");
+    await nextTick();
+    await flushPromises();
+    expect(xtermState.options.theme?.background).toBe("rgba(9, 9, 9, 0.95)");
+
+    document.documentElement.removeAttribute("data-theme");
+    document.documentElement.style.removeProperty("--console-bg-deep");
+    document.documentElement.style.removeProperty("--console-text");
+    document.documentElement.style.removeProperty("--accent");
+    document.documentElement.style.removeProperty("--accent-rgb");
+    wrapper.unmount();
   });
 });

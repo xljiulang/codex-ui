@@ -194,7 +194,7 @@ describe("GitView 文件列表与 diff", () => {
     expect(diffCall?.[1]).toEqual({
       root: rootPath,
       path: "a.txt",
-      kind: "modified",
+      kind: "modify",
     });
 
     const openCall = mockedInvoke.mock.calls.find(
