@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, watch } from "vue";
 import ChatView from "./ChatView.vue";
 import {
   activeTab,
   activeTabId,
   activateTab,
   cancelClose,
+  closeAllOtherTabs,
   closeTab,
   discardTabAndClose,
   pendingCloseId,
@@ -17,6 +18,10 @@ import {
 } from "../composables/useEditorTabs";
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import type { FsEntry } from "../lib/sessionFs";
+import { useActionMenu } from "../composables/useActionMenu";
+import { setToast } from "../composables/useCodex";
+import { relPathOf } from "../lib/format";
+import { ICON_CLOSE_ALL } from "../lib/icons";
 
 // CodeMirror / diff 渲染较重，仍按需加载，避免拖累主窗口首屏
 const TextEditorPane = defineAsyncComponent(
@@ -49,15 +54,6 @@ function kindLabel(kind: string): string {
   return "修改";
 }
 
-/** 路径相对标签 root 的表示（无扩展名文件图标缓存键用） */
-function relPathOf(root: string, path: string): string {
-  const normRoot = root.replace(/[\\/]+$/, "");
-  if (path.startsWith(normRoot + "\\") || path.startsWith(normRoot + "/")) {
-    return path.slice(normRoot.length + 1);
-  }
-  return path;
-}
-
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
 function tabToEntry(tab: FileEditorTab | DiffEditorTab): FsEntry {
   const root = tab.kind === "file" ? tab.root : tab.workspaceRoot;
@@ -76,6 +72,48 @@ function tabToEntry(tab: FileEditorTab | DiffEditorTab): FsEntry {
 function tabIcon(tab: FileEditorTab | DiffEditorTab): string {
   return iconFor(tabToEntry(tab)) ?? "";
 }
+
+/** 标签悬停提示：文件/diff 显示相对工作区根的路径 */
+function tabTooltip(tab: EditorTab): string {
+  if (tab.kind === "chat") return "会话";
+  const root = tab.kind === "file" ? tab.root : tab.workspaceRoot;
+  return relPathOf(root, tab.path);
+}
+
+/** 会话主标签右键菜单：关闭其它所有标签（未保存的跳过） */
+function openChatTabMenu(e: MouseEvent, tab: EditorTab) {
+  if (tab.kind !== "chat" || tabs.length <= 1) return;
+  openCtx(e, [
+    {
+      label: "关闭其它所有标签",
+      icon: ICON_CLOSE_ALL,
+      action: () => {
+        const skipped = closeAllOtherTabs();
+        if (skipped > 0) setToast(`已跳过 ${skipped} 个未保存的标签`);
+      },
+    },
+  ]);
+}
+
+const { ctxMenu, openCtx, onWindowClick, onWindowScroll, onKeydown: onMenuKeydown } =
+  useActionMenu({ width: 190, scrollScope: ".editor-tabs" });
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== "Escape") return;
+  onMenuKeydown(e);
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onKeydown);
+  window.addEventListener("click", onWindowClick);
+  window.addEventListener("scroll", onWindowScroll, true);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("click", onWindowClick);
+  window.removeEventListener("scroll", onWindowScroll, true);
+});
 
 // 打开/关闭标签时按 root 分组懒加载缺失的文件图标（命中资源面板同一缓存）
 watch(
@@ -113,8 +151,9 @@ watch(
         :aria-selected="tab.id === activeTabId"
         :aria-label="tab.kind === 'chat' ? '会话' : tab.title"
         :tabindex="tab.id === activeTabId ? 0 : -1"
-        v-tooltip="tab.kind === 'chat' ? '会话' : tab.path"
+        v-tooltip="tabTooltip(tab)"
         @click="activateTab(tab.id)"
+        @contextmenu="openChatTabMenu($event, tab)"
         @mousedown.middle.prevent="closeTab(tab.id)"
       >
         <span v-if="tab.kind === 'chat'" class="editor-tab-logo" aria-hidden="true">
@@ -186,6 +225,24 @@ watch(
           <button class="text-editor-btn" @click="cancelClose">取消</button>
         </div>
       </div>
+    </div>
+    <div
+      v-if="ctxMenu"
+      class="ctx-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      @click.stop
+    >
+      <button
+        v-for="it in ctxMenu.items"
+        :key="it.label"
+        class="ctx-menu-item"
+        @click="it.action(); ctxMenu = null"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="it.icon" fill-rule="evenodd" />
+        </svg>
+        <span>{{ it.label }}</span>
+      </button>
     </div>
   </div>
 </template>

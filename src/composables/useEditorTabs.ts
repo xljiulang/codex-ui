@@ -288,6 +288,23 @@ export function discardTabAndClose(id: string): void {
   removeTab(id);
 }
 
+/**
+ * 关闭其它所有标签（保留会话主标签）：
+ * 未保存（脏）的文件标签跳过不关，返回跳过的数量。
+ */
+export function closeAllOtherTabs(): number {
+  let skipped = 0;
+  for (const tab of [...tabs]) {
+    if (tab.id === "chat") continue;
+    if (tab.kind === "file" && tab.dirty) {
+      skipped++;
+      continue;
+    }
+    removeTab(tab.id);
+  }
+  return skipped;
+}
+
 function removeTab(id: string): void {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;

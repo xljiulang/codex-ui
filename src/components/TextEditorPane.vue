@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { EditorView } from "@codemirror/view";
 import { formatFileSize } from "../lib/sessionFs";
 import { languageFromPath } from "../lib/highlight";
+import { relPathOf } from "../lib/format";
 import { saveFileTab, type FileEditorTab } from "../composables/useEditorTabs";
 
 const props = defineProps<{ tab: FileEditorTab }>();
@@ -85,7 +86,7 @@ onBeforeUnmount(() => {
   <div class="text-editor-window text-editor-embedded">
     <div class="text-editor-head">
       <span class="text-editor-title">
-        <span class="text-editor-path">{{ tab.path }}</span>
+        <span class="text-editor-path">{{ relPathOf(tab.root, tab.path) }}</span>
         <span class="text-editor-lang">{{ langLabel }}</span>
         <span v-if="tab.dirty" class="text-editor-dirty">未保存</span>
         <span v-if="tab.readOnly" class="text-editor-ro">只读</span>

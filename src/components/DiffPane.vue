@@ -62,10 +62,10 @@ const renderedRows = computed(() =>
   <div class="diff-window diff-embedded">
     <div class="diff-window-head">
       <span class="diff-window-title">
+        <span class="diff-window-path">{{ tab.path }}</span>
         <span class="change-kind" :class="tab.changeKind">
           {{ kindLabel(tab.changeKind) }}
         </span>
-        <span class="diff-window-path">{{ tab.path }}</span>
       </span>
     </div>
     <div class="diff-window-body">

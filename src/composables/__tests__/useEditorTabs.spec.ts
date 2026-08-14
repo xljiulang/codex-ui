@@ -8,6 +8,7 @@ import {
   __resetEditorTabsForTest,
   activeTabId,
   activateTab,
+  closeAllOtherTabs,
   closeTab,
   discardTabAndClose,
   openDiffTab,
@@ -216,6 +217,43 @@ describe("useEditorTabs 标签状态", () => {
 
     closeTab(activeTabId.value);
     expect(activeTabId.value).toBe("chat");
+  });
+
+  it("关闭其它所有标签：保留会话标签，干净标签关闭，脏标签跳过并返回数量", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "build_diff_preview") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    await openFileTab(root, "c.txt");
+    const dirtyTab = fileTab(activeTabId.value);
+    const { view, host } = mountView(dirtyTab);
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(dirtyTab.dirty).toBe(true);
+
+    await openDiffTab({
+      path: "d.txt",
+      kind: "add",
+      diff: "diff --git a/d.txt b/d.txt\n@@ -0,0 +1 @@\n+x",
+      workspace_root: root,
+    });
+
+    const skipped = closeAllOtherTabs();
+    expect(skipped).toBe(1);
+    expect(tabs.map((t) => t.id)).toEqual(["chat", dirtyTab.id]);
+    expect(tabs.some((t) => t.kind === "diff")).toBe(false);
+    expect(tabs.some((t) => t.title === "a.txt")).toBe(false);
+    expect(tabs.some((t) => t.title === "b.txt")).toBe(false);
+    expect(tabs.some((t) => t.id === dirtyTab.id)).toBe(true);
+    view.destroy();
+    host.remove();
   });
 
   it("activateTab 忽略不存在的 id", () => {

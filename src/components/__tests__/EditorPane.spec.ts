@@ -28,6 +28,7 @@ import {
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
+import { store } from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
@@ -136,6 +137,40 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("会话标签右键菜单：关闭其它所有标签，未保存的跳过并提示", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    await openFileTab(root, bTxt);
+    await settle();
+    // 当前激活 b.txt：改成脏标记
+    (await viewOf(wrapper)).dispatch({ changes: { from: 0, insert: "x" } });
+    await flushPromises();
+    expect(wrapper.findAll(".editor-tab-dirty")).toHaveLength(1);
+
+    const chatTab = wrapper.findAll(".editor-tab")[0];
+    await chatTab.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items).toHaveLength(1);
+    expect(items[0].text().trim()).toBe("关闭其它所有标签");
+
+    await items[0].trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
+    expect(store.toast).toContain("已跳过 1 个未保存的标签");
+    wrapper.unmount();
+  });
+
   it("打开文本文件：新增文件标签、渲染编辑器并激活", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
@@ -154,8 +189,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(labels[0].text()).toContain("a.txt");
     expect(wrapper.find(".editor-tab-icon").exists()).toBe(true);
     expect(wrapper.find(".editor-tab-icon svg").exists()).toBe(true);
+    expect(wrapper.findAll(".editor-tab")[1].attributes("data-tip")).toBe(
+      "a.txt",
+    );
     await waitForEl(wrapper, ".text-editor-path");
-    expect(wrapper.find(".text-editor-path").text()).toBe(aTxt);
+    expect(wrapper.find(".text-editor-path").text()).toBe("a.txt");
     expect((await viewOf(wrapper)).state.doc.toString()).toBe("hello");
     expect(wrapper.find(".text-editor-dirty").exists()).toBe(false);
     wrapper.unmount();
@@ -396,6 +434,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     expect(wrapper.find(".editor-tab-kind").text()).toBe("新增");
     expect(wrapper.find(".diff-window-path").text()).toBe("a.txt");
+    const titleSpans = wrapper.findAll(".diff-window-title > span");
+    expect(titleSpans[0].classes()).toContain("diff-window-path");
+    expect(titleSpans[1].classes()).toContain("change-kind");
     expect(wrapper.find(".diff-row.add").exists()).toBe(true);
     expect(wrapper.find(".diff-row.add .diff-text").text()).toBe("hello");
     wrapper.unmount();

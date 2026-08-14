@@ -37,3 +37,12 @@ export function pathBaseName(path: string): string {
   const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
 }
+
+/** 路径相对 root 的表示：剥离 root 前缀（兼容 / 与 \ 分隔符），非 root 下的路径原样返回 */
+export function relPathOf(root: string, path: string): string {
+  const normRoot = root.replace(/[\\/]+$/, "");
+  if (path.startsWith(normRoot + "\\") || path.startsWith(normRoot + "/")) {
+    return path.slice(normRoot.length + 1);
+  }
+  return path;
+}
