@@ -15,6 +15,7 @@ import {
   type EditorTab,
   type FileEditorTab,
   type DiffEditorTab,
+  type PreviewEditorTab,
 } from "../composables/useEditorTabs";
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import type { FsEntry } from "../lib/sessionFs";
@@ -28,6 +29,7 @@ const TextEditorPane = defineAsyncComponent(
   () => import("./TextEditorPane.vue"),
 );
 const DiffPane = defineAsyncComponent(() => import("./DiffPane.vue"));
+const PreviewPane = defineAsyncComponent(() => import("./PreviewPane.vue"));
 
 /** 通用文件回退图标（与资源面板一致） */
 const ICON_FILE =
@@ -38,6 +40,9 @@ const activeFileTab = computed(() =>
 );
 const activeDiffTab = computed(() =>
   activeTab.value?.kind === "diff" ? activeTab.value : null,
+);
+const activePreviewTab = computed(() =>
+  activeTab.value?.kind === "preview" ? activeTab.value : null,
 );
 
 /** 会话标签常驻，存在任何文件/diff 标签时才显示标签栏 */
@@ -55,8 +60,9 @@ function kindLabel(kind: string): string {
 }
 
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
-function tabToEntry(tab: FileEditorTab | DiffEditorTab): FsEntry {
-  const root = tab.kind === "file" ? tab.root : tab.workspaceRoot;
+function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEntry {
+  const root =
+    tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
   return {
     name: tab.title,
     path: tab.path,
@@ -69,7 +75,7 @@ function tabToEntry(tab: FileEditorTab | DiffEditorTab): FsEntry {
   };
 }
 
-function tabIcon(tab: FileEditorTab | DiffEditorTab): string {
+function tabIcon(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string {
   return iconFor(tabToEntry(tab)) ?? "";
 }
 
@@ -78,7 +84,8 @@ function tabTooltip(tab: EditorTab): string {
   if (tab.kind === "chat") {
     return store.turnActive ? "会话（进行中）" : "会话";
   }
-  const root = tab.kind === "file" ? tab.root : tab.workspaceRoot;
+  const root =
+    tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
   return relPathOf(root, tab.path);
 }
 
@@ -124,7 +131,8 @@ watch(
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of tabs) {
       if (tab.kind === "chat") continue;
-      const root = tab.kind === "file" ? tab.root : tab.workspaceRoot;
+      const root =
+        tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
       const list = byRoot.get(root) ?? [];
       list.push(tabToEntry(tab));
       byRoot.set(root, list);
@@ -192,6 +200,7 @@ watch(
         <span v-else-if="tab.kind === 'diff'" class="editor-tab-kind">
           {{ kindLabel(tab.changeKind) }}
         </span>
+        <span v-else-if="tab.kind === 'preview'" class="editor-tab-kind">预览</span>
         <button
           v-if="tab.kind !== 'chat'"
           class="editor-tab-close"
@@ -210,6 +219,7 @@ watch(
       <ChatView v-show="activeTab?.kind === 'chat'" />
       <TextEditorPane v-if="activeFileTab" :tab="activeFileTab" />
       <DiffPane v-else-if="activeDiffTab" :tab="activeDiffTab" />
+      <PreviewPane v-else-if="activePreviewTab" :tab="activePreviewTab" />
     </div>
     <div v-if="pendingTab" class="text-editor-overlay">
       <div class="text-editor-confirm">

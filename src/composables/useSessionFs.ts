@@ -2,7 +2,7 @@ import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { resolveCwd, setToast, store, toastError } from "./useCodex";
-import { openFileTab } from "./useEditorTabs";
+import { openFileTab, openPreviewTab } from "./useEditorTabs";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
@@ -347,6 +347,20 @@ export function openTextEditor(entry: FsEntry) {
   const root = sessionRoot.value;
   if (!root) return;
   void openFileTab(root, entry.path);
+}
+
+/** 应用内打开 PDF 预览：在主窗口左侧编辑器区打开/激活 PDF 预览标签 */
+export function openPdfPreview(entry: FsEntry) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  void openPreviewTab("pdf", root, entry.path);
+}
+
+/** 应用内打开图像预览：在主窗口左侧编辑器区打开/激活图像预览标签 */
+export function openImagePreview(entry: FsEntry) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  void openPreviewTab("image", root, entry.path);
 }
 
 /**

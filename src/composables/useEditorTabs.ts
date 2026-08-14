@@ -1,5 +1,5 @@
 import { computed, markRaw, reactive, ref, shallowReactive } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Compartment, EditorState, Text } from "@codemirror/state";
 import {
   buildSaveContent,
@@ -9,12 +9,19 @@ import {
   type EditorEol,
 } from "../lib/editorFile";
 import { pathBaseName } from "../lib/format";
+import { base64ToBytes, type PreviewType } from "../lib/preview";
 import type { DiffRow } from "../lib/types";
 
 /** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
 interface TextFileContent {
   content: string;
   validUtf8: boolean;
+  byteSize: number;
+}
+
+/** 会话二进制文件读取结果（与 Rust session_fs_read_bytes 返回结构一致） */
+interface BinaryFileContent {
+  content: string;
   byteSize: number;
 }
 
@@ -71,7 +78,25 @@ export interface DiffEditorTab {
   fallback: string;
 }
 
-export type EditorTab = ChatEditorTab | FileEditorTab | DiffEditorTab;
+export interface PreviewEditorTab {
+  kind: "preview";
+  /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显 */
+  previewType: PreviewType;
+  id: string;
+  root: string;
+  path: string;
+  title: string;
+  loading: boolean;
+  error: string;
+  /** 图像预览：convertFileSrc(path) 的 asset URL */
+  imageUrl: string;
+  /** PDF 预览：后端读取的原始字节（pdf.js getDocument 数据源） */
+  pdfData: Uint8Array | null;
+  /** PDF 页数：组件加载文档后回填 */
+  pageCount: number | null;
+}
+
+export type EditorTab = ChatEditorTab | FileEditorTab | DiffEditorTab | PreviewEditorTab;
 
 /** 标签列表：第一个固定为“对话”主标签，不可关闭 */
 export const tabs = shallowReactive<EditorTab[]>([]);
@@ -96,6 +121,10 @@ function fileTabId(root: string, path: string): string {
 
 function diffTabId(p: DiffPreviewParams): string {
   return "diff:" + JSON.stringify([p.workspace_root, p.path, p.kind]);
+}
+
+function previewTabId(type: PreviewType, root: string, path: string): string {
+  return `preview:${type}:${JSON.stringify([root, path])}`;
 }
 
 function nowTime(): string {
@@ -254,6 +283,52 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
   try {
     const rows = await invoke<DiffRow[]>("build_diff_preview", { params });
     tab.rows = rows ?? [];
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
+
+/**
+ * 打开特殊文件预览标签（PDF / 图像）：已打开则激活；否则新建标签并异步准备数据。
+ * 图像直接经 asset 协议取 URL；PDF 经 session_fs_read_bytes 读取 base64 后解码为字节。
+ */
+export async function openPreviewTab(
+  type: PreviewType,
+  root: string,
+  path: string,
+): Promise<void> {
+  const id = previewTabId(type, root, path);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  const tab = reactive({
+    kind: "preview",
+    previewType: type,
+    id,
+    root,
+    path,
+    title: pathBaseName(path) || path,
+    loading: true,
+    error: "",
+    imageUrl: "",
+    pdfData: null,
+    pageCount: null,
+  }) as unknown as PreviewEditorTab;
+  tabs.push(tab);
+  activeTabId.value = id;
+  try {
+    if (type === "image") {
+      tab.imageUrl = convertFileSrc(path);
+    } else {
+      const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
+        root,
+        path,
+      });
+      tab.pdfData = base64ToBytes(info.content);
+    }
   } catch (e) {
     tab.error = String(e);
   } finally {

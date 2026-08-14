@@ -7,6 +7,8 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
 use crate::codex::path_util::{clean_path, is_inside_path, norm_key};
 use crate::codex::file_icon::icon_data_uri;
 
@@ -574,6 +576,47 @@ pub async fn session_fs_probe_text(root: String, path: String) -> Result<bool, S
     .await
 }
 
+/// 二进制预览读取上限（PDF 预览用；图像预览走 asset 协议不经过此命令）
+const MAX_PREVIEW_BYTES: u64 = 50 * 1024 * 1024;
+
+/// 二进制文件内容（预览用；camelCase 序列化）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BinaryFileContent {
+    /// base64 编码的文件字节（前端解码后交给渲染器）
+    pub content: String,
+    pub byte_size: u64,
+}
+
+/// 二进制文件读取（PDF 预览用）：路径包含校验、仅文件、大小上限（参数化便于测试），
+/// 字节以 base64 返回，避免 Tauri IPC 对字节数组的低效 JSON 序列化。
+fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<BinaryFileContent, String> {
+    let target = ensure_inside(root, path)?;
+    let meta = std::fs::metadata(&target)
+        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    if !meta.is_file() {
+        return Err(format!("不是文件: {}", clean_path(&target)));
+    }
+    if meta.len() > max_bytes {
+        return Err(format!("文件过大，暂不支持预览（上限 {} MiB）", max_bytes / (1024 * 1024)));
+    }
+    let bytes = std::fs::read(&target)
+        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    Ok(BinaryFileContent {
+        content: STANDARD.encode(&bytes),
+        byte_size: meta.len(),
+    })
+}
+
+#[tauri::command]
+pub async fn session_fs_read_bytes(root: String, path: String) -> Result<BinaryFileContent, String> {
+    run_blocking(120, move || {
+        let root_p = resolve_root(&root)?;
+        read_bytes_impl(&root_p, Path::new(&path), MAX_PREVIEW_BYTES)
+    })
+    .await
+}
+
 /// 图标请求：path 为会话内文件绝对路径（仅文件；文件夹图标不在范围）
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1014,5 +1057,27 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         assert!(probe_text_impl(&root, &outside).is_err());
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn read_bytes_roundtrip_with_guards() {
+        let (tmp, root) = tree();
+        // 正常读取：base64 内容 + 字节数
+        let payload = [0x25u8, 0x50, 0x44, 0x46, 0x2d, 0x31]; // %PDF-1
+        std::fs::write(root.join("doc.pdf"), payload).unwrap();
+        let c = read_bytes_impl(&root, &root.join("doc.pdf"), 1024).unwrap();
+        assert_eq!(c.content, STANDARD.encode(payload));
+        assert_eq!(c.byte_size, payload.len() as u64);
+        // 目录拒绝
+        assert!(read_bytes_impl(&root, &root.join("src"), 1024).is_err());
+        // 越界拒绝
+        let outside = tmp.path().parent().unwrap().join("outside.pdf");
+        std::fs::write(&outside, b"x").unwrap();
+        assert!(read_bytes_impl(&root, &outside, 1024).is_err());
+        let _ = std::fs::remove_file(&outside);
+        // 超过上限拒绝
+        std::fs::write(root.join("big.pdf"), vec![0u8; 2048]).unwrap();
+        let err = read_bytes_impl(&root, &root.join("big.pdf"), 1024).unwrap_err();
+        assert!(err.contains("文件过大"));
     }
 }

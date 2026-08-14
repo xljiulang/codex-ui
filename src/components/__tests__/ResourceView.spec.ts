@@ -9,20 +9,27 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   };
 });
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  convertFileSrc: vi.fn((p: string) => `asset://${p}`),
+}));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
 import { store } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
-import { __resetEditorTabsForTest } from "../../composables/useEditorTabs";
+import {
+  __resetEditorTabsForTest,
+  tabs,
+} from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import type { FsEntry } from "../../lib/sessionFs";
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedConvertFileSrc = vi.mocked(convertFileSrc);
 const rootPath = "D:\\codex\\codex-ui";
 
 const rootEntry: FsEntry = {
@@ -85,6 +92,16 @@ const picPng: FsEntry = {
   createdAtMs: 0,
   childCount: null,
 };
+const docPdf: FsEntry = {
+  name: "doc.pdf",
+  path: rootPath + "\\src\\doc.pdf",
+  relPath: "src/doc.pdf",
+  isDir: false,
+  size: 4096,
+  modifiedAtMs: 0,
+  createdAtMs: 0,
+  childCount: null,
+};
 
 function mockFs() {
   mockedInvoke.mockImplementation((cmd, args) => {
@@ -96,19 +113,23 @@ function mockFs() {
     if (cmd === "session_fs_list") {
       const dir = (args as { dir?: string }).dir;
       if (dir === rootPath) return Promise.resolve([srcDir, nodeModules, aTxt]);
-      if (dir === srcDir.path) return Promise.resolve([mainTs, picPng]);
+      if (dir === srcDir.path) return Promise.resolve([mainTs, picPng, docPdf]);
       return Promise.resolve([]);
     }
     if (cmd === "session_fs_search") {
       const query = (args as { query?: string }).query ?? "";
       if (query.toLowerCase().includes("main")) return Promise.resolve([mainTs]);
       if (query.toLowerCase().includes("src")) return Promise.resolve([srcDir]);
+      if (query.toLowerCase().includes("doc")) return Promise.resolve([docPdf]);
       return Promise.resolve([]);
     }
     if (cmd === "session_fs_icons") return Promise.resolve([]);
     if (cmd === "session_fs_probe_text") {
       const path = (args as { path?: string }).path;
       return Promise.resolve(path !== picPng.path);
+    }
+    if (cmd === "session_fs_read_bytes") {
+      return Promise.resolve({ content: "JVBERi0x", byteSize: 8 });
     }
     if (cmd === "workspace_dir") return Promise.resolve(rootPath);
     if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
@@ -351,7 +372,7 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("单击非文本文件行：提示无法打开且不触发预览", async () => {
+  it("单击图像文件行：打开图像预览，不再提示无法打开", async () => {
     const wrapper = await mountPanel();
     await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
     await flushPromises();
@@ -361,11 +382,58 @@ describe("ResourceView 文件树", () => {
     expect(picRow).toBeTruthy();
     await picRow!.trigger("click");
     await flushPromises();
-    expect(store.toast).toContain("该文件不是文本文件，无法打开");
+    expect(store.toast).not.toContain("该文件不是文本文件");
+    expect(mockedConvertFileSrc).toHaveBeenCalledWith(picPng.path);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "session_fs_read",
       expect.anything(),
     );
+    const previewTabs = tabs.filter((t) => t.kind === "preview");
+    expect(previewTabs).toHaveLength(1);
+    expect(previewTabs[0].previewType).toBe("image");
+    wrapper.unmount();
+  });
+
+  it("右键 PDF 文件「打开」：进入 PDF 预览并读取二进制", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
+    await flushPromises();
+    const pdfRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((w) => w.text().includes("doc.pdf"));
+    expect(pdfRow).toBeTruthy();
+    await pdfRow!.trigger("contextmenu", { clientX: 200, clientY: 200 });
+    await clickCtxItem(wrapper, "打开");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read_bytes", {
+      root: rootPath,
+      path: docPdf.path,
+    });
+    const previewTabs = tabs.filter((t) => t.kind === "preview");
+    expect(previewTabs).toHaveLength(1);
+    expect(previewTabs[0].previewType).toBe("pdf");
+    wrapper.unmount();
+  });
+
+  it("右键图像文件「打开」：进入图像预览，不探测文本", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
+    await flushPromises();
+    const picRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((w) => w.text().includes("pic.png"));
+    expect(picRow).toBeTruthy();
+    await picRow!.trigger("contextmenu", { clientX: 200, clientY: 200 });
+    await clickCtxItem(wrapper, "打开");
+
+    expect(mockedConvertFileSrc).toHaveBeenCalledWith(picPng.path);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_probe_text",
+      expect.anything(),
+    );
+    const previewTabs = tabs.filter((t) => t.kind === "preview");
+    expect(previewTabs).toHaveLength(1);
+    expect(previewTabs[0].previewType).toBe("image");
     wrapper.unmount();
   });
 
@@ -576,6 +644,22 @@ describe("ResourceView 文件树", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
       root: rootPath,
       path: mainTs.path,
+    });
+    wrapper.unmount();
+  });
+
+  it("搜索态单击 PDF 结果：进入 PDF 预览", async () => {
+    vi.useFakeTimers();
+    const wrapper = await mountPanel();
+    await wrapper.find(".history-search").setValue("doc");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    await wrapper.find(".resource-result").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read_bytes", {
+      root: rootPath,
+      path: docPdf.path,
     });
     wrapper.unmount();
   });

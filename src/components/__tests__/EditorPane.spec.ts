@@ -10,7 +10,19 @@ vi.mock("../ChatView.vue", () => ({
   },
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+// PDF 渲染较重且 happy-dom 无 canvas/worker：mock pdfjs-dist，验证标签装配即可
+vi.mock("pdfjs-dist", () => ({
+  GlobalWorkerOptions: {},
+  getDocument: vi.fn(() => ({
+    promise: Promise.reject(new Error("mocked pdf")),
+    destroy: vi.fn(() => Promise.resolve()),
+  })),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  convertFileSrc: vi.fn((p: string) => `asset://${p}`),
+}));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
@@ -24,6 +36,7 @@ import {
   closeTab,
   openDiffTab,
   openFileTab,
+  openPreviewTab,
   tabs,
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
@@ -469,6 +482,49 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(titleSpans[1].classes()).toContain("change-kind");
     expect(wrapper.find(".diff-row.add").exists()).toBe(true);
     expect(wrapper.find(".diff-row.add .diff-text").text()).toBe("hello");
+    wrapper.unmount();
+  });
+
+  it("打开图像预览：标签栏显示「预览」徽标并渲染预览区", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openPreviewTab("image", root, "pic.png");
+    await settle();
+
+    expect(wrapper.find(".editor-tabs").exists()).toBe(true);
+    const tabEls = wrapper.findAll(".editor-tab");
+    expect(tabEls).toHaveLength(2);
+    expect(tabEls[1].find(".editor-tab-label").text()).toBe("pic.png");
+    expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
+    expect(tabEls[1].attributes("data-tip")).toBe("pic.png");
+    await waitForEl(wrapper, ".preview-pane");
+    wrapper.unmount();
+  });
+
+  it("打开 PDF 预览标签：读取二进制并渲染预览区", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: "JVBERi0x", byteSize: 8 });
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openPreviewTab("pdf", root, "doc.pdf");
+    await settle();
+
+    const tabEls = wrapper.findAll(".editor-tab");
+    expect(tabEls).toHaveLength(2);
+    expect(tabEls[1].find(".editor-tab-label").text()).toBe("doc.pdf");
+    expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
+    await waitForEl(wrapper, ".preview-pane");
     wrapper.unmount();
   });
 });

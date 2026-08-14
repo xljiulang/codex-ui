@@ -32,6 +32,8 @@ import {
   treeRows,
   loadingRoot,
   addAsAttachment,
+  openImagePreview,
+  openPdfPreview,
 } from "../composables/useSessionFs";
 import {
   formatFileSize,
@@ -39,6 +41,7 @@ import {
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
+import { previewTypeForName } from "../lib/preview";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
@@ -196,8 +199,17 @@ function openFileMenu(entry: FsEntry, e: MouseEvent) {
   openCtx(e, items);
 }
 
-/** 打开前先探测内容：文本→打开预览；非文本/探测失败→提示无法打开并结束 */
+/** 打开前先按扩展名分发：PDF/图像 → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
 async function requestOpen(entry: FsEntry) {
+  const type = previewTypeForName(entry.name);
+  if (type === "pdf") {
+    openPdfPreview(entry);
+    return;
+  }
+  if (type === "image") {
+    openImagePreview(entry);
+    return;
+  }
   const ok = await probeTextEntry(entry);
   if (ok === null) return; // 探测失败：错误信息已 toast
   if (ok) {

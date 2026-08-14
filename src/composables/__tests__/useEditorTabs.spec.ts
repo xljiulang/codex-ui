@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  convertFileSrc: vi.fn((p: string) => `asset://${p}`),
+}));
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   __resetEditorTabsForTest,
   activeTabId,
@@ -13,14 +16,17 @@ import {
   discardTabAndClose,
   openDiffTab,
   openFileTab,
+  openPreviewTab,
   pendingCloseId,
   saveFileTab,
   saveTabAndClose,
   tabs,
   type FileEditorTab,
+  type PreviewEditorTab,
 } from "../useEditorTabs";
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedConvertFileSrc = vi.mocked(convertFileSrc);
 const root = "D:\\repo";
 
 function fileContent(content: string, validUtf8 = true) {
@@ -289,5 +295,79 @@ describe("useEditorTabs 标签状态", () => {
       workspace_root: root,
     });
     expect(tabs.filter((t) => t.kind === "diff")).toHaveLength(1);
+  });
+
+  it("打开图像预览：创建标签、生成 asset URL、激活；重复打开去重", async () => {
+    await openPreviewTab("image", root, "pic.png");
+    expect(tabs).toHaveLength(2);
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("image");
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toBe("");
+    expect(preview!.imageUrl).toBe("asset://pic.png");
+    expect(mockedConvertFileSrc).toHaveBeenCalledWith("pic.png");
+    expect(activeTabId.value).toBe(preview!.id);
+
+    await openPreviewTab("image", root, "pic.png");
+    expect(tabs.filter((t) => t.kind === "preview")).toHaveLength(1);
+    expect(activeTabId.value).toBe(preview!.id);
+  });
+
+  it("打开 PDF 预览：读取 session_fs_read_bytes 并解码为字节", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read_bytes") {
+        expect(args).toEqual({ root, path: "doc.pdf" });
+        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("pdf", root, "doc.pdf");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("pdf");
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toBe("");
+    expect(Array.from(preview!.pdfData ?? [])).toEqual([
+      104, 101, 108, 108, 111,
+    ]);
+    expect(activeTabId.value).toBe(preview!.id);
+  });
+
+  it("PDF 读取失败：标签保留并记录错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.reject("pdf boom");
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("pdf", root, "doc.pdf");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toContain("pdf boom");
+    expect(preview!.pdfData).toBeNull();
+  });
+
+  it("预览标签关闭与全部关闭：无脏确认直接移除", async () => {
+    await openPreviewTab("image", root, "pic.png");
+    await openPreviewTab("pdf", root, "doc.pdf");
+    const previews = tabs.filter((t) => t.kind === "preview");
+    expect(previews).toHaveLength(2);
+
+    closeTab(previews[0].id);
+    expect(tabs.some((t) => t.id === previews[0].id)).toBe(false);
+
+    const skipped = closeAllOtherTabs();
+    expect(skipped).toBe(0);
+    expect(tabs.filter((t) => t.kind === "preview")).toHaveLength(0);
+    expect(tabs.map((t) => t.id)).toEqual(["chat"]);
   });
 });
