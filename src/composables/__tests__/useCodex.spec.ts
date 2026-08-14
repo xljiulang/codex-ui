@@ -1978,3 +1978,115 @@ describe("loadSettings 默认权限初始值", () => {
     expect(store.permissionMode).toBe("ask-for-approval");
   });
 });
+
+describe("loadSettings 记忆模式", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.permissionMode = "ask-for-approval";
+  });
+
+  it("启动时按持久化的记忆模式加载", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      default_permission: "ask-for-approval",
+      memory_mode: "enabled",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.memory_mode).toBe("enabled");
+  });
+
+  it("持久化值非法或缺失时回退 disabled", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      default_permission: "ask-for-approval",
+      memory_mode: "bogus",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.memory_mode).toBe("disabled");
+  });
+});
+
+describe("新建会话应用记忆模式", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.currentThreadId = null;
+    store.attachments.splice(0);
+    store.toast = "";
+    store.settings.memory_mode = "enabled";
+    store.taskMode = "execute";
+    store.goalText = null;
+  });
+
+  function mockNewChatFlow() {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_start") {
+        return Promise.resolve({ thread: { id: "t-new" } });
+      }
+      if (cmd === "turn_start") {
+        return Promise.resolve({ turn: { id: "nt1" } });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve(null);
+      }
+      if (cmd === "codex_rpc") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it("新建会话成功后显式应用持久化的记忆模式", async () => {
+    mockNewChatFlow();
+    await sendPrompt("你好");
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/memoryMode/set",
+      params: { threadId: "t-new", mode: "enabled" },
+    });
+    expect(store.currentThreadId).toBe("t-new");
+  });
+
+  it("记忆模式关闭时也显式调用（保证确定性）", async () => {
+    store.settings.memory_mode = "disabled";
+    mockNewChatFlow();
+    await sendPrompt("你好");
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/memoryMode/set",
+      params: { threadId: "t-new", mode: "disabled" },
+    });
+  });
+
+  it("记忆同步失败静默不打扰新建流程", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_start") {
+        return Promise.resolve({ thread: { id: "t-new" } });
+      }
+      if (cmd === "turn_start") {
+        return Promise.resolve({ turn: { id: "nt1" } });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve(null);
+      }
+      if (cmd === "codex_rpc") return Promise.reject(new Error("记忆不可用"));
+      return Promise.resolve(undefined);
+    });
+    await sendPrompt("你好");
+    expect(store.currentThreadId).toBe("t-new");
+    expect(store.toast).not.toContain("记忆");
+  });
+});

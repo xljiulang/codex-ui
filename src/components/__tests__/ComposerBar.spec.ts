@@ -32,6 +32,7 @@ import {
   ensureThreadPlugins,
   NEW_CHAT_PLUGIN_KEY,
   sendPrompt,
+  settleConfirm,
   store,
 } from "../../composables/useCodex";
 
@@ -891,6 +892,20 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     defaultReasoningEffort: "high",
   };
 
+  const EXTRA = {
+    id: "gpt-5-extra",
+    model: "gpt-5-extra",
+    displayName: "gpt-5-extra",
+    description: "备选模型",
+    hidden: false,
+    isDefault: false,
+    supportedReasoningEfforts: [
+      { reasoningEffort: "low", description: "低" },
+      { reasoningEffort: "medium", description: "中" },
+    ],
+    defaultReasoningEffort: "medium",
+  };
+
   beforeEach(() => {
     store.model = null;
     store.effort = null;
@@ -993,5 +1008,186 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
     expect(store.modelOpen).toBe(false);
+  });
+
+  it("应用模型/强度后立即调用 thread/settings/update 同步当前会话", async () => {
+    store.toast = "";
+    store.currentThreadId = "t1";
+    store.modelsLoaded = true;
+    store.models = [GPT5, EXTRA];
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    const optionBtns = () => wrapper!.findAll(".popup-menu .option-btn");
+    // 选择非默认模型
+    await optionBtns()[1].trigger("click");
+    await flushPromises();
+    // 选择非默认推理强度 low
+    const low = optionBtns().find((b) => b.text().trim() === "low")!;
+    await low.trigger("click");
+    await flushPromises();
+    await wrapper.find(".popup-menu .btn.primary").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/settings/update",
+      params: { threadId: "t1", model: "gpt-5-extra", effort: "low" },
+    });
+    expect(store.model).toBe("gpt-5-extra");
+    expect(store.effort).toBe("low");
+    expect(store.modelOpen).toBe(false);
+  });
+
+  it("无当前会话时应用模型不调用 thread/settings/update", async () => {
+    store.toast = "";
+    store.currentThreadId = null;
+    store.modelsLoaded = true;
+    store.models = [GPT5, EXTRA];
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    await wrapper.findAll(".popup-menu .option-btn")[1].trigger("click");
+    await flushPromises();
+    await wrapper.find(".popup-menu .btn.primary").trigger("click");
+    await flushPromises();
+    expect(store.model).toBe("gpt-5-extra");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "codex_rpc",
+      expect.objectContaining({ method: "thread/settings/update" }),
+    );
+  });
+
+  it("thread/settings/update 失败时 toast 提示并关闭菜单", async () => {
+    store.toast = "";
+    store.currentThreadId = "t1";
+    store.modelsLoaded = true;
+    store.models = [GPT5];
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "thread/settings/update") {
+        throw new Error("同步失败");
+      }
+      return {};
+    });
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    await wrapper.find(".popup-menu .btn.primary").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("同步失败");
+    expect(store.model).toBeNull();
+    expect(store.modelOpen).toBe(false);
+  });
+});
+
+describe("ComposerBar 手动压缩上下文", () => {
+  let wrapper: VueWrapper | null = null;
+
+  beforeEach(() => {
+    store.threadTokenUsage = { used: 5000, window: 10000 };
+    store.currentThreadId = "t1";
+    store.turnActive = false;
+    store.toast = "";
+    store.confirm = null;
+    mockedInvoke.mockReset();
+    mockRpc(false);
+  });
+
+  afterEach(() => {
+    store.threadTokenUsage = null;
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  it("有用量时渲染百分比与 aria-label，window 未知时不渲染", async () => {
+    wrapper = mount(ComposerBar);
+    const btn = wrapper.find(".ctx-window");
+    expect(btn.exists()).toBe(true);
+    expect(btn.text()).toBe("50%");
+    expect(btn.attributes("aria-label")).toBe("压缩上下文");
+
+    store.threadTokenUsage = null;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ctx-window").exists()).toBe(false);
+  });
+
+  it("点击弹出确认框，取消不调用 thread/compact/start", async () => {
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".ctx-window").trigger("click");
+    expect(store.confirm?.title).toBe("压缩上下文");
+    settleConfirm(false);
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "codex_rpc",
+      expect.objectContaining({ method: "thread/compact/start" }),
+    );
+  });
+
+  it("确认后调用 thread/compact/start 并提示", async () => {
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".ctx-window").trigger("click");
+    settleConfirm(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/compact/start",
+      params: { threadId: "t1" },
+    });
+    expect(store.toast).toContain("已开始压缩上下文");
+  });
+
+  it("无当前会话或回合进行中时按钮禁用，空闲时可点", async () => {
+    store.currentThreadId = null;
+    wrapper = mount(ComposerBar);
+    await wrapper.vm.$nextTick();
+    expect(
+      (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    store.currentThreadId = "t1";
+    await wrapper.vm.$nextTick();
+    expect(
+      (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    store.turnActive = true;
+    await wrapper.vm.$nextTick();
+    expect(
+      (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("压缩请求进行中按钮禁用，完成后恢复", async () => {
+    let resolveInvoke!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_rpc") {
+        return new Promise((r) => {
+          resolveInvoke = r;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".ctx-window").trigger("click");
+    settleConfirm(true);
+    await flushPromises();
+    expect(
+      (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+    resolveInvoke({});
+    await flushPromises();
+    expect(
+      (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(store.toast).toContain("已开始压缩上下文");
+  });
+
+  it("压缩失败时 toast 错误", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "codex_rpc") throw new Error("压缩失败");
+      return undefined;
+    });
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".ctx-window").trigger("click");
+    settleConfirm(true);
+    await flushPromises();
+    expect(store.toast).toContain("压缩失败");
   });
 });

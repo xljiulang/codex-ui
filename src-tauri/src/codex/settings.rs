@@ -13,10 +13,17 @@ pub struct AppSettings {
     /// 权限模式的启动初始值：ask-for-approval｜help-me-approve｜full-access
     #[serde(default = "default_permission")]
     pub default_permission: String,
+    /// 记忆模式：disabled（关闭，默认）｜enabled（启用）
+    #[serde(default = "default_memory_mode")]
+    pub memory_mode: String,
 }
 
 fn default_permission() -> String {
     "ask-for-approval".into()
+}
+
+fn default_memory_mode() -> String {
+    "disabled".into()
 }
 
 impl Default for AppSettings {
@@ -28,6 +35,7 @@ impl Default for AppSettings {
             followup_mode: "adjust".into(),
             theme: "blue".into(),
             default_permission: default_permission(),
+            memory_mode: default_memory_mode(),
         }
     }
 }
@@ -76,19 +84,22 @@ mod tests {
 
         let s = load(dir.path());
         assert_eq!(s.default_permission, "ask-for-approval");
+        assert_eq!(s.memory_mode, "disabled");
     }
 
     #[test]
-    fn save_load_roundtrip_preserves_default_permission() {
+    fn save_load_roundtrip_preserves_default_permission_and_memory_mode() {
         let dir = TempDir::new().unwrap();
         let s = AppSettings {
             default_permission: "full-access".into(),
+            memory_mode: "enabled".into(),
             ..AppSettings::default()
         };
 
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
         assert_eq!(loaded.default_permission, "full-access");
+        assert_eq!(loaded.memory_mode, "enabled");
         // 原子写不应残留临时文件
         assert!(!settings_path(dir.path())
             .with_extension("json.tmp")

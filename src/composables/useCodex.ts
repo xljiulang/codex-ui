@@ -36,6 +36,7 @@ const defaultSettings = (): AppSettings => ({
   followup_mode: "adjust",
   theme: "blue",
   default_permission: "ask-for-approval",
+  memory_mode: "disabled",
 });
 
 interface ModelInfo {
@@ -408,6 +409,9 @@ export async function loadSettings() {
     !PERMISSION_MODES.some((m) => m.id === store.settings.default_permission)
   ) {
     store.settings.default_permission = "ask-for-approval";
+  }
+  if (!["enabled", "disabled"].includes(store.settings.memory_mode)) {
+    store.settings.memory_mode = "disabled";
   }
   store.permissionMode = store.settings.default_permission;
   applyTheme(store.settings.theme);
@@ -985,6 +989,15 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       }
     }
     store.goalText = pendingGoal;
+    // 记忆模式：显式应用持久化设置（含关闭），保证新会话与设置一致；失败静默跳过
+    try {
+      await invoke("codex_rpc", {
+        method: "thread/memoryMode/set",
+        params: { threadId, mode: store.settings.memory_mode },
+      });
+    } catch {
+      // 服务端不支持记忆特性时静默跳过，不打扰新建流程
+    }
     await refreshThreads();
     if (prompt.trim() || attachments.length) {
       // 仿 VS Code：后台临时线程总结首条消息生成短标题（不阻塞主回合）

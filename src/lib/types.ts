@@ -87,6 +87,8 @@ export interface AppSettings {
   theme: string;
   /** 权限模式的启动初始值：ask-for-approval｜help-me-approve｜full-access */
   default_permission: string;
+  /** 记忆模式：disabled（关闭，默认）｜enabled（启用）；作为新建会话的初始值 */
+  memory_mode: string;
 }
 
 export interface AuthStatus {

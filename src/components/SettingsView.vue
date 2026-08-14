@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  askConfirm,
   saveSettings,
   setToast,
   store,
@@ -22,6 +23,7 @@ const enterToSend = ref(store.settings.enter_to_send);
 const followupMode = ref(store.settings.followup_mode);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const defaultPermission = ref(store.settings.default_permission);
+const memoryMode = ref(store.settings.memory_mode);
 
 function close(restore = true) {
   if (restore && theme.value !== store.settings.theme) {
@@ -69,9 +71,38 @@ async function apply() {
     followup_mode: followupMode.value,
     theme: theme.value,
     default_permission: defaultPermission.value,
+    memory_mode: memoryMode.value,
   });
-  setToast("设置已保存");
+  // 有当前会话时立即同步记忆模式（与模型同步一致）：失败 toast 但不阻塞保存
+  let syncError: string | null = null;
+  if (store.currentThreadId) {
+    try {
+      await invoke("codex_rpc", {
+        method: "thread/memoryMode/set",
+        params: { threadId: store.currentThreadId, mode: memoryMode.value },
+      });
+    } catch (e) {
+      syncError = toastError(e);
+    }
+  }
+  setToast(syncError ?? "设置已保存");
   close(false);
+}
+
+async function resetMemory() {
+  const ok = await askConfirm({
+    title: "重置记忆",
+    message: "将清空全部已保存的记忆，且无法撤销。是否继续？",
+    confirmLabel: "重置记忆",
+    cancelLabel: "取消",
+  });
+  if (!ok) return;
+  try {
+    await invoke("codex_rpc", { method: "memory/reset", params: null });
+    setToast("记忆已重置");
+  } catch (e) {
+    setToast(toastError(e));
+  }
 }
 
 function selectTheme(id: ThemeId) {
@@ -151,16 +182,43 @@ function selectTheme(id: ThemeId) {
           </div>
 
           <div class="setting-row">
-            <label>codex 可执行文件（留空使用 PATH）</label>
+            <label>记忆模式</label>
+            <select v-model="memoryMode" class="memory-mode-select">
+              <option value="disabled">关闭</option>
+              <option value="enabled">启用</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label>重置记忆</label>
             <div class="setting-path-row">
-              <div class="setting-value">
-                {{ codexPath || "未设置（使用 PATH 查找）" }}
+              <div class="setting-value">清空全部已保存的记忆（无法撤销）</div>
+              <button class="btn danger memory-reset-btn" @click="resetMemory()">
+                重置记忆…
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label>codex 可执行文件（留空自动查找）</label>
+            <div class="setting-path-row codex-path-row">
+              <div class="setting-value codex-path-value">
+                {{ codexPath || "未设置（自动查找）" }}
               </div>
-              <button class="btn" @click="pickCodexFile()">选择文件…</button>
-              <button v-if="codexPath" class="btn danger" @click="codexPath = ''">
+              <button class="btn codex-pick-btn" @click="pickCodexFile()">
+                选择文件…
+              </button>
+              <button
+                v-if="codexPath"
+                class="btn danger codex-clear-btn"
+                @click="codexPath = ''"
+              >
                 清除
               </button>
             </div>
+            <p v-if="!codexPath && store.server.codexPath" class="setting-note">
+              当前使用（自动检测）：{{ store.server.codexPath }}
+            </p>
           </div>
         </div>
       </div>

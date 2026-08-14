@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { loadModels, store } from "../composables/useCodex";
+import { invoke } from "@tauri-apps/api/core";
+import { loadModels, setToast, store, toastError } from "../composables/useCodex";
 
 const emit = defineEmits<{ close: [] }>();
 const model = ref(store.model ?? "");
@@ -37,10 +38,26 @@ function selectModel(m: (typeof store.models)[number]) {
 
 onMounted(() => void loadModels());
 
-function apply() {
+async function apply() {
   // 进程级生效，不写配置文件
   store.model = model.value.trim() ? model.value.trim() : null;
   store.effort = effort.value || null;
+  // 有当前会话时立即同步到服务端：thread/settings/update 对后续回合即时生效
+  // （model/effort 传 null 表示恢复默认，与 turn/start 的显式 null 语义一致）
+  if (store.currentThreadId) {
+    try {
+      await invoke("codex_rpc", {
+        method: "thread/settings/update",
+        params: {
+          threadId: store.currentThreadId,
+          model: store.model,
+          effort: store.effort,
+        },
+      });
+    } catch (e) {
+      setToast(toastError(e));
+    }
+  }
   emit("close");
 }
 </script>

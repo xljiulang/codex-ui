@@ -11,6 +11,7 @@ import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
 import TaskModeMenu from "./TaskModeMenu.vue";
 import {
+  askConfirm,
   interrupt,
   effectiveEffort,
   modelDisplayName,
@@ -70,6 +71,7 @@ const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
 const MIN_EDITOR_HEIGHT = 120;
 const editorHeight = ref<number | null>(null);
 const resizingEditor = ref(false);
+const compacting = ref(false);
 let resizeStartY = 0;
 let resizeStartH = MIN_EDITOR_HEIGHT;
 
@@ -736,6 +738,30 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+/** 手动压缩上下文：空闲（有会话且无进行中回合）时二次确认后发起 thread/compact/start */
+async function compactContext() {
+  if (!store.currentThreadId || store.turnActive || compacting.value) return;
+  const ok = await askConfirm({
+    title: "压缩上下文",
+    message: "将把当前对话内容压缩为摘要以释放上下文窗口，是否继续？",
+    confirmLabel: "压缩",
+    cancelLabel: "取消",
+  });
+  if (!ok) return;
+  compacting.value = true;
+  try {
+    await invoke("codex_rpc", {
+      method: "thread/compact/start",
+      params: { threadId: store.currentThreadId },
+    });
+    setToast("已开始压缩上下文");
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    compacting.value = false;
+  }
+}
+
 function modelChipLabel(): string {
   const name = modelDisplayName(store.model);
   const effort = effectiveEffort();
@@ -823,9 +849,16 @@ function taskModeLabel(): string {
         </div>
       </div>
       <div class="composer-right">
-        <span v-if="ctxUsage" class="ctx-window" v-tooltip="ctxTooltip">
+        <button
+          v-if="ctxUsage"
+          class="ctx-window"
+          aria-label="压缩上下文"
+          :disabled="!store.currentThreadId || store.turnActive || compacting"
+          v-tooltip="ctxTooltip"
+          @click="compactContext()"
+        >
           {{ ctxUsage.pct }}%
-        </span>
+        </button>
         <div class="menu-anchor">
           <button
             class="model-chip"
