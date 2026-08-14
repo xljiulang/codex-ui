@@ -361,12 +361,47 @@ function closeMenus() {
   mention.value = null;
 }
 
+type ComposerMenu = "perm" | "task" | "model";
+
+/** 切换三个按钮菜单：打开一个时关闭另外两个，再点一次当前按钮则关闭 */
+function toggleMenu(which: ComposerMenu) {
+  const willOpen = !store[`${which}Open`];
+  store.permOpen = false;
+  store.taskOpen = false;
+  store.modelOpen = false;
+  store[`${which}Open`] = willOpen;
+}
+
 function onKeydownGlobal(e: KeyboardEvent) {
   if (e.key === "Escape") closeMenus();
 }
 
+function onWindowMousedown(e: MouseEvent) {
+  // 三个按钮弹出层：点击外部任意区域自动关闭。用 mousedown 而非 click，
+  // 与 GitView 分支弹层一致——WebView2 原生菜单「粘贴」只合成 click、
+  // 不合成 mousedown，避免粘贴等操作误关弹层。
+  // 用 Element 而非 HTMLElement：点击 svg/path 等 SVG 目标也应正确判断。
+  if (!(e.target instanceof Element)) {
+    store.permOpen = false;
+    store.taskOpen = false;
+    store.modelOpen = false;
+    return;
+  }
+  // 弹出层内部与三个触发按钮不自动关闭（按钮自身的 click 负责切换）
+  if (
+    e.target.closest(".popup-menu") ||
+    e.target.closest(".perm-chip, .task-chip, .model-chip")
+  ) {
+    return;
+  }
+  store.permOpen = false;
+  store.taskOpen = false;
+  store.modelOpen = false;
+}
+
 onMounted(() => {
   window.addEventListener("keydown", onKeydownGlobal);
+  window.addEventListener("mousedown", onWindowMousedown);
   window.addEventListener("resize", clampEditorHeightOnResize);
   exposeEditor();
   void setupDragDrop();
@@ -378,6 +413,7 @@ watch(editor, () => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
+  window.removeEventListener("mousedown", onWindowMousedown);
   window.removeEventListener("resize", clampEditorHeightOnResize);
   dropUnlisten?.();
   endResize();
@@ -703,7 +739,7 @@ function formatTokens(n: number): string {
 function modelChipLabel(): string {
   const name = modelDisplayName(store.model);
   const effort = effectiveEffort();
-  return effort ? `${name}(${effort})` : name;
+  return effort ? `${name} (${effort})` : name;
 }
 
 function taskModeLabel(): string {
@@ -756,7 +792,7 @@ function taskModeLabel(): string {
             class="perm-chip"
             v-tooltip="'权限模式'"
             :disabled="store.turnActive"
-            @click="store.permOpen = !store.permOpen"
+            @click="toggleMenu('perm')"
           >
             <svg class="chip-icon" viewBox="0 0 24 24">
               <path :d="permissionMode(store.permissionMode).icon" />
@@ -773,7 +809,7 @@ function taskModeLabel(): string {
             class="task-chip"
             v-tooltip="'任务模式'"
             :disabled="store.turnActive"
-            @click="store.taskOpen = !store.taskOpen"
+            @click="toggleMenu('task')"
           >
             <svg class="chip-icon" viewBox="0 0 24 24">
               <path :d="taskMode(store.taskMode).icon" />
@@ -794,7 +830,7 @@ function taskModeLabel(): string {
           <button
             class="model-chip"
             v-tooltip="'模型'"
-            @click="store.modelOpen = !store.modelOpen"
+            @click="toggleMenu('model')"
           >
             <svg class="model-chip-icon" viewBox="0 0 24 24">
               <rect x="5" y="5" width="14" height="14" rx="2" />

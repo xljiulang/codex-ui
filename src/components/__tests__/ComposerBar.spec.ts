@@ -874,3 +874,124 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
     expect(rowStyle()).toContain("--editor-h: 96px");
   });
 });
+
+describe("ComposerBar 模型按钮与弹出层", () => {
+  let wrapper: VueWrapper | null = null;
+
+  const GPT5 = {
+    id: "gpt-5",
+    model: "gpt-5",
+    displayName: "gpt-5",
+    description: "最新模型",
+    hidden: false,
+    isDefault: true,
+    supportedReasoningEfforts: [
+      { reasoningEffort: "high", description: "高" },
+    ],
+    defaultReasoningEffort: "high",
+  };
+
+  beforeEach(() => {
+    store.model = null;
+    store.effort = null;
+    store.models = [];
+    store.modelsLoaded = false;
+    store.permOpen = false;
+    store.taskOpen = false;
+    store.modelOpen = false;
+    store.turnActive = false;
+    mockedInvoke.mockReset();
+    mockRpc(false);
+  });
+
+  afterEach(() => {
+    store.model = null;
+    store.effort = null;
+    store.models = [];
+    store.permOpen = false;
+    store.taskOpen = false;
+    store.modelOpen = false;
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  it("模型按钮显示“名称 (强度)”带空格；无强度时仅显示名称", async () => {
+    store.models = [GPT5];
+    store.model = "gpt-5";
+    store.effort = "high";
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    const chip = () => wrapper!.find(".model-chip").text();
+    expect(chip()).toContain("gpt-5 (high)");
+
+    // 无推理强度：仅显示模型名，不带括号
+    store.effort = null;
+    store.models[0].defaultReasoningEffort = "";
+    await flushPromises();
+    expect(chip()).toBe("gpt-5");
+  });
+
+  it("弹出层外部 mousedown 自动关闭；内部与触发按钮不关闭", async () => {
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    expect(store.modelOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
+
+    // 弹出层内部 mousedown 不关闭
+    await wrapper.find(".popup-menu .menu-group-title").trigger("mousedown");
+    await flushPromises();
+    expect(store.modelOpen).toBe(true);
+
+    // 触发按钮 mousedown 不自动关闭，click 负责切换关闭
+    await wrapper.find(".model-chip").trigger("mousedown");
+    await flushPromises();
+    expect(store.modelOpen).toBe(true);
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    expect(store.modelOpen).toBe(false);
+
+    // 权限/任务/模型三个菜单：外部 mousedown 均自动关闭
+    await wrapper.find(".perm-chip").trigger("click");
+    await flushPromises();
+    expect(store.permOpen).toBe(true);
+    window.dispatchEvent(new MouseEvent("mousedown"));
+    await flushPromises();
+    expect(store.permOpen).toBe(false);
+
+    await wrapper.find(".task-chip").trigger("click");
+    await flushPromises();
+    expect(store.taskOpen).toBe(true);
+    window.dispatchEvent(new MouseEvent("mousedown"));
+    await flushPromises();
+    expect(store.taskOpen).toBe(false);
+
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    expect(store.modelOpen).toBe(true);
+    window.dispatchEvent(new MouseEvent("mousedown"));
+    await flushPromises();
+    expect(store.modelOpen).toBe(false);
+  });
+
+  it("打开一个菜单时自动关闭另外两个，再点当前按钮关闭", async () => {
+    wrapper = mount(ComposerBar);
+    await wrapper.find(".perm-chip").trigger("click");
+    await flushPromises();
+    expect(store.permOpen).toBe(true);
+
+    await wrapper.find(".task-chip").trigger("click");
+    await flushPromises();
+    expect(store.permOpen).toBe(false);
+    expect(store.taskOpen).toBe(true);
+
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    expect(store.taskOpen).toBe(false);
+    expect(store.modelOpen).toBe(true);
+
+    await wrapper.find(".model-chip").trigger("click");
+    await flushPromises();
+    expect(store.modelOpen).toBe(false);
+  });
+});
