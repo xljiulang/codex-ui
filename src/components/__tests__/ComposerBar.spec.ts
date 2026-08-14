@@ -32,7 +32,6 @@ import {
   ensureThreadPlugins,
   NEW_CHAT_PLUGIN_KEY,
   sendPrompt,
-  settleConfirm,
   store,
 } from "../../composables/useCodex";
 
@@ -1092,6 +1091,7 @@ describe("ComposerBar 手动压缩上下文", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     store.threadTokenUsage = null;
     wrapper?.unmount();
     wrapper = null;
@@ -1109,22 +1109,18 @@ describe("ComposerBar 手动压缩上下文", () => {
     expect(wrapper.find(".ctx-window").exists()).toBe(false);
   });
 
-  it("点击弹出确认框，取消不调用 thread/compact/start", async () => {
+  it("单击不触发压缩", async () => {
     wrapper = mount(ComposerBar);
     await wrapper.find(".ctx-window").trigger("click");
-    expect(store.confirm?.title).toBe("压缩上下文");
-    settleConfirm(false);
-    await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "codex_rpc",
       expect.objectContaining({ method: "thread/compact/start" }),
     );
   });
 
-  it("确认后调用 thread/compact/start 并提示", async () => {
+  it("双击发起压缩并提示", async () => {
     wrapper = mount(ComposerBar);
-    await wrapper.find(".ctx-window").trigger("click");
-    settleConfirm(true);
+    await wrapper.find(".ctx-window").trigger("dblclick");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/compact/start",
@@ -1133,7 +1129,7 @@ describe("ComposerBar 手动压缩上下文", () => {
     expect(store.toast).toContain("已开始压缩上下文");
   });
 
-  it("无当前会话或回合进行中时按钮禁用，空闲时可点", async () => {
+  it("无当前会话时按钮禁用，回合进行中不禁用且可压缩", async () => {
     store.currentThreadId = null;
     wrapper = mount(ComposerBar);
     await wrapper.vm.$nextTick();
@@ -1151,22 +1147,29 @@ describe("ComposerBar 手动压缩上下文", () => {
     await wrapper.vm.$nextTick();
     expect(
       (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
-    ).toBe(true);
+    ).toBe(false);
+
+    // 忙时双击同样触发压缩
+    await wrapper.find(".ctx-window").trigger("dblclick");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/compact/start",
+      params: { threadId: "t1" },
+    });
   });
 
   it("压缩请求进行中按钮禁用，完成后恢复", async () => {
     let resolveInvoke!: (v: unknown) => void;
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_rpc") {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "thread/compact/start") {
         return new Promise((r) => {
           resolveInvoke = r;
         });
       }
-      return Promise.resolve(undefined);
+      return Promise.resolve({});
     });
     wrapper = mount(ComposerBar);
-    await wrapper.find(".ctx-window").trigger("click");
-    settleConfirm(true);
+    await wrapper.find(".ctx-window").trigger("dblclick");
     await flushPromises();
     expect(
       (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
@@ -1180,14 +1183,119 @@ describe("ComposerBar 手动压缩上下文", () => {
   });
 
   it("压缩失败时 toast 错误", async () => {
-    mockedInvoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "codex_rpc") throw new Error("压缩失败");
-      return undefined;
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "thread/compact/start") {
+        throw new Error("压缩失败");
+      }
+      return {};
     });
     wrapper = mount(ComposerBar);
-    await wrapper.find(".ctx-window").trigger("click");
-    settleConfirm(true);
+    await wrapper.find(".ctx-window").trigger("dblclick");
     await flushPromises();
     expect(store.toast).toContain("压缩失败");
+  });
+});
+
+describe("ComposerBar 任务目标芯片", () => {
+  let wrapper: VueWrapper | null = null;
+
+  beforeEach(() => {
+    store.attachments.splice(0);
+    store.threadPlugins = {};
+    store.skills = [];
+    store.skillsLoaded = false;
+    store.server.workspace = "D:/repo";
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.settings.enter_to_send = true;
+    store.currentThreadId = null;
+    store.goalText = null;
+    store.goalStatus = null;
+    store.goalOpen = false;
+    store.confirm = null;
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+    mockRpc(false);
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  it("无目标时只有旗子（无文字、无 ×），无会话也可点", async () => {
+    store.currentThreadId = null;
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    expect(wrapper.find(".goal-chip").exists()).toBe(true);
+    expect(wrapper.find(".goal-label").exists()).toBe(false);
+    expect(wrapper.find(".goal-clear-btn").exists()).toBe(false);
+    expect(
+      (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it("有目标时旗子 + ×，完成/预算耗尽状态有颜色 class", async () => {
+    store.currentThreadId = "t1";
+    store.goalText = "发布 v2 版本并修复登录流程的所有已知问题再补上边界处理";
+    store.goalStatus = "completed";
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    expect(wrapper.find(".goal-clear-btn").exists()).toBe(true);
+    expect(wrapper.find(".goal-icon-btn.status-completed").exists()).toBe(true);
+    expect(
+      (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    store.goalStatus = "budget_limited";
+    await wrapper.vm.$nextTick();
+    expect(
+      wrapper.find(".goal-icon-btn.status-budget_limited").exists(),
+    ).toBe(true);
+  });
+
+  it("旗子点击打开设置弹层（无会话也可预填）", async () => {
+    store.currentThreadId = null;
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    await wrapper.find(".goal-icon-btn").trigger("click");
+    await flushPromises();
+    expect(store.goalOpen).toBe(true);
+    expect(wrapper.find(".goal-menu").exists()).toBe(true);
+  });
+
+  it("有目标时旗子点击打开弹层（回填），不弹确认框", async () => {
+    store.currentThreadId = "t1";
+    store.goalText = "发布 v2";
+    store.goalStatus = "active";
+    mockedInvoke.mockResolvedValue(undefined);
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    await wrapper.find(".goal-icon-btn").trigger("click");
+    await flushPromises();
+    expect(store.goalOpen).toBe(true);
+    expect(wrapper.find(".goal-menu").exists()).toBe(true);
+    expect(store.confirm).toBeNull();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "goal_clear",
+      expect.anything(),
+    );
+  });
+
+  it("× 点击直接调用 goal_clear，不弹确认框", async () => {
+    store.currentThreadId = "t1";
+    store.goalText = "发布 v2";
+    store.goalStatus = "active";
+    mockedInvoke.mockResolvedValue(undefined);
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    await wrapper.find(".goal-clear-btn").trigger("click");
+    await flushPromises();
+    expect(store.confirm).toBeNull();
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
+      threadId: "t1",
+    });
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
   });
 });

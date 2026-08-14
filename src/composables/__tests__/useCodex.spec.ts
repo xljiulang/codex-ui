@@ -34,6 +34,7 @@ import {
   __resetPinnedSectionForTest,
   __resetTitleHelperCapabilityForTest,
   autoTitleThread,
+  clearGoal,
   dismissPlanPrompt,
   disposeEvents,
   ensureSkills,
@@ -53,6 +54,7 @@ import {
   sanitizeTitle,
   searchThreads,
   sendPrompt,
+  setGoal,
   settleConfirm,
   sortThreads,
   store,
@@ -217,6 +219,7 @@ describe("updateWindowTitle 窗口标题", () => {
     store.resumedThreadId = null;
     store.threadTokenUsage = null;
     store.goalText = null;
+    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -593,6 +596,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.resumedThreadId = null;
     store.threadTokenUsage = null;
     store.goalText = null;
+    store.goalStatus = null;
     store.taskMode = "execute";
     store.confirm = null;
   });
@@ -613,10 +617,10 @@ describe("切换会话自动标准停止旧回合", () => {
     expect(store.currentTurnId).toBeNull();
   });
 
-  it("目标模式下新建会话：先清旧会话目标，再中断旧回合", async () => {
+  it("有活跃目标时新建会话：先清旧会话目标，再中断旧回合", async () => {
     store.turnActive = true;
-    store.taskMode = "goal";
     store.goalText = "旧目标";
+    store.goalStatus = "active";
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
     const p = newEmptyChat();
@@ -630,9 +634,11 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "turn-1",
     });
     expect(store.currentThreadId).toBeNull();
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
   });
 
-  it("切换到其他历史会话时标准停止旧回合，并打开目标会话", async () => {
+  it("切换到其他历史会话时标准停止旧回合，并打开历史会话", async () => {
     store.turnActive = true;
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
@@ -742,10 +748,10 @@ describe("切换会话自动标准停止旧回合", () => {
     expect(store.currentThreadId).toBe("t1");
   });
 
-  it("目标模式标准停止：先清目标再 turn/interrupt（默认操作当前会话）", async () => {
+  it("有活跃目标时标准停止：先清目标再 turn/interrupt（默认操作当前会话）", async () => {
     store.turnActive = true;
-    store.taskMode = "goal";
     store.goalText = "目标";
+    store.goalStatus = "active";
     store.currentThreadId = "t1";
     store.currentTurnId = "turn-1";
     await interrupt();
@@ -757,12 +763,12 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "turn-1",
     });
     expect(store.goalText).toBeNull();
-    expect(store.taskMode).toBe("execute");
+    expect(store.goalStatus).toBeNull();
   });
 
   it("显式传入旧线程/回合 id 时：目标清除作用于旧线程，且不污染新会话的回合 id", async () => {
-    store.taskMode = "goal";
     store.goalText = "旧目标";
+    store.goalStatus = "active";
     store.currentThreadId = "t2"; // 模拟 store 已切到新会话
     store.currentTurnId = null;
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
@@ -790,6 +796,293 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "abc-123",
     });
     expect(store.currentTurnId).toBeNull();
+    // 清除的是旧线程目标：本地展示（当前线程 t2 的）目标状态不被清空
+    expect(store.goalText).toBe("旧目标");
+    expect(store.goalStatus).toBe("active");
+  });
+});
+
+describe("线程级目标：设置/清除/读取/事件同步", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.currentThreadId = null;
+    store.currentThreadName = "";
+    store.currentThreadCwd = null;
+    store.currentThreadOrigin = null;
+    store.resumedThreadId = null;
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentTurnId = null;
+    store.threadTokenUsage = null;
+    store.goalText = null;
+    store.goalStatus = null;
+    store.toast = "";
+  });
+
+  it("setGoal：无会话时本地保存为待应用目标，不调用 goal_set", async () => {
+    store.currentThreadId = null;
+    const ok = await setGoal("修复登录");
+    expect(ok).toBe(true);
+    expect(store.goalText).toBe("修复登录");
+    expect(store.goalStatus).toBeNull();
+    expect(store.toast).toBe("");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "goal_set",
+      expect.anything(),
+    );
+  });
+
+  it("setGoal：空文本不提交", async () => {
+    store.currentThreadId = "t1";
+    const ok = await setGoal("   ");
+    expect(ok).toBe(false);
+    expect(store.toast).toContain("目标不能为空");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "goal_set",
+      expect.anything(),
+    );
+  });
+
+  it("setGoal：超过 4000 字符被拒绝", async () => {
+    store.currentThreadId = "t1";
+    const ok = await setGoal("长".repeat(4001));
+    expect(ok).toBe(false);
+    expect(store.toast).toContain("4000");
+  });
+
+  it("setGoal：成功后本地记录目标与 active 状态", async () => {
+    store.currentThreadId = "t1";
+    mockedInvoke.mockResolvedValue(undefined);
+    const ok = await setGoal("  修复登录流程  ");
+    expect(ok).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_set", {
+      threadId: "t1",
+      objective: "修复登录流程",
+    });
+    expect(store.goalText).toBe("修复登录流程");
+    expect(store.goalStatus).toBe("active");
+    expect(store.toast).toContain("已设置目标");
+  });
+
+  it("setGoal：失败时保留原目标并提示错误", async () => {
+    store.currentThreadId = "t1";
+    store.goalText = "旧目标";
+    store.goalStatus = "completed";
+    mockedInvoke.mockRejectedValue(new Error("服务端拒绝"));
+    const ok = await setGoal("新目标");
+    expect(ok).toBe(false);
+    expect(store.goalText).toBe("旧目标");
+    expect(store.goalStatus).toBe("completed");
+    expect(store.toast).toContain("服务端拒绝");
+  });
+
+  it("clearGoal：无会话时仅清空本地状态", async () => {
+    store.goalText = "目标";
+    store.goalStatus = "active";
+    await clearGoal();
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "goal_clear",
+      expect.anything(),
+    );
+  });
+
+  it("空闲但线程有活跃目标时新建会话：先清目标再切换", async () => {
+    store.turnActive = false;
+    store.goalText = "旧目标";
+    store.goalStatus = "active";
+    store.currentThreadId = "t1";
+    store.currentTurnId = null;
+    const p = newEmptyChat();
+    expect(await p).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
+      threadId: "t1",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "turn_interrupt",
+      expect.anything(),
+    );
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
+  });
+
+  it("空闲但旧线程有活跃目标时切换历史会话：先清目标", async () => {
+    store.turnActive = false;
+    store.goalText = "旧目标";
+    store.goalStatus = "active";
+    store.currentThreadId = "t1";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
+      threadId: "t1",
+    });
+    expect(store.currentThreadId).toBe("t2");
+  });
+
+  it("openThread：goal_get 兼容 {objective,status} 返回并填充状态", async () => {
+    store.currentThreadId = "t1";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") {
+        return Promise.resolve({ objective: "修复登录", status: "completed" });
+      }
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    expect(store.currentThreadId).toBe("t2");
+    expect(store.goalText).toBe("修复登录");
+    expect(store.goalStatus).toBe("completed");
+  });
+
+  it("openThread：goal_get 兼容 {goal:{objective,status}} 包裹返回", async () => {
+    store.currentThreadId = "t1";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") {
+        return Promise.resolve({
+          goal: { objective: "重构登录", status: "active" },
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    expect(store.goalText).toBe("重构登录");
+    expect(store.goalStatus).toBe("active");
+  });
+
+  it("openThread：goal_get 失败或未挂目标时状态为空", async () => {
+    store.currentThreadId = "t1";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.reject(new Error("读取失败"));
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
+  });
+});
+
+describe("thread/goal 事件同步与回合完成不清目标", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，确保本组用例重新注册监听
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.currentThreadId = "t1";
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentTurnId = null;
+    store.taskMode = "execute";
+    store.goalText = null;
+    store.goalStatus = null;
+  });
+
+  it("thread/goal/updated：同步当前会话的目标文本与状态", async () => {
+    await wireEvents();
+    fireListen("thread/goal/updated", {
+      threadId: "t1",
+      goal: { objective: "发布 v2", status: "completed" },
+    });
+    expect(store.goalText).toBe("发布 v2");
+    expect(store.goalStatus).toBe("completed");
+  });
+
+  it("thread/goal/updated：旧会话通知不污染当前会话", async () => {
+    await wireEvents();
+    store.goalText = "当前目标";
+    store.goalStatus = "active";
+    fireListen("thread/goal/updated", {
+      threadId: "t-other",
+      goal: { objective: "别人", status: "completed" },
+    });
+    expect(store.goalText).toBe("当前目标");
+    expect(store.goalStatus).toBe("active");
+  });
+
+  it("thread/goal/cleared：清空当前会话目标", async () => {
+    await wireEvents();
+    store.goalText = "发布 v2";
+    store.goalStatus = "active";
+    fireListen("thread/goal/cleared", { threadId: "t1" });
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
+  });
+
+  it("turn/completed：不再自动清除目标（目标由服务端循环管理）", async () => {
+    await wireEvents();
+    store.goalText = "发布 v2";
+    store.goalStatus = "active";
+    store.itemsByThread["t1"] = [];
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+      timeout: 3000,
+      interval: 20,
+    });
+    expect(store.goalText).toBe("发布 v2");
+    expect(store.goalStatus).toBe("active");
   });
 });
 
@@ -807,6 +1100,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     store.resumedThreadId = null;
     store.threadTokenUsage = null;
     store.goalText = null;
+    store.goalStatus = null;
     store.taskMode = "execute";
     store.confirm = null;
     store.showSettings = false;
@@ -1168,6 +1462,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
   const LONG_TEXT = "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(2);
 
   beforeEach(() => {
+    disposeEvents(); // 重置 wired，避免前面 wireEvents 用例的监听残留
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
     mockListenCapture();
     mockedInvoke.mockReset();
@@ -2030,6 +2325,7 @@ describe("新建会话应用记忆模式", () => {
     store.settings.memory_mode = "enabled";
     store.taskMode = "execute";
     store.goalText = null;
+    store.goalStatus = null;
   });
 
   function mockNewChatFlow() {
@@ -2059,6 +2355,18 @@ describe("新建会话应用记忆模式", () => {
       params: { threadId: "t-new", mode: "enabled" },
     });
     expect(store.currentThreadId).toBe("t-new");
+  });
+
+  it("会话前预填的目标在创建会话时挂载并置为 active", async () => {
+    store.goalText = "预填目标";
+    store.goalStatus = null;
+    mockNewChatFlow();
+    await sendPrompt("你好");
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_set", {
+      threadId: "t-new",
+      objective: "预填目标",
+    });
+    expect(store.goalStatus).toBe("active");
   });
 
   it("记忆模式关闭时也显式调用（保证确定性）", async () => {

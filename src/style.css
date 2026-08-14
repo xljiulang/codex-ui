@@ -3679,6 +3679,82 @@ body.resizing-editor {
   height: 13px;
 }
 
+.goal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  background: rgba(var(--overlay-rgb), 0.05);
+  border: 1px solid var(--border-light);
+  backdrop-filter: blur(6px);
+}
+
+.goal-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.goal-icon-btn.has-goal {
+  color: var(--accent);
+}
+
+.goal-icon-btn.status-completed {
+  color: var(--green, #3fb950);
+}
+
+.goal-icon-btn.status-budget_limited,
+.goal-icon-btn.status-paused {
+  color: var(--yellow, #d29922);
+}
+
+.goal-icon-btn:hover {
+  background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.15);
+}
+
+.goal-icon-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.goal-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.goal-clear-btn:hover {
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.12);
+}
+
+.goal-clear-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
 .model-chip {
   display: inline-flex;
   align-items: center;
@@ -3861,9 +3937,14 @@ body.resizing-editor {
 @media (max-width: 640px) {
   .perm-chip,
   .task-chip,
+  .goal-chip,
   .model-chip {
     padding: 0 6px;
     font-size: 11px;
+  }
+
+  .goal-chip {
+    padding: 0 4px;
   }
 
   .composer-left,
@@ -3949,6 +4030,51 @@ body.resizing-editor {
   color: var(--text-faint);
   padding: 2px 8px 6px;
   text-transform: none;
+}
+
+/* 设置目标弹层 */
+.goal-menu {
+  min-width: 320px;
+  padding: 8px;
+}
+
+.goal-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 74px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-bright);
+  background: var(--composer-bg);
+  border: 1px solid var(--border-light);
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.goal-input:focus {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.goal-menu-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.goal-count {
+  margin-right: auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+.goal-hint {
+  font-size: 10.5px;
+  color: var(--text-faint);
 }
 
 .menu-item {

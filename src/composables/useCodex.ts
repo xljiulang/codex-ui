@@ -50,6 +50,24 @@ interface ModelInfo {
   defaultReasoningEffort: string;
 }
 
+/** 线程目标的持久状态（thread/goal/get 与 thread/goal/updated 携带） */
+export type GoalStatus =
+  | "active"
+  | "completed"
+  | "budget_limited"
+  | "paused"
+  | "cleared";
+
+export function isGoalStatus(v: unknown): v is GoalStatus {
+  return (
+    v === "active" ||
+    v === "completed" ||
+    v === "budget_limited" ||
+    v === "paused" ||
+    v === "cleared"
+  );
+}
+
 /** 计划模式回合完成后的“计划已就绪”确认弹窗数据（纯前端 UX，非协议交互） */
 export interface PlanPrompt {
   threadId: string;
@@ -135,10 +153,10 @@ export const store = reactive({
   threadTokenUsage: null as { used: number; window: number | null } | null,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
   newChatCwd: null as string | null,
-  taskMode: "execute" as "execute" | "plan" | "goal",
+  taskMode: "execute" as "execute" | "plan",
   goalText: null as string | null,
-  /** 目标模式下用户首条消息对应回合的 id，完成/终止时据此清除目标并退回执行 */
-  goalTurnId: null as string | null,
+  /** 当前线程目标状态（thread/goal 事件同步，null = 未挂载目标） */
+  goalStatus: null as GoalStatus | null,
   attachments: [] as UserInput[],
   showSettings: false,
   /** 右侧面板当前激活 Tab；新建会话后由 activateResourcesTab 切回资源 */
@@ -146,6 +164,7 @@ export const store = reactive({
   permOpen: false,
   taskOpen: false,
   modelOpen: false,
+  goalOpen: false,
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,
@@ -983,15 +1002,16 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;
+    // 会话前预填的目标：创建会话后挂载到新线程（失败不阻塞新建，保留待应用状态）
     const pendingGoal = store.goalText;
     if (pendingGoal) {
       try {
         await invoke("goal_set", { threadId, objective: pendingGoal });
+        store.goalStatus = "active";
       } catch {
-        // 目标设置失败不阻塞新建会话
+        // 挂载失败静默保留，用户可稍后重新设置
       }
     }
-    store.goalText = pendingGoal;
     // 记忆模式：显式应用持久化设置（含关闭），保证新会话与设置一致；失败静默跳过
     try {
       await invoke("codex_rpc", {
@@ -1070,20 +1090,10 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   });
   await updateWindowTitle(); // 首条消息发送后窗口标题立即跟随
   try {
-    // 目标模式：以本条消息的纯文本为目标（已有会话在此同步设置）
-    if (store.taskMode === "goal" && store.goalText) {
-      try {
-        await invoke("goal_set", { threadId, objective: store.goalText });
-      } catch {
-        // 目标设置失败不阻塞回合
-      }
-    }
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
     store.turnActive = true;
     // 立即记录回合 id，供 turn/interrupt 使用（turn/started 事件可能稍后才到）
     if (res?.turn?.id) store.currentTurnId = res.turn.id;
-    // 目标模式：用户回合 id 以 turn/started 事件为准（与 turn/completed 一致，
-    // 注意响应里的 turn.id 与事件 id 不同），在事件监听中记录
   } catch (e) {
     if (isThreadNotFound(e)) {
       resetToNewChat();
@@ -1092,10 +1102,6 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
       setToast(toastError(e));
     }
     store.turnActive = false;
-    // 目标回合启动失败：清除目标并退回执行，避免目标悬挂自动续跑
-    if (store.taskMode === "goal") {
-      await clearGoal();
-    }
   }
 }
 
@@ -1231,11 +1237,12 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
     });
     if (!ok) return false;
   }
-  // 标准停止旧回合（与停止按钮一致，含目标模式清目标），再切换到新对话；
+  // 标准停止旧回合（与停止按钮一致，含活跃目标清目标），再切换到新对话；
   // 显式传入旧线程/回合 id，避免切换后 store 已复位导致中断丢失。
   const oldThreadId = store.currentThreadId;
   const oldTurnId = store.currentTurnId;
-  if (store.turnActive && oldThreadId) {
+  // 无进行中回合但线程有活跃目标时同样清除：目标循环可能在回合间隙静默续跑
+  if (oldThreadId && (store.turnActive || store.goalText)) {
     void interrupt(oldThreadId, oldTurnId);
   }
   store.currentThreadId = null;
@@ -1248,6 +1255,7 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   store.currentTurnId = null;
   store.threadTokenUsage = null;
   store.goalText = null;
+  store.goalStatus = null;
   await updateWindowTitle();
   return true;
 }
@@ -1273,11 +1281,16 @@ export async function openThread(threadId: string): Promise<boolean> {
     });
     if (!ok) return false;
   }
-  // 切换到其他会话前，标准停止旧回合（与停止按钮一致，含目标模式清目标）；
+  // 切换到其他会话前，标准停止旧回合（与停止按钮一致，含活跃目标清目标）；
   // 点击当前正在进行的会话不算切换，不中断。
   const oldThreadId = store.currentThreadId;
   const oldTurnId = store.currentTurnId;
-  if (store.turnActive && oldThreadId && oldThreadId !== threadId) {
+  // 无进行中回合但旧线程有活跃目标时同样清除，避免目标循环在后台静默续跑
+  if (
+    oldThreadId &&
+    oldThreadId !== threadId &&
+    (store.turnActive || store.goalText)
+  ) {
     void interrupt(oldThreadId, oldTurnId);
   }
   store.currentThreadId = threadId;
@@ -1308,13 +1321,17 @@ export async function openThread(threadId: string): Promise<boolean> {
     store.currentTurnId = null;
     store.threadTokenUsage = null;
     try {
-      const g = await invoke<{ objective?: string; goal?: { objective?: string } }>(
-        "goal_get",
-        { threadId },
-      );
-      store.goalText = g?.objective ?? g?.goal?.objective ?? null;
+      const g = await invoke<{
+        objective?: string;
+        status?: string;
+        goal?: { objective?: string; status?: string };
+      }>("goal_get", { threadId });
+      const goal = g?.goal ?? g;
+      store.goalText = goal?.objective ?? null;
+      store.goalStatus = isGoalStatus(goal?.status) ? goal.status : null;
     } catch {
       store.goalText = null;
+      store.goalStatus = null;
     }
     await updateWindowTitle();
     return true;
@@ -1357,7 +1374,7 @@ export async function openHistorySession(threadId: string): Promise<void> {
   await finishSessionSwitch();
 }
 
-/** 标准停止回合：与停止按钮一致，目标模式先清目标再 turn/interrupt；
+/** 标准停止回合：与停止按钮一致，线程有活跃目标时先清目标再 turn/interrupt；
  * 可显式传入线程/回合 id（切换会话时用），缺省时操作当前会话。 */
 export async function interrupt(
   threadId?: string | null,
@@ -1365,11 +1382,9 @@ export async function interrupt(
 ) {
   const tid = threadId ?? store.currentThreadId;
   if (!tid) return;
-  const goalMode = store.taskMode === "goal";
-  // 目标模式：先清除目标切断自动续跑（目标循环回合极快，回合中断可能追不上；
-  // 清除目标后当前回合自然结束、不再有新回合）
-  if (goalMode) {
-    store.goalTurnId = null;
+  // 线程有活跃目标：先清除目标切断服务端 auto-continuation（目标循环回合极快，
+  // 回合中断可能追不上；清除目标后当前回合自然结束、不再自动续跑）
+  if (store.goalText) {
     await clearGoal(tid);
   }
   let target = turnId ?? store.currentTurnId;
@@ -1403,19 +1418,50 @@ export async function interrupt(
   }
 }
 
+/** 为当前线程挂载目标（thread/goal/set）；目标设置成功后由服务端自动续跑回合 */
+export async function setGoal(objective: string): Promise<boolean> {
+  const text = objective.trim();
+  if (!text) {
+    setToast("目标不能为空");
+    return false;
+  }
+  if (text.length > 4000) {
+    setToast("目标最长 4000 字符");
+    return false;
+  }
+  const tid = store.currentThreadId;
+  // 会话未开始（新对话编辑态）：仅本地保存为待应用目标，创建会话时再挂载
+  if (!tid) {
+    store.goalText = text;
+    store.goalStatus = null;
+    return true;
+  }
+  try {
+    await invoke("goal_set", { threadId: tid, objective: text });
+    store.goalText = text;
+    store.goalStatus = "active";
+    setToast("已设置目标");
+    return true;
+  } catch (e) {
+    setToast(toastError(e));
+    return false;
+  }
+}
+
 export async function clearGoal(threadId?: string | null) {
-  store.goalTurnId = null;
   const tid = threadId ?? store.currentThreadId;
   if (!tid) {
     store.goalText = null;
-    if (store.taskMode === "goal") store.taskMode = "execute";
+    store.goalStatus = null;
     return;
   }
   try {
     await invoke("goal_clear", { threadId: tid });
-    store.goalText = null;
-    if (store.taskMode === "goal") {
-      store.taskMode = "execute";
+    // 仅当清除的是当前会话时才清空本地目标展示；
+    // 切换会话时对旧线程的清除不应污染新会话的目标状态
+    if (tid === store.currentThreadId) {
+      store.goalText = null;
+      store.goalStatus = null;
     }
   } catch (e) {
     setToast(toastError(e));
@@ -1493,10 +1539,6 @@ export async function wireEvents() {
       // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
       // 事件 id 仅在响应缺失时兜底。
       if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
-      // 目标模式兜底：若响应未携带 id，以首个 turn/started 作为用户回合
-      if (store.taskMode === "goal" && !store.goalTurnId && p.turn?.id) {
-        store.goalTurnId = p.turn.id;
-      }
     }),
     await listen("turn/completed", async (e) => {
       const p = e.payload as {
@@ -1540,11 +1582,7 @@ export async function wireEvents() {
         }
         if (touched) store.itemsRev++;
       }
-      // 目标模式：用户回合完成/被终止 → 清除目标并退回执行
-      if (store.taskMode === "goal" && store.goalTurnId && p.turn?.id === store.goalTurnId) {
-        store.goalTurnId = null;
-        await clearGoal();
-      }
+      // 目标完成/预算耗尽由服务端通过 thread/goal/updated 通知，回合完成不再自动清目标
       // 计划模式：回合正常完成且产出 plan 内容 → 弹出“计划已就绪”确认（仿 VS Code/CLI，
       // 纯客户端 UX：协议层没有计划确认交互，由客户端在计划 item 完成后自行询问）
       if (
@@ -1738,6 +1776,26 @@ export async function wireEvents() {
       const p = e.payload as { threadId: string; status: { type: string } };
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.status = p.status;
+    }),
+    await listen("thread/goal/updated", (e) => {
+      const p = e.payload as {
+        threadId?: string;
+        goal?: { objective?: string; status?: string };
+      };
+      if (isBackgroundThread(p.threadId)) return;
+      // 仅同步当前会话的目标状态：切换会话后旧会话迟到的通知不应污染新会话
+      if (p.threadId && p.threadId !== store.currentThreadId) return;
+      if (p.goal) {
+        if (typeof p.goal.objective === "string") store.goalText = p.goal.objective;
+        if (isGoalStatus(p.goal.status)) store.goalStatus = p.goal.status;
+      }
+    }),
+    await listen("thread/goal/cleared", (e) => {
+      const p = e.payload as { threadId?: string };
+      if (isBackgroundThread(p.threadId)) return;
+      if (p.threadId && p.threadId !== store.currentThreadId) return;
+      store.goalText = null;
+      store.goalStatus = null;
     }),
     await listen("thread/started", (e) => {
       const p = e.payload as { thread?: { id?: string } };

@@ -1,4 +1,6 @@
-// codex-ui 目标模式 E2E：首次输入即目标，回合完成/被终止后清除目标并退回执行模式
+// codex-ui 线程级目标 E2E：旗子图标 + × 取消，会话前可预填，填写即生效
+// 流程：无会话预填/取消预填 → 发送首条消息自动挂载目标 → 服务端围绕目标自动续跑完成（文件标记）
+//       → 状态颜色变为已完成 → × 取消目标 → 再次设置后点停止先清目标
 // 用法: node scripts/verify-goal.mjs
 import { spawn, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -13,6 +15,7 @@ const CDP_PORT = 9223;
 const CDP_BASE = `http://127.0.0.1:${CDP_PORT}`;
 
 const MARKER = "GOMARK_" + crypto.randomBytes(4).toString("hex").toUpperCase();
+const MARKER2 = "GOMARK2_" + crypto.randomBytes(4).toString("hex").toUpperCase();
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-ui-goal-test-"));
 const results = [];
 let child = null;
@@ -52,7 +55,8 @@ function cleanupSessions() {
       if (e.isDirectory()) walk(p);
       else if (e.name.endsWith(".jsonl")) {
         try {
-          if (fs.readFileSync(p, "utf8").includes(MARKER)) fs.unlinkSync(p);
+          const text = fs.readFileSync(p, "utf8");
+          if (text.includes(MARKER) || text.includes(MARKER2)) fs.unlinkSync(p);
         } catch {}
       }
     }
@@ -139,7 +143,8 @@ async function createClient(wsUrl) {
 const evalJs = (expression) => cdp.evalJs(expression);
 const waitFor = (desc, expr, timeoutMs) => cdp.waitFor(desc, expr, timeoutMs);
 
-async function setInput(text) {
+/** 在富文本输入框写入文本 */
+async function setEditorText(text) {
   await evalJs(`(() => {
     const ed = window.__CODEX_UI_EDITOR__;
     if (!ed) throw new Error("编辑器实例未暴露");
@@ -148,31 +153,18 @@ async function setInput(text) {
   })()`);
 }
 
-async function switchGoalMode() {
-  await waitFor(
-    "任务模式按钮可用",
-    `!document.querySelector(".task-chip").disabled`,
-    60000,
-  );
+/** 在设置目标弹层的 textarea 写入文本（触发 v-model） */
+async function setGoalInput(text) {
   await evalJs(`(() => {
-    document.querySelector(".task-chip").click();
+    const ta = document.querySelector(".goal-input");
+    if (!ta) throw new Error("目标输入框未找到");
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      "value",
+    ).set;
+    setter.call(ta, ${JSON.stringify(text)});
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
   })()`);
-  await waitFor(
-    "任务模式菜单",
-    `!!document.querySelector(".mode-menu-item")`,
-    5000,
-  );
-  await evalJs(`(() => {
-    const item = Array.from(document.querySelectorAll(".mode-menu-item")).find(
-      (x) => x.textContent.includes("目标模式"),
-    );
-    item.click();
-  })()`);
-  await waitFor(
-    "目标模式选中",
-    `document.querySelector(".task-chip").textContent.includes("目标模式")`,
-    5000,
-  );
 }
 
 async function clickSend() {
@@ -184,22 +176,63 @@ async function clickSend() {
   })()`);
 }
 
-// 进行中停止：只要还有进行中的回合就点停止（覆盖用户回合与目标自动续跑回合），
-// 直到退回执行模式且空闲；返回期间出现的异常 toast。
-async function stopUntilIdle(timeoutMs) {
+/** 点击目标旗子（无会话也可点），等待弹层出现 */
+async function clickGoalFlag() {
+  await waitFor(
+    "目标旗子可用",
+    `(() => {
+      const b = document.querySelector(".goal-icon-btn");
+      return !!b && !b.disabled;
+    })()`,
+    60000,
+  );
+  await evalJs(`document.querySelector(".goal-icon-btn").click()`);
+  await waitFor("设置目标弹层", `!!document.querySelector(".goal-menu")`, 5000);
+}
+
+/** 在弹层填入目标并按 Enter 确认（填写即生效） */
+async function fillGoalAndConfirm(text) {
+  await setGoalInput(text);
+  await evalJs(`(() => {
+    const ta = document.querySelector(".goal-input");
+    ta.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+  })()`);
+  await waitFor("弹层关闭", `!document.querySelector(".goal-menu")`, 5000);
+  await waitFor(
+    "目标已挂载（× 出现）",
+    `!!document.querySelector(".goal-clear-btn")`,
+    5000,
+  );
+}
+
+/** × 直接取消目标（不弹确认） */
+async function cancelGoalViaX() {
+  await waitFor(
+    "× 按钮存在",
+    `!!document.querySelector(".goal-clear-btn")`,
+    5000,
+  );
+  await evalJs(`document.querySelector(".goal-clear-btn").click()`);
+  await waitFor(
+    "目标已清除（× 消失）",
+    `!document.querySelector(".goal-clear-btn")`,
+    10000,
+  );
+}
+
+/** 目标激活期间反复点停止，直到目标被清除且空闲；返回期间出现的异常 toast */
+async function stopUntilGoalCleared(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  let errorSeen = "";
   while (Date.now() < deadline) {
     const state = await evalJs(`(() => ({
-      mode: document.querySelector(".task-chip")?.textContent ?? "",
       active: !!document.querySelector(".send-btn.stop"),
+      cleared: !document.querySelector(".goal-clear-btn"),
       toast: document.querySelector(".toast")?.textContent ?? "",
     }))()`);
-    if (state.toast.includes("expected active turn")) {
-      errorSeen = state.toast;
-      break;
-    }
-    if (!state.active && state.mode.includes("执行模式")) break;
+    if (state.toast.includes("expected active turn")) return state.toast;
+    if (!state.active && state.cleared) return "";
     if (state.active) {
       await evalJs(`document.querySelector(".send-btn.stop").click()`);
       await sleep(800);
@@ -207,7 +240,7 @@ async function stopUntilIdle(timeoutMs) {
       await sleep(500);
     }
   }
-  return errorSeen;
+  return "停止后目标未清除";
 }
 
 async function main() {
@@ -225,52 +258,61 @@ async function main() {
   cdp = await createClient(page.webSocketDebuggerUrl);
   await waitFor("编辑器加载", `!!document.querySelector(".ProseMirror")`, 60000);
 
-  // 场景 1：切换目标模式不弹对话框，首条消息即目标，回合完成后退回执行
-  await switchGoalMode();
-  const modalOpened = await evalJs(`!!document.querySelector(".modal")`);
-  record("目标模式: 切换后不自动弹目标对话框", modalOpened === false);
-
   const goalFile = path.join(testDir, "goal-ok.txt");
-  await setInput(`创建文件 ${goalFile}，内容写入 ${MARKER}，完成后停止`);
+  const goalText = `创建文件 ${goalFile}，内容写入 ${MARKER}，完成后停止`;
+
+  // 场景 0：未创建会话时旗子可用，可预填目标并取消预填
+  const flagUsable = await evalJs(`(() => {
+    const b = document.querySelector(".goal-icon-btn");
+    return !!b && !b.disabled;
+  })()`);
+  record("目标: 未创建会话时旗子可用", flagUsable === true);
+
+  await clickGoalFlag();
+  await fillGoalAndConfirm(goalText);
+  record("目标: 会话前预填目标生效（× 出现，待应用）", true);
+
+  await cancelGoalViaX();
+  record("目标: 预填目标可被 × 直接取消", true);
+
+  // 重新预填真实目标，随后发送首条消息创建会话并自动挂载
+  await clickGoalFlag();
+  await fillGoalAndConfirm(goalText);
+  await setEditorText("开始执行");
   const sent = await clickSend();
   if (!sent) throw new Error("发送失败");
   await waitFor(
-    "回合完成退回执行模式",
-    `document.querySelector(".task-chip").textContent.includes("执行模式")`,
-    180000,
+    "目标自动挂载（× 保持存在）",
+    `!!document.querySelector(".goal-clear-btn")`,
+    60000,
+  );
+  record("目标: 创建会话后自动挂载预填目标", true);
+
+  // 场景 1：服务端围绕目标自动续跑完成 → 旗子颜色状态变为已完成
+  await waitFor(
+    "目标完成状态（旗子 green class）",
+    `!!document.querySelector(".goal-icon-btn.status-completed")`,
+    300000,
   );
   const fileOk =
     fs.existsSync(goalFile) &&
     fs.readFileSync(goalFile, "utf8").includes(MARKER);
-  record("目标模式: 实质性目标已完成（文件含标记词）", fileOk);
-  const lastAgent = await evalJs(`(() => {
-    const agents = document.querySelectorAll(".msg-agent");
-    return agents.length ? agents[agents.length - 1].innerText : "";
-  })()`);
-  record(
-    "目标模式: 回合完成后退回执行模式",
-    lastAgent.length > 0,
-    lastAgent.slice(0, 120),
-  );
+  record("目标: 实质性目标已完成（文件含标记词）", fileOk);
 
-  // 等待可能的目标自动续跑回合结束（任务模式按钮需可用才能再切换）
-  await waitFor(
-    "回合全部结束（无进行中回合）",
-    `!document.querySelector(".send-btn.stop")`,
-    120000,
-  );
+  // 场景 2：× 取消已挂载目标
+  await cancelGoalViaX();
+  record("目标: × 取消已挂载目标", true);
 
-  // 场景 2：进行中停止（用户回合 + 目标自动续跑回合）后清除目标并退回执行
-  await switchGoalMode();
-  await setInput(`分析 ${testDir} 目录下的所有文件并给出架构总结，回复 ${MARKER}2`);
-  const sent2 = await clickSend();
-  if (!sent2) throw new Error("发送失败 2");
-  const interruptError = await stopUntilIdle(180000);
-  const mode = await evalJs(`document.querySelector(".task-chip")?.textContent ?? ""`);
+  // 场景 3：目标激活期间点停止 → 先清目标再中断
+  await clickGoalFlag();
+  await fillGoalAndConfirm(
+    `分析 ${testDir} 目录下的所有文件并给出架构总结，回复 ${MARKER2}`,
+  );
+  const stopError = await stopUntilGoalCleared(180000);
   record(
-    "目标模式: 进行中停止后清除目标并退回执行（无 expected active turn 异常）",
-    interruptError === "" && mode.includes("执行模式"),
-    (interruptError || mode).slice(0, 120),
+    "目标: 停止按钮先清目标（无 expected active turn 异常）",
+    stopError === "",
+    stopError.slice(0, 120),
   );
 
   const pass = results.filter((r) => r.ok).length;

@@ -24,7 +24,7 @@ export async function registerCloseGuard(): Promise<UnlistenFn> {
           cancelLabel: "取消",
         });
         if (!ok) return;
-        // 先停止当前回合（与切换会话一致，含目标模式清目标），再强制关闭，
+        // 先停止当前回合（与切换会话一致，含活跃目标清目标），再强制关闭，
         // destroy 不会再次触发 close-requested，避免循环。
         await interrupt(store.currentThreadId, store.currentTurnId);
         await win.destroy();

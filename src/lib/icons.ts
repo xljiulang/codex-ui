@@ -28,6 +28,9 @@ export const ICON_REFRESH =
   "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
 export const ICON_CHEVRON_DOWN = "M4 6l4 4 4-4z";
 
+/** 目标：旗帜（目标芯片的设置/取消按钮与状态展示共用） */
+export const ICON_GOAL = "M4 3h2v18H4zm2 1h13l-2.8 4 2.8 4H6z";
+
 /** 关闭其它所有标签：交叠标签卡片 + 关闭叉（需配合 fill-rule="evenodd" 挖空） */
 export const ICON_CLOSE_ALL =
   "M5 3h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 3v8h8V6H5z" +

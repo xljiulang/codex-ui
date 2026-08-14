@@ -10,8 +10,9 @@ import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
 import TaskModeMenu from "./TaskModeMenu.vue";
+import GoalMenu from "./GoalMenu.vue";
 import {
-  askConfirm,
+  clearGoal,
   interrupt,
   effectiveEffort,
   modelDisplayName,
@@ -33,7 +34,7 @@ import {
   type FuzzyFileResult,
 } from "../lib/mention";
 import { permissionMode } from "../lib/permissions";
-import { ICON_CHEVRON_DOWN } from "../lib/icons";
+import { ICON_CHEVRON_DOWN, ICON_GOAL } from "../lib/icons";
 import {
   Reference,
   docToRuns,
@@ -360,6 +361,7 @@ function closeMenus() {
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
+  store.goalOpen = false;
   mention.value = null;
 }
 
@@ -371,6 +373,7 @@ function toggleMenu(which: ComposerMenu) {
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
+  store.goalOpen = false;
   store[`${which}Open`] = willOpen;
 }
 
@@ -387,18 +390,20 @@ function onWindowMousedown(e: MouseEvent) {
     store.permOpen = false;
     store.taskOpen = false;
     store.modelOpen = false;
+    store.goalOpen = false;
     return;
   }
   // 弹出层内部与三个触发按钮不自动关闭（按钮自身的 click 负责切换）
   if (
     e.target.closest(".popup-menu") ||
-    e.target.closest(".perm-chip, .task-chip, .model-chip")
+    e.target.closest(".perm-chip, .task-chip, .model-chip, .goal-chip")
   ) {
     return;
   }
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
+  store.goalOpen = false;
 }
 
 onMounted(() => {
@@ -677,10 +682,6 @@ function submit(flip = false) {
   const fileSection = fileMentionSection(files);
   const marker = files.length ? `\n${MY_REQUEST_MARKER}\n` : "";
   const wireText = `${fileSection}${marker}${wireInline}`;
-  // 目标模式：首条消息的纯文本即目标（后续回合完成/终止时清除）
-  if (store.taskMode === "goal" && plainText.trim()) {
-    store.goalText = plainText.trim();
-  }
   // 先清空编辑器（onUpdate 会同步 store.attachments 为空），再写入本次附件
   editor.value?.commands.setContent("");
   refsById.value = new Map();
@@ -727,9 +728,10 @@ const ctxUsage = computed(() => {
 });
 
 const ctxTooltip = computed(() => {
+  if (compacting.value) return "正在压缩上下文…";
   const u = ctxUsage.value;
   if (!u) return "";
-  return `上下文已用 ${formatTokens(u.used)}，共 ${formatTokens(u.window)}`;
+  return `上下文已用 ${formatTokens(u.used)}，共 ${formatTokens(u.window)}，双击进行压缩`;
 });
 
 function formatTokens(n: number): string {
@@ -738,16 +740,9 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-/** 手动压缩上下文：空闲（有会话且无进行中回合）时二次确认后发起 thread/compact/start */
-async function compactContext() {
-  if (!store.currentThreadId || store.turnActive || compacting.value) return;
-  const ok = await askConfirm({
-    title: "压缩上下文",
-    message: "将把当前对话内容压缩为摘要以释放上下文窗口，是否继续？",
-    confirmLabel: "压缩",
-    cancelLabel: "取消",
-  });
-  if (!ok) return;
+/** 发起 thread/compact/start：回合进行中也可压缩，由服务端处理 */
+async function compactNow() {
+  if (!store.currentThreadId || compacting.value) return;
   compacting.value = true;
   try {
     await invoke("codex_rpc", {
@@ -770,8 +765,47 @@ function modelChipLabel(): string {
 
 function taskModeLabel(): string {
   if (store.taskMode === "plan") return "计划模式";
-  if (store.taskMode === "goal") return "目标模式";
   return "执行模式";
+}
+
+function goalStatusLabel(): string {
+  switch (store.goalStatus) {
+    case "completed":
+      return "✓ 已完成";
+    case "budget_limited":
+      return "预算耗尽";
+    case "paused":
+      return "已暂停";
+    case "cleared":
+      return "已清除";
+    default:
+      return "";
+  }
+}
+
+/** 目标旗子提示：未设置/待应用（会话前预填）/已挂载三种状态 */
+function goalTooltip(): string {
+  if (!store.goalText) return "设置目标";
+  if (!store.currentThreadId) {
+    return `目标：${store.goalText}（待应用：创建会话后生效），点击修改`;
+  }
+  const status =
+    store.goalStatus === "active" || !store.goalStatus
+      ? "进行中"
+      : goalStatusLabel();
+  return `目标：${store.goalText}（${status}），点击修改`;
+}
+
+/** 目标旗子：始终可点，打开设置弹层（有目标时回填）；再点一次关闭 */
+function onGoalIconClick() {
+  const willOpen = !store.goalOpen;
+  closeMenus();
+  store.goalOpen = willOpen;
+}
+
+/** × 按钮：直接取消目标（会话前仅清空待填目标），不弹确认 */
+function onCancelGoalClick() {
+  void clearGoal();
 }
 
 </script>
@@ -847,15 +881,49 @@ function taskModeLabel(): string {
           </button>
           <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
         </div>
+        <div class="menu-anchor">
+          <div class="goal-chip">
+            <button
+              class="goal-icon-btn"
+              :class="{
+                'has-goal': !!store.goalText,
+                'status-completed': store.goalStatus === 'completed',
+                'status-budget_limited': store.goalStatus === 'budget_limited',
+                'status-paused': store.goalStatus === 'paused',
+              }"
+              :aria-label="goalTooltip()"
+              v-tooltip="goalTooltip()"
+              @click="onGoalIconClick()"
+            >
+              <svg viewBox="0 0 24 24">
+                <path :d="ICON_GOAL" />
+              </svg>
+            </button>
+            <button
+              v-if="store.goalText"
+              class="goal-clear-btn"
+              aria-label="取消目标"
+              v-tooltip="'取消目标'"
+              @click="onCancelGoalClick()"
+            >
+              <svg viewBox="0 0 24 24">
+                <path
+                  d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"
+                />
+              </svg>
+            </button>
+          </div>
+          <GoalMenu v-if="store.goalOpen" @close="store.goalOpen = false" />
+        </div>
       </div>
       <div class="composer-right">
         <button
           v-if="ctxUsage"
           class="ctx-window"
           aria-label="压缩上下文"
-          :disabled="!store.currentThreadId || store.turnActive || compacting"
+          :disabled="!store.currentThreadId || compacting"
           v-tooltip="ctxTooltip"
-          @click="compactContext()"
+          @dblclick="compactNow()"
         >
           {{ ctxUsage.pct }}%
         </button>
@@ -936,6 +1004,7 @@ function taskModeLabel(): string {
           store.permOpen ||
           store.taskOpen ||
           store.modelOpen ||
+          store.goalOpen ||
           mention
         "
         class="menu-backdrop"
