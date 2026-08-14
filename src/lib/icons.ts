@@ -68,3 +68,7 @@ export const ICON_EDIT =
 /** diff 简要/完整切换：三条横线列表图标 */
 export const ICON_SUMMARY =
   "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z";
+
+/** 代码格式化：魔法棒图标（编辑器右键菜单） */
+export const ICON_FORMAT =
+  "M7.5 5.6 10 7 8.6 4.5 10 2 7.5 3.4 5 2l1.4 2.5L5 7l2.5-1.4zM19 13l-1.4 2.5L15 14l1.4 2.5L15 19l2.5-1.4L20 19l-1.4-2.5L20 14l-2.5 1.4L19 13zm-2.3-6.3L5 18.4 6.6 20 18 8.6l-1.3-1.9zM5 3l1 1.8L7.8 3 6.8 4.8 5 3z";

@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import TextEditorPane from "../TextEditorPane.vue";
+import { store } from "../../composables/useCodex";
 import {
   __resetEditorTabsForTest,
   openFileTab,
@@ -200,6 +201,95 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
       "全选",
       "查找/替换",
     ]);
+    wrapper.unmount();
+  });
+
+  it("可格式化文件（json/ts/py/xml/html）右键菜单末尾为「代码格式化」", async () => {
+    for (const [name, content] of [
+      ["a.json", '{"a":1}'],
+      ["a.ts", "const x: number = 1;"],
+      ["a.py", "x = 1"],
+      ["a.xml", "<root><a>1</a></root>"],
+      ["a.html", "<div><p>x</p></div>"],
+    ] as const) {
+      const tab = await openTab(name, content);
+      const wrapper = await mountEditor(tab);
+      await openCtx(wrapper);
+      const labels = menuLabels(wrapper);
+      expect(labels[labels.length - 1], name).toBe("代码格式化");
+      wrapper.unmount();
+    }
+  });
+
+  it("不可格式化文件（txt/无扩展名）不显示「代码格式化」", async () => {
+    const tab = await openTab("a.txt", "hello");
+    const wrapper = await mountEditor(tab);
+    await openCtx(wrapper);
+    expect(menuLabels(wrapper)).not.toContain("代码格式化");
+    wrapper.unmount();
+
+    const noExtTab = await openTab("noext", "hello");
+    const noExtWrapper = await mountEditor(noExtTab);
+    await openCtx(noExtWrapper);
+    expect(menuLabels(noExtWrapper)).not.toContain("代码格式化");
+    noExtWrapper.unmount();
+  });
+
+  it("点击「代码格式化」：JSON 规范化（空格/缩进）、置脏、可撤销回退", async () => {
+    const tab = await openTab("a.json", '{"a":1,"b":[1,2]}');
+    const wrapper = await mountEditor(tab);
+    const view = await viewOf(wrapper);
+
+    await openCtx(wrapper);
+    await clickMenuItem(wrapper, "代码格式化");
+
+    // 短 JSON 对象在打印宽度内保持单行，但规范化为空格与 4 空格缩进风格
+    await vi.waitFor(
+      () => {
+        expect(view.state.doc.toString()).toBe(
+          '{ "a": 1, "b": [1, 2] }',
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    expect(tab.dirty).toBe(true);
+
+    await openCtx(wrapper);
+    await clickMenuItem(wrapper, "撤销");
+    expect(view.state.doc.toString()).toBe('{"a":1,"b":[1,2]}');
+    wrapper.unmount();
+  });
+
+  it("点击「代码格式化」：XML 展开为多行", async () => {
+    const tab = await openTab("a.xml", "<root><a>1</a></root>");
+    const wrapper = await mountEditor(tab);
+    const view = await viewOf(wrapper);
+
+    await openCtx(wrapper);
+    await clickMenuItem(wrapper, "代码格式化");
+
+    expect(view.state.doc.toString()).toBe(
+      "<root>\n    <a>1</a>\n</root>",
+    );
+    wrapper.unmount();
+  });
+
+  it("非法 JSON 点击「代码格式化」：文档不变并弹出错误提示", async () => {
+    store.toast = "";
+    const tab = await openTab("a.json", '{"a": }');
+    const wrapper = await mountEditor(tab);
+    const view = await viewOf(wrapper);
+
+    await openCtx(wrapper);
+    await clickMenuItem(wrapper, "代码格式化");
+
+    expect(view.state.doc.toString()).toBe('{"a": }');
+    await vi.waitFor(
+      () => {
+        expect(store.toast).toBe("JSON 语法错误，无法格式化");
+      },
+      { timeout: 5000, interval: 20 },
+    );
     wrapper.unmount();
   });
 

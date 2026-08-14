@@ -10,12 +10,14 @@ import { saveFileTab, type FileEditorTab } from "../composables/useEditorTabs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { setToast } from "../composables/useCodex";
 import { copyText } from "../lib/clipboard";
+import { formatDoc, isFormatablePath } from "../lib/codeFormat";
 import MarkdownText from "./MarkdownText.vue";
 import {
   ICON_COPY,
   ICON_CUT,
   ICON_EDIT,
   ICON_FIND,
+  ICON_FORMAT,
   ICON_PASTE,
   ICON_PREVIEW,
   ICON_REDO,
@@ -153,7 +155,30 @@ function buildMenuItems(): CtxItem[] {
       },
     },
   );
+  if (isFormatablePath(props.tab.path)) {
+    items.push({
+      label: "代码格式化",
+      icon: ICON_FORMAT,
+      action: () => void formatCurrentDoc(),
+    });
+  }
   return items;
+}
+
+/** 代码格式化：全文重排为单次可撤销事务；失败或加载中不修改文档 */
+async function formatCurrentDoc() {
+  const v = view;
+  if (!v) return;
+  const res = await formatDoc(props.tab.path, v.state.doc.toString());
+  if (!res.ok) {
+    setToast(res.message);
+    return;
+  }
+  if ("unchanged" in res) return;
+  v.dispatch({
+    changes: { from: 0, to: v.state.doc.length, insert: res.text },
+  });
+  v.focus();
 }
 
 async function copySelection() {
