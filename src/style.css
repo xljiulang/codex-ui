@@ -4840,6 +4840,12 @@ body.resizing-editor {
   padding: 12px 14px;
 }
 
+.plan-prompt-hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
 .interaction-head {
   display: flex;
   align-items: center;

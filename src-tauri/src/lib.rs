@@ -56,6 +56,7 @@ pub fn run() {
             codex::session_fs::session_fs_watch_stop,
             codex::session_fs::session_fs_read,
             codex::session_fs::session_fs_write,
+            codex::session_fs::session_fs_create_file,
             codex::session_fs::session_fs_probe_text,
             codex::session_fs::session_fs_read_bytes,
             codex::session_fs::session_fs_icons,

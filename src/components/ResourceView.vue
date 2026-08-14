@@ -32,8 +32,10 @@ import {
   treeRows,
   loadingRoot,
   addAsAttachment,
+  createTextFile,
   openImagePreview,
   openPdfPreview,
+  pasteAvailable,
 } from "../composables/useSessionFs";
 import {
   formatFileSize,
@@ -49,6 +51,7 @@ import {
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
   ICON_OPEN,
+  ICON_PLUS,
   ICON_REFRESH,
   ICON_RENAME,
   ICON_TERMINAL,
@@ -114,15 +117,25 @@ function fileMeta(entry: FsEntry): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-function openRootMenu(e: MouseEvent) {
+async function openRootMenu(e: MouseEvent) {
   const root = rootEntry.value;
   if (!root) return;
+  const canPaste = await pasteAvailable();
   openCtx(e, [
     {
-      label: "粘贴",
-      icon: ICON_PASTE,
-      action: () => void pasteInto(root.path),
+      label: "新建文本文件",
+      icon: ICON_PLUS,
+      action: () => void createTextFile(root.path),
     },
+    ...(canPaste
+      ? [
+          {
+            label: "粘贴",
+            icon: ICON_PASTE,
+            action: () => void pasteInto(root.path),
+          },
+        ]
+      : []),
     {
       label: "在此打开终端",
       icon: ICON_TERMINAL,
@@ -136,14 +149,24 @@ function openRootMenu(e: MouseEvent) {
   ]);
 }
 
-function openDirMenu(entry: FsEntry, e: MouseEvent) {
+async function openDirMenu(entry: FsEntry, e: MouseEvent) {
+  const canPaste = await pasteAvailable();
   openCtx(e, [
-    { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
     {
-      label: "粘贴",
-      icon: ICON_PASTE,
-      action: () => void pasteInto(entry.path),
+      label: "新建文本文件",
+      icon: ICON_PLUS,
+      action: () => void createTextFile(entry.path),
     },
+    { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
+    ...(canPaste
+      ? [
+          {
+            label: "粘贴",
+            icon: ICON_PASTE,
+            action: () => void pasteInto(entry.path),
+          },
+        ]
+      : []),
     {
       label: "删除",
       icon: ICON_DELETE,

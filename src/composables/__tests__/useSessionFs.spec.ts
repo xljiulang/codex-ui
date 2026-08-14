@@ -12,10 +12,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { store } from "../useCodex";
 import {
   __resetSessionFsForTest,
+  copyBuffer,
+  createTextFile,
   ensureEntryIcons,
   iconCacheKey,
   iconFor,
   openPathInApp,
+  pasteAvailable,
 } from "../useSessionFs";
 import {
   __resetEditorTabsForTest,
@@ -228,5 +231,84 @@ describe("openPathInApp 对话链接应用内打开", () => {
     } finally {
       w.__CODEX_UI_TEST__ = false;
     }
+  });
+});
+
+describe("useSessionFs 粘贴可用性与新建文本文件", () => {
+  beforeEach(() => {
+    __resetSessionFsForTest();
+    store.server.workspace = root;
+    store.toast = "";
+    copyBuffer.value = [];
+    mockedInvoke.mockReset();
+    mockedInvoke.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    __resetSessionFsForTest();
+  });
+
+  it("pasteAvailable：无复制记录且剪贴板无文件时为 false", async () => {
+    expect(await pasteAvailable()).toBe(false);
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_file_paths");
+  });
+
+  it("pasteAvailable：系统剪贴板有文件时为 true", async () => {
+    mockedInvoke.mockResolvedValue(["D:\\src\\a.txt"]);
+    expect(await pasteAvailable()).toBe(true);
+  });
+
+  it("pasteAvailable：内部复制记录非空时为 true，不再查剪贴板", async () => {
+    copyBuffer.value = ["D:\\src\\a.txt"];
+    expect(await pasteAvailable()).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("clipboard_file_paths");
+  });
+
+  it("pasteAvailable：剪贴板读取失败按不可用处理", async () => {
+    mockedInvoke.mockRejectedValue(new Error("剪贴板忙"));
+    expect(await pasteAvailable()).toBe(false);
+  });
+
+  it("createTextFile：调用命令、提示并刷新", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "session_fs_create_file") {
+        return Promise.resolve({
+          name: "新建文本文件.txt",
+          path: `${root}\\新建文本文件.txt`,
+          relPath: "新建文本文件.txt",
+          isDir: false,
+          size: 0,
+          modifiedAtMs: 0,
+          createdAtMs: 0,
+          childCount: null,
+        });
+      }
+      if (cmd === "session_fs_metadata") {
+        return Promise.resolve({
+          name: "repo",
+          path: root,
+          relPath: ".",
+          isDir: true,
+          size: null,
+          modifiedAtMs: 0,
+          createdAtMs: 0,
+          childCount: 0,
+        });
+      }
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+
+    await createTextFile(root + "\\src");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_create_file", {
+      root,
+      dir: root + "\\src",
+    });
+    expect(store.toast).toContain("已创建「新建文本文件.txt」");
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
+      root,
+      path: root,
+    });
   });
 });

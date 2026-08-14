@@ -102,9 +102,12 @@ const docPdf: FsEntry = {
   createdAtMs: 0,
   childCount: null,
 };
+/** 右键菜单剪贴板文件源（默认含文件，粘贴可见；置空验证隐藏） */
+let clipboardFiles: string[] = [];
 
 function mockFs() {
   mockedInvoke.mockImplementation((cmd, args) => {
+    if (cmd === "clipboard_file_paths") return Promise.resolve(clipboardFiles);
     if (cmd === "session_fs_metadata") {
       const path = (args as { path?: string }).path;
       if (path === aTxt.path) return Promise.resolve(aTxt);
@@ -163,6 +166,7 @@ async function openRowCtx(
     clientX: 200,
     clientY: 200,
   });
+  await flushPromises();
 }
 
 async function clickCtxItem(wrapper: VueWrapper, label: string) {
@@ -181,6 +185,7 @@ describe("ResourceView 文件树", () => {
     store.newChatCwd = null;
     store.attachments = [];
     store.toast = "";
+    clipboardFiles = [aTxt.path];
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
@@ -464,6 +469,7 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-dir");
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).toEqual([
+      "新建文本文件",
       "复制",
       "粘贴",
       "删除",
@@ -479,7 +485,22 @@ describe("ResourceView 文件树", () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-root");
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
-    expect(labels).toEqual(["粘贴", "在此打开终端", "在资源管理器中打开"]);
+    expect(labels).toEqual([
+      "新建文本文件",
+      "粘贴",
+      "在此打开终端",
+      "在资源管理器中打开",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("剪贴板无文件且无复制记录时右键菜单不显示「粘贴」", async () => {
+    clipboardFiles = [];
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    expect(labels).not.toContain("粘贴");
+    expect(labels[0]).toBe("新建文本文件");
     wrapper.unmount();
   });
 

@@ -524,6 +524,35 @@ pub async fn session_fs_write(
     .await
 }
 
+/// 新建文本文件：目标必须为根内目录，自动生成唯一名
+/// （新建文本文件.txt，冲突时追加 (2)、(3)…），创建空文件并返回条目
+fn create_file_impl(root: &Path, dir: &Path) -> Result<FsEntry, String> {
+    let dir_c = ensure_inside(root, dir)?;
+    if !dir_c.is_dir() {
+        return Err("目标必须是目录".into());
+    }
+    const BASE: &str = "新建文本文件";
+    let mut name = format!("{BASE}.txt");
+    let mut n = 2;
+    while dir_c.join(&name).exists() {
+        name = format!("{BASE} ({n}).txt");
+        n += 1;
+    }
+    let target = dir_c.join(&name);
+    std::fs::write(&target, "")
+        .map_err(|e| format!("创建文件失败 {}: {e}", clean_path(&target)))?;
+    entry_from_path(root, &target)
+}
+
+#[tauri::command]
+pub async fn session_fs_create_file(root: String, dir: String) -> Result<FsEntry, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_root(&root)?;
+        create_file_impl(&root_p, Path::new(&dir))
+    })
+    .await
+}
+
 /// 文本探测采样字节数（与 git 二进制判定窗口一致，覆盖常见文件头）
 const TEXT_PROBE_BYTES: usize = 8000;
 
@@ -835,6 +864,50 @@ mod tests {
         assert!(validate_name("a?").is_err());
         assert!(validate_name("a.").is_err());
         assert!(validate_name(" a").is_err());
+    }
+
+    #[test]
+    fn create_file_creates_empty_file_with_unique_name() {
+        let (tmp, root) = tree();
+        let dir = root.join("src");
+
+        let e1 = create_file_impl(&root, &dir).unwrap();
+        assert_eq!(e1.name, "新建文本文件.txt");
+        assert_eq!(
+            std::fs::read(dir.join("新建文本文件.txt")).unwrap(),
+            b""
+        );
+
+        // 同名冲突 → (2)、(3)、(4) 递增
+        let e2 = create_file_impl(&root, &dir).unwrap();
+        assert_eq!(e2.name, "新建文本文件 (2).txt");
+        let e3 = create_file_impl(&root, &dir).unwrap();
+        assert_eq!(e3.name, "新建文本文件 (3).txt");
+        let e4 = create_file_impl(&root, &dir).unwrap();
+        assert_eq!(e4.name, "新建文本文件 (4).txt");
+
+        // 条目指向目标目录内的真实文件
+        assert!(dir.join(&e4.name).is_file());
+        let _ = tmp;
+    }
+
+    #[test]
+    fn create_file_rejects_non_dir_missing_and_outside() {
+        let (tmp, root) = tree();
+
+        // 目标是文件
+        let err = create_file_impl(&root, &root.join("a.txt")).unwrap_err();
+        assert!(err.contains("必须是目录"));
+
+        // 目标不存在
+        let err = create_file_impl(&root, &root.join("missing")).unwrap_err();
+        assert!(err.contains("无法访问路径"));
+
+        // 越出根目录
+        let outside = tmp.path().parent().unwrap().to_path_buf();
+        let err = create_file_impl(&root, &outside).unwrap_err();
+        assert!(err.contains("路径越界"));
+        let _ = tmp;
     }
 
     #[test]

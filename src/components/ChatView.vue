@@ -4,6 +4,7 @@ import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import InlineInteraction from "./InlineInteraction.vue";
 import MessageItem from "./MessageItem.vue";
+import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { currentItems, store } from "../composables/useCodex";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
 
@@ -93,7 +94,12 @@ function jumpToBottom() {
 }
 
 watch(
-  [() => items.value.length, () => store.itemsRev, () => store.interactions.length],
+  [
+    () => items.value.length,
+    () => store.itemsRev,
+    () => store.interactions.length,
+    () => store.planPrompt,
+  ],
   () => {
     scheduleScroll();
   },
@@ -163,6 +169,7 @@ onBeforeUnmount(() => {
           </section>
         </template>
         <InlineInteraction />
+        <PlanPromptBubble />
         <div
           v-if="
             store.turnActive &&

@@ -318,6 +318,29 @@ export async function pasteInto(targetDir: string) {
   }
 }
 
+/** 粘贴是否可用：内部复制记录非空或系统剪贴板含文件（读取失败按不可用处理） */
+export async function pasteAvailable(): Promise<boolean> {
+  if (copyBuffer.value.length) return true;
+  const paths = await readClipboardPaths();
+  return paths.length > 0;
+}
+
+/** 在目录下新建文本文件（唯一命名由后端保证），成功后刷新并提示 */
+export async function createTextFile(dir: string) {
+  const root = sessionRoot.value;
+  if (!root) return;
+  try {
+    const created = await invoke<FsEntry>("session_fs_create_file", {
+      root,
+      dir,
+    });
+    setToast(`已创建「${created.name}」`);
+    await refreshAll();
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
 export async function renameEntry(path: string, newName: string) {
   const root = sessionRoot.value;
   if (!root) return;

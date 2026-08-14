@@ -20,11 +20,19 @@ vi.mock("../../composables/useCodex", () => {
       params: Record<string, unknown>;
       at: number;
     }[],
+    planPrompt: null as {
+      threadId: string;
+      turnId: string;
+      planText: string;
+    } | null,
   });
   return {
     currentItems: vi.fn(),
     resolveCwd: () => "",
     store,
+    dismissPlanPrompt: vi.fn(),
+    executePlan: vi.fn(),
+    exitPlanMode: vi.fn(),
     respondInteraction: vi.fn(
       (interaction: { requestId: number }) => {
         store.interactions = store.interactions.filter(
@@ -620,5 +628,77 @@ describe("ChatView 日期分隔线", () => {
       timeout: 2000,
       interval: 10,
     });
+  });
+});
+
+describe("ChatView 计划已就绪气泡", () => {
+  beforeEach(() => {
+    store.planPrompt = null;
+  });
+
+  it("planPrompt 设置后消息流末尾渲染计划气泡，解决后移除", async () => {
+    mockedItems.mockReturnValue([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+          EmptyState: { template: "<div />" },
+        },
+      },
+    });
+    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(false);
+
+    store.planPrompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 修复方案",
+    };
+    await nextTick();
+    const bubbles = wrapper.findAll(".chat-scroll .interaction-bubble");
+    expect(bubbles).toHaveLength(1);
+    expect(bubbles[0].text()).toContain("计划已就绪");
+    expect(bubbles[0].text()).not.toContain("# 修复方案");
+
+    store.planPrompt = null;
+    await nextTick();
+    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("与交互气泡并存时 InlineInteraction 在前、计划气泡在后", async () => {
+    mockedItems.mockReturnValue([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    store.interactions.push({
+      requestId: 3,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "echo hi", reason: "测试" },
+      at: Date.now(),
+    });
+    store.planPrompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 修复方案",
+    };
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+          EmptyState: { template: "<div />" },
+        },
+      },
+    });
+    await nextTick();
+    const bubbles = wrapper.findAll(".chat-scroll .interaction-bubble");
+    expect(bubbles).toHaveLength(2);
+    expect(bubbles[0].text()).toContain("批准执行命令");
+    expect(bubbles[1].text()).toContain("计划已就绪");
+    wrapper.unmount();
+    store.interactions = [];
+    store.planPrompt = null;
   });
 });
