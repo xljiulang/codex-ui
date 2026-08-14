@@ -4202,9 +4202,11 @@ body.resizing-editor {
   background: transparent;
 }
 
-/* 加宽滚动条：仅 diff 查看器与文本编辑器（其余窗口保持 8px） */
+/* 加宽滚动条：diff 查看器、文本编辑器与会话区（其余面板保持 8px） */
 .diff-window-body::-webkit-scrollbar,
-.text-editor-host .cm-scroller::-webkit-scrollbar {
+.text-editor-host .cm-scroller::-webkit-scrollbar,
+.chat-scroll::-webkit-scrollbar,
+.text-editor-preview::-webkit-scrollbar {
   width: 12px;
   height: 12px;
 }
@@ -4797,6 +4799,17 @@ body.resizing-editor {
 .text-editor-host > * {
   flex: 1;
   min-width: 0;
+}
+.text-editor-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 18px 20px;
+  background: var(--console-bg-deep);
+  color: var(--console-text);
+}
+.text-editor-preview .md {
+  max-width: 920px;
 }
 .text-editor-status {
   display: flex;
