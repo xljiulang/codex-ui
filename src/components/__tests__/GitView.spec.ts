@@ -35,6 +35,7 @@ const rootPath = "D:\\codex\\demo";
 const okStatus: GitStatus = {
   repoRoot: rootPath,
   branch: "main",
+  hasRemote: true,
   files: [
     { path: "a.txt", status: "modified", staged: false, worktree: true },
     { path: "b.txt", status: "untracked", staged: false, worktree: true },
@@ -315,6 +316,9 @@ describe("GitView 分支管理", () => {
       if (cmd === "git_changes_branches") {
         return Promise.resolve({ current, branches });
       }
+      if (cmd === "git_changes_remotes") {
+        return Promise.resolve({ current: null, remotes: [] });
+      }
       if (cmd === "git_changes_branch_switch") {
         return Promise.resolve({ ...okStatus, branch: "dev" });
       }
@@ -501,7 +505,13 @@ describe("GitView 分支管理", () => {
     await flushPromises();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
 
+    // 原生菜单粘贴合成的 click 不应关闭弹层
     window.dispatchEvent(new MouseEvent("click"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
+
+    // 外部按下（mousedown）才关闭
+    window.dispatchEvent(new MouseEvent("mousedown"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
 
@@ -532,6 +542,14 @@ describe("GitView 分支管理", () => {
     expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
     chatEl.remove();
 
+    // 弹层内部列表滚动（粘贴/聚焦自动滚动同路径）不关闭
+    wrapper.find(".git-branch-menu-list").element.dispatchEvent(
+      new Event("scroll"),
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
+
+    // 面板内容区滚动关闭
     wrapper.find(".git-file-list").element.dispatchEvent(new Event("scroll"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
@@ -839,8 +857,13 @@ describe("GitView 分区折叠", () => {
       false,
     );
 
-    // 点刷新按钮触发状态刷新，折叠状态应保留
-    await wrapper.find(".git-refresh").trigger("click");
+    // 监听事件触发自动刷新，折叠状态应保留（越过 1s 刷新冷却）
+    const changedCb = mockedListen.mock.calls.find(
+      ([ev]) => ev === "git-changes/changed",
+    )?.[1] as () => void;
+    expect(changedCb).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 1200));
+    changedCb();
     await flushPromises();
     expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
       false,
@@ -1154,6 +1177,7 @@ describe("GitView 变更文件树形目录", () => {
   const treeStatus: GitStatus = {
     repoRoot: rootPath,
     branch: "main",
+    hasRemote: true,
     files: [
       { path: "a.txt", status: "modified", staged: false, worktree: true },
       { path: "src/b.txt", status: "untracked", staged: false, worktree: true },
@@ -1448,7 +1472,7 @@ describe("GitView 变更文件树形目录", () => {
     wrapper.unmount();
   });
 
-  it("刷新后保留手动折叠状态", async () => {
+  it("自动刷新后保留手动折叠状态", async () => {
     mockTreeRepo();
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
@@ -1456,7 +1480,13 @@ describe("GitView 变更文件树形目录", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.findAll(".git-tree-row")).toHaveLength(5);
 
-    await wrapper.find(".git-refresh").trigger("click");
+    // 监听事件触发自动刷新（越过 1s 刷新冷却），折叠状态应保留
+    const changedCb = mockedListen.mock.calls.find(
+      ([ev]) => ev === "git-changes/changed",
+    )?.[1] as () => void;
+    expect(changedCb).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 1200));
+    changedCb();
     await flushPromises();
     expect(wrapper.findAll(".git-tree-row")).toHaveLength(5);
     expect(wrapper.find(".git-view").text()).not.toContain("src/deep/c.txt");
@@ -1479,6 +1509,7 @@ describe("GitView 提交", () => {
   const stagedStatus: GitStatus = {
     repoRoot: rootPath,
     branch: "main",
+    hasRemote: true,
     files: [
       { path: "a.txt", status: "modified", staged: true, worktree: false },
       { path: "b.txt", status: "added", staged: true, worktree: false },
@@ -1595,7 +1626,7 @@ describe("GitView 拉取", () => {
     __resetGitChangesForTest();
   });
 
-  it("拉取/推送合并为胶囊：容器包含两按钮与分隔线", async () => {
+  it("拉取/推送合并为胶囊：容器包含两按钮与一条分隔线", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
       if (cmd === "git_changes_git_available") return Promise.resolve(true);
@@ -1603,11 +1634,33 @@ describe("GitView 拉取", () => {
     });
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
+
     const capsule = wrapper.find(".git-pull-push");
     expect(capsule.exists()).toBe(true);
     expect(capsule.find(".git-pull").exists()).toBe(true);
     expect(capsule.find(".git-push").exists()).toBe(true);
-    expect(capsule.find(".git-pull-push-divider").exists()).toBe(true);
+    expect(capsule.find(".git-refresh").exists()).toBe(false);
+    expect(capsule.findAll(".git-pull-push-divider")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("无远端时拉取/推送禁用并提示", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({ ...okStatus, hasRemote: false });
+      }
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const pullBtn = wrapper.find(".git-pull");
+    const pushBtn = wrapper.find(".git-push");
+    expect((pullBtn.element as HTMLButtonElement).disabled).toBe(true);
+    expect((pushBtn.element as HTMLButtonElement).disabled).toBe(true);
+    expect(pullBtn.attributes("data-tip")).toBe("未配置远端，无法拉取");
+    expect(pushBtn.attributes("data-tip")).toBe("未配置远端，无法推送");
     wrapper.unmount();
   });
 
@@ -1813,6 +1866,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
   const letterStatus: GitStatus = {
     repoRoot: rootPath,
     branch: "main",
+    hasRemote: true,
     files: [
       { path: "added.txt", status: "added", staged: true, worktree: false },
       { path: "mod.txt", status: "modified", staged: true, worktree: false },
@@ -1826,6 +1880,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
   const stagedStatus: GitStatus = {
     repoRoot: rootPath,
     branch: "main",
+    hasRemote: true,
     files: [
       { path: "a.txt", status: "modified", staged: true, worktree: false },
       { path: "b.txt", status: "added", staged: true, worktree: false },
@@ -1945,6 +2000,417 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
     expect(unstageBtn.exists()).toBe(true);
     expect((stageBtn.element as HTMLButtonElement).disabled).toBe(false);
     expect((unstageBtn.element as HTMLButtonElement).disabled).toBe(true);
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 远端管理", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  const originRemote = {
+    name: "origin",
+    fetchUrl: "https://github.com/x/y.git",
+    pushUrl: "https://github.com/x/y.git",
+  };
+
+  const defaultBranches = {
+    current: "main",
+    branches: ["main"],
+    remoteBranches: [],
+    currentUpstream: null,
+  };
+
+  function mockRemotes(
+    list: Array<{ name: string; fetchUrl: string | null; pushUrl: string | null }>,
+    current: string | null,
+  ) {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_branches") {
+        return Promise.resolve(defaultBranches);
+      }
+      if (
+        cmd === "git_changes_remotes" ||
+        cmd === "git_changes_remote_add" ||
+        cmd === "git_changes_remote_set_url" ||
+        cmd === "git_changes_remote_remove"
+      ) {
+        return Promise.resolve({ current, remotes: list });
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it("打开分支弹层渲染远端管理分区（三分区头/名称/地址/当前徽章）", async () => {
+    mockRemotes([originRemote], "origin");
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".git-remote-manage-section").exists()).toBe(true);
+    expect(wrapper.find(".git-branch-section-head").text()).toBe("本地");
+    expect(
+      wrapper.findAll(".git-remote-branch-head").map((h) => h.text().trim()),
+    ).toEqual(["远程", "远端管理"]);
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_remotes",
+    );
+    expect(call).toBeTruthy();
+    expect((call?.[1] as { path?: string } | undefined)?.path).toBe(rootPath);
+    expect(wrapper.find(".git-remote-name").text()).toContain("origin");
+    expect(wrapper.find(".git-remote-badge").exists()).toBe(true);
+    expect(wrapper.find(".git-remote-url").text()).toContain("github.com/x/y.git");
+    wrapper.unmount();
+  });
+
+  it("无远端时显示空状态", async () => {
+    mockRemotes([], null);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    expect(
+      wrapper.find(".git-remote-manage-section .git-remote-branch-empty").text(),
+    ).toBe("暂无远端");
+    wrapper.unmount();
+  });
+
+  it("添加远端调用 git_changes_remote_add 并清空输入", async () => {
+    mockRemotes([], null);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    const inputs = wrapper.findAll(".git-remote-add input");
+    await inputs[0].setValue("upstream");
+    await inputs[1].setValue("https://example.com/u.git");
+    await wrapper.find(".git-remote-add-btn").trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_remote_add",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({
+      root: rootPath,
+      name: "upstream",
+      url: "https://example.com/u.git",
+    });
+    expect(
+      (wrapper.findAll(".git-remote-add input")[0].element as HTMLInputElement)
+        .value,
+    ).toBe("");
+    expect(
+      (wrapper.findAll(".git-remote-add input")[1].element as HTMLInputElement)
+        .value,
+    ).toBe("");
+    expect(store.toast).toContain("已添加远端 upstream");
+    wrapper.unmount();
+  });
+
+  it("切换远端：调用 switch_upstream，当前远端行禁用，成功后徽章更新", async () => {
+    const upstreamRemote = {
+      name: "upstream",
+      fetchUrl: "https://example.com/u.git",
+      pushUrl: "https://example.com/u.git",
+    };
+    let current = "origin";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_branches") {
+        return Promise.resolve(defaultBranches);
+      }
+      if (cmd === "git_changes_remotes") {
+        return Promise.resolve({ current, remotes: [originRemote, upstreamRemote] });
+      }
+      if (cmd === "git_changes_remote_switch_upstream") {
+        current = "upstream";
+        return Promise.resolve({
+          current: "upstream",
+          remotes: [originRemote, upstreamRemote],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    const rows = wrapper.findAll(".git-remote-row");
+    const originRow = rows.find((r) =>
+      r.find(".git-remote-name").text().includes("origin"),
+    )!;
+    const upstreamRow = rows.find((r) =>
+      r.find(".git-remote-name").text().includes("upstream"),
+    )!;
+    expect(
+      (originRow.find(".git-remote-switch").element as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (upstreamRow.find(".git-remote-switch").element as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+
+    await upstreamRow.find(".git-remote-switch").trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_remote_switch_upstream",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, remote: "upstream" });
+    expect(store.toast).toContain("已将当前分支上游切换到 upstream");
+    const badgeRow = wrapper.find(".git-remote-badge").element.closest(
+      ".git-remote-row",
+    );
+    expect(
+      badgeRow?.querySelector(".git-remote-name")?.textContent,
+    ).toContain("upstream");
+    wrapper.unmount();
+  });
+
+  it("删除当前上游远端：确认含警告，确认后调用 remove，取消不调用", async () => {
+    mockRemotes([originRemote], "origin");
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".git-remote-delete").trigger("click");
+    await flushPromises();
+    expect(store.confirm?.title).toBe("删除远端");
+    expect(store.confirm?.message).toContain("当前分支的拉取/推送依赖该远端");
+    settleConfirm(false);
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd]) => cmd === "git_changes_remote_remove",
+      ),
+    ).toBe(false);
+
+    await wrapper.find(".git-remote-delete").trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_remote_remove",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, name: "origin" });
+    expect(store.toast).toContain("已删除远端 origin");
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 远程分支管理", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  function mockBranchRepoWithRemotes(
+    overrides: Partial<{
+      branch: string;
+      local: string[];
+      remote: string[];
+      upstream: string | null;
+    }> = {},
+  ) {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({
+          ...okStatus,
+          branch: overrides.branch ?? "main",
+        });
+      }
+      if (cmd === "git_changes_branches") {
+        return Promise.resolve({
+          current: overrides.branch ?? "main",
+          branches: overrides.local ?? ["main"],
+          remoteBranches: overrides.remote ?? ["origin/main"],
+          currentUpstream: overrides.upstream ?? "origin/main",
+        });
+      }
+      if (cmd === "git_changes_remotes") {
+        return Promise.resolve({ current: null, remotes: [] });
+      }
+      if (cmd === "git_changes_remote_fetch") {
+        return Promise.resolve({
+          current: "main",
+          branches: ["main", "feature"],
+          remoteBranches: ["origin/feature", "origin/main"],
+          currentUpstream: "origin/main",
+        });
+      }
+      if (cmd === "git_changes_branch_checkout_remote") {
+        return Promise.resolve({ ...okStatus, branch: "feature" });
+      }
+      if (cmd === "git_changes_branch_switch") {
+        return Promise.resolve({ ...okStatus, branch: "dev" });
+      }
+      if (cmd === "git_changes_remote_branch_delete") {
+        return Promise.resolve({
+          current: "main",
+          branches: ["main"],
+          remoteBranches: ["origin/main"],
+          currentUpstream: "origin/main",
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  it("弹层渲染本地/远程两分区与上游徽章", async () => {
+    mockBranchRepoWithRemotes({
+      local: ["main", "dev"],
+      remote: ["origin/main", "origin/dev"],
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find(".git-branch-section-head").text()).toBe("本地");
+    expect(wrapper.findAll(".git-branch-menu-item")).toHaveLength(2);
+    expect(wrapper.findAll(".git-remote-branch-item")).toHaveLength(2);
+    const badge = wrapper.find(".git-remote-branch-badge");
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toBe("上游");
+    expect(
+      wrapper.find(".git-remote-branch-item.upstream .git-remote-branch-name").text(),
+    ).toBe("origin/main");
+    wrapper.unmount();
+  });
+
+  it("点击远程分支：本地无同名调 checkout_remote，有同名调本地切换", async () => {
+    mockBranchRepoWithRemotes({
+      local: ["main"],
+      remote: ["origin/feature", "origin/main"],
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    await wrapper
+      .findAll(".git-remote-branch-item")
+      .find((i) => i.find(".git-remote-branch-name").text() === "origin/feature")!
+      .trigger("click");
+    await flushPromises();
+    const checkoutCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_branch_checkout_remote",
+    );
+    expect(checkoutCall).toBeTruthy();
+    expect(checkoutCall?.[1]).toEqual({
+      root: rootPath,
+      remoteBranch: "origin/feature",
+    });
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+    expect(store.toast).toContain("已检出远程分支 origin/feature");
+    wrapper.unmount();
+  });
+
+  it("本地已有同名分支时点击远程分支走 git_changes_branch_switch", async () => {
+    mockBranchRepoWithRemotes({
+      local: ["dev", "main"],
+      remote: ["origin/dev", "origin/main"],
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    await wrapper
+      .findAll(".git-remote-branch-item")
+      .find((i) => i.find(".git-remote-branch-name").text() === "origin/dev")!
+      .trigger("click");
+    await flushPromises();
+    const switchCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_branch_switch",
+    );
+    expect(switchCall).toBeTruthy();
+    expect(switchCall?.[1]).toEqual({ path: rootPath, name: "dev" });
+    expect(store.toast).toContain("已切换到本地分支 dev");
+    wrapper.unmount();
+  });
+
+  it("拉取刷新：调用 remote_fetch（目标为当前上游所在远端）并刷新列表", async () => {
+    mockBranchRepoWithRemotes({});
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".git-remote-branch-fetch").trigger("click");
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_remote_fetch",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath, remote: "origin" });
+    expect(store.toast).toContain("已拉取远端更新");
+    expect(
+      wrapper.findAll(".git-remote-branch-name").map((n) => n.text()),
+    ).toContain("origin/feature");
+    wrapper.unmount();
+  });
+
+  it("删除远程分支：当前上游弹确认含警告，取消不调用，确认后调用", async () => {
+    mockBranchRepoWithRemotes({
+      remote: ["origin/main"],
+      upstream: "origin/main",
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".git-remote-branch-delete").trigger("click");
+    await flushPromises();
+    expect(store.confirm?.title).toBe("删除远程分支");
+    expect(store.confirm?.message).toContain("当前分支跟踪该远程分支");
+    settleConfirm(false);
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd]) => cmd === "git_changes_remote_branch_delete",
+      ),
+    ).toBe(false);
+
+    await wrapper.find(".git-remote-branch-delete").trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_remote_branch_delete",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({
+      root: rootPath,
+      remoteBranch: "origin/main",
+    });
+    expect(store.toast).toContain("已删除远程分支 origin/main");
     wrapper.unmount();
   });
 });

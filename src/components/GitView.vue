@@ -22,11 +22,14 @@ import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
   gitDiffKind,
   gitStatusLetter,
+  type GitBranches,
   type GitCommitEntry,
   type GitFile,
   type GitMergeResult,
   type GitPullResult,
   type GitPushResult,
+  type GitRemote,
+  type GitRemotes,
   type GitStatus,
 } from "../lib/gitChanges";
 import {
@@ -60,8 +63,17 @@ const confirmInit = ref(false);
 
 const branchMenuOpen = ref(false);
 const branches = ref<string[]>([]);
+const remoteBranches = ref<string[]>([]);
+const currentUpstream = ref<string | null>(null);
 const newBranchName = ref("");
 const branchBusy = ref(false);
+const fetchBusy = ref(false);
+const remotes = ref<GitRemote[]>([]);
+const currentRemote = ref<string | null>(null);
+const remoteBusy = ref(false);
+const remoteLoading = ref(false);
+const newRemoteName = ref("");
+const newRemoteUrl = ref("");
 const mergeBusy = ref(false);
 const pullBusy = ref(false);
 const pushBusy = ref(false);
@@ -97,6 +109,8 @@ const ICON_CLOSE =
   "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 const ICON_MERGE =
   "M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z";
+const ICON_SWITCH =
+  "M6.99 11 3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z";
 
 /** 分区：更改（工作区侧） / 暂存更改（HEAD→索引侧） */
 type GitSection = "changes" | "staged";
@@ -372,17 +386,25 @@ async function doInit() {
   await initGitRepo();
 }
 
+/** 分支列表统一回填（兼容旧返回：缺失字段取默认值） */
+function applyBranches(res: GitBranches) {
+  branches.value = res.branches ?? [];
+  remoteBranches.value = res.remoteBranches ?? [];
+  currentUpstream.value = res.currentUpstream ?? null;
+}
+
 async function openBranchMenu() {
   const root = repoRoot.value;
   if (!root || branchBusy.value) return;
   branchBusy.value = true;
   try {
-    const res = await invoke<{ current: string; branches: string[] }>(
-      "git_changes_branches",
-      { path: root },
-    );
-    branches.value = res.branches;
+    const res = await invoke<GitBranches>("git_changes_branches", {
+      path: root,
+    });
+    applyBranches(res);
     branchMenuOpen.value = true;
+    // 远端管理分区：与分支列表并行加载，失败 toast 不影响分区展示
+    void loadRemotes();
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -395,6 +417,199 @@ async function toggleBranchMenu() {
     branchMenuOpen.value = false;
   } else {
     await openBranchMenu();
+  }
+}
+
+/** 「拉取刷新」目标远端：优先当前上游所在远端，其次远端管理状态，最后为空串（后端取默认） */
+function defaultFetchRemote(): string {
+  const upstream = currentUpstream.value;
+  if (upstream) {
+    const idx = upstream.indexOf("/");
+    if (idx > 0) return upstream.slice(0, idx);
+  }
+  return currentRemote.value ?? "";
+}
+
+/** 拉取远端更新并刷新分支列表（含远程分支） */
+async function fetchRemoteBranches() {
+  if (fetchBusy.value || branchBusy.value) return;
+  const root = repoRoot.value;
+  if (!root) return;
+  fetchBusy.value = true;
+  try {
+    const res = await invoke<GitBranches>("git_changes_remote_fetch", {
+      root,
+      remote: defaultFetchRemote(),
+    });
+    applyBranches(res);
+    setToast("已拉取远端更新");
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    fetchBusy.value = false;
+  }
+}
+
+/** 远程分支短名（去掉远端前缀，如 origin/dev → dev） */
+function remoteBranchShortName(remoteBranch: string): string {
+  const idx = remoteBranch.indexOf("/");
+  return idx >= 0 ? remoteBranch.slice(idx + 1) : remoteBranch;
+}
+
+/** 点击远程分支：本地已有同名分支走本地切换，否则检出为本地跟踪分支 */
+async function checkoutRemoteBranch(remoteBranch: string) {
+  if (branchBusy.value) return;
+  const root = repoRoot.value;
+  if (!root) return;
+  const shortName = remoteBranchShortName(remoteBranch);
+  if (shortName === branchLabel.value) return;
+  branchBusy.value = true;
+  try {
+    if (branches.value.includes(shortName)) {
+      const st = await invoke<GitStatus>("git_changes_branch_switch", {
+        path: root,
+        name: shortName,
+      });
+      gitStatus.value = st;
+      branchMenuOpen.value = false;
+      setToast(`已切换到本地分支 ${shortName}`);
+      return;
+    }
+    const st = await invoke<GitStatus>("git_changes_branch_checkout_remote", {
+      root,
+      remoteBranch,
+    });
+    gitStatus.value = st;
+    branchMenuOpen.value = false;
+    setToast(`已检出远程分支 ${remoteBranch}`);
+    // 刷新分支列表（新增本地分支与上游）
+    const res = await invoke<GitBranches>("git_changes_branches", {
+      path: root,
+    });
+    applyBranches(res);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    branchBusy.value = false;
+  }
+}
+
+/** 删除远程分支：二次确认（当前上游时追加警告），成功后刷新列表 */
+async function deleteRemoteBranch(remoteBranch: string) {
+  const root = repoRoot.value;
+  if (!root) return;
+  const isUpstream = remoteBranch === currentUpstream.value;
+  const ok = await askConfirm({
+    title: "删除远程分支",
+    message: isUpstream
+      ? `确定删除远程分支「${remoteBranch}」吗？当前分支跟踪该远程分支，删除后需重新设置上游。`
+      : `确定删除远程分支「${remoteBranch}」吗？远端上的该分支将被移除。`,
+    confirmLabel: "删除远程分支",
+  });
+  if (!ok || branchBusy.value) return;
+  branchBusy.value = true;
+  try {
+    const res = await invoke<GitBranches>("git_changes_remote_branch_delete", {
+      root,
+      remoteBranch,
+    });
+    applyBranches(res);
+    setToast(`已删除远程分支 ${remoteBranch}`);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    branchBusy.value = false;
+  }
+}
+
+async function loadRemotes() {
+  const root = repoRoot.value;
+  if (!root || remoteLoading.value) return;
+  remoteLoading.value = true;
+  try {
+    const res = await invoke<GitRemotes>("git_changes_remotes", { path: root });
+    remotes.value = res.remotes;
+    currentRemote.value = res.current;
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    remoteLoading.value = false;
+  }
+}
+
+async function addRemote() {
+  if (remoteBusy.value) return;
+  const root = repoRoot.value;
+  if (!root) return;
+  const name = newRemoteName.value.trim();
+  const url = newRemoteUrl.value.trim();
+  if (!name || !url) return;
+  remoteBusy.value = true;
+  try {
+    const res = await invoke<GitRemotes>("git_changes_remote_add", {
+      root,
+      name,
+      url,
+    });
+    remotes.value = res.remotes;
+    currentRemote.value = res.current;
+    newRemoteName.value = "";
+    newRemoteUrl.value = "";
+    setToast(`已添加远端 ${name}`);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    remoteBusy.value = false;
+  }
+}
+
+/** 把当前分支上游切换到目标远端（单上游替换）；已是当前上游时禁用 */
+async function switchRemote(remote: GitRemote) {
+  if (remoteBusy.value) return;
+  const root = repoRoot.value;
+  if (!root) return;
+  if (remote.name === currentRemote.value) return;
+  remoteBusy.value = true;
+  try {
+    const res = await invoke<GitRemotes>("git_changes_remote_switch_upstream", {
+      root,
+      remote: remote.name,
+    });
+    remotes.value = res.remotes;
+    currentRemote.value = res.current;
+    setToast(`已将当前分支上游切换到 ${remote.name}`);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    remoteBusy.value = false;
+  }
+}
+
+async function removeRemote(remote: GitRemote) {
+  const root = repoRoot.value;
+  if (!root) return;
+  const isCurrent = remote.name === currentRemote.value;
+  const ok = await askConfirm({
+    title: "删除远端",
+    message: isCurrent
+      ? `确定删除远端「${remote.name}」吗？当前分支的拉取/推送依赖该远端，删除后需重新配置。`
+      : `确定删除远端「${remote.name}」吗？`,
+    confirmLabel: "删除远端",
+  });
+  if (!ok || remoteBusy.value) return;
+  remoteBusy.value = true;
+  try {
+    const res = await invoke<GitRemotes>("git_changes_remote_remove", {
+      root,
+      name: remote.name,
+    });
+    remotes.value = res.remotes;
+    currentRemote.value = res.current;
+    setToast(`已删除远端 ${remote.name}`);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    remoteBusy.value = false;
   }
 }
 
@@ -427,11 +642,10 @@ async function createBranch() {
     gitStatus.value = st;
     newBranchName.value = "";
     // 重新拉取分支列表，保持弹层打开
-    const res = await invoke<{ current: string; branches: string[] }>(
-      "git_changes_branches",
-      { path: repoRoot.value },
-    );
-    branches.value = res.branches;
+    const res = await invoke<GitBranches>("git_changes_branches", {
+      path: repoRoot.value,
+    });
+    applyBranches(res);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -536,21 +750,26 @@ watch(
   () => void loadCommitLog(),
 );
 
-function onWindowClick(e: MouseEvent) {
+function onWindowMousedown(e: MouseEvent) {
+  // 分支弹层：仅外部 mousedown 关闭。WebView2 原生菜单「粘贴」只合成 click、不合成
+  // mousedown，避免粘贴远端名/地址时弹层被误关。
   // 用 Element 而非 HTMLElement：点击 svg/path 等 SVG 目标也应正确判断
   if (!(e.target instanceof Element)) {
     branchMenuOpen.value = false;
-    onMenuWindowClick();
     return;
   }
   if (
     e.target.closest(".git-branch-menu") ||
-    e.target.closest(".git-branch-btn") ||
-    e.target.closest(".ctx-menu")
+    e.target.closest(".git-branch-btn")
   ) {
     return;
   }
   branchMenuOpen.value = false;
+}
+
+function onWindowClick(e: MouseEvent) {
+  // 右键菜单：任意外部 click 关闭（弹层内部点击由各自处理器负责）
+  if (e.target instanceof Element && e.target.closest(".ctx-menu")) return;
   onMenuWindowClick();
 }
 
@@ -563,17 +782,21 @@ function onKeydown(e: KeyboardEvent) {
 function onWindowScroll(e: Event) {
   // 仅面板自身滚动时关闭；聊天区等外部滚动不影响分支弹层
   if (!(e.target instanceof Element)) return;
+  // 分支弹层自身（含本地/远程/远端管理内部列表）滚动不关闭，粘贴/聚焦自动滚动不误关
+  if (e.target.closest(".git-branch-menu")) return;
   if (!e.target.closest(".git-view")) return;
   branchMenuOpen.value = false;
   onMenuWindowScroll(e);
 }
 
 onMounted(() => {
+  window.addEventListener("mousedown", onWindowMousedown);
   window.addEventListener("click", onWindowClick);
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("scroll", onWindowScroll, true);
 });
 onBeforeUnmount(() => {
+  window.removeEventListener("mousedown", onWindowMousedown);
   window.removeEventListener("click", onWindowClick);
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("scroll", onWindowScroll, true);
@@ -855,10 +1078,18 @@ async function restoreDir(node: GitDirNode) {
           <button
             class="git-icon-btn git-pull"
             :class="{ busy: pullBusy }"
-            :disabled="!gitAvailable || pullBusy || pushBusy || branchLabel === 'HEAD'"
+            :disabled="
+              !gitStatus?.hasRemote ||
+              !gitAvailable ||
+              pullBusy ||
+              pushBusy ||
+              branchLabel === 'HEAD'
+            "
             :aria-label="pullBusy ? '拉取中…' : '拉取'"
             v-tooltip="
-              !gitAvailable
+              !gitStatus?.hasRemote
+                ? '未配置远端，无法拉取'
+                : !gitAvailable
                 ? '未检测到 git，无法拉取'
                 : branchLabel === 'HEAD'
                   ? '游离 HEAD 无法拉取'
@@ -881,10 +1112,18 @@ async function restoreDir(node: GitDirNode) {
           <button
             class="git-icon-btn git-push"
             :class="{ busy: pushBusy }"
-            :disabled="!gitAvailable || pushBusy || pullBusy || branchLabel === 'HEAD'"
+            :disabled="
+              !gitStatus?.hasRemote ||
+              !gitAvailable ||
+              pushBusy ||
+              pullBusy ||
+              branchLabel === 'HEAD'
+            "
             :aria-label="pushBusy ? '推送中…' : '推送'"
             v-tooltip="
-              !gitAvailable
+              !gitStatus?.hasRemote
+                ? '未配置远端，无法推送'
+                : !gitAvailable
                 ? '未检测到 git，无法推送'
                 : branchLabel === 'HEAD'
                   ? '游离 HEAD 无法推送'
@@ -902,19 +1141,10 @@ async function restoreDir(node: GitDirNode) {
             <span v-else class="git-push-text">推送中…</span>
           </button>
         </div>
-        <button
-          class="git-icon-btn git-refresh"
-          aria-label="刷新"
-          v-tooltip="'刷新'"
-          @click="refreshGitChanges()"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_REFRESH" />
-          </svg>
-        </button>
         <!-- 分支弹层作为 .git-head 子节点，absolute 定位相对头部，避免被面板 overflow 裁掉 -->
         <div v-if="branchMenuOpen" class="git-branch-menu">
           <div class="git-branch-menu-list">
+            <div class="git-branch-section-head">本地</div>
             <div
               v-for="b in branches"
               :key="b"
@@ -951,7 +1181,139 @@ async function restoreDir(node: GitDirNode) {
               </button>
             </div>
             <div v-if="!branches.length" class="git-branch-menu-empty">
-              暂无分支
+              暂无本地分支
+            </div>
+          </div>
+          <div class="git-remote-branch-section">
+            <div class="git-remote-branch-head">
+              <span>远程</span>
+              <button
+                class="git-remote-branch-fetch"
+                aria-label="拉取远端更新"
+                v-tooltip="'拉取远端更新'"
+                :disabled="fetchBusy"
+                @click="fetchRemoteBranches()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_REFRESH" />
+                </svg>
+                <span v-if="fetchBusy">拉取中…</span>
+              </button>
+            </div>
+            <div v-if="remoteBranches.length" class="git-remote-branch-list">
+              <div
+                v-for="rb in remoteBranches"
+                :key="rb"
+                class="git-remote-branch-item"
+                :class="{ upstream: rb === currentUpstream }"
+                @click="checkoutRemoteBranch(rb)"
+              >
+                <span class="git-remote-branch-name">{{ rb }}</span>
+                <span
+                  v-if="rb === currentUpstream"
+                  class="git-remote-branch-badge"
+                >上游</span>
+                <button
+                  class="git-remote-branch-delete"
+                  aria-label="删除远程分支"
+                  v-tooltip="'删除远程分支'"
+                  :disabled="branchBusy"
+                  @click.stop="deleteRemoteBranch(rb)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_CLOSE" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div v-else class="git-remote-branch-empty">暂无远程分支</div>
+          </div>
+          <div class="git-remote-branch-section git-remote-manage-section">
+            <div class="git-remote-branch-head">
+              <span>远端管理</span>
+              <span v-if="remoteLoading" class="git-remote-loading">加载中…</span>
+            </div>
+            <div v-if="remotes.length" class="git-remote-list">
+              <div v-for="r in remotes" :key="r.name" class="git-remote-row">
+                <span class="git-remote-main">
+                  <span class="git-remote-name">
+                    {{ r.name }}
+                    <span
+                      v-if="r.name === currentRemote"
+                      class="git-remote-badge"
+                    >当前</span>
+                  </span>
+                  <span class="git-remote-url" :title="r.fetchUrl ?? undefined">
+                    {{ r.fetchUrl || "（未配置拉取地址）" }}
+                  </span>
+                  <span
+                    v-if="r.pushUrl && r.pushUrl !== r.fetchUrl"
+                    class="git-remote-url git-remote-push"
+                    :title="r.pushUrl"
+                  >
+                    推送：{{ r.pushUrl }}
+                  </span>
+                </span>
+                <span class="git-remote-actions">
+                  <button
+                    class="git-remote-switch"
+                    aria-label="切换远端"
+                    v-tooltip="
+                      r.name === currentRemote
+                        ? '当前远端'
+                        : '设为当前分支上游'
+                    "
+                    :disabled="remoteBusy || r.name === currentRemote"
+                    @click="switchRemote(r)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_SWITCH" />
+                    </svg>
+                  </button>
+                  <button
+                    class="git-remote-delete"
+                    aria-label="删除远端"
+                    v-tooltip="'删除远端'"
+                    :disabled="remoteBusy"
+                    @click="removeRemote(r)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                  </button>
+                </span>
+              </div>
+            </div>
+            <div v-else-if="!remoteLoading" class="git-remote-branch-empty">
+              暂无远端
+            </div>
+            <div class="git-remote-add">
+              <input
+                v-model="newRemoteName"
+                class="git-remote-input"
+                type="text"
+                placeholder="远端名…"
+                :disabled="remoteBusy"
+                @keydown.enter="addRemote()"
+              />
+              <input
+                v-model="newRemoteUrl"
+                class="git-remote-input"
+                type="text"
+                placeholder="远端地址…"
+                :disabled="remoteBusy"
+                @keydown.enter="addRemote()"
+              />
+              <button
+                class="git-remote-add-btn"
+                :disabled="remoteBusy || !newRemoteName.trim() || !newRemoteUrl.trim()"
+                @click="addRemote()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_PLUS" />
+                </svg>
+                <span>添加</span>
+              </button>
             </div>
           </div>
           <div class="git-branch-create">

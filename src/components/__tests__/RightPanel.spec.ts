@@ -92,6 +92,7 @@ function mockFs() {
       return Promise.resolve({
         repoRoot: rootPath,
         branch: "main",
+        hasRemote: true,
         files: [
           { path: "src/a.ts", status: "modified", staged: false, worktree: true },
         ],

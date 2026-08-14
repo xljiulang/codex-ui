@@ -1217,6 +1217,8 @@ select option {
   z-index: 300;
   width: 210px;
   max-width: calc(100% - 24px);
+  max-height: min(560px, calc(100vh - 140px));
+  overflow-y: auto;
   background: var(--menu-bg);
   border: 1px solid var(--border-light);
   border-radius: 10px;
@@ -1400,6 +1402,327 @@ select option {
   cursor: default;
 }
 
+/* 分支弹层分区标题 */
+.git-branch-section-head {
+  padding: 5px 8px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+}
+
+/* 远程分支分区 */
+.git-remote-branch-section {
+  display: flex;
+  flex-direction: column;
+  padding: 5px 2px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.git-remote-branch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+}
+
+.git-remote-branch-fetch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.git-remote-branch-fetch svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.git-remote-branch-fetch:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.git-remote-branch-fetch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-remote-branch-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.git-remote-branch-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-bright);
+}
+
+.git-remote-branch-item:hover {
+  background: var(--bg-hover);
+}
+
+.git-remote-branch-item.upstream {
+  color: var(--accent);
+}
+
+.git-remote-branch-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-remote-branch-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+
+.git-remote-branch-delete {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.git-remote-branch-delete svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.git-remote-branch-delete:hover:not(:disabled) {
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.14);
+}
+
+.git-remote-branch-delete:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.git-remote-branch-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.git-remote-loading {
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.git-remote-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.git-remote-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text-bright);
+}
+
+.git-remote-row:hover {
+  background: var(--bg-hover);
+}
+
+.git-remote-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.git-remote-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-remote-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+
+.git-remote-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.git-remote-push {
+  color: var(--text-faint);
+}
+
+.git-remote-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+}
+
+.git-remote-input:focus {
+  border-color: var(--accent);
+}
+
+.git-remote-actions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.git-remote-switch,
+.git-remote-delete {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.git-remote-switch svg,
+.git-remote-delete svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.git-remote-switch:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+.git-remote-delete:hover:not(:disabled) {
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.14);
+}
+
+.git-remote-switch:disabled,
+.git-remote-delete:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.git-remote-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.git-remote-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 2px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.git-remote-add-btn {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #ffffff;
+  background: var(--accent);
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+
+.git-remote-add-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.git-remote-add-btn:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.git-remote-add-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .git-icon-btn {
   flex-shrink: 0;
   display: inline-flex;
@@ -1429,12 +1752,6 @@ select option {
   width: 14px;
   height: 14px;
   fill: currentColor;
-}
-
-.git-refresh {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
 }
 
 .git-pull {

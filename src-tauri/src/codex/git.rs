@@ -88,6 +88,8 @@ pub struct GitStatus {
     pub repo_root: String,
     /// 当前分支名；游离 HEAD 或尚未出生时为 "HEAD"
     pub branch: String,
+    /// 仓库是否配置了任意远端（拉取/推送可用性的前置条件）
+    pub has_remote: bool,
     pub files: Vec<GitFile>,
 }
 
@@ -141,6 +143,28 @@ pub struct GitCommitEntry {
     pub author: String,
     /// UNIX 秒时间戳（作者时区）
     pub time_secs: i64,
+}
+
+/// 远端条目（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRemote {
+    /// 远端名
+    pub name: String,
+    /// 拉取地址（remote.<name>.url）；仅配置了推送地址时可能为 null
+    pub fetch_url: Option<String>,
+    /// 推送地址（remote.<name>.pushUrl；未显式配置时与拉取地址相同）
+    pub push_url: Option<String>,
+}
+
+/// 远端列表（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRemotes {
+    /// 当前分支跟踪/默认使用的远端名；游离 HEAD 或无远端时为 null
+    pub current: Option<String>,
+    /// 按名称排序的远端列表
+    pub remotes: Vec<GitRemote>,
 }
 
 /// 文件监听句柄（sender 被 drop 时防抖任务随 rx 关闭退出）
@@ -337,6 +361,7 @@ fn status_sync(path: &str) -> Result<GitStatus, GitError> {
     Ok(GitStatus {
         repo_root: clean_path(workdir),
         branch,
+        has_remote: !repo.remote_names().is_empty(),
         files,
     })
 }
@@ -362,6 +387,10 @@ pub struct GitBranches {
     pub current: String,
     /// 本地分支名（按名称排序）
     pub branches: Vec<String>,
+    /// 远端跟踪分支短名（refs/remotes/<remote>/<branch>，如 origin/main，按名称排序）
+    pub remote_branches: Vec<String>,
+    /// 当前分支的上游「远端/分支」短名（如 origin/main）；无上游时为 null
+    pub current_upstream: Option<String>,
 }
 
 /// 分支名合法性校验（与 git check-ref-format 近似）
@@ -397,6 +426,7 @@ fn branches_sync(path: &str) -> Result<GitBranches, GitError> {
     let repo = open_repo(path)?;
     let current = current_branch(&repo);
     let mut branches: Vec<String> = Vec::new();
+    let mut remote_branches: Vec<String> = Vec::new();
     let references = repo
         .references()
         .map_err(|e| git_err(format!("读取引用失败: {e}")))?;
@@ -407,8 +437,32 @@ fn branches_sync(path: &str) -> Result<GitBranches, GitError> {
         let item = item.map_err(|e| git_err(format!("读取分支失败: {e}")))?;
         branches.push(item.name().shorten().to_str_lossy().into_owned());
     }
+    let remote_iter = references
+        .remote_branches()
+        .map_err(|e| git_err(format!("读取远程分支失败: {e}")))?;
+    for item in remote_iter {
+        let item = item.map_err(|e| git_err(format!("读取远程分支失败: {e}")))?;
+        remote_branches.push(item.name().shorten().to_str_lossy().into_owned());
+    }
     branches.sort_by_key(|a| a.to_lowercase());
-    Ok(GitBranches { current, branches })
+    remote_branches.sort_by_key(|a| a.to_lowercase());
+    let current_upstream = current_remote_branch(&repo, &current);
+    Ok(GitBranches {
+        current,
+        branches,
+        remote_branches,
+        current_upstream,
+    })
+}
+
+/// 当前分支上游的「远端/分支」短名（无上游/游离 HEAD/解析失败时为 None）
+fn current_remote_branch(repo: &gix::Repository, branch: &str) -> Option<String> {
+    if branch == "HEAD" {
+        return None;
+    }
+    resolve_remote_target(repo, branch)
+        .ok()
+        .map(|(label, remote_branch)| format!("{label}/{remote_branch}"))
 }
 
 fn create_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
@@ -1709,6 +1763,390 @@ fn push_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPushResult, GitEr
     })
 }
 
+// ---------- 远端管理 ----------
+
+/// 远端列表（只读，gix 实现，不依赖系统 git）：名称排序，
+/// fetch/push 地址按 gix 语义取（pushUrl 未配置时回退为拉取地址）。
+fn remotes_sync(path: &str) -> Result<GitRemotes, GitError> {
+    let repo = open_repo(path)?;
+    let mut remotes: Vec<GitRemote> = Vec::new();
+    for name in repo.remote_names() {
+        let name = name.to_string();
+        let remote = repo
+            .find_remote(&name)
+            .map_err(|e| git_err(format!("读取远端 {name} 失败: {e}")))?;
+        remotes.push(GitRemote {
+            fetch_url: remote
+                .url(gix::remote::Direction::Fetch)
+                .map(|u| u.to_bstring().to_string()),
+            push_url: remote
+                .url(gix::remote::Direction::Push)
+                .map(|u| u.to_bstring().to_string()),
+            name,
+        });
+    }
+    remotes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(GitRemotes {
+        current: current_remote_label(&repo),
+        remotes,
+    })
+}
+
+/// 当前分支的远端名：经 resolve_remote_target 解析（无远端/游离 HEAD/解析失败均为 None）
+fn current_remote_label(repo: &gix::Repository) -> Option<String> {
+    let branch = current_branch(repo);
+    if branch == "HEAD" {
+        return None;
+    }
+    resolve_remote_target(repo, &branch)
+        .ok()
+        .map(|(label, _)| label)
+}
+
+/// 远端名合法性校验（git remote 子命令规则的子集，其余由 git 自身兜底校验）
+fn validate_remote_name(name: &str) -> Result<(), GitError> {
+    if name.is_empty() || name.trim() != name {
+        return Err(git_err("远端名不能为空或包含首尾空格"));
+    }
+    if name.starts_with('-')
+        || name.contains('/')
+        || name.contains("..")
+        || name.ends_with('.')
+        || name.contains(['~', '^', ':', '?', '*', '[', '\\'])
+        || name.contains(' ')
+        || name.contains("@{")
+    {
+        return Err(git_err("远端名不合法（不能以 - 开头、包含 /、.. 或空格，也不能以 . 结尾）"));
+    }
+    Ok(())
+}
+
+/// 执行 git 子命令（远端/网络类操作；锁由外层 run_blocking 统一持有），
+/// 失败输出经 `map_error` 映射为中文提示。
+fn run_git_mapped(
+    git_bin: &Path,
+    root: &str,
+    args: &[&str],
+    action: &str,
+    map_error: impl Fn(&str) -> String,
+) -> Result<(), GitError> {
+    let out = git_command(git_bin)
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        // 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
+            } else {
+                git_err(format!("执行 {action} 失败: {e}"))
+            }
+        })?;
+    if !out.status.success() {
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        return Err(git_err(map_error(&combined)));
+    }
+    Ok(())
+}
+
+/// 执行 git remote 写操作（错误映射见 remote_failure_message）
+fn run_remote_git(git_bin: &Path, root: &str, args: &[&str]) -> Result<(), GitError> {
+    run_git_mapped(git_bin, root, args, "git remote", remote_failure_message)
+}
+
+/// 把 git remote 失败输出映射为友好中文提示（LANG=C 下输出为英文，关键词稳定）
+fn remote_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("already exists") {
+        "远端已存在".to_string()
+    } else if c.contains("no such remote") {
+        "远端不存在".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git remote 操作失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+/// 添加远端（调用系统 git：`git remote add <name> <url>`，自动生成默认 fetch refspec）
+fn remote_add_sync_with_git(
+    git_bin: &Path,
+    root: &str,
+    name: &str,
+    url: &str,
+) -> Result<GitRemotes, GitError> {
+    let name = name.trim();
+    let url = url.trim();
+    validate_remote_name(name)?;
+    if url.is_empty() {
+        return Err(git_err("远端地址不能为空"));
+    }
+    run_remote_git(git_bin, root, &["remote", "add", name, url])?;
+    remotes_sync(root)
+}
+
+/// 修改远端拉取地址（`git remote set-url <name> <url>`；pushUrl 保持不变）
+fn remote_set_url_sync_with_git(
+    git_bin: &Path,
+    root: &str,
+    name: &str,
+    url: &str,
+) -> Result<GitRemotes, GitError> {
+    let name = name.trim();
+    let url = url.trim();
+    validate_remote_name(name)?;
+    if url.is_empty() {
+        return Err(git_err("远端地址不能为空"));
+    }
+    run_remote_git(git_bin, root, &["remote", "set-url", name, url])?;
+    remotes_sync(root)
+}
+
+/// 删除远端（`git remote remove <name>`；删除当前上游远端允许，由前端确认提示）
+fn remote_remove_sync_with_git(git_bin: &Path, root: &str, name: &str) -> Result<GitRemotes, GitError> {
+    let name = name.trim();
+    validate_remote_name(name)?;
+    run_remote_git(git_bin, root, &["remote", "remove", name])?;
+    remotes_sync(root)
+}
+
+fn remote_add_sync(root: &str, name: &str, url: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    remote_add_sync_with_git(&git_bin, root, name, url)
+}
+
+fn remote_set_url_sync(root: &str, name: &str, url: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    remote_set_url_sync_with_git(&git_bin, root, name, url)
+}
+
+fn remote_remove_sync(root: &str, name: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    remote_remove_sync_with_git(&git_bin, root, name)
+}
+
+// ---------- 远程分支管理 ----------
+
+/// 解析「远端/分支」→ (远端名, 分支名)
+fn split_remote_branch(remote_branch: &str) -> Result<(&str, &str), GitError> {
+    let rb = remote_branch.trim();
+    let idx = rb
+        .find('/')
+        .ok_or_else(|| git_err("远程分支名格式应为 远端/分支"))?;
+    let (remote, branch) = (&rb[..idx], &rb[idx + 1..]);
+    if remote.is_empty() || branch.is_empty() {
+        return Err(git_err("远程分支名格式应为 远端/分支"));
+    }
+    Ok((remote, branch))
+}
+
+/// 把 git fetch 失败输出映射为友好中文提示（LANG=C 下输出为英文，关键词稳定）
+fn fetch_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("authentication failed")
+        || c.contains("could not read username")
+        || c.contains("terminal prompts disabled")
+        || c.contains("401")
+        || c.contains("403")
+    {
+        "拉取认证失败，请检查 Git 凭证（如 Git Credential Manager）".to_string()
+    } else if c.contains("couldn't find remote ref") || c.contains("no such branch") {
+        "远端没有该分支，无法拉取".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git fetch 失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+/// 把 git checkout / 删除远程分支失败输出映射为友好中文提示
+fn remote_branch_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("cannot be created from it")
+        || c.contains("did not match")
+        || c.contains("pathspec")
+    {
+        "远端分支不存在，请先拉取刷新".to_string()
+    } else if c.contains("remote ref does not exist") || c.contains("unable to delete") {
+        "远端分支不存在，无法删除".to_string()
+    } else if c.contains("authentication failed")
+        || c.contains("could not read username")
+        || c.contains("terminal prompts disabled")
+        || c.contains("401")
+        || c.contains("403")
+    {
+        "操作认证失败，请检查 Git 凭证（如 Git Credential Manager）".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git 远程分支操作失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+/// 拉取远端更新（`git fetch <remote>`；remote 为空时取默认远端），返回刷新后的分支列表
+fn remote_fetch_sync_with_git(
+    git_bin: &Path,
+    root: &str,
+    remote: &str,
+) -> Result<GitBranches, GitError> {
+    let repo = open_repo(root)?;
+    let trimmed = remote.trim();
+    let remote_label = if trimmed.is_empty() {
+        repo.remote_default_name(gix::remote::Direction::Fetch)
+            .map(|n| n.to_string())
+            .or_else(|| {
+                repo.find_fetch_remote(None)
+                    .ok()
+                    .and_then(|r| r.name().map(|n| n.as_bstr().to_str_lossy().into_owned()))
+            })
+            .ok_or_else(|| git_err("未找到可用的远端"))?
+    } else {
+        trimmed.to_string()
+    };
+    run_git_mapped(
+        git_bin,
+        root,
+        &["fetch", &remote_label],
+        "git fetch",
+        fetch_failure_message,
+    )?;
+    branches_sync(root)
+}
+
+/// 从远程分支检出为同名本地跟踪分支（`git checkout -b <branch> --track <remote>/<branch>`）。
+/// 本地已有同名分支时拒绝（由前端路由到本地切换）。
+fn branch_checkout_remote_sync_with_git(
+    git_bin: &Path,
+    root: &str,
+    remote_branch: &str,
+) -> Result<GitStatus, GitError> {
+    let (remote_label, branch) = split_remote_branch(remote_branch)?;
+    validate_remote_name(remote_label)?;
+    validate_branch_name(branch)?;
+    let repo = open_repo(root)?;
+    let full = gix::refs::Category::LocalBranch
+        .to_full_name(BStr::new(branch))
+        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
+    if repo.find_reference(&full).is_ok() {
+        return Err(git_err(format!("本地分支 {branch} 已存在，请先切换到该分支")));
+    }
+    let track = format!("{remote_label}/{branch}");
+    run_git_mapped(
+        git_bin,
+        root,
+        &["checkout", "-b", branch, "--track", &track],
+        "git checkout",
+        remote_branch_failure_message,
+    )?;
+    status_sync(root)
+}
+
+/// 删除远程分支（`git push <remote> --delete <branch>`），返回刷新后的分支列表
+fn remote_branch_delete_sync_with_git(
+    git_bin: &Path,
+    root: &str,
+    remote_branch: &str,
+) -> Result<GitBranches, GitError> {
+    let (remote_label, branch) = split_remote_branch(remote_branch)?;
+    validate_remote_name(remote_label)?;
+    validate_branch_name(branch)?;
+    run_git_mapped(
+        git_bin,
+        root,
+        &["push", remote_label, "--delete", branch],
+        "git push",
+        remote_branch_failure_message,
+    )?;
+    branches_sync(root)
+}
+
+/// 把 `git branch --set-upstream-to` 失败输出映射为友好中文提示
+fn switch_upstream_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("does not exist") || c.contains("not a valid branch") {
+        "远端没有同名分支，请先拉取刷新".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "设置上游失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+/// 把当前分支上游切换到 `remote` 的同名分支（`git branch --set-upstream-to <remote>/<分支>`，
+/// 单上游替换）。返回刷新后的远端列表。
+fn remote_switch_upstream_sync_with_git(
+    git_bin: &Path,
+    root: &str,
+    remote: &str,
+) -> Result<GitRemotes, GitError> {
+    let remote = remote.trim();
+    validate_remote_name(remote)?;
+    let repo = open_repo(root)?;
+    let _ = repo
+        .find_remote(remote)
+        .map_err(|_| git_err(format!("远端 {remote} 不存在")))?;
+    let branch = current_branch(&repo);
+    if branch == "HEAD" {
+        return Err(git_err("游离 HEAD 状态无法设置上游，请先切换到某个分支"));
+    }
+    let target = format!("{remote}/{branch}");
+    run_git_mapped(
+        git_bin,
+        root,
+        &["branch", "--set-upstream-to", &target],
+        "git branch",
+        switch_upstream_failure_message,
+    )?;
+    remotes_sync(root)
+}
+
+fn remote_fetch_sync(root: &str, remote: &str) -> Result<GitBranches, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    remote_fetch_sync_with_git(&git_bin, root, remote)
+}
+
+fn branch_checkout_remote_sync(root: &str, remote_branch: &str) -> Result<GitStatus, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    branch_checkout_remote_sync_with_git(&git_bin, root, remote_branch)
+}
+
+fn remote_branch_delete_sync(root: &str, remote_branch: &str) -> Result<GitBranches, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    remote_branch_delete_sync_with_git(&git_bin, root, remote_branch)
+}
+
+fn remote_switch_upstream_sync(root: &str, remote: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    remote_switch_upstream_sync_with_git(&git_bin, root, remote)
+}
+
 /// 将本地分支 `name` 合并到当前分支（等价 `git merge <name>`）：
 /// 快进或三路合并（创建合并提交）。与拉取相同，仅当合并触达的路径与本地
 /// 已暂存/未暂存改动重叠时拒绝（列文件）；提交级冲突时中止，不改动工作区与索引。
@@ -2049,6 +2487,67 @@ pub async fn git_changes_pull(root: String) -> Result<GitPullResult, GitError> {
 pub async fn git_changes_push(root: String) -> Result<GitPushResult, GitError> {
     // 推送涉及网络传输与可能的凭证交互，放宽超时到 10 分钟
     run_blocking_with_timeout(600, move || push_sync(&root)).await
+}
+
+/// 远端列表（只读，gix 实现，不依赖系统 git）
+#[tauri::command]
+pub async fn git_changes_remotes(path: String) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remotes_sync(&path)).await
+}
+
+/// 添加远端（调用系统 git）
+#[tauri::command]
+pub async fn git_changes_remote_add(root: String, name: String, url: String) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remote_add_sync(&root, &name, &url)).await
+}
+
+/// 修改远端拉取地址（调用系统 git）
+#[tauri::command]
+pub async fn git_changes_remote_set_url(
+    root: String,
+    name: String,
+    url: String,
+) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remote_set_url_sync(&root, &name, &url)).await
+}
+
+/// 删除远端（调用系统 git）
+#[tauri::command]
+pub async fn git_changes_remote_remove(root: String, name: String) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remote_remove_sync(&root, &name)).await
+}
+
+/// 拉取远端更新（remote 为空时取默认远端；网络操作放宽超时到 10 分钟）
+#[tauri::command]
+pub async fn git_changes_remote_fetch(root: String, remote: String) -> Result<GitBranches, GitError> {
+    run_blocking_with_timeout(600, move || remote_fetch_sync(&root, &remote)).await
+}
+
+/// 从远程分支检出为同名本地跟踪分支（调用系统 git）
+#[tauri::command]
+pub async fn git_changes_branch_checkout_remote(
+    root: String,
+    remote_branch: String,
+) -> Result<GitStatus, GitError> {
+    run_blocking(move || branch_checkout_remote_sync(&root, &remote_branch)).await
+}
+
+/// 删除远程分支（调用系统 git；网络操作放宽超时到 10 分钟）
+#[tauri::command]
+pub async fn git_changes_remote_branch_delete(
+    root: String,
+    remote_branch: String,
+) -> Result<GitBranches, GitError> {
+    run_blocking_with_timeout(600, move || remote_branch_delete_sync(&root, &remote_branch)).await
+}
+
+/// 把当前分支上游切换到指定远端的同名分支（调用系统 git，单上游替换）
+#[tauri::command]
+pub async fn git_changes_remote_switch_upstream(
+    root: String,
+    remote: String,
+) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remote_switch_upstream_sync(&root, &remote)).await
 }
 
 /// 探测本机是否安装了 git（推送依赖系统 git）；只探测不执行任何操作
@@ -3924,6 +4423,648 @@ mod tests {
             return;
         }
         assert!(find_git().is_some());
+    }
+
+    // ---------- 远端管理 ----------
+
+    /// 归一化 Windows 路径后比较（git 存储远端 URL 时会把反斜杠转成斜杠）
+    fn norm_url(s: &str) -> String {
+        s.replace('\\', "/").trim_end_matches('/').to_lowercase()
+    }
+
+    #[test]
+    fn remotes_lists_configured_remote_with_urls_and_current() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+
+        let res = remotes_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.remotes.len(), 1);
+        assert_eq!(res.remotes[0].name, "origin");
+        let bare_url = bare.path().to_string_lossy();
+        assert_eq!(
+            norm_url(res.remotes[0].fetch_url.as_deref().unwrap_or_default()),
+            norm_url(&bare_url)
+        );
+        assert_eq!(
+            norm_url(res.remotes[0].push_url.as_deref().unwrap_or_default()),
+            norm_url(&bare_url)
+        );
+        assert_eq!(res.current.as_deref(), Some("origin"));
+    }
+
+    #[test]
+    fn remotes_empty_when_no_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+
+        let res = remotes_sync(work.path().to_str().unwrap()).unwrap();
+        assert!(res.remotes.is_empty());
+        assert_eq!(res.current, None);
+    }
+
+    #[test]
+    fn remote_add_creates_remote_with_fetch_refspec() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let bare = TempDir::new().unwrap();
+        let git_bin = find_git().unwrap();
+        let url = bare.path().to_string_lossy();
+
+        let res = remote_add_sync_with_git(
+            &git_bin,
+            work.path().to_str().unwrap(),
+            "upstream",
+            &url,
+        )
+        .unwrap();
+        assert_eq!(res.remotes.len(), 1);
+        assert_eq!(res.remotes[0].name, "upstream");
+        assert_eq!(
+            norm_url(res.remotes[0].fetch_url.as_deref().unwrap_or_default()),
+            norm_url(&url)
+        );
+        // git remote add 自动生成默认 fetch refspec
+        let (code, fetch, _) = git(work.path(), &["config", "--get", "remote.upstream.fetch"]);
+        assert_eq!(code, 0);
+        assert!(fetch.contains("refs/remotes/upstream"), "actual: {fetch}");
+    }
+
+    #[test]
+    fn remote_add_rejects_duplicate() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let git_bin = find_git().unwrap();
+
+        let err = remote_add_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin",
+            &bare.path().to_string_lossy(),
+        )
+        .unwrap_err();
+        assert!(err.message.contains("已存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn remote_add_validates_name_and_url() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let git_bin = find_git().unwrap();
+        let root = work.path().to_str().unwrap();
+
+        let err = remote_add_sync_with_git(&git_bin, root, "bad name", "https://x").unwrap_err();
+        assert!(err.message.contains("远端名"), "actual: {}", err.message);
+        let err = remote_add_sync_with_git(&git_bin, root, "up", "  ").unwrap_err();
+        assert!(err.message.contains("远端地址"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn remote_set_url_updates_fetch_address() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let bare = TempDir::new().unwrap();
+        let git_bin = find_git().unwrap();
+        let root = work.path().to_str().unwrap();
+        let url = bare.path().to_string_lossy();
+        let url2 = format!("{}/mirror", url);
+        assert_eq!(
+            remote_add_sync_with_git(&git_bin, root, "origin", &url)
+                .unwrap()
+                .remotes
+                .len(),
+            1
+        );
+
+        let res = remote_set_url_sync_with_git(&git_bin, root, "origin", &url2).unwrap();
+        assert_eq!(
+            norm_url(res.remotes[0].fetch_url.as_deref().unwrap_or_default()),
+            norm_url(&url2)
+        );
+        let (code, got, _) = git(work.path(), &["remote", "get-url", "origin"]);
+        assert_eq!(code, 0);
+        assert_eq!(norm_url(got.trim()), norm_url(&url2));
+    }
+
+    #[test]
+    fn remote_set_url_rejects_missing_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let git_bin = find_git().unwrap();
+
+        let err = remote_set_url_sync_with_git(
+            &git_bin,
+            work.path().to_str().unwrap(),
+            "nope",
+            "https://example.com/x.git",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("远端不存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn remote_remove_deletes_remote_and_section() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let bare = TempDir::new().unwrap();
+        let git_bin = find_git().unwrap();
+        let root = work.path().to_str().unwrap();
+        let url = bare.path().to_string_lossy();
+        assert_eq!(
+            remote_add_sync_with_git(&git_bin, root, "origin", &url)
+                .unwrap()
+                .remotes
+                .len(),
+            1
+        );
+
+        let res = remote_remove_sync_with_git(&git_bin, root, "origin").unwrap();
+        assert!(res.remotes.is_empty());
+        let (code, _, _) = git(work.path(), &["config", "--get", "remote.origin.url"]);
+        assert_ne!(code, 0, "删除后 remote.origin.url 不应再存在");
+    }
+
+    #[test]
+    fn remote_remove_rejects_missing_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let git_bin = find_git().unwrap();
+
+        let err = remote_remove_sync_with_git(
+            &git_bin,
+            work.path().to_str().unwrap(),
+            "nope",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("远端不存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn remote_remove_allows_current_upstream() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let git_bin = find_git().unwrap();
+        let root = work2.path().to_str().unwrap();
+        assert_eq!(
+            remotes_sync(root).unwrap().current.as_deref(),
+            Some("origin")
+        );
+
+        let res = remote_remove_sync_with_git(&git_bin, root, "origin").unwrap();
+        assert!(res.remotes.is_empty());
+        assert_eq!(res.current, None);
+    }
+
+    #[test]
+    fn remote_mutations_report_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let missing = Path::new("definitely-missing-git-binary-xyz");
+
+        let err = remote_add_sync_with_git(missing, work.path().to_str().unwrap(), "up", "https://x")
+            .unwrap_err();
+        assert!(err.message.contains("未检测到系统 git"), "actual: {}", err.message);
+    }
+
+    // ---------- 远程分支 ----------
+
+    /// 在 work1 创建并推送 `name` 分支到 bare，随后切回 main
+    fn push_remote_branch(work1: &Path, bare: &Path, name: &str) {
+        assert_eq!(git(work1, &["checkout", "-b", name]).0, 0);
+        std::fs::write(work1.join(format!("{name}.txt")), format!("{name}\n")).unwrap();
+        assert_eq!(git(work1, &["add", "-A"]).0, 0);
+        assert_eq!(git(work1, &["commit", "-m", name]).0, 0);
+        assert_eq!(git(work1, &["push", bare.to_str().unwrap(), name]).0, 0);
+        assert_eq!(git(work1, &["checkout", "main"]).0, 0);
+    }
+
+    #[test]
+    fn split_remote_branch_validates_format() {
+        assert!(split_remote_branch("origin/main").is_ok());
+        assert!(split_remote_branch("main").is_err());
+        assert!(split_remote_branch("origin/").is_err());
+    }
+
+    #[test]
+    fn branches_lists_remote_branches_and_upstream() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        push_remote_branch(work1.path(), bare.path(), "dev");
+        assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
+
+        let bs = branches_sync(work2.path().to_str().unwrap()).unwrap();
+        assert!(bs.remote_branches.contains(&"origin/main".to_string()));
+        assert!(bs.remote_branches.contains(&"origin/dev".to_string()));
+        assert_eq!(bs.current_upstream.as_deref(), Some("origin/main"));
+        assert!(bs.branches.iter().all(|b| b == "main"));
+    }
+
+    #[test]
+    fn remote_fetch_refreshes_remote_branches() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let git_bin = find_git().unwrap();
+        let root = work2.path().to_str().unwrap();
+        assert!(!branches_sync(root).unwrap().remote_branches.contains(&"origin/dev".to_string()));
+
+        push_remote_branch(work1.path(), bare.path(), "dev");
+        let res = remote_fetch_sync_with_git(&git_bin, root, "origin").unwrap();
+        assert!(res.remote_branches.contains(&"origin/dev".to_string()));
+        // remote 为空：取默认远端（origin）
+        let res2 = remote_fetch_sync_with_git(&git_bin, root, "").unwrap();
+        assert!(res2.remote_branches.contains(&"origin/dev".to_string()));
+    }
+
+    #[test]
+    fn remote_fetch_reports_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let err = remote_fetch_sync_with_git(
+            Path::new("definitely-missing-git-binary-xyz"),
+            work.path().to_str().unwrap(),
+            "origin",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("未检测到系统 git"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn checkout_remote_creates_local_tracking_branch() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        push_remote_branch(work1.path(), bare.path(), "dev");
+        assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
+        let git_bin = find_git().unwrap();
+
+        let st = branch_checkout_remote_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin/dev",
+        )
+        .unwrap();
+        assert_eq!(st.branch, "dev");
+        let (code, remote, _) = git(work2.path(), &["config", "branch.dev.remote"]);
+        assert_eq!(code, 0);
+        assert_eq!(remote.trim(), "origin");
+        let (_, merge, _) = git(work2.path(), &["config", "branch.dev.merge"]);
+        assert_eq!(merge.trim(), "refs/heads/dev");
+        let bs = branches_sync(work2.path().to_str().unwrap()).unwrap();
+        assert!(bs.branches.contains(&"dev".to_string()));
+        assert_eq!(bs.current_upstream.as_deref(), Some("origin/dev"));
+    }
+
+    #[test]
+    fn checkout_remote_rejects_existing_local_branch() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        push_remote_branch(work1.path(), bare.path(), "dev");
+        assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
+        assert_eq!(git(work2.path(), &["branch", "dev"]).0, 0);
+        let git_bin = find_git().unwrap();
+
+        let err = branch_checkout_remote_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin/dev",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("已存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn checkout_remote_rejects_missing_remote_branch() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let git_bin = find_git().unwrap();
+
+        let err = branch_checkout_remote_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin/nope",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("远端分支不存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn checkout_remote_reports_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let err = branch_checkout_remote_sync_with_git(
+            Path::new("definitely-missing-git-binary-xyz"),
+            work.path().to_str().unwrap(),
+            "origin/dev",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("未检测到系统 git"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn delete_remote_branch_removes_ref() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        push_remote_branch(work1.path(), bare.path(), "dev");
+        assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
+        let git_bin = find_git().unwrap();
+
+        let res = remote_branch_delete_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin/dev",
+        )
+        .unwrap();
+        assert!(!res.remote_branches.contains(&"origin/dev".to_string()));
+        let (code, _, _) = git(bare.path(), &["rev-parse", "dev"]);
+        assert_ne!(code, 0, "远端 dev 分支应已被删除");
+    }
+
+    #[test]
+    fn delete_remote_branch_rejects_missing() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let git_bin = find_git().unwrap();
+
+        let err = remote_branch_delete_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin/nope",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("远端分支不存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn delete_remote_branch_reports_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let err = remote_branch_delete_sync_with_git(
+            Path::new("definitely-missing-git-binary-xyz"),
+            work.path().to_str().unwrap(),
+            "origin/main",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("未检测到系统 git"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn status_reports_has_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+        let st = status_sync(work.path().to_str().unwrap()).unwrap();
+        assert!(!st.has_remote);
+
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let st = status_sync(work2.path().to_str().unwrap()).unwrap();
+        assert!(st.has_remote);
+    }
+
+    #[test]
+    fn switch_upstream_sets_branch_upstream() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare1 = TempDir::new().unwrap();
+        let bare2 = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare1.path(), work1.path(), work2.path());
+        // bare2 复制 work1（含 main），work2 添加 upstream 远端并拉取
+        assert_eq!(
+            git(work1.path(), &["clone", "--bare", ".", bare2.path().to_str().unwrap()]).0,
+            0
+        );
+        let git_bin = find_git().unwrap();
+        let root = work2.path().to_str().unwrap();
+        assert_eq!(
+            git(work2.path(), &["remote", "add", "upstream", bare2.path().to_str().unwrap()]).0,
+            0
+        );
+        assert_eq!(git(work2.path(), &["fetch", "upstream"]).0, 0);
+
+        let res = remote_switch_upstream_sync_with_git(&git_bin, root, "upstream").unwrap();
+        assert_eq!(res.current.as_deref(), Some("upstream"));
+        let (_, remote, _) = git(work2.path(), &["config", "branch.main.remote"]);
+        assert_eq!(remote.trim(), "upstream");
+        let (_, merge, _) = git(work2.path(), &["config", "branch.main.merge"]);
+        assert_eq!(merge.trim(), "refs/heads/main");
+    }
+
+    #[test]
+    fn switch_upstream_rejects_detached_head() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        assert_eq!(git(work2.path(), &["checkout", "--detach"]).0, 0);
+        let git_bin = find_git().unwrap();
+
+        let err = remote_switch_upstream_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "origin",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("游离"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn switch_upstream_rejects_missing_remote_branch() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare1 = TempDir::new().unwrap();
+        let empty = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare1.path(), work1.path(), work2.path());
+        assert_eq!(git(empty.path(), &["init", "--bare"]).0, 0);
+        assert_eq!(
+            git(work2.path(), &["remote", "add", "up", empty.path().to_str().unwrap()]).0,
+            0
+        );
+        assert_eq!(git(work2.path(), &["fetch", "up"]).0, 0);
+        let git_bin = find_git().unwrap();
+
+        let err = remote_switch_upstream_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "up",
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("远端没有同名分支"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn switch_upstream_rejects_missing_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        let git_bin = find_git().unwrap();
+
+        let err = remote_switch_upstream_sync_with_git(
+            &git_bin,
+            work2.path().to_str().unwrap(),
+            "nope",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("不存在"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn switch_upstream_reports_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+
+        let err = remote_switch_upstream_sync_with_git(
+            Path::new("definitely-missing-git-binary-xyz"),
+            work2.path().to_str().unwrap(),
+            "origin",
+        )
+        .unwrap_err();
+        assert!(err.message.contains("未检测到系统 git"), "actual: {}", err.message);
     }
 
     // ---------- 分支合并 ----------

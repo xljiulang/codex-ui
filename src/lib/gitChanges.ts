@@ -25,7 +25,21 @@ export interface GitStatus {
   repoRoot: string;
   /** 当前分支名；游离 HEAD 时为 "HEAD" */
   branch: string;
+  /** 仓库是否配置了任意远端（拉取/推送可用性的前置条件） */
+  hasRemote: boolean;
   files: GitFile[];
+}
+
+/** 分支列表（Rust git_changes_branches 返回，字段 camelCase） */
+export interface GitBranches {
+  /** 当前分支名；游离 HEAD 或尚未出生时为 "HEAD" */
+  current: string;
+  /** 本地分支名（按名称排序） */
+  branches: string[];
+  /** 远端跟踪分支短名（如 origin/main，按名称排序） */
+  remoteBranches: string[];
+  /** 当前分支上游的「远端/分支」短名；无上游时为 null */
+  currentUpstream: string | null;
 }
 
 /** Rust git_changes_pull 返回值（字段 camelCase） */
@@ -63,6 +77,24 @@ export interface GitCommitEntry {
   author: string;
   /** UNIX 秒时间戳（作者时区） */
   timeSecs: number;
+}
+
+/** 远端条目（Rust git_changes_remotes 返回，字段 camelCase） */
+export interface GitRemote {
+  /** 远端名 */
+  name: string;
+  /** 拉取地址（remote.<name>.url；仅配置推送地址时可能为 null） */
+  fetchUrl: string | null;
+  /** 推送地址（未显式配置 pushUrl 时与拉取地址相同） */
+  pushUrl: string | null;
+}
+
+/** 远端列表（Rust git_changes_remotes 返回） */
+export interface GitRemotes {
+  /** 当前分支跟踪/默认使用的远端名；无远端时为 null */
+  current: string | null;
+  /** 按名称排序的远端列表 */
+  remotes: GitRemote[];
 }
 
 /** diff 预览类型（与 DiffPreviewParams.kind 一致） */
