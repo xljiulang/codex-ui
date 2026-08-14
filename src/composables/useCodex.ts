@@ -329,7 +329,8 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
           threadId,
           cursor,
           limit: 50,
-          sortDirection: "ascending",
+          // 协议 SortDirection 枚举为 "asc" | "desc"（"ascending" 会被服务端拒绝）
+          sortDirection: "asc",
           itemsView: "full",
         },
       })) as TurnsListPage;
@@ -338,8 +339,10 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
       if (!cursor) break;
       if (turns.length > 2000) break; // 防超长会话
     }
-  } catch {
-    return null; // 服务端不支持时回退到 thread_read 的摘要项
+  } catch (e) {
+    // 服务端不支持时回退到 thread_read 的摘要项；记录原因便于排查协议漂移
+    console.warn("[codex-ui] thread/turns/list(full) 失败，回退摘要加载:", e);
+    return null;
   }
   return flattenTurns(turns);
 }

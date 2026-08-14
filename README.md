@@ -85,11 +85,34 @@ npm run tauri build
 ## 测试
 
 ```powershell
-npm test                                   # 前端单元测试
-cargo test --manifest-path src-tauri\Cargo.toml   # Rust 集成测试（真实 codex app-server 全流程）
+npm test                                   # 前端单元测试（vitest，等价 npm run test:unit）
+npm run test:typecheck                     # vue-tsc 类型检查
+npm run test:coverage                      # 前端单测 + 覆盖率（v8；门槛 lines≥80 / functions≥75 / statements≥75 / branches≥70）
+npm run test:rust                          # Rust 单元测试（cargo test --lib）
+$env:CODEX_BIN='codex'; npm run test:rust:integration
+                                           # Rust 真实 app-server 集成测试（握手/回合、置顶、目标全生命周期、记忆模式、线程设置同步、回合列表 full、会话搜索）
+npm run test:all                           # 单元 + 类型 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
+npm run test:e2e                           # E2E 一键编排（见下）
 ```
 
-端到端探针脚本（`scripts/`）：`verify-core.mjs`（核心冒烟）、`verify-approval.mjs` / `probe-approval*.mjs`（审批，含“批准并记住此规则”）、`check-mode-lock.mjs`（回合中模式按钮禁用）、`verify-diff.mjs` / `verify-goal.mjs` / `verify-mentions.mjs` / `audit-themes.mjs` 等。
+### 端到端（E2E）
+
+E2E 驱动真实 release UI（WebView2 CDP）+ 少量真实模型调用，需要已构建 release 与可用的 `codex` CLI：
+
+```powershell
+node scripts/run-e2e.mjs --build           # 构建（npm build + cargo release）后串行跑 core/diff/goal/mentions/audit(static)
+node scripts/run-e2e.mjs --only goal       # 只跑目标探针（逗号分隔多个）
+node scripts/run-e2e.mjs --continue        # 单个失败后继续运行剩余探针
+node scripts/run-e2e.mjs --audit-chat      # 主题审计改用 chat 阶段（默认 static）
+```
+
+探针清单（`scripts/`，共享基础设施在 `scripts/lib/e2e.mjs`）：
+
+- 自启应用：`verify-core.mjs`（核心冒烟/置顶/切换停止）、`verify-goal.mjs`（线程级目标全流程）、`verify-diff.mjs`（独立 diff 窗口）、`verify-mentions.mjs`（@ 文件 / 插件 / $ 技能）、`audit-themes.mjs`（三主题截图取证）。
+- 附着运行中的应用（需先以 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` 启动，支持 `--port` 与 `CODEX_E2E_PORT`）：`verify-approval.mjs`（审批，含“批准并记住此规则”，需 `CODEX_E2E_TARGET`）、`check-mode-lock.mjs`（回合中模式按钮禁用）。
+- 协议级探针（直连 `codex app-server --stdio`）：`probe-approval*.mjs`。
+
+E2E 探针自建临时目录与会话，结束时自动清理；CDP 端口被占用或应用启动失败时给出明确诊断，可用 `CODEX_E2E_PORT` 换端口。
 
 ## 使用说明
 

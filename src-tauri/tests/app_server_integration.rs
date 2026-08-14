@@ -173,6 +173,239 @@ fn method_unavailable(resp: &Value) -> bool {
             .is_some_and(|m| m.contains("unknown variant"))
 }
 
+/// 初始化握手并创建线程，返回 thread_id（新集成测试共用）。
+fn start_thread(server: &mut Server, cwd: &Path, deadline: Instant) -> String {
+    let init_id = server.request(
+        "initialize",
+        json!({
+            "clientInfo": { "name": "codex-ui-test", "title": "Codex UI Test", "version": "0.1.0" },
+            "capabilities": { "experimentalApi": true, "requestAttestation": false }
+        }),
+    );
+    let init_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(init_id))
+        .expect("initialize response");
+    assert!(init_resp.get("result").is_some(), "initialize 应成功: {init_resp}");
+    server.notify("initialized");
+
+    let start_id = server.request(
+        "thread/start",
+        json!({
+            "cwd": cwd.to_string_lossy(),
+            "approvalPolicy": "untrusted",
+            "sandbox": "read-only"
+        }),
+    );
+    let start_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(start_id))
+        .expect("thread/start response");
+    start_resp["result"]["thread"]["id"]
+        .as_str()
+        .expect("thread id")
+        .to_string()
+}
+
+/// 删除线程并结束 app-server（新集成测试共用）。
+fn cleanup_thread(server: &mut Server, thread_id: &str, deadline: Instant) {
+    let delete_id = server.request("thread/delete", json!({ "threadId": thread_id }));
+    let _ = server.wait_for(deadline, |v| {
+        v.get("id").and_then(|i| i.as_u64()) == Some(delete_id)
+    });
+    server.child.kill().ok();
+    let _ = server.child.wait();
+}
+
+#[test]
+fn app_server_goal_lifecycle() {
+    if codex_bin().is_none() {
+        eprintln!("跳过：未设置 CODEX_BIN");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut server = Server::start(tmp.path());
+    let deadline = Instant::now() + Duration::from_secs(180);
+    let thread_id = start_thread(&mut server, tmp.path(), deadline);
+
+    // 挂载目标：thread/goal/set 返回 active
+    let set_id = server.request(
+        "thread/goal/set",
+        json!({ "threadId": thread_id, "objective": "只回复 OK 两个字母，完成后停止" }),
+    );
+    let set_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(set_id))
+        .expect("thread/goal/set response");
+    let set_result = set_resp.get("result").expect("thread/goal/set 应成功: {set_resp}");
+    assert_eq!(set_result["goal"]["status"].as_str().unwrap_or(""), "active");
+
+    // 等待服务端 auto-continuation 完成后下发非 active 状态（协议值 complete）
+    let updated = server
+        .wait_for(deadline, |v| {
+            v.get("method").and_then(|m| m.as_str()) == Some("thread/goal/updated")
+                && v["params"]["goal"]["status"]
+                    .as_str()
+                    .is_some_and(|s| s != "active")
+        })
+        .expect("thread/goal/updated 非 active 状态");
+    assert_eq!(
+        updated["params"]["goal"]["status"].as_str().unwrap_or(""),
+        "complete",
+        "目标完成状态应为 complete: {updated}"
+    );
+
+    // goal/get 回读一致
+    let get_id = server.request("thread/goal/get", json!({ "threadId": thread_id }));
+    let get_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(get_id))
+        .expect("thread/goal/get response");
+    let goal = &get_resp["result"]["goal"];
+    assert_eq!(goal["status"].as_str().unwrap_or(""), "complete");
+    assert_eq!(goal["objective"].as_str().unwrap_or(""), "只回复 OK 两个字母，完成后停止");
+
+    // goal/clear 清除并返回 cleared: true
+    let clear_id = server.request("thread/goal/clear", json!({ "threadId": thread_id }));
+    let clear_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(clear_id))
+        .expect("thread/goal/clear response");
+    assert_eq!(clear_resp["result"]["cleared"].as_bool(), Some(true));
+
+    cleanup_thread(&mut server, &thread_id, deadline);
+}
+
+#[test]
+fn app_server_memory_and_settings_update() {
+    if codex_bin().is_none() {
+        eprintln!("跳过：未设置 CODEX_BIN");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut server = Server::start(tmp.path());
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let thread_id = start_thread(&mut server, tmp.path(), deadline);
+
+    // 记忆模式开关（协议响应为空对象，断言无错误即成功）
+    for mode in ["enabled", "disabled"] {
+        let mem_id = server.request(
+            "thread/memoryMode/set",
+            json!({ "threadId": thread_id, "mode": mode }),
+        );
+        let mem_resp = server
+            .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(mem_id))
+            .expect("thread/memoryMode/set response");
+        assert!(
+            mem_resp.get("result").is_some(),
+            "memoryMode/set({mode}) 应成功: {mem_resp}"
+        );
+    }
+
+    // 线程设置更新：显式 null（恢复默认）与非空 effort 均被接受
+    let s1_id = server.request(
+        "thread/settings/update",
+        json!({ "threadId": thread_id, "model": null, "effort": null }),
+    );
+    let s1_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(s1_id))
+        .expect("thread/settings/update response 1");
+    assert!(s1_resp.get("result").is_some(), "settings/update(nulls) 应成功: {s1_resp}");
+
+    let s2_id = server.request(
+        "thread/settings/update",
+        json!({ "threadId": thread_id, "effort": "low" }),
+    );
+    let s2_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(s2_id))
+        .expect("thread/settings/update response 2");
+    assert!(
+        s2_resp.get("result").is_some(),
+        "settings/update(effort=low) 应成功: {s2_resp}"
+    );
+
+    cleanup_thread(&mut server, &thread_id, deadline);
+}
+
+#[test]
+fn app_server_turns_list_full_and_search() {
+    if codex_bin().is_none() {
+        eprintln!("跳过：未设置 CODEX_BIN");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut server = Server::start(tmp.path());
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let thread_id = start_thread(&mut server, tmp.path(), deadline);
+
+    // 唯一搜索词（PID + 纳秒），避免命中历史残留会话
+    let marker = format!(
+        "SMOKE{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let prompt = format!("回复包含 {marker} 的一个词");
+
+    let turn_id = server.request(
+        "turn/start",
+        json!({
+            "threadId": thread_id,
+            "input": [{"type": "text", "text": prompt, "text_elements": []}]
+        }),
+    );
+    let turn_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(turn_id))
+        .expect("turn/start response");
+    assert!(turn_resp.get("result").is_some(), "turn/start 应成功: {turn_resp}");
+    let completed = server
+        .wait_for(deadline, |v| {
+            v.get("method").and_then(|m| m.as_str()) == Some("turn/completed")
+        })
+        .expect("turn/completed");
+    assert_eq!(
+        completed["params"]["turn"]["status"].as_str().unwrap_or(""),
+        "completed"
+    );
+
+    // turns/list：asc + full（协议 SortDirection 为 "asc"|"desc"），完整条目应包含用户消息
+    let list_id = server.request(
+        "thread/turns/list",
+        json!({
+            "threadId": thread_id,
+            "sortDirection": "asc",
+            "itemsView": "full",
+            "limit": 50
+        }),
+    );
+    let list_resp = server
+        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(list_id))
+        .expect("thread/turns/list response");
+    assert!(list_resp.get("result").is_some(), "turns/list 应成功: {list_resp}");
+    let full_text = serde_json::to_string(&list_resp["result"]).unwrap_or_default();
+    assert!(
+        full_text.contains(&marker),
+        "turns/list(full) 应包含用户消息文本: {full_text}"
+    );
+
+    // thread/search：按唯一词命中新建会话（索引可能延迟，短重试窗口）
+    let mut found = false;
+    for _ in 0..30 {
+        let search_id = server.request("thread/search", json!({ "searchTerm": marker }));
+        let search_resp = server
+            .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(search_id))
+            .expect("thread/search response");
+        assert!(search_resp.get("result").is_some(), "thread/search 应成功: {search_resp}");
+        if search_resp["result"]["data"]
+            .as_array()
+            .is_some_and(|a| !a.is_empty())
+        {
+            found = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    assert!(found, "thread/search 应命中新建会话（marker={marker}）");
+
+    cleanup_thread(&mut server, &thread_id, deadline);
+}
+
 #[test]
 fn app_server_pin_unpin_via_probe() {
     if codex_bin().is_none() {

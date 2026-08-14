@@ -42,6 +42,7 @@ import {
   executePlan,
   exitPlanMode,
   interrupt,
+  isGoalStatus,
   loadSettings,
   newEmptyChat,
   openHistorySession,
@@ -802,6 +803,26 @@ describe("切换会话自动标准停止旧回合", () => {
   });
 });
 
+describe("GoalStatus 枚举对齐协议 ThreadGoalStatus", () => {
+  it("接受协议全部取值（active/paused/blocked/usageLimited/budgetLimited/complete）", () => {
+    expect(isGoalStatus("active")).toBe(true);
+    expect(isGoalStatus("paused")).toBe(true);
+    expect(isGoalStatus("blocked")).toBe(true);
+    expect(isGoalStatus("usageLimited")).toBe(true);
+    expect(isGoalStatus("budgetLimited")).toBe(true);
+    expect(isGoalStatus("complete")).toBe(true);
+  });
+
+  it("拒绝旧版/非协议取值（completed/budget_limited/cleared 等）", () => {
+    expect(isGoalStatus("completed")).toBe(false);
+    expect(isGoalStatus("budget_limited")).toBe(false);
+    expect(isGoalStatus("cleared")).toBe(false);
+    expect(isGoalStatus("")).toBe(false);
+    expect(isGoalStatus(null)).toBe(false);
+    expect(isGoalStatus(undefined)).toBe(false);
+  });
+});
+
 describe("线程级目标：设置/清除/读取/事件同步", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
@@ -1013,6 +1034,39 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(await p).toBe(true);
     expect(store.goalText).toBeNull();
     expect(store.goalStatus).toBeNull();
+  });
+
+  it("openThread：loadFullItems 以 asc+full 拉取完整工具/命令详情", async () => {
+    store.currentThreadId = "t1";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/turns/list",
+      params: {
+        threadId: "t2",
+        cursor: null,
+        limit: 50,
+        // 协议 SortDirection 为 "asc" | "desc"（旧值 "ascending" 会被服务端拒绝）
+        sortDirection: "asc",
+        itemsView: "full",
+      },
+    });
   });
 });
 

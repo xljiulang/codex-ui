@@ -1,155 +1,58 @@
 // 精简 diff 专项 E2E：1 条真实模型消息（apply_patch 改 hello.txt + 新建 sample.ts）
 // 验证独立 diff 窗口：内联旧/新/分隔、指示条对齐、代码语法高亮、自定义右键菜单。
 // 用法: node scripts/verify-diff.mjs
-import { spawn, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  cleanupSessions,
+  createClient,
+  finish,
+  killAppTree,
+  log,
+  mkTmp,
+  record as recordResult,
+  spawnApp,
+  waitForEditor,
+} from "./lib/e2e.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const APP = path.join(repoRoot, "src-tauri", "target", "release", "codex-ui.exe");
-const CDP_BASE = "http://127.0.0.1:9222";
+const CDP_PORT = Number(process.env.CODEX_E2E_PORT || "9222");
+const CDP_BASE = `http://127.0.0.1:${CDP_PORT}`;
 const TAG = "[测试diff]";
 const MARKER = "DIFF_MARKER_" + crypto.randomBytes(4).toString("hex").toUpperCase();
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "codexui-diff-e2e-"));
+const testDir = mkTmp("codexui-diff-e2e-");
 // 300 行大文件：让 diff 窗口出现滚动，验证指示条与滚动条位置对齐
 const helloLines = Array.from({ length: 300 }, (_, i) =>
   i === 99 ? `标记词: ${MARKER}` : `第 ${i + 1} 行普通内容`,
 );
 fs.writeFileSync(path.join(testDir, "hello.txt"), helloLines.join("\n") + "\n", "utf8");
-const evidenceDir = fs.mkdtempSync(path.join(os.tmpdir(), "codexui-diff-evidence-"));
+const evidenceDir = mkTmp("codexui-diff-evidence-");
 
 let child = null;
 let cdp = null;
 const results = [];
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
-
-function record(name, ok, detail = "") {
-  results.push({ name, ok });
-  log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
-}
-
-function killApp() {
-  if (!child) return;
-  try { child.kill(); } catch {}
-  try {
-    execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-  } catch {}
-  child = null;
-}
+const record = (name, ok, detail = "") =>
+  recordResult(results, name, ok, detail);
 
 function cleanup() {
-  killApp();
-  const root = path.join(os.homedir(), ".codex", "sessions");
-  if (fs.existsSync(root)) {
-    const walk = (d) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) walk(p);
-        else if (e.name.endsWith(".jsonl")) {
-          try {
-            if (fs.readFileSync(p, "utf8").includes(MARKER)) fs.unlinkSync(p);
-          } catch {}
-        }
-      }
-    };
-    walk(root);
-  }
-  try { fs.rmSync(testDir, { recursive: true, force: true }); } catch {}
+  killAppTree(child);
+  cleanupSessions([MARKER]);
+  try {
+    fs.rmSync(testDir, { recursive: true, force: true });
+  } catch {}
 }
 
 process.on("exit", cleanup);
 process.on("SIGINT", () => process.exit(130));
 process.on("SIGTERM", () => process.exit(143));
 
-async function waitForCdp() {
-  for (let i = 0; i < 120; i++) {
-    try {
-      const t = (await (await fetch(`${CDP_BASE}/json/list`)).json()).find(
-        (x) => x.type === "page",
-      );
-      if (t?.webSocketDebuggerUrl) return t;
-    } catch {}
-    await sleep(500);
-  }
-  throw new Error("CDP timeout");
-}
-
-async function createClient(wsUrl) {
-  const c = { seq: 0, pending: new Map(), ws: null };
-  await new Promise((res, rej) => {
-    c.ws = new WebSocket(wsUrl);
-    c.ws.onopen = res;
-    c.ws.onerror = () => rej(new Error("ws"));
-  });
-  c.ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data);
-    const p = c.pending.get(m.id);
-    if (!p) return;
-    c.pending.delete(m.id);
-    if (m.error) p.reject(new Error(JSON.stringify(m.error)));
-    else p.resolve(m.result);
-  };
-  c.send = (method, params = {}) =>
-    new Promise((res, rej) => {
-      const id = ++c.seq;
-      c.pending.set(id, { resolve: res, reject: rej });
-      c.ws.send(JSON.stringify({ id, method, params }));
-    });
-  c.evalJs = async (expression) => {
-    const r = await c.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (r.exceptionDetails) {
-      throw new Error("页面脚本异常: " + JSON.stringify(r.exceptionDetails).slice(0, 300));
-    }
-    return r.result.value;
-  };
-  c.waitFor = async (desc, expr, timeoutMs = 15000) => {
-    const deadline = Date.now() + timeoutMs;
-    let last;
-    while (Date.now() < deadline) {
-      last = await c.evalJs(expr);
-      if (last) return last;
-      await sleep(300);
-    }
-    throw new Error(`等待超时: ${desc}`);
-  };
-  c.screenshot = async (name) => {
-    try {
-      const r = await c.send("Page.captureScreenshot", { format: "png" });
-      const p = path.join(evidenceDir, name);
-      fs.writeFileSync(p, Buffer.from(r.data, "base64"));
-      log(`截图: ${p}`);
-    } catch {}
-  };
-  c.close = () => { try { c.ws.close(); } catch {} };
-  await c.send("Runtime.enable");
-  await c.send("Page.enable");
-  return c;
-}
-
 async function main() {
-  child = spawn(APP, [], {
-    cwd: testDir,
-    env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=9222" },
-    stdio: "ignore",
-    windowsHide: false,
-  });
-  const mainPage = await waitForCdp();
-  const mainPageId = mainPage.id;
-  cdp = await createClient(mainPage.webSocketDebuggerUrl);
-  await cdp.waitFor("输入框就绪", `!!document.querySelector(".ProseMirror")`, 60000);
+  const r = await spawnApp({ cwd: testDir, port: CDP_PORT });
+  child = r.child;
+  const mainPageId = r.page.id;
+  cdp = await createClient(r.page.webSocketDebuggerUrl);
+  await waitForEditor(cdp, 60000);
 
   const setInput = (text) =>
     cdp.evalJs(`(() => {
@@ -282,5 +185,5 @@ async function main() {
 }
 
 main()
-  .then(() => { cleanup(); process.exit(results.every((r) => r.ok) ? 0 : 1); })
+  .then(() => finish(results, cleanup))
   .catch((e) => { log("E2E 失败: " + e.message); cleanup(); process.exit(2); });

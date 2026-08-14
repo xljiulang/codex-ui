@@ -1,4 +1,10 @@
 // 端到端验证：请求批准模式下批准文件变更，确认不再显示"已拒绝"，并检查 diff 渲染
+function arg(name, fallback) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
+}
+const CDP_PORT = Number(arg("port", process.env.CODEX_E2E_PORT || "9222"));
+const CDP_BASE = `http://127.0.0.1:${CDP_PORT}`;
 const TARGET = process.env.CODEX_E2E_TARGET;
 if (!TARGET) {
   console.error("需要 CODEX_E2E_TARGET");
@@ -6,10 +12,15 @@ if (!TARGET) {
 }
 const PROMPT = `编辑文件：在 ${TARGET} 中写入两行文字 hello 和 world`;
 
-const targets = await (await fetch("http://127.0.0.1:9222/json/list")).json();
+const targets = await (await fetch(`${CDP_BASE}/json/list`)).json();
 const page = targets.find((t) => t.type === "page");
 if (!page) {
-  console.log("NO_PAGE");
+  console.error(
+    `NO_PAGE：未检测到运行中的 codex-ui（CDP ${CDP_PORT}）。` +
+      `本探针附着运行中的应用，请先以远程调试端口启动，例如：\n` +
+      `  set WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=${CDP_PORT} && codex-ui.exe\n` +
+      `或改用 scripts/run-e2e.mjs 自动编排（--build 后串行运行）。`,
+  );
   process.exit(1);
 }
 const ws = new WebSocket(page.webSocketDebuggerUrl);

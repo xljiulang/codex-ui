@@ -1,18 +1,23 @@
 // codex-ui 核心链路 E2E：置顶（Pinned 分区协议）、切换会话自动停止旧回合、
 // 设置面板 toggle、Ctrl+Enter 换行、置顶徽章对齐（DOM 几何断言 + 截图）。
-// 通过 WebView2 远程调试（CDP 9222）驱动真实 release UI + 少量真实模型调用。
+// 通过 WebView2 远程调试（CDP）驱动真实 release UI + 少量真实模型调用。
 // 用法: node scripts/verify-core.mjs
-import { spawn, execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {
+  cleanupSessions,
+  createClient,
+  finish,
+  killAppTree,
+  log,
+  mkTmp,
+  record as recordResult,
+  sleep,
+  spawnApp,
+  waitForEditor,
+} from "./lib/e2e.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const APP = path.join(repoRoot, "src-tauri", "target", "release", "codex-ui.exe");
-const CDP_PORT = 9222;
-const CDP_BASE = `http://127.0.0.1:${CDP_PORT}`;
+const CDP_PORT = Number(process.env.CODEX_E2E_PORT || "9222");
 
 const TAG_A = "[测试核心A]";
 const TAG_B = "[测试核心B]";
@@ -22,73 +27,18 @@ const PROMPT_A = `${TAG_A} 只回 OK`;
 const PROMPT_B = `${TAG_B} 只回 OK`;
 const LONG_PROMPT = `[测试核心L] ${MARKER} 请每秒输出一行数字，循环 12 次后输出 DONE 结束。`;
 
-const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-ui-core-test-"));
-const evidenceDir = fs.mkdtempSync(
-  path.join(os.tmpdir(), "codex-ui-core-evidence-"),
-);
+const testDir = mkTmp("codex-ui-core-test-");
+const evidenceDir = mkTmp("codex-ui-core-evidence-");
 
 const results = [];
+const record = (name, ok, detail = "") =>
+  recordResult(results, name, ok, detail);
 let child = null;
 let cdp = null;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function log(msg) {
-  console.log(`[${new Date().toISOString()}] ${msg}`);
-}
-
-function record(name, ok, detail = "") {
-  results.push({ name, ok, detail });
-  log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
-}
-
-function killApp() {
-  if (!child) return;
-  try {
-    child.kill();
-  } catch {}
-  try {
-    execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-  } catch {}
-  child = null;
-}
-
-function cleanupSessions() {
-  const root = path.join(os.homedir(), ".codex", "sessions");
-  if (!fs.existsSync(root)) return;
-  const files = [];
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.name.endsWith(".jsonl")) files.push(p);
-    }
-  };
-  walk(root);
-  let removed = 0;
-  for (const f of files) {
-    try {
-      const content = fs.readFileSync(f, "utf8");
-      if (
-        content.includes(MARKER) ||
-        content.includes(TAG_A) ||
-        content.includes(TAG_B) ||
-        content.includes("[测试核心L]")
-      ) {
-        fs.unlinkSync(f);
-        removed++;
-      }
-    } catch {}
-  }
-  if (removed) log(`已删除 ${removed} 个测试会话文件`);
-}
-
 function cleanup() {
-  killApp();
-  cleanupSessions();
+  killAppTree(child);
+  cleanupSessions([MARKER, TAG_A, TAG_B, "[测试核心L]"]);
   try {
     fs.rmSync(testDir, { recursive: true, force: true });
   } catch {}
@@ -98,116 +48,24 @@ process.on("exit", cleanup);
 process.on("SIGINT", () => process.exit(130));
 process.on("SIGTERM", () => process.exit(143));
 
-async function waitForCdp(timeoutMs = 90000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${CDP_BASE}/json/list`);
-      const targets = await res.json();
-      const page = targets.find((t) => t.type === "page");
-      if (page?.webSocketDebuggerUrl) return page;
-    } catch {}
-    await sleep(500);
-  }
-  throw new Error("CDP 连接超时，请确认 9222 端口未被占用且应用已启动");
-}
-
-async function createClient(wsUrl) {
-  const client = { seq: 0, pending: new Map(), ws: null };
-  await new Promise((resolve, reject) => {
-    client.ws = new WebSocket(wsUrl);
-    client.ws.onopen = resolve;
-    client.ws.onerror = () => reject(new Error("WebSocket 连接失败"));
-  });
-  client.ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (!msg.id) return;
-    const p = client.pending.get(msg.id);
-    if (!p) return;
-    client.pending.delete(msg.id);
-    if (msg.error) p.reject(new Error(JSON.stringify(msg.error)));
-    else p.resolve(msg.result);
-  };
-  client.send = (method, params = {}) =>
-    new Promise((resolve, reject) => {
-      const id = ++client.seq;
-      client.pending.set(id, { resolve, reject });
-      client.ws.send(JSON.stringify({ id, method, params }));
-    });
-  client.evalJs = async (expression) => {
-    const r = await client.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (r.exceptionDetails) {
-      throw new Error(
-        "页面脚本异常: " + JSON.stringify(r.exceptionDetails).slice(0, 500),
-      );
-    }
-    return r.result.value;
-  };
-  client.waitFor = async (desc, expr, timeoutMs = 15000) => {
-    const deadline = Date.now() + timeoutMs;
-    let last;
-    while (Date.now() < deadline) {
-      last = await client.evalJs(expr);
-      if (last) return last;
-      await sleep(300);
-    }
-    throw new Error(`等待超时: ${desc}，最后结果: ${JSON.stringify(last)}`);
-  };
-  client.screenshot = async (name) => {
-    try {
-      const r = await client.send("Page.captureScreenshot", { format: "png" });
-      const p = path.join(evidenceDir, name);
-      fs.writeFileSync(p, Buffer.from(r.data, "base64"));
-      log(`截图已保存: ${p}`);
-    } catch (e) {
-      log(`截图失败 ${name}: ${e.message}`);
-    }
-  };
-  client.close = () => {
-    try {
-      client.ws.close();
-    } catch {}
-  };
-  await client.send("Runtime.enable");
-  await client.send("Page.enable");
-  return client;
-}
-
-async function connectCdp(url) {
-  cdp = await createClient(url);
-}
-
 const evalJs = (expression) => cdp.evalJs(expression);
-const screenshot = (name) => cdp.screenshot(name);
+const screenshot = (name) => cdp.screenshot(name, evidenceDir);
 const waitFor = (desc, expr, timeoutMs) =>
   cdp.waitFor(desc, expr, timeoutMs);
 
 async function launchApp() {
-  if (!fs.existsSync(APP)) throw new Error(`未找到应用: ${APP}`);
-  child = spawn(APP, [], {
-    cwd: testDir,
-    env: {
-      ...process.env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
-    },
-    stdio: "ignore",
-    // 必须可见启动：WindowStyle Hidden / windowsHide 会阻止 WebView2 初始化
-    windowsHide: false,
-  });
-  log("应用已启动，等待 CDP…");
-  const page = await waitForCdp();
-  await connectCdp(page.webSocketDebuggerUrl);
-  await waitFor("编辑器加载", `!!document.querySelector(".ProseMirror")`, 60000);
+  const r = await spawnApp({ cwd: testDir, port: CDP_PORT });
+  child = r.child;
+  cdp = await createClient(r.page.webSocketDebuggerUrl);
+  await waitForEditor(cdp, 60000);
   log("UI 就绪");
 }
 
 async function relaunchApp() {
   log("重启应用以验证置顶持久化…");
-  killApp();
+  killAppTree(child);
+  child = null;
+  cdp = null;
   await sleep(2000);
   await launchApp();
 }
@@ -722,10 +580,7 @@ async function main() {
 }
 
 main()
-  .then(() => {
-    cleanup();
-    process.exit(results.every((r) => r.ok) ? 0 : 1);
-  })
+  .then(() => finish(results, cleanup))
   .catch((e) => {
     log("E2E 失败: " + e.message);
     cleanup();

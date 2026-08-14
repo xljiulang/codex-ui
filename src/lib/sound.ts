@@ -14,3 +14,8 @@ export function playNotificationSound(): void {
     // 音频不可用时静默降级
   }
 }
+
+/** 仅测试用：重置节流时间戳，保证用例相互独立 */
+export function __resetNotificationSoundForTest() {
+  lastPlayed = 0;
+}

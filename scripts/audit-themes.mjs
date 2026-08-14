@@ -4,14 +4,16 @@
 //   node scripts/audit-themes.mjs --phase chat   [--port 9225] [--out <dir>]
 // static: 空状态×3 + 设置弹窗×3 + 历史面板×1 + 令牌快照
 // chat:   真实回合（Markdown 富内容 + 命令工具卡片）×3 主题
-import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const APP = path.join(repoRoot, "src-tauri", "target", "release", "codex-ui.exe");
+import {
+  createClient,
+  killAppTree,
+  sleep,
+  spawnApp,
+  waitForEditor,
+} from "./lib/e2e.mjs";
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -29,86 +31,15 @@ fs.mkdirSync(OUT, { recursive: true });
 console.log(`[audit] phase=${PHASE} port=${CDP_PORT}\n[audit] OUT=${OUT}\n[audit] WORK=${WORK}`);
 
 const THEMES = ["blue", "dark", "light"];
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let child = null;
 let cdp = null;
 
 function killApp() {
-  if (!child) return;
-  try {
-    child.kill();
-  } catch {}
-  try {
-    execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-  } catch {}
+  killAppTree(child);
 }
 process.on("exit", killApp);
 process.on("SIGINT", () => process.exit(130));
 process.on("SIGTERM", () => process.exit(143));
-
-async function waitForCdp(timeoutMs = 90000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${CDP_BASE}/json/list`);
-      const targets = await res.json();
-      const page = targets.find((t) => t.type === "page");
-      if (page?.webSocketDebuggerUrl) return page;
-    } catch {}
-    await sleep(500);
-  }
-  throw new Error("CDP 连接超时");
-}
-
-async function createClient(wsUrl) {
-  const client = { seq: 0, pending: new Map(), ws: null };
-  await new Promise((resolve, reject) => {
-    client.ws = new WebSocket(wsUrl);
-    client.ws.onopen = resolve;
-    client.ws.onerror = () => reject(new Error("WebSocket 连接失败"));
-  });
-  client.ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (!msg.id) return;
-    const p = client.pending.get(msg.id);
-    if (!p) return;
-    client.pending.delete(msg.id);
-    if (msg.error) p.reject(new Error(JSON.stringify(msg.error)));
-    else p.resolve(msg.result);
-  };
-  client.send = (method, params = {}) =>
-    new Promise((resolve, reject) => {
-      const id = ++client.seq;
-      client.pending.set(id, { resolve, reject });
-      client.ws.send(JSON.stringify({ id, method, params }));
-    });
-  client.evalJs = async (expression) => {
-    const r = await client.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (r.exceptionDetails)
-      throw new Error("页面脚本异常: " + JSON.stringify(r.exceptionDetails).slice(0, 500));
-    return r.result.value;
-  };
-  client.waitFor = async (desc, expr, timeoutMs = 15000) => {
-    const deadline = Date.now() + timeoutMs;
-    let last;
-    while (Date.now() < deadline) {
-      last = await client.evalJs(expr);
-      if (last) return last;
-      await sleep(400);
-    }
-    throw new Error(`等待超时: ${desc}，最后结果: ${JSON.stringify(last)}`);
-  };
-  await client.send("Runtime.enable");
-  await client.send("Page.enable");
-  return client;
-}
 
 const evalJs = (expression) => cdp.evalJs(expression);
 const waitFor = (desc, expr, timeoutMs) => cdp.waitFor(desc, expr, timeoutMs);
@@ -397,18 +328,10 @@ async function phaseDiff() {
 }
 
 async function main() {
-  child = spawn(APP, [], {
-    cwd: WORK,
-    env: {
-      ...process.env,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
-    },
-    stdio: "ignore",
-    windowsHide: false,
-  });
-  const page = await waitForCdp();
-  cdp = await createClient(page.webSocketDebuggerUrl);
-  await waitFor("编辑器加载", `!!document.querySelector(".ProseMirror")`, 60000);
+  const r = await spawnApp({ cwd: WORK, port: CDP_PORT });
+  child = r.child;
+  cdp = await createClient(r.page.webSocketDebuggerUrl);
+  await waitForEditor(cdp, 60000);
   await sleep(1000);
   console.log(`[audit] APP READY, data-theme=${await evalJs('document.documentElement.dataset.theme')}`);
 
