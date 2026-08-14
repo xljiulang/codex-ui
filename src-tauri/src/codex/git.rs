@@ -1447,6 +1447,19 @@ fn conflict_path(c: &gix::merge::tree::Conflict) -> String {
     "<未知路径>".to_string()
 }
 
+/// 创建系统 git 命令：Windows GUI 应用下设置 CREATE_NO_WINDOW，
+/// 避免拉取/推送子进程闪现黑色控制台窗口。
+fn git_command(git_bin: &Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new(git_bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// 拉取：调用系统 git（快进优先，`--ff-only`）。分叉时不自动合并，
 /// 报错提示先经 GitView 分支合并手动合并，绝不留下冲突状态。
 fn pull_sync(root: &str) -> Result<GitPullResult, GitError> {
@@ -1463,7 +1476,7 @@ fn pull_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPullResult, GitEr
         return Err(git_err("游离 HEAD 状态无法拉取，请先切换到某个分支"));
     }
     let (remote_label, remote_branch) = resolve_remote_target(&repo, &branch)?;
-    let out = std::process::Command::new(git_bin)
+    let out = git_command(git_bin)
         .arg("-C")
         .arg(root)
         .args([
@@ -1655,7 +1668,7 @@ fn push_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPushResult, GitEr
     }
     let (remote_label, remote_branch) = resolve_remote_target(&repo, &branch)?;
     let refspec = format!("{branch}:{remote_branch}");
-    let out = std::process::Command::new(git_bin)
+    let out = git_command(git_bin)
         .arg("-C")
         .arg(root)
         .args(["push", "-u", &remote_label, &refspec])

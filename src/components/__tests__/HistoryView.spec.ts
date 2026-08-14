@@ -492,9 +492,11 @@ describe("HistoryView 文件夹右键菜单", () => {
     store.searchSnippets = {};
     store.panelTab = "history";
     mockedInvoke.mockClear();
+    mockedDelete.mockClear();
+    mockedDelete.mockResolvedValue(undefined);
   });
 
-  it("文件夹行右键显示“新建会话”与“在资源管理器中打开”", async () => {
+  it("文件夹行右键显示“新建会话”“在资源管理器中打开”“删除所有会话”", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
       clientX: 200,
@@ -503,7 +505,11 @@ describe("HistoryView 文件夹右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["新建会话", "在资源管理器中打开"]);
+    expect(labels).toEqual(["新建会话", "在资源管理器中打开", "删除所有会话"]);
+    const del = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text().trim() === "删除所有会话")!;
+    expect(del.classes()).toContain("danger");
     wrapper.unmount();
   });
 
@@ -531,6 +537,74 @@ describe("HistoryView 文件夹右键菜单", () => {
       path: "D:\\codex\\codex-ui",
     });
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("点击「删除所有会话」弹出确认框且不直接删除", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "删除所有会话");
+
+    expect(wrapper.find(".modal-mask").exists()).toBe(true);
+    expect(wrapper.find(".modal-title").text()).toBe("删除所有会话");
+    expect(wrapper.text()).toContain(
+      "确定删除目录「codex-ui」下的所有会话（共 2 个）吗？此操作不可恢复。",
+    );
+    expect(mockedDelete).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("分组删除确认框点「取消」关闭且不删除", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "删除所有会话");
+    const cancel = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "取消");
+    await cancel!.trigger("click");
+
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(mockedDelete).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("分组删除确认后对组内每个会话调用 deleteThread 并关闭确认框", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "删除所有会话");
+    const del = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "删除");
+    await del!.trigger("click");
+
+    expect(mockedDelete).toHaveBeenCalledTimes(2);
+    expect(mockedDelete).toHaveBeenCalledWith("t1");
+    expect(mockedDelete).toHaveBeenCalledWith("t2");
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("分组删除确认框按 Escape 关闭且不删除", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "删除所有会话");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(mockedDelete).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });

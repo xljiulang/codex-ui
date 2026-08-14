@@ -42,7 +42,11 @@ import {
   ICON_RENAME,
 } from "../lib/icons";
 
-const confirmThread = ref<ThreadSummary | null>(null);
+/** 删除确认目标：单条会话或整个目录分组 */
+type ConfirmDelete =
+  | { kind: "thread"; thread: ThreadSummary }
+  | { kind: "group"; group: HistoryGroup };
+const confirmDelete = ref<ConfirmDelete | null>(null);
 const confirmEl = ref<HTMLElement | null>(null);
 const searchTerm = ref("");
 const editingId = ref<string | null>(null);
@@ -152,7 +156,17 @@ function cancelRename() {
 }
 
 function askDelete(t: ThreadSummary) {
-  confirmThread.value = t;
+  confirmDelete.value = { kind: "thread", thread: t };
+  lastFocus = document.activeElement as HTMLElement | null;
+  void nextTick(() => {
+    confirmEl.value
+      ?.querySelector<HTMLElement>(".modal-foot .btn.danger")
+      ?.focus();
+  });
+}
+
+function askDeleteGroup(group: HistoryGroup) {
+  confirmDelete.value = { kind: "group", group };
   lastFocus = document.activeElement as HTMLElement | null;
   void nextTick(() => {
     confirmEl.value
@@ -162,18 +176,22 @@ function askDelete(t: ThreadSummary) {
 }
 
 function cancelDelete() {
-  confirmThread.value = null;
+  confirmDelete.value = null;
   lastFocus?.focus?.();
   lastFocus = null;
 }
 
 async function doDelete() {
-  const t = confirmThread.value;
-  if (!t) return;
-  confirmThread.value = null;
+  const target = confirmDelete.value;
+  if (!target) return;
+  confirmDelete.value = null;
   lastFocus?.focus?.();
   lastFocus = null;
-  await deleteThread(t.id);
+  if (target.kind === "thread") {
+    await deleteThread(target.thread.id);
+  } else {
+    await Promise.all(target.group.threads.map((t) => deleteThread(t.id)));
+  }
 }
 
 /** 打开会话行右键菜单；重命名输入框内右键放行给全局编辑菜单 */
@@ -213,6 +231,12 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
       icon: ICON_FOLDER_OPEN,
       action: () => revealInExplorer(group.path),
     },
+    {
+      label: "删除所有会话",
+      icon: ICON_DELETE,
+      danger: true,
+      action: () => askDeleteGroup(group),
+    },
   ]);
 }
 
@@ -225,8 +249,20 @@ function revealInExplorer(path: string) {
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   if (onMenuKeydown(e)) return;
-  if (confirmThread.value) cancelDelete();
+  if (confirmDelete.value) cancelDelete();
 }
+
+const confirmTitle = computed(() =>
+  confirmDelete.value?.kind === "group" ? "删除所有会话" : "删除会话",
+);
+const confirmMessage = computed(() => {
+  const t = confirmDelete.value;
+  if (!t) return "";
+  if (t.kind === "thread") {
+    return `确定删除会话「${threadTitle(t.thread)}」吗？此操作不可恢复。`;
+  }
+  return `确定删除目录「${t.group.label}」下的所有会话（共 ${t.group.threads.length} 个）吗？此操作不可恢复。`;
+});
 
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
@@ -377,13 +413,13 @@ onBeforeUnmount(() => {
         <span>{{ it.label }}</span>
       </button>
     </div>
-    <div v-if="confirmThread" class="modal-mask">
+    <div v-if="confirmDelete" class="modal-mask">
       <div ref="confirmEl" class="modal" tabindex="-1">
         <div class="modal-head">
-          <span class="modal-title">删除会话</span>
+          <span class="modal-title">{{ confirmTitle }}</span>
         </div>
         <div class="modal-body">
-          确定删除会话「{{ threadTitle(confirmThread) }}」吗？此操作不可恢复。
+          {{ confirmMessage }}
         </div>
         <div class="modal-foot">
           <button class="btn" @click="cancelDelete()">取消</button>
