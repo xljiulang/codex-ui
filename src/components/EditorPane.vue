@@ -168,13 +168,11 @@ function tabTooltip(tab: EditorTab): string {
 
 /**
  * 标题悬停提示：标题与路径不同时才显示路径，避免提示与可见标题重复。
- * 文件/diff/预览显示相对工作区根的路径，终端显示工作目录。
+ * 文件/diff/预览显示相对工作区根的路径；终端不显示 ToolTip。
  */
 function titleTooltip(tab: EditorTab): string {
   if (tab.kind === "chat") return "";
-  if (tab.kind === "terminal") {
-    return tab.title !== tab.cwd ? tab.cwd : "";
-  }
+  if (tab.kind === "terminal") return "";
   const root =
     tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
   const path = relPathOf(root, tab.path);
@@ -195,7 +193,9 @@ function fileTabAbsPath(tab: FileEditorTab | PreviewEditorTab): string {
  */
 function openTabMenu(e: MouseEvent, tab: EditorTab) {
   const closeWithToast = (skipped: number) => {
-    if (skipped > 0) setToast(`已跳过 ${skipped} 个未保存的标签`);
+    if (skipped > 0) {
+      setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端）`);
+    }
   };
   const idx = tabs.findIndex((t) => t.id === tab.id);
   const hasLeft = tabs.slice(0, idx).some((t) => t.kind !== "chat");
@@ -312,7 +312,7 @@ watch(
           <span class="editor-tab-brand">CODEX</span>
           <span
             v-if="store.turnActive"
-            class="editor-tab-run"
+            class="editor-tab-run pinned"
             aria-hidden="true"
           ></span>
         </button>
@@ -359,6 +359,17 @@ watch(
                 <path :d="ICON_FILE" />
               </svg>
             </span>
+            <span
+              v-if="
+                tab.kind === 'terminal' &&
+                tab.busy &&
+                !tab.loading &&
+                !tab.exited &&
+                !tab.error
+              "
+              class="editor-tab-run inline"
+              aria-hidden="true"
+            ></span>
             <span class="editor-tab-label" v-tooltip="titleTooltip(tab)">
               {{ tab.title }}
             </span>

@@ -5609,11 +5609,8 @@ body.resizing-editor {
   -webkit-text-fill-color: transparent;
 }
 
-/* 会话标签呼吸灯：回合进行中右上角呼吸圆点 */
+/* 呼吸圆点基础样式：会话标签（回合进行中）与终端标签（命令执行中）共用 */
 .editor-tab-run {
-  position: absolute;
-  top: 5px;
-  right: 6px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -5621,6 +5618,18 @@ body.resizing-editor {
   box-shadow: 0 0 8px var(--accent-glow);
   animation: breathe 1.6s ease-in-out infinite;
   pointer-events: none;
+}
+
+/* 会话标签：右上角绝对定位，不挤占布局 */
+.editor-tab-run.pinned {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+}
+
+/* 终端标签：inline 跟随 flex 布局，位于图标与标题之间（右上角被关闭按钮占用） */
+.editor-tab-run.inline {
+  flex-shrink: 0;
 }
 
 @keyframes breathe {

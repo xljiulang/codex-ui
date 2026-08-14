@@ -63,10 +63,11 @@ import {
   openPreviewTab,
   openTerminalTab,
   tabs,
+  type TerminalEditorTab,
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
-import { store } from "../../composables/useCodex";
+import { settleConfirm, store } from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
@@ -123,6 +124,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     termFocus.calls = 0;
     __resetEditorTabsForTest();
     __resetSessionFsForTest();
+    store.confirm = null;
   });
 
   afterEach(() => {
@@ -371,7 +373,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
-    expect(store.toast).toContain("已跳过 1 个未保存的标签");
+    expect(store.toast).toContain("已跳过 1 个标签（未保存文件 / 运行中的终端）");
     wrapper.unmount();
   });
 
@@ -473,7 +475,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
-    expect(store.toast).toContain("已跳过 1 个未保存的标签");
+    expect(store.toast).toContain("已跳过 1 个标签（未保存文件 / 运行中的终端）");
     wrapper.unmount();
   });
 
@@ -624,7 +626,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     const termEl = wrapper
       .findAll(".editor-tab")
-      .find((w) => w.text().includes("src"))!;
+      .find((w) => w.text().includes("PowerShell"))!;
     await termEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
@@ -1013,12 +1015,10 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
-    expect(tabEls[1].find(".editor-tab-label").text()).toBe("src");
-    // 标题（目录名）与 cwd 不同：标题上显示完整 cwd，header 无 tooltip
+    expect(tabEls[1].find(".editor-tab-label").text()).toBe("PowerShell");
+    // 终端标签标题固定为 PowerShell，无 ToolTip（header 与 label 均无 data-tip）
     expect(tabEls[1].attributes("data-tip")).toBe("");
-    expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe(
-      root + "\\src",
-    );
+    expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
     await waitForEl(wrapper, ".terminal-pane");
     wrapper.unmount();
@@ -1042,10 +1042,116 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const before = termFocus.calls;
     const termTab = wrapper
       .findAll(".editor-tab")
-      .find((w) => w.text().includes("src"))!;
+      .find((w) => w.text().includes("PowerShell"))!;
     await termTab.trigger("click");
     await settle();
     expect(termFocus.calls).toBeGreaterThan(before);
+    wrapper.unmount();
+  });
+
+  it("点击关闭按钮关闭运行中的终端：弹确认，取消保留、确认终止并关闭", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+    await waitForEl(wrapper, ".terminal-pane");
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    )!;
+    t.busy = true;
+    await nextTick();
+
+    const termEl = () => wrapper.findAll(".editor-tab")[1];
+    await termEl().find(".editor-tab-close").trigger("click");
+    await nextTick();
+    expect(store.confirm?.title).toBe("关闭终端");
+
+    // 取消：标签保留、进程不终止
+    settleConfirm(false);
+    await flushPromises();
+    expect(tabs.some((x) => x.id === t.id)).toBe(true);
+
+    // 再次关闭并确认：终止进程并移除标签
+    await termEl().find(".editor-tab-close").trigger("click");
+    await nextTick();
+    expect(store.confirm).not.toBeNull();
+    settleConfirm(true);
+    await flushPromises();
+    expect(tabs.some((x) => x.id === t.id)).toBe(false);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", { id: t.id });
+    wrapper.unmount();
+  });
+
+  it("终端标签：命令执行中显示呼吸圆点，空闲隐藏且多终端独立", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+    await waitForEl(wrapper, ".terminal-pane");
+    await openTerminalTab(root + "\\lib");
+    await settle();
+
+    // 终端标签标题固定为 PowerShell：按标签位置（chat 固定第 0 位）与 cwd 区分
+    const termTabs = wrapper.findAll(".editor-tab");
+    const t1 = tabs.find(
+      (x): x is TerminalEditorTab =>
+        x.kind === "terminal" && x.cwd === root + "\\src",
+    )!;
+    const t2 = tabs.find(
+      (x): x is TerminalEditorTab =>
+        x.kind === "terminal" && x.cwd === root + "\\lib",
+    )!;
+
+    expect(termTabs[1].find(".editor-tab-run").exists()).toBe(false);
+
+    t1.busy = true;
+    await nextTick();
+    expect(termTabs[1].find(".editor-tab-run.inline").exists()).toBe(true);
+    expect(termTabs[2].find(".editor-tab-run").exists()).toBe(false);
+
+    t2.busy = true;
+    t1.busy = false;
+    await nextTick();
+    expect(termTabs[1].find(".editor-tab-run").exists()).toBe(false);
+    expect(termTabs[2].find(".editor-tab-run.inline").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("终端标签：已退出或启动失败时即使 busy 也不显示呼吸圆点", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+    await waitForEl(wrapper, ".terminal-pane");
+
+    const termEl = () => wrapper.findAll(".editor-tab")[1];
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    )!;
+    t.busy = true;
+    await nextTick();
+    expect(termEl().find(".editor-tab-run").exists()).toBe(true);
+
+    t.exited = true;
+    await nextTick();
+    expect(termEl().find(".editor-tab-run").exists()).toBe(false);
+
+    t.exited = false;
+    t.error = "spawn boom";
+    await nextTick();
+    expect(termEl().find(".editor-tab-run").exists()).toBe(false);
     wrapper.unmount();
   });
 });

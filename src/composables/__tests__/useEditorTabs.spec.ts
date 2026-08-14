@@ -47,6 +47,7 @@ import {
   ensureTerminalListeners,
   releaseTerminal,
 } from "../useTerminalEvents";
+import { settleConfirm, store } from "../useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
@@ -85,6 +86,7 @@ describe("useEditorTabs 标签状态", () => {
     mockedAttachTerminal.mockReset();
     mockedReleaseTerminal.mockReset();
     __resetEditorTabsForTest();
+    store.confirm = null;
   });
 
   it("初始仅含“对话”主标签且不可关闭", () => {
@@ -527,7 +529,7 @@ describe("useEditorTabs 标签状态", () => {
     );
     expect(t).toBeTruthy();
     expect(t!.cwd).toBe(root);
-    expect(t!.title).toBe("repo");
+    expect(t!.title).toBe("PowerShell");
     expect(t!.loading).toBe(false);
     expect(t!.error).toBe("");
     expect(t!.exited).toBe(false);
@@ -618,6 +620,109 @@ describe("useEditorTabs 标签状态", () => {
     );
     closeTab(t!.id);
     expect(mockedReleaseTerminal).toHaveBeenCalledWith(t!.id);
+  });
+
+  it("关闭运行中的终端：先弹确认，确认后终止进程并移除", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    )!;
+    t.busy = true;
+
+    const pending = closeTab(t.id);
+    expect(store.confirm?.title).toBe("关闭终端");
+    expect(store.confirm?.message).toContain("终止该进程");
+    expect(store.confirm?.confirmLabel).toBe("终止并关闭");
+
+    settleConfirm(true);
+    await pending;
+    expect(tabs.some((x) => x.id === t.id)).toBe(false);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", { id: t.id });
+  });
+
+  it("关闭运行中的终端：取消确认则保留标签、不终止进程", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    )!;
+    t.busy = true;
+
+    const pending = closeTab(t.id);
+    expect(store.confirm).not.toBeNull();
+    settleConfirm(false);
+    await pending;
+    expect(tabs.some((x) => x.id === t.id)).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("terminal_kill", {
+      id: t.id,
+    });
+  });
+
+  it("关闭其它所有标签：跳过运行中的终端并计入返回计数", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    await openTerminalTab(root);
+    const ts = tabs.filter(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    ts[0].busy = true;
+
+    const skipped = closeAllOtherTabs();
+    expect(skipped).toBe(1);
+    expect(tabs.some((x) => x.id === ts[0].id)).toBe(true);
+    expect(tabs.some((x) => x.id === ts[1].id)).toBe(false);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("terminal_kill", {
+      id: ts[0].id,
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: ts[1].id,
+    });
+  });
+
+  it("关闭其它所有标签：未保存文件与运行中终端合并跳过计数", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openTerminalTab(root);
+    const f = tabs.find(
+      (x): x is FileEditorTab => x.kind === "file",
+    )!;
+    f.dirty = true;
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    )!;
+    t.busy = true;
+
+    const skipped = closeAllOtherTabs();
+    expect(skipped).toBe(2);
+    expect(tabs.some((x) => x.id === f.id)).toBe(true);
+    expect(tabs.some((x) => x.id === t.id)).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("terminal_kill", {
+      id: t.id,
+    });
   });
 
   it("关闭其它所有标签：终端一并结束进程", async () => {

@@ -46,7 +46,14 @@ const DEFAULT_COLS: u16 = 100;
 
 /// PowerShell 启动参数：-NoLogo 去横幅；启动时把控制台编码固定为 UTF-8，
 /// 保证中文/Unicode 输出经 ConPTY 读回后不乱码（zh-CN 默认 OEM 936）。
-const PS_STARTUP: &str = "chcp 65001 > $null; [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8";
+/// 同时覆写 prompt：每次回到提示符先输出隐藏标记 OSC 133;D（BEL 终止），
+/// 前端据此判定“命令已执行完、回到空闲”，提示符外观保持默认 `PS <路径> `。
+/// 注：Windows PowerShell 5.1 不支持反引号 `e 转义，控制字符用 [char] 构造。
+/// 另：2025-12 安全更新（CVE-2025-54100）起 Invoke-WebRequest 解析 HTML 前会弹
+/// “脚本执行风险”确认；这里设置会话级默认参数等效自动带 -UseBasicParsing，
+/// wget/iwr 不再弹窗（代价是 Links/Images/Forms 等 DOM 解析属性不可用，
+/// 个别场景可显式 -UseBasicParsing:$false 恢复完整解析）。
+const PS_STARTUP: &str = "chcp 65001 > $null; [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $PSDefaultParameterValues['Invoke-WebRequest:UseBasicParsing'] = $true; function prompt { \"$([char]27)]133;D$([char]7)PS $($executionContext.SessionState.Path.CurrentLocation)> \" }";
 
 /// 校验 cwd 为存在的绝对目录（与 session_fs 的 resolve_root 语义一致）
 fn validate_cwd(cwd: &str) -> Result<PathBuf, String> {
@@ -303,7 +310,7 @@ mod tests {
         // 中文由码点运行时构造，避免仅凭输入回显误判编码正确
         writer
             .write_all(
-                b"Write-Output 'PTY-OK-42' ([string]::Join('', [char[]](0x7EC8,0x7AEF,0x6D4B,0x8BD5)))\r\n",
+                b"Write-Output 'PTY-OK-42' ([string]::Join('', [char[]](0x7EC8,0x7AEF,0x6D4B,0x8BD5)))\r\nWrite-Output ('IWR-DEFAULT=' + $PSDefaultParameterValues['Invoke-WebRequest:UseBasicParsing'])\r\n",
             )
             .expect("write input");
         writer.flush().expect("flush input");
@@ -321,7 +328,10 @@ mod tests {
                         let _ = writer.write_all(b"\x1b[24;1R");
                         let _ = writer.flush();
                     }
-                    if out.contains("PTY-OK-42") && out.contains("终端测试") {
+                    if out.contains("PTY-OK-42")
+                        && out.contains("终端测试")
+                        && out.contains("IWR-DEFAULT=True")
+                    {
                         break;
                     }
                 }
@@ -337,6 +347,14 @@ mod tests {
         assert!(
             out.contains("PTY-OK-42") && out.contains("终端测试"),
             "pty output: {out}"
+        );
+        assert!(
+            out.contains("\x1b]133;D"),
+            "pty output missing prompt marker: {out}"
+        );
+        assert!(
+            out.contains("IWR-DEFAULT=True"),
+            "pty output missing Invoke-WebRequest UseBasicParsing default: {out}"
         );
     }
 

@@ -111,6 +111,7 @@ function makeTab(over: Partial<TerminalEditorTab> = {}): TerminalEditorTab {
     title: "repo",
     loading: false,
     error: "",
+    busy: false,
     exited: false,
     exitCode: null,
     ...over,
@@ -339,6 +340,85 @@ describe("TerminalPane", () => {
     expect(tab.exited).toBe(true);
     expect(tab.exitCode).toBe(0);
     expect(wrapper.find(".terminal-overlay").text()).toContain("进程已退出");
+    wrapper.unmount();
+  });
+
+  it("回放含提示符标记的缓冲输出：busy 保持 false（初始空闲）", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab();
+    bridgeState.buffered.set(tab.id, ["\x1b]133;D\x07PS D:\\repo> "]);
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    expect(tab.busy).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("普通输出不改 busy：无命令执行时不误亮", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab();
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+
+    bridgeState.dataHandlers.get(tab.id)!("build output line\r\n");
+    await nextTick();
+    expect(tab.busy).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("回车/粘贴换行置 busy=true，收到提示符标记后熄灭", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab();
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+
+    xtermState.onData?.("npm run build\r");
+    await nextTick();
+    expect(tab.busy).toBe(true);
+
+    bridgeState.dataHandlers.get(tab.id)!("\x1b]133;D\x07PS D:\\repo> ");
+    await nextTick();
+    expect(tab.busy).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("提示符标记跨两块输出拆分时仍能识别", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab();
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+
+    xtermState.onData?.("build\r");
+    await nextTick();
+    expect(tab.busy).toBe(true);
+
+    bridgeState.dataHandlers.get(tab.id)!("\x1b]133;");
+    bridgeState.dataHandlers.get(tab.id)!("D\x07PS D:\\repo> ");
+    await nextTick();
+    expect(tab.busy).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("terminal/exit 事件同时熄灭 busy", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab({ busy: true });
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+
+    bridgeState.exitHandlers.get(tab.id)!(0);
+    await nextTick();
+    expect(tab.busy).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("挂载前进程已退出：缓冲退出码同时熄灭 busy", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab({ busy: true });
+    bridgeState.bufferedExit.set(tab.id, 1);
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    await nextTick();
+    expect(tab.exited).toBe(true);
+    expect(tab.busy).toBe(false);
     wrapper.unmount();
   });
 

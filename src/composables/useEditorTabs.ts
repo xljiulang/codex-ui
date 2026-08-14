@@ -16,6 +16,7 @@ import {
   ensureTerminalListeners,
   releaseTerminal,
 } from "./useTerminalEvents";
+import { askConfirm } from "./useCodex";
 
 /** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
 interface TextFileContent {
@@ -111,6 +112,8 @@ export interface TerminalEditorTab {
   title: string;
   loading: boolean;
   error: string;
+  /** 命令执行中：回车/粘贴换行置位，收到提示符标记（OSC 133;D）后熄灭 */
+  busy: boolean;
   /** 进程已退出（收到 terminal/exit 事件后置位） */
   exited: boolean;
   exitCode: number | null;
@@ -171,9 +174,11 @@ export async function openTerminalTab(cwd: string): Promise<void> {
     kind: "terminal",
     id,
     cwd,
-    title: pathBaseName(cwd) || cwd,
+    // 终端标签标题固定为 PowerShell，不随工作目录变化；多开时同名
+    title: "PowerShell",
     loading: true,
     error: "",
+    busy: false,
     exited: false,
     exitCode: null,
   }) as unknown as TerminalEditorTab;
@@ -408,17 +413,32 @@ function disposeTab(tab: EditorTab): void {
   }
 }
 
+/** 运行中终端判定：命令执行中（busy）且未退出、无错误（与标签呼吸灯同源） */
+export function isTerminalBusy(tab: EditorTab): boolean {
+  return tab.kind === "terminal" && tab.busy && !tab.exited && !tab.error;
+}
+
 /**
  * 关闭标签：脏文件先挂起确认（pendingCloseId），确认后由 saveTabAndClose/
- * discardTabAndClose 完成；终端直接结束进程并移除，不做确认。
+ * discardTabAndClose 完成；运行中的终端先弹全局确认，确认后终止进程并移除，
+ * 取消则保留；空闲/已退出/启动失败的终端直接结束进程并移除。
  */
-export function closeTab(id: string): void {
+export async function closeTab(id: string): Promise<void> {
   if (id === "chat") return;
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
   if (tab.kind === "file" && tab.dirty) {
     pendingCloseId.value = id;
     return;
+  }
+  if (isTerminalBusy(tab)) {
+    const ok = await askConfirm({
+      title: "关闭终端",
+      message: "终端正在执行命令，关闭将终止该进程。是否继续？",
+      confirmLabel: "终止并关闭",
+      cancelLabel: "取消",
+    });
+    if (!ok) return;
   }
   disposeTab(tab);
   removeTab(id);
@@ -440,7 +460,8 @@ export function discardTabAndClose(id: string): void {
 }
 
 /**
- * 按谓词批量关闭标签：脏文件跳过计数、终端结束进程、其余直接移除。
+ * 按谓词批量关闭标签：未保存文件与运行中的终端跳过计数、终端结束进程、
+ * 其余直接移除。
  * 谓词基于遍历时的快照索引判定；快照遍历 + 按 id 移除，删除过程安全。
  */
 function closeTabsMatching(
@@ -450,6 +471,10 @@ function closeTabsMatching(
   for (const [idx, tab] of [...tabs].entries()) {
     if (!pred(tab, idx)) continue;
     if (tab.kind === "file" && tab.dirty) {
+      skipped++;
+      continue;
+    }
+    if (isTerminalBusy(tab)) {
       skipped++;
       continue;
     }

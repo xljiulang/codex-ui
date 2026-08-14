@@ -14,6 +14,23 @@ const props = defineProps<{ tab: TerminalEditorTab; active?: boolean }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
 
+/** 后端 prompt 注入的空闲标记：PowerShell 每次回到提示符先输出 OSC 133;D */
+const PROMPT_MARKER = "\x1b]133;D";
+/** 标记前缀长度：跨输出块拆分时保留上一块尾部做拼接匹配 */
+const MARKER_PREFIX_LEN = PROMPT_MARKER.length;
+let tailCarry = "";
+
+/**
+ * 扫描输出块中的提示符标记：收到标记说明命令已执行完、回到空闲提示符。
+ * 标记可能被分块拆分，需与上一块尾部拼接后匹配。
+ */
+function scanPromptMarker(chunk: string): boolean {
+  const combined = tailCarry + chunk;
+  const found = combined.includes(PROMPT_MARKER);
+  tailCarry = found ? "" : combined.slice(-(MARKER_PREFIX_LEN - 1));
+  return found;
+}
+
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let resizeObserver: ResizeObserver | null = null;
@@ -116,29 +133,38 @@ onMounted(() => {
 
   term.onData((data) => {
     if (disposed || props.tab.exited || props.tab.error) return;
+    // 回车/粘贴换行视为“开始执行命令”：亮起呼吸灯，直到下一个提示符标记
+    if (data.includes("\r") || data.includes("\n")) {
+      props.tab.busy = true;
+    }
     void invoke("terminal_write", { id: props.tab.id, data }).catch(() => {});
   });
 
   // 挂载前 openTerminalTab 已通过事件桥缓冲启动输出（含 ConPTY DSR 查询，
   // xterm 写入后会自动应答，提示符才能渲染），这里先回放再转实时。
+  tailCarry = "";
   handle = attachTerminal(props.tab.id);
   for (const chunk of handle.flush()) {
     if (disposed) break;
+    if (scanPromptMarker(chunk)) props.tab.busy = false;
     term?.write(chunk);
   }
   const bufferedExit = handle.exitCode;
   if (bufferedExit !== null && !disposed) {
     props.tab.exited = true;
     props.tab.exitCode = bufferedExit;
+    props.tab.busy = false;
   }
   handle.onData((data) => {
     if (disposed) return;
+    if (scanPromptMarker(data)) props.tab.busy = false;
     term?.write(data);
   });
   handle.onExit((exitCode) => {
     if (disposed) return;
     props.tab.exited = true;
     props.tab.exitCode = exitCode;
+    props.tab.busy = false;
   });
 
   // 面板尺寸变化（窗口缩放/切回标签）时重新 fit 并同步 ConPTY
