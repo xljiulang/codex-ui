@@ -103,6 +103,24 @@
   --console-bg-deep: rgba(12, 16, 22, 0.9);
   --console-text: #c6cdd8;
   --code-text: #c6cdd8;
+  /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
+  --console-ansi-black: #0e1116;
+  --console-ansi-red: #f0565f;
+  --console-ansi-green: #46d5a8;
+  --console-ansi-yellow: #e5d6a0;
+  --console-ansi-blue: #79b8ff;
+  --console-ansi-magenta: #c792ea;
+  --console-ansi-cyan: #56b6c2;
+  --console-ansi-white: #c6cdd8;
+  --console-ansi-bright-black: #76819a;
+  --console-ansi-bright-red: #ff7a83;
+  --console-ansi-bright-green: #7cebc2;
+  --console-ansi-bright-yellow: #f2e3b0;
+  --console-ansi-bright-blue: #9ccbff;
+  --console-ansi-bright-magenta: #e0a7f5;
+  --console-ansi-bright-cyan: #86d7e0;
+  --console-ansi-bright-white: #eef2f8;
+  --console-cursor-text: #0c1016;
 
   /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
   --syntax-comment: #6a9955;
@@ -215,6 +233,24 @@
   --console-bg-deep: rgba(12, 13, 20, 0.9);
   --console-text: #b9b8c9;
   --code-text: #cdcbe0;
+  /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
+  --console-ansi-black: #0a0b10;
+  --console-ansi-red: #ff6b74;
+  --console-ansi-green: #55e0b3;
+  --console-ansi-yellow: #f0e0a4;
+  --console-ansi-blue: #8fb3ff;
+  --console-ansi-magenta: #c792ea;
+  --console-ansi-cyan: #56b6c2;
+  --console-ansi-white: #c9c7d6;
+  --console-ansi-bright-black: #868399;
+  --console-ansi-bright-red: #ff8d94;
+  --console-ansi-bright-green: #7cf0c4;
+  --console-ansi-bright-yellow: #f8eabe;
+  --console-ansi-bright-blue: #b6c9ff;
+  --console-ansi-bright-magenta: #e0a7f5;
+  --console-ansi-bright-cyan: #86d7e0;
+  --console-ansi-bright-white: #f1effc;
+  --console-cursor-text: #0c1016;
 
   /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
   --syntax-comment: #6a9955;
@@ -329,6 +365,24 @@
   --console-text: #3e4756;
   --code-text: #3e4756;
   --code-bg: linear-gradient(180deg, #ffffff 0%, #eef2f9 100%);
+  /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
+  --console-ansi-black: #24292f;
+  --console-ansi-red: #cf222e;
+  --console-ansi-green: #116329;
+  --console-ansi-yellow: #9a6700;
+  --console-ansi-blue: #0969da;
+  --console-ansi-magenta: #8250df;
+  --console-ansi-cyan: #1b7c83;
+  --console-ansi-white: #57606a;
+  --console-ansi-bright-black: #6e7781;
+  --console-ansi-bright-red: #e5534b;
+  --console-ansi-bright-green: #1a7f37;
+  --console-ansi-bright-yellow: #9a6700;
+  --console-ansi-bright-blue: #0969da;
+  --console-ansi-bright-magenta: #8250df;
+  --console-ansi-bright-cyan: #1b7c83;
+  --console-ansi-bright-white: #3e4756;
+  --console-cursor-text: #ffffff;
 
   /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
   --syntax-comment: #6a737d;

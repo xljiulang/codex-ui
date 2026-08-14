@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -10,7 +10,7 @@ import {
   type TerminalHandle,
 } from "../composables/useTerminalEvents";
 
-const props = defineProps<{ tab: TerminalEditorTab }>();
+const props = defineProps<{ tab: TerminalEditorTab; active?: boolean }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
 
@@ -25,20 +25,56 @@ interface TerminalTheme {
   background: string;
   foreground: string;
   cursor: string;
+  cursorAccent: string;
   selectionBackground: string;
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
 }
 
-/** 从当前主题 CSS 变量读取 xterm 基础配色（变量缺失时回退到原有深色默认值） */
+/** 从当前主题 CSS 变量读取 xterm 完整配色（变量缺失时回退到蓝夜默认值） */
 function readTerminalTheme(): TerminalTheme {
   const cs = getComputedStyle(document.documentElement);
   const accentRgb = cs.getPropertyValue("--accent-rgb").trim();
+  const v = (name: string, fallback: string) =>
+    cs.getPropertyValue(name).trim() || fallback;
   return {
-    background: cs.getPropertyValue("--console-bg-deep").trim() || "#0c1016",
-    foreground: cs.getPropertyValue("--console-text").trim() || "#d4dce8",
-    cursor: cs.getPropertyValue("--accent").trim() || "#4f8cc9",
+    background: v("--console-bg-deep", "#0c1016"),
+    foreground: v("--console-text", "#d4dce8"),
+    cursor: v("--accent", "#4f8cc9"),
+    cursorAccent: v("--console-cursor-text", "#0c1016"),
     selectionBackground: accentRgb
       ? `rgba(${accentRgb}, 0.35)`
       : "rgba(79, 140, 201, 0.35)",
+    black: v("--console-ansi-black", "#0e1116"),
+    red: v("--console-ansi-red", "#f0565f"),
+    green: v("--console-ansi-green", "#46d5a8"),
+    yellow: v("--console-ansi-yellow", "#e5d6a0"),
+    blue: v("--console-ansi-blue", "#79b8ff"),
+    magenta: v("--console-ansi-magenta", "#c792ea"),
+    cyan: v("--console-ansi-cyan", "#56b6c2"),
+    white: v("--console-ansi-white", "#c6cdd8"),
+    brightBlack: v("--console-ansi-bright-black", "#76819a"),
+    brightRed: v("--console-ansi-bright-red", "#ff7a83"),
+    brightGreen: v("--console-ansi-bright-green", "#7cebc2"),
+    brightYellow: v("--console-ansi-bright-yellow", "#f2e3b0"),
+    brightBlue: v("--console-ansi-bright-blue", "#9ccbff"),
+    brightMagenta: v("--console-ansi-bright-magenta", "#e0a7f5"),
+    brightCyan: v("--console-ansi-bright-cyan", "#86d7e0"),
+    brightWhite: v("--console-ansi-bright-white", "#eef2f8"),
   };
 }
 
@@ -123,8 +159,22 @@ onMounted(() => {
     });
   }
 
-  term.focus();
+  if (props.active && !props.tab.exited && !props.tab.error) {
+    term.focus();
+  }
 });
+
+// 标签被激活（v-show 由隐藏转显示）后聚焦 xterm，切回终端即可直接输入
+watch(
+  () => props.active,
+  (active) => {
+    if (!active || disposed || props.tab.exited || props.tab.error) return;
+    void nextTick(() => {
+      if (disposed || props.tab.exited || props.tab.error) return;
+      term?.focus();
+    });
+  },
+);
 
 // spawn 完成（loading 置 false）后补一次 fit/resize，消除挂载时 resize
 // 早于 spawn 完成、被后端“终端不存在”拒绝的竞态。

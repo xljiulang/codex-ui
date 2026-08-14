@@ -408,6 +408,7 @@ watch(
         :key="t.id"
         v-show="activeTabId === t.id"
         :tab="t"
+        :active="activeTabId === t.id"
       />
     </div>
     <div v-if="pendingTab" class="text-editor-overlay">

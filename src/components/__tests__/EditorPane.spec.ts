@@ -9,13 +9,18 @@ vi.mock("../ChatView.vue", () => ({
     template: "<div class='chat-stub' />",
   },
 }));
+
+const { termFocus } = vi.hoisted(() => ({ termFocus: { calls: 0 } }));
+
 vi.mock("@xterm/xterm", () => {
   class TerminalMock {
     loadAddon() {}
     open() {}
     onData() {}
     write() {}
-    focus() {}
+    focus() {
+      termFocus.calls++;
+    }
     dispose() {}
   }
   return { Terminal: TerminalMock };
@@ -115,6 +120,7 @@ function mountPane() {
 describe("EditorPane 左侧多标签编辑区", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
+    termFocus.calls = 0;
     __resetEditorTabsForTest();
     __resetSessionFsForTest();
   });
@@ -1014,6 +1020,31 @@ describe("EditorPane 左侧多标签编辑区", () => {
     );
     expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
     await waitForEl(wrapper, ".terminal-pane");
+    wrapper.unmount();
+  });
+
+  it("切换回已打开的终端标签时聚焦 xterm", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+    await waitForEl(wrapper, ".terminal-pane");
+    expect(termFocus.calls).toBeGreaterThanOrEqual(1);
+
+    // 切到对话标签，再点回终端标签：激活路径应再次聚焦
+    activateTab("chat");
+    await settle();
+    const before = termFocus.calls;
+    const termTab = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("src"))!;
+    await termTab.trigger("click");
+    await settle();
+    expect(termFocus.calls).toBeGreaterThan(before);
     wrapper.unmount();
   });
 });

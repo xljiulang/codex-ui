@@ -15,6 +15,7 @@ const { bridgeState, xtermState } = vi.hoisted(() => ({
     onData: null as null | ((d: string) => void),
     writeCalls: [] as string[],
     disposed: 0,
+    focusCalls: 0,
     constructorOptions: null as Record<string, unknown> | null,
     options: {} as { theme?: Record<string, unknown> },
   },
@@ -34,7 +35,9 @@ vi.mock("@xterm/xterm", () => {
     write(d: string) {
       xtermState.writeCalls.push(d);
     }
-    focus() {}
+    focus() {
+      xtermState.focusCalls++;
+    }
     dispose() {
       xtermState.disposed++;
     }
@@ -114,6 +117,130 @@ function makeTab(over: Partial<TerminalEditorTab> = {}): TerminalEditorTab {
   }) as unknown as TerminalEditorTab;
 }
 
+/** 三套主题的 CSS 变量表（与 src/style.css 保持一致） */
+const THEME_VARS: Record<string, Record<string, string>> = {
+  blue: {
+    "--console-bg-deep": "rgba(12, 16, 22, 0.9)",
+    "--console-text": "#c6cdd8",
+    "--accent": "#4da6ff",
+    "--accent-rgb": "77, 166, 255",
+    "--console-cursor-text": "#0c1016",
+    "--console-ansi-black": "#0e1116",
+    "--console-ansi-red": "#f0565f",
+    "--console-ansi-green": "#46d5a8",
+    "--console-ansi-yellow": "#e5d6a0",
+    "--console-ansi-blue": "#79b8ff",
+    "--console-ansi-magenta": "#c792ea",
+    "--console-ansi-cyan": "#56b6c2",
+    "--console-ansi-white": "#c6cdd8",
+    "--console-ansi-bright-black": "#76819a",
+    "--console-ansi-bright-red": "#ff7a83",
+    "--console-ansi-bright-green": "#7cebc2",
+    "--console-ansi-bright-yellow": "#f2e3b0",
+    "--console-ansi-bright-blue": "#9ccbff",
+    "--console-ansi-bright-magenta": "#e0a7f5",
+    "--console-ansi-bright-cyan": "#86d7e0",
+    "--console-ansi-bright-white": "#eef2f8",
+  },
+  dark: {
+    "--console-bg-deep": "rgba(12, 13, 20, 0.9)",
+    "--console-text": "#b9b8c9",
+    "--accent": "#a78bfa",
+    "--accent-rgb": "167, 139, 250",
+    "--console-cursor-text": "#0c1016",
+    "--console-ansi-black": "#0a0b10",
+    "--console-ansi-red": "#ff6b74",
+    "--console-ansi-green": "#55e0b3",
+    "--console-ansi-yellow": "#f0e0a4",
+    "--console-ansi-blue": "#8fb3ff",
+    "--console-ansi-magenta": "#c792ea",
+    "--console-ansi-cyan": "#56b6c2",
+    "--console-ansi-white": "#c9c7d6",
+    "--console-ansi-bright-black": "#868399",
+    "--console-ansi-bright-red": "#ff8d94",
+    "--console-ansi-bright-green": "#7cf0c4",
+    "--console-ansi-bright-yellow": "#f8eabe",
+    "--console-ansi-bright-blue": "#b6c9ff",
+    "--console-ansi-bright-magenta": "#e0a7f5",
+    "--console-ansi-bright-cyan": "#86d7e0",
+    "--console-ansi-bright-white": "#f1effc",
+  },
+  light: {
+    "--console-bg-deep": "rgba(231, 236, 244, 0.95)",
+    "--console-text": "#3e4756",
+    "--accent": "#2563eb",
+    "--accent-rgb": "37, 99, 235",
+    "--console-cursor-text": "#ffffff",
+    "--console-ansi-black": "#24292f",
+    "--console-ansi-red": "#cf222e",
+    "--console-ansi-green": "#116329",
+    "--console-ansi-yellow": "#9a6700",
+    "--console-ansi-blue": "#0969da",
+    "--console-ansi-magenta": "#8250df",
+    "--console-ansi-cyan": "#1b7c83",
+    "--console-ansi-white": "#57606a",
+    "--console-ansi-bright-black": "#6e7781",
+    "--console-ansi-bright-red": "#e5534b",
+    "--console-ansi-bright-green": "#1a7f37",
+    "--console-ansi-bright-yellow": "#9a6700",
+    "--console-ansi-bright-blue": "#0969da",
+    "--console-ansi-bright-magenta": "#8250df",
+    "--console-ansi-bright-cyan": "#1b7c83",
+    "--console-ansi-bright-white": "#3e4756",
+  },
+};
+
+const ANSI_MAP: Array<[string, string]> = [
+  ["black", "--console-ansi-black"],
+  ["red", "--console-ansi-red"],
+  ["green", "--console-ansi-green"],
+  ["yellow", "--console-ansi-yellow"],
+  ["blue", "--console-ansi-blue"],
+  ["magenta", "--console-ansi-magenta"],
+  ["cyan", "--console-ansi-cyan"],
+  ["white", "--console-ansi-white"],
+  ["brightBlack", "--console-ansi-bright-black"],
+  ["brightRed", "--console-ansi-bright-red"],
+  ["brightGreen", "--console-ansi-bright-green"],
+  ["brightYellow", "--console-ansi-bright-yellow"],
+  ["brightBlue", "--console-ansi-bright-blue"],
+  ["brightMagenta", "--console-ansi-bright-magenta"],
+  ["brightCyan", "--console-ansi-bright-cyan"],
+  ["brightWhite", "--console-ansi-bright-white"],
+];
+
+function applyThemeVars(id: string) {
+  for (const [name, value] of Object.entries(THEME_VARS[id])) {
+    document.documentElement.style.setProperty(name, value);
+  }
+  document.documentElement.setAttribute("data-theme", id);
+}
+
+function clearThemeVars() {
+  for (const vars of Object.values(THEME_VARS)) {
+    for (const name of Object.keys(vars)) {
+      document.documentElement.style.removeProperty(name);
+    }
+  }
+  document.documentElement.removeAttribute("data-theme");
+}
+
+/** 按主题变量表推导 TerminalPane 应同步给 xterm 的完整主题对象 */
+function expectedTheme(id: string): Record<string, string> {
+  const vars = THEME_VARS[id];
+  const theme: Record<string, string> = {
+    background: vars["--console-bg-deep"],
+    foreground: vars["--console-text"],
+    cursor: vars["--accent"],
+    cursorAccent: vars["--console-cursor-text"],
+    selectionBackground: `rgba(${vars["--accent-rgb"]}, 0.35)`,
+  };
+  for (const [key, varName] of ANSI_MAP) {
+    theme[key] = vars[varName];
+  }
+  return theme;
+}
+
 describe("TerminalPane", () => {
   beforeEach(() => {
     bridgeState.attached.length = 0;
@@ -125,6 +252,7 @@ describe("TerminalPane", () => {
     xtermState.onData = null;
     xtermState.writeCalls.length = 0;
     xtermState.disposed = 0;
+    xtermState.focusCalls = 0;
     xtermState.constructorOptions = null;
     xtermState.options = {};
     mockedInvoke.mockReset();
@@ -249,60 +377,88 @@ describe("TerminalPane", () => {
     expect(xtermState.disposed).toBe(1);
   });
 
-  it("按当前主题 CSS 变量初始化 xterm 基础配色", async () => {
-    document.documentElement.style.setProperty(
-      "--console-bg-deep",
-      "rgba(1, 2, 3, 0.9)",
-    );
-    document.documentElement.style.setProperty("--console-text", "#aabbcc");
-    document.documentElement.style.setProperty("--accent", "#123456");
-    document.documentElement.style.setProperty("--accent-rgb", "18, 52, 86");
+  it("挂载时聚焦 xterm（首次打开即可直接输入）", async () => {
     mockedInvoke.mockResolvedValue(undefined);
-    const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
-    await flushPromises();
-
-    expect(xtermState.constructorOptions?.allowTransparency).toBe(true);
-    expect(xtermState.constructorOptions?.theme).toEqual({
-      background: "rgba(1, 2, 3, 0.9)",
-      foreground: "#aabbcc",
-      cursor: "#123456",
-      selectionBackground: "rgba(18, 52, 86, 0.35)",
+    const wrapper = mount(TerminalPane, {
+      props: { tab: makeTab(), active: true },
     });
-
-    document.documentElement.style.removeProperty("--console-bg-deep");
-    document.documentElement.style.removeProperty("--console-text");
-    document.documentElement.style.removeProperty("--accent");
-    document.documentElement.style.removeProperty("--accent-rgb");
+    await flushPromises();
+    expect(xtermState.focusCalls).toBe(1);
     wrapper.unmount();
   });
 
-  it("data-theme 变化后同步更新 xterm 配色", async () => {
-    document.documentElement.style.setProperty(
-      "--console-bg-deep",
-      "rgba(1, 2, 3, 0.9)",
-    );
-    document.documentElement.style.setProperty("--console-text", "#aabbcc");
-    document.documentElement.style.setProperty("--accent", "#123456");
-    document.documentElement.style.setProperty("--accent-rgb", "18, 52, 86");
+  it("标签激活（active false→true）后聚焦 xterm", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const wrapper = mount(TerminalPane, {
+      props: { tab: makeTab(), active: false },
+    });
+    await flushPromises();
+    expect(xtermState.focusCalls).toBe(0);
+
+    await wrapper.setProps({ active: true });
+    await nextTick();
+    await flushPromises();
+    expect(xtermState.focusCalls).toBe(1);
+    wrapper.unmount();
+  });
+
+  it("标签切走（active true→false）不再聚焦", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const wrapper = mount(TerminalPane, {
+      props: { tab: makeTab(), active: true },
+    });
+    await flushPromises();
+    expect(xtermState.focusCalls).toBe(1);
+
+    await wrapper.setProps({ active: false });
+    await nextTick();
+    expect(xtermState.focusCalls).toBe(1);
+    wrapper.unmount();
+  });
+
+  it("已退出终端激活时不聚焦", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const tab = makeTab({ exited: true, exitCode: 0 });
+    const wrapper = mount(TerminalPane, {
+      props: { tab, active: false },
+    });
+    await flushPromises();
+
+    await wrapper.setProps({ active: true });
+    await nextTick();
+    expect(xtermState.focusCalls).toBe(0);
+    wrapper.unmount();
+  });
+
+  it.each(["blue", "dark", "light"])(
+    "主题 %s：按主题 CSS 变量构造完整 xterm 配色",
+    async (id) => {
+      applyThemeVars(id);
+      mockedInvoke.mockResolvedValue(undefined);
+      const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
+      await flushPromises();
+
+      expect(xtermState.constructorOptions?.allowTransparency).toBe(true);
+      expect(xtermState.constructorOptions?.theme).toEqual(expectedTheme(id));
+
+      clearThemeVars();
+      wrapper.unmount();
+    },
+  );
+
+  it("data-theme 切换（蓝夜 → 晨光）后同步更新完整 xterm 配色", async () => {
+    applyThemeVars("blue");
     mockedInvoke.mockResolvedValue(undefined);
     const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
     await flushPromises();
-    expect(xtermState.options.theme?.background).toBe("rgba(1, 2, 3, 0.9)");
+    expect(xtermState.options.theme).toEqual(expectedTheme("blue"));
 
-    document.documentElement.style.setProperty(
-      "--console-bg-deep",
-      "rgba(9, 9, 9, 0.95)",
-    );
-    document.documentElement.setAttribute("data-theme", "light");
+    applyThemeVars("light");
     await nextTick();
     await flushPromises();
-    expect(xtermState.options.theme?.background).toBe("rgba(9, 9, 9, 0.95)");
+    expect(xtermState.options.theme).toEqual(expectedTheme("light"));
 
-    document.documentElement.removeAttribute("data-theme");
-    document.documentElement.style.removeProperty("--console-bg-deep");
-    document.documentElement.style.removeProperty("--console-text");
-    document.documentElement.style.removeProperty("--accent");
-    document.documentElement.style.removeProperty("--accent-rgb");
+    clearThemeVars();
     wrapper.unmount();
   });
 });
