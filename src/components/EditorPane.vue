@@ -16,13 +16,14 @@ import {
   type FileEditorTab,
   type DiffEditorTab,
   type PreviewEditorTab,
+  type TerminalEditorTab,
 } from "../composables/useEditorTabs";
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import type { FsEntry } from "../lib/sessionFs";
 import { useActionMenu } from "../composables/useActionMenu";
 import { setToast, store } from "../composables/useCodex";
 import { relPathOf } from "../lib/format";
-import { ICON_CLOSE_ALL } from "../lib/icons";
+import { ICON_CLOSE_ALL, ICON_TERMINAL } from "../lib/icons";
 
 // CodeMirror / diff 渲染较重，仍按需加载，避免拖累主窗口首屏
 const TextEditorPane = defineAsyncComponent(
@@ -30,6 +31,7 @@ const TextEditorPane = defineAsyncComponent(
 );
 const DiffPane = defineAsyncComponent(() => import("./DiffPane.vue"));
 const PreviewPane = defineAsyncComponent(() => import("./PreviewPane.vue"));
+const TerminalPane = defineAsyncComponent(() => import("./TerminalPane.vue"));
 
 /** 通用文件回退图标（与资源面板一致） */
 const ICON_FILE =
@@ -43,6 +45,10 @@ const activeDiffTab = computed(() =>
 );
 const activePreviewTab = computed(() =>
   activeTab.value?.kind === "preview" ? activeTab.value : null,
+);
+/** 终端标签列表：全部常驻挂载（v-show 切换），切走不销毁 xterm/不中断进程 */
+const activeTerminalTabs = computed(() =>
+  tabs.filter((t): t is TerminalEditorTab => t.kind === "terminal"),
 );
 
 /** 会话标签常驻，存在任何文件/diff 标签时才显示标签栏 */
@@ -83,6 +89,9 @@ function tabIcon(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string 
 function tabTooltip(tab: EditorTab): string {
   if (tab.kind === "chat") {
     return store.turnActive ? "会话（进行中）" : "会话";
+  }
+  if (tab.kind === "terminal") {
+    return tab.cwd;
   }
   const root =
     tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
@@ -126,11 +135,14 @@ onBeforeUnmount(() => {
 
 // 打开/关闭标签时按 root 分组懒加载缺失的文件图标（命中资源面板同一缓存）
 watch(
-  () => tabs.filter((t) => t.kind !== "chat").map((t) => t.id),
+  () =>
+    tabs
+      .filter((t) => t.kind !== "chat" && t.kind !== "terminal")
+      .map((t) => t.id),
   () => {
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of tabs) {
-      if (tab.kind === "chat") continue;
+      if (tab.kind === "chat" || tab.kind === "terminal") continue;
       const root =
         tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
       const list = byRoot.get(root) ?? [];
@@ -170,6 +182,15 @@ watch(
           <svg viewBox="0 0 24 24">
             <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
             <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
+          </svg>
+        </span>
+        <span
+          v-else-if="tab.kind === 'terminal'"
+          class="editor-tab-icon"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24">
+            <path :d="ICON_TERMINAL" />
           </svg>
         </span>
         <span v-else class="editor-tab-icon" aria-hidden="true">
@@ -220,6 +241,12 @@ watch(
       <TextEditorPane v-if="activeFileTab" :tab="activeFileTab" />
       <DiffPane v-else-if="activeDiffTab" :tab="activeDiffTab" />
       <PreviewPane v-else-if="activePreviewTab" :tab="activePreviewTab" />
+      <TerminalPane
+        v-for="t in activeTerminalTabs"
+        :key="t.id"
+        v-show="activeTabId === t.id"
+        :tab="t"
+      />
     </div>
     <div v-if="pendingTab" class="text-editor-overlay">
       <div class="text-editor-confirm">

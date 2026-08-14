@@ -96,7 +96,25 @@ export interface PreviewEditorTab {
   pageCount: number | null;
 }
 
-export type EditorTab = ChatEditorTab | FileEditorTab | DiffEditorTab | PreviewEditorTab;
+export interface TerminalEditorTab {
+  kind: "terminal";
+  id: string;
+  /** 终端启动目录（绝对路径） */
+  cwd: string;
+  title: string;
+  loading: boolean;
+  error: string;
+  /** 进程已退出（收到 terminal/exit 事件后置位） */
+  exited: boolean;
+  exitCode: number | null;
+}
+
+export type EditorTab =
+  | ChatEditorTab
+  | FileEditorTab
+  | DiffEditorTab
+  | PreviewEditorTab
+  | TerminalEditorTab;
 
 /** 标签列表：第一个固定为“对话”主标签，不可关闭 */
 export const tabs = shallowReactive<EditorTab[]>([]);
@@ -131,6 +149,41 @@ function nowTime(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** 终端标签自增序号：保证同一毫秒内连续多开也生成不同 id */
+let terminalSeq = 0;
+
+/**
+ * 打开终端标签：每次调用都新建独立会话（支持同目录多开），生成唯一 id、
+ * 激活标签后向后端发起 terminal_spawn；失败保留标签并记录错误。
+ */
+export async function openTerminalTab(cwd: string): Promise<void> {
+  const id = `terminal:${++terminalSeq}:${Date.now()}`;
+  const tab = reactive({
+    kind: "terminal",
+    id,
+    cwd,
+    title: pathBaseName(cwd) || cwd,
+    loading: true,
+    error: "",
+    exited: false,
+    exitCode: null,
+  }) as unknown as TerminalEditorTab;
+  tabs.push(tab);
+  activeTabId.value = id;
+  try {
+    await invoke("terminal_spawn", { id, cwd });
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+    // 启动期间标签已被关闭（closeTab 先执行）：spawn 完成后回收后端会话，
+    // 避免遗留无人引用的 PTY 进程
+    if (!tabs.some((t) => t.id === id)) {
+      void invoke("terminal_kill", { id }).catch(() => {});
+    }
+  }
 }
 
 export function activateTab(id: string): void {
@@ -336,7 +389,17 @@ export async function openPreviewTab(
   }
 }
 
-/** 关闭标签：脏文件先挂起确认（pendingCloseId），确认后由 saveTabAndClose/discardTabAndClose 完成 */
+/** 释放标签后端资源：终端进程结束（幂等，失败静默） */
+function disposeTab(tab: EditorTab): void {
+  if (tab.kind === "terminal") {
+    void invoke("terminal_kill", { id: tab.id }).catch(() => {});
+  }
+}
+
+/**
+ * 关闭标签：脏文件先挂起确认（pendingCloseId），确认后由 saveTabAndClose/
+ * discardTabAndClose 完成；终端直接结束进程并移除，不做确认。
+ */
 export function closeTab(id: string): void {
   if (id === "chat") return;
   const tab = tabs.find((t) => t.id === id);
@@ -345,6 +408,7 @@ export function closeTab(id: string): void {
     pendingCloseId.value = id;
     return;
   }
+  disposeTab(tab);
   removeTab(id);
 }
 
@@ -365,7 +429,7 @@ export function discardTabAndClose(id: string): void {
 
 /**
  * 关闭其它所有标签（保留会话主标签）：
- * 未保存（脏）的文件标签跳过不关，返回跳过的数量。
+ * 未保存（脏）的文件标签跳过不关、终端直接结束进程，返回跳过的数量。
  */
 export function closeAllOtherTabs(): number {
   let skipped = 0;
@@ -375,6 +439,7 @@ export function closeAllOtherTabs(): number {
       skipped++;
       continue;
     }
+    disposeTab(tab);
     removeTab(tab.id);
   }
   return skipped;

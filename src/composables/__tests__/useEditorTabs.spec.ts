@@ -17,12 +17,14 @@ import {
   openDiffTab,
   openFileTab,
   openPreviewTab,
+  openTerminalTab,
   pendingCloseId,
   saveFileTab,
   saveTabAndClose,
   tabs,
   type FileEditorTab,
   type PreviewEditorTab,
+  type TerminalEditorTab,
 } from "../useEditorTabs";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -369,5 +371,118 @@ describe("useEditorTabs 标签状态", () => {
     expect(skipped).toBe(0);
     expect(tabs.filter((t) => t.kind === "preview")).toHaveLength(0);
     expect(tabs.map((t) => t.id)).toEqual(["chat"]);
+  });
+
+  it("打开终端：创建标签并激活、调用 terminal_spawn", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    expect(tabs).toHaveLength(2);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t).toBeTruthy();
+    expect(t!.cwd).toBe(root);
+    expect(t!.title).toBe("repo");
+    expect(t!.loading).toBe(false);
+    expect(t!.error).toBe("");
+    expect(t!.exited).toBe(false);
+    expect(t!.id).toMatch(/^terminal:/);
+    expect(activeTabId.value).toBe(t!.id);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_spawn", {
+      id: t!.id,
+      cwd: root,
+    });
+  });
+
+  it("同目录连续打开生成不同 id（支持多开）", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    await openTerminalTab(root);
+    const ts = tabs.filter((x) => x.kind === "terminal");
+    expect(ts).toHaveLength(2);
+    expect(new Set(ts.map((t) => t.id)).size).toBe(2);
+  });
+
+  it("spawn 失败：标签保留并记录错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.reject("spawn boom");
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t!.loading).toBe(false);
+    expect(t!.error).toContain("spawn boom");
+  });
+
+  it("关闭终端标签：调用 terminal_kill 并移除，不弹脏确认", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    closeTab(t!.id);
+    expect(pendingCloseId.value).toBeNull();
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: t!.id,
+    });
+    expect(tabs.some((x) => x.id === t!.id)).toBe(false);
+  });
+
+  it("关闭其它所有标签：终端一并结束进程", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const skipped = closeAllOtherTabs();
+    expect(skipped).toBe(0);
+    expect(tabs.map((t) => t.id)).toEqual(["chat"]);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: expect.any(String),
+    });
+  });
+
+  it("启动期间关闭标签：spawn 完成后回收后端会话", async () => {
+    let resolveSpawn!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") {
+        return new Promise((r) => {
+          resolveSpawn = r;
+        });
+      }
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    const pending = openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t).toBeTruthy();
+    closeTab(t!.id);
+    resolveSpawn({});
+    await pending;
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: t!.id,
+    });
+    expect(tabs.some((x) => x.id === t!.id)).toBe(false);
   });
 });

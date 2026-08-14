@@ -51,7 +51,9 @@ import {
   ICON_OPEN,
   ICON_REFRESH,
   ICON_RENAME,
+  ICON_TERMINAL,
 } from "../lib/icons";
+import { openTerminalTab } from "../composables/useEditorTabs";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -122,6 +124,11 @@ function openRootMenu(e: MouseEvent) {
       action: () => void pasteInto(root.path),
     },
     {
+      label: "在此打开终端",
+      icon: ICON_TERMINAL,
+      action: () => void openTerminalTab(root.path),
+    },
+    {
       label: "在资源管理器中打开",
       icon: ICON_REVEAL,
       action: () => revealInExplorer(root.path),
@@ -152,6 +159,11 @@ function openDirMenu(entry: FsEntry, e: MouseEvent) {
       label: "添加为会话附件",
       icon: ICON_ATTACH,
       action: () => addAsAttachment(entry),
+    },
+    {
+      label: "在此打开终端",
+      icon: ICON_TERMINAL,
+      action: () => void openTerminalTab(entry.path),
     },
     {
       label: "在资源管理器中打开",

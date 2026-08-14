@@ -5146,6 +5146,52 @@ body.resizing-editor {
   flex-direction: column;
 }
 
+/* 终端标签：xterm 填满编辑区，深色控制台底色（与 --console-bg-deep 一致） */
+.terminal-pane {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #0c1016;
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 0 8px 10px;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.terminal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(12, 16, 22, 0.92);
+  color: var(--text-dim);
+  text-align: center;
+  pointer-events: none;
+}
+
+.terminal-overlay-title {
+  font-size: 13px;
+  color: var(--text-bright);
+}
+
+.terminal-overlay-msg {
+  font-size: 12px;
+  max-width: 80%;
+  word-break: break-all;
+}
+
 /* 内嵌编辑区/diff 区：替代独立窗口的 100vh，填满面板剩余高度 */
 .text-editor-embedded,
 .diff-embedded {

@@ -59,6 +59,10 @@ pub fn run() {
             codex::session_fs::session_fs_probe_text,
             codex::session_fs::session_fs_read_bytes,
             codex::session_fs::session_fs_icons,
+            codex::terminal::terminal_spawn,
+            codex::terminal::terminal_write,
+            codex::terminal::terminal_resize,
+            codex::terminal::terminal_kill,
             codex::git::git_changes_status,
             codex::git::git_changes_init,
             codex::git::git_changes_commit,
@@ -87,6 +91,9 @@ pub fn run() {
             app.manage(server);
             app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
             app.manage(codex::git::GitWatcherState(std::sync::Mutex::new(None)));
+            app.manage(codex::terminal::TerminalState(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )));
             server_handle.ensure_running();
             Ok(())
         })

@@ -6,3 +6,4 @@ pub mod git;
 pub mod path_util;
 pub mod session_fs;
 pub mod settings;
+pub mod terminal;

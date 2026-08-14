@@ -9,6 +9,25 @@ vi.mock("../ChatView.vue", () => ({
     template: "<div class='chat-stub' />",
   },
 }));
+vi.mock("@xterm/xterm", () => {
+  class TerminalMock {
+    loadAddon() {}
+    open() {}
+    onData() {}
+    write() {}
+    focus() {}
+    dispose() {}
+  }
+  return { Terminal: TerminalMock };
+});
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit() {}
+    proposeDimensions() {
+      return { cols: 100, rows: 30 };
+    }
+  },
+}));
 
 // PDF 渲染较重且 happy-dom 无 canvas/worker：mock pdfjs-dist，验证标签装配即可
 vi.mock("pdfjs-dist", () => ({
@@ -37,6 +56,7 @@ import {
   openDiffTab,
   openFileTab,
   openPreviewTab,
+  openTerminalTab,
   tabs,
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
@@ -525,6 +545,26 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("doc.pdf");
     expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
     await waitForEl(wrapper, ".preview-pane");
+    wrapper.unmount();
+  });
+
+  it("打开终端标签：显示终端图标标签并渲染终端面板", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    expect(wrapper.find(".editor-tabs").exists()).toBe(true);
+    const tabEls = wrapper.findAll(".editor-tab");
+    expect(tabEls).toHaveLength(2);
+    expect(tabEls[1].find(".editor-tab-label").text()).toBe("src");
+    expect(tabEls[1].attributes("data-tip")).toBe(root + "\\src");
+    expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
+    await waitForEl(wrapper, ".terminal-pane");
     wrapper.unmount();
   });
 });

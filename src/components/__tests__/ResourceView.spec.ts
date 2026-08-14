@@ -466,16 +466,37 @@ describe("ResourceView 文件树", () => {
       "删除",
       "重命名",
       "添加为会话附件",
+      "在此打开终端",
       "在资源管理器中打开",
     ]);
     wrapper.unmount();
   });
 
-  it("根节点右键菜单只含粘贴与在资源管理器中打开", async () => {
+  it("根节点右键菜单含粘贴、在此打开终端与在资源管理器中打开", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-root");
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
-    expect(labels).toEqual(["粘贴", "在资源管理器中打开"]);
+    expect(labels).toEqual(["粘贴", "在此打开终端", "在资源管理器中打开"]);
+    wrapper.unmount();
+  });
+
+  it("根节点「在此打开终端」：以工作根目录创建终端标签", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-root");
+    await clickCtxItem(wrapper, "在此打开终端");
+    const t = tabs.find((x) => x.kind === "terminal");
+    expect(t).toBeTruthy();
+    expect(t!.cwd).toBe(rootPath);
+    wrapper.unmount();
+  });
+
+  it("目录「在此打开终端」：以该目录创建终端标签", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    await clickCtxItem(wrapper, "在此打开终端");
+    const t = tabs.find((x) => x.kind === "terminal");
+    expect(t).toBeTruthy();
+    expect(t!.cwd).toBe(srcDir.path);
     wrapper.unmount();
   });
 
