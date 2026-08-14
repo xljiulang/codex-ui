@@ -3549,7 +3549,7 @@ body.resizing-editor {
   display: block;
   width: 100%;
   height: var(--editor-h, auto);
-  min-height: 96px;
+  min-height: 120px;
   max-height: var(--editor-h, 132px);
   line-height: 1.55;
   padding: 13px 14px 42px;
@@ -4806,6 +4806,49 @@ body.resizing-editor {
   padding: 12px 14px;
 }
 
+/* 待处理交互气泡：内嵌消息流，替代原模态弹窗（回答时上下文保持可见） */
+.interaction-bubble {
+  max-width: 92%;
+  margin-top: 24px;
+  margin-inline: auto;
+  border: 1px solid color-mix(in srgb, var(--yellow) 38%, transparent);
+  border-left: 3px solid var(--yellow);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--yellow) 5%, var(--bg-panel));
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(var(--overlay-rgb), 0.05);
+  padding: 12px 14px;
+}
+
+.interaction-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.interaction-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.interaction-pending {
+  font-size: 11px;
+  color: var(--yellow);
+  white-space: nowrap;
+}
+
+.interaction-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
 .date-sep {
   display: flex;
   align-items: center;
@@ -5627,6 +5670,25 @@ body.resizing-editor {
   position: absolute;
   top: 5px;
   right: 6px;
+}
+
+/* 会话标签：待处理交互计数角标（警示色，与运行圆点并排） */
+.interaction-badge {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--yellow);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 8px rgba(255, 190, 0, 0.35);
+  pointer-events: auto;
 }
 
 /* 终端标签：inline 跟随 flex 布局，位于图标与标题之间（右上角被关闭按钮占用） */

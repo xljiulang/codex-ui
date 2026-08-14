@@ -2,11 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { respondInteraction, store } from "../composables/useCodex";
+import { focusComposer } from "../lib/composerFocus";
 import type { PendingInteraction } from "../lib/types";
 
 const current = computed<PendingInteraction | undefined>(() => store.interactions[0]);
 const params = computed(() => (current.value?.params ?? {}) as Record<string, unknown>);
-const modalEl = ref<HTMLElement | null>(null);
+const bubbleEl = ref<HTMLElement | null>(null);
 
 const V2_APPROVAL_METHODS = [
   "item/commandExecution/requestApproval",
@@ -43,7 +44,6 @@ const hasCommandDetails = computed(
 const selectedOptions = reactive<Record<string, string>>({});
 const otherInputs = reactive<Record<string, string>>({});
 const formValues = reactive<Record<string, string>>({});
-let lastFocus: HTMLElement | null = null;
 
 // 分步提问：一次只展示一道题
 const qIndex = ref(0);
@@ -62,22 +62,21 @@ watch(current, () => {
   for (const k of Object.keys(formValues)) delete formValues[k];
   qIndex.value = 0;
   if (current.value) {
-    // 打开时把焦点移入弹窗（首个主按钮），关闭时还原
-    lastFocus = document.activeElement as HTMLElement | null;
+    // 打开时把焦点移入气泡（首个主按钮）
     void nextTick(() => {
-      const primary = modalEl.value?.querySelector<HTMLElement>(
-        ".modal-foot .btn.primary",
+      const primary = bubbleEl.value?.querySelector<HTMLElement>(
+        ".interaction-foot .btn.primary",
       );
-      (primary ?? modalEl.value)?.focus();
+      (primary ?? bubbleEl.value)?.focus();
     });
-  } else if (lastFocus) {
-    lastFocus.focus?.();
-    lastFocus = null;
+  } else {
+    // 交互解决后把焦点还给输入框
+    focusComposer();
   }
 });
 
 function onKeydown(e: KeyboardEvent) {
-  // Escape：仅对提问/表单类弹窗执行“取消”，审批必须明确选择
+  // Escape：仅对提问/表单类执行“取消”，审批必须明确选择
   if (e.key === "Escape" && current.value && (isUserInput.value || isElicitation.value)) {
     reject();
   }
@@ -240,10 +239,10 @@ function schemaProperties(): [string, Record<string, unknown>][] {
 </script>
 
 <template>
-  <div v-if="current" class="modal-mask">
-    <div ref="modalEl" class="modal" tabindex="-1">
-      <div class="modal-head">
-        <span class="modal-title">
+  <div v-if="current" class="msg msg-agent">
+    <div ref="bubbleEl" class="interaction-bubble" tabindex="-1">
+      <div class="interaction-head">
+        <span class="interaction-title">
           {{
             isUserInput
               ? "Codex 需要输入"
@@ -254,12 +253,12 @@ function schemaProperties(): [string, Record<string, unknown>][] {
                   : "批准操作"
           }}
         </span>
-        <span v-if="store.interactions.length > 1" class="modal-title" style="font-size: 11px">
+        <span v-if="store.interactions.length > 1" class="interaction-pending">
           还有 {{ store.interactions.length - 1 }} 个待处理
         </span>
       </div>
 
-      <div class="modal-body">
+      <div class="interaction-body">
         <!-- 命令审批 -->
         <template v-if="isCommandApproval">
           <div class="approval-hero">
@@ -386,7 +385,7 @@ function schemaProperties(): [string, Record<string, unknown>][] {
         </template>
       </div>
 
-      <div class="modal-foot">
+      <div class="interaction-foot">
         <template v-if="isUserInput">
           <button class="btn" @click="reject()">取消</button>
           <template v-if="hasMultipleQuestions">

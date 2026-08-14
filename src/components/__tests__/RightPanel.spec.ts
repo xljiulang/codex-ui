@@ -271,7 +271,7 @@ describe("RightPanel 宽度调节", () => {
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 300 }));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".history-panel").attributes("style")).toContain(
-      "width: 464px",
+      "width: 500px",
     );
 
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: -1000 }));
@@ -284,14 +284,14 @@ describe("RightPanel 宽度调节", () => {
     wrapper.unmount();
   });
 
-  it("向右拖拽不窄于默认宽度 264px", async () => {
+  it("向右拖拽不窄于默认宽度 300px", async () => {
     const wrapper = mount(RightPanel);
     const handle = wrapper.find(".history-resize-handle");
     await handle.trigger("pointerdown", { clientX: 100 });
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000 }));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".history-panel").attributes("style")).toContain(
-      "width: 264px",
+      "width: 300px",
     );
 
     window.dispatchEvent(new PointerEvent("pointerup"));

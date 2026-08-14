@@ -315,6 +315,13 @@ watch(
             class="editor-tab-run pinned"
             aria-hidden="true"
           ></span>
+          <span
+            v-if="store.interactions.length > 0"
+            class="interaction-badge"
+            :title="`${store.interactions.length} 个待处理交互`"
+          >
+            {{ store.interactions.length }}
+          </span>
         </button>
         <div
           ref="tabScroller"

@@ -2,21 +2,41 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
 
-vi.mock("../../composables/useCodex", () => ({
-  currentItems: vi.fn(),
-  resolveCwd: () => "",
-  store: reactive({
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+}));
+
+vi.mock("../../composables/useCodex", () => {
+  const store = reactive({
     turnActive: false,
     busy: false,
     loadingThread: false,
     currentThreadId: null,
     activeWorkByThread: {},
     itemsRev: 0,
-  }),
-}));
+    interactions: [] as {
+      requestId: number;
+      method: string;
+      params: Record<string, unknown>;
+      at: number;
+    }[],
+  });
+  return {
+    currentItems: vi.fn(),
+    resolveCwd: () => "",
+    store,
+    respondInteraction: vi.fn(
+      (interaction: { requestId: number }) => {
+        store.interactions = store.interactions.filter(
+          (i) => i.requestId !== interaction.requestId,
+        );
+      },
+    ),
+  };
+});
 
 import ChatView from "../ChatView.vue";
-import { currentItems, store } from "../../composables/useCodex";
+import { currentItems, respondInteraction, store } from "../../composables/useCodex";
 import type { ThreadItem } from "../../lib/types";
 
 const mockedItems = vi.mocked(currentItems);
@@ -141,6 +161,82 @@ describe("ChatView 日期分隔线", () => {
     store.activeWorkByThread.t1 = 1;
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(false);
+    store.turnActive = false;
+    store.currentThreadId = null;
+    store.activeWorkByThread = {};
+  });
+
+  it("待处理交互内嵌渲染在消息流末尾，回答后移除", async () => {
+    mockedItems.mockReturnValue([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+          EmptyState: { template: "<div />" },
+        },
+      },
+    });
+    expect(wrapper.find(".interaction-bubble").exists()).toBe(false);
+
+    store.interactions.push({
+      requestId: 1,
+      method: "item/tool/requestUserInput",
+      params: {
+        questions: [
+          {
+            id: "q1",
+            header: "",
+            question: "要处理哪个项目？",
+            isOther: false,
+            isSecret: false,
+            options: [{ label: "A", description: "项目 A" }],
+          },
+        ],
+      },
+      at: Date.now(),
+    });
+    await nextTick();
+    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(true);
+
+    await wrapper
+      .findAll(".interaction-foot .btn")
+      .find((b) => b.text().trim() === "提交")!
+      .trigger("click");
+    expect(respondInteraction).toHaveBeenCalledTimes(1);
+    await nextTick();
+    expect(wrapper.find(".interaction-bubble").exists()).toBe(false);
+  });
+
+  it("交互挂起时不显示“思考中”提示", async () => {
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.activeWorkByThread = { t1: 0 };
+    store.interactions.push({
+      requestId: 2,
+      method: "item/tool/requestUserInput",
+      params: { questions: [] },
+      at: Date.now(),
+    });
+    mockedItems.mockReturnValue([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    expect(wrapper.find(".thinking-chip").exists()).toBe(false);
+
+    store.interactions = [];
+    await nextTick();
+    expect(wrapper.find(".thinking-chip").exists()).toBe(true);
+
     store.turnActive = false;
     store.currentThreadId = null;
     store.activeWorkByThread = {};

@@ -4,7 +4,6 @@ import AppHeader from "./components/AppHeader.vue";
 import EditorPane from "./components/EditorPane.vue";
 import RightPanel from "./components/RightPanel.vue";
 import SettingsView from "./components/SettingsView.vue";
-import InteractionDialog from "./components/InteractionDialog.vue";
 import PlanDialog from "./components/PlanDialog.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
@@ -35,7 +34,6 @@ onBeforeUnmount(() => {
       <RightPanel />
     </div>
     <SettingsView v-if="store.showSettings" />
-    <InteractionDialog />
     <PlanDialog />
     <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>

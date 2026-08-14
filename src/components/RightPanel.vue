@@ -6,7 +6,7 @@ import ResourceView from "./ResourceView.vue";
 import { store, type PanelTab } from "../composables/useCodex";
 
 /** 右侧面板默认/最小宽度（px） */
-const DEFAULT_PANEL_WIDTH = 264;
+const DEFAULT_PANEL_WIDTH = 300;
 
 /** 激活 Tab：全局 store 状态，新建会话入口可统一切回资源 */
 const activeTab = computed<PanelTab>(() => store.panelTab);

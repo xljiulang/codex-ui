@@ -67,7 +67,7 @@ const hasText = ref(false);
 const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
 
 // 输入框可拖拽高度：最低为现有自动高度，最高为窗口一半
-const MIN_EDITOR_HEIGHT = 96;
+const MIN_EDITOR_HEIGHT = 120;
 const editorHeight = ref<number | null>(null);
 const resizingEditor = ref(false);
 let resizeStartY = 0;

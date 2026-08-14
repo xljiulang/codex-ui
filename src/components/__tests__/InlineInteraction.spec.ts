@@ -1,12 +1,15 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { enableAutoUnmount, mount } from "@vue/test-utils";
+
+// 每个用例结束后卸载组件，避免 window keydown 监听器跨用例累积
+enableAutoUnmount(afterEach);
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, respondInteraction: vi.fn() };
 });
 
-import InteractionDialog from "../InteractionDialog.vue";
+import InlineInteraction from "../InlineInteraction.vue";
 import { respondInteraction, store } from "../../composables/useCodex";
 
 const mockedRespond = vi.mocked(respondInteraction);
@@ -38,7 +41,11 @@ describe("requestUserInput 响应格式", () => {
       },
       at: Date.now(),
     });
-    const wrapper = mount(InteractionDialog);
+    const wrapper = mount(InlineInteraction);
+    // 内嵌气泡渲染：不再使用模态遮罩/弹窗
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(wrapper.find(".modal").exists()).toBe(false);
+    expect(wrapper.find(".interaction-bubble").exists()).toBe(true);
     const optionB = wrapper
       .findAll(".option-btn")
       .find((b) => b.text().trim() === "B");
@@ -76,7 +83,7 @@ describe("requestUserInput 响应格式", () => {
       params: { questions },
       at: Date.now(),
     });
-    const wrapper = mount(InteractionDialog);
+    const wrapper = mount(InlineInteraction);
 
     const expectedAnswers: Record<string, { answers: string[] }> = {};
     for (let i = 0; i < N; i++) {
@@ -127,7 +134,7 @@ describe("审批/询问弹窗信息层级", () => {
       },
       at: Date.now(),
     });
-    const wrapper = mount(InteractionDialog);
+    const wrapper = mount(InlineInteraction);
     expect(wrapper.text()).toContain("批准执行命令");
     expect(wrapper.text()).toContain("npm run build");
     expect(wrapper.text()).toContain("构建前端产物");
@@ -151,7 +158,7 @@ describe("审批/询问弹窗信息层级", () => {
       },
       at: Date.now(),
     });
-    const wrapper = mount(InteractionDialog);
+    const wrapper = mount(InlineInteraction);
     expect(wrapper.text()).toContain("是否允许此操作？");
     const details = wrapper.find(".approval-details");
     (details.element as HTMLDetailsElement).open = true;
@@ -166,8 +173,64 @@ describe("审批/询问弹窗信息层级", () => {
       params: {},
       at: Date.now(),
     });
-    const wrapper = mount(InteractionDialog);
+    const wrapper = mount(InlineInteraction);
     expect(wrapper.text()).toContain("是否允许此操作？");
     expect(wrapper.find(".approval-details").exists()).toBe(false);
+  });
+
+  it("命令审批：批准/拒绝按钮内嵌在气泡中，点击后按协议返回", async () => {
+    store.interactions.push({
+      requestId: 13,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "npm test" },
+      at: Date.now(),
+    });
+    const wrapper = mount(InlineInteraction);
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(wrapper.find(".interaction-bubble").exists()).toBe(true);
+    const buttons = wrapper.findAll(".interaction-foot .btn");
+    expect(buttons.map((b) => b.text().trim())).toEqual(["拒绝", "批准"]);
+    await buttons.find((b) => b.text().trim() === "批准")!.trigger("click");
+    expect(mockedRespond).toHaveBeenCalledTimes(1);
+    expect(mockedRespond.mock.calls[0][1]).toEqual({ decision: "accept" });
+  });
+
+  it("提问类交互按 Escape 触发取消（拒绝），审批类不响应 Escape", async () => {
+    store.interactions.push({
+      requestId: 14,
+      method: "item/tool/requestUserInput",
+      params: {
+        questions: [
+          {
+            id: "q1",
+            header: "选择项目",
+            question: "要处理哪个项目？",
+            isOther: false,
+            isSecret: false,
+            options: [{ label: "A", description: "项目 A" }],
+          },
+        ],
+      },
+      at: Date.now(),
+    });
+    mount(InlineInteraction);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(mockedRespond).toHaveBeenCalledTimes(1);
+    expect(mockedRespond.mock.calls[0][1]).toEqual({
+      decision: { denied: { rejection: "用户拒绝" } },
+    });
+
+    // 审批类：Escape 不触发任何响应
+    mockedRespond.mockClear();
+    store.interactions = [];
+    store.interactions.push({
+      requestId: 15,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "npm test" },
+      at: Date.now(),
+    });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(mockedRespond).not.toHaveBeenCalled();
+    store.interactions = [];
   });
 });

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
+import InlineInteraction from "./InlineInteraction.vue";
 import MessageItem from "./MessageItem.vue";
 import { currentItems, store } from "../composables/useCodex";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
@@ -92,7 +93,7 @@ function jumpToBottom() {
 }
 
 watch(
-  [() => items.value.length, () => store.itemsRev],
+  [() => items.value.length, () => store.itemsRev, () => store.interactions.length],
   () => {
     scheduleScroll();
   },
@@ -161,8 +162,14 @@ onBeforeUnmount(() => {
             </template>
           </section>
         </template>
+        <InlineInteraction />
         <div
-          v-if="store.turnActive && !hasActiveWork && items.length"
+          v-if="
+            store.turnActive &&
+            !hasActiveWork &&
+            items.length &&
+            store.interactions.length === 0
+          "
           class="thinking-chip"
         >
           思考中
