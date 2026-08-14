@@ -12,8 +12,13 @@ import {
   refreshGitChanges,
   setGitChangesActive,
 } from "../composables/useGitChanges";
-import { sessionRoot } from "../composables/useSessionFs";
+import {
+  ensureEntryIcons,
+  iconFor,
+  sessionRoot,
+} from "../composables/useSessionFs";
 import { openDiffTab } from "../composables/useEditorTabs";
+import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
   gitDiffKind,
   gitStatusLetter,
@@ -69,6 +74,10 @@ const logBusy = ref(false);
 /** 是否还有更旧的提交可加载（上一批返回满 50 条即视为还有更多） */
 const logHasMore = ref(false);
 const LOG_LIMIT = 50;
+
+/** 通用文件回退图标（与资源面板一致） */
+const ICON_FILE =
+  "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 
 const ICON_STAGE =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
@@ -238,6 +247,43 @@ const canCommit = computed(
     !!commitMessage.value.trim() &&
     stagedCount.value > 0,
 );
+
+/** 变更文件 → FsEntry（供系统文件图标管线复用；repoRoot 为空时回退相对路径） */
+function gitFileEntry(file: GitFile): FsEntry {
+  const root = repoRoot.value;
+  return {
+    name: file.path.split("/").pop() ?? file.path,
+    path: root ? joinFsPath(root, file.path) : file.path,
+    relPath: file.path,
+    isDir: false,
+    size: null,
+    modifiedAtMs: 0,
+    createdAtMs: 0,
+    childCount: null,
+  };
+}
+
+/** 文件类型图标：共享图标缓存取不到时返回 undefined，渲染层回退 SVG */
+function gitFileIcon(file: GitFile): string | undefined {
+  return iconFor(gitFileEntry(file)) ?? undefined;
+}
+
+// 变更列表可见行变化时懒加载缺失的文件图标（与资源面板同管线）
+watch(
+  [worktreeRows, stagedRows, repoRoot],
+  () => {
+    const root = repoRoot.value;
+    if (!root) return;
+    const files = [
+      ...worktreeRows.value,
+      ...stagedRows.value,
+    ]
+      .filter((r): r is GitFileNode => r.kind === "file")
+      .map((r) => gitFileEntry(r.file));
+    if (files.length) void ensureEntryIcons(files, root);
+  },
+);
+
 const commitHint = computed(() =>
   stagedCount.value > 0
     ? `将提交 ${stagedCount.value} 个文件`
@@ -993,16 +1039,31 @@ async function restoreDir(node: GitDirNode) {
               </template>
               <template v-else>
                 <span
-                  class="git-status-icon"
-                  :class="`git-status-${row.file.status}`"
+                  class="git-file-icon"
+                  aria-hidden="true"
                 >
-                  {{ gitStatusLetter(row.file.status) }}
+                  <img
+                    v-if="gitFileIcon(row.file)"
+                    class="git-file-icon-img"
+                    :src="gitFileIcon(row.file)"
+                    alt=""
+                    draggable="false"
+                  />
+                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_FILE" />
+                  </svg>
                 </span>
                 <span
                   class="git-path"
                   :class="{ 'git-path-strike': row.file.status === 'deleted' }"
                 >
                   {{ row.file.path }}
+                </span>
+                <span
+                  class="git-status-icon"
+                  :class="`git-status-${row.file.status}`"
+                >
+                  {{ gitStatusLetter(row.file.status) }}
                 </span>
               </template>
             </div>
@@ -1096,16 +1157,31 @@ async function restoreDir(node: GitDirNode) {
               </template>
               <template v-else>
                 <span
-                  class="git-status-icon"
-                  :class="`git-status-${row.file.status}`"
+                  class="git-file-icon"
+                  aria-hidden="true"
                 >
-                  {{ gitStatusLetter(row.file.status) }}
+                  <img
+                    v-if="gitFileIcon(row.file)"
+                    class="git-file-icon-img"
+                    :src="gitFileIcon(row.file)"
+                    alt=""
+                    draggable="false"
+                  />
+                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_FILE" />
+                  </svg>
                 </span>
                 <span
                   class="git-path"
                   :class="{ 'git-path-strike': row.file.status === 'deleted' }"
                 >
                   {{ row.file.path }}
+                </span>
+                <span
+                  class="git-status-icon"
+                  :class="`git-status-${row.file.status}`"
+                >
+                  {{ gitStatusLetter(row.file.status) }}
                 </span>
               </template>
             </div>

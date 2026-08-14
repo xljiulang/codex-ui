@@ -151,6 +151,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(tabEls).toHaveLength(2);
     expect(tabEls[0].classes()).toContain("pinned");
     expect(tabEls[0].find(".editor-tab-logo").exists()).toBe(true);
+    expect(tabEls[0].find(".editor-tab-brand").text()).toBe("CODEX");
     expect(tabEls[0].find(".editor-tab-label").exists()).toBe(false);
     expect(tabEls[0].attributes("aria-label")).toBe("会话");
     expect(tabEls[0].find(".editor-tab-close").exists()).toBe(false);
@@ -631,7 +632,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("会话进行中：对话标签显示呼吸灯并提示进行中，结束后隐藏", async () => {
+  it("会话进行中：对话标签显示呼吸灯，结束后隐藏（无 tooltip）", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -648,12 +649,12 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     const chatTab = () => wrapper.findAll(".editor-tab")[0];
     expect(chatTab().find(".editor-tab-run").exists()).toBe(false);
-    expect(chatTab().attributes("data-tip")).toBe("会话");
+    expect(chatTab().attributes("data-tip")).toBeUndefined();
 
     store.turnActive = true;
     await nextTick();
     expect(chatTab().find(".editor-tab-run").exists()).toBe(true);
-    expect(chatTab().attributes("data-tip")).toBe("会话（进行中）");
+    expect(chatTab().attributes("data-tip")).toBeUndefined();
 
     store.turnActive = false;
     await nextTick();

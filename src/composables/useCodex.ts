@@ -337,7 +337,7 @@ async function updateWindowTitle() {
     const threadTitle = currentThreadTitle();
     const title = threadTitle
       ? folder
-        ? `${folder} - ${threadTitle}`
+        ? `${folder} / ${threadTitle}`
         : threadTitle
       : folder || "Codex UI";
     await win.setTitle(title);

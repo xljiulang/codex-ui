@@ -249,7 +249,7 @@ describe("updateWindowTitle 窗口标题", () => {
     expect(mockWin.setTitle).toHaveBeenCalledWith("B");
   });
 
-  it("有会话但尚无标题：回退显示 文件夹名 - 首条消息预览", async () => {
+  it("有会话但尚无标题：回退显示 文件夹名 / 首条消息预览", async () => {
     store.threads = [
       { id: "t2", name: null, preview: "预览文本", createdAt: 0, recencyAt: 0 },
     ];
@@ -271,10 +271,10 @@ describe("updateWindowTitle 窗口标题", () => {
     });
     await openThread("t2");
     expect(store.currentThreadId).toBe("t2");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 预览文本");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 预览文本");
   });
 
-  it("有会话且无名称无预览：回退显示 文件夹名 - 新会话", async () => {
+  it("有会话且无名称无预览：回退显示 文件夹名 / 新会话", async () => {
     store.threads = [
       { id: "t2", name: null, preview: "", createdAt: 0, recencyAt: 0 },
     ];
@@ -296,17 +296,17 @@ describe("updateWindowTitle 窗口标题", () => {
     });
     await openThread("t2");
     expect(store.currentThreadId).toBe("t2");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 新会话");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 新会话");
   });
 
-  it("有会话标题：显示 文件夹名 - 对话标题", async () => {
+  it("有会话标题：显示 文件夹名 / 对话标题", async () => {
     store.currentThreadId = "t1";
     store.threads = [
       { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
     ];
     mockedInvoke.mockResolvedValue(undefined);
     await renameThread("t1", "我的标题");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 我的标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 我的标题");
   });
 
   it("线程 cwd 与工作区不同：取线程 cwd 文件夹名", async () => {
@@ -318,7 +318,7 @@ describe("updateWindowTitle 窗口标题", () => {
     ];
     mockedInvoke.mockResolvedValue(undefined);
     await renameThread("t1", "标题");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("other-app - 标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("other-app / 标题");
   });
 
   it("有会话且有 cwd：残留的 newChatCwd 不串味", async () => {
@@ -331,7 +331,7 @@ describe("updateWindowTitle 窗口标题", () => {
     ];
     mockedInvoke.mockResolvedValue(undefined);
     await renameThread("t1", "标题");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("sub - 标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("sub / 标题");
   });
 
   it("有会话但 cwd 缺失：回退 workspace，不采用残留的 newChatCwd", async () => {
@@ -344,10 +344,10 @@ describe("updateWindowTitle 窗口标题", () => {
     ];
     mockedInvoke.mockResolvedValue(undefined);
     await renameThread("t1", "标题");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 标题");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 标题");
   });
 
-  it("thread/name/updated 事件产生标题后更新为 文件夹名 - 新名", async () => {
+  it("thread/name/updated 事件产生标题后更新为 文件夹名 / 新名", async () => {
     disposeEvents();
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
     mockListenCapture();
@@ -362,7 +362,7 @@ describe("updateWindowTitle 窗口标题", () => {
       threadName: "新名",
     });
     expect(store.currentThreadName).toBe("新名");
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo - 新名");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 新名");
     disposeEvents();
   });
 });

@@ -299,7 +299,6 @@ watch(
           :aria-selected="activeTabId === 'chat'"
           aria-label="会话"
           :tabindex="activeTabId === 'chat' ? 0 : -1"
-          v-tooltip="tabTooltip(chatTab)"
           @click="activateTab('chat')"
           @contextmenu="openTabMenu($event, chatTab)"
           @mousedown.middle.prevent="closeTab('chat')"
@@ -310,6 +309,7 @@ watch(
               <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
             </svg>
           </span>
+          <span class="editor-tab-brand">CODEX</span>
           <span
             v-if="store.turnActive"
             class="editor-tab-run"

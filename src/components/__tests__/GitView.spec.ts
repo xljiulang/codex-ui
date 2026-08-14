@@ -21,6 +21,7 @@ import GitView from "../GitView.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import { settleConfirm, store } from "../../composables/useCodex";
 import { __resetGitChangesForTest } from "../../composables/useGitChanges";
+import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
   tabs,
@@ -74,6 +75,7 @@ beforeEach(() => {
   store.newChatCwd = null;
   mockedInvoke.mockClear();
   __resetGitChangesForTest();
+  __resetSessionFsForTest();
   __resetEditorTabsForTest();
 });
 
@@ -164,6 +166,44 @@ describe("GitView 文件列表与 diff", () => {
     expect(untrackedIcon.exists()).toBe(true);
     expect(untrackedIcon.attributes("data-tip")).toBeUndefined();
     expect(untrackedIcon.text().trim()).toBe("U");
+    // 文件行：左侧文件图标（无缓存回退 SVG），状态徽标位于行最右侧
+    for (const row of wrapper.findAll(".git-file")) {
+      expect(row.find(".git-file-icon").exists()).toBe(true);
+      expect(row.find(".git-file-icon svg").exists()).toBe(true);
+      const children = row.element.children;
+      expect(
+        children[children.length - 1].classList.contains("git-status-icon"),
+      ).toBe(true);
+    }
+    wrapper.unmount();
+  });
+
+  it("有系统图标缓存时文件行渲染图片图标，请求以 repoRoot 为根", async () => {
+    mockWatcherAndDefaults();
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([
+          { path: "D:\\codex\\demo\\a.txt", dataUri: "data:image/png;base64,abc" },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const iconCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "session_fs_icons",
+    );
+    expect(iconCall).toBeTruthy();
+    expect((iconCall?.[1] as { root?: string } | undefined)?.root).toBe(
+      rootPath,
+    );
+    const img = wrapper.find(".git-file-icon-img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toContain("data:image/png;base64");
+    wrapper.unmount();
   });
 
   it("单击文件行打开 diff 窗口", async () => {
