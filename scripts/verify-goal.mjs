@@ -291,7 +291,7 @@ async function main() {
   // 场景 1：服务端围绕目标自动续跑完成 → 旗子颜色状态变为已完成
   await waitFor(
     "目标完成状态（旗子 green class）",
-    `!!document.querySelector(".goal-icon-btn.status-completed")`,
+    `!!document.querySelector(".goal-icon-btn.status-complete")`,
     300000,
   );
   const fileOk =

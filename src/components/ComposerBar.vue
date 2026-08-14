@@ -770,14 +770,16 @@ function taskModeLabel(): string {
 
 function goalStatusLabel(): string {
   switch (store.goalStatus) {
-    case "completed":
+    case "complete":
       return "✓ 已完成";
-    case "budget_limited":
+    case "budgetLimited":
       return "预算耗尽";
+    case "usageLimited":
+      return "用量受限";
+    case "blocked":
+      return "已阻塞";
     case "paused":
       return "已暂停";
-    case "cleared":
-      return "已清除";
     default:
       return "";
   }
@@ -887,8 +889,10 @@ function onCancelGoalClick() {
               class="goal-icon-btn"
               :class="{
                 'has-goal': !!store.goalText,
-                'status-completed': store.goalStatus === 'completed',
-                'status-budget_limited': store.goalStatus === 'budget_limited',
+                'status-complete': store.goalStatus === 'complete',
+                'status-budget-limited': store.goalStatus === 'budgetLimited',
+                'status-usage-limited': store.goalStatus === 'usageLimited',
+                'status-blocked': store.goalStatus === 'blocked',
                 'status-paused': store.goalStatus === 'paused',
               }"
               :aria-label="goalTooltip()"

@@ -1238,19 +1238,19 @@ describe("ComposerBar 任务目标芯片", () => {
   it("有目标时旗子 + ×，完成/预算耗尽状态有颜色 class", async () => {
     store.currentThreadId = "t1";
     store.goalText = "发布 v2 版本并修复登录流程的所有已知问题再补上边界处理";
-    store.goalStatus = "completed";
+    store.goalStatus = "complete";
     wrapper = mount(ComposerBar);
     await flushPromises();
     expect(wrapper.find(".goal-clear-btn").exists()).toBe(true);
-    expect(wrapper.find(".goal-icon-btn.status-completed").exists()).toBe(true);
+    expect(wrapper.find(".goal-icon-btn.status-complete").exists()).toBe(true);
     expect(
       (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).disabled,
     ).toBe(false);
 
-    store.goalStatus = "budget_limited";
+    store.goalStatus = "budgetLimited";
     await wrapper.vm.$nextTick();
     expect(
-      wrapper.find(".goal-icon-btn.status-budget_limited").exists(),
+      wrapper.find(".goal-icon-btn.status-budget-limited").exists(),
     ).toBe(true);
   });
 

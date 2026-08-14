@@ -50,21 +50,23 @@ interface ModelInfo {
   defaultReasoningEffort: string;
 }
 
-/** 线程目标的持久状态（thread/goal/get 与 thread/goal/updated 携带） */
+/** 线程目标的持久状态（thread/goal/get 与 thread/goal/updated 携带；值对齐协议绑定 ThreadGoalStatus） */
 export type GoalStatus =
   | "active"
-  | "completed"
-  | "budget_limited"
   | "paused"
-  | "cleared";
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
 
 export function isGoalStatus(v: unknown): v is GoalStatus {
   return (
     v === "active" ||
-    v === "completed" ||
-    v === "budget_limited" ||
     v === "paused" ||
-    v === "cleared"
+    v === "blocked" ||
+    v === "usageLimited" ||
+    v === "budgetLimited" ||
+    v === "complete"
   );
 }
 

@@ -867,12 +867,12 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   it("setGoal：失败时保留原目标并提示错误", async () => {
     store.currentThreadId = "t1";
     store.goalText = "旧目标";
-    store.goalStatus = "completed";
+    store.goalStatus = "complete";
     mockedInvoke.mockRejectedValue(new Error("服务端拒绝"));
     const ok = await setGoal("新目标");
     expect(ok).toBe(false);
     expect(store.goalText).toBe("旧目标");
-    expect(store.goalStatus).toBe("completed");
+    expect(store.goalStatus).toBe("complete");
     expect(store.toast).toContain("服务端拒绝");
   });
 
@@ -952,7 +952,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
         }
       }
       if (cmd === "goal_get") {
-        return Promise.resolve({ objective: "修复登录", status: "completed" });
+        return Promise.resolve({ objective: "修复登录", status: "complete" });
       }
       return Promise.resolve(undefined);
     });
@@ -960,7 +960,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(await p).toBe(true);
     expect(store.currentThreadId).toBe("t2");
     expect(store.goalText).toBe("修复登录");
-    expect(store.goalStatus).toBe("completed");
+    expect(store.goalStatus).toBe("complete");
   });
 
   it("openThread：goal_get 兼容 {goal:{objective,status}} 包裹返回", async () => {
@@ -1041,10 +1041,10 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
     await wireEvents();
     fireListen("thread/goal/updated", {
       threadId: "t1",
-      goal: { objective: "发布 v2", status: "completed" },
+      goal: { objective: "发布 v2", status: "complete" },
     });
     expect(store.goalText).toBe("发布 v2");
-    expect(store.goalStatus).toBe("completed");
+    expect(store.goalStatus).toBe("complete");
   });
 
   it("thread/goal/updated：旧会话通知不污染当前会话", async () => {
@@ -1053,7 +1053,7 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
     store.goalStatus = "active";
     fireListen("thread/goal/updated", {
       threadId: "t-other",
-      goal: { objective: "别人", status: "completed" },
+      goal: { objective: "别人", status: "complete" },
     });
     expect(store.goalText).toBe("当前目标");
     expect(store.goalStatus).toBe("active");

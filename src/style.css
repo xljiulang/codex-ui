@@ -3710,11 +3710,13 @@ body.resizing-editor {
   color: var(--accent);
 }
 
-.goal-icon-btn.status-completed {
+.goal-icon-btn.status-complete {
   color: var(--green, #3fb950);
 }
 
-.goal-icon-btn.status-budget_limited,
+.goal-icon-btn.status-budget-limited,
+.goal-icon-btn.status-usage-limited,
+.goal-icon-btn.status-blocked,
 .goal-icon-btn.status-paused {
   color: var(--yellow, #d29922);
 }
