@@ -1,8 +1,4 @@
-use std::path::Path;
-use std::sync::Mutex;
-
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
 
 /// diff 预览参数（由主窗口传入新窗口）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,9 +8,6 @@ pub struct DiffPreviewParams {
     pub diff: String,
     pub workspace_root: String,
 }
-
-/// 新窗口取走参数的共享状态
-pub struct DiffParamsState(pub Mutex<Option<DiffPreviewParams>>);
 
 /// 内联 diff 行（serde 标签枚举，字段 camelCase 与前端一致）
 #[derive(Debug, Clone, Serialize)]
@@ -360,59 +353,6 @@ pub fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, Str
     build_inline_rows(&old_content, &new_content, &params.diff)
 }
 
-pub fn take_params(state: &DiffParamsState) -> Option<DiffPreviewParams> {
-    state.0.lock().unwrap().take()
-}
-
-#[tauri::command]
-pub fn take_diff_params(state: tauri::State<'_, DiffParamsState>) -> Option<DiffPreviewParams> {
-    take_params(state.inner())
-}
-
-/// 打开独立 diff 窗口；参数存入共享状态，由新窗口一次性取走
-#[tauri::command]
-pub async fn open_diff_window(
-    app: tauri::AppHandle,
-    params: DiffPreviewParams,
-) -> Result<(), String> {
-    // 标题取文件名（不含路径），提取失败回退默认值，避免首开时闪现旧标题
-    let title = Path::new(&params.path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or("文件差异预览")
-        .to_string();
-    if let Some(state) = app.try_state::<DiffParamsState>() {
-        *state.0.lock().unwrap() = Some(params);
-    }
-    // 窗口创建必须发生在主线程消息泵上：同步创建 WebView2 窗口会阻塞主线程导致死锁
-    // （新窗口停在 about:blank、invoke 永不返回），因此用 run_on_main_thread 异步创建。
-    let app2 = app.clone();
-    app.run_on_main_thread(move || {
-        if let Some(win) = app2.get_webview_window("diff-preview") {
-            // 复用已有窗口：更新参数后重新加载，避免 close+新建同 label 窗口的竞态
-            let _ = win.eval("location.reload()");
-            return;
-        }
-        if let Err(e) = tauri::WebviewWindowBuilder::new(
-            &app2,
-            "diff-preview",
-            tauri::WebviewUrl::App("index.html".into()),
-        )
-        .title(title)
-        .inner_size(1280.0, 720.0)
-        .min_inner_size(400.0, 560.0)
-        .center()
-        .resizable(true)
-        .build()
-        {
-            eprintln!("open diff window failed: {e}");
-        }
-    })
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,15 +545,4 @@ mod tests {
         assert!(build_diff_preview(params).is_err());
     }
 
-    #[test]
-    fn take_params_consumes_once() {
-        let state = DiffParamsState(Mutex::new(Some(DiffPreviewParams {
-            path: "x".into(),
-            kind: "update".into(),
-            diff: "".into(),
-            workspace_root: "".into(),
-        })));
-        assert!(take_params(&state).is_some());
-        assert!(take_params(&state).is_none());
-    }
 }

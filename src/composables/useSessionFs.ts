@@ -2,6 +2,7 @@ import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { resolveCwd, setToast, store, toastError } from "./useCodex";
+import { openFileTab } from "./useEditorTabs";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
@@ -100,8 +101,10 @@ function setIconCache(key: string, value: string | null) {
  * 按可见行懒加载缺失的文件图标：同扩展名只发一个代表路径，结果回填缓存；
  * 单个失败缓存 null 不重试；整批失败（如 root 无效）不缓存，待下次可见行变化重试。
  */
-export async function ensureEntryIcons(entries: FsEntry[]): Promise<void> {
-  const root = sessionRoot.value;
+export async function ensureEntryIcons(
+  entries: FsEntry[],
+  root: string = sessionRoot.value,
+): Promise<void> {
   if (!root || !entries.length) return;
   const byKey = new Map<string, FsEntry>();
   for (const e of entries) {
@@ -339,13 +342,11 @@ export function revealInExplorer(path: string) {
   void invoke("reveal_path", { path }).catch((e) => setToast(toastError(e)));
 }
 
-/** 应用内打开文本文件：独立编辑窗口编辑并高亮展示 */
+/** 应用内打开文本文件：在主窗口左侧编辑器区打开/激活一个文件标签 */
 export function openTextEditor(entry: FsEntry) {
   const root = sessionRoot.value;
   if (!root) return;
-  void invoke("open_text_editor", { root, path: entry.path }).catch((e) =>
-    setToast(toastError(e)),
-  );
+  void openFileTab(root, entry.path);
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   setGitChangesActive,
 } from "../composables/useGitChanges";
 import { sessionRoot } from "../composables/useSessionFs";
+import { openDiffTab } from "../composables/useEditorTabs";
 import {
   gitDiffKind,
   gitStatusLetter,
@@ -500,13 +501,11 @@ async function openDiff(file: GitFile) {
       setToast("该文件无内容变化（可能仅为重命名）");
       return;
     }
-    await invoke("open_diff_window", {
-      params: {
-        path: file.path,
-        kind: gitDiffKind(file.status),
-        diff,
-        workspace_root: root,
-      },
+    await openDiffTab({
+      path: file.path,
+      kind: gitDiffKind(file.status),
+      diff,
+      workspace_root: root,
     });
   } catch (e) {
     setToast(toastError(e));

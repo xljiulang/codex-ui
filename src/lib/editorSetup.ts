@@ -258,6 +258,8 @@ export interface EditorExtensionsOptions {
   onDirtyChange: (dirty: boolean) => void;
   onCursorChange: (line: number, col: number) => void;
   onSave: () => void;
+  /** 每次文档/选区更新后回调最新 EditorState（标签页用于回写保存状态，无需 DOM 视图） */
+  onStateChange?: (state: EditorState) => void;
 }
 
 /** 组装编辑器扩展：行号、活动行、历史、查找/替换、快捷键、主题、高亮、脏状态监听 */
@@ -293,6 +295,7 @@ export function buildEditorExtensions(
       ...searchKeymap,
     ]),
     EditorView.updateListener.of((update) => {
+      opts.onStateChange?.(update.state);
       if (update.docChanged) {
         const saved = opts.savedText();
         opts.onDirtyChange(saved ? !update.state.doc.eq(saved) : false);

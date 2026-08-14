@@ -1911,6 +1911,7 @@ select option {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  min-height: 0;
   position: relative;
 }
 
@@ -4715,9 +4716,9 @@ body.resizing-editor {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
   color: var(--text-dim);
   background: transparent;
   border: none;
@@ -4915,4 +4916,181 @@ body.resizing-editor {
   margin-top: 2px;
   font-size: 11px;
   color: var(--text-faint);
+}
+
+/* ===== 左侧编辑器标签容器（对话主标签 + 文件/diff 标签） ===== */
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.editor-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.editor-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.editor-tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text-bright);
+}
+
+.editor-tab.pinned.active .editor-tab-label {
+  color: var(--accent);
+}
+
+.editor-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 对话主标签：AppHeader 同款 Logo */
+.editor-tab-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.editor-tab-logo svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+
+.editor-tab-logo svg .logo-c {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* 文件/diff 标签：文件系统图标（无缓存时回退通用文件 SVG） */
+.editor-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.editor-tab-icon-img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.editor-tab-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  color: var(--text-dim);
+}
+
+.editor-tab:hover .editor-tab-icon svg,
+.editor-tab.active .editor-tab-icon svg {
+  color: var(--text-bright);
+}
+
+.editor-tab-dirty {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yellow);
+  flex-shrink: 0;
+}
+
+.editor-tab-kind {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.editor-tab.is-diff .editor-tab-kind {
+  background: rgba(229, 214, 160, 0.14);
+  color: var(--yellow);
+}
+
+.editor-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.editor-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text-bright);
+}
+
+.editor-tab-close svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.editor-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 内嵌编辑区/diff 区：替代独立窗口的 100vh，填满面板剩余高度 */
+.text-editor-embedded,
+.diff-embedded {
+  flex: 1;
+  min-height: 0;
+  height: auto;
 }

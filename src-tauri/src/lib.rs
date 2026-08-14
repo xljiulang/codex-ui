@@ -38,8 +38,6 @@ pub fn run() {
             codex::commands::open_url,
             codex::commands::reveal_path,
             codex::diff::build_diff_preview,
-            codex::diff::open_diff_window,
-            codex::diff::take_diff_params,
             codex::commands::pick_files,
             codex::commands::pick_directory,
             codex::commands::pick_codex_file,
@@ -60,8 +58,6 @@ pub fn run() {
             codex::session_fs::session_fs_write,
             codex::session_fs::session_fs_probe_text,
             codex::session_fs::session_fs_icons,
-            codex::text_editor::open_text_editor,
-            codex::text_editor::take_text_editor_params,
             codex::git::git_changes_status,
             codex::git::git_changes_init,
             codex::git::git_changes_commit,
@@ -88,9 +84,7 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
-            app.manage(codex::diff::DiffParamsState(std::sync::Mutex::new(None)));
             app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
-            app.manage(codex::text_editor::TextEditorParamsState(std::sync::Mutex::new(None)));
             app.manage(codex::git::GitWatcherState(std::sync::Mutex::new(None)));
             server_handle.ensure_running();
             Ok(())

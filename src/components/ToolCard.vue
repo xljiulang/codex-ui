@@ -9,6 +9,7 @@ import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { workspaceRoot } from "../lib/links";
 import { copyText } from "../lib/clipboard";
+import { openDiffTab } from "../composables/useEditorTabs";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -296,17 +297,15 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
   });
 }
 
-// ---------- 文件变更：打开独立 diff 窗口 ----------
+// ---------- 文件变更：在主窗口打开 diff 标签 ----------
 function openPreview(c: { path: string; kind: unknown; diff?: string }) {
   if (!c.diff) return;
-  void invoke("open_diff_window", {
-    params: {
-      path: c.path,
-      kind: kindOf(c.kind),
-      diff: c.diff,
-      workspace_root: workspaceRoot(),
-    },
-  }).catch(() => undefined);
+  void openDiffTab({
+    path: c.path,
+    kind: kindOf(c.kind),
+    diff: c.diff,
+    workspace_root: workspaceRoot(),
+  });
 }
 </script>
 

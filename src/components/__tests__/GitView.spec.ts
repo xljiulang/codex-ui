@@ -21,6 +21,10 @@ import GitView from "../GitView.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import { settleConfirm, store } from "../../composables/useCodex";
 import { __resetGitChangesForTest } from "../../composables/useGitChanges";
+import {
+  __resetEditorTabsForTest,
+  tabs,
+} from "../../composables/useEditorTabs";
 import type { GitCommitEntry, GitStatus } from "../../lib/gitChanges";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -70,6 +74,7 @@ beforeEach(() => {
   store.newChatCwd = null;
   mockedInvoke.mockClear();
   __resetGitChangesForTest();
+  __resetEditorTabsForTest();
 });
 
 describe("GitView 空状态与初始化", () => {
@@ -138,7 +143,9 @@ describe("GitView 文件列表与 diff", () => {
           "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-hello\n+hello2\n",
         );
       }
-      if (cmd === "open_diff_window") return Promise.resolve(undefined);
+      if (cmd === "build_diff_preview") {
+        return Promise.resolve([{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }]);
+      }
       return Promise.resolve(undefined);
     });
 
@@ -168,7 +175,9 @@ describe("GitView 文件列表与 diff", () => {
           "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-hello\n+hello2\n",
         );
       }
-      if (cmd === "open_diff_window") return Promise.resolve(undefined);
+      if (cmd === "build_diff_preview") {
+        return Promise.resolve([{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }]);
+      }
       return Promise.resolve(undefined);
     });
 
@@ -189,7 +198,7 @@ describe("GitView 文件列表与 diff", () => {
     });
 
     const openCall = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "open_diff_window",
+      ([cmd]) => cmd === "build_diff_preview",
     );
     expect(openCall).toBeTruthy();
     const params = (
@@ -206,6 +215,9 @@ describe("GitView 文件列表与 diff", () => {
     expect(params.kind).toBe("modify");
     expect(params.workspace_root).toBe(rootPath);
     expect(params.diff).toContain("@@");
+    expect(
+      tabs.some((t) => t.kind === "diff" && t.path === "a.txt"),
+    ).toBe(true);
     wrapper.unmount();
   });
 
@@ -905,7 +917,7 @@ describe("GitView 变更文件右键菜单", () => {
     wrapper.unmount();
   });
 
-  it("点击打开调用 open_diff_window 并关闭菜单", async () => {
+  it("点击打开调用 build_diff_preview 并关闭菜单", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
       if (cmd === "git_changes_diff") {
@@ -913,7 +925,9 @@ describe("GitView 变更文件右键菜单", () => {
           "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-hello\n+hello2\n",
         );
       }
-      if (cmd === "open_diff_window") return Promise.resolve(undefined);
+      if (cmd === "build_diff_preview") {
+        return Promise.resolve([{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }]);
+      }
       return Promise.resolve(undefined);
     });
     const wrapper = mountGitView({ props: { active: true } });
@@ -926,7 +940,7 @@ describe("GitView 变更文件右键菜单", () => {
     await flushPromises();
 
     const call = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "open_diff_window",
+      ([cmd]) => cmd === "build_diff_preview",
     );
     expect(call).toBeTruthy();
     const params = (

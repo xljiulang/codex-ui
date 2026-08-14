@@ -1,26 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { computed } from "vue";
 import hljs, { languageFromPath } from "../lib/highlight";
 import type { DiffRow } from "../lib/types";
-import { setWindowTitleFromPath } from "../lib/windowTitle";
+import type { DiffEditorTab } from "../composables/useEditorTabs";
 
-interface DiffPreviewParams {
-  path: string;
-  kind: string;
-  diff: string;
-  workspace_root: string;
-}
-
-const loading = ref(true);
-const error = ref("");
-const rows = ref<DiffRow[]>([]);
-const params = ref<DiffPreviewParams | null>(null);
+const props = defineProps<{ tab: DiffEditorTab }>();
 
 const MAX_HIGHLIGHT_LINES = 20_000;
-const lang = computed(() =>
-  params.value ? languageFromPath(params.value.path) : null,
-);
+const lang = computed(() => languageFromPath(props.tab.path));
 
 function kindLabel(kind: string): string {
   if (kind === "add") return "新增";
@@ -37,7 +24,7 @@ function fallbackLineCls(l: string): string {
 }
 
 const fallbackLines = computed(() =>
-  (params.value?.diff ?? "")
+  (props.tab.fallback || "")
     .split("\n")
     .map((text) => ({ text, cls: fallbackLineCls(text) })),
 );
@@ -55,7 +42,7 @@ function rowText(r: DiffRow): string {
 /** 逐行语法高亮：未知语言/空行/超大文件回退纯文本 */
 function highlightLine(r: DiffRow): string | null {
   if (r.kind === "sep" || !r.text || !lang.value) return null;
-  if (rows.value.length > MAX_HIGHLIGHT_LINES) return null;
+  if (props.tab.rows.length > MAX_HIGHLIGHT_LINES) return null;
   try {
     return hljs.highlight(r.text, {
       language: lang.value,
@@ -67,59 +54,29 @@ function highlightLine(r: DiffRow): string | null {
 }
 
 const renderedRows = computed(() =>
-  rows.value.map((r) => ({ ...r, html: highlightLine(r) })),
+  props.tab.rows.map((r) => ({ ...r, html: highlightLine(r) })),
 );
-
-async function load() {
-  loading.value = true;
-  error.value = "";
-  try {
-    const p = await invoke<DiffPreviewParams | null>("take_diff_params");
-    if (!p) {
-      error.value = "未找到 diff 参数";
-      return;
-    }
-    params.value = p;
-    // 窗口标题栏显示文件名（不含路径）
-    await setWindowTitleFromPath(p.path);
-    rows.value = await invoke<DiffRow[]>("build_diff_preview", { params: p });
-  } catch (e) {
-    error.value = String(e);
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(() => {
-  void load();
-  // 右键无菜单：仅阻止默认（避免“刷新”），不显示任何菜单
-  window.addEventListener("contextmenu", onContextMenu);
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener("contextmenu", onContextMenu);
-});
-
-function onContextMenu(e: Event) {
-  e.preventDefault();
-}
 </script>
 
 <template>
-  <div class="diff-window">
+  <div class="diff-window diff-embedded">
     <div class="diff-window-head">
       <span class="diff-window-title">
-        <span class="change-kind" :class="params?.kind ?? ''">
-          {{ kindLabel(params?.kind ?? "") }}
+        <span class="change-kind" :class="tab.changeKind">
+          {{ kindLabel(tab.changeKind) }}
         </span>
-        <span class="diff-window-path">{{ params?.path ?? "" }}</span>
+        <span class="diff-window-path">{{ tab.path }}</span>
       </span>
     </div>
     <div class="diff-window-body">
-      <div v-if="loading" class="diff-loading">正在加载文件内容…</div>
-      <template v-else-if="error || !rows.length">
+      <div v-if="tab.loading" class="diff-loading">正在加载文件内容…</div>
+      <template v-else-if="tab.error || !tab.rows.length">
         <div class="diff-fallback-note">
-          {{ error ? `无法预览该文件（${error}），显示原始差异：` : "暂无差异内容" }}
+          {{
+            tab.error
+              ? `无法预览该文件（${tab.error}），显示原始差异：`
+              : "暂无差异内容"
+          }}
         </div>
         <pre class="diff-view diff-preview">
           <div

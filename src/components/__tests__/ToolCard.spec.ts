@@ -234,14 +234,14 @@ describe("文件变更：打开独立 diff 窗口", () => {
     } as ThreadItem;
   }
 
-  it("点击变更行调用 open_diff_window 并传参", async () => {
+  it("点击变更行调用 build_diff_preview 打开 diff 标签", async () => {
     const wrapper = mount(ToolCard, {
       props: { item: changeItem(REPLACE_DIFF, "D:\\repo\\a.cs", "update") },
     });
     await wrapper.find(".tool-card-header").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("open_diff_window", {
+    expect(mockedInvoke).toHaveBeenCalledWith("build_diff_preview", {
       params: {
         path: "D:\\repo\\a.cs",
         kind: "update",
@@ -265,7 +265,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
     await wrapper.find(".tool-card-header").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "open_diff_window",
+      "build_diff_preview",
       expect.anything(),
     );
   });

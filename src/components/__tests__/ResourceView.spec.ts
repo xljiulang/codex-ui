@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
 import { store } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
+import { __resetEditorTabsForTest } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import type { FsEntry } from "../../lib/sessionFs";
 
@@ -159,6 +160,7 @@ describe("ResourceView 文件树", () => {
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
+    __resetEditorTabsForTest();
   });
 
   afterEach(() => {
@@ -301,11 +303,11 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("文本文件「打开」：调用 open_text_editor 打开编辑窗口", async () => {
+  it("文本文件「打开」：在主窗口打开文件标签", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "打开");
-    expect(mockedInvoke).toHaveBeenCalledWith("open_text_editor", {
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
       root: rootPath,
       path: aTxt.path,
     });
@@ -338,11 +340,11 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("单击文本文件行调用 open_text_editor 打开编辑器", async () => {
+  it("单击文本文件行在主窗口打开文件标签", async () => {
     const wrapper = await mountPanel();
     await wrapper.find(".resource-row.resource-file").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("open_text_editor", {
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
       root: rootPath,
       path: aTxt.path,
     });
@@ -361,7 +363,7 @@ describe("ResourceView 文件树", () => {
     await flushPromises();
     expect(store.toast).toContain("该文件不是文本文件，无法打开");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "open_text_editor",
+      "session_fs_read",
       expect.anything(),
     );
     wrapper.unmount();
@@ -380,7 +382,7 @@ describe("ResourceView 文件树", () => {
     await flushPromises();
     expect(store.toast).toContain("probe error");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "open_text_editor",
+      "session_fs_read",
       expect.anything(),
     );
     wrapper.unmount();
@@ -571,7 +573,7 @@ describe("ResourceView 文件树", () => {
 
     await wrapper.find(".resource-result").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("open_text_editor", {
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
       root: rootPath,
       path: mainTs.path,
     });
