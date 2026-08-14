@@ -1406,6 +1406,29 @@ select option {
   color: var(--text-bright);
 }
 
+.git-push {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  color: var(--accent);
+}
+
+.git-push:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.git-push.busy:disabled {
+  opacity: 0.75;
+}
+
+.git-push-text {
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--text-bright);
+}
+
 .git-commit-bar {
   padding: 6px 12px 2px;
   display: flex;

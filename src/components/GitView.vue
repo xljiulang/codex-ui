@@ -21,6 +21,7 @@ import {
   type GitFile,
   type GitMergeResult,
   type GitPullResult,
+  type GitPushResult,
   type GitStatus,
 } from "../lib/gitChanges";
 import {
@@ -36,22 +37,29 @@ import {
 
 const props = defineProps<{ active: boolean }>();
 
+/** 本机是否安装了 git（推送依赖系统 git，缺失时禁用按钮并提示） */
+const gitAvailable = ref(true);
+const branchLabel = computed(() => gitStatus.value?.branch ?? "");
+const repoRoot = computed(() => gitStatus.value?.repoRoot ?? "");
+
 watch(
   () => props.active,
-  (v) => setGitChangesActive(v),
+  (v) => {
+    setGitChangesActive(v);
+    if (v) void checkGitAvailable();
+  },
   { immediate: true },
 );
 
 const confirmInit = ref(false);
 
-const branchLabel = computed(() => gitStatus.value?.branch ?? "");
-const repoRoot = computed(() => gitStatus.value?.repoRoot ?? "");
 const branchMenuOpen = ref(false);
 const branches = ref<string[]>([]);
 const newBranchName = ref("");
 const branchBusy = ref(false);
 const mergeBusy = ref(false);
 const pullBusy = ref(false);
+const pushBusy = ref(false);
 const commitMessage = ref("");
 const commitBusy = ref(false);
 
@@ -257,7 +265,7 @@ async function doCommit() {
 
 /** 拉取远端更新；游离 HEAD 或忙碌时禁用 */
 async function doPull() {
-  if (pullBusy.value || branchLabel.value === "HEAD") return;
+  if (pullBusy.value || branchLabel.value === "HEAD" || !gitAvailable.value) return;
   const root = repoRoot.value;
   if (!root) return;
   pullBusy.value = true;
@@ -269,6 +277,41 @@ async function doPull() {
     setToast(toastError(e));
   } finally {
     pullBusy.value = false;
+  }
+}
+
+/** 探测本机是否安装了 git（推送可用性）；探测失败视为不可用 */
+async function checkGitAvailable() {
+  try {
+    gitAvailable.value = await invoke<boolean>("git_changes_git_available", {
+      path: repoRoot.value || sessionRoot.value || "",
+    });
+  } catch {
+    gitAvailable.value = false;
+  }
+}
+
+/** 推送当前分支到上游；游离 HEAD、未装 git 或忙碌时禁用 */
+async function doPush() {
+  if (
+    pushBusy.value ||
+    pullBusy.value ||
+    branchLabel.value === "HEAD" ||
+    !gitAvailable.value
+  ) {
+    return;
+  }
+  const root = repoRoot.value;
+  if (!root) return;
+  pushBusy.value = true;
+  try {
+    const res = await invoke<GitPushResult>("git_changes_push", { root });
+    gitStatus.value = res.status;
+    setToast(res.message);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    pushBusy.value = false;
   }
 }
 
@@ -763,14 +806,18 @@ async function restoreDir(node: GitDirNode) {
         <button
           class="git-icon-btn git-pull"
           :class="{ busy: pullBusy }"
-          :disabled="pullBusy || branchLabel === 'HEAD'"
+          :disabled="!gitAvailable || pullBusy || pushBusy || branchLabel === 'HEAD'"
           :aria-label="pullBusy ? '拉取中…' : '拉取'"
           v-tooltip="
-            branchLabel === 'HEAD'
+            !gitAvailable
+              ? '未检测到 git，无法拉取'
+              : branchLabel === 'HEAD'
               ? '游离 HEAD 无法拉取'
               : pullBusy
                 ? '拉取中…'
-                : '拉取'
+                : pushBusy
+                  ? '推送中…'
+                  : '拉取'
           "
           @click="doPull()"
         >
@@ -780,6 +827,29 @@ async function restoreDir(node: GitDirNode) {
             />
           </svg>
           <span v-else class="git-pull-text">拉取中…</span>
+        </button>
+        <button
+          class="git-icon-btn git-push"
+          :class="{ busy: pushBusy }"
+          :disabled="!gitAvailable || pushBusy || pullBusy || branchLabel === 'HEAD'"
+          :aria-label="pushBusy ? '推送中…' : '推送'"
+          v-tooltip="
+            !gitAvailable
+              ? '未检测到 git，无法推送'
+              : branchLabel === 'HEAD'
+                ? '游离 HEAD 无法推送'
+                : pushBusy
+                  ? '推送中…'
+                  : pullBusy
+                    ? '拉取中…'
+                    : '推送'
+          "
+          @click="doPush()"
+        >
+          <svg v-if="!pushBusy" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z" />
+          </svg>
+          <span v-else class="git-push-text">推送中…</span>
         </button>
         <button
           class="git-icon-btn git-refresh"

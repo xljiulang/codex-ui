@@ -103,6 +103,18 @@ pub struct GitPullResult {
     pub message: String,
 }
 
+/// 推送结果（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPushResult {
+    /// 推送后的最新状态
+    pub status: GitStatus,
+    /// pushed | up_to_date
+    pub kind: String,
+    /// 给用户的中文结果提示
+    pub message: String,
+}
+
 /// 分支合并结果（供前端展示）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1246,38 +1258,6 @@ fn commit_log_sync(
     Ok(out)
 }
 
-/// 解析当前分支的上游（remote + 远端跟踪 ref）：优先 `branch.<name>.remote/merge` 配置，
-/// 无配置时以默认 fetch 远端（origin）同名分支兜底。
-fn resolve_upstream<'a>(
-    repo: &'a gix::Repository,
-    branch: &'a str,
-) -> Result<(gix::Remote<'a>, gix::refs::FullName), GitError> {
-    let branch_full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(branch))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    if let Some(Ok(tracking)) = repo
-        .branch_remote_tracking_ref_name(branch_full.as_ref(), gix::remote::Direction::Fetch)
-    {
-        if let Some(remote) = repo.branch_remote(branch, gix::remote::Direction::Fetch) {
-            return Ok((remote.map_err(|e| git_err(format!("读取远端失败: {e}")))?, tracking));
-        }
-    }
-    let remote = repo
-        .find_fetch_remote(None)
-        .map_err(|e| git_err(format!("未找到可拉取的远端: {e}")))?;
-    let remote_name = remote
-        .name()
-        .ok_or_else(|| git_err("远端没有名称，无法确定跟踪分支"))?
-        .as_bstr()
-        .to_str_lossy()
-        .into_owned();
-    let tracking_short = format!("{remote_name}/{branch}");
-    let tracking = gix::refs::Category::RemoteBranch
-        .to_full_name(tracking_short.as_str())
-        .map_err(|e| git_err(format!("跟踪分支名不合法: {e}")))?;
-    Ok((remote, tracking))
-}
-
 /// 计算 旧树 → 新树 的变更路径（add/mod/delete；跳过 rewrite 与目录条目）
 fn diff_changed_paths(
     repo: &gix::Repository,
@@ -1467,230 +1447,251 @@ fn conflict_path(c: &gix::merge::tree::Conflict) -> String {
     "<未知路径>".to_string()
 }
 
-/// 拉取：先 fetch 更新远端跟踪 ref，再按本地/远端关系快进或合并。
-/// 仅当拉取会改到的路径与本地已暂存/未暂存改动重叠时拒绝（列文件），
-/// 不重叠的本地改动保留（已暂存内容在拉取后仍在暂存区）；分叉合并遇到提交级
-/// 冲突时中止，不改动工作区与索引。
-fn pull_sync(path: &str) -> Result<GitPullResult, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+/// 拉取：调用系统 git（快进优先，`--ff-only`）。分叉时不自动合并，
+/// 报错提示先经 GitView 分支合并手动合并，绝不留下冲突状态。
+fn pull_sync(root: &str) -> Result<GitPullResult, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    pull_sync_with_git(&git_bin, root)
+}
+
+/// pull 实现（git 可执行文件路径可注入，便于测试“git 缺失”分支）
+fn pull_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPullResult, GitError> {
+    let repo = open_repo(root)?;
     let branch = current_branch(&repo);
     if branch == "HEAD" {
         return Err(git_err("游离 HEAD 状态无法拉取，请先切换到某个分支"));
     }
-    // 本地风险路径：已暂存（HEAD→索引）+ 已跟踪的工作区修改；
-    // 未跟踪文件不纳入（由 sync_worktree_files 的覆盖守卫保护，不触碰时自然保留）。
-    let st = status_sync(path)?;
-    let staged_paths: Vec<String> = st
-        .files
-        .iter()
-        .filter(|f| f.staged)
-        .map(|f| f.path.clone())
-        .collect();
-    let local_risk_paths: Vec<String> = st
-        .files
-        .iter()
-        .filter(|f| f.worktree && f.status != FileStatus::Untracked)
-        .map(|f| f.path.clone())
-        .collect();
+    let (remote_label, remote_branch) = resolve_remote_target(&repo, &branch)?;
+    let out = std::process::Command::new(git_bin)
+        .arg("-C")
+        .arg(root)
+        .args([
+            "pull",
+            "--no-rebase",
+            "--ff-only",
+            &remote_label,
+            &remote_branch,
+        ])
+        // 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起
+        //（Git Credential Manager 等 GUI 助手不受影响，认证失败会快速报错）。
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
+            } else {
+                git_err(format!("执行 git pull 失败: {e}"))
+            }
+        })?;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let combined = format!("{stdout}\n{stderr}");
+    if !out.status.success() {
+        return Err(git_err(pull_failure_message(&combined)));
+    }
+    let status = status_sync(root)?;
+    let (kind, message) = if combined.contains("Already up to date") {
+        ("up_to_date".to_string(), "本地已是最新".to_string())
+    } else {
+        (
+            "fast_forward".to_string(),
+            format!("已快进更新到远端 {remote_label}/{remote_branch}"),
+        )
+    };
+    Ok(GitPullResult { status, kind, message })
+}
 
-    let (remote, tracking_ref) = resolve_upstream(&repo, &branch)?;
+/// 把 git pull 失败输出映射为友好中文提示（LANG=C 下输出为英文，关键词稳定）
+fn pull_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("not possible to fast-forward") {
+        "本地与远端已分叉，无法快进拉取，请先在 GitView 中合并分支后再拉取".to_string()
+    } else if c.contains("would be overwritten by merge")
+        || c.contains("untracked working tree files would be overwritten")
+        || c.contains("local changes")
+    {
+        "本地更改会被拉取覆盖，请先提交或还原后再拉取".to_string()
+    } else if c.contains("authentication failed")
+        || c.contains("could not read username")
+        || c.contains("terminal prompts disabled")
+        || c.contains("401")
+        || c.contains("403")
+    {
+        "拉取认证失败，请检查 Git 凭证（如 Git Credential Manager）".to_string()
+    } else if c.contains("couldn't find remote ref") || c.contains("no such branch") {
+        "远端没有该分支，无法拉取".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git pull 失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+/// 探测系统 git 可执行文件：优先 PATH，回退常见安装目录。
+/// 拉取/推送是仅有的两个依赖系统 git 的功能（其余读取/状态/提交/合并仍由 gix 完成）。
+fn find_git() -> Option<PathBuf> {
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            for name in ["git.exe", "git"] {
+                let cand = dir.join(name);
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LocalAppData"] {
+        if let Ok(base) = std::env::var(var) {
+            let base = PathBuf::from(base);
+            for sub in ["Git\\cmd\\git.exe", "Programs\\Git\\cmd\\git.exe"] {
+                let cand = base.join(sub);
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 从远端跟踪 ref 解析远端分支名（refs/remotes/<remote>/<rb> 或 refs/heads/<rb>）
+fn remote_branch_from_tracking(tracking: &gix::refs::FullName, remote_label: &str) -> Option<String> {
+    let s = tracking.as_bstr().to_str_lossy();
+    let prefix = format!("refs/remotes/{remote_label}/");
+    if let Some(rest) = s.strip_prefix(&prefix) {
+        return Some(rest.to_string());
+    }
+    if let Some(rest) = s.strip_prefix("refs/heads/") {
+        return Some(rest.to_string());
+    }
+    None
+}
+
+/// 解析远端目标（远端名/URL + 远端分支名）：优先已配置的上游，
+/// 无配置时以默认远端（origin）同名分支兜底。
+fn resolve_remote_target(
+    repo: &gix::Repository,
+    branch: &str,
+) -> Result<(String, String), GitError> {
+    let branch_full = gix::refs::Category::LocalBranch
+        .to_full_name(BStr::new(branch))
+        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
+    if let Some(Ok(tracking)) = repo
+        .branch_remote_tracking_ref_name(branch_full.as_ref(), gix::remote::Direction::Fetch)
+    {
+        if let Some(remote) = repo.branch_remote(branch, gix::remote::Direction::Fetch) {
+            let remote = remote.map_err(|e| git_err(format!("读取远端失败: {e}")))?;
+            let remote_label = remote
+                .name()
+                .map(|n| n.as_bstr().to_str_lossy().into_owned())
+                .or_else(|| {
+                    remote
+                        .url(gix::remote::Direction::Push)
+                        .map(|u| u.to_bstring().to_string())
+                })
+                .ok_or_else(|| git_err("远端没有名称或地址"))?;
+            let remote_branch = remote_branch_from_tracking(&tracking, &remote_label)
+                .ok_or_else(|| git_err("无法解析上游远端分支名"))?;
+            return Ok((remote_label, remote_branch));
+        }
+    }
+    let remote = repo
+        .find_fetch_remote(None)
+        .map_err(|e| git_err(format!("未找到可用的远端: {e}")))?;
     let remote_label = remote
         .name()
         .map(|n| n.as_bstr().to_str_lossy().into_owned())
-        .unwrap_or_else(|| branch.clone());
+        .or_else(|| {
+            remote
+                .url(gix::remote::Direction::Push)
+                .map(|u| u.to_bstring().to_string())
+        })
+        .ok_or_else(|| git_err("远端没有名称或地址"))?;
+    Ok((remote_label, branch.to_string()))
+}
 
-    // ① fetch：更新远端跟踪 ref
-    let connection = remote
-        .connect(gix::remote::Direction::Fetch)
-        .map_err(|e| git_err(format!("连接远端失败: {e}")))?;
-    let prepare = connection
-        .prepare_fetch(gix::progress::Discard, Default::default())
-        .map_err(|e| git_err(format!("准备拉取失败: {e}")))?;
-    prepare
-        .receive(gix::progress::Discard, &gix::interrupt::IS_INTERRUPTED)
-        .map_err(|e| git_err(format!("拉取失败: {e}")))?;
-
-    let remote_id = repo
-        .find_reference(&tracking_ref)
-        .map_err(|_| git_err(format!("远端 {remote_label} 没有分支 {branch}，无法拉取")))?
-        .peel_to_id()
-        .map_err(|e| git_err(format!("解析远端分支失败: {e}")))?;
-    let remote_tree_id = remote_id
-        .object()
-        .map_err(|e| git_err(format!("读取远端提交失败: {e}")))?
-        .into_commit()
-        .tree_id()
-        .map_err(|e| git_err(format!("读取远端提交失败: {e}")))?;
-    let remote_oid = remote_id.detach();
-    let remote_tree_oid = remote_tree_id.detach();
-
-    // ② 本地状态
-    let local_oid = repo.head_id().ok().map(|id| id.detach());
-    let local_tree_id = repo
-        .head_tree_id_or_empty()
-        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    let local_tree_oid = local_tree_id.detach();
-
-    // ③ 判定拉取类型与目标树（只读计算，不写入）
-    let mut target_tree_oid: Option<gix::hash::ObjectId> = None;
-    let (kind, message) = match local_oid {
-        None => {
-            // 本地无提交：快进到远端
-            target_tree_oid = Some(remote_tree_oid);
-            (
-                "fast_forward".to_string(),
-                format!("已更新到远端 {remote_label}/{branch}"),
-            )
-        }
-        Some(local) if local == remote_oid => {
-            ("up_to_date".to_string(), "本地已是最新".to_string())
-        }
-        Some(local) => {
-            let labels = gix::merge::blob::builtin_driver::text::Labels {
-                ancestor: Some(BStr::new("ancestor")),
-                current: Some(BStr::new("ours")),
-                other: Some(BStr::new("theirs")),
-            };
-            let options = repo
-                .tree_merge_options()
-                .map_err(|e| git_err(format!("初始化合并选项失败: {e}")))?
-                .into();
-            let mut outcome = repo
-                .merge_commits(local, remote_oid, labels, options)
-                .map_err(|e| git_err(format!("合并远端更改失败: {e}")))?;
-            let merge_bases: Vec<gix::hash::ObjectId> = outcome
-                .merge_bases
-                .iter()
-                .flat_map(|nb| nb.iter().copied())
-                .collect();
-            if merge_bases.contains(&remote_oid) {
-                // 远端是本地祖先 → 本地已是最新
-                ("up_to_date".to_string(), "本地已是最新".to_string())
-            } else if merge_bases.contains(&local) {
-                // 本地是远端祖先 → 快进
-                target_tree_oid = Some(remote_tree_oid);
-                (
-                    "fast_forward".to_string(),
-                    format!("已快进更新到远端 {remote_label}/{branch}"),
-                )
-            } else {
-                // 分叉：真实合并，提交级冲突则中止
-                if !outcome.tree_merge.conflicts.is_empty() {
-                    let paths: Vec<String> = outcome
-                        .tree_merge
-                        .conflicts
-                        .iter()
-                        .map(conflict_path)
-                        .collect();
-                    return Err(git_err(format!(
-                        "拉取合并存在冲突，已中止（未修改任何文件）。冲突文件：{}",
-                        paths.join("、")
-                    )));
-                }
-                let merged_tree_oid = outcome
-                    .tree_merge
-                    .tree
-                    .write()
-                    .map(|id| id.detach())
-                    .map_err(|e| git_err(format!("写入合并树失败: {e}")))?;
-                target_tree_oid = Some(merged_tree_oid);
-                (
-                    "merged".to_string(),
-                    format!("已合并远端 {remote_label}/{branch} 的更改"),
-                )
-            }
-        }
-    };
-
-    // ④ 冲突判定：拉取触达的路径与本地风险路径重叠 → 在任何写入之前拒绝
-    let pull_changed: Vec<String> = if let Some(target) = target_tree_oid {
-        let changed = diff_changed_paths(&repo, &local_tree_oid, &target)?;
-        let mut overlap: Vec<&String> = local_risk_paths
-            .iter()
-            .chain(staged_paths.iter())
-            .filter(|p| changed.iter().any(|c| c == *p))
-            .collect();
-        overlap.sort();
-        overlap.dedup();
-        if !overlap.is_empty() {
-            let names: Vec<&str> = overlap.iter().map(|s| s.as_str()).collect();
-            return Err(git_err(format!(
-                "本地更改会被拉取覆盖，请先提交或还原后再拉取：{}",
-                names.join("、")
-            )));
-        }
-        changed
+/// 把 git push 失败输出映射为友好中文提示（LANG=C 下输出为英文，关键词稳定）
+fn push_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("fetch first") || c.contains("non-fast-forward") || c.contains("[rejected]") {
+        "推送被拒绝：远端领先本地，请先拉取合并后再推送".to_string()
+    } else if c.contains("authentication failed")
+        || c.contains("could not read username")
+        || c.contains("terminal prompts disabled")
+        || c.contains("401")
+        || c.contains("403")
+    {
+        "推送认证失败，请检查 Git 凭证（如 Git Credential Manager）".to_string()
+    } else if c.contains("does not match any") || c.contains("src refspec") {
+        "当前分支还没有提交，无法推送".to_string()
     } else {
-        Vec::new()
-    };
-
-    // 写阶段前置状态捕获（用于失败回滚）
-    let old_index_owned = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut old_index_owned = old_index_owned.into_owned_or_cloned();
-    let local_tree = local_tree_id
-        .object()
-        .map_err(|e| git_err(format!("读取本地树失败: {e}")))?;
-    let local_tree = local_tree.into_tree();
-
-    // ⑤⑥ 应用：同步工作区 → 重建索引 → 更新分支/创建合并提交。
-    // 任一步失败都回滚到写前状态，避免留下“文件是新内容、引用还是旧提交”的半状态。
-    let apply_result = (|| -> Result<(), GitError> {
-        if let Some(target) = target_tree_oid {
-            sync_worktree_files(&repo, workdir, &local_tree_oid, &target)?;
-            rebuild_index_preserving_staged(&repo, &target, &staged_paths, &pull_changed)?;
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git push 失败".to_string()
+        } else {
+            trimmed.to_string()
         }
-        match kind.as_str() {
-            "fast_forward" => update_branch_ref(&repo, &branch, remote_oid)?,
-            "merged" => {
-                let merge_msg = format!(
-                    "Merge remote-tracking branch '{remote_label}/{branch}' into {branch}"
-                );
-                let local_oid = *local_oid.as_ref().expect("合并必有本地提交");
-                repo.commit(
-                    "HEAD",
-                    merge_msg,
-                    target_tree_oid.expect("合并必有目标树"),
-                    vec![local_oid, remote_oid],
-                )
-                .map_err(|e| git_err(format!("创建合并提交失败: {e}")))?;
-            }
-            _ => {}
-        }
-        Ok(())
-    })();
-
-    if let Err(e) = apply_result {
-        // 尽最大努力回滚：工作区 → 旧索引 → 分支引用回到本地提交（本地无提交则删除分支引用）
-        let _ = restore_paths_from_tree(workdir, &local_tree, &pull_changed);
-        let _ = old_index_owned.write(gix::index::write::Options::default());
-        let branch_full = gix::refs::Category::LocalBranch
-            .to_full_name(BStr::new(&branch))
-            .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-        let restore_change = match &local_oid {
-            Some(oid) => gix::refs::transaction::Change::Update {
-                log: Default::default(),
-                expected: gix::refs::transaction::PreviousValue::Any,
-                new: gix::refs::Target::Object(*oid),
-            },
-            None => gix::refs::transaction::Change::Delete {
-                expected: gix::refs::transaction::PreviousValue::Any,
-                log: gix::refs::transaction::RefLog::AndReference,
-            },
-        };
-        let _ = repo.edit_reference(gix::refs::transaction::RefEdit {
-            change: restore_change,
-            name: branch_full,
-            deref: false,
-        });
-        return Err(e);
     }
+}
 
-    Ok(GitPullResult {
-        status: status_sync(path)?,
-        kind,
+/// 推送当前分支到上游远端（调用系统 git；首次推送自动设置上游 -u）。
+fn push_sync(root: &str) -> Result<GitPushResult, GitError> {
+    let git_bin = find_git()
+        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
+    push_sync_with_git(&git_bin, root)
+}
+
+/// push 实现（git 可执行文件路径可注入，便于测试“git 缺失”分支）
+fn push_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPushResult, GitError> {
+    let repo = open_repo(root)?;
+    let branch = current_branch(&repo);
+    if branch == "HEAD" {
+        return Err(git_err("游离 HEAD 状态无法推送，请先切换到某个分支"));
+    }
+    let (remote_label, remote_branch) = resolve_remote_target(&repo, &branch)?;
+    let refspec = format!("{branch}:{remote_branch}");
+    let out = std::process::Command::new(git_bin)
+        .arg("-C")
+        .arg(root)
+        .args(["push", "-u", &remote_label, &refspec])
+        // 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起
+        //（Git Credential Manager 等 GUI 助手不受影响，认证失败会快速报错）。
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
+            } else {
+                git_err(format!("执行 git push 失败: {e}"))
+            }
+        })?;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let combined = format!("{stdout}\n{stderr}");
+    if !out.status.success() {
+        return Err(git_err(push_failure_message(&combined)));
+    }
+    let status = status_sync(root)?;
+    let kind = if combined.contains("Everything up-to-date") {
+        "up_to_date"
+    } else {
+        "pushed"
+    };
+    let message = if kind == "up_to_date" {
+        format!("本地已是最新（{remote_label}/{remote_branch}）")
+    } else {
+        format!("已推送到 {remote_label}/{remote_branch}")
+    };
+    Ok(GitPushResult {
+        status,
+        kind: kind.to_string(),
         message,
     })
 }
@@ -2029,6 +2030,19 @@ pub async fn git_changes_commit(root: String, message: String) -> Result<GitStat
 pub async fn git_changes_pull(root: String) -> Result<GitPullResult, GitError> {
     // 拉取涉及网络传输，放宽超时到 10 分钟
     run_blocking_with_timeout(600, move || pull_sync(&root)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_push(root: String) -> Result<GitPushResult, GitError> {
+    // 推送涉及网络传输与可能的凭证交互，放宽超时到 10 分钟
+    run_blocking_with_timeout(600, move || push_sync(&root)).await
+}
+
+/// 探测本机是否安装了 git（推送依赖系统 git）；只探测不执行任何操作
+#[tauri::command]
+pub async fn git_changes_git_available(path: String) -> bool {
+    let _ = path;
+    find_git().is_some()
 }
 
 #[tauri::command]
@@ -3456,6 +3470,8 @@ mod tests {
         assert_eq!(git(work1, &["init", "-b", "main"]).0, 0);
         assert_eq!(git(work1, &["config", "user.name", "t"]).0, 0);
         assert_eq!(git(work1, &["config", "user.email", "t@t"]).0, 0);
+        // 关闭 autocrlf，保证检出内容与提交字节一致（不受全局配置影响）
+        assert_eq!(git(work1, &["config", "core.autocrlf", "false"]).0, 0);
         std::fs::write(work1.join("a.txt"), "v1\n").unwrap();
         std::fs::write(work1.join("b.txt"), "vb\n").unwrap();
         assert_eq!(git(work1, &["add", "a.txt", "b.txt"]).0, 0);
@@ -3464,9 +3480,14 @@ mod tests {
             git(work1, &["clone", "--bare", ".", bare.to_str().unwrap()]).0,
             0
         );
-        assert_eq!(git(work2, &["clone", bare.to_str().unwrap(), "."]).0, 0);
+        // 在 clone 阶段就关闭 autocrlf，避免全局配置把检出内容写成 CRLF 导致仓库“脏”
+        assert_eq!(
+            git(work2, &["-c", "core.autocrlf=false", "clone", bare.to_str().unwrap(), "."]).0,
+            0
+        );
         assert_eq!(git(work2, &["config", "user.name", "t"]).0, 0);
         assert_eq!(git(work2, &["config", "user.email", "t@t"]).0, 0);
+        assert_eq!(git(work2, &["config", "core.autocrlf", "false"]).0, 0);
     }
 
     #[test]
@@ -3499,7 +3520,7 @@ mod tests {
     }
 
     #[test]
-    fn pull_merges_when_diverged() {
+    fn pull_refuses_when_diverged() {
         if !git_available() {
             eprintln!("skip: 未安装 git");
             return;
@@ -3521,55 +3542,13 @@ mod tests {
             0
         );
 
-        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
-        assert_eq!(res.kind, "merged");
-        assert!(res.status.files.is_empty());
-        assert_eq!(
-            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
-            "v2\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(work2.path().join("b.txt")).unwrap(),
-            "local\n"
-        );
-        // HEAD 为合并提交
-        let head_subject = git(work2.path(), &["log", "-1", "--format=%s"]).1;
-        assert!(head_subject.contains("Merge remote-tracking branch"));
-    }
-
-    #[test]
-    fn pull_conflict_aborts_without_changes() {
-        if !git_available() {
-            eprintln!("skip: 未安装 git");
-            return;
-        }
-        let bare = TempDir::new().unwrap();
-        let work1 = TempDir::new().unwrap();
-        let work2 = TempDir::new().unwrap();
-        setup_pull_repo(bare.path(), work1.path(), work2.path());
-        // work2 本地修改 a.txt 并提交
-        std::fs::write(work2.path().join("a.txt"), "w2\n").unwrap();
-        assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
-        assert_eq!(git(work2.path(), &["commit", "-m", "w2"]).0, 0);
-        // work1 也修改 a.txt 并推送（同路径不同内容 → 冲突）
-        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
-        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
-        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
-        assert_eq!(
-            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
-            0
-        );
-
         let before_head = git(work2.path(), &["rev-parse", "HEAD"]).1;
         let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
-        assert!(err.message.contains("冲突"));
-        assert!(err.message.contains("a.txt"));
-        // 中止后工作区与 HEAD 不变
-        assert_eq!(
-            std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
-            "w2\n"
-        );
+        assert!(err.message.contains("分叉"), "actual: {}", err.message);
+        // ff-only 拒绝后不留任何冲突/合并残留
         assert_eq!(git(work2.path(), &["rev-parse", "HEAD"]).1, before_head);
+        assert!(!work2.path().join(".git").join("MERGE_HEAD").exists());
+        assert!(git(work2.path(), &["status", "--porcelain"]).1.is_empty());
     }
 
     #[test]
@@ -3594,7 +3573,6 @@ mod tests {
         std::fs::write(work2.path().join("a.txt"), "dirty\n").unwrap();
         let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("会被拉取覆盖"));
-        assert!(err.message.contains("a.txt"));
         // 拒绝后工作区与 HEAD 不变
         assert_eq!(
             std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
@@ -3627,7 +3605,6 @@ mod tests {
         let before_head = git(work2.path(), &["rev-parse", "HEAD"]).1;
         let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("会被拉取覆盖"));
-        assert!(err.message.contains("a.txt"));
         assert_eq!(
             std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
             "staged\n"
@@ -3747,6 +3724,193 @@ mod tests {
         let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "up_to_date");
         assert!(res.status.files.is_empty());
+    }
+
+    #[test]
+    fn pull_reports_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+
+        let err = pull_sync_with_git(
+            Path::new("definitely-missing-git-binary-xyz"),
+            work2.path().to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("未检测到系统 git"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn pull_fails_without_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+
+        let err = pull_sync(work.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            err.message.contains("未找到可用的远端"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    // ---------- 推送 ----------
+
+    /// 推送成功：bare 远端 ref 更新、-u 设置上游（remote/merge）
+    #[test]
+    fn push_updates_remote_and_sets_upstream() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work2 本地提交 v2
+        std::fs::write(work2.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work2.path(), &["commit", "-m", "v2"]).0, 0);
+
+        let res = push_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "pushed");
+        assert!(res.message.contains("已推送到"));
+        // bare 远端 main 已指向 work2 HEAD
+        let (code, remote_oid, _) = git(bare.path(), &["rev-parse", "main"]);
+        assert_eq!(code, 0);
+        let (_, local_oid, _) = git(work2.path(), &["rev-parse", "HEAD"]);
+        assert_eq!(remote_oid.trim(), local_oid.trim());
+        // 上游已设置
+        let (_, remote, _) = git(work2.path(), &["config", "branch.main.remote"]);
+        assert_eq!(remote.trim(), "origin");
+        let (_, merge, _) = git(work2.path(), &["config", "branch.main.merge"]);
+        assert_eq!(merge.trim(), "refs/heads/main");
+    }
+
+    #[test]
+    fn push_up_to_date_second_time() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        std::fs::write(work2.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work2.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(push_sync(work2.path().to_str().unwrap()).unwrap().kind, "pushed");
+
+        let res = push_sync(work2.path().to_str().unwrap()).unwrap();
+        assert_eq!(res.kind, "up_to_date");
+        assert!(res.message.contains("已是最新"));
+    }
+
+    #[test]
+    fn push_rejected_when_remote_ahead() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        // work1 推送到 bare，使远端领先
+        std::fs::write(work1.path().join("a.txt"), "v2\n").unwrap();
+        assert_eq!(git(work1.path(), &["add", "a.txt"]).0, 0);
+        assert_eq!(git(work1.path(), &["commit", "-m", "v2"]).0, 0);
+        assert_eq!(
+            git(work1.path(), &["push", bare.path().to_str().unwrap(), "main"]).0,
+            0
+        );
+        // work2 本地分叉提交
+        std::fs::write(work2.path().join("b.txt"), "local\n").unwrap();
+        assert_eq!(git(work2.path(), &["add", "b.txt"]).0, 0);
+        assert_eq!(git(work2.path(), &["commit", "-m", "local"]).0, 0);
+
+        let err = push_sync(work2.path().to_str().unwrap()).unwrap_err();
+        assert!(err.message.contains("先拉取"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn push_rejects_detached_head() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+        assert_eq!(git(work2.path(), &["checkout", "--detach"]).0, 0);
+
+        let err = push_sync(work2.path().to_str().unwrap()).unwrap_err();
+        assert!(err.message.contains("游离"), "actual: {}", err.message);
+    }
+
+    #[test]
+    fn push_fails_without_remote() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let work = TempDir::new().unwrap();
+        std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
+        init_committed_repo(work.path());
+
+        let err = push_sync(work.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            err.message.contains("未找到可用的远端"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn push_reports_missing_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let bare = TempDir::new().unwrap();
+        let work1 = TempDir::new().unwrap();
+        let work2 = TempDir::new().unwrap();
+        setup_pull_repo(bare.path(), work1.path(), work2.path());
+
+        let err = push_sync_with_git(
+            Path::new("definitely-missing-git-binary-xyz"),
+            work2.path().to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            err.message.contains("未检测到系统 git"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn git_available_detects_system_git() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        assert!(find_git().is_some());
     }
 
     // ---------- 分支合并 ----------

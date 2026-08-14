@@ -38,6 +38,16 @@ export interface GitPullResult {
   message: string;
 }
 
+/** Rust git_changes_push 返回值（字段 camelCase） */
+export interface GitPushResult {
+  /** 推送后的最新状态 */
+  status: GitStatus;
+  /** pushed | up_to_date */
+  kind: "pushed" | "up_to_date";
+  /** 给用户的中文结果提示 */
+  message: string;
+}
+
 /** Rust git_changes_branch_merge 返回值（与拉取结果同构） */
 export type GitMergeResult = GitPullResult;
 

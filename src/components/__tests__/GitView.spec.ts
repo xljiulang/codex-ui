@@ -1521,6 +1521,7 @@ describe("GitView 拉取", () => {
   it("点击拉取调用 git_changes_pull 并更新状态与 toast", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
       if (cmd === "git_changes_pull") {
         return Promise.resolve({
           status: okStatus,
@@ -1548,6 +1549,7 @@ describe("GitView 拉取", () => {
   it("拉取失败时 toast 展示后端错误", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
       if (cmd === "git_changes_pull") {
         return Promise.reject({ message: "连接远端失败" });
       }
@@ -1567,6 +1569,7 @@ describe("GitView 拉取", () => {
       if (cmd === "git_changes_status") {
         return Promise.resolve({ ...okStatus, branch: "HEAD" });
       }
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
       return Promise.resolve(undefined);
     });
     const wrapper = mountGitView({ props: { active: true } });
@@ -1574,6 +1577,129 @@ describe("GitView 拉取", () => {
 
     expect(
       (wrapper.find(".git-pull").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("本机未安装 git 时拉取按钮禁用并提示", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(false);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const pullBtn = wrapper.find(".git-pull");
+    expect((pullBtn.element as HTMLButtonElement).disabled).toBe(true);
+    expect(pullBtn.attributes("data-tip")).toBe("未检测到 git，无法拉取");
+    wrapper.unmount();
+  });
+});
+
+describe("GitView 推送", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server.workspace = rootPath;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.confirm = null;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  it("点击推送调用 git_changes_push 并更新状态与 toast", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
+      if (cmd === "git_changes_push") {
+        return Promise.resolve({
+          status: okStatus,
+          kind: "pushed",
+          message: "已推送到 origin/main",
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-push").trigger("click");
+    await flushPromises();
+
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_push",
+    );
+    expect(call).toBeTruthy();
+    expect(call?.[1]).toEqual({ root: rootPath });
+    expect(store.toast).toBe("已推送到 origin/main");
+    wrapper.unmount();
+  });
+
+  it("推送失败时 toast 展示后端错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
+      if (cmd === "git_changes_push") {
+        return Promise.reject({ message: "推送被拒绝：远端领先本地" });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-push").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("推送被拒绝");
+    wrapper.unmount();
+  });
+
+  it("游离 HEAD 时推送按钮禁用", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return Promise.resolve({ ...okStatus, branch: "HEAD" });
+      }
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    expect(
+      (wrapper.find(".git-push").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("本机未安装 git 时推送按钮禁用并提示", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(false);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const pushBtn = wrapper.find(".git-push");
+    expect((pushBtn.element as HTMLButtonElement).disabled).toBe(true);
+    expect(pushBtn.attributes("data-tip")).toBe("未检测到 git，无法推送");
+    wrapper.unmount();
+  });
+
+  it("拉取忙碌时推送按钮禁用（互斥）", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_git_available") return Promise.resolve(true);
+      if (cmd === "git_changes_pull") return new Promise(() => {});
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find(".git-pull").trigger("click");
+    expect(
+      (wrapper.find(".git-push").element as HTMLButtonElement).disabled,
     ).toBe(true);
     wrapper.unmount();
   });

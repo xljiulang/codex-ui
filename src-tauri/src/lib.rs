@@ -67,6 +67,8 @@ pub fn run() {
             codex::git::git_changes_init,
             codex::git::git_changes_commit,
             codex::git::git_changes_pull,
+            codex::git::git_changes_push,
+            codex::git::git_changes_git_available,
             codex::git::git_changes_branches,
             codex::git::git_changes_branch_create,
             codex::git::git_changes_branch_delete,
