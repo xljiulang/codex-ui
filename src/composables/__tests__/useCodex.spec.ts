@@ -445,7 +445,10 @@ describe("队列模式下发送提示", () => {
   });
 
   it("回合进行中且为队列模式：消息入队并提示", async () => {
+    const before = store.userSendRev;
     await sendPrompt("第二条消息");
+    // 手动发送标记递增（ChatView 据此强制吸底）；队列落地时不走 sendPrompt，不递增
+    expect(store.userSendRev).toBe(before + 1);
     expect(store.followupQueue).toHaveLength(1);
     expect(store.followupQueue[0].text).toBe("第二条消息");
     expect(store.toast).toContain("已加入队列");

@@ -106,6 +106,9 @@ export const store = reactive({
   activeWorkByThread: {} as Record<string, number>,
   // 任意消息变更（新增/完成/流式增量）都会递增，供吸底滚动等做 O(1) 变更感知
   itemsRev: 0,
+  // 用户手动发送计数器：每次 ComposerBar 提交（sendPrompt）递增，
+  // 供 ChatView 在发送后强制恢复吸底（排队消息自动发送不递增）
+  userSendRev: 0,
   turnActive: false,
   turnInterrupted: false,
   currentTurnId: null as string | null,
@@ -1154,6 +1157,9 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
 export async function sendPrompt(text: string, flip = false) {
   const attachments = store.attachments.splice(0);
   if (!text.trim() && attachments.length === 0) return;
+  // 手动发送标记：ChatView 据此在发送后强制恢复吸底回到底部
+  // （队列消息在回合结束后自动发送时走 continueTurn/newChat，不递增）
+  store.userSendRev++;
   // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
   if (store.turnActive && store.currentThreadId) {
     const base = store.settings.followup_mode;

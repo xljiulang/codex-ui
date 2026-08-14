@@ -93,6 +93,15 @@ function jumpToBottom() {
   scheduleScroll();
 }
 
+// 用户手动发送消息后强制恢复吸底：即使此前上滑查看历史已解除吸底，
+// 发送动作也应立即回到底部并继续跟随；排队消息自动发送不触发（不打断阅读位置）
+watch(
+  () => store.userSendRev,
+  () => {
+    jumpToBottom();
+  },
+);
+
 watch(
   [
     () => items.value.length,

@@ -14,6 +14,7 @@ vi.mock("../../composables/useCodex", () => {
     currentThreadId: null,
     activeWorkByThread: {},
     itemsRev: 0,
+    userSendRev: 0,
     interactions: [] as {
       requestId: number;
       method: string;
@@ -350,6 +351,73 @@ describe("ChatView 日期分隔线", () => {
     store.itemsRev++;
     await nextTick();
     expect(scroller.scrollTop).toBe(900); // 已解除，不再被拉回
+  });
+
+  it("上滑解除吸底后手动发送（userSendRev 递增）强制回到底部并继续吸底", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000
+    // 用户上滑 50px（dist 50 > 32）→ 解除吸底
+    scroller.scrollTop = 950;
+    const ev = new Event("scroll");
+    Object.defineProperty(ev, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(ev);
+    // 手动发送（sendPrompt 递增 userSendRev）→ 强制回到底部
+    store.userSendRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+    // 后续内容到达仍持续吸底
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
+  it("排队消息自动发送（仅追加 userMessage）不打断阅读位置", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    mockedItems.mockReturnValue(arr);
+    const wrapper = mount(ChatView, {
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000
+    // 用户上滑 50px（dist 50 > 32）→ 解除吸底
+    scroller.scrollTop = 950;
+    const ev = new Event("scroll");
+    Object.defineProperty(ev, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(ev);
+    // 队列消息在回合结束后自动落地：追加 userMessage，但 userSendRev 不变
+    arr.push({ id: "u1", type: "userMessage", text: "第二条" } as ThreadItem);
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(950); // 不被拉回，保持阅读位置
   });
 
   it("轻微上滑（不足解除阈值）不解除，新内容到达仍吸底跟随", async () => {
