@@ -1,4 +1,4 @@
-import { reactive, watch } from "vue";
+import { nextTick, reactive, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
@@ -26,6 +26,7 @@ import {
 } from "../lib/mention";
 import { playNotificationSound } from "../lib/sound";
 import { pathBaseName } from "../lib/format";
+import { focusComposer } from "../lib/composerFocus";
 import { applyTheme } from "./useTheme";
 
 const defaultSettings = (): AppSettings => ({
@@ -1197,10 +1198,9 @@ export async function executePlan() {
 
 /**
  * 新建空会话（所有 UI 入口的统一函数）：可预置本次会话的工作目录 cwd。
- * 头部「新建会话」与历史目录右键「新建会话」都调用本函数，
- * 避免各入口各自处理 newChatCwd / 标题刷新导致遗漏。
+ * 返回 true 表示已进入新会话；进行中会话确认被取消时返回 false（不切换）。
  */
-export async function newEmptyChat(cwd?: string | null) {
+export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   if (cwd) store.newChatCwd = cwd;
   // 会话进行中切换：先让用户确认（确认才停止旧回合并切换）
   if (store.turnActive && store.currentThreadId) {
@@ -1210,7 +1210,7 @@ export async function newEmptyChat(cwd?: string | null) {
       confirmLabel: "停止并切换",
       cancelLabel: "取消",
     });
-    if (!ok) return;
+    if (!ok) return false;
   }
   // 标准停止旧回合（与停止按钮一致，含目标模式清目标），再切换到新对话；
   // 显式传入旧线程/回合 id，避免切换后 store 已复位导致中断丢失。
@@ -1230,11 +1230,16 @@ export async function newEmptyChat(cwd?: string | null) {
   store.threadTokenUsage = null;
   store.goalText = null;
   await updateWindowTitle();
+  return true;
 }
 
-export async function openThread(threadId: string) {
+/**
+ * 打开历史会话：返回 true 表示成功切换到目标会话；
+ * 点击当前会话（无操作）或进行中会话确认被取消时返回 false。
+ */
+export async function openThread(threadId: string): Promise<boolean> {
   // 点击当前会话不产生任何影响（不重载、不重置运行状态，含进行中场景）
-  if (threadId === store.currentThreadId) return;
+  if (threadId === store.currentThreadId) return false;
   // 会话进行中切到其它会话：先让用户确认（点当前会话不算切换，不弹窗）
   if (
     store.turnActive &&
@@ -1247,7 +1252,7 @@ export async function openThread(threadId: string) {
       confirmLabel: "停止并切换",
       cancelLabel: "取消",
     });
-    if (!ok) return;
+    if (!ok) return false;
   }
   // 切换到其他会话前，标准停止旧回合（与停止按钮一致，含目标模式清目标）；
   // 点击当前正在进行的会话不算切换，不中断。
@@ -1293,6 +1298,7 @@ export async function openThread(threadId: string) {
       store.goalText = null;
     }
     await updateWindowTitle();
+    return true;
   } catch (e) {
     if (isThreadNotFound(e)) {
       resetToNewChat();
@@ -1300,9 +1306,36 @@ export async function openThread(threadId: string) {
     } else {
       setToast(toastError(e));
     }
+    return false;
   } finally {
     store.loadingThread = false;
   }
+}
+
+/** 切换会话成功后的统一收尾：关设置页 → 聚焦输入框 → 激活资源管理器加载工作目录 */
+async function finishSessionSwitch() {
+  store.showSettings = false;
+  await nextTick();
+  focusComposer();
+  activateResourcesTab();
+}
+
+/**
+ * 新建会话统一入口（头部按钮 / 历史目录右键「新建会话」）：
+ * 切换成功（未被取消）才聚焦输入框并激活资源管理器；标题更新由 newEmptyChat 原有逻辑负责。
+ */
+export async function openNewSession(cwd?: string | null): Promise<void> {
+  if (!(await newEmptyChat(cwd))) return;
+  await finishSessionSwitch();
+}
+
+/**
+ * 打开历史会话统一入口（会话行单击 / 右键「打开」）：
+ * 切换成功（未被取消）才聚焦输入框并激活资源管理器；点击当前会话视为无操作，不触发收尾。
+ */
+export async function openHistorySession(threadId: string): Promise<void> {
+  if (!(await openThread(threadId))) return;
+  await finishSessionSwitch();
 }
 
 /** 标准停止回合：与停止按钮一致，目标模式先清目标再 turn/interrupt；

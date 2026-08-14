@@ -1,18 +1,18 @@
-import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
-  return { ...mod, newEmptyChat: vi.fn() };
+  return { ...mod, openNewSession: vi.fn() };
 });
 
 import { invoke } from "@tauri-apps/api/core";
 import AppHeader from "../AppHeader.vue";
 import { tooltipDirective } from "../../directives/tooltip";
-import { newEmptyChat, store } from "../../composables/useCodex";
+import { openNewSession, store } from "../../composables/useCodex";
 
-const mockedNewChat = vi.mocked(newEmptyChat);
+const mockedOpenNewSession = vi.mocked(openNewSession);
 const mockedInvoke = vi.mocked(invoke);
 
 function mountHeader() {
@@ -28,7 +28,8 @@ describe("AppHeader 导航", () => {
     store.currentThreadCwd = null;
     store.server.workspace = "";
     store.panelTab = "history";
-    mockedNewChat.mockClear();
+    mockedOpenNewSession.mockClear();
+    mockedInvoke.mockResolvedValue("D:/project");
   });
 
   it("点设置打开设置页", async () => {
@@ -44,16 +45,14 @@ describe("AppHeader 导航", () => {
     await wrapper.find('button[aria-label="设置"]').trigger("click");
     expect(store.showSettings).toBe(false);
     expect(store.currentThreadId).toBe("t1");
-    expect(mockedNewChat).not.toHaveBeenCalled();
+    expect(mockedOpenNewSession).not.toHaveBeenCalled();
   });
 
-  it("设置打开时点新建会话：关闭设置并新建", async () => {
+  it("设置打开时点新建会话：调用统一新建入口", async () => {
     store.showSettings = true;
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
-    expect(store.showSettings).toBe(false);
-    expect(mockedNewChat).toHaveBeenCalledTimes(1);
-    expect(store.panelTab).toBe("resources");
+    expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
   });
 
   it("设置按钮无 active 态", async () => {
@@ -73,7 +72,7 @@ describe("AppHeader 新建会话选择工作目录", () => {
     store.newChatCwd = null;
     store.panelTab = "history";
     mockedInvoke.mockReset();
-    mockedNewChat.mockClear();
+    mockedOpenNewSession.mockClear();
   });
 
   it("点击新建会话先弹文件夹选择器，选中目录后写入并新建", async () => {
@@ -81,19 +80,19 @@ describe("AppHeader 新建会话选择工作目录", () => {
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
-    expect(mockedNewChat).toHaveBeenCalledWith("D:/project");
-    expect(mockedNewChat).toHaveBeenCalledTimes(1);
-    expect(store.panelTab).toBe("resources");
+    expect(mockedOpenNewSession).toHaveBeenCalledWith("D:/project");
+    expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
   });
 
-  it("取消选择文件夹仍新建会话，沿用当前工作目录", async () => {
+  it("取消选择文件夹：流程直接结束（不新建、不聚焦、不切 Tab）", async () => {
     mockedInvoke.mockResolvedValue(null);
+    store.showSettings = true;
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
-    expect(mockedNewChat).toHaveBeenCalledWith(null);
-    expect(mockedNewChat).toHaveBeenCalledTimes(1);
-    expect(store.panelTab).toBe("resources");
+    expect(mockedOpenNewSession).not.toHaveBeenCalled();
+    expect(store.panelTab).toBe("history");
+    expect(store.showSettings).toBe(true);
   });
 
   it("选择器打开期间按钮禁用，重复点击不会再次弹窗", async () => {
@@ -111,11 +110,11 @@ describe("AppHeader 新建会话选择工作目录", () => {
     expect(btn.attributes("disabled")).toBeDefined();
     await btn.trigger("click");
     expect(mockedInvoke).toHaveBeenCalledTimes(1);
-    expect(mockedNewChat).not.toHaveBeenCalled();
+    expect(mockedOpenNewSession).not.toHaveBeenCalled();
     resolveDir(null);
     await flushPromises();
     expect(btn.attributes("disabled")).toBeUndefined();
-    expect(mockedNewChat).toHaveBeenCalledTimes(1);
+    expect(mockedOpenNewSession).not.toHaveBeenCalled();
   });
 
   it("工作目录按钮已移除，头部只剩新建会话与设置两个图标按钮", () => {
@@ -127,40 +126,5 @@ describe("AppHeader 新建会话选择工作目录", () => {
       "新建会话",
       "设置",
     ]);
-  });
-});
-
-describe("AppHeader 新建会话聚焦输入框", () => {
-  afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
-    document.body.innerHTML = "";
-  });
-
-  it("优先通过 Tiptap 编辑器实例聚焦", async () => {
-    const focus = vi.fn();
-    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
-      commands: { focus },
-    };
-    const wrapper = mountHeader();
-
-    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
-    await wrapper.vm.$nextTick();
-
-    expect(focus).toHaveBeenCalledTimes(1);
-  });
-
-  it("无编辑器实例时兜底聚焦 .ProseMirror 元素", async () => {
-    const composer = document.createElement("div");
-    composer.className = "composer";
-    const editor = document.createElement("div");
-    editor.className = "ProseMirror";
-    composer.appendChild(editor);
-    document.body.appendChild(composer);
-    const wrapper = mountHeader();
-
-    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
-    await wrapper.vm.$nextTick();
-
-    expect(document.activeElement).toBe(editor);
   });
 });

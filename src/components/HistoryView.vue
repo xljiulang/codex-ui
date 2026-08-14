@@ -2,11 +2,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  activateResourcesTab,
   clearSearch,
   deleteThread,
-  newEmptyChat,
-  openThread,
+  openHistorySession,
+  openNewSession,
   renameThread,
   refreshThreads,
   searchThreads,
@@ -21,7 +20,6 @@ import { formatRelativeTime } from "../lib/format";
 import { groupThreads } from "../lib/historyGroup";
 import type { HistoryGroup } from "../lib/historyGroup";
 import type { ThreadSummary } from "../lib/types";
-import { focusComposer } from "../lib/composerFocus";
 import { debounce } from "../lib/debounce";
 import {
   ICON_ARROW_DOWN,
@@ -159,7 +157,11 @@ async function doDelete() {
 function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.(".rename-input")) return;
   openCtx(e, [
-    { label: "打开", icon: ICON_OPEN, action: () => void openThread(t.id) },
+    {
+      label: "打开",
+      icon: ICON_OPEN,
+      action: () => void openHistorySession(t.id),
+    },
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
     {
       label: t.isPinned ? "取消固定" : "置顶固定",
@@ -181,14 +183,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
     {
       label: "新建会话",
       icon: ICON_PLUS,
-      action: () => {
-        store.showSettings = false;
-        void newEmptyChat(group.path);
-        // 与头部「新建会话」一致：进入新对话后聚焦输入框
-        void nextTick(focusComposer);
-        // 与头部「新建会话」一致：右侧面板切回资源管理器 Tab
-        activateResourcesTab();
-      },
+      action: () => void openNewSession(group.path),
     },
     {
       label: "在资源管理器中打开",
@@ -294,7 +289,7 @@ onBeforeUnmount(() => {
             active: row.thread.id === store.currentThreadId,
             'folder-item': row.inFolder,
           }"
-          @click="openThread(row.thread.id)"
+          @click="openHistorySession(row.thread.id)"
           @contextmenu="openCtxMenu(row.thread, $event)"
         >
           <span class="history-main">

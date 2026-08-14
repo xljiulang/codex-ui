@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
+import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  activateResourcesTab,
-  newEmptyChat,
-  setToast,
-  store,
-  toastError,
-} from "../composables/useCodex";
-import { focusComposer } from "../lib/composerFocus";
+import { openNewSession, setToast, store, toastError } from "../composables/useCodex";
 import { ICON_PLUS } from "../lib/icons";
 
 // 选择文件夹对话框打开中：禁止重复触发，避免同时弹多个系统对话框
@@ -18,19 +11,15 @@ async function onNewChat() {
   if (picking.value) return;
   picking.value = true;
   try {
-    // 先选目录（用户取消也继续新建），选中则作为本次新建会话的工作目录
+    // 先选目录；取消选择文件夹则流程直接结束（不新建、不聚焦、不切 Tab）
     const dir = await invoke<string | null>("pick_directory");
-    void newEmptyChat(dir);
+    if (!dir) return;
+    await openNewSession(dir);
   } catch (e) {
     setToast(toastError(e));
   } finally {
     picking.value = false;
   }
-  store.showSettings = false;
-  // 无论是否发生了会话切换，新建对话后都让输入框重新获得焦点
-  void nextTick(focusComposer);
-  // 新建会话后右侧面板切回资源管理器 Tab
-  activateResourcesTab();
 }
 
 function onSettings() {

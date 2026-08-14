@@ -43,6 +43,8 @@ import {
   interrupt,
   loadSettings,
   newEmptyChat,
+  openHistorySession,
+  openNewSession,
   openThread,
   renameThread,
   refreshThreads,
@@ -599,7 +601,7 @@ describe("切换会话自动标准停止旧回合", () => {
     const p = newEmptyChat();
     expect(store.confirm?.title).toBe("切换会话");
     settleConfirm(true);
-    await p;
+    expect(await p).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
       threadId: "t1",
       turnId: "turn-1",
@@ -616,7 +618,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.currentTurnId = "turn-1";
     const p = newEmptyChat();
     settleConfirm(true);
-    await p;
+    expect(await p).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
       threadId: "t1",
     });
@@ -649,7 +651,7 @@ describe("切换会话自动标准停止旧回合", () => {
     });
     const p = openThread("t2");
     settleConfirm(true);
-    await p;
+    expect(await p).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("turn_interrupt", {
       threadId: "t1",
       turnId: "turn-1",
@@ -669,7 +671,7 @@ describe("切换会话自动标准停止旧回合", () => {
       }
       return Promise.resolve(undefined);
     });
-    await openThread("t1");
+    expect(await openThread("t1")).toBe(false);
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
     );
@@ -698,7 +700,7 @@ describe("切换会话自动标准停止旧回合", () => {
       return Promise.resolve(undefined);
     });
 
-    await openThread("t1");
+    expect(await openThread("t1")).toBe(false);
 
     expect(store.currentThreadId).toBe("t1");
     expect(store.currentThreadName).toBe("会话一");
@@ -715,7 +717,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.currentTurnId = "turn-1";
     const p = newEmptyChat();
     settleConfirm(false);
-    await p;
+    expect(await p).toBe(false);
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
     );
@@ -729,7 +731,7 @@ describe("切换会话自动标准停止旧回合", () => {
     store.currentTurnId = "turn-1";
     const p = openThread("t2");
     settleConfirm(false);
-    await p;
+    expect(await p).toBe(false);
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
     );
@@ -785,6 +787,116 @@ describe("切换会话自动标准停止旧回合", () => {
       turnId: "abc-123",
     });
     expect(store.currentTurnId).toBeNull();
+  });
+});
+
+describe("openNewSession / openHistorySession 统一收尾", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    store.threadPlugins = {};
+    store.turnActive = false;
+    store.turnInterrupted = false;
+    store.currentThreadId = null;
+    store.currentThreadName = "";
+    store.currentTurnId = null;
+    store.currentThreadOrigin = null;
+    store.currentThreadCwd = null;
+    store.resumedThreadId = null;
+    store.threadTokenUsage = null;
+    store.goalText = null;
+    store.taskMode = "execute";
+    store.confirm = null;
+    store.showSettings = false;
+    store.panelTab = "history";
+    store.newChatCwd = null;
+  });
+
+  it("openNewSession 成功后：关设置页、聚焦输入框、切回资源 Tab", async () => {
+    store.showSettings = true;
+    const focus = vi.fn();
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
+      commands: { focus },
+    };
+    try {
+      await openNewSession("D:/projects/B");
+      expect(store.newChatCwd).toBe("D:/projects/B");
+      expect(store.showSettings).toBe(false);
+      expect(store.panelTab).toBe("resources");
+      expect(focus).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
+    }
+  });
+
+  it("openNewSession：进行中会话确认取消，不聚焦、不切 Tab、不改设置", async () => {
+    store.showSettings = true;
+    store.turnActive = true;
+    store.currentThreadId = "t1";
+    store.currentTurnId = "turn-1";
+    const focus = vi.fn();
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
+      commands: { focus },
+    };
+    try {
+      const p = openNewSession("D:/projects/B");
+      settleConfirm(false);
+      await p;
+      expect(store.currentThreadId).toBe("t1");
+      expect(store.showSettings).toBe(true);
+      expect(store.panelTab).toBe("history");
+      expect(focus).not.toHaveBeenCalled();
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
+    }
+  });
+
+  it("openHistorySession 成功后：关设置页、聚焦输入框、切回资源 Tab", async () => {
+    store.showSettings = true;
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", cwd: "D:/projects/B", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    const focus = vi.fn();
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
+      commands: { focus },
+    };
+    try {
+      await openHistorySession("t2");
+      expect(store.currentThreadId).toBe("t2");
+      expect(store.currentThreadCwd).toBe("D:/projects/B");
+      expect(store.showSettings).toBe(false);
+      expect(store.panelTab).toBe("resources");
+      expect(focus).toHaveBeenCalledTimes(1);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
+    }
+  });
+
+  it("openHistorySession：点击当前会话不聚焦、不切 Tab", async () => {
+    store.currentThreadId = "t1";
+    const focus = vi.fn();
+    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
+      commands: { focus },
+    };
+    try {
+      await openHistorySession("t1");
+      expect(focus).not.toHaveBeenCalled();
+      expect(store.panelTab).toBe("history");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
+    }
   });
 });
 

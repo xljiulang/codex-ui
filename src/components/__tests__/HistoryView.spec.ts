@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
@@ -6,9 +6,9 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   return {
     ...mod,
     deleteThread: vi.fn(),
-    newEmptyChat: vi.fn(),
+    openHistorySession: vi.fn(),
+    openNewSession: vi.fn(),
     togglePin: vi.fn(),
-    openThread: vi.fn(),
     refreshThreads: vi.fn(),
     searchThreads: vi.fn(),
   };
@@ -22,8 +22,8 @@ import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
 import {
   deleteThread,
-  newEmptyChat,
-  openThread,
+  openHistorySession,
+  openNewSession,
   refreshThreads,
   searchThreads,
   store,
@@ -31,9 +31,9 @@ import {
 } from "../../composables/useCodex";
 
 const mockedDelete = vi.mocked(deleteThread);
-const mockedNewEmptyChat = vi.mocked(newEmptyChat);
+const mockedOpenNewSession = vi.mocked(openNewSession);
+const mockedOpenHistorySession = vi.mocked(openHistorySession);
 const mockedTogglePin = vi.mocked(togglePin);
-const mockedOpen = vi.mocked(openThread);
 const mockedRefresh = vi.mocked(refreshThreads);
 const mockedSearch = vi.mocked(searchThreads);
 const mockedInvoke = vi.mocked(invoke);
@@ -174,7 +174,7 @@ describe("HistoryView 右键菜单", () => {
     mockBasicHistory();
     store.searchActive = false;
     store.searchSnippets = {};
-    mockedOpen.mockClear();
+    mockedOpenHistorySession.mockClear();
   });
 
   it("右键会话行显示四项菜单：打开/重命名/置顶固定/删除会话", async () => {
@@ -210,11 +210,11 @@ describe("HistoryView 右键菜单", () => {
     expect(wrapper.findAll(".ctx-menu-item.danger")).toHaveLength(1);
   });
 
-  it("点击“打开”调用 openThread 并关闭菜单", async () => {
+  it("点击“打开”调用 openHistorySession 并关闭菜单", async () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "打开");
-    expect(mockedOpen).toHaveBeenCalledWith("t1");
+    expect(mockedOpenHistorySession).toHaveBeenCalledWith("t1");
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });
 
@@ -267,14 +267,14 @@ describe("HistoryView 单击打开会话", () => {
     mockBasicHistory();
     store.searchActive = false;
     store.searchSnippets = {};
-    mockedOpen.mockClear();
+    mockedOpenHistorySession.mockClear();
   });
 
-  it("单击会话行调用 openThread", async () => {
+  it("单击会话行调用 openHistorySession", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.findAll(".history-item")[0].trigger("click");
 
-    expect(mockedOpen).toHaveBeenCalledWith("t1");
+    expect(mockedOpenHistorySession).toHaveBeenCalledWith("t1");
     wrapper.unmount();
   });
 });
@@ -488,16 +488,15 @@ describe("HistoryView 文件夹右键菜单", () => {
     wrapper.unmount();
   });
 
-  it("点击“新建会话”预置分组目录并进入新对话", async () => {
+  it("点击“新建会话”预置分组目录并进入统一新建入口", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
     await clickCtxItem(wrapper, "新建会话");
-    expect(mockedNewEmptyChat).toHaveBeenCalledWith("D:\\codex\\codex-ui");
-    expect(mockedNewEmptyChat).toHaveBeenCalledTimes(1);
-    expect(store.panelTab).toBe("resources");
+    expect(mockedOpenNewSession).toHaveBeenCalledWith("D:\\codex\\codex-ui");
+    expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
@@ -513,66 +512,6 @@ describe("HistoryView 文件夹右键菜单", () => {
       path: "D:\\codex\\codex-ui",
     });
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
-    wrapper.unmount();
-  });
-});
-
-describe("HistoryView 新建会话聚焦输入框", () => {
-  afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
-    document.body.innerHTML = "";
-  });
-
-  beforeEach(() => {
-    store.threads = [
-      {
-        id: "t1",
-        name: "会话一",
-        createdAt: now,
-        recencyAt: 3,
-        cwd: "D:\\codex\\codex-ui",
-      },
-    ];
-    store.loadingHistory = false;
-    store.searchActive = false;
-    store.searchSnippets = {};
-    store.newChatCwd = null;
-    store.panelTab = "history";
-    mockedNewEmptyChat.mockClear();
-  });
-
-  it("点击“新建会话”后优先通过 Tiptap 实例聚焦输入框", async () => {
-    const focus = vi.fn();
-    (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
-      commands: { focus },
-    };
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
-      clientX: 200,
-      clientY: 200,
-    });
-    await clickCtxItem(wrapper, "新建会话");
-    await wrapper.vm.$nextTick();
-    expect(focus).toHaveBeenCalledTimes(1);
-    expect(store.panelTab).toBe("resources");
-    wrapper.unmount();
-  });
-
-  it("无编辑器实例时兜底聚焦 .ProseMirror 元素", async () => {
-    const composer = document.createElement("div");
-    composer.className = "composer";
-    const editor = document.createElement("div");
-    editor.className = "ProseMirror";
-    composer.appendChild(editor);
-    document.body.appendChild(composer);
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
-      clientX: 200,
-      clientY: 200,
-    });
-    await clickCtxItem(wrapper, "新建会话");
-    await wrapper.vm.$nextTick();
-    expect(document.activeElement).toBe(editor);
     wrapper.unmount();
   });
 });
