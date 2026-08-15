@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
 import GitHistoryList from "./GitHistoryList.vue";
@@ -69,8 +70,6 @@ const branchMenuOpen = ref(false);
 const branchBusy = ref(false);
 const pullBusy = ref(false);
 const pushBusy = ref(false);
-const commitMessage = ref("");
-const commitBusy = ref(false);
 
 const ICON_STAGE =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
@@ -82,8 +81,6 @@ const ICON_IGNORE =
   "M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z";
 const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
-const ICON_CHECK =
-  "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z";
 
 /** 分区：更改（工作区侧） / 暂存更改（HEAD→索引侧） */
 type GitSection = "changes" | "staged";
@@ -170,13 +167,6 @@ function attemptReveal() {
 // diff 标签激活请求 / git 状态晚加载：定位并高亮对应变更行
 watch([gitRevealTarget, gitStatus], () => attemptReveal());
 
-const canCommit = computed(
-  () =>
-    !commitBusy.value &&
-    !!commitMessage.value.trim() &&
-    stagedCount.value > 0,
-);
-
 /** 变更文件 → FsEntry（供系统文件图标管线复用；repoWorkspace 为空时回退相对路径） */
 function gitFileEntry(file: GitFile): FsEntry {
   const root = repoWorkspace.value;
@@ -212,33 +202,6 @@ watch(
     if (files.length) void ensureEntryIcons(files, root);
   },
 );
-
-const commitHint = computed(() =>
-  stagedCount.value > 0
-    ? `将提交 ${stagedCount.value} 个文件`
-    : "先在上方暂存更改",
-);
-
-/** 提交已暂存更改；成功后清空消息并刷新状态 */
-async function doCommit() {
-  if (!canCommit.value) return;
-  const root = gitStatus.value?.repoWorkspace;
-  if (!root) return;
-  commitBusy.value = true;
-  try {
-    const st = await invoke<GitStatus>("git_changes_commit", {
-      workspace: root,
-      message: commitMessage.value.trim(),
-    });
-    gitStatus.value = st;
-    commitMessage.value = "";
-    setToast("提交成功");
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    commitBusy.value = false;
-  }
-}
 
 /** 拉取远端更新；游离 HEAD 或忙碌时禁用 */
 async function doPull() {
@@ -792,29 +755,11 @@ async function restoreDir(node: GitDirNode) {
           </span>
         </div>
         <template v-if="!isSectionCollapsed('staged')">
-          <div class="git-commit-bar">
-            <textarea
-              v-model="commitMessage"
-              class="git-commit-input"
-              rows="2"
-              placeholder="提交消息（Ctrl+Enter 提交）"
-              :disabled="commitBusy"
-              @keydown.ctrl.enter="doCommit()"
-            ></textarea>
-            <div class="git-commit-row">
-              <button
-                class="git-commit-btn"
-                :disabled="!canCommit"
-                @click="doCommit()"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_CHECK" />
-                </svg>
-                <span>{{ commitBusy ? "提交中…" : "提交" }}</span>
-              </button>
-              <span class="git-commit-hint">{{ commitHint }}</span>
-            </div>
-          </div>
+          <GitCommitBar
+            :workspace="repoWorkspace"
+            :staged-count="stagedCount"
+            @committed="applyBranchStatus"
+          />
           <GitFileTree
             :rows="stagedRows"
             section="staged"
