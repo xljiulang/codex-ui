@@ -1,0 +1,319 @@
+import { markRaw, reactive } from "vue";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  buildSaveContent,
+  detectEol,
+  normalizeForEditor,
+  stripBom,
+} from "../../lib/editorFile";
+import { formatTimeHMS, pathBaseName } from "../../lib/format";
+import { assetUrl } from "../../lib/asset";
+import { base64ToBytes, type PreviewType } from "../../lib/preview";
+import type { DiffRow } from "../../lib/types";
+import {
+  attachTerminal,
+  ensureTerminalListeners,
+} from "../useTerminalEvents";
+import { TabIcon, TabKind } from "../../lib/tabs";
+import { activeTabId, insertTab, tabs } from "../useTabs";
+import type {
+  DiffEditorTab,
+  DiffPreviewParams,
+  EditorTab,
+  FileEditorTab,
+  PreviewEditorTab,
+  TerminalEditorTab,
+} from "./types";
+
+/** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
+interface TextFileContent {
+  content: string;
+  validUtf8: boolean;
+  byteSize: number;
+}
+
+/** 会话二进制文件读取结果（与 Rust session_fs_read_bytes 返回结构一致） */
+interface BinaryFileContent {
+  content: string;
+  byteSize: number;
+}
+
+function fileTabId(workspace: string, path: string): string {
+  return "file:" + JSON.stringify([workspace, path]);
+}
+
+function diffTabId(p: DiffPreviewParams): string {
+  return "diff:" + JSON.stringify([p.workspace, p.path, p.kind]);
+}
+
+function previewTabId(
+  type: PreviewType,
+  workspace: string,
+  path: string,
+): string {
+  return `preview:${type}:${JSON.stringify([workspace, path])}`;
+}
+
+/** 终端标签自增序号：保证同一毫秒内连续多开也生成不同 id */
+let terminalSeq = 0;
+
+/**
+ * 打开终端标签：每次调用都新建独立会话（支持同目录多开），生成唯一 id、
+ * 激活标签后向后端发起 terminal_spawn；失败保留标签并记录错误。
+ */
+export async function openTerminalTab(workspace: string): Promise<void> {
+  const id = `terminal:${++terminalSeq}:${Date.now()}`;
+  const tab = reactive({
+    kind: TabKind.Terminal,
+    id,
+    workspace,
+    // 终端标签标题固定为 PowerShell，不随工作目录变化；多开时同名
+    title: "PowerShell",
+    icon: TabIcon.Terminal,
+    loading: true,
+    error: "",
+    busy: false,
+    exited: false,
+    exitCode: null,
+  }) as unknown as TerminalEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    // 先注册全局事件监听并建立缓冲，再 spawn，避免启动输出（含 ConPTY DSR
+    // 查询）在懒加载面板挂载前丢失导致首个终端空白。
+    await ensureTerminalListeners();
+    attachTerminal(id);
+    await invoke("terminal_spawn", { id, workspace });
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+    // 启动期间标签已被关闭（closeTab 先执行）：spawn 完成后回收后端会话，
+    // 避免遗留无人引用的 PTY 进程
+    if (!tabs.some((t) => t.id === id)) {
+      void invoke("terminal_kill", { id }).catch(() => {});
+    }
+  }
+}
+
+/**
+ * 打开文本文件标签：已打开则直接激活；否则新建标签并异步读取内容、
+ * 构建 CodeMirror 状态（按标签闭包维护 dirty/cursor/最新 state）。
+ */
+export async function openFileTab(
+  workspace: string,
+  path: string,
+): Promise<void> {
+  const id = fileTabId(workspace, path);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  // reactive 的类型会深展开 EditorState，这里用断言还原为标签类型；
+  // 运行时编辑器状态在赋值时均已 markRaw，不会被深度代理。
+  const tab = reactive({
+    kind: TabKind.File,
+    id,
+    workspace,
+    path,
+    title: pathBaseName(path) || path,
+    icon: TabIcon.File,
+    loading: true,
+    error: "",
+    readOnly: false,
+    dirty: false,
+    saving: false,
+    wrap: false,
+    markdownPreview: false,
+    eol: "\n",
+    hadBom: false,
+    byteSize: null,
+    cursor: { line: 1, col: 1 },
+    status: "",
+    editorState: null,
+    savedText: null,
+    wrapCompartment: null,
+  }) as unknown as FileEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    const info = await invoke<TextFileContent>("session_fs_read", {
+      workspace,
+      path,
+    });
+    const ro = !info.validUtf8;
+    const { text, hadBom } = stripBom(info.content);
+    const lineEol = detectEol(text);
+    const doc = normalizeForEditor(text, lineEol);
+    // CodeMirror 相关模块仅在首次打开文件时加载（保持主包轻量）
+    const [{ buildEditorExtensions, createEditorState, languageForPath }, { Compartment }] =
+      await Promise.all([
+        import("../../lib/editorSetup"),
+        import("@codemirror/state"),
+      ]);
+    const wrapCompartment = new Compartment();
+    const state = createEditorState(
+      doc,
+      buildEditorExtensions({
+        language: languageForPath(path),
+        readOnly: ro,
+        wrap: false,
+        wrapCompartment,
+        savedText: () => tab.savedText,
+        onDirtyChange: (d) => {
+          tab.dirty = d;
+        },
+        onCursorChange: (line, col) => {
+          tab.cursor = { line, col };
+        },
+        onSave: () => {
+          void saveFileTab(tab.id);
+        },
+        onStateChange: (s) => {
+          tab.editorState = markRaw(s);
+        },
+      }),
+    );
+    tab.readOnly = ro;
+    tab.eol = lineEol;
+    tab.hadBom = hadBom;
+    tab.byteSize = info.byteSize;
+    tab.wrapCompartment = markRaw(wrapCompartment);
+    tab.editorState = markRaw(state);
+    tab.savedText = markRaw(state.doc);
+    if (ro) {
+      tab.status = "文件不是 UTF-8 编码，已以只读方式打开";
+    }
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
+
+/** 保存指定文件标签；成功返回 true 并复位脏标记 */
+export async function saveFileTab(id: string): Promise<boolean> {
+  const tab = tabs.find(
+    (t): t is FileEditorTab => t.kind === TabKind.File && t.id === id,
+  );
+  if (!tab || !tab.editorState || tab.readOnly || !tab.dirty || tab.saving) {
+    return false;
+  }
+  tab.saving = true;
+  try {
+    const content = buildSaveContent(
+      tab.editorState.doc.toString(),
+      tab.eol,
+      tab.hadBom,
+    );
+    await invoke("session_fs_write", {
+      workspace: tab.workspace,
+      path: tab.path,
+      content,
+    });
+    tab.savedText = markRaw(tab.editorState.doc);
+    tab.dirty = false;
+    tab.status = `已保存 ${formatTimeHMS(Date.now())}`;
+    return true;
+  } catch (e) {
+    tab.status = `保存失败：${String(e)}`;
+    return false;
+  } finally {
+    tab.saving = false;
+  }
+}
+
+/** 打开 diff 预览标签：已打开则激活；否则取行数据后展示 */
+export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
+  const id = diffTabId(params);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  const tab = reactive({
+    kind: TabKind.Diff,
+    id,
+    path: params.path,
+    changeKind: params.kind,
+    workspace: params.workspace,
+    title: pathBaseName(params.path) || params.path,
+    icon: TabIcon.File,
+    loading: true,
+    error: "",
+    rows: [],
+    fallback: params.diff,
+    brief: false,
+  }) as unknown as DiffEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    const rows = await invoke<DiffRow[]>("build_diff_preview", { params });
+    tab.rows = rows ?? [];
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
+
+/**
+ * 打开特殊文件预览标签（PDF / 图像）：已打开则激活；否则新建标签并异步准备数据。
+ * 图像直接经 asset 协议取 URL；PDF 经 session_fs_read_bytes 读取 base64 后解码为字节。
+ */
+export async function openPreviewTab(
+  type: PreviewType,
+  workspace: string,
+  path: string,
+): Promise<void> {
+  const id = previewTabId(type, workspace, path);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  const tab = reactive({
+    kind: TabKind.Preview,
+    previewType: type,
+    id,
+    workspace,
+    path,
+    title: pathBaseName(path) || path,
+    icon: TabIcon.File,
+    loading: true,
+    error: "",
+    imageUrl: "",
+    pdfData: null,
+    pageCount: null,
+  }) as unknown as PreviewEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    if (type === "image") {
+      tab.imageUrl = assetUrl(path);
+    } else {
+      const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
+        workspace,
+        path,
+      });
+      tab.pdfData = base64ToBytes(info.content);
+    }
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
+
+/** 运行中终端判定：命令执行中（busy）且未退出、无错误（与标签呼吸灯同源） */
+export function isTerminalBusy(tab: EditorTab): boolean {
+  return tab.kind === TabKind.Terminal && tab.busy && !tab.exited && !tab.error;
+}
+
+/** 文件是否已打开（存在 workspace+path 相同的文件编辑器或预览标签；diff 不计） */
+export function isFileTabOpen(workspace: string, path: string): boolean {
+  return tabs.some(
+    (t) =>
+      (t.kind === TabKind.File || t.kind === TabKind.Preview) &&
+      t.workspace === workspace &&
+      t.path === path,
+  );
+}
