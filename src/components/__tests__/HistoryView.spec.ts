@@ -23,6 +23,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
+import { ICON_SESSION } from "../../lib/icons";
 import {
   deleteThread,
   openHistorySession,
@@ -546,6 +547,11 @@ describe("HistoryView 文件夹右键菜单", () => {
       "在资源管理器中打开",
       "删除所有会话",
     ]);
+    // 「新建会话」复用标签栏「+」菜单的六边形 Logo 图标
+    const item = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text().trim() === "新建会话")!;
+    expect(item.find("svg path").attributes("d")).toBe(ICON_SESSION);
     const del = wrapper
       .findAll(".ctx-menu-item")
       .find((b) => b.text().trim() === "删除所有会话")!;

@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  openNewSession,
   setToast,
   toastError,
   workspace,
@@ -20,6 +19,7 @@ import {
   pasteInto,
   probeTextEntry,
   refreshAll,
+  revealActiveTab,
   renameEntry,
   revealInExplorer,
   revealInTree,
@@ -110,7 +110,11 @@ const suppressClick = ref(false);
 
 watch(
   () => props.active,
-  (v) => setSessionFsActive(v),
+  (v) => {
+    setSessionFsActive(v);
+    // 面板切换进入时按活动标签（文件/diff/预览）工作区重载并定位
+    if (v) void revealActiveTab();
+  },
   { immediate: true },
 );
 
@@ -144,11 +148,6 @@ async function openRootMenu(e: MouseEvent) {
   if (!root) return;
   const canPaste = await pasteAvailable();
   openCtx(e, [
-    {
-      label: "新建会话",
-      icon: ICON_PLUS,
-      action: () => void openNewSession(root.path),
-    },
     {
       label: "新建文本文件",
       icon: ICON_PLUS,

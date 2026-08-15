@@ -56,7 +56,8 @@ watch(
   (v) => {
     setGitChangesActive(v);
     if (v) void checkGitAvailable();
-    if (v && selectedGitPath.value) attemptReveal();
+    // 面板切换进入时无条件重试：diff 标签激活早于 git 状态加载也能定位
+    if (v) attemptReveal();
   },
   { immediate: true },
 );

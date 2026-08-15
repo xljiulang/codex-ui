@@ -34,6 +34,9 @@ export const ICON_CHEVRON_DOWN = "M4 6l4 4 4-4z";
 /** 目标：旗帜（目标芯片的设置/取消按钮与状态展示共用） */
 export const ICON_GOAL = "M4 3h2v18H4zm2 1h13l-2.8 4 2.8 4H6z";
 
+/** 会话：六边形 Logo（会话标签、标签栏「+」菜单与历史分组右键「新建会话」共用） */
+export const ICON_SESSION = "M12 2l8.66 5v10L12 22l-8.66-5V7z";
+
 /** 关闭其它所有标签：交叠标签卡片 + 关闭叉（需配合 fill-rule="evenodd" 挖空） */
 export const ICON_CLOSE_ALL =
   "M5 3h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 3v8h8V6H5z" +

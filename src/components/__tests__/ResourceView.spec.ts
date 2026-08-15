@@ -5,7 +5,6 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
-    openNewSession: vi.fn(),
     refreshThreads: vi.fn(),
   };
 });
@@ -20,10 +19,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
-import { openNewSession, store } from "../../composables/useCodex";
+import { store } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
+  openFileTab,
   tabs,
   type FileEditorTab,
   type PreviewEditorTab,
@@ -35,7 +35,6 @@ import { TabIcon, TabKind } from "../../lib/tabs";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
-const mockedOpenNewSession = vi.mocked(openNewSession);
 const rootPath = "D:\\codex\\codex-ui";
 
 const rootEntry: FsEntry = {
@@ -154,6 +153,9 @@ function mockFs() {
     if (cmd === "session_fs_read_bytes") {
       return Promise.resolve({ content: "JVBERi0x", byteSize: 8 });
     }
+    if (cmd === "session_fs_read") {
+      return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+    }
     if (cmd === "startup_workspace") return Promise.resolve(rootPath);
     if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
     if (cmd === "session_fs_create_dir") {
@@ -241,7 +243,6 @@ describe("ResourceView 文件树", () => {
     createdTextFile = null;
     txtIconUri = "data:image/png;base64,TXTICON";
     mockedInvoke.mockClear();
-    mockedOpenNewSession.mockClear();
     mockFs();
     __resetSessionFsForTest();
     __resetEditorTabsForTest();
@@ -596,18 +597,46 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("根节点右键菜单含新建会话、粘贴、在此打开终端与在资源管理器中打开", async () => {
+  it("根节点右键菜单不含新建会话，保留粘贴、在此打开终端与在资源管理器中打开", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-root");
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).toEqual([
-      "新建会话",
       "新建文本文件",
       "新建文件夹",
       "粘贴",
       "在此打开终端",
       "在资源管理器中打开",
     ]);
+    wrapper.unmount();
+  });
+
+  it("面板重新激活时按活动文件标签定位：展开祖先目录并选中文件", async () => {
+    const wrapper = await mountPanel();
+    // 初始仅展开第一层：src 目录收起，main.ts 不可见
+    expect(wrapper.text()).not.toContain("main.ts");
+
+    // 面板隐藏期间激活 src/main.ts 文件标签（EditorPane 的激活 watcher 同样会定位）
+    await wrapper.setProps({ active: false });
+    await openFileTab(rootPath, mainTs.path);
+    await flushPromises();
+
+    // 切回资源面板：按活动标签重新定位
+    await wrapper.setProps({ active: true });
+    await flushPromises();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("main.ts");
+    expect(
+      wrapper
+        .findAll(".resource-row.resource-file")
+        .find((r) => r.text().includes("main.ts"))
+        ?.classes(),
+    ).toContain("active");
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_list", {
+      workspace: rootPath,
+      dir: srcDir.path,
+    });
     wrapper.unmount();
   });
 
@@ -786,16 +815,6 @@ describe("ResourceView 文件树", () => {
       .find((b) => b.text().trim() === "新建文本文件")!;
     expect(item.find(".ctx-menu-item-img").exists()).toBe(false);
     expect(item.find("svg").exists()).toBe(true);
-    wrapper.unmount();
-  });
-
-  it("根节点「新建会话」：以工作根目录调用统一新建入口并关闭菜单", async () => {
-    const wrapper = await mountPanel();
-    await openRowCtx(wrapper, ".resource-row.resource-root");
-    await clickCtxItem(wrapper, "新建会话");
-    expect(mockedOpenNewSession).toHaveBeenCalledWith(rootPath);
-    expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
-    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 

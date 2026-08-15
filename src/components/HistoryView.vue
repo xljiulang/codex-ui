@@ -40,9 +40,9 @@ import {
   ICON_FOLDER_OPEN,
   ICON_OPEN,
   ICON_PIN,
-  ICON_PLUS,
   ICON_REFRESH,
   ICON_RENAME,
+  ICON_SESSION,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -242,7 +242,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
   const items: CtxItem[] = [
     {
       label: "新建会话",
-      icon: ICON_PLUS,
+      icon: ICON_SESSION,
       action: () => void openNewSession(group.path),
     },
     {

@@ -56,6 +56,7 @@ import {
   ICON_CLOSE_LEFT,
   ICON_CLOSE_RIGHT,
   ICON_REVEAL,
+  ICON_SESSION,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -346,9 +347,6 @@ watch(activeTabId, (id) => {
     activeTabId.value = store.activeSessionId;
   }
 });
-
-/** 会话六边形 Logo 路径（「新建会话」菜单项图标） */
-const ICON_SESSION = "M12 2l8.66 5v10L12 22l-8.66-5V7z";
 
 /** 活动标签的工作区：活动编辑器标签取 tab.workspace，活动会话标签取记录 workspace */
 const activeWorkspace = computed((): string | null => {

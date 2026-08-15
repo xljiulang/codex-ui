@@ -2519,4 +2519,39 @@ describe("GitView diff 标签联动定位", () => {
     expect(row.classes()).toContain("selected");
     wrapper.unmount();
   });
+
+  it("git 状态晚于 diff 目标加载、面板激活后仍定位", async () => {
+    // 状态延迟返回：diff 目标先设置、面板尚未激活时状态尚未就绪
+    let resolveStatus: (v: GitStatus) => void = () => {};
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return new Promise<GitStatus>((resolve) => {
+          resolveStatus = resolve;
+        });
+      }
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mountGitView({ props: { active: false } });
+    await flushPromises();
+    revealGitFile(rootPath, "src/b.txt");
+    await flushPromises();
+    expect(wrapper.find('[data-git-path="src/b.txt"]').exists()).toBe(false);
+
+    // 激活面板：状态随后返回，仍应定位并高亮活动 diff 文件
+    await wrapper.setProps({ active: true });
+    resolveStatus(revealStatus);
+    await flushPromises();
+
+    const row = wrapper.find('[data-git-path="src/b.txt"]');
+    expect(row.exists()).toBe(true);
+    expect(row.classes()).toContain("selected");
+    wrapper.unmount();
+  });
 });

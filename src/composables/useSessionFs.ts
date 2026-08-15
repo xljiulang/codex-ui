@@ -2,7 +2,8 @@ import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { setToast, store, toastError, workspace } from "./useCodex";
-import { openFileTab, openPreviewTab } from "./useEditorTabs";
+import { activeTab, openFileTab, openPreviewTab } from "./useEditorTabs";
+import { TabKind } from "../lib/tabs";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
@@ -315,6 +316,17 @@ async function revealAbsPath(absPath: string, expandTarget: boolean): Promise<vo
 /** Tab 激活同步入口：文件/预览/Diff 标签带绝对路径时调用；工作区外路径自动跳过 */
 export async function revealAbsPathInTree(absPath: string): Promise<void> {
   await revealAbsPath(absPath, false);
+}
+
+/** 面板切换同步入口：活动标签为 文件/diff/预览 时在资源树中定位（终端/会话标签不定位） */
+export async function revealActiveTab(): Promise<void> {
+  const tab = activeTab.value;
+  if (!tab || tab.kind === TabKind.Terminal) return;
+  // 会话标签不参与 activeTab（会话标签由 sessionTabs 管理），此处只剩 文件/diff/预览
+  const absPath = /^[A-Za-z]:[\\/]/.test(tab.path)
+    ? tab.path
+    : joinFsPath(tab.workspace, tab.path);
+  await revealAbsPathInTree(absPath);
 }
 
 /** 点击搜索结果：展开祖先目录、清除搜索、选中并滚动到树中该行 */
