@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -610,14 +610,6 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
         return Err(git_err(format!("当前已在分支 {name}")));
     }
 
-    // 守卫 1：有已跟踪改动时拒绝切换，避免覆盖本地修改
-    if repo
-        .is_dirty()
-        .map_err(|e| git_err(format!("检查工作区状态失败: {e}")))?
-    {
-        return Err(git_err("工作区有已跟踪的改动，请先提交或还原后再切换分支"));
-    }
-
     let target_tree_id = target_ref
         .peel_to_id()
         .map_err(|e| git_err(format!("解析分支 {name} 失败: {e}")))?;
@@ -646,25 +638,98 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
         )
         .map_err(|e| git_err(format!("计算分支差异失败: {e}")))?;
 
-    // 守卫 2：目标路径已存在但未被跟踪（未跟踪文件将被覆盖）
     let old_index = repo
         .index_or_empty()
         .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
+
+    // 冲突检查：未跟踪文件将被覆盖 / 本地改动与目标内容不一致。
+    // 语义对齐 git checkout：无冲突即可切换，未提交改动随分支携带。
+    let mut untracked_overwrite: Option<String> = None;
+    let mut conflicts: Vec<String> = Vec::new();
+    // 携带路径 + 工作区快照（回滚时优先还原，避免覆盖丢失本地编辑）
+    let mut carried: Vec<(String, Option<Vec<u8>>)> = Vec::new();
+
     for change in &changes {
         let location = match change {
             gix::diff::tree_with_rewrites::Change::Addition { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { location, .. } => location,
+            | gix::diff::tree_with_rewrites::Change::Modification { location, .. }
+            | gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => location,
             _ => continue,
         };
         // 目录级（tree）条目在索引中没有对应条目，且真实碰撞由文件级变化逐条校验，跳过
         if change.entry_mode().is_tree() {
             continue;
         }
-        if workdir.join(path_str(location.as_ref())).exists()
-            && old_index.entry_by_path(location.as_ref()).is_none()
+        let rel = path_str(location.as_ref());
+        let index_entry = old_index.entry_by_path(location.as_ref());
+        let work_exists = workdir.join(&rel).exists();
+
+        // 未跟踪文件将被覆盖（目标新增/修改路径已存在且不在索引）
+        if matches!(
+            change,
+            gix::diff::tree_with_rewrites::Change::Addition { .. }
+                | gix::diff::tree_with_rewrites::Change::Modification { .. }
+        ) && work_exists
+            && index_entry.is_none()
         {
-            return Err(git_err(format!("未跟踪文件将被覆盖: {}", path_str(location.as_ref()))));
+            if untracked_overwrite.is_none() {
+                untracked_overwrite = Some(rel);
+            }
+            continue;
         }
+
+        // 本地改动判定：工作区/索引与 HEAD 不一致，或索引新增
+        let head_id = old_tree
+            .lookup_entry_by_path(Path::new(&rel))
+            .map_err(|e| git_err(format!("读取 HEAD 条目失败: {e}")))?
+            .map(|e| e.id().detach());
+        let target_id = match change {
+            gix::diff::tree_with_rewrites::Change::Addition { id, .. }
+            | gix::diff::tree_with_rewrites::Change::Modification { id, .. } => Some(*id),
+            gix::diff::tree_with_rewrites::Change::Deletion { .. } => None,
+            _ => None,
+        };
+        let work = std::fs::read(workdir.join(&rel)).ok();
+
+        let mut local_modified = false;
+        if let Some(hid) = head_id {
+            let head_bytes = repo
+                .find_object(hid)
+                .ok()
+                .map(|mut o| std::mem::take(&mut o.data));
+            let work_modified = head_bytes.as_deref() != work.as_deref();
+            let index_modified = index_entry.map(|e| e.id != hid).unwrap_or(true);
+            local_modified = work_modified || index_modified;
+        } else if index_entry.is_some() {
+            local_modified = true; // 索引新增（staged new）
+        }
+        if !local_modified {
+            continue;
+        }
+
+        // 冲突：本地有改动且目标内容与本地不一致才拒绝
+        let target_bytes = target_id
+            .and_then(|tid| repo.find_object(tid).ok())
+            .map(|mut o| std::mem::take(&mut o.data));
+        let conflict = match target_bytes {
+            Some(tb) => !(work.is_some() && work.as_deref() == Some(tb.as_slice())),
+            None => work.is_some(),
+        };
+        if conflict {
+            conflicts.push(rel);
+        } else {
+            carried.push((rel, work));
+        }
+    }
+
+    if let Some(p) = untracked_overwrite {
+        return Err(git_err(format!("未跟踪文件将被覆盖: {p}")));
+    }
+    if !conflicts.is_empty() {
+        return Err(git_err(format!(
+            "本地修改与目标分支冲突，无法切换: {}（请先提交或还原）",
+            conflicts.join("、")
+        )));
     }
 
     // 写阶段前置状态捕获（用于失败回滚）
@@ -682,10 +747,12 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
             gix::diff::tree_with_rewrites::Change::Rewrite { .. } => None,
         })
         .collect();
+    let changed_set: HashSet<&str> = changed_paths.iter().map(|s| s.as_str()).collect();
+    let carried_set: HashSet<&str> = carried.iter().map(|(rel, _)| rel.as_str()).collect();
 
     // 写阶段（工作区 → 索引 → HEAD）。任一步失败都回滚到写前状态，避免半切换。
     let write_result = (|| -> Result<(), GitError> {
-        // ① 同步工作区文件
+        // ① 同步工作区文件（携带路径内容与目标一致，重写无害）
         for change in &changes {
             match change {
                 gix::diff::tree_with_rewrites::Change::Addition { location, id, .. }
@@ -719,10 +786,29 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
             }
         }
 
-        // ② 重建索引
+        // ② 重建索引：以目标树为底，未触及路径保留旧暂存条目（携带暂存改动）
         let mut new_index = repo
             .index_from_tree(&target_tree.id)
             .map_err(|e| git_err(format!("重建索引失败: {e}")))?;
+        for (entry, old_path) in old_index_owned.entries_mut_with_paths() {
+            let rel = old_path.to_str_lossy();
+            if changed_set.contains(rel.as_ref()) {
+                continue; // 分支差异路径由目标树决定
+            }
+            let target_same = target_tree
+                .lookup_entry_by_path(Path::new(rel.as_ref()))
+                .map_err(|e| git_err(format!("读取目标树条目失败: {e}")))?
+                .map(|te| te.id().detach() == entry.id)
+                .unwrap_or(false);
+            if !target_same {
+                if let Some(e) =
+                    new_index.entry_mut_by_path_and_stage(old_path, entry.stage())
+                {
+                    e.id = entry.id;
+                    e.mode = entry.mode;
+                }
+            }
+        }
         new_index
             .write(gix::index::write::Options::default())
             .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
@@ -742,8 +828,30 @@ fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
     })();
 
     if let Err(e) = write_result {
-        // 尽最大努力回滚：工作区文件 → 旧索引 → 旧 HEAD
-        let _ = restore_paths_from_tree(workdir, &old_tree, &changed_paths);
+        // 尽最大努力回滚：携带路径快照 → 其余变更路径旧树 → 旧索引 → 旧 HEAD
+        for (rel, snapshot) in &carried {
+            let dest = workdir.join(rel);
+            match snapshot {
+                Some(bytes) => {
+                    if let Some(parent) = dest.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&dest, bytes);
+                }
+                None => {
+                    if dest.is_file() || dest.is_symlink() {
+                        let _ = std::fs::remove_file(&dest);
+                    }
+                    remove_empty_parents(workdir, &dest);
+                }
+            }
+        }
+        let non_carried: Vec<String> = changed_paths
+            .iter()
+            .filter(|p| !carried_set.contains(p.as_str()))
+            .cloned()
+            .collect();
+        let _ = restore_paths_from_tree(workdir, &old_tree, &non_carried);
         let _ = old_index_owned.write(gix::index::write::Options::default());
         let _ = restore_head(&repo, &old_head);
         return Err(e);
@@ -3289,7 +3397,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_switch_refuses_when_dirty() {
+    fn branch_switch_carries_uncommitted_changes() {
         if !git_available() {
             eprintln!("skip: 未安装 git");
             return;
@@ -3299,11 +3407,155 @@ mod tests {
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         init_committed_repo(root);
         assert_eq!(git(root, &["branch", "other"]).0, 0);
+        // 本地修改 a.txt（other 分支未触及）→ 切换成功并携带
         std::fs::write(root.join("a.txt"), "dirty").unwrap();
+        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        assert_eq!(st.branch, "other");
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "dirty");
+        assert!(st.files.iter().any(|f| f.path == "a.txt"));
+        // 切回 main：改动继续携带
+        let st = switch_branch_sync(root.to_str().unwrap(), "main").unwrap();
+        assert_eq!(st.branch, "main");
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "dirty");
+    }
+
+    #[test]
+    fn branch_switch_refuses_conflicting_local_changes() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        // other 分支把 a.txt 改为 two
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "other"]).0, 0);
+        std::fs::write(root.join("a.txt"), "two").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "main"]).0, 0);
+        // main 本地修改 a.txt 与目标不同 → 拒绝且停留在 main
+        std::fs::write(root.join("a.txt"), "local").unwrap();
         let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
-        assert!(err.message.contains("已跟踪的改动"));
+        assert!(err.message.contains("本地修改与目标分支冲突"));
+        assert!(err.message.contains("a.txt"));
         let repo = open_repo(root.to_str().unwrap()).unwrap();
         assert_eq!(repo.head_name().unwrap().unwrap().shorten(), "main");
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "local");
+    }
+
+    #[test]
+    fn branch_switch_allows_when_local_matches_target() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "other"]).0, 0);
+        std::fs::write(root.join("a.txt"), "two").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "main"]).0, 0);
+        // 本地内容恰与目标一致 → 切换成功
+        std::fs::write(root.join("a.txt"), "two").unwrap();
+        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        assert_eq!(st.branch, "other");
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two");
+    }
+
+    #[test]
+    fn branch_switch_carries_local_deletion() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        // 本地删除 a.txt（other 未触及）→ 切换成功且删除携带
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        assert_eq!(st.branch, "other");
+        assert!(!root.join("a.txt").exists());
+        assert!(st.files.iter().any(|f| f.path == "a.txt"));
+    }
+
+    #[test]
+    fn branch_switch_refuses_target_deletes_locally_modified() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        // other 分支删除 a.txt
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "other"]).0, 0);
+        assert_eq!(git(root, &["rm", "a.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "del"]).0, 0);
+        assert_eq!(git(root, &["switch", "main"]).0, 0);
+        // main 本地修改 a.txt，目标删除 → 拒绝
+        std::fs::write(root.join("a.txt"), "local").unwrap();
+        let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
+        assert!(err.message.contains("本地修改与目标分支冲突"));
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "local");
+    }
+
+    #[test]
+    fn branch_switch_allows_when_both_deleted() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        assert_eq!(git(root, &["switch", "other"]).0, 0);
+        assert_eq!(git(root, &["rm", "a.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "del"]).0, 0);
+        assert_eq!(git(root, &["switch", "main"]).0, 0);
+        // 本地也删除 a.txt → 双方一致，切换成功
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        assert_eq!(st.branch, "other");
+        assert!(!root.join("a.txt").exists());
+    }
+
+    #[test]
+    fn branch_switch_preserves_staged_changes_on_untouched_paths() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["branch", "other"]).0, 0);
+        // 修改 a.txt 并暂存；other 分支未触及 → 切换后索引保留暂存内容
+        std::fs::write(root.join("a.txt"), "staged").unwrap();
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        assert_eq!(st.branch, "other");
+        let repo = open_repo(root.to_str().unwrap()).unwrap();
+        let index = repo.index_or_empty().unwrap();
+        let entry = index
+            .entry_by_path(BStr::new("a.txt"))
+            .expect("a.txt 应在索引中");
+        let blob = repo.find_object(entry.id).unwrap();
+        assert_eq!(String::from_utf8_lossy(&blob.data), "staged");
     }
 
     #[test]
