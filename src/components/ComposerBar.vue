@@ -209,10 +209,7 @@ function updateMentionFromCaret() {
   const m = matchMentionToken(textBefore);
     mention.value = m;
     if (!m) {
-      fileResults.value = [];
-      searchingFiles.value = false;
-      debouncedFileSearch.cancel();
-      searchSeq++;
+      resetFileSearch(true);
       return;
     }
   if (m.kind === "@") scheduleFileSearch(m.token);
@@ -234,12 +231,17 @@ function syncAttachments() {
   store.attachments = [...refs, ...rowAttachments.value];
 }
 
+/** 清空 @ 文件搜索状态；invalidate=true 时使进行中的异步结果失效 */
+function resetFileSearch(invalidate = false) {
+  fileResults.value = [];
+  searchingFiles.value = false;
+  debouncedFileSearch.cancel();
+  if (invalidate) searchSeq++;
+}
+
 function scheduleFileSearch(token: string) {
   if (!token) {
-    fileResults.value = [];
-    searchingFiles.value = false;
-    debouncedFileSearch.cancel();
-    searchSeq++;
+    resetFileSearch(true);
     return;
   }
   debouncedFileSearch.run(token);
@@ -291,9 +293,7 @@ function onSelectAttachment(a: UserInput) {
   if (a.type === "mention" || a.type === "localImage") {
     ed.chain().focus().deleteRange({ from, to: caretPos }).run();
     mention.value = null;
-    debouncedFileSearch.cancel();
-    fileResults.value = [];
-    searchingFiles.value = false;
+    resetFileSearch();
     rowAttachments.value.push(a);
     syncAttachments();
     void nextTick(() => ed.commands.focus());
@@ -313,9 +313,7 @@ function onSelectAttachment(a: UserInput) {
     ])
     .run();
   mention.value = null;
-  debouncedFileSearch.cancel();
-  fileResults.value = [];
-  searchingFiles.value = false;
+  resetFileSearch();
   syncAttachments();
   void nextTick(() => ed.commands.focus());
 }
@@ -329,9 +327,7 @@ function removeMentionTokenInEditor() {
   const from = tokenStartPos(ed.state.doc, caretPos, m.token.length);
   ed.chain().focus().deleteRange({ from, to: caretPos }).run();
   mention.value = null;
-  debouncedFileSearch.cancel();
-  fileResults.value = [];
-  searchingFiles.value = false;
+  resetFileSearch();
 }
 
 function onPickFiles() {
