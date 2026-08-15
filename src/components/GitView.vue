@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
 import GitHistoryList from "./GitHistoryList.vue";
 import { askConfirm, setToast, toastError } from "../composables/useCodex";
@@ -20,7 +21,6 @@ import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import { openDiffTab } from "../composables/useEditorTabs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
-  gitStatusLetter,
   normalizeDiffKind,
   type GitFile,
   type GitPullResult,
@@ -32,14 +32,12 @@ import {
   flattenRows,
   type GitDirNode,
   type GitFileNode,
+  type GitTreeNode,
 } from "../lib/gitTree";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
   ICON_DELETE,
-  ICON_FILE,
-  ICON_FOLDER_CLOSED,
-  ICON_FOLDER_OPEN,
   ICON_OPEN,
   ICON_PLUS,
 } from "../lib/icons";
@@ -364,6 +362,22 @@ async function openDiff(file: GitFile) {
   } catch (e) {
     setToast(toastError(e));
   }
+}
+
+/** GitFileTree 行单击：目录折叠/展开，文件打开 diff */
+function onFileRowClick(row: GitTreeNode) {
+  if (row.kind === "dir") toggleDirRow(row);
+  else void openDiff(row.file);
+}
+
+/** GitFileTree 行右键：目录/文件菜单（带分区参数） */
+function onFileRowContext(
+  section: GitSection,
+  row: GitTreeNode,
+  e: MouseEvent,
+) {
+  if (row.kind === "dir") openDirCtx(section, row, e);
+  else openFileCtx(section, row.file, e);
 }
 
 function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
@@ -729,66 +743,15 @@ async function restoreDir(node: GitDirNode) {
           </span>
         </div>
         <template v-if="!isSectionCollapsed('changes')">
-          <div v-if="worktreeRows.length" class="git-file-list">
-            <div
-              v-for="row in worktreeRows"
-              :key="`changes:${row.kind}:${row.relPath}`"
-              class="git-tree-row"
-              :class="{
-                'git-dir': row.kind === 'dir',
-                'git-file': row.kind === 'file',
-                selected: row.kind === 'file' && row.relPath === selectedGitPath,
-              }"
-              :data-git-path="row.kind === 'file' ? row.relPath : undefined"
-              :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-              @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
-              @contextmenu="
-                row.kind === 'dir'
-                  ? openDirCtx('changes', row, $event)
-                  : openFileCtx('changes', row.file, $event)
-              "
-            >
-              <template v-if="row.kind === 'dir'">
-                <svg class="git-dir-arrow" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
-                </svg>
-                <svg class="git-dir-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
-                </svg>
-                <span class="git-dir-name">{{ row.name }}</span>
-              </template>
-              <template v-else>
-                <span
-                  class="git-file-icon"
-                  aria-hidden="true"
-                >
-                  <img
-                    v-if="gitFileIcon(row.file)"
-                    class="git-file-icon-img"
-                    :src="gitFileIcon(row.file)"
-                    alt=""
-                    draggable="false"
-                  />
-                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
-                  </svg>
-                </span>
-                <span
-                  class="git-path"
-                  :class="{ 'git-path-strike': row.file.status === 'deleted' }"
-                >
-                  {{ row.file.path }}
-                </span>
-                <span
-                  class="git-status-icon"
-                  :class="`git-status-${row.file.status}`"
-                >
-                  {{ gitStatusLetter(row.file.status) }}
-                </span>
-              </template>
-            </div>
-          </div>
-          <div v-else class="git-section-empty">无更改</div>
+          <GitFileTree
+            :rows="worktreeRows"
+            section="changes"
+            :selected-path="selectedGitPath"
+            :file-icon="gitFileIcon"
+            empty-text="无更改"
+            @row-click="onFileRowClick"
+            @row-context="onFileRowContext"
+          />
         </template>
       </div>
 
@@ -852,66 +815,15 @@ async function restoreDir(node: GitDirNode) {
               <span class="git-commit-hint">{{ commitHint }}</span>
             </div>
           </div>
-          <div v-if="stagedRows.length" class="git-file-list">
-            <div
-              v-for="row in stagedRows"
-              :key="`staged:${row.kind}:${row.relPath}`"
-              class="git-tree-row"
-              :class="{
-                'git-dir': row.kind === 'dir',
-                'git-file': row.kind === 'file',
-                selected: row.kind === 'file' && row.relPath === selectedGitPath,
-              }"
-              :data-git-path="row.kind === 'file' ? row.relPath : undefined"
-              :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
-              @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
-              @contextmenu="
-                row.kind === 'dir'
-                  ? openDirCtx('staged', row, $event)
-                  : openFileCtx('staged', row.file, $event)
-              "
-            >
-              <template v-if="row.kind === 'dir'">
-                <svg class="git-dir-arrow" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="row.collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
-                </svg>
-                <svg class="git-dir-icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="row.collapsed ? ICON_FOLDER_CLOSED : ICON_FOLDER_OPEN" />
-                </svg>
-                <span class="git-dir-name">{{ row.name }}</span>
-              </template>
-              <template v-else>
-                <span
-                  class="git-file-icon"
-                  aria-hidden="true"
-                >
-                  <img
-                    v-if="gitFileIcon(row.file)"
-                    class="git-file-icon-img"
-                    :src="gitFileIcon(row.file)"
-                    alt=""
-                    draggable="false"
-                  />
-                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
-                  </svg>
-                </span>
-                <span
-                  class="git-path"
-                  :class="{ 'git-path-strike': row.file.status === 'deleted' }"
-                >
-                  {{ row.file.path }}
-                </span>
-                <span
-                  class="git-status-icon"
-                  :class="`git-status-${row.file.status}`"
-                >
-                  {{ gitStatusLetter(row.file.status) }}
-                </span>
-              </template>
-            </div>
-          </div>
-          <div v-else class="git-section-empty">无暂存更改</div>
+          <GitFileTree
+            :rows="stagedRows"
+            section="staged"
+            :selected-path="selectedGitPath"
+            :file-icon="gitFileIcon"
+            empty-text="无暂存更改"
+            @row-click="onFileRowClick"
+            @row-context="onFileRowContext"
+          />
         </template>
       </div>
 
