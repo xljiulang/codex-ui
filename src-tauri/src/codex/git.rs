@@ -9,7 +9,7 @@ use gix::status::tree_index::TrackRenames;
 use gix::status::UntrackedFiles;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::codex::path_util::{clean_path, norm_key};
 
@@ -2687,9 +2687,18 @@ pub async fn git_changes_watch_start(
     state: State<'_, GitWatcherState>,
     root: String,
 ) -> Result<(), GitError> {
+    git_changes_watch_start_impl(&app, &state, &root).await
+}
+
+/// 开始监听仓库目录（远程 RPC 与 Tauri 命令共用）
+pub async fn git_changes_watch_start_impl(
+    app: &AppHandle,
+    state: &GitWatcherState,
+    root: &str,
+) -> Result<(), GitError> {
     // 在阻塞线程中解析仓库：工作区根、git 目录、已跟踪路径集合、排除规则栈
     let (repo_root, git_dir, tracked, excludes, objects) = match run_blocking({
-        let root = root.clone();
+        let root = root.to_string();
         move || -> Result<
             (
                 PathBuf,
@@ -2844,7 +2853,11 @@ pub async fn git_changes_watch_start(
                     if let Some(t) = last_event {
                         if t.elapsed() >= Duration::from_millis(300) {
                             let payload = serde_json::json!({ "root": clean_path(&root_for_task) });
-                            let _ = handle.emit("git-changes/changed", payload);
+                            crate::codex::remote::emit_event(
+                                &handle,
+                                "git-changes/changed",
+                                payload,
+                            );
                             last_event = None;
                         }
                     }
@@ -2867,6 +2880,10 @@ pub async fn git_changes_watch_start(
 
 #[tauri::command]
 pub async fn git_changes_watch_stop(state: State<'_, GitWatcherState>) -> Result<(), GitError> {
+    git_changes_watch_stop_impl(&state).await
+}
+
+pub async fn git_changes_watch_stop_impl(state: &GitWatcherState) -> Result<(), GitError> {
     let mut guard = state.0.lock().map_err(|e| git_err(format!("锁定监听状态失败: {e}")))?;
     guard.take();
     Ok(())

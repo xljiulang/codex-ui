@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { assetUrl } from "../lib/ipc";
 import MarkdownText from "./MarkdownText.vue";
 import ReasoningBlock from "./ReasoningBlock.vue";
 import RefChip from "./RefChip.vue";
@@ -20,7 +20,7 @@ const props = defineProps<{ item: ThreadItem }>();
 
 function imageSrc(path: string): string {
   try {
-    return convertFileSrc(path);
+    return assetUrl(path);
   } catch {
     return path;
   }

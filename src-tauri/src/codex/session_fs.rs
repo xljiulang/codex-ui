@@ -5,7 +5,7 @@ use std::io::Read;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
@@ -842,7 +842,16 @@ pub async fn session_fs_watch_start(
     state: State<'_, FsWatcherState>,
     root: String,
 ) -> Result<(), String> {
-    let root_p = resolve_root(&root)?;
+    session_fs_watch_start_impl(&app, &state, &root).await
+}
+
+/// 开始递归监听工作目录（远程 RPC 与 Tauri 命令共用）
+pub async fn session_fs_watch_start_impl(
+    app: &AppHandle,
+    state: &FsWatcherState,
+    root: &str,
+) -> Result<(), String> {
+    let root_p = resolve_root(root)?;
     let root_c = root_p
         .canonicalize()
         .map_err(|e| format!("无法解析工作目录 {}: {e}", root))?;
@@ -905,7 +914,7 @@ pub async fn session_fs_watch_start(
                                 "root": clean_path(&root_for_task),
                                 "paths": pending,
                             });
-                            let _ = handle.emit("session-fs/changed", payload);
+                            crate::codex::remote::emit_event(&handle, "session-fs/changed", payload);
                             pending.clear();
                             last_event = None;
                         }
@@ -925,9 +934,32 @@ pub async fn session_fs_watch_start(
 
 #[tauri::command]
 pub async fn session_fs_watch_stop(state: State<'_, FsWatcherState>) -> Result<(), String> {
+    session_fs_watch_stop_impl(&state).await
+}
+
+pub async fn session_fs_watch_stop_impl(state: &FsWatcherState) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     guard.take();
     Ok(())
+}
+
+/// 远程 /asset 路径校验：工作目录内，或粘贴图片落盘目录（临时目录）内
+pub fn asset_path_for_remote(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let p = path
+        .canonicalize()
+        .map_err(|e| format!("无法访问路径 {}: {e}", clean_path(path)))?;
+    let root_c = root
+        .canonicalize()
+        .map_err(|e| format!("无法访问工作目录 {}: {e}", clean_path(root)))?;
+    if is_inside_path(&root_c, &p) {
+        return Ok(p);
+    }
+    if let Ok(paste) = std::env::temp_dir().join("codex-ui-paste").canonicalize() {
+        if is_inside_path(&paste, &p) {
+            return Ok(p);
+        }
+    }
+    Err(format!("路径越界: {}", clean_path(path)))
 }
 
 #[cfg(test)]
@@ -1113,6 +1145,31 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         assert!(ensure_inside(&root, &outside).is_err());
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn asset_path_for_remote_guards_workspace_and_paste_dir() {
+        let (tmp, root) = tree();
+
+        // 工作目录内文件放行
+        let ok = asset_path_for_remote(&root, &root.join("a.txt")).unwrap();
+        assert_eq!(ok, root.join("a.txt").canonicalize().unwrap());
+
+        // 粘贴图片临时目录内放行
+        let paste = std::env::temp_dir().join("codex-ui-paste");
+        std::fs::create_dir_all(&paste).unwrap();
+        let pasted = paste.join("shot.png");
+        std::fs::write(&pasted, b"img").unwrap();
+        assert!(asset_path_for_remote(&root, &pasted).is_ok());
+        let _ = std::fs::remove_file(&pasted);
+
+        // 越界/不存在拒绝
+        let outside = tmp.path().parent().unwrap().join("outside.txt");
+        std::fs::write(&outside, "x").unwrap();
+        assert!(asset_path_for_remote(&root, &outside).is_err());
+        let _ = std::fs::remove_file(&outside);
+        assert!(asset_path_for_remote(&root, &root.join("missing.txt")).is_err());
+        let _ = tmp;
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
@@ -269,7 +269,8 @@ impl CodexServer {
                 // server -> client request (approval / user input / elicitation)
                 let method = v["method"].as_str().unwrap_or("unknown");
                 let params = v.get("params").cloned().unwrap_or(Value::Null);
-                let _ = self.app.emit(
+                crate::codex::remote::emit_event(
+                    &self.app,
                     "interaction:request",
                     json!({ "requestId": id, "method": method, "params": params }),
                 );
@@ -297,7 +298,7 @@ impl CodexServer {
         }
         if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
             let params = v.get("params").cloned().unwrap_or(Value::Null);
-            let _ = self.app.emit(method, params);
+            crate::codex::remote::emit_event(&self.app, method, params);
         }
     }
 
@@ -589,7 +590,7 @@ impl CodexServer {
 
     async fn emit_status(&self) {
         let status = self.status().await;
-        let _ = self.app.emit("server/status", status);
+        crate::codex::remote::emit_event(&self.app, "server/status", status);
     }
 
     async fn resolve_codex(&self) -> Result<PathBuf, String> {

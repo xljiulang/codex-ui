@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import { respondInteraction, setToast, store } from "../composables/useCodex";
 import { focusComposer } from "../lib/composerFocus";
 import type { PendingInteraction } from "../lib/types";
@@ -263,7 +263,7 @@ async function handleElicitation() {
   const mode = obj(params.value).mode ?? "form";
   if (mode === "url") {
     try {
-      await invoke("open_url", { url: str(params.value.url) });
+      await call("open_url", { url: str(params.value.url) });
     } catch {
       // ignore
     }

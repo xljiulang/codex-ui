@@ -1,6 +1,5 @@
 import { ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { call, subscribe, type UnlistenFn } from "../lib/ipc";
 import { setToast, toastError } from "./useCodex";
 import { sessionRoot } from "./useSessionFs";
 import type { GitErrorCode, GitStatus } from "../lib/gitChanges";
@@ -48,7 +47,7 @@ async function refresh() {
     gitState.value = "loading";
     gitErrorMsg.value = "";
     try {
-      const st = await invoke<GitStatus>("git_changes_status", { path: root });
+      const st = await call<GitStatus>("git_changes_status", { path: root });
       gitStatus.value = st;
       gitState.value = "ok";
     } catch (e) {
@@ -77,7 +76,7 @@ export async function initGitRepo(): Promise<boolean> {
   if (!root || gitInitBusy.value) return false;
   gitInitBusy.value = true;
   try {
-    await invoke("git_changes_init", { path: root });
+    await call("git_changes_init", { path: root });
     // 初始化后仓库根与 .git 才存在，重新同步监听
     await syncWatcher();
     await refresh();
@@ -97,7 +96,7 @@ async function syncWatcher() {
   if (active && root) {
     if (!unlistenGitEvent) {
       try {
-        unlistenGitEvent = await listen("git-changes/changed", () => {
+        unlistenGitEvent = await subscribe("git-changes/changed", () => {
           if (!active) return;
           if (Date.now() - lastRefreshAt < REFRESH_COOLDOWN_MS) return;
           void refresh();
@@ -107,7 +106,7 @@ async function syncWatcher() {
       }
     }
     try {
-      await invoke("git_changes_watch_start", { root });
+      await call("git_changes_watch_start", { root });
       watcherStarted = true;
     } catch (e) {
       setToast(toastError(e));
@@ -117,7 +116,7 @@ async function syncWatcher() {
     unlistenGitEvent = null;
     if (watcherStarted) {
       try {
-        await invoke("git_changes_watch_stop");
+        await call("git_changes_watch_stop");
       } catch {
         // 忽略停止失败
       }

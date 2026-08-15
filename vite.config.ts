@@ -17,6 +17,7 @@ export default defineConfig({
   },
   test: {
     environment: "happy-dom",
+    setupFiles: ["./vitest.setup.ts"],
     include: ["src/**/*.spec.ts"],
     coverage: {
       provider: "v8",

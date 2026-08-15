@@ -1,6 +1,5 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { call, subscribe, type UnlistenFn } from "../lib/ipc";
 import { resolveCwd, setToast, store, toastError } from "./useCodex";
 import { openFileTab, openPreviewTab } from "./useEditorTabs";
 import { toUserAttachment } from "../lib/mention";
@@ -122,7 +121,7 @@ export async function ensureEntryIcons(
     requests.push({ path: e.path });
   }
   try {
-    const results = await invoke<IconResult[]>("session_fs_icons", { root, requests });
+    const results = await call<IconResult[]>("session_fs_icons", { root, requests });
     for (const r of results) {
       const key = pathToKey.get(r.path);
       if (key) setIconCache(key, r.dataUri);
@@ -146,7 +145,7 @@ export async function ensureTextFileIcon(): Promise<void> {
   if (textFileIconTask) return textFileIconTask;
   textFileIconTask = (async () => {
     try {
-      const uri = await invoke<string | null>("session_fs_icon_for_ext", {
+      const uri = await call<string | null>("session_fs_icon_for_ext", {
         ext: ".txt",
       });
       setIconCache("ext:.txt", uri ?? null);
@@ -168,7 +167,7 @@ export function textFileMenuIcon(): string | undefined {
 /** 兜底：从后端直接取启动工作目录（store 尚未就绪时用） */
 async function resolveFallbackRoot(): Promise<string> {
   try {
-    const w = await invoke<string>("workspace_dir");
+    const w = await call<string>("workspace_dir");
     if (w && w.trim()) return w.trim();
   } catch {
     // 忽略，沿用空根
@@ -183,7 +182,7 @@ export async function loadDir(path: string, force = false): Promise<void> {
   if (!force && childrenByPath[path] !== undefined) return;
   loadingByPath[path] = true;
   try {
-    childrenByPath[path] = await invoke<FsEntry[]>("session_fs_list", {
+    childrenByPath[path] = await call<FsEntry[]>("session_fs_list", {
       root,
       dir: path,
     });
@@ -200,7 +199,7 @@ async function loadRoot(root: string) {
   loadingRoot.value = true;
   rootError.value = "";
   try {
-    rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
+    rootEntry.value = await call<FsEntry>("session_fs_metadata", {
       root,
       path: root,
     });
@@ -232,7 +231,7 @@ export async function refreshAll() {
   }
   loadingRoot.value = true;
   try {
-    rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
+    rootEntry.value = await call<FsEntry>("session_fs_metadata", {
       root,
       path: root,
     });
@@ -265,7 +264,7 @@ export async function runSearchNow() {
   const seq = ++searchSeq;
   searching.value = true;
   try {
-    const res = await invoke<FsEntry[]>("session_fs_search", {
+    const res = await call<FsEntry[]>("session_fs_search", {
       root,
       query: q,
       limit: SEARCH_LIMIT,
@@ -332,7 +331,7 @@ export function copyEntry(entry: FsEntry) {
 
 async function readClipboardPaths(): Promise<string[]> {
   try {
-    return await invoke<string[]>("clipboard_file_paths");
+    return await call<string[]>("clipboard_file_paths");
   } catch {
     return [];
   }
@@ -350,7 +349,7 @@ export async function pasteInto(targetDir: string) {
     return;
   }
   try {
-    const created = await invoke<FsEntry[]>("session_fs_paste", {
+    const created = await call<FsEntry[]>("session_fs_paste", {
       root,
       destDir: targetDir,
       sources,
@@ -375,7 +374,7 @@ export async function createTextFile(dir: string): Promise<FsEntry | null> {
   const root = sessionRoot.value;
   if (!root) return null;
   try {
-    const created = await invoke<FsEntry>("session_fs_create_file", {
+    const created = await call<FsEntry>("session_fs_create_file", {
       root,
       dir,
     });
@@ -393,7 +392,7 @@ export async function createFolder(dir: string): Promise<FsEntry | null> {
   const root = sessionRoot.value;
   if (!root) return null;
   try {
-    const created = await invoke<FsEntry>("session_fs_create_dir", {
+    const created = await call<FsEntry>("session_fs_create_dir", {
       root,
       dir,
     });
@@ -410,7 +409,7 @@ export async function renameEntry(path: string, newName: string) {
   const root = sessionRoot.value;
   if (!root) return;
   try {
-    await invoke<FsEntry>("session_fs_rename", { root, path, newName });
+    await call<FsEntry>("session_fs_rename", { root, path, newName });
     await refreshAll();
   } catch (e) {
     setToast(toastError(e));
@@ -421,7 +420,7 @@ export async function deleteEntry(path: string) {
   const root = sessionRoot.value;
   if (!root) return;
   try {
-    await invoke("session_fs_delete", { root, path });
+    await call("session_fs_delete", { root, path });
     await refreshAll();
   } catch (e) {
     setToast(toastError(e));
@@ -433,7 +432,7 @@ export async function moveEntry(src: string, destDir: string): Promise<boolean> 
   const root = sessionRoot.value;
   if (!root) return false;
   try {
-    await invoke<FsEntry>("session_fs_move", { root, src, destDir });
+    await call<FsEntry>("session_fs_move", { root, src, destDir });
     const name = src.split(/[\\/]/).pop() ?? src;
     setToast(`已移动「${name}」`);
     await refreshAll();
@@ -445,7 +444,7 @@ export async function moveEntry(src: string, destDir: string): Promise<boolean> 
 }
 
 export function revealInExplorer(path: string) {
-  void invoke("reveal_path", { path }).catch((e) => setToast(toastError(e)));
+  void call("reveal_path", { path }).catch((e) => setToast(toastError(e)));
 }
 
 /** 应用内打开文本文件：在主窗口左侧编辑器区打开/激活一个文件标签 */
@@ -479,7 +478,7 @@ export async function probeTextEntry(
   const root = sessionRoot.value;
   if (!root) return null;
   try {
-    return await invoke<boolean>("session_fs_probe_text", {
+    return await call<boolean>("session_fs_probe_text", {
       root,
       path: entry.path,
     });
@@ -534,7 +533,7 @@ export async function openPathInApp(path: string): Promise<boolean> {
     return true;
   }
   try {
-    const isText = await invoke<boolean>("session_fs_probe_text", {
+    const isText = await call<boolean>("session_fs_probe_text", {
       root,
       path: relPath,
     });
@@ -566,7 +565,7 @@ async function syncWatcher() {
   if (active && root) {
     if (!unlistenFsEvent) {
       try {
-        unlistenFsEvent = await listen("session-fs/changed", () => {
+        unlistenFsEvent = await subscribe("session-fs/changed", () => {
           if (active) void refreshAll();
         });
       } catch {
@@ -574,7 +573,7 @@ async function syncWatcher() {
       }
     }
     try {
-      await invoke("session_fs_watch_start", { root });
+      await call("session_fs_watch_start", { root });
       watcherStarted = true;
     } catch (e) {
       setToast(toastError(e));
@@ -584,7 +583,7 @@ async function syncWatcher() {
     unlistenFsEvent = null;
     if (watcherStarted) {
       try {
-        await invoke("session_fs_watch_stop");
+        await call("session_fs_watch_stop");
       } catch {
         // 忽略停止失败
       }

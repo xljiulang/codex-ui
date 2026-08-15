@@ -3,8 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { assetUrl, call, isTauri, type UnlistenFn } from "../lib/ipc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
@@ -235,7 +234,7 @@ async function runFileSearch(token: string) {
   }
   searchingFiles.value = true;
   try {
-    const res = await invoke<{ files?: FuzzyFileResult[] }>("codex_rpc", {
+    const res = await call<{ files?: FuzzyFileResult[] }>("codex_rpc", {
       method: "fuzzyFileSearch",
       params: { query: token, roots: [root], cancellationToken: null },
     });
@@ -319,7 +318,7 @@ function onPickFiles() {
   removeMentionTokenInEditor();
   void (async () => {
     try {
-      const files = await invoke<string[]>("pick_files", {
+      const files = await call<string[]>("pick_files", {
         multiple: true,
         initialDir: mentionRoot(),
       });
@@ -340,7 +339,7 @@ function onPickDir() {
   removeMentionTokenInEditor();
   void (async () => {
     try {
-      const dir = await invoke<string | null>("pick_directory", {
+      const dir = await call<string | null>("pick_directory", {
         initialDir: mentionRoot(),
       });
       if (dir) {
@@ -545,7 +544,7 @@ async function addFilesWithPaths(
       }
       try {
         const bytes = new Uint8Array(await f.arrayBuffer());
-        const saved = await invoke<string>("save_pasted_image", {
+        const saved = await call<string>("save_pasted_image", {
           bytes: Array.from(bytes),
           name: `pasted.${imageExtFromType(f.type, name)}`,
         });
@@ -571,7 +570,7 @@ async function addFilesWithPaths(
 async function handlePastedFiles(files: File[]) {
   let originalPaths: string[] = [];
   try {
-    originalPaths = await invoke<string[]>("clipboard_file_paths");
+    originalPaths = await call<string[]>("clipboard_file_paths");
   } catch {
     originalPaths = [];
   }
@@ -600,6 +599,7 @@ let dropUnlisten: UnlistenFn | undefined;
 
 /** Tauri 拖放事件：drop 时直接拿到绝对路径数组（WebView2 下 HTML5 dataTransfer.files 为空） */
 async function setupDragDrop() {
+  if (!isTauri()) return; // 远程 Web 模式走 HTML5 @drop 兜底
   try {
     dropUnlisten = await getCurrentWebview().onDragDropEvent((event) => {
       const p = event.payload;
@@ -704,7 +704,7 @@ function removeRowAttachment(i: number) {
 
 function imageSrc(path: string): string {
   try {
-    return convertFileSrc(path);
+    return assetUrl(path);
   } catch {
     return path;
   }
@@ -747,7 +747,7 @@ async function compactNow() {
   if (!store.currentThreadId || compacting.value) return;
   compacting.value = true;
   try {
-    await invoke("codex_rpc", {
+    await call("codex_rpc", {
       method: "thread/compact/start",
       params: { threadId: store.currentThreadId },
     });

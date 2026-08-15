@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import { openNewSession, setToast, toastError } from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
@@ -452,7 +452,7 @@ async function openProps(entry: FsEntry) {
   propsEntry.value = entry;
   propsLoading.value = true;
   try {
-    const meta = await invoke<FsEntry>("session_fs_metadata", {
+    const meta = await call<FsEntry>("session_fs_metadata", {
       root: sessionRoot.value,
       path: entry.path,
     });

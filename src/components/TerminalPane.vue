@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -106,7 +106,7 @@ function syncSize() {
   if (!fitAddon || props.tab.exited || props.tab.error) return;
   const dims = fitAddon.proposeDimensions();
   if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
-  void invoke("terminal_resize", {
+  void call("terminal_resize", {
     id: props.tab.id,
     cols: dims.cols,
     rows: dims.rows,
@@ -137,7 +137,7 @@ onMounted(() => {
     if (data.includes("\r") || data.includes("\n")) {
       props.tab.busy = true;
     }
-    void invoke("terminal_write", { id: props.tab.id, data }).catch(() => {});
+    void call("terminal_write", { id: props.tab.id, data }).catch(() => {});
   });
 
   // 挂载前 openTerminalTab 已通过事件桥缓冲启动输出（含 ConPTY DSR 查询，

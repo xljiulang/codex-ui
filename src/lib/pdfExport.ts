@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { assetUrl, call } from "./ipc";
 import { setToast, toastError } from "../composables/useCodex";
 import type { FileEditorTab } from "../composables/useEditorTabs";
 import hljs from "./highlight";
@@ -60,11 +60,11 @@ export function resolveImageSrc(
   if (local.startsWith("file:///")) local = local.slice("file:///".length);
   if (/^\/[A-Za-z]:\//.test(local)) local = local.slice(1);
   if (/^[A-Za-z]:[\\/]/.test(local)) {
-    return convertFileSrc(local);
+    return assetUrl(local);
   }
   if (local.startsWith("#")) return null;
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(local)) return null;
-  return convertFileSrc(resolvePath(dirOf(fileAbsPath), local));
+  return assetUrl(resolvePath(dirOf(fileAbsPath), local));
 }
 
 /** 导出 PDF 内联打印样式：A4 纵向、16mm 边距、浅色主题、hljs 浅色 token 色 */
@@ -204,7 +204,7 @@ export async function exportMarkdownToPdf(tab: FileEditorTab): Promise<void> {
     : `${tab.root.replace(/[\\/]+$/, "")}\\${tab.path}`;
   const html = await buildPrintHtml(text, fileAbsPath);
   try {
-    const saved = await invoke<string | null>("export_markdown_pdf", {
+    const saved = await call<string | null>("export_markdown_pdf", {
       html,
       suggestedName: pdfSuggestedName(tab.path),
       initialDir: dirOf(fileAbsPath),

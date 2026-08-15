@@ -1,6 +1,5 @@
 import { nextTick, reactive, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { call, subscribe, type UnlistenFn } from "../lib/ipc";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 
 import type {
@@ -358,7 +357,7 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
   let cursor: string | null = null;
   try {
     for (let i = 0; i < 30; i++) {
-      const res = (await invoke("codex_rpc", {
+      const res = (await call("codex_rpc", {
         method: "thread/turns/list",
         params: {
           threadId,
@@ -464,7 +463,7 @@ function resetToNewChat() {
 
 export async function loadSettings() {
   try {
-    const s = await invoke<AppSettings>("settings_get");
+    const s = await call<AppSettings>("settings_get");
     store.settings = { ...defaultSettings(), ...s };
   } catch {
     store.settings = defaultSettings();
@@ -484,12 +483,12 @@ export async function loadSettings() {
 
 export async function saveSettings(patch: Partial<AppSettings>) {
   store.settings = { ...store.settings, ...patch };
-  await invoke("settings_set", { settings: store.settings });
+  await call("settings_set", { settings: store.settings });
   applyTheme(store.settings.theme);
 }
 
 export async function refreshServer() {
-  const s = await invoke<ServerStatus>("server_status");
+  const s = await call<ServerStatus>("server_status");
   store.server = { ...store.server, ...s };
 }
 
@@ -497,7 +496,7 @@ export async function refreshServer() {
 export async function loadModels(force = false) {
   if (store.modelsLoaded && !force) return;
   try {
-    const res = await invoke<{ data: ModelInfo[] }>("codex_rpc", {
+    const res = await call<{ data: ModelInfo[] }>("codex_rpc", {
       method: "model/list",
       params: {},
     });
@@ -513,7 +512,7 @@ export async function ensureThreadPlugins(threadId: string) {
   if (store.threadPlugins[threadId]?.loaded) return;
   store.threadPlugins[threadId] = { plugins: [], loaded: false };
   try {
-    const res = await invoke<{
+    const res = await call<{
       marketplaces?: {
         plugins?: {
           id?: string;
@@ -567,7 +566,7 @@ export async function ensureThreadPlugins(threadId: string) {
 export async function ensureSkills(force = false) {
   if (store.skillsLoaded && !force) return;
   try {
-    const res = await invoke<{
+    const res = await call<{
       data?: {
         skills?: (SkillItem & {
           description?: string;
@@ -678,7 +677,7 @@ export function sortThreads(list: ThreadSummary[]): ThreadSummary[] {
 async function getPinCapability(): Promise<PinCapability | null> {
   if (pinCapabilityCache) return pinCapabilityCache;
   try {
-    const cap = await invoke<PinCapability>("codex_pin_capability");
+    const cap = await call<PinCapability>("codex_pin_capability");
     pinCapabilityCache = cap;
     return cap;
   } catch {
@@ -703,7 +702,7 @@ export function __resetTitleHelperCapabilityForTest() {
 async function getTitleHelperCapability(): Promise<TitleHelperCapability | null> {
   if (titleHelperCapabilityCache) return titleHelperCapabilityCache;
   try {
-    const cap = await invoke<TitleHelperCapability>("codex_title_helper_capability");
+    const cap = await call<TitleHelperCapability>("codex_title_helper_capability");
     titleHelperCapabilityCache = cap;
     return cap;
   } catch {
@@ -722,7 +721,7 @@ export async function refreshThreads() {
       const res: {
         data: ThreadSummary[];
         nextCursor: string | null;
-      } = await invoke("thread_list", {
+      } = await call("thread_list", {
         limit: 50,
         cursor,
       });
@@ -755,7 +754,7 @@ export async function searchThreads(term: string) {
       const res: {
         data: { thread: ThreadSummary; snippet: string }[];
         nextCursor: string | null;
-      } = await invoke("codex_rpc", {
+      } = await call("codex_rpc", {
         method: "thread/search",
         params: {
           searchTerm: t,
@@ -793,7 +792,7 @@ export async function renameThread(threadId: string, name: string): Promise<bool
   const n = name.trim();
   if (!n) return false;
   try {
-    await invoke("thread_set_name", { threadId, name: n });
+    await call("thread_set_name", { threadId, name: n });
     const t = store.threads.find((x) => x.id === threadId);
     if (t) t.name = n;
     if (store.currentThreadId === threadId) {
@@ -855,12 +854,12 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     backgroundThreadIds.delete(helperThreadId);
     try {
       if (cap.ephemeral) {
-        await invoke("codex_rpc", {
+        await call("codex_rpc", {
           method: "thread/unsubscribe",
           params: { threadId: helperThreadId },
         });
       } else {
-        await invoke("thread_delete", { threadId: helperThreadId });
+        await call("thread_delete", { threadId: helperThreadId });
       }
     } catch {
       // 清理失败不影响主会话
@@ -896,7 +895,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     if (cap.ephemeral) {
       startParams.ephemeral = true;
     }
-    const started = await invoke<{ thread?: { id?: string } }>("thread_start", {
+    const started = await call<{ thread?: { id?: string } }>("thread_start", {
       params: startParams,
     });
     helperThreadId = started?.thread?.id ?? null;
@@ -904,7 +903,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     backgroundThreadIds.add(helperThreadId);
 
     oneOff.push(
-      await listen("item/agentMessage/delta", (e) => {
+      await subscribe("item/agentMessage/delta", (e) => {
         const p = e.payload as {
           threadId?: string;
           itemId?: string;
@@ -918,7 +917,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
         // 标题取最后一个 agentMessage 的累积文本
         titleText = [...titleByItem.values()].pop() ?? titleText;
       }),
-      await listen("turn/started", (e) => {
+      await subscribe("turn/started", (e) => {
         const p = e.payload as {
           threadId?: string;
           turn?: { id?: string };
@@ -926,7 +925,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
         if (p.threadId !== helperThreadId) return;
         helperTurnId = p.turn?.id ?? null;
       }),
-      await listen("turn/completed", (e) => {
+      await subscribe("turn/completed", (e) => {
         const p = e.payload as {
           threadId?: string;
           turn?: { id?: string; status?: string };
@@ -942,7 +941,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
       void (async () => {
         if (helperThreadId && helperTurnId) {
           try {
-            await invoke("turn_interrupt", {
+            await call("turn_interrupt", {
               threadId: helperThreadId,
               turnId: helperTurnId,
             });
@@ -958,7 +957,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
       `给下面用户消息生成一个不超过 30 字的中文会话标题，只输出标题本身，不要任何解释、引号或 Markdown。\n\n用户消息：\n${text}`,
       [],
     );
-    await invoke("turn_start", {
+    await call("turn_start", {
       params: {
         threadId: helperThreadId,
         input,
@@ -986,7 +985,7 @@ export async function togglePin(threadId: string, pinned: boolean) {
     if (t) t.isPinned = pinned;
     if (cap.protocol === "metadata_is_pinned") {
       // 旧版协议：isPinned 布尔元数据
-      await invoke("codex_rpc", {
+      await call("codex_rpc", {
         method: "thread/metadata/update",
         params: { threadId, isPinned: pinned },
       });
@@ -1000,13 +999,13 @@ export async function togglePin(threadId: string, pinned: boolean) {
       if (cap.protocol === "section_move") {
         // 新版协议：threadSection/move（0.147+ 改名为 thread/section/move，按探测结果调用）
         const method = cap.sectionMoveMethod ?? "threadSection/move";
-        await invoke("codex_rpc", {
+        await call("codex_rpc", {
           method,
           params: { threadId, sectionId },
         });
       } else {
         // 分区时代协议：metadata/update 携带 sectionId
-        await invoke("codex_rpc", {
+        await call("codex_rpc", {
           method: "thread/metadata/update",
           params: { threadId, sectionId },
         });
@@ -1033,7 +1032,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     if (reviewer) params.approvalsReviewer = reviewer;
     // 显式携带（null 表示用默认），避免旧值在会话里粘滞；effort 由随后的 turn/start 携带
     params.model = store.model ?? null;
-    const res = await invoke<{ thread: { id: string; name?: string | null }; model?: string }>(
+    const res = await call<{ thread: { id: string; name?: string | null }; model?: string }>(
       "thread_start",
       { params },
     );
@@ -1061,7 +1060,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     }
     // 记忆模式：显式应用持久化设置（含关闭），保证新会话与设置一致；失败静默跳过
     try {
-      await invoke("codex_rpc", {
+      await call("codex_rpc", {
         method: "thread/memoryMode/set",
         params: { threadId, mode: store.settings.memory_mode },
       });
@@ -1087,7 +1086,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   // 用户真正发消息时才恢复（thread/start 新建的会话已订阅，无需恢复）。
   if (store.resumedThreadId !== threadId) {
     try {
-      await invoke("thread_resume", { params: { threadId } });
+      await call("thread_resume", { params: { threadId } });
       store.resumedThreadId = threadId;
     } catch (e) {
       if (isThreadNotFound(e)) {
@@ -1147,7 +1146,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     }
   }
   try {
-    const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
+    const res = await call<{ turn?: { id?: string } }>("turn_start", { params });
     store.turnActive = true;
     // 立即记录回合 id，供 turn/interrupt 使用（turn/started 事件可能稍后才到）
     if (res?.turn?.id) store.currentTurnId = res.turn.id;
@@ -1179,7 +1178,7 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
     startedAtMs: Date.now(),
   });
   try {
-    await invoke("turn_steer", {
+    await call("turn_steer", {
       params: {
         threadId,
         clientUserMessageId: clientId,
@@ -1195,7 +1194,7 @@ async function steerTurn(prompt: string, attachments: UserInput[]) {
       for (let attempt = 0; attempt < 5; attempt++) {
         await new Promise((r) => setTimeout(r, 400));
         try {
-          await invoke("turn_steer", {
+          await call("turn_steer", {
             params: {
               threadId,
               clientUserMessageId: clientId,
@@ -1362,7 +1361,7 @@ export async function openThread(threadId: string): Promise<boolean> {
   store.currentThreadOrigin = "history";
   store.loadingThread = true;
   try {
-    const res = await invoke<{
+    const res = await call<{
       thread: {
         id: string;
         name?: string | null;
@@ -1386,7 +1385,7 @@ export async function openThread(threadId: string): Promise<boolean> {
     store.threadTokenUsage = null;
     store.goalArmed = false; // 勾选态不跨会话；服务端目标经 goal_get 回填
     try {
-      const g = await invoke<{
+      const g = await call<{
         objective?: string;
         status?: string;
         goal?: { objective?: string; status?: string };
@@ -1465,7 +1464,7 @@ export async function interrupt(
   // 若用户点得过早会收到 “no active turn”，短暂重试几次。
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      await invoke("turn_interrupt", {
+      await call("turn_interrupt", {
         threadId: tid,
         turnId: target,
       });
@@ -1504,7 +1503,7 @@ export async function setGoal(objective: string): Promise<boolean> {
   const tid = store.currentThreadId;
   if (!tid) return false; // 仅在线程存在时挂载（防御：调用方应保证有会话）
   try {
-    await invoke("goal_set", { threadId: tid, objective: text });
+    await call("goal_set", { threadId: tid, objective: text });
     store.goalText = text;
     store.goalStatus = "active";
     setToast("已设置目标");
@@ -1524,7 +1523,7 @@ export async function clearGoal(threadId?: string | null) {
     return;
   }
   try {
-    await invoke("goal_clear", { threadId: tid });
+    await call("goal_clear", { threadId: tid });
     // 仅当清除的是当前会话时才清空本地目标展示；
     // 切换会话时对旧线程的清除不应污染新会话的目标状态
     if (tid === store.currentThreadId) {
@@ -1539,7 +1538,7 @@ export async function clearGoal(threadId?: string | null) {
 
 export async function deleteThread(threadId: string) {
   try {
-    await invoke("thread_delete", { threadId });
+    await call("thread_delete", { threadId });
     store.threads = store.threads.filter((t) => t.id !== threadId);
     // 释放该会话的本地缓存，避免历史列表长期累积内存
     delete store.itemsByThread[threadId];
@@ -1559,7 +1558,7 @@ export async function deleteThread(threadId: string) {
 
 export async function respondInteraction(interaction: PendingInteraction, result: unknown) {
   try {
-    await invoke("interaction_respond", {
+    await call("interaction_respond", {
       requestId: interaction.requestId,
       result,
     });
@@ -1575,13 +1574,13 @@ export async function wireEvents() {
   wired = true;
 
   unlisteners.push(
-    await listen("server/status", (e) => {
+    await subscribe("server/status", (e) => {
       store.server = { ...store.server, ...(e.payload as ServerStatus) };
     }),
   );
 
   unlisteners.push(
-    await listen("interaction:request", async (e) => {
+    await subscribe("interaction:request", async (e) => {
       const p = e.payload as {
         requestId: number | string;
         method: string;
@@ -1593,14 +1592,14 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("serverRequest/resolved", (e) => {
+    await subscribe("serverRequest/resolved", (e) => {
       const p = e.payload as { requestId: number };
       store.interactions = store.interactions.filter((i) => i.requestId !== p.requestId);
     }),
   );
 
   unlisteners.push(
-    await listen("turn/started", (e) => {
+    await subscribe("turn/started", (e) => {
       const p = e.payload as { threadId?: string; turn?: { id?: string } };
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程事件不进入全局状态
       // 仅处理当前会话的事件：切换会话后，旧会话迟到的 turn/started
@@ -1613,7 +1612,7 @@ export async function wireEvents() {
       // 事件 id 仅在响应缺失时兜底。
       if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
     }),
-    await listen("turn/completed", async (e) => {
+    await subscribe("turn/completed", async (e) => {
       const p = e.payload as {
         threadId?: string;
         turn?: { id?: string; status?: string };
@@ -1694,7 +1693,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("item/started", (e) => {
+    await subscribe("item/started", (e) => {
       const p = e.payload as {
         item: ThreadItem;
         threadId: string;
@@ -1706,7 +1705,7 @@ export async function wireEvents() {
         startedAtMs: p.startedAtMs ?? Date.now(),
       });
     }),
-    await listen("item/completed", (e) => {
+    await subscribe("item/completed", (e) => {
       const p = e.payload as {
         item: ThreadItem;
         threadId: string;
@@ -1738,7 +1737,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("item/agentMessage/delta", (e) => {
+    await subscribe("item/agentMessage/delta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string };
       if (isBackgroundThread(p.threadId)) return;
       let item = findItem(p.threadId, p.itemId);
@@ -1756,7 +1755,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("item/commandExecution/outputDelta", (e) => {
+    await subscribe("item/commandExecution/outputDelta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string };
       if (isBackgroundThread(p.threadId)) return;
       let item = findItem(p.threadId, p.itemId);
@@ -1770,7 +1769,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("item/reasoning/textDelta", (e) => {
+    await subscribe("item/reasoning/textDelta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string; contentIndex: number };
       if (isBackgroundThread(p.threadId)) return;
       let item = findItem(p.threadId, p.itemId);
@@ -1798,7 +1797,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("item/fileChange/patchUpdated", (e) => {
+    await subscribe("item/fileChange/patchUpdated", (e) => {
       const p = e.payload as {
         threadId: string;
         itemId: string;
@@ -1816,7 +1815,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("thread/name/updated", (e) => {
+    await subscribe("thread/name/updated", (e) => {
       const p = e.payload as { threadId: string; threadName?: string };
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.name = p.threadName ?? null;
@@ -1825,7 +1824,7 @@ export async function wireEvents() {
         void updateWindowTitle();
       }
     }),
-    await listen("thread/tokenUsage/updated", (e) => {
+    await subscribe("thread/tokenUsage/updated", (e) => {
       const p = e.payload as {
         threadId: string;
         tokenUsage?: {
@@ -1845,12 +1844,12 @@ export async function wireEvents() {
         };
       }
     }),
-    await listen("thread/status/changed", (e) => {
+    await subscribe("thread/status/changed", (e) => {
       const p = e.payload as { threadId: string; status: { type: string } };
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.status = p.status;
     }),
-    await listen("thread/goal/updated", (e) => {
+    await subscribe("thread/goal/updated", (e) => {
       const p = e.payload as {
         threadId?: string;
         goal?: { objective?: string; status?: string };
@@ -1872,7 +1871,7 @@ export async function wireEvents() {
         }
       }
     }),
-    await listen("thread/goal/cleared", (e) => {
+    await subscribe("thread/goal/cleared", (e) => {
       const p = e.payload as { threadId?: string };
       if (isBackgroundThread(p.threadId)) return;
       if (p.threadId && p.threadId !== store.currentThreadId) return;
@@ -1880,7 +1879,7 @@ export async function wireEvents() {
       store.goalStatus = null;
       store.goalArmed = false;
     }),
-    await listen("thread/started", (e) => {
+    await subscribe("thread/started", (e) => {
       const p = e.payload as { thread?: { id?: string } };
       if (isBackgroundThread(p?.thread?.id)) return; // 临时线程不触发历史刷新
       void refreshThreads();
@@ -1888,7 +1887,7 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("error", (e) => {
+    await subscribe("error", (e) => {
       const p = e.payload as {
         error?: { message?: string; codexErrorInfo?: unknown };
       };
@@ -1899,7 +1898,7 @@ export async function wireEvents() {
           : "codex 发生错误",
       );
     }),
-    await listen("warning", (e) => {
+    await subscribe("warning", (e) => {
       const p = e.payload as { message?: string };
       if (p?.message) setToast(friendlyServerMessage(p.message));
     }),

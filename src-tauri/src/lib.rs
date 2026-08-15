@@ -15,6 +15,7 @@ use codex::app_server::CodexServer;
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
 
 pub fn run() {
+    let remote_cfg = codex::remote::parse_remote_args();
     tauri::Builder::default()
         .on_page_load(|webview, payload| {
             // 主窗口页面加载完成（Vue 已挂载、加载动画已渲染）后再显示，
@@ -146,7 +147,7 @@ pub fn run() {
             codex::git::git_changes_watch_start,
             codex::git::git_changes_watch_stop,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             // 先读取已保存主题，再以对应背景色创建主窗口：
             // 窗口从创建那一刻起颜色即与主题一致，避免首帧错色/闪色（缺省按 blue）。
             let app_dir = app.path().app_data_dir().ok();
@@ -191,6 +192,14 @@ pub fn run() {
             app.manage(codex::terminal::TerminalState(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )));
+            app.manage(codex::remote::RemoteHub::new(&remote_cfg));
+            if remote_cfg.enabled {
+                let app_handle = app.handle().clone();
+                let cfg = remote_cfg.clone();
+                tauri::async_runtime::spawn(async move {
+                    codex::remote::start_remote(app_handle, cfg).await;
+                });
+            }
             server_handle.ensure_running();
             Ok(())
         })

@@ -1,5 +1,5 @@
 import { computed, markRaw, reactive, ref, shallowReactive } from "vue";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { assetUrl, call } from "../lib/ipc";
 import type { Compartment, EditorState, Text } from "@codemirror/state";
 import {
   buildSaveContent,
@@ -99,7 +99,7 @@ export interface PreviewEditorTab {
   title: string;
   loading: boolean;
   error: string;
-  /** 图像预览：convertFileSrc(path) 的 asset URL */
+  /** 图像预览：assetUrl(path) 的 asset URL */
   imageUrl: string;
   /** PDF 预览：后端读取的原始字节（pdf.js getDocument 数据源） */
   pdfData: Uint8Array | null;
@@ -186,7 +186,7 @@ export async function openTerminalTab(cwd: string): Promise<void> {
     // 查询）在懒加载面板挂载前丢失导致首个终端空白。
     await ensureTerminalListeners();
     attachTerminal(id);
-    await invoke("terminal_spawn", { id, cwd });
+    await call("terminal_spawn", { id, cwd });
   } catch (e) {
     tab.error = String(e);
   } finally {
@@ -194,7 +194,7 @@ export async function openTerminalTab(cwd: string): Promise<void> {
     // 启动期间标签已被关闭（closeTab 先执行）：spawn 完成后回收后端会话，
     // 避免遗留无人引用的 PTY 进程
     if (!tabs.some((t) => t.id === id)) {
-      void invoke("terminal_kill", { id }).catch(() => {});
+      void call("terminal_kill", { id }).catch(() => {});
     }
   }
 }
@@ -240,7 +240,7 @@ export async function openFileTab(root: string, path: string): Promise<void> {
   tabs.push(tab);
   activeTabId.value = id;
   try {
-    const info = await invoke<TextFileContent>("session_fs_read", {
+    const info = await call<TextFileContent>("session_fs_read", {
       root,
       path,
     });
@@ -309,7 +309,7 @@ export async function saveFileTab(id: string): Promise<boolean> {
       tab.eol,
       tab.hadBom,
     );
-    await invoke("session_fs_write", {
+    await call("session_fs_write", {
       root: tab.root,
       path: tab.path,
       content,
@@ -349,7 +349,7 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
   tabs.push(tab);
   activeTabId.value = id;
   try {
-    const rows = await invoke<DiffRow[]>("build_diff_preview", { params });
+    const rows = await call<DiffRow[]>("build_diff_preview", { params });
     tab.rows = rows ?? [];
   } catch (e) {
     tab.error = String(e);
@@ -389,9 +389,9 @@ export async function openPreviewTab(
   activeTabId.value = id;
   try {
     if (type === "image") {
-      tab.imageUrl = convertFileSrc(path);
+      tab.imageUrl = assetUrl(path);
     } else {
-      const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
+      const info = await call<BinaryFileContent>("session_fs_read_bytes", {
         root,
         path,
       });
@@ -407,7 +407,7 @@ export async function openPreviewTab(
 /** 释放标签后端资源：终端进程结束（幂等，失败静默） */
 function disposeTab(tab: EditorTab): void {
   if (tab.kind === "terminal") {
-    void invoke("terminal_kill", { id: tab.id }).catch(() => {});
+    void call("terminal_kill", { id: tab.id }).catch(() => {});
   }
 }
 

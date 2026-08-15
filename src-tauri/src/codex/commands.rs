@@ -512,6 +512,209 @@ pub fn settings_set(app: AppHandle, settings: AppSettings) -> Result<(), String>
     settings::save(&dir, &settings)
 }
 
+// ---------------- 远程 RPC 复用实现（与 Tauri 命令共用逻辑） ----------------
+
+pub async fn server_status_impl(server: &CodexServer) -> Result<Value, String> {
+    Ok(server.status().await)
+}
+
+pub fn server_connect_impl(server: &Server) -> Result<(), String> {
+    server.ensure_running();
+    Ok(())
+}
+
+pub async fn server_logs_impl(server: &CodexServer) -> Result<Vec<String>, String> {
+    let status = server.status().await;
+    Ok(status
+        .get("logs")
+        .and_then(|l| l.as_array())
+        .and_then(|a| {
+            a.iter()
+                .map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_default())
+}
+
+pub async fn codex_rpc_impl(
+    server: &CodexServer,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    server.request(method, params, None).await
+}
+
+pub async fn codex_rpc_long_impl(
+    server: &CodexServer,
+    method: &str,
+    params: Value,
+    timeout_ms: u64,
+) -> Result<Value, String> {
+    server
+        .request(method, params, Some(Duration::from_millis(timeout_ms)))
+        .await
+}
+
+pub async fn codex_pin_capability_impl(server: &CodexServer) -> Result<Value, String> {
+    server.pin_capability().await
+}
+
+pub async fn codex_title_helper_capability_impl(server: &CodexServer) -> Result<Value, String> {
+    server.title_helper_capability().await
+}
+
+pub async fn interaction_respond_impl(
+    server: &CodexServer,
+    request_id: Value,
+    result: Value,
+) -> Result<(), String> {
+    server.send_response(&request_id, result).await
+}
+
+pub async fn thread_list_impl(
+    server: &CodexServer,
+    limit: Option<u64>,
+    cursor: Option<String>,
+    cwd: Option<String>,
+) -> Result<Value, String> {
+    let mut params = serde_json::Map::new();
+    if let Some(l) = limit {
+        params.insert("limit".into(), json!(l));
+    }
+    if let Some(c) = cursor {
+        params.insert("cursor".into(), json!(c));
+    }
+    if let Some(w) = cwd {
+        params.insert("cwd".into(), json!(w));
+    }
+    server.request("thread/list", Value::Object(params), None).await
+}
+
+pub async fn thread_start_impl(
+    server: &CodexServer,
+    params: Value,
+) -> Result<Value, String> {
+    server
+        .request("thread/start", params, Some(Duration::from_secs(60)))
+        .await
+}
+
+pub async fn thread_read_impl(
+    server: &CodexServer,
+    thread_id: &str,
+    include_turns: Option<bool>,
+) -> Result<Value, String> {
+    server
+        .request(
+            "thread/read",
+            json!({ "threadId": thread_id, "includeTurns": include_turns.unwrap_or(true) }),
+            Some(Duration::from_secs(60)),
+        )
+        .await
+}
+
+pub async fn thread_resume_impl(
+    server: &CodexServer,
+    params: Value,
+) -> Result<Value, String> {
+    server
+        .request("thread/resume", params, Some(Duration::from_secs(60)))
+        .await
+}
+
+pub async fn thread_delete_impl(
+    server: &CodexServer,
+    thread_id: &str,
+) -> Result<Value, String> {
+    server
+        .request("thread/delete", json!({ "threadId": thread_id }), None)
+        .await
+}
+
+pub async fn thread_set_name_impl(
+    server: &CodexServer,
+    thread_id: &str,
+    name: &str,
+) -> Result<Value, String> {
+    server
+        .request(
+            "thread/name/set",
+            json!({ "threadId": thread_id, "name": name }),
+            None,
+        )
+        .await
+}
+
+pub async fn turn_start_impl(server: &CodexServer, params: Value) -> Result<Value, String> {
+    server
+        .request("turn/start", params, Some(Duration::from_secs(60)))
+        .await
+}
+
+pub async fn turn_steer_impl(server: &CodexServer, params: Value) -> Result<Value, String> {
+    server
+        .request("turn/steer", params, Some(Duration::from_secs(60)))
+        .await
+}
+
+pub async fn turn_interrupt_impl(
+    server: &CodexServer,
+    thread_id: &str,
+    turn_id: &str,
+) -> Result<Value, String> {
+    server
+        .request(
+            "turn/interrupt",
+            json!({ "threadId": thread_id, "turnId": turn_id }),
+            None,
+        )
+        .await
+}
+
+pub async fn goal_set_impl(
+    server: &CodexServer,
+    thread_id: &str,
+    objective: &str,
+) -> Result<Value, String> {
+    server
+        .request(
+            "thread/goal/set",
+            json!({ "threadId": thread_id, "objective": objective }),
+            None,
+        )
+        .await
+}
+
+pub async fn goal_get_impl(
+    server: &CodexServer,
+    thread_id: &str,
+) -> Result<Value, String> {
+    server
+        .request("thread/goal/get", json!({ "threadId": thread_id }), None)
+        .await
+}
+
+pub async fn goal_clear_impl(
+    server: &CodexServer,
+    thread_id: &str,
+) -> Result<Value, String> {
+    server
+        .request("thread/goal/clear", json!({ "threadId": thread_id }), None)
+        .await
+}
+
+pub async fn auth_status_impl(server: &CodexServer) -> Result<Value, String> {
+    server.request("account/read", json!({}), None).await
+}
+
+pub async fn auth_logout_impl(server: &CodexServer) -> Result<Value, String> {
+    server.request("account/logout", Value::Null, None).await
+}
+
+pub fn workspace_dir_impl(server: &CodexServer) -> String {
+    server.workspace().to_string_lossy().into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

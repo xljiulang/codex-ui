@@ -1,4 +1,4 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { subscribe, type UnlistenFn } from "../lib/ipc";
 
 interface TerminalOutputPayload {
   id: string;
@@ -42,7 +42,7 @@ let listenersReady: Promise<void> | null = null;
 export function ensureTerminalListeners(): Promise<void> {
   if (listenersReady) return listenersReady;
   listenersReady = (async () => {
-    unlistenOutput = await listen<TerminalOutputPayload>("terminal/output", (e) => {
+    unlistenOutput = await subscribe<TerminalOutputPayload>("terminal/output", (e) => {
       const { id, data } = e.payload;
       const handlers = dataHandlers.get(id);
       if (handlers && handlers.size > 0) {
@@ -53,7 +53,7 @@ export function ensureTerminalListeners(): Promise<void> {
         else outputBuffer.set(id, [data]);
       }
     });
-    unlistenExit = await listen<TerminalExitPayload>("terminal/exit", (e) => {
+    unlistenExit = await subscribe<TerminalExitPayload>("terminal/exit", (e) => {
       const { id, exitCode } = e.payload;
       const handlers = exitHandlers.get(id);
       if (handlers && handlers.size > 0) {

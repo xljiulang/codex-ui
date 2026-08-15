@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import { loadModels, setToast, store, toastError } from "../composables/useCodex";
 
 const emit = defineEmits<{ close: [] }>();
@@ -46,7 +46,7 @@ async function apply() {
   // （model/effort 传 null 表示恢复默认，与 turn/start 的显式 null 语义一致）
   if (store.currentThreadId) {
     try {
-      await invoke("codex_rpc", {
+      await call("codex_rpc", {
         method: "thread/settings/update",
         params: {
           threadId: store.currentThreadId,

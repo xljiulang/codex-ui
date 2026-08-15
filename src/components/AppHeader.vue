@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import {
   openNewSession,
   resolveCwd,
@@ -18,7 +18,7 @@ async function onNewChat() {
   picking.value = true;
   try {
     // 先选目录（初始定位到当前维护的工作目录）；取消选择文件夹则流程直接结束（不新建、不聚焦、不切 Tab）
-    const dir = await invoke<string | null>("pick_directory", {
+    const dir = await call<string | null>("pick_directory", {
       initialDir: resolveCwd(),
     });
     if (!dir) return;

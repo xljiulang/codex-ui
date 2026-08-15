@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import {
   askConfirm,
   saveSettings,
@@ -54,7 +54,7 @@ async function pickCodexFile() {
     const initialDir = current
       ? current.replace(/[\\/][^\\/]*$/, "")
       : undefined;
-    const dir = await invoke<string | null>("pick_codex_file", {
+    const dir = await call<string | null>("pick_codex_file", {
       initialDir,
     });
     if (dir) codexPath.value = dir;
@@ -77,7 +77,7 @@ async function apply() {
   let syncError: string | null = null;
   if (store.currentThreadId) {
     try {
-      await invoke("codex_rpc", {
+      await call("codex_rpc", {
         method: "thread/memoryMode/set",
         params: { threadId: store.currentThreadId, mode: memoryMode.value },
       });
@@ -98,7 +98,7 @@ async function resetMemory() {
   });
   if (!ok) return;
   try {
-    await invoke("codex_rpc", { method: "memory/reset", params: null });
+    await call("codex_rpc", { method: "memory/reset", params: null });
     setToast("记忆已重置");
   } catch (e) {
     setToast(toastError(e));

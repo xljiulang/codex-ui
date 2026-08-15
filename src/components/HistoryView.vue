@@ -8,7 +8,7 @@ import {
   ref,
   watch,
 } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import {
   clearSearch,
   deleteThread,
@@ -241,7 +241,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
 }
 
 function revealInExplorer(path: string) {
-  void invoke("reveal_path", { path }).catch((e) => {
+  void call("reveal_path", { path }).catch((e) => {
     setToast(toastError(e));
   });
 }

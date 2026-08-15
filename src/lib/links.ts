@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./ipc";
 import { resolveCwd, setToast, toastError } from "../composables/useCodex";
 
 export type LinkClassification =
@@ -90,10 +90,10 @@ export function openLink(href: string, root: string = workspaceRoot()) {
     return;
   }
   if (cls.kind === "web") {
-    void invoke("open_url", { url: cls.url }).catch(() => undefined);
+    void call("open_url", { url: cls.url }).catch(() => undefined);
     return;
   }
-  void invoke("reveal_path", { path: cls.path }).catch((e) => {
+  void call("reveal_path", { path: cls.path }).catch((e) => {
     setToast(toastError(e));
   });
 }

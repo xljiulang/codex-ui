@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import { askConfirm, setToast, toastError } from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
@@ -312,7 +312,7 @@ async function doCommit() {
   if (!root) return;
   commitBusy.value = true;
   try {
-    const st = await invoke<GitStatus>("git_changes_commit", {
+    const st = await call<GitStatus>("git_changes_commit", {
       root,
       message: commitMessage.value.trim(),
     });
@@ -333,7 +333,7 @@ async function doPull() {
   if (!root) return;
   pullBusy.value = true;
   try {
-    const res = await invoke<GitPullResult>("git_changes_pull", { root });
+    const res = await call<GitPullResult>("git_changes_pull", { root });
     gitStatus.value = res.status;
     setToast(res.message);
   } catch (e) {
@@ -346,7 +346,7 @@ async function doPull() {
 /** 探测本机是否安装了 git（推送可用性）；探测失败视为不可用 */
 async function checkGitAvailable() {
   try {
-    gitAvailable.value = await invoke<boolean>("git_changes_git_available", {
+    gitAvailable.value = await call<boolean>("git_changes_git_available", {
       path: repoRoot.value || sessionRoot.value || "",
     });
   } catch {
@@ -368,7 +368,7 @@ async function doPush() {
   if (!root) return;
   pushBusy.value = true;
   try {
-    const res = await invoke<GitPushResult>("git_changes_push", { root });
+    const res = await call<GitPushResult>("git_changes_push", { root });
     gitStatus.value = res.status;
     setToast(res.message);
   } catch (e) {
@@ -399,7 +399,7 @@ async function openBranchMenu() {
   if (!root || branchBusy.value) return;
   branchBusy.value = true;
   try {
-    const res = await invoke<GitBranches>("git_changes_branches", {
+    const res = await call<GitBranches>("git_changes_branches", {
       path: root,
     });
     applyBranches(res);
@@ -438,7 +438,7 @@ async function fetchRemoteBranches() {
   if (!root) return;
   fetchBusy.value = true;
   try {
-    const res = await invoke<GitBranches>("git_changes_remote_fetch", {
+    const res = await call<GitBranches>("git_changes_remote_fetch", {
       root,
       remote: defaultFetchRemote(),
     });
@@ -467,7 +467,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
   branchBusy.value = true;
   try {
     if (branches.value.includes(shortName)) {
-      const st = await invoke<GitStatus>("git_changes_branch_switch", {
+      const st = await call<GitStatus>("git_changes_branch_switch", {
         path: root,
         name: shortName,
       });
@@ -476,7 +476,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
       setToast(`已切换到本地分支 ${shortName}`);
       return;
     }
-    const st = await invoke<GitStatus>("git_changes_branch_checkout_remote", {
+    const st = await call<GitStatus>("git_changes_branch_checkout_remote", {
       root,
       remoteBranch,
     });
@@ -484,7 +484,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
     branchMenuOpen.value = false;
     setToast(`已检出远程分支 ${remoteBranch}`);
     // 刷新分支列表（新增本地分支与上游）
-    const res = await invoke<GitBranches>("git_changes_branches", {
+    const res = await call<GitBranches>("git_changes_branches", {
       path: root,
     });
     applyBranches(res);
@@ -510,7 +510,7 @@ async function deleteRemoteBranch(remoteBranch: string) {
   if (!ok || branchBusy.value) return;
   branchBusy.value = true;
   try {
-    const res = await invoke<GitBranches>("git_changes_remote_branch_delete", {
+    const res = await call<GitBranches>("git_changes_remote_branch_delete", {
       root,
       remoteBranch,
     });
@@ -528,7 +528,7 @@ async function loadRemotes() {
   if (!root || remoteLoading.value) return;
   remoteLoading.value = true;
   try {
-    const res = await invoke<GitRemotes>("git_changes_remotes", { path: root });
+    const res = await call<GitRemotes>("git_changes_remotes", { path: root });
     remotes.value = res.remotes;
     currentRemote.value = res.current;
   } catch (e) {
@@ -547,7 +547,7 @@ async function addRemote() {
   if (!name || !url) return;
   remoteBusy.value = true;
   try {
-    const res = await invoke<GitRemotes>("git_changes_remote_add", {
+    const res = await call<GitRemotes>("git_changes_remote_add", {
       root,
       name,
       url,
@@ -572,7 +572,7 @@ async function switchRemote(remote: GitRemote) {
   if (remote.name === currentRemote.value) return;
   remoteBusy.value = true;
   try {
-    const res = await invoke<GitRemotes>("git_changes_remote_switch_upstream", {
+    const res = await call<GitRemotes>("git_changes_remote_switch_upstream", {
       root,
       remote: remote.name,
     });
@@ -600,7 +600,7 @@ async function removeRemote(remote: GitRemote) {
   if (!ok || remoteBusy.value) return;
   remoteBusy.value = true;
   try {
-    const res = await invoke<GitRemotes>("git_changes_remote_remove", {
+    const res = await call<GitRemotes>("git_changes_remote_remove", {
       root,
       name: remote.name,
     });
@@ -618,7 +618,7 @@ async function switchBranch(name: string) {
   if (branchBusy.value || name === branchLabel.value) return;
   branchBusy.value = true;
   try {
-    const st = await invoke<GitStatus>("git_changes_branch_switch", {
+    const st = await call<GitStatus>("git_changes_branch_switch", {
       path: repoRoot.value,
       name,
     });
@@ -636,14 +636,14 @@ async function createBranch() {
   if (!name || branchBusy.value) return;
   branchBusy.value = true;
   try {
-    const st = await invoke<GitStatus>("git_changes_branch_create", {
+    const st = await call<GitStatus>("git_changes_branch_create", {
       path: repoRoot.value,
       name,
     });
     gitStatus.value = st;
     newBranchName.value = "";
     // 重新拉取分支列表，保持弹层打开
-    const res = await invoke<GitBranches>("git_changes_branches", {
+    const res = await call<GitBranches>("git_changes_branches", {
       path: repoRoot.value,
     });
     applyBranches(res);
@@ -658,7 +658,7 @@ async function deleteBranch(name: string) {
   if (branchBusy.value || name === branchLabel.value) return;
   branchBusy.value = true;
   try {
-    const st = await invoke<GitStatus>("git_changes_branch_delete", {
+    const st = await call<GitStatus>("git_changes_branch_delete", {
       path: repoRoot.value,
       name,
     });
@@ -676,7 +676,7 @@ async function mergeBranch(name: string) {
   if (branchBusy.value || mergeBusy.value || name === branchLabel.value) return;
   mergeBusy.value = true;
   try {
-    const res = await invoke<GitMergeResult>("git_changes_branch_merge", {
+    const res = await call<GitMergeResult>("git_changes_branch_merge", {
       path: repoRoot.value,
       name,
     });
@@ -696,7 +696,7 @@ async function loadCommitLog() {
   if (!root || logBusy.value) return;
   logBusy.value = true;
   try {
-    const res = await invoke<GitCommitEntry[]>("git_changes_log", {
+    const res = await call<GitCommitEntry[]>("git_changes_log", {
       root,
       limit: LOG_LIMIT,
       before: null,
@@ -718,7 +718,7 @@ async function loadMoreCommits() {
   if (!root || logBusy.value || !last) return;
   logBusy.value = true;
   try {
-    const res = await invoke<GitCommitEntry[]>("git_changes_log", {
+    const res = await call<GitCommitEntry[]>("git_changes_log", {
       root,
       limit: LOG_LIMIT,
       before: last.hash,
@@ -799,7 +799,7 @@ async function openDiff(file: GitFile) {
   const root = gitStatus.value?.repoRoot;
   if (!root) return;
   try {
-    const diff = await invoke<string>("git_changes_diff", {
+    const diff = await call<string>("git_changes_diff", {
       root,
       path: file.path,
       kind: normalizeDiffKind(file.status),
@@ -929,7 +929,7 @@ async function runGitOp(cmd: string, relPath: string) {
   if (!root) return;
   gitActionBusy.value = true;
   try {
-    const st = await invoke<GitStatus>(cmd, { root, path: relPath });
+    const st = await call<GitStatus>(cmd, { root, path: relPath });
     gitStatus.value = st;
   } catch (e) {
     setToast(toastError(e));
@@ -987,7 +987,7 @@ async function runGitAllOp(cmd: string) {
   if (!root) return;
   gitActionBusy.value = true;
   try {
-    const st = await invoke<GitStatus>(cmd, { root });
+    const st = await call<GitStatus>(cmd, { root });
     gitStatus.value = st;
   } catch (e) {
     setToast(toastError(e));

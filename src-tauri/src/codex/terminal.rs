@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::codex::path_util::clean_path;
 
@@ -91,13 +91,23 @@ pub fn terminal_spawn(
     id: String,
     cwd: String,
 ) -> Result<TerminalSpawnResult, String> {
+    terminal_spawn_impl(&app, &state, &id, &cwd)
+}
+
+/// 创建新终端（远程 RPC 与 Tauri 命令共用）
+pub fn terminal_spawn_impl(
+    app: &AppHandle,
+    state: &TerminalState,
+    id: &str,
+    cwd: &str,
+) -> Result<TerminalSpawnResult, String> {
     if id.trim().is_empty() {
         return Err("终端 id 不能为空".into());
     }
-    let dir = validate_cwd(&cwd)?;
+    let dir = validate_cwd(cwd)?;
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
-        if guard.contains_key(&id) {
+        if guard.contains_key(id) {
             return Err(format!("终端已存在: {id}"));
         }
     }
@@ -136,14 +146,13 @@ pub fn terminal_spawn(
     });
     {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-        guard.insert(id.clone(), session);
+        guard.insert(id.to_string(), session);
     }
 
     // reader 线程：分块读取输出 emit "terminal/output"；EOF 后取退出码 emit
     // "terminal/exit" 并清理 map（kill 路径下 kill_session 已先移除，此处幂等）。
     let app_for_thread = app.clone();
-    drop(app);
-    let id_for_thread = id.clone();
+    let id_for_thread = id.to_string();
     std::thread::spawn(move || {
         let state_for_thread = app_for_thread.state::<TerminalState>();
         let mut buf = [0u8; 8192];
@@ -152,12 +161,14 @@ pub fn terminal_spawn(
                 Ok(0) => break,
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    let _ = app_for_thread.emit(
+                    crate::codex::remote::emit_event(
+                        &app_for_thread,
                         "terminal/output",
-                        TerminalOutputPayload {
+                        serde_json::to_value(TerminalOutputPayload {
                             id: id_for_thread.clone(),
                             data,
-                        },
+                        })
+                        .unwrap_or_default(),
                     );
                 }
                 Err(_) => break,
@@ -178,12 +189,14 @@ pub fn terminal_spawn(
             }
             code
         };
-        let _ = app_for_thread.emit(
+        crate::codex::remote::emit_event(
+            &app_for_thread,
             "terminal/exit",
-            TerminalExitPayload {
+            serde_json::to_value(TerminalExitPayload {
                 id: id_for_thread.clone(),
                 exit_code,
-            },
+            })
+            .unwrap_or_default(),
         );
         let lock_result = state_for_thread.0.lock();
         if let Ok(mut guard) = lock_result {
@@ -191,7 +204,7 @@ pub fn terminal_spawn(
         }
     });
 
-    Ok(TerminalSpawnResult { id })
+    Ok(TerminalSpawnResult { id: id.to_string() })
 }
 
 /// 向终端写入输入（xterm onData → 原始字节）
@@ -201,9 +214,17 @@ pub fn terminal_write(
     id: String,
     data: String,
 ) -> Result<(), String> {
+    terminal_write_impl(&state, &id, &data)
+}
+
+pub fn terminal_write_impl(
+    state: &TerminalState,
+    id: &str,
+    data: &str,
+) -> Result<(), String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     let session = guard
-        .get(&id)
+        .get(id)
         .ok_or_else(|| format!("终端不存在: {id}"))?;
     let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
     writer
@@ -220,9 +241,18 @@ pub fn terminal_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    terminal_resize_impl(&state, &id, cols, rows)
+}
+
+pub fn terminal_resize_impl(
+    state: &TerminalState,
+    id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
     let session = guard
-        .get(&id)
+        .get(id)
         .ok_or_else(|| format!("终端不存在: {id}"))?;
     let master = session.master.lock().map_err(|e| e.to_string())?;
     master
@@ -238,7 +268,11 @@ pub fn terminal_resize(
 /// 结束终端进程并移除会话（幂等：会话不存在时返回 Ok）
 #[tauri::command]
 pub fn terminal_kill(state: State<'_, TerminalState>, id: String) -> Result<(), String> {
-    kill_session(&state, &id)
+    terminal_kill_impl(&state, &id)
+}
+
+pub fn terminal_kill_impl(state: &TerminalState, id: &str) -> Result<(), String> {
+    kill_session(state, id)
 }
 
 #[cfg(test)]

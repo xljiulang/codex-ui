@@ -143,6 +143,15 @@ codex app-server generate-ts --out <dir> --experimental
 
 **标题自动总结**依赖临时线程协议，启动后由 `codex_title_helper_capability` 只读探测（创建内存线程后立即释放）：支持 `experimentalApi` + `ephemeral` 时用内存临时线程；支持 `experimentalApi` 但不支持 `ephemeral` 时用普通线程总结后删除；不支持 `experimentalApi` 时跳过标题总结。
 
+## 远程 Web 模式（手机/浏览器访问）
+
+codex-ui 内置远程 Web 模式：`--remote` 启动后监听 `0.0.0.0`，提供 HTTP+WebSocket 服务并托管同一份前端（完整 UI，含聊天/历史/文件树/Git/终端），手机浏览器经 frp 等隧道访问即可。远程端只能调用应用接口，不接触操作系统。
+
+- 构建：纯桌面版用 `build-release.bat`；需要远程 Web 模式用 `build-web-release.bat`（`npm run build` 后 `cargo build --release --features remote-web`），dist 内嵌进 exe。
+- 启动：`codex-ui --remote --port 8000 [--token <T>]`；未指定 token 时自动生成并打印，同时保存到 `%APPDATA%\com.codexui.app\remote-token.txt`。
+- 访问：浏览器打开 `http://<电脑>:8000/?token=<T>`（公网建议经 frp 配 https 域名）；令牌同时鉴权 `/rpc`、`/events`、`/asset`。
+- 限制：原生对话框类操作（选择文件/文件夹、系统剪贴板文件、在资源管理器中打开、导出 PDF）在远程模式不可用并提示；系统文件拖放附件在远程走 HTML5 兜底（非图片拿不到原始路径）。终端、文件树、Git、聊天等完整可用。
+
 ## 常见问题
 
 - **启动后“localhost 拒绝连接”**：生产构建缺少 `tauri/custom-protocol` 特性（或前端未构建）。确认 `Cargo.toml` 已启用该特性并重新 `cargo build --release`。
@@ -150,6 +159,7 @@ codex app-server generate-ts --out <dir> --experimental
 - **点击历史后发送/停止按钮反复交替**：该会话带活跃目标且被自动恢复。新版打开会话为只读、不会触发；如已发生，清掉该会话目标或删除会话。
 - **“批准并记住此规则”后仍被拒**：确认权限模式为“请求批准/帮我批准”（沙箱为 workspace-write）；早期版本误用 read-only 沙箱导致该问题。
 - **本地图片不显示**：确认构建启用了 `protocol-asset` 特性且 `tauri.conf.json` 配置了 `assetProtocol`。
+- **远程模式 401/无法访问**：确认启动参数带 `--remote` 且访问 URL 带正确的 `?token=`；经 frp 公网转发时建议配置 https。
 - **继续历史会话报 `invalid_request_error: you passed .`**：旧版会向服务端发送空模型；更新到最新版本（修复后自动回退到默认模型）。
 - **拉取/推送提示“未检测到系统 git”**：拉取与推送依赖系统 Git；请安装 Git（git-scm.com）或将其加入 PATH，安装后重启应用。其余功能（状态/提交/分支合并等）不需要系统 git。
 - **拉取提示“本地与远端已分叉”**：拉取采用快进优先（`--ff-only`），分叉时不自动合并；请先提交本地改动，再在 GitView 分支管理中合并远端分支后重新拉取。

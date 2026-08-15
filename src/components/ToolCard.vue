@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/ipc";
 import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
@@ -429,7 +429,7 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
             :key="i"
             class="web-result"
             :href="r.url || '#'"
-            @click.prevent="r.url ? void invoke('open_url', { url: r.url }) : undefined"
+            @click.prevent="r.url ? void call('open_url', { url: r.url }) : undefined"
           >
             <span class="web-result-title">{{ r.title || r.url || "（无标题）" }}</span>
             <span v-if="r.snippet" class="web-result-snippet">{{ r.snippet }}</span>
