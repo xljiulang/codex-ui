@@ -41,7 +41,7 @@ codex-ui.exe（Tauri 2 窗口）
 │   ├── mod.rs         模块声明
 │   └── settings.rs    设置读写
 └── Vue 3 前端  src/
-    ├── composables/useCodex.ts  状态 + 事件订阅 + 协议调用（含会话标签 sessionTabs）
+    ├── composables/useCodex/  状态中心（目录，按领域拆分：store/事件桥/会话/回合/历史等，入口 index.ts 再导出）
     ├── composables/useEditorTabs.ts  左侧多标签状态（文件/diff/预览/终端标签；统一关闭入口 closeAnyTab）
     ├── composables/useTerminalEvents.ts  终端事件桥（spawn 前监听 + 按 id 缓冲/回放）
     ├── composables/useSessionFs.ts  会话资源状态（懒加载/搜索/监听/图标缓存）
