@@ -221,6 +221,10 @@ async function clickCtxItem(wrapper: VueWrapper, label: string) {
   await flushPromises();
 }
 
+function fireWindowPointer(type: string, x: number, y: number) {
+  window.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y }));
+}
+
 describe("ResourceView 文件树", () => {
   beforeEach(() => {
     store.server.workspace = rootPath;
@@ -594,39 +598,107 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("拖拽文件到目录：高亮目标并调用 session_fs_move", async () => {
+  it("指针拖拽文件到目录：显示幽灵、高亮目标并调用 session_fs_move", async () => {
     const wrapper = await mountPanel();
     const fileRow = wrapper.find(".resource-row.resource-file");
     const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
-    await fileRow.trigger("dragstart", {
-      dataTransfer: { setData: vi.fn(), effectAllowed: "" },
+    const hitSpy = vi
+      .spyOn(document, "elementFromPoint")
+      .mockReturnValue(dirRow.element as Element);
+    await fileRow.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
     });
-    await dirRow.trigger("dragover", { dataTransfer: { dropEffect: "" } });
+    fireWindowPointer("pointermove", 120, 120);
+    await flushPromises();
+    expect(wrapper.find(".resource-drag-ghost").exists()).toBe(true);
     expect(dirRow.classes()).toContain("resource-drop-target");
-    await dirRow.trigger("drop", { dataTransfer: {} });
+    fireWindowPointer("pointerup", 120, 120);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_move", {
       root: rootPath,
       src: aTxt.path,
       destDir: srcDir.path,
     });
+    hitSpy.mockRestore();
     wrapper.unmount();
   });
 
-  it("拖拽到自身：不高亮也不调用移动", async () => {
+  it("指针拖拽到自身：不高亮也不调用移动", async () => {
     const wrapper = await mountPanel();
     const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
-    await dirRow.trigger("dragstart", {
-      dataTransfer: { setData: vi.fn(), effectAllowed: "" },
+    const hitSpy = vi
+      .spyOn(document, "elementFromPoint")
+      .mockReturnValue(dirRow.element as Element);
+    await dirRow.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
     });
-    await dirRow.trigger("dragover", { dataTransfer: { dropEffect: "" } });
+    fireWindowPointer("pointermove", 120, 120);
+    await flushPromises();
+    expect(wrapper.find(".resource-drag-ghost").exists()).toBe(true);
     expect(dirRow.classes()).not.toContain("resource-drop-target");
-    await dirRow.trigger("drop", { dataTransfer: {} });
+    fireWindowPointer("pointerup", 120, 120);
     await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "session_fs_move",
       expect.anything(),
     );
+    hitSpy.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("拖拽中按 Escape：取消并清除幽灵与高亮", async () => {
+    const wrapper = await mountPanel();
+    const fileRow = wrapper.find(".resource-row.resource-file");
+    const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
+    const hitSpy = vi
+      .spyOn(document, "elementFromPoint")
+      .mockReturnValue(dirRow.element as Element);
+    await fileRow.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireWindowPointer("pointermove", 120, 120);
+    await flushPromises();
+    expect(wrapper.find(".resource-drag-ghost").exists()).toBe(true);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await flushPromises();
+    expect(wrapper.find(".resource-drag-ghost").exists()).toBe(false);
+    expect(dirRow.classes()).not.toContain("resource-drop-target");
+    fireWindowPointer("pointerup", 120, 120);
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_move",
+      expect.anything(),
+    );
+    hitSpy.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("拖拽结束后的合成 click 被抑制，不触发文件打开", async () => {
+    const wrapper = await mountPanel();
+    const fileRow = wrapper.find(".resource-row.resource-file");
+    const hitSpy = vi
+      .spyOn(document, "elementFromPoint")
+      .mockReturnValue(fileRow.element as Element);
+    await fileRow.trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    fireWindowPointer("pointermove", 130, 130);
+    fireWindowPointer("pointerup", 130, 130);
+    await fileRow.trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_probe_text",
+      expect.anything(),
+    );
+    hitSpy.mockRestore();
     wrapper.unmount();
   });
 

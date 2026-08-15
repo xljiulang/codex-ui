@@ -2419,6 +2419,48 @@ select option {
   outline-offset: -1px;
 }
 
+/* 自绘指针拖拽：拖拽期间禁止文本选择、隐藏行内 @ 按钮、grabbing 光标 */
+body.resource-dragging {
+  user-select: none;
+}
+body.resource-dragging .resource-row {
+  cursor: grabbing;
+}
+body.resource-dragging .resource-add {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 拖拽幽灵卡片：fixed 跟随指针，不参与命中 */
+.resource-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: 12px;
+  transform: translate(-50%, -130%);
+  opacity: 0.92;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-drag-ghost svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
 .resource-error {
   color: var(--red);
   white-space: pre-wrap;

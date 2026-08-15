@@ -88,9 +88,18 @@ const propsEntry = ref<FsEntry | null>(null);
 const propsLoading = ref(false);
 const editingPath = ref<string | null>(null);
 const editName = ref("");
-/** 树内拖拽移动：正在拖拽的源路径与当前高亮目标路径 */
-const dragPath = ref<string | null>(null);
+/** 树内拖拽移动（自绘指针拖拽）：按下起点、激活态、高亮目标与浮动幽灵 */
+const dragStart = ref<{ entry: FsEntry; x: number; y: number } | null>(null);
+const dragActive = ref(false);
 const dragOverPath = ref<string | null>(null);
+const dragGhost = ref<{
+  x: number;
+  y: number;
+  name: string;
+  isDir: boolean;
+} | null>(null);
+/** 拖拽结束后的合成 click 抑制标志（setTimeout(0) 复位） */
+const suppressClick = ref(false);
 
 watch(
   () => props.active,
@@ -302,22 +311,27 @@ async function onCreateTextFile(parent: FsEntry) {
   startRename(created);
 }
 
-function onRowDragStart(entry: FsEntry, e: DragEvent) {
-  dragPath.value = entry.path;
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", entry.path);
-  }
+/** 指针拖拽移动：按下后移动超过阈值才激活；激活后显示幽灵并命中高亮目标目录 */
+const DRAG_THRESHOLD = 5;
+
+function onRowPointerDown(entry: FsEntry, e: PointerEvent) {
+  if (e.button !== 0) return;
+  const t = e.target as HTMLElement | null;
+  if (t?.closest?.(".rename-input, .resource-add, .resource-arrow")) return;
+  dragStart.value = { entry, x: e.clientX, y: e.clientY };
 }
 
-function onRowDragEnd() {
-  dragPath.value = null;
+function cancelDrag() {
+  dragStart.value = null;
+  dragActive.value = false;
   dragOverPath.value = null;
+  dragGhost.value = null;
+  document.body.classList.remove("resource-dragging");
 }
 
 /** 拖拽目标合法性：源存在、目标不是源自身、目标不在源目录内（大小写不敏感） */
 function canDropTo(targetPath: string): boolean {
-  const src = dragPath.value;
+  const src = dragStart.value?.entry.path;
   if (!src) return false;
   const srcKey = src.replace(/\//g, "\\").toLowerCase();
   const targetKey = targetPath.replace(/\//g, "\\").toLowerCase();
@@ -325,23 +339,49 @@ function canDropTo(targetPath: string): boolean {
   return !targetKey.startsWith(srcKey + "\\");
 }
 
-function onRowDragOver(entry: FsEntry, e: DragEvent) {
-  if (!entry.isDir || !canDropTo(entry.path)) return;
-  e.preventDefault();
-  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-  dragOverPath.value = entry.path;
+function onWindowPointerMove(e: PointerEvent) {
+  const start = dragStart.value;
+  if (!start) return;
+  if (!dragActive.value) {
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) {
+      return;
+    }
+    dragActive.value = true;
+    document.body.classList.add("resource-dragging");
+  }
+  dragGhost.value = {
+    x: e.clientX,
+    y: e.clientY,
+    name: start.entry.name,
+    isDir: start.entry.isDir,
+  };
+  // 命中检测：指针下最近的资源行；仅目录且合法时高亮
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const row = el?.closest?.(".resource-row") as HTMLElement | null;
+  const path = row?.dataset.fsPath;
+  dragOverPath.value =
+    path && row.classList.contains("resource-dir") && canDropTo(path)
+      ? path
+      : null;
 }
 
-function onRowDragLeave(entry: FsEntry) {
-  if (dragOverPath.value === entry.path) dragOverPath.value = null;
-}
-
-async function onRowDrop(entry: FsEntry, e: DragEvent) {
-  e.preventDefault();
-  const src = dragPath.value;
-  dragOverPath.value = null;
-  if (!entry.isDir || !src || !canDropTo(entry.path)) return;
-  await moveEntry(src, entry.path);
+function onWindowPointerUp() {
+  const start = dragStart.value;
+  dragStart.value = null;
+  if (dragActive.value) {
+    dragActive.value = false;
+    suppressClick.value = true;
+    window.setTimeout(() => {
+      suppressClick.value = false;
+    }, 0);
+    const target = dragOverPath.value;
+    dragOverPath.value = null;
+    dragGhost.value = null;
+    document.body.classList.remove("resource-dragging");
+    if (start && target) {
+      void moveEntry(start.entry.path, target);
+    }
+  }
 }
 
 function onRowContext(row: ResourceRow, e: MouseEvent) {
@@ -351,6 +391,10 @@ function onRowContext(row: ResourceRow, e: MouseEvent) {
 
 /** 文件树行单击：文件 → 选中并在文本文件时打开预览；目录 → 折叠/展开 */
 function onTreeRowClick(row: ResourceRow) {
+  if (suppressClick.value) {
+    suppressClick.value = false;
+    return;
+  }
   if (row.kind === "file") {
     selectedPath.value = row.entry.path;
     void requestOpen(row.entry);
@@ -438,6 +482,10 @@ function onRefresh() {
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
+  if (dragActive.value || dragStart.value) {
+    cancelDrag();
+    return;
+  }
   if (onMenuKeydown(e)) return;
   if (confirmDelete.value) cancelDelete();
   else if (propsEntry.value) propsEntry.value = null;
@@ -448,11 +496,17 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("click", onWindowClick);
   window.addEventListener("scroll", onWindowScroll, true);
+  window.addEventListener("pointermove", onWindowPointerMove);
+  window.addEventListener("pointerup", onWindowPointerUp);
+  window.addEventListener("pointercancel", cancelDrag);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("click", onWindowClick);
   window.removeEventListener("scroll", onWindowScroll, true);
+  window.removeEventListener("pointermove", onWindowPointerMove);
+  window.removeEventListener("pointerup", onWindowPointerUp);
+  window.removeEventListener("pointercancel", cancelDrag);
 });
 
 const deleteLabel = computed(() => {
@@ -553,15 +607,10 @@ const deleteLabel = computed(() => {
           }"
           :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
           :data-fs-path="row.entry.path"
-          :draggable="row.kind !== 'root'"
           v-tooltip="row.kind === 'root' ? row.entry.path : undefined"
           @click="onTreeRowClick(row)"
           @contextmenu="onRowContext(row, $event)"
-          @dragstart="onRowDragStart(row.entry, $event)"
-          @dragend="onRowDragEnd()"
-          @dragover="onRowDragOver(row.entry, $event)"
-          @dragleave="onRowDragLeave(row.entry)"
-          @drop="onRowDrop(row.entry, $event)"
+          @pointerdown="row.kind !== 'root' && onRowPointerDown(row.entry, $event)"
         >
           <button
             v-if="row.kind !== 'root'"
@@ -626,6 +675,17 @@ const deleteLabel = computed(() => {
           暂无工作目录
         </div>
       </template>
+    </div>
+
+    <div
+      v-if="dragGhost"
+      class="resource-drag-ghost"
+      :style="{ left: dragGhost.x + 'px', top: dragGhost.y + 'px' }"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path :d="dragGhost.isDir ? ICON_FOLDER_CLOSED : ICON_FILE" />
+      </svg>
+      <span>{{ dragGhost.name }}</span>
     </div>
 
     <div
