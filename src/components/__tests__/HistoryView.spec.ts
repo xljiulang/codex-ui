@@ -17,6 +17,9 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
 
 import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
@@ -528,7 +531,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     mockedDelete.mockResolvedValue(undefined);
   });
 
-  it("文件夹行右键显示“新建会话”“在资源管理器中打开”“删除所有会话”", async () => {
+  it("文件夹行右键显示“新建会话”“在此打开终端”“在资源管理器中打开”“删除所有会话”", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
       clientX: 200,
@@ -537,7 +540,12 @@ describe("HistoryView 文件夹右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["新建会话", "在资源管理器中打开", "删除所有会话"]);
+    expect(labels).toEqual([
+      "新建会话",
+      "在此打开终端",
+      "在资源管理器中打开",
+      "删除所有会话",
+    ]);
     const del = wrapper
       .findAll(".ctx-menu-item")
       .find((b) => b.text().trim() === "删除所有会话")!;
@@ -555,6 +563,24 @@ describe("HistoryView 文件夹右键菜单", () => {
     expect(mockedOpenNewSession).toHaveBeenCalledWith("D:\\codex\\codex-ui");
     expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("点击「在此打开终端」：以分组目录启动终端", async () => {
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "在此打开终端");
+    await flushPromises();
+    const spawn = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "terminal_spawn",
+    );
+    expect(spawn).toBeTruthy();
+    expect((spawn![1] as { workspace?: string }).workspace).toBe(
+      "D:\\codex\\codex-ui",
+    );
     wrapper.unmount();
   });
 
@@ -636,7 +662,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["新建会话", "在资源管理器中打开"]);
+    expect(labels).toEqual(["新建会话", "在此打开终端", "在资源管理器中打开"]);
     wrapper.unmount();
   });
 

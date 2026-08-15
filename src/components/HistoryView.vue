@@ -9,6 +9,7 @@ import {
   watch,
 } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { openTerminalTab } from "../composables/useEditorTabs";
 import {
   clearSearch,
   deleteThread,
@@ -42,6 +43,7 @@ import {
   ICON_PLUS,
   ICON_REFRESH,
   ICON_RENAME,
+  ICON_TERMINAL,
 } from "../lib/icons";
 
 /** 删除确认目标：单条会话或整个目录分组 */
@@ -242,6 +244,11 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
       label: "新建会话",
       icon: ICON_PLUS,
       action: () => void openNewSession(group.path),
+    },
+    {
+      label: "在此打开终端",
+      icon: ICON_TERMINAL,
+      action: () => void openTerminalTab(group.path),
     },
     {
       label: "在资源管理器中打开",
