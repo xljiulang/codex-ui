@@ -28,6 +28,7 @@ import {
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import type { FsEntry } from "../../lib/sessionFs";
+import { ICON_AT } from "../../lib/icons";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
@@ -346,6 +347,10 @@ describe("ResourceView 文件树", () => {
       "添加为会话附件",
       "在资源管理器中打开",
     ]);
+    // “添加为会话附件”使用与行悬停按钮相同的 @ 图标
+    expect(
+      wrapper.findAll(".ctx-menu-item")[5].find("svg path")?.attributes("d"),
+    ).toBe(ICON_AT);
     wrapper.unmount();
   });
 
@@ -721,6 +726,12 @@ describe("ResourceView 文件树", () => {
         .findAll(".resource-row.resource-dir")[0]
         .element.firstElementChild?.classList.contains("resource-add"),
     ).toBe(true);
+    // 与右键菜单共用同一个 @ 图标
+    expect(
+      wrapper
+        .find(".resource-row.resource-file .resource-add svg path")
+        .attributes("d"),
+    ).toBe(ICON_AT);
     wrapper.unmount();
   });
 
@@ -764,6 +775,9 @@ describe("ResourceView 文件树", () => {
         .find(".resource-result")
         .element.firstElementChild?.classList.contains("resource-add"),
     ).toBe(true);
+    expect(
+      wrapper.find(".resource-result .resource-add svg path").attributes("d"),
+    ).toBe(ICON_AT);
     wrapper.unmount();
   });
 

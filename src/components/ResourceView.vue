@@ -48,6 +48,7 @@ import { previewTypeForName } from "../lib/preview";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
+  ICON_AT,
   ICON_DELETE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
@@ -69,8 +70,6 @@ const ICON_COPY =
   "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
 const ICON_REVEAL =
   "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
-const ICON_ATTACH =
-  "M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-1.93-1.57-3.5-3.5-3.5S8 3.07 8 5v12.5c0 2.76 2.24 5 5 5s5-2.24 5-5V6h-1.5z";
 const ICON_INFO =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z";
 
@@ -188,7 +187,7 @@ async function openDirMenu(entry: FsEntry, e: MouseEvent) {
     },
     {
       label: "添加为会话附件",
-      icon: ICON_ATTACH,
+      icon: ICON_AT,
       action: () => addAsAttachment(entry),
     },
     {
@@ -230,7 +229,7 @@ function openFileMenu(entry: FsEntry, e: MouseEvent) {
     },
     {
       label: "添加为会话附件",
-      icon: ICON_ATTACH,
+      icon: ICON_AT,
       action: () => addAsAttachment(entry),
     },
     {
@@ -437,7 +436,7 @@ const deleteLabel = computed(() => {
             :aria-label="`添加 ${entry.name} 为会话附件`"
             v-tooltip="'添加为会话附件'"
             @click.stop="addAsAttachment(entry)"
-          >@</button>
+          ><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICON_AT" /></svg></button>
           <span class="resource-icon">
             <img
               v-if="fileIcon(entry)"
@@ -485,7 +484,7 @@ const deleteLabel = computed(() => {
             :aria-label="`添加 ${row.entry.name} 为会话附件`"
             v-tooltip="'添加为会话附件'"
             @click.stop="addAsAttachment(row.entry)"
-          >@</button>
+          ><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICON_AT" /></svg></button>
           <svg
             v-if="row.kind !== 'file'"
             class="resource-arrow"
