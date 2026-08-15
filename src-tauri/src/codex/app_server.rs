@@ -557,7 +557,7 @@ impl CodexServer {
         let inner = self.shared.inner.lock().await;
         json!({
             "connected": inner.connected,
-            "workspace": self.workspace.to_string_lossy(),
+            "startupWorkspace": self.workspace.to_string_lossy(),
             "codexPath": inner.codex_path.as_ref().map(|p| p.to_string_lossy().to_string()),
             "logs": inner.logs.clone(),
         })

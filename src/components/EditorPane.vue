@@ -142,7 +142,7 @@ const pendingTab = computed<EditorTab | null>(
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
 function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEntry {
   const root =
-    tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
+    tab.kind === "file" ? tab.workspace : tab.kind === "diff" ? tab.workspace : tab.workspace;
   return {
     name: tab.title,
     path: tab.path,
@@ -176,7 +176,7 @@ function sessionTabPending(tab: SessionTab): number {
 function titleTooltip(tab: EditorTab): string {
   if (tab.kind === "terminal") return "";
   const root =
-    tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
+    tab.kind === "file" ? tab.workspace : tab.kind === "diff" ? tab.workspace : tab.workspace;
   const path = relPathOf(root, tab.path);
   return tab.title !== path ? path : "";
 }
@@ -185,10 +185,10 @@ function titleTooltip(tab: EditorTab): string {
 function tabAbsPath(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string {
   const root =
     tab.kind === "file"
-      ? tab.root
+      ? tab.workspace
       : tab.kind === "diff"
-        ? tab.workspaceRoot
-        : tab.root;
+        ? tab.workspace
+        : tab.workspace;
   return /^[A-Za-z]:[\\/]/.test(tab.path) ? tab.path : joinFsPath(root, tab.path);
 }
 
@@ -303,7 +303,7 @@ watch(
     for (const tab of tabs) {
       if (tab.kind === "terminal") continue;
       const root =
-        tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
+        tab.kind === "file" ? tab.workspace : tab.kind === "diff" ? tab.workspace : tab.workspace;
       const list = byRoot.get(root) ?? [];
       list.push(tabToEntry(tab));
       byRoot.set(root, list);
@@ -315,8 +315,12 @@ watch(
   { immediate: true },
 );
 
-/** Tab 激活：带文件路径的标签（文件/预览/Diff）在资源树中同步选中并展开所在目录 */
+/**
+ * Tab 激活：把活动标签的工作区写入 store.workspace（资源/Git 面板跟随切换），
+ * 带文件路径的标签（文件/预览/Diff）再在资源树中同步选中并展开所在目录。
+ */
 watch(activeTab, (tab) => {
+  store.workspace = tab ? tab.workspace : null;
   if (!tab || tab.kind === "terminal") return;
   void revealAbsPathInTree(tabAbsPath(tab));
 });

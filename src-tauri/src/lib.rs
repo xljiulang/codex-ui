@@ -81,7 +81,7 @@ pub fn run() {
             codex::commands::auth_login,
             codex::commands::auth_api_key_configured,
             codex::commands::auth_logout,
-            codex::commands::workspace_dir,
+            codex::commands::startup_workspace,
             codex::commands::open_url,
             codex::commands::reveal_path,
             codex::diff::build_diff_preview,

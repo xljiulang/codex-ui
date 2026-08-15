@@ -7,7 +7,7 @@ import { useThrottledRef } from "../composables/useThrottledRef";
 import { useTailWindow } from "../composables/useTailWindow";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
-import { workspaceRoot } from "../lib/links";
+import { sessionWorkspace } from "../lib/links";
 import { copyText } from "../lib/clipboard";
 import { openDiffTab } from "../composables/useEditorTabs";
 import {
@@ -294,7 +294,7 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
     path: c.path,
     kind: normalizeDiffKind(c.kind),
     diff: c.diff,
-    workspace_root: workspaceRoot(),
+    workspace: sessionWorkspace(),
   });
 }
 </script>

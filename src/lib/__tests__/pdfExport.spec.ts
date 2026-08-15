@@ -27,7 +27,7 @@ function fakeTab(content: string): FileEditorTab {
   return {
     kind: "file",
     id: "t1",
-    root: "D:\\repo",
+    workspace: "D:\\repo",
     path: "a.md",
     title: "a.md",
     loading: false,

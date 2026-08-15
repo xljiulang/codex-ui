@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { resolveCwd, setToast, toastError } from "../composables/useCodex";
+import { resolveSessionWorkspace, setToast, toastError } from "../composables/useCodex";
 
 export type LinkClassification =
   | { kind: "web"; url: string }
@@ -65,8 +65,8 @@ export function displayHref(href: string, workspaceRoot: string): string {
   return cls.kind === "web" ? cls.url : cls.path;
 }
 
-export function workspaceRoot(): string {
-  return resolveCwd();
+export function sessionWorkspace(): string {
+  return resolveSessionWorkspace();
 }
 
 interface TestHookWindow {
@@ -75,8 +75,8 @@ interface TestHookWindow {
 }
 
 /** 网页走默认浏览器；本地路径用资源管理器定位（文件 /select，目录打开），失败 toast 提示 */
-export function openLink(href: string, root: string = workspaceRoot()) {
-  const cls = localPathFromHref(href, root);
+export function openLink(href: string, workspace: string = sessionWorkspace()) {
+  const cls = localPathFromHref(href, workspace);
   if (!cls) return;
   const testWin = window as unknown as TestHookWindow;
   // E2E 测试钩子：__CODEX_UI_TEST__ 开启时只记录分发，不真正打开浏览器/资源管理器

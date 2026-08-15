@@ -22,8 +22,8 @@ describe("AppHeader 导航", () => {
   beforeEach(() => {
     store.showSettings = false;
     store.currentThreadId = null;
-    store.currentThreadCwd = null;
-    store.server.workspace = "";
+    store.currentThreadWorkspace = null;
+    store.server.startupWorkspace = "";
     store.panelTab = "history";
     mockedPickAndOpenNewSession.mockClear();
   });

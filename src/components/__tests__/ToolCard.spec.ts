@@ -219,7 +219,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue(null);
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.toast = "";
     __resetEditorTabsForTest();
   });
@@ -247,7 +247,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
             path: string;
             kind: string;
             diff: string;
-            workspace_root: string;
+            workspace: string;
           };
         }
       | undefined;
@@ -272,7 +272,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
     const params = openCallParams()?.params;
     expect(params?.path).toBe("D:\\repo\\a.cs");
     expect(params?.kind).toBe("modify");
-    expect(params?.workspace_root).toBe("D:/repo");
+    expect(params?.workspace).toBe("D:/repo");
     expect(params?.diff).toBe(REPLACE_DIFF);
     wrapper.unmount();
   });

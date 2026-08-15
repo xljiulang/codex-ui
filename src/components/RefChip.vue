@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { openLink, workspaceRoot } from "../lib/links";
+import { openLink, sessionWorkspace } from "../lib/links";
 import { NEW_CHAT_PLUGIN_KEY, store } from "../composables/useCodex";
 
 const props = withDefaults(
@@ -42,7 +42,7 @@ const kindLabel = computed(() =>
 
 function onClick() {
   if (!clickable.value) return;
-  openLink(props.path, workspaceRoot());
+  openLink(props.path, sessionWorkspace());
 }
 
 // ---------------- 自定义悬浮卡片 ----------------

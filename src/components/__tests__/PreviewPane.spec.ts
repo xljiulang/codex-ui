@@ -10,7 +10,7 @@ function makeTab(
     kind: "preview",
     previewType: "image",
     id: "p1",
-    root: "D:/repo",
+    workspace: "D:/repo",
     path: "assets/logo.png",
     title: "logo.png",
     loading: false,

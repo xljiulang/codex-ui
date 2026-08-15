@@ -140,7 +140,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       threadId: "t1",
       name: "",
       origin: "history",
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -153,10 +153,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     });
     store.activeSessionId = "sess-1";
+    store.workspace = null;
     store.confirm = null;
   });
 
@@ -725,7 +726,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       path: "a.txt",
       kind: "modify",
       diff: "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-x\n+y",
-      workspace_root: root,
+      workspace: root,
     });
     await settle();
     await openTerminalTab(root + "\\src");
@@ -876,7 +877,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       .trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write", {
-      root,
+      workspace: root,
       path: "a.txt",
       content: "\uFEFFxa\r\nb\r\n",
     });
@@ -1031,7 +1032,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await saveBtn.trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write", {
-      root,
+      workspace: root,
       path: "a.txt",
       content: "xhello",
     });
@@ -1054,7 +1055,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       path: "a.txt",
       kind: "add",
       diff: "diff --git a/a.txt b/a.txt\n@@ -0,0 +1 @@\n+hello",
-      workspace_root: root,
+      workspace: root,
     });
     await settle();
     await waitForEl(wrapper, ".diff-window-path");
@@ -1215,11 +1216,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const termTabs = wrapper.findAll(".editor-tab");
     const t1 = tabs.find(
       (x): x is TerminalEditorTab =>
-        x.kind === "terminal" && x.cwd === root + "\\src",
+        x.kind === "terminal" && x.workspace === root + "\\src",
     )!;
     const t2 = tabs.find(
       (x): x is TerminalEditorTab =>
-        x.kind === "terminal" && x.cwd === root + "\\lib",
+        x.kind === "terminal" && x.workspace === root + "\\lib",
     )!;
 
     expect(termTabs[1].find(".editor-tab-run").exists()).toBe(false);
@@ -1269,9 +1270,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
   it("激活文件标签：资源树同步选中并展开所在目录", async () => {
     store.currentThreadId = null;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
-    store.server.workspace = root;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.server.startupWorkspace = root;
     const mainTs = root + "\\src\\main.ts";
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
@@ -1303,7 +1304,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(selectedPath.value).toBe(mainTs);
     expect(expanded.has(root + "\\src")).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_list", {
-      root,
+      workspace: root,
       dir: root + "\\src",
     });
     wrapper.unmount();
@@ -1311,9 +1312,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
   it("激活 Diff 标签：同样同步资源树定位", async () => {
     store.currentThreadId = null;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
-    store.server.workspace = root;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.server.startupWorkspace = root;
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") return Promise.resolve([]);
       if (cmd === "session_fs_icons") return Promise.resolve([]);
@@ -1326,7 +1327,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       path: "src/main.ts",
       kind: "modify",
       diff: "diff",
-      workspace_root: root,
+      workspace: root,
     });
     await settle();
     expect(selectedPath.value).toBe(root + "\\src\\main.ts");
@@ -1334,11 +1335,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("工作区外文件标签激活：不改变资源树选中", async () => {
+  it("工作区外文件标签激活：资源树跟随该文件工作区并选中", async () => {
     store.currentThreadId = null;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
-    store.server.workspace = root;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.server.startupWorkspace = root;
     const outside = "D:\\outside";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
@@ -1349,15 +1350,68 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const wrapper = mountPane();
     await openFileTab(outside, "f.txt");
     await settle();
-    expect(selectedPath.value).toBe("");
+    expect(store.workspace).toBe(outside);
+    expect(selectedPath.value).toBe(outside + "\\f.txt");
+    wrapper.unmount();
+  });
+
+  it("激活文件标签：store.workspace 跟随其工作区；切回会话标签复位 null", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      if (cmd === "session_fs_icons") {
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    expect(store.workspace).toBe(root);
+
+    activeTabId.value = "sess-1";
+    await settle();
+    expect(store.workspace).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("激活 diff/预览/终端标签：store.workspace 分别跟随其工作区", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "build_diff_preview") return Promise.resolve([]);
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+      }
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openDiffTab({
+      path: "a.txt",
+      kind: "modify",
+      diff: "diff",
+      workspace: root,
+    });
+    await settle();
+    expect(store.workspace).toBe(root);
+
+    await openPreviewTab("pdf", root + "\\sub", "doc.pdf");
+    await settle();
+    expect(store.workspace).toBe(root + "\\sub");
+
+    await openTerminalTab(root + "\\term");
+    await settle();
+    expect(store.workspace).toBe(root + "\\term");
     wrapper.unmount();
   });
 
   it("搜索态下激活文件标签：退出搜索并定位到树", async () => {
     store.currentThreadId = null;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
-    store.server.workspace = root;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.server.startupWorkspace = root;
     searchTerm.value = "main";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));

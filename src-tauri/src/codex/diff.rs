@@ -6,7 +6,7 @@ pub struct DiffPreviewParams {
     pub path: String,
     pub kind: String,
     pub diff: String,
-    pub workspace_root: String,
+    pub workspace: String,
 }
 
 /// 内联 diff 行（serde 标签枚举，字段 camelCase 与前端一致）
@@ -342,7 +342,7 @@ fn resolve_path(p: &str, root: &str) -> Result<String, String> {
 /// 一次 IPC 完成：路径解析 + 读文件 + 反向重建 + 内联行生成
 #[tauri::command]
 pub fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
-    let abs = resolve_path(&params.path, &params.workspace_root)?;
+    let abs = resolve_path(&params.path, &params.workspace)?;
     let new_content = if params.kind == "delete" {
         String::new()
     } else {
@@ -512,7 +512,7 @@ mod tests {
             path: p.to_string_lossy().into_owned(),
             kind: "update".into(),
             diff: REPLACE_DIFF.to_string(),
-            workspace_root: dir.to_string_lossy().into_owned(),
+            workspace: dir.to_string_lossy().into_owned(),
         };
         let rows = build_diff_preview(params).unwrap();
         assert_eq!(rows.len(), 5);
@@ -528,7 +528,7 @@ mod tests {
             path: "src/a.txt".into(),
             kind: "update".into(),
             diff: REPLACE_DIFF.to_string(),
-            workspace_root: dir.to_string_lossy().into_owned(),
+            workspace: dir.to_string_lossy().into_owned(),
         };
         assert_eq!(build_diff_preview(params).unwrap().len(), 5);
         let _ = std::fs::remove_dir_all(&dir);
@@ -540,7 +540,7 @@ mod tests {
             path: "C:\\definitely-missing-diff-preview.txt".into(),
             kind: "update".into(),
             diff: REPLACE_DIFF.to_string(),
-            workspace_root: String::new(),
+            workspace: String::new(),
         };
         assert!(build_diff_preview(params).is_err());
     }

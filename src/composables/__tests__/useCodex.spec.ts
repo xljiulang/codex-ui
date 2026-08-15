@@ -58,7 +58,7 @@ import {
   pickAndOpenNewSession,
   refreshThreads,
   refreshServer,
-  resolveCwd,
+  resolveSessionWorkspace,
   sanitizeTitle,
   searchThreads,
   sessionTabTitle,
@@ -72,6 +72,7 @@ import {
   togglePin,
   toastError,
   wireEvents,
+  workspace,
 } from "../useCodex";
 import type { SessionTab } from "../useCodex";
 
@@ -108,7 +109,7 @@ function makeSessionTab(
     threadId,
     name: "",
     origin: threadId ? "history" : null,
-    cwd: null,
+    workspace: null,
     resumedThreadId: null,
     turnActive: false,
     currentTurnId: null,
@@ -121,7 +122,7 @@ function makeSessionTab(
     attachments: [],
     planPrompt: null,
     loadingThread: false,
-    newChatCwd: null,
+    newChatWorkspace: null,
     interactions: [],
     ...over,
   };
@@ -340,7 +341,7 @@ describe("refreshServer 服务状态同步", () => {
     mockedInvoke.mockReset();
     store.server = {
       connected: false,
-      workspace: "",
+      startupWorkspace: "",
       codexPath: null,
       logs: [],
     };
@@ -349,7 +350,7 @@ describe("refreshServer 服务状态同步", () => {
   it("server_status 返回 codexPath 后写入 store.server.codexPath", async () => {
     mockedInvoke.mockResolvedValue({
       connected: true,
-      workspace: "D:/repo",
+      startupWorkspace: "D:/repo",
       codexPath: "D:/codex/codex.exe",
       logs: [],
     });
@@ -357,7 +358,7 @@ describe("refreshServer 服务状态同步", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("server_status");
     expect(store.server.codexPath).toBe("D:/codex/codex.exe");
     expect(store.server.connected).toBe(true);
-    expect(store.server.workspace).toBe("D:/repo");
+    expect(store.server.startupWorkspace).toBe("D:/repo");
   });
 });
 
@@ -368,14 +369,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      workspace: "D:/repo",
+      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
     store.currentThreadId = null;
     store.currentThreadName = "";
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
     store.turnActive = false;
@@ -390,7 +391,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
 
   it("新建会话不再调用 setTitle（主窗口标题固定）", async () => {
     await newEmptyChat("D:/projects/B");
-    expect(store.newChatCwd).toBe("D:/projects/B");
+    expect(store.newChatWorkspace).toBe("D:/projects/B");
     expect(mockWin.setTitle).not.toHaveBeenCalled();
   });
 
@@ -411,7 +412,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadId: "t1",
       name: "我的标题",
       origin: "history",
-      cwd: "D:/repo/sub",
+      workspace: "D:/repo/sub",
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -424,7 +425,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("sub / 我的标题");
@@ -439,7 +440,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadId: "t1",
       name: "",
       origin: "history",
-      cwd: "D:/repo",
+      workspace: "D:/repo",
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -452,7 +453,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("repo / 预览文本");
@@ -464,7 +465,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadId: null,
       name: "标题",
       origin: null,
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -477,7 +478,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("repo / 标题");
@@ -489,7 +490,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadId: null,
       name: "",
       origin: null,
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -502,7 +503,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("repo / 新建会话");
@@ -514,7 +515,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadId: null,
       name: "",
       origin: null,
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -527,20 +528,20 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: "D:/projects/B",
+      newChatWorkspace: "D:/projects/B",
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("B / 新建会话");
   });
 
   it("会话标签标题：无 workspace 且无 cwd 时降级为仅标题", () => {
-    store.server.workspace = "";
+    store.server.startupWorkspace = "";
     const tab: SessionTab = {
       id: "s1",
       threadId: null,
       name: "",
       origin: null,
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -553,7 +554,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("新建会话");
@@ -570,7 +571,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadId: "t1",
       name: "",
       origin: "history",
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -583,7 +584,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     });
     store.activeSessionId = "s1";
@@ -599,41 +600,41 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 });
 
-describe("resolveCwd 工作目录解析", () => {
+describe("resolveSessionWorkspace 工作目录解析", () => {
   beforeEach(() => {
     store.server = {
       connected: false,
-      workspace: "D:/repo",
+      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
     store.currentThreadId = null;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
   });
 
   it("有会话：取会话 cwd", () => {
     store.currentThreadId = "t1";
-    store.currentThreadCwd = "D:/projects/other";
-    store.newChatCwd = "D:/projects/B";
-    expect(resolveCwd()).toBe("D:/projects/other");
+    store.currentThreadWorkspace = "D:/projects/other";
+    store.newChatWorkspace = "D:/projects/B";
+    expect(resolveSessionWorkspace()).toBe("D:/projects/other");
   });
 
-  it("有会话但 cwd 缺失：回退 workspace，不读残留的 newChatCwd", () => {
+  it("有会话但 cwd 缺失：回退 workspace，不读残留的 newChatWorkspace", () => {
     store.currentThreadId = "t1";
-    store.currentThreadCwd = null;
-    store.newChatCwd = "D:/projects/B";
-    expect(resolveCwd()).toBe("D:/repo");
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = "D:/projects/B";
+    expect(resolveSessionWorkspace()).toBe("D:/repo");
   });
 
-  it("无会话：优先 newChatCwd", () => {
-    store.newChatCwd = "D:/projects/B";
-    expect(resolveCwd()).toBe("D:/projects/B");
+  it("无会话：优先 newChatWorkspace", () => {
+    store.newChatWorkspace = "D:/projects/B";
+    expect(resolveSessionWorkspace()).toBe("D:/projects/B");
   });
 
   it("全部为空时返回空串", () => {
-    store.server.workspace = "";
-    expect(resolveCwd()).toBe("");
+    store.server.startupWorkspace = "";
+    expect(resolveSessionWorkspace()).toBe("");
   });
 });
 
@@ -822,7 +823,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     store.currentThreadName = "";
     store.currentTurnId = null;
     store.currentThreadOrigin = null;
-    store.currentThreadCwd = null;
+    store.currentThreadWorkspace = null;
     store.resumedThreadId = null;
     store.threadTokenUsage = null;
     store.goalText = null;
@@ -1084,10 +1085,11 @@ describe("会话标签状态与事件路由", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
+    store.workspace = null;
     store.currentThreadId = null;
     store.currentThreadName = "";
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.turnActive = false;
     store.currentTurnId = null;
     store.goalText = null;
@@ -1097,6 +1099,23 @@ describe("会话标签状态与事件路由", () => {
     store.attachments = [];
     store.interactions = [];
     store.threads = [];
+  });
+
+  it("workspace 计算：有活动标签覆盖时返回覆盖值，否则回落会话工作区", async () => {
+    store.currentThreadId = "t1";
+    store.currentThreadWorkspace = "D:/session";
+    store.server.startupWorkspace = "D:/startup";
+    expect(workspace.value).toBe("D:/session");
+
+    store.workspace = "D:/tab";
+    expect(workspace.value).toBe("D:/tab");
+
+    store.workspace = null;
+    expect(workspace.value).toBe("D:/session");
+
+    store.currentThreadId = null;
+    store.newChatWorkspace = "D:/newchat";
+    expect(workspace.value).toBe("D:/newchat");
   });
 
   it("isThreadOpen / isThreadRunning 反映标签打开与运行状态", () => {
@@ -1114,7 +1133,7 @@ describe("会话标签状态与事件路由", () => {
     store.sessionTabs.push(
       makeSessionTab("s2", "t2", {
         name: "会话B",
-        cwd: "D:/repo/b",
+        workspace: "D:/repo/b",
         planPrompt: { threadId: "t2", turnId: "tp2", planText: "计划B" },
       }),
     );
@@ -1132,7 +1151,7 @@ describe("会话标签状态与事件路由", () => {
     expect(store.activeSessionId).toBe("s2");
     expect(store.currentThreadId).toBe("t2");
     expect(store.currentThreadName).toBe("会话B");
-    expect(store.currentThreadCwd).toBe("D:/repo/b");
+    expect(store.currentThreadWorkspace).toBe("D:/repo/b");
     expect(store.turnActive).toBe(false);
     expect(store.planPrompt?.planText).toBe("计划B");
 
@@ -1194,7 +1213,7 @@ describe("会话标签状态与事件路由", () => {
   });
 
   it("pickAndOpenNewSession：弹目录选择（初始为 workspace），选中后新建会话", async () => {
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "pick_directory") {
         return Promise.resolve("D:/project");
@@ -1207,13 +1226,13 @@ describe("会话标签状态与事件路由", () => {
     });
     expect(store.sessionTabs).toHaveLength(1);
     expect(store.sessionTabs[0].threadId).toBeNull();
-    expect(store.sessionTabs[0].newChatCwd).toBe("D:/project");
+    expect(store.sessionTabs[0].newChatWorkspace).toBe("D:/project");
   });
 
   it("pickAndOpenNewSession：有会话时初始目录为线程 cwd", async () => {
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.currentThreadId = "t1";
-    store.currentThreadCwd = "D:/session";
+    store.currentThreadWorkspace = "D:/session";
     mockedInvoke.mockResolvedValue("D:/project");
     await pickAndOpenNewSession();
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
@@ -1222,7 +1241,7 @@ describe("会话标签状态与事件路由", () => {
   });
 
   it("pickAndOpenNewSession：取消选择不新建", async () => {
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     mockedInvoke.mockResolvedValue(null);
     await pickAndOpenNewSession();
     expect(store.sessionTabs).toHaveLength(0);
@@ -1379,7 +1398,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     __resetSessionTabsForTest();
     store.currentThreadId = null;
     store.currentThreadName = "";
-    store.currentThreadCwd = null;
+    store.currentThreadWorkspace = null;
     store.currentThreadOrigin = null;
     store.resumedThreadId = null;
     store.turnActive = false;
@@ -1771,7 +1790,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     store.currentThreadName = "";
     store.currentTurnId = null;
     store.currentThreadOrigin = null;
-    store.currentThreadCwd = null;
+    store.currentThreadWorkspace = null;
     store.resumedThreadId = null;
     store.threadTokenUsage = null;
     store.goalText = null;
@@ -1780,7 +1799,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     store.confirm = null;
     store.showSettings = false;
     store.panelTab = "history";
-    store.newChatCwd = null;
+    store.newChatWorkspace = null;
   });
 
   it("openNewSession 成功后：关设置页、聚焦输入框、切回资源 Tab", async () => {
@@ -1791,7 +1810,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     };
     try {
       await openNewSession("D:/projects/B");
-      expect(store.newChatCwd).toBe("D:/projects/B");
+      expect(store.newChatWorkspace).toBe("D:/projects/B");
       expect(store.showSettings).toBe(false);
       expect(store.panelTab).toBe("history");
       expect(focus).toHaveBeenCalledTimes(1);
@@ -1846,7 +1865,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     try {
       await openHistorySession("t2");
       expect(store.currentThreadId).toBe("t2");
-      expect(store.currentThreadCwd).toBe("D:/projects/B");
+      expect(store.currentThreadWorkspace).toBe("D:/projects/B");
       expect(store.showSettings).toBe(false);
       expect(store.panelTab).toBe("history");
       expect(focus).toHaveBeenCalledTimes(1);
@@ -2190,8 +2209,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
     store.toast = "";
     store.currentThreadId = "t1";
     store.currentThreadName = "";
-    store.currentThreadCwd = "D:/repo";
-    store.server.workspace = "D:/repo";
+    store.currentThreadWorkspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.threads = [{ id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 }];
   });
 
@@ -2633,8 +2652,8 @@ describe("后台临时线程 delta 事件隔离", () => {
     store.toast = "";
     store.currentThreadId = "t1";
     store.currentThreadName = "";
-    store.currentThreadCwd = "D:/repo";
-    store.server.workspace = "D:/repo";
+    store.currentThreadWorkspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.threads = [
       { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
     ];

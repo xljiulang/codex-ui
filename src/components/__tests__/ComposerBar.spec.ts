@@ -145,9 +145,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     store.skills = [];
     store.skillsLoaded = false;
     store.currentThreadId = null;
-    store.server.workspace = "D:/repo";
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = "D:/repo";
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -477,7 +477,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
     store.toast = "";
     store.threadPlugins = {};
     store.currentThreadId = null;
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -677,7 +677,7 @@ describe("ComposerBar 拖放图片/文件", () => {
     store.toast = "";
     store.threadPlugins = {};
     store.currentThreadId = null;
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -812,7 +812,7 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
     store.attachments.splice(0);
     store.threadPlugins = {};
     store.currentThreadId = null;
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1204,9 +1204,9 @@ describe("ComposerBar 任务目标芯片", () => {
     store.threadPlugins = {};
     store.skills = [];
     store.skillsLoaded = false;
-    store.server.workspace = "D:/repo";
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = "D:/repo";
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.settings.enter_to_send = true;
     store.currentThreadId = null;
     store.turnActive = false;

@@ -82,14 +82,14 @@ fn ensure_inside(root: &Path, target: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn resolve_root(root: &str) -> Result<PathBuf, String> {
-    let p = PathBuf::from(root);
+fn resolve_workspace(workspace: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(workspace);
     if !p.is_absolute() {
         return Err("工作目录必须为绝对路径".into());
     }
-    let meta = std::fs::metadata(&p).map_err(|e| format!("无法访问工作目录 {root}: {e}"))?;
+    let meta = std::fs::metadata(&p).map_err(|e| format!("无法访问工作目录 {workspace}: {e}"))?;
     if !meta.is_dir() {
-        return Err(format!("工作目录不是目录: {root}"));
+        return Err(format!("工作目录不是目录: {workspace}"));
     }
     Ok(p)
 }
@@ -406,9 +406,9 @@ fn move_impl(root: &Path, src: &Path, dest_dir: &Path) -> Result<FsEntry, String
 }
 
 #[tauri::command]
-pub async fn session_fs_list(root: String, dir: String) -> Result<Vec<FsEntry>, String> {
+pub async fn session_fs_list(workspace: String, dir: String) -> Result<Vec<FsEntry>, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         list_impl(&root_p, Path::new(&dir))
     })
     .await
@@ -416,21 +416,21 @@ pub async fn session_fs_list(root: String, dir: String) -> Result<Vec<FsEntry>, 
 
 #[tauri::command]
 pub async fn session_fs_search(
-    root: String,
+    workspace: String,
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<FsEntry>, String> {
     run_blocking(120, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         search_impl(&root_p, &query, limit.unwrap_or(200))
     })
     .await
 }
 
 #[tauri::command]
-pub async fn session_fs_metadata(root: String, path: String) -> Result<FsEntry, String> {
+pub async fn session_fs_metadata(workspace: String, path: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         metadata_impl(&root_p, Path::new(&path))
     })
     .await
@@ -438,21 +438,21 @@ pub async fn session_fs_metadata(root: String, path: String) -> Result<FsEntry, 
 
 #[tauri::command]
 pub async fn session_fs_rename(
-    root: String,
+    workspace: String,
     path: String,
     new_name: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         rename_impl(&root_p, Path::new(&path), &new_name)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn session_fs_delete(root: String, path: String) -> Result<(), String> {
+pub async fn session_fs_delete(workspace: String, path: String) -> Result<(), String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         delete_impl(&root_p, Path::new(&path))
     })
     .await
@@ -460,12 +460,12 @@ pub async fn session_fs_delete(root: String, path: String) -> Result<(), String>
 
 #[tauri::command]
 pub async fn session_fs_copy(
-    root: String,
+    workspace: String,
     src: String,
     dest_dir: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         copy_impl(&root_p, Path::new(&src), Path::new(&dest_dir))
     })
     .await
@@ -473,12 +473,12 @@ pub async fn session_fs_copy(
 
 #[tauri::command]
 pub async fn session_fs_paste(
-    root: String,
+    workspace: String,
     dest_dir: String,
     sources: Vec<String>,
 ) -> Result<Vec<FsEntry>, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         paste_impl(&root_p, Path::new(&dest_dir), &sources)
     })
     .await
@@ -486,12 +486,12 @@ pub async fn session_fs_paste(
 
 #[tauri::command]
 pub async fn session_fs_move(
-    root: String,
+    workspace: String,
     src: String,
     dest_dir: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         move_impl(&root_p, Path::new(&src), Path::new(&dest_dir))
     })
     .await
@@ -549,9 +549,9 @@ async fn run_blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn session_fs_read(root: String, path: String) -> Result<TextFileContent, String> {
+pub async fn session_fs_read(workspace: String, path: String) -> Result<TextFileContent, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         read_impl(&root_p, Path::new(&path))
     })
     .await
@@ -580,12 +580,12 @@ fn write_impl(root: &Path, path: &Path, content: &str) -> Result<FsEntry, String
 
 #[tauri::command]
 pub async fn session_fs_write(
-    root: String,
+    workspace: String,
     path: String,
     content: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         write_impl(&root_p, Path::new(&path), &content)
     })
     .await
@@ -632,18 +632,18 @@ fn create_dir_impl(root: &Path, dir: &Path) -> Result<FsEntry, String> {
 }
 
 #[tauri::command]
-pub async fn session_fs_create_file(root: String, dir: String) -> Result<FsEntry, String> {
+pub async fn session_fs_create_file(workspace: String, dir: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         create_file_impl(&root_p, Path::new(&dir))
     })
     .await
 }
 
 #[tauri::command]
-pub async fn session_fs_create_dir(root: String, dir: String) -> Result<FsEntry, String> {
+pub async fn session_fs_create_dir(workspace: String, dir: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         create_dir_impl(&root_p, Path::new(&dir))
     })
     .await
@@ -693,9 +693,9 @@ fn probe_text_impl(root: &Path, path: &Path) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn session_fs_probe_text(root: String, path: String) -> Result<bool, String> {
+pub async fn session_fs_probe_text(workspace: String, path: String) -> Result<bool, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         probe_text_impl(&root_p, Path::new(&path))
     })
     .await
@@ -734,9 +734,9 @@ fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<BinaryFil
 }
 
 #[tauri::command]
-pub async fn session_fs_read_bytes(root: String, path: String) -> Result<BinaryFileContent, String> {
+pub async fn session_fs_read_bytes(workspace: String, path: String) -> Result<BinaryFileContent, String> {
     run_blocking(120, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         read_bytes_impl(&root_p, Path::new(&path), MAX_PREVIEW_BYTES)
     })
     .await
@@ -779,12 +779,12 @@ fn icons_impl(root: &Path, requests: &[IconRequest], size: u32) -> Vec<IconResul
 
 #[tauri::command]
 pub async fn session_fs_icons(
-    root: String,
+    workspace: String,
     requests: Vec<IconRequest>,
     size: Option<u32>,
 ) -> Result<Vec<IconResult>, String> {
     run_blocking(60, move || {
-        let root_p = resolve_root(&root)?;
+        let root_p = resolve_workspace(&workspace)?;
         Ok(icons_impl(&root_p, &requests, size.unwrap_or(16)))
     })
     .await
@@ -840,12 +840,12 @@ fn path_to_rel(root: &Path, p: &Path) -> String {
 pub async fn session_fs_watch_start(
     app: AppHandle,
     state: State<'_, FsWatcherState>,
-    root: String,
+    workspace: String,
 ) -> Result<(), String> {
-    let root_p = resolve_root(&root)?;
+    let root_p = resolve_workspace(&workspace)?;
     let root_c = root_p
         .canonicalize()
-        .map_err(|e| format!("无法解析工作目录 {}: {e}", root))?;
+        .map_err(|e| format!("无法解析工作目录 {}: {e}", workspace))?;
 
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -879,7 +879,7 @@ pub async fn session_fs_watch_start(
 
     watcher
         .watch(&root_c, RecursiveMode::Recursive)
-        .map_err(|e| format!("监听目录失败 {}: {e}", root))?;
+        .map_err(|e| format!("监听目录失败 {}: {e}", workspace))?;
 
     // 防抖任务：300ms 静默后向前端 emit 变更事件
     let handle = app.clone();

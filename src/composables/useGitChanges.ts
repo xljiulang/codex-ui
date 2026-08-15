@@ -2,7 +2,7 @@ import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { setToast, toastError } from "./useCodex";
-import { sessionRoot } from "./useSessionFs";
+import { workspace } from "./useCodex";
 import type { GitErrorCode, GitStatus } from "../lib/gitChanges";
 
 export type GitViewState = "loading" | "ok" | "not_repo" | "error";
@@ -38,7 +38,7 @@ async function refresh() {
   refreshing = true;
   lastRefreshAt = Date.now();
   try {
-    const root = sessionRoot.value;
+    const root = workspace.value;
     if (!root) {
       gitStatus.value = null;
       gitState.value = "error";
@@ -48,7 +48,7 @@ async function refresh() {
     gitState.value = "loading";
     gitErrorMsg.value = "";
     try {
-      const st = await invoke<GitStatus>("git_changes_status", { path: root });
+      const st = await invoke<GitStatus>("git_changes_status", { workspace: root });
       gitStatus.value = st;
       gitState.value = "ok";
     } catch (e) {
@@ -73,11 +73,11 @@ export async function refreshGitChanges() {
 
 /** 一键初始化 Git 仓库（仅 git init，不自动提交）；成功后自动刷新状态 */
 export async function initGitRepo(): Promise<boolean> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root || gitInitBusy.value) return false;
   gitInitBusy.value = true;
   try {
-    await invoke("git_changes_init", { path: root });
+    await invoke("git_changes_init", { workspace: root });
     // 初始化后仓库根与 .git 才存在，重新同步监听
     await syncWatcher();
     await refresh();
@@ -93,7 +93,7 @@ export async function initGitRepo(): Promise<boolean> {
 }
 
 async function syncWatcher() {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (active && root) {
     if (!unlistenGitEvent) {
       try {
@@ -107,7 +107,7 @@ async function syncWatcher() {
       }
     }
     try {
-      await invoke("git_changes_watch_start", { root });
+      await invoke("git_changes_watch_start", { workspace: root });
       watcherStarted = true;
     } catch (e) {
       setToast(toastError(e));
@@ -135,7 +135,7 @@ export function setGitChangesActive(v: boolean) {
 }
 
 // 根目录切换（切换会话/新建会话选目录）：重新检测并刷新，监听跟随新根
-watch(sessionRoot, (r, old) => {
+watch(workspace, (r, old) => {
   if (r === old) return;
   if (!active) return;
   gitStatus.value = null;

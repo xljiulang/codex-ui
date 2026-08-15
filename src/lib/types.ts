@@ -1,6 +1,6 @@
 export interface ServerStatus {
   connected: boolean;
-  workspace: string;
+  startupWorkspace: string;
   codexPath?: string | null;
   logs: string[];
 }

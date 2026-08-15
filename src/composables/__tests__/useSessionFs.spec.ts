@@ -46,7 +46,8 @@ function file(name: string, relPath: string, isDir = false): FsEntry {
 describe("useSessionFs 文件图标缓存", () => {
   beforeEach(() => {
     __resetSessionFsForTest();
-    store.server.workspace = root;
+    store.workspace = null;
+    store.server.startupWorkspace = root;
     mockedInvoke.mockClear();
     mockedInvoke.mockResolvedValue([]);
   });
@@ -120,7 +121,7 @@ describe("useSessionFs 文件图标缓存", () => {
 describe("openPathInApp 对话链接应用内打开", () => {
   beforeEach(() => {
     __resetEditorTabsForTest();
-    store.server.workspace = root;
+    store.server.startupWorkspace = root;
     store.toast = "";
     mockedInvoke.mockClear();
   });
@@ -137,14 +138,14 @@ describe("openPathInApp 对话链接应用内打开", () => {
     const ok = await openPathInApp(path);
     expect(ok).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
-      root,
+      workspace: root,
       path,
     });
     const tab = tabs.find(
       (t): t is FileEditorTab => t.kind === "file" && t.path === path,
     );
     expect(tab).toBeTruthy();
-    expect(tab?.root).toBe(root);
+    expect(tab?.workspace).toBe(root);
   });
 
   it("工作区内 PDF：打开 PDF 预览标签", async () => {
@@ -211,14 +212,14 @@ describe("openPathInApp 对话链接应用内打开", () => {
     const ok = await openPathInApp(path);
     expect(ok).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
-      root: "D:\\other",
+      workspace: "D:\\other",
       path: "x.txt",
     });
     const tab = tabs.find(
       (t): t is FileEditorTab => t.kind === "file" && t.path === "x.txt",
     );
     expect(tab).toBeTruthy();
-    expect(tab?.root).toBe("D:\\other");
+    expect(tab?.workspace).toBe("D:\\other");
   });
 
   it("测试钩子开启时短路返回 false 且不调 IPC", async () => {
@@ -237,7 +238,7 @@ describe("openPathInApp 对话链接应用内打开", () => {
 describe("useSessionFs 粘贴可用性与新建文本文件", () => {
   beforeEach(() => {
     __resetSessionFsForTest();
-    store.server.workspace = root;
+    store.server.startupWorkspace = root;
     store.toast = "";
     copyBuffer.value = [];
     mockedInvoke.mockReset();
@@ -302,12 +303,12 @@ describe("useSessionFs 粘贴可用性与新建文本文件", () => {
     await createTextFile(root + "\\src");
 
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_create_file", {
-      root,
+      workspace: root,
       dir: root + "\\src",
     });
     expect(store.toast).toContain("已创建「新建文本文件.txt」");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
-      root,
+      workspace: root,
       path: root,
     });
   });

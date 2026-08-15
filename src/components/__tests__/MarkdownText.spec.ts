@@ -19,7 +19,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
 
   beforeEach(() => {
     mockedInvoke.mockClear();
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     // 测试环境固定走同步回退解析，避免 happy-dom Worker 挂起
     (globalThis as Record<string, unknown>).Worker = undefined;
   });
@@ -119,11 +119,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     await wrapper.find("a").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
-      root: "D:\\",
+      workspace: "D:\\",
       path: "a b.txt",
     });
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
-      root: "D:\\",
+      workspace: "D:\\",
       path: "a b.txt",
     });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -147,7 +147,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     await wrapper.find("a").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
-      root: "D:/repo",
+      workspace: "D:/repo",
       path: "D:\\repo\\src\\a.ts",
     });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -253,7 +253,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     await a.trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
-      root: "D:\\codex\\codex-ui\\docs",
+      workspace: "D:\\codex\\codex-ui\\docs",
       path: "计划.md",
     });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -279,7 +279,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     await a.trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
-      root: "D:\\codex",
+      workspace: "D:\\codex",
       path: "a.md",
     });
     expect(mockedInvoke).not.toHaveBeenCalledWith(

@@ -201,7 +201,7 @@ export async function exportMarkdownToPdf(tab: FileEditorTab): Promise<void> {
   }
   const fileAbsPath = /^[A-Za-z]:[\\/]/.test(tab.path)
     ? tab.path
-    : `${tab.root.replace(/[\\/]+$/, "")}\\${tab.path}`;
+    : `${tab.workspace.replace(/[\\/]+$/, "")}\\${tab.path}`;
   const html = await buildPrintHtml(text, fileAbsPath);
   try {
     const saved = await invoke<string | null>("export_markdown_pdf", {

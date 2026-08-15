@@ -12,11 +12,8 @@ import {
   refreshGitChanges,
   setGitChangesActive,
 } from "../composables/useGitChanges";
-import {
-  ensureEntryIcons,
-  iconFor,
-  sessionRoot,
-} from "../composables/useSessionFs";
+import { workspace } from "../composables/useCodex";
+import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import { openDiffTab } from "../composables/useEditorTabs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
@@ -49,7 +46,7 @@ const props = defineProps<{ active: boolean }>();
 /** 本机是否安装了 git（推送依赖系统 git，缺失时禁用按钮并提示） */
 const gitAvailable = ref(true);
 const branchLabel = computed(() => gitStatus.value?.branch ?? "");
-const repoRoot = computed(() => gitStatus.value?.repoRoot ?? "");
+const repoWorkspace = computed(() => gitStatus.value?.repoWorkspace ?? "");
 
 watch(
   () => props.active,
@@ -263,9 +260,9 @@ const canCommit = computed(
     stagedCount.value > 0,
 );
 
-/** 变更文件 → FsEntry（供系统文件图标管线复用；repoRoot 为空时回退相对路径） */
+/** 变更文件 → FsEntry（供系统文件图标管线复用；repoWorkspace 为空时回退相对路径） */
 function gitFileEntry(file: GitFile): FsEntry {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   return {
     name: file.path.split("/").pop() ?? file.path,
     path: root ? joinFsPath(root, file.path) : file.path,
@@ -285,9 +282,9 @@ function gitFileIcon(file: GitFile): string | undefined {
 
 // 变更列表可见行变化时懒加载缺失的文件图标（与资源面板同管线）
 watch(
-  [worktreeRows, stagedRows, repoRoot],
+  [worktreeRows, stagedRows, repoWorkspace],
   () => {
-    const root = repoRoot.value;
+    const root = repoWorkspace.value;
     if (!root) return;
     const files = [
       ...worktreeRows.value,
@@ -308,12 +305,12 @@ const commitHint = computed(() =>
 /** 提交已暂存更改；成功后清空消息并刷新状态 */
 async function doCommit() {
   if (!canCommit.value) return;
-  const root = gitStatus.value?.repoRoot;
+  const root = gitStatus.value?.repoWorkspace;
   if (!root) return;
   commitBusy.value = true;
   try {
     const st = await invoke<GitStatus>("git_changes_commit", {
-      root,
+      workspace: root,
       message: commitMessage.value.trim(),
     });
     gitStatus.value = st;
@@ -329,11 +326,11 @@ async function doCommit() {
 /** 拉取远端更新；游离 HEAD 或忙碌时禁用 */
 async function doPull() {
   if (pullBusy.value || branchLabel.value === "HEAD" || !gitAvailable.value) return;
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   pullBusy.value = true;
   try {
-    const res = await invoke<GitPullResult>("git_changes_pull", { root });
+    const res = await invoke<GitPullResult>("git_changes_pull", { workspace: root });
     gitStatus.value = res.status;
     setToast(res.message);
   } catch (e) {
@@ -347,7 +344,7 @@ async function doPull() {
 async function checkGitAvailable() {
   try {
     gitAvailable.value = await invoke<boolean>("git_changes_git_available", {
-      path: repoRoot.value || sessionRoot.value || "",
+      path: repoWorkspace.value || workspace.value || "",
     });
   } catch {
     gitAvailable.value = false;
@@ -364,11 +361,11 @@ async function doPush() {
   ) {
     return;
   }
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   pushBusy.value = true;
   try {
-    const res = await invoke<GitPushResult>("git_changes_push", { root });
+    const res = await invoke<GitPushResult>("git_changes_push", { workspace: root });
     gitStatus.value = res.status;
     setToast(res.message);
   } catch (e) {
@@ -395,12 +392,12 @@ function applyBranches(res: GitBranches) {
 }
 
 async function openBranchMenu() {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root || branchBusy.value) return;
   branchBusy.value = true;
   try {
     const res = await invoke<GitBranches>("git_changes_branches", {
-      path: root,
+      workspace: root,
     });
     applyBranches(res);
     branchMenuOpen.value = true;
@@ -434,12 +431,12 @@ function defaultFetchRemote(): string {
 /** 拉取远端更新并刷新分支列表（含远程分支） */
 async function fetchRemoteBranches() {
   if (fetchBusy.value || branchBusy.value) return;
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   fetchBusy.value = true;
   try {
     const res = await invoke<GitBranches>("git_changes_remote_fetch", {
-      root,
+      workspace: root,
       remote: defaultFetchRemote(),
     });
     applyBranches(res);
@@ -460,7 +457,7 @@ function remoteBranchShortName(remoteBranch: string): string {
 /** 点击远程分支：本地已有同名分支走本地切换，否则检出为本地跟踪分支 */
 async function checkoutRemoteBranch(remoteBranch: string) {
   if (branchBusy.value) return;
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   const shortName = remoteBranchShortName(remoteBranch);
   if (shortName === branchLabel.value) return;
@@ -468,7 +465,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
   try {
     if (branches.value.includes(shortName)) {
       const st = await invoke<GitStatus>("git_changes_branch_switch", {
-        path: root,
+        workspace: root,
         name: shortName,
       });
       gitStatus.value = st;
@@ -477,7 +474,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
       return;
     }
     const st = await invoke<GitStatus>("git_changes_branch_checkout_remote", {
-      root,
+      workspace: root,
       remoteBranch,
     });
     gitStatus.value = st;
@@ -485,7 +482,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
     setToast(`已检出远程分支 ${remoteBranch}`);
     // 刷新分支列表（新增本地分支与上游）
     const res = await invoke<GitBranches>("git_changes_branches", {
-      path: root,
+      workspace: root,
     });
     applyBranches(res);
   } catch (e) {
@@ -497,7 +494,7 @@ async function checkoutRemoteBranch(remoteBranch: string) {
 
 /** 删除远程分支：二次确认（当前上游时追加警告），成功后刷新列表 */
 async function deleteRemoteBranch(remoteBranch: string) {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   const isUpstream = remoteBranch === currentUpstream.value;
   const ok = await askConfirm({
@@ -511,7 +508,7 @@ async function deleteRemoteBranch(remoteBranch: string) {
   branchBusy.value = true;
   try {
     const res = await invoke<GitBranches>("git_changes_remote_branch_delete", {
-      root,
+      workspace: root,
       remoteBranch,
     });
     applyBranches(res);
@@ -524,11 +521,11 @@ async function deleteRemoteBranch(remoteBranch: string) {
 }
 
 async function loadRemotes() {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root || remoteLoading.value) return;
   remoteLoading.value = true;
   try {
-    const res = await invoke<GitRemotes>("git_changes_remotes", { path: root });
+    const res = await invoke<GitRemotes>("git_changes_remotes", { workspace: root });
     remotes.value = res.remotes;
     currentRemote.value = res.current;
   } catch (e) {
@@ -540,7 +537,7 @@ async function loadRemotes() {
 
 async function addRemote() {
   if (remoteBusy.value) return;
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   const name = newRemoteName.value.trim();
   const url = newRemoteUrl.value.trim();
@@ -548,7 +545,7 @@ async function addRemote() {
   remoteBusy.value = true;
   try {
     const res = await invoke<GitRemotes>("git_changes_remote_add", {
-      root,
+      workspace: root,
       name,
       url,
     });
@@ -567,13 +564,13 @@ async function addRemote() {
 /** 把当前分支上游切换到目标远端（单上游替换）；已是当前上游时禁用 */
 async function switchRemote(remote: GitRemote) {
   if (remoteBusy.value) return;
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   if (remote.name === currentRemote.value) return;
   remoteBusy.value = true;
   try {
     const res = await invoke<GitRemotes>("git_changes_remote_switch_upstream", {
-      root,
+      workspace: root,
       remote: remote.name,
     });
     remotes.value = res.remotes;
@@ -587,7 +584,7 @@ async function switchRemote(remote: GitRemote) {
 }
 
 async function removeRemote(remote: GitRemote) {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root) return;
   const isCurrent = remote.name === currentRemote.value;
   const ok = await askConfirm({
@@ -601,7 +598,7 @@ async function removeRemote(remote: GitRemote) {
   remoteBusy.value = true;
   try {
     const res = await invoke<GitRemotes>("git_changes_remote_remove", {
-      root,
+      workspace: root,
       name: remote.name,
     });
     remotes.value = res.remotes;
@@ -619,7 +616,7 @@ async function switchBranch(name: string) {
   branchBusy.value = true;
   try {
     const st = await invoke<GitStatus>("git_changes_branch_switch", {
-      path: repoRoot.value,
+      path: repoWorkspace.value,
       name,
     });
     gitStatus.value = st;
@@ -637,14 +634,14 @@ async function createBranch() {
   branchBusy.value = true;
   try {
     const st = await invoke<GitStatus>("git_changes_branch_create", {
-      path: repoRoot.value,
+      path: repoWorkspace.value,
       name,
     });
     gitStatus.value = st;
     newBranchName.value = "";
     // 重新拉取分支列表，保持弹层打开
     const res = await invoke<GitBranches>("git_changes_branches", {
-      path: repoRoot.value,
+      path: repoWorkspace.value,
     });
     applyBranches(res);
   } catch (e) {
@@ -659,7 +656,7 @@ async function deleteBranch(name: string) {
   branchBusy.value = true;
   try {
     const st = await invoke<GitStatus>("git_changes_branch_delete", {
-      path: repoRoot.value,
+      path: repoWorkspace.value,
       name,
     });
     gitStatus.value = st;
@@ -677,7 +674,7 @@ async function mergeBranch(name: string) {
   mergeBusy.value = true;
   try {
     const res = await invoke<GitMergeResult>("git_changes_branch_merge", {
-      path: repoRoot.value,
+      path: repoWorkspace.value,
       name,
     });
     gitStatus.value = res.status;
@@ -692,12 +689,12 @@ async function mergeBranch(name: string) {
 
 /** 重载提交历史第一页（最新在前）；由 gitStatus 变化/手动刷新触发 */
 async function loadCommitLog() {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   if (!root || logBusy.value) return;
   logBusy.value = true;
   try {
     const res = await invoke<GitCommitEntry[]>("git_changes_log", {
-      root,
+      workspace: root,
       limit: LOG_LIMIT,
       before: null,
     });
@@ -713,13 +710,13 @@ async function loadCommitLog() {
 
 /** 加载更多提交历史：以当前最后一条 hash 为游标续页并追加 */
 async function loadMoreCommits() {
-  const root = repoRoot.value;
+  const root = repoWorkspace.value;
   const last = commits.value[commits.value.length - 1];
   if (!root || logBusy.value || !last) return;
   logBusy.value = true;
   try {
     const res = await invoke<GitCommitEntry[]>("git_changes_log", {
-      root,
+      workspace: root,
       limit: LOG_LIMIT,
       before: last.hash,
     });
@@ -796,11 +793,11 @@ onBeforeUnmount(() => {
 });
 
 async function openDiff(file: GitFile) {
-  const root = gitStatus.value?.repoRoot;
+  const root = gitStatus.value?.repoWorkspace;
   if (!root) return;
   try {
     const diff = await invoke<string>("git_changes_diff", {
-      root,
+      workspace: root,
       path: file.path,
       kind: normalizeDiffKind(file.status),
     });
@@ -812,7 +809,7 @@ async function openDiff(file: GitFile) {
       path: file.path,
       kind: normalizeDiffKind(file.status),
       diff,
-      workspace_root: root,
+      workspace: root,
     });
   } catch (e) {
     setToast(toastError(e));
@@ -925,11 +922,11 @@ function openDirCtx(section: GitSection, node: GitDirNode, e: MouseEvent) {
 
 async function runGitOp(cmd: string, relPath: string) {
   if (gitActionBusy.value) return;
-  const root = gitStatus.value?.repoRoot;
+  const root = gitStatus.value?.repoWorkspace;
   if (!root) return;
   gitActionBusy.value = true;
   try {
-    const st = await invoke<GitStatus>(cmd, { root, path: relPath });
+    const st = await invoke<GitStatus>(cmd, { workspace: root, path: relPath });
     gitStatus.value = st;
   } catch (e) {
     setToast(toastError(e));
@@ -983,11 +980,11 @@ function unstageDir(node: GitDirNode) {
 /** 全部操作：暂存全部工作区变更 / 取消暂存全部已暂存变更 */
 async function runGitAllOp(cmd: string) {
   if (gitActionBusy.value) return;
-  const root = gitStatus.value?.repoRoot;
+  const root = gitStatus.value?.repoWorkspace;
   if (!root) return;
   gitActionBusy.value = true;
   try {
-    const st = await invoke<GitStatus>(cmd, { root });
+    const st = await invoke<GitStatus>(cmd, { workspace: root });
     gitStatus.value = st;
   } catch (e) {
     setToast(toastError(e));
@@ -1051,7 +1048,7 @@ async function restoreDir(node: GitDirNode) {
       <div class="git-head">
         <button
           class="git-branch git-branch-btn"
-          v-tooltip="repoRoot"
+          v-tooltip="repoWorkspace"
           :disabled="branchBusy"
           @click="toggleBranchMenu()"
         >
@@ -1632,7 +1629,7 @@ async function restoreDir(node: GitDirNode) {
         <div class="modal-body">
           确定要将当前目录初始化为 Git 仓库吗？<br />
           <span class="git-confirm-path">
-            {{ sessionRoot || "当前工作目录" }}
+            {{ workspace || "当前工作目录" }}
           </span>
           <p class="git-confirm-desc">
             将执行 git init，仅初始化、不会自动提交；初始化后现有文件会以“未跟踪”状态显示。

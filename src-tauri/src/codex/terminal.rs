@@ -55,9 +55,9 @@ const DEFAULT_COLS: u16 = 100;
 /// 个别场景可显式 -UseBasicParsing:$false 恢复完整解析）。
 const PS_STARTUP: &str = "chcp 65001 > $null; [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $PSDefaultParameterValues['Invoke-WebRequest:UseBasicParsing'] = $true; function prompt { \"$([char]27)]133;D$([char]7)PS $($executionContext.SessionState.Path.CurrentLocation)> \" }";
 
-/// 校验 cwd 为存在的绝对目录（与 session_fs 的 resolve_root 语义一致）
-fn validate_cwd(cwd: &str) -> Result<PathBuf, String> {
-    let p = PathBuf::from(cwd);
+/// 校验工作区为存在的绝对目录（与 session_fs 的 resolve_workspace 语义一致）
+fn validate_workspace(workspace: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(workspace);
     if !p.is_absolute() {
         return Err("工作目录必须为绝对路径".into());
     }
@@ -82,19 +82,19 @@ fn kill_session(state: &TerminalState, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 创建新终端：以给定目录为 cwd 启动 PowerShell（ConPTY），并启动 reader 线程转发输出。
+/// 创建新终端：以给定工作区启动 PowerShell（ConPTY），并启动 reader 线程转发输出。
 /// id 由前端生成（terminal:<uuid>），保证标签与后端会话一一对应，天然支持多开。
 #[tauri::command]
 pub fn terminal_spawn(
     app: AppHandle,
     state: State<'_, TerminalState>,
     id: String,
-    cwd: String,
+    workspace: String,
 ) -> Result<TerminalSpawnResult, String> {
     if id.trim().is_empty() {
         return Err("终端 id 不能为空".into());
     }
-    let dir = validate_cwd(&cwd)?;
+    let dir = validate_workspace(&workspace)?;
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         if guard.contains_key(&id) {
@@ -258,16 +258,16 @@ mod tests {
 
     #[test]
     fn spawn_rejects_invalid_cwd() {
-        assert!(validate_cwd("relative/path").is_err());
+        assert!(validate_workspace("relative/path").is_err());
         let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("no_such_dir_for_terminal_test");
-        assert!(validate_cwd(missing.to_str().unwrap()).is_err());
+        assert!(validate_workspace(missing.to_str().unwrap()).is_err());
     }
 
     #[test]
     fn spawn_accepts_existing_dir() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        assert!(validate_cwd(dir.to_str().unwrap()).is_ok());
+        assert!(validate_workspace(dir.to_str().unwrap()).is_ok());
     }
 
     /// 真实 ConPTY 冒烟：以 PowerShell + UTF-8 启动参数拉起子进程，

@@ -78,14 +78,14 @@ export function toApprovalsReviewer(
 /** turn/start 的沙箱覆盖参数是 sandboxPolicy 对象 */
 export function toSandboxPolicy(
   mode: PermissionId,
-  workspaceRoot?: string,
+  workspace?: string,
 ): Record<string, unknown> {
   switch (mode) {
     case "ask-for-approval":
     case "help-me-approve":
       return {
         type: "workspaceWrite",
-        writableRoots: workspaceRoot ? [workspaceRoot] : [],
+        writableRoots: workspace ? [workspace] : [],
         networkAccess: false,
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,

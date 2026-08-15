@@ -85,7 +85,7 @@ pub struct GitFile {
 #[serde(rename_all = "camelCase")]
 pub struct GitStatus {
     /// 仓库根目录（Windows 反斜杠路径）
-    pub repo_root: String,
+    pub repo_workspace: String,
     /// 当前分支名；游离 HEAD 或尚未出生时为 "HEAD"
     pub branch: String,
     /// 仓库是否配置了任意远端（拉取/推送可用性的前置条件）
@@ -359,7 +359,7 @@ fn status_sync(path: &str) -> Result<GitStatus, GitError> {
     files.retain(|f| !has_node_modules_component(&f.path));
     files.sort_by_key(|a| a.path.to_lowercase());
     Ok(GitStatus {
-        repo_root: clean_path(workdir),
+        repo_workspace: clean_path(workdir),
         branch,
         has_remote: !repo.remote_names().is_empty(),
         files,
@@ -2576,172 +2576,172 @@ async fn run_blocking<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn git_changes_status(path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || status_sync(&path)).await
+pub async fn git_changes_status(workspace: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || status_sync(&workspace)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_commit(root: String, message: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || commit_sync(&root, &message)).await
+pub async fn git_changes_commit(workspace: String, message: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || commit_sync(&workspace, &message)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_pull(root: String) -> Result<GitPullResult, GitError> {
+pub async fn git_changes_pull(workspace: String) -> Result<GitPullResult, GitError> {
     // 拉取涉及网络传输，放宽超时到 10 分钟
-    run_blocking_with_timeout(600, move || pull_sync(&root)).await
+    run_blocking_with_timeout(600, move || pull_sync(&workspace)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_push(root: String) -> Result<GitPushResult, GitError> {
+pub async fn git_changes_push(workspace: String) -> Result<GitPushResult, GitError> {
     // 推送涉及网络传输与可能的凭证交互，放宽超时到 10 分钟
-    run_blocking_with_timeout(600, move || push_sync(&root)).await
+    run_blocking_with_timeout(600, move || push_sync(&workspace)).await
 }
 
 /// 远端列表（只读，gix 实现，不依赖系统 git）
 #[tauri::command]
-pub async fn git_changes_remotes(path: String) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remotes_sync(&path)).await
+pub async fn git_changes_remotes(workspace: String) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remotes_sync(&workspace)).await
 }
 
 /// 添加远端（调用系统 git）
 #[tauri::command]
-pub async fn git_changes_remote_add(root: String, name: String, url: String) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_add_sync(&root, &name, &url)).await
+pub async fn git_changes_remote_add(workspace: String, name: String, url: String) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remote_add_sync(&workspace, &name, &url)).await
 }
 
 /// 修改远端拉取地址（调用系统 git）
 #[tauri::command]
 pub async fn git_changes_remote_set_url(
-    root: String,
+    workspace: String,
     name: String,
     url: String,
 ) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_set_url_sync(&root, &name, &url)).await
+    run_blocking(move || remote_set_url_sync(&workspace, &name, &url)).await
 }
 
 /// 删除远端（调用系统 git）
 #[tauri::command]
-pub async fn git_changes_remote_remove(root: String, name: String) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_remove_sync(&root, &name)).await
+pub async fn git_changes_remote_remove(workspace: String, name: String) -> Result<GitRemotes, GitError> {
+    run_blocking(move || remote_remove_sync(&workspace, &name)).await
 }
 
 /// 拉取远端更新（remote 为空时取默认远端；网络操作放宽超时到 10 分钟）
 #[tauri::command]
-pub async fn git_changes_remote_fetch(root: String, remote: String) -> Result<GitBranches, GitError> {
-    run_blocking_with_timeout(600, move || remote_fetch_sync(&root, &remote)).await
+pub async fn git_changes_remote_fetch(workspace: String, remote: String) -> Result<GitBranches, GitError> {
+    run_blocking_with_timeout(600, move || remote_fetch_sync(&workspace, &remote)).await
 }
 
 /// 从远程分支检出为同名本地跟踪分支（调用系统 git）
 #[tauri::command]
 pub async fn git_changes_branch_checkout_remote(
-    root: String,
+    workspace: String,
     remote_branch: String,
 ) -> Result<GitStatus, GitError> {
-    run_blocking(move || branch_checkout_remote_sync(&root, &remote_branch)).await
+    run_blocking(move || branch_checkout_remote_sync(&workspace, &remote_branch)).await
 }
 
 /// 删除远程分支（调用系统 git；网络操作放宽超时到 10 分钟）
 #[tauri::command]
 pub async fn git_changes_remote_branch_delete(
-    root: String,
+    workspace: String,
     remote_branch: String,
 ) -> Result<GitBranches, GitError> {
-    run_blocking_with_timeout(600, move || remote_branch_delete_sync(&root, &remote_branch)).await
+    run_blocking_with_timeout(600, move || remote_branch_delete_sync(&workspace, &remote_branch)).await
 }
 
 /// 把当前分支上游切换到指定远端的同名分支（调用系统 git，单上游替换）
 #[tauri::command]
 pub async fn git_changes_remote_switch_upstream(
-    root: String,
+    workspace: String,
     remote: String,
 ) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_switch_upstream_sync(&root, &remote)).await
+    run_blocking(move || remote_switch_upstream_sync(&workspace, &remote)).await
 }
 
 /// 探测本机是否安装了 git（推送依赖系统 git）；只探测不执行任何操作
 #[tauri::command]
-pub async fn git_changes_git_available(path: String) -> bool {
-    let _ = path;
+pub async fn git_changes_git_available(workspace: String) -> bool {
+    let _ = workspace;
     find_git().is_some()
 }
 
 #[tauri::command]
-pub async fn git_changes_init(path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || init_sync(&path)).await
+pub async fn git_changes_init(workspace: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || init_sync(&workspace)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_branches(path: String) -> Result<GitBranches, GitError> {
-    run_blocking(move || branches_sync(&path)).await
+pub async fn git_changes_branches(workspace: String) -> Result<GitBranches, GitError> {
+    run_blocking(move || branches_sync(&workspace)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_branch_create(path: String, name: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || create_branch_sync(&path, &name)).await
+pub async fn git_changes_branch_create(workspace: String, name: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || create_branch_sync(&workspace, &name)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_branch_delete(path: String, name: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || delete_branch_sync(&path, &name)).await
+pub async fn git_changes_branch_delete(workspace: String, name: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || delete_branch_sync(&workspace, &name)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_branch_switch(path: String, name: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || switch_branch_sync(&path, &name)).await
+pub async fn git_changes_branch_switch(workspace: String, name: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || switch_branch_sync(&workspace, &name)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_branch_merge(path: String, name: String) -> Result<GitMergeResult, GitError> {
-    run_blocking(move || merge_branch_sync(&path, &name)).await
+pub async fn git_changes_branch_merge(workspace: String, name: String) -> Result<GitMergeResult, GitError> {
+    run_blocking(move || merge_branch_sync(&workspace, &name)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_log(
-    root: String,
+    workspace: String,
     limit: usize,
     before: Option<String>,
 ) -> Result<Vec<GitCommitEntry>, GitError> {
-    run_blocking(move || commit_log_sync(&root, limit, before)).await
+    run_blocking(move || commit_log_sync(&workspace, limit, before)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_diff(root: String, path: String, kind: String) -> Result<String, GitError> {
-    run_blocking(move || diff_sync(&root, &path, &kind)).await
+pub async fn git_changes_diff(workspace: String, path: String, kind: String) -> Result<String, GitError> {
+    run_blocking(move || diff_sync(&workspace, &path, &kind)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_stage(root: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || stage_sync(&root, &path)).await
+pub async fn git_changes_stage(workspace: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || stage_sync(&workspace, &path)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_unstage(root: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || unstage_sync(&root, &path)).await
+pub async fn git_changes_unstage(workspace: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || unstage_sync(&workspace, &path)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_stage_all(root: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || stage_all_sync(&root)).await
+pub async fn git_changes_stage_all(workspace: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || stage_all_sync(&workspace)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_unstage_all(root: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || unstage_all_sync(&root)).await
+pub async fn git_changes_unstage_all(workspace: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || unstage_all_sync(&workspace)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_restore(root: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || restore_sync(&root, &path)).await
+pub async fn git_changes_restore(workspace: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || restore_sync(&workspace, &path)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_delete(root: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || delete_sync(&root, &path)).await
+pub async fn git_changes_delete(workspace: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || delete_sync(&workspace, &path)).await
 }
 
 #[tauri::command]
-pub async fn git_changes_ignore(root: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || ignore_sync(&root, &path)).await
+pub async fn git_changes_ignore(workspace: String, path: String) -> Result<GitStatus, GitError> {
+    run_blocking(move || ignore_sync(&workspace, &path)).await
 }
 
 // ---------- .git / 工作区监听 ----------
@@ -3029,7 +3029,7 @@ mod tests {
         init_committed_repo(root);
         let st = status_sync(root.to_str().unwrap()).unwrap();
         assert!(st.files.is_empty());
-        assert!(!st.repo_root.is_empty());
+        assert!(!st.repo_workspace.is_empty());
         assert!(!st.branch.is_empty());
     }
 
@@ -3195,7 +3195,7 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
         let st = init_sync(root.to_str().unwrap()).unwrap();
-        let diff = diff_sync(&st.repo_root, "c.txt", "untracked").unwrap();
+        let diff = diff_sync(&st.repo_workspace, "c.txt", "untracked").unwrap();
         assert!(diff.contains("@@"));
         assert!(diff.contains("+hello"));
     }
@@ -3212,7 +3212,7 @@ mod tests {
         init_committed_repo(root);
         std::fs::write(root.join("a.txt"), "one\ntwo!\n").unwrap();
         let st = status_sync(root.to_str().unwrap()).unwrap();
-        let diff = diff_sync(&st.repo_root, "a.txt", "modified").unwrap();
+        let diff = diff_sync(&st.repo_workspace, "a.txt", "modified").unwrap();
         assert!(diff.contains("@@"));
         assert!(diff.contains("-two"));
         assert!(diff.contains("+two!"));
@@ -3230,7 +3230,7 @@ mod tests {
         init_committed_repo(root);
         std::fs::remove_file(root.join("a.txt")).unwrap();
         let st = status_sync(root.to_str().unwrap()).unwrap();
-        let diff = diff_sync(&st.repo_root, "a.txt", "deleted").unwrap();
+        let diff = diff_sync(&st.repo_workspace, "a.txt", "deleted").unwrap();
         assert!(diff.contains("-one"));
         assert!(diff.contains("-two"));
         assert!(!diff.contains("+one"));
@@ -3242,7 +3242,7 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("bin.dat"), b"\x00\x01\x02").unwrap();
         let st = init_sync(root.to_str().unwrap()).unwrap();
-        let err = diff_sync(&st.repo_root, "bin.dat", "untracked").unwrap_err();
+        let err = diff_sync(&st.repo_workspace, "bin.dat", "untracked").unwrap_err();
         assert!(err.message.contains("二进制"));
     }
 

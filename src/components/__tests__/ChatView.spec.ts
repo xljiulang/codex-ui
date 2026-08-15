@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
-import { nextTick, reactive } from "vue";
+import { computed, nextTick, reactive } from "vue";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -30,7 +30,8 @@ vi.mock("../../composables/useCodex", () => {
   });
   return {
     currentItems: vi.fn(),
-    resolveCwd: () => "",
+    resolveSessionWorkspace: () => "",
+    workspace: computed(() => ""),
     store,
     dismissPlanPrompt: vi.fn(),
     executePlan: vi.fn(),
@@ -58,7 +59,7 @@ function makeTab(): SessionTab {
     threadId: "t1",
     name: "",
     origin: "history",
-    cwd: null,
+    workspace: null,
     resumedThreadId: null,
     turnActive: false,
     currentTurnId: null,
@@ -71,7 +72,7 @@ function makeTab(): SessionTab {
     attachments: [],
     planPrompt: null,
     loadingThread: false,
-    newChatCwd: null,
+    newChatWorkspace: null,
     interactions: store.interactions as unknown as SessionTab["interactions"],
   };
 }

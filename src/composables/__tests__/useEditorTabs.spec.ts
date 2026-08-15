@@ -141,7 +141,7 @@ describe("useEditorTabs 标签状态", () => {
 
     expect(await saveFileTab(tab.id)).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write", {
-      root,
+      workspace: root,
       path: "a.txt",
       content: "\uFEFFxa\r\nb\r\n",
     });
@@ -279,7 +279,7 @@ describe("useEditorTabs 标签状态", () => {
       path: "d.txt",
       kind: "add",
       diff: "diff --git a/d.txt b/d.txt\n@@ -0,0 +1 @@\n+x",
-      workspace_root: root,
+      workspace: root,
     });
 
     const skipped = closeAllOtherTabs();
@@ -421,7 +421,7 @@ describe("useEditorTabs 标签状态", () => {
       path: "a.txt",
       kind: "modify",
       diff: "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-a\n+b",
-      workspace_root: root,
+      workspace: root,
     });
     expect(tabs).toHaveLength(1);
     const diffTabs = tabs.filter((t) => t.kind === "diff");
@@ -438,7 +438,7 @@ describe("useEditorTabs 标签状态", () => {
       path: "a.txt",
       kind: "modify",
       diff: "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-a\n+b",
-      workspace_root: root,
+      workspace: root,
     });
     expect(tabs.filter((t) => t.kind === "diff")).toHaveLength(1);
   });
@@ -465,7 +465,7 @@ describe("useEditorTabs 标签状态", () => {
   it("打开 PDF 预览：读取 session_fs_read_bytes 并解码为字节", async () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
-        expect(args).toEqual({ root, path: "doc.pdf" });
+        expect(args).toEqual({ workspace: root, path: "doc.pdf" });
         return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
@@ -529,7 +529,7 @@ describe("useEditorTabs 标签状态", () => {
       (x): x is TerminalEditorTab => x.kind === "terminal",
     );
     expect(t).toBeTruthy();
-    expect(t!.cwd).toBe(root);
+    expect(t!.workspace).toBe(root);
     expect(t!.title).toBe("PowerShell");
     expect(t!.loading).toBe(false);
     expect(t!.error).toBe("");
@@ -538,7 +538,7 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).toBe(t!.id);
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_spawn", {
       id: t!.id,
-      cwd: root,
+      workspace: root,
     });
   });
 

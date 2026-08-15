@@ -16,7 +16,7 @@ import {
   effectiveEffort,
   modelDisplayName,
   permissionChip,
-  resolveCwd,
+  resolveSessionWorkspace,
   sendPrompt,
   setToast,
   store,
@@ -252,7 +252,7 @@ async function runFileSearch(token: string) {
 }
 
 function mentionRoot(): string {
-  return resolveCwd();
+  return resolveSessionWorkspace();
 }
 
 function refNameOf(a: UserInput): string {

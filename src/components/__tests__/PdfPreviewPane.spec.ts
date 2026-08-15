@@ -26,7 +26,7 @@ function makeTab(over: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
     kind: "preview",
     previewType: "pdf",
     id: "p1",
-    root: "D:/repo",
+    workspace: "D:/repo",
     path: "doc.pdf",
     title: "doc.pdf",
     loading: false,

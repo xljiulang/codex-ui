@@ -151,7 +151,7 @@ function mockFs() {
     if (cmd === "session_fs_read_bytes") {
       return Promise.resolve({ content: "JVBERi0x", byteSize: 8 });
     }
-    if (cmd === "workspace_dir") return Promise.resolve(rootPath);
+    if (cmd === "startup_workspace") return Promise.resolve(rootPath);
     if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
     if (cmd === "session_fs_create_dir") {
       createdFolder = {
@@ -227,9 +227,10 @@ function fireWindowPointer(type: string, x: number, y: number) {
 
 describe("ResourceView 文件树", () => {
   beforeEach(() => {
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.workspace = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.attachments = [];
     store.toast = "";
     clipboardFiles = [aTxt.path];
@@ -255,32 +256,32 @@ describe("ResourceView 文件树", () => {
     expect(wrapper.findAll(".resource-row.resource-file")).toHaveLength(1);
     expect(wrapper.text()).not.toContain("main.ts");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
-      root: rootPath,
+      workspace: rootPath,
       path: rootPath,
     });
     wrapper.unmount();
   });
 
-  it("currentThreadCwd 为空字符串时回退启动工作目录", async () => {
-    store.currentThreadCwd = "";
+  it("currentThreadWorkspace 为空字符串时回退启动工作目录", async () => {
+    store.currentThreadWorkspace = "";
     const wrapper = await mountPanel();
     expect(wrapper.find(".resource-root").text()).toContain("codex-ui");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
-      root: rootPath,
+      workspace: rootPath,
       path: rootPath,
     });
     wrapper.unmount();
   });
 
   it("工作目录均未就绪时用 workspace_dir 兜底", async () => {
-    store.currentThreadCwd = "";
-    store.newChatCwd = "";
-    store.server.workspace = "";
+    store.currentThreadWorkspace = "";
+    store.newChatWorkspace = "";
+    store.server.startupWorkspace = "";
     const wrapper = await mountPanel();
     expect(wrapper.find(".resource-root").text()).toContain("codex-ui");
-    expect(mockedInvoke).toHaveBeenCalledWith("workspace_dir");
+    expect(mockedInvoke).toHaveBeenCalledWith("startup_workspace");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
-      root: rootPath,
+      workspace: rootPath,
       path: rootPath,
     });
     wrapper.unmount();
@@ -402,7 +403,7 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "打开");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
-      root: rootPath,
+      workspace: rootPath,
       path: aTxt.path,
     });
     wrapper.unmount();
@@ -439,7 +440,7 @@ describe("ResourceView 文件树", () => {
     await wrapper.find(".resource-row.resource-file").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
-      root: rootPath,
+      workspace: rootPath,
       path: aTxt.path,
     });
     wrapper.unmount();
@@ -479,7 +480,7 @@ describe("ResourceView 文件树", () => {
     await clickCtxItem(wrapper, "打开");
 
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read_bytes", {
-      root: rootPath,
+      workspace: rootPath,
       path: docPdf.path,
     });
     const previewTabs = tabs.filter((t) => t.kind === "preview");
@@ -567,7 +568,7 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-dir");
     await clickCtxItem(wrapper, "新建文件夹");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_create_dir", {
-      root: rootPath,
+      workspace: rootPath,
       dir: srcDir.path,
     });
     // 创建后展开/加载父目录并进入行内重命名
@@ -583,7 +584,7 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-dir");
     await clickCtxItem(wrapper, "新建文本文件");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_create_file", {
-      root: rootPath,
+      workspace: rootPath,
       dir: srcDir.path,
     });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -617,7 +618,7 @@ describe("ResourceView 文件树", () => {
     fireWindowPointer("pointerup", 120, 120);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_move", {
-      root: rootPath,
+      workspace: rootPath,
       src: aTxt.path,
       destDir: srcDir.path,
     });
@@ -766,7 +767,7 @@ describe("ResourceView 文件树", () => {
     await clickCtxItem(wrapper, "在此打开终端");
     const t = tabs.find((x) => x.kind === "terminal");
     expect(t).toBeTruthy();
-    expect(t!.cwd).toBe(rootPath);
+    expect(t!.workspace).toBe(rootPath);
     wrapper.unmount();
   });
 
@@ -776,7 +777,7 @@ describe("ResourceView 文件树", () => {
     await clickCtxItem(wrapper, "在此打开终端");
     const t = tabs.find((x) => x.kind === "terminal");
     expect(t).toBeTruthy();
-    expect(t!.cwd).toBe(srcDir.path);
+    expect(t!.workspace).toBe(srcDir.path);
     wrapper.unmount();
   });
 
@@ -815,7 +816,7 @@ describe("ResourceView 文件树", () => {
     await input.trigger("keydown.enter");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_rename", {
-      root: rootPath,
+      workspace: rootPath,
       path: aTxt.path,
       newName: "b.txt",
     });
@@ -836,7 +837,7 @@ describe("ResourceView 文件树", () => {
     await del!.trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_delete", {
-      root: rootPath,
+      workspace: rootPath,
       path: aTxt.path,
     });
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
@@ -854,7 +855,7 @@ describe("ResourceView 文件树", () => {
     expect(text).toContain(aTxt.path);
     expect(text).toContain("1.5 KB");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
-      root: rootPath,
+      workspace: rootPath,
       path: aTxt.path,
     });
     wrapper.unmount();
@@ -869,7 +870,7 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-dir");
     await clickCtxItem(wrapper, "粘贴");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_paste", {
-      root: rootPath,
+      workspace: rootPath,
       destDir: srcDir.path,
       sources: [aTxt.path],
     });
@@ -974,7 +975,7 @@ describe("ResourceView 文件树", () => {
     await flushPromises();
 
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_search", {
-      root: rootPath,
+      workspace: rootPath,
       query: "main",
       limit: 200,
     });
@@ -1018,7 +1019,7 @@ describe("ResourceView 文件树", () => {
     await wrapper.find(".resource-result").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
-      root: rootPath,
+      workspace: rootPath,
       path: mainTs.path,
     });
     wrapper.unmount();
@@ -1034,7 +1035,7 @@ describe("ResourceView 文件树", () => {
     await wrapper.find(".resource-result").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read_bytes", {
-      root: rootPath,
+      workspace: rootPath,
       path: docPdf.path,
     });
     wrapper.unmount();

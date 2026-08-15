@@ -71,7 +71,7 @@ function openTabFor(threadId: string) {
     threadId,
     name: "",
     origin: "history",
-    cwd: null,
+    workspace: null,
     resumedThreadId: null,
     turnActive: false,
     currentTurnId: null,
@@ -84,7 +84,7 @@ function openTabFor(threadId: string) {
     attachments: [],
     planPrompt: null,
     loadingThread: false,
-    newChatCwd: null,
+    newChatWorkspace: null,
     interactions: [],
   });
 }
@@ -703,7 +703,7 @@ describe("HistoryView 会话标签联动", () => {
       threadId: "t1",
       name: "",
       origin: "history",
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: true,
       currentTurnId: null,
@@ -716,7 +716,7 @@ describe("HistoryView 会话标签联动", () => {
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     });
     const wrapper = mount(HistoryView);
@@ -738,7 +738,7 @@ describe("HistoryView 会话标签联动", () => {
       threadId: "t1",
       name: "",
       origin: "history",
-      cwd: null,
+      workspace: null,
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -751,7 +751,7 @@ describe("HistoryView 会话标签联动", () => {
       attachments: [],
       planPrompt: null,
       loadingThread: false,
-      newChatCwd: null,
+      newChatWorkspace: null,
       interactions: [],
     });
     const wrapper = mount(HistoryView);

@@ -519,7 +519,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     );
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write", {
-      root,
+      workspace: root,
       path: "a.md",
       content: "# # hi",
     });

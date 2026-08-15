@@ -1,4 +1,4 @@
-import { nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
@@ -127,7 +127,7 @@ export interface SessionTab {
   /** 会话名称（自动生成/手动重命名，随 thread/name/updated 同步） */
   name: string;
   origin: "new" | "history" | null;
-  cwd: string | null;
+  workspace: string | null;
   resumedThreadId: string | null;
   turnActive: boolean;
   currentTurnId: string | null;
@@ -141,7 +141,7 @@ export interface SessionTab {
   planPrompt: PlanPrompt | null;
   loadingThread: boolean;
   /** 新建对话时可选的项目目录（null = 使用启动工作目录） */
-  newChatCwd: string | null;
+  newChatWorkspace: string | null;
   /** 该标签待处理的交互（审批/提问/elicitation），按 threadId 路由 */
   interactions: PendingInteraction[];
 }
@@ -178,7 +178,7 @@ export type PanelTab = "history" | "resources" | "git";
 export const store = reactive({
   server: {
     connected: false,
-    workspace: "",
+    startupWorkspace: "",
     codexPath: null as string | null,
     logs: [] as string[],
   },
@@ -188,12 +188,14 @@ export const store = reactive({
   currentThreadId: null as string | null,
   currentThreadName: "",
   currentThreadOrigin: null as "new" | "history" | null,
-  currentThreadCwd: null as string | null,
+  currentThreadWorkspace: null as string | null,
   resumedThreadId: null as string | null,
   /** 已打开的会话标签列表（多会话标签） */
   sessionTabs: [] as SessionTab[],
   /** 当前激活的会话标签 id（null = 尚未初始化任何标签） */
   activeSessionId: null as string | null,
+  /** 活动标签工作区覆盖（文件/diff/预览/终端标签由 EditorPane 写入；null=跟随会话工作区） */
+  workspace: null as string | null,
   itemsByThread: {} as Record<string, ThreadItem[]>,
   // 每个线程“进行中工作”计数（流式文本/进行中工具），避免渲染时全量扫描
   activeWorkByThread: {} as Record<string, number>,
@@ -229,7 +231,7 @@ export const store = reactive({
   skillsLoaded: false,
   threadTokenUsage: null as { used: number; window: number | null } | null,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
-  newChatCwd: null as string | null,
+  newChatWorkspace: null as string | null,
   taskMode: "execute" as "execute" | "plan",
   goalText: null as string | null,
   /** 当前线程目标状态（thread/goal 事件同步，null = 未挂载目标） */
@@ -264,7 +266,7 @@ function freshSessionTab(): SessionTab {
     threadId: null,
     name: "",
     origin: null,
-    cwd: null,
+    workspace: null,
     resumedThreadId: null,
     turnActive: false,
     currentTurnId: null,
@@ -277,7 +279,7 @@ function freshSessionTab(): SessionTab {
     attachments: [],
     planPrompt: null,
     loadingThread: false,
-    newChatCwd: null,
+    newChatWorkspace: null,
     interactions: [],
   };
 }
@@ -311,7 +313,7 @@ export function activeSessionTab(): SessionTab | null {
  * 标题内容取名称/摘要，无线程的新对话兜底“新建会话”；无任何可用目录时降级为仅标题内容。
  */
 export function sessionTabTitle(tab: SessionTab): string {
-  const root = resolveTabCwd(tab);
+  const root = resolveSessionWorkspace(tab);
   const folder = root ? pathBaseName(root) : "";
   const summary = tab.threadId
     ? store.threads.find((t) => t.id === tab.threadId)
@@ -325,7 +327,7 @@ function restoreSession(tab: SessionTab) {
   store.currentThreadId = tab.threadId;
   store.currentThreadName = tab.name;
   store.currentThreadOrigin = tab.origin;
-  store.currentThreadCwd = tab.cwd;
+  store.currentThreadWorkspace = tab.workspace;
   store.resumedThreadId = tab.resumedThreadId;
   store.turnActive = tab.turnActive;
   store.currentTurnId = tab.currentTurnId;
@@ -336,7 +338,7 @@ function restoreSession(tab: SessionTab) {
   store.threadTokenUsage = tab.threadTokenUsage;
   store.planPrompt = tab.planPrompt;
   store.loadingThread = tab.loadingThread;
-  store.newChatCwd = tab.newChatCwd;
+  store.newChatWorkspace = tab.newChatWorkspace;
   store.followupQueue = [...tab.followupQueue];
   store.attachments = [...tab.attachments];
 }
@@ -348,7 +350,7 @@ function syncActiveSessionTab() {
   tab.threadId = store.currentThreadId;
   tab.name = store.currentThreadName;
   tab.origin = store.currentThreadOrigin;
-  tab.cwd = store.currentThreadCwd;
+  tab.workspace = store.currentThreadWorkspace;
   tab.resumedThreadId = store.resumedThreadId;
   tab.turnActive = store.turnActive;
   tab.currentTurnId = store.currentTurnId;
@@ -359,7 +361,7 @@ function syncActiveSessionTab() {
   tab.threadTokenUsage = store.threadTokenUsage;
   tab.planPrompt = store.planPrompt ? { ...store.planPrompt } : null;
   tab.loadingThread = store.loadingThread;
-  tab.newChatCwd = store.newChatCwd;
+  tab.newChatWorkspace = store.newChatWorkspace;
   tab.followupQueue = [...store.followupQueue];
   tab.attachments = [...store.attachments];
 }
@@ -661,20 +663,29 @@ async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
 }
 
 /**
- * 规范的工作目录解析（所有入口共用，避免各调用点优先级不一致）：
- * 有会话时以会话 cwd 为准（忽略残留的 newChatCwd），
- * 无会话（新建会话中）优先待新建目录 newChatCwd，其次 workspace；均跳过空串。
+ * 会话工作区解析（所有入口共用，避免优先级不一致）：
+ * 有会话时以会话工作区为准（忽略残留的 newChatWorkspace），无会话（新建会话中）
+ * 优先待新建目录，其次启动工作区；均跳过空串。
+ * 传 tab 时按指定会话标签解析（后台标签发送回合时沙箱可写根等应跟随该标签）。
  */
-export function resolveCwd(): string {
-  const cwd = store.currentThreadId ? store.currentThreadCwd : store.newChatCwd;
-  return cwd?.trim() || store.server.workspace?.trim() || "";
+export function resolveSessionWorkspace(tab?: SessionTab): string {
+  const cwd = tab
+    ? tab.threadId
+      ? tab.workspace
+      : tab.newChatWorkspace
+    : store.currentThreadId
+      ? store.currentThreadWorkspace
+      : store.newChatWorkspace;
+  return cwd?.trim() || store.server.startupWorkspace?.trim() || "";
 }
 
-/** 按标签解析工作目录（后台标签发送回合时沙箱可写根等应跟随该标签而非活动标签） */
-function resolveTabCwd(tab: SessionTab): string {
-  const cwd = tab.threadId ? tab.cwd : tab.newChatCwd;
-  return cwd?.trim() || store.server.workspace?.trim() || "";
-}
+/**
+ * 当前工作区：由活动编辑器标签决定（文件/diff/预览/终端标签由 EditorPane 写入
+ * store.workspace），null 或未设置时回落会话工作区。资源/Git 面板与新建会话初始目录跟随它。
+ */
+export const workspace = computed(
+  () => store.workspace ?? resolveSessionWorkspace(),
+);
 
 // 活动会话标签记录自动同步：live 字段（当前活动标签）的任何变化都落回标签记录，
 // 保证切走/切回时标签状态不丢失（消息列表本身按线程存于 itemsByThread，无需同步）。
@@ -683,7 +694,7 @@ watch(
     store.currentThreadId,
     store.currentThreadName,
     store.currentThreadOrigin,
-    store.currentThreadCwd,
+    store.currentThreadWorkspace,
     store.resumedThreadId,
     store.turnActive,
     store.currentTurnId,
@@ -694,7 +705,7 @@ watch(
     store.threadTokenUsage,
     store.planPrompt,
     store.loadingThread,
-    store.newChatCwd,
+    store.newChatWorkspace,
     store.followupQueue.length,
     store.attachments.length,
     store.threads.find((t) => t.id === store.currentThreadId)?.name,
@@ -711,7 +722,7 @@ function resetToNewChat() {
   store.currentThreadId = null;
   store.currentThreadName = "";
   store.currentThreadOrigin = null;
-  store.currentThreadCwd = null;
+  store.currentThreadWorkspace = null;
   store.resumedThreadId = null;
   store.currentTurnId = null;
   store.turnActive = false;
@@ -1149,7 +1160,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
 
   try {
     const startParams: Record<string, unknown> = {
-      cwd: resolveCwd(),
+      cwd: resolveSessionWorkspace(),
       approvalPolicy: "never",
       sandbox: "read-only",
     };
@@ -1283,8 +1294,8 @@ async function newChat(prompt: string, attachments: UserInput[]) {
   store.busy = true;
   const tabId = store.activeSessionId;
   try {
-    // newChat 仅在无当前会话时被调用，resolveCwd 走 newChatCwd → workspace 分支
-    const cwd = resolveCwd();
+    // newChat 仅在无当前会话时被调用，resolveSessionWorkspace 走 newChatWorkspace → workspace 分支
+    const cwd = resolveSessionWorkspace();
     const params: Record<string, unknown> = {
       cwd,
       approvalPolicy: toApprovalPolicy(store.permissionMode),
@@ -1318,9 +1329,9 @@ async function newChat(prompt: string, attachments: UserInput[]) {
         tab.threadId = threadId;
         tab.name = res.thread.name ?? "";
         tab.origin = "new";
-        tab.cwd = cwd;
+        tab.workspace = cwd;
         tab.resumedThreadId = threadId;
-        tab.newChatCwd = null;
+        tab.newChatWorkspace = null;
         tab.loadingThread = false;
       }
       store.itemsByThread[threadId] = [];
@@ -1332,9 +1343,9 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.currentThreadId = threadId;
     store.currentThreadName = res.thread.name ?? "";
     store.currentThreadOrigin = "new";
-    store.currentThreadCwd = cwd;
+    store.currentThreadWorkspace = cwd;
     store.resumedThreadId = threadId;
-    store.newChatCwd = null; // 本次新建已消费，恢复默认
+    store.newChatWorkspace = null; // 本次新建已消费，恢复默认
     store.currentModel = res.model ?? currentModelId();
     void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
@@ -1372,7 +1383,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
 
 /**
  * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按当前全局设置，
- * 沙箱可写根跟随传入的 cwd（活动标签用 resolveCwd，后台标签用 resolveTabCwd）。
+ * 沙箱可写根跟随传入的 cwd（活动标签用 resolveSessionWorkspace，后台标签用 resolveSessionWorkspace）。
  */
 function buildTurnParams(
   threadId: string,
@@ -1436,7 +1447,7 @@ async function continueTurnForTab(
   }
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, resolveTabCwd(tab));
+  const params = buildTurnParams(threadId, input, clientId, resolveSessionWorkspace(tab));
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -1496,7 +1507,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入
   const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, resolveCwd());
+  const params = buildTurnParams(threadId, input, clientId, resolveSessionWorkspace());
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -1662,7 +1673,7 @@ export async function executePlan() {
  */
 export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   const tab = freshSessionTab();
-  if (cwd) tab.newChatCwd = cwd;
+  if (cwd) tab.newChatWorkspace = cwd;
   store.sessionTabs.push(tab);
   store.activeSessionId = tab.id;
   restoreSession(tab);
@@ -1704,7 +1715,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     if (isActive()) {
       store.currentThreadId = threadId;
       store.currentThreadName = name;
-      store.currentThreadCwd = cwd;
+      store.currentThreadWorkspace = cwd;
       store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
       store.turnActive = false;
       store.turnInterrupted = false;
@@ -1714,7 +1725,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     } else {
       tab.threadId = threadId;
       tab.name = name;
-      tab.cwd = cwd;
+      tab.workspace = cwd;
       tab.resumedThreadId = null;
       tab.turnActive = false;
       tab.turnInterrupted = false;
@@ -1807,7 +1818,7 @@ export async function pickAndOpenNewSession(): Promise<void> {
   pickingNewSessionDir.value = true;
   try {
     const dir = await invoke<string | null>("pick_directory", {
-      initialDir: resolveCwd(),
+      initialDir: workspace.value,
     });
     if (!dir) return;
     await openNewSession(dir);

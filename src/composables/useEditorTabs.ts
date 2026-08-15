@@ -37,13 +37,13 @@ export interface DiffPreviewParams {
   path: string;
   kind: DiffPreviewKind;
   diff: string;
-  workspace_root: string;
+  workspace: string;
 }
 
 export interface FileEditorTab {
   kind: "file";
   id: string;
-  root: string;
+  workspace: string;
   path: string;
   title: string;
   loading: boolean;
@@ -71,7 +71,7 @@ export interface DiffEditorTab {
   path: string;
   /** diff 变化类型：add / delete / modify */
   changeKind: DiffPreviewKind;
-  workspaceRoot: string;
+  workspace: string;
   title: string;
   loading: boolean;
   error: string;
@@ -87,7 +87,7 @@ export interface PreviewEditorTab {
   /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显 */
   previewType: PreviewType;
   id: string;
-  root: string;
+  workspace: string;
   path: string;
   title: string;
   loading: boolean;
@@ -104,7 +104,7 @@ export interface TerminalEditorTab {
   kind: "terminal";
   id: string;
   /** 终端启动目录（绝对路径） */
-  cwd: string;
+  workspace: string;
   title: string;
   loading: boolean;
   error: string;
@@ -131,16 +131,16 @@ export const activeTab = computed<EditorTab | null>(
   () => tabs.find((t) => t.id === activeTabId.value) ?? null,
 );
 
-function fileTabId(root: string, path: string): string {
-  return "file:" + JSON.stringify([root, path]);
+function fileTabId(workspace: string, path: string): string {
+  return "file:" + JSON.stringify([workspace, path]);
 }
 
 function diffTabId(p: DiffPreviewParams): string {
-  return "diff:" + JSON.stringify([p.workspace_root, p.path, p.kind]);
+  return "diff:" + JSON.stringify([p.workspace, p.path, p.kind]);
 }
 
-function previewTabId(type: PreviewType, root: string, path: string): string {
-  return `preview:${type}:${JSON.stringify([root, path])}`;
+function previewTabId(type: PreviewType, workspace: string, path: string): string {
+  return `preview:${type}:${JSON.stringify([workspace, path])}`;
 }
 
 /** 终端标签自增序号：保证同一毫秒内连续多开也生成不同 id */
@@ -150,12 +150,12 @@ let terminalSeq = 0;
  * 打开终端标签：每次调用都新建独立会话（支持同目录多开），生成唯一 id、
  * 激活标签后向后端发起 terminal_spawn；失败保留标签并记录错误。
  */
-export async function openTerminalTab(cwd: string): Promise<void> {
+export async function openTerminalTab(workspace: string): Promise<void> {
   const id = `terminal:${++terminalSeq}:${Date.now()}`;
   const tab = reactive({
     kind: "terminal",
     id,
-    cwd,
+    workspace,
     // 终端标签标题固定为 PowerShell，不随工作目录变化；多开时同名
     title: "PowerShell",
     loading: true,
@@ -171,7 +171,7 @@ export async function openTerminalTab(cwd: string): Promise<void> {
     // 查询）在懒加载面板挂载前丢失导致首个终端空白。
     await ensureTerminalListeners();
     attachTerminal(id);
-    await invoke("terminal_spawn", { id, cwd });
+    await invoke("terminal_spawn", { id, workspace });
   } catch (e) {
     tab.error = String(e);
   } finally {
@@ -192,8 +192,8 @@ export function activateTab(id: string): void {
  * 打开文本文件标签：已打开则直接激活；否则新建标签并异步读取内容、
  * 构建 CodeMirror 状态（按标签闭包维护 dirty/cursor/最新 state）。
  */
-export async function openFileTab(root: string, path: string): Promise<void> {
-  const id = fileTabId(root, path);
+export async function openFileTab(workspace: string, path: string): Promise<void> {
+  const id = fileTabId(workspace, path);
   if (tabs.some((t) => t.id === id)) {
     activeTabId.value = id;
     return;
@@ -203,7 +203,7 @@ export async function openFileTab(root: string, path: string): Promise<void> {
   const tab = reactive({
     kind: "file",
     id,
-    root,
+    workspace,
     path,
     title: pathBaseName(path) || path,
     loading: true,
@@ -226,7 +226,7 @@ export async function openFileTab(root: string, path: string): Promise<void> {
   activeTabId.value = id;
   try {
     const info = await invoke<TextFileContent>("session_fs_read", {
-      root,
+      workspace,
       path,
     });
     const ro = !info.validUtf8;
@@ -295,7 +295,7 @@ export async function saveFileTab(id: string): Promise<boolean> {
       tab.hadBom,
     );
     await invoke("session_fs_write", {
-      root: tab.root,
+      workspace: tab.workspace,
       path: tab.path,
       content,
     });
@@ -323,7 +323,7 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
     id,
     path: params.path,
     changeKind: params.kind,
-    workspaceRoot: params.workspace_root,
+    workspace: params.workspace,
     title: pathBaseName(params.path) || params.path,
     loading: true,
     error: "",
@@ -349,10 +349,10 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
  */
 export async function openPreviewTab(
   type: PreviewType,
-  root: string,
+  workspace: string,
   path: string,
 ): Promise<void> {
-  const id = previewTabId(type, root, path);
+  const id = previewTabId(type, workspace, path);
   if (tabs.some((t) => t.id === id)) {
     activeTabId.value = id;
     return;
@@ -361,7 +361,7 @@ export async function openPreviewTab(
     kind: "preview",
     previewType: type,
     id,
-    root,
+    workspace,
     path,
     title: pathBaseName(path) || path,
     loading: true,
@@ -377,7 +377,7 @@ export async function openPreviewTab(
       tab.imageUrl = convertFileSrc(path);
     } else {
       const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
-        root,
+        workspace,
         path,
       });
       tab.pdfData = base64ToBytes(info.content);

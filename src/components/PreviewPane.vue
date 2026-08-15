@@ -8,7 +8,7 @@ const props = defineProps<{ tab: PreviewEditorTab }>();
 // pdf.js 较重，懒加载避免拖累主窗口首屏
 const PdfPreviewPane = defineAsyncComponent(() => import("./PdfPreviewPane.vue"));
 
-const relPath = computed(() => relPathOf(props.tab.root, props.tab.path));
+const relPath = computed(() => relPathOf(props.tab.workspace, props.tab.path));
 const kindLabel = computed(() =>
   props.tab.previewType === "pdf" ? "PDF" : "图像",
 );

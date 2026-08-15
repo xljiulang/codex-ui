@@ -280,7 +280,7 @@ pub async fn auth_logout(server: State<'_, Server>) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub fn workspace_dir(server: State<'_, Server>) -> String {
+pub fn startup_workspace(server: State<'_, Server>) -> String {
     server.workspace().to_string_lossy().into_owned()
 }
 

@@ -6,7 +6,7 @@ import {
   displayHref,
   localPathFromHref,
   openLink,
-  workspaceRoot,
+  sessionWorkspace,
 } from "../lib/links";
 import { openPathInApp } from "../composables/useSessionFs";
 import { renderMarkdown } from "../lib/markdownRenderer";
@@ -180,7 +180,7 @@ function decorateLinks() {
     a.setAttribute("data-link-ready", "1");
     const href = a.getAttribute("href") ?? "";
     // 悬停显示完整 URL：使用全局自定义 tooltip，而非原生 title
-    const tip = displayHref(href, workspaceRoot());
+    const tip = displayHref(href, sessionWorkspace());
     a.addEventListener("mouseenter", () =>
       showTooltip(tip, a.getBoundingClientRect(), a),
     );
@@ -189,7 +189,7 @@ function decorateLinks() {
       ev.preventDefault();
       ev.stopPropagation();
       const h = a.getAttribute("href") ?? "";
-      const root = workspaceRoot();
+      const root = sessionWorkspace();
       const cls = localPathFromHref(h, root);
       // 网页/无法分类：保持原 openLink 行为（浏览器/忽略）
       if (!cls || cls.kind === "web") {

@@ -90,7 +90,7 @@ function mockFs() {
     }
     if (cmd === "git_changes_status") {
       return Promise.resolve({
-        repoRoot: rootPath,
+        repoWorkspace: rootPath,
         branch: "main",
         hasRemote: true,
         files: [
@@ -114,9 +114,10 @@ describe("RightPanel Tab 栏", () => {
   beforeEach(() => {
     store.threads = [];
     store.loadingHistory = false;
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.workspace = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();
@@ -233,7 +234,8 @@ describe("RightPanel 宽度调节", () => {
   beforeEach(() => {
     store.threads = [];
     store.loadingHistory = false;
-    store.server.workspace = rootPath;
+    store.server.startupWorkspace = rootPath;
+    store.workspace = null;
     store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();

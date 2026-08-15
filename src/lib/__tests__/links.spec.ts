@@ -7,12 +7,12 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 vi.mock("../../composables/useCodex", () => ({
   store: reactive({
-    currentThreadCwd: null,
+    currentThreadWorkspace: null,
     server: { workspace: "D:/repo" },
     toast: "",
   }),
   toastError: (e: unknown) => String(e),
-  resolveCwd: () => "D:/repo",
+  resolveSessionWorkspace: () => "D:/repo",
   setToast: (msg: string) => {
     store.toast = msg;
   },

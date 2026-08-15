@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { openNewSession, setToast, toastError } from "../composables/useCodex";
+import {
+  openNewSession,
+  setToast,
+  toastError,
+  workspace,
+} from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
   clearSearch,
@@ -26,7 +31,6 @@ import {
   searchResults,
   searchTerm,
   selectedPath,
-  sessionRoot,
   setSessionFsActive,
   textFileMenuIcon,
   toggleDir,
@@ -453,7 +457,7 @@ async function openProps(entry: FsEntry) {
   propsLoading.value = true;
   try {
     const meta = await invoke<FsEntry>("session_fs_metadata", {
-      root: sessionRoot.value,
+      workspace: workspace.value,
       path: entry.path,
     });
     propsEntry.value = meta;

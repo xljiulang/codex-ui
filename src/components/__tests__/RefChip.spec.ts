@@ -133,7 +133,7 @@ describe("RefChip 自定义悬浮卡片", () => {
   });
 
   it("点击文件 chip 触发 reveal_path（测试钩子）", async () => {
-    store.server.workspace = "D:/repo";
+    store.server.startupWorkspace = "D:/repo";
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = true;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
     const wrapper = mount(RefChip, {

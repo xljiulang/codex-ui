@@ -33,7 +33,7 @@ const mockedListen = vi.mocked(listen);
 const rootPath = "D:\\codex\\demo";
 
 const okStatus: GitStatus = {
-  repoRoot: rootPath,
+  repoWorkspace: rootPath,
   branch: "main",
   hasRemote: true,
   files: [
@@ -71,9 +71,9 @@ function mockWatcherAndDefaults() {
 
 beforeEach(() => {
   store.threads = [];
-  store.server.workspace = rootPath;
-  store.currentThreadCwd = null;
-  store.newChatCwd = null;
+  store.server.startupWorkspace = rootPath;
+  store.currentThreadWorkspace = null;
+  store.newChatWorkspace = null;
   mockedInvoke.mockClear();
   __resetGitChangesForTest();
   __resetSessionFsForTest();
@@ -179,7 +179,7 @@ describe("GitView 文件列表与 diff", () => {
     wrapper.unmount();
   });
 
-  it("有系统图标缓存时文件行渲染图片图标，请求以 repoRoot 为根", async () => {
+  it("有系统图标缓存时文件行渲染图片图标，请求以 repoWorkspace 为根", async () => {
     mockWatcherAndDefaults();
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
@@ -198,7 +198,7 @@ describe("GitView 文件列表与 diff", () => {
       ([cmd]) => cmd === "session_fs_icons",
     );
     expect(iconCall).toBeTruthy();
-    expect((iconCall?.[1] as { root?: string } | undefined)?.root).toBe(
+    expect((iconCall?.[1] as { workspace?: string } | undefined)?.workspace).toBe(
       rootPath,
     );
     const img = wrapper.find(".git-file-icon-img");
@@ -233,7 +233,7 @@ describe("GitView 文件列表与 diff", () => {
     );
     expect(diffCall).toBeTruthy();
     expect(diffCall?.[1]).toEqual({
-      root: rootPath,
+      workspace: rootPath,
       path: "a.txt",
       kind: "modify",
     });
@@ -248,13 +248,13 @@ describe("GitView 文件列表与 diff", () => {
           path: string;
           kind: string;
           diff: string;
-          workspace_root: string;
+          workspace: string;
         };
       }
     ).params;
     expect(params.path).toBe("a.txt");
     expect(params.kind).toBe("modify");
-    expect(params.workspace_root).toBe(rootPath);
+    expect(params.workspace).toBe(rootPath);
     expect(params.diff).toContain("@@");
     expect(
       tabs.some((t) => t.kind === "diff" && t.path === "a.txt"),
@@ -300,9 +300,9 @@ describe("GitView 文件列表与 diff", () => {
 describe("GitView 分支管理", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
   });
@@ -560,9 +560,9 @@ describe("GitView 分支管理", () => {
 describe("GitView 提交历史", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
   });
@@ -751,9 +751,9 @@ describe("GitView 提交历史", () => {
 describe("GitView 分区折叠", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.toast = "";
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
@@ -897,9 +897,9 @@ describe("GitView 分区折叠", () => {
 describe("GitView 变更文件右键菜单", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
@@ -1012,13 +1012,13 @@ describe("GitView 变更文件右键菜单", () => {
           path: string;
           kind: string;
           diff: string;
-          workspace_root: string;
+          workspace: string;
         };
       }
     ).params;
     expect(params.path).toBe("a.txt");
     expect(params.kind).toBe("modify");
-    expect(params.workspace_root).toBe(rootPath);
+    expect(params.workspace).toBe(rootPath);
     expect(params.diff).toContain("@@");
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
@@ -1038,7 +1038,7 @@ describe("GitView 变更文件右键菜单", () => {
       ([cmd]) => cmd === "git_changes_stage",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "a.txt" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "a.txt" });
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
@@ -1062,7 +1062,7 @@ describe("GitView 变更文件右键菜单", () => {
       ([cmd]) => cmd === "git_changes_unstage",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "a.txt" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "a.txt" });
     wrapper.unmount();
   });
 
@@ -1080,7 +1080,7 @@ describe("GitView 变更文件右键菜单", () => {
       ([cmd]) => cmd === "git_changes_ignore",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "b.txt" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "b.txt" });
     wrapper.unmount();
   });
 
@@ -1119,7 +1119,7 @@ describe("GitView 变更文件右键菜单", () => {
       ([cmd]) => cmd === "git_changes_restore",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "a.txt" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "a.txt" });
     wrapper.unmount();
   });
 
@@ -1140,7 +1140,7 @@ describe("GitView 变更文件右键菜单", () => {
       ([cmd]) => cmd === "git_changes_delete",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "b.txt" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "b.txt" });
     wrapper.unmount();
   });
 
@@ -1166,16 +1166,16 @@ describe("GitView 变更文件右键菜单", () => {
 describe("GitView 变更文件树形目录", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
   });
 
   const treeStatus: GitStatus = {
-    repoRoot: rootPath,
+    repoWorkspace: rootPath,
     branch: "main",
     hasRemote: true,
     files: [
@@ -1417,7 +1417,7 @@ describe("GitView 变更文件树形目录", () => {
       ([cmd]) => cmd === "git_changes_stage",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "src2" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "src2" });
     wrapper.unmount();
   });
 
@@ -1450,7 +1450,7 @@ describe("GitView 变更文件树形目录", () => {
       ([cmd]) => cmd === "git_changes_restore",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "src" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "src" });
     wrapper.unmount();
   });
 
@@ -1468,7 +1468,7 @@ describe("GitView 变更文件树形目录", () => {
       ([cmd]) => cmd === "git_changes_ignore",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, path: "src" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, path: "src" });
     wrapper.unmount();
   });
 
@@ -1497,9 +1497,9 @@ describe("GitView 变更文件树形目录", () => {
 describe("GitView 提交", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -1507,7 +1507,7 @@ describe("GitView 提交", () => {
   });
 
   const stagedStatus: GitStatus = {
-    repoRoot: rootPath,
+    repoWorkspace: rootPath,
     branch: "main",
     hasRemote: true,
     files: [
@@ -1550,7 +1550,7 @@ describe("GitView 提交", () => {
       ([cmd]) => cmd === "git_changes_commit",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, message: "feat: 提交 a" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, message: "feat: 提交 a" });
     expect(
       (wrapper.find(".git-commit-input").element as HTMLTextAreaElement).value,
     ).toBe("");
@@ -1617,9 +1617,9 @@ describe("GitView 提交", () => {
 describe("GitView 拉取", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -1687,7 +1687,7 @@ describe("GitView 拉取", () => {
       ([cmd]) => cmd === "git_changes_pull",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath });
+    expect(call?.[1]).toEqual({ workspace: rootPath });
     expect(store.toast).toBe("已快进更新到远端 origin/main");
     wrapper.unmount();
   });
@@ -1746,9 +1746,9 @@ describe("GitView 拉取", () => {
 describe("GitView 推送", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -1778,7 +1778,7 @@ describe("GitView 推送", () => {
       ([cmd]) => cmd === "git_changes_push",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath });
+    expect(call?.[1]).toEqual({ workspace: rootPath });
     expect(store.toast).toBe("已推送到 origin/main");
     wrapper.unmount();
   });
@@ -1854,9 +1854,9 @@ describe("GitView 推送", () => {
 describe("GitView 状态字母与全部暂存/取消暂存", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -1864,7 +1864,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
   });
 
   const letterStatus: GitStatus = {
-    repoRoot: rootPath,
+    repoWorkspace: rootPath,
     branch: "main",
     hasRemote: true,
     files: [
@@ -1878,7 +1878,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
   };
 
   const stagedStatus: GitStatus = {
-    repoRoot: rootPath,
+    repoWorkspace: rootPath,
     branch: "main",
     hasRemote: true,
     files: [
@@ -1950,7 +1950,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
       ([cmd]) => cmd === "git_changes_stage_all",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath });
+    expect(call?.[1]).toEqual({ workspace: rootPath });
     wrapper.unmount();
   });
 
@@ -1970,7 +1970,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
       ([cmd]) => cmd === "git_changes_unstage_all",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath });
+    expect(call?.[1]).toEqual({ workspace: rootPath });
     wrapper.unmount();
   });
 
@@ -2007,9 +2007,9 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
 describe("GitView 远端管理", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -2067,7 +2067,9 @@ describe("GitView 远端管理", () => {
       ([cmd]) => cmd === "git_changes_remotes",
     );
     expect(call).toBeTruthy();
-    expect((call?.[1] as { path?: string } | undefined)?.path).toBe(rootPath);
+    expect((call?.[1] as { workspace?: string } | undefined)?.workspace).toBe(
+      rootPath,
+    );
     expect(wrapper.find(".git-remote-name").text()).toContain("origin");
     expect(wrapper.find(".git-remote-badge").exists()).toBe(true);
     expect(wrapper.find(".git-remote-url").text()).toContain("github.com/x/y.git");
@@ -2106,7 +2108,7 @@ describe("GitView 远端管理", () => {
     );
     expect(call).toBeTruthy();
     expect(call?.[1]).toEqual({
-      root: rootPath,
+      workspace: rootPath,
       name: "upstream",
       url: "https://example.com/u.git",
     });
@@ -2173,7 +2175,7 @@ describe("GitView 远端管理", () => {
       ([cmd]) => cmd === "git_changes_remote_switch_upstream",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, remote: "upstream" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, remote: "upstream" });
     expect(store.toast).toContain("已将当前分支上游切换到 upstream");
     const badgeRow = wrapper.find(".git-remote-badge").element.closest(
       ".git-remote-row",
@@ -2211,7 +2213,7 @@ describe("GitView 远端管理", () => {
       ([cmd]) => cmd === "git_changes_remote_remove",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, name: "origin" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, name: "origin" });
     expect(store.toast).toContain("已删除远端 origin");
     wrapper.unmount();
   });
@@ -2220,9 +2222,9 @@ describe("GitView 远端管理", () => {
 describe("GitView 远程分支管理", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.workspace = rootPath;
-    store.currentThreadCwd = null;
-    store.newChatCwd = null;
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -2323,7 +2325,7 @@ describe("GitView 远程分支管理", () => {
     );
     expect(checkoutCall).toBeTruthy();
     expect(checkoutCall?.[1]).toEqual({
-      root: rootPath,
+      workspace: rootPath,
       remoteBranch: "origin/feature",
     });
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
@@ -2350,7 +2352,7 @@ describe("GitView 远程分支管理", () => {
       ([cmd]) => cmd === "git_changes_branch_switch",
     );
     expect(switchCall).toBeTruthy();
-    expect(switchCall?.[1]).toEqual({ path: rootPath, name: "dev" });
+    expect(switchCall?.[1]).toEqual({ workspace: rootPath, name: "dev" });
     expect(store.toast).toContain("已切换到本地分支 dev");
     wrapper.unmount();
   });
@@ -2368,7 +2370,7 @@ describe("GitView 远程分支管理", () => {
       ([cmd]) => cmd === "git_changes_remote_fetch",
     );
     expect(call).toBeTruthy();
-    expect(call?.[1]).toEqual({ root: rootPath, remote: "origin" });
+    expect(call?.[1]).toEqual({ workspace: rootPath, remote: "origin" });
     expect(store.toast).toContain("已拉取远端更新");
     expect(
       wrapper.findAll(".git-remote-branch-name").map((n) => n.text()),
@@ -2407,7 +2409,7 @@ describe("GitView 远程分支管理", () => {
     );
     expect(call).toBeTruthy();
     expect(call?.[1]).toEqual({
-      root: rootPath,
+      workspace: rootPath,
       remoteBranch: "origin/main",
     });
     expect(store.toast).toContain("已删除远程分支 origin/main");

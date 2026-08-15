@@ -1,7 +1,7 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { resolveCwd, setToast, store, toastError } from "./useCodex";
+import { setToast, store, toastError, workspace } from "./useCodex";
 import { openFileTab, openPreviewTab } from "./useEditorTabs";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
@@ -20,9 +20,6 @@ import {
 const SEARCH_LIMIT = 200;
 /** 图标缓存上限：超限按插入顺序淘汰最旧 */
 const ICON_CACHE_MAX = 1000;
-
-/** 当前会话工作目录：统一走 resolveCwd 规范优先级 */
-export const sessionRoot = computed(() => resolveCwd());
 
 export const rootEntry = ref<FsEntry | null>(null);
 export const rootError = ref("");
@@ -105,7 +102,7 @@ function setIconCache(key: string, value: string | null) {
  */
 export async function ensureEntryIcons(
   entries: FsEntry[],
-  root: string = sessionRoot.value,
+  root: string = workspace.value,
 ): Promise<void> {
   if (!root || !entries.length) return;
   const byKey = new Map<string, FsEntry>();
@@ -122,7 +119,7 @@ export async function ensureEntryIcons(
     requests.push({ path: e.path });
   }
   try {
-    const results = await invoke<IconResult[]>("session_fs_icons", { root, requests });
+    const results = await invoke<IconResult[]>("session_fs_icons", { workspace: root, requests });
     for (const r of results) {
       const key = pathToKey.get(r.path);
       if (key) setIconCache(key, r.dataUri);
@@ -141,7 +138,7 @@ let textFileIconTask: Promise<void> | null = null;
 
 /** 按 .txt 扩展名取一次系统图标并写入缓存（复用 ext:.txt 键，.txt 文件行/标签同步受益） */
 export async function ensureTextFileIcon(): Promise<void> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root || iconCache.has("ext:.txt")) return;
   if (textFileIconTask) return textFileIconTask;
   textFileIconTask = (async () => {
@@ -168,7 +165,7 @@ export function textFileMenuIcon(): string | undefined {
 /** 兜底：从后端直接取启动工作目录（store 尚未就绪时用） */
 async function resolveFallbackRoot(): Promise<string> {
   try {
-    const w = await invoke<string>("workspace_dir");
+    const w = await invoke<string>("startup_workspace");
     if (w && w.trim()) return w.trim();
   } catch {
     // 忽略，沿用空根
@@ -178,13 +175,13 @@ async function resolveFallbackRoot(): Promise<string> {
 
 /** 拉取一个目录的直接子项（懒加载；已缓存且非强制时直接返回） */
 export async function loadDir(path: string, force = false): Promise<void> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   if (!force && childrenByPath[path] !== undefined) return;
   loadingByPath[path] = true;
   try {
     childrenByPath[path] = await invoke<FsEntry[]>("session_fs_list", {
-      root,
+      workspace: root,
       dir: path,
     });
   } catch (e) {
@@ -201,7 +198,7 @@ async function loadRoot(root: string) {
   rootError.value = "";
   try {
     rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
-      root,
+      workspace: root,
       path: root,
     });
     expanded.add(root);
@@ -224,7 +221,7 @@ export function toggleDir(path: string) {
 
 /** 刷新根 + 所有已加载目录，保留展开状态 */
 export async function refreshAll() {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   if (searchActive.value) {
     await runSearchNow();
@@ -233,7 +230,7 @@ export async function refreshAll() {
   loadingRoot.value = true;
   try {
     rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
-      root,
+      workspace: root,
       path: root,
     });
     expanded.add(root);
@@ -260,13 +257,13 @@ export async function runSearchNow() {
     searching.value = false;
     return;
   }
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   const seq = ++searchSeq;
   searching.value = true;
   try {
     const res = await invoke<FsEntry[]>("session_fs_search", {
-      root,
+      workspace: root,
       query: q,
       limit: SEARCH_LIMIT,
     });
@@ -295,7 +292,7 @@ export function clearSearch() {
  * expandTarget=true 时目标目录自身也展开（搜索结果点击目录用）。
  */
 async function revealAbsPath(absPath: string, expandTarget: boolean): Promise<void> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root || !absPath) return;
   const norm = absPath.replace(/\//g, "\\");
   if (!isPathUnderRoot(root, norm)) return;
@@ -340,7 +337,7 @@ async function readClipboardPaths(): Promise<string[]> {
 
 /** 把内部复制记录（或系统剪贴板文件）粘贴进目标目录 */
 export async function pasteInto(targetDir: string) {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   const sources = copyBuffer.value.length
     ? [...copyBuffer.value]
@@ -351,7 +348,7 @@ export async function pasteInto(targetDir: string) {
   }
   try {
     const created = await invoke<FsEntry[]>("session_fs_paste", {
-      root,
+      workspace: root,
       destDir: targetDir,
       sources,
     });
@@ -372,11 +369,11 @@ export async function pasteAvailable(): Promise<boolean> {
 
 /** 在目录下新建文本文件（唯一命名由后端保证），成功后刷新并返回条目；失败返回 null */
 export async function createTextFile(dir: string): Promise<FsEntry | null> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return null;
   try {
     const created = await invoke<FsEntry>("session_fs_create_file", {
-      root,
+      workspace: root,
       dir,
     });
     setToast(`已创建「${created.name}」`);
@@ -390,11 +387,11 @@ export async function createTextFile(dir: string): Promise<FsEntry | null> {
 
 /** 在目录下新建文件夹（唯一命名由后端保证），成功后刷新并返回条目；失败返回 null */
 export async function createFolder(dir: string): Promise<FsEntry | null> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return null;
   try {
     const created = await invoke<FsEntry>("session_fs_create_dir", {
-      root,
+      workspace: root,
       dir,
     });
     setToast(`已创建「${created.name}」`);
@@ -407,10 +404,10 @@ export async function createFolder(dir: string): Promise<FsEntry | null> {
 }
 
 export async function renameEntry(path: string, newName: string) {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   try {
-    await invoke<FsEntry>("session_fs_rename", { root, path, newName });
+    await invoke<FsEntry>("session_fs_rename", { workspace: root, path, newName });
     await refreshAll();
   } catch (e) {
     setToast(toastError(e));
@@ -418,10 +415,10 @@ export async function renameEntry(path: string, newName: string) {
 }
 
 export async function deleteEntry(path: string) {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   try {
-    await invoke("session_fs_delete", { root, path });
+    await invoke("session_fs_delete", { workspace: root, path });
     await refreshAll();
   } catch (e) {
     setToast(toastError(e));
@@ -430,10 +427,10 @@ export async function deleteEntry(path: string) {
 
 /** 树内拖拽移动：把 src 移动到 destDir 目录下；成功后刷新并提示，返回是否成功 */
 export async function moveEntry(src: string, destDir: string): Promise<boolean> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return false;
   try {
-    await invoke<FsEntry>("session_fs_move", { root, src, destDir });
+    await invoke<FsEntry>("session_fs_move", { workspace: root, src, destDir });
     const name = src.split(/[\\/]/).pop() ?? src;
     setToast(`已移动「${name}」`);
     await refreshAll();
@@ -450,21 +447,21 @@ export function revealInExplorer(path: string) {
 
 /** 应用内打开文本文件：在主窗口左侧编辑器区打开/激活一个文件标签 */
 export function openTextEditor(entry: FsEntry) {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   void openFileTab(root, entry.path);
 }
 
 /** 应用内打开 PDF 预览：在主窗口左侧编辑器区打开/激活 PDF 预览标签 */
 export function openPdfPreview(entry: FsEntry) {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   void openPreviewTab("pdf", root, entry.path);
 }
 
 /** 应用内打开图像预览：在主窗口左侧编辑器区打开/激活图像预览标签 */
 export function openImagePreview(entry: FsEntry) {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return;
   void openPreviewTab("image", root, entry.path);
 }
@@ -476,11 +473,11 @@ export function openImagePreview(entry: FsEntry) {
 export async function probeTextEntry(
   entry: FsEntry,
 ): Promise<boolean | null> {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (!root) return null;
   try {
     return await invoke<boolean>("session_fs_probe_text", {
-      root,
+      workspace: root,
       path: entry.path,
     });
   } catch (e) {
@@ -516,7 +513,7 @@ function isPathUnderRoot(root: string, path: string): boolean {
 export async function openPathInApp(path: string): Promise<boolean> {
   const testWin = window as unknown as { __CODEX_UI_TEST__?: boolean };
   if (testWin.__CODEX_UI_TEST__) return false;
-  const session = sessionRoot.value;
+  const session = workspace.value;
   if (!session) return false;
   const underSession = isPathUnderRoot(session, path);
   const root = underSession ? session : dirNameOf(path);
@@ -535,7 +532,7 @@ export async function openPathInApp(path: string): Promise<boolean> {
   }
   try {
     const isText = await invoke<boolean>("session_fs_probe_text", {
-      root,
+      workspace: root,
       path: relPath,
     });
     if (!isText) return false;
@@ -562,7 +559,7 @@ export function addAsAttachment(entry: FsEntry) {
 }
 
 async function syncWatcher() {
-  const root = sessionRoot.value;
+  const root = workspace.value;
   if (active && root) {
     if (!unlistenFsEvent) {
       try {
@@ -574,7 +571,7 @@ async function syncWatcher() {
       }
     }
     try {
-      await invoke("session_fs_watch_start", { root });
+      await invoke("session_fs_watch_start", { workspace });
       watcherStarted = true;
     } catch (e) {
       setToast(toastError(e));
@@ -593,16 +590,16 @@ async function syncWatcher() {
   }
 }
 
-/** 激活资源 Tab：解析根目录（含 workspace_dir 兜底）后加载树 */
+/** 激活资源 Tab：解析工作区（含 startup_workspace 兜底）后加载树 */
 async function activate() {
-  const root = sessionRoot.value || (await resolveFallbackRoot());
+  const root = workspace.value || (await resolveFallbackRoot());
   if (!root) {
     rootError.value = "暂无工作目录";
     return;
   }
-  if (!sessionRoot.value) {
+  if (!workspace.value) {
     // 兜底结果回写全局，让头部等其它读取点保持一致
-    store.server.workspace = root;
+    store.server.startupWorkspace = root;
   }
   // 预取「新建文本文件」菜单的系统 .txt 图标（写 ext:.txt 缓存）
   void ensureTextFileIcon();
@@ -624,7 +621,7 @@ export function setSessionFsActive(v: boolean) {
 }
 
 // 根目录切换（切换会话/新建会话选目录）：重置并重新加载，监听跟随新根
-watch(sessionRoot, (r, old) => {
+watch(workspace, (r, old) => {
   if (r === old) return;
   if (!active) return;
   if (r) {

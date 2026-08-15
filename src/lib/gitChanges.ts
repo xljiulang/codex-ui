@@ -22,7 +22,7 @@ export interface GitFile {
 
 export interface GitStatus {
   /** 仓库根目录（Windows 反斜杠路径） */
-  repoRoot: string;
+  repoWorkspace: string;
   /** 当前分支名；游离 HEAD 时为 "HEAD" */
   branch: string;
   /** 仓库是否配置了任意远端（拉取/推送可用性的前置条件） */
