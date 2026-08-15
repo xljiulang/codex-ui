@@ -13,6 +13,7 @@ import { copyText } from "../lib/clipboard";
 import { formatDoc, isFormattablePath } from "../lib/codeFormat";
 import { exportMarkdownToPdf } from "../lib/pdfExport";
 import MarkdownText from "./MarkdownText.vue";
+import ContextMenu from "./ContextMenu.vue";
 import {
   ICON_COPY,
   ICON_CUT,
@@ -364,23 +365,12 @@ onBeforeUnmount(() => {
       <span>{{ tab.eol === "\r\n" ? "CRLF" : "LF" }}</span>
       <span class="text-editor-status-save">{{ tab.status }}</span>
     </div>
-    <div
+    <ContextMenu
       v-if="ctxMenu"
-      class="ctx-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
-    >
-      <button
-        v-for="it in ctxMenu.items"
-        :key="it.label"
-        class="ctx-menu-item"
-        @click="it.action(); ctxMenu = null"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="it.icon" fill-rule="evenodd" />
-        </svg>
-        <span>{{ it.label }}</span>
-      </button>
-    </div>
+      :items="ctxMenu.items"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      @close="ctxMenu = null"
+    />
   </div>
 </template>

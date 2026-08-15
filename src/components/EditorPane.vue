@@ -7,6 +7,7 @@ import {
   watch,
 } from "vue";
 import ChatView from "./ChatView.vue";
+import ContextMenu from "./ContextMenu.vue";
 import EditorTabBar from "./EditorTabBar.vue";
 import {
   activeTab,
@@ -298,35 +299,12 @@ function openAddMenu(e: MouseEvent) {
         </div>
       </div>
     </div>
-    <div
+    <ContextMenu
       v-if="ctxMenu"
-      class="ctx-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
-    >
-      <button
-        v-for="it in ctxMenu.items"
-        :key="it.label"
-        class="ctx-menu-item"
-        @click="it.action(); ctxMenu = null"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          :class="{ 'ctx-session-logo': it.paths }"
-        >
-          <template v-if="it.paths">
-            <path
-              v-for="p in it.paths"
-              :key="p.d"
-              :d="p.d"
-              :class="{ 'logo-c': p.accent }"
-            />
-          </template>
-          <path v-else :d="it.icon" fill-rule="evenodd" />
-        </svg>
-        <span>{{ it.label }}</span>
-      </button>
-    </div>
+      :items="ctxMenu.items"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      @close="ctxMenu = null"
+    />
   </div>
 </template>

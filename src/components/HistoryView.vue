@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ContextMenu from "./ContextMenu.vue";
 import {
   computed,
   onBeforeUnmount,
@@ -357,37 +358,13 @@ onBeforeUnmount(() => {
         加载中…
       </div>
     </div>
-    <div
+    <ContextMenu
       v-if="ctxMenu"
-      class="ctx-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
-    >
-      <button
-        v-for="it in ctxMenu.items"
-        :key="it.label"
-        class="ctx-menu-item"
-        :class="{ danger: it.danger }"
-        @click="it.action(); ctxMenu = null"
-      >
-        <svg
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-          :class="{ 'ctx-session-logo': it.paths }"
-        >
-          <template v-if="it.paths">
-            <path
-              v-for="p in it.paths"
-              :key="p.d"
-              :d="p.d"
-              :class="{ 'logo-c': p.accent }"
-            />
-          </template>
-          <path v-else :d="it.icon" />
-        </svg>
-        <span>{{ it.label }}</span>
-      </button>
-    </div>
+      :items="ctxMenu.items"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      @close="ctxMenu = null"
+    />
     <div v-if="confirmDelete" class="modal-mask">
       <div ref="confirmEl" class="modal" tabindex="-1">
         <div class="modal-head">

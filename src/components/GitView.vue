@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import ContextMenu from "./ContextMenu.vue";
 import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
@@ -550,26 +551,14 @@ function toggleDirRow(node: GitDirNode) {
       </div>
     </template>
 
-    <div
+    <ContextMenu
       v-if="ctxMenu"
-      class="ctx-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
-    >
-      <button
-        v-for="it in ctxMenu.items"
-        :key="it.label"
-        class="ctx-menu-item"
-        :class="{ danger: it.danger }"
-        :disabled="gitActionBusy"
-        @click="it.action(); ctxMenu = null"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="it.icon" />
-        </svg>
-        <span>{{ it.label }}</span>
-      </button>
-    </div>
+      :items="ctxMenu.items"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      :disabled="gitActionBusy"
+      @close="ctxMenu = null"
+    />
 
     <div v-if="confirmInit" class="modal-mask" @click.self="confirmInit = false">
       <div class="modal" tabindex="-1">
