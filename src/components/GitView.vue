@@ -27,6 +27,12 @@ import {
   type GitPushResult,
   type GitStatus,
 } from "../lib/gitChanges";
+import {
+  buildGitTree,
+  flattenRows,
+  type GitDirNode,
+  type GitFileNode,
+} from "../lib/gitTree";
 import { formatDateTime } from "../lib/format";
 import {
   ICON_ARROW_DOWN,
@@ -103,34 +109,6 @@ const {
 } = useActionMenu({ width: 190, scrollScope: ".git-view" });
 const gitActionBusy = ref(false);
 
-interface GitFileNode {
-  kind: "file";
-  name: string;
-  relPath: string;
-  depth: number;
-  file: GitFile;
-}
-
-interface GitDirNode {
-  kind: "dir";
-  name: string;
-  relPath: string;
-  depth: number;
-  collapsed: boolean;
-  childCount: number;
-  hasStaged: boolean;
-  hasUnstaged: boolean;
-  hasUntracked: boolean;
-  children: GitTreeNode[];
-}
-
-type GitTreeNode = GitFileNode | GitDirNode;
-
-interface DirAcc {
-  dirs: Map<string, DirAcc>;
-  files: GitFile[];
-}
-
 /** 手动折叠的目录集合；未记录 = 默认展开，折叠状态跨刷新保留 */
 const collapsedDirs = reactive(new Set<string>());
 
@@ -147,90 +125,18 @@ function toggleSection(key: string) {
   else collapsedSections.add(key);
 }
 
-function buildGitTree(files: GitFile[]): GitTreeNode[] {
-  const root: DirAcc = { dirs: new Map(), files: [] };
-  for (const f of files) {
-    const parts = f.path.split("/");
-    let acc = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const d = parts[i];
-      let next = acc.dirs.get(d);
-      if (!next) {
-        next = { dirs: new Map(), files: [] };
-        acc.dirs.set(d, next);
-      }
-      acc = next;
-    }
-    acc.files.push(f);
-  }
-  return dirNodes(root, "", 0);
-}
-
-function dirNodes(acc: DirAcc, relPath: string, depth: number): GitTreeNode[] {
-  const nodes: GitTreeNode[] = [];
-  for (const name of [...acc.dirs.keys()].sort((a, b) => a.localeCompare(b))) {
-    const childRel = relPath ? `${relPath}/${name}` : name;
-    const children = dirNodes(acc.dirs.get(name)!, childRel, depth + 1);
-    const childCount = children.reduce(
-      (n, c) => n + (c.kind === "dir" ? c.childCount : 1),
-      0,
-    );
-    const hasStaged = children.some((c) =>
-      c.kind === "dir" ? c.hasStaged : c.file.staged,
-    );
-    const hasUnstaged = children.some((c) =>
-      c.kind === "dir" ? c.hasUnstaged : !c.file.staged,
-    );
-    const hasUntracked = children.some((c) =>
-      c.kind === "dir" ? c.hasUntracked : c.file.status === "untracked",
-    );
-    nodes.push({
-      kind: "dir",
-      name,
-      relPath: childRel,
-      depth,
-      collapsed: collapsedDirs.has(childRel),
-      childCount,
-      hasStaged,
-      hasUnstaged,
-      hasUntracked,
-      children,
-    });
-  }
-  const files = acc.files
-    .slice()
-    .sort((a, b) => a.path.localeCompare(b.path));
-  for (const f of files) {
-    nodes.push({
-      kind: "file",
-      name: f.path.split("/").pop() ?? f.path,
-      relPath: f.path,
-      depth,
-      file: f,
-    });
-  }
-  return nodes;
-}
-
-function flattenRows(nodes: GitTreeNode[]): GitTreeNode[] {
-  const rows: GitTreeNode[] = [];
-  for (const n of nodes) {
-    rows.push(n);
-    if (n.kind === "dir" && !n.collapsed) {
-      rows.push(...flattenRows(n.children));
-    }
-  }
-  return rows;
-}
-
 const worktreeFiles = computed(() =>
   gitStatus.value ? gitStatus.value.files.filter((f) => f.worktree) : [],
 );
 const stagedFiles = computed(() =>
   gitStatus.value ? gitStatus.value.files.filter((f) => f.staged) : [],
 );
-const worktreeRows = computed(() => flattenRows(buildGitTree(worktreeFiles.value)));
-const stagedRows = computed(() => flattenRows(buildGitTree(stagedFiles.value)));
+const worktreeRows = computed(() =>
+  flattenRows(buildGitTree(worktreeFiles.value, collapsedDirs)),
+);
+const stagedRows = computed(() =>
+  flattenRows(buildGitTree(stagedFiles.value, collapsedDirs)),
+);
 const stagedCount = computed(() => stagedFiles.value.length);
 /** 更改总数（每个文件计一次，含已暂存 + 工作区 + 未跟踪） */
 const changeCount = computed(() => gitStatus.value?.files.length ?? 0);
