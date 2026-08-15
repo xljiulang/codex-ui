@@ -1,15 +1,31 @@
 pub mod codex;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri::utils::config::Color;
 
 use codex::app_server::CodexServer;
 
+/// 主窗口一次性显示守卫：页面加载完成后首次触发，避免重复导航反复处理
+static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
+
 pub fn run() {
     tauri::Builder::default()
+        .on_page_load(|webview, payload| {
+            // 主窗口页面加载完成（Vue 已挂载、加载动画已渲染）后再显示，
+            // 避免窗体到 WebView 初始化完成之间的默认色闪屏。
+            if webview.label() == "main"
+                && payload.event() == PageLoadEvent::Finished
+                && !MAIN_WINDOW_SHOWN.swap(true, Ordering::SeqCst)
+            {
+                let _ = webview.window().show();
+            }
+        })
         .register_asynchronous_uri_scheme_protocol("print-export", |ctx, request, responder| {
             // 隐藏打印窗口经 print-export://localhost/<id> 加载暂存的打印 HTML
             let id = request.uri().path().trim_start_matches('/').to_string();
@@ -144,12 +160,22 @@ pub fn run() {
                 .min_inner_size(400.0, 560.0)
                 .resizable(true)
                 .center()
+                .visible(false)
                 .background_color(Color(r, g, b, a))
                 .build()
                 .map_err(|e| {
                     eprintln!("创建主窗口失败: {e}");
                     format!("创建主窗口失败: {e}")
                 })?;
+
+            // 兜底：页面加载失败/卡死时，窗口也能在 5 秒后出现（对已显示窗口是空操作）
+            let fallback_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(5));
+                if let Some(win) = fallback_handle.get_webview_window("main") {
+                    let _ = win.show();
+                }
+            });
 
             let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
