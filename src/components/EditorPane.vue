@@ -14,10 +14,10 @@ import {
   activeTabId,
   activateTab,
   cancelClose,
+  closeAnyTab,
   closeAllOtherTabs,
   closeTabsToLeft,
   closeTabsToRight,
-  closeTab,
   discardTabAndClose,
   pendingCloseId,
   saveTabAndClose,
@@ -40,14 +40,13 @@ import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
   closeAllSessionTabs,
   closeOtherSessionTabs,
-  closeSessionTab,
   newEmptyChat,
-  sessionTabTitle,
   setToast,
   store,
   switchSessionTab,
   type SessionTab,
 } from "../composables/useCodex";
+import { isTabWorking, TabIcon, TabKind } from "../lib/tabs";
 import { relPathOf } from "../lib/format";
 import {
   ICON_CLOSE_ALL,
@@ -142,7 +141,7 @@ const pendingTab = computed<EditorTab | null>(
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
 function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEntry {
   const root =
-    tab.kind === "file" ? tab.workspace : tab.kind === "diff" ? tab.workspace : tab.workspace;
+    tab.kind === TabKind.File ? tab.workspace : tab.kind === TabKind.Diff ? tab.workspace : tab.workspace;
   return {
     name: tab.title,
     path: tab.path,
@@ -155,13 +154,14 @@ function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEn
   };
 }
 
-function tabIcon(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string {
+function tabIcon(tab: EditorTab): string {
+  if (tab.kind === TabKind.Terminal) return "";
   return iconFor(tabToEntry(tab)) ?? "";
 }
 
 /** 会话标签悬停提示：进行中显示“会话（进行中）” */
 function sessionTabTooltip(tab: SessionTab): string {
-  return tab.turnActive ? "会话（进行中）" : "会话";
+  return isTabWorking(tab) ? "会话（进行中）" : "会话";
 }
 
 /** 会话标签待处理交互计数：绑定线程读标签记录，新对话（无线程）回退全局 */
@@ -174,9 +174,9 @@ function sessionTabPending(tab: SessionTab): number {
  * 文件/diff/预览显示相对工作区根的路径；终端不显示 ToolTip。
  */
 function titleTooltip(tab: EditorTab): string {
-  if (tab.kind === "terminal") return "";
+  if (tab.kind === TabKind.Terminal) return "";
   const root =
-    tab.kind === "file" ? tab.workspace : tab.kind === "diff" ? tab.workspace : tab.workspace;
+    tab.kind === TabKind.File ? tab.workspace : tab.kind === TabKind.Diff ? tab.workspace : tab.workspace;
   const path = relPathOf(root, tab.path);
   return tab.title !== path ? path : "";
 }
@@ -184,9 +184,9 @@ function titleTooltip(tab: EditorTab): string {
 /** 文件型标签（file/preview/diff）的磁盘绝对路径：兼容相对路径与工作区外绝对路径 */
 function tabAbsPath(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string {
   const root =
-    tab.kind === "file"
+    tab.kind === TabKind.File
       ? tab.workspace
-      : tab.kind === "diff"
+      : tab.kind === TabKind.Diff
         ? tab.workspace
         : tab.workspace;
   return /^[A-Za-z]:[\\/]/.test(tab.path) ? tab.path : joinFsPath(root, tab.path);
@@ -260,7 +260,7 @@ function openEditorTabMenu(e: MouseEvent, tab: EditorTab) {
     });
   }
   // 文件/预览标签（含对话打开的工作区外文件）可直达所在目录，置于菜单末尾
-  if (tab.kind === "file" || tab.kind === "preview") {
+  if (tab.kind === TabKind.File || tab.kind === TabKind.Preview) {
     items.push({
       label: "在资源管理器中打开",
       icon: ICON_REVEAL,
@@ -301,9 +301,9 @@ watch(
   () => {
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of tabs) {
-      if (tab.kind === "terminal") continue;
+      if (tab.kind === TabKind.Terminal) continue;
       const root =
-        tab.kind === "file" ? tab.workspace : tab.kind === "diff" ? tab.workspace : tab.workspace;
+        tab.kind === TabKind.File ? tab.workspace : tab.kind === TabKind.Diff ? tab.workspace : tab.workspace;
       const list = byRoot.get(root) ?? [];
       list.push(tabToEntry(tab));
       byRoot.set(root, list);
@@ -321,7 +321,7 @@ watch(
  */
 watch(activeTab, (tab) => {
   store.workspace = tab ? tab.workspace : null;
-  if (!tab || tab.kind === "terminal") return;
+  if (!tab || tab.kind === TabKind.Terminal) return;
   void revealAbsPathInTree(tabAbsPath(tab));
 });
 
@@ -379,12 +379,12 @@ function onSessionTabClick(id: string) {
             :class="{ active: tab.id === activeTabId }"
             role="tab"
             :aria-selected="tab.id === activeTabId"
-            :aria-label="sessionTabTitle(tab)"
+            :aria-label="tab.title"
             :tabindex="tab.id === activeTabId ? 0 : -1"
             v-tooltip="sessionTabTooltip(tab)"
             @click="onSessionTabClick(tab.id)"
             @contextmenu="openSessionTabMenu($event)"
-            @mousedown.middle.prevent="closeSessionTab(tab.id)"
+            @mousedown.middle.prevent="closeAnyTab(tab)"
           >
             <span class="editor-tab-logo" aria-hidden="true">
               <svg viewBox="0 0 24 24">
@@ -392,9 +392,9 @@ function onSessionTabClick(id: string) {
                 <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
               </svg>
             </span>
-            <span class="editor-tab-label">{{ sessionTabTitle(tab) }}</span>
+            <span class="editor-tab-label">{{ tab.title }}</span>
             <span
-              v-if="tab.turnActive"
+              v-if="isTabWorking(tab)"
               class="editor-tab-run inline"
               aria-hidden="true"
             ></span>
@@ -407,8 +407,8 @@ function onSessionTabClick(id: string) {
             </span>
             <button
               class="editor-tab-close"
-              :aria-label="'关闭会话 ' + sessionTabTitle(tab)"
-              @click.stop="closeSessionTab(tab.id)"
+              :aria-label="'关闭会话 ' + tab.title"
+              @click.stop="closeAnyTab(tab)"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
@@ -423,7 +423,7 @@ function onSessionTabClick(id: string) {
             class="editor-tab"
             :class="{
               active: tab.id === activeTabId,
-              'is-diff': tab.kind === 'diff',
+              'is-diff': tab.kind === TabKind.Diff,
             }"
             role="tab"
             :aria-selected="tab.id === activeTabId"
@@ -431,10 +431,10 @@ function onSessionTabClick(id: string) {
             :tabindex="tab.id === activeTabId ? 0 : -1"
             @click="activateTab(tab.id)"
             @contextmenu="openEditorTabMenu($event, tab)"
-            @mousedown.middle.prevent="closeTab(tab.id)"
+            @mousedown.middle.prevent="closeAnyTab(tab)"
           >
             <span
-              v-if="tab.kind === 'terminal'"
+              v-if="tab.icon === TabIcon.Terminal"
               class="editor-tab-icon"
               aria-hidden="true"
             >
@@ -455,13 +455,7 @@ function onSessionTabClick(id: string) {
               </svg>
             </span>
             <span
-              v-if="
-                tab.kind === 'terminal' &&
-                tab.busy &&
-                !tab.loading &&
-                !tab.exited &&
-                !tab.error
-              "
+              v-if="isTabWorking(tab)"
               class="editor-tab-run inline"
               aria-hidden="true"
             ></span>
@@ -469,20 +463,20 @@ function onSessionTabClick(id: string) {
               {{ tab.title }}
             </span>
             <span
-              v-if="tab.kind === 'file' && tab.dirty"
+              v-if="tab.kind === TabKind.File && tab.dirty"
               class="editor-tab-dirty"
               title="未保存"
             ></span>
-            <span v-else-if="tab.kind === 'diff'" class="editor-tab-kind">
+            <span v-else-if="tab.kind === TabKind.Diff" class="editor-tab-kind">
               {{ diffKindLabel(tab.changeKind) }}
             </span>
-            <span v-else-if="tab.kind === 'preview'" class="editor-tab-kind">
+            <span v-else-if="tab.kind === TabKind.Preview" class="editor-tab-kind">
               预览
             </span>
             <button
               class="editor-tab-close"
               :aria-label="'关闭 ' + tab.title"
-              @click.stop="closeTab(tab.id)"
+              @click.stop="closeAnyTab(tab)"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path

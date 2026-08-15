@@ -68,6 +68,9 @@ function mockBasicHistory() {
 function openTabFor(threadId: string) {
   store.sessionTabs.push({
     id: "s-" + threadId,
+    kind: "chat",
+    title: "会话",
+    icon: "chat",
     threadId,
     name: "",
     origin: "history",
@@ -83,7 +86,7 @@ function openTabFor(threadId: string) {
     followupQueue: [],
     attachments: [],
     planPrompt: null,
-    loadingThread: false,
+    loading: false,
     newChatWorkspace: null,
     interactions: [],
   });
@@ -700,6 +703,9 @@ describe("HistoryView 会话标签联动", () => {
   it("已打开标签的会话行显示「已打开」标记，后台运行中显示呼吸点", async () => {
     store.sessionTabs.push({
       id: "s1",
+      kind: "chat",
+      title: "会话",
+      icon: "chat",
       threadId: "t1",
       name: "",
       origin: "history",
@@ -715,7 +721,7 @@ describe("HistoryView 会话标签联动", () => {
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     });
@@ -732,9 +738,12 @@ describe("HistoryView 会话标签联动", () => {
     wrapper.unmount();
   });
 
-  it("已打开会话行右键菜单不含「关闭标签」与「删除会话」", async () => {
+  it("已打开会话行右键菜单不含「打开」「关闭标签」「删除会话」", async () => {
     store.sessionTabs.push({
       id: "s1",
+      kind: "chat",
+      title: "会话",
+      icon: "chat",
       threadId: "t1",
       name: "",
       origin: "history",
@@ -750,24 +759,26 @@ describe("HistoryView 会话标签联动", () => {
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     });
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper, 0);
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    expect(labels).not.toContain("打开");
     expect(labels).not.toContain("关闭标签");
     expect(labels).not.toContain("删除会话");
-    expect(labels).toEqual(["打开", "重命名", "置顶固定"]);
+    expect(labels).toEqual(["重命名", "置顶固定"]);
     wrapper.unmount();
   });
 
-  it("未打开的会话行右键菜单不含「关闭标签」但含「删除会话」", async () => {
+  it("未打开的会话行右键菜单含「打开」与「删除会话」、不含「关闭标签」", async () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper, 1); // t2 未打开
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).not.toContain("关闭标签");
+    expect(labels).toContain("打开");
     expect(labels).toContain("删除会话");
     wrapper.unmount();
   });

@@ -33,6 +33,7 @@ import {
   friendlyServerMessage,
 } from "../lib/serverMessages";
 import { applyTheme } from "./useTheme";
+import { TabIcon, TabKind, type EditorTabBase } from "../lib/tabs";
 
 const defaultSettings = (): AppSettings => ({
   codex_path: null,
@@ -119,7 +120,10 @@ export interface PlanPrompt {
  * 活动标签的实时状态以 store 的 current* 字段为准（由自动同步 watch 落回本记录）；
  * 切换标签时以本记录恢复 live 字段。消息列表本身按线程存于 itemsByThread，无需复制。
  */
-export interface SessionTab {
+export interface SessionTab extends EditorTabBase {
+  kind: (typeof TabKind)["Chat"];
+  title: string;
+  icon: (typeof TabIcon)["Chat"];
   /** 标签唯一 id（线程绑定前后保持稳定，供编辑器标签 key 使用） */
   id: string;
   /** 绑定的线程 id；一个会话最多对应一个标签（唯一性约束） */
@@ -139,7 +143,7 @@ export interface SessionTab {
   followupQueue: { text: string; attachments: UserInput[] }[];
   attachments: UserInput[];
   planPrompt: PlanPrompt | null;
-  loadingThread: boolean;
+  loading: boolean;
   /** 新建对话时可选的项目目录（null = 使用启动工作目录） */
   newChatWorkspace: string | null;
   /** 该标签待处理的交互（审批/提问/elicitation），按 threadId 路由 */
@@ -213,7 +217,7 @@ export const store = reactive({
   // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
   booting: true,
   loadingHistory: false,
-  loadingThread: false,
+  loading: false,
   busy: false,
   currentModel: "",
   // 进程级设置：权限模式 / 模型 / 推理强度，仅当前运行期有效，不写入配置文件
@@ -263,6 +267,9 @@ function nextSessionTabId(): string {
 function freshSessionTab(): SessionTab {
   return {
     id: nextSessionTabId(),
+    kind: TabKind.Chat,
+    title: "新建会话",
+    icon: TabIcon.Chat,
     threadId: null,
     name: "",
     origin: null,
@@ -278,7 +285,7 @@ function freshSessionTab(): SessionTab {
     followupQueue: [],
     attachments: [],
     planPrompt: null,
-    loadingThread: false,
+    loading: false,
     newChatWorkspace: null,
     interactions: [],
   };
@@ -337,7 +344,7 @@ function restoreSession(tab: SessionTab) {
   store.goalArmed = tab.goalArmed;
   store.threadTokenUsage = tab.threadTokenUsage;
   store.planPrompt = tab.planPrompt;
-  store.loadingThread = tab.loadingThread;
+  store.loading = tab.loading;
   store.newChatWorkspace = tab.newChatWorkspace;
   store.followupQueue = [...tab.followupQueue];
   store.attachments = [...tab.attachments];
@@ -360,10 +367,11 @@ function syncActiveSessionTab() {
   tab.goalArmed = store.goalArmed;
   tab.threadTokenUsage = store.threadTokenUsage;
   tab.planPrompt = store.planPrompt ? { ...store.planPrompt } : null;
-  tab.loadingThread = store.loadingThread;
+  tab.loading = store.loading;
   tab.newChatWorkspace = store.newChatWorkspace;
   tab.followupQueue = [...store.followupQueue];
   tab.attachments = [...store.attachments];
+  tab.title = sessionTabTitle(tab);
 }
 
 /** 乐观复位被停止/关闭的标签回合状态（interrupt 异步完成前先复位展示） */
@@ -704,7 +712,7 @@ watch(
     store.goalArmed,
     store.threadTokenUsage,
     store.planPrompt,
-    store.loadingThread,
+    store.loading,
     store.newChatWorkspace,
     store.followupQueue.length,
     store.attachments.length,
@@ -1332,7 +1340,8 @@ async function newChat(prompt: string, attachments: UserInput[]) {
         tab.workspace = cwd;
         tab.resumedThreadId = threadId;
         tab.newChatWorkspace = null;
-        tab.loadingThread = false;
+        tab.loading = false;
+        tab.title = sessionTabTitle(tab);
       }
       store.itemsByThread[threadId] = [];
       store.activeWorkByThread[threadId] = 0;
@@ -1674,6 +1683,7 @@ export async function executePlan() {
 export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   const tab = freshSessionTab();
   if (cwd) tab.newChatWorkspace = cwd;
+  tab.title = sessionTabTitle(tab);
   store.sessionTabs.push(tab);
   store.activeSessionId = tab.id;
   restoreSession(tab);
@@ -1691,8 +1701,8 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
  */
 async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolean> {
   const isActive = () => store.activeSessionId === tab.id;
-  tab.loadingThread = true;
-  if (isActive()) store.loadingThread = true;
+  tab.loading = true;
+  if (isActive()) store.loading = true;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
   try {
     const res = await invoke<{
@@ -1732,6 +1742,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
       tab.currentTurnId = null;
       tab.threadTokenUsage = null;
       tab.goalArmed = false;
+      tab.title = sessionTabTitle(tab);
     }
     let goalText: string | null = null;
     let goalStatus: GoalStatus | null = null;
@@ -1777,8 +1788,8 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     }
     return false;
   } finally {
-    tab.loadingThread = false;
-    if (isActive()) store.loadingThread = false;
+    tab.loading = false;
+    if (isActive()) store.loading = false;
   }
 }
 
@@ -2277,6 +2288,7 @@ export async function wireEvents() {
       const tab = findSessionTabByThread(p.threadId);
       if (tab && p.threadName) {
         tab.name = p.threadName;
+        tab.title = sessionTabTitle(tab);
         if (store.activeSessionId === tab.id) {
           store.currentThreadName = p.threadName;
         }

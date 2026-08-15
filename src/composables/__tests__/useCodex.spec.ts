@@ -121,10 +121,13 @@ function makeSessionTab(
     followupQueue: [],
     attachments: [],
     planPrompt: null,
-    loadingThread: false,
+    loading: false,
     newChatWorkspace: null,
     interactions: [],
     ...over,
+    kind: "chat",
+    title: "",
+    icon: "chat",
   };
 }
 
@@ -409,6 +412,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     ];
     const tab: SessionTab = {
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: "t1",
       name: "我的标题",
       origin: "history",
@@ -424,7 +430,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     };
@@ -437,6 +443,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     ];
     const tab: SessionTab = {
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: "t1",
       name: "",
       origin: "history",
@@ -452,7 +461,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     };
@@ -462,6 +471,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   it("会话标签标题：无目录回退 workspace 目录名", () => {
     const tab: SessionTab = {
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: null,
       name: "标题",
       origin: null,
@@ -477,7 +489,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     };
@@ -487,6 +499,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   it("会话标签标题：全新标签兜底 目录名 / 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: null,
       name: "",
       origin: null,
@@ -502,7 +517,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     };
@@ -512,6 +527,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   it("会话标签标题：新对话预选目录后为 目录名 / 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: null,
       name: "",
       origin: null,
@@ -527,7 +545,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: "D:/projects/B",
       interactions: [],
     };
@@ -538,6 +556,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.server.startupWorkspace = "";
     const tab: SessionTab = {
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: null,
       name: "",
       origin: null,
@@ -553,7 +574,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     };
@@ -568,6 +589,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.sessionTabs.push({
       id: "s1",
+      kind: "chat",
+      title: "",
+      icon: "chat",
       threadId: "t1",
       name: "",
       origin: "history",
@@ -583,7 +607,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     });
@@ -1097,6 +1121,7 @@ describe("会话标签状态与事件路由", () => {
     store.planPrompt = null;
     store.followupQueue = [];
     store.attachments = [];
+    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -1116,6 +1141,33 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadId = null;
     store.newChatWorkspace = "D:/newchat";
     expect(workspace.value).toBe("D:/newchat");
+  });
+
+  it("会话标签 title 由同步点维护：新建带目录为 目录名 / 新建会话，改名后更新", async () => {
+    store.server.startupWorkspace = "D:/repo";
+    await newEmptyChat("D:/projects/B");
+    expect(store.sessionTabs[0].title).toBe("B / 新建会话");
+
+    await newEmptyChat();
+    const tab = store.sessionTabs[1];
+    expect(tab.title).toBe("repo / 新建会话");
+    store.currentThreadId = "t1";
+    store.currentThreadWorkspace = "D:/repo/sub";
+    store.currentThreadName = "我的标题";
+    await flushPromises();
+    expect(tab.title).toBe("sub / 我的标题");
+  });
+
+  it("会话标签 loading 字段与 live 同步（loadingThread 改名后读写一致）", async () => {
+    await newEmptyChat();
+    const tab = store.sessionTabs[0];
+    expect(tab.loading).toBe(false);
+    store.loading = true;
+    await flushPromises();
+    expect(tab.loading).toBe(true);
+    store.loading = false;
+    await flushPromises();
+    expect(tab.loading).toBe(false);
   });
 
   it("isThreadOpen / isThreadRunning 反映标签打开与运行状态", () => {

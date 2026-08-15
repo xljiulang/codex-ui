@@ -17,7 +17,9 @@ import {
   ensureTerminalListeners,
   releaseTerminal,
 } from "./useTerminalEvents";
-import { askConfirm } from "./useCodex";
+import { askConfirm, closeSessionTab } from "./useCodex";
+import type { SessionTab } from "./useCodex";
+import { TabIcon, TabKind, type EditorTabBase } from "../lib/tabs";
 
 /** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
 interface TextFileContent {
@@ -40,8 +42,8 @@ export interface DiffPreviewParams {
   workspace: string;
 }
 
-export interface FileEditorTab {
-  kind: "file";
+export interface FileEditorTab extends EditorTabBase {
+  kind: (typeof TabKind)["File"];
   id: string;
   workspace: string;
   path: string;
@@ -65,8 +67,8 @@ export interface FileEditorTab {
   wrapCompartment: Compartment | null;
 }
 
-export interface DiffEditorTab {
-  kind: "diff";
+export interface DiffEditorTab extends EditorTabBase {
+  kind: (typeof TabKind)["Diff"];
   id: string;
   path: string;
   /** diff 变化类型：add / delete / modify */
@@ -82,8 +84,8 @@ export interface DiffEditorTab {
   brief: boolean;
 }
 
-export interface PreviewEditorTab {
-  kind: "preview";
+export interface PreviewEditorTab extends EditorTabBase {
+  kind: (typeof TabKind)["Preview"];
   /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显 */
   previewType: PreviewType;
   id: string;
@@ -100,8 +102,8 @@ export interface PreviewEditorTab {
   pageCount: number | null;
 }
 
-export interface TerminalEditorTab {
-  kind: "terminal";
+export interface TerminalEditorTab extends EditorTabBase {
+  kind: (typeof TabKind)["Terminal"];
   id: string;
   /** 终端启动目录（绝对路径） */
   workspace: string;
@@ -153,11 +155,12 @@ let terminalSeq = 0;
 export async function openTerminalTab(workspace: string): Promise<void> {
   const id = `terminal:${++terminalSeq}:${Date.now()}`;
   const tab = reactive({
-    kind: "terminal",
+    kind: TabKind.Terminal,
     id,
     workspace,
     // 终端标签标题固定为 PowerShell，不随工作目录变化；多开时同名
     title: "PowerShell",
+    icon: TabIcon.Terminal,
     loading: true,
     error: "",
     busy: false,
@@ -201,11 +204,12 @@ export async function openFileTab(workspace: string, path: string): Promise<void
   // reactive 的类型会深展开 EditorState，这里用断言还原为标签类型；
   // 运行时编辑器状态在赋值时均已 markRaw，不会被深度代理。
   const tab = reactive({
-    kind: "file",
+    kind: TabKind.File,
     id,
     workspace,
     path,
     title: pathBaseName(path) || path,
+    icon: TabIcon.File,
     loading: true,
     error: "",
     readOnly: false,
@@ -282,7 +286,7 @@ export async function openFileTab(workspace: string, path: string): Promise<void
 /** 保存指定文件标签；成功返回 true 并复位脏标记 */
 export async function saveFileTab(id: string): Promise<boolean> {
   const tab = tabs.find(
-    (t): t is FileEditorTab => t.kind === "file" && t.id === id,
+    (t): t is FileEditorTab => t.kind === TabKind.File && t.id === id,
   );
   if (!tab || !tab.editorState || tab.readOnly || !tab.dirty || tab.saving) {
     return false;
@@ -319,12 +323,13 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
     return;
   }
   const tab = reactive({
-    kind: "diff",
+    kind: TabKind.Diff,
     id,
     path: params.path,
     changeKind: params.kind,
     workspace: params.workspace,
     title: pathBaseName(params.path) || params.path,
+    icon: TabIcon.File,
     loading: true,
     error: "",
     rows: [],
@@ -358,12 +363,13 @@ export async function openPreviewTab(
     return;
   }
   const tab = reactive({
-    kind: "preview",
+    kind: TabKind.Preview,
     previewType: type,
     id,
     workspace,
     path,
     title: pathBaseName(path) || path,
+    icon: TabIcon.File,
     loading: true,
     error: "",
     imageUrl: "",
@@ -391,14 +397,24 @@ export async function openPreviewTab(
 
 /** 释放标签后端资源：终端进程结束（幂等，失败静默） */
 function disposeTab(tab: EditorTab): void {
-  if (tab.kind === "terminal") {
+  if (tab.kind === TabKind.Terminal) {
     void invoke("terminal_kill", { id: tab.id }).catch(() => {});
   }
 }
 
 /** 运行中终端判定：命令执行中（busy）且未退出、无错误（与标签呼吸灯同源） */
 export function isTerminalBusy(tab: EditorTab): boolean {
-  return tab.kind === "terminal" && tab.busy && !tab.exited && !tab.error;
+  return tab.kind === TabKind.Terminal && tab.busy && !tab.exited && !tab.error;
+}
+
+/** 文件是否已打开（存在 workspace+path 相同的文件编辑器或预览标签；diff 不计） */
+export function isFileTabOpen(workspace: string, path: string): boolean {
+  return tabs.some(
+    (t) =>
+      (t.kind === TabKind.File || t.kind === TabKind.Preview) &&
+      t.workspace === workspace &&
+      t.path === path,
+  );
 }
 
 /**
@@ -409,7 +425,7 @@ export function isTerminalBusy(tab: EditorTab): boolean {
 export async function closeTab(id: string): Promise<void> {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
-  if (tab.kind === "file" && tab.dirty) {
+  if (tab.kind === TabKind.File && tab.dirty) {
     pendingCloseId.value = id;
     return;
   }
@@ -424,6 +440,21 @@ export async function closeTab(id: string): Promise<void> {
   }
   disposeTab(tab);
   removeTab(id);
+}
+
+/**
+ * 统一关闭入口（关闭按钮/中键/批量关闭共用）：按 kind 路由——
+ * 会话标签走 closeSessionTab（运行中确认并中断），编辑器标签走 closeTab
+ * （脏文件挂起、运行中终端确认并终止）。
+ */
+export async function closeAnyTab(
+  tab: SessionTab | EditorTab,
+): Promise<void> {
+  if (tab.kind === TabKind.Chat) {
+    await closeSessionTab(tab.id);
+    return;
+  }
+  await closeTab(tab.id);
 }
 
 export function cancelClose(): void {
@@ -452,7 +483,7 @@ function closeTabsMatching(
   let skipped = 0;
   for (const [idx, tab] of [...tabs].entries()) {
     if (!pred(tab, idx)) continue;
-    if (tab.kind === "file" && tab.dirty) {
+    if (tab.kind === TabKind.File && tab.dirty) {
       skipped++;
       continue;
     }
@@ -491,7 +522,7 @@ function removeTab(id: string): void {
   const kind = tabs[idx].kind;
   const wasActive = activeTabId.value === id;
   tabs.splice(idx, 1);
-  if (kind === "terminal") releaseTerminal(id);
+  if (kind === TabKind.Terminal) releaseTerminal(id);
   if (wasActive) {
     const next = tabs[Math.max(0, idx - 1)] ?? tabs[0];
     activeTabId.value = next ? next.id : "";
@@ -501,7 +532,7 @@ function removeTab(id: string): void {
 /** 有未保存更改的文件标签（供关闭应用守卫使用） */
 export function dirtyFileTabs(): FileEditorTab[] {
   return tabs.filter(
-    (t): t is FileEditorTab => t.kind === "file" && t.dirty,
+    (t): t is FileEditorTab => t.kind === TabKind.File && t.dirty,
   );
 }
 

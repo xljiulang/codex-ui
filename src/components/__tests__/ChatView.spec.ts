@@ -10,7 +10,7 @@ vi.mock("../../composables/useCodex", () => {
   const store = reactive({
     turnActive: false,
     busy: false,
-    loadingThread: false,
+    loading: false,
     currentThreadId: null,
     itemsByThread: {} as Record<string, unknown[]>,
     activeWorkByThread: {},
@@ -56,6 +56,9 @@ import type { SessionTab } from "../../composables/useCodex";
 function makeTab(): SessionTab {
   return {
     id: "tab-1",
+    kind: "chat",
+    title: "会话",
+    icon: "chat",
     threadId: "t1",
     name: "",
     origin: "history",
@@ -71,7 +74,7 @@ function makeTab(): SessionTab {
     followupQueue: [],
     attachments: [],
     planPrompt: null,
-    loadingThread: false,
+    loading: false,
     newChatWorkspace: null,
     interactions: store.interactions as unknown as SessionTab["interactions"],
   };

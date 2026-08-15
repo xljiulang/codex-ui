@@ -1,10 +1,13 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, interrupt, store } from "./useCodex";
-import { dirtyFileTabs, saveAllDirtyTabs } from "./useEditorTabs";
+import { dirtyFileTabs, saveAllDirtyTabs, tabs } from "./useEditorTabs";
+import { isTabWorking } from "../lib/tabs";
 
 /**
- * 主窗口关闭守卫：当前回合进行中时先让用户确认，确认后停止回合再关闭窗口。
+ * 主窗口关闭守卫：仍有工作中的标签（会话回合/目标续跑、终端命令执行）时先让用户确认，
+ * 确认后停止全部工作会话并终止运行中终端，再关闭窗口。
  * 与“切换会话”共用同一套全局确认框；非 Tauri 环境（浏览器/单测）返回 no-op，
  * 避免注册过程抛错。
  */
@@ -12,21 +15,34 @@ export async function registerCloseGuard(): Promise<UnlistenFn> {
   try {
     const win = getCurrentWindow();
     return await win.onCloseRequested(async (event) => {
-      // 回合进行中：先确认停止回合再关闭
-      if (store.turnActive && store.currentThreadId) {
+      // 工作中的标签：先确认停止再关闭（会话含目标激活续跑；终端含命令执行中）
+      const workingSessions = store.sessionTabs.filter((t) => isTabWorking(t));
+      const busyTerminals = tabs.filter((t) => isTabWorking(t));
+      if (workingSessions.length > 0 || busyTerminals.length > 0) {
         event.preventDefault();
         // 已有确认框（如切换会话弹窗）时不叠加，仅阻止关闭
         if (store.confirm) return;
         const ok = await askConfirm({
           title: "关闭应用",
-          message: "当前会话仍在进行中，关闭将停止当前回合。是否继续？",
+          message: `有 ${workingSessions.length} 个会话、${busyTerminals.length} 个终端正在工作，关闭将停止它们。是否继续？`,
           confirmLabel: "停止并关闭",
           cancelLabel: "取消",
         });
         if (!ok) return;
-        // 先停止当前回合（与切换会话一致，含活跃目标清目标），再强制关闭，
+        // 停止所有工作中的会话（含活跃目标清目标），终止所有运行中终端
+        await Promise.all(
+          workingSessions.map((s) =>
+            s.threadId
+              ? interrupt(s.threadId, s.currentTurnId)
+              : Promise.resolve(),
+          ),
+        );
+        await Promise.all(
+          busyTerminals.map((t) =>
+            invoke("terminal_kill", { id: t.id }).catch(() => undefined),
+          ),
+        );
         // destroy 不会再次触发 close-requested，避免循环。
-        await interrupt(store.currentThreadId, store.currentTurnId);
         await win.destroy();
         return;
       }

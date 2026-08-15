@@ -25,10 +25,13 @@ import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
   tabs,
+  type FileEditorTab,
+  type PreviewEditorTab,
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import type { FsEntry } from "../../lib/sessionFs";
 import { ICON_AT } from "../../lib/icons";
+import { TabIcon, TabKind } from "../../lib/tabs";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
@@ -420,6 +423,51 @@ describe("ResourceView 文件树", () => {
     await picRow!.trigger("contextmenu", { clientX: 200, clientY: 200 });
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels[0]).toBe("打开");
+    wrapper.unmount();
+  });
+
+  it("已打开文件（编辑器标签）右键菜单不含「打开」", async () => {
+    tabs.push({
+      kind: TabKind.File,
+      id: "f-open",
+      workspace: rootPath,
+      path: aTxt.path,
+      title: "a.txt",
+      icon: TabIcon.File,
+      loading: false,
+      error: "",
+    } as unknown as FileEditorTab);
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-file");
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(labels).not.toContain("打开");
+    expect(labels).toContain("复制");
+    wrapper.unmount();
+  });
+
+  it("已打开文件（预览标签）右键菜单同样不含「打开」", async () => {
+    tabs.push({
+      kind: TabKind.Preview,
+      previewType: "pdf",
+      id: "p-open",
+      workspace: rootPath,
+      path: aTxt.path,
+      title: "a.txt",
+      icon: TabIcon.File,
+      loading: false,
+      error: "",
+      imageUrl: "",
+      pdfData: null,
+      pageCount: null,
+    } as unknown as PreviewEditorTab);
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-file");
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(labels).not.toContain("打开");
     wrapper.unmount();
   });
 

@@ -206,11 +206,15 @@ async function doDelete() {
 function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.(".rename-input")) return;
   const items: CtxItem[] = [
-    {
-      label: "打开",
-      icon: ICON_OPEN,
-      action: () => void openHistorySession(t.id),
-    },
+    ...(isThreadOpen(t.id)
+      ? []
+      : [
+          {
+            label: "打开",
+            icon: ICON_OPEN,
+            action: () => void openHistorySession(t.id),
+          },
+        ]),
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
     {
       label: t.isPinned ? "取消固定" : "置顶固定",

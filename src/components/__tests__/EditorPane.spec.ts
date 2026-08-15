@@ -137,6 +137,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
     // 会话标签 fixture：多会话标签下 EditorPane 的会话标签来自 store.sessionTabs
     store.sessionTabs.push({
       id: "sess-1",
+      kind: "chat",
+      title: "新建会话",
+      icon: "chat",
       threadId: "t1",
       name: "",
       origin: "history",
@@ -152,7 +155,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       followupQueue: [],
       attachments: [],
       planPrompt: null,
-      loadingThread: false,
+      loading: false,
       newChatWorkspace: null,
       interactions: [],
     });

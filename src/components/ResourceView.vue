@@ -65,7 +65,10 @@ import {
   ICON_RENAME,
   ICON_TERMINAL,
 } from "../lib/icons";
-import { openTerminalTab } from "../composables/useEditorTabs";
+import {
+  isFileTabOpen,
+  openTerminalTab,
+} from "../composables/useEditorTabs";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -234,11 +237,15 @@ async function openDirMenu(entry: FsEntry, e: MouseEvent) {
 
 function openFileMenu(entry: FsEntry, e: MouseEvent) {
   const items: CtxItem[] = [
-    {
-      label: "打开",
-      icon: ICON_OPEN,
-      action: () => void requestOpen(entry),
-    },
+    ...(isFileTabOpen(workspace.value, entry.path)
+      ? []
+      : [
+          {
+            label: "打开",
+            icon: ICON_OPEN,
+            action: () => void requestOpen(entry),
+          },
+        ]),
     { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
     {
       label: "属性",

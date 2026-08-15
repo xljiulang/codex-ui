@@ -24,6 +24,7 @@ const mockedGetDocument = vi.mocked(getDocument);
 function makeTab(over: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
   return {
     kind: "preview",
+    icon: "file",
     previewType: "pdf",
     id: "p1",
     workspace: "D:/repo",

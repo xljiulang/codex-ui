@@ -200,7 +200,7 @@ onBeforeUnmount(() => {
           <span class="dot"></span>
           <span class="dot"></span>
         </div>
-        <div v-if="tab.loadingThread" class="loading-thread-note">加载会话…</div>
+        <div v-if="tab.loading" class="loading-thread-note">加载会话…</div>
       </div>
       <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
         ↓ 回到底部

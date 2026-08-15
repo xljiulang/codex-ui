@@ -26,6 +26,7 @@ const mockedSetToast = vi.mocked(setToast);
 function fakeTab(content: string): FileEditorTab {
   return {
     kind: "file",
+    icon: "file",
     id: "t1",
     workspace: "D:\\repo",
     path: "a.md",

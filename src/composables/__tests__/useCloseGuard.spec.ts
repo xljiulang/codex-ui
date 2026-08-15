@@ -2,6 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { registerCloseGuard } from "../useCloseGuard";
 import { settleConfirm, store } from "../useCodex";
+import {
+  __resetEditorTabsForTest,
+  tabs,
+  type TerminalEditorTab,
+} from "../useEditorTabs";
+import type { SessionTab } from "../useCodex";
 
 interface CloseEventLike {
   preventDefault: ReturnType<typeof vi.fn>;
@@ -56,6 +62,52 @@ function makeCloseEvent(): CloseEventLike {
   };
 }
 
+/** 构造工作/空闲会话标签 */
+function sessionTab(
+  over: Partial<SessionTab> = {},
+): SessionTab {
+  return {
+    id: "s1",
+    kind: "chat",
+    title: "会话",
+    icon: "chat",
+    threadId: "t1",
+    name: "",
+    origin: "history",
+    workspace: "D:/repo",
+    resumedThreadId: null,
+    turnActive: false,
+    currentTurnId: null,
+    turnInterrupted: false,
+    goalText: null,
+    goalStatus: null,
+    goalArmed: false,
+    threadTokenUsage: null,
+    followupQueue: [],
+    attachments: [],
+    planPrompt: null,
+    loading: false,
+    newChatWorkspace: null,
+    interactions: [],
+    ...over,
+  };
+}
+
+function busyTerminal(id = "term-1"): TerminalEditorTab {
+  return {
+    kind: "terminal",
+    id,
+    workspace: "D:/repo",
+    title: "PowerShell",
+    icon: "terminal",
+    loading: false,
+    error: "",
+    busy: true,
+    exited: false,
+    exitCode: null,
+  };
+}
+
 describe("registerCloseGuard 关闭窗口守卫", () => {
   beforeEach(() => {
     h.state.handler = null;
@@ -65,13 +117,15 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue({});
     store.confirm = null;
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    __resetEditorTabsForTest();
     store.turnActive = false;
     store.currentThreadId = null;
     store.currentTurnId = null;
     store.taskMode = "execute";
   });
 
-  it("回合空闲：不阻止关闭、不弹确认", async () => {
+  it("无工作标签且无脏文件：不阻止关闭、不弹确认", async () => {
     await registerCloseGuard();
     expect(h.state.handler).not.toBeNull();
     const ev = makeCloseEvent();
@@ -81,15 +135,16 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     expect(h.win.destroy).not.toHaveBeenCalled();
   });
 
-  it("回合进行中：阻止关闭并弹出确认", async () => {
-    store.turnActive = true;
-    store.currentThreadId = "t1";
+  it("有工作会话：阻止关闭并弹出确认（提示会话数量）", async () => {
+    store.sessionTabs.push(
+      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
+    );
     await registerCloseGuard();
     const ev = makeCloseEvent();
     const pending = h.state.handler!(ev);
     expect(ev.preventDefault).toHaveBeenCalled();
     expect(store.confirm?.title).toBe("关闭应用");
-    expect(store.confirm?.message).toContain("关闭将停止当前回合");
+    expect(store.confirm?.message).toContain("1 个会话");
     expect(store.confirm?.confirmLabel).toBe("停止并关闭");
     expect(store.confirm?.cancelLabel).toBe("取消");
     settleConfirm(false);
@@ -97,10 +152,18 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     expect(h.win.destroy).not.toHaveBeenCalled();
   });
 
-  it("点击「停止并关闭」：先停止回合再关闭窗口", async () => {
-    store.turnActive = true;
-    store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
+  it("点击「停止并关闭」：停止所有工作会话（含后台标签）再关闭窗口", async () => {
+    store.sessionTabs.push(
+      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
+    );
+    store.sessionTabs.push(
+      sessionTab({
+        id: "s2",
+        threadId: "t2",
+        turnActive: true,
+        currentTurnId: "turn-2",
+      }),
+    );
     await registerCloseGuard();
     const ev = makeCloseEvent();
     const pending = h.state.handler!(ev);
@@ -110,13 +173,49 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
       "turn_interrupt",
       expect.objectContaining({ threadId: "t1", turnId: "turn-1" }),
     );
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "turn_interrupt",
+      expect.objectContaining({ threadId: "t2", turnId: "turn-2" }),
+    );
     expect(h.win.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("点击「取消」：不停止回合、不关闭窗口", async () => {
-    store.turnActive = true;
-    store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
+  it("目标激活续跑（无进行中回合）也视为工作：确认后清目标", async () => {
+    store.sessionTabs.push(
+      sessionTab({ goalText: "目标", goalStatus: "active" }),
+    );
+    await registerCloseGuard();
+    const ev = makeCloseEvent();
+    const pending = h.state.handler!(ev);
+    expect(store.confirm?.message).toContain("1 个会话");
+    settleConfirm(true);
+    await pending;
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "goal_clear",
+      expect.objectContaining({ threadId: "t1" }),
+    );
+    expect(h.win.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("有运行中终端：阻止关闭，确认后 terminal_kill 再关闭", async () => {
+    tabs.push(busyTerminal());
+    await registerCloseGuard();
+    const ev = makeCloseEvent();
+    const pending = h.state.handler!(ev);
+    expect(ev.preventDefault).toHaveBeenCalled();
+    expect(store.confirm?.message).toContain("1 个终端");
+    settleConfirm(true);
+    await pending;
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: "term-1",
+    });
+    expect(h.win.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("点击「取消」：不停止、不关闭窗口", async () => {
+    store.sessionTabs.push(
+      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
+    );
     await registerCloseGuard();
     const ev = makeCloseEvent();
     const pending = h.state.handler!(ev);
@@ -130,8 +229,9 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
   });
 
   it("已有确认框（如切换会话）时：仅阻止关闭，不覆盖原确认", async () => {
-    store.turnActive = true;
-    store.currentThreadId = "t1";
+    store.sessionTabs.push(
+      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
+    );
     const resolve = vi.fn();
     const existing = {
       title: "切换会话",
@@ -147,7 +247,6 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     expect(ev.preventDefault).toHaveBeenCalled();
     expect(store.confirm).not.toBeNull();
     expect(store.confirm?.title).toBe("切换会话");
-    expect(store.confirm?.message).toContain("切换将停止当前回合");
     expect(resolve).not.toHaveBeenCalled();
     expect(h.win.destroy).not.toHaveBeenCalled();
   });

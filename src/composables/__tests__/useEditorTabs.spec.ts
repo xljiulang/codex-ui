@@ -25,6 +25,7 @@ import {
   __resetEditorTabsForTest,
   activeTabId,
   activateTab,
+  closeAnyTab,
   closeAllOtherTabs,
   closeTabsToLeft,
   closeTabsToRight,
@@ -48,6 +49,8 @@ import {
   releaseTerminal,
 } from "../useTerminalEvents";
 import { settleConfirm, store } from "../useCodex";
+import type { SessionTab } from "../useCodex";
+import { TabIcon, TabKind } from "../../lib/tabs";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
@@ -768,5 +771,80 @@ describe("useEditorTabs 标签状态", () => {
       id: t!.id,
     });
     expect(tabs.some((x) => x.id === t!.id)).toBe(false);
+  });
+});
+
+describe("closeAnyTab 统一关闭入口", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    __resetEditorTabsForTest();
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    store.confirm = null;
+  });
+
+  it("会话标签：走 closeSessionTab 并移除", async () => {
+    const tab: SessionTab = {
+      id: "s1",
+      kind: TabKind.Chat,
+      title: "会话",
+      icon: TabIcon.Chat,
+      threadId: "t1",
+      name: "",
+      origin: "history",
+      workspace: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loading: false,
+      newChatWorkspace: null,
+      interactions: [],
+    };
+    store.sessionTabs.push(tab);
+    await closeAnyTab(tab);
+    expect(store.sessionTabs.some((t) => t.id === tab.id)).toBe(false);
+  });
+
+  it("运行中终端：确认后终止进程并移除", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === TabKind.Terminal,
+    )!;
+    t.busy = true;
+    const pending = closeAnyTab(t);
+    expect(store.confirm?.title).toBe("关闭终端");
+    settleConfirm(true);
+    await pending;
+    expect(tabs.some((x) => x.id === t.id)).toBe(false);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", { id: t.id });
+  });
+
+  it("脏文件：挂起确认不直接关闭", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openFileTab(root, "a.txt");
+    const f = tabs.find(
+      (x): x is FileEditorTab => x.kind === TabKind.File,
+    )!;
+    f.dirty = true;
+    await closeAnyTab(f);
+    expect(pendingCloseId.value).toBe(f.id);
+    expect(tabs.some((x) => x.id === f.id)).toBe(true);
   });
 });

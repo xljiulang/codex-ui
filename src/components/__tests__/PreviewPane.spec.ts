@@ -8,6 +8,7 @@ function makeTab(
 ): PreviewEditorTab {
   return {
     kind: "preview",
+    icon: "file",
     previewType: "image",
     id: "p1",
     workspace: "D:/repo",
