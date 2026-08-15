@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
-import type { ThreadItem } from "../lib/types";
+import {
+  isThreadItemType,
+  type FileChangeItem,
+  type ThreadItem,
+  type TodoListItem,
+  type WebSearchItem,
+} from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
 import { useTailWindow } from "../composables/useTailWindow";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
-import { sessionWorkspace } from "../lib/links";
 import { copyText } from "../lib/clipboard";
-import { openDiffTab } from "../composables/useEditorTabs";
-import {
-  diffKindLabel,
-  normalizeDiffKind,
-} from "../lib/gitChanges";
+import FileChangeCard from "./FileChangeCard.vue";
+import TodoListCard from "./TodoListCard.vue";
+import WebSearchCard from "./WebSearchCard.vue";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -101,23 +103,16 @@ const commandText = computed(() => {
   return String(props.item.command ?? "");
 });
 
-const changes = computed(
-  () =>
-    (props.item.changes as
-      | { path: string; kind: string | { type: string }; diff?: string }[]
-      | undefined) ?? [],
-);
-
 const sub = computed(() => {
   if (type.value === "commandExecution") return commandText.value;
   if (type.value === "webSearch") {
     return String(props.item.query ?? "");
   }
-  if (type.value === "fileChange") {
-    if (!changes.value.length) return "";
-    const first = changes.value[0].path;
-    return changes.value.length > 1
-      ? `${first} (等${changes.value.length}个)`
+  if (isThreadItemType<FileChangeItem>(props.item, "fileChange")) {
+    if (!props.item.changes.length) return "";
+    const first = props.item.changes[0].path;
+    return props.item.changes.length > 1
+      ? `${first} (等${props.item.changes.length}个)`
       : first;
   }
   return "";
@@ -196,26 +191,6 @@ async function copyCommand() {
   }, 1500);
 }
 
-/** webSearch 的结构化结果（协议为透明 JSON，尽力提取常见字段） */
-const webResults = computed(() => {
-  const r = props.item.results as unknown[] | null | undefined;
-  if (!Array.isArray(r)) return [];
-  return r.map((x) => {
-    if (x && typeof x === "object") {
-      const o = x as Record<string, unknown>;
-      return {
-        title: String(o.title ?? o.name ?? ""),
-        url: String(o.url ?? o.link ?? ""),
-        snippet: String(o.snippet ?? o.description ?? o.content ?? ""),
-      };
-    }
-    return { title: String(x), url: "", snippet: "" };
-  });
-});
-const webResultsUsable = computed(() =>
-  webResults.value.some((r) => r.title || r.url),
-);
-
 const argsJson = computed(() => {
   const a = props.item.arguments;
   if (a === undefined || a === null) return "";
@@ -249,54 +224,8 @@ const errorText = computed(() => {
   return e?.message ?? "";
 });
 
-const todos = computed(
-  () =>
-    (props.item.items as { text: string; completed: boolean }[] | undefined) ??
-    [],
-);
-
 // 默认折叠：不再因运行中/失败/文件变更自动展开，点击头部才展开
 const effectiveExpanded = computed(() => expanded.value);
-
-function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: string }[] {
-  const raw = c.diff ?? "";
-  const lines = raw.split("\n");
-  const kind = normalizeDiffKind(c.kind);
-  const hasMarkers = lines.some(
-    (l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l),
-  );
-  if (!hasMarkers) {
-    const prefix = kind === "add" ? "+" : kind === "delete" ? "-" : "";
-    return lines.map((l) => ({
-      text: l ? `${prefix}${l}` : l,
-      cls:
-        kind === "add"
-          ? "diff-add"
-          : kind === "delete"
-            ? "diff-del"
-            : "",
-    }));
-  }
-  return lines.map((l) => {
-    if (/^(\+\+\+|---)/.test(l)) return { text: l, cls: "diff-file" };
-    if (l.startsWith("+")) return { text: l, cls: "diff-add" };
-    if (l.startsWith("-")) return { text: l, cls: "diff-del" };
-    if (l.startsWith("@@")) return { text: l, cls: "diff-hunk" };
-    return { text: l, cls: "" };
-  });
-}
-
-// ---------- 文件变更：用条目自带的内联 diff 直接打开 ----------
-
-function openPreview(c: { path: string; kind: unknown; diff?: string }) {
-  if (!c.diff) return;
-  void openDiffTab({
-    path: c.path,
-    kind: normalizeDiffKind(c.kind),
-    diff: c.diff,
-    workspace: sessionWorkspace(),
-  });
-}
 </script>
 
 <template>
@@ -385,60 +314,19 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
         </div>
       </template>
 
-      <template v-else-if="type === 'fileChange'">
-        <div v-for="c in changes" :key="c.path" class="change-block">
-          <div
-            class="change-row"
-            :class="{ clickable: !!c.diff }"
-            v-tooltip="c.diff ? '点击查看完整差异' : ''"
-            @click="openPreview(c)"
-          >
-            <span class="change-kind" :class="normalizeDiffKind(c.kind)">
-              {{ diffKindLabel(normalizeDiffKind(c.kind)) }}
-            </span>
-            <span>{{ c.path }}</span>
-          </div>
-          <div v-if="c.diff" class="diff-wrap">
-            <pre class="diff-view" :class="{ collapsed: !expanded }">
-              <div
-                v-for="(l, j) in diffEntries(c)"
-                :key="j"
-                class="diff-line"
-                :class="l.cls"
-              >{{ l.text }}</div>
-            </pre>
-          </div>
-        </div>
-        <div v-if="!changes.length" class="tool-meta">暂无变更</div>
-      </template>
-
-      <template v-else-if="type === 'todoList'">
-        <div class="change-list">
-          <div v-for="t in todos" :key="t.text" class="todo-row" :class="{ done: t.completed }">
-            <span>{{ t.completed ? "☑" : "☐" }}</span>
-            <span>{{ t.text }}</span>
-          </div>
-        </div>
-      </template>
-
-      <template v-else-if="type === 'webSearch'">
-        <div class="tool-meta">查询：{{ item.query }}</div>
-        <div v-if="webResultsUsable" class="web-results">
-          <a
-            v-for="(r, i) in webResults"
-            :key="i"
-            class="web-result"
-            :href="r.url || '#'"
-            @click.prevent="r.url ? void invoke('open_url', { url: r.url }) : undefined"
-          >
-            <span class="web-result-title">{{ r.title || r.url || "（无标题）" }}</span>
-            <span v-if="r.snippet" class="web-result-snippet">{{ r.snippet }}</span>
-          </a>
-        </div>
-        <div v-else-if="webResults.length" class="tool-json">
-          {{ JSON.stringify(item.results) }}
-        </div>
-        </template>
+      <FileChangeCard
+        v-else-if="item.type === 'fileChange'"
+        :item="item as FileChangeItem"
+        :expanded="expanded"
+      />
+      <TodoListCard
+        v-else-if="item.type === 'todoList'"
+        :item="item as TodoListItem"
+      />
+      <WebSearchCard
+        v-else-if="item.type === 'webSearch'"
+        :item="item as WebSearchItem"
+      />
       </div>
     </Transition>
   </div>
