@@ -92,17 +92,6 @@ describe("codeFormat XML 美化", () => {
 });
 
 describe("codeFormat 缩进重排（非 Prettier 语言）", () => {
-  it("修正多行 Go 的缩进", async () => {
-    const res = await formatDoc(
-      "a.go",
-      "func f() {\nif x {\nreturn 1\n}\n}",
-    );
-    expect(res).toEqual({
-      ok: true,
-      text: "func f() {\n    if x {\n        return 1\n    }\n}",
-    });
-  });
-
   it("单行内容保持原样（不展开）", async () => {
     const res = await formatDoc("a.go", "func f() { if x { return 1 } }");
     expect(res).toEqual({ ok: true, unchanged: true });

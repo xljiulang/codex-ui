@@ -170,6 +170,87 @@ describe("toastError 错误提示提取", () => {
     expect(toastError(42)).toBe("42");
     expect(toastError(null)).toBe("null");
   });
+
+  it("服务端已知消息映射为友好中文", () => {
+    expect(
+      toastError({
+        error: {
+          message:
+            "Context window exceeded while compacting; removing oldest history item.",
+        },
+      }),
+    ).toBe("上下文超出窗口，已自动压缩并移除最早的历史内容");
+    expect(
+      toastError("Server overloaded; retry later."),
+    ).toBe("服务过载，请稍后重试");
+    expect(
+      toastError("cannot resume running thread thr_1 with history while it is already running"),
+    ).toBe("该会话正被占用（已有回合在运行或其它进程持有），请稍后再试");
+  });
+});
+
+describe("服务端 error/warning 事件 toast 本地化", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，确保本组用例重新注册监听
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.toast = "";
+  });
+
+  it("error 事件：thread 占用原文映射为中文 toast", async () => {
+    await wireEvents();
+    fireListen("error", {
+      error: {
+        message:
+          "cannot resume running thread thr_9 with history while it is already running",
+      },
+    });
+    expect(store.toast).toBe(
+      "该会话正被占用（已有回合在运行或其它进程持有），请稍后再试",
+    );
+  });
+
+  it("error 事件：窗口压缩原文映射为中文 toast", async () => {
+    await wireEvents();
+    fireListen("error", {
+      error: {
+        message:
+          "Context window exceeded while compacting; removing oldest history item. Error: oops",
+      },
+    });
+    expect(store.toast).toBe(
+      "上下文超出窗口，已自动压缩并移除最早的历史内容",
+    );
+  });
+
+  it("error 事件：codexErrorInfo 结构化映射优先", async () => {
+    await wireEvents();
+    fireListen("error", {
+      error: { message: "raw message", codexErrorInfo: "contextWindowExceeded" },
+    });
+    expect(store.toast).toBe("上下文已超出模型窗口");
+  });
+
+  it("error 事件：无 message 时回退通用文案", async () => {
+    await wireEvents();
+    fireListen("error", { error: {} });
+    expect(store.toast).toBe("codex 发生错误");
+  });
+
+  it("warning 事件：原文映射为中文 toast，未匹配保留原文", async () => {
+    await wireEvents();
+    fireListen("warning", { message: "Server overloaded; retry later." });
+    expect(store.toast).toBe("服务过载，请稍后重试");
+    fireListen("warning", { message: "some future warning" });
+    expect(store.toast).toBe("some future warning");
+  });
 });
 
 describe("refreshServer 服务状态同步", () => {

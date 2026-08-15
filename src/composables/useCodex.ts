@@ -27,6 +27,10 @@ import {
 import { playNotificationSound } from "../lib/sound";
 import { pathBaseName } from "../lib/format";
 import { focusComposer } from "../lib/composerFocus";
+import {
+  friendlyServerError,
+  friendlyServerMessage,
+} from "../lib/serverMessages";
 import { applyTheme } from "./useTheme";
 
 const defaultSettings = (): AppSettings => ({
@@ -285,14 +289,10 @@ export function setToast(msg: string) {
   store.toast = msg;
 }
 
-/** 把错误对象转成可读提示：优先取 error.error.message / error.message，避免显示原始 JSON */
+/** 把错误对象转成可读提示：优先提取 error.error.message / error.message，
+ * 再经服务端消息映射为友好中文；未匹配保留原文（避免显示原始 JSON） */
 export function toastError(e: unknown): string {
-  if (e && typeof e === "object") {
-    const err = e as { error?: { message?: unknown }; message?: unknown };
-    if (typeof err.error?.message === "string") return err.error.message;
-    if (typeof err.message === "string") return err.message;
-  }
-  return String(e);
+  return friendlyServerError(e);
 }
 
 function isActiveItem(item: ThreadItem): boolean {
@@ -1886,12 +1886,19 @@ export async function wireEvents() {
 
   unlisteners.push(
     await listen("error", (e) => {
-      const p = e.payload as { error?: { message?: string } };
-      setToast(p.error?.message ?? "codex 发生错误");
+      const p = e.payload as {
+        error?: { message?: string; codexErrorInfo?: unknown };
+      };
+      const err = p.error;
+      setToast(
+        err && (err.message || err.codexErrorInfo)
+          ? friendlyServerError(err)
+          : "codex 发生错误",
+      );
     }),
     await listen("warning", (e) => {
       const p = e.payload as { message?: string };
-      if (p?.message) setToast(p.message);
+      if (p?.message) setToast(friendlyServerMessage(p.message));
     }),
   );
 }
