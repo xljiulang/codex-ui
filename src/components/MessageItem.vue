@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import MarkdownText from "./MarkdownText.vue";
 import ReasoningBlock from "./ReasoningBlock.vue";
 import RefChip from "./RefChip.vue";
 import ToolCard from "./ToolCard.vue";
+import { assetUrl } from "../lib/asset";
 import { formatDuration, formatTimeHM } from "../lib/format";
 import { copyText } from "../lib/clipboard";
 import {
@@ -14,57 +14,38 @@ import {
   parseFileMentionSection,
   type InlineSegment,
 } from "../lib/mention";
-import type { ThreadItem, UserInput } from "../lib/types";
+import { isUserInput, type ThreadItem, type UserInput } from "../lib/types";
 
 const props = defineProps<{ item: ThreadItem }>();
 
-function imageSrc(path: string): string {
-  try {
-    return convertFileSrc(path);
-  } catch {
-    return path;
-  }
-}
-
-function partType(c: unknown): string {
-  return ((c as UserInput)?.type) ?? "";
-}
-
-function partName(c: unknown): string {
-  const u = c as UserInput;
-  return u.type === "mention" || u.type === "skill" ? u.name : "";
-}
-
-function partRefPath(c: unknown): string {
-  const u = c as UserInput;
-  return u.type === "mention" || u.type === "skill" ? u.path : "";
-}
+/** 用户消息内容项：运行时过滤为合法 UserInput（协议外未知形状直接丢弃） */
+const contentItems = computed(() => {
+  const content = props.item.content;
+  return Array.isArray(content) ? content.filter(isUserInput) : [];
+});
 
 /** 文本项正文：含 Files 段时取 `## My request:` 之后，否则整段 */
-function bodyText(c: unknown): string {
-  const u = c as UserInput;
-  if (u.type !== "text") return "";
+function bodyText(c: UserInput): string {
+  if (c.type !== "text") return "";
   const marker = `\n${MY_REQUEST_MARKER}\n`;
-  const idx = u.text.indexOf(marker);
-  if (idx >= 0 && u.text.includes(FILE_MENTION_HEADING)) {
-    return u.text.slice(idx + marker.length);
+  const idx = c.text.indexOf(marker);
+  if (idx >= 0 && c.text.includes(FILE_MENTION_HEADING)) {
+    return c.text.slice(idx + marker.length);
   }
-  return u.text;
+  return c.text;
 }
 
 /** 解析文本项正文中的内联引用片段（Files 段文件不在此，由附件区渲染） */
-function partInline(c: unknown): InlineSegment[] {
-  const u = c as UserInput;
-  if (u.type !== "text") return [];
-  return parseInlineMentions(bodyText(u));
+function partInline(c: UserInput): InlineSegment[] {
+  if (c.type !== "text") return [];
+  return parseInlineMentions(bodyText(c));
 }
 
 /** 附件区文件：跨 text 项解析 Files 段、保序合并 */
 const bubbleFiles = computed(() => {
   const out: { name: string; path: string }[] = [];
-  for (const c of (props.item.content as unknown[]) ?? []) {
-    const u = c as UserInput;
-    if (u.type === "text") out.push(...parseFileMentionSection(u.text));
+  for (const c of contentItems.value) {
+    if (c.type === "text") out.push(...parseFileMentionSection(c.text));
   }
   return out;
 });
@@ -72,12 +53,13 @@ const bubbleFiles = computed(() => {
 /** 附件区图片：localImage 项 */
 const bubbleImages = computed(
   () =>
-    ((props.item.content as unknown[]) ?? []).filter(
-      (x) => (x as UserInput).type === "localImage",
-    ) as Extract<UserInput, { type: "localImage" }>[],
+    contentItems.value.filter(
+      (x): x is Extract<UserInput, { type: "localImage" }> =>
+        x.type === "localImage",
+    ),
 );
 
-function hasInlineRefs(c: unknown): boolean {
+function hasInlineRefs(c: UserInput): boolean {
   return partInline(c).some((s) => s.type === "ref");
 }
 
@@ -89,9 +71,9 @@ function segRefKind(
 }
 
 /** 同一条消息里内联引用（[@name]/[$name]）的名称集合 */
-function inlineRefNameSet(content: unknown): Set<string> {
+function inlineRefNameSet(content: UserInput[]): Set<string> {
   const names = new Set<string>();
-  for (const x of (content as unknown[]) ?? []) {
+  for (const x of content) {
     for (const s of partInline(x)) {
       if (s.type === "ref") names.add(s.name);
     }
@@ -99,13 +81,13 @@ function inlineRefNameSet(content: unknown): Set<string> {
   return names;
 }
 
-function hasInlineRefNamed(content: unknown, name: string): boolean {
+function hasInlineRefNamed(content: UserInput[], name: string): boolean {
   return inlineRefNameSet(content).has(name);
 }
 
 /** 同名内联引用的前缀（@/$），用于结构化 skill 项的渲染前缀 */
-function inlinePrefixFor(content: unknown, name: string): string | null {
-  for (const x of (content as unknown[]) ?? []) {
+function inlinePrefixFor(content: UserInput[], name: string): string | null {
+  for (const x of content) {
     for (const s of partInline(x)) {
       if (s.type === "ref" && s.name === name) return s.prefix;
     }
@@ -114,7 +96,7 @@ function inlinePrefixFor(content: unknown, name: string): string | null {
 }
 
 /** 结构化 skill 项的前缀：同消息内存在同名插件链接（[@name]）时按插件渲染 @，否则按技能渲染 $ */
-function skillPrefixFor(content: unknown, name: string): string {
+function skillPrefixFor(content: UserInput[], name: string): string {
   return inlinePrefixFor(content, name) ?? "$";
 }
 
@@ -206,21 +188,21 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           <img
             v-if="!attachmentImgErrors.has(k)"
             class="user-image attachment-image clickable"
-            :src="imageSrc(img.path)"
+            :src="assetUrl(img.path)"
             alt="图片"
             loading="lazy"
             decoding="async"
-            @click="openLightbox(imageSrc(img.path))"
+            @click="openLightbox(assetUrl(img.path))"
             @error="markAttachmentImgError(k)"
           />
           <div v-else class="img-fallback">图片加载失败</div>
         </template>
       </div>
-        <template v-for="(c, i) in (item.content as unknown[]) ?? []" :key="i">
-        <template v-if="partType(c) === 'localImage'">
+        <template v-for="(c, i) in contentItems" :key="i">
+        <template v-if="c.type === 'localImage'">
           <!-- 图片已渲染到附件区 -->
         </template>
-        <template v-else-if="partType(c) === 'text'">
+        <template v-else-if="c.type === 'text'">
           <template v-if="hasInlineRefs(c)">
             <template v-for="(seg, j) in partInline(c)" :key="'seg' + j">
               <RefChip
@@ -236,18 +218,18 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           </template>
           <MarkdownText v-else :text="bodyText(c)" />
         </template>
-        <template v-else-if="partType(c) === 'skill'">
+        <template v-else-if="c.type === 'skill'">
           <RefChip
-            v-if="!hasInlineRefNamed(item.content, partName(c))"
-            :path="partRefPath(c)"
-            :label="skillPrefixFor(item.content, partName(c)) + partName(c)"
+            v-if="!hasInlineRefNamed(contentItems, c.name)"
+            :path="c.path"
+            :label="skillPrefixFor(contentItems, c.name) + c.name"
             kind="skill"
           />
         </template>
         <RefChip
           v-else
-          :path="partRefPath(c)"
-          :label="'@' + partName(c)"
+          :path="c.path"
+          :label="'@' + c.name"
           kind="file"
         />
       </template>
@@ -316,11 +298,11 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
       <img
         v-if="!imgErr"
         class="user-image clickable"
-        :src="imageSrc(String(item.path ?? ''))"
+        :src="assetUrl(String(item.path ?? ''))"
         alt="图片"
         loading="lazy"
         decoding="async"
-        @click="openLightbox(imageSrc(String(item.path ?? '')))"
+        @click="openLightbox(assetUrl(String(item.path ?? '')))"
         @error="markImgErr()"
       />
       <div v-else class="img-fallback">图片加载失败</div>

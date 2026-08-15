@@ -88,6 +88,8 @@ const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
 const aTxt = root + "\\a.txt";
 const bTxt = root + "\\b.txt";
+const aMd = root + "\\a.md";
+const bMd = root + "\\b.md";
 
 function fileContent(content: string, validUtf8 = true) {
   return {
@@ -387,6 +389,56 @@ describe("EditorPane 左侧多标签编辑区", () => {
       wrapper.find(".text-editor-actions button[aria-label='编辑']").exists(),
     ).toBe(true);
     expect(wrapper.find(".text-editor-preview .md").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("a.md 预览后打开 b.md 并预览：显示 b 内容而非 a 内容", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read") {
+        const path = (args as { path?: string }).path;
+        return Promise.resolve(
+          path === bMd
+            ? fileContent("# B标题\n\nB 正文")
+            : fileContent("# A标题\n\nA 正文"),
+        );
+      }
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+
+    // 打开 a.md 并进入预览，确认渲染的是 A 内容
+    await openFileTab(root, aMd);
+    await settle();
+    await waitForEl(wrapper, ".text-editor-actions button[aria-label='预览']");
+    await wrapper
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await settle();
+    await vi.waitFor(
+      () => {
+        const txt = wrapper.find(".text-editor-preview .md").text();
+        expect(txt).toContain("A标题");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+
+    // 打开 b.md 并进入预览：必须显示 B 内容，不得残留 A 内容
+    await openFileTab(root, bMd);
+    await settle();
+    await waitForEl(wrapper, ".text-editor-actions button[aria-label='预览']");
+    await wrapper
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await settle();
+    await vi.waitFor(
+      () => {
+        const txt = wrapper.find(".text-editor-preview .md").text();
+        expect(txt).toContain("B标题");
+        expect(txt).not.toContain("A标题");
+      },
+      { timeout: 5000, interval: 20 },
+    );
     wrapper.unmount();
   });
 

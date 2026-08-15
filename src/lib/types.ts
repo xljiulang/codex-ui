@@ -71,6 +71,19 @@ export interface LocalImageInput {
 }
 export type UserInput = TextInput | MentionInput | SkillInput | LocalImageInput;
 
+/** 运行时校验：内容项是否为合法的 UserInput（协议外未知形状直接丢弃） */
+export function isUserInput(c: unknown): c is UserInput {
+  if (!c || typeof c !== "object") return false;
+  const t = (c as { type?: unknown }).type;
+  if (t === "text") return typeof (c as TextInput).text === "string";
+  if (t === "localImage") return typeof (c as LocalImageInput).path === "string";
+  if (t === "mention" || t === "skill") {
+    const m = c as MentionInput | SkillInput;
+    return typeof m.name === "string" && typeof m.path === "string";
+  }
+  return false;
+}
+
 export interface PendingInteraction {
   /** 协议 RequestId 为 string | number，原样透传给 interaction_respond */
   requestId: number | string;

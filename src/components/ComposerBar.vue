@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { JSONContent } from "@tiptap/core";
@@ -27,6 +27,7 @@ import {
   unregisterComposerAddHandler,
 } from "../composables/useCodex";
 import type { UserInput } from "../lib/types";
+import { assetUrl } from "../lib/asset";
 import { debounce } from "../lib/debounce";
 import {
   baseName,
@@ -750,14 +751,6 @@ function removeRowAttachment(i: number) {
   syncAttachments();
 }
 
-function imageSrc(path: string): string {
-  try {
-    return convertFileSrc(path);
-  } catch {
-    return path;
-  }
-}
-
 function rowAttPath(a: UserInput): string {
   return a.type === "mention" || a.type === "localImage" ? a.path : "";
 }
@@ -1014,7 +1007,7 @@ function onGoalIconClick() {
         <img
           v-if="a.type === 'localImage'"
           class="attachment-thumb"
-          :src="imageSrc(a.path)"
+          :src="assetUrl(a.path)"
           alt=""
         />
         <template v-if="a.type === 'localImage'">

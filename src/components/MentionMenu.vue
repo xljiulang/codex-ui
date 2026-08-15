@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { UserInput } from "../lib/types";
+import { assetUrl } from "../lib/asset";
 import {
   toUserAttachment,
   type FuzzyFileResult,
@@ -197,7 +197,7 @@ const brokenIcons = ref(new Set<string>());
 function pluginIconSrc(p: PluginItem): string {
   if (brokenIcons.value.has(p.id)) return "";
   if (p.iconUrl) return p.iconUrl;
-  if (p.iconPath) return convertFileSrc(p.iconPath);
+  if (p.iconPath) return assetUrl(p.iconPath);
   return "";
 }
 

@@ -1,5 +1,5 @@
 import { markRaw, reactive, ref } from "vue";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { Compartment, EditorState, Text } from "@codemirror/state";
 import {
   buildSaveContent,
@@ -9,6 +9,7 @@ import {
   type EditorEol,
 } from "../lib/editorFile";
 import { formatTimeHMS, pathBaseName } from "../lib/format";
+import { assetUrl } from "../lib/asset";
 import type { DiffPreviewKind } from "../lib/gitChanges";
 import { base64ToBytes, type PreviewType } from "../lib/preview";
 import type { DiffRow } from "../lib/types";
@@ -371,7 +372,7 @@ export async function openPreviewTab(
   activeTabId.value = id;
   try {
     if (type === "image") {
-      tab.imageUrl = convertFileSrc(path);
+      tab.imageUrl = assetUrl(path);
     } else {
       const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
         workspace,
