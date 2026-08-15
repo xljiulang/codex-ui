@@ -2,24 +2,21 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import {
   setToast,
-  workspace,
 } from "../composables/useCodex";
-import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { useActionMenu } from "../composables/useActionMenu";
 import { useResourceDragDrop } from "../composables/useResourceDragDrop";
 import { useResourceDialogs } from "../composables/useResourceDialogs";
+import { useResourceMenus } from "../composables/useResourceMenus";
 import {
   clearSearch,
-  copyEntry,
   ensureEntryIcons,
   expanded,
   iconFor,
   onSearchInput,
   openTextEditor,
-  pasteInto,
   probeTextEntry,
   refreshAll,
   revealActiveTab,
-  revealInExplorer,
   revealInTree,
   rootEntry,
   rootError,
@@ -30,7 +27,6 @@ import {
   searchTerm,
   selectedPath,
   setSessionFsActive,
-  textFileMenuIcon,
   toggleDir,
   treeRows,
   loadingRoot,
@@ -41,7 +37,6 @@ import {
   moveEntry,
   openImagePreview,
   openPdfPreview,
-  pasteAvailable,
 } from "../composables/useSessionFs";
 import {
   formatFileSize,
@@ -54,25 +49,14 @@ import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
   ICON_AT,
-  ICON_COPY,
-  ICON_DELETE,
   ICON_FILE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
-  ICON_INFO,
-  ICON_OPEN,
-  ICON_PASTE,
-  ICON_PLUS,
   ICON_REFRESH,
-  ICON_RENAME,
-  ICON_REVEAL,
-  ICON_TERMINAL,
 } from "../lib/icons";
 import {
   activeTab,
   activeTabId,
-  isFileTabOpen,
-  openTerminalTab,
 } from "../composables/useEditorTabs";
 import { TabKind } from "../lib/tabs";
 
@@ -110,6 +94,21 @@ const {
   formatAbsolute,
   deleteLabel,
 } = useResourceDialogs();
+// 右键菜单构建（根/目录/文件）
+const {
+  openRootMenu,
+  openEntryMenu,
+} = useResourceMenus({
+  openCtx,
+  rootEntry,
+  hasActiveSessionTab,
+  onCreateFolder,
+  onCreateTextFile,
+  requestOpen,
+  startRename,
+  askDelete,
+  openProps,
+});
 // 树内拖拽移动（自绘指针拖拽）
 const {
   dragOverPath,
@@ -155,147 +154,6 @@ function fileMeta(entry: FsEntry): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-async function openRootMenu(e: MouseEvent) {
-  const root = rootEntry.value;
-  if (!root) return;
-  const canPaste = await pasteAvailable();
-  openCtx(e, [
-    {
-      label: "新建文本文件",
-      icon: ICON_PLUS,
-      img: textFileMenuIcon(),
-      action: () => void onCreateTextFile(root),
-    },
-    {
-      label: "新建文件夹",
-      icon: ICON_PLUS,
-      action: () => void onCreateFolder(root),
-    },
-    ...(canPaste
-      ? [
-          {
-            label: "粘贴",
-            icon: ICON_PASTE,
-            action: () => void pasteInto(root.path),
-          },
-        ]
-      : []),
-    {
-      label: "在此打开终端",
-      icon: ICON_TERMINAL,
-      action: () => void openTerminalTab(root.path),
-    },
-    {
-      label: "在资源管理器中打开",
-      icon: ICON_REVEAL,
-      action: () => revealInExplorer(root.path),
-    },
-  ]);
-}
-
-async function openDirMenu(entry: FsEntry, e: MouseEvent) {
-  const canPaste = await pasteAvailable();
-  openCtx(e, [
-    {
-      label: "新建文本文件",
-      icon: ICON_PLUS,
-      img: textFileMenuIcon(),
-      action: () => void onCreateTextFile(entry),
-    },
-    {
-      label: "新建文件夹",
-      icon: ICON_PLUS,
-      action: () => void onCreateFolder(entry),
-    },
-    { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
-    ...(canPaste
-      ? [
-          {
-            label: "粘贴",
-            icon: ICON_PASTE,
-            action: () => void pasteInto(entry.path),
-          },
-        ]
-      : []),
-    {
-      label: "删除",
-      icon: ICON_DELETE,
-      danger: true,
-      action: () => askDelete(entry),
-    },
-    {
-      label: "重命名",
-      icon: ICON_RENAME,
-      action: () => startRename(entry),
-    },
-    ...(hasActiveSessionTab.value
-      ? [
-          {
-            label: "添加为会话附件",
-            icon: ICON_AT,
-            action: () => addAsAttachment(entry),
-          },
-        ]
-      : []),
-    {
-      label: "在此打开终端",
-      icon: ICON_TERMINAL,
-      action: () => void openTerminalTab(entry.path),
-    },
-    {
-      label: "在资源管理器中打开",
-      icon: ICON_REVEAL,
-      action: () => revealInExplorer(entry.path),
-    },
-  ]);
-}
-
-function openFileMenu(entry: FsEntry, e: MouseEvent) {
-  const items: CtxItem[] = [
-    ...(isFileTabOpen(workspace.value, entry.path)
-      ? []
-      : [
-          {
-            label: "打开",
-            icon: ICON_OPEN,
-            action: () => void requestOpen(entry),
-          },
-        ]),
-    { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
-    {
-      label: "属性",
-      icon: ICON_INFO,
-      action: () => void openProps(entry),
-    },
-    {
-      label: "删除",
-      icon: ICON_DELETE,
-      danger: true,
-      action: () => askDelete(entry),
-    },
-    {
-      label: "重命名",
-      icon: ICON_RENAME,
-      action: () => startRename(entry),
-    },
-    ...(hasActiveSessionTab.value
-      ? [
-          {
-            label: "添加为会话附件",
-            icon: ICON_AT,
-            action: () => addAsAttachment(entry),
-          },
-        ]
-      : []),
-    {
-      label: "在资源管理器中打开",
-      icon: ICON_REVEAL,
-      action: () => revealInExplorer(entry.path),
-    },
-  ];
-  openCtx(e, items);
-}
-
 /** 打开前先按扩展名分发：PDF/图像 → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
 async function requestOpen(entry: FsEntry) {
   const type = previewTypeForName(entry.name);
@@ -314,11 +172,6 @@ async function requestOpen(entry: FsEntry) {
     return;
   }
   setToast("该文件不是文本文件，无法打开");
-}
-
-function openEntryMenu(entry: FsEntry, e: MouseEvent) {
-  if (entry.isDir) openDirMenu(entry, e);
-  else openFileMenu(entry, e);
 }
 
 /** 新建文件夹：创建成功后展开/加载父目录并自动进入行内重命名 */
