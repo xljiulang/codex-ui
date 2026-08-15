@@ -31,6 +31,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  addAttachmentToActiveSession,
   __resetPinnedSectionForTest,
   __resetTitleHelperCapabilityForTest,
   autoTitleThread,
@@ -58,6 +59,7 @@ import {
   pickAndOpenNewSession,
   refreshThreads,
   refreshServer,
+  registerComposerAddHandler,
   resolveSessionWorkspace,
   sanitizeTitle,
   searchThreads,
@@ -71,10 +73,12 @@ import {
   __resetSessionTabsForTest,
   togglePin,
   toastError,
+  unregisterComposerAddHandler,
   wireEvents,
   workspace,
 } from "../useCodex";
 import type { SessionTab } from "../useCodex";
+import type { UserInput } from "../../lib/types";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
@@ -3412,5 +3416,57 @@ describe("新建会话应用记忆模式", () => {
     await sendPrompt("你好");
     expect(store.currentThreadId).toBe("t-new");
     expect(store.toast).not.toContain("记忆");
+  });
+});
+
+describe("会话级附件注册表（资源面板 @ 路由）", () => {
+  const mention = (name: string, path: string): UserInput => ({
+    type: "mention",
+    name,
+    path,
+  });
+
+  beforeEach(() => {
+    __resetSessionTabsForTest();
+    store.activeSessionId = null;
+  });
+
+  it("有活动会话且已注册处理器：路由成功并调用处理器", () => {
+    store.sessionTabs.push(makeSessionTab("s1", null));
+    store.activeSessionId = "s1";
+    const fn = vi.fn();
+    registerComposerAddHandler("s1", fn);
+
+    const a = mention("a.txt", "D:/repo/a.txt");
+    expect(addAttachmentToActiveSession(a)).toBe(true);
+    expect(fn).toHaveBeenCalledWith(a);
+    unregisterComposerAddHandler("s1");
+  });
+
+  it("无活动会话：返回 false 且不调用任何处理器", () => {
+    const fn = vi.fn();
+    registerComposerAddHandler("s1", fn);
+
+    expect(addAttachmentToActiveSession(mention("a.txt", "p"))).toBe(false);
+    expect(fn).not.toHaveBeenCalled();
+    unregisterComposerAddHandler("s1");
+  });
+
+  it("活动会话未注册处理器：返回 false", () => {
+    store.sessionTabs.push(makeSessionTab("s1", null));
+    store.activeSessionId = "s1";
+
+    expect(addAttachmentToActiveSession(mention("a.txt", "p"))).toBe(false);
+  });
+
+  it("注销后不再路由到该会话", () => {
+    store.sessionTabs.push(makeSessionTab("s1", null));
+    store.activeSessionId = "s1";
+    const fn = vi.fn();
+    registerComposerAddHandler("s1", fn);
+    unregisterComposerAddHandler("s1");
+
+    expect(addAttachmentToActiveSession(mention("a.txt", "p"))).toBe(false);
+    expect(fn).not.toHaveBeenCalled();
   });
 });

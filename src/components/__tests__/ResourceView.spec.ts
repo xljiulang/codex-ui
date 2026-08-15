@@ -19,10 +19,16 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
-import { store, __resetSessionTabsForTest } from "../../composables/useCodex";
+import {
+  registerComposerAddHandler,
+  store,
+  unregisterComposerAddHandler,
+  __resetSessionTabsForTest,
+} from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
+  activeTabId,
   openFileTab,
   tabs,
   type FileEditorTab,
@@ -281,9 +287,12 @@ describe("ResourceView 文件树", () => {
       interactions: [],
     });
     store.activeSessionId = "s1";
+    // 会话标签正在显示：附件入口可见（隐藏场景由专门用例覆盖）
+    activeTabId.value = "s1";
   });
 
   afterEach(() => {
+    unregisterComposerAddHandler("s1");
     __resetSessionFsForTest();
     vi.useRealTimers();
   });
@@ -997,10 +1006,9 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("添加为会话附件：调用全局入口并携带协议附件", async () => {
+  it("添加为会话附件：路由到活动会话的注册处理器并携带协议附件", async () => {
     const addAttachment = vi.fn();
-    (window as unknown as { __CODEX_UI_ADD_ATTACHMENT__?: unknown }).__CODEX_UI_ADD_ATTACHMENT__ =
-      addAttachment;
+    registerComposerAddHandler("s1", addAttachment);
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "添加为会话附件");
@@ -1041,10 +1049,9 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("点击 @ 按钮调用全局附件入口，且不触发行点击", async () => {
+  it("点击 @ 按钮路由到活动会话的注册处理器，且不触发行点击", async () => {
     const addAttachment = vi.fn();
-    (window as unknown as { __CODEX_UI_ADD_ATTACHMENT__?: unknown }).__CODEX_UI_ADD_ATTACHMENT__ =
-      addAttachment;
+    registerComposerAddHandler("s1", addAttachment);
     const wrapper = await mountPanel();
 
     // 文件行：只添加附件，不打开文件（不触发内容探测）
@@ -1064,6 +1071,26 @@ describe("ResourceView 文件树", () => {
     const wasCollapsed = dirRow.classes().includes("collapsed");
     await dirRow.find(".resource-add").trigger("click");
     expect(dirRow.classes().includes("collapsed")).toBe(wasCollapsed);
+    wrapper.unmount();
+  });
+
+  it("非会话视图（文件标签激活）时：隐藏「添加为会话附件」菜单项与行 @ 按钮", async () => {
+    activeTabId.value = "file1";
+    const wrapper = await mountPanel();
+    // 树行与搜索结果行均无 @ 按钮
+    expect(wrapper.find(".resource-add").exists()).toBe(false);
+    // 文件右键菜单不含附件项
+    await openRowCtx(wrapper, ".resource-row.resource-file");
+    const fileLabels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(fileLabels).not.toContain("添加为会话附件");
+    // 目录右键菜单不含附件项
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    const dirLabels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(dirLabels).not.toContain("添加为会话附件");
     wrapper.unmount();
   });
 

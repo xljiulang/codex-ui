@@ -339,6 +339,39 @@ export function activeSessionTab(): SessionTab | null {
 }
 
 /**
+ * ComposerBar 注册的“添加为会话附件”处理器：tabId → handler。
+ * 取代旧的单例 window 钩子：多个会话标签同时挂载时，只有注册表能保证
+ * 附件路由到当前活动的会话输入区，而不是最后挂载的那个。
+ */
+const composerAddHandlers = new Map<string, (a: UserInput) => void>();
+
+/** ComposerBar 挂载/创建编辑器后注册本会话标签的附件处理器 */
+export function registerComposerAddHandler(
+  tabId: string,
+  fn: (a: UserInput) => void,
+) {
+  composerAddHandlers.set(tabId, fn);
+}
+
+/** ComposerBar 卸载时注销，避免路由到已关闭会话 */
+export function unregisterComposerAddHandler(tabId: string) {
+  composerAddHandlers.delete(tabId);
+}
+
+/**
+ * 资源面板“添加为会话附件”路由：按当前活动会话标签 id 查找其 ComposerBar
+ * 处理器并调用；无活动会话或处理器缺失时返回 false，由调用方兜底。
+ */
+export function addAttachmentToActiveSession(a: UserInput): boolean {
+  const tab = activeSessionTab();
+  if (!tab) return false;
+  const fn = composerAddHandlers.get(tab.id);
+  if (!fn) return false;
+  fn(a);
+  return true;
+}
+
+/**
  * 会话标签显示标题：恒为 `{sessionroot} / {标题内容}` 格式。
  * sessionroot 取标签解析后工作目录的目录名（线程 cwd → 新对话预选目录 → workspace 兜底）；
  * 标题内容取名称/摘要，无线程的新对话兜底“新建会话”；无任何可用目录时降级为仅标题内容。

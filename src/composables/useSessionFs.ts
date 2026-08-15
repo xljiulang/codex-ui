@@ -1,11 +1,16 @@
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { setToast, store, toastError, workspace } from "./useCodex";
+import {
+  addAttachmentToActiveSession,
+  setToast,
+  store,
+  toastError,
+  workspace,
+} from "./useCodex";
 import { activeTab, openFileTab, openPreviewTab } from "./useEditorTabs";
 import { TabKind } from "../lib/tabs";
 import { toUserAttachment } from "../lib/mention";
-import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
 import { pathBaseName, relPathOf } from "../lib/format";
 import { previewTypeForName } from "../lib/preview";
@@ -556,15 +561,10 @@ export async function openPathInApp(path: string): Promise<boolean> {
   }
 }
 
-/** 添加为会话附件：优先走 ComposerBar 全局入口，缺失时兜底 push store */
+/** 添加为会话附件：路由到当前活动会话的 ComposerBar；异常态兜底 push store */
 export function addAsAttachment(entry: FsEntry) {
   const a = toUserAttachment(entry.name, entry.path);
-  const w = window as unknown as {
-    __CODEX_UI_ADD_ATTACHMENT__?: (a: UserInput) => void;
-  };
-  if (typeof w.__CODEX_UI_ADD_ATTACHMENT__ === "function") {
-    w.__CODEX_UI_ADD_ATTACHMENT__(a);
-  } else {
+  if (!addAttachmentToActiveSession(a)) {
     store.attachments.push(a);
   }
   setToast(`已添加「${entry.name}」为会话附件`);

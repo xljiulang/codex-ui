@@ -29,11 +29,13 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 import { invoke } from "@tauri-apps/api/core";
 import ComposerBar from "../ComposerBar.vue";
 import {
+  addAttachmentToActiveSession,
   ensureThreadPlugins,
   NEW_CHAT_PLUGIN_KEY,
   sendPrompt,
   store,
   type SessionTab,
+  __resetSessionTabsForTest,
 } from "../../composables/useCodex";
 import type { UserInput } from "../../lib/types";
 
@@ -1474,5 +1476,134 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       type: "mention",
       path: "D:/repo/src/a.cs",
     });
+  });
+});
+
+describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
+  let wrapperA: VueWrapper | null = null;
+  let wrapperB: VueWrapper | null = null;
+
+  function makeTab(id: string): SessionTab {
+    return {
+      id,
+      kind: "chat",
+      title: "会话",
+      icon: "chat",
+      threadId: null,
+      name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
+      origin: null,
+      workspace: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loading: false,
+      newChatWorkspace: null,
+      interactions: [],
+    };
+  }
+
+  function makeAttachment(name: string, path: string): UserInput {
+    return { type: "mention", name, path };
+  }
+
+  beforeEach(() => {
+    store.attachments.splice(0);
+    store.threadPlugins = {};
+    store.skills = [];
+    store.skillsLoaded = false;
+    store.currentThreadId = null;
+    store.server.startupWorkspace = "D:/repo";
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.settings.enter_to_send = true;
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+    mockRpc(false);
+    __resetSessionTabsForTest();
+  });
+
+  afterEach(() => {
+    wrapperB?.unmount();
+    wrapperB = null;
+    wrapperA?.unmount();
+    wrapperA = null;
+  });
+
+  it("两个会话同时挂载：附件路由到活动会话 A，不进入最后挂载的 B", async () => {
+    const tabA = makeTab("tab-a");
+    const tabB = makeTab("tab-b");
+    store.sessionTabs.push(tabA, tabB);
+    store.activeSessionId = "tab-a";
+
+    wrapperA = mount(ComposerBar, {
+      props: { tab: tabA, active: true },
+    });
+    wrapperB = mount(ComposerBar, {
+      props: { tab: tabB, active: false },
+    });
+    await flushPromises();
+
+    const a = makeAttachment("a.txt", "D:/repo/a.txt");
+    expect(addAttachmentToActiveSession(a)).toBe(true);
+    // 只写入 A 的输入区并同步 store；B 完全不受影响
+    expect(store.attachments).toEqual([a]);
+    expect(tabA.draftAttachments).toEqual([a]);
+    expect(tabB.draftAttachments).toEqual([]);
+  });
+
+  it("切换活动会话后：附件路由到新的活动会话 B", async () => {
+    const tabA = makeTab("tab-a");
+    const tabB = makeTab("tab-b");
+    store.sessionTabs.push(tabA, tabB);
+    store.activeSessionId = "tab-a";
+
+    wrapperA = mount(ComposerBar, {
+      props: { tab: tabA, active: true },
+    });
+    wrapperB = mount(ComposerBar, {
+      props: { tab: tabB, active: false },
+    });
+    await flushPromises();
+
+    store.activeSessionId = "tab-b";
+    const b = makeAttachment("b.cs", "D:/repo/src/b.cs");
+    expect(addAttachmentToActiveSession(b)).toBe(true);
+    expect(store.attachments).toEqual([b]);
+    expect(tabB.draftAttachments).toEqual([b]);
+    expect(tabA.draftAttachments).toEqual([]);
+  });
+
+  it("卸载后注销：附件不再路由到该会话", async () => {
+    const tabA = makeTab("tab-a");
+    store.sessionTabs.push(tabA);
+    store.activeSessionId = "tab-a";
+
+    wrapperA = mount(ComposerBar, {
+      props: { tab: tabA, active: true },
+    });
+    await flushPromises();
+    wrapperA.unmount();
+    wrapperA = null;
+
+    const a = makeAttachment("a.txt", "D:/repo/a.txt");
+    expect(addAttachmentToActiveSession(a)).toBe(false);
+    expect(store.attachments).toEqual([]);
+    expect(tabA.draftAttachments).toEqual([]);
   });
 });

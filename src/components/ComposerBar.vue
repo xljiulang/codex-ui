@@ -17,12 +17,14 @@ import {
   effectiveEffort,
   modelDisplayName,
   permissionChip,
+  registerComposerAddHandler,
   resolveSessionWorkspace,
   sendPrompt,
   setToast,
   store,
   toastError,
   type SessionTab,
+  unregisterComposerAddHandler,
 } from "../composables/useCodex";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
@@ -184,7 +186,7 @@ const editor = useEditor({
   onCreate: () => {
     syncAfterChange();
     exposeEditor();
-    exposeAddAttachment();
+    registerAddAttachment();
     if (props.active) restoreDraftFromTab();
   },
   onUpdate: () => {
@@ -204,18 +206,16 @@ function exposeEditor() {
   }
 }
 
-/** 会话资源面板“添加为会话附件”的全局入口：追加到附件行并同步 store */
-function exposeAddAttachment() {
-  try {
-    (window as unknown as Record<string, unknown>).__CODEX_UI_ADD_ATTACHMENT__ =
-      (a: UserInput) => {
-        rowAttachments.value.push(a);
-        syncAttachments();
-        void nextTick(() => editor.value?.commands.focus());
-      };
-  } catch {
-    // 非浏览器环境忽略
-  }
+/** 会话资源面板“添加为会话附件”入口：向注册表注册本会话标签的处理器 */
+function registerAddAttachment() {
+  if (!props.tab) return;
+  registerComposerAddHandler(props.tab.id, (a: UserInput) => {
+    rowAttachments.value.push(a);
+    syncAttachments();
+    // 同步进标签草稿：切走/恢复时附件不被草稿恢复覆盖
+    props.tab.draftAttachments = [...rowAttachments.value];
+    void nextTick(() => editor.value?.commands.focus());
+  });
 }
 
 function currentRuns(): EditorRun[] {
@@ -458,12 +458,13 @@ onMounted(() => {
 });
 watch(editor, () => {
   exposeEditor();
-  exposeAddAttachment();
+  registerAddAttachment();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
   window.removeEventListener("mousedown", onWindowMousedown);
   window.removeEventListener("resize", clampComposerHeightOnResize);
+  if (props.tab) unregisterComposerAddHandler(props.tab.id);
   dropUnlisten?.();
   endComposerResize();
   debouncedFileSearch.cancel();

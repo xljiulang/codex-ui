@@ -67,17 +67,19 @@ import {
   ICON_TERMINAL,
 } from "../lib/icons";
 import {
+  activeTabId,
   isFileTabOpen,
   openTerminalTab,
 } from "../composables/useEditorTabs";
 
 const props = defineProps<{ active: boolean }>();
 
-/** 是否存在活动会话标签：无则隐藏「添加为会话附件」入口，避免附件进入错误输入区 */
+/** 是否正在显示活动会话标签：仅会话视图可见时提供「添加为会话附件」入口，
+ *  避免附件进入隐藏/非活动会话的输入区（文件/diff/预览/终端标签激活时隐藏） */
 const hasActiveSessionTab = computed(
   () =>
-    !!store.activeSessionId &&
-    store.sessionTabs.some((t) => t.id === store.activeSessionId),
+    store.activeSessionId !== null &&
+    activeTabId.value === store.activeSessionId,
 );
 
 const ICON_FILE =
