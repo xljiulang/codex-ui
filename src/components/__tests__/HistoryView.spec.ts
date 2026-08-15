@@ -726,7 +726,7 @@ describe("HistoryView 会话标签联动", () => {
     store.sessionTabs.splice(0, store.sessionTabs.length);
   });
 
-  it("已打开标签的会话行显示「已打开」标记，后台运行中显示呼吸点", async () => {
+  it("后台运行中的会话行显示呼吸点，未运行不显示", async () => {
     store.sessionTabs.push({
       id: "s1",
       kind: "chat",
@@ -757,9 +757,7 @@ describe("HistoryView 会话标签联动", () => {
     const rows = wrapper.findAll(".history-item");
     const t1Row = rows.find((r) => r.text().includes("会话一"))!;
     const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
-    expect(t1Row.find(".history-open-badge").exists()).toBe(true);
     expect(t1Row.find(".history-run-dot").exists()).toBe(true);
-    expect(t2Row.find(".history-open-badge").exists()).toBe(false);
     expect(t2Row.find(".history-run-dot").exists()).toBe(false);
     wrapper.unmount();
   });

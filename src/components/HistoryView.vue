@@ -379,7 +379,6 @@ onBeforeUnmount(() => {
           class="history-item"
           :class="{
             active: row.thread.id === store.currentThreadId,
-            open: isThreadOpen(row.thread.id),
             running: isThreadRunning(row.thread.id),
             'folder-item': row.inFolder,
           }"
@@ -408,13 +407,6 @@ onBeforeUnmount(() => {
                   </svg>
                 </span>
                 <span class="history-title">{{ threadTitle(row.thread) }}</span>
-                <span
-                  v-if="isThreadOpen(row.thread.id)"
-                  class="history-open-badge"
-                  title="已在会话标签中打开"
-                >
-                  已打开
-                </span>
                 <span
                   v-if="isThreadRunning(row.thread.id)"
                   class="history-run-dot"
