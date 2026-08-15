@@ -79,9 +79,22 @@ describe("AppHeader 新建会话选择工作目录", () => {
     mockedInvoke.mockResolvedValue("D:/project");
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
-    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
+      initialDir: "D:/repo",
+    });
     expect(mockedOpenNewSession).toHaveBeenCalledWith("D:/project");
     expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("有会话时目录选择器初始目录为当前会话工作目录", async () => {
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = "D:/session";
+    mockedInvoke.mockResolvedValue("D:/project");
+    const wrapper = mountHeader();
+    await wrapper.find('button[aria-label="新建会话"]').trigger("click");
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
+      initialDir: "D:/session",
+    });
   });
 
   it("取消选择文件夹：流程直接结束（不新建、不聚焦、不切 Tab）", async () => {
@@ -89,7 +102,9 @@ describe("AppHeader 新建会话选择工作目录", () => {
     store.showSettings = true;
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="新建会话"]').trigger("click");
-    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory");
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
+      initialDir: "D:/repo",
+    });
     expect(mockedOpenNewSession).not.toHaveBeenCalled();
     expect(store.panelTab).toBe("history");
     expect(store.showSettings).toBe(true);

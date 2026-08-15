@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { openNewSession, setToast, store, toastError } from "../composables/useCodex";
+import {
+  openNewSession,
+  resolveCwd,
+  setToast,
+  store,
+  toastError,
+} from "../composables/useCodex";
 import { ICON_PLUS } from "../lib/icons";
 
 // 选择文件夹对话框打开中：禁止重复触发，避免同时弹多个系统对话框
@@ -11,8 +17,10 @@ async function onNewChat() {
   if (picking.value) return;
   picking.value = true;
   try {
-    // 先选目录；取消选择文件夹则流程直接结束（不新建、不聚焦、不切 Tab）
-    const dir = await invoke<string | null>("pick_directory");
+    // 先选目录（初始定位到当前维护的工作目录）；取消选择文件夹则流程直接结束（不新建、不聚焦、不切 Tab）
+    const dir = await invoke<string | null>("pick_directory", {
+      initialDir: resolveCwd(),
+    });
     if (!dir) return;
     await openNewSession(dir);
   } catch (e) {
