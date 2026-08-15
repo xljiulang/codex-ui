@@ -35,6 +35,9 @@ export const ICON_PIN =
 export const ICON_PLUS = "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z";
 export const ICON_REFRESH =
   "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
+/** 更多操作（三个点） */
+export const ICON_MORE =
+  "M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z";
 export const ICON_CHEVRON_DOWN = "M4 6l4 4 4-4z";
 
 /** 目标：旗帜（目标芯片的设置/取消按钮与状态展示共用） */

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import GitBranchMenu from "./GitBranchMenu.vue";
+import GitHistoryList from "./GitHistoryList.vue";
 import { askConfirm, setToast, toastError } from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
@@ -21,7 +22,6 @@ import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
   gitStatusLetter,
   normalizeDiffKind,
-  type GitCommitEntry,
   type GitFile,
   type GitPullResult,
   type GitPushResult,
@@ -33,7 +33,6 @@ import {
   type GitDirNode,
   type GitFileNode,
 } from "../lib/gitTree";
-import { formatDateTime } from "../lib/format";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
@@ -75,13 +74,6 @@ const pushBusy = ref(false);
 const commitMessage = ref("");
 const commitBusy = ref(false);
 
-/** 提交历史（最新在前），git_changes_log 返回 */
-const commits = ref<GitCommitEntry[]>([]);
-const logBusy = ref(false);
-/** 是否还有更旧的提交可加载（上一批返回满 50 条即视为还有更多） */
-const logHasMore = ref(false);
-const LOG_LIMIT = 50;
-
 const ICON_STAGE =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
 const ICON_UNSTAGE =
@@ -94,8 +86,6 @@ const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
 const ICON_CHECK =
   "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z";
-const ICON_MORE =
-  "M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z";
 
 /** 分区：更改（工作区侧） / 暂存更改（HEAD→索引侧） */
 type GitSection = "changes" | "staged";
@@ -322,59 +312,6 @@ async function toggleBranchMenu() {
 function applyBranchStatus(st: GitStatus) {
   gitStatus.value = st;
 }
-
-/** 重载提交历史第一页（最新在前）；由 gitStatus 变化/手动刷新触发 */
-async function loadCommitLog() {
-  const root = repoWorkspace.value;
-  if (!root || logBusy.value) return;
-  logBusy.value = true;
-  try {
-    const res = await invoke<GitCommitEntry[]>("git_changes_log", {
-      workspace: root,
-      limit: LOG_LIMIT,
-      before: null,
-    });
-    commits.value = Array.isArray(res) ? res : [];
-    logHasMore.value = commits.value.length === LOG_LIMIT;
-  } catch {
-    commits.value = [];
-    logHasMore.value = false;
-  } finally {
-    logBusy.value = false;
-  }
-}
-
-/** 加载更多提交历史：以当前最后一条 hash 为游标续页并追加 */
-async function loadMoreCommits() {
-  const root = repoWorkspace.value;
-  const last = commits.value[commits.value.length - 1];
-  if (!root || logBusy.value || !last) return;
-  logBusy.value = true;
-  try {
-    const res = await invoke<GitCommitEntry[]>("git_changes_log", {
-      workspace: root,
-      limit: LOG_LIMIT,
-      before: last.hash,
-    });
-    if (!Array.isArray(res) || !res.length) {
-      // 已到历史尽头（含游标失效/重写场景）：隐藏按钮，保留已加载列表
-      logHasMore.value = false;
-      return;
-    }
-    commits.value = commits.value.concat(res);
-    logHasMore.value = res.length === LOG_LIMIT;
-  } catch {
-    // 加载更多失败保持现状，按钮保留以便重试
-  } finally {
-    logBusy.value = false;
-  }
-}
-
-// gitStatus 每次刷新（含提交/合并/拉取/切分支）后同步刷新提交历史
-watch(
-  () => gitStatus.value,
-  () => void loadCommitLog(),
-);
 
 function onWindowClick(e: MouseEvent) {
   // 右键菜单：任意外部 click 关闭（弹层内部点击由各自处理器负责）
@@ -999,32 +936,7 @@ async function restoreDir(node: GitDirNode) {
           <span>提交历史</span>
         </div>
         <template v-if="!isSectionCollapsed('history')">
-          <div v-if="commits.length" class="git-log-list">
-            <div v-for="c in commits" :key="c.hash" class="git-log-item">
-              <span class="git-log-dot" aria-hidden="true"></span>
-              <div class="git-log-main">
-                <span class="git-log-subject">{{ c.subject }}</span>
-                <span class="git-log-meta">
-                  {{ c.author }} · {{ formatDateTime(c.timeSecs) }}
-                </span>
-              </div>
-              <span class="git-log-hash" :title="c.hash">{{ c.shortHash }}</span>
-            </div>
-            <button
-              v-if="logHasMore"
-              class="git-icon-btn git-log-more"
-              aria-label="加载更多"
-              v-tooltip="'加载更多'"
-              :disabled="logBusy"
-              @click="loadMoreCommits()"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_MORE" />
-              </svg>
-            </button>
-          </div>
-          <div v-else-if="logBusy" class="git-section-empty">加载中…</div>
-          <div v-else class="git-section-empty">暂无提交记录</div>
+          <GitHistoryList :workspace="repoWorkspace" :reload-key="gitStatus" />
         </template>
       </div>
     </template>
