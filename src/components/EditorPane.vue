@@ -52,6 +52,7 @@ import {
   ICON_CLOSE_ALL,
   ICON_CLOSE_LEFT,
   ICON_CLOSE_RIGHT,
+  ICON_FILE,
   ICON_REVEAL,
   SESSION_LOGO_PATHS,
   ICON_TERMINAL,
@@ -64,10 +65,6 @@ const TextEditorPane = defineAsyncComponent(
 const DiffPane = defineAsyncComponent(() => import("./DiffPane.vue"));
 const PreviewPane = defineAsyncComponent(() => import("./PreviewPane.vue"));
 const TerminalPane = defineAsyncComponent(() => import("./TerminalPane.vue"));
-
-/** 通用文件回退图标（与资源面板一致） */
-const ICON_FILE =
-  "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 
 const activeFileTab = computed<FileEditorTab | null>(() =>
   activeTab.value?.kind === TabKind.File

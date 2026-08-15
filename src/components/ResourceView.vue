@@ -7,6 +7,7 @@ import {
   workspace,
 } from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { useResourceDragDrop } from "../composables/useResourceDragDrop";
 import {
   clearSearch,
   copyEntry,
@@ -56,13 +57,18 @@ import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
   ICON_AT,
+  ICON_COPY,
   ICON_DELETE,
+  ICON_FILE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
+  ICON_INFO,
   ICON_OPEN,
+  ICON_PASTE,
   ICON_PLUS,
   ICON_REFRESH,
   ICON_RENAME,
+  ICON_REVEAL,
   ICON_TERMINAL,
 } from "../lib/icons";
 import {
@@ -83,17 +89,6 @@ const hasActiveSessionTab = computed(
     activeTab.value?.kind === TabKind.Chat,
 );
 
-const ICON_FILE =
-  "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
-const ICON_PASTE =
-  "M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm2 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z";
-const ICON_COPY =
-  "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
-const ICON_REVEAL =
-  "M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z";
-const ICON_INFO =
-  "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z";
-
 const {
   ctxMenu,
   openCtx,
@@ -106,18 +101,15 @@ const propsEntry = ref<FsEntry | null>(null);
 const propsLoading = ref(false);
 const editingPath = ref<string | null>(null);
 const editName = ref("");
-/** 树内拖拽移动（自绘指针拖拽）：按下起点、激活态、高亮目标与浮动幽灵 */
-const dragStart = ref<{ entry: FsEntry; x: number; y: number } | null>(null);
-const dragActive = ref(false);
-const dragOverPath = ref<string | null>(null);
-const dragGhost = ref<{
-  x: number;
-  y: number;
-  name: string;
-  isDir: boolean;
-} | null>(null);
-/** 拖拽结束后的合成 click 抑制标志（setTimeout(0) 复位） */
-const suppressClick = ref(false);
+// 树内拖拽移动（自绘指针拖拽）
+const {
+  dragOverPath,
+  dragGhost,
+  suppressClick,
+  isDragging,
+  onRowPointerDown,
+  cancelDrag,
+} = useResourceDragDrop(moveEntry);
 
 watch(
   () => props.active,
@@ -340,79 +332,6 @@ async function onCreateTextFile(parent: FsEntry) {
   startRename(created);
 }
 
-/** 指针拖拽移动：按下后移动超过阈值才激活；激活后显示幽灵并命中高亮目标目录 */
-const DRAG_THRESHOLD = 5;
-
-function onRowPointerDown(entry: FsEntry, e: PointerEvent) {
-  if (e.button !== 0) return;
-  const t = e.target as HTMLElement | null;
-  if (t?.closest?.(".rename-input, .resource-add, .resource-arrow")) return;
-  dragStart.value = { entry, x: e.clientX, y: e.clientY };
-}
-
-function cancelDrag() {
-  dragStart.value = null;
-  dragActive.value = false;
-  dragOverPath.value = null;
-  dragGhost.value = null;
-  document.body.classList.remove("resource-dragging");
-}
-
-/** 拖拽目标合法性：源存在、目标不是源自身、目标不在源目录内（大小写不敏感） */
-function canDropTo(targetPath: string): boolean {
-  const src = dragStart.value?.entry.path;
-  if (!src) return false;
-  const srcKey = src.replace(/\//g, "\\").toLowerCase();
-  const targetKey = targetPath.replace(/\//g, "\\").toLowerCase();
-  if (targetKey === srcKey) return false;
-  return !targetKey.startsWith(srcKey + "\\");
-}
-
-function onWindowPointerMove(e: PointerEvent) {
-  const start = dragStart.value;
-  if (!start) return;
-  if (!dragActive.value) {
-    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) {
-      return;
-    }
-    dragActive.value = true;
-    document.body.classList.add("resource-dragging");
-  }
-  dragGhost.value = {
-    x: e.clientX,
-    y: e.clientY,
-    name: start.entry.name,
-    isDir: start.entry.isDir,
-  };
-  // 命中检测：指针下最近的资源行；仅目录且合法时高亮
-  const el = document.elementFromPoint(e.clientX, e.clientY);
-  const row = el?.closest?.(".resource-row") as HTMLElement | null;
-  const path = row?.dataset.fsPath;
-  dragOverPath.value =
-    path && row.classList.contains("resource-dir") && canDropTo(path)
-      ? path
-      : null;
-}
-
-function onWindowPointerUp() {
-  const start = dragStart.value;
-  dragStart.value = null;
-  if (dragActive.value) {
-    dragActive.value = false;
-    suppressClick.value = true;
-    window.setTimeout(() => {
-      suppressClick.value = false;
-    }, 0);
-    const target = dragOverPath.value;
-    dragOverPath.value = null;
-    dragGhost.value = null;
-    document.body.classList.remove("resource-dragging");
-    if (start && target) {
-      void moveEntry(start.entry.path, target);
-    }
-  }
-}
-
 function onRowContext(row: ResourceRow, e: MouseEvent) {
   if (row.kind === "root") openRootMenu(e);
   else openEntryMenu(row.entry, e);
@@ -511,7 +430,7 @@ function onRefresh() {
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
-  if (dragActive.value || dragStart.value) {
+  if (isDragging.value) {
     cancelDrag();
     return;
   }
@@ -525,17 +444,11 @@ onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   window.addEventListener("click", onWindowClick);
   window.addEventListener("scroll", onWindowScroll, true);
-  window.addEventListener("pointermove", onWindowPointerMove);
-  window.addEventListener("pointerup", onWindowPointerUp);
-  window.addEventListener("pointercancel", cancelDrag);
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("click", onWindowClick);
   window.removeEventListener("scroll", onWindowScroll, true);
-  window.removeEventListener("pointermove", onWindowPointerMove);
-  window.removeEventListener("pointerup", onWindowPointerUp);
-  window.removeEventListener("pointercancel", cancelDrag);
 });
 
 const deleteLabel = computed(() => {

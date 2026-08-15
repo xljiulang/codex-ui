@@ -40,11 +40,44 @@ export interface ThreadRead {
   };
 }
 
-export type ThreadItem = {
+/** 消息/工具项公共字段（协议推送的动态字段，各类型按需具备） */
+export interface ThreadItemBase {
   id: string;
-  type: string;
+  streaming?: boolean;
+  startedAtMs?: number;
+  completedAtMs?: number;
+  durationMs?: number | null;
+  clientId?: string;
+  /** 协议未枚举字段保持松散访问（迁移期兼容，按需 as 收窄） */
   [key: string]: unknown;
-};
+}
+
+/**
+ * 消息/工具项：type 为判别字段，按类型收窄后字段有真实类型；
+ * 未枚举的类型落入 UnknownItem（松散访问）。
+ */
+export type ThreadItem =
+  | UserMessageItem
+  | AgentMessageItem
+  | PlanItem
+  | ReasoningItem
+  | ErrorItem
+  | CommandExecutionItem
+  | CollabAgentToolCallItem
+  | McpToolCallItem
+  | DynamicToolCallItem
+  | FileChangeItem
+  | WebSearchItem
+  | TodoListItem
+  | ContextCompactionItem
+  | ImageViewItem
+  | SleepItem
+  | UnknownItem;
+
+/** 协议中未枚举的消息/工具类型：保持松散访问 */
+export interface UnknownItem extends ThreadItemBase {
+  type: string;
+}
 
 export interface TextInput {
   type: "text";
@@ -125,33 +158,49 @@ export interface AuthStatus {
   requiresOpenaiAuth?: boolean | null;
 }
 
-export interface AgentMessageItem {
-  id: string;
+export interface AgentMessageItem extends ThreadItemBase {
   type: "agentMessage";
   text: string;
   phase?: string | null;
 }
 
-export interface ReasoningItem {
-  id: string;
+/** 计划模式确认消息（与 agentMessage 同形状） */
+export interface PlanItem extends ThreadItemBase {
+  type: "plan";
+  text: string;
+  phase?: string | null;
+}
+
+export interface ReasoningItem extends ThreadItemBase {
   type: "reasoning";
   summary?: string[];
   content?: string[];
 }
 
-export interface CommandExecutionItem {
-  id: string;
+/** 服务端错误消息（未知消息类型兜底渲染） */
+export interface ErrorItem extends ThreadItemBase {
+  type: "error";
+  message?: string | null;
+}
+
+export interface CommandExecutionItem extends ThreadItemBase {
   type: "commandExecution";
   command: string;
   cwd?: string;
   status: string;
   aggregatedOutput?: string | null;
   exitCode?: number | null;
-  durationMs?: number | null;
 }
 
-export interface McpToolCallItem {
-  id: string;
+/** 子代理协作调用（字段形状同动态工具，宽松访问） */
+export interface CollabAgentToolCallItem extends ThreadItemBase {
+  type: "collabAgentToolCall";
+  status?: string;
+  result?: unknown;
+  error?: { message?: string } | null;
+}
+
+export interface McpToolCallItem extends ThreadItemBase {
   type: "mcpToolCall";
   server: string;
   tool: string;
@@ -159,11 +208,9 @@ export interface McpToolCallItem {
   status: string;
   result?: { content?: unknown[] } | null;
   error?: { message?: string } | null;
-  durationMs?: number | null;
 }
 
-export interface DynamicToolCallItem {
-  id: string;
+export interface DynamicToolCallItem extends ThreadItemBase {
   type: "dynamicToolCall";
   tool: string;
   namespace?: string | null;
@@ -171,26 +218,38 @@ export interface DynamicToolCallItem {
   status: string;
   contentItems?: unknown[] | null;
   success?: boolean | null;
-  durationMs?: number | null;
 }
 
-export interface FileChangeItem {
-  id: string;
+export interface FileChangeItem extends ThreadItemBase {
   type: "fileChange";
   changes: { path: string; kind: string | { type: string }; diff?: string }[];
   status: string;
 }
 
-export interface WebSearchItem {
-  id: string;
+export interface WebSearchItem extends ThreadItemBase {
   type: "webSearch";
   query: string;
 }
 
-export interface TodoListItem {
-  id: string;
+export interface TodoListItem extends ThreadItemBase {
   type: "todoList";
   items: { text: string; completed: boolean }[];
+}
+
+/** 上下文已压缩提示（无附加字段） */
+export interface ContextCompactionItem extends ThreadItemBase {
+  type: "contextCompaction";
+}
+
+/** 图片查看消息（独立图片渲染分支） */
+export interface ImageViewItem extends ThreadItemBase {
+  type: "imageView";
+  path?: string;
+}
+
+/** 等待提示（如命令执行中的 sleep） */
+export interface SleepItem extends ThreadItemBase {
+  type: "sleep";
 }
 
 /** diff 预览内联行（Rust build_diff_preview 返回，字段 camelCase） */
@@ -200,8 +259,7 @@ export type DiffRow =
   | { kind: "add"; newNo: number; text: string }
   | { kind: "sep" };
 
-export interface UserMessageItem {
-  id: string;
+export interface UserMessageItem extends ThreadItemBase {
   type: "userMessage";
   content: UserInput[];
 }

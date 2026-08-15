@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -26,6 +26,8 @@ import {
   type SessionTab,
   unregisterComposerAddHandler,
 } from "../composables/useCodex";
+import { useComposerResize } from "../composables/useComposerResize";
+import { useContextUsage } from "../composables/useContextUsage";
 import type { UserInput } from "../lib/types";
 import { assetUrl } from "../lib/asset";
 import { debounce } from "../lib/debounce";
@@ -115,53 +117,14 @@ watch(
 // 粘贴的截图/位图最大字节数（原路径文件不受限）
 const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
 
-// 输入框可拖拽高度：最低为现有自动高度，最高为窗口一半
-const MIN_COMPOSER_HEIGHT = 120;
-const composerHeight = ref<number | null>(null);
-const resizingComposer = ref(false);
-const compacting = ref(false);
-let resizeStartY = 0;
-let resizeStartH = MIN_COMPOSER_HEIGHT;
-
-function maxComposerHeight(): number {
-  return Math.max(MIN_COMPOSER_HEIGHT, Math.round(window.innerHeight / 2));
-}
-
-function currentComposerHeight(): number {
-  const el = document.querySelector<HTMLElement>(".rich-editor .ProseMirror");
-  return el ? Math.round(el.getBoundingClientRect().height) : MIN_COMPOSER_HEIGHT;
-}
-
-function startComposerResize(e: PointerEvent) {
-  e.preventDefault();
-  resizingComposer.value = true;
-  resizeStartY = e.clientY;
-  resizeStartH = composerHeight.value ?? currentComposerHeight();
-  window.addEventListener("pointermove", onComposerResizeMove);
-  window.addEventListener("pointerup", endComposerResize);
-  document.body.classList.add("resizing-composer");
-}
-
-function onComposerResizeMove(e: PointerEvent) {
-  const h = resizeStartH + (resizeStartY - e.clientY);
-  composerHeight.value = Math.min(
-    maxComposerHeight(),
-    Math.max(MIN_COMPOSER_HEIGHT, Math.round(h)),
-  );
-}
-
-function endComposerResize() {
-  resizingComposer.value = false;
-  window.removeEventListener("pointermove", onComposerResizeMove);
-  window.removeEventListener("pointerup", endComposerResize);
-  document.body.classList.remove("resizing-composer");
-}
-
-function clampComposerHeightOnResize() {
-  if (composerHeight.value != null) {
-    composerHeight.value = Math.min(composerHeight.value, maxComposerHeight());
-  }
-}
+// 输入框可拖拽高度（最低 120px，最高窗口一半）
+const {
+  composerHeight,
+  resizingComposer,
+  startComposerResize,
+  endComposerResize,
+  clampComposerHeightOnResize,
+} = useComposerResize();
 
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
 const sentHistory: string[] = [];
@@ -759,46 +722,8 @@ function rowAttName(a: UserInput): string {
   return a.type === "mention" || a.type === "skill" ? a.name : "";
 }
 
-// 上下文窗口使用情况：window 未知时不显示
-const ctxUsage = computed(() => {
-  const u = store.threadTokenUsage;
-  if (!u || u.window == null || u.window <= 0) return null;
-  return {
-    pct: Math.min(100, Math.round((u.used / u.window) * 100)),
-    used: u.used,
-    window: u.window,
-  };
-});
-
-const ctxTooltip = computed(() => {
-  if (compacting.value) return "正在压缩上下文…";
-  const u = ctxUsage.value;
-  if (!u) return "";
-  return `上下文已用 ${formatTokens(u.used)}，共 ${formatTokens(u.window)}，双击进行压缩`;
-});
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return String(n);
-}
-
-/** 发起 thread/compact/start：回合进行中也可压缩，由服务端处理 */
-async function compactNow() {
-  if (!store.currentThreadId || compacting.value) return;
-  compacting.value = true;
-  try {
-    await invoke("codex_rpc", {
-      method: "thread/compact/start",
-      params: { threadId: store.currentThreadId },
-    });
-    setToast("已开始压缩上下文");
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    compacting.value = false;
-  }
-}
+// 上下文窗口使用情况与手动压缩
+const { ctxUsage, ctxTooltip, compacting, compactNow } = useContextUsage();
 
 function modelChipLabel(): string {
   const name = modelDisplayName(store.model);

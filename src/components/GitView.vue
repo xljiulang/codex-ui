@@ -32,6 +32,7 @@ import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
   ICON_DELETE,
+  ICON_FILE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
   ICON_OPEN,
@@ -74,10 +75,6 @@ const logBusy = ref(false);
 /** 是否还有更旧的提交可加载（上一批返回满 50 条即视为还有更多） */
 const logHasMore = ref(false);
 const LOG_LIMIT = 50;
-
-/** 通用文件回退图标（与资源面板一致） */
-const ICON_FILE =
-  "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 
 const ICON_STAGE =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
