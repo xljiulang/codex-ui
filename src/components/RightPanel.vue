@@ -16,8 +16,8 @@ const isDragging = ref(false);
 let resizeStartX = 0;
 let resizeStartW = DEFAULT_PANEL_WIDTH;
 
-/** Tab 顺序：资源为第一个/默认 tab；供方向键切换使用 */
-const TAB_ORDER = ["resources", "history", "git"] as const;
+/** Tab 顺序：会话为第一个/默认 tab；供方向键切换使用 */
+const TAB_ORDER = ["history", "resources", "git"] as const;
 
 /** 面板宽度钳制：最小为默认宽度，最大为半个窗口宽度 */
 function clampPanelWidth(w: number) {
@@ -92,21 +92,6 @@ onBeforeUnmount(() => {
     <div class="panel-tabs" role="tablist" @keydown="moveTab">
       <button
         class="panel-tab"
-        :class="{ active: activeTab === 'resources' }"
-        role="tab"
-        :tabindex="activeTab === 'resources' ? 0 : -1"
-        :aria-selected="activeTab === 'resources'"
-        @click="store.panelTab = 'resources'"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"
-          />
-        </svg>
-        <span>资源</span>
-      </button>
-      <button
-        class="panel-tab"
         :class="{ active: activeTab === 'history' }"
         role="tab"
         :tabindex="activeTab === 'history' ? 0 : -1"
@@ -119,6 +104,21 @@ onBeforeUnmount(() => {
           />
         </svg>
         <span>会话</span>
+      </button>
+      <button
+        class="panel-tab"
+        :class="{ active: activeTab === 'resources' }"
+        role="tab"
+        :tabindex="activeTab === 'resources' ? 0 : -1"
+        :aria-selected="activeTab === 'resources'"
+        @click="store.panelTab = 'resources'"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"
+          />
+        </svg>
+        <span>资源</span>
       </button>
       <button
         class="panel-tab"

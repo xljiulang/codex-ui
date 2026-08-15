@@ -12,6 +12,7 @@ vi.mock("../../composables/useCodex", () => {
     busy: false,
     loadingThread: false,
     currentThreadId: null,
+    itemsByThread: {} as Record<string, unknown[]>,
     activeWorkByThread: {},
     itemsRev: 0,
     userSendRev: 0,
@@ -36,22 +37,51 @@ vi.mock("../../composables/useCodex", () => {
     exitPlanMode: vi.fn(),
     respondInteraction: vi.fn(
       (interaction: { requestId: number }) => {
-        store.interactions = store.interactions.filter(
-          (i) => i.requestId !== interaction.requestId,
+        const i = store.interactions.findIndex(
+          (x) => x.requestId === interaction.requestId,
         );
+        if (i >= 0) store.interactions.splice(i, 1);
       },
     ),
   };
 });
 
 import ChatView from "../ChatView.vue";
-import { currentItems, respondInteraction, store } from "../../composables/useCodex";
+import { respondInteraction, store } from "../../composables/useCodex";
 import type { ThreadItem } from "../../lib/types";
+import type { SessionTab } from "../../composables/useCodex";
 
-const mockedItems = vi.mocked(currentItems);
+/** 会话标签 fixture：threadId 固定 t1，交互列表与 mock store 共享同一数组 */
+function makeTab(): SessionTab {
+  return {
+    id: "tab-1",
+    threadId: "t1",
+    name: "",
+    origin: "history",
+    cwd: null,
+    resumedThreadId: null,
+    turnActive: false,
+    currentTurnId: null,
+    turnInterrupted: false,
+    goalText: null,
+    goalStatus: null,
+    goalArmed: false,
+    threadTokenUsage: null,
+    followupQueue: [],
+    attachments: [],
+    planPrompt: null,
+    loadingThread: false,
+    newChatCwd: null,
+    interactions: store.interactions as unknown as SessionTab["interactions"],
+  };
+}
+
+let tab: SessionTab;
 
 describe("ChatView 日期分隔线", () => {
   beforeEach(() => {
+    store.interactions.splice(0);
+    tab = reactive(makeTab());
     // happy-dom 用同步 rAF 简化吸底滚动测试（返回 undefined，避免 scrollRaf 守卫卡死）
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
       cb(0);
@@ -63,11 +93,11 @@ describe("ChatView 日期分隔线", () => {
   it("跨天消息之间插入日期分隔线", () => {
     const day1 = new Date(2026, 7, 9, 10, 0).getTime();
     const day2 = new Date(2026, 7, 10, 9, 0).getTime();
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "第一天", startedAtMs: day1 },
       { id: "a2", type: "agentMessage", text: "第二天", startedAtMs: day2 },
     ] as ThreadItem[]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -83,12 +113,12 @@ describe("ChatView 日期分隔线", () => {
 
   it("同一天不重复插入分隔线，缺少时间戳时不插入", () => {
     const day1 = new Date(2026, 7, 9, 10, 0).getTime();
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x", startedAtMs: day1 },
       { id: "a2", type: "agentMessage", text: "y", startedAtMs: day1 },
       { id: "a3", type: "agentMessage", text: "无时间戳" },
     ] as ThreadItem[]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -101,7 +131,7 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("按回合分组渲染：userMessage 起始新回合，历史续接归入伪回合", () => {
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a0", type: "agentMessage", text: "历史" },
       { id: "u1", type: "userMessage", text: "问题1" },
       { id: "r1", type: "reasoning", content: ["思考"] },
@@ -109,7 +139,7 @@ describe("ChatView 日期分隔线", () => {
       { id: "u2", type: "userMessage", text: "问题2" },
       { id: "a2", type: "agentMessage", text: "回答2" },
     ] as ThreadItem[]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -137,8 +167,8 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("无消息时显示空状态", () => {
-    mockedItems.mockReturnValue([]);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = ([]);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -148,17 +178,17 @@ describe("ChatView 日期分隔线", () => {
       },
     });
     expect(wrapper.find(".empty-stub").exists()).toBe(true);
-    store.turnActive = false;
+    tab.turnActive = false;
   });
 
   it("思考中提示随进行中计数显示/隐藏", async () => {
-    store.turnActive = true;
+    tab.turnActive = true;
     store.currentThreadId = "t1";
     store.activeWorkByThread = { t1: 0 };
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -170,16 +200,16 @@ describe("ChatView 日期分隔线", () => {
     store.activeWorkByThread.t1 = 1;
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(false);
-    store.turnActive = false;
+    tab.turnActive = false;
     store.currentThreadId = null;
     store.activeWorkByThread = {};
   });
 
   it("待处理交互内嵌渲染在消息流末尾，回答后移除", async () => {
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -220,7 +250,7 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("交互挂起时不显示“思考中”提示", async () => {
-    store.turnActive = true;
+    tab.turnActive = true;
     store.currentThreadId = "t1";
     store.activeWorkByThread = { t1: 0 };
     store.interactions.push({
@@ -229,10 +259,10 @@ describe("ChatView 日期分隔线", () => {
       params: { questions: [] },
       at: Date.now(),
     });
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -242,18 +272,18 @@ describe("ChatView 日期分隔线", () => {
     });
     expect(wrapper.find(".thinking-chip").exists()).toBe(false);
 
-    store.interactions = [];
+    store.interactions.splice(0);
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(true);
 
-    store.turnActive = false;
+    tab.turnActive = false;
     store.currentThreadId = null;
     store.activeWorkByThread = {};
   });
 
   it("无障碍播报区域随回合状态更新", async () => {
-    mockedItems.mockReturnValue([]);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = ([]);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -264,10 +294,10 @@ describe("ChatView 日期分隔线", () => {
     });
     const live = wrapper.find('.sr-only[aria-live="polite"]');
     expect(live.exists()).toBe(true);
-    store.turnActive = true;
+    tab.turnActive = true;
     await nextTick();
     expect(live.text()).toBe("正在生成回复");
-    store.turnActive = false;
+    tab.turnActive = false;
     await nextTick();
     expect(live.text()).toBe("回复完成");
   });
@@ -276,8 +306,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -301,8 +331,8 @@ describe("ChatView 日期分隔线", () => {
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -326,8 +356,8 @@ describe("ChatView 日期分隔线", () => {
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -357,8 +387,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -392,8 +422,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -424,8 +454,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -454,8 +484,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -484,8 +514,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -520,8 +550,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -554,8 +584,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -589,8 +619,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -620,8 +650,8 @@ describe("ChatView 日期分隔线", () => {
         streaming: true,
       } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -650,8 +680,8 @@ describe("ChatView 日期分隔线", () => {
         streaming: true,
       } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -675,8 +705,8 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    mockedItems.mockReturnValue(arr);
-    const wrapper = mount(ChatView, {
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -701,14 +731,14 @@ describe("ChatView 日期分隔线", () => {
 
 describe("ChatView 计划已就绪气泡", () => {
   beforeEach(() => {
-    store.planPrompt = null;
+    tab.planPrompt = null;
   });
 
   it("planPrompt 设置后消息流末尾渲染计划气泡，解决后移除", async () => {
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -719,7 +749,7 @@ describe("ChatView 计划已就绪气泡", () => {
     });
     expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(false);
 
-    store.planPrompt = {
+    tab.planPrompt = {
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案",
@@ -730,14 +760,14 @@ describe("ChatView 计划已就绪气泡", () => {
     expect(bubbles[0].text()).toContain("计划已就绪");
     expect(bubbles[0].text()).not.toContain("# 修复方案");
 
-    store.planPrompt = null;
+    tab.planPrompt = null;
     await nextTick();
     expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(false);
     wrapper.unmount();
   });
 
   it("与交互气泡并存时 InlineInteraction 在前、计划气泡在后", async () => {
-    mockedItems.mockReturnValue([
+    store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
     store.interactions.push({
@@ -746,12 +776,12 @@ describe("ChatView 计划已就绪气泡", () => {
       params: { command: "echo hi", reason: "测试" },
       at: Date.now(),
     });
-    store.planPrompt = {
+    tab.planPrompt = {
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案",
     };
-    const wrapper = mount(ChatView, {
+    const wrapper = mount(ChatView, { props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -766,7 +796,7 @@ describe("ChatView 计划已就绪气泡", () => {
     expect(bubbles[0].text()).toContain("批准执行命令");
     expect(bubbles[1].text()).toContain("计划已就绪");
     wrapper.unmount();
-    store.interactions = [];
-    store.planPrompt = null;
+    store.interactions.splice(0);
+    tab.planPrompt = null;
   });
 });

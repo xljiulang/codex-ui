@@ -113,6 +113,39 @@ export interface PlanPrompt {
   planText: string;
 }
 
+/**
+ * 会话标签：左侧标签区的每个“会话”标签对应一个打开的会话
+ * （threadId 非空 = 已绑定线程；null = 待发送首条消息的新对话）。
+ * 活动标签的实时状态以 store 的 current* 字段为准（由自动同步 watch 落回本记录）；
+ * 切换标签时以本记录恢复 live 字段。消息列表本身按线程存于 itemsByThread，无需复制。
+ */
+export interface SessionTab {
+  /** 标签唯一 id（线程绑定前后保持稳定，供编辑器标签 key 使用） */
+  id: string;
+  /** 绑定的线程 id；一个会话最多对应一个标签（唯一性约束） */
+  threadId: string | null;
+  /** 会话名称（自动生成/手动重命名，随 thread/name/updated 同步） */
+  name: string;
+  origin: "new" | "history" | null;
+  cwd: string | null;
+  resumedThreadId: string | null;
+  turnActive: boolean;
+  currentTurnId: string | null;
+  turnInterrupted: boolean;
+  goalText: string | null;
+  goalStatus: GoalStatus | null;
+  goalArmed: boolean;
+  threadTokenUsage: { used: number; window: number | null } | null;
+  followupQueue: { text: string; attachments: UserInput[] }[];
+  attachments: UserInput[];
+  planPrompt: PlanPrompt | null;
+  loadingThread: boolean;
+  /** 新建对话时可选的项目目录（null = 使用启动工作目录） */
+  newChatCwd: string | null;
+  /** 该标签待处理的交互（审批/提问/elicitation），按 threadId 路由 */
+  interactions: PendingInteraction[];
+}
+
 /** @ 菜单中展示的插件条目（plugin/list 归一化结果） */
 export interface PluginItem {
   id: string;
@@ -157,6 +190,10 @@ export const store = reactive({
   currentThreadOrigin: null as "new" | "history" | null,
   currentThreadCwd: null as string | null,
   resumedThreadId: null as string | null,
+  /** 已打开的会话标签列表（多会话标签） */
+  sessionTabs: [] as SessionTab[],
+  /** 当前激活的会话标签 id（null = 尚未初始化任何标签） */
+  activeSessionId: null as string | null,
   itemsByThread: {} as Record<string, ThreadItem[]>,
   // 每个线程“进行中工作”计数（流式文本/进行中工具），避免渲染时全量扫描
   activeWorkByThread: {} as Record<string, number>,
@@ -201,8 +238,8 @@ export const store = reactive({
   goalArmed: false,
   attachments: [] as UserInput[],
   showSettings: false,
-  /** 右侧面板当前激活 Tab；新建会话后由 activateResourcesTab 切回资源 */
-  panelTab: "resources" as PanelTab,
+  /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
+  panelTab: "history" as PanelTab,
   permOpen: false,
   taskOpen: false,
   modelOpen: false,
@@ -213,9 +250,254 @@ export const store = reactive({
   planPrompt: null as PlanPrompt | null,
 });
 
-/** 新建会话后统一入口：把右侧面板切回资源管理器 Tab */
-export function activateResourcesTab() {
-  store.panelTab = "resources";
+let sessionTabSeq = 0;
+
+/** 会话标签唯一 id：线程绑定前/后均稳定（多标签下编辑器标签 key 不变） */
+function nextSessionTabId(): string {
+  return `session-${Date.now()}-${++sessionTabSeq}`;
+}
+
+/** 新对话（未绑定线程）标签的默认状态 */
+function freshSessionTab(): SessionTab {
+  return {
+    id: nextSessionTabId(),
+    threadId: null,
+    name: "",
+    origin: null,
+    cwd: null,
+    resumedThreadId: null,
+    turnActive: false,
+    currentTurnId: null,
+    turnInterrupted: false,
+    goalText: null,
+    goalStatus: null,
+    goalArmed: false,
+    threadTokenUsage: null,
+    followupQueue: [],
+    attachments: [],
+    planPrompt: null,
+    loadingThread: false,
+    newChatCwd: null,
+    interactions: [],
+  };
+}
+
+/** 按线程查找已打开的会话标签（唯一性约束：至多一个） */
+export function findSessionTabByThread(
+  threadId: string | null | undefined,
+): SessionTab | undefined {
+  if (!threadId) return undefined;
+  return store.sessionTabs.find((t) => t.threadId === threadId);
+}
+
+/** 该线程是否已作为会话标签打开 */
+export function isThreadOpen(threadId: string): boolean {
+  return !!findSessionTabByThread(threadId);
+}
+
+/** 该线程的会话标签是否正在后台/前台运行回合 */
+export function isThreadRunning(threadId: string): boolean {
+  return !!findSessionTabByThread(threadId)?.turnActive;
+}
+
+/** 当前激活的会话标签（无则 null） */
+export function activeSessionTab(): SessionTab | null {
+  return store.sessionTabs.find((t) => t.id === store.activeSessionId) ?? null;
+}
+
+/**
+ * 会话标签显示标题：恒为 `{sessionroot} / {标题内容}` 格式。
+ * sessionroot 取标签解析后工作目录的目录名（线程 cwd → 新对话预选目录 → workspace 兜底）；
+ * 标题内容取名称/摘要，无线程的新对话兜底“新建会话”；无任何可用目录时降级为仅标题内容。
+ */
+export function sessionTabTitle(tab: SessionTab): string {
+  const root = resolveTabCwd(tab);
+  const folder = root ? pathBaseName(root) : "";
+  const summary = tab.threadId
+    ? store.threads.find((t) => t.id === tab.threadId)
+    : undefined;
+  const title = tab.name || (summary ? threadTitle(summary) : "新建会话");
+  return folder ? `${folder} / ${title}` : title;
+}
+
+/** 把标签记录恢复到 live 字段（切换/关闭标签时用） */
+function restoreSession(tab: SessionTab) {
+  store.currentThreadId = tab.threadId;
+  store.currentThreadName = tab.name;
+  store.currentThreadOrigin = tab.origin;
+  store.currentThreadCwd = tab.cwd;
+  store.resumedThreadId = tab.resumedThreadId;
+  store.turnActive = tab.turnActive;
+  store.currentTurnId = tab.currentTurnId;
+  store.turnInterrupted = tab.turnInterrupted;
+  store.goalText = tab.goalText;
+  store.goalStatus = tab.goalStatus;
+  store.goalArmed = tab.goalArmed;
+  store.threadTokenUsage = tab.threadTokenUsage;
+  store.planPrompt = tab.planPrompt;
+  store.loadingThread = tab.loadingThread;
+  store.newChatCwd = tab.newChatCwd;
+  store.followupQueue = [...tab.followupQueue];
+  store.attachments = [...tab.attachments];
+}
+
+/** 把 live 字段快照到活动标签记录（活动标签的字段变化后由 watch 持续调用） */
+function syncActiveSessionTab() {
+  const tab = activeSessionTab();
+  if (!tab) return;
+  tab.threadId = store.currentThreadId;
+  tab.name = store.currentThreadName;
+  tab.origin = store.currentThreadOrigin;
+  tab.cwd = store.currentThreadCwd;
+  tab.resumedThreadId = store.resumedThreadId;
+  tab.turnActive = store.turnActive;
+  tab.currentTurnId = store.currentTurnId;
+  tab.turnInterrupted = store.turnInterrupted;
+  tab.goalText = store.goalText;
+  tab.goalStatus = store.goalStatus;
+  tab.goalArmed = store.goalArmed;
+  tab.threadTokenUsage = store.threadTokenUsage;
+  tab.planPrompt = store.planPrompt ? { ...store.planPrompt } : null;
+  tab.loadingThread = store.loadingThread;
+  tab.newChatCwd = store.newChatCwd;
+  tab.followupQueue = [...store.followupQueue];
+  tab.attachments = [...store.attachments];
+}
+
+/** 乐观复位被停止/关闭的标签回合状态（interrupt 异步完成前先复位展示） */
+function markSessionTabStopped(tab: SessionTab | null | undefined) {
+  if (!tab) return;
+  tab.turnActive = false;
+  tab.currentTurnId = null;
+  tab.turnInterrupted = true;
+  tab.goalText = null;
+  tab.goalStatus = null;
+  tab.goalArmed = false;
+}
+
+/**
+ * 切换到指定会话标签：快照当前标签 → 恢复目标标签 → 更新 live 字段。
+ * 会话多开：切换不确认、不中断后台回合。
+ */
+export async function switchSessionTab(id: string): Promise<boolean> {
+  const target = store.sessionTabs.find((t) => t.id === id);
+  if (!target) return false;
+  if (id === store.activeSessionId) return true;
+  syncActiveSessionTab();
+  store.activeSessionId = id;
+  restoreSession(target);
+  return true;
+}
+
+/**
+ * 关闭会话标签：运行中的会话先确认并中断（多开时仅关闭才停止）；关闭活动标签时
+ * 自动切到相邻标签，无剩余标签时新建一个空标签兜底。
+ */
+export async function closeSessionTab(id: string): Promise<void> {
+  const idx = store.sessionTabs.findIndex((t) => t.id === id);
+  if (idx < 0) return;
+  const tab = store.sessionTabs[idx];
+  if (tab.threadId && (tab.turnActive || tab.goalText)) {
+    const ok = await askConfirm({
+      title: "关闭会话标签",
+      message: "该会话仍在进行中，关闭将停止当前回合。是否继续？",
+      confirmLabel: "停止并关闭",
+      cancelLabel: "取消",
+    });
+    if (!ok) return;
+    void interrupt(tab.threadId, tab.currentTurnId);
+    markSessionTabStopped(tab);
+  }
+  const wasActive = store.activeSessionId === id;
+  store.sessionTabs.splice(idx, 1);
+  if (wasActive) {
+    const next =
+      store.sessionTabs[Math.min(idx, store.sessionTabs.length - 1)] ?? null;
+    if (next) {
+      store.activeSessionId = next.id;
+      restoreSession(next);
+    } else {
+      const fresh = freshSessionTab();
+      store.sessionTabs.push(fresh);
+      store.activeSessionId = fresh.id;
+      restoreSession(fresh);
+      void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+    }
+  }
+  // 释放该线程的本地消息缓存（无其它标签引用时）
+  if (
+    tab.threadId &&
+    !store.sessionTabs.some((t) => t.threadId === tab.threadId)
+  ) {
+    delete store.itemsByThread[tab.threadId];
+    delete store.activeWorkByThread[tab.threadId];
+  }
+}
+
+/** 关闭除当前活动标签外的所有会话标签（会话标签右键菜单） */
+export async function closeOtherSessionTabs(): Promise<void> {
+  const keep = store.activeSessionId;
+  for (const tab of [...store.sessionTabs]) {
+    if (tab.id === keep) continue;
+    // 运行中的会话标签跳过（不逐个弹确认），与“关闭所有标签”行为一致
+    if (tab.turnActive || tab.goalText) continue;
+    await closeSessionTab(tab.id);
+  }
+}
+
+/**
+ * 关闭全部会话标签（“关闭所有标签”用）：运行中的跳过并计数；
+ * 关闭后保证至少保留一个空会话标签兜底。
+ * 返回跳过的运行中标签数量。
+ */
+export async function closeAllSessionTabs(): Promise<number> {
+  let skipped = 0;
+  for (const tab of [...store.sessionTabs]) {
+    if (tab.turnActive || tab.goalText) {
+      skipped++;
+      continue;
+    }
+    await closeSessionTab(tab.id);
+  }
+  if (store.sessionTabs.length === 0) {
+    const fresh = freshSessionTab();
+    store.sessionTabs.push(fresh);
+    store.activeSessionId = fresh.id;
+    restoreSession(fresh);
+    void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+  }
+  return skipped;
+}
+
+/**
+ * 打开历史会话的统一入口（唯一性约束）：已有标签绑定该线程则直接切换（不新建、
+ * 不重载）；否则新建标签并加载。返回 true 表示已进入目标会话。
+ */
+export async function openSessionTabForThread(
+  threadId: string,
+): Promise<boolean> {
+  if (threadId === store.currentThreadId) return true;
+  const existing = findSessionTabByThread(threadId);
+  if (existing) {
+    await switchSessionTab(existing.id);
+    return true;
+  }
+  const tab = freshSessionTab();
+  tab.threadId = threadId; // 先绑定，加载期间也满足唯一性
+  store.sessionTabs.push(tab);
+  if (!(await switchSessionTab(tab.id))) {
+    const i = store.sessionTabs.indexOf(tab);
+    if (i >= 0) store.sessionTabs.splice(i, 1);
+    return false;
+  }
+  tab.origin = "history";
+  return await loadThreadInto(tab, threadId);
+}
+
+/** 仅测试用：清空会话标签状态 */
+export function __resetSessionTabsForTest() {
+  store.sessionTabs.splice(0, store.sessionTabs.length);
+  store.activeSessionId = null;
 }
 
 let unlisteners: UnlistenFn[] = [];
@@ -392,55 +674,37 @@ export function resolveCwd(): string {
   return cwd?.trim() || store.server.workspace?.trim() || "";
 }
 
-async function updateWindowTitle() {
-  try {
-    const win = getCurrentWindow();
-    const cwd = resolveCwd();
-    const folder = cwd ? pathBaseName(cwd) : "";
-    const threadTitle = currentThreadTitle();
-    const title = threadTitle
-      ? folder
-        ? `${folder} / ${threadTitle}`
-        : threadTitle
-      : folder || "Codex UI";
-    await win.setTitle(title);
-  } catch {
-    // 非 Tauri 环境（如浏览器预览）忽略
-  }
+/** 按标签解析工作目录（后台标签发送回合时沙箱可写根等应跟随该标签而非活动标签） */
+function resolveTabCwd(tab: SessionTab): string {
+  const cwd = tab.threadId ? tab.cwd : tab.newChatCwd;
+  return cwd?.trim() || store.server.workspace?.trim() || "";
 }
 
-/** 当前会话的对话标题：优先已生成的名称（自动生成或手动重命名），
- * 名称缺失时回退到摘要预览/“新会话”，与历史列表 threadTitle 显示一致 */
-function currentThreadTitle(): string {
-  if (store.currentThreadName) return store.currentThreadName;
-  const summary = store.threads.find((t) => t.id === store.currentThreadId);
-  return summary ? threadTitle(summary) : "";
-}
-
-function isMainWindow(): boolean {
-  try {
-    return getCurrentWindow().label === "main";
-  } catch {
-    // 非 Tauri 环境（浏览器预览/单测）按主窗口处理，由 updateWindowTitle 内部兜底
-    return true;
-  }
-}
-
-// 标题自动跟随工作目录/会话状态（仅主窗口生效）；
-// 即使未来新增入口漏调用 updateWindowTitle，标题也不会滞后。
-if (isMainWindow()) {
-  watch(
-    () => [
-      store.currentThreadId,
-      store.currentThreadName,
-      store.currentThreadCwd,
-      store.newChatCwd,
-      store.server.workspace,
-      store.threads.find((t) => t.id === store.currentThreadId)?.name,
-    ],
-    () => void updateWindowTitle(),
-  );
-}
+// 活动会话标签记录自动同步：live 字段（当前活动标签）的任何变化都落回标签记录，
+// 保证切走/切回时标签状态不丢失（消息列表本身按线程存于 itemsByThread，无需同步）。
+watch(
+  () => [
+    store.currentThreadId,
+    store.currentThreadName,
+    store.currentThreadOrigin,
+    store.currentThreadCwd,
+    store.resumedThreadId,
+    store.turnActive,
+    store.currentTurnId,
+    store.turnInterrupted,
+    store.goalText,
+    store.goalStatus,
+    store.goalArmed,
+    store.threadTokenUsage,
+    store.planPrompt,
+    store.loadingThread,
+    store.newChatCwd,
+    store.followupQueue.length,
+    store.attachments.length,
+    store.threads.find((t) => t.id === store.currentThreadId)?.name,
+  ],
+  () => syncActiveSessionTab(),
+);
 
 function isThreadNotFound(e: unknown): boolean {
   return String(e).toLowerCase().includes("thread not found");
@@ -459,7 +723,6 @@ function resetToNewChat() {
   store.goalText = null;
   store.goalStatus = null;
   store.goalArmed = false;
-  void updateWindowTitle();
 }
 
 export async function loadSettings() {
@@ -796,9 +1059,10 @@ export async function renameThread(threadId: string, name: string): Promise<bool
     await invoke("thread_set_name", { threadId, name: n });
     const t = store.threads.find((x) => x.id === threadId);
     if (t) t.name = n;
+    const tab = findSessionTabByThread(threadId);
+    if (tab) tab.name = n;
     if (store.currentThreadId === threadId) {
       store.currentThreadName = n;
-      void updateWindowTitle();
     }
     return true;
   } catch (e) {
@@ -1021,6 +1285,7 @@ export async function togglePin(threadId: string, pinned: boolean) {
 
 async function newChat(prompt: string, attachments: UserInput[]) {
   store.busy = true;
+  const tabId = store.activeSessionId;
   try {
     // newChat 仅在无当前会话时被调用，resolveCwd 走 newChatCwd → workspace 分支
     const cwd = resolveCwd();
@@ -1038,6 +1303,36 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       { params },
     );
     const threadId = res.thread.id;
+    // 防御：该新线程已被其它标签绑定（异常路径），聚焦已有标签并释放当前标签
+    const existing = findSessionTabByThread(threadId);
+    if (existing) {
+      const cur = activeSessionTab();
+      const i = cur ? store.sessionTabs.indexOf(cur) : -1;
+      if (i >= 0) store.sessionTabs.splice(i, 1);
+      store.activeSessionId = existing.id;
+      restoreSession(existing);
+      store.currentModel = res.model ?? currentModelId();
+      await refreshThreads();
+      return;
+    }
+    // 创建期间用户已切换到其它标签：结果直接写入原标签记录，避免污染当前会话
+    if (store.activeSessionId !== tabId) {
+      const tab = store.sessionTabs.find((t) => t.id === tabId);
+      if (tab) {
+        tab.threadId = threadId;
+        tab.name = res.thread.name ?? "";
+        tab.origin = "new";
+        tab.cwd = cwd;
+        tab.resumedThreadId = threadId;
+        tab.newChatCwd = null;
+        tab.loadingThread = false;
+      }
+      store.itemsByThread[threadId] = [];
+      store.activeWorkByThread[threadId] = 0;
+      store.currentModel = res.model ?? currentModelId();
+      await refreshThreads();
+      return;
+    }
     store.currentThreadId = threadId;
     store.currentThreadName = res.thread.name ?? "";
     store.currentThreadOrigin = "new";
@@ -1074,9 +1369,112 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       void autoTitleThread(threadId, stripMentionContext(prompt));
       await continueTurn(prompt, attachments);
     }
-    await updateWindowTitle();
   } finally {
     store.busy = false;
+  }
+}
+
+/**
+ * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按当前全局设置，
+ * 沙箱可写根跟随传入的 cwd（活动标签用 resolveCwd，后台标签用 resolveTabCwd）。
+ */
+function buildTurnParams(
+  threadId: string,
+  input: UserInput[],
+  clientId: string,
+  cwd: string,
+): Record<string, unknown> {
+  const params: Record<string, unknown> = {
+    threadId,
+    input,
+    clientUserMessageId: clientId,
+  };
+  // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
+  params.approvalPolicy = toApprovalPolicy(store.permissionMode);
+  params.sandboxPolicy = toSandboxPolicy(store.permissionMode, cwd);
+  const reviewer = toApprovalsReviewer(store.permissionMode);
+  if (reviewer) params.approvalsReviewer = reviewer;
+  // 显式携带（null 表示用默认），避免旧值在会话里粘滞
+  params.model = store.model ?? null;
+  params.effort = store.effort ?? null;
+  // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
+  // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
+  // 模型未知时绝不发送空字符串（上游会报 invalid_request_error），此时省略该字段。
+  const collabModel = currentModelId();
+  if (collabModel) {
+    params.collaborationMode = {
+      mode: store.taskMode === "plan" ? "plan" : "default",
+      settings: {
+        model: collabModel,
+        reasoning_effort: store.effort ?? null,
+        developer_instructions: null,
+      },
+    };
+  }
+  return params;
+}
+
+/** 按标签发送回合（后台标签的队列消息等用）：状态写入目标标签记录，不触碰活动标签 */
+async function continueTurnForTab(
+  tab: SessionTab,
+  prompt: string,
+  attachments: UserInput[],
+) {
+  const threadId = tab.threadId;
+  if (!threadId) return;
+  // 后台历史会话同样按需恢复；新会话（thread/start 创建）已订阅无需恢复
+  if (tab.resumedThreadId !== threadId) {
+    try {
+      await invoke("thread_resume", { params: { threadId } });
+      tab.resumedThreadId = threadId;
+    } catch (e) {
+      if (isThreadNotFound(e)) {
+        const i = store.sessionTabs.indexOf(tab);
+        if (i >= 0) store.sessionTabs.splice(i, 1);
+        setToast("会话已不存在，已关闭该标签");
+      } else {
+        setToast(toastError(e));
+      }
+      return;
+    }
+  }
+  const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const input = buildTurnInput(prompt, attachments);
+  const params = buildTurnParams(threadId, input, clientId, resolveTabCwd(tab));
+  upsertItem(threadId, {
+    id: clientId,
+    clientId,
+    type: "userMessage",
+    content: input,
+    startedAtMs: Date.now(),
+  });
+  // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
+  if (tab.goalText && !tab.goalStatus) {
+    try {
+      await invoke("goal_set", { threadId, objective: tab.goalText });
+      tab.goalStatus = "active";
+    } catch (e) {
+      tab.goalText = null;
+      tab.goalStatus = null;
+      tab.goalArmed = false;
+      setToast(toastError(e));
+    }
+  }
+  try {
+    const res = await invoke<{ turn?: { id?: string } }>("turn_start", {
+      params,
+    });
+    tab.turnActive = true;
+    if (res?.turn?.id) tab.currentTurnId = res.turn.id;
+  } catch (e) {
+    if (isThreadNotFound(e)) {
+      const i = store.sessionTabs.indexOf(tab);
+      if (i >= 0) store.sessionTabs.splice(i, 1);
+      setToast("会话已不存在，已关闭该标签");
+    } else {
+      setToast(toastError(e));
+    }
+    tab.turnActive = false;
   }
 }
 
@@ -1102,32 +1500,7 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入
   const input = buildTurnInput(prompt, attachments);
-  const params: Record<string, unknown> = { threadId, input, clientUserMessageId: clientId };
-  // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
-  params.approvalPolicy = toApprovalPolicy(store.permissionMode);
-  params.sandboxPolicy = toSandboxPolicy(
-    store.permissionMode,
-    resolveCwd(),
-  );
-  const reviewer = toApprovalsReviewer(store.permissionMode);
-  if (reviewer) params.approvalsReviewer = reviewer;
-  // 显式携带（null 表示用默认），避免旧值在会话里粘滞
-  params.model = store.model ?? null;
-  params.effort = store.effort ?? null;
-  // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
-  // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
-  // 模型未知时绝不发送空字符串（上游会报 invalid_request_error），此时省略该字段。
-  const collabModel = currentModelId();
-  if (collabModel) {
-    params.collaborationMode = {
-      mode: store.taskMode === "plan" ? "plan" : "default",
-      settings: {
-        model: collabModel,
-        reasoning_effort: store.effort ?? null,
-        developer_instructions: null,
-      },
-    };
-  }
+  const params = buildTurnParams(threadId, input, clientId, resolveCwd());
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -1135,7 +1508,6 @@ async function continueTurn(prompt: string, attachments: UserInput[]) {
     content: input,
     startedAtMs: Date.now(),
   });
-  await updateWindowTitle(); // 首条消息发送后窗口标题立即跟随
   // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
   // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
   if (store.goalText && !store.goalStatus) {
@@ -1288,39 +1660,17 @@ export async function executePlan() {
  * 新建空会话（所有 UI 入口的统一函数）：可预置本次会话的工作目录 cwd。
  * 返回 true 表示已进入新会话；进行中会话确认被取消时返回 false（不切换）。
  */
+/**
+ * 新建空会话标签（所有“新会话”入口的统一函数）：会话多开，不打断/不停止
+ * 当前或后台标签的回合；可预置本次会话的工作目录 cwd。恒返回 true。
+ */
 export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
-  if (cwd) store.newChatCwd = cwd;
-  // 会话进行中切换：先让用户确认（确认才停止旧回合并切换）
-  if (store.turnActive && store.currentThreadId) {
-    const ok = await askConfirm({
-      title: "切换会话",
-      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
-      confirmLabel: "停止并切换",
-      cancelLabel: "取消",
-    });
-    if (!ok) return false;
-  }
-  // 标准停止旧回合（与停止按钮一致，含活跃目标清目标），再切换到新对话；
-  // 显式传入旧线程/回合 id，避免切换后 store 已复位导致中断丢失。
-  const oldThreadId = store.currentThreadId;
-  const oldTurnId = store.currentTurnId;
-  // 无进行中回合但线程有活跃目标时同样清除：目标循环可能在回合间隙静默续跑
-  if (oldThreadId && (store.turnActive || store.goalText)) {
-    void interrupt(oldThreadId, oldTurnId);
-  }
-  store.currentThreadId = null;
+  const tab = freshSessionTab();
+  if (cwd) tab.newChatCwd = cwd;
+  store.sessionTabs.push(tab);
+  store.activeSessionId = tab.id;
+  restoreSession(tab);
   void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 进入新对话编辑态即预初始化插件缓存
-  store.currentThreadName = "";
-  store.currentThreadOrigin = null;
-  store.currentThreadCwd = null;
-  store.resumedThreadId = null;
-  store.turnInterrupted = false;
-  store.currentTurnId = null;
-  store.threadTokenUsage = null;
-  store.goalText = null;
-  store.goalStatus = null;
-  store.goalArmed = false;
-  await updateWindowTitle();
   return true;
 }
 
@@ -1328,39 +1678,15 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
  * 打开历史会话：返回 true 表示成功切换到目标会话；
  * 点击当前会话（无操作）或进行中会话确认被取消时返回 false。
  */
-export async function openThread(threadId: string): Promise<boolean> {
-  // 点击当前会话不产生任何影响（不重载、不重置运行状态，含进行中场景）
-  if (threadId === store.currentThreadId) return false;
-  // 会话进行中切到其它会话：先让用户确认（点当前会话不算切换，不弹窗）
-  if (
-    store.turnActive &&
-    store.currentThreadId &&
-    store.currentThreadId !== threadId
-  ) {
-    const ok = await askConfirm({
-      title: "切换会话",
-      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
-      confirmLabel: "停止并切换",
-      cancelLabel: "取消",
-    });
-    if (!ok) return false;
-  }
-  // 切换到其他会话前，标准停止旧回合（与停止按钮一致，含活跃目标清目标）；
-  // 点击当前正在进行的会话不算切换，不中断。
-  const oldThreadId = store.currentThreadId;
-  const oldTurnId = store.currentTurnId;
-  // 无进行中回合但旧线程有活跃目标时同样清除，避免目标循环在后台静默续跑
-  if (
-    oldThreadId &&
-    oldThreadId !== threadId &&
-    (store.turnActive || store.goalText)
-  ) {
-    void interrupt(oldThreadId, oldTurnId);
-  }
-  store.currentThreadId = threadId;
+/**
+ * 把历史会话加载进指定会话标签（结果按“是否仍为活动标签”写入 live 字段或标签记录，
+ * 避免加载期间用户切换标签导致状态串味）。
+ */
+async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolean> {
+  const isActive = () => store.activeSessionId === tab.id;
+  tab.loadingThread = true;
+  if (isActive()) store.loadingThread = true;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
-  store.currentThreadOrigin = "history";
-  store.loadingThread = true;
   try {
     const res = await invoke<{
       thread: {
@@ -1377,14 +1703,31 @@ export async function openThread(threadId: string): Promise<boolean> {
     store.activeWorkByThread[threadId] = (
       store.itemsByThread[threadId] ?? []
     ).filter((x) => isActiveItem(x)).length;
-    store.currentThreadName = res.thread.name ?? "";
-    store.currentThreadCwd = res.thread.cwd ?? null;
-    store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
-    store.threadTokenUsage = null;
-    store.goalArmed = false; // 勾选态不跨会话；服务端目标经 goal_get 回填
+    const name = res.thread.name ?? "";
+    const cwd = res.thread.cwd ?? null;
+    if (isActive()) {
+      store.currentThreadId = threadId;
+      store.currentThreadName = name;
+      store.currentThreadCwd = cwd;
+      store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
+      store.turnActive = false;
+      store.turnInterrupted = false;
+      store.currentTurnId = null;
+      store.threadTokenUsage = null;
+      store.goalArmed = false; // 勾选态不跨会话；服务端目标经 goal_get 回填
+    } else {
+      tab.threadId = threadId;
+      tab.name = name;
+      tab.cwd = cwd;
+      tab.resumedThreadId = null;
+      tab.turnActive = false;
+      tab.turnInterrupted = false;
+      tab.currentTurnId = null;
+      tab.threadTokenUsage = null;
+      tab.goalArmed = false;
+    }
+    let goalText: string | null = null;
+    let goalStatus: GoalStatus | null = null;
     try {
       const g = await invoke<{
         objective?: string;
@@ -1392,45 +1735,64 @@ export async function openThread(threadId: string): Promise<boolean> {
         goal?: { objective?: string; status?: string };
       }>("goal_get", { threadId });
       const goal = g?.goal ?? g;
-      store.goalText = goal?.objective ?? null;
-      store.goalStatus = isGoalStatus(goal?.status) ? goal.status : null;
+      goalText = goal?.objective ?? null;
+      goalStatus = isGoalStatus(goal?.status) ? goal.status : null;
     } catch {
-      store.goalText = null;
-      store.goalStatus = null;
+      // 服务端不支持/失败：按无目标处理
     }
     // 终态目标（已完成/受限等）：打开即 toast 提示并复位（相当于没有目标），服务端同步清除
-    if (store.goalStatus && isGoalTerminalStatus(store.goalStatus)) {
-      setToast(goalStatusToast(store.goalStatus));
-      store.goalText = null;
-      store.goalStatus = null;
+    if (goalStatus && isGoalTerminalStatus(goalStatus)) {
+      setToast(goalStatusToast(goalStatus));
+      goalText = null;
+      goalStatus = null;
       void clearGoal(threadId);
     }
-    await updateWindowTitle();
+    if (isActive()) {
+      store.goalText = goalText;
+      store.goalStatus = goalStatus;
+    } else {
+      tab.goalText = goalText;
+      tab.goalStatus = goalStatus;
+    }
     return true;
   } catch (e) {
     if (isThreadNotFound(e)) {
-      resetToNewChat();
-      setToast("会话已不存在，已切换为新会话");
+      if (isActive()) {
+        resetToNewChat();
+        setToast("会话已不存在，已切换为新会话");
+      } else {
+        const i = store.sessionTabs.indexOf(tab);
+        if (i >= 0) store.sessionTabs.splice(i, 1);
+        setToast("会话已不存在，已关闭该标签");
+      }
     } else {
       setToast(toastError(e));
     }
     return false;
   } finally {
-    store.loadingThread = false;
+    tab.loadingThread = false;
+    if (isActive()) store.loadingThread = false;
   }
 }
 
-/** 切换会话成功后的统一收尾：关设置页 → 聚焦输入框 → 激活资源管理器加载工作目录 */
+/**
+ * 打开历史会话：统一走 openSessionTabForThread（唯一性约束：已打开则聚焦，
+ * 未打开则新建标签加载）。返回 true 表示成功切换到目标会话。
+ */
+export async function openThread(threadId: string): Promise<boolean> {
+  return openSessionTabForThread(threadId);
+}
+
+/** 切换会话成功后的统一收尾：关设置页 → 聚焦输入框（右侧面板保持当前 Tab） */
 async function finishSessionSwitch() {
   store.showSettings = false;
   await nextTick();
   focusComposer();
-  activateResourcesTab();
 }
 
 /**
  * 新建会话统一入口（头部按钮 / 历史目录右键「新建会话」）：
- * 切换成功（未被取消）才聚焦输入框并激活资源管理器；标题更新由 newEmptyChat 原有逻辑负责。
+ * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
  */
 export async function openNewSession(cwd?: string | null): Promise<void> {
   if (!(await newEmptyChat(cwd))) return;
@@ -1439,7 +1801,7 @@ export async function openNewSession(cwd?: string | null): Promise<void> {
 
 /**
  * 打开历史会话统一入口（会话行单击 / 右键「打开」）：
- * 切换成功（未被取消）才聚焦输入框并激活资源管理器；点击当前会话视为无操作，不触发收尾。
+ * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
  */
 export async function openHistorySession(threadId: string): Promise<void> {
   if (!(await openThread(threadId))) return;
@@ -1454,10 +1816,18 @@ export async function interrupt(
 ) {
   const tid = threadId ?? store.currentThreadId;
   if (!tid) return;
+  const tab = threadId ? findSessionTabByThread(tid) : activeSessionTab();
   // 线程有活跃目标：先清除目标切断服务端 auto-continuation（目标循环回合极快，
   // 回合中断可能追不上；清除目标后当前回合自然结束、不再自动续跑）
-  if (store.goalText) {
+  const hasGoal = tab ? Boolean(tab.goalText) : Boolean(store.goalText);
+  if (hasGoal) {
     await clearGoal(tid);
+    // 后台标签的目标状态直接清本地（clearGoal 仅清活动会话本地状态）
+    if (tab && tab.threadId === tid) {
+      tab.goalText = null;
+      tab.goalStatus = null;
+      tab.goalArmed = false;
+    }
   }
   let target = turnId ?? store.currentTurnId;
   if (!target) return;
@@ -1544,13 +1914,24 @@ export async function deleteThread(threadId: string) {
     // 释放该会话的本地缓存，避免历史列表长期累积内存
     delete store.itemsByThread[threadId];
     delete store.activeWorkByThread[threadId];
-    if (store.currentThreadId === threadId) {
-      store.currentThreadId = null;
-      store.currentThreadName = "";
-      store.currentThreadCwd = null;
-      store.resumedThreadId = null;
-      store.threadTokenUsage = null;
-      await updateWindowTitle();
+    // 关闭绑定该线程的会话标签（线程已删除，无需确认/中断）
+    for (const tab of store.sessionTabs.filter((t) => t.threadId === threadId)) {
+      const idx = store.sessionTabs.indexOf(tab);
+      store.sessionTabs.splice(idx, 1);
+      if (store.activeSessionId === tab.id) {
+        const next =
+          store.sessionTabs[Math.min(idx, store.sessionTabs.length - 1)] ?? null;
+        if (next) {
+          store.activeSessionId = next.id;
+          restoreSession(next);
+        } else {
+          const fresh = freshSessionTab();
+          store.sessionTabs.push(fresh);
+          store.activeSessionId = fresh.id;
+          restoreSession(fresh);
+          void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+        }
+      }
     }
   } catch (e) {
     setToast(toastError(e));
@@ -1567,6 +1948,13 @@ export async function respondInteraction(interaction: PendingInteraction, result
     setToast(toastError(e));
   } finally {
     store.interactions = store.interactions.filter((i) => i.requestId !== interaction.requestId);
+    for (const tab of store.sessionTabs) {
+      if (tab.interactions?.some((i) => i.requestId === interaction.requestId)) {
+        tab.interactions = tab.interactions.filter(
+          (i) => i.requestId !== interaction.requestId,
+        );
+      }
+    }
   }
 }
 
@@ -1587,15 +1975,31 @@ export async function wireEvents() {
         method: string;
         params: Record<string, unknown>;
       };
-      store.interactions.push({ ...p, at: Date.now() });
+      // 按线程路由到对应会话标签（协议确认审批/提问/elicitation 均带 threadId）；
+      // 无 threadId 或线程未打开时回退全局列表（由活动标签展示）
+      const threadId =
+        typeof p.params?.threadId === "string" ? p.params.threadId : undefined;
+      const tab = findSessionTabByThread(threadId);
+      if (tab) {
+        tab.interactions.push({ ...p, at: Date.now() });
+      } else {
+        store.interactions.push({ ...p, at: Date.now() });
+      }
       if (store.settings.sound_enabled) playNotificationSound();
     }),
   );
 
   unlisteners.push(
     await listen("serverRequest/resolved", (e) => {
-      const p = e.payload as { requestId: number };
+      const p = e.payload as { requestId: number | string };
       store.interactions = store.interactions.filter((i) => i.requestId !== p.requestId);
+      for (const tab of store.sessionTabs) {
+        if (tab.interactions.some((i) => i.requestId === p.requestId)) {
+          tab.interactions = tab.interactions.filter(
+            (i) => i.requestId !== p.requestId,
+          );
+        }
+      }
     }),
   );
 
@@ -1603,15 +2007,24 @@ export async function wireEvents() {
     await listen("turn/started", (e) => {
       const p = e.payload as { threadId?: string; turn?: { id?: string } };
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程事件不进入全局状态
-      // 仅处理当前会话的事件：切换会话后，旧会话迟到的 turn/started
-      // 不应把新会话误置为进行中
-      if (p.threadId && p.threadId !== store.currentThreadId) return;
-      store.turnActive = true;
-      store.turnInterrupted = false;
-      store.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
-      // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
-      // 事件 id 仅在响应缺失时兜底。
-      if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
+      const tab = p.threadId
+        ? findSessionTabByThread(p.threadId)
+        : activeSessionTab();
+      if (!tab) return;
+      const isActive = store.activeSessionId === tab.id;
+      if (isActive) {
+        store.turnActive = true;
+        store.turnInterrupted = false;
+        store.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
+        // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
+        // 事件 id 仅在响应缺失时兜底。
+        if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
+      } else {
+        tab.turnActive = true;
+        tab.turnInterrupted = false;
+        tab.planPrompt = null;
+        if (!tab.currentTurnId && p.turn?.id) tab.currentTurnId = p.turn.id;
+      }
     }),
     await listen("turn/completed", async (e) => {
       const p = e.payload as {
@@ -1619,18 +2032,25 @@ export async function wireEvents() {
         turn?: { id?: string; status?: string };
       };
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程完成不影响主对话
-      // 仅处理当前会话的完成事件：切换会话后，旧会话的 turn/completed
-      // 不应触发新会话的队列发送、计划弹窗或状态复位
-      if (p.threadId && p.threadId !== store.currentThreadId) return;
-      store.turnActive = false;
-      store.turnInterrupted = p.turn?.status === "interrupted";
-      store.currentTurnId = null;
+      const tid = p.threadId ?? store.currentThreadId;
+      const tab = tid ? findSessionTabByThread(tid) : activeSessionTab();
+      const interrupted = p.turn?.status === "interrupted";
+      const isActive = tab ? store.activeSessionId === tab.id : false;
+      if (tab) {
+        if (isActive) {
+          store.turnActive = false;
+          store.turnInterrupted = interrupted;
+          store.currentTurnId = null;
+        } else {
+          tab.turnActive = false;
+          tab.turnInterrupted = interrupted;
+          tab.currentTurnId = null;
+        }
+      }
       // 回合结束：把仍处于进行中/流式状态的 item 收敛为终态并补算耗时，
       // 避免手动停止后最后一张工具卡的实时计时持续跳动
-      const tid = p.threadId ?? store.currentThreadId;
       if (tid) {
         const threadItems = store.itemsByThread[tid] ?? [];
-        const interrupted = store.turnInterrupted;
         const now = Date.now();
         let touched = false;
         for (const it of threadItems) {
@@ -1659,12 +2079,13 @@ export async function wireEvents() {
       // 计划模式：回合正常完成且产出 plan 内容 → 弹出“计划已就绪”确认（仿 VS Code/CLI，
       // 纯客户端 UX：协议层没有计划确认交互，由客户端在计划 item 完成后自行询问）
       if (
+        tab &&
         store.taskMode === "plan" &&
-        !store.turnInterrupted &&
-        store.followupQueue.length === 0 &&
+        !interrupted &&
+        tab.followupQueue.length === 0 &&
         p.turn?.id &&
         tid &&
-        store.planPrompt?.turnId !== p.turn.id
+        tab.planPrompt?.turnId !== p.turn.id
       ) {
         const threadItems = store.itemsByThread[tid] ?? [];
         let planText = "";
@@ -1676,18 +2097,24 @@ export async function wireEvents() {
           }
         }
         if (planText) {
-          store.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
-          if (store.settings.sound_enabled) playNotificationSound();
+          if (isActive) {
+            store.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
+            if (store.settings.sound_enabled) playNotificationSound();
+          } else {
+            tab.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
+          }
         }
       }
       await refreshThreads();
       // 处理“加入队列”的跟进消息
-      if (store.followupQueue.length) {
-        const next = store.followupQueue.shift()!;
-        if (store.currentThreadId) {
+      if (tab && tab.followupQueue.length) {
+        const next = tab.followupQueue.shift()!;
+        if (store.activeSessionId === tab.id) {
+          // 活动标签：走 live 字段路径（发送状态落到当前会话）
           await continueTurn(next.text, next.attachments);
-        } else {
-          await newChat(next.text, next.attachments);
+        } else if (tab.threadId) {
+          // 后台标签：状态写入标签记录，不触碰活动标签
+          await continueTurnForTab(tab, next.text, next.attachments);
         }
       }
     }),
@@ -1820,9 +2247,12 @@ export async function wireEvents() {
       const p = e.payload as { threadId: string; threadName?: string };
       const t = store.threads.find((x) => x.id === p.threadId);
       if (t) t.name = p.threadName ?? null;
-      if (store.currentThreadId === p.threadId && p.threadName) {
-        store.currentThreadName = p.threadName;
-        void updateWindowTitle();
+      const tab = findSessionTabByThread(p.threadId);
+      if (tab && p.threadName) {
+        tab.name = p.threadName;
+        if (store.activeSessionId === tab.id) {
+          store.currentThreadName = p.threadName;
+        }
       }
     }),
     await listen("thread/tokenUsage/updated", (e) => {
@@ -1834,14 +2264,22 @@ export async function wireEvents() {
           modelContextWindow?: number | null;
         };
       };
-      if (p.threadId === store.currentThreadId) {
+      const usage = {
+        // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
+        used:
+          p.tokenUsage?.last?.totalTokens ??
+          p.tokenUsage?.total?.totalTokens ??
+          0,
+        window: p.tokenUsage?.modelContextWindow ?? null,
+      };
+      const tab = findSessionTabByThread(p.threadId);
+      if (tab && store.activeSessionId === tab.id) {
+        store.threadTokenUsage = usage;
+      } else if (tab) {
+        tab.threadTokenUsage = usage;
+      } else if (p.threadId === store.currentThreadId) {
         store.threadTokenUsage = {
-          // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
-          used:
-            p.tokenUsage?.last?.totalTokens ??
-            p.tokenUsage?.total?.totalTokens ??
-            0,
-          window: p.tokenUsage?.modelContextWindow ?? null,
+          ...usage,
         };
       }
     }),
@@ -1856,29 +2294,55 @@ export async function wireEvents() {
         goal?: { objective?: string; status?: string };
       };
       if (isBackgroundThread(p.threadId)) return;
-      // 仅同步当前会话的目标状态：切换会话后旧会话迟到的通知不应污染新会话
-      if (p.threadId && p.threadId !== store.currentThreadId) return;
+      const tab = p.threadId
+        ? findSessionTabByThread(p.threadId)
+        : activeSessionTab();
+      if (!tab) return; // 未打开的线程目标不进入 UI
+      const isActive = store.activeSessionId === tab.id;
       if (p.goal) {
-        if (typeof p.goal.objective === "string") store.goalText = p.goal.objective;
-        if (isGoalStatus(p.goal.status)) store.goalStatus = p.goal.status;
+        const objective =
+          typeof p.goal.objective === "string" ? p.goal.objective : null;
+        const status = isGoalStatus(p.goal.status) ? p.goal.status : null;
+        if (isActive) {
+          store.goalText = objective;
+          store.goalStatus = status;
+        } else {
+          tab.goalText = objective;
+          tab.goalStatus = status;
+        }
         // 服务端终态：目标已完成/预算耗尽/受限/阻塞/暂停 → toast 提示并复位
         // （先同步清本地，视觉上即“无目标”；后台 goal_clear 同步服务端）
         if (isGoalTerminalStatus(p.goal.status)) {
           setToast(goalStatusToast(p.goal.status));
-          store.goalText = null;
-          store.goalStatus = null;
-          store.goalArmed = false;
-          void clearGoal(p.threadId ?? store.currentThreadId);
+          if (isActive) {
+            store.goalText = null;
+            store.goalStatus = null;
+            store.goalArmed = false;
+          } else {
+            tab.goalText = null;
+            tab.goalStatus = null;
+            tab.goalArmed = false;
+          }
+          void clearGoal(tab.threadId ?? store.currentThreadId);
         }
       }
     }),
     await listen("thread/goal/cleared", (e) => {
       const p = e.payload as { threadId?: string };
       if (isBackgroundThread(p.threadId)) return;
-      if (p.threadId && p.threadId !== store.currentThreadId) return;
-      store.goalText = null;
-      store.goalStatus = null;
-      store.goalArmed = false;
+      const tab = p.threadId
+        ? findSessionTabByThread(p.threadId)
+        : activeSessionTab();
+      if (!tab) return;
+      if (store.activeSessionId === tab.id) {
+        store.goalText = null;
+        store.goalStatus = null;
+        store.goalArmed = false;
+      } else {
+        tab.goalText = null;
+        tab.goalStatus = null;
+        tab.goalArmed = false;
+      }
     }),
     await listen("thread/started", (e) => {
       const p = e.payload as { thread?: { id?: string } };
@@ -1914,9 +2378,21 @@ export async function init() {
     store.booting = false;
   }, BOOT_MAX_MS);
   try {
-    // 先拿到工作目录：窗口标题与沙箱可写根需要它；历史列表有意展示全部目录的会话。
+    // 先拿到工作目录：沙箱可写根与资源/Git 面板需要它；历史列表有意展示全部目录的会话。
     await Promise.all([loadSettings(), refreshServer()]);
-    await updateWindowTitle();
+    // 主窗口标题固定为 “Codex UI”，与当前会话无关（非 Tauri 环境静默忽略）
+    try {
+      await getCurrentWindow().setTitle("Codex UI");
+    } catch {
+      // 忽略非 Tauri 环境
+    }
+    // 启动即建立首个会话标签（新对话编辑态），多会话标签的兜底标签
+    if (store.sessionTabs.length === 0) {
+      const tab = freshSessionTab();
+      store.sessionTabs.push(tab);
+      store.activeSessionId = tab.id;
+      restoreSession(tab);
+    }
     void loadModels();
     void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动的初始新对话即预初始化插件缓存
     void ensureSkills(); // 应用启动预加载技能列表（$ 菜单与回显悬浮提示共用）

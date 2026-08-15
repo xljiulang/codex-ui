@@ -40,13 +40,6 @@ export interface DiffPreviewParams {
   workspace_root: string;
 }
 
-export interface ChatEditorTab {
-  kind: "chat";
-  id: "chat";
-  title: string;
-  closable: false;
-}
-
 export interface FileEditorTab {
   kind: "file";
   id: string;
@@ -123,28 +116,20 @@ export interface TerminalEditorTab {
 }
 
 export type EditorTab =
-  | ChatEditorTab
   | FileEditorTab
   | DiffEditorTab
   | PreviewEditorTab
   | TerminalEditorTab;
 
-/** 标签列表：第一个固定为“对话”主标签，不可关闭 */
+/** 文件/diff/预览/终端标签列表（会话标签由 useCodex 的 sessionTabs 管理） */
 export const tabs = shallowReactive<EditorTab[]>([]);
-export const activeTabId = ref("chat");
+export const activeTabId = ref("");
 /** 待关闭的脏文件标签 id（由编辑面板弹确认层） */
 export const pendingCloseId = ref<string | null>(null);
 
 export const activeTab = computed<EditorTab | null>(
   () => tabs.find((t) => t.id === activeTabId.value) ?? null,
 );
-
-function initChatTab() {
-  if (!tabs.some((t) => t.id === "chat")) {
-    tabs.unshift({ kind: "chat", id: "chat", title: "对话", closable: false });
-  }
-}
-initChatTab();
 
 function fileTabId(root: string, path: string): string {
   return "file:" + JSON.stringify([root, path]);
@@ -422,7 +407,6 @@ export function isTerminalBusy(tab: EditorTab): boolean {
  * 取消则保留；空闲/已退出/启动失败的终端直接结束进程并移除。
  */
 export async function closeTab(id: string): Promise<void> {
-  if (id === "chat") return;
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
   if (tab.kind === "file" && tab.dirty) {
@@ -482,23 +466,23 @@ function closeTabsMatching(
   return skipped;
 }
 
-/** 关闭其它所有标签（保留会话主标签）；返回跳过的未保存标签数量 */
+/** 关闭其它所有文件/diff/预览/终端标签；返回跳过的未保存标签数量 */
 export function closeAllOtherTabs(): number {
-  return closeTabsMatching((tab) => tab.id !== "chat");
+  return closeTabsMatching(() => true);
 }
 
-/** 关闭目标标签左侧所有可关闭标签（不含会话与目标本身）；返回跳过的未保存标签数量 */
+/** 关闭目标标签左侧所有可关闭标签（不含目标本身）；返回跳过的未保存标签数量 */
 export function closeTabsToLeft(id: string): number {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return 0;
-  return closeTabsMatching((tab, i) => i < idx && tab.id !== "chat");
+  return closeTabsMatching((_tab, i) => i < idx);
 }
 
-/** 关闭目标标签右侧所有可关闭标签（不含会话与目标本身）；返回跳过的未保存标签数量 */
+/** 关闭目标标签右侧所有可关闭标签（不含目标本身）；返回跳过的未保存标签数量 */
 export function closeTabsToRight(id: string): number {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return 0;
-  return closeTabsMatching((tab, i) => i > idx && tab.id !== "chat");
+  return closeTabsMatching((_tab, i) => i > idx);
 }
 
 function removeTab(id: string): void {
@@ -510,7 +494,7 @@ function removeTab(id: string): void {
   if (kind === "terminal") releaseTerminal(id);
   if (wasActive) {
     const next = tabs[Math.max(0, idx - 1)] ?? tabs[0];
-    activeTabId.value = next ? next.id : "chat";
+    activeTabId.value = next ? next.id : "";
   }
 }
 
@@ -527,10 +511,9 @@ export async function saveAllDirtyTabs(): Promise<boolean> {
   return results.every(Boolean);
 }
 
-/** 测试专用：清空标签状态并重建“对话”主标签 */
+/** 测试专用：清空文件/diff/预览/终端标签状态 */
 export function __resetEditorTabsForTest(): void {
   tabs.splice(0, tabs.length);
-  activeTabId.value = "chat";
+  activeTabId.value = "";
   pendingCloseId.value = null;
-  initChatTab();
 }

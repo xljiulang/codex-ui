@@ -936,6 +936,29 @@ select option {
   min-width: 0;
 }
 
+/* 历史会话行：已打开标签标记 + 后台运行呼吸点 */
+.history-open-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  white-space: nowrap;
+}
+
+.history-run-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
 .pin-badge {
   flex-shrink: 0;
   display: inline-flex;
@@ -5889,11 +5912,8 @@ body.resizing-composer {
   right: 6px;
 }
 
-/* 会话标签：待处理交互计数角标（警示色，与运行圆点并排） */
+/* 会话标签：待处理交互计数角标（警示色，行内展示避免覆盖关闭按钮） */
 .interaction-badge {
-  position: absolute;
-  top: 2px;
-  right: 3px;
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
@@ -5906,6 +5926,31 @@ body.resizing-composer {
   text-align: center;
   box-shadow: 0 0 8px rgba(255, 190, 0, 0.35);
   pointer-events: auto;
+  flex-shrink: 0;
+}
+
+/* 标签栏末尾「新建会话标签」按钮 */
+.editor-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: 0 6px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.editor-tab-add:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.editor-tab-add svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 
 /* 终端标签：inline 跟随 flex 布局，位于图标与标题之间（右上角被关闭按钮占用） */

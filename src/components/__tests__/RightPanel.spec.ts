@@ -117,22 +117,22 @@ describe("RightPanel Tab 栏", () => {
     store.server.workspace = rootPath;
     store.currentThreadCwd = null;
     store.newChatCwd = null;
-    store.panelTab = "resources";
+    store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
     __resetGitChangesForTest();
   });
 
-  it("默认显示资源 Tab，历史会话面板隐藏", async () => {
+  it("默认显示会话 Tab，资源面板隐藏", async () => {
     const wrapper = mount(RightPanel);
     await flushPromises();
 
     const tabs = wrapper.findAll(".panel-tab");
     expect(tabs).toHaveLength(3);
     expect(tabs.map((t) => t.text().trim())).toEqual([
-      "资源",
       "会话",
+      "资源",
       "Git",
     ]);
     // git 状态未加载时角标不显示
@@ -140,46 +140,49 @@ describe("RightPanel Tab 栏", () => {
     expect(tabs[0].classes()).toContain("active");
     // v-show 单根化后互斥生效（happy-dom 的 isVisible 不可靠，直接断言 inline style）
     expect(
-      (wrapper.find(".resource-view").element as HTMLElement).style.display,
+      (wrapper.find(".history-view").element as HTMLElement).style.display,
     ).toBe("");
     expect(
-      (wrapper.find(".history-view").element as HTMLElement).style.display,
+      (wrapper.find(".resource-view").element as HTMLElement).style.display,
     ).toBe("none");
     expect(
       (wrapper.find(".git-view").element as HTMLElement).style.display,
     ).toBe("none");
-    // 默认资源 Tab 激活时加载文件树
-    expect(wrapper.find(".resource-root").exists()).toBe(true);
+    // 默认会话 Tab：不加载资源树
+    expect(wrapper.find(".resource-root").exists()).toBe(false);
   });
 
-  it("切换到会话/资源 Tab：底部高亮切换、资源树加载", async () => {
+  it("切换到资源/会话 Tab：底部高亮切换、资源树加载", async () => {
     const wrapper = mount(RightPanel);
     await flushPromises();
 
-    // 默认资源 → 切到会话
+    // 默认会话 → 切到资源
     await wrapper.findAll(".panel-tab")[1].trigger("click");
     await flushPromises();
 
     expect(wrapper.findAll(".panel-tab")[1].classes()).toContain("active");
     expect(wrapper.findAll(".panel-tab")[0].classes()).not.toContain("active");
     expect(
+      (wrapper.find(".resource-view").element as HTMLElement).style.display,
+    ).toBe("");
+    expect(
+      (wrapper.find(".history-view").element as HTMLElement).style.display,
+    ).toBe("none");
+    expect(wrapper.find(".resource-root").exists()).toBe(true);
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "session_fs_list"),
+    ).toBe(true);
+
+    // 切回会话
+    await wrapper.findAll(".panel-tab")[0].trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".panel-tab")[0].classes()).toContain("active");
+    expect(
       (wrapper.find(".history-view").element as HTMLElement).style.display,
     ).toBe("");
     expect(
       (wrapper.find(".resource-view").element as HTMLElement).style.display,
     ).toBe("none");
-
-    // 切回资源：资源树加载
-    await wrapper.findAll(".panel-tab")[0].trigger("click");
-    await flushPromises();
-    expect(wrapper.findAll(".panel-tab")[0].classes()).toContain("active");
-    expect(
-      (wrapper.find(".resource-view").element as HTMLElement).style.display,
-    ).toBe("");
-    expect(wrapper.find(".resource-root").exists()).toBe(true);
-    expect(
-      mockedInvoke.mock.calls.some(([cmd]) => cmd === "session_fs_list"),
-    ).toBe(true);
   });
 
   it("切换到 Git 更改 Tab：底部高亮切换、加载 git 状态", async () => {
@@ -207,48 +210,22 @@ describe("RightPanel Tab 栏", () => {
     const wrapper = mount(RightPanel);
     await flushPromises();
 
-    // 默认资源 Tab：展开 src，main.ts 出现
+    // 切到资源 Tab：展开 src，main.ts 出现
+    await wrapper.findAll(".panel-tab")[1].trigger("click");
+    await flushPromises();
     await wrapper
       .findAll(".resource-row.resource-dir")[0]
       .trigger("click");
     await flushPromises();
     expect(wrapper.find(".resource-view").text()).toContain("main.ts");
 
-    // 切回历史再切回资源：组件实例与展开状态保留
-    await wrapper.findAll(".panel-tab")[1].trigger("click");
+    // 切回会话再切回资源：组件实例与展开状态保留
     await wrapper.findAll(".panel-tab")[0].trigger("click");
+    await wrapper.findAll(".panel-tab")[1].trigger("click");
     await flushPromises();
 
     expect(wrapper.findComponent(ResourceView).exists()).toBe(true);
     expect(wrapper.find(".resource-view").text()).toContain("main.ts");
-  });
-
-  it("新建会话后激活资源 Tab：从会话 Tab 切回资源并显示资源树", async () => {
-    const wrapper = mount(RightPanel);
-    await flushPromises();
-
-    // 先切到会话 Tab，模拟新建会话前停留的位置
-    await wrapper.findAll(".panel-tab")[1].trigger("click");
-    await flushPromises();
-    expect(wrapper.findAll(".panel-tab")[1].classes()).toContain("active");
-    expect(
-      (wrapper.find(".resource-view").element as HTMLElement).style.display,
-    ).toBe("none");
-
-    // 模拟新建会话：全局 store 将 tab 置回资源
-    store.panelTab = "resources";
-    await flushPromises();
-
-    expect(wrapper.findAll(".panel-tab")[0].classes()).toContain("active");
-    expect(wrapper.findAll(".panel-tab")[1].classes()).not.toContain("active");
-    expect(
-      (wrapper.find(".resource-view").element as HTMLElement).style.display,
-    ).toBe("");
-    expect(
-      (wrapper.find(".history-view").element as HTMLElement).style.display,
-    ).toBe("none");
-    expect(wrapper.find(".resource-root").exists()).toBe(true);
-    wrapper.unmount();
   });
 });
 
@@ -257,7 +234,7 @@ describe("RightPanel 宽度调节", () => {
     store.threads = [];
     store.loadingHistory = false;
     store.server.workspace = rootPath;
-    store.panelTab = "resources";
+    store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();

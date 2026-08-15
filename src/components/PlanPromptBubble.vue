@@ -4,15 +4,16 @@ import {
   dismissPlanPrompt,
   executePlan,
   exitPlanMode,
-  store,
+  type PlanPrompt,
 } from "../composables/useCodex";
 import { focusComposer } from "../lib/composerFocus";
 
+const props = defineProps<{ prompt: PlanPrompt | null }>();
 const bubbleEl = ref<HTMLElement | null>(null);
 
 // 出现时聚焦“执行计划”主按钮，解决后把焦点还给输入框
 watch(
-  () => store.planPrompt,
+  () => props.prompt,
   (v, prev) => {
     if (v) {
       void nextTick(() => {
@@ -29,7 +30,7 @@ watch(
 
 function onKeydown(e: KeyboardEvent) {
   // Esc 等同“待在计划”：关闭气泡、保持计划模式、不发消息
-  if (e.key === "Escape" && store.planPrompt) dismissPlanPrompt();
+  if (e.key === "Escape" && props.prompt) dismissPlanPrompt();
 }
 
 onMounted(() => window.addEventListener("keydown", onKeydown));
@@ -37,7 +38,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <div v-if="store.planPrompt" class="msg msg-agent">
+  <div v-if="prompt" class="msg msg-agent">
     <div ref="bubbleEl" class="interaction-bubble" tabindex="-1">
       <div class="interaction-head">
         <span class="interaction-title">计划已就绪</span>

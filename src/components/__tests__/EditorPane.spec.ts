@@ -72,7 +72,11 @@ import {
   searchTerm,
   selectedPath,
 } from "../../composables/useSessionFs";
-import { settleConfirm, store } from "../../composables/useCodex";
+import {
+  __resetSessionTabsForTest,
+  settleConfirm,
+  store,
+} from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
@@ -129,6 +133,30 @@ describe("EditorPane 左侧多标签编辑区", () => {
     termFocus.calls = 0;
     __resetEditorTabsForTest();
     __resetSessionFsForTest();
+    __resetSessionTabsForTest();
+    // 会话标签 fixture：多会话标签下 EditorPane 的会话标签来自 store.sessionTabs
+    store.sessionTabs.push({
+      id: "sess-1",
+      threadId: "t1",
+      name: "",
+      origin: "history",
+      cwd: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loadingThread: false,
+      newChatCwd: null,
+      interactions: [],
+    });
+    store.activeSessionId = "sess-1";
     store.confirm = null;
   });
 
@@ -136,14 +164,14 @@ describe("EditorPane 左侧多标签编辑区", () => {
     vi.clearAllMocks();
   });
 
-  it("仅有会话标签时隐藏标签栏，对话区直接可见", () => {
+  it("仅有会话标签时标签栏常驻显示，对话区直接可见", () => {
     const wrapper = mountPane();
-    expect(wrapper.find(".editor-tabs").exists()).toBe(false);
+    expect(wrapper.find(".editor-tabs").exists()).toBe(true);
     expect(wrapper.find(".chat-stub").exists()).toBe(true);
     wrapper.unmount();
   });
 
-  it("打开文件后显示标签栏：会话为 Logo 主标签且不可关闭", async () => {
+  it("打开文件后显示标签栏：会话标签可关闭，文件标签在其后", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -156,16 +184,16 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
-    expect(tabEls[0].classes()).toContain("pinned");
+    expect(tabEls[0].classes()).not.toContain("pinned");
     expect(tabEls[0].find(".editor-tab-logo").exists()).toBe(true);
-    expect(tabEls[0].find(".editor-tab-brand").text()).toBe("CODEX");
-    expect(tabEls[0].find(".editor-tab-label").exists()).toBe(false);
-    expect(tabEls[0].attributes("aria-label")).toBe("会话");
-    expect(tabEls[0].find(".editor-tab-close").exists()).toBe(false);
+    expect(tabEls[0].find(".editor-tab-label").exists()).toBe(true);
+    expect(tabEls[0].text()).toContain("新建会话");
+    expect(tabEls[0].find(".editor-tab-close").exists()).toBe(true);
+    expect(tabEls[1].text()).toContain("a.txt");
     wrapper.unmount();
   });
 
-  it("会话标签固定在滚动区外，其它标签在滚动区内滚动", async () => {
+  it("会话标签与文件标签同在滚动区内滚动", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -183,16 +211,14 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
-    expect(tabEls[0].classes()).toContain("pinned");
-    expect(tabEls[0].attributes("aria-label")).toBe("会话");
-    // 会话 tab 是固定区包裹层的直接子节点，不在滚动区内部
-    expect(
-      tabEls[0].element.parentElement?.classList.contains("editor-tabs-track"),
-    ).toBe(true);
+    expect(tabEls[0].classes()).not.toContain("pinned");
+    expect(tabEls[0].find(".editor-tab-logo").exists()).toBe(true);
 
     const scrollerTabs = wrapper.find(".editor-tabs").findAll(".editor-tab");
-    expect(scrollerTabs).toHaveLength(1);
-    expect(scrollerTabs[0].text()).toContain("a.txt");
+    expect(scrollerTabs).toHaveLength(2);
+    expect(scrollerTabs[0].find(".editor-tab-logo").exists()).toBe(true);
+    expect(scrollerTabs[0].text()).toContain("新建会话");
+    expect(scrollerTabs[1].text()).toContain("a.txt");
     expect(scrollerTabs[0].classes()).not.toContain("pinned");
     wrapper.unmount();
   });
@@ -230,7 +256,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".text-editor-preview .md").exists()).toBe(true);
 
     // 切到会话再回来（组件卸载重建）
-    activateTab("chat");
+    activeTabId.value = "sess-1";
     await settle();
     expect(wrapper.find(".text-editor-preview").exists()).toBe(false);
     activateTab(aTab.id);
@@ -260,7 +286,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("关闭最后一个文件标签后标签栏再次隐藏", async () => {
+  it("关闭最后一个文件标签后标签栏仍显示（会话标签常驻）", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -272,9 +298,12 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await settle();
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
 
-    await wrapper.find(".editor-tab-close").trigger("click");
+    const fileTabEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await fileTabEl.find(".editor-tab-close").trigger("click");
     await settle();
-    expect(wrapper.find(".editor-tabs").exists()).toBe(false);
+    expect(wrapper.find(".editor-tabs").exists()).toBe(true);
     expect(wrapper.find(".chat-stub").exists()).toBe(true);
     wrapper.unmount();
   });
@@ -320,7 +349,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       configurable: true,
     });
 
-    activateTab("chat");
+    activeTabId.value = "sess-1";
     await settle();
     activateTab(bTab.id);
     await settle();
@@ -391,7 +420,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("会话标签右键菜单：统一三项（无关闭左边），关闭所有跳过未保存并提示", async () => {
+  it("会话标签右键菜单：关闭所有（含会话）跳过未保存并提示 + 关闭其它会话标签", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -416,14 +445,16 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "关闭所有标签",
-      "关闭右边所有标签",
+      "关闭其它会话标签",
     ]);
 
     await items[0].trigger("click");
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
-    expect(store.toast).toContain("已跳过 1 个标签（未保存文件 / 运行中的终端）");
+    expect(tabs.map((t) => t.title)).toEqual(["b.txt"]);
+    expect(store.toast).toContain(
+      "已跳过 1 个标签（未保存文件 / 运行中的终端 / 运行中的会话）",
+    );
     wrapper.unmount();
   });
 
@@ -524,8 +555,10 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await items[0].trigger("click");
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
-    expect(store.toast).toContain("已跳过 1 个标签（未保存文件 / 运行中的终端）");
+    expect(tabs.map((t) => t.title)).toEqual(["b.txt"]);
+    expect(store.toast).toContain(
+      "已跳过 1 个标签（未保存文件 / 运行中的终端 / 运行中的会话）",
+    );
     wrapper.unmount();
   });
 
@@ -555,7 +588,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(items[1].text().trim()).toBe("关闭右边所有标签");
     await items[1].trigger("click");
     await flushPromises();
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
+    expect(tabs.map((t) => t.title)).toEqual(["a.txt"]);
     wrapper.unmount();
   });
 
@@ -684,7 +717,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("会话进行中：对话标签显示呼吸灯，结束后隐藏（无 tooltip）", async () => {
+  it("会话进行中：会话标签显示呼吸灯，结束后隐藏", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -694,21 +727,18 @@ describe("EditorPane 左侧多标签编辑区", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    store.turnActive = false;
     const wrapper = mountPane();
     await openFileTab(root, aTxt);
     await settle();
 
     const chatTab = () => wrapper.findAll(".editor-tab")[0];
     expect(chatTab().find(".editor-tab-run").exists()).toBe(false);
-    expect(chatTab().attributes("data-tip")).toBeUndefined();
 
-    store.turnActive = true;
+    store.sessionTabs[0].turnActive = true;
     await nextTick();
     expect(chatTab().find(".editor-tab-run").exists()).toBe(true);
-    expect(chatTab().attributes("data-tip")).toBeUndefined();
 
-    store.turnActive = false;
+    store.sessionTabs[0].turnActive = false;
     await nextTick();
     expect(chatTab().find(".editor-tab-run").exists()).toBe(false);
     wrapper.unmount();
@@ -728,13 +758,13 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     expect(wrapper.findAll(".editor-tab")).toHaveLength(2);
     const labels = wrapper.findAll(".editor-tab-label");
-    expect(labels).toHaveLength(1);
-    expect(labels[0].text()).toContain("a.txt");
+    expect(labels).toHaveLength(2);
+    expect(labels[1].text()).toContain("a.txt");
     expect(wrapper.find(".editor-tab-icon").exists()).toBe(true);
     expect(wrapper.find(".editor-tab-icon svg").exists()).toBe(true);
     // 根目录文件：标题与相对路径相同，header 与标题均不显示 tooltip
     const fileTabEl = wrapper.findAll(".editor-tab")[1];
-    expect(fileTabEl.attributes("data-tip")).toBe("");
+    expect(fileTabEl.attributes("data-tip")).toBeUndefined();
     expect(fileTabEl.find(".editor-tab-label").attributes("data-tip")).toBe("");
     await waitForEl(wrapper, ".text-editor-path");
     expect(wrapper.find(".text-editor-path").text()).toBe("a.txt");
@@ -757,7 +787,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     const fileTabEl = wrapper.findAll(".editor-tab")[1];
     expect(fileTabEl.find(".editor-tab-label").text()).toBe("a.txt");
-    expect(fileTabEl.attributes("data-tip")).toBe("");
+    expect(fileTabEl.attributes("data-tip")).toBeUndefined();
     expect(fileTabEl.find(".editor-tab-label").attributes("data-tip")).toBe(
       "src\\a.txt",
     );
@@ -885,7 +915,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     view.dispatch({ changes: { from: 0, insert: "x" } });
     await flushPromises();
 
-    activateTab("chat");
+    activeTabId.value = "sess-1";
     await settle();
     expect(wrapper.find(".text-editor-host").exists()).toBe(false);
     expect(wrapper.find(".chat-stub").exists()).toBe(true);
@@ -974,7 +1004,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       content: "xhello",
     });
     expect(tabs.some((t) => t.id === aTab.id)).toBe(false);
-    expect(activeTabId.value).toBe("chat");
+    expect(activeTabId.value).toBe("sess-1");
     wrapper.unmount();
   });
 
@@ -1024,7 +1054,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("pic.png");
     expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
     // 根目录文件：标题与相对路径相同，header 与标题均不显示 tooltip
-    expect(tabEls[1].attributes("data-tip")).toBe("");
+    expect(tabEls[1].attributes("data-tip")).toBeUndefined();
     expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     await waitForEl(wrapper, ".preview-pane");
     wrapper.unmount();
@@ -1067,7 +1097,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(tabEls).toHaveLength(2);
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("PowerShell");
     // 终端标签标题固定为 PowerShell，无 ToolTip（header 与 label 均无 data-tip）
-    expect(tabEls[1].attributes("data-tip")).toBe("");
+    expect(tabEls[1].attributes("data-tip")).toBeUndefined();
     expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
     await waitForEl(wrapper, ".terminal-pane");
@@ -1086,8 +1116,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await waitForEl(wrapper, ".terminal-pane");
     expect(termFocus.calls).toBeGreaterThanOrEqual(1);
 
-    // 切到对话标签，再点回终端标签：激活路径应再次聚焦
-    activateTab("chat");
+    // 切到会话标签，再点回终端标签：激活路径应再次聚焦
+    activeTabId.value = "sess-1";
     await settle();
     const before = termFocus.calls;
     const termTab = wrapper

@@ -40,17 +40,17 @@ describe("PlanPromptBubble 计划已就绪气泡", () => {
   });
 
   it("未设置 planPrompt 时不渲染", () => {
-    wrapper = mount(PlanPromptBubble);
+    wrapper = mount(PlanPromptBubble, { props: { prompt: null } });
     expect(wrapper.find(".interaction-bubble").exists()).toBe(false);
   });
 
   it("渲染紧凑气泡：标题、说明与三个按钮，不渲染计划正文", () => {
-    store.planPrompt = {
+    const prompt = {
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案",
     };
-    wrapper = mount(PlanPromptBubble);
+    wrapper = mount(PlanPromptBubble, { props: { prompt } });
 
     expect(wrapper.find(".interaction-bubble").exists()).toBe(true);
     expect(wrapper.find(".interaction-title").text()).toContain("计划已就绪");
@@ -68,12 +68,12 @@ describe("PlanPromptBubble 计划已就绪气泡", () => {
   });
 
   it("点击执行计划触发 executePlan", async () => {
-    store.planPrompt = {
+    const prompt = {
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案",
     };
-    wrapper = mount(PlanPromptBubble);
+    wrapper = mount(PlanPromptBubble, { props: { prompt } });
     const buttons = wrapper.findAll(".interaction-foot .btn");
 
     await buttons[2].trigger("click");
@@ -83,12 +83,12 @@ describe("PlanPromptBubble 计划已就绪气泡", () => {
   });
 
   it("待在计划调用 dismissPlanPrompt、退出计划模式调用 exitPlanMode", async () => {
-    store.planPrompt = {
+    const prompt = {
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案",
     };
-    wrapper = mount(PlanPromptBubble);
+    wrapper = mount(PlanPromptBubble, { props: { prompt } });
     const buttons = wrapper.findAll(".interaction-foot .btn");
 
     await buttons[0].trigger("click");
@@ -100,12 +100,12 @@ describe("PlanPromptBubble 计划已就绪气泡", () => {
   });
 
   it("按 Escape 等同待在计划", async () => {
-    store.planPrompt = {
+    const prompt = {
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案",
     };
-    wrapper = mount(PlanPromptBubble);
+    wrapper = mount(PlanPromptBubble, { props: { prompt } });
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(mockedDismiss).toHaveBeenCalledTimes(1);

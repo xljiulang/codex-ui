@@ -89,10 +89,9 @@ describe("useEditorTabs 标签状态", () => {
     store.confirm = null;
   });
 
-  it("初始仅含“对话”主标签且不可关闭", () => {
-    expect(tabs).toHaveLength(1);
-    expect(tabs[0]).toMatchObject({ kind: "chat", id: "chat", title: "对话" });
-    expect(activeTabId.value).toBe("chat");
+  it("初始不含固定会话标签（会话标签由 useCodex 管理）", () => {
+    expect(tabs).toHaveLength(0);
+    expect(activeTabId.value).toBe("");
   });
 
   it("打开文件创建标签并激活；重复打开只激活不重建", async () => {
@@ -104,8 +103,8 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openFileTab(root, "a.txt");
-    expect(tabs).toHaveLength(2);
-    expect(activeTabId.value).not.toBe("chat");
+    expect(tabs).toHaveLength(1);
+    expect(activeTabId.value).not.toBe("");
     const tab = fileTab(activeTabId.value);
     expect(tab.title).toBe("a.txt");
     expect(tab.markdownPreview).toBe(false);
@@ -114,7 +113,7 @@ describe("useEditorTabs 标签状态", () => {
     expect(tab.editorState!.doc.toString()).toBe("hello");
 
     await openFileTab(root, "a.txt");
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(1);
     expect(activeTabId.value).toBe(tab.id);
   });
 
@@ -209,7 +208,7 @@ describe("useEditorTabs 标签状态", () => {
     host.remove();
   });
 
-  it("放弃并关闭：不写盘直接移除；对话标签不可关闭", async () => {
+  it("放弃并关闭：不写盘直接移除；未知标签 id 关闭无操作", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -229,10 +228,10 @@ describe("useEditorTabs 标签状态", () => {
       "session_fs_write",
       expect.anything(),
     );
-    expect(activeTabId.value).toBe("chat");
+    expect(activeTabId.value).toBe("");
 
-    closeTab("chat");
-    expect(tabs[0].id).toBe("chat");
+    closeTab("nope");
+    expect(tabs).toHaveLength(0);
     view.destroy();
     host.remove();
   });
@@ -247,17 +246,17 @@ describe("useEditorTabs 标签状态", () => {
 
     await openFileTab(root, "a.txt");
     await openFileTab(root, "b.txt");
-    expect(activeTabId.value).not.toBe("chat");
+    expect(activeTabId.value).not.toBe("");
     const firstId = activeTabId.value;
     closeTab(firstId);
     expect(activeTabId.value).not.toBe(firstId);
-    expect(activeTabId.value).not.toBe("chat");
+    expect(activeTabId.value).not.toBe("");
 
     closeTab(activeTabId.value);
-    expect(activeTabId.value).toBe("chat");
+    expect(activeTabId.value).toBe("");
   });
 
-  it("关闭其它所有标签：保留会话标签，干净标签关闭，脏标签跳过并返回数量", async () => {
+  it("关闭其它所有标签：干净标签关闭，脏标签跳过并返回数量", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("x"));
@@ -285,7 +284,7 @@ describe("useEditorTabs 标签状态", () => {
 
     const skipped = closeAllOtherTabs();
     expect(skipped).toBe(1);
-    expect(tabs.map((t) => t.id)).toEqual(["chat", dirtyTab.id]);
+    expect(tabs.map((t) => t.id)).toEqual([dirtyTab.id]);
     expect(tabs.some((t) => t.kind === "diff")).toBe(false);
     expect(tabs.some((t) => t.title === "a.txt")).toBe(false);
     expect(tabs.some((t) => t.title === "b.txt")).toBe(false);
@@ -313,7 +312,7 @@ describe("useEditorTabs 标签状态", () => {
 
     const skipped = closeTabsToLeft(cTab.id);
     expect(skipped).toBe(1);
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt", "c.txt"]);
+    expect(tabs.map((t) => t.title)).toEqual(["b.txt", "c.txt"]);
     view.destroy();
     host.remove();
   });
@@ -333,10 +332,10 @@ describe("useEditorTabs 标签状态", () => {
 
     const skipped = closeTabsToRight(aTab.id);
     expect(skipped).toBe(0);
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
+    expect(tabs.map((t) => t.title)).toEqual(["a.txt"]);
   });
 
-  it("关闭右边：以会话标签为目标等于关闭全部其它标签，跳过脏标签并计数", async () => {
+  it("关闭右边所有标签：跳过脏标签并计数", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("x"));
@@ -351,10 +350,11 @@ describe("useEditorTabs 标签状态", () => {
     view.dispatch({ changes: { from: 0, insert: "x" } });
     expect(dirtyTab.dirty).toBe(true);
     await openFileTab(root, "c.txt");
+    const aTab = tabs.find((t) => t.title === "a.txt")!;
 
-    const skipped = closeTabsToRight("chat");
+    const skipped = closeTabsToRight(aTab.id);
     expect(skipped).toBe(1);
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "b.txt"]);
+    expect(tabs.map((t) => t.title)).toEqual(["a.txt", "b.txt"]);
     expect(tabs.some((t) => t.id === dirtyTab.id)).toBe(true);
     view.destroy();
     host.remove();
@@ -376,13 +376,13 @@ describe("useEditorTabs 标签状态", () => {
 
     const skipped = closeTabsToRight(aTab.id);
     expect(skipped).toBe(0);
-    expect(tabs.map((t) => t.title)).toEqual(["对话", "a.txt"]);
+    expect(tabs.map((t) => t.title)).toEqual(["a.txt"]);
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
       id: expect.any(String),
     });
   });
 
-  it("关闭左边：首个非会话标签返回 0 且无变化", async () => {
+  it("关闭左边：首个标签返回 0 且无变化", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("x"));
@@ -395,7 +395,7 @@ describe("useEditorTabs 标签状态", () => {
     const aTab = tabs.find((t) => t.title === "a.txt")!;
 
     expect(closeTabsToLeft(aTab.id)).toBe(0);
-    expect(tabs).toHaveLength(3);
+    expect(tabs).toHaveLength(2);
   });
 
   it("关闭左边/右边：未知 id 返回 0", () => {
@@ -405,7 +405,7 @@ describe("useEditorTabs 标签状态", () => {
 
   it("activateTab 忽略不存在的 id", () => {
     activateTab("nope");
-    expect(activeTabId.value).toBe("chat");
+    expect(activeTabId.value).toBe("");
   });
 
   it("打开 diff 标签：拉取行数据、激活、重复打开去重", async () => {
@@ -423,7 +423,7 @@ describe("useEditorTabs 标签状态", () => {
       diff: "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-a\n+b",
       workspace_root: root,
     });
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(1);
     const diffTabs = tabs.filter((t) => t.kind === "diff");
     expect(diffTabs).toHaveLength(1);
     expect(diffTabs[0]).toMatchObject({
@@ -445,7 +445,7 @@ describe("useEditorTabs 标签状态", () => {
 
   it("打开图像预览：创建标签、生成 asset URL、激活；重复打开去重", async () => {
     await openPreviewTab("image", root, "pic.png");
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(1);
     const preview = tabs.find(
       (t): t is PreviewEditorTab => t.kind === "preview",
     );
@@ -514,7 +514,7 @@ describe("useEditorTabs 标签状态", () => {
     const skipped = closeAllOtherTabs();
     expect(skipped).toBe(0);
     expect(tabs.filter((t) => t.kind === "preview")).toHaveLength(0);
-    expect(tabs.map((t) => t.id)).toEqual(["chat"]);
+    expect(tabs).toHaveLength(0);
   });
 
   it("打开终端：创建标签并激活、调用 terminal_spawn", async () => {
@@ -524,7 +524,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(1);
     const t = tabs.find(
       (x): x is TerminalEditorTab => x.kind === "terminal",
     );
@@ -736,7 +736,7 @@ describe("useEditorTabs 标签状态", () => {
     await openTerminalTab(root);
     const skipped = closeAllOtherTabs();
     expect(skipped).toBe(0);
-    expect(tabs.map((t) => t.id)).toEqual(["chat"]);
+    expect(tabs).toHaveLength(0);
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
       id: expect.any(String),
     });

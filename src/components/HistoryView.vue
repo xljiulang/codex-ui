@@ -11,7 +11,10 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import {
   clearSearch,
+  closeSessionTab,
   deleteThread,
+  isThreadOpen,
+  isThreadRunning,
   openHistorySession,
   openNewSession,
   renameThread,
@@ -23,7 +26,7 @@ import {
   toastError,
   togglePin,
 } from "../composables/useCodex";
-import { useActionMenu } from "../composables/useActionMenu";
+import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { formatRelativeTime } from "../lib/format";
 import { groupThreads } from "../lib/historyGroup";
 import type { HistoryGroup } from "../lib/historyGroup";
@@ -32,6 +35,7 @@ import { debounce } from "../lib/debounce";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
+  ICON_CLOSE_ALL,
   ICON_DELETE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
@@ -197,25 +201,45 @@ async function doDelete() {
 /** 打开会话行右键菜单；重命名输入框内右键放行给全局编辑菜单 */
 function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.(".rename-input")) return;
-  openCtx(e, [
+  const items: CtxItem[] = [
     {
       label: "打开",
       icon: ICON_OPEN,
       action: () => void openHistorySession(t.id),
     },
+    ...(isThreadOpen(t.id)
+      ? [
+          {
+            label: "关闭标签",
+            icon: ICON_CLOSE_ALL,
+            action: () => void closeSessionTab(findSessionTabId(t.id)),
+          },
+        ]
+      : []),
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
     {
       label: t.isPinned ? "取消固定" : "置顶固定",
       icon: ICON_PIN,
       action: () => void togglePin(t.id, !t.isPinned),
     },
-    {
-      label: "删除会话",
-      icon: ICON_DELETE,
-      danger: true,
-      action: () => askDelete(t),
-    },
-  ]);
+    ...(isThreadOpen(t.id)
+      ? []
+      : [
+          {
+            label: "删除会话",
+            icon: ICON_DELETE,
+            danger: true,
+            action: () => askDelete(t),
+          },
+        ]),
+  ];
+  openCtx(e, items);
+}
+
+/** 会话标签 id（已打开时才调用） */
+function findSessionTabId(threadId: string): string {
+  const tab = store.sessionTabs.find((t) => t.threadId === threadId);
+  return tab?.id ?? "";
 }
 
 /** 历史目录行右键菜单：新建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
@@ -346,6 +370,8 @@ onBeforeUnmount(() => {
           class="history-item"
           :class="{
             active: row.thread.id === store.currentThreadId,
+            open: isThreadOpen(row.thread.id),
+            running: isThreadRunning(row.thread.id),
             'folder-item': row.inFolder,
           }"
           @click="openHistorySession(row.thread.id)"
@@ -373,6 +399,19 @@ onBeforeUnmount(() => {
                   </svg>
                 </span>
                 <span class="history-title">{{ threadTitle(row.thread) }}</span>
+                <span
+                  v-if="isThreadOpen(row.thread.id)"
+                  class="history-open-badge"
+                  title="已在会话标签中打开"
+                >
+                  已打开
+                </span>
+                <span
+                  v-if="isThreadRunning(row.thread.id)"
+                  class="history-run-dot"
+                  title="后台运行中"
+                  aria-hidden="true"
+                ></span>
               </span>
               <span
                 v-if="store.searchActive && store.searchSnippets[row.thread.id]"

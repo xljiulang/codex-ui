@@ -5,7 +5,13 @@ import { respondInteraction, setToast, store } from "../composables/useCodex";
 import { focusComposer } from "../lib/composerFocus";
 import type { PendingInteraction } from "../lib/types";
 
-const current = computed<PendingInteraction | undefined>(() => store.interactions[0]);
+const props = withDefaults(
+  defineProps<{ interactions?: PendingInteraction[] }>(),
+  { interactions: () => store.interactions },
+);
+const current = computed<PendingInteraction | undefined>(
+  () => props.interactions[0],
+);
 const params = computed(() => (current.value?.params ?? {}) as Record<string, unknown>);
 const bubbleEl = ref<HTMLElement | null>(null);
 
@@ -395,8 +401,8 @@ function buildFormContent(): Record<string, unknown> {
                   : "批准操作"
           }}
         </span>
-        <span v-if="store.interactions.length > 1" class="interaction-pending">
-          还有 {{ store.interactions.length - 1 }} 个待处理
+        <span v-if="interactions.length > 1" class="interaction-pending">
+          还有 {{ interactions.length - 1 }} 个待处理
         </span>
       </div>
 

@@ -23,7 +23,6 @@ import {
   saveTabAndClose,
   tabs,
   type EditorTab,
-  type ChatEditorTab,
   type FileEditorTab,
   type DiffEditorTab,
   type PreviewEditorTab,
@@ -38,7 +37,17 @@ import {
 } from "../composables/useSessionFs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
-import { setToast, store } from "../composables/useCodex";
+import {
+  closeAllSessionTabs,
+  closeOtherSessionTabs,
+  closeSessionTab,
+  newEmptyChat,
+  sessionTabTitle,
+  setToast,
+  store,
+  switchSessionTab,
+  type SessionTab,
+} from "../composables/useCodex";
 import { relPathOf } from "../lib/format";
 import {
   ICON_CLOSE_ALL,
@@ -74,15 +83,11 @@ const activeTerminalTabs = computed(() =>
   tabs.filter((t): t is TerminalEditorTab => t.kind === "terminal"),
 );
 
-/** 会话主标签：常驻标签栏左侧固定展示（滚动区外），不可关闭 */
-const chatTab = computed<ChatEditorTab>(
-  () => tabs.find((t): t is ChatEditorTab => t.kind === "chat")!,
-);
-/** 会话以外的标签：在右侧独立滚动区内滚动 */
-const otherTabs = computed(() => tabs.filter((t) => t.kind !== "chat"));
+/** 会话标签（多会话多开）：与文件/diff/预览/终端标签共用同一条标签栏 */
+const sessionTabs = computed(() => store.sessionTabs);
 
-/** 会话标签常驻，存在任何文件/diff 标签时才显示标签栏 */
-const showTabBar = computed(() => tabs.length > 1);
+/** 标签栏常驻显示：会话标签恒存在（应用启动后 ≥1），不因“只剩一个会话标签”而隐藏 */
+const showTabBar = computed(() => store.sessionTabs.length > 0);
 
 /** Tab 横向滚动：新标签/激活标签自动滚入视野，溢出时显示左右箭头 */
 const tabScroller = ref<HTMLElement | null>(null);
@@ -120,7 +125,7 @@ function scrollTabs(dir: -1 | 1) {
 }
 
 watch(
-  [activeTabId, () => tabs.length],
+  [activeTabId, () => tabs.length, () => store.sessionTabs.length],
   () => {
     void nextTick(() => {
       scrollActiveTabIntoView();
@@ -154,12 +159,14 @@ function tabIcon(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string 
   return iconFor(tabToEntry(tab)) ?? "";
 }
 
-/** 标签头悬停提示：仅会话标签保留（非会话标签的提示移到标题上） */
-function tabTooltip(tab: EditorTab): string {
-  if (tab.kind === "chat") {
-    return store.turnActive ? "会话（进行中）" : "会话";
-  }
-  return "";
+/** 会话标签悬停提示：进行中显示“会话（进行中）” */
+function sessionTabTooltip(tab: SessionTab): string {
+  return tab.turnActive ? "会话（进行中）" : "会话";
+}
+
+/** 会话标签待处理交互计数：绑定线程读标签记录，新对话（无线程）回退全局 */
+function sessionTabPending(tab: SessionTab): number {
+  return tab.threadId ? (tab.interactions?.length ?? 0) : store.interactions.length;
 }
 
 /**
@@ -167,7 +174,6 @@ function tabTooltip(tab: EditorTab): string {
  * 文件/diff/预览显示相对工作区根的路径；终端不显示 ToolTip。
  */
 function titleTooltip(tab: EditorTab): string {
-  if (tab.kind === "chat") return "";
   if (tab.kind === "terminal") return "";
   const root =
     tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
@@ -191,39 +197,66 @@ function fileTabAbsPath(tab: FileEditorTab | PreviewEditorTab): string {
   return tabAbsPath(tab);
 }
 
-/**
- * 标签右键菜单：所有标签统一提供关闭所有/左边/右边（未保存的跳过并提示）。
- * 会话主标签固定在首位且不可关闭：左边项天然隐藏（idx=0），关闭所有天然
- * 排除会话标签（closeAllOtherTabs），无需特判。
- */
-function openTabMenu(e: MouseEvent, tab: EditorTab) {
-  const closeWithToast = (skipped: number) => {
-    if (skipped > 0) {
-      setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端）`);
-    }
-  };
-  const idx = tabs.findIndex((t) => t.id === tab.id);
-  const hasLeft = tabs.slice(0, idx).some((t) => t.kind !== "chat");
-  const hasRight = tabs.slice(idx + 1).some((t) => t.kind !== "chat");
+/** 关闭所有标签（文件/diff/预览/终端 + 会话标签）：运行中会话/终端与未保存文件跳过并计数 */
+async function closeAllTabsWithToast() {
+  const editorSkipped = closeAllOtherTabs();
+  const sessionSkipped = await closeAllSessionTabs();
+  const skipped = editorSkipped + sessionSkipped;
+  if (skipped > 0) {
+    setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`);
+  }
+}
+
+/** 会话标签右键菜单：关闭所有标签（含会话）+ 关闭其它会话标签 */
+function openSessionTabMenu(e: MouseEvent) {
   const items: CtxItem[] = [
     {
       label: "关闭所有标签",
       icon: ICON_CLOSE_ALL,
-      action: () => closeWithToast(closeAllOtherTabs()),
+      action: () => void closeAllTabsWithToast(),
+    },
+    {
+      label: "关闭其它会话标签",
+      icon: ICON_CLOSE_ALL,
+      action: () => void closeOtherSessionTabs(),
+    },
+  ];
+  openCtx(e, items);
+}
+
+/**
+ * 文件/diff/预览/终端标签右键菜单：关闭所有（含会话标签）+ 关闭左边/右边
+ * （仅同组文件类标签，不涉及会话标签）+ 文件直达目录。
+ */
+function openEditorTabMenu(e: MouseEvent, tab: EditorTab) {
+  const idx = tabs.findIndex((t) => t.id === tab.id);
+  const hasLeft = idx > 0;
+  const hasRight = idx >= 0 && idx < tabs.length - 1;
+  const items: CtxItem[] = [
+    {
+      label: "关闭所有标签",
+      icon: ICON_CLOSE_ALL,
+      action: () => void closeAllTabsWithToast(),
     },
   ];
   if (hasLeft) {
     items.push({
       label: "关闭左边所有标签",
       icon: ICON_CLOSE_LEFT,
-      action: () => closeWithToast(closeTabsToLeft(tab.id)),
+      action: () => {
+        const skipped = closeTabsToLeft(tab.id);
+        if (skipped > 0) setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端）`);
+      },
     });
   }
   if (hasRight) {
     items.push({
       label: "关闭右边所有标签",
       icon: ICON_CLOSE_RIGHT,
-      action: () => closeWithToast(closeTabsToRight(tab.id)),
+      action: () => {
+        const skipped = closeTabsToRight(tab.id);
+        if (skipped > 0) setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端）`);
+      },
     });
   }
   // 文件/预览标签（含对话打开的工作区外文件）可直达所在目录，置于菜单末尾
@@ -263,12 +296,12 @@ onBeforeUnmount(() => {
 watch(
   () =>
     tabs
-      .filter((t) => t.kind !== "chat" && t.kind !== "terminal")
+      .filter((t) => t.kind !== "terminal")
       .map((t) => t.id),
   () => {
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of tabs) {
-      if (tab.kind === "chat" || tab.kind === "terminal") continue;
+      if (tab.kind === "terminal") continue;
       const root =
         tab.kind === "file" ? tab.root : tab.kind === "diff" ? tab.workspaceRoot : tab.root;
       const list = byRoot.get(root) ?? [];
@@ -284,9 +317,36 @@ watch(
 
 /** Tab 激活：带文件路径的标签（文件/预览/Diff）在资源树中同步选中并展开所在目录 */
 watch(activeTab, (tab) => {
-  if (!tab || tab.kind === "chat" || tab.kind === "terminal") return;
+  if (!tab || tab.kind === "terminal") return;
   void revealAbsPathInTree(tabAbsPath(tab));
 });
+
+/** 活动会话标签切换：编辑器视图跟随（会话标签 id 即 activeTabId） */
+watch(
+  () => store.activeSessionId,
+  (id) => {
+    if (id) activeTabId.value = id;
+  },
+  { immediate: true },
+);
+
+// 编辑器标签关闭到空时回落到活动会话标签（关闭最后一个文件标签后回到对话视图）
+watch(activeTabId, (id) => {
+  if (!id && store.activeSessionId) {
+    activeTabId.value = store.activeSessionId;
+  }
+});
+
+/** 标签栏末尾「+」：快速新建空会话标签 */
+function onAddSessionTab() {
+  void newEmptyChat();
+}
+
+/** 点击会话标签：先切编辑器视图，再同步会话状态（已激活时也要回到对话视图） */
+function onSessionTabClick(id: string) {
+  activeTabId.value = id;
+  void switchSessionTab(id);
+}
 </script>
 
 <template>
@@ -303,44 +363,58 @@ watch(activeTab, (tab) => {
         </svg>
       </button>
       <div class="editor-tabs-track" role="tablist" aria-label="编辑标签">
-        <button
-          class="editor-tab pinned"
-          :class="{ active: activeTabId === 'chat' }"
-          role="tab"
-          :aria-selected="activeTabId === 'chat'"
-          aria-label="会话"
-          :tabindex="activeTabId === 'chat' ? 0 : -1"
-          @click="activateTab('chat')"
-          @contextmenu="openTabMenu($event, chatTab)"
-          @mousedown.middle.prevent="closeTab('chat')"
-        >
-          <span class="editor-tab-logo" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
-              <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
-            </svg>
-          </span>
-          <span class="editor-tab-brand">CODEX</span>
-          <span
-            v-if="store.turnActive"
-            class="editor-tab-run pinned"
-            aria-hidden="true"
-          ></span>
-          <span
-            v-if="store.interactions.length > 0"
-            class="interaction-badge"
-            :title="`${store.interactions.length} 个待处理交互`"
-          >
-            {{ store.interactions.length }}
-          </span>
-        </button>
         <div
           ref="tabScroller"
           class="editor-tabs"
           @scroll.passive="updateTabScrollState"
         >
           <button
-            v-for="tab in otherTabs"
+            v-for="tab in sessionTabs"
+            :key="tab.id"
+            class="editor-tab session-tab"
+            :class="{ active: tab.id === activeTabId }"
+            role="tab"
+            :aria-selected="tab.id === activeTabId"
+            :aria-label="sessionTabTitle(tab)"
+            :tabindex="tab.id === activeTabId ? 0 : -1"
+            v-tooltip="sessionTabTooltip(tab)"
+            @click="onSessionTabClick(tab.id)"
+            @contextmenu="openSessionTabMenu($event)"
+            @mousedown.middle.prevent="closeSessionTab(tab.id)"
+          >
+            <span class="editor-tab-logo" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
+                <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
+              </svg>
+            </span>
+            <span class="editor-tab-label">{{ sessionTabTitle(tab) }}</span>
+            <span
+              v-if="tab.turnActive"
+              class="editor-tab-run inline"
+              aria-hidden="true"
+            ></span>
+            <span
+              v-if="sessionTabPending(tab) > 0"
+              class="interaction-badge"
+              :title="`${sessionTabPending(tab)} 个待处理交互`"
+            >
+              {{ sessionTabPending(tab) }}
+            </span>
+            <button
+              class="editor-tab-close"
+              :aria-label="'关闭会话 ' + sessionTabTitle(tab)"
+              @click.stop="closeSessionTab(tab.id)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"
+                />
+              </svg>
+            </button>
+          </button>
+          <button
+            v-for="tab in tabs"
             :key="tab.id"
             class="editor-tab"
             :class="{
@@ -351,9 +425,8 @@ watch(activeTab, (tab) => {
             :aria-selected="tab.id === activeTabId"
             :aria-label="tab.title"
             :tabindex="tab.id === activeTabId ? 0 : -1"
-            v-tooltip="tabTooltip(tab)"
             @click="activateTab(tab.id)"
-            @contextmenu="openTabMenu($event, tab)"
+            @contextmenu="openEditorTabMenu($event, tab)"
             @mousedown.middle.prevent="closeTab(tab.id)"
           >
             <span
@@ -414,6 +487,16 @@ watch(activeTab, (tab) => {
               </svg>
             </button>
           </button>
+          <button
+            class="editor-tab-add"
+            aria-label="新建会话标签"
+            v-tooltip="'新建会话'"
+            @click="onAddSessionTab()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" />
+            </svg>
+          </button>
         </div>
       </div>
       <button
@@ -428,7 +511,12 @@ watch(activeTab, (tab) => {
       </button>
     </div>
     <div class="editor-pane-body">
-      <ChatView v-show="activeTab?.kind === 'chat'" />
+      <ChatView
+        v-for="tab in sessionTabs"
+        :key="tab.id"
+        v-show="activeTabId === tab.id"
+        :tab="tab"
+      />
       <TextEditorPane v-if="activeFileTab" :tab="activeFileTab" />
       <DiffPane v-else-if="activeDiffTab" :tab="activeDiffTab" />
       <PreviewPane v-else-if="activePreviewTab" :tab="activePreviewTab" />

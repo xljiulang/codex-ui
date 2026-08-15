@@ -222,7 +222,7 @@ describe("审批/询问弹窗信息层级", () => {
 
     // 审批类：Escape 不触发任何响应
     mockedRespond.mockClear();
-    store.interactions = [];
+    store.interactions.splice(0);
     store.interactions.push({
       requestId: 15,
       method: "item/commandExecution/requestApproval",
@@ -231,7 +231,7 @@ describe("审批/询问弹窗信息层级", () => {
     });
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(mockedRespond).not.toHaveBeenCalled();
-    store.interactions = [];
+    store.interactions.splice(0);
   });
 });
 

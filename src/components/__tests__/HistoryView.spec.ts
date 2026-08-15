@@ -5,6 +5,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
+    closeSessionTab: vi.fn(),
     deleteThread: vi.fn(),
     openHistorySession: vi.fn(),
     openNewSession: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
 import {
+  closeSessionTab,
   deleteThread,
   openHistorySession,
   openNewSession,
@@ -31,6 +33,7 @@ import {
 } from "../../composables/useCodex";
 
 const mockedDelete = vi.mocked(deleteThread);
+const mockedCloseSessionTab = vi.mocked(closeSessionTab);
 const mockedOpenNewSession = vi.mocked(openNewSession);
 const mockedOpenHistorySession = vi.mocked(openHistorySession);
 const mockedTogglePin = vi.mocked(togglePin);
@@ -605,6 +608,92 @@ describe("HistoryView 文件夹右键菜单", () => {
 
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
     expect(mockedDelete).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+});
+
+describe("HistoryView 会话标签联动", () => {
+  beforeEach(() => {
+    mockBasicHistory();
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    mockedCloseSessionTab.mockClear();
+  });
+
+  it("已打开标签的会话行显示「已打开」标记，后台运行中显示呼吸点", async () => {
+    store.sessionTabs.push({
+      id: "s1",
+      threadId: "t1",
+      name: "",
+      origin: "history",
+      cwd: null,
+      resumedThreadId: null,
+      turnActive: true,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loadingThread: false,
+      newChatCwd: null,
+      interactions: [],
+    });
+    const wrapper = mount(HistoryView);
+    await wrapper.vm.$nextTick();
+
+    const rows = wrapper.findAll(".history-item");
+    const t1Row = rows.find((r) => r.text().includes("会话一"))!;
+    const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
+    expect(t1Row.find(".history-open-badge").exists()).toBe(true);
+    expect(t1Row.find(".history-run-dot").exists()).toBe(true);
+    expect(t2Row.find(".history-open-badge").exists()).toBe(false);
+    expect(t2Row.find(".history-run-dot").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("已打开会话行右键菜单含「关闭标签」且不含「删除会话」，点击调用 closeSessionTab", async () => {
+    store.sessionTabs.push({
+      id: "s1",
+      threadId: "t1",
+      name: "",
+      origin: "history",
+      cwd: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loadingThread: false,
+      newChatCwd: null,
+      interactions: [],
+    });
+    const wrapper = mount(HistoryView);
+    await openCtxMenu(wrapper, 0);
+    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    expect(labels).toContain("关闭标签");
+    expect(labels).not.toContain("删除会话");
+
+    await clickCtxItem(wrapper, "关闭标签");
+    expect(mockedCloseSessionTab).toHaveBeenCalledWith("s1");
+    wrapper.unmount();
+  });
+
+  it("未打开的会话行右键菜单不含「关闭标签」但含「删除会话」", async () => {
+    const wrapper = mount(HistoryView);
+    await openCtxMenu(wrapper, 1); // t2 未打开
+    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    expect(labels).not.toContain("关闭标签");
+    expect(labels).toContain("删除会话");
+    expect(mockedCloseSessionTab).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });

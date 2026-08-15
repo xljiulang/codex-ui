@@ -5,11 +5,18 @@ import EmptyState from "./EmptyState.vue";
 import InlineInteraction from "./InlineInteraction.vue";
 import MessageItem from "./MessageItem.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
-import { currentItems, store } from "../composables/useCodex";
+import { store, type SessionTab } from "../composables/useCodex";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
 
 const scroller = ref<HTMLElement | null>(null);
-const items = computed(() => currentItems());
+const props = defineProps<{ tab: SessionTab }>();
+const items = computed(() =>
+  props.tab.threadId ? (store.itemsByThread[props.tab.threadId] ?? []) : [],
+);
+/** 该标签的待处理交互：绑定线程的走标签记录，未绑定（新对话）回退全局 */
+const interactionItems = computed(() =>
+  props.tab.threadId ? (props.tab.interactions ?? []) : store.interactions,
+);
 
 function formatDay(ts: number): string {
   const d = new Date(ts);
@@ -38,13 +45,13 @@ let lastStickScrollTop = 0;
 const UNPIN_DIST_PX = 32;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
-  () => (store.activeWorkByThread[store.currentThreadId ?? ""] ?? 0) > 0,
+  () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
 );
 
 // ---------- 无障碍播报（回合开始/结束） ----------
 const liveAnnouncement = ref("");
 watch(
-  () => store.turnActive,
+  () => props.tab.turnActive,
   (v, old) => {
     if (v && !old) liveAnnouncement.value = "正在生成回复";
     else if (!v && old) liveAnnouncement.value = "回复完成";
@@ -106,8 +113,8 @@ watch(
   [
     () => items.value.length,
     () => store.itemsRev,
-    () => store.interactions.length,
-    () => store.planPrompt,
+    () => interactionItems.value.length,
+    () => props.tab.planPrompt,
   ],
   () => {
     scheduleScroll();
@@ -163,11 +170,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="chat">
-    <div v-if="store.turnActive" class="thinking-bar"></div>
+    <div v-if="tab.turnActive" class="thinking-bar"></div>
     <div class="chat-scroll-wrap">
       <div ref="scroller" class="chat-scroll" @scroll="onScroll">
         <div v-if="items.length === 0" class="chat-empty">
-          <EmptyState :busy="store.turnActive || store.busy" />
+          <EmptyState :busy="tab.turnActive || store.busy" />
         </div>
         <template v-for="turn in turns" :key="turn.key">
           <section class="turn">
@@ -177,14 +184,14 @@ onBeforeUnmount(() => {
             </template>
           </section>
         </template>
-        <InlineInteraction />
-        <PlanPromptBubble />
+        <InlineInteraction :interactions="interactionItems" />
+        <PlanPromptBubble :prompt="tab.planPrompt" />
         <div
           v-if="
-            store.turnActive &&
+            tab.turnActive &&
             !hasActiveWork &&
             items.length &&
-            store.interactions.length === 0
+            interactionItems.length === 0
           "
           class="thinking-chip"
         >
@@ -193,7 +200,7 @@ onBeforeUnmount(() => {
           <span class="dot"></span>
           <span class="dot"></span>
         </div>
-        <div v-if="store.loadingThread" class="loading-thread-note">加载会话…</div>
+        <div v-if="tab.loadingThread" class="loading-thread-note">加载会话…</div>
       </div>
       <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
         ↓ 回到底部
