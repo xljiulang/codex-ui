@@ -5,8 +5,12 @@ import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
 import GitHistoryList from "./GitHistoryList.vue";
-import { askConfirm, setToast, toastError } from "../composables/useCodex";
-import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { setToast, toastError } from "../composables/useCodex";
+import { useActionMenu } from "../composables/useActionMenu";
+import {
+  useGitFileActions,
+  type GitSection,
+} from "../composables/useGitFileActions";
 import {
   gitErrorMsg,
   gitInitBusy,
@@ -38,8 +42,6 @@ import {
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
-  ICON_DELETE,
-  ICON_OPEN,
   ICON_PLUS,
 } from "../lib/icons";
 
@@ -71,19 +73,8 @@ const branchBusy = ref(false);
 const pullBusy = ref(false);
 const pushBusy = ref(false);
 
-const ICON_STAGE =
-  "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z";
-const ICON_UNSTAGE =
-  "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z";
-const ICON_RESTORE =
-  "M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z";
-const ICON_IGNORE =
-  "M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z";
 const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
-
-/** 分区：更改（工作区侧） / 暂存更改（HEAD→索引侧） */
-type GitSection = "changes" | "staged";
 
 const {
   ctxMenu,
@@ -92,7 +83,13 @@ const {
   onWindowScroll: onMenuWindowScroll,
   onKeydown: onMenuKeydown,
 } = useActionMenu({ width: 190, scrollScope: ".git-view" });
-const gitActionBusy = ref(false);
+const {
+  gitActionBusy,
+  openFileCtx,
+  openDirCtx,
+  stageAll,
+  unstageAll,
+} = useGitFileActions({ gitStatus, openCtx, openDiff });
 
 /** 手动折叠的目录集合；未记录 = 默认展开，折叠状态跨刷新保留 */
 const collapsedDirs = reactive(new Set<string>());
@@ -343,204 +340,9 @@ function onFileRowContext(
   else openFileCtx(section, row.file, e);
 }
 
-function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  const items: CtxItem[] = [
-    {
-      label: "打开",
-      icon: ICON_OPEN,
-      action: () => void openDiff(file),
-    },
-  ];
-  if (file.status === "modified" || file.status === "deleted") {
-    if (section === "changes") {
-      items.push({
-        label: "暂存",
-        icon: ICON_STAGE,
-        action: () => stageFile(file),
-      });
-    } else {
-      items.push({
-        label: "取消暂存",
-        icon: ICON_UNSTAGE,
-        action: () => unstageFile(file),
-      });
-    }
-    items.push({
-      label: "撤消更改",
-      icon: ICON_RESTORE,
-      danger: true,
-      action: () => void restoreFile(file),
-    });
-  } else if (file.status === "untracked") {
-    items.push({
-      label: "暂存",
-      icon: ICON_STAGE,
-      action: () => stageFile(file),
-    });
-    items.push({
-      label: "忽略此本地项",
-      icon: ICON_IGNORE,
-      action: () => ignoreFile(file),
-    });
-    items.push({
-      label: "删除文件",
-      icon: ICON_DELETE,
-      danger: true,
-      action: () => void deleteFile(file),
-    });
-  } else if (file.status === "added") {
-    items.push({
-      label: "取消暂存",
-      icon: ICON_UNSTAGE,
-      action: () => unstageFile(file),
-    });
-    items.push({
-      label: "删除文件",
-      icon: ICON_DELETE,
-      danger: true,
-      action: () => void deleteFile(file),
-    });
-  }
-  // conflicted / renamed 仅保留“打开”
-  openCtx(e, items);
-}
-
 function toggleDirRow(node: GitDirNode) {
   if (collapsedDirs.has(node.relPath)) collapsedDirs.delete(node.relPath);
   else collapsedDirs.add(node.relPath);
-}
-
-function openDirCtx(section: GitSection, node: GitDirNode, e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  const items: CtxItem[] = [];
-  if (section === "changes") {
-    // 目录出现在更改区即含工作区侧更改
-    items.push({
-      label: "暂存",
-      icon: ICON_STAGE,
-      action: () => stageDir(node),
-    });
-    if (node.hasUntracked) {
-      items.push({
-        label: "忽略此本地项",
-        icon: ICON_IGNORE,
-        action: () => ignoreDir(node),
-      });
-    }
-  } else {
-    // 目录出现在暂存更改区即含已暂存更改
-    items.push({
-      label: "取消暂存",
-      icon: ICON_UNSTAGE,
-      action: () => unstageDir(node),
-    });
-  }
-  items.push({
-    label: "撤消更改",
-    icon: ICON_RESTORE,
-    danger: true,
-    action: () => void restoreDir(node),
-  });
-  openCtx(e, items);
-}
-
-async function runGitOp(cmd: string, relPath: string) {
-  if (gitActionBusy.value) return;
-  const root = gitStatus.value?.repoWorkspace;
-  if (!root) return;
-  gitActionBusy.value = true;
-  try {
-    const st = await invoke<GitStatus>(cmd, { workspace: root, path: relPath });
-    gitStatus.value = st;
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    gitActionBusy.value = false;
-  }
-}
-
-function stageFile(file: GitFile) {
-  void runGitOp("git_changes_stage", file.path);
-}
-
-function unstageFile(file: GitFile) {
-  void runGitOp("git_changes_unstage", file.path);
-}
-
-function ignoreFile(file: GitFile) {
-  void runGitOp("git_changes_ignore", file.path);
-}
-
-async function restoreFile(file: GitFile) {
-  if (gitActionBusy.value) return;
-  const ok = await askConfirm({
-    title: "撤消更改",
-    message: `将丢弃「${file.path}」的所有本地更改（含已暂存内容），确定撤消吗？`,
-    confirmLabel: "撤消更改",
-  });
-  if (!ok) return;
-  void runGitOp("git_changes_restore", file.path);
-}
-
-async function deleteFile(file: GitFile) {
-  if (gitActionBusy.value) return;
-  const ok = await askConfirm({
-    title: "删除文件",
-    message: `确定删除「${file.path}」吗？工作区文件将被移除并记录为暂存删除，此操作不可恢复。`,
-    confirmLabel: "删除",
-  });
-  if (!ok) return;
-  void runGitOp("git_changes_delete", file.path);
-}
-
-function stageDir(node: GitDirNode) {
-  void runGitOp("git_changes_stage", node.relPath);
-}
-
-function unstageDir(node: GitDirNode) {
-  void runGitOp("git_changes_unstage", node.relPath);
-}
-
-/** 全部操作：暂存全部工作区变更 / 取消暂存全部已暂存变更 */
-async function runGitAllOp(cmd: string) {
-  if (gitActionBusy.value) return;
-  const root = gitStatus.value?.repoWorkspace;
-  if (!root) return;
-  gitActionBusy.value = true;
-  try {
-    const st = await invoke<GitStatus>(cmd, { workspace: root });
-    gitStatus.value = st;
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    gitActionBusy.value = false;
-  }
-}
-
-function stageAll() {
-  void runGitAllOp("git_changes_stage_all");
-}
-
-function unstageAll() {
-  void runGitAllOp("git_changes_unstage_all");
-}
-
-function ignoreDir(node: GitDirNode) {
-  void runGitOp("git_changes_ignore", node.relPath);
-}
-
-async function restoreDir(node: GitDirNode) {
-  if (gitActionBusy.value) return;
-  const ok = await askConfirm({
-    title: "撤消更改",
-    message: `将丢弃「${node.relPath}」目录下的所有本地更改（含已暂存内容），确定撤消吗？`,
-    confirmLabel: "撤消更改",
-  });
-  if (!ok) return;
-  void runGitOp("git_changes_restore", node.relPath);
 }
 </script>
 
