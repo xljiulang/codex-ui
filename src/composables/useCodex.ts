@@ -171,6 +171,8 @@ export const store = reactive({
   followupQueue: [] as { text: string; attachments: UserInput[] }[],
   interactions: [] as PendingInteraction[],
   settings: defaultSettings(),
+  // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
+  booting: true,
   loadingHistory: false,
   loadingThread: false,
   busy: false,
@@ -1904,17 +1906,28 @@ export async function wireEvents() {
   );
 }
 
+/** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
+const BOOT_MAX_MS = 15_000;
+
 export async function init() {
-  // 先拿到工作目录：窗口标题与沙箱可写根需要它；历史列表有意展示全部目录的会话。
-  await Promise.all([loadSettings(), refreshServer()]);
-  await updateWindowTitle();
-  void loadModels();
-  void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动的初始新对话即预初始化插件缓存
-  void ensureSkills(); // 应用启动预加载技能列表（$ 菜单与回显悬浮提示共用）
-  await refreshThreads();
-  await wireEvents();
-  // 监听注册后补取一次状态：避免后端启动成功的首次推送早于监听注册被丢弃
-  void refreshServer().catch(() => undefined);
+  const bootTimer = window.setTimeout(() => {
+    store.booting = false;
+  }, BOOT_MAX_MS);
+  try {
+    // 先拿到工作目录：窗口标题与沙箱可写根需要它；历史列表有意展示全部目录的会话。
+    await Promise.all([loadSettings(), refreshServer()]);
+    await updateWindowTitle();
+    void loadModels();
+    void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动的初始新对话即预初始化插件缓存
+    void ensureSkills(); // 应用启动预加载技能列表（$ 菜单与回显悬浮提示共用）
+    await refreshThreads();
+    await wireEvents();
+    // 监听注册后补取一次状态：避免后端启动成功的首次推送早于监听注册被丢弃
+    void refreshServer().catch(() => undefined);
+  } finally {
+    window.clearTimeout(bootTimer);
+    store.booting = false;
+  }
 }
 
 export function disposeEvents() {

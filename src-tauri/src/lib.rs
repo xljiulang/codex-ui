@@ -3,7 +3,8 @@ pub mod codex;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::utils::config::Color;
 
 use codex::app_server::CodexServer;
 
@@ -128,6 +129,28 @@ pub fn run() {
             codex::git::git_changes_watch_stop,
         ])
         .setup(|app| {
+            // 先读取已保存主题，再以对应背景色创建主窗口：
+            // 窗口从创建那一刻起颜色即与主题一致，避免首帧错色/闪色（缺省按 blue）。
+            let app_dir = app.path().app_data_dir().ok();
+            let theme = app_dir
+                .as_deref()
+                .map(codex::settings::load)
+                .unwrap_or_default()
+                .theme;
+            let (r, g, b, a) = codex::settings::theme_background_rgba(&theme);
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("Codex UI")
+                .inner_size(1280.0, 720.0)
+                .min_inner_size(400.0, 560.0)
+                .resizable(true)
+                .center()
+                .background_color(Color(r, g, b, a))
+                .build()
+                .map_err(|e| {
+                    eprintln!("创建主窗口失败: {e}");
+                    format!("创建主窗口失败: {e}")
+                })?;
+
             let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();

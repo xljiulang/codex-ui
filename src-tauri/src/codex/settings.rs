@@ -67,6 +67,16 @@ pub fn save(app_dir: &Path, s: &AppSettings) -> Result<(), String> {
     fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
+/// 主题对应的启动窗口背景色（RGBA）：dark→曜黑、light→晨光、其它含缺省→蓝夜。
+/// 用于原生窗口在 Web 内容渲染前就与保存的主题配色一致，避免启动白屏/错色。
+pub fn theme_background_rgba(theme: &str) -> (u8, u8, u8, u8) {
+    match theme {
+        "dark" => (0x0a, 0x0b, 0x10, 0xff),
+        "light" => (0xf4, 0xf6, 0xfb, 0xff),
+        _ => (0x0e, 0x11, 0x16, 0xff),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +114,18 @@ mod tests {
         assert!(!settings_path(dir.path())
             .with_extension("json.tmp")
             .exists());
+    }
+
+    #[test]
+    fn theme_background_matches_theme_palette() {
+        assert_eq!(theme_background_rgba("dark"), (0x0a, 0x0b, 0x10, 0xff));
+        assert_eq!(theme_background_rgba("light"), (0xf4, 0xf6, 0xfb, 0xff));
+        assert_eq!(theme_background_rgba("blue"), (0x0e, 0x11, 0x16, 0xff));
+    }
+
+    #[test]
+    fn theme_background_falls_back_for_unknown_theme() {
+        assert_eq!(theme_background_rgba(""), (0x0e, 0x11, 0x16, 0xff));
+        assert_eq!(theme_background_rgba("neon"), (0x0e, 0x11, 0x16, 0xff));
     }
 }

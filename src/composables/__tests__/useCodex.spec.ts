@@ -41,6 +41,7 @@ import {
   ensureThreadPlugins,
   executePlan,
   exitPlanMode,
+  init,
   interrupt,
   isGoalStatus,
   loadSettings,
@@ -186,6 +187,43 @@ describe("toastError 错误提示提取", () => {
     expect(
       toastError("cannot resume running thread thr_1 with history while it is already running"),
     ).toBe("该会话正被占用（已有回合在运行或其它进程持有），请稍后再试");
+  });
+});
+
+describe("启动加载态 booting 状态", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，避免 init() 内的 wireEvents 与其它用例互相干扰
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.booting = true;
+  });
+
+  it("初始为 true，init() 完成后置为 false", async () => {
+    expect(store.booting).toBe(true);
+    await init();
+    expect(store.booting).toBe(false);
+  });
+
+  it("init() 抛错时也关闭加载态", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "server_status") {
+        return Promise.reject(new Error("后端不可用"));
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    expect(store.booting).toBe(true);
+    await expect(init()).rejects.toThrow("后端不可用");
+    expect(store.booting).toBe(false);
   });
 });
 

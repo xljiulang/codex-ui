@@ -10,17 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Codex UI",
-        "width": 1280,
-        "height": 720,
-        "minWidth": 400,
-        "minHeight": 560,
-        "resizable": true,
-        "center": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: https:; style-src 'self' 'unsafe-inline'; media-src 'self' asset: http://asset.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:",
       "assetProtocol": {
