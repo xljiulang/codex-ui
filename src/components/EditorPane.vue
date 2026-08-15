@@ -358,8 +358,17 @@ const activeWorkspace = computed((): string | null => {
   return s?.workspace ?? null;
 });
 
-/** 是否存在激活状态的标签（无活动标签时隐藏「+」） */
-const hasActiveTab = computed(() => activeTabId.value !== "");
+/**
+ * 是否存在激活状态的标签（无活动标签时隐藏「+」）。
+ * 按“活动标签真实存在”判定：activeTabId 可能残留已关闭会话标签的 id，
+ * 仅看非空会误判，需同时命中编辑器标签或现存会话标签。
+ */
+const hasActiveTab = computed(
+  () =>
+    activeTabId.value !== "" &&
+    (activeTab.value !== null ||
+      store.sessionTabs.some((t) => t.id === activeTabId.value)),
+);
 
 /** 标签栏末尾「+」：选择新建会话或新建终端，均使用活动标签工作区启动 */
 function openAddMenu(e: MouseEvent) {

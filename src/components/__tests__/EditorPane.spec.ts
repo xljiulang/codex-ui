@@ -196,6 +196,20 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("关闭最后一个会话标签后：无活动标签，「+」隐藏", async () => {
+    const wrapper = mountPane();
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
+    const tabEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("新建会话"))!;
+    await tabEl.find(".editor-tab-close").trigger("click");
+    await settle();
+    expect(store.sessionTabs.length).toBe(0);
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
+    expect(wrapper.find(".no-session-state").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("有活动标签时「+」可见，点击弹出「新建会话 / 新建终端」菜单（带图标）", async () => {
     store.sessionTabs[0].workspace = "D:/repo";
     const wrapper = mountPane();
