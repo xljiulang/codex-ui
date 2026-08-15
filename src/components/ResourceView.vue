@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { setToast, toastError } from "../composables/useCodex";
+import { openNewSession, setToast, toastError } from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
   clearSearch,
@@ -122,6 +122,11 @@ async function openRootMenu(e: MouseEvent) {
   if (!root) return;
   const canPaste = await pasteAvailable();
   openCtx(e, [
+    {
+      label: "新建会话",
+      icon: ICON_PLUS,
+      action: () => void openNewSession(root.path),
+    },
     {
       label: "新建文本文件",
       icon: ICON_PLUS,

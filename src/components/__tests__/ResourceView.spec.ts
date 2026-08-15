@@ -5,6 +5,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
+    openNewSession: vi.fn(),
     refreshThreads: vi.fn(),
   };
 });
@@ -19,7 +20,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
-import { store } from "../../composables/useCodex";
+import { openNewSession, store } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
@@ -30,6 +31,7 @@ import type { FsEntry } from "../../lib/sessionFs";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
+const mockedOpenNewSession = vi.mocked(openNewSession);
 const rootPath = "D:\\codex\\codex-ui";
 
 const rootEntry: FsEntry = {
@@ -187,6 +189,7 @@ describe("ResourceView 文件树", () => {
     store.toast = "";
     clipboardFiles = [aTxt.path];
     mockedInvoke.mockClear();
+    mockedOpenNewSession.mockClear();
     mockFs();
     __resetSessionFsForTest();
     __resetEditorTabsForTest();
@@ -481,16 +484,27 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("根节点右键菜单含粘贴、在此打开终端与在资源管理器中打开", async () => {
+  it("根节点右键菜单含新建会话、粘贴、在此打开终端与在资源管理器中打开", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-root");
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).toEqual([
+      "新建会话",
       "新建文本文件",
       "粘贴",
       "在此打开终端",
       "在资源管理器中打开",
     ]);
+    wrapper.unmount();
+  });
+
+  it("根节点「新建会话」：以工作根目录调用统一新建入口并关闭菜单", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-root");
+    await clickCtxItem(wrapper, "新建会话");
+    expect(mockedOpenNewSession).toHaveBeenCalledWith(rootPath);
+    expect(mockedOpenNewSession).toHaveBeenCalledTimes(1);
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 
