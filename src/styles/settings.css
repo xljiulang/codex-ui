@@ -1,0 +1,105 @@
+/* 拆分自 src/style.css：设置页（保持全局顺序，勿重排） */
+/* 设置页 */
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setting-row {
+  background: rgba(var(--overlay-rgb), 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  transition: border-color 0.15s ease;
+}
+
+.setting-row:hover {
+  border-color: var(--border-light);
+}
+
+.setting-row label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 5px;
+}
+
+.setting-row input[type="text"],
+.setting-row select {
+  width: 100%;
+}
+
+.setting-value {
+  font-size: 12px;
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  word-break: break-all;
+  user-select: text;
+}
+
+.setting-path-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.setting-path-row .setting-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.server-logs {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--console-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  user-select: text;
+  color: var(--console-text);
+  box-shadow: var(--inset-shadow-md);
+}
+
+.auth-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 11px 14px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+}
+

@@ -118,7 +118,7 @@ function makeTab(over: Partial<TerminalEditorTab> = {}): TerminalEditorTab {
   }) as unknown as TerminalEditorTab;
 }
 
-/** 三套主题的 CSS 变量表（与 src/style.css 保持一致） */
+/** 三套主题的 CSS 变量表（与 src/styles/theme.css 保持一致） */
 const THEME_VARS: Record<string, Record<string, string>> = {
   blue: {
     "--console-bg-deep": "rgba(12, 16, 22, 0.9)",

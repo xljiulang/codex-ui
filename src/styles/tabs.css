@@ -1,0 +1,506 @@
+/* 拆分自 src/style.css：编辑器标签栏/会话主标签/呼吸点/标签图标徽标（保持全局顺序，勿重排） */
+/* ===== 左侧编辑器标签容器（对话主标签 + 文件/diff 标签） ===== */
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.editor-tabs-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 46px;
+  padding: 13px 8px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+  flex-shrink: 0;
+}
+
+/* 会话主标签固定区：与右侧滚动区同排，自身不滚动 */
+.editor-tabs-track {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 32px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.editor-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.editor-tab-scroll {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.editor-tab-scroll:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.editor-tab-scroll svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  height: 32px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0 8px 0 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.editor-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.editor-tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text-bright);
+}
+
+.editor-tab.pinned.active .editor-tab-label {
+  color: var(--accent);
+}
+
+/* 会话主标签固定在滚动区外：不收缩，右侧细分隔线（active 时已有边框，避免双线） */
+.editor-tab.pinned {
+  flex-shrink: 0;
+  box-shadow: 1px 0 0 var(--border);
+}
+
+.editor-tab.pinned.active {
+  box-shadow: none;
+}
+
+.editor-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 对话主标签：AppHeader 同款 Logo */
+.editor-tab-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.editor-tab-logo svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+
+.editor-tab-logo svg .logo-c {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* 会话主标签品牌文字：AppHeader .brand-name 同款渐变，按 Tab 高度缩放 */
+.editor-tab-brand {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 1.2px;
+  white-space: nowrap;
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 呼吸圆点基础样式：会话标签（回合进行中）与终端标签（命令执行中）共用 */
+.editor-tab-run {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: breathe 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* 会话标签：右上角绝对定位，不挤占布局 */
+.editor-tab-run.pinned {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+}
+
+/* 会话标签：待处理交互计数角标（警示色，行内展示避免覆盖关闭按钮） */
+.interaction-badge {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--yellow);
+  color: var(--bg);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 8px rgba(255, 190, 0, 0.35);
+  pointer-events: auto;
+  flex-shrink: 0;
+}
+
+/* 标签栏末尾「新建会话标签」按钮 */
+.editor-tab-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: 0 6px;
+  border-radius: 8px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.editor-tab-add:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.editor-tab-add svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* 终端标签：inline 跟随 flex 布局，位于图标与标题之间（右上角被关闭按钮占用） */
+.editor-tab-run.inline {
+  flex-shrink: 0;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+/* 文件/diff 标签：文件系统图标（无缓存时回退通用文件 SVG） */
+.editor-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.editor-tab-icon-img {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.editor-tab-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  color: var(--text-dim);
+}
+
+.editor-tab:hover .editor-tab-icon svg,
+.editor-tab.active .editor-tab-icon svg {
+  color: var(--text-bright);
+}
+
+.editor-tab-dirty {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yellow);
+  flex-shrink: 0;
+}
+
+.editor-tab-kind {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.editor-tab.is-diff .editor-tab-kind {
+  background: rgba(229, 214, 160, 0.14);
+  color: var(--yellow);
+}
+
+.editor-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.editor-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text-bright);
+}
+
+.editor-tab-close svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.editor-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 终端标签：xterm 填满编辑区，控制台底色随主题切换（与代码块共用 --console-*） */
+.terminal-pane {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--console-bg-deep);
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 0 8px 10px;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.terminal-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  background: var(--console-bg);
+  color: var(--text-dim);
+  text-align: center;
+  pointer-events: none;
+}
+
+.terminal-overlay-title {
+  font-size: 13px;
+  color: var(--text-bright);
+}
+
+.terminal-overlay-msg {
+  font-size: 12px;
+  max-width: 80%;
+  word-break: break-all;
+}
+
+/* 内嵌编辑区/diff 区：替代独立窗口的 100vh，填满面板剩余高度 */
+.text-editor-embedded,
+.diff-embedded {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* 特殊文件预览区（PDF / 图像）：与文本编辑器/diff 同风格内嵌布局 */
+.preview-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--console-bg-deep);
+}
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--diff-head-bg);
+}
+.preview-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-bright);
+  word-break: break-all;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 11px;
+}
+.preview-kind {
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-radius: 999px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+}
+.preview-note {
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.preview-error {
+  color: var(--red);
+}
+.preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.preview-image {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 16px;
+}
+.preview-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* PDF 预览：工具栏 + 可滚动画布 */
+.pdf-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--diff-head-bg);
+}
+.pdf-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  padding: 0 6px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+.pdf-toolbar-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+.pdf-toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pdf-toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+.pdf-toolbar-page,
+.pdf-toolbar-percent {
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: center;
+}
+.pdf-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.pdf-toolbar-fit {
+  margin-left: auto;
+}
+.pdf-canvas-host {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+}
+.pdf-canvas-host canvas {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  background: #fff;
+  border-radius: 2px;
+  align-self: flex-start;
+}

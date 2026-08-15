@@ -1,0 +1,551 @@
+/* 拆分自 src/style.css：头部/新建会话/右侧面板/拖拽条/历史行/面板内容区（保持全局顺序，勿重排） */
+/* 头部 */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--header-bg);
+  backdrop-filter: blur(10px);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 30;
+  box-shadow: var(--header-shadow);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  align-self: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.2),
+    rgba(var(--accent-rgb), 0.06)
+  );
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.brand-logo svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+
+.brand-logo svg .logo-c {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.brand-name {
+  font-size: 14.5px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text-bright);
+  letter-spacing: 1.8px;
+  background: var(--brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  color: var(--text-dim);
+  position: relative;
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.icon-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.icon-btn.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+/* 新建会话：与设置完全同形态（32px 圆角方形、同 hover 手感），
+   仅以更大的 18px 强调色加号区分主次 */
+.icon-btn.new-chat-btn {
+  color: var(--accent);
+}
+
+.icon-btn.new-chat-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* 右侧面板 */
+.right-panel {
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 宽度拖拽条（面板左缘） */
+.right-panel-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+  z-index: 5;
+  touch-action: none;
+  transition: background-color 0.14s ease;
+}
+
+/* 拖拽条中的分隔细线：默认隐现，悬停/拖动时点亮 */
+.right-panel-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  transition: background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+/* 拖拽条中部的抓握手感点 */
+.right-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.28);
+  opacity: 0;
+  transition: opacity 0.14s ease, background-color 0.14s ease;
+}
+
+.right-panel-resize-handle:hover,
+.right-panel-resize-handle.dragging {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.16),
+    rgba(var(--accent-rgb), 0.02)
+  );
+}
+
+.right-panel-resize-handle:hover::before,
+.right-panel-resize-handle.dragging::before {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.right-panel-resize-handle:hover::after,
+.right-panel-resize-handle.dragging::after {
+  opacity: 1;
+}
+
+.history-head {
+  position: relative;
+  height: 46px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+}
+
+.history-search-group {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.history-search-group:focus-within {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.history-search {
+  width: 100%;
+  height: 28px;
+  padding: 0 10px;
+  padding-right: 30px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.history-search:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.history-search-clear {
+  position: absolute;
+  right: 32px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.history-search-clear:hover {
+  color: var(--text-bright);
+  background: var(--bg-hover);
+}
+
+.history-refresh {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+
+.history-refresh:hover {
+  color: var(--text-bright);
+  background: var(--bg-hover);
+}
+
+.history-refresh svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.history-folder {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  margin-top: 2px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.history-folder:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.history-folder .folder-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.history-folder .folder-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
+.history-folder .folder-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.55;
+}
+
+.history-folder .folder-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-folder .folder-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.history-item.folder-item {
+  margin-left: 14px;
+}
+
+.history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  position: relative;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.history-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.history-item.active {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.11),
+    rgba(var(--accent-rgb), 0.03)
+  );
+  border-color: rgba(var(--accent-rgb), 0.24);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.history-title {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 历史会话行：后台运行呼吸点 */
+.history-run-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.pin-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.pin-badge svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+.history-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-snippet {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rename-input {
+  width: 100%;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.history-time {
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 右侧面板外壳内容区与底部 Tab 栏 */
+.panel-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-view,
+.resource-view,
+.git-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-tabs {
+  flex-shrink: 0;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--panel-bg);
+  padding: 0 6px;
+}
+
+.panel-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 9px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.panel-tab svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  opacity: 0.82;
+}
+
+.panel-tab span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel-tab .tab-badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #ffffff;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.5);
+}
+
+.panel-tab:hover {
+  color: var(--text-bright);
+}
+
+.panel-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.panel-tab.active svg {
+  opacity: 1;
+}
+
+.panel-tab:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: -1px;
+}
+

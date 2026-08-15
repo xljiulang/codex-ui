@@ -1,0 +1,539 @@
+/* 拆分自 src/style.css：主题令牌与三套主题（blue/dark/light）（保持全局顺序，勿重排） */
+/* ===== 主题系统 =====
+ * 三套主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光）。
+ * 根节点 data-theme 决定当前主题，未设置时回退 blue。
+ * 代码块/命令输出等控制台表面随主题切换（--console-* / --code-* / --syntax-* 按主题定义）。
+ */
+
+/* 跨主题共享的几何/字体令牌 */
+:root {
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  /* 代码块容器：全主题保持深色“终端”质感 */
+  --code-bg: linear-gradient(180deg, #161c25 0%, #0e1218 100%);
+}
+
+/* 主题一：蓝夜（默认） */
+:root,
+:root[data-theme="blue"] {
+  color-scheme: dark;
+
+  /* 基础画布：蓝黑深色，比纯黑更有层次 */
+  --bg: #0e1116;
+  --bg-panel: #151a21;
+  --bg-input: #1b212a;
+  --bg-hover: #1e2530;
+  --bg-active: #26303d;
+
+  /* 发丝线：半透明白叠出的层次，避免生硬灰 */
+  --border: rgba(var(--border-rgb), 0.14);
+  --border-light: rgba(var(--border-rgb), 0.26);
+  --border-rgb: 151, 167, 190;
+
+  --text: #c6cdd8;
+  --text-bright: #eef2f8;
+  --text-dim: #8b95a7;
+  --text-faint: #76819a;
+
+  /* 主色：蓝色 */
+  --accent: #4da6ff;
+  --accent-dim: #2f7fe0;
+  --accent-rgb: 77, 166, 255;
+  --accent-dim-rgb: 47, 127, 224;
+  --accent-soft: rgba(var(--accent-rgb), 0.12);
+  --accent-glow: rgba(var(--accent-rgb), 0.42);
+
+  --green: #46d5a8;
+  --green-rgb: 70, 213, 168;
+  --red: #f0565f;
+  --red-rgb: 240, 86, 95;
+  --yellow: #e5d6a0;
+  --blue: #79b8ff;
+  --purple: #c792ea;
+  --purple-rgb: 199, 146, 234;
+
+  /* 表面渐变与玻璃 */
+  --header-bg: linear-gradient(
+    180deg,
+    rgba(31, 38, 49, 0.92),
+    rgba(21, 26, 33, 0.97)
+  );
+  --panel-bg: linear-gradient(
+    180deg,
+    rgba(21, 26, 33, 0.92),
+    rgba(15, 19, 25, 0.97)
+  );
+  --footer-bg: linear-gradient(
+    180deg,
+    rgba(21, 26, 33, 0.94),
+    rgba(14, 17, 22, 0.98)
+  );
+  --diff-head-bg: linear-gradient(
+    180deg,
+    rgba(31, 38, 49, 0.9),
+    rgba(21, 26, 33, 0.95)
+  );
+  --tool-card-bg: linear-gradient(
+    180deg,
+    rgba(var(--input-rgb), 0.9),
+    rgba(18, 23, 30, 0.95)
+  );
+  --composer-bg: linear-gradient(180deg, #1d242e, #181e27);
+  --editor-menu-bg: linear-gradient(180deg, #222a36, #1a2029);
+  --modal-bg: linear-gradient(180deg, #1a2029, #151a21);
+  --chip-bg: linear-gradient(180deg, #242c38, #1c222c);
+  --chip-bg-hover: linear-gradient(180deg, #2a3341, #202834);
+  --table-head-bg: linear-gradient(180deg, #202836, #1b222d);
+  --reasoning-bg: linear-gradient(
+    180deg,
+    rgba(var(--purple-rgb), 0.05),
+    rgba(var(--panel-rgb), 0.4)
+  );
+
+  --panel-rgb: 21, 26, 33;
+  --glass-rgb: 38, 48, 61;
+  --input-rgb: 27, 33, 42;
+  --menu-bg: rgba(23, 28, 36, 0.97);
+  --tooltip-bg: rgba(28, 34, 44, 0.97);
+
+  /* 终端质感：代码块与命令输出（深色容器、浅色文字） */
+  --console-bg: rgba(10, 14, 19, 0.92);
+  --console-bg-deep: rgba(12, 16, 22, 0.9);
+  --console-text: #c6cdd8;
+  --code-text: #c6cdd8;
+  /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
+  --console-ansi-black: #0e1116;
+  --console-ansi-red: #f0565f;
+  --console-ansi-green: #46d5a8;
+  --console-ansi-yellow: #e5d6a0;
+  --console-ansi-blue: #79b8ff;
+  --console-ansi-magenta: #c792ea;
+  --console-ansi-cyan: #56b6c2;
+  --console-ansi-white: #c6cdd8;
+  --console-ansi-bright-black: #76819a;
+  --console-ansi-bright-red: #ff7a83;
+  --console-ansi-bright-green: #7cebc2;
+  --console-ansi-bright-yellow: #f2e3b0;
+  --console-ansi-bright-blue: #9ccbff;
+  --console-ansi-bright-magenta: #e0a7f5;
+  --console-ansi-bright-cyan: #86d7e0;
+  --console-ansi-bright-white: #eef2f8;
+  --console-cursor-text: #0c1016;
+
+  /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
+  --syntax-comment: #6a9955;
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-function: #dcdcaa;
+  --syntax-type: #9cdcfe;
+  --syntax-const: #4ec9b0;
+  --syntax-symbol: #d19a66;
+  --syntax-deletion: #f44747;
+  --code-head-tint: rgba(255, 255, 255, 0.03);
+
+  --brand-grad: linear-gradient(90deg, #f2f7ff, #9db8dd);
+  --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
+  --link-hover: #9ccbff;
+  --diff-del-text: #f0a0a0;
+  --diff-add-text: #9fe3d4;
+
+  --overlay-rgb: 255, 255, 255;
+  --header-shadow: 0 1px 12px rgba(0, 0, 0, 0.28);
+  --footer-shadow: 0 -8px 24px rgba(0, 0, 0, 0.22);
+  --inset-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  --inset-shadow-md: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.38);
+  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.5);
+}
+
+/* 主题二：曜黑（近黑画布 + 霓虹紫，更冷峻凌厉） */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0a0b10;
+  --bg-panel: #12131a;
+  --bg-input: #181a23;
+  --bg-hover: #1d1f2b;
+  --bg-active: #262938;
+
+  --border: rgba(173, 168, 212, 0.14);
+  --border-light: rgba(173, 168, 212, 0.28);
+  --border-rgb: 173, 168, 212;
+
+  --text: #c9c7d6;
+  --text-bright: #f1effc;
+  --text-dim: #9492a6;
+  --text-faint: #868399;
+
+  --accent: #a78bfa;
+  --accent-dim: #7b5df0;
+  --accent-rgb: 167, 139, 250;
+  --accent-dim-rgb: 123, 93, 240;
+  --accent-soft: rgba(var(--accent-rgb), 0.13);
+  --accent-glow: rgba(var(--accent-rgb), 0.38);
+
+  --green: #55e0b3;
+  --green-rgb: 85, 224, 179;
+  --red: #ff6b74;
+  --red-rgb: 255, 107, 116;
+  --yellow: #f0e0a4;
+  --blue: #8fb3ff;
+  --purple: #c792ea;
+  --purple-rgb: 199, 146, 234;
+
+  --header-bg: linear-gradient(
+    180deg,
+    rgba(24, 25, 34, 0.92),
+    rgba(13, 14, 21, 0.97)
+  );
+  --panel-bg: linear-gradient(
+    180deg,
+    rgba(18, 19, 27, 0.92),
+    rgba(11, 12, 18, 0.97)
+  );
+  --footer-bg: linear-gradient(
+    180deg,
+    rgba(18, 19, 27, 0.94),
+    rgba(10, 11, 17, 0.98)
+  );
+  --diff-head-bg: linear-gradient(
+    180deg,
+    rgba(24, 25, 34, 0.9),
+    rgba(13, 14, 21, 0.95)
+  );
+  --tool-card-bg: linear-gradient(
+    180deg,
+    rgba(24, 25, 35, 0.92),
+    rgba(14, 15, 22, 0.96)
+  );
+  --composer-bg: linear-gradient(180deg, #191a26, #13141e);
+  --editor-menu-bg: linear-gradient(180deg, #1d1e2b, #151622);
+  --modal-bg: linear-gradient(180deg, #161724, #101118);
+  --chip-bg: linear-gradient(180deg, #1f202e, #171824);
+  --chip-bg-hover: linear-gradient(180deg, #272838, #1b1c29);
+  --table-head-bg: linear-gradient(180deg, #1d1e2c, #151624);
+  --reasoning-bg: linear-gradient(
+    180deg,
+    rgba(167, 139, 250, 0.06),
+    rgba(18, 19, 27, 0.4)
+  );
+
+  --panel-rgb: 18, 19, 27;
+  --glass-rgb: 32, 33, 46;
+  --input-rgb: 24, 25, 35;
+  --menu-bg: rgba(16, 17, 24, 0.97);
+  --tooltip-bg: rgba(22, 23, 31, 0.97);
+
+  --console-bg: rgba(9, 10, 15, 0.92);
+  --console-bg-deep: rgba(12, 13, 20, 0.9);
+  --console-text: #b9b8c9;
+  --code-text: #cdcbe0;
+  /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
+  --console-ansi-black: #0a0b10;
+  --console-ansi-red: #ff6b74;
+  --console-ansi-green: #55e0b3;
+  --console-ansi-yellow: #f0e0a4;
+  --console-ansi-blue: #8fb3ff;
+  --console-ansi-magenta: #c792ea;
+  --console-ansi-cyan: #56b6c2;
+  --console-ansi-white: #c9c7d6;
+  --console-ansi-bright-black: #868399;
+  --console-ansi-bright-red: #ff8d94;
+  --console-ansi-bright-green: #7cf0c4;
+  --console-ansi-bright-yellow: #f8eabe;
+  --console-ansi-bright-blue: #b6c9ff;
+  --console-ansi-bright-magenta: #e0a7f5;
+  --console-ansi-bright-cyan: #86d7e0;
+  --console-ansi-bright-white: #f1effc;
+  --console-cursor-text: #0c1016;
+
+  /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
+  --syntax-comment: #6a9955;
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-function: #dcdcaa;
+  --syntax-type: #9cdcfe;
+  --syntax-const: #4ec9b0;
+  --syntax-symbol: #d19a66;
+  --syntax-deletion: #f44747;
+  --code-head-tint: rgba(255, 255, 255, 0.03);
+
+  --brand-grad: linear-gradient(90deg, #f4f1ff, #b9aee6);
+  --btn-grad: linear-gradient(135deg, #7557ec, #6d54e8);
+  --link-hover: #c5b6fd;
+  --diff-del-text: #f2a3a9;
+  --diff-add-text: #8fe6c8;
+
+  --overlay-rgb: 255, 255, 255;
+  --header-shadow: 0 1px 12px rgba(0, 0, 0, 0.34);
+  --footer-shadow: 0 -8px 24px rgba(0, 0, 0, 0.28);
+  --inset-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.36);
+  --inset-shadow-md: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.42);
+  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.52);
+}
+
+/* 主题三：晨光（通透明亮，蓝主色加深保证对比度） */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f6fb;
+  --bg-panel: #ffffff;
+  --bg-input: #ffffff;
+  --bg-hover: #e9edf4;
+  --bg-active: #dfe5ee;
+
+  --border: rgba(60, 76, 101, 0.16);
+  --border-light: rgba(60, 76, 101, 0.28);
+  --border-rgb: 60, 76, 101;
+
+  --text: #3e4756;
+  --text-bright: #151b26;
+  --text-dim: #626e7d;
+  --text-faint: #5f6b7a;
+
+  --accent: #2563eb;
+  --accent-dim: #1d5fc4;
+  --accent-rgb: 37, 99, 235;
+  --accent-dim-rgb: 29, 95, 196;
+  --accent-soft: rgba(var(--accent-rgb), 0.1);
+  --accent-glow: rgba(var(--accent-rgb), 0.28);
+
+  --green: #0e7a58;
+  --green-rgb: 14, 122, 88;
+  --red: #c23a45;
+  --red-rgb: 194, 58, 69;
+  --yellow: #a16207;
+  --blue: #2563eb;
+  --purple: #7c3aed;
+  --purple-rgb: 124, 58, 237;
+
+  --header-bg: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.94),
+    rgba(241, 245, 251, 0.98)
+  );
+  --panel-bg: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96),
+    rgba(244, 247, 252, 0.99)
+  );
+  --footer-bg: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.96),
+    rgba(238, 242, 249, 0.99)
+  );
+  --diff-head-bg: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(241, 245, 251, 0.96)
+  );
+  --tool-card-bg: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.95),
+    rgba(241, 245, 251, 0.98)
+  );
+  --composer-bg: linear-gradient(180deg, #ffffff, #eef2f9);
+  --editor-menu-bg: linear-gradient(180deg, #f4f7fc, #e9eef6);
+  --modal-bg: linear-gradient(180deg, #ffffff, #f2f5fa);
+  --chip-bg: linear-gradient(180deg, #ffffff, #eef1f7);
+  --chip-bg-hover: linear-gradient(180deg, #f2f5fa, #e5eaf2);
+  --table-head-bg: linear-gradient(180deg, #edf1f8, #e2e8f1);
+  --reasoning-bg: linear-gradient(
+    180deg,
+    rgba(124, 58, 237, 0.08),
+    rgba(255, 255, 255, 0.55)
+  );
+
+  --panel-rgb: 255, 255, 255;
+  --glass-rgb: 255, 255, 255;
+  --input-rgb: 255, 255, 255;
+  --menu-bg: rgba(255, 255, 255, 0.97);
+  --tooltip-bg: rgba(255, 255, 255, 0.97);
+
+  /* 控制台表面：晨光主题下为浅色容器、深色文字 */
+  --console-bg: rgba(238, 243, 250, 0.95);
+  --console-bg-deep: rgba(231, 236, 244, 0.95);
+  --console-text: #3e4756;
+  --code-text: #3e4756;
+  --code-bg: linear-gradient(180deg, #ffffff 0%, #eef2f9 100%);
+  /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
+  --console-ansi-black: #24292f;
+  --console-ansi-red: #cf222e;
+  --console-ansi-green: #116329;
+  --console-ansi-yellow: #9a6700;
+  --console-ansi-blue: #0969da;
+  --console-ansi-magenta: #8250df;
+  --console-ansi-cyan: #1b7c83;
+  --console-ansi-white: #57606a;
+  --console-ansi-bright-black: #6e7781;
+  --console-ansi-bright-red: #e5534b;
+  --console-ansi-bright-green: #1a7f37;
+  --console-ansi-bright-yellow: #9a6700;
+  --console-ansi-bright-blue: #0969da;
+  --console-ansi-bright-magenta: #8250df;
+  --console-ansi-bright-cyan: #1b7c83;
+  --console-ansi-bright-white: #3e4756;
+  --console-cursor-text: #ffffff;
+
+  /* 语法高亮：编辑器/diff/代码块共用，随主题切换 */
+  --syntax-comment: #6a737d;
+  --syntax-keyword: #cf222e;
+  --syntax-string: #0a3069;
+  --syntax-number: #0550ae;
+  --syntax-function: #8250df;
+  --syntax-type: #953800;
+  --syntax-const: #116329;
+  --syntax-symbol: #953800;
+  --syntax-deletion: #b62324;
+  --code-head-tint: rgba(0, 0, 0, 0.04);
+
+  --brand-grad: linear-gradient(90deg, #202a3a, #64748b);
+  --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
+  --link-hover: #1a56c4;
+  --diff-del-text: #c23a45;
+  --diff-add-text: #0e7a58;
+
+  --overlay-rgb: 25, 35, 52;
+  --header-shadow: 0 1px 12px rgba(30, 40, 60, 0.08);
+  --footer-shadow: 0 -8px 24px rgba(30, 40, 60, 0.07);
+  --inset-shadow: inset 0 1px 2px rgba(30, 40, 60, 0.08);
+  --inset-shadow-md: inset 0 1px 3px rgba(30, 40, 60, 0.1);
+
+  --shadow-sm: 0 1px 2px rgba(30, 40, 60, 0.07);
+  --shadow-md: 0 6px 20px rgba(30, 40, 60, 0.1);
+  --shadow-lg: 0 16px 44px rgba(30, 40, 60, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", -apple-system, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  background-image: radial-gradient(
+      1100px 420px at 50% -180px,
+      rgba(var(--accent-rgb), 0.055),
+      transparent 70%
+    ),
+    radial-gradient(
+      900px 380px at 85% -120px,
+      rgba(var(--accent-rgb), 0.045),
+      transparent 65%
+    );
+  background-attachment: fixed;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(var(--accent-rgb), 0.3);
+  color: var(--text-bright);
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+.option-btn:focus-visible,
+.mode-menu-item:focus-visible,
+.menu-item:focus-visible,
+.tool-toggle:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.14);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  outline: none;
+  resize: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+select {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+select:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+select option {
+  background: var(--bg-panel);
+  color: var(--text-bright);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+

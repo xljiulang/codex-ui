@@ -1,0 +1,245 @@
+/* 拆分自 src/style.css：空状态/toast/右键菜单/Logo/tooltip/滚动条（保持全局顺序，勿重排） */
+/* 空状态 */
+.empty-state {
+  text-align: center;
+  color: var(--text-faint);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  font-size: 12.5px;
+}
+
+/* 零会话标签空状态：主区域居中纯提示 */
+.no-session-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--text-faint);
+}
+
+.no-session-state .no-session-hint {
+  font-size: 13px;
+}
+
+/* 空状态 Logo：与 AppHeader 相同的圆角方块 + 六边形 C 标 */
+.empty-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.2),
+    rgba(var(--accent-dim-rgb), 0.06)
+  );
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.empty-logo:not(.busy) {
+  opacity: 0.55;
+}
+
+.empty-logo svg {
+  width: 38px;
+  height: 38px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+}
+
+.empty-logo svg .logo-c {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.empty-logo.busy svg {
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* toast */
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(var(--glass-rgb), 0.95);
+  color: var(--text-bright);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-size: 12.5px;
+  font-weight: 600;
+  z-index: 200;
+  max-width: 80vw;
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(var(--overlay-rgb), 0.06);
+  backdrop-filter: blur(12px);
+  animation: toast-in 0.18s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  flex-shrink: 0;
+}
+
+/* 自定义右键菜单 */
+.ctx-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 140px;
+  background: var(--menu-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg), inset 0 1px 0 rgba(var(--overlay-rgb), 0.05);
+  backdrop-filter: blur(14px);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  animation: menu-in 0.12s ease;
+}
+
+.ctx-menu-item {
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text);
+  width: 100%;
+}
+
+.ctx-menu-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+/* 会话 Logo 多路径图标：描边六边形 + C 标记（与会话标签同款，菜单 14px 缩放） */
+.ctx-menu-item svg.ctx-session-logo {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.ctx-menu-item svg.ctx-session-logo .logo-c {
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.ctx-menu-item-img {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.ctx-menu-item:hover {
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--text-bright);
+}
+
+.ctx-menu-item.danger:hover {
+  color: var(--red);
+}
+
+/* 全局统一 tooltip（v-tooltip 指令） */
+.app-tooltip {
+  position: fixed;
+  z-index: 500;
+  max-width: 340px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-bright);
+  background: var(--tooltip-bg);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(var(--overlay-rgb), 0.05);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  word-break: break-word;
+  white-space: pre-wrap;
+  animation: tooltip-in 0.12s ease;
+}
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(var(--border-rgb), 0.26);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--border-rgb), 0.42);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 加宽滚动条：diff 查看器、文本编辑器与会话区（其余面板保持 8px） */
+.diff-window-body::-webkit-scrollbar,
+.text-editor-host .cm-scroller::-webkit-scrollbar,
+.chat-scroll::-webkit-scrollbar,
+.text-editor-preview::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+

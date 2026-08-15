@@ -1,0 +1,481 @@
+/* 拆分自 src/style.css：输入区与窄窗口适配（保持全局顺序，勿重排） */
+/* 输入区 */
+.composer {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px 14px;
+  background: var(--footer-bg);
+  backdrop-filter: blur(12px);
+  position: relative;
+  /* backdrop-filter 会创建独立层叠上下文：菜单（z-index 40）被困在内部、
+     整体低于 .app-header（z-index 30）。提升整个 composer 层即可让
+     @/$ 等弹出菜单显示在头部之上；menu-backdrop 已 Teleport 到 body，
+     仍保持 z-index 29 位于头部之下，头部保持可点击。
+     权限/任务/模型三个按钮弹出层的外部关闭改由 window mousedown 判定
+     （点击任意非弹出层区域自动关闭），menu-backdrop 仅兜底 mention 菜单。 */
+  z-index: 31;
+  flex-shrink: 0;
+  box-shadow: var(--footer-shadow);
+}
+
+.composer.dragover {
+  outline: 2px dashed var(--accent-dim);
+  outline-offset: -6px;
+  border-radius: 12px;
+}
+
+.composer-input-row {
+  position: relative;
+}
+
+.composer-resize-handle {
+  height: 8px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  border-radius: 6px;
+  user-select: none;
+  touch-action: none;
+  transition: background-color 0.14s ease;
+}
+
+.composer-resize-handle:hover,
+.composer-resize-handle.active {
+  background: rgba(var(--accent-rgb), 0.09);
+}
+
+.composer-resize-grip {
+  width: 30px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-light);
+  transition: background-color 0.14s ease;
+}
+
+.composer-resize-handle:hover .composer-resize-grip,
+.composer-resize-handle.active .composer-resize-grip {
+  background: var(--accent-dim);
+}
+
+body.resizing-composer {
+  user-select: none;
+  cursor: ns-resize;
+}
+
+.rich-editor {
+  width: 100%;
+}
+
+.rich-editor .ProseMirror {
+  display: block;
+  width: 100%;
+  height: var(--composer-h, auto);
+  min-height: 120px;
+  max-height: var(--composer-h, 132px);
+  line-height: 1.55;
+  padding: 13px 14px 42px;
+  background: var(--composer-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+  outline: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: var(--inset-shadow-md), var(--shadow-sm);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.rich-editor .ProseMirror:focus {
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: var(--inset-shadow),
+    0 0 0 3px rgba(var(--accent-rgb), 0.12),
+    0 6px 22px rgba(var(--accent-rgb), 0.08);
+}
+
+.rich-editor .ProseMirror p {
+  margin: 0;
+}
+
+.rich-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-faint);
+  pointer-events: none;
+  height: 0;
+}
+
+.ref-chip {
+  display: inline-block;
+  vertical-align: baseline;
+  border-radius: 6px;
+  padding: 0 7px;
+  margin: 0 1px;
+  font-size: 12px;
+  line-height: 1.7;
+  background: rgba(var(--accent-rgb), 0.16);
+  border: 1px solid rgba(var(--accent-rgb), 0.26);
+  color: var(--link-hover);
+  cursor: default;
+  user-select: none;
+}
+
+.composer-left,
+.composer-right {
+  position: absolute;
+  bottom: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-left {
+  left: 10px;
+}
+
+.composer-right {
+  right: 10px;
+}
+
+.perm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.perm-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
+}
+
+.perm-chip svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.perm-chip .chevron {
+  width: 10px;
+  height: 10px;
+}
+
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.task-chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
+}
+
+.task-chip svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
+
+.task-chip .chip-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.goal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid var(--border-light);
+  backdrop-filter: blur(6px);
+  transition: border-color 0.15s ease, background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.goal-chip:hover {
+  border-color: var(--text-faint);
+  background: rgba(127, 127, 127, 0.13);
+}
+
+.goal-chip.has-goal {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  border-color: rgba(var(--accent-rgb), 0.28);
+}
+
+.goal-chip.has-goal:hover {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
+}
+
+.goal-icon-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.goal-icon-btn.has-goal {
+  color: var(--accent);
+}
+
+.goal-check {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.goal-icon-btn.status-active .goal-check {
+  animation: pulse 1s infinite;
+}
+
+.goal-icon-btn:hover {
+  background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.15);
+}
+
+.goal-icon-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  backdrop-filter: blur(6px);
+}
+
+.model-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
+}
+
+.model-chip svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
+
+.model-chip .model-chip-icon {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.ctx-window {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 30px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border-radius: var(--radius);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease,
+    box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.ctx-window:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.15);
+  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
+}
+
+.ctx-window:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.send-btn {
+  height: 30px;
+  padding: 0 18px;
+  gap: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--btn-grad);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.send-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.send-btn:hover:not(:disabled) {
+  transform: scale(1.08);
+  filter: brightness(1.06);
+  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+.send-btn.lit {
+  animation: send-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes send-pulse {
+  0%,
+  100% {
+    box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow: 0 2px 22px rgba(var(--accent-rgb), 0.6),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+}
+
+.send-btn.stop {
+  background: rgba(var(--red-rgb), 0.13);
+  color: var(--red);
+  border: 1px solid rgba(var(--red-rgb), 0.35);
+  box-shadow: none;
+}
+
+.send-btn.stop:hover:not(:disabled) {
+  background: rgba(var(--red-rgb), 0.2);
+  box-shadow: 0 0 14px rgba(var(--red-rgb), 0.18);
+  filter: none;
+}
+
+.attachment-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  color: var(--link-hover);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+}
+
+.attachment-chip button {
+  color: var(--text-dim);
+  line-height: 1;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-chip button:hover {
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.12);
+}
+
+.attachment-thumb {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+/* 窄窗口适配 */
+@media (max-width: 640px) {
+  .perm-chip,
+  .task-chip,
+  .goal-chip,
+  .model-chip {
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .goal-chip {
+    padding: 0 4px;
+  }
+
+  .composer-left,
+  .composer-right {
+    gap: 4px;
+  }
+}
+

@@ -1,0 +1,12 @@
+/* style.css 拆分入口：按原文件顺序引入，勿调整顺序（全局级联依赖顺序） */
+@import "./theme.css";
+@import "./layout.css";
+@import "./git.css";
+@import "./resources.css";
+@import "./chat.css";
+@import "./composer.css";
+@import "./overlays.css";
+@import "./settings.css";
+@import "./feedback.css";
+@import "./render.css";
+@import "./tabs.css";

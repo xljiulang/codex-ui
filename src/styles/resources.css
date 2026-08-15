@@ -1,0 +1,245 @@
+/* 拆分自 src/style.css：资源树/系统图标/@ 附件按钮/树内拖拽（保持全局顺序，勿重排） */
+/* 会话资源树 */
+.resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease,
+    box-shadow 0.14s ease;
+  position: relative;
+}
+
+.resource-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.resource-row.active {
+  background: linear-gradient(
+    90deg,
+    rgba(var(--accent-rgb), 0.11),
+    rgba(var(--accent-rgb), 0.03)
+  );
+  border-color: rgba(var(--accent-rgb), 0.24);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.resource-root {
+  font-weight: 600;
+}
+
+.resource-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.resource-row.resource-file .resource-icon {
+  color: var(--text-faint);
+}
+
+.resource-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* 系统文件图标（PNG data URI）：与内置 SVG 图标同尺寸，避免行高跳动 */
+.resource-icon-img {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+/* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
+.resource-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.55;
+}
+
+.resource-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.resource-name {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-relpath {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-side {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 45%;
+}
+
+.resource-time {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  min-width: 22px;
+  text-align: center;
+}
+
+/* 悬停“@”添加为会话附件按钮：绝对定位悬浮在行首，不占布局空间；行悬停/聚焦时显示 */
+.resource-add {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-input);
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.resource-add svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.resource-row:hover .resource-add,
+.resource-add:focus-visible {
+  opacity: 1;
+}
+
+.resource-add:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+/* 树内拖拽移动：合法目标目录高亮 */
+.resource-row.resource-drop-target {
+  background: rgba(var(--accent-rgb), 0.12);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* 自绘指针拖拽：拖拽期间禁止文本选择、隐藏行内 @ 按钮、grabbing 光标 */
+body.resource-dragging {
+  user-select: none;
+}
+body.resource-dragging .resource-row {
+  cursor: grabbing;
+}
+body.resource-dragging .resource-add {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 拖拽幽灵卡片：fixed 跟随指针，不参与命中 */
+.resource-drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: 12px;
+  transform: translate(-50%, -130%);
+  opacity: 0.92;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resource-drag-ghost svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+.resource-error {
+  color: var(--red);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.resource-props {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resource-prop {
+  display: flex;
+  gap: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.resource-prop-key {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--text-dim);
+}
+
+.resource-prop-value {
+  min-width: 0;
+  color: var(--text-bright);
+  word-break: break-all;
+}
+
