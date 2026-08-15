@@ -34,7 +34,13 @@ let view: EditorView | null = null;
 const isMarkdown = computed(
   () => languageFromPath(props.tab.path) === "markdown",
 );
-const previewMode = ref(false);
+/** 预览/编辑态随标签持久化：切走再回来保持切出时状态（存于 FileEditorTab.markdownPreview） */
+const previewMode = computed({
+  get: () => props.tab.markdownPreview,
+  set: (v: boolean) => {
+    props.tab.markdownPreview = v;
+  },
+});
 
 const langLabel = computed(
   () => languageFromPath(props.tab.path) ?? "text",
@@ -265,13 +271,10 @@ watch(
     void nextTick(ensureView);
   },
 );
-// 切换文件标签时复位预览态
-watch(
-  () => props.tab.id,
-  () => {
-    previewMode.value = false;
-  },
-);
+// 回到编辑态时宿主重新可见：补一次测量，避免预览态下隐藏宿主中创建的视图布局滞后
+watch(previewMode, (v) => {
+  if (!v) void nextTick(() => view?.requestMeasure());
+});
 
 onBeforeUnmount(() => {
   view?.destroy();

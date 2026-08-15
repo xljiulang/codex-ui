@@ -108,6 +108,7 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).not.toBe("chat");
     const tab = fileTab(activeTabId.value);
     expect(tab.title).toBe("a.txt");
+    expect(tab.markdownPreview).toBe(false);
     expect(tab.loading).toBe(false);
     expect(tab.editorState).not.toBeNull();
     expect(tab.editorState!.doc.toString()).toBe("hello");

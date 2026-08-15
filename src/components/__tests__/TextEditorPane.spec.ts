@@ -204,6 +204,29 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     wrapper.unmount();
   });
 
+  it("预览态写入标签状态：卸载重挂载后仍保持预览", async () => {
+    const tab = await openTab("a.md", "# 标题");
+    const w1 = await mountEditor(tab);
+    await w1
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await nextTick();
+    expect(tab.markdownPreview).toBe(true);
+    expect(
+      w1.find(".text-editor-actions button[aria-label='编辑']").exists(),
+    ).toBe(true);
+    w1.unmount();
+
+    const w2 = await mountEditor(tab);
+    expect(tab.markdownPreview).toBe(true);
+    expect(
+      w2.find(".text-editor-actions button[aria-label='编辑']").exists(),
+    ).toBe(true);
+    await waitForEl(w2, ".text-editor-preview .md");
+    expect(w2.find(".text-editor-preview .md").text()).toContain("标题");
+    w2.unmount();
+  });
+
   it("可格式化文件（json/ts/py/xml/html）右键菜单末尾为「代码格式化」", async () => {
     for (const [name, content] of [
       ["a.json", '{"a":1}'],

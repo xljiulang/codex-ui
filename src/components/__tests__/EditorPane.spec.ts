@@ -192,6 +192,51 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("md 预览态在切换标签后保持：文件间切换与卸载重建均不丢失", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read") {
+        const path = (args as { path?: string }).path;
+        return Promise.resolve(
+          path === bTxt ? fileContent("hello") : fileContent("# 标题"),
+        );
+      }
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, "a.md");
+    await settle();
+    await waitForEl(wrapper, ".text-editor-actions button[aria-label='预览']");
+    await wrapper
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await settle();
+    expect(wrapper.find(".text-editor-preview .md").exists()).toBe(true);
+    const aTab = tabs.find((t) => t.title === "a.md")!;
+
+    // 文件间切换（组件不卸载，仅 prop 变化）
+    await openFileTab(root, bTxt);
+    await settle();
+    activateTab(aTab.id);
+    await settle();
+    expect(
+      wrapper.find(".text-editor-actions button[aria-label='编辑']").exists(),
+    ).toBe(true);
+    expect(wrapper.find(".text-editor-preview .md").exists()).toBe(true);
+
+    // 切到会话再回来（组件卸载重建）
+    activateTab("chat");
+    await settle();
+    expect(wrapper.find(".text-editor-preview").exists()).toBe(false);
+    activateTab(aTab.id);
+    await settle();
+    expect(
+      wrapper.find(".text-editor-actions button[aria-label='编辑']").exists(),
+    ).toBe(true);
+    expect(wrapper.find(".text-editor-preview .md").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("标签栏 tablist 角色由固定区包裹层承担", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {

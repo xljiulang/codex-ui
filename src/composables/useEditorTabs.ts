@@ -58,6 +58,8 @@ export interface FileEditorTab {
   dirty: boolean;
   saving: boolean;
   wrap: boolean;
+  /** Markdown 预览/编辑切换态：随标签持久化，切换标签后保持切出时状态 */
+  markdownPreview: boolean;
   eol: EditorEol;
   hadBom: boolean;
   byteSize: number | null;
@@ -230,6 +232,7 @@ export async function openFileTab(root: string, path: string): Promise<void> {
     dirty: false,
     saving: false,
     wrap: false,
+    markdownPreview: false,
     eol: "\n",
     hadBom: false,
     byteSize: null,
