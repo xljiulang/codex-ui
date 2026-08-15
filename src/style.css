@@ -3686,21 +3686,33 @@ body.resizing-editor {
   height: 30px;
   padding: 0 6px;
   border-radius: var(--radius);
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  color: var(--text-faint);
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid var(--border-light);
   backdrop-filter: blur(6px);
   transition: border-color 0.15s ease, background-color 0.15s ease,
     box-shadow 0.15s ease;
 }
 
 .goal-chip:hover {
+  border-color: var(--text-faint);
+  background: rgba(127, 127, 127, 0.13);
+}
+
+.goal-chip.has-goal {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  border-color: rgba(var(--accent-rgb), 0.28);
+}
+
+.goal-chip.has-goal:hover {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
   box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .goal-icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3708,7 +3720,7 @@ body.resizing-editor {
   height: 24px;
   flex-shrink: 0;
   border-radius: 7px;
-  color: var(--accent);
+  color: var(--text-faint);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -3718,15 +3730,20 @@ body.resizing-editor {
   color: var(--accent);
 }
 
-.goal-icon-btn.status-complete {
-  color: var(--green, #3fb950);
+.goal-check {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
 }
 
-.goal-icon-btn.status-budget-limited,
-.goal-icon-btn.status-usage-limited,
-.goal-icon-btn.status-blocked,
-.goal-icon-btn.status-paused {
-  color: var(--yellow, #d29922);
+.goal-icon-btn.status-active .goal-check {
+  animation: pulse 1s infinite;
 }
 
 .goal-icon-btn:hover {
@@ -3737,31 +3754,6 @@ body.resizing-editor {
 .goal-icon-btn svg {
   width: 15px;
   height: 15px;
-  fill: currentColor;
-}
-
-.goal-clear-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  color: var(--text-faint);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-
-.goal-clear-btn:hover {
-  color: var(--red);
-  background: rgba(var(--red-rgb), 0.12);
-}
-
-.goal-clear-btn svg {
-  width: 12px;
-  height: 12px;
   fill: currentColor;
 }
 
@@ -4042,51 +4034,6 @@ body.resizing-editor {
   color: var(--text-faint);
   padding: 2px 8px 6px;
   text-transform: none;
-}
-
-/* 设置目标弹层 */
-.goal-menu {
-  min-width: 320px;
-  padding: 8px;
-}
-
-.goal-input {
-  width: 100%;
-  resize: vertical;
-  min-height: 74px;
-  padding: 8px 10px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text-bright);
-  background: var(--composer-bg);
-  border: 1px solid var(--border-light);
-  outline: none;
-  box-sizing: border-box;
-  font-family: inherit;
-}
-
-.goal-input:focus {
-  border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
-}
-
-.goal-menu-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.goal-count {
-  margin-right: auto;
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-
-.goal-hint {
-  font-size: 10.5px;
-  color: var(--text-faint);
 }
 
 .menu-item {
@@ -5025,9 +4972,9 @@ body.resizing-editor {
 }
 
 .plan-prompt-hint {
-  font-size: 11px;
+  font-size: 12.5px;
   line-height: 1.5;
-  color: var(--text-dim);
+  color: var(--text);
 }
 
 .interaction-head {

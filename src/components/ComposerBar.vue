@@ -10,7 +10,6 @@ import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
 import TaskModeMenu from "./TaskModeMenu.vue";
-import GoalMenu from "./GoalMenu.vue";
 import {
   clearGoal,
   interrupt,
@@ -361,7 +360,6 @@ function closeMenus() {
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
-  store.goalOpen = false;
   mention.value = null;
 }
 
@@ -373,7 +371,6 @@ function toggleMenu(which: ComposerMenu) {
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
-  store.goalOpen = false;
   store[`${which}Open`] = willOpen;
 }
 
@@ -390,7 +387,6 @@ function onWindowMousedown(e: MouseEvent) {
     store.permOpen = false;
     store.taskOpen = false;
     store.modelOpen = false;
-    store.goalOpen = false;
     return;
   }
   // 弹出层内部与三个触发按钮不自动关闭（按钮自身的 click 负责切换）
@@ -403,7 +399,6 @@ function onWindowMousedown(e: MouseEvent) {
   store.permOpen = false;
   store.taskOpen = false;
   store.modelOpen = false;
-  store.goalOpen = false;
 }
 
 onMounted(() => {
@@ -677,6 +672,13 @@ function submit(flip = false) {
     .filter((r) => r.kind === "ref")
     .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
     .filter((a): a is UserInput => !!a);
+  // 目标 flag：仅执行模式（非计划）下首条消息消费勾选，目标=该消息纯文本；
+  // 计划模式消息不消费，arm 保持（“执行计划”按钮另行以计划内容挂载目标）
+  if (store.goalArmed && store.taskMode !== "plan" && plainText.trim()) {
+    store.goalText = plainText.trim();
+    store.goalArmed = false;
+    store.goalStatus = null;
+  }
   const rowItems = rowAttachments.value;
   const files = rowItems.filter((a) => a.type === "mention");
   const fileSection = fileMentionSection(files);
@@ -768,46 +770,32 @@ function taskModeLabel(): string {
   return "执行模式";
 }
 
-function goalStatusLabel(): string {
-  switch (store.goalStatus) {
-    case "complete":
-      return "✓ 已完成";
-    case "budgetLimited":
-      return "预算耗尽";
-    case "usageLimited":
-      return "用量受限";
-    case "blocked":
-      return "已阻塞";
-    case "paused":
-      return "已暂停";
-    default:
-      return "";
-  }
+/** 目标预览：压缩连续空白并截断到 120 字符，超长追加省略号 */
+function goalPreview(text: string): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 120 ? `${t.slice(0, 120)}…` : t;
 }
 
-/** 目标旗子提示：未设置/待应用（会话前预填）/已挂载三种状态 */
+/** 目标旗子提示：未勾选/已勾选待首条消息/已挂载（进行中） */
 function goalTooltip(): string {
-  if (!store.goalText) return "设置目标";
-  if (!store.currentThreadId) {
-    return `目标：${store.goalText}（待应用：创建会话后生效），点击修改`;
+  if (!store.goalText && !store.goalArmed) {
+    return "目标：勾选后，首条消息将作为目标自动执行";
   }
-  const status =
-    store.goalStatus === "active" || !store.goalStatus
-      ? "进行中"
-      : goalStatusLabel();
-  return `目标：${store.goalText}（${status}），点击修改`;
+  if (store.goalArmed && !store.goalText) {
+    return "目标已勾选：发送首条消息后自动以其为目标，点击取消勾选";
+  }
+  const text = store.goalText ?? "";
+  if (!store.currentThreadId) return `目标：${goalPreview(text)}（待挂载）`;
+  return `目标：${goalPreview(text)}（进行中），点击取消目标`;
 }
 
-/** 目标旗子：始终可点，打开设置弹层（有目标时回填）；再点一次关闭 */
+/** 目标旗子：已挂载/回填目标时点击直接取消（clearGoal）；否则切换勾选态 */
 function onGoalIconClick() {
-  const willOpen = !store.goalOpen;
-  closeMenus();
-  store.goalOpen = willOpen;
-}
-
-/** × 按钮：直接取消目标（会话前仅清空待填目标），不弹确认 */
-function onCancelGoalClick() {
-  void clearGoal();
+  if (store.goalText) {
+    void clearGoal();
+    return;
+  }
+  store.goalArmed = !store.goalArmed;
 }
 
 </script>
@@ -884,17 +872,20 @@ function onCancelGoalClick() {
           <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
         </div>
         <div class="menu-anchor">
-          <div class="goal-chip">
+          <div
+            v-if="!store.turnActive || !!store.goalText"
+            class="goal-chip"
+            :class="{ 'has-goal': !!store.goalText || store.goalArmed }"
+          >
             <button
               class="goal-icon-btn"
               :class="{
-                'has-goal': !!store.goalText,
-                'status-complete': store.goalStatus === 'complete',
-                'status-budget-limited': store.goalStatus === 'budgetLimited',
-                'status-usage-limited': store.goalStatus === 'usageLimited',
-                'status-blocked': store.goalStatus === 'blocked',
-                'status-paused': store.goalStatus === 'paused',
+                'has-goal': !!store.goalText || store.goalArmed,
+                'status-active':
+                  !!store.goalText &&
+                  (store.goalStatus === 'active' || store.goalStatus === null),
               }"
+              :aria-pressed="!!store.goalText || store.goalArmed"
               :aria-label="goalTooltip()"
               v-tooltip="goalTooltip()"
               @click="onGoalIconClick()"
@@ -902,22 +893,13 @@ function onCancelGoalClick() {
               <svg viewBox="0 0 24 24">
                 <path :d="ICON_GOAL" />
               </svg>
-            </button>
-            <button
-              v-if="store.goalText"
-              class="goal-clear-btn"
-              aria-label="取消目标"
-              v-tooltip="'取消目标'"
-              @click="onCancelGoalClick()"
-            >
-              <svg viewBox="0 0 24 24">
-                <path
-                  d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"
-                />
-              </svg>
+              <span
+                v-if="store.goalArmed || store.goalText"
+                class="goal-check"
+                aria-hidden="true"
+              ></span>
             </button>
           </div>
-          <GoalMenu v-if="store.goalOpen" @close="store.goalOpen = false" />
         </div>
       </div>
       <div class="composer-right">
@@ -1008,7 +990,6 @@ function onCancelGoalClick() {
           store.permOpen ||
           store.taskOpen ||
           store.modelOpen ||
-          store.goalOpen ||
           mention
         "
         class="menu-backdrop"

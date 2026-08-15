@@ -1209,9 +1209,11 @@ describe("ComposerBar 任务目标芯片", () => {
     store.newChatCwd = null;
     store.settings.enter_to_send = true;
     store.currentThreadId = null;
+    store.turnActive = false;
+    store.taskMode = "execute";
     store.goalText = null;
     store.goalStatus = null;
-    store.goalOpen = false;
+    store.goalArmed = false;
     store.confirm = null;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1223,48 +1225,70 @@ describe("ComposerBar 任务目标芯片", () => {
     wrapper = null;
   });
 
-  it("无目标时只有旗子（无文字、无 ×），无会话也可点", async () => {
+  it("无目标时只有旗子（无角标），点击勾选目标 flag", async () => {
     store.currentThreadId = null;
     wrapper = mount(ComposerBar);
     await flushPromises();
     expect(wrapper.find(".goal-chip").exists()).toBe(true);
     expect(wrapper.find(".goal-label").exists()).toBe(false);
-    expect(wrapper.find(".goal-clear-btn").exists()).toBe(false);
+    expect(wrapper.find(".goal-chip.has-goal").exists()).toBe(false);
+    expect(wrapper.find(".goal-check").exists()).toBe(false);
+    const btn = wrapper.find(".goal-icon-btn");
+    expect(btn.attributes("disabled")).toBeUndefined();
     expect(
-      (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).disabled,
-    ).toBe(false);
+      (btn.element as HTMLButtonElement).getAttribute("aria-pressed"),
+    ).toBe("false");
+    await btn.trigger("click");
+    await flushPromises();
+    expect(store.goalArmed).toBe(true);
+    expect(wrapper.find(".goal-icon-btn.has-goal").exists()).toBe(true);
+    expect(wrapper.find(".goal-chip.has-goal").exists()).toBe(true);
+    const armedBadge = wrapper.find(".goal-check");
+    expect(armedBadge.exists()).toBe(true);
+    expect(armedBadge.text()).toBe("");
+    expect(wrapper.find(".goal-icon-btn.status-active").exists()).toBe(false);
+    expect(
+      (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).getAttribute(
+        "aria-pressed",
+      ),
+    ).toBe("true");
+    expect(wrapper.find(".goal-menu").exists()).toBe(false);
   });
 
-  it("有目标时旗子 + ×，完成/预算耗尽状态有颜色 class", async () => {
-    store.currentThreadId = "t1";
-    store.goalText = "发布 v2 版本并修复登录流程的所有已知问题再补上边界处理";
-    store.goalStatus = "complete";
+  it("已勾选未发送时再次点击：取消勾选（无目标值可清）", async () => {
     wrapper = mount(ComposerBar);
     await flushPromises();
-    expect(wrapper.find(".goal-clear-btn").exists()).toBe(true);
-    expect(wrapper.find(".goal-icon-btn.status-complete").exists()).toBe(true);
-    expect(
-      (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).disabled,
-    ).toBe(false);
-
-    store.goalStatus = "budgetLimited";
+    store.goalArmed = true;
     await wrapper.vm.$nextTick();
-    expect(
-      wrapper.find(".goal-icon-btn.status-budget-limited").exists(),
-    ).toBe(true);
-  });
-
-  it("旗子点击打开设置弹层（无会话也可预填）", async () => {
-    store.currentThreadId = null;
-    wrapper = mount(ComposerBar);
-    await flushPromises();
     await wrapper.find(".goal-icon-btn").trigger("click");
     await flushPromises();
-    expect(store.goalOpen).toBe(true);
-    expect(wrapper.find(".goal-menu").exists()).toBe(true);
+    expect(store.goalArmed).toBe(false);
+    expect(store.goalText).toBeNull();
   });
 
-  it("有目标时旗子点击打开弹层（回填），不弹确认框", async () => {
+  it("回合运行中且无目标：目标按钮隐藏（不可勾选）", async () => {
+    store.currentThreadId = "t1";
+    store.turnActive = true;
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    expect(wrapper.find(".goal-chip").exists()).toBe(false);
+    expect(wrapper.find(".goal-icon-btn").exists()).toBe(false);
+    expect(store.goalArmed).toBe(false);
+  });
+
+  it("目标进行中：出现角标且挂 status-active（呼吸动画）", async () => {
+    store.currentThreadId = "t1";
+    store.goalText = "发布 v2";
+    store.goalStatus = "active";
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    expect(wrapper.find(".goal-icon-btn.status-active").exists()).toBe(true);
+    const badge = wrapper.find(".goal-check");
+    expect(badge.exists()).toBe(true);
+    expect(badge.text()).toBe("");
+  });
+
+  it("有目标时点击旗子直接取消目标（不弹确认、不开弹层）", async () => {
     store.currentThreadId = "t1";
     store.goalText = "发布 v2";
     store.goalStatus = "active";
@@ -1273,29 +1297,73 @@ describe("ComposerBar 任务目标芯片", () => {
     await flushPromises();
     await wrapper.find(".goal-icon-btn").trigger("click");
     await flushPromises();
-    expect(store.goalOpen).toBe(true);
-    expect(wrapper.find(".goal-menu").exists()).toBe(true);
     expect(store.confirm).toBeNull();
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "goal_clear",
-      expect.anything(),
-    );
-  });
-
-  it("× 点击直接调用 goal_clear，不弹确认框", async () => {
-    store.currentThreadId = "t1";
-    store.goalText = "发布 v2";
-    store.goalStatus = "active";
-    mockedInvoke.mockResolvedValue(undefined);
-    wrapper = mount(ComposerBar);
-    await flushPromises();
-    await wrapper.find(".goal-clear-btn").trigger("click");
-    await flushPromises();
-    expect(store.confirm).toBeNull();
-    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
-      threadId: "t1",
-    });
+    expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", { threadId: "t1" });
     expect(store.goalText).toBeNull();
     expect(store.goalStatus).toBeNull();
+    expect(store.goalArmed).toBe(false);
   });
+
+  it("勾选后发送首条消息：纯文本成为目标并复位勾选态", async () => {
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    await wrapper.find(".goal-icon-btn").trigger("click");
+    await typeInEditor("修复登录流程");
+    await wrapper.find("button.send-btn").trigger("click");
+    await flushPromises();
+    expect(store.goalArmed).toBe(false);
+    expect(store.goalText).toBe("修复登录流程");
+    expect(store.goalStatus).toBeNull();
+    expect(mockedSendPrompt).toHaveBeenCalled();
+    expect(mockedSendPrompt.mock.calls[0][0]).toContain("修复登录流程");
+  });
+
+  it("计划模式下发送消息：不消费勾选，目标保持待首条执行消息", async () => {
+    store.taskMode = "plan";
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    await wrapper.find(".goal-icon-btn").trigger("click");
+    await typeInEditor("制定发布计划");
+    await wrapper.find("button.send-btn").trigger("click");
+    await flushPromises();
+    expect(store.goalArmed).toBe(true);
+    expect(store.goalText).toBeNull();
+    expect(store.goalStatus).toBeNull();
+    expect(mockedSendPrompt).toHaveBeenCalled();
+  });
+
+  it("长目标 tooltip 截断到 120 字符预览", async () => {
+    store.currentThreadId = "t1";
+    store.goalText = "修".repeat(200);
+    store.goalStatus = "active";
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    const label = wrapper.find(".goal-icon-btn").attributes("aria-label") ?? "";
+    expect(label).toContain("…");
+    expect(label).toContain("进行中");
+    expect(label.length).toBeLessThan(200);
+    expect(label).not.toContain("修".repeat(200));
+  });
+
+  it("勾选后发送纯附件（无纯文本）：不设目标，勾选态保持", async () => {
+    mockRpc(true);
+    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+    wrapper = mount(ComposerBar);
+    await typeInEditor("@a.cs");
+    await waitSearch();
+    const row = wrapper
+      .findAll(".mention-menu button.menu-item")
+      .find((b) => b.text().includes("a.cs"));
+    expect(row).toBeTruthy();
+    await row!.trigger("click");
+    await flushPromises();
+    await wrapper.find(".goal-icon-btn").trigger("click");
+    await wrapper.find("button.send-btn").trigger("click");
+    await flushPromises();
+    expect(store.goalArmed).toBe(true);
+    expect(store.goalText).toBeNull();
+    expect(mockedSendPrompt).toHaveBeenCalled();
+    expect(mockedSendPrompt.mock.calls[0][0]).toContain("a.cs");
+  });
+
 });

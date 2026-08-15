@@ -1,6 +1,7 @@
-// codex-ui 线程级目标 E2E：旗子图标 + × 取消，会话前可预填，填写即生效
-// 流程：无会话预填/取消预填 → 发送首条消息自动挂载目标 → 服务端围绕目标自动续跑完成（文件标记）
-//       → 状态颜色变为已完成 → × 取消目标 → 再次设置后点停止先清目标
+// codex-ui 目标 flag E2E：勾选后首条消息即目标，终态自动复位
+// 流程：无会话勾选/取消勾选 → 勾选后发送首条消息（消息纯文本即目标）自动挂载
+//       → 服务端围绕目标自动续跑完成（文件标记）→ 终态自动复位（× 与勾选态消失）
+//       → 再次勾选后点停止先清目标
 // 用法: node scripts/verify-goal.mjs
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -55,20 +56,6 @@ async function setEditorText(text) {
   })()`);
 }
 
-/** 在设置目标弹层的 textarea 写入文本（触发 v-model） */
-async function setGoalInput(text) {
-  await evalJs(`(() => {
-    const ta = document.querySelector(".goal-input");
-    if (!ta) throw new Error("目标输入框未找到");
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype,
-      "value",
-    ).set;
-    setter.call(ta, ${JSON.stringify(text)});
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-  })()`);
-}
-
 async function clickSend() {
   return evalJs(`(() => {
     const b = document.querySelector("button.send-btn");
@@ -78,7 +65,7 @@ async function clickSend() {
   })()`);
 }
 
-/** 点击目标旗子（无会话也可点），等待弹层出现 */
+/** 点击目标旗子（toggle 勾选/取消） */
 async function clickGoalFlag() {
   await waitFor(
     "目标旗子可用",
@@ -89,38 +76,28 @@ async function clickGoalFlag() {
     60000,
   );
   await evalJs(`document.querySelector(".goal-icon-btn").click()`);
-  await waitFor("设置目标弹层", `!!document.querySelector(".goal-menu")`, 5000);
 }
 
-/** 在弹层填入目标并按 Enter 确认（填写即生效） */
-async function fillGoalAndConfirm(text) {
-  await setGoalInput(text);
-  await evalJs(`(() => {
-    const ta = document.querySelector(".goal-input");
-    ta.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
-    );
-  })()`);
-  await waitFor("弹层关闭", `!document.querySelector(".goal-menu")`, 5000);
+/** 勾选目标 flag：等 has-goal 出现（待首条消息态，无 ×） */
+async function armGoalFlag() {
+  await clickGoalFlag();
   await waitFor(
-    "目标已挂载（× 出现）",
-    `!!document.querySelector(".goal-clear-btn")`,
+    "目标已勾选（has-goal）",
+    `(() => {
+      const b = document.querySelector(".goal-icon-btn");
+      return !!b && b.classList.contains("has-goal");
+    })()`,
     5000,
   );
 }
 
-/** × 直接取消目标（不弹确认） */
-async function cancelGoalViaX() {
+/** 取消勾选（未发送前）：等 has-goal 消失 */
+async function disarmGoalFlag() {
+  await clickGoalFlag();
   await waitFor(
-    "× 按钮存在",
-    `!!document.querySelector(".goal-clear-btn")`,
+    "目标已取消勾选",
+    `!document.querySelector(".goal-icon-btn.has-goal")`,
     5000,
-  );
-  await evalJs(`document.querySelector(".goal-clear-btn").click()`);
-  await waitFor(
-    "目标已清除（× 消失）",
-    `!document.querySelector(".goal-clear-btn")`,
-    10000,
   );
 }
 
@@ -130,7 +107,7 @@ async function stopUntilGoalCleared(timeoutMs) {
   while (Date.now() < deadline) {
     const state = await evalJs(`(() => ({
       active: !!document.querySelector(".send-btn.stop"),
-      cleared: !document.querySelector(".goal-clear-btn"),
+      cleared: !document.querySelector(".goal-icon-btn.has-goal"),
       toast: document.querySelector(".toast")?.textContent ?? "",
     }))()`);
     if (state.toast.includes("expected active turn")) return state.toast;
@@ -154,52 +131,73 @@ async function main() {
   const goalFile = path.join(testDir, "goal-ok.txt");
   const goalText = `创建文件 ${goalFile}，内容写入 ${MARKER}，完成后停止`;
 
-  // 场景 0：未创建会话时旗子可用，可预填目标并取消预填
+  // 场景 0：未创建会话时旗子可用；勾选后进入“已勾选待首条消息”态（has-goal、无 ×），可取消勾选
   const flagUsable = await evalJs(`(() => {
     const b = document.querySelector(".goal-icon-btn");
     return !!b && !b.disabled;
   })()`);
   record("目标: 未创建会话时旗子可用", flagUsable === true);
 
-  await clickGoalFlag();
-  await fillGoalAndConfirm(goalText);
-  record("目标: 会话前预填目标生效（× 出现，待应用）", true);
+  await armGoalFlag();
+  const armedState = await evalJs(`(() => {
+    const b = document.querySelector(".goal-icon-btn");
+    const badge = document.querySelector(".goal-check");
+    return (
+      !!b &&
+      b.classList.contains("has-goal") &&
+      !!badge
+    );
+  })()`);
+  record("目标: 勾选后 has-goal 出现且角标出现（待首条消息）", armedState === true);
 
-  await cancelGoalViaX();
-  record("目标: 预填目标可被 × 直接取消", true);
+  await disarmGoalFlag();
+  record(
+    "目标: 未发送前可取消勾选（has-goal 消失）",
+    (await evalJs(
+      `!document.querySelector(".goal-icon-btn.has-goal")`,
+    )) === true,
+  );
 
-  // 重新预填真实目标，随后发送首条消息创建会话并自动挂载
-  await clickGoalFlag();
-  await fillGoalAndConfirm(goalText);
-  await setEditorText("开始执行");
+  // 场景 1：勾选后发送首条消息，消息纯文本即目标并自动挂载
+  await armGoalFlag();
+  await setEditorText(goalText);
   const sent = await clickSend();
   if (!sent) throw new Error("发送失败");
   await waitFor(
-    "目标自动挂载（× 保持存在）",
-    `!!document.querySelector(".goal-clear-btn")`,
+    "目标自动挂载（status-active 出现）",
+    `!!document.querySelector(".goal-icon-btn.status-active")`,
     60000,
   );
-  record("目标: 创建会话后自动挂载预填目标", true);
+  record("目标: 首条消息即目标并自动挂载", true);
 
-  // 场景 1：服务端围绕目标自动续跑完成 → 旗子颜色状态变为已完成
+  // 服务端围绕目标自动续跑完成 → 终态自动复位（has-goal 消失、flag 回到未勾选）
   await waitFor(
-    "目标完成状态（旗子 green class）",
-    `!!document.querySelector(".goal-icon-btn.status-complete")`,
+    "目标完成并自动复位（has-goal 消失）",
+    `!document.querySelector(".goal-icon-btn.has-goal")`,
     300000,
   );
   const fileOk =
     fs.existsSync(goalFile) &&
     fs.readFileSync(goalFile, "utf8").includes(MARKER);
   record("目标: 实质性目标已完成（文件含标记词）", fileOk);
+  record(
+    "目标: 终态自动复位（has-goal 消失）",
+    (await evalJs(
+      `!document.querySelector(".goal-icon-btn.has-goal")`,
+    )) === true,
+  );
 
-  // 场景 2：× 取消已挂载目标
-  await cancelGoalViaX();
-  record("目标: × 取消已挂载目标", true);
-
-  // 场景 3：目标激活期间点停止 → 先清目标再中断
-  await clickGoalFlag();
-  await fillGoalAndConfirm(
+  // 场景 2：再次勾选后发送新目标消息，目标激活期间点停止 → 先清目标再中断
+  await armGoalFlag();
+  await setEditorText(
     `分析 ${testDir} 目录下的所有文件并给出架构总结，回复 ${MARKER2}`,
+  );
+  const sent2 = await clickSend();
+  if (!sent2) throw new Error("发送失败");
+  await waitFor(
+    "目标再次挂载（status-active 出现）",
+    `!!document.querySelector(".goal-icon-btn.status-active")`,
+    60000,
   );
   const stopError = await stopUntilGoalCleared(180000);
   record(
