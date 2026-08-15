@@ -9,6 +9,36 @@ use codex::app_server::CodexServer;
 
 pub fn run() {
     tauri::Builder::default()
+        .register_asynchronous_uri_scheme_protocol("print-export", |ctx, request, responder| {
+            // 隐藏打印窗口经 print-export://localhost/<id> 加载暂存的打印 HTML
+            let id = request.uri().path().trim_start_matches('/').to_string();
+            let state = ctx
+                .app_handle()
+                .state::<codex::pdf_export::PdfExportState>();
+            let html = state
+                .0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&id)
+                .cloned();
+            match html {
+                Some(body) => responder.respond(
+                    tauri::http::Response::builder()
+                        .header(
+                            tauri::http::header::CONTENT_TYPE,
+                            "text/html; charset=utf-8",
+                        )
+                        .body(body.into_bytes())
+                        .unwrap(),
+                ),
+                None => responder.respond(
+                    tauri::http::Response::builder()
+                        .status(tauri::http::StatusCode::BAD_REQUEST)
+                        .body("print content not found".to_string().into_bytes())
+                        .unwrap(),
+                ),
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             codex::commands::server_status,
             codex::commands::server_connect,
@@ -60,6 +90,7 @@ pub fn run() {
             codex::session_fs::session_fs_probe_text,
             codex::session_fs::session_fs_read_bytes,
             codex::session_fs::session_fs_icons,
+            codex::pdf_export::export_markdown_pdf,
             codex::terminal::terminal_spawn,
             codex::terminal::terminal_write,
             codex::terminal::terminal_resize,
@@ -100,6 +131,9 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
+            app.manage(codex::pdf_export::PdfExportState(
+                std::sync::Mutex::new(std::collections::HashMap::new()),
+            ));
             app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
             app.manage(codex::git::GitWatcherState(std::sync::Mutex::new(None)));
             app.manage(codex::terminal::TerminalState(std::sync::Mutex::new(

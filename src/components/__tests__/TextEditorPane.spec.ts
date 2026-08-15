@@ -348,6 +348,69 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     wrapper.unmount();
   });
 
+  it("Markdown 文件右键菜单末尾显示「导出 PDF」，普通文件不显示", async () => {
+    const mdTab = await openTab("a.md", "# 标题");
+    const mdWrapper = await mountEditor(mdTab);
+    await openCtx(mdWrapper);
+    const mdLabels = menuLabels(mdWrapper);
+    expect(mdLabels[mdLabels.length - 1]).toBe("导出 PDF");
+    mdWrapper.unmount();
+
+    const txtTab = await openTab("a.txt", "hello");
+    const txtWrapper = await mountEditor(txtTab);
+    await openCtx(txtWrapper);
+    expect(menuLabels(txtWrapper)).not.toContain("导出 PDF");
+    txtWrapper.unmount();
+  });
+
+  it("点击「导出 PDF」：以当前（含未保存）内容调用导出命令，成功后提示路径", async () => {
+    const content = "# 标题\n\n正文";
+    const tab = await openTab("a.md", content);
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent(content));
+      }
+      if (cmd === "export_markdown_pdf") {
+        return Promise.resolve("D:\\out\\a.pdf");
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    store.toast = "";
+    const wrapper = await mountEditor(tab);
+
+    // 修改文档但不保存：导出必须使用当前缓冲区内容
+    const view = await viewOf(wrapper);
+    view.dispatch({ changes: { from: 0, insert: "> " } });
+    expect(tab.dirty).toBe(true);
+
+    await openCtx(wrapper);
+    await clickMenuItem(wrapper, "导出 PDF");
+
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith(
+          "export_markdown_pdf",
+          expect.objectContaining({
+            suggestedName: "a.pdf",
+            initialDir: "D:\\repo",
+          }),
+        );
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    const args = mockedInvoke.mock.calls.find(
+      (c) => c[0] === "export_markdown_pdf",
+    )?.[1] as { html?: string };
+    expect(args.html ?? "").toContain("<h1>标题</h1>");
+    await vi.waitFor(
+      () => {
+        expect(store.toast).toBe("已导出 PDF：D:\\out\\a.pdf");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    wrapper.unmount();
+  });
+
   it("非法 JSON 点击「代码格式化」：文档不变并弹出错误提示", async () => {
     store.toast = "";
     const tab = await openTab("a.json", '{"a": }');

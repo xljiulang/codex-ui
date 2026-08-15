@@ -4,6 +4,7 @@ pub mod diff;
 pub mod file_icon;
 pub mod git;
 pub mod path_util;
+pub mod pdf_export;
 pub mod session_fs;
 pub mod settings;
 pub mod terminal;

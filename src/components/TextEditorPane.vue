@@ -11,6 +11,7 @@ import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { setToast } from "../composables/useCodex";
 import { copyText } from "../lib/clipboard";
 import { formatDoc, isFormatablePath } from "../lib/codeFormat";
+import { exportMarkdownToPdf } from "../lib/pdfExport";
 import MarkdownText from "./MarkdownText.vue";
 import {
   ICON_COPY,
@@ -19,6 +20,7 @@ import {
   ICON_FIND,
   ICON_FORMAT,
   ICON_PASTE,
+  ICON_PDF,
   ICON_PREVIEW,
   ICON_REDO,
   ICON_SELECT_ALL,
@@ -165,6 +167,13 @@ function buildMenuItems(): CtxItem[] {
       label: "代码格式化",
       icon: ICON_FORMAT,
       action: () => void formatCurrentDoc(),
+    });
+  }
+  if (isMarkdown.value && !props.tab.loading && !props.tab.error) {
+    items.push({
+      label: "导出 PDF",
+      icon: ICON_PDF,
+      action: () => void exportMarkdownToPdf(props.tab),
     });
   }
   return items;
