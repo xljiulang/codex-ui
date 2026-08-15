@@ -227,6 +227,57 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     w2.unmount();
   });
 
+  it("切换标签后预览显示新标签内容（回归：不残留上一标签内容）", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read") {
+        const path = (args as { path?: string }).path;
+        return Promise.resolve(
+          path === "b.md"
+            ? fileContent("# B标题\n\nB 正文")
+            : fileContent("# A标题\n\nA 正文"),
+        );
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openFileTab(root, "a.md");
+    const aTab = tabs.find(
+      (t): t is FileEditorTab => t.kind === "file" && t.title === "a.md",
+    )!;
+    const wrapper = await mountEditor(aTab);
+
+    // A 进入预览，确认渲染的是 A 内容
+    await wrapper
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await nextTick();
+    await waitForEl(wrapper, ".text-editor-preview .md");
+    expect(wrapper.find(".text-editor-preview .md").text()).toContain("A标题");
+
+    // 切到 B 标签（视图换档完成）后进入预览：必须显示 B 内容
+    await openFileTab(root, "b.md");
+    const bTab = tabs.find(
+      (t): t is FileEditorTab => t.kind === "file" && t.title === "b.md",
+    )!;
+    await wrapper.setProps({ tab: bTab });
+    await flushPromises();
+    await nextTick();
+    await viewOf(wrapper);
+    await wrapper
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await nextTick();
+    await waitForEl(wrapper, ".text-editor-preview .md");
+    await vi.waitFor(
+      () => {
+        const txt = wrapper.find(".text-editor-preview .md").text();
+        expect(txt).toContain("B标题");
+        expect(txt).not.toContain("A标题");
+      },
+      { timeout: 5000, interval: 20 },
+    );
+    wrapper.unmount();
+  });
+
   it("可格式化文件（json/ts/py/xml/html）右键菜单末尾为「代码格式化」", async () => {
     for (const [name, content] of [
       ["a.json", '{"a":1}'],

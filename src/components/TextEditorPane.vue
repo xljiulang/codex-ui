@@ -51,13 +51,12 @@ const byteSizeLabel = computed(() =>
     : formatFileSize(props.tab.byteSize),
 );
 
-/** 预览内容：优先取挂载中的视图文档，未挂载回退标签保存的 EditorState */
-const previewText = computed(
-  () =>
-    view?.state.doc.toString() ??
-    props.tab.editorState?.doc.toString() ??
-    "",
-);
+/**
+ * 预览内容：以标签保存的 EditorState 为唯一数据源（onStateChange 在每次
+ * 文档/选区更新后同步回写）。不读挂载中的 view——它是非响应式变量，切换
+ * 标签后 computed 不会随视图换档失效，会导致预览显示上一标签的内容。
+ */
+const previewText = computed(() => props.tab.editorState?.doc.toString() ?? "");
 
 const {
   ctxMenu,
