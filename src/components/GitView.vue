@@ -5,8 +5,9 @@ import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
 import GitHistoryList from "./GitHistoryList.vue";
-import { setToast, toastError } from "../composables/useCodex";
+import { setToast, toastError, workspace } from "../composables/useCodex";
 import { useActionMenu } from "../composables/useActionMenu";
+import { useGitRemoteOps } from "../composables/useGitRemoteOps";
 import {
   useGitFileActions,
   type GitSection,
@@ -21,15 +22,12 @@ import {
   refreshGitChanges,
   setGitChangesActive,
 } from "../composables/useGitChanges";
-import { workspace } from "../composables/useCodex";
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import { openDiffTab } from "../composables/useEditorTabs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
   normalizeDiffKind,
   type GitFile,
-  type GitPullResult,
-  type GitPushResult,
   type GitStatus,
 } from "../lib/gitChanges";
 import {
@@ -47,10 +45,16 @@ import {
 
 const props = defineProps<{ active: boolean }>();
 
-/** 本机是否安装了 git（推送依赖系统 git，缺失时禁用按钮并提示） */
-const gitAvailable = ref(true);
-const branchLabel = computed(() => gitStatus.value?.branch ?? "");
-const repoWorkspace = computed(() => gitStatus.value?.repoWorkspace ?? "");
+const {
+  gitAvailable,
+  pullBusy,
+  pushBusy,
+  branchLabel,
+  repoWorkspace,
+  doPull,
+  doPush,
+  checkGitAvailable,
+} = useGitRemoteOps({ gitStatus });
 /** 当前在 Git 面板中高亮的变更文件（相对仓库根路径） */
 const selectedGitPath = ref("");
 
@@ -70,8 +74,6 @@ const confirmInit = ref(false);
 const branchMenuOpen = ref(false);
 /** 分支弹层忙碌态（由 GitBranchMenu v-model 同步，用于头部按钮禁用） */
 const branchBusy = ref(false);
-const pullBusy = ref(false);
-const pushBusy = ref(false);
 
 const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
@@ -199,58 +201,6 @@ watch(
     if (files.length) void ensureEntryIcons(files, root);
   },
 );
-
-/** 拉取远端更新；游离 HEAD 或忙碌时禁用 */
-async function doPull() {
-  if (pullBusy.value || branchLabel.value === "HEAD" || !gitAvailable.value) return;
-  const root = repoWorkspace.value;
-  if (!root) return;
-  pullBusy.value = true;
-  try {
-    const res = await invoke<GitPullResult>("git_changes_pull", { workspace: root });
-    gitStatus.value = res.status;
-    setToast(res.message);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    pullBusy.value = false;
-  }
-}
-
-/** 探测本机是否安装了 git（推送可用性）；探测失败视为不可用 */
-async function checkGitAvailable() {
-  try {
-    gitAvailable.value = await invoke<boolean>("git_changes_git_available", {
-      path: repoWorkspace.value || workspace.value || "",
-    });
-  } catch {
-    gitAvailable.value = false;
-  }
-}
-
-/** 推送当前分支到上游；游离 HEAD、未装 git 或忙碌时禁用 */
-async function doPush() {
-  if (
-    pushBusy.value ||
-    pullBusy.value ||
-    branchLabel.value === "HEAD" ||
-    !gitAvailable.value
-  ) {
-    return;
-  }
-  const root = repoWorkspace.value;
-  if (!root) return;
-  pushBusy.value = true;
-  try {
-    const res = await invoke<GitPushResult>("git_changes_push", { workspace: root });
-    gitStatus.value = res.status;
-    setToast(res.message);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    pushBusy.value = false;
-  }
-}
 
 function startInit() {
   confirmInit.value = true;
