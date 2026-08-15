@@ -19,6 +19,7 @@ import {
   iconFor,
   openPathInApp,
   pasteAvailable,
+  setSessionFsActive,
 } from "../useSessionFs";
 import {
   __resetEditorTabsForTest,
@@ -116,6 +117,46 @@ describe("useSessionFs 文件图标缓存", () => {
     await ensureEntryIcons([a]);
     expect(iconFor(a)).toBeNull();
   });
+});
+
+it("激活资源面板：session_fs_watch_start 传字符串工作区而非 computed（防循环引用）", async () => {
+  store.server.startupWorkspace = root;
+  store.currentThreadWorkspace = null;
+  store.newChatWorkspace = null;
+  store.workspace = null;
+  mockedInvoke.mockImplementation((cmd) => {
+    if (cmd === "session_fs_metadata") {
+      return Promise.resolve({
+        name: "repo",
+        path: root,
+        relPath: ".",
+        isDir: true,
+        size: null,
+        modifiedAtMs: 0,
+        createdAtMs: 0,
+        childCount: 0,
+      });
+    }
+    if (cmd === "session_fs_list") return Promise.resolve([]);
+    if (cmd === "session_fs_watch_start") return Promise.resolve(undefined);
+    return Promise.resolve(undefined);
+  });
+  setSessionFsActive(true);
+  await vi.waitFor(
+    () => {
+      expect(mockedInvoke).toHaveBeenCalledWith("session_fs_watch_start", {
+        workspace: root,
+      });
+    },
+    { timeout: 3000, interval: 20 },
+  );
+  const call = mockedInvoke.mock.calls.find(
+    ([c]) => c === "session_fs_watch_start",
+  );
+  expect(typeof (call?.[1] as { workspace?: unknown }).workspace).toBe(
+    "string",
+  );
+  __resetSessionFsForTest();
 });
 
 describe("openPathInApp 对话链接应用内打开", () => {

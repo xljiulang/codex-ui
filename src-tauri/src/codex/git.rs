@@ -2793,11 +2793,11 @@ fn load_tracked_set(root: &Path) -> std::collections::HashSet<String> {
 pub async fn git_changes_watch_start(
     app: AppHandle,
     state: State<'_, GitWatcherState>,
-    root: String,
+    workspace: String,
 ) -> Result<(), GitError> {
     // 在阻塞线程中解析仓库：工作区根、git 目录、已跟踪路径集合、排除规则栈
     let (repo_root, git_dir, tracked, excludes, objects) = match run_blocking({
-        let root = root.clone();
+        let root = workspace;
         move || -> Result<
             (
                 PathBuf,

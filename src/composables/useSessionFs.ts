@@ -571,7 +571,7 @@ async function syncWatcher() {
       }
     }
     try {
-      await invoke("session_fs_watch_start", { workspace });
+      await invoke("session_fs_watch_start", { workspace: root });
       watcherStarted = true;
     } catch (e) {
       setToast(toastError(e));
