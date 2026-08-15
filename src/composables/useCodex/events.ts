@@ -3,7 +3,14 @@ import { watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { friendlyServerError, friendlyServerMessage } from "../../lib/serverMessages";
-import type { ServerStatus, ThreadItem } from "../../lib/types";
+import {
+  isThreadItemType,
+  type AgentMessageItem,
+  type CommandExecutionItem,
+  type ReasoningItem,
+  type ServerStatus,
+  type ThreadItem,
+} from "../../lib/types";
 import { playNotificationSound } from "../../lib/sound";
 import { bumpActive, findItem, isActiveItem, upsertItem } from "./items";
 import { activeSessionTab, allSessionTabs, findSessionTabByThread, sessionTabTitle } from "./sessionState";
@@ -255,6 +262,7 @@ export async function wireEvents() {
         item = { id: p.itemId, type: "agentMessage", text: "", streaming: true };
         upsertItem(p.threadId, item);
       }
+      if (!isThreadItemType<AgentMessageItem>(item, "agentMessage")) return;
       item.text = (item.text ?? "") + p.delta;
       if (!item.streaming) {
         item.streaming = true;
@@ -273,6 +281,8 @@ export async function wireEvents() {
         item = { id: p.itemId, type: "commandExecution", command: "", status: "in_progress", aggregatedOutput: "" };
         upsertItem(p.threadId, item);
       }
+      if (!isThreadItemType<CommandExecutionItem>(item, "commandExecution"))
+        return;
       item.aggregatedOutput = (item.aggregatedOutput ?? "") + p.delta;
       store.itemsRev++;
     }),
@@ -287,6 +297,7 @@ export async function wireEvents() {
         item = { id: p.itemId, type: "reasoning", content: [] };
         upsertItem(p.threadId, item);
       }
+      if (!isThreadItemType<ReasoningItem>(item, "reasoning")) return;
       if (typeof item.startedAtMs !== "number") {
         item.startedAtMs = Date.now();
       }
@@ -294,7 +305,7 @@ export async function wireEvents() {
         item.streaming = true;
         bumpActive(p.threadId, 1);
       }
-      const content = (item.content as string[] | undefined) ?? [];
+      const content = item.content ?? [];
       const idx = p.contentIndex ?? content.length - 1;
       if (idx >= 0 && idx < content.length) {
         content[idx] = (content[idx] ?? "") + p.delta;

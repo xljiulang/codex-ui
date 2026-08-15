@@ -285,7 +285,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     <ReasoningBlock :item="item" />
   </div>
   <div v-else-if="item.type === 'error'" class="msg">
-    <div class="msg-error">{{ (item.message as string) ?? "发生错误" }}</div>
+    <div class="msg-error">{{ item.message ?? "发生错误" }}</div>
   </div>
   <div v-else-if="isTool" class="msg">
     <ToolCard :item="item" />

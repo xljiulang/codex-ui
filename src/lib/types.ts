@@ -79,6 +79,18 @@ export interface UnknownItem extends ThreadItemBase {
   type: string;
 }
 
+/**
+ * 判别辅助：按 type 收窄到指定消息类型。
+ * 相比裸 `item.type !== "x"`，类型谓词能排除 UnknownItem 兜底成员，
+ * 保证收窄结果不含松散访问成员。
+ */
+export function isThreadItemType<T extends ThreadItem>(
+  item: ThreadItem,
+  type: T["type"],
+): item is T {
+  return item.type === type;
+}
+
 export interface TextInput {
   type: "text";
   text: string;
