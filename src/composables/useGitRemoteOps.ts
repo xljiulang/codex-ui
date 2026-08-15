@@ -21,7 +21,12 @@ export function useGitRemoteOps(options: { gitStatus: Ref<GitStatus | null> }) {
 
   /** 拉取远端更新；游离 HEAD 或忙碌时禁用 */
   async function doPull() {
-    if (pullBusy.value || branchLabel.value === "HEAD" || !gitAvailable.value)
+    if (
+      pullBusy.value ||
+      pushBusy.value ||
+      branchLabel.value === "HEAD" ||
+      !gitAvailable.value
+    )
       return;
     const root = repoWorkspace.value;
     if (!root) return;
