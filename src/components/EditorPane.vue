@@ -29,6 +29,7 @@ import {
   type PreviewEditorTab,
   type TerminalEditorTab,
 } from "../composables/useEditorTabs";
+import { diffKindLabel } from "../lib/gitChanges";
 import {
   ensureEntryIcons,
   iconFor,
@@ -132,12 +133,6 @@ watch(
 const pendingTab = computed<EditorTab | null>(
   () => tabs.find((t) => t.id === pendingCloseId.value) ?? null,
 );
-
-function kindLabel(kind: string): string {
-  if (kind === "add") return "新增";
-  if (kind === "delete") return "删除";
-  return "修改";
-}
 
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
 function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEntry {
@@ -402,7 +397,7 @@ watch(activeTab, (tab) => {
               title="未保存"
             ></span>
             <span v-else-if="tab.kind === 'diff'" class="editor-tab-kind">
-              {{ kindLabel(tab.changeKind) }}
+              {{ diffKindLabel(tab.changeKind) }}
             </span>
             <span v-else-if="tab.kind === 'preview'" class="editor-tab-kind">
               预览

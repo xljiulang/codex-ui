@@ -15,6 +15,29 @@ export function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** 毫秒时间戳 → HH:MM */
+export function formatTimeHM(ms: number): string {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** 毫秒时间戳 → HH:MM:SS */
+export function formatTimeHMS(ms: number): string {
+  const d = new Date(ms);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** UNIX 秒时间戳 → YYYY-MM-DD HH:MM（0 返回空串） */
+export function formatDateTime(secs: number): string {
+  if (!secs) return "";
+  const d = new Date(secs * 1000);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 export function formatRelativeTime(ts?: number | null): string {
   if (!ts) return "";
   const diff = Date.now() / 1000 - ts;

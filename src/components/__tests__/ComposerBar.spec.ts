@@ -834,7 +834,7 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
 
   async function dragTo(clientY: number) {
     await flushPromises();
-    const handle = wrapper!.find(".editor-resize-handle").element;
+    const handle = wrapper!.find(".composer-resize-handle").element;
     handle.dispatchEvent(
       new PointerEvent("pointerdown", { clientY: 200, bubbles: true }),
     );
@@ -850,13 +850,13 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
 
     await dragTo(100);
     const h1 = Number(
-      /--editor-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
+      /--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
     );
     expect(h1).toBeGreaterThanOrEqual(120);
 
     await dragTo(50);
     const h2 = Number(
-      /--editor-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
+      /--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
     );
     // 第二次拖拽以当前高度为基准继续增长
     expect(h2).toBeGreaterThan(h1);
@@ -865,13 +865,13 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
   it("向上拖超过窗口一半被夹紧到半屏（innerHeight/2 = 300）", async () => {
     wrapper = mount(ComposerBar);
     await dragTo(200 - 10000);
-    expect(rowStyle()).toContain("--editor-h: 300px");
+    expect(rowStyle()).toContain("--composer-h: 300px");
   });
 
   it("向下拖低于最低高度被夹紧到 120px", async () => {
     wrapper = mount(ComposerBar);
     await dragTo(200 + 10000);
-    expect(rowStyle()).toContain("--editor-h: 120px");
+    expect(rowStyle()).toContain("--composer-h: 120px");
   });
 });
 

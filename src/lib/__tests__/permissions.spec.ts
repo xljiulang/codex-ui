@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PermissionId } from "../types";
 import {
   permissionMode,
   toApprovalPolicy,
@@ -27,7 +28,7 @@ describe("权限模式映射", () => {
   });
 
   it("未知模式回退到完全访问", () => {
-    expect(permissionMode("unknown").id).toBe("full-access");
+    expect(permissionMode("unknown" as PermissionId).id).toBe("full-access");
   });
 
   it("turn/start sandboxPolicy 映射", () => {

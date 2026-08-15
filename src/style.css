@@ -659,8 +659,8 @@ select option {
   height: 18px;
 }
 
-/* 历史面板 */
-.history-panel {
+/* 右侧面板 */
+.right-panel {
   flex-shrink: 0;
   border-left: 1px solid var(--border);
   background: var(--panel-bg);
@@ -671,7 +671,7 @@ select option {
 }
 
 /* 宽度拖拽条（面板左缘） */
-.history-resize-handle {
+.right-panel-resize-handle {
   position: absolute;
   left: 0;
   top: 0;
@@ -684,7 +684,7 @@ select option {
 }
 
 /* 拖拽条中的分隔细线：默认隐现，悬停/拖动时点亮 */
-.history-resize-handle::before {
+.right-panel-resize-handle::before {
   content: "";
   position: absolute;
   left: 3px;
@@ -696,7 +696,7 @@ select option {
 }
 
 /* 拖拽条中部的抓握手感点 */
-.history-resize-handle::after {
+.right-panel-resize-handle::after {
   content: "";
   position: absolute;
   left: 1px;
@@ -710,8 +710,8 @@ select option {
   transition: opacity 0.14s ease, background-color 0.14s ease;
 }
 
-.history-resize-handle:hover,
-.history-resize-handle.dragging {
+.right-panel-resize-handle:hover,
+.right-panel-resize-handle.dragging {
   background: linear-gradient(
     90deg,
     rgba(var(--accent-rgb), 0.16),
@@ -719,14 +719,14 @@ select option {
   );
 }
 
-.history-resize-handle:hover::before,
-.history-resize-handle.dragging::before {
+.right-panel-resize-handle:hover::before,
+.right-panel-resize-handle.dragging::before {
   background: var(--accent);
   box-shadow: 0 0 8px var(--accent-glow);
 }
 
-.history-resize-handle:hover::after,
-.history-resize-handle.dragging::after {
+.right-panel-resize-handle:hover::after,
+.right-panel-resize-handle.dragging::after {
   opacity: 1;
 }
 
@@ -3346,7 +3346,7 @@ select option {
   border: 1px solid rgba(var(--green-rgb), 0.28);
 }
 
-.change-kind.update {
+.change-kind.modify {
   background: rgba(var(--accent-rgb), 0.14);
   color: var(--accent);
   border: 1px solid rgba(var(--accent-rgb), 0.28);
@@ -3505,7 +3505,7 @@ select option {
   position: relative;
 }
 
-.editor-resize-handle {
+.composer-resize-handle {
   height: 8px;
   margin-bottom: 2px;
   display: flex;
@@ -3518,12 +3518,12 @@ select option {
   transition: background-color 0.14s ease;
 }
 
-.editor-resize-handle:hover,
-.editor-resize-handle.active {
+.composer-resize-handle:hover,
+.composer-resize-handle.active {
   background: rgba(var(--accent-rgb), 0.09);
 }
 
-.editor-resize-grip {
+.composer-resize-grip {
   width: 30px;
   height: 3px;
   border-radius: 999px;
@@ -3531,12 +3531,12 @@ select option {
   transition: background-color 0.14s ease;
 }
 
-.editor-resize-handle:hover .editor-resize-grip,
-.editor-resize-handle.active .editor-resize-grip {
+.composer-resize-handle:hover .composer-resize-grip,
+.composer-resize-handle.active .composer-resize-grip {
   background: var(--accent-dim);
 }
 
-body.resizing-editor {
+body.resizing-composer {
   user-select: none;
   cursor: ns-resize;
 }
@@ -3548,9 +3548,9 @@ body.resizing-editor {
 .rich-editor .ProseMirror {
   display: block;
   width: 100%;
-  height: var(--editor-h, auto);
+  height: var(--composer-h, auto);
   min-height: 120px;
-  max-height: var(--editor-h, 132px);
+  max-height: var(--composer-h, 132px);
   line-height: 1.55;
   padding: 13px 14px 42px;
   background: var(--composer-bg);

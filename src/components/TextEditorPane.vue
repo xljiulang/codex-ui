@@ -10,7 +10,7 @@ import { saveFileTab, type FileEditorTab } from "../composables/useEditorTabs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { setToast } from "../composables/useCodex";
 import { copyText } from "../lib/clipboard";
-import { formatDoc, isFormatablePath } from "../lib/codeFormat";
+import { formatDoc, isFormattablePath } from "../lib/codeFormat";
 import { exportMarkdownToPdf } from "../lib/pdfExport";
 import MarkdownText from "./MarkdownText.vue";
 import {
@@ -162,7 +162,7 @@ function buildMenuItems(): CtxItem[] {
       },
     },
   );
-  if (isFormatablePath(props.tab.path)) {
+  if (isFormattablePath(props.tab.path)) {
     items.push({
       label: "代码格式化",
       icon: ICON_FORMAT,

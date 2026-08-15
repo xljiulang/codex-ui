@@ -11,6 +11,7 @@ import type {
   ThreadSummary,
   Turn,
   UserInput,
+  PermissionId,
 } from "../lib/types";
 import {
   PERMISSION_MODES,
@@ -175,7 +176,7 @@ export const store = reactive({
   busy: false,
   currentModel: "",
   // 进程级设置：权限模式 / 模型 / 推理强度，仅当前运行期有效，不写入配置文件
-  permissionMode: "ask-for-approval" as string,
+  permissionMode: "ask-for-approval" as PermissionId,
   model: null as string | null,
   effort: null as string | null,
   models: [] as ModelInfo[],

@@ -20,8 +20,8 @@ import {
 import { openDiffTab } from "../composables/useEditorTabs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import {
-  gitDiffKind,
   gitStatusLetter,
+  normalizeDiffKind,
   type GitBranches,
   type GitCommitEntry,
   type GitFile,
@@ -32,6 +32,7 @@ import {
   type GitRemotes,
   type GitStatus,
 } from "../lib/gitChanges";
+import { formatDateTime } from "../lib/format";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
@@ -736,14 +737,6 @@ async function loadMoreCommits() {
   }
 }
 
-/** UNIX 秒 → 本地时间字符串 */
-function formatCommitTime(secs: number): string {
-  if (!secs) return "";
-  const d = new Date(secs * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 // gitStatus 每次刷新（含提交/合并/拉取/切分支）后同步刷新提交历史
 watch(
   () => gitStatus.value,
@@ -809,7 +802,7 @@ async function openDiff(file: GitFile) {
     const diff = await invoke<string>("git_changes_diff", {
       root,
       path: file.path,
-      kind: gitDiffKind(file.status),
+      kind: normalizeDiffKind(file.status),
     });
     if (!diff) {
       setToast("该文件无内容变化（可能仅为重命名）");
@@ -817,7 +810,7 @@ async function openDiff(file: GitFile) {
     }
     await openDiffTab({
       path: file.path,
-      kind: gitDiffKind(file.status),
+      kind: normalizeDiffKind(file.status),
       diff,
       workspace_root: root,
     });
@@ -1579,7 +1572,7 @@ async function restoreDir(node: GitDirNode) {
               <div class="git-log-main">
                 <span class="git-log-subject">{{ c.subject }}</span>
                 <span class="git-log-meta">
-                  {{ c.author }} · {{ formatCommitTime(c.timeSecs) }}
+                  {{ c.author }} · {{ formatDateTime(c.timeSecs) }}
                 </span>
               </div>
               <span class="git-log-hash" :title="c.hash">{{ c.shortHash }}</span>

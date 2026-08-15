@@ -68,50 +68,50 @@ const hasText = ref(false);
 const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
 
 // 输入框可拖拽高度：最低为现有自动高度，最高为窗口一半
-const MIN_EDITOR_HEIGHT = 120;
-const editorHeight = ref<number | null>(null);
-const resizingEditor = ref(false);
+const MIN_COMPOSER_HEIGHT = 120;
+const composerHeight = ref<number | null>(null);
+const resizingComposer = ref(false);
 const compacting = ref(false);
 let resizeStartY = 0;
-let resizeStartH = MIN_EDITOR_HEIGHT;
+let resizeStartH = MIN_COMPOSER_HEIGHT;
 
-function maxEditorHeight(): number {
-  return Math.max(MIN_EDITOR_HEIGHT, Math.round(window.innerHeight / 2));
+function maxComposerHeight(): number {
+  return Math.max(MIN_COMPOSER_HEIGHT, Math.round(window.innerHeight / 2));
 }
 
-function currentEditorHeight(): number {
+function currentComposerHeight(): number {
   const el = document.querySelector<HTMLElement>(".rich-editor .ProseMirror");
-  return el ? Math.round(el.getBoundingClientRect().height) : MIN_EDITOR_HEIGHT;
+  return el ? Math.round(el.getBoundingClientRect().height) : MIN_COMPOSER_HEIGHT;
 }
 
-function startResize(e: PointerEvent) {
+function startComposerResize(e: PointerEvent) {
   e.preventDefault();
-  resizingEditor.value = true;
+  resizingComposer.value = true;
   resizeStartY = e.clientY;
-  resizeStartH = editorHeight.value ?? currentEditorHeight();
-  window.addEventListener("pointermove", onResizeMove);
-  window.addEventListener("pointerup", endResize);
-  document.body.classList.add("resizing-editor");
+  resizeStartH = composerHeight.value ?? currentComposerHeight();
+  window.addEventListener("pointermove", onComposerResizeMove);
+  window.addEventListener("pointerup", endComposerResize);
+  document.body.classList.add("resizing-composer");
 }
 
-function onResizeMove(e: PointerEvent) {
+function onComposerResizeMove(e: PointerEvent) {
   const h = resizeStartH + (resizeStartY - e.clientY);
-  editorHeight.value = Math.min(
-    maxEditorHeight(),
-    Math.max(MIN_EDITOR_HEIGHT, Math.round(h)),
+  composerHeight.value = Math.min(
+    maxComposerHeight(),
+    Math.max(MIN_COMPOSER_HEIGHT, Math.round(h)),
   );
 }
 
-function endResize() {
-  resizingEditor.value = false;
-  window.removeEventListener("pointermove", onResizeMove);
-  window.removeEventListener("pointerup", endResize);
-  document.body.classList.remove("resizing-editor");
+function endComposerResize() {
+  resizingComposer.value = false;
+  window.removeEventListener("pointermove", onComposerResizeMove);
+  window.removeEventListener("pointerup", endComposerResize);
+  document.body.classList.remove("resizing-composer");
 }
 
-function clampEditorHeightOnResize() {
-  if (editorHeight.value != null) {
-    editorHeight.value = Math.min(editorHeight.value, maxEditorHeight());
+function clampComposerHeightOnResize() {
+  if (composerHeight.value != null) {
+    composerHeight.value = Math.min(composerHeight.value, maxComposerHeight());
   }
 }
 
@@ -404,7 +404,7 @@ function onWindowMousedown(e: MouseEvent) {
 onMounted(() => {
   window.addEventListener("keydown", onKeydownGlobal);
   window.addEventListener("mousedown", onWindowMousedown);
-  window.addEventListener("resize", clampEditorHeightOnResize);
+  window.addEventListener("resize", clampComposerHeightOnResize);
   exposeEditor();
   void setupDragDrop();
   void nextTick(() => editor.value?.commands.focus());
@@ -416,9 +416,9 @@ watch(editor, () => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
   window.removeEventListener("mousedown", onWindowMousedown);
-  window.removeEventListener("resize", clampEditorHeightOnResize);
+  window.removeEventListener("resize", clampComposerHeightOnResize);
   dropUnlisten?.();
-  endResize();
+  endComposerResize();
   debouncedFileSearch.cancel();
   try {
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
@@ -810,16 +810,16 @@ function onGoalIconClick() {
   >
     <div
       class="composer-input-row"
-      :style="editorHeight ? { '--editor-h': `${editorHeight}px` } : undefined"
+      :style="composerHeight ? { '--composer-h': `${composerHeight}px` } : undefined"
     >
       <div
-        class="editor-resize-handle"
-        :class="{ active: resizingEditor }"
+        class="composer-resize-handle"
+        :class="{ active: resizingComposer }"
         aria-label="调整输入框高度"
         v-tooltip="'拖动调整输入框高度'"
-        @pointerdown="startResize"
+        @pointerdown="startComposerResize"
       >
-        <span class="editor-resize-grip"></span>
+        <span class="composer-resize-grip"></span>
       </div>
       <div class="menu-anchor input-anchor">
         <EditorContent :editor="editor" class="rich-editor" />

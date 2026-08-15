@@ -79,17 +79,31 @@ export interface PendingInteraction {
   at: number;
 }
 
+/** 界面主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光） */
+export type ThemeId = "blue" | "dark" | "light";
+
+/** 权限批准模式：ask-for-approval（请求批准）｜help-me-approve（帮我批准）｜full-access（完全访问） */
+export type PermissionId =
+  | "ask-for-approval"
+  | "help-me-approve"
+  | "full-access";
+
+/** 记忆模式：disabled（关闭，默认）｜enabled（启用） */
+export type MemoryMode = "disabled" | "enabled";
+
+/** 跟进处理方式：adjust（调整方向）｜queue（加入队列） */
+export type FollowupMode = "adjust" | "queue";
+
 export interface AppSettings {
   codex_path?: string | null;
   sound_enabled: boolean;
   enter_to_send: boolean;
-  followup_mode: string;
-  /** 界面主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光） */
-  theme: string;
-  /** 权限模式的启动初始值：ask-for-approval｜help-me-approve｜full-access */
-  default_permission: string;
-  /** 记忆模式：disabled（关闭，默认）｜enabled（启用）；作为新建会话的初始值 */
-  memory_mode: string;
+  followup_mode: FollowupMode;
+  theme: ThemeId;
+  /** 权限模式的启动初始值 */
+  default_permission: PermissionId;
+  /** 作为新建会话的初始值 */
+  memory_mode: MemoryMode;
 }
 
 export interface AuthStatus {

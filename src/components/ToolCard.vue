@@ -10,7 +10,10 @@ import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { workspaceRoot } from "../lib/links";
 import { copyText } from "../lib/clipboard";
 import { openDiffTab } from "../composables/useEditorTabs";
-import type { DiffPreviewKind } from "../lib/gitChanges";
+import {
+  diffKindLabel,
+  normalizeDiffKind,
+} from "../lib/gitChanges";
 
 const props = defineProps<{ item: ThreadItem }>();
 const expanded = ref(false);
@@ -255,25 +258,10 @@ const todos = computed(
 // 默认折叠：不再因运行中/失败/文件变更自动展开，点击头部才展开
 const effectiveExpanded = computed(() => expanded.value);
 
-function kindOf(kind: unknown): string {
-  if (typeof kind === "string") return kind;
-  if (kind && typeof kind === "object" && "type" in (kind as Record<string, unknown>)) {
-    return String((kind as { type: unknown }).type);
-  }
-  return "update";
-}
-
-function kindLabel(kind: unknown): string {
-  const k = kindOf(kind);
-  if (k === "add") return "新增";
-  if (k === "delete") return "删除";
-  return "修改";
-}
-
 function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: string }[] {
   const raw = c.diff ?? "";
   const lines = raw.split("\n");
-  const kind = kindOf(c.kind);
+  const kind = normalizeDiffKind(c.kind);
   const hasMarkers = lines.some(
     (l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l),
   );
@@ -300,19 +288,11 @@ function diffEntries(c: { kind: unknown; diff?: string }): { text: string; cls: 
 
 // ---------- 文件变更：用条目自带的内联 diff 直接打开 ----------
 
-/** 变更 kind 归一为 diff 预览类型（非 add/delete 一律按修改处理） */
-function diffKindOf(kind: unknown): DiffPreviewKind {
-  const k = kindOf(kind);
-  if (k === "add") return "add";
-  if (k === "delete") return "delete";
-  return "modify";
-}
-
 function openPreview(c: { path: string; kind: unknown; diff?: string }) {
   if (!c.diff) return;
   void openDiffTab({
     path: c.path,
-    kind: diffKindOf(c.kind),
+    kind: normalizeDiffKind(c.kind),
     diff: c.diff,
     workspace_root: workspaceRoot(),
   });
@@ -413,7 +393,9 @@ function openPreview(c: { path: string; kind: unknown; diff?: string }) {
             v-tooltip="c.diff ? '点击查看完整差异' : ''"
             @click="openPreview(c)"
           >
-            <span class="change-kind" :class="kindOf(c.kind)">{{ kindLabel(c.kind) }}</span>
+            <span class="change-kind" :class="normalizeDiffKind(c.kind)">
+              {{ diffKindLabel(normalizeDiffKind(c.kind)) }}
+            </span>
             <span>{{ c.path }}</span>
           </div>
           <div v-if="c.diff" class="diff-wrap">

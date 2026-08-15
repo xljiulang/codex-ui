@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { PERMISSION_MODES } from "../lib/permissions";
 import { store } from "../composables/useCodex";
+import type { PermissionId } from "../lib/types";
 
 const emit = defineEmits<{ close: [] }>();
 
-function choose(id: string) {
+function choose(id: PermissionId) {
   if (store.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
   store.permissionMode = id; // 进程级生效，不写配置文件
   emit("close");

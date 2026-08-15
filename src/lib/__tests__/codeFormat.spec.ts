@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  FORMATABLE_EXTS,
+  FORMATTABLE_EXTS,
   formatDoc,
-  isFormatablePath,
+  isFormattablePath,
 } from "../codeFormat";
 
 describe("codeFormat 扩展名识别", () => {
@@ -15,15 +15,15 @@ describe("codeFormat 扩展名识别", () => {
       "py", "rs", "c", "h", "cpp", "go", "java", "kt", "cs", "php", "sql",
       "sh", "ps1", "rb", "ini", "cfg", "diff",
     ]) {
-      expect(FORMATABLE_EXTS.has(ext), ext).toBe(true);
-      expect(isFormatablePath(`D:\\repo\\a.${ext}`), ext).toBe(true);
+      expect(FORMATTABLE_EXTS.has(ext), ext).toBe(true);
+      expect(isFormattablePath(`D:\\repo\\a.${ext}`), ext).toBe(true);
     }
   });
 
   it("不支持的扩展名不显示格式化", () => {
-    expect(isFormatablePath("D:\\repo\\a.txt")).toBe(false);
-    expect(isFormatablePath("D:\\repo\\noext")).toBe(false);
-    expect(isFormatablePath("D:\\repo\\a.JSON")).toBe(true); // 大小写不敏感
+    expect(isFormattablePath("D:\\repo\\a.txt")).toBe(false);
+    expect(isFormattablePath("D:\\repo\\noext")).toBe(false);
+    expect(isFormattablePath("D:\\repo\\a.JSON")).toBe(true); // 大小写不敏感
   });
 });
 

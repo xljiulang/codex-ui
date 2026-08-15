@@ -135,9 +135,26 @@ export function gitStatusLetter(status: GitFileStatus): string {
   }
 }
 
-/** 映射到现有 diff 窗口的 kind 取值 */
-export function gitDiffKind(status: GitFileStatus): DiffPreviewKind {
-  if (status === "added" || status === "untracked") return "add";
-  if (status === "deleted") return "delete";
+/**
+ * 任意变更 kind → diff 预览类型（唯一实现）：
+ * 兼容 GitFileStatus（added/untracked→add、deleted→delete）与协议 kind
+ * （字符串或 { type } 对象）；其余一律按修改处理。
+ */
+export function normalizeDiffKind(kind: unknown): DiffPreviewKind {
+  const k =
+    typeof kind === "string"
+      ? kind
+      : kind && typeof kind === "object" && "type" in (kind as Record<string, unknown>)
+        ? String((kind as { type: unknown }).type)
+        : "";
+  if (k === "add" || k === "added" || k === "untracked") return "add";
+  if (k === "delete" || k === "deleted") return "delete";
   return "modify";
+}
+
+/** diff 预览类型的中文标签（新增/删除/修改） */
+export function diffKindLabel(kind: DiffPreviewKind): string {
+  if (kind === "add") return "新增";
+  if (kind === "delete") return "删除";
+  return "修改";
 }

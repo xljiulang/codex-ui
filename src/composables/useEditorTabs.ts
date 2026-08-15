@@ -8,7 +8,8 @@ import {
   stripBom,
   type EditorEol,
 } from "../lib/editorFile";
-import { pathBaseName } from "../lib/format";
+import { formatTimeHMS, pathBaseName } from "../lib/format";
+import type { DiffPreviewKind } from "../lib/gitChanges";
 import { base64ToBytes, type PreviewType } from "../lib/preview";
 import type { DiffRow } from "../lib/types";
 import {
@@ -34,7 +35,7 @@ interface BinaryFileContent {
 /** diff 预览参数（与 Rust DiffPreviewParams 结构一致） */
 export interface DiffPreviewParams {
   path: string;
-  kind: string;
+  kind: DiffPreviewKind;
   diff: string;
   workspace_root: string;
 }
@@ -76,7 +77,7 @@ export interface DiffEditorTab {
   id: string;
   path: string;
   /** diff 变化类型：add / delete / modify */
-  changeKind: string;
+  changeKind: DiffPreviewKind;
   workspaceRoot: string;
   title: string;
   loading: boolean;
@@ -155,12 +156,6 @@ function diffTabId(p: DiffPreviewParams): string {
 
 function previewTabId(type: PreviewType, root: string, path: string): string {
   return `preview:${type}:${JSON.stringify([root, path])}`;
-}
-
-function nowTime(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 /** 终端标签自增序号：保证同一毫秒内连续多开也生成不同 id */
@@ -321,7 +316,7 @@ export async function saveFileTab(id: string): Promise<boolean> {
     });
     tab.savedText = markRaw(tab.editorState.doc);
     tab.dirty = false;
-    tab.status = `已保存 ${nowTime()}`;
+    tab.status = `已保存 ${formatTimeHMS(Date.now())}`;
     return true;
   } catch (e) {
     tab.status = `保存失败：${String(e)}`;

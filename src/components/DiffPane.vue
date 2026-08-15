@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import hljs, { languageFromPath } from "../lib/highlight";
 import { ICON_SUMMARY } from "../lib/icons";
+import { diffKindLabel } from "../lib/gitChanges";
 import type { DiffRow } from "../lib/types";
 import type { DiffEditorTab } from "../composables/useEditorTabs";
 
@@ -9,12 +10,6 @@ const props = defineProps<{ tab: DiffEditorTab }>();
 
 const MAX_HIGHLIGHT_LINES = 20_000;
 const lang = computed(() => languageFromPath(props.tab.path));
-
-function kindLabel(kind: string): string {
-  if (kind === "add") return "新增";
-  if (kind === "delete") return "删除";
-  return "修改";
-}
 
 function fallbackLineCls(l: string): string {
   if (/^(\+\+\+|---)/.test(l)) return "diff-file";
@@ -78,7 +73,7 @@ function toggleBrief() {
       <span class="diff-window-title">
         <span class="diff-window-path">{{ tab.path }}</span>
         <span class="change-kind" :class="tab.changeKind">
-          {{ kindLabel(tab.changeKind) }}
+          {{ diffKindLabel(tab.changeKind) }}
         </span>
       </span>
       <span class="diff-window-actions">

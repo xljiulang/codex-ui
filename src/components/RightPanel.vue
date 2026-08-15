@@ -74,9 +74,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="history-panel" :style="{ width: panelWidth + 'px' }">
+  <aside class="right-panel" :style="{ width: panelWidth + 'px' }">
     <div
-      class="history-resize-handle"
+      class="right-panel-resize-handle"
       :class="{ dragging: isDragging }"
       aria-hidden="true"
       @pointerdown="startResize"

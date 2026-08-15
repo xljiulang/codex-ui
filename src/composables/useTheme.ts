@@ -1,4 +1,6 @@
-export type ThemeId = "blue" | "dark" | "light";
+import type { ThemeId } from "../lib/types";
+
+export type { ThemeId };
 
 export interface ThemeOption {
   id: ThemeId;

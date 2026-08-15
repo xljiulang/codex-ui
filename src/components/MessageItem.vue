@@ -5,7 +5,7 @@ import MarkdownText from "./MarkdownText.vue";
 import ReasoningBlock from "./ReasoningBlock.vue";
 import RefChip from "./RefChip.vue";
 import ToolCard from "./ToolCard.vue";
-import { formatDuration } from "../lib/format";
+import { formatDuration, formatTimeHM } from "../lib/format";
 import { copyText } from "../lib/clipboard";
 import {
   FILE_MENTION_HEADING,
@@ -140,16 +140,9 @@ const isTool =
   props.item.type === "fileChange" ||
   props.item.type === "todoList";
 
-// ---------- 时间戳 ----------
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(
-    d.getMinutes(),
-  ).padStart(2, "0")}`;
-}
 const time = computed(() =>
   typeof props.item.startedAtMs === "number"
-    ? formatTime(props.item.startedAtMs as number)
+    ? formatTimeHM(props.item.startedAtMs as number)
     : "",
 );
 const isFinalAnswer = computed(() => props.item.phase === "final_answer");

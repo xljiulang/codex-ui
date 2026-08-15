@@ -1,5 +1,7 @@
+import type { PermissionId } from "./types";
+
 export interface PermissionMode {
-  id: string;
+  id: PermissionId;
   label: string;
   desc: string;
   chip: string;
@@ -31,11 +33,11 @@ export const PERMISSION_MODES: PermissionMode[] = [
   },
 ];
 
-export function permissionMode(id: string): PermissionMode {
+export function permissionMode(id: PermissionId): PermissionMode {
   return PERMISSION_MODES.find((m) => m.id === id) ?? PERMISSION_MODES[2];
 }
 
-export function toApprovalPolicy(mode: string): string {
+export function toApprovalPolicy(mode: PermissionId): "on-request" | "never" {
   switch (mode) {
     case "ask-for-approval":
       return "on-request";
@@ -46,7 +48,9 @@ export function toApprovalPolicy(mode: string): string {
   }
 }
 
-export function toSandbox(mode: string): string {
+export function toSandbox(
+  mode: PermissionId,
+): "workspace-write" | "danger-full-access" {
   switch (mode) {
     case "ask-for-approval":
       return "workspace-write";
@@ -58,7 +62,9 @@ export function toSandbox(mode: string): string {
 }
 
 /** 官方映射：请求批准→用户评审；帮我批准→自动评审 */
-export function toApprovalsReviewer(mode: string): string | null {
+export function toApprovalsReviewer(
+  mode: PermissionId,
+): "user" | "auto_review" | null {
   switch (mode) {
     case "ask-for-approval":
       return "user";
@@ -71,7 +77,7 @@ export function toApprovalsReviewer(mode: string): string | null {
 
 /** turn/start 的沙箱覆盖参数是 sandboxPolicy 对象 */
 export function toSandboxPolicy(
-  mode: string,
+  mode: PermissionId,
   workspaceRoot?: string,
 ): Record<string, unknown> {
   switch (mode) {

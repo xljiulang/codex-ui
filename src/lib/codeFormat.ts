@@ -72,7 +72,7 @@ const INDENT_EXTS = new Set([
 ]);
 
 /** 编辑器可格式化的全部扩展名（小写） */
-export const FORMATABLE_EXTS = new Set<string>([
+export const FORMATTABLE_EXTS = new Set<string>([
   ...Object.keys(PRETTIER_EXTS),
   ...XML_EXTS,
   ...INDENT_EXTS,
@@ -83,11 +83,11 @@ export type FormatResult =
   | { ok: true; unchanged: true }
   | { ok: false; message: string };
 
-export function isFormatablePath(path: string): boolean {
+export function isFormattablePath(path: string): boolean {
   const name = path.split(/[\\/]/).pop() ?? "";
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
-  return FORMATABLE_EXTS.has(ext);
+  return FORMATTABLE_EXTS.has(ext);
 }
 
 function extOf(path: string): string {
