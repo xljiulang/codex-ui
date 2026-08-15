@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  dirNameOf,
   flattenResourceTree,
   formatFileSize,
   formatFileTime,
+  isPathUnderRoot,
   joinFsPath,
   type FsEntry,
 } from "../sessionFs";
@@ -105,5 +107,32 @@ describe("joinFsPath", () => {
   it("拼接 Windows 路径并去尾分隔符", () => {
     expect(joinFsPath("D:\\repo", "src")).toBe("D:\\repo\\src");
     expect(joinFsPath("D:\\repo\\", "a.txt")).toBe("D:\\repo\\a.txt");
+  });
+});
+
+describe("dirNameOf", () => {
+  it("取最后一个分隔符前的部分并去尾分隔符", () => {
+    expect(dirNameOf("D:\\repo\\src\\main.ts")).toBe("D:\\repo\\src");
+    expect(dirNameOf("D:/repo/src/main.ts")).toBe("D:\\repo\\src");
+  });
+
+  it("盘符根返回带尾反斜杠，无分隔符返回空串", () => {
+    expect(dirNameOf("D:\\")).toBe("D:\\");
+    expect(dirNameOf("main.ts")).toBe("");
+  });
+});
+
+describe("isPathUnderRoot", () => {
+  it("边界判定：相等或位于根内为 true，外部/前缀歧义为 false", () => {
+    expect(isPathUnderRoot("D:\\repo", "D:\\repo")).toBe(true);
+    expect(isPathUnderRoot("D:\\repo", "D:\\repo\\src\\a.ts")).toBe(true);
+    expect(isPathUnderRoot("D:\\repo", "D:\\repo2\\a.ts")).toBe(false);
+    expect(isPathUnderRoot("D:\\repo", "D:\\other\\a.ts")).toBe(false);
+    expect(isPathUnderRoot("", "D:\\repo")).toBe(false);
+  });
+
+  it("大小写不敏感且兼容正斜杠", () => {
+    expect(isPathUnderRoot("d:\\repo", "D:\\REPO\\src\\a.ts")).toBe(true);
+    expect(isPathUnderRoot("D:/repo", "D:/repo/src/a.ts")).toBe(true);
   });
 });
