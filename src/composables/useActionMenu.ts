@@ -4,6 +4,11 @@ import { clampMenuPos } from "../lib/ctxMenu";
 export interface CtxItem {
   label: string;
   icon?: string;
+  /**
+   * 多路径图标（如会话 Logo：描边六边形 + C 标记），存在时优先于 icon 渲染；
+   * accent 路径按描边 Logo 渲染（logo-c 类）。
+   */
+  paths?: { d: string; accent?: boolean }[];
   /** 位图图标（如系统文件图标 PNG data URI）；存在时优先于 icon 渲染 */
   img?: string;
   danger?: boolean;

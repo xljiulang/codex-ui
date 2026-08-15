@@ -23,7 +23,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
-import { ICON_SESSION } from "../../lib/icons";
+import { ICON_SESSION, ICON_SESSION_LOGO_C } from "../../lib/icons";
 import {
   deleteThread,
   openHistorySession,
@@ -556,11 +556,20 @@ describe("HistoryView 文件夹右键菜单", () => {
       "在资源管理器中打开",
       "删除所有会话",
     ]);
-    // 「新建会话」复用标签栏「+」菜单的六边形 Logo 图标
+    // 「新建会话」复用会话标签同款 Logo：描边六边形 + C 标记（两条路径）
     const item = wrapper
       .findAll(".ctx-menu-item")
       .find((b) => b.text().trim() === "新建会话")!;
-    expect(item.find("svg path").attributes("d")).toBe(ICON_SESSION);
+    const sessionPaths = item.findAll("svg path");
+    expect(sessionPaths).toHaveLength(2);
+    expect(sessionPaths[0].attributes("d")).toBe(ICON_SESSION);
+    expect(sessionPaths[1].attributes("d")).toBe(ICON_SESSION_LOGO_C);
+    expect(sessionPaths[1].classes()).toContain("logo-c");
+    // 其它菜单项仍为单路径
+    const term = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text().trim() === "在此打开终端")!;
+    expect(term.findAll("svg path")).toHaveLength(1);
     const del = wrapper
       .findAll(".ctx-menu-item")
       .find((b) => b.text().trim() === "删除所有会话")!;

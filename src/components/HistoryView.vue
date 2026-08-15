@@ -42,7 +42,7 @@ import {
   ICON_PIN,
   ICON_REFRESH,
   ICON_RENAME,
-  ICON_SESSION,
+  SESSION_LOGO_PATHS,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -242,7 +242,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
   const items: CtxItem[] = [
     {
       label: "新建会话",
-      icon: ICON_SESSION,
+      paths: SESSION_LOGO_PATHS,
       action: () => void openNewSession(group.path),
     },
     {
@@ -447,8 +447,20 @@ onBeforeUnmount(() => {
         :class="{ danger: it.danger }"
         @click="it.action(); ctxMenu = null"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="it.icon" />
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          :class="{ 'ctx-session-logo': it.paths }"
+        >
+          <template v-if="it.paths">
+            <path
+              v-for="p in it.paths"
+              :key="p.d"
+              :d="p.d"
+              :class="{ 'logo-c': p.accent }"
+            />
+          </template>
+          <path v-else :d="it.icon" />
         </svg>
         <span>{{ it.label }}</span>
       </button>

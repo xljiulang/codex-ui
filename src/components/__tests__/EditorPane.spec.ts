@@ -78,7 +78,7 @@ import {
   store,
   type SessionTab,
 } from "../../composables/useCodex";
-import { ICON_TERMINAL } from "../../lib/icons";
+import { ICON_SESSION_LOGO_C, ICON_TERMINAL } from "../../lib/icons";
 import {
   __resetGitChangesForTest,
   gitRevealTarget,
@@ -229,9 +229,16 @@ describe("EditorPane 左侧多标签编辑区", () => {
       "新建会话",
       "新建终端",
     ]);
-    expect(items[0].find("svg path").attributes("d")).toBe(
+    // 新建会话：会话标签同款 Logo（六边形 + C 标记两条路径）
+    const sessionPaths = items[0].findAll("svg path");
+    expect(sessionPaths).toHaveLength(2);
+    expect(sessionPaths[0].attributes("d")).toBe(
       "M12 2l8.66 5v10L12 22l-8.66-5V7z",
     );
+    expect(sessionPaths[1].attributes("d")).toBe(ICON_SESSION_LOGO_C);
+    expect(sessionPaths[1].classes()).toContain("logo-c");
+    // 新建终端：仍为单路径图标
+    expect(items[1].findAll("svg path")).toHaveLength(1);
     expect(items[1].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
     wrapper.unmount();
   });

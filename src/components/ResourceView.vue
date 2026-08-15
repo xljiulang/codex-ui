@@ -738,8 +738,21 @@ const deleteLabel = computed(() => {
           alt=""
           draggable="false"
         />
-        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="it.icon" />
+        <svg
+          v-else
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          :class="{ 'ctx-session-logo': it.paths }"
+        >
+          <template v-if="it.paths">
+            <path
+              v-for="p in it.paths"
+              :key="p.d"
+              :d="p.d"
+              :class="{ 'logo-c': p.accent }"
+            />
+          </template>
+          <path v-else :d="it.icon" />
         </svg>
         <span>{{ it.label }}</span>
       </button>

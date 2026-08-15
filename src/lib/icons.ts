@@ -34,8 +34,17 @@ export const ICON_CHEVRON_DOWN = "M4 6l4 4 4-4z";
 /** 目标：旗帜（目标芯片的设置/取消按钮与状态展示共用） */
 export const ICON_GOAL = "M4 3h2v18H4zm2 1h13l-2.8 4 2.8 4H6z";
 
-/** 会话：六边形 Logo（会话标签、标签栏「+」菜单与历史分组右键「新建会话」共用） */
+/** 会话：六边形 Logo 外框（会话标签与「新建会话」菜单共用） */
 export const ICON_SESSION = "M12 2l8.66 5v10L12 22l-8.66-5V7z";
+
+/** 会话 Logo 的“C”标记路径（与标签栏会话标签 .logo-c 同源，需配合描边渲染） */
+export const ICON_SESSION_LOGO_C = "M14.9 9.1a4.5 4.5 0 1 0 0 5.8";
+
+/** 会话 Logo 完整路径集：描边六边形 + C 标记（「新建会话」菜单项用） */
+export const SESSION_LOGO_PATHS = [
+  { d: ICON_SESSION },
+  { d: ICON_SESSION_LOGO_C, accent: true },
+];
 
 /** 关闭其它所有标签：交叠标签卡片 + 关闭叉（需配合 fill-rule="evenodd" 挖空） */
 export const ICON_CLOSE_ALL =

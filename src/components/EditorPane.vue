@@ -53,7 +53,7 @@ import {
   ICON_CLOSE_LEFT,
   ICON_CLOSE_RIGHT,
   ICON_REVEAL,
-  ICON_SESSION,
+  SESSION_LOGO_PATHS,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -353,7 +353,7 @@ function openAddMenu(e: MouseEvent) {
   openCtx(e, [
     {
       label: "新建会话",
-      icon: ICON_SESSION,
+      paths: SESSION_LOGO_PATHS,
       action: () => void newEmptyChat(ws || null),
     },
     {
@@ -584,8 +584,20 @@ function openAddMenu(e: MouseEvent) {
         class="ctx-menu-item"
         @click="it.action(); ctxMenu = null"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="it.icon" fill-rule="evenodd" />
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          :class="{ 'ctx-session-logo': it.paths }"
+        >
+          <template v-if="it.paths">
+            <path
+              v-for="p in it.paths"
+              :key="p.d"
+              :d="p.d"
+              :class="{ 'logo-c': p.accent }"
+            />
+          </template>
+          <path v-else :d="it.icon" fill-rule="evenodd" />
         </svg>
         <span>{{ it.label }}</span>
       </button>
