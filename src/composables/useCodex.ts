@@ -130,6 +130,22 @@ export interface SessionTab extends EditorTabBase {
   threadId: string | null;
   /** 会话名称（自动生成/手动重命名，随 thread/name/updated 同步） */
   name: string;
+  /** 会话名是否来自「首条消息内容」（供 AI 总结覆盖；手动重命名后置 false） */
+  nameIsFirstMessage: boolean;
+  /** 会话私有：权限模式（新会话取默认权限） */
+  permissionMode: PermissionId;
+  /** 会话私有：任务模式 */
+  taskMode: "execute" | "plan";
+  /** 会话私有：模型（null = 服务端默认） */
+  model: string | null;
+  /** 会话私有：推理强度（null = 默认） */
+  effort: string | null;
+  /** 会话私有：输入框草稿（Tiptap 文档 JSON 序列化，ComposerBar 维护） */
+  draftJson: string;
+  /** 会话私有：输入框附件区（ComposerBar 维护） */
+  draftAttachments: UserInput[];
+  /** 会话私有：输入框内联引用 map（refId → 附件，ComposerBar 维护） */
+  draftRefs: Record<string, UserInput>;
   origin: "new" | "history" | null;
   workspace: string | null;
   resumedThreadId: string | null;
@@ -272,6 +288,14 @@ function freshSessionTab(): SessionTab {
     icon: TabIcon.Chat,
     threadId: null,
     name: "",
+    nameIsFirstMessage: false,
+    permissionMode: store.settings.default_permission,
+    taskMode: "execute",
+    model: store.model,
+    effort: store.effort,
+    draftJson: JSON.stringify({ type: "doc", content: [] }),
+    draftAttachments: [],
+    draftRefs: {},
     origin: null,
     workspace: null,
     resumedThreadId: null,
@@ -333,6 +357,10 @@ export function sessionTabTitle(tab: SessionTab): string {
 function restoreSession(tab: SessionTab) {
   store.currentThreadId = tab.threadId;
   store.currentThreadName = tab.name;
+  store.permissionMode = tab.permissionMode;
+  store.taskMode = tab.taskMode;
+  store.model = tab.model;
+  store.effort = tab.effort;
   store.currentThreadOrigin = tab.origin;
   store.currentThreadWorkspace = tab.workspace;
   store.resumedThreadId = tab.resumedThreadId;
@@ -356,6 +384,10 @@ function syncActiveSessionTab() {
   if (!tab) return;
   tab.threadId = store.currentThreadId;
   tab.name = store.currentThreadName;
+  tab.permissionMode = store.permissionMode;
+  tab.taskMode = store.taskMode;
+  tab.model = store.model;
+  tab.effort = store.effort;
   tab.origin = store.currentThreadOrigin;
   tab.workspace = store.currentThreadWorkspace;
   tab.resumedThreadId = store.resumedThreadId;
@@ -701,6 +733,10 @@ watch(
   () => [
     store.currentThreadId,
     store.currentThreadName,
+    store.permissionMode,
+    store.taskMode,
+    store.model,
+    store.effort,
     store.currentThreadOrigin,
     store.currentThreadWorkspace,
     store.resumedThreadId,
@@ -1066,8 +1102,16 @@ export function clearSearch() {
   void refreshThreads();
 }
 
-/** 重命名会话；返回是否成功（手动重命名与自动标题写回共用） */
-export async function renameThread(threadId: string, name: string): Promise<boolean> {
+/**
+ * 重命名会话；返回是否成功（手动重命名 / 首条消息作标题 / AI 总结写回共用）。
+ * source 决定 nameIsFirstMessage 标记：manual（默认）清除标记，
+ * first-message 置位（AI 总结可覆盖）；auto-summary 不修改标记（由调用方维护）。
+ */
+export async function renameThread(
+  threadId: string,
+  name: string,
+  source: "manual" | "first-message" | "auto-summary" = "manual",
+): Promise<boolean> {
   const n = name.trim();
   if (!n) return false;
   try {
@@ -1075,7 +1119,13 @@ export async function renameThread(threadId: string, name: string): Promise<bool
     const t = store.threads.find((x) => x.id === threadId);
     if (t) t.name = n;
     const tab = findSessionTabByThread(threadId);
-    if (tab) tab.name = n;
+    if (tab) {
+      tab.name = n;
+      if (source !== "auto-summary") {
+        tab.nameIsFirstMessage = source === "first-message";
+      }
+      tab.title = sessionTabTitle(tab);
+    }
     if (store.currentThreadId === threadId) {
       store.currentThreadName = n;
     }
@@ -1105,8 +1155,11 @@ export function sanitizeTitle(raw: string): string {
 export async function autoTitleThread(threadId: string, firstMessagePlain: string) {
   const text = firstMessagePlain.replace(/\s+/g, " ").trim();
   if (!text || text.length <= 15) return; // 短文保持默认标题，不消耗模型
+  const tab = findSessionTabByThread(threadId);
+  // 仅当尚无名称、或名称来自首条消息（可被总结覆盖）时继续；手动命名不覆盖
+  if (tab?.name && !tab.nameIsFirstMessage) return;
   const t = store.threads.find((x) => x.id === threadId);
-  if (t?.name || store.currentThreadName) return; // 已被命名（手动/其它客户端）
+  if ((!tab?.name || !tab.nameIsFirstMessage) && (t?.name || store.currentThreadName)) return;
   const cap = await getTitleHelperCapability();
   if (!cap?.experimentalApi) return; // 不支持 experimentalApi：不总结
 
@@ -1154,11 +1207,14 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     if (status === "completed") {
       const title = sanitizeTitle(titleText);
       if (title) {
-        // 目标线程若已在总结期间被命名（如用户手动改名），不再覆盖
-        const cur = store.threads.find((x) => x.id === threadId);
-        if (!cur?.name && !store.currentThreadName) {
-          if (await renameThread(threadId, title)) {
+        // 目标线程若已在总结期间被手动命名，不再覆盖；首条消息名可覆盖
+        const cur = findSessionTabByThread(threadId);
+        if (!cur?.name || cur.nameIsFirstMessage) {
+          if (await renameThread(threadId, title, "auto-summary")) {
+            if (cur) cur.nameIsFirstMessage = false;
             setToast("当前会话的标题已简化");
+            // 历史列表同步最终标题（搜索态下不覆盖搜索结果）
+            if (!store.searchActive) void refreshThreads();
           }
         }
       }
@@ -1381,6 +1437,16 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     }
     await refreshThreads();
     if (prompt.trim() || attachments.length) {
+      // 第 2 步：首条消息内容作为会话标题（AI 总结完成后由 autoTitleThread 覆盖）
+      const firstText = stripMentionContext(prompt).replace(/\s+/g, " ").trim();
+      if (firstText) {
+        const tab = findSessionTabByThread(threadId);
+        if (
+          await renameThread(threadId, sanitizeTitle(firstText), "first-message")
+        ) {
+          if (tab) tab.nameIsFirstMessage = true;
+        }
+      }
       // 仿 VS Code：后台临时线程总结首条消息生成短标题（不阻塞主回合）
       void autoTitleThread(threadId, stripMentionContext(prompt));
       await continueTurn(prompt, attachments);

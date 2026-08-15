@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { invoke } from "@tauri-apps/api/core";
 import {
   setToast,
+  store,
   toastError,
   workspace,
 } from "../composables/useCodex";
@@ -71,6 +72,13 @@ import {
 } from "../composables/useEditorTabs";
 
 const props = defineProps<{ active: boolean }>();
+
+/** 是否存在活动会话标签：无则隐藏「添加为会话附件」入口，避免附件进入错误输入区 */
+const hasActiveSessionTab = computed(
+  () =>
+    !!store.activeSessionId &&
+    store.sessionTabs.some((t) => t.id === store.activeSessionId),
+);
 
 const ICON_FILE =
   "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
@@ -216,11 +224,15 @@ async function openDirMenu(entry: FsEntry, e: MouseEvent) {
       icon: ICON_RENAME,
       action: () => startRename(entry),
     },
-    {
-      label: "添加为会话附件",
-      icon: ICON_AT,
-      action: () => addAsAttachment(entry),
-    },
+    ...(hasActiveSessionTab.value
+      ? [
+          {
+            label: "添加为会话附件",
+            icon: ICON_AT,
+            action: () => addAsAttachment(entry),
+          },
+        ]
+      : []),
     {
       label: "在此打开终端",
       icon: ICON_TERMINAL,
@@ -262,11 +274,15 @@ function openFileMenu(entry: FsEntry, e: MouseEvent) {
       icon: ICON_RENAME,
       action: () => startRename(entry),
     },
-    {
-      label: "添加为会话附件",
-      icon: ICON_AT,
-      action: () => addAsAttachment(entry),
-    },
+    ...(hasActiveSessionTab.value
+      ? [
+          {
+            label: "添加为会话附件",
+            icon: ICON_AT,
+            action: () => addAsAttachment(entry),
+          },
+        ]
+      : []),
     {
       label: "在资源管理器中打开",
       icon: ICON_REVEAL,
@@ -574,6 +590,7 @@ const deleteLabel = computed(() => {
           @contextmenu="openEntryMenu(entry, $event)"
         >
           <button
+            v-if="hasActiveSessionTab"
             class="resource-add"
             :aria-label="`添加 ${entry.name} 为会话附件`"
             v-tooltip="'添加为会话附件'"
@@ -623,7 +640,7 @@ const deleteLabel = computed(() => {
           @pointerdown="row.kind !== 'root' && onRowPointerDown(row.entry, $event)"
         >
           <button
-            v-if="row.kind !== 'root'"
+            v-if="hasActiveSessionTab && row.kind !== 'root'"
             class="resource-add"
             :aria-label="`添加 ${row.entry.name} 为会话附件`"
             v-tooltip="'添加为会话附件'"

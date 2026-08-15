@@ -9,7 +9,7 @@ import { store, type SessionTab } from "../composables/useCodex";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
 
 const scroller = ref<HTMLElement | null>(null);
-const props = defineProps<{ tab: SessionTab }>();
+const props = defineProps<{ tab: SessionTab; active?: boolean }>();
 const items = computed(() =>
   props.tab.threadId ? (store.itemsByThread[props.tab.threadId] ?? []) : [],
 );
@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
         ↓ 回到底部
       </div>
     </div>
-    <ComposerBar />
+    <ComposerBar :tab="tab" :active="active" />
     <div class="sr-only" aria-live="polite">{{ liveAnnouncement }}</div>
   </div>
 </template>

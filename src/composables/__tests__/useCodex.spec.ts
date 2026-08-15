@@ -108,6 +108,14 @@ function makeSessionTab(
     id,
     threadId,
     name: "",
+    nameIsFirstMessage: false,
+    permissionMode: "ask-for-approval",
+    taskMode: "execute",
+    model: null,
+    effort: null,
+    draftJson: JSON.stringify({ type: "doc", content: [] }),
+    draftAttachments: [],
+    draftRefs: {},
     origin: threadId ? "history" : null,
     workspace: null,
     resumedThreadId: null,
@@ -417,6 +425,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: "t1",
       name: "我的标题",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: "history",
       workspace: "D:/repo/sub",
       resumedThreadId: null,
@@ -448,6 +464,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: "t1",
       name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: "history",
       workspace: "D:/repo",
       resumedThreadId: null,
@@ -476,6 +500,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: null,
       name: "标题",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: null,
       workspace: null,
       resumedThreadId: null,
@@ -504,6 +536,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: null,
       name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: null,
       workspace: null,
       resumedThreadId: null,
@@ -532,6 +572,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: null,
       name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: null,
       workspace: null,
       resumedThreadId: null,
@@ -561,6 +609,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: null,
       name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: null,
       workspace: null,
       resumedThreadId: null,
@@ -594,6 +650,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       icon: "chat",
       threadId: "t1",
       name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
       origin: "history",
       workspace: null,
       resumedThreadId: null,
@@ -1181,16 +1245,31 @@ describe("会话标签状态与事件路由", () => {
   });
 
   it("switchSessionTab：快照当前、恢复目标，各标签状态不串", async () => {
-    store.sessionTabs.push(makeSessionTab("s1", "t1"));
+    store.sessionTabs.push(
+      makeSessionTab("s1", "t1", {
+        permissionMode: "full-access",
+        taskMode: "plan",
+        model: "gpt-5",
+        effort: "high",
+      }),
+    );
     store.sessionTabs.push(
       makeSessionTab("s2", "t2", {
         name: "会话B",
         workspace: "D:/repo/b",
         planPrompt: { threadId: "t2", turnId: "tp2", planText: "计划B" },
+        permissionMode: "help-me-approve",
+        taskMode: "execute",
+        model: "o3",
+        effort: "low",
       }),
     );
     store.activeSessionId = "s1";
     store.currentThreadId = "t1";
+    store.permissionMode = "full-access";
+    store.taskMode = "plan";
+    store.model = "gpt-5";
+    store.effort = "high";
     store.turnActive = true;
     store.currentTurnId = "turn-1";
     store.goalText = "目标A";
@@ -1206,6 +1285,10 @@ describe("会话标签状态与事件路由", () => {
     expect(store.currentThreadWorkspace).toBe("D:/repo/b");
     expect(store.turnActive).toBe(false);
     expect(store.planPrompt?.planText).toBe("计划B");
+    expect(store.permissionMode).toBe("help-me-approve");
+    expect(store.taskMode).toBe("execute");
+    expect(store.model).toBe("o3");
+    expect(store.effort).toBe("low");
 
     expect(await switchSessionTab("s1")).toBe(true);
     expect(store.currentThreadId).toBe("t1");
@@ -1214,6 +1297,49 @@ describe("会话标签状态与事件路由", () => {
     expect(store.goalText).toBe("目标A");
     expect(store.attachments).toHaveLength(1);
     expect(store.followupQueue).toHaveLength(1);
+    expect(store.permissionMode).toBe("full-access");
+    expect(store.taskMode).toBe("plan");
+    expect(store.model).toBe("gpt-5");
+    expect(store.effort).toBe("high");
+  });
+
+  it("新建会话发送首条消息：标题先取消息内容并标记首条消息名", async () => {
+    store.sessionTabs.push(
+      makeSessionTab("s1", null, { newChatWorkspace: "D:/repo" }),
+    );
+    store.activeSessionId = "s1";
+    store.currentThreadId = null;
+    store.currentThreadName = "";
+    store.server.startupWorkspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_start") {
+        return Promise.resolve({
+          thread: { id: "t1", name: null },
+          model: "gpt-5",
+        });
+      }
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/memoryMode/set") return Promise.resolve({});
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await sendPrompt("帮我修复登录页面报错");
+    expect(store.currentThreadId).toBe("t1");
+    expect(store.currentThreadName).toBe("帮我修复登录页面报错");
+    expect(store.sessionTabs[0].name).toBe("帮我修复登录页面报错");
+    expect(store.sessionTabs[0].nameIsFirstMessage).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+      threadId: "t1",
+      name: "帮我修复登录页面报错",
+    });
   });
 
   it("活动标签的 live 字段变化自动同步回标签记录", async () => {
@@ -2314,9 +2440,61 @@ describe("autoTitleThread 临时线程标题总结", () => {
   });
 
   it("线程已有名称时不覆盖", async () => {
+    const tab = store.sessionTabs[0];
+    tab.name = "手动标题";
+    tab.nameIsFirstMessage = false;
     store.currentThreadName = "手动标题";
     await autoTitleThread("t1", LONG_TEXT);
     expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+  });
+
+  it("名称来自首条消息时总结可覆盖并复位标记", async () => {
+    const tab = store.sessionTabs[0];
+    tab.name = "帮我修复登录页面报错";
+    tab.nameIsFirstMessage = true;
+    store.currentThreadName = "帮我修复登录页面报错";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_title_helper_capability") {
+        return Promise.resolve({ experimentalApi: true, ephemeral: true });
+      }
+      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "thread_list")
+        return Promise.resolve({ data: [], nextCursor: null });
+      return Promise.resolve(undefined);
+    });
+
+    const p = autoTitleThread("t1", LONG_TEXT);
+    await p;
+    fireListen("item/agentMessage/delta", {
+      threadId: "helper1",
+      itemId: "m1",
+      delta: "修复登录页面报错",
+    });
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "completed" },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+        threadId: "t1",
+        name: "修复登录页面报错",
+      });
+    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(() => {
+      expect(tab.nameIsFirstMessage).toBe(false);
+    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("thread_list", expect.anything());
+    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(() => {
+      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+        method: "thread/unsubscribe",
+        params: { threadId: "helper1" },
+      });
+    }, { timeout: 3000, interval: 20 });
   });
 
   it("ephemeral 路径：模型标题写回，临时线程注销", async () => {
@@ -2340,6 +2518,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
         return Promise.resolve({ turn: { id: "ht1" } });
       }
       if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "thread_list")
+        return Promise.resolve({ data: [], nextCursor: null });
       return Promise.resolve(undefined);
     });
 
@@ -2391,6 +2571,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
       }
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "thread_list")
+        return Promise.resolve({ data: [], nextCursor: null });
       return Promise.resolve(undefined);
     });
 

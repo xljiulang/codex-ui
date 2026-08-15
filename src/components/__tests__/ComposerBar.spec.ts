@@ -33,7 +33,9 @@ import {
   NEW_CHAT_PLUGIN_KEY,
   sendPrompt,
   store,
+  type SessionTab,
 } from "../../composables/useCodex";
+import type { UserInput } from "../../lib/types";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedSendPrompt = vi.mocked(sendPrompt);
@@ -1366,4 +1368,111 @@ describe("ComposerBar 任务目标芯片", () => {
     expect(mockedSendPrompt.mock.calls[0][0]).toContain("a.cs");
   });
 
+});
+
+describe("ComposerBar 权限与草稿会话私有", () => {
+  let wrapper: VueWrapper | null = null;
+
+  function makeTab(over: Partial<SessionTab> = {}): SessionTab {
+    return {
+      id: "s1",
+      kind: "chat",
+      title: "会话",
+      icon: "chat",
+      threadId: null,
+      name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
+      origin: null,
+      workspace: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loading: false,
+      newChatWorkspace: null,
+      interactions: [],
+      ...over,
+    };
+  }
+
+  beforeEach(() => {
+    store.attachments.splice(0);
+    store.threadPlugins = {};
+    store.skills = [];
+    store.skillsLoaded = false;
+    store.currentThreadId = null;
+    store.server.startupWorkspace = "D:/repo";
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.settings.enter_to_send = true;
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+    mockRpc(false);
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  it("回合进行中权限按钮仍可点击并切换模式", async () => {
+    store.turnActive = true;
+    wrapper = mount(ComposerBar);
+    await flushPromises();
+    const chip = wrapper.find(".perm-chip");
+    expect(chip.attributes("disabled")).toBeUndefined();
+    await chip.trigger("click");
+    await flushPromises();
+    expect(store.permOpen).toBe(true);
+    await wrapper.findAll(".mode-menu-item")[2].trigger("click");
+    await flushPromises();
+    expect(store.permissionMode).toBe("full-access");
+    expect(store.permOpen).toBe(false);
+  });
+
+  it("标签激活时恢复草稿文本与附件区", async () => {
+    const draft: UserInput = {
+      type: "mention",
+      name: "a.cs",
+      path: "D:/repo/src/a.cs",
+    };
+    const tab = makeTab({
+      draftJson: JSON.stringify({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "草稿内容" }],
+          },
+        ],
+      }),
+      draftAttachments: [draft],
+    });
+    wrapper = mount(ComposerBar, {
+      props: { tab, active: true },
+    });
+    await flushPromises();
+    const ed = getEditor();
+    const text = ed.getText();
+    expect(text).toContain("草稿内容");
+    expect(store.attachments).toHaveLength(1);
+    expect(store.attachments[0]).toMatchObject({
+      type: "mention",
+      path: "D:/repo/src/a.cs",
+    });
+  });
 });

@@ -19,7 +19,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import ResourceView from "../ResourceView.vue";
-import { store } from "../../composables/useCodex";
+import { store, __resetSessionTabsForTest } from "../../composables/useCodex";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
@@ -246,6 +246,41 @@ describe("ResourceView 文件树", () => {
     mockFs();
     __resetSessionFsForTest();
     __resetEditorTabsForTest();
+    __resetSessionTabsForTest();
+    // 默认存在一个活动会话标签：附件入口可见（隐藏场景由专门用例覆盖）
+    store.sessionTabs.push({
+      id: "s1",
+      kind: "chat",
+      title: "会话",
+      icon: "chat",
+      threadId: null,
+      name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
+      origin: null,
+      workspace: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loading: false,
+      newChatWorkspace: null,
+      interactions: [],
+    });
+    store.activeSessionId = "s1";
   });
 
   afterEach(() => {
@@ -637,6 +672,24 @@ describe("ResourceView 文件树", () => {
       workspace: rootPath,
       dir: srcDir.path,
     });
+    wrapper.unmount();
+  });
+
+  it("无活动会话标签时：隐藏「添加为会话附件」菜单项与行 @ 按钮", async () => {
+    __resetSessionTabsForTest();
+    const wrapper = await mountPanel();
+    // 目录右键菜单不含附件项
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    expect(labels).not.toContain("添加为会话附件");
+    // 文件右键菜单不含附件项
+    await openRowCtx(wrapper, ".resource-row.resource-file");
+    const fileLabels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(fileLabels).not.toContain("添加为会话附件");
+    // 行悬停 @ 按钮隐藏
+    expect(wrapper.find(".resource-add").exists()).toBe(false);
     wrapper.unmount();
   });
 

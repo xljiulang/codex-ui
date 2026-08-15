@@ -26,11 +26,11 @@ describe("PermissionMenu 权限模式菜单", () => {
     expect(w.emitted("close")).toBeTruthy();
   });
 
-  it("回合进行中点击无效（兜底）", async () => {
+  it("回合进行中仍可切换权限模式", async () => {
     store.turnActive = true;
     const w = mount(PermissionMenu);
     await w.findAll(".mode-menu-item")[1].trigger("click");
-    expect(store.permissionMode).toBe("ask-for-approval");
-    expect(w.emitted("close")).toBeUndefined();
+    expect(store.permissionMode).toBe("help-me-approve");
+    expect(w.emitted("close")).toBeTruthy();
   });
 });

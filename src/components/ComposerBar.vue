@@ -6,6 +6,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import type { JSONContent } from "@tiptap/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
@@ -21,6 +22,7 @@ import {
   setToast,
   store,
   toastError,
+  type SessionTab,
 } from "../composables/useCodex";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
@@ -45,6 +47,8 @@ import {
 } from "../lib/richEditor";
 import { taskMode } from "../lib/tasks";
 
+const props = defineProps<{ tab: SessionTab; active?: boolean }>();
+
 const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
   null,
 );
@@ -63,6 +67,47 @@ const debouncedFileSearch = debounce(
 const refsById = ref(new Map<string, UserInput>());
 const rowAttachments = ref<UserInput[]>([]);
 const hasText = ref(false);
+
+/** 草稿保存：把当前输入内容快照到会话标签（仅在有内容时写入） */
+function saveDraftToTab() {
+  if (!props.tab) return;
+  const ed = editor.value;
+  const json = ed ? (ed.getJSON() as JSONContent) : null;
+  const hasDraft =
+    hasText.value ||
+    rowAttachments.value.length > 0 ||
+    refsById.value.size > 0;
+  if (!hasDraft) return;
+  props.tab.draftJson = json ? JSON.stringify(json) : "";
+  props.tab.draftAttachments = [...rowAttachments.value];
+  props.tab.draftRefs = Object.fromEntries(refsById.value.entries());
+}
+
+/** 草稿恢复：标签激活时还原输入内容与内联引用 */
+function restoreDraftFromTab() {
+  const ed = editor.value;
+  if (!ed || !props.tab?.draftJson) return;
+  refsById.value = new Map(Object.entries(props.tab.draftRefs ?? {}));
+  rowAttachments.value = [...(props.tab.draftAttachments ?? [])];
+  try {
+    const json = JSON.parse(props.tab.draftJson) as JSONContent;
+    ed.commands.setContent(json);
+  } catch {
+    // 草稿损坏时静默丢弃，保留空输入
+  }
+}
+
+// 标签激活状态：激活时恢复草稿，切走前快照
+watch(
+  () => props.active,
+  (v) => {
+    if (v) {
+      restoreDraftFromTab();
+    } else {
+      saveDraftToTab();
+    }
+  },
+);
 
 // 粘贴的截图/位图最大字节数（原路径文件不受限）
 const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -140,6 +185,7 @@ const editor = useEditor({
     syncAfterChange();
     exposeEditor();
     exposeAddAttachment();
+    if (props.active) restoreDraftFromTab();
   },
   onUpdate: () => {
     syncAfterChange();
@@ -407,6 +453,7 @@ onMounted(() => {
   window.addEventListener("resize", clampComposerHeightOnResize);
   exposeEditor();
   void setupDragDrop();
+  if (props.active) restoreDraftFromTab();
   void nextTick(() => editor.value?.commands.focus());
 });
 watch(editor, () => {
@@ -841,7 +888,6 @@ function onGoalIconClick() {
           <button
             class="perm-chip"
             v-tooltip="'权限模式'"
-            :disabled="store.turnActive"
             @click="toggleMenu('perm')"
           >
             <svg class="chip-icon" viewBox="0 0 24 24">

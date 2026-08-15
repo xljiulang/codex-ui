@@ -566,6 +566,7 @@ function onSessionTabClick(id: string) {
         :key="tab.id"
         v-show="activeTabId === tab.id"
         :tab="tab"
+        :active="activeTabId === tab.id"
       />
       <TextEditorPane v-if="activeFileTab" :tab="activeFileTab" />
       <DiffPane v-else-if="activeDiffTab" :tab="activeDiffTab" />
