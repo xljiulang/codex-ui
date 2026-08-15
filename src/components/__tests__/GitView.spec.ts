@@ -20,7 +20,10 @@ import { listen } from "@tauri-apps/api/event";
 import GitView from "../GitView.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import { settleConfirm, store } from "../../composables/useCodex";
-import { __resetGitChangesForTest } from "../../composables/useGitChanges";
+import {
+  __resetGitChangesForTest,
+  revealGitFile,
+} from "../../composables/useGitChanges";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
@@ -2413,6 +2416,107 @@ describe("GitView 远程分支管理", () => {
       remoteBranch: "origin/main",
     });
     expect(store.toast).toContain("已删除远程分支 origin/main");
+    wrapper.unmount();
+  });
+});
+
+describe("GitView diff 标签联动定位", () => {
+  const revealStatus: GitStatus = {
+    repoWorkspace: rootPath,
+    branch: "main",
+    hasRemote: true,
+    files: [
+      {
+        path: "src/b.txt",
+        status: "untracked",
+        staged: false,
+        worktree: true,
+      },
+      {
+        path: "src/deep/c.txt",
+        status: "modified",
+        staged: true,
+        worktree: false,
+      },
+    ],
+  };
+
+  function mockRevealRepo() {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(revealStatus);
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+  }
+
+  function dirRow(wrapper: ReturnType<typeof mountGitView>, name: string) {
+    return wrapper
+      .findAll(".git-dir")
+      .find((r) => r.find(".git-dir-name").text() === name)!;
+  }
+
+  beforeEach(() => {
+    store.threads = [];
+    store.server.startupWorkspace = rootPath;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.confirm = null;
+    mockedInvoke.mockClear();
+    __resetGitChangesForTest();
+  });
+
+  it("reveal 后匹配行带 selected、祖先目录展开、scrollIntoView 被调用", async () => {
+    mockRevealRepo();
+    const scrollSpy = vi
+      .spyOn(Element.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const wrapper = mountGitView({
+      props: { active: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    // 先折叠 src，验证 reveal 会重新展开祖先目录
+    await dirRow(wrapper, "src").trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-git-path="src/b.txt"]').exists()).toBe(false);
+
+    revealGitFile(rootPath, "src/b.txt");
+    await flushPromises();
+    const row = wrapper.find('[data-git-path="src/b.txt"]');
+    expect(row.exists()).toBe(true);
+    expect(row.classes()).toContain("selected");
+    expect(scrollSpy).toHaveBeenCalled();
+    scrollSpy.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("仓库不匹配（workspace 不同）不选中", async () => {
+    mockRevealRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    revealGitFile("D:\\other", "src/b.txt");
+    await flushPromises();
+    expect(wrapper.findAll(".git-tree-row.selected")).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("文件在暂存区时回退匹配", async () => {
+    mockRevealRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    revealGitFile(rootPath, "src/deep/c.txt");
+    await flushPromises();
+    const row = wrapper.find('[data-git-path="src/deep/c.txt"]');
+    expect(row.exists()).toBe(true);
+    expect(row.classes()).toContain("selected");
     wrapper.unmount();
   });
 });

@@ -77,6 +77,11 @@ import {
   settleConfirm,
   store,
 } from "../../composables/useCodex";
+import { ICON_TERMINAL } from "../../lib/icons";
+import {
+  __resetGitChangesForTest,
+  gitRevealTarget,
+} from "../../composables/useGitChanges";
 
 const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
@@ -134,6 +139,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     __resetEditorTabsForTest();
     __resetSessionFsForTest();
     __resetSessionTabsForTest();
+    __resetGitChangesForTest();
     // 会话标签 fixture：多会话标签下 EditorPane 的会话标签来自 store.sessionTabs
     store.sessionTabs.push({
       id: "sess-1",
@@ -175,18 +181,67 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("零会话零文件标签时：空状态显示 Logo 与提示文案（无新建按钮），标签栏保留「+」", () => {
+  it("零会话零文件标签时：空状态显示 Logo 与提示文案（无新建按钮），无活动标签「+」隐藏", () => {
     store.sessionTabs.splice(0, store.sessionTabs.length);
     store.activeSessionId = null;
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
-    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
     expect(wrapper.find(".no-session-state").exists()).toBe(true);
     expect(wrapper.find(".no-session-state .empty-logo").exists()).toBe(true);
     expect(wrapper.find(".no-session-state").text()).toContain(
       "当前还没有任何打开的项",
     );
     expect(wrapper.find(".no-session-state .btn").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("有活动标签时「+」可见，点击弹出「新建会话 / 新建终端」菜单（带图标）", async () => {
+    store.sessionTabs[0].workspace = "D:/repo";
+    const wrapper = mountPane();
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
+    await wrapper.find(".editor-tab-add").trigger("click");
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "新建会话",
+      "新建终端",
+    ]);
+    expect(items[0].find("svg path").attributes("d")).toBe(
+      "M12 2l8.66 5v10L12 22l-8.66-5V7z",
+    );
+    expect(items[1].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
+    wrapper.unmount();
+  });
+
+  it("点击「新建会话」：以活动标签工作区作为新会话目录", async () => {
+    store.sessionTabs[0].workspace = "D:/repo";
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[0].trigger("click");
+    const added = store.sessionTabs.find(
+      (t) => t.threadId === null && t.id !== "sess-1",
+    );
+    expect(added).toBeTruthy();
+    expect(added!.newChatWorkspace).toBe("D:/repo");
+    wrapper.unmount();
+  });
+
+  it("点击「新建终端」：以活动标签工作区启动终端", async () => {
+    store.sessionTabs[0].workspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await settle();
+    const spawn = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "terminal_spawn",
+    );
+    expect(spawn).toBeTruthy();
+    expect((spawn![1] as { workspace?: string }).workspace).toBe("D:/repo");
     wrapper.unmount();
   });
 
@@ -750,6 +805,27 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
     ).not.toContain("在资源管理器中打开");
+    wrapper.unmount();
+  });
+
+  it("激活 diff 标签：gitRevealTarget 指向该标签的 workspace/path", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "build_diff_preview") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openDiffTab({
+      path: "a.txt",
+      kind: "modify",
+      diff: "diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-x\n+y",
+      workspace: root,
+    });
+    await settle();
+    expect(gitRevealTarget.value).toMatchObject({
+      workspace: root,
+      path: "a.txt",
+    });
+    expect(typeof gitRevealTarget.value?.seq).toBe("number");
     wrapper.unmount();
   });
 

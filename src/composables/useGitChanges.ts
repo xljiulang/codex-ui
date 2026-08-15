@@ -12,6 +12,22 @@ export const gitStatus = ref<GitStatus | null>(null);
 export const gitErrorMsg = ref("");
 /** 初始化进行中（防重复点击） */
 export const gitInitBusy = ref(false);
+/**
+ * 外部（EditorPane 激活 diff 标签）请求在 Git 面板中定位某变更文件：
+ * workspace=仓库根，path=文件相对/绝对路径；seq 自增保证重复定位也触发 watch。
+ */
+export const gitRevealTarget = ref<{
+  workspace: string;
+  path: string;
+  seq: number;
+} | null>(null);
+
+let revealSeq = 0;
+
+/** 请求 Git 面板定位并高亮某变更文件（与资源树定位并行，由 GitView 消费） */
+export function revealGitFile(workspace: string, path: string): void {
+  gitRevealTarget.value = { workspace, path, seq: ++revealSeq };
+}
 
 /** 事件冷却窗口：监听事件距上次刷新不足该时长时忽略，兜底防自激刷新 */
 const REFRESH_COOLDOWN_MS = 1000;
@@ -152,6 +168,8 @@ export function __resetGitChangesForTest() {
   gitStatus.value = null;
   gitErrorMsg.value = "";
   gitInitBusy.value = false;
+  gitRevealTarget.value = null;
+  revealSeq = 0;
   unlistenGitEvent?.();
   unlistenGitEvent = null;
   watcherStarted = false;

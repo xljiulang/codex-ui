@@ -19,6 +19,7 @@ import {
   closeTabsToLeft,
   closeTabsToRight,
   discardTabAndClose,
+  openTerminalTab,
   pendingCloseId,
   saveTabAndClose,
   tabs,
@@ -35,6 +36,7 @@ import {
   revealAbsPathInTree,
   revealInExplorer,
 } from "../composables/useSessionFs";
+import { revealGitFile } from "../composables/useGitChanges";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
@@ -44,6 +46,7 @@ import {
   setToast,
   store,
   switchSessionTab,
+  workspace,
   type SessionTab,
 } from "../composables/useCodex";
 import { isTabWorking, TabIcon, TabKind } from "../lib/tabs";
@@ -321,6 +324,9 @@ watch(
  */
 watch(activeTab, (tab) => {
   store.workspace = tab ? tab.workspace : null;
+  if (tab && tab.kind === TabKind.Diff) {
+    revealGitFile(tab.workspace, tab.path);
+  }
   if (!tab || tab.kind === TabKind.Terminal) return;
   void revealAbsPathInTree(tabAbsPath(tab));
 });
@@ -341,9 +347,35 @@ watch(activeTabId, (id) => {
   }
 });
 
-/** 标签栏末尾「+」：快速新建空会话标签 */
-function onAddSessionTab() {
-  void newEmptyChat();
+/** 会话六边形 Logo 路径（「新建会话」菜单项图标） */
+const ICON_SESSION = "M12 2l8.66 5v10L12 22l-8.66-5V7z";
+
+/** 活动标签的工作区：活动编辑器标签取 tab.workspace，活动会话标签取记录 workspace */
+const activeWorkspace = computed((): string | null => {
+  const t = activeTab.value;
+  if (t) return t.workspace;
+  const s = store.sessionTabs.find((x) => x.id === store.activeSessionId);
+  return s?.workspace ?? null;
+});
+
+/** 是否存在激活状态的标签（无活动标签时隐藏「+」） */
+const hasActiveTab = computed(() => activeTabId.value !== "");
+
+/** 标签栏末尾「+」：选择新建会话或新建终端，均使用活动标签工作区启动 */
+function openAddMenu(e: MouseEvent) {
+  const ws = activeWorkspace.value || workspace.value || "";
+  openCtx(e, [
+    {
+      label: "新建会话",
+      icon: ICON_SESSION,
+      action: () => void newEmptyChat(ws || null),
+    },
+    {
+      label: "新建终端",
+      icon: ICON_TERMINAL,
+      action: () => void openTerminalTab(ws),
+    },
+  ]);
 }
 
 /** 点击会话标签：先切编辑器视图，再同步会话状态（已激活时也要回到对话视图） */
@@ -486,10 +518,11 @@ function onSessionTabClick(id: string) {
             </button>
           </button>
           <button
+            v-if="hasActiveTab"
             class="editor-tab-add"
-            aria-label="新建会话标签"
-            v-tooltip="'新建会话'"
-            @click="onAddSessionTab()"
+            aria-label="新建会话或终端"
+            v-tooltip="'新建会话 / 新建终端'"
+            @click="openAddMenu($event)"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6z" />

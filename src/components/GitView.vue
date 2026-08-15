@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, setToast, toastError } from "../composables/useCodex";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
   gitErrorMsg,
   gitInitBusy,
+  gitRevealTarget,
   gitState,
   gitStatus,
   initGitRepo,
@@ -47,12 +48,15 @@ const props = defineProps<{ active: boolean }>();
 const gitAvailable = ref(true);
 const branchLabel = computed(() => gitStatus.value?.branch ?? "");
 const repoWorkspace = computed(() => gitStatus.value?.repoWorkspace ?? "");
+/** 当前在 Git 面板中高亮的变更文件（相对仓库根路径） */
+const selectedGitPath = ref("");
 
 watch(
   () => props.active,
   (v) => {
     setGitChangesActive(v);
     if (v) void checkGitAvailable();
+    if (v && selectedGitPath.value) attemptReveal();
   },
   { immediate: true },
 );
@@ -253,6 +257,48 @@ const stagedRows = computed(() => flattenRows(buildGitTree(stagedFiles.value)));
 const stagedCount = computed(() => stagedFiles.value.length);
 /** 更改总数（每个文件计一次，含已暂存 + 工作区 + 未跟踪） */
 const changeCount = computed(() => gitStatus.value?.files.length ?? 0);
+
+/** 归一化目标为相对仓库根路径；仓库不匹配返回 null */
+function normGitRel(target: { workspace: string; path: string }): string | null {
+  const root = repoWorkspace.value;
+  if (!root) return null;
+  if (target.workspace && target.workspace !== root) return null;
+  const rootNorm = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  let p = target.path.replace(/\\/g, "/");
+  if (p.startsWith(rootNorm + "/")) {
+    p = p.slice(rootNorm.length + 1);
+  }
+  return p || null;
+}
+
+/** 在 Git 面板中定位并高亮目标变更文件：展开祖先目录、滚动到可见 */
+function attemptReveal() {
+  const target = gitRevealTarget.value;
+  if (!target) return;
+  const rel = normGitRel(target);
+  if (rel === null) return;
+  // 在完整文件列表中查找（折叠的祖先目录不影响定位），变更区优先、暂存区次之
+  const match =
+    worktreeFiles.value.find((f) => f.path === rel) ??
+    stagedFiles.value.find((f) => f.path === rel);
+  if (!match) return;
+  const parts = rel.split("/");
+  let acc = "";
+  for (let i = 0; i < parts.length - 1; i++) {
+    acc = acc ? `${acc}/${parts[i]}` : parts[i];
+    collapsedDirs.delete(acc);
+  }
+  selectedGitPath.value = rel;
+  void nextTick(() => {
+    document
+      .querySelector<HTMLElement>(`[data-git-path="${CSS.escape(rel)}"]`)
+      ?.scrollIntoView({ block: "center" });
+  });
+}
+
+// diff 标签激活请求 / git 状态晚加载：定位并高亮对应变更行
+watch([gitRevealTarget, gitStatus], () => attemptReveal());
+
 const canCommit = computed(
   () =>
     !commitBusy.value &&
@@ -1371,7 +1417,12 @@ async function restoreDir(node: GitDirNode) {
               v-for="row in worktreeRows"
               :key="`changes:${row.kind}:${row.relPath}`"
               class="git-tree-row"
-              :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
+              :class="{
+                'git-dir': row.kind === 'dir',
+                'git-file': row.kind === 'file',
+                selected: row.kind === 'file' && row.relPath === selectedGitPath,
+              }"
+              :data-git-path="row.kind === 'file' ? row.relPath : undefined"
               :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
               @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
               @contextmenu="
@@ -1489,7 +1540,12 @@ async function restoreDir(node: GitDirNode) {
               v-for="row in stagedRows"
               :key="`staged:${row.kind}:${row.relPath}`"
               class="git-tree-row"
-              :class="row.kind === 'dir' ? 'git-dir' : 'git-file'"
+              :class="{
+                'git-dir': row.kind === 'dir',
+                'git-file': row.kind === 'file',
+                selected: row.kind === 'file' && row.relPath === selectedGitPath,
+              }"
+              :data-git-path="row.kind === 'file' ? row.relPath : undefined"
               :style="{ paddingLeft: 8 + row.depth * 14 + 'px' }"
               @click="row.kind === 'dir' ? toggleDirRow(row) : openDiff(row.file)"
               @contextmenu="
