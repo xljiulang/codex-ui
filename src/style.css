@@ -4730,6 +4730,13 @@ body.resizing-editor {
   fill: currentColor;
 }
 
+.ctx-menu-item-img {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
 .ctx-menu-item:hover {
   background: rgba(var(--accent-rgb), 0.1);
   color: var(--text-bright);

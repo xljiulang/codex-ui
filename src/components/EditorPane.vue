@@ -32,6 +32,7 @@ import {
 import {
   ensureEntryIcons,
   iconFor,
+  revealAbsPathInTree,
   revealInExplorer,
 } from "../composables/useSessionFs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
@@ -179,11 +180,20 @@ function titleTooltip(tab: EditorTab): string {
   return tab.title !== path ? path : "";
 }
 
+/** 文件型标签（file/preview/diff）的磁盘绝对路径：兼容相对路径与工作区外绝对路径 */
+function tabAbsPath(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): string {
+  const root =
+    tab.kind === "file"
+      ? tab.root
+      : tab.kind === "diff"
+        ? tab.workspaceRoot
+        : tab.root;
+  return /^[A-Za-z]:[\\/]/.test(tab.path) ? tab.path : joinFsPath(root, tab.path);
+}
+
 /** 文件型标签（file/preview）的磁盘绝对路径：兼容工作区内绝对路径与外部文件（root=父目录+文件名） */
 function fileTabAbsPath(tab: FileEditorTab | PreviewEditorTab): string {
-  return /^[A-Za-z]:[\\/]/.test(tab.path)
-    ? tab.path
-    : joinFsPath(tab.root, tab.path);
+  return tabAbsPath(tab);
 }
 
 /**
@@ -276,6 +286,12 @@ watch(
   },
   { immediate: true },
 );
+
+/** Tab 激活：带文件路径的标签（文件/预览/Diff）在资源树中同步选中并展开所在目录 */
+watch(activeTab, (tab) => {
+  if (!tab || tab.kind === "chat" || tab.kind === "terminal") return;
+  void revealAbsPathInTree(tabAbsPath(tab));
+});
 </script>
 
 <template>

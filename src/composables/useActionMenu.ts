@@ -4,6 +4,8 @@ import { clampMenuPos } from "../lib/ctxMenu";
 export interface CtxItem {
   label: string;
   icon?: string;
+  /** 位图图标（如系统文件图标 PNG data URI）；存在时优先于 icon 渲染 */
+  img?: string;
   danger?: boolean;
   action: () => void;
 }

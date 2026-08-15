@@ -106,10 +106,13 @@ const docPdf: FsEntry = {
 };
 /** 右键菜单剪贴板文件源（默认含文件，粘贴可见；置空验证隐藏） */
 let clipboardFiles: string[] = [];
+/** 「新建文本文件」菜单系统图标（默认可用；置 null 验证回退 SVG） */
+let txtIconUri: string | null = "data:image/png;base64,TXTICON";
 
 function mockFs() {
   mockedInvoke.mockImplementation((cmd, args) => {
     if (cmd === "clipboard_file_paths") return Promise.resolve(clipboardFiles);
+    if (cmd === "session_fs_icon_for_ext") return Promise.resolve(txtIconUri);
     if (cmd === "session_fs_metadata") {
       const path = (args as { path?: string }).path;
       if (path === aTxt.path) return Promise.resolve(aTxt);
@@ -188,6 +191,7 @@ describe("ResourceView 文件树", () => {
     store.attachments = [];
     store.toast = "";
     clipboardFiles = [aTxt.path];
+    txtIconUri = "data:image/png;base64,TXTICON";
     mockedInvoke.mockClear();
     mockedOpenNewSession.mockClear();
     mockFs();
@@ -307,9 +311,19 @@ describe("ResourceView 文件树", () => {
     const wrapper = await mountPanel();
     await flushPromises();
 
-    const img = wrapper.find(".resource-row.resource-file .resource-icon-img");
-    expect(img.exists()).toBe(true);
-    expect(img.attributes("src")).toBe("data:image/png;base64,ICON");
+    // .txt 行复用「新建文本文件」菜单预取的系统 .txt 图标缓存
+    const txtImg = wrapper.find(".resource-row.resource-file .resource-icon-img");
+    expect(txtImg.exists()).toBe(true);
+    expect(txtImg.attributes("src")).toBe("data:image/png;base64,TXTICON");
+
+    // 展开 src 后其它文件走 session_fs_icons 批量取图
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
+    await flushPromises();
+    const tsImg = wrapper
+      .findAll(".resource-row.resource-file")[1]
+      .find(".resource-icon-img");
+    expect(tsImg.exists()).toBe(true);
+    expect(tsImg.attributes("src")).toBe("data:image/png;base64,ICON");
     expect(
       wrapper.find(".resource-row.resource-dir .resource-icon svg").exists(),
     ).toBe(true);
@@ -495,6 +509,44 @@ describe("ResourceView 文件树", () => {
       "在此打开终端",
       "在资源管理器中打开",
     ]);
+    wrapper.unmount();
+  });
+
+  it("根节点「新建文本文件」菜单使用系统 .txt 图标 img", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-root");
+    const item = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text().trim() === "新建文本文件")!;
+    const img = item.find(".ctx-menu-item-img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe(txtIconUri);
+    expect(item.find("svg").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("目录「新建文本文件」菜单使用系统 .txt 图标 img", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    const item = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text().trim() === "新建文本文件")!;
+    const img = item.find(".ctx-menu-item-img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe(txtIconUri);
+    expect(item.find("svg").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("系统 .txt 图标不可用时「新建文本文件」回退加号 SVG", async () => {
+    txtIconUri = null;
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    const item = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text().trim() === "新建文本文件")!;
+    expect(item.find(".ctx-menu-item-img").exists()).toBe(false);
+    expect(item.find("svg").exists()).toBe(true);
     wrapper.unmount();
   });
 

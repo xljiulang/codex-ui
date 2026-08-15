@@ -28,6 +28,7 @@ import {
   selectedPath,
   sessionRoot,
   setSessionFsActive,
+  textFileMenuIcon,
   toggleDir,
   treeRows,
   loadingRoot,
@@ -130,6 +131,7 @@ async function openRootMenu(e: MouseEvent) {
     {
       label: "新建文本文件",
       icon: ICON_PLUS,
+      img: textFileMenuIcon(),
       action: () => void createTextFile(root.path),
     },
     ...(canPaste
@@ -160,6 +162,7 @@ async function openDirMenu(entry: FsEntry, e: MouseEvent) {
     {
       label: "新建文本文件",
       icon: ICON_PLUS,
+      img: textFileMenuIcon(),
       action: () => void createTextFile(entry.path),
     },
     { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
@@ -554,7 +557,14 @@ const deleteLabel = computed(() => {
         :class="{ danger: it.danger }"
         @click="it.action(); ctxMenu = null"
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
+        <img
+          v-if="it.img"
+          class="ctx-menu-item-img"
+          :src="it.img"
+          alt=""
+          draggable="false"
+        />
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
           <path :d="it.icon" />
         </svg>
         <span>{{ it.label }}</span>

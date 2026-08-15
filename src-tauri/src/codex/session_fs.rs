@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use crate::codex::path_util::{clean_path, is_inside_path, norm_key};
-use crate::codex::file_icon::icon_data_uri;
+use crate::codex::file_icon::{icon_data_uri, icon_data_uri_for_ext};
 
 /// 会话资源条目（camelCase 序列化，供前端直接使用）
 #[derive(Debug, Clone, Serialize)]
@@ -694,6 +694,33 @@ pub async fn session_fs_icons(
     .await
 }
 
+/// 扩展名合法性：以 . 开头、总长 2..=16、仅含字母数字、点、下划线与连字符
+fn validate_ext(ext: &str) -> Result<(), String> {
+    if !ext.starts_with('.') || ext.len() < 2 || ext.len() > 16 {
+        return Err("扩展名必须以 . 开头且长度不超过 16 字符".into());
+    }
+    if !ext[1..]
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err("扩展名包含非法字符".into());
+    }
+    Ok(())
+}
+
+/// 按扩展名提取系统文件图标（文件无需存在）：构造探测文件名直接调用
+/// SHGetFileInfo，其对不存在的路径仍按扩展名关联返回图标，不触碰文件系统。
+/// 用于右键菜单等按类型取图场景；失败返回 None（前端回退内置 SVG）。
+fn icon_for_ext_impl(ext: &str) -> Result<Option<String>, String> {
+    validate_ext(ext)?;
+    icon_data_uri_for_ext(ext, 16)
+}
+
+#[tauri::command]
+pub async fn session_fs_icon_for_ext(ext: String) -> Result<Option<String>, String> {
+    run_blocking(60, move || icon_for_ext_impl(&ext)).await
+}
+
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
     p.strip_prefix(root)
         .map(|rel| {
@@ -848,6 +875,42 @@ mod tests {
         );
         assert!(out[1].data_uri.is_none());
         let _ = tmp;
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn icon_for_ext_returns_txt_system_icon() {
+        // 不存在的路径仍按扩展名返回系统 TXT 图标
+        let uri = icon_for_ext_impl(".txt").unwrap();
+        assert!(
+            uri.as_deref()
+                .unwrap_or("")
+                .starts_with("data:image/png;base64,")
+        );
+    }
+
+    #[test]
+    fn icon_for_ext_validates_input() {
+        assert!(validate_ext(".txt").is_ok());
+        assert!(validate_ext(".TXT").is_ok());
+        assert!(validate_ext(".tar.gz").is_ok());
+        assert!(validate_ext(".a_b-c").is_ok());
+        // 无点/空/过短
+        assert!(validate_ext("txt").is_err());
+        assert!(validate_ext("").is_err());
+        assert!(validate_ext(".").is_err());
+        // 非法字符
+        assert!(validate_ext(".tx t").is_err());
+        assert!(validate_ext(".tx\t").is_err());
+        assert!(validate_ext(".a/b").is_err());
+        assert!(validate_ext(".a\\b").is_err());
+        assert!(validate_ext(".\u{4e2d}").is_err());
+        // 超长
+        assert!(validate_ext(&format!(".{}", "a".repeat(20))).is_err());
+        assert!(validate_ext(&format!(".{}", "a".repeat(15))).is_ok());
+        // 非法输入直接 Err，不触碰取图标逻辑
+        assert!(icon_for_ext_impl("txt").is_err());
+        assert!(icon_for_ext_impl("").is_err());
     }
 
     #[test]

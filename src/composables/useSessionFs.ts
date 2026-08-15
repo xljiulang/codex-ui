@@ -6,7 +6,7 @@ import { openFileTab, openPreviewTab } from "./useEditorTabs";
 import { toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
 import { debounce } from "../lib/debounce";
-import { pathBaseName } from "../lib/format";
+import { pathBaseName, relPathOf } from "../lib/format";
 import { previewTypeForName } from "../lib/preview";
 import {
   flattenResourceTree,
@@ -136,6 +136,35 @@ export async function ensureEntryIcons(
   }
 }
 
+/** 「新建文本文件」菜单系统图标任务：防止重复发起取图请求 */
+let textFileIconTask: Promise<void> | null = null;
+
+/** 按 .txt 扩展名取一次系统图标并写入缓存（复用 ext:.txt 键，.txt 文件行/标签同步受益） */
+export async function ensureTextFileIcon(): Promise<void> {
+  const root = sessionRoot.value;
+  if (!root || iconCache.has("ext:.txt")) return;
+  if (textFileIconTask) return textFileIconTask;
+  textFileIconTask = (async () => {
+    try {
+      const uri = await invoke<string | null>("session_fs_icon_for_ext", {
+        ext: ".txt",
+      });
+      setIconCache("ext:.txt", uri ?? null);
+    } catch {
+      // 取不到/失败：缓存 null 不再重试，菜单回退内置 SVG
+      setIconCache("ext:.txt", null);
+    } finally {
+      textFileIconTask = null;
+    }
+  })();
+  return textFileIconTask;
+}
+
+/** 右键菜单「新建文本文件」图标：缓存未就绪/不可用时返回 undefined（调用方回退 SVG） */
+export function textFileMenuIcon(): string | undefined {
+  return iconCache.get("ext:.txt") ?? undefined;
+}
+
 /** 兜底：从后端直接取启动工作目录（store 尚未就绪时用） */
 async function resolveFallbackRoot(): Promise<string> {
   try {
@@ -260,24 +289,40 @@ export function clearSearch() {
   searching.value = false;
 }
 
-/** 点击搜索结果：展开祖先目录、清除搜索、选中并滚动到树中该行 */
-export async function revealInTree(entry: FsEntry) {
+/**
+ * 按绝对路径在树中定位：路径不在当前工作区内（大小写不敏感边界判定）视为
+ * 「匹配不上」直接跳过；匹配时逐级展开祖先目录、清除搜索、选中并滚动到可见。
+ * expandTarget=true 时目标目录自身也展开（搜索结果点击目录用）。
+ */
+async function revealAbsPath(absPath: string, expandTarget: boolean): Promise<void> {
   const root = sessionRoot.value;
-  if (!root) return;
-  const parts = entry.relPath.split("/").filter(Boolean);
-  const dirs = entry.isDir ? parts : parts.slice(0, -1);
+  if (!root || !absPath) return;
+  const norm = absPath.replace(/\//g, "\\");
+  if (!isPathUnderRoot(root, norm)) return;
+  const parts = relPathOf(root, norm).replace(/\\/g, "/").split("/").filter(Boolean);
+  const dirs = expandTarget ? parts : parts.slice(0, -1);
   let cur = root;
   for (const part of dirs) {
     cur = joinFsPath(cur, part);
     expanded.add(cur);
     await loadDir(cur);
   }
-  selectedPath.value = entry.path;
+  selectedPath.value = norm;
   clearSearch();
   await nextTick();
   document
-    .querySelector(`[data-fs-path="${CSS.escape(entry.path)}"]`)
+    .querySelector(`[data-fs-path="${CSS.escape(norm)}"]`)
     ?.scrollIntoView({ block: "center" });
+}
+
+/** Tab 激活同步入口：文件/预览/Diff 标签带绝对路径时调用；工作区外路径自动跳过 */
+export async function revealAbsPathInTree(absPath: string): Promise<void> {
+  await revealAbsPath(absPath, false);
+}
+
+/** 点击搜索结果：展开祖先目录、清除搜索、选中并滚动到树中该行 */
+export async function revealInTree(entry: FsEntry) {
+  await revealAbsPath(entry.path, entry.isDir);
 }
 
 export function copyEntry(entry: FsEntry) {
@@ -523,6 +568,8 @@ async function activate() {
     // 兜底结果回写全局，让头部等其它读取点保持一致
     store.server.workspace = root;
   }
+  // 预取「新建文本文件」菜单的系统 .txt 图标（写 ext:.txt 缓存）
+  void ensureTextFileIcon();
   if (loadedRoot !== root) {
     loadedRoot = root;
     resetTree();

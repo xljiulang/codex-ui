@@ -24,7 +24,7 @@ pub fn icon_data_uri(path: &Path, size: u32) -> Result<Option<String>, String> {
     let _guard = ICON_LOCK
         .lock()
         .map_err(|_| "图标提取锁异常".to_string())?;
-    unsafe { icon_data_uri_impl(path, size) }
+    unsafe { icon_data_uri_impl(path, size, false) }
 }
 
 #[cfg(not(windows))]
@@ -32,8 +32,29 @@ pub fn icon_data_uri(_path: &Path, _size: u32) -> Result<Option<String>, String>
     Ok(None)
 }
 
+/// 按扩展名提取系统文件图标（文件无需存在）：配合 SHGFI_USEFILEATTRIBUTES，
+/// Shell 按传入属性而非磁盘文件解析类型关联，用于菜单等按类型取图场景。
 #[cfg(windows)]
-unsafe fn icon_data_uri_impl(path: &Path, size: u32) -> Result<Option<String>, String> {
+pub fn icon_data_uri_for_ext(ext: &str, size: u32) -> Result<Option<String>, String> {
+    let probe = format!("__codex_icon_probe{ext}");
+    let size = if size == 0 { DEFAULT_ICON_SIZE } else { size };
+    let _guard = ICON_LOCK
+        .lock()
+        .map_err(|_| "图标提取锁异常".to_string())?;
+    unsafe { icon_data_uri_impl(Path::new(&probe), size, true) }
+}
+
+#[cfg(not(windows))]
+pub fn icon_data_uri_for_ext(_ext: &str, _size: u32) -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(windows)]
+unsafe fn icon_data_uri_impl(
+    path: &Path,
+    size: u32,
+    use_file_attributes: bool,
+) -> Result<Option<String>, String> {
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
     // SHGetFileInfo 需要线程内 COM 初始化；MTA 足够且适合阻塞线程。
@@ -45,7 +66,7 @@ unsafe fn icon_data_uri_impl(path: &Path, size: u32) -> Result<Option<String>, S
         return Err(format!("COM 初始化失败: {hr:?}"));
     }
 
-    let result = shell_file_icon_data_uri(path, size);
+    let result = shell_file_icon_data_uri(path, size, use_file_attributes);
     if initialized {
         windows::Win32::System::Com::CoUninitialize();
     }
@@ -54,13 +75,18 @@ unsafe fn icon_data_uri_impl(path: &Path, size: u32) -> Result<Option<String>, S
 
 /// 通过 SHGetFileInfoW 取文件类型图标 → RGBA → PNG → data URI。
 #[cfg(windows)]
-unsafe fn shell_file_icon_data_uri(path: &Path, size: u32) -> Result<Option<String>, String> {
+unsafe fn shell_file_icon_data_uri(
+    path: &Path,
+    size: u32,
+    use_file_attributes: bool,
+) -> Result<Option<String>, String> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
     use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON,
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_FLAGS, SHGFI_ICON, SHGFI_SMALLICON,
+        SHGFI_USEFILEATTRIBUTES,
     };
     use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
 
@@ -71,7 +97,13 @@ unsafe fn shell_file_icon_data_uri(path: &Path, size: u32) -> Result<Option<Stri
         FILE_ATTRIBUTE_NORMAL,
         Some(&mut info),
         std::mem::size_of::<SHFILEINFOW>() as u32,
-        SHGFI_ICON | SHGFI_SMALLICON,
+        SHGFI_ICON
+            | SHGFI_SMALLICON
+            | if use_file_attributes {
+                SHGFI_USEFILEATTRIBUTES
+            } else {
+                SHGFI_FLAGS(0)
+            },
     );
     if ret == 0 || info.hIcon.is_invalid() {
         return Ok(None);
@@ -313,5 +345,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let missing = tmp.path().join("no_such_file.xyz");
         assert!(icon_data_uri(&missing, 16).unwrap().is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn icon_for_ext_is_png() {
+        let uri = icon_data_uri_for_ext(".txt", 16)
+            .unwrap()
+            .expect("应按扩展名取到 txt 图标");
+        assert!(uri.starts_with("data:image/png;base64,"));
+        assert!(png_magic(&uri));
     }
 }

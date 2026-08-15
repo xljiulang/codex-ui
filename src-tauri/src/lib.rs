@@ -90,6 +90,7 @@ pub fn run() {
             codex::session_fs::session_fs_probe_text,
             codex::session_fs::session_fs_read_bytes,
             codex::session_fs::session_fs_icons,
+            codex::session_fs::session_fs_icon_for_ext,
             codex::pdf_export::export_markdown_pdf,
             codex::terminal::terminal_spawn,
             codex::terminal::terminal_write,

@@ -66,7 +66,12 @@ import {
   type TerminalEditorTab,
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
-import { __resetSessionFsForTest } from "../../composables/useSessionFs";
+import {
+  __resetSessionFsForTest,
+  expanded,
+  searchTerm,
+  selectedPath,
+} from "../../composables/useSessionFs";
 import { settleConfirm, store } from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -1197,6 +1202,113 @@ describe("EditorPane 左侧多标签编辑区", () => {
     t.error = "spawn boom";
     await nextTick();
     expect(termEl().find(".editor-tab-run").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("激活文件标签：资源树同步选中并展开所在目录", async () => {
+    store.currentThreadId = null;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.server.workspace = root;
+    const mainTs = root + "\\src\\main.ts";
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "session_fs_icon_for_ext") return Promise.resolve(null);
+      if (cmd === "session_fs_list") {
+        const dir = (args as { dir?: string }).dir;
+        if (dir === root + "\\src") {
+          return Promise.resolve([
+            {
+              name: "main.ts",
+              path: mainTs,
+              relPath: "src/main.ts",
+              isDir: false,
+              size: 1,
+              modifiedAtMs: 0,
+              createdAtMs: 0,
+              childCount: null,
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, mainTs);
+    await settle();
+    expect(selectedPath.value).toBe(mainTs);
+    expect(expanded.has(root + "\\src")).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_list", {
+      root,
+      dir: root + "\\src",
+    });
+    wrapper.unmount();
+  });
+
+  it("激活 Diff 标签：同样同步资源树定位", async () => {
+    store.currentThreadId = null;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.server.workspace = root;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "build_diff_preview") return Promise.resolve([]);
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "session_fs_icon_for_ext") return Promise.resolve(null);
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openDiffTab({
+      path: "src/main.ts",
+      kind: "modify",
+      diff: "diff",
+      workspace_root: root,
+    });
+    await settle();
+    expect(selectedPath.value).toBe(root + "\\src\\main.ts");
+    expect(expanded.has(root + "\\src")).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("工作区外文件标签激活：不改变资源树选中", async () => {
+    store.currentThreadId = null;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.server.workspace = root;
+    const outside = "D:\\outside";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "session_fs_icon_for_ext") return Promise.resolve(null);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(outside, "f.txt");
+    await settle();
+    expect(selectedPath.value).toBe("");
+    wrapper.unmount();
+  });
+
+  it("搜索态下激活文件标签：退出搜索并定位到树", async () => {
+    store.currentThreadId = null;
+    store.currentThreadCwd = null;
+    store.newChatCwd = null;
+    store.server.workspace = root;
+    searchTerm.value = "main";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "session_fs_icon_for_ext") return Promise.resolve(null);
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, root + "\\a.txt");
+    await settle();
+    expect(searchTerm.value).toBe("");
+    expect(selectedPath.value).toBe(root + "\\a.txt");
     wrapper.unmount();
   });
 });
