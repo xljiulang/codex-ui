@@ -10,13 +10,12 @@ import {
   type GitStatus,
 } from "../lib/gitChanges";
 import {
+  ICON_CLOSE,
   ICON_DELETE,
   ICON_PLUS,
   ICON_REFRESH,
 } from "../lib/icons";
 
-const ICON_CLOSE =
-  "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 const ICON_MERGE =
   "M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z";
 const ICON_SWITCH =
