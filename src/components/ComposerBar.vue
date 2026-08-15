@@ -26,16 +26,15 @@ import {
 import { useComposerResize } from "../composables/useComposerResize";
 import { useContextUsage } from "../composables/useContextUsage";
 import { useComposerAttachments } from "../composables/useComposerAttachments";
+import { useMentionFileSearch } from "../composables/useMentionFileSearch";
 import type { UserInput } from "../lib/types";
 import { assetUrl } from "../lib/asset";
-import { debounce } from "../lib/debounce";
 import {
   baseName,
   fileMentionSection,
   matchMentionToken,
   MY_REQUEST_MARKER,
   toUserAttachment,
-  type FuzzyFileResult,
 } from "../lib/mention";
 import { permissionMode } from "../lib/permissions";
 import { ICON_CHEVRON_DOWN } from "../lib/icons";
@@ -58,14 +57,14 @@ const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
 );
 const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
 
-// @ 文件引用：模糊搜索结果
-const fileResults = ref<FuzzyFileResult[]>([]);
-const searchingFiles = ref(false);
-let searchSeq = 0;
-const debouncedFileSearch = debounce(
-  (token: string) => void runFileSearch(token),
-  250,
-);
+// @ 文件引用：模糊搜索（防抖/序号失效/上限 50）
+const {
+  fileResults,
+  searchingFiles,
+  scheduleFileSearch,
+  resetFileSearch,
+  cancelFileSearch,
+} = useMentionFileSearch();
 
 // 编辑器内联引用：chip id → 附件（仅插件/技能）；文件与图片走下方附件区
 const refsById = ref(new Map<string, UserInput>());
@@ -231,54 +230,14 @@ function syncAttachments() {
   store.attachments = [...refs, ...rowAttachments.value];
 }
 
-/** 清空 @ 文件搜索状态；invalidate=true 时使进行中的异步结果失效 */
-function resetFileSearch(invalidate = false) {
-  fileResults.value = [];
-  searchingFiles.value = false;
-  debouncedFileSearch.cancel();
-  if (invalidate) searchSeq++;
-}
-
-function scheduleFileSearch(token: string) {
-  if (!token) {
-    resetFileSearch(true);
-    return;
-  }
-  debouncedFileSearch.run(token);
-}
-
-async function runFileSearch(token: string) {
-  const seq = ++searchSeq;
-  const root = mentionRoot();
-  if (!root) {
-    searchingFiles.value = false;
-    return;
-  }
-  searchingFiles.value = true;
-  try {
-    const res = await invoke<{ files?: FuzzyFileResult[] }>("codex_rpc", {
-      method: "fuzzyFileSearch",
-      params: { query: token, roots: [root], cancellationToken: null },
-    });
-    if (seq !== searchSeq) return;
-    fileResults.value = (res.files ?? []).slice(0, 50);
-  } catch (e) {
-    if (seq === searchSeq) {
-      fileResults.value = [];
-      setToast(toastError(e));
-    }
-  } finally {
-    if (seq === searchSeq) searchingFiles.value = false;
-  }
-}
-
-function mentionRoot(): string {
-  return resolveSessionWorkspace();
-}
-
 function refNameOf(a: UserInput): string {
   if (a.type === "mention" || a.type === "skill") return a.name;
   return "";
+}
+
+/** 文件/文件夹选择器的初始目录（与 @ 搜索同一工作区基准） */
+function mentionRoot(): string {
+  return resolveSessionWorkspace();
 }
 
 /** 菜单选中引用：插件/技能删除触发词后插入内联 chip；文件/图片删除触发词后进附件区 */
@@ -435,7 +394,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", clampComposerHeightOnResize);
   if (props.tab) unregisterComposerAddHandler(props.tab.id);
   endComposerResize();
-  debouncedFileSearch.cancel();
+  cancelFileSearch();
   try {
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ =
       undefined;
