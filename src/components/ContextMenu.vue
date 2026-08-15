@@ -30,7 +30,7 @@ const emit = defineEmits<{ close: [] }>();
         draggable="false"
       />
       <svg
-        v-else
+        v-else-if="it.paths || it.icon"
         viewBox="0 0 24 24"
         aria-hidden="true"
         :class="{ 'ctx-session-logo': it.paths }"

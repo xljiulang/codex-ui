@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
 import AppHeader from "./components/AppHeader.vue";
+import ContextMenu from "./components/ContextMenu.vue";
 import EditorPane from "./components/EditorPane.vue";
 import RightPanel from "./components/RightPanel.vue";
 import LoadingScreen from "./components/LoadingScreen.vue";
@@ -37,21 +38,13 @@ onBeforeUnmount(() => {
     <SettingsView v-if="store.showSettings" />
     <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
-    <div
+    <ContextMenu
       v-if="ctxMenu"
-      class="ctx-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
-    >
-      <button
-        v-for="it in ctxMenu.items"
-        :key="it.label"
-        class="ctx-menu-item"
-        @click="it.action(); ctxMenu = null"
-      >
-        {{ it.label }}
-      </button>
-    </div>
+      :items="ctxMenu.items"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      @close="ctxMenu = null"
+    />
   </div>
   <TooltipLayer />
 </template>
