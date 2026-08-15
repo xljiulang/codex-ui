@@ -1383,6 +1383,47 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     expect(store.threads[0].isPinned).toBe(false);
   });
 
+  it("section_move 新方法名：探测返回 thread/section/move 时按其调用", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "codex_pin_capability") {
+        return Promise.resolve({
+          protocol: "section_move",
+          pinnedSectionId: "sec-1",
+          sectionMoveMethod: "thread/section/move",
+        });
+      }
+      if (cmd === "codex_rpc") {
+        return Promise.resolve({ thread: { id: "t1" } });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({
+          data: [
+            {
+              id: "t1",
+              name: "会话",
+              createdAt: 0,
+              recencyAt: 0,
+              isPinned: true,
+            },
+          ],
+          nextCursor: null,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
+
+    await togglePin("t1", true);
+
+    expect(rpcCalls("thread/section/move")).toHaveLength(1);
+    expect(rpcCalls("thread/section/move")[0][1]).toEqual({
+      method: "thread/section/move",
+      params: { threadId: "t1", sectionId: "sec-1" },
+    });
+    expect(rpcCalls("threadSection/move")).toHaveLength(0);
+    expect(store.threads[0].isPinned).toBe(true);
+  });
+
   it("metadata_is_pinned 置顶/取消：旧版走 metadata/update isPinned 布尔", async () => {
     let refreshedPinned = true;
     mockedInvoke.mockImplementation((cmd: string) => {

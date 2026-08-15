@@ -82,10 +82,10 @@ pub async fn codex_title_helper_capability(
 #[tauri::command]
 pub async fn interaction_respond(
     server: State<'_, Server>,
-    request_id: u64,
+    request_id: Value,
     result: Value,
 ) -> Result<(), String> {
-    server.send_response(request_id, result).await
+    server.send_response(&request_id, result).await
 }
 
 #[tauri::command]
@@ -240,13 +240,9 @@ pub async fn goal_clear(
 
 #[tauri::command]
 pub async fn auth_status(server: State<'_, Server>) -> Result<Value, String> {
-    server
-        .request(
-            "getAuthStatus",
-            json!({ "includeToken": false, "refreshToken": false }),
-            None,
-        )
-        .await
+    // `getAuthStatus` 已不在 0.146 协议 schema 中（文档标“兼容旧接口”，实际会
+    // method not found）；改用正式的 `account/read`。前端当前未调用本命令。
+    server.request("account/read", json!({}), None).await
 }
 
 #[tauri::command]

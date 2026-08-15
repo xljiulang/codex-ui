@@ -261,7 +261,10 @@ impl CodexServer {
     }
 
     async fn handle_message(&self, v: Value) {
-        if let Some(id) = v.get("id").and_then(|x| x.as_u64()) {
+        // 协议 RequestId 为 string | number：服务端反向请求可能带字符串 id，
+        // 必须原样保留（我们的请求 id 恒为 u64 数字，应答按数字匹配 pending）。
+        let id = v.get("id").filter(|x| !x.is_null()).cloned();
+        if id.is_some() {
             if v.get("method").and_then(|m| m.as_str()).is_some() {
                 // server -> client request (approval / user input / elicitation)
                 let method = v["method"].as_str().unwrap_or("unknown");
@@ -284,9 +287,11 @@ impl CodexServer {
             } else {
                 Ok(v.get("result").cloned().unwrap_or(Value::Null))
             };
-            let mut inner = self.shared.inner.lock().await;
-            if let Some(tx) = inner.pending.remove(&id) {
-                let _ = tx.send(result);
+            if let Some(numeric_id) = id.and_then(|x| x.as_u64()) {
+                let mut inner = self.shared.inner.lock().await;
+                if let Some(tx) = inner.pending.remove(&numeric_id) {
+                    let _ = tx.send(result);
+                }
             }
             return;
         }
@@ -332,59 +337,81 @@ impl CodexServer {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
 
+        // 服务端入口饱和（-32001）时请求尚未被处理，按协议建议指数退避 + 抖动重试。
+        const MAX_OVERLOAD_RETRIES: u32 = 3;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
-        let (tx, rx) = oneshot::channel();
         let msg = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        {
-            let mut inner = self.shared.inner.lock().await;
-            if !inner.connected {
-                return Err(RpcError {
-                    code: None,
-                    message: "codex app-server 未连接，正在重连，请稍候".into(),
-                });
-            }
-            let stdin = inner
-                .stdin
-                .as_mut()
-                .ok_or_else(|| RpcError {
-                    code: None,
-                    message: "codex app-server stdin 不可用".to_string(),
-                })?;
-            let line = format!("{}\n", msg);
-            stdin
-                .write_all(line.as_bytes())
-                .await
-                .map_err(|e| RpcError {
-                    code: None,
-                    message: format!("写入 app-server 失败: {e}"),
-                })?;
-            inner.pending.insert(id, tx);
-        }
         let t = timeout.unwrap_or(Duration::from_secs(30));
-        tokio::time::timeout(t, rx)
-            .await
-            .map_err(|_| RpcError {
-                code: None,
-                message: format!("请求 {method} 超时"),
-            })?
-            .map_err(|_| RpcError {
-                code: None,
-                message: "codex app-server 连接中断".to_string(),
-            })?
+        let mut attempt: u32 = 0;
+        loop {
+            let (tx, rx) = oneshot::channel();
+            {
+                let mut inner = self.shared.inner.lock().await;
+                if !inner.connected {
+                    return Err(RpcError {
+                        code: None,
+                        message: "codex app-server 未连接，正在重连，请稍候".into(),
+                    });
+                }
+                let stdin = inner
+                    .stdin
+                    .as_mut()
+                    .ok_or_else(|| RpcError {
+                        code: None,
+                        message: "codex app-server stdin 不可用".to_string(),
+                    })?;
+                let line = format!("{}\n", msg);
+                stdin
+                    .write_all(line.as_bytes())
+                    .await
+                    .map_err(|e| RpcError {
+                        code: None,
+                        message: format!("写入 app-server 失败: {e}"),
+                    })?;
+                inner.pending.insert(id, tx);
+            }
+            let err = match tokio::time::timeout(t, rx).await {
+                Ok(Ok(Ok(v))) => return Ok(v),
+                Ok(Ok(Err(e))) => e,
+                Ok(Err(_)) => {
+                    // 超时：摘除 pending，避免残留（迟到应答的 tx.send 已被丢弃）
+                    self.shared.inner.lock().await.pending.remove(&id);
+                    RpcError {
+                        code: None,
+                        message: format!("请求 {method} 超时"),
+                    }
+                }
+                Err(_) => RpcError {
+                    code: None,
+                    message: "codex app-server 连接中断".to_string(),
+                },
+            };
+            if err.code == Some(-32001) && attempt < MAX_OVERLOAD_RETRIES {
+                attempt += 1;
+                let backoff_ms = 200u64 * (1 << attempt);
+                let jitter_ms = (id % 100) as u64;
+                tokio::time::sleep(Duration::from_millis(backoff_ms + jitter_ms)).await;
+                continue;
+            }
+            return Err(err);
+        }
     }
 
     /// 稳定内置 Pinned 分区 id（与 codex 源码常量一致，与 CODEX_HOME 无关）。
     const PINNED_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
     /// 探测用假线程 id：合法 UUID 格式，任何真实 codex 都会在字段校验后报 thread not found。
     const PROBE_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
+    /// 分区移动方法的探测顺序：0.146 及此前为 `threadSection/move`，
+    /// 新版（0.147+）改名为 `thread/section/move`（`threadSection/list` 保留）。
+    const SECTION_MOVE_METHODS: [&str; 2] = ["threadSection/move", "thread/section/move"];
 
     fn method_unavailable(e: &RpcError) -> bool {
         e.code == Some(-32601) || e.message.contains("unknown variant")
     }
 
     /// 探测当前 codex 的置顶协议能力（只读，不修改任何线程状态）。
-    /// 返回 `{ protocol, pinnedSectionId }`：
-    /// - `section_move`：新版分区协议 `threadSection/move`；
+    /// 返回 `{ protocol, pinnedSectionId, sectionMoveMethod? }`：
+    /// - `section_move`：新版分区协议（`sectionMoveMethod` 为实际可用的移动方法名）；
     /// - `metadata_section`：分区时代 `thread/metadata/update { sectionId }`；
     /// - `metadata_is_pinned`：旧版 `thread/metadata/update { isPinned }`；
     /// - `unsupported`：完全不支持置顶。
@@ -406,21 +433,34 @@ impl CodexServer {
                             .and_then(|s| s["id"].as_str().map(|x| x.to_string()))
                     })
                     .unwrap_or_else(|| Self::PINNED_SECTION_ID.to_string());
-                match self
-                    .request_verbose(
-                        "threadSection/move",
-                        json!({ "threadId": Self::PROBE_THREAD_ID, "sectionId": null }),
-                        None,
-                    )
-                    .await
-                {
-                    Err(e) if Self::method_unavailable(&e) => Ok(json!({
-                        "protocol": "metadata_section",
-                        "pinnedSectionId": section_id,
-                    })),
-                    Err(e) if e.code.is_none() => Err(e.message),
-                    _ => Ok(json!({
+                // 依次探测两个分区移动方法名；任一可用即采用（假线程 id 会报
+                // thread not found，视为方法存在）。
+                let mut move_method: Option<&'static str> = None;
+                for m in Self::SECTION_MOVE_METHODS {
+                    match self
+                        .request_verbose(
+                            m,
+                            json!({ "threadId": Self::PROBE_THREAD_ID, "sectionId": null }),
+                            None,
+                        )
+                        .await
+                    {
+                        Err(e) if Self::method_unavailable(&e) => continue,
+                        Err(e) if e.code.is_none() => return Err(e.message),
+                        _ => {
+                            move_method = Some(m);
+                            break;
+                        }
+                    }
+                }
+                match move_method {
+                    Some(m) => Ok(json!({
                         "protocol": "section_move",
+                        "pinnedSectionId": section_id,
+                        "sectionMoveMethod": m,
+                    })),
+                    None => Ok(json!({
+                        "protocol": "metadata_section",
                         "pinnedSectionId": section_id,
                     })),
                 }
@@ -494,8 +534,13 @@ impl CodexServer {
         }
     }
 
-    pub async fn send_response(&self, id: u64, result: Value) -> Result<(), String> {
-        let msg = json!({ "jsonrpc": "2.0", "id": id, "result": result });
+    /// 应答服务端反向请求（approval / user input / elicitation）。
+    /// request id 按协议可为 number 或 string，原样回显。
+    pub async fn send_response(&self, request_id: &Value, result: Value) -> Result<(), String> {
+        if !request_id.is_number() && !request_id.is_string() {
+            return Err("request id 必须是 number 或 string".to_string());
+        }
+        let msg = json!({ "jsonrpc": "2.0", "id": request_id, "result": result });
         let mut inner = self.shared.inner.lock().await;
         let stdin = inner
             .stdin

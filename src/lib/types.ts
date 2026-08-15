@@ -72,7 +72,8 @@ export interface LocalImageInput {
 export type UserInput = TextInput | MentionInput | SkillInput | LocalImageInput;
 
 export interface PendingInteraction {
-  requestId: number;
+  /** 协议 RequestId 为 string | number，原样透传给 interaction_respond */
+  requestId: number | string;
   method: string;
   params: Record<string, unknown>;
   at: number;

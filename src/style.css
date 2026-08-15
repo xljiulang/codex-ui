@@ -4968,6 +4968,52 @@ body.resizing-editor {
   padding: 12px 14px;
 }
 
+.interaction-bubble select,
+.interaction-bubble input[type="text"],
+.interaction-bubble input[type="number"],
+.interaction-bubble input[type="password"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(var(--input-rgb), 0.8);
+}
+
+.interaction-bubble select:focus,
+.interaction-bubble input:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.required-mark {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.multi-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.multi-options .option-btn {
+  width: auto;
+  cursor: pointer;
+}
+
+.multi-options .option-btn::before {
+  border-radius: 4px;
+}
+
+.multi-options .option-btn:has(input:checked) {
+  border-color: var(--accent-dim);
+  color: var(--text-bright);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+
 .plan-prompt-hint {
   font-size: 11px;
   line-height: 1.5;

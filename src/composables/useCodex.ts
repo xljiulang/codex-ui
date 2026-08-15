@@ -594,6 +594,8 @@ export type PinProtocol =
 export interface PinCapability {
   protocol: PinProtocol;
   pinnedSectionId: string | null;
+  /** section_move 时实际可用的分区移动方法名（新版 codex 为 thread/section/move） */
+  sectionMoveMethod?: "threadSection/move" | "thread/section/move";
 }
 
 /** 新版协议内置的 “Pinned” 分区，作为置顶的持久化位置（可用 threadSection/list 发现） */
@@ -958,9 +960,10 @@ export async function togglePin(threadId: string, pinned: boolean) {
         return;
       }
       if (cap.protocol === "section_move") {
-        // 新版协议：threadSection/move
+        // 新版协议：threadSection/move（0.147+ 改名为 thread/section/move，按探测结果调用）
+        const method = cap.sectionMoveMethod ?? "threadSection/move";
         await invoke("codex_rpc", {
-          method: "threadSection/move",
+          method,
           params: { threadId, sectionId },
         });
       } else {
@@ -1518,7 +1521,11 @@ export async function wireEvents() {
 
   unlisteners.push(
     await listen("interaction:request", async (e) => {
-      const p = e.payload as { requestId: number; method: string; params: Record<string, unknown> };
+      const p = e.payload as {
+        requestId: number | string;
+        method: string;
+        params: Record<string, unknown>;
+      };
       store.interactions.push({ ...p, at: Date.now() });
       if (store.settings.sound_enabled) playNotificationSound();
     }),
