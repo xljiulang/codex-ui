@@ -370,10 +370,10 @@ export async function pasteAvailable(): Promise<boolean> {
   return paths.length > 0;
 }
 
-/** 在目录下新建文本文件（唯一命名由后端保证），成功后刷新并提示 */
-export async function createTextFile(dir: string) {
+/** 在目录下新建文本文件（唯一命名由后端保证），成功后刷新并返回条目；失败返回 null */
+export async function createTextFile(dir: string): Promise<FsEntry | null> {
   const root = sessionRoot.value;
-  if (!root) return;
+  if (!root) return null;
   try {
     const created = await invoke<FsEntry>("session_fs_create_file", {
       root,
@@ -381,8 +381,28 @@ export async function createTextFile(dir: string) {
     });
     setToast(`已创建「${created.name}」`);
     await refreshAll();
+    return created;
   } catch (e) {
     setToast(toastError(e));
+    return null;
+  }
+}
+
+/** 在目录下新建文件夹（唯一命名由后端保证），成功后刷新并返回条目；失败返回 null */
+export async function createFolder(dir: string): Promise<FsEntry | null> {
+  const root = sessionRoot.value;
+  if (!root) return null;
+  try {
+    const created = await invoke<FsEntry>("session_fs_create_dir", {
+      root,
+      dir,
+    });
+    setToast(`已创建「${created.name}」`);
+    await refreshAll();
+    return created;
+  } catch (e) {
+    setToast(toastError(e));
+    return null;
   }
 }
 
@@ -405,6 +425,22 @@ export async function deleteEntry(path: string) {
     await refreshAll();
   } catch (e) {
     setToast(toastError(e));
+  }
+}
+
+/** 树内拖拽移动：把 src 移动到 destDir 目录下；成功后刷新并提示，返回是否成功 */
+export async function moveEntry(src: string, destDir: string): Promise<boolean> {
+  const root = sessionRoot.value;
+  if (!root) return false;
+  try {
+    await invoke<FsEntry>("session_fs_move", { root, src, destDir });
+    const name = src.split(/[\\/]/).pop() ?? src;
+    setToast(`已移动「${name}」`);
+    await refreshAll();
+    return true;
+  } catch (e) {
+    setToast(toastError(e));
+    return false;
   }
 }
 

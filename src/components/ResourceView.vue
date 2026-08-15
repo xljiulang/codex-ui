@@ -34,6 +34,9 @@ import {
   loadingRoot,
   addAsAttachment,
   createTextFile,
+  createFolder,
+  loadDir,
+  moveEntry,
   openImagePreview,
   openPdfPreview,
   pasteAvailable,
@@ -85,6 +88,9 @@ const propsEntry = ref<FsEntry | null>(null);
 const propsLoading = ref(false);
 const editingPath = ref<string | null>(null);
 const editName = ref("");
+/** 树内拖拽移动：正在拖拽的源路径与当前高亮目标路径 */
+const dragPath = ref<string | null>(null);
+const dragOverPath = ref<string | null>(null);
 
 watch(
   () => props.active,
@@ -131,7 +137,12 @@ async function openRootMenu(e: MouseEvent) {
       label: "新建文本文件",
       icon: ICON_PLUS,
       img: textFileMenuIcon(),
-      action: () => void createTextFile(root.path),
+      action: () => void onCreateTextFile(root),
+    },
+    {
+      label: "新建文件夹",
+      icon: ICON_PLUS,
+      action: () => void onCreateFolder(root),
     },
     ...(canPaste
       ? [
@@ -162,7 +173,12 @@ async function openDirMenu(entry: FsEntry, e: MouseEvent) {
       label: "新建文本文件",
       icon: ICON_PLUS,
       img: textFileMenuIcon(),
-      action: () => void createTextFile(entry.path),
+      action: () => void onCreateTextFile(entry),
+    },
+    {
+      label: "新建文件夹",
+      icon: ICON_PLUS,
+      action: () => void onCreateFolder(entry),
     },
     { label: "复制", icon: ICON_COPY, action: () => copyEntry(entry) },
     ...(canPaste
@@ -264,6 +280,68 @@ async function requestOpen(entry: FsEntry) {
 function openEntryMenu(entry: FsEntry, e: MouseEvent) {
   if (entry.isDir) openDirMenu(entry, e);
   else openFileMenu(entry, e);
+}
+
+/** 新建文件夹：创建成功后展开/加载父目录并自动进入行内重命名 */
+async function onCreateFolder(parent: FsEntry) {
+  const created = await createFolder(parent.path);
+  if (!created) return;
+  expanded.add(parent.path);
+  await loadDir(parent.path, true);
+  await nextTick();
+  startRename(created);
+}
+
+/** 新建文本文件：创建成功后展开/加载父目录并自动进入行内重命名 */
+async function onCreateTextFile(parent: FsEntry) {
+  const created = await createTextFile(parent.path);
+  if (!created) return;
+  expanded.add(parent.path);
+  await loadDir(parent.path, true);
+  await nextTick();
+  startRename(created);
+}
+
+function onRowDragStart(entry: FsEntry, e: DragEvent) {
+  dragPath.value = entry.path;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", entry.path);
+  }
+}
+
+function onRowDragEnd() {
+  dragPath.value = null;
+  dragOverPath.value = null;
+}
+
+/** 拖拽目标合法性：源存在、目标不是源自身、目标不在源目录内（大小写不敏感） */
+function canDropTo(targetPath: string): boolean {
+  const src = dragPath.value;
+  if (!src) return false;
+  const srcKey = src.replace(/\//g, "\\").toLowerCase();
+  const targetKey = targetPath.replace(/\//g, "\\").toLowerCase();
+  if (targetKey === srcKey) return false;
+  return !targetKey.startsWith(srcKey + "\\");
+}
+
+function onRowDragOver(entry: FsEntry, e: DragEvent) {
+  if (!entry.isDir || !canDropTo(entry.path)) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  dragOverPath.value = entry.path;
+}
+
+function onRowDragLeave(entry: FsEntry) {
+  if (dragOverPath.value === entry.path) dragOverPath.value = null;
+}
+
+async function onRowDrop(entry: FsEntry, e: DragEvent) {
+  e.preventDefault();
+  const src = dragPath.value;
+  dragOverPath.value = null;
+  if (!entry.isDir || !src || !canDropTo(entry.path)) return;
+  await moveEntry(src, entry.path);
 }
 
 function onRowContext(row: ResourceRow, e: MouseEvent) {
@@ -471,12 +549,19 @@ const deleteLabel = computed(() => {
             'resource-file': row.kind === 'file',
             collapsed: row.kind !== 'file' && row.collapsed,
             active: row.kind !== 'root' && selectedPath === row.entry.path,
+            'resource-drop-target': dragOverPath === row.entry.path,
           }"
           :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
           :data-fs-path="row.entry.path"
+          :draggable="row.kind !== 'root'"
           v-tooltip="row.kind === 'root' ? row.entry.path : undefined"
           @click="onTreeRowClick(row)"
           @contextmenu="onRowContext(row, $event)"
+          @dragstart="onRowDragStart(row.entry, $event)"
+          @dragend="onRowDragEnd()"
+          @dragover="onRowDragOver(row.entry, $event)"
+          @dragleave="onRowDragLeave(row.entry)"
+          @drop="onRowDrop(row.entry, $event)"
         >
           <button
             v-if="row.kind !== 'root'"

@@ -351,6 +351,60 @@ fn paste_impl(root: &Path, dest_dir: &Path, sources: &[String]) -> Result<Vec<Fs
     Ok(out)
 }
 
+/// 移动：优先同卷 rename；跨盘（CrossesDevices）降级为递归复制 + 删除源。
+/// 禁止移动根、移动到自身或子目录；目标目录必须存在且同名不冲突。
+fn move_impl(root: &Path, src: &Path, dest_dir: &Path) -> Result<FsEntry, String> {
+    let src_c = ensure_inside(root, src)?;
+    let dest_c = ensure_inside(root, dest_dir)?;
+    let root_c = root
+        .canonicalize()
+        .map_err(|e| format!("无法访问工作目录 {}: {e}", clean_path(root)))?;
+    if norm_key(&src_c) == norm_key(&root_c) {
+        return Err("不能移动工作目录".into());
+    }
+    if !dest_c.is_dir() {
+        return Err("目标必须是目录".into());
+    }
+    if norm_key(&src_c) == norm_key(&dest_c) {
+        return Err("不能移动到自身".into());
+    }
+    if is_inside_path(&src_c, &dest_c) {
+        return Err("不能移动到自身或子目录".into());
+    }
+    let name = src_c
+        .file_name()
+        .ok_or_else(|| "无法确定源名称".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let target = dest_c.join(&name);
+    if target.exists() {
+        return Err(format!("目标已存在: {}", clean_path(&target)));
+    }
+    match std::fs::rename(&src_c, &target) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            copy_recursive(&src_c, &target)?;
+            if src_c.is_dir() {
+                std::fs::remove_dir_all(&src_c).map_err(|e| {
+                    format!(
+                        "移动失败（跨盘复制后删除源目录） {}: {e}",
+                        clean_path(&src_c)
+                    )
+                })?;
+            } else {
+                std::fs::remove_file(&src_c).map_err(|e| {
+                    format!(
+                        "移动失败（跨盘复制后删除源文件） {}: {e}",
+                        clean_path(&src_c)
+                    )
+                })?;
+            }
+        }
+        Err(e) => return Err(format!("移动失败 {}: {e}", clean_path(&src_c))),
+    }
+    entry_from_path(root, &target)
+}
+
 #[tauri::command]
 pub async fn session_fs_list(root: String, dir: String) -> Result<Vec<FsEntry>, String> {
     run_blocking(60, move || {
@@ -426,6 +480,19 @@ pub async fn session_fs_paste(
     run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         paste_impl(&root_p, Path::new(&dest_dir), &sources)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn session_fs_move(
+    root: String,
+    src: String,
+    dest_dir: String,
+) -> Result<FsEntry, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_root(&root)?;
+        move_impl(&root_p, Path::new(&src), Path::new(&dest_dir))
     })
     .await
 }
@@ -544,11 +611,40 @@ fn create_file_impl(root: &Path, dir: &Path) -> Result<FsEntry, String> {
     entry_from_path(root, &target)
 }
 
+/// 新建文件夹：目标必须为根内目录，自动生成唯一名
+/// （新建文件夹，冲突时追加 (2)、(3)…），创建空目录并返回条目
+fn create_dir_impl(root: &Path, dir: &Path) -> Result<FsEntry, String> {
+    let dir_c = ensure_inside(root, dir)?;
+    if !dir_c.is_dir() {
+        return Err("目标必须是目录".into());
+    }
+    const BASE: &str = "新建文件夹";
+    let mut name = BASE.to_string();
+    let mut n = 2;
+    while dir_c.join(&name).exists() {
+        name = format!("{BASE} ({n})");
+        n += 1;
+    }
+    let target = dir_c.join(&name);
+    std::fs::create_dir(&target)
+        .map_err(|e| format!("创建文件夹失败 {}: {e}", clean_path(&target)))?;
+    entry_from_path(root, &target)
+}
+
 #[tauri::command]
 pub async fn session_fs_create_file(root: String, dir: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
         let root_p = resolve_root(&root)?;
         create_file_impl(&root_p, Path::new(&dir))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn session_fs_create_dir(root: String, dir: String) -> Result<FsEntry, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_root(&root)?;
+        create_dir_impl(&root_p, Path::new(&dir))
     })
     .await
 }
@@ -1102,6 +1198,101 @@ mod tests {
         assert!(root.join("src").join("b.txt").exists());
         // 防止粘贴到自身
         assert!(paste_impl(&root, &root.join("src"), &[root.join("src").to_string_lossy().into_owned()]).is_err());
+    }
+
+    #[test]
+    fn create_dir_creates_folder_with_unique_name() {
+        let (tmp, root) = tree();
+        let dir = root.join("src");
+
+        let e1 = create_dir_impl(&root, &dir).unwrap();
+        assert_eq!(e1.name, "新建文件夹");
+        assert!(dir.join("新建文件夹").is_dir());
+
+        // 同名冲突 → (2)、(3) 递增
+        let e2 = create_dir_impl(&root, &dir).unwrap();
+        assert_eq!(e2.name, "新建文件夹 (2)");
+        let e3 = create_dir_impl(&root, &dir).unwrap();
+        assert_eq!(e3.name, "新建文件夹 (3)");
+
+        // 条目指向目标目录内的真实目录
+        assert!(dir.join(&e3.name).is_dir());
+        let _ = tmp;
+    }
+
+    #[test]
+    fn create_dir_rejects_non_dir_missing_and_outside() {
+        let (tmp, root) = tree();
+
+        // 目标是文件
+        let err = create_dir_impl(&root, &root.join("a.txt")).unwrap_err();
+        assert!(err.contains("必须是目录"));
+
+        // 目标不存在
+        let err = create_dir_impl(&root, &root.join("missing")).unwrap_err();
+        assert!(err.contains("无法访问路径"));
+
+        // 越出根目录
+        let outside = tmp.path().parent().unwrap().to_path_buf();
+        let err = create_dir_impl(&root, &outside).unwrap_err();
+        assert!(err.contains("路径越界"));
+        let _ = tmp;
+    }
+
+    #[test]
+    fn move_moves_file_and_dir_with_guards() {
+        let (_tmp, root) = tree();
+
+        // 文件移动到子目录：rename 成功且源消失
+        let e = move_impl(&root, &root.join("a.txt"), &root.join("src")).unwrap();
+        assert_eq!(e.name, "a.txt");
+        assert!(root.join("src").join("a.txt").exists());
+        assert!(!root.join("a.txt").exists());
+
+        // 目录移动到另一目录（递归）
+        let e = move_impl(&root, &root.join("src"), &root.join("node_modules")).unwrap();
+        assert!(e.is_dir);
+        assert!(root.join("node_modules").join("src").join("main.ts").exists());
+        assert!(!root.join("src").exists());
+
+        // 移动到自身所在目录（目标已存在）
+        assert!(move_impl(&root, &root.join("b.txt"), &root).is_err());
+
+        // 目录移动到自身
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        assert!(move_impl(&root, &root.join("sub"), &root.join("sub")).is_err());
+
+        // 移动到自身子目录
+        std::fs::create_dir_all(root.join("sub").join("inner")).unwrap();
+        let err = move_impl(&root, &root.join("sub"), &root.join("sub").join("inner")).unwrap_err();
+        assert!(err.contains("子目录"));
+
+        // 移动根被拒
+        assert!(move_impl(&root, &root, &root.join("sub")).is_err());
+
+        // 目标已存在
+        std::fs::write(root.join("sub").join(".gitignore"), "x").unwrap();
+        let err = move_impl(&root, &root.join(".gitignore"), &root.join("sub")).unwrap_err();
+        assert!(err.contains("目标已存在"));
+    }
+
+    #[test]
+    fn move_rejects_missing_and_outside() {
+        let (tmp, root) = tree();
+
+        // 源不存在
+        let err = move_impl(&root, &root.join("missing.txt"), &root.join("src")).unwrap_err();
+        assert!(err.contains("无法访问路径"));
+
+        // 目标必须是目录
+        let err = move_impl(&root, &root.join("a.txt"), &root.join("a.txt")).unwrap_err();
+        assert!(err.contains("目标必须是目录"));
+
+        // 越出根目录
+        let outside = tmp.path().parent().unwrap().to_path_buf();
+        let err = move_impl(&root, &root.join("a.txt"), &outside).unwrap_err();
+        assert!(err.contains("路径越界"));
+        let _ = tmp;
     }
 
     #[test]

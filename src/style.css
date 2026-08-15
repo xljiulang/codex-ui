@@ -2412,6 +2412,13 @@ select option {
   border-color: rgba(var(--accent-rgb), 0.45);
 }
 
+/* 树内拖拽移动：合法目标目录高亮 */
+.resource-row.resource-drop-target {
+  background: rgba(var(--accent-rgb), 0.12);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .resource-error {
   color: var(--red);
   white-space: pre-wrap;

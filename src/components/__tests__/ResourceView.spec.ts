@@ -107,6 +107,10 @@ const docPdf: FsEntry = {
 };
 /** 右键菜单剪贴板文件源（默认含文件，粘贴可见；置空验证隐藏） */
 let clipboardFiles: string[] = [];
+/** 「新建文件夹」测试态：创建后加入 src 目录列表，驱动行内重命名渲染 */
+let createdFolder: FsEntry | null = null;
+/** 「新建文本文件」测试态：创建后加入 src 目录列表，驱动行内重命名渲染 */
+let createdTextFile: FsEntry | null = null;
 /** 「新建文本文件」菜单系统图标（默认可用；置 null 验证回退 SVG） */
 let txtIconUri: string | null = "data:image/png;base64,TXTICON";
 
@@ -122,7 +126,14 @@ function mockFs() {
     if (cmd === "session_fs_list") {
       const dir = (args as { dir?: string }).dir;
       if (dir === rootPath) return Promise.resolve([srcDir, nodeModules, aTxt]);
-      if (dir === srcDir.path) return Promise.resolve([mainTs, picPng, docPdf]);
+      if (dir === srcDir.path)
+        return Promise.resolve([
+          mainTs,
+          picPng,
+          docPdf,
+          ...(createdFolder ? [createdFolder] : []),
+          ...(createdTextFile ? [createdTextFile] : []),
+        ]);
       return Promise.resolve([]);
     }
     if (cmd === "session_fs_search") {
@@ -142,6 +153,32 @@ function mockFs() {
     }
     if (cmd === "workspace_dir") return Promise.resolve(rootPath);
     if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
+    if (cmd === "session_fs_create_dir") {
+      createdFolder = {
+        name: "新建文件夹",
+        path: srcDir.path + "\\新建文件夹",
+        relPath: "src/新建文件夹",
+        isDir: true,
+        size: null,
+        modifiedAtMs: 0,
+        createdAtMs: 0,
+        childCount: 0,
+      };
+      return Promise.resolve(createdFolder);
+    }
+    if (cmd === "session_fs_create_file") {
+      createdTextFile = {
+        name: "新建文本文件.txt",
+        path: srcDir.path + "\\新建文本文件.txt",
+        relPath: "src/新建文本文件.txt",
+        isDir: false,
+        size: 0,
+        modifiedAtMs: 0,
+        createdAtMs: 0,
+        childCount: null,
+      };
+      return Promise.resolve(createdTextFile);
+    }
     if (cmd === "session_fs_delete") return Promise.resolve(undefined);
     if (cmd === "session_fs_paste") return Promise.resolve([mainTs]);
     if (
@@ -192,6 +229,8 @@ describe("ResourceView 文件树", () => {
     store.attachments = [];
     store.toast = "";
     clipboardFiles = [aTxt.path];
+    createdFolder = null;
+    createdTextFile = null;
     txtIconUri = "data:image/png;base64,TXTICON";
     mockedInvoke.mockClear();
     mockedOpenNewSession.mockClear();
@@ -492,6 +531,7 @@ describe("ResourceView 文件树", () => {
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).toEqual([
       "新建文本文件",
+      "新建文件夹",
       "复制",
       "粘贴",
       "删除",
@@ -510,10 +550,83 @@ describe("ResourceView 文件树", () => {
     expect(labels).toEqual([
       "新建会话",
       "新建文本文件",
+      "新建文件夹",
       "粘贴",
       "在此打开终端",
       "在资源管理器中打开",
     ]);
+    wrapper.unmount();
+  });
+
+  it("新建文件夹：调用 session_fs_create_dir 并自动进入重命名", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    await clickCtxItem(wrapper, "新建文件夹");
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_create_dir", {
+      root: rootPath,
+      dir: srcDir.path,
+    });
+    // 创建后展开/加载父目录并进入行内重命名
+    await flushPromises();
+    const input = wrapper.find(".resource-rename-input");
+    expect(input.exists()).toBe(true);
+    expect((input.element as HTMLInputElement).value).toBe("新建文件夹");
+    wrapper.unmount();
+  });
+
+  it("新建文本文件：调用 session_fs_create_file 并自动进入重命名", async () => {
+    const wrapper = await mountPanel();
+    await openRowCtx(wrapper, ".resource-row.resource-dir");
+    await clickCtxItem(wrapper, "新建文本文件");
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_create_file", {
+      root: rootPath,
+      dir: srcDir.path,
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_create_dir",
+      expect.anything(),
+    );
+    // 创建后展开/加载父目录并进入行内重命名
+    await flushPromises();
+    const input = wrapper.find(".resource-rename-input");
+    expect(input.exists()).toBe(true);
+    expect((input.element as HTMLInputElement).value).toBe("新建文本文件.txt");
+    wrapper.unmount();
+  });
+
+  it("拖拽文件到目录：高亮目标并调用 session_fs_move", async () => {
+    const wrapper = await mountPanel();
+    const fileRow = wrapper.find(".resource-row.resource-file");
+    const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
+    await fileRow.trigger("dragstart", {
+      dataTransfer: { setData: vi.fn(), effectAllowed: "" },
+    });
+    await dirRow.trigger("dragover", { dataTransfer: { dropEffect: "" } });
+    expect(dirRow.classes()).toContain("resource-drop-target");
+    await dirRow.trigger("drop", { dataTransfer: {} });
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_move", {
+      root: rootPath,
+      src: aTxt.path,
+      destDir: srcDir.path,
+    });
+    wrapper.unmount();
+  });
+
+  it("拖拽到自身：不高亮也不调用移动", async () => {
+    const wrapper = await mountPanel();
+    const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
+    await dirRow.trigger("dragstart", {
+      dataTransfer: { setData: vi.fn(), effectAllowed: "" },
+    });
+    await dirRow.trigger("dragover", { dataTransfer: { dropEffect: "" } });
+    expect(dirRow.classes()).not.toContain("resource-drop-target");
+    await dirRow.trigger("drop", { dataTransfer: {} });
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_move",
+      expect.anything(),
+    );
     wrapper.unmount();
   });
 
