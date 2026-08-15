@@ -125,7 +125,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue({});
     store.confirm = null;
-    store.sessionTabs.splice(0, store.sessionTabs.length);
+    tabs.splice(0, tabs.length);
     __resetEditorTabsForTest();
     store.turnActive = false;
     store.currentThreadId = null;
@@ -144,7 +144,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
   });
 
   it("有工作会话：阻止关闭并弹出确认（提示会话数量）", async () => {
-    store.sessionTabs.push(
+    tabs.push(
       sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
     );
     await registerCloseGuard();
@@ -161,10 +161,10 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
   });
 
   it("点击「停止并关闭」：停止所有工作会话（含后台标签）再关闭窗口", async () => {
-    store.sessionTabs.push(
+    tabs.push(
       sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
     );
-    store.sessionTabs.push(
+    tabs.push(
       sessionTab({
         id: "s2",
         threadId: "t2",
@@ -189,7 +189,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
   });
 
   it("目标激活续跑（无进行中回合）也视为工作：确认后清目标", async () => {
-    store.sessionTabs.push(
+    tabs.push(
       sessionTab({ goalText: "目标", goalStatus: "active" }),
     );
     await registerCloseGuard();
@@ -221,7 +221,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
   });
 
   it("点击「取消」：不停止、不关闭窗口", async () => {
-    store.sessionTabs.push(
+    tabs.push(
       sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
     );
     await registerCloseGuard();
@@ -237,7 +237,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
   });
 
   it("已有确认框（如切换会话）时：仅阻止关闭，不覆盖原确认", async () => {
-    store.sessionTabs.push(
+    tabs.push(
       sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
     );
     const resolve = vi.fn();

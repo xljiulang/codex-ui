@@ -3,7 +3,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, interrupt, store } from "./useCodex";
 import { dirtyFileTabs, saveAllDirtyTabs, tabs } from "./useEditorTabs";
-import { isTabWorking } from "../lib/tabs";
+import { isTabWorking, TabKind } from "../lib/tabs";
+import type { SessionTab } from "./useCodex";
+import type { TerminalEditorTab } from "./useEditorTabs";
 
 /**
  * 主窗口关闭守卫：仍有工作中的标签（会话回合/目标续跑、终端命令执行）时先让用户确认，
@@ -16,8 +18,13 @@ export async function registerCloseGuard(): Promise<UnlistenFn> {
     const win = getCurrentWindow();
     return await win.onCloseRequested(async (event) => {
       // 工作中的标签：先确认停止再关闭（会话含目标激活续跑；终端含命令执行中）
-      const workingSessions = store.sessionTabs.filter((t) => isTabWorking(t));
-      const busyTerminals = tabs.filter((t) => isTabWorking(t));
+      const workingTabs = tabs.filter((t) => isTabWorking(t));
+      const workingSessions = workingTabs.filter(
+        (t): t is SessionTab => t.kind === TabKind.Chat,
+      );
+      const busyTerminals = workingTabs.filter(
+        (t): t is TerminalEditorTab => t.kind === TabKind.Terminal,
+      );
       if (workingSessions.length > 0 || busyTerminals.length > 0) {
         event.preventDefault();
         // 已有确认框（如切换会话弹窗）时不叠加，仅阻止关闭

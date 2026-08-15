@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { invoke } from "@tauri-apps/api/core";
 import {
   setToast,
-  store,
   toastError,
   workspace,
 } from "../composables/useCodex";
@@ -67,10 +66,12 @@ import {
   ICON_TERMINAL,
 } from "../lib/icons";
 import {
+  activeTab,
   activeTabId,
   isFileTabOpen,
   openTerminalTab,
 } from "../composables/useEditorTabs";
+import { TabKind } from "../lib/tabs";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -78,8 +79,8 @@ const props = defineProps<{ active: boolean }>();
  *  避免附件进入隐藏/非活动会话的输入区（文件/diff/预览/终端标签激活时隐藏） */
 const hasActiveSessionTab = computed(
   () =>
-    store.activeSessionId !== null &&
-    activeTabId.value === store.activeSessionId,
+    activeTabId.value !== "" &&
+    activeTab.value?.kind === TabKind.Chat,
 );
 
 const ICON_FILE =

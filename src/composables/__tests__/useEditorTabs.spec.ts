@@ -27,8 +27,8 @@ import {
   activateTab,
   closeAnyTab,
   closeAllOtherTabs,
-  closeTabsToLeft,
-  closeTabsToRight,
+  closeTabsToLeftAll,
+  closeTabsToRightAll,
   closeTab,
   discardTabAndClose,
   openDiffTab,
@@ -50,6 +50,7 @@ import {
 } from "../useTerminalEvents";
 import { settleConfirm, store } from "../useCodex";
 import type { SessionTab } from "../useCodex";
+import { insertTab } from "../useTabs";
 import { TabIcon, TabKind } from "../../lib/tabs";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -313,7 +314,7 @@ describe("useEditorTabs 标签状态", () => {
     await openFileTab(root, "c.txt");
     const cTab = tabs.find((t) => t.title === "c.txt")!;
 
-    const skipped = closeTabsToLeft(cTab.id);
+    const skipped = await closeTabsToLeftAll(cTab.id);
     expect(skipped).toBe(1);
     expect(tabs.map((t) => t.title)).toEqual(["b.txt", "c.txt"]);
     view.destroy();
@@ -333,7 +334,7 @@ describe("useEditorTabs 标签状态", () => {
     await openFileTab(root, "c.txt");
     const aTab = tabs.find((t) => t.title === "a.txt")!;
 
-    const skipped = closeTabsToRight(aTab.id);
+    const skipped = await closeTabsToRightAll(aTab.id);
     expect(skipped).toBe(0);
     expect(tabs.map((t) => t.title)).toEqual(["a.txt"]);
   });
@@ -355,7 +356,7 @@ describe("useEditorTabs 标签状态", () => {
     await openFileTab(root, "c.txt");
     const aTab = tabs.find((t) => t.title === "a.txt")!;
 
-    const skipped = closeTabsToRight(aTab.id);
+    const skipped = await closeTabsToRightAll(aTab.id);
     expect(skipped).toBe(1);
     expect(tabs.map((t) => t.title)).toEqual(["a.txt", "b.txt"]);
     expect(tabs.some((t) => t.id === dirtyTab.id)).toBe(true);
@@ -363,7 +364,7 @@ describe("useEditorTabs 标签状态", () => {
     host.remove();
   });
 
-  it("关闭右边所有标签：右侧终端标签一并结束进程", async () => {
+  it("关闭左边所有标签：范围内的终端标签一并结束进程", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("x"));
@@ -375,11 +376,13 @@ describe("useEditorTabs 标签状态", () => {
 
     await openFileTab(root, "a.txt");
     await openTerminalTab(root);
-    const aTab = tabs.find((t) => t.title === "a.txt")!;
+    await openFileTab(root, "b.txt");
+    const bTab = tabs.find((t) => t.title === "b.txt")!;
 
-    const skipped = closeTabsToRight(aTab.id);
+    const skipped = await closeTabsToLeftAll(bTab.id);
     expect(skipped).toBe(0);
-    expect(tabs.map((t) => t.title)).toEqual(["a.txt"]);
+    // 终端恒在文件之前：b.txt 左侧含终端与 a.txt，一并关闭
+    expect(tabs.map((t) => t.title)).toEqual(["b.txt"]);
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
       id: expect.any(String),
     });
@@ -397,13 +400,13 @@ describe("useEditorTabs 标签状态", () => {
     await openFileTab(root, "b.txt");
     const aTab = tabs.find((t) => t.title === "a.txt")!;
 
-    expect(closeTabsToLeft(aTab.id)).toBe(0);
+    expect(await closeTabsToLeftAll(aTab.id)).toBe(0);
     expect(tabs).toHaveLength(2);
   });
 
-  it("关闭左边/右边：未知 id 返回 0", () => {
-    expect(closeTabsToLeft("nope")).toBe(0);
-    expect(closeTabsToRight("nope")).toBe(0);
+  it("关闭左边/右边：未知 id 返回 0", async () => {
+    expect(await closeTabsToLeftAll("nope")).toBe(0);
+    expect(await closeTabsToRightAll("nope")).toBe(0);
   });
 
   it("activateTab 忽略不存在的 id", () => {
@@ -778,7 +781,7 @@ describe("closeAnyTab 统一关闭入口", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetEditorTabsForTest();
-    store.sessionTabs.splice(0, store.sessionTabs.length);
+    tabs.splice(0, tabs.length);
     store.confirm = null;
   });
 
@@ -815,9 +818,9 @@ describe("closeAnyTab 统一关闭入口", () => {
       newChatWorkspace: null,
       interactions: [],
     };
-    store.sessionTabs.push(tab);
+    tabs.push(tab);
     await closeAnyTab(tab);
-    expect(store.sessionTabs.some((t) => t.id === tab.id)).toBe(false);
+    expect(tabs.some((t) => t.id === tab.id)).toBe(false);
   });
 
   it("运行中终端：确认后终止进程并移除", async () => {
@@ -854,5 +857,91 @@ describe("closeAnyTab 统一关闭入口", () => {
     await closeAnyTab(f);
     expect(pendingCloseId.value).toBe(f.id);
     expect(tabs.some((x) => x.id === f.id)).toBe(true);
+  });
+
+  function makeSessionTab(id: string, over: Partial<SessionTab> = {}): SessionTab {
+    return {
+      id,
+      kind: "chat",
+      title: "会话",
+      icon: "chat",
+      threadId: null,
+      name: "",
+      nameIsFirstMessage: false,
+      permissionMode: "ask-for-approval",
+      taskMode: "execute",
+      model: null,
+      effort: null,
+      draftJson: JSON.stringify({ type: "doc", content: [] }),
+      draftAttachments: [],
+      draftRefs: {},
+      origin: null,
+      workspace: null,
+      resumedThreadId: null,
+      turnActive: false,
+      currentTurnId: null,
+      turnInterrupted: false,
+      goalText: null,
+      goalStatus: null,
+      goalArmed: false,
+      threadTokenUsage: null,
+      followupQueue: [],
+      attachments: [],
+      planPrompt: null,
+      loading: false,
+      newChatWorkspace: null,
+      interactions: [],
+      ...over,
+    };
+  }
+
+  it("统一列表三块排序：会话在前、终端居中、文件按打开顺序在后", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    insertTab(makeSessionTab("s1"));
+    await openTerminalTab(root);
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    // 后插入的会话仍回到会话块末尾（终端之前）
+    insertTab(makeSessionTab("s2"));
+    expect(tabs.map((t) => t.title)).toEqual([
+      "会话",
+      "会话",
+      "PowerShell",
+      "a.txt",
+      "b.txt",
+    ]);
+  });
+
+  it("closeTab 关闭会话标签：路由到会话关闭并切换活动标签", async () => {
+    insertTab(makeSessionTab("s1"));
+    insertTab(makeSessionTab("s2"));
+    activeTabId.value = "s1";
+
+    await closeTab("s1");
+    expect(tabs.some((t) => t.id === "s1")).toBe(false);
+    expect(activeTabId.value).toBe("s2");
+  });
+
+  it("批量关闭（关闭左边）范围内的运行中会话：跳过并计数", async () => {
+    insertTab(makeSessionTab("s1", { turnActive: true }));
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openFileTab(root, "a.txt");
+
+    const aTab = tabs.find((t) => t.title === "a.txt")!;
+    const skipped = await closeTabsToLeftAll(aTab.id);
+    expect(skipped).toBe(1);
+    expect(tabs.some((t) => t.id === "s1")).toBe(true);
   });
 });

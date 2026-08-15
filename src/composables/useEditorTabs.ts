@@ -1,4 +1,4 @@
-import { computed, markRaw, reactive, ref, shallowReactive } from "vue";
+import { markRaw, reactive, ref } from "vue";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { Compartment, EditorState, Text } from "@codemirror/state";
 import {
@@ -18,8 +18,10 @@ import {
   releaseTerminal,
 } from "./useTerminalEvents";
 import { askConfirm, closeSessionTab } from "./useCodex";
-import type { SessionTab } from "./useCodex";
 import { TabIcon, TabKind, type EditorTabBase } from "../lib/tabs";
+import { activeTabId, insertTab, tabs } from "./useTabs";
+export { activeTab, activeTabId, activateTab, tabs } from "./useTabs";
+import type { Tab } from "./useTabs";
 
 /** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
 interface TextFileContent {
@@ -123,15 +125,8 @@ export type EditorTab =
   | PreviewEditorTab
   | TerminalEditorTab;
 
-/** 文件/diff/预览/终端标签列表（会话标签由 useCodex 的 sessionTabs 管理） */
-export const tabs = shallowReactive<EditorTab[]>([]);
-export const activeTabId = ref("");
 /** 待关闭的脏文件标签 id（由编辑面板弹确认层） */
 export const pendingCloseId = ref<string | null>(null);
-
-export const activeTab = computed<EditorTab | null>(
-  () => tabs.find((t) => t.id === activeTabId.value) ?? null,
-);
 
 function fileTabId(workspace: string, path: string): string {
   return "file:" + JSON.stringify([workspace, path]);
@@ -167,7 +162,7 @@ export async function openTerminalTab(workspace: string): Promise<void> {
     exited: false,
     exitCode: null,
   }) as unknown as TerminalEditorTab;
-  tabs.push(tab);
+  insertTab(tab);
   activeTabId.value = id;
   try {
     // 先注册全局事件监听并建立缓冲，再 spawn，避免启动输出（含 ConPTY DSR
@@ -185,10 +180,6 @@ export async function openTerminalTab(workspace: string): Promise<void> {
       void invoke("terminal_kill", { id }).catch(() => {});
     }
   }
-}
-
-export function activateTab(id: string): void {
-  if (tabs.some((t) => t.id === id)) activeTabId.value = id;
 }
 
 /**
@@ -226,7 +217,7 @@ export async function openFileTab(workspace: string, path: string): Promise<void
     savedText: null,
     wrapCompartment: null,
   }) as unknown as FileEditorTab;
-  tabs.push(tab);
+  insertTab(tab);
   activeTabId.value = id;
   try {
     const info = await invoke<TextFileContent>("session_fs_read", {
@@ -336,7 +327,7 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
     fallback: params.diff,
     brief: false,
   }) as unknown as DiffEditorTab;
-  tabs.push(tab);
+  insertTab(tab);
   activeTabId.value = id;
   try {
     const rows = await invoke<DiffRow[]>("build_diff_preview", { params });
@@ -376,7 +367,7 @@ export async function openPreviewTab(
     pdfData: null,
     pageCount: null,
   }) as unknown as PreviewEditorTab;
-  tabs.push(tab);
+  insertTab(tab);
   activeTabId.value = id;
   try {
     if (type === "image") {
@@ -425,6 +416,10 @@ export function isFileTabOpen(workspace: string, path: string): boolean {
 export async function closeTab(id: string): Promise<void> {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
+  if (tab.kind === TabKind.Chat) {
+    await closeSessionTab(tab.id);
+    return;
+  }
   if (tab.kind === TabKind.File && tab.dirty) {
     pendingCloseId.value = id;
     return;
@@ -443,17 +438,11 @@ export async function closeTab(id: string): Promise<void> {
 }
 
 /**
- * 统一关闭入口（关闭按钮/中键/批量关闭共用）：按 kind 路由——
+ * 统一关闭入口（关闭按钮/中键/批量关闭共用）：统一列表内按 id 关闭——
  * 会话标签走 closeSessionTab（运行中确认并中断），编辑器标签走 closeTab
  * （脏文件挂起、运行中终端确认并终止）。
  */
-export async function closeAnyTab(
-  tab: SessionTab | EditorTab,
-): Promise<void> {
-  if (tab.kind === TabKind.Chat) {
-    await closeSessionTab(tab.id);
-    return;
-  }
+export async function closeAnyTab(tab: Tab): Promise<void> {
   await closeTab(tab.id);
 }
 
@@ -473,26 +462,28 @@ export function discardTabAndClose(id: string): void {
 }
 
 /**
- * 按谓词批量关闭标签：未保存文件与运行中的终端跳过计数、终端结束进程、
- * 其余直接移除。
+ * 按谓词批量关闭编辑器标签（会话标签不参与）：未保存文件与运行中的终端
+ * 跳过计数、终端结束进程、其余直接移除。
  * 谓词基于遍历时的快照索引判定；快照遍历 + 按 id 移除，删除过程安全。
  */
 function closeTabsMatching(
-  pred: (tab: EditorTab, idx: number) => boolean,
+  pred: (tab: Tab, idx: number) => boolean,
 ): number {
   let skipped = 0;
   for (const [idx, tab] of [...tabs].entries()) {
     if (!pred(tab, idx)) continue;
-    if (tab.kind === TabKind.File && tab.dirty) {
+    if (tab.kind === TabKind.Chat) continue; // 会话标签由统一批量关闭处理
+    const t = tab as EditorTab;
+    if (t.kind === TabKind.File && t.dirty) {
       skipped++;
       continue;
     }
-    if (isTerminalBusy(tab)) {
+    if (isTerminalBusy(t)) {
       skipped++;
       continue;
     }
-    disposeTab(tab);
-    removeTab(tab.id);
+    disposeTab(t);
+    removeTab(t.id);
   }
   return skipped;
 }
@@ -502,18 +493,54 @@ export function closeAllOtherTabs(): number {
   return closeTabsMatching(() => true);
 }
 
-/** 关闭目标标签左侧所有可关闭标签（不含目标本身）；返回跳过的未保存标签数量 */
-export function closeTabsToLeft(id: string): number {
-  const idx = tabs.findIndex((t) => t.id === id);
-  if (idx < 0) return 0;
-  return closeTabsMatching((_tab, i) => i < idx);
+/**
+ * 按统一列表顺序关闭 [start, end) 区间内的标签（含会话标签）：运行中的会话
+ * 跳过计数（不逐个确认），未保存文件/运行中终端跳过计数；返回跳过数量。
+ */
+async function closeTabRange(start: number, end: number): Promise<number> {
+  let skipped = 0;
+  const snapshot = [...tabs].slice(start, end);
+  for (const tab of snapshot) {
+    if (tab.kind === TabKind.Chat) {
+      if (tab.turnActive || tab.goalText) {
+        skipped++;
+        continue;
+      }
+      await closeSessionTab(tab.id);
+      continue;
+    }
+    const t = tab as EditorTab;
+    if (t.kind === TabKind.File && t.dirty) {
+      skipped++;
+      continue;
+    }
+    if (isTerminalBusy(t)) {
+      skipped++;
+      continue;
+    }
+    disposeTab(t);
+    removeTab(t.id);
+  }
+  return skipped;
 }
 
-/** 关闭目标标签右侧所有可关闭标签（不含目标本身）；返回跳过的未保存标签数量 */
-export function closeTabsToRight(id: string): number {
+/** 关闭目标标签左侧所有标签（含会话标签，不含目标本身）；返回跳过数量 */
+export async function closeTabsToLeftAll(id: string): Promise<number> {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return 0;
-  return closeTabsMatching((_tab, i) => i > idx);
+  return closeTabRange(0, idx);
+}
+
+/** 关闭目标标签右侧所有标签（含会话标签，不含目标本身）；返回跳过数量 */
+export async function closeTabsToRightAll(id: string): Promise<number> {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx < 0) return 0;
+  return closeTabRange(idx + 1, tabs.length);
+}
+
+/** 关闭全部标签（会话+编辑器）；返回跳过数量 */
+export async function closeAllTabs(): Promise<number> {
+  return closeTabRange(0, tabs.length);
 }
 
 function removeTab(id: string): void {
@@ -523,6 +550,7 @@ function removeTab(id: string): void {
   const wasActive = activeTabId.value === id;
   tabs.splice(idx, 1);
   if (kind === TabKind.Terminal) releaseTerminal(id);
+  if (kind === TabKind.Chat) return; // 会话标签的激活切换由 useCodex 的会话关闭流程处理
   if (wasActive) {
     const next = tabs[Math.max(0, idx - 1)] ?? tabs[0];
     activeTabId.value = next ? next.id : "";
@@ -542,9 +570,12 @@ export async function saveAllDirtyTabs(): Promise<boolean> {
   return results.every(Boolean);
 }
 
-/** 测试专用：清空文件/diff/预览/终端标签状态 */
+/** 测试专用：清空文件/diff/预览/终端标签（保留会话标签） */
 export function __resetEditorTabsForTest(): void {
-  tabs.splice(0, tabs.length);
-  activeTabId.value = "";
+  const removed = tabs.filter((t) => t.kind !== TabKind.Chat);
+  for (const t of removed) tabs.splice(tabs.indexOf(t), 1);
+  if (!tabs.some((t) => t.id === activeTabId.value)) {
+    activeTabId.value = tabs[0]?.id ?? "";
+  }
   pendingCloseId.value = null;
 }

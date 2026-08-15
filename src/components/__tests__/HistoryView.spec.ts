@@ -33,6 +33,7 @@ import {
   store,
   togglePin,
 } from "../../composables/useCodex";
+import { tabs } from "../../composables/useEditorTabs";
 
 const mockedDelete = vi.mocked(deleteThread);
 const mockedOpenNewSession = vi.mocked(openNewSession);
@@ -70,7 +71,7 @@ function mockBasicHistory() {
 
 /** 打开一个会话标签（用于“已打开不可删除”相关用例） */
 function openTabFor(threadId: string) {
-  store.sessionTabs.push({
+  tabs.push({
     id: "s-" + threadId,
     kind: "chat",
     title: "会话",
@@ -107,7 +108,7 @@ function openTabFor(threadId: string) {
 describe("HistoryView 删除确认", () => {
   beforeEach(() => {
     mockBasicHistory();
-    store.sessionTabs.splice(0, store.sessionTabs.length);
+    tabs.splice(0, tabs.length);
     store.toast = "";
     mockedDelete.mockClear();
     mockedDelete.mockResolvedValue(undefined);
@@ -533,7 +534,7 @@ describe("HistoryView 文件夹右键菜单", () => {
     store.searchActive = false;
     store.searchSnippets = {};
     store.panelTab = "history";
-    store.sessionTabs.splice(0, store.sessionTabs.length);
+    tabs.splice(0, tabs.length);
     store.toast = "";
     mockedInvoke.mockClear();
     mockedDelete.mockClear();
@@ -737,11 +738,11 @@ describe("HistoryView 文件夹右键菜单", () => {
 describe("HistoryView 会话标签联动", () => {
   beforeEach(() => {
     mockBasicHistory();
-    store.sessionTabs.splice(0, store.sessionTabs.length);
+    tabs.splice(0, tabs.length);
   });
 
   it("后台运行中的会话行显示呼吸点，未运行不显示", async () => {
-    store.sessionTabs.push({
+    tabs.push({
       id: "s1",
       kind: "chat",
       title: "会话",
@@ -785,7 +786,7 @@ describe("HistoryView 会话标签联动", () => {
   });
 
   it("已打开会话行右键菜单不含「打开」「关闭标签」「删除会话」", async () => {
-    store.sessionTabs.push({
+    tabs.push({
       id: "s1",
       kind: "chat",
       title: "会话",

@@ -38,6 +38,9 @@ import {
   __resetSessionTabsForTest,
 } from "../../composables/useCodex";
 import type { UserInput } from "../../lib/types";
+import { activeTabId, tabs as _tabs } from "../../composables/useEditorTabs";
+/** 本 spec 的会话标签 fixture 直接放入统一列表 */
+const tabs = _tabs as unknown as SessionTab[];
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedSendPrompt = vi.mocked(sendPrompt);
@@ -1548,8 +1551,8 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
   it("两个会话同时挂载：附件路由到活动会话 A，不进入最后挂载的 B", async () => {
     const tabA = makeTab("tab-a");
     const tabB = makeTab("tab-b");
-    store.sessionTabs.push(tabA, tabB);
-    store.activeSessionId = "tab-a";
+    tabs.push(tabA, tabB);
+    activeTabId.value = "tab-a";
 
     wrapperA = mount(ComposerBar, {
       props: { tab: tabA, active: true },
@@ -1570,8 +1573,8 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
   it("切换活动会话后：附件路由到新的活动会话 B", async () => {
     const tabA = makeTab("tab-a");
     const tabB = makeTab("tab-b");
-    store.sessionTabs.push(tabA, tabB);
-    store.activeSessionId = "tab-a";
+    tabs.push(tabA, tabB);
+    activeTabId.value = "tab-a";
 
     wrapperA = mount(ComposerBar, {
       props: { tab: tabA, active: true },
@@ -1581,7 +1584,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
     });
     await flushPromises();
 
-    store.activeSessionId = "tab-b";
+    activeTabId.value = "tab-b";
     const b = makeAttachment("b.cs", "D:/repo/src/b.cs");
     expect(addAttachmentToActiveSession(b)).toBe(true);
     expect(store.attachments).toEqual([b]);
@@ -1591,8 +1594,8 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
 
   it("卸载后注销：附件不再路由到该会话", async () => {
     const tabA = makeTab("tab-a");
-    store.sessionTabs.push(tabA);
-    store.activeSessionId = "tab-a";
+    tabs.push(tabA);
+    activeTabId.value = "tab-a";
 
     wrapperA = mount(ComposerBar, {
       props: { tab: tabA, active: true },

@@ -326,8 +326,13 @@ export async function revealAbsPathInTree(absPath: string): Promise<void> {
 /** 面板切换同步入口：活动标签为 文件/diff/预览 时在资源树中定位（终端/会话标签不定位） */
 export async function revealActiveTab(): Promise<void> {
   const tab = activeTab.value;
-  if (!tab || tab.kind === TabKind.Terminal) return;
-  // 会话标签不参与 activeTab（会话标签由 sessionTabs 管理），此处只剩 文件/diff/预览
+  if (
+    !tab ||
+    tab.kind === TabKind.Terminal ||
+    tab.kind === TabKind.Chat
+  ) {
+    return;
+  }
   const absPath = /^[A-Za-z]:[\\/]/.test(tab.path)
     ? tab.path
     : joinFsPath(tab.workspace, tab.path);

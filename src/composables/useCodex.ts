@@ -29,6 +29,13 @@ import { playNotificationSound } from "../lib/sound";
 import { pathBaseName } from "../lib/format";
 import { focusComposer } from "../lib/composerFocus";
 import {
+  activeTab,
+  activeTabId,
+  activateTab,
+  insertTab,
+  tabs,
+} from "./useTabs";
+import {
   friendlyServerError,
   friendlyServerMessage,
 } from "../lib/serverMessages";
@@ -210,10 +217,6 @@ export const store = reactive({
   currentThreadOrigin: null as "new" | "history" | null,
   currentThreadWorkspace: null as string | null,
   resumedThreadId: null as string | null,
-  /** 已打开的会话标签列表（多会话标签） */
-  sessionTabs: [] as SessionTab[],
-  /** 当前激活的会话标签 id（null = 尚未初始化任何标签） */
-  activeSessionId: null as string | null,
   /** 活动标签工作区覆盖（文件/diff/预览/终端标签由 EditorPane 写入；null=跟随会话工作区） */
   workspace: null as string | null,
   itemsByThread: {} as Record<string, ThreadItem[]>,
@@ -281,7 +284,7 @@ function nextSessionTabId(): string {
 
 /** 新对话（未绑定线程）标签的默认状态 */
 function freshSessionTab(): SessionTab {
-  return {
+  return reactive({
     id: nextSessionTabId(),
     kind: TabKind.Chat,
     title: "新建会话",
@@ -312,7 +315,7 @@ function freshSessionTab(): SessionTab {
     loading: false,
     newChatWorkspace: null,
     interactions: [],
-  };
+  } as SessionTab);
 }
 
 /** 按线程查找已打开的会话标签（唯一性约束：至多一个） */
@@ -320,7 +323,9 @@ export function findSessionTabByThread(
   threadId: string | null | undefined,
 ): SessionTab | undefined {
   if (!threadId) return undefined;
-  return store.sessionTabs.find((t) => t.threadId === threadId);
+  return tabs.find(
+    (t): t is SessionTab => t.kind === TabKind.Chat && t.threadId === threadId,
+  );
 }
 
 /** 该线程是否已作为会话标签打开 */
@@ -333,9 +338,21 @@ export function isThreadRunning(threadId: string): boolean {
   return !!findSessionTabByThread(threadId)?.turnActive;
 }
 
-/** 当前激活的会话标签（无则 null） */
+/** live 字段当前投影的会话标签 id（活动标签为会话时随切换更新；文件/终端活动时保持最近会话） */
+let activeSessionTabId: string | null = null;
+
+/** 当前激活的会话标签（无则 null）：优先当前显示标签，否则最近投影的会话 */
 export function activeSessionTab(): SessionTab | null {
-  return store.sessionTabs.find((t) => t.id === store.activeSessionId) ?? null;
+  const t = activeTab.value;
+  if (t && t.kind === TabKind.Chat) return t;
+  if (!activeSessionTabId) return null;
+  const s = tabs.find((x) => x.id === activeSessionTabId);
+  return s && s.kind === TabKind.Chat ? s : null;
+}
+
+/** 统一列表中的会话标签集合（事件路由/批量处理用） */
+function allSessionTabs(): SessionTab[] {
+  return tabs.filter((t): t is SessionTab => t.kind === TabKind.Chat);
 }
 
 /**
@@ -452,32 +469,58 @@ function markSessionTabStopped(tab: SessionTab | null | undefined) {
 
 /** 复位 live 字段到“无会话标签”默认态（不创建标签；允许 0 个会话标签） */
 function resetLiveSessionState() {
-  store.activeSessionId = null;
   restoreSession(freshSessionTab());
 }
 
 /**
- * 切换到指定会话标签：快照当前标签 → 恢复目标标签 → 更新 live 字段。
+ * 当前显示标签为会话时：同步 activeSessionTabId 并投影 live 字段；
+ * 无任何标签时复位 live 默认态。切换/关闭/复位统一走这里。
+ */
+function syncActiveSessionProjection() {
+  const t = activeTab.value;
+  if (t && t.kind === TabKind.Chat) {
+    if (activeSessionTabId !== t.id) {
+      activeSessionTabId = t.id;
+      restoreSession(t);
+    }
+    return;
+  }
+  if (!t && activeSessionTabId !== null) {
+    activeSessionTabId = null;
+    resetLiveSessionState();
+  }
+}
+
+// 活动标签变化（切换/关闭）时同步 live 字段投影；flush sync 保证切换后立即可用
+watch(activeTab, () => syncActiveSessionProjection(), {
+  immediate: true,
+  flush: "sync",
+});
+
+/**
+ * 切换到指定会话标签：统一列表内按 id 激活（live 字段由投影 watch 同步）。
  * 会话多开：切换不确认、不中断后台回合。
  */
 export async function switchSessionTab(id: string): Promise<boolean> {
-  const target = store.sessionTabs.find((t) => t.id === id);
+  const target = tabs.find(
+    (t): t is SessionTab => t.kind === TabKind.Chat && t.id === id,
+  );
   if (!target) return false;
-  if (id === store.activeSessionId) return true;
-  syncActiveSessionTab();
-  store.activeSessionId = id;
-  restoreSession(target);
+  if (activeTabId.value === id) return true;
+  activateTab(id);
   return true;
 }
 
 /**
  * 关闭会话标签：运行中的会话先确认并中断（多开时仅关闭才停止）；关闭活动标签时
- * 自动切到相邻标签，无剩余标签时新建一个空标签兜底。
+ * 自动切到相邻会话标签，无剩余会话时复位 live 默认态并把视图切到剩余标签（或空）。
  */
 export async function closeSessionTab(id: string): Promise<void> {
-  const idx = store.sessionTabs.findIndex((t) => t.id === id);
-  if (idx < 0) return;
-  const tab = store.sessionTabs[idx];
+  const sessions = allSessionTabs();
+  const sidx = sessions.findIndex((t) => t.id === id);
+  if (sidx < 0) return;
+  const tab = sessions[sidx];
+  const idx = tabs.indexOf(tab);
   if (tab.threadId && (tab.turnActive || tab.goalText)) {
     const ok = await askConfirm({
       title: "关闭会话标签",
@@ -489,37 +532,47 @@ export async function closeSessionTab(id: string): Promise<void> {
     void interrupt(tab.threadId, tab.currentTurnId);
     markSessionTabStopped(tab);
   }
-  const wasActive = store.activeSessionId === id;
-  store.sessionTabs.splice(idx, 1);
+  const wasActive = activeTabId.value === id;
+  tabs.splice(idx, 1);
   if (wasActive) {
-    const next =
-      store.sessionTabs[Math.min(idx, store.sessionTabs.length - 1)] ?? null;
-    if (next) {
-      store.activeSessionId = next.id;
-      restoreSession(next);
-    } else {
-      // 允许 0 个会话标签：复位 live 字段到无会话默认态
-      resetLiveSessionState();
-    }
+    // 相邻会话标签（sessions 为移除前快照：同位置或前一个）；无会话时视图切到剩余标签
+    const next = sessions[sidx + 1] ?? sessions[sidx - 1] ?? null;
+    if (next) activateTab(next.id);
+    else if (tabs.length > 0) activateTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
+    else activeTabId.value = "";
   }
   // 释放该线程的本地消息缓存（无其它标签引用时）
   if (
     tab.threadId &&
-    !store.sessionTabs.some((t) => t.threadId === tab.threadId)
+    !allSessionTabs().some((t) => t.threadId === tab.threadId)
   ) {
     delete store.itemsByThread[tab.threadId];
     delete store.activeWorkByThread[tab.threadId];
   }
 }
 
-/** 关闭除当前活动标签外的所有会话标签（会话标签右键菜单） */
-export async function closeOtherSessionTabs(): Promise<void> {
-  const keep = store.activeSessionId;
-  for (const tab of [...store.sessionTabs]) {
-    if (tab.id === keep) continue;
-    // 运行中的会话标签跳过（不逐个弹确认），与“关闭所有标签”行为一致
-    if (tab.turnActive || tab.goalText) continue;
-    await closeSessionTab(tab.id);
+/**
+ * 无条件移除会话标签（线程不存在等异常路径）：处理活动切换、live 投影与缓存清理。
+ */
+function dropSessionTab(tab: SessionTab) {
+  const idx = tabs.indexOf(tab);
+  if (idx < 0) return;
+  const sessions = allSessionTabs();
+  const sidx = sessions.indexOf(tab);
+  const wasActive = activeTabId.value === tab.id;
+  tabs.splice(idx, 1);
+  if (wasActive) {
+    const next = sessions[sidx + 1] ?? sessions[sidx - 1] ?? null;
+    if (next) activateTab(next.id);
+    else if (tabs.length > 0) activateTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
+    else activeTabId.value = "";
+  }
+  if (
+    tab.threadId &&
+    !allSessionTabs().some((t) => t.threadId === tab.threadId)
+  ) {
+    delete store.itemsByThread[tab.threadId];
+    delete store.activeWorkByThread[tab.threadId];
   }
 }
 
@@ -530,7 +583,7 @@ export async function closeOtherSessionTabs(): Promise<void> {
  */
 export async function closeAllSessionTabs(): Promise<number> {
   let skipped = 0;
-  for (const tab of [...store.sessionTabs]) {
+  for (const tab of allSessionTabs()) {
     if (tab.turnActive || tab.goalText) {
       skipped++;
       continue;
@@ -555,10 +608,10 @@ export async function openSessionTabForThread(
   }
   const tab = freshSessionTab();
   tab.threadId = threadId; // 先绑定，加载期间也满足唯一性
-  store.sessionTabs.push(tab);
+  insertTab(tab);
   if (!(await switchSessionTab(tab.id))) {
-    const i = store.sessionTabs.indexOf(tab);
-    if (i >= 0) store.sessionTabs.splice(i, 1);
+    const i = tabs.indexOf(tab);
+    if (i >= 0) tabs.splice(i, 1);
     return false;
   }
   tab.origin = "history";
@@ -567,8 +620,13 @@ export async function openSessionTabForThread(
 
 /** 仅测试用：清空会话标签状态 */
 export function __resetSessionTabsForTest() {
-  store.sessionTabs.splice(0, store.sessionTabs.length);
-  store.activeSessionId = null;
+  for (const tab of allSessionTabs()) {
+    tabs.splice(tabs.indexOf(tab), 1);
+  }
+  activeSessionTabId = null;
+  if (!tabs.some((t) => t.id === activeTabId.value)) {
+    activeTabId.value = tabs[0]?.id ?? "";
+  }
 }
 
 let unlisteners: UnlistenFn[] = [];
@@ -1389,7 +1447,7 @@ export async function togglePin(threadId: string, pinned: boolean) {
 
 async function newChat(prompt: string, attachments: UserInput[]) {
   store.busy = true;
-  const tabId = store.activeSessionId;
+  const tabId = activeSessionTab()?.id ?? null;
   try {
     // newChat 仅在无当前会话时被调用，resolveSessionWorkspace 走 newChatWorkspace → workspace 分支
     const cwd = resolveSessionWorkspace();
@@ -1411,17 +1469,17 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     const existing = findSessionTabByThread(threadId);
     if (existing) {
       const cur = activeSessionTab();
-      const i = cur ? store.sessionTabs.indexOf(cur) : -1;
-      if (i >= 0) store.sessionTabs.splice(i, 1);
-      store.activeSessionId = existing.id;
-      restoreSession(existing);
+      if (cur) dropSessionTab(cur);
+      activateTab(existing.id);
       store.currentModel = res.model ?? currentModelId();
       await refreshThreads();
       return;
     }
     // 创建期间用户已切换到其它标签：结果直接写入原标签记录，避免污染当前会话
-    if (store.activeSessionId !== tabId) {
-      const tab = store.sessionTabs.find((t) => t.id === tabId);
+    if (tabId !== null && activeSessionTab()?.id !== tabId) {
+      const tab = tabs.find(
+        (t): t is SessionTab => t.kind === TabKind.Chat && t.id === tabId,
+      );
       if (tab) {
         tab.threadId = threadId;
         tab.name = res.thread.name ?? "";
@@ -1544,8 +1602,7 @@ async function continueTurnForTab(
       tab.resumedThreadId = threadId;
     } catch (e) {
       if (isThreadNotFound(e)) {
-        const i = store.sessionTabs.indexOf(tab);
-        if (i >= 0) store.sessionTabs.splice(i, 1);
+        dropSessionTab(tab);
         setToast("会话已不存在，已关闭该标签");
       } else {
         setToast(toastError(e));
@@ -1583,8 +1640,7 @@ async function continueTurnForTab(
     if (res?.turn?.id) tab.currentTurnId = res.turn.id;
   } catch (e) {
     if (isThreadNotFound(e)) {
-      const i = store.sessionTabs.indexOf(tab);
-      if (i >= 0) store.sessionTabs.splice(i, 1);
+      dropSessionTab(tab);
       setToast("会话已不存在，已关闭该标签");
     } else {
       setToast(toastError(e));
@@ -1783,9 +1839,8 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   const tab = freshSessionTab();
   if (cwd) tab.newChatWorkspace = cwd;
   tab.title = sessionTabTitle(tab);
-  store.sessionTabs.push(tab);
-  store.activeSessionId = tab.id;
-  restoreSession(tab);
+  insertTab(tab);
+  activateTab(tab.id); // live 字段由投影 watch 同步
   void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 进入新对话编辑态即预初始化插件缓存
   return true;
 }
@@ -1799,7 +1854,7 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
  * 避免加载期间用户切换标签导致状态串味）。
  */
 async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolean> {
-  const isActive = () => store.activeSessionId === tab.id;
+  const isActive = () => activeSessionTab()?.id === tab.id;
   tab.loading = true;
   if (isActive()) store.loading = true;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
@@ -1878,8 +1933,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
         resetToNewChat();
         setToast("会话已不存在，已切换为新会话");
       } else {
-        const i = store.sessionTabs.indexOf(tab);
-        if (i >= 0) store.sessionTabs.splice(i, 1);
+        dropSessionTab(tab);
         setToast("会话已不存在，已关闭该标签");
       }
     } else {
@@ -2055,20 +2109,8 @@ export async function deleteThread(threadId: string) {
     delete store.itemsByThread[threadId];
     delete store.activeWorkByThread[threadId];
     // 关闭绑定该线程的会话标签（线程已删除，无需确认/中断）
-    for (const tab of store.sessionTabs.filter((t) => t.threadId === threadId)) {
-      const idx = store.sessionTabs.indexOf(tab);
-      store.sessionTabs.splice(idx, 1);
-      if (store.activeSessionId === tab.id) {
-        const next =
-          store.sessionTabs[Math.min(idx, store.sessionTabs.length - 1)] ?? null;
-        if (next) {
-          store.activeSessionId = next.id;
-          restoreSession(next);
-        } else {
-          // 允许 0 个会话标签：复位 live 字段到无会话默认态
-          resetLiveSessionState();
-        }
-      }
+    for (const tab of allSessionTabs().filter((t) => t.threadId === threadId)) {
+      dropSessionTab(tab);
     }
   } catch (e) {
     setToast(toastError(e));
@@ -2085,7 +2127,7 @@ export async function respondInteraction(interaction: PendingInteraction, result
     setToast(toastError(e));
   } finally {
     store.interactions = store.interactions.filter((i) => i.requestId !== interaction.requestId);
-    for (const tab of store.sessionTabs) {
+    for (const tab of allSessionTabs()) {
       if (tab.interactions?.some((i) => i.requestId === interaction.requestId)) {
         tab.interactions = tab.interactions.filter(
           (i) => i.requestId !== interaction.requestId,
@@ -2130,7 +2172,7 @@ export async function wireEvents() {
     await listen("serverRequest/resolved", (e) => {
       const p = e.payload as { requestId: number | string };
       store.interactions = store.interactions.filter((i) => i.requestId !== p.requestId);
-      for (const tab of store.sessionTabs) {
+      for (const tab of allSessionTabs()) {
         if (tab.interactions.some((i) => i.requestId === p.requestId)) {
           tab.interactions = tab.interactions.filter(
             (i) => i.requestId !== p.requestId,
@@ -2148,7 +2190,7 @@ export async function wireEvents() {
         ? findSessionTabByThread(p.threadId)
         : activeSessionTab();
       if (!tab) return;
-      const isActive = store.activeSessionId === tab.id;
+      const isActive = activeSessionTab()?.id === tab.id;
       if (isActive) {
         store.turnActive = true;
         store.turnInterrupted = false;
@@ -2172,7 +2214,7 @@ export async function wireEvents() {
       const tid = p.threadId ?? store.currentThreadId;
       const tab = tid ? findSessionTabByThread(tid) : activeSessionTab();
       const interrupted = p.turn?.status === "interrupted";
-      const isActive = tab ? store.activeSessionId === tab.id : false;
+      const isActive = tab ? activeSessionTab()?.id === tab.id : false;
       if (tab) {
         if (isActive) {
           store.turnActive = false;
@@ -2246,7 +2288,7 @@ export async function wireEvents() {
       // 处理“加入队列”的跟进消息
       if (tab && tab.followupQueue.length) {
         const next = tab.followupQueue.shift()!;
-        if (store.activeSessionId === tab.id) {
+        if (activeSessionTab()?.id === tab.id) {
           // 活动标签：走 live 字段路径（发送状态落到当前会话）
           await continueTurn(next.text, next.attachments);
         } else if (tab.threadId) {
@@ -2388,7 +2430,7 @@ export async function wireEvents() {
       if (tab && p.threadName) {
         tab.name = p.threadName;
         tab.title = sessionTabTitle(tab);
-        if (store.activeSessionId === tab.id) {
+        if (activeSessionTab()?.id === tab.id) {
           store.currentThreadName = p.threadName;
         }
       }
@@ -2411,7 +2453,7 @@ export async function wireEvents() {
         window: p.tokenUsage?.modelContextWindow ?? null,
       };
       const tab = findSessionTabByThread(p.threadId);
-      if (tab && store.activeSessionId === tab.id) {
+      if (tab && activeSessionTab()?.id === tab.id) {
         store.threadTokenUsage = usage;
       } else if (tab) {
         tab.threadTokenUsage = usage;
@@ -2436,7 +2478,7 @@ export async function wireEvents() {
         ? findSessionTabByThread(p.threadId)
         : activeSessionTab();
       if (!tab) return; // 未打开的线程目标不进入 UI
-      const isActive = store.activeSessionId === tab.id;
+      const isActive = activeSessionTab()?.id === tab.id;
       if (p.goal) {
         const objective =
           typeof p.goal.objective === "string" ? p.goal.objective : null;
@@ -2472,7 +2514,7 @@ export async function wireEvents() {
         ? findSessionTabByThread(p.threadId)
         : activeSessionTab();
       if (!tab) return;
-      if (store.activeSessionId === tab.id) {
+      if (activeSessionTab()?.id === tab.id) {
         store.goalText = null;
         store.goalStatus = null;
         store.goalArmed = false;

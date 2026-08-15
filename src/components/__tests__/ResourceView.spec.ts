@@ -254,7 +254,7 @@ describe("ResourceView 文件树", () => {
     __resetEditorTabsForTest();
     __resetSessionTabsForTest();
     // 默认存在一个活动会话标签：附件入口可见（隐藏场景由专门用例覆盖）
-    store.sessionTabs.push({
+    tabs.push({
       id: "s1",
       kind: "chat",
       title: "会话",
@@ -286,7 +286,7 @@ describe("ResourceView 文件树", () => {
       newChatWorkspace: null,
       interactions: [],
     });
-    store.activeSessionId = "s1";
+    activeTabId.value = "s1";
     // 会话标签正在显示：附件入口可见（隐藏场景由专门用例覆盖）
     activeTabId.value = "s1";
   });

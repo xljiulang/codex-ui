@@ -14,10 +14,10 @@ import {
   activeTabId,
   activateTab,
   cancelClose,
+  closeAllTabs,
   closeAnyTab,
-  closeAllOtherTabs,
-  closeTabsToLeft,
-  closeTabsToRight,
+  closeTabsToLeftAll,
+  closeTabsToRightAll,
   discardTabAndClose,
   openTerminalTab,
   pendingCloseId,
@@ -40,12 +40,9 @@ import { revealGitFile } from "../composables/useGitChanges";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
-  closeAllSessionTabs,
-  closeOtherSessionTabs,
   newEmptyChat,
   setToast,
   store,
-  switchSessionTab,
   workspace,
   type SessionTab,
 } from "../composables/useCodex";
@@ -72,22 +69,34 @@ const TerminalPane = defineAsyncComponent(() => import("./TerminalPane.vue"));
 const ICON_FILE =
   "M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z";
 
-const activeFileTab = computed(() =>
-  activeTab.value?.kind === "file" ? activeTab.value : null,
+const activeFileTab = computed<FileEditorTab | null>(() =>
+  activeTab.value?.kind === TabKind.File
+    ? (activeTab.value as FileEditorTab)
+    : null,
 );
-const activeDiffTab = computed(() =>
-  activeTab.value?.kind === "diff" ? activeTab.value : null,
+const activeDiffTab = computed<DiffEditorTab | null>(() =>
+  activeTab.value?.kind === TabKind.Diff
+    ? (activeTab.value as DiffEditorTab)
+    : null,
 );
-const activePreviewTab = computed(() =>
-  activeTab.value?.kind === "preview" ? activeTab.value : null,
+const activePreviewTab = computed<PreviewEditorTab | null>(() =>
+  activeTab.value?.kind === TabKind.Preview
+    ? (activeTab.value as PreviewEditorTab)
+    : null,
 );
 /** 终端标签列表：全部常驻挂载（v-show 切换），切走不销毁 xterm/不中断进程 */
 const activeTerminalTabs = computed(() =>
   tabs.filter((t): t is TerminalEditorTab => t.kind === "terminal"),
 );
 
-/** 会话标签（多会话多开）：与文件/diff/预览/终端标签共用同一条标签栏 */
-const sessionTabs = computed(() => store.sessionTabs);
+/** 会话标签视图（统一列表中的会话块，恒在前） */
+const sessionTabs = computed(() =>
+  tabs.filter((t): t is SessionTab => t.kind === TabKind.Chat),
+);
+/** 文件/diff/预览/终端标签视图（统一列表中的其余部分，会话之后） */
+const editorTabs = computed<EditorTab[]>(() =>
+  tabs.filter((t): t is EditorTab => t.kind !== TabKind.Chat),
+);
 
 /** 标签栏常驻显示：所有标签关闭后仍保留「+」新建入口 */
 const showTabBar = computed(() => true);
@@ -128,7 +137,7 @@ function scrollTabs(dir: -1 | 1) {
 }
 
 watch(
-  [activeTabId, () => tabs.length, () => store.sessionTabs.length],
+  [activeTabId, () => tabs.length],
   () => {
     void nextTick(() => {
       scrollActiveTabIntoView();
@@ -139,7 +148,9 @@ watch(
 
 /** 待关闭确认的脏文件标签 */
 const pendingTab = computed<EditorTab | null>(
-  () => tabs.find((t) => t.id === pendingCloseId.value) ?? null,
+  () =>
+    (tabs.find((t) => t.id === pendingCloseId.value) as EditorTab | undefined) ??
+    null,
 );
 
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
@@ -203,36 +214,14 @@ function fileTabAbsPath(tab: FileEditorTab | PreviewEditorTab): string {
 
 /** 关闭所有标签（文件/diff/预览/终端 + 会话标签）：运行中会话/终端与未保存文件跳过并计数 */
 async function closeAllTabsWithToast() {
-  const editorSkipped = closeAllOtherTabs();
-  const sessionSkipped = await closeAllSessionTabs();
-  const skipped = editorSkipped + sessionSkipped;
+  const skipped = await closeAllTabs();
   if (skipped > 0) {
     setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`);
   }
 }
 
-/** 会话标签右键菜单：关闭所有标签（含会话）+ 关闭其它会话标签 */
-function openSessionTabMenu(e: MouseEvent) {
-  const items: CtxItem[] = [
-    {
-      label: "关闭所有标签",
-      icon: ICON_CLOSE_ALL,
-      action: () => void closeAllTabsWithToast(),
-    },
-    {
-      label: "关闭其它会话标签",
-      icon: ICON_CLOSE_ALL,
-      action: () => void closeOtherSessionTabs(),
-    },
-  ];
-  openCtx(e, items);
-}
-
-/**
- * 文件/diff/预览/终端标签右键菜单：关闭所有（含会话标签）+ 关闭左边/右边
- * （仅同组文件类标签，不涉及会话标签）+ 文件直达目录。
- */
-function openEditorTabMenu(e: MouseEvent, tab: EditorTab) {
+/** 统一标签右键菜单：关闭所有 + 关闭左边/右边（按统一列表整体顺序）+ 文件直达目录 */
+function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
   const idx = tabs.findIndex((t) => t.id === tab.id);
   const hasLeft = idx > 0;
   const hasRight = idx >= 0 && idx < tabs.length - 1;
@@ -248,8 +237,13 @@ function openEditorTabMenu(e: MouseEvent, tab: EditorTab) {
       label: "关闭左边所有标签",
       icon: ICON_CLOSE_LEFT,
       action: () => {
-        const skipped = closeTabsToLeft(tab.id);
-        if (skipped > 0) setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端）`);
+        void closeTabsToLeftAll(tab.id).then((skipped) => {
+          if (skipped > 0) {
+            setToast(
+              `已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`,
+            );
+          }
+        });
       },
     });
   }
@@ -258,8 +252,13 @@ function openEditorTabMenu(e: MouseEvent, tab: EditorTab) {
       label: "关闭右边所有标签",
       icon: ICON_CLOSE_RIGHT,
       action: () => {
-        const skipped = closeTabsToRight(tab.id);
-        if (skipped > 0) setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端）`);
+        void closeTabsToRightAll(tab.id).then((skipped) => {
+          if (skipped > 0) {
+            setToast(
+              `已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`,
+            );
+          }
+        });
       },
     });
   }
@@ -300,16 +299,21 @@ onBeforeUnmount(() => {
 watch(
   () =>
     tabs
-      .filter((t) => t.kind !== "terminal")
+      .filter((t) => t.kind !== TabKind.Terminal && t.kind !== TabKind.Chat)
       .map((t) => t.id),
   () => {
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of tabs) {
-      if (tab.kind === TabKind.Terminal) continue;
+      if (tab.kind === TabKind.Terminal || tab.kind === TabKind.Chat) continue;
+      const t = tab as FileEditorTab | DiffEditorTab | PreviewEditorTab;
       const root =
-        tab.kind === TabKind.File ? tab.workspace : tab.kind === TabKind.Diff ? tab.workspace : tab.workspace;
+        t.kind === TabKind.File
+          ? t.workspace
+          : t.kind === TabKind.Diff
+            ? t.workspace
+            : t.workspace;
       const list = byRoot.get(root) ?? [];
-      list.push(tabToEntry(tab));
+      list.push(tabToEntry(t));
       byRoot.set(root, list);
     }
     for (const [root, entries] of byRoot) {
@@ -328,44 +332,19 @@ watch(activeTab, (tab) => {
   if (tab && tab.kind === TabKind.Diff) {
     revealGitFile(tab.workspace, tab.path);
   }
-  if (!tab || tab.kind === TabKind.Terminal) return;
+  if (!tab || tab.kind === TabKind.Terminal || tab.kind === TabKind.Chat) return;
   void revealAbsPathInTree(tabAbsPath(tab));
 });
 
-/** 活动会话标签切换：编辑器视图跟随（会话标签 id 即 activeTabId） */
-watch(
-  () => store.activeSessionId,
-  (id) => {
-    if (id) activeTabId.value = id;
-  },
-  { immediate: true },
-);
-
-// 编辑器标签关闭到空时回落到活动会话标签（关闭最后一个文件标签后回到对话视图）
-watch(activeTabId, (id) => {
-  if (!id && store.activeSessionId) {
-    activeTabId.value = store.activeSessionId;
-  }
-});
-
-/** 活动标签的工作区：活动编辑器标签取 tab.workspace，活动会话标签取记录 workspace */
-const activeWorkspace = computed((): string | null => {
-  const t = activeTab.value;
-  if (t) return t.workspace;
-  const s = store.sessionTabs.find((x) => x.id === store.activeSessionId);
-  return s?.workspace ?? null;
-});
+/** 活动标签的工作区（会话/文件/diff/预览/终端统一取 tab.workspace） */
+const activeWorkspace = computed((): string | null => activeTab.value?.workspace ?? null);
 
 /**
  * 是否存在激活状态的标签（无活动标签时隐藏「+」）。
- * 按“活动标签真实存在”判定：activeTabId 可能残留已关闭会话标签的 id，
- * 仅看非空会误判，需同时命中编辑器标签或现存会话标签。
+ * 按“活动标签真实存在”判定（activeTab 覆盖统一列表全部类型）。
  */
 const hasActiveTab = computed(
-  () =>
-    activeTabId.value !== "" &&
-    (activeTab.value !== null ||
-      store.sessionTabs.some((t) => t.id === activeTabId.value)),
+  () => activeTabId.value !== "" && activeTab.value !== null,
 );
 
 /** 标签栏末尾「+」：选择新建会话或新建终端，均使用活动标签工作区启动 */
@@ -385,11 +364,6 @@ function openAddMenu(e: MouseEvent) {
   ]);
 }
 
-/** 点击会话标签：先切编辑器视图，再同步会话状态（已激活时也要回到对话视图） */
-function onSessionTabClick(id: string) {
-  activeTabId.value = id;
-  void switchSessionTab(id);
-}
 </script>
 
 <template>
@@ -421,8 +395,8 @@ function onSessionTabClick(id: string) {
             :aria-label="tab.title"
             :tabindex="tab.id === activeTabId ? 0 : -1"
             v-tooltip="sessionTabTooltip(tab)"
-            @click="onSessionTabClick(tab.id)"
-            @contextmenu="openSessionTabMenu($event)"
+            @click="activateTab(tab.id)"
+            @contextmenu="openTabMenu($event, tab)"
             @mousedown.middle.prevent="closeAnyTab(tab)"
           >
             <span class="editor-tab-logo" aria-hidden="true">
@@ -457,7 +431,7 @@ function onSessionTabClick(id: string) {
             </button>
           </button>
           <button
-            v-for="tab in tabs"
+            v-for="tab in editorTabs"
             :key="tab.id"
             class="editor-tab"
             :class="{
@@ -469,7 +443,7 @@ function onSessionTabClick(id: string) {
             :aria-label="tab.title"
             :tabindex="tab.id === activeTabId ? 0 : -1"
             @click="activateTab(tab.id)"
-            @contextmenu="openEditorTabMenu($event, tab)"
+            @contextmenu="openTabMenu($event, tab)"
             @mousedown.middle.prevent="closeAnyTab(tab)"
           >
             <span
@@ -549,10 +523,7 @@ function onSessionTabClick(id: string) {
       </button>
     </div>
     <div class="editor-pane-body">
-      <div
-        v-if="store.sessionTabs.length === 0 && tabs.length === 0"
-        class="no-session-state"
-      >
+      <div v-if="tabs.length === 0" class="no-session-state">
         <div class="empty-logo">
           <svg viewBox="0 0 24 24">
             <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
