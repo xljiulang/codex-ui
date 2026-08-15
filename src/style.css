@@ -4692,6 +4692,21 @@ body.resizing-composer {
   font-size: 12.5px;
 }
 
+/* 零会话标签空状态：主区域居中纯提示 */
+.no-session-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: var(--text-faint);
+}
+
+.no-session-state .no-session-hint {
+  font-size: 13px;
+}
+
 /* 空状态 Logo：与 AppHeader 相同的圆角方块 + 六边形 C 标 */
 .empty-logo {
   display: inline-flex;

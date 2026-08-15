@@ -1,4 +1,4 @@
-import { nextTick, reactive, watch } from "vue";
+import { nextTick, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
@@ -375,6 +375,12 @@ function markSessionTabStopped(tab: SessionTab | null | undefined) {
   tab.goalArmed = false;
 }
 
+/** 复位 live 字段到“无会话标签”默认态（不创建标签；允许 0 个会话标签） */
+function resetLiveSessionState() {
+  store.activeSessionId = null;
+  restoreSession(freshSessionTab());
+}
+
 /**
  * 切换到指定会话标签：快照当前标签 → 恢复目标标签 → 更新 live 字段。
  * 会话多开：切换不确认、不中断后台回合。
@@ -417,11 +423,8 @@ export async function closeSessionTab(id: string): Promise<void> {
       store.activeSessionId = next.id;
       restoreSession(next);
     } else {
-      const fresh = freshSessionTab();
-      store.sessionTabs.push(fresh);
-      store.activeSessionId = fresh.id;
-      restoreSession(fresh);
-      void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+      // 允许 0 个会话标签：复位 live 字段到无会话默认态
+      resetLiveSessionState();
     }
   }
   // 释放该线程的本地消息缓存（无其它标签引用时）
@@ -447,7 +450,7 @@ export async function closeOtherSessionTabs(): Promise<void> {
 
 /**
  * 关闭全部会话标签（“关闭所有标签”用）：运行中的跳过并计数；
- * 关闭后保证至少保留一个空会话标签兜底。
+ * 允许关闭到 0 个会话标签（主区域显示空状态）。
  * 返回跳过的运行中标签数量。
  */
 export async function closeAllSessionTabs(): Promise<number> {
@@ -458,13 +461,6 @@ export async function closeAllSessionTabs(): Promise<number> {
       continue;
     }
     await closeSessionTab(tab.id);
-  }
-  if (store.sessionTabs.length === 0) {
-    const fresh = freshSessionTab();
-    store.sessionTabs.push(fresh);
-    store.activeSessionId = fresh.id;
-    restoreSession(fresh);
-    void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
   }
   return skipped;
 }
@@ -1799,6 +1795,29 @@ export async function openNewSession(cwd?: string | null): Promise<void> {
   await finishSessionSwitch();
 }
 
+/** 目录选择对话框打开中：禁止重复触发（头部「+」与空状态按钮共用，供按钮禁用态绑定） */
+export const pickingNewSessionDir = ref(false);
+
+/**
+ * 选择工作目录并新建会话（头部「+」与零会话空状态按钮共用）：
+ * 先弹目录选择（初始定位当前维护的工作目录），取消则流程直接结束。
+ */
+export async function pickAndOpenNewSession(): Promise<void> {
+  if (pickingNewSessionDir.value) return;
+  pickingNewSessionDir.value = true;
+  try {
+    const dir = await invoke<string | null>("pick_directory", {
+      initialDir: resolveCwd(),
+    });
+    if (!dir) return;
+    await openNewSession(dir);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    pickingNewSessionDir.value = false;
+  }
+}
+
 /**
  * 打开历史会话统一入口（会话行单击 / 右键「打开」）：
  * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
@@ -1925,11 +1944,8 @@ export async function deleteThread(threadId: string) {
           store.activeSessionId = next.id;
           restoreSession(next);
         } else {
-          const fresh = freshSessionTab();
-          store.sessionTabs.push(fresh);
-          store.activeSessionId = fresh.id;
-          restoreSession(fresh);
-          void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+          // 允许 0 个会话标签：复位 live 字段到无会话默认态
+          resetLiveSessionState();
         }
       }
     }
@@ -2386,15 +2402,8 @@ export async function init() {
     } catch {
       // 忽略非 Tauri 环境
     }
-    // 启动即建立首个会话标签（新对话编辑态），多会话标签的兜底标签
-    if (store.sessionTabs.length === 0) {
-      const tab = freshSessionTab();
-      store.sessionTabs.push(tab);
-      store.activeSessionId = tab.id;
-      restoreSession(tab);
-    }
     void loadModels();
-    void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动的初始新对话即预初始化插件缓存
+    void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 应用启动预初始化新对话插件缓存
     void ensureSkills(); // 应用启动预加载技能列表（$ 菜单与回显悬浮提示共用）
     await refreshThreads();
     await wireEvents();

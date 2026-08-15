@@ -1,34 +1,10 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import {
-  openNewSession,
-  resolveCwd,
-  setToast,
+  pickAndOpenNewSession,
+  pickingNewSessionDir,
   store,
-  toastError,
 } from "../composables/useCodex";
 import { ICON_PLUS } from "../lib/icons";
-
-// 选择文件夹对话框打开中：禁止重复触发，避免同时弹多个系统对话框
-const picking = ref(false);
-
-async function onNewChat() {
-  if (picking.value) return;
-  picking.value = true;
-  try {
-    // 先选目录（初始定位到当前维护的工作目录）；取消选择文件夹则流程直接结束（不新建、不聚焦、不切 Tab）
-    const dir = await invoke<string | null>("pick_directory", {
-      initialDir: resolveCwd(),
-    });
-    if (!dir) return;
-    await openNewSession(dir);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    picking.value = false;
-  }
-}
 
 function onSettings() {
   store.showSettings = !store.showSettings;
@@ -50,9 +26,13 @@ function onSettings() {
       <button
         class="icon-btn new-chat-btn"
         aria-label="新建会话"
-        :disabled="picking"
-        v-tooltip="picking ? '正在选择文件夹…' : '新建会话（选择工作目录）'"
-        @click="onNewChat()"
+        :disabled="pickingNewSessionDir"
+        v-tooltip="
+          pickingNewSessionDir
+            ? '正在选择文件夹…'
+            : '新建会话（选择工作目录）'
+        "
+        @click="pickAndOpenNewSession()"
       >
         <svg viewBox="0 0 24 24">
           <path :d="ICON_PLUS" />

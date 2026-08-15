@@ -38,6 +38,7 @@ import {
   closeAllSessionTabs,
   closeOtherSessionTabs,
   closeSessionTab,
+  deleteThread,
   dismissPlanPrompt,
   disposeEvents,
   ensureSkills,
@@ -54,6 +55,7 @@ import {
   openHistorySession,
   openNewSession,
   openThread,
+  pickAndOpenNewSession,
   refreshThreads,
   refreshServer,
   resolveCwd,
@@ -240,6 +242,7 @@ describe("启动加载态 booting 状态", () => {
       }
       return Promise.resolve(undefined);
     });
+    __resetSessionTabsForTest();
     store.booting = true;
   });
 
@@ -247,6 +250,9 @@ describe("启动加载态 booting 状态", () => {
     expect(store.booting).toBe(true);
     await init();
     expect(store.booting).toBe(false);
+    // 允许 0 个会话标签：启动不自动创建
+    expect(store.sessionTabs).toHaveLength(0);
+    expect(store.activeSessionId).toBeNull();
   });
 
   it("init() 抛错时也关闭加载态", async () => {
@@ -959,10 +965,11 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       turnId: "turn-1",
     });
     expect(store.sessionTabs.some((t) => t.id === "s1")).toBe(false);
-    // 无剩余标签时兜底新建一个空标签
-    expect(store.sessionTabs).toHaveLength(1);
-    expect(store.sessionTabs[0].threadId).toBeNull();
-    expect(store.activeSessionId).toBe(store.sessionTabs[0].id);
+    // 允许 0 个会话标签：不兜底新建，live 字段复位到无会话默认态
+    expect(store.sessionTabs).toHaveLength(0);
+    expect(store.activeSessionId).toBeNull();
+    expect(store.currentThreadId).toBeNull();
+    expect(store.turnActive).toBe(false);
   });
 
   it("关闭运行中的会话标签：取消确认则保留、不中断", async () => {
@@ -1150,7 +1157,7 @@ describe("会话标签状态与事件路由", () => {
     expect(store.sessionTabs[0].goalText).toBe("新目标");
   });
 
-  it("closeAllSessionTabs：运行中跳过并计数，关闭后兜底空标签", async () => {
+  it("closeAllSessionTabs：运行中跳过并计数，关闭后保留运行中标签", async () => {
     store.sessionTabs.push(makeSessionTab("s1", "t1"));
     store.sessionTabs.push(
       makeSessionTab("s2", "t2", { turnActive: true }),
@@ -1160,10 +1167,80 @@ describe("会话标签状态与事件路由", () => {
     expect(skipped).toBe(1);
     expect(store.sessionTabs.some((t) => t.id === "s1")).toBe(false);
     expect(store.sessionTabs.some((t) => t.id === "s2")).toBe(true);
-    expect(store.sessionTabs.length).toBeGreaterThanOrEqual(1);
+    expect(store.sessionTabs).toHaveLength(1);
     expect(store.activeSessionId).toBe(
       store.sessionTabs[store.sessionTabs.length - 1].id,
     );
+  });
+
+  it("closeAllSessionTabs：全部关闭后允许 0 标签", async () => {
+    store.sessionTabs.push(makeSessionTab("s1", "t1"));
+    store.activeSessionId = "s1";
+    const skipped = await closeAllSessionTabs();
+    expect(skipped).toBe(0);
+    expect(store.sessionTabs).toHaveLength(0);
+    expect(store.activeSessionId).toBeNull();
+  });
+
+  it("deleteThread：删除唯一标签后允许 0 标签并复位 live 字段", async () => {
+    store.sessionTabs.push(makeSessionTab("s1", "t1"));
+    store.activeSessionId = "s1";
+    store.currentThreadId = "t1";
+    mockedInvoke.mockResolvedValue(undefined);
+    await deleteThread("t1");
+    expect(store.sessionTabs).toHaveLength(0);
+    expect(store.activeSessionId).toBeNull();
+    expect(store.currentThreadId).toBeNull();
+  });
+
+  it("pickAndOpenNewSession：弹目录选择（初始为 workspace），选中后新建会话", async () => {
+    store.server.workspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "pick_directory") {
+        return Promise.resolve("D:/project");
+      }
+      return Promise.resolve(undefined);
+    });
+    await pickAndOpenNewSession();
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
+      initialDir: "D:/repo",
+    });
+    expect(store.sessionTabs).toHaveLength(1);
+    expect(store.sessionTabs[0].threadId).toBeNull();
+    expect(store.sessionTabs[0].newChatCwd).toBe("D:/project");
+  });
+
+  it("pickAndOpenNewSession：有会话时初始目录为线程 cwd", async () => {
+    store.server.workspace = "D:/repo";
+    store.currentThreadId = "t1";
+    store.currentThreadCwd = "D:/session";
+    mockedInvoke.mockResolvedValue("D:/project");
+    await pickAndOpenNewSession();
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
+      initialDir: "D:/session",
+    });
+  });
+
+  it("pickAndOpenNewSession：取消选择不新建", async () => {
+    store.server.workspace = "D:/repo";
+    mockedInvoke.mockResolvedValue(null);
+    await pickAndOpenNewSession();
+    expect(store.sessionTabs).toHaveLength(0);
+  });
+
+  it("pickAndOpenNewSession：选择器打开期间防重入", async () => {
+    let resolveDir!: (v: string | null) => void;
+    mockedInvoke.mockImplementation(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveDir = resolve;
+        }),
+    );
+    const p1 = pickAndOpenNewSession();
+    const p2 = pickAndOpenNewSession();
+    resolveDir(null);
+    await Promise.all([p1, p2]);
+    expect(mockedInvoke).toHaveBeenCalledTimes(1);
   });
 
   it("interaction:request 按 threadId 路由到对应标签，resolved 移除", async () => {

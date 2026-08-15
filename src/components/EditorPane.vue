@@ -86,8 +86,8 @@ const activeTerminalTabs = computed(() =>
 /** 会话标签（多会话多开）：与文件/diff/预览/终端标签共用同一条标签栏 */
 const sessionTabs = computed(() => store.sessionTabs);
 
-/** 标签栏常驻显示：会话标签恒存在（应用启动后 ≥1），不因“只剩一个会话标签”而隐藏 */
-const showTabBar = computed(() => store.sessionTabs.length > 0);
+/** 标签栏常驻显示：所有标签关闭后仍保留「+」新建入口 */
+const showTabBar = computed(() => true);
 
 /** Tab 横向滚动：新标签/激活标签自动滚入视野，溢出时显示左右箭头 */
 const tabScroller = ref<HTMLElement | null>(null);
@@ -511,6 +511,18 @@ function onSessionTabClick(id: string) {
       </button>
     </div>
     <div class="editor-pane-body">
+      <div
+        v-if="store.sessionTabs.length === 0 && tabs.length === 0"
+        class="no-session-state"
+      >
+        <div class="empty-logo">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
+            <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
+          </svg>
+        </div>
+        <p class="no-session-hint">当前还没有任何打开的项</p>
+      </div>
       <ChatView
         v-for="tab in sessionTabs"
         :key="tab.id"

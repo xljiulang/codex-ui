@@ -171,6 +171,38 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("零会话零文件标签时：空状态显示 Logo 与提示文案（无新建按钮），标签栏保留「+」", () => {
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    store.activeSessionId = null;
+    const wrapper = mountPane();
+    expect(wrapper.find(".editor-tabs").exists()).toBe(true);
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
+    expect(wrapper.find(".no-session-state").exists()).toBe(true);
+    expect(wrapper.find(".no-session-state .empty-logo").exists()).toBe(true);
+    expect(wrapper.find(".no-session-state").text()).toContain(
+      "当前还没有任何打开的项",
+    );
+    expect(wrapper.find(".no-session-state .btn").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("零会话但有文件标签时：标签栏显示、空状态不显示", async () => {
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    store.activeSessionId = null;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("hello"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    expect(wrapper.find(".editor-tabs").exists()).toBe(true);
+    expect(wrapper.find(".no-session-state").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("打开文件后显示标签栏：会话标签可关闭，文件标签在其后", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {

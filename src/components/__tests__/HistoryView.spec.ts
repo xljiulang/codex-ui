@@ -1,11 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { mount, type VueWrapper } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
-    closeSessionTab: vi.fn(),
     deleteThread: vi.fn(),
     openHistorySession: vi.fn(),
     openNewSession: vi.fn(),
@@ -22,7 +21,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
 import {
-  closeSessionTab,
   deleteThread,
   openHistorySession,
   openNewSession,
@@ -33,7 +31,6 @@ import {
 } from "../../composables/useCodex";
 
 const mockedDelete = vi.mocked(deleteThread);
-const mockedCloseSessionTab = vi.mocked(closeSessionTab);
 const mockedOpenNewSession = vi.mocked(openNewSession);
 const mockedOpenHistorySession = vi.mocked(openHistorySession);
 const mockedTogglePin = vi.mocked(togglePin);
@@ -67,9 +64,36 @@ function mockBasicHistory() {
   store.loadingHistory = false;
 }
 
+/** 打开一个会话标签（用于“已打开不可删除”相关用例） */
+function openTabFor(threadId: string) {
+  store.sessionTabs.push({
+    id: "s-" + threadId,
+    threadId,
+    name: "",
+    origin: "history",
+    cwd: null,
+    resumedThreadId: null,
+    turnActive: false,
+    currentTurnId: null,
+    turnInterrupted: false,
+    goalText: null,
+    goalStatus: null,
+    goalArmed: false,
+    threadTokenUsage: null,
+    followupQueue: [],
+    attachments: [],
+    planPrompt: null,
+    loadingThread: false,
+    newChatCwd: null,
+    interactions: [],
+  });
+}
+
 describe("HistoryView 删除确认", () => {
   beforeEach(() => {
     mockBasicHistory();
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    store.toast = "";
     mockedDelete.mockClear();
     mockedDelete.mockResolvedValue(undefined);
   });
@@ -494,6 +518,8 @@ describe("HistoryView 文件夹右键菜单", () => {
     store.searchActive = false;
     store.searchSnippets = {};
     store.panelTab = "history";
+    store.sessionTabs.splice(0, store.sessionTabs.length);
+    store.toast = "";
     mockedInvoke.mockClear();
     mockedDelete.mockClear();
     mockedDelete.mockResolvedValue(undefined);
@@ -596,6 +622,59 @@ describe("HistoryView 文件夹右键菜单", () => {
     wrapper.unmount();
   });
 
+  it("组内全部会话已打开：文件夹右键菜单不含「删除所有会话」", async () => {
+    openTabFor("t1");
+    openTabFor("t2");
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(labels).toEqual(["新建会话", "在资源管理器中打开"]);
+    wrapper.unmount();
+  });
+
+  it("组内部分未打开：文件夹右键菜单保留「删除所有会话」", async () => {
+    openTabFor("t1");
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
+    expect(labels).toContain("删除所有会话");
+    wrapper.unmount();
+  });
+
+  it("混有已打开/未打开：「删除所有会话」仅删除未打开并提示跳过数量", async () => {
+    openTabFor("t1");
+    const wrapper = mount(HistoryView);
+    await wrapper.find(".history-folder").trigger("contextmenu", {
+      clientX: 200,
+      clientY: 200,
+    });
+    await clickCtxItem(wrapper, "删除所有会话");
+    // 确认框文案体现保留数量
+    expect(wrapper.text()).toContain("1 个已打开将保留");
+    const del = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "删除");
+    await del!.trigger("click");
+    await flushPromises();
+
+    expect(mockedDelete).toHaveBeenCalledTimes(1);
+    expect(mockedDelete).toHaveBeenCalledWith("t2");
+    expect(mockedDelete).not.toHaveBeenCalledWith("t1");
+    expect(store.toast).toContain("已跳过 1 个已打开的会话");
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("分组删除确认框按 Escape 关闭且不删除", async () => {
     const wrapper = mount(HistoryView);
     await wrapper.find(".history-folder").trigger("contextmenu", {
@@ -616,7 +695,6 @@ describe("HistoryView 会话标签联动", () => {
   beforeEach(() => {
     mockBasicHistory();
     store.sessionTabs.splice(0, store.sessionTabs.length);
-    mockedCloseSessionTab.mockClear();
   });
 
   it("已打开标签的会话行显示「已打开」标记，后台运行中显示呼吸点", async () => {
@@ -654,7 +732,7 @@ describe("HistoryView 会话标签联动", () => {
     wrapper.unmount();
   });
 
-  it("已打开会话行右键菜单含「关闭标签」且不含「删除会话」，点击调用 closeSessionTab", async () => {
+  it("已打开会话行右键菜单不含「关闭标签」与「删除会话」", async () => {
     store.sessionTabs.push({
       id: "s1",
       threadId: "t1",
@@ -679,11 +757,9 @@ describe("HistoryView 会话标签联动", () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper, 0);
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
-    expect(labels).toContain("关闭标签");
+    expect(labels).not.toContain("关闭标签");
     expect(labels).not.toContain("删除会话");
-
-    await clickCtxItem(wrapper, "关闭标签");
-    expect(mockedCloseSessionTab).toHaveBeenCalledWith("s1");
+    expect(labels).toEqual(["打开", "重命名", "置顶固定"]);
     wrapper.unmount();
   });
 
@@ -693,7 +769,6 @@ describe("HistoryView 会话标签联动", () => {
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).not.toContain("关闭标签");
     expect(labels).toContain("删除会话");
-    expect(mockedCloseSessionTab).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });

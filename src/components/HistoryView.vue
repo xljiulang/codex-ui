@@ -11,7 +11,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import {
   clearSearch,
-  closeSessionTab,
   deleteThread,
   isThreadOpen,
   isThreadRunning,
@@ -35,7 +34,6 @@ import { debounce } from "../lib/debounce";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
-  ICON_CLOSE_ALL,
   ICON_DELETE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
@@ -194,7 +192,13 @@ async function doDelete() {
   if (target.kind === "thread") {
     await deleteThread(target.thread.id);
   } else {
-    await Promise.all(target.group.threads.map((t) => deleteThread(t.id)));
+    // 已打开标签的会话不可删除：仅删除未打开的，跳过的计数提示
+    const closed = target.group.threads.filter((t) => !isThreadOpen(t.id));
+    const skipped = target.group.threads.length - closed.length;
+    await Promise.all(closed.map((t) => deleteThread(t.id)));
+    if (skipped > 0) {
+      setToast(`已跳过 ${skipped} 个已打开的会话`);
+    }
   }
 }
 
@@ -207,15 +211,6 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
       icon: ICON_OPEN,
       action: () => void openHistorySession(t.id),
     },
-    ...(isThreadOpen(t.id)
-      ? [
-          {
-            label: "关闭标签",
-            icon: ICON_CLOSE_ALL,
-            action: () => void closeSessionTab(findSessionTabId(t.id)),
-          },
-        ]
-      : []),
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
     {
       label: t.isPinned ? "取消固定" : "置顶固定",
@@ -236,15 +231,9 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   openCtx(e, items);
 }
 
-/** 会话标签 id（已打开时才调用） */
-function findSessionTabId(threadId: string): string {
-  const tab = store.sessionTabs.find((t) => t.threadId === threadId);
-  return tab?.id ?? "";
-}
-
 /** 历史目录行右键菜单：新建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
 function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
-  openCtx(e, [
+  const items: CtxItem[] = [
     {
       label: "新建会话",
       icon: ICON_PLUS,
@@ -255,13 +244,17 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
       icon: ICON_FOLDER_OPEN,
       action: () => revealInExplorer(group.path),
     },
-    {
+  ];
+  // 组内全部会话都已打开时隐藏「删除所有会话」
+  if (group.threads.some((t) => !isThreadOpen(t.id))) {
+    items.push({
       label: "删除所有会话",
       icon: ICON_DELETE,
       danger: true,
       action: () => askDeleteGroup(group),
-    },
-  ]);
+    });
+  }
+  openCtx(e, items);
 }
 
 function revealInExplorer(path: string) {
@@ -285,7 +278,12 @@ const confirmMessage = computed(() => {
   if (t.kind === "thread") {
     return `确定删除会话「${threadTitle(t.thread)}」吗？此操作不可恢复。`;
   }
-  return `确定删除目录「${t.group.label}」下的所有会话（共 ${t.group.threads.length} 个）吗？此操作不可恢复。`;
+  const openCount = t.group.threads.filter((x) => isThreadOpen(x.id)).length;
+  if (openCount === 0) {
+    return `确定删除目录「${t.group.label}」下的所有会话（共 ${t.group.threads.length} 个）吗？此操作不可恢复。`;
+  }
+  const closedCount = t.group.threads.length - openCount;
+  return `确定删除目录「${t.group.label}」下的 ${closedCount} 个未打开的会话吗？（${openCount} 个已打开将保留）此操作不可恢复。`;
 });
 
 onMounted(() => {
