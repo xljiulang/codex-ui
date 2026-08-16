@@ -878,6 +878,91 @@ describe("计划完成确认弹窗", () => {
     });
   });
 
+  it("第二轮评估未产出 plan：不再弹旧计划（回归：跨回合误扫）", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "u1", type: "userMessage", content: [], startedAtMs: 1000 },
+      {
+        id: "p1",
+        type: "plan",
+        text: "计划A",
+        status: "completed",
+        startedAtMs: 2000,
+      },
+      { id: "u2", type: "userMessage", content: [], startedAtMs: 3000 },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-2", status: "completed" },
+    });
+    await flushPromises();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
+  });
+
+  it("第二轮真正产出 plan：弹出新计划而非旧计划", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "u1", type: "userMessage", content: [], startedAtMs: 1000 },
+      {
+        id: "p1",
+        type: "plan",
+        text: "计划A",
+        status: "completed",
+        startedAtMs: 2000,
+      },
+      { id: "u2", type: "userMessage", content: [], startedAtMs: 3000 },
+      {
+        id: "p2",
+        type: "plan",
+        text: "计划B",
+        status: "completed",
+        startedAtMs: 4000,
+      },
+    ];
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-2", status: "completed" },
+    });
+    await flushPromises();
+    expect(activeSessionTab()?.planPrompt).toEqual({
+      threadId: "t1",
+      turnId: "turn-2",
+      planText: "计划B",
+    });
+  });
+
+  it("组合场景：turn/started 清空旧提示，第二轮无新 plan 不弹", async () => {
+    await wireEvents();
+    (tabs[0] as SessionTab).planPrompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "计划A",
+    };
+    store.itemsByThread["t1"] = [
+      { id: "u1", type: "userMessage", content: [], startedAtMs: 1000 },
+      {
+        id: "p1",
+        type: "plan",
+        text: "计划A",
+        status: "completed",
+        startedAtMs: 2000,
+      },
+      { id: "u2", type: "userMessage", content: [], startedAtMs: 3000 },
+    ];
+
+    fireListen("turn/started", { threadId: "t1", turn: { id: "turn-2" } });
+    expect(activeSessionTab()?.planPrompt).toBeNull();
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-2", status: "completed" },
+    });
+    await flushPromises();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
+  });
+
   it("tab 为 plan、store 为 execute：仍按标签模式弹出计划确认（不读全局 taskMode）", async () => {
     await wireEvents();
     store.itemsByThread["t1"] = [

@@ -198,8 +198,18 @@ export async function wireEvents() {
         tab.planPrompt?.turnId !== p.turn.id
       ) {
         const threadItems = store.itemsByThread[tid] ?? [];
-        let planText = "";
+        // 只认可“当前回合”产出的 plan：回合以 userMessage 起始，plan 必须位于
+        // 最后一条 userMessage 之后；找不到 userMessage（历史/测试 fixture）时
+        // 回退整线程扫描，避免把上一个回合的旧计划误当本轮产出重复弹窗。
+        let scanStart = 0;
         for (let i = threadItems.length - 1; i >= 0; i--) {
+          if (threadItems[i]?.type === "userMessage") {
+            scanStart = i + 1;
+            break;
+          }
+        }
+        let planText = "";
+        for (let i = threadItems.length - 1; i >= scanStart; i--) {
           const it = threadItems[i];
           if (it?.type === "plan" && typeof it.text === "string" && it.text.trim()) {
             planText = it.text;
