@@ -11,7 +11,7 @@ export function useComposerDraft(options: {
   refsById: Ref<Map<string, UserInput>>;
   hasText: Ref<boolean>;
 }) {
-  /** 草稿保存：把当前输入内容快照到会话标签（仅在有内容时写入） */
+  /** 草稿保存：把当前输入内容快照到会话标签；内容为空时清空草稿，避免删空后旧草稿复活 */
   function saveDraftToTab() {
     const tab = options.tab();
     if (!tab) return;
@@ -21,7 +21,12 @@ export function useComposerDraft(options: {
       options.hasText.value ||
       options.rowAttachments.value.length > 0 ||
       options.refsById.value.size > 0;
-    if (!hasDraft) return;
+    if (!hasDraft) {
+      tab.draftJson = "";
+      tab.draftAttachments = [];
+      tab.draftRefs = {};
+      return;
+    }
     tab.draftJson = json ? JSON.stringify(json) : "";
     tab.draftAttachments = [...options.rowAttachments.value];
     tab.draftRefs = Object.fromEntries(options.refsById.value.entries());

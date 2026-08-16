@@ -1480,6 +1480,37 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       path: "D:/repo/src/a.cs",
     });
   });
+
+  it("删空内容切走再切回不恢复旧草稿", async () => {
+    const tab = makeTab({
+      draftJson: JSON.stringify({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "旧草稿" }],
+          },
+        ],
+      }),
+    });
+    wrapper = mount(ComposerBar, {
+      props: { tab, active: true },
+    });
+    await flushPromises();
+    expect(getEditor().getText()).toContain("旧草稿");
+
+    // 删空内容
+    getEditor().commands.setContent("");
+    await flushPromises();
+    // 切走（快照）再切回（恢复）
+    await wrapper.setProps({ active: false });
+    await flushPromises();
+    await wrapper.setProps({ active: true });
+    await flushPromises();
+
+    expect(getEditor().getText()).toBe("");
+    expect(tab.draftJson).toBe("");
+  });
 });
 
 describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
