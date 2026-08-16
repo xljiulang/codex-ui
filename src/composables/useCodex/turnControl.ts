@@ -52,6 +52,26 @@ export function buildTurnParams(
   return params;
 }
 
+/** 构造用户消息回合：生成 clientId、序列化输入、构建协议参数并乐观插入消息项 */
+function buildUserTurn(
+  threadId: string,
+  prompt: string,
+  attachments: UserInput[],
+  cwd: string,
+): { clientId: string; input: UserInput[]; params: Record<string, unknown> } {
+  const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const input = buildTurnInput(prompt, attachments);
+  const params = buildTurnParams(threadId, input, clientId, cwd);
+  upsertItem(threadId, {
+    id: clientId,
+    clientId,
+    type: "userMessage",
+    content: input,
+    startedAtMs: Date.now(),
+  });
+  return { clientId, input, params };
+}
+
 
 /** 按标签发送回合（后台标签的队列消息等用）：状态写入目标标签记录，不触碰活动标签 */
 export async function continueTurnForTab(
@@ -76,16 +96,12 @@ export async function continueTurnForTab(
       return;
     }
   }
-  const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, resolveSessionWorkspace(tab));
-  upsertItem(threadId, {
-    id: clientId,
-    clientId,
-    type: "userMessage",
-    content: input,
-    startedAtMs: Date.now(),
-  });
+  const { params } = buildUserTurn(
+    threadId,
+    prompt,
+    attachments,
+    resolveSessionWorkspace(tab),
+  );
   // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
   if (tab.goalText && !tab.goalStatus) {
     try {
@@ -135,17 +151,13 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
       return;
     }
   }
-  const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入
-  const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, resolveSessionWorkspace());
-  upsertItem(threadId, {
-    id: clientId,
-    clientId,
-    type: "userMessage",
-    content: input,
-    startedAtMs: Date.now(),
-  });
+  const { params } = buildUserTurn(
+    threadId,
+    prompt,
+    attachments,
+    resolveSessionWorkspace(),
+  );
   // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
   // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
   if (store.goalText && !store.goalStatus) {
@@ -180,15 +192,12 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
     setToast("当前没有进行中的回合");
     return;
   }
-  const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const input = buildTurnInput(prompt, attachments);
-  upsertItem(threadId, {
-    id: clientId,
-    clientId,
-    type: "userMessage",
-    content: input,
-    startedAtMs: Date.now(),
-  });
+  const { clientId, input } = buildUserTurn(
+    threadId,
+    prompt,
+    attachments,
+    resolveSessionWorkspace(),
+  );
   try {
     await invoke("turn_steer", {
       params: {
