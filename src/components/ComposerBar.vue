@@ -4,7 +4,6 @@ import { EditorContent, useEditor } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { invoke } from "@tauri-apps/api/core";
-import type { JSONContent } from "@tiptap/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
@@ -26,6 +25,7 @@ import {
 import { useComposerResize } from "../composables/useComposerResize";
 import { useContextUsage } from "../composables/useContextUsage";
 import { useComposerAttachments } from "../composables/useComposerAttachments";
+import { useComposerDraft } from "../composables/useComposerDraft";
 import { useMentionFileSearch } from "../composables/useMentionFileSearch";
 import { useInputHistory } from "../composables/useInputHistory";
 import type { UserInput } from "../lib/types";
@@ -71,47 +71,6 @@ const {
 const refsById = ref(new Map<string, UserInput>());
 const rowAttachments = ref<UserInput[]>([]);
 const hasText = ref(false);
-
-/** 草稿保存：把当前输入内容快照到会话标签（仅在有内容时写入） */
-function saveDraftToTab() {
-  if (!props.tab) return;
-  const ed = editor.value;
-  const json = ed ? (ed.getJSON() as JSONContent) : null;
-  const hasDraft =
-    hasText.value ||
-    rowAttachments.value.length > 0 ||
-    refsById.value.size > 0;
-  if (!hasDraft) return;
-  props.tab.draftJson = json ? JSON.stringify(json) : "";
-  props.tab.draftAttachments = [...rowAttachments.value];
-  props.tab.draftRefs = Object.fromEntries(refsById.value.entries());
-}
-
-/** 草稿恢复：标签激活时还原输入内容与内联引用 */
-function restoreDraftFromTab() {
-  const ed = editor.value;
-  if (!ed || !props.tab?.draftJson) return;
-  refsById.value = new Map(Object.entries(props.tab.draftRefs ?? {}));
-  rowAttachments.value = [...(props.tab.draftAttachments ?? [])];
-  try {
-    const json = JSON.parse(props.tab.draftJson) as JSONContent;
-    ed.commands.setContent(json);
-  } catch {
-    // 草稿损坏时静默丢弃，保留空输入
-  }
-}
-
-// 标签激活状态：激活时恢复草稿，切走前快照
-watch(
-  () => props.active,
-  (v) => {
-    if (v) {
-      restoreDraftFromTab();
-    } else {
-      saveDraftToTab();
-    }
-  },
-);
 
 // 输入框可拖拽高度（最低 120px，最高窗口一半）
 const {
@@ -168,6 +127,27 @@ const editor = useEditor({
     updateMentionFromCaret();
   },
 });
+
+// 输入草稿：按标签持久化（激活恢复、切走快照）
+const { saveDraftToTab, restoreDraftFromTab } = useComposerDraft({
+  tab: () => props.tab,
+  editor,
+  rowAttachments,
+  refsById,
+  hasText,
+});
+
+// 标签激活状态：激活时恢复草稿，切走前快照
+watch(
+  () => props.active,
+  (v) => {
+    if (v) {
+      restoreDraftFromTab();
+    } else {
+      saveDraftToTab();
+    }
+  },
+);
 
 function exposeEditor() {
   try {
