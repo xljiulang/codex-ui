@@ -251,8 +251,7 @@ function onSelectAttachment(a: UserInput) {
     : caretPos;
   if (a.type === "mention" || a.type === "localImage") {
     ed.chain().focus().deleteRange({ from, to: caretPos }).run();
-    mention.value = null;
-    resetFileSearch();
+    closeMentionMenu();
     rowAttachments.value.push(a);
     syncAttachments();
     void nextTick(() => ed.commands.focus());
@@ -271,10 +270,15 @@ function onSelectAttachment(a: UserInput) {
       { type: "text", text: " " },
     ])
     .run();
-  mention.value = null;
-  resetFileSearch();
+  closeMentionMenu();
   syncAttachments();
   void nextTick(() => ed.commands.focus());
+}
+
+/** 关闭 @ 菜单并清空搜索状态（选中/取消/删除触发词共用） */
+function closeMentionMenu() {
+  mention.value = null;
+  resetFileSearch();
 }
 
 /** 删除当前触发词（用于打开本地文件/文件夹选择器前） */
@@ -285,49 +289,40 @@ function removeMentionTokenInEditor() {
   const caretPos = ed.state.selection.from;
   const from = tokenStartPos(ed.state.doc, caretPos, m.token.length);
   ed.chain().focus().deleteRange({ from, to: caretPos }).run();
-  mention.value = null;
-  resetFileSearch();
+  closeMentionMenu();
+}
+
+/** 文件/文件夹选择器共用流程：删除触发词 → 选择 → 附件区 → 回焦 */
+async function pickAndAdd(picker: () => Promise<string[] | string | null>) {
+  removeMentionTokenInEditor();
+  try {
+    const picked = await picker();
+    const list = Array.isArray(picked) ? picked : picked ? [picked] : [];
+    for (const p of list) {
+      const a = toUserAttachment(baseName(p), p);
+      rowAttachments.value.push(a);
+    }
+    syncAttachments();
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    void nextTick(() => editor.value?.commands.focus());
+  }
 }
 
 function onPickFiles() {
-  removeMentionTokenInEditor();
-  void (async () => {
-    try {
-      const files = await invoke<string[]>("pick_files", {
-        multiple: true,
-        initialDir: mentionRoot(),
-      });
-      for (const f of files) {
-        const a = toUserAttachment(baseName(f), f);
-        rowAttachments.value.push(a);
-      }
-      syncAttachments();
-    } catch (e) {
-      setToast(toastError(e));
-    } finally {
-      void nextTick(() => editor.value?.commands.focus());
-    }
-  })();
+  void pickAndAdd(() =>
+    invoke<string[]>("pick_files", {
+      multiple: true,
+      initialDir: mentionRoot(),
+    }),
+  );
 }
 
 function onPickDir() {
-  removeMentionTokenInEditor();
-  void (async () => {
-    try {
-      const dir = await invoke<string | null>("pick_directory", {
-        initialDir: mentionRoot(),
-      });
-      if (dir) {
-        const a = toUserAttachment(baseName(dir), dir);
-        rowAttachments.value.push(a);
-      }
-      syncAttachments();
-    } catch (e) {
-      setToast(toastError(e));
-    } finally {
-      void nextTick(() => editor.value?.commands.focus());
-    }
-  })();
+  void pickAndAdd(() =>
+    invoke<string | null>("pick_directory", { initialDir: mentionRoot() }),
+  );
 }
 
 function closeMenus() {
