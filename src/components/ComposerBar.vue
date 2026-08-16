@@ -27,6 +27,7 @@ import { useComposerResize } from "../composables/useComposerResize";
 import { useContextUsage } from "../composables/useContextUsage";
 import { useComposerAttachments } from "../composables/useComposerAttachments";
 import { useMentionFileSearch } from "../composables/useMentionFileSearch";
+import { useInputHistory } from "../composables/useInputHistory";
 import type { UserInput } from "../lib/types";
 import { assetUrl } from "../lib/asset";
 import {
@@ -135,8 +136,7 @@ const {
 });
 
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
-const sentHistory: string[] = [];
-let historyIndex = -1;
+const inputHistory = useInputHistory();
 
 const editor = useEditor({
   extensions: [
@@ -454,19 +454,11 @@ function handleKeydown(e: KeyboardEvent): boolean {
     if (!sel || !sel.empty || sel.from > 1) return false;
     e.preventDefault();
     if (e.key === "ArrowUp") {
-      if (!sentHistory.length) return true;
-      if (historyIndex === -1) historyIndex = sentHistory.length - 1;
-      else if (historyIndex > 0) historyIndex--;
-      setEditorPlainText(sentHistory[historyIndex]);
+      const t = inputHistory.prev();
+      if (t !== null) setEditorPlainText(t);
     } else {
-      if (historyIndex === -1) return true;
-      historyIndex++;
-      if (historyIndex >= sentHistory.length) {
-        historyIndex = -1;
-        setEditorPlainText("");
-      } else {
-        setEditorPlainText(sentHistory[historyIndex]);
-      }
+      const t = inputHistory.next();
+      if (t !== null) setEditorPlainText(t);
     }
     return true;
   }
@@ -509,10 +501,8 @@ function submit(flip = false) {
   rowAttachments.value = [];
   store.attachments = [...refs, ...rowItems];
   if (plainText.trim()) {
-    sentHistory.push(plainText);
-    if (sentHistory.length > 100) sentHistory.shift();
+    inputHistory.push(plainText);
   }
-  historyIndex = -1;
   void sendPrompt(wireText, flip);
 }
 
