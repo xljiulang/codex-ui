@@ -100,23 +100,6 @@ export interface GitRemotes {
 /** diff 预览类型（与 DiffPreviewParams.kind 一致） */
 export type DiffPreviewKind = "add" | "delete" | "modify";
 
-export function gitStatusLabel(status: GitFileStatus): string {
-  switch (status) {
-    case "added":
-      return "新增";
-    case "modified":
-      return "修改";
-    case "deleted":
-      return "删除";
-    case "renamed":
-      return "重命名";
-    case "untracked":
-      return "未跟踪";
-    case "conflicted":
-      return "冲突";
-  }
-}
-
 /** 状态文字图标（git 惯例：A/M/D/R/U/C） */
 export function gitStatusLetter(status: GitFileStatus): string {
   switch (status) {
