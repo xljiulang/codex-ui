@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import ContextMenu from "./ContextMenu.vue";
+import ModalDialog from "./ModalDialog.vue";
 import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
@@ -560,34 +561,26 @@ function toggleDirRow(node: GitDirNode) {
       @close="ctxMenu = null"
     />
 
-    <div v-if="confirmInit" class="modal-mask" @click.self="confirmInit = false">
-      <div class="modal" tabindex="-1">
-        <div class="modal-head">
-          <span class="modal-title">添加到 Git</span>
-          <button
-            class="modal-close"
-            aria-label="关闭"
-            @click="confirmInit = false"
-          >
-            ×
-          </button>
-        </div>
-        <div class="modal-body">
-          确定要将当前目录初始化为 Git 仓库吗？<br />
-          <span class="git-confirm-path">
-            {{ workspace || "当前工作目录" }}
-          </span>
-          <p class="git-confirm-desc">
-            将执行 git init，仅初始化、不会自动提交；初始化后现有文件会以“未跟踪”状态显示。
-          </p>
-        </div>
-        <div class="modal-foot">
-          <button class="btn" @click="confirmInit = false">取消</button>
-          <button class="btn git-init-ok" :disabled="gitInitBusy" @click="doInit">
-            {{ gitInitBusy ? "初始化中…" : "确认" }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <ModalDialog
+      v-if="confirmInit"
+      title="添加到 Git"
+      closable
+      mask-close
+      @close="confirmInit = false"
+    >
+      确定要将当前目录初始化为 Git 仓库吗？<br />
+      <span class="git-confirm-path">
+        {{ workspace || "当前工作目录" }}
+      </span>
+      <p class="git-confirm-desc">
+        将执行 git init，仅初始化、不会自动提交；初始化后现有文件会以“未跟踪”状态显示。
+      </p>
+      <template #foot>
+        <button class="btn" @click="confirmInit = false">取消</button>
+        <button class="btn git-init-ok" :disabled="gitInitBusy" @click="doInit">
+          {{ gitInitBusy ? "初始化中…" : "确认" }}
+        </button>
+      </template>
+    </ModalDialog>
   </div>
 </template>

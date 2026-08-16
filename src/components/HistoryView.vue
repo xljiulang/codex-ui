@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ContextMenu from "./ContextMenu.vue";
+import ModalDialog from "./ModalDialog.vue";
 import {
   computed,
   onBeforeUnmount,
@@ -47,6 +48,8 @@ import {
 
 // 重命名/删除确认弹窗状态
 const confirmEl = ref<HTMLElement | null>(null);
+/** 嵌套属性访问保留 Ref 对象（顶层绑定会被模板自动解包） */
+const rootRefs = { confirmEl };
 const {
   confirmDelete,
   editingId,
@@ -365,19 +368,16 @@ onBeforeUnmount(() => {
       :y="ctxMenu.y"
       @close="ctxMenu = null"
     />
-    <div v-if="confirmDelete" class="modal-mask">
-      <div ref="confirmEl" class="modal" tabindex="-1">
-        <div class="modal-head">
-          <span class="modal-title">{{ confirmTitle }}</span>
-        </div>
-        <div class="modal-body">
-          {{ confirmMessage }}
-        </div>
-        <div class="modal-foot">
-          <button class="btn" @click="cancelDelete()">取消</button>
-          <button class="btn danger" @click="doDelete()">删除</button>
-        </div>
-      </div>
-    </div>
+    <ModalDialog
+      v-if="confirmDelete"
+      :title="confirmTitle"
+      :root-ref="rootRefs.confirmEl"
+    >
+      {{ confirmMessage }}
+      <template #foot>
+        <button class="btn" @click="cancelDelete()">取消</button>
+        <button class="btn danger" @click="doDelete()">删除</button>
+      </template>
+    </ModalDialog>
   </div>
 </template>

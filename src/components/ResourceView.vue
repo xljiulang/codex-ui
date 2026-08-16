@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ContextMenu from "./ContextMenu.vue";
+import ModalDialog from "./ModalDialog.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import {
   setToast,
@@ -432,68 +433,62 @@ onBeforeUnmount(() => {
       @close="ctxMenu = null"
     />
 
-    <div v-if="confirmDelete" class="modal-mask">
-      <div class="modal" tabindex="-1">
-        <div class="modal-head">
-          <span class="modal-title">删除{{ confirmDelete.isDir ? "文件夹" : "文件" }}</span>
-        </div>
-        <div class="modal-body">{{ deleteLabel }}</div>
-        <div class="modal-foot">
-          <button class="btn" @click="cancelDelete()">取消</button>
-          <button class="btn danger" @click="doDelete()">删除</button>
-        </div>
-      </div>
-    </div>
+    <ModalDialog
+      v-if="confirmDelete"
+      :title="`删除${confirmDelete.isDir ? '文件夹' : '文件'}`"
+    >
+      {{ deleteLabel }}
+      <template #foot>
+        <button class="btn" @click="cancelDelete()">取消</button>
+        <button class="btn danger" @click="doDelete()">删除</button>
+      </template>
+    </ModalDialog>
 
-    <div v-if="propsEntry" class="modal-mask">
-      <div class="modal" tabindex="-1">
-        <div class="modal-head">
-          <span class="modal-title">属性 - {{ propsEntry.name }}</span>
-          <button class="modal-close" aria-label="关闭" @click="propsEntry = null">
-            ×
-          </button>
-        </div>
-        <div class="modal-body resource-props">
-          <div class="resource-prop">
-            <span class="resource-prop-key">名称</span>
-            <span class="resource-prop-value">{{ propsEntry.name }}</span>
-          </div>
-          <div class="resource-prop">
-            <span class="resource-prop-key">类型</span>
-            <span class="resource-prop-value">
-              {{ propsEntry.isDir ? "文件夹" : "文件" }}
-            </span>
-          </div>
-          <div class="resource-prop">
-            <span class="resource-prop-key">完整路径</span>
-            <span class="resource-prop-value">{{ propsEntry.path }}</span>
-          </div>
-          <div class="resource-prop">
-            <span class="resource-prop-key">大小</span>
-            <span class="resource-prop-value">
-              {{ propsEntry.isDir
-                ? (propsEntry.childCount ?? 0) + " 项"
-                : formatFileSize(propsEntry.size) || "-" }}
-            </span>
-          </div>
-          <div class="resource-prop">
-            <span class="resource-prop-key">修改时间</span>
-            <span class="resource-prop-value">
-              {{ formatAbsolute(propsEntry.modifiedAtMs) }}
-            </span>
-          </div>
-          <div class="resource-prop">
-            <span class="resource-prop-key">创建时间</span>
-            <span class="resource-prop-value">
-              {{ formatAbsolute(propsEntry.createdAtMs) }}
-            </span>
-          </div>
-          <div v-if="propsLoading" class="menu-note">读取中…</div>
-        </div>
-        <div class="modal-foot">
-          <button class="btn" @click="propsEntry = null">关闭</button>
-        </div>
+    <ModalDialog
+      v-if="propsEntry"
+      :title="`属性 - ${propsEntry.name}`"
+      closable
+      body-class="resource-props"
+      @close="propsEntry = null"
+    >
+      <div class="resource-prop">
+        <span class="resource-prop-key">名称</span>
+        <span class="resource-prop-value">{{ propsEntry.name }}</span>
       </div>
-    </div>
+      <div class="resource-prop">
+        <span class="resource-prop-key">类型</span>
+        <span class="resource-prop-value">
+          {{ propsEntry.isDir ? "文件夹" : "文件" }}
+        </span>
+      </div>
+      <div class="resource-prop">
+        <span class="resource-prop-key">完整路径</span>
+        <span class="resource-prop-value">{{ propsEntry.path }}</span>
+      </div>
+      <div class="resource-prop">
+        <span class="resource-prop-key">大小</span>
+        <span class="resource-prop-value">
+          {{ propsEntry.isDir
+            ? (propsEntry.childCount ?? 0) + " 项"
+            : formatFileSize(propsEntry.size) || "-" }}
+        </span>
+      </div>
+      <div class="resource-prop">
+        <span class="resource-prop-key">修改时间</span>
+        <span class="resource-prop-value">
+          {{ formatAbsolute(propsEntry.modifiedAtMs) }}
+        </span>
+      </div>
+      <div class="resource-prop">
+        <span class="resource-prop-key">创建时间</span>
+        <span class="resource-prop-value">
+          {{ formatAbsolute(propsEntry.createdAtMs) }}
+        </span>
+      </div>
+      <div v-if="propsLoading" class="menu-note">读取中…</div>
+      <template #foot>
+        <button class="btn" @click="propsEntry = null">关闭</button>
+      </template>
+    </ModalDialog>
   </div>
 </template>
