@@ -1122,11 +1122,7 @@
   border-color: var(--border-light);
 }
 
-/* 当前激活 diff 标签对应的变更文件行 */
-.git-tree-row.selected {
-  background: var(--accent-soft);
-  border-color: rgba(var(--accent-rgb), 0.35);
-}
+/* 选中态样式统一在 resources.css（.git-tree-row.selected 与历史/资源行共用） */
 
 .git-dir-arrow {
   flex-shrink: 0;

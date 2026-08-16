@@ -9,8 +9,7 @@
   border-radius: 10px;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color 0.14s ease, border-color 0.14s ease,
-    box-shadow 0.14s ease;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
   position: relative;
 }
 
@@ -19,14 +18,12 @@
   border-color: var(--border);
 }
 
+/* 统一选中态：会话/资源/Git 变更文件共用（原 Git 面板样式） */
+.git-tree-row.selected,
+.history-item.active,
 .resource-row.active {
-  background: linear-gradient(
-    90deg,
-    rgba(var(--accent-rgb), 0.11),
-    rgba(var(--accent-rgb), 0.03)
-  );
-  border-color: rgba(var(--accent-rgb), 0.24);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--accent-soft);
+  border-color: rgba(var(--accent-rgb), 0.35);
 }
 
 .resource-root {
@@ -242,4 +239,3 @@ body.resource-dragging .resource-add {
   color: var(--text-bright);
   word-break: break-all;
 }
-
