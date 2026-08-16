@@ -21,6 +21,8 @@ export function buildTurnParams(
   input: UserInput[],
   clientId: string,
   cwd: string,
+  /** 发送目标标签的任务模式（后台标签传 tab.taskMode；缺省取活动会话模式） */
+  taskMode?: "execute" | "plan",
 ): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId,
@@ -40,8 +42,9 @@ export function buildTurnParams(
   // 模型未知时绝不发送空字符串（上游会报 invalid_request_error），此时省略该字段。
   const collabModel = currentModelId();
   if (collabModel) {
+    const mode = taskMode ?? store.taskMode;
     params.collaborationMode = {
-      mode: store.taskMode === "plan" ? "plan" : "default",
+      mode: mode === "plan" ? "plan" : "default",
       settings: {
         model: collabModel,
         reasoning_effort: store.effort ?? null,
@@ -58,10 +61,11 @@ function buildUserTurn(
   prompt: string,
   attachments: UserInput[],
   cwd: string,
+  taskMode?: "execute" | "plan",
 ): { clientId: string; input: UserInput[]; params: Record<string, unknown> } {
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, cwd);
+  const params = buildTurnParams(threadId, input, clientId, cwd, taskMode);
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -101,6 +105,7 @@ export async function continueTurnForTab(
     prompt,
     attachments,
     resolveSessionWorkspace(tab),
+    tab.taskMode,
   );
   // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
   if (tab.goalText && !tab.goalStatus) {
@@ -259,7 +264,11 @@ export async function interrupt(
       tab.goalArmed = false;
     }
   }
-  let target = turnId ?? store.currentTurnId;
+  // 显式线程路径（关闭标签/关窗守卫）只使用目标标签自己的回合 id，
+  // 绝不借用活动标签的 store.currentTurnId，避免跨线程误中断；
+  // 无显式线程（停止按钮）时 store 即活动会话的 live 字段，才允许取 store。
+  let target = turnId;
+  if (!target && threadId === undefined) target = store.currentTurnId;
   if (!target) return;
   // 服务端可能在 turn/started 事件之后才把回合标记为 active；
   // 若用户点得过早会收到 “no active turn”，短暂重试几次。

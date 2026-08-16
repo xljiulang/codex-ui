@@ -175,7 +175,7 @@ export async function wireEvents() {
       // 纯客户端 UX：协议层没有计划确认交互，由客户端在计划 item 完成后自行询问）
       if (
         tab &&
-        store.taskMode === "plan" &&
+        tab.taskMode === "plan" &&
         !interrupted &&
         tab.followupQueue.length === 0 &&
         p.turn?.id &&

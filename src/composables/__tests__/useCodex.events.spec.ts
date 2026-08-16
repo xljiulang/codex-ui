@@ -4,6 +4,7 @@ import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { autoTitleThread } from "../useCodex/threads";
+import type { SessionTab } from "../useCodex/types";
 import { activeTabId } from "../useEditorTabs";
 import { capturedListeners, fireListen, makeSessionTab, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
@@ -401,7 +402,7 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    tabs.push(makeSessionTab("s1", "t1"));
+    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
     store.turnActive = false;
@@ -800,6 +801,41 @@ describe("计划完成确认弹窗", () => {
     });
   });
 
+  it("tab 为 plan、store 为 execute：仍按标签模式弹出计划确认（不读全局 taskMode）", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "计划A", status: "completed" },
+    ];
+    (tabs[0] as SessionTab).taskMode = "plan";
+    store.taskMode = "execute";
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    expect(store.planPrompt).toEqual({
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "计划A",
+    });
+  });
+
+  it("tab 为 execute、store 为 plan：不弹计划提示（计划判定按标签模式）", async () => {
+    await wireEvents();
+    store.itemsByThread["t1"] = [
+      { id: "p1", type: "plan", text: "计划A", status: "completed" },
+    ];
+    (tabs[0] as SessionTab).taskMode = "execute";
+    store.taskMode = "plan";
+
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed" },
+    });
+    expect(store.planPrompt).toBeNull();
+    expect((tabs[0] as SessionTab).planPrompt).toBeNull();
+  });
+
   it("中断回合不弹窗", async () => {
     await wireEvents();
     store.itemsByThread["t1"] = [
@@ -837,6 +873,7 @@ describe("计划完成确认弹窗", () => {
   it("非计划模式回合完成不弹窗", async () => {
     await wireEvents();
     store.taskMode = "execute";
+    (tabs[0] as SessionTab).taskMode = "execute";
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "# 计划", status: "completed" },
     ];

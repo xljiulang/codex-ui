@@ -4,7 +4,7 @@ import { settleConfirm } from "../useCodex/confirm";
 import { __resetSessionTabsForTest, isThreadOpen, isThreadRunning, sessionTabTitle } from "../useCodex/sessionState";
 import { addAttachmentToActiveSession, closeAllSessionTabs, closeSessionTab, registerComposerAddHandler, switchSessionTab, unregisterComposerAddHandler } from "../useCodex/sessionTabs";
 import { store } from "../useCodex/store";
-import { interrupt } from "../useCodex/turnControl";
+import { continueTurnForTab, interrupt } from "../useCodex/turnControl";
 import type { SessionTab } from "../useCodex/types";
 import { tabs as _tabs, activeTabId } from "../useEditorTabs";
 import { __resetTabsForTest, type Tab } from "../useTabs";
@@ -1130,5 +1130,82 @@ describe("统一列表：活动会话 live 字段投影", () => {
     expect(store.currentThreadId).toBeNull();
     expect(store.currentThreadName).toBe("");
     expect(store.turnActive).toBe(false);
+  });
+});
+
+describe("多会话隔离：关闭/发送不触碰其它标签", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    __resetSessionTabsForTest();
+    store.currentThreadId = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.turnActive = false;
+    store.currentTurnId = null;
+    store.taskMode = "execute";
+    store.goalText = null;
+    store.goalStatus = null;
+    store.goalArmed = false;
+    store.followupQueue = [];
+    store.attachments = [];
+    store.planPrompt = null;
+    store.loading = false;
+    store.itemsByThread = {};
+    store.activeWorkByThread = {};
+  });
+
+  it("关闭后台运行中且无回合 id 的标签：不借用活动标签回合 id 发 turn_interrupt", async () => {
+    // A 活动：正在跑回合（TA）；B 后台：turnActive 但回合 id 尚未回填
+    tabs.push(
+      makeSessionTab("sA", "tA", { turnActive: true, currentTurnId: "TA" }),
+    );
+    tabs.push(
+      makeSessionTab("sB", "tB", { turnActive: true, currentTurnId: null }),
+    );
+    activeTabId.value = "sA";
+    store.currentThreadId = "tA";
+    store.currentTurnId = "TA";
+    store.turnActive = true;
+
+    const p = closeSessionTab("sB");
+    expect(store.confirm?.title).toBe("关闭会话标签");
+    settleConfirm(true);
+    await p;
+
+    // 目标线程无回合 id：不得借用 store 的 TA 发 turn_interrupt（避免误中断 A）
+    const interruptCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "turn_interrupt",
+    );
+    expect(interruptCalls).toHaveLength(0);
+    expect(tabs.some((t) => t.id === "sB")).toBe(false);
+    // A 的回合状态不受影响
+    expect(store.currentThreadId).toBe("tA");
+    expect(store.currentTurnId).toBe("TA");
+    expect(store.turnActive).toBe(true);
+  });
+
+  it("后台标签发送使用自己的任务模式：tab=plan、store=execute 时 collaborationMode.mode=plan", async () => {
+    const tab = makeSessionTab("sB", "tB", {
+      taskMode: "plan",
+      resumedThreadId: "tB",
+    });
+    tabs.push(tab);
+    store.taskMode = "execute";
+    store.model = "gpt-5";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "turn_start") {
+        return Promise.resolve({ turn: { id: "turn-b" } });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await continueTurnForTab(tab, "hello", []);
+
+    const call = mockedInvoke.mock.calls.find(([c]) => c === "turn_start");
+    const params = (call?.[1] as { params?: Record<string, unknown> })
+      ?.params;
+    expect(params?.collaborationMode).toMatchObject({ mode: "plan" });
+    expect(tab.turnActive).toBe(true);
+    expect(tab.currentTurnId).toBe("turn-b");
   });
 });
