@@ -462,6 +462,14 @@ describe("SettingsView 终端 Shell", () => {
     expect(options).toEqual(["cmd", "powershell"]);
   });
 
+  it("终端 Shell 行位于设置面板最后一项", () => {
+    wrapper = mount(SettingsView);
+    const labels = wrapper
+      .findAll(".settings .setting-row")
+      .map((row) => row.find("label").text());
+    expect(labels[labels.length - 1]).toBe("终端 Shell");
+  });
+
   it("选择 PowerShell 保存后 patch 包含 terminal_shell: powershell", async () => {
     wrapper = mount(SettingsView);
     await wrapper.find("select.terminal-shell-select").setValue("powershell");

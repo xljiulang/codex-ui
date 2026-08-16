@@ -178,14 +178,6 @@ function selectTheme(id: ThemeId) {
           </div>
 
           <div class="setting-row">
-            <label>终端 Shell</label>
-            <select v-model="terminalShell" class="terminal-shell-select">
-              <option value="cmd">cmd（命令提示符）</option>
-              <option value="powershell">PowerShell</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
             <label>默认权限</label>
             <select v-model="defaultPermission" class="default-permission-select">
               <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
@@ -232,6 +224,14 @@ function selectTheme(id: ThemeId) {
             <p v-if="!codexPath && store.server.codexPath" class="setting-note">
               当前使用（自动检测）：{{ store.server.codexPath }}
             </p>
+          </div>
+
+          <div class="setting-row">
+            <label>终端 Shell</label>
+            <select v-model="terminalShell" class="terminal-shell-select">
+              <option value="cmd">cmd（命令提示符）</option>
+              <option value="powershell">PowerShell</option>
+            </select>
           </div>
         </div>
       </div>
