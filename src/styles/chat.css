@@ -173,6 +173,12 @@
   contain-intrinsic-size: auto 80px;
 }
 
+/* 历史会话加载/切回吸底测量：一次性真实渲染全部消息，纠正 content-visibility
+ * 估算高度导致的「滚不到最新」；测量后移除，contain-intrinsic-size: auto 记住真实高度 */
+.chat-scroll.measuring .msg {
+  content-visibility: visible;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -1035,4 +1041,3 @@
   border-top: 1px dashed var(--border);
   padding-top: 8px;
 }
-

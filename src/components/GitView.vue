@@ -78,6 +78,13 @@ const branchMenuOpen = ref(false);
 /** 分支弹层忙碌态（由 GitBranchMenu v-model 同步，用于头部按钮禁用） */
 const branchBusy = ref(false);
 
+// 仓库工作区变化（切换会话/标签）：旧仓库的分支弹层不再有效，关闭并复位忙碌态，
+// 避免残留旧分支列表对错误仓库操作、或忙碌态未复位导致分支按钮永久禁用
+watch(repoWorkspace, () => {
+  if (branchMenuOpen.value) closeBranchMenu();
+  else branchBusy.value = false;
+});
+
 const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
 
@@ -217,6 +224,16 @@ async function doInit() {
 /** 分支弹层开关：打开后由 GitBranchMenu 挂载时自行加载列表与远端 */
 async function toggleBranchMenu() {
   branchMenuOpen.value = !branchMenuOpen.value;
+}
+
+/**
+ * 关闭分支弹层并复位忙碌态：忙碌事件经子组件 emit 同步，Vue 3.5 在子组件卸载后
+ * 会丢弃 emit，若弹层在操作进行中关闭（点空白/Escape/滚动/切换仓库），GitBranchMenu
+ * 的 finally 复位事件无法送达，分支按钮会永久禁用。因此关闭时由父组件兜底复位。
+ */
+function closeBranchMenu() {
+  branchMenuOpen.value = false;
+  branchBusy.value = false;
 }
 
 /** 分支/远端/提交操作导致仓库状态变化：回写 gitStatus（联动提交历史刷新），
@@ -421,7 +438,7 @@ function toggleDirRow(node: GitDirNode) {
           :workspace="repoWorkspace"
           :branch-label="branchLabel"
           v-model:busy="branchBusy"
-          @close="branchMenuOpen = false"
+          @close="closeBranchMenu"
           @status="applyBranchStatus"
         />
       </div>

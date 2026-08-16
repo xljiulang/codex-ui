@@ -128,6 +128,11 @@ async function revealAbsPath(
   if (!root || !absPath) return;
   const norm = absPath.replace(/\//g, "\\");
   if (!isPathUnderRoot(root, norm)) return;
+  // 根尚未加载（资源面板从未激活/工作区刚切换）时先加载根，否则下方祖先展开后
+  // 树仍无法渲染目标行，selectedPath/scrollIntoView 会静默失效（diff 标签联动资源树失效）
+  if (!rootEntry.value || childrenByPath[root] === undefined) {
+    await loadRoot(root);
+  }
   const parts = relPathOf(root, norm)
     .replace(/\\/g, "/")
     .split("/")

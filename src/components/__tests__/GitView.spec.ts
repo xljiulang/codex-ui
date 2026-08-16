@@ -22,6 +22,7 @@ import { tooltipDirective } from "../../directives/tooltip";
 import { settleConfirm, store } from "../../composables/useCodex";
 import {
   __resetGitChangesForTest,
+  gitStatus,
   refreshGitChanges,
   revealGitFile,
 } from "../../composables/useGitChanges";
@@ -611,6 +612,78 @@ describe("GitView 分支管理", () => {
     wrapper.find(".git-file-list").element.dispatchEvent(new Event("scroll"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("分支列表加载中外部关闭弹层：分支按钮忙碌态复位且可再次打开", async () => {
+    let resolveBranches!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_branches") {
+        return new Promise((r) => {
+          resolveBranches = r;
+        });
+      }
+      if (cmd === "git_changes_remotes") {
+        return Promise.resolve({ current: null, remotes: [] });
+      }
+      if (cmd === "git_changes_log") return Promise.resolve([]);
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
+    // 分支列表请求挂起中：按钮处于忙碌禁用态
+    expect(
+      (wrapper.find(".git-branch-btn").element as HTMLButtonElement).disabled,
+    ).toBe(true);
+
+    // 加载完成前外部 mousedown 关闭弹层：弹层卸载后异步 finally 的 emit 被 Vue 丢弃，
+    // 依赖父组件 closeBranchMenu 兜底复位
+    window.dispatchEvent(new MouseEvent("mousedown"));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+
+    resolveBranches({ current: "main", branches: ["main"] });
+    await flushPromises();
+    expect(
+      (wrapper.find(".git-branch-btn").element as HTMLButtonElement).disabled,
+    ).toBe(false);
+
+    // 复位后分支按钮可再次打开弹层
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("弹层打开时切换仓库工作区：弹层关闭且分支按钮可用", async () => {
+    mockBranchRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper.find(".git-branch-btn").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
+
+    // 切换到另一仓库：旧仓库分支弹层关闭、忙碌态复位
+    gitStatus.value = {
+      ...okStatus,
+      repoWorkspace: "D:\\another-repo",
+      branch: "dev",
+    };
+    await flushPromises();
+    expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
+    expect(
+      (wrapper.find(".git-branch-btn").element as HTMLButtonElement).disabled,
+    ).toBe(false);
     wrapper.unmount();
   });
 });

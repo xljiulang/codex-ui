@@ -1487,6 +1487,18 @@ describe("EditorPane 左侧多标签编辑区", () => {
     store.server.startupWorkspace = root;
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") return Promise.resolve([]);
+      if (cmd === "session_fs_metadata") {
+        return Promise.resolve({
+          name: "repo",
+          path: root,
+          relPath: ".",
+          isDir: true,
+          size: null,
+          modifiedAtMs: 0,
+          createdAtMs: 0,
+          childCount: 1,
+        });
+      }
       if (cmd === "session_fs_icons") return Promise.resolve([]);
       if (cmd === "session_fs_icon_for_ext") return Promise.resolve(null);
       if (cmd === "session_fs_list") return Promise.resolve([]);
@@ -1502,6 +1514,12 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await settle();
     expect(selectedPath.value).toBe(root + "\\src\\main.ts");
     expect(expanded.has(root + "\\src")).toBe(true);
+    // 根未加载（资源面板从未激活）时由定位流程补齐加载，联动才不失效
+    expect(expanded.has(root)).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
+      workspace: root,
+      path: root,
+    });
     wrapper.unmount();
   });
 

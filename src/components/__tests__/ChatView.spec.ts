@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { computed, nextTick, reactive } from "vue";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -338,6 +338,40 @@ describe("ChatView 日期分隔线", () => {
     expect(scroller.scrollTop).toBe(1000);
   });
 
+  it("历史会话加载完成：强制测量后滚动到最新消息", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+      { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
+    ]);
+    store.itemsByThread["t1"] = (arr);
+    tab.loading = true;
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    scroller.scrollTop = 0;
+
+    // loading true→false（历史会话整批落地）：settleToBottom 强制测量后滚到底部
+    tab.loading = false;
+    await nextTick();
+    await flushPromises();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(1000);
+    // 测量类已移除，不残留强制渲染状态
+    expect(scroller.classList.contains("measuring")).toBe(false);
+    wrapper.unmount();
+  });
+
   it("任意消息变更（itemsRev 增长）时吸底滚动", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
@@ -550,10 +584,13 @@ describe("ChatView 日期分隔线", () => {
     // 切换到新会话 → 重置吸底并回到底部
     store.currentThreadId = "t2";
     await nextTick();
+    await flushPromises();
+    await flushPromises();
     expect(scroller.scrollTop).toBe(1000);
     // 新内容到达后继续吸底
     store.itemsRev++;
     await nextTick();
+    await flushPromises();
     expect(scroller.scrollTop).toBe(1000);
     store.currentThreadId = null;
   });

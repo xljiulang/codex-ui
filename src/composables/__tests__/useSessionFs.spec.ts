@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises } from "@vue/test-utils";
+import { nextTick } from "vue";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -17,12 +18,15 @@ import {
   copyBuffer,
   createTextFile,
   ensureEntryIcons,
+  expanded,
   iconCacheKey,
   iconFor,
   loadingRoot,
   openPathInApp,
   pasteAvailable,
+  revealAbsPathInTree,
   rootEntry,
+  selectedPath,
   setSessionFsActive,
 } from "../useSessionFs";
 import {
@@ -464,5 +468,81 @@ describe("useSessionFs 工作区切换保留旧数据", () => {
     await flushPromises();
     await flushPromises();
     expect(rootEntry.value?.path).toBe(c);
+  });
+});
+
+describe("revealAbsPathInTree 资源树定位", () => {
+  const rootEntryData: FsEntry = {
+    name: "repo",
+    path: root,
+    relPath: ".",
+    isDir: true,
+    size: null,
+    modifiedAtMs: 0,
+    createdAtMs: 0,
+    childCount: 2,
+  };
+  const srcEntry = file("src", "src", true);
+  const mainEntry = file("main.ts", "src/main.ts");
+
+  beforeEach(() => {
+    __resetSessionFsForTest();
+    store.workspace = root;
+    store.server.startupWorkspace = root;
+    store.toast = "";
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string, args) => {
+      if (cmd === "session_fs_metadata") return Promise.resolve(rootEntryData);
+      if (cmd === "session_fs_list") {
+        const dir = (args as { dir?: string } | undefined)?.dir;
+        if (dir === root) return Promise.resolve([srcEntry]);
+        if (dir === root + "\\src") return Promise.resolve([mainEntry]);
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(undefined);
+    });
+  });
+
+  afterEach(() => {
+    __resetSessionFsForTest();
+  });
+
+  it("根未加载时先加载根，再展开祖先并选中目标文件", async () => {
+    expect(rootEntry.value).toBeNull();
+    expect(childrenByPath[root]).toBeUndefined();
+
+    await revealAbsPathInTree(root + "\\src\\main.ts");
+    await nextTick();
+
+    // 根由定位流程补齐加载
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
+      workspace: root,
+      path: root,
+    });
+    expect(rootEntry.value?.path).toBe(root);
+    expect(childrenByPath[root]?.map((e) => e.path)).toEqual([srcEntry.path]);
+    expect(childrenByPath[root + "\\src"]?.map((e) => e.path)).toEqual([
+      mainEntry.path,
+    ]);
+    expect(expanded.has(root)).toBe(true);
+    expect(expanded.has(root + "\\src")).toBe(true);
+    expect(selectedPath.value).toBe(root + "\\src\\main.ts");
+  });
+
+  it("根已加载时不重复拉取根元信息", async () => {
+    setSessionFsActive(true);
+    await flushPromises();
+    expect(rootEntry.value?.path).toBe(root);
+    mockedInvoke.mockClear();
+
+    await revealAbsPathInTree(root + "\\src\\main.ts");
+    await nextTick();
+
+    expect(mockedInvoke).not.toHaveBeenCalledWith("session_fs_metadata", {
+      workspace: root,
+      path: root,
+    });
+    expect(selectedPath.value).toBe(root + "\\src\\main.ts");
+    expect(expanded.has(root + "\\src")).toBe(true);
   });
 });

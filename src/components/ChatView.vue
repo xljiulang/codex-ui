@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import InlineInteraction from "./InlineInteraction.vue";
@@ -100,6 +100,29 @@ function jumpToBottom() {
   scheduleScroll();
 }
 
+/**
+ * 历史会话整批加载/切回后强制滚到最新：`.msg` 使用 content-visibility（未渲染时按
+ * 80px 估算高度），直接 scrollTop=scrollHeight 会落在估算底部、高于真实底部，且
+ * content-visibility 的布局变化不触发 MutationObserver。给 scroller 临时加 measuring
+ * 类一次性真实渲染全部消息（contain-intrinsic-size: auto 会记住真实高度），
+ * 测量后滚到底部再移除类，随后复用双 rAF 吸底兜底。
+ */
+async function settleToBottom() {
+  const el = scroller.value;
+  if (!el) return;
+  stickToBottom.value = true;
+  el.classList.add("measuring");
+  try {
+    await nextTick();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    el.scrollTop = el.scrollHeight;
+    lastStickScrollTop = el.scrollTop;
+  } finally {
+    el.classList.remove("measuring");
+  }
+  scheduleScroll();
+}
+
 // 用户手动发送消息后强制恢复吸底：即使此前上滑查看历史已解除吸底，
 // 发送动作也应立即回到底部并继续跟随；排队消息自动发送不触发（不打断阅读位置）
 watch(
@@ -126,9 +149,24 @@ watch(
 watch(
   () => store.currentThreadId,
   () => {
-    stickToBottom.value = true;
-    lastStickScrollTop = 0;
-    scheduleScroll();
+    // 切回已加载会话：内容可能仍处 content-visibility 估算布局，直接吸底会停在最新消息之上
+    if (items.value.length > 0) {
+      void settleToBottom();
+    } else {
+      stickToBottom.value = true;
+      lastStickScrollTop = 0;
+      scheduleScroll();
+    }
+  },
+);
+
+// 历史会话加载完成（loading true→false）：消息整批落地后强制测量并滚到最新
+watch(
+  () => props.tab.loading,
+  (v, old) => {
+    if (old && !v && items.value.length > 0) {
+      void settleToBottom();
+    }
   },
 );
 

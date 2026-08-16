@@ -29,6 +29,7 @@ import { __resetSessionFsForTest } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
   activeTabId,
+  openDiffTab,
   openFileTab,
   tabs,
   type FileEditorTab,
@@ -307,6 +308,41 @@ describe("ResourceView 文件树", () => {
       workspace: rootPath,
       path: rootPath,
     });
+    wrapper.unmount();
+  });
+
+  it("激活 diff 标签后切到资源面板：根未加载时先加载根并滚动定位到目标文件", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+    // 打开 diff 标签（Git 面板/消息入口），此时资源面板未激活、根尚未加载
+    await openDiffTab({
+      path: "src/main.ts",
+      kind: "modify",
+      diff: "diff",
+      workspace: rootPath,
+    });
+    await flushPromises();
+    expect(activeTabId.value).not.toBe("s1");
+
+    // attachTo 挂到 document.body：revealAbsPath 的 document.querySelector 需要真实文档
+    const wrapper = mount(ResourceView, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { directives: { tooltip: tooltipDirective } },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const row = wrapper
+      .findAll(".resource-row")
+      .find((r) => r.attributes("data-fs-path") === mainTs.path);
+    expect(row?.exists()).toBe(true);
+    expect(row?.classes()).toContain("active");
+    expect(scrollIntoView).toHaveBeenCalled();
     wrapper.unmount();
   });
 

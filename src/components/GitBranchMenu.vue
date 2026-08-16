@@ -309,6 +309,10 @@ onMounted(() => {
   window.addEventListener("scroll", onWindowScroll, true);
 });
 onBeforeUnmount(() => {
+  // 兜底复位父组件忙碌态：操作进行中弹层被卸载（外部关闭/切换仓库/面板状态切换）时，
+  // 异步 finally 里的 emit 已被 Vue 丢弃（isUnmounted），这里在卸载前同步补发一次，
+  // 避免 GitView 分支按钮永久禁用。Vue 在 beforeUnmount 阶段 isUnmounted 尚未置位。
+  if (branchBusy.value) emit("update:busy", false);
   window.removeEventListener("mousedown", onWindowMousedown);
   window.removeEventListener("keydown", onKeydown);
   window.removeEventListener("scroll", onWindowScroll, true);
