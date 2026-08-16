@@ -3,7 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { setToast, store, toastError, workspace } from "../useCodex";
 import {
+  copyBuffer,
+  pruneTreeToRoot,
   rootError,
+  rootEntry,
   resetTree,
 } from "./state";
 import {
@@ -12,7 +15,7 @@ import {
   resolveFallbackRoot,
 } from "./tree";
 import { ensureTextFileIcon } from "./icons";
-import { resetSearchState } from "./search";
+import { clearSearch, resetSearchState } from "./search";
 
 let active = false;
 /** 已加载的根路径：同根重新激活时保留展开状态，仅刷新数据 */
@@ -67,8 +70,15 @@ async function activate() {
   void ensureTextFileIcon();
   if (loadedRoot !== root) {
     loadedRoot = root;
-    resetTree();
-    await loadRoot(root);
+    // 不 resetTree：旧数据保持到新根加载完成（首屏无旧数据，行为等价）
+    const ok = await loadRoot(root);
+    if (ok) {
+      pruneTreeToRoot(root);
+      clearSearch();
+      copyBuffer.value = [];
+    } else if (rootEntry.value && rootError.value) {
+      setToast(rootError.value);
+    }
   } else {
     await refreshAll();
   }
@@ -82,21 +92,28 @@ export function setSessionFsActive(v: boolean) {
   if (v) void activate();
 }
 
-// 根目录切换（切换会话/新建会话选目录）：重置并重新加载，监听跟随新根
-watch(workspace, (r, old) => {
+// 根目录切换（切换会话/新建会话选目录）：不 resetTree，旧数据保持到新根加载完成，
+// 成功后替换并清理旧根缓存；监听跟随新根
+watch(workspace, async (r, old) => {
   if (r === old) return;
   if (!active) return;
+  void syncWatcher();
   if (r) {
     if (loadedRoot !== r) {
       loadedRoot = r;
-      resetTree();
-      void loadRoot(r);
+      const ok = await loadRoot(r);
+      if (ok) {
+        pruneTreeToRoot(r);
+        clearSearch();
+        copyBuffer.value = [];
+      } else if (rootEntry.value && rootError.value) {
+        setToast(rootError.value);
+      }
     }
   } else {
     resetTree();
     rootError.value = "暂无工作目录";
   }
-  void syncWatcher();
 });
 
 /** 仅测试用：清空模块状态 */

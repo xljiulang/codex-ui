@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from "vue";
 import {
   flattenResourceTree,
+  isPathUnderRoot,
   type FsEntry,
   type ResourceRow,
 } from "../../lib/sessionFs";
@@ -45,4 +46,18 @@ export function resetTree() {
   selectedPath.value = "";
   copyBuffer.value = [];
   iconCache.clear();
+}
+
+/** 根切换成功后：清理旧根缓存的 childrenByPath/expanded/selectedPath，
+ * 避免 watcher 事件触发 refreshAll 时误加载旧根路径 */
+export function pruneTreeToRoot(root: string) {
+  for (const k of Object.keys(childrenByPath)) {
+    if (!isPathUnderRoot(root, k)) delete childrenByPath[k];
+  }
+  for (const k of [...expanded]) {
+    if (!isPathUnderRoot(root, k)) expanded.delete(k);
+  }
+  if (selectedPath.value && !isPathUnderRoot(root, selectedPath.value)) {
+    selectedPath.value = "";
+  }
 }

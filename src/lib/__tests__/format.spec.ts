@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatElapsed, formatRelativeTime } from "../format";
+import {
+  formatDuration,
+  formatElapsed,
+  formatRelativeTime,
+  relPathOf,
+} from "../format";
 
 describe("耗时格式化", () => {
   it("进行中计时 mm:ss.s", () => {
@@ -25,5 +30,27 @@ describe("耗时格式化", () => {
   it("超过 30 天显示两位数年份的紧凑日期（适配固定时间列）", () => {
     const past = Date.now() / 1000 - 40 * 86400;
     expect(formatRelativeTime(past)).toMatch(/^\d{2}\/\d{1,2}\/\d{1,2}$/);
+  });
+});
+
+describe("relPathOf", () => {
+  it("root 与 path 分隔符不一致时仍正确剥离", () => {
+    expect(
+      relPathOf("D:/codex/codex-ui", "D:\\codex\\codex-ui\\src\\components"),
+    ).toBe("src\\components");
+    expect(relPathOf("D:\\repo", "D:/repo/src/a.ts")).toBe("src\\a.ts");
+  });
+
+  it("大小写不一致时仍正确剥离", () => {
+    expect(relPathOf("d:/repo/", "D:\\Repo\\src\\a.ts")).toBe("src\\a.ts");
+  });
+
+  it("path 等于 root 返回空串", () => {
+    expect(relPathOf("D:\\repo", "D:\\repo")).toBe("");
+    expect(relPathOf("D:/repo", "d:\\repo")).toBe("");
+  });
+
+  it("非 root 下路径原样返回", () => {
+    expect(relPathOf("D:\\repo", "D:\\other\\a.ts")).toBe("D:\\other\\a.ts");
   });
 });

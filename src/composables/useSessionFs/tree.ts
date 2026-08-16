@@ -51,19 +51,24 @@ export async function loadDir(path: string, force = false): Promise<void> {
   }
 }
 
-/** 加载根节点元信息 + 第一层子项（root 为已解析的绝对路径） */
-export async function loadRoot(root: string) {
+/** 加载根节点元信息 + 第一层子项（root 为已解析的绝对路径）；
+ * 返回是否成功写入（请求期间工作区已切换时结果作废返回 false） */
+export async function loadRoot(root: string): Promise<boolean> {
   loadingRoot.value = true;
   rootError.value = "";
   try {
-    rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
+    const entry = await invoke<FsEntry>("session_fs_metadata", {
       workspace: root,
       path: root,
     });
+    if (workspace.value !== root) return false; // 请求期间工作区已切换：结果作废
+    rootEntry.value = entry;
     expanded.add(root);
     await loadDir(root);
+    return true;
   } catch (e) {
     rootError.value = toastError(e);
+    return false;
   } finally {
     loadingRoot.value = false;
   }
@@ -88,17 +93,23 @@ export async function refreshAll() {
   }
   loadingRoot.value = true;
   try {
-    rootEntry.value = await invoke<FsEntry>("session_fs_metadata", {
+    const entry = await invoke<FsEntry>("session_fs_metadata", {
       workspace: root,
       path: root,
     });
+    if (workspace.value !== root) return; // 请求期间工作区已切换：结果作废
+    rootEntry.value = entry;
     expanded.add(root);
   } catch (e) {
+    if (workspace.value !== root) return;
     rootError.value = toastError(e);
   } finally {
     loadingRoot.value = false;
   }
-  const paths = [root, ...Object.keys(childrenByPath)];
+  const paths = [
+    root,
+    ...Object.keys(childrenByPath).filter((p) => isPathUnderRoot(root, p)),
+  ];
   for (const p of paths) {
     await loadDir(p, true);
   }

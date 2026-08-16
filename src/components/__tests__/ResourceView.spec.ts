@@ -1188,3 +1188,55 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 });
+
+describe("ResourceView 工作区切换", () => {
+  beforeEach(() => {
+    store.server.startupWorkspace = rootPath;
+    store.workspace = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.attachments = [];
+    store.toast = "";
+    mockedInvoke.mockClear();
+    mockFs();
+    __resetSessionFsForTest();
+    __resetEditorTabsForTest();
+    __resetSessionTabsForTest();
+  });
+
+  it("切换工作区保留旧树渲染，新数据到达后更新为新根", async () => {
+    const wrapper = await mountPanel();
+    expect(wrapper.text()).toContain("codex-ui");
+    expect(wrapper.find(".resource-row").exists()).toBe(true);
+
+    let resolveMeta!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "session_fs_metadata") {
+        return new Promise((r) => {
+          resolveMeta = r;
+        });
+      }
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      if (
+        cmd === "session_fs_watch_start" ||
+        cmd === "session_fs_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const other = "D:\\other";
+    store.workspace = other;
+    await flushPromises();
+    // 新根 metadata 挂起中：旧树仍在渲染
+    expect(wrapper.text()).toContain("codex-ui");
+    expect(wrapper.find(".resource-row").exists()).toBe(true);
+
+    resolveMeta({ ...rootEntry, name: "other", path: other });
+    await flushPromises();
+    await flushPromises();
+    expect(wrapper.text()).toContain("other");
+    wrapper.unmount();
+  });
+});

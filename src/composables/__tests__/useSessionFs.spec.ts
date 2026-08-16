@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -12,13 +13,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { store } from "../useCodex";
 import {
   __resetSessionFsForTest,
+  childrenByPath,
   copyBuffer,
   createTextFile,
   ensureEntryIcons,
   iconCacheKey,
   iconFor,
+  loadingRoot,
   openPathInApp,
   pasteAvailable,
+  rootEntry,
   setSessionFsActive,
 } from "../useSessionFs";
 import {
@@ -352,5 +356,113 @@ describe("useSessionFs 粘贴可用性与新建文本文件", () => {
       workspace: root,
       path: root,
     });
+  });
+});
+
+describe("useSessionFs 工作区切换保留旧数据", () => {
+  const rootEntryData: FsEntry = {
+    name: "repo",
+    path: root,
+    relPath: ".",
+    isDir: true,
+    size: null,
+    modifiedAtMs: 0,
+    createdAtMs: 0,
+    childCount: 1,
+  };
+
+  beforeEach(() => {
+    __resetSessionFsForTest();
+    store.workspace = null;
+    store.server.startupWorkspace = root;
+    store.toast = "";
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "session_fs_metadata") return Promise.resolve(rootEntryData);
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+  });
+
+  afterEach(() => {
+    __resetSessionFsForTest();
+  });
+
+  it("切换工作区不清空旧数据，新根加载完成后更新并清理旧根缓存", async () => {
+    setSessionFsActive(true);
+    await flushPromises();
+    expect(rootEntry.value?.path).toBe(root);
+
+    let resolveMeta!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "session_fs_metadata") {
+        return new Promise((r) => {
+          resolveMeta = r;
+        });
+      }
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+
+    const other = "D:\\other";
+    store.workspace = other;
+    await flushPromises();
+    // 新根 metadata 挂起中：旧 rootEntry 仍在、loading 不影响旧数据展示
+    expect(rootEntry.value?.path).toBe(root);
+    expect(loadingRoot.value).toBe(true);
+
+    const otherEntry: FsEntry = {
+      ...rootEntryData,
+      name: "other",
+      path: other,
+    };
+    resolveMeta(otherEntry);
+    await flushPromises();
+    await flushPromises();
+    expect(rootEntry.value?.path).toBe(other);
+    // 旧根缓存被清理
+    expect(childrenByPath[root]).toBeUndefined();
+    expect(store.toast).toBe("");
+  });
+
+  it("metadata 挂起期间再次切换工作区：旧结果作废不写入", async () => {
+    setSessionFsActive(true);
+    await flushPromises();
+    expect(rootEntry.value?.path).toBe(root);
+
+    let resolveB!: (v: unknown) => void;
+    let resolveC!: (v: unknown) => void;
+    let metaCall = 0;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "session_fs_metadata") {
+        metaCall += 1;
+        if (metaCall === 1) {
+          return new Promise((r) => {
+            resolveB = r;
+          });
+        }
+        return new Promise((r) => {
+          resolveC = r;
+        });
+      }
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+
+    const b = "D:\\b";
+    const c = "D:\\c";
+    store.workspace = b;
+    await flushPromises();
+    store.workspace = c;
+    await flushPromises();
+
+    resolveB({ ...rootEntryData, name: "b", path: b });
+    await flushPromises();
+    expect(rootEntry.value?.path).toBe(root);
+
+    resolveC({ ...rootEntryData, name: "c", path: c });
+    await flushPromises();
+    await flushPromises();
+    expect(rootEntry.value?.path).toBe(c);
   });
 });
