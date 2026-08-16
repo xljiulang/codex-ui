@@ -1,25 +1,28 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use gix::bstr::{BStr, BString, ByteSlice};
-use gix::progress::Discard;
-use gix::status::tree_index::TrackRenames;
-use gix::status::UntrackedFiles;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::codex::path_util::{clean_path, norm_key};
 
-/// 单文件大小上限（暂存/diff 等全量读入内存的操作），超过直接报错
+/// 单文件大小上限（diff 等全量读入内存的操作），超过直接报错
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// 串行化所有 git 操作：gix 不像 git 那样写索引锁文件，并发写会互相覆盖。
+/// 文件监听防抖窗口：最后一次 watch 文件变化后静默 3 秒才获取 git 变更信息，
+/// 避免频繁创建 git 子进程。
+const WATCH_DEBOUNCE_MS: u64 = 3000;
+
+/// 串行化所有 git 操作：git 子进程会写索引锁文件，并发写会互相覆盖。
 /// 锁在 spawn_blocking 任务内部获取并持有到任务真正结束，超时后任务继续执行时
 /// 后续操作也会排队等待，避免与后台仍在运行的 git 操作并发读写仓库。
 static GIT_OP_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+/// 启动时探测并缓存的系统 git 可执行文件路径（None 表示未安装）
+static GIT_BIN: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 fn git_op_lock() -> &'static Mutex<()> {
     GIT_OP_LOCK.get_or_init(|| Mutex::new(()))
@@ -55,7 +58,11 @@ fn not_a_repo() -> GitError {
     }
 }
 
-/// 变更状态（前端按小写字符串展示）
+fn git_missing() -> GitError {
+    git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
+}
+
+/// 变更状态（前端按小写字符串展示；与 git 状态字母 A/M/D/R/U/C 对应）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[derive(PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
@@ -63,6 +70,8 @@ pub enum FileStatus {
     Added,
     Modified,
     Deleted,
+    Renamed,
+    Conflicted,
     Untracked,
 }
 
@@ -72,7 +81,7 @@ pub enum FileStatus {
 pub struct GitFile {
     /// 相对仓库根的路径（正斜杠分隔）
     pub path: String,
-    /// added | modified | deleted | untracked
+    /// added | modified | deleted | renamed | conflicted | untracked
     pub status: FileStatus,
     /// 是否已有暂存区变化（HEAD → 索引）
     pub staged: bool,
@@ -176,35 +185,170 @@ pub struct GitWatchHandle {
 
 pub struct GitWatcherState(pub Mutex<Option<GitWatchHandle>>);
 
-// ---------- 仓库打开 ----------
+// ---------- git 可执行文件探测与缓存 ----------
 
-/// 打开（向上发现）Git 仓库；非仓库返回 `NotARepo`
-fn open_repo(path: &str) -> Result<gix::Repository, GitError> {
-    match gix::discover(path) {
-        Ok(repo) => Ok(repo),
-        Err(err) => {
-            use gix::discover::upwards::Error as Up;
-            let is_not_repo = matches!(
-                err,
-                gix::discover::Error::Discover(
-                    Up::NoGitRepository { .. }
-                        | Up::NoGitRepositoryWithinCeiling { .. }
-                        | Up::NoGitRepositoryWithinFs { .. }
-                        | Up::NoMatchingCeilingDir
-                )
-            );
-            if is_not_repo {
-                Err(not_a_repo())
-            } else {
-                Err(git_err(format!("无法打开 Git 仓库: {err}")))
+/// 探测系统 git 可执行文件：优先 PATH，回退常见安装目录
+fn locate_git() -> Option<PathBuf> {
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            for name in ["git.exe", "git"] {
+                let cand = dir.join(name);
+                if cand.is_file() {
+                    return Some(cand);
+                }
             }
         }
     }
+    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LocalAppData"] {
+        if let Ok(base) = std::env::var(var) {
+            let base = PathBuf::from(base);
+            for sub in ["Git\\cmd\\git.exe", "Programs\\Git\\cmd\\git.exe"] {
+                let cand = base.join(sub);
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+    None
 }
 
-/// 相对路径字节 → 展示字符串
-fn path_str(p: &BStr) -> String {
-    p.to_str_lossy().into_owned()
+/// 验证候选 git 可执行文件可用（`git --version`）
+fn probe() -> Option<PathBuf> {
+    let cand = locate_git()?;
+    let ok = git_command(&cand)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    ok.then_some(cand)
+}
+
+/// codex-ui 启动时调用一次：确认 git 可用状态并缓存结果。
+/// 探测失败后整个会话视为未安装 git（安装后需重启应用）。
+pub fn probe_git_at_startup() -> bool {
+    let found = probe();
+    let ok = found.is_some();
+    let _ = GIT_BIN.set(found);
+    ok
+}
+
+/// 返回缓存（或惰性探测）到的 git 可执行文件路径
+fn git_bin() -> Result<&'static Path, GitError> {
+    if GIT_BIN.get().is_none() {
+        let _ = GIT_BIN.set(probe());
+    }
+    GIT_BIN
+        .get()
+        .and_then(|o| o.as_deref())
+        .ok_or_else(git_missing)
+}
+
+// ---------- git 子进程执行 ----------
+
+/// 创建系统 git 命令：Windows GUI 应用下设置 CREATE_NO_WINDOW，
+/// 避免子进程闪现黑色控制台窗口。
+fn git_command(git_bin: &Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new(git_bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// 统一执行 git 子命令，返回 (退出码, stdout, stderr)。
+/// 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起。
+fn git_output(
+    git_bin: &Path,
+    root: &str,
+    args: &[&str],
+) -> Result<(i32, String, String), GitError> {
+    let out = git_command(git_bin)
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .env("LANG", "C")
+        .env("LC_ALL", "C")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                git_missing()
+            } else {
+                git_err(format!(
+                    "执行 git {} 失败: {e}",
+                    args.first().copied().unwrap_or("")
+                ))
+            }
+        })?;
+    Ok((
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    ))
+}
+
+/// 执行 git 子命令并校验退出码：成功返回 stdout，失败经 `map_error` 映射为中文提示
+fn git_run_mapped(
+    git_bin: &Path,
+    root: &str,
+    args: &[&str],
+    map_error: impl Fn(&str) -> String,
+) -> Result<String, GitError> {
+    let (code, stdout, stderr) = git_output(git_bin, root, args)?;
+    if code != 0 {
+        let combined = format!("{stdout}\n{stderr}");
+        return Err(git_err(map_error(&combined)));
+    }
+    Ok(stdout)
+}
+
+// ---------- 仓库发现 ----------
+
+/// 仓库信息：工作区根与 git 目录
+struct RepoInfo {
+    workdir: PathBuf,
+    git_dir: PathBuf,
+}
+
+/// 向上发现 Git 仓库（`git rev-parse`）；非仓库返回 `NotARepo`
+fn git_rev_parse(root: &str) -> Result<RepoInfo, GitError> {
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)
+}
+
+fn git_rev_parse_with(git_bin: &Path, root: &str) -> Result<RepoInfo, GitError> {
+    let (code, stdout, stderr) = git_output(
+        git_bin,
+        root,
+        &[
+            "rev-parse",
+            "--show-toplevel",
+            "--git-dir",
+            "--is-inside-work-tree",
+        ],
+    )?;
+    if code != 0 {
+        let c = format!("{stdout}\n{stderr}").to_lowercase();
+        if c.contains("not a git repository") || c.contains("no git repository") {
+            return Err(not_a_repo());
+        }
+        return Err(git_err(format!("无法打开 Git 仓库: {}", stderr.trim())));
+    }
+    let mut lines = stdout.lines();
+    let workdir = lines.next().ok_or_else(|| git_err("git rev-parse 输出不完整"))?;
+    let git_dir = lines.next().ok_or_else(|| git_err("git rev-parse 输出不完整"))?;
+    let inside = lines.next().unwrap_or("true");
+    if inside.trim() != "true" {
+        return Err(not_a_repo());
+    }
+    Ok(RepoInfo {
+        workdir: PathBuf::from(workdir),
+        git_dir: PathBuf::from(git_dir),
+    })
 }
 
 /// 路径是否包含 node_modules 组件（任意深度，大小写不敏感）
@@ -214,8 +358,8 @@ fn has_node_modules_component(path: &str) -> bool {
 
 // ---------- 状态 ----------
 
-/// 合并同一路径的多个状态（暂存 + 未暂存），与 `git status` 的 XY 合并规则一致：
-/// deleted > added > modified > untracked
+/// 合并同一路径的多个状态（暂存 + 未暂存），展示优先级：
+/// conflicted > deleted > modified > renamed/added > untracked
 fn merge_file(
     files: &mut Vec<GitFile>,
     index_of: &mut HashMap<String, usize>,
@@ -225,9 +369,10 @@ fn merge_file(
     worktree: bool,
 ) {
     let prio = |s: FileStatus| match s {
+        FileStatus::Conflicted => 5,
         FileStatus::Deleted => 4,
-        FileStatus::Added => 3,
-        FileStatus::Modified => 2,
+        FileStatus::Modified => 3,
+        FileStatus::Renamed | FileStatus::Added => 2,
         FileStatus::Untracked => 1,
     };
     let norm = path.to_lowercase();
@@ -248,133 +393,136 @@ fn merge_file(
     }
 }
 
-fn status_sync(path: &str) -> Result<GitStatus, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let branch = match repo.head_name() {
-        Ok(Some(name)) => name.shorten().to_str_lossy().into_owned(),
-        _ => "HEAD".to_string(),
-    };
+/// porcelain XY 状态字母 → FileStatus（'?' 未跟踪单独处理）
+fn letter_status(c: char) -> Option<FileStatus> {
+    match c {
+        'A' => Some(FileStatus::Added),
+        'D' => Some(FileStatus::Deleted),
+        'M' | 'T' => Some(FileStatus::Modified),
+        'R' | 'C' => Some(FileStatus::Renamed),
+        'U' => Some(FileStatus::Conflicted),
+        _ => None,
+    }
+}
+
+/// 当前分支短名（游离 HEAD 或 HEAD 未出生/失败时为 "HEAD"）
+fn git_current_branch_with(git_bin: &Path, root: &str) -> Result<String, GitError> {
+    let (code, stdout, _) = git_output(git_bin, root, &["symbolic-ref", "--short", "-q", "HEAD"])?;
+    let name = stdout.trim();
+    if code == 0 && !name.is_empty() {
+        Ok(name.to_string())
+    } else {
+        Ok("HEAD".to_string())
+    }
+}
+
+/// 仓库是否配置了任意远端
+fn git_has_remote_with(git_bin: &Path, root: &str) -> Result<bool, GitError> {
+    let (code, stdout, _) = git_output(git_bin, root, &["remote"])?;
+    if code != 0 {
+        return Err(git_err("读取远端列表失败"));
+    }
+    Ok(!stdout.trim().is_empty())
+}
+
+fn git_status(root: &str) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    git_status_with(&git_bin, root)
+}
+
+/// 状态（标准 porcelain）：默认开启重命名检测；`-z` 下条目为 `XY 路径`，
+/// 重命名/复制为双路径（`新路径\0旧路径\0`），展示路径取新路径。
+fn git_status_with(git_bin: &Path, root: &str) -> Result<GitStatus, GitError> {
+    let repo = git_rev_parse_with(git_bin, root)?;
+    let workdir = clean_path(&repo.workdir);
+    let branch = git_current_branch_with(git_bin, root)?;
+    let has_remote = git_has_remote_with(git_bin, root)?;
+
+    let (code, stdout, stderr) = git_output(
+        git_bin,
+        root,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+        ],
+    )?;
+    if code != 0 {
+        return Err(git_err(format!("git status 失败: {}", stderr.trim())));
+    }
 
     let mut files: Vec<GitFile> = Vec::new();
     let mut index_of: HashMap<String, usize> = HashMap::new();
-
-    let platform = repo
-        .status(Discard)
-        .map_err(|e| git_err(format!("初始化 git status 失败: {e}")))?
-        .untracked_files(UntrackedFiles::Files)
-        .index_worktree_rewrites(None)
-        .tree_index_track_renames(TrackRenames::Disabled);
-
-    let iter = platform
-        .into_iter(Vec::<BString>::new())
-        .map_err(|e| git_err(format!("git status 失败: {e}")))?;
-
-    for item in iter {
-        let item = item.map_err(|e| git_err(format!("git status 失败: {e}")))?;
-        match item {
-            // HEAD → 索引 的变化（暂存区）
-            gix::status::Item::TreeIndex(change) => {
-                use gix::diff::index::Change;
-                match change {
-                    Change::Addition { location, .. } => {
-                        merge_file(
-                            &mut files,
-                            &mut index_of,
-                            path_str(&location),
-                            FileStatus::Added,
-                            true,
-                            false,
-                        );
-                    }
-                    Change::Deletion { location, .. } => {
-                        merge_file(
-                            &mut files,
-                            &mut index_of,
-                            path_str(&location),
-                            FileStatus::Deleted,
-                            true,
-                            false,
-                        );
-                    }
-                    Change::Modification { location, .. } => {
-                        merge_file(
-                            &mut files,
-                            &mut index_of,
-                            path_str(&location),
-                            FileStatus::Modified,
-                            true,
-                            false,
-                        );
-                    }
-                    // 重命名检测已关闭，理论上不会出现
-                    Change::Rewrite { .. } => continue,
-                }
+    let tokens: Vec<&str> = stdout.split('\0').collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        // 合法条目至少 "XY " + 一个字符的路径
+        if tok.len() < 4 || !tok.as_bytes()[2].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        let x = tok.as_bytes()[0] as char;
+        let y = tok.as_bytes()[1] as char;
+        let path = &tok[3..];
+        let is_rename = x == 'R' || x == 'C' || y == 'R' || y == 'C';
+        let orig = if is_rename && i + 1 < tokens.len() {
+            let o = tokens[i + 1].to_string();
+            i += 1;
+            Some(o)
+        } else {
+            None
+        };
+        // 无条件隐藏 node_modules（含重命名任一侧路径）
+        if has_node_modules_component(path)
+            || orig.as_deref().map(has_node_modules_component).unwrap_or(false)
+        {
+            i += 1;
+            continue;
+        }
+        if x == '?' && y == '?' {
+            merge_file(
+                &mut files,
+                &mut index_of,
+                path.to_string(),
+                FileStatus::Untracked,
+                false,
+                true,
+            );
+        } else {
+            if let Some(st) = letter_status(x) {
+                merge_file(&mut files, &mut index_of, path.to_string(), st, true, false);
             }
-            // 索引 → 工作区 的变化（含未跟踪文件）
-            gix::status::Item::IndexWorktree(item) => {
-                use gix::status::index_worktree::Item as IwItem;
-                use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
-                match item {
-                    IwItem::Modification {
-                        rela_path, status, ..
-                    } => {
-                        let status = match status {
-                            // gix 版简化：冲突按“修改”展示
-                            EntryStatus::Conflict { .. } => FileStatus::Modified,
-                            EntryStatus::Change(Change::Removed) => FileStatus::Deleted,
-                            EntryStatus::Change(_) => FileStatus::Modified,
-                            EntryStatus::NeedsUpdate(_) => continue,
-                            EntryStatus::IntentToAdd => FileStatus::Added,
-                        };
-                        merge_file(
-                            &mut files,
-                            &mut index_of,
-                            path_str(rela_path.as_ref()),
-                            status,
-                            false,
-                            true,
-                        );
-                    }
-                    IwItem::DirectoryContents { entry, .. } => {
-                        if matches!(entry.status, gix::dir::entry::Status::Untracked) {
-                            merge_file(
-                                &mut files,
-                                &mut index_of,
-                                path_str(entry.rela_path.as_ref()),
-                                FileStatus::Untracked,
-                                false,
-                                true,
-                            );
-                        }
-                    }
-                    // 重命名检测已关闭，理论上不会出现
-                    IwItem::Rewrite { .. } => continue,
-                }
+            if let Some(st) = letter_status(y) {
+                merge_file(&mut files, &mut index_of, path.to_string(), st, false, true);
             }
         }
+        i += 1;
     }
 
-    // 无条件忽略 node_modules（即使已被跟踪也隐藏）
-    files.retain(|f| !has_node_modules_component(&f.path));
     files.sort_by_key(|a| a.path.to_lowercase());
     Ok(GitStatus {
-        repo_workspace: clean_path(workdir),
+        repo_workspace: workdir,
         branch,
-        has_remote: !repo.remote_names().is_empty(),
+        has_remote,
         files,
     })
 }
 
-fn init_sync(path: &str) -> Result<GitStatus, GitError> {
-    match open_repo(path) {
+fn git_init(root: &str) -> Result<GitStatus, GitError> {
+    match git_rev_parse(root) {
         Ok(_) => return Err(git_err("当前目录已经是 Git 仓库，无需初始化")),
         Err(e) if e.code != GitErrorCode::NotARepo => return Err(e),
         Err(_) => {}
     }
-    // 仅初始化（默认分支 main，HEAD 未出生，不自动提交）
-    gix::init(path).map_err(|e| git_err(format!("git 初始化失败: {e}")))?;
-    status_sync(path)
+    let git_bin = git_bin()?;
+    let (code, _, stderr) = git_output(&git_bin, root, &["init", "-b", "main"])?;
+    if code != 0 {
+        return Err(git_err(format!("git 初始化失败: {}", stderr.trim())));
+    }
+    git_status_with(&git_bin, root)
 }
 
 // ---------- 分支管理 ----------
@@ -414,39 +562,32 @@ fn validate_branch_name(name: &str) -> Result<(), GitError> {
     Ok(())
 }
 
-/// 取当前分支短名（游离 HEAD 或 HEAD 未出生时为 "HEAD"）
-fn current_branch(repo: &gix::Repository) -> String {
-    match repo.head_name() {
-        Ok(Some(name)) => name.shorten().to_str_lossy().into_owned(),
-        _ => "HEAD".to_string(),
-    }
+/// 分支列表（`git branch` / `git branch -r`）
+fn git_branch(root: &str) -> Result<GitBranches, GitError> {
+    let git_bin = git_bin()?;
+    git_branch_with(&git_bin, root)
 }
 
-fn branches_sync(path: &str) -> Result<GitBranches, GitError> {
-    let repo = open_repo(path)?;
-    let current = current_branch(&repo);
-    let mut branches: Vec<String> = Vec::new();
-    let mut remote_branches: Vec<String> = Vec::new();
-    let references = repo
-        .references()
-        .map_err(|e| git_err(format!("读取引用失败: {e}")))?;
-    let iter = references
-        .local_branches()
-        .map_err(|e| git_err(format!("读取分支失败: {e}")))?;
-    for item in iter {
-        let item = item.map_err(|e| git_err(format!("读取分支失败: {e}")))?;
-        branches.push(item.name().shorten().to_str_lossy().into_owned());
-    }
-    let remote_iter = references
-        .remote_branches()
-        .map_err(|e| git_err(format!("读取远程分支失败: {e}")))?;
-    for item in remote_iter {
-        let item = item.map_err(|e| git_err(format!("读取远程分支失败: {e}")))?;
-        remote_branches.push(item.name().shorten().to_str_lossy().into_owned());
-    }
+fn git_branch_with(git_bin: &Path, root: &str) -> Result<GitBranches, GitError> {
+    git_rev_parse_with(git_bin, root)?;
+    let current = git_current_branch_with(git_bin, root)?;
+    let mut branches =
+        git_list_refs_with(git_bin, root, &["branch", "--format=%(refname:short)"])?;
+    let mut remote_branches = git_list_refs_with(
+        git_bin,
+        root,
+        &["branch", "-r", "--format=%(refname:short)"],
+    )?
+    .into_iter()
+    .filter(|b| !b.ends_with("/HEAD"))
+    .collect::<Vec<String>>();
     branches.sort_by_key(|a| a.to_lowercase());
     remote_branches.sort_by_key(|a| a.to_lowercase());
-    let current_upstream = current_remote_branch(&repo, &current);
+    let current_upstream = if current == "HEAD" {
+        None
+    } else {
+        git_upstream_with(git_bin, root, &current)?
+    };
     Ok(GitBranches {
         current,
         branches,
@@ -455,410 +596,178 @@ fn branches_sync(path: &str) -> Result<GitBranches, GitError> {
     })
 }
 
-/// 当前分支上游的「远端/分支」短名（无上游/游离 HEAD/解析失败时为 None）
-fn current_remote_branch(repo: &gix::Repository, branch: &str) -> Option<String> {
-    if branch == "HEAD" {
-        return None;
+/// 执行会输出多行的 git 列表命令并收集非空行
+fn git_list_refs_with(
+    git_bin: &Path,
+    root: &str,
+    args: &[&str],
+) -> Result<Vec<String>, GitError> {
+    let (code, stdout, stderr) = git_output(git_bin, root, args)?;
+    if code != 0 {
+        return Err(git_err(format!("git {} 失败: {}", args[0], stderr.trim())));
     }
-    resolve_remote_target(repo, branch)
-        .ok()
-        .map(|(label, remote_branch)| format!("{label}/{remote_branch}"))
+    Ok(stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
 }
 
-fn create_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
+/// 当前分支上游「远端/分支」短名（无上游/游离 HEAD 时为 None）
+fn git_upstream_with(
+    git_bin: &Path,
+    root: &str,
+    _branch: &str,
+) -> Result<Option<String>, GitError> {
+    let (code, stdout, _) = git_output(
+        git_bin,
+        root,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    )?;
+    if code != 0 {
+        return Ok(None);
+    }
+    let up = stdout.trim();
+    if up.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(up.to_string()))
+    }
+}
+
+/// 引用是否存在
+fn git_ref_exists_with(git_bin: &Path, root: &str, refname: &str) -> Result<bool, GitError> {
+    let (code, _, _) = git_output(git_bin, root, &["show-ref", "--verify", "--quiet", refname])?;
+    Ok(code == 0)
+}
+
+/// HEAD 是否已有提交（未出生 → false）
+fn git_head_exists_with(git_bin: &Path, root: &str) -> Result<bool, GitError> {
+    let (code, _, _) = git_output(git_bin, root, &["rev-parse", "--verify", "--quiet", "HEAD"])?;
+    Ok(code == 0)
+}
+
+/// 创建分支（`git branch <name>`）
+fn git_branch_create(root: &str, name: &str) -> Result<GitStatus, GitError> {
     let name = name.trim();
     validate_branch_name(name)?;
-    let repo = open_repo(path)?;
-    let head_id = repo
-        .head_id()
-        .map_err(|_| git_err("仓库还没有任何提交，无法创建分支"))?;
-    let full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(name))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    if repo.find_reference(&full).is_ok() {
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    if !git_head_exists_with(&git_bin, root)? {
+        return Err(git_err("仓库还没有任何提交，无法创建分支"));
+    }
+    if git_ref_exists_with(&git_bin, root, &format!("refs/heads/{name}"))? {
         return Err(git_err(format!("分支 {name} 已存在")));
     }
-    let head_obj = head_id
-        .object()
-        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    repo.edit_reference(gix::refs::transaction::RefEdit {
-        change: gix::refs::transaction::Change::Update {
-            log: Default::default(),
-            expected: gix::refs::transaction::PreviousValue::MustNotExist,
-            new: gix::refs::Target::Object(head_obj.id),
-        },
-        name: full,
-        deref: false,
-    })
-    .map_err(|e| git_err(format!("创建分支失败: {e}")))?;
-    status_sync(path)
+    git_run_mapped(&git_bin, root, &["branch", name], |combined| {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            format!("创建分支 {name} 失败")
+        } else {
+            trimmed.to_string()
+        }
+    })?;
+    git_status_with(&git_bin, root)
 }
 
-fn delete_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
+/// 删除分支（`git branch -D`，无条件删除：不校验是否合并）
+fn git_branch_delete(root: &str, name: &str) -> Result<GitStatus, GitError> {
     let name = name.trim();
-    let repo = open_repo(path)?;
-    if current_branch(&repo) == name {
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    let current = git_current_branch_with(&git_bin, root)?;
+    if current == name {
         return Err(git_err("不能删除当前所在分支"));
     }
-    let full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(name))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    let _ = repo
-        .find_reference(&full)
-        .map_err(|_| git_err(format!("分支 {name} 不存在")))?;
-    repo.edit_reference(gix::refs::transaction::RefEdit {
-        change: gix::refs::transaction::Change::Delete {
-            expected: gix::refs::transaction::PreviousValue::Any,
-            log: gix::refs::transaction::RefLog::AndReference,
-        },
-        name: full,
-        deref: false,
-    })
-    .map_err(|e| git_err(format!("删除分支失败: {e}")))?;
-    status_sync(path)
-}
-
-/// 捕获当前 HEAD 的目标（符号引用或对象），用于写阶段失败时恢复。
-/// `None` 表示 HEAD 原本未出生（新仓库无提交）。
-fn capture_head_target(repo: &gix::Repository) -> Result<Option<gix::refs::Target>, GitError> {
-    let head = repo.head().map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    Ok(match head.kind {
-        gix::head::Kind::Symbolic(r) => Some(gix::refs::Target::Symbolic(r.name)),
-        gix::head::Kind::Detached { target, .. } => Some(gix::refs::Target::Object(target)),
-        gix::head::Kind::Unborn(_) => None,
-    })
-}
-
-/// 将 HEAD 恢复到捕获的目标；`None` 表示恢复“未出生”状态（删除 HEAD 引用）
-fn restore_head(repo: &gix::Repository, target: &Option<gix::refs::Target>) -> Result<(), GitError> {
-    let name: gix::refs::FullName = "HEAD".try_into().expect("valid");
-    let change = match target {
-        Some(gix::refs::Target::Symbolic(full)) => gix::refs::transaction::Change::Update {
-            log: Default::default(),
-            expected: gix::refs::transaction::PreviousValue::Any,
-            new: gix::refs::Target::Symbolic(full.clone()),
-        },
-        Some(gix::refs::Target::Object(oid)) => gix::refs::transaction::Change::Update {
-            log: Default::default(),
-            expected: gix::refs::transaction::PreviousValue::Any,
-            new: gix::refs::Target::Object(*oid),
-        },
-        None => gix::refs::transaction::Change::Delete {
-            expected: gix::refs::transaction::PreviousValue::Any,
-            log: gix::refs::transaction::RefLog::AndReference,
-        },
-    };
-    repo.edit_reference(gix::refs::transaction::RefEdit {
-        change,
-        name,
-        deref: false,
-    })
-    .map_err(|e| git_err(format!("恢复 HEAD 失败: {e}")))?;
-    Ok(())
-}
-
-/// 将 `paths` 对应的工作区文件恢复为 `tree` 中的内容：
-/// tree 有该路径 → 写回 blob；没有（纯新增）→ 删除文件。用于写阶段失败的尽最大努力回滚。
-fn restore_paths_from_tree(
-    workdir: &Path,
-    tree: &gix::Tree,
-    paths: &[String],
-) -> Result<(), GitError> {
-    for rel in paths {
-        let dest = workdir.join(rel);
-        let entry = tree
-            .lookup_entry_by_path(Path::new(rel))
-            .map_err(|e| git_err(format!("回滚时在旧树中查找 {rel} 失败: {e}")))?;
-        match entry {
-            Some(e) if e.mode().is_blob() => {
-                let mut obj = e
-                    .object()
-                    .map_err(|err| git_err(format!("回滚时读取 {rel} 对象失败: {err}")))?;
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent).map_err(|err| {
-                        git_err(format!("回滚时创建目录失败 {}: {err}", clean_path(parent)))
-                    })?;
-                }
-                std::fs::write(&dest, std::mem::take(&mut obj.data)).map_err(|err| {
-                    git_err(format!("回滚时写回文件失败 {}: {err}", clean_path(&dest)))
-                })?;
-            }
-            _ => {
-                if dest.is_file() || dest.is_symlink() {
-                    std::fs::remove_file(&dest).map_err(|err| {
-                        git_err(format!("回滚时删除文件失败 {}: {err}", clean_path(&dest)))
-                    })?;
-                }
-                remove_empty_parents(workdir, &dest);
-            }
-        }
+    if !git_ref_exists_with(&git_bin, root, &format!("refs/heads/{name}"))? {
+        return Err(git_err(format!("分支 {name} 不存在")));
     }
-    Ok(())
+    git_run_mapped(&git_bin, root, &["branch", "-D", name], branch_delete_failure_message)?;
+    git_status_with(&git_bin, root)
 }
 
-fn switch_branch_sync(path: &str, name: &str) -> Result<GitStatus, GitError> {
+/// 删除分支失败提示映射
+fn branch_delete_failure_message(combined: &str) -> String {
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        "删除分支失败".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+// ---------- 分支切换 ----------
+
+/// 切换分支（`git switch <name>`，标准语义：无冲突即可切换，未提交改动随分支携带）
+fn git_switch(root: &str, name: &str) -> Result<GitStatus, GitError> {
     let name = name.trim();
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(name))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    let mut target_ref = repo
-        .find_reference(&full)
-        .map_err(|_| git_err(format!("分支 {name} 不存在")))?;
-    if current_branch(&repo) == name {
+    validate_branch_name(name)?;
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    let current = git_current_branch_with(&git_bin, root)?;
+    if current == name {
         return Err(git_err(format!("当前已在分支 {name}")));
     }
-
-    let target_tree_id = target_ref
-        .peel_to_id()
-        .map_err(|e| git_err(format!("解析分支 {name} 失败: {e}")))?;
-    let target_tree = target_tree_id
-        .object()
-        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
-        .into_commit()
-        .tree_id()
-        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
-        .object()
-        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
-        .into_tree();
-    let old_tree_id = repo
-        .head_tree_id_or_empty()
-        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    let old_tree = old_tree_id
-        .object()
-        .map_err(|e| git_err(format!("读取 HEAD 树失败: {e}")))?
-        .into_tree();
-
-    let changes = repo
-        .diff_tree_to_tree(
-            Some(&old_tree),
-            Some(&target_tree),
-            gix::diff::Options::default().with_rewrites(None),
-        )
-        .map_err(|e| git_err(format!("计算分支差异失败: {e}")))?;
-
-    let old_index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-
-    // 冲突检查：未跟踪文件将被覆盖 / 本地改动与目标内容不一致。
-    // 语义对齐 git checkout：无冲突即可切换，未提交改动随分支携带。
-    let mut untracked_overwrite: Option<String> = None;
-    let mut conflicts: Vec<String> = Vec::new();
-    // 携带路径 + 工作区快照（回滚时优先还原，避免覆盖丢失本地编辑）
-    let mut carried: Vec<(String, Option<Vec<u8>>)> = Vec::new();
-
-    for change in &changes {
-        let location = match change {
-            gix::diff::tree_with_rewrites::Change::Addition { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => location,
-            _ => continue,
-        };
-        // 目录级（tree）条目在索引中没有对应条目，且真实碰撞由文件级变化逐条校验，跳过
-        if change.entry_mode().is_tree() {
-            continue;
-        }
-        let rel = path_str(location.as_ref());
-        let index_entry = old_index.entry_by_path(location.as_ref());
-        let work_exists = workdir.join(&rel).exists();
-
-        // 未跟踪文件将被覆盖（目标新增/修改路径已存在且不在索引）
-        if matches!(
-            change,
-            gix::diff::tree_with_rewrites::Change::Addition { .. }
-                | gix::diff::tree_with_rewrites::Change::Modification { .. }
-        ) && work_exists
-            && index_entry.is_none()
-        {
-            if untracked_overwrite.is_none() {
-                untracked_overwrite = Some(rel);
-            }
-            continue;
-        }
-
-        // 本地改动判定：工作区/索引与 HEAD 不一致，或索引新增
-        let head_id = old_tree
-            .lookup_entry_by_path(Path::new(&rel))
-            .map_err(|e| git_err(format!("读取 HEAD 条目失败: {e}")))?
-            .map(|e| e.id().detach());
-        let target_id = match change {
-            gix::diff::tree_with_rewrites::Change::Addition { id, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { id, .. } => Some(*id),
-            gix::diff::tree_with_rewrites::Change::Deletion { .. } => None,
-            _ => None,
-        };
-        let work = std::fs::read(workdir.join(&rel)).ok();
-
-        let mut local_modified = false;
-        if let Some(hid) = head_id {
-            let head_bytes = repo
-                .find_object(hid)
-                .ok()
-                .map(|mut o| std::mem::take(&mut o.data));
-            let work_modified = head_bytes.as_deref() != work.as_deref();
-            let index_modified = index_entry.map(|e| e.id != hid).unwrap_or(true);
-            local_modified = work_modified || index_modified;
-        } else if index_entry.is_some() {
-            local_modified = true; // 索引新增（staged new）
-        }
-        if !local_modified {
-            continue;
-        }
-
-        // 冲突：本地有改动且目标内容与本地不一致才拒绝
-        let target_bytes = target_id
-            .and_then(|tid| repo.find_object(tid).ok())
-            .map(|mut o| std::mem::take(&mut o.data));
-        let conflict = match target_bytes {
-            Some(tb) => !(work.is_some() && work.as_deref() == Some(tb.as_slice())),
-            None => work.is_some(),
-        };
-        if conflict {
-            conflicts.push(rel);
-        } else {
-            carried.push((rel, work));
-        }
+    if !git_ref_exists_with(&git_bin, root, &format!("refs/heads/{name}"))? {
+        return Err(git_err(format!("分支 {name} 不存在")));
     }
-
-    if let Some(p) = untracked_overwrite {
-        return Err(git_err(format!("未跟踪文件将被覆盖: {p}")));
-    }
-    if !conflicts.is_empty() {
-        return Err(git_err(format!(
-            "本地修改与目标分支冲突，无法切换: {}（请先提交或还原）",
-            conflicts.join("、")
+    let (code, stdout, stderr) = git_output(&git_bin, root, &["switch", name])?;
+    if code != 0 {
+        return Err(git_err(switch_failure_message(
+            &format!("{stdout}\n{stderr}"),
+            name,
         )));
     }
-
-    // 写阶段前置状态捕获（用于失败回滚）
-    let mut old_index_owned = old_index.into_owned_or_cloned();
-    let old_head = capture_head_target(&repo)?;
-    let changed_paths: Vec<String> = changes
-        .iter()
-        .filter(|c| !c.entry_mode().is_tree())
-        .filter_map(|c| match c {
-            gix::diff::tree_with_rewrites::Change::Addition { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => {
-                Some(path_str(location.as_ref()))
-            }
-            gix::diff::tree_with_rewrites::Change::Rewrite { .. } => None,
-        })
-        .collect();
-    let changed_set: HashSet<&str> = changed_paths.iter().map(|s| s.as_str()).collect();
-    let carried_set: HashSet<&str> = carried.iter().map(|(rel, _)| rel.as_str()).collect();
-
-    // 写阶段（工作区 → 索引 → HEAD）。任一步失败都回滚到写前状态，避免半切换。
-    let write_result = (|| -> Result<(), GitError> {
-        // ① 同步工作区文件（携带路径内容与目标一致，重写无害）
-        for change in &changes {
-            match change {
-                gix::diff::tree_with_rewrites::Change::Addition { location, id, .. }
-                | gix::diff::tree_with_rewrites::Change::Modification { location, id, .. } => {
-                    let rel = path_str(location.as_ref());
-                    let dest = workdir.join(&rel);
-                    let obj = repo
-                        .find_object(*id)
-                        .map_err(|e| git_err(format!("读取对象失败: {e}")))?;
-                    if obj.kind != gix::objs::Kind::Blob {
-                        continue;
-                    }
-                    let mut obj = obj;
-                    if let Some(parent) = dest.parent() {
-                        std::fs::create_dir_all(parent).map_err(|e| {
-                            git_err(format!("创建目录失败 {}: {e}", clean_path(parent)))
-                        })?;
-                    }
-                    std::fs::write(&dest, std::mem::take(&mut obj.data))
-                        .map_err(|e| git_err(format!("写入文件失败 {}: {e}", clean_path(&dest))))?;
-                }
-                gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => {
-                    let p = workdir.join(path_str(location.as_ref()));
-                    if p.is_file() || p.is_symlink() {
-                        std::fs::remove_file(&p)
-                            .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&p))))?;
-                    }
-                    remove_empty_parents(workdir, &p);
-                }
-                gix::diff::tree_with_rewrites::Change::Rewrite { .. } => continue,
-            }
-        }
-
-        // ② 重建索引：以目标树为底，未触及路径保留旧暂存条目（携带暂存改动）
-        let mut new_index = repo
-            .index_from_tree(&target_tree.id)
-            .map_err(|e| git_err(format!("重建索引失败: {e}")))?;
-        for (entry, old_path) in old_index_owned.entries_mut_with_paths() {
-            let rel = old_path.to_str_lossy();
-            if changed_set.contains(rel.as_ref()) {
-                continue; // 分支差异路径由目标树决定
-            }
-            let target_same = target_tree
-                .lookup_entry_by_path(Path::new(rel.as_ref()))
-                .map_err(|e| git_err(format!("读取目标树条目失败: {e}")))?
-                .map(|te| te.id().detach() == entry.id)
-                .unwrap_or(false);
-            if !target_same {
-                if let Some(e) =
-                    new_index.entry_mut_by_path_and_stage(old_path, entry.stage())
-                {
-                    e.id = entry.id;
-                    e.mode = entry.mode;
-                }
-            }
-        }
-        new_index
-            .write(gix::index::write::Options::default())
-            .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-
-        // ③ 更新 HEAD 指向目标分支
-        repo.edit_reference(gix::refs::transaction::RefEdit {
-            change: gix::refs::transaction::Change::Update {
-                log: Default::default(),
-                expected: gix::refs::transaction::PreviousValue::Any,
-                new: gix::refs::Target::Symbolic(full),
-            },
-            name: "HEAD".try_into().expect("valid"),
-            deref: false,
-        })
-        .map_err(|e| git_err(format!("切换分支失败: {e}")))?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        // 尽最大努力回滚：携带路径快照 → 其余变更路径旧树 → 旧索引 → 旧 HEAD
-        for (rel, snapshot) in &carried {
-            let dest = workdir.join(rel);
-            match snapshot {
-                Some(bytes) => {
-                    if let Some(parent) = dest.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let _ = std::fs::write(&dest, bytes);
-                }
-                None => {
-                    if dest.is_file() || dest.is_symlink() {
-                        let _ = std::fs::remove_file(&dest);
-                    }
-                    remove_empty_parents(workdir, &dest);
-                }
-            }
-        }
-        let non_carried: Vec<String> = changed_paths
-            .iter()
-            .filter(|p| !carried_set.contains(p.as_str()))
-            .cloned()
-            .collect();
-        let _ = restore_paths_from_tree(workdir, &old_tree, &non_carried);
-        let _ = old_index_owned.write(gix::index::write::Options::default());
-        let _ = restore_head(&repo, &old_head);
-        return Err(e);
-    }
-
-    status_sync(path)
+    git_status_with(&git_bin, root)
 }
+
+/// 提取 git 错误输出中以 `\t` 前缀列出的文件列表，用中文顿号连接
+fn extract_listed_paths(combined: &str) -> String {
+    let mut paths: Vec<String> = Vec::new();
+    let mut in_list = false;
+    for line in combined.lines() {
+        let c = line.to_lowercase();
+        if c.contains("would be overwritten") || c.contains("untracked working tree files") {
+            in_list = true;
+            continue;
+        }
+        if in_list {
+            if line.starts_with('\t') {
+                paths.push(line.trim().to_string());
+            } else if !line.is_empty() {
+                break;
+            }
+        }
+    }
+    if paths.is_empty() {
+        "<未知路径>".to_string()
+    } else {
+        paths.join("、")
+    }
+}
+
+/// 切换分支失败提示映射
+fn switch_failure_message(combined: &str, name: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("your local changes to the following files would be overwritten") {
+        format!(
+            "本地修改与目标分支冲突，无法切换: {}（请先提交或还原）",
+            extract_listed_paths(combined)
+        )
+    } else if c.contains("untracked working tree files would be overwritten") {
+        format!("未跟踪文件将被覆盖: {}", extract_listed_paths(combined))
+    } else if c.contains("already on") {
+        format!("当前已在分支 {name}")
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            format!("切换分支 {name} 失败")
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
 
 // ---------- 变更文件操作 ----------
 
@@ -899,95 +808,6 @@ fn remove_empty_parents(workdir: &Path, p: &Path) {
     }
 }
 
-/// 从索引移除指定路径的所有条目（含冲突各阶段）并写回；无对应条目时不写文件
-fn remove_index_entry(repo: &gix::Repository, rel: &str) -> Result<(), GitError> {
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut index = index.into_owned_or_cloned();
-    let rel_b = BStr::new(rel.as_bytes());
-    let before = index.entries().len();
-    index.remove_entries(|_, p, _| p == rel_b);
-    if index.entries().len() != before {
-        index.remove_tree();
-        index.remove_resolve_undo();
-        index
-            .write(gix::index::write::Options::default())
-            .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    }
-    Ok(())
-}
-
-/// 取 HEAD 树中 `path` 的条目（blob id + mode）；HEAD 未出生或无此路径 → None
-fn head_entry(
-    repo: &gix::Repository,
-    path: &str,
-) -> Result<Option<(gix::hash::ObjectId, gix::index::entry::Mode)>, GitError> {
-    let tree_id = repo
-        .head_tree_id_or_empty()
-        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    let tree = tree_id
-        .object()
-        .map_err(|e| git_err(format!("读取 HEAD 树失败: {e}")))?
-        .into_tree();
-    let Some(entry) = tree
-        .lookup_entry_by_path(path)
-        .map_err(|e| git_err(format!("在 HEAD 中查找 {path} 失败: {e}")))?
-    else {
-        return Ok(None);
-    };
-    Ok(Some((
-        entry.object_id(),
-        gix::index::entry::Mode::from(entry.mode().kind()),
-    )))
-}
-
-/// 将索引中多个路径重置为 HEAD 状态（等价 `git restore --staged <paths>`）：
-/// HEAD 有该路径 → 索引条目更新为 HEAD 的 blob/mode；HEAD 无 → 移除条目。不写盘。
-fn reset_index_entries(
-    index: &mut gix::index::File,
-    repo: &gix::Repository,
-    rels: &[String],
-) -> Result<(), GitError> {
-    for rel in rels {
-        let head = head_entry(repo, rel)?;
-        let rel_b = BStr::new(rel.as_bytes());
-        index.remove_entries(|_, p, _| p == rel_b);
-        if let Some((id, mode)) = head {
-            index.dangerously_push_entry(
-                gix::index::entry::Stat::default(),
-                id,
-                gix::index::entry::Flags::empty(),
-                mode,
-                rel_b,
-            );
-        }
-    }
-    index.sort_entries();
-    index.remove_tree();
-    index.remove_resolve_undo();
-    Ok(())
-}
-
-/// 单文件取消暂存：索引条目重置为 HEAD 状态，工作区不变
-fn reset_index_entry(repo: &gix::Repository, rel: &str) -> Result<(), GitError> {
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut index = index.into_owned_or_cloned();
-    let rels = [rel.to_string()];
-    reset_index_entries(&mut index, repo, &rels)?;
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    Ok(())
-}
-
-/// HEAD 树中是否存在 `path`（未出生 HEAD 视为不存在）
-fn head_has_path(repo: &gix::Repository, path: &str) -> Result<bool, GitError> {
-    Ok(head_entry(repo, path)?.is_some())
-}
-
 /// 目录前缀下的变更文件（含精确匹配；大小写不敏感，与 Windows 路径规则一致）
 fn files_under(files: &[GitFile], dir: &str) -> Vec<GitFile> {
     let dir_l = dir.trim_end_matches('/').to_lowercase();
@@ -1002,267 +822,185 @@ fn files_under(files: &[GitFile], dir: &str) -> Vec<GitFile> {
         .collect()
 }
 
-/// 将单个文件登记进索引（不写盘）：工作区文件存在 → 写入 blob 并登记/更新索引条目；
-/// 已删除 → 移除条目（暂存删除）。与 `git add` 语义一致：先移除旧条目（含冲突各阶段）。
-fn stage_index_entry(
-    index: &mut gix::index::File,
-    repo: &gix::Repository,
+/// 暂存（`git add -- <rel>`；目录递归，未跟踪即添加跟踪，删除同样暂存）
+fn git_add(root: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let rel = validate_rel_path(rel)?;
+    let git_bin = git_bin()?;
+    let repo = git_rev_parse_with(&git_bin, root)?;
+    // 保留超大单文件保护（git 本身可处理大文件，此处仅前置拦截）
+    let abs = repo.workdir.join(&rel);
+    if abs.is_file()
+        && std::fs::metadata(&abs)
+            .map(|m| m.len() > MAX_FILE_BYTES)
+            .unwrap_or(false)
+    {
+        return Err(git_err(format!(
+            "文件过大（超过 {} MB），无法暂存: {}",
+            MAX_FILE_BYTES / (1024 * 1024),
+            clean_path(&abs)
+        )));
+    }
+    git_run_mapped(&git_bin, root, &["add", "--", &rel], git_add_failure_message)?;
+    git_status_with(&git_bin, root)
+}
+
+/// 全部暂存（`git add -A`）
+fn git_add_all(root: &str) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    git_run_mapped(&git_bin, root, &["add", "-A"], git_add_failure_message)?;
+    git_status_with(&git_bin, root)
+}
+
+/// 取消暂存（`git restore --staged -- <rel>`）
+fn git_unstage(root: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let rel = validate_rel_path(rel)?;
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    if git_head_exists_with(&git_bin, root)? {
+        git_run_mapped(&git_bin, root, &["restore", "--staged", "--", &rel], |combined| {
+            let trimmed = combined.trim();
+            if trimmed.is_empty() {
+                "取消暂存失败".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })?;
+    } else {
+        // HEAD 未出生：`git restore --staged` 依赖 HEAD，改用 `git rm --cached`
+        git_run_mapped(&git_bin, root, &["rm", "--cached", "-f", "-q", "--", &rel], |combined| {
+            let trimmed = combined.trim();
+            if trimmed.is_empty() {
+                "取消暂存失败".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })?;
+    }
+    git_status_with(&git_bin, root)
+}
+
+/// 全部取消暂存：`git reset -q`；HEAD 未出生时 `git rm --cached -r -q -- .`
+fn git_unstage_all(root: &str) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    if git_head_exists_with(&git_bin, root)? {
+        git_run_mapped(&git_bin, root, &["reset", "-q"], |combined| {
+            let trimmed = combined.trim();
+            if trimmed.is_empty() {
+                "取消暂存失败".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })?;
+    } else {
+        git_run_mapped(
+            &git_bin,
+            root,
+            &["rm", "--cached", "-r", "-q", "--", "."],
+            |combined| {
+                let trimmed = combined.trim();
+                if trimmed.is_empty() {
+                    "取消暂存失败".to_string()
+                } else {
+                    trimmed.to_string()
+                }
+            },
+        )?;
+    }
+    git_status_with(&git_bin, root)
+}
+
+/// 索引中是否存在该路径
+fn git_index_has_with(git_bin: &Path, root: &str, rel: &str) -> Result<bool, GitError> {
+    let (code, _, _) = git_output(git_bin, root, &["ls-files", "--error-unmatch", "--", rel])?;
+    Ok(code == 0)
+}
+
+/// 还原单个文件：已跟踪 → `git restore --staged --worktree`（丢弃暂存+工作区改动）；
+/// 未跟踪 → `git clean -f` 删除
+fn git_restore_one_with(
+    git_bin: &Path,
     workdir: &Path,
+    root: &str,
     rel: &str,
 ) -> Result<(), GitError> {
-    let abs = workdir.join(rel);
-    let rel_b = BStr::new(rel.as_bytes());
-    index.remove_entries(|_, p, _| p == rel_b);
-
-    match std::fs::symlink_metadata(&abs) {
-        Ok(meta) if !meta.is_dir() => {
-            if meta.len() > MAX_FILE_BYTES {
-                return Err(git_err(format!(
-                    "文件过大（超过 {} MB），无法暂存: {}",
-                    MAX_FILE_BYTES / (1024 * 1024),
-                    clean_path(&abs)
-                )));
-            }
-            let data = std::fs::read(&abs)
-                .map_err(|e| git_err(format!("读取文件失败 {}: {e}", clean_path(&abs))))?;
-            let id = repo
-                .write_blob(&data)
-                .map_err(|e| git_err(format!("写入对象失败: {e}")))?;
-            let stat = gix::index::fs::Metadata::from_path_no_follow(&abs)
-                .ok()
-                .and_then(|m| gix::index::entry::Stat::from_fs(&m).ok())
-                .unwrap_or_default();
-            let mode = if meta.file_type().is_symlink() {
-                gix::index::entry::Mode::SYMLINK
-            } else {
-                gix::index::entry::Mode::FILE
-            };
-            index.dangerously_push_entry(
-                stat,
-                id.detach(),
-                gix::index::entry::Flags::empty(),
-                mode,
-                rel_b,
-            );
-            index.sort_entries();
-            index.remove_tree();
-            index.remove_resolve_undo();
-        }
-        Ok(_) => return Err(git_err("暂存目标不是文件")),
-        Err(_) => {
-            // 工作区文件已不存在：暂存删除，索引条目已在上方移除
-            index.remove_tree();
-            index.remove_resolve_undo();
-        }
-    }
-    Ok(())
-}
-
-/// 单文件暂存（等价 `git add <path>`）
-fn stage_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let rel = validate_rel_path(rel)?;
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut index = index.into_owned_or_cloned();
-    stage_index_entry(&mut index, &repo, workdir, &rel)?;
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    Ok(())
-}
-
-/// 暂存：支持文件或目录；目录 = 递归暂存其下所有变更文件（未跟踪即“添加跟踪”），
-/// 目录内已删除的已跟踪文件同样暂存删除
-fn stage_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let rel = validate_rel_path(rel)?;
-    if workdir.join(&rel).is_dir() {
-        let st = status_sync(path)?;
-        let rels: Vec<String> = files_under(&st.files, &rel)
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        let index = repo
-            .index_or_empty()
-            .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-        let mut index = index.into_owned_or_cloned();
-        for r in &rels {
-            let r = validate_rel_path(r)?;
-            stage_index_entry(&mut index, &repo, workdir, &r)?;
-        }
-        index
-            .write(gix::index::write::Options::default())
-            .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
+    if git_index_has_with(git_bin, root, rel)? {
+        git_run_mapped(
+            git_bin,
+            root,
+            &["restore", "--staged", "--worktree", "--", rel],
+            git_restore_failure_message,
+        )?;
     } else {
-        stage_file_sync(path, &rel)?;
-    }
-    status_sync(path)
-}
-
-/// 单文件取消暂存：索引条目重置为 HEAD 状态，工作区不变
-fn unstage_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
-    let repo = open_repo(path)?;
-    let rel = validate_rel_path(rel)?;
-    reset_index_entry(&repo, &rel)
-}
-
-/// 取消暂存：支持文件或目录；目录 = 其下所有变更文件索引重置为 HEAD
-fn unstage_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let rel = validate_rel_path(rel)?;
-    if workdir.join(&rel).is_dir() {
-        let st = status_sync(path)?;
-        let rels: Vec<String> = files_under(&st.files, &rel)
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        let index = repo
-            .index_or_empty()
-            .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-        let mut index = index.into_owned_or_cloned();
-        reset_index_entries(&mut index, &repo, &rels)?;
-        index
-            .write(gix::index::write::Options::default())
-            .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    } else {
-        unstage_file_sync(path, &rel)?;
-    }
-    status_sync(path)
-}
-
-/// 全部暂存：等价 `git add -A`，将当前所有工作区侧变更暂存
-/// （含未跟踪、删除与冲突文件，冲突按当前工作区内容暂存即标记已解决）
-fn stage_all_sync(path: &str) -> Result<GitStatus, GitError> {
-    let st = status_sync(path)?;
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut index = index.into_owned_or_cloned();
-    for f in st.files.iter().filter(|f| f.worktree) {
-        let r = validate_rel_path(&f.path)?;
-        stage_index_entry(&mut index, &repo, workdir, &r)?;
-    }
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    status_sync(path)
-}
-
-/// 全部取消暂存：所有已暂存文件索引重置为 HEAD（HEAD 无则移除），工作区不变
-fn unstage_all_sync(path: &str) -> Result<GitStatus, GitError> {
-    let st = status_sync(path)?;
-    let repo = open_repo(path)?;
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut index = index.into_owned_or_cloned();
-    let rels: Vec<String> = st
-        .files
-        .iter()
-        .filter(|f| f.staged)
-        .map(|f| f.path.clone())
-        .collect();
-    reset_index_entries(&mut index, &repo, &rels)?;
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    status_sync(path)
-}
-
-/// 单文件工作区还原：HEAD 有该路径 → 写回 HEAD 内容；HEAD 无 → 删除工作区文件。不写索引。
-fn restore_file_worktree(repo: &gix::Repository, workdir: &Path, rel: &str) -> Result<(), GitError> {
-    let abs = workdir.join(rel);
-    if head_has_path(repo, rel)? {
-        let data = head_blob(repo, rel)?;
-        if let Some(parent) = abs.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| git_err(format!("创建目录失败 {}: {e}", clean_path(parent))))?;
-        }
-        std::fs::write(&abs, data)
-            .map_err(|e| git_err(format!("写入文件失败 {}: {e}", clean_path(&abs))))?;
-    } else if abs.is_file() || abs.is_symlink() {
-        std::fs::remove_file(&abs)
-            .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&abs))))?;
-        remove_empty_parents(workdir, &abs);
+        git_run_mapped(
+            git_bin,
+            root,
+            &["clean", "-f", "-q", "--", rel],
+            git_clean_failure_message,
+        )?;
+        remove_empty_parents(workdir, &workdir.join(rel));
     }
     Ok(())
-}
-
-/// 单文件还原：完全丢弃该文件本地更改——先取消暂存，工作区恢复为 HEAD 内容；
-/// HEAD 无此文件（未跟踪/新增）则删除工作区文件
-fn restore_file_sync(path: &str, rel: &str) -> Result<(), GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let rel = validate_rel_path(rel)?;
-    reset_index_entry(&repo, &rel)?;
-    restore_file_worktree(&repo, workdir, &rel)
 }
 
 /// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）
-fn restore_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+fn git_restore(root: &str, rel: &str) -> Result<GitStatus, GitError> {
     let rel = validate_rel_path(rel)?;
-    if workdir.join(&rel).is_dir() {
-        let st = status_sync(path)?;
+    let git_bin = git_bin()?;
+    let repo = git_rev_parse_with(&git_bin, root)?;
+    if repo.workdir.join(&rel).is_dir() {
+        let st = git_status_with(&git_bin, root)?;
         let rels: Vec<String> = files_under(&st.files, &rel)
             .into_iter()
             .map(|f| f.path)
             .collect();
         for r in &rels {
-            restore_file_worktree(&repo, workdir, r)?;
+            let r = validate_rel_path(r)?;
+            git_restore_one_with(&git_bin, &repo.workdir, root, &r)?;
         }
-        let index = repo
-            .index_or_empty()
-            .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-        let mut index = index.into_owned_or_cloned();
-        reset_index_entries(&mut index, &repo, &rels)?;
-        index
-            .write(gix::index::write::Options::default())
-            .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
     } else {
-        restore_file_sync(path, &rel)?;
+        git_restore_one_with(&git_bin, &repo.workdir, root, &rel)?;
     }
-    status_sync(path)
+    git_status_with(&git_bin, root)
 }
 
-/// 删除文件：移除工作区文件并从索引移除（等价 `git rm`），逐级清理空目录；不支持目录
-fn delete_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+/// 删除文件：已跟踪 `git rm -f`（工作区+索引），未跟踪 `git clean -f`；
+/// 逐级清理空目录；不支持目录
+fn git_rm(root: &str, rel: &str) -> Result<GitStatus, GitError> {
     let rel = validate_rel_path(rel)?;
-    let abs = workdir.join(&rel);
+    let git_bin = git_bin()?;
+    let repo = git_rev_parse_with(&git_bin, root)?;
+    let abs = repo.workdir.join(&rel);
     if abs.is_dir() {
         return Err(git_err("不支持删除目录"));
     }
-    if abs.is_file() || abs.is_symlink() {
-        std::fs::remove_file(&abs)
-            .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&abs))))?;
-        remove_empty_parents(workdir, &abs);
+    if git_index_has_with(&git_bin, root, &rel)? {
+        git_run_mapped(&git_bin, root, &["rm", "-f", "--", &rel], git_rm_failure_message)?;
+    } else {
+        git_run_mapped(
+            &git_bin,
+            root,
+            &["clean", "-f", "-q", "--", &rel],
+            git_clean_failure_message,
+        )?;
     }
-    remove_index_entry(&repo, &rel)?;
-    status_sync(path)
+    remove_empty_parents(&repo.workdir, &abs);
+    git_status_with(&git_bin, root)
 }
 
 /// 添加到 .gitignore：文件追加 `/路径`，目录追加 `/路径/`（不存在则创建，幂等跳过重复条目）
-fn ignore_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
+fn git_ignore(root: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    let repo = git_rev_parse_with(&git_bin, root)?;
     let rel = validate_rel_path(rel)?;
-    let pattern = if workdir.join(&rel).is_dir() {
+    let pattern = if repo.workdir.join(&rel).is_dir() {
         format!("/{}/", rel.trim_end_matches('/'))
     } else {
         format!("/{rel}")
     };
     let plain = pattern.trim_start_matches('/');
-    let gitignore = workdir.join(".gitignore");
+    let gitignore = repo.workdir.join(".gitignore");
     let existing = std::fs::read_to_string(&gitignore).unwrap_or_default();
     let already = existing.lines().any(|l| {
         let l = l.strip_suffix('\r').unwrap_or(l);
@@ -1278,396 +1016,228 @@ fn ignore_sync(path: &str, rel: &str) -> Result<GitStatus, GitError> {
         std::fs::write(&gitignore, out)
             .map_err(|e| git_err(format!("写入 .gitignore 失败: {e}")))?;
     }
-    status_sync(path)
+    git_status_with(&git_bin, root)
+}
+
+/// `git add` 失败提示映射
+fn git_add_failure_message(combined: &str) -> String {
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        "git add 失败".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// `git restore` 失败提示映射
+fn git_restore_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("did not match") || c.contains("pathspec") {
+        "文件不在仓库中，无法还原".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git restore 失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+/// `git clean` 失败提示映射
+fn git_clean_failure_message(combined: &str) -> String {
+    let c = combined.to_lowercase();
+    if c.contains("cannot clean") || c.contains("not remove") {
+        "无法删除未跟踪文件".to_string()
+    } else {
+        let trimmed = combined.trim();
+        if trimmed.is_empty() {
+            "git clean 失败".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+/// `git rm` 失败提示映射
+fn git_rm_failure_message(combined: &str) -> String {
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        "git rm 失败".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 // ---------- 提交与拉取 ----------
 
-/// 从索引全量条目构建树（等价 `git write-tree`）：以空树为起点逐条 upsert。
-/// 提交树由索引决定，未暂存的工作区改动不会进入树。
-fn index_tree_id(repo: &gix::Repository) -> Result<gix::hash::ObjectId, GitError> {
-    use gix::object::tree::{Editor, EntryKind};
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let empty_tree = repo
-        .find_object(gix::hash::ObjectId::empty_tree(repo.object_hash()))
-        .map_err(|e| git_err(format!("读取空树失败: {e}")))?
-        .into_tree();
-    let mut editor = Editor::new(&empty_tree)
-        .map_err(|e| git_err(format!("初始化树编辑器失败: {e}")))?;
-    for entry in index.entries() {
-        let kind = match entry.mode {
-            gix::index::entry::Mode::FILE => EntryKind::Blob,
-            gix::index::entry::Mode::FILE_EXECUTABLE => EntryKind::BlobExecutable,
-            gix::index::entry::Mode::SYMLINK => EntryKind::Link,
-            gix::index::entry::Mode::COMMIT => EntryKind::Commit,
-            gix::index::entry::Mode::DIR => continue,
-            _ => continue,
-        };
-        editor
-            .upsert(entry.path(&index), kind, entry.id)
-            .map_err(|e| git_err(format!("构建提交树失败: {e}")))?;
-    }
-    editor
-        .write()
-        .map(|id| id.detach())
-        .map_err(|e| git_err(format!("写入提交树失败: {e}")))
-}
 
-/// 提交已暂存更改（等价 `git commit`）：索引全量条目构建树，创建提交并更新 HEAD，
-/// 成功后重建索引为提交树。未暂存更改保留在工作区。
-fn commit_sync(path: &str, message: &str) -> Result<GitStatus, GitError> {
+/// 提交（`git commit -m <message>`）：仅提交已暂存更改，未暂存保留在工作区
+fn git_commit(root: &str, message: &str) -> Result<GitStatus, GitError> {
     let message = message.trim();
     if message.is_empty() {
         return Err(git_err("提交消息不能为空"));
     }
-    let repo = open_repo(path)?;
-    // 冲突检测：索引存在 stage != 0（unmerged）条目时拒绝提交，避免用未定义行为建树
-    let index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    if index.entries().iter().any(|e| e.stage_raw() != 0) {
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    // 未解决冲突 → 拒绝
+    let (code, unmerged, _) = git_output(&git_bin, root, &["ls-files", "-u"])?;
+    if code != 0 {
+        return Err(git_err("读取索引失败"));
+    }
+    if !unmerged.trim().is_empty() {
         return Err(git_err("仓库存在未解决的合并冲突，请先解决冲突后再提交"));
     }
-    let st = status_sync(path)?;
-    if !st.files.iter().any(|f| f.staged) {
+    // 无已暂存更改 → 拒绝（`git diff --cached --quiet` 退出码 0 表示无差异）
+    let (code, _, _) = git_output(&git_bin, root, &["diff", "--cached", "--quiet"])?;
+    if code == 0 {
         return Err(git_err("没有已暂存的更改，请先暂存文件"));
     }
-    if repo.author().is_none() || repo.committer().is_none() {
-        return Err(git_err("未配置 Git 用户信息（user.name / user.email），请先在仓库配置后重试"));
+    let (code, stdout, stderr) = git_output(&git_bin, root, &["commit", "-m", message])?;
+    if code != 0 {
+        let combined = format!("{stdout}\n{stderr}");
+        let c = combined.to_lowercase();
+        if c.contains("please tell me who you are")
+            || c.contains("unable to auto-detect email address")
+            || c.contains("user.name")
+        {
+            return Err(git_err("未配置 Git 用户信息（user.name / user.email），请先在仓库配置后重试"));
+        }
+        return Err(git_err(commit_failure_message(&combined)));
     }
-    let tree_id = index_tree_id(&repo)?;
-    let parents: Vec<gix::hash::ObjectId> = match repo.head_id() {
-        Ok(id) => vec![id.detach()],
-        Err(_) => Vec::new(),
-    };
-    repo.commit("HEAD", message, tree_id, parents)
-        .map_err(|e| git_err(format!("提交失败: {e}")))?;
-    // 提交后索引重置为提交树（等价 git commit 后的索引状态）
-    let mut index = repo
-        .index_from_tree(&tree_id)
-        .map_err(|e| git_err(format!("重建索引失败: {e}")))?;
-    index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    status_sync(path)
+    git_status_with(&git_bin, root)
 }
 
-/// 从 HEAD 沿第一父链遍历提交历史（最多 `limit` 条，最新在前）；
-/// 合并提交会顺带展开其其它父提交。仓库尚无提交时返回空列表。
-/// `before` 为续页游标（上一批最后一条的完整 hash）：命中前只遍历不输出，
-/// 命中后继续输出下一批，保证顺序与首次加载一致；游标无效或不可达时返回空列表。
-fn commit_log_sync(
-    path: &str,
-    limit: usize,
-    before: Option<String>,
-) -> Result<Vec<GitCommitEntry>, GitError> {
-    let repo = open_repo(path)?;
+/// 提交失败提示映射
+fn commit_failure_message(combined: &str) -> String {
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        "提交失败".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 提交历史（`git log -z --format=%H%x00%an%x00%at%x00%s`）。
+/// `before` 为续页游标（上一批最后一条的完整 hash），从游标的父提交继续向后取；
+/// 无效游标或仓库尚无提交时返回空列表。
+fn git_log(root: &str, limit: usize, before: Option<String>) -> Result<Vec<GitCommitEntry>, GitError> {
     let limit = limit.clamp(1, 200);
-    let before = before
-        .as_deref()
-        .and_then(|s| gix::hash::ObjectId::from_hex(s.as_bytes()).ok());
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    let mut args: Vec<String> = vec![
+        "log".to_string(),
+        "-z".to_string(),
+        "--format=%H%x00%an%x00%at%x00%s".to_string(),
+        "-n".to_string(),
+        limit.to_string(),
+    ];
+    if let Some(b) = before {
+        args.push(format!("{b}^"));
+    }
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let (code, stdout, _) = git_output(&git_bin, root, &arg_refs)?;
+    if code != 0 {
+        return Ok(Vec::new());
+    }
+    let fields: Vec<&str> = stdout.split('\0').collect();
     let mut out: Vec<GitCommitEntry> = Vec::new();
-    let mut stack: Vec<gix::hash::ObjectId> = match repo.head_id() {
-        Ok(id) => vec![id.detach()],
-        Err(_) => return Ok(out),
-    };
-    let mut seen: std::collections::HashSet<gix::hash::ObjectId> = std::collections::HashSet::new();
-    let mut reached = before.is_none();
-    while let Some(id) = stack.pop() {
-        if out.len() >= limit {
+    let mut i = 0;
+    while i + 3 < fields.len() {
+        let hash = fields[i];
+        if hash.is_empty() {
             break;
         }
-        if !seen.insert(id) {
-            continue;
-        }
-        let commit = repo
-            .find_object(id)
-            .map_err(|e| git_err(format!("读取提交失败: {e}")))?
-            .into_commit();
-        // 先处理第一父（栈逆序压入），近似 git log 的第一父优先顺序
-        let parents: Vec<gix::hash::ObjectId> = commit.parent_ids().map(|p| p.detach()).collect();
-        if !reached {
-            if before.as_ref() == Some(&id) {
-                reached = true;
-            }
-            for p in parents.into_iter().rev() {
-                stack.push(p);
-            }
-            continue;
-        }
-        let subject = commit
-            .message()
-            .map(|m| m.summary().to_str_lossy().into_owned())
-            .unwrap_or_default();
-        let author = commit
-            .author()
-            .map(|a| a.name.to_str_lossy().into_owned())
-            .unwrap_or_default();
-        let time_secs = commit.time().map(|t| t.seconds).unwrap_or(0);
         out.push(GitCommitEntry {
-            hash: id.to_string(),
-            short_hash: id.to_string().chars().take(7).collect(),
-            subject,
-            author,
-            time_secs,
+            hash: hash.to_string(),
+            short_hash: hash.chars().take(7).collect(),
+            subject: fields[i + 3].to_string(),
+            author: fields[i + 1].to_string(),
+            time_secs: fields[i + 2].parse().unwrap_or(0),
         });
-        for p in parents.into_iter().rev() {
-            stack.push(p);
-        }
+        i += 4;
     }
     Ok(out)
 }
 
-/// 计算 旧树 → 新树 的变更路径（add/mod/delete；跳过 rewrite 与目录条目）
-fn diff_changed_paths(
-    repo: &gix::Repository,
-    old_tree_id: &gix::hash::oid,
-    new_tree_id: &gix::hash::oid,
-) -> Result<Vec<String>, GitError> {
-    let old_tree = repo
-        .find_object(old_tree_id)
-        .map_err(|e| git_err(format!("读取旧树失败: {e}")))?
-        .into_tree();
-    let new_tree = repo
-        .find_object(new_tree_id)
-        .map_err(|e| git_err(format!("读取新树失败: {e}")))?
-        .into_tree();
-    let changes = repo
-        .diff_tree_to_tree(
-            Some(&old_tree),
-            Some(&new_tree),
-            gix::diff::Options::default().with_rewrites(None),
-        )
-        .map_err(|e| git_err(format!("计算树差异失败: {e}")))?;
-    let mut paths = Vec::new();
-    for change in &changes {
-        if change.entry_mode().is_tree() {
-            continue;
-        }
-        let location = match change {
-            gix::diff::tree_with_rewrites::Change::Addition { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => location,
-            gix::diff::tree_with_rewrites::Change::Rewrite { .. } => continue,
-        };
-        paths.push(path_str(location.as_ref()));
-    }
-    Ok(paths)
+/// git 近似二进制判定：前 8000 字节内出现 NUL
+fn looks_binary(data: &[u8]) -> bool {
+    data[..data.len().min(8000)].contains(&0)
 }
 
-/// 把 旧树 → 新树 的变更同步到工作区文件（写/删），不重建索引；
-/// 目标路径已存在但未被跟踪时拒绝，避免覆盖未跟踪文件。
-fn sync_worktree_files(
-    repo: &gix::Repository,
-    workdir: &Path,
-    old_tree_id: &gix::hash::oid,
-    new_tree_id: &gix::hash::oid,
-) -> Result<(), GitError> {
-    let old_tree = repo
-        .find_object(old_tree_id)
-        .map_err(|e| git_err(format!("读取旧树失败: {e}")))?
-        .into_tree();
-    let new_tree = repo
-        .find_object(new_tree_id)
-        .map_err(|e| git_err(format!("读取新树失败: {e}")))?
-        .into_tree();
-    let changes = repo
-        .diff_tree_to_tree(
-            Some(&old_tree),
-            Some(&new_tree),
-            gix::diff::Options::default().with_rewrites(None),
-        )
-        .map_err(|e| git_err(format!("计算树差异失败: {e}")))?;
-
-    // 守卫：目标路径已存在但未被跟踪（未跟踪文件将被覆盖）
-    let old_index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    for change in &changes {
-        let location = match change {
-            gix::diff::tree_with_rewrites::Change::Addition { location, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { location, .. } => location,
-            _ => continue,
-        };
-        if change.entry_mode().is_tree() {
-            continue;
-        }
-        if workdir.join(path_str(location.as_ref())).exists()
-            && old_index.entry_by_path(location.as_ref()).is_none()
-        {
-            return Err(git_err(format!(
-                "未跟踪文件将被覆盖: {}",
-                path_str(location.as_ref())
-            )));
-        }
+/// diff 基准统一为 HEAD（暂存 + 未暂存合并）；未跟踪文件与空内容对比。
+/// 返回空串表示无内容变化；二进制返回错误提示。
+fn git_diff(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
+    let path = validate_rel_path(path)?;
+    let git_bin = git_bin()?;
+    let repo = git_rev_parse_with(&git_bin, root)?;
+    let in_head = git_output(&git_bin, root, &["cat-file", "-e", &format!("HEAD:{path}")])?.0 == 0;
+    let (code, out, stderr) = if in_head {
+        git_output(
+            &git_bin,
+            root,
+            &["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", &path],
+        )?
+    } else {
+        // 未跟踪/新增：与空内容对比（`git diff --no-index` 有差异时退出码为 1）
+        let abs = repo.workdir.join(&path);
+        git_output(
+            &git_bin,
+            root,
+            &[
+                "diff",
+                "--no-index",
+                "--",
+                "/dev/null",
+                abs.to_string_lossy().as_ref(),
+            ],
+        )?
+    };
+    if code != 0 && code != 1 {
+        return Err(git_err(format!("git diff 失败: {}", stderr.trim())));
     }
-
-    for change in &changes {
-        match change {
-            gix::diff::tree_with_rewrites::Change::Addition { location, id, .. }
-            | gix::diff::tree_with_rewrites::Change::Modification { location, id, .. } => {
-                let rel = path_str(location.as_ref());
-                let dest = workdir.join(&rel);
-                let obj = repo
-                    .find_object(*id)
-                    .map_err(|e| git_err(format!("读取对象失败: {e}")))?;
-                if obj.kind != gix::objs::Kind::Blob {
-                    continue;
-                }
-                let mut obj = obj;
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| git_err(format!("创建目录失败 {}: {e}", clean_path(parent))))?;
-                }
-                std::fs::write(&dest, std::mem::take(&mut obj.data))
-                    .map_err(|e| git_err(format!("写入文件失败 {}: {e}", clean_path(&dest))))?;
-            }
-            gix::diff::tree_with_rewrites::Change::Deletion { location, .. } => {
-                let p = workdir.join(path_str(location.as_ref()));
-                if p.is_file() || p.is_symlink() {
-                    std::fs::remove_file(&p)
-                        .map_err(|e| git_err(format!("删除文件失败 {}: {e}", clean_path(&p))))?;
-                }
-                remove_empty_parents(workdir, &p);
-            }
-            gix::diff::tree_with_rewrites::Change::Rewrite { .. } => continue,
-        }
+    if out.len() as u64 > MAX_FILE_BYTES {
+        return Err(git_err(format!(
+            "文件过大（超过 {} MB），无法显示差异: {path}",
+            MAX_FILE_BYTES / (1024 * 1024)
+        )));
     }
-    Ok(())
+    if out.trim().is_empty() {
+        return Ok(String::new());
+    }
+    if looks_binary(out.as_bytes()) || out.contains("Binary files") {
+        return Err(git_err("该文件是二进制文件，无法显示文本差异"));
+    }
+    Ok(out)
 }
 
-/// 重建索引为 `new_tree_id`，并保留未被拉取触达的已暂存条目：
-/// 有条目则重新登记旧 blob/mode，已暂存删除则保持移除。
-fn rebuild_index_preserving_staged(
-    repo: &gix::Repository,
-    new_tree_id: &gix::hash::oid,
-    staged_paths: &[String],
-    pull_changed: &[String],
-) -> Result<(), GitError> {
-    let old_index = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut new_index = repo
-        .index_from_tree(new_tree_id)
-        .map_err(|e| git_err(format!("重建索引失败: {e}")))?;
-    for path in staged_paths {
-        // 被拉取触达的已暂存路径已在冲突判定阶段拒绝，这里防御性跳过
-        if pull_changed.iter().any(|p| p == path) {
-            continue;
-        }
-        let rel_b = BStr::new(path.as_bytes());
-        new_index.remove_entries(|_, p, _| p == rel_b);
-        if let Some(entry) = old_index.entry_by_path(rel_b) {
-            new_index.dangerously_push_entry(entry.stat, entry.id, entry.flags, entry.mode, rel_b);
-        }
-    }
-    new_index.sort_entries();
-    new_index.remove_tree();
-    new_index.remove_resolve_undo();
-    new_index
-        .write(gix::index::write::Options::default())
-        .map_err(|e| git_err(format!("写入索引失败: {e}")))?;
-    Ok(())
-}
-
-/// 更新本地分支引用指向 `target`（用于快进）
-fn update_branch_ref(
-    repo: &gix::Repository,
-    branch: &str,
-    target: gix::hash::ObjectId,
-) -> Result<(), GitError> {
-    let full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(branch))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    repo.edit_reference(gix::refs::transaction::RefEdit {
-        change: gix::refs::transaction::Change::Update {
-            log: Default::default(),
-            expected: gix::refs::transaction::PreviousValue::Any,
-            new: gix::refs::Target::Object(target),
-        },
-        name: full,
-        deref: false,
-    })
-    .map_err(|e| git_err(format!("更新分支失败: {e}")))?;
-    Ok(())
-}
-
-/// 提取冲突路径（ours/theirs 任一非 Rewrite 侧的位置）
-fn conflict_path(c: &gix::merge::tree::Conflict) -> String {
-    use gix::diff::tree_with_rewrites::Change;
-    for change in [&c.ours, &c.theirs] {
-        let loc = match change {
-            Change::Addition { location, .. }
-            | Change::Modification { location, .. }
-            | Change::Deletion { location, .. } => location,
-            Change::Rewrite { .. } => continue,
-        };
-        return path_str(loc.as_ref());
-    }
-    "<未知路径>".to_string()
-}
-
-/// 创建系统 git 命令：Windows GUI 应用下设置 CREATE_NO_WINDOW，
-/// 避免拉取/推送子进程闪现黑色控制台窗口。
-fn git_command(git_bin: &Path) -> std::process::Command {
-    let mut cmd = std::process::Command::new(git_bin);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    cmd
-}
+// ---------- 拉取与推送 ----------
 
 /// 拉取：调用系统 git（快进优先，`--ff-only`）。分叉时不自动合并，
 /// 报错提示先经 GitView 分支合并手动合并，绝不留下冲突状态。
-fn pull_sync(root: &str) -> Result<GitPullResult, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    pull_sync_with_git(&git_bin, root)
+fn git_pull(root: &str) -> Result<GitPullResult, GitError> {
+    let git_bin = git_bin()?;
+    git_pull_with(&git_bin, root)
 }
 
 /// pull 实现（git 可执行文件路径可注入，便于测试“git 缺失”分支）
-fn pull_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPullResult, GitError> {
-    let repo = open_repo(root)?;
-    let branch = current_branch(&repo);
+fn git_pull_with(git_bin: &Path, root: &str) -> Result<GitPullResult, GitError> {
+    git_rev_parse_with(git_bin, root)?;
+    let branch = git_current_branch_with(git_bin, root)?;
     if branch == "HEAD" {
         return Err(git_err("游离 HEAD 状态无法拉取，请先切换到某个分支"));
     }
-    let (remote_label, remote_branch) = resolve_remote_target(&repo, &branch)?;
-    let out = git_command(git_bin)
-        .arg("-C")
-        .arg(root)
-        .args([
-            "pull",
-            "--no-rebase",
-            "--ff-only",
-            &remote_label,
-            &remote_branch,
-        ])
-        // 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起
-        //（Git Credential Manager 等 GUI 助手不受影响，认证失败会快速报错）。
-        .env("LANG", "C")
-        .env("LC_ALL", "C")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
-            } else {
-                git_err(format!("执行 git pull 失败: {e}"))
-            }
-        })?;
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let (remote_label, remote_branch) = git_remote_target_with(git_bin, root, &branch)?;
+    let (code, stdout, stderr) = git_output(
+        git_bin,
+        root,
+        &["pull", "--no-rebase", "--ff-only", &remote_label, &remote_branch],
+    )?;
     let combined = format!("{stdout}\n{stderr}");
-    if !out.status.success() {
+    if code != 0 {
         return Err(git_err(pull_failure_message(&combined)));
     }
-    let status = status_sync(root)?;
+    let status = git_status_with(git_bin, root)?;
     let (kind, message) = if combined.contains("Already up to date") {
         ("up_to_date".to_string(), "本地已是最新".to_string())
     } else {
@@ -1707,87 +1277,44 @@ fn pull_failure_message(combined: &str) -> String {
         }
     }
 }
-/// 探测系统 git 可执行文件：优先 PATH，回退常见安装目录。
-/// 拉取/推送是仅有的两个依赖系统 git 的功能（其余读取/状态/提交/合并仍由 gix 完成）。
-fn find_git() -> Option<PathBuf> {
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            for name in ["git.exe", "git"] {
-                let cand = dir.join(name);
-                if cand.is_file() {
-                    return Some(cand);
-                }
-            }
-        }
-    }
-    for var in ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "LocalAppData"] {
-        if let Ok(base) = std::env::var(var) {
-            let base = PathBuf::from(base);
-            for sub in ["Git\\cmd\\git.exe", "Programs\\Git\\cmd\\git.exe"] {
-                let cand = base.join(sub);
-                if cand.is_file() {
-                    return Some(cand);
-                }
-            }
-        }
-    }
-    None
+
+/// 推送当前分支到上游远端（调用系统 git；首次推送自动设置上游 -u）。
+fn git_push(root: &str) -> Result<GitPushResult, GitError> {
+    let git_bin = git_bin()?;
+    git_push_with(&git_bin, root)
 }
 
-/// 从远端跟踪 ref 解析远端分支名（refs/remotes/<remote>/<rb> 或 refs/heads/<rb>）
-fn remote_branch_from_tracking(tracking: &gix::refs::FullName, remote_label: &str) -> Option<String> {
-    let s = tracking.as_bstr().to_str_lossy();
-    let prefix = format!("refs/remotes/{remote_label}/");
-    if let Some(rest) = s.strip_prefix(&prefix) {
-        return Some(rest.to_string());
+/// push 实现（git 可执行文件路径可注入，便于测试“git 缺失”分支）
+fn git_push_with(git_bin: &Path, root: &str) -> Result<GitPushResult, GitError> {
+    git_rev_parse_with(git_bin, root)?;
+    let branch = git_current_branch_with(git_bin, root)?;
+    if branch == "HEAD" {
+        return Err(git_err("游离 HEAD 状态无法推送，请先切换到某个分支"));
     }
-    if let Some(rest) = s.strip_prefix("refs/heads/") {
-        return Some(rest.to_string());
+    let (remote_label, remote_branch) = git_remote_target_with(git_bin, root, &branch)?;
+    let refspec = format!("{branch}:{remote_branch}");
+    let (code, stdout, stderr) =
+        git_output(git_bin, root, &["push", "-u", &remote_label, &refspec])?;
+    let combined = format!("{stdout}\n{stderr}");
+    if code != 0 {
+        return Err(git_err(push_failure_message(&combined)));
     }
-    None
-}
-
-/// 解析远端目标（远端名/URL + 远端分支名）：优先已配置的上游，
-/// 无配置时以默认远端（origin）同名分支兜底。
-fn resolve_remote_target(
-    repo: &gix::Repository,
-    branch: &str,
-) -> Result<(String, String), GitError> {
-    let branch_full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(branch))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    if let Some(Ok(tracking)) = repo
-        .branch_remote_tracking_ref_name(branch_full.as_ref(), gix::remote::Direction::Fetch)
-    {
-        if let Some(remote) = repo.branch_remote(branch, gix::remote::Direction::Fetch) {
-            let remote = remote.map_err(|e| git_err(format!("读取远端失败: {e}")))?;
-            let remote_label = remote
-                .name()
-                .map(|n| n.as_bstr().to_str_lossy().into_owned())
-                .or_else(|| {
-                    remote
-                        .url(gix::remote::Direction::Push)
-                        .map(|u| u.to_bstring().to_string())
-                })
-                .ok_or_else(|| git_err("远端没有名称或地址"))?;
-            let remote_branch = remote_branch_from_tracking(&tracking, &remote_label)
-                .ok_or_else(|| git_err("无法解析上游远端分支名"))?;
-            return Ok((remote_label, remote_branch));
-        }
-    }
-    let remote = repo
-        .find_fetch_remote(None)
-        .map_err(|e| git_err(format!("未找到可用的远端: {e}")))?;
-    let remote_label = remote
-        .name()
-        .map(|n| n.as_bstr().to_str_lossy().into_owned())
-        .or_else(|| {
-            remote
-                .url(gix::remote::Direction::Push)
-                .map(|u| u.to_bstring().to_string())
-        })
-        .ok_or_else(|| git_err("远端没有名称或地址"))?;
-    Ok((remote_label, branch.to_string()))
+    let status = git_status_with(git_bin, root)?;
+    let kind = if combined.contains("Everything up-to-date") {
+        "up_to_date"
+    } else {
+        "pushed"
+    };
+    let message = if kind == "up_to_date" {
+        format!("本地已是最新（{remote_label}/{remote_branch}）")
+    } else {
+        format!("已推送到 {remote_label}/{remote_branch}")
+    };
+    Ok(GitPushResult {
+        status,
+        kind: kind.to_string(),
+        message,
+    })
 }
 
 /// 把 git push 失败输出映射为友好中文提示（LANG=C 下输出为英文，关键词稳定）
@@ -1814,101 +1341,110 @@ fn push_failure_message(combined: &str) -> String {
     }
 }
 
-/// 推送当前分支到上游远端（调用系统 git；首次推送自动设置上游 -u）。
-fn push_sync(root: &str) -> Result<GitPushResult, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    push_sync_with_git(&git_bin, root)
+/// 解析远端目标（远端名 + 远端分支名）：优先已配置的上游，
+/// 无配置时以默认远端（origin）同名分支兜底。
+fn git_remote_target_with(
+    git_bin: &Path,
+    root: &str,
+    branch: &str,
+) -> Result<(String, String), GitError> {
+    let remote = git_config_with(git_bin, root, &format!("branch.{branch}.remote"))?;
+    let merge = git_config_with(git_bin, root, &format!("branch.{branch}.merge"))?;
+    if let (Some(r), Some(m)) = (remote, merge) {
+        let remote_branch = m.strip_prefix("refs/heads/").unwrap_or(&m).to_string();
+        return Ok((r, remote_branch));
+    }
+    let names = git_remote_names_with(git_bin, root)?;
+    let label = if names.iter().any(|n| n == "origin") {
+        "origin".to_string()
+    } else if let Some(first) = names.first() {
+        first.clone()
+    } else {
+        return Err(git_err("未找到可用的远端"));
+    };
+    Ok((label, branch.to_string()))
 }
 
-/// push 实现（git 可执行文件路径可注入，便于测试“git 缺失”分支）
-fn push_sync_with_git(git_bin: &Path, root: &str) -> Result<GitPushResult, GitError> {
-    let repo = open_repo(root)?;
-    let branch = current_branch(&repo);
-    if branch == "HEAD" {
-        return Err(git_err("游离 HEAD 状态无法推送，请先切换到某个分支"));
+/// 读取单个 git config 键（缺失时返回 None）
+fn git_config_with(git_bin: &Path, root: &str, key: &str) -> Result<Option<String>, GitError> {
+    let (code, stdout, _) = git_output(git_bin, root, &["config", "--get", key])?;
+    if code != 0 {
+        return Ok(None);
     }
-    let (remote_label, remote_branch) = resolve_remote_target(&repo, &branch)?;
-    let refspec = format!("{branch}:{remote_branch}");
-    let out = git_command(git_bin)
-        .arg("-C")
-        .arg(root)
-        .args(["push", "-u", &remote_label, &refspec])
-        // 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起
-        //（Git Credential Manager 等 GUI 助手不受影响，认证失败会快速报错）。
-        .env("LANG", "C")
-        .env("LC_ALL", "C")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
-            } else {
-                git_err(format!("执行 git push 失败: {e}"))
-            }
-        })?;
-    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-    let combined = format!("{stdout}\n{stderr}");
-    if !out.status.success() {
-        return Err(git_err(push_failure_message(&combined)));
+    let v = stdout.trim().to_string();
+    if v.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(v))
     }
-    let status = status_sync(root)?;
-    let kind = if combined.contains("Everything up-to-date") {
-        "up_to_date"
-    } else {
-        "pushed"
-    };
-    let message = if kind == "up_to_date" {
-        format!("本地已是最新（{remote_label}/{remote_branch}）")
-    } else {
-        format!("已推送到 {remote_label}/{remote_branch}")
-    };
-    Ok(GitPushResult {
-        status,
-        kind: kind.to_string(),
-        message,
-    })
+}
+
+/// 远端名列表（`git remote`）
+fn git_remote_names_with(git_bin: &Path, root: &str) -> Result<Vec<String>, GitError> {
+    let (code, stdout, _) = git_output(git_bin, root, &["remote"])?;
+    if code != 0 {
+        return Err(git_err("读取远端列表失败"));
+    }
+    Ok(stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
 }
 
 // ---------- 远端管理 ----------
 
-/// 远端列表（只读，gix 实现，不依赖系统 git）：名称排序，
-/// fetch/push 地址按 gix 语义取（pushUrl 未配置时回退为拉取地址）。
-fn remotes_sync(path: &str) -> Result<GitRemotes, GitError> {
-    let repo = open_repo(path)?;
-    let mut remotes: Vec<GitRemote> = Vec::new();
-    for name in repo.remote_names() {
-        let name = name.to_string();
-        let remote = repo
-            .find_remote(&name)
-            .map_err(|e| git_err(format!("读取远端 {name} 失败: {e}")))?;
-        remotes.push(GitRemote {
-            fetch_url: remote
-                .url(gix::remote::Direction::Fetch)
-                .map(|u| u.to_bstring().to_string()),
-            push_url: remote
-                .url(gix::remote::Direction::Push)
-                .map(|u| u.to_bstring().to_string()),
-            name,
-        });
-    }
-    remotes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    Ok(GitRemotes {
-        current: current_remote_label(&repo),
-        remotes,
-    })
+/// 远端列表（`git remote -v`）：fetch/push 地址；pushUrl 未配置时回退为拉取地址
+fn git_remote(root: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = git_bin()?;
+    git_remote_with(&git_bin, root)
 }
 
-/// 当前分支的远端名：经 resolve_remote_target 解析（无远端/游离 HEAD/解析失败均为 None）
-fn current_remote_label(repo: &gix::Repository) -> Option<String> {
-    let branch = current_branch(repo);
-    if branch == "HEAD" {
-        return None;
+fn git_remote_with(git_bin: &Path, root: &str) -> Result<GitRemotes, GitError> {
+    git_rev_parse_with(git_bin, root)?;
+    let (code, stdout, stderr) = git_output(git_bin, root, &["remote", "-v"])?;
+    if code != 0 {
+        return Err(git_err(format!("读取远端列表失败: {}", stderr.trim())));
     }
-    resolve_remote_target(repo, &branch)
-        .ok()
-        .map(|(label, _)| label)
+    let mut remotes: Vec<GitRemote> = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        let (name, rest) = match line.split_once('\t') {
+            Some((n, r)) => (n, r.trim()),
+            None => continue,
+        };
+        let (url, is_push) = if let Some(u) = rest.strip_suffix(" (fetch)") {
+            (u.trim(), false)
+        } else if let Some(u) = rest.strip_suffix(" (push)") {
+            (u.trim(), true)
+        } else {
+            continue;
+        };
+        let url = url.to_string();
+        if let Some(existing) = remotes.iter_mut().find(|r| r.name == name) {
+            if is_push {
+                existing.push_url = Some(url);
+            } else {
+                existing.fetch_url = Some(url);
+            }
+        } else {
+            remotes.push(GitRemote {
+                name: name.to_string(),
+                fetch_url: if is_push { None } else { Some(url.clone()) },
+                push_url: if is_push { Some(url) } else { None },
+            });
+        }
+    }
+    remotes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    let current = git_current_branch_with(git_bin, root)?;
+    let current = if current == "HEAD" {
+        None
+    } else {
+        git_remote_target_with(git_bin, root, &current)
+            .ok()
+            .map(|(label, _)| label)
+    };
+    Ok(GitRemotes { current, remotes })
 }
 
 /// 远端名合法性校验（git remote 子命令规则的子集，其余由 git 自身兜底校验）
@@ -1929,47 +1465,6 @@ fn validate_remote_name(name: &str) -> Result<(), GitError> {
     Ok(())
 }
 
-/// 执行 git 子命令（远端/网络类操作；锁由外层 run_blocking 统一持有），
-/// 失败输出经 `map_error` 映射为中文提示。
-fn run_git_mapped(
-    git_bin: &Path,
-    root: &str,
-    args: &[&str],
-    action: &str,
-    map_error: impl Fn(&str) -> String,
-) -> Result<(), GitError> {
-    let out = git_command(git_bin)
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        // 固定英文输出便于解析；GIT_TERMINAL_PROMPT=0 避免在无终端环境挂起
-        .env("LANG", "C")
-        .env("LC_ALL", "C")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH")
-            } else {
-                git_err(format!("执行 {action} 失败: {e}"))
-            }
-        })?;
-    if !out.status.success() {
-        let combined = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        return Err(git_err(map_error(&combined)));
-    }
-    Ok(())
-}
-
-/// 执行 git remote 写操作（错误映射见 remote_failure_message）
-fn run_remote_git(git_bin: &Path, root: &str, args: &[&str]) -> Result<(), GitError> {
-    run_git_mapped(git_bin, root, args, "git remote", remote_failure_message)
-}
-
 /// 把 git remote 失败输出映射为友好中文提示（LANG=C 下输出为英文，关键词稳定）
 fn remote_failure_message(combined: &str) -> String {
     let c = combined.to_lowercase();
@@ -1987,8 +1482,13 @@ fn remote_failure_message(combined: &str) -> String {
     }
 }
 
-/// 添加远端（调用系统 git：`git remote add <name> <url>`，自动生成默认 fetch refspec）
-fn remote_add_sync_with_git(
+/// 添加远端（`git remote add <name> <url>`，自动生成默认 fetch refspec）
+fn git_remote_add(root: &str, name: &str, url: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = git_bin()?;
+    git_remote_add_with(&git_bin, root, name, url)
+}
+
+fn git_remote_add_with(
     git_bin: &Path,
     root: &str,
     name: &str,
@@ -2000,12 +1500,17 @@ fn remote_add_sync_with_git(
     if url.is_empty() {
         return Err(git_err("远端地址不能为空"));
     }
-    run_remote_git(git_bin, root, &["remote", "add", name, url])?;
-    remotes_sync(root)
+    git_run_mapped(git_bin, root, &["remote", "add", name, url], remote_failure_message)?;
+    git_remote_with(git_bin, root)
 }
 
 /// 修改远端拉取地址（`git remote set-url <name> <url>`；pushUrl 保持不变）
-fn remote_set_url_sync_with_git(
+fn git_remote_set_url(root: &str, name: &str, url: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = git_bin()?;
+    git_remote_set_url_with(&git_bin, root, name, url)
+}
+
+fn git_remote_set_url_with(
     git_bin: &Path,
     root: &str,
     name: &str,
@@ -2017,34 +1522,21 @@ fn remote_set_url_sync_with_git(
     if url.is_empty() {
         return Err(git_err("远端地址不能为空"));
     }
-    run_remote_git(git_bin, root, &["remote", "set-url", name, url])?;
-    remotes_sync(root)
+    git_run_mapped(git_bin, root, &["remote", "set-url", name, url], remote_failure_message)?;
+    git_remote_with(git_bin, root)
 }
 
 /// 删除远端（`git remote remove <name>`；删除当前上游远端允许，由前端确认提示）
-fn remote_remove_sync_with_git(git_bin: &Path, root: &str, name: &str) -> Result<GitRemotes, GitError> {
+fn git_remote_remove(root: &str, name: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = git_bin()?;
+    git_remote_remove_with(&git_bin, root, name)
+}
+
+fn git_remote_remove_with(git_bin: &Path, root: &str, name: &str) -> Result<GitRemotes, GitError> {
     let name = name.trim();
     validate_remote_name(name)?;
-    run_remote_git(git_bin, root, &["remote", "remove", name])?;
-    remotes_sync(root)
-}
-
-fn remote_add_sync(root: &str, name: &str, url: &str) -> Result<GitRemotes, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    remote_add_sync_with_git(&git_bin, root, name, url)
-}
-
-fn remote_set_url_sync(root: &str, name: &str, url: &str) -> Result<GitRemotes, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    remote_set_url_sync_with_git(&git_bin, root, name, url)
-}
-
-fn remote_remove_sync(root: &str, name: &str) -> Result<GitRemotes, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    remote_remove_sync_with_git(&git_bin, root, name)
+    git_run_mapped(git_bin, root, &["remote", "remove", name], remote_failure_message)?;
+    git_remote_with(git_bin, root)
 }
 
 // ---------- 远程分支管理 ----------
@@ -2112,38 +1604,39 @@ fn remote_branch_failure_message(combined: &str) -> String {
 }
 
 /// 拉取远端更新（`git fetch <remote>`；remote 为空时取默认远端），返回刷新后的分支列表
-fn remote_fetch_sync_with_git(
-    git_bin: &Path,
-    root: &str,
-    remote: &str,
-) -> Result<GitBranches, GitError> {
-    let repo = open_repo(root)?;
+/// 拉取远端更新（`git fetch <remote>`；remote 为空时取默认远端），返回刷新后的分支列表
+fn git_fetch(root: &str, remote: &str) -> Result<GitBranches, GitError> {
+    let git_bin = git_bin()?;
+    git_fetch_with(&git_bin, root, remote)
+}
+
+fn git_fetch_with(git_bin: &Path, root: &str, remote: &str) -> Result<GitBranches, GitError> {
+    git_rev_parse_with(git_bin, root)?;
     let trimmed = remote.trim();
     let remote_label = if trimmed.is_empty() {
-        repo.remote_default_name(gix::remote::Direction::Fetch)
-            .map(|n| n.to_string())
-            .or_else(|| {
-                repo.find_fetch_remote(None)
-                    .ok()
-                    .and_then(|r| r.name().map(|n| n.as_bstr().to_str_lossy().into_owned()))
-            })
-            .ok_or_else(|| git_err("未找到可用的远端"))?
+        let names = git_remote_names_with(git_bin, root)?;
+        if names.iter().any(|n| n == "origin") {
+            "origin".to_string()
+        } else if let Some(first) = names.first() {
+            first.clone()
+        } else {
+            return Err(git_err("未找到可用的远端"));
+        }
     } else {
         trimmed.to_string()
     };
-    run_git_mapped(
-        git_bin,
-        root,
-        &["fetch", &remote_label],
-        "git fetch",
-        fetch_failure_message,
-    )?;
-    branches_sync(root)
+    git_run_mapped(git_bin, root, &["fetch", &remote_label], fetch_failure_message)?;
+    git_branch_with(git_bin, root)
 }
 
 /// 从远程分支检出为同名本地跟踪分支（`git checkout -b <branch> --track <remote>/<branch>`）。
 /// 本地已有同名分支时拒绝（由前端路由到本地切换）。
-fn branch_checkout_remote_sync_with_git(
+fn git_checkout(root: &str, remote_branch: &str) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    git_checkout_with(&git_bin, root, remote_branch)
+}
+
+fn git_checkout_with(
     git_bin: &Path,
     root: &str,
     remote_branch: &str,
@@ -2151,26 +1644,27 @@ fn branch_checkout_remote_sync_with_git(
     let (remote_label, branch) = split_remote_branch(remote_branch)?;
     validate_remote_name(remote_label)?;
     validate_branch_name(branch)?;
-    let repo = open_repo(root)?;
-    let full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(branch))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    if repo.find_reference(&full).is_ok() {
+    git_rev_parse_with(git_bin, root)?;
+    if git_ref_exists_with(git_bin, root, &format!("refs/heads/{branch}"))? {
         return Err(git_err(format!("本地分支 {branch} 已存在，请先切换到该分支")));
     }
     let track = format!("{remote_label}/{branch}");
-    run_git_mapped(
+    git_run_mapped(
         git_bin,
         root,
         &["checkout", "-b", branch, "--track", &track],
-        "git checkout",
         remote_branch_failure_message,
     )?;
-    status_sync(root)
+    git_status_with(git_bin, root)
 }
 
 /// 删除远程分支（`git push <remote> --delete <branch>`），返回刷新后的分支列表
-fn remote_branch_delete_sync_with_git(
+fn git_push_delete(root: &str, remote_branch: &str) -> Result<GitBranches, GitError> {
+    let git_bin = git_bin()?;
+    git_push_delete_with(&git_bin, root, remote_branch)
+}
+
+fn git_push_delete_with(
     git_bin: &Path,
     root: &str,
     remote_branch: &str,
@@ -2178,14 +1672,14 @@ fn remote_branch_delete_sync_with_git(
     let (remote_label, branch) = split_remote_branch(remote_branch)?;
     validate_remote_name(remote_label)?;
     validate_branch_name(branch)?;
-    run_git_mapped(
+    git_rev_parse_with(git_bin, root)?;
+    git_run_mapped(
         git_bin,
         root,
         &["push", remote_label, "--delete", branch],
-        "git push",
         remote_branch_failure_message,
     )?;
-    branches_sync(root)
+    git_branch_with(git_bin, root)
 }
 
 /// 把 `git branch --set-upstream-to` 失败输出映射为友好中文提示
@@ -2205,349 +1699,136 @@ fn switch_upstream_failure_message(combined: &str) -> String {
 
 /// 把当前分支上游切换到 `remote` 的同名分支（`git branch --set-upstream-to <remote>/<分支>`，
 /// 单上游替换）。返回刷新后的远端列表。
-fn remote_switch_upstream_sync_with_git(
+fn git_set_upstream(root: &str, remote: &str) -> Result<GitRemotes, GitError> {
+    let git_bin = git_bin()?;
+    git_set_upstream_with(&git_bin, root, remote)
+}
+
+fn git_set_upstream_with(
     git_bin: &Path,
     root: &str,
     remote: &str,
 ) -> Result<GitRemotes, GitError> {
     let remote = remote.trim();
     validate_remote_name(remote)?;
-    let repo = open_repo(root)?;
-    let _ = repo
-        .find_remote(remote)
-        .map_err(|_| git_err(format!("远端 {remote} 不存在")))?;
-    let branch = current_branch(&repo);
+    git_rev_parse_with(git_bin, root)?;
+    let (code, _, _) = git_output(git_bin, root, &["remote", "get-url", remote])?;
+    if code != 0 {
+        return Err(git_err(format!("远端 {remote} 不存在")));
+    }
+    let branch = git_current_branch_with(git_bin, root)?;
     if branch == "HEAD" {
         return Err(git_err("游离 HEAD 状态无法设置上游，请先切换到某个分支"));
     }
     let target = format!("{remote}/{branch}");
-    run_git_mapped(
+    git_run_mapped(
         git_bin,
         root,
         &["branch", "--set-upstream-to", &target],
-        "git branch",
         switch_upstream_failure_message,
     )?;
-    remotes_sync(root)
+    git_remote_with(git_bin, root)
 }
 
-fn remote_fetch_sync(root: &str, remote: &str) -> Result<GitBranches, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    remote_fetch_sync_with_git(&git_bin, root, remote)
-}
+// ---------- 分支合并 ----------
 
-fn branch_checkout_remote_sync(root: &str, remote_branch: &str) -> Result<GitStatus, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    branch_checkout_remote_sync_with_git(&git_bin, root, remote_branch)
-}
-
-fn remote_branch_delete_sync(root: &str, remote_branch: &str) -> Result<GitBranches, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    remote_branch_delete_sync_with_git(&git_bin, root, remote_branch)
-}
-
-fn remote_switch_upstream_sync(root: &str, remote: &str) -> Result<GitRemotes, GitError> {
-    let git_bin = find_git()
-        .ok_or_else(|| git_err("未检测到系统 git，请先安装 Git（git-scm.com）或将其加入 PATH"))?;
-    remote_switch_upstream_sync_with_git(&git_bin, root, remote)
-}
-
-/// 将本地分支 `name` 合并到当前分支（等价 `git merge <name>`）：
-/// 快进或三路合并（创建合并提交）。与拉取相同，仅当合并触达的路径与本地
-/// 已暂存/未暂存改动重叠时拒绝（列文件）；提交级冲突时中止，不改动工作区与索引。
-fn merge_branch_sync(path: &str, name: &str) -> Result<GitMergeResult, GitError> {
+/// 合并本地分支到当前分支（`git merge <name>`，标准语义）：
+/// 快进或三路合并（git 自动创建合并提交）；冲突一律中止并 `git merge --abort`，
+/// 绝不留下冲突文件；本地更改会被合并覆盖时在合并前直接拒绝。
+fn git_merge(root: &str, name: &str) -> Result<GitMergeResult, GitError> {
     let name = name.trim();
-    let repo = open_repo(path)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let branch = current_branch(&repo);
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    let branch = git_current_branch_with(&git_bin, root)?;
     if branch == "HEAD" {
         return Err(git_err("游离 HEAD 状态无法合并，请先切换到某个分支"));
     }
     if branch == name {
         return Err(git_err("不能将当前分支合并到自身"));
     }
-    let full = gix::refs::Category::LocalBranch
-        .to_full_name(BStr::new(name))
-        .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-    let source_id = repo
-        .find_reference(&full)
-        .map_err(|_| git_err(format!("分支 {name} 不存在")))?
-        .peel_to_id()
-        .map_err(|e| git_err(format!("解析分支 {name} 失败: {e}")))?;
-    let source_oid = source_id.detach();
-    let source_tree_oid = source_id
-        .object()
-        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
-        .into_commit()
-        .tree_id()
-        .map_err(|e| git_err(format!("读取分支 {name} 失败: {e}")))?
-        .detach();
-
-    // 本地风险路径：已暂存（HEAD→索引）+ 已跟踪的工作区修改；
-    // 未跟踪文件不纳入（由 sync_worktree_files 的覆盖守卫保护）。
-    let st = status_sync(path)?;
-    let staged_paths: Vec<String> = st
-        .files
-        .iter()
-        .filter(|f| f.staged)
-        .map(|f| f.path.clone())
-        .collect();
-    let local_risk_paths: Vec<String> = st
-        .files
-        .iter()
-        .filter(|f| f.worktree && f.status != FileStatus::Untracked)
-        .map(|f| f.path.clone())
-        .collect();
-
-    // 本地状态
-    let local_oid = repo.head_id().ok().map(|id| id.detach());
-    let local_tree_id = repo
-        .head_tree_id_or_empty()
-        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    let local_tree_oid = local_tree_id.detach();
-
-    // 判定合并类型与目标树（只读计算，不写入）
-    let mut target_tree_oid: Option<gix::hash::ObjectId> = None;
-    let (kind, message) = match local_oid {
-        None => return Err(git_err("仓库还没有任何提交，无法合并")),
-        Some(local) if local == source_oid => {
-            ("up_to_date".to_string(), "分支已是最新，无需合并".to_string())
+    if !git_ref_exists_with(&git_bin, root, &format!("refs/heads/{name}"))? {
+        return Err(git_err(format!("分支 {name} 不存在")));
+    }
+    if !git_head_exists_with(&git_bin, root)? {
+        return Err(git_err("仓库还没有任何提交，无法合并"));
+    }
+    let source_tip = git_rev_parse_ref_with(&git_bin, root, &format!("refs/heads/{name}"))?;
+    let (code, stdout, stderr) = git_output(&git_bin, root, &["merge", name])?;
+    let combined = format!("{stdout}\n{stderr}");
+    if code != 0 {
+        let c = combined.to_lowercase();
+        // 冲突 → 立即中止，不留冲突文件
+        if c.contains("conflict") {
+            let _ = git_output(&git_bin, root, &["merge", "--abort"]);
+            return Err(git_err(format!(
+                "合并 {name} 存在冲突，已中止（未修改任何文件）。冲突文件：{}",
+                extract_conflict_paths(&combined)
+            )));
         }
-        Some(local) => {
-            let labels = gix::merge::blob::builtin_driver::text::Labels {
-                ancestor: Some(BStr::new("ancestor")),
-                current: Some(BStr::new("ours")),
-                other: Some(BStr::new("theirs")),
-            };
-            let options = repo
-                .tree_merge_options()
-                .map_err(|e| git_err(format!("初始化合并选项失败: {e}")))?
-                .into();
-            let mut outcome = repo
-                .merge_commits(local, source_oid, labels, options)
-                .map_err(|e| git_err(format!("合并分支 {name} 失败: {e}")))?;
-            let merge_bases: Vec<gix::hash::ObjectId> = outcome
-                .merge_bases
-                .iter()
-                .flat_map(|nb| nb.iter().copied())
-                .collect();
-            if merge_bases.contains(&source_oid) {
-                // 源分支是本地祖先 → 本地已包含其全部提交
-                ("up_to_date".to_string(), "分支已是最新，无需合并".to_string())
-            } else if merge_bases.contains(&local) {
-                // 本地是源分支祖先 → 快进
-                target_tree_oid = Some(source_tree_oid);
-                (
-                    "fast_forward".to_string(),
-                    format!("已将分支 {name} 快进合并到 {branch}"),
-                )
-            } else {
-                // 分叉：真实合并，提交级冲突则中止
-                if !outcome.tree_merge.conflicts.is_empty() {
-                    let paths: Vec<String> = outcome
-                        .tree_merge
-                        .conflicts
-                        .iter()
-                        .map(conflict_path)
-                        .collect();
-                    return Err(git_err(format!(
-                        "合并 {name} 存在冲突，已中止（未修改任何文件）。冲突文件：{}",
-                        paths.join("、")
-                    )));
-                }
-                let merged_tree_oid = outcome
-                    .tree_merge
-                    .tree
-                    .write()
-                    .map(|id| id.detach())
-                    .map_err(|e| git_err(format!("写入合并树失败: {e}")))?;
-                target_tree_oid = Some(merged_tree_oid);
-                (
-                    "merged".to_string(),
-                    format!("已将分支 {name} 合并到 {branch}"),
-                )
-            }
-        }
-    };
-
-    // 冲突判定：合并触达的路径与本地风险路径重叠 → 在任何写入之前拒绝
-    let merge_changed: Vec<String> = if let Some(target) = target_tree_oid {
-        let changed = diff_changed_paths(&repo, &local_tree_oid, &target)?;
-        let mut overlap: Vec<&String> = local_risk_paths
-            .iter()
-            .chain(staged_paths.iter())
-            .filter(|p| changed.iter().any(|c| c == *p))
-            .collect();
-        overlap.sort();
-        overlap.dedup();
-        if !overlap.is_empty() {
-            let names: Vec<&str> = overlap.iter().map(|s| s.as_str()).collect();
+        // 本地更改会被合并覆盖 → git 在合并前拒绝，无状态残留
+        if c.contains("would be overwritten by merge") {
             return Err(git_err(format!(
                 "本地更改会被合并覆盖，请先提交或还原后再合并：{}",
-                names.join("、")
+                extract_listed_paths(&combined)
             )));
         }
-        changed
+        let trimmed = combined.trim();
+        return Err(git_err(if trimmed.is_empty() {
+            format!("合并分支 {name} 失败")
+        } else {
+            trimmed.to_string()
+        }));
+    }
+    let head_after = git_rev_parse_head_with(&git_bin, root)?;
+    let status = git_status_with(&git_bin, root)?;
+    let (kind, message) = if combined.to_lowercase().contains("already up to date") {
+        ("up_to_date".to_string(), "分支已是最新，无需合并".to_string())
+    } else if head_after == source_tip {
+        (
+            "fast_forward".to_string(),
+            format!("已将分支 {name} 快进合并到 {branch}"),
+        )
     } else {
-        Vec::new()
+        (
+            "merged".to_string(),
+            format!("已将分支 {name} 合并到 {branch}"),
+        )
     };
+    Ok(GitMergeResult { status, kind, message })
+}
 
-    // 写阶段前置状态捕获（用于失败回滚）
-    let old_index_owned = repo
-        .index_or_empty()
-        .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-    let mut old_index_owned = old_index_owned.into_owned_or_cloned();
-    let local_tree = local_tree_id
-        .object()
-        .map_err(|e| git_err(format!("读取本地树失败: {e}")))?
-        .into_tree();
+/// 取当前 HEAD 的完整 hash
+fn git_rev_parse_head_with(git_bin: &Path, root: &str) -> Result<String, GitError> {
+    git_rev_parse_ref_with(git_bin, root, "HEAD")
+}
 
-    // 应用：同步工作区 → 重建索引 → 更新分支/创建合并提交。
-    // 任一步失败都回滚到写前状态，避免留下半合并状态。
-    let apply_result = (|| -> Result<(), GitError> {
-        if let Some(target) = target_tree_oid {
-            sync_worktree_files(&repo, workdir, &local_tree_oid, &target)?;
-            rebuild_index_preserving_staged(&repo, &target, &staged_paths, &merge_changed)?;
-        }
-        match kind.as_str() {
-            "fast_forward" => update_branch_ref(&repo, &branch, source_oid)?,
-            "merged" => {
-                let merge_msg = format!("Merge branch '{name}' into {branch}");
-                let local_oid = *local_oid.as_ref().expect("合并必有本地提交");
-                repo.commit(
-                    "HEAD",
-                    merge_msg,
-                    target_tree_oid.expect("合并必有目标树"),
-                    vec![local_oid, source_oid],
-                )
-                .map_err(|e| git_err(format!("创建合并提交失败: {e}")))?;
+/// 取指定引用指向的完整 hash
+fn git_rev_parse_ref_with(git_bin: &Path, root: &str, reference: &str) -> Result<String, GitError> {
+    let (code, stdout, stderr) = git_output(git_bin, root, &["rev-parse", reference])?;
+    if code != 0 {
+        return Err(git_err(format!("解析 {reference} 失败: {}", stderr.trim())));
+    }
+    Ok(stdout.trim().to_string())
+}
+
+/// 从 git merge 输出提取冲突文件列表（`CONFLICT ...: Merge conflict in <path>`）
+fn extract_conflict_paths(combined: &str) -> String {
+    let mut paths: Vec<String> = Vec::new();
+    for line in combined.lines() {
+        let l = line.trim();
+        if let Some(idx) = l.find("conflict in ") {
+            let p = l[idx + "conflict in ".len()..].trim();
+            let p = p.trim_end_matches(':').trim();
+            if !p.is_empty() && !paths.contains(&p.to_string()) {
+                paths.push(p.to_string());
             }
-            _ => {}
         }
-        Ok(())
-    })();
-
-    if let Err(e) = apply_result {
-        // 尽最大努力回滚：工作区 → 旧索引 → 分支引用回到本地提交
-        let _ = restore_paths_from_tree(workdir, &local_tree, &merge_changed);
-        let _ = old_index_owned.write(gix::index::write::Options::default());
-        let branch_full = gix::refs::Category::LocalBranch
-            .to_full_name(BStr::new(&branch))
-            .map_err(|e| git_err(format!("分支名不合法: {e}")))?;
-        let restore_change = match &local_oid {
-            Some(oid) => gix::refs::transaction::Change::Update {
-                log: Default::default(),
-                expected: gix::refs::transaction::PreviousValue::Any,
-                new: gix::refs::Target::Object(*oid),
-            },
-            None => gix::refs::transaction::Change::Delete {
-                expected: gix::refs::transaction::PreviousValue::Any,
-                log: gix::refs::transaction::RefLog::AndReference,
-            },
-        };
-        let _ = repo.edit_reference(gix::refs::transaction::RefEdit {
-            change: restore_change,
-            name: branch_full,
-            deref: false,
-        });
-        return Err(e);
     }
-
-    Ok(GitMergeResult {
-        status: status_sync(path)?,
-        kind,
-        message,
-    })
-}
-
-// ---------- diff ----------
-
-/// git 近似二进制判定：前 8000 字节内出现 NUL
-fn looks_binary(data: &[u8]) -> bool {
-    data[..data.len().min(8000)].contains(&0)
-}
-
-/// 渲染 unified diff（`@@ -a,b +c,d @@` + `+`/`-`/` ` 行，与 git diff -U3 兼容）；
-/// 任一输入为二进制时返回 None
-fn render_diff(old: &[u8], new: &[u8]) -> Option<String> {
-    if looks_binary(old) || looks_binary(new) {
-        return None;
-    }
-    use gix::diff::blob::unified_diff::{ConsumeBinaryHunk, ContextSize};
-    use gix::diff::blob::{
-        Algorithm, InternedInput, UnifiedDiff, diff_with_slider_heuristics,
-        platform::resource::ByteLinesWithoutTerminator,
-    };
-    let input = InternedInput::new(
-        ByteLinesWithoutTerminator::new(old),
-        ByteLinesWithoutTerminator::new(new),
-    );
-    let diff = diff_with_slider_heuristics(Algorithm::default(), &input);
-    let out: BString = UnifiedDiff::new(
-        &diff,
-        &input,
-        ConsumeBinaryHunk::new(BString::default(), "\n"),
-        ContextSize::symmetrical(3),
-    )
-    .consume()
-    .ok()?;
-    Some(out.to_str_lossy().into_owned())
-}
-
-/// 取 HEAD 树中 `path` 对应的 blob 内容（HEAD 未出生或无此路径 → 空）
-fn head_blob(repo: &gix::Repository, path: &str) -> Result<Vec<u8>, GitError> {
-    let tree_id = repo
-        .head_tree_id_or_empty()
-        .map_err(|e| git_err(format!("读取 HEAD 失败: {e}")))?;
-    let tree = tree_id
-        .object()
-        .map_err(|e| git_err(format!("读取 HEAD 树失败: {e}")))?
-        .into_tree();
-    let Some(entry) = tree
-        .lookup_entry_by_path(path)
-        .map_err(|e| git_err(format!("在 HEAD 中查找 {path} 失败: {e}")))?
-    else {
-        return Ok(Vec::new());
-    };
-    let mut obj = entry
-        .object()
-        .map_err(|e| git_err(format!("读取 {path} 对象失败: {e}")))?;
-    if obj.kind == gix::objs::Kind::Blob {
-        let data = std::mem::take(&mut obj.data);
-        if data.len() as u64 > MAX_FILE_BYTES {
-            return Err(git_err(format!(
-                "文件过大（超过 {} MB），无法处理: {path}",
-                MAX_FILE_BYTES / (1024 * 1024)
-            )));
-        }
-        Ok(data)
+    if paths.is_empty() {
+        "<未知路径>".to_string()
     } else {
-        Ok(Vec::new())
+        paths.join("、")
     }
-}
-
-/// diff 基准统一为 HEAD（暂存 + 未暂存合并）；未跟踪文件为空 → 工作区内容。
-/// 返回空串表示无内容变化。
-fn diff_sync(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
-    let path = validate_rel_path(path)?;
-    let repo = open_repo(root)?;
-    let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-    let old = head_blob(&repo, &path)?;
-    // 已删除或不可读的文件视为空内容
-    let new = std::fs::read(workdir.join(&path)).unwrap_or_default();
-    if new.len() as u64 > MAX_FILE_BYTES {
-        return Err(git_err(format!(
-            "文件过大（超过 {} MB），无法显示差异: {path}",
-            MAX_FILE_BYTES / (1024 * 1024)
-        )));
-    }
-    if old == new {
-        return Ok(String::new());
-    }
-    render_diff(&old, &new).ok_or_else(|| git_err("该文件是二进制文件，无法显示文本差异"))
 }
 
 /// 在阻塞线程中执行同步 git 操作，带指定超时（秒）
@@ -2577,36 +1858,36 @@ async fn run_blocking<T: Send + 'static>(
 
 #[tauri::command]
 pub async fn git_changes_status(workspace: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || status_sync(&workspace)).await
+    run_blocking(move || git_status(&workspace)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_commit(workspace: String, message: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || commit_sync(&workspace, &message)).await
+    run_blocking(move || git_commit(&workspace, &message)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_pull(workspace: String) -> Result<GitPullResult, GitError> {
     // 拉取涉及网络传输，放宽超时到 10 分钟
-    run_blocking_with_timeout(600, move || pull_sync(&workspace)).await
+    run_blocking_with_timeout(600, move || git_pull(&workspace)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_push(workspace: String) -> Result<GitPushResult, GitError> {
     // 推送涉及网络传输与可能的凭证交互，放宽超时到 10 分钟
-    run_blocking_with_timeout(600, move || push_sync(&workspace)).await
+    run_blocking_with_timeout(600, move || git_push(&workspace)).await
 }
 
-/// 远端列表（只读，gix 实现，不依赖系统 git）
+/// 远端列表（`git remote -v`）
 #[tauri::command]
 pub async fn git_changes_remotes(workspace: String) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remotes_sync(&workspace)).await
+    run_blocking(move || git_remote(&workspace)).await
 }
 
 /// 添加远端（调用系统 git）
 #[tauri::command]
 pub async fn git_changes_remote_add(workspace: String, name: String, url: String) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_add_sync(&workspace, &name, &url)).await
+    run_blocking(move || git_remote_add(&workspace, &name, &url)).await
 }
 
 /// 修改远端拉取地址（调用系统 git）
@@ -2616,19 +1897,19 @@ pub async fn git_changes_remote_set_url(
     name: String,
     url: String,
 ) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_set_url_sync(&workspace, &name, &url)).await
+    run_blocking(move || git_remote_set_url(&workspace, &name, &url)).await
 }
 
 /// 删除远端（调用系统 git）
 #[tauri::command]
 pub async fn git_changes_remote_remove(workspace: String, name: String) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_remove_sync(&workspace, &name)).await
+    run_blocking(move || git_remote_remove(&workspace, &name)).await
 }
 
 /// 拉取远端更新（remote 为空时取默认远端；网络操作放宽超时到 10 分钟）
 #[tauri::command]
 pub async fn git_changes_remote_fetch(workspace: String, remote: String) -> Result<GitBranches, GitError> {
-    run_blocking_with_timeout(600, move || remote_fetch_sync(&workspace, &remote)).await
+    run_blocking_with_timeout(600, move || git_fetch(&workspace, &remote)).await
 }
 
 /// 从远程分支检出为同名本地跟踪分支（调用系统 git）
@@ -2637,7 +1918,7 @@ pub async fn git_changes_branch_checkout_remote(
     workspace: String,
     remote_branch: String,
 ) -> Result<GitStatus, GitError> {
-    run_blocking(move || branch_checkout_remote_sync(&workspace, &remote_branch)).await
+    run_blocking(move || git_checkout(&workspace, &remote_branch)).await
 }
 
 /// 删除远程分支（调用系统 git；网络操作放宽超时到 10 分钟）
@@ -2646,7 +1927,7 @@ pub async fn git_changes_remote_branch_delete(
     workspace: String,
     remote_branch: String,
 ) -> Result<GitBranches, GitError> {
-    run_blocking_with_timeout(600, move || remote_branch_delete_sync(&workspace, &remote_branch)).await
+    run_blocking_with_timeout(600, move || git_push_delete(&workspace, &remote_branch)).await
 }
 
 /// 把当前分支上游切换到指定远端的同名分支（调用系统 git，单上游替换）
@@ -2655,44 +1936,44 @@ pub async fn git_changes_remote_switch_upstream(
     workspace: String,
     remote: String,
 ) -> Result<GitRemotes, GitError> {
-    run_blocking(move || remote_switch_upstream_sync(&workspace, &remote)).await
+    run_blocking(move || git_set_upstream(&workspace, &remote)).await
 }
 
-/// 探测本机是否安装了 git（推送依赖系统 git）；只探测不执行任何操作
+/// 本机 git 可用性（返回启动探测的缓存结果）
 #[tauri::command]
 pub async fn git_changes_git_available(workspace: String) -> bool {
     let _ = workspace;
-    find_git().is_some()
+    git_bin().is_ok()
 }
 
 #[tauri::command]
 pub async fn git_changes_init(workspace: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || init_sync(&workspace)).await
+    run_blocking(move || git_init(&workspace)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_branches(workspace: String) -> Result<GitBranches, GitError> {
-    run_blocking(move || branches_sync(&workspace)).await
+    run_blocking(move || git_branch(&workspace)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_branch_create(workspace: String, name: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || create_branch_sync(&workspace, &name)).await
+    run_blocking(move || git_branch_create(&workspace, &name)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_branch_delete(workspace: String, name: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || delete_branch_sync(&workspace, &name)).await
+    run_blocking(move || git_branch_delete(&workspace, &name)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_branch_switch(workspace: String, name: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || switch_branch_sync(&workspace, &name)).await
+    run_blocking(move || git_switch(&workspace, &name)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_branch_merge(workspace: String, name: String) -> Result<GitMergeResult, GitError> {
-    run_blocking(move || merge_branch_sync(&workspace, &name)).await
+    run_blocking(move || git_merge(&workspace, &name)).await
 }
 
 #[tauri::command]
@@ -2701,47 +1982,47 @@ pub async fn git_changes_log(
     limit: usize,
     before: Option<String>,
 ) -> Result<Vec<GitCommitEntry>, GitError> {
-    run_blocking(move || commit_log_sync(&workspace, limit, before)).await
+    run_blocking(move || git_log(&workspace, limit, before)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_diff(workspace: String, path: String, kind: String) -> Result<String, GitError> {
-    run_blocking(move || diff_sync(&workspace, &path, &kind)).await
+    run_blocking(move || git_diff(&workspace, &path, &kind)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_stage(workspace: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || stage_sync(&workspace, &path)).await
+    run_blocking(move || git_add(&workspace, &path)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_unstage(workspace: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || unstage_sync(&workspace, &path)).await
+    run_blocking(move || git_unstage(&workspace, &path)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_stage_all(workspace: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || stage_all_sync(&workspace)).await
+    run_blocking(move || git_add_all(&workspace)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_unstage_all(workspace: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || unstage_all_sync(&workspace)).await
+    run_blocking(move || git_unstage_all(&workspace)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_restore(workspace: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || restore_sync(&workspace, &path)).await
+    run_blocking(move || git_restore(&workspace, &path)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_delete(workspace: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || delete_sync(&workspace, &path)).await
+    run_blocking(move || git_rm(&workspace, &path)).await
 }
 
 #[tauri::command]
 pub async fn git_changes_ignore(workspace: String, path: String) -> Result<GitStatus, GitError> {
-    run_blocking(move || ignore_sync(&workspace, &path)).await
+    run_blocking(move || git_ignore(&workspace, &path)).await
 }
 
 // ---------- .git / 工作区监听 ----------
@@ -2768,73 +2049,19 @@ fn path_under_excluded_dot_dir(root: &Path, p: &Path) -> bool {
     false
 }
 
-/// 相对路径（正斜杠、小写比较）是否属于 .git 内部
-fn is_git_internal_rel(rel_norm: &str) -> bool {
-    let rel = rel_norm.to_ascii_lowercase();
-    rel == ".git" || rel.starts_with(".git/")
-}
-
-/// 重新读取索引中的已跟踪路径集合（小写、正斜杠），用于 .git 变化后刷新监听过滤
-fn load_tracked_set(root: &Path) -> std::collections::HashSet<String> {
-    gix::discover(root)
-        .ok()
-        .and_then(|repo| repo.index_or_empty().ok())
-        .map(|index| {
-            index
-                .entries()
-                .iter()
-                .map(|e| e.path(&index).to_str_lossy().to_lowercase())
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[tauri::command]
 pub async fn git_changes_watch_start(
     app: AppHandle,
     state: State<'_, GitWatcherState>,
     workspace: String,
 ) -> Result<(), GitError> {
-    // 在阻塞线程中解析仓库：工作区根、git 目录、已跟踪路径集合、排除规则栈
-    let (repo_root, git_dir, tracked, excludes, objects) = match run_blocking({
+    // 在阻塞线程中解析仓库：工作区根与 git 目录（git.exe）
+    let (repo_root, git_dir) = match run_blocking({
         let root = workspace;
-        move || -> Result<
-            (
-                PathBuf,
-                PathBuf,
-                std::collections::HashSet<String>,
-                gix::worktree::Stack,
-                gix::OdbHandle,
-            ),
-            GitError,
-        > {
-            let repo = open_repo(&root)?;
-            let workdir = repo.workdir().ok_or_else(|| git_err("该仓库没有工作目录"))?;
-            let index = repo
-                .index_or_empty()
-                .map_err(|e| git_err(format!("读取索引失败: {e}")))?;
-            let tracked: std::collections::HashSet<String> = index
-                .entries()
-                .iter()
-                .map(|e| e.path(&index).to_str_lossy().to_lowercase())
-                .collect();
-            // 排除栈脱离仓库，仅保留跨线程安全的对象句柄
-            let stack = repo
-                .excludes(
-                    &index,
-                    None,
-                    gix::worktree::stack::state::ignore::Source::WorktreeThenIdMappingIfNotSkipped,
-                )
-                .map_err(|e| git_err(format!("初始化 gitignore 规则失败: {e}")))?
-                .detach();
-            let objects = repo.objects.clone();
-            Ok((
-                workdir.to_path_buf(),
-                repo.git_dir().to_path_buf(),
-                tracked,
-                stack,
-                objects,
-            ))
+        move || -> Result<(PathBuf, PathBuf), GitError> {
+            let git_bin = git_bin()?;
+            let info = git_rev_parse_with(&git_bin, &root)?;
+            Ok((info.workdir, info.git_dir))
         }
     })
     .await
@@ -2866,40 +2093,13 @@ pub async fn git_changes_watch_start(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<PathBuf>(1024);
     let tx_watcher = tx.clone();
     let root_for_filter = repo_root.clone();
-    let excludes = Arc::new(Mutex::new((excludes, objects)));
-    let tracked = Arc::new(Mutex::new(tracked));
-    let tracked_for_task = tracked.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(ev) = res {
             for p in ev.paths {
+                // 本地廉价过滤：排除 `. 开头目录`（.git 除外）与 node_modules；
+                // 忽略文件由 3s 防抖后的 git status 原生过滤
                 if path_under_excluded_dot_dir(&root_for_filter, &p) {
                     continue;
-                }
-                // 应用 .gitignore 规则：忽略“被忽略且未被跟踪”的路径；.git 内部事件始终放行
-                if let Ok(rel) = p.strip_prefix(&root_for_filter) {
-                    let rel_norm = rel.to_string_lossy().replace('\\', "/");
-                    let is_git_internal = is_git_internal_rel(&rel_norm);
-                    let is_tracked = tracked
-                        .lock()
-                        .map(|g| g.contains(&rel_norm.to_lowercase()))
-                        .unwrap_or(false);
-                    if !is_git_internal && !is_tracked {
-                        if let Ok(mut guard) = excludes.lock() {
-                            let (stack, objects) = &mut *guard;
-                            let mode = if p.is_dir() {
-                                Some(gix::index::entry::Mode::DIR)
-                            } else {
-                                None
-                            };
-                            let excluded = stack
-                                .at_path(rel_norm.as_str(), mode, objects)
-                                .map(|platform| platform.is_excluded())
-                                .unwrap_or(false);
-                            if excluded {
-                                continue;
-                            }
-                        }
-                    }
                 }
                 let _ = tx_watcher.try_send(p.clone());
             }
@@ -2918,10 +2118,9 @@ pub async fn git_changes_watch_start(
             .map_err(|e| git_err(format!("监听 git 目录失败 {}: {e}", git_dir.display())))?;
     }
 
-    // 防抖任务：300ms 静默后向前端 emit 变更事件
+    // 防抖任务：最后一次 watch 文件变化静默 3 秒后 emit 变更事件
     let handle = app.clone();
     let root_for_task = repo_root.clone();
-    let git_dir_for_task = git_dir.clone();
     tauri::async_runtime::spawn(async move {
         let mut last_event: Option<tokio::time::Instant> = None;
         let mut ticker = tokio::time::interval(Duration::from_millis(150));
@@ -2929,28 +2128,14 @@ pub async fn git_changes_watch_start(
         loop {
             tokio::select! {
                 maybe = rx.recv() => match maybe {
-                    Some(p) => {
-                        // .git 内部事件（索引/引用变化）后刷新已跟踪集合，
-                        // 避免新暂存/新提交的文件被 gitignore 过滤掉
-                        let git_event = if let Ok(rel) = p.strip_prefix(&root_for_task) {
-                            is_git_internal_rel(&rel.to_string_lossy().replace('\\', "/"))
-                        } else {
-                            p.starts_with(&git_dir_for_task)
-                        };
-                        if git_event {
-                            let new_set =
-                                tokio::task::block_in_place(|| load_tracked_set(&root_for_task));
-                            if let Ok(mut g) = tracked_for_task.lock() {
-                                *g = new_set;
-                            }
-                        }
+                    Some(_) => {
                         last_event = Some(tokio::time::Instant::now());
                     }
                     None => break,
                 },
                 _ = ticker.tick() => {
                     if let Some(t) = last_event {
-                        if t.elapsed() >= Duration::from_millis(300) {
+                        if t.elapsed() >= Duration::from_millis(WATCH_DEBOUNCE_MS) {
                             let payload = serde_json::json!({ "root": clean_path(&root_for_task) });
                             let _ = handle.emit("git-changes/changed", payload);
                             last_event = None;
@@ -3008,14 +2193,16 @@ mod tests {
         )
     }
 
-    fn init_committed_repo(dir: &Path) {
-        // -b main：与 gix::init 的默认分支保持一致
-        assert_eq!(git(dir, &["init", "-b", "main"]).0, 0);
-        assert_eq!(git(dir, &["config", "user.name", "t"]).0, 0);
-        assert_eq!(git(dir, &["config", "user.email", "t@t"]).0, 0);
-        assert_eq!(git(dir, &["add", "-A"]).0, 0);
-        assert_eq!(git(dir, &["commit", "-m", "init"]).0, 0);
-    }
+fn init_committed_repo(dir: &Path) {
+    // -b main：与 git init 的默认分支保持一致
+    assert_eq!(git(dir, &["init", "-b", "main"]).0, 0);
+    assert_eq!(git(dir, &["config", "user.name", "t"]).0, 0);
+    assert_eq!(git(dir, &["config", "user.email", "t@t"]).0, 0);
+    // 关闭 autocrlf：保证检出/合并/还原写出的内容与提交字节一致（LF）
+    assert_eq!(git(dir, &["config", "core.autocrlf", "false"]).0, 0);
+    assert_eq!(git(dir, &["add", "-A"]).0, 0);
+    assert_eq!(git(dir, &["commit", "-m", "init"]).0, 0);
+}
 
     #[test]
     fn status_clean_repo_returns_empty() {
@@ -3027,7 +2214,7 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         init_committed_repo(root);
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         assert!(st.files.is_empty());
         assert!(!st.repo_workspace.is_empty());
         assert!(!st.branch.is_empty());
@@ -3047,7 +2234,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "hello2").unwrap();
         std::fs::remove_file(root.join("b.txt")).unwrap();
         std::fs::write(root.join("c.txt"), "new").unwrap();
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         let mut by_path: Vec<(String, FileStatus)> =
             st.files.iter().map(|f| (f.path.clone(), f.status)).collect();
         by_path.sort();
@@ -3076,7 +2263,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "two").unwrap();
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
         std::fs::write(root.join("a.txt"), "three").unwrap();
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
         assert_eq!(st.files[0].status, FileStatus::Modified);
@@ -3103,7 +2290,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "three\n").unwrap();
         std::fs::write(root.join("c.txt"), "new\n").unwrap();
 
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         let a = st.files.iter().find(|f| f.path == "a.txt").unwrap();
         assert!(a.staged && a.worktree);
         let b = st.files.iter().find(|f| f.path == "b.txt").unwrap();
@@ -3126,7 +2313,7 @@ mod tests {
         std::fs::write(root.join(".gitignore"), "ignored.log\n").unwrap();
         std::fs::write(root.join("ignored.log"), "x").unwrap();
         std::fs::write(root.join("kept.txt"), "y").unwrap();
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         let paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
         assert!(paths.contains(&"kept.txt"));
         assert!(!paths.contains(&"ignored.log"));
@@ -3149,9 +2336,66 @@ mod tests {
         std::fs::write(root.join("node_modules").join("new.js"), "x").unwrap();
         std::fs::write(root.join("node_modules").join("tracked.txt"), "v2").unwrap();
         std::fs::write(root.join("a.txt"), "hello2").unwrap();
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         let paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["a.txt"]);
+    }
+
+    #[test]
+    fn status_parses_paths_with_spaces_and_special_chars() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("my file #1.txt"), "x\n").unwrap();
+        std::fs::write(root.join("中文 名称.txt"), "y\n").unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"my file #1.txt"), "actual: {paths:?}");
+        assert!(paths.contains(&"中文 名称.txt"), "actual: {paths:?}");
+    }
+
+    #[test]
+    fn status_shows_renamed_and_unmerged() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("old.txt"), "x\n").unwrap();
+        init_committed_repo(root);
+        // 纯重命名（git mv）→ Renamed，展示新路径
+        assert_eq!(git(root, &["mv", "old.txt", "new.txt"]).0, 0);
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let r = st.files.iter().find(|f| f.path == "new.txt").unwrap();
+        assert_eq!(r.status, FileStatus::Renamed);
+        assert!(r.staged);
+        assert!(!r.worktree);
+
+        // 制造未合并索引 → Conflicted（staged + worktree 双标志）
+        assert_eq!(git(root, &["commit", "-m", "rename"]).0, 0);
+        assert_eq!(git(root, &["checkout", "-b", "side"]).0, 0);
+        std::fs::write(root.join("new.txt"), "side\n").unwrap();
+        assert_eq!(git(root, &["add", "new.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "side"]).0, 0);
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+        std::fs::write(root.join("new.txt"), "main\n").unwrap();
+        assert_eq!(git(root, &["add", "new.txt"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "main"]).0, 0);
+        let (code, _, _) = git(root, &["merge", "side"]);
+        assert_ne!(code, 0, "merge 应产生冲突");
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let c = st.files.iter().find(|f| f.path == "new.txt").unwrap();
+        assert_eq!(c.status, FileStatus::Conflicted);
+        assert!(c.staged);
+        assert!(c.worktree);
+        // 清理冲突状态
+        assert_eq!(git(root, &["merge", "--abort"]).0, 0);
     }
 
     #[test]
@@ -3159,7 +2403,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
-        let st = init_sync(root.to_str().unwrap()).unwrap();
+        let st = git_init(root.to_str().unwrap()).unwrap();
         assert!(root.join(".git").is_dir());
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
@@ -3167,16 +2411,19 @@ mod tests {
         assert!(!st.files[0].staged);
         assert!(st.files[0].worktree);
         // 仅初始化，不应产生任何提交（HEAD 未出生）
-        let repo = open_repo(root.to_str().unwrap()).unwrap();
-        assert!(repo.head().unwrap().is_unborn());
+        assert_ne!(
+            git(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).0,
+            0,
+            "HEAD 应未出生"
+        );
     }
 
     #[test]
     fn init_twice_errors() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
-        let err = init_sync(root.to_str().unwrap()).unwrap_err();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
+        let err = git_init(root.to_str().unwrap()).unwrap_err();
         assert_eq!(err.code, GitErrorCode::RepoError);
         assert!(err.message.contains("已经是 Git 仓库"));
     }
@@ -3185,7 +2432,7 @@ mod tests {
     fn status_not_a_repo() {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("x.txt"), "x").unwrap();
-        let err = status_sync(dir.path().to_str().unwrap()).unwrap_err();
+        let err = git_status(dir.path().to_str().unwrap()).unwrap_err();
         assert_eq!(err.code, GitErrorCode::NotARepo);
     }
 
@@ -3194,8 +2441,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
-        let st = init_sync(root.to_str().unwrap()).unwrap();
-        let diff = diff_sync(&st.repo_workspace, "c.txt", "untracked").unwrap();
+        let st = git_init(root.to_str().unwrap()).unwrap();
+        let diff = git_diff(&st.repo_workspace, "c.txt", "untracked").unwrap();
         assert!(diff.contains("@@"));
         assert!(diff.contains("+hello"));
     }
@@ -3211,8 +2458,8 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
         init_committed_repo(root);
         std::fs::write(root.join("a.txt"), "one\ntwo!\n").unwrap();
-        let st = status_sync(root.to_str().unwrap()).unwrap();
-        let diff = diff_sync(&st.repo_workspace, "a.txt", "modified").unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let diff = git_diff(&st.repo_workspace, "a.txt", "modified").unwrap();
         assert!(diff.contains("@@"));
         assert!(diff.contains("-two"));
         assert!(diff.contains("+two!"));
@@ -3229,8 +2476,8 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
         init_committed_repo(root);
         std::fs::remove_file(root.join("a.txt")).unwrap();
-        let st = status_sync(root.to_str().unwrap()).unwrap();
-        let diff = diff_sync(&st.repo_workspace, "a.txt", "deleted").unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let diff = git_diff(&st.repo_workspace, "a.txt", "deleted").unwrap();
         assert!(diff.contains("-one"));
         assert!(diff.contains("-two"));
         assert!(!diff.contains("+one"));
@@ -3241,20 +2488,20 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("bin.dat"), b"\x00\x01\x02").unwrap();
-        let st = init_sync(root.to_str().unwrap()).unwrap();
-        let err = diff_sync(&st.repo_workspace, "bin.dat", "untracked").unwrap_err();
+        let st = git_init(root.to_str().unwrap()).unwrap();
+        let err = git_diff(&st.repo_workspace, "bin.dat", "untracked").unwrap_err();
         assert!(err.message.contains("二进制"));
     }
 
     #[test]
     fn status_does_not_write_index() {
-        // gix 状态只读：初始化后（无 index 文件）执行状态不应创建 .git/index
+        // 只读状态：初始化后（无 index 文件）执行状态不应创建 .git/index
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
         assert!(!root.join(".git").join("index").exists());
-        let st = status_sync(root.to_str().unwrap()).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
         assert!(!root.join(".git").join("index").exists());
         assert_eq!(st.files.len(), 1);
     }
@@ -3310,7 +2557,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         init_committed_repo(root);
         assert_eq!(git(root, &["branch", "feature"]).0, 0);
-        let bs = branches_sync(root.to_str().unwrap()).unwrap();
+        let bs = git_branch(root.to_str().unwrap()).unwrap();
         assert_eq!(bs.current, "main");
         assert_eq!(bs.branches, vec!["feature".to_string(), "main".to_string()]);
     }
@@ -3325,12 +2572,12 @@ mod tests {
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         init_committed_repo(root);
-        let st = create_branch_sync(root.to_str().unwrap(), "dev").unwrap();
+        let st = git_branch_create(root.to_str().unwrap(), "dev").unwrap();
         assert_eq!(st.branch, "main");
-        let bs = branches_sync(root.to_str().unwrap()).unwrap();
+        let bs = git_branch(root.to_str().unwrap()).unwrap();
         assert!(bs.branches.contains(&"dev".to_string()));
         // 重复创建同名分支报错
-        assert!(create_branch_sync(root.to_str().unwrap(), "dev").is_err());
+        assert!(git_branch_create(root.to_str().unwrap(), "dev").is_err());
     }
 
     #[test]
@@ -3338,8 +2585,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
-        let err = create_branch_sync(root.to_str().unwrap(), "dev").unwrap_err();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
+        let err = git_branch_create(root.to_str().unwrap(), "dev").unwrap_err();
         assert!(err.message.contains("还没有任何提交"));
     }
 
@@ -3354,15 +2601,40 @@ mod tests {
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         init_committed_repo(root);
         assert_eq!(git(root, &["branch", "feature"]).0, 0);
-        let st = delete_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        let st = git_branch_delete(root.to_str().unwrap(), "feature").unwrap();
         assert_eq!(st.branch, "main");
-        let bs = branches_sync(root.to_str().unwrap()).unwrap();
+        let bs = git_branch(root.to_str().unwrap()).unwrap();
         assert!(!bs.branches.contains(&"feature".to_string()));
         // 禁止删除当前分支
-        let err = delete_branch_sync(root.to_str().unwrap(), "main").unwrap_err();
+        let err = git_branch_delete(root.to_str().unwrap(), "main").unwrap_err();
         assert!(err.message.contains("当前所在分支"));
         // 删除不存在分支报错
-        assert!(delete_branch_sync(root.to_str().unwrap(), "nope").is_err());
+        assert!(git_branch_delete(root.to_str().unwrap(), "nope").is_err());
+    }
+
+    #[test]
+    fn branch_delete_unmerged_succeeds() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        init_committed_repo(root);
+        // feature 有独立提交，未合并回 main
+        assert_eq!(git(root, &["checkout", "-b", "feature"]).0, 0);
+        std::fs::write(root.join("b.txt"), "feat\n").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "feat"]).0, 0);
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+
+        // 无条件删除：未完全合并的分支也应删除成功
+        let st = git_branch_delete(root.to_str().unwrap(), "feature").unwrap();
+        assert_eq!(st.branch, "main");
+        let bs = git_branch(root.to_str().unwrap()).unwrap();
+        assert!(!bs.branches.contains(&"feature".to_string()));
+        assert!(bs.branches.contains(&"main".to_string()));
     }
 
     #[test]
@@ -3385,13 +2657,13 @@ mod tests {
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one");
 
         // 进程内切换到 other：工作区/索引/HEAD 同步
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "other").unwrap();
         assert_eq!(st.branch, "other");
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two");
         assert!(st.files.is_empty());
 
         // 切回 main
-        let st = switch_branch_sync(root.to_str().unwrap(), "main").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "main").unwrap();
         assert_eq!(st.branch, "main");
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one");
     }
@@ -3409,12 +2681,12 @@ mod tests {
         assert_eq!(git(root, &["branch", "other"]).0, 0);
         // 本地修改 a.txt（other 分支未触及）→ 切换成功并携带
         std::fs::write(root.join("a.txt"), "dirty").unwrap();
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "other").unwrap();
         assert_eq!(st.branch, "other");
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "dirty");
         assert!(st.files.iter().any(|f| f.path == "a.txt"));
         // 切回 main：改动继续携带
-        let st = switch_branch_sync(root.to_str().unwrap(), "main").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "main").unwrap();
         assert_eq!(st.branch, "main");
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "dirty");
     }
@@ -3438,16 +2710,15 @@ mod tests {
         assert_eq!(git(root, &["switch", "main"]).0, 0);
         // main 本地修改 a.txt 与目标不同 → 拒绝且停留在 main
         std::fs::write(root.join("a.txt"), "local").unwrap();
-        let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
+        let err = git_switch(root.to_str().unwrap(), "other").unwrap_err();
         assert!(err.message.contains("本地修改与目标分支冲突"));
         assert!(err.message.contains("a.txt"));
-        let repo = open_repo(root.to_str().unwrap()).unwrap();
-        assert_eq!(repo.head_name().unwrap().unwrap().shorten(), "main");
+        assert_eq!(git(root, &["branch", "--show-current"]).1.trim(), "main");
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "local");
     }
 
     #[test]
-    fn branch_switch_allows_when_local_matches_target() {
+    fn branch_switch_refuses_when_local_changes_would_be_overwritten() {
         if !git_available() {
             eprintln!("skip: 未安装 git");
             return;
@@ -3462,10 +2733,12 @@ mod tests {
         assert_eq!(git(root, &["add", "-A"]).0, 0);
         assert_eq!(git(root, &["commit", "-m", "other"]).0, 0);
         assert_eq!(git(root, &["switch", "main"]).0, 0);
-        // 本地内容恰与目标一致 → 切换成功
+        // 本地内容与 HEAD 不一致（即使与目标一致）→ 标准 git 仍拒绝，
+        // 避免任何未提交改动被覆盖的歧义；停留在 main
         std::fs::write(root.join("a.txt"), "two").unwrap();
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
-        assert_eq!(st.branch, "other");
+        let err = git_switch(root.to_str().unwrap(), "other").unwrap_err();
+        assert!(err.message.contains("本地修改与目标分支冲突"));
+        assert_eq!(git(root, &["branch", "--show-current"]).1.trim(), "main");
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "two");
     }
 
@@ -3482,7 +2755,7 @@ mod tests {
         assert_eq!(git(root, &["branch", "other"]).0, 0);
         // 本地删除 a.txt（other 未触及）→ 切换成功且删除携带
         std::fs::remove_file(root.join("a.txt")).unwrap();
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "other").unwrap();
         assert_eq!(st.branch, "other");
         assert!(!root.join("a.txt").exists());
         assert!(st.files.iter().any(|f| f.path == "a.txt"));
@@ -3506,7 +2779,7 @@ mod tests {
         assert_eq!(git(root, &["switch", "main"]).0, 0);
         // main 本地修改 a.txt，目标删除 → 拒绝
         std::fs::write(root.join("a.txt"), "local").unwrap();
-        let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
+        let err = git_switch(root.to_str().unwrap(), "other").unwrap_err();
         assert!(err.message.contains("本地修改与目标分支冲突"));
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "local");
     }
@@ -3528,7 +2801,7 @@ mod tests {
         assert_eq!(git(root, &["switch", "main"]).0, 0);
         // 本地也删除 a.txt → 双方一致，切换成功
         std::fs::remove_file(root.join("a.txt")).unwrap();
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "other").unwrap();
         assert_eq!(st.branch, "other");
         assert!(!root.join("a.txt").exists());
     }
@@ -3547,15 +2820,10 @@ mod tests {
         // 修改 a.txt 并暂存；other 分支未触及 → 切换后索引保留暂存内容
         std::fs::write(root.join("a.txt"), "staged").unwrap();
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "other").unwrap();
         assert_eq!(st.branch, "other");
-        let repo = open_repo(root.to_str().unwrap()).unwrap();
-        let index = repo.index_or_empty().unwrap();
-        let entry = index
-            .entry_by_path(BStr::new("a.txt"))
-            .expect("a.txt 应在索引中");
-        let blob = repo.find_object(entry.id).unwrap();
-        assert_eq!(String::from_utf8_lossy(&blob.data), "staged");
+        let (_, blob, _) = git(root, &["show", ":a.txt"]);
+        assert_eq!(blob, "staged");
     }
 
     #[test]
@@ -3577,7 +2845,7 @@ mod tests {
         assert_eq!(git(root, &["switch", "main"]).0, 0);
         // main 工作区出现未跟踪 x.txt，切换将覆盖 → 拒绝
         std::fs::write(root.join("x.txt"), "local").unwrap();
-        let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
+        let err = git_switch(root.to_str().unwrap(), "other").unwrap_err();
         assert!(err.message.contains("未跟踪文件将被覆盖"));
     }
 
@@ -3601,12 +2869,12 @@ mod tests {
         assert_eq!(git(root, &["switch", "main"]).0, 0);
 
         // 进程内切换到 other：docs 目录不应被误判为未跟踪文件
-        let st = switch_branch_sync(root.to_str().unwrap(), "other").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "other").unwrap();
         assert_eq!(st.branch, "other");
         assert_eq!(std::fs::read_to_string(root.join("docs/a.txt")).unwrap(), "two");
 
         // 切回 main
-        let st = switch_branch_sync(root.to_str().unwrap(), "main").unwrap();
+        let st = git_switch(root.to_str().unwrap(), "main").unwrap();
         assert_eq!(st.branch, "main");
         assert_eq!(std::fs::read_to_string(root.join("docs/a.txt")).unwrap(), "one");
     }
@@ -3632,7 +2900,7 @@ mod tests {
         // main 工作区出现未跟踪 newdir/x.txt，切换将覆盖 → 拒绝
         std::fs::create_dir_all(root.join("newdir")).unwrap();
         std::fs::write(root.join("newdir/x.txt"), "local").unwrap();
-        let err = switch_branch_sync(root.to_str().unwrap(), "other").unwrap_err();
+        let err = git_switch(root.to_str().unwrap(), "other").unwrap_err();
         assert!(err.message.contains("未跟踪文件将被覆盖"));
         assert!(err.message.contains("newdir/x.txt"));
     }
@@ -3642,10 +2910,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
         // 暂存 → added 且 staged=true
-        let st = stage_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let st = git_add(root.to_str().unwrap(), "c.txt").unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "c.txt");
         assert_eq!(st.files[0].status, FileStatus::Added);
@@ -3653,7 +2921,7 @@ mod tests {
         assert!(!st.files[0].worktree);
 
         // 取消暂存 → 回到 untracked 且 staged=false，工作区内容保留
-        let st = unstage_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let st = git_unstage(root.to_str().unwrap(), "c.txt").unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "c.txt");
         assert_eq!(st.files[0].status, FileStatus::Untracked);
@@ -3674,13 +2942,13 @@ mod tests {
         init_committed_repo(root);
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
 
-        let st = stage_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        let st = git_add(root.to_str().unwrap(), "a.txt").unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].status, FileStatus::Modified);
         assert!(st.files[0].staged);
         assert!(!st.files[0].worktree);
 
-        let st = unstage_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        let st = git_unstage(root.to_str().unwrap(), "a.txt").unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].status, FileStatus::Modified);
         assert!(!st.files[0].staged);
@@ -3700,7 +2968,7 @@ mod tests {
         init_committed_repo(root);
         std::fs::remove_file(root.join("a.txt")).unwrap();
 
-        let st = stage_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        let st = git_add(root.to_str().unwrap(), "a.txt").unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
         assert_eq!(st.files[0].status, FileStatus::Deleted);
@@ -3724,7 +2992,7 @@ mod tests {
         std::fs::write(root.join("new.txt"), "hello\n").unwrap();
         std::fs::remove_file(root.join("c.txt")).unwrap();
 
-        let st = stage_all_sync(root.to_str().unwrap()).unwrap();
+        let st = git_add_all(root.to_str().unwrap()).unwrap();
         assert_eq!(st.files.len(), 3);
         for f in &st.files {
             assert!(f.staged, "{} 应已暂存", f.path);
@@ -3755,10 +3023,10 @@ mod tests {
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
         std::fs::write(root.join("new.txt"), "hello\n").unwrap();
 
-        let st = stage_all_sync(root.to_str().unwrap()).unwrap();
+        let st = git_add_all(root.to_str().unwrap()).unwrap();
         assert!(st.files.iter().all(|f| f.staged));
 
-        let st = unstage_all_sync(root.to_str().unwrap()).unwrap();
+        let st = git_unstage_all(root.to_str().unwrap()).unwrap();
         assert_eq!(st.files.len(), 2);
         for f in &st.files {
             assert!(!f.staged, "{} 应已取消暂存", f.path);
@@ -3780,8 +3048,8 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         init_committed_repo(root);
 
-        assert!(stage_all_sync(root.to_str().unwrap()).unwrap().files.is_empty());
-        assert!(unstage_all_sync(root.to_str().unwrap())
+        assert!(git_add_all(root.to_str().unwrap()).unwrap().files.is_empty());
+        assert!(git_unstage_all(root.to_str().unwrap())
             .unwrap()
             .files
             .is_empty());
@@ -3802,7 +3070,7 @@ mod tests {
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
         std::fs::write(root.join("a.txt"), "three\n").unwrap();
 
-        let st = restore_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        let st = git_restore(root.to_str().unwrap(), "a.txt").unwrap();
         assert!(st.files.is_empty());
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "one\n");
     }
@@ -3812,9 +3080,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        let st = restore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let st = git_restore(root.to_str().unwrap(), "c.txt").unwrap();
         assert!(st.files.is_empty());
         assert!(!root.join("c.txt").exists());
     }
@@ -3833,7 +3101,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
 
-        let st = delete_sync(root.to_str().unwrap(), "a.txt").unwrap();
+        let st = git_rm(root.to_str().unwrap(), "a.txt").unwrap();
         // 等价 git rm：删除工作区文件并在暂存区记录删除
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "a.txt");
@@ -3848,9 +3116,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        let st = ignore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let st = git_ignore(root.to_str().unwrap(), "c.txt").unwrap();
         // c.txt 已被忽略，仅 .gitignore 自身作为新文件出现
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, ".gitignore");
@@ -3860,7 +3128,7 @@ mod tests {
         assert_eq!(ig, "/c.txt\n");
 
         // 重复忽略幂等：条目不重复
-        let _ = ignore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let _ = git_ignore(root.to_str().unwrap(), "c.txt").unwrap();
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(ig, "/c.txt\n");
     }
@@ -3872,9 +3140,9 @@ mod tests {
         std::fs::write(root.join("c.txt"), "hello\n").unwrap();
         std::fs::write(root.join("d.txt"), "world\n").unwrap();
         std::fs::write(root.join(".gitignore"), "*.log").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        let st = ignore_sync(root.to_str().unwrap(), "c.txt").unwrap();
+        let st = git_ignore(root.to_str().unwrap(), "c.txt").unwrap();
         // c.txt 被忽略；d.txt 与 .gitignore 仍为未跟踪
         let mut paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
         paths.sort();
@@ -3888,28 +3156,28 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "x").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        assert!(stage_sync(root.to_str().unwrap(), "../outside").is_err());
-        assert!(stage_sync(root.to_str().unwrap(), r"C:\outside").is_err());
-        assert!(stage_sync(root.to_str().unwrap(), "node_modules/x.js").is_err());
-        assert!(stage_sync(root.to_str().unwrap(), ".git/config").is_err());
-        assert!(restore_sync(root.to_str().unwrap(), "a/../b").is_err());
-        assert!(delete_sync(root.to_str().unwrap(), "/abs").is_err());
-        assert!(ignore_sync(root.to_str().unwrap(), "").is_err());
+        assert!(git_add(root.to_str().unwrap(), "../outside").is_err());
+        assert!(git_add(root.to_str().unwrap(), r"C:\outside").is_err());
+        assert!(git_add(root.to_str().unwrap(), "node_modules/x.js").is_err());
+        assert!(git_add(root.to_str().unwrap(), ".git/config").is_err());
+        assert!(git_restore(root.to_str().unwrap(), "a/../b").is_err());
+        assert!(git_rm(root.to_str().unwrap(), "/abs").is_err());
+        assert!(git_ignore(root.to_str().unwrap(), "").is_err());
     }
 
     #[test]
-    fn diff_sync_rejects_unsafe_paths() {
+    fn git_diff_rejects_unsafe_paths() {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "x").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        assert!(diff_sync(root.to_str().unwrap(), "../outside.txt", "modified").is_err());
-        assert!(diff_sync(root.to_str().unwrap(), r"C:\outside.txt", "modified").is_err());
-        assert!(diff_sync(root.to_str().unwrap(), "node_modules/x.js", "modified").is_err());
-        assert!(diff_sync(root.to_str().unwrap(), "a/../b", "modified").is_err());
+        assert!(git_diff(root.to_str().unwrap(), "../outside.txt", "modified").is_err());
+        assert!(git_diff(root.to_str().unwrap(), r"C:\outside.txt", "modified").is_err());
+        assert!(git_diff(root.to_str().unwrap(), "node_modules/x.js", "modified").is_err());
+        assert!(git_diff(root.to_str().unwrap(), "a/../b", "modified").is_err());
     }
 
     #[test]
@@ -3934,7 +3202,7 @@ mod tests {
         let (code, _, _) = git(root, &["merge", "side"]);
         assert_ne!(code, 0, "merge 应产生冲突");
 
-        let err = commit_sync(root.to_str().unwrap(), "msg").unwrap_err();
+        let err = git_commit(root.to_str().unwrap(), "msg").unwrap_err();
         assert!(err.message.contains("冲突"));
     }
 
@@ -3943,10 +3211,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "x").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
         std::fs::write(root.join("big.bin"), vec![0u8; MAX_FILE_BYTES as usize + 1]).unwrap();
-        let err = stage_sync(root.to_str().unwrap(), "big.bin").unwrap_err();
+        let err = git_add(root.to_str().unwrap(), "big.bin").unwrap_err();
         assert!(err.message.contains("文件过大"));
     }
 
@@ -3966,7 +3234,7 @@ mod tests {
         std::fs::write(root.join("newdir/sub/b.txt"), "y\n").unwrap();
         std::fs::write(root.join("newdir/x.log"), "ignored\n").unwrap();
 
-        let st = stage_sync(root.to_str().unwrap(), "newdir").unwrap();
+        let st = git_add(root.to_str().unwrap(), "newdir").unwrap();
         let mut by_path: Vec<(String, FileStatus, bool, bool)> = st
             .files
             .iter()
@@ -3997,9 +3265,8 @@ mod tests {
             ]
         );
         // 已忽略文件不应被加入索引
-        let repo = open_repo(root.to_str().unwrap()).unwrap();
-        let index = repo.index_or_empty().unwrap();
-        assert!(index.entry_by_path(BStr::new("newdir/x.log")).is_none());
+        let (_, ls, _) = git(root, &["ls-files"]);
+        assert!(!ls.contains("x.log"), "已忽略文件不应被加入索引: {ls}");
     }
 
     #[test]
@@ -4017,7 +3284,7 @@ mod tests {
         std::fs::write(root.join("src/a.txt"), "x\n").unwrap();
         std::fs::write(root.join("src2/b.txt"), "y\n").unwrap();
 
-        let st = stage_sync(root.to_str().unwrap(), "src").unwrap();
+        let st = git_add(root.to_str().unwrap(), "src").unwrap();
         let mut by_path: Vec<(String, FileStatus, bool, bool)> = st
             .files
             .iter()
@@ -4053,12 +3320,12 @@ mod tests {
         std::fs::write(root.join("src/a.txt"), "two\n").unwrap();
         std::fs::write(root.join("src/b.txt"), "two\n").unwrap();
 
-        let st = stage_sync(root.to_str().unwrap(), "src").unwrap();
+        let st = git_add(root.to_str().unwrap(), "src").unwrap();
         assert_eq!(st.files.len(), 2);
         assert!(st.files.iter().all(|f| f.staged));
         assert!(st.files.iter().all(|f| !f.worktree));
 
-        let st = unstage_sync(root.to_str().unwrap(), "src").unwrap();
+        let st = git_unstage(root.to_str().unwrap(), "src").unwrap();
         assert_eq!(st.files.len(), 2);
         assert!(st.files.iter().all(|f| !f.staged));
         assert!(st.files.iter().all(|f| f.worktree));
@@ -4082,7 +3349,7 @@ mod tests {
         std::fs::remove_file(root.join("src/b.txt")).unwrap();
         std::fs::write(root.join("src/c.txt"), "new\n").unwrap();
 
-        let st = restore_sync(root.to_str().unwrap(), "src").unwrap();
+        let st = git_restore(root.to_str().unwrap(), "src").unwrap();
         assert!(st.files.is_empty());
         assert_eq!(std::fs::read_to_string(root.join("src/a.txt")).unwrap(), "one\n");
         assert_eq!(std::fs::read_to_string(root.join("src/b.txt")).unwrap(), "one\n");
@@ -4095,9 +3362,9 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join("newdir")).unwrap();
         std::fs::write(root.join("newdir/a.txt"), "x\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        let st = ignore_sync(root.to_str().unwrap(), "newdir").unwrap();
+        let st = git_ignore(root.to_str().unwrap(), "newdir").unwrap();
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, ".gitignore");
         assert!(!st.files[0].staged);
@@ -4106,7 +3373,7 @@ mod tests {
         assert_eq!(ig, "/newdir/\n");
 
         // 重复忽略幂等
-        let _ = ignore_sync(root.to_str().unwrap(), "newdir").unwrap();
+        let _ = git_ignore(root.to_str().unwrap(), "newdir").unwrap();
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(ig, "/newdir/\n");
     }
@@ -4117,9 +3384,9 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join("newdir")).unwrap();
         std::fs::write(root.join("newdir/a.txt"), "x\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
 
-        let err = delete_sync(root.to_str().unwrap(), "newdir").unwrap_err();
+        let err = git_rm(root.to_str().unwrap(), "newdir").unwrap_err();
         assert!(err.message.contains("不支持删除目录"));
     }
 
@@ -4140,7 +3407,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
 
-        let st = commit_sync(root.to_str().unwrap(), "feat: update a").unwrap();
+        let st = git_commit(root.to_str().unwrap(), "feat: update a").unwrap();
         assert!(st.files.iter().all(|f| !f.staged));
         assert_eq!(st.files.len(), 1);
         assert_eq!(st.files[0].path, "c.txt");
@@ -4163,12 +3430,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "hello\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
         assert_eq!(git(root, &["config", "user.name", "t"]).0, 0);
         assert_eq!(git(root, &["config", "user.email", "t@t"]).0, 0);
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
 
-        let st = commit_sync(root.to_str().unwrap(), "first").unwrap();
+        let st = git_commit(root.to_str().unwrap(), "first").unwrap();
         assert!(st.files.is_empty());
         assert_eq!(git(root, &["log", "-1", "--format=%s"]).1.trim(), "first");
     }
@@ -4178,8 +3445,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "x").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
-        let err = commit_sync(root.to_str().unwrap(), "   ").unwrap_err();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
+        let err = git_commit(root.to_str().unwrap(), "   ").unwrap_err();
         assert!(err.message.contains("提交消息不能为空"));
     }
 
@@ -4194,7 +3461,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
         init_committed_repo(root);
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
-        let err = commit_sync(root.to_str().unwrap(), "msg").unwrap_err();
+        let err = git_commit(root.to_str().unwrap(), "msg").unwrap_err();
         assert!(err.message.contains("没有已暂存的更改"));
     }
 
@@ -4204,7 +3471,7 @@ mod tests {
             eprintln!("skip: 未安装 git");
             return;
         }
-        // gix 会按 git 规则回退到全局/系统配置与身份环境变量；存在可解析身份时
+        // git 会按规则回退到全局/系统配置与身份环境变量；存在可解析身份时
         // 无法构造“缺失”场景，优雅跳过，避免屏蔽全局配置的正当回退行为。
         let dir_probe = TempDir::new().unwrap();
         let probe = dir_probe.path();
@@ -4223,7 +3490,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "x\n").unwrap();
         assert_eq!(git(root, &["init", "-b", "main"]).0, 0);
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
-        let err = commit_sync(root.to_str().unwrap(), "msg").unwrap_err();
+        let err = git_commit(root.to_str().unwrap(), "msg").unwrap_err();
         assert!(err.message.contains("user.name"));
     }
 
@@ -4273,7 +3540,7 @@ mod tests {
             0
         );
 
-        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_pull(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "fast_forward");
         assert!(res.status.files.is_empty());
         assert_eq!(
@@ -4307,7 +3574,7 @@ mod tests {
         );
 
         let before_head = git(work2.path(), &["rev-parse", "HEAD"]).1;
-        let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
+        let err = git_pull(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("分叉"), "actual: {}", err.message);
         // ff-only 拒绝后不留任何冲突/合并残留
         assert_eq!(git(work2.path(), &["rev-parse", "HEAD"]).1, before_head);
@@ -4335,7 +3602,7 @@ mod tests {
         );
         // work2 未暂存修改同一文件 → 重叠拒绝
         std::fs::write(work2.path().join("a.txt"), "dirty\n").unwrap();
-        let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
+        let err = git_pull(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("会被拉取覆盖"));
         // 拒绝后工作区与 HEAD 不变
         assert_eq!(
@@ -4367,14 +3634,14 @@ mod tests {
         std::fs::write(work2.path().join("a.txt"), "staged\n").unwrap();
         assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
         let before_head = git(work2.path(), &["rev-parse", "HEAD"]).1;
-        let err = pull_sync(work2.path().to_str().unwrap()).unwrap_err();
+        let err = git_pull(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("会被拉取覆盖"));
         assert_eq!(
             std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
             "staged\n"
         );
         assert_eq!(git(work2.path(), &["rev-parse", "HEAD"]).1, before_head);
-        let st = status_sync(work2.path().to_str().unwrap()).unwrap();
+        let st = git_status(work2.path().to_str().unwrap()).unwrap();
         let a = st.files.iter().find(|f| f.path == "a.txt").unwrap();
         assert!(a.staged);
     }
@@ -4400,7 +3667,7 @@ mod tests {
         std::fs::write(work2.path().join("b.txt"), "staged\n").unwrap();
         assert_eq!(git(work2.path(), &["add", "b.txt"]).0, 0);
 
-        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_pull(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "fast_forward");
         assert_eq!(
             std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
@@ -4442,7 +3709,7 @@ mod tests {
         // 未跟踪文件也应放行并保留
         std::fs::write(work2.path().join("c.txt"), "untracked\n").unwrap();
 
-        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_pull(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "fast_forward");
         assert_eq!(
             std::fs::read_to_string(work2.path().join("a.txt")).unwrap(),
@@ -4485,7 +3752,7 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let res = pull_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_pull(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "up_to_date");
         assert!(res.status.files.is_empty());
     }
@@ -4501,7 +3768,7 @@ mod tests {
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
 
-        let err = pull_sync_with_git(
+        let err = git_pull_with(
             Path::new("definitely-missing-git-binary-xyz"),
             work2.path().to_str().unwrap(),
         )
@@ -4523,7 +3790,7 @@ mod tests {
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
 
-        let err = pull_sync(work.path().to_str().unwrap()).unwrap_err();
+        let err = git_pull(work.path().to_str().unwrap()).unwrap_err();
         assert!(
             err.message.contains("未找到可用的远端"),
             "actual: {}",
@@ -4549,7 +3816,7 @@ mod tests {
         assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
         assert_eq!(git(work2.path(), &["commit", "-m", "v2"]).0, 0);
 
-        let res = push_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_push(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "pushed");
         assert!(res.message.contains("已推送到"));
         // bare 远端 main 已指向 work2 HEAD
@@ -4577,9 +3844,9 @@ mod tests {
         std::fs::write(work2.path().join("a.txt"), "v2\n").unwrap();
         assert_eq!(git(work2.path(), &["add", "a.txt"]).0, 0);
         assert_eq!(git(work2.path(), &["commit", "-m", "v2"]).0, 0);
-        assert_eq!(push_sync(work2.path().to_str().unwrap()).unwrap().kind, "pushed");
+        assert_eq!(git_push(work2.path().to_str().unwrap()).unwrap().kind, "pushed");
 
-        let res = push_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_push(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.kind, "up_to_date");
         assert!(res.message.contains("已是最新"));
     }
@@ -4607,7 +3874,7 @@ mod tests {
         assert_eq!(git(work2.path(), &["add", "b.txt"]).0, 0);
         assert_eq!(git(work2.path(), &["commit", "-m", "local"]).0, 0);
 
-        let err = push_sync(work2.path().to_str().unwrap()).unwrap_err();
+        let err = git_push(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("先拉取"), "actual: {}", err.message);
     }
 
@@ -4623,7 +3890,7 @@ mod tests {
         setup_pull_repo(bare.path(), work1.path(), work2.path());
         assert_eq!(git(work2.path(), &["checkout", "--detach"]).0, 0);
 
-        let err = push_sync(work2.path().to_str().unwrap()).unwrap_err();
+        let err = git_push(work2.path().to_str().unwrap()).unwrap_err();
         assert!(err.message.contains("游离"), "actual: {}", err.message);
     }
 
@@ -4637,7 +3904,7 @@ mod tests {
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
 
-        let err = push_sync(work.path().to_str().unwrap()).unwrap_err();
+        let err = git_push(work.path().to_str().unwrap()).unwrap_err();
         assert!(
             err.message.contains("未找到可用的远端"),
             "actual: {}",
@@ -4656,7 +3923,7 @@ mod tests {
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
 
-        let err = push_sync_with_git(
+        let err = git_push_with(
             Path::new("definitely-missing-git-binary-xyz"),
             work2.path().to_str().unwrap(),
         )
@@ -4674,7 +3941,7 @@ mod tests {
             eprintln!("skip: 未安装 git");
             return;
         }
-        assert!(find_git().is_some());
+        assert!(locate_git().is_some());
     }
 
     // ---------- 远端管理 ----------
@@ -4695,7 +3962,7 @@ mod tests {
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
 
-        let res = remotes_sync(work2.path().to_str().unwrap()).unwrap();
+        let res = git_remote(work2.path().to_str().unwrap()).unwrap();
         assert_eq!(res.remotes.len(), 1);
         assert_eq!(res.remotes[0].name, "origin");
         let bare_url = bare.path().to_string_lossy();
@@ -4720,7 +3987,7 @@ mod tests {
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
 
-        let res = remotes_sync(work.path().to_str().unwrap()).unwrap();
+        let res = git_remote(work.path().to_str().unwrap()).unwrap();
         assert!(res.remotes.is_empty());
         assert_eq!(res.current, None);
     }
@@ -4735,10 +4002,10 @@ mod tests {
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
         let bare = TempDir::new().unwrap();
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let url = bare.path().to_string_lossy();
 
-        let res = remote_add_sync_with_git(
+        let res = git_remote_add_with(
             &git_bin,
             work.path().to_str().unwrap(),
             "upstream",
@@ -4767,9 +4034,9 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_add_sync_with_git(
+        let err = git_remote_add_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin",
@@ -4788,12 +4055,12 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let root = work.path().to_str().unwrap();
 
-        let err = remote_add_sync_with_git(&git_bin, root, "bad name", "https://x").unwrap_err();
+        let err = git_remote_add_with(&git_bin, root, "bad name", "https://x").unwrap_err();
         assert!(err.message.contains("远端名"), "actual: {}", err.message);
-        let err = remote_add_sync_with_git(&git_bin, root, "up", "  ").unwrap_err();
+        let err = git_remote_add_with(&git_bin, root, "up", "  ").unwrap_err();
         assert!(err.message.contains("远端地址"), "actual: {}", err.message);
     }
 
@@ -4807,19 +4074,19 @@ mod tests {
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
         let bare = TempDir::new().unwrap();
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let root = work.path().to_str().unwrap();
         let url = bare.path().to_string_lossy();
         let url2 = format!("{}/mirror", url);
         assert_eq!(
-            remote_add_sync_with_git(&git_bin, root, "origin", &url)
+            git_remote_add_with(&git_bin, root, "origin", &url)
                 .unwrap()
                 .remotes
                 .len(),
             1
         );
 
-        let res = remote_set_url_sync_with_git(&git_bin, root, "origin", &url2).unwrap();
+        let res = git_remote_set_url_with(&git_bin, root, "origin", &url2).unwrap();
         assert_eq!(
             norm_url(res.remotes[0].fetch_url.as_deref().unwrap_or_default()),
             norm_url(&url2)
@@ -4838,9 +4105,9 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_set_url_sync_with_git(
+        let err = git_remote_set_url_with(
             &git_bin,
             work.path().to_str().unwrap(),
             "nope",
@@ -4860,18 +4127,18 @@ mod tests {
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
         let bare = TempDir::new().unwrap();
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let root = work.path().to_str().unwrap();
         let url = bare.path().to_string_lossy();
         assert_eq!(
-            remote_add_sync_with_git(&git_bin, root, "origin", &url)
+            git_remote_add_with(&git_bin, root, "origin", &url)
                 .unwrap()
                 .remotes
                 .len(),
             1
         );
 
-        let res = remote_remove_sync_with_git(&git_bin, root, "origin").unwrap();
+        let res = git_remote_remove_with(&git_bin, root, "origin").unwrap();
         assert!(res.remotes.is_empty());
         let (code, _, _) = git(work.path(), &["config", "--get", "remote.origin.url"]);
         assert_ne!(code, 0, "删除后 remote.origin.url 不应再存在");
@@ -4886,9 +4153,9 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_remove_sync_with_git(
+        let err = git_remote_remove_with(
             &git_bin,
             work.path().to_str().unwrap(),
             "nope",
@@ -4907,14 +4174,14 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let root = work2.path().to_str().unwrap();
         assert_eq!(
-            remotes_sync(root).unwrap().current.as_deref(),
+            git_remote(root).unwrap().current.as_deref(),
             Some("origin")
         );
 
-        let res = remote_remove_sync_with_git(&git_bin, root, "origin").unwrap();
+        let res = git_remote_remove_with(&git_bin, root, "origin").unwrap();
         assert!(res.remotes.is_empty());
         assert_eq!(res.current, None);
     }
@@ -4930,7 +4197,7 @@ mod tests {
         init_committed_repo(work.path());
         let missing = Path::new("definitely-missing-git-binary-xyz");
 
-        let err = remote_add_sync_with_git(missing, work.path().to_str().unwrap(), "up", "https://x")
+        let err = git_remote_add_with(missing, work.path().to_str().unwrap(), "up", "https://x")
             .unwrap_err();
         assert!(err.message.contains("未检测到系统 git"), "actual: {}", err.message);
     }
@@ -4967,7 +4234,7 @@ mod tests {
         push_remote_branch(work1.path(), bare.path(), "dev");
         assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
 
-        let bs = branches_sync(work2.path().to_str().unwrap()).unwrap();
+        let bs = git_branch(work2.path().to_str().unwrap()).unwrap();
         assert!(bs.remote_branches.contains(&"origin/main".to_string()));
         assert!(bs.remote_branches.contains(&"origin/dev".to_string()));
         assert_eq!(bs.current_upstream.as_deref(), Some("origin/main"));
@@ -4984,15 +4251,15 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let root = work2.path().to_str().unwrap();
-        assert!(!branches_sync(root).unwrap().remote_branches.contains(&"origin/dev".to_string()));
+        assert!(!git_branch(root).unwrap().remote_branches.contains(&"origin/dev".to_string()));
 
         push_remote_branch(work1.path(), bare.path(), "dev");
-        let res = remote_fetch_sync_with_git(&git_bin, root, "origin").unwrap();
+        let res = git_fetch_with(&git_bin, root, "origin").unwrap();
         assert!(res.remote_branches.contains(&"origin/dev".to_string()));
         // remote 为空：取默认远端（origin）
-        let res2 = remote_fetch_sync_with_git(&git_bin, root, "").unwrap();
+        let res2 = git_fetch_with(&git_bin, root, "").unwrap();
         assert!(res2.remote_branches.contains(&"origin/dev".to_string()));
     }
 
@@ -5005,7 +4272,7 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let err = remote_fetch_sync_with_git(
+        let err = git_fetch_with(
             Path::new("definitely-missing-git-binary-xyz"),
             work.path().to_str().unwrap(),
             "origin",
@@ -5026,9 +4293,9 @@ mod tests {
         setup_pull_repo(bare.path(), work1.path(), work2.path());
         push_remote_branch(work1.path(), bare.path(), "dev");
         assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let st = branch_checkout_remote_sync_with_git(
+        let st = git_checkout_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin/dev",
@@ -5040,7 +4307,7 @@ mod tests {
         assert_eq!(remote.trim(), "origin");
         let (_, merge, _) = git(work2.path(), &["config", "branch.dev.merge"]);
         assert_eq!(merge.trim(), "refs/heads/dev");
-        let bs = branches_sync(work2.path().to_str().unwrap()).unwrap();
+        let bs = git_branch(work2.path().to_str().unwrap()).unwrap();
         assert!(bs.branches.contains(&"dev".to_string()));
         assert_eq!(bs.current_upstream.as_deref(), Some("origin/dev"));
     }
@@ -5058,9 +4325,9 @@ mod tests {
         push_remote_branch(work1.path(), bare.path(), "dev");
         assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
         assert_eq!(git(work2.path(), &["branch", "dev"]).0, 0);
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = branch_checkout_remote_sync_with_git(
+        let err = git_checkout_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin/dev",
@@ -5079,9 +4346,9 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = branch_checkout_remote_sync_with_git(
+        let err = git_checkout_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin/nope",
@@ -5099,7 +4366,7 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let err = branch_checkout_remote_sync_with_git(
+        let err = git_checkout_with(
             Path::new("definitely-missing-git-binary-xyz"),
             work.path().to_str().unwrap(),
             "origin/dev",
@@ -5120,9 +4387,9 @@ mod tests {
         setup_pull_repo(bare.path(), work1.path(), work2.path());
         push_remote_branch(work1.path(), bare.path(), "dev");
         assert_eq!(git(work2.path(), &["fetch", "origin"]).0, 0);
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let res = remote_branch_delete_sync_with_git(
+        let res = git_push_delete_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin/dev",
@@ -5143,9 +4410,9 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_branch_delete_sync_with_git(
+        let err = git_push_delete_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin/nope",
@@ -5163,7 +4430,7 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let err = remote_branch_delete_sync_with_git(
+        let err = git_push_delete_with(
             Path::new("definitely-missing-git-binary-xyz"),
             work.path().to_str().unwrap(),
             "origin/main",
@@ -5181,14 +4448,14 @@ mod tests {
         let work = TempDir::new().unwrap();
         std::fs::write(work.path().join("a.txt"), "x\n").unwrap();
         init_committed_repo(work.path());
-        let st = status_sync(work.path().to_str().unwrap()).unwrap();
+        let st = git_status(work.path().to_str().unwrap()).unwrap();
         assert!(!st.has_remote);
 
         let bare = TempDir::new().unwrap();
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let st = status_sync(work2.path().to_str().unwrap()).unwrap();
+        let st = git_status(work2.path().to_str().unwrap()).unwrap();
         assert!(st.has_remote);
     }
 
@@ -5208,7 +4475,7 @@ mod tests {
             git(work1.path(), &["clone", "--bare", ".", bare2.path().to_str().unwrap()]).0,
             0
         );
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
         let root = work2.path().to_str().unwrap();
         assert_eq!(
             git(work2.path(), &["remote", "add", "upstream", bare2.path().to_str().unwrap()]).0,
@@ -5216,7 +4483,7 @@ mod tests {
         );
         assert_eq!(git(work2.path(), &["fetch", "upstream"]).0, 0);
 
-        let res = remote_switch_upstream_sync_with_git(&git_bin, root, "upstream").unwrap();
+        let res = git_set_upstream_with(&git_bin, root, "upstream").unwrap();
         assert_eq!(res.current.as_deref(), Some("upstream"));
         let (_, remote, _) = git(work2.path(), &["config", "branch.main.remote"]);
         assert_eq!(remote.trim(), "upstream");
@@ -5235,9 +4502,9 @@ mod tests {
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
         assert_eq!(git(work2.path(), &["checkout", "--detach"]).0, 0);
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_switch_upstream_sync_with_git(
+        let err = git_set_upstream_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "origin",
@@ -5263,9 +4530,9 @@ mod tests {
             0
         );
         assert_eq!(git(work2.path(), &["fetch", "up"]).0, 0);
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_switch_upstream_sync_with_git(
+        let err = git_set_upstream_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "up",
@@ -5288,9 +4555,9 @@ mod tests {
         let work1 = TempDir::new().unwrap();
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
-        let git_bin = find_git().unwrap();
+        let git_bin = locate_git().unwrap();
 
-        let err = remote_switch_upstream_sync_with_git(
+        let err = git_set_upstream_with(
             &git_bin,
             work2.path().to_str().unwrap(),
             "nope",
@@ -5310,7 +4577,7 @@ mod tests {
         let work2 = TempDir::new().unwrap();
         setup_pull_repo(bare.path(), work1.path(), work2.path());
 
-        let err = remote_switch_upstream_sync_with_git(
+        let err = git_set_upstream_with(
             Path::new("definitely-missing-git-binary-xyz"),
             work2.path().to_str().unwrap(),
             "origin",
@@ -5342,7 +4609,7 @@ mod tests {
         let root = dir.path();
         setup_merge_repo(root);
 
-        let res = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        let res = git_merge(root.to_str().unwrap(), "feature").unwrap();
         assert_eq!(res.kind, "fast_forward");
         assert!(res.status.files.is_empty());
         // feature 新增的文件进入工作区，main 快进到 feature 提交
@@ -5364,7 +4631,7 @@ mod tests {
         assert_eq!(git(root, &["add", "c.txt"]).0, 0);
         assert_eq!(git(root, &["commit", "-m", "main-side"]).0, 0);
 
-        let res = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        let res = git_merge(root.to_str().unwrap(), "feature").unwrap();
         assert_eq!(res.kind, "merged");
         assert!(res.status.files.is_empty());
         // 双方内容都在
@@ -5374,7 +4641,7 @@ mod tests {
         let head_subject = git(root, &["log", "-1", "--format=%s"]).1;
         assert!(head_subject.contains("Merge branch 'feature'"));
         // 合并后再次合并 → up to date
-        let res = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap();
+        let res = git_merge(root.to_str().unwrap(), "feature").unwrap();
         assert_eq!(res.kind, "up_to_date");
     }
 
@@ -5400,7 +4667,7 @@ mod tests {
         assert_eq!(git(root, &["commit", "-m", "main-side"]).0, 0);
 
         let before_head = git(root, &["rev-parse", "HEAD"]).1;
-        let err = merge_branch_sync(root.to_str().unwrap(), "side").unwrap_err();
+        let err = git_merge(root.to_str().unwrap(), "side").unwrap_err();
         assert!(err.message.contains("冲突"));
         assert!(err.message.contains("a.txt"));
         // 中止后工作区与 HEAD 不变
@@ -5420,14 +4687,14 @@ mod tests {
         setup_merge_repo(root);
 
         // 不能合并当前分支到自身
-        let err = merge_branch_sync(root.to_str().unwrap(), "main").unwrap_err();
+        let err = git_merge(root.to_str().unwrap(), "main").unwrap_err();
         assert!(err.message.contains("自身"));
         // 不存在的分支
-        let err = merge_branch_sync(root.to_str().unwrap(), "nope").unwrap_err();
+        let err = git_merge(root.to_str().unwrap(), "nope").unwrap_err();
         assert!(err.message.contains("不存在"));
         // 游离 HEAD 无法合并
         assert_eq!(git(root, &["checkout", "--detach", "main"]).0, 0);
-        let err = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap_err();
+        let err = git_merge(root.to_str().unwrap(), "feature").unwrap_err();
         assert!(err.message.contains("游离 HEAD"));
         assert_eq!(git(root, &["checkout", "main"]).0, 0);
     }
@@ -5450,7 +4717,7 @@ mod tests {
         assert_eq!(git(root, &["checkout", "main"]).0, 0);
         std::fs::write(root.join("a.txt"), "dirty\n").unwrap();
 
-        let err = merge_branch_sync(root.to_str().unwrap(), "feature").unwrap_err();
+        let err = git_merge(root.to_str().unwrap(), "feature").unwrap_err();
         assert!(err.message.contains("会被合并覆盖"));
         assert!(err.message.contains("a.txt"));
         // 拒绝后工作区与 HEAD 不变
@@ -5475,7 +4742,7 @@ mod tests {
         assert_eq!(git(root, &["commit", "-m", "second"]).0, 0);
         assert_eq!(git(root, &["commit", "--allow-empty", "-m", "third"]).0, 0);
 
-        let log = commit_log_sync(root.to_str().unwrap(), 10, None).unwrap();
+        let log = git_log(root.to_str().unwrap(), 10, None).unwrap();
         assert_eq!(log.len(), 3);
         assert_eq!(log[0].subject, "third");
         assert_eq!(log[1].subject, "second");
@@ -5499,7 +4766,7 @@ mod tests {
         for i in 0..5 {
             assert_eq!(git(root, &["commit", "--allow-empty", "-m", &format!("c{i}")]).0, 0);
         }
-        let log = commit_log_sync(root.to_str().unwrap(), 3, None).unwrap();
+        let log = git_log(root.to_str().unwrap(), 3, None).unwrap();
         assert_eq!(log.len(), 3);
         assert_eq!(log[0].subject, "c4");
         assert_eq!(log[2].subject, "c2");
@@ -5510,8 +4777,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let root = dir.path();
         std::fs::write(root.join("a.txt"), "x\n").unwrap();
-        let _ = init_sync(root.to_str().unwrap()).unwrap();
-        let log = commit_log_sync(root.to_str().unwrap(), 10, None).unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
+        let log = git_log(root.to_str().unwrap(), 10, None).unwrap();
         assert!(log.is_empty());
     }
 
@@ -5529,25 +4796,25 @@ mod tests {
             assert_eq!(git(root, &["commit", "--allow-empty", "-m", &format!("c{i}")]).0, 0);
         }
         // 共 9 条：init、c0..c7（最新在前 c7..c0、init）
-        let first = commit_log_sync(root.to_str().unwrap(), 3, None).unwrap();
+        let first = git_log(root.to_str().unwrap(), 3, None).unwrap();
         assert_eq!(first.len(), 3);
         assert_eq!(first[0].subject, "c7");
         assert_eq!(first[2].subject, "c5");
         let second =
-            commit_log_sync(root.to_str().unwrap(), 3, Some(first[2].hash.clone())).unwrap();
+            git_log(root.to_str().unwrap(), 3, Some(first[2].hash.clone())).unwrap();
         assert_eq!(second.len(), 3);
         assert_eq!(second[0].subject, "c4");
         assert_eq!(second[2].subject, "c2");
         let third =
-            commit_log_sync(root.to_str().unwrap(), 3, Some(second[2].hash.clone())).unwrap();
+            git_log(root.to_str().unwrap(), 3, Some(second[2].hash.clone())).unwrap();
         assert_eq!(third.len(), 3);
         assert_eq!(third[0].subject, "c1");
         assert_eq!(third[2].subject, "init");
         // 游标为最后一条时返回空
-        let tail = commit_log_sync(root.to_str().unwrap(), 3, Some(third[2].hash.clone())).unwrap();
+        let tail = git_log(root.to_str().unwrap(), 3, Some(third[2].hash.clone())).unwrap();
         assert!(tail.is_empty());
         // 无效游标返回空，避免前端重复追加
-        let bogus = commit_log_sync(root.to_str().unwrap(), 3, Some("0".repeat(40))).unwrap();
+        let bogus = git_log(root.to_str().unwrap(), 3, Some("0".repeat(40))).unwrap();
         assert!(bogus.is_empty());
     }
 }

@@ -147,6 +147,9 @@ pub fn run() {
             codex::git::git_changes_watch_stop,
         ])
         .setup(|app| {
+            // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
+            codex::git::probe_git_at_startup();
+
             // 先读取已保存主题，再以对应背景色创建主窗口：
             // 窗口从创建那一刻起颜色即与主题一致，避免首帧错色/闪色（缺省按 blue）。
             let app_dir = app.path().app_data_dir().ok();
