@@ -127,8 +127,6 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     store.confirm = null;
     tabs.splice(0, tabs.length);
     __resetEditorTabsForTest();
-    store.currentThreadId = null;
-    store.taskMode = "execute";
   });
 
   it("无工作标签且无脏文件：不阻止关闭、不弹确认", async () => {

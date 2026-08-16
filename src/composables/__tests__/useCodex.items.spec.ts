@@ -2,7 +2,8 @@ import { resolveSessionWorkspace, workspace } from "../useCodex/items";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { refreshThreads, searchThreads } from "../useCodex/threads";
-import { resetUseCodexState } from "./useCodexTestHarness";
+import { activeTabId } from "../useEditorTabs";
+import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,31 +48,35 @@ describe("resolveSessionWorkspace 工作目录解析", () => {
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
   });
 
   it("有会话：取会话 cwd", () => {
-    store.currentThreadId = "t1";
-    store.currentThreadWorkspace = "D:/projects/other";
-    store.newChatWorkspace = "D:/projects/B";
+    __resetSessionTabsForTest();
+    tabs.push(
+      makeSessionTab("s1", "t1", { workspace: "D:/projects/other" }),
+    );
+    activeTabId.value = "s1";
     expect(resolveSessionWorkspace()).toBe("D:/projects/other");
   });
 
   it("有会话但 cwd 缺失：回退 workspace，不读残留的 newChatWorkspace", () => {
-    store.currentThreadId = "t1";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = "D:/projects/B";
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
     expect(resolveSessionWorkspace()).toBe("D:/repo");
   });
 
   it("无会话：优先 newChatWorkspace", () => {
-    store.newChatWorkspace = "D:/projects/B";
+    __resetSessionTabsForTest();
+    tabs.push(
+      makeSessionTab("s1", null, { newChatWorkspace: "D:/projects/B" }),
+    );
+    activeTabId.value = "s1";
     expect(resolveSessionWorkspace()).toBe("D:/projects/B");
   });
 
   it("全部为空时返回空串", () => {
+    __resetSessionTabsForTest();
     store.server.startupWorkspace = "";
     expect(resolveSessionWorkspace()).toBe("");
   });
@@ -81,20 +86,17 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
 
 
   it("workspace 计算：有活动标签覆盖时返回覆盖值，否则回落会话工作区", async () => {
-    store.currentThreadId = "t1";
-    store.currentThreadWorkspace = "D:/session";
+    __resetSessionTabsForTest();
+    tabs.push(
+      makeSessionTab("s1", "t1", { workspace: "D:/session" }),
+    );
+    activeTabId.value = "s1";
     store.server.startupWorkspace = "D:/startup";
     expect(workspace.value).toBe("D:/session");
 
@@ -104,8 +106,11 @@ describe("会话标签状态与事件路由", () => {
     store.workspace = null;
     expect(workspace.value).toBe("D:/session");
 
-    store.currentThreadId = null;
-    store.newChatWorkspace = "D:/newchat";
+    // 切到新建会话标签（无线程）：优先 newChatWorkspace
+    tabs.push(
+      makeSessionTab("s2", null, { newChatWorkspace: "D:/newchat" }),
+    );
+    activeTabId.value = "s2";
     expect(workspace.value).toBe("D:/newchat");
   });
 });
@@ -213,4 +218,3 @@ describe("历史全量加载（逐页拉取）", () => {
     });
   });
 });
-

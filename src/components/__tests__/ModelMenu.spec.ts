@@ -13,7 +13,15 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 
 import { invoke } from "@tauri-apps/api/core";
 import ModelMenu from "../ModelMenu.vue";
-import { loadModels, store } from "../../composables/useCodex";
+import {
+  activeSessionTab,
+  loadModels,
+  store,
+  type SessionTab,
+} from "../../composables/useCodex";
+import { activeTabId, tabs } from "../../composables/useEditorTabs";
+import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
+import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedLoadModels = vi.mocked(loadModels);
@@ -45,10 +53,15 @@ const OTHER_MODEL = {
 
 describe("ModelMenu 模型与推理强度", () => {
   beforeEach(() => {
+    __resetSessionTabsForTest();
+    tabs.push(
+      makeSessionTab("s1", "t1", {
+        model: "gpt-5.2-codex",
+        effort: "high",
+      }),
+    );
+    activeTabId.value = "s1";
     store.models = [DEFAULT_MODEL, OTHER_MODEL];
-    store.model = null;
-    store.effort = null;
-    store.currentThreadId = null;
     store.toast = "";
     mockedInvoke.mockReset();
     mockedLoadModels.mockReset();
@@ -74,9 +87,6 @@ describe("ModelMenu 模型与推理强度", () => {
   });
 
   it("应用模型/强度：有当前会话时立即同步 thread/settings/update", async () => {
-    store.currentThreadId = "t1";
-    store.model = "gpt-5.2-codex";
-    store.effort = "high";
     const w = mount(ModelMenu);
     await w.find("button.btn.primary").trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
@@ -87,8 +97,7 @@ describe("ModelMenu 模型与推理强度", () => {
   });
 
   it("选择默认模型后应用：model/effort 以 null 同步（恢复默认）", async () => {
-    store.currentThreadId = "t1";
-    store.model = "other-model";
+    (tabs[0] as SessionTab).effort = ""; // 默认模型支持档位不强制清空；初始无强度时应用 null
     const w = mount(ModelMenu);
     await w.findAll(".option-btn")[0].trigger("click"); // 默认模型行
     await w.find("button.btn.primary").trigger("click");
@@ -99,17 +108,16 @@ describe("ModelMenu 模型与推理强度", () => {
   });
 
   it("无当前会话时应用不调用 thread/settings/update", async () => {
-    store.model = "other-model";
+    (tabs[0] as SessionTab).threadId = null; // 编辑态新对话：本地生效但不同步服务端
     const w = mount(ModelMenu);
+    await w.findAll(".option-btn")[1].trigger("click"); // 选择其它模型
     await w.find("button.btn.primary").trigger("click");
     expect(mockedInvoke).not.toHaveBeenCalled();
-    expect(store.model).toBe("other-model");
+    expect(activeSessionTab()?.model).toBe("other-model");
     expect(w.emitted("close")).toBeTruthy();
   });
 
   it("同步失败时 toast 提示但仍关闭菜单", async () => {
-    store.currentThreadId = "t1";
-    store.model = "other-model";
     mockedInvoke.mockRejectedValue(new Error("同步失败"));
     const w = mount(ModelMenu);
     await w.find("button.btn.primary").trigger("click");

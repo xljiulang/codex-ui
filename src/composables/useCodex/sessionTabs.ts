@@ -1,10 +1,9 @@
 // useCodex 拆分模块：会话标签高层操作（原 useCodex.ts 的一部分，纯移动，行为不变）
-import { watch } from "vue";
 import { TabKind } from "../../lib/tabs";
 import type { UserInput } from "../../lib/types";
 import { activeTabId, activateTab, tabs } from "../useTabs";
 import { askConfirm } from "./confirm";
-import { activeSessionTab, allSessionTabs, markSessionTabStopped, syncActiveSessionTab } from "./sessionState";
+import { activeSessionTab, allSessionTabs, markSessionTabStopped } from "./sessionState";
 import { store } from "./store";
 import { interrupt } from "./turnControl";
 import type { SessionTab } from "./types";
@@ -119,25 +118,3 @@ export async function closeAllSessionTabs(): Promise<number> {
   }
   return skipped;
 }
-
-
-// 活动会话标签记录自动同步：live 字段（当前活动标签）的任何变化都落回标签记录，
-// 保证切走/切回时标签状态不丢失（消息列表本身按线程存于 itemsByThread，无需同步）。
-watch(
-  () => [
-    store.currentThreadId,
-    store.currentThreadName,
-    store.permissionMode,
-    store.taskMode,
-    store.model,
-    store.effort,
-    store.currentThreadOrigin,
-    store.currentThreadWorkspace,
-    store.resumedThreadId,
-    store.loading,
-    store.newChatWorkspace,
-    store.attachments.length,
-    store.threads.find((t) => t.id === store.currentThreadId)?.name,
-  ],
-  () => syncActiveSessionTab(),
-);

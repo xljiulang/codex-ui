@@ -119,13 +119,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -175,7 +169,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       threadName: "新名",
     });
     expect(tabs[0].name).toBe("新名");
-    expect(store.currentThreadName).toBe("新名");
+    expect(activeSessionTab()?.name).toBe("新名");
     expect(mockWin.setTitle).not.toHaveBeenCalled();
     disposeEvents();
   });
@@ -213,12 +207,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -256,12 +244,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -287,7 +269,6 @@ describe("会话标签状态与事件路由", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     await wireEvents();
     fireListen("turn/completed", {
       threadId: "t2",
@@ -304,12 +285,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -340,7 +315,6 @@ describe("会话标签状态与事件路由", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     await wireEvents();
     fireListen("turn/completed", {
       threadId: "t2",
@@ -384,8 +358,6 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
-    store.taskMode = "execute";
   });
 
   it("thread/goal/updated：同步当前会话的目标文本与状态", async () => {
@@ -463,10 +435,9 @@ describe("消息变更计数器与回合结束清扫", () => {
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    tabs.push(makeSessionTab("s1", "t1"));
+    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
     activeTabId.value = "s1";
     store.itemsRev = 0;
-    store.currentThreadId = "t1";
     store.activeWorkByThread = {};
   });
 
@@ -591,9 +562,6 @@ describe("旧会话 turn 事件不串扰新会话", () => {
     });
     tabs.push(makeSessionTab("s2", "t2"));
     activeTabId.value = "s2";
-    store.currentThreadId = "t2";
-    store.resumedThreadId = "t2";
-    store.taskMode = "execute";
     store.itemsByThread = {};
     store.activeWorkByThread = {};
   });
@@ -605,7 +573,6 @@ describe("旧会话 turn 事件不串扰新会话", () => {
   it("旧线程 turn/completed：不复位状态、不弹计划确认、不消费队列", async () => {
     await wireEvents();
     tabs[0].turnActive = true; // 模拟新会话正在运行
-    store.taskMode = "plan";
     tabs[0].followupQueue.push({ text: "队列消息", attachments: [] });
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "旧会话计划", status: "completed" },
@@ -640,9 +607,6 @@ describe("后台临时线程 delta 事件隔离", () => {
     mockedInvoke.mockReset();
     __resetTitleHelperCapabilityForTest();
     store.toast = "";
-    store.currentThreadId = "t1";
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = "D:/repo";
     store.server.startupWorkspace = "D:/repo";
     store.threads = [
       { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
@@ -714,11 +678,8 @@ describe("计划完成确认弹窗", () => {
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    tabs.push(makeSessionTab("s1", "t1"));
+    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
-    store.resumedThreadId = "t1";
-    store.taskMode = "plan";
     store.itemsByThread = {};
   });
 
@@ -767,7 +728,6 @@ describe("计划完成确认弹窗", () => {
       { id: "p1", type: "plan", text: "计划A", status: "completed" },
     ];
     (tabs[0] as SessionTab).taskMode = "plan";
-    store.taskMode = "execute";
 
     fireListen("turn/completed", {
       threadId: "t1",
@@ -786,7 +746,6 @@ describe("计划完成确认弹窗", () => {
       { id: "p1", type: "plan", text: "计划A", status: "completed" },
     ];
     (tabs[0] as SessionTab).taskMode = "execute";
-    store.taskMode = "plan";
 
     fireListen("turn/completed", {
       threadId: "t1",
@@ -832,7 +791,6 @@ describe("计划完成确认弹窗", () => {
 
   it("非计划模式回合完成不弹窗", async () => {
     await wireEvents();
-    store.taskMode = "execute";
     (tabs[0] as SessionTab).taskMode = "execute";
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "# 计划", status: "completed" },
@@ -875,7 +833,7 @@ describe("计划完成确认弹窗", () => {
 
     await executePlan();
 
-    expect(store.taskMode).toBe("execute");
+    expect(activeSessionTab()?.taskMode).toBe("execute");
     expect(activeSessionTab()?.planPrompt).toBeNull();
     // 目标勾选被消费：目标=合成消息（含计划全文）
     expect(activeSessionTab()?.goalArmed).toBe(false);
@@ -898,12 +856,12 @@ describe("计划完成确认弹窗", () => {
     tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
     dismissPlanPrompt();
     expect(activeSessionTab()?.planPrompt).toBeNull();
-    expect(store.taskMode).toBe("plan");
+    expect(activeSessionTab()?.taskMode).toBe("plan");
 
     tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
     exitPlanMode();
     expect(activeSessionTab()?.planPrompt).toBeNull();
-    expect(store.taskMode).toBe("execute");
+    expect(activeSessionTab()?.taskMode).toBe("execute");
   });
 });
 
@@ -920,11 +878,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    store.currentThreadId = null;
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.taskMode = "execute";
-    store.attachments = [];
     store.itemsByThread = {};
     store.activeWorkByThread = {};
   });
@@ -949,7 +902,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       }),
     );
     activeTabId.value = "sA";
-    store.currentThreadId = "tA";
     store.itemsByThread["tB"] = [
       { id: "p1", type: "plan", text: "B的计划", status: "completed" },
     ];
@@ -981,7 +933,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       }),
     );
     activeTabId.value = "sA";
-    store.currentThreadId = "tA";
     store.itemsByThread["tA"] = [
       { id: "p1", type: "plan", text: "A的计划", status: "completed" },
     ];
@@ -1009,7 +960,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       }),
     );
     activeTabId.value = "sA";
-    store.currentThreadId = "tA";
     await wireEvents();
 
     fireListen("turn/completed", {
@@ -1039,7 +989,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       }),
     );
     activeTabId.value = "sA";
-    store.currentThreadId = "tA";
     await wireEvents();
 
     fireListen("turn/started", { turn: { id: "turn-b" } });
@@ -1060,7 +1009,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       }),
     );
     activeTabId.value = "sA";
-    store.currentThreadId = "tA";
     await wireEvents();
 
     fireListen("thread/goal/updated", {

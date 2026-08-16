@@ -10,6 +10,12 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 import { invoke } from "@tauri-apps/api/core";
 import SettingsView from "../SettingsView.vue";
 import { saveSettings, settleConfirm, store } from "../../composables/useCodex";
+import { activeTabId, tabs as _tabs } from "../../composables/useEditorTabs";
+import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
+import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
+import type { SessionTab } from "../../composables/useCodex";
+
+const tabs = _tabs as unknown as SessionTab[];
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedSave = vi.mocked(saveSettings);
@@ -319,8 +325,10 @@ describe("SettingsView 记忆管理", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
   beforeEach(() => {
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
     store.settings.memory_mode = "disabled";
-    store.currentThreadId = null;
     store.toast = "";
     store.confirm = null;
     mockedInvoke.mockReset();
@@ -357,7 +365,6 @@ describe("SettingsView 记忆管理", () => {
   });
 
   it("有当前会话时保存后立即同步 thread/memoryMode/set", async () => {
-    store.currentThreadId = "t1";
     wrapper = mount(SettingsView);
     await wrapper.find("select.memory-mode-select").setValue("enabled");
     await wrapper.find("button.btn.primary").trigger("click");
@@ -369,6 +376,7 @@ describe("SettingsView 记忆管理", () => {
   });
 
   it("无当前会话时保存不调用 thread/memoryMode/set", async () => {
+    __resetSessionTabsForTest();
     wrapper = mount(SettingsView);
     await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
@@ -379,7 +387,6 @@ describe("SettingsView 记忆管理", () => {
   });
 
   it("同步失败 toast 错误但设置仍保存并关闭", async () => {
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "thread/memoryMode/set") {
         throw new Error("同步记忆失败");

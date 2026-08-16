@@ -1,6 +1,6 @@
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { activeSessionTab, setToast, store, toastError } from "./useCodex";
+import { activeSessionTab, setToast, toastError } from "./useCodex";
 
 /** 上下文窗口使用情况：window 未知时不显示 */
 export function useContextUsage() {
@@ -31,12 +31,13 @@ export function useContextUsage() {
 
   /** 发起 thread/compact/start：回合进行中也可压缩，由服务端处理 */
   async function compactNow() {
-    if (!store.currentThreadId || compacting.value) return;
+    const tid = activeSessionTab()?.threadId;
+    if (!tid || compacting.value) return;
     compacting.value = true;
     try {
       await invoke("codex_rpc", {
         method: "thread/compact/start",
-        params: { threadId: store.currentThreadId },
+        params: { threadId: tid },
       });
       setToast("已开始压缩上下文");
     } catch (e) {

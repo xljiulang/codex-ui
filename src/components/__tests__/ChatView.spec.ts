@@ -195,7 +195,6 @@ describe("ChatView 日期分隔线", () => {
 
   it("思考中提示随进行中计数显示/隐藏", async () => {
     tab.turnActive = true;
-    store.currentThreadId = "t1";
     store.activeWorkByThread = { t1: 0 };
     store.itemsByThread["t1"] = ([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
@@ -213,7 +212,6 @@ describe("ChatView 日期分隔线", () => {
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(false);
     tab.turnActive = false;
-    store.currentThreadId = null;
     store.activeWorkByThread = {};
   });
 
@@ -263,7 +261,6 @@ describe("ChatView 日期分隔线", () => {
 
   it("交互挂起时不显示“思考中”提示", async () => {
     tab.turnActive = true;
-    store.currentThreadId = "t1";
     store.activeWorkByThread = { t1: 0 };
     store.interactions.push({
       requestId: 2,
@@ -289,7 +286,6 @@ describe("ChatView 日期分隔线", () => {
     expect(wrapper.find(".thinking-chip").exists()).toBe(true);
 
     tab.turnActive = false;
-    store.currentThreadId = null;
     store.activeWorkByThread = {};
   });
 
@@ -582,7 +578,7 @@ describe("ChatView 日期分隔线", () => {
     Object.defineProperty(scrollEv, "isTrusted", { get: () => true });
     scroller.dispatchEvent(scrollEv);
     // 切换到新会话 → 重置吸底并回到底部
-    store.currentThreadId = "t2";
+    tab.threadId = "t2";
     await nextTick();
     await flushPromises();
     await flushPromises();
@@ -592,7 +588,6 @@ describe("ChatView 日期分隔线", () => {
     await nextTick();
     await flushPromises();
     expect(scroller.scrollTop).toBe(1000);
-    store.currentThreadId = null;
   });
 
   it("追赶窗口内向下滚动不解除吸底", async () => {

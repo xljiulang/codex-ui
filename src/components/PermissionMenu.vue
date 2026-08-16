@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { PERMISSION_MODES } from "../lib/permissions";
-import { store } from "../composables/useCodex";
+import { activeSessionTab } from "../composables/useCodex";
 import type { PermissionId } from "../lib/types";
 
 const emit = defineEmits<{ close: [] }>();
 
 function choose(id: PermissionId) {
-  store.permissionMode = id; // 进程级生效，不写配置文件
+  const tab = activeSessionTab();
+  if (tab) tab.permissionMode = id; // 进程级生效，不写配置文件
   emit("close");
 }
 </script>
@@ -20,7 +21,7 @@ function choose(id: PermissionId) {
       v-for="m in PERMISSION_MODES"
       :key="m.id"
       class="mode-menu-item"
-      :class="{ selected: store.permissionMode === m.id }"
+      :class="{ selected: activeSessionTab()?.permissionMode === m.id }"
       @click="choose(m.id)"
     >
       <span class="mode-icon">
@@ -32,7 +33,7 @@ function choose(id: PermissionId) {
         <div class="mode-label">{{ m.label }}</div>
         <div class="mode-desc">{{ m.desc }}</div>
       </span>
-      <span v-if="store.permissionMode === m.id" class="mode-check">✓</span>
+      <span v-if="activeSessionTab()?.permissionMode === m.id" class="mode-check">✓</span>
     </button>
   </div>
 </template>

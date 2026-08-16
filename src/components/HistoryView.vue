@@ -12,6 +12,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { openTerminalTab } from "../composables/useEditorTabs";
 import {
+  activeSessionTab,
   clearSearch,
   isThreadOpen,
   isThreadRunning,
@@ -305,7 +306,7 @@ onBeforeUnmount(() => {
           v-else
           class="history-item"
           :class="{
-            active: row.thread.id === store.currentThreadId,
+            active: row.thread.id === activeSessionTab()?.threadId,
             running: isThreadRunning(row.thread.id),
             'folder-item': row.inFolder,
           }"

@@ -3,17 +3,35 @@ import { invoke } from "@tauri-apps/api/core";
 import { PERMISSION_MODES } from "../../lib/permissions";
 import type { AppSettings, ServerStatus } from "../../lib/types";
 import { applyTheme } from "../useTheme";
+import { activeSessionTab, sessionTabTitle } from "./sessionState";
 import { store } from "./store";
-import { defaultSettings, type ModelInfo, type PluginItem, type SkillItem } from "./types";
+import {
+  defaultSettings,
+  type ModelInfo,
+  type PluginItem,
+  type SessionTab,
+  type SkillItem,
+} from "./types";
 
 
 /** 当前会话已不存在（被删除等）时重置回新对话，避免继续发送一直报错 */
 export function resetToNewChat() {
-  store.currentThreadId = null;
-  store.currentThreadName = "";
-  store.currentThreadOrigin = null;
-  store.currentThreadWorkspace = null;
-  store.resumedThreadId = null;
+  const tab = activeSessionTab();
+  if (!tab) return;
+  tab.threadId = null;
+  tab.name = "";
+  tab.origin = null;
+  tab.workspace = null;
+  tab.resumedThreadId = null;
+  tab.turnActive = false;
+  tab.currentTurnId = null;
+  tab.turnInterrupted = false;
+  tab.goalText = null;
+  tab.goalStatus = null;
+  tab.goalArmed = false;
+  tab.planPrompt = null;
+  tab.followupQueue = [];
+  tab.title = sessionTabTitle(tab);
 }
 
 
@@ -33,7 +51,8 @@ export async function loadSettings() {
   if (!["enabled", "disabled"].includes(store.settings.memory_mode)) {
     store.settings.memory_mode = "disabled";
   }
-  store.permissionMode = store.settings.default_permission;
+  const tab = activeSessionTab();
+  if (tab) tab.permissionMode = store.settings.default_permission;
   applyTheme(store.settings.theme);
 }
 
@@ -166,9 +185,10 @@ export function modelDisplayName(model: string | null): string {
 }
 
 
-/** 当前生效模型 id：显式选择 → 会话已知模型 → 默认模型 → 列表首个 → 空 */
-export function currentModelId(): string {
-  if (store.model) return store.model;
+/** 当前生效模型 id：标签显式选择 → 会话已知模型 → 默认模型 → 列表首个 → 空 */
+export function currentModelId(tab?: Pick<SessionTab, "model">): string {
+  const m = tab?.model ?? activeSessionTab()?.model;
+  if (m) return m;
   if (store.currentModel) return store.currentModel;
   const def = store.models.find((m) => m.isDefault);
   if (def) return def.model;
@@ -176,11 +196,12 @@ export function currentModelId(): string {
 }
 
 
-/** 当前生效的推理强度：显式值优先，否则用默认模型的默认强度 */
-export function effectiveEffort(): string {
-  if (store.effort) return store.effort;
+/** 当前生效的推理强度：标签显式值优先，否则用默认模型的默认强度 */
+export function effectiveEffort(tab?: Pick<SessionTab, "model" | "effort">): string {
+  const session = tab ?? activeSessionTab();
+  if (session?.effort) return session.effort;
   const m =
-    store.models.find((x) => x.model === store.model) ??
+    store.models.find((x) => x.model === session?.model) ??
     store.models.find((x) => x.isDefault);
   return m?.defaultReasoningEffort ?? "";
 }

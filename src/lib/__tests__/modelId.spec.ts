@@ -1,15 +1,19 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { currentModelId, store } from "../../composables/useCodex";
+import { activeTabId, tabs } from "../../composables/useEditorTabs";
+import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
+import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 
 beforeEach(() => {
-  store.model = null;
+  __resetSessionTabsForTest();
   store.currentModel = "";
   store.models = [];
 });
 
 describe("currentModelId 模型取值", () => {
   it("显式选择的模型优先", () => {
-    store.model = "deepseek-v4-pro";
+    tabs.push(makeSessionTab("s1", "t1", { model: "deepseek-v4-pro" }));
+    activeTabId.value = "s1";
     store.currentModel = "deepseek-v4-flash";
     store.models = [
       { id: "1", model: "deepseek-v4-flash", isDefault: true },

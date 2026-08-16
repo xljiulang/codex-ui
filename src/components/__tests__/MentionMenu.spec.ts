@@ -42,7 +42,6 @@ function makePlugin(over: Partial<(typeof store.threadPlugins)["x"]["plugins"][n
 
 describe("MentionMenu @/$ 联合菜单", () => {
   beforeEach(() => {
-    store.currentThreadId = null;
     store.threadPlugins[NEW_CHAT_PLUGIN_KEY] = {
       plugins: [makePlugin()],
       loaded: true,

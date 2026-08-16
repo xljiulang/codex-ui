@@ -1,6 +1,6 @@
 // useCodex 拆分模块：全局 store 与共享模块状态（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { reactive } from "vue";
-import type { PendingInteraction, PermissionId, ThreadItem, ThreadSummary, UserInput } from "../../lib/types";
+import type { PendingInteraction, ThreadItem, ThreadSummary } from "../../lib/types";
 import {
   defaultSettings,
   type ConfirmRequest,
@@ -21,11 +21,6 @@ export const store = reactive({
   threads: [] as ThreadSummary[],
   searchActive: false,
   searchSnippets: {} as Record<string, string>,
-  currentThreadId: null as string | null,
-  currentThreadName: "",
-  currentThreadOrigin: null as "new" | "history" | null,
-  currentThreadWorkspace: null as string | null,
-  resumedThreadId: null as string | null,
   /** 活动标签工作区覆盖（文件/diff/预览/终端标签由 EditorPane 写入；null=跟随会话工作区） */
   workspace: null as string | null,
   itemsByThread: {} as Record<string, ThreadItem[]>,
@@ -41,13 +36,8 @@ export const store = reactive({
   // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
   booting: true,
   loadingHistory: false,
-  loading: false,
   busy: false,
   currentModel: "",
-  // 进程级设置：权限模式 / 模型 / 推理强度，仅当前运行期有效，不写入配置文件
-  permissionMode: "ask-for-approval" as PermissionId,
-  model: null as string | null,
-  effort: null as string | null,
   models: [] as ModelInfo[],
   modelsLoaded: false,
   // 对话级插件缓存：key 为 currentThreadId（未创建会话时为 NEW_CHAT_PLUGIN_KEY）
@@ -57,10 +47,6 @@ export const store = reactive({
   >,
   skills: [] as SkillItem[],
   skillsLoaded: false,
-  // 新建对话时可选的项目目录（null = 使用启动工作目录）
-  newChatWorkspace: null as string | null,
-  taskMode: "execute" as "execute" | "plan",
-  attachments: [] as UserInput[],
   showSettings: false,
   /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
   panelTab: "history" as PanelTab,

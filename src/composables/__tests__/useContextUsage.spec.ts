@@ -8,7 +8,7 @@ vi.mock("../useCodex", async (importOriginal) => {
 });
 
 import { invoke } from "@tauri-apps/api/core";
-import { setToast, store, type SessionTab } from "../useCodex";
+import { setToast, type SessionTab } from "../useCodex";
 import { useContextUsage } from "../useContextUsage";
 import { activeTabId, tabs } from "../useEditorTabs";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
@@ -24,7 +24,6 @@ describe("useContextUsage", () => {
     __resetSessionTabsForTest();
     tabs.push(reactive(makeSessionTab("s1", "t1")));
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
   });
 
   it("window 已知时计算百分比并截断到 100", () => {
@@ -65,7 +64,8 @@ describe("useContextUsage", () => {
     });
     expect(mockedToast).toHaveBeenCalledWith("已开始压缩上下文");
 
-    store.currentThreadId = null;
+    // 无活动会话（新建对话编辑态）不发起压缩
+    __resetSessionTabsForTest();
     await u.compactNow();
     expect(mockedInvoke).toHaveBeenCalledTimes(1);
   });

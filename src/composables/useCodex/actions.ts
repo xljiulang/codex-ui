@@ -32,7 +32,7 @@ import {
 export async function openSessionTabForThread(
   threadId: string,
 ): Promise<boolean> {
-  if (threadId === store.currentThreadId) return true;
+  if (threadId === activeSessionTab()?.threadId) return true;
   const existing = findSessionTabByThread(threadId);
   if (existing) {
     await switchSessionTab(existing.id);
@@ -53,19 +53,22 @@ export async function openSessionTabForThread(
 
 async function newChat(prompt: string, attachments: UserInput[]) {
   store.busy = true;
-  const tabId = activeSessionTab()?.id ?? null;
+  const active = activeSessionTab();
+  const tabId = active?.id ?? null;
   try {
     // newChat 仅在无当前会话时被调用，resolveSessionWorkspace 走 newChatWorkspace → workspace 分支
-    const cwd = resolveSessionWorkspace();
+    const cwd = resolveSessionWorkspace(active ?? undefined);
+    const permission =
+      active?.permissionMode ?? store.settings.default_permission;
     const params: Record<string, unknown> = {
       cwd,
-      approvalPolicy: toApprovalPolicy(store.permissionMode),
-      sandbox: toSandbox(store.permissionMode),
+      approvalPolicy: toApprovalPolicy(permission),
+      sandbox: toSandbox(permission),
     };
-    const reviewer = toApprovalsReviewer(store.permissionMode);
+    const reviewer = toApprovalsReviewer(permission);
     if (reviewer) params.approvalsReviewer = reviewer;
     // 显式携带（null 表示用默认），避免旧值在会话里粘滞；effort 由随后的 turn/start 携带
-    params.model = store.model ?? null;
+    params.model = active?.model ?? null;
     const res = await invoke<{ thread: { id: string; name?: string | null }; model?: string }>(
       "thread_start",
       { params },
@@ -77,7 +80,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       const cur = activeSessionTab();
       if (cur) dropSessionTab(cur);
       activateTab(existing.id);
-      store.currentModel = res.model ?? currentModelId();
+      store.currentModel = res.model ?? currentModelId(existing);
       await refreshThreads();
       return;
     }
@@ -98,17 +101,22 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       }
       store.itemsByThread[threadId] = [];
       store.activeWorkByThread[threadId] = 0;
-      store.currentModel = res.model ?? currentModelId();
+      store.currentModel = res.model ?? currentModelId(tab);
       await refreshThreads();
       return;
     }
-    store.currentThreadId = threadId;
-    store.currentThreadName = res.thread.name ?? "";
-    store.currentThreadOrigin = "new";
-    store.currentThreadWorkspace = cwd;
-    store.resumedThreadId = threadId;
-    store.newChatWorkspace = null; // 本次新建已消费，恢复默认
-    store.currentModel = res.model ?? currentModelId();
+    const activeTab = activeSessionTab();
+    if (activeTab) {
+      activeTab.threadId = threadId;
+      activeTab.name = res.thread.name ?? "";
+      activeTab.origin = "new";
+      activeTab.workspace = cwd;
+      activeTab.resumedThreadId = threadId;
+      activeTab.newChatWorkspace = null; // 本次新建已消费，恢复默认
+      activeTab.loading = false;
+      activeTab.title = sessionTabTitle(activeTab);
+    }
+    store.currentModel = res.model ?? currentModelId(activeTab ?? undefined);
     void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;
@@ -158,13 +166,13 @@ async function newChat(prompt: string, attachments: UserInput[]) {
 
 
 export async function sendPrompt(text: string, flip = false) {
-  const attachments = store.attachments.splice(0);
+  const tab = activeSessionTab();
+  const attachments = tab?.attachments.splice(0) ?? [];
   if (!text.trim() && attachments.length === 0) return;
   // 手动发送标记：ChatView 据此在发送后强制恢复吸底回到底部
   // （队列消息在回合结束后自动发送时走 continueTurn/newChat，不递增）
   store.userSendRev++;
   // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
-  const tab = activeSessionTab();
   if (tab?.turnActive && tab.threadId) {
     const base = store.settings.followup_mode;
     const mode = flip ? (base === "adjust" ? "queue" : "adjust") : base;
@@ -177,7 +185,7 @@ export async function sendPrompt(text: string, flip = false) {
     return;
   }
   try {
-    if (!store.currentThreadId) {
+    if (!tab?.threadId) {
       await newChat(text, attachments);
     } else {
       await continueTurn(text, attachments);
@@ -199,8 +207,10 @@ export function dismissPlanPrompt() {
 /** “退出计划模式”：切回执行模式并关闭弹窗，不发消息 */
 export function exitPlanMode() {
   const tab = activeSessionTab();
-  if (tab) tab.planPrompt = null;
-  store.taskMode = "execute";
+  if (tab) {
+    tab.planPrompt = null;
+    tab.taskMode = "execute";
+  }
 }
 
 
@@ -211,7 +221,7 @@ export async function executePlan() {
   if (!prompt) return;
   if (tab) tab.planPrompt = null;
   // 先切模式，使本轮 turn/start 显式携带 collaborationMode default（计划模式粘滞，需显式退出）
-  store.taskMode = "execute";
+  if (tab) tab.taskMode = "execute";
   const text = `PLEASE IMPLEMENT THIS PLAN:\n${prompt.planText}`;
   // 目标勾选：执行计划即首条执行消息，目标=该合成消息（含计划全文）
   if (tab?.goalArmed) {
@@ -220,7 +230,7 @@ export async function executePlan() {
     tab.goalStatus = null;
   }
   try {
-    if (store.currentThreadId) {
+    if (tab?.threadId) {
       await continueTurn(text, []);
     } else {
       await newChat(text, []);
@@ -262,7 +272,6 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
 async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolean> {
   const isActive = () => activeSessionTab()?.id === tab.id;
   tab.loading = true;
-  if (isActive()) store.loading = true;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
   try {
     const res = await invoke<{
@@ -282,12 +291,6 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     ).filter((x) => isActiveItem(x)).length;
     const name = res.thread.name ?? "";
     const cwd = res.thread.cwd ?? null;
-    if (isActive()) {
-      store.currentThreadId = threadId;
-      store.currentThreadName = name;
-      store.currentThreadWorkspace = cwd;
-      store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
-    }
     // 回合/计划/目标等状态一律写标签（tab 是唯一事实源，不再写 store）
     tab.threadId = threadId;
     tab.name = name;
@@ -298,9 +301,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     tab.currentTurnId = null;
     tab.threadTokenUsage = null;
     tab.goalArmed = false; // 勾选态不跨会话；服务端目标经 goal_get 回填
-    if (!isActive()) {
-      tab.title = sessionTabTitle(tab);
-    }
+    tab.title = sessionTabTitle(tab);
     let goalText: string | null = null;
     let goalStatus: GoalStatus | null = null;
     try {
@@ -340,7 +341,6 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     return false;
   } finally {
     tab.loading = false;
-    if (isActive()) store.loading = false;
   }
 }
 

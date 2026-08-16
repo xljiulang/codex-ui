@@ -361,9 +361,6 @@ export async function wireEvents() {
       if (tab && p.threadName) {
         tab.name = p.threadName;
         tab.title = sessionTabTitle(tab);
-        if (activeSessionTab()?.id === tab.id) {
-          store.currentThreadName = p.threadName;
-        }
       }
     }),
     await listen("thread/tokenUsage/updated", (e) => {

@@ -13,7 +13,7 @@ import type { SessionTab } from "./types";
 
 
 /**
- * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按当前全局设置，
+ * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按发送目标标签（session）取值，
  * 沙箱可写根跟随传入的 cwd（活动标签用 resolveSessionWorkspace，后台标签用 resolveSessionWorkspace）。
  */
 export function buildTurnParams(
@@ -21,8 +21,11 @@ export function buildTurnParams(
   input: UserInput[],
   clientId: string,
   cwd: string,
-  /** 发送目标标签的任务模式（后台标签传 tab.taskMode；缺省取活动会话模式） */
-  taskMode?: "execute" | "plan",
+  /** 发送目标标签（会话设置唯一事实源）；缺省时权限用默认设置、模型/强度为空 */
+  session?: Pick<
+    SessionTab,
+    "permissionMode" | "model" | "effort" | "taskMode"
+  >,
 ): Record<string, unknown> {
   const params: Record<string, unknown> = {
     threadId,
@@ -30,24 +33,25 @@ export function buildTurnParams(
     clientUserMessageId: clientId,
   };
   // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
-  params.approvalPolicy = toApprovalPolicy(store.permissionMode);
-  params.sandboxPolicy = toSandboxPolicy(store.permissionMode, cwd);
-  const reviewer = toApprovalsReviewer(store.permissionMode);
+  const permission = session?.permissionMode ?? store.settings.default_permission;
+  params.approvalPolicy = toApprovalPolicy(permission);
+  params.sandboxPolicy = toSandboxPolicy(permission, cwd);
+  const reviewer = toApprovalsReviewer(permission);
   if (reviewer) params.approvalsReviewer = reviewer;
   // 显式携带（null 表示用默认），避免旧值在会话里粘滞
-  params.model = store.model ?? null;
-  params.effort = store.effort ?? null;
+  params.model = session?.model ?? null;
+  params.effort = session?.effort ?? null;
   // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
   // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
   // 模型未知时绝不发送空字符串（上游会报 invalid_request_error），此时省略该字段。
-  const collabModel = currentModelId();
+  const collabModel = currentModelId(session);
   if (collabModel) {
-    const mode = taskMode ?? store.taskMode;
+    const mode = session?.taskMode ?? "execute";
     params.collaborationMode = {
       mode: mode === "plan" ? "plan" : "default",
       settings: {
         model: collabModel,
-        reasoning_effort: store.effort ?? null,
+        reasoning_effort: session?.effort ?? null,
         developer_instructions: null,
       },
     };
@@ -61,11 +65,14 @@ function buildUserTurn(
   prompt: string,
   attachments: UserInput[],
   cwd: string,
-  taskMode?: "execute" | "plan",
+  session?: Pick<
+    SessionTab,
+    "permissionMode" | "model" | "effort" | "taskMode"
+  >,
 ): { clientId: string; input: UserInput[]; params: Record<string, unknown> } {
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, cwd, taskMode);
+  const params = buildTurnParams(threadId, input, clientId, cwd, session);
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -105,7 +112,7 @@ export async function continueTurnForTab(
     prompt,
     attachments,
     resolveSessionWorkspace(tab),
-    tab.taskMode,
+    tab,
   );
   // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
   if (tab.goalText && !tab.goalStatus) {
@@ -139,15 +146,14 @@ export async function continueTurnForTab(
 
 export async function continueTurn(prompt: string, attachments: UserInput[]) {
   const tab = activeSessionTab();
-  const threadId = tab?.threadId ?? store.currentThreadId;
+  const threadId = tab?.threadId;
   if (!threadId) return;
   // 历史会话在打开时只读、不恢复，避免带活跃目标的会话被自动持续执行；
   // 用户真正发消息时才恢复（thread/start 新建的会话已订阅，无需恢复）。
-  if ((tab?.resumedThreadId ?? store.resumedThreadId) !== threadId) {
+  if (tab?.resumedThreadId !== threadId) {
     try {
       await invoke("thread_resume", { params: { threadId } });
       if (tab) tab.resumedThreadId = threadId;
-      else store.resumedThreadId = threadId;
     } catch (e) {
       if (isThreadNotFound(e)) {
         resetToNewChat();
@@ -164,6 +170,7 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
     prompt,
     attachments,
     resolveSessionWorkspace(),
+    tab,
   );
   // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
   // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
@@ -198,7 +205,7 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
 /** 向进行中的回合追加输入（“调整方向”），协议 turn/steer */
 export async function steerTurn(prompt: string, attachments: UserInput[]) {
   const tab = activeSessionTab();
-  const threadId = tab?.threadId ?? store.currentThreadId;
+  const threadId = tab?.threadId;
   const turnId = tab?.currentTurnId ?? null;
   if (!threadId || !turnId) {
     setToast("当前没有进行中的回合");
@@ -209,6 +216,7 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
     prompt,
     attachments,
     resolveSessionWorkspace(),
+    tab,
   );
   try {
     await invoke("turn_steer", {
@@ -257,7 +265,7 @@ export async function interrupt(
   turnId?: string | null,
 ) {
   const active = activeSessionTab();
-  const tid = threadId ?? active?.threadId ?? store.currentThreadId;
+  const tid = threadId ?? active?.threadId;
   if (!tid) return;
   const tab = threadId ? findSessionTabByThread(tid) : active;
   // 线程有活跃目标：先清除目标切断服务端 auto-continuation（目标循环回合极快，
@@ -320,7 +328,7 @@ export async function setGoal(objective: string): Promise<boolean> {
     return false;
   }
   const tab = activeSessionTab();
-  const tid = tab?.threadId ?? store.currentThreadId;
+  const tid = tab?.threadId;
   if (!tid) return false; // 仅在线程存在时挂载（防御：调用方应保证有会话）
   try {
     await invoke("goal_set", { threadId: tid, objective: text });
@@ -340,7 +348,7 @@ export async function setGoal(objective: string): Promise<boolean> {
 
 export async function clearGoal(threadId?: string | null) {
   const active = activeSessionTab();
-  const tid = threadId ?? active?.threadId ?? store.currentThreadId;
+  const tid = threadId ?? active?.threadId;
   if (!tid) {
     if (active) {
       active.goalText = null;

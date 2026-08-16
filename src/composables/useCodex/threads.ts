@@ -119,9 +119,6 @@ export async function renameThread(
       }
       tab.title = sessionTabTitle(tab);
     }
-    if (store.currentThreadId === threadId) {
-      store.currentThreadName = n;
-    }
     return true;
   } catch (e) {
     setToast(toastError(e));
@@ -154,7 +151,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
   // 仅当尚无名称、或名称来自首条消息（可被总结覆盖）时继续；手动命名不覆盖
   if (tab?.name && !tab.nameIsFirstMessage) return;
   const t = store.threads.find((x) => x.id === threadId);
-  if ((!tab?.name || !tab.nameIsFirstMessage) && (t?.name || store.currentThreadName)) return;
+  if ((!tab?.name || !tab.nameIsFirstMessage) && (t?.name || tab?.name)) return;
   const cap = await getTitleHelperCapability();
   if (!cap?.experimentalApi) return; // 不支持 experimentalApi：不总结
 

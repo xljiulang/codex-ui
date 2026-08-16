@@ -8,6 +8,7 @@ import {
 } from "../lib/mention";
 import {
   NEW_CHAT_PLUGIN_KEY,
+  activeSessionTab,
   ensureSkills,
   store,
   type PluginItem,
@@ -57,7 +58,7 @@ type Row =
 
 /** 当前对话的插件缓存（未创建会话用 NEW_CHAT_PLUGIN_KEY） */
 const currentThreadPlugins = computed(() => {
-  const key = store.currentThreadId ?? NEW_CHAT_PLUGIN_KEY;
+  const key = activeSessionTab()?.threadId ?? NEW_CHAT_PLUGIN_KEY;
   return store.threadPlugins[key]?.plugins ?? [];
 });
 

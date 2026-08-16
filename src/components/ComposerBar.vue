@@ -211,7 +211,7 @@ function syncAttachments() {
     .filter((r) => r.kind === "ref")
     .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
     .filter((a): a is UserInput => !!a);
-  store.attachments = [...refs, ...rowAttachments.value];
+  props.tab.attachments = [...refs, ...rowAttachments.value];
 }
 
 function refNameOf(a: UserInput): string {
@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
 
 // 新建对话后输入框重新获得焦点（组件未卸载的情况，如聊天页直接点“新建对话”）
 watch(
-  () => store.currentThreadId,
+  () => props.tab.threadId,
   (v) => {
     if (!v) void nextTick(() => editor.value?.commands.focus());
   },
@@ -424,7 +424,7 @@ function submit(flip = false) {
     .filter((a): a is UserInput => !!a);
   // 目标 flag：仅执行模式（非计划）下首条消息消费勾选，目标=该消息纯文本；
   // 计划模式消息不消费，arm 保持（“执行计划”按钮另行以计划内容挂载目标）
-  if (props.tab.goalArmed && store.taskMode !== "plan" && plainText.trim()) {
+  if (props.tab.goalArmed && props.tab.taskMode !== "plan" && plainText.trim()) {
     props.tab.goalText = plainText.trim();
     props.tab.goalArmed = false;
     props.tab.goalStatus = null;
@@ -434,11 +434,11 @@ function submit(flip = false) {
   const fileSection = fileMentionSection(files);
   const marker = files.length ? `\n${MY_REQUEST_MARKER}\n` : "";
   const wireText = `${fileSection}${marker}${wireInline}`;
-  // 先清空编辑器（onUpdate 会同步 store.attachments 为空），再写入本次附件
+  // 先清空编辑器（onUpdate 会同步 tab.attachments 为空），再写入本次附件
   editor.value?.commands.setContent("");
   refsById.value = new Map();
   rowAttachments.value = [];
-  store.attachments = [...refs, ...rowItems];
+  props.tab.attachments = [...refs, ...rowItems];
   if (plainText.trim()) {
     inputHistory.push(plainText);
   }
@@ -462,13 +462,13 @@ function rowAttName(a: UserInput): string {
 const { ctxUsage, ctxTooltip, compacting, compactNow } = useContextUsage();
 
 function modelChipLabel(): string {
-  const name = modelDisplayName(store.model);
-  const effort = effectiveEffort();
+  const name = modelDisplayName(props.tab.model ?? "");
+  const effort = effectiveEffort(props.tab);
   return effort ? `${name} (${effort})` : name;
 }
 
 function taskModeLabel(): string {
-  if (store.taskMode === "plan") return "计划模式";
+  if (props.tab.taskMode === "plan") return "计划模式";
   return "执行模式";
 }
 
@@ -518,7 +518,7 @@ function taskModeLabel(): string {
             @click="toggleMenu('perm')"
           >
             <svg class="chip-icon" viewBox="0 0 24 24">
-              <path :d="permissionMode(store.permissionMode).icon" />
+              <path :d="permissionMode(tab.permissionMode).icon" />
             </svg>
             {{ permissionChip() }}
             <svg class="chevron" viewBox="0 0 16 16">
@@ -535,7 +535,7 @@ function taskModeLabel(): string {
             @click="toggleMenu('task')"
           >
             <svg class="chip-icon" viewBox="0 0 24 24">
-              <path :d="taskMode(store.taskMode).icon" />
+              <path :d="taskMode(tab.taskMode).icon" />
             </svg>
             {{ taskModeLabel() }}
             <svg viewBox="0 0 16 16">
@@ -553,7 +553,7 @@ function taskModeLabel(): string {
           v-if="ctxUsage"
           class="ctx-window"
           aria-label="压缩上下文"
-          :disabled="!store.currentThreadId || compacting"
+          :disabled="!tab.threadId || compacting"
           v-tooltip="ctxTooltip"
           @dblclick="compactNow()"
         >
@@ -592,8 +592,8 @@ function taskModeLabel(): string {
           v-else
           class="send-btn"
           v-tooltip="'发送'"
-          :class="{ lit: !!(hasText || store.attachments.length) }"
-          :disabled="!hasText && store.attachments.length === 0"
+          :class="{ lit: !!(hasText || tab.attachments.length) }"
+          :disabled="!hasText && tab.attachments.length === 0"
           @click="submit()"
         >
           <svg viewBox="0 0 24 24">

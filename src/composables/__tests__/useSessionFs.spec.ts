@@ -129,8 +129,6 @@ describe("useSessionFs 文件图标缓存", () => {
 
 it("激活资源面板：session_fs_watch_start 传字符串工作区而非 computed（防循环引用）", async () => {
   store.server.startupWorkspace = root;
-  store.currentThreadWorkspace = null;
-  store.newChatWorkspace = null;
   store.workspace = null;
   mockedInvoke.mockImplementation((cmd) => {
     if (cmd === "session_fs_metadata") {

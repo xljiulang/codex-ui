@@ -116,8 +116,6 @@ describe("RightPanel Tab 栏", () => {
     store.loadingHistory = false;
     store.server.startupWorkspace = rootPath;
     store.workspace = null;
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
     store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();

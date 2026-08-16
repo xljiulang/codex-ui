@@ -264,9 +264,6 @@ describe("ResourceView 文件树", () => {
   beforeEach(() => {
     store.server.startupWorkspace = rootPath;
     store.workspace = null;
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
     store.toast = "";
     clipboardFiles = [aTxt.path];
     createdFolder = null;
@@ -538,7 +535,6 @@ describe("ResourceView 文件树", () => {
   });
 
   it("currentThreadWorkspace 为空字符串时回退启动工作目录", async () => {
-    store.currentThreadWorkspace = "";
     const wrapper = await mountPanel();
     expect(wrapper.find(".resource-root").text()).toContain("codex-ui");
     expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
@@ -549,8 +545,6 @@ describe("ResourceView 文件树", () => {
   });
 
   it("工作目录均未就绪时用 workspace_dir 兜底", async () => {
-    store.currentThreadWorkspace = "";
-    store.newChatWorkspace = "";
     store.server.startupWorkspace = "";
     const wrapper = await mountPanel();
     expect(wrapper.find(".resource-root").text()).toContain("codex-ui");
@@ -1420,9 +1414,6 @@ describe("ResourceView 工作区切换", () => {
   beforeEach(() => {
     store.server.startupWorkspace = rootPath;
     store.workspace = null;
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
     store.toast = "";
     mockedInvoke.mockClear();
     mockFs();

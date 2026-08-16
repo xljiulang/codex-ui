@@ -354,9 +354,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
     store.toast = "";
-    store.currentThreadId = "t1";
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = "D:/repo";
     store.server.startupWorkspace = "D:/repo";
     store.threads = [{ id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 }];
   });
@@ -412,7 +409,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
     const tab = tabs[0];
     tab.name = "手动标题";
     tab.nameIsFirstMessage = false;
-    store.currentThreadName = "手动标题";
     await autoTitleThread("t1", LONG_TEXT);
     expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
   });
@@ -421,7 +417,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
     const tab = tabs[0];
     tab.name = "帮我修复登录页面报错";
     tab.nameIsFirstMessage = true;
-    store.currentThreadName = "帮我修复登录页面报错";
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "codex_title_helper_capability") {
         return Promise.resolve({ experimentalApi: true, ephemeral: true });

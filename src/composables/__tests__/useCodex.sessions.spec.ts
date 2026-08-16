@@ -57,13 +57,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -118,13 +112,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -179,13 +167,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -237,13 +219,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -295,13 +271,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -353,13 +323,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       codexPath: null,
       logs: [],
     };
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.currentThreadOrigin = null;
     store.threads = [];
-    store.resumedThreadId = null;
     store.threadPlugins = {};
   });
 
@@ -406,12 +370,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.threadPlugins = {};
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadOrigin = null;
-    store.currentThreadWorkspace = null;
-    store.resumedThreadId = null;
-    store.taskMode = "execute";
     store.confirm = null;
   });
 
@@ -420,13 +378,12 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       makeSessionTab("s1", "t1", { turnActive: true, currentTurnId: "turn-1" }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
 
     expect(await newEmptyChat()).toBe(true);
     expect(store.confirm).toBeNull();
     expect(tabs).toHaveLength(2);
     expect(activeTabId.value).toBe(tabs[1].id);
-    expect(store.currentThreadId).toBeNull();
+    expect(activeSessionTab()?.threadId).toBeNull();
     expect(activeSessionTab()?.currentTurnId).toBeNull();
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
@@ -442,7 +399,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       makeSessionTab("s1", "t1", { turnActive: true, currentTurnId: "turn-1" }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -467,7 +423,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     expect(interruptCalls).toHaveLength(0);
     expect(tabs).toHaveLength(2);
-    expect(store.currentThreadId).toBe("t2");
+    expect(activeSessionTab()?.threadId).toBe("t2");
     expect(tabs[0].turnActive).toBe(true);
   });
 
@@ -476,7 +432,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       makeSessionTab("s1", "t1", { turnActive: true, currentTurnId: "turn-1" }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -505,7 +460,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     tabs.push(makeSessionTab("s1", "t1"));
     tabs.push(makeSessionTab("s2", "t2"));
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -517,7 +471,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
 
     expect(await openThread("t2")).toBe(true);
     expect(activeTabId.value).toBe("s2");
-    expect(store.currentThreadId).toBe("t2");
+    expect(activeSessionTab()?.threadId).toBe("t2");
     expect(tabs).toHaveLength(2);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "thread_read",
@@ -530,7 +484,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       makeSessionTab("s1", "t1", { turnActive: true, currentTurnId: "turn-1" }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
 
     const p = closeSessionTab("s1");
     expect(store.confirm?.title).toBe("关闭会话标签");
@@ -544,7 +497,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     // 允许 0 个会话标签：不兜底新建，live 字段复位到无会话默认态
     expect(tabs).toHaveLength(0);
     expect(activeTabId.value).toBe("");
-    expect(store.currentThreadId).toBeNull();
     expect(activeSessionTab()).toBeNull();
   });
 
@@ -553,7 +505,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       makeSessionTab("s1", "t1", { turnActive: true, currentTurnId: "turn-1" }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
 
     const p = closeSessionTab("s1");
     expect(store.confirm).not.toBeNull();
@@ -577,7 +528,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
 
     await interrupt();
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
@@ -607,7 +557,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       }),
     );
     activeTabId.value = "s2";
-    store.currentThreadId = "t2";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "turn_interrupt") {
         const turnId = (args as { turnId?: string })?.turnId;
@@ -642,12 +591,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -661,10 +604,9 @@ describe("会话标签状态与事件路由", () => {
     await newEmptyChat();
     const tab = tabs[1];
     expect(tab.title).toBe("repo / 新建会话");
-    store.currentThreadId = "t1";
-    store.currentThreadWorkspace = "D:/repo/sub";
-    store.currentThreadName = "我的标题";
-    await flushPromises();
+    tab.name = "我的标题";
+    tab.newChatWorkspace = "D:/projects/B/sub";
+    tab.title = sessionTabTitle(tab);
     expect(tab.title).toBe("sub / 我的标题");
   });
 });
@@ -673,26 +615,18 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
 
 
-  it("会话标签 loading 字段与 live 同步（loadingThread 改名后读写一致）", async () => {
+  it("会话标签 loading 字段读写一致", async () => {
     await newEmptyChat();
     const tab = tabs[0];
     expect(tab.loading).toBe(false);
-    store.loading = true;
-    await flushPromises();
+    tab.loading = true;
     expect(tab.loading).toBe(true);
-    store.loading = false;
-    await flushPromises();
+    tab.loading = false;
     expect(tab.loading).toBe(false);
   });
 });
@@ -701,12 +635,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -727,12 +655,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -749,6 +671,7 @@ describe("会话标签状态与事件路由", () => {
         currentTurnId: "turn-1",
         goalText: "目标A",
         goalStatus: "active",
+        attachments: [{ type: "text", text: "草稿A", text_elements: [] }],
         followupQueue: [{ text: "队列A", attachments: [] }],
       }),
     );
@@ -764,37 +687,31 @@ describe("会话标签状态与事件路由", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
-    store.permissionMode = "full-access";
-    store.taskMode = "plan";
-    store.model = "gpt-5";
-    store.effort = "high";
-    store.attachments = [{ type: "text", text: "草稿A", text_elements: [] }];
     await flushPromises(); // 活动标签记录与 live 字段同步
 
     expect(await switchSessionTab("s2")).toBe(true);
     expect(activeTabId.value).toBe("s2");
-    expect(store.currentThreadId).toBe("t2");
-    expect(store.currentThreadName).toBe("会话B");
-    expect(store.currentThreadWorkspace).toBe("D:/repo/b");
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(activeSessionTab()?.name).toBe("会话B");
+    expect(activeSessionTab()?.workspace).toBe("D:/repo/b");
     expect(activeSessionTab()?.turnActive).toBe(false);
     expect(activeSessionTab()?.planPrompt?.planText).toBe("计划B");
-    expect(store.permissionMode).toBe("help-me-approve");
-    expect(store.taskMode).toBe("execute");
-    expect(store.model).toBe("o3");
-    expect(store.effort).toBe("low");
+    expect(activeSessionTab()?.permissionMode).toBe("help-me-approve");
+    expect(activeSessionTab()?.taskMode).toBe("execute");
+    expect(activeSessionTab()?.model).toBe("o3");
+    expect(activeSessionTab()?.effort).toBe("low");
 
     expect(await switchSessionTab("s1")).toBe(true);
-    expect(store.currentThreadId).toBe("t1");
+    expect(activeSessionTab()?.threadId).toBe("t1");
     expect(activeSessionTab()?.turnActive).toBe(true);
     expect(activeSessionTab()?.currentTurnId).toBe("turn-1");
     expect(activeSessionTab()?.goalText).toBe("目标A");
-    expect(store.attachments).toHaveLength(1);
+    expect(activeSessionTab()?.attachments).toHaveLength(1);
     expect(activeSessionTab()?.followupQueue).toHaveLength(1);
-    expect(store.permissionMode).toBe("full-access");
-    expect(store.taskMode).toBe("plan");
-    expect(store.model).toBe("gpt-5");
-    expect(store.effort).toBe("high");
+    expect(activeSessionTab()?.permissionMode).toBe("full-access");
+    expect(activeSessionTab()?.taskMode).toBe("plan");
+    expect(activeSessionTab()?.model).toBe("gpt-5");
+    expect(activeSessionTab()?.effort).toBe("high");
   });
 });
 describe("会话标签状态与事件路由", () => {
@@ -802,24 +719,14 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
 
 
   it("活动标签的 live 字段变化自动同步回标签记录", async () => {
-    tabs.push(makeSessionTab("s1", "t1"));
+    tabs.push(makeSessionTab("s1", "t1", { name: "会话A", taskMode: "plan" }));
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
-    store.currentThreadName = "会话A";
-    store.taskMode = "plan";
-    await flushPromises();
     expect(tabs[0].name).toBe("会话A");
     expect(tabs[0].taskMode).toBe("plan");
   });
@@ -829,12 +736,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -861,12 +762,6 @@ describe("会话标签状态与事件路由", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.workspace = null;
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.attachments = [];
-    store.loading = false;
     store.interactions = [];
     store.threads = [];
   });
@@ -963,9 +858,6 @@ describe("统一列表：活动会话 live 字段投影", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetTabsForTest();
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
   });
 
   it("切换会话标签：live 字段投影为目标标签状态", async () => {
@@ -985,42 +877,42 @@ describe("统一列表：活动会话 live 字段投影", () => {
     );
 
     activeTabId.value = "s1";
-    expect(store.currentThreadId).toBe("t1");
-    expect(store.currentThreadName).toBe("会话一");
-    expect(store.currentThreadWorkspace).toBe("D:/a");
+    expect(activeSessionTab()?.threadId).toBe("t1");
+    expect(activeSessionTab()?.name).toBe("会话一");
+    expect(activeSessionTab()?.workspace).toBe("D:/a");
     expect(activeSessionTab()?.turnActive).toBe(true);
 
     activeTabId.value = "s2";
-    expect(store.currentThreadId).toBe("t2");
-    expect(store.currentThreadName).toBe("会话二");
-    expect(store.currentThreadWorkspace).toBe("D:/b");
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(activeSessionTab()?.name).toBe("会话二");
+    expect(activeSessionTab()?.workspace).toBe("D:/b");
     expect(activeSessionTab()?.turnActive).toBe(false);
   });
 
   it("切到文件标签：live 字段保持最近会话不变，切回后仍一致", () => {
     tabs.push(makeSessionTab("s1", "t1", { name: "会话一" }));
     activeTabId.value = "s1";
-    expect(store.currentThreadId).toBe("t1");
+    expect(activeSessionTab()?.threadId).toBe("t1");
 
     (_tabs as unknown as Tab[]).push(makeFileTabFixture("file:test"));
     activeTabId.value = "file:test";
-    expect(store.currentThreadId).toBe("t1");
-    expect(store.currentThreadName).toBe("会话一");
+    expect(activeSessionTab()?.threadId).toBe("t1");
+    expect(activeSessionTab()?.name).toBe("会话一");
 
     activeTabId.value = "s1";
-    expect(store.currentThreadId).toBe("t1");
+    expect(activeSessionTab()?.threadId).toBe("t1");
   });
 
   it("关闭活动会话：投影切到相邻会话", async () => {
     tabs.push(makeSessionTab("s1", "t1", { name: "会话一" }));
     tabs.push(makeSessionTab("s2", "t2", { name: "会话二" }));
     activeTabId.value = "s1";
-    expect(store.currentThreadId).toBe("t1");
+    expect(activeSessionTab()?.threadId).toBe("t1");
 
     await closeSessionTab("s1");
     expect(activeTabId.value).toBe("s2");
-    expect(store.currentThreadId).toBe("t2");
-    expect(store.currentThreadName).toBe("会话二");
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(activeSessionTab()?.name).toBe("会话二");
   });
 
   it("关闭最后一个会话：live 复位默认态，无活动标签", async () => {
@@ -1029,8 +921,6 @@ describe("统一列表：活动会话 live 字段投影", () => {
 
     await closeSessionTab("s1");
     expect(activeTabId.value).toBe("");
-    expect(store.currentThreadId).toBeNull();
-    expect(store.currentThreadName).toBe("");
     expect(activeSessionTab()).toBeNull();
   });
 });
@@ -1039,12 +929,6 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
-    store.currentThreadId = null;
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
-    store.taskMode = "execute";
-    store.attachments = [];
-    store.loading = false;
     store.itemsByThread = {};
     store.activeWorkByThread = {};
   });
@@ -1058,7 +942,6 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
       makeSessionTab("sB", "tB", { turnActive: true, currentTurnId: null }),
     );
     activeTabId.value = "sA";
-    store.currentThreadId = "tA";
 
     const p = closeSessionTab("sB");
     expect(store.confirm?.title).toBe("关闭会话标签");
@@ -1072,7 +955,7 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     expect(interruptCalls).toHaveLength(0);
     expect(tabs.some((t) => t.id === "sB")).toBe(false);
     // A 的回合状态不受影响
-    expect(store.currentThreadId).toBe("tA");
+    expect(activeSessionTab()?.threadId).toBe("tA");
     expect(activeSessionTab()?.currentTurnId).toBe("TA");
     expect(activeSessionTab()?.turnActive).toBe(true);
   });
@@ -1083,8 +966,7 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
       resumedThreadId: "tB",
     });
     tabs.push(tab);
-    store.taskMode = "execute";
-    store.model = "gpt-5";
+    store.currentModel = "gpt-5";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "turn_start") {
         return Promise.resolve({ turn: { id: "turn-b" } });

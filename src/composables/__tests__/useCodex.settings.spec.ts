@@ -1,6 +1,8 @@
 import { ensureSkills, ensureThreadPlugins, loadSettings, refreshServer } from "../useCodex/settings";
 import { store } from "../useCodex/store";
-import { PLUGINS_RESPONSE, SKILLS_RESPONSE, resetUseCodexState } from "./useCodexTestHarness";
+import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
+import { activeTabId } from "../useEditorTabs";
+import { makeSessionTab, PLUGINS_RESPONSE, SKILLS_RESPONSE, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -187,7 +189,9 @@ describe("ensureSkills 技能全局缓存", () => {
 describe("loadSettings 默认权限初始值", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
-    store.permissionMode = "ask-for-approval";
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
   });
 
   it("启动时按持久化的默认权限设置权限模式初始值", async () => {
@@ -203,7 +207,7 @@ describe("loadSettings 默认权限初始值", () => {
     await loadSettings();
 
     expect(store.settings.default_permission).toBe("full-access");
-    expect(store.permissionMode).toBe("full-access");
+    expect(activeSessionTab()?.permissionMode).toBe("full-access");
   });
 
   it("持久化值非法时回退 ask-for-approval", async () => {
@@ -219,13 +223,12 @@ describe("loadSettings 默认权限初始值", () => {
     await loadSettings();
 
     expect(store.settings.default_permission).toBe("ask-for-approval");
-    expect(store.permissionMode).toBe("ask-for-approval");
+    expect(activeSessionTab()?.permissionMode).toBe("ask-for-approval");
   });
 });
 describe("loadSettings 记忆模式", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
-    store.permissionMode = "ask-for-approval";
   });
 
   it("启动时按持久化的记忆模式加载", async () => {

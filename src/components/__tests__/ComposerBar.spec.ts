@@ -47,7 +47,12 @@ const tabs = _tabs as unknown as SessionTab[];
 
 /** 默认会话标签 fixture：多数渲染用例仅需满足 ComposerBar 的 tab prop */
 function defaultTab(): SessionTab {
-  return reactive(makeSessionTab("s1", null));
+  __resetSessionTabsForTest();
+  const t = reactive(makeSessionTab("s1", null));
+  // 注册为活动标签：activeSessionTab()/附件/模型等按标签读写的路径可见
+  tabs.push(t);
+  activeTabId.value = "s1";
+  return t;
 }
 
 const mockedInvoke = vi.mocked(invoke);
@@ -155,14 +160,11 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
   let wrapper: VueWrapper | null = null;
 
   beforeEach(() => {
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.threadPlugins = {};
     store.skills = [];
     store.skillsLoaded = false;
-    store.currentThreadId = null;
     store.server.startupWorkspace = "D:/repo";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -244,7 +246,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     const rowChip = wrapper!.find(".attachment-chip");
     expect(rowChip.exists()).toBe(true);
     expect(rowChip.text()).toContain("@a.cs");
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" },
     ]);
   });
@@ -262,7 +264,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     const rowChip = wrapper.find(".attachment-chip");
     expect(rowChip.exists()).toBe(true);
     expect(rowChip.text()).toContain("@a.cs");
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" },
     ]);
   });
@@ -276,7 +278,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     const chip = wrapper.find(".ref-chip");
     expect(chip.exists()).toBe(true);
     expect(chip.text()).toBe("@documents");
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       {
         type: "skill",
         name: "documents",
@@ -295,7 +297,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     const chip = wrapper.find(".ref-chip");
     expect(chip.exists()).toBe(true);
     expect(chip.text()).toBe("$csharp-code-rules");
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       {
         type: "skill",
         name: "csharp-code-rules",
@@ -328,10 +330,10 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
       .findAll(".attachment-chip")
       .map((x) => x.text().replace("×", "").trim());
     expect(rowTexts).toEqual(["@a.cs"]);
-    expect(store.attachments.map((a) => a.type)).toEqual(["skill", "mention"]);
+    expect(activeSessionTab()?.attachments.map((a) => a.type)).toEqual(["skill", "mention"]);
   });
 
-  it("发送时把内联引用写入 store.attachments 并调用 sendPrompt", async () => {
+  it("发送时把内联引用写入 activeSessionTab()?.attachments 并调用 sendPrompt", async () => {
     mockRpc(true);
     await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
@@ -345,7 +347,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
       false,
     );
     expect(mockedSendPrompt.mock.calls[0][0]).toContain("检查一下");
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" },
     ]);
     expect(getEditor().getText()).toBe("");
@@ -371,7 +373,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     });
     expect(wrapper.findAll(".ref-chip").length).toBe(0);
     expect(wrapper.findAll(".attachment-chip").length).toBe(1);
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/pic.png" },
     ]);
   });
@@ -488,10 +490,9 @@ describe("ComposerBar 粘贴图片/文件", () => {
   let wrapper: VueWrapper | null = null;
 
   beforeEach(() => {
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.toast = "";
     store.threadPlugins = {};
-    store.currentThreadId = null;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -552,7 +553,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
       bytes: expect.any(Array),
       name: "pasted.png",
     });
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "C:/tmp/paste/pasted-1-1.png" },
     ]);
     expect(wrapper.find(".attachment-thumb").exists()).toBe(true);
@@ -571,7 +572,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
     await flushPromises();
 
     expect(ev.defaultPrevented).toBe(false);
-    expect(store.attachments).toHaveLength(0);
+    expect(activeSessionTab()?.attachments).toHaveLength(0);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "save_pasted_image",
       expect.anything(),
@@ -590,7 +591,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
       "save_pasted_image",
       expect.anything(),
     );
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/shot.png" },
     ]);
   });
@@ -603,7 +604,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await pasteItems([makeFileItem("report.pdf", "application/pdf")]);
 
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "mention", name: "report.pdf", path: "D:/repo/report.pdf" },
     ]);
     expect(wrapper.find(".attachment-chip").text()).toContain("@report.pdf");
@@ -618,7 +619,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
     await pasteItems([makeFileItem("report.pdf", "application/pdf")]);
 
     expect(store.toast).toContain("暂不支持该粘贴");
-    expect(store.attachments).toEqual([]);
+    expect(activeSessionTab()?.attachments).toEqual([]);
   });
 
   it("粘贴超大图片（>20MB）：提示跳过且不加附件", async () => {
@@ -632,7 +633,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
     ]);
 
     expect(store.toast).toContain("图片过大");
-    expect(store.attachments).toEqual([]);
+    expect(activeSessionTab()?.attachments).toEqual([]);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "save_pasted_image",
       expect.anything(),
@@ -654,7 +655,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
       "clipboard_file_paths",
       expect.anything(),
     );
-    expect(store.attachments).toEqual([]);
+    expect(activeSessionTab()?.attachments).toEqual([]);
   });
 
   it("混合粘贴：截图位图落盘 + 文件原路径，一次全部处理", async () => {
@@ -669,7 +670,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
       makeFileItem("a.txt", "text/plain"),
     ]);
 
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "C:/tmp/paste/pasted-2-2.png" },
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
     ]);
@@ -688,10 +689,9 @@ describe("ComposerBar 拖放图片/文件", () => {
   let wrapper: VueWrapper | null = null;
 
   beforeEach(() => {
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.toast = "";
     store.threadPlugins = {};
-    store.currentThreadId = null;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -733,7 +733,7 @@ describe("ComposerBar 拖放图片/文件", () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await dropAndFlush([makeDropFile("shot.png", "image/png", 8, "D:/repo/shot.png")]);
 
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/shot.png" },
     ]);
   });
@@ -750,7 +750,7 @@ describe("ComposerBar 拖放图片/文件", () => {
       bytes: expect.any(Array),
       name: "pasted.png",
     });
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "C:/tmp/drop/pasted-1-1.png" },
     ]);
   });
@@ -760,7 +760,7 @@ describe("ComposerBar 拖放图片/文件", () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await dropAndFlush([makeDropFile("a.txt", "text/plain", 8, "D:/repo/a.txt")]);
 
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
     ]);
   });
@@ -771,7 +771,7 @@ describe("ComposerBar 拖放图片/文件", () => {
     await dropAndFlush([makeDropFile("a.txt", "text/plain")]);
 
     expect(store.toast).toContain("暂不支持该拖放");
-    expect(store.attachments).toEqual([]);
+    expect(activeSessionTab()?.attachments).toEqual([]);
   });
 
   it("纯文本拖放：不阻止默认行为，不生成附件", async () => {
@@ -785,7 +785,7 @@ describe("ComposerBar 拖放图片/文件", () => {
     wrapper!.find(".composer").element.dispatchEvent(ev);
 
     expect(ev.defaultPrevented).toBe(false);
-    expect(store.attachments).toEqual([]);
+    expect(activeSessionTab()?.attachments).toEqual([]);
   });
 
   it("Tauri 拖放事件：over 高亮、drop 路径生成附件（图片 localImage、文件 mention）", async () => {
@@ -808,7 +808,7 @@ describe("ComposerBar 拖放图片/文件", () => {
     await flushPromises();
 
     expect(wrapper.find(".composer").classes()).not.toContain("dragover");
-    expect(store.attachments).toEqual([
+    expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/shot.png" },
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
     ]);
@@ -824,9 +824,8 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
       value: 600,
       configurable: true,
     });
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.threadPlugins = {};
-    store.currentThreadId = null;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -892,6 +891,7 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
 
 describe("ComposerBar 模型按钮与弹出层", () => {
   let wrapper: VueWrapper | null = null;
+  let tab: SessionTab;
 
   const GPT5 = {
     id: "gpt-5",
@@ -921,8 +921,9 @@ describe("ComposerBar 模型按钮与弹出层", () => {
   };
 
   beforeEach(() => {
-    store.model = null;
-    store.effort = null;
+    __resetSessionTabsForTest();
+    tab = defaultTab();
+    tab.threadId = "t1";
     store.models = [];
     store.modelsLoaded = false;
     store.permOpen = false;
@@ -933,8 +934,6 @@ describe("ComposerBar 模型按钮与弹出层", () => {
   });
 
   afterEach(() => {
-    store.model = null;
-    store.effort = null;
     store.models = [];
     store.permOpen = false;
     store.taskOpen = false;
@@ -945,22 +944,19 @@ describe("ComposerBar 模型按钮与弹出层", () => {
 
   it("模型按钮显示“名称 (强度)”带空格；无强度时仅显示名称", async () => {
     store.models = [GPT5];
-    store.model = "gpt-5";
-    store.effort = "high";
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    wrapper = mount(ComposerBar, { props: { tab } });
     await flushPromises();
     const chip = () => wrapper!.find(".model-chip").text();
     expect(chip()).toContain("gpt-5 (high)");
 
     // 无推理强度：仅显示模型名，不带括号
-    store.effort = null;
     store.models[0].defaultReasoningEffort = "";
     await flushPromises();
     expect(chip()).toBe("gpt-5");
   });
 
   it("弹出层外部 mousedown 自动关闭；内部与触发按钮不关闭", async () => {
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
     expect(store.modelOpen).toBe(true);
@@ -1003,7 +999,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
   });
 
   it("打开一个菜单时自动关闭另外两个，再点当前按钮关闭", async () => {
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".perm-chip").trigger("click");
     await flushPromises();
     expect(store.permOpen).toBe(true);
@@ -1025,10 +1021,9 @@ describe("ComposerBar 模型按钮与弹出层", () => {
 
   it("应用模型/强度后立即调用 thread/settings/update 同步当前会话", async () => {
     store.toast = "";
-    store.currentThreadId = "t1";
     store.modelsLoaded = true;
     store.models = [GPT5, EXTRA];
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
     const optionBtns = () => wrapper!.findAll(".popup-menu .option-btn");
@@ -1045,24 +1040,24 @@ describe("ComposerBar 模型按钮与弹出层", () => {
       method: "thread/settings/update",
       params: { threadId: "t1", model: "gpt-5-extra", effort: "low" },
     });
-    expect(store.model).toBe("gpt-5-extra");
-    expect(store.effort).toBe("low");
+    expect(activeSessionTab()?.model).toBe("gpt-5-extra");
+    expect(activeSessionTab()?.effort).toBe("low");
     expect(store.modelOpen).toBe(false);
   });
 
   it("无当前会话时应用模型不调用 thread/settings/update", async () => {
+    tab.threadId = null;
     store.toast = "";
-    store.currentThreadId = null;
     store.modelsLoaded = true;
     store.models = [GPT5, EXTRA];
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
     await wrapper.findAll(".popup-menu .option-btn")[1].trigger("click");
     await flushPromises();
     await wrapper.find(".popup-menu .btn.primary").trigger("click");
     await flushPromises();
-    expect(store.model).toBe("gpt-5-extra");
+    expect(activeSessionTab()?.model).toBe("gpt-5-extra");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "codex_rpc",
       expect.objectContaining({ method: "thread/settings/update" }),
@@ -1071,7 +1066,6 @@ describe("ComposerBar 模型按钮与弹出层", () => {
 
   it("thread/settings/update 失败时 toast 提示并关闭菜单", async () => {
     store.toast = "";
-    store.currentThreadId = "t1";
     store.modelsLoaded = true;
     store.models = [GPT5];
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
@@ -1080,13 +1074,13 @@ describe("ComposerBar 模型按钮与弹出层", () => {
       }
       return {};
     });
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
     await wrapper.find(".popup-menu .btn.primary").trigger("click");
     await flushPromises();
     expect(store.toast).toContain("同步失败");
-    expect(store.model).toBeNull();
+    expect(activeSessionTab()?.model).toBeNull();
     expect(store.modelOpen).toBe(false);
   });
 });
@@ -1098,10 +1092,8 @@ describe("ComposerBar 手动压缩上下文", () => {
   beforeEach(() => {
     __resetSessionTabsForTest();
     tab = defaultTab();
+    tab.threadId = "t1";
     tab.threadTokenUsage = { used: 5000, window: 10000 };
-    tabs.push(tab);
-    activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     store.toast = "";
     store.confirm = null;
     mockedInvoke.mockReset();
@@ -1147,14 +1139,14 @@ describe("ComposerBar 手动压缩上下文", () => {
   });
 
   it("无当前会话时按钮禁用，回合进行中不禁用且可压缩", async () => {
-    store.currentThreadId = null;
+    tab.threadId = null;
     wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.vm.$nextTick();
     expect(
       (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
     ).toBe(true);
 
-    store.currentThreadId = "t1";
+    tab.threadId = "t1";
     await wrapper.vm.$nextTick();
     expect(
       (wrapper.find(".ctx-window").element as HTMLButtonElement).disabled,
@@ -1219,18 +1211,12 @@ describe("ComposerBar 任务目标芯片", () => {
   beforeEach(() => {
     __resetSessionTabsForTest();
     tab = defaultTab();
-    tabs.push(tab);
-    activeTabId.value = "s1";
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.threadPlugins = {};
     store.skills = [];
     store.skillsLoaded = false;
     store.server.startupWorkspace = "D:/repo";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
     store.settings.enter_to_send = true;
-    store.currentThreadId = null;
-    store.taskMode = "execute";
     store.confirm = null;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1243,7 +1229,6 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("无目标时只有旗子（无角标），点击勾选目标 flag", async () => {
-    store.currentThreadId = null;
     wrapper = mount(ComposerBar, { props: { tab } });
     await flushPromises();
     expect(wrapper.find(".goal-chip").exists()).toBe(true);
@@ -1284,7 +1269,6 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("回合运行中且无目标：目标按钮隐藏（不可勾选）", async () => {
-    store.currentThreadId = "t1";
     tab.turnActive = true;
     wrapper = mount(ComposerBar, { props: { tab } });
     await flushPromises();
@@ -1294,7 +1278,6 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("目标进行中：出现角标且挂 status-active（呼吸动画）", async () => {
-    store.currentThreadId = "t1";
     tab.goalText = "目标";
     tab.goalStatus = "active";
     wrapper = mount(ComposerBar, { props: { tab } });
@@ -1306,7 +1289,6 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("有目标时点击旗子直接取消目标（不弹确认、不开弹层）", async () => {
-    store.currentThreadId = "t1";
     tab.threadId = "t1";
     tab.goalText = "目标";
     tab.goalStatus = "active";
@@ -1337,7 +1319,7 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("计划模式下发送消息：不消费勾选，目标保持待首条执行消息", async () => {
-    store.taskMode = "plan";
+    tab.taskMode = "plan";
     wrapper = mount(ComposerBar, { props: { tab } });
     await flushPromises();
     await wrapper.find(".goal-icon-btn").trigger("click");
@@ -1351,7 +1333,6 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("长目标 tooltip 截断到 120 字符预览", async () => {
-    store.currentThreadId = "t1";
     tab.threadId = "t1";
     tab.goalText = "修".repeat(200);
     tab.goalStatus = "active";
@@ -1427,14 +1408,11 @@ describe("ComposerBar 权限与草稿会话私有", () => {
   }
 
   beforeEach(() => {
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.threadPlugins = {};
     store.skills = [];
     store.skillsLoaded = false;
-    store.currentThreadId = null;
     store.server.startupWorkspace = "D:/repo";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1456,7 +1434,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
     expect(store.permOpen).toBe(true);
     await wrapper.findAll(".mode-menu-item")[2].trigger("click");
     await flushPromises();
-    expect(store.permissionMode).toBe("full-access");
+    expect(activeSessionTab()?.permissionMode).toBe("full-access");
     expect(store.permOpen).toBe(false);
   });
 
@@ -1478,6 +1456,9 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       }),
       draftAttachments: [draft],
     });
+    __resetSessionTabsForTest();
+    tabs.push(tab);
+    activeTabId.value = "s1";
     wrapper = mount(ComposerBar, {
       props: { tab, active: true },
     });
@@ -1485,8 +1466,8 @@ describe("ComposerBar 权限与草稿会话私有", () => {
     const ed = getEditor();
     const text = ed.getText();
     expect(text).toContain("草稿内容");
-    expect(store.attachments).toHaveLength(1);
-    expect(store.attachments[0]).toMatchObject({
+    expect(activeSessionTab()?.attachments).toHaveLength(1);
+    expect(activeSessionTab()?.attachments[0]).toMatchObject({
       type: "mention",
       path: "D:/repo/src/a.cs",
     });
@@ -1568,14 +1549,11 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
   }
 
   beforeEach(() => {
-    store.attachments.splice(0);
+    activeSessionTab()?.attachments.splice(0);
     store.threadPlugins = {};
     store.skills = [];
     store.skillsLoaded = false;
-    store.currentThreadId = null;
     store.server.startupWorkspace = "D:/repo";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1607,7 +1585,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
     const a = makeAttachment("a.txt", "D:/repo/a.txt");
     expect(addAttachmentToActiveSession(a)).toBe(true);
     // 只写入 A 的输入区并同步 store；B 完全不受影响
-    expect(store.attachments).toEqual([a]);
+    expect(activeSessionTab()?.attachments).toEqual([a]);
     expect(tabA.draftAttachments).toEqual([a]);
     expect(tabB.draftAttachments).toEqual([]);
   });
@@ -1629,7 +1607,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
     activeTabId.value = "tab-b";
     const b = makeAttachment("b.cs", "D:/repo/src/b.cs");
     expect(addAttachmentToActiveSession(b)).toBe(true);
-    expect(store.attachments).toEqual([b]);
+    expect(activeSessionTab()?.attachments).toEqual([b]);
     expect(tabB.draftAttachments).toEqual([b]);
     expect(tabA.draftAttachments).toEqual([]);
   });
@@ -1648,7 +1626,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
 
     const a = makeAttachment("a.txt", "D:/repo/a.txt");
     expect(addAttachmentToActiveSession(a)).toBe(false);
-    expect(store.attachments).toEqual([]);
+    expect(activeSessionTab()?.attachments).toEqual([]);
     expect(tabA.draftAttachments).toEqual([]);
   });
 });

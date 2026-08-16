@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThreadItem, Turn } from "../../lib/types";
+import { activeSessionTab } from "./sessionState";
 import { store } from "./store";
 import type { SessionTab } from "./types";
 
@@ -117,13 +118,12 @@ export async function loadFullItems(threadId: string): Promise<ThreadItem[] | nu
  * 传 tab 时按指定会话标签解析（后台标签发送回合时沙箱可写根等应跟随该标签）。
  */
 export function resolveSessionWorkspace(tab?: SessionTab): string {
-  const cwd = tab
-    ? tab.threadId
-      ? tab.workspace
-      : tab.newChatWorkspace
-    : store.currentThreadId
-      ? store.currentThreadWorkspace
-      : store.newChatWorkspace;
+  const session = tab ?? activeSessionTab();
+  const cwd = session
+    ? session.threadId
+      ? session.workspace
+      : session.newChatWorkspace
+    : "";
   return cwd?.trim() || store.server.startupWorkspace?.trim() || "";
 }
 

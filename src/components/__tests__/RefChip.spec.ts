@@ -18,7 +18,6 @@ function tooltipText(): string {
 describe("RefChip 自定义悬浮卡片", () => {
   beforeEach(() => {
     document.body.innerHTML = ""; // 清掉跨用例残留的 Teleport 悬浮卡片
-    store.currentThreadId = null;
     store.threadPlugins = {};
     store.skills = [];
     store.skillsLoaded = false;

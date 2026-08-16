@@ -30,8 +30,8 @@ export function freshSessionTab(): SessionTab {
     nameIsFirstMessage: false,
     permissionMode: store.settings.default_permission,
     taskMode: "execute",
-    model: store.model,
-    effort: store.effort,
+    model: store.currentModel || null,
+    effort: null,
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
@@ -114,43 +114,6 @@ export function sessionTabTitle(tab: SessionTab): string {
 }
 
 
-/** 把标签记录恢复到 live 字段（切换/关闭标签时用） */
-function restoreSession(tab: SessionTab) {
-  store.currentThreadId = tab.threadId;
-  store.currentThreadName = tab.name;
-  store.permissionMode = tab.permissionMode;
-  store.taskMode = tab.taskMode;
-  store.model = tab.model;
-  store.effort = tab.effort;
-  store.currentThreadOrigin = tab.origin;
-  store.currentThreadWorkspace = tab.workspace;
-  store.resumedThreadId = tab.resumedThreadId;
-  store.loading = tab.loading;
-  store.newChatWorkspace = tab.newChatWorkspace;
-  store.attachments = [...tab.attachments];
-}
-
-
-/** 把 live 字段快照到活动标签记录（活动标签的字段变化后由 watch 持续调用） */
-export function syncActiveSessionTab() {
-  const tab = activeSessionTab();
-  if (!tab) return;
-  tab.threadId = store.currentThreadId;
-  tab.name = store.currentThreadName;
-  tab.permissionMode = store.permissionMode;
-  tab.taskMode = store.taskMode;
-  tab.model = store.model;
-  tab.effort = store.effort;
-  tab.origin = store.currentThreadOrigin;
-  tab.workspace = store.currentThreadWorkspace;
-  tab.resumedThreadId = store.resumedThreadId;
-  tab.loading = store.loading;
-  tab.newChatWorkspace = store.newChatWorkspace;
-  tab.attachments = [...store.attachments];
-  tab.title = sessionTabTitle(tab);
-}
-
-
 /** 乐观复位被停止/关闭的标签回合状态（interrupt 异步完成前先复位展示） */
 export function markSessionTabStopped(tab: SessionTab | null | undefined) {
   if (!tab) return;
@@ -163,28 +126,18 @@ export function markSessionTabStopped(tab: SessionTab | null | undefined) {
 }
 
 
-/** 复位 live 字段到“无会话标签”默认态（不创建标签；允许 0 个会话标签） */
-function resetLiveSessionState() {
-  restoreSession(freshSessionTab());
-}
-
-
 /**
- * 当前显示标签为会话时：同步 activeSessionTabId 并投影 live 字段；
- * 无任何标签时复位 live 默认态。切换/关闭/复位统一走这里。
+ * 当前显示标签为会话时维护 activeSessionTabId（最近会话回退）；
+ * 无任何标签时清空。会话状态已全部落在标签对象上，无需投影。
  */
 function syncActiveSessionProjection() {
   const t = activeTab.value;
   if (t && t.kind === TabKind.Chat) {
-    if (activeSessionTabId !== t.id) {
-      activeSessionTabId = t.id;
-      restoreSession(t);
-    }
+    activeSessionTabId = t.id;
     return;
   }
   if (!t && activeSessionTabId !== null) {
     activeSessionTabId = null;
-    resetLiveSessionState();
   }
 }
 

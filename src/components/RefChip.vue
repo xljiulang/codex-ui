@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { openLink, sessionWorkspace } from "../lib/links";
-import { NEW_CHAT_PLUGIN_KEY, store } from "../composables/useCodex";
+import {
+  NEW_CHAT_PLUGIN_KEY,
+  activeSessionTab,
+  store,
+} from "../composables/useCodex";
 
 const props = withDefaults(
   defineProps<{
@@ -23,7 +27,7 @@ const tipText = computed(() => {
   if (props.kind === "file") return props.path;
   const name = props.label.replace(/^[@$]/, "");
   if (props.kind === "plugin") {
-    const key = store.currentThreadId ?? NEW_CHAT_PLUGIN_KEY;
+    const key = activeSessionTab()?.threadId ?? NEW_CHAT_PLUGIN_KEY;
     const pluginId = props.path.startsWith("plugin://")
       ? props.path.slice("plugin://".length)
       : "";

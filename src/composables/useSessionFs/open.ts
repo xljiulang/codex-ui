@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
+  activeSessionTab,
   addAttachmentToActiveSession,
   setToast,
-  store,
   toastError,
   workspace,
 } from "../useCodex";
@@ -98,11 +98,11 @@ export async function openPathInApp(path: string): Promise<boolean> {
   }
 }
 
-/** 添加为会话附件：路由到当前活动会话的 ComposerBar；异常态兜底 push store */
+/** 添加为会话附件：路由到当前活动会话的 ComposerBar；异常态兜底 push 活动标签附件 */
 export function addAsAttachment(entry: FsEntry) {
   const a = toUserAttachment(entry.name, entry.path);
   if (!addAttachmentToActiveSession(a)) {
-    store.attachments.push(a);
+    activeSessionTab()?.attachments.push(a);
   }
   setToast(`已添加「${entry.name}」为会话附件`);
 }

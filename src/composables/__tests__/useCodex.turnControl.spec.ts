@@ -44,16 +44,10 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
-    store.currentThreadId = null;
-    store.currentThreadName = "";
-    store.currentThreadWorkspace = null;
-    store.currentThreadOrigin = null;
-    store.resumedThreadId = null;
     store.toast = "";
   });
 
   it("setGoal：无会话时不挂载（返回 false，不调用 goal_set）", async () => {
-    store.currentThreadId = null;
     const ok = await setGoal("修复登录");
     expect(ok).toBe(false);
     expect(activeSessionTab()).toBeNull();
@@ -64,7 +58,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("setGoal：空文本不提交", async () => {
-    store.currentThreadId = "t1";
     const ok = await setGoal("   ");
     expect(ok).toBe(false);
     expect(store.toast).toContain("目标不能为空");
@@ -75,7 +68,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("setGoal：超过 4000 字符被拒绝", async () => {
-    store.currentThreadId = "t1";
     const ok = await setGoal("长".repeat(4001));
     expect(ok).toBe(false);
     expect(store.toast).toContain("4000");
@@ -84,7 +76,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   it("setGoal：成功后本地记录目标与 active 状态", async () => {
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     mockedInvoke.mockResolvedValue(undefined);
     const ok = await setGoal("  修复登录流程  ");
     expect(ok).toBe(true);
@@ -105,7 +96,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     mockedInvoke.mockRejectedValue(new Error("服务端拒绝"));
     const ok = await setGoal("新目标");
     expect(ok).toBe(false);
@@ -132,7 +122,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     expect(await newEmptyChat()).toBe(true);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "goal_clear",
@@ -150,7 +139,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -173,12 +161,11 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       "goal_clear",
       expect.anything(),
     );
-    expect(store.currentThreadId).toBe("t2");
+    expect(activeSessionTab()?.threadId).toBe("t2");
     expect(tabs[0].goalText).toBe("旧目标");
   });
 
   it("openThread：goal_get 返回终态时 toast + 复位 + goal_clear", async () => {
-    store.currentThreadId = "t1";
     store.toast = "";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
@@ -200,7 +187,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     });
     const p = openThread("t2");
     expect(await p).toBe(true);
-    expect(store.currentThreadId).toBe("t2");
+    expect(activeSessionTab()?.threadId).toBe("t2");
     // 终态目标：打开即 toast 提示并复位（相当于没有目标），服务端同步清除
     expect(activeSessionTab()?.goalText).toBeNull();
     expect(activeSessionTab()?.goalStatus).toBeNull();
@@ -210,7 +197,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("openThread：goal_get 兼容 {goal:{objective,status}} 包裹返回", async () => {
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -238,7 +224,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("openThread：goal_get 失败或未挂目标时状态为空", async () => {
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -262,7 +247,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("openThread：loadFullItems 以 asc+full 拉取完整工具/命令详情", async () => {
-    store.currentThreadId = "t1";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -302,8 +286,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }),
     );
     activeTabId.value = "s1";
-    store.currentThreadId = "t1";
-    store.resumedThreadId = "t1"; // 跳过 thread_resume
+    tabs[0].resumedThreadId = "t1"; // 跳过 thread_resume
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "turn_start") {
         return Promise.resolve({ turn: { id: "nt1" } });

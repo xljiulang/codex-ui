@@ -29,7 +29,7 @@ function formatDay(ts: number): string {
 // 按回合分组：userMessage 起始新回合，行对象按 key 缓存复用
 const turnsBuilder = createTurnsBuilder(formatDay);
 watch(
-  () => store.currentThreadId,
+  () => props.tab.threadId,
   () => turnsBuilder.clear(),
 );
 const turns = computed<Turn[]>(() => turnsBuilder.build(items.value));
@@ -147,7 +147,7 @@ watch(
 // 切换会话（新建/打开历史/会话失效重置）后重置吸底状态，
 // 避免旧会话的上滑状态残留导致新对话默认不吸底
 watch(
-  () => store.currentThreadId,
+  () => props.tab.threadId,
   () => {
     // 切回已加载会话：内容可能仍处 content-visibility 估算布局，直接吸底会停在最新消息之上
     if (items.value.length > 0) {

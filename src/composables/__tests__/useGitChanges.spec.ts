@@ -38,10 +38,8 @@ const STATUS = {
 describe("useGitChanges 状态机与监听", () => {
   beforeEach(() => {
     __resetGitChangesForTest();
-    store.currentThreadId = "t1";
-    store.currentThreadWorkspace = null;
-    store.newChatWorkspace = null;
     store.server.startupWorkspace = "";
+    store.workspace = "D:/repo";
     mockedInvoke.mockReset();
     mockListen.mockReset();
     mockListen.mockResolvedValue(vi.fn());
@@ -52,7 +50,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("刷新成功进入 ok 并保存状态", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockResolvedValue(STATUS);
     await refreshGitChanges();
     expect(gitState.value).toBe("ok");
@@ -60,7 +57,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("not_a_repo 错误进入 not_repo", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockRejectedValue({ code: "not_a_repo", message: "not a git repo" });
     await refreshGitChanges();
     expect(gitState.value).toBe("not_repo");
@@ -68,7 +64,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("其他错误进入 error 并提取中文提示", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockRejectedValue({ code: "repo_error", message: "boom" });
     await refreshGitChanges();
     expect(gitState.value).toBe("error");
@@ -76,13 +71,13 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("无工作目录时进入 error 并提示", async () => {
+    store.workspace = null;
     await refreshGitChanges();
     expect(gitState.value).toBe("error");
     expect(gitErrorMsg.value).toBe("暂无工作目录");
   });
 
   it("initGitRepo 成功返回 true 并刷新为 ok", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "git_changes_status") return Promise.resolve(STATUS);
       return Promise.resolve(undefined);
@@ -93,7 +88,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("激活时启动监听并刷新，停用时停止监听", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockResolvedValue(STATUS);
     setGitChangesActive(true);
     await flushPromises();
@@ -106,7 +100,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("1 秒冷却期内监听事件不触发重复刷新", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockResolvedValue(STATUS);
     setGitChangesActive(true);
     await flushPromises();
@@ -123,7 +116,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("工作区切换不切 loading，在途旧结果作废并续刷", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockResolvedValue(STATUS);
     setGitChangesActive(true);
     await flushPromises();
@@ -151,8 +143,8 @@ describe("useGitChanges 状态机与监听", () => {
     // 旧工作区刷新在途时切换工作区
     void refreshGitChanges();
     await flushPromises();
-    store.currentThreadWorkspace = "D:/other";
     await flushPromises();
+    store.workspace = "D:/other";
     expect(gitState.value).toBe("ok");
     expect(gitStatus.value).toEqual(STATUS);
 
@@ -169,7 +161,6 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("已有数据时刷新保持 ok（不切 loading）", async () => {
-    store.currentThreadWorkspace = "D:/repo";
     mockedInvoke.mockResolvedValue(STATUS);
     setGitChangesActive(true);
     await flushPromises();
@@ -202,7 +193,6 @@ describe("useGitChanges 状态机与监听", () => {
   it("自操作进行中 watcher 事件不触发刷新", async () => {
     vi.useFakeTimers();
     try {
-      store.currentThreadWorkspace = "D:/repo";
       mockedInvoke.mockResolvedValue(STATUS);
       setGitChangesActive(true);
       await vi.advanceTimersByTimeAsync(0);

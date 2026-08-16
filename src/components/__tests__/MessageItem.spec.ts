@@ -331,7 +331,6 @@ describe("用户消息中的图片附件", () => {
 
   it("文件/技能 chip 可点击触发 reveal_path，插件 chip 不可点击", async () => {
     store.server.startupWorkspace = "D:/repo";
-    store.currentThreadId = null;
     store.threadPlugins[NEW_CHAT_PLUGIN_KEY] = {
       loaded: true,
       plugins: [

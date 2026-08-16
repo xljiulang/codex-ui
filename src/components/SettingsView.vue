@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  activeSessionTab,
   askConfirm,
   saveSettings,
   setToast,
@@ -75,11 +76,12 @@ async function apply() {
   });
   // 有当前会话时立即同步记忆模式（与模型同步一致）：失败 toast 但不阻塞保存
   let syncError: string | null = null;
-  if (store.currentThreadId) {
+  const threadId = activeSessionTab()?.threadId;
+  if (threadId) {
     try {
       await invoke("codex_rpc", {
         method: "thread/memoryMode/set",
-        params: { threadId: store.currentThreadId, mode: memoryMode.value },
+        params: { threadId, mode: memoryMode.value },
       });
     } catch (e) {
       syncError = toastError(e);

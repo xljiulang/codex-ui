@@ -8,7 +8,17 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 
 import AppHeader from "../AppHeader.vue";
 import { tooltipDirective } from "../../directives/tooltip";
-import { pickAndOpenNewSession, store } from "../../composables/useCodex";
+import {
+  activeSessionTab,
+  pickAndOpenNewSession,
+  store,
+} from "../../composables/useCodex";
+import { activeTabId, tabs as _tabs } from "../../composables/useEditorTabs";
+import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
+import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
+import type { SessionTab } from "../../composables/useCodex";
+
+const tabs = _tabs as unknown as SessionTab[];
 
 const mockedPickAndOpenNewSession = vi.mocked(pickAndOpenNewSession);
 
@@ -20,9 +30,10 @@ function mountHeader() {
 
 describe("AppHeader 导航", () => {
   beforeEach(() => {
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
     store.showSettings = false;
-    store.currentThreadId = null;
-    store.currentThreadWorkspace = null;
     store.server.startupWorkspace = "";
     store.panelTab = "history";
     mockedPickAndOpenNewSession.mockClear();
@@ -36,11 +47,10 @@ describe("AppHeader 导航", () => {
 
   it("设置页再点设置关闭设置，回到原对话且不新建/不中断", async () => {
     store.showSettings = true;
-    store.currentThreadId = "t1";
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="设置"]').trigger("click");
     expect(store.showSettings).toBe(false);
-    expect(store.currentThreadId).toBe("t1");
+    expect(activeSessionTab()?.threadId).toBe("t1");
     expect(mockedPickAndOpenNewSession).not.toHaveBeenCalled();
   });
 
