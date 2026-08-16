@@ -22,6 +22,7 @@ import {
   gitState,
   gitStatus,
   initGitRepo,
+  markGitStatusFresh,
   refreshGitChanges,
   setGitChangesActive,
 } from "../composables/useGitChanges";
@@ -218,9 +219,11 @@ async function toggleBranchMenu() {
   branchMenuOpen.value = !branchMenuOpen.value;
 }
 
-/** 分支/远端操作导致仓库状态变化：回写 gitStatus（联动提交历史刷新） */
+/** 分支/远端/提交操作导致仓库状态变化：回写 gitStatus（联动提交历史刷新），
+ * 并抑制紧随其后的 watcher 自动刷新（操作已回写最新状态） */
 function applyBranchStatus(st: GitStatus) {
   gitStatus.value = st;
+  markGitStatusFresh();
 }
 
 function onWindowClick(e: MouseEvent) {

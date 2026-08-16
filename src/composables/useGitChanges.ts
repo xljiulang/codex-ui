@@ -32,9 +32,16 @@ export function revealGitFile(workspace: string, path: string): void {
 /** 事件冷却窗口：监听事件距上次刷新不足该时长时忽略，兜底防自激刷新 */
 const REFRESH_COOLDOWN_MS = 1000;
 
+/** 操作成功后抑制自动刷新的窗口：操作已回写最新状态，watcher 会在操作改文件后约 3s
+ * 触发一次 `git-changes/changed`，若不去重会导致面板重复刷新并多跑一次 git status */
+const AUTO_REFRESH_SUPPRESS_MS = 5000;
+
 let active = false;
 let refreshing = false;
 let lastRefreshAt = 0;
+let suppressAutoRefreshUntil = 0;
+let gitOpInFlight = false;
+let refreshRetryPending = false;
 let unlistenGitEvent: UnlistenFn | null = null;
 let watcherStarted = false;
 
@@ -61,13 +68,21 @@ async function refresh() {
       gitErrorMsg.value = "暂无工作目录";
       return;
     }
-    gitState.value = "loading";
     gitErrorMsg.value = "";
     try {
       const st = await invoke<GitStatus>("git_changes_status", { workspace: root });
+      if (workspace.value !== root) {
+        // 请求期间工作区已切换：结果作废，结束后续刷新工作区
+        refreshRetryPending = true;
+        return;
+      }
       gitStatus.value = st;
       gitState.value = "ok";
     } catch (e) {
+      if (workspace.value !== root) {
+        refreshRetryPending = true;
+        return;
+      }
       gitStatus.value = null;
       const code = errorCodeOf(e);
       if (code === "not_a_repo") {
@@ -79,12 +94,29 @@ async function refresh() {
     }
   } finally {
     refreshing = false;
+    if (refreshRetryPending) {
+      refreshRetryPending = false;
+      void refresh();
+    }
   }
 }
 
 /** 手动刷新（供 Git 更改 Tab 的刷新按钮与错误重试使用） */
 export async function refreshGitChanges() {
   await refresh();
+}
+
+/** 标记状态已是最新：抑制紧随其后的 watcher 自动刷新（供拉取/推送/暂存/提交/分支等
+ * 已回写 gitStatus 的操作调用，避免 3s 防抖事件触发冗余刷新） */
+export function markGitStatusFresh(ms: number = AUTO_REFRESH_SUPPRESS_MS) {
+  suppressAutoRefreshUntil = Date.now() + ms;
+}
+
+/** 本应用 git 写操作进行中标记：期间忽略 watcher 自动刷新。
+ * 写操作成功后会回写最新 gitStatus，若事件在操作结束前到达，只会触发一次排队等待的
+ * 冗余刷新（且可能长时间卡在 loading），因此操作期间直接忽略自动刷新。 */
+export function setGitOpInFlight(v: boolean) {
+  gitOpInFlight = v;
 }
 
 /** 一键初始化 Git 仓库（仅 git init，不自动提交）；成功后自动刷新状态 */
@@ -115,6 +147,8 @@ async function syncWatcher() {
       try {
         unlistenGitEvent = await listen("git-changes/changed", () => {
           if (!active) return;
+          if (gitOpInFlight) return;
+          if (Date.now() < suppressAutoRefreshUntil) return;
           if (Date.now() - lastRefreshAt < REFRESH_COOLDOWN_MS) return;
           void refresh();
         });
@@ -150,11 +184,11 @@ export function setGitChangesActive(v: boolean) {
   if (v) void refresh();
 }
 
-// 根目录切换（切换会话/新建会话选目录）：重新检测并刷新，监听跟随新根
+// 根目录切换（切换会话/新建会话选目录）：不切 loading，旧数据保持到新工作区状态到达；
+// 刷新在途时由 refresh 自身检测旧结果并自动续刷
 watch(workspace, (r, old) => {
   if (r === old) return;
   if (!active) return;
-  gitStatus.value = null;
   void syncWatcher();
   void refresh();
 });
@@ -164,6 +198,9 @@ export function __resetGitChangesForTest() {
   active = false;
   refreshing = false;
   lastRefreshAt = 0;
+  suppressAutoRefreshUntil = 0;
+  gitOpInFlight = false;
+  refreshRetryPending = false;
   gitState.value = "loading";
   gitStatus.value = null;
   gitErrorMsg.value = "";

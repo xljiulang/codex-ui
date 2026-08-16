@@ -12,9 +12,9 @@ use crate::codex::path_util::{clean_path, norm_key};
 /// 单文件大小上限（diff 等全量读入内存的操作），超过直接报错
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
-/// 文件监听防抖窗口：最后一次 watch 文件变化后静默 3 秒才获取 git 变更信息，
+/// 文件监听防抖窗口：最后一次 watch 文件变化后静默 300ms 才获取 git 变更信息，
 /// 避免频繁创建 git 子进程。
-const WATCH_DEBOUNCE_MS: u64 = 3000;
+const WATCH_DEBOUNCE_MS: u64 = 300;
 
 /// 串行化所有 git 操作：git 子进程会写索引锁文件，并发写会互相覆盖。
 /// 锁在 spawn_blocking 任务内部获取并持有到任务真正结束，超时后任务继续执行时
@@ -2097,7 +2097,7 @@ pub async fn git_changes_watch_start(
         if let Ok(ev) = res {
             for p in ev.paths {
                 // 本地廉价过滤：排除 `. 开头目录`（.git 除外）与 node_modules；
-                // 忽略文件由 3s 防抖后的 git status 原生过滤
+                // 忽略文件由 300ms 防抖后的 git status 原生过滤
                 if path_under_excluded_dot_dir(&root_for_filter, &p) {
                     continue;
                 }
@@ -2118,7 +2118,7 @@ pub async fn git_changes_watch_start(
             .map_err(|e| git_err(format!("监听 git 目录失败 {}: {e}", git_dir.display())))?;
     }
 
-    // 防抖任务：最后一次 watch 文件变化静默 3 秒后 emit 变更事件
+    // 防抖任务：最后一次 watch 文件变化静默 300ms 后 emit 变更事件
     let handle = app.clone();
     let root_for_task = repo_root.clone();
     tauri::async_runtime::spawn(async move {

@@ -22,6 +22,7 @@ import { tooltipDirective } from "../../directives/tooltip";
 import { settleConfirm, store } from "../../composables/useCodex";
 import {
   __resetGitChangesForTest,
+  refreshGitChanges,
   revealGitFile,
 } from "../../composables/useGitChanges";
 import { __resetSessionFsForTest } from "../../composables/useSessionFs";
@@ -136,6 +137,60 @@ describe("GitView 空状态与初始化", () => {
 
     expect(wrapper.find(".git-view").text()).toContain("boom");
     expect(wrapper.find(".git-view").text()).toContain("重试");
+  });
+});
+
+describe("GitView 刷新无 loading", () => {
+  it("已有数据时刷新不切 loading 且不清空面板", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    expect(wrapper.find(".git-head").exists()).toBe(true);
+
+    let resolveStatus!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return new Promise((r) => {
+          resolveStatus = r;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    void refreshGitChanges();
+    await flushPromises();
+    // 刷新挂起时：旧数据仍在、不出现 loading 提示
+    expect(wrapper.find(".git-head").exists()).toBe(true);
+    expect(wrapper.find(".git-note").exists()).toBe(false);
+    expect(wrapper.find(".git-loading-mask").exists()).toBe(false);
+
+    resolveStatus(okStatus);
+    await flushPromises();
+    expect(wrapper.find(".git-head").exists()).toBe(true);
+    expect(wrapper.find(".git-note").exists()).toBe(false);
+  });
+
+  it("首次加载无数据时显示整面板 loading", async () => {
+    let resolveStatus!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") {
+        return new Promise((r) => {
+          resolveStatus = r;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    expect(wrapper.find(".git-note").exists()).toBe(true);
+    expect(wrapper.find(".git-head").exists()).toBe(false);
+
+    resolveStatus(okStatus);
+    await flushPromises();
+    expect(wrapper.find(".git-note").exists()).toBe(false);
+    expect(wrapper.find(".git-head").exists()).toBe(true);
   });
 });
 

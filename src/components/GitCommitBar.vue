@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { setToast, toastError } from "../composables/useCodex";
+import { setGitOpInFlight } from "../composables/useGitChanges";
 import type { GitStatus } from "../lib/gitChanges";
 import { ICON_CHECK } from "../lib/icons";
 
@@ -39,6 +40,7 @@ async function doCommit() {
   if (!props.workspace) return;
   commitBusy.value = true;
   try {
+    setGitOpInFlight(true);
     const st = await invoke<GitStatus>("git_changes_commit", {
       workspace: props.workspace,
       message: commitMessage.value.trim(),
@@ -49,6 +51,7 @@ async function doCommit() {
   } catch (e) {
     setToast(toastError(e));
   } finally {
+    setGitOpInFlight(false);
     commitBusy.value = false;
   }
 }

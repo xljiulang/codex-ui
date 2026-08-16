@@ -1,6 +1,7 @@
 import { computed, ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { setToast, toastError, workspace } from "./useCodex";
+import { markGitStatusFresh, setGitOpInFlight } from "./useGitChanges";
 import type {
   GitPullResult,
   GitPushResult,
@@ -32,14 +33,17 @@ export function useGitRemoteOps(options: { gitStatus: Ref<GitStatus | null> }) {
     if (!root) return;
     pullBusy.value = true;
     try {
+      setGitOpInFlight(true);
       const res = await invoke<GitPullResult>("git_changes_pull", {
         workspace: root,
       });
       options.gitStatus.value = res.status;
+      markGitStatusFresh();
       setToast(res.message);
     } catch (e) {
       setToast(toastError(e));
     } finally {
+      setGitOpInFlight(false);
       pullBusy.value = false;
     }
   }
@@ -69,14 +73,17 @@ export function useGitRemoteOps(options: { gitStatus: Ref<GitStatus | null> }) {
     if (!root) return;
     pushBusy.value = true;
     try {
+      setGitOpInFlight(true);
       const res = await invoke<GitPushResult>("git_changes_push", {
         workspace: root,
       });
       options.gitStatus.value = res.status;
+      markGitStatusFresh();
       setToast(res.message);
     } catch (e) {
       setToast(toastError(e));
     } finally {
+      setGitOpInFlight(false);
       pushBusy.value = false;
     }
   }

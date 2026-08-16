@@ -24,6 +24,7 @@ import {
   initGitRepo,
   refreshGitChanges,
   setGitChangesActive,
+  setGitOpInFlight,
 } from "../useGitChanges";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -119,5 +120,115 @@ describe("useGitChanges 状态机与监听", () => {
       ([cmd]) => cmd === "git_changes_status",
     ).length;
     expect(statusCalls).toBe(2);
+  });
+
+  it("工作区切换不切 loading，在途旧结果作废并续刷", async () => {
+    store.currentThreadWorkspace = "D:/repo";
+    mockedInvoke.mockResolvedValue(STATUS);
+    setGitChangesActive(true);
+    await flushPromises();
+    expect(gitState.value).toBe("ok");
+    expect(gitStatus.value).toEqual(STATUS);
+
+    let resolveOld!: (v: unknown) => void;
+    let resolveNew!: (v: unknown) => void;
+    let statusCall = 0;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "git_changes_status") {
+        statusCall += 1;
+        if (statusCall === 1) {
+          return new Promise((r) => {
+            resolveOld = r;
+          });
+        }
+        return new Promise((r) => {
+          resolveNew = r;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    // 旧工作区刷新在途时切换工作区
+    void refreshGitChanges();
+    await flushPromises();
+    store.currentThreadWorkspace = "D:/other";
+    await flushPromises();
+    expect(gitState.value).toBe("ok");
+    expect(gitStatus.value).toEqual(STATUS);
+
+    // 旧结果返回：作废不写入
+    resolveOld({ ...STATUS, branch: "stale" });
+    await flushPromises();
+    expect(gitStatus.value?.branch).toBe("main");
+
+    // 自动续刷新工作区
+    resolveNew({ ...STATUS, branch: "new" });
+    await flushPromises();
+    expect(gitStatus.value?.branch).toBe("new");
+    expect(gitState.value).toBe("ok");
+  });
+
+  it("已有数据时刷新保持 ok（不切 loading）", async () => {
+    store.currentThreadWorkspace = "D:/repo";
+    mockedInvoke.mockResolvedValue(STATUS);
+    setGitChangesActive(true);
+    await flushPromises();
+    expect(gitState.value).toBe("ok");
+    expect(gitStatus.value).toEqual(STATUS);
+
+    let resolveStatus!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "git_changes_status") {
+        return new Promise((r) => {
+          resolveStatus = r;
+        });
+      }
+      return Promise.resolve(STATUS);
+    });
+    const pending = refreshGitChanges();
+    await flushPromises();
+    // 刷新挂起中：状态保持 ok、旧数据不清空
+    expect(gitState.value).toBe("ok");
+    expect(gitStatus.value).toEqual(STATUS);
+
+    const updated = { ...STATUS, branch: "dev" };
+    resolveStatus(updated);
+    await pending;
+    await flushPromises();
+    expect(gitState.value).toBe("ok");
+    expect(gitStatus.value).toEqual(updated);
+  });
+
+  it("自操作进行中 watcher 事件不触发刷新", async () => {
+    vi.useFakeTimers();
+    try {
+      store.currentThreadWorkspace = "D:/repo";
+      mockedInvoke.mockResolvedValue(STATUS);
+      setGitChangesActive(true);
+      await vi.advanceTimersByTimeAsync(0);
+      const handler = mockListen.mock.calls[0]?.[1];
+      expect(handler).toBeTypeOf("function");
+
+      // 越过 1s 冷却后：in-flight 期间事件被忽略
+      vi.advanceTimersByTime(1100);
+      setGitOpInFlight(true);
+      handler();
+      await vi.advanceTimersByTimeAsync(0);
+      let statusCalls = mockedInvoke.mock.calls.filter(
+        ([cmd]) => cmd === "git_changes_status",
+      ).length;
+      expect(statusCalls).toBe(1);
+
+      // 复位后事件恢复触发刷新
+      setGitOpInFlight(false);
+      handler();
+      await vi.advanceTimersByTimeAsync(0);
+      statusCalls = mockedInvoke.mock.calls.filter(
+        ([cmd]) => cmd === "git_changes_status",
+      ).length;
+      expect(statusCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

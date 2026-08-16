@@ -1,6 +1,7 @@
 import { ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, setToast, toastError } from "./useCodex";
+import { markGitStatusFresh, setGitOpInFlight } from "./useGitChanges";
 import type { CtxItem } from "./useActionMenu";
 import type { GitFile, GitStatus } from "../lib/gitChanges";
 import type { GitDirNode } from "../lib/gitTree";
@@ -34,11 +35,14 @@ export function useGitFileActions(options: {
     if (!root) return;
     gitActionBusy.value = true;
     try {
+      setGitOpInFlight(true);
       const st = await invoke<GitStatus>(cmd, { workspace: root, path: relPath });
       options.gitStatus.value = st;
+      markGitStatusFresh();
     } catch (e) {
       setToast(toastError(e));
     } finally {
+      setGitOpInFlight(false);
       gitActionBusy.value = false;
     }
   }
@@ -50,11 +54,14 @@ export function useGitFileActions(options: {
     if (!root) return;
     gitActionBusy.value = true;
     try {
+      setGitOpInFlight(true);
       const st = await invoke<GitStatus>(cmd, { workspace: root });
       options.gitStatus.value = st;
+      markGitStatusFresh();
     } catch (e) {
       setToast(toastError(e));
     } finally {
+      setGitOpInFlight(false);
       gitActionBusy.value = false;
     }
   }

@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import GitRemotesSection from "./GitRemotesSection.vue";
 import { askConfirm, setToast, toastError } from "../composables/useCodex";
+import { setGitOpInFlight } from "../composables/useGitChanges";
 import {
   type GitBranches,
   type GitMergeResult,
@@ -16,6 +17,16 @@ import {
 
 const ICON_MERGE =
   "M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z";
+
+/** 分支写操作包装：进行中忽略 watcher 自动刷新（操作结束会回写最新状态） */
+async function runBranchOp<T>(fn: () => Promise<T>): Promise<T> {
+  setGitOpInFlight(true);
+  try {
+    return await fn();
+  } finally {
+    setGitOpInFlight(false);
+  }
+}
 
 const props = defineProps<{
   /** 仓库根目录（invoke 参数与分支操作的工作区） */
@@ -88,10 +99,12 @@ async function fetchRemoteBranches() {
   if (fetchBusy.value || branchBusy.value) return;
   fetchBusy.value = true;
   try {
-    const res = await invoke<GitBranches>("git_changes_remote_fetch", {
-      workspace: props.workspace,
-      remote: defaultFetchRemote(),
-    });
+    const res = await runBranchOp(() =>
+      invoke<GitBranches>("git_changes_remote_fetch", {
+        workspace: props.workspace,
+        remote: defaultFetchRemote(),
+      }),
+    );
     applyBranches(res);
     setToast("已拉取远端更新");
   } catch (e) {
@@ -114,28 +127,30 @@ async function checkoutRemoteBranch(remoteBranch: string) {
   if (shortName === props.branchLabel) return;
   setBranchBusy(true);
   try {
-    if (branches.value.includes(shortName)) {
-      const st = await invoke<GitStatus>("git_changes_branch_switch", {
+    await runBranchOp(async () => {
+      if (branches.value.includes(shortName)) {
+        const st = await invoke<GitStatus>("git_changes_branch_switch", {
+          workspace: props.workspace,
+          name: shortName,
+        });
+        emit("status", st);
+        emit("close");
+        setToast(`已切换到本地分支 ${shortName}`);
+        return;
+      }
+      const st = await invoke<GitStatus>("git_changes_branch_checkout_remote", {
         workspace: props.workspace,
-        name: shortName,
+        remoteBranch,
       });
       emit("status", st);
       emit("close");
-      setToast(`已切换到本地分支 ${shortName}`);
-      return;
-    }
-    const st = await invoke<GitStatus>("git_changes_branch_checkout_remote", {
-      workspace: props.workspace,
-      remoteBranch,
+      setToast(`已检出远程分支 ${remoteBranch}`);
+      // 刷新分支列表（新增本地分支与上游）
+      const res = await invoke<GitBranches>("git_changes_branches", {
+        workspace: props.workspace,
+      });
+      applyBranches(res);
     });
-    emit("status", st);
-    emit("close");
-    setToast(`已检出远程分支 ${remoteBranch}`);
-    // 刷新分支列表（新增本地分支与上游）
-    const res = await invoke<GitBranches>("git_changes_branches", {
-      workspace: props.workspace,
-    });
-    applyBranches(res);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -156,10 +171,12 @@ async function deleteRemoteBranch(remoteBranch: string) {
   if (!ok || branchBusy.value) return;
   setBranchBusy(true);
   try {
-    const res = await invoke<GitBranches>("git_changes_remote_branch_delete", {
-      workspace: props.workspace,
-      remoteBranch,
-    });
+    const res = await runBranchOp(() =>
+      invoke<GitBranches>("git_changes_remote_branch_delete", {
+        workspace: props.workspace,
+        remoteBranch,
+      }),
+    );
     applyBranches(res);
     setToast(`已删除远程分支 ${remoteBranch}`);
   } catch (e) {
@@ -173,10 +190,12 @@ async function switchBranch(name: string) {
   if (branchBusy.value || name === props.branchLabel) return;
   setBranchBusy(true);
   try {
-    const st = await invoke<GitStatus>("git_changes_branch_switch", {
-      workspace: props.workspace,
-      name,
-    });
+    const st = await runBranchOp(() =>
+      invoke<GitStatus>("git_changes_branch_switch", {
+        workspace: props.workspace,
+        name,
+      }),
+    );
     emit("status", st);
     emit("close");
   } catch (e) {
@@ -191,17 +210,19 @@ async function createBranch() {
   if (!name || branchBusy.value) return;
   setBranchBusy(true);
   try {
-    const st = await invoke<GitStatus>("git_changes_branch_create", {
-      workspace: props.workspace,
-      name,
+    await runBranchOp(async () => {
+      const st = await invoke<GitStatus>("git_changes_branch_create", {
+        workspace: props.workspace,
+        name,
+      });
+      emit("status", st);
+      newBranchName.value = "";
+      // 重新拉取分支列表，保持弹层打开
+      const res = await invoke<GitBranches>("git_changes_branches", {
+        workspace: props.workspace,
+      });
+      applyBranches(res);
     });
-    emit("status", st);
-    newBranchName.value = "";
-    // 重新拉取分支列表，保持弹层打开
-    const res = await invoke<GitBranches>("git_changes_branches", {
-      workspace: props.workspace,
-    });
-    applyBranches(res);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -213,10 +234,12 @@ async function deleteBranch(name: string) {
   if (branchBusy.value || name === props.branchLabel) return;
   setBranchBusy(true);
   try {
-    const st = await invoke<GitStatus>("git_changes_branch_delete", {
-      workspace: props.workspace,
-      name,
-    });
+    const st = await runBranchOp(() =>
+      invoke<GitStatus>("git_changes_branch_delete", {
+        workspace: props.workspace,
+        name,
+      }),
+    );
     emit("status", st);
     branches.value = branches.value.filter((b) => b !== name);
   } catch (e) {
@@ -231,10 +254,12 @@ async function mergeBranch(name: string) {
   if (branchBusy.value || mergeBusy.value || name === props.branchLabel) return;
   mergeBusy.value = true;
   try {
-    const res = await invoke<GitMergeResult>("git_changes_branch_merge", {
-      workspace: props.workspace,
-      name,
-    });
+    const res = await runBranchOp(() =>
+      invoke<GitMergeResult>("git_changes_branch_merge", {
+        workspace: props.workspace,
+        name,
+      }),
+    );
     emit("status", res.status);
     setToast(res.message);
     emit("close");
