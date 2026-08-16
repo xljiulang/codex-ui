@@ -216,6 +216,22 @@ async function mountPanel(active = true) {
     global: { directives: { tooltip: tooltipDirective } },
   });
   await flushPromises();
+  // happy-dom 无真实布局：给文件区一个足够大的矩形，避免拖拽边界判定把测试坐标判为界外
+  const list = wrapper.find(".resource-list").element as HTMLElement;
+  Object.defineProperty(list, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      left: 0,
+      top: 0,
+      right: 2000,
+      bottom: 2000,
+      width: 2000,
+      height: 2000,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  });
   return wrapper;
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import ContextMenu from "./ContextMenu.vue";
 import ModalDialog from "./ModalDialog.vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   setToast,
   workspace,
@@ -114,6 +114,8 @@ const {
   openProps,
 });
 // 树内拖拽移动（自绘指针拖拽）
+/** 拖拽边界：资源文件区（.resource-list），指针离开时隐藏幽灵/清除高亮 */
+const listRef = ref<HTMLElement | null>(null);
 const {
   dragOverPath,
   dragGhost,
@@ -121,7 +123,7 @@ const {
   isDragging,
   onRowPointerDown,
   cancelDrag,
-} = useResourceDragDrop(moveEntry);
+} = useResourceDragDrop(moveEntry, listRef);
 
 watch(
   () => props.active,
@@ -293,7 +295,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="history-list resource-list">
+    <div ref="listRef" class="history-list resource-list">
       <!-- 搜索态：平铺结果 -->
       <template v-if="searchActive">
         <div

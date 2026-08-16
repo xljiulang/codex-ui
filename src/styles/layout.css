@@ -383,6 +383,29 @@
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* 历史会话行：会话 Logo（与标签栏「+」新建会话同款，按行高缩放） */
+.history-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  color: var(--text);
+}
+
+.history-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.history-icon svg .logo-c {
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
 .history-title {
   min-width: 0;
   font-size: 12px;
@@ -548,4 +571,3 @@
   outline: 2px solid var(--accent-glow);
   outline-offset: -1px;
 }
-

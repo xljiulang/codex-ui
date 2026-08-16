@@ -210,6 +210,16 @@ describe("HistoryView 置顶", () => {
     await clickCtxItem(wrapper, "取消固定");
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", false);
   });
+
+  it("会话行显示会话 Logo 图标（六边形外框 + C 标记，与「新建会话」一致）", () => {
+    const wrapper = mount(HistoryView);
+    const icons = wrapper.findAll(".history-icon");
+    expect(icons.length).toBeGreaterThan(0);
+    const paths = icons[0].findAll("path");
+    expect(paths).toHaveLength(2);
+    expect(paths[1].classes()).toContain("logo-c");
+    wrapper.unmount();
+  });
 });
 
 describe("HistoryView 右键菜单", () => {

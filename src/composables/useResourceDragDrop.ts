@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import type { FsEntry } from "../lib/sessionFs";
 
 /** 指针拖拽移动超过该阈值才激活（区分普通点击） */
@@ -10,6 +10,8 @@ const DRAG_THRESHOLD = 5;
  */
 export function useResourceDragDrop(
   moveEntry: (srcPath: string, destDir: string) => Promise<boolean>,
+  /** 拖拽边界：资源文件区元素；缺省不限制（指针可越界，仅离区时隐藏幽灵/清除高亮） */
+  listRef?: Ref<HTMLElement | null>,
 ) {
   const dragStart = ref<{ entry: FsEntry; x: number; y: number } | null>(null);
   const dragActive = ref(false);
@@ -53,6 +55,14 @@ export function useResourceDragDrop(
     return !targetKey.startsWith(srcKey + "\\");
   }
 
+  /** 指针是否位于拖拽边界（资源文件区）矩形内；未提供边界时不限制 */
+  function isInsideBoundary(x: number, y: number): boolean {
+    const el = listRef?.value;
+    if (!el) return true;
+    const r = el.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
   function onWindowPointerMove(e: PointerEvent) {
     const start = dragStart.value;
     if (!start) return;
@@ -62,6 +72,12 @@ export function useResourceDragDrop(
       }
       dragActive.value = true;
       document.body.classList.add("resource-dragging");
+    }
+    // 离开资源文件区：隐藏幽灵并清除目标高亮（拖拽保持，回到区内恢复；区外松手不移动）
+    if (!isInsideBoundary(e.clientX, e.clientY)) {
+      dragGhost.value = null;
+      dragOverPath.value = null;
+      return;
     }
     dragGhost.value = {
       x: e.clientX,

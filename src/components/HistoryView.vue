@@ -312,6 +312,16 @@ onBeforeUnmount(() => {
           @click="openHistorySession(row.thread.id)"
           @contextmenu="openCtxMenu(row.thread, $event)"
         >
+          <span class="history-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path
+                v-for="p in SESSION_LOGO_PATHS"
+                :key="p.d"
+                :d="p.d"
+                :class="{ 'logo-c': p.accent }"
+              />
+            </svg>
+          </span>
           <span class="history-main">
             <input
               v-if="editingId === row.thread.id"
