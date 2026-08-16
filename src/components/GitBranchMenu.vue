@@ -174,7 +174,7 @@ async function switchBranch(name: string) {
   setBranchBusy(true);
   try {
     const st = await invoke<GitStatus>("git_changes_branch_switch", {
-      path: props.workspace,
+      workspace: props.workspace,
       name,
     });
     emit("status", st);
@@ -192,14 +192,14 @@ async function createBranch() {
   setBranchBusy(true);
   try {
     const st = await invoke<GitStatus>("git_changes_branch_create", {
-      path: props.workspace,
+      workspace: props.workspace,
       name,
     });
     emit("status", st);
     newBranchName.value = "";
     // 重新拉取分支列表，保持弹层打开
     const res = await invoke<GitBranches>("git_changes_branches", {
-      path: props.workspace,
+      workspace: props.workspace,
     });
     applyBranches(res);
   } catch (e) {
@@ -214,7 +214,7 @@ async function deleteBranch(name: string) {
   setBranchBusy(true);
   try {
     const st = await invoke<GitStatus>("git_changes_branch_delete", {
-      path: props.workspace,
+      workspace: props.workspace,
       name,
     });
     emit("status", st);
@@ -232,7 +232,7 @@ async function mergeBranch(name: string) {
   mergeBusy.value = true;
   try {
     const res = await invoke<GitMergeResult>("git_changes_branch_merge", {
-      path: props.workspace,
+      workspace: props.workspace,
       name,
     });
     emit("status", res.status);

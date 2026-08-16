@@ -59,6 +59,16 @@ describe("useGitRemoteOps", () => {
     expect(ops.gitAvailable.value).toBe(false);
   });
 
+  it("checkGitAvailable 传入工作区并写回可用状态", async () => {
+    mockedInvoke.mockResolvedValueOnce(true);
+    const ops = useGitRemoteOps({ gitStatus: ref<GitStatus | null>(status()) });
+    await ops.checkGitAvailable();
+    expect(mockedInvoke).toHaveBeenCalledWith("git_changes_git_available", {
+      workspace: "D:\\repo",
+    });
+    expect(ops.gitAvailable.value).toBe(true);
+  });
+
   it("无仓库根目录时静默返回", async () => {
     const ops = useGitRemoteOps({ gitStatus: ref<GitStatus | null>(null) });
     await ops.doPull();

@@ -48,7 +48,7 @@ export function useGitRemoteOps(options: { gitStatus: Ref<GitStatus | null> }) {
   async function checkGitAvailable() {
     try {
       gitAvailable.value = await invoke<boolean>("git_changes_git_available", {
-        path: repoWorkspace.value || workspace.value || "",
+        workspace: repoWorkspace.value || workspace.value || "",
       });
     } catch {
       gitAvailable.value = false;

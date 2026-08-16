@@ -412,7 +412,7 @@ describe("GitView 分支管理", () => {
       ([cmd]) => cmd === "git_changes_branch_switch",
     );
     expect(call).toBeTruthy();
-    expect((call?.[1] as { path: string; name: string }).name).toBe("dev");
+    expect(call?.[1]).toEqual({ workspace: rootPath, name: "dev" });
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
     expect(wrapper.find(".git-branch-btn").text()).toContain("dev");
     wrapper.unmount();
@@ -433,7 +433,7 @@ describe("GitView 分支管理", () => {
       ([cmd]) => cmd === "git_changes_branch_create",
     );
     expect(call).toBeTruthy();
-    expect((call?.[1] as { path: string; name: string }).name).toBe("hotfix");
+    expect(call?.[1]).toEqual({ workspace: rootPath, name: "hotfix" });
     expect(
       (wrapper.find(".git-branch-input").element as HTMLInputElement).value,
     ).toBe("");
@@ -462,7 +462,7 @@ describe("GitView 分支管理", () => {
       ([cmd]) => cmd === "git_changes_branch_delete",
     );
     expect(call).toBeTruthy();
-    expect((call?.[1] as { path: string; name: string }).name).toBe("feature");
+    expect(call?.[1]).toEqual({ workspace: rootPath, name: "feature" });
     const names = wrapper.findAll(".git-branch-name").map((n) => n.text());
     expect(names).not.toContain("feature");
     wrapper.unmount();
@@ -494,7 +494,7 @@ describe("GitView 分支管理", () => {
       ([cmd]) => cmd === "git_changes_branch_merge",
     );
     expect(call).toBeTruthy();
-    expect((call?.[1] as { path: string; name: string }).name).toBe("feature");
+    expect(call?.[1]).toEqual({ workspace: rootPath, name: "feature" });
     expect(store.toast).toContain("已将分支 feature 合并到 main");
     expect(wrapper.find(".git-branch-menu").exists()).toBe(false);
     wrapper.unmount();
