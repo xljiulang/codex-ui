@@ -920,6 +920,69 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("激活文件标签：gitRevealTarget 指向该标签的 workspace/path", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
+      if (cmd === "session_fs_metadata") {
+        return Promise.resolve({
+          name: "repo",
+          path: root,
+          relPath: ".",
+          isDir: true,
+          size: null,
+          modifiedAtMs: 0,
+          createdAtMs: 0,
+          childCount: 1,
+        });
+      }
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "session_fs_icon_for_ext") return Promise.resolve(null);
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openFileTab(root, aTxt);
+    await settle();
+    expect(gitRevealTarget.value).toMatchObject({
+      workspace: root,
+      path: aTxt,
+    });
+    expect(typeof gitRevealTarget.value?.seq).toBe("number");
+    wrapper.unmount();
+  });
+
+  it("激活预览标签：gitRevealTarget 指向该标签的 workspace/path", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+      }
+      if (cmd === "session_fs_metadata") {
+        return Promise.resolve({
+          name: "sub",
+          path: root + "\\sub",
+          relPath: ".",
+          isDir: true,
+          size: null,
+          modifiedAtMs: 0,
+          createdAtMs: 0,
+          childCount: 0,
+        });
+      }
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openPreviewTab("pdf", root + "\\sub", "doc.pdf");
+    await settle();
+    expect(gitRevealTarget.value).toMatchObject({
+      workspace: root + "\\sub",
+      path: "doc.pdf",
+    });
+    expect(typeof gitRevealTarget.value?.seq).toBe("number");
+    wrapper.unmount();
+  });
+
   it("会话进行中：会话标签显示呼吸灯，结束后隐藏", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {

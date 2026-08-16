@@ -9,6 +9,7 @@ import {
   joinFsPath,
   type FsEntry,
 } from "../../lib/sessionFs";
+import { normalizeFsPath, pathEquals } from "../../lib/path";
 import {
   childrenByPath,
   expanded,
@@ -25,7 +26,7 @@ import { clearSearch, runSearchNow } from "./search";
 export async function resolveFallbackRoot(): Promise<string> {
   try {
     const w = await invoke<string>("startup_workspace");
-    if (w && w.trim()) return w.trim();
+    if (w && w.trim()) return normalizeFsPath(w.trim());
   } catch {
     // 忽略，沿用空根
   }
@@ -34,7 +35,7 @@ export async function resolveFallbackRoot(): Promise<string> {
 
 /** 拉取一个目录的直接子项（懒加载；已缓存且非强制时直接返回） */
 export async function loadDir(path: string, force = false): Promise<void> {
-  const root = workspace.value;
+  const root = normalizeFsPath(workspace.value);
   if (!root) return;
   if (!force && childrenByPath[path] !== undefined) return;
   loadingByPath[path] = true;
@@ -61,7 +62,7 @@ export async function loadRoot(root: string): Promise<boolean> {
       workspace: root,
       path: root,
     });
-    if (workspace.value !== root) return false; // 请求期间工作区已切换：结果作废
+    if (!pathEquals(workspace.value, root)) return false; // 请求期间工作区已切换：结果作废
     rootEntry.value = entry;
     expanded.add(root);
     await loadDir(root);
@@ -72,6 +73,26 @@ export async function loadRoot(root: string): Promise<boolean> {
   } finally {
     loadingRoot.value = false;
   }
+}
+
+let rootLoadInFlight: Promise<boolean> | null = null;
+let rootLoadTarget = "";
+
+/** 确保根已加载（单飞）：已就绪直接返回；同根并发加载共享同一次请求；
+ * 供 revealAbsPath 与资源面板激活并行时去重，避免重复拉根元信息 */
+export function ensureRootLoaded(root: string): Promise<boolean> {
+  if (rootEntry.value?.path === root && childrenByPath[root] !== undefined) {
+    return Promise.resolve(true);
+  }
+  if (rootLoadInFlight && rootLoadTarget === root) {
+    return rootLoadInFlight;
+  }
+  rootLoadTarget = root;
+  rootLoadInFlight = loadRoot(root).finally(() => {
+    rootLoadInFlight = null;
+    rootLoadTarget = "";
+  });
+  return rootLoadInFlight;
 }
 
 /** 展开/折叠目录；首次展开时懒加载子项 */
@@ -85,7 +106,7 @@ export function toggleDir(path: string) {
 
 /** 刷新根 + 所有已加载目录，保留展开状态 */
 export async function refreshAll() {
-  const root = workspace.value;
+  const root = normalizeFsPath(workspace.value);
   if (!root) return;
   if (searchActive.value) {
     await runSearchNow();
@@ -115,6 +136,36 @@ export async function refreshAll() {
   }
 }
 
+/** 按 data-fs-path 大小写不敏感查找资源树行（Windows 路径大小写不敏感） */
+function findRowByPath(path: string): HTMLElement | null {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-fs-path]")) {
+    const p = el.dataset.fsPath;
+    if (p && pathEquals(p, path)) return el;
+  }
+  return null;
+}
+
+/**
+ * 等待目标行渲染后滚动定位：面板刚激活/目录异步加载时行可能晚于 selectedPath
+ * 落定才出现，且 git 路径与磁盘路径可能大小写不一致；找到后把 selectedPath 校正为
+ * 树的规范路径（保证高亮匹配），再 scrollIntoView。上限重试，超时静默放弃
+ * （已删除文件等不在树中的路径）。
+ */
+async function scrollToReveal(path: string): Promise<void> {
+  const MAX_TRIES = 12;
+  for (let i = 0; i < MAX_TRIES; i++) {
+    await nextTick();
+    const el = findRowByPath(path);
+    if (!el) continue;
+    const canonical = el.dataset.fsPath;
+    if (canonical && canonical !== path) {
+      selectedPath.value = canonical;
+    }
+    el.scrollIntoView({ block: "center" });
+    return;
+  }
+}
+
 /**
  * 按绝对路径在树中定位：路径不在当前工作区内（大小写不敏感边界判定）视为
  * 「匹配不上」直接跳过；匹配时逐级展开祖先目录、清除搜索、选中并滚动到可见。
@@ -124,15 +175,13 @@ async function revealAbsPath(
   absPath: string,
   expandTarget: boolean,
 ): Promise<void> {
-  const root = workspace.value;
+  const root = normalizeFsPath(workspace.value);
   if (!root || !absPath) return;
-  const norm = absPath.replace(/\//g, "\\");
+  const norm = normalizeFsPath(absPath);
   if (!isPathUnderRoot(root, norm)) return;
   // 根尚未加载（资源面板从未激活/工作区刚切换）时先加载根，否则下方祖先展开后
   // 树仍无法渲染目标行，selectedPath/scrollIntoView 会静默失效（diff 标签联动资源树失效）
-  if (!rootEntry.value || childrenByPath[root] === undefined) {
-    await loadRoot(root);
-  }
+  await ensureRootLoaded(root);
   const parts = relPathOf(root, norm)
     .replace(/\\/g, "/")
     .split("/")
@@ -146,10 +195,7 @@ async function revealAbsPath(
   }
   selectedPath.value = norm;
   clearSearch();
-  await nextTick();
-  document
-    .querySelector(`[data-fs-path="${CSS.escape(norm)}"]`)
-    ?.scrollIntoView({ block: "center" });
+  await scrollToReveal(norm);
 }
 
 /** Tab 激活同步入口：文件/预览/Diff 标签带绝对路径时调用；工作区外路径自动跳过 */

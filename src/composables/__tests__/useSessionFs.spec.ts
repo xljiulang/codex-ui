@@ -545,4 +545,47 @@ describe("revealAbsPathInTree 资源树定位", () => {
     expect(selectedPath.value).toBe(root + "\\src\\main.ts");
     expect(expanded.has(root + "\\src")).toBe(true);
   });
+
+  it("并发 reveal 同一根：session_fs_metadata 只调用一次", async () => {
+    let resolveMeta!: (v: unknown) => void;
+    let metaCalls = 0;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "session_fs_metadata") {
+        metaCalls += 1;
+        return new Promise((r) => {
+          resolveMeta = r;
+        });
+      }
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+
+    const p1 = revealAbsPathInTree(root + "\\src\\main.ts");
+    const p2 = revealAbsPathInTree(root + "\\src\\main.ts");
+    // 单飞：并发定位共享同一次根加载
+    expect(metaCalls).toBe(1);
+
+    resolveMeta(rootEntryData);
+    await p1;
+    await p2;
+    await nextTick();
+    expect(metaCalls).toBe(1);
+    expect(rootEntry.value?.path).toBe(root);
+    expect(selectedPath.value).toBe(root + "\\src\\main.ts");
+  });
+
+  it("正斜杠 workspace（如 git repo_workspace）：缓存键全为反斜杠规范，无正斜杠平行键", async () => {
+    store.workspace = "D:/repo";
+    await revealAbsPathInTree("D:/repo/src/main.ts");
+    await nextTick();
+
+    expect(rootEntry.value?.path).toBe(root);
+    expect(childrenByPath[root]).toBeDefined();
+    expect(childrenByPath["D:/repo"]).toBeUndefined();
+    expect(childrenByPath[root + "\\src"]).toBeDefined();
+    expect(expanded.has(root)).toBe(true);
+    expect(expanded.has(root + "\\src")).toBe(true);
+    expect(expanded.has("D:/repo")).toBe(false);
+    expect(selectedPath.value).toBe(root + "\\src\\main.ts");
+  });
 });

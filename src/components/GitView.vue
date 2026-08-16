@@ -26,9 +26,14 @@ import {
   refreshGitChanges,
   setGitChangesActive,
 } from "../composables/useGitChanges";
-import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
+import {
+  ensureEntryIcons,
+  iconFor,
+  revealAbsPathInTree,
+} from "../composables/useSessionFs";
 import { openDiffTab } from "../composables/useEditorTabs";
 import { joinFsPath, type FsEntry } from "../lib/sessionFs";
+import { pathEquals, relPathOf } from "../lib/path";
 import {
   normalizeDiffKind,
   type GitFile,
@@ -139,13 +144,11 @@ const changeCount = computed(() => gitStatus.value?.files.length ?? 0);
 function normGitRel(target: { workspace: string; path: string }): string | null {
   const root = repoWorkspace.value;
   if (!root) return null;
-  if (target.workspace && target.workspace !== root) return null;
-  const rootNorm = root.replace(/\\/g, "/").replace(/\/+$/, "");
-  let p = target.path.replace(/\\/g, "/");
-  if (p.startsWith(rootNorm + "/")) {
-    p = p.slice(rootNorm.length + 1);
-  }
-  return p || null;
+  // 工作区比较走全局共享方法（正/反斜杠、大小写等价）；目标路径可能是相对仓库根的
+  // 相对路径或绝对路径，统一归一为相对仓库根的正斜杠形式
+  if (target.workspace && !pathEquals(target.workspace, root)) return null;
+  const rel = relPathOf(root, target.path).replace(/\\/g, "/");
+  return rel || null;
 }
 
 /** 在 Git 面板中定位并高亮目标变更文件：展开祖先目录、滚动到可见 */
@@ -158,7 +161,11 @@ function attemptReveal() {
   const match =
     worktreeFiles.value.find((f) => f.path === rel) ??
     stagedFiles.value.find((f) => f.path === rel);
-  if (!match) return;
+  if (!match) {
+    // 目标文件不在当前变更/暂存列表中：清空高亮（激活无 git 变更文件不再残留旧高亮）
+    selectedGitPath.value = "";
+    return;
+  }
   const parts = rel.split("/");
   let acc = "";
   for (let i = 0; i < parts.length - 1; i++) {
@@ -291,6 +298,9 @@ async function openDiff(file: GitFile) {
       diff,
       workspace: root,
     });
+    // 直接联动资源树定位：与 EditorPane 标签激活 watch 双保险，覆盖
+    // 「Git 面板开 diff → 切资源面板」场景的时序/竞态
+    void revealAbsPathInTree(joinFsPath(root, file.path));
   } catch (e) {
     setToast(toastError(e));
   }

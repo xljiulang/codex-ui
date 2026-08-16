@@ -25,7 +25,14 @@ import {
   unregisterComposerAddHandler,
   __resetSessionTabsForTest,
 } from "../../composables/useCodex";
-import { __resetSessionFsForTest } from "../../composables/useSessionFs";
+import {
+  __resetSessionFsForTest,
+  selectedPath,
+} from "../../composables/useSessionFs";
+import {
+  __resetGitChangesForTest,
+  gitRevealTarget,
+} from "../../composables/useGitChanges";
 import {
   __resetEditorTabsForTest,
   activeTabId,
@@ -252,6 +259,7 @@ describe("ResourceView 文件树", () => {
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
+    __resetGitChangesForTest();
     __resetEditorTabsForTest();
     __resetSessionTabsForTest();
     // 默认存在一个活动会话标签：附件入口可见（隐藏场景由专门用例覆盖）
@@ -342,6 +350,173 @@ describe("ResourceView 文件树", () => {
       .find((r) => r.attributes("data-fs-path") === mainTs.path);
     expect(row?.exists()).toBe(true);
     expect(row?.classes()).toContain("active");
+    expect(scrollIntoView).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("点击文件行：联动 Git 面板高亮（revealGitFile）", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.find(".resource-row.resource-file").trigger("click");
+    await flushPromises();
+    expect(gitRevealTarget.value).toMatchObject({
+      workspace: rootPath,
+      path: aTxt.path,
+    });
+    wrapper.unmount();
+  });
+
+  it("点击搜索结果文件：联动 Git 面板高亮（revealGitFile）", async () => {
+    vi.useFakeTimers();
+    const wrapper = await mountPanel();
+    await wrapper.find(".history-search").setValue("main");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    await wrapper.find(".resource-result").trigger("click");
+    await flushPromises();
+    expect(gitRevealTarget.value).toMatchObject({
+      workspace: rootPath,
+      path: mainTs.path,
+    });
+    wrapper.unmount();
+  });
+
+  it("reveal 大小写不敏感：diff 路径与磁盘路径大小写不一致仍高亮定位", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+    const canonical = srcDir.path + "\\Main.TS";
+    const base = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (
+        cmd === "session_fs_list" &&
+        (args as { dir?: string }).dir === srcDir.path
+      ) {
+        return Promise.resolve([
+          {
+            ...mainTs,
+            name: "Main.TS",
+            path: canonical,
+            relPath: "src/Main.TS",
+          },
+        ]);
+      }
+      return base(cmd, args);
+    });
+
+    await openDiffTab({
+      path: "src/main.ts",
+      kind: "modify",
+      diff: "diff",
+      workspace: rootPath,
+    });
+    await flushPromises();
+    const wrapper = mount(ResourceView, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { directives: { tooltip: tooltipDirective } },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const row = wrapper
+      .findAll(".resource-row")
+      .find((r) => (r.attributes("data-fs-path") ?? "").toLowerCase() === canonical.toLowerCase());
+    expect(row?.exists()).toBe(true);
+    expect(row?.classes()).toContain("active");
+    // selectedPath 被校正为树的规范路径（大小写以磁盘为准）
+    expect(selectedPath.value).toBe(canonical);
+    expect(scrollIntoView).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("git 正斜杠 repoWorkspace 打开深层 diff：目录自动展开、文件选中并滚动定位", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+    const deepDir: FsEntry = {
+      name: "deep",
+      path: srcDir.path + "\\deep",
+      relPath: "src/deep",
+      isDir: true,
+      size: null,
+      modifiedAtMs: 0,
+      createdAtMs: 0,
+      childCount: 1,
+    };
+    const nestedDir: FsEntry = {
+      name: "nested",
+      path: deepDir.path + "\\nested",
+      relPath: "src/deep/nested",
+      isDir: true,
+      size: null,
+      modifiedAtMs: 0,
+      createdAtMs: 0,
+      childCount: 1,
+    };
+    const deepFile: FsEntry = {
+      name: "file.txt",
+      path: nestedDir.path + "\\file.txt",
+      relPath: "src/deep/nested/file.txt",
+      isDir: false,
+      size: 1,
+      modifiedAtMs: 0,
+      createdAtMs: 0,
+      childCount: null,
+    };
+    const base = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_list") {
+        const dir = (args as { dir?: string }).dir;
+        if (dir === srcDir.path) return Promise.resolve([deepDir]);
+        if (dir === deepDir.path) return Promise.resolve([nestedDir]);
+        if (dir === nestedDir.path) return Promise.resolve([deepFile]);
+      }
+      return base(cmd, args);
+    });
+
+    // diff 标签 workspace 来自 git repo_workspace：正斜杠形式；EditorPane 会把它写入 store.workspace
+    const fwdRoot = rootPath.replace(/\\/g, "/");
+    store.workspace = fwdRoot;
+    await openDiffTab({
+      path: "src/deep/nested/file.txt",
+      kind: "modify",
+      diff: "diff",
+      workspace: fwdRoot,
+    });
+    await flushPromises();
+    const wrapper = mount(ResourceView, {
+      props: { active: true },
+      attachTo: document.body,
+      global: { directives: { tooltip: tooltipDirective } },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const dirRows = wrapper.findAll(".resource-row.resource-dir");
+    const dirPaths = dirRows.map((r) => r.attributes("data-fs-path"));
+    // 根列表还含 node_modules 等其它目录，只断言目标祖先目录存在且已展开
+    for (const p of [srcDir.path, deepDir.path, nestedDir.path]) {
+      expect(dirPaths).toContain(p);
+    }
+    for (const r of dirRows.filter((r) =>
+      [srcDir.path, deepDir.path, nestedDir.path].includes(
+        r.attributes("data-fs-path") ?? "",
+      ),
+    )) {
+      expect(r.classes()).not.toContain("collapsed");
+    }
+    const fileRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((r) => r.attributes("data-fs-path") === deepFile.path);
+    expect(fileRow?.exists()).toBe(true);
+    expect(fileRow?.classes()).toContain("active");
     expect(scrollIntoView).toHaveBeenCalled();
     wrapper.unmount();
   });

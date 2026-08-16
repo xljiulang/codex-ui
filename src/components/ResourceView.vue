@@ -4,7 +4,9 @@ import ModalDialog from "./ModalDialog.vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import {
   setToast,
+  workspace,
 } from "../composables/useCodex";
+import { revealGitFile } from "../composables/useGitChanges";
 import { useActionMenu } from "../composables/useActionMenu";
 import { useResourceDragDrop } from "../composables/useResourceDragDrop";
 import { useResourceDialogs } from "../composables/useResourceDialogs";
@@ -210,6 +212,8 @@ function onTreeRowClick(row: ResourceRow) {
   if (row.kind === "file") {
     selectedPath.value = row.entry.path;
     void requestOpen(row.entry);
+    // 双向联动：资源面板点文件时同步高亮 Git 面板对应变更行（无变更时自然无匹配）
+    revealGitFile(workspace.value, row.entry.path);
     return;
   }
   toggleDir(row.entry.path);
@@ -222,6 +226,8 @@ function onSearchResultClick(entry: FsEntry) {
     return;
   }
   void requestOpen(entry);
+  // 搜索态结果点击同样联动 Git 面板
+  revealGitFile(workspace.value, entry.path);
 }
 
 function onRefresh() {

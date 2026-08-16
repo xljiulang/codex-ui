@@ -1,4 +1,14 @@
 import { formatRelativeTime } from "./format";
+// 路径工具统一实现收敛到 ./path：本文件仅 re-export，保持既有调用方不变
+export {
+  dirNameOf,
+  isPathUnderRoot,
+  joinFsPath,
+  normalizeFsPath,
+  normalizePathKey,
+  pathEquals,
+  relPathOf,
+} from "./path";
 
 /** 会话资源条目（Rust session_fs 命令返回，字段 camelCase） */
 export interface FsEntry {
@@ -81,27 +91,5 @@ export function flattenResourceTree(
   };
   walk(root, 1);
   return rows;
-}
-
-/** Windows 路径拼接：去尾分隔符后追加反斜杠 */
-export function joinFsPath(base: string, name: string): string {
-  return base.replace(/[\\/]+$/, "") + "\\" + name;
-}
-
-/** Windows 路径 dirname：取最后一个分隔符前的部分（去尾分隔符）；无分隔符返回空串 */
-export function dirNameOf(path: string): string {
-  const norm = path.replace(/\//g, "\\");
-  const idx = norm.lastIndexOf("\\");
-  if (idx < 0) return "";
-  const dir = norm.slice(0, idx).replace(/\\+$/, "");
-  return /^[A-Za-z]:$/.test(dir) ? dir + "\\" : dir;
-}
-
-/** 路径是否位于根目录之内（Windows 大小写不敏感，按分隔符边界判定） */
-export function isPathUnderRoot(root: string, path: string): boolean {
-  const a = root.replace(/\//g, "\\").toLowerCase().replace(/\\+$/, "");
-  const b = path.replace(/\//g, "\\").toLowerCase();
-  if (!a) return false;
-  return b === a || b.startsWith(a + "\\");
 }
 

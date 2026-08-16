@@ -2,6 +2,7 @@ import { watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { setToast, store, toastError, workspace } from "../useCodex";
+import { normalizeFsPath } from "../../lib/path";
 import {
   copyBuffer,
   pruneTreeToRoot,
@@ -10,7 +11,7 @@ import {
   resetTree,
 } from "./state";
 import {
-  loadRoot,
+  ensureRootLoaded,
   refreshAll,
   resolveFallbackRoot,
 } from "./tree";
@@ -24,7 +25,7 @@ let unlistenFsEvent: (() => void) | null = null;
 let watcherStarted = false;
 
 async function syncWatcher() {
-  const root = workspace.value;
+  const root = normalizeFsPath(workspace.value);
   if (active && root) {
     if (!unlistenFsEvent) {
       try {
@@ -57,7 +58,7 @@ async function syncWatcher() {
 
 /** 激活资源 Tab：解析工作区（含 startup_workspace 兜底）后加载树 */
 async function activate() {
-  const root = workspace.value || (await resolveFallbackRoot());
+  const root = normalizeFsPath(workspace.value) || (await resolveFallbackRoot());
   if (!root) {
     rootError.value = "暂无工作目录";
     return;
@@ -71,7 +72,7 @@ async function activate() {
   if (loadedRoot !== root) {
     loadedRoot = root;
     // 不 resetTree：旧数据保持到新根加载完成（首屏无旧数据，行为等价）
-    const ok = await loadRoot(root);
+    const ok = await ensureRootLoaded(root);
     if (ok) {
       pruneTreeToRoot(root);
       clearSearch();
@@ -95,15 +96,17 @@ export function setSessionFsActive(v: boolean) {
 // 根目录切换（切换会话/新建会话选目录）：不 resetTree，旧数据保持到新根加载完成，
 // 成功后替换并清理旧根缓存；监听跟随新根
 watch(workspace, async (r, old) => {
-  if (r === old) return;
+  const root = normalizeFsPath(r ?? "");
+  const prev = normalizeFsPath(old ?? "");
+  if (root === prev) return;
   if (!active) return;
   void syncWatcher();
-  if (r) {
-    if (loadedRoot !== r) {
-      loadedRoot = r;
-      const ok = await loadRoot(r);
+  if (root) {
+    if (loadedRoot !== root) {
+      loadedRoot = root;
+      const ok = await ensureRootLoaded(root);
       if (ok) {
-        pruneTreeToRoot(r);
+        pruneTreeToRoot(root);
         clearSearch();
         copyBuffer.value = [];
       } else if (rootEntry.value && rootError.value) {

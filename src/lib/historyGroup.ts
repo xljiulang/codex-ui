@@ -1,4 +1,5 @@
 import type { ThreadSummary } from "./types";
+import { normalizePathKey } from "./path";
 
 /** 历史目录分组（key 为规范化路径，path 为原始完整路径用于 tooltip） */
 export interface HistoryGroup {
@@ -12,9 +13,9 @@ export type HistoryRow =
   | { kind: "group"; group: HistoryGroup }
   | { kind: "item"; thread: ThreadSummary };
 
-/** 规范化目录分组键：统一反斜杠、去尾部分隔符；Windows 下大小写不敏感 */
+/** 规范化目录分组键：复用全局共享比较/键形态（反斜杠 + 小写） */
 export function normalizeDirKey(cwd: string): string {
-  return cwd.replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase();
+  return normalizePathKey(cwd);
 }
 
 /** 目录显示名：路径最后一段；根路径（如 C:\）原样返回 */

@@ -1077,7 +1077,8 @@ mod tests {
             "\\\\srv\\share\\f.txt"
         );
         assert_eq!(clean_path(Path::new(r"D:\plain\path")), "D:\\plain\\path");
-        assert_eq!(clean_path(Path::new("C:/mixed/path")), "C:/mixed/path");
+        // 对外绝对路径统一反斜杠（git 等外部输出正斜杠时也归一）
+        assert_eq!(clean_path(Path::new("C:/mixed/path")), "C:\\mixed\\path");
     }
 
     #[test]

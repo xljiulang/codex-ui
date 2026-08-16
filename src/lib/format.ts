@@ -61,14 +61,5 @@ export function pathBaseName(path: string): string {
   return idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
 }
 
-/** 路径相对 root 的表示：统一反斜杠、大小写不敏感地剥离 root 前缀；
- * path 等于 root 返回空串；非 root 下的路径原样返回 */
-export function relPathOf(root: string, path: string): string {
-  const normRoot = root.replace(/\//g, "\\").replace(/\\+$/, "");
-  const normPath = path.replace(/\//g, "\\");
-  if (normPath.toLowerCase() === normRoot.toLowerCase()) return "";
-  if (normPath.toLowerCase().startsWith(normRoot.toLowerCase() + "\\")) {
-    return normPath.slice(normRoot.length + 1);
-  }
-  return path;
-}
+// 路径相对化统一实现收敛到 ./path：本文件仅 re-export，保持既有调用方不变
+export { relPathOf } from "./path";

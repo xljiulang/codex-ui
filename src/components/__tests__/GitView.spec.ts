@@ -2682,4 +2682,63 @@ describe("GitView diff 标签联动定位", () => {
     expect(row.classes()).toContain("selected");
     wrapper.unmount();
   });
+
+  it("点击变更文件打开 diff 后直接联动资源树定位", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(revealStatus);
+      if (cmd === "git_changes_diff") {
+        return Promise.resolve(
+          "diff --git a/src/b.txt b/src/b.txt\n@@ -1 +1 @@\n-x\n+y",
+        );
+      }
+      if (cmd === "build_diff_preview") return Promise.resolve([]);
+      if (cmd === "session_fs_metadata") {
+        return Promise.resolve({
+          name: "repo",
+          path: rootPath,
+          relPath: ".",
+          isDir: true,
+          size: null,
+          modifiedAtMs: 0,
+          createdAtMs: 0,
+          childCount: 1,
+        });
+      }
+      if (cmd === "session_fs_list") return Promise.resolve([]);
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    await wrapper.find('[data-git-path="src/b.txt"]').trigger("click");
+    await flushPromises();
+    // openDiff 打开 diff 标签后直接调用 revealAbsPathInTree：根未加载时先拉根元信息
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
+      workspace: rootPath,
+      path: rootPath,
+    });
+    wrapper.unmount();
+  });
+
+  it("reveal 目标不在变更列表：清空旧高亮", async () => {
+    mockRevealRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    revealGitFile(rootPath, "src/b.txt");
+    await flushPromises();
+    expect(wrapper.findAll(".git-tree-row.selected")).toHaveLength(1);
+
+    // 激活无 git 变更的文件：不再残留旧高亮
+    revealGitFile(rootPath, "src/no-change.txt");
+    await flushPromises();
+    expect(wrapper.findAll(".git-tree-row.selected")).toHaveLength(0);
+    wrapper.unmount();
+  });
 });

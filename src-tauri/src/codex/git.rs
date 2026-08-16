@@ -2335,6 +2335,12 @@ fn init_committed_repo(dir: &Path) {
         let st = git_status(root.to_str().unwrap()).unwrap();
         assert!(st.files.is_empty());
         assert!(!st.repo_workspace.is_empty());
+        // 对外绝对路径统一反斜杠（git rev-parse 输出正斜杠，clean_path 负责转换）
+        assert!(
+            !st.repo_workspace.contains('/'),
+            "repo_workspace 应使用反斜杠: {}",
+            st.repo_workspace
+        );
         assert!(!st.branch.is_empty());
     }
 

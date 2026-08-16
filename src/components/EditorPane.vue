@@ -198,7 +198,12 @@ onBeforeUnmount(() => {
  */
 watch(activeTab, (tab) => {
   store.workspace = tab ? tab.workspace : null;
-  if (tab && tab.kind === TabKind.Diff) {
+  if (
+    tab &&
+    (tab.kind === TabKind.File ||
+      tab.kind === TabKind.Preview ||
+      tab.kind === TabKind.Diff)
+  ) {
     revealGitFile(tab.workspace, tab.path);
   }
   if (!tab || tab.kind === TabKind.Terminal || tab.kind === TabKind.Chat) return;
