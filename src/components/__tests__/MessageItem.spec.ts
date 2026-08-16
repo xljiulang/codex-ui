@@ -618,3 +618,89 @@ describe("子代理活动提示", () => {
     expect(wrapper.text()).toContain("/root/agent-1");
   });
 });
+
+describe("执行计划用户消息卡片", () => {
+  it("命中 PLEASE IMPLEMENT THIS PLAN 前缀：渲染卡片且默认不显示正文", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: {
+          id: "u1",
+          type: "userMessage",
+          content: [
+            {
+              type: "text",
+              text: "PLEASE IMPLEMENT THIS PLAN:\n# 计划A\n- 步骤1",
+              text_elements: [],
+            },
+          ],
+        } as ThreadItem,
+      },
+    });
+    expect(wrapper.find(".plan-text-card").exists()).toBe(true);
+    // 标题取自计划本身（首行标题），正文默认折叠不可见
+    expect(wrapper.find(".plan-text-card .plan-text-title").text()).toBe("计划A");
+    expect(wrapper.text()).not.toContain("步骤1");
+  });
+
+  it("带内联引用的执行计划消息：引用照常渲染", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: {
+          id: "u1",
+          type: "userMessage",
+          content: [
+            { type: "mention", name: "a.txt", path: "D:\\p\\a.txt" },
+            {
+              type: "text",
+              text: "PLEASE IMPLEMENT THIS PLAN:\n- 步骤",
+              text_elements: [],
+            },
+          ],
+        } as ThreadItem,
+      },
+    });
+    expect(wrapper.find(".plan-text-card").exists()).toBe(true);
+    expect(wrapper.find(".mention-inline").exists()).toBe(true);
+  });
+
+  it("非前缀消息仍走普通 Markdown（回归）", async () => {
+    // 走同步回退解析，避免 happy-dom Worker 挂起（与文件内既有图片用例一致）
+    (globalThis as Record<string, unknown>).Worker = undefined;
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: {
+          id: "u1",
+          type: "userMessage",
+          content: [
+            { type: "text", text: "普通问题", text_elements: [] },
+          ],
+        } as ThreadItem,
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find(".plan-text-card").exists()).toBe(false);
+    expect(wrapper.text()).toContain("普通问题");
+  });
+
+  it("助理端 plan 条目渲染为计划卡片：默认展开，可收起", async () => {
+    (globalThis as Record<string, unknown>).Worker = undefined;
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: {
+          id: "p1",
+          type: "plan",
+          text: "# 方案\n- 步骤",
+        } as ThreadItem,
+      },
+    });
+    await flushPromises();
+    const card = wrapper.find(".plan-text-card");
+    expect(card.exists()).toBe(true);
+    // 标题取自计划自身（# 方案），正文默认展开
+    expect(card.find(".plan-text-title").text()).toBe("方案");
+    expect(card.find(".plan-text-body").exists()).toBe(true);
+    expect(card.text()).toContain("步骤");
+    await card.find(".plan-text-toggle").trigger("click");
+    expect(card.find(".plan-text-body").exists()).toBe(false);
+  });
+});

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import MarkdownText from "./MarkdownText.vue";
+import PlanTextCard from "./PlanTextCard.vue";
 import ReasoningBlock from "./ReasoningBlock.vue";
 import RefChip from "./RefChip.vue";
 import ToolCard from "./ToolCard.vue";
@@ -22,6 +23,20 @@ const props = defineProps<{ item: ThreadItem }>();
 const contentItems = computed(() => {
   const content = props.item.content;
   return Array.isArray(content) ? content.filter(isUserInput) : [];
+});
+
+/** 执行计划消息：文本项拼接后命中 PLEASE IMPLEMENT THIS PLAN: 前缀时卡片化展示 */
+const EXECUTE_PLAN_PREFIX = "PLEASE IMPLEMENT THIS PLAN:";
+const userText = computed(() =>
+  contentItems.value.map((c) => bodyText(c)).join("\n"),
+);
+const isExecutePlan = computed(() =>
+  userText.value.trimStart().toUpperCase().startsWith(EXECUTE_PLAN_PREFIX),
+);
+const executePlanText = computed(() => {
+  const t = userText.value.trimStart();
+  if (!t.toUpperCase().startsWith(EXECUTE_PLAN_PREFIX)) return "";
+  return t.slice(EXECUTE_PLAN_PREFIX.length).trim();
 });
 
 /** 文本项正文：含 Files 段时取 `## My request:` 之后，否则整段 */
@@ -199,11 +214,15 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           <div v-else class="img-fallback">图片加载失败</div>
         </template>
       </div>
-        <template v-for="(c, i) in contentItems" :key="i">
+      <PlanTextCard
+        v-if="isExecutePlan"
+        :plan-text="executePlanText"
+      />
+      <template v-for="(c, i) in contentItems" :key="i">
         <template v-if="c.type === 'localImage'">
           <!-- 图片已渲染到附件区 -->
         </template>
-        <template v-else-if="c.type === 'text'">
+        <template v-else-if="c.type === 'text' && !isExecutePlan">
           <template v-if="hasInlineRefs(c)">
             <template v-for="(seg, j) in partInline(c)" :key="'seg' + j">
               <RefChip
@@ -228,7 +247,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           />
         </template>
         <RefChip
-          v-else
+          v-else-if="c.type === 'mention'"
           :path="c.path"
           :label="'@' + c.name"
           kind="file"
@@ -237,7 +256,11 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
       <span v-if="time" class="msg-time">{{ time }}</span>
     </div>
   </div>
-  <div v-else-if="item.type === 'agentMessage' || item.type === 'plan'" class="msg msg-agent">
+  <div v-else-if="item.type === 'plan'" class="msg">
+    <!-- 助理端计划是计划模式产出，默认展开直接可见 -->
+    <PlanTextCard :plan-text="String(item.text ?? '')" default-open />
+  </div>
+  <div v-else-if="item.type === 'agentMessage'" class="msg msg-agent">
     <span v-if="item.phase === 'commentary' && item.streaming === true" class="phase-badge">进行中</span>
     <div
       v-if="isFinalAnswer && !item.streaming"

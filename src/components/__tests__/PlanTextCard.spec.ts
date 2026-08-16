@@ -1,0 +1,67 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
+import PlanTextCard from "../PlanTextCard.vue";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => {
+  it("默认折叠：标题来自计划首个标题行，正文不可见", () => {
+    const wrapper = mount(PlanTextCard, {
+      props: { planText: "# 方案\n- 步骤1" },
+    });
+    expect(wrapper.text()).toContain("方案");
+    expect(wrapper.find(".plan-text-body").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("步骤1");
+  });
+
+  it("无标题行时回退标题 计划，正文可展开", async () => {
+    const wrapper = mount(PlanTextCard, {
+      props: { planText: "直接是内容" },
+    });
+    expect(wrapper.find(".plan-text-title").text()).toBe("计划");
+    expect(wrapper.find(".plan-text-body").exists()).toBe(false);
+    await wrapper.find(".plan-text-toggle").trigger("click");
+    expect(wrapper.text()).toContain("直接是内容");
+  });
+
+  it("defaultOpen 为 true 时初始展开", () => {
+    const wrapper = mount(PlanTextCard, {
+      props: { planText: "# 方案\n- 步骤1", defaultOpen: true },
+    });
+    expect(wrapper.find(".plan-text-body").exists()).toBe(true);
+  });
+
+  it("点击展开显示正文，再点收起", async () => {
+    const wrapper = mount(PlanTextCard, {
+      props: { planText: "# 方案\n- 步骤1" },
+    });
+    await wrapper.find(".plan-text-toggle").trigger("click");
+    expect(wrapper.find(".plan-text-body").exists()).toBe(true);
+    expect(wrapper.text()).toContain("步骤1");
+    await wrapper.find(".plan-text-toggle").trigger("click");
+    expect(wrapper.find(".plan-text-body").exists()).toBe(false);
+  });
+
+  it("复制按钮把完整原始 Markdown（含标题）传给剪贴板并短暂显示已复制", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const wrapper = mount(PlanTextCard, {
+      props: { planText: "# 标题\n- 步骤" },
+    });
+    await wrapper.find(".plan-text-copy").trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("# 标题\n- 步骤");
+    expect(wrapper.text()).toContain("已复制");
+  });
+
+  it("空 planText 容错：无复制按钮，仍可折叠", async () => {
+    const wrapper = mount(PlanTextCard, { props: { planText: "" } });
+    expect(wrapper.find(".plan-text-toggle").exists()).toBe(true);
+    expect(wrapper.find(".plan-text-copy").exists()).toBe(false);
+  });
+});
