@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -2049,6 +2050,74 @@ fn path_under_excluded_dot_dir(root: &Path, p: &Path) -> bool {
     false
 }
 
+/// 忽略快照：`git ls-files -oi --exclude-standard --directory -z` 解析结果，
+/// 用于 notify 回调过滤被忽略路径（避免对忽略内容触发 git status 刷新）
+#[derive(Default)]
+struct IgnoreSnapshot {
+    /// 被整体忽略的目录（相对仓库根、正斜杠、小写；不含尾斜杠）
+    dirs: HashSet<String>,
+    /// 被忽略的精确文件（相对仓库根、正斜杠、小写）
+    files: HashSet<String>,
+}
+
+/// 归一化忽略匹配键：统一正斜杠 + 小写（Windows 大小写不敏感）
+fn ignore_key(p: &str) -> String {
+    p.replace('\\', "/").to_lowercase()
+}
+
+/// 解析 `git ls-files -z` 输出：尾 `/` 为被整体忽略的目录，其余为精确文件
+fn parse_ignored_list(output: &str) -> IgnoreSnapshot {
+    let mut snap = IgnoreSnapshot::default();
+    for entry in output.split('\0') {
+        let trimmed = entry.trim_end_matches('/');
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = ignore_key(trimmed);
+        if entry.ends_with('/') {
+            snap.dirs.insert(key);
+        } else {
+            snap.files.insert(key);
+        }
+    }
+    snap
+}
+
+impl IgnoreSnapshot {
+    /// 路径是否应被忽略：精确命中文件/目录，或任一祖先目录被整体忽略
+    fn is_ignored(&self, rel: &str) -> bool {
+        let key = ignore_key(rel);
+        if self.files.contains(&key) || self.dirs.contains(&key) {
+            return true;
+        }
+        let mut rest = key.as_str();
+        while let Some(idx) = rest.rfind('/') {
+            rest = &rest[..idx];
+            if self.dirs.contains(rest) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+/// 用系统 git 重建忽略快照（`git ls-files -oi --exclude-standard --directory -z`）；
+/// 失败/非零退出返回空快照（安全回退为不过滤）
+fn build_ignore_snapshot(git_bin: &Path, root: &str) -> IgnoreSnapshot {
+    let (code, stdout, _) = match git_output(
+        git_bin,
+        root,
+        &["ls-files", "-oi", "--exclude-standard", "--directory", "-z"],
+    ) {
+        Ok(v) => v,
+        Err(_) => return IgnoreSnapshot::default(),
+    };
+    if code != 0 {
+        return IgnoreSnapshot::default();
+    }
+    parse_ignored_list(&stdout)
+}
+
 #[tauri::command]
 pub async fn git_changes_watch_start(
     app: AppHandle,
@@ -2093,13 +2162,40 @@ pub async fn git_changes_watch_start(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<PathBuf>(1024);
     let tx_watcher = tx.clone();
     let root_for_filter = repo_root.clone();
+    // 忽略快照 + 脏标记：notify 回调置脏，防抖任务 ticker 用 git 重建
+    let ignore_snapshot = Arc::new(Mutex::new(IgnoreSnapshot::default()));
+    let ignore_dirty = Arc::new(AtomicBool::new(true));
+    let ignore_snapshot_cb = ignore_snapshot.clone();
+    let ignore_dirty_cb = ignore_dirty.clone();
+    let exclude_suffix = PathBuf::from(".git").join("info").join("exclude");
+    let exclude_suffix_cb = exclude_suffix.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(ev) = res {
             for p in ev.paths {
-                // 本地廉价过滤：排除 `. 开头目录`（.git 除外）与 node_modules；
-                // 忽略文件由 300ms 防抖后的 git status 原生过滤
+                // .gitignore（任意层级）或 .git/info/exclude 变更：标记重建忽略快照
+                let fname = p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if fname == ".gitignore" || (fname == "exclude" && p.ends_with(&exclude_suffix_cb))
+                {
+                    ignore_dirty_cb.store(true, Ordering::SeqCst);
+                }
+                // 本地廉价过滤：排除 `. 开头目录`（.git 除外）与 node_modules
                 if path_under_excluded_dot_dir(&root_for_filter, &p) {
                     continue;
+                }
+                // 忽略快照过滤：命中 gitignore 的路径不再触发刷新（真实变更仍由
+                // 防抖后的 git status 原生过滤）
+                if let Ok(rel) = p.strip_prefix(&root_for_filter) {
+                    let rel_str = rel.to_string_lossy();
+                    if ignore_snapshot_cb
+                        .lock()
+                        .map(|s| s.is_ignored(&rel_str))
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
                 }
                 let _ = tx_watcher.try_send(p.clone());
             }
@@ -2118,9 +2214,12 @@ pub async fn git_changes_watch_start(
             .map_err(|e| git_err(format!("监听 git 目录失败 {}: {e}", git_dir.display())))?;
     }
 
-    // 防抖任务：最后一次 watch 文件变化静默 300ms 后 emit 变更事件
+    // 防抖任务：最后一次 watch 文件变化静默 300ms 后 emit 变更事件；
+    // 顺带在忽略快照脏时用 git 重建（spawn_blocking 内 spawn git 子进程）
     let handle = app.clone();
     let root_for_task = repo_root.clone();
+    let ignore_snapshot_task = ignore_snapshot.clone();
+    let ignore_dirty_task = ignore_dirty.clone();
     tauri::async_runtime::spawn(async move {
         let mut last_event: Option<tokio::time::Instant> = None;
         let mut ticker = tokio::time::interval(Duration::from_millis(150));
@@ -2134,6 +2233,25 @@ pub async fn git_changes_watch_start(
                     None => break,
                 },
                 _ = ticker.tick() => {
+                    if ignore_dirty_task.swap(false, Ordering::SeqCst) {
+                        let root_for_snap = root_for_task
+                            .to_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_default();
+                        let snap_handle = ignore_snapshot_task.clone();
+                        if let Ok(snap) = tokio::task::spawn_blocking(move || {
+                            match git_bin() {
+                                Ok(b) => build_ignore_snapshot(b, &root_for_snap),
+                                Err(_) => IgnoreSnapshot::default(),
+                            }
+                        })
+                        .await
+                        {
+                            if let Ok(mut guard) = snap_handle.lock() {
+                                *guard = snap;
+                            }
+                        }
+                    }
                     if let Some(t) = last_event {
                         if t.elapsed() >= Duration::from_millis(WATCH_DEBOUNCE_MS) {
                             let payload = serde_json::json!({ "root": clean_path(&root_for_task) });
@@ -2528,6 +2646,56 @@ fn init_committed_repo(dir: &Path) {
         assert!(!path_under_excluded_dot_dir(root, &root.join(".git/index")));
         assert!(!path_under_excluded_dot_dir(root, &root.join(".gitignore")));
         assert!(!path_under_excluded_dot_dir(root, &root.join("src/a.txt")));
+    }
+
+    #[test]
+    fn parse_ignored_list_splits_dirs_and_files() {
+        let snap = parse_ignored_list("dist/\0debug.log\0src/gen/\0");
+        assert!(snap.dirs.contains("dist"));
+        assert!(snap.dirs.contains("src/gen"));
+        assert!(snap.files.contains("debug.log"));
+        assert!(!snap.files.contains("dist"));
+    }
+
+    #[test]
+    fn is_ignored_matches_files_and_ancestor_dirs() {
+        let snap = parse_ignored_list("dist/\0debug.log\0");
+        assert!(snap.is_ignored("debug.log"));
+        assert!(snap.is_ignored("dist"));
+        assert!(snap.is_ignored("dist/x/y.txt"));
+        // 大小写/分隔符归一（Windows 大小写不敏感）
+        assert!(snap.is_ignored("DIST\\x.txt"));
+        assert!(!snap.is_ignored("src/main.rs"));
+        assert!(!snap.is_ignored("distx.txt"));
+    }
+
+    #[test]
+    fn build_ignore_snapshot_uses_gitignore() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "ignored.txt\ntmp/\n").unwrap();
+        std::fs::write(root.join("ignored.txt"), "x").unwrap();
+        std::fs::create_dir_all(root.join("tmp/sub")).unwrap();
+        std::fs::write(root.join("tmp/sub/y.txt"), "y").unwrap();
+        std::fs::write(root.join("keep.txt"), "k").unwrap();
+        assert_eq!(git(root, &["init", "-b", "main"]).0, 0);
+
+        let git_bin = PathBuf::from("git");
+        let root_s = root.to_str().unwrap();
+        let snap = build_ignore_snapshot(&git_bin, root_s);
+        assert!(snap.files.contains("ignored.txt"));
+        assert!(snap.dirs.contains("tmp"));
+        assert!(!snap.files.contains("keep.txt"));
+
+        // 删除 .gitignore 后重建为空（不再有忽略规则）
+        std::fs::remove_file(root.join(".gitignore")).unwrap();
+        let snap2 = build_ignore_snapshot(&git_bin, root_s);
+        assert!(snap2.files.is_empty());
+        assert!(snap2.dirs.is_empty());
     }
 
     #[test]
