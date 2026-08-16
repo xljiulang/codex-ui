@@ -72,34 +72,6 @@ export function fileMentionSection(attachments: UserInput[]): string {
   return refs ? `\n${FILE_MENTION_HEADING}\n${refs}` : "";
 }
 
-/**
- * 插件/技能引用文本：Markdown 链接拼在 `## My request:` 之后、用户输入之前。
- * 插件（source="plugin"）生成 `[@name](path)`，技能生成 `[$name](path)`。
- */
-export function skillMentionLinks(attachments: UserInput[]): string {
-  const links = attachments
-    .filter((a) => a.type === "skill")
-    .map((a) => {
-      const prefix = a.source === "plugin" ? "@" : "$";
-      return `[${prefix}${a.name}](${toProtocolPath(a.path)})`;
-    })
-    .join(" ");
-  return links ? `${links} ` : "";
-}
-
-/**
- * 组装单条 text 输入：文件引用段 + `## My request:` + 技能链接 + 用户输入。
- * 与 VS Code Codex 扩展抓包确认的格式一致。
- */
-export function assemblePromptText(
-  prompt: string,
-  attachments: UserInput[],
-): string {
-  const section = fileMentionSection(attachments);
-  const links = skillMentionLinks(attachments);
-  return `${section ? `${section}\n${MY_REQUEST_MARKER}\n` : ""}${links}${prompt}\n`;
-}
-
 /** 组装一轮的协议输入：text 项直接使用传入的 prompt（引用已由调用方以内联链接写进文本原位），
  *  技能作为结构化 skill 项附带（fork 会把 SKILL.md 内容注入上下文），
  *  图片作为 localImage 项附带，路径统一转正斜杠。 */
@@ -183,33 +155,7 @@ export function parseFileMentionSection(
   return files;
 }
 
-/** 从文本中解析技能引用链接 `[$name](path)`，供界面渲染 `$name` 标签 */
-export function parseSkillMentionLinks(
-  text: string,
-): { name: string; path: string }[] {
-  const out: { name: string; path: string }[] = [];
-  const re = /\[\$([^\]]+)\]\(([^)]+)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    out.push({ name: m[1], path: m[2] });
-  }
-  return out;
-}
-
-/** 从文本中解析插件引用链接 `[@name](path)`，供界面渲染 `@name` 标签 */
-export function parsePluginMentionLinks(
-  text: string,
-): { name: string; path: string }[] {
-  const out: { name: string; path: string }[] = [];
-  const re = /\[@([^\]]+)\]\(([^)]+)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    out.push({ name: m[1], path: m[2] });
-  }
-  return out;
-}
-
-/** 移除文本开头的插件/技能引用链接（assemblePromptText 自动生成的部分） */
+/** 移除文本开头的插件/技能引用链接 */
 export function stripSkillLinks(text: string): string {
   return text.replace(/^(?:\[[@$][^\]]+\]\([^)]+\)\s*)+/, "");
 }

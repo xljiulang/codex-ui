@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  assemblePromptText,
   baseName,
   buildTurnInput,
   fileMentionSection,
@@ -8,9 +7,6 @@ import {
   matchMentionToken,
   parseFileMentionSection,
   parseInlineMentions,
-  parsePluginMentionLinks,
-  parseSkillMentionLinks,
-  skillMentionLinks,
   stripMentionContext,
   stripSkillLinks,
   toProtocolPath,
@@ -123,12 +119,6 @@ describe("混合使用 @ 文件引用与 $ 技能引用", () => {
     { type: "localImage", path: "D:/repo/p.png" },
   ];
 
-  it("assemblePromptText 顺序：文件段 + My request + 技能链接 + 用户输入", () => {
-    expect(assemblePromptText("混合测试", mixedAttachments)).toBe(
-      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.txt: D:/repo/b.txt\n\n## My request:\n[$s1](C:/x/s1/SKILL.md) [$s2](C:/x/s2/SKILL.md) 混合测试\n",
-    );
-  });
-
   it("buildTurnInput 混合附件顺序：图片、文本、技能项", () => {
     const input = buildTurnInput("混合测试", mixedAttachments);
     expect(input).toEqual([
@@ -143,16 +133,11 @@ describe("混合使用 @ 文件引用与 $ 技能引用", () => {
     ]);
   });
 
-  it("混合文本可分别解析出文件引用与技能链接，stripMentionContext 还原用户输入", () => {
-    const text = assemblePromptText("混合测试", [
-      { type: "mention", name: "a.cs", path: "D:/repo/a.cs" },
-      { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
-    ]);
+  it("文件引用段可解析，stripMentionContext 还原用户输入", () => {
+    const text =
+      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$s1](C:/x/s1/SKILL.md) 混合测试\n";
     expect(parseFileMentionSection(text)).toEqual([
       { name: "a.cs", path: "D:/repo/a.cs" },
-    ]);
-    expect(parseSkillMentionLinks(text)).toEqual([
-      { name: "s1", path: "C:/x/s1/SKILL.md" },
     ]);
     expect(stripMentionContext(text)).toBe("混合测试");
   });
@@ -206,85 +191,9 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     expect(fileMentionSection([])).toBe("");
   });
 
-  it("assemblePromptText 组装 VS Code 同款单条 text 输入", () => {
-    const text = assemblePromptText("看一下这个文件", [
-      { type: "mention", name: "a.cs", path: "D:/repo/a.cs" },
-    ]);
-    expect(text).toBe(
-      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n看一下这个文件\n",
-    );
-    expect(assemblePromptText("hello", [])).toBe("hello\n");
-  });
-
-  it("skillMentionLinks 生成 VS Code 同款技能链接文本", () => {
-    expect(
-      skillMentionLinks([
-        {
-          type: "skill",
-          name: "csharp-code-rules",
-          path: "C:\\Users\\x\\.codex\\skills\\csharp-code-rules\\SKILL.md",
-        },
-      ]),
-    ).toBe(
-      "[$csharp-code-rules](C:/Users/x/.codex/skills/csharp-code-rules/SKILL.md) ",
-    );
-    expect(
-      skillMentionLinks([
-        { type: "skill", name: "a", path: "C:/x/SKILL.md" },
-        { type: "skill", name: "b", path: "C:/y/SKILL.md" },
-      ]),
-    ).toBe("[$a](C:/x/SKILL.md) [$b](C:/y/SKILL.md) ");
-    expect(skillMentionLinks([])).toBe("");
-  });
-
-  it("skillMentionLinks：插件生成 [@name](path)，技能生成 [$name](path)", () => {
-    expect(
-      skillMentionLinks([
-        {
-          type: "skill",
-          name: "documents",
-          path: "C:/x/plugins/documents",
-          source: "plugin",
-        },
-      ]),
-    ).toBe("[@documents](C:/x/plugins/documents) ");
-    expect(
-      skillMentionLinks([
-        {
-          type: "skill",
-          name: "csharp-code-rules",
-          path: "C:/x/skills/csharp-code-rules/SKILL.md",
-          source: "skill",
-        },
-      ]),
-    ).toBe("[$csharp-code-rules](C:/x/skills/csharp-code-rules/SKILL.md) ");
-    expect(
-      skillMentionLinks([
-        {
-          type: "skill",
-          name: "documents",
-          path: "C:/x/plugins/documents",
-          source: "plugin",
-        },
-        { type: "skill", name: "s1", path: "C:/x/s1/SKILL.md" },
-      ]),
-    ).toBe(
-      "[@documents](C:/x/plugins/documents) [$s1](C:/x/s1/SKILL.md) ",
-    );
-  });
-
-  it("parsePluginMentionLinks 解析 [@name](path)，stripMentionContext 同时剥离 @ 与 $ 链接", () => {
+  it("stripMentionContext 剥离 @ 与 $ 引用链接", () => {
     const text =
       "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[@documents](C:/x/plugins/documents) [$csharp-code-rules](C:/x/skills/csharp-code-rules/SKILL.md) 混合测试\n";
-    expect(parsePluginMentionLinks(text)).toEqual([
-      { name: "documents", path: "C:/x/plugins/documents" },
-    ]);
-    expect(parseSkillMentionLinks(text)).toEqual([
-      {
-        name: "csharp-code-rules",
-        path: "C:/x/skills/csharp-code-rules/SKILL.md",
-      },
-    ]);
     expect(stripMentionContext(text)).toBe("混合测试");
     expect(
       stripMentionContext(
@@ -296,20 +205,6 @@ describe("toUserAttachment / isImagePath / baseName", () => {
         "[@documents](C:/x/plugins/documents) [$csharp-code-rules](C:/x/SKILL.md) 看下\n",
       ),
     ).toBe("看下");
-  });
-
-  it("assemblePromptText 文件段 + My request + 技能链接 + 用户输入", () => {
-    const text = assemblePromptText("逆向分析", [
-      { type: "mention", name: "a.exe", path: "D:/repo/a.exe" },
-      {
-        type: "skill",
-        name: "ida-pro-mcp:idapython",
-        path: "C:\\Users\\x\\.codex\\plugins\\cache\\mrexodia\\ida-pro-mcp\\0.1.0\\skills\\idapython\\SKILL.md",
-      },
-    ]);
-    expect(text).toBe(
-      "\n# Files mentioned by the user:\n\n## a.exe: D:/repo/a.exe\n\n## My request:\n[$ida-pro-mcp:idapython](C:/Users/x/.codex/plugins/cache/mrexodia/ida-pro-mcp/0.1.0/skills/idapython/SKILL.md) 逆向分析\n",
-    );
   });
 
   it("buildTurnInput 文件走单条 text、技能走结构化项且路径转正斜杠", () => {
@@ -426,10 +321,8 @@ describe("toUserAttachment / isImagePath / baseName", () => {
   });
 
   it("parseFileMentionSection / stripMentionContext 用于界面回显", () => {
-    const text = assemblePromptText("看看这个", [
-      { type: "mention", name: "a.cs", path: "D:/repo/a.cs" },
-      { type: "mention", name: "b.cs", path: "D:/repo/b.cs" },
-    ]);
+    const text =
+      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.cs: D:/repo/b.cs\n\n## My request:\n看看这个\n";
     expect(parseFileMentionSection(text)).toEqual([
       { name: "a.cs", path: "D:/repo/a.cs" },
       { name: "b.cs", path: "D:/repo/b.cs" },
@@ -438,25 +331,14 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     expect(stripMentionContext("普通文本")).toBe("普通文本");
   });
 
-  it("parseSkillMentionLinks / stripSkillLinks 用于界面回显", () => {
-    const text = assemblePromptText("逆向分析", [
-      {
-        type: "skill",
-        name: "ida-pro-mcp:idapython",
-        path: "C:/Users/x/.codex/plugins/cache/mrexodia/ida-pro-mcp/0.1.0/skills/idapython/SKILL.md",
-      },
-    ]);
-    expect(parseSkillMentionLinks(text)).toEqual([
-      {
-        name: "ida-pro-mcp:idapython",
-        path: "C:/Users/x/.codex/plugins/cache/mrexodia/ida-pro-mcp/0.1.0/skills/idapython/SKILL.md",
-      },
-    ]);
+  it("stripSkillLinks / stripMentionContext 剥离技能链接", () => {
     expect(stripSkillLinks("[$a](C:/x/SKILL.md) [$b](C:/y/SKILL.md) hello")).toBe(
       "hello",
     );
     expect(stripSkillLinks("普通文本")).toBe("普通文本");
     // 带文件段时 stripMentionContext 也去掉技能链接
+    const text =
+      "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$ida-pro-mcp:idapython](C:/x/SKILL.md) 逆向分析\n";
     expect(stripMentionContext(text)).toBe("逆向分析");
   });
 
