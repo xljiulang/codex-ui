@@ -943,3 +943,194 @@ describe("计划完成确认弹窗", () => {
     expect(store.taskMode).toBe("execute");
   });
 });
+
+describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动会话）", () => {
+  beforeEach(() => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    __resetSessionTabsForTest();
+    store.currentThreadId = null;
+    store.currentThreadWorkspace = null;
+    store.newChatWorkspace = null;
+    store.turnActive = false;
+    store.currentTurnId = null;
+    store.taskMode = "execute";
+    store.planPrompt = null;
+    store.goalText = null;
+    store.goalStatus = null;
+    store.goalArmed = false;
+    store.followupQueue = [];
+    store.attachments = [];
+    store.itemsByThread = {};
+    store.activeWorkByThread = {};
+  });
+
+  afterEach(() => {
+    disposeEvents();
+  });
+
+  it("turn/completed 缺 threadId 且 turn id 匹配后台标签 B：只写 B，活动标签 A 不受影响", async () => {
+    tabs.push(
+      makeSessionTab("sA", "tA", {
+        turnActive: true,
+        currentTurnId: "turn-a",
+        taskMode: "execute",
+      }),
+    );
+    tabs.push(
+      makeSessionTab("sB", "tB", {
+        turnActive: true,
+        currentTurnId: "turn-b",
+        taskMode: "plan",
+      }),
+    );
+    activeTabId.value = "sA";
+    store.currentThreadId = "tA";
+    store.turnActive = true;
+    store.currentTurnId = "turn-a";
+    store.planPrompt = null;
+    store.itemsByThread["tB"] = [
+      { id: "p1", type: "plan", text: "B的计划", status: "completed" },
+    ];
+    await wireEvents();
+
+    fireListen("turn/completed", {
+      turn: { id: "turn-b", status: "completed" },
+    });
+    await flushPromises();
+
+    expect((tabs[1] as SessionTab).turnActive).toBe(false);
+    expect((tabs[1] as SessionTab).planPrompt).toEqual({
+      threadId: "tB",
+      turnId: "turn-b",
+      planText: "B的计划",
+    });
+    // 活动标签 A 的回合状态与提示均不受影响
+    expect((tabs[0] as SessionTab).turnActive).toBe(true);
+    expect(store.turnActive).toBe(true);
+    expect(store.planPrompt).toBeNull();
+  });
+
+  it("turn/completed 缺 threadId 且 turn id 匹配活动会话：正常写 store", async () => {
+    tabs.push(
+      makeSessionTab("sA", "tA", {
+        turnActive: true,
+        currentTurnId: "turn-a",
+        taskMode: "plan",
+      }),
+    );
+    activeTabId.value = "sA";
+    store.currentThreadId = "tA";
+    store.turnActive = true;
+    store.currentTurnId = "turn-a";
+    store.planPrompt = null;
+    store.itemsByThread["tA"] = [
+      { id: "p1", type: "plan", text: "A的计划", status: "completed" },
+    ];
+    await wireEvents();
+
+    fireListen("turn/completed", {
+      turn: { id: "turn-a", status: "completed" },
+    });
+    await flushPromises();
+
+    expect(store.turnActive).toBe(false);
+    expect(store.planPrompt).toEqual({
+      threadId: "tA",
+      turnId: "turn-a",
+      planText: "A的计划",
+    });
+  });
+
+  it("turn/completed 缺 threadId 且无任何标签匹配 turn id：跳过，活动标签状态不变", async () => {
+    tabs.push(
+      makeSessionTab("sA", "tA", {
+        turnActive: true,
+        currentTurnId: "turn-a",
+        taskMode: "plan",
+      }),
+    );
+    activeTabId.value = "sA";
+    store.currentThreadId = "tA";
+    store.turnActive = true;
+    store.currentTurnId = "turn-a";
+    store.planPrompt = null;
+    await wireEvents();
+
+    fireListen("turn/completed", {
+      turn: { id: "turn-zzz", status: "completed" },
+    });
+    await flushPromises();
+
+    expect(store.turnActive).toBe(true);
+    expect(store.planPrompt).toBeNull();
+    expect((tabs[0] as SessionTab).turnActive).toBe(true);
+  });
+
+  it("turn/started 缺 threadId 且 turn id 匹配后台标签 B：B 置为进行中，A 的计划提示不被清空", async () => {
+    tabs.push(
+      makeSessionTab("sA", "tA", {
+        turnActive: false,
+        currentTurnId: "turn-a",
+        taskMode: "plan",
+        planPrompt: { threadId: "tA", turnId: "turn-1", planText: "旧提示" },
+      }),
+    );
+    tabs.push(
+      makeSessionTab("sB", "tB", {
+        turnActive: false,
+        currentTurnId: "turn-b",
+        taskMode: "execute",
+      }),
+    );
+    activeTabId.value = "sA";
+    store.currentThreadId = "tA";
+    store.turnActive = false;
+    store.currentTurnId = "turn-a";
+    store.planPrompt = { threadId: "tA", turnId: "turn-1", planText: "旧提示" };
+    await wireEvents();
+
+    fireListen("turn/started", { turn: { id: "turn-b" } });
+    await flushPromises();
+
+    expect((tabs[1] as SessionTab).turnActive).toBe(true);
+    // A 的“计划已就绪”提示不被 B 的回合开始事件清掉
+    expect(store.planPrompt).not.toBeNull();
+    expect((tabs[0] as SessionTab).planPrompt).not.toBeNull();
+  });
+
+  it("thread/goal/updated 与 cleared 缺 threadId：跳过，活动标签目标状态不变", async () => {
+    tabs.push(
+      makeSessionTab("sA", "tA", {
+        goalText: "A目标",
+        goalStatus: "active",
+        goalArmed: true,
+      }),
+    );
+    activeTabId.value = "sA";
+    store.currentThreadId = "tA";
+    store.goalText = "A目标";
+    store.goalStatus = "active";
+    store.goalArmed = true;
+    await wireEvents();
+
+    fireListen("thread/goal/updated", {
+      goal: { objective: "B目标", status: "active" },
+    });
+    fireListen("thread/goal/cleared", {});
+    await flushPromises();
+
+    expect(store.goalText).toBe("A目标");
+    expect(store.goalStatus).toBe("active");
+    expect(store.goalArmed).toBe(true);
+    expect((tabs[0] as SessionTab).goalText).toBe("A目标");
+  });
+});
