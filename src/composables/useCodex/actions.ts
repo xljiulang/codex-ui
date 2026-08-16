@@ -5,14 +5,26 @@ import { focusComposer } from "../../lib/composerFocus";
 import { stripMentionContext } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandbox } from "../../lib/permissions";
 import { TabKind } from "../../lib/tabs";
-import type { PendingInteraction, Turn, UserInput } from "../../lib/types";
+import type {
+  PendingInteraction,
+  ThreadSummary,
+  Turn,
+  UserInput,
+} from "../../lib/types";
 import { activateTab, insertTab, tabs } from "../useTabs";
 import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, workspace } from "./items";
 import { activeSessionTab, allSessionTabs, dropSessionTab, findSessionTabByThread, freshSessionTab, sessionTabTitle } from "./sessionState";
 import { currentModelId, ensureThreadPlugins, resetToNewChat } from "./settings";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
-import { autoTitleThread, isThreadNotFound, refreshThreads, renameThread, sanitizeTitle } from "./threads";
+import {
+  autoTitleThread,
+  isThreadNotFound,
+  refreshThreads,
+  renameThread,
+  sanitizeTitle,
+  upsertThreadSummary,
+} from "./threads";
 import { setToast, toastError } from "./toast";
 import { clearGoal, continueTurn, setGoal, steerTurn } from "./turnControl";
 import {
@@ -69,7 +81,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     if (reviewer) params.approvalsReviewer = reviewer;
     // 显式携带（null 表示用默认），避免旧值在会话里粘滞；effort 由随后的 turn/start 携带
     params.model = active?.model ?? null;
-    const res = await invoke<{ thread: { id: string; name?: string | null }; model?: string }>(
+    const res = await invoke<{ thread: ThreadSummary; model?: string }>(
       "thread_start",
       { params },
     );
@@ -99,6 +111,16 @@ async function newChat(prompt: string, attachments: UserInput[]) {
         tab.loading = false;
         tab.title = sessionTabTitle(tab);
       }
+      // 面板一致性兜底：新线程可能尚未被 thread_list 返回，本地先写入摘要
+      upsertThreadSummary({
+        id: threadId,
+        name: tab?.name || res.thread.name || null,
+        createdAt: res.thread.createdAt ?? Date.now(),
+        updatedAt: res.thread.updatedAt ?? Date.now(),
+        recencyAt: res.thread.recencyAt ?? Date.now(),
+        cwd,
+        source: res.thread.source ?? "appServer",
+      });
       store.itemsByThread[threadId] = [];
       store.activeWorkByThread[threadId] = 0;
       store.currentModel = res.model ?? currentModelId(tab);
@@ -120,6 +142,16 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;
+    // 面板一致性兜底：新线程可能尚未被 thread_list 返回，本地先写入摘要
+    upsertThreadSummary({
+      id: threadId,
+      name: activeTab?.name || res.thread.name || null,
+      createdAt: res.thread.createdAt ?? Date.now(),
+      updatedAt: res.thread.updatedAt ?? Date.now(),
+      recencyAt: res.thread.recencyAt ?? Date.now(),
+      cwd,
+      source: res.thread.source ?? "appServer",
+    });
     // 待挂载目标（勾选后首条消息即目标）：创建会话后挂载到新线程；失败不阻塞新建，
     // 清空本地目标状态，用户可重新勾选
     const pendingGoal = activeSessionTab()?.goalText;

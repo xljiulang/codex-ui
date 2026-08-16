@@ -151,6 +151,42 @@ describe("会话标签状态与事件路由", () => {
       name: "帮我修复登录页面报错",
     });
   });
+
+  it("新建会话短首条消息：thread_list 未返回时也即时同步历史面板", async () => {
+    tabs.push(
+      makeSessionTab("s1", null, { newChatWorkspace: "D:/repo" }),
+    );
+    activeTabId.value = "s1";
+    store.server.startupWorkspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_start") {
+        return Promise.resolve({
+          thread: { id: "t1", name: null },
+          model: "gpt-5",
+        });
+      }
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/memoryMode/set") return Promise.resolve({});
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await sendPrompt("ABCDE");
+    expect(activeSessionTab()?.threadId).toBe("t1");
+    expect(activeSessionTab()?.name).toBe("ABCDE");
+    // thread_list 返回空（新线程尚未可列）时，本地兜底仍同步历史面板
+    const found = store.threads.find((t) => t.id === "t1");
+    expect(found).toBeTruthy();
+    expect(found?.name).toBe("ABCDE");
+    expect(store.threads[0]?.id).toBe("t1");
+  });
 });
 describe("会话标签状态与事件路由", () => {
   beforeEach(() => {

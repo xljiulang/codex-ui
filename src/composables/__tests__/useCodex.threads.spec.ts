@@ -2,7 +2,13 @@ import { __resetPinnedSectionForTest, __resetTitleHelperCapabilityForTest, sortT
 import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
-import { autoTitleThread, sanitizeTitle, togglePin } from "../useCodex/threads";
+import {
+  autoTitleThread,
+  renameThread,
+  sanitizeTitle,
+  togglePin,
+  upsertThreadSummary,
+} from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
 import { capturedListeners, fireListen, makeSessionTab, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
@@ -649,5 +655,45 @@ describe("autoTitleThread 临时线程标题总结", () => {
       timeout: 3000,
       interval: 20,
     });
+  });
+});
+
+describe("upsertThreadSummary 历史面板本地兜底", () => {
+  beforeEach(() => {
+    store.threads = [];
+  });
+
+  it("追加新条目并按最近时间排序", () => {
+    upsertThreadSummary({ id: "t1", name: "旧", createdAt: 100, recencyAt: 100 });
+    upsertThreadSummary({ id: "t2", name: "新", createdAt: 200, recencyAt: 200 });
+    expect(store.threads.map((t) => t.id)).toEqual(["t2", "t1"]);
+  });
+
+  it("同 id 替换不产生重复", () => {
+    upsertThreadSummary({ id: "t1", name: "旧", createdAt: 100, recencyAt: 100 });
+    upsertThreadSummary({ id: "t1", name: "新", createdAt: 100, recencyAt: 200 });
+    expect(store.threads).toHaveLength(1);
+    expect(store.threads[0].name).toBe("新");
+  });
+});
+
+describe("renameThread 缺失条目兜底", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.searchActive = false;
+    mockedInvoke.mockReset();
+    mockedInvoke.mockResolvedValue(undefined);
+  });
+
+  it("线程不在历史列表时本地写入新标题", async () => {
+    expect(await renameThread("t9", "新标题")).toBe(true);
+    expect(store.threads).toHaveLength(1);
+    expect(store.threads[0]).toMatchObject({ id: "t9", name: "新标题" });
+  });
+
+  it("搜索态不注入本地条目", async () => {
+    store.searchActive = true;
+    expect(await renameThread("t9", "新标题")).toBe(true);
+    expect(store.threads).toHaveLength(0);
   });
 });

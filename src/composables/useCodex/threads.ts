@@ -43,6 +43,21 @@ export async function refreshThreads() {
   }
 }
 
+/**
+ * 本地兜底：把线程摘要写入历史列表（按 id 替换或追加，随后重排）。
+ * 用于新建线程尚未被 thread_list 返回时保持面板一致；
+ * 后续 refreshThreads 会以服务端权威数据整体替换。
+ */
+export function upsertThreadSummary(summary: ThreadSummary) {
+  const idx = store.threads.findIndex((x) => x.id === summary.id);
+  if (idx >= 0) {
+    store.threads[idx] = summary;
+  } else {
+    store.threads.push(summary);
+  }
+  store.threads = sortThreads(store.threads);
+}
+
 
 /** 搜索历史会话（thread/search）：全量翻页，结果写入 store.threads 并附带摘要 */
 export async function searchThreads(term: string) {
@@ -111,6 +126,16 @@ export async function renameThread(
     await invoke("thread_set_name", { threadId, name: n });
     const t = store.threads.find((x) => x.id === threadId);
     if (t) t.name = n;
+    else if (!store.searchActive) {
+      // 线程不在历史列表（新建/列表时序）：本地兜底写入，保证面板即时同步
+      upsertThreadSummary({
+        id: threadId,
+        name: n,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        recencyAt: Date.now(),
+      });
+    }
     const tab = findSessionTabByThread(threadId);
     if (tab) {
       tab.name = n;
