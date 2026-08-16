@@ -599,3 +599,22 @@ describe("用户消息中的图片附件", () => {
   });
 
 });
+
+describe("子代理活动提示", () => {
+  it("subAgentActivity 渲染 kind 与 agentPath", () => {
+    const wrapper = mount(MessageItem, {
+      props: {
+        item: {
+          id: "s1",
+          type: "subAgentActivity",
+          kind: "subAgentSpawned",
+          agentPath: "/root/agent-1",
+        } as ThreadItem,
+      },
+    });
+    expect(wrapper.find(".sub-agent-note").exists()).toBe(true);
+    expect(wrapper.text()).toContain("子代理活动");
+    expect(wrapper.text()).toContain("subAgentSpawned");
+    expect(wrapper.text()).toContain("/root/agent-1");
+  });
+});

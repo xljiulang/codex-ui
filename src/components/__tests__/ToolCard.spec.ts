@@ -387,3 +387,44 @@ describe("命令输出增量渲染", () => {
     expect(text).not.toContain("AAA");
   });
 });
+
+describe("ToolCard 新增条目类型", () => {
+  it("imageGeneration 分发到 ImageGenerationCard", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: {
+          id: "g1",
+          type: "imageGeneration",
+          status: "completed",
+          revisedPrompt: "生成一个图标",
+          result: "C:/tmp/icon.png",
+        } as ThreadItem,
+      },
+    });
+    expect(wrapper.text()).toContain("生成图片");
+    expect(wrapper.text()).toContain("生成一个图标");
+    await wrapper.find(".tool-card-header").trigger("click");
+    expect(wrapper.find(".image-gen-card").exists()).toBe(true);
+  });
+
+  it("MCP 进度行与百分比条在展开后显示", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: {
+          id: "m1",
+          type: "mcpToolCall",
+          server: "srv",
+          tool: "t",
+          status: "in_progress",
+          progressText: "下载中",
+          progressPercent: 40,
+        } as ThreadItem,
+      },
+    });
+    await wrapper.find(".tool-card-header").trigger("click");
+    expect(wrapper.text()).toContain("进度：下载中");
+    const fill = wrapper.find(".tool-progress-fill");
+    expect(fill.exists()).toBe(true);
+    expect(fill.attributes("style")).toContain("width: 40%");
+  });
+});

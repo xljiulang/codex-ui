@@ -304,6 +304,7 @@ describe("ResourceView 文件树", () => {
       followupQueue: [],
       attachments: [],
       planPrompt: null,
+      plan: null,
       loading: false,
       newChatWorkspace: null,
       interactions: [],

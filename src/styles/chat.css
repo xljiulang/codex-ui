@@ -982,6 +982,92 @@
   text-decoration: line-through;
 }
 
+/* Updated Plan 任务清单卡片（turn/plan/updated） */
+.plan-card {
+  border: 1px solid var(--border);
+  background: var(--tool-card-bg);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+  padding: 8px 12px;
+}
+
+.plan-explanation {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+}
+
+.plan-step .plan-step-icon {
+  color: var(--text-faint);
+}
+
+.plan-step.in-progress {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.plan-step.in-progress .plan-step-icon {
+  color: var(--accent);
+}
+
+.plan-step.done .plan-step-icon {
+  color: var(--green);
+}
+
+.plan-step.done .plan-step-text {
+  text-decoration: line-through;
+}
+
+/* 子代理活动提示（subAgentActivity） */
+.sub-agent-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--reasoning-bg);
+  margin-bottom: 8px;
+}
+
+/* AI 生成图片卡片（imageGeneration） */
+.image-gen-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.image-gen-img {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  background: var(--console-bg);
+}
+
+/* MCP 工具调用进度条 */
+.tool-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  overflow: hidden;
+  margin: 4px 0;
+}
+
+.tool-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
 /* 推理折叠块 */
 .reasoning-block {
   border: 1px solid var(--border);

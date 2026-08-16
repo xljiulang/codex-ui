@@ -4,6 +4,7 @@ import ComposerBar from "./ComposerBar.vue";
 import EmptyState from "./EmptyState.vue";
 import InlineInteraction from "./InlineInteraction.vue";
 import MessageItem from "./MessageItem.vue";
+import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
@@ -222,6 +223,7 @@ onBeforeUnmount(() => {
             </template>
           </section>
         </template>
+        <PlanCard v-if="tab.plan" :plan="tab.plan" />
         <InlineInteraction :interactions="interactionItems" />
         <PlanPromptBubble :prompt="tab.planPrompt" />
         <div

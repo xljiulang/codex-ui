@@ -7,6 +7,7 @@ import {
   isThreadItemType,
   type AgentMessageItem,
   type CommandExecutionItem,
+  type McpToolCallItem,
   type ReasoningItem,
   type ServerStatus,
   type ThreadItem,
@@ -28,6 +29,7 @@ import {
   goalStatusToast,
   isGoalStatus,
   isGoalTerminalStatus,
+  type PlanStep,
   type SessionTab,
 } from "./types";
 
@@ -133,6 +135,7 @@ export async function wireEvents() {
       tab.turnActive = true;
       tab.turnInterrupted = false;
       tab.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
+      tab.plan = null; // 新回合开始：重置 Updated Plan 任务清单
       // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
       // 事件 id 仅在响应缺失时兜底。
       if (!tab.currentTurnId && p.turn?.id) tab.currentTurnId = p.turn.id;
@@ -349,6 +352,149 @@ export async function wireEvents() {
         status: "inProgress",
         streaming: true,
       });
+    }),
+  );
+
+  unlisteners.push(
+    await listen("turn/plan/updated", (e) => {
+      const p = e.payload as {
+        threadId?: string;
+        turnId?: string | number;
+        turn?: { id?: string };
+        explanation?: unknown;
+        plan?: unknown;
+      };
+      const threadId = typeof p.threadId === "string" ? p.threadId : undefined;
+      if (isBackgroundThread(threadId)) return;
+      const tab = threadId
+        ? resolveTurnTab({ threadId })
+        : typeof p.turnId === "string" || typeof p.turnId === "number"
+          ? resolveTurnTab({ turn: { id: String(p.turnId) } })
+          : p.turn?.id
+            ? resolveTurnTab({ turn: { id: p.turn.id } })
+            : null;
+      if (!tab) return;
+      // 载荷防御性归一化：非法/缺失 status 一律按 pending 处理
+      const rawSteps = Array.isArray(p.plan) ? p.plan : [];
+      const steps = rawSteps.flatMap((s) => {
+        if (!s || typeof s !== "object") return [];
+        const o = s as Record<string, unknown>;
+        if (typeof o.step !== "string" || !o.step) return [];
+        return {
+          step: o.step,
+          status:
+            o.status === "inProgress" || o.status === "completed"
+              ? o.status
+              : "pending",
+        };
+      }) as PlanStep[];
+      tab.plan = {
+        ...(typeof p.explanation === "string" && p.explanation
+          ? { explanation: p.explanation }
+          : {}),
+        steps,
+      };
+    }),
+  );
+
+  unlisteners.push(
+    await listen("item/reasoning/summaryTextDelta", (e) => {
+      const p = e.payload as {
+        threadId?: string;
+        itemId?: string;
+        delta?: string;
+        summaryIndex?: number;
+      };
+      if (!p.threadId || !p.itemId) return;
+      const threadId = p.threadId;
+      const itemId = p.itemId;
+      if (isBackgroundThread(threadId)) return;
+      const item = getOrCreateItem(threadId, itemId, () => ({
+        id: itemId,
+        type: "reasoning",
+        summary: [],
+        streaming: true,
+      }));
+      if (!isThreadItemType<ReasoningItem>(item, "reasoning")) return;
+      if (typeof item.startedAtMs !== "number") item.startedAtMs = Date.now();
+      if (!item.streaming) {
+        item.streaming = true;
+        bumpActive(threadId, 1);
+      }
+      const summary = item.summary ?? [];
+      const idx =
+        typeof p.summaryIndex === "number"
+          ? p.summaryIndex
+          : summary.length - 1;
+      if (idx >= 0 && idx < summary.length) {
+        summary[idx] = (summary[idx] ?? "") + String(p.delta ?? "");
+      } else if (idx < 0 || idx === summary.length) {
+        summary.push(String(p.delta ?? ""));
+      } else {
+        while (summary.length <= idx) summary.push("");
+        summary[idx] = String(p.delta ?? "");
+      }
+      item.summary = summary;
+      store.itemsRev++;
+    }),
+  );
+
+  unlisteners.push(
+    await listen("item/reasoning/summaryPartAdded", (e) => {
+      const p = e.payload as {
+        threadId?: string;
+        itemId?: string;
+        summaryIndex?: number;
+      };
+      if (!p.threadId || !p.itemId) return;
+      const threadId = p.threadId;
+      const itemId = p.itemId;
+      if (isBackgroundThread(threadId)) return;
+      const item = getOrCreateItem(threadId, itemId, () => ({
+        id: itemId,
+        type: "reasoning",
+        summary: [],
+        streaming: true,
+      }));
+      if (!isThreadItemType<ReasoningItem>(item, "reasoning")) return;
+      const summary = item.summary ?? [];
+      const idx =
+        typeof p.summaryIndex === "number" ? p.summaryIndex : summary.length;
+      while (summary.length <= idx) summary.push("");
+      item.summary = summary;
+      store.itemsRev++;
+    }),
+  );
+
+  unlisteners.push(
+    await listen("item/mcpToolCall/progress", (e) => {
+      const p = e.payload as {
+        threadId?: string;
+        itemId?: string;
+        message?: unknown;
+        text?: unknown;
+        progress?: unknown;
+        percent?: unknown;
+      };
+      if (!p.threadId || !p.itemId) return;
+      const threadId = p.threadId;
+      const itemId = p.itemId;
+      if (isBackgroundThread(threadId)) return;
+      const item = getOrCreateItem(threadId, itemId, () => ({
+        id: itemId,
+        type: "mcpToolCall",
+        server: "",
+        tool: "",
+        status: "in_progress",
+      }));
+      if (!isThreadItemType<McpToolCallItem>(item, "mcpToolCall")) return;
+      const progressText = String(p.message ?? p.text ?? p.progress ?? "");
+      if (progressText) item.progressText = progressText;
+      const percent = typeof p.percent === "number" ? p.percent : NaN;
+      if (!Number.isNaN(percent) && percent >= 0 && percent <= 100) {
+        item.progressPercent = percent;
+      }
+      store.itemsRev++;
     }),
   );
 

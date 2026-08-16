@@ -90,6 +90,20 @@ export interface PlanPrompt {
   planText: string;
 }
 
+/** Updated Plan 任务清单步骤状态（协议 turn/plan/updated：pending/inProgress/completed） */
+export type PlanStepStatus = "pending" | "inProgress" | "completed";
+
+export interface PlanStep {
+  step: string;
+  status: PlanStepStatus;
+}
+
+/** turn/plan/updated 通知载荷（explanation? + plan: [{step,status}]） */
+export interface TurnPlan {
+  explanation?: string;
+  steps: PlanStep[];
+}
+
 
 /**
  * 会话标签：左侧标签区的每个“会话”标签对应一个打开的会话
@@ -136,6 +150,8 @@ export interface SessionTab extends EditorTabBase {
   followupQueue: { text: string; attachments: UserInput[] }[];
   attachments: UserInput[];
   planPrompt: PlanPrompt | null;
+  /** 当前回合的 Updated Plan 任务清单（turn/plan/updated 驱动，新回合重置） */
+  plan: TurnPlan | null;
   loading: boolean;
   /** 新建对话时可选的项目目录（null = 使用启动工作目录） */
   newChatWorkspace: string | null;

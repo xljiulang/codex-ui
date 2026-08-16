@@ -48,6 +48,7 @@ export function freshSessionTab(): SessionTab {
     followupQueue: [],
     attachments: [],
     planPrompt: null,
+    plan: null,
     loading: false,
     newChatWorkspace: null,
     interactions: [],

@@ -3,6 +3,8 @@ import { computed, ref, watch } from "vue";
 import {
   isThreadItemType,
   type FileChangeItem,
+  type ImageGenerationItem,
+  type McpToolCallItem,
   type ThreadItem,
   type TodoListItem,
   type WebSearchItem,
@@ -14,6 +16,7 @@ import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { copyText } from "../lib/clipboard";
 import FileChangeCard from "./FileChangeCard.vue";
+import ImageGenerationCard from "./ImageGenerationCard.vue";
 import TodoListCard from "./TodoListCard.vue";
 import WebSearchCard from "./WebSearchCard.vue";
 
@@ -79,6 +82,8 @@ const title = computed(() => {
       return "搜索网络";
     case "fileChange":
       return "文件变更";
+    case "imageGeneration":
+      return "生成图片";
     case "todoList":
       return "计划";
     default:
@@ -107,6 +112,9 @@ const sub = computed(() => {
   if (type.value === "commandExecution") return commandText.value;
   if (type.value === "webSearch") {
     return String(props.item.query ?? "");
+  }
+  if (type.value === "imageGeneration") {
+    return String(props.item.revisedPrompt ?? "");
   }
   if (isThreadItemType<FileChangeItem>(props.item, "fileChange")) {
     if (!props.item.changes.length) return "";
@@ -224,6 +232,18 @@ const errorText = computed(() => {
   return e?.message ?? "";
 });
 
+const mcpProgressText = computed(() =>
+  isThreadItemType<McpToolCallItem>(props.item, "mcpToolCall")
+    ? props.item.progressText ?? ""
+    : "",
+);
+const mcpProgressPercent = computed(() =>
+  isThreadItemType<McpToolCallItem>(props.item, "mcpToolCall") &&
+  typeof props.item.progressPercent === "number"
+    ? props.item.progressPercent
+    : null,
+);
+
 // 默认折叠：不再因运行中/失败/文件变更自动展开，点击头部才展开
 const effectiveExpanded = computed(() => expanded.value);
 </script>
@@ -295,6 +315,17 @@ const effectiveExpanded = computed(() => expanded.value);
       </template>
 
       <template v-else-if="type === 'mcpToolCall' || type === 'dynamicToolCall'">
+        <div v-if="mcpProgressText" class="tool-meta">
+          进度：{{ mcpProgressText }}
+        </div>
+        <div v-if="mcpProgressPercent !== null" class="tool-progress">
+          <div
+            class="tool-progress-fill"
+            :style="{
+              width: Math.min(100, Math.max(0, mcpProgressPercent)) + '%',
+            }"
+          ></div>
+        </div>
         <div v-if="argsJson" class="tool-json">{{ argsJson }}</div>
         <div v-if="resultText" class="tool-output">{{ resultText }}</div>
         <div v-if="errorText" class="tool-meta" style="color: var(--red)">
@@ -326,6 +357,10 @@ const effectiveExpanded = computed(() => expanded.value);
       <WebSearchCard
         v-else-if="item.type === 'webSearch'"
         :item="item as WebSearchItem"
+      />
+      <ImageGenerationCard
+        v-else-if="item.type === 'imageGeneration'"
+        :item="item as ImageGenerationItem"
       />
       </div>
     </Transition>

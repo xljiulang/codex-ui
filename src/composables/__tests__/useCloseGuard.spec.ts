@@ -94,6 +94,7 @@ function sessionTab(
     followupQueue: [],
     attachments: [],
     planPrompt: null,
+    plan: null,
     loading: false,
     newChatWorkspace: null,
     interactions: [],

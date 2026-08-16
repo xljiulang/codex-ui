@@ -71,6 +71,8 @@ export type ThreadItem =
   | TodoListItem
   | ContextCompactionItem
   | ImageViewItem
+  | ImageGenerationItem
+  | SubAgentActivityItem
   | SleepItem
   | UnknownItem;
 
@@ -225,6 +227,9 @@ export interface McpToolCallItem extends ThreadItemBase {
   status: string;
   result?: { content?: unknown[] } | null;
   error?: { message?: string } | null;
+  /** item/mcpToolCall/progress 通知写入的进度文本/百分比 */
+  progressText?: string;
+  progressPercent?: number;
 }
 
 export interface DynamicToolCallItem extends ThreadItemBase {
@@ -246,6 +251,23 @@ export interface FileChangeItem extends ThreadItemBase {
 export interface WebSearchItem extends ThreadItemBase {
   type: "webSearch";
   query: string;
+}
+
+/** AI 生成图片条目（协议 imageGeneration：id, status, revisedPrompt?, result） */
+export interface ImageGenerationItem extends ThreadItemBase {
+  type: "imageGeneration";
+  status: string;
+  revisedPrompt?: string | null;
+  /** 结果形状宽松：本地路径 / http(s) / data: URL，或含 path/url/src/dataUrl 的对象 */
+  result?: unknown;
+}
+
+/** 子代理活动条目（协议 subAgentActivity：kind, agentThreadId, agentPath） */
+export interface SubAgentActivityItem extends ThreadItemBase {
+  type: "subAgentActivity";
+  kind: string;
+  agentThreadId?: string | null;
+  agentPath?: string | null;
 }
 
 export interface TodoListItem extends ThreadItemBase {

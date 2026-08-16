@@ -32,6 +32,7 @@ function sessionTab(over: Partial<SessionTab> = {}): SessionTab {
     followupQueue: [],
     attachments: [],
     planPrompt: null,
+    plan: null,
     loading: false,
     newChatWorkspace: null,
     interactions: [],

@@ -82,6 +82,7 @@ function makeTab(): SessionTab {
     followupQueue: [],
     attachments: [],
     planPrompt: null,
+    plan: null,
     loading: false,
     newChatWorkspace: null,
     interactions: store.interactions as unknown as SessionTab["interactions"],
@@ -842,5 +843,50 @@ describe("ChatView 计划已就绪气泡", () => {
     wrapper.unmount();
     store.interactions.splice(0);
     tab.planPrompt = null;
+  });
+});
+
+describe("ChatView Updated Plan 任务清单", () => {
+  it("有 plan 时渲染计划卡片（说明 + 步骤状态）", () => {
+    tab = reactive(makeTab());
+    tab.plan = {
+      explanation: "分两步完成",
+      steps: [
+        { step: "第一步", status: "inProgress" },
+        { step: "第二步", status: "completed" },
+        { step: "第三步", status: "pending" },
+      ],
+    };
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    expect(wrapper.find(".plan-card").exists()).toBe(true);
+    expect(wrapper.text()).toContain("分两步完成");
+    expect(wrapper.findAll(".plan-step")).toHaveLength(3);
+    expect(wrapper.find(".plan-step.in-progress").exists()).toBe(true);
+    expect(wrapper.find(".plan-step.done").exists()).toBe(true);
+    expect(wrapper.find(".plan-step.pending").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("plan 为 null 时不渲染计划卡片", () => {
+    tab = reactive(makeTab());
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    expect(wrapper.find(".plan-card").exists()).toBe(false);
+    wrapper.unmount();
   });
 });

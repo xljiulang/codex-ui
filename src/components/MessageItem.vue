@@ -120,6 +120,7 @@ const isTool =
   props.item.type === "collabAgentToolCall" ||
   props.item.type === "webSearch" ||
   props.item.type === "fileChange" ||
+  props.item.type === "imageGeneration" ||
   props.item.type === "todoList";
 
 const time = computed(() =>
@@ -306,6 +307,12 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
         @error="markImgErr()"
       />
       <div v-else class="img-fallback">图片加载失败</div>
+    </div>
+  </div>
+  <div v-else-if="item.type === 'subAgentActivity'" class="msg">
+    <div class="sub-agent-note">
+      子代理活动：{{ item.kind
+      }}<template v-if="item.agentPath">（{{ item.agentPath }}）</template>
     </div>
   </div>
   <div v-else-if="item.type === 'sleep'" class="msg">

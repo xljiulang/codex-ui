@@ -2,7 +2,7 @@ import { dismissPlanPrompt, executePlan, exitPlanMode } from "../useCodex/action
 import { __resetTitleHelperCapabilityForTest } from "../useCodex/capabilities";
 import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
-import { store } from "../useCodex/store";
+import { backgroundThreadIds, store } from "../useCodex/store";
 import { autoTitleThread } from "../useCodex/threads";
 import type { SessionTab } from "../useCodex/types";
 import { activeTabId } from "../useEditorTabs";
@@ -158,6 +158,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       followupQueue: [],
       attachments: [],
       planPrompt: null,
+      plan: null,
       loading: false,
       newChatWorkspace: null,
       interactions: [],
@@ -237,6 +238,161 @@ describe("会话标签状态与事件路由", () => {
     fireListen("serverRequest/resolved", { requestId: 1, threadId: "t2" });
     expect(tabs[1].interactions).toHaveLength(0);
     disposeEvents();
+  });
+});
+
+describe("turn/plan/updated 与推理/MCP 增量事件", () => {
+  beforeEach(() => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    __resetSessionTabsForTest();
+    store.itemsByThread = {};
+    backgroundThreadIds.clear();
+  });
+
+  it("turn/plan/updated：按 threadId 写入 plan，非法 status 归一化为 pending", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { currentTurnId: "turn-1" }));
+    activeTabId.value = "s1";
+    await wireEvents();
+
+    fireListen("turn/plan/updated", {
+      threadId: "t1",
+      explanation: "先做 A",
+      plan: [
+        { step: "A", status: "inProgress" },
+        { step: "B", status: "completed" },
+        { step: "C", status: "bogus" },
+      ],
+    });
+
+    expect(tabs[0].plan).toEqual({
+      explanation: "先做 A",
+      steps: [
+        { step: "A", status: "inProgress" },
+        { step: "B", status: "completed" },
+        { step: "C", status: "pending" },
+      ],
+    });
+  });
+
+  it("turn/plan/updated：仅带 turnId 时按回合归因", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { currentTurnId: "turn-9" }));
+    activeTabId.value = "s1";
+    await wireEvents();
+
+    fireListen("turn/plan/updated", {
+      turnId: "turn-9",
+      plan: [{ step: "X", status: "pending" }],
+    });
+
+    expect(tabs[0].plan?.steps).toEqual([{ step: "X", status: "pending" }]);
+  });
+
+  it("turn/plan/updated：无法归因时跳过", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { currentTurnId: "turn-1" }));
+    activeTabId.value = "s1";
+    await wireEvents();
+
+    fireListen("turn/plan/updated", {
+      plan: [{ step: "X", status: "pending" }],
+    });
+
+    expect(tabs[0].plan).toBeNull();
+  });
+
+  it("turn/plan/updated：后台线程跳过", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
+    backgroundThreadIds.add("bg-1");
+    await wireEvents();
+
+    fireListen("turn/plan/updated", {
+      threadId: "bg-1",
+      plan: [{ step: "X", status: "pending" }],
+    });
+
+    expect(tabs[0].plan).toBeNull();
+  });
+
+  it("turn/started 重置 plan", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { currentTurnId: "turn-1" }));
+    activeTabId.value = "s1";
+    await wireEvents();
+    fireListen("turn/plan/updated", {
+      threadId: "t1",
+      plan: [{ step: "A", status: "inProgress" }],
+    });
+    expect(tabs[0].plan).not.toBeNull();
+
+    fireListen("turn/started", { threadId: "t1", turn: { id: "turn-2" } });
+    expect(tabs[0].plan).toBeNull();
+  });
+
+  it("item/reasoning/summaryTextDelta 按索引追加，summaryPartAdded 扩展数组", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
+    await wireEvents();
+
+    fireListen("item/reasoning/summaryTextDelta", {
+      threadId: "t1",
+      itemId: "r1",
+      summaryIndex: 0,
+      delta: "思考",
+    });
+    fireListen("item/reasoning/summaryTextDelta", {
+      threadId: "t1",
+      itemId: "r1",
+      summaryIndex: 0,
+      delta: "中",
+    });
+    fireListen("item/reasoning/summaryPartAdded", {
+      threadId: "t1",
+      itemId: "r1",
+      summaryIndex: 2,
+    });
+
+    const items = store.itemsByThread["t1"] ?? [];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      type: "reasoning",
+      summary: ["思考中", "", ""],
+      streaming: true,
+    });
+  });
+
+  it("item/mcpToolCall/progress 写入进度字段，缺失字段容错", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
+    await wireEvents();
+
+    fireListen("item/mcpToolCall/progress", {
+      threadId: "t1",
+      itemId: "m1",
+      message: "下载中",
+      percent: 50,
+    });
+    let items = store.itemsByThread["t1"] ?? [];
+    expect(items[0]).toMatchObject({
+      type: "mcpToolCall",
+      progressText: "下载中",
+      progressPercent: 50,
+    });
+
+    // 无 message/percent 的后续事件不覆盖已有值
+    fireListen("item/mcpToolCall/progress", { threadId: "t1", itemId: "m1" });
+    items = store.itemsByThread["t1"] ?? [];
+    expect(items[0]).toMatchObject({
+      progressText: "下载中",
+      progressPercent: 50,
+    });
   });
 });
 describe("会话标签状态与事件路由", () => {
