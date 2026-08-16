@@ -926,16 +926,9 @@
 .git-status-icon {
   flex-shrink: 0;
   margin-left: auto;
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
-  border: 1px solid currentColor;
-  border-radius: 6px;
 }
 
 .git-status-added,
@@ -1177,4 +1170,3 @@
   line-height: 1.6;
   color: var(--text-dim);
 }
-
