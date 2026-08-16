@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { invoke } from "@tauri-apps/api/core";
 import ContextMenu from "./ContextMenu.vue";
 import ModalDialog from "./ModalDialog.vue";
+import GitSectionHead from "./GitSectionHead.vue";
 import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
@@ -41,7 +42,6 @@ import {
 } from "../lib/gitTree";
 import {
   ICON_ARROW_DOWN,
-  ICON_ARROW_RIGHT,
   ICON_PLUS,
 } from "../lib/icons";
 
@@ -424,41 +424,26 @@ function toggleDirRow(node: GitDirNode) {
       </div>
 
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('changes') }">
-        <div
-          class="git-section-head"
-          role="button"
-          tabindex="0"
-          :aria-expanded="!isSectionCollapsed('changes')"
-          @click="toggleSection('changes')"
-          @keydown.enter="toggleSection('changes')"
+        <GitSectionHead
+          label="更改"
+          :collapsed="isSectionCollapsed('changes')"
+          @toggle="toggleSection('changes')"
         >
-          <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              :d="
-                isSectionCollapsed('changes')
-                  ? ICON_ARROW_RIGHT
-                  : ICON_ARROW_DOWN
-              "
-            />
-          </svg>
-          <span>更改</span>
-          <span class="git-section-actions">
-            <span v-if="changeCount > 0" class="git-section-count">{{
-              changeCount
-            }}</span>
-            <button
-              class="git-icon-btn git-section-action git-section-stage"
-              aria-label="全部暂存"
-              v-tooltip="'全部暂存'"
-              :disabled="gitActionBusy || !worktreeRows.length"
-              @click.stop="stageAll()"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_ARROW_DOWN" />
-              </svg>
-            </button>
-          </span>
-        </div>
+          <span v-if="changeCount > 0" class="git-section-count">{{
+            changeCount
+          }}</span>
+          <button
+            class="git-icon-btn git-section-action git-section-stage"
+            aria-label="全部暂存"
+            v-tooltip="'全部暂存'"
+            :disabled="gitActionBusy || !worktreeRows.length"
+            @click.stop="stageAll()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="ICON_ARROW_DOWN" />
+            </svg>
+          </button>
+        </GitSectionHead>
         <template v-if="!isSectionCollapsed('changes')">
           <GitFileTree
             :rows="worktreeRows"
@@ -473,41 +458,26 @@ function toggleDirRow(node: GitDirNode) {
       </div>
 
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('staged') }">
-        <div
-          class="git-section-head"
-          role="button"
-          tabindex="0"
-          :aria-expanded="!isSectionCollapsed('staged')"
-          @click="toggleSection('staged')"
-          @keydown.enter="toggleSection('staged')"
+        <GitSectionHead
+          label="暂存更改"
+          :collapsed="isSectionCollapsed('staged')"
+          @toggle="toggleSection('staged')"
         >
-          <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              :d="
-                isSectionCollapsed('staged')
-                  ? ICON_ARROW_RIGHT
-                  : ICON_ARROW_DOWN
-              "
-            />
-          </svg>
-          <span>暂存更改</span>
-          <span class="git-section-actions">
-            <span v-if="stagedCount > 0" class="git-section-count">{{
-              stagedCount
-            }}</span>
-            <button
-              class="git-icon-btn git-section-action git-section-unstage"
-              aria-label="全部取消暂存"
-              v-tooltip="'全部取消暂存'"
-              :disabled="gitActionBusy || !stagedRows.length"
-              @click.stop="unstageAll()"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_ARROW_UP" />
-              </svg>
-            </button>
-          </span>
-        </div>
+          <span v-if="stagedCount > 0" class="git-section-count">{{
+            stagedCount
+          }}</span>
+          <button
+            class="git-icon-btn git-section-action git-section-unstage"
+            aria-label="全部取消暂存"
+            v-tooltip="'全部取消暂存'"
+            :disabled="gitActionBusy || !stagedRows.length"
+            @click.stop="unstageAll()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="ICON_ARROW_UP" />
+            </svg>
+          </button>
+        </GitSectionHead>
         <template v-if="!isSectionCollapsed('staged')">
           <GitCommitBar
             :workspace="repoWorkspace"
@@ -527,25 +497,11 @@ function toggleDirRow(node: GitDirNode) {
       </div>
 
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('history') }">
-        <div
-          class="git-section-head"
-          role="button"
-          tabindex="0"
-          :aria-expanded="!isSectionCollapsed('history')"
-          @click="toggleSection('history')"
-          @keydown.enter="toggleSection('history')"
-        >
-          <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              :d="
-                isSectionCollapsed('history')
-                  ? ICON_ARROW_RIGHT
-                  : ICON_ARROW_DOWN
-              "
-            />
-          </svg>
-          <span>提交历史</span>
-        </div>
+        <GitSectionHead
+          label="提交历史"
+          :collapsed="isSectionCollapsed('history')"
+          @toggle="toggleSection('history')"
+        />
         <template v-if="!isSectionCollapsed('history')">
           <GitHistoryList :workspace="repoWorkspace" :reload-key="gitStatus" />
         </template>
