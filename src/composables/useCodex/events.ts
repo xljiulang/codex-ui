@@ -12,7 +12,13 @@ import {
   type ThreadItem,
 } from "../../lib/types";
 import { playNotificationSound } from "../../lib/sound";
-import { bumpActive, findItem, isActiveItem, upsertItem } from "./items";
+import {
+  bumpActive,
+  findItem,
+  getOrCreateItem,
+  isActiveItem,
+  upsertItem,
+} from "./items";
 import { activeSessionTab, allSessionTabs, findSessionTabByThread, sessionTabTitle } from "./sessionState";
 import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
@@ -257,11 +263,12 @@ export async function wireEvents() {
     await listen("item/agentMessage/delta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string };
       if (isBackgroundThread(p.threadId)) return;
-      let item = findItem(p.threadId, p.itemId);
-      if (!item) {
-        item = { id: p.itemId, type: "agentMessage", text: "", streaming: true };
-        upsertItem(p.threadId, item);
-      }
+      const item = getOrCreateItem(p.threadId, p.itemId, () => ({
+        id: p.itemId,
+        type: "agentMessage",
+        text: "",
+        streaming: true,
+      }));
       if (!isThreadItemType<AgentMessageItem>(item, "agentMessage")) return;
       item.text = (item.text ?? "") + p.delta;
       if (!item.streaming) {
@@ -276,11 +283,13 @@ export async function wireEvents() {
     await listen("item/commandExecution/outputDelta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string };
       if (isBackgroundThread(p.threadId)) return;
-      let item = findItem(p.threadId, p.itemId);
-      if (!item) {
-        item = { id: p.itemId, type: "commandExecution", command: "", status: "in_progress", aggregatedOutput: "" };
-        upsertItem(p.threadId, item);
-      }
+      const item = getOrCreateItem(p.threadId, p.itemId, () => ({
+        id: p.itemId,
+        type: "commandExecution",
+        command: "",
+        status: "in_progress",
+        aggregatedOutput: "",
+      }));
       if (!isThreadItemType<CommandExecutionItem>(item, "commandExecution"))
         return;
       item.aggregatedOutput = (item.aggregatedOutput ?? "") + p.delta;
@@ -292,11 +301,11 @@ export async function wireEvents() {
     await listen("item/reasoning/textDelta", (e) => {
       const p = e.payload as { threadId: string; itemId: string; delta: string; contentIndex: number };
       if (isBackgroundThread(p.threadId)) return;
-      let item = findItem(p.threadId, p.itemId);
-      if (!item) {
-        item = { id: p.itemId, type: "reasoning", content: [] };
-        upsertItem(p.threadId, item);
-      }
+      const item = getOrCreateItem(p.threadId, p.itemId, () => ({
+        id: p.itemId,
+        type: "reasoning",
+        content: [],
+      }));
       if (!isThreadItemType<ReasoningItem>(item, "reasoning")) return;
       if (typeof item.startedAtMs !== "number") {
         item.startedAtMs = Date.now();

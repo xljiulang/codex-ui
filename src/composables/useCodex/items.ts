@@ -49,6 +49,19 @@ export function findItem(threadId: string, itemId: string): ThreadItem | undefin
   return (store.itemsByThread[threadId] ?? []).find((x) => x.id === itemId);
 }
 
+/** 按 id 取消息项，不存在时用工厂创建并插入（流式 delta 场景） */
+export function getOrCreateItem(
+  threadId: string,
+  itemId: string,
+  factory: () => ThreadItem,
+): ThreadItem {
+  const existing = findItem(threadId, itemId);
+  if (existing) return existing;
+  const created = factory();
+  upsertItem(threadId, created);
+  return created;
+}
+
 
 export function flattenTurns(turns?: Turn[]): ThreadItem[] {
   if (!turns) return [];
