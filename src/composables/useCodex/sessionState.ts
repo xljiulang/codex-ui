@@ -125,17 +125,8 @@ function restoreSession(tab: SessionTab) {
   store.currentThreadOrigin = tab.origin;
   store.currentThreadWorkspace = tab.workspace;
   store.resumedThreadId = tab.resumedThreadId;
-  store.turnActive = tab.turnActive;
-  store.currentTurnId = tab.currentTurnId;
-  store.turnInterrupted = tab.turnInterrupted;
-  store.goalText = tab.goalText;
-  store.goalStatus = tab.goalStatus;
-  store.goalArmed = tab.goalArmed;
-  store.threadTokenUsage = tab.threadTokenUsage;
-  store.planPrompt = tab.planPrompt;
   store.loading = tab.loading;
   store.newChatWorkspace = tab.newChatWorkspace;
-  store.followupQueue = [...tab.followupQueue];
   store.attachments = [...tab.attachments];
 }
 
@@ -153,17 +144,8 @@ export function syncActiveSessionTab() {
   tab.origin = store.currentThreadOrigin;
   tab.workspace = store.currentThreadWorkspace;
   tab.resumedThreadId = store.resumedThreadId;
-  tab.turnActive = store.turnActive;
-  tab.currentTurnId = store.currentTurnId;
-  tab.turnInterrupted = store.turnInterrupted;
-  tab.goalText = store.goalText;
-  tab.goalStatus = store.goalStatus;
-  tab.goalArmed = store.goalArmed;
-  tab.threadTokenUsage = store.threadTokenUsage;
-  tab.planPrompt = store.planPrompt ? { ...store.planPrompt } : null;
   tab.loading = store.loading;
   tab.newChatWorkspace = store.newChatWorkspace;
-  tab.followupQueue = [...store.followupQueue];
   tab.attachments = [...store.attachments];
   tab.title = sessionTabTitle(tab);
 }

@@ -1,5 +1,5 @@
 import { newEmptyChat, openThread, sendPrompt } from "../useCodex/actions";
-import { __resetSessionTabsForTest } from "../useCodex/sessionState";
+import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { clearGoal, setGoal } from "../useCodex/turnControl";
 import { activeTabId } from "../useEditorTabs";
@@ -49,12 +49,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     store.currentThreadWorkspace = null;
     store.currentThreadOrigin = null;
     store.resumedThreadId = null;
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.toast = "";
   });
 
@@ -62,8 +56,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     store.currentThreadId = null;
     const ok = await setGoal("修复登录");
     expect(ok).toBe(false);
-    expect(store.goalText).toBeNull();
-    expect(store.goalStatus).toBeNull();
+    expect(activeSessionTab()).toBeNull();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "goal_set",
       expect.anything(),
@@ -89,6 +82,8 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("setGoal：成功后本地记录目标与 active 状态", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
     store.currentThreadId = "t1";
     mockedInvoke.mockResolvedValue(undefined);
     const ok = await setGoal("  修复登录流程  ");
@@ -97,31 +92,31 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       threadId: "t1",
       objective: "修复登录流程",
     });
-    expect(store.goalText).toBe("修复登录流程");
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalText).toBe("修复登录流程");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
     expect(store.toast).toContain("已设置目标");
   });
 
   it("setGoal：失败时保留原目标并提示错误", async () => {
+    tabs.push(
+      makeSessionTab("s1", "t1", {
+        goalText: "旧目标",
+        goalStatus: "complete",
+      }),
+    );
+    activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.goalText = "旧目标";
-    store.goalStatus = "complete";
     mockedInvoke.mockRejectedValue(new Error("服务端拒绝"));
     const ok = await setGoal("新目标");
     expect(ok).toBe(false);
-    expect(store.goalText).toBe("旧目标");
-    expect(store.goalStatus).toBe("complete");
+    expect(activeSessionTab()?.goalText).toBe("旧目标");
+    expect(activeSessionTab()?.goalStatus).toBe("complete");
     expect(store.toast).toContain("服务端拒绝");
   });
 
   it("clearGoal：无会话时仅清空本地状态", async () => {
-    store.goalText = "目标";
-    store.goalStatus = "active";
-    store.goalArmed = true;
     await clearGoal();
-    expect(store.goalText).toBeNull();
-    expect(store.goalStatus).toBeNull();
-    expect(store.goalArmed).toBe(false);
+    expect(activeSessionTab()).toBeNull();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "goal_clear",
       expect.anything(),
@@ -138,9 +133,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.goalText = "旧目标";
-    store.goalStatus = "active";
-    store.goalArmed = true;
     expect(await newEmptyChat()).toBe(true);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "goal_clear",
@@ -159,8 +151,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.goalText = "旧目标";
-    store.goalStatus = "active";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -189,7 +179,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
 
   it("openThread：goal_get 返回终态时 toast + 复位 + goal_clear", async () => {
     store.currentThreadId = "t1";
-    store.goalArmed = true;
     store.toast = "";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
@@ -213,9 +202,9 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(await p).toBe(true);
     expect(store.currentThreadId).toBe("t2");
     // 终态目标：打开即 toast 提示并复位（相当于没有目标），服务端同步清除
-    expect(store.goalText).toBeNull();
-    expect(store.goalStatus).toBeNull();
-    expect(store.goalArmed).toBe(false);
+    expect(activeSessionTab()?.goalText).toBeNull();
+    expect(activeSessionTab()?.goalStatus).toBeNull();
+    expect(activeSessionTab()?.goalArmed).toBe(false);
     expect(store.toast).toContain("目标已完成");
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", { threadId: "t2" });
   });
@@ -244,8 +233,8 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     });
     const p = openThread("t2");
     expect(await p).toBe(true);
-    expect(store.goalText).toBe("重构登录");
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalText).toBe("重构登录");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
   });
 
   it("openThread：goal_get 失败或未挂目标时状态为空", async () => {
@@ -268,8 +257,8 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     });
     const p = openThread("t2");
     expect(await p).toBe(true);
-    expect(store.goalText).toBeNull();
-    expect(store.goalStatus).toBeNull();
+    expect(activeSessionTab()?.goalText).toBeNull();
+    expect(activeSessionTab()?.goalStatus).toBeNull();
   });
 
   it("openThread：loadFullItems 以 asc+full 拉取完整工具/命令详情", async () => {
@@ -306,10 +295,15 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
   });
 
   it("continueTurn：待挂载目标在回合启动前 goal_set 挂载", async () => {
+    tabs.push(
+      makeSessionTab("s1", "t1", {
+        goalText: "修复登录",
+        goalStatus: null,
+      }),
+    );
+    activeTabId.value = "s1";
     store.currentThreadId = "t1";
     store.resumedThreadId = "t1"; // 跳过 thread_resume
-    store.goalText = "修复登录";
-    store.goalStatus = null;
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "turn_start") {
         return Promise.resolve({ turn: { id: "nt1" } });
@@ -321,7 +315,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       threadId: "t1",
       objective: "修复登录",
     });
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
     const goalIdx = mockedInvoke.mock.calls.findIndex(
       ([c]) => c === "goal_set",
     );

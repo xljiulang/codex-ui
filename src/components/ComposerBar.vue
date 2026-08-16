@@ -424,10 +424,10 @@ function submit(flip = false) {
     .filter((a): a is UserInput => !!a);
   // 目标 flag：仅执行模式（非计划）下首条消息消费勾选，目标=该消息纯文本；
   // 计划模式消息不消费，arm 保持（“执行计划”按钮另行以计划内容挂载目标）
-  if (store.goalArmed && store.taskMode !== "plan" && plainText.trim()) {
-    store.goalText = plainText.trim();
-    store.goalArmed = false;
-    store.goalStatus = null;
+  if (props.tab.goalArmed && store.taskMode !== "plan" && plainText.trim()) {
+    props.tab.goalText = plainText.trim();
+    props.tab.goalArmed = false;
+    props.tab.goalStatus = null;
   }
   const rowItems = rowAttachments.value;
   const files = rowItems.filter((a) => a.type === "mention");
@@ -531,7 +531,7 @@ function taskModeLabel(): string {
           <button
             class="task-chip"
             v-tooltip="'任务模式'"
-            :disabled="store.turnActive"
+            :disabled="tab.turnActive"
             @click="toggleMenu('task')"
           >
             <svg class="chip-icon" viewBox="0 0 24 24">
@@ -545,7 +545,7 @@ function taskModeLabel(): string {
           <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
         </div>
         <div class="menu-anchor">
-          <GoalChip />
+          <GoalChip :tab="tab" />
         </div>
       </div>
       <div class="composer-right">
@@ -578,7 +578,7 @@ function taskModeLabel(): string {
           <ModelMenu v-if="store.modelOpen" @close="store.modelOpen = false" />
         </div>
         <button
-          v-if="store.turnActive"
+          v-if="tab.turnActive"
           class="send-btn stop"
           v-tooltip="'停止生成'"
           @click="interrupt()"

@@ -1,6 +1,6 @@
 import { __resetPinnedSectionForTest, __resetTitleHelperCapabilityForTest, sortThreads } from "../useCodex/capabilities";
 import { disposeEvents, wireEvents } from "../useCodex/events";
-import { __resetSessionTabsForTest } from "../useCodex/sessionState";
+import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { autoTitleThread, sanitizeTitle, togglePin } from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
@@ -604,7 +604,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
   });
 
   it("后台临时线程事件被隔离：不影响全局进行中状态", async () => {
-    store.turnActive = false;
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "codex_title_helper_capability") {
         return Promise.resolve({ experimentalApi: true, ephemeral: true });
@@ -624,7 +623,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
 
     // 后台线程 turn/started：不置为进行中
     fireListen("turn/started", { threadId: "helper1", turn: { id: "ht1" } });
-    expect(store.turnActive).toBe(false);
+    expect(activeSessionTab()?.turnActive).toBe(false);
 
     // 后台线程 turn/completed：不结束全局状态、不触发历史刷新
     fireListen("item/agentMessage/delta", {
@@ -642,16 +641,16 @@ describe("autoTitleThread 临时线程标题总结", () => {
         name: expect.any(String),
       });
     }, { timeout: 3000, interval: 20 });
-    expect(store.turnActive).toBe(false);
+    expect(activeSessionTab()?.turnActive).toBe(false);
 
     // 主线程事件照常工作
     fireListen("turn/started", { threadId: "t1", turn: { id: "mt1" } });
-    expect(store.turnActive).toBe(true);
+    expect(activeSessionTab()?.turnActive).toBe(true);
     fireListen("turn/completed", {
       threadId: "t1",
       turn: { id: "mt1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });

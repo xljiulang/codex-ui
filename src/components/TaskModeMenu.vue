@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { store } from "../composables/useCodex";
+import { activeSessionTab, store } from "../composables/useCodex";
 import { TASK_MODES, type TaskMode } from "../lib/tasks";
 
 const emit = defineEmits<{ close: [] }>();
 
 function choose(id: TaskMode["id"]) {
-  if (store.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
+  if (activeSessionTab()?.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
   store.taskMode = id;
   emit("close");
 }

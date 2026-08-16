@@ -4,10 +4,8 @@ import type { PendingInteraction, PermissionId, ThreadItem, ThreadSummary, UserI
 import {
   defaultSettings,
   type ConfirmRequest,
-  type GoalStatus,
   type ModelInfo,
   type PanelTab,
-  type PlanPrompt,
   type PluginItem,
   type SkillItem,
 } from "./types";
@@ -38,10 +36,6 @@ export const store = reactive({
   // 用户手动发送计数器：每次 ComposerBar 提交（sendPrompt）递增，
   // 供 ChatView 在发送后强制恢复吸底（排队消息自动发送不递增）
   userSendRev: 0,
-  turnActive: false,
-  turnInterrupted: false,
-  currentTurnId: null as string | null,
-  followupQueue: [] as { text: string; attachments: UserInput[] }[],
   interactions: [] as PendingInteraction[],
   settings: defaultSettings(),
   // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
@@ -63,15 +57,9 @@ export const store = reactive({
   >,
   skills: [] as SkillItem[],
   skillsLoaded: false,
-  threadTokenUsage: null as { used: number; window: number | null } | null,
   // 新建对话时可选的项目目录（null = 使用启动工作目录）
   newChatWorkspace: null as string | null,
   taskMode: "execute" as "execute" | "plan",
-  goalText: null as string | null,
-  /** 当前线程目标状态（thread/goal 事件同步，null = 未挂载目标） */
-  goalStatus: null as GoalStatus | null,
-  /** 目标 flag 勾选态：勾选后无目标值，首条消息纯文本即目标（纯客户端状态，不跨会话） */
-  goalArmed: false,
   attachments: [] as UserInput[],
   showSettings: false,
   /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
@@ -82,8 +70,6 @@ export const store = reactive({
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,
-  /** 计划模式回合完成后待用户确认的“计划已就绪”弹窗 */
-  planPrompt: null as PlanPrompt | null,
 });
 
 

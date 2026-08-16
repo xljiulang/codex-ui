@@ -14,12 +14,6 @@ export function resetToNewChat() {
   store.currentThreadOrigin = null;
   store.currentThreadWorkspace = null;
   store.resumedThreadId = null;
-  store.currentTurnId = null;
-  store.turnActive = false;
-  store.turnInterrupted = false;
-  store.goalText = null;
-  store.goalStatus = null;
-  store.goalArmed = false;
 }
 
 

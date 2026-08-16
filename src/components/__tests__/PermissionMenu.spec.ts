@@ -6,7 +6,6 @@ import { store } from "../../composables/useCodex";
 describe("PermissionMenu 权限模式菜单", () => {
   beforeEach(() => {
     store.permissionMode = "ask-for-approval";
-    store.turnActive = false;
   });
 
   it("渲染三种模式并高亮当前模式", () => {
@@ -26,8 +25,7 @@ describe("PermissionMenu 权限模式菜单", () => {
     expect(w.emitted("close")).toBeTruthy();
   });
 
-  it("回合进行中仍可切换权限模式", async () => {
-    store.turnActive = true;
+  it("切换权限模式并关闭", async () => {
     const w = mount(PermissionMenu);
     await w.findAll(".mode-menu-item")[1].trigger("click");
     expect(store.permissionMode).toBe("help-me-approve");

@@ -1,7 +1,7 @@
 import type { UserInput } from "../../lib/types";
 import { newEmptyChat, openThread } from "../useCodex/actions";
 import { settleConfirm } from "../useCodex/confirm";
-import { __resetSessionTabsForTest, isThreadOpen, isThreadRunning, sessionTabTitle } from "../useCodex/sessionState";
+import { __resetSessionTabsForTest, activeSessionTab, isThreadOpen, isThreadRunning, sessionTabTitle } from "../useCodex/sessionState";
 import { addAttachmentToActiveSession, closeAllSessionTabs, closeSessionTab, registerComposerAddHandler, switchSessionTab, unregisterComposerAddHandler } from "../useCodex/sessionTabs";
 import { store } from "../useCodex/store";
 import { continueTurnForTab, interrupt } from "../useCodex/turnControl";
@@ -63,13 +63,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -130,13 +124,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -197,13 +185,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -261,13 +243,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -325,13 +301,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -389,13 +359,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -442,17 +406,11 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.threadPlugins = {};
-    store.turnActive = false;
-    store.turnInterrupted = false;
     store.currentThreadId = null;
     store.currentThreadName = "";
-    store.currentTurnId = null;
     store.currentThreadOrigin = null;
     store.currentThreadWorkspace = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.taskMode = "execute";
     store.confirm = null;
   });
@@ -463,15 +421,13 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
-    store.turnActive = true;
 
     expect(await newEmptyChat()).toBe(true);
     expect(store.confirm).toBeNull();
     expect(tabs).toHaveLength(2);
     expect(activeTabId.value).toBe(tabs[1].id);
     expect(store.currentThreadId).toBeNull();
-    expect(store.currentTurnId).toBeNull();
+    expect(activeSessionTab()?.currentTurnId).toBeNull();
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
     );
@@ -487,8 +443,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
-    store.turnActive = true;
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -523,8 +477,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
-    store.turnActive = true;
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -540,8 +492,8 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     expect(interruptCalls).toHaveLength(0);
     expect(store.confirm).toBeNull();
-    expect(store.turnActive).toBe(true);
-    expect(store.currentTurnId).toBe("turn-1");
+    expect(activeSessionTab()?.turnActive).toBe(true);
+    expect(activeSessionTab()?.currentTurnId).toBe("turn-1");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "thread_read",
       expect.anything(),
@@ -579,8 +531,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
-    store.turnActive = true;
 
     const p = closeSessionTab("s1");
     expect(store.confirm?.title).toBe("关闭会话标签");
@@ -595,7 +545,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     expect(tabs).toHaveLength(0);
     expect(activeTabId.value).toBe("");
     expect(store.currentThreadId).toBeNull();
-    expect(store.turnActive).toBe(false);
+    expect(activeSessionTab()).toBeNull();
   });
 
   it("关闭运行中的会话标签：取消确认则保留、不中断", async () => {
@@ -604,8 +554,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
-    store.turnActive = true;
 
     const p = closeSessionTab("s1");
     expect(store.confirm).not.toBeNull();
@@ -630,11 +578,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.currentTurnId = "turn-1";
-    store.turnActive = true;
-    store.goalText = "目标";
-    store.goalStatus = "active";
-    store.goalArmed = true;
 
     await interrupt();
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", {
@@ -644,13 +587,19 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       threadId: "t1",
       turnId: "turn-1",
     });
-    expect(store.goalText).toBeNull();
-    expect(store.goalStatus).toBeNull();
-    expect(store.goalArmed).toBe(false);
+    expect(activeSessionTab()?.goalText).toBeNull();
+    expect(activeSessionTab()?.goalStatus).toBeNull();
+    expect(activeSessionTab()?.goalArmed).toBe(false);
     expect(tabs[0].goalText).toBeNull();
   });
 
   it("显式传入旧线程/回合 id 时：目标清除作用于旧线程，且不污染新会话的回合 id", async () => {
+    tabs.push(
+      makeSessionTab("s1", "t1", {
+        goalText: "旧目标",
+        goalStatus: "active",
+      }),
+    );
     tabs.push(
       makeSessionTab("s2", "t2", {
         goalText: "旧目标",
@@ -659,9 +608,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s2";
     store.currentThreadId = "t2";
-    store.currentTurnId = null;
-    store.goalText = "旧目标";
-    store.goalStatus = "active";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "turn_interrupt") {
         const turnId = (args as { turnId?: string })?.turnId;
@@ -686,9 +632,9 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       threadId: "t1",
       turnId: "abc-123",
     });
-    expect(store.currentTurnId).toBeNull();
-    expect(store.goalText).toBe("旧目标");
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.currentTurnId).toBeNull();
+    expect(activeSessionTab()?.goalText).toBe("旧目标");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
   });
 });
 describe("会话标签状态与事件路由", () => {
@@ -700,12 +646,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -737,12 +677,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -771,12 +705,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -803,12 +731,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -823,6 +745,11 @@ describe("会话标签状态与事件路由", () => {
         taskMode: "plan",
         model: "gpt-5",
         effort: "high",
+        turnActive: true,
+        currentTurnId: "turn-1",
+        goalText: "目标A",
+        goalStatus: "active",
+        followupQueue: [{ text: "队列A", attachments: [] }],
       }),
     );
     tabs.push(
@@ -842,12 +769,7 @@ describe("会话标签状态与事件路由", () => {
     store.taskMode = "plan";
     store.model = "gpt-5";
     store.effort = "high";
-    store.turnActive = true;
-    store.currentTurnId = "turn-1";
-    store.goalText = "目标A";
-    store.goalStatus = "active";
     store.attachments = [{ type: "text", text: "草稿A", text_elements: [] }];
-    store.followupQueue = [{ text: "队列A", attachments: [] }];
     await flushPromises(); // 活动标签记录与 live 字段同步
 
     expect(await switchSessionTab("s2")).toBe(true);
@@ -855,8 +777,8 @@ describe("会话标签状态与事件路由", () => {
     expect(store.currentThreadId).toBe("t2");
     expect(store.currentThreadName).toBe("会话B");
     expect(store.currentThreadWorkspace).toBe("D:/repo/b");
-    expect(store.turnActive).toBe(false);
-    expect(store.planPrompt?.planText).toBe("计划B");
+    expect(activeSessionTab()?.turnActive).toBe(false);
+    expect(activeSessionTab()?.planPrompt?.planText).toBe("计划B");
     expect(store.permissionMode).toBe("help-me-approve");
     expect(store.taskMode).toBe("execute");
     expect(store.model).toBe("o3");
@@ -864,11 +786,11 @@ describe("会话标签状态与事件路由", () => {
 
     expect(await switchSessionTab("s1")).toBe(true);
     expect(store.currentThreadId).toBe("t1");
-    expect(store.turnActive).toBe(true);
-    expect(store.currentTurnId).toBe("turn-1");
-    expect(store.goalText).toBe("目标A");
+    expect(activeSessionTab()?.turnActive).toBe(true);
+    expect(activeSessionTab()?.currentTurnId).toBe("turn-1");
+    expect(activeSessionTab()?.goalText).toBe("目标A");
     expect(store.attachments).toHaveLength(1);
-    expect(store.followupQueue).toHaveLength(1);
+    expect(activeSessionTab()?.followupQueue).toHaveLength(1);
     expect(store.permissionMode).toBe("full-access");
     expect(store.taskMode).toBe("plan");
     expect(store.model).toBe("gpt-5");
@@ -884,12 +806,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -901,12 +817,11 @@ describe("会话标签状态与事件路由", () => {
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.turnActive = true;
+    store.currentThreadName = "会话A";
+    store.taskMode = "plan";
     await flushPromises();
-    expect(tabs[0].turnActive).toBe(true);
-    store.goalText = "新目标";
-    await flushPromises();
-    expect(tabs[0].goalText).toBe("新目标");
+    expect(tabs[0].name).toBe("会话A");
+    expect(tabs[0].taskMode).toBe("plan");
   });
 });
 describe("会话标签状态与事件路由", () => {
@@ -918,12 +833,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -956,12 +865,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -1063,7 +966,6 @@ describe("统一列表：活动会话 live 字段投影", () => {
     store.currentThreadId = null;
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
-    store.turnActive = false;
   });
 
   it("切换会话标签：live 字段投影为目标标签状态", async () => {
@@ -1086,13 +988,13 @@ describe("统一列表：活动会话 live 字段投影", () => {
     expect(store.currentThreadId).toBe("t1");
     expect(store.currentThreadName).toBe("会话一");
     expect(store.currentThreadWorkspace).toBe("D:/a");
-    expect(store.turnActive).toBe(true);
+    expect(activeSessionTab()?.turnActive).toBe(true);
 
     activeTabId.value = "s2";
     expect(store.currentThreadId).toBe("t2");
     expect(store.currentThreadName).toBe("会话二");
     expect(store.currentThreadWorkspace).toBe("D:/b");
-    expect(store.turnActive).toBe(false);
+    expect(activeSessionTab()?.turnActive).toBe(false);
   });
 
   it("切到文件标签：live 字段保持最近会话不变，切回后仍一致", () => {
@@ -1129,7 +1031,7 @@ describe("统一列表：活动会话 live 字段投影", () => {
     expect(activeTabId.value).toBe("");
     expect(store.currentThreadId).toBeNull();
     expect(store.currentThreadName).toBe("");
-    expect(store.turnActive).toBe(false);
+    expect(activeSessionTab()).toBeNull();
   });
 });
 
@@ -1140,15 +1042,8 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     store.currentThreadId = null;
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
     store.taskMode = "execute";
-    store.goalText = null;
-    store.goalStatus = null;
-    store.goalArmed = false;
-    store.followupQueue = [];
     store.attachments = [];
-    store.planPrompt = null;
     store.loading = false;
     store.itemsByThread = {};
     store.activeWorkByThread = {};
@@ -1164,8 +1059,6 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     );
     activeTabId.value = "sA";
     store.currentThreadId = "tA";
-    store.currentTurnId = "TA";
-    store.turnActive = true;
 
     const p = closeSessionTab("sB");
     expect(store.confirm?.title).toBe("关闭会话标签");
@@ -1180,8 +1073,8 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     expect(tabs.some((t) => t.id === "sB")).toBe(false);
     // A 的回合状态不受影响
     expect(store.currentThreadId).toBe("tA");
-    expect(store.currentTurnId).toBe("TA");
-    expect(store.turnActive).toBe(true);
+    expect(activeSessionTab()?.currentTurnId).toBe("TA");
+    expect(activeSessionTab()?.turnActive).toBe(true);
   });
 
   it("后台标签发送使用自己的任务模式：tab=plan、store=execute 时 collaborationMode.mode=plan", async () => {

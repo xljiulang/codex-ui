@@ -114,13 +114,16 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     store.activeWorkByThread[threadId] = 0;
     // 待挂载目标（勾选后首条消息即目标）：创建会话后挂载到新线程；失败不阻塞新建，
     // 清空本地目标状态，用户可重新勾选
-    const pendingGoal = store.goalText;
+    const pendingGoal = activeSessionTab()?.goalText;
     if (pendingGoal) {
       const ok = await setGoal(pendingGoal);
       if (!ok) {
-        store.goalText = null;
-        store.goalStatus = null;
-        store.goalArmed = false;
+        const t = activeSessionTab();
+        if (t) {
+          t.goalText = null;
+          t.goalStatus = null;
+          t.goalArmed = false;
+        }
       }
     }
     // 记忆模式：显式应用持久化设置（含关闭），保证新会话与设置一致；失败静默跳过
@@ -161,13 +164,14 @@ export async function sendPrompt(text: string, flip = false) {
   // （队列消息在回合结束后自动发送时走 continueTurn/newChat，不递增）
   store.userSendRev++;
   // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
-  if (store.turnActive && store.currentThreadId) {
+  const tab = activeSessionTab();
+  if (tab?.turnActive && tab.threadId) {
     const base = store.settings.followup_mode;
     const mode = flip ? (base === "adjust" ? "queue" : "adjust") : base;
     if (mode === "adjust") {
       await steerTurn(text, attachments);
     } else {
-      store.followupQueue.push({ text, attachments });
+      tab.followupQueue.push({ text, attachments });
       setToast("已加入队列，回合结束后自动发送");
     }
     return;
@@ -187,30 +191,33 @@ export async function sendPrompt(text: string, flip = false) {
 
 /** “待在计划”：关闭“计划已就绪”弹窗，保持计划模式，不发消息（Esc 同此行为） */
 export function dismissPlanPrompt() {
-  store.planPrompt = null;
+  const tab = activeSessionTab();
+  if (tab) tab.planPrompt = null;
 }
 
 
 /** “退出计划模式”：切回执行模式并关闭弹窗，不发消息 */
 export function exitPlanMode() {
-  store.planPrompt = null;
+  const tab = activeSessionTab();
+  if (tab) tab.planPrompt = null;
   store.taskMode = "execute";
 }
 
 
 /** “执行计划”：仿 VS Code —— 发送 `PLEASE IMPLEMENT THIS PLAN:` 消息并切到执行模式 */
 export async function executePlan() {
-  const prompt = store.planPrompt;
+  const tab = activeSessionTab();
+  const prompt = tab?.planPrompt;
   if (!prompt) return;
-  store.planPrompt = null;
+  if (tab) tab.planPrompt = null;
   // 先切模式，使本轮 turn/start 显式携带 collaborationMode default（计划模式粘滞，需显式退出）
   store.taskMode = "execute";
   const text = `PLEASE IMPLEMENT THIS PLAN:\n${prompt.planText}`;
   // 目标勾选：执行计划即首条执行消息，目标=该合成消息（含计划全文）
-  if (store.goalArmed) {
-    store.goalText = text;
-    store.goalArmed = false;
-    store.goalStatus = null;
+  if (tab?.goalArmed) {
+    tab.goalText = text;
+    tab.goalArmed = false;
+    tab.goalStatus = null;
   }
   try {
     if (store.currentThreadId) {
@@ -280,21 +287,18 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
       store.currentThreadName = name;
       store.currentThreadWorkspace = cwd;
       store.resumedThreadId = null; // 只读打开，不恢复；发消息时才恢复
-      store.turnActive = false;
-      store.turnInterrupted = false;
-      store.currentTurnId = null;
-      store.threadTokenUsage = null;
-      store.goalArmed = false; // 勾选态不跨会话；服务端目标经 goal_get 回填
-    } else {
-      tab.threadId = threadId;
-      tab.name = name;
-      tab.workspace = cwd;
-      tab.resumedThreadId = null;
-      tab.turnActive = false;
-      tab.turnInterrupted = false;
-      tab.currentTurnId = null;
-      tab.threadTokenUsage = null;
-      tab.goalArmed = false;
+    }
+    // 回合/计划/目标等状态一律写标签（tab 是唯一事实源，不再写 store）
+    tab.threadId = threadId;
+    tab.name = name;
+    tab.workspace = cwd;
+    tab.resumedThreadId = null;
+    tab.turnActive = false;
+    tab.turnInterrupted = false;
+    tab.currentTurnId = null;
+    tab.threadTokenUsage = null;
+    tab.goalArmed = false; // 勾选态不跨会话；服务端目标经 goal_get 回填
+    if (!isActive()) {
       tab.title = sessionTabTitle(tab);
     }
     let goalText: string | null = null;
@@ -318,13 +322,8 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
       goalStatus = null;
       void clearGoal(threadId);
     }
-    if (isActive()) {
-      store.goalText = goalText;
-      store.goalStatus = goalStatus;
-    } else {
-      tab.goalText = goalText;
-      tab.goalStatus = goalStatus;
-    }
+    tab.goalText = goalText;
+    tab.goalStatus = goalStatus;
     return true;
   } catch (e) {
     if (isThreadNotFound(e)) {

@@ -138,14 +138,16 @@ export async function continueTurnForTab(
 
 
 export async function continueTurn(prompt: string, attachments: UserInput[]) {
-  const threadId = store.currentThreadId;
+  const tab = activeSessionTab();
+  const threadId = tab?.threadId ?? store.currentThreadId;
   if (!threadId) return;
   // 历史会话在打开时只读、不恢复，避免带活跃目标的会话被自动持续执行；
   // 用户真正发消息时才恢复（thread/start 新建的会话已订阅，无需恢复）。
-  if (store.resumedThreadId !== threadId) {
+  if ((tab?.resumedThreadId ?? store.resumedThreadId) !== threadId) {
     try {
       await invoke("thread_resume", { params: { threadId } });
-      store.resumedThreadId = threadId;
+      if (tab) tab.resumedThreadId = threadId;
+      else store.resumedThreadId = threadId;
     } catch (e) {
       if (isThreadNotFound(e)) {
         resetToNewChat();
@@ -165,19 +167,22 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
   );
   // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
   // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
-  if (store.goalText && !store.goalStatus) {
-    const ok = await setGoal(store.goalText);
+  if (tab?.goalText && !tab.goalStatus) {
+    const ok = await setGoal(tab.goalText);
     if (!ok) {
-      store.goalText = null;
-      store.goalStatus = null;
-      store.goalArmed = false;
+      tab.goalText = null;
+      tab.goalStatus = null;
+      tab.goalArmed = false;
     }
   }
   try {
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
-    store.turnActive = true;
-    // 立即记录回合 id，供 turn/interrupt 使用（turn/started 事件可能稍后才到）
-    if (res?.turn?.id) store.currentTurnId = res.turn.id;
+    if (tab) {
+      // 回合状态写活动标签（tab 是唯一事实源）
+      tab.turnActive = true;
+      // 立即记录回合 id，供 turn/interrupt 使用（turn/started 事件可能稍后才到）
+      if (res?.turn?.id) tab.currentTurnId = res.turn.id;
+    }
   } catch (e) {
     if (isThreadNotFound(e)) {
       resetToNewChat();
@@ -185,15 +190,17 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
     } else {
       setToast(toastError(e));
     }
-    store.turnActive = false;
+    if (tab) tab.turnActive = false;
   }
 }
 
 
 /** 向进行中的回合追加输入（“调整方向”），协议 turn/steer */
 export async function steerTurn(prompt: string, attachments: UserInput[]) {
-  const threadId = store.currentThreadId;
-  if (!threadId || !store.currentTurnId) {
+  const tab = activeSessionTab();
+  const threadId = tab?.threadId ?? store.currentThreadId;
+  const turnId = tab?.currentTurnId ?? null;
+  if (!threadId || !turnId) {
     setToast("当前没有进行中的回合");
     return;
   }
@@ -209,7 +216,7 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
         threadId,
         clientUserMessageId: clientId,
         input,
-        expectedTurnId: store.currentTurnId,
+        expectedTurnId: turnId,
       },
     });
   } catch (e) {
@@ -225,7 +232,7 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
               threadId,
               clientUserMessageId: clientId,
               input,
-              expectedTurnId: store.currentTurnId,
+              expectedTurnId: turnId,
             },
           });
           return;
@@ -249,12 +256,13 @@ export async function interrupt(
   threadId?: string | null,
   turnId?: string | null,
 ) {
-  const tid = threadId ?? store.currentThreadId;
+  const active = activeSessionTab();
+  const tid = threadId ?? active?.threadId ?? store.currentThreadId;
   if (!tid) return;
-  const tab = threadId ? findSessionTabByThread(tid) : activeSessionTab();
+  const tab = threadId ? findSessionTabByThread(tid) : active;
   // 线程有活跃目标：先清除目标切断服务端 auto-continuation（目标循环回合极快，
   // 回合中断可能追不上；清除目标后当前回合自然结束、不再自动续跑）
-  const hasGoal = tab ? Boolean(tab.goalText) : Boolean(store.goalText);
+  const hasGoal = tab ? Boolean(tab.goalText) : false;
   if (hasGoal) {
     await clearGoal(tid);
     // 后台标签的目标状态直接清本地（clearGoal 仅清活动会话本地状态）
@@ -265,10 +273,10 @@ export async function interrupt(
     }
   }
   // 显式线程路径（关闭标签/关窗守卫）只使用目标标签自己的回合 id，
-  // 绝不借用活动标签的 store.currentTurnId，避免跨线程误中断；
-  // 无显式线程（停止按钮）时 store 即活动会话的 live 字段，才允许取 store。
+  // 绝不借用活动标签的 currentTurnId，避免跨线程误中断；
+  // 无显式线程（停止按钮）时才取活动标签的 currentTurnId。
   let target = turnId;
-  if (!target && threadId === undefined) target = store.currentTurnId;
+  if (!target && threadId === undefined) target = active?.currentTurnId ?? null;
   if (!target) return;
   // 服务端可能在 turn/started 事件之后才把回合标记为 active；
   // 若用户点得过早会收到 “no active turn”，短暂重试几次。
@@ -285,8 +293,8 @@ export async function interrupt(
       const found = /but found ([0-9a-fA-F-]+)/i.exec(msg);
       if (found && found[1] !== target) {
         target = found[1];
-        // 仅在操作当前会话时同步 store，避免切换会话后把旧回合 id 写进新会话
-        if (threadId === undefined) store.currentTurnId = target;
+        // 仅在操作当前会话时同步活动标签的回合 id，避免切换会话后写错标签
+        if (threadId === undefined && active) active.currentTurnId = target;
         continue;
       }
       if (msg.includes("no active turn")) {
@@ -311,12 +319,16 @@ export async function setGoal(objective: string): Promise<boolean> {
     setToast("目标最长 4000 字符");
     return false;
   }
-  const tid = store.currentThreadId;
+  const tab = activeSessionTab();
+  const tid = tab?.threadId ?? store.currentThreadId;
   if (!tid) return false; // 仅在线程存在时挂载（防御：调用方应保证有会话）
   try {
     await invoke("goal_set", { threadId: tid, objective: text });
-    store.goalText = text;
-    store.goalStatus = "active";
+    // 目标状态写活动标签（tab 是唯一事实源）
+    if (tab) {
+      tab.goalText = text;
+      tab.goalStatus = "active";
+    }
     setToast("已设置目标");
     return true;
   } catch (e) {
@@ -327,21 +339,24 @@ export async function setGoal(objective: string): Promise<boolean> {
 
 
 export async function clearGoal(threadId?: string | null) {
-  const tid = threadId ?? store.currentThreadId;
+  const active = activeSessionTab();
+  const tid = threadId ?? active?.threadId ?? store.currentThreadId;
   if (!tid) {
-    store.goalText = null;
-    store.goalStatus = null;
-    store.goalArmed = false;
+    if (active) {
+      active.goalText = null;
+      active.goalStatus = null;
+      active.goalArmed = false;
+    }
     return;
   }
   try {
     await invoke("goal_clear", { threadId: tid });
     // 仅当清除的是当前会话时才清空本地目标展示；
     // 切换会话时对旧线程的清除不应污染新会话的目标状态
-    if (tid === store.currentThreadId) {
-      store.goalText = null;
-      store.goalStatus = null;
-      store.goalArmed = false;
+    if (active?.threadId === tid) {
+      active.goalText = null;
+      active.goalStatus = null;
+      active.goalArmed = false;
     }
   } catch (e) {
     setToast(toastError(e));

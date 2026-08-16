@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { reactive } from "vue";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../useCodex", async (importOriginal) => {
@@ -7,8 +8,11 @@ vi.mock("../useCodex", async (importOriginal) => {
 });
 
 import { invoke } from "@tauri-apps/api/core";
-import { setToast, store } from "../useCodex";
+import { setToast, store, type SessionTab } from "../useCodex";
 import { useContextUsage } from "../useContextUsage";
+import { activeTabId, tabs } from "../useEditorTabs";
+import { __resetSessionTabsForTest } from "../useCodex/sessionState";
+import { makeSessionTab } from "./useCodexTestHarness";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedToast = vi.mocked(setToast);
@@ -17,29 +21,34 @@ describe("useContextUsage", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedToast.mockClear();
-    store.threadTokenUsage = null;
+    __resetSessionTabsForTest();
+    tabs.push(reactive(makeSessionTab("s1", "t1")));
+    activeTabId.value = "s1";
     store.currentThreadId = "t1";
   });
 
   it("window 已知时计算百分比并截断到 100", () => {
-    store.threadTokenUsage = { used: 5000, window: 10000 };
+    (tabs[0] as SessionTab).threadTokenUsage = { used: 5000, window: 10000 };
     const u = useContextUsage();
     expect(u.ctxUsage.value).toEqual({ pct: 50, used: 5000, window: 10000 });
 
-    store.threadTokenUsage = { used: 12000, window: 10000 };
+    (tabs[0] as SessionTab).threadTokenUsage = { used: 12000, window: 10000 };
     expect(u.ctxUsage.value?.pct).toBe(100);
   });
 
   it("window 缺失/非正数时返回 null", () => {
     const u = useContextUsage();
     expect(u.ctxUsage.value).toBeNull();
-    store.threadTokenUsage = { used: 100, window: 0 };
+    (tabs[0] as SessionTab).threadTokenUsage = { used: 100, window: 0 };
     expect(u.ctxUsage.value).toBeNull();
     expect(u.ctxTooltip.value).toBe("");
   });
 
   it("tooltip 按 K/M 格式化", () => {
-    store.threadTokenUsage = { used: 1_500_000, window: 2_000_000 };
+    (tabs[0] as SessionTab).threadTokenUsage = {
+      used: 1_500_000,
+      window: 2_000_000,
+    };
     const u = useContextUsage();
     expect(u.ctxTooltip.value).toBe(
       "上下文已用 1.5M，共 2.0M，双击进行压缩",

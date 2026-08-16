@@ -2,11 +2,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import TaskModeMenu from "../TaskModeMenu.vue";
 import { store } from "../../composables/useCodex";
+import { activeTabId, tabs } from "../../composables/useEditorTabs";
+import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
+import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 
 describe("TaskModeMenu 任务模式菜单", () => {
   beforeEach(() => {
     store.taskMode = "execute";
-    store.turnActive = false;
+    __resetSessionTabsForTest();
   });
 
   it("仅渲染执行/计划两项（无目标模式）", () => {
@@ -25,7 +28,8 @@ describe("TaskModeMenu 任务模式菜单", () => {
   });
 
   it("回合进行中点击无效（兜底）", async () => {
-    store.turnActive = true;
+    tabs.push(makeSessionTab("s1", "t1", { turnActive: true }));
+    activeTabId.value = "s1";
     const w = mount(TaskModeMenu);
     await w.findAll(".mode-menu-item")[1].trigger("click");
     expect(store.taskMode).toBe("execute");

@@ -127,9 +127,7 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     store.confirm = null;
     tabs.splice(0, tabs.length);
     __resetEditorTabsForTest();
-    store.turnActive = false;
     store.currentThreadId = null;
-    store.currentTurnId = null;
     store.taskMode = "execute";
   });
 
@@ -266,3 +264,4 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     expect(() => unlisten()).not.toThrow();
   });
 });
+

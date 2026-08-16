@@ -1,7 +1,7 @@
 import { dismissPlanPrompt, executePlan, exitPlanMode } from "../useCodex/actions";
 import { __resetTitleHelperCapabilityForTest } from "../useCodex/capabilities";
 import { disposeEvents, wireEvents } from "../useCodex/events";
-import { __resetSessionTabsForTest } from "../useCodex/sessionState";
+import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { autoTitleThread } from "../useCodex/threads";
 import type { SessionTab } from "../useCodex/types";
@@ -125,13 +125,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.newChatWorkspace = null;
     store.currentThreadOrigin = null;
     store.threads = [];
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.resumedThreadId = null;
-    store.threadTokenUsage = null;
-    store.goalText = null;
-    store.goalStatus = null;
     store.threadPlugins = {};
   });
 
@@ -223,12 +217,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -272,12 +260,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -306,7 +288,6 @@ describe("会话标签状态与事件路由", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.turnActive = true;
     await wireEvents();
     fireListen("turn/completed", {
       threadId: "t2",
@@ -314,7 +295,7 @@ describe("会话标签状态与事件路由", () => {
     });
     expect(tabs[1].turnActive).toBe(false);
     expect(tabs[0].turnActive).toBe(true);
-    expect(store.turnActive).toBe(true);
+    expect(activeSessionTab()?.turnActive).toBe(true);
     disposeEvents();
   });
 });
@@ -327,12 +308,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -366,7 +341,6 @@ describe("会话标签状态与事件路由", () => {
     );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.turnActive = true;
     await wireEvents();
     fireListen("turn/completed", {
       threadId: "t2",
@@ -385,7 +359,7 @@ describe("会话标签状态与事件路由", () => {
     expect(tabs[1].turnActive).toBe(true); // 新回合开始
     expect(tabs[1].currentTurnId).toBe("nt2");
     expect(tabs[0].turnActive).toBe(true);
-    expect(store.turnActive).toBe(true);
+    expect(activeSessionTab()?.turnActive).toBe(true);
     disposeEvents();
   });
 });
@@ -402,15 +376,16 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
+    tabs.push(
+      makeSessionTab("s1", "t1", {
+        taskMode: "plan",
+        goalText: "发布 v2",
+        goalStatus: "active",
+      }),
+    );
     activeTabId.value = "s1";
     store.currentThreadId = "t1";
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.taskMode = "execute";
-    store.goalText = null;
-    store.goalStatus = null;
   });
 
   it("thread/goal/updated：同步当前会话的目标文本与状态", async () => {
@@ -419,67 +394,60 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
       threadId: "t1",
       goal: { objective: "发布 v2", status: "active" },
     });
-    expect(store.goalText).toBe("发布 v2");
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalText).toBe("发布 v2");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
   });
 
   it("thread/goal/updated 终态：自动清目标并复位 flag（goal_clear）", async () => {
     await wireEvents();
-    store.goalText = "发布 v2";
-    store.goalStatus = "active";
     store.toast = "";
     fireListen("thread/goal/updated", {
       threadId: "t1",
       goal: { objective: "发布 v2", status: "complete" },
     });
-    await vi.waitFor(() => expect(store.goalText).toBeNull(), {
+    await vi.waitFor(() => expect(activeSessionTab()?.goalText).toBeNull(), {
       timeout: 3000,
       interval: 20,
     });
-    expect(store.goalStatus).toBeNull();
-    expect(store.goalArmed).toBe(false);
+    expect(activeSessionTab()?.goalStatus).toBeNull();
+    expect(activeSessionTab()?.goalArmed).toBe(false);
     expect(store.toast).toContain("目标已完成");
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", { threadId: "t1" });
   });
 
   it("thread/goal/updated：旧会话通知不污染当前会话", async () => {
     await wireEvents();
-    store.goalText = "当前目标";
-    store.goalStatus = "active";
+    tabs[0].goalText = "当前目标";
+    tabs[0].goalStatus = "active";
     fireListen("thread/goal/updated", {
       threadId: "t-other",
       goal: { objective: "别人", status: "complete" },
     });
-    expect(store.goalText).toBe("当前目标");
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalText).toBe("当前目标");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
   });
 
   it("thread/goal/cleared：清空当前会话目标", async () => {
     await wireEvents();
-    store.goalText = "发布 v2";
-    store.goalStatus = "active";
-    store.goalArmed = true;
     fireListen("thread/goal/cleared", { threadId: "t1" });
-    expect(store.goalText).toBeNull();
-    expect(store.goalStatus).toBeNull();
-    expect(store.goalArmed).toBe(false);
+    expect(activeSessionTab()?.goalText).toBeNull();
+    expect(activeSessionTab()?.goalStatus).toBeNull();
+    expect(activeSessionTab()?.goalArmed).toBe(false);
   });
 
   it("turn/completed：不再自动清除目标（目标由服务端循环管理）", async () => {
     await wireEvents();
-    store.goalText = "发布 v2";
-    store.goalStatus = "active";
     store.itemsByThread["t1"] = [];
     fireListen("turn/completed", {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });
-    expect(store.goalText).toBe("发布 v2");
-    expect(store.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalText).toBe("发布 v2");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
   });
 });
 describe("消息变更计数器与回合结束清扫", () => {
@@ -494,11 +462,11 @@ describe("消息变更计数器与回合结束清扫", () => {
       }
       return Promise.resolve(undefined);
     });
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
     store.itemsRev = 0;
     store.currentThreadId = "t1";
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
     store.activeWorkByThread = {};
   });
 
@@ -565,7 +533,7 @@ describe("消息变更计数器与回合结束清扫", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "interrupted" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });
@@ -600,7 +568,7 @@ describe("消息变更计数器与回合结束清扫", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });
@@ -621,14 +589,11 @@ describe("旧会话 turn 事件不串扰新会话", () => {
       }
       return Promise.resolve(undefined);
     });
+    tabs.push(makeSessionTab("s2", "t2"));
+    activeTabId.value = "s2";
     store.currentThreadId = "t2";
     store.resumedThreadId = "t2";
     store.taskMode = "execute";
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.itemsByThread = {};
     store.activeWorkByThread = {};
   });
@@ -639,9 +604,9 @@ describe("旧会话 turn 事件不串扰新会话", () => {
 
   it("旧线程 turn/completed：不复位状态、不弹计划确认、不消费队列", async () => {
     await wireEvents();
-    store.turnActive = true; // 模拟新会话正在运行
+    tabs[0].turnActive = true; // 模拟新会话正在运行
     store.taskMode = "plan";
-    store.followupQueue.push({ text: "队列消息", attachments: [] });
+    tabs[0].followupQueue.push({ text: "队列消息", attachments: [] });
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "旧会话计划", status: "completed" },
     ];
@@ -652,17 +617,17 @@ describe("旧会话 turn 事件不串扰新会话", () => {
     });
     await flushPromises();
 
-    expect(store.turnActive).toBe(true);
-    expect(store.currentTurnId).toBeNull();
-    expect(store.planPrompt).toBeNull();
-    expect(store.followupQueue).toHaveLength(1);
+    expect(tabs[0].turnActive).toBe(true);
+    expect(tabs[0].currentTurnId).toBeNull();
+    expect(tabs[0].planPrompt).toBeNull();
+    expect(tabs[0].followupQueue).toHaveLength(1);
   });
 
   it("旧线程 turn/started：不把新会话置为进行中", async () => {
     await wireEvents();
     fireListen("turn/started", { threadId: "t1", turn: { id: "old-turn" } });
-    expect(store.turnActive).toBe(false);
-    expect(store.currentTurnId).toBeNull();
+    expect(tabs[0].turnActive).toBe(false);
+    expect(tabs[0].currentTurnId).toBeNull();
   });
 });
 describe("后台临时线程 delta 事件隔离", () => {
@@ -754,11 +719,6 @@ describe("计划完成确认弹窗", () => {
     store.currentThreadId = "t1";
     store.resumedThreadId = "t1";
     store.taskMode = "plan";
-    store.turnActive = false;
-    store.turnInterrupted = false;
-    store.currentTurnId = null;
-    store.followupQueue = [];
-    store.planPrompt = null;
     store.itemsByThread = {};
   });
 
@@ -772,12 +732,12 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.planPrompt).not.toBeNull(), {
+    await vi.waitFor(() => expect(activeSessionTab()?.planPrompt).not.toBeNull(), {
       timeout: 3000,
       interval: 20,
     });
 
-    expect(store.planPrompt).toEqual({
+    expect(activeSessionTab()?.planPrompt).toEqual({
       threadId: "t1",
       turnId: "turn-1",
       planText: "# 修复方案\n1. 改代码",
@@ -795,7 +755,7 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.planPrompt?.planText).toBe("新计划"), {
+    await vi.waitFor(() => expect(activeSessionTab()?.planPrompt?.planText).toBe("新计划"), {
       timeout: 3000,
       interval: 20,
     });
@@ -813,7 +773,7 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    expect(store.planPrompt).toEqual({
+    expect(activeSessionTab()?.planPrompt).toEqual({
       threadId: "t1",
       turnId: "turn-1",
       planText: "计划A",
@@ -832,7 +792,7 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
     expect((tabs[0] as SessionTab).planPrompt).toBeNull();
   });
 
@@ -846,11 +806,11 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "interrupted" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
   it("回合内无 plan item 不弹窗", async () => {
@@ -863,11 +823,11 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
   it("非计划模式回合完成不弹窗", async () => {
@@ -882,25 +842,28 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(store.turnActive).toBe(false), {
+    await vi.waitFor(() => expect(activeSessionTab()?.turnActive).toBe(false), {
       timeout: 3000,
       interval: 20,
     });
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
   it("新回合开始（turn/started）关闭计划确认弹窗", async () => {
     await wireEvents();
-    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
 
     fireListen("turn/started", { threadId: "t1", turn: { id: "turn-2" } });
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
   it("executePlan 发送 PLEASE IMPLEMENT THIS PLAN 消息并切到执行模式", async () => {
     await wireEvents();
-    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 修复\n1. 步骤" };
-    store.goalArmed = true;
+    tabs[0].planPrompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 修复\n1. 步骤",
+    };
+    tabs[0].goalArmed = true;
     store.currentModel = "gpt-5.2-codex"; // 使 turn/start 携带 collaborationMode
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
@@ -913,11 +876,11 @@ describe("计划完成确认弹窗", () => {
     await executePlan();
 
     expect(store.taskMode).toBe("execute");
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
     // 目标勾选被消费：目标=合成消息（含计划全文）
-    expect(store.goalArmed).toBe(false);
-    expect(store.goalText).toBe("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤");
-    expect(store.goalStatus).toBe("active"); // 随 continueTurn 已挂载
+    expect(activeSessionTab()?.goalArmed).toBe(false);
+    expect(activeSessionTab()?.goalText).toBe("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤");
+    expect(activeSessionTab()?.goalStatus).toBe("active"); // 随 continueTurn 已挂载
     expect(mockedInvoke).toHaveBeenCalledWith("goal_set", {
       threadId: "t1",
       objective: "PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤",
@@ -932,14 +895,14 @@ describe("计划完成确认弹窗", () => {
   });
 
   it("dismissPlanPrompt 保持计划模式、exitPlanMode 切回执行", () => {
-    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+    tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
     dismissPlanPrompt();
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
     expect(store.taskMode).toBe("plan");
 
-    store.planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+    tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
     exitPlanMode();
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.planPrompt).toBeNull();
     expect(store.taskMode).toBe("execute");
   });
 });
@@ -960,14 +923,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     store.currentThreadId = null;
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
     store.taskMode = "execute";
-    store.planPrompt = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.goalArmed = false;
-    store.followupQueue = [];
     store.attachments = [];
     store.itemsByThread = {};
     store.activeWorkByThread = {};
@@ -994,9 +950,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     );
     activeTabId.value = "sA";
     store.currentThreadId = "tA";
-    store.turnActive = true;
-    store.currentTurnId = "turn-a";
-    store.planPrompt = null;
     store.itemsByThread["tB"] = [
       { id: "p1", type: "plan", text: "B的计划", status: "completed" },
     ];
@@ -1015,8 +968,8 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     });
     // 活动标签 A 的回合状态与提示均不受影响
     expect((tabs[0] as SessionTab).turnActive).toBe(true);
-    expect(store.turnActive).toBe(true);
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.turnActive).toBe(true);
+    expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
   it("turn/completed 缺 threadId 且 turn id 匹配活动会话：正常写 store", async () => {
@@ -1029,9 +982,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     );
     activeTabId.value = "sA";
     store.currentThreadId = "tA";
-    store.turnActive = true;
-    store.currentTurnId = "turn-a";
-    store.planPrompt = null;
     store.itemsByThread["tA"] = [
       { id: "p1", type: "plan", text: "A的计划", status: "completed" },
     ];
@@ -1042,8 +992,8 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     });
     await flushPromises();
 
-    expect(store.turnActive).toBe(false);
-    expect(store.planPrompt).toEqual({
+    expect(activeSessionTab()?.turnActive).toBe(false);
+    expect(activeSessionTab()?.planPrompt).toEqual({
       threadId: "tA",
       turnId: "turn-a",
       planText: "A的计划",
@@ -1060,9 +1010,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     );
     activeTabId.value = "sA";
     store.currentThreadId = "tA";
-    store.turnActive = true;
-    store.currentTurnId = "turn-a";
-    store.planPrompt = null;
     await wireEvents();
 
     fireListen("turn/completed", {
@@ -1070,8 +1017,8 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     });
     await flushPromises();
 
-    expect(store.turnActive).toBe(true);
-    expect(store.planPrompt).toBeNull();
+    expect(activeSessionTab()?.turnActive).toBe(true);
+    expect(activeSessionTab()?.planPrompt).toBeNull();
     expect((tabs[0] as SessionTab).turnActive).toBe(true);
   });
 
@@ -1093,9 +1040,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     );
     activeTabId.value = "sA";
     store.currentThreadId = "tA";
-    store.turnActive = false;
-    store.currentTurnId = "turn-a";
-    store.planPrompt = { threadId: "tA", turnId: "turn-1", planText: "旧提示" };
     await wireEvents();
 
     fireListen("turn/started", { turn: { id: "turn-b" } });
@@ -1103,7 +1047,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
 
     expect((tabs[1] as SessionTab).turnActive).toBe(true);
     // A 的“计划已就绪”提示不被 B 的回合开始事件清掉
-    expect(store.planPrompt).not.toBeNull();
+    expect(activeSessionTab()?.planPrompt).not.toBeNull();
     expect((tabs[0] as SessionTab).planPrompt).not.toBeNull();
   });
 
@@ -1117,9 +1061,6 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     );
     activeTabId.value = "sA";
     store.currentThreadId = "tA";
-    store.goalText = "A目标";
-    store.goalStatus = "active";
-    store.goalArmed = true;
     await wireEvents();
 
     fireListen("thread/goal/updated", {
@@ -1128,9 +1069,9 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
     fireListen("thread/goal/cleared", {});
     await flushPromises();
 
-    expect(store.goalText).toBe("A目标");
-    expect(store.goalStatus).toBe("active");
-    expect(store.goalArmed).toBe(true);
+    expect(activeSessionTab()?.goalText).toBe("A目标");
+    expect(activeSessionTab()?.goalStatus).toBe("active");
+    expect(activeSessionTab()?.goalArmed).toBe(true);
     expect((tabs[0] as SessionTab).goalText).toBe("A目标");
   });
 });

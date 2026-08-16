@@ -41,7 +41,7 @@ async function updateTaskbarProgress() {
   try {
     const win = getCurrentWindow();
     await win.setProgressBar({
-      status: store.turnActive
+      status: activeSessionTab()?.turnActive
         ? ProgressBarStatus.Indeterminate
         : ProgressBarStatus.None,
     });
@@ -52,7 +52,7 @@ async function updateTaskbarProgress() {
 
 
 watch(
-  () => store.turnActive,
+  () => activeSessionTab()?.turnActive,
   () => void updateTaskbarProgress(),
   { immediate: true },
 );
@@ -60,7 +60,7 @@ watch(
 /**
  * 回合事件归属解析：事件必须能证明归属到某个会话标签——
  * 优先 `threadId`；缺 `threadId` 时按回合 id 匹配标签的 `currentTurnId`；
- * 仅当 turn id 与活动会话的 `store.currentTurnId` 一致时才回退活动会话；
+ * 仅当 turn id 与活动会话标签的 `currentTurnId` 一致时才回退活动会话；
  * 完全无法归因返回 null（调用方跳过）。禁止把缺失身份的事件默认当活动会话处理。
  */
 export function resolveTurnTab(p: {
@@ -72,7 +72,7 @@ export function resolveTurnTab(p: {
   if (turnId) {
     const byTurn = allSessionTabs().find((t) => t.currentTurnId === turnId);
     if (byTurn) return byTurn;
-    if (store.currentTurnId === turnId) return activeSessionTab();
+    if (activeSessionTab()?.currentTurnId === turnId) return activeSessionTab();
   }
   return null;
 }
@@ -129,20 +129,13 @@ export async function wireEvents() {
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程事件不进入全局状态
       const tab = resolveTurnTab(p);
       if (!tab) return;
-      const isActive = activeSessionTab()?.id === tab.id;
-      if (isActive) {
-        store.turnActive = true;
-        store.turnInterrupted = false;
-        store.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
-        // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
-        // 事件 id 仅在响应缺失时兜底。
-        if (!store.currentTurnId && p.turn?.id) store.currentTurnId = p.turn.id;
-      } else {
-        tab.turnActive = true;
-        tab.turnInterrupted = false;
-        tab.planPrompt = null;
-        if (!tab.currentTurnId && p.turn?.id) tab.currentTurnId = p.turn.id;
-      }
+      // 回合状态一律写归属标签（tab 是唯一事实源，不再写 store）
+      tab.turnActive = true;
+      tab.turnInterrupted = false;
+      tab.planPrompt = null; // 新回合开始：关闭“计划已就绪”确认弹窗
+      // currentTurnId 保留 turn/start 响应的服务端回合 id（turn_interrupt 需要）；
+      // 事件 id 仅在响应缺失时兜底。
+      if (!tab.currentTurnId && p.turn?.id) tab.currentTurnId = p.turn.id;
     }),
     await listen("turn/completed", async (e) => {
       const p = e.payload as {
@@ -155,17 +148,11 @@ export async function wireEvents() {
       // 但不触碰任何标签的回合状态/计划提示
       const tid = p.threadId ?? tab?.threadId;
       const interrupted = p.turn?.status === "interrupted";
-      const isActive = tab ? activeSessionTab()?.id === tab.id : false;
       if (tab) {
-        if (isActive) {
-          store.turnActive = false;
-          store.turnInterrupted = interrupted;
-          store.currentTurnId = null;
-        } else {
-          tab.turnActive = false;
-          tab.turnInterrupted = interrupted;
-          tab.currentTurnId = null;
-        }
+        // 回合状态一律写归属标签（tab 是唯一事实源，不再写 store）
+        tab.turnActive = false;
+        tab.turnInterrupted = interrupted;
+        tab.currentTurnId = null;
       }
       // 回合结束：把仍处于进行中/流式状态的 item 收敛为终态并补算耗时，
       // 避免手动停止后最后一张工具卡的实时计时持续跳动
@@ -217,12 +204,8 @@ export async function wireEvents() {
           }
         }
         if (planText) {
-          if (isActive) {
-            store.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
-            if (store.settings.sound_enabled) playNotificationSound();
-          } else {
-            tab.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
-          }
+          tab.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
+          if (store.settings.sound_enabled) playNotificationSound();
         }
       }
       await refreshThreads();
@@ -401,15 +384,8 @@ export async function wireEvents() {
         window: p.tokenUsage?.modelContextWindow ?? null,
       };
       const tab = findSessionTabByThread(p.threadId);
-      if (tab && activeSessionTab()?.id === tab.id) {
-        store.threadTokenUsage = usage;
-      } else if (tab) {
-        tab.threadTokenUsage = usage;
-      } else if (p.threadId === store.currentThreadId) {
-        store.threadTokenUsage = {
-          ...usage,
-        };
-      }
+      // token 用量一律写归属标签；未打开线程的事件无处可写 → 跳过
+      if (tab) tab.threadTokenUsage = usage;
     }),
     await listen("thread/status/changed", (e) => {
       const p = e.payload as { threadId: string; status: { type: string } };
@@ -425,31 +401,20 @@ export async function wireEvents() {
       // 目标事件无回合 id 可归因：缺 threadId 时跳过，不回退活动会话
       const tab = p.threadId ? findSessionTabByThread(p.threadId) : null;
       if (!tab) return; // 未打开的线程目标不进入 UI
-      const isActive = activeSessionTab()?.id === tab.id;
       if (p.goal) {
         const objective =
           typeof p.goal.objective === "string" ? p.goal.objective : null;
         const status = isGoalStatus(p.goal.status) ? p.goal.status : null;
-        if (isActive) {
-          store.goalText = objective;
-          store.goalStatus = status;
-        } else {
-          tab.goalText = objective;
-          tab.goalStatus = status;
-        }
+        // 目标状态一律写归属标签（tab 是唯一事实源，不再写 store）
+        tab.goalText = objective;
+        tab.goalStatus = status;
         // 服务端终态：目标已完成/预算耗尽/受限/阻塞/暂停 → toast 提示并复位
         // （先同步清本地，视觉上即“无目标”；后台 goal_clear 同步服务端）
         if (isGoalTerminalStatus(p.goal.status)) {
           setToast(goalStatusToast(p.goal.status));
-          if (isActive) {
-            store.goalText = null;
-            store.goalStatus = null;
-            store.goalArmed = false;
-          } else {
-            tab.goalText = null;
-            tab.goalStatus = null;
-            tab.goalArmed = false;
-          }
+          tab.goalText = null;
+          tab.goalStatus = null;
+          tab.goalArmed = false;
           void clearGoal(tab.threadId);
         }
       }
@@ -460,15 +425,10 @@ export async function wireEvents() {
       // 缺线程身份无法归因：跳过，不回退活动会话
       const tab = p.threadId ? findSessionTabByThread(p.threadId) : null;
       if (!tab) return;
-      if (activeSessionTab()?.id === tab.id) {
-        store.goalText = null;
-        store.goalStatus = null;
-        store.goalArmed = false;
-      } else {
-        tab.goalText = null;
-        tab.goalStatus = null;
-        tab.goalArmed = false;
-      }
+      // 目标状态一律写归属标签（tab 是唯一事实源，不再写 store）
+      tab.goalText = null;
+      tab.goalStatus = null;
+      tab.goalArmed = false;
     }),
     await listen("thread/started", (e) => {
       const p = e.payload as { thread?: { id?: string } };

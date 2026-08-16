@@ -16,7 +16,6 @@ import {
   dismissPlanPrompt,
   executePlan,
   exitPlanMode,
-  store,
 } from "../../composables/useCodex";
 
 const mockedDismiss = vi.mocked(dismissPlanPrompt);
@@ -26,7 +25,6 @@ let wrapper: ReturnType<typeof mount> | undefined;
 
 describe("PlanPromptBubble 计划已就绪气泡", () => {
   beforeEach(() => {
-    store.planPrompt = null;
     wrapper?.unmount();
     wrapper = undefined;
     mockedDismiss.mockClear();

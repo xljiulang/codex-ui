@@ -1,13 +1,13 @@
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { setToast, store, toastError } from "./useCodex";
+import { activeSessionTab, setToast, store, toastError } from "./useCodex";
 
 /** 上下文窗口使用情况：window 未知时不显示 */
 export function useContextUsage() {
   const compacting = ref(false);
 
   const ctxUsage = computed(() => {
-    const u = store.threadTokenUsage;
+    const u = activeSessionTab()?.threadTokenUsage;
     if (!u || u.window == null || u.window <= 0) return null;
     return {
       pct: Math.min(100, Math.round((u.used / u.window) * 100)),

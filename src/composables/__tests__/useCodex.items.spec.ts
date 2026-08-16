@@ -85,12 +85,6 @@ describe("会话标签状态与事件路由", () => {
     store.currentThreadName = "";
     store.currentThreadWorkspace = null;
     store.newChatWorkspace = null;
-    store.turnActive = false;
-    store.currentTurnId = null;
-    store.goalText = null;
-    store.goalStatus = null;
-    store.planPrompt = null;
-    store.followupQueue = [];
     store.attachments = [];
     store.loading = false;
     store.interactions = [];
@@ -219,3 +213,4 @@ describe("历史全量加载（逐页拉取）", () => {
     });
   });
 });
+
