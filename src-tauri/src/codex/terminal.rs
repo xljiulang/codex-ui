@@ -65,12 +65,92 @@ const PS_STARTUP: &str = "chcp 65001 > $null; [Console]::InputEncoding = [Consol
 /// 注：cmd 的版权横幅无法用命令行参数去除，仅装饰性输出，不影响标记判定。
 const CMD_STARTUP: &str = "chcp 65001 >nul & prompt $E]133;D$E\\$P$G ";
 
-/// 按设置选择终端 Shell：powershell → PowerShell，其余（含未知/缺失）→ cmd
-fn shell_command(shell: &str) -> (&'static str, &'static [&'static str]) {
-    if shell == "powershell" {
-        ("powershell.exe", &["-NoLogo", "-NoExit", "-Command", PS_STARTUP])
+/// 解析安装目录名的前导数字版本号（如 8 → 8、7-preview → 7）；无前导数字返回 None
+fn dir_major_version(name: &str) -> Option<u64> {
+    let digits: String = name
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    if digits.is_empty() {
+        None
     } else {
-        ("cmd.exe", &["/D", "/K", CMD_STARTUP])
+        digits.parse().ok()
+    }
+}
+
+/// 扫描 %ProgramFiles%\PowerShell\*（根目录按传入顺序）下的 pwsh.exe，
+/// 按目录名前导数字版本号取最新；同版本号取修改时间更新者；无命中返回 None。
+fn find_pwsh(program_files_roots: &[PathBuf]) -> Option<PathBuf> {
+    let mut best: Option<(u64, std::time::SystemTime, PathBuf)> = None;
+    for root in program_files_roots {
+        let powershell_dir = root.join("PowerShell");
+        let Ok(entries) = std::fs::read_dir(&powershell_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let dir_path = entry.path();
+            if !dir_path.is_dir() {
+                continue;
+            }
+            let Some(version) = entry.file_name().to_str().and_then(dir_major_version) else {
+                continue;
+            };
+            let exe = dir_path.join("pwsh.exe");
+            if !exe.is_file() {
+                continue;
+            }
+            let mtime = std::fs::metadata(&exe)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            let replace = match &best {
+                None => true,
+                Some((best_version, best_mtime, _)) => {
+                    version > *best_version || (version == *best_version && mtime > *best_mtime)
+                }
+            };
+            if replace {
+                best = Some((version, mtime, exe));
+            }
+        }
+    }
+    best.map(|(_, _, exe)| exe)
+}
+
+/// 解析 PowerShell 可执行文件：仅扫描 %ProgramW6432%/%ProgramFiles% 下的
+/// PowerShell\* 目录取最新 pwsh.exe；找不到直接回退系统自带 powershell.exe（5.1），
+/// 不探测 PATH / 商店别名。每次调用实时解析，不缓存。
+fn resolve_powershell() -> String {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(p) = std::env::var("ProgramW6432") {
+        roots.push(PathBuf::from(p));
+    }
+    if let Ok(p) = std::env::var("ProgramFiles") {
+        roots.push(PathBuf::from(p));
+    }
+    match find_pwsh(&roots) {
+        Some(exe) => exe.to_string_lossy().into_owned(),
+        None => "powershell.exe".into(),
+    }
+}
+
+/// 按设置选择终端 Shell：powershell → PowerShell（优先 pwsh 7+，缺失回退 5.1），
+/// 其余（含未知/缺失）→ cmd
+fn shell_command(shell: &str) -> (String, Vec<String>) {
+    if shell == "powershell" {
+        (
+            resolve_powershell(),
+            vec![
+                "-NoLogo".into(),
+                "-NoExit".into(),
+                "-Command".into(),
+                PS_STARTUP.into(),
+            ],
+        )
+    } else {
+        (
+            "cmd.exe".into(),
+            vec!["/D".into(), "/K".into(), CMD_STARTUP.into()],
+        )
     }
 }
 
@@ -139,8 +219,8 @@ pub fn terminal_spawn(
         .map(|dir| settings::load(&dir).terminal_shell)
         .unwrap_or_else(|_| "cmd".into());
     let (program, args) = shell_command(&shell);
-    let mut cmd = CommandBuilder::new(program);
-    cmd.args(args);
+    let mut cmd = CommandBuilder::new(&program);
+    cmd.args(&args);
     cmd.cwd(&dir);
     let child = pair
         .slave
@@ -271,7 +351,50 @@ pub fn terminal_kill(state: State<'_, TerminalState>, id: String) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+    use std::sync::Mutex as StdMutex;
     use std::time::{Duration, Instant};
+
+    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+
+    /// 串行设置/恢复多个环境变量（避免并行测试互相干扰；Mutex 不可重入，勿嵌套）
+    fn with_envs(pairs: &[(&str, Option<&str>)], f: impl FnOnce()) {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let old: Vec<(&str, Option<std::ffi::OsString>)> = pairs
+            .iter()
+            .map(|(k, _)| (*k, std::env::var_os(k)))
+            .collect();
+        for (k, v) in pairs {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        f();
+        for (k, v) in old {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+    }
+
+    /// 在根目录下伪造 PowerShell\<版本>\pwsh.exe 并返回其路径
+    fn write_pwsh(root: &Path, version_dir: &str) -> PathBuf {
+        let exe = root
+            .join("PowerShell")
+            .join(version_dir)
+            .join("pwsh.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, b"MZ").unwrap();
+        exe
+    }
+
+    fn set_modified(p: &Path, t: std::time::SystemTime) {
+        let f = std::fs::File::options().write(true).open(p).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_modified(t))
+            .unwrap();
+    }
 
     fn state() -> TerminalState {
         TerminalState(Mutex::new(HashMap::new()))
@@ -300,17 +423,104 @@ mod tests {
     #[test]
     fn shell_command_maps_powershell_and_cmd() {
         let (prog, args) = shell_command("powershell");
-        assert_eq!(prog, "powershell.exe");
-        assert_eq!(args, ["-NoLogo", "-NoExit", "-Command", PS_STARTUP]);
+        assert_eq!(prog, resolve_powershell());
+        assert_eq!(
+            args,
+            vec!["-NoLogo", "-NoExit", "-Command", PS_STARTUP]
+        );
 
         let (prog, args) = shell_command("cmd");
         assert_eq!(prog, "cmd.exe");
-        assert_eq!(args, ["/D", "/K", CMD_STARTUP]);
+        assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
 
         // 未知/缺失值统一回落 cmd
         let (prog, args) = shell_command("bogus");
         assert_eq!(prog, "cmd.exe");
-        assert_eq!(args, ["/D", "/K", CMD_STARTUP]);
+        assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
+    }
+
+    #[test]
+    fn find_pwsh_picks_highest_version_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let v7 = write_pwsh(root.path(), "7");
+        let v8 = write_pwsh(root.path(), "8");
+        assert_eq!(find_pwsh(&[root.path().to_path_buf()]).unwrap(), v8);
+        assert_ne!(v7, v8);
+    }
+
+    #[test]
+    fn find_pwsh_same_major_uses_newer_mtime() {
+        let root = tempfile::tempdir().unwrap();
+        let stable = write_pwsh(root.path(), "7");
+        let preview = write_pwsh(root.path(), "7-preview");
+        set_modified(&stable, std::time::UNIX_EPOCH);
+        set_modified(
+            &preview,
+            std::time::UNIX_EPOCH + Duration::from_secs(1),
+        );
+        assert_eq!(
+            find_pwsh(&[root.path().to_path_buf()]).unwrap(),
+            preview
+        );
+    }
+
+    #[test]
+    fn find_pwsh_prefers_first_root_on_tie() {
+        let root_a = tempfile::tempdir().unwrap();
+        let root_b = tempfile::tempdir().unwrap();
+        let a = write_pwsh(root_a.path(), "7");
+        let b = write_pwsh(root_b.path(), "7");
+        set_modified(&a, std::time::UNIX_EPOCH);
+        set_modified(&b, std::time::UNIX_EPOCH);
+        assert_eq!(
+            find_pwsh(&[
+                root_a.path().to_path_buf(),
+                root_b.path().to_path_buf(),
+            ])
+            .unwrap(),
+            a
+        );
+    }
+
+    #[test]
+    fn find_pwsh_missing_returns_none() {
+        let root = tempfile::tempdir().unwrap();
+        // 无 PowerShell 目录
+        assert_eq!(find_pwsh(&[root.path().to_path_buf()]), None);
+        // PowerShell 目录存在但版本目录无前导数字 / 无 pwsh.exe
+        std::fs::create_dir_all(root.path().join("PowerShell").join("foo")).unwrap();
+        assert_eq!(find_pwsh(&[root.path().to_path_buf()]), None);
+    }
+
+    #[test]
+    fn resolve_powershell_uses_found_pwsh() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = write_pwsh(root.path(), "8");
+        let root_s = root.path().to_string_lossy().into_owned();
+        with_envs(
+            &[("ProgramW6432", Some(&root_s)), ("ProgramFiles", None)],
+            || {
+                assert_eq!(
+                    resolve_powershell(),
+                    exe.to_string_lossy().into_owned()
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_powershell_falls_back_when_no_pwsh() {
+        let empty = tempfile::tempdir().unwrap();
+        let empty_s = empty.path().to_string_lossy().into_owned();
+        with_envs(
+            &[
+                ("ProgramW6432", Some(&empty_s)),
+                ("ProgramFiles", Some(&empty_s)),
+            ],
+            || {
+                assert_eq!(resolve_powershell(), "powershell.exe");
+            },
+        );
     }
 
     /// 真实 ConPTY 冒烟：以 cmd + UTF-8 启动参数拉起子进程，
