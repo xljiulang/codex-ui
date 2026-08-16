@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::codex::path_util::clean_path;
+use crate::codex::settings;
 
 /// 终端会话：持有 ConPTY 主端、写端与子进程。
 /// reader 线程在输出 EOF（进程退出或被 kill）后自行清理 map 条目。
@@ -55,6 +56,24 @@ const DEFAULT_COLS: u16 = 100;
 /// 个别场景可显式 -UseBasicParsing:$false 恢复完整解析）。
 const PS_STARTUP: &str = "chcp 65001 > $null; [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $PSDefaultParameterValues['Invoke-WebRequest:UseBasicParsing'] = $true; function prompt { \"$([char]27)]133;D$([char]7)PS $($executionContext.SessionState.Path.CurrentLocation)> \" }";
 
+/// cmd 启动参数：/D 跳过注册表 AutoRun，/K 执行启动串后保持交互；
+/// 启动时把活动代码页固定为 UTF-8（chcp 65001），保证中文/Unicode
+/// 输出经 ConPTY 读回后不乱码（zh-CN 默认 OEM 936）。
+/// 同时覆写 prompt：每次回到提示符先输出隐藏标记 OSC 133;D（ST 终止，
+/// `$E` 即 ESC、`$E\` 即 ST），前端据此判定“命令已执行完、回到空闲”，
+/// 提示符外观保持默认 `C:\路径> `。
+/// 注：cmd 的版权横幅无法用命令行参数去除，仅装饰性输出，不影响标记判定。
+const CMD_STARTUP: &str = "chcp 65001 >nul & prompt $E]133;D$E\\$P$G ";
+
+/// 按设置选择终端 Shell：powershell → PowerShell，其余（含未知/缺失）→ cmd
+fn shell_command(shell: &str) -> (&'static str, &'static [&'static str]) {
+    if shell == "powershell" {
+        ("powershell.exe", &["-NoLogo", "-NoExit", "-Command", PS_STARTUP])
+    } else {
+        ("cmd.exe", &["/D", "/K", CMD_STARTUP])
+    }
+}
+
 /// 校验工作区为存在的绝对目录（与 session_fs 的 resolve_workspace 语义一致）
 fn validate_workspace(workspace: &str) -> Result<PathBuf, String> {
     let p = PathBuf::from(workspace);
@@ -82,7 +101,8 @@ fn kill_session(state: &TerminalState, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 创建新终端：以给定工作区启动 PowerShell（ConPTY），并启动 reader 线程转发输出。
+/// 创建新终端：以给定工作区按设置启动 cmd 或 PowerShell（ConPTY），
+/// 并启动 reader 线程转发输出。
 /// id 由前端生成（terminal:<uuid>），保证标签与后端会话一一对应，天然支持多开。
 #[tauri::command]
 pub fn terminal_spawn(
@@ -112,13 +132,20 @@ pub fn terminal_spawn(
         })
         .map_err(|e| format!("创建终端失败: {e}"))?;
 
-    let mut cmd = CommandBuilder::new("powershell.exe");
-    cmd.args(["-NoLogo", "-NoExit", "-Command", PS_STARTUP]);
+    // 与前端标签标题读取同一份 settings.json（settings_set 已先落盘），保证一致
+    let shell = app
+        .path()
+        .app_data_dir()
+        .map(|dir| settings::load(&dir).terminal_shell)
+        .unwrap_or_else(|_| "cmd".into());
+    let (program, args) = shell_command(&shell);
+    let mut cmd = CommandBuilder::new(program);
+    cmd.args(args);
     cmd.cwd(&dir);
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("启动 PowerShell 失败: {e}"))?;
+        .map_err(|e| format!("启动终端失败: {e}"))?;
     drop(pair.slave);
 
     let master: Box<dyn MasterPty + Send> = pair.master;
@@ -268,6 +295,109 @@ mod tests {
     fn spawn_accepts_existing_dir() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         assert!(validate_workspace(dir.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn shell_command_maps_powershell_and_cmd() {
+        let (prog, args) = shell_command("powershell");
+        assert_eq!(prog, "powershell.exe");
+        assert_eq!(args, ["-NoLogo", "-NoExit", "-Command", PS_STARTUP]);
+
+        let (prog, args) = shell_command("cmd");
+        assert_eq!(prog, "cmd.exe");
+        assert_eq!(args, ["/D", "/K", CMD_STARTUP]);
+
+        // 未知/缺失值统一回落 cmd
+        let (prog, args) = shell_command("bogus");
+        assert_eq!(prog, "cmd.exe");
+        assert_eq!(args, ["/D", "/K", CMD_STARTUP]);
+    }
+
+    /// 真实 ConPTY 冒烟：以 cmd + UTF-8 启动参数拉起子进程，
+    /// 宿主应答光标位置查询（xterm 同款行为）后写入命令，
+    /// 验证输入回显、UTF-8 活动代码页与提示符空闲标记（OSC 133;D）。
+    #[test]
+    fn pty_smoke_cmd_output() {
+        let pty_system = native_pty_system();
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+        let mut cmd = CommandBuilder::new("cmd.exe");
+        cmd.args(["/D", "/K", CMD_STARTUP]);
+        cmd.cwd(std::env::current_dir().unwrap());
+        let mut child = pair.slave.spawn_command(cmd).expect("spawn cmd");
+        drop(pair.slave);
+
+        let mut reader = pair.master.try_clone_reader().expect("clone reader");
+        let mut writer = pair.master.take_writer().expect("take writer");
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let _ = tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        std::thread::sleep(Duration::from_millis(600));
+        writer
+            .write_all(
+                b"echo PTY-OK-42\r\necho \xe7\xbb\x88\xe7\xab\xaf\xe6\xb5\x8b\xe8\xaf\x95\r\n",
+            )
+            .expect("write input");
+        writer.flush().expect("flush input");
+
+        let mut out = String::new();
+        let mut responded_dsr = false;
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(chunk) => {
+                    out.push_str(&chunk);
+                    // ConPTY（INHERIT_CURSOR）启动先查询光标位置，宿主须应答
+                    if !responded_dsr && out.contains("\x1b[6n") {
+                        responded_dsr = true;
+                        let _ = writer.write_all(b"\x1b[24;1R");
+                        let _ = writer.flush();
+                    }
+                    if out.contains("PTY-OK-42")
+                        && out.contains("终端测试")
+                        && out.contains("65001")
+                    {
+                        break;
+                    }
+                }
+                Err(_) => {
+                    if Instant::now() >= deadline {
+                        let _ = child.kill();
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = child.kill();
+        assert!(
+            out.contains("PTY-OK-42") && out.contains("终端测试"),
+            "pty output: {out}"
+        );
+        assert!(
+            out.contains("\x1b]133;D"),
+            "pty output missing prompt marker: {out}"
+        );
+        assert!(
+            out.contains("65001"),
+            "pty output missing active code page 65001: {out}"
+        );
     }
 
     /// 真实 ConPTY 冒烟：以 PowerShell + UTF-8 启动参数拉起子进程，

@@ -891,7 +891,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     const termEl = wrapper
       .findAll(".editor-tab")
-      .find((w) => w.text().includes("PowerShell"))!;
+      .find((w) => w.text().includes("cmd"))!;
     await termEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
@@ -1361,8 +1361,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
-    expect(tabEls[1].find(".editor-tab-label").text()).toBe("PowerShell");
-    // 终端标签标题固定为 PowerShell，无 ToolTip（header 与 label 均无 data-tip）
+    expect(tabEls[1].find(".editor-tab-label").text()).toBe("cmd");
+    // 终端标签标题固定为 cmd，无 ToolTip（header 与 label 均无 data-tip）
     expect(tabEls[1].attributes("data-tip")).toBeUndefined();
     expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
@@ -1388,7 +1388,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const before = termFocus.calls;
     const termTab = wrapper
       .findAll(".editor-tab")
-      .find((w) => w.text().includes("PowerShell"))!;
+      .find((w) => w.text().includes("cmd"))!;
     await termTab.trigger("click");
     await settle();
     expect(termFocus.calls).toBeGreaterThan(before);
@@ -1445,7 +1445,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await openTerminalTab(root + "\\lib");
     await settle();
 
-    // 终端标签标题固定为 PowerShell：按标签位置（chat 固定第 0 位）与 cwd 区分
+    // 终端标签标题固定为 cmd：按标签位置（chat 固定第 0 位）与 cwd 区分
     const termTabs = wrapper.findAll(".editor-tab");
     const t1 = tabs.find(
       (x): x is TerminalEditorTab =>
@@ -1687,7 +1687,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     // 会话 fixture（sess-1）恒在前，终端居中，文件按打开顺序在后
     const labels = wrapper.findAll(".editor-tab").map((w) => w.text().trim());
     expect(labels[0]).toContain("新建会话");
-    expect(labels[1]).toBe("PowerShell");
+    expect(labels[1]).toBe("cmd");
     expect(labels[2]).toBe("a.txt");
     expect(labels[3]).toBe("b.txt");
     wrapper.unmount();

@@ -429,3 +429,46 @@ describe("SettingsView 记忆管理", () => {
     });
   });
 });
+
+describe("SettingsView 终端 Shell", () => {
+  let wrapper: ReturnType<typeof mount> | undefined;
+
+  beforeEach(() => {
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
+    store.settings.terminal_shell = "cmd";
+    store.toast = "";
+    store.confirm = null;
+    mockedInvoke.mockReset();
+    mockedInvoke.mockResolvedValue({});
+    mockedSave.mockClear();
+    mockedSave.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = undefined;
+  });
+
+  it("渲染终端 Shell 下拉，默认选中 cmd", () => {
+    wrapper = mount(SettingsView);
+    const select = wrapper.find("select.terminal-shell-select");
+    expect(select.exists()).toBe(true);
+    expect((select.element as HTMLSelectElement).value).toBe("cmd");
+    const options = wrapper
+      .findAll("select.terminal-shell-select option")
+      .map((o) => o.attributes("value"));
+    expect(options).toEqual(["cmd", "powershell"]);
+  });
+
+  it("选择 PowerShell 保存后 patch 包含 terminal_shell: powershell", async () => {
+    wrapper = mount(SettingsView);
+    await wrapper.find("select.terminal-shell-select").setValue("powershell");
+    await wrapper.find("button.btn.primary").trigger("click");
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith(
+      expect.objectContaining({ terminal_shell: "powershell" }),
+    );
+  });
+});

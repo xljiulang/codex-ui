@@ -152,6 +152,9 @@ export type MemoryMode = "disabled" | "enabled";
 /** 跟进处理方式：adjust（调整方向）｜queue（加入队列） */
 export type FollowupMode = "adjust" | "queue";
 
+/** 终端 Shell：cmd（命令提示符，默认）｜powershell */
+export type TerminalShell = "cmd" | "powershell";
+
 export interface AppSettings {
   codex_path?: string | null;
   sound_enabled: boolean;
@@ -162,6 +165,8 @@ export interface AppSettings {
   default_permission: PermissionId;
   /** 作为新建会话的初始值 */
   memory_mode: MemoryMode;
+  /** 新开终端使用的 Shell */
+  terminal_shell: TerminalShell;
 }
 
 export interface AuthStatus {

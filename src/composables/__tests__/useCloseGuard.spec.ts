@@ -106,7 +106,7 @@ function busyTerminal(id = "term-1"): TerminalEditorTab {
     kind: "terminal",
     id,
     workspace: "D:/repo",
-    title: "PowerShell",
+    title: "cmd",
     icon: "terminal",
     loading: false,
     error: "",
@@ -262,4 +262,3 @@ describe("registerCloseGuard 关闭窗口守卫", () => {
     expect(() => unlisten()).not.toThrow();
   });
 });
-

@@ -16,6 +16,7 @@ import {
 } from "../useTerminalEvents";
 import { TabIcon, TabKind } from "../../lib/tabs";
 import { activeTabId, insertTab, tabs } from "../useTabs";
+import { store } from "../useCodex/store";
 import type {
   DiffEditorTab,
   DiffPreviewParams,
@@ -67,8 +68,8 @@ export async function openTerminalTab(workspace: string): Promise<void> {
     kind: TabKind.Terminal,
     id,
     workspace,
-    // 终端标签标题固定为 PowerShell，不随工作目录变化；多开时同名
-    title: "PowerShell",
+    // 终端标签标题跟随所选 Shell（与后端 spawn 读取同一份设置），多开时同名
+    title: store.settings.terminal_shell === "powershell" ? "PowerShell" : "cmd",
     icon: TabIcon.Terminal,
     loading: true,
     error: "",

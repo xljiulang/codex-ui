@@ -16,6 +16,7 @@ import {
   type ThemeId,
 } from "../composables/useTheme";
 import { PERMISSION_MODES } from "../lib/permissions";
+import type { TerminalShell } from "../lib/types";
 
 const closeBtn = ref<HTMLButtonElement | null>(null);
 const codexPath = ref(store.settings.codex_path ?? "");
@@ -25,6 +26,7 @@ const followupMode = ref(store.settings.followup_mode);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const defaultPermission = ref(store.settings.default_permission);
 const memoryMode = ref(store.settings.memory_mode);
+const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 
 function close(restore = true) {
   if (restore && theme.value !== store.settings.theme) {
@@ -73,6 +75,7 @@ async function apply() {
     theme: theme.value,
     default_permission: defaultPermission.value,
     memory_mode: memoryMode.value,
+    terminal_shell: terminalShell.value,
   });
   // 有当前会话时立即同步记忆模式（与模型同步一致）：失败 toast 但不阻塞保存
   let syncError: string | null = null;
@@ -171,6 +174,14 @@ function selectTheme(id: ThemeId) {
             <select v-model="followupMode">
               <option value="adjust">调整方向</option>
               <option value="queue">加入队列</option>
+            </select>
+          </div>
+
+          <div class="setting-row">
+            <label>终端 Shell</label>
+            <select v-model="terminalShell" class="terminal-shell-select">
+              <option value="cmd">cmd（命令提示符）</option>
+              <option value="powershell">PowerShell</option>
             </select>
           </div>
 

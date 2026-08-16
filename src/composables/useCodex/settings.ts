@@ -51,6 +51,9 @@ export async function loadSettings() {
   if (!["enabled", "disabled"].includes(store.settings.memory_mode)) {
     store.settings.memory_mode = "disabled";
   }
+  if (!["cmd", "powershell"].includes(store.settings.terminal_shell)) {
+    store.settings.terminal_shell = "cmd";
+  }
   const tab = activeSessionTab();
   if (tab) tab.permissionMode = store.settings.default_permission;
   applyTheme(store.settings.theme);

@@ -11,6 +11,7 @@ export const defaultSettings = (): AppSettings => ({
   theme: "blue",
   default_permission: "ask-for-approval",
   memory_mode: "disabled",
+  terminal_shell: "cmd",
 });
 
 

@@ -14,7 +14,7 @@ const props = defineProps<{ tab: TerminalEditorTab; active?: boolean }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
 
-/** 后端 prompt 注入的空闲标记：PowerShell 每次回到提示符先输出 OSC 133;D */
+/** 后端 prompt 注入的空闲标记：cmd/PowerShell 每次回到提示符先输出 OSC 133;D */
 const PROMPT_MARKER = "\x1b]133;D";
 /** 标记前缀长度：跨输出块拆分时保留上一块尾部做拼接匹配 */
 const MARKER_PREFIX_LEN = PROMPT_MARKER.length;

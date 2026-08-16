@@ -536,7 +536,7 @@ describe("useEditorTabs 标签状态", () => {
     );
     expect(t).toBeTruthy();
     expect(t!.workspace).toBe(root);
-    expect(t!.title).toBe("PowerShell");
+    expect(t!.title).toBe("cmd");
     expect(t!.loading).toBe(false);
     expect(t!.error).toBe("");
     expect(t!.exited).toBe(false);
@@ -546,6 +546,21 @@ describe("useEditorTabs 标签状态", () => {
       id: t!.id,
       workspace: root,
     });
+  });
+
+  it("打开终端：设置 terminal_shell 为 powershell 时标题为 PowerShell", async () => {
+    store.settings.terminal_shell = "powershell";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root);
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t!.title).toBe("PowerShell");
+    store.settings.terminal_shell = "cmd";
   });
 
   it("打开终端：先建立全局监听/缓冲，再发起 spawn", async () => {
@@ -913,7 +928,7 @@ describe("closeAnyTab 统一关闭入口", () => {
     expect(tabs.map((t) => t.title)).toEqual([
       "会话",
       "会话",
-      "PowerShell",
+      "cmd",
       "a.txt",
       "b.txt",
     ]);

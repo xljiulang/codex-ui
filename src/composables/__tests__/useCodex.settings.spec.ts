@@ -263,3 +263,43 @@ describe("loadSettings 记忆模式", () => {
     expect(store.settings.memory_mode).toBe("disabled");
   });
 });
+
+describe("loadSettings 终端 Shell", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+  });
+
+  it("启动时按持久化的 terminal_shell 加载", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      default_permission: "ask-for-approval",
+      memory_mode: "disabled",
+      terminal_shell: "powershell",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.terminal_shell).toBe("powershell");
+  });
+
+  it("持久化值非法或缺失时回退 cmd", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      default_permission: "ask-for-approval",
+      memory_mode: "disabled",
+      terminal_shell: "bogus",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.terminal_shell).toBe("cmd");
+  });
+});

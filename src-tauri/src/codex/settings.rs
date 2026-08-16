@@ -16,6 +16,9 @@ pub struct AppSettings {
     /// 记忆模式：disabled（关闭，默认）｜enabled（启用）
     #[serde(default = "default_memory_mode")]
     pub memory_mode: String,
+    /// 终端 Shell：cmd（命令提示符，默认）｜powershell
+    #[serde(default = "default_terminal_shell")]
+    pub terminal_shell: String,
 }
 
 fn default_permission() -> String {
@@ -24,6 +27,10 @@ fn default_permission() -> String {
 
 fn default_memory_mode() -> String {
     "disabled".into()
+}
+
+fn default_terminal_shell() -> String {
+    "cmd".into()
 }
 
 impl Default for AppSettings {
@@ -36,6 +43,7 @@ impl Default for AppSettings {
             theme: "blue".into(),
             default_permission: default_permission(),
             memory_mode: default_memory_mode(),
+            terminal_shell: default_terminal_shell(),
         }
     }
 }
@@ -95,14 +103,16 @@ mod tests {
         let s = load(dir.path());
         assert_eq!(s.default_permission, "ask-for-approval");
         assert_eq!(s.memory_mode, "disabled");
+        assert_eq!(s.terminal_shell, "cmd");
     }
 
     #[test]
-    fn save_load_roundtrip_preserves_default_permission_and_memory_mode() {
+    fn save_load_roundtrip_preserves_custom_settings() {
         let dir = TempDir::new().unwrap();
         let s = AppSettings {
             default_permission: "full-access".into(),
             memory_mode: "enabled".into(),
+            terminal_shell: "powershell".into(),
             ..AppSettings::default()
         };
 
@@ -110,6 +120,7 @@ mod tests {
         let loaded = load(dir.path());
         assert_eq!(loaded.default_permission, "full-access");
         assert_eq!(loaded.memory_mode, "enabled");
+        assert_eq!(loaded.terminal_shell, "powershell");
         // 原子写不应残留临时文件
         assert!(!settings_path(dir.path())
             .with_extension("json.tmp")
