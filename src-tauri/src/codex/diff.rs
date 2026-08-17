@@ -258,58 +258,7 @@ pub fn build_inline_rows(
             emit_ctx_pair!();
         }
 
-        let mut o = h.old_start;
-        let mut n = h.new_start;
-        let mut saw_change = false;
-        let mut before_ctx: Vec<DiffRow> = Vec::new();
-        let mut after_ctx: Vec<DiffRow> = Vec::new();
-        let mut dels: Vec<(u32, String)> = Vec::new();
-        let mut adds: Vec<(u32, String)> = Vec::new();
-        for (kind, text) in &h.lines {
-            match kind {
-                DiffLineKind::Ctx => {
-                    let row = DiffRow::Ctx {
-                        old_no: o as u32,
-                        new_no: n as u32,
-                        text: text.clone(),
-                    };
-                    o += 1;
-                    n += 1;
-                    if saw_change {
-                        after_ctx.push(row);
-                    } else {
-                        before_ctx.push(row);
-                    }
-                }
-                DiffLineKind::Del => {
-                    dels.push((o as u32, text.clone()));
-                    o += 1;
-                    saw_change = true;
-                }
-                DiffLineKind::Add => {
-                    adds.push((n as u32, text.clone()));
-                    n += 1;
-                    saw_change = true;
-                }
-            }
-        }
-        let has_del = !dels.is_empty();
-        let has_add = !adds.is_empty();
-        rows.extend(before_ctx);
-        rows.extend(
-            dels
-                .into_iter()
-                .map(|(old_no, text)| DiffRow::Del { old_no, text }),
-        );
-        if has_del && has_add {
-            rows.push(DiffRow::Sep);
-        }
-        rows.extend(
-            adds
-                .into_iter()
-                .map(|(new_no, text)| DiffRow::Add { new_no, text }),
-        );
-        rows.extend(after_ctx);
+        rows.extend(build_hunk_rows(h));
         old_idx += h.old_count;
         new_idx += h.new_count;
     }
@@ -326,60 +275,70 @@ pub fn build_commit_diff_rows(diff: &str) -> Result<Vec<DiffRow>, String> {
     let hunks = parse_unified_diff(diff)?;
     let mut rows: Vec<DiffRow> = Vec::new();
     for h in &hunks {
-        let mut o = h.old_start;
-        let mut n = h.new_start;
-        let mut saw_change = false;
-        let mut before_ctx: Vec<DiffRow> = Vec::new();
-        let mut after_ctx: Vec<DiffRow> = Vec::new();
-        let mut dels: Vec<(u32, String)> = Vec::new();
-        let mut adds: Vec<(u32, String)> = Vec::new();
-        for (kind, text) in &h.lines {
-            match kind {
-                DiffLineKind::Ctx => {
-                    let row = DiffRow::Ctx {
-                        old_no: o as u32,
-                        new_no: n as u32,
-                        text: text.clone(),
-                    };
-                    o += 1;
-                    n += 1;
-                    if saw_change {
-                        after_ctx.push(row);
-                    } else {
-                        before_ctx.push(row);
-                    }
-                }
-                DiffLineKind::Del => {
-                    dels.push((o as u32, text.clone()));
-                    o += 1;
-                    saw_change = true;
-                }
-                DiffLineKind::Add => {
-                    adds.push((n as u32, text.clone()));
-                    n += 1;
-                    saw_change = true;
-                }
-            }
-        }
-        let has_del = !dels.is_empty();
-        let has_add = !adds.is_empty();
-        rows.extend(before_ctx);
-        rows.extend(
-            dels
-                .into_iter()
-                .map(|(old_no, text)| DiffRow::Del { old_no, text }),
-        );
-        if has_del && has_add {
-            rows.push(DiffRow::Sep);
-        }
-        rows.extend(
-            adds
-                .into_iter()
-                .map(|(new_no, text)| DiffRow::Add { new_no, text }),
-        );
-        rows.extend(after_ctx);
+        rows.extend(build_hunk_rows(h));
     }
     Ok(rows)
+}
+
+/// 构建单个 hunk 的内联行。
+///
+/// 一个 hunk 可能包含多个变更组（如 ctx→del→add→ctx→add→ctx）。
+/// 每遇到上下文行先冲刷当前挂起的变更组（删除行 → 分隔 → 新增行），
+/// 再输出该上下文行，保证新旧两侧行号各自单调，不再出现
+/// “新增行号 417 之后又出现 405”这类乱序。
+fn build_hunk_rows(h: &DiffHunk) -> Vec<DiffRow> {
+    let mut rows: Vec<DiffRow> = Vec::new();
+    let mut o = h.old_start;
+    let mut n = h.new_start;
+    let mut pending_dels: Vec<(u32, String)> = Vec::new();
+    let mut pending_adds: Vec<(u32, String)> = Vec::new();
+
+    macro_rules! flush_pending {
+        () => {{
+            let has_del = !pending_dels.is_empty();
+            let has_add = !pending_adds.is_empty();
+            if has_del || has_add {
+                rows.extend(
+                    pending_dels
+                        .drain(..)
+                        .map(|(old_no, text)| DiffRow::Del { old_no, text }),
+                );
+                if has_del && has_add {
+                    rows.push(DiffRow::Sep);
+                }
+                rows.extend(
+                    pending_adds
+                        .drain(..)
+                        .map(|(new_no, text)| DiffRow::Add { new_no, text }),
+                );
+            }
+        }};
+    }
+
+    for (kind, text) in &h.lines {
+        match kind {
+            DiffLineKind::Ctx => {
+                flush_pending!();
+                rows.push(DiffRow::Ctx {
+                    old_no: o as u32,
+                    new_no: n as u32,
+                    text: text.clone(),
+                });
+                o += 1;
+                n += 1;
+            }
+            DiffLineKind::Del => {
+                pending_dels.push((o as u32, text.clone()));
+                o += 1;
+            }
+            DiffLineKind::Add => {
+                pending_adds.push((n as u32, text.clone()));
+                n += 1;
+            }
+        }
+    }
+    flush_pending!();
+    rows
 }
 
 /// Windows 路径解析：绝对盘符路径/UNC 直接返回，相对路径按工作目录拼接；
@@ -514,6 +473,64 @@ mod tests {
         let rows = build_inline_rows("", "n1\nn2", "@@ -0,0 +1,2 @@\n+n1\n+n2").unwrap();
         assert_eq!(rows.iter().filter(|r| matches!(r, DiffRow::Sep)).count(), 0);
         assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn inline_rows_multi_change_group_keeps_monotonic_numbers() {
+        // 一个 hunk 内含多个变更组（ctx→del→add→ctx→add→ctx），
+        // 旧代码会把第二个 add 组后的上下文整体挪到所有 add 之后，
+        // 导致新文件行号乱序（如 …2、4、3、5…）；修复后必须按实际位置穿插输出。
+        let old_lines = vec!["line1", "line2", "line3", "line5"];
+        let new_lines = vec!["line1", "X", "line3", "Y", "line5"];
+        let diff = "@@ -1,4 +1,5 @@\n line1\n-line2\n+X\n line3\n+Y\n line5";
+        let rows = build_inline_rows(
+            &old_lines.join("\n"),
+            &new_lines.join("\n"),
+            diff,
+        )
+        .unwrap();
+        assert!(matches!(&rows[0], DiffRow::Ctx { old_no: 1, new_no: 1, .. }));
+        assert!(matches!(&rows[1], DiffRow::Del { old_no: 2, .. }));
+        assert!(matches!(&rows[2], DiffRow::Sep));
+        assert!(matches!(&rows[3], DiffRow::Add { new_no: 2, .. }));
+        assert!(matches!(&rows[4], DiffRow::Ctx { old_no: 3, new_no: 3, .. }));
+        assert!(matches!(&rows[5], DiffRow::Add { new_no: 4, .. }));
+        assert!(matches!(&rows[6], DiffRow::Ctx { old_no: 4, new_no: 5, .. }));
+        // 新旧两侧行号必须各自严格单调递增
+        let mut last_old = 0u32;
+        let mut last_new = 0u32;
+        for r in &rows {
+            match r {
+                DiffRow::Ctx { old_no, new_no, .. } => {
+                    assert!(*old_no > last_old);
+                    assert!(*new_no > last_new);
+                    last_old = *old_no;
+                    last_new = *new_no;
+                }
+                DiffRow::Del { old_no, .. } => {
+                    assert!(*old_no > last_old);
+                    last_old = *old_no;
+                }
+                DiffRow::Add { new_no, .. } => {
+                    assert!(*new_no > last_new);
+                    last_new = *new_no;
+                }
+                DiffRow::Sep => {}
+            }
+        }
+    }
+
+    #[test]
+    fn commit_diff_rows_multi_change_group_keeps_monotonic_numbers() {
+        let diff = "@@ -1,4 +1,5 @@\n line1\n-line2\n+X\n line3\n+Y\n line5";
+        let rows = build_commit_diff_rows(diff).unwrap();
+        assert!(matches!(&rows[0], DiffRow::Ctx { old_no: 1, new_no: 1, .. }));
+        assert!(matches!(&rows[1], DiffRow::Del { old_no: 2, .. }));
+        assert!(matches!(&rows[2], DiffRow::Sep));
+        assert!(matches!(&rows[3], DiffRow::Add { new_no: 2, .. }));
+        assert!(matches!(&rows[4], DiffRow::Ctx { old_no: 3, new_no: 3, .. }));
+        assert!(matches!(&rows[5], DiffRow::Add { new_no: 4, .. }));
+        assert!(matches!(&rows[6], DiffRow::Ctx { old_no: 4, new_no: 5, .. }));
     }
 
     #[test]
