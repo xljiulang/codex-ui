@@ -96,9 +96,9 @@ ws.onopen = async () => {
           return 'clicked:' + label;
         }
         const stop = !!document.querySelector('.send-btn.stop');
-        const fc = [...document.querySelectorAll('.tool-card')]
-          .find(c => c.querySelector('.tool-card-title')?.textContent === '文件变更');
-        return JSON.stringify({ modal: false, stop, fcStatus: fc ? fc.querySelector('.tool-card-status')?.textContent.trim() : null });
+        const fc = [...document.querySelectorAll('.assistant-card')]
+          .find(c => c.querySelector('.assistant-card-title')?.textContent === '文件变更');
+        return JSON.stringify({ modal: false, stop, fcStatus: fc ? fc.querySelector('.assistant-card-status')?.textContent.trim() : null });
       })()`);
       if (typeof st === "string" && st.startsWith("clicked:")) {
         clickedLabels.push(st);
@@ -121,11 +121,11 @@ ws.onopen = async () => {
     console.log("FINISHED:", finished, "CLICKS:", clickedLabels);
     await sleep(1000);
     const card = await evalJs(`(() => {
-      const cards = [...document.querySelectorAll('.tool-card')];
-      const all = cards.map(c => c.querySelector('.tool-card-title')?.textContent + ':' + (c.querySelector('.tool-card-status')?.textContent.trim() || ''));
-      const fc = cards.find(c => c.querySelector('.tool-card-title')?.textContent === '文件变更');
+      const cards = [...document.querySelectorAll('.assistant-card')];
+      const all = cards.map(c => c.querySelector('.assistant-card-title')?.textContent + ':' + (c.querySelector('.assistant-card-status')?.textContent.trim() || ''));
+      const fc = cards.find(c => c.querySelector('.assistant-card-title')?.textContent === '文件变更');
       if (!fc) return JSON.stringify({ fc: false });
-      const status = fc.querySelector('.tool-card-status')?.textContent.trim() || '';
+      const status = fc.querySelector('.assistant-card-status')?.textContent.trim() || '';
       const adds = [...fc.querySelectorAll('.diff-add')].map(d => d.textContent);
       const dels = [...fc.querySelectorAll('.diff-del')].map(d => d.textContent);
       return JSON.stringify({ fc: true, status, adds, dels, all });

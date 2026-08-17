@@ -12,7 +12,7 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
       props: { planText: "# 方案\n- 步骤1" },
     });
     expect(wrapper.text()).toContain("方案");
-    expect(wrapper.find(".plan-text-body").exists()).toBe(false);
+    expect(wrapper.find(".assistant-card-body").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("步骤1");
   });
 
@@ -20,9 +20,9 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
     const wrapper = mount(PlanTextCard, {
       props: { planText: "直接是内容" },
     });
-    expect(wrapper.find(".plan-text-title").text()).toBe("计划");
-    expect(wrapper.find(".plan-text-body").exists()).toBe(false);
-    await wrapper.find(".plan-text-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-title").text()).toBe("计划");
+    expect(wrapper.find(".assistant-card-body").exists()).toBe(false);
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.text()).toContain("直接是内容");
   });
 
@@ -30,18 +30,18 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
     const wrapper = mount(PlanTextCard, {
       props: { planText: "# 方案\n- 步骤1", defaultOpen: true },
     });
-    expect(wrapper.find(".plan-text-body").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card-body").exists()).toBe(true);
   });
 
   it("点击展开显示正文，再点收起", async () => {
     const wrapper = mount(PlanTextCard, {
       props: { planText: "# 方案\n- 步骤1" },
     });
-    await wrapper.find(".plan-text-toggle").trigger("click");
-    expect(wrapper.find(".plan-text-body").exists()).toBe(true);
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-body").exists()).toBe(true);
     expect(wrapper.text()).toContain("步骤1");
-    await wrapper.find(".plan-text-toggle").trigger("click");
-    expect(wrapper.find(".plan-text-body").exists()).toBe(false);
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-body").exists()).toBe(false);
   });
 
   it("复制按钮把完整原始 Markdown（含标题）传给剪贴板并短暂显示已复制", async () => {
@@ -61,7 +61,7 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
 
   it("空 planText 容错：无复制按钮，仍可折叠", async () => {
     const wrapper = mount(PlanTextCard, { props: { planText: "" } });
-    expect(wrapper.find(".plan-text-toggle").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card-toggle").exists()).toBe(true);
     expect(wrapper.find(".plan-text-copy").exists()).toBe(false);
   });
 });

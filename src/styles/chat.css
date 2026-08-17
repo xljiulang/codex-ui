@@ -161,7 +161,7 @@
   margin-bottom: 0;
 }
 
-.turn .tool-card {
+.turn .assistant-card {
   margin-bottom: 0;
 }
 
@@ -696,8 +696,8 @@
   margin: 1px 3px;
 }
 
-/* 工具卡片 */
-.tool-card {
+/* 助手卡片：ToolCard/PlanTextCard/PlanCard/ReasoningBlock 共享容器、头部、正文结构 */
+.assistant-card {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--tool-card-bg);
@@ -707,43 +707,67 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.tool-card-header {
+.assistant-card-header {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  cursor: pointer;
   border-bottom: 1px solid transparent;
   transition: background-color 0.14s ease;
 }
 
-.tool-card-header:hover {
+.assistant-card-header:hover {
   background: rgba(var(--overlay-rgb), 0.02);
 }
 
-.tool-card.expanded .tool-card-header {
+.assistant-card.expanded .assistant-card-header {
   border-bottom-color: var(--border);
 }
 
-.card-body-enter-active,
-.card-body-leave-active {
+.assistant-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-card-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.assistant-card-body-enter-active,
+.assistant-card-body-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;
 }
 
-.card-body-enter-from,
-.card-body-leave-to {
+.assistant-card-body-enter-from,
+.assistant-card-body-leave-to {
   opacity: 0;
   transform: translateY(-4px);
 }
 
-.tool-card-title {
+.assistant-card-title {
   font-weight: 600;
   color: var(--text-bright);
   font-size: 12.5px;
   flex-shrink: 0;
 }
 
-.tool-card-sub {
+.assistant-card-sub {
   color: var(--text-dim);
   font-size: 11px;
   font-family: var(--mono);
@@ -754,7 +778,7 @@
   text-overflow: ellipsis;
 }
 
-.tool-card-status {
+.assistant-card-status {
   font-size: 11px;
   display: flex;
   align-items: center;
@@ -803,7 +827,7 @@
   }
 }
 
-.tool-card-body {
+.assistant-card-body {
   padding: 10px 12px;
   font-size: 12px;
 }
@@ -982,15 +1006,7 @@
   text-decoration: line-through;
 }
 
-/* Updated Plan 任务清单卡片（turn/plan/updated） */
-.plan-card {
-  border: 1px solid var(--border);
-  background: var(--tool-card-bg);
-  border-radius: var(--radius);
-  margin-bottom: 14px;
-  padding: 8px 12px;
-}
-
+/* Updated Plan 任务清单正文（容器走共享 .assistant-card） */
 .plan-explanation {
   color: var(--text-dim);
   font-size: 12px;
@@ -1068,39 +1084,7 @@
   transition: width 0.2s ease;
 }
 
-/* 计划文本卡片：用户端“执行计划”与助理端 plan 条目共用 */
-.plan-text-card {
-  border: 1px solid var(--border);
-  background: var(--tool-card-bg);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-}
-
-.plan-text-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.plan-text-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  cursor: pointer;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.plan-text-arrow {
-  color: var(--text-dim);
-  font-size: 11px;
-}
-
+/* 计划文本卡片：用户端“执行计划”与助理端 plan 条目共用（容器走共享 .assistant-card） */
 .plan-text-copy {
   background: none;
   border: 1px solid var(--border);
@@ -1116,37 +1100,10 @@
   border-color: var(--accent);
 }
 
-.plan-text-body {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
-}
-
-/* 推理折叠块 */
-.reasoning-block {
-  border: 1px solid var(--border);
+/* 推理折叠块：容器走共享 .assistant-card，保留紫色语义边框与底色 */
+.assistant-card--reasoning {
   border-left: 3px solid var(--purple);
   background: var(--reasoning-bg);
-  border-radius: 10px;
-  margin-bottom: 14px;
-  padding: 8px 12px;
-}
-
-.reasoning-toggle {
-  color: var(--text-dim);
-  font-size: 11px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  text-align: left;
-  padding: 2px 0;
-  font-weight: 600;
-}
-
-.reasoning-toggle:hover {
-  color: var(--text-bright);
 }
 
 .reasoning-time {
@@ -1157,7 +1114,7 @@
 }
 
 .reasoning-preview {
-  margin-top: 2px;
+  padding: 0 12px 8px;
   font-size: 11.5px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -1172,12 +1129,9 @@
 }
 
 .reasoning-content {
-  margin-top: 8px;
   color: var(--text-dim);
   font-size: 12px;
   white-space: pre-wrap;
   user-select: text;
   line-height: 1.55;
-  border-top: 1px dashed var(--border);
-  padding-top: 8px;
 }

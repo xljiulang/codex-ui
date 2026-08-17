@@ -26,19 +26,21 @@ async function copyPlan() {
 </script>
 
 <template>
-  <div class="plan-text-card">
-    <div class="plan-text-head">
+  <div class="assistant-card" :class="{ expanded: open }">
+    <div class="assistant-card-header">
       <button
-        class="plan-text-toggle"
+        type="button"
+        class="assistant-card-toggle"
         :aria-expanded="open"
         aria-label="展开或收起计划"
         @click="open = !open"
       >
-        <span class="plan-text-arrow">{{ open ? "▾" : "▸" }}</span>
-        <span class="plan-text-title">{{ plan.title }}</span>
+        <span class="assistant-card-arrow">{{ open ? "▾" : "▸" }}</span>
+        <span class="assistant-card-title">{{ plan.title }}</span>
       </button>
       <button
         v-if="planText"
+        type="button"
         class="plan-text-copy"
         :aria-label="'复制计划'"
         @click="copyPlan()"
@@ -46,8 +48,10 @@ async function copyPlan() {
         {{ copied ? "已复制" : "复制计划" }}
       </button>
     </div>
-    <div v-if="open" class="plan-text-body">
-      <MarkdownText :text="plan.body" />
-    </div>
+    <Transition name="assistant-card-body">
+      <div v-if="open" class="assistant-card-body">
+        <MarkdownText :text="plan.body" />
+      </div>
+    </Transition>
   </div>
 </template>

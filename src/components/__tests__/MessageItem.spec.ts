@@ -636,9 +636,9 @@ describe("执行计划用户消息卡片", () => {
         } as ThreadItem,
       },
     });
-    expect(wrapper.find(".plan-text-card").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card").exists()).toBe(true);
     // 标题取自计划本身（首行标题），正文默认折叠不可见
-    expect(wrapper.find(".plan-text-card .plan-text-title").text()).toBe("计划A");
+    expect(wrapper.find(".assistant-card .assistant-card-title").text()).toBe("计划A");
     expect(wrapper.text()).not.toContain("步骤1");
   });
 
@@ -659,7 +659,7 @@ describe("执行计划用户消息卡片", () => {
         } as ThreadItem,
       },
     });
-    expect(wrapper.find(".plan-text-card").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card").exists()).toBe(true);
     expect(wrapper.find(".mention-inline").exists()).toBe(true);
   });
 
@@ -678,7 +678,7 @@ describe("执行计划用户消息卡片", () => {
       },
     });
     await flushPromises();
-    expect(wrapper.find(".plan-text-card").exists()).toBe(false);
+    expect(wrapper.find(".assistant-card").exists()).toBe(false);
     expect(wrapper.text()).toContain("普通问题");
   });
 
@@ -694,13 +694,13 @@ describe("执行计划用户消息卡片", () => {
       },
     });
     await flushPromises();
-    const card = wrapper.find(".plan-text-card");
+    const card = wrapper.find(".assistant-card");
     expect(card.exists()).toBe(true);
     // 标题取自计划自身（# 方案），正文默认展开
-    expect(card.find(".plan-text-title").text()).toBe("方案");
-    expect(card.find(".plan-text-body").exists()).toBe(true);
+    expect(card.find(".assistant-card-title").text()).toBe("方案");
+    expect(card.find(".assistant-card-body").exists()).toBe(true);
     expect(card.text()).toContain("步骤");
-    await card.find(".plan-text-toggle").trigger("click");
-    expect(card.find(".plan-text-body").exists()).toBe(false);
+    await card.find(".assistant-card-toggle").trigger("click");
+    expect(card.find(".assistant-card-body").exists()).toBe(false);
   });
 });

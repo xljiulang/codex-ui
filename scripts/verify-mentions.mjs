@@ -647,15 +647,15 @@ async function main() {
   await waitTurnDone();
   const expandFileCards = () =>
     evalJs(`(() => {
-      const cards = Array.from(document.querySelectorAll(".tool-card"));
-      const c = cards.find((x) => x.querySelector(".tool-card-title")?.textContent.trim() === "文件变更");
-      const header = c?.querySelector(".tool-card-header");
+      const cards = Array.from(document.querySelectorAll(".assistant-card"));
+      const c = cards.find((x) => x.querySelector(".assistant-card-title")?.textContent.trim() === "文件变更");
+      const header = c?.querySelector(".assistant-card-toggle");
       if (header) header.click();
     })()`);
   await expandFileCards();
   await sleep(500);
   let rowsFound = await evalJs(
-    `Array.from(document.querySelectorAll(".tool-card .change-row.clickable")).map((r) => r.textContent.trim())`,
+    `Array.from(document.querySelectorAll(".assistant-card .change-row.clickable")).map((r) => r.textContent.trim())`,
   );
   if (rowsFound.length === 0) {
     // 模型偶发不执行 apply_patch：补一条强指令重试一次
@@ -669,7 +669,7 @@ async function main() {
     await expandFileCards();
     await sleep(500);
     rowsFound = await evalJs(
-      `Array.from(document.querySelectorAll(".tool-card .change-row.clickable")).map((r) => r.textContent.trim())`,
+      `Array.from(document.querySelectorAll(".assistant-card .change-row.clickable")).map((r) => r.textContent.trim())`,
     );
   }
   record(
@@ -681,7 +681,7 @@ async function main() {
   async function openDiffWindowAndWait(targetText) {
     await evalJs(
       `(() => {
-        const rows = Array.from(document.querySelectorAll(".tool-card .change-row.clickable"));
+        const rows = Array.from(document.querySelectorAll(".assistant-card .change-row.clickable"));
         const row = rows.find((r) => r.textContent.includes(${JSON.stringify(
           targetText,
         )}));

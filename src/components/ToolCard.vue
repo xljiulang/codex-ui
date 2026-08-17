@@ -250,25 +250,35 @@ const effectiveExpanded = computed(() => expanded.value);
 
 <template>
   <div
-    class="tool-card"
+    class="assistant-card"
     :class="{
       expanded: effectiveExpanded,
     }"
   >
-    <div class="tool-card-header" @click="expanded = !expanded">
-      <span class="tool-card-title">{{ title }}</span>
-      <span class="tool-card-sub">{{ sub }}</span>
-      <span class="tool-card-status">
-        <template v-if="statusLabel">
-          <span class="status-dot" :class="statusClass"></span>
-          <span>{{ statusLabel }}</span>
-        </template>
-        <span v-if="timeLabel">{{ timeLabel }}</span>
-      </span>
+    <div class="assistant-card-header">
+      <button
+        type="button"
+        class="assistant-card-toggle"
+        :aria-expanded="effectiveExpanded"
+        @click="expanded = !expanded"
+      >
+        <span class="assistant-card-arrow">{{
+          effectiveExpanded ? "▾" : "▸"
+        }}</span>
+        <span class="assistant-card-title">{{ title }}</span>
+        <span class="assistant-card-sub">{{ sub }}</span>
+        <span class="assistant-card-status">
+          <template v-if="statusLabel">
+            <span class="status-dot" :class="statusClass"></span>
+            <span>{{ statusLabel }}</span>
+          </template>
+          <span v-if="timeLabel">{{ timeLabel }}</span>
+        </span>
+      </button>
     </div>
 
-    <Transition name="card-body">
-      <div v-if="effectiveExpanded" class="tool-card-body">
+    <Transition name="assistant-card-body">
+      <div v-if="effectiveExpanded" class="assistant-card-body">
         <template v-if="type === 'commandExecution'">
         <div class="tool-command">
           <span class="tool-command-text">{{ commandText }}</span>

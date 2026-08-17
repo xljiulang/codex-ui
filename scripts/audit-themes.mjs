@@ -76,7 +76,7 @@ async function domState(name) {
       userMsgs: q(".msg-user"),
       agentMsgs: q(".msg-agent"),
       errors: q(".msg-error"),
-      toolCards: q(".tool-card"),
+      toolCards: q(".assistant-card"),
       reasoning: q(".msg-reasoning"),
       modal: !!document.querySelector(".modal"),
       toast: document.querySelector(".toast")?.textContent ?? "",
@@ -84,7 +84,7 @@ async function domState(name) {
       stopBtn: !!document.querySelector(".send-btn.stop"),
       scrollTop: sc ? Math.round(sc.scrollTop) : null,
       scrollHeight: sc ? sc.scrollHeight : null,
-      toolCardsRect: rects(".tool-card"),
+      toolCardsRect: rects(".assistant-card"),
       toolOutputRect: rects(".tool-output"),
       toolCommandRect: rects(".tool-command"),
     };
@@ -278,7 +278,7 @@ async function phaseChat() {
   await waitTurnDone("命令回合", 300000);
   await sleep(2500);
 
-  await evalJs(`document.querySelector(".tool-card-header")?.click()`);
+  await evalJs(`document.querySelector(".assistant-card-toggle")?.click()`);
   await sleep(600);
 
   for (const t of ["blue", "dark", "light"]) {
@@ -298,7 +298,7 @@ async function phaseDiff() {
   await waitTurnStarted();
   await waitTurnDone("diff 回合", 300000);
   await sleep(2500);
-  await evalJs(`Array.from(document.querySelectorAll(".tool-card-header")).forEach((el) => el.click())`);
+  await evalJs(`Array.from(document.querySelectorAll(".assistant-card-toggle")).forEach((el) => el.click())`);
   await sleep(800);
   await scrollToBottom();
   const st = await evalJs(`(() => {
@@ -308,7 +308,7 @@ async function phaseDiff() {
     };
     return {
       theme: document.documentElement.dataset.theme,
-      toolCards: document.querySelectorAll(".tool-card").length,
+      toolCards: document.querySelectorAll(".assistant-card").length,
       diffViews: document.querySelectorAll(".diff-view").length,
       diffViewBg: cs(".diff-view", "backgroundColor"),
       diffAdd: cs(".diff-add", "color"),

@@ -21,10 +21,10 @@ describe("ReasoningBlock 完整展示", () => {
     });
     await flushPromises();
     // 默认折叠，点击后展开
-    expect(wrapper.find(".reasoning-toggle").attributes("aria-expanded")).toBe(
+    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
       "false",
     );
-    await wrapper.find(".reasoning-toggle").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     const content = wrapper.find(".reasoning-content");
     expect(content.classes()).not.toContain("capped");
     expect(wrapper.find(".reasoning-expand").exists()).toBe(false);
@@ -37,11 +37,11 @@ describe("ReasoningBlock 完整展示", () => {
     });
     await flushPromises();
     // 非流式时默认折叠
-    expect(wrapper.find(".reasoning-toggle").attributes("aria-expanded")).toBe(
+    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
       "false",
     );
-    await wrapper.find(".reasoning-toggle").trigger("click");
-    expect(wrapper.find(".reasoning-toggle").attributes("aria-expanded")).toBe(
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
       "true",
     );
     expect(wrapper.find(".reasoning-content").exists()).toBe(true);
@@ -56,7 +56,7 @@ describe("ReasoningBlock 完整展示", () => {
     expect(preview.exists()).toBe(true);
     expect(preview.text()).toBe("第 1 行思考内容");
     await preview.trigger("click");
-    expect(wrapper.find(".reasoning-toggle").attributes("aria-expanded")).toBe(
+    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
       "true",
     );
     expect(wrapper.find(".reasoning-content").text()).toContain(

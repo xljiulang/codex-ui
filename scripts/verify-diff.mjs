@@ -88,21 +88,21 @@ async function main() {
 
   // ToolCard 默认折叠：先展开“文件变更”卡片，变更行才会出现在 DOM
   await cdp.evalJs(`(() => {
-    const cards = Array.from(document.querySelectorAll(".tool-card"));
-    const c = cards.find((x) => x.querySelector(".tool-card-title")?.textContent.trim() === "文件变更");
-    const header = c?.querySelector(".tool-card-header");
+    const cards = Array.from(document.querySelectorAll(".assistant-card"));
+    const c = cards.find((x) => x.querySelector(".assistant-card-title")?.textContent.trim() === "文件变更");
+    const header = c?.querySelector(".assistant-card-toggle");
     if (header) header.click();
   })()`);
   await sleep(500);
 
   const rowsFound = await cdp.evalJs(
-    `Array.from(document.querySelectorAll(".tool-card .change-row.clickable")).map((r) => r.textContent.trim())`,
+    `Array.from(document.querySelectorAll(".assistant-card .change-row.clickable")).map((r) => r.textContent.trim())`,
   );
   record("出现可点击的变更行", rowsFound.length >= 2, JSON.stringify(rowsFound));
 
   async function openDiffWindow(targetText) {
     await cdp.evalJs(`(() => {
-      const rows = Array.from(document.querySelectorAll(".tool-card .change-row.clickable"));
+      const rows = Array.from(document.querySelectorAll(".assistant-card .change-row.clickable"));
       const row = rows.find((r) => r.textContent.includes(${JSON.stringify(
         targetText,
       )}));

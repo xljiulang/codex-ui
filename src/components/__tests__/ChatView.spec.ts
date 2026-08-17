@@ -866,7 +866,7 @@ describe("ChatView Updated Plan 任务清单", () => {
         },
       },
     });
-    expect(wrapper.find(".plan-card").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card").exists()).toBe(true);
     expect(wrapper.text()).toContain("分两步完成");
     expect(wrapper.findAll(".plan-step")).toHaveLength(3);
     expect(wrapper.find(".plan-step.in-progress").exists()).toBe(true);
@@ -886,7 +886,7 @@ describe("ChatView Updated Plan 任务清单", () => {
         },
       },
     });
-    expect(wrapper.find(".plan-card").exists()).toBe(false);
+    expect(wrapper.find(".assistant-card").exists()).toBe(false);
     wrapper.unmount();
   });
 });

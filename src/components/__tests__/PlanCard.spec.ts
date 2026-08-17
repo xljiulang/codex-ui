@@ -17,6 +17,11 @@ describe("PlanCard Updated Plan 任务清单", () => {
       },
     });
     expect(wrapper.text()).toContain("执行计划");
+    expect(wrapper.find(".assistant-card-title").text()).toBe("计划");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe("3 步 · 1 完成");
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("true");
     expect(wrapper.findAll(".plan-step")).toHaveLength(3);
     expect(wrapper.find(".plan-step.pending").text()).toContain("☐");
     expect(wrapper.find(".plan-step.in-progress").text()).toContain("◐");
@@ -26,7 +31,32 @@ describe("PlanCard Updated Plan 任务清单", () => {
 
   it("无说明与空步骤时正常渲染空卡片", () => {
     const wrapper = mount(PlanCard, { props: { plan: { steps: [] } } });
-    expect(wrapper.find(".plan-card").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card").exists()).toBe(true);
+    expect(wrapper.find(".assistant-card-sub").exists()).toBe(false);
     expect(wrapper.findAll(".plan-step")).toHaveLength(0);
+  });
+
+  it("点击头部折叠/展开并同步 aria-expanded", async () => {
+    const wrapper = mount(PlanCard, {
+      props: {
+        plan: {
+          steps: [
+            { step: "A", status: "pending" },
+            { step: "B", status: "completed" },
+          ],
+        },
+      },
+    });
+    expect(wrapper.findAll(".plan-step")).toHaveLength(2);
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("false");
+    expect(wrapper.findAll(".plan-step")).toHaveLength(0);
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("true");
+    expect(wrapper.findAll(".plan-step")).toHaveLength(2);
   });
 });

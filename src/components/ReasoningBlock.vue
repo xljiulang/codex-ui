@@ -53,25 +53,23 @@ watch(
 </script>
 
 <template>
-  <div class="reasoning-block">
-    <button
-      class="reasoning-toggle"
-      :aria-expanded="open"
-      :aria-label="'思考过程'"
-      @click="open = !open"
-    >
-      <svg
-        viewBox="0 0 16 16"
-        width="10"
-        height="10"
-        style="fill: currentColor; transform: rotate(0deg)"
-        :style="open ? 'transform: rotate(90deg)' : ''"
+  <div
+    class="assistant-card assistant-card--reasoning"
+    :class="{ expanded: open }"
+  >
+    <div class="assistant-card-header">
+      <button
+        type="button"
+        class="assistant-card-toggle"
+        :aria-expanded="open"
+        :aria-label="'思考过程'"
+        @click="open = !open"
       >
-        <path d="M6 4l4 4-4 4z" />
-      </svg>
-      <span>{{ open ? "收起思考过程" : "显示思考过程" }}</span>
-      <span v-if="timeLabel" class="reasoning-time">{{ timeLabel }}</span>
-    </button>
+        <span class="assistant-card-arrow">{{ open ? "▾" : "▸" }}</span>
+        <span>{{ open ? "收起思考过程" : "显示思考过程" }}</span>
+        <span v-if="timeLabel" class="reasoning-time">{{ timeLabel }}</span>
+      </button>
+    </div>
     <div
       v-if="!open && previewLine"
       class="reasoning-preview"
@@ -80,6 +78,10 @@ watch(
     >
       {{ previewLine }}
     </div>
-    <div v-if="open" class="reasoning-content">{{ shownText }}</div>
+    <Transition name="assistant-card-body">
+      <div v-if="open" class="assistant-card-body reasoning-content">
+        {{ shownText }}
+      </div>
+    </Transition>
   </div>
 </template>

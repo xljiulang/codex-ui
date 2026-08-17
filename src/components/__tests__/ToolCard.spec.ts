@@ -81,7 +81,7 @@ describe("ToolCard 实时耗时", () => {
     );
     expect(wrapper.text()).toContain("失败");
     // 卡片默认折叠，展开后显示退出码
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.text()).toContain("退出码：1");
   });
 
@@ -98,11 +98,11 @@ describe("ToolCard 实时耗时", () => {
       },
     });
     // 头部：执行命令 + 简洁命令（不再是工作目录）
-    expect(wrapper.find(".tool-card-title").text()).toBe("执行命令");
-    expect(wrapper.find(".tool-card-sub").text()).toBe("whoami");
+    expect(wrapper.find(".assistant-card-title").text()).toBe("执行命令");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe("whoami");
     expect(wrapper.text()).not.toContain("D:\\codex\\codex-ui");
     // 展开后显示工作目录
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.text()).toContain("工作目录：D:\\codex\\codex-ui");
   });
 
@@ -118,7 +118,7 @@ describe("ToolCard 实时耗时", () => {
         }),
       },
     });
-    expect(wrapper.find(".tool-card-sub").text()).toBe("npm run build");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe("npm run build");
   });
 
   it("webSearch 渲染结构化结果", async () => {
@@ -135,7 +135,7 @@ describe("ToolCard 实时耗时", () => {
         } as ThreadItem,
       },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     const titles = wrapper.findAll(".web-result-title").map((t) => t.text());
     expect(titles).toContain("Tauri 官网");
     expect(titles).toContain("第二条");
@@ -155,7 +155,7 @@ describe("ToolCard 实时耗时", () => {
     // 默认折叠：不渲染输出区
     expect(wrapper.find(".tool-output").exists()).toBe(false);
     // 点击头部展开卡片，输出折叠为摘要
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.find(".tool-output.collapsed").exists()).toBe(true);
     expect(wrapper.find(".tool-toggle").text()).toContain("展开完整输出");
     // 展开完整输出
@@ -179,7 +179,7 @@ describe("ToolCard 实时耗时", () => {
         }),
       },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.find(".tool-output-cap").text()).toContain("5000");
     const text = wrapper.find(".tool-output").text();
     expect(text).toContain("line-5999");
@@ -197,7 +197,7 @@ describe("ToolCard 实时耗时", () => {
         item: makeItem({ status: "completed", durationMs: 100 }),
       },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     const btn = wrapper.find(".tool-command .copy-btn");
     expect(btn.exists()).toBe(true);
     await btn.trigger("click");
@@ -261,7 +261,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
     const wrapper = mount(ToolCard, {
       props: { item: changeItem(REPLACE_DIFF, "D:\\repo\\a.cs", "update") },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     await flushPromises();
 
@@ -281,7 +281,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
     const wrapper = mount(ToolCard, {
       props: { item: changeItem("", "D:\\repo\\empty.cs", "update") },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     await wrapper.find(".change-row").trigger("click");
     await flushPromises();
 
@@ -306,7 +306,7 @@ describe("文件变更：折叠标题显示文件名", () => {
         item: changeItem([{ path: "D:\\repo\\a.cs", kind: "update", diff: "x" }]),
       },
     });
-    expect(wrapper.find(".tool-card-sub").text()).toBe("D:\\repo\\a.cs");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe("D:\\repo\\a.cs");
   });
 
   it("多文件时折叠标题显示第一个路径和文件总数", () => {
@@ -319,14 +319,14 @@ describe("文件变更：折叠标题显示文件名", () => {
         ]),
       },
     });
-    expect(wrapper.find(".tool-card-sub").text()).toBe("D:\\repo\\a.cs (等3个)");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe("D:\\repo\\a.cs (等3个)");
   });
 
   it("无变更时折叠标题为空", () => {
     const wrapper = mount(ToolCard, {
       props: { item: changeItem([]) },
     });
-    expect(wrapper.find(".tool-card-sub").text()).toBe("");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe("");
   });
 });
 
@@ -343,7 +343,7 @@ describe("命令输出增量渲染", () => {
         }),
       },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     await wait();
     expect(wrapper.find(".tool-output").text()).toContain("line1");
 
@@ -370,7 +370,7 @@ describe("命令输出增量渲染", () => {
         }),
       },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     await wait();
     expect(wrapper.find(".tool-output").text()).toContain("AAA");
 
@@ -403,7 +403,7 @@ describe("ToolCard 新增条目类型", () => {
     });
     expect(wrapper.text()).toContain("生成图片");
     expect(wrapper.text()).toContain("生成一个图标");
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.find(".image-gen-card").exists()).toBe(true);
   });
 
@@ -421,7 +421,7 @@ describe("ToolCard 新增条目类型", () => {
         } as ThreadItem,
       },
     });
-    await wrapper.find(".tool-card-header").trigger("click");
+    await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.text()).toContain("进度：下载中");
     const fill = wrapper.find(".tool-progress-fill");
     expect(fill.exists()).toBe(true);
