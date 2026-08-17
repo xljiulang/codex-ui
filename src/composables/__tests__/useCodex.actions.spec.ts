@@ -2,7 +2,7 @@ import { deleteThread, newEmptyChat, openHistorySession, openNewSession, pickAnd
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { activeTabId } from "../useEditorTabs";
-import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { DEFAULT_MODEL, makeSessionTab, PLUGINS_RESPONSE, resetUseCodexState, SKILLS_RESPONSE, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -52,7 +52,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -74,7 +73,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -306,7 +304,6 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
-    store.threadPlugins = {};
     store.confirm = null;
     store.showSettings = false;
     store.panelTab = "history";
@@ -537,5 +534,93 @@ describe("模型不可用时的发送路径", () => {
     expect(mockedInvoke).not.toHaveBeenCalledWith("turn_start", expect.anything());
     expect(activeSessionTab()?.turnActive).toBe(false);
     expect(store.itemsByThread["t1"] ?? []).toHaveLength(0);
+  });
+});
+
+describe("会话级插件/技能缓存生命周期", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    __resetSessionTabsForTest();
+    store.workspace = null;
+    store.interactions = [];
+    store.threads = [];
+  });
+
+  it("newEmptyChat 创建标签即触发 plugin/list 与 skills/list 并写入标签缓存", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "codex_rpc") {
+        const method =
+          (args as { method?: string } | undefined)?.method ??
+          (args as { params?: { method?: string } } | undefined)?.params
+            ?.method;
+        if (method === "plugin/list") return Promise.resolve(PLUGINS_RESPONSE);
+        if (method === "skills/list") return Promise.resolve(SKILLS_RESPONSE);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await newEmptyChat();
+
+    await vi.waitFor(
+      () => {
+        expect(activeSessionTab()?.plugins.loaded).toBe(true);
+        expect(activeSessionTab()?.skills.loaded).toBe(true);
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    expect(activeSessionTab()?.plugins.plugins.length).toBeGreaterThan(0);
+    expect(activeSessionTab()?.skills.skills.length).toBeGreaterThan(0);
+  });
+});
+
+describe("会话创建中标记（creatingChat）", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    __resetSessionTabsForTest();
+    store.workspace = null;
+    store.interactions = [];
+    store.threads = [];
+  });
+
+  it("newChat 创建期间标记发起标签，切换标签后按原标签清回", async () => {
+    const tabA = makeSessionTab("sA", null);
+    tabs.push(tabA);
+    activeTabId.value = "sA";
+    let resolveThread!: (v: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_start") {
+        return new Promise((r) => {
+          resolveThread = r;
+        });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      if (cmd === "codex_rpc") {
+        const method =
+          (args as { method?: string } | undefined)?.method ??
+          (args as { params?: { method?: string } } | undefined)?.params
+            ?.method;
+        if (method === "thread/memoryMode/set") return Promise.resolve({});
+        return Promise.resolve({});
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const p = sendPrompt("你好");
+    // thread_start 挂起期间：发起标签处于「创建中」
+    expect(tabA.creatingChat).toBe(true);
+
+    // 创建期间切到另一标签：结果写回原标签，标记也按原标签清回
+    const tabB = makeSessionTab("sB", null);
+    tabs.push(tabB);
+    activeTabId.value = "sB";
+
+    resolveThread({ thread: { id: "t-new" } });
+    await p;
+
+    expect(tabA.creatingChat).toBe(false);
+    expect(tabB.creatingChat).toBe(false);
+    expect(tabA.threadId).toBe("t-new");
   });
 });

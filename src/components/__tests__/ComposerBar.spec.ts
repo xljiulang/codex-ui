@@ -32,7 +32,6 @@ import ComposerBar from "../ComposerBar.vue";
 import {
   addAttachmentToActiveSession,
   ensureThreadPlugins,
-  NEW_CHAT_PLUGIN_KEY,
   sendPrompt,
   store,
   type SessionTab,
@@ -161,9 +160,6 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
-    store.threadPlugins = {};
-    store.skills = [];
-    store.skillsLoaded = false;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -205,8 +201,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
   });
 
   it("@ 空 token：菜单固定行在前、插件列表在后", async () => {
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@");
     expect(wrapper.find(".mention-menu").exists()).toBe(true);
     const labels = menuLabels();
@@ -219,8 +216,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   it("联合搜索：命中插件在命中文件前", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@doc");
     await waitSearch();
     const labels = menuLabels();
@@ -253,8 +251,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   it("选中文件进附件区（不内联），触发词被移除且附件同步", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("看 @a.cs");
     await waitSearch();
     await clickMenuRow("a.cs");
@@ -270,8 +269,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
   });
 
   it("选中插件生成 @ 前缀 chip 与 source=plugin 附件", async () => {
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@doc");
     await waitSearch();
     await clickMenuRow("Documents");
@@ -309,8 +309,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   it("混编：文件进附件区、技能内联，按顺序序列化", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("先 ");
     await typeInEditor("@a.cs");
     await waitSearch();
@@ -335,8 +336,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   it("发送时把内联引用写入 activeSessionTab()?.attachments 并调用 sendPrompt", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@a.cs");
     await waitSearch();
     await clickMenuRow("a.cs");
@@ -380,8 +382,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   it("@ 菜单打开时 Enter 选中高亮行而不是发送", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@a.cs");
     await waitSearch();
     await wrapper.find(".ProseMirror").trigger("keydown", { key: "ArrowDown" });
@@ -402,8 +405,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
   });
 
   it("仅附件无文本时发送按钮可用", async () => {
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@doc");
     await waitSearch();
     await clickMenuRow("Documents");
@@ -470,8 +474,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   it("@ 菜单打开时 Ctrl+Enter 插入换行而非选中高亮项", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
-    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@doc");
     await waitSearch();
     expect(wrapper.find(".mention-menu").exists()).toBe(true);
@@ -492,7 +497,6 @@ describe("ComposerBar 粘贴图片/文件", () => {
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
     store.toast = "";
-    store.threadPlugins = {};
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -691,7 +695,6 @@ describe("ComposerBar 拖放图片/文件", () => {
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
     store.toast = "";
-    store.threadPlugins = {};
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -825,7 +828,6 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
       configurable: true,
     });
     activeSessionTab()?.attachments.splice(0);
-    store.threadPlugins = {};
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -926,18 +928,12 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     tab.threadId = "t1";
     store.models = [];
     store.modelsLoaded = false;
-    store.permOpen = false;
-    store.taskOpen = false;
-    store.modelOpen = false;
     mockedInvoke.mockReset();
     mockRpc(false);
   });
 
   afterEach(() => {
     store.models = [];
-    store.permOpen = false;
-    store.taskOpen = false;
-    store.modelOpen = false;
     wrapper?.unmount();
     wrapper = null;
   });
@@ -959,64 +955,63 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
-    expect(store.modelOpen).toBe(true);
     expect(wrapper.find(".popup-menu").exists()).toBe(true);
 
     // 弹出层内部 mousedown 不关闭
     await wrapper.find(".popup-menu .menu-group-title").trigger("mousedown");
     await flushPromises();
-    expect(store.modelOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
 
     // 触发按钮 mousedown 不自动关闭，click 负责切换关闭
     await wrapper.find(".model-chip").trigger("mousedown");
     await flushPromises();
-    expect(store.modelOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
-    expect(store.modelOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
 
     // 权限/任务/模型三个菜单：外部 mousedown 均自动关闭
     await wrapper.find(".perm-chip").trigger("click");
     await flushPromises();
-    expect(store.permOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
     window.dispatchEvent(new MouseEvent("mousedown"));
     await flushPromises();
-    expect(store.permOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
 
     await wrapper.find(".task-chip").trigger("click");
     await flushPromises();
-    expect(store.taskOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
     window.dispatchEvent(new MouseEvent("mousedown"));
     await flushPromises();
-    expect(store.taskOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
 
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
-    expect(store.modelOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
     window.dispatchEvent(new MouseEvent("mousedown"));
     await flushPromises();
-    expect(store.modelOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 
   it("打开一个菜单时自动关闭另外两个，再点当前按钮关闭", async () => {
     wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".perm-chip").trigger("click");
     await flushPromises();
-    expect(store.permOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").text()).toContain("应如何批准 Codex 操作？");
 
     await wrapper.find(".task-chip").trigger("click");
     await flushPromises();
-    expect(store.permOpen).toBe(false);
-    expect(store.taskOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").text()).toContain("任务模式");
+    expect(wrapper.find(".popup-menu").text()).not.toContain("应如何批准 Codex 操作？");
 
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
-    expect(store.taskOpen).toBe(false);
-    expect(store.modelOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").text()).toContain("模型");
+    expect(wrapper.find(".popup-menu").text()).not.toContain("任务模式");
 
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
-    expect(store.modelOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 
   it("应用模型/强度后立即调用 thread/settings/update 同步当前会话", async () => {
@@ -1042,7 +1037,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     });
     expect(activeSessionTab()?.model).toBe("gpt-5-extra");
     expect(activeSessionTab()?.effort).toBe("low");
-    expect(store.modelOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 
   it("无当前会话时应用模型不调用 thread/settings/update", async () => {
@@ -1081,7 +1076,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await flushPromises();
     expect(store.toast).toContain("同步失败");
     expect(activeSessionTab()?.model).toBeNull();
-    expect(store.modelOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 });
 
@@ -1212,9 +1207,6 @@ describe("ComposerBar 任务目标芯片", () => {
     __resetSessionTabsForTest();
     tab = defaultTab();
     activeSessionTab()?.attachments.splice(0);
-    store.threadPlugins = {};
-    store.skills = [];
-    store.skillsLoaded = false;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     store.confirm = null;
@@ -1347,7 +1339,7 @@ describe("ComposerBar 任务目标芯片", () => {
 
   it("勾选后发送纯附件（无纯文本）：不设目标，勾选态保持", async () => {
     mockRpc(true);
-    await ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY);
+    await ensureThreadPlugins(tab);
     wrapper = mount(ComposerBar, { props: { tab } });
     await typeInEditor("@a.cs");
     await waitSearch();
@@ -1384,6 +1376,9 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -1410,9 +1405,6 @@ describe("ComposerBar 权限与草稿会话私有", () => {
 
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
-    store.threadPlugins = {};
-    store.skills = [];
-    store.skillsLoaded = false;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
@@ -1432,11 +1424,11 @@ describe("ComposerBar 权限与草稿会话私有", () => {
     expect(chip.attributes("disabled")).toBeUndefined();
     await chip.trigger("click");
     await flushPromises();
-    expect(store.permOpen).toBe(true);
+    expect(wrapper.find(".popup-menu").exists()).toBe(true);
     await wrapper.findAll(".mode-menu-item")[2].trigger("click");
     await flushPromises();
     expect(activeSessionTab()?.permissionMode).toBe("full-access");
-    expect(store.permOpen).toBe(false);
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 
   it("标签激活时恢复草稿文本与附件区", async () => {
@@ -1523,6 +1515,9 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -1552,9 +1547,6 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
 
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
-    store.threadPlugins = {};
-    store.skills = [];
-    store.skillsLoaded = false;
     store.server.startupWorkspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();

@@ -131,6 +131,10 @@ export interface SessionTab extends EditorTabBase {
   model: string | null;
   /** 会话私有：推理强度（null = 默认） */
   effort: string | null;
+  /** 会话私有：插件列表缓存（plugin/list 归一化，随会话创建/打开拉取） */
+  plugins: { plugins: PluginItem[]; loaded: boolean };
+  /** 会话私有：技能列表缓存（skills/list 归一化，随会话创建/打开拉取） */
+  skills: { skills: SkillItem[]; loaded: boolean };
   /** 会话私有：输入框草稿（Tiptap 文档 JSON 序列化，ComposerBar 维护） */
   draftJson: string;
   /** 会话私有：输入框附件区（ComposerBar 维护） */
@@ -153,6 +157,8 @@ export interface SessionTab extends EditorTabBase {
   /** 当前回合的 Updated Plan 任务清单（turn/plan/updated 驱动，新回合重置） */
   plan: TurnPlan | null;
   loading: boolean;
+  /** 会话私有：正在创建新会话并发送首条消息（newChat 流程中） */
+  creatingChat: boolean;
   /** 新建对话时可选的项目目录（null = 使用启动工作目录） */
   newChatWorkspace: string | null;
   /** 该标签待处理的交互（审批/提问/elicitation），按 threadId 路由 */
@@ -183,11 +189,6 @@ export interface SkillItem {
   /** 短描述（$ 菜单展示用，优先 interface.shortDescription） */
   shortDesc: string;
 }
-
-
-/** 未创建会话（新对话编辑态）的插件缓存 key */
-export const NEW_CHAT_PLUGIN_KEY = "__new__";
-
 
 /** 右侧面板 Tab：资源管理器 / 会话历史 / Git */
 export type PanelTab = "history" | "resources" | "git";

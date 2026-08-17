@@ -1,5 +1,4 @@
-import type { Ref } from "vue";
-import { store } from "./useCodex";
+import { ref, type Ref } from "vue";
 
 /** @ / $ 提及弹层触发状态 */
 export type ComposerMention =
@@ -8,22 +7,35 @@ export type ComposerMention =
 
 export type ComposerMenu = "perm" | "task" | "model";
 
-/** 输入区三个按钮菜单（权限/任务/模型）的开关与外部点击关闭语义 */
+/**
+ * 输入区三个按钮菜单（权限/任务/模型）的开关与外部点击关闭语义。
+ * 状态为组件局部 ref：每个 ComposerBar 实例各自持有，多会话标签互不串扰。
+ */
 export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
+  const permOpen = ref(false);
+  const taskOpen = ref(false);
+  const modelOpen = ref(false);
+
+  function menuRef(which: ComposerMenu) {
+    return which === "perm" ? permOpen : which === "task" ? taskOpen : modelOpen;
+  }
+
+  function closeAll() {
+    permOpen.value = false;
+    taskOpen.value = false;
+    modelOpen.value = false;
+  }
+
   function closeMenus() {
-    store.permOpen = false;
-    store.taskOpen = false;
-    store.modelOpen = false;
+    closeAll();
     options.mention.value = null;
   }
 
   /** 切换三个按钮菜单：打开一个时关闭另外两个，再点一次当前按钮则关闭 */
   function toggleMenu(which: ComposerMenu) {
-    const willOpen = !store[`${which}Open`];
-    store.permOpen = false;
-    store.taskOpen = false;
-    store.modelOpen = false;
-    store[`${which}Open`] = willOpen;
+    const willOpen = !menuRef(which).value;
+    closeAll();
+    menuRef(which).value = willOpen;
   }
 
   function onKeydownGlobal(e: KeyboardEvent) {
@@ -36,9 +48,7 @@ export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
     // 不合成 mousedown，避免粘贴等操作误关弹层。
     // 用 Element 而非 HTMLElement：点击 svg/path 等 SVG 目标也应正确判断。
     if (!(e.target instanceof Element)) {
-      store.permOpen = false;
-      store.taskOpen = false;
-      store.modelOpen = false;
+      closeAll();
       return;
     }
     // 弹出层内部与三个触发按钮不自动关闭（按钮自身的 click 负责切换）
@@ -48,10 +58,16 @@ export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
     ) {
       return;
     }
-    store.permOpen = false;
-    store.taskOpen = false;
-    store.modelOpen = false;
+    closeAll();
   }
 
-  return { closeMenus, toggleMenu, onKeydownGlobal, onWindowMousedown };
+  return {
+    permOpen,
+    taskOpen,
+    modelOpen,
+    closeMenus,
+    toggleMenu,
+    onKeydownGlobal,
+    onWindowMousedown,
+  };
 }

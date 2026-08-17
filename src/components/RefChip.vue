@@ -2,17 +2,14 @@
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { localPathFromHref, openLink, sessionWorkspace } from "../lib/links";
 import { openPathInApp } from "../composables/useSessionFs";
-import {
-  NEW_CHAT_PLUGIN_KEY,
-  activeSessionTab,
-  store,
-} from "../composables/useCodex";
+import type { SessionTab } from "../composables/useCodex";
 
 const props = withDefaults(
   defineProps<{
     path: string;
     label: string;
     kind: "file" | "plugin" | "skill";
+    tab: SessionTab;
     delay?: number;
   }>(),
   { delay: 120 },
@@ -28,16 +25,15 @@ const tipText = computed(() => {
   if (props.kind === "file") return props.path;
   const name = props.label.replace(/^[@$]/, "");
   if (props.kind === "plugin") {
-    const key = activeSessionTab()?.threadId ?? NEW_CHAT_PLUGIN_KEY;
     const pluginId = props.path.startsWith("plugin://")
       ? props.path.slice("plugin://".length)
       : "";
-    const plugin = store.threadPlugins[key]?.plugins.find(
+    const plugin = props.tab.plugins.plugins.find(
       (p) => (pluginId && p.id === pluginId) || (!pluginId && p.name === name),
     );
     return plugin?.description || props.path;
   }
-  const skill = store.skills.find((s) => s.name === name);
+  const skill = props.tab.skills.skills.find((s) => s.name === name);
   return skill?.desc || props.path;
 });
 

@@ -1,4 +1,4 @@
-import { ensureSkills, ensureThreadPlugins, loadSettings, refreshServer } from "../useCodex/settings";
+import { ensureSkills, ensureThreadPlugins, loadSettings, refreshServer, resetToNewChat } from "../useCodex/settings";
 import { store } from "../useCodex/store";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { activeTabId } from "../useEditorTabs";
@@ -64,16 +64,16 @@ describe("refreshServer 服务状态同步", () => {
     expect(store.server.startupWorkspace).toBe("D:/repo");
   });
 });
-describe("ensureThreadPlugins 对话级插件缓存", () => {
+describe("ensureThreadPlugins 会话级插件缓存", () => {
   beforeEach(() => {
-    store.threadPlugins = {};
     mockedInvoke.mockReset();
   });
 
-  it("为对话归一化 plugin/list：过滤未安装/禁用插件并按 id 去重", async () => {
+  it("为会话归一化 plugin/list：过滤未安装/禁用插件并按 id 去重", async () => {
+    const tab = makeSessionTab("s1", "t1");
     mockedInvoke.mockResolvedValue(PLUGINS_RESPONSE);
-    await ensureThreadPlugins("t1");
-    expect(store.threadPlugins["t1"]).toEqual({
+    await ensureThreadPlugins(tab);
+    expect(tab.plugins).toEqual({
       loaded: true,
       plugins: [
         {
@@ -110,10 +110,12 @@ describe("ensureThreadPlugins 对话级插件缓存", () => {
     expect(skillsCalls).toHaveLength(0);
   });
 
-  it("同对话复用缓存不重复请求，不同对话各自缓存", async () => {
+  it("同会话复用缓存不重复请求，不同会话各自缓存互不串扰", async () => {
+    const tab1 = makeSessionTab("s1", "t1");
+    const tab2 = makeSessionTab("s2", "t2");
     mockedInvoke.mockResolvedValue(PLUGINS_RESPONSE);
-    await ensureThreadPlugins("t1");
-    await ensureThreadPlugins("t1"); // 同对话复用
+    await ensureThreadPlugins(tab1);
+    await ensureThreadPlugins(tab1); // 同会话复用
     let calls = mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
@@ -121,20 +123,25 @@ describe("ensureThreadPlugins 对话级插件缓存", () => {
     );
     expect(calls).toHaveLength(1);
 
-    await ensureThreadPlugins("t2"); // 新对话预加载
-    await ensureThreadPlugins("t1"); // 仍复用
+    await ensureThreadPlugins(tab2); // 新会话预加载
+    await ensureThreadPlugins(tab1); // 仍复用
     calls = mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
         (args as { method?: string } | undefined)?.method === "plugin/list",
     );
     expect(calls).toHaveLength(2);
+    // 两个会话缓存各自独立
+    expect(tab1.plugins.plugins.length).toBeGreaterThan(0);
+    expect(tab2.plugins.plugins.length).toBeGreaterThan(0);
+    expect(tab1.plugins).not.toBe(tab2.plugins);
   });
 
-  it("plugin/list 失败时该对话缓存为空且不回退 skills/list", async () => {
+  it("plugin/list 失败时该会话缓存为空且不回退 skills/list", async () => {
+    const tab = makeSessionTab("s1", "t1");
     mockedInvoke.mockRejectedValue(new Error("boom"));
-    await ensureThreadPlugins("t1");
-    expect(store.threadPlugins["t1"]).toEqual({
+    await ensureThreadPlugins(tab);
+    expect(tab.plugins).toEqual({
       plugins: [],
       loaded: false,
     });
@@ -146,26 +153,27 @@ describe("ensureThreadPlugins 对话级插件缓存", () => {
     expect(skillsCalls).toHaveLength(0);
   });
 });
-describe("ensureSkills 技能全局缓存", () => {
+describe("ensureSkills 会话级技能缓存", () => {
   beforeEach(() => {
-    store.skills = [];
-    store.skillsLoaded = false;
     mockedInvoke.mockReset();
   });
 
-  it("归一化 skills/list：过滤禁用项并缓存", async () => {
+  it("归一化 skills/list：过滤禁用项并缓存到会话标签", async () => {
+    const tab = makeSessionTab("s1", "t1");
     mockedInvoke.mockResolvedValue(SKILLS_RESPONSE);
-    await ensureSkills();
-    expect(store.skillsLoaded).toBe(true);
-    expect(store.skills).toEqual([
-      {
-        name: "csharp-code-rules",
-        key: "csharp-code-rules",
-        path: "C:/x/skills/csharp-code-rules/SKILL.md",
-        desc: "C# 代码规范长描述",
-        shortDesc: "C# 代码规范短描述",
-      },
-    ]);
+    await ensureSkills(tab);
+    expect(tab.skills).toEqual({
+      loaded: true,
+      skills: [
+        {
+          name: "csharp-code-rules",
+          key: "csharp-code-rules",
+          path: "C:/x/skills/csharp-code-rules/SKILL.md",
+          desc: "C# 代码规范长描述",
+          shortDesc: "C# 代码规范短描述",
+        },
+      ],
+    });
     const calls = mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
@@ -174,16 +182,51 @@ describe("ensureSkills 技能全局缓存", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("幂等：第二次调用不重复请求", async () => {
+  it("幂等：同一会话第二次调用不重复请求", async () => {
+    const tab = makeSessionTab("s1", "t1");
     mockedInvoke.mockResolvedValue(SKILLS_RESPONSE);
-    await ensureSkills();
-    await ensureSkills();
+    await ensureSkills(tab);
+    await ensureSkills(tab);
     const calls = mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
         (args as { method?: string } | undefined)?.method === "skills/list",
     );
     expect(calls).toHaveLength(1);
+  });
+});
+describe("resetToNewChat 会话级缓存复位", () => {
+  it("复位插件/技能缓存为未加载（下次发送重新拉取）", () => {
+    const tab = makeSessionTab("s1", "t1", {
+      plugins: {
+        plugins: [
+          {
+            id: "p1",
+            name: "p1",
+            displayName: "P1",
+            description: "",
+            path: "",
+            iconPath: "",
+            iconUrl: "",
+            brandColor: "",
+          },
+        ],
+        loaded: true,
+      },
+      skills: {
+        skills: [
+          { name: "s1", key: "s1", path: "", desc: "", shortDesc: "" },
+        ],
+        loaded: true,
+      },
+    });
+    tabs.push(tab);
+    activeTabId.value = "s1";
+
+    resetToNewChat();
+
+    expect(tab.plugins).toEqual({ plugins: [], loaded: false });
+    expect(tab.skills).toEqual({ skills: [], loaded: false });
   });
 });
 describe("loadSettings 默认权限初始值", () => {

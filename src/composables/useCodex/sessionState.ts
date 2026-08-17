@@ -32,6 +32,8 @@ export function freshSessionTab(): SessionTab {
     taskMode: "execute",
     model: null,
     effort: null,
+    plugins: { plugins: [], loaded: false },
+    skills: { skills: [], loaded: false },
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
@@ -50,6 +52,7 @@ export function freshSessionTab(): SessionTab {
     planPrompt: null,
     plan: null,
     loading: false,
+    creatingChat: false,
     newChatWorkspace: null,
     interactions: [],
   } as SessionTab);

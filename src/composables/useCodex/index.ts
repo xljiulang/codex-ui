@@ -2,7 +2,7 @@
 // 原 useCodex.ts（2610 行）已按领域拆分为 useCodex/ 目录下多个模块；
 // 本文件仅做再导出，保证调用方 `import { ... } from "../useCodex"` 完全不变。
 export { store } from "./store";
-export { isGoalStatus, NEW_CHAT_PLUGIN_KEY } from "./types";
+export { isGoalStatus } from "./types";
 export type {
   ConfirmRequest,
   GoalStatus,

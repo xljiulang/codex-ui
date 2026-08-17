@@ -7,11 +7,10 @@ import {
   type FuzzyFileResult,
 } from "../lib/mention";
 import {
-  NEW_CHAT_PLUGIN_KEY,
-  activeSessionTab,
   ensureSkills,
-  store,
+  ensureThreadPlugins,
   type PluginItem,
+  type SessionTab,
 } from "../composables/useCodex";
 
 const props = defineProps<{
@@ -19,6 +18,7 @@ const props = defineProps<{
   token: string;
   results: FuzzyFileResult[];
   searching: boolean;
+  tab: SessionTab;
 }>();
 
 const emit = defineEmits<{
@@ -28,20 +28,21 @@ const emit = defineEmits<{
   "select-attachment": [attachment: UserInput];
 }>();
 
-// ---------------- $ 分支：技能列表（保持原行为） ----------------
-/** 首次打开时确保技能缓存已加载（幂等，之后复用） */
+// ---------------- $ 分支：技能列表（会话级缓存） ----------------
+/** 首次打开时确保本会话技能缓存已加载（幂等，之后复用） */
 onMounted(() => {
-  void ensureSkills();
+  void ensureSkills(props.tab);
+  void ensureThreadPlugins(props.tab);
 });
 
 const loadingSkills = computed(
-  () => !store.skillsLoaded && store.skills.length === 0,
+  () => !props.tab.skills.loaded && props.tab.skills.skills.length === 0,
 );
 
 const tokenLower = computed(() => props.token.toLowerCase());
 const filteredSkills = computed(() => {
-  if (!props.token) return store.skills;
-  return store.skills.filter(
+  if (!props.token) return props.tab.skills.skills;
+  return props.tab.skills.skills.filter(
     (s) =>
       s.name.toLowerCase().includes(tokenLower.value) ||
       s.key.toLowerCase().includes(tokenLower.value),
@@ -56,11 +57,8 @@ type Row =
   | { kind: "plugin"; plugin: PluginItem }
   | { kind: "title"; label: string };
 
-/** 当前对话的插件缓存（未创建会话用 NEW_CHAT_PLUGIN_KEY） */
-const currentThreadPlugins = computed(() => {
-  const key = activeSessionTab()?.threadId ?? NEW_CHAT_PLUGIN_KEY;
-  return store.threadPlugins[key]?.plugins ?? [];
-});
+/** 当前会话的插件缓存（会话级，随会话创建/打开拉取） */
+const currentThreadPlugins = computed(() => props.tab.plugins.plugins);
 
 /** 缓存插件按 token 过滤（名称/显示名/描述），空 token 显示全部 */
 const filteredPlugins = computed(() => {

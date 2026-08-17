@@ -16,8 +16,9 @@ import {
   type InlineSegment,
 } from "../lib/mention";
 import { isUserInput, type ThreadItem, type UserInput } from "../lib/types";
+import type { SessionTab } from "../composables/useCodex";
 
-const props = defineProps<{ item: ThreadItem }>();
+const props = defineProps<{ item: ThreadItem; tab: SessionTab }>();
 
 /** 用户消息内容项：运行时过滤为合法 UserInput（协议外未知形状直接丢弃） */
 const contentItems = computed(() => {
@@ -199,6 +200,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           :path="f.path"
           :label="'@' + f.name"
           kind="file"
+          :tab="props.tab"
         />
         <template v-for="(img, k) in bubbleImages" :key="'img' + k">
           <img
@@ -230,6 +232,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
                 :path="seg.path"
                 :label="seg.prefix + seg.name"
                 :kind="segRefKind(seg)"
+                :tab="props.tab"
               />
               <span v-else-if="seg.text" class="md-inline">
                 <MarkdownText :text="seg.text" />
@@ -244,6 +247,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
             :path="c.path"
             :label="skillPrefixFor(contentItems, c.name) + c.name"
             kind="skill"
+            :tab="props.tab"
           />
         </template>
         <RefChip
@@ -251,6 +255,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           :path="c.path"
           :label="'@' + c.name"
           kind="file"
+          :tab="props.tab"
         />
       </template>
       <span v-if="time" class="msg-time">{{ time }}</span>

@@ -58,7 +58,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -78,6 +77,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -114,7 +116,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -134,6 +135,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -170,7 +174,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -187,6 +190,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -223,7 +229,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -240,6 +245,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -276,7 +284,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -293,6 +300,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -329,7 +339,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       logs: [],
     };
     store.threads = [];
-    store.threadPlugins = {};
   });
 
 
@@ -347,6 +356,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       taskMode: "execute",
       model: null,
       effort: null,
+      plugins: { plugins: [], loaded: false },
+      skills: { skills: [], loaded: false },
+      creatingChat: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -375,7 +387,6 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
-    store.threadPlugins = {};
     store.confirm = null;
   });
 

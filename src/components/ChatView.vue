@@ -213,13 +213,13 @@ onBeforeUnmount(() => {
     <div class="chat-scroll-wrap">
       <div ref="scroller" class="chat-scroll" @scroll="onScroll">
         <div v-if="items.length === 0" class="chat-empty">
-          <EmptyState :busy="tab.turnActive || store.busy" />
+          <EmptyState :busy="tab.turnActive || tab.creatingChat" />
         </div>
         <template v-for="turn in turns" :key="turn.key">
           <section class="turn">
             <template v-for="row in turn.rows" :key="row.key">
               <div v-if="row.kind === 'sep'" class="date-sep">{{ row.date }}</div>
-              <MessageItem v-else :item="row.item" />
+              <MessageItem v-else :item="row.item" :tab="props.tab" />
             </template>
           </section>
         </template>

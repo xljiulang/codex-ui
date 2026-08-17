@@ -15,7 +15,7 @@ import type {
 import { activeTab, activateTab, insertTab, tabs } from "../useTabs";
 import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, workspace } from "./items";
 import { activeSessionTab, allSessionTabs, dropSessionTab, findSessionTabByThread, freshSessionTab, sessionTabTitle } from "./sessionState";
-import { ensureThreadPlugins, resetToNewChat } from "./settings";
+import { ensureSkills, ensureThreadPlugins, resetToNewChat } from "./settings";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
 import {
@@ -32,7 +32,6 @@ import {
   goalStatusToast,
   isGoalStatus,
   isGoalTerminalStatus,
-  NEW_CHAT_PLUGIN_KEY,
   type GoalStatus,
   type SessionTab,
 } from "./types";
@@ -72,9 +71,10 @@ export async function openSessionTabForThread(
 
 
 async function newChat(prompt: string, attachments: UserInput[]) {
-  store.busy = true;
   const active = activeSessionTab();
   const tabId = active?.id ?? null;
+  // 创建中标记写发起时的标签；即使创建期间用户切换标签，finally 也按 tabId 清回原标签
+  if (active) active.creatingChat = true;
   try {
     // newChat 仅在无当前会话时被调用，resolveSessionWorkspace 走 newChatWorkspace → workspace 分支
     const cwd = resolveSessionWorkspace(active ?? undefined);
@@ -144,7 +144,11 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       activeTab.loading = false;
       activeTab.title = sessionTabTitle(activeTab);
     }
-    void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
+    // 会话级插件/技能缓存兜底：标签创建时已预取，此处失败重试
+    if (activeTab) {
+      void ensureThreadPlugins(activeTab);
+      void ensureSkills(activeTab);
+    }
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;
     // 面板一致性兜底：新线程可能尚未被 thread_list 返回，本地先写入摘要
@@ -197,7 +201,10 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       await continueTurn(prompt, attachments);
     }
   } finally {
-    store.busy = false;
+    const target = tabId
+      ? allSessionTabs().find((t) => t.id === tabId)
+      : undefined;
+    if (target) target.creatingChat = false;
   }
 }
 
@@ -230,7 +237,6 @@ export async function sendPrompt(text: string, flip = false) {
     }
   } catch (e) {
     setToast(toastError(e));
-    store.busy = false;
   }
 }
 
@@ -275,7 +281,6 @@ export async function executePlan() {
     }
   } catch (e) {
     setToast(toastError(e));
-    store.busy = false;
   }
 }
 
@@ -294,7 +299,8 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   tab.title = sessionTabTitle(tab);
   insertTab(tab);
   activateTab(tab.id); // live 字段由投影 watch 同步
-  void ensureThreadPlugins(NEW_CHAT_PLUGIN_KEY); // 进入新对话编辑态即预初始化插件缓存
+  void ensureThreadPlugins(tab); // 进入新对话编辑态即预初始化插件缓存
+  void ensureSkills(tab); // 技能列表随会话拉取（$ 菜单与回显共用）
   return true;
 }
 
@@ -310,7 +316,8 @@ export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
 async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolean> {
   const isActive = () => activeSessionTab()?.id === tab.id;
   tab.loading = true;
-  void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
+  void ensureThreadPlugins(tab); // 进入历史对话即预初始化插件缓存
+  void ensureSkills(tab); // 技能列表随会话拉取
   try {
     // 统一只读元数据：codex CLI 创建的分页线程（historyMode=paginated）不支持
     // includeTurns=true；完整消息一律走 thread/turns/list 分页，legacy 线程在

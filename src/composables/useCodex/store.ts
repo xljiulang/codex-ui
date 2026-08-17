@@ -6,8 +6,6 @@ import {
   type ConfirmRequest,
   type ModelInfo,
   type PanelTab,
-  type PluginItem,
-  type SkillItem,
 } from "./types";
 
 
@@ -36,22 +34,11 @@ export const store = reactive({
   // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
   booting: true,
   loadingHistory: false,
-  busy: false,
   models: [] as ModelInfo[],
   modelsLoaded: false,
-  // 对话级插件缓存：key 为 currentThreadId（未创建会话时为 NEW_CHAT_PLUGIN_KEY）
-  threadPlugins: {} as Record<
-    string,
-    { plugins: PluginItem[]; loaded: boolean }
-  >,
-  skills: [] as SkillItem[],
-  skillsLoaded: false,
   showSettings: false,
   /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
   panelTab: "history" as PanelTab,
-  permOpen: false,
-  taskOpen: false,
-  modelOpen: false,
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,

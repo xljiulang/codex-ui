@@ -57,9 +57,17 @@ const props = defineProps<{ tab: SessionTab; active?: boolean }>();
 const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
   null,
 );
-// 输入区三个按钮菜单（权限/任务/模型）开关与外部点击关闭
-const { closeMenus, toggleMenu, onKeydownGlobal, onWindowMousedown } =
-  useComposerMenus({ mention });
+// 输入区三个按钮菜单（权限/任务/模型）开关与外部点击关闭；
+// 状态为组件局部 ref，多会话标签各自的输入区互不串扰
+const {
+  permOpen,
+  taskOpen,
+  modelOpen,
+  closeMenus,
+  toggleMenu,
+  onKeydownGlobal,
+  onWindowMousedown,
+} = useComposerMenus({ mention });
 const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
 
 // @ 文件引用：模糊搜索（防抖/序号失效/上限 50）
@@ -504,6 +512,7 @@ function taskModeLabel(): string {
           :token="mention.token"
           :results="fileResults"
           :searching="searchingFiles"
+          :tab="props.tab"
           @close="mention = null"
           @pick-files="onPickFiles()"
           @pick-dir="onPickDir()"
@@ -525,7 +534,7 @@ function taskModeLabel(): string {
               <path :d="ICON_CHEVRON_DOWN" />
             </svg>
           </button>
-          <PermissionMenu v-if="store.permOpen" @close="store.permOpen = false" />
+          <PermissionMenu v-if="permOpen" @close="permOpen = false" />
         </div>
         <div class="menu-anchor">
           <button
@@ -542,7 +551,7 @@ function taskModeLabel(): string {
             <path :d="ICON_CHEVRON_DOWN" />
             </svg>
           </button>
-          <TaskModeMenu v-if="store.taskOpen" @close="store.taskOpen = false" />
+          <TaskModeMenu v-if="taskOpen" @close="taskOpen = false" />
         </div>
         <div class="menu-anchor">
           <GoalChip :tab="tab" />
@@ -575,7 +584,7 @@ function taskModeLabel(): string {
               <path :d="ICON_CHEVRON_DOWN" />
             </svg>
           </button>
-          <ModelMenu v-if="store.modelOpen" @close="store.modelOpen = false" />
+          <ModelMenu v-if="modelOpen" @close="modelOpen = false" />
         </div>
         <button
           v-if="tab.turnActive"
@@ -633,9 +642,9 @@ function taskModeLabel(): string {
     <Teleport to="body">
       <div
         v-if="
-          store.permOpen ||
-          store.taskOpen ||
-          store.modelOpen ||
+          permOpen ||
+          taskOpen ||
+          modelOpen ||
           mention
         "
         class="menu-backdrop"

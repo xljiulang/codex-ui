@@ -8,10 +8,43 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import RefChip from "../RefChip.vue";
-import { NEW_CHAT_PLUGIN_KEY, store } from "../../composables/useCodex";
+import { store } from "../../composables/useCodex";
+import type { SessionTab } from "../../composables/useCodex";
+import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 
 const mockedInvoke = vi.mocked(invoke);
 const waitTick = () => new Promise((r) => setTimeout(r, 20));
+
+/** RefChip 挂载共用的会话标签 fixture（插件/技能缓存随标签提供） */
+const TEST_TAB: SessionTab = makeSessionTab("s1", "t1", {
+  plugins: {
+    loaded: true,
+    plugins: [
+      {
+        id: "documents@openai-primary-runtime",
+        name: "documents",
+        displayName: "Documents",
+        description: "创建和编辑文档工件",
+        path: "C:/x/documents",
+        iconPath: "",
+        iconUrl: "",
+        brandColor: "",
+      },
+    ],
+  },
+  skills: {
+    loaded: true,
+    skills: [
+      {
+        name: "csharp-code-rules",
+        key: "csharp-code-rules",
+        path: "C:/x/skills/csharp-code-rules/SKILL.md",
+        desc: "C# 代码规范说明",
+        shortDesc: "C# 代码规范短说明",
+      },
+    ],
+  },
+});
 
 function tooltipText(): string {
   return document.body.querySelector(".ref-tooltip")?.textContent ?? "";
@@ -20,45 +53,18 @@ function tooltipText(): string {
 describe("RefChip 自定义悬浮卡片", () => {
   beforeEach(() => {
     document.body.innerHTML = ""; // 清掉跨用例残留的 Teleport 悬浮卡片
-    store.threadPlugins = {};
-    store.skills = [];
-    store.skillsLoaded = false;
-    store.threadPlugins[NEW_CHAT_PLUGIN_KEY] = {
-      loaded: true,
-      plugins: [
-        {
-          id: "documents@openai-primary-runtime",
-          name: "documents",
-          displayName: "Documents",
-          description: "创建和编辑文档工件",
-          path: "C:/x/documents",
-          iconPath: "",
-          iconUrl: "",
-          brandColor: "",
-        },
-      ],
-    };
-    store.skills = [
-      {
-        name: "csharp-code-rules",
-        key: "csharp-code-rules",
-        path: "C:/x/skills/csharp-code-rules/SKILL.md",
-        desc: "C# 代码规范说明",
-        shortDesc: "C# 代码规范短说明",
-      },
-    ];
   });
 
   it("不再使用原生 title 属性", () => {
     const wrapper = mount(RefChip, {
-      props: { path: "src/a.cs", label: "@a.cs", kind: "file" },
+      props: { tab: TEST_TAB, path: "src/a.cs", label: "@a.cs", kind: "file" },
     });
     expect(wrapper.attributes("title")).toBeUndefined();
   });
 
   it("文件 chip 悬浮显示路径卡片", async () => {
     const wrapper = mount(RefChip, {
-      props: { path: "src/a.cs", label: "@a.cs", kind: "file", delay: 0 },
+      props: { tab: TEST_TAB, path: "src/a.cs", label: "@a.cs", kind: "file", delay: 0 },
     });
     await wrapper.find(".mention-inline").trigger("mouseenter");
     await waitTick();
@@ -72,7 +78,7 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("插件 chip 悬浮显示插件说明，缺失回退路径", async () => {
     const wrapper = mount(RefChip, {
-      props: {
+      props: { tab: TEST_TAB,
         path: "plugin://documents@openai-primary-runtime",
         label: "@documents",
         kind: "plugin",
@@ -86,7 +92,7 @@ describe("RefChip 自定义悬浮卡片", () => {
     await waitTick();
 
     const missing = mount(RefChip, {
-      props: {
+      props: { tab: TEST_TAB,
         path: "plugin://unknown@market",
         label: "@unknown",
         kind: "plugin",
@@ -100,7 +106,7 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("技能 chip 悬浮显示技能说明，缺失回退路径", async () => {
     const wrapper = mount(RefChip, {
-      props: {
+      props: { tab: TEST_TAB,
         path: "C:/x/skills/csharp-code-rules/SKILL.md",
         label: "$csharp-code-rules",
         kind: "skill",
@@ -114,7 +120,7 @@ describe("RefChip 自定义悬浮卡片", () => {
     await waitTick();
 
     const missing = mount(RefChip, {
-      props: { path: "C:/x/SKILL.md", label: "$zzz", kind: "skill", delay: 0 },
+      props: { tab: TEST_TAB, path: "C:/x/SKILL.md", label: "$zzz", kind: "skill", delay: 0 },
     });
     await missing.find(".mention-inline").trigger("mouseenter");
     await waitTick();
@@ -123,7 +129,7 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("plugin:// chip 不可点击（渲染为 span）", () => {
     const wrapper = mount(RefChip, {
-      props: {
+      props: { tab: TEST_TAB,
         path: "plugin://documents@openai-primary-runtime",
         label: "@documents",
         kind: "plugin",
@@ -138,7 +144,7 @@ describe("RefChip 自定义悬浮卡片", () => {
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = true;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
     const wrapper = mount(RefChip, {
-      props: { path: "src/a.cs", label: "@a.cs", kind: "file" },
+      props: { tab: TEST_TAB, path: "src/a.cs", label: "@a.cs", kind: "file" },
     });
     await wrapper.find(".mention-inline").trigger("click");
     await flushPromises();
@@ -161,7 +167,7 @@ describe("RefChip 自定义悬浮卡片", () => {
       return Promise.resolve(undefined);
     });
     const wrapper = mount(RefChip, {
-      props: { path: "src/a.cs", label: "@a.cs", kind: "file" },
+      props: { tab: TEST_TAB, path: "src/a.cs", label: "@a.cs", kind: "file" },
     });
     await wrapper.find(".mention-inline").trigger("click");
     await flushPromises();
@@ -182,7 +188,7 @@ describe("RefChip 自定义悬浮卡片", () => {
       return Promise.resolve(undefined);
     });
     const wrapper = mount(RefChip, {
-      props: { path: "src/a.bin", label: "@a.bin", kind: "file" },
+      props: { tab: TEST_TAB, path: "src/a.bin", label: "@a.bin", kind: "file" },
     });
     await wrapper.find(".mention-inline").trigger("click");
     await flushPromises();

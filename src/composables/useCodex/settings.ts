@@ -29,6 +29,8 @@ export function resetToNewChat() {
   tab.goalText = null;
   tab.goalStatus = null;
   tab.goalArmed = false;
+  tab.plugins = { plugins: [], loaded: false };
+  tab.skills = { skills: [], loaded: false };
   tab.planPrompt = null;
   tab.followupQueue = [];
   tab.title = sessionTabTitle(tab);
@@ -89,10 +91,10 @@ export async function loadModels(force = false) {
 }
 
 
-/** 确保指定对话的插件缓存已加载（对话级缓存：已加载直接返回，不回退 skills/list） */
-export async function ensureThreadPlugins(threadId: string) {
-  if (store.threadPlugins[threadId]?.loaded) return;
-  store.threadPlugins[threadId] = { plugins: [], loaded: false };
+/** 确保指定会话的插件缓存已加载（会话级缓存：已加载直接返回，失败可重试） */
+export async function ensureThreadPlugins(tab: SessionTab) {
+  if (tab.plugins.loaded) return;
+  tab.plugins = { plugins: [], loaded: false };
   try {
     const res = await invoke<{
       marketplaces?: {
@@ -137,17 +139,17 @@ export async function ensureThreadPlugins(threadId: string) {
         });
       }
     }
-    store.threadPlugins[threadId] = { plugins: list, loaded: true };
+    tab.plugins = { plugins: list, loaded: true };
   } catch {
     // 插件列表不可用时保持空，不回退 skills/list
-    store.threadPlugins[threadId] = { plugins: [], loaded: false };
+    tab.plugins = { plugins: [], loaded: false };
   }
 }
 
 
-/** 拉取技能列表（全局缓存，幂等），供 $ 菜单与回显悬浮提示使用 */
-export async function ensureSkills(force = false) {
-  if (store.skillsLoaded && !force) return;
+/** 拉取技能列表（会话级缓存，幂等），供 $ 菜单与回显悬浮提示使用 */
+export async function ensureSkills(tab: SessionTab) {
+  if (tab.skills.loaded) return;
   try {
     const res = await invoke<{
       data?: {
@@ -168,11 +170,10 @@ export async function ensureSkills(force = false) {
         shortDesc:
           s.interface?.shortDescription ?? s.description ?? s.desc ?? "",
       }));
-    store.skills = list;
-    store.skillsLoaded = true;
+    tab.skills = { skills: list, loaded: true };
   } catch {
     // 技能列表不可用时保持空
-    store.skills = [];
+    tab.skills = { skills: [], loaded: false };
   }
 }
 
