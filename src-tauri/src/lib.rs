@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(windows)]
+use tauri::AppHandle;
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri::utils::config::Color;
@@ -13,6 +15,51 @@ use codex::app_server::CodexServer;
 
 /// 主窗口一次性显示守卫：页面加载完成后首次触发，避免重复导航反复处理
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// 主窗口 F1-F12 默认浏览器行为拦截：
+/// WebView2 会把无修饰键的功能键（F5 刷新、F1 帮助、F11 全屏、F12 开发者工具等）当
+/// 成浏览器快捷键直接处理，导致界面刷新或弹出浏览器功能。这里注册
+/// AcceleratorKeyPressed 事件，把 F1-F12（虚拟键码 0x70-0x7B）标记为已处理，
+/// 阻止默认行为；Ctrl/Alt/Shift 组合下的功能键（如 Alt+F4）不拦截，保留系统快捷键。
+#[cfg(windows)]
+fn disable_main_window_function_keys(app: &AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
+    };
+    use webview2_com::AcceleratorKeyPressedEventHandler;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.with_webview(|webview| {
+        let controller = webview.controller();
+        let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            unsafe {
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
+                let _ = args.KeyEventKind(&mut kind);
+                if kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                    || kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                {
+                    let mut key = 0u32;
+                    let _ = args.VirtualKey(&mut key);
+                    // VK_F1(0x70) ..= VK_F12(0x7B)
+                    if (0x70..=0x7B).contains(&key) {
+                        let _ = args.SetHandled(true);
+                    }
+                }
+            }
+            Ok(())
+        }));
+        // token 仅用于后续 remove_AcceleratorKeyPressed；handler 由事件注册持有
+        let mut token = 0i64;
+        unsafe {
+            let _ = controller.add_AcceleratorKeyPressed(&handler, &mut token);
+        }
+    });
+}
 
 pub fn run() {
     tauri::Builder::default()
@@ -173,6 +220,9 @@ pub fn run() {
                     eprintln!("创建主窗口失败: {e}");
                     format!("创建主窗口失败: {e}")
                 })?;
+
+            // 拦截主窗口 F1-F12 的 WebView2 默认行为（F5 刷新等）
+            disable_main_window_function_keys(app.handle());
 
             // 兜底：页面加载失败/卡死时，窗口也能在 5 秒后出现（对已显示窗口是空操作）
             let fallback_handle = app.handle().clone();
