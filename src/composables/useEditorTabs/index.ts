@@ -10,6 +10,7 @@ export type {
   EditorTab,
   FileEditorTab,
   PreviewEditorTab,
+  SettingsTab,
   TerminalEditorTab,
 } from "./types";
 export {
@@ -21,9 +22,11 @@ export {
   openDiffTab,
   openFileTab,
   openPreviewTab,
+  openSettingsTab,
   saveDocxTab,
   openTerminalTab,
   saveFileTab,
+  SETTINGS_TAB_ID,
 } from "./open";
 export { refreshActiveTabFromFs, type FsChangedPayload } from "./refresh";
 export {

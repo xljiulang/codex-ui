@@ -421,9 +421,8 @@ export async function openThread(threadId: string): Promise<boolean> {
 }
 
 
-/** 切换会话成功后的统一收尾：关设置页 → 聚焦输入框（右侧面板保持当前 Tab） */
+/** 切换会话成功后的统一收尾：聚焦输入框（右侧面板保持当前 Tab） */
 async function finishSessionSwitch() {
-  store.showSettings = false;
   await nextTick();
   focusComposer();
 }

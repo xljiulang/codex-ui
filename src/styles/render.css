@@ -768,10 +768,6 @@
   transform 0.15s ease;
 }
 
-.modal.settings-modal {
-  width: min(620px, 94vw);
-}
-
 .theme-card:hover {
   border-color: var(--border-light);
   transform: translateY(-1px);
@@ -837,4 +833,3 @@
   font-size: 11px;
   color: var(--text-faint);
 }
-

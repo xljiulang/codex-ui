@@ -2,12 +2,27 @@
 import {
   pickAndOpenNewSession,
   pickingNewSessionDir,
-  store,
 } from "../composables/useCodex";
-import { ICON_PLUS } from "../lib/icons";
+import {
+  closeAnyTab,
+  openSettingsTab,
+  SETTINGS_TAB_ID,
+} from "../composables/useEditorTabs";
+import { activeTabId, activateTab, tabs } from "../composables/useTabs";
+import { ICON_PLUS, ICON_SETTINGS } from "../lib/icons";
 
+/** 设置按钮：无设置标签则创建并激活；已存在未激活则激活；已激活则关闭（保持原 toggle 习惯） */
 function onSettings() {
-  store.showSettings = !store.showSettings;
+  const existing = tabs.find((t) => t.id === SETTINGS_TAB_ID);
+  if (!existing) {
+    openSettingsTab();
+    return;
+  }
+  if (activeTabId.value === SETTINGS_TAB_ID) {
+    void closeAnyTab(existing);
+  } else {
+    activateTab(SETTINGS_TAB_ID);
+  }
 }
 </script>
 
@@ -45,9 +60,7 @@ function onSettings() {
         @click="onSettings()"
       >
         <svg viewBox="0 0 24 24">
-          <path
-            d="M19.14 12.94a7.1 7.1 0 0 0 .06-.94 7.1 7.1 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.1 7.1 0 0 0-1.62-.94L14.4 2.8a.5.5 0 0 0-.49-.4h-3.82a.5.5 0 0 0-.49.4l-.36 2.54a7.1 7.1 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22l-1.92 3.32a.5.5 0 0 0 .12.64l2.03 1.58a7.1 7.1 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .61.22l2.39-.96a7.1 7.1 0 0 0 1.62.94l.36 2.54a.5.5 0 0 0 .49.4h3.82a.5.5 0 0 0 .49-.4l.36-2.54a7.1 7.1 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 15.5 12 3.5 3.5 0 0 1 12 15.5z"
-          />
+          <path :d="ICON_SETTINGS" />
         </svg>
       </button>
     </div>

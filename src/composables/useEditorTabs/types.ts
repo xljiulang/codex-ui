@@ -4,7 +4,7 @@ import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow } from "../../lib/types";
 import type { Editor } from "@tiptap/vue-3";
-import { TabKind, type EditorTabBase } from "../../lib/tabs";
+import { TabIcon, TabKind, type EditorTabBase } from "../../lib/tabs";
 
 /** diff 预览参数（与 Rust DiffPreviewParams 结构一致） */
 export interface DiffPreviewParams {
@@ -134,10 +134,21 @@ export interface CommitEditorTab extends EditorTabBase {
   detail: GitCommitDetail | null;
 }
 
+/** 设置标签：全应用唯一的设置页（统一列表恒在最后，可关闭） */
+export interface SettingsTab extends EditorTabBase {
+  kind: (typeof TabKind)["Settings"];
+  id: string;
+  title: string;
+  icon: (typeof TabIcon)["Settings"];
+  workspace: null;
+  loading: false;
+}
+
 export type EditorTab =
   | FileEditorTab
   | DocxEditorTab
   | DiffEditorTab
   | PreviewEditorTab
   | TerminalEditorTab
-  | CommitEditorTab;
+  | CommitEditorTab
+  | SettingsTab;

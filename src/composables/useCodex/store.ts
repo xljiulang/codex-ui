@@ -36,7 +36,6 @@ export const store = reactive({
   loadingHistory: false,
   models: [] as ModelInfo[],
   modelsLoaded: false,
-  showSettings: false,
   /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
   panelTab: "history" as PanelTab,
   toast: "",

@@ -18,6 +18,7 @@ import {
   ICON_CLOSE,
   ICON_FILE,
   ICON_GIT,
+  ICON_SETTINGS,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -146,7 +147,13 @@ function tabToEntry(
 }
 
 function tabIcon(tab: EditorTab): string {
-  if (tab.kind === TabKind.Terminal || tab.kind === TabKind.Commit) return "";
+  if (
+    tab.kind === TabKind.Terminal ||
+    tab.kind === TabKind.Commit ||
+    tab.kind === TabKind.Settings
+  ) {
+    return "";
+  }
   return iconFor(tabToEntry(tab)) ?? "";
 }
 
@@ -159,7 +166,12 @@ watch(
   () => {
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of props.editorTabs) {
-      if (tab.kind === TabKind.Terminal || tab.kind === TabKind.Commit) continue;
+      if (
+        tab.kind === TabKind.Terminal ||
+        tab.kind === TabKind.Commit ||
+        tab.kind === TabKind.Settings
+      )
+        continue;
       const t =
         tab as FileEditorTab | DocxEditorTab | DiffEditorTab | PreviewEditorTab;
       const list = byRoot.get(t.workspace) ?? [];
@@ -188,6 +200,7 @@ function sessionTabPending(tab: SessionTab): number {
  * 文件/diff/预览显示相对工作区根的路径；终端不显示 ToolTip。
  */
 function titleTooltip(tab: EditorTab): string {
+  if (tab.kind === TabKind.Settings) return "";
   if (tab.kind === TabKind.Terminal) return "";
   if (tab.kind === TabKind.Commit) return tab.hash;
   const path = relPathOf(tab.workspace, tab.path);
@@ -287,6 +300,15 @@ function titleTooltip(tab: EditorTab): string {
         >
           <svg viewBox="0 0 16 16">
             <path :d="ICON_GIT" />
+          </svg>
+        </span>
+        <span
+          v-else-if="tab.icon === TabIcon.Settings"
+          class="editor-tab-icon"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24">
+            <path :d="ICON_SETTINGS" />
           </svg>
         </span>
         <span v-else class="editor-tab-icon" aria-hidden="true">

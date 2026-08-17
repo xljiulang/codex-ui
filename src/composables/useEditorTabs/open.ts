@@ -19,7 +19,7 @@ import {
   ensureTerminalListeners,
 } from "../useTerminalEvents";
 import { TabIcon, TabKind } from "../../lib/tabs";
-import { activeTabId, insertTab, tabs } from "../useTabs";
+import { activateTab, activeTabId, insertTab, tabs } from "../useTabs";
 import { store } from "../useCodex/store";
 import type {
   CommitEditorTab,
@@ -29,6 +29,7 @@ import type {
   EditorTab,
   FileEditorTab,
   PreviewEditorTab,
+  SettingsTab,
   TerminalEditorTab,
 } from "./types";
 
@@ -53,6 +54,31 @@ function previewTabId(
   path: string,
 ): string {
   return `preview:${type}:${JSON.stringify([workspace, path])}`;
+}
+
+/** 设置标签固定 id：全局唯一，头部设置按钮据此查找/激活/关闭 */
+export const SETTINGS_TAB_ID = "settings";
+
+/**
+ * 打开设置标签：不存在则创建（统一列表恒在最后）并激活，已存在则直接激活。
+ * 关闭入口复用统一 closeAnyTab（关闭活动标签自动回到相邻标签）。
+ */
+export function openSettingsTab(): void {
+  const existing = tabs.find((t) => t.id === SETTINGS_TAB_ID);
+  if (existing) {
+    activateTab(SETTINGS_TAB_ID);
+    return;
+  }
+  const tab: SettingsTab = {
+    id: SETTINGS_TAB_ID,
+    kind: TabKind.Settings,
+    title: "设置",
+    icon: TabIcon.Settings,
+    workspace: null,
+    loading: false,
+  };
+  insertTab(tab);
+  activateTab(SETTINGS_TAB_ID);
 }
 
 /**

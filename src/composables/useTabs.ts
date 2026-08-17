@@ -6,10 +6,11 @@ import type { EditorTab } from "./useEditorTabs";
 /** 统一标签：会话标签与文件/diff/预览/终端标签同列表维护 */
 export type Tab = SessionTab | EditorTab;
 
-/** 标签 kind 排位：chat=0、terminal=1、其它=2（决定统一列表的三块顺序） */
+/** 标签 kind 排位：chat=0、terminal=1、其它=2、settings=3（统一列表四块顺序，设置恒在最后） */
 function kindRank(kind: Tab["kind"]): number {
   if (kind === TabKind.Chat) return 0;
   if (kind === TabKind.Terminal) return 1;
+  if (kind === TabKind.Settings) return 3;
   return 2;
 }
 

@@ -11,9 +11,15 @@ import { tooltipDirective } from "../../directives/tooltip";
 import {
   activeSessionTab,
   pickAndOpenNewSession,
-  store,
 } from "../../composables/useCodex";
-import { activeTabId, tabs as _tabs } from "../../composables/useEditorTabs";
+import {
+  activateTab,
+  activeTabId,
+  openSettingsTab,
+  SETTINGS_TAB_ID,
+  tabs as _tabs,
+} from "../../composables/useEditorTabs";
+import { __resetTabsForTest } from "../../composables/useTabs";
 import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
 import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 import type { SessionTab } from "../../composables/useCodex";
@@ -30,28 +36,36 @@ function mountHeader() {
 
 describe("AppHeader 导航", () => {
   beforeEach(() => {
+    __resetTabsForTest();
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
-    store.showSettings = false;
-    store.server.startupWorkspace = "";
-    store.panelTab = "history";
     mockedPickAndOpenNewSession.mockClear();
   });
 
-  it("点设置打开设置页", async () => {
+  it("点设置创建设置标签并激活", async () => {
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="设置"]').trigger("click");
-    expect(store.showSettings).toBe(true);
+    expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
+    expect(activeTabId.value).toBe(SETTINGS_TAB_ID);
   });
 
-  it("设置页再点设置关闭设置，回到原对话且不新建/不中断", async () => {
-    store.showSettings = true;
+  it("设置标签已激活时再点设置关闭，回到原对话且不新建/不中断", async () => {
+    openSettingsTab();
     const wrapper = mountHeader();
     await wrapper.find('button[aria-label="设置"]').trigger("click");
-    expect(store.showSettings).toBe(false);
+    expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(false);
     expect(activeSessionTab()?.threadId).toBe("t1");
     expect(mockedPickAndOpenNewSession).not.toHaveBeenCalled();
+  });
+
+  it("设置标签存在但未激活时点设置仅激活", async () => {
+    openSettingsTab();
+    activateTab("s1");
+    const wrapper = mountHeader();
+    await wrapper.find('button[aria-label="设置"]').trigger("click");
+    expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
+    expect(activeTabId.value).toBe(SETTINGS_TAB_ID);
   });
 
   it("点新建会话：调用共享新建入口（含目录选择）", async () => {
@@ -61,7 +75,7 @@ describe("AppHeader 导航", () => {
   });
 
   it("设置按钮无 active 态", async () => {
-    store.showSettings = true;
+    openSettingsTab();
     const wrapper = mountHeader();
     expect(wrapper.find('button[aria-label="设置"]').classes()).not.toContain(
       "active",

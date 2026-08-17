@@ -1,7 +1,11 @@
 import { deleteThread, newEmptyChat, openHistorySession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
-import { activeTabId } from "../useEditorTabs";
+import {
+  activeTabId,
+  openSettingsTab,
+  SETTINGS_TAB_ID,
+} from "../useEditorTabs";
 import { DEFAULT_MODEL, makeSessionTab, PLUGINS_RESPONSE, resetUseCodexState, SKILLS_RESPONSE, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -305,12 +309,11 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.confirm = null;
-    store.showSettings = false;
     store.panelTab = "history";
   });
 
-  it("openNewSession 成功后：关设置页、聚焦输入框、切回资源 Tab", async () => {
-    store.showSettings = true;
+  it("openNewSession 成功后：设置标签不再激活、聚焦输入框、切回资源 Tab", async () => {
+    openSettingsTab();
     const focus = vi.fn();
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
       commands: { focus },
@@ -318,7 +321,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     try {
       await openNewSession("D:/projects/B");
       expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
-      expect(store.showSettings).toBe(false);
+      expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
       expect(store.panelTab).toBe("history");
       expect(focus).toHaveBeenCalledTimes(1);
     } finally {
@@ -327,7 +330,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
   });
 
   it("openNewSession：进行中会话不弹确认（会话多开），直接新建标签并收尾", async () => {
-    store.showSettings = true;
+    openSettingsTab();
     const focus = vi.fn();
     (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__ = {
       commands: { focus },
@@ -336,7 +339,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
       await openNewSession("D:/projects/B");
       expect(store.confirm).toBeNull();
       expect(tabs.some((t) => t.threadId === null)).toBe(true);
-      expect(store.showSettings).toBe(false);
+      expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
       expect(store.panelTab).toBe("history");
       expect(focus).toHaveBeenCalledTimes(1);
     } finally {
@@ -344,8 +347,8 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
     }
   });
 
-  it("openHistorySession 成功后：关设置页、聚焦输入框、切回资源 Tab", async () => {
-    store.showSettings = true;
+  it("openHistorySession 成功后：设置标签不再激活、聚焦输入框、切回资源 Tab", async () => {
+    openSettingsTab();
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -370,7 +373,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
       await openHistorySession("t2");
       expect(activeSessionTab()?.threadId).toBe("t2");
       expect(activeSessionTab()?.workspace).toBe("D:/projects/B");
-      expect(store.showSettings).toBe(false);
+      expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
       expect(store.panelTab).toBe("history");
       expect(focus).toHaveBeenCalledTimes(1);
     } finally {

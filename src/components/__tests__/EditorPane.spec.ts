@@ -216,6 +216,22 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("仅有设置标签时：「+」隐藏（除设置外无任何标签）", () => {
+    tabs.splice(0, tabs.length);
+    tabs.push({
+      id: "settings",
+      kind: "settings" as const,
+      title: "设置",
+      icon: "settings" as const,
+      workspace: null,
+      loading: false,
+    });
+    activeTabId.value = "settings";
+    const wrapper = mountPane();
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("关闭最后一个会话标签后：无活动标签，「+」隐藏", async () => {
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tab-add").exists()).toBe(true);

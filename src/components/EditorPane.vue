@@ -10,6 +10,7 @@ import {
 import ChatView from "./ChatView.vue";
 import ContextMenu from "./ContextMenu.vue";
 import EditorTabBar from "./EditorTabBar.vue";
+import SettingsView from "./SettingsView.vue";
 import {
   activeTab,
   activeTabId,
@@ -31,6 +32,7 @@ import {
   type DiffEditorTab,
   type PreviewEditorTab,
   type TerminalEditorTab,
+  SETTINGS_TAB_ID,
 } from "../composables/useEditorTabs";
 import {
   revealAbsPathInTree,
@@ -248,7 +250,8 @@ watch(activeTab, (tab) => {
     !tab ||
     tab.kind === TabKind.Terminal ||
     tab.kind === TabKind.Chat ||
-    tab.kind === TabKind.Commit
+    tab.kind === TabKind.Commit ||
+    tab.kind === TabKind.Settings
   ) {
     return;
   }
@@ -259,11 +262,11 @@ watch(activeTab, (tab) => {
 const activeWorkspace = computed((): string | null => activeTab.value?.workspace ?? null);
 
 /**
- * 是否存在激活状态的标签（无活动标签时隐藏「+」）。
- * 按“活动标签真实存在”判定（activeTab 覆盖统一列表全部类型）。
+ * 标签栏末尾「+」是否显示：存在非设置标签时显示。
+ * 空列表或仅有设置标签（无会话/文件/终端等）时隐藏。
  */
-const hasActiveTab = computed(
-  () => activeTabId.value !== "" && activeTab.value !== null,
+const hasActiveTab = computed(() =>
+  tabs.some((t) => t.kind !== TabKind.Settings),
 );
 
 /** 标签栏末尾「+」：选择新建会话或新建终端，均使用活动标签工作区启动 */
@@ -329,6 +332,7 @@ function openAddMenu(e: MouseEvent) {
         :tab="t"
         :active="activeTabId === t.id"
       />
+      <SettingsView v-if="activeTabId === SETTINGS_TAB_ID" />
     </div>
     <div v-if="pendingTab" class="text-editor-overlay">
       <div class="text-editor-confirm">

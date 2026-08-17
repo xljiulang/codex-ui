@@ -5,7 +5,6 @@ import ContextMenu from "./components/ContextMenu.vue";
 import EditorPane from "./components/EditorPane.vue";
 import RightPanel from "./components/RightPanel.vue";
 import LoadingScreen from "./components/LoadingScreen.vue";
-import SettingsView from "./components/SettingsView.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
@@ -35,7 +34,6 @@ onBeforeUnmount(() => {
       <EditorPane />
       <RightPanel />
     </div>
-    <SettingsView v-if="store.showSettings" />
     <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
     <ContextMenu

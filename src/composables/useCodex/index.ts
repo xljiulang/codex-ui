@@ -8,7 +8,10 @@ export type {
   GoalStatus,
   PanelTab,
   PlanPrompt,
+  PluginCatalogItem,
   PluginItem,
+  PluginMarketplaceInfo,
+  PluginMarketplaceLoadError,
   SessionTab,
   SkillItem,
 } from "./types";
@@ -41,6 +44,15 @@ export {
   refreshServer,
   saveSettings,
 } from "./settings";
+export {
+  addMarketplace,
+  installPlugin,
+  isAuthRequiredError,
+  loadPluginCatalog,
+  refreshPluginCaches,
+  removeMarketplace,
+  uninstallPlugin,
+} from "./plugins";
 export {
   autoTitleThread,
   clearSearch,

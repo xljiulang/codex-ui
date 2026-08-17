@@ -10,7 +10,13 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
 import { invoke } from "@tauri-apps/api/core";
 import SettingsView from "../SettingsView.vue";
 import { saveSettings, settleConfirm, store } from "../../composables/useCodex";
-import { activeTabId, tabs as _tabs } from "../../composables/useEditorTabs";
+import {
+  activeTabId,
+  openSettingsTab,
+  SETTINGS_TAB_ID,
+  tabs as _tabs,
+} from "../../composables/useEditorTabs";
+import { __resetTabsForTest } from "../../composables/useTabs";
 import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
 import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 import type { SessionTab } from "../../composables/useCodex";
@@ -20,8 +26,17 @@ const tabs = _tabs as unknown as SessionTab[];
 const mockedInvoke = vi.mocked(invoke);
 const mockedSave = vi.mocked(saveSettings);
 
+/** 打开设置标签并激活会话 s1（供「关闭/取消/保存」类测试使用） */
+function mountWithSettingsTab() {
+  tabs.push(makeSessionTab("s1", "t1"));
+  activeTabId.value = "s1";
+  openSettingsTab();
+  return mount(SettingsView);
+}
+
 describe("SettingsView codex 可执行文件选择", () => {
   beforeEach(() => {
+    __resetTabsForTest();
     store.settings.codex_path = "C:/tools/codex.exe";
     store.toast = "";
     mockedInvoke.mockReset();
@@ -75,16 +90,16 @@ describe("SettingsView codex 可执行文件选择", () => {
     expect(wrapper.find("button.codex-clear-btn").exists()).toBe(false);
   });
 
-  it("保存设置时空路径存为 null", async () => {
+  it("清除路径时立即保存为 null", async () => {
     const wrapper = mount(SettingsView);
     await wrapper.find("button.codex-clear-btn").trigger("click");
-    await wrapper.find("button.btn.primary").trigger("click");
+    await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ codex_path: null }),
     );
   });
 
-  it("未设置且检测到路径时展示当前使用说明，保存不写入该路径", async () => {
+  it("未设置且检测到路径时展示当前使用说明", () => {
     store.settings.codex_path = null;
     store.server.codexPath = "C:/auto/codex.exe";
     const wrapper = mount(SettingsView);
@@ -92,12 +107,6 @@ describe("SettingsView codex 可执行文件选择", () => {
     expect(note.exists()).toBe(true);
     expect(note.text()).toContain("当前使用（自动检测）");
     expect(note.text()).toContain("C:/auto/codex.exe");
-
-    await wrapper.find("button.btn.primary").trigger("click");
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith(
-      expect.objectContaining({ codex_path: null }),
-    );
   });
 
   it("未设置且未检测到路径时不显示当前使用说明", () => {
@@ -107,29 +116,32 @@ describe("SettingsView codex 可执行文件选择", () => {
     expect(wrapper.find(".setting-note").exists()).toBe(false);
   });
 
-  it("设置自定义路径时保存为自定义值，不显示检测说明", async () => {
+  it("选择新路径后立即保存为自定义值，不显示检测说明", async () => {
     store.settings.codex_path = "C:/custom/codex.exe";
     store.server.codexPath = "C:/auto/codex.exe";
+    mockedInvoke.mockResolvedValue("D:/new/codex.exe");
     const wrapper = mount(SettingsView);
     expect(wrapper.find(".codex-path-value").text()).toContain(
       "C:/custom/codex.exe",
     );
     expect(wrapper.find(".setting-note").exists()).toBe(false);
 
-    await wrapper.find("button.btn.primary").trigger("click");
+    await wrapper.find("button.codex-pick-btn").trigger("click");
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
-      expect.objectContaining({ codex_path: "C:/custom/codex.exe" }),
+      expect.objectContaining({ codex_path: "D:/new/codex.exe" }),
     );
   });
 });
 
-describe("SettingsView 模态框行为", () => {
+describe("SettingsView 设置标签行为", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
   beforeEach(() => {
-    store.showSettings = true;
+    __resetTabsForTest();
+    __resetSessionTabsForTest();
     store.toast = "";
+    mockedInvoke.mockReset();
     mockedSave.mockClear();
   });
 
@@ -138,69 +150,99 @@ describe("SettingsView 模态框行为", () => {
     wrapper = undefined;
   });
 
-  it("渲染模态结构：遮罩、对话框、标题与关闭按钮", () => {
+  it("渲染为全宽页面而非模态框，面板内不再含标题与关闭按钮", () => {
     wrapper = mount(SettingsView);
-    expect(wrapper.find(".modal-mask").exists()).toBe(true);
-    expect(wrapper.find(".modal.settings-modal").exists()).toBe(true);
-    expect(wrapper.find(".modal-title").text()).toContain("设置");
-    expect(wrapper.find('button[aria-label="关闭设置"]').exists()).toBe(true);
-    expect(wrapper.find(".modal-body .settings").exists()).toBe(true);
+    expect(wrapper.find(".settings-page").exists()).toBe(true);
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(wrapper.find(".settings-page-title").exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="关闭设置"]').exists()).toBe(false);
+    expect(wrapper.find(".settings-section").exists()).toBe(true);
   });
 
-  it("按 Escape 关闭设置", async () => {
-    wrapper = mount(SettingsView);
+  it("按 Escape 不关闭设置标签", async () => {
+    wrapper = mountWithSettingsTab();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await wrapper.vm.$nextTick();
-    expect(store.showSettings).toBe(false);
+    expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
   });
 
-  it("点击关闭 X 关闭设置", async () => {
+  it("个性化 / 通用 / 插件管理三个分区均渲染", () => {
     wrapper = mount(SettingsView);
-    await wrapper.find('button[aria-label="关闭设置"]').trigger("click");
-    expect(store.showSettings).toBe(false);
+    const titles = wrapper.findAll(".settings-section-title").map((s) => s.text());
+    expect(titles).toContain("个性化");
+    expect(titles).toContain("通用");
+    expect(titles).toContain("插件管理");
   });
 
-  it("点击「取消」关闭设置且不保存", async () => {
+  it("左侧导航渲染三个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
-    const cancel = wrapper
-      .findAll(".modal-foot .btn")
-      .find((b) => b.text().trim() === "取消");
-    expect(cancel).toBeDefined();
-    await cancel!.trigger("click");
-    expect(store.showSettings).toBe(false);
-    expect(mockedSave).not.toHaveBeenCalled();
+    const items = wrapper.findAll(".settings-nav-item");
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "个性化",
+      "通用设置",
+      "插件管理",
+    ]);
+    expect(items[0].classes()).toContain("active");
+    expect(items[1].classes()).not.toContain("active");
+    expect(items[2].classes()).not.toContain("active");
+    const personal = wrapper
+      .find(".settings-section-personalization")
+      .element as HTMLElement;
+    const general = wrapper.find(".settings-section-general").element as HTMLElement;
+    const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
+    expect(personal.style.display).not.toBe("none");
+    expect(general.style.display).toBe("none");
+    expect(plugins.style.display).toBe("none");
   });
 
-  it("点击「保存」成功后关闭设置并提示已保存", async () => {
+  it("点击「插件管理」切换右侧面板", async () => {
     wrapper = mount(SettingsView);
-    await wrapper.find("button.btn.primary").trigger("click");
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalledTimes(1);
-    expect(store.showSettings).toBe(false);
-    expect(store.toast).toContain("设置已保存");
+    const items = wrapper.findAll(".settings-nav-item");
+    await items[2].trigger("click");
+    expect(items[0].classes()).not.toContain("active");
+    expect(items[2].classes()).toContain("active");
+    const general = wrapper.find(".settings-section-general").element as HTMLElement;
+    const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
+    expect(general.style.display).toBe("none");
+    expect(plugins.style.display).not.toBe("none");
   });
 
-  it("点击遮罩不关闭（防误触丢改动）", async () => {
+  it("记忆模式行合并：下拉与重置按钮同行，无说明文字", () => {
     wrapper = mount(SettingsView);
-    await wrapper.find(".modal-mask").trigger("click");
-    expect(store.showSettings).toBe(true);
+    const row = wrapper
+      .findAll(".settings-section-general .setting-row")
+      .find((r) => r.text().includes("记忆模式"))!;
+    expect(row.exists()).toBe(true);
+    expect(row.find("select.memory-mode-select").exists()).toBe(true);
+    expect(row.find("button.memory-reset-btn").exists()).toBe(true);
+    expect(row.find(".setting-value").exists()).toBe(false);
+    expect(row.text()).not.toContain("清空全部已保存的记忆");
   });
 });
 
 describe("SettingsView 主题保存后生效", () => {
   beforeEach(() => {
+    __resetTabsForTest();
     store.settings.theme = "blue";
     store.toast = "";
     mockedSave.mockClear();
+    // 模拟真实 saveSettings：patch 立即合并进 store（即时保存语义）
+    mockedSave.mockImplementation((patch) => {
+      store.settings = { ...store.settings, ...patch };
+      return Promise.resolve();
+    });
     document.documentElement.dataset.theme = "blue";
   });
 
-  it("点主题卡片只更新选中态，不即时保存或修改 store", async () => {
+  it("点主题卡片立即保存并更新选中态", async () => {
     const wrapper = mount(SettingsView);
     await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
+    await flushPromises();
 
-    expect(mockedSave).not.toHaveBeenCalled();
-    expect(store.settings.theme).toBe("blue");
+    expect(mockedSave).toHaveBeenCalledWith(
+      expect.objectContaining({ theme: "dark" }),
+    );
+    expect(store.settings.theme).toBe("dark");
     expect(
       wrapper.find('.theme-card[data-theme-id="dark"]').classes(),
     ).toContain("selected");
@@ -209,71 +251,47 @@ describe("SettingsView 主题保存后生效", () => {
     ).not.toContain("selected");
   });
 
-  it("选主题后点保存：saveSettings 收到新主题并关闭", async () => {
+  it("点主题卡片即时预览到根节点并写入 store", async () => {
     const wrapper = mount(SettingsView);
     await wrapper.find('.theme-card[data-theme-id="light"]').trigger("click");
-    await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
-
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(store.settings.theme).toBe("light");
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ theme: "light" }),
     );
-    expect(store.showSettings).toBe(false);
+    wrapper.unmount();
   });
 
-  it("未保存取消后重开：主题选中态回到已保存值", async () => {
+  it("保存成功后重开设置页：主题选中态为已保存值", async () => {
     const wrapper = mount(SettingsView);
     await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
+    await flushPromises();
     wrapper.unmount();
 
     const reopened = mount(SettingsView);
     expect(
       reopened.find('.theme-card[data-theme-id="dark"]').classes(),
-    ).not.toContain("selected");
+    ).toContain("selected");
     expect(
       reopened.find('.theme-card[data-theme-id="blue"]').classes(),
-    ).toContain("selected");
+    ).not.toContain("selected");
     reopened.unmount();
   });
 
-  it("选主题卡片即时预览到根节点，但不写入 store", async () => {
+  it("保存失败时提示错误", async () => {
+    mockedSave.mockRejectedValueOnce(new Error("写入配置失败"));
     const wrapper = mount(SettingsView);
     await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(store.settings.theme).toBe("blue");
-    expect(mockedSave).not.toHaveBeenCalled();
-    wrapper.unmount();
-  });
-
-  it("未保存取消后还原根节点主题", async () => {
-    const wrapper = mount(SettingsView);
-    await wrapper.find('.theme-card[data-theme-id="dark"]').trigger("click");
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    const cancel = wrapper
-      .findAll(".modal-foot .btn")
-      .find((b) => b.text().trim() === "取消");
-    await cancel!.trigger("click");
-    expect(store.showSettings).toBe(false);
-    expect(document.documentElement.dataset.theme).toBe("blue");
-    wrapper.unmount();
-  });
-
-  it("保存后保留预览主题不回退", async () => {
-    const wrapper = mount(SettingsView);
-    await wrapper.find('.theme-card[data-theme-id="light"]').trigger("click");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith(
-      expect.objectContaining({ theme: "light" }),
-    );
-    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(store.toast).toContain("写入配置失败");
     wrapper.unmount();
   });
 });
 
 describe("SettingsView 默认权限", () => {
   beforeEach(() => {
+    __resetTabsForTest();
     store.settings.default_permission = "ask-for-approval";
     store.toast = "";
     mockedSave.mockClear();
@@ -293,30 +311,15 @@ describe("SettingsView 默认权限", () => {
     wrapper.unmount();
   });
 
-  it("保存时 patch 包含所选默认权限", async () => {
+  it("切换默认权限后立即保存", async () => {
     const wrapper = mount(SettingsView);
     await wrapper
       .find("select.default-permission-select")
       .setValue("full-access");
-    await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ default_permission: "full-access" }),
     );
-    wrapper.unmount();
-  });
-
-  it("取消不保存默认权限", async () => {
-    const wrapper = mount(SettingsView);
-    await wrapper
-      .find("select.default-permission-select")
-      .setValue("help-me-approve");
-    const cancel = wrapper
-      .findAll(".modal-foot .btn")
-      .find((b) => b.text().trim() === "取消");
-    expect(cancel).toBeDefined();
-    await cancel!.trigger("click");
-    expect(mockedSave).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 });
@@ -325,6 +328,7 @@ describe("SettingsView 记忆管理", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
   beforeEach(() => {
+    __resetTabsForTest();
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
@@ -354,20 +358,18 @@ describe("SettingsView 记忆管理", () => {
     wrapper.unmount();
   });
 
-  it("保存时 patch 包含记忆模式", async () => {
+  it("切换记忆模式后立即保存", async () => {
     wrapper = mount(SettingsView);
     await wrapper.find("select.memory-mode-select").setValue("enabled");
-    await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ memory_mode: "enabled" }),
     );
   });
 
-  it("有当前会话时保存后立即同步 thread/memoryMode/set", async () => {
+  it("有当前会话时切换记忆模式后同步 thread/memoryMode/set", async () => {
     wrapper = mount(SettingsView);
     await wrapper.find("select.memory-mode-select").setValue("enabled");
-    await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/memoryMode/set",
@@ -375,10 +377,10 @@ describe("SettingsView 记忆管理", () => {
     });
   });
 
-  it("无当前会话时保存不调用 thread/memoryMode/set", async () => {
+  it("无当前会话时切换记忆模式不调用 thread/memoryMode/set", async () => {
     __resetSessionTabsForTest();
     wrapper = mount(SettingsView);
-    await wrapper.find("button.btn.primary").trigger("click");
+    await wrapper.find("select.memory-mode-select").setValue("enabled");
     await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "codex_rpc",
@@ -386,7 +388,7 @@ describe("SettingsView 记忆管理", () => {
     );
   });
 
-  it("同步失败 toast 错误但设置仍保存并关闭", async () => {
+  it("同步失败 toast 错误但设置仍已保存", async () => {
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "thread/memoryMode/set") {
         throw new Error("同步记忆失败");
@@ -394,11 +396,10 @@ describe("SettingsView 记忆管理", () => {
       return {};
     });
     wrapper = mount(SettingsView);
-    await wrapper.find("button.btn.primary").trigger("click");
+    await wrapper.find("select.memory-mode-select").setValue("enabled");
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledTimes(1);
     expect(store.toast).toContain("同步记忆失败");
-    expect(store.showSettings).toBe(false);
   });
 
   it("重置记忆需确认，确认后调用 memory/reset 并提示", async () => {
@@ -434,6 +435,7 @@ describe("SettingsView 终端 Shell", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
   beforeEach(() => {
+    __resetTabsForTest();
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
@@ -462,21 +464,339 @@ describe("SettingsView 终端 Shell", () => {
     expect(options).toEqual(["cmd", "powershell"]);
   });
 
-  it("终端 Shell 行位于设置面板最后一项", () => {
+  it("终端 Shell 行位于通用分区内最后一项", () => {
     wrapper = mount(SettingsView);
-    const labels = wrapper
+    const section = wrapper.find(".settings-section-general");
+    const labels = section
       .findAll(".settings .setting-row")
       .map((row) => row.find("label").text());
     expect(labels[labels.length - 1]).toBe("终端 Shell");
   });
 
-  it("选择 PowerShell 保存后 patch 包含 terminal_shell: powershell", async () => {
+  it("切换 PowerShell 后立即保存", async () => {
     wrapper = mount(SettingsView);
     await wrapper.find("select.terminal-shell-select").setValue("powershell");
-    await wrapper.find("button.btn.primary").trigger("click");
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ terminal_shell: "powershell" }),
     );
+  });
+});
+
+describe("SettingsView 插件管理", () => {
+  let wrapper: ReturnType<typeof mount> | undefined;
+
+  beforeEach(() => {
+    __resetTabsForTest();
+    __resetSessionTabsForTest();
+    store.toast = "";
+    store.confirm = null;
+    mockedInvoke.mockReset();
+    mockedSave.mockClear();
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = undefined;
+  });
+
+  it("按市场分组渲染插件与状态标签，区分本地/远程目录", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "browser",
+              name: "browser",
+              installed: true,
+              enabled: true,
+              interface: { displayName: "Browser", shortDescription: "浏览器控制" },
+            },
+            {
+              id: "pdf",
+              name: "pdf",
+              installed: false,
+              enabled: false,
+              interface: { displayName: "PDF" },
+            },
+          ],
+        },
+        {
+          name: "openai-curated",
+          path: null,
+          plugins: [
+            {
+              id: "gmail",
+              name: "gmail",
+              installed: false,
+              enabled: false,
+              interface: { displayName: "Gmail" },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const mps = wrapper.findAll(".plugin-marketplace");
+    expect(mps.length).toBe(2);
+    expect(wrapper.text()).toContain("Browser");
+    expect(wrapper.text()).toContain("PDF");
+    expect(wrapper.text()).toContain("Gmail");
+    expect(wrapper.text()).toContain("已启用");
+    expect(wrapper.text()).toContain("未安装");
+    expect(mps[0].text()).toContain("本地市场");
+    expect(mps[1].text()).toContain("官方远程目录");
+  });
+
+  it("点击市场标题折叠/展开插件列表", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "browser",
+              name: "browser",
+              installed: true,
+              enabled: true,
+              interface: { displayName: "Browser" },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find(".plugin-list").exists()).toBe(true);
+    const head = wrapper.find(".plugin-marketplace-head");
+    await head.trigger("click");
+    expect(wrapper.find(".plugin-list").exists()).toBe(false);
+    expect(head.classes()).toContain("collapsed");
+    await head.trigger("click");
+    expect(wrapper.find(".plugin-list").exists()).toBe(true);
+    expect(head.classes()).not.toContain("collapsed");
+  });
+
+  it("点击移除市场按钮不触发折叠", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "browser",
+              name: "browser",
+              installed: true,
+              enabled: true,
+              interface: { displayName: "Browser" },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const head = wrapper.find(".plugin-marketplace-head");
+    await wrapper.find(".plugin-market-remove").trigger("click");
+    expect(store.confirm).toBeTruthy();
+    expect(head.classes()).not.toContain("collapsed");
+    expect(wrapper.find(".plugin-list").exists()).toBe(true);
+  });
+
+  it("加载失败展示 marketplaceLoadErrors", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [],
+      marketplaceLoadErrors: [{ name: "bad-repo", error: "git clone 失败" }],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find(".plugin-load-error").text()).toContain("git clone 失败");
+  });
+
+  it("本地市场插件安装传 marketplacePath", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "pdf",
+                  name: "pdf",
+                  installed: false,
+                  interface: { displayName: "PDF" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "plugin/install",
+      params: { marketplacePath: "C:/x/bundled", pluginName: "pdf" },
+    });
+    expect(store.toast).toContain("已安装 PDF");
+  });
+
+  it("远程目录插件安装传 remoteMarketplaceName", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-curated",
+              path: null,
+              plugins: [
+                {
+                  id: "gmail",
+                  name: "gmail",
+                  installed: false,
+                  interface: { displayName: "Gmail" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "plugin/install",
+      params: { remoteMarketplaceName: "openai-curated", pluginName: "gmail" },
+    });
+  });
+
+  it("安装需认证时提示账号登录（API key 不可用）", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-curated",
+              path: null,
+              plugins: [
+                {
+                  id: "gmail",
+                  name: "gmail",
+                  installed: false,
+                  interface: { displayName: "Gmail" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (cmd === "codex_rpc" && args?.method === "plugin/install") {
+        throw new Error("authentication required");
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("需要账号登录");
+  });
+
+  it("卸载需确认，确认后调用 plugin/uninstall", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "browser",
+                  name: "browser",
+                  installed: true,
+                  enabled: true,
+                  interface: { displayName: "Browser" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-uninstall-btn").trigger("click");
+    expect(store.confirm).toBeTruthy();
+    settleConfirm(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "plugin/uninstall",
+      params: { pluginId: "browser" },
+    });
+  });
+
+  it("添加市场调用 marketplace/add 并刷新目录", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "marketplace/add") {
+        return {};
+      }
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return { marketplaces: [] };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .find(".plugin-market-add input")
+      .setValue("owner/repo");
+    await wrapper.find(".plugin-market-add .btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "marketplace/add",
+      params: { source: "owner/repo" },
+    });
+    expect(store.toast).toContain("市场已添加");
+  });
+
+  it("管理员禁用插件不显示安装按钮", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "banned",
+              name: "banned",
+              installed: false,
+              enabled: false,
+              availability: "DisabledByAdmin",
+              disabledReason: "disabled by admin",
+              interface: { displayName: "Banned" },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.text()).toContain("管理员已禁用");
+    expect(wrapper.find(".plugin-install-btn").attributes("disabled")).toBeDefined();
   });
 });

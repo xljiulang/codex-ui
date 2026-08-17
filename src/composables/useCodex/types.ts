@@ -178,6 +178,41 @@ export interface PluginItem {
   brandColor: string;
 }
 
+/** 插件目录条目（plugin/list 的 PluginSummary 归一化，供设置页插件管理） */
+export interface PluginCatalogItem {
+  id: string;
+  name: string;
+  remotePluginId: string | null;
+  version: string | null;
+  installed: boolean;
+  enabled: boolean;
+  availability: string;
+  disabledReason: string | null;
+  authPolicy: string;
+  installPolicy: string;
+  displayName: string;
+  description: string;
+  iconUrl: string | null;
+  keywords: string[];
+}
+
+/** 插件市场（plugin/list 的 PluginMarketplaceEntry 归一化，供设置页插件管理） */
+export interface PluginMarketplaceInfo {
+  name: string;
+  /** 本地市场路径；null = 纯远程目录（官方 curated 等） */
+  path: string | null;
+  /** 远程目录市场：安装走 remoteMarketplaceName，本地市场走 marketplacePath */
+  isRemote: boolean;
+  displayName: string;
+  plugins: PluginCatalogItem[];
+}
+
+/** plugin/list 返回的市场加载错误 */
+export interface PluginMarketplaceLoadError {
+  name: string;
+  error: string;
+}
+
 
 /** $ 菜单与回显悬浮提示共用的技能条目（skills/list 归一化结果） */
 export interface SkillItem {

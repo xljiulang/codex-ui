@@ -10,6 +10,7 @@ export const TabKind = {
   Preview: "preview",
   Terminal: "terminal",
   Commit: "commit",
+  Settings: "settings",
 } as const;
 export type TabKind = (typeof TabKind)[keyof typeof TabKind];
 
@@ -19,6 +20,7 @@ export const TabIcon = {
   Terminal: "terminal",
   File: "file",
   Commit: "commit",
+  Settings: "settings",
 } as const;
 export type TabIcon = (typeof TabIcon)[keyof typeof TabIcon];
 
