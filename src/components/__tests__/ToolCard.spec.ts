@@ -10,6 +10,15 @@ import ToolCard from "../ToolCard.vue";
 import type { ThreadItem } from "../../lib/types";
 import { store } from "../../composables/useCodex";
 import { __resetEditorTabsForTest } from "../../composables/useEditorTabs";
+import {
+  ICON_AGENTS,
+  ICON_CHECKLIST,
+  ICON_EDIT,
+  ICON_GLOBE,
+  ICON_IMAGE,
+  ICON_TERMINAL,
+  ICON_TOOL,
+} from "../../lib/icons";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -426,5 +435,105 @@ describe("ToolCard 新增条目类型", () => {
     const fill = wrapper.find(".tool-progress-fill");
     expect(fill.exists()).toBe(true);
     expect(fill.attributes("style")).toContain("width: 40%");
+  });
+});
+
+describe("ToolCard 头部图标", () => {
+  const cases: {
+    name: string;
+    item: ThreadItem;
+    expected: string;
+    title: string;
+  }[] = [
+    {
+      name: "执行命令",
+      item: makeItem({}),
+      expected: ICON_TERMINAL,
+      title: "执行命令",
+    },
+    {
+      name: "MCP 工具调用",
+      item: {
+        id: "t1",
+        type: "mcpToolCall",
+        server: "srv",
+        tool: "t",
+      } as ThreadItem,
+      expected: ICON_TOOL,
+      title: "调用工具 srv::t",
+    },
+    {
+      name: "动态工具调用",
+      item: {
+        id: "t2",
+        type: "dynamicToolCall",
+        namespace: "ns",
+        tool: "t",
+      } as ThreadItem,
+      expected: ICON_TOOL,
+      title: "调用工具 ns/t",
+    },
+    {
+      name: "子代理协作",
+      item: {
+        id: "t3",
+        type: "collabAgentToolCall",
+        tool: "spawn_agent",
+      } as ThreadItem,
+      expected: ICON_AGENTS,
+      title: "子代理协作",
+    },
+    {
+      name: "网络搜索",
+      item: { id: "t4", type: "webSearch", query: "q" } as ThreadItem,
+      expected: ICON_GLOBE,
+      title: "搜索网络",
+    },
+    {
+      name: "文件变更",
+      item: {
+        id: "t5",
+        type: "fileChange",
+        changes: [],
+        status: "completed",
+      } as ThreadItem,
+      expected: ICON_EDIT,
+      title: "文件变更",
+    },
+    {
+      name: "生成图片",
+      item: {
+        id: "t6",
+        type: "imageGeneration",
+        status: "completed",
+      } as ThreadItem,
+      expected: ICON_IMAGE,
+      title: "生成图片",
+    },
+    {
+      name: "计划",
+      item: { id: "t7", type: "todoList", items: [] } as ThreadItem,
+      expected: ICON_CHECKLIST,
+      title: "计划",
+    },
+  ];
+
+  it.each(cases)("$name 渲染对应图标且标题不变", ({ item, expected, title }) => {
+    const wrapper = mount(ToolCard, { props: { item } });
+    const icon = wrapper.find(".assistant-card-icon");
+    expect(icon.exists()).toBe(true);
+    expect(icon.attributes("aria-hidden")).toBe("true");
+    expect(icon.find("path").attributes("d")).toBe(expected);
+    expect(wrapper.find(".assistant-card-title").text()).toBe(title);
+  });
+
+  it("未知类型回退扳手图标", () => {
+    const wrapper = mount(ToolCard, {
+      props: { item: { id: "u1", type: "unknown" } as unknown as ThreadItem },
+    });
+    expect(wrapper.find(".assistant-card-icon path").attributes("d")).toBe(
+      ICON_TOOL,
+    );
+    expect(wrapper.find(".assistant-card-title").text()).toBe("工具");
   });
 });

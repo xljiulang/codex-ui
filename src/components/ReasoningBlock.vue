@@ -5,6 +5,7 @@ import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
 import { formatDuration, formatElapsed } from "../lib/format";
+import { ICON_THINK } from "../lib/icons";
 
 const props = defineProps<{ item: ThreadItem }>();
 const open = ref(false);
@@ -66,6 +67,9 @@ watch(
         @click="open = !open"
       >
         <span class="assistant-card-arrow">{{ open ? "▾" : "▸" }}</span>
+        <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="ICON_THINK" />
+        </svg>
         <span>{{ open ? "收起思考过程" : "显示思考过程" }}</span>
         <span v-if="timeLabel" class="reasoning-time">{{ timeLabel }}</span>
       </button>

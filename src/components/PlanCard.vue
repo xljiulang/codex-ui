@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { TurnPlan } from "../composables/useCodex/types";
+import { ICON_CHECKLIST } from "../lib/icons";
 
 const props = defineProps<{ plan: TurnPlan }>();
 
@@ -26,6 +27,9 @@ const sub = computed(() => {
         @click="open = !open"
       >
         <span class="assistant-card-arrow">{{ open ? "▾" : "▸" }}</span>
+        <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="ICON_CHECKLIST" />
+        </svg>
         <span class="assistant-card-title">计划</span>
         <span v-if="sub" class="assistant-card-sub">{{ sub }}</span>
       </button>

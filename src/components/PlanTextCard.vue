@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import MarkdownText from "./MarkdownText.vue";
 import { copyText } from "../lib/clipboard";
 import { splitPlanTitle } from "../lib/planText";
+import { ICON_PLAN } from "../lib/icons";
 
 const props = defineProps<{
   /** 计划正文（原始 Markdown 源码，含计划自带标题） */
@@ -36,6 +37,9 @@ async function copyPlan() {
         @click="open = !open"
       >
         <span class="assistant-card-arrow">{{ open ? "▾" : "▸" }}</span>
+        <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="ICON_PLAN" />
+        </svg>
         <span class="assistant-card-title">{{ plan.title }}</span>
       </button>
       <button

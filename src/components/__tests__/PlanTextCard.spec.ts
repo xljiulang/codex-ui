@@ -1,12 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import PlanTextCard from "../PlanTextCard.vue";
+import { ICON_PLAN } from "../../lib/icons";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => {
+  it("头部渲染计划内容图标", () => {
+    const wrapper = mount(PlanTextCard, {
+      props: { planText: "# 方案\n- 步骤1" },
+    });
+    const icon = wrapper.find(".assistant-card-icon");
+    expect(icon.exists()).toBe(true);
+    expect(icon.find("path").attributes("d")).toBe(ICON_PLAN);
+  });
+
   it("默认折叠：标题来自计划首个标题行，正文不可见", () => {
     const wrapper = mount(PlanTextCard, {
       props: { planText: "# 方案\n- 步骤1" },

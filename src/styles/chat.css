@@ -754,6 +754,15 @@
   font-size: 11px;
 }
 
+/* 助理工具卡片标题左侧图标：与箭头同色、不参与换行收缩 */
+.assistant-card-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+  fill: currentColor;
+}
+
 .assistant-card-body-enter-active,
 .assistant-card-body-leave-active {
   transition: opacity 0.18s ease, transform 0.18s ease;

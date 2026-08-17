@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import ReasoningBlock from "../ReasoningBlock.vue";
 import type { ThreadItem } from "../../lib/types";
+import { ICON_THINK } from "../../lib/icons";
 
 function reasoningItem(lines: number, streaming = true): ThreadItem {
   const content = Array.from({ length: lines }, (_, i) => `第 ${i + 1} 行思考内容`);
@@ -15,6 +16,15 @@ function reasoningItem(lines: number, streaming = true): ThreadItem {
 }
 
 describe("ReasoningBlock 完整展示", () => {
+  it("头部渲染思考灯泡图标", () => {
+    const wrapper = mount(ReasoningBlock, {
+      props: { item: reasoningItem(1, false) },
+    });
+    const icon = wrapper.find(".assistant-card-icon");
+    expect(icon.exists()).toBe(true);
+    expect(icon.find("path").attributes("d")).toBe(ICON_THINK);
+  });
+
   it("长内容完整渲染，不再限高、无展开按钮", async () => {
     const wrapper = mount(ReasoningBlock, {
       props: { item: reasoningItem(20) },

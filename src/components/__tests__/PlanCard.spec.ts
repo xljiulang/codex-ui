@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import PlanCard from "../PlanCard.vue";
+import { ICON_CHECKLIST } from "../../lib/icons";
 
 describe("PlanCard Updated Plan 任务清单", () => {
+  it("头部渲染计划单勾选清单图标", () => {
+    const wrapper = mount(PlanCard, {
+      props: {
+        plan: { steps: [{ step: "A", status: "pending" }] },
+      },
+    });
+    const icon = wrapper.find(".assistant-card-icon");
+    expect(icon.exists()).toBe(true);
+    expect(icon.find("path").attributes("d")).toBe(ICON_CHECKLIST);
+  });
+
   it("渲染说明与三种状态的步骤", () => {
     const wrapper = mount(PlanCard, {
       props: {

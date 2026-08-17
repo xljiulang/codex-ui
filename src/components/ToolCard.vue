@@ -15,6 +15,15 @@ import { useTailWindow } from "../composables/useTailWindow";
 import { formatDuration, formatElapsed } from "../lib/format";
 import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { copyText } from "../lib/clipboard";
+import {
+  ICON_AGENTS,
+  ICON_CHECKLIST,
+  ICON_EDIT,
+  ICON_GLOBE,
+  ICON_IMAGE,
+  ICON_TERMINAL,
+  ICON_TOOL,
+} from "../lib/icons";
 import FileChangeCard from "./FileChangeCard.vue";
 import ImageGenerationCard from "./ImageGenerationCard.vue";
 import TodoListCard from "./TodoListCard.vue";
@@ -88,6 +97,29 @@ const title = computed(() => {
       return "计划";
     default:
       return "工具";
+  }
+});
+
+/** 头部图标：按工具类型映射，默认工具调用扳手 */
+const icon = computed(() => {
+  switch (type.value) {
+    case "commandExecution":
+      return ICON_TERMINAL;
+    case "mcpToolCall":
+    case "dynamicToolCall":
+      return ICON_TOOL;
+    case "collabAgentToolCall":
+      return ICON_AGENTS;
+    case "webSearch":
+      return ICON_GLOBE;
+    case "fileChange":
+      return ICON_EDIT;
+    case "imageGeneration":
+      return ICON_IMAGE;
+    case "todoList":
+      return ICON_CHECKLIST;
+    default:
+      return ICON_TOOL;
   }
 });
 
@@ -265,6 +297,9 @@ const effectiveExpanded = computed(() => expanded.value);
         <span class="assistant-card-arrow">{{
           effectiveExpanded ? "▾" : "▸"
         }}</span>
+        <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="icon" />
+        </svg>
         <span class="assistant-card-title">{{ title }}</span>
         <span class="assistant-card-sub">{{ sub }}</span>
         <span class="assistant-card-status">
