@@ -2,10 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises } from "@vue/test-utils";
 import { nextTick } from "vue";
 
+const docxMock = vi.hoisted(() => ({
+  docxToHtml: vi.fn(),
+  jsonToDocx: vi.fn(),
+  isDocxPath: vi.fn((name: string) => name.toLowerCase().endsWith(".docx")),
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: vi.fn((p: string) => `asset://${p}`),
 }));
+vi.mock("../../lib/docx", () => docxMock);
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
@@ -220,6 +227,33 @@ describe("openPathInApp 对话链接应用内打开", () => {
     expect(tab).toBeTruthy();
     expect((tab as { previewType?: string } | undefined)?.previewType).toBe(
       "image",
+    );
+  });
+
+  it("工作区内 .docx：直接打开富文本编辑标签（不做文本探测）", async () => {
+    docxMock.docxToHtml.mockResolvedValue({ html: "<p>doc</p>", warnings: [] });
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: btoa("PK"), byteSize: 2 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const path = root + "\\a.docx";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("session_fs_probe_text", {
+      workspace: root,
+      path,
+    });
+    const tab = tabs.find((t) => t.kind === "docx" && t.path === path);
+    expect(tab).toBeTruthy();
+    await vi.waitFor(
+      () => {
+        expect(
+          (tab as { initialHtml?: string | null } | undefined)?.initialHtml,
+        ).toBe("<p>doc</p>");
+      },
+      { timeout: 3000, interval: 20 },
     );
   });
 

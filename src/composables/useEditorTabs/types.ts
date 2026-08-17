@@ -3,6 +3,7 @@ import type { EditorEol } from "../../lib/editorFile";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow } from "../../lib/types";
+import type { Editor } from "@tiptap/vue-3";
 import { TabKind, type EditorTabBase } from "../../lib/tabs";
 
 /** diff 预览参数（与 Rust DiffPreviewParams 结构一致） */
@@ -36,6 +37,25 @@ export interface FileEditorTab extends EditorTabBase {
   editorState: EditorState | null;
   savedText: Text | null;
   wrapCompartment: Compartment | null;
+}
+
+/** .docx 富文本编辑标签：TipTap 编辑器实例随标签持久（非响应式） */
+export interface DocxEditorTab extends EditorTabBase {
+  kind: (typeof TabKind)["Docx"];
+  id: string;
+  workspace: string;
+  path: string;
+  title: string;
+  loading: boolean;
+  error: string;
+  dirty: boolean;
+  saving: boolean;
+  status: string;
+  byteSize: number | null;
+  /** 首次导入的 HTML（TipTap 数据源），markRaw 存储避免响应式代理 */
+  initialHtml: string | null;
+  /** TipTap 编辑器实例（markRaw），由 DocxEditorPane 创建后回填 */
+  editor: Editor | null;
 }
 
 export interface DiffEditorTab extends EditorTabBase {
@@ -104,6 +124,7 @@ export interface CommitEditorTab extends EditorTabBase {
 
 export type EditorTab =
   | FileEditorTab
+  | DocxEditorTab
   | DiffEditorTab
   | PreviewEditorTab
   | TerminalEditorTab

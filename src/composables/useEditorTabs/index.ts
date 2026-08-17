@@ -4,6 +4,7 @@
 export { activeTab, activeTabId, activateTab, tabs } from "../useTabs";
 export type {
   CommitEditorTab,
+  DocxEditorTab,
   DiffEditorTab,
   DiffPreviewParams,
   EditorTab,
@@ -16,9 +17,11 @@ export {
   isTerminalBusy,
   openCommitFileDiffTab,
   openCommitTab,
+  openDocxTab,
   openDiffTab,
   openFileTab,
   openPreviewTab,
+  saveDocxTab,
   openTerminalTab,
   saveFileTab,
 } from "./open";
@@ -31,7 +34,7 @@ export {
   closeTab,
   closeTabsToLeftAll,
   closeTabsToRightAll,
-  dirtyFileTabs,
+  dirtyEditableTabs,
   discardTabAndClose,
   pendingCloseId,
   saveAllDirtyTabs,

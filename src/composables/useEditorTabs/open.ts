@@ -10,6 +10,7 @@ import { formatTimeHMS, pathBaseName } from "../../lib/format";
 import { assetUrl } from "../../lib/asset";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import { base64ToBytes, type PreviewType } from "../../lib/preview";
+import { docxToHtml, jsonToDocx } from "../../lib/docx";
 import type { DiffRow } from "../../lib/types";
 import {
   attachTerminal,
@@ -20,6 +21,7 @@ import { activeTabId, insertTab, tabs } from "../useTabs";
 import { store } from "../useCodex/store";
 import type {
   CommitEditorTab,
+  DocxEditorTab,
   DiffEditorTab,
   DiffPreviewParams,
   EditorTab,
@@ -407,6 +409,86 @@ export async function openPreviewTab(
   }
 }
 
+/**
+ * 打开 .docx 富文本编辑标签：已打开则直接激活；否则新建标签并异步读取
+ * 二进制字节 → mammoth 转 HTML 存入标签，由 DocxEditorPane 创建 TipTap 实例。
+ */
+export async function openDocxTab(
+  workspace: string,
+  path: string,
+): Promise<void> {
+  const id = fileTabId(workspace, path);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  const tab = reactive({
+    kind: TabKind.Docx,
+    id,
+    workspace,
+    path,
+    title: pathBaseName(path) || path,
+    icon: TabIcon.File,
+    loading: true,
+    error: "",
+    dirty: false,
+    saving: false,
+    status: "",
+    byteSize: null,
+    initialHtml: null,
+    editor: null,
+  }) as unknown as DocxEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
+      workspace,
+      path,
+    });
+    const bytes = base64ToBytes(info.content);
+    // base64ToBytes 生成的是精确长度的新缓冲区，可直接取 .buffer
+    const { html, warnings } = await docxToHtml(bytes.buffer as ArrayBuffer);
+    tab.initialHtml = html;
+    tab.byteSize = info.byteSize;
+    if (warnings.length > 0) {
+      tab.status = `导入提示：${warnings[0]}`;
+    }
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
+
+/** 保存 .docx 标签：编辑器 JSON → docx 字节 → 直接覆盖原文件 */
+export async function saveDocxTab(id: string): Promise<boolean> {
+  const tab = tabs.find(
+    (t): t is DocxEditorTab => t.kind === TabKind.Docx && t.id === id,
+  );
+  if (!tab || !tab.editor || !tab.dirty || tab.saving) {
+    return false;
+  }
+  tab.saving = true;
+  try {
+    const { base64, warnings } = await jsonToDocx(tab.editor.getJSON());
+    await invoke("session_fs_write_bytes", {
+      workspace: tab.workspace,
+      path: tab.path,
+      content: base64,
+    });
+    tab.dirty = false;
+    tab.status = `已保存 ${formatTimeHMS(Date.now())}${
+      warnings.length > 0 ? `（${warnings[0]}）` : ""
+    }`;
+    return true;
+  } catch (e) {
+    tab.status = `保存失败：${String(e)}`;
+    return false;
+  } finally {
+    tab.saving = false;
+  }
+}
+
 /** 运行中终端判定：命令执行中（busy）且未退出、无错误（与标签呼吸灯同源） */
 export function isTerminalBusy(tab: EditorTab): boolean {
   return tab.kind === TabKind.Terminal && tab.busy && !tab.exited && !tab.error;
@@ -416,7 +498,9 @@ export function isTerminalBusy(tab: EditorTab): boolean {
 export function isFileTabOpen(workspace: string, path: string): boolean {
   return tabs.some(
     (t) =>
-      (t.kind === TabKind.File || t.kind === TabKind.Preview) &&
+      (t.kind === TabKind.File ||
+        t.kind === TabKind.Preview ||
+        t.kind === TabKind.Docx) &&
       t.workspace === workspace &&
       t.path === path,
   );

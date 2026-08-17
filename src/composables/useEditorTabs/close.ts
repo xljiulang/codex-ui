@@ -5,11 +5,18 @@ import { releaseTerminal } from "../useTerminalEvents";
 import { TabKind } from "../../lib/tabs";
 import { activeTabId, tabs } from "../useTabs";
 import type { Tab } from "../useTabs";
-import { isTerminalBusy, saveFileTab } from "./open";
-import type { EditorTab, FileEditorTab } from "./types";
+import { isTerminalBusy, saveDocxTab, saveFileTab } from "./open";
+import type { DocxEditorTab, EditorTab, FileEditorTab } from "./types";
 
 /** 待关闭的脏文件标签 id（由编辑面板弹确认层） */
 export const pendingCloseId = ref<string | null>(null);
+
+/** 有未保存更改的文件型标签（.txt 等文本 + .docx 富文本） */
+function isDirtyEditableTab(tab: EditorTab): boolean {
+  return (
+    (tab.kind === TabKind.File || tab.kind === TabKind.Docx) && tab.dirty
+  );
+}
 
 /** 释放标签后端资源：终端进程结束（幂等，失败静默） */
 function disposeTab(tab: EditorTab): void {
@@ -30,7 +37,7 @@ export async function closeTab(id: string): Promise<void> {
     await closeSessionTab(tab.id);
     return;
   }
-  if (tab.kind === TabKind.File && tab.dirty) {
+  if (isDirtyEditableTab(tab)) {
     pendingCloseId.value = id;
     return;
   }
@@ -62,7 +69,9 @@ export function cancelClose(): void {
 
 export async function saveTabAndClose(id: string): Promise<void> {
   pendingCloseId.value = null;
-  const ok = await saveFileTab(id);
+  const tab = tabs.find((t) => t.id === id);
+  const ok =
+    tab?.kind === TabKind.Docx ? await saveDocxTab(id) : await saveFileTab(id);
   if (ok) removeTab(id);
 }
 
@@ -84,7 +93,7 @@ function closeTabsMatching(
     if (!pred(tab, idx)) continue;
     if (tab.kind === TabKind.Chat) continue; // 会话标签由统一批量关闭处理
     const t = tab as EditorTab;
-    if (t.kind === TabKind.File && t.dirty) {
+    if (isDirtyEditableTab(t)) {
       skipped++;
       continue;
     }
@@ -120,7 +129,7 @@ async function closeTabRange(start: number, end: number): Promise<number> {
       continue;
     }
     const t = tab as EditorTab;
-    if (t.kind === TabKind.File && t.dirty) {
+    if (isDirtyEditableTab(t)) {
       skipped++;
       continue;
     }
@@ -167,17 +176,20 @@ function removeTab(id: string): void {
   }
 }
 
-/** 有未保存更改的文件标签（供关闭应用守卫使用） */
-export function dirtyFileTabs(): FileEditorTab[] {
+/** 有未保存更改的文件型标签（文本 + .docx，供关闭应用守卫使用） */
+export function dirtyEditableTabs(): (FileEditorTab | DocxEditorTab)[] {
   return tabs.filter(
-    (t): t is FileEditorTab => t.kind === TabKind.File && t.dirty,
+    (t): t is FileEditorTab | DocxEditorTab =>
+      (t.kind === TabKind.File || t.kind === TabKind.Docx) && t.dirty,
   );
 }
 
 /** 保存全部脏标签；全部成功返回 true（任一失败则不关闭应用） */
 export async function saveAllDirtyTabs(): Promise<boolean> {
   const results = await Promise.all(
-    dirtyFileTabs().map((t) => saveFileTab(t.id)),
+    dirtyEditableTabs().map((t) =>
+      t.kind === TabKind.Docx ? saveDocxTab(t.id) : saveFileTab(t.id),
+    ),
   );
   return results.every(Boolean);
 }

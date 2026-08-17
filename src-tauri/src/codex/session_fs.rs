@@ -591,6 +591,49 @@ pub async fn session_fs_write(
     .await
 }
 
+/// 二进制内容写入（.docx 等富文本编辑用）：base64 解码后直写，
+/// 守卫与 write_impl 一致（路径包含校验、仅文件），大小上限与
+/// 二进制读取一致（MAX_PREVIEW_BYTES）。
+fn write_bytes_impl(
+    root: &Path,
+    path: &Path,
+    content: &str,
+    max_bytes: u64,
+) -> Result<FsEntry, String> {
+    // base64 长度约 4/3 于原始字节：先按文本长度预检，避免超大负载先解码再拒绝
+    if content.len() as u64 > max_bytes * 4 / 3 + 4 {
+        return Err("文件过大，暂不支持保存".into());
+    }
+    let bytes = STANDARD
+        .decode(content)
+        .map_err(|_| "内容不是合法的 base64".to_string())?;
+    if bytes.len() as u64 > max_bytes {
+        return Err("文件过大，暂不支持保存".into());
+    }
+    let target = ensure_inside(root, path)?;
+    let meta = std::fs::metadata(&target)
+        .map_err(|e| format!("无法写入文件 {}: {e}", clean_path(&target)))?;
+    if !meta.is_file() {
+        return Err(format!("不是文件: {}", clean_path(&target)));
+    }
+    std::fs::write(&target, &bytes)
+        .map_err(|e| format!("写入文件失败 {}: {e}", clean_path(&target)))?;
+    entry_from_path(root, &target)
+}
+
+#[tauri::command]
+pub async fn session_fs_write_bytes(
+    workspace: String,
+    path: String,
+    content: String,
+) -> Result<FsEntry, String> {
+    run_blocking(60, move || {
+        let root_p = resolve_workspace(&workspace)?;
+        write_bytes_impl(&root_p, Path::new(&path), &content, MAX_PREVIEW_BYTES)
+    })
+    .await
+}
+
 /// 新建文本文件：目标必须为根内目录，自动生成唯一名
 /// （新建文本文件.txt，冲突时追加 (2)、(3)…），创建空文件并返回条目
 fn create_file_impl(root: &Path, dir: &Path) -> Result<FsEntry, String> {
@@ -1407,5 +1450,44 @@ mod tests {
         std::fs::write(root.join("big.pdf"), vec![0u8; 2048]).unwrap();
         let err = read_bytes_impl(&root, &root.join("big.pdf"), 1024).unwrap_err();
         assert!(err.contains("文件过大"));
+    }
+
+    #[test]
+    fn write_bytes_roundtrip_with_guards() {
+        let (tmp, root) = tree();
+        // 正常写入：base64 解码后覆盖原文件
+        let payload = [0x50u8, 0x4b, 0x03, 0x04, 0x14, 0x00]; // PK\x03\x04
+        std::fs::write(root.join("doc.docx"), b"old").unwrap();
+        let e =
+            write_bytes_impl(&root, &root.join("doc.docx"), &STANDARD.encode(payload), 1024)
+                .unwrap();
+        assert_eq!(e.name, "doc.docx");
+        assert_eq!(std::fs::read(root.join("doc.docx")).unwrap(), payload);
+        // 目录拒绝
+        assert!(
+            write_bytes_impl(&root, &root.join("src"), &STANDARD.encode(payload), 1024)
+                .is_err()
+        );
+        // 越界拒绝
+        let outside = tmp.path().parent().unwrap().join("outside.docx");
+        std::fs::write(&outside, b"x").unwrap();
+        assert!(
+            write_bytes_impl(&root, &outside, &STANDARD.encode(payload), 1024).is_err()
+        );
+        let _ = std::fs::remove_file(&outside);
+        // 非法 base64 拒绝
+        let err =
+            write_bytes_impl(&root, &root.join("doc.docx"), "not-base64!!!", 1024).unwrap_err();
+        assert!(err.contains("base64"));
+        // 超过上限拒绝
+        let big = vec![0u8; 2048];
+        let err = write_bytes_impl(&root, &root.join("doc.docx"), &STANDARD.encode(&big), 1024)
+            .unwrap_err();
+        assert!(err.contains("文件过大"));
+        // 超长文本在解码前即拒绝（不分配大内存）
+        let huge = "A".repeat(4096);
+        let err = write_bytes_impl(&root, &root.join("doc.docx"), &huge, 1024).unwrap_err();
+        assert!(err.contains("文件过大"));
+        let _ = tmp;
     }
 }

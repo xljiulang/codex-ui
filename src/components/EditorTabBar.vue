@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type {
   DiffEditorTab,
+  DocxEditorTab,
   EditorTab,
   FileEditorTab,
   PreviewEditorTab,
@@ -128,7 +129,9 @@ onBeforeUnmount(() => {
 });
 
 /** 标签 → 伪 FsEntry，复用资源面板图标缓存/取图逻辑 */
-function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEntry {
+function tabToEntry(
+  tab: FileEditorTab | DocxEditorTab | DiffEditorTab | PreviewEditorTab,
+): FsEntry {
   const root = tab.workspace;
   return {
     name: tab.title,
@@ -157,7 +160,8 @@ watch(
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of props.editorTabs) {
       if (tab.kind === TabKind.Terminal || tab.kind === TabKind.Commit) continue;
-      const t = tab as FileEditorTab | DiffEditorTab | PreviewEditorTab;
+      const t =
+        tab as FileEditorTab | DocxEditorTab | DiffEditorTab | PreviewEditorTab;
       const list = byRoot.get(t.workspace) ?? [];
       list.push(tabToEntry(t));
       byRoot.set(t.workspace, list);
@@ -321,7 +325,10 @@ function titleTooltip(tab: EditorTab): string {
           {{ tab.title }}
         </span>
         <span
-          v-if="tab.kind === TabKind.File && tab.dirty"
+          v-if="
+            (tab.kind === TabKind.File || tab.kind === TabKind.Docx) &&
+            tab.dirty
+          "
           class="editor-tab-dirty"
           title="未保存"
         ></span>

@@ -2,7 +2,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, interrupt, store } from "./useCodex";
-import { dirtyFileTabs, saveAllDirtyTabs, tabs } from "./useEditorTabs";
+import { dirtyEditableTabs, saveAllDirtyTabs, tabs } from "./useEditorTabs";
 import { isTabWorking, TabKind } from "../lib/tabs";
 import type { SessionTab } from "./useCodex";
 import type { TerminalEditorTab } from "./useEditorTabs";
@@ -54,7 +54,7 @@ export async function registerCloseGuard(): Promise<UnlistenFn> {
         return;
       }
       // 存在未保存文件：确认先保存再关闭，避免丢失编辑内容
-      const dirty = dirtyFileTabs();
+      const dirty = dirtyEditableTabs();
       if (dirty.length > 0) {
         event.preventDefault();
         if (store.confirm) return;

@@ -6,10 +6,11 @@ import {
   toastError,
   workspace,
 } from "../useCodex";
-import { openFileTab, openPreviewTab } from "../useEditorTabs";
+import { openDocxTab, openFileTab, openPreviewTab } from "../useEditorTabs";
 import { toUserAttachment } from "../../lib/mention";
 import { pathBaseName } from "../../lib/format";
 import { previewTypeForName } from "../../lib/preview";
+import { isDocxPath } from "../../lib/docx";
 import {
   dirNameOf,
   isPathUnderRoot,
@@ -35,6 +36,13 @@ export function openImagePreview(entry: FsEntry) {
   const root = workspace.value;
   if (!root) return;
   void openPreviewTab("image", root, entry.path);
+}
+
+/** 应用内打开 .docx 富文本编辑：在主窗口左侧编辑器区打开/激活 .docx 标签 */
+export function openDocxEditor(entry: FsEntry) {
+  const root = workspace.value;
+  if (!root) return;
+  void openDocxTab(root, entry.path);
 }
 
 /**
@@ -82,6 +90,10 @@ export async function openPathInApp(path: string): Promise<boolean> {
   if (type === "image") {
     // 图片走 asset 协议，需要绝对路径；root 仅作标签元数据
     void openPreviewTab("image", root, path);
+    return true;
+  }
+  if (isDocxPath(relPath)) {
+    void openDocxTab(root, relPath);
     return true;
   }
   try {

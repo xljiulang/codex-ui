@@ -5,6 +5,7 @@ import type { EditorTab } from "../composables/useEditorTabs";
 export const TabKind = {
   Chat: "chat",
   File: "file",
+  Docx: "docx",
   Diff: "diff",
   Preview: "preview",
   Terminal: "terminal",
