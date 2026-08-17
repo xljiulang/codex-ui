@@ -7,13 +7,15 @@ import path from "node:path";
 import {
   cleanupSessions,
   createClient,
+  ensureSession,
   finish,
   killAppTree,
   log,
   mkTmp,
+  openDiffTab,
   record as recordResult,
+  sleep,
   spawnApp,
-  waitForEditor,
 } from "./lib/e2e.mjs";
 
 const CDP_PORT = Number(process.env.CODEX_E2E_PORT || "9222");
@@ -230,9 +232,8 @@ async function main() {
 
   const r = await spawnApp({ cwd: testDir, port: CDP_PORT });
   child = r.child;
-  const mainPageId = r.page.id;
   cdp = await createClient(r.page.webSocketDebuggerUrl);
-  await waitForEditor(cdp, 60000);
+  await ensureSession(cdp);
   log("UI 就绪");
 
   // ---------- 场景 1: @ 单独 ----------
@@ -678,42 +679,6 @@ async function main() {
     JSON.stringify(rowsFound),
   );
 
-  async function openDiffWindowAndWait(targetText) {
-    await evalJs(
-      `(() => {
-        const rows = Array.from(document.querySelectorAll(".assistant-card .change-row.clickable"));
-        const row = rows.find((r) => r.textContent.includes(${JSON.stringify(
-          targetText,
-        )}));
-        if (row) row.click();
-      })()`,
-    );
-    let diffTarget = null;
-    for (let i = 0; i < 40; i++) {
-      const list = await (await fetch(`${CDP_BASE}/json/list`)).json();
-      diffTarget = list.find(
-        (t) => t.type === "page" && t.id !== mainPageId,
-      );
-      if (diffTarget) break;
-      await sleep(500);
-    }
-    if (!diffTarget) return null;
-    const d = await createClient(diffTarget.webSocketDebuggerUrl);
-    // 复用窗口时 target id 不变，等待内容切到目标文件
-    await d.waitFor(
-      "diff 窗口内容就绪",
-      `(() => {
-        const path = document.querySelector(".diff-window-path")?.textContent ?? "";
-        if (!path.includes(${JSON.stringify(targetText)})) return false;
-        const loading = !!document.querySelector(".diff-loading");
-        const rows = document.querySelectorAll(".diff-row").length;
-        return !loading && (rows > 0 || !!document.querySelector(".diff-fallback-note"));
-      })()`,
-      15000,
-    );
-    return d;
-  }
-
   async function checkNoContextMenu(d) {
     return d.evalJs(`(() => {
       const el = document.querySelector(".diff-text");
@@ -739,7 +704,7 @@ async function main() {
 
   if (rowsFound.length > 0) {
     // hello.txt：旧/新/分隔 + 右键无菜单
-    const d1 = await openDiffWindowAndWait("hello.txt");
+    const d1 = await openDiffTab(cdp, "hello.txt");
     record("文件变更: hello.txt diff 窗口打开", !!d1);
     if (d1) {
       const inline = await d1.evalJs(`(() => {
@@ -766,11 +731,10 @@ async function main() {
       const ctx1 = await checkNoContextMenu(d1);
       record("文件变更: 右键无菜单（阻止默认）", ctx1.ok, JSON.stringify(ctx1));
       await d1.screenshot("8-diff-preview.png");
-      d1.close();
     }
 
     // sample.ts：代码语法高亮
-    const d2 = await openDiffWindowAndWait("sample.ts");
+    const d2 = await openDiffTab(cdp, "sample.ts");
     record("文件变更: sample.ts diff 窗口打开（语法高亮）", !!d2);
     if (d2) {
       const hl = await d2.evalJs(`(() => {

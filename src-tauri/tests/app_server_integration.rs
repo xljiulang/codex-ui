@@ -2,14 +2,121 @@
 //! 设置环境变量 CODEX_BIN 指向 codex 可执行文件时才会运行，否则跳过。
 
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+/// 解析 CODEX_BIN 指向的真实 codex 可执行文件（可能带路径或只是命令名）。
+/// npm 安装的 `codex` 在 PATH 里通常只是 `.cmd`/`.ps1` shim，Rust 的
+/// `Command::new` 无法直接启动；这里按 npm 嵌套/扁平布局解析出真实 codex.exe，
+/// 找不到再回退官方安装目录，最后才原样返回（spawn 时报错而非静默跳过）。
 fn codex_bin() -> Option<String> {
-    std::env::var("CODEX_BIN").ok()
+    let raw = std::env::var("CODEX_BIN").ok()?;
+    Some(resolve_codex_bin(&raw))
+}
+
+fn resolve_codex_bin(raw: &str) -> String {
+    let direct = PathBuf::from(raw);
+    let lower = raw.to_ascii_lowercase();
+    if direct.is_file() && lower.ends_with(".exe") {
+        return raw.to_string();
+    }
+    // 直接指向 shim 文件（.cmd/.bat/.ps1）：在其目录下按 npm 布局解析
+    if direct.is_file()
+        && (lower.ends_with(".cmd") || lower.ends_with(".bat") || lower.ends_with(".ps1"))
+    {
+        if let Some(exe) = direct.parent().and_then(npm_codex_exe) {
+            return exe.to_string_lossy().into_owned();
+        }
+    }
+    // 裸命令名：PATH 里先找原生 exe，再找 shim 并按 npm 布局解析
+    if !direct.is_absolute() {
+        if let Some(p) = find_on_path(&format!("{raw}.exe")) {
+            return p;
+        }
+        let shim = find_on_path(&format!("{raw}.cmd"))
+            .or_else(|| find_on_path(&format!("{raw}.bat")))
+            .or_else(|| find_on_path(&format!("{raw}.ps1")));
+        if let Some(shim) = shim {
+            if let Some(exe) = Path::new(&shim).parent().and_then(npm_codex_exe) {
+                return exe.to_string_lossy().into_owned();
+            }
+        }
+    }
+    // 官方安装兜底：%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe 取最新
+    if let Some(exe) = official_codex_exe() {
+        return exe.to_string_lossy().into_owned();
+    }
+    raw.to_string()
+}
+
+fn find_on_path(name: &str) -> Option<String> {
+    let path = std::env::var("PATH").ok()?;
+    for root in std::env::split_paths(&path) {
+        let p = root.join(name);
+        if p.is_file() {
+            return Some(p.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+/// npm 前缀目录下按嵌套/扁平布局找 @openai 平台包里的真实 codex.exe（x64/arm64）
+fn npm_codex_exe(prefix: &Path) -> Option<PathBuf> {
+    const LAYOUTS: [&[&str]; 2] = [
+        &["node_modules", "@openai", "codex", "node_modules", "@openai"],
+        &["node_modules", "@openai"],
+    ];
+    const TARGETS: [&[&str]; 2] = [
+        &[
+            "codex-win32-x64",
+            "vendor",
+            "x86_64-pc-windows-msvc",
+            "bin",
+            "codex.exe",
+        ],
+        &[
+            "codex-win32-arm64",
+            "vendor",
+            "aarch64-pc-windows-msvc",
+            "bin",
+            "codex.exe",
+        ],
+    ];
+    for layout in LAYOUTS {
+        for target in TARGETS {
+            let mut p = PathBuf::from(prefix);
+            for seg in layout.iter().chain(target.iter()) {
+                p.push(seg);
+            }
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// 官方安装：glob %LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe，按修改时间取最新
+fn official_codex_exe() -> Option<PathBuf> {
+    let root = std::env::var("LOCALAPPDATA")
+        .map(|d| PathBuf::from(d).join("OpenAI").join("Codex").join("bin"))
+        .ok()?;
+    let mut best: Option<(PathBuf, std::time::SystemTime)> = None;
+    for entry in std::fs::read_dir(&root).ok()?.flatten() {
+        let exe = entry.path().join("codex.exe");
+        if exe.is_file() {
+            let mtime = std::fs::metadata(&exe)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            if best.as_ref().map(|(_, t)| mtime > *t).unwrap_or(true) {
+                best = Some((exe, mtime));
+            }
+        }
+    }
+    best.map(|(p, _)| p)
 }
 
 struct Server {

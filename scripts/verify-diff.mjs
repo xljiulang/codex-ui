@@ -7,13 +7,15 @@ import path from "node:path";
 import {
   cleanupSessions,
   createClient,
+  ensureSession,
   finish,
   killAppTree,
   log,
   mkTmp,
+  openDiffTab,
   record as recordResult,
+  sleep,
   spawnApp,
-  waitForEditor,
 } from "./lib/e2e.mjs";
 
 const CDP_PORT = Number(process.env.CODEX_E2E_PORT || "9222");
@@ -50,9 +52,8 @@ process.on("SIGTERM", () => process.exit(143));
 async function main() {
   const r = await spawnApp({ cwd: testDir, port: CDP_PORT });
   child = r.child;
-  const mainPageId = r.page.id;
   cdp = await createClient(r.page.webSocketDebuggerUrl);
-  await waitForEditor(cdp, 60000);
+  await ensureSession(cdp);
 
   const setInput = (text) =>
     cdp.evalJs(`(() => {
@@ -100,37 +101,6 @@ async function main() {
   );
   record("出现可点击的变更行", rowsFound.length >= 2, JSON.stringify(rowsFound));
 
-  async function openDiffWindow(targetText) {
-    await cdp.evalJs(`(() => {
-      const rows = Array.from(document.querySelectorAll(".assistant-card .change-row.clickable"));
-      const row = rows.find((r) => r.textContent.includes(${JSON.stringify(
-        targetText,
-      )}));
-      if (row) row.click();
-    })()`);
-    let t = null;
-    for (let i = 0; i < 40; i++) {
-      t = (await (await fetch(`${CDP_BASE}/json/list`)).json()).find(
-        (x) => x.type === "page" && x.id !== mainPageId,
-      );
-      if (t) break;
-      await sleep(500);
-    }
-    if (!t) return null;
-    const d = await createClient(t.webSocketDebuggerUrl);
-    await d.waitFor(
-      "内容就绪",
-      `(() => {
-        const path = document.querySelector(".diff-window-path")?.textContent ?? "";
-        if (!path.includes(${JSON.stringify(targetText)})) return false;
-        return !document.querySelector(".diff-loading") &&
-          (document.querySelectorAll(".diff-row").length > 0 ||
-            !!document.querySelector(".diff-fallback-note"));
-      })()`,
-    );
-    return d;
-  }
-
   async function checkNoContextMenu(d) {
     return d.evalJs(`(() => {
       const el = document.querySelector(".diff-text");
@@ -150,7 +120,7 @@ async function main() {
     })()`);
   }
 
-  const d1 = await openDiffWindow("hello.txt");
+  const d1 = await openDiffTab(cdp, "hello.txt");
   record("hello.txt diff 窗口打开", !!d1);
   if (d1) {
     const inline = await d1.evalJs(`(() => {
@@ -164,10 +134,9 @@ async function main() {
     record("内联旧/新/分隔", inline.old && inline.neu && inline.sep);
     record("右键无自定义菜单", await checkNoContextMenu(d1));
     await d1.screenshot("diff-hello.png");
-    d1.close();
   }
 
-  const d2 = await openDiffWindow("sample.ts");
+  const d2 = await openDiffTab(cdp, "sample.ts");
   record("sample.ts diff 窗口打开（复用）", !!d2);
   if (d2) {
     const hl = await d2.evalJs(
@@ -176,7 +145,6 @@ async function main() {
     record("代码文件语法高亮", hl);
     record("代码窗口右键无菜单", await checkNoContextMenu(d2));
     await d2.screenshot("diff-highlight.png");
-    d2.close();
   }
 
   const pass = results.filter((r) => r.ok).length;

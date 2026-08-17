@@ -1,4 +1,6 @@
 // 端到端验证：对话进行中权限/任务模式按钮禁用，空闲时恢复可用
+import { ensureSession } from "./lib/e2e.mjs";
+
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
@@ -63,6 +65,8 @@ function chipState() {
 
 ws.onopen = async () => {
   try {
+    // 应用可能启动在零会话标签空状态：先确保存在会话与编辑器（测试钩子）
+    await ensureSession({ evalJs });
     // 等待 UI 就绪
     for (let i = 0; i < 30; i++) {
       await sleep(300);
@@ -83,10 +87,8 @@ ws.onopen = async () => {
       console.log("AFTER_STOP:", JSON.stringify(st));
     }
 
-    // 新建会话，避免受历史会话影响
-    await evalJs(
-      `document.querySelector('button[aria-label="新建会话"]')?.click()`,
-    );
+    // 新建会话（测试钩子），避免受历史会话影响
+    await ensureSession({ evalJs });
     await sleep(400);
     st = JSON.parse(await chipState());
     console.log("NEW_CHAT:", JSON.stringify(st));

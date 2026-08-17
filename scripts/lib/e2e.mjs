@@ -246,6 +246,76 @@ export async function waitForEditor(client, timeoutMs = 60000) {
   );
 }
 
+/**
+ * 确保存在可用的会话标签与聊天编辑器：
+ * 应用可能启动在“零会话标签”空状态（ad7fc6b 起），先等应用壳就绪，
+ * 无编辑器时通过 __CODEX_UI_TEST__.newSession() 创建会话（避开原生目录选择器），
+ * 再等编辑器出现。client 只需提供 evalJs（含 waitFor 的 e2e client 亦可）。
+ */
+export async function ensureSession(client, timeoutMs = 30000) {
+  const waitEval = async (desc, expr, waitMs) => {
+    const deadline = Date.now() + waitMs;
+    let last;
+    while (Date.now() < deadline) {
+      last = await client.evalJs(expr);
+      if (last) return last;
+      await sleep(300);
+    }
+    throw new Error(`等待超时: ${desc}，最后结果: ${JSON.stringify(last)}`);
+  };
+  await waitEval(
+    "应用壳就绪",
+    `!!(document.querySelector(".app") || document.querySelector(".ProseMirror"))`,
+    timeoutMs,
+  );
+  const hasEditor = await client.evalJs(
+    `!!document.querySelector(".ProseMirror")`,
+  );
+  if (hasEditor) return;
+  const created = await client.evalJs(`(async () => {
+    const t = window.__CODEX_UI_TEST__;
+    if (!t || typeof t.newSession !== "function") return false;
+    await t.newSession();
+    return true;
+  })()`);
+  if (!created) {
+    throw new Error("__CODEX_UI_TEST__.newSession 不可用，无法创建会话");
+  }
+  await waitEval("新会话编辑器", `!!document.querySelector(".ProseMirror")`, 15000);
+}
+
+/**
+ * 点击文件变更行打开内嵌 diff 标签（主窗口标签页，v-show 切换）：
+ * 等可见（非 display:none）diff 窗口的目标路径与内容就绪。返回主页面客户端。
+ */
+export async function openDiffTab(client, targetText, timeoutMs = 30000) {
+  await client.evalJs(`(() => {
+    const rows = Array.from(document.querySelectorAll(".assistant-card .change-row.clickable"));
+    const row = rows.find((r) => r.textContent.includes(${JSON.stringify(
+      targetText,
+    )}));
+    if (row) row.click();
+  })()`);
+  await client.waitFor(
+    "diff 标签内容就绪",
+    `(() => {
+      const vis = Array.from(document.querySelectorAll(".diff-window")).find(
+        (w) => w.offsetParent !== null,
+      );
+      if (!vis) return false;
+      const path = vis.querySelector(".diff-window-path")?.textContent ?? "";
+      if (!path.includes(${JSON.stringify(targetText)})) return false;
+      return (
+        !vis.querySelector(".diff-loading") &&
+        (vis.querySelectorAll(".diff-row").length > 0 ||
+          !!vis.querySelector(".diff-fallback-note"))
+      );
+    })()`,
+    timeoutMs,
+  );
+  return client;
+}
+
 /** 收尾：执行清理并按结果退出（供 main().then 使用） */
 export function finish(results, cleanupFn) {
   try {

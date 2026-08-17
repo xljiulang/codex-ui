@@ -1,4 +1,6 @@
 // 端到端验证：请求批准模式下批准文件变更，确认不再显示"已拒绝"，并检查 diff 渲染
+import { ensureSession } from "./lib/e2e.mjs";
+
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
@@ -57,10 +59,8 @@ const sleep = (ms) => evalJs(`new Promise(r => setTimeout(r, ${ms}))`);
 
 ws.onopen = async () => {
   try {
-    // 先新建会话，避免沿用已被删除的会话
-    await evalJs(
-      `document.querySelector('button[aria-label="新建会话"]').click()`,
-    );
+    // 先新建会话（测试钩子，避开原生目录选择器），避免沿用已被删除的会话
+    await ensureSession({ evalJs });
     await sleep(400);
     await evalJs(`(() => {
       const ed = window.__CODEX_UI_EDITOR__;

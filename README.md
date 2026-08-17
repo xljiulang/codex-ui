@@ -94,6 +94,8 @@ npm run test:coverage                      # 前端单测 + 覆盖率（v8；门
 npm run test:rust                          # Rust 单元测试（cargo test --lib）
 $env:CODEX_BIN='codex'; npm run test:rust:integration
                                            # Rust 真实 app-server 集成测试（握手/回合、置顶、目标全生命周期、记忆模式、线程设置同步、回合列表 full、会话搜索）
+                                           # CODEX_BIN 可填裸命令名（npm 的 .cmd/.ps1 shim 会自动解析为真实 codex.exe）
+                                           # 或 codex.exe 完整路径；未设置 CODEX_BIN 时集成用例自动跳过
 npm run test:all                           # 单元 + 类型 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
 npm run test:e2e                           # E2E 一键编排（见下）
 ```

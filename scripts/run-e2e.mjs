@@ -17,11 +17,32 @@ const repoRoot = path.resolve(
   "..",
 );
 
+// Windows 下 npm 是 .cmd shim，Node spawnSync 无法直接解析；统一用
+// node + npm-cli.js 启动，避免 spawnSync npm ENOENT。
+const npmCli = path.resolve(
+  path.dirname(process.execPath),
+  "node_modules",
+  "npm",
+  "bin",
+  "npm-cli.js",
+);
+
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 const has = (name) => process.argv.includes(`--${name}`);
+
+function runNpm(args, opts = {}) {
+  const r = spawnSync(process.execPath, [npmCli, ...args], {
+    stdio: "inherit",
+    cwd: repoRoot,
+    env: process.env,
+    ...opts,
+  });
+  if (r.error) throw r.error;
+  return r.status ?? 1;
+}
 
 const PROBES = [
   { name: "core", script: "verify-core.mjs", port: 9222, args: [] },
@@ -62,7 +83,7 @@ async function main() {
 
   if (has("build")) {
     log("步骤 1/2: 构建前端…");
-    if (run("npm", ["run", "build"]) !== 0) {
+    if (runNpm(["run", "build"]) !== 0) {
       log("前端构建失败");
       return 1;
     }
@@ -80,7 +101,10 @@ async function main() {
     }
   }
 
-  const codexCheck = spawnSync("codex", ["--version"], { stdio: "ignore" });
+  const codexCheck =
+    process.platform === "win32"
+      ? spawnSync("cmd", ["/c", "codex --version"], { stdio: "ignore" })
+      : spawnSync("codex", ["--version"], { stdio: "ignore" });
   if (codexCheck.error) {
     log("警告: 未检测到 codex CLI，探针需要真实 codex app-server + 模型调用");
   }

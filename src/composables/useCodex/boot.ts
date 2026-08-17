@@ -12,6 +12,18 @@ const BOOT_MAX_MS = 15_000;
 
 
 export async function init() {
+  // E2E 测试钩子（与 ComposerBar 暴露 __CODEX_UI_EDITOR__ 同模式）：
+  // 无原生目录选择器创建会话（探针在临时目录启动应用后使用）。
+  try {
+    (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = {
+      newSession: async () => {
+        const { openNewSession } = await import("./actions");
+        await openNewSession();
+      },
+    };
+  } catch {
+    // 非浏览器环境忽略
+  }
   const bootTimer = window.setTimeout(() => {
     store.booting = false;
   }, BOOT_MAX_MS);

@@ -9,10 +9,10 @@ import os from "node:os";
 import path from "node:path";
 import {
   createClient,
+  ensureSession,
   killAppTree,
   sleep,
   spawnApp,
-  waitForEditor,
 } from "./lib/e2e.mjs";
 
 function arg(name, fallback) {
@@ -247,7 +247,7 @@ async function phaseStatic() {
   }
   await setTheme("blue");
   // 历史面板常驻右侧，直接等待挂载后截图
-  await waitFor("历史面板", `!!document.querySelector(".history-panel")`, 5000);
+await waitFor("历史面板", `!!document.querySelector(".history-view")`, 5000);
   await sleep(600);
   await shot("05-history-shared.png");
 }
@@ -331,7 +331,7 @@ async function main() {
   const r = await spawnApp({ cwd: WORK, port: CDP_PORT });
   child = r.child;
   cdp = await createClient(r.page.webSocketDebuggerUrl);
-  await waitForEditor(cdp, 60000);
+  await ensureSession(cdp);
   await sleep(1000);
   console.log(`[audit] APP READY, data-theme=${await evalJs('document.documentElement.dataset.theme')}`);
 

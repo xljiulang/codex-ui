@@ -7,6 +7,7 @@ import fs from "node:fs";
 import {
   cleanupSessions,
   createClient,
+  ensureSession,
   finish,
   killAppTree,
   log,
@@ -14,7 +15,6 @@ import {
   record as recordResult,
   sleep,
   spawnApp,
-  waitForEditor,
 } from "./lib/e2e.mjs";
 
 const CDP_PORT = Number(process.env.CODEX_E2E_PORT || "9222");
@@ -57,7 +57,7 @@ async function launchApp() {
   const r = await spawnApp({ cwd: testDir, port: CDP_PORT });
   child = r.child;
   cdp = await createClient(r.page.webSocketDebuggerUrl);
-  await waitForEditor(cdp, 60000);
+  await ensureSession(cdp);
   log("UI 就绪");
 }
 
@@ -89,13 +89,35 @@ async function clearInput() {
 }
 
 async function clickSend() {
-  return evalJs(`(() => {
-    const b = document.querySelector("button.send-btn");
-    if (!b) return { ok: false, reason: "send-btn 不存在" };
-    if (b.disabled) return { ok: false, reason: "send-btn 禁用" };
-    b.click();
-    return { ok: true };
+  // 插入内容后按钮禁用态随 Vue 渲染更新，轮询等待（≤5s）再点击
+  const deadline = Date.now() + 5000;
+  let last;
+  while (Date.now() < deadline) {
+    last = await evalJs(`(() => {
+      // 多会话标签下 v-show 隐藏的旧会话仍在 DOM：只认可见（活动）会话的按钮
+      const b = Array.from(document.querySelectorAll("button.send-btn")).find(
+        (x) => x.offsetParent !== null,
+      );
+      if (!b) return { ok: false, reason: "send-btn 不存在" };
+      if (b.disabled) return { ok: false, reason: "send-btn 禁用" };
+      b.click();
+      return { ok: true };
+    })()`);
+    if (last.ok) return last;
+    await sleep(200);
+  }
+  const diag = await evalJs(`(() => {
+    const ed = window.__CODEX_UI_EDITOR__;
+    return JSON.stringify({
+      text: ed ? ed.getText() : null,
+      docSize: ed ? ed.state.doc.content.size : -1,
+      attachmentChips: document.querySelectorAll(".attachment-chip").length,
+      sessionTabs: Array.from(document.querySelectorAll(".session-tab")).map((t) => t.textContent.trim()),
+      activeTab: document.querySelector(".session-tab.active")?.textContent.trim() ?? null,
+      hasStop: !!document.querySelector(".send-btn.stop"),
+    });
   })()`);
+  return { ok: false, reason: `send-btn 禁用 (${diag})` };
 }
 
 async function waitTurnDone(timeoutMs = 240000) {
@@ -129,7 +151,7 @@ async function openHistory() {
   // 面板常驻右侧：只需等待挂载
   await waitFor(
     "历史面板出现",
-    `!!document.querySelector(".history-panel")`,
+    `!!document.querySelector(".history-view")`,
     10000,
   );
   await expandAllFolders();
@@ -169,9 +191,11 @@ async function expandAllFolders() {
 }
 
 async function clickNewChat() {
-  await evalJs(
-    `document.querySelector('button[aria-label="新建会话"]').click()`,
-  );
+  await evalJs(`(async () => {
+    const t = window.__CODEX_UI_TEST__;
+    if (!t) throw new Error("__CODEX_UI_TEST__ 未暴露");
+    await t.newSession();
+  })()`);
 }
 
 async function historyRowCount() {
@@ -226,14 +250,14 @@ async function scenarioSettingsToggle() {
   await evalJs(`document.querySelector('button[aria-label="设置"]').click()`);
   await waitFor("设置面板出现", `!!document.querySelector(".settings")`, 10000);
   const opened = await evalJs(
-    `!!document.querySelector(".settings") && !!document.querySelector(".history-panel")`,
+    `!!document.querySelector(".settings") && !!document.querySelector(".history-view")`,
   );
   record("设置: 点击打开设置面板，历史面板保持显示", opened);
 
   await evalJs(`document.querySelector('button[aria-label="设置"]').click()`);
   await waitFor("设置面板关闭", `!document.querySelector(".settings")`, 10000);
   const historyKept = await evalJs(
-    `!!document.querySelector(".history-panel")`,
+    `!!document.querySelector(".history-view")`,
   );
   record("设置: 再次点击关闭设置面板，历史面板仍显示", historyKept);
 }
@@ -309,7 +333,7 @@ async function scenarioPasteImage() {
 async function scenarioEditorResize() {
   log("场景 2c: 输入框高度拖拽调节");
   await evalJs(`(() => {
-    const handle = document.querySelector(".editor-resize-handle");
+    const handle = document.querySelector(".composer-resize-handle");
     handle.dispatchEvent(new PointerEvent("pointerdown", { clientY: 300, bubbles: true }));
   })()`);
   await evalJs(`(() => {
@@ -325,12 +349,12 @@ async function scenarioEditorResize() {
   );
   record(
     "输入框: 向上拖拽后设置内联高度并增高",
-    style1.includes("--editor-h") && h1 >= 96,
+    style1.includes("--composer-h") && h1 >= 120,
     `style=${style1} h=${h1}`,
   );
   // 拖回最低高度
   await evalJs(`(() => {
-    const handle = document.querySelector(".editor-resize-handle");
+    const handle = document.querySelector(".composer-resize-handle");
     handle.dispatchEvent(new PointerEvent("pointerdown", { clientY: 100, bubbles: true }));
   })()`);
   await evalJs(`(() => {
@@ -342,8 +366,8 @@ async function scenarioEditorResize() {
     `document.querySelector(".composer-input-row").getAttribute("style") ?? ""`,
   );
   record(
-    "输入框: 向下拖拽夹紧到最低高度 96px",
-    /--editor-h:\s*96px/.test(style2),
+    "输入框: 向下拖拽夹紧到最低高度 120px",
+    /--composer-h:\s*120px/.test(style2),
     style2,
   );
 }
@@ -437,7 +461,7 @@ async function scenarioPin() {
   }
   if (badgeCount < 2) {
     const dump = await evalJs(`(() => ({
-      panel: !!document.querySelector(".history-panel"),
+      panel: !!document.querySelector(".history-view"),
       items: document.querySelectorAll(".history-item").length,
       folders: document.querySelectorAll(".history-folder").length,
       rows: Array.from(document.querySelectorAll(".history-item")).slice(0, 8).map((r) => ({
@@ -552,7 +576,7 @@ async function scenarioHistoryAlwaysVisible() {
   })()`);
   await sleep(1200);
   const stillOpen = await evalJs(
-    `!!document.querySelector(".history-panel")`,
+    `!!document.querySelector(".history-view")`,
   );
   record(
     "历史: 点击历史会话后面板保持显示（面板常驻右侧）",

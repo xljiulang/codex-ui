@@ -9,6 +9,7 @@ import path from "node:path";
 import {
   cleanupSessions,
   createClient,
+  ensureSession,
   finish,
   killAppTree,
   log,
@@ -16,7 +17,6 @@ import {
   record as recordResult,
   sleep,
   spawnApp,
-  waitForEditor,
 } from "./lib/e2e.mjs";
 
 const CDP_PORT = Number(process.env.CODEX_E2E_PORT || "9223");
@@ -126,7 +126,7 @@ async function main() {
   const r = await spawnApp({ cwd: testDir, port: CDP_PORT });
   child = r.child;
   cdp = await createClient(r.page.webSocketDebuggerUrl);
-  await waitForEditor(cdp, 60000);
+  await ensureSession(cdp);
 
   const goalFile = path.join(testDir, "goal-ok.txt");
   const goalText = `创建文件 ${goalFile}，内容写入 ${MARKER}，完成后停止`;
