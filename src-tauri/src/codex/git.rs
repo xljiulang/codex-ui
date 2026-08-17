@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::codex::diff::DiffRow;
 use crate::codex::path_util::{clean_path, norm_key};
+use crate::codex::session_fs::looks_text;
 
 /// 单文件大小上限（diff 等全量读入内存的操作），超过直接报错
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -314,6 +316,21 @@ fn git_output(
     root: &str,
     args: &[&str],
 ) -> Result<(i32, String, String), GitError> {
+    let (code, stdout, stderr) = git_output_raw(git_bin, root, args)?;
+    Ok((
+        code,
+        String::from_utf8_lossy(&stdout).into_owned(),
+        stderr,
+    ))
+}
+
+/// 执行 git 子命令并返回原始字节 stdout（内容判定用；lossy 转换会破坏
+/// 非法 UTF-8 的探测，不能用于判定文件是否为文本）。
+fn git_output_raw(
+    git_bin: &Path,
+    root: &str,
+    args: &[&str],
+) -> Result<(i32, Vec<u8>, String), GitError> {
     let out = git_command(git_bin)
         .arg("-C")
         .arg(root)
@@ -334,7 +351,7 @@ fn git_output(
         })?;
     Ok((
         out.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.stdout,
         String::from_utf8_lossy(&out.stderr).into_owned(),
     ))
 }
@@ -1390,12 +1407,27 @@ fn git_commit_file_diff(root: &str, hash: &str, path: &str) -> Result<Vec<DiffRo
     git_rev_parse_with(&git_bin, root)?;
     let parents = commit_parents(&git_bin, root, hash)?;
     let base = commit_base_from_parents(&parents);
+    // 文本判定（与资源面板 session_fs_probe_text 同一规则）：新旧两个版本
+    // 中任一侧为二进制都报错；某一侧不存在（新增/删除）时只探测存在的一侧，
+    // 两侧都取不到时继续执行 diff（该路径在两树中都不存在时行集为空）。
+    let new_is_text = blob_bytes(&git_bin, root, &hash, &path)
+        .as_deref()
+        .map(content_is_text)
+        .unwrap_or(true);
+    let old_is_text = blob_bytes(&git_bin, root, &base, &path)
+        .as_deref()
+        .map(content_is_text)
+        .unwrap_or(true);
+    if !new_is_text || !old_is_text {
+        return Err(git_err("该文件是二进制文件，无法显示文本差异"));
+    }
     let (code, out, stderr) = git_output(
         &git_bin,
         root,
         &[
             "diff",
             "-M",
+            "--text",
             "--no-ext-diff",
             "--unified=3",
             &base,
@@ -1413,15 +1445,46 @@ fn git_commit_file_diff(root: &str, hash: &str, path: &str) -> Result<Vec<DiffRo
             MAX_FILE_BYTES / (1024 * 1024)
         )));
     }
-    if out.contains("Binary files") || looks_binary(out.as_bytes()) {
-        return Err(git_err("该文件是二进制文件，无法显示文本差异"));
-    }
     crate::codex::diff::build_commit_diff_rows(&out).map_err(git_err)
 }
 
-/// git 近似二进制判定：前 8000 字节内出现 NUL
-fn looks_binary(data: &[u8]) -> bool {
-    data[..data.len().min(8000)].contains(&0)
+/// 内容文本判定采样字节数（与 session_fs 文本探测窗口一致）
+const TEXT_PROBE_BYTES: usize = 8000;
+
+/// 应用文本判定：前 8000 字节无 NUL 且合法 UTF-8（采样边界截断容忍）→ 文本。
+/// 与资源面板 session_fs_probe_text 共用同一规则，保证两处对同一文件判定一致。
+fn content_is_text(data: &[u8]) -> bool {
+    looks_text(&data[..data.len().min(TEXT_PROBE_BYTES)])
+}
+
+/// 读取仓库内 blob 原始字节（`git cat-file blob <rev>:<path>`）；不存在返回 None
+fn blob_bytes(git_bin: &Path, root: &str, rev: &str, path: &str) -> Option<Vec<u8>> {
+    let (code, out, _) = git_output_raw(
+        git_bin,
+        root,
+        &["cat-file", "blob", &format!("{rev}:{path}")],
+    )
+    .ok()?;
+    if code != 0 {
+        return None;
+    }
+    Some(out)
+}
+
+/// 探测工作区文件是否为文本：读取前 8000 字节按应用规则判定；
+/// 文件不存在或不可读时返回 None（由调用方回退到 HEAD 版本探测）。
+fn worktree_file_is_text(root: &Path, path: &str) -> Option<bool> {
+    let mut buf = vec![0u8; TEXT_PROBE_BYTES];
+    let mut file = std::fs::File::open(root.join(path)).ok()?;
+    let mut n = 0;
+    while n < buf.len() {
+        match file.read(&mut buf[n..]) {
+            Ok(0) => break,
+            Ok(read) => n += read,
+            Err(_) => return None,
+        }
+    }
+    Some(content_is_text(&buf[..n]))
 }
 
 /// diff 基准统一为 HEAD（暂存 + 未暂存合并）；未跟踪文件与空内容对比。
@@ -1431,11 +1494,31 @@ fn git_diff(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
     let git_bin = git_bin()?;
     let repo = git_rev_parse_with(&git_bin, root)?;
     let in_head = git_output(&git_bin, root, &["cat-file", "-e", &format!("HEAD:{path}")])?.0 == 0;
+    // 文本判定（与资源面板同一规则）：优先探测工作区文件，删除/不可读时回退
+    // HEAD blob；两者都不可判定时继续执行 diff，由 git 输出兜底。
+    let is_text = match worktree_file_is_text(&repo.workdir, &path) {
+        Some(text) => text,
+        None => blob_bytes(&git_bin, root, "HEAD", &path)
+            .as_deref()
+            .map(content_is_text)
+            .unwrap_or(true),
+    };
+    if !is_text {
+        return Err(git_err("该文件是二进制文件，无法显示文本差异"));
+    }
     let (code, out, stderr) = if in_head {
         git_output(
             &git_bin,
             root,
-            &["diff", "--no-ext-diff", "--unified=3", "HEAD", "--", &path],
+            &[
+                "diff",
+                "--text",
+                "--no-ext-diff",
+                "--unified=3",
+                "HEAD",
+                "--",
+                &path,
+            ],
         )?
     } else {
         // 未跟踪/新增：与空内容对比（`git diff --no-index` 有差异时退出码为 1）
@@ -1445,6 +1528,7 @@ fn git_diff(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
             root,
             &[
                 "diff",
+                "--text",
                 "--no-index",
                 "--",
                 "/dev/null",
@@ -1463,9 +1547,6 @@ fn git_diff(root: &str, path: &str, _kind: &str) -> Result<String, GitError> {
     }
     if out.trim().is_empty() {
         return Ok(String::new());
-    }
-    if looks_binary(out.as_bytes()) || out.contains("Binary files") {
-        return Err(git_err("该文件是二进制文件，无法显示文本差异"));
     }
     Ok(out)
 }
@@ -2890,6 +2971,64 @@ fn init_committed_repo(dir: &Path) {
         let st = git_init(root.to_str().unwrap()).unwrap();
         let err = git_diff(&st.repo_workspace, "bin.dat", "untracked").unwrap_err();
         assert!(err.message.contains("二进制"));
+    }
+
+    /// 构造“前 8000 字节为纯文本、之后夹带 NUL”的内容：
+    /// 资源面板探测为文本可编辑，而 git 自身（全文件扫描 NUL）判为二进制。
+    fn late_nul_content() -> Vec<u8> {
+        let mut content = b"line text\n".repeat(1200); // 前 12000 字节为纯文本
+        content.extend_from_slice(&[0u8, 1, 2, 3].repeat(100)); // 之后夹带 NUL
+        content.push(b'\n'); // NUL 行后换行，保证后续断言行独立成行
+        content.extend_from_slice(b"AFTER-BEFORE\ntail line\n");
+        content
+    }
+
+    #[test]
+    fn diff_modified_with_late_nul_returns_text() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let mut content = late_nul_content();
+        std::fs::write(root.join("mix.dat"), &content).unwrap();
+        init_committed_repo(root);
+        let needle = b"AFTER-BEFORE";
+        let pos = content.windows(needle.len()).position(|w| w == needle).unwrap();
+        content.splice(pos..pos + needle.len(), b"AFTER-CHANGED".iter().copied());
+        std::fs::write(root.join("mix.dat"), &content).unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let diff = git_diff(&st.repo_workspace, "mix.dat", "modified").unwrap();
+        assert!(diff.contains("+AFTER-CHANGED"));
+        assert!(diff.contains("-AFTER-BEFORE"));
+    }
+
+    #[test]
+    fn diff_gitattributes_binary_returns_text() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("doc.txt"), "plain line 1\nplain line 2\n").unwrap();
+        std::fs::write(root.join(".gitattributes"), "doc.txt binary\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("doc.txt"), "plain line 1\nplain line 2\nchanged\n").unwrap();
+        let st = git_status(root.to_str().unwrap()).unwrap();
+        let diff = git_diff(&st.repo_workspace, "doc.txt", "modified").unwrap();
+        assert!(diff.contains("+changed"));
+    }
+
+    #[test]
+    fn diff_untracked_with_late_nul_returns_text() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("mix.dat"), late_nul_content()).unwrap();
+        let st = git_init(root.to_str().unwrap()).unwrap();
+        let diff = git_diff(&st.repo_workspace, "mix.dat", "untracked").unwrap();
+        assert!(diff.contains("+AFTER-BEFORE"));
     }
 
     #[test]
@@ -5476,5 +5615,30 @@ fn init_committed_repo(dir: &Path) {
         let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
         let err = git_commit_file_diff(root.to_str().unwrap(), &hash, "bin.dat").unwrap_err();
         assert!(err.message.contains("二进制"));
+    }
+
+    #[test]
+    fn commit_file_diff_with_late_nul_returns_rows() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let mut content = late_nul_content();
+        std::fs::write(root.join("mix.dat"), &content).unwrap();
+        init_committed_repo(root);
+        let needle = b"AFTER-BEFORE";
+        let pos = content.windows(needle.len()).position(|w| w == needle).unwrap();
+        content.splice(pos..pos + needle.len(), b"AFTER-CHANGED".iter().copied());
+        std::fs::write(root.join("mix.dat"), &content).unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "change"]).0, 0);
+        let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let rows = git_commit_file_diff(root.to_str().unwrap(), &hash, "mix.dat").unwrap();
+        assert!(
+            rows.iter()
+                .any(|r| matches!(r, DiffRow::Add { text, .. } if text.contains("AFTER-CHANGED")))
+        );
     }
 }

@@ -654,7 +654,7 @@ const TEXT_PROBE_BYTES: usize = 8000;
 
 /// 内容级文本判定：前 8000 字节内出现 NUL → 二进制；无 NUL 且为空或
 /// 合法 UTF-8（仅采样末尾多字节序列被截断视为合法）→ 文本。
-fn looks_text(data: &[u8]) -> bool {
+pub(crate) fn looks_text(data: &[u8]) -> bool {
     if data.contains(&0) {
         return false;
     }
