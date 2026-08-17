@@ -99,7 +99,7 @@ codex app-server --listen off            # 不暴露本地传输
 
 - 订阅关系：`thread/start` / `thread/resume` / `thread/fork` 成功后自动订阅该线程的回合/条目事件；`thread/unsubscribe` 取消订阅。
 - 分页：`thread/list`、`thread/search`、`thread/turns/list`、`thread/items/list` 均返回 `nextCursor`（向后翻）与 `backwardsCursor`（反向翻页锚点）。
-- `thread/read` 不加载线程；`thread/turns/list` 可在不 resume 的情况下分页读取历史。
+- `thread/read` 不加载线程；`thread/turns/list` 可在不 resume 的情况下分页读取历史。分页线程（`historyMode=paginated`，codex CLI 创建）不支持 `thread/read(includeTurns=true)`，客户端须以 `includeTurns: false` 读元数据，历史统一用 `thread/turns/list` 分页读取。
 - 目标（goal）挂在线程上，由服务端 auto-continuation 循环驱动自动续跑，直到完成/预算耗尽/暂停/清除（见 `thread/goal/*`）。
 
 ## 4. 初始化握手
@@ -190,7 +190,7 @@ type InitializeResponse = {
 | `thread/start` | `v2/ThreadStartParams` | 新建会话；返回 `ThreadStartResponse`，并发 `thread/started` 通知 |
 | `thread/resume` | `v2/ThreadResumeParams` | 按 threadId 恢复旧会话（或按 history/path）；返回 `ThreadResumeResponse` |
 | `thread/fork` | `v2/ThreadForkParams` | 从现有会话分叉（可 `lastTurnId` / `beforeTurnId` 截断）；返回 `ThreadForkResponse` |
-| `thread/read` | `v2/ThreadReadParams` | 不加载读取存储线程（可选 `includeTurns`）；返回 `ThreadReadResponse` |
+| `thread/read` | `v2/ThreadReadParams` | 不加载读取存储线程（可选 `includeTurns`；分页线程不支持 `includeTurns=true`）；返回 `ThreadReadResponse` |
 | `thread/list` | `v2/ThreadListParams` | 分页列出存储线程（cursor/limit/sort/filter）；返回 `ThreadListResponse` |
 | `thread/loaded/list` | `v2/ThreadLoadedListParams` | 当前内存中已加载线程 id 列表（实验） |
 | `thread/turns/list` | `v2/ThreadTurnsListParams` | 分页读回合历史（实验；`itemsView`：notLoaded/summary/full） |

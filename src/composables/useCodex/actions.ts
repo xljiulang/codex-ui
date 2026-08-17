@@ -315,18 +315,40 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
   tab.loading = true;
   void ensureThreadPlugins(threadId); // 进入历史对话即预初始化插件缓存
   try {
+    // 统一只读元数据：codex CLI 创建的分页线程（historyMode=paginated）不支持
+    // includeTurns=true；完整消息一律走 thread/turns/list 分页，legacy 线程在
+    // turns/list 不可用时才回退 includeTurns=true 摘要读取
     const res = await invoke<{
       thread: {
         id: string;
         name?: string | null;
         preview?: string;
         cwd?: string | null;
+        historyMode?: string | null;
         turns?: Turn[];
       };
-    }>("thread_read", { threadId, includeTurns: true });
-    // 优先用全量 items（含命令/工具详情），失败则回退摘要
-    const fullItems = await loadFullItems(threadId);
-    store.itemsByThread[threadId] = fullItems ?? flattenTurns(res.thread.turns);
+    }>("thread_read", { threadId, includeTurns: false });
+    const historyMode = res.thread.historyMode;
+    // 优先用全量 items（含命令/工具详情），失败时按 historyMode 分流回退
+    let fullItems = await loadFullItems(threadId);
+    if (!fullItems) {
+      if (historyMode === "paginated") {
+        // 分页线程不支持 includeTurns=true，保持空列表打开（仍可继续发送消息）
+        fullItems = [];
+        setToast("该会话为分页存储，当前 Codex 版本无法读取历史，仍可继续发送消息");
+      } else {
+        try {
+          const legacy = await invoke<{ thread: { turns?: Turn[] } }>(
+            "thread_read",
+            { threadId, includeTurns: true },
+          );
+          fullItems = flattenTurns(legacy.thread.turns);
+        } catch {
+          fullItems = [];
+        }
+      }
+    }
+    store.itemsByThread[threadId] = fullItems;
     store.activeWorkByThread[threadId] = (
       store.itemsByThread[threadId] ?? []
     ).filter((x) => isActiveItem(x)).length;

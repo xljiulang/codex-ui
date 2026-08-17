@@ -278,6 +278,97 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     });
   });
 
+  it("openThread：分页线程以 includeTurns=false 读元数据，消息来自 turns/list", async () => {
+    const items = [
+      { id: "i1", type: "userMessage", content: [{ type: "inputText", text: "hi" }] },
+      { id: "i2", type: "agentMessage", content: [{ type: "outputText", text: "hello" }] },
+    ];
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: {
+            id: "t2",
+            name: "会话2",
+            cwd: "/ws",
+            historyMode: "paginated",
+            turns: [],
+          },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { method?: string })?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({
+            data: [{ id: "turn-1", status: "completed", items }],
+            nextCursor: null,
+          });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    // 分页线程：只读元数据，绝不尝试 includeTurns=true
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_read", {
+      threadId: "t2",
+      includeTurns: false,
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_read", {
+      threadId: "t2",
+      includeTurns: true,
+    });
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(activeSessionTab()?.workspace).toBe("/ws");
+    expect(store.itemsByThread["t2"]).toEqual(items);
+    expect(store.toast).toBe("");
+  });
+
+  it("openThread：legacy 线程 turns/list 失败时回退 includeTurns=true 摘要", async () => {
+    const summaryItems = [
+      { id: "s1", type: "userMessage", content: [{ type: "inputText", text: "旧消息" }] },
+    ];
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        const includeTurns = (args as { includeTurns?: boolean })?.includeTurns;
+        if (includeTurns === true) {
+          return Promise.resolve({
+            thread: {
+              id: "t2",
+              name: "会话2",
+              turns: [
+                { id: "turn-1", status: "completed", items: summaryItems },
+              ],
+            },
+          });
+        }
+        return Promise.resolve({
+          thread: { id: "t2", name: "会话2", turns: [] },
+        });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { method?: string })?.method;
+        if (method === "thread/turns/list") {
+          return Promise.reject(new Error("method not found"));
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+    const p = openThread("t2");
+    expect(await p).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_read", {
+      threadId: "t2",
+      includeTurns: false,
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_read", {
+      threadId: "t2",
+      includeTurns: true,
+    });
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(store.itemsByThread["t2"]).toEqual(summaryItems);
+  });
+
   it("continueTurn：待挂载目标在回合启动前 goal_set 挂载", async () => {
     tabs.push(
       makeSessionTab("s1", "t1", {

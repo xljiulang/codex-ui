@@ -15,6 +15,8 @@ export interface ThreadSummary {
   cwd?: string;
   source?: string;
   cliVersion?: string;
+  /** 线程历史存储模式：legacy（codex-ui 创建）| paginated（codex CLI 创建） */
+  historyMode?: string | null;
   status?: { type: string };
   /** 服务端持久化的分区（新版协议用内置 “Pinned” 分区表示置顶） */
   section?: { id: string; name: string } | null;
@@ -36,6 +38,9 @@ export interface ThreadRead {
     id: string;
     name?: string | null;
     preview?: string;
+    cwd?: string | null;
+    /** legacy | paginated；分页线程不支持 includeTurns=true，须用 thread/turns/list 分页读取 */
+    historyMode?: string | null;
     turns?: Turn[];
   };
 }
