@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { focusComposer } from "../../lib/composerFocus";
 import { stripMentionContext } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandbox } from "../../lib/permissions";
+import { sessionLog } from "../../lib/sessionLog";
 import { TabKind } from "../../lib/tabs";
 import type {
   PendingInteraction,
@@ -45,6 +46,7 @@ export async function openSessionTabForThread(
   threadId: string,
 ): Promise<boolean> {
   if (threadId === activeSessionTab()?.threadId) return true;
+  void sessionLog("info", threadId, "session-open");
   const existing = findSessionTabByThread(threadId);
   if (existing) {
     await switchSessionTab(existing.id);
@@ -201,6 +203,7 @@ export async function sendPrompt(text: string, flip = false) {
   const tab = activeSessionTab();
   const attachments = tab?.attachments.splice(0) ?? [];
   if (!text.trim() && attachments.length === 0) return;
+  void sessionLog("info", tab?.threadId ?? null, "user-send", `chars=${text.length}`);
   // 手动发送标记：ChatView 据此在发送后强制恢复吸底回到底部
   // （队列消息在回合结束后自动发送时走 continueTurn/newChat，不递增）
   store.userSendRev++;
@@ -442,6 +445,7 @@ export async function openHistorySession(threadId: string): Promise<void> {
 export async function deleteThread(threadId: string) {
   try {
     await invoke("thread_delete", { threadId });
+    void sessionLog("warn", threadId, "thread-delete");
     store.threads = store.threads.filter((t) => t.id !== threadId);
     // 释放该会话的本地缓存，避免历史列表长期累积内存
     delete store.itemsByThread[threadId];

@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { buildTurnInput } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandboxPolicy } from "../../lib/permissions";
+import { sessionLog } from "../../lib/sessionLog";
 import type { UserInput } from "../../lib/types";
 import { resolveSessionWorkspace, upsertItem } from "./items";
 import { activeSessionTab, dropSessionTab, findSessionTabByThread } from "./sessionState";
@@ -218,6 +219,7 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
     resolveSessionWorkspace(),
     tab,
   );
+  void sessionLog("info", threadId, "user-steer", `chars=${prompt.length}`);
   try {
     await invoke("turn_steer", {
       params: {
@@ -267,6 +269,7 @@ export async function interrupt(
   const active = activeSessionTab();
   const tid = threadId ?? active?.threadId;
   if (!tid) return;
+  void sessionLog("info", tid, "user-stop");
   const tab = threadId ? findSessionTabByThread(tid) : active;
   // 线程有活跃目标：先清除目标切断服务端 auto-continuation（目标循环回合极快，
   // 回合中断可能追不上；清除目标后当前回合自然结束、不再自动续跑）

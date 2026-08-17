@@ -60,6 +60,7 @@ pub fn run() {
             codex::commands::server_status,
             codex::commands::server_connect,
             codex::commands::server_logs,
+            codex::commands::session_log,
             codex::commands::codex_rpc,
             codex::commands::codex_rpc_long,
             codex::commands::codex_pin_capability,

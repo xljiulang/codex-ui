@@ -12,6 +12,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 
 use crate::codex::settings::{self, AppSettings};
+use crate::codex::session_log::SessionLog;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
@@ -29,6 +30,7 @@ pub struct CodexServer {
     next_id: AtomicU64,
     workspace: PathBuf,
     run_started: AtomicBool,
+    log: Option<SessionLog>,
 }
 
 struct Shared {
@@ -70,6 +72,11 @@ impl Inner {
 
 impl CodexServer {
     pub fn new(app: AppHandle, workspace: PathBuf) -> Self {
+        let log = app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|d| SessionLog::new(d.join("logs")));
         Self {
             app,
             shared: Arc::new(Shared {
@@ -79,6 +86,7 @@ impl CodexServer {
             next_id: AtomicU64::new(0),
             workspace,
             run_started: AtomicBool::new(false),
+            log,
         }
     }
 
@@ -102,10 +110,46 @@ impl CodexServer {
         }
     }
 
+    /// 写一条日志文件条目；日志目录不可用/写盘失败时静默忽略。
+    fn log_file(&self, level: &str, thread: Option<&str>, event: &str, kv: &[(String, String)]) {
+        if let Some(log) = &self.log {
+            log.write(level, thread, event, kv);
+        }
+    }
+
+    /// 记录带会话归属的 RPC 事件；跳过高频流式增量事件（*/delta）避免日志被淹没。
+    fn log_event(&self, event: &str, method: &str, params: &Value) {
+        if event.ends_with("/delta") {
+            return;
+        }
+        let mut kv = SessionLog::summarize_params(method, params);
+        let thread = take_thread(&mut kv);
+        self.log_file("info", thread.as_deref(), event, &kv);
+    }
+
+    /// 前端用户动作日志（仅允许安全字段；调用方负责不传敏感内容）。
+    pub fn session_log(
+        &self,
+        level: String,
+        thread_id: Option<String>,
+        event: String,
+        detail: Option<String>,
+    ) {
+        let level = if matches!(level.as_str(), "info" | "warn" | "error") {
+            level
+        } else {
+            "info".into()
+        };
+        let kv = detail
+            .map(|d| vec![("msg".to_string(), d)])
+            .unwrap_or_default();
+        self.log_file(&level, thread_id.as_deref(), &event, &kv);
+    }
+
     async fn run(self: Arc<Self>) {
         while !self.shared.stop.load(Ordering::SeqCst) {
             if let Err(e) = self.spawn_and_read().await {
-                self.push_log(format!("codex app-server 错误: {e}")).await;
+                self.push_log("error", format!("codex app-server 错误: {e}")).await;
             }
             self.mark_disconnected().await;
             self.emit_status().await;
@@ -155,7 +199,7 @@ impl CodexServer {
                         Ok(_) => {
                             let t = line.trim_end().to_string();
                             if !t.is_empty() {
-                                this.push_log(format!("[stderr] {t}")).await;
+                                this.push_log("info", format!("[stderr] {t}")).await;
                             }
                         }
                     }
@@ -205,7 +249,7 @@ impl CodexServer {
                     if v.get("result").is_some() {
                         init_ok = true;
                     } else {
-                        self.push_log(format!("initialize 失败: {}", v["error"]))
+                        self.push_log("error", format!("initialize 失败: {}", v["error"]))
                             .await;
                     }
                     break;
@@ -227,12 +271,16 @@ impl CodexServer {
             inner.connected = true;
             inner.ready = true;
             inner.codex_path = Some(codex.clone());
-            inner.push_log_locked(format!(
+        }
+        self.push_log(
+            "info",
+            format!(
                 "已启动 codex app-server（{}），工作目录：{}",
                 codex.display(),
                 self.workspace.display()
-            ));
-        }
+            ),
+        )
+        .await;
         self.emit_status().await;
 
         let mut line = String::new();
@@ -251,9 +299,10 @@ impl CodexServer {
             }
             match serde_json::from_str::<Value>(t) {
                 Ok(v) => self.handle_message(v).await,
-                Err(e) => self
-                    .push_log(format!("无法解析 app-server 消息: {e}"))
-                    .await,
+                Err(e) => {
+                    self.push_log("error", format!("无法解析 app-server 消息: {e}"))
+                        .await
+                }
             }
         }
         err_logger.abort();
@@ -269,6 +318,7 @@ impl CodexServer {
                 // server -> client request (approval / user input / elicitation)
                 let method = v["method"].as_str().unwrap_or("unknown");
                 let params = v.get("params").cloned().unwrap_or(Value::Null);
+                self.log_event("server-request", method, &params);
                 let _ = self.app.emit(
                     "interaction:request",
                     json!({ "requestId": id, "method": method, "params": params }),
@@ -297,6 +347,7 @@ impl CodexServer {
         }
         if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
             let params = v.get("params").cloned().unwrap_or(Value::Null);
+            self.log_event(method, method, &params);
             let _ = self.app.emit(method, params);
         }
     }
@@ -313,7 +364,46 @@ impl CodexServer {
     }
 
     /// 保留 JSON-RPC error code 的请求变体，供能力探测等需要区分错误类型的场景使用。
+    /// 外层记录出站请求与响应（含耗时/错误码），内层实现真实收发。
     pub async fn request_verbose(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Option<Duration>,
+    ) -> Result<Value, RpcError> {
+        let mut kv = SessionLog::summarize_params(method, &params);
+        let thread = take_thread(&mut kv);
+        kv.insert(0, ("method".to_string(), method.to_string()));
+        self.log_file("info", thread.as_deref(), "rpc-request", &kv);
+        let start = Instant::now();
+        let res = self.request_verbose_inner(method, params, timeout).await;
+        let dur_ms = start.elapsed().as_millis().to_string();
+        let mut resp_kv = vec![
+            ("method".to_string(), method.to_string()),
+            ("durMs".to_string(), dur_ms),
+        ];
+        let level = match &res {
+            Ok(_) => {
+                resp_kv.push(("ok".to_string(), "true".into()));
+                "info"
+            }
+            Err(e) => {
+                resp_kv.push(("ok".to_string(), "false".into()));
+                resp_kv.push((
+                    "code".to_string(),
+                    e.code
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "transport".into()),
+                ));
+                resp_kv.push(("msg".to_string(), truncate(&e.message, 200)));
+                "warn"
+            }
+        };
+        self.log_file(level, thread.as_deref(), "rpc-response", &resp_kv);
+        res
+    }
+
+    async fn request_verbose_inner(
         &self,
         method: &str,
         params: Value,
@@ -563,28 +653,33 @@ impl CodexServer {
         })
     }
 
-    pub async fn push_log(&self, line: String) {
+    pub async fn push_log(&self, level: &str, line: String) {
         let mut inner = self.shared.inner.lock().await;
-        inner.push_log_locked(line);
+        inner.push_log_locked(line.clone());
+        drop(inner);
+        self.log_file(level, None, "server-log", &[("msg".to_string(), line)]);
     }
 
     async fn mark_disconnected(&self) {
-        let mut inner = self.shared.inner.lock().await;
-        inner.connected = false;
-        inner.ready = false;
-        inner.stdin = None;
-        if let Some(mut child) = inner.child.take() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+        {
+            let mut inner = self.shared.inner.lock().await;
+            inner.connected = false;
+            inner.ready = false;
+            inner.stdin = None;
+            if let Some(mut child) = inner.child.take() {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+            let pending = std::mem::take(&mut inner.pending);
+            for (_, tx) in pending {
+                let _ = tx.send(Err(RpcError {
+                    code: None,
+                    message: "codex app-server 连接中断".into(),
+                }));
+            }
         }
-        let pending = std::mem::take(&mut inner.pending);
-        for (_, tx) in pending {
-            let _ = tx.send(Err(RpcError {
-                code: None,
-                message: "codex app-server 连接中断".into(),
-            }));
-        }
-        inner.push_log_locked("codex app-server 已断开，正在重连…".into());
+        self.push_log("warn", "codex app-server 已断开，正在重连…".into())
+            .await;
     }
 
     async fn emit_status(&self) {
@@ -601,6 +696,24 @@ impl CodexServer {
             .map(|d| settings::load(&d))
             .unwrap_or_default();
         find_codex_sync(&settings)
+    }
+}
+
+/// 从摘要中取出 threadId 并移除该键（文件行头部单独输出 `thread=` 列，避免重复）。
+fn take_thread(kv: &mut Vec<(String, String)>) -> Option<String> {
+    kv.iter()
+        .position(|(k, _)| k == "threadId")
+        .map(|i| kv.remove(i).1)
+}
+
+/// 截断长文本，防止错误消息把日志行撑爆。
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let mut out: String = s.chars().take(max).collect();
+        out.push('…');
+        out
     }
 }
 

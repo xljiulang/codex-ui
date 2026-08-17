@@ -42,6 +42,19 @@ pub async fn server_logs(server: State<'_, Server>) -> Result<Vec<String>, Strin
         .unwrap_or_default())
 }
 
+/// 前端用户动作日志（仅允许安全字段；调用方负责不传敏感内容，失败静默）。
+#[tauri::command]
+pub async fn session_log(
+    server: State<'_, Server>,
+    level: String,
+    thread_id: Option<String>,
+    event: String,
+    detail: Option<String>,
+) -> Result<(), String> {
+    server.session_log(level, thread_id, event, detail);
+    Ok(())
+}
+
 /// Generic passthrough for protocol methods not explicitly wrapped.
 #[tauri::command]
 pub async fn codex_rpc(
