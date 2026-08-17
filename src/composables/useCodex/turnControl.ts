@@ -44,19 +44,19 @@ export function buildTurnParams(
   params.effort = session?.effort ?? null;
   // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
   // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
-  // 模型未知时绝不发送空字符串（上游会报 invalid_request_error），此时省略该字段。
+  // 三面独立映射：mode 只由 taskMode 决定，settings.model 只由 currentModelId 解析；
+  // 协议要求 settings.model 为非空 string（实测 null 会被服务端拒绝），
+  // 模型无法解析时 currentModelId 抛错，由发送方 toast 提示并中止发送。
   const collabModel = currentModelId(session);
-  if (collabModel) {
-    const mode = session?.taskMode ?? "execute";
-    params.collaborationMode = {
-      mode: mode === "plan" ? "plan" : "default",
-      settings: {
-        model: collabModel,
-        reasoning_effort: session?.effort ?? null,
-        developer_instructions: null,
-      },
-    };
-  }
+  const mode = session?.taskMode ?? "execute";
+  params.collaborationMode = {
+    mode: mode === "plan" ? "plan" : "default",
+    settings: {
+      model: collabModel,
+      reasoning_effort: session?.effort ?? null,
+      developer_instructions: null,
+    },
+  };
   return params;
 }
 
@@ -108,26 +108,27 @@ export async function continueTurnForTab(
       return;
     }
   }
-  const { params } = buildUserTurn(
-    threadId,
-    prompt,
-    attachments,
-    resolveSessionWorkspace(tab),
-    tab,
-  );
-  // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
-  if (tab.goalText && !tab.goalStatus) {
-    try {
-      await invoke("goal_set", { threadId, objective: tab.goalText });
-      tab.goalStatus = "active";
-    } catch (e) {
-      tab.goalText = null;
-      tab.goalStatus = null;
-      tab.goalArmed = false;
-      setToast(toastError(e));
-    }
-  }
   try {
+    // 参数构建失败（如无可用模型）时走统一错误路径，toast 提示并中止发送
+    const { params } = buildUserTurn(
+      threadId,
+      prompt,
+      attachments,
+      resolveSessionWorkspace(tab),
+      tab,
+    );
+    // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
+    if (tab.goalText && !tab.goalStatus) {
+      try {
+        await invoke("goal_set", { threadId, objective: tab.goalText });
+        tab.goalStatus = "active";
+      } catch (e) {
+        tab.goalText = null;
+        tab.goalStatus = null;
+        tab.goalArmed = false;
+        setToast(toastError(e));
+      }
+    }
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", {
       params,
     });
@@ -165,25 +166,26 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
       return;
     }
   }
-  // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入
-  const { params } = buildUserTurn(
-    threadId,
-    prompt,
-    attachments,
-    resolveSessionWorkspace(),
-    tab,
-  );
-  // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
-  // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
-  if (tab?.goalText && !tab.goalStatus) {
-    const ok = await setGoal(tab.goalText);
-    if (!ok) {
-      tab.goalText = null;
-      tab.goalStatus = null;
-      tab.goalArmed = false;
-    }
-  }
   try {
+    // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入；
+    // 参数构建失败（如无可用模型）时走统一错误路径，toast 提示并中止发送
+    const { params } = buildUserTurn(
+      threadId,
+      prompt,
+      attachments,
+      resolveSessionWorkspace(),
+      tab,
+    );
+    // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
+    // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
+    if (tab?.goalText && !tab.goalStatus) {
+      const ok = await setGoal(tab.goalText);
+      if (!ok) {
+        tab.goalText = null;
+        tab.goalStatus = null;
+        tab.goalArmed = false;
+      }
+    }
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
     if (tab) {
       // 回合状态写活动标签（tab 是唯一事实源）
@@ -212,13 +214,22 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
     setToast("当前没有进行中的回合");
     return;
   }
-  const { clientId, input } = buildUserTurn(
-    threadId,
-    prompt,
-    attachments,
-    resolveSessionWorkspace(),
-    tab,
-  );
+  const built = (() => {
+    try {
+      return buildUserTurn(
+        threadId,
+        prompt,
+        attachments,
+        resolveSessionWorkspace(),
+        tab,
+      );
+    } catch (e) {
+      setToast(toastError(e));
+      return null;
+    }
+  })();
+  if (!built) return;
+  const { clientId, input } = built;
   void sessionLog("info", threadId, "user-steer", `chars=${prompt.length}`);
   try {
     await invoke("turn_steer", {

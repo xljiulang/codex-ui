@@ -188,14 +188,17 @@ export function modelDisplayName(model: string | null): string {
 }
 
 
-/** 当前生效模型 id：标签显式选择 → 会话已知模型 → 默认模型 → 列表首个 → 空 */
+/** 当前生效模型 id：传入标签时只取该标签的 model（不读活动标签）→ 默认模型 → 列表首个 → 无可选时抛错 */
 export function currentModelId(tab?: Pick<SessionTab, "model">): string {
-  const m = tab?.model ?? activeSessionTab()?.model;
+  // 传入 tab 时严格以该标签为准（后台标签发送不串用活动标签模型）；
+  // 未传 tab（"当前会话"语义）才回退活动标签
+  const m = tab ? tab.model : (activeSessionTab()?.model ?? null);
   if (m) return m;
-  if (store.currentModel) return store.currentModel;
-  const def = store.models.find((m) => m.isDefault);
+  const def = store.models.find((x) => x.isDefault);
   if (def) return def.model;
-  return store.models[0]?.model ?? "";
+  const first = store.models[0];
+  if (first) return first.model;
+  throw new Error("当前没有可用模型，请检查模型列表");
 }
 
 

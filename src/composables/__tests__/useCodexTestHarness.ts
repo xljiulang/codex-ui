@@ -5,7 +5,7 @@ import { tabs as _tabs } from "../useEditorTabs";
 import { disposeEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
-import type { SessionTab } from "../useCodex/types";
+import type { ModelInfo, SessionTab } from "../useCodex/types";
 
 export const capturedListeners: Record<
   string,
@@ -76,6 +76,18 @@ export function makeSessionTab(
     icon: "chat",
   };
 }
+
+/** 发送路径测试共用的默认模型 fixture（真实应用启动时模型列表至少含默认模型） */
+export const DEFAULT_MODEL: ModelInfo = {
+  id: "gpt-5",
+  model: "gpt-5",
+  displayName: "gpt-5",
+  description: "默认模型",
+  hidden: false,
+  isDefault: true,
+  supportedReasoningEfforts: [],
+  defaultReasoningEffort: "",
+};
 
 export const SKILLS_RESPONSE = {
   data: [

@@ -15,7 +15,7 @@ import type {
 import { activeTab, activateTab, insertTab, tabs } from "../useTabs";
 import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, workspace } from "./items";
 import { activeSessionTab, allSessionTabs, dropSessionTab, findSessionTabByThread, freshSessionTab, sessionTabTitle } from "./sessionState";
-import { currentModelId, ensureThreadPlugins, resetToNewChat } from "./settings";
+import { ensureThreadPlugins, resetToNewChat } from "./settings";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
 import {
@@ -100,7 +100,6 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       const cur = activeSessionTab();
       if (cur) dropSessionTab(cur);
       activateTab(existing.id);
-      store.currentModel = res.model ?? currentModelId(existing);
       await refreshThreads();
       return;
     }
@@ -131,7 +130,6 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       });
       store.itemsByThread[threadId] = [];
       store.activeWorkByThread[threadId] = 0;
-      store.currentModel = res.model ?? currentModelId(tab);
       await refreshThreads();
       return;
     }
@@ -146,7 +144,6 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       activeTab.loading = false;
       activeTab.title = sessionTabTitle(activeTab);
     }
-    store.currentModel = res.model ?? currentModelId(activeTab ?? undefined);
     void ensureThreadPlugins(threadId); // 进入新对话即预初始化插件缓存
     store.itemsByThread[threadId] = [];
     store.activeWorkByThread[threadId] = 0;

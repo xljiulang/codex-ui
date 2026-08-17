@@ -6,7 +6,7 @@ import { backgroundThreadIds, store } from "../useCodex/store";
 import { autoTitleThread } from "../useCodex/threads";
 import type { SessionTab } from "../useCodex/types";
 import { activeTabId } from "../useEditorTabs";
-import { capturedListeners, fireListen, makeSessionTab, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { capturedListeners, DEFAULT_MODEL, fireListen, makeSessionTab, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -459,6 +459,7 @@ describe("会话标签状态与事件路由", () => {
       }
       return Promise.resolve(undefined);
     });
+    store.models = [DEFAULT_MODEL];
     tabs.push(
       makeSessionTab("s1", "t1", { turnActive: true }),
     );
@@ -1063,7 +1064,7 @@ describe("计划完成确认弹窗", () => {
       planText: "# 修复\n1. 步骤",
     };
     tabs[0].goalArmed = true;
-    store.currentModel = "gpt-5.2-codex"; // 使 turn/start 携带 collaborationMode
+    tabs[0].model = "gpt-5.2-codex"; // 使 turn/start 携带 collaborationMode
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
       if (cmd === "thread_list") {

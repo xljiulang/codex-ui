@@ -2,7 +2,7 @@ import { deleteThread, newEmptyChat, openHistorySession, openNewSession, pickAnd
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { activeTabId } from "../useEditorTabs";
-import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +37,7 @@ const mockedListen = vi.mocked(listen);
 
 beforeEach(() => {
   resetUseCodexState(mockedInvoke, mockedListen);
+  store.models = [DEFAULT_MODEL];
 });
 
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
@@ -146,6 +147,8 @@ describe("会话标签状态与事件路由", () => {
     expect(activeSessionTab()?.name).toBe("帮我修复登录页面报错");
     expect(tabs[0].name).toBe("帮我修复登录页面报错");
     expect(tabs[0].nameIsFirstMessage).toBe(true);
+    // 模型只存在于标签且由用户显式选择写入：thread_start 返回的 res.model 不回填
+    expect(activeSessionTab()?.model).toBeNull();
     expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
       threadId: "t1",
       name: "帮我修复登录页面报错",
@@ -504,5 +507,35 @@ describe("新建会话应用记忆模式", () => {
     await sendPrompt("你好");
     expect(activeSessionTab()?.threadId).toBe("t-new");
     expect(store.toast).not.toContain("记忆");
+  });
+});
+
+describe("模型不可用时的发送路径", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    __resetSessionTabsForTest();
+    store.workspace = null;
+    store.interactions = [];
+    store.threads = [];
+    store.models = [];
+    store.toast = "";
+  });
+
+  it("无可用模型时发送中止：toast 提示且不调用 turn_start、不落用户消息", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { resumedThreadId: "t1" }));
+    activeTabId.value = "s1";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "turn_start") {
+        return Promise.resolve({ turn: { id: "nt1" } });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await sendPrompt("你好");
+
+    expect(store.toast).toContain("当前没有可用模型");
+    expect(mockedInvoke).not.toHaveBeenCalledWith("turn_start", expect.anything());
+    expect(activeSessionTab()?.turnActive).toBe(false);
+    expect(store.itemsByThread["t1"] ?? []).toHaveLength(0);
   });
 });

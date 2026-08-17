@@ -1,9 +1,9 @@
 import { newEmptyChat, openThread, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
-import { clearGoal, setGoal } from "../useCodex/turnControl";
+import { buildTurnParams, clearGoal, setGoal } from "../useCodex/turnControl";
 import { activeTabId } from "../useEditorTabs";
-import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -384,6 +384,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }
       return Promise.resolve(undefined);
     });
+    store.models = [DEFAULT_MODEL];
     await sendPrompt("你好");
     expect(mockedInvoke).toHaveBeenCalledWith("goal_set", {
       threadId: "t1",
@@ -398,5 +399,55 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     );
     expect(goalIdx).toBeGreaterThan(-1);
     expect(turnIdx).toBeGreaterThan(goalIdx);
+  });
+});
+
+describe("buildTurnParams 三面独立映射", () => {
+  it("权限/任务模式/模型各自独立派生，互不串扰", () => {
+    store.models = [DEFAULT_MODEL];
+    const params = buildTurnParams(
+      "t1",
+      [{ type: "text", text: "hi", text_elements: [] }],
+      "cid-1",
+      "D:/repo",
+      {
+        permissionMode: "full-access",
+        taskMode: "plan",
+        model: "gpt-5-extra",
+        effort: "high",
+      },
+    );
+    // 权限面：由 permissionMode 独立映射
+    expect(params.approvalPolicy).toBe("never");
+    expect(params.sandboxPolicy).toEqual({ type: "dangerFullAccess" });
+    // 模型面：params.model 取标签显式值
+    expect(params.model).toBe("gpt-5-extra");
+    // 计划模式面：mode 由 taskMode 决定，settings.model 取同一标签显式值
+    expect(params.collaborationMode).toMatchObject({
+      mode: "plan",
+      settings: { model: "gpt-5-extra", reasoning_effort: "high" },
+    });
+  });
+
+  it("执行模式 + 标签未选模型时回退默认模型，权限面仍独立", () => {
+    store.models = [DEFAULT_MODEL];
+    const params = buildTurnParams(
+      "t1",
+      [{ type: "text", text: "hi", text_elements: [] }],
+      "cid-2",
+      "D:/repo",
+      {
+        permissionMode: "help-me-approve",
+        taskMode: "execute",
+        model: null,
+        effort: null,
+      },
+    );
+    expect(params.approvalPolicy).toBe("on-request");
+    expect(params.model).toBeNull();
+    expect(params.collaborationMode).toMatchObject({
+      mode: "default",
+      settings: { model: "gpt-5" },
+    });
   });
 });

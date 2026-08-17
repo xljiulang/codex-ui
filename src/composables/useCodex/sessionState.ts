@@ -30,7 +30,7 @@ export function freshSessionTab(): SessionTab {
     nameIsFirstMessage: false,
     permissionMode: store.settings.default_permission,
     taskMode: "execute",
-    model: store.currentModel || null,
+    model: null,
     effort: null,
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],

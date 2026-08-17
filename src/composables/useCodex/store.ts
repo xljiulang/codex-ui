@@ -37,7 +37,6 @@ export const store = reactive({
   booting: true,
   loadingHistory: false,
   busy: false,
-  currentModel: "",
   models: [] as ModelInfo[],
   modelsLoaded: false,
   // 对话级插件缓存：key 为 currentThreadId（未创建会话时为 NEW_CHAT_PLUGIN_KEY）

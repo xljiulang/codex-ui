@@ -999,7 +999,7 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
       resumedThreadId: "tB",
     });
     tabs.push(tab);
-    store.currentModel = "gpt-5";
+    tab.model = "gpt-5";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "turn_start") {
         return Promise.resolve({ turn: { id: "turn-b" } });
