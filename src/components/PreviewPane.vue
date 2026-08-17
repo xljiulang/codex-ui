@@ -78,7 +78,7 @@ watch(
       无法预览该文件（{{ tab.error }}）
     </div>
     <template v-else>
-      <div v-if="tab.previewType === 'image'" class="preview-body preview-image">
+      <div v-if="tab.previewType === 'image'" class="preview-image">
         <div class="preview-zoom-toolbar">
           <button
             class="preview-zoom-btn"
@@ -107,17 +107,19 @@ watch(
             适应窗口
           </button>
         </div>
-        <img
-          v-if="!imgError"
-          :src="tab.imageUrl"
-          alt=""
-          draggable="false"
-          :class="{ zoomed: zoom !== 1 }"
-          :style="imageStyle"
-          @load="onImgLoad"
-          @error="imgError = true"
-        />
-        <div v-else class="preview-note preview-error">无法预览该图片</div>
+        <div class="preview-image-stage">
+          <img
+            v-if="!imgError"
+            :src="tab.imageUrl"
+            alt=""
+            draggable="false"
+            :class="{ zoomed: zoom !== 1 }"
+            :style="imageStyle"
+            @load="onImgLoad"
+            @error="imgError = true"
+          />
+          <div v-else class="preview-note preview-error">无法预览该图片</div>
+        </div>
       </div>
       <PdfPreviewPane v-else-if="tab.previewType === 'pdf'" :tab="tab" />
       <XlsxPreviewPane v-else :tab="tab" />

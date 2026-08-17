@@ -38,6 +38,18 @@ describe("PreviewPane 预览标签", () => {
     expect(w.text()).toContain("assets/logo.png");
   });
 
+  it("图像预览结构：缩放工具栏在滚动区之上，图片位于 preview-image-stage 内", () => {
+    const w = mount(PreviewPane, { props: { tab: makeTab() } });
+    const toolbar = w.find(".preview-zoom-toolbar");
+    const stage = w.find(".preview-image-stage");
+    expect(stage.exists()).toBe(true);
+    expect(stage.find("img").exists()).toBe(true);
+    // DOM 顺序：工具栏 → 滚动区（避免工具栏与图片并排把图片挤到右侧）
+    const children = Array.from(w.find(".preview-image").element.children);
+    expect(children.indexOf(toolbar.element)).toBe(0);
+    expect(children.indexOf(stage.element)).toBe(1);
+  });
+
   it("图像缩放：放大按原始像素等比缩放，适应窗口复位", async () => {
     const w = mount(PreviewPane, { props: { tab: makeTab() } });
     const img = w.find(".preview-image img").element as HTMLImageElement;
