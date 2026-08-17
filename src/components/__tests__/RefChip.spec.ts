@@ -6,9 +6,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (p: string) => "asset://mock/" + p,
 }));
 
+import { invoke } from "@tauri-apps/api/core";
 import RefChip from "../RefChip.vue";
 import { NEW_CHAT_PLUGIN_KEY, store } from "../../composables/useCodex";
 
+const mockedInvoke = vi.mocked(invoke);
 const waitTick = () => new Promise((r) => setTimeout(r, 20));
 
 function tooltipText(): string {
@@ -147,5 +149,45 @@ describe("RefChip 自定义悬浮卡片", () => {
     ]);
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = false;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
+  });
+
+  it("文本文件 chip 点击先应用内打开（probe 成功不调用 reveal_path）", async () => {
+    store.server.startupWorkspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hi", validUtf8: true, byteSize: 2 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(RefChip, {
+      props: { path: "src/a.cs", label: "@a.cs", kind: "file" },
+    });
+    await wrapper.find(".mention-inline").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      workspace: "D:/repo",
+      path: "D:\\repo\\src\\a.cs",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "reveal_path",
+      expect.anything(),
+    );
+  });
+
+  it("二进制文件 chip 点击回退 reveal_path 定位", async () => {
+    store.server.startupWorkspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(false);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(RefChip, {
+      props: { path: "src/a.bin", label: "@a.bin", kind: "file" },
+    });
+    await wrapper.find(".mention-inline").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "D:\\repo\\src\\a.bin",
+    });
   });
 });

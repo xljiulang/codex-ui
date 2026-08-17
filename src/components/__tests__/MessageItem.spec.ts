@@ -329,7 +329,7 @@ describe("用户消息中的图片附件", () => {
     expect(texts).toEqual(["先", "中间", "结尾"]);
   });
 
-  it("文件/技能 chip 可点击触发 reveal_path，插件 chip 不可点击", async () => {
+  it("文件/技能 chip 可点击（测试钩子下回退 reveal_path），插件 chip 不可点击", async () => {
     store.server.startupWorkspace = "D:/repo";
     store.threadPlugins[NEW_CHAT_PLUGIN_KEY] = {
       loaded: true,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { openLink, sessionWorkspace } from "../lib/links";
+import { localPathFromHref, openLink, sessionWorkspace } from "../lib/links";
+import { openPathInApp } from "../composables/useSessionFs";
 import {
   NEW_CHAT_PLUGIN_KEY,
   activeSessionTab,
@@ -17,7 +18,7 @@ const props = withDefaults(
   { delay: 120 },
 );
 
-/** 本地路径（非 plugin:// 等 URI）可点击，点击用资源管理器定位 */
+/** 本地路径（非 plugin:// 等 URI）可点击；文件先应用内打开、失败回退资源管理器定位，技能直接定位 */
 const clickable = computed(
   () => !!props.path && !props.path.startsWith("plugin://"),
 );
@@ -44,8 +45,15 @@ const kindLabel = computed(() =>
   props.kind === "file" ? "文件" : props.kind === "plugin" ? "插件" : "技能",
 );
 
-function onClick() {
+async function onClick() {
   if (!clickable.value) return;
+  if (props.kind === "file") {
+    const cls = localPathFromHref(props.path, sessionWorkspace());
+    if (cls?.kind === "local") {
+      const opened = await openPathInApp(cls.path);
+      if (opened) return;
+    }
+  }
   openLink(props.path, sessionWorkspace());
 }
 
