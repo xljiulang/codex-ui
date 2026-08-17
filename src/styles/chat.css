@@ -707,6 +707,11 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* 底部实时计划卡与上方回合内容保持间距（回合内间距已由 .turn flex gap 控制） */
+.plan-card {
+  margin-top: 16px;
+}
+
 .assistant-card-header {
   display: flex;
   align-items: center;

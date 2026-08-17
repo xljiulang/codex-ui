@@ -17,7 +17,7 @@ const sub = computed(() => {
 </script>
 
 <template>
-  <div class="assistant-card" :class="{ expanded: open }">
+  <div class="assistant-card plan-card" :class="{ expanded: open }">
     <div class="assistant-card-header">
       <button
         type="button"
