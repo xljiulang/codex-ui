@@ -37,6 +37,7 @@ function docxTab(html: string, overrides: Partial<DocxEditorTab> = {}): DocxEdit
     saving: false,
     status: "",
     byteSize: 1024,
+    stale: false,
     initialHtml: html,
     editor: null,
     ...overrides,

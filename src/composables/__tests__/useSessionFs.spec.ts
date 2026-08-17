@@ -172,6 +172,49 @@ it("激活资源面板：session_fs_watch_start 传字符串工作区而非 comp
   __resetSessionFsForTest();
 });
 
+it("工作区存在即启动监听；停用面板不停监听；清空工作区才停止", async () => {
+  const watchWs = "D:\\watch-test-ws"; // 唯一路径，避免与残留会话工作区相等导致 computed 不变
+  store.server.startupWorkspace = "";
+  store.workspace = null;
+  mockedInvoke.mockImplementation((cmd) => {
+    if (cmd === "session_fs_watch_start") return Promise.resolve(undefined);
+    if (cmd === "session_fs_watch_stop") return Promise.resolve(undefined);
+    return Promise.resolve(undefined);
+  });
+  mockedInvoke.mockClear(); // 排除前一用例残留调用
+
+  // 未激活资源面板时设置工作区：监听也应启动
+  store.workspace = watchWs;
+  await vi.waitFor(
+    () => {
+      expect(mockedInvoke).toHaveBeenCalledWith("session_fs_watch_start", {
+        workspace: watchWs,
+      });
+    },
+    { timeout: 3000, interval: 20 },
+  );
+  await flushPromises(); // 等待 watch_start 处理完成（watcherStarted 置位）
+
+  // 停用资源面板：监听保持（不再 watch_stop）
+  mockedInvoke.mockClear();
+  setSessionFsActive(false);
+  await flushPromises();
+  expect(mockedInvoke).not.toHaveBeenCalledWith(
+    "session_fs_watch_stop",
+    expect.anything(),
+  );
+
+  // 清空工作区：监听停止
+  store.workspace = null;
+  await vi.waitFor(
+    () => {
+      expect(mockedInvoke).toHaveBeenCalledWith("session_fs_watch_stop");
+    },
+    { timeout: 3000, interval: 20 },
+  );
+  __resetSessionFsForTest();
+});
+
 describe("openPathInApp 对话链接应用内打开", () => {
   beforeEach(() => {
     __resetEditorTabsForTest();

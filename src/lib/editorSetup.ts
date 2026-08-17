@@ -1,7 +1,9 @@
 import {
   Compartment,
+  EditorSelection,
   EditorState,
   type Extension,
+  type SelectionRange,
   type Text,
 } from "@codemirror/state";
 import {
@@ -309,10 +311,37 @@ export function buildEditorExtensions(
   ];
 }
 
-/** 创建编辑器状态 */
+/** 创建编辑器状态；selection 为可选光标位置（行/列均从 1 起，超出时夹紧） */
 export function createEditorState(
   doc: string,
   extensions: Extension[],
+  selection?: { line: number; col: number },
 ): EditorState {
-  return EditorState.create({ doc, extensions });
+  const opts: {
+    doc: string;
+    extensions: Extension[];
+    selection?: EditorSelection | SelectionRange;
+  } = {
+    doc,
+    extensions,
+  };
+  if (selection) {
+    opts.selection = EditorSelection.cursor(posAtLineCol(doc, selection.line, selection.col));
+  }
+  return EditorState.create(opts);
+}
+
+/** 行/列（1 起）→ 文档偏移；行不存在时取文档末尾，列超出行尾时取行尾 */
+export function posAtLineCol(doc: string, line: number, col: number): number {
+  let pos = 0;
+  let current = 1;
+  while (current < line) {
+    const nl = doc.indexOf("\n", pos);
+    if (nl < 0) break;
+    pos = nl + 1;
+    current++;
+  }
+  const lineEnd = doc.indexOf("\n", pos);
+  const end = lineEnd < 0 ? doc.length : lineEnd;
+  return Math.min(end, pos + Math.max(0, col - 1));
 }

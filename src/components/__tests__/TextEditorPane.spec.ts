@@ -142,6 +142,19 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     txtWrapper.unmount();
   });
 
+  it("滚动事件写回标签 scrollTop，挂载时按标签记录恢复", async () => {
+    const tab = await openTab("a.txt", "line1\nline2\nline3");
+    tab.scrollTop = 42;
+    const wrapper = await mountEditor(tab);
+    const view = await viewOf(wrapper);
+    expect(view.scrollDOM.scrollTop).toBe(42);
+
+    view.scrollDOM.scrollTop = 77;
+    view.scrollDOM.dispatchEvent(new Event("scroll"));
+    expect(tab.scrollTop).toBe(77);
+    wrapper.unmount();
+  });
+
   it("预览/编辑切换：预览渲染当前文档，切回编辑保留内容与脏状态", async () => {
     const content = "# 标题\n\n**加粗** 正文";
     const tab = await openTab("a.md", content);

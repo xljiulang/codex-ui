@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
 import PreviewPane from "../PreviewPane.vue";
 import type { PreviewEditorTab } from "../../composables/useEditorTabs";
 
@@ -19,6 +20,7 @@ function makeTab(
     imageUrl: "asset://D:/repo/assets/logo.png",
     pdfData: null,
     pageCount: null,
+    stale: false,
     ...over,
   };
 }
@@ -37,6 +39,17 @@ describe("PreviewPane 预览标签", () => {
     const w = mount(PreviewPane, { props: { tab: makeTab() } });
     await w.find(".preview-image img").trigger("error");
     expect(w.text()).toContain("无法预览该图片");
+  });
+
+  it("imageUrl 变化（外部刷新）复位图片加载失败状态", async () => {
+    const tab = reactive(makeTab());
+    const w = mount(PreviewPane, { props: { tab } });
+    await w.find(".preview-image img").trigger("error");
+    expect(w.text()).toContain("无法预览该图片");
+    tab.imageUrl = "asset://D:/repo/assets/logo.png?t=123";
+    await flushPromises();
+    expect(w.text()).not.toContain("无法预览该图片");
+    expect(w.find(".preview-image img").exists()).toBe(true);
   });
 
   it("loading/error 状态分别展示", () => {

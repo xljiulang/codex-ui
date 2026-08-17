@@ -14,9 +14,9 @@ const kindLabel = computed(() =>
 );
 const imgError = ref(false);
 
-// 切换预览标签时复位图像加载失败状态
+// 切换预览标签或图片地址变化（外部刷新）时复位图像加载失败状态
 watch(
-  () => props.tab,
+  [() => props.tab, () => props.tab.imageUrl],
   () => {
     imgError.value = false;
   },

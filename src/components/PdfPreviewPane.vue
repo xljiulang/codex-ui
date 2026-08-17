@@ -39,6 +39,9 @@ async function load() {
   loadingTask?.destroy().catch(() => {});
   loadingTask = null;
   doc = null;
+  // 外部刷新（pdfData 替换）时保留当前页与缩放，加载完成后夹紧恢复
+  const prevPage = pageNo.value;
+  const prevZoom = zoom.value;
   pageCount.value = 0;
   pageNo.value = 1;
   zoom.value = 1;
@@ -54,6 +57,8 @@ async function load() {
     const d = await task.promise;
     doc = d;
     pageCount.value = d.numPages;
+    pageNo.value = Math.min(prevPage, d.numPages);
+    zoom.value = prevZoom;
     props.tab.pageCount = d.numPages;
   } catch (e) {
     error.value = String(e);
@@ -116,8 +121,12 @@ function fitWidth() {
   zoom.value = 1;
 }
 
-// 切换/首次挂载：重新加载文档；页码与缩放变化：重绘当前页
-watch(() => props.tab, () => void load(), { immediate: true });
+// 切换标签或外部刷新替换 pdfData：重新加载文档；页码与缩放变化：重绘当前页
+watch(
+  [() => props.tab, () => props.tab.pdfData],
+  () => void load(),
+  { immediate: true },
+);
 watch([pageNo, zoom], () => void renderPage());
 
 onBeforeUnmount(() => {

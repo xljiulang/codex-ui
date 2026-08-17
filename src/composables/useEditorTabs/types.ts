@@ -32,6 +32,10 @@ export interface FileEditorTab extends EditorTabBase {
   hadBom: boolean;
   byteSize: number | null;
   cursor: { line: number; col: number };
+  /** 编辑区垂直滚动位置（TextEditorPane 写回，外部刷新后恢复） */
+  scrollTop: number;
+  /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
+  stale: boolean;
   status: string;
   /** CodeMirror 状态（非响应式，避免深度代理开销）；切换标签时由编辑组件 setState */
   editorState: EditorState | null;
@@ -52,6 +56,8 @@ export interface DocxEditorTab extends EditorTabBase {
   saving: boolean;
   status: string;
   byteSize: number | null;
+  /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
+  stale: boolean;
   /** 首次导入的 HTML（TipTap 数据源），markRaw 存储避免响应式代理 */
   initialHtml: string | null;
   /** TipTap 编辑器实例（markRaw），由 DocxEditorPane 创建后回填 */
@@ -91,6 +97,8 @@ export interface PreviewEditorTab extends EditorTabBase {
   pdfData: Uint8Array | null;
   /** PDF 页数：组件加载文档后回填 */
   pageCount: number | null;
+  /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
+  stale: boolean;
 }
 
 export interface TerminalEditorTab extends EditorTabBase {

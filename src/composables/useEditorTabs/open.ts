@@ -1,5 +1,6 @@
 import { markRaw, reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import type { EditorState } from "@codemirror/state";
 import {
   buildSaveContent,
   detectEol,
@@ -57,6 +58,51 @@ function previewTabId(
   path: string,
 ): string {
   return `preview:${type}:${JSON.stringify([workspace, path])}`;
+}
+
+/**
+ * 按标签当前配置构建 CodeMirror 状态（首次打开与外部变更刷新共用）：
+ * 语言/只读/换行/Compartment 均取自标签，回写 dirty/cursor/editorState 回调一致。
+ * selection 可选：恢复光标位置（行/列 1 起，超出自动夹紧）。
+ */
+export async function buildFileEditorState(
+  tab: FileEditorTab,
+  doc: string,
+  validUtf8: boolean,
+  selection?: { line: number; col: number },
+): Promise<EditorState> {
+  const [{ buildEditorExtensions, createEditorState, languageForPath }, { Compartment }] =
+    await Promise.all([
+      import("../../lib/editorSetup"),
+      import("@codemirror/state"),
+    ]);
+  const wrapCompartment = tab.wrapCompartment ?? new Compartment();
+  if (!tab.wrapCompartment) {
+    tab.wrapCompartment = markRaw(wrapCompartment);
+  }
+  return createEditorState(
+    doc,
+    buildEditorExtensions({
+      language: languageForPath(tab.path),
+      readOnly: !validUtf8,
+      wrap: tab.wrap,
+      wrapCompartment,
+      savedText: () => tab.savedText,
+      onDirtyChange: (d) => {
+        tab.dirty = d;
+      },
+      onCursorChange: (line, col) => {
+        tab.cursor = { line, col };
+      },
+      onSave: () => {
+        void saveFileTab(tab.id);
+      },
+      onStateChange: (s) => {
+        tab.editorState = markRaw(s);
+      },
+    }),
+    selection,
+  );
 }
 
 function commitTabId(workspace: string, hash: string): string {
@@ -235,6 +281,8 @@ export async function openFileTab(
     hadBom: false,
     byteSize: null,
     cursor: { line: 1, col: 1 },
+    scrollTop: 0,
+    stale: false,
     status: "",
     editorState: null,
     savedText: null,
@@ -251,40 +299,11 @@ export async function openFileTab(
     const { text, hadBom } = stripBom(info.content);
     const lineEol = detectEol(text);
     const doc = normalizeForEditor(text, lineEol);
-    // CodeMirror 相关模块仅在首次打开文件时加载（保持主包轻量）
-    const [{ buildEditorExtensions, createEditorState, languageForPath }, { Compartment }] =
-      await Promise.all([
-        import("../../lib/editorSetup"),
-        import("@codemirror/state"),
-      ]);
-    const wrapCompartment = new Compartment();
-    const state = createEditorState(
-      doc,
-      buildEditorExtensions({
-        language: languageForPath(path),
-        readOnly: ro,
-        wrap: false,
-        wrapCompartment,
-        savedText: () => tab.savedText,
-        onDirtyChange: (d) => {
-          tab.dirty = d;
-        },
-        onCursorChange: (line, col) => {
-          tab.cursor = { line, col };
-        },
-        onSave: () => {
-          void saveFileTab(tab.id);
-        },
-        onStateChange: (s) => {
-          tab.editorState = markRaw(s);
-        },
-      }),
-    );
+    const state = await buildFileEditorState(tab, doc, info.validUtf8);
     tab.readOnly = ro;
     tab.eol = lineEol;
     tab.hadBom = hadBom;
     tab.byteSize = info.byteSize;
-    tab.wrapCompartment = markRaw(wrapCompartment);
     tab.editorState = markRaw(state);
     tab.savedText = markRaw(state.doc);
     if (ro) {
@@ -389,6 +408,7 @@ export async function openPreviewTab(
     imageUrl: "",
     pdfData: null,
     pageCount: null,
+    stale: false,
   }) as unknown as PreviewEditorTab;
   insertTab(tab);
   activeTabId.value = id;
@@ -435,6 +455,7 @@ export async function openDocxTab(
     saving: false,
     status: "",
     byteSize: null,
+    stale: false,
     initialHtml: null,
     editor: null,
   }) as unknown as DocxEditorTab;

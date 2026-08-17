@@ -42,6 +42,8 @@ function fakeTab(content: string): FileEditorTab {
     hadBom: false,
     byteSize: content.length,
     cursor: { line: 1, col: 1 },
+    scrollTop: 0,
+    stale: false,
     status: "",
     editorState: {
       doc: { toString: () => content },

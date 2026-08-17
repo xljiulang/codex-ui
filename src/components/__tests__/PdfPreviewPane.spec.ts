@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
 
 const { mockPage } = vi.hoisted(() => ({
   mockPage: {
@@ -35,6 +36,7 @@ function makeTab(over: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
     imageUrl: "",
     pdfData: new Uint8Array([1, 2, 3]),
     pageCount: null,
+    stale: false,
     ...over,
   };
 }
@@ -101,6 +103,25 @@ describe("PdfPreviewPane PDF 预览", () => {
     expect(w.find('[aria-label="缩小"]').attributes("disabled")).toBeDefined();
     await w.find(".pdf-toolbar-fit").trigger("click");
     expect(w.text()).toContain("100%");
+  });
+
+  it("pdfData 变化（外部刷新）触发重载并保持页码与缩放", async () => {
+    const tab = reactive(makeTab());
+    const w = mount(PdfPreviewPane, { props: { tab } });
+    await flushPromises();
+    await w.find('[aria-label="下一页"]').trigger("click");
+    expect(w.text()).toContain("2 / 3");
+    await w.find('[aria-label="放大"]').trigger("click");
+    expect(w.text()).toContain("125%");
+    const callsBefore = mockedGetDocument.mock.calls.length;
+
+    // 同一标签对象替换 pdfData：应重新加载（旧实现只监听 props.tab 对象不会触发）
+    tab.pdfData = new Uint8Array([4, 5, 6]);
+    await flushPromises();
+    expect(mockedGetDocument.mock.calls.length).toBeGreaterThan(callsBefore);
+    await flushPromises();
+    expect(w.text()).toContain("2 / 3");
+    expect(w.text()).toContain("125%");
   });
 
   it("空数据提示 PDF 内容为空", async () => {

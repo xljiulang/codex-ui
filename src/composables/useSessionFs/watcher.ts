@@ -17,6 +17,7 @@ import {
 } from "./tree";
 import { ensureTextFileIcon } from "./icons";
 import { clearSearch, resetSearchState } from "./search";
+import { refreshActiveTabFromFs } from "../useEditorTabs";
 
 let active = false;
 /** 已加载的根路径：同根重新激活时保留展开状态，仅刷新数据 */
@@ -24,13 +25,28 @@ let loadedRoot = "";
 let unlistenFsEvent: (() => void) | null = null;
 let watcherStarted = false;
 
+/** 文件监听跟随工作区（始终生效，不依赖资源面板激活）：有工作区即监听 */
 async function syncWatcher() {
   const root = normalizeFsPath(workspace.value);
-  if (active && root) {
+  if (root) {
     if (!unlistenFsEvent) {
       try {
-        unlistenFsEvent = await listen("session-fs/changed", () => {
+        unlistenFsEvent = await listen("session-fs/changed", (e) => {
           if (active) void refreshAll();
+          const payload = e.payload as
+            | { root?: unknown; paths?: unknown }
+            | undefined;
+          void refreshActiveTabFromFs(
+            payload &&
+              typeof payload.root === "string" &&
+              Array.isArray(payload.paths) &&
+              payload.paths.every((p) => typeof p === "string")
+              ? {
+                  root: payload.root,
+                  paths: payload.paths as string[],
+                }
+              : undefined,
+          );
         });
       } catch {
         // 非 Tauri 环境（如单测）忽略
@@ -99,8 +115,8 @@ watch(workspace, async (r, old) => {
   const root = normalizeFsPath(r ?? "");
   const prev = normalizeFsPath(old ?? "");
   if (root === prev) return;
-  if (!active) return;
   void syncWatcher();
+  if (!active) return;
   if (root) {
     if (loadedRoot !== root) {
       loadedRoot = root;

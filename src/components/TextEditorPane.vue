@@ -82,17 +82,31 @@ function ensureView() {
   if (view) {
     if (view.state !== state) {
       view.setState(state);
+      view.scrollDOM.scrollTop = props.tab.scrollTop || 0;
+      // CodeMirror 在 setState 后可能按滚动锚/光标再调整，下一帧兜底恢复
+      requestAnimationFrame(() => {
+        if (view && view.state === state) {
+          view.scrollDOM.scrollTop = props.tab.scrollTop || 0;
+        }
+      });
       view.focus();
     }
     view.requestMeasure();
     return;
   }
   view = new EditorView({ state, parent: host });
+  view.scrollDOM.scrollTop = props.tab.scrollTop || 0;
+  view.scrollDOM.addEventListener("scroll", onEditorScroll);
   // 编辑区自定义右键菜单（剪切/复制/粘贴等常用功能），面板其余区域仍走全局菜单
   view.dom.addEventListener("contextmenu", onEditorContextMenu);
   // 测试挂点：组件测试通过 host.__cmView 驱动编辑
   (host as HTMLDivElement & { __cmView?: EditorView }).__cmView = view;
   view.focus();
+}
+
+/** 滚动位置写回标签：切走再回来、外部刷新重建状态后恢复同一位置 */
+function onEditorScroll() {
+  if (view) props.tab.scrollTop = view.scrollDOM.scrollTop;
 }
 
 /** 编辑区右键：定位光标到点击处（点击处不在选区时），再弹出自定义菜单 */
