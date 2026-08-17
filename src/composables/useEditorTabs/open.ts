@@ -8,6 +8,7 @@ import {
   stripBom,
 } from "../../lib/editorFile";
 import { formatTimeHMS, pathBaseName } from "../../lib/format";
+import { languageFromPath } from "../../lib/highlight";
 import { assetUrl } from "../../lib/asset";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
@@ -270,7 +271,8 @@ export async function openFileTab(
     dirty: false,
     saving: false,
     wrap: false,
-    markdownPreview: false,
+    // Markdown 文件默认渲染模式（与 TextEditorPane.isMarkdown 同一判断，覆盖 .md/.markdown）
+    markdownPreview: languageFromPath(path) === "markdown",
     eol: "\n",
     hadBom: false,
     byteSize: null,

@@ -370,11 +370,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const wrapper = mountPane();
     await openFileTab(root, "a.md");
     await settle();
-    await waitForEl(wrapper, ".text-editor-actions button[aria-label='预览']");
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
-    await settle();
+    await waitForEl(wrapper, ".text-editor-preview .md");
+    // 默认渲染模式：无需切换即为预览态
+    expect(
+      wrapper.find(".text-editor-actions button[aria-label='编辑']").exists(),
+    ).toBe(true);
     expect(wrapper.find(".text-editor-preview .md").exists()).toBe(true);
     const aTab = tabs.find((t) => t.title === "a.md")!;
 
@@ -416,13 +416,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
     });
     const wrapper = mountPane();
 
-    // 打开 a.md 并进入预览，确认渲染的是 A 内容
+    // 打开 a.md（默认渲染模式），确认渲染的是 A 内容
     await openFileTab(root, aMd);
-    await settle();
-    await waitForEl(wrapper, ".text-editor-actions button[aria-label='预览']");
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
     await settle();
     await vi.waitFor(
       () => {
@@ -432,13 +427,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
       { timeout: 5000, interval: 20 },
     );
 
-    // 打开 b.md 并进入预览：必须显示 B 内容，不得残留 A 内容
+    // 打开 b.md（默认渲染模式）：必须显示 B 内容，不得残留 A 内容
     await openFileTab(root, bMd);
-    await settle();
-    await waitForEl(wrapper, ".text-editor-actions button[aria-label='预览']");
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
     await settle();
     await vi.waitFor(
       () => {

@@ -132,6 +132,24 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).toBe(tab.id);
   });
 
+  it("Markdown 文件默认渲染模式，普通文件默认编辑模式", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("# 标题"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.md");
+    expect(fileTab(activeTabId.value).markdownPreview).toBe(true);
+
+    await openFileTab(root, "README.MARKDOWN");
+    expect(fileTab(activeTabId.value).markdownPreview).toBe(true);
+
+    await openFileTab(root, "b.txt");
+    expect(fileTab(activeTabId.value).markdownPreview).toBe(false);
+  });
+
   it("编辑后 dirty 为真；保存调用 session_fs_write 并还原 CRLF/BOM", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {

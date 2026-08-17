@@ -126,9 +126,17 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     vi.clearAllMocks();
   });
 
-  it("Markdown 文件显示「预览」切换按钮，普通文件不显示", async () => {
+  it("Markdown 文件默认渲染模式并显示「预览/编辑」切换按钮，普通文件不显示", async () => {
     const mdTab = await openTab("a.md", "# 标题");
     const mdWrapper = await mountEditor(mdTab);
+    // 默认渲染模式：按钮显示「编辑」（点击切回编辑）
+    expect(
+      mdWrapper.find(".text-editor-actions button[aria-label='编辑']").exists(),
+    ).toBe(true);
+    await mdWrapper
+      .find(".text-editor-actions button[aria-label='编辑']")
+      .trigger("click");
+    await nextTick();
     expect(
       mdWrapper.find(".text-editor-actions button[aria-label='预览']").exists(),
     ).toBe(true);
@@ -155,20 +163,12 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     wrapper.unmount();
   });
 
-  it("预览/编辑切换：预览渲染当前文档，切回编辑保留内容与脏状态", async () => {
+  it("预览/编辑切换：默认预览渲染当前文档，切编辑保留内容、切回预览正常", async () => {
     const content = "# 标题\n\n**加粗** 正文";
     const tab = await openTab("a.md", content);
     const wrapper = await mountEditor(tab);
-    const view = await viewOf(wrapper);
-    expect(view.state.doc.toString()).toBe(content);
 
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
-    await nextTick();
-    expect(wrapper.find(".text-editor-host").attributes("style")).toContain(
-      "display: none",
-    );
+    // 默认渲染模式：预览渲染当前文档
     await waitForEl(wrapper, ".text-editor-preview .md");
     expect(wrapper.find(".text-editor-preview .md").text()).toContain("标题");
     expect(wrapper.find(".text-editor-preview .md").text()).toContain("正文");
@@ -181,6 +181,15 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     expect(style).not.toContain("display: none");
     expect((await viewOf(wrapper)).state.doc.toString()).toBe(content);
     expect(tab.dirty).toBe(false);
+
+    await wrapper
+      .find(".text-editor-actions button[aria-label='预览']")
+      .trigger("click");
+    await nextTick();
+    expect(wrapper.find(".text-editor-host").attributes("style")).toContain(
+      "display: none",
+    );
+    await waitForEl(wrapper, ".text-editor-preview .md");
     wrapper.unmount();
   });
 
@@ -220,14 +229,12 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
   it("预览态写入标签状态：卸载重挂载后仍保持预览", async () => {
     const tab = await openTab("a.md", "# 标题");
     const w1 = await mountEditor(tab);
-    await w1
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
-    await nextTick();
+    // 默认渲染模式：初始即为预览态
     expect(tab.markdownPreview).toBe(true);
     expect(
       w1.find(".text-editor-actions button[aria-label='编辑']").exists(),
     ).toBe(true);
+    await waitForEl(w1, ".text-editor-preview .md");
     w1.unmount();
 
     const w2 = await mountEditor(tab);
@@ -258,15 +265,11 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     )!;
     const wrapper = await mountEditor(aTab);
 
-    // A 进入预览，确认渲染的是 A 内容
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
-    await nextTick();
+    // A 默认渲染模式：确认渲染的是 A 内容
     await waitForEl(wrapper, ".text-editor-preview .md");
     expect(wrapper.find(".text-editor-preview .md").text()).toContain("A标题");
 
-    // 切到 B 标签（视图换档完成）后进入预览：必须显示 B 内容
+    // 切到 B 标签（视图换档完成）：B 默认渲染模式，必须显示 B 内容
     await openFileTab(root, "b.md");
     const bTab = tabs.find(
       (t): t is FileEditorTab => t.kind === "file" && t.title === "b.md",
@@ -275,10 +278,6 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     await flushPromises();
     await nextTick();
     await viewOf(wrapper);
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
-    await nextTick();
     await waitForEl(wrapper, ".text-editor-preview .md");
     await vi.waitFor(
       () => {
@@ -523,10 +522,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     view.dispatch({ changes: { from: 0, insert: "# " } });
     expect(tab.dirty).toBe(true);
 
-    await wrapper
-      .find(".text-editor-actions button[aria-label='预览']")
-      .trigger("click");
-    await nextTick();
+    // 默认渲染模式：无需切换，预览态下直接 Ctrl+S 保存
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key: "s", ctrlKey: true }),
     );
