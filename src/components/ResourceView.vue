@@ -42,6 +42,7 @@ import {
   moveEntry,
   openImagePreview,
   openPdfPreview,
+  openXlsxPreview,
 } from "../composables/useSessionFs";
 import {
   formatFileSize,
@@ -162,7 +163,7 @@ function fileMeta(entry: FsEntry): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-/** 打开前先按扩展名分发：PDF/图像 → 对应预览标签；.docx → 富文本编辑；其余探测内容：文本→编辑器；非文本→提示无法打开 */
+/** 打开前先按扩展名分发：PDF/图像/XLSX → 对应预览标签；.docx → 富文本编辑；其余探测内容：文本→编辑器；非文本→提示无法打开 */
 async function requestOpen(entry: FsEntry) {
   const type = previewTypeForName(entry.name);
   if (type === "pdf") {
@@ -171,6 +172,10 @@ async function requestOpen(entry: FsEntry) {
   }
   if (type === "image") {
     openImagePreview(entry);
+    return;
+  }
+  if (type === "xlsx") {
+    openXlsxPreview(entry);
     return;
   }
   if (isDocxPath(entry.name)) {

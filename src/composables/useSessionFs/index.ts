@@ -51,6 +51,7 @@ export {
   openPathInApp,
   openPdfPreview,
   openTextEditor,
+  openXlsxPreview,
   probeTextEntry,
 } from "./open";
 export { setSessionFsActive, __resetSessionFsForTest } from "./watcher";

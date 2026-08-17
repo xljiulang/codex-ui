@@ -259,7 +259,7 @@ async function refreshDocxTab(tab: DocxEditorTab): Promise<void> {
   }
 }
 
-/** 预览标签：图片击穿缓存重取，PDF 替换字节由组件重载（保持页/缩放） */
+/** 预览标签：图片击穿缓存重取，PDF / XLSX 替换字节由组件重载（保持页/表） */
 async function refreshPreviewTab(tab: PreviewEditorTab): Promise<void> {
   try {
     if (tab.previewType === "image") {
@@ -269,10 +269,15 @@ async function refreshPreviewTab(tab: PreviewEditorTab): Promise<void> {
         workspace: tab.workspace,
         path: tab.path,
       });
-      tab.pdfData = base64ToBytes(info.content);
+      const bytes = base64ToBytes(info.content);
+      if (tab.previewType === "pdf") {
+        tab.pdfData = bytes;
+      } else {
+        tab.xlsxData = bytes;
+      }
     }
   } catch {
-    // 预览标签无状态栏：刷新失败静默（图片/PDF 组件各自展示错误态）
+    // 预览标签无状态栏：刷新失败静默（图片/PDF/XLSX 组件各自展示错误态）
   }
 }
 

@@ -19,6 +19,7 @@ vi.mock("../../lib/docx", () => docxMock);
 import { invoke } from "@tauri-apps/api/core";
 import {
   __resetEditorTabsForTest,
+  activateTab,
   openDocxTab,
   openFileTab,
   openPreviewTab,
@@ -386,6 +387,69 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     });
     await refreshActiveTabFromFs({ root, paths: ["doc.pdf"] });
     expect(tab.pdfData!.length).toBe(4);
+  });
+
+  it("XLSX 预览：替换 xlsxData 字节", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("AAA"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openPreviewTab("xlsx", root, "book.xlsx");
+    const tab = tabs.find(
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "book.xlsx",
+    )!;
+    expect(tab.xlsxData!.length).toBe(3);
+
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("BBBB"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await refreshActiveTabFromFs({ root, paths: ["book.xlsx"] });
+    expect(tab.xlsxData!.length).toBe(4);
+  });
+
+  it("XLSX 预览非活动标签：标记 stale，切回活动补刷并清除标记", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("AAA"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openPreviewTab("xlsx", root, "book.xlsx");
+    const tab = tabs.find(
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "book.xlsx",
+    )!;
+    await openFile("a.txt", "A");
+    expect(tab.stale).toBe(false);
+    expect(tab.xlsxData!.length).toBe(3);
+
+    // 非活动 xlsx 命中事件：只标记 stale，不读盘
+    mockedInvoke.mockClear();
+    await refreshActiveTabFromFs({ root, paths: ["book.xlsx"] });
+    expect(tab.stale).toBe(true);
+    expect(tab.xlsxData!.length).toBe(3);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_read_bytes",
+      expect.anything(),
+    );
+
+    // 切回活动：自动补刷替换字节并清除标记
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("BBBB"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    activateTab(tab.id);
+    await flushPromises();
+    expect(tab.xlsxData!.length).toBe(4);
+    expect(tab.stale).toBe(false);
   });
 
   it("编辑区交互后延迟到空闲再刷新", async () => {

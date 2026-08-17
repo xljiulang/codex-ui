@@ -83,7 +83,7 @@ export interface DiffEditorTab extends EditorTabBase {
 
 export interface PreviewEditorTab extends EditorTabBase {
   kind: (typeof TabKind)["Preview"];
-  /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显 */
+  /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显；xlsx → 表格预览 */
   previewType: PreviewType;
   id: string;
   workspace: string;
@@ -95,6 +95,10 @@ export interface PreviewEditorTab extends EditorTabBase {
   imageUrl: string;
   /** PDF 预览：后端读取的原始字节（pdf.js getDocument 数据源） */
   pdfData: Uint8Array | null;
+  /** XLSX 预览：后端读取的原始字节（SheetJS read 数据源，组件解析渲染） */
+  xlsxData: Uint8Array | null;
+  /** XLSX 当前工作表序号：随标签持久，外部刷新后按新工作表数夹紧 */
+  xlsxSheetIndex: number;
   /** PDF 页数：组件加载文档后回填 */
   pageCount: number | null;
   /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */

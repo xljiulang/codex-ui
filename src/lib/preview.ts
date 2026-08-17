@@ -1,8 +1,9 @@
-/** 特殊文件类型预览：扩展名识别与字节解码（PDF / 图像） */
+/** 特殊文件类型预览：扩展名识别与字节解码（PDF / 图像 / XLSX） */
 
-export type PreviewType = "pdf" | "image";
+export type PreviewType = "pdf" | "image" | "xlsx";
 
 const PDF_EXT = "pdf";
+const XLSX_EXT = "xlsx";
 const IMAGE_EXTS = [
   "png",
   "jpg",
@@ -23,13 +24,14 @@ export function extOf(name: string): string | null {
 }
 
 /**
- * 按扩展名判定预览类型：.pdf → "pdf"；常见图像格式 → "image"；
+ * 按扩展名判定预览类型：.pdf → "pdf"；常见图像格式 → "image"；.xlsx → "xlsx"；
  * 其余返回 null（走原有文本探测/编辑器逻辑）。大小写不敏感。
  */
 export function previewTypeForName(name: string): PreviewType | null {
   const ext = extOf(name);
   if (!ext) return null;
   if (ext === PDF_EXT) return "pdf";
+  if (ext === XLSX_EXT) return "xlsx";
   if (IMAGE_EXTS.includes(ext)) return "image";
   return null;
 }

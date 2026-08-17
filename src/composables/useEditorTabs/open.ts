@@ -382,8 +382,8 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
 }
 
 /**
- * 打开特殊文件预览标签（PDF / 图像）：已打开则激活；否则新建标签并异步准备数据。
- * 图像直接经 asset 协议取 URL；PDF 经 session_fs_read_bytes 读取 base64 后解码为字节。
+ * 打开特殊文件预览标签（PDF / 图像 / XLSX）：已打开则激活；否则新建标签并异步准备数据。
+ * 图像直接经 asset 协议取 URL；PDF / XLSX 经 session_fs_read_bytes 读取 base64 后解码为字节。
  */
 export async function openPreviewTab(
   type: PreviewType,
@@ -407,6 +407,8 @@ export async function openPreviewTab(
     error: "",
     imageUrl: "",
     pdfData: null,
+    xlsxData: null,
+    xlsxSheetIndex: 0,
     pageCount: null,
     stale: false,
   }) as unknown as PreviewEditorTab;
@@ -420,7 +422,12 @@ export async function openPreviewTab(
         workspace,
         path,
       });
-      tab.pdfData = base64ToBytes(info.content);
+      const bytes = base64ToBytes(info.content);
+      if (type === "pdf") {
+        tab.pdfData = bytes;
+      } else {
+        tab.xlsxData = bytes;
+      }
     }
   } catch (e) {
     tab.error = String(e);

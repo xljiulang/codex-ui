@@ -38,6 +38,13 @@ export function openImagePreview(entry: FsEntry) {
   void openPreviewTab("image", root, entry.path);
 }
 
+/** 应用内打开 .xlsx 预览：在主窗口左侧编辑器区打开/激活只读表格预览标签 */
+export function openXlsxPreview(entry: FsEntry) {
+  const root = workspace.value;
+  if (!root) return;
+  void openPreviewTab("xlsx", root, entry.path);
+}
+
 /** 应用内打开 .docx 富文本编辑：在主窗口左侧编辑器区打开/激活 .docx 标签 */
 export function openDocxEditor(entry: FsEntry) {
   const root = workspace.value;
@@ -66,7 +73,7 @@ export async function probeTextEntry(
 }
 
 /**
- * 对话本地链接：支持则在应用内 tab 打开（PDF/图片 → 预览标签，文本 → 编辑器），
+ * 对话本地链接：支持则在应用内 tab 打开（PDF/图片/XLSX → 预览标签，文本 → 编辑器），
  * 返回 true；否则返回 false，由调用方降级为资源管理器。
  * 工作区外文件以父目录作为根（仅本次读取/打开，不改变会话工作区）。
  * 测试钩子（__CODEX_UI_TEST__）开启时直接返回 false，保持 E2E 现有
@@ -90,6 +97,10 @@ export async function openPathInApp(path: string): Promise<boolean> {
   if (type === "image") {
     // 图片走 asset 协议，需要绝对路径；root 仅作标签元数据
     void openPreviewTab("image", root, path);
+    return true;
+  }
+  if (type === "xlsx") {
+    void openPreviewTab("xlsx", root, relPath);
     return true;
   }
   if (isDocxPath(relPath)) {

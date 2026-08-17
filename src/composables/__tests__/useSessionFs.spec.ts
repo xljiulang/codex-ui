@@ -300,6 +300,27 @@ describe("openPathInApp 对话链接应用内打开", () => {
     );
   });
 
+  it("工作区内 .xlsx：直接打开表格预览标签（不做文本探测）", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: btoa("PK"), byteSize: 2 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const path = root + "\\a.xlsx";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("session_fs_probe_text", {
+      workspace: root,
+      path,
+    });
+    const tab = tabs.find((t) => t.kind === "preview" && t.path === path);
+    expect(tab).toBeTruthy();
+    expect((tab as { previewType?: string } | undefined)?.previewType).toBe(
+      "xlsx",
+    );
+  });
+
   it("二进制文件：返回 false 且不打开标签", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(false);

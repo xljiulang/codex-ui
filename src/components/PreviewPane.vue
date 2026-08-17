@@ -7,10 +7,17 @@ const props = defineProps<{ tab: PreviewEditorTab }>();
 
 // pdf.js 较重，懒加载避免拖累主窗口首屏
 const PdfPreviewPane = defineAsyncComponent(() => import("./PdfPreviewPane.vue"));
+const XlsxPreviewPane = defineAsyncComponent(
+  () => import("./XlsxPreviewPane.vue"),
+);
 
 const relPath = computed(() => relPathOf(props.tab.workspace, props.tab.path));
 const kindLabel = computed(() =>
-  props.tab.previewType === "pdf" ? "PDF" : "图像",
+  props.tab.previewType === "pdf"
+    ? "PDF"
+    : props.tab.previewType === "xlsx"
+      ? "表格"
+      : "图像",
 );
 const imgError = ref(false);
 
@@ -44,7 +51,8 @@ watch(
         />
         <div v-else class="preview-note preview-error">无法预览该图片</div>
       </div>
-      <PdfPreviewPane v-else :tab="tab" />
+      <PdfPreviewPane v-else-if="tab.previewType === 'pdf'" :tab="tab" />
+      <XlsxPreviewPane v-else :tab="tab" />
     </template>
   </div>
 </template>

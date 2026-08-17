@@ -519,6 +519,64 @@ describe("useEditorTabs 标签状态", () => {
     expect(preview!.pdfData).toBeNull();
   });
 
+  it("打开 XLSX 预览：读取 session_fs_read_bytes 并解码为字节", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read_bytes") {
+        expect(args).toEqual({ workspace: root, path: "book.xlsx" });
+        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("xlsx", root, "book.xlsx");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("xlsx");
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toBe("");
+    expect(preview!.xlsxSheetIndex).toBe(0);
+    expect(Array.from(preview!.xlsxData ?? [])).toEqual([
+      104, 101, 108, 108, 111,
+    ]);
+    expect(activeTabId.value).toBe(preview!.id);
+  });
+
+  it("XLSX 预览重复打开：去重并激活原标签", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("xlsx", root, "book.xlsx");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    await openPreviewTab("xlsx", root, "book.xlsx");
+    expect(tabs.filter((t) => t.kind === "preview")).toHaveLength(1);
+    expect(activeTabId.value).toBe(preview!.id);
+  });
+
+  it("XLSX 读取失败：标签保留并记录错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.reject("xlsx boom");
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("xlsx", root, "book.xlsx");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toContain("xlsx boom");
+    expect(preview!.xlsxData).toBeNull();
+  });
+
   it("打开提交详情：创建标签、拉取详情、激活；重复打开去重", async () => {
     const detail = {
       hash: "a".repeat(40),
