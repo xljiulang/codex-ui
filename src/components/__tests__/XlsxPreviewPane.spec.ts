@@ -78,6 +78,38 @@ describe("XlsxPreviewPane 表格预览", () => {
     expect(tab.xlsxSheetIndex).toBe(1);
   });
 
+  it("缩放：放大/缩小/100% 复位，行高与列宽随缩放变化", async () => {
+    const wrapper = mount(XlsxPreviewPane, {
+      props: { tab: makeTab(twoSheetBytes()) },
+    });
+    await flushPromises();
+    expect(wrapper.find(".preview-zoom-percent").text()).toBe("100%");
+    expect(wrapper.find(".xlsx-table").attributes("style")).toContain(
+      "--xlsx-row-h: 28px",
+    );
+
+    const btns = wrapper.findAll(".preview-zoom-btn");
+    await btns[1].trigger("click"); // ＋ → 125%
+    await flushPromises();
+    expect(wrapper.find(".preview-zoom-percent").text()).toBe("125%");
+    expect(wrapper.find(".xlsx-table").attributes("style")).toContain(
+      "--xlsx-row-h: 35px",
+    );
+
+    await btns[0].trigger("click"); // − → 100%
+    await flushPromises();
+    expect(wrapper.find(".preview-zoom-percent").text()).toBe("100%");
+
+    await btns[1].trigger("click"); // ＋ → 125%
+    await flushPromises();
+    await btns[2].trigger("click"); // 100% 复位
+    await flushPromises();
+    expect(wrapper.find(".preview-zoom-percent").text()).toBe("100%");
+    expect(wrapper.find(".xlsx-table").attributes("style")).toContain(
+      "--xlsx-row-h: 28px",
+    );
+  });
+
   it("外部替换 xlsxData（自动刷新）：重解析并重渲染", async () => {
     const wrapper = mount(XlsxPreviewPane, {
       props: { tab: makeTab(twoSheetBytes()) },

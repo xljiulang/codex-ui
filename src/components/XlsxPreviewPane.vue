@@ -13,11 +13,16 @@ const props = defineProps<{ tab: PreviewEditorTab }>();
 const ROW_HEIGHT = 28;
 /** 可视区上下额外渲染的行数，避免快速滚动露出空白 */
 const OVERSCAN = 10;
+/** 缩放范围与步进：0.5–3 倍，与 PDF 预览同一套交互 */
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 1.25;
 
 const loading = ref(true);
 const error = ref("");
 const workbook = ref<XlsxWorkbook | null>(null);
 const sheetIndex = ref(0);
+const zoom = ref(1);
 const gridHost = ref<HTMLDivElement | null>(null);
 const startRow = ref(0);
 const endRow = ref(0);
@@ -36,11 +41,21 @@ const visibleRows = computed(() => {
   return sheet.rows.slice(startRow.value, endRow.value);
 });
 
-/** 表格最小宽度：列宽之和，窄于容器时由 100% 撑满 */
-const tableWidth = computed(() => {
+const percentLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
+/** 缩放后的行高（px）：虚拟滚动与单元格高度共用 */
+const rowHeightPx = computed(() => Math.round(ROW_HEIGHT * zoom.value));
+/** 缩放后的字号（px）：内容随缩放同步放大 */
+const fontPx = computed(() => Math.round(12 * zoom.value));
+/** 缩放后的列宽（px） */
+const scaledWidths = computed(() => {
   const sheet = activeSheet.value;
-  if (!sheet) return 0;
-  return sheet.colWidths.reduce((a, b) => a + b, 0);
+  if (!sheet) return [];
+  return sheet.colWidths.map((w) => Math.round(w * zoom.value));
+});
+
+/** 表格最小宽度：缩放后列宽之和，窄于容器时由 100% 撑满 */
+const tableWidth = computed(() => {
+  return scaledWidths.value.reduce((a, b) => a + b, 0);
 });
 
 /** 滚动窗口计算：按容器滚动位置确定可见行区间（含上下 overscan） */
@@ -48,17 +63,30 @@ function updateWindow() {
   const host = gridHost.value;
   const sheet = activeSheet.value;
   if (!host || !sheet || sheet.rowCount === 0) return;
+  const rowH = rowHeightPx.value;
   const first = Math.max(
     0,
-    Math.floor(host.scrollTop / ROW_HEIGHT) - OVERSCAN,
+    Math.floor(host.scrollTop / rowH) - OVERSCAN,
   );
-  const count = Math.ceil(host.clientHeight / ROW_HEIGHT) + OVERSCAN * 2;
+  const count = Math.ceil(host.clientHeight / rowH) + OVERSCAN * 2;
   startRow.value = first;
   endRow.value = Math.min(sheet.rowCount, first + count);
 }
 
 function onScroll() {
   updateWindow();
+}
+
+function zoomIn() {
+  zoom.value = Math.min(MAX_ZOOM, zoom.value * ZOOM_STEP);
+}
+
+function zoomOut() {
+  zoom.value = Math.max(MIN_ZOOM, zoom.value / ZOOM_STEP);
+}
+
+function resetZoom() {
+  zoom.value = 1;
 }
 
 function selectSheet(i: number) {
@@ -116,6 +144,11 @@ watch(
   () => void load(),
   { immediate: true },
 );
+
+// 缩放变化后行高/列宽重新布局，浏览器会夹紧滚动位置：下一帧重算可见窗口
+watch(zoom, () => {
+  void nextTick(updateWindow);
+});
 </script>
 
 <template>
@@ -131,6 +164,34 @@ watch(
           @click="selectSheet(i)"
         >
           {{ sheet.name }}
+        </button>
+      </div>
+      <div class="xlsx-zoom">
+        <button
+          class="preview-zoom-btn"
+          type="button"
+          :disabled="zoom <= MIN_ZOOM"
+          aria-label="缩小"
+          @click="zoomOut()"
+        >
+          −
+        </button>
+        <span class="preview-zoom-percent">{{ percentLabel }}</span>
+        <button
+          class="preview-zoom-btn"
+          type="button"
+          :disabled="zoom >= MAX_ZOOM"
+          aria-label="放大"
+          @click="zoomIn()"
+        >
+          ＋
+        </button>
+        <button
+          class="preview-zoom-btn"
+          type="button"
+          @click="resetZoom()"
+        >
+          100%
         </button>
       </div>
       <span v-if="activeSheet" class="xlsx-meta">
@@ -155,11 +216,15 @@ watch(
     >
       <table
         class="xlsx-table"
-        :style="{ minWidth: `${tableWidth}px` }"
+        :style="{
+          minWidth: `${tableWidth}px`,
+          fontSize: `${fontPx}px`,
+          '--xlsx-row-h': `${rowHeightPx}px`,
+        }"
       >
         <colgroup>
           <col
-            v-for="(w, c) in activeSheet.colWidths"
+            v-for="(w, c) in scaledWidths"
             :key="c"
             :style="{ width: `${w}px` }"
           />
@@ -179,7 +244,7 @@ watch(
           <tr v-if="startRow > 0" class="xlsx-spacer">
             <td
               :colspan="activeSheet.colCount"
-              :style="{ height: `${startRow * ROW_HEIGHT}px` }"
+              :style="{ height: `${startRow * rowHeightPx}px` }"
             />
           </tr>
           <tr v-for="(row, i) in visibleRows" :key="startRow + i">
@@ -196,7 +261,7 @@ watch(
             <td
               :colspan="activeSheet.colCount"
               :style="{
-                height: `${(activeSheet.rowCount - endRow) * ROW_HEIGHT}px`,
+                height: `${(activeSheet.rowCount - endRow) * rowHeightPx}px`,
               }"
             />
           </tr>

@@ -33,8 +33,63 @@ describe("PreviewPane 预览标签", () => {
     const img = w.find(".preview-image img");
     expect(img.exists()).toBe(true);
     expect(img.attributes("src")).toBe("asset://D:/repo/assets/logo.png");
+    expect(w.find(".preview-zoom-toolbar").exists()).toBe(true);
     expect(w.text()).toContain("图像");
     expect(w.text()).toContain("assets/logo.png");
+  });
+
+  it("图像缩放：放大按原始像素等比缩放，适应窗口复位", async () => {
+    const w = mount(PreviewPane, { props: { tab: makeTab() } });
+    const img = w.find(".preview-image img").element as HTMLImageElement;
+    Object.defineProperty(img, "naturalWidth", {
+      value: 200,
+      configurable: true,
+    });
+    Object.defineProperty(img, "naturalHeight", {
+      value: 100,
+      configurable: true,
+    });
+    img.dispatchEvent(new Event("load"));
+
+    const btns = w.findAll(".preview-zoom-btn");
+    expect(w.find(".preview-zoom-percent").text()).toBe("100%");
+    await btns[1].trigger("click"); // ＋ → 125%
+    expect(w.find(".preview-zoom-percent").text()).toBe("125%");
+    expect(w.find(".preview-image img").attributes("style")).toContain(
+      "width: 250px",
+    );
+    expect(w.find(".preview-image img").attributes("style")).toContain(
+      "height: 125px",
+    );
+    expect(w.find(".preview-image img").classes()).toContain("zoomed");
+
+    await btns[2].trigger("click"); // 适应窗口
+    expect(w.find(".preview-zoom-percent").text()).toBe("100%");
+    expect(w.find(".preview-image img").attributes("style") ?? "").not.toContain(
+      "250px",
+    );
+    expect(w.find(".preview-image img").classes()).not.toContain("zoomed");
+  });
+
+  it("imageUrl 变化（外部刷新）复位缩放", async () => {
+    const tab = reactive(makeTab());
+    const w = mount(PreviewPane, { props: { tab } });
+    const img = w.find(".preview-image img").element as HTMLImageElement;
+    Object.defineProperty(img, "naturalWidth", {
+      value: 200,
+      configurable: true,
+    });
+    Object.defineProperty(img, "naturalHeight", {
+      value: 100,
+      configurable: true,
+    });
+    img.dispatchEvent(new Event("load"));
+    await w.findAll(".preview-zoom-btn")[1].trigger("click");
+    expect(w.find(".preview-zoom-percent").text()).toBe("125%");
+
+    tab.imageUrl = "asset://D:/repo/assets/logo.png?t=456";
+    await flushPromises();
+    expect(w.find(".preview-zoom-percent").text()).toBe("100%");
   });
 
   it("图像加载失败显示友好提示", async () => {
