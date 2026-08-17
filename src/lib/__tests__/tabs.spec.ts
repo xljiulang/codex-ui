@@ -58,9 +58,11 @@ describe("isTabWorking 统一工作中判定", () => {
     expect(TabKind.Diff).toBe("diff");
     expect(TabKind.Preview).toBe("preview");
     expect(TabKind.Terminal).toBe("terminal");
+    expect(TabKind.Commit).toBe("commit");
     expect(TabIcon.Chat).toBe("chat");
     expect(TabIcon.Terminal).toBe("terminal");
     expect(TabIcon.File).toBe("file");
+    expect(TabIcon.Commit).toBe("commit");
   });
 
   it("会话标签：回合进行中或目标激活为工作中", () => {
@@ -103,9 +105,10 @@ describe("isTabWorking 统一工作中判定", () => {
     ).toBe(false);
   });
 
-  it("文件/diff/预览标签：恒非工作中", () => {
+  it("文件/diff/预览/提交详情标签：恒非工作中", () => {
     expect(isTabWorking(plainTab(TabKind.File))).toBe(false);
     expect(isTabWorking(plainTab(TabKind.Diff))).toBe(false);
     expect(isTabWorking(plainTab(TabKind.Preview))).toBe(false);
+    expect(isTabWorking(plainTab(TabKind.Commit))).toBe(false);
   });
 });

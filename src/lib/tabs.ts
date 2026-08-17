@@ -8,6 +8,7 @@ export const TabKind = {
   Diff: "diff",
   Preview: "preview",
   Terminal: "terminal",
+  Commit: "commit",
 } as const;
 export type TabKind = (typeof TabKind)[keyof typeof TabKind];
 
@@ -16,6 +17,7 @@ export const TabIcon = {
   Chat: "chat",
   Terminal: "terminal",
   File: "file",
+  Commit: "commit",
 } as const;
 export type TabIcon = (typeof TabIcon)[keyof typeof TabIcon];
 

@@ -31,6 +31,8 @@ import {
   closeTabsToRightAll,
   closeTab,
   discardTabAndClose,
+  openCommitFileDiffTab,
+  openCommitTab,
   openDiffTab,
   openFileTab,
   openPreviewTab,
@@ -506,6 +508,104 @@ describe("useEditorTabs 标签状态", () => {
     expect(preview!.loading).toBe(false);
     expect(preview!.error).toContain("pdf boom");
     expect(preview!.pdfData).toBeNull();
+  });
+
+  it("打开提交详情：创建标签、拉取详情、激活；重复打开去重", async () => {
+    const detail = {
+      hash: "a".repeat(40),
+      shortHash: "aaaaaaa",
+      subject: "feat: x",
+      body: "feat: x\n\nbody",
+      author: "t",
+      authorEmail: "t@t",
+      authorTimeSecs: 1000,
+      committer: "t",
+      committerEmail: "t@t",
+      committerTimeSecs: 1000,
+      parents: [],
+      files: [],
+    };
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_commit_detail") {
+        return Promise.resolve(detail);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openCommitTab(root, detail.hash, "feat: x");
+    expect(tabs).toHaveLength(1);
+    const t = tabs.find((x) => x.kind === "commit");
+    expect(t).toMatchObject({
+      kind: "commit",
+      workspace: root,
+      hash: detail.hash,
+      title: "feat: x",
+      loading: false,
+      error: "",
+      detail,
+    });
+    expect(activeTabId.value).toBe(t!.id);
+    expect(mockedInvoke).toHaveBeenCalledWith("git_changes_commit_detail", {
+      workspace: root,
+      hash: detail.hash,
+    });
+
+    await openCommitTab(root, detail.hash, "feat: x");
+    expect(tabs.filter((x) => x.kind === "commit")).toHaveLength(1);
+  });
+
+  it("打开提交详情：读取失败保留标签并记录错误", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_commit_detail") {
+        return Promise.reject("detail boom");
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openCommitTab(root, "a".repeat(40), "feat");
+    const t = tabs.find((x) => x.kind === "commit");
+    expect(t!.loading).toBe(false);
+    expect(t!.error).toContain("detail boom");
+  });
+
+  it("打开提交文件 diff：创建 Diff 标签、拉取行数据、激活；按提交+文件去重", async () => {
+    const rows = [
+      { kind: "del", oldNo: 1, text: "x" },
+      { kind: "add", newNo: 1, text: "y" },
+    ];
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_commit_file_diff") {
+        return Promise.resolve(rows);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    const hash = "b".repeat(40);
+
+    await openCommitFileDiffTab(root, hash, "src/a.txt", "modify");
+    expect(tabs).toHaveLength(1);
+    const t = tabs.find((x) => x.kind === "diff");
+    expect(t).toMatchObject({
+      kind: "diff",
+      path: "src/a.txt",
+      changeKind: "modify",
+      workspace: root,
+      loading: false,
+      error: "",
+      rows,
+      title: "a.txt",
+    });
+    expect(activeTabId.value).toBe(t!.id);
+    expect(mockedInvoke).toHaveBeenCalledWith("git_changes_commit_file_diff", {
+      workspace: root,
+      hash,
+      path: "src/a.txt",
+    });
+
+    await openCommitFileDiffTab(root, hash, "src/a.txt", "modify");
+    expect(tabs.filter((x) => x.kind === "diff")).toHaveLength(1);
+    // 同一文件不同提交 → 独立 diff 标签
+    await openCommitFileDiffTab(root, "c".repeat(40), "src/a.txt", "modify");
+    expect(tabs.filter((x) => x.kind === "diff")).toHaveLength(2);
   });
 
   it("预览标签关闭与全部关闭：无脏确认直接移除", async () => {

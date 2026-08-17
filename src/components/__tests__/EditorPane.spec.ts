@@ -58,6 +58,7 @@ import {
   activateTab,
   activeTabId,
   closeTab,
+  openCommitTab,
   openDiffTab,
   openFileTab,
   openPreviewTab,
@@ -78,7 +79,11 @@ import {
   store,
   type SessionTab,
 } from "../../composables/useCodex";
-import { ICON_SESSION_LOGO_C, ICON_TERMINAL } from "../../lib/icons";
+import {
+  ICON_GIT,
+  ICON_SESSION_LOGO_C,
+  ICON_TERMINAL,
+} from "../../lib/icons";
 import {
   __resetGitChangesForTest,
   gitRevealTarget,
@@ -1324,6 +1329,91 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(tabEls[1].attributes("data-tip")).toBeUndefined();
     expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     await waitForEl(wrapper, ".preview-pane");
+    wrapper.unmount();
+  });
+
+  it("打开提交详情标签：渲染元信息与文件列表，点击文件打开该提交的 diff 标签", async () => {
+    const hash = "d".repeat(40);
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_commit_detail") {
+        return Promise.resolve({
+          hash,
+          shortHash: "ddddddd",
+          subject: "feat: commit",
+          body: "feat: commit\n\nbody text",
+          author: "tester",
+          authorEmail: "t@t",
+          authorTimeSecs: 1700000000,
+          committer: "tester",
+          committerEmail: "t@t",
+          committerTimeSecs: 1700000000,
+          parents: [],
+          files: [
+            {
+              path: "src/a.txt",
+              status: "modified",
+              insertions: 2,
+              deletions: 1,
+              binary: false,
+            },
+            {
+              path: "bin.dat",
+              status: "added",
+              insertions: 0,
+              deletions: 0,
+              binary: true,
+            },
+          ],
+        });
+      }
+      if (cmd === "git_changes_commit_file_diff") {
+        return Promise.resolve([
+          { kind: "ctx", oldNo: 1, newNo: 1, text: "a" },
+          { kind: "del", oldNo: 2, text: "x" },
+          { kind: "add", newNo: 2, text: "y" },
+        ]);
+      }
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    const wrapper = mountPane();
+    await openCommitTab(root, hash, "feat: commit");
+    await settle();
+    await waitForEl(wrapper, ".commit-pane");
+
+    // 提交标签图标与 GitView 面板 tab 同款
+    expect(wrapper.find(".editor-tab-icon svg path").attributes("d")).toBe(
+      ICON_GIT,
+    );
+    expect(wrapper.find(".commit-subject").text()).toBe("feat: commit");
+    expect(wrapper.find(".commit-hash").text()).toBe("ddddddd");
+    expect(wrapper.find(".commit-meta").text()).toContain("tester");
+    expect(wrapper.find(".commit-body").text()).toContain("body text");
+    const fileRows = wrapper.findAll(".commit-file");
+    expect(fileRows).toHaveLength(2);
+    expect(fileRows[0].find(".commit-file-path").text()).toBe("src/a.txt");
+    expect(fileRows[0].find(".commit-file-stats").text()).toContain("+2");
+    expect(fileRows[0].find(".commit-file-stats").text()).toContain("-1");
+    expect(fileRows[1].find(".commit-file-stats").text()).toBe("二进制");
+
+    // 点击文件行：调用该提交的文件 diff 并打开 Diff 标签
+    await fileRows[0].trigger("click");
+    await settle();
+    const diffCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_commit_file_diff",
+    );
+    expect(diffCall).toBeTruthy();
+    expect(diffCall?.[1]).toEqual({
+      workspace: root,
+      hash,
+      path: "src/a.txt",
+    });
+    const diffTab = tabs.find((t) => t.kind === "diff");
+    expect(diffTab).toBeTruthy();
+    expect(diffTab?.path).toBe("src/a.txt");
+    await waitForEl(wrapper, ".diff-window-path");
+    expect(wrapper.find(".diff-window-path").text()).toBe("src/a.txt");
     wrapper.unmount();
   });
 

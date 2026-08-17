@@ -24,6 +24,7 @@ import {
   saveTabAndClose,
   tabs,
   type EditorTab,
+  type CommitEditorTab,
   type FileEditorTab,
   type DiffEditorTab,
   type PreviewEditorTab,
@@ -60,6 +61,7 @@ const TextEditorPane = defineAsyncComponent(
 const DiffPane = defineAsyncComponent(() => import("./DiffPane.vue"));
 const PreviewPane = defineAsyncComponent(() => import("./PreviewPane.vue"));
 const TerminalPane = defineAsyncComponent(() => import("./TerminalPane.vue"));
+const CommitPane = defineAsyncComponent(() => import("./CommitPane.vue"));
 
 const activeFileTab = computed<FileEditorTab | null>(() =>
   activeTab.value?.kind === TabKind.File
@@ -74,6 +76,11 @@ const activeDiffTab = computed<DiffEditorTab | null>(() =>
 const activePreviewTab = computed<PreviewEditorTab | null>(() =>
   activeTab.value?.kind === TabKind.Preview
     ? (activeTab.value as PreviewEditorTab)
+    : null,
+);
+const activeCommitTab = computed<CommitEditorTab | null>(() =>
+  activeTab.value?.kind === TabKind.Commit
+    ? (activeTab.value as CommitEditorTab)
     : null,
 );
 /** 终端标签列表：全部常驻挂载（v-show 切换），切走不销毁 xterm/不中断进程 */
@@ -206,7 +213,14 @@ watch(activeTab, (tab) => {
   ) {
     revealGitFile(tab.workspace, tab.path);
   }
-  if (!tab || tab.kind === TabKind.Terminal || tab.kind === TabKind.Chat) return;
+  if (
+    !tab ||
+    tab.kind === TabKind.Terminal ||
+    tab.kind === TabKind.Chat ||
+    tab.kind === TabKind.Commit
+  ) {
+    return;
+  }
   void revealAbsPathInTree(tabAbsPath(tab));
 });
 
@@ -274,6 +288,7 @@ function openAddMenu(e: MouseEvent) {
       <TextEditorPane v-if="activeFileTab" :tab="activeFileTab" />
       <DiffPane v-else-if="activeDiffTab" :tab="activeDiffTab" />
       <PreviewPane v-else-if="activePreviewTab" :tab="activePreviewTab" />
+      <CommitPane v-else-if="activeCommitTab" :tab="activeCommitTab" />
       <TerminalPane
         v-for="t in activeTerminalTabs"
         :key="t.id"

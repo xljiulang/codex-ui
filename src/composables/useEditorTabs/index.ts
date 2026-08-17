@@ -3,6 +3,7 @@
 // 本文件仅做再导出，保证调用方 `import { ... } from "../useEditorTabs"` 完全不变。
 export { activeTab, activeTabId, activateTab, tabs } from "../useTabs";
 export type {
+  CommitEditorTab,
   DiffEditorTab,
   DiffPreviewParams,
   EditorTab,
@@ -13,6 +14,8 @@ export type {
 export {
   isFileTabOpen,
   isTerminalBusy,
+  openCommitFileDiffTab,
+  openCommitTab,
   openDiffTab,
   openFileTab,
   openPreviewTab,

@@ -8,6 +8,7 @@ import {
 } from "../../lib/editorFile";
 import { formatTimeHMS, pathBaseName } from "../../lib/format";
 import { assetUrl } from "../../lib/asset";
+import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import { base64ToBytes, type PreviewType } from "../../lib/preview";
 import type { DiffRow } from "../../lib/types";
 import {
@@ -18,6 +19,7 @@ import { TabIcon, TabKind } from "../../lib/tabs";
 import { activeTabId, insertTab, tabs } from "../useTabs";
 import { store } from "../useCodex/store";
 import type {
+  CommitEditorTab,
   DiffEditorTab,
   DiffPreviewParams,
   EditorTab,
@@ -55,8 +57,105 @@ function previewTabId(
   return `preview:${type}:${JSON.stringify([workspace, path])}`;
 }
 
+function commitTabId(workspace: string, hash: string): string {
+  return "commit:" + JSON.stringify([workspace, hash]);
+}
+
+function commitFileDiffTabId(
+  workspace: string,
+  hash: string,
+  path: string,
+): string {
+  return "diff:commit:" + JSON.stringify([workspace, hash, path]);
+}
+
 /** 终端标签自增序号：保证同一毫秒内连续多开也生成不同 id */
 let terminalSeq = 0;
+
+/**
+ * 打开提交详情标签：同一提交已打开则直接激活；否则新建标签并异步拉取
+ * git_changes_commit_detail 填充 detail，失败保留标签并记录错误。
+ */
+export async function openCommitTab(
+  workspace: string,
+  hash: string,
+  subject: string,
+): Promise<void> {
+  const id = commitTabId(workspace, hash);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  const tab = reactive({
+    kind: TabKind.Commit,
+    id,
+    workspace,
+    hash,
+    title: subject || hash.slice(0, 7) || "提交",
+    icon: TabIcon.Commit,
+    loading: true,
+    error: "",
+    detail: null,
+  }) as unknown as CommitEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    const detail = await invoke<GitCommitDetail>("git_changes_commit_detail", {
+      workspace,
+      hash,
+    });
+    tab.detail = detail ?? null;
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
+
+/**
+ * 打开提交内单个文件的 diff 标签：复用普通 Diff 标签渲染，id 含 hash 避免与
+ * 工作区 diff 冲突；rows 由 git_changes_commit_file_diff 直接返回。
+ */
+export async function openCommitFileDiffTab(
+  workspace: string,
+  hash: string,
+  path: string,
+  changeKind: DiffPreviewKind,
+): Promise<void> {
+  const id = commitFileDiffTabId(workspace, hash, path);
+  if (tabs.some((t) => t.id === id)) {
+    activeTabId.value = id;
+    return;
+  }
+  const tab = reactive({
+    kind: TabKind.Diff,
+    id,
+    path,
+    changeKind,
+    workspace,
+    title: pathBaseName(path) || path,
+    icon: TabIcon.File,
+    loading: true,
+    error: "",
+    rows: [],
+    fallback: "",
+    brief: false,
+  }) as unknown as DiffEditorTab;
+  insertTab(tab);
+  activeTabId.value = id;
+  try {
+    const rows = await invoke<DiffRow[]>("git_changes_commit_file_diff", {
+      workspace,
+      hash,
+      path,
+    });
+    tab.rows = rows ?? [];
+  } catch (e) {
+    tab.error = String(e);
+  } finally {
+    tab.loading = false;
+  }
+}
 
 /**
  * 打开终端标签：每次调用都新建独立会话（支持同目录多开），生成唯一 id、

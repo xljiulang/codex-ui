@@ -1028,15 +1028,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   padding: 5px 8px;
   border-radius: 8px;
   border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
   transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 
 .git-log-item:hover {
   background: var(--bg-hover);
   border-color: var(--border-light);
+}
+
+.git-log-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .git-log-dot {
@@ -1165,4 +1176,141 @@
   font-size: 12px;
   line-height: 1.6;
   color: var(--text-dim);
+}
+
+/* 提交详情标签（CommitPane） */
+.commit-pane {
+  height: 100%;
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.commit-head {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.commit-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.commit-subject {
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-bright);
+  word-break: break-word;
+}
+
+.commit-hash {
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+}
+
+.commit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+}
+
+.commit-meta-item {
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.commit-body {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-bright);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.commit-files {
+  margin-top: 12px;
+}
+
+.commit-files-title {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.commit-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.commit-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.commit-file:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+
+.commit-file:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.commit-file-status {
+  flex-shrink: 0;
+  width: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.commit-file-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-file-stats {
+  flex-shrink: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+}
+
+.commit-file-add {
+  color: var(--green);
+  margin-right: 6px;
+}
+
+.commit-file-del {
+  color: var(--red);
 }

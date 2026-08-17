@@ -802,6 +802,77 @@ describe("GitView 提交历史", () => {
     wrapper.unmount();
   });
 
+  it("点击提交记录打开提交详情标签并拉取详情", async () => {
+    const hash = "c".repeat(40);
+    mockRepoWithLog([
+      {
+        hash,
+        shortHash: "ccccccc",
+        subject: "feat: detail",
+        author: "tester",
+        timeSecs: 1700000000,
+      },
+    ]);
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_status") return Promise.resolve(okStatus);
+      if (cmd === "git_changes_log") {
+        return Promise.resolve([
+          {
+            hash,
+            shortHash: "ccccccc",
+            subject: "feat: detail",
+            author: "tester",
+            timeSecs: 1700000000,
+          },
+        ]);
+      }
+      if (cmd === "git_changes_commit_detail") {
+        return Promise.resolve({
+          hash,
+          shortHash: "ccccccc",
+          subject: "feat: detail",
+          body: "feat: detail",
+          author: "tester",
+          authorEmail: "t@t",
+          authorTimeSecs: 1700000000,
+          committer: "tester",
+          committerEmail: "t@t",
+          committerTimeSecs: 1700000000,
+          parents: [],
+          files: [],
+        });
+      }
+      if (
+        cmd === "git_changes_watch_start" ||
+        cmd === "git_changes_watch_stop"
+      ) {
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("click");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.find(".git-log-item").trigger("click");
+    await flushPromises();
+
+    const detailCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "git_changes_commit_detail",
+    );
+    expect(detailCall).toBeTruthy();
+    expect(detailCall?.[1]).toEqual({ workspace: rootPath, hash });
+    const commitTab = tabs.find((t) => t.kind === "commit");
+    expect(commitTab).toBeTruthy();
+    expect(commitTab?.hash).toBe(hash);
+    expect(commitTab?.detail?.subject).toBe("feat: detail");
+    wrapper.unmount();
+  });
+
   it("首批 50 条显示加载更多，点击追加第二批并携带 before 游标", async () => {
     const { all, logCalls } = mockPagedLog(120);
     const wrapper = mountGitView({ props: { active: true } });

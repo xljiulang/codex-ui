@@ -79,6 +79,47 @@ export interface GitCommitEntry {
   timeSecs: number;
 }
 
+/** Rust git_changes_commit_detail 单文件条目（字段 camelCase） */
+export interface GitCommitFile {
+  /** 相对仓库根的路径（正斜杠分隔；重命名取新路径） */
+  path: string;
+  status: GitFileStatus;
+  /** 新增行数（二进制为 0） */
+  insertions: number;
+  /** 删除行数（二进制为 0） */
+  deletions: number;
+  /** 是否二进制文件（git numstat 显示 -） */
+  binary: boolean;
+}
+
+/** Rust git_changes_commit_detail 返回值（字段 camelCase） */
+export interface GitCommitDetail {
+  /** 完整提交哈希 */
+  hash: string;
+  /** 7 位短哈希 */
+  shortHash: string;
+  /** 提交标题（首行） */
+  subject: string;
+  /** 完整提交消息（标题 + 正文，保留换行） */
+  body: string;
+  /** 作者名 */
+  author: string;
+  /** 作者邮箱 */
+  authorEmail: string;
+  /** 作者 UNIX 秒时间戳（作者时区） */
+  authorTimeSecs: number;
+  /** 提交者名 */
+  committer: string;
+  /** 提交者邮箱 */
+  committerEmail: string;
+  /** 提交者 UNIX 秒时间戳（提交者时区） */
+  committerTimeSecs: number;
+  /** 父提交完整哈希（合并提交多个） */
+  parents: string[];
+  /** 变更文件 */
+  files: GitCommitFile[];
+}
+
 /** 远端条目（Rust git_changes_remotes 返回，字段 camelCase） */
 export interface GitRemote {
   /** 远端名 */

@@ -1,6 +1,6 @@
 import type { Compartment, EditorState, Text } from "@codemirror/state";
 import type { EditorEol } from "../../lib/editorFile";
-import type { DiffPreviewKind } from "../../lib/gitChanges";
+import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow } from "../../lib/types";
 import { TabKind, type EditorTabBase } from "../../lib/tabs";
@@ -88,8 +88,23 @@ export interface TerminalEditorTab extends EditorTabBase {
   exitCode: number | null;
 }
 
+export interface CommitEditorTab extends EditorTabBase {
+  kind: (typeof TabKind)["Commit"];
+  id: string;
+  /** 仓库根目录（绝对路径） */
+  workspace: string;
+  /** 完整提交哈希 */
+  hash: string;
+  title: string;
+  loading: boolean;
+  error: string;
+  /** 提交详情（git_changes_commit_detail 返回；加载完成后填充） */
+  detail: GitCommitDetail | null;
+}
+
 export type EditorTab =
   | FileEditorTab
   | DiffEditorTab
   | PreviewEditorTab
-  | TerminalEditorTab;
+  | TerminalEditorTab
+  | CommitEditorTab;

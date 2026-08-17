@@ -8,6 +8,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::codex::diff::DiffRow;
 use crate::codex::path_util::{clean_path, norm_key};
 
 /// 单文件大小上限（diff 等全量读入内存的操作），超过直接报错
@@ -153,6 +154,52 @@ pub struct GitCommitEntry {
     pub author: String,
     /// UNIX 秒时间戳（作者时区）
     pub time_secs: i64,
+}
+
+/// 提交内变更文件条目（供前端展示）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitFile {
+    /// 相对仓库根的路径（正斜杠分隔；重命名取新路径）
+    pub path: String,
+    /// added | modified | deleted | renamed | conflicted | untracked
+    pub status: FileStatus,
+    /// 新增行数（二进制为 0）
+    pub insertions: u32,
+    /// 删除行数（二进制为 0）
+    pub deletions: u32,
+    /// 是否二进制文件（git numstat 显示 -）
+    pub binary: bool,
+}
+
+/// 提交详情（供前端展示；文件统计对比第一个父提交，根提交对比空树）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitDetail {
+    /// 完整提交哈希
+    pub hash: String,
+    /// 7 位短哈希
+    pub short_hash: String,
+    /// 提交标题（首行）
+    pub subject: String,
+    /// 完整提交消息（标题 + 正文，保留换行）
+    pub body: String,
+    /// 作者名
+    pub author: String,
+    /// 作者邮箱
+    pub author_email: String,
+    /// 作者 UNIX 秒时间戳（作者时区）
+    pub author_time_secs: i64,
+    /// 提交者名
+    pub committer: String,
+    /// 提交者邮箱
+    pub committer_email: String,
+    /// 提交者 UNIX 秒时间戳（提交者时区）
+    pub committer_time_secs: i64,
+    /// 父提交完整哈希（第一个为第一父提交；合并提交多个）
+    pub parents: Vec<String>,
+    /// 变更文件
+    pub files: Vec<GitCommitFile>,
 }
 
 /// 远端条目（供前端展示）
@@ -1161,6 +1208,217 @@ fn git_log(root: &str, limit: usize, before: Option<String>) -> Result<Vec<GitCo
     Ok(out)
 }
 
+/// 空树对象哈希（固定值），作为根提交（无父提交）的 diff 基准
+const EMPTY_TREE_HASH: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// 提交的父哈希列表（`git log -1 --format=%P`，空格分隔；根提交为空）
+fn commit_parents(git_bin: &Path, root: &str, hash: &str) -> Result<Vec<String>, GitError> {
+    let (code, stdout, stderr) = git_output(
+        git_bin,
+        root,
+        &["log", "-1", "--format=%P", hash],
+    )?;
+    if code != 0 {
+        let combined = format!("{stdout}\n{stderr}");
+        return Err(git_err(format!(
+            "无法读取提交详情: {}",
+            combined.trim()
+        )));
+    }
+    Ok(stdout.split_whitespace().map(|s| s.to_string()).collect())
+}
+
+/// diff 基准：第一个父提交；根提交用空树
+fn commit_base_from_parents(parents: &[String]) -> String {
+    parents
+        .first()
+        .cloned()
+        .unwrap_or_else(|| EMPTY_TREE_HASH.to_string())
+}
+
+/// numstat 重命名路径 `old => new` 取新路径（git diff --numstat -M 输出形式）
+fn rename_new_path(path: &str) -> &str {
+    path.rsplit_once(" => ").map(|(_, new)| new).unwrap_or(path)
+}
+
+/// name-status 状态字母 → FileStatus（-M 下可能出现 R100；T 视为修改）
+fn commit_status_letter(status: &str) -> FileStatus {
+    match status.chars().next() {
+        Some('A') => FileStatus::Added,
+        Some('D') => FileStatus::Deleted,
+        Some('R') => FileStatus::Renamed,
+        _ => FileStatus::Modified,
+    }
+}
+
+/// 提交变更文件列表：numstat 取增删行数，name-status 取状态字母，按新路径合并
+fn git_commit_files(
+    git_bin: &Path,
+    root: &str,
+    base: &str,
+    hash: &str,
+) -> Result<Vec<GitCommitFile>, GitError> {
+    let (code, numstat, stderr) = git_output(
+        git_bin,
+        root,
+        &["diff", "--numstat", "-M", "--no-ext-diff", base, hash],
+    )?;
+    if code != 0 {
+        return Err(git_err(format!(
+            "读取提交文件统计失败: {}",
+            stderr.trim()
+        )));
+    }
+    let (code2, namestat, stderr2) = git_output(
+        git_bin,
+        root,
+        &["diff", "--name-status", "-M", "--no-ext-diff", base, hash],
+    )?;
+    if code2 != 0 {
+        return Err(git_err(format!(
+            "读取提交文件状态失败: {}",
+            stderr2.trim()
+        )));
+    }
+    let mut counts: HashMap<String, (u32, u32, bool)> = HashMap::new();
+    for line in numstat.lines() {
+        let mut parts = line.split('\t');
+        let added = parts.next().unwrap_or("");
+        let deleted = parts.next().unwrap_or("");
+        let path = parts.next().unwrap_or("").trim();
+        if path.is_empty() {
+            continue;
+        }
+        let path = rename_new_path(path);
+        let binary = added == "-" || deleted == "-";
+        let (a, d) = if binary {
+            (0, 0)
+        } else {
+            (
+                added.parse().unwrap_or(0),
+                deleted.parse().unwrap_or(0),
+            )
+        };
+        counts.insert(path.to_string(), (a, d, binary));
+    }
+    let mut files: Vec<GitCommitFile> = Vec::new();
+    for line in namestat.lines() {
+        let mut parts = line.split('\t');
+        let status = parts.next().unwrap_or("");
+        // 重命名行含旧/新两个路径字段（R100\told\tnew），取最后一个为新路径
+        let rest: Vec<&str> = parts.collect();
+        let path = rest.last().copied().unwrap_or("").trim();
+        if path.is_empty() {
+            continue;
+        }
+        let path = rename_new_path(path);
+        let (insertions, deletions, binary) =
+            counts.remove(path).unwrap_or((0, 0, false));
+        files.push(GitCommitFile {
+            path: path.to_string(),
+            status: commit_status_letter(status),
+            insertions,
+            deletions,
+            binary,
+        });
+    }
+    Ok(files)
+}
+
+/// 提交详情（元信息 + 变更文件统计；对比第一个父提交，根提交对比空树）
+fn git_commit_detail(root: &str, hash: &str) -> Result<GitCommitDetail, GitError> {
+    let hash = hash.trim();
+    if hash.is_empty() {
+        return Err(git_err("提交哈希不能为空"));
+    }
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    let (code, stdout, stderr) = git_output(
+        &git_bin,
+        root,
+        &[
+            "log",
+            "-1",
+            "--format=%H%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%P%x00%B",
+            hash,
+        ],
+    )?;
+    if code != 0 {
+        let combined = format!("{stdout}\n{stderr}");
+        return Err(git_err(format!(
+            "无法读取提交详情: {}",
+            combined.trim()
+        )));
+    }
+    let fields: Vec<&str> = stdout.split('\0').collect();
+    if fields.len() < 9 || fields[0].is_empty() {
+        return Err(git_err("无法解析提交详情（输出不完整）"));
+    }
+    let hash_full = fields[0].to_string();
+    let parents: Vec<String> = fields[7]
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let body = fields[8].trim_end().to_string();
+    let subject = body.lines().next().unwrap_or("").to_string();
+    let base = commit_base_from_parents(&parents);
+    let files = git_commit_files(&git_bin, root, &base, &hash_full)?;
+    Ok(GitCommitDetail {
+        short_hash: hash_full.chars().take(7).collect(),
+        hash: hash_full,
+        subject,
+        body,
+        author: fields[1].to_string(),
+        author_email: fields[2].to_string(),
+        author_time_secs: fields[3].parse().unwrap_or(0),
+        committer: fields[4].to_string(),
+        committer_email: fields[5].to_string(),
+        committer_time_secs: fields[6].parse().unwrap_or(0),
+        parents,
+        files,
+    })
+}
+
+/// 提交中单个文件的差异（对比第一个父提交；根提交对比空树），返回 DiffRow 行
+fn git_commit_file_diff(root: &str, hash: &str, path: &str) -> Result<Vec<DiffRow>, GitError> {
+    let path = validate_rel_path(path)?;
+    let hash = hash.trim();
+    if hash.is_empty() {
+        return Err(git_err("提交哈希不能为空"));
+    }
+    let git_bin = git_bin()?;
+    git_rev_parse_with(&git_bin, root)?;
+    let parents = commit_parents(&git_bin, root, hash)?;
+    let base = commit_base_from_parents(&parents);
+    let (code, out, stderr) = git_output(
+        &git_bin,
+        root,
+        &[
+            "diff",
+            "-M",
+            "--no-ext-diff",
+            "--unified=3",
+            &base,
+            hash,
+            "--",
+            &path,
+        ],
+    )?;
+    if code != 0 {
+        return Err(git_err(format!("git diff 失败: {}", stderr.trim())));
+    }
+    if out.len() as u64 > MAX_FILE_BYTES {
+        return Err(git_err(format!(
+            "文件过大（超过 {} MB），无法显示差异: {path}",
+            MAX_FILE_BYTES / (1024 * 1024)
+        )));
+    }
+    if out.contains("Binary files") || looks_binary(out.as_bytes()) {
+        return Err(git_err("该文件是二进制文件，无法显示文本差异"));
+    }
+    crate::codex::diff::build_commit_diff_rows(&out).map_err(git_err)
+}
+
 /// git 近似二进制判定：前 8000 字节内出现 NUL
 fn looks_binary(data: &[u8]) -> bool {
     data[..data.len().min(8000)].contains(&0)
@@ -1984,6 +2242,23 @@ pub async fn git_changes_log(
     before: Option<String>,
 ) -> Result<Vec<GitCommitEntry>, GitError> {
     run_blocking(move || git_log(&workspace, limit, before)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_commit_detail(
+    workspace: String,
+    hash: String,
+) -> Result<GitCommitDetail, GitError> {
+    run_blocking(move || git_commit_detail(&workspace, &hash)).await
+}
+
+#[tauri::command]
+pub async fn git_changes_commit_file_diff(
+    workspace: String,
+    hash: String,
+    path: String,
+) -> Result<Vec<DiffRow>, GitError> {
+    run_blocking(move || git_commit_file_diff(&workspace, &hash, &path)).await
 }
 
 #[tauri::command]
@@ -4990,5 +5265,216 @@ fn init_committed_repo(dir: &Path) {
         // 无效游标返回空，避免前端重复追加
         let bogus = git_log(root.to_str().unwrap(), 3, Some("0".repeat(40))).unwrap();
         assert!(bogus.is_empty());
+    }
+
+    #[test]
+    fn commit_detail_metadata_and_files() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        let first = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("b.txt"), "new\n").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "second\n\nbody line"]).0, 0);
+        let second = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let detail = git_commit_detail(root.to_str().unwrap(), &second).unwrap();
+        assert_eq!(detail.hash, second);
+        assert_eq!(detail.short_hash.len(), 7);
+        assert_eq!(detail.subject, "second");
+        assert!(detail.body.contains("body line"));
+        assert_eq!(detail.author, "t");
+        assert_eq!(detail.author_email, "t@t");
+        assert_eq!(detail.committer, "t");
+        assert_eq!(detail.parents, vec![first]);
+        let mut files: Vec<(String, FileStatus, u32, u32)> = detail
+            .files
+            .iter()
+            .map(|f| {
+                (
+                    f.path.clone(),
+                    f.status,
+                    f.insertions,
+                    f.deletions,
+                )
+            })
+            .collect();
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                ("a.txt".to_string(), FileStatus::Modified, 1, 1),
+                ("b.txt".to_string(), FileStatus::Added, 1, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn commit_detail_root_commit_uses_empty_tree() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x\n").unwrap();
+        init_committed_repo(root);
+        let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let detail = git_commit_detail(root.to_str().unwrap(), &hash).unwrap();
+        assert!(detail.parents.is_empty());
+        assert_eq!(detail.files.len(), 1);
+        assert_eq!(detail.files[0].path, "a.txt");
+        assert_eq!(detail.files[0].status, FileStatus::Added);
+        assert_eq!(detail.files[0].insertions, 1);
+        assert_eq!(detail.files[0].deletions, 0);
+    }
+
+    #[test]
+    fn commit_detail_merge_uses_first_parent() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        // main 侧修改 a.txt
+        std::fs::write(root.join("a.txt"), "main\n").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "main change"]).0, 0);
+        // side 分支新增 b.txt
+        assert_eq!(git(root, &["checkout", "-b", "side"]).0, 0);
+        std::fs::write(root.join("b.txt"), "side\n").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "side change"]).0, 0);
+        // 合并回 main（不同文件无冲突）
+        assert_eq!(git(root, &["checkout", "main"]).0, 0);
+        assert_eq!(
+            git(root, &["merge", "--no-ff", "-m", "merge side", "side"]).0,
+            0
+        );
+        let merge_hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let detail = git_commit_detail(root.to_str().unwrap(), &merge_hash).unwrap();
+        assert_eq!(detail.parents.len(), 2);
+        assert_eq!(detail.subject, "merge side");
+        // 对比第一父提交（main）：仅 b.txt 新增
+        assert_eq!(detail.files.len(), 1);
+        assert_eq!(detail.files[0].path, "b.txt");
+        assert_eq!(detail.files[0].status, FileStatus::Added);
+    }
+
+    #[test]
+    fn commit_detail_rename_and_binary() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("old.txt"), "content\n").unwrap();
+        std::fs::write(root.join("bin.dat"), [0u8, 1, 2, 3]).unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["mv", "old.txt", "new.txt"]).0, 0);
+        std::fs::write(root.join("bin.dat"), [9u8, 8, 7]).unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "rename+bin"]).0, 0);
+        let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let detail = git_commit_detail(root.to_str().unwrap(), &hash).unwrap();
+        let renamed = detail
+            .files
+            .iter()
+            .find(|f| f.status == FileStatus::Renamed)
+            .expect("存在重命名文件");
+        assert_eq!(renamed.path, "new.txt");
+        assert!(!renamed.binary);
+        let bin = detail
+            .files
+            .iter()
+            .find(|f| f.path == "bin.dat")
+            .expect("存在二进制文件");
+        assert_eq!(bin.status, FileStatus::Modified);
+        assert!(bin.binary);
+        assert_eq!(bin.insertions, 0);
+        assert_eq!(bin.deletions, 0);
+    }
+
+    #[test]
+    fn commit_detail_empty_commit_has_empty_files() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x\n").unwrap();
+        init_committed_repo(root);
+        assert_eq!(git(root, &["commit", "--allow-empty", "-m", "empty"]).0, 0);
+        let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let detail = git_commit_detail(root.to_str().unwrap(), &hash).unwrap();
+        assert!(detail.files.is_empty());
+        assert_eq!(detail.subject, "empty");
+    }
+
+    #[test]
+    fn commit_detail_invalid_hash_errors() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x\n").unwrap();
+        init_committed_repo(root);
+        let err = git_commit_detail(root.to_str().unwrap(), &"0".repeat(40)).unwrap_err();
+        assert!(err.message.contains("无法读取提交详情"));
+    }
+
+    #[test]
+    fn commit_file_diff_returns_rows() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "second"]).0, 0);
+        let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let rows = git_commit_file_diff(root.to_str().unwrap(), &hash, "a.txt").unwrap();
+        assert!(rows.iter().any(|r| matches!(r, DiffRow::Del { .. })));
+        assert!(rows.iter().any(|r| matches!(r, DiffRow::Add { .. })));
+        // 两树中都不存在的路径：返回空行
+        assert!(
+            git_commit_file_diff(root.to_str().unwrap(), &hash, "nope.txt")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn commit_file_diff_binary_errors() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("bin.dat"), [0u8, 1, 2]).unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("bin.dat"), [3u8, 4, 5]).unwrap();
+        assert_eq!(git(root, &["add", "-A"]).0, 0);
+        assert_eq!(git(root, &["commit", "-m", "bin change"]).0, 0);
+        let hash = git(root, &["rev-parse", "HEAD"]).1.trim().to_string();
+        let err = git_commit_file_diff(root.to_str().unwrap(), &hash, "bin.dat").unwrap_err();
+        assert!(err.message.contains("二进制"));
     }
 }

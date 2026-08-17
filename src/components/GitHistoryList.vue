@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { openCommitTab } from "../composables/useEditorTabs";
 import type { GitCommitEntry, GitStatus } from "../lib/gitChanges";
 import { formatDateTime } from "../lib/format";
 import { ICON_MORE } from "../lib/icons";
@@ -66,6 +67,11 @@ async function loadMoreCommits() {
   }
 }
 
+/** 单击提交记录：打开提交详情标签（同一提交重复点击仅激活已有标签） */
+function openCommit(commit: GitCommitEntry) {
+  void openCommitTab(props.workspace, commit.hash, commit.subject);
+}
+
 // gitStatus 每次刷新（含提交/合并/拉取/切分支）后同步刷新提交历史
 watch(
   () => props.reloadKey,
@@ -76,7 +82,13 @@ watch(
 
 <template>
   <div v-if="commits.length" class="git-log-list">
-    <div v-for="c in commits" :key="c.hash" class="git-log-item">
+    <button
+      v-for="c in commits"
+      :key="c.hash"
+      class="git-log-item"
+      :aria-label="'查看提交 ' + c.subject"
+      @click="openCommit(c)"
+    >
       <span class="git-log-dot" aria-hidden="true"></span>
       <div class="git-log-main">
         <span class="git-log-subject">{{ c.subject }}</span>
@@ -85,7 +97,7 @@ watch(
         </span>
       </div>
       <span class="git-log-hash" :title="c.hash">{{ c.shortHash }}</span>
-    </div>
+    </button>
     <button
       v-if="logHasMore"
       class="git-icon-btn git-log-more"

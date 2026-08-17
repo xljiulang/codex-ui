@@ -319,6 +319,69 @@ pub fn build_inline_rows(
     Ok(rows)
 }
 
+/// 由 git 生成的单文件 unified diff 直接构建内联行（提交内容不可变，无需磁盘内容校验）。
+/// 与 build_inline_rows 的 hunk 内逻辑一致：上下文在前、删除行、分隔、新增行、上下文在后；
+/// 不补全 hunk 外内容（git diff 输出本就只含变更区域，适合历史提交展示）。
+pub fn build_commit_diff_rows(diff: &str) -> Result<Vec<DiffRow>, String> {
+    let hunks = parse_unified_diff(diff)?;
+    let mut rows: Vec<DiffRow> = Vec::new();
+    for h in &hunks {
+        let mut o = h.old_start;
+        let mut n = h.new_start;
+        let mut saw_change = false;
+        let mut before_ctx: Vec<DiffRow> = Vec::new();
+        let mut after_ctx: Vec<DiffRow> = Vec::new();
+        let mut dels: Vec<(u32, String)> = Vec::new();
+        let mut adds: Vec<(u32, String)> = Vec::new();
+        for (kind, text) in &h.lines {
+            match kind {
+                DiffLineKind::Ctx => {
+                    let row = DiffRow::Ctx {
+                        old_no: o as u32,
+                        new_no: n as u32,
+                        text: text.clone(),
+                    };
+                    o += 1;
+                    n += 1;
+                    if saw_change {
+                        after_ctx.push(row);
+                    } else {
+                        before_ctx.push(row);
+                    }
+                }
+                DiffLineKind::Del => {
+                    dels.push((o as u32, text.clone()));
+                    o += 1;
+                    saw_change = true;
+                }
+                DiffLineKind::Add => {
+                    adds.push((n as u32, text.clone()));
+                    n += 1;
+                    saw_change = true;
+                }
+            }
+        }
+        let has_del = !dels.is_empty();
+        let has_add = !adds.is_empty();
+        rows.extend(before_ctx);
+        rows.extend(
+            dels
+                .into_iter()
+                .map(|(old_no, text)| DiffRow::Del { old_no, text }),
+        );
+        if has_del && has_add {
+            rows.push(DiffRow::Sep);
+        }
+        rows.extend(
+            adds
+                .into_iter()
+                .map(|(new_no, text)| DiffRow::Add { new_no, text }),
+        );
+        rows.extend(after_ctx);
+    }
+    Ok(rows)
+}
+
 /// Windows 路径解析：绝对盘符路径/UNC 直接返回，相对路径按工作目录拼接；
 /// drive-relative（`C:foo`）无法确定驱动器当前目录，直接报错。
 fn resolve_path(p: &str, root: &str) -> Result<String, String> {
@@ -543,6 +606,41 @@ mod tests {
             workspace: String::new(),
         };
         assert!(build_diff_preview(params).is_err());
+    }
+
+    #[test]
+    fn commit_diff_rows_from_git_patch() {
+        let diff = "diff --git a/a.txt b/a.txt\n\
+index 111..222 100644\n\
+--- a/a.txt\n\
++++ b/a.txt\n\
+@@ -1,3 +1,3 @@\n\
+ a\n\
+-b\n\
++B\n\
+ c\n\
+@@ -10 +10 @@\n\
+-p\n\
++q\n";
+        let rows = build_commit_diff_rows(diff).unwrap();
+        assert!(matches!(&rows[0], DiffRow::Ctx { text, .. } if text == "a"));
+        assert!(matches!(&rows[1], DiffRow::Del { old_no: 2, .. }));
+        assert!(matches!(&rows[2], DiffRow::Sep));
+        assert!(matches!(&rows[3], DiffRow::Add { new_no: 2, .. }));
+        assert!(matches!(&rows[4], DiffRow::Ctx { old_no: 3, new_no: 3, .. }));
+        assert!(matches!(&rows[5], DiffRow::Del { old_no: 10, .. }));
+        assert!(matches!(&rows[6], DiffRow::Sep));
+        assert!(matches!(&rows[7], DiffRow::Add { new_no: 10, .. }));
+    }
+
+    #[test]
+    fn commit_diff_rows_skip_rename_and_empty() {
+        let rename_diff = "diff --git a/old.txt b/new.txt\n\
+similarity index 100%\n\
+rename from old.txt\n\
+rename to new.txt\n";
+        assert!(build_commit_diff_rows(rename_diff).unwrap().is_empty());
+        assert!(build_commit_diff_rows("").unwrap().is_empty());
     }
 
 }

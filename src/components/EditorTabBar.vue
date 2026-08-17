@@ -13,7 +13,12 @@ import { diffKindLabel } from "../lib/gitChanges";
 import { relPathOf } from "../lib/format";
 import type { FsEntry } from "../lib/sessionFs";
 import { isTabWorking, TabIcon, TabKind } from "../lib/tabs";
-import { ICON_CLOSE, ICON_FILE, ICON_TERMINAL } from "../lib/icons";
+import {
+  ICON_CLOSE,
+  ICON_FILE,
+  ICON_GIT,
+  ICON_TERMINAL,
+} from "../lib/icons";
 
 const props = defineProps<{
   sessionTabs: SessionTab[];
@@ -97,7 +102,7 @@ function tabToEntry(tab: FileEditorTab | DiffEditorTab | PreviewEditorTab): FsEn
 }
 
 function tabIcon(tab: EditorTab): string {
-  if (tab.kind === TabKind.Terminal) return "";
+  if (tab.kind === TabKind.Terminal || tab.kind === TabKind.Commit) return "";
   return iconFor(tabToEntry(tab)) ?? "";
 }
 
@@ -105,12 +110,12 @@ function tabIcon(tab: EditorTab): string {
 watch(
   () =>
     props.editorTabs
-      .filter((t) => t.kind !== TabKind.Terminal)
+      .filter((t) => t.kind !== TabKind.Terminal && t.kind !== TabKind.Commit)
       .map((t) => t.id),
   () => {
     const byRoot = new Map<string, FsEntry[]>();
     for (const tab of props.editorTabs) {
-      if (tab.kind === TabKind.Terminal) continue;
+      if (tab.kind === TabKind.Terminal || tab.kind === TabKind.Commit) continue;
       const t = tab as FileEditorTab | DiffEditorTab | PreviewEditorTab;
       const list = byRoot.get(t.workspace) ?? [];
       list.push(tabToEntry(t));
@@ -139,6 +144,7 @@ function sessionTabPending(tab: SessionTab): number {
  */
 function titleTooltip(tab: EditorTab): string {
   if (tab.kind === TabKind.Terminal) return "";
+  if (tab.kind === TabKind.Commit) return tab.hash;
   const path = relPathOf(tab.workspace, tab.path);
   return tab.title !== path ? path : "";
 }
@@ -227,6 +233,15 @@ function titleTooltip(tab: EditorTab): string {
         >
           <svg viewBox="0 0 24 24">
             <path :d="ICON_TERMINAL" />
+          </svg>
+        </span>
+        <span
+          v-else-if="tab.icon === TabIcon.Commit"
+          class="editor-tab-icon"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 16 16">
+            <path :d="ICON_GIT" />
           </svg>
         </span>
         <span v-else class="editor-tab-icon" aria-hidden="true">
