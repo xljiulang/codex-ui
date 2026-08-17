@@ -483,7 +483,7 @@ describe("useEditorTabs 标签状态", () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
         expect(args).toEqual({ workspace: root, path: "doc.pdf" });
-        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -523,7 +523,7 @@ describe("useEditorTabs 标签状态", () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
         expect(args).toEqual({ workspace: root, path: "book.xlsx" });
-        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -546,7 +546,7 @@ describe("useEditorTabs 标签状态", () => {
   it("XLSX 预览重复打开：去重并激活原标签", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });

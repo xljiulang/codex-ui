@@ -45,7 +45,7 @@ function fileContent(content: string, validUtf8 = true) {
 }
 
 function binaryContent(bytes: string) {
-  return { content: btoa(bytes), byteSize: bytes.length };
+  return new TextEncoder().encode(bytes).buffer;
 }
 
 /** 资源树打开的真实形态：标签 path 为绝对路径，事件 paths 为相对路径 */

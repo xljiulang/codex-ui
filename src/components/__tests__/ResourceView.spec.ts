@@ -165,7 +165,7 @@ function mockFs() {
       return Promise.resolve(path !== picPng.path);
     }
     if (cmd === "session_fs_read_bytes") {
-      return Promise.resolve({ content: "JVBERi0x", byteSize: 8 });
+      return Promise.resolve(new Uint8Array([37, 80, 68, 70, 45, 49]).buffer);
     }
     if (cmd === "session_fs_read") {
       return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });

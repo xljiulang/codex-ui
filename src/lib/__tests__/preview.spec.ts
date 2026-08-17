@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { base64ToBytes, extOf, previewTypeForName } from "../preview";
+import { extOf, previewTypeForName } from "../preview";
 
 describe("previewTypeForName 扩展名识别", () => {
   it("pdf 扩展名（大小写不敏感）", () => {
@@ -51,12 +51,5 @@ describe("extOf 边界", () => {
   it("无扩展名与点文件返回 null", () => {
     expect(extOf("noext")).toBeNull();
     expect(extOf(".gitignore")).toBeNull();
-  });
-});
-
-describe("base64ToBytes", () => {
-  it("base64 解码为 Uint8Array", () => {
-    const bytes = base64ToBytes("aGVsbG8=");
-    expect(Array.from(bytes)).toEqual([104, 101, 108, 108, 111]);
   });
 });

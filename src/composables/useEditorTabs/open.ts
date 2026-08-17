@@ -10,7 +10,7 @@ import {
 import { formatTimeHMS, pathBaseName } from "../../lib/format";
 import { assetUrl } from "../../lib/asset";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
-import { base64ToBytes, type PreviewType } from "../../lib/preview";
+import type { PreviewType } from "../../lib/preview";
 import { docxToHtml, jsonToDocx } from "../../lib/docx";
 import type { DiffRow } from "../../lib/types";
 import {
@@ -35,12 +35,6 @@ import type {
 interface TextFileContent {
   content: string;
   validUtf8: boolean;
-  byteSize: number;
-}
-
-/** 会话二进制文件读取结果（与 Rust session_fs_read_bytes 返回结构一致） */
-interface BinaryFileContent {
-  content: string;
   byteSize: number;
 }
 
@@ -383,7 +377,7 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
 
 /**
  * 打开特殊文件预览标签（PDF / 图像 / XLSX）：已打开则激活；否则新建标签并异步准备数据。
- * 图像直接经 asset 协议取 URL；PDF / XLSX 经 session_fs_read_bytes 读取 base64 后解码为字节。
+ * 图像直接经 asset 协议取 URL；PDF / XLSX 经 session_fs_read_bytes 直取原始字节（ArrayBuffer）。
  */
 export async function openPreviewTab(
   type: PreviewType,
@@ -418,11 +412,12 @@ export async function openPreviewTab(
     if (type === "image") {
       tab.imageUrl = assetUrl(path);
     } else {
-      const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
-        workspace,
-        path,
-      });
-      const bytes = base64ToBytes(info.content);
+      const bytes = new Uint8Array(
+        await invoke<ArrayBuffer>("session_fs_read_bytes", {
+          workspace,
+          path,
+        }),
+      );
       if (type === "pdf") {
         tab.pdfData = bytes;
       } else {
@@ -469,15 +464,13 @@ export async function openDocxTab(
   insertTab(tab);
   activeTabId.value = id;
   try {
-    const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
+    const buf = await invoke<ArrayBuffer>("session_fs_read_bytes", {
       workspace,
       path,
     });
-    const bytes = base64ToBytes(info.content);
-    // base64ToBytes 生成的是精确长度的新缓冲区，可直接取 .buffer
-    const { html, warnings } = await docxToHtml(bytes.buffer as ArrayBuffer);
+    const { html, warnings } = await docxToHtml(buf);
     tab.initialHtml = html;
-    tab.byteSize = info.byteSize;
+    tab.byteSize = buf.byteLength;
     if (warnings.length > 0) {
       tab.status = `导入提示：${warnings[0]}`;
     }

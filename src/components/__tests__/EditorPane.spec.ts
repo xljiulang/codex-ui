@@ -1186,7 +1186,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   it("激活预览标签：gitRevealTarget 指向该标签的 workspace/path", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
       }
       if (cmd === "session_fs_metadata") {
         return Promise.resolve({
@@ -1646,7 +1646,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   it("打开 PDF 预览标签：读取二进制并渲染预览区", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve({ content: "JVBERi0x", byteSize: 8 });
+        return Promise.resolve(new Uint8Array([37, 80, 68, 70, 45, 49]).buffer);
       }
       if (cmd === "session_fs_icons") {
         return Promise.resolve([]);
@@ -1939,7 +1939,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") return Promise.resolve([]);
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve({ content: "aGVsbG8=", byteSize: 5 });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
       }
       if (cmd === "session_fs_icons") return Promise.resolve([]);
       if (cmd === "terminal_spawn") return Promise.resolve({});

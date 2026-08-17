@@ -35,13 +35,3 @@ export function previewTypeForName(name: string): PreviewType | null {
   if (IMAGE_EXTS.includes(ext)) return "image";
   return null;
 }
-
-/** base64 字符串 → Uint8Array（PDF 预览字节数据源） */
-export function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    bytes[i] = bin.charCodeAt(i);
-  }
-  return bytes;
-}

@@ -9,7 +9,6 @@ import { docxToHtml } from "../../lib/docx";
 import { detectEol, normalizeForEditor, stripBom } from "../../lib/editorFile";
 import { formatTimeHMS, relPathOf } from "../../lib/format";
 import { normalizeFsPath } from "../../lib/path";
-import { base64ToBytes } from "../../lib/preview";
 import { TabKind } from "../../lib/tabs";
 import { buildFileEditorState } from "./open";
 import type {
@@ -28,12 +27,6 @@ export interface FsChangedPayload {
 interface TextFileContent {
   content: string;
   validUtf8: boolean;
-  byteSize: number;
-}
-
-/** 会话二进制文件读取结果（与 Rust session_fs_read_bytes 返回结构一致） */
-interface BinaryFileContent {
-  content: string;
   byteSize: number;
 }
 
@@ -217,17 +210,11 @@ async function refreshFileTab(tab: FileEditorTab): Promise<void> {
 /** .docx 标签：重新导入并替换编辑器内容，恢复选区与宿主滚动位置 */
 async function refreshDocxTab(tab: DocxEditorTab): Promise<void> {
   try {
-    const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
+    const buf = await invoke<ArrayBuffer>("session_fs_read_bytes", {
       workspace: tab.workspace,
       path: tab.path,
     });
-    const bytes = base64ToBytes(info.content);
-    const { html } = await docxToHtml(
-      bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength,
-      ) as ArrayBuffer,
-    );
+    const { html } = await docxToHtml(buf);
     if (html === tab.initialHtml) return;
     const editor = tab.editor;
     if (editor) {
@@ -252,7 +239,7 @@ async function refreshDocxTab(tab: DocxEditorTab): Promise<void> {
       tab.dirty = false;
     }
     tab.initialHtml = html;
-    tab.byteSize = info.byteSize;
+    tab.byteSize = buf.byteLength;
     tab.status = `已从磁盘刷新 ${formatTimeHMS(Date.now())}`;
   } catch {
     tab.status = "外部刷新失败：文件可能已被删除";
@@ -265,11 +252,12 @@ async function refreshPreviewTab(tab: PreviewEditorTab): Promise<void> {
     if (tab.previewType === "image") {
       tab.imageUrl = `${assetUrl(tab.path)}?t=${Date.now()}`;
     } else {
-      const info = await invoke<BinaryFileContent>("session_fs_read_bytes", {
-        workspace: tab.workspace,
-        path: tab.path,
-      });
-      const bytes = base64ToBytes(info.content);
+      const bytes = new Uint8Array(
+        await invoke<ArrayBuffer>("session_fs_read_bytes", {
+          workspace: tab.workspace,
+          path: tab.path,
+        }),
+      );
       if (tab.previewType === "pdf") {
         tab.pdfData = bytes;
       } else {

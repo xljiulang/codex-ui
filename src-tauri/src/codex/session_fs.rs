@@ -747,18 +747,10 @@ pub async fn session_fs_probe_text(workspace: String, path: String) -> Result<bo
 /// 二进制预览读取上限（PDF 预览用；图像预览走 asset 协议不经过此命令）
 const MAX_PREVIEW_BYTES: u64 = 50 * 1024 * 1024;
 
-/// 二进制文件内容（预览用；camelCase 序列化）
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BinaryFileContent {
-    /// base64 编码的文件字节（前端解码后交给渲染器）
-    pub content: String,
-    pub byte_size: u64,
-}
-
-/// 二进制文件读取（PDF 预览用）：路径包含校验、仅文件、大小上限（参数化便于测试），
-/// 字节以 base64 返回，避免 Tauri IPC 对字节数组的低效 JSON 序列化。
-fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<BinaryFileContent, String> {
+/// 二进制文件读取（PDF/XLSX/DOCX 预览与编辑用）：路径包含校验、仅文件、大小上限（参数化便于测试）。
+/// 直接返回原始字节：Tauri v2 IPC 对 `Vec<u8>` 返回值走原始二进制通道（InvokeResponseBody::Raw），
+/// 前端 invoke 直接拿到 ArrayBuffer，无需 base64 中转。
+fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
     let target = ensure_inside(root, path)?;
     let meta = std::fs::metadata(&target)
         .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
@@ -770,14 +762,11 @@ fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<BinaryFil
     }
     let bytes = std::fs::read(&target)
         .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
-    Ok(BinaryFileContent {
-        content: STANDARD.encode(&bytes),
-        byte_size: meta.len(),
-    })
+    Ok(bytes)
 }
 
 #[tauri::command]
-pub async fn session_fs_read_bytes(workspace: String, path: String) -> Result<BinaryFileContent, String> {
+pub async fn session_fs_read_bytes(workspace: String, path: String) -> Result<Vec<u8>, String> {
     run_blocking(120, move || {
         let root_p = resolve_workspace(&workspace)?;
         read_bytes_impl(&root_p, Path::new(&path), MAX_PREVIEW_BYTES)
@@ -1433,12 +1422,11 @@ mod tests {
     #[test]
     fn read_bytes_roundtrip_with_guards() {
         let (tmp, root) = tree();
-        // 正常读取：base64 内容 + 字节数
+        // 正常读取：原始字节直返
         let payload = [0x25u8, 0x50, 0x44, 0x46, 0x2d, 0x31]; // %PDF-1
         std::fs::write(root.join("doc.pdf"), payload).unwrap();
         let c = read_bytes_impl(&root, &root.join("doc.pdf"), 1024).unwrap();
-        assert_eq!(c.content, STANDARD.encode(payload));
-        assert_eq!(c.byte_size, payload.len() as u64);
+        assert_eq!(c, payload);
         // 目录拒绝
         assert!(read_bytes_impl(&root, &root.join("src"), 1024).is_err());
         // 越界拒绝
