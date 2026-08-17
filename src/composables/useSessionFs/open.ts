@@ -80,43 +80,49 @@ export async function probeTextEntry(
  * reveal_path 分发记录不回归。
  */
 export async function openPathInApp(path: string): Promise<boolean> {
-  const testWin = window as unknown as { __CODEX_UI_TEST__?: boolean };
-  if (testWin.__CODEX_UI_TEST__) return false;
-  const session = workspace.value;
-  if (!session) return false;
-  const underSession = isPathUnderRoot(session, path);
-  const root = underSession ? session : dirNameOf(path);
-  const relPath = underSession ? path : pathBaseName(path);
-  if (!root || !relPath) return false;
-
-  const type = previewTypeForName(relPath);
-  if (type === "pdf") {
-    void openPreviewTab("pdf", root, relPath);
-    return true;
-  }
-  if (type === "image") {
-    // 图片走 asset 协议，需要绝对路径；root 仅作标签元数据
-    void openPreviewTab("image", root, path);
-    return true;
-  }
-  if (type === "xlsx") {
-    void openPreviewTab("xlsx", root, relPath);
-    return true;
-  }
-  if (isDocxPath(relPath)) {
-    void openDocxTab(root, relPath);
-    return true;
-  }
   try {
-    const isText = await invoke<boolean>("session_fs_probe_text", {
-      workspace: root,
-      path: relPath,
-    });
-    if (!isText) return false;
-    void openFileTab(root, relPath);
-    return true;
+    const testWin = window as unknown as { __CODEX_UI_TEST__?: boolean };
+    if (testWin.__CODEX_UI_TEST__) return false;
+    const session = workspace.value;
+    if (!session) return false;
+    const underSession = isPathUnderRoot(session, path);
+    const root = underSession ? session : dirNameOf(path);
+    const relPath = underSession ? path : pathBaseName(path);
+    if (!root || !relPath) return false;
+
+    const type = previewTypeForName(relPath);
+    if (type === "pdf") {
+      void openPreviewTab("pdf", root, relPath);
+      return true;
+    }
+    if (type === "image") {
+      // 图片走 asset 协议，需要绝对路径；root 仅作标签元数据
+      void openPreviewTab("image", root, path);
+      return true;
+    }
+    if (type === "xlsx") {
+      void openPreviewTab("xlsx", root, relPath);
+      return true;
+    }
+    if (isDocxPath(relPath)) {
+      void openDocxTab(root, relPath);
+      return true;
+    }
+    try {
+      const isText = await invoke<boolean>("session_fs_probe_text", {
+        workspace: root,
+        path: relPath,
+      });
+      if (!isText) return false;
+      void openFileTab(root, relPath);
+      return true;
+    } catch {
+      // 目录/缺失/不可读：降级为资源管理器（原行为），不额外 toast
+      return false;
+    }
   } catch {
-    // 目录/缺失/不可读：降级为资源管理器（原行为），不额外 toast
+    // 任何意外异常（路径解析/预览类型判定等）一律降级为资源管理器，
+    // 避免调用方静默失败（既不打开也不定位）
     return false;
   }
 }

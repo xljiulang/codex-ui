@@ -82,6 +82,9 @@ export async function spawnApp({
     env: {
       ...process.env,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+      // 仅 E2E 启动暴露 __CODEX_UI_TEST__ 钩子；正常启动不设置，避免
+      // openLink/openPathInApp 被测试钩子短路（生产环境文件链接点击无反应）
+      CODEX_UI_TEST: "1",
       ...extraEnv,
     },
     stdio: "ignore",

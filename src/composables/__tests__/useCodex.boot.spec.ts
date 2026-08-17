@@ -79,4 +79,35 @@ describe("启动加载态 booting 状态", () => {
     await expect(init()).rejects.toThrow("后端不可用");
     expect(store.booting).toBe(false);
   });
+
+  it("test_hook_enabled=true（E2E 启动）时暴露 __CODEX_UI_TEST__", async () => {
+    delete (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "test_hook_enabled") return Promise.resolve(true);
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    await init();
+    const hook = (
+      window as unknown as { __CODEX_UI_TEST__?: { newSession?: unknown } }
+    ).__CODEX_UI_TEST__;
+    expect(typeof hook?.newSession).toBe("function");
+  });
+
+  it("test_hook_enabled=false（正常启动）时不暴露 __CODEX_UI_TEST__", async () => {
+    delete (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "test_hook_enabled") return Promise.resolve(false);
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    await init();
+    expect(
+      (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__,
+    ).toBeUndefined();
+  });
 });

@@ -104,6 +104,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            codex::commands::test_hook_enabled,
             codex::commands::server_status,
             codex::commands::server_connect,
             codex::commands::server_logs,

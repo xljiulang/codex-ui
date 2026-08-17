@@ -17,6 +17,14 @@ fn pick_directory_lock() -> &'static Mutex<()> {
     PICK_DIRECTORY_LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// E2E 测试钩子开关：仅当以 CODEX_UI_TEST=1 启动时暴露 window.__CODEX_UI_TEST__，
+/// 正常启动不暴露——避免 openLink/openPathInApp 被测试钩子短路导致生产环境
+/// 文件链接/引用点击无反应。
+#[tauri::command]
+pub fn test_hook_enabled() -> bool {
+    std::env::var_os("CODEX_UI_TEST").is_some()
+}
+
 #[tauri::command]
 pub async fn server_status(server: State<'_, Server>) -> Result<Value, String> {
     Ok(server.status().await)

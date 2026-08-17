@@ -46,8 +46,12 @@ async function onClick() {
   if (props.kind === "file") {
     const cls = localPathFromHref(props.path, sessionWorkspace());
     if (cls?.kind === "local") {
-      const opened = await openPathInApp(cls.path);
-      if (opened) return;
+      try {
+        const opened = await openPathInApp(cls.path);
+        if (opened) return;
+      } catch {
+        // 应用内打开异常：降级资源管理器定位，避免静默无反应
+      }
     }
   }
   openLink(props.path, sessionWorkspace());

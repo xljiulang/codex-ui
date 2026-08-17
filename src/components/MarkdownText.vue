@@ -199,7 +199,7 @@ function decorateLinks() {
       // 本地：支持则在应用内 tab 打开，否则降级资源管理器（原行为）
       void openPathInApp(cls.path).then((opened) => {
         if (!opened) openLink(h, root);
-      });
+      }).catch(() => openLink(h, root));
     });
   }
 }

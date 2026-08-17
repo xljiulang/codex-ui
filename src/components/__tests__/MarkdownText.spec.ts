@@ -221,6 +221,68 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     expect(wrapper.find(".md strong").text()).toBe("world");
   });
 
+  it("流式同段落链接后追加内容（结构变化）后链接仍可点击", async () => {
+    vi.useFakeTimers();
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(MarkdownText, {
+      props: { text: "[文件](D:/repo/a.ts)", streaming: true },
+    });
+    await flushPromises();
+    vi.advanceTimersByTime(80);
+    await flushPromises();
+    await wrapper.setProps({
+      text: "[文件](D:/repo/a.ts) 后续内容",
+      streaming: true,
+    });
+    vi.advanceTimersByTime(80);
+    await flushPromises();
+    await wrapper.setProps({ streaming: false });
+    await flushPromises();
+
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "session_fs_probe_text",
+      expect.anything(),
+    );
+  });
+
+  it("助手回复的盘符路径链接（D:/…）点击在应用内打开，工作区外以父目录为根", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      }
+      return Promise.resolve(null);
+    });
+    const wrapper = mount(MarkdownText, {
+      props: {
+        text: "收到文件路径链接：[index.html](D:/codex/codex-ui/index.html)",
+      },
+    });
+    await flushPromises();
+    await wrapper.find("a").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      workspace: "D:\\codex\\codex-ui",
+      path: "index.html",
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_read", {
+      workspace: "D:\\codex\\codex-ui",
+      path: "index.html",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "reveal_path",
+      expect.anything(),
+    );
+  });
+
   it("代码块闭合等结构重排时回退整段替换", async () => {
     const wrapper = mount(MarkdownText, {
       props: { text: "```js\nconst x = 1;", streaming: true },
