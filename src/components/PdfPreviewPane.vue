@@ -3,11 +3,16 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { nextTick } from "vue";
+import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
 import type { PreviewEditorTab } from "../composables/useEditorTabs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
-const props = defineProps<{ tab: PreviewEditorTab }>();
+const props = defineProps<{
+  tab: PreviewEditorTab;
+  /** 头部动作区容器：工具栏 Teleport 目标；缺省时原位渲染 */
+  actionsTarget?: HTMLElement | null;
+}>();
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
@@ -28,6 +33,8 @@ let doc: pdfjsLib.PDFDocumentProxy | null = null;
 let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
 let renderTask: pdfjsLib.RenderTask | null = null;
 let renderSeq = 0;
+
+useCtrlWheelZoom(canvasHost, zoom, MIN_SCALE, MAX_SCALE, SCALE_STEP);
 
 const percentLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
 
@@ -142,58 +149,60 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="pdf-preview">
-    <div class="pdf-toolbar">
-      <button
-        class="pdf-toolbar-btn"
-        :disabled="pageNo <= 1"
-        aria-label="上一页"
-        v-tooltip="'上一页'"
-        @click="prevPage()"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
-        </svg>
-      </button>
-      <button
-        class="pdf-toolbar-btn"
-        :disabled="pageNo >= pageCount"
-        aria-label="下一页"
-        v-tooltip="'下一页'"
-        @click="nextPage()"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z" />
-        </svg>
-      </button>
-      <span class="pdf-toolbar-page">{{ pageNo }} / {{ pageCount }}</span>
-      <span class="pdf-toolbar-sep"></span>
-      <button
-        class="pdf-toolbar-btn"
-        :disabled="zoom <= MIN_SCALE"
-        aria-label="缩小"
-        v-tooltip="'缩小'"
-        @click="zoomOut()"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M7 11h10v2H7z" />
-        </svg>
-      </button>
-      <span class="pdf-toolbar-percent">{{ percentLabel }}</span>
-      <button
-        class="pdf-toolbar-btn"
-        :disabled="zoom >= MAX_SCALE"
-        aria-label="放大"
-        v-tooltip="'放大'"
-        @click="zoomIn()"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
-        </svg>
-      </button>
-      <button class="pdf-toolbar-btn pdf-toolbar-fit" @click="fitWidth()">
-        适应宽度
-      </button>
-    </div>
+    <Teleport :to="props.actionsTarget" :disabled="!props.actionsTarget">
+      <div class="pdf-toolbar">
+        <button
+          class="pdf-toolbar-btn"
+          :disabled="pageNo <= 1"
+          aria-label="上一页"
+          v-tooltip="'上一页'"
+          @click="prevPage()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+          </svg>
+        </button>
+        <button
+          class="pdf-toolbar-btn"
+          :disabled="pageNo >= pageCount"
+          aria-label="下一页"
+          v-tooltip="'下一页'"
+          @click="nextPage()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z" />
+          </svg>
+        </button>
+        <span class="pdf-toolbar-page">{{ pageNo }} / {{ pageCount }}</span>
+        <span class="pdf-toolbar-sep"></span>
+        <button
+          class="pdf-toolbar-btn"
+          :disabled="zoom <= MIN_SCALE"
+          aria-label="缩小"
+          v-tooltip="'缩小'"
+          @click="zoomOut()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M7 11h10v2H7z" />
+          </svg>
+        </button>
+        <span class="pdf-toolbar-percent">{{ percentLabel }}</span>
+        <button
+          class="pdf-toolbar-btn"
+          :disabled="zoom >= MAX_SCALE"
+          aria-label="放大"
+          v-tooltip="'放大'"
+          @click="zoomIn()"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" />
+          </svg>
+        </button>
+        <button class="pdf-toolbar-btn pdf-toolbar-fit" @click="fitWidth()">
+          适应宽度
+        </button>
+      </div>
+    </Teleport>
     <div v-if="loading" class="preview-note">正在渲染 PDF…</div>
     <div v-else-if="error" class="preview-note preview-error">
       无法预览该 PDF（{{ error }}）

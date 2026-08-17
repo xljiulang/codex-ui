@@ -145,4 +145,36 @@ describe("XlsxPreviewPane 表格预览", () => {
     await flushPromises();
     expect(wrapper.find(".preview-error").text()).toContain("表格内容为空");
   });
+
+  it("提供 actionsTarget 时工具栏 Teleport 到头部容器", async () => {
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const wrapper = mount(XlsxPreviewPane, {
+      props: { tab: makeTab(twoSheetBytes()), actionsTarget: target },
+    });
+    await flushPromises();
+    expect(target.querySelector(".xlsx-toolbar")).toBeTruthy();
+    expect(wrapper.find(".xlsx-toolbar").exists()).toBe(false);
+    wrapper.unmount();
+    target.remove();
+  });
+
+  it("内容区 Ctrl+滚轮缩放", async () => {
+    const wrapper = mount(XlsxPreviewPane, {
+      props: { tab: makeTab(twoSheetBytes()) },
+    });
+    await flushPromises();
+    expect(wrapper.find(".preview-zoom-percent").text()).toBe("100%");
+    const host = wrapper.find(".xlsx-grid-host").element;
+    const e = new WheelEvent("wheel", {
+      deltaY: -100,
+      bubbles: true,
+      cancelable: true,
+    });
+    // happy-dom 的 WheelEvent 构造不接收 ctrlKey，手动定义
+    Object.defineProperty(e, "ctrlKey", { value: true, configurable: true });
+    host.dispatchEvent(e);
+    await flushPromises();
+    expect(wrapper.find(".preview-zoom-percent").text()).toBe("125%");
+  });
 });

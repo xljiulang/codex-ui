@@ -183,6 +183,44 @@ describe("PdfPreviewPane PDF 预览", () => {
     w2.unmount();
   });
 
+  it("提供 actionsTarget 时工具栏 Teleport 到头部容器", async () => {
+    const target = document.createElement("div");
+    document.body.appendChild(target);
+    const w = mount(PdfPreviewPane, {
+      props: { tab: makeTab(), actionsTarget: target },
+    });
+    await flushPromises();
+    expect(target.querySelector(".pdf-toolbar")).toBeTruthy();
+    expect(w.find(".pdf-toolbar").exists()).toBe(false);
+    w.unmount();
+    target.remove();
+  });
+
+  it("内容区 Ctrl+滚轮缩放", async () => {
+    // happy-dom 无 2D canvas：stub getContext 让 canvas host 正常渲染
+    const origGetContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({})) as never;
+    try {
+      const w = mount(PdfPreviewPane, { props: { tab: makeTab() } });
+      await flushPromises();
+      expect(w.find(".pdf-toolbar-percent").text()).toBe("100%");
+      const host = w.find(".pdf-canvas-host").element;
+      const e = new WheelEvent("wheel", {
+        deltaY: -100,
+        bubbles: true,
+        cancelable: true,
+      });
+      // happy-dom 的 WheelEvent 构造不接收 ctrlKey，手动定义
+      Object.defineProperty(e, "ctrlKey", { value: true, configurable: true });
+      host.dispatchEvent(e);
+      await flushPromises();
+      expect(w.find(".pdf-toolbar-percent").text()).toBe("125%");
+      w.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = origGetContext;
+    }
+  });
+
   it("加载失败展示错误信息", async () => {
     mockedGetDocument.mockReturnValue({
       promise: Promise.reject(new Error("损坏的文件")),

@@ -38,16 +38,35 @@ describe("PreviewPane 预览标签", () => {
     expect(w.text()).toContain("assets/logo.png");
   });
 
-  it("图像预览结构：缩放工具栏在滚动区之上，图片位于 preview-image-stage 内", () => {
+  it("图像预览结构：缩放控件并入头部行，图片位于 preview-image-stage 内", () => {
     const w = mount(PreviewPane, { props: { tab: makeTab() } });
-    const toolbar = w.find(".preview-zoom-toolbar");
+    // 缩放控件渲染在头部右侧动作区
+    expect(
+      w.find(".preview-head-actions .preview-zoom-toolbar").exists(),
+    ).toBe(true);
     const stage = w.find(".preview-image-stage");
     expect(stage.exists()).toBe(true);
     expect(stage.find("img").exists()).toBe(true);
-    // DOM 顺序：工具栏 → 滚动区（避免工具栏与图片并排把图片挤到右侧）
+    // 内容区只剩滚动区，不再有独立工具栏行
     const children = Array.from(w.find(".preview-image").element.children);
-    expect(children.indexOf(toolbar.element)).toBe(0);
-    expect(children.indexOf(stage.element)).toBe(1);
+    expect(children.length).toBe(1);
+    expect(children[0].className).toContain("preview-image-stage");
+  });
+
+  it("图像内容区 Ctrl+滚轮缩放", async () => {
+    const w = mount(PreviewPane, { props: { tab: makeTab() } });
+    await flushPromises();
+    const stage = w.find(".preview-image-stage").element;
+    const e = new WheelEvent("wheel", {
+      deltaY: -100,
+      bubbles: true,
+      cancelable: true,
+    });
+    // happy-dom 的 WheelEvent 构造不接收 ctrlKey，手动定义
+    Object.defineProperty(e, "ctrlKey", { value: true, configurable: true });
+    stage.dispatchEvent(e);
+    await flushPromises();
+    expect(w.find(".preview-zoom-percent").text()).toBe("125%");
   });
 
   it("图像缩放：放大按原始像素等比缩放，适应窗口复位", async () => {

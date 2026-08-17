@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
 import type { PreviewEditorTab } from "../composables/useEditorTabs";
 import {
   parseXlsx,
@@ -7,7 +8,11 @@ import {
   type XlsxWorkbook,
 } from "../lib/xlsx";
 
-const props = defineProps<{ tab: PreviewEditorTab }>();
+const props = defineProps<{
+  tab: PreviewEditorTab;
+  /** 头部动作区容器：工具栏 Teleport 目标；缺省时原位渲染 */
+  actionsTarget?: HTMLElement | null;
+}>();
 
 /** 网格固定行高（px）：虚拟滚动的行高基准 */
 const ROW_HEIGHT = 28;
@@ -26,6 +31,8 @@ const zoom = ref(1);
 const gridHost = ref<HTMLDivElement | null>(null);
 const startRow = ref(0);
 const endRow = ref(0);
+
+useCtrlWheelZoom(gridHost, zoom, MIN_ZOOM, MAX_ZOOM, ZOOM_STEP);
 
 const activeSheet = computed<XlsxSheetData | null>(() => {
   const wb = workbook.value;
@@ -153,51 +160,53 @@ watch(zoom, () => {
 
 <template>
   <div class="xlsx-preview">
-    <div class="xlsx-toolbar">
-      <div class="xlsx-sheets">
-        <button
-          v-for="(sheet, i) in workbook?.sheets ?? []"
-          :key="sheet.name"
-          class="xlsx-sheet-btn"
-          :class="{ active: i === sheetIndex }"
-          type="button"
-          @click="selectSheet(i)"
-        >
-          {{ sheet.name }}
-        </button>
+    <Teleport :to="props.actionsTarget" :disabled="!props.actionsTarget">
+      <div class="xlsx-toolbar">
+        <div class="xlsx-sheets">
+          <button
+            v-for="(sheet, i) in workbook?.sheets ?? []"
+            :key="sheet.name"
+            class="xlsx-sheet-btn"
+            :class="{ active: i === sheetIndex }"
+            type="button"
+            @click="selectSheet(i)"
+          >
+            {{ sheet.name }}
+          </button>
+        </div>
+        <div class="xlsx-zoom">
+          <button
+            class="preview-zoom-btn"
+            type="button"
+            :disabled="zoom <= MIN_ZOOM"
+            aria-label="缩小"
+            @click="zoomOut()"
+          >
+            −
+          </button>
+          <span class="preview-zoom-percent">{{ percentLabel }}</span>
+          <button
+            class="preview-zoom-btn"
+            type="button"
+            :disabled="zoom >= MAX_ZOOM"
+            aria-label="放大"
+            @click="zoomIn()"
+          >
+            ＋
+          </button>
+          <button
+            class="preview-zoom-btn"
+            type="button"
+            @click="resetZoom()"
+          >
+            100%
+          </button>
+        </div>
+        <span v-if="activeSheet" class="xlsx-meta">
+          {{ activeSheet.rowCount }} 行 × {{ activeSheet.colCount }} 列
+        </span>
       </div>
-      <div class="xlsx-zoom">
-        <button
-          class="preview-zoom-btn"
-          type="button"
-          :disabled="zoom <= MIN_ZOOM"
-          aria-label="缩小"
-          @click="zoomOut()"
-        >
-          −
-        </button>
-        <span class="preview-zoom-percent">{{ percentLabel }}</span>
-        <button
-          class="preview-zoom-btn"
-          type="button"
-          :disabled="zoom >= MAX_ZOOM"
-          aria-label="放大"
-          @click="zoomIn()"
-        >
-          ＋
-        </button>
-        <button
-          class="preview-zoom-btn"
-          type="button"
-          @click="resetZoom()"
-        >
-          100%
-        </button>
-      </div>
-      <span v-if="activeSheet" class="xlsx-meta">
-        {{ activeSheet.rowCount }} 行 × {{ activeSheet.colCount }} 列
-      </span>
-    </div>
+    </Teleport>
     <div v-if="loading" class="preview-note">正在解析表格…</div>
     <div v-else-if="error" class="preview-note preview-error">
       无法预览该表格（{{ error }}）

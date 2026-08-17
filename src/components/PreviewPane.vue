@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from "vue";
 import { relPathOf } from "../lib/format";
+import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
 import type { PreviewEditorTab } from "../composables/useEditorTabs";
 
 const props = defineProps<{ tab: PreviewEditorTab }>();
@@ -27,6 +28,11 @@ const ZOOM_STEP = 1.25;
 const zoom = ref(1);
 const naturalW = ref(0);
 const naturalH = ref(0);
+/** 头部右侧动作区：图像缩放控件内联、PDF/XLSX 工具栏经 Teleport 移入 */
+const headActions = ref<HTMLElement | null>(null);
+/** 图像内容滚动区：Ctrl+滚轮缩放 */
+const imageStage = ref<HTMLElement | null>(null);
+useCtrlWheelZoom(imageStage, zoom, MIN_ZOOM, MAX_ZOOM, ZOOM_STEP);
 
 const percentLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
 const imageStyle = computed(() => {
@@ -72,14 +78,11 @@ watch(
     <div class="preview-head">
       <span class="preview-path">{{ relPath }}</span>
       <span class="preview-kind">{{ kindLabel }}</span>
-    </div>
-    <div v-if="tab.loading" class="preview-note">正在加载预览…</div>
-    <div v-else-if="tab.error" class="preview-note preview-error">
-      无法预览该文件（{{ tab.error }}）
-    </div>
-    <template v-else>
-      <div v-if="tab.previewType === 'image'" class="preview-image">
-        <div class="preview-zoom-toolbar">
+      <div ref="headActions" class="preview-head-actions">
+        <div
+          v-if="tab.previewType === 'image' && !tab.loading && !tab.error"
+          class="preview-zoom-toolbar"
+        >
           <button
             class="preview-zoom-btn"
             type="button"
@@ -107,7 +110,15 @@ watch(
             适应窗口
           </button>
         </div>
-        <div class="preview-image-stage">
+      </div>
+    </div>
+    <div v-if="tab.loading" class="preview-note">正在加载预览…</div>
+    <div v-else-if="tab.error" class="preview-note preview-error">
+      无法预览该文件（{{ tab.error }}）
+    </div>
+    <template v-else>
+      <div v-if="tab.previewType === 'image'" class="preview-image">
+        <div ref="imageStage" class="preview-image-stage">
           <img
             v-if="!imgError"
             :src="tab.imageUrl"
@@ -121,8 +132,12 @@ watch(
           <div v-else class="preview-note preview-error">无法预览该图片</div>
         </div>
       </div>
-      <PdfPreviewPane v-else-if="tab.previewType === 'pdf'" :tab="tab" />
-      <XlsxPreviewPane v-else :tab="tab" />
+      <PdfPreviewPane
+        v-else-if="tab.previewType === 'pdf'"
+        :tab="tab"
+        :actions-target="headActions"
+      />
+      <XlsxPreviewPane v-else :tab="tab" :actions-target="headActions" />
     </template>
   </div>
 </template>
