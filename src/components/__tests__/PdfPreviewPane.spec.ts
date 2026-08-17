@@ -134,6 +134,55 @@ describe("PdfPreviewPane PDF 预览", () => {
     expect(w.text()).toContain("无法预览该 PDF（PDF 内容为空）");
   });
 
+  it("传给 pdfjs 的是副本：模拟 pdf.js 转移 buffer 后标签 pdfData 仍完整", async () => {
+    const tab = reactive(makeTab()); // pdfData = new Uint8Array([1, 2, 3])
+    const doc = {
+      numPages: 3,
+      getPage: vi.fn(async () => mockPage),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    let receivedIsCopy = false;
+    let receivedLenBeforeTransfer = 0;
+    mockedGetDocument.mockImplementation((params) => {
+      // 模拟 pdf.js 真实行为：把传入 data 的 ArrayBuffer 转移（detach）
+      const data = params?.data;
+      if (data instanceof Uint8Array) {
+        receivedIsCopy = data !== tab.pdfData;
+        receivedLenBeforeTransfer = data.length;
+        try {
+          structuredClone(data, { transfer: [data.buffer] });
+        } catch {}
+      }
+      return {
+        promise: Promise.resolve(doc),
+        destroy: vi.fn().mockResolvedValue(undefined),
+      } as never;
+    });
+    const w = mount(PdfPreviewPane, { props: { tab } });
+    await flushPromises();
+    // 传给 getDocument 的是副本（非原引用），且转移前字节数完整
+    expect(receivedIsCopy).toBe(true);
+    expect(receivedLenBeforeTransfer).toBe(3);
+    // 标签上的 pdfData 保持完整（未被转移 detach）
+    expect(tab.pdfData!.length).toBe(3);
+    expect(w.text()).toContain("1 / 3");
+    w.unmount();
+  });
+
+  it("同一标签卸载后重挂载仍能渲染（切标签切回不再误报内容为空）", async () => {
+    const tab = reactive(makeTab());
+    const w = mount(PdfPreviewPane, { props: { tab } });
+    await flushPromises();
+    expect(w.text()).toContain("1 / 3");
+    w.unmount();
+
+    const w2 = mount(PdfPreviewPane, { props: { tab } });
+    await flushPromises();
+    expect(w2.text()).toContain("1 / 3");
+    expect(w2.text()).not.toContain("PDF 内容为空");
+    w2.unmount();
+  });
+
   it("加载失败展示错误信息", async () => {
     mockedGetDocument.mockReturnValue({
       promise: Promise.reject(new Error("损坏的文件")),

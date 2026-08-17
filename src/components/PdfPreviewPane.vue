@@ -52,7 +52,10 @@ async function load() {
     return;
   }
   try {
-    const task = pdfjsLib.getDocument({ data });
+    // 传副本给 pdfjs：其内部会经 structuredClone(transfer) 把 data.buffer 转移给
+    // worker，直接传 props.tab.pdfData 会把标签上保存的字节 detach 成空 buffer，
+    // 导致切标签重挂载后 load() 读到空字节而误报「PDF 内容为空」。
+    const task = pdfjsLib.getDocument({ data: data.slice() });
     loadingTask = task;
     const d = await task.promise;
     doc = d;
