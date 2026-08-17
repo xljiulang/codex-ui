@@ -336,7 +336,8 @@ function toggleDirRow(node: GitDirNode) {
     <div v-else-if="gitState === 'not_repo'" class="git-empty">
       <p class="git-empty-title">当前目录不是 Git 仓库</p>
       <p class="git-empty-desc">
-        点击下方按钮可将当前工作目录初始化为 Git 仓库（仅初始化，不会自动提交）。
+        点击下方按钮可将当前工作目录初始化为 Git 仓库（仅初始化，不会自动提交，并创建默认
+        .gitignore 与 .gitattributes，已存在则跳过）。
       </p>
       <button
         class="btn primary git-init-btn"
@@ -558,7 +559,8 @@ function toggleDirRow(node: GitDirNode) {
         {{ workspace || "当前工作目录" }}
       </span>
       <p class="git-confirm-desc">
-        将执行 git init，仅初始化、不会自动提交；初始化后现有文件会以“未跟踪”状态显示。
+        将执行 git init，仅初始化、不会自动提交；同时创建默认 .gitignore 与
+        .gitattributes（已存在则跳过）；初始化后现有文件会以“未跟踪”状态显示。
       </p>
       <template #foot>
         <button class="btn" @click="confirmInit = false">取消</button>

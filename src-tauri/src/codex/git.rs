@@ -576,6 +576,52 @@ fn git_status_with(git_bin: &Path, root: &str) -> Result<GitStatus, GitError> {
     })
 }
 
+/// 默认 .gitignore 模板（初始化时创建，已存在则跳过；LF、UTF-8、无 BOM）
+const DEFAULT_GITIGNORE: &str = r#"# 操作系统
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# JetBrains / IntelliJ（IDEA、PyCharm、WebStorm、GoLand 等）
+.idea/
+*.iml
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Xcode
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+target/
+bin/
+obj/
+*.log
+"#;
+
+/// 默认 .gitattributes 模板（初始化时创建，已存在则跳过；不强制 LF）
+const DEFAULT_GITATTRIBUTES: &str = "* text=auto\n";
+
 fn git_init(root: &str) -> Result<GitStatus, GitError> {
     match git_rev_parse(root) {
         Ok(_) => return Err(git_err("当前目录已经是 Git 仓库，无需初始化")),
@@ -586,6 +632,18 @@ fn git_init(root: &str) -> Result<GitStatus, GitError> {
     let (code, _, stderr) = git_output(&git_bin, root, &["init", "-b", "main"])?;
     if code != 0 {
         return Err(git_err(format!("git 初始化失败: {}", stderr.trim())));
+    }
+    let repo = git_rev_parse_with(&git_bin, root)?;
+    // 默认创建 .gitignore / .gitattributes（已存在则跳过，保留用户内容）
+    let gitignore = repo.workdir.join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(&gitignore, DEFAULT_GITIGNORE)
+            .map_err(|e| git_err(format!("写入 .gitignore 失败: {e}")))?;
+    }
+    let gitattributes = repo.workdir.join(".gitattributes");
+    if !gitattributes.exists() {
+        std::fs::write(&gitattributes, DEFAULT_GITATTRIBUTES)
+            .map_err(|e| git_err(format!("写入 .gitattributes 失败: {e}")))?;
     }
     git_status_with(&git_bin, root)
 }
@@ -2885,17 +2943,52 @@ fn init_committed_repo(dir: &Path) {
         std::fs::write(root.join("a.txt"), "hello").unwrap();
         let st = git_init(root.to_str().unwrap()).unwrap();
         assert!(root.join(".git").is_dir());
-        assert_eq!(st.files.len(), 1);
-        assert_eq!(st.files[0].path, "a.txt");
-        assert_eq!(st.files[0].status, FileStatus::Untracked);
-        assert!(!st.files[0].staged);
-        assert!(st.files[0].worktree);
+        // 默认创建 .gitignore / .gitattributes：按小写路径排序在前，均为未跟踪
+        assert_eq!(
+            st.files
+                .iter()
+                .map(|f| f.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![".gitattributes", ".gitignore", "a.txt"]
+        );
+        assert!(st
+            .files
+            .iter()
+            .all(|f| f.status == FileStatus::Untracked && f.worktree && !f.staged));
+        let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(ig.contains("node_modules/"));
+        assert!(ig.contains(".idea/"));
+        assert!(ig.contains(".vs/"));
+        let attrs = std::fs::read_to_string(root.join(".gitattributes")).unwrap();
+        assert_eq!(attrs, "* text=auto\n");
         // 仅初始化，不应产生任何提交（HEAD 未出生）
         assert_ne!(
             git(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).0,
             0,
             "HEAD 应未出生"
         );
+    }
+
+    #[test]
+    fn init_preserves_existing_gitignore_and_gitattributes() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "custom-ignore\n").unwrap();
+        std::fs::write(root.join(".gitattributes"), "*.bin binary\n").unwrap();
+        let st = git_init(root.to_str().unwrap()).unwrap();
+        assert!(root.join(".git").is_dir());
+        // 已有文件内容原样保留，不被默认模板覆盖
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitignore")).unwrap(),
+            "custom-ignore\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join(".gitattributes")).unwrap(),
+            "*.bin binary\n"
+        );
+        // 两个已有文件仍以未跟踪状态出现（不重复创建）
+        assert_eq!(st.files.len(), 2);
+        assert!(st.files.iter().all(|f| f.status == FileStatus::Untracked));
     }
 
     #[test]
@@ -3041,7 +3134,8 @@ fn init_committed_repo(dir: &Path) {
         assert!(!root.join(".git").join("index").exists());
         let st = git_status(root.to_str().unwrap()).unwrap();
         assert!(!root.join(".git").join("index").exists());
-        assert_eq!(st.files.len(), 1);
+        // git_init 默认创建 .gitignore / .gitattributes，随 a.txt 共 3 个未跟踪文件
+        assert_eq!(st.files.len(), 3);
     }
 
     #[test]
@@ -3502,19 +3596,19 @@ fn init_committed_repo(dir: &Path) {
 
         // 暂存 → added 且 staged=true
         let st = git_add(root.to_str().unwrap(), "c.txt").unwrap();
-        assert_eq!(st.files.len(), 1);
-        assert_eq!(st.files[0].path, "c.txt");
-        assert_eq!(st.files[0].status, FileStatus::Added);
-        assert!(st.files[0].staged);
-        assert!(!st.files[0].worktree);
+        assert_eq!(st.files.len(), 3);
+        let c = st.files.iter().find(|f| f.path == "c.txt").unwrap();
+        assert_eq!(c.status, FileStatus::Added);
+        assert!(c.staged);
+        assert!(!c.worktree);
 
         // 取消暂存 → 回到 untracked 且 staged=false，工作区内容保留
         let st = git_unstage(root.to_str().unwrap(), "c.txt").unwrap();
-        assert_eq!(st.files.len(), 1);
-        assert_eq!(st.files[0].path, "c.txt");
-        assert_eq!(st.files[0].status, FileStatus::Untracked);
-        assert!(!st.files[0].staged);
-        assert!(st.files[0].worktree);
+        assert_eq!(st.files.len(), 3);
+        let c = st.files.iter().find(|f| f.path == "c.txt").unwrap();
+        assert_eq!(c.status, FileStatus::Untracked);
+        assert!(!c.staged);
+        assert!(c.worktree);
         assert_eq!(std::fs::read_to_string(root.join("c.txt")).unwrap(), "hello\n");
     }
 
@@ -3671,7 +3765,9 @@ fn init_committed_repo(dir: &Path) {
         let _ = git_init(root.to_str().unwrap()).unwrap();
 
         let st = git_restore(root.to_str().unwrap(), "c.txt").unwrap();
-        assert!(st.files.is_empty());
+        // c.txt 已删除；默认创建的 .gitignore / .gitattributes 仍为未跟踪
+        assert_eq!(st.files.len(), 2);
+        assert!(st.files.iter().all(|f| f.status == FileStatus::Untracked));
         assert!(!root.join("c.txt").exists());
     }
 
@@ -3707,18 +3803,19 @@ fn init_committed_repo(dir: &Path) {
         let _ = git_init(root.to_str().unwrap()).unwrap();
 
         let st = git_ignore(root.to_str().unwrap(), "c.txt").unwrap();
-        // c.txt 已被忽略，仅 .gitignore 自身作为新文件出现
-        assert_eq!(st.files.len(), 1);
-        assert_eq!(st.files[0].path, ".gitignore");
-        assert!(!st.files[0].staged);
-        assert!(st.files[0].worktree);
+        // c.txt 已被忽略；默认创建的 .gitignore / .gitattributes 仍为未跟踪
+        assert_eq!(st.files.len(), 2);
+        let ig_file = st.files.iter().find(|f| f.path == ".gitignore").unwrap();
+        assert!(!ig_file.staged);
+        assert!(ig_file.worktree);
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(ig, "/c.txt\n");
+        assert!(ig.contains("node_modules/"));
+        assert!(ig.ends_with("/c.txt\n"));
 
         // 重复忽略幂等：条目不重复
         let _ = git_ignore(root.to_str().unwrap(), "c.txt").unwrap();
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(ig, "/c.txt\n");
+        assert_eq!(ig.matches("/c.txt\n").count(), 1);
     }
 
     #[test]
@@ -3734,7 +3831,7 @@ fn init_committed_repo(dir: &Path) {
         // c.txt 被忽略；d.txt 与 .gitignore 仍为未跟踪
         let mut paths: Vec<&str> = st.files.iter().map(|f| f.path.as_str()).collect();
         paths.sort();
-        assert_eq!(paths, vec![".gitignore", "d.txt"]);
+        assert_eq!(paths, vec![".gitattributes", ".gitignore", "d.txt"]);
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(ig, "*.log\n/c.txt\n");
     }
@@ -3953,17 +4050,17 @@ fn init_committed_repo(dir: &Path) {
         let _ = git_init(root.to_str().unwrap()).unwrap();
 
         let st = git_ignore(root.to_str().unwrap(), "newdir").unwrap();
-        assert_eq!(st.files.len(), 1);
-        assert_eq!(st.files[0].path, ".gitignore");
-        assert!(!st.files[0].staged);
-        assert!(st.files[0].worktree);
+        assert_eq!(st.files.len(), 2);
+        let ig_file = st.files.iter().find(|f| f.path == ".gitignore").unwrap();
+        assert!(!ig_file.staged);
+        assert!(ig_file.worktree);
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(ig, "/newdir/\n");
+        assert!(ig.ends_with("/newdir/\n"));
 
         // 重复忽略幂等
         let _ = git_ignore(root.to_str().unwrap(), "newdir").unwrap();
         let ig = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-        assert_eq!(ig, "/newdir/\n");
+        assert_eq!(ig.matches("/newdir/\n").count(), 1);
     }
 
     #[test]
@@ -4024,7 +4121,9 @@ fn init_committed_repo(dir: &Path) {
         assert_eq!(git(root, &["add", "a.txt"]).0, 0);
 
         let st = git_commit(root.to_str().unwrap(), "first").unwrap();
-        assert!(st.files.is_empty());
+        // 仅 a.txt 被提交；默认创建的 .gitignore / .gitattributes 保持未跟踪
+        assert_eq!(st.files.len(), 2);
+        assert!(st.files.iter().all(|f| f.status == FileStatus::Untracked));
         assert_eq!(git(root, &["log", "-1", "--format=%s"]).1.trim(), "first");
     }
 

@@ -107,6 +107,7 @@ describe("GitView 空状态与初始化", () => {
 
     await wrapper.find(".git-init-btn").trigger("click");
     expect(wrapper.find(".modal").exists()).toBe(true);
+    expect(wrapper.find(".modal").text()).toContain(".gitignore");
     await wrapper.find(".git-init-ok").trigger("click");
     await flushPromises();
 
