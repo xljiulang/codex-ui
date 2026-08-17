@@ -12,7 +12,7 @@ import type {
   Turn,
   UserInput,
 } from "../../lib/types";
-import { activateTab, insertTab, tabs } from "../useTabs";
+import { activeTab, activateTab, insertTab, tabs } from "../useTabs";
 import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, workspace } from "./items";
 import { activeSessionTab, allSessionTabs, dropSessionTab, findSessionTabByThread, freshSessionTab, sessionTabTitle } from "./sessionState";
 import { currentModelId, ensureThreadPlugins, resetToNewChat } from "./settings";
@@ -45,7 +45,13 @@ import {
 export async function openSessionTabForThread(
   threadId: string,
 ): Promise<boolean> {
-  if (threadId === activeSessionTab()?.threadId) return true;
+  // 仅当目标线程的会话标签是真正的活动标签时短路：文件/终端标签活动时
+  // activeSessionTab() 返回的是“最近投影”会话而非显示中的标签，点击历史会话
+  // 仍必须走 switchSessionTab 把对应会话标签切回前台。
+  const active = activeTab.value;
+  if (active && active.kind === TabKind.Chat && active.threadId === threadId) {
+    return true;
+  }
   void sessionLog("info", threadId, "session-open");
   const existing = findSessionTabByThread(threadId);
   if (existing) {

@@ -909,6 +909,33 @@ describe("统一列表：活动会话 live 字段投影", () => {
     expect(activeSessionTab()?.threadId).toBe("t1");
   });
 
+  it("文件标签活动时点击历史会话：聚焦已打开的会话标签（不新建、不重载）", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activeTabId.value = "s1";
+    (_tabs as unknown as Tab[]).push(makeFileTabFixture("file:test"));
+    activeTabId.value = "file:test";
+    // bug 前提：文件标签活动时投影仍指向最近会话 s1，但显示中的标签是文件
+    expect(activeSessionTab()?.threadId).toBe("t1");
+
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({
+          thread: { id: "t1", name: "会话1", turns: [] },
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    expect(await openThread("t1")).toBe(true);
+    // 修复点：即使投影会话就是 s1，点击历史会话也必须把 s1 切回前台
+    expect(activeTabId.value).toBe("s1");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_read",
+      expect.anything(),
+    );
+    expect(tabs).toHaveLength(2); // 会话 + 文件：不新建标签
+  });
+
   it("关闭活动会话：投影切到相邻会话", async () => {
     tabs.push(makeSessionTab("s1", "t1", { name: "会话一" }));
     tabs.push(makeSessionTab("s2", "t2", { name: "会话二" }));
