@@ -130,7 +130,7 @@ export async function uninstallPlugin(pluginId: string): Promise<void> {
   await refreshPluginCaches();
 }
 
-/** 添加远端插件市场（HTTP(S)/SSH Git URL 或 owner/repo） */
+/** 添加插件市场（Git URL / owner/repo 或本地绝对路径） */
 export async function addMarketplace(source: string): Promise<void> {
   await invoke("codex_rpc", {
     method: "marketplace/add",

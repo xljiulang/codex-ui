@@ -416,7 +416,7 @@ function canInstall(p: PluginCatalogItem): boolean {
             <div class="plugin-market-add">
               <input
                 v-model="pluginState.source"
-                placeholder="Git URL 或 owner/repo"
+                placeholder="Git URL 或本地绝对路径"
                 @keydown.enter="doAddMarketplace"
               />
               <button

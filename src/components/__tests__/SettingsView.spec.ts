@@ -762,6 +762,9 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
+    expect(
+      wrapper.find(".plugin-market-add input").attributes("placeholder"),
+    ).toBe("Git URL 或本地绝对路径");
     await wrapper
       .find(".plugin-market-add input")
       .setValue("owner/repo");
