@@ -34,6 +34,47 @@ const emit = defineEmits<{
   add: [e: MouseEvent];
 }>();
 
+/** 终端标签内联重命名状态：renamingId 命中时标题原位变为输入框 */
+const renamingId = ref("");
+const renameDraft = ref("");
+
+/** 进入终端标签标题重命名：预填当前标题并在渲染后聚焦输入框 */
+function startRename(tab: EditorTab) {
+  if (tab.kind !== TabKind.Terminal) return;
+  renamingId.value = tab.id;
+  renameDraft.value = tab.title;
+  void nextTick(() => {
+    document.querySelector<HTMLInputElement>(".tab-rename-input")?.focus();
+  });
+}
+
+/** 提交重命名：trim 后非空且与原标题不同才写入（空值视为取消，保留原标题） */
+function commitRename(tab: EditorTab) {
+  if (renamingId.value !== tab.id) return;
+  renamingId.value = "";
+  const title = renameDraft.value.trim();
+  if (title && title !== tab.title) {
+    tab.title = title;
+  }
+}
+
+function cancelRename() {
+  renamingId.value = "";
+}
+
+/** 终端标签标题双击：进入内联重命名 */
+function onLabelDblClick(tab: EditorTab) {
+  if (tab.kind === TabKind.Terminal) startRename(tab);
+}
+
+/** 标签右键：输入框内放行给原生编辑菜单（不弹标签菜单） */
+function onTabContext(e: MouseEvent, tab: SessionTab | EditorTab) {
+  if ((e.target as HTMLElement).closest?.(".tab-rename-input")) return;
+  emit("context", e, tab);
+}
+
+defineExpose({ startRename });
+
 /** Tab 横向滚动：新标签/激活标签自动滚入视野，溢出时显示左右箭头 */
 const tabScroller = ref<HTMLElement | null>(null);
 const canScrollLeft = ref(false);
@@ -223,7 +264,7 @@ function titleTooltip(tab: EditorTab): string {
         :aria-label="tab.title"
         :tabindex="tab.id === activeTabId ? 0 : -1"
         @click="emit('activate', tab.id)"
-        @contextmenu="emit('context', $event, tab)"
+        @contextmenu="onTabContext($event, tab)"
         @mousedown.middle.prevent="emit('close', tab)"
       >
         <span
@@ -261,7 +302,22 @@ function titleTooltip(tab: EditorTab): string {
           class="editor-tab-run inline"
           aria-hidden="true"
         ></span>
-        <span class="editor-tab-label" v-tooltip="titleTooltip(tab)">
+        <input
+          v-if="renamingId === tab.id"
+          v-model="renameDraft"
+          class="rename-input tab-rename-input"
+          aria-label="重命名终端标题"
+          @click.stop
+          @keydown.enter="commitRename(tab)"
+          @keydown.esc="cancelRename()"
+          @blur="commitRename(tab)"
+        />
+        <span
+          v-else
+          class="editor-tab-label"
+          v-tooltip="titleTooltip(tab)"
+          @dblclick="onLabelDblClick(tab)"
+        >
           {{ tab.title }}
         </span>
         <span

@@ -4,6 +4,7 @@ import {
   defineAsyncComponent,
   onBeforeUnmount,
   onMounted,
+  ref,
   watch,
 } from "vue";
 import ChatView from "./ChatView.vue";
@@ -49,6 +50,7 @@ import {
   ICON_CLOSE_ALL,
   ICON_CLOSE_LEFT,
   ICON_CLOSE_RIGHT,
+  ICON_RENAME,
   ICON_REVEAL,
   SESSION_LOGO_PATHS,
   ICON_TERMINAL,
@@ -62,6 +64,9 @@ const DiffPane = defineAsyncComponent(() => import("./DiffPane.vue"));
 const PreviewPane = defineAsyncComponent(() => import("./PreviewPane.vue"));
 const TerminalPane = defineAsyncComponent(() => import("./TerminalPane.vue"));
 const CommitPane = defineAsyncComponent(() => import("./CommitPane.vue"));
+
+/** EditorTabBar 实例引用：右键菜单「重命名」调用其暴露的内联重命名入口 */
+const tabBarRef = ref<InstanceType<typeof EditorTabBar> | null>(null);
 
 const activeFileTab = computed<FileEditorTab | null>(() =>
   activeTab.value?.kind === TabKind.File
@@ -168,6 +173,14 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
       },
     });
   }
+  // 终端标签：标题处内联重命名（双击标题或右键菜单均可进入）
+  if (tab.kind === TabKind.Terminal) {
+    items.push({
+      label: "重命名",
+      icon: ICON_RENAME,
+      action: () => tabBarRef.value?.startRename(tab as TerminalEditorTab),
+    });
+  }
   // 文件/预览标签（含对话打开的工作区外文件）可直达所在目录，置于菜单末尾
   if (tab.kind === TabKind.File || tab.kind === TabKind.Preview) {
     items.push({
@@ -258,6 +271,7 @@ function openAddMenu(e: MouseEvent) {
   <div class="editor-pane">
     <div v-if="showTabBar" class="editor-tabs-bar">
       <EditorTabBar
+        ref="tabBarRef"
         :session-tabs="sessionTabs"
         :editor-tabs="editorTabs"
         :active-tab-id="activeTabId"

@@ -905,6 +905,229 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("终端标签右键菜单含「重命名」，文件/会话标签不含", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await openFileTab(root, aTxt);
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).toContain("重命名");
+
+    const fileEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await fileEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).not.toContain("重命名");
+
+    const sessEl = wrapper.findAll(".editor-tab")[0];
+    await sessEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).not.toContain("重命名");
+    wrapper.unmount();
+  });
+
+  it("终端标签右键「重命名」：标题原位变输入框并预填当前标题", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
+    const renameItem = wrapper
+      .findAll(".ctx-menu-item")
+      .find((i) => i.text().trim() === "重命名")!;
+    await renameItem.trigger("click");
+    await settle();
+
+    const input = wrapper.find(".tab-rename-input");
+    expect(input.exists()).toBe(true);
+    expect((input.element as HTMLInputElement).value).toBe("终端 (cmd)");
+    wrapper.unmount();
+  });
+
+  it("双击终端标签标题进入重命名；双击文件标签标题不进入", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
+      if (cmd === "session_fs_icons") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await openFileTab(root, aTxt);
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.find(".editor-tab-label").trigger("dblclick");
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(true);
+
+    // 先退出终端重命名，避免输入框干扰文件标签断言
+    await wrapper.find(".tab-rename-input").trigger("keydown.esc");
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
+
+    const fileEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("a.txt"))!;
+    await fileEl.find(".editor-tab-label").trigger("dblclick");
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("输入新标题按 Enter：标签标题更新", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.find(".editor-tab-label").trigger("dblclick");
+    await wrapper.find(".tab-rename-input").setValue("构建终端");
+    await wrapper.find(".tab-rename-input").trigger("keydown.enter");
+    await settle();
+
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll(".editor-tab")
+        .some((w) => w.text().includes("构建终端")),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("失焦提交重命名：标签标题更新", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.find(".editor-tab-label").trigger("dblclick");
+    await wrapper.find(".tab-rename-input").setValue("失焦标题");
+    await wrapper.find(".tab-rename-input").trigger("blur");
+    await settle();
+
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll(".editor-tab")
+        .some((w) => w.text().includes("失焦标题")),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("输入全空白按 Enter：原标题不变", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.find(".editor-tab-label").trigger("dblclick");
+    await wrapper.find(".tab-rename-input").setValue("   ");
+    await wrapper.find(".tab-rename-input").trigger("keydown.enter");
+    await settle();
+
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll(".editor-tab")
+        .some((w) => w.text().includes("cmd")),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("按 Esc 取消重命名：标题不变、输入框关闭", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.find(".editor-tab-label").trigger("dblclick");
+    await wrapper.find(".tab-rename-input").setValue("临时标题");
+    await wrapper.find(".tab-rename-input").trigger("keydown.esc");
+    await settle();
+
+    expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll(".editor-tab")
+        .some((w) => w.text().includes("cmd")),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("重命名输入框内右键不弹标签菜单", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await openTerminalTab(root + "\\src");
+    await settle();
+
+    const termEl = wrapper
+      .findAll(".editor-tab")
+      .find((w) => w.text().includes("cmd"))!;
+    await termEl.find(".editor-tab-label").trigger("dblclick");
+    await wrapper
+      .find(".tab-rename-input")
+      .trigger("contextmenu", { clientX: 100, clientY: 100 });
+    expect(wrapper.findAll(".ctx-menu-item").length).toBe(0);
+    wrapper.unmount();
+  });
+
   it("激活 diff 标签：gitRevealTarget 指向该标签的 workspace/path", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") return Promise.resolve([]);
@@ -1452,8 +1675,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
-    expect(tabEls[1].find(".editor-tab-label").text()).toBe("cmd");
-    // 终端标签标题固定为 cmd，无 ToolTip（header 与 label 均无 data-tip）
+    expect(tabEls[1].find(".editor-tab-label").text()).toBe("终端 (cmd)");
+    // 终端标签标题固定为「终端 (cmd)」，无 ToolTip（header 与 label 均无 data-tip）
     expect(tabEls[1].attributes("data-tip")).toBeUndefined();
     expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
     expect(tabEls[1].find(".editor-tab-icon svg").exists()).toBe(true);
@@ -1778,7 +2001,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     // 会话 fixture（sess-1）恒在前，终端居中，文件按打开顺序在后
     const labels = wrapper.findAll(".editor-tab").map((w) => w.text().trim());
     expect(labels[0]).toContain("新建会话");
-    expect(labels[1]).toBe("cmd");
+    expect(labels[1]).toBe("终端 (cmd)");
     expect(labels[2]).toBe("a.txt");
     expect(labels[3]).toBe("b.txt");
     wrapper.unmount();

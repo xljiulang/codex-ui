@@ -167,8 +167,12 @@ export async function openTerminalTab(workspace: string): Promise<void> {
     kind: TabKind.Terminal,
     id,
     workspace,
-    // 终端标签标题跟随所选 Shell（与后端 spawn 读取同一份设置），多开时同名
-    title: store.settings.terminal_shell === "powershell" ? "PowerShell" : "cmd",
+    // 终端标签标题跟随所选 Shell（与后端 spawn 读取同一份设置），多开时同名；
+    // 格式为「终端 (cmd) / 终端 (PowerShell)」，用户可右键「重命名」覆盖
+    title:
+      store.settings.terminal_shell === "powershell"
+        ? "终端 (PowerShell)"
+        : "终端 (cmd)",
     icon: TabIcon.Terminal,
     loading: true,
     error: "",
