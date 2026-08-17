@@ -117,9 +117,9 @@ impl CodexServer {
         }
     }
 
-    /// 记录带会话归属的 RPC 事件；跳过高频流式增量事件（*/delta）避免日志被淹没。
+    /// 记录带会话归属的 RPC 事件；跳过高频流式增量事件（如 textDelta）避免日志被淹没。
     fn log_event(&self, event: &str, method: &str, params: &Value) {
-        if event.ends_with("/delta") {
+        if is_streaming_delta(event) {
             return;
         }
         let mut kv = SessionLog::summarize_params(method, params);
@@ -717,6 +717,16 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// 判断通知是否为流式增量事件：事件名最后一段包含 delta（大小写不敏感），
+/// 覆盖 `/delta`、`textDelta`、`outputDelta` 等变体，避免日志被高频增量刷屏。
+fn is_streaming_delta(event: &str) -> bool {
+    event
+        .rsplit('/')
+        .next()
+        .map(|seg| seg.to_ascii_lowercase().contains("delta"))
+        .unwrap_or(false)
+}
+
 /// codex 配置文件路径：CODEX_HOME（若设置）否则 %USERPROFILE%\.codex\config.toml。
 /// CODEX_HOME 设置时完全重定向，不回退到 USERPROFILE。
 fn codex_config_path() -> Option<PathBuf> {
@@ -941,6 +951,34 @@ mod tests {
 
     fn empty_settings() -> AppSettings {
         AppSettings::default()
+    }
+
+    #[test]
+    fn streaming_delta_filter_matches_delta_variants() {
+        for e in [
+            "item/reasoning/textDelta",
+            "item/commandExecution/outputDelta",
+            "item/agentMessage/delta",
+            "item/agentMessage/Delta",
+        ] {
+            assert!(is_streaming_delta(e), "{e} 应视为流式事件");
+        }
+    }
+
+    #[test]
+    fn streaming_delta_filter_keeps_state_events() {
+        for e in [
+            "turn/started",
+            "turn/completed",
+            "item/started",
+            "item/completed",
+            "thread/tokenUsage/updated",
+            "mcpServer/startupStatus/updated",
+            "remoteControl/status/changed",
+            "server-request",
+        ] {
+            assert!(!is_streaming_delta(e), "{e} 不应视为流式事件");
+        }
     }
 
     fn write_config(cli_path: &Path, dir: &Path) {
