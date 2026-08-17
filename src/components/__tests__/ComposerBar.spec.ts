@@ -868,7 +868,7 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
     const h1 = Number(
       /--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
     );
-    expect(h1).toBeGreaterThanOrEqual(120);
+    expect(h1).toBeGreaterThanOrEqual(100);
 
     await dragTo(50);
     const h2 = Number(
@@ -884,10 +884,10 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
     expect(rowStyle()).toContain("--composer-h: 300px");
   });
 
-  it("向下拖低于最低高度被夹紧到 120px", async () => {
+  it("向下拖低于最低高度被夹紧到 100px", async () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await dragTo(200 + 10000);
-    expect(rowStyle()).toContain("--composer-h: 120px");
+    expect(rowStyle()).toContain("--composer-h: 100px");
   });
 });
 

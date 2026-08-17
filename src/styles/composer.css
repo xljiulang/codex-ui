@@ -71,8 +71,8 @@ body.resizing-composer {
   display: block;
   width: 100%;
   height: var(--composer-h, auto);
-  min-height: 120px;
-  max-height: var(--composer-h, 132px);
+  min-height: max(16vh, 100px);
+  max-height: var(--composer-h, 18vh);
   line-height: 1.55;
   padding: 13px 14px 42px;
   background: var(--composer-bg);
@@ -478,4 +478,3 @@ body.resizing-composer {
     gap: 4px;
   }
 }
-

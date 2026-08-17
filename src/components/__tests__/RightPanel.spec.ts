@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
@@ -229,7 +229,13 @@ describe("RightPanel Tab 栏", () => {
 });
 
 describe("RightPanel 宽度调节", () => {
+  const realInnerWidth = window.innerWidth;
+
   beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", {
+      value: 1024,
+      configurable: true,
+    });
     store.threads = [];
     store.loadingHistory = false;
     store.server.startupWorkspace = rootPath;
@@ -241,14 +247,24 @@ describe("RightPanel 宽度调节", () => {
     __resetGitChangesForTest();
   });
 
-  it("向左拖拽加宽面板，并钳制在半个窗口宽度内", async () => {
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", {
+      value: realInnerWidth,
+      configurable: true,
+    });
+  });
+
+  it("初始宽度按窗口比例 24%（1024 → 246px）；向左拖拽加宽并钳制在半个窗口宽度内", async () => {
     const wrapper = mount(RightPanel);
+    expect(wrapper.find(".right-panel").attributes("style")).toContain(
+      "width: 246px",
+    );
     const handle = wrapper.find(".right-panel-resize-handle");
     await handle.trigger("pointerdown", { clientX: 500 });
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 300 }));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".right-panel").attributes("style")).toContain(
-      "width: 500px",
+      "width: 446px",
     );
 
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: -1000 }));
@@ -261,14 +277,14 @@ describe("RightPanel 宽度调节", () => {
     wrapper.unmount();
   });
 
-  it("向右拖拽不窄于默认宽度 300px", async () => {
+  it("向右拖拽不窄于最小宽度（16% 与 200px 兜底取较大者）", async () => {
     const wrapper = mount(RightPanel);
     const handle = wrapper.find(".right-panel-resize-handle");
     await handle.trigger("pointerdown", { clientX: 100 });
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000 }));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".right-panel").attributes("style")).toContain(
-      "width: 300px",
+      "width: 200px",
     );
 
     window.dispatchEvent(new PointerEvent("pointerup"));

@@ -6,24 +6,39 @@ import ResourceView from "./ResourceView.vue";
 import { store, type PanelTab } from "../composables/useCodex";
 import { ICON_GIT } from "../lib/icons";
 
-/** 右侧面板默认/最小宽度（px） */
-const DEFAULT_PANEL_WIDTH = 300;
+/** 面板初始宽度 = 窗口宽度 × 比例；最小宽度 = 比例值与固定兜底取较大者 */
+const PANEL_WIDTH_RATIO = 0.24;
+const MIN_PANEL_WIDTH_RATIO = 0.16;
+const MIN_PANEL_WIDTH_PX = 200;
 
 /** 激活 Tab：全局 store 状态，新建会话入口可统一切回资源 */
 const activeTab = computed<PanelTab>(() => store.panelTab);
 /** 面板宽度：仅本次运行生效，不持久化 */
-const panelWidth = ref(DEFAULT_PANEL_WIDTH);
+const panelWidth = ref(initialPanelWidth());
 const isDragging = ref(false);
 let resizeStartX = 0;
-let resizeStartW = DEFAULT_PANEL_WIDTH;
+let resizeStartW = initialPanelWidth();
 
 /** Tab 顺序：会话为第一个/默认 tab；供方向键切换使用 */
 const TAB_ORDER = ["history", "resources", "git"] as const;
 
-/** 面板宽度钳制：最小为默认宽度，最大为半个窗口宽度 */
+/** 面板初始宽度：窗口宽度的 24%（1280 下约 307px，保持现状比例） */
+function initialPanelWidth() {
+  return Math.round(window.innerWidth * PANEL_WIDTH_RATIO);
+}
+
+/** 面板最小宽度：窗口宽度的 16% 与固定兜底 200px 取较大者 */
+function minPanelWidth() {
+  return Math.max(
+    Math.round(window.innerWidth * MIN_PANEL_WIDTH_RATIO),
+    MIN_PANEL_WIDTH_PX,
+  );
+}
+
+/** 面板宽度钳制：最小为比例+兜底，最大为半个窗口宽度 */
 function clampPanelWidth(w: number) {
-  const max = Math.max(DEFAULT_PANEL_WIDTH, Math.floor(window.innerWidth / 2));
-  return Math.min(Math.max(w, DEFAULT_PANEL_WIDTH), max);
+  const max = Math.max(initialPanelWidth(), Math.floor(window.innerWidth / 2));
+  return Math.min(Math.max(w, minPanelWidth()), max);
 }
 
 function startResize(e: PointerEvent) {

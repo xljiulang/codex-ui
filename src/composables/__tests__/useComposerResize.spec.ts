@@ -16,7 +16,7 @@ describe("useComposerResize", () => {
     document.body.classList.remove("resizing-composer");
   });
 
-  it("start → pointermove 更新高度（钳制 120..半窗），pointerup 清理", () => {
+  it("start → pointermove 更新高度（钳制 100..半窗，600 高下 16%=96 兜底 100），pointerup 清理", () => {
     const r = useComposerResize();
     const start = {
       preventDefault: vi.fn(),
@@ -27,13 +27,13 @@ describe("useComposerResize", () => {
     expect(document.body.classList.contains("resizing-composer")).toBe(true);
 
     window.dispatchEvent(pointerEvent(200)); // 上移 100 → 高度 220
-    expect(r.composerHeight.value).toBe(220);
+    expect(r.composerHeight.value).toBe(200);
 
     window.dispatchEvent(pointerEvent(-2000)); // 大幅上移 → 钳制半窗 300
     expect(r.composerHeight.value).toBe(300);
 
-    window.dispatchEvent(pointerEvent(2000)); // 大幅下移 → 钳制最低 120
-    expect(r.composerHeight.value).toBe(120);
+    window.dispatchEvent(pointerEvent(2000)); // 大幅下移 → 钳制最低 100
+    expect(r.composerHeight.value).toBe(100);
 
     window.dispatchEvent(
       new MouseEvent("pointerup") as unknown as PointerEvent,
