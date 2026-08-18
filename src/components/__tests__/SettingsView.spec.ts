@@ -194,13 +194,14 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航中「模型配置」位于「个性化」之后", () => {
+  it("导航顺序：个性化 → 通用设置 → 模型配置", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
       .map((i) => i.text().trim());
     expect(labels.indexOf("个性化")).toBe(0);
-    expect(labels.indexOf("模型配置")).toBe(1);
+    expect(labels.indexOf("通用设置")).toBe(1);
+    expect(labels.indexOf("模型配置")).toBe(2);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -223,7 +224,9 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain("config");
     expect(wrapper.text()).toContain("model_catalog_json");
     expect(wrapper.text()).toContain("AGENTS");
-    expect(wrapper.findAll(".model-config-card").length).toBe(3);
+    expect(
+      wrapper.findAll(".settings-section-model-config .model-config-card").length,
+    ).toBe(3);
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
   });
 
@@ -258,7 +261,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const saveButtons = wrapper.findAll(
-      ".model-config-card .model-config-actions button.primary",
+      ".settings-section-model-config .model-config-card .model-config-actions button.primary",
     );
     expect(saveButtons.map((b) => b.text().trim())).toEqual([
       "保存",
@@ -793,6 +796,379 @@ describe("SettingsView 模型配置", () => {
   });
 });
 
+describe("SettingsView 技能管理 / MCP 管理", () => {
+  const sampleMcpState = {
+    config_path: "C:/apps/codex-ui/.codex/config.toml",
+    servers: [
+      {
+        name: "filesystem",
+        command: "npx",
+        args: ["-y", "mcp-server-filesystem"],
+        env: [{ key: "K1", value: "v1" }],
+        url: "",
+        headers: [],
+        bearer_token_env_var: "",
+      },
+      {
+        name: "remote",
+        command: "",
+        args: [],
+        env: [],
+        url: "https://example.com/mcp",
+        headers: [{ key: "Authorization", value: "Bearer x" }],
+        bearer_token_env_var: "MY_MCP_TOKEN",
+      },
+    ],
+  };
+  const sampleSkillsState = {
+    skills_dir: "C:/apps/codex-ui/.codex/skills",
+    items: [
+      {
+        name: "pdf",
+        path: "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+        description: "读写 PDF 文件",
+      },
+      {
+        name: "csharp-code-rules",
+        path: "C:/apps/codex-ui/.codex/skills/csharp-code-rules/SKILL.md",
+        description: "C# 团队规范",
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    store.toast = "";
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "mcp_servers_read")
+        return Promise.resolve(sampleMcpState);
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          config_path: "C:/apps/codex-ui/.codex/config.toml",
+          config_exists: true,
+          config_content: "",
+          model_catalog_json: "",
+          model_catalog_path: "",
+          model_catalog_exists: false,
+          model_catalog: "",
+          model: "",
+          model_reasoning_effort: "",
+          model_provider: "",
+          preferred_auth_method: "",
+          forced_login_method: "",
+          openai_api_key_present: false,
+          providers: [],
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve({
+          agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
+          exists: true,
+          content: "",
+        });
+      return Promise.resolve(undefined);
+    });
+    mockedSave.mockClear();
+    mockedOpenPathInApp.mockReset();
+    mockedOpenPathInApp.mockResolvedValue(true);
+  });
+
+  it("技能管理渲染本地技能并可打开 SKILL.md", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const nav = wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!;
+    await nav.trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".skill-row");
+    expect(rows.length).toBe(2);
+    expect(rows[0].text()).toContain("pdf");
+    expect(rows[0].text()).toContain("读写 PDF 文件");
+    expect(rows[0].text()).toContain(
+      "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+    );
+    expect(rows[1].text()).toContain("csharp-code-rules");
+    expect(rows[1].text()).toContain("C# 团队规范");
+    await rows[0].find("button.skill-row-main").trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+    );
+  });
+
+  it("技能管理刷新重新拉取 skills_read", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .find(".settings-section-skills .model-config-reload-btn")
+      .trigger("click");
+    await flushPromises();
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before + 1);
+  });
+
+  it("MCP 管理渲染服务器名称与传输类型", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
+    expect(wrapper.text()).toContain("filesystem");
+    expect(wrapper.text()).toContain("remote");
+    expect(
+      wrapper.findAll(".mcp-server-type").map((t) => t.text()),
+    ).toEqual(["stdio", "http"]);
+  });
+
+  it("MCP stdio 添加：args 空格分隔后保存", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 filesystem"]')
+      .setValue("memory");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 npx"]')
+      .setValue("npx");
+    await wrapper
+      .find(".mcp-server-form .mcp-args-input")
+      .setValue("-y mcp-server-memory");
+    await wrapper
+      .findAll(".mcp-server-form button")
+      .find((b) => b.text().includes("添加环境变量"))!
+      .trigger("click");
+    await flushPromises();
+    const envInputs = wrapper.findAll(".mcp-env-row input");
+    await envInputs[0].setValue("API_KEY");
+    await envInputs[1].setValue("sk-123");
+    await wrapper
+      .findAll(".mcp-server-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(3);
+
+    await wrapper
+      .find(".settings-section-mcp .model-config-card")
+      .findAll("button")
+      .find((b) => b.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
+      input: {
+        servers: [
+          {
+            name: "filesystem",
+            command: "npx",
+            args: ["-y", "mcp-server-filesystem"],
+            env: [{ key: "K1", value: "v1" }],
+            url: "",
+            headers: [],
+            bearer_token_env_var: "",
+          },
+          {
+            name: "remote",
+            command: "",
+            args: [],
+            env: [],
+            url: "https://example.com/mcp",
+            headers: [{ key: "Authorization", value: "Bearer x" }],
+            bearer_token_env_var: "MY_MCP_TOKEN",
+          },
+          {
+            name: "memory",
+            command: "npx",
+            args: ["-y", "mcp-server-memory"],
+            env: [{ key: "API_KEY", value: "sk-123" }],
+            url: "",
+            headers: [],
+            bearer_token_env_var: "",
+          },
+        ],
+      },
+    });
+    expect(store.toast).toContain("MCP 配置已保存");
+  });
+
+  it("MCP http 添加：url/请求头/bearer 令牌保存", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper.find("#mcp-form-transport").setValue("http");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 filesystem"]')
+      .setValue("docs");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 https://example.com/mcp"]')
+      .setValue("https://developers.openai.com/mcp");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 MY_MCP_TOKEN"]')
+      .setValue("DOCS_TOKEN");
+    await wrapper
+      .findAll(".mcp-server-form button")
+      .find((b) => b.text().includes("添加请求头"))!
+      .trigger("click");
+    await flushPromises();
+    const headerInputs = wrapper.findAll(".mcp-env-row input");
+    await headerInputs[0].setValue("Authorization");
+    await headerInputs[1].setValue("Bearer sk-docs");
+    await wrapper
+      .findAll(".mcp-server-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .find(".settings-section-mcp .model-config-card")
+      .findAll("button")
+      .find((b) => b.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
+      input: {
+        servers: [
+          {
+            name: "filesystem",
+            command: "npx",
+            args: ["-y", "mcp-server-filesystem"],
+            env: [{ key: "K1", value: "v1" }],
+            url: "",
+            headers: [],
+            bearer_token_env_var: "",
+          },
+          {
+            name: "remote",
+            command: "",
+            args: [],
+            env: [],
+            url: "https://example.com/mcp",
+            headers: [{ key: "Authorization", value: "Bearer x" }],
+            bearer_token_env_var: "MY_MCP_TOKEN",
+          },
+          {
+            name: "docs",
+            command: "",
+            args: [],
+            env: [],
+            url: "https://developers.openai.com/mcp",
+            headers: [{ key: "Authorization", value: "Bearer sk-docs" }],
+            bearer_token_env_var: "DOCS_TOKEN",
+          },
+        ],
+      },
+    });
+  });
+
+  it("MCP 空 command 被拦截", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 filesystem"]')
+      .setValue("x");
+    await wrapper
+      .findAll(".mcp-server-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("请填写 command");
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
+  });
+
+  it("MCP http 空 url 被拦截", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper.find("#mcp-form-transport").setValue("http");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 filesystem"]')
+      .setValue("x");
+    await wrapper
+      .findAll(".mcp-server-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("请填写 url");
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
+  });
+
+  it("MCP 删除服务器后保存移除", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .findAll("button")
+      .find((b) => b.text().trim() === "删除")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(1);
+    await wrapper
+      .find(".settings-section-mcp .model-config-card")
+      .findAll("button")
+      .find((b) => b.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
+      input: {
+        servers: [
+          {
+            name: "remote",
+            command: "",
+            args: [],
+            env: [],
+            url: "https://example.com/mcp",
+            headers: [{ key: "Authorization", value: "Bearer x" }],
+            bearer_token_env_var: "MY_MCP_TOKEN",
+          },
+        ],
+      },
+    });
+  });
+});
+
 describe("SettingsView 设置标签行为", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
@@ -825,35 +1201,45 @@ describe("SettingsView 设置标签行为", () => {
     expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
   });
 
-  it("个性化 / 模型配置 / 通用设置 / 插件管理四个分区均渲染", () => {
+  it("个性化 / 通用设置 / 模型配置 / 技能管理 / MCP管理 / 插件管理六个分区均渲染", () => {
     wrapper = mount(SettingsView);
     const titles = wrapper.findAll(".settings-section-title").map((s) => s.text());
     expect(titles).toContain("个性化");
     expect(titles).toContain("模型配置");
     expect(titles).toContain("通用设置");
+    expect(titles).toContain("技能管理");
+    expect(titles).toContain("MCP 管理");
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染四个分类，默认选中第一个", () => {
+  it("左侧导航渲染六个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "个性化",
-      "模型配置",
       "通用设置",
+      "模型配置",
+      "技能管理",
+      "MCP管理",
       "插件管理",
     ]);
     expect(items[0].classes()).toContain("active");
     expect(items[1].classes()).not.toContain("active");
     expect(items[2].classes()).not.toContain("active");
     expect(items[3].classes()).not.toContain("active");
+    expect(items[4].classes()).not.toContain("active");
+    expect(items[5].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;
     const general = wrapper.find(".settings-section-general").element as HTMLElement;
+    const skills = wrapper.find(".settings-section-skills").element as HTMLElement;
+    const mcp = wrapper.find(".settings-section-mcp").element as HTMLElement;
     const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
     expect(personal.style.display).not.toBe("none");
     expect(general.style.display).toBe("none");
+    expect(skills.style.display).toBe("none");
+    expect(mcp.style.display).toBe("none");
     expect(plugins.style.display).toBe("none");
   });
 

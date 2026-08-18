@@ -627,6 +627,141 @@
   color: var(--text-dim);
 }
 
+/* 技能管理 */
+.skills-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.skill-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.skill-row:last-child {
+  border-bottom: none;
+}
+
+.skill-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill-row-main svg {
+  width: 13px;
+  height: 13px;
+  fill: var(--accent);
+  flex-shrink: 0;
+}
+
+.skill-name {
+  font-size: 13px;
+  color: var(--text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.skill-path {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+}
+
+/* MCP 管理 */
+.mcp-servers-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mcp-server-row:last-child {
+  border-bottom: none;
+}
+
+.mcp-server-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.mcp-server-name {
+  font-size: 13px;
+  color: var(--text-bright);
+  font-family: var(--mono);
+}
+
+.mcp-server-type {
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.mcp-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(var(--overlay-rgb), 0.02);
+}
+
+.mcp-env-block {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mcp-env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcp-env-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-env-row input {
+  flex: 1;
+}
+
 .model-config-warning {
   margin: 0;
   font-size: 12px;

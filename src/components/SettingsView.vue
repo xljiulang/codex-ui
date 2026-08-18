@@ -36,21 +36,29 @@ import {
   ICON_EXTENSION,
   ICON_FILE,
   ICON_FOLDER_OPEN,
-  ICON_MODEL,
+  ICON_BRACES,
+  ICON_MCP,
   ICON_PALETTE,
   ICON_PLUS,
   ICON_REFRESH,
   ICON_RESTART,
   ICON_SAVE,
+  ICON_SKILL,
   ICON_TUNE,
 } from "../lib/icons";
 import { PERMISSION_MODES } from "../lib/permissions";
 import type {
   AppSettings,
   CustomInstructionsState,
+  McpEnvEntry,
+  McpServerInfo,
+  McpServersEdit,
+  McpServersState,
   ModelConfigUiEdit,
   ModelConfigState,
   ModelProviderInfo,
+  SkillsItem,
+  SkillsState,
   TerminalShell,
 } from "../lib/types";
 
@@ -65,8 +73,10 @@ const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSections = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
-  { id: "model-config", label: "模型配置", icon: ICON_MODEL },
   { id: "general", label: "通用设置", icon: ICON_TUNE },
+  { id: "model-config", label: "模型配置", icon: ICON_BRACES },
+  { id: "skills", label: "技能管理", icon: ICON_SKILL },
+  { id: "mcp", label: "MCP管理", icon: ICON_MCP },
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
 ] as const;
 type SettingsSectionId = (typeof settingsSections)[number]["id"];
@@ -77,6 +87,8 @@ onMounted(() => {
   void refreshPlugins();
   void loadModelConfig();
   void loadCustomInstructions();
+  void loadSkills();
+  void loadMcp();
 });
 
 /** 即时保存：任何设置项变更立即持久化（成功静默，失败 toast） */
@@ -586,6 +598,228 @@ async function saveCustomInstructions() {
 
 function openAgentsFile() {
   void openPathInAppOrReveal(agents.agents_path);
+}
+
+// ---------- 技能管理 ----------
+
+const skillsState = reactive({
+  loading: false,
+  items: [] as SkillsItem[],
+});
+
+/** 拉取本地技能列表（skills_read：CODEX_HOME/skills 文件夹） */
+async function loadSkills() {
+  if (skillsState.loading) return;
+  skillsState.loading = true;
+  try {
+    const res = await invoke<SkillsState | null>("skills_read");
+    skillsState.items = res?.items ?? [];
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    skillsState.loading = false;
+  }
+}
+
+function openSkill(s: SkillsItem) {
+  void openPathInAppOrReveal(s.path);
+}
+
+// ---------- MCP 管理 ----------
+
+const mcpState = reactive({
+  loading: false,
+  saving: false,
+  config_path: "",
+  servers: [] as McpServerInfo[],
+});
+
+/** MCP 新增/编辑表单状态（editingIndex < 0 表示新增） */
+const mcpForm = reactive({
+  open: false,
+  editingIndex: -1,
+  /** 传输方式："stdio" | "http" */
+  transport: "stdio" as "stdio" | "http",
+  name: "",
+  command: "",
+  argsText: "",
+  env: [] as McpEnvEntry[],
+  url: "",
+  headers: [] as McpEnvEntry[],
+  bearer_token_env_var: "",
+});
+
+const mcpFormErrors = reactive({
+  name: "",
+  command: "",
+  url: "",
+  env: "",
+});
+
+function clearMcpFormErrors() {
+  mcpFormErrors.name = "";
+  mcpFormErrors.command = "";
+  mcpFormErrors.url = "";
+  mcpFormErrors.env = "";
+}
+
+async function loadMcp() {
+  if (mcpState.loading) return;
+  mcpState.loading = true;
+  try {
+    const res = await invoke<McpServersState | null>("mcp_servers_read");
+    if (res) {
+      mcpState.config_path = res.config_path;
+      mcpState.servers = (res.servers ?? []).map((s) => ({ ...s }));
+    }
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    mcpState.loading = false;
+  }
+}
+
+/** 打开「添加」MCP 服务器表单 */
+function openAddMcp() {
+  mcpForm.open = true;
+  mcpForm.editingIndex = -1;
+  mcpForm.transport = "stdio";
+  mcpForm.name = "";
+  mcpForm.command = "";
+  mcpForm.argsText = "";
+  mcpForm.env = [];
+  mcpForm.url = "";
+  mcpForm.headers = [];
+  mcpForm.bearer_token_env_var = "";
+  clearMcpFormErrors();
+}
+
+/** 打开「编辑」MCP 服务器表单（标识 name 只读） */
+function openEditMcp(index: number) {
+  const s = mcpState.servers[index];
+  if (!s) return;
+  mcpForm.open = true;
+  mcpForm.editingIndex = index;
+  mcpForm.name = s.name;
+  mcpForm.transport = s.url.trim() ? "http" : "stdio";
+  mcpForm.command = s.command;
+  mcpForm.argsText = (s.args ?? []).join(" ");
+  mcpForm.env = (s.env ?? []).map((e) => ({ ...e }));
+  mcpForm.url = s.url ?? "";
+  mcpForm.headers = (s.headers ?? []).map((e) => ({ ...e }));
+  mcpForm.bearer_token_env_var = s.bearer_token_env_var ?? "";
+  clearMcpFormErrors();
+}
+
+function closeMcpForm() {
+  mcpForm.open = false;
+}
+
+function addMcpEnvRow() {
+  mcpForm.env.push({ key: "", value: "" });
+}
+
+function removeMcpEnvRow(index: number) {
+  mcpForm.env.splice(index, 1);
+}
+
+function addMcpHeaderRow() {
+  mcpForm.headers.push({ key: "", value: "" });
+}
+
+function removeMcpHeaderRow(index: number) {
+  mcpForm.headers.splice(index, 1);
+}
+
+/** 提交 MCP 表单：校验后写入本地列表（保存按钮统一落盘） */
+function confirmMcpForm() {
+  clearMcpFormErrors();
+  const name = mcpForm.name.trim();
+  if (!name) {
+    mcpFormErrors.name = "请填写服务器名称";
+    return;
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+    mcpFormErrors.name = "只能包含字母、数字、下划线与连字符";
+    return;
+  }
+  if (mcpForm.editingIndex < 0) {
+    if (mcpState.servers.some((s) => s.name === name)) {
+      mcpFormErrors.name = "服务器名称已存在";
+      return;
+    }
+  }
+  const isHttp = mcpForm.transport === "http";
+  if (isHttp) {
+    if (!mcpForm.url.trim()) {
+      mcpFormErrors.url = "请填写 url";
+      return;
+    }
+    if (!/^https?:\/\//i.test(mcpForm.url.trim())) {
+      mcpFormErrors.url = "url 必须以 http:// 或 https:// 开头";
+      return;
+    }
+  } else if (!mcpForm.command.trim()) {
+    mcpFormErrors.command = "请填写 command";
+    return;
+  }
+  const kvRows = isHttp ? mcpForm.headers : mcpForm.env;
+  const kvLabel = isHttp ? "请求头" : "env";
+  const envKeys = new Set<string>();
+  for (const e of kvRows) {
+    const key = e.key.trim();
+    if (!key) {
+      mcpFormErrors.env = `存在空的 ${kvLabel} 键`;
+      return;
+    }
+    if (envKeys.has(key)) {
+      mcpFormErrors.env = `${kvLabel}键「${key}」重复`;
+      return;
+    }
+    envKeys.add(key);
+  }
+  const args = mcpForm.argsText
+    .split(/\s+/)
+    .map((a) => a.trim())
+    .filter(Boolean);
+  const entry: McpServerInfo = {
+    name,
+    command: isHttp ? "" : mcpForm.command.trim(),
+    args: isHttp ? [] : args,
+    env: isHttp ? [] : mcpForm.env.map((e) => ({ key: e.key.trim(), value: e.value })),
+    url: isHttp ? mcpForm.url.trim() : "",
+    headers: isHttp
+      ? mcpForm.headers.map((e) => ({ key: e.key.trim(), value: e.value }))
+      : [],
+    bearer_token_env_var: isHttp ? mcpForm.bearer_token_env_var.trim() : "",
+  };
+  if (mcpForm.editingIndex < 0) {
+    mcpState.servers.push(entry);
+  } else {
+    mcpState.servers[mcpForm.editingIndex] = entry;
+  }
+  mcpForm.open = false;
+}
+
+/** 删除 MCP 服务器（保存时落盘） */
+function removeMcp(index: number) {
+  mcpState.servers.splice(index, 1);
+}
+
+/** 保存 MCP 配置：整表同步到 config.toml */
+async function saveMcp() {
+  if (mcpState.saving || mcpState.loading) return;
+  mcpState.saving = true;
+  try {
+    const input: McpServersEdit = { servers: mcpState.servers };
+    await invoke("mcp_servers_save", { input });
+    setToast("MCP 配置已保存（重启应用后生效）");
+    await loadMcp();
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    mcpState.saving = false;
+  }
 }
 
 // ---------- 插件管理 ----------
@@ -1315,6 +1549,369 @@ function canInstall(p: PluginCatalogItem): boolean {
               当前使用（自动检测）：{{ store.server.codexPath }}
             </p>
           </div>
+          </div>
+        </section>
+
+        <section
+          v-show="activeSection === 'skills'"
+          class="settings-section settings-section-skills"
+        >
+          <h2 class="settings-section-title">技能管理</h2>
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>已安装技能</h3>
+              <div class="model-config-path">
+                共 {{ skillsState.items.length }} 个
+              </div>
+            </div>
+            <div class="skills-list">
+              <div
+                v-if="skillsState.loading && !skillsState.items.length"
+                class="plugin-empty"
+              >
+                正在加载技能…
+              </div>
+              <div v-else-if="!skillsState.items.length" class="plugin-empty">
+                暂无可用技能
+              </div>
+              <div
+                v-for="s in skillsState.items"
+                :key="s.path"
+                class="skill-row"
+              >
+                <button
+                  type="button"
+                  class="skill-row-main"
+                  title="在编辑器中打开 SKILL.md"
+                  @click="openSkill(s)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_FILE" />
+                  </svg>
+                  <span class="skill-name">{{ s.name }}</span>
+                </button>
+                <p v-if="s.description" class="skill-desc">
+                  {{ s.description }}
+                </p>
+                <div class="skill-path">{{ s.path }}</div>
+              </div>
+            </div>
+            <div class="model-config-actions">
+              <button
+                class="btn model-config-reload-btn"
+                :disabled="skillsState.loading"
+                @click="loadSkills"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_REFRESH" />
+                </svg>
+                刷新
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-show="activeSection === 'mcp'"
+          class="settings-section settings-section-mcp"
+        >
+          <h2 class="settings-section-title">MCP 管理</h2>
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>MCP 服务器</h3>
+              <div class="model-config-path">
+                {{ mcpState.config_path || "正在读取路径…" }}
+              </div>
+            </div>
+            <div class="mcp-servers-list">
+              <div
+                v-if="mcpState.loading && !mcpState.servers.length"
+                class="plugin-empty"
+              >
+                正在加载 MCP 服务器…
+              </div>
+              <div v-else-if="!mcpState.servers.length" class="plugin-empty">
+                还没有 MCP 服务器，点击下方「添加」创建。
+              </div>
+              <div
+                v-for="(s, i) in mcpState.servers"
+                :key="s.name"
+                class="mcp-server-row"
+              >
+                <div class="mcp-server-info">
+                  <span class="mcp-server-name">{{ s.name }}</span>
+                  <span class="mcp-server-type">
+                    {{ s.url.trim() ? "http" : "stdio" }}
+                  </span>
+                </div>
+                <div class="model-provider-actions">
+                  <button
+                    class="btn"
+                    :disabled="mcpState.loading"
+                    @click="openEditMcp(i)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_EDIT" />
+                    </svg>
+                    编辑
+                  </button>
+                  <button
+                    class="btn"
+                    :disabled="mcpState.loading"
+                    @click="removeMcp(i)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                    删除
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="mcpForm.open" class="mcp-server-form">
+              <div
+                class="setting-row"
+                :class="{ 'model-config-row-error': mcpFormErrors.name }"
+              >
+                <label>
+                  名称（name）
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  v-model="mcpForm.name"
+                  type="text"
+                  :disabled="mcpForm.editingIndex >= 0"
+                  placeholder="如 filesystem"
+                  :class="{ 'model-config-input-error': mcpFormErrors.name }"
+                />
+                <p v-if="mcpFormErrors.name" class="model-config-field-error">
+                  {{ mcpFormErrors.name }}
+                </p>
+              </div>
+              <div class="setting-row">
+                <label for="mcp-form-transport">传输方式</label>
+                <select
+                  id="mcp-form-transport"
+                  v-model="mcpForm.transport"
+                >
+                  <option value="stdio">stdio</option>
+                  <option value="http">Streamable HTTP</option>
+                </select>
+              </div>
+              <div
+                v-if="mcpForm.transport === 'stdio'"
+                class="setting-row"
+                :class="{ 'model-config-row-error': mcpFormErrors.command }"
+              >
+                <label>
+                  command
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  v-model="mcpForm.command"
+                  type="text"
+                  placeholder="如 npx"
+                  :class="{ 'model-config-input-error': mcpFormErrors.command }"
+                />
+                <p
+                  v-if="mcpFormErrors.command"
+                  class="model-config-field-error"
+                >
+                  {{ mcpFormErrors.command }}
+                </p>
+              </div>
+              <div
+                v-if="mcpForm.transport === 'stdio'"
+                class="setting-row"
+              >
+                <label>args（空格分隔）</label>
+                <input
+                  class="mcp-args-input"
+                  v-model="mcpForm.argsText"
+                  type="text"
+                  placeholder="如 -y @modelcontextprotocol/server-filesystem ."
+                />
+              </div>
+              <div
+                v-if="mcpForm.transport === 'stdio'"
+                class="setting-row mcp-env-block"
+                :class="{ 'model-config-row-error': mcpFormErrors.env }"
+              >
+                <label>env（环境变量）</label>
+                <div class="mcp-env-rows">
+                  <div
+                    v-for="(e, i) in mcpForm.env"
+                    :key="i"
+                    class="mcp-env-row"
+                  >
+                    <input
+                      v-model="e.key"
+                      type="text"
+                      placeholder="环境变量名"
+                    />
+                    <input
+                      v-model="e.value"
+                      type="text"
+                      placeholder="值"
+                    />
+                    <button
+                      class="btn"
+                      title="删除该环境变量"
+                      @click="removeMcpEnvRow(i)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path :d="ICON_DELETE" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <p v-if="mcpFormErrors.env" class="model-config-field-error">
+                  {{ mcpFormErrors.env }}
+                </p>
+              </div>
+              <div
+                v-if="mcpForm.transport === 'http'"
+                class="setting-row"
+                :class="{ 'model-config-row-error': mcpFormErrors.url }"
+              >
+                <label>
+                  url
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  v-model="mcpForm.url"
+                  type="text"
+                  placeholder="如 https://example.com/mcp"
+                  :class="{ 'model-config-input-error': mcpFormErrors.url }"
+                />
+                <p v-if="mcpFormErrors.url" class="model-config-field-error">
+                  {{ mcpFormErrors.url }}
+                </p>
+              </div>
+              <div
+                v-if="mcpForm.transport === 'http'"
+                class="setting-row"
+              >
+                <label>bearer_token_env_var（Bearer 令牌环境变量名）</label>
+                <input
+                  v-model="mcpForm.bearer_token_env_var"
+                  type="text"
+                  placeholder="如 MY_MCP_TOKEN"
+                />
+              </div>
+              <div
+                v-if="mcpForm.transport === 'http'"
+                class="setting-row mcp-env-block"
+                :class="{ 'model-config-row-error': mcpFormErrors.env }"
+              >
+                <label>http_headers（静态请求头）</label>
+                <div class="mcp-env-rows">
+                  <div
+                    v-for="(h, i) in mcpForm.headers"
+                    :key="i"
+                    class="mcp-env-row"
+                  >
+                    <input
+                      v-model="h.key"
+                      type="text"
+                      placeholder="请求头名"
+                    />
+                    <input
+                      v-model="h.value"
+                      type="text"
+                      placeholder="值"
+                    />
+                    <button
+                      class="btn"
+                      title="删除该请求头"
+                      @click="removeMcpHeaderRow(i)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path :d="ICON_DELETE" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <p v-if="mcpFormErrors.env" class="model-config-field-error">
+                  {{ mcpFormErrors.env }}
+                </p>
+              </div>
+              <div class="model-config-actions">
+                <button
+                  v-if="mcpForm.transport === 'stdio'"
+                  class="btn"
+                  @click="addMcpEnvRow"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                  添加环境变量
+                </button>
+                <button
+                  v-else
+                  class="btn"
+                  @click="addMcpHeaderRow"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                  添加请求头
+                </button>
+                <button class="btn primary" @click="confirmMcpForm">
+                  <svg
+                    v-if="mcpForm.editingIndex < 0"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path :d="ICON_CHECK" />
+                  </svg>
+                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_SAVE" />
+                  </svg>
+                  {{ mcpForm.editingIndex >= 0 ? "保存修改" : "添加" }}
+                </button>
+                <button class="btn" @click="closeMcpForm">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_CLOSE" />
+                  </svg>
+                  取消
+                </button>
+              </div>
+            </div>
+
+            <div class="model-config-actions">
+              <button
+                class="btn primary"
+                :disabled="mcpState.saving || mcpState.loading"
+                @click="saveMcp"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_SAVE" />
+                </svg>
+                {{ mcpState.saving ? "保存中…" : "保存" }}
+              </button>
+              <button
+                class="btn model-config-reload-btn"
+                :disabled="mcpState.loading"
+                @click="loadMcp"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_REFRESH" />
+                </svg>
+                重读
+              </button>
+              <button
+                class="btn mcp-config-add-btn"
+                :disabled="mcpState.loading"
+                @click="openAddMcp"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_PLUS" />
+                </svg>
+                添加
+              </button>
+            </div>
           </div>
         </section>
 

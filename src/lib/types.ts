@@ -224,6 +224,53 @@ export interface CustomInstructionsState {
   content: string;
 }
 
+/** env 表中的单个键值对 */
+export interface McpEnvEntry {
+  key: string;
+  value: string;
+}
+
+/** 单个 MCP 服务器条目（env 用有序键值对，便于 UI 增删） */
+export interface McpServerInfo {
+  /** [mcp_servers.<name>] 表名标识 */
+  name: string;
+  /** STDIO 启动命令（http 服务器为空） */
+  command: string;
+  args: string[];
+  env: McpEnvEntry[];
+  /** Streamable HTTP 地址（stdio 服务器为空） */
+  url: string;
+  /** 静态 HTTP 请求头（http_headers） */
+  headers: McpEnvEntry[];
+  /** Bearer 令牌来源环境变量名 */
+  bearer_token_env_var: string;
+}
+
+/** mcp_servers_read 返回结构（与 Rust 端一致） */
+export interface McpServersState {
+  config_path: string;
+  servers: McpServerInfo[];
+}
+
+/** mcp_servers_save 输入（与 Rust 端一致） */
+export interface McpServersEdit {
+  servers: McpServerInfo[];
+}
+
+/** 单个本地技能条目（skills_read 返回） */
+export interface SkillsItem {
+  name: string;
+  /** SKILL.md 的绝对路径 */
+  path: string;
+  description: string;
+}
+
+/** skills_read 返回结构（与 Rust 端一致） */
+export interface SkillsState {
+  skills_dir: string;
+  items: SkillsItem[];
+}
+
 export interface AuthStatus {
   authMethod?: string | null;
   authToken?: string | null;
