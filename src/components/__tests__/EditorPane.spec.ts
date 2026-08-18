@@ -55,12 +55,14 @@ import { invoke } from "@tauri-apps/api/core";
 import EditorPane from "../EditorPane.vue";
 import {
   __resetEditorTabsForTest,
+  SETTINGS_TAB_ID,
   activateTab,
   activeTabId,
   closeTab,
   openCommitTab,
   openDiffTab,
   openFileTab,
+  openSettingsTab,
   openPreviewTab,
   openTerminalTab,
   tabs,
@@ -229,6 +231,59 @@ describe("EditorPane 左侧多标签编辑区", () => {
     activeTabId.value = "settings";
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("切走再切回保持设置页状态", async () => {
+    const wrapper = mountPane();
+    openSettingsTab();
+    await settle();
+    const modelItem = wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("模型配置"))!;
+    await modelItem.trigger("click");
+    await settle();
+    expect(
+      (wrapper.find(".settings-section-model-config").element as HTMLElement)
+        .style.display,
+    ).not.toBe("none");
+
+    activateTab("sess-1");
+    await settle();
+    activateTab(SETTINGS_TAB_ID);
+    await settle();
+    expect(
+      (wrapper.find(".settings-section-model-config").element as HTMLElement)
+        .style.display,
+    ).not.toBe("none");
+    wrapper.unmount();
+  });
+
+  it("关闭设置标签后重开重置", async () => {
+    const wrapper = mountPane();
+    openSettingsTab();
+    await settle();
+    const modelItem = wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("模型配置"))!;
+    await modelItem.trigger("click");
+    await settle();
+
+    closeTab(SETTINGS_TAB_ID);
+    await settle();
+    expect(wrapper.find(".settings-nav-item").exists()).toBe(false);
+
+    openSettingsTab();
+    await settle();
+    expect(wrapper.find(".settings-nav-item").exists()).toBe(true);
+    expect(
+      (wrapper.find(".settings-section-personalization").element as HTMLElement)
+        .style.display,
+    ).not.toBe("none");
+    expect(
+      (wrapper.find(".settings-section-model-config").element as HTMLElement)
+        .style.display,
+    ).toBe("none");
     wrapper.unmount();
   });
 

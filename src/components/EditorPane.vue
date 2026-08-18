@@ -269,6 +269,11 @@ const hasActiveTab = computed(() =>
   tabs.some((t) => t.kind !== TabKind.Settings),
 );
 
+/** 设置标签是否存在：存在期间常驻挂载（v-show 切换），关闭后销毁重置 */
+const settingsTabOpen = computed(() =>
+  tabs.some((t) => t.id === SETTINGS_TAB_ID),
+);
+
 /** 标签栏末尾「+」：选择新建会话或新建终端，均使用活动标签工作区启动 */
 function openAddMenu(e: MouseEvent) {
   const ws = activeWorkspace.value || workspace.value || "";
@@ -332,7 +337,10 @@ function openAddMenu(e: MouseEvent) {
         :tab="t"
         :active="activeTabId === t.id"
       />
-      <SettingsView v-if="activeTabId === SETTINGS_TAB_ID" />
+      <SettingsView
+        v-if="settingsTabOpen"
+        v-show="activeTabId === SETTINGS_TAB_ID"
+      />
     </div>
     <div v-if="pendingTab" class="text-editor-overlay">
       <div class="text-editor-confirm">

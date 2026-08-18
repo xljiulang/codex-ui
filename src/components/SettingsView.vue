@@ -51,7 +51,7 @@ const settingsSections = [
   { id: "plugins", label: "插件管理" },
 ] as const;
 type SettingsSectionId = (typeof settingsSections)[number]["id"];
-/** 当前选中分类：默认取第一个分类（不依赖具体标签），重开设置页（v-if 重新挂载）重置 */
+/** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
 const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
 
 onMounted(() => {
