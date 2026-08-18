@@ -145,9 +145,34 @@ describe("SettingsView 模型配置", () => {
     config_path: "C:/apps/codex-ui/.codex/config.toml",
     config_exists: true,
     config_content: 'model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n',
+    model_catalog_json: "",
     model_catalog_path: "C:/apps/codex-ui/.codex/models.json",
     model_catalog_exists: true,
     model_catalog: '{\n  "models": []\n}',
+    model: "deepseek-v4-flash",
+    model_reasoning_effort: "high",
+    model_provider: "deepseek",
+    preferred_auth_method: "apikey",
+    forced_login_method: "api",
+    openai_api_key_present: false,
+    providers: [
+      {
+        key: "deepseek",
+        name: "DeepSeek",
+        base_url: "https://api.deepseek.com/",
+        env_key: "",
+        experimental_bearer_token: "sk-test",
+        wire_api: "responses",
+      },
+      {
+        key: "other",
+        name: "Other",
+        base_url: "https://other.example.com/v1",
+        env_key: "OTHER_API_KEY",
+        experimental_bearer_token: "",
+        wire_api: "chat",
+      },
+    ],
   };
   const sampleAgentsState = {
     agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
@@ -188,12 +213,6 @@ describe("SettingsView 模型配置", () => {
         wrapper.findAll("textarea.model-config-textarea")[0]
           .element as HTMLTextAreaElement
       ).value,
-    ).toBe('model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n');
-    expect(
-      (
-        wrapper.findAll("textarea.model-config-textarea")[1]
-          .element as HTMLTextAreaElement
-      ).value,
     ).toBe('{\n  "models": []\n}');
     expect(
       (
@@ -208,7 +227,7 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
   });
 
-  it("文件缺失时读取自动创建：三卡均可编辑并显示标题链接", async () => {
+  it("文件缺失时读取自动创建：卡片均可编辑并显示路径链接", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
         return Promise.resolve({
@@ -225,12 +244,14 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const textareas = wrapper.findAll("textarea.model-config-textarea");
-    // 三个文件已自动创建：config 与 model_catalog_json 均可编辑
+    // 文件已自动创建：model_catalog_json 与 AGENTS 均可编辑
     expect(textareas[0].attributes("disabled")).toBeUndefined();
-    expect(textareas[1].attributes("disabled")).toBeUndefined();
+    expect(
+      wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
+    ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 三个标题链接均可用（model_catalog_json 有值）
-    expect(wrapper.findAll(".model-config-title-link").length).toBe(3);
+    // 三条路径链接均可用（config / model_catalog_json / AGENTS）
+    expect(wrapper.findAll(".model-config-path-link").length).toBe(3);
   });
 
   it("三张卡片保存按钮文案均为「保存」", async () => {
@@ -239,19 +260,11 @@ describe("SettingsView 模型配置", () => {
     const saveButtons = wrapper.findAll(
       ".model-config-card .model-config-actions button.primary",
     );
-    expect(saveButtons.map((b) => b.text().trim())).toEqual(["保存", "保存", "保存"]);
-  });
-
-  it("点 config 卡「保存」调用 model_config_save 并提交整文件内容", async () => {
-    const wrapper = mount(SettingsView);
-    await flushPromises();
-    const cards = wrapper.findAll(".model-config-card");
-    await cards[0].find(".model-config-actions button.primary").trigger("click");
-    await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("model_config_save", {
-      content: 'model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n',
-    });
-    expect(store.toast).toContain("config 已保存");
+    expect(saveButtons.map((b) => b.text().trim())).toEqual([
+      "保存",
+      "保存",
+      "保存",
+    ]);
   });
 
   it("点 model_catalog_json 卡「保存」调用 model_catalog_save", async () => {
@@ -278,10 +291,10 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("点击 config 标题在应用内打开", async () => {
+  it("点击 config 路径链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-title-link");
+    const links = wrapper.findAll(".model-config-path-link");
     expect(links.length).toBe(3);
     await links[0].trigger("click");
     await flushPromises();
@@ -293,10 +306,10 @@ describe("SettingsView 模型配置", () => {
     ).toBe(false);
   });
 
-  it("点击 model_catalog_json 标题在应用内打开", async () => {
+  it("点击 model_catalog_json 路径链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-title-link");
+    const links = wrapper.findAll(".model-config-path-link");
     await links[1].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -304,10 +317,10 @@ describe("SettingsView 模型配置", () => {
     );
   });
 
-  it("点击 AGENTS 标题在应用内打开", async () => {
+  it("点击 AGENTS 路径链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-title-link");
+    const links = wrapper.findAll(".model-config-path-link");
     await links[2].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -319,7 +332,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(false);
     const wrapper = mount(SettingsView);
     await flushPromises();
-    await wrapper.findAll(".model-config-title-link")[0].trigger("click");
+    await wrapper.findAll(".model-config-path-link")[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/config.toml",
@@ -329,11 +342,11 @@ describe("SettingsView 模型配置", () => {
     });
   });
 
-  it("config 刷新不重置 model_catalog_json 文本框", async () => {
+  it("模型提供方重读不重置 model_catalog_json 文本框", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .findAll("textarea.model-config-textarea")[1]
+      .findAll("textarea.model-config-textarea")[0]
       .setValue('{\n  "models": [],\n  "edited": true\n}');
     const readCallsBefore = mockedInvoke.mock.calls.filter(
       ([name]) => name === "model_config_read",
@@ -347,7 +360,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe(readCallsBefore + 1);
     expect(
       (
-        wrapper.findAll("textarea.model-config-textarea")[1]
+        wrapper.findAll("textarea.model-config-textarea")[0]
           .element as HTMLTextAreaElement
       ).value,
     ).toBe('{\n  "models": [],\n  "edited": true\n}');
@@ -378,7 +391,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe(agentsCallsBefore + 1);
   });
 
-  it("保存 config 成功后自动重读 model_catalog_json 卡片", async () => {
+  it("保存模型提供方成功后自动重读 model_catalog_json 卡片", async () => {
     let catalogContent = '{\n  "models": []\n}';
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
@@ -404,10 +417,10 @@ describe("SettingsView 模型配置", () => {
     expect(
       mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
         .length,
-    ).toBe(readCallsBefore + 1);
+    ).toBe(readCallsBefore + 3);
     expect(
       (
-        wrapper.findAll("textarea.model-config-textarea")[1]
+        wrapper.findAll("textarea.model-config-textarea")[0]
           .element as HTMLTextAreaElement
       ).value,
     ).toBe('{\n  "models": [{ "id": "gpt-x" }]\n}');
@@ -429,7 +442,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const textareas = wrapper.findAll("textarea.model-config-textarea");
-    expect(textareas[1].attributes("disabled")).toBeDefined();
+    expect(textareas[0].attributes("disabled")).toBeDefined();
     expect(
       wrapper
         .findAll(".model-config-card")[1]
@@ -437,7 +450,149 @@ describe("SettingsView 模型配置", () => {
         .attributes("disabled"),
     ).toBeDefined();
     expect(wrapper.text()).toContain("config 未配置 model_catalog_json");
-    expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
+    expect(wrapper.findAll(".model-config-path-link").length).toBe(2);
+  });
+
+  it("渲染提供方列表与激活单选", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const rows = wrapper.findAll(".model-provider-row");
+    expect(rows.length).toBe(2);
+    expect(rows[0].text()).toContain("DeepSeek");
+    expect(rows[0].text()).toContain("deepseek");
+    const radios = wrapper.findAll('input[name="model-provider-active"]');
+    expect(radios.length).toBe(2);
+    expect((radios[0].element as HTMLInputElement).checked).toBe(true);
+    expect((radios[1].element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("空列表时添加首个提供方自动激活", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model: "",
+          model_reasoning_effort: "",
+          model_provider: "",
+          providers: [],
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.text()).toContain("还没有提供方");
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".model-provider-form").exists()).toBe(true);
+    await wrapper
+      .find('input[placeholder="如 my-provider"]')
+      .setValue("first");
+    await wrapper
+      .find('input[placeholder="如 DeepSeek"]')
+      .setValue("First");
+    await wrapper
+      .find('input[placeholder="https://api.example.com/v1"]')
+      .setValue("https://first.example.com/v1");
+    await wrapper
+      .find('input[placeholder="如 OPENAI_API_KEY"]')
+      .setValue("MY_API_KEY");
+    await wrapper
+      .findAll(".model-provider-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    const radios = wrapper.findAll('input[name="model-provider-active"]');
+    expect(radios.length).toBe(1);
+    expect((radios[0].element as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("重复提供方标识被拦截", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper.find('input[placeholder="如 my-provider"]').setValue("deepseek");
+    await wrapper
+      .findAll(".model-provider-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("提供方标识已存在");
+    expect(wrapper.findAll(".model-provider-row").length).toBe(2);
+  });
+
+  it("编辑提供方后保存调用 model_config_ui_save", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const rows = wrapper.findAll(".model-provider-row");
+    await rows[1]
+      .findAll("button")
+      .find((b) => b.text().trim() === "编辑")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".model-provider-form").exists()).toBe(true);
+    expect(
+      wrapper.find('input[placeholder="如 my-provider"]').attributes("disabled"),
+    ).toBeDefined();
+    await wrapper
+      .find('input[placeholder="https://api.example.com/v1"]')
+      .setValue("https://new.example.com/v1");
+    await wrapper
+      .findAll(".model-provider-form button")
+      .find((b) => b.text().trim() === "保存修改")!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".model-config-card")[0]
+      .findAll("button")
+      .find((b) => b.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("model_config_ui_save", {
+      input: {
+        model: "deepseek-v4-flash",
+        model_reasoning_effort: "high",
+        model_provider: "deepseek",
+        preferred_auth_method: "apikey",
+        forced_login_method: "api",
+        model_catalog_json: "",
+        providers: [
+          {
+            key: "deepseek",
+            name: "DeepSeek",
+            base_url: "https://api.deepseek.com/",
+            env_key: "",
+            experimental_bearer_token: "sk-test",
+            wire_api: "responses",
+          },
+          {
+            key: "other",
+            name: "Other",
+            base_url: "https://new.example.com/v1",
+            env_key: "OTHER_API_KEY",
+            experimental_bearer_token: "",
+            wire_api: "chat",
+          },
+        ],
+      },
+    });
+    expect(store.toast).toContain("模型配置已保存");
+  });
+
+  it("删除激活项按钮禁用，非激活项可删除", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const rows = wrapper.findAll(".model-provider-row");
+    const delBtns = rows.map(
+      (r) => r.findAll("button").find((b) => b.text().trim() === "删除")!,
+    );
+    expect(delBtns[0].attributes("disabled")).toBeDefined();
+    expect(delBtns[1].attributes("disabled")).toBeUndefined();
+    await delBtns[1].trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".model-provider-row").length).toBe(1);
   });
 
   it("不再展示固定值 UI", async () => {
@@ -445,6 +600,183 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(wrapper.find(".model-config-fixed").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("固定值");
+  });
+
+  it("model 为空时保存被拦截并提示必填", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model: "",
+          model_reasoning_effort: "",
+          preferred_auth_method: "",
+          forced_login_method: "",
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".model-config-card")[0]
+      .findAll("button")
+      .find((b) => b.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("请填写 model");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "model_config_ui_save",
+      expect.anything(),
+    );
+  });
+
+  it("认证方式默认不写入，选 API Key 时写入两个键", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          preferred_auth_method: "",
+          forced_login_method: "",
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const save = () =>
+      wrapper
+        .findAll(".model-config-card")[0]
+        .findAll("button")
+        .find((b) => b.text().includes("保存"))!
+        .trigger("click");
+    await save();
+    await flushPromises();
+    const uiSaveCalls = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "model_config_ui_save",
+    );
+    const last = uiSaveCalls[uiSaveCalls.length - 1]?.[1] as {
+      input: Record<string, unknown>;
+    };
+    expect(last.input.preferred_auth_method).toBe("");
+    expect(last.input.forced_login_method).toBe("");
+
+    await wrapper.find("#model-config-ui-auth").setValue("apikey");
+    await save();
+    await flushPromises();
+    const uiSaveCalls2 = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "model_config_ui_save",
+    );
+    const last2 = uiSaveCalls2[uiSaveCalls2.length - 1]?.[1] as {
+      input: Record<string, unknown>;
+    };
+    expect(last2.input.preferred_auth_method).toBe("apikey");
+    expect(last2.input.forced_login_method).toBe("api");
+  });
+
+  it("model_catalog_json 目标不存在时黄色警告但允许保存", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model_catalog_json: "D:/missing/models.json",
+          preferred_auth_method: "",
+          forced_login_method: "",
+        });
+      if (cmd === "model_catalog_target_exists")
+        return Promise.resolve(false);
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".model-config-card")[0]
+      .findAll("button")
+      .find((b) => b.text().includes("保存"))!
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("model_catalog_target_exists", {
+      value: "D:/missing/models.json",
+    });
+    expect(wrapper.text()).toContain(
+      "model_catalog_json 目标文件将在读取时自动创建",
+    );
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "model_config_ui_save",
+      expect.objectContaining({
+        input: expect.objectContaining({
+          model_catalog_json: "D:/missing/models.json",
+        }),
+      }),
+    );
+  });
+
+  it("检测到全局 OPENAI_API_KEY 时表单可省略认证并显示提示", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model: "",
+          model_reasoning_effort: "",
+          model_provider: "",
+          providers: [],
+          preferred_auth_method: "",
+          forced_login_method: "",
+          openai_api_key_present: true,
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper
+      .find('input[placeholder="如 my-provider"]')
+      .setValue("env-only");
+    await wrapper
+      .find('input[placeholder="如 DeepSeek"]')
+      .setValue("Env Only");
+    await wrapper
+      .find('input[placeholder="https://api.example.com/v1"]')
+      .setValue("https://env.example.com/v1");
+    await flushPromises();
+    // 表单打开期间应看到全局 OPENAI_API_KEY 的绿色提示
+    expect(wrapper.text()).toContain("已检测到全局 OPENAI_API_KEY");
+    await wrapper
+      .findAll(".model-provider-form button")
+      .find((b) => b.text().trim() === "添加")!
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".model-provider-row").length).toBe(1);
+  });
+
+  it("提供方表单缺少名称/base_url/认证时逐字段提示", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    const add = () =>
+      wrapper
+        .findAll(".model-provider-form button")
+        .find((b) => b.text().trim() === "添加")!
+        .trigger("click");
+    await wrapper.find('input[placeholder="如 my-provider"]').setValue("x");
+    await add();
+    expect(wrapper.text()).toContain("请填写提供方名称");
+    await wrapper.find('input[placeholder="如 DeepSeek"]').setValue("X");
+    await add();
+    expect(wrapper.text()).toContain("请填写 base_url");
+    await wrapper
+      .find('input[placeholder="https://api.example.com/v1"]')
+      .setValue("https://x.example.com/v1");
+    await add();
+    expect(wrapper.text()).toContain("请填写 env_key 或 API Key");
+    expect(wrapper.findAll(".model-provider-row").length).toBe(2);
   });
 
   it("读取失败时展示错误提示", async () => {
@@ -1145,6 +1477,18 @@ describe("SettingsView 按钮图标", () => {
     model_catalog_path: "C:/apps/codex-ui/.codex/models.json",
     model_catalog_exists: true,
     model_catalog: '{\n  "models": []\n}',
+    model: "deepseek-v4-flash",
+    model_reasoning_effort: "",
+    model_provider: "deepseek",
+    providers: [
+      {
+        key: "deepseek",
+        name: "DeepSeek",
+        base_url: "https://api.deepseek.com/",
+        experimental_bearer_token: "sk-test",
+        wire_api: "responses",
+      },
+    ],
   };
   const sampleAgentsState = {
     agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
@@ -1202,11 +1546,16 @@ describe("SettingsView 按钮图标", () => {
   it("导航与主要操作按钮均渲染图标且文案不以省略号结尾", async () => {
     wrapper = mount(SettingsView);
     await flushPromises();
+    // 打开提供方表单，覆盖表单按钮（取消/添加）
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
     const selectors = [
       ".settings-nav-item",
-      ".model-config-title-link",
+      ".model-config-path-link",
       ".model-config-actions button.primary",
       ".model-config-reload-btn",
+      ".model-provider-actions .btn",
+      ".model-provider-form .btn",
       "button.codex-pick-btn",
       "button.codex-clear-btn",
       "button.memory-reset-btn",

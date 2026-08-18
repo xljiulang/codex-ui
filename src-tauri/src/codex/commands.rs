@@ -549,11 +549,25 @@ pub fn model_config_save(content: String) -> Result<(), String> {
     model_config::save_config(&content)
 }
 
+/// 保存可视化模型配置（model / model_reasoning_effort / model_provider / 提供方列表）：
+/// 只写可视化覆盖的键与提供方表，其余 TOML 内容保留。
+#[tauri::command]
+pub fn model_config_ui_save(input: model_config::ModelConfigUiEdit) -> Result<(), String> {
+    model_config::save_config_ui(&input)
+}
+
 /// 保存 model_catalog_json 目标文件原文：目标路径从 config.toml 解析，
 /// 内容必须非空且为合法 JSON。
 #[tauri::command]
 pub fn model_catalog_save(content: String) -> Result<(), String> {
     model_config::save_model_catalog(&content)
+}
+
+/// 检查 model_catalog_json 配置值对应的目标文件当前是否存在（不创建文件），
+/// 供设置页保存前给出黄色警告。
+#[tauri::command]
+pub fn model_catalog_target_exists(value: String) -> Result<bool, String> {
+    model_config::catalog_target_exists(&value)
 }
 
 /// 读取自定义指令（CODEX_HOME/AGENTS.md），供设置页「模型配置」Tab 使用。

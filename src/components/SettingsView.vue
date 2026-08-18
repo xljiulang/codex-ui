@@ -28,8 +28,11 @@ import {
 import { openPathInApp } from "../composables/useSessionFs";
 import {
   ICON_CHEVRON_DOWN,
+  ICON_CHECK,
+  ICON_CLOSE,
   ICON_DELETE,
   ICON_DOWNLOAD,
+  ICON_EDIT,
   ICON_EXTENSION,
   ICON_FILE,
   ICON_FOLDER_OPEN,
@@ -45,7 +48,9 @@ import { PERMISSION_MODES } from "../lib/permissions";
 import type {
   AppSettings,
   CustomInstructionsState,
+  ModelConfigUiEdit,
   ModelConfigState,
+  ModelProviderInfo,
   TerminalShell,
 } from "../lib/types";
 
@@ -150,15 +155,60 @@ function selectTheme(id: ThemeId) {
 /** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
   loading: false,
-  savingConfig: false,
   savingCatalog: false,
+  savingProviders: false,
   config_path: "",
   config_exists: false,
   config_content: "",
+  model_catalog_json: "",
   model_catalog_path: "",
   model_catalog_exists: false,
   model_catalog: "",
+  model: "",
+  model_reasoning_effort: "",
+  model_provider: "",
+  preferred_auth_method: "",
+  forced_login_method: "",
+  openai_api_key_present: false,
+  providers: [] as ModelProviderInfo[],
 });
+
+/** 模型提供方卡片校验状态：空串表示无错误；catalogWarning 为黄色警告（不阻断保存） */
+const modelConfigErrors = reactive({
+  model: "",
+  provider: "",
+  catalogWarning: "",
+});
+
+/** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
+const providerForm = reactive({
+  open: false,
+  editingIndex: -1,
+  key: "",
+  name: "",
+  base_url: "",
+  env_key: "",
+  experimental_bearer_token: "",
+  wire_api: "responses",
+});
+
+/** 提供方表单逐字段校验状态 */
+const providerFormErrors = reactive({
+  key: "",
+  name: "",
+  base_url: "",
+  auth: "",
+});
+
+/** 顶层认证方式："" 默认（不写入）/ "apikey" / "chatgpt" */
+const authMethod = ref("");
+
+function clearProviderFormErrors() {
+  providerFormErrors.key = "";
+  providerFormErrors.name = "";
+  providerFormErrors.base_url = "";
+  providerFormErrors.auth = "";
+}
 
 /** 应用 config 卡片字段（刷新该卡片时不影响 model_catalog_json 文本框） */
 function applyConfigCard(res: ModelConfigState) {
@@ -174,12 +224,40 @@ function applyCatalogCard(res: ModelConfigState) {
   modelConfig.model_catalog = res.model_catalog;
 }
 
+/** 应用「模型提供方」卡片字段（刷新该卡片时不影响其它卡片文本框） */
+function applyProvidersCard(res: ModelConfigState) {
+  modelConfig.model = res.model;
+  modelConfig.model_reasoning_effort = res.model_reasoning_effort;
+  modelConfig.model_provider = res.model_provider;
+  modelConfig.preferred_auth_method = res.preferred_auth_method;
+  modelConfig.forced_login_method = res.forced_login_method;
+  modelConfig.model_catalog_json = res.model_catalog_json;
+  modelConfig.openai_api_key_present = res.openai_api_key_present;
+  // 浅拷贝：组件内增删改不污染调用方数组引用（测试/热更新下尤其重要）
+  modelConfig.providers = (res.providers ?? []).map((p) => ({ ...p }));
+  // 由 preferred_auth_method/forced_login_method 推导「认证方式」下拉
+  if (
+    res.preferred_auth_method === "apikey" &&
+    res.forced_login_method === "api"
+  ) {
+    authMethod.value = "apikey";
+  } else if (
+    res.preferred_auth_method === "chatgpt" &&
+    res.forced_login_method === "chatgpt"
+  ) {
+    authMethod.value = "chatgpt";
+  } else {
+    authMethod.value = "";
+  }
+}
+
 async function loadModelConfig() {
   modelConfig.loading = true;
   try {
     const res = await invoke<ModelConfigState>("model_config_read");
     applyConfigCard(res);
     applyCatalogCard(res);
+    applyProvidersCard(res);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -213,19 +291,221 @@ async function refreshCatalog() {
   }
 }
 
-async function saveModelConfig() {
-  if (modelConfig.savingConfig || modelConfig.loading) return;
-  modelConfig.savingConfig = true;
+/** 模型提供方卡片刷新：重新从磁盘读取并只应用该卡片字段 */
+async function refreshProviders() {
+  modelConfig.loading = true;
   try {
-    await invoke("model_config_save", { content: modelConfig.config_content });
-    modelConfig.config_exists = true;
-    setToast("config 已保存（重启应用后生效）");
-    // config 中 model_catalog_json 可能已变化：保存成功后自动重读该卡片
+    const res = await invoke<ModelConfigState>("model_config_read");
+    applyProvidersCard(res);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    modelConfig.loading = false;
+  }
+}
+
+/** 打开「添加」提供方表单 */
+function openAddProvider() {
+  providerForm.open = true;
+  providerForm.editingIndex = -1;
+  providerForm.key = "";
+  providerForm.name = "";
+  providerForm.base_url = "";
+  providerForm.env_key = "";
+  providerForm.experimental_bearer_token = "";
+  providerForm.wire_api = "responses";
+  clearProviderFormErrors();
+}
+
+/** 打开「编辑提供方」表单（标识 key 只读） */
+function openEditProvider(index: number) {
+  const p = modelConfig.providers[index];
+  if (!p) return;
+  providerForm.open = true;
+  providerForm.editingIndex = index;
+  providerForm.key = p.key;
+  providerForm.name = p.name;
+  providerForm.base_url = p.base_url;
+  providerForm.env_key = p.env_key;
+  providerForm.experimental_bearer_token = p.experimental_bearer_token;
+  providerForm.wire_api = p.wire_api || "responses";
+  clearProviderFormErrors();
+}
+
+function closeProviderForm() {
+  providerForm.open = false;
+}
+
+/** 提交提供方表单：校验后写入本地列表（保存按钮统一落盘） */
+function confirmProviderForm() {
+  clearProviderFormErrors();
+  const key = providerForm.key.trim();
+  if (!key) {
+    providerFormErrors.key = "请填写提供方标识";
+    return;
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+    providerFormErrors.key = "只能包含字母、数字、下划线与连字符";
+    return;
+  }
+  if (providerForm.editingIndex < 0) {
+    if (modelConfig.providers.some((p) => p.key === key)) {
+      providerFormErrors.key = "提供方标识已存在";
+      return;
+    }
+  }
+  if (!providerForm.name.trim()) {
+    providerFormErrors.name = "请填写提供方名称";
+    return;
+  }
+  if (!providerForm.base_url.trim()) {
+    providerFormErrors.base_url = "请填写 base_url";
+    return;
+  }
+  const hasAuth =
+    !!providerForm.env_key.trim() ||
+    !!providerForm.experimental_bearer_token.trim() ||
+    modelConfig.openai_api_key_present;
+  if (!hasAuth) {
+    providerFormErrors.auth =
+      "请填写 env_key 或 API Key（也可仅设置全局 OPENAI_API_KEY 环境变量）";
+    return;
+  }
+  if (providerForm.editingIndex < 0) {
+    modelConfig.providers.push({
+      key,
+      name: providerForm.name.trim(),
+      base_url: providerForm.base_url.trim(),
+      env_key: providerForm.env_key.trim(),
+      experimental_bearer_token: providerForm.experimental_bearer_token.trim(),
+      wire_api: providerForm.wire_api,
+    });
+    // 第一个提供方自动激活，减少新手配置步骤
+    if (modelConfig.providers.length === 1) {
+      modelConfig.model_provider = key;
+    }
+  } else {
+    const p = modelConfig.providers[providerForm.editingIndex];
+    if (!p) return;
+    p.name = providerForm.name.trim();
+    p.base_url = providerForm.base_url.trim();
+    p.env_key = providerForm.env_key.trim();
+    p.experimental_bearer_token = providerForm.experimental_bearer_token.trim();
+    p.wire_api = providerForm.wire_api;
+  }
+  providerForm.open = false;
+}
+
+/** 删除提供方：激活项禁止删除 */
+function removeProvider(index: number) {
+  const p = modelConfig.providers[index];
+  if (!p) return;
+  if (p.key === modelConfig.model_provider) {
+    setToast("请先切换到其它提供方，再删除当前激活项");
+    return;
+  }
+  modelConfig.providers.splice(index, 1);
+}
+
+/** 校验单个提供方必填字段，返回错误文案（空串表示通过） */
+function providerRowError(p: ModelProviderInfo): string {
+  if (!(p.name ?? "").trim()) return "缺少名称（name）";
+  if (!(p.base_url ?? "").trim()) return "缺少 base_url";
+  if (!(p.wire_api ?? "").trim()) return "缺少 wire_api";
+  if (
+    !(p.env_key ?? "").trim() &&
+    !(p.experimental_bearer_token ?? "").trim() &&
+    !modelConfig.openai_api_key_present
+  ) {
+    return "缺少认证方式（env_key / API Key / 全局 OPENAI_API_KEY）";
+  }
+  return "";
+}
+
+/** 认证方式下拉 → 顶层两个键（默认不写入） */
+function authMethodToEdit(): {
+  preferred_auth_method: string;
+  forced_login_method: string;
+} {
+  if (authMethod.value === "apikey") {
+    return { preferred_auth_method: "apikey", forced_login_method: "api" };
+  }
+  if (authMethod.value === "chatgpt") {
+    return {
+      preferred_auth_method: "chatgpt",
+      forced_login_method: "chatgpt",
+    };
+  }
+  return { preferred_auth_method: "", forced_login_method: "" };
+}
+
+/** 保存可视化模型配置：整状态同步，其余 TOML 内容由后端保留 */
+async function saveProviders() {
+  if (modelConfig.savingProviders || modelConfig.loading) return;
+  modelConfigErrors.model = "";
+  modelConfigErrors.provider = "";
+  modelConfigErrors.catalogWarning = "";
+  let blocked = false;
+  if (!modelConfig.model.trim()) {
+    modelConfigErrors.model = "请填写 model（模型名称）";
+    blocked = true;
+  }
+  if (modelConfig.providers.length > 0 && !modelConfig.model_provider.trim()) {
+    modelConfigErrors.provider = "请选择一个模型提供方";
+    blocked = true;
+  }
+  for (const p of modelConfig.providers) {
+    const err = providerRowError(p);
+    if (err) {
+      setToast(`提供方「${p.key}」${err}`);
+      blocked = true;
+    }
+  }
+  if (blocked) return;
+
+  // model_catalog_json 目标文件存在性检查：不存在给出黄色警告，但允许保存
+  let catalogExists = true;
+  const catalogValue = modelConfig.model_catalog_json.trim();
+  if (catalogValue) {
+    try {
+      catalogExists = await invoke<boolean>("model_catalog_target_exists", {
+        value: catalogValue,
+      });
+    } catch (e) {
+      setToast(toastError(e));
+    }
+  }
+  if (!catalogExists) {
+    modelConfigErrors.catalogWarning =
+      "model_catalog_json 目标文件不存在，保存后将在读取时自动创建（空模型目录）";
+  }
+
+  modelConfig.savingProviders = true;
+  try {
+    const auth = authMethodToEdit();
+    const input: ModelConfigUiEdit = {
+      model: modelConfig.model.trim(),
+      model_reasoning_effort: modelConfig.model_reasoning_effort.trim(),
+      model_provider: modelConfig.model_provider,
+      preferred_auth_method: auth.preferred_auth_method,
+      forced_login_method: auth.forced_login_method,
+      model_catalog_json: catalogValue,
+      providers: modelConfig.providers,
+    };
+    await invoke("model_config_ui_save", { input });
+    setToast("模型配置已保存（重启应用后生效）");
+    if (!catalogExists) {
+      modelConfigErrors.catalogWarning =
+        "已保存；model_catalog_json 目标文件将在读取时自动创建";
+    }
+    // config 内容已变化：重读提供方、原始 config 与 model_catalog_json 卡片
+    await refreshProviders();
+    await refreshModelConfig();
     await refreshCatalog();
   } catch (e) {
     setToast(toastError(e));
   } finally {
-    modelConfig.savingConfig = false;
+    modelConfig.savingProviders = false;
   }
 }
 
@@ -512,80 +792,341 @@ function canInstall(p: PluginCatalogItem): boolean {
 
           <div class="model-config-card">
             <div class="model-config-card-head">
-              <h3>
+              <h3>模型提供方</h3>
+              <div class="model-config-path">
                 <button
-                  v-if="modelConfig.config_path && modelConfig.config_exists"
+                  v-if="modelConfig.config_path"
                   type="button"
-                  class="model-config-title-link"
-                  title="在编辑器中打开文件"
+                  class="model-config-path-link"
+                  title="在编辑器中打开 config.toml"
                   @click="openModelConfigFile"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_FILE" />
                   </svg>
-                  config
+                  {{ modelConfig.config_path }}
                 </button>
-                <template v-else>config</template>
-              </h3>
-              <div class="model-config-path">
-                {{ modelConfig.config_path || "正在读取路径…" }}
-                <span v-if="modelConfig.config_path && !modelConfig.config_exists" class="model-config-missing">
-                  （文件不存在，保存时将新建）
-                </span>
+                <template v-else>正在读取路径…</template>
               </div>
             </div>
-            <textarea
-              v-model="modelConfig.config_content"
-              class="model-config-textarea"
-              :disabled="modelConfig.loading"
-              placeholder="在此编辑 config.toml 文件内容"
-              spellcheck="false"
-            ></textarea>
+
+            <div class="settings">
+              <div
+                class="setting-row"
+                :class="{ 'model-config-row-error': modelConfigErrors.model }"
+              >
+                <label for="model-config-ui-model">
+                  model（模型名称）
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  id="model-config-ui-model"
+                  v-model="modelConfig.model"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                  placeholder="如 deepseek-v4-flash"
+                  :class="{ 'model-config-input-error': modelConfigErrors.model }"
+                />
+                <p
+                  v-if="modelConfigErrors.model"
+                  class="model-config-field-error"
+                >
+                  {{ modelConfigErrors.model }}
+                </p>
+              </div>
+              <div class="setting-row">
+                <label for="model-config-ui-effort">model_reasoning_effort</label>
+                <select
+                  id="model-config-ui-effort"
+                  v-model="modelConfig.model_reasoning_effort"
+                  :disabled="modelConfig.loading"
+                >
+                  <option value="">默认（不写入）</option>
+                  <option value="low">low</option>
+                  <option value="high">high</option>
+                  <option value="max">max</option>
+                </select>
+              </div>
+              <div class="setting-row">
+                <label for="model-config-ui-auth">认证方式</label>
+                <select
+                  id="model-config-ui-auth"
+                  v-model="authMethod"
+                  :disabled="modelConfig.loading"
+                >
+                  <option value="">默认（不写入）</option>
+                  <option value="apikey">API Key</option>
+                  <option value="chatgpt">ChatGPT 登录</option>
+                </select>
+                <p class="model-config-advanced-note">
+                  选「API Key」写入
+                  preferred_auth_method="apikey" 与 forced_login_method="api"
+                </p>
+              </div>
+              <div class="setting-row">
+                <label for="model-config-ui-catalog">model_catalog_json</label>
+                <input
+                  id="model-config-ui-catalog"
+                  v-model="modelConfig.model_catalog_json"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                  placeholder="如 models.json 或绝对路径"
+                />
+              </div>
+            </div>
+
+            <div class="model-providers-list">
+              <div v-if="modelConfig.providers.length === 0" class="model-providers-empty">
+                还没有提供方，点击下方「添加」创建。
+              </div>
+              <div
+                v-for="(p, i) in modelConfig.providers"
+                :key="p.key"
+                class="model-provider-row"
+                :class="{ 'model-provider-row-error': providerRowError(p) }"
+              >
+                <label class="model-provider-radio">
+                  <input
+                    type="radio"
+                    name="model-provider-active"
+                    :value="p.key"
+                    v-model="modelConfig.model_provider"
+                    :disabled="modelConfig.loading"
+                  />
+                  <span class="model-provider-name">
+                    {{ p.name || p.key }}
+                    <span class="model-config-required" title="必填">*</span>
+                  </span>
+                  <span class="model-provider-key">{{ p.key }}</span>
+                  <span v-if="p.wire_api" class="model-provider-wire">{{ p.wire_api }}</span>
+                </label>
+                <p
+                  v-if="providerRowError(p)"
+                  class="model-config-field-error model-provider-row-msg"
+                >
+                  {{ providerRowError(p) }}
+                </p>
+                <div class="model-provider-actions">
+                  <button
+                    class="btn"
+                    :disabled="modelConfig.loading"
+                    @click="openEditProvider(i)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_EDIT" />
+                    </svg>
+                    编辑
+                  </button>
+                  <button
+                    class="btn"
+                    :disabled="modelConfig.loading || p.key === modelConfig.model_provider"
+                    :title="
+                      p.key === modelConfig.model_provider
+                        ? '先切换到其它提供方再删除'
+                        : ''
+                    "
+                    @click="removeProvider(i)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                    删除
+                  </button>
+                </div>
+              </div>
+              <p
+                v-if="modelConfigErrors.provider"
+                class="model-config-field-error"
+              >
+                {{ modelConfigErrors.provider }}
+              </p>
+            </div>
+
+            <div v-if="providerForm.open" class="model-provider-form">
+              <div
+                class="setting-row"
+                :class="{ 'model-config-row-error': providerFormErrors.key }"
+              >
+                <label>
+                  标识（key）
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  v-model="providerForm.key"
+                  type="text"
+                  :disabled="providerForm.editingIndex >= 0"
+                  placeholder="如 my-provider"
+                  :class="{ 'model-config-input-error': providerFormErrors.key }"
+                />
+                <p
+                  v-if="providerFormErrors.key"
+                  class="model-config-field-error"
+                >
+                  {{ providerFormErrors.key }}
+                </p>
+              </div>
+              <div
+                class="setting-row"
+                :class="{ 'model-config-row-error': providerFormErrors.name }"
+              >
+                <label>
+                  名称（name）
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  v-model="providerForm.name"
+                  type="text"
+                  placeholder="如 DeepSeek"
+                  :class="{ 'model-config-input-error': providerFormErrors.name }"
+                />
+                <p
+                  v-if="providerFormErrors.name"
+                  class="model-config-field-error"
+                >
+                  {{ providerFormErrors.name }}
+                </p>
+              </div>
+              <div
+                class="setting-row"
+                :class="{ 'model-config-row-error': providerFormErrors.base_url }"
+              >
+                <label>
+                  base_url
+                  <span class="model-config-required" title="必填">*</span>
+                </label>
+                <input
+                  v-model="providerForm.base_url"
+                  type="text"
+                  placeholder="https://api.example.com/v1"
+                  :class="{
+                    'model-config-input-error': providerFormErrors.base_url,
+                  }"
+                />
+                <p
+                  v-if="providerFormErrors.base_url"
+                  class="model-config-field-error"
+                >
+                  {{ providerFormErrors.base_url }}
+                </p>
+              </div>
+              <div class="setting-row">
+                <label>env_key（环境变量名）</label>
+                <input
+                  v-model="providerForm.env_key"
+                  type="text"
+                  placeholder="如 OPENAI_API_KEY"
+                />
+              </div>
+              <div
+                class="setting-row"
+                :class="{ 'model-config-row-error': providerFormErrors.auth }"
+              >
+                <label>experimental_bearer_token</label>
+                <input
+                  v-model="providerForm.experimental_bearer_token"
+                  type="password"
+                  placeholder="API Key"
+                />
+                <p
+                  v-if="providerFormErrors.auth"
+                  class="model-config-field-error"
+                >
+                  {{ providerFormErrors.auth }}
+                </p>
+                <p
+                  v-else-if="modelConfig.openai_api_key_present"
+                  class="model-config-auth-hint"
+                >
+                  已检测到全局 OPENAI_API_KEY，env_key / API Key 可留空
+                </p>
+              </div>
+              <div class="setting-row">
+                <label>wire_api</label>
+                <select v-model="providerForm.wire_api">
+                  <option value="responses">responses</option>
+                  <option value="chat">chat</option>
+                </select>
+              </div>
+              <div class="model-config-actions">
+                <button class="btn primary" @click="confirmProviderForm">
+                  <svg
+                    v-if="providerForm.editingIndex < 0"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path :d="ICON_CHECK" />
+                  </svg>
+                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_SAVE" />
+                  </svg>
+                  {{ providerForm.editingIndex >= 0 ? "保存修改" : "添加" }}
+                </button>
+                <button class="btn" @click="closeProviderForm">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_CLOSE" />
+                  </svg>
+                  取消
+                </button>
+              </div>
+            </div>
+
+            <p
+              v-if="modelConfigErrors.catalogWarning"
+              class="model-config-warning"
+            >
+              {{ modelConfigErrors.catalogWarning }}
+            </p>
 
             <div class="model-config-actions">
               <button
                 class="btn primary"
-                :disabled="modelConfig.savingConfig || modelConfig.loading"
-                @click="saveModelConfig"
+                :disabled="modelConfig.savingProviders || modelConfig.loading"
+                @click="saveProviders"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
-                {{ modelConfig.savingConfig ? "保存中…" : "保存" }}
+                {{ modelConfig.savingProviders ? "保存中…" : "保存" }}
               </button>
               <button
                 class="btn model-config-reload-btn"
                 :disabled="modelConfig.loading"
-                @click="refreshModelConfig"
+                @click="refreshProviders"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_REFRESH" />
                 </svg>
                 重读
               </button>
+              <button
+                class="btn model-config-add-btn"
+                :disabled="modelConfig.loading"
+                @click="openAddProvider"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_PLUS" />
+                </svg>
+                添加
+              </button>
             </div>
           </div>
 
           <div class="model-config-card">
             <div class="model-config-card-head">
-              <h3>
-                <button
-                  v-if="modelConfig.model_catalog_path && modelConfig.model_catalog_exists"
-                  type="button"
-                  class="model-config-title-link"
-                  title="在编辑器中打开文件"
-                  @click="openCatalogFile"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
-                  </svg>
-                  model_catalog_json
-                </button>
-                <template v-else>model_catalog_json</template>
-              </h3>
+              <h3>model_catalog_json</h3>
               <div class="model-config-path">
                 <template v-if="modelConfig.model_catalog_path">
-                  {{ modelConfig.model_catalog_path }}
+                  <button
+                    type="button"
+                    class="model-config-path-link"
+                    title="在编辑器中打开文件"
+                    @click="openCatalogFile"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FILE" />
+                    </svg>
+                    {{ modelConfig.model_catalog_path }}
+                  </button>
                   <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
                     （文件不存在，无法编辑）
                   </span>
@@ -632,23 +1173,21 @@ function canInstall(p: PluginCatalogItem): boolean {
 
           <div class="model-config-card">
             <div class="model-config-card-head">
-              <h3>
+              <h3>AGENTS</h3>
+              <div class="model-config-path">
                 <button
-                  v-if="agents.agents_path && agents.exists"
+                  v-if="agents.agents_path"
                   type="button"
-                  class="model-config-title-link"
+                  class="model-config-path-link"
                   title="在编辑器中打开文件"
                   @click="openAgentsFile"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_FILE" />
                   </svg>
-                  AGENTS
+                  {{ agents.agents_path }}
                 </button>
-                <template v-else>AGENTS</template>
-              </h3>
-              <div class="model-config-path">
-                {{ agents.agents_path || "正在读取路径…" }}
+                <template v-else>正在读取路径…</template>
                 <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
                   （文件不存在，保存时将新建）
                 </span>

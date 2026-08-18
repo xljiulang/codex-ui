@@ -181,9 +181,40 @@ export interface ModelConfigState {
   config_path: string;
   config_exists: boolean;
   config_content: string;
+  /** 顶层 model_catalog_json 的原始配置值（未配置时为空字符串） */
+  model_catalog_json: string;
   model_catalog_path: string;
   model_catalog_exists: boolean;
   model_catalog: string;
+  model: string;
+  model_reasoning_effort: string;
+  model_provider: string;
+  preferred_auth_method: string;
+  forced_login_method: string;
+  /** 进程环境是否已设置非空 OPENAI_API_KEY */
+  openai_api_key_present: boolean;
+  providers: ModelProviderInfo[];
+}
+
+/** 单个 model_provider 的可视化字段（标识 key 创建后不可改名） */
+export interface ModelProviderInfo {
+  key: string;
+  name: string;
+  base_url: string;
+  env_key: string;
+  experimental_bearer_token: string;
+  wire_api: string;
+}
+
+/** 可视化模型配置保存载荷（与 Rust 端 ModelConfigUiEdit 一致） */
+export interface ModelConfigUiEdit {
+  model: string;
+  model_reasoning_effort: string;
+  model_provider: string;
+  preferred_auth_method: string;
+  forced_login_method: string;
+  model_catalog_json: string;
+  providers: ModelProviderInfo[];
 }
 
 /** 自定义指令（CODEX_HOME/AGENTS.md）读取结果，字段与 Rust 端一致 */

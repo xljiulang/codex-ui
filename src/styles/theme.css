@@ -51,6 +51,7 @@
   --red: #f0565f;
   --red-rgb: 240, 86, 95;
   --yellow: #e5d6a0;
+  --yellow-rgb: 229, 214, 160;
   --blue: #79b8ff;
   --purple: #c792ea;
   --purple-rgb: 199, 146, 234;
@@ -183,6 +184,7 @@
   --red: #ff6b74;
   --red-rgb: 255, 107, 116;
   --yellow: #f0e0a4;
+  --yellow-rgb: 240, 224, 164;
   --blue: #8fb3ff;
   --purple: #c792ea;
   --purple-rgb: 199, 146, 234;
@@ -313,6 +315,7 @@
   --red: #c23a45;
   --red-rgb: 194, 58, 69;
   --yellow: #a16207;
+  --yellow-rgb: 161, 98, 7;
   --blue: #2563eb;
   --purple: #7c3aed;
   --purple-rgb: 124, 58, 237;
@@ -536,4 +539,3 @@ select option {
   flex: 1;
   min-height: 0;
 }
-
