@@ -9,6 +9,5 @@ pub mod path_util;
 pub mod pdf_export;
 pub mod session_fs;
 pub mod session_log;
-pub mod session_migrate;
 pub mod settings;
 pub mod terminal;

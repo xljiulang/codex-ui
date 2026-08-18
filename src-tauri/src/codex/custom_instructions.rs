@@ -1,6 +1,6 @@
-//! 自定义指令读写：管理 `CODEX_HOME/AGENTS.md`（与 config.toml、models.json 同目录）。
+//! 自定义指令读写：管理 `CODEX_HOME/AGENTS.md`（与 config.toml、model_catalog_json 目标文件同目录）。
 //!
-//! 文件不存在时读取返回空内容；保存自动创建目录与文件，允许保存空内容
+//! 文件不存在时读取会自动创建空文件；保存自动创建目录与文件，允许保存空内容
 //! （Codex 会跳过空指令文件）。
 
 use serde::Serialize;
@@ -28,17 +28,14 @@ pub fn read_state() -> Result<CustomInstructionsState, String> {
 
 fn read_state_in(home: &Path) -> Result<CustomInstructionsState, String> {
     let path = agents_md_path_in(home);
-    let (exists, content) = if path.is_file() {
-        (
-            true,
-            fs::read_to_string(&path).map_err(|e| format!("读取 AGENTS.md 失败: {e}"))?,
-        )
-    } else {
-        (false, String::new())
-    };
+    if !path.is_file() {
+        // 不存在则创建：保证设置页可直接编辑
+        atomic_write(&path, "")?;
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("读取 AGENTS.md 失败: {e}"))?;
     Ok(CustomInstructionsState {
         agents_path: path.to_string_lossy().into_owned(),
-        exists,
+        exists: true,
         content,
     })
 }
@@ -58,12 +55,16 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn missing_file_returns_empty_and_exists_false() {
+    fn missing_file_is_created_empty_and_exists_true() {
         let dir = TempDir::new().unwrap();
         let state = read_state_in(dir.path()).unwrap();
-        assert!(!state.exists);
+        assert!(state.exists);
         assert_eq!(state.content, "");
         assert_eq!(state.agents_path, agents_md_path_in(dir.path()).to_string_lossy());
+        assert_eq!(
+            fs::read_to_string(agents_md_path_in(dir.path())).unwrap(),
+            ""
+        );
     }
 
     #[test]

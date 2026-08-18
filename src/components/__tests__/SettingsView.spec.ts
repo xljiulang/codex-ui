@@ -144,19 +144,10 @@ describe("SettingsView 模型配置", () => {
   const sampleModelConfig = {
     config_path: "C:/apps/codex-ui/.codex/config.toml",
     config_exists: true,
-    model: "deepseek-v4-flash",
-    model_reasoning_effort: "high",
-    model_provider: "codex-ui",
-    forced_login_method: "api",
-    model_catalog_json: "models.json",
-    preferred_auth_method: "apikey",
-    wire_api: "responses",
-    name: "deepseek",
-    base_url: "https://api.deepseek.com/",
-    experimental_bearer_token: "你的 DeepSeek API Key",
-    models_json_path: "C:/apps/codex-ui/.codex/models.json",
-    models_json_exists: true,
-    models_json: '{\n  "models": []\n}',
+    config_content: 'model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n',
+    model_catalog_path: "C:/apps/codex-ui/.codex/models.json",
+    model_catalog_exists: true,
+    model_catalog: '{\n  "models": []\n}',
   };
   const sampleAgentsState = {
     agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
@@ -193,27 +184,14 @@ describe("SettingsView 模型配置", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("model_config_read");
     expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_read");
     expect(
-      (wrapper.find("input#model-config-model").element as HTMLInputElement)
-        .value,
-    ).toBe("deepseek-v4-flash");
-    expect(
       (
-        wrapper.find("input#model-config-effort").element as HTMLInputElement
+        wrapper.findAll("textarea.model-config-textarea")[0]
+          .element as HTMLTextAreaElement
       ).value,
-    ).toBe("high");
+    ).toBe('model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n');
     expect(
       (
-        wrapper.find("input#model-config-base-url").element as HTMLInputElement
-      ).value,
-    ).toBe("https://api.deepseek.com/");
-    expect(
-      (
-        wrapper.find("input#model-config-token").element as HTMLInputElement
-      ).value,
-    ).toBe("你的 DeepSeek API Key");
-    expect(
-      (
-        wrapper.find("textarea.model-config-textarea")
+        wrapper.findAll("textarea.model-config-textarea")[1]
           .element as HTMLTextAreaElement
       ).value,
     ).toBe('{\n  "models": []\n}');
@@ -223,33 +201,36 @@ describe("SettingsView 模型配置", () => {
           .element as HTMLTextAreaElement
       ).value,
     ).toBe("# AGENTS.md\n\nWindows 环境。\n");
+    expect(wrapper.text()).toContain("config");
+    expect(wrapper.text()).toContain("model_catalog_json");
+    expect(wrapper.text()).toContain("AGENTS");
     expect(wrapper.findAll(".model-config-card").length).toBe(3);
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
   });
 
-  it("文件缺失时显示示例值与新建提示", async () => {
+  it("文件缺失时读取自动创建：三卡均可编辑并显示标题链接", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
-          config_exists: false,
-          models_json_exists: false,
-          models_json: "",
+          config_exists: true,
+          config_content: "",
+          model_catalog_exists: true,
+          model_catalog: '{"models":[]}',
         });
       if (cmd === "custom_instructions_read")
-        return Promise.resolve({ ...sampleAgentsState, exists: false, content: "" });
+        return Promise.resolve({ ...sampleAgentsState, exists: true, content: "" });
       return Promise.resolve(undefined);
     });
     const wrapper = mount(SettingsView);
     await flushPromises();
-    expect(
-      (wrapper.find("input#model-config-model").element as HTMLInputElement)
-        .value,
-    ).toBe("deepseek-v4-flash");
-    const missing = wrapper.findAll(".model-config-missing");
-    expect(missing.length).toBe(3);
-    expect(missing[0].text()).toContain("文件不存在，保存时将新建");
-    expect(wrapper.find(".model-config-title-link").exists()).toBe(false);
+    const textareas = wrapper.findAll("textarea.model-config-textarea");
+    // 三个文件已自动创建：config 与 model_catalog_json 均可编辑
+    expect(textareas[0].attributes("disabled")).toBeUndefined();
+    expect(textareas[1].attributes("disabled")).toBeUndefined();
+    expect(wrapper.find(".model-config-missing").exists()).toBe(false);
+    // 三个标题链接均可用（model_catalog_json 有值）
+    expect(wrapper.findAll(".model-config-title-link").length).toBe(3);
   });
 
   it("三张卡片保存按钮文案均为「保存」", async () => {
@@ -261,37 +242,31 @@ describe("SettingsView 模型配置", () => {
     expect(saveButtons.map((b) => b.text().trim())).toEqual(["保存", "保存", "保存"]);
   });
 
-  it("点 config.toml 卡「保存」调用 model_config_save 并提交 5 个可编辑值", async () => {
+  it("点 config 卡「保存」调用 model_config_save 并提交整文件内容", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const cards = wrapper.findAll(".model-config-card");
     await cards[0].find(".model-config-actions button.primary").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("model_config_save", {
-      input: {
-        model: "deepseek-v4-flash",
-        model_reasoning_effort: "high",
-        name: "deepseek",
-        base_url: "https://api.deepseek.com/",
-        experimental_bearer_token: "你的 DeepSeek API Key",
-      },
+      content: 'model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n',
     });
-    expect(store.toast).toContain("config.toml 已保存");
+    expect(store.toast).toContain("config 已保存");
   });
 
-  it("点 models.json 卡「保存」调用 models_json_save", async () => {
+  it("点 model_catalog_json 卡「保存」调用 model_catalog_save", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const cards = wrapper.findAll(".model-config-card");
     await cards[1].find(".model-config-actions button.primary").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("models_json_save", {
+    expect(mockedInvoke).toHaveBeenCalledWith("model_catalog_save", {
       content: '{\n  "models": []\n}',
     });
-    expect(store.toast).toContain("models.json 已保存");
+    expect(store.toast).toContain("model_catalog_json 已保存");
   });
 
-  it("点 AGENTS.md 卡「保存」调用 custom_instructions_save", async () => {
+  it("点 AGENTS 卡「保存」调用 custom_instructions_save", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const cards = wrapper.findAll(".model-config-card");
@@ -300,10 +275,10 @@ describe("SettingsView 模型配置", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_save", {
       content: "# AGENTS.md\n\nWindows 环境。\n",
     });
-    expect(store.toast).toContain("AGENTS.md 已保存");
+    expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("点击 config.toml 标题在应用内打开", async () => {
+  it("点击 config 标题在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(".model-config-title-link");
@@ -318,7 +293,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe(false);
   });
 
-  it("点击 models.json 标题在应用内打开", async () => {
+  it("点击 model_catalog_json 标题在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(".model-config-title-link");
@@ -329,7 +304,7 @@ describe("SettingsView 模型配置", () => {
     );
   });
 
-  it("点击 AGENTS.md 标题在应用内打开", async () => {
+  it("点击 AGENTS 标题在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(".model-config-title-link");
@@ -354,11 +329,11 @@ describe("SettingsView 模型配置", () => {
     });
   });
 
-  it("config.toml 刷新不重置 models.json 文本框", async () => {
+  it("config 刷新不重置 model_catalog_json 文本框", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .find("textarea.model-config-textarea")
+      .findAll("textarea.model-config-textarea")[1]
       .setValue('{\n  "models": [],\n  "edited": true\n}');
     const readCallsBefore = mockedInvoke.mock.calls.filter(
       ([name]) => name === "model_config_read",
@@ -372,13 +347,13 @@ describe("SettingsView 模型配置", () => {
     ).toBe(readCallsBefore + 1);
     expect(
       (
-        wrapper.find("textarea.model-config-textarea")
+        wrapper.findAll("textarea.model-config-textarea")[1]
           .element as HTMLTextAreaElement
       ).value,
     ).toBe('{\n  "models": [],\n  "edited": true\n}');
   });
 
-  it("models.json 与 AGENTS.md 刷新重新从磁盘读取", async () => {
+  it("model_catalog_json 与 AGENTS 刷新重新从磁盘读取", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const readCallsBefore = mockedInvoke.mock.calls.filter(
@@ -401,6 +376,68 @@ describe("SettingsView 模型配置", () => {
         ([name]) => name === "custom_instructions_read",
       ).length,
     ).toBe(agentsCallsBefore + 1);
+  });
+
+  it("保存 config 成功后自动重读 model_catalog_json 卡片", async () => {
+    let catalogContent = '{\n  "models": []\n}';
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model_catalog: catalogContent,
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const readCallsBefore = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "model_config_read",
+    ).length;
+    catalogContent = '{\n  "models": [{ "id": "gpt-x" }]\n}';
+    await wrapper
+      .findAll(".model-config-card")[0]
+      .find(".model-config-actions button.primary")
+      .trigger("click");
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
+        .length,
+    ).toBe(readCallsBefore + 1);
+    expect(
+      (
+        wrapper.findAll("textarea.model-config-textarea")[1]
+          .element as HTMLTextAreaElement
+      ).value,
+    ).toBe('{\n  "models": [{ "id": "gpt-x" }]\n}');
+  });
+
+  it("model_catalog_json 未配置时禁用编辑", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model_catalog_path: "",
+          model_catalog_exists: false,
+          model_catalog: "",
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const textareas = wrapper.findAll("textarea.model-config-textarea");
+    expect(textareas[1].attributes("disabled")).toBeDefined();
+    expect(
+      wrapper
+        .findAll(".model-config-card")[1]
+        .find(".model-config-actions button.primary")
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(wrapper.text()).toContain("config 未配置 model_catalog_json");
+    expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
   });
 
   it("不再展示固定值 UI", async () => {
@@ -1104,19 +1141,10 @@ describe("SettingsView 按钮图标", () => {
   const sampleModelConfig = {
     config_path: "C:/apps/codex-ui/.codex/config.toml",
     config_exists: true,
-    model: "deepseek-v4-flash",
-    model_reasoning_effort: "high",
-    model_provider: "codex-ui",
-    forced_login_method: "api",
-    model_catalog_json: "models.json",
-    preferred_auth_method: "apikey",
-    wire_api: "responses",
-    name: "deepseek",
-    base_url: "https://api.deepseek.com/",
-    experimental_bearer_token: "你的 DeepSeek API Key",
-    models_json_path: "C:/apps/codex-ui/.codex/models.json",
-    models_json_exists: true,
-    models_json: '{\n  "models": []\n}',
+    config_content: 'model = "deepseek-v4-flash"\n',
+    model_catalog_path: "C:/apps/codex-ui/.codex/models.json",
+    model_catalog_exists: true,
+    model_catalog: '{\n  "models": []\n}',
   };
   const sampleAgentsState = {
     agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",

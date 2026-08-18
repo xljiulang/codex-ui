@@ -536,22 +536,24 @@ pub fn settings_set(app: AppHandle, settings: AppSettings) -> Result<(), String>
     settings::save(&dir, &settings)
 }
 
-/// 读取模型配置（CODEX_HOME/config.toml 与 models.json），供设置页「模型配置」Tab 使用。
+/// 读取模型配置（CODEX_HOME/config.toml 与 model_catalog_json 目标文件），
+/// 供设置页「模型配置」Tab 使用。
 #[tauri::command]
 pub fn model_config_read() -> Result<model_config::ModelConfigState, String> {
     model_config::read_state()
 }
 
-/// 保存 config.toml：只更新受管键（5 个可编辑值 + 5 个固定值），其余内容保留。
+/// 保存 config.toml 整文件：内容必须为合法 TOML，原文写入，不注入受管键。
 #[tauri::command]
-pub fn model_config_save(input: model_config::ModelConfigEdit) -> Result<(), String> {
-    model_config::save_config(&input)
+pub fn model_config_save(content: String) -> Result<(), String> {
+    model_config::save_config(&content)
 }
 
-/// 保存 models.json 原文：内容必须非空且为合法 JSON。
+/// 保存 model_catalog_json 目标文件原文：目标路径从 config.toml 解析，
+/// 内容必须非空且为合法 JSON。
 #[tauri::command]
-pub fn models_json_save(content: String) -> Result<(), String> {
-    model_config::save_models_json(&content)
+pub fn model_catalog_save(content: String) -> Result<(), String> {
+    model_config::save_model_catalog(&content)
 }
 
 /// 读取自定义指令（CODEX_HOME/AGENTS.md），供设置页「模型配置」Tab 使用。

@@ -826,7 +826,8 @@ fn bundled_codex_exe_in(dir: &Path) -> Option<PathBuf> {
 
 /// 为 codex.exe 子进程设置启动环境变量：
 /// - PATH 前插应用自身目录的 bin（bin 存在时），让 codex 能调用其中的 CLI 工具；
-/// - CODEX_HOME 指向应用自身目录下的 .codex 文件夹。
+/// - 不显式设置 CODEX_HOME：子进程继承 codex-ui 的环境变量，未设置时 codex
+///   默认使用 `%USERPROFILE%\.codex`（与设置页模型配置目录一致）。
 pub fn apply_codex_env(cmd: &mut std::process::Command) {
     if let Some(dir) = app_exe_dir() {
         apply_codex_env_in(cmd, &dir);
@@ -851,7 +852,6 @@ fn apply_codex_env_in(cmd: &mut std::process::Command, app_dir: &Path) {
     if let Some(joined) = prepend_bin_path(&existing, app_dir) {
         cmd.env("PATH", joined);
     }
-    cmd.env("CODEX_HOME", app_dir.join(".codex"));
 }
 
 /// 官方安装：glob %LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe，按修改时间取最新
@@ -1062,10 +1062,10 @@ mod tests {
     }
 
     #[test]
-    fn apply_codex_env_in_prepends_bin_and_sets_codex_home() {
+    fn apply_codex_env_in_prepends_bin_only() {
         use std::ffi::OsStr;
 
-        // bin 存在：PATH 前插 bin 目录，且保留原 PATH；CODEX_HOME 指向 app/.codex
+        // bin 存在：PATH 前插 bin 目录，且保留原 PATH；不设置 CODEX_HOME
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
         let old = tmp.path().join("old").join("bin").to_string_lossy().into_owned();
@@ -1085,14 +1085,13 @@ mod tests {
             assert_eq!(parts.first().unwrap(), &tmp.path().join("bin"));
             assert!(parts.contains(&tmp.path().join("old").join("bin")));
 
-            let home = envs
-                .iter()
-                .find_map(|(k, v)| (k == OsStr::new("CODEX_HOME")).then(|| v.clone().unwrap()))
-                .unwrap();
-            assert_eq!(home, tmp.path().join(".codex"));
+            assert!(
+                envs.iter().all(|(k, _)| k != OsStr::new("CODEX_HOME")),
+                "不应设置 CODEX_HOME"
+            );
         });
 
-        // bin 缺失：PATH 不改写，但 CODEX_HOME 仍设置
+        // bin 缺失：PATH 不改写，也不设置 CODEX_HOME
         let tmp2 = tempfile::tempdir().unwrap();
         let dir2_s = tmp2.path().to_string_lossy().into_owned();
         with_envs(&[("PATH", Some(&dir2_s))], || {
@@ -1107,11 +1106,10 @@ mod tests {
                 envs.iter().all(|(k, _)| k != OsStr::new("PATH")),
                 "bin 缺失时不应改写 PATH"
             );
-            let home = envs
-                .iter()
-                .find_map(|(k, v)| (k == OsStr::new("CODEX_HOME")).then(|| v.clone().unwrap()))
-                .unwrap();
-            assert_eq!(home, tmp2.path().join(".codex"));
+            assert!(
+                envs.iter().all(|(k, _)| k != OsStr::new("CODEX_HOME")),
+                "不应设置 CODEX_HOME"
+            );
         });
     }
 

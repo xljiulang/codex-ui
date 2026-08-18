@@ -147,39 +147,31 @@ function selectTheme(id: ThemeId) {
 
 // ---------- 模型配置 ----------
 
-/** config.toml / models.json 表单状态（字段与 Rust 端 model_config_read 返回一致） */
+/** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
   loading: false,
   savingConfig: false,
-  savingModelsJson: false,
+  savingCatalog: false,
   config_path: "",
   config_exists: false,
-  model: "",
-  model_reasoning_effort: "",
-  name: "",
-  base_url: "",
-  experimental_bearer_token: "",
-  models_json_path: "",
-  models_json_exists: false,
-  models_json: "",
+  config_content: "",
+  model_catalog_path: "",
+  model_catalog_exists: false,
+  model_catalog: "",
 });
 
-/** 应用 config.toml 卡片字段（刷新该卡片时不影响 models.json 文本框） */
+/** 应用 config 卡片字段（刷新该卡片时不影响 model_catalog_json 文本框） */
 function applyConfigCard(res: ModelConfigState) {
   modelConfig.config_path = res.config_path;
   modelConfig.config_exists = res.config_exists;
-  modelConfig.model = res.model;
-  modelConfig.model_reasoning_effort = res.model_reasoning_effort;
-  modelConfig.name = res.name;
-  modelConfig.base_url = res.base_url;
-  modelConfig.experimental_bearer_token = res.experimental_bearer_token;
+  modelConfig.config_content = res.config_content;
 }
 
-/** 应用 models.json 卡片字段 */
-function applyModelsJsonCard(res: ModelConfigState) {
-  modelConfig.models_json_path = res.models_json_path;
-  modelConfig.models_json_exists = res.models_json_exists;
-  modelConfig.models_json = res.models_json;
+/** 应用 model_catalog_json 卡片字段 */
+function applyCatalogCard(res: ModelConfigState) {
+  modelConfig.model_catalog_path = res.model_catalog_path;
+  modelConfig.model_catalog_exists = res.model_catalog_exists;
+  modelConfig.model_catalog = res.model_catalog;
 }
 
 async function loadModelConfig() {
@@ -187,7 +179,7 @@ async function loadModelConfig() {
   try {
     const res = await invoke<ModelConfigState>("model_config_read");
     applyConfigCard(res);
-    applyModelsJsonCard(res);
+    applyCatalogCard(res);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -195,7 +187,7 @@ async function loadModelConfig() {
   }
 }
 
-/** config.toml 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
+/** config 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
 async function refreshModelConfig() {
   modelConfig.loading = true;
   try {
@@ -208,12 +200,12 @@ async function refreshModelConfig() {
   }
 }
 
-/** models.json 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
-async function refreshModelsJson() {
+/** model_catalog_json 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
+async function refreshCatalog() {
   modelConfig.loading = true;
   try {
     const res = await invoke<ModelConfigState>("model_config_read");
-    applyModelsJsonCard(res);
+    applyCatalogCard(res);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -225,17 +217,11 @@ async function saveModelConfig() {
   if (modelConfig.savingConfig || modelConfig.loading) return;
   modelConfig.savingConfig = true;
   try {
-    await invoke("model_config_save", {
-      input: {
-        model: modelConfig.model,
-        model_reasoning_effort: modelConfig.model_reasoning_effort,
-        name: modelConfig.name,
-        base_url: modelConfig.base_url,
-        experimental_bearer_token: modelConfig.experimental_bearer_token,
-      },
-    });
+    await invoke("model_config_save", { content: modelConfig.config_content });
     modelConfig.config_exists = true;
-    setToast("config.toml 已保存（重启应用后生效）");
+    setToast("config 已保存（重启应用后生效）");
+    // config 中 model_catalog_json 可能已变化：保存成功后自动重读该卡片
+    await refreshCatalog();
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -243,17 +229,17 @@ async function saveModelConfig() {
   }
 }
 
-async function saveModelsJson() {
-  if (modelConfig.savingModelsJson || modelConfig.loading) return;
-  modelConfig.savingModelsJson = true;
+async function saveCatalog() {
+  if (modelConfig.savingCatalog || modelConfig.loading) return;
+  modelConfig.savingCatalog = true;
   try {
-    await invoke("models_json_save", { content: modelConfig.models_json });
-    modelConfig.models_json_exists = true;
-    setToast("models.json 已保存");
+    await invoke("model_catalog_save", { content: modelConfig.model_catalog });
+    modelConfig.model_catalog_exists = true;
+    setToast("model_catalog_json 已保存");
   } catch (e) {
     setToast(toastError(e));
   } finally {
-    modelConfig.savingModelsJson = false;
+    modelConfig.savingCatalog = false;
   }
 }
 
@@ -273,8 +259,8 @@ function openModelConfigFile() {
   void openPathInAppOrReveal(modelConfig.config_path);
 }
 
-function openModelsJsonFile() {
-  void openPathInAppOrReveal(modelConfig.models_json_path);
+function openCatalogFile() {
+  void openPathInAppOrReveal(modelConfig.model_catalog_path);
 }
 
 // ---------- AGENTS.md 自定义指令 ----------
@@ -310,7 +296,7 @@ async function saveCustomInstructions() {
   try {
     await invoke("custom_instructions_save", { content: agents.content });
     agents.exists = true;
-    setToast("AGENTS.md 已保存（新会话生效）");
+    setToast("AGENTS 已保存（新会话生效）");
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -537,9 +523,9 @@ function canInstall(p: PluginCatalogItem): boolean {
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_FILE" />
                   </svg>
-                  config.toml
+                  config
                 </button>
-                <template v-else>config.toml</template>
+                <template v-else>config</template>
               </h3>
               <div class="model-config-path">
                 {{ modelConfig.config_path || "正在读取路径…" }}
@@ -548,58 +534,13 @@ function canInstall(p: PluginCatalogItem): boolean {
                 </span>
               </div>
             </div>
-
-            <div class="settings">
-              <div class="setting-row">
-                <label for="model-config-model">model</label>
-                <input
-                  id="model-config-model"
-                  v-model="modelConfig.model"
-                  type="text"
-                  :disabled="modelConfig.loading"
-                  placeholder="如 deepseek-v4-flash"
-                />
-              </div>
-              <div class="setting-row">
-                <label for="model-config-effort">model_reasoning_effort</label>
-                <input
-                  id="model-config-effort"
-                  v-model="modelConfig.model_reasoning_effort"
-                  type="text"
-                  :disabled="modelConfig.loading"
-                  placeholder="low / high / max"
-                />
-              </div>
-              <div class="setting-row">
-                <label for="model-config-provider-name">name（模型提供方名称）</label>
-                <input
-                  id="model-config-provider-name"
-                  v-model="modelConfig.name"
-                  type="text"
-                  :disabled="modelConfig.loading"
-                />
-              </div>
-              <div class="setting-row">
-                <label for="model-config-base-url">base_url</label>
-                <input
-                  id="model-config-base-url"
-                  v-model="modelConfig.base_url"
-                  type="text"
-                  :disabled="modelConfig.loading"
-                  placeholder="https://api.deepseek.com/"
-                />
-              </div>
-              <div class="setting-row">
-                <label for="model-config-token">experimental_bearer_token</label>
-                <input
-                  id="model-config-token"
-                  v-model="modelConfig.experimental_bearer_token"
-                  type="text"
-                  :disabled="modelConfig.loading"
-                  placeholder="你的 DeepSeek API Key"
-                />
-              </div>
-            </div>
+            <textarea
+              v-model="modelConfig.config_content"
+              class="model-config-textarea"
+              :disabled="modelConfig.loading"
+              placeholder="在此编辑 config.toml 文件内容"
+              spellcheck="false"
+            ></textarea>
 
             <div class="model-config-actions">
               <button
@@ -629,48 +570,57 @@ function canInstall(p: PluginCatalogItem): boolean {
             <div class="model-config-card-head">
               <h3>
                 <button
-                  v-if="modelConfig.models_json_path && modelConfig.models_json_exists"
+                  v-if="modelConfig.model_catalog_path && modelConfig.model_catalog_exists"
                   type="button"
                   class="model-config-title-link"
                   title="在编辑器中打开文件"
-                  @click="openModelsJsonFile"
+                  @click="openCatalogFile"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_FILE" />
                   </svg>
-                  models.json
+                  model_catalog_json
                 </button>
-                <template v-else>models.json</template>
+                <template v-else>model_catalog_json</template>
               </h3>
               <div class="model-config-path">
-                {{ modelConfig.models_json_path || "正在读取路径…" }}
-                <span v-if="modelConfig.models_json_path && !modelConfig.models_json_exists" class="model-config-missing">
-                  （文件不存在，保存时将新建）
-                </span>
+                <template v-if="modelConfig.model_catalog_path">
+                  {{ modelConfig.model_catalog_path }}
+                  <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
+                    （文件不存在，无法编辑）
+                  </span>
+                </template>
+                <template v-else>
+                  {{ modelConfig.config_path ? "（config 未配置 model_catalog_json）" : "正在读取路径…" }}
+                </template>
               </div>
             </div>
             <textarea
-              v-model="modelConfig.models_json"
+              v-model="modelConfig.model_catalog"
               class="model-config-textarea"
-              :disabled="modelConfig.loading"
-              placeholder="在此编辑 models.json 文件内容（必须是合法 JSON）"
+              :disabled="modelConfig.loading || !modelConfig.model_catalog_exists"
+              placeholder="在此编辑 model_catalog_json 目标文件内容（必须是合法 JSON）"
               spellcheck="false"
             ></textarea>
             <div class="model-config-actions">
               <button
                 class="btn primary"
-                :disabled="modelConfig.savingModelsJson || modelConfig.loading"
-                @click="saveModelsJson"
+                :disabled="
+                  modelConfig.savingCatalog ||
+                  modelConfig.loading ||
+                  !modelConfig.model_catalog_exists
+                "
+                @click="saveCatalog"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
-                {{ modelConfig.savingModelsJson ? "保存中…" : "保存" }}
+                {{ modelConfig.savingCatalog ? "保存中…" : "保存" }}
               </button>
               <button
                 class="btn model-config-reload-btn"
                 :disabled="modelConfig.loading"
-                @click="refreshModelsJson"
+                @click="refreshCatalog"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_REFRESH" />
@@ -693,9 +643,9 @@ function canInstall(p: PluginCatalogItem): boolean {
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_FILE" />
                   </svg>
-                  AGENTS.md
+                  AGENTS
                 </button>
-                <template v-else>AGENTS.md</template>
+                <template v-else>AGENTS</template>
               </h3>
               <div class="model-config-path">
                 {{ agents.agents_path || "正在读取路径…" }}
@@ -708,7 +658,7 @@ function canInstall(p: PluginCatalogItem): boolean {
               v-model="agents.content"
               class="custom-instructions-textarea"
               :disabled="agents.loading"
-              placeholder="在此编辑 AGENTS.md 内容（Codex 全局自定义指令）"
+              placeholder="在此编辑 AGENTS 内容（Codex 全局自定义指令）"
               spellcheck="false"
             ></textarea>
             <div class="model-config-actions">

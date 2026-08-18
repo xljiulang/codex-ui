@@ -67,12 +67,19 @@ fn rel_path_of(root: &Path, path: &Path) -> String {
     path_s.replace('\\', "/")
 }
 
-/// target 必须位于 root 内（规范化后，Windows 大小写不敏感）
+/// target 必须位于 root 内（规范化后，Windows 大小写不敏感）。
+/// 相对路径按 root 解析（工作区外文件以父目录为根、传文件名的场景），
+/// 绝对路径原样使用。
 fn ensure_inside(root: &Path, target: &Path) -> Result<PathBuf, String> {
     let root_c = root
         .canonicalize()
         .map_err(|e| format!("无法访问工作目录 {}: {e}", clean_path(root)))?;
-    let target_c = target
+    let joined = if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        root.join(target)
+    };
+    let target_c = joined
         .canonicalize()
         .map_err(|e| format!("无法访问路径 {}: {e}", clean_path(target)))?;
     if is_inside_path(&root_c, &target_c) {
@@ -1146,6 +1153,24 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         assert!(ensure_inside(&root, &outside).is_err());
         let _ = std::fs::remove_file(&outside);
+    }
+
+    #[test]
+    fn ensure_inside_resolves_relative_path_against_root() {
+        let (_tmp, root) = tree();
+        // 相对路径按 root 拼接（工作区外文件以父目录为根、传文件名的场景）
+        let resolved = ensure_inside(&root, Path::new("src/main.ts")).unwrap();
+        assert_eq!(
+            resolved,
+            root.join("src").join("main.ts").canonicalize().unwrap()
+        );
+        // 相对路径指向 root 下不存在的文件：仍报错
+        assert!(ensure_inside(&root, Path::new("missing.txt")).is_err());
+        // 相对路径逃逸 root（..）：拼接规范化后被越界校验拒绝
+        let escape = root.join("..").join("escape-x.txt");
+        std::fs::write(&escape, "x").unwrap();
+        assert!(ensure_inside(&root, Path::new("../escape-x.txt")).is_err());
+        let _ = std::fs::remove_file(&escape);
     }
 
     #[test]

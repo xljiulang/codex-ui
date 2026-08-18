@@ -143,7 +143,7 @@ pub fn run() {
             codex::commands::settings_set,
             codex::commands::model_config_read,
             codex::commands::model_config_save,
-            codex::commands::models_json_save,
+            codex::commands::model_catalog_save,
             codex::commands::custom_instructions_read,
             codex::commands::custom_instructions_save,
             codex::session_fs::session_fs_list,
@@ -255,10 +255,6 @@ pub fn run() {
                 std::collections::HashMap::new(),
             )));
             server_handle.ensure_running();
-            // 启动后后台迁移历史会话（best-effort，静默失败，不阻塞启动）
-            std::thread::spawn(|| {
-                let _ = codex::session_migrate::migrate_sessions_once();
-            });
             Ok(())
         })
         .build(tauri::generate_context!())
