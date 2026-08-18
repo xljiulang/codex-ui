@@ -174,6 +174,7 @@ impl CodexServer {
         {
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        apply_codex_env(cmd.as_std_mut());
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("启动 codex app-server 失败: {e}"))?;
@@ -727,33 +728,6 @@ fn is_streaming_delta(event: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// codex 配置文件路径：CODEX_HOME（若设置）否则 %USERPROFILE%\.codex\config.toml。
-/// CODEX_HOME 设置时完全重定向，不回退到 USERPROFILE。
-fn codex_config_path() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("CODEX_HOME") {
-        let p = PathBuf::from(home).join("config.toml");
-        return p.is_file().then_some(p);
-    }
-    let p = std::env::var("USERPROFILE")
-        .map(|d| PathBuf::from(d).join(".codex").join("config.toml"))
-        .ok()?;
-    p.is_file().then_some(p)
-}
-
-/// 读取 config.toml 中 [mcp_servers.node_repl.env] 的 CODEX_CLI_PATH，值指向的文件存在才返回
-fn read_codex_cli_path(config: &Path) -> Option<PathBuf> {
-    let text = std::fs::read_to_string(config).ok()?;
-    let doc: toml::Value = toml::from_str(&text).ok()?;
-    let v = doc
-        .get("mcp_servers")?
-        .get("node_repl")?
-        .get("env")?
-        .get("CODEX_CLI_PATH")?
-        .as_str()?;
-    let pb = PathBuf::from(v);
-    pb.is_file().then_some(pb)
-}
-
 /// 在 npm 前缀目录下按嵌套/扁平布局找 @openai 平台包里的真实 codex.exe（x64/arm64）
 fn npm_codex_exe(prefix: &Path) -> Option<PathBuf> {
     const LAYOUTS: [&[&str]; 2] = [
@@ -788,6 +762,54 @@ fn npm_codex_exe(prefix: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// 应用自身目录：运行中可执行文件（current_exe）所在目录。
+pub(crate) fn app_exe_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
+}
+
+/// 应用自身目录下的 bin/codex.exe：current_exe 所在目录的 bin 子目录，
+/// 文件存在才返回；不是工作目录。
+fn bundled_codex_exe() -> Option<PathBuf> {
+    let dir = app_exe_dir()?;
+    bundled_codex_exe_in(&dir)
+}
+
+/// <应用目录>/bin/codex.exe，存在才返回（纯函数，便于测试）
+fn bundled_codex_exe_in(dir: &Path) -> Option<PathBuf> {
+    let p = dir.join("bin").join("codex.exe");
+    p.is_file().then_some(p)
+}
+
+/// 为 codex.exe 子进程设置启动环境变量：
+/// - PATH 前插应用自身目录的 bin（bin 存在时），让 codex 能调用其中的 CLI 工具；
+/// - CODEX_HOME 指向应用自身目录下的 .codex 文件夹。
+pub fn apply_codex_env(cmd: &mut std::process::Command) {
+    if let Some(dir) = app_exe_dir() {
+        apply_codex_env_in(cmd, &dir);
+    }
+}
+
+/// 把 <app_dir>/bin 前插到现有 PATH：bin 目录存在时返回新 PATH 值，
+/// 否则返回 None（保持原 PATH 不变）。
+pub(crate) fn prepend_bin_path(existing: &str, app_dir: &Path) -> Option<std::ffi::OsString> {
+    let bin = app_dir.join("bin");
+    if !bin.is_dir() {
+        return None;
+    }
+    let mut parts: Vec<_> = std::env::split_paths(existing).collect();
+    parts.insert(0, bin);
+    std::env::join_paths(parts).ok()
+}
+
+/// apply_codex_env 的纯函数变体：app_dir 为应用自身目录，便于测试。
+fn apply_codex_env_in(cmd: &mut std::process::Command, app_dir: &Path) {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    if let Some(joined) = prepend_bin_path(&existing, app_dir) {
+        cmd.env("PATH", joined);
+    }
+    cmd.env("CODEX_HOME", app_dir.join(".codex"));
 }
 
 /// 官方安装：glob %LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe，按修改时间取最新
@@ -876,7 +898,7 @@ fn static_path_candidates() -> Vec<PathBuf> {
 }
 
 /// Synchronous codex.exe discovery shared by the server and auth login.
-/// 顺序：settings 路径 → config.toml CODEX_CLI_PATH → CODEX_BIN →
+/// 顺序：settings 路径 → 应用自身目录 bin → CODEX_BIN →
 /// 官方安装（最新）→ PATH/APPDATA npm/nvm-windows 静态布局 → 报错。
 pub fn find_codex_sync(settings: &AppSettings) -> Result<PathBuf, String> {
     // 1. 应用设置
@@ -890,11 +912,9 @@ pub fn find_codex_sync(settings: &AppSettings) -> Result<PathBuf, String> {
             return Ok(pb);
         }
     }
-    // 2. config.toml 的 CODEX_CLI_PATH
-    if let Some(cfg) = codex_config_path() {
-        if let Some(pb) = read_codex_cli_path(&cfg) {
-            return Ok(pb);
-        }
+    // 2. 应用自身目录 bin（current_exe 所在目录）
+    if let Some(pb) = bundled_codex_exe() {
+        return Ok(pb);
     }
     // 3. CODEX_BIN
     if let Ok(p) = std::env::var("CODEX_BIN") {
@@ -981,38 +1001,96 @@ mod tests {
         }
     }
 
-    fn write_config(cli_path: &Path, dir: &Path) {
-        std::fs::create_dir_all(dir).unwrap();
-        let toml = format!(
-            "[mcp_servers.node_repl.env]\nCODEX_CLI_PATH = '{}'\n",
-            cli_path.display()
-        );
-        std::fs::write(dir.join("config.toml"), toml).unwrap();
+    #[test]
+    fn bundled_codex_exe_in_resolves_bin_next_to_app_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin_exe = tmp.path().join("bin").join("codex.exe");
+        std::fs::create_dir_all(bin_exe.parent().unwrap()).unwrap();
+        std::fs::write(&bin_exe, b"MZ").unwrap();
+        assert_eq!(bundled_codex_exe_in(tmp.path()), Some(bin_exe.clone()));
+
+        // 有 bin 目录但没有 codex.exe
+        let tmp2 = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp2.path().join("bin")).unwrap();
+        assert_eq!(bundled_codex_exe_in(tmp2.path()), None);
+
+        // 无 bin 目录
+        let tmp3 = tempfile::tempdir().unwrap();
+        assert_eq!(bundled_codex_exe_in(tmp3.path()), None);
     }
 
     #[test]
-    fn read_codex_cli_path_valid_and_missing() {
+    fn apply_codex_env_in_prepends_bin_and_sets_codex_home() {
+        use std::ffi::OsStr;
+
+        // bin 存在：PATH 前插 bin 目录，且保留原 PATH；CODEX_HOME 指向 app/.codex
         let tmp = tempfile::tempdir().unwrap();
-        let exe = tmp.path().join("codex.exe");
-        std::fs::write(&exe, b"MZ").unwrap();
-        write_config(&exe, tmp.path());
+        std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
+        let old = tmp.path().join("old").join("bin").to_string_lossy().into_owned();
+        with_envs(&[("PATH", Some(&old))], || {
+            let mut cmd = std::process::Command::new("codex");
+            apply_codex_env_in(&mut cmd, tmp.path());
+            let envs: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> = cmd
+                .get_envs()
+                .map(|(k, v)| (k.to_os_string(), v.map(|s| s.to_os_string())))
+                .collect();
 
-        assert_eq!(
-            read_codex_cli_path(&tmp.path().join("config.toml")),
-            Some(exe)
-        );
+            let path = envs
+                .iter()
+                .find_map(|(k, v)| (k == OsStr::new("PATH")).then(|| v.clone().unwrap()))
+                .unwrap();
+            let parts: Vec<_> = std::env::split_paths(&path).collect();
+            assert_eq!(parts.first().unwrap(), &tmp.path().join("bin"));
+            assert!(parts.contains(&tmp.path().join("old").join("bin")));
 
-        let bad = tmp.path().join("bad.toml");
-        std::fs::write(
-            &bad,
-            "[mcp_servers.node_repl.env]\nCODEX_CLI_PATH = 'C:\\nope\\x.exe'\n",
-        )
+            let home = envs
+                .iter()
+                .find_map(|(k, v)| (k == OsStr::new("CODEX_HOME")).then(|| v.clone().unwrap()))
+                .unwrap();
+            assert_eq!(home, tmp.path().join(".codex"));
+        });
+
+        // bin 缺失：PATH 不改写，但 CODEX_HOME 仍设置
+        let tmp2 = tempfile::tempdir().unwrap();
+        let dir2_s = tmp2.path().to_string_lossy().into_owned();
+        with_envs(&[("PATH", Some(&dir2_s))], || {
+            let mut cmd = std::process::Command::new("codex");
+            apply_codex_env_in(&mut cmd, tmp2.path());
+            let envs: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> = cmd
+                .get_envs()
+                .map(|(k, v)| (k.to_os_string(), v.map(|s| s.to_os_string())))
+                .collect();
+
+            assert!(
+                envs.iter().all(|(k, _)| k != OsStr::new("PATH")),
+                "bin 缺失时不应改写 PATH"
+            );
+            let home = envs
+                .iter()
+                .find_map(|(k, v)| (k == OsStr::new("CODEX_HOME")).then(|| v.clone().unwrap()))
+                .unwrap();
+            assert_eq!(home, tmp2.path().join(".codex"));
+        });
+    }
+
+    #[test]
+    fn prepend_bin_path_prepends_bin_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
+        let existing = std::env::join_paths([
+            tmp.path().join("a"),
+            tmp.path().join("b"),
+        ])
         .unwrap();
-        assert_eq!(read_codex_cli_path(&bad), None);
+        let joined = prepend_bin_path(&existing.to_string_lossy(), tmp.path()).unwrap();
+        let parts: Vec<_> = std::env::split_paths(&joined).collect();
+        assert_eq!(parts.first().unwrap(), &tmp.path().join("bin"));
+        assert!(parts.contains(&tmp.path().join("a")));
+        assert!(parts.contains(&tmp.path().join("b")));
 
-        let nokey = tmp.path().join("nokey.toml");
-        std::fs::write(&nokey, "[other]\n").unwrap();
-        assert_eq!(read_codex_cli_path(&nokey), None);
+        // bin 缺失 → None（保持原 PATH）
+        let tmp2 = tempfile::tempdir().unwrap();
+        assert!(prepend_bin_path(&existing.to_string_lossy(), tmp2.path()).is_none());
     }
 
     #[test]
@@ -1131,16 +1209,7 @@ mod tests {
         settings.codex_path = Some(settings_exe.to_string_lossy().into_owned());
         assert_eq!(find_codex_sync(&settings).unwrap(), settings_exe);
 
-        // 2. config.toml（CODEX_HOME 指向临时目录）
-        let home = tempfile::tempdir().unwrap();
-        let cfg_exe = home.path().join("cfg.exe");
-        std::fs::write(&cfg_exe, b"MZ").unwrap();
-        write_config(&cfg_exe, home.path());
         settings.codex_path = None;
-        let home_s = home.path().to_string_lossy().into_owned();
-        with_envs(&[("CODEX_HOME", Some(&home_s)), ("CODEX_BIN", None)], || {
-            assert_eq!(find_codex_sync(&settings).unwrap(), cfg_exe);
-        });
 
         // 3. CODEX_BIN
         let bin = tmp.path().join("env.exe");

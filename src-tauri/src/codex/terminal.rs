@@ -7,6 +7,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::codex::app_server::{app_exe_dir, prepend_bin_path};
 use crate::codex::path_util::clean_path;
 use crate::codex::settings;
 
@@ -222,6 +223,14 @@ pub fn terminal_spawn(
     let mut cmd = CommandBuilder::new(&program);
     cmd.args(&args);
     cmd.cwd(&dir);
+    // 与应用启动 codex 一致：把应用自身目录的 bin 前插到终端 PATH，
+    // 使终端里可直接调用 bin 目录中的 CLI 工具（fd/rg/sg 等）。
+    let existing_path = std::env::var("PATH").unwrap_or_default();
+    if let Some(app_dir) = app_exe_dir() {
+        if let Some(joined) = prepend_bin_path(&existing_path, &app_dir) {
+            cmd.env("PATH", joined);
+        }
+    }
     let child = pair
         .slave
         .spawn_command(cmd)

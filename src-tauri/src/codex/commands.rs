@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
 
-use crate::codex::app_server::{CodexServer, find_codex_sync};
+use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
 use crate::codex::settings::{self, AppSettings};
 
 type Server = Arc<CodexServer>;
@@ -273,6 +273,7 @@ pub fn auth_login(app: AppHandle) -> Result<(), String> {
     let codex = find_codex_sync(&settings)?;
     let mut cmd = std::process::Command::new(&codex);
     cmd.arg("login");
+    apply_codex_env(&mut cmd);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
