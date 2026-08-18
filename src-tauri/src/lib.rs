@@ -255,6 +255,10 @@ pub fn run() {
                 std::collections::HashMap::new(),
             )));
             server_handle.ensure_running();
+            // 启动后后台迁移历史会话（best-effort，静默失败，不阻塞启动）
+            std::thread::spawn(|| {
+                let _ = codex::session_migrate::migrate_sessions_once();
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
