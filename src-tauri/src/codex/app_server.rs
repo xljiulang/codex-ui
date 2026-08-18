@@ -284,6 +284,23 @@ impl CodexServer {
         .await;
         self.emit_status().await;
 
+        // 初始化成功后隐式尝试添加内置插件市场（失败静默，仅作尝试）：
+        // <应用目录>/marketplaces/openai-bundled 与 .../openai-primary-runtime。
+        // 与设置页「添加市场」走同一 marketplace/add RPC；目录缺失或
+        // codex 不接受本地路径时忽略错误，不打扰用户。
+        for path in bundled_marketplace_paths() {
+            let server = self.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = server
+                    .request(
+                        "marketplace/add",
+                        json!({ "source": path }),
+                        Some(Duration::from_secs(10)),
+                    )
+                    .await;
+            });
+        }
+
         let mut line = String::new();
         loop {
             line.clear();
@@ -769,6 +786,31 @@ pub(crate) fn app_exe_dir() -> Option<PathBuf> {
     std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
 }
 
+/// 枚举 marketplaces 目录下全部本层子目录，作为内置插件市场路径（纯函数，便于测试）。
+/// 仅保留目录、按名称排序；目录不存在或不可读时返回空。
+fn bundled_marketplace_paths_in(marketplaces_dir: &Path) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(marketplaces_dir) else {
+        return paths;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            paths.push(path.to_string_lossy().into_owned());
+        }
+    }
+    paths.sort();
+    paths
+}
+
+/// 待隐式尝试添加的内置市场路径；应用目录不可用时为空。
+fn bundled_marketplace_paths() -> Vec<String> {
+    let Some(dir) = app_exe_dir() else {
+        return Vec::new();
+    };
+    bundled_marketplace_paths_in(&dir.join("marketplaces"))
+}
+
 /// 应用自身目录下的 bin/codex.exe：current_exe 所在目录的 bin 子目录，
 /// 文件存在才返回；不是工作目录。
 fn bundled_codex_exe() -> Option<PathBuf> {
@@ -1091,6 +1133,39 @@ mod tests {
             assert_eq!(config_dir, tmp2.path().join(".codex"));
             assert_eq!(config_dir, home);
         });
+    }
+
+    #[test]
+    fn bundled_marketplace_paths_in_lists_first_level_dirs_sorted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let marketplaces = tmp.path().join("marketplaces");
+        for name in ["openai-bundled", "openai-primary-runtime", "a-market"] {
+            std::fs::create_dir_all(marketplaces.join(name)).unwrap();
+        }
+        // 普通文件不算市场
+        std::fs::write(marketplaces.join("notes.txt"), "x").unwrap();
+
+        let paths = bundled_marketplace_paths_in(&marketplaces);
+        assert_eq!(
+            paths,
+            vec![
+                marketplaces.join("a-market").to_string_lossy().into_owned(),
+                marketplaces
+                    .join("openai-bundled")
+                    .to_string_lossy()
+                    .into_owned(),
+                marketplaces
+                    .join("openai-primary-runtime")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bundled_marketplace_paths_in_missing_dir_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(bundled_marketplace_paths_in(&tmp.path().join("no-marketplaces")).is_empty());
     }
 
     #[test]
