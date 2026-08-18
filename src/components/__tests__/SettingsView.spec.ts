@@ -501,10 +501,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper
       .find('input[placeholder="如 OPENAI_API_KEY"]')
       .setValue("MY_API_KEY");
-    await wrapper
-      .findAll(".model-provider-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
+    await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     const radios = wrapper.findAll('input[name="model-provider-active"]');
     expect(radios.length).toBe(1);
@@ -517,10 +514,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
     await wrapper.find('input[placeholder="如 my-provider"]').setValue("deepseek");
-    await wrapper
-      .findAll(".model-provider-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
+    await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("提供方标识已存在");
     expect(wrapper.findAll(".model-provider-row").length).toBe(2);
@@ -530,10 +524,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const rows = wrapper.findAll(".model-provider-row");
-    await rows[1]
-      .findAll("button")
-      .find((b) => b.text().trim() === "编辑")!
-      .trigger("click");
+    await rows[1].find(".provider-row-edit").trigger("click");
     await flushPromises();
     expect(wrapper.find(".model-provider-form").exists()).toBe(true);
     expect(
@@ -542,10 +533,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper
       .find('input[placeholder="https://api.example.com/v1"]')
       .setValue("https://new.example.com/v1");
-    await wrapper
-      .findAll(".model-provider-form button")
-      .find((b) => b.text().trim() === "保存修改")!
-      .trigger("click");
+    await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     await wrapper
       .findAll(".model-config-card")[0]
@@ -589,10 +577,11 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     const rows = wrapper.findAll(".model-provider-row");
     const delBtns = rows.map(
-      (r) => r.findAll("button").find((b) => b.text().trim() === "删除")!,
+      (r) => r.find(".provider-row-delete")!,
     );
     expect(delBtns[0].attributes("disabled")).toBeDefined();
     expect(delBtns[1].attributes("disabled")).toBeUndefined();
+    expect(delBtns[1].classes()).toContain("danger");
     await delBtns[1].trigger("click");
     await flushPromises();
     expect(wrapper.findAll(".model-provider-row").length).toBe(1);
@@ -750,10 +739,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     // 表单打开期间应看到全局 OPENAI_API_KEY 的绿色提示
     expect(wrapper.text()).toContain("已检测到全局 OPENAI_API_KEY");
-    await wrapper
-      .findAll(".model-provider-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
+    await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.findAll(".model-provider-row").length).toBe(1);
   });
@@ -764,10 +750,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
     const add = () =>
-      wrapper
-        .findAll(".model-provider-form button")
-        .find((b) => b.text().trim() === "添加")!
-        .trigger("click");
+      wrapper.find(".provider-form-submit").trigger("click");
     await wrapper.find('input[placeholder="如 my-provider"]').setValue("x");
     await add();
     expect(wrapper.text()).toContain("请填写提供方名称");
@@ -932,6 +915,17 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(
       wrapper.findAll(".mcp-server-type").map((t) => t.text()),
     ).toEqual(["stdio", "http"]);
+    expect(wrapper.find(".mcp-row-delete").classes()).toContain("danger");
+    expect(
+      wrapper.find(".settings-section-mcp .mcp-config-add-btn").exists(),
+    ).toBe(true);
+    // 即时保存模式下 MCP 卡不再有「保存」按钮
+    expect(
+      wrapper
+        .find(".settings-section-mcp .model-config-card")
+        .findAll("button")
+        .some((b) => b.text().includes("保存")),
+    ).toBe(false);
   });
 
   it("MCP stdio 添加：args 空格分隔后保存", async () => {
@@ -954,26 +948,12 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await wrapper
       .find(".mcp-server-form .mcp-args-input")
       .setValue("-y mcp-server-memory");
-    await wrapper
-      .findAll(".mcp-server-form button")
-      .find((b) => b.text().includes("添加环境变量"))!
-      .trigger("click");
+    await wrapper.find(".mcp-kv-add-btn").trigger("click");
     await flushPromises();
     const envInputs = wrapper.findAll(".mcp-env-row input");
     await envInputs[0].setValue("API_KEY");
     await envInputs[1].setValue("sk-123");
-    await wrapper
-      .findAll(".mcp-server-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
-    await flushPromises();
-    expect(wrapper.findAll(".mcp-server-row").length).toBe(3);
-
-    await wrapper
-      .find(".settings-section-mcp .model-config-card")
-      .findAll("button")
-      .find((b) => b.text().includes("保存"))!
-      .trigger("click");
+    await wrapper.find(".mcp-form-submit").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
       input: {
@@ -1008,7 +988,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
         ],
       },
     });
-    expect(store.toast).toContain("MCP 配置已保存");
+    expect(store.toast).toContain("MCP 服务器已保存");
   });
 
   it("MCP http 添加：url/请求头/bearer 令牌保存", async () => {
@@ -1031,24 +1011,12 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await wrapper
       .find('.mcp-server-form input[placeholder="如 MY_MCP_TOKEN"]')
       .setValue("DOCS_TOKEN");
-    await wrapper
-      .findAll(".mcp-server-form button")
-      .find((b) => b.text().includes("添加请求头"))!
-      .trigger("click");
+    await wrapper.find(".mcp-kv-add-btn").trigger("click");
     await flushPromises();
     const headerInputs = wrapper.findAll(".mcp-env-row input");
     await headerInputs[0].setValue("Authorization");
     await headerInputs[1].setValue("Bearer sk-docs");
-    await wrapper
-      .findAll(".mcp-server-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
-    await flushPromises();
-    await wrapper
-      .find(".settings-section-mcp .model-config-card")
-      .findAll("button")
-      .find((b) => b.text().includes("保存"))!
-      .trigger("click");
+    await wrapper.find(".mcp-form-submit").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
       input: {
@@ -1098,10 +1066,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await wrapper
       .find('.mcp-server-form input[placeholder="如 filesystem"]')
       .setValue("x");
-    await wrapper
-      .findAll(".mcp-server-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
+    await wrapper.find(".mcp-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("请填写 command");
     expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
@@ -1121,16 +1086,13 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await wrapper
       .find('.mcp-server-form input[placeholder="如 filesystem"]')
       .setValue("x");
-    await wrapper
-      .findAll(".mcp-server-form button")
-      .find((b) => b.text().trim() === "添加")!
-      .trigger("click");
+    await wrapper.find(".mcp-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("请填写 url");
     expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
   });
 
-  it("MCP 删除服务器后保存移除", async () => {
+  it("MCP 删除弹确认后立即保存", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
@@ -1140,16 +1102,10 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await flushPromises();
     await wrapper
       .findAll(".mcp-server-row")[0]
-      .findAll("button")
-      .find((b) => b.text().trim() === "删除")!
+      .find(".mcp-row-delete")
       .trigger("click");
     await flushPromises();
-    expect(wrapper.findAll(".mcp-server-row").length).toBe(1);
-    await wrapper
-      .find(".settings-section-mcp .model-config-card")
-      .findAll("button")
-      .find((b) => b.text().includes("保存"))!
-      .trigger("click");
+    settleConfirm(true);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
       input: {
@@ -1166,6 +1122,29 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
         ],
       },
     });
+    expect(store.toast).toContain("已删除 MCP 服务器");
+  });
+
+  it("MCP 删除取消时不落盘", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-delete")
+      .trigger("click");
+    settleConfirm(false);
+    await flushPromises();
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
+    expect(
+      mockedInvoke.mock.calls.filter(
+        ([name]) => name === "mcp_servers_save",
+      ).length,
+    ).toBe(0);
   });
 });
 
@@ -1945,7 +1924,7 @@ describe("SettingsView 按钮图标", () => {
       "button.codex-pick-btn",
       "button.codex-clear-btn",
       "button.memory-reset-btn",
-      ".plugin-manage-toolbar > .btn",
+      ".plugin-refresh-btn",
       ".plugin-market-add .btn",
       ".plugin-market-remove",
       ".plugin-install-btn",

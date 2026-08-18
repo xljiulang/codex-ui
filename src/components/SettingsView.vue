@@ -83,6 +83,16 @@ type SettingsSectionId = (typeof settingsSections)[number]["id"];
 /** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
 const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
 
+/** 导航键盘操作：上下方向键循环切换分类（与其它面板方向键习惯一致） */
+function onNavKeydown(e: KeyboardEvent) {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  const idx = settingsSections.findIndex((s) => s.id === activeSection.value);
+  const delta = e.key === "ArrowDown" ? 1 : -1;
+  activeSection.value =
+    settingsSections[(idx + delta + settingsSections.length) % settingsSections.length].id;
+}
+
 onMounted(() => {
   void refreshPlugins();
   void loadModelConfig();
@@ -731,8 +741,9 @@ function removeMcpHeaderRow(index: number) {
   mcpForm.headers.splice(index, 1);
 }
 
-/** 提交 MCP 表单：校验后写入本地列表（保存按钮统一落盘） */
-function confirmMcpForm() {
+/** 提交 MCP 表单：校验后更新本地列表并立即落盘 */
+async function confirmMcpForm() {
+  if (mcpState.saving || mcpState.loading) return;
   clearMcpFormErrors();
   const name = mcpForm.name.trim();
   if (!name) {
@@ -793,30 +804,49 @@ function confirmMcpForm() {
       : [],
     bearer_token_env_var: isHttp ? mcpForm.bearer_token_env_var.trim() : "",
   };
-  if (mcpForm.editingIndex < 0) {
+  const isNew = mcpForm.editingIndex < 0;
+  if (isNew) {
     mcpState.servers.push(entry);
   } else {
     mcpState.servers[mcpForm.editingIndex] = entry;
   }
-  mcpForm.open = false;
-}
-
-/** 删除 MCP 服务器（保存时落盘） */
-function removeMcp(index: number) {
-  mcpState.servers.splice(index, 1);
-}
-
-/** 保存 MCP 配置：整表同步到 config.toml */
-async function saveMcp() {
-  if (mcpState.saving || mcpState.loading) return;
   mcpState.saving = true;
   try {
     const input: McpServersEdit = { servers: mcpState.servers };
     await invoke("mcp_servers_save", { input });
-    setToast("MCP 配置已保存（重启应用后生效）");
+    setToast("MCP 服务器已保存（重启应用后生效）");
+    mcpForm.open = false;
     await loadMcp();
   } catch (e) {
     setToast(toastError(e));
+    // 回滚：重读磁盘状态，保留表单输入
+    await loadMcp();
+  } finally {
+    mcpState.saving = false;
+  }
+}
+
+/** 删除 MCP 服务器：弹确认后立即落盘 */
+async function removeMcp(index: number) {
+  const s = mcpState.servers[index];
+  if (!s || mcpState.saving || mcpState.loading) return;
+  const ok = await askConfirm({
+    title: "删除 MCP 服务器",
+    message: `确定删除 MCP 服务器「${s.name}」吗？删除后立即写入 config.toml。`,
+    confirmLabel: "删除",
+    cancelLabel: "取消",
+  });
+  if (!ok) return;
+  mcpState.servers.splice(index, 1);
+  mcpState.saving = true;
+  try {
+    const input: McpServersEdit = { servers: mcpState.servers };
+    await invoke("mcp_servers_save", { input });
+    setToast(`已删除 MCP 服务器「${s.name}」（重启应用后生效）`);
+    await loadMcp();
+  } catch (e) {
+    setToast(toastError(e));
+    await loadMcp(); // 回滚
   } finally {
     mcpState.saving = false;
   }
@@ -953,7 +983,11 @@ function canInstall(p: PluginCatalogItem): boolean {
 <template>
   <div class="settings-page">
     <div class="settings-page-body">
-      <nav class="settings-nav" aria-label="设置分类">
+      <nav
+        class="settings-nav"
+        aria-label="设置分类"
+        @keydown="onNavKeydown"
+      >
         <button
           v-for="s in settingsSections"
           :key="s.id"
@@ -974,45 +1008,55 @@ function canInstall(p: PluginCatalogItem): boolean {
           class="settings-section settings-section-personalization"
         >
           <h2 class="settings-section-title">个性化</h2>
-          <div class="settings">
-            <div class="setting-row checkbox-row">
-              <input
-                id="sound"
-                v-model="sound"
-                type="checkbox"
-                @change="persist({ sound_enabled: sound })"
-              />
-              <label for="sound" style="margin: 0">提权/交互时播放提示音</label>
-            </div>
+          <p class="settings-section-desc">
+            主题外观、音效与消息发送偏好
+          </p>
+          <div class="settings-card">
+            <div class="settings">
+              <div class="setting-row checkbox-row">
+                <input
+                  id="sound"
+                  v-model="sound"
+                  type="checkbox"
+                  @change="persist({ sound_enabled: sound })"
+                />
+                <label for="sound">提权/交互时播放提示音</label>
+              </div>
 
-            <div class="setting-row checkbox-row">
-              <input
-                id="enter"
-                v-model="enterToSend"
-                type="checkbox"
-                @change="persist({ enter_to_send: enterToSend })"
-              />
-              <label for="enter" style="margin: 0">
-                Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
-              </label>
-            </div>
+              <div class="setting-row checkbox-row">
+                <input
+                  id="enter"
+                  v-model="enterToSend"
+                  type="checkbox"
+                  @change="persist({ enter_to_send: enterToSend })"
+                />
+                <label for="enter">
+                  Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
+                </label>
+              </div>
 
-            <div class="setting-row">
-              <label>主题外观</label>
-              <div class="theme-picker">
-                <button
-                  v-for="t in THEMES"
-                  :key="t.id"
-                  class="theme-card"
-                  :class="{ selected: theme === t.id }"
-                  :data-theme-id="t.id"
-                  :aria-pressed="theme === t.id"
-                  @click="selectTheme(t.id)"
-                >
-                  <span class="theme-swatch"></span>
-                  <span class="theme-name">{{ t.name }}</span>
-                  <span class="theme-desc">{{ t.desc }}</span>
-                </button>
+              <div class="setting-row">
+                <label>主题外观</label>
+                <div class="theme-picker">
+                  <button
+                    v-for="t in THEMES"
+                    :key="t.id"
+                    class="theme-card"
+                    :class="{ selected: theme === t.id }"
+                    :data-theme-id="t.id"
+                    :aria-pressed="theme === t.id"
+                    @click="selectTheme(t.id)"
+                  >
+                    <span class="theme-swatch"></span>
+                    <span class="theme-name">{{ t.name }}</span>
+                    <span class="theme-desc">{{ t.desc }}</span>
+                    <span v-if="theme === t.id" class="theme-check" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path :d="ICON_CHECK" />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1023,24 +1067,39 @@ function canInstall(p: PluginCatalogItem): boolean {
           class="settings-section settings-section-model-config"
         >
           <h2 class="settings-section-title">模型配置</h2>
+          <p class="settings-section-desc">
+            模型、模型提供方与全局自定义指令
+          </p>
 
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>模型提供方</h3>
-              <div class="model-config-path">
+              <div class="model-config-head-actions">
                 <button
-                  v-if="modelConfig.config_path"
-                  type="button"
-                  class="model-config-path-link"
-                  title="在编辑器中打开 config.toml"
-                  @click="openModelConfigFile"
+                  class="btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="modelConfig.loading"
+                  @click="refreshProviders"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
+                    <path :d="ICON_REFRESH" />
                   </svg>
-                  {{ modelConfig.config_path }}
                 </button>
-                <template v-else>正在读取路径…</template>
+                <div class="model-config-path">
+                  <button
+                    v-if="modelConfig.config_path"
+                    type="button"
+                    class="model-config-path-link"
+                    title="在编辑器中打开 config.toml"
+                    @click="openModelConfigFile"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FILE" />
+                    </svg>
+                    {{ modelConfig.config_path }}
+                  </button>
+                  <template v-else>正在读取路径…</template>
+                </div>
               </div>
             </div>
 
@@ -1142,29 +1201,28 @@ function canInstall(p: PluginCatalogItem): boolean {
                 </p>
                 <div class="model-provider-actions">
                   <button
-                    class="btn"
+                    class="btn btn-icon provider-row-edit"
+                    title="编辑"
                     :disabled="modelConfig.loading"
                     @click="openEditProvider(i)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_EDIT" />
                     </svg>
-                    编辑
                   </button>
                   <button
-                    class="btn"
+                    class="btn btn-icon danger provider-row-delete"
                     :disabled="modelConfig.loading || p.key === modelConfig.model_provider"
                     :title="
                       p.key === modelConfig.model_provider
                         ? '先切换到其它提供方再删除'
-                        : ''
+                        : '删除'
                     "
                     @click="removeProvider(i)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_DELETE" />
                     </svg>
-                    删除
                   </button>
                 </div>
               </div>
@@ -1282,24 +1340,25 @@ function canInstall(p: PluginCatalogItem): boolean {
                 </select>
               </div>
               <div class="model-config-actions">
-                <button class="btn primary" @click="confirmProviderForm">
-                  <svg
-                    v-if="providerForm.editingIndex < 0"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
+                <button
+                  class="btn btn-icon primary provider-form-submit"
+                  :title="
+                    providerForm.editingIndex >= 0 ? '保存修改' : '添加'
+                  "
+                  @click="confirmProviderForm"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_CHECK" />
                   </svg>
-                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_SAVE" />
-                  </svg>
-                  {{ providerForm.editingIndex >= 0 ? "保存修改" : "添加" }}
                 </button>
-                <button class="btn" @click="closeProviderForm">
+                <button
+                  class="btn btn-icon provider-form-cancel"
+                  title="取消"
+                  @click="closeProviderForm"
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_CLOSE" />
                   </svg>
-                  取消
                 </button>
               </div>
             </div>
@@ -1323,16 +1382,6 @@ function canInstall(p: PluginCatalogItem): boolean {
                 {{ modelConfig.savingProviders ? "保存中…" : "保存" }}
               </button>
               <button
-                class="btn model-config-reload-btn"
-                :disabled="modelConfig.loading"
-                @click="refreshProviders"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_REFRESH" />
-                </svg>
-                重读
-              </button>
-              <button
                 class="btn model-config-add-btn"
                 :disabled="modelConfig.loading"
                 @click="openAddProvider"
@@ -1348,26 +1397,38 @@ function canInstall(p: PluginCatalogItem): boolean {
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>model_catalog_json</h3>
-              <div class="model-config-path">
-                <template v-if="modelConfig.model_catalog_path">
-                  <button
-                    type="button"
-                    class="model-config-path-link"
-                    title="在编辑器中打开文件"
-                    @click="openCatalogFile"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FILE" />
-                    </svg>
-                    {{ modelConfig.model_catalog_path }}
-                  </button>
-                  <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
-                    （文件不存在，无法编辑）
-                  </span>
-                </template>
-                <template v-else>
-                  {{ modelConfig.config_path ? "（config 未配置 model_catalog_json）" : "正在读取路径…" }}
-                </template>
+              <div class="model-config-head-actions">
+                <button
+                  class="btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="modelConfig.loading"
+                  @click="refreshCatalog"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
+                <div class="model-config-path">
+                  <template v-if="modelConfig.model_catalog_path">
+                    <button
+                      type="button"
+                      class="model-config-path-link"
+                      title="在编辑器中打开文件"
+                      @click="openCatalogFile"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path :d="ICON_FILE" />
+                      </svg>
+                      {{ modelConfig.model_catalog_path }}
+                    </button>
+                    <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
+                      （文件不存在，无法编辑）
+                    </span>
+                  </template>
+                  <template v-else>
+                    {{ modelConfig.config_path ? "（config 未配置 model_catalog_json）" : "正在读取路径…" }}
+                  </template>
+                </div>
               </div>
             </div>
             <textarea
@@ -1392,39 +1453,41 @@ function canInstall(p: PluginCatalogItem): boolean {
                 </svg>
                 {{ modelConfig.savingCatalog ? "保存中…" : "保存" }}
               </button>
-              <button
-                class="btn model-config-reload-btn"
-                :disabled="modelConfig.loading"
-                @click="refreshCatalog"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_REFRESH" />
-                </svg>
-                重读
-              </button>
             </div>
           </div>
 
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>AGENTS</h3>
-              <div class="model-config-path">
+              <div class="model-config-head-actions">
                 <button
-                  v-if="agents.agents_path"
-                  type="button"
-                  class="model-config-path-link"
-                  title="在编辑器中打开文件"
-                  @click="openAgentsFile"
+                  class="btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="agents.loading || agents.saving"
+                  @click="loadCustomInstructions"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
+                    <path :d="ICON_REFRESH" />
                   </svg>
-                  {{ agents.agents_path }}
                 </button>
-                <template v-else>正在读取路径…</template>
-                <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
-                  （文件不存在，保存时将新建）
-                </span>
+                <div class="model-config-path">
+                  <button
+                    v-if="agents.agents_path"
+                    type="button"
+                    class="model-config-path-link"
+                    title="在编辑器中打开文件"
+                    @click="openAgentsFile"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FILE" />
+                    </svg>
+                    {{ agents.agents_path }}
+                  </button>
+                  <template v-else>正在读取路径…</template>
+                  <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
+                    （文件不存在，保存时将新建）
+                  </span>
+                </div>
               </div>
             </div>
             <textarea
@@ -1445,16 +1508,6 @@ function canInstall(p: PluginCatalogItem): boolean {
                 </svg>
                 {{ agents.saving ? "保存中…" : "保存" }}
               </button>
-              <button
-                class="btn model-config-reload-btn"
-                :disabled="agents.loading || agents.saving"
-                @click="loadCustomInstructions"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_REFRESH" />
-                </svg>
-                重读
-              </button>
             </div>
           </div>
         </section>
@@ -1464,91 +1517,95 @@ function canInstall(p: PluginCatalogItem): boolean {
           class="settings-section settings-section-general"
         >
           <h2 class="settings-section-title">通用设置</h2>
-          <div class="settings">
-
-          <div class="setting-row">
-            <label>终端 Shell</label>
-            <select
-              v-model="terminalShell"
-              class="terminal-shell-select"
-              @change="persist({ terminal_shell: terminalShell })"
-            >
-              <option value="cmd">cmd（命令提示符）</option>
-              <option value="powershell">PowerShell</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label>跟进处理方式</label>
-            <select
-              v-model="followupMode"
-              @change="persist({ followup_mode: followupMode })"
-            >
-              <option value="adjust">调整方向</option>
-              <option value="queue">加入队列</option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label>默认权限</label>
-            <select
-              v-model="defaultPermission"
-              class="default-permission-select"
-              @change="persist({ default_permission: defaultPermission })"
-            >
-              <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
-                {{ m.label }}
-              </option>
-            </select>
-          </div>
-
-          <div class="setting-row">
-            <label>记忆模式</label>
-            <div class="setting-path-row">
-              <select
-                v-model="memoryMode"
-                class="memory-mode-select"
-                @change="onMemoryModeChange"
-              >
-                <option value="disabled">关闭</option>
-                <option value="enabled">启用</option>
-              </select>
-              <button class="btn danger memory-reset-btn" @click="resetMemory()">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_RESTART" />
-                </svg>
-                重置记忆
-              </button>
-            </div>
-          </div>
-
-          <div class="setting-row">
-            <label>codex 可执行文件（留空自动查找）</label>
-            <div class="setting-path-row codex-path-row">
-              <div class="setting-value codex-path-value">
-                {{ codexPath || "未设置（自动查找）" }}
+          <p class="settings-section-desc">
+            终端、权限与记忆等基础行为
+          </p>
+          <div class="settings-card">
+            <div class="settings">
+              <div class="setting-row">
+                <label>终端 Shell</label>
+                <select
+                  v-model="terminalShell"
+                  class="terminal-shell-select"
+                  @change="persist({ terminal_shell: terminalShell })"
+                >
+                  <option value="cmd">cmd（命令提示符）</option>
+                  <option value="powershell">PowerShell</option>
+                </select>
               </div>
-              <button class="btn codex-pick-btn" @click="pickCodexFile()">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_FOLDER_OPEN" />
-                </svg>
-                选择文件
-              </button>
-              <button
-                v-if="codexPath"
-                class="btn danger codex-clear-btn"
-                @click="clearCodexPath()"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_DELETE" />
-                </svg>
-                清除
-              </button>
+
+              <div class="setting-row">
+                <label>跟进处理方式</label>
+                <select
+                  v-model="followupMode"
+                  @change="persist({ followup_mode: followupMode })"
+                >
+                  <option value="adjust">调整方向</option>
+                  <option value="queue">加入队列</option>
+                </select>
+              </div>
+
+              <div class="setting-row">
+                <label>默认权限</label>
+                <select
+                  v-model="defaultPermission"
+                  class="default-permission-select"
+                  @change="persist({ default_permission: defaultPermission })"
+                >
+                  <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
+                    {{ m.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="setting-row">
+                <label>记忆模式</label>
+                <div class="setting-path-row">
+                  <select
+                    v-model="memoryMode"
+                    class="memory-mode-select"
+                    @change="onMemoryModeChange"
+                  >
+                    <option value="disabled">关闭</option>
+                    <option value="enabled">启用</option>
+                  </select>
+                  <button class="btn danger memory-reset-btn" @click="resetMemory()">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_RESTART" />
+                    </svg>
+                    重置记忆
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <label>codex 可执行文件（留空自动查找）</label>
+                <div class="setting-path-row codex-path-row">
+                  <div class="setting-value codex-path-value">
+                    {{ codexPath || "未设置（自动查找）" }}
+                  </div>
+                  <button class="btn codex-pick-btn" @click="pickCodexFile()">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FOLDER_OPEN" />
+                    </svg>
+                    选择文件
+                  </button>
+                  <button
+                    v-if="codexPath"
+                    class="btn danger codex-clear-btn"
+                    @click="clearCodexPath()"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                    清除
+                  </button>
+                </div>
+                <p v-if="!codexPath && store.server.codexPath" class="setting-note">
+                  当前使用（自动检测）：{{ store.server.codexPath }}
+                </p>
+              </div>
             </div>
-            <p v-if="!codexPath && store.server.codexPath" class="setting-note">
-              当前使用（自动检测）：{{ store.server.codexPath }}
-            </p>
-          </div>
           </div>
         </section>
 
@@ -1557,11 +1614,26 @@ function canInstall(p: PluginCatalogItem): boolean {
           class="settings-section settings-section-skills"
         >
           <h2 class="settings-section-title">技能管理</h2>
+          <p class="settings-section-desc">
+            管理 CODEX_HOME 下的本地技能（SKILL.md）
+          </p>
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>已安装技能</h3>
-              <div class="model-config-path">
-                共 {{ skillsState.items.length }} 个
+              <div class="model-config-head-actions">
+                <button
+                  class="btn-icon model-config-reload-btn"
+                  title="刷新"
+                  :disabled="skillsState.loading"
+                  @click="loadSkills"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
+                <div class="model-config-path">
+                  共 {{ skillsState.items.length }} 个
+                </div>
               </div>
             </div>
             <div class="skills-list">
@@ -1596,18 +1668,6 @@ function canInstall(p: PluginCatalogItem): boolean {
                 <div class="skill-path">{{ s.path }}</div>
               </div>
             </div>
-            <div class="model-config-actions">
-              <button
-                class="btn model-config-reload-btn"
-                :disabled="skillsState.loading"
-                @click="loadSkills"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_REFRESH" />
-                </svg>
-                刷新
-              </button>
-            </div>
           </div>
         </section>
 
@@ -1616,11 +1676,36 @@ function canInstall(p: PluginCatalogItem): boolean {
           class="settings-section settings-section-mcp"
         >
           <h2 class="settings-section-title">MCP 管理</h2>
+          <p class="settings-section-desc">
+            配置 MCP 服务器（写入 config.toml，重启后生效）
+          </p>
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>MCP 服务器</h3>
-              <div class="model-config-path">
-                {{ mcpState.config_path || "正在读取路径…" }}
+              <div class="model-config-head-actions">
+                <button
+                  class="btn mcp-config-add-btn"
+                  :disabled="mcpState.loading || mcpState.saving"
+                  @click="openAddMcp"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                  添加
+                </button>
+                <button
+                  class="btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="mcpState.loading"
+                  @click="loadMcp"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
+                <div class="model-config-path">
+                  {{ mcpState.config_path || "正在读取路径…" }}
+                </div>
               </div>
             </div>
             <div class="mcp-servers-list">
@@ -1646,24 +1731,24 @@ function canInstall(p: PluginCatalogItem): boolean {
                 </div>
                 <div class="model-provider-actions">
                   <button
-                    class="btn"
-                    :disabled="mcpState.loading"
+                    class="btn btn-icon mcp-row-edit"
+                    title="编辑"
+                    :disabled="mcpState.loading || mcpState.saving"
                     @click="openEditMcp(i)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_EDIT" />
                     </svg>
-                    编辑
                   </button>
                   <button
-                    class="btn"
-                    :disabled="mcpState.loading"
+                    class="btn btn-icon danger mcp-row-delete"
+                    title="删除"
+                    :disabled="mcpState.loading || mcpState.saving"
                     @click="removeMcp(i)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_DELETE" />
                     </svg>
-                    删除
                   </button>
                 </div>
               </div>
@@ -1756,7 +1841,7 @@ function canInstall(p: PluginCatalogItem): boolean {
                       placeholder="值"
                     />
                     <button
-                      class="btn"
+                      class="btn btn-icon danger"
                       title="删除该环境变量"
                       @click="removeMcpEnvRow(i)"
                     >
@@ -1823,7 +1908,7 @@ function canInstall(p: PluginCatalogItem): boolean {
                       placeholder="值"
                     />
                     <button
-                      class="btn"
+                      class="btn btn-icon danger"
                       title="删除该请求头"
                       @click="removeMcpHeaderRow(i)"
                     >
@@ -1840,78 +1925,46 @@ function canInstall(p: PluginCatalogItem): boolean {
               <div class="model-config-actions">
                 <button
                   v-if="mcpForm.transport === 'stdio'"
-                  class="btn"
+                  class="btn btn-icon mcp-kv-add-btn"
+                  title="添加环境变量"
                   @click="addMcpEnvRow"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_PLUS" />
                   </svg>
-                  添加环境变量
                 </button>
                 <button
                   v-else
-                  class="btn"
+                  class="btn btn-icon mcp-kv-add-btn"
+                  title="添加请求头"
                   @click="addMcpHeaderRow"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_PLUS" />
                   </svg>
-                  添加请求头
                 </button>
-                <button class="btn primary" @click="confirmMcpForm">
-                  <svg
-                    v-if="mcpForm.editingIndex < 0"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
+                <button
+                  class="btn btn-icon primary mcp-form-submit"
+                  :title="mcpForm.editingIndex >= 0 ? '保存修改' : '添加'"
+                  :disabled="mcpState.saving || mcpState.loading"
+                  @click="confirmMcpForm"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_CHECK" />
                   </svg>
-                  <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_SAVE" />
-                  </svg>
-                  {{ mcpForm.editingIndex >= 0 ? "保存修改" : "添加" }}
                 </button>
-                <button class="btn" @click="closeMcpForm">
+                <button
+                  class="btn btn-icon mcp-form-cancel"
+                  title="取消"
+                  @click="closeMcpForm"
+                >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_CLOSE" />
                   </svg>
-                  取消
                 </button>
               </div>
             </div>
 
-            <div class="model-config-actions">
-              <button
-                class="btn primary"
-                :disabled="mcpState.saving || mcpState.loading"
-                @click="saveMcp"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_SAVE" />
-                </svg>
-                {{ mcpState.saving ? "保存中…" : "保存" }}
-              </button>
-              <button
-                class="btn model-config-reload-btn"
-                :disabled="mcpState.loading"
-                @click="loadMcp"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_REFRESH" />
-                </svg>
-                重读
-              </button>
-              <button
-                class="btn mcp-config-add-btn"
-                :disabled="mcpState.loading"
-                @click="openAddMcp"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_PLUS" />
-                </svg>
-                添加
-              </button>
-            </div>
           </div>
         </section>
 
@@ -1920,140 +1973,148 @@ function canInstall(p: PluginCatalogItem): boolean {
           class="settings-section settings-section-plugins"
         >
           <h2 class="settings-section-title">插件管理</h2>
-          <div class="plugin-manage">
-          <div class="plugin-manage-toolbar">
-            <button
-              class="btn"
-              :disabled="pluginState.loading"
-              @click="refreshPlugins(true)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_REFRESH" />
-              </svg>
-              {{ pluginState.loading ? "刷新中…" : "刷新目录" }}
-            </button>
-            <div class="plugin-market-add">
-              <input
-                v-model="pluginState.source"
-                placeholder="Git URL 或本地绝对路径"
-                @keydown.enter="doAddMarketplace"
-              />
-              <button
-                class="btn"
-                :disabled="pluginState.adding || !pluginState.source.trim()"
-                @click="doAddMarketplace"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_PLUS" />
-                </svg>
-                {{ pluginState.adding ? "添加中…" : "添加市场" }}
-              </button>
-            </div>
-          </div>
-
-          <div v-if="pluginState.loadErrors.length" class="plugin-load-errors">
-            <p
-              v-for="(err, i) in pluginState.loadErrors"
-              :key="i"
-              class="plugin-load-error"
-            >
-              市场「{{ err.name || "未知" }}」加载失败：{{ err.error }}
-            </p>
-          </div>
-
-          <div
-            v-if="pluginState.loading && !pluginState.marketplaces.length"
-            class="plugin-empty"
-          >
-            正在加载插件目录…
-          </div>
-          <div v-else-if="!pluginState.marketplaces.length" class="plugin-empty">
-            暂无可用市场
-          </div>
-          <div v-else class="plugin-marketplaces">
-            <div
-              v-for="mp in pluginState.marketplaces"
-              :key="mp.name"
-              class="plugin-marketplace"
-            >
-              <div
-                class="plugin-marketplace-head"
-                :class="{ collapsed: pluginState.collapsed[mp.name] }"
-                @click="toggleMarketplace(mp)"
-              >
-                <span class="plugin-marketplace-chevron" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path :d="ICON_CHEVRON_DOWN" />
-                  </svg>
-                </span>
-                <span class="plugin-marketplace-name">{{ mp.displayName }}</span>
-                <span class="plugin-marketplace-kind">
-                  {{ mp.isRemote ? "官方远程目录" : "本地市场" }}
-                </span>
+          <p class="settings-section-desc">
+            插件市场目录与本地安装管理
+          </p>
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>插件市场</h3>
+              <div class="model-config-head-actions">
                 <button
-                  v-if="!mp.isRemote"
-                  class="btn danger plugin-market-remove"
-                  @click.stop="doRemoveMarketplace(mp)"
+                  class="btn plugin-refresh-btn"
+                  :disabled="pluginState.loading"
+                  @click="refreshPlugins(true)"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_DELETE" />
+                    <path :d="ICON_REFRESH" />
                   </svg>
-                  移除市场
+                  {{ pluginState.loading ? "刷新中…" : "刷新目录" }}
                 </button>
               </div>
-              <template v-if="!pluginState.collapsed[mp.name]">
-                <div v-if="!mp.plugins.length" class="plugin-empty small">
-                  该市场暂无插件
-                </div>
-                <div v-else class="plugin-list">
-                  <div v-for="p in mp.plugins" :key="p.id" class="plugin-row">
-                    <div class="plugin-info">
-                      <div class="plugin-name">
-                        {{ p.displayName }}
-                        <span v-if="p.version" class="plugin-version">
-                          {{ p.version }}
-                        </span>
-                      </div>
-                      <div v-if="p.description" class="plugin-desc">
-                        {{ p.description }}
-                      </div>
-                      <div class="plugin-meta">
-                        <span class="plugin-status">{{ statusLabel(p) }}</span>
-                        <span
-                          v-if="p.disabledReason"
-                          class="plugin-disabled-reason"
-                        >
-                          {{ p.disabledReason }}
-                        </span>
-                      </div>
-                    </div>
-                    <button
-                      v-if="!p.installed"
-                      class="btn primary plugin-install-btn"
-                      :disabled="!canInstall(p) || !!pluginState.busy[p.id]"
-                      @click="doInstall(mp, p)"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="ICON_DOWNLOAD" />
-                      </svg>
-                      {{ pluginState.busy[p.id] ? "安装中…" : "安装" }}
-                    </button>
-                    <button
-                      v-else
-                      class="btn danger plugin-uninstall-btn"
-                      :disabled="!!pluginState.busy[p.id]"
-                      @click="doUninstall(p)"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="ICON_DELETE" />
-                      </svg>
-                      {{ pluginState.busy[p.id] ? "卸载中…" : "卸载" }}
-                    </button>
-                  </div>
-                </div>
-              </template>
             </div>
-          </div>
+            <div class="plugin-manage-toolbar">
+              <div class="plugin-market-add">
+                <input
+                  v-model="pluginState.source"
+                  placeholder="Git URL 或本地绝对路径"
+                  @keydown.enter="doAddMarketplace"
+                />
+                <button
+                  class="btn"
+                  :disabled="pluginState.adding || !pluginState.source.trim()"
+                  @click="doAddMarketplace"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                  {{ pluginState.adding ? "添加中…" : "添加市场" }}
+                </button>
+              </div>
+            </div>
+
+            <div v-if="pluginState.loadErrors.length" class="plugin-load-errors">
+              <p
+                v-for="(err, i) in pluginState.loadErrors"
+                :key="i"
+                class="plugin-load-error"
+              >
+                市场「{{ err.name || "未知" }}」加载失败：{{ err.error }}
+              </p>
+            </div>
+
+            <div
+              v-if="pluginState.loading && !pluginState.marketplaces.length"
+              class="plugin-empty"
+            >
+              正在加载插件目录…
+            </div>
+            <div v-else-if="!pluginState.marketplaces.length" class="plugin-empty">
+              暂无可用市场
+            </div>
+            <div v-else class="plugin-marketplaces">
+              <div
+                v-for="mp in pluginState.marketplaces"
+                :key="mp.name"
+                class="plugin-marketplace"
+              >
+                <div
+                  class="plugin-marketplace-head"
+                  :class="{ collapsed: pluginState.collapsed[mp.name] }"
+                  @click="toggleMarketplace(mp)"
+                >
+                  <span class="plugin-marketplace-chevron" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path :d="ICON_CHEVRON_DOWN" />
+                    </svg>
+                  </span>
+                  <span class="plugin-marketplace-name">{{ mp.displayName }}</span>
+                  <span class="plugin-marketplace-kind">
+                    {{ mp.isRemote ? "官方远程目录" : "本地市场" }}
+                  </span>
+                  <button
+                    v-if="!mp.isRemote"
+                    class="btn btn-icon danger plugin-market-remove"
+                    title="移除市场"
+                    @click.stop="doRemoveMarketplace(mp)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                  </button>
+                </div>
+                <template v-if="!pluginState.collapsed[mp.name]">
+                  <div v-if="!mp.plugins.length" class="plugin-empty small">
+                    该市场暂无插件
+                  </div>
+                  <div v-else class="plugin-list">
+                    <div v-for="p in mp.plugins" :key="p.id" class="plugin-row">
+                      <div class="plugin-info">
+                        <div class="plugin-name">
+                          {{ p.displayName }}
+                          <span v-if="p.version" class="plugin-version">
+                            {{ p.version }}
+                          </span>
+                        </div>
+                        <div v-if="p.description" class="plugin-desc">
+                          {{ p.description }}
+                        </div>
+                        <div class="plugin-meta">
+                          <span class="plugin-status">{{ statusLabel(p) }}</span>
+                          <span
+                            v-if="p.disabledReason"
+                            class="plugin-disabled-reason"
+                          >
+                            {{ p.disabledReason }}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        v-if="!p.installed"
+                        class="btn primary plugin-install-btn"
+                        :disabled="!canInstall(p) || !!pluginState.busy[p.id]"
+                        @click="doInstall(mp, p)"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path :d="ICON_DOWNLOAD" />
+                        </svg>
+                        {{ pluginState.busy[p.id] ? "安装中…" : "安装" }}
+                      </button>
+                      <button
+                        v-else
+                        class="btn danger plugin-uninstall-btn"
+                        :disabled="!!pluginState.busy[p.id]"
+                        @click="doUninstall(p)"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path :d="ICON_DELETE" />
+                        </svg>
+                        {{ pluginState.busy[p.id] ? "卸载中…" : "卸载" }}
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
         </section>
       </div>

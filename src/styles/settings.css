@@ -6,6 +6,12 @@
   gap: 12px;
 }
 
+/* 卡片内设置列表：行与行之间用细分隔线串联，避免边框嵌套 */
+.model-config-card > .settings,
+.settings-card > .settings {
+  gap: 0;
+}
+
 .setting-row {
   background: rgba(var(--overlay-rgb), 0.02);
   border: 1px solid var(--border);
@@ -18,11 +24,39 @@
   border-color: var(--border-light);
 }
 
+/* 卡片内的常规设置行：去边框去底色，仅保留分隔线与悬停底色 */
+.model-config-card > .settings > .setting-row:not(.model-config-row-error),
+.settings-card > .settings > .setting-row:not(.model-config-row-error),
+.model-provider-form > .setting-row:not(.model-config-row-error),
+.mcp-server-form > .setting-row:not(.model-config-row-error) {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(var(--border-rgb), 0.45);
+}
+
+.model-config-card > .settings > .setting-row:not(.model-config-row-error):hover,
+.settings-card > .settings > .setting-row:not(.model-config-row-error):hover,
+.model-provider-form > .setting-row:not(.model-config-row-error):hover,
+.mcp-server-form > .setting-row:not(.model-config-row-error):hover {
+  background: rgba(var(--overlay-rgb), 0.025);
+  border-bottom-color: rgba(var(--border-rgb), 0.7);
+}
+
+.model-config-card > .settings > .setting-row:not(.model-config-row-error):last-child,
+.settings-card > .settings > .setting-row:not(.model-config-row-error):last-child,
+.model-provider-form > .setting-row:not(.model-config-row-error):last-child,
+.mcp-server-form > .setting-row:not(.model-config-row-error):last-child {
+  border-bottom: none;
+}
+
 .setting-row label {
   display: block;
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-dim);
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .setting-row input[type="text"],
@@ -37,7 +71,7 @@
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 8px;
+  padding: 7px 10px;
   word-break: break-all;
   user-select: text;
 }
@@ -45,7 +79,7 @@
 .setting-path-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .setting-note {
@@ -70,15 +104,23 @@
 .checkbox-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 12.5px;
+  color: var(--text);
+}
+
+.checkbox-row label {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
   color: var(--text);
 }
 
 .checkbox-row input[type="checkbox"] {
   accent-color: var(--accent);
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
 }
 
@@ -124,12 +166,18 @@
   min-height: 0;
 }
 
-/* 按钮内图标通用排版（设置页所有 .btn 按钮） */
+/* 按钮统一：设置页所有 .btn 等高等距，图标尺寸一致 */
 .settings-page .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+  border-radius: 8px;
 }
 
 .settings-page .btn svg {
@@ -139,24 +187,91 @@
   flex-shrink: 0;
 }
 
+/* 纯图标型：卡片头重读、键值对行删除 */
+.settings-page .btn-icon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.settings-page .btn-icon:hover {
+  background: var(--chip-bg-hover);
+  border-color: transparent;
+}
+
+.settings-page .btn-icon:focus-visible {
+  outline: 2px solid var(--accent-glow);
+  outline-offset: -1px;
+}
+
+/* 表单提交的 ✓：无边框无底色，主题色图标，hover 主题色浅底 */
+.settings-page .btn-icon.primary {
+  background: transparent;
+  color: var(--accent);
+}
+
+.settings-page .btn-icon.primary:hover {
+  background: var(--accent-soft);
+  color: var(--accent-dim);
+  border-color: transparent;
+}
+
+/* 危险操作（删除）：红色图标，hover 红色浅底 */
+.settings-page .btn-icon.danger {
+  background: transparent;
+  color: var(--red);
+}
+
+.settings-page .btn-icon.danger:hover {
+  background: rgba(var(--red-rgb), 0.1);
+  color: var(--red);
+  border-color: transparent;
+}
+
+.settings-page .btn-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 控件与按钮同高：输入框 / 下拉 / 按钮统一 32px 高 */
+.settings-page input[type="text"],
+.settings-page input[type="password"],
+.settings-page select {
+  height: 32px;
+  padding: 6px 10px;
+}
+
+/* 卡片头部右侧：路径 + 重读图标 */
+.model-config-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 /* 左侧分类导航 */
 .settings-nav {
-  width: 150px;
+  width: 176px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 8px;
+  gap: 2px;
+  padding: 14px 10px;
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 
 .settings-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -165,6 +280,19 @@
   text-align: left;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
+}
+
+.settings-nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: height 0.15s ease;
 }
 
 .settings-nav-item:hover {
@@ -178,9 +306,13 @@
   font-weight: 600;
 }
 
+.settings-nav-item.active::before {
+  height: 16px;
+}
+
 .settings-nav-item svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   fill: currentColor;
   flex-shrink: 0;
 }
@@ -190,22 +322,42 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  padding: 16px 18px 24px;
+  padding: 20px 24px 32px;
 }
 
 .settings-section {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-width: 920px;
+  animation: settings-section-in 0.18s ease;
+}
+
+@keyframes settings-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .settings-section-title {
   margin: 0;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
-  color: var(--text-dim);
+  color: var(--text);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+}
+
+.settings-section-desc {
+  margin: -6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
 }
 
 .settings-page-foot {
@@ -285,24 +437,28 @@
 .plugin-marketplaces {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
 }
 
 .plugin-marketplace {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .plugin-marketplace-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  background: rgba(var(--overlay-rgb), 0.03);
+  padding: 10px 4px;
   border-bottom: 1px solid var(--border);
+  border-radius: 8px;
   cursor: pointer;
   user-select: none;
+  transition: background 0.15s ease;
+}
+
+.plugin-marketplace-head:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
 }
 
 .plugin-marketplace-chevron {
@@ -326,23 +482,21 @@
 
 .plugin-marketplace-name {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-bright);
 }
 
 .plugin-marketplace-kind {
-  font-size: 11px;
-  color: var(--text-faint);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
   border-radius: 999px;
-  padding: 2px 9px;
+  padding: 1px 6px;
+  flex-shrink: 0;
 }
 
 .plugin-market-remove {
   margin-left: auto;
-  padding: 4px 10px;
-  font-size: 11.5px;
 }
 
 .plugin-list {
@@ -354,8 +508,13 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 14px;
+  padding: 10px 4px;
   border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.plugin-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
 }
 
 .plugin-row:last-child {
@@ -405,12 +564,11 @@
 }
 
 .plugin-status {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.08);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  background: var(--accent-soft);
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 1px 6px;
 }
 
 .plugin-disabled-reason {
@@ -425,15 +583,20 @@
   min-width: 64px;
 }
 
-/* 模型配置 */
-.model-config-card {
+/* 通用卡片：模型配置 / 个性化 / 通用设置共用同一容器 */
+.model-config-card,
+.settings-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  background: rgba(var(--overlay-rgb), 0.02);
+  gap: 8px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--overlay-rgb), 0.035),
+    rgba(var(--overlay-rgb), 0.015)
+  );
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border-radius: 14px;
+  padding: 14px 18px;
 }
 
 .model-config-card-head {
@@ -441,17 +604,19 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
+  margin-bottom: 2px;
 }
 
 .model-config-card-head h3 {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-bright);
   flex-shrink: 0;
 }
 
 .model-config-path {
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.4;
   color: var(--text-dim);
@@ -474,6 +639,7 @@
   border: none;
   background: none;
   font: inherit;
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.4;
   color: var(--accent);
@@ -512,8 +678,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 2px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.model-provider-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
 }
 
 .model-provider-row:last-child {
@@ -563,9 +734,13 @@
 }
 
 .model-providers-empty {
+  padding: 18px;
+  text-align: center;
   font-size: 12px;
   color: var(--text-dim);
-  padding: 8px 2px;
+  background: rgba(var(--overlay-rgb), 0.02);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
 }
 
 .model-provider-form {
@@ -573,8 +748,8 @@
   flex-direction: column;
   gap: 10px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 14px 16px;
   background: rgba(var(--overlay-rgb), 0.02);
 }
 
@@ -637,8 +812,13 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 8px 2px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.skill-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
 }
 
 .skill-row:last-child {
@@ -699,8 +879,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 2px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.mcp-server-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
 }
 
 .mcp-server-row:last-child {
@@ -736,8 +921,8 @@
   flex-direction: column;
   gap: 10px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 14px 16px;
   background: rgba(var(--overlay-rgb), 0.02);
 }
 
@@ -811,4 +996,49 @@
 .custom-instructions-textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* 主题选择卡片：选中态增加对勾徽标，描述文字提升对比度 */
+.settings-page .theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.settings-page .theme-card {
+  position: relative;
+  flex: 1 1 150px;
+  min-width: 128px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+
+.settings-page .theme-swatch {
+  height: 48px;
+}
+
+.settings-page .theme-desc {
+  color: var(--text-dim);
+}
+
+.settings-page .theme-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 0 0 2px var(--bg-input);
+}
+
+.settings-page .theme-check svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
 }
