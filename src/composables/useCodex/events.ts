@@ -25,6 +25,8 @@ import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import { clearGoal, continueTurn, continueTurnForTab } from "./turnControl";
+import { tabs } from "../useTabs";
+import { isTabWorking } from "../../lib/tabs";
 import {
   goalStatusToast,
   isGoalStatus,
@@ -38,12 +40,13 @@ let unlisteners: UnlistenFn[] = [];
 let wired = false;
 
 
-/** 回合进行中时在任务栏显示不确定进度条，结束后隐藏（非 Tauri 环境静默忽略） */
+/** 任一标签（会话回合/目标续跑、终端命令执行）在工作时，任务栏显示不确定进度条；
+ * 全部结束后隐藏（非 Tauri 环境静默忽略）。与标签栏呼吸灯同源（isTabWorking）。 */
 async function updateTaskbarProgress() {
   try {
     const win = getCurrentWindow();
     await win.setProgressBar({
-      status: activeSessionTab()?.turnActive
+      status: tabs.some((t) => isTabWorking(t))
         ? ProgressBarStatus.Indeterminate
         : ProgressBarStatus.None,
     });
@@ -54,7 +57,7 @@ async function updateTaskbarProgress() {
 
 
 watch(
-  () => activeSessionTab()?.turnActive,
+  () => tabs.some((t) => isTabWorking(t)),
   () => void updateTaskbarProgress(),
   { immediate: true },
 );

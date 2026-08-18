@@ -4,6 +4,7 @@ import {
   buildEditorExtensions,
   createEditorState,
   editorTheme,
+  editorThemeSpec,
   languageForPath,
 } from "../editorSetup";
 
@@ -61,5 +62,14 @@ describe("buildEditorExtensions", () => {
 
   it("editorTheme 存在", () => {
     expect(editorTheme).toBeTruthy();
+  });
+});
+
+describe("editorTheme 查找面板按钮", () => {
+  it("按钮不叠加深色渐变（浅色主题黑字黑底修复）", () => {
+    const btn = editorThemeSpec[".cm-panels .cm-button"];
+    expect(btn.backgroundColor).toBe("var(--bg-active)");
+    expect(btn.backgroundImage).toBe("none");
+    expect(btn.color).toBe("var(--text-bright)");
   });
 });

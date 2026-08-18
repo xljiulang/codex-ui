@@ -93,83 +93,86 @@ export const editorHighlightStyle = HighlightStyle.define([
   { tag: tags.strong, fontWeight: "600" },
 ]);
 
-/** 编辑器外观：CSS 变量驱动，深色终端质感（与旧预览一致） */
-export const editorTheme = EditorView.theme(
-  {
-    "&": {
-      height: "100%",
-      fontSize: "12px",
-      backgroundColor: "var(--console-bg-deep)",
-      color: "var(--console-text)",
-    },
-    ".cm-scroller": {
-      fontFamily: "var(--mono)",
-      lineHeight: "1.55",
-      overflow: "auto",
-    },
-    ".cm-content": {
-      caretColor: "var(--accent)",
-      padding: "10px 0",
-    },
-    ".cm-line": {
-      padding: "0 12px 0 8px",
-    },
-    ".cm-gutters": {
-      backgroundColor: "transparent",
-      color: "var(--text-faint)",
-      border: "none",
-      paddingLeft: "8px",
-    },
-    ".cm-activeLine": {
-      backgroundColor: "rgba(var(--accent-rgb), 0.07)",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: "rgba(var(--accent-rgb), 0.09)",
-      color: "var(--text-dim)",
-    },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-      backgroundColor: "rgba(var(--accent-rgb), 0.28)",
-    },
-    ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--accent)",
-    },
-    ".cm-panels": {
-      backgroundColor: "var(--bg-panel)",
-      color: "var(--text)",
-    },
-    ".cm-panels.cm-panels-top": {
-      borderBottom: "1px solid var(--border)",
-    },
-    ".cm-panels .cm-textfield": {
-      backgroundColor: "var(--bg-input)",
-      color: "var(--text)",
-      border: "1px solid var(--border)",
-      borderRadius: "6px",
-      fontFamily: "var(--mono)",
-      fontSize: "12px",
-    },
-    ".cm-panels .cm-button": {
-      backgroundColor: "var(--bg-active)",
-      color: "var(--text-bright)",
-      border: "1px solid var(--border)",
-      borderRadius: "6px",
-      cursor: "pointer",
-      fontSize: "12px",
-    },
-    ".cm-panels label": {
-      color: "var(--text-dim)",
-      fontSize: "12px",
-    },
-    ".cm-searchMatch": {
-      backgroundColor: "rgba(var(--accent-rgb), 0.32)",
-      outline: "none",
-    },
-    ".cm-searchMatch.cm-searchMatch-selected": {
-      backgroundColor: "rgba(229, 214, 160, 0.45)",
-    },
+/** 编辑器外观主题 spec：CSS 变量驱动，深色终端质感（与旧预览一致）。
+ * 独立命名便于测试（如查找面板按钮配色）。 */
+export const editorThemeSpec = {
+  "&": {
+    height: "100%",
+    fontSize: "12px",
+    backgroundColor: "var(--console-bg-deep)",
+    color: "var(--console-text)",
   },
-  { dark: true },
-);
+  ".cm-scroller": {
+    fontFamily: "var(--mono)",
+    lineHeight: "1.55",
+    overflow: "auto",
+  },
+  ".cm-content": {
+    caretColor: "var(--accent)",
+    padding: "10px 0",
+  },
+  ".cm-line": {
+    padding: "0 12px 0 8px",
+  },
+  ".cm-gutters": {
+    backgroundColor: "transparent",
+    color: "var(--text-faint)",
+    border: "none",
+    paddingLeft: "8px",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "rgba(var(--accent-rgb), 0.07)",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "rgba(var(--accent-rgb), 0.09)",
+    color: "var(--text-dim)",
+  },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
+    backgroundColor: "rgba(var(--accent-rgb), 0.28)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--accent)",
+  },
+  ".cm-panels": {
+    backgroundColor: "var(--bg-panel)",
+    color: "var(--text)",
+  },
+  ".cm-panels.cm-panels-top": {
+    borderBottom: "1px solid var(--border)",
+  },
+  ".cm-panels .cm-textfield": {
+    backgroundColor: "var(--bg-input)",
+    color: "var(--text)",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    fontFamily: "var(--mono)",
+    fontSize: "12px",
+  },
+  ".cm-panels .cm-button": {
+    backgroundColor: "var(--bg-active)",
+    color: "var(--text-bright)",
+    // 覆盖 CodeMirror 基础主题 &dark .cm-button 的近黑渐变，避免浅色主题下黑字黑底
+    backgroundImage: "none",
+    border: "1px solid var(--border)",
+    borderRadius: "6px",
+    cursor: "pointer",
+    fontSize: "12px",
+  },
+  ".cm-panels label": {
+    color: "var(--text-dim)",
+    fontSize: "12px",
+  },
+  ".cm-searchMatch": {
+    backgroundColor: "rgba(var(--accent-rgb), 0.32)",
+    outline: "none",
+  },
+  ".cm-searchMatch.cm-searchMatch-selected": {
+    backgroundColor: "rgba(229, 214, 160, 0.45)",
+  },
+};
+
+/** 编辑器外观主题（深色基调；控件颜色由 CSS 变量随应用主题切换） */
+export const editorTheme = EditorView.theme(editorThemeSpec, { dark: true });
 
 /** 扩展名 → CodeMirror 语言扩展；无法识别返回 null（纯文本） */
 export function languageForPath(path: string): Extension | null {

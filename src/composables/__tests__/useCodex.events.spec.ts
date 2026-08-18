@@ -11,7 +11,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { flushPromises } from "@vue/test-utils";
+import { reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TabIcon, TabKind } from "../../lib/tabs";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -108,6 +110,70 @@ describe("服务端 error/warning 事件 toast 本地化", () => {
     expect(store.toast).toBe("some future warning");
   });
 });
+
+describe("任务栏进度条跟随工作标签", () => {
+  beforeEach(() => {
+    mockWin.setProgressBar.mockClear();
+  });
+
+  afterEach(() => {
+    // __resetSessionTabsForTest 只清理会话标签；终端等编辑器标签需显式清空，
+    // 避免残留污染后续依赖 tabs[0] 的用例
+    tabs.splice(0, tabs.length);
+  });
+
+  it("会话回合进行中（含非活动标签）→ Indeterminate，结束后 None", async () => {
+    const tab = reactive(makeSessionTab("s1", "t1", { turnActive: true }));
+    tabs.push(tab);
+    await flushPromises();
+    expect(mockWin.setProgressBar).toHaveBeenLastCalledWith({
+      status: "Indeterminate",
+    });
+
+    tab.turnActive = false;
+    await flushPromises();
+    expect(mockWin.setProgressBar).toHaveBeenLastCalledWith({ status: "None" });
+  });
+
+  it("目标激活（goalStatus active）→ Indeterminate", async () => {
+    tabs.push(
+      reactive(
+        makeSessionTab("s1", "t1", {
+          goalStatus: "active",
+          goalArmed: true,
+        }),
+      ),
+    );
+    await flushPromises();
+    expect(mockWin.setProgressBar).toHaveBeenLastCalledWith({
+      status: "Indeterminate",
+    });
+  });
+
+  it("终端命令执行中 → Indeterminate，结束后 None", async () => {
+    const terminal = reactive({
+      id: "term1",
+      kind: TabKind.Terminal,
+      title: "终端 (cmd)",
+      icon: TabIcon.Terminal,
+      workspace: "D:/repo",
+      loading: false,
+      busy: true,
+      exited: false,
+      error: "",
+    });
+    tabs.push(terminal as unknown as SessionTab);
+    await flushPromises();
+    expect(mockWin.setProgressBar).toHaveBeenLastCalledWith({
+      status: "Indeterminate",
+    });
+
+    terminal.busy = false;
+    await flushPromises();
+    expect(mockWin.setProgressBar).toHaveBeenLastCalledWith({ status: "None" });
+  });
+});
+
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
