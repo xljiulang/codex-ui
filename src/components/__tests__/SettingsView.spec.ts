@@ -249,7 +249,7 @@ describe("SettingsView 模型配置", () => {
     const missing = wrapper.findAll(".model-config-missing");
     expect(missing.length).toBe(3);
     expect(missing[0].text()).toContain("文件不存在，保存时将新建");
-    expect(wrapper.find(".model-config-path-link").exists()).toBe(false);
+    expect(wrapper.find(".model-config-title-link").exists()).toBe(false);
   });
 
   it("三张卡片保存按钮文案均为「保存」", async () => {
@@ -303,10 +303,10 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS.md 已保存");
   });
 
-  it("点击 config.toml 路径在应用内打开", async () => {
+  it("点击 config.toml 标题在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-path-link");
+    const links = wrapper.findAll(".model-config-title-link");
     expect(links.length).toBe(3);
     await links[0].trigger("click");
     await flushPromises();
@@ -318,10 +318,10 @@ describe("SettingsView 模型配置", () => {
     ).toBe(false);
   });
 
-  it("点击 models.json 路径在应用内打开", async () => {
+  it("点击 models.json 标题在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-path-link");
+    const links = wrapper.findAll(".model-config-title-link");
     await links[1].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -329,10 +329,10 @@ describe("SettingsView 模型配置", () => {
     );
   });
 
-  it("点击 AGENTS.md 路径在应用内打开", async () => {
+  it("点击 AGENTS.md 标题在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-path-link");
+    const links = wrapper.findAll(".model-config-title-link");
     await links[2].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -344,7 +344,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(false);
     const wrapper = mount(SettingsView);
     await flushPromises();
-    await wrapper.findAll(".model-config-path-link")[0].trigger("click");
+    await wrapper.findAll(".model-config-title-link")[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/config.toml",
@@ -364,7 +364,7 @@ describe("SettingsView 模型配置", () => {
       ([name]) => name === "model_config_read",
     ).length;
     const cards = wrapper.findAll(".model-config-card");
-    await cards[0].find(".model-config-refresh-btn").trigger("click");
+    await cards[0].find(".model-config-reload-btn").trigger("click");
     await flushPromises();
     expect(
       mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
@@ -388,9 +388,9 @@ describe("SettingsView 模型配置", () => {
       ([name]) => name === "custom_instructions_read",
     ).length;
     const cards = wrapper.findAll(".model-config-card");
-    await cards[1].find(".model-config-refresh-btn").trigger("click");
+    await cards[1].find(".model-config-reload-btn").trigger("click");
     await flushPromises();
-    await cards[2].find(".model-config-refresh-btn").trigger("click");
+    await cards[2].find(".model-config-reload-btn").trigger("click");
     await flushPromises();
     expect(
       mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
@@ -1095,5 +1095,109 @@ describe("SettingsView 插件管理", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("管理员已禁用");
     expect(wrapper.find(".plugin-install-btn").attributes("disabled")).toBeDefined();
+  });
+});
+
+describe("SettingsView 按钮图标", () => {
+  let wrapper: ReturnType<typeof mount> | undefined;
+
+  const sampleModelConfig = {
+    config_path: "C:/apps/codex-ui/.codex/config.toml",
+    config_exists: true,
+    model: "deepseek-v4-flash",
+    model_reasoning_effort: "high",
+    model_provider: "codex-ui",
+    forced_login_method: "api",
+    model_catalog_json: "models.json",
+    preferred_auth_method: "apikey",
+    wire_api: "responses",
+    name: "deepseek",
+    base_url: "https://api.deepseek.com/",
+    experimental_bearer_token: "你的 DeepSeek API Key",
+    models_json_path: "C:/apps/codex-ui/.codex/models.json",
+    models_json_exists: true,
+    models_json: '{\n  "models": []\n}',
+  };
+  const sampleAgentsState = {
+    agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
+    exists: true,
+    content: "# AGENTS.md\n",
+  };
+
+  beforeEach(() => {
+    __resetTabsForTest();
+    __resetSessionTabsForTest();
+    store.toast = "";
+    store.confirm = null;
+    store.settings.codex_path = "C:/tools/codex.exe";
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "pdf",
+                  name: "pdf",
+                  installed: false,
+                  interface: { displayName: "PDF" },
+                },
+                {
+                  id: "browser",
+                  name: "browser",
+                  installed: true,
+                  enabled: true,
+                  interface: { displayName: "Browser" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve({});
+    });
+    mockedSave.mockClear();
+    mockedSave.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = undefined;
+  });
+
+  it("导航与主要操作按钮均渲染图标且文案不以省略号结尾", async () => {
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const selectors = [
+      ".settings-nav-item",
+      ".model-config-title-link",
+      ".model-config-actions button.primary",
+      ".model-config-reload-btn",
+      "button.codex-pick-btn",
+      "button.codex-clear-btn",
+      "button.memory-reset-btn",
+      ".plugin-manage-toolbar > .btn",
+      ".plugin-market-add .btn",
+      ".plugin-market-remove",
+      ".plugin-install-btn",
+      ".plugin-uninstall-btn",
+    ];
+    for (const sel of selectors) {
+      const buttons = wrapper.findAll(sel);
+      expect(buttons.length, `${sel} 未找到按钮`).toBeGreaterThan(0);
+      for (const btn of buttons) {
+        expect(btn.find("svg").exists(), `${sel} 缺少图标`).toBe(true);
+        expect(
+          btn.text().trim().endsWith("…"),
+          `${sel} 文案不应以省略号结尾`,
+        ).toBe(false);
+      }
+    }
   });
 });

@@ -123,6 +123,21 @@
   min-height: 0;
 }
 
+/* 按钮内图标通用排版（设置页所有 .btn 按钮） */
+.settings-page .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.settings-page .btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
 /* 左侧分类导航 */
 .settings-nav {
   width: 150px;
@@ -138,6 +153,7 @@
 .settings-nav-item {
   display: flex;
   align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 8px 10px;
   border: none;
@@ -159,6 +175,13 @@
   background: rgba(var(--accent-rgb), 0.1);
   color: var(--accent);
   font-weight: 600;
+}
+
+.settings-nav-item svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  flex-shrink: 0;
 }
 
 /* 右侧内容面板 */
@@ -427,15 +450,6 @@
   flex-shrink: 0;
 }
 
-.model-config-head-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-  justify-content: flex-end;
-}
-
 .model-config-path {
   font-size: 11px;
   line-height: 1.4;
@@ -443,69 +457,44 @@
   word-break: break-all;
   user-select: text;
   text-align: right;
+  min-width: 0;
 }
 
 .model-config-missing {
   color: var(--red);
 }
 
-.model-config-path-link {
-  display: block;
-  flex: 1;
-  min-width: 0;
+.model-config-title-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   margin: 0;
   padding: 0;
   border: none;
   background: none;
   font: inherit;
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--accent);
-  text-align: right;
-  word-break: break-all;
   cursor: pointer;
-  user-select: text;
 }
 
-.model-config-path-link:hover {
+.model-config-title-link:hover {
   color: var(--accent-dim);
   text-decoration: underline;
 }
 
-.model-config-refresh-btn {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.model-config-refresh-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
-
-.model-config-refresh-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.model-config-refresh-btn svg {
-  width: 14px;
-  height: 14px;
+.model-config-title-link svg {
+  width: 12px;
+  height: 12px;
   fill: currentColor;
+  flex-shrink: 0;
 }
 
 .model-config-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
