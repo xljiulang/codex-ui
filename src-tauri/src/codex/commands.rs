@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
 
 use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
+use crate::codex::custom_instructions;
+use crate::codex::model_config;
 use crate::codex::settings::{self, AppSettings};
 
 type Server = Arc<CodexServer>;
@@ -532,6 +534,36 @@ pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
 pub fn settings_set(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     settings::save(&dir, &settings)
+}
+
+/// 读取模型配置（CODEX_HOME/config.toml 与 models.json），供设置页「模型配置」Tab 使用。
+#[tauri::command]
+pub fn model_config_read() -> Result<model_config::ModelConfigState, String> {
+    model_config::read_state()
+}
+
+/// 保存 config.toml：只更新受管键（5 个可编辑值 + 5 个固定值），其余内容保留。
+#[tauri::command]
+pub fn model_config_save(input: model_config::ModelConfigEdit) -> Result<(), String> {
+    model_config::save_config(&input)
+}
+
+/// 保存 models.json 原文：内容必须非空且为合法 JSON。
+#[tauri::command]
+pub fn models_json_save(content: String) -> Result<(), String> {
+    model_config::save_models_json(&content)
+}
+
+/// 读取自定义指令（CODEX_HOME/AGENTS.md），供设置页「模型配置」Tab 使用。
+#[tauri::command]
+pub fn custom_instructions_read() -> Result<custom_instructions::CustomInstructionsState, String> {
+    custom_instructions::read_state()
+}
+
+/// 保存自定义指令（CODEX_HOME/AGENTS.md）：原文写入，允许空内容。
+#[tauri::command]
+pub fn custom_instructions_save(content: String) -> Result<(), String> {
+    custom_instructions::save(&content)
 }
 
 #[cfg(test)]

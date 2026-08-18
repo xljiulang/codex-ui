@@ -25,9 +25,15 @@ import {
   previewTheme,
   type ThemeId,
 } from "../composables/useTheme";
-import { ICON_CHEVRON_DOWN } from "../lib/icons";
+import { openPathInApp } from "../composables/useSessionFs";
+import { ICON_CHEVRON_DOWN, ICON_REFRESH } from "../lib/icons";
 import { PERMISSION_MODES } from "../lib/permissions";
-import type { AppSettings, TerminalShell } from "../lib/types";
+import type {
+  AppSettings,
+  CustomInstructionsState,
+  ModelConfigState,
+  TerminalShell,
+} from "../lib/types";
 
 const codexPath = ref(store.settings.codex_path ?? "");
 const sound = ref(store.settings.sound_enabled);
@@ -40,6 +46,7 @@ const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSections = [
   { id: "personalization", label: "个性化" },
+  { id: "model-config", label: "模型配置" },
   { id: "general", label: "通用设置" },
   { id: "plugins", label: "插件管理" },
 ] as const;
@@ -49,6 +56,8 @@ const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
 
 onMounted(() => {
   void refreshPlugins();
+  void loadModelConfig();
+  void loadCustomInstructions();
 });
 
 /** 即时保存：任何设置项变更立即持久化（成功静默，失败 toast） */
@@ -120,6 +129,183 @@ function selectTheme(id: ThemeId) {
   theme.value = id;
   previewTheme(id);
   void persist({ theme: id });
+}
+
+// ---------- 模型配置 ----------
+
+/** config.toml / models.json 表单状态（字段与 Rust 端 model_config_read 返回一致） */
+const modelConfig = reactive({
+  loading: false,
+  savingConfig: false,
+  savingModelsJson: false,
+  config_path: "",
+  config_exists: false,
+  model: "",
+  model_reasoning_effort: "",
+  name: "",
+  base_url: "",
+  experimental_bearer_token: "",
+  models_json_path: "",
+  models_json_exists: false,
+  models_json: "",
+});
+
+/** 应用 config.toml 卡片字段（刷新该卡片时不影响 models.json 文本框） */
+function applyConfigCard(res: ModelConfigState) {
+  modelConfig.config_path = res.config_path;
+  modelConfig.config_exists = res.config_exists;
+  modelConfig.model = res.model;
+  modelConfig.model_reasoning_effort = res.model_reasoning_effort;
+  modelConfig.name = res.name;
+  modelConfig.base_url = res.base_url;
+  modelConfig.experimental_bearer_token = res.experimental_bearer_token;
+}
+
+/** 应用 models.json 卡片字段 */
+function applyModelsJsonCard(res: ModelConfigState) {
+  modelConfig.models_json_path = res.models_json_path;
+  modelConfig.models_json_exists = res.models_json_exists;
+  modelConfig.models_json = res.models_json;
+}
+
+async function loadModelConfig() {
+  modelConfig.loading = true;
+  try {
+    const res = await invoke<ModelConfigState>("model_config_read");
+    applyConfigCard(res);
+    applyModelsJsonCard(res);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    modelConfig.loading = false;
+  }
+}
+
+/** config.toml 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
+async function refreshModelConfig() {
+  modelConfig.loading = true;
+  try {
+    const res = await invoke<ModelConfigState>("model_config_read");
+    applyConfigCard(res);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    modelConfig.loading = false;
+  }
+}
+
+/** models.json 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
+async function refreshModelsJson() {
+  modelConfig.loading = true;
+  try {
+    const res = await invoke<ModelConfigState>("model_config_read");
+    applyModelsJsonCard(res);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    modelConfig.loading = false;
+  }
+}
+
+async function saveModelConfig() {
+  if (modelConfig.savingConfig || modelConfig.loading) return;
+  modelConfig.savingConfig = true;
+  try {
+    await invoke("model_config_save", {
+      input: {
+        model: modelConfig.model,
+        model_reasoning_effort: modelConfig.model_reasoning_effort,
+        name: modelConfig.name,
+        base_url: modelConfig.base_url,
+        experimental_bearer_token: modelConfig.experimental_bearer_token,
+      },
+    });
+    modelConfig.config_exists = true;
+    setToast("config.toml 已保存（重启应用后生效）");
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    modelConfig.savingConfig = false;
+  }
+}
+
+async function saveModelsJson() {
+  if (modelConfig.savingModelsJson || modelConfig.loading) return;
+  modelConfig.savingModelsJson = true;
+  try {
+    await invoke("models_json_save", { content: modelConfig.models_json });
+    modelConfig.models_json_exists = true;
+    setToast("models.json 已保存");
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    modelConfig.savingModelsJson = false;
+  }
+}
+
+/** 应用内打开文件（文本走编辑器标签），失败回退资源管理器定位 */
+async function openPathInAppOrReveal(path: string) {
+  if (!path) return;
+  const opened = await openPathInApp(path);
+  if (opened) return;
+  try {
+    await invoke("reveal_path", { path });
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+function openModelConfigFile() {
+  void openPathInAppOrReveal(modelConfig.config_path);
+}
+
+function openModelsJsonFile() {
+  void openPathInAppOrReveal(modelConfig.models_json_path);
+}
+
+// ---------- AGENTS.md 自定义指令 ----------
+
+/** CODEX_HOME/AGENTS.md 卡片状态 */
+const agents = reactive({
+  loading: false,
+  saving: false,
+  agents_path: "",
+  exists: false,
+  content: "",
+});
+
+async function loadCustomInstructions() {
+  agents.loading = true;
+  try {
+    const res = await invoke<CustomInstructionsState>(
+      "custom_instructions_read",
+    );
+    agents.agents_path = res.agents_path;
+    agents.exists = res.exists;
+    agents.content = res.content;
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    agents.loading = false;
+  }
+}
+
+async function saveCustomInstructions() {
+  if (agents.saving || agents.loading) return;
+  agents.saving = true;
+  try {
+    await invoke("custom_instructions_save", { content: agents.content });
+    agents.exists = true;
+    setToast("AGENTS.md 已保存（新会话生效）");
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    agents.saving = false;
+  }
+}
+
+function openAgentsFile() {
+  void openPathInAppOrReveal(agents.agents_path);
 }
 
 // ---------- 插件管理 ----------
@@ -316,11 +502,226 @@ function canInstall(p: PluginCatalogItem): boolean {
         </section>
 
         <section
+          v-show="activeSection === 'model-config'"
+          class="settings-section settings-section-model-config"
+        >
+          <h2 class="settings-section-title">模型配置</h2>
+
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>config.toml</h3>
+              <div class="model-config-head-right">
+                <button
+                  v-if="modelConfig.config_path && modelConfig.config_exists"
+                  type="button"
+                  class="model-config-path-link"
+                  title="在编辑器中打开文件"
+                  @click="openModelConfigFile"
+                >
+                  {{ modelConfig.config_path }}
+                </button>
+                <div v-else class="model-config-path">
+                  {{ modelConfig.config_path || "正在读取路径…" }}
+                  <span v-if="modelConfig.config_path && !modelConfig.config_exists" class="model-config-missing">
+                    （文件不存在，保存时将新建）
+                  </span>
+                </div>
+                <button
+                  class="model-config-refresh-btn"
+                  type="button"
+                  title="重新从磁盘读取"
+                  :disabled="modelConfig.loading"
+                  @click="refreshModelConfig"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="settings">
+              <div class="setting-row">
+                <label for="model-config-model">model</label>
+                <input
+                  id="model-config-model"
+                  v-model="modelConfig.model"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                  placeholder="如 deepseek-v4-flash"
+                />
+              </div>
+              <div class="setting-row">
+                <label for="model-config-effort">model_reasoning_effort</label>
+                <input
+                  id="model-config-effort"
+                  v-model="modelConfig.model_reasoning_effort"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                  placeholder="low / high / max"
+                />
+              </div>
+              <div class="setting-row">
+                <label for="model-config-provider-name">name（模型提供方名称）</label>
+                <input
+                  id="model-config-provider-name"
+                  v-model="modelConfig.name"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                />
+              </div>
+              <div class="setting-row">
+                <label for="model-config-base-url">base_url</label>
+                <input
+                  id="model-config-base-url"
+                  v-model="modelConfig.base_url"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                  placeholder="https://api.deepseek.com/"
+                />
+              </div>
+              <div class="setting-row">
+                <label for="model-config-token">experimental_bearer_token</label>
+                <input
+                  id="model-config-token"
+                  v-model="modelConfig.experimental_bearer_token"
+                  type="text"
+                  :disabled="modelConfig.loading"
+                  placeholder="你的 DeepSeek API Key"
+                />
+              </div>
+            </div>
+
+            <div class="model-config-actions">
+              <button
+                class="btn primary"
+                :disabled="modelConfig.savingConfig || modelConfig.loading"
+                @click="saveModelConfig"
+              >
+                {{ modelConfig.savingConfig ? "保存中…" : "保存" }}
+              </button>
+            </div>
+          </div>
+
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>models.json</h3>
+              <div class="model-config-head-right">
+                <button
+                  v-if="modelConfig.models_json_path && modelConfig.models_json_exists"
+                  type="button"
+                  class="model-config-path-link"
+                  title="在编辑器中打开文件"
+                  @click="openModelsJsonFile"
+                >
+                  {{ modelConfig.models_json_path }}
+                </button>
+                <div v-else class="model-config-path">
+                  {{ modelConfig.models_json_path || "正在读取路径…" }}
+                  <span v-if="modelConfig.models_json_path && !modelConfig.models_json_exists" class="model-config-missing">
+                    （文件不存在，保存时将新建）
+                  </span>
+                </div>
+                <button
+                  class="model-config-refresh-btn"
+                  type="button"
+                  title="重新从磁盘读取"
+                  :disabled="modelConfig.loading"
+                  @click="refreshModelsJson"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <textarea
+              v-model="modelConfig.models_json"
+              class="model-config-textarea"
+              :disabled="modelConfig.loading"
+              placeholder="在此编辑 models.json 文件内容（必须是合法 JSON）"
+              spellcheck="false"
+            ></textarea>
+            <div class="model-config-actions">
+              <button
+                class="btn primary"
+                :disabled="modelConfig.savingModelsJson || modelConfig.loading"
+                @click="saveModelsJson"
+              >
+                {{ modelConfig.savingModelsJson ? "保存中…" : "保存" }}
+              </button>
+            </div>
+          </div>
+
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>AGENTS.md</h3>
+              <div class="model-config-head-right">
+                <button
+                  v-if="agents.agents_path && agents.exists"
+                  type="button"
+                  class="model-config-path-link"
+                  title="在编辑器中打开文件"
+                  @click="openAgentsFile"
+                >
+                  {{ agents.agents_path }}
+                </button>
+                <div v-else class="model-config-path">
+                  {{ agents.agents_path || "正在读取路径…" }}
+                  <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
+                    （文件不存在，保存时将新建）
+                  </span>
+                </div>
+                <button
+                  class="model-config-refresh-btn"
+                  type="button"
+                  title="重新从磁盘读取"
+                  :disabled="agents.loading || agents.saving"
+                  @click="loadCustomInstructions"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <textarea
+              v-model="agents.content"
+              class="custom-instructions-textarea"
+              :disabled="agents.loading"
+              placeholder="在此编辑 AGENTS.md 内容（Codex 全局自定义指令）"
+              spellcheck="false"
+            ></textarea>
+            <div class="model-config-actions">
+              <button
+                class="btn primary"
+                :disabled="agents.saving || agents.loading"
+                @click="saveCustomInstructions"
+              >
+                {{ agents.saving ? "保存中…" : "保存" }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section
           v-show="activeSection === 'general'"
           class="settings-section settings-section-general"
         >
-          <h2 class="settings-section-title">通用</h2>
+          <h2 class="settings-section-title">通用设置</h2>
           <div class="settings">
+
+          <div class="setting-row">
+            <label>终端 Shell</label>
+            <select
+              v-model="terminalShell"
+              class="terminal-shell-select"
+              @change="persist({ terminal_shell: terminalShell })"
+            >
+              <option value="cmd">cmd（命令提示符）</option>
+              <option value="powershell">PowerShell</option>
+            </select>
+          </div>
 
           <div class="setting-row">
             <label>跟进处理方式</label>
@@ -383,18 +784,6 @@ function canInstall(p: PluginCatalogItem): boolean {
             <p v-if="!codexPath && store.server.codexPath" class="setting-note">
               当前使用（自动检测）：{{ store.server.codexPath }}
             </p>
-          </div>
-
-          <div class="setting-row">
-            <label>终端 Shell</label>
-            <select
-              v-model="terminalShell"
-              class="terminal-shell-select"
-              @change="persist({ terminal_shell: terminalShell })"
-            >
-              <option value="cmd">cmd（命令提示符）</option>
-              <option value="powershell">PowerShell</option>
-            </select>
           </div>
           </div>
         </section>

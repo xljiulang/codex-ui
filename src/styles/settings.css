@@ -400,3 +400,151 @@
   flex-shrink: 0;
   min-width: 64px;
 }
+
+/* 模型配置 */
+.model-config-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(var(--overlay-rgb), 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.model-config-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-config-card-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.model-config-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.model-config-path {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+  text-align: right;
+}
+
+.model-config-missing {
+  color: var(--red);
+}
+
+.model-config-path-link {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--accent);
+  text-align: right;
+  word-break: break-all;
+  cursor: pointer;
+  user-select: text;
+}
+
+.model-config-path-link:hover {
+  color: var(--accent-dim);
+  text-decoration: underline;
+}
+
+.model-config-refresh-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.model-config-refresh-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.model-config-refresh-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.model-config-refresh-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.model-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-config-textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.model-config-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.custom-instructions-textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+
+.custom-instructions-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}

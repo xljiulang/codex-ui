@@ -176,6 +176,32 @@ export interface AppSettings {
   terminal_shell: TerminalShell;
 }
 
+/** 模型配置（config.toml / models.json）读取结果，字段与 Rust 端一致 */
+export interface ModelConfigState {
+  config_path: string;
+  config_exists: boolean;
+  model: string;
+  model_reasoning_effort: string;
+  model_provider: string;
+  forced_login_method: string;
+  model_catalog_json: string;
+  preferred_auth_method: string;
+  wire_api: string;
+  name: string;
+  base_url: string;
+  experimental_bearer_token: string;
+  models_json_path: string;
+  models_json_exists: boolean;
+  models_json: string;
+}
+
+/** 自定义指令（CODEX_HOME/AGENTS.md）读取结果，字段与 Rust 端一致 */
+export interface CustomInstructionsState {
+  agents_path: string;
+  exists: boolean;
+  content: string;
+}
+
 export interface AuthStatus {
   authMethod?: string | null;
   authToken?: string | null;

@@ -6,10 +6,15 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, saveSettings: vi.fn() };
 });
+vi.mock("../../composables/useSessionFs", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../../composables/useSessionFs")>();
+  return { ...mod, openPathInApp: vi.fn() };
+});
 
 import { invoke } from "@tauri-apps/api/core";
 import SettingsView from "../SettingsView.vue";
 import { saveSettings, settleConfirm, store } from "../../composables/useCodex";
+import { openPathInApp } from "../../composables/useSessionFs";
 import {
   activeTabId,
   openSettingsTab,
@@ -25,6 +30,7 @@ const tabs = _tabs as unknown as SessionTab[];
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedSave = vi.mocked(saveSettings);
+const mockedOpenPathInApp = vi.mocked(openPathInApp);
 
 /** 打开设置标签并激活会话 s1（供「关闭/取消/保存」类测试使用） */
 function mountWithSettingsTab() {
@@ -44,13 +50,13 @@ describe("SettingsView codex 可执行文件选择", () => {
     mockedSave.mockResolvedValue(undefined);
   });
 
-  it("渲染只读路径与选择按钮，不再渲染文本输入框", () => {
+  it("渲染只读路径与选择按钮，路径行不再渲染文本输入框", () => {
     const wrapper = mount(SettingsView);
     const row = wrapper.find(".codex-path-row");
     expect(row.exists()).toBe(true);
     expect(row.find(".codex-path-value").text()).toContain("C:/tools/codex.exe");
     expect(row.find("button.codex-pick-btn").text()).toContain("选择文件");
-    expect(wrapper.find('input[type="text"]').exists()).toBe(false);
+    expect(row.find('input[type="text"]').exists()).toBe(false);
   });
 
   it("空路径时显示未设置提示，无清除按钮", () => {
@@ -134,6 +140,290 @@ describe("SettingsView codex 可执行文件选择", () => {
   });
 });
 
+describe("SettingsView 模型配置", () => {
+  const sampleModelConfig = {
+    config_path: "C:/apps/codex-ui/.codex/config.toml",
+    config_exists: true,
+    model: "deepseek-v4-flash",
+    model_reasoning_effort: "high",
+    model_provider: "codex-ui",
+    forced_login_method: "api",
+    model_catalog_json: "models.json",
+    preferred_auth_method: "apikey",
+    wire_api: "responses",
+    name: "deepseek",
+    base_url: "https://api.deepseek.com/",
+    experimental_bearer_token: "你的 DeepSeek API Key",
+    models_json_path: "C:/apps/codex-ui/.codex/models.json",
+    models_json_exists: true,
+    models_json: '{\n  "models": []\n}',
+  };
+  const sampleAgentsState = {
+    agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
+    exists: true,
+    content: "# AGENTS.md\n\nWindows 环境。\n",
+  };
+
+  beforeEach(() => {
+    store.toast = "";
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    mockedSave.mockClear();
+    mockedOpenPathInApp.mockReset();
+    mockedOpenPathInApp.mockResolvedValue(true);
+  });
+
+  it("导航中「模型配置」位于「个性化」之后", () => {
+    const wrapper = mount(SettingsView);
+    const labels = wrapper
+      .findAll(".settings-nav-item")
+      .map((i) => i.text().trim());
+    expect(labels.indexOf("个性化")).toBe(0);
+    expect(labels.indexOf("模型配置")).toBe(1);
+  });
+
+  it("挂载时调用读取命令并填充三张卡片", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("model_config_read");
+    expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_read");
+    expect(
+      (wrapper.find("input#model-config-model").element as HTMLInputElement)
+        .value,
+    ).toBe("deepseek-v4-flash");
+    expect(
+      (
+        wrapper.find("input#model-config-effort").element as HTMLInputElement
+      ).value,
+    ).toBe("high");
+    expect(
+      (
+        wrapper.find("input#model-config-base-url").element as HTMLInputElement
+      ).value,
+    ).toBe("https://api.deepseek.com/");
+    expect(
+      (
+        wrapper.find("input#model-config-token").element as HTMLInputElement
+      ).value,
+    ).toBe("你的 DeepSeek API Key");
+    expect(
+      (
+        wrapper.find("textarea.model-config-textarea")
+          .element as HTMLTextAreaElement
+      ).value,
+    ).toBe('{\n  "models": []\n}');
+    expect(
+      (
+        wrapper.find("textarea.custom-instructions-textarea")
+          .element as HTMLTextAreaElement
+      ).value,
+    ).toBe("# AGENTS.md\n\nWindows 环境。\n");
+    expect(wrapper.findAll(".model-config-card").length).toBe(3);
+    expect(wrapper.find(".model-config-missing").exists()).toBe(false);
+  });
+
+  it("文件缺失时显示示例值与新建提示", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          config_exists: false,
+          models_json_exists: false,
+          models_json: "",
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve({ ...sampleAgentsState, exists: false, content: "" });
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(
+      (wrapper.find("input#model-config-model").element as HTMLInputElement)
+        .value,
+    ).toBe("deepseek-v4-flash");
+    const missing = wrapper.findAll(".model-config-missing");
+    expect(missing.length).toBe(3);
+    expect(missing[0].text()).toContain("文件不存在，保存时将新建");
+    expect(wrapper.find(".model-config-path-link").exists()).toBe(false);
+  });
+
+  it("三张卡片保存按钮文案均为「保存」", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const saveButtons = wrapper.findAll(
+      ".model-config-card .model-config-actions button.primary",
+    );
+    expect(saveButtons.map((b) => b.text().trim())).toEqual(["保存", "保存", "保存"]);
+  });
+
+  it("点 config.toml 卡「保存」调用 model_config_save 并提交 5 个可编辑值", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const cards = wrapper.findAll(".model-config-card");
+    await cards[0].find(".model-config-actions button.primary").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("model_config_save", {
+      input: {
+        model: "deepseek-v4-flash",
+        model_reasoning_effort: "high",
+        name: "deepseek",
+        base_url: "https://api.deepseek.com/",
+        experimental_bearer_token: "你的 DeepSeek API Key",
+      },
+    });
+    expect(store.toast).toContain("config.toml 已保存");
+  });
+
+  it("点 models.json 卡「保存」调用 models_json_save", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const cards = wrapper.findAll(".model-config-card");
+    await cards[1].find(".model-config-actions button.primary").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("models_json_save", {
+      content: '{\n  "models": []\n}',
+    });
+    expect(store.toast).toContain("models.json 已保存");
+  });
+
+  it("点 AGENTS.md 卡「保存」调用 custom_instructions_save", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const cards = wrapper.findAll(".model-config-card");
+    await cards[2].find(".model-config-actions button.primary").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_save", {
+      content: "# AGENTS.md\n\nWindows 环境。\n",
+    });
+    expect(store.toast).toContain("AGENTS.md 已保存");
+  });
+
+  it("点击 config.toml 路径在应用内打开", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const links = wrapper.findAll(".model-config-path-link");
+    expect(links.length).toBe(3);
+    await links[0].trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/config.toml",
+    );
+    expect(
+      mockedInvoke.mock.calls.some(([name]) => name === "reveal_path"),
+    ).toBe(false);
+  });
+
+  it("点击 models.json 路径在应用内打开", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const links = wrapper.findAll(".model-config-path-link");
+    await links[1].trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/models.json",
+    );
+  });
+
+  it("点击 AGENTS.md 路径在应用内打开", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const links = wrapper.findAll(".model-config-path-link");
+    await links[2].trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/AGENTS.md",
+    );
+  });
+
+  it("应用内打开失败时回退 reveal_path", async () => {
+    mockedOpenPathInApp.mockResolvedValue(false);
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.findAll(".model-config-path-link")[0].trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/config.toml",
+    );
+    expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
+      path: "C:/apps/codex-ui/.codex/config.toml",
+    });
+  });
+
+  it("config.toml 刷新不重置 models.json 文本框", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .find("textarea.model-config-textarea")
+      .setValue('{\n  "models": [],\n  "edited": true\n}');
+    const readCallsBefore = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "model_config_read",
+    ).length;
+    const cards = wrapper.findAll(".model-config-card");
+    await cards[0].find(".model-config-refresh-btn").trigger("click");
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
+        .length,
+    ).toBe(readCallsBefore + 1);
+    expect(
+      (
+        wrapper.find("textarea.model-config-textarea")
+          .element as HTMLTextAreaElement
+      ).value,
+    ).toBe('{\n  "models": [],\n  "edited": true\n}');
+  });
+
+  it("models.json 与 AGENTS.md 刷新重新从磁盘读取", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const readCallsBefore = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "model_config_read",
+    ).length;
+    const agentsCallsBefore = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "custom_instructions_read",
+    ).length;
+    const cards = wrapper.findAll(".model-config-card");
+    await cards[1].find(".model-config-refresh-btn").trigger("click");
+    await flushPromises();
+    await cards[2].find(".model-config-refresh-btn").trigger("click");
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
+        .length,
+    ).toBe(readCallsBefore + 1);
+    expect(
+      mockedInvoke.mock.calls.filter(
+        ([name]) => name === "custom_instructions_read",
+      ).length,
+    ).toBe(agentsCallsBefore + 1);
+  });
+
+  it("不再展示固定值 UI", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find(".model-config-fixed").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("固定值");
+  });
+
+  it("读取失败时展示错误提示", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read")
+        return Promise.reject(new Error("config.toml 解析失败: 语法错误"));
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    mount(SettingsView);
+    await flushPromises();
+    expect(store.toast).toContain("config.toml 解析失败");
+  });
+});
+
 describe("SettingsView 设置标签行为", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
@@ -166,25 +456,28 @@ describe("SettingsView 设置标签行为", () => {
     expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
   });
 
-  it("个性化 / 通用 / 插件管理三个分区均渲染", () => {
+  it("个性化 / 模型配置 / 通用设置 / 插件管理四个分区均渲染", () => {
     wrapper = mount(SettingsView);
     const titles = wrapper.findAll(".settings-section-title").map((s) => s.text());
     expect(titles).toContain("个性化");
-    expect(titles).toContain("通用");
+    expect(titles).toContain("模型配置");
+    expect(titles).toContain("通用设置");
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染三个分类，默认选中第一个", () => {
+  it("左侧导航渲染四个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "个性化",
+      "模型配置",
       "通用设置",
       "插件管理",
     ]);
     expect(items[0].classes()).toContain("active");
     expect(items[1].classes()).not.toContain("active");
     expect(items[2].classes()).not.toContain("active");
+    expect(items[3].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;
@@ -198,9 +491,10 @@ describe("SettingsView 设置标签行为", () => {
   it("点击「插件管理」切换右侧面板", async () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
-    await items[2].trigger("click");
+    const pluginItem = items.find((i) => i.text().includes("插件管理"))!;
+    await pluginItem.trigger("click");
     expect(items[0].classes()).not.toContain("active");
-    expect(items[2].classes()).toContain("active");
+    expect(pluginItem.classes()).toContain("active");
     const general = wrapper.find(".settings-section-general").element as HTMLElement;
     const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
     expect(general.style.display).toBe("none");
@@ -464,13 +758,13 @@ describe("SettingsView 终端 Shell", () => {
     expect(options).toEqual(["cmd", "powershell"]);
   });
 
-  it("终端 Shell 行位于通用分区内最后一项", () => {
+  it("终端 Shell 行位于通用分区内第一项", () => {
     wrapper = mount(SettingsView);
     const section = wrapper.find(".settings-section-general");
     const labels = section
       .findAll(".settings .setting-row")
       .map((row) => row.find("label").text());
-    expect(labels[labels.length - 1]).toBe("终端 Shell");
+    expect(labels[0]).toBe("终端 Shell");
   });
 
   it("切换 PowerShell 后立即保存", async () => {

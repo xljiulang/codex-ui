@@ -1,8 +1,10 @@
 pub mod app_server;
 pub mod commands;
+pub mod custom_instructions;
 pub mod diff;
 pub mod file_icon;
 pub mod git;
+pub mod model_config;
 pub mod path_util;
 pub mod pdf_export;
 pub mod session_fs;

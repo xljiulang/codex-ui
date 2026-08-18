@@ -784,7 +784,8 @@ fn bundled_codex_exe_in(dir: &Path) -> Option<PathBuf> {
 
 /// 为 codex.exe 子进程设置启动环境变量：
 /// - PATH 前插应用自身目录的 bin（bin 存在时），让 codex 能调用其中的 CLI 工具；
-/// - CODEX_HOME 指向应用自身目录下的 .codex 文件夹。
+/// - CODEX_HOME 与 CODEX_CONFIG_DIR 都指向应用自身目录下的 .codex 文件夹
+///   （后者用于覆盖系统级的 CODEX_CONFIG_DIR，避免 codex 读到别处配置）。
 pub fn apply_codex_env(cmd: &mut std::process::Command) {
     if let Some(dir) = app_exe_dir() {
         apply_codex_env_in(cmd, &dir);
@@ -809,7 +810,9 @@ fn apply_codex_env_in(cmd: &mut std::process::Command, app_dir: &Path) {
     if let Some(joined) = prepend_bin_path(&existing, app_dir) {
         cmd.env("PATH", joined);
     }
-    cmd.env("CODEX_HOME", app_dir.join(".codex"));
+    let codex_home = app_dir.join(".codex");
+    cmd.env("CODEX_HOME", &codex_home);
+    cmd.env("CODEX_CONFIG_DIR", &codex_home);
 }
 
 /// 官方安装：glob %LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe，按修改时间取最新
@@ -1023,7 +1026,8 @@ mod tests {
     fn apply_codex_env_in_prepends_bin_and_sets_codex_home() {
         use std::ffi::OsStr;
 
-        // bin 存在：PATH 前插 bin 目录，且保留原 PATH；CODEX_HOME 指向 app/.codex
+        // bin 存在：PATH 前插 bin 目录，且保留原 PATH；
+        // CODEX_HOME 与 CODEX_CONFIG_DIR 都指向 app/.codex
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
         let old = tmp.path().join("old").join("bin").to_string_lossy().into_owned();
@@ -1048,9 +1052,17 @@ mod tests {
                 .find_map(|(k, v)| (k == OsStr::new("CODEX_HOME")).then(|| v.clone().unwrap()))
                 .unwrap();
             assert_eq!(home, tmp.path().join(".codex"));
+            let config_dir = envs
+                .iter()
+                .find_map(|(k, v)| {
+                    (k == OsStr::new("CODEX_CONFIG_DIR")).then(|| v.clone().unwrap())
+                })
+                .unwrap();
+            assert_eq!(config_dir, tmp.path().join(".codex"));
+            assert_eq!(config_dir, home);
         });
 
-        // bin 缺失：PATH 不改写，但 CODEX_HOME 仍设置
+        // bin 缺失：PATH 不改写，但 CODEX_HOME 与 CODEX_CONFIG_DIR 仍设置
         let tmp2 = tempfile::tempdir().unwrap();
         let dir2_s = tmp2.path().to_string_lossy().into_owned();
         with_envs(&[("PATH", Some(&dir2_s))], || {
@@ -1070,6 +1082,14 @@ mod tests {
                 .find_map(|(k, v)| (k == OsStr::new("CODEX_HOME")).then(|| v.clone().unwrap()))
                 .unwrap();
             assert_eq!(home, tmp2.path().join(".codex"));
+            let config_dir = envs
+                .iter()
+                .find_map(|(k, v)| {
+                    (k == OsStr::new("CODEX_CONFIG_DIR")).then(|| v.clone().unwrap())
+                })
+                .unwrap();
+            assert_eq!(config_dir, tmp2.path().join(".codex"));
+            assert_eq!(config_dir, home);
         });
     }
 
