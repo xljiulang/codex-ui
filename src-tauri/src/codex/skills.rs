@@ -1,12 +1,12 @@
-//! 技能管理：扫描 `{CODEX_HOME}/skills` 文件夹下的本地技能。
+//! 技能管理：从 codex app-server 的 `skills/list` 聚合列表中过滤出本地技能。
 //!
-//! 每个子文件夹对应一个技能，读取其中的 `SKILL.md` YAML frontmatter
-//! （name / description，缺失时回退文件夹名/空描述）；`.` 开头的系统文件夹跳过。
+//! 本地技能判定：SKILL.md 路径位于 `{CODEX_HOME}/skills` 目录内，且相对路径
+//! 不以 `.` 开头（跳过 `.system` 等系统目录）。展示包含禁用技能（不做 enabled 过滤）。
 
-use serde::Serialize;
-use std::fs;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use super::app_server::CodexServer;
 use super::model_config::codex_home;
 
 /// 单个本地技能条目。
@@ -16,6 +16,7 @@ pub struct SkillInfo {
     /// SKILL.md 的绝对路径。
     pub path: String,
     pub description: String,
+    pub enabled: bool,
 }
 
 /// `skills_read` 的返回结构。
@@ -26,152 +27,295 @@ pub struct SkillsState {
     pub items: Vec<SkillInfo>,
 }
 
-/// 读取本地技能列表（真实 CODEX_HOME）。
-pub fn read_state() -> Result<SkillsState, String> {
+/// `skills/list` 返回的单个技能条目（只声明需要的字段，缺省字段给默认值）。
+#[derive(Debug, Clone, Deserialize)]
+struct SkillListItem {
+    name: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    description: String,
+    /// 防御旧形状：部分实现可能用 `desc` 提供描述。
+    #[serde(default)]
+    desc: String,
+    #[serde(default, rename = "shortDescription")]
+    short_description: Option<String>,
+    #[serde(default)]
+    interface: Option<SkillInterface>,
+    #[serde(default)]
+    enabled: bool,
+}
+
+/// `skills/list` 条目中的 interface 字段（取 shortDescription）。
+#[derive(Debug, Clone, Deserialize)]
+struct SkillInterface {
+    #[serde(default, rename = "shortDescription")]
+    short_description: Option<String>,
+}
+
+/// 读取本地技能列表：请求 `skills/list` 后按路径过滤出 `{CODEX_HOME}/skills` 下的技能。
+pub async fn read_state(server: &CodexServer, force_reload: bool) -> Result<SkillsState, String> {
     let home = codex_home()?;
-    Ok(scan_skills_dir(&home.join("skills")))
-}
-
-/// 扫描指定技能目录（目录不存在时返回空列表）。
-fn scan_skills_dir(skills_dir: &Path) -> SkillsState {
-    let mut items = Vec::new();
-    if skills_dir.is_dir() {
-        let Ok(entries) = fs::read_dir(skills_dir) else {
-            return SkillsState {
-                skills_dir: skills_dir.to_string_lossy().into_owned(),
-                items,
-            };
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let folder_name = entry.file_name().to_string_lossy().into_owned();
-            if folder_name.starts_with('.') {
-                continue;
-            }
-            let skill_md = path.join("SKILL.md");
-            if !skill_md.is_file() {
-                continue;
-            }
-            let (name, description) =
-                read_frontmatter(&skill_md).unwrap_or((folder_name, String::new()));
-            items.push(SkillInfo {
-                name,
-                path: skill_md.to_string_lossy().into_owned(),
-                description,
-            });
-        }
-    }
-    items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    SkillsState {
+    let skills_dir = home.join("skills");
+    let params = serde_json::json!({ "forceReload": force_reload });
+    let res = server.request("skills/list", params, None).await?;
+    let items = parse_skill_items(&res)?;
+    Ok(SkillsState {
         skills_dir: skills_dir.to_string_lossy().into_owned(),
-        items,
-    }
+        items: filter_local_skills(&items, &skills_dir),
+    })
 }
 
-/// 读取 SKILL.md 的 YAML frontmatter：返回 (name, description)。
-/// frontmatter 缺失或解析失败时返回 None（由调用方回退）。
-fn read_frontmatter(path: &std::path::Path) -> Option<(String, String)> {
-    let text = fs::read_to_string(path).ok()?;
-    let text = text.strip_prefix("\u{feff}").unwrap_or(&text);
-    let trimmed = text.trim_start();
-    let after_open = trimmed.strip_prefix("---")?;
-    let end = after_open.find("\n---")?;
-    let front = &after_open[..end];
-    let mut name = String::new();
-    let mut description = String::new();
-    for line in front.lines() {
-        let line = line.trim();
-        if let Some(v) = line.strip_prefix("name:") {
-            name = unquote(v.trim());
-        } else if let Some(v) = line.strip_prefix("description:") {
-            description = unquote(v.trim());
+/// 展平 `skills/list` 响应 `data[].skills[]`；单个条目解析失败时跳过而不是整体失败。
+fn parse_skill_items(res: &serde_json::Value) -> Result<Vec<SkillListItem>, String> {
+    let entries = res
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "skills/list 响应缺少 data 数组".to_string())?;
+    let mut items = Vec::new();
+    for entry in entries {
+        let skills = entry
+            .get("skills")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| "skills/list 条目缺少 skills 数组".to_string())?;
+        for skill in skills {
+            if let Ok(item) = serde_json::from_value::<SkillListItem>(skill.clone()) {
+                items.push(item);
+            }
         }
     }
-    if name.is_empty() {
-        None
-    } else {
-        Some((name, description))
-    }
+    Ok(items)
 }
 
-/// 去掉 YAML 标量首尾引号（支持单/双引号）。
-fn unquote(s: &str) -> String {
-    let s = s.trim();
-    if s.len() >= 2 {
-        let bytes = s.as_bytes();
-        if (bytes[0] == b'"' && bytes[s.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[s.len() - 1] == b'\'')
+/// 过滤出本地技能：path 位于 skills_dir 内且相对路径不以 `.` 开头。
+/// 不做 enabled 过滤（管理页展示含禁用技能）。
+fn filter_local_skills(items: &[SkillListItem], skills_dir: &Path) -> Vec<SkillInfo> {
+    let mut out = Vec::new();
+    for item in items {
+        let path = PathBuf::from(&item.path);
+        let Some(rel) = relative_under(&path, skills_dir) else {
+            continue;
+        };
+        if rel
+            .components()
+            .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
         {
-            return s[1..s.len() - 1].to_string();
+            continue;
         }
+        let description = if !item.description.is_empty() {
+            item.description.clone()
+        } else if let Some(short) = item
+            .interface
+            .as_ref()
+            .and_then(|i| i.short_description.as_ref())
+            .or(item.short_description.as_ref())
+        {
+            short.clone()
+        } else if !item.desc.is_empty() {
+            item.desc.clone()
+        } else {
+            String::new()
+        };
+        out.push(SkillInfo {
+            name: item.name.clone(),
+            path: item.path.clone(),
+            description,
+            enabled: item.enabled,
+        });
     }
-    s.to_string()
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+/// 返回 path 相对 dir 的相对路径；path 不在 dir 内（或等于 dir）时返回 None。
+/// Windows 下路径比较大小写不敏感、统一分隔符。
+fn relative_under(path: &Path, dir: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let dir_key = path_key(dir);
+        let child_key = path_key(path);
+        let prefix = format!("{}\\", dir_key);
+        let rest = child_key.strip_prefix(&prefix)?;
+        if rest.is_empty() {
+            return None;
+        }
+        Some(PathBuf::from(rest.replace('\\', "/")))
+    }
+    #[cfg(not(windows))]
+    {
+        path.strip_prefix(dir)
+            .ok()
+            .filter(|r| !r.as_os_str().is_empty())
+            .map(PathBuf::from)
+    }
+}
+
+#[cfg(windows)]
+fn path_key(p: &Path) -> String {
+    p.components()
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+        .collect::<Vec<_>>()
+        .join("\\")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
-    fn make_skill(dir: &std::path::Path, folder: &str, frontmatter: &str) {
-        let folder_path = dir.join(folder);
-        fs::create_dir_all(&folder_path).unwrap();
-        fs::write(folder_path.join("SKILL.md"), frontmatter).unwrap();
+    fn list_item(name: &str, path: &str, enabled: bool, description: &str) -> SkillListItem {
+        SkillListItem {
+            name: name.to_string(),
+            path: path.to_string(),
+            description: description.to_string(),
+            desc: String::new(),
+            short_description: None,
+            interface: None,
+            enabled,
+        }
     }
 
     #[test]
-    fn scans_skills_folder_with_frontmatter() {
-        let dir = TempDir::new().unwrap();
-        make_skill(
-            dir.path(),
-            "alpha",
-            "---\nname: \"alpha\"\ndescription: \"首个技能\"\n---\n\n# Alpha\n",
+    fn keeps_only_local_skills_under_skills_dir() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        let items = vec![
+            list_item(
+                "pdf",
+                "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+                true,
+                "读写 PDF 文件",
+            ),
+            list_item(
+                "plugin-skill",
+                "C:/apps/codex-ui/.codex/plugins/cache/x/skills/y/SKILL.md",
+                true,
+                "插件技能",
+            ),
+            list_item("outside", "D:/elsewhere/SKILL.md", true, "外部"),
+        ];
+        let out = filter_local_skills(&items, dir);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "pdf");
+        assert_eq!(out[0].description, "读写 PDF 文件");
+        assert!(out[0].enabled);
+    }
+
+    #[test]
+    fn skips_dot_segments() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        let items = vec![
+            list_item(
+                "sys",
+                "C:/apps/codex-ui/.codex/skills/.system/sys/SKILL.md",
+                true,
+                "系统技能",
+            ),
+            list_item(
+                "ok",
+                "C:/apps/codex-ui/.codex/skills/ok/SKILL.md",
+                true,
+                "",
+            ),
+        ];
+        let out = filter_local_skills(&items, dir);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "ok");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn path_compare_is_case_insensitive_on_windows() {
+        let dir = Path::new("C:/Apps/Codex-UI/.codex/Skills");
+        let items = vec![list_item(
+            "pdf",
+            "c:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+            false,
+            "",
+        )];
+        let out = filter_local_skills(&items, dir);
+        assert_eq!(out.len(), 1);
+        assert!(!out[0].enabled);
+    }
+
+    #[test]
+    fn keeps_disabled_skills() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        let items = vec![
+            list_item(
+                "on",
+                "C:/apps/codex-ui/.codex/skills/on/SKILL.md",
+                true,
+                "",
+            ),
+            list_item(
+                "off",
+                "C:/apps/codex-ui/.codex/skills/off/SKILL.md",
+                false,
+                "",
+            ),
+        ];
+        let out = filter_local_skills(&items, dir);
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().any(|s| s.name == "off" && !s.enabled));
+    }
+
+    #[test]
+    fn description_precedence() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        let mut from_interface = list_item(
+            "a",
+            "C:/apps/codex-ui/.codex/skills/a/SKILL.md",
+            true,
+            "",
         );
-        make_skill(
-            dir.path(),
-            "beta",
-            "---\nname: 'beta'\ndescription: '第二个'\n---\n",
+        from_interface.interface = Some(SkillInterface {
+            short_description: Some("interface 短描述".to_string()),
+        });
+        let mut from_desc = list_item(
+            "b",
+            "C:/apps/codex-ui/.codex/skills/b/SKILL.md",
+            true,
+            "",
         );
-        let state = scan_skills_dir(dir.path());
-        assert_eq!(state.items.len(), 2);
-        assert_eq!(state.items[0].name, "alpha");
-        assert_eq!(state.items[0].description, "首个技能");
-        assert!(state.items[0].path.ends_with("SKILL.md"));
-        assert_eq!(state.items[1].name, "beta");
-        assert_eq!(state.items[1].description, "第二个");
+        from_desc.desc = "desc 字段".to_string();
+        let out = filter_local_skills(&[from_interface, from_desc], dir);
+        assert_eq!(out[0].description, "interface 短描述");
+        assert_eq!(out[1].description, "desc 字段");
     }
 
     #[test]
-    fn skips_dot_folders_and_folders_without_skill_md() {
-        let dir = TempDir::new().unwrap();
-        make_skill(dir.path(), ".system", "---\nname: sys\n---\n");
-        make_skill(dir.path(), "ok", "---\nname: ok\n---\n");
-        fs::create_dir_all(dir.path().join("empty")).unwrap();
-        fs::write(dir.path().join("note.txt"), "x").unwrap();
-
-        let state = scan_skills_dir(dir.path());
-        assert_eq!(state.items.len(), 1);
-        assert_eq!(state.items[0].name, "ok");
+    fn sorts_by_name_case_insensitive() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        let items = vec![
+            list_item(
+                "beta",
+                "C:/apps/codex-ui/.codex/skills/beta/SKILL.md",
+                true,
+                "",
+            ),
+            list_item(
+                "Alpha",
+                "C:/apps/codex-ui/.codex/skills/Alpha/SKILL.md",
+                true,
+                "",
+            ),
+        ];
+        let out = filter_local_skills(&items, dir);
+        assert_eq!(out.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), [
+            "Alpha",
+            "beta"
+        ]);
     }
 
     #[test]
-    fn falls_back_when_frontmatter_missing() {
-        let dir = TempDir::new().unwrap();
-        make_skill(dir.path(), "no-frontmatter", "# No Frontmatter\n");
-        let state = scan_skills_dir(dir.path());
-        assert_eq!(state.items.len(), 1);
-        assert_eq!(state.items[0].name, "no-frontmatter");
-        assert_eq!(state.items[0].description, "");
+    fn empty_list_returns_empty() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        assert!(filter_local_skills(&[], dir).is_empty());
     }
 
     #[test]
-    fn missing_dir_returns_empty_list() {
-        let dir = TempDir::new().unwrap();
-        let missing = dir.path().join("nope");
-        let state = scan_skills_dir(&missing);
-        assert!(state.items.is_empty());
+    fn missing_path_is_excluded() {
+        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
+        let items = vec![list_item("nopath", "", true, "")];
+        assert!(filter_local_skills(&items, dir).is_empty());
     }
 }

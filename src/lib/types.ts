@@ -263,6 +263,7 @@ export interface SkillsItem {
   /** SKILL.md 的绝对路径 */
   path: string;
   description: string;
+  enabled: boolean;
 }
 
 /** skills_read 返回结构（与 Rust 端一致） */

@@ -651,7 +651,8 @@
   color: var(--red);
 }
 
-.model-config-path-link {
+.model-config-path-link,
+.skill-path-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -667,14 +668,17 @@
   cursor: pointer;
   text-align: left;
   word-break: break-all;
+  user-select: text;
 }
 
-.model-config-path-link:hover {
+.model-config-path-link:hover,
+.skill-path-link:hover {
   color: var(--accent-dim);
   text-decoration: underline;
 }
 
-.model-config-path-link svg {
+.model-config-path-link svg,
+.skill-path-link svg {
   width: 11px;
   height: 11px;
   fill: currentColor;
@@ -831,8 +835,9 @@
 
 .skill-row {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
   transition: background 0.15s ease;
@@ -844,6 +849,35 @@
 
 .skill-row:last-child {
   border-bottom: none;
+}
+
+.skill-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.skill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.skill-status {
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.skill-status.off {
+  color: var(--text-dim);
+  background: rgba(var(--overlay-rgb), 0.05);
 }
 
 .skill-row-main {
@@ -879,14 +913,6 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-dim);
-}
-
-.skill-path {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-dim);
-  word-break: break-all;
-  user-select: text;
 }
 
 /* MCP 管理 */

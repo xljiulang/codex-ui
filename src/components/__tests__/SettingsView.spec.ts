@@ -806,11 +806,13 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
         name: "pdf",
         path: "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
         description: "读写 PDF 文件",
+        enabled: true,
       },
       {
         name: "csharp-code-rules",
         path: "C:/apps/codex-ui/.codex/skills/csharp-code-rules/SKILL.md",
         description: "C# 团队规范",
+        enabled: false,
       },
     ],
   };
@@ -876,6 +878,22 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     );
   });
 
+  it("点击技能路径在应用内打开 SKILL.md", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".skill-row");
+    await rows[0].find(".skill-path-link").trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+    );
+  });
+
   it("技能管理刷新重新拉取 skills_read", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
@@ -895,6 +913,75 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       ([name]) => name === "skills_read",
     ).length;
     expect(after).toBe(before + 1);
+  });
+
+  it("禁用技能行显示状态与启用按钮，点击后写配置并强制刷新", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".skill-row");
+    expect(rows[1].text()).toContain("已禁用");
+    await rows[1].find(".skill-actions .btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "skills/config/write",
+      params: { name: "csharp-code-rules", enabled: true },
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("skills_read", {
+      forceReload: true,
+    });
+    expect(store.toast).toContain("已启用 csharp-code-rules");
+  });
+
+  it("启用状态的技能点击后写禁用配置", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".skill-row");
+    expect(rows[0].text()).toContain("已启用");
+    await rows[0].find(".skill-actions .btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "skills/config/write",
+      params: { name: "pdf", enabled: false },
+    });
+    expect(store.toast).toContain("已禁用 pdf");
+  });
+
+  it("启用/禁用失败时 toast 错误且不强制刷新", async () => {
+    mockedInvoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      const params = args as Record<string, unknown> | undefined;
+      if (cmd === "codex_rpc" && params?.method === "skills/config/write") {
+        throw new Error("配置写入失败");
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".skill-row");
+    await rows[1].find(".skill-actions .btn").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("配置写入失败");
+    const forcedReloads = mockedInvoke.mock.calls.filter(
+      ([name, arg]) =>
+        name === "skills_read" &&
+        (arg as Record<string, unknown> | undefined)?.forceReload === true,
+    );
+    expect(forcedReloads.length).toBe(0);
   });
 
   it("MCP 管理渲染服务器名称与传输类型", async () => {

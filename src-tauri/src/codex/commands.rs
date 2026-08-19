@@ -584,10 +584,14 @@ pub fn mcp_servers_save(input: mcp_servers::McpServersEdit) -> Result<(), String
     mcp_servers::save(&input)
 }
 
-/// 读取本地技能列表（CODEX_HOME/skills 文件夹），供设置页「技能管理」使用。
+/// 读取本地技能列表（从 skills/list 聚合列表过滤 CODEX_HOME/skills 下的技能），
+/// 供设置页「技能管理」使用；force_reload 为 true 时绕过技能缓存强制重扫。
 #[tauri::command]
-pub fn skills_read() -> Result<skills::SkillsState, String> {
-    skills::read_state()
+pub async fn skills_read(
+    server: State<'_, Server>,
+    force_reload: Option<bool>,
+) -> Result<skills::SkillsState, String> {
+    skills::read_state(&server, force_reload.unwrap_or(false)).await
 }
 
 /// 读取自定义指令（CODEX_HOME/AGENTS.md），供设置页「模型配置」Tab 使用。

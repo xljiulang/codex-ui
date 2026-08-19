@@ -37,6 +37,7 @@ import {
   ICON_FILE,
   ICON_FOLDER_OPEN,
   ICON_BRACES,
+  ICON_IGNORE,
   ICON_MCP,
   ICON_PALETTE,
   ICON_PLUS,
@@ -615,14 +616,17 @@ function openAgentsFile() {
 const skillsState = reactive({
   loading: false,
   items: [] as SkillsItem[],
+  busy: {} as Record<string, boolean>,
 });
 
-/** 拉取本地技能列表（skills_read：CODEX_HOME/skills 文件夹） */
-async function loadSkills() {
+/** 拉取本地技能列表（skills_read：从 skills/list 过滤出 CODEX_HOME/skills 下的技能） */
+async function loadSkills(forceReload = false) {
   if (skillsState.loading) return;
   skillsState.loading = true;
   try {
-    const res = await invoke<SkillsState | null>("skills_read");
+    const res = await invoke<SkillsState | null>("skills_read", {
+      forceReload,
+    });
     skillsState.items = res?.items ?? [];
   } catch (e) {
     setToast(toastError(e));
@@ -633,6 +637,25 @@ async function loadSkills() {
 
 function openSkill(s: SkillsItem) {
   void openPathInAppOrReveal(s.path);
+}
+
+/** 启用/禁用技能：写用户级技能配置后强制重读列表 */
+async function toggleSkill(s: SkillsItem) {
+  if (skillsState.loading || skillsState.busy[s.path]) return;
+  skillsState.busy[s.path] = true;
+  const next = !s.enabled;
+  try {
+    await invoke("codex_rpc", {
+      method: "skills/config/write",
+      params: { name: s.name, enabled: next },
+    });
+    setToast(next ? `已启用 ${s.name}` : `已禁用 ${s.name}`);
+    await loadSkills(true);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    skillsState.busy[s.path] = false;
+  }
 }
 
 // ---------- MCP 管理 ----------
@@ -1641,7 +1664,7 @@ function canInstall(p: PluginCatalogItem): boolean {
                   class="btn-icon model-config-reload-btn"
                   title="刷新"
                   :disabled="skillsState.loading"
-                  @click="loadSkills"
+                  @click="loadSkills()"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_REFRESH" />
@@ -1667,21 +1690,51 @@ function canInstall(p: PluginCatalogItem): boolean {
                 :key="s.path"
                 class="skill-row"
               >
-                <button
-                  type="button"
-                  class="skill-row-main"
-                  title="在编辑器中打开 SKILL.md"
-                  @click="openSkill(s)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
-                  </svg>
-                  <span class="skill-name">{{ s.name }}</span>
-                </button>
-                <p v-if="s.description" class="skill-desc">
-                  {{ s.description }}
-                </p>
-                <div class="skill-path">{{ s.path }}</div>
+                <div class="skill-info">
+                  <button
+                    type="button"
+                    class="skill-row-main"
+                    title="在编辑器中打开 SKILL.md"
+                    @click="openSkill(s)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FILE" />
+                    </svg>
+                    <span class="skill-name">{{ s.name }}</span>
+                  </button>
+                  <p v-if="s.description" class="skill-desc">
+                    {{ s.description }}
+                  </p>
+                  <button
+                    type="button"
+                    class="skill-path-link"
+                    title="在编辑器中打开 SKILL.md"
+                    @click="openSkill(s)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FILE" />
+                    </svg>
+                    {{ s.path }}
+                  </button>
+                </div>
+                <div class="skill-actions">
+                  <span class="skill-status" :class="{ off: !s.enabled }">
+                    {{ s.enabled ? "已启用" : "已禁用" }}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-icon"
+                    :class="{ primary: !s.enabled, loading: !!skillsState.busy[s.path] }"
+                    :title="s.enabled ? '禁用' : '启用'"
+                    :aria-label="s.enabled ? '禁用' : '启用'"
+                    :disabled="skillsState.loading || !!skillsState.busy[s.path]"
+                    @click="toggleSkill(s)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="s.enabled ? ICON_IGNORE : ICON_CHECK" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
