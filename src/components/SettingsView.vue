@@ -1372,24 +1372,27 @@ function canInstall(p: PluginCatalogItem): boolean {
 
             <div class="model-config-actions">
               <button
-                class="btn primary"
+                class="btn btn-icon primary model-config-save-btn"
+                :class="{ loading: modelConfig.savingProviders }"
+                title="保存"
+                aria-label="保存"
                 :disabled="modelConfig.savingProviders || modelConfig.loading"
                 @click="saveProviders"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
-                {{ modelConfig.savingProviders ? "保存中…" : "保存" }}
               </button>
               <button
-                class="btn model-config-add-btn"
+                class="btn btn-icon primary model-config-add-btn"
+                title="添加"
+                aria-label="添加"
                 :disabled="modelConfig.loading"
                 @click="openAddProvider"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_PLUS" />
                 </svg>
-                添加
               </button>
             </div>
           </div>
@@ -1440,7 +1443,10 @@ function canInstall(p: PluginCatalogItem): boolean {
             ></textarea>
             <div class="model-config-actions">
               <button
-                class="btn primary"
+                class="btn btn-icon primary model-config-save-btn"
+                :class="{ loading: modelConfig.savingCatalog }"
+                title="保存"
+                aria-label="保存"
                 :disabled="
                   modelConfig.savingCatalog ||
                   modelConfig.loading ||
@@ -1451,7 +1457,6 @@ function canInstall(p: PluginCatalogItem): boolean {
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
-                {{ modelConfig.savingCatalog ? "保存中…" : "保存" }}
               </button>
             </div>
           </div>
@@ -1499,14 +1504,16 @@ function canInstall(p: PluginCatalogItem): boolean {
             ></textarea>
             <div class="model-config-actions">
               <button
-                class="btn primary"
+                class="btn btn-icon primary model-config-save-btn"
+                :class="{ loading: agents.saving }"
+                title="保存"
+                aria-label="保存"
                 :disabled="agents.saving || agents.loading"
                 @click="saveCustomInstructions"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
-                {{ agents.saving ? "保存中…" : "保存" }}
               </button>
             </div>
           </div>
@@ -1569,11 +1576,15 @@ function canInstall(p: PluginCatalogItem): boolean {
                     <option value="disabled">关闭</option>
                     <option value="enabled">启用</option>
                   </select>
-                  <button class="btn danger memory-reset-btn" @click="resetMemory()">
+                  <button
+                    class="btn btn-icon danger memory-reset-btn"
+                    title="重置记忆"
+                    aria-label="重置记忆"
+                    @click="resetMemory()"
+                  >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_RESTART" />
                     </svg>
-                    重置记忆
                   </button>
                 </div>
               </div>
@@ -1584,21 +1595,26 @@ function canInstall(p: PluginCatalogItem): boolean {
                   <div class="setting-value codex-path-value">
                     {{ codexPath || "未设置（自动查找）" }}
                   </div>
-                  <button class="btn codex-pick-btn" @click="pickCodexFile()">
+                  <button
+                    class="btn btn-icon codex-pick-btn"
+                    title="选择文件"
+                    aria-label="选择文件"
+                    @click="pickCodexFile()"
+                  >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_FOLDER_OPEN" />
                     </svg>
-                    选择文件
                   </button>
                   <button
                     v-if="codexPath"
-                    class="btn danger codex-clear-btn"
+                    class="btn btn-icon danger codex-clear-btn"
+                    title="清除"
+                    aria-label="清除"
                     @click="clearCodexPath()"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_DELETE" />
                     </svg>
-                    清除
                   </button>
                 </div>
                 <p v-if="!codexPath && store.server.codexPath" class="setting-note">
@@ -1684,14 +1700,15 @@ function canInstall(p: PluginCatalogItem): boolean {
               <h3>MCP 服务器</h3>
               <div class="model-config-head-actions">
                 <button
-                  class="btn mcp-config-add-btn"
+                  class="btn btn-icon primary mcp-config-add-btn"
+                  title="添加"
+                  aria-label="添加"
                   :disabled="mcpState.loading || mcpState.saving"
                   @click="openAddMcp"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_PLUS" />
                   </svg>
-                  添加
                 </button>
                 <button
                   class="btn-icon model-config-reload-btn"
@@ -1716,7 +1733,7 @@ function canInstall(p: PluginCatalogItem): boolean {
                 正在加载 MCP 服务器…
               </div>
               <div v-else-if="!mcpState.servers.length" class="plugin-empty">
-                还没有 MCP 服务器，点击下方「添加」创建。
+                还没有 MCP 服务器，点击卡片头部「＋」创建。
               </div>
               <div
                 v-for="(s, i) in mcpState.servers"

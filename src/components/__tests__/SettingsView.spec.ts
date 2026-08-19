@@ -55,7 +55,7 @@ describe("SettingsView codex 可执行文件选择", () => {
     const row = wrapper.find(".codex-path-row");
     expect(row.exists()).toBe(true);
     expect(row.find(".codex-path-value").text()).toContain("C:/tools/codex.exe");
-    expect(row.find("button.codex-pick-btn").text()).toContain("选择文件");
+    expect(row.find("button.codex-pick-btn").attributes("title")).toBe("选择文件");
     expect(row.find('input[type="text"]').exists()).toBe(false);
   });
 
@@ -257,13 +257,13 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.findAll(".model-config-path-link").length).toBe(3);
   });
 
-  it("三张卡片保存按钮文案均为「保存」", async () => {
+  it("三张卡片保存按钮标题均为「保存」", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const saveButtons = wrapper.findAll(
-      ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
     );
-    expect(saveButtons.map((b) => b.text().trim())).toEqual([
+    expect(saveButtons.map((b) => b.attributes("title"))).toEqual([
       "保存",
       "保存",
       "保存",
@@ -537,8 +537,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper
       .findAll(".model-config-card")[0]
-      .findAll("button")
-      .find((b) => b.text().includes("保存"))!
+      .find(".model-config-save-btn")!
       .trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("model_config_ui_save", {
@@ -612,8 +611,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper
       .findAll(".model-config-card")[0]
-      .findAll("button")
-      .find((b) => b.text().includes("保存"))!
+      .find(".model-config-save-btn")!
       .trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("请填写 model");
@@ -640,8 +638,7 @@ describe("SettingsView 模型配置", () => {
     const save = () =>
       wrapper
         .findAll(".model-config-card")[0]
-        .findAll("button")
-        .find((b) => b.text().includes("保存"))!
+        .find(".model-config-save-btn")!
         .trigger("click");
     await save();
     await flushPromises();
@@ -686,8 +683,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper
       .findAll(".model-config-card")[0]
-      .findAll("button")
-      .find((b) => b.text().includes("保存"))!
+      .find(".model-config-save-btn")!
       .trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("model_catalog_target_exists", {
