@@ -225,7 +225,7 @@ function titleTooltip(tab: EditorTab): string {
       class="editor-tabs"
       @scroll.passive="updateTabScrollState"
     >
-      <button
+      <div
         v-for="tab in sessionTabs"
         :key="tab.id"
         class="editor-tab session-tab"
@@ -236,6 +236,8 @@ function titleTooltip(tab: EditorTab): string {
         :tabindex="tab.id === activeTabId ? 0 : -1"
         v-tooltip="sessionTabTooltip(tab)"
         @click="emit('activate', tab.id)"
+        @keydown.enter.prevent="emit('activate', tab.id)"
+        @keydown.space.prevent="emit('activate', tab.id)"
         @contextmenu="emit('context', $event, tab)"
         @mousedown.middle.prevent="emit('close', tab)"
       >
@@ -267,8 +269,8 @@ function titleTooltip(tab: EditorTab): string {
             <path :d="ICON_CLOSE" />
           </svg>
         </button>
-      </button>
-      <button
+      </div>
+      <div
         v-for="tab in editorTabs"
         :key="tab.id"
         class="editor-tab"
@@ -281,6 +283,8 @@ function titleTooltip(tab: EditorTab): string {
         :aria-label="tab.title"
         :tabindex="tab.id === activeTabId ? 0 : -1"
         @click="emit('activate', tab.id)"
+        @keydown.enter.prevent="emit('activate', tab.id)"
+        @keydown.space.prevent="emit('activate', tab.id)"
         @contextmenu="onTabContext($event, tab)"
         @mousedown.middle.prevent="emit('close', tab)"
       >
@@ -369,7 +373,7 @@ function titleTooltip(tab: EditorTab): string {
             <path :d="ICON_CLOSE" />
           </svg>
         </button>
-      </button>
+      </div>
       <button
         v-if="hasActiveTab"
         class="editor-tab-add"

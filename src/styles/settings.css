@@ -233,8 +233,29 @@
 }
 
 .settings-page .btn-icon svg {
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 16px;
+  transition: transform 0.15s ease;
+}
+
+/* 纯图标按钮悬停：轻微放大图标，配合底色反馈 */
+.settings-page .btn-icon:hover svg {
+  transform: scale(1.1);
+}
+
+/* 加载/进行中：图标旋转，弱化整体 */
+.settings-page .btn-icon.loading {
+  opacity: 0.7;
+}
+
+.settings-page .btn-icon.loading svg {
+  animation: settings-icon-spin 1s linear infinite;
+}
+
+@keyframes settings-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 控件与按钮同高：输入框 / 下拉 / 按钮统一 32px 高 */
@@ -385,6 +406,7 @@
 
 .plugin-market-add {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex: 1;
   min-width: 280px;
@@ -580,7 +602,6 @@
 .plugin-install-btn,
 .plugin-uninstall-btn {
   flex-shrink: 0;
-  min-width: 64px;
 }
 
 /* 通用卡片：模型配置 / 个性化 / 通用设置共用同一容器 */

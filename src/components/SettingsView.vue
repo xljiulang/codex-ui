@@ -1981,14 +1981,16 @@ function canInstall(p: PluginCatalogItem): boolean {
               <h3>插件市场</h3>
               <div class="model-config-head-actions">
                 <button
-                  class="btn plugin-refresh-btn"
+                  class="btn btn-icon plugin-refresh-btn"
+                  :class="{ loading: pluginState.loading }"
+                  title="刷新目录"
+                  aria-label="刷新目录"
                   :disabled="pluginState.loading"
                   @click="refreshPlugins(true)"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_REFRESH" />
                   </svg>
-                  {{ pluginState.loading ? "刷新中…" : "刷新目录" }}
                 </button>
               </div>
             </div>
@@ -2000,14 +2002,16 @@ function canInstall(p: PluginCatalogItem): boolean {
                   @keydown.enter="doAddMarketplace"
                 />
                 <button
-                  class="btn"
+                  class="btn btn-icon primary plugin-market-add-btn"
+                  :class="{ loading: pluginState.adding }"
+                  title="添加市场"
+                  aria-label="添加市场"
                   :disabled="pluginState.adding || !pluginState.source.trim()"
                   @click="doAddMarketplace"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_PLUS" />
                   </svg>
-                  {{ pluginState.adding ? "添加中…" : "添加市场" }}
                 </button>
               </div>
             </div>
@@ -2090,25 +2094,29 @@ function canInstall(p: PluginCatalogItem): boolean {
                       </div>
                       <button
                         v-if="!p.installed"
-                        class="btn primary plugin-install-btn"
+                        class="btn btn-icon primary plugin-install-btn"
+                        :class="{ loading: !!pluginState.busy[p.id] }"
+                        :title="pluginState.busy[p.id] ? '安装中…' : '安装'"
+                        :aria-label="pluginState.busy[p.id] ? '安装中' : '安装'"
                         :disabled="!canInstall(p) || !!pluginState.busy[p.id]"
                         @click="doInstall(mp, p)"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path :d="ICON_DOWNLOAD" />
                         </svg>
-                        {{ pluginState.busy[p.id] ? "安装中…" : "安装" }}
                       </button>
                       <button
                         v-else
-                        class="btn danger plugin-uninstall-btn"
+                        class="btn btn-icon danger plugin-uninstall-btn"
+                        :class="{ loading: !!pluginState.busy[p.id] }"
+                        :title="pluginState.busy[p.id] ? '卸载中…' : '卸载'"
+                        :aria-label="pluginState.busy[p.id] ? '卸载中' : '卸载'"
                         :disabled="!!pluginState.busy[p.id]"
                         @click="doUninstall(p)"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
                           <path :d="ICON_DELETE" />
                         </svg>
-                        {{ pluginState.busy[p.id] ? "卸载中…" : "卸载" }}
                       </button>
                     </div>
                   </div>
