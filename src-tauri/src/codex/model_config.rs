@@ -103,14 +103,37 @@ fn model_catalog_json_value(config_path: &Path) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-/// model_catalog_json 目标路径：绝对路径原样使用，相对路径基于 CODEX_HOME 拼接。
+/// model_catalog_json 目标路径：绝对路径原样使用，相对路径基于 CODEX_HOME 拼接；
+/// 独立首段 `~`（`~`、`~/...`、`~\...`）先展开为 %USERPROFILE%，再走上述判定。
 fn model_catalog_path_in(home: &Path, value: &str) -> PathBuf {
-    let p = Path::new(value);
+    let expanded = expand_tilde(value);
+    let p = Path::new(&expanded);
     if p.is_absolute() {
         p.to_path_buf()
     } else {
         home.join(p)
     }
+}
+
+/// 展开前导 `~`（仅当 `~` 为独立首段）：`~`、`~/...`、`~\...` → %USERPROFILE% 下路径；
+/// `~user/...` 保持字面（Windows 无用户名展开语义）；USERPROFILE 缺失或空白时原样返回。
+fn expand_tilde(value: &str) -> String {
+    let Some(rest) = value.strip_prefix('~') else {
+        return value.to_string();
+    };
+    if !(rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')) {
+        return value.to_string();
+    }
+    let Some(profile) = std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()) else {
+        return value.to_string();
+    };
+    let profile = PathBuf::from(profile);
+    if rest.is_empty() {
+        return profile.to_string_lossy().into_owned();
+    }
+    // 去掉前导分隔符：Windows 下 join 以 `/`/`\` 开头的路径会重置到盘符根目录
+    let rest = rest.trim_start_matches(|c| c == '/' || c == '\\');
+    profile.join(rest).to_string_lossy().into_owned()
 }
 
 /// 检查 model_catalog_json 配置值对应的目标文件是否存在（不创建文件）。
@@ -1034,6 +1057,140 @@ name = "A"
                 fs::write(home.join("models.json"), "[]").unwrap();
                 assert!(catalog_target_exists("models.json").unwrap());
                 assert!(!catalog_target_exists("").unwrap());
+            },
+        );
+    }
+
+    #[test]
+    fn expand_tilde_resolves_only_standalone_tilde() {
+        let tmp = TempDir::new().unwrap();
+        let profile = tmp.path().join("profile");
+        let profile_s = profile.to_string_lossy().into_owned();
+        with_envs(
+            &[("CODEX_HOME", None), ("USERPROFILE", Some(&profile_s))],
+            || {
+                assert_eq!(expand_tilde("~"), profile_s);
+                assert_eq!(
+                    norm_path(&expand_tilde("~/a/b.json")),
+                    norm_path(&profile.join("a").join("b.json").to_string_lossy())
+                );
+                assert_eq!(
+                    norm_path(&expand_tilde("~\\a\\b.json")),
+                    norm_path(&profile.join("a").join("b.json").to_string_lossy())
+                );
+                // `~user/...` 与普通相对路径不展开
+                assert_eq!(expand_tilde("~user/a.json"), "~user/a.json");
+                assert_eq!(expand_tilde("plain/a.json"), "plain/a.json");
+            },
+        );
+    }
+
+    #[test]
+    fn expand_tilde_keeps_literal_without_userprofile() {
+        with_envs(&[("CODEX_HOME", None), ("USERPROFILE", None)], || {
+            assert_eq!(expand_tilde("~/a.json"), "~/a.json");
+            assert_eq!(expand_tilde("~"), "~");
+        });
+    }
+
+    #[test]
+    fn read_state_resolves_tilde_catalog_against_userprofile() {
+        let dir = TempDir::new().unwrap();
+        let profile = TempDir::new().unwrap();
+        let profile_s = profile.path().to_string_lossy().into_owned();
+        fs::write(
+            config_path_in(dir.path()),
+            "model_catalog_json = \"~/.codex/models.json\"",
+        )
+        .unwrap();
+        let target = profile.path().join(".codex").join("models.json");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, r#"{"models":[]}"#).unwrap();
+
+        with_envs(
+            &[("CODEX_HOME", None), ("USERPROFILE", Some(&profile_s))],
+            || {
+                let state = read_state_in(dir.path()).unwrap();
+                assert_eq!(
+                    norm_path(&state.model_catalog_path),
+                    norm_path(&target.to_string_lossy())
+                );
+                assert!(state.model_catalog_exists);
+                assert_eq!(state.model_catalog, r#"{"models":[]}"#);
+            },
+        );
+    }
+
+    #[test]
+    fn read_state_resolves_tilde_with_backslash_separator() {
+        let dir = TempDir::new().unwrap();
+        let profile = TempDir::new().unwrap();
+        let profile_s = profile.path().to_string_lossy().into_owned();
+        fs::write(
+            config_path_in(dir.path()),
+            r#"model_catalog_json = "~\\models.json""#,
+        )
+        .unwrap();
+        let target = profile.path().join("models.json");
+        fs::write(&target, "[]").unwrap();
+
+        with_envs(
+            &[("CODEX_HOME", None), ("USERPROFILE", Some(&profile_s))],
+            || {
+                let state = read_state_in(dir.path()).unwrap();
+                assert_eq!(
+                    norm_path(&state.model_catalog_path),
+                    norm_path(&target.to_string_lossy())
+                );
+                assert!(state.model_catalog_exists);
+                assert_eq!(state.model_catalog, "[]");
+            },
+        );
+    }
+
+    #[test]
+    fn read_state_creates_missing_tilde_catalog_target() {
+        let dir = TempDir::new().unwrap();
+        let profile = TempDir::new().unwrap();
+        let profile_s = profile.path().to_string_lossy().into_owned();
+        fs::write(
+            config_path_in(dir.path()),
+            "model_catalog_json = \"~/catalog/custom.json\"",
+        )
+        .unwrap();
+
+        with_envs(
+            &[("CODEX_HOME", None), ("USERPROFILE", Some(&profile_s))],
+            || {
+                let state = read_state_in(dir.path()).unwrap();
+                let target = profile.path().join("catalog").join("custom.json");
+                assert_eq!(
+                    norm_path(&state.model_catalog_path),
+                    norm_path(&target.to_string_lossy())
+                );
+                assert!(state.model_catalog_exists);
+                assert_eq!(state.model_catalog, DEFAULT_MODEL_CATALOG_CONTENT);
+                assert_eq!(
+                    fs::read_to_string(&target).unwrap(),
+                    DEFAULT_MODEL_CATALOG_CONTENT
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn catalog_target_exists_resolves_tilde_against_userprofile() {
+        let tmp = TempDir::new().unwrap();
+        let profile = tmp.path().join("profile");
+        let profile_s = profile.to_string_lossy().into_owned();
+        with_envs(
+            &[("CODEX_HOME", None), ("USERPROFILE", Some(&profile_s))],
+            || {
+                assert!(!catalog_target_exists("~/models.json").unwrap());
+                assert!(!profile.join("models.json").exists());
+                fs::create_dir_all(&profile).unwrap();
+                fs::write(profile.join("models.json"), "[]").unwrap();
+                assert!(catalog_target_exists("~/models.json").unwrap());
             },
         );
     }
