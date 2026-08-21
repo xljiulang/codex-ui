@@ -1096,16 +1096,6 @@ function canInstall(p: PluginCatalogItem): boolean {
             <div class="model-config-card-head">
               <h3>模型提供方</h3>
               <div class="model-config-head-actions">
-                <button
-                  class="btn btn-icon model-config-reload-btn"
-                  title="重读"
-                  :disabled="modelConfig.loading"
-                  @click="refreshProviders"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_REFRESH" />
-                  </svg>
-                </button>
                 <div class="model-config-path">
                   <button
                     v-if="modelConfig.config_path"
@@ -1121,6 +1111,16 @@ function canInstall(p: PluginCatalogItem): boolean {
                   </button>
                   <template v-else>正在读取路径…</template>
                 </div>
+                <button
+                  class="btn btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="modelConfig.loading"
+                  @click="refreshProviders"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
               </div>
             </div>
 
@@ -1422,16 +1422,6 @@ function canInstall(p: PluginCatalogItem): boolean {
             <div class="model-config-card-head">
               <h3>model_catalog_json</h3>
               <div class="model-config-head-actions">
-                <button
-                  class="btn btn-icon model-config-reload-btn"
-                  title="重读"
-                  :disabled="modelConfig.loading"
-                  @click="refreshCatalog"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_REFRESH" />
-                  </svg>
-                </button>
                 <div class="model-config-path">
                   <template v-if="modelConfig.model_catalog_path">
                     <button
@@ -1453,6 +1443,16 @@ function canInstall(p: PluginCatalogItem): boolean {
                     {{ modelConfig.config_path ? "（config 未配置 model_catalog_json）" : "正在读取路径…" }}
                   </template>
                 </div>
+                <button
+                  class="btn btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="modelConfig.loading"
+                  @click="refreshCatalog"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
               </div>
             </div>
             <textarea
@@ -1486,16 +1486,6 @@ function canInstall(p: PluginCatalogItem): boolean {
             <div class="model-config-card-head">
               <h3>AGENTS</h3>
               <div class="model-config-head-actions">
-                <button
-                  class="btn btn-icon model-config-reload-btn"
-                  title="重读"
-                  :disabled="agents.loading || agents.saving"
-                  @click="loadCustomInstructions"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_REFRESH" />
-                  </svg>
-                </button>
                 <div class="model-config-path">
                   <button
                     v-if="agents.agents_path"
@@ -1514,6 +1504,16 @@ function canInstall(p: PluginCatalogItem): boolean {
                     （文件不存在，保存时将新建）
                   </span>
                 </div>
+                <button
+                  class="btn btn-icon model-config-reload-btn"
+                  title="重读"
+                  :disabled="agents.loading || agents.saving"
+                  @click="loadCustomInstructions"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_REFRESH" />
+                  </svg>
+                </button>
               </div>
             </div>
             <textarea
@@ -1658,6 +1658,9 @@ function canInstall(p: PluginCatalogItem): boolean {
             <div class="model-config-card-head">
               <h3>已安装技能</h3>
               <div class="model-config-head-actions">
+                <div class="model-config-path">
+                  共 {{ skillsState.items.length }} 个
+                </div>
                 <button
                   class="btn btn-icon model-config-reload-btn"
                   title="刷新"
@@ -1668,9 +1671,6 @@ function canInstall(p: PluginCatalogItem): boolean {
                     <path :d="ICON_REFRESH" />
                   </svg>
                 </button>
-                <div class="model-config-path">
-                  共 {{ skillsState.items.length }} 个
-                </div>
               </div>
             </div>
             <div class="skills-list">
