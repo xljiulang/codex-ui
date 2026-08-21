@@ -1097,7 +1097,7 @@ function canInstall(p: PluginCatalogItem): boolean {
               <h3>模型提供方</h3>
               <div class="model-config-head-actions">
                 <button
-                  class="btn-icon model-config-reload-btn"
+                  class="btn btn-icon model-config-reload-btn"
                   title="重读"
                   :disabled="modelConfig.loading"
                   @click="refreshProviders"
@@ -1423,7 +1423,7 @@ function canInstall(p: PluginCatalogItem): boolean {
               <h3>model_catalog_json</h3>
               <div class="model-config-head-actions">
                 <button
-                  class="btn-icon model-config-reload-btn"
+                  class="btn btn-icon model-config-reload-btn"
                   title="重读"
                   :disabled="modelConfig.loading"
                   @click="refreshCatalog"
@@ -1487,7 +1487,7 @@ function canInstall(p: PluginCatalogItem): boolean {
               <h3>AGENTS</h3>
               <div class="model-config-head-actions">
                 <button
-                  class="btn-icon model-config-reload-btn"
+                  class="btn btn-icon model-config-reload-btn"
                   title="重读"
                   :disabled="agents.loading || agents.saving"
                   @click="loadCustomInstructions"
@@ -1659,7 +1659,7 @@ function canInstall(p: PluginCatalogItem): boolean {
               <h3>已安装技能</h3>
               <div class="model-config-head-actions">
                 <button
-                  class="btn-icon model-config-reload-btn"
+                  class="btn btn-icon model-config-reload-btn"
                   title="刷新"
                   :disabled="skillsState.loading"
                   @click="loadSkills()"
@@ -1762,7 +1762,7 @@ function canInstall(p: PluginCatalogItem): boolean {
                   </svg>
                 </button>
                 <button
-                  class="btn-icon model-config-reload-btn"
+                  class="btn btn-icon model-config-reload-btn"
                   title="重读"
                   :disabled="mcpState.loading"
                   @click="loadMcp"
