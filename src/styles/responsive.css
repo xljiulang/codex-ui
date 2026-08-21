@@ -1,0 +1,76 @@
+/* 窄窗口适配断点（媒体查询不支持 CSS 变量，以下为固定值）：
+   960px = 适中收窄，720px = 紧凑；输入区断点与 720px 对齐 */
+
+/* ===== 960px：适中收窄 ===== */
+@media (max-width: 960px) {
+  /* 顶栏：隐藏品牌文字（保留 Logo），收紧间距 */
+  .app-header {
+    padding: 0 var(--space-4);
+  }
+  .brand {
+    gap: var(--space-2);
+  }
+  .brand-name {
+    display: none;
+  }
+  .header-actions {
+    gap: var(--space-1);
+  }
+
+  /* 聊天区：收紧左右留白 */
+  .chat-scroll {
+    padding: var(--space-6) var(--space-6) var(--space-4);
+  }
+
+  /* 编辑器标签：限宽与栏内边距收紧 */
+  .editor-tabs-bar {
+    padding: var(--space-4) var(--space-2) 0;
+  }
+  .editor-tab {
+    max-width: 160px;
+  }
+
+  /* 设置页：导航收窄、内容面板留白收紧 */
+  .settings-nav {
+    width: 140px;
+    padding: var(--space-5) var(--space-3);
+  }
+  .settings-nav-item {
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+  .settings-panel {
+    padding: var(--space-6) var(--space-8) 24px;
+  }
+}
+
+/* ===== 720px：紧凑 ===== */
+@media (max-width: 720px) {
+  /* 右侧面板 tab：仅保留图标 */
+  .panel-tab span {
+    display: none;
+  }
+
+  /* 设置页：导航项再收紧、图标略缩 */
+  .settings-nav {
+    width: 120px;
+    padding: var(--space-4) var(--space-2);
+  }
+  .settings-nav-item {
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+  }
+  .settings-nav-item svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* 历史/Git 面板头部与聊天区进一步收紧 */
+  .history-head,
+  .git-head {
+    padding: var(--space-2) var(--space-3);
+  }
+  .chat-scroll {
+    padding: var(--space-4) var(--space-4) var(--space-3);
+  }
+}

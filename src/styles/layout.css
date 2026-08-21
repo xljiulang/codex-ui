@@ -378,7 +378,7 @@
 
 .history-icon svg .logo-c {
   stroke-linecap: round;
-  stroke-width: 1.8;
+  stroke-width: 2;
 }
 
 .history-title {
@@ -463,13 +463,21 @@
 }
 
 .history-view,
-.resource-view,
-.git-view {
+.resource-view {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.git-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .panel-tabs {

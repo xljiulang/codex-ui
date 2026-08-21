@@ -131,13 +131,26 @@ body.resizing-composer {
   right: 10px;
 }
 
-.perm-chip {
+/* 输入区芯片基类 */
+.perm-chip,
+.task-chip,
+.model-chip,
+.ctx-window,
+.goal-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   height: 30px;
-  padding: 0 11px;
+  box-sizing: border-box;
   border-radius: var(--radius);
+}
+
+/* accent 芯片 */
+.perm-chip,
+.task-chip,
+.model-chip,
+.ctx-window {
+  padding: 0 11px;
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--accent);
@@ -145,7 +158,10 @@ body.resizing-composer {
   border: 1px solid rgba(var(--accent-rgb), 0.28);
 }
 
-.perm-chip:hover:not(:disabled) {
+.perm-chip:hover:not(:disabled),
+.task-chip:hover:not(:disabled),
+.model-chip:hover:not(:disabled),
+.ctx-window:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
 }
@@ -161,25 +177,6 @@ body.resizing-composer {
   height: 10px;
 }
 
-.task-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 30px;
-  padding: 0 11px;
-  border-radius: var(--radius);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-}
-
-.task-chip:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.15);
-}
-
 .task-chip svg {
   width: 10px;
   height: 10px;
@@ -192,12 +189,7 @@ body.resizing-composer {
 }
 
 .goal-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 30px;
   padding: 0 var(--space-2);
-  border-radius: var(--radius);
   color: var(--text-faint);
   background: var(--neutral-soft);
   border: 1px solid var(--border-light);
@@ -221,19 +213,27 @@ body.resizing-composer {
   background: rgba(var(--accent-rgb), 0.15);
 }
 
-.goal-icon-btn {
-  position: relative;
+/* 无边框图标按钮基类 */
+.text-editor-icon-btn,
+.docx-editor-tool-btn,
+.goal-icon-btn,
+.settings-page .btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
+}
+
+.goal-icon-btn {
+  position: relative;
   width: var(--ctrl-h-xs);
   height: var(--ctrl-h-xs);
   flex-shrink: 0;
-  border-radius: var(--radius);
   color: var(--text-faint);
-  background: transparent;
-  border: none;
-  cursor: pointer;
 }
 
 .goal-icon-btn.has-goal {
@@ -265,26 +265,6 @@ body.resizing-composer {
   fill: currentColor;
 }
 
-.model-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 30px;
-  padding: 0 11px;
-  border-radius: var(--radius);
-  font-size: var(--font-sm);
-  font-weight: 600;
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-}
-
-.model-chip:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.15);
-}
-
 .model-chip svg {
   width: 10px;
   height: 10px;
@@ -296,36 +276,20 @@ body.resizing-composer {
   height: 13px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.7;
+  stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
 .ctx-window {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
   min-width: 38px;
-  height: 30px;
   padding: 0 var(--space-3);
-  box-sizing: border-box;
-  border-radius: var(--radius);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  font-size: var(--font-sm);
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
   font-family: inherit;
   cursor: pointer;
   transition: color var(--ease), border-color var(--ease), background-color var(--ease),
     box-shadow var(--ease), opacity var(--ease);
-}
-
-.ctx-window:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.15);
 }
 
 .ctx-window:disabled {
@@ -443,7 +407,7 @@ body.resizing-composer {
 }
 
 /* 窄窗口适配 */
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .perm-chip,
   .task-chip,
   .goal-chip,

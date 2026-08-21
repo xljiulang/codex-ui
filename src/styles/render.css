@@ -306,12 +306,6 @@
   word-break: break-all;
 }
 
-/* 工具卡：命令复制按钮、输出截断提示 */
-.tool-command {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
 .tool-command-text {
   flex: 1;
   min-width: 0;
@@ -609,17 +603,9 @@
   cursor: default;
 }
 .text-editor-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: var(--ctrl-h-xs);
   height: var(--ctrl-h-xs);
-  border-radius: var(--radius);
   color: var(--text-dim);
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
 }
 .text-editor-icon-btn:hover {
   background: var(--bg-hover);

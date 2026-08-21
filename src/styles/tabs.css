@@ -462,27 +462,38 @@
   max-height: none;
 }
 
-/* 预览缩放工具栏（XLSX / 图像共用） */
-.preview-zoom-btn {
+/* 工具栏小按钮组：预览缩放 / PDF / XLSX 共用 */
+.preview-zoom-btn,
+.pdf-toolbar-btn,
+.xlsx-sheet-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--ctrl-h-xs);
   height: var(--ctrl-h-xs);
   border-radius: var(--radius);
   color: var(--text-dim);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  padding: 0 var(--space-2);
-  cursor: pointer;
   font-family: inherit;
   font-size: var(--font-md);
+  cursor: pointer;
 }
-.preview-zoom-btn:hover:not(:disabled) {
+
+.preview-zoom-btn,
+.pdf-toolbar-btn {
+  min-width: var(--ctrl-h-xs);
+  padding: 0 var(--space-2);
+}
+
+.preview-zoom-btn:hover:not(:disabled),
+.pdf-toolbar-btn:hover:not(:disabled),
+.xlsx-sheet-btn:hover {
   background: var(--bg-hover);
   color: var(--text-bright);
 }
-.preview-zoom-btn:disabled {
+
+.preview-zoom-btn:disabled,
+.pdf-toolbar-btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -513,29 +524,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-.pdf-toolbar-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--ctrl-h-xs);
-  height: var(--ctrl-h-xs);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  padding: 0 var(--space-2);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: var(--font-md);
-}
-.pdf-toolbar-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
-.pdf-toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 .pdf-toolbar-btn svg {
   width: 14px;
@@ -595,23 +583,11 @@
   flex-wrap: wrap;
 }
 .xlsx-sheet-btn {
-  height: var(--ctrl-h-xs);
   max-width: 180px;
   padding: 0 var(--space-4);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  font-family: inherit;
-  font-size: var(--font-md);
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.xlsx-sheet-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
 }
 .xlsx-sheet-btn.active {
   color: var(--accent);

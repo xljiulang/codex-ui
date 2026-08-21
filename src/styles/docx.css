@@ -77,17 +77,9 @@
   flex-wrap: wrap;
 }
 .docx-editor-tool-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: var(--ctrl-h-sm);
   height: var(--ctrl-h-sm);
-  border-radius: var(--radius);
   color: var(--text-dim);
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
 }
 .docx-editor-tool-btn:hover {
   background: var(--bg-hover);

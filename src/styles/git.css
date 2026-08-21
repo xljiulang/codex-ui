@@ -1,9 +1,4 @@
 /* 拆分自 src/style.css：Git 更改/分支/拉取推送/提交历史/激活 diff 行（保持全局顺序，勿重排） */
-/* Git 更改 */
-.git-view {
-  overflow-y: auto;
-}
-
 .git-note {
   padding: var(--space-12) var(--space-6);
   text-align: center;
@@ -45,18 +40,6 @@
   height: 13px;
   fill: currentColor;
   flex-shrink: 0;
-}
-
-.git-init-btn.primary {
-  background: var(--accent);
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.git-init-btn.primary:hover {
-  background: var(--accent-dim);
-  filter: none;
-  box-shadow: none;
 }
 
 .git-init-ok {
@@ -275,23 +258,35 @@
   border-top: 1px solid var(--border);
 }
 
-.git-branch-input {
-  flex: 1;
-  min-width: 0;
-  padding: var(--space-1) var(--space-3);
+/* 输入框基类：Git 分支/远端/提交共用 */
+.git-branch-input,
+.git-remote-input,
+.git-commit-input {
   font-size: var(--font-md);
   color: var(--text-bright);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
   outline: none;
 }
 
-.git-branch-input:focus {
+.git-branch-input,
+.git-remote-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius);
+}
+
+.git-branch-input:focus,
+.git-remote-input:focus {
   border-color: var(--accent);
 }
 
-.git-branch-create-btn {
+/* 主按钮组：Git 初始化/分支创建/远端添加/提交共用 */
+.git-branch-create-btn,
+.git-remote-add-btn,
+.git-commit-btn,
+.git-init-btn.primary {
   flex-shrink: 0;
   height: var(--ctrl-h-sm);
   padding: 0 var(--space-5);
@@ -309,18 +304,26 @@
   transition: background-color var(--ease);
 }
 
-.git-branch-create-btn svg {
+.git-branch-create-btn svg,
+.git-remote-add-btn svg,
+.git-commit-btn svg {
   width: 13px;
   height: 13px;
   fill: currentColor;
   flex-shrink: 0;
 }
 
-.git-branch-create-btn:hover:not(:disabled) {
+.git-branch-create-btn:hover:not(:disabled),
+.git-remote-add-btn:hover:not(:disabled),
+.git-commit-btn:hover:not(:disabled),
+.git-init-btn.primary:hover {
   background: var(--accent-dim);
 }
 
-.git-branch-create-btn:disabled {
+.git-branch-create-btn:disabled,
+.git-remote-add-btn:disabled,
+.git-commit-btn:disabled,
+.git-init-btn.primary:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -419,15 +422,9 @@
   white-space: nowrap;
 }
 
-.git-remote-branch-badge {
-  flex-shrink: 0;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
+.git-remote-branch-badge,
+.git-remote-badge {
   padding: 2px var(--space-1);
-  border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.12);
-  color: var(--accent);
 }
 
 .git-remote-branch-delete {
@@ -512,17 +509,6 @@
   white-space: nowrap;
 }
 
-.git-remote-badge {
-  flex-shrink: 0;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  padding: 2px var(--space-1);
-  border-radius: 999px;
-  background: rgba(var(--accent-rgb), 0.12);
-  color: var(--accent);
-}
-
 .git-remote-url {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -533,22 +519,6 @@
 
 .git-remote-push {
   color: var(--text-faint);
-}
-
-.git-remote-input {
-  flex: 1;
-  min-width: 0;
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--font-md);
-  color: var(--text-bright);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  outline: none;
-}
-
-.git-remote-input:focus {
-  border-color: var(--accent);
 }
 
 .git-remote-actions {
@@ -610,40 +580,6 @@
   padding: var(--space-2) 2px 2px;
   margin-top: var(--space-1);
   border-top: 1px solid var(--border);
-}
-
-.git-remote-add-btn {
-  flex-shrink: 0;
-  height: var(--ctrl-h-sm);
-  padding: 0 var(--space-5);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  border: none;
-  border-radius: var(--radius);
-  font-size: var(--font-md);
-  font-weight: 700;
-  color: var(--on-accent);
-  background: var(--accent);
-  cursor: pointer;
-  transition: background-color var(--ease);
-}
-
-.git-remote-add-btn svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-  flex-shrink: 0;
-}
-
-.git-remote-add-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-}
-
-.git-remote-add-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .git-icon-btn {
@@ -758,14 +694,10 @@
   min-height: 44px;
   max-height: 120px;
   padding: var(--space-3) var(--space-3);
-  font-size: var(--font-md);
   line-height: 1.5;
   font-family: inherit;
-  color: var(--text-bright);
   background: var(--bg-input, var(--bg-hover));
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  outline: none;
   transition: border-color var(--ease);
 }
 
@@ -782,40 +714,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-}
-
-.git-commit-btn {
-  flex-shrink: 0;
-  height: var(--ctrl-h-sm);
-  padding: 0 var(--space-5);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  border: none;
-  border-radius: var(--radius);
-  font-size: var(--font-md);
-  font-weight: 700;
-  color: var(--on-accent);
-  background: var(--accent);
-  cursor: pointer;
-  transition: background-color var(--ease);
-}
-
-.git-commit-btn svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-  flex-shrink: 0;
-}
-
-.git-commit-btn:hover:not(:disabled) {
-  background: var(--accent-dim);
-}
-
-.git-commit-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .git-commit-hint {

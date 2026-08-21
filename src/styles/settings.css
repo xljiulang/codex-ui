@@ -165,20 +165,6 @@
   min-height: 0;
 }
 
-/* 按钮统一：设置页所有 .btn 等高等距，图标尺寸一致 */
-.settings-page .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  height: var(--ctrl-h-md);
-  padding: 0 var(--space-6);
-  font-size: var(--font-md);
-  line-height: 1;
-  white-space: nowrap;
-  border-radius: var(--radius);
-}
-
 .settings-page .btn svg {
   width: 13px;
   height: 13px;
@@ -190,10 +176,7 @@
 .settings-page .btn-icon {
   width: var(--ctrl-h-sm);
   height: var(--ctrl-h-sm);
-  padding: 0;
-  border-radius: var(--radius);
   border-color: transparent;
-  background: transparent;
   box-shadow: none;
 }
 
@@ -524,13 +507,25 @@
   color: var(--text-bright);
 }
 
-.plugin-marketplace-kind {
+/* 胶囊徽章基类：accent 系徽章共享，padding 差异保留在各自规则 */
+.plugin-status,
+.skill-status,
+.plugin-marketplace-kind,
+.model-provider-wire,
+.mcp-server-type,
+.git-remote-badge,
+.git-remote-branch-badge {
   font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
   color: var(--accent);
   background: var(--accent-soft);
   border-radius: 999px;
-  padding: 1px var(--space-2);
   flex-shrink: 0;
+}
+
+.plugin-marketplace-kind {
+  padding: 1px var(--space-2);
 }
 
 .plugin-market-remove {
@@ -602,10 +597,6 @@
 }
 
 .plugin-status {
-  font-size: var(--font-xs);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 999px;
   padding: 1px var(--space-2);
 }
 
@@ -755,12 +746,7 @@
 }
 
 .model-provider-wire {
-  font-size: var(--font-xs);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 999px;
   padding: 1px var(--space-2);
-  flex-shrink: 0;
 }
 
 .model-provider-actions {
@@ -879,12 +865,7 @@
 }
 
 .skill-status {
-  font-size: var(--font-xs);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 999px;
   padding: 1px var(--space-2);
-  flex-shrink: 0;
 }
 
 .skill-status.off {
@@ -967,12 +948,7 @@
 }
 
 .mcp-server-type {
-  font-size: var(--font-xs);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: 999px;
   padding: 1px var(--space-2);
-  flex-shrink: 0;
 }
 
 .mcp-server-form {
