@@ -13,7 +13,7 @@
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 46px;
+  height: var(--head-h);
   padding: var(--space-5) var(--space-3) 0;
   border-bottom: 1px solid var(--border);
   background: var(--header-bg);
@@ -494,7 +494,7 @@
 
 .preview-zoom-btn:disabled,
 .pdf-toolbar-btn:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .preview-zoom-percent {

@@ -294,7 +294,7 @@ body.resizing-composer {
 
 .ctx-window:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
 }
 
 .send-btn {

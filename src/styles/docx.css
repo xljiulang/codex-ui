@@ -98,7 +98,7 @@
   color: var(--accent);
 }
 .docx-editor-tool-btn:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .docx-editor-tool-sep {

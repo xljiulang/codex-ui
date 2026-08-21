@@ -53,13 +53,13 @@
 }
 
 .git-init-ok:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 
 .git-head {
   position: relative;
-  height: 46px;
+  height: var(--head-h);
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -95,7 +95,7 @@
 
 .git-branch:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
 }
 
 .git-branch .git-branch-name-text {
@@ -207,7 +207,7 @@
 }
 
 .git-branch-delete:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -239,7 +239,7 @@
 }
 
 .git-branch-merge:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -324,7 +324,7 @@
 .git-remote-add-btn:disabled,
 .git-commit-btn:disabled,
 .git-init-btn.primary:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -383,7 +383,7 @@
 }
 
 .git-remote-branch-fetch:disabled {
-  opacity: 0.5;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -453,7 +453,7 @@
 }
 
 .git-remote-branch-delete:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -562,7 +562,7 @@
 
 .git-remote-switch:disabled,
 .git-remote-delete:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -603,7 +603,7 @@
 }
 
 .git-icon-btn:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -627,7 +627,7 @@
 }
 
 .git-pull.busy:disabled {
-  opacity: 0.75;
+  opacity: var(--opacity-busy);
 }
 
 .git-pull-text {
@@ -650,7 +650,7 @@
 }
 
 .git-push.busy:disabled {
-  opacity: 0.75;
+  opacity: var(--opacity-busy);
 }
 
 .git-push-text {
@@ -706,7 +706,7 @@
 }
 
 .git-commit-input:disabled {
-  opacity: 0.6;
+  opacity: var(--opacity-disabled);
   cursor: not-allowed;
 }
 

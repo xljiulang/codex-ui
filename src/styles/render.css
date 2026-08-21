@@ -237,7 +237,7 @@
   border-color: var(--text-dim);
 }
 .msg-action-btn:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
@@ -599,7 +599,7 @@
   border-color: transparent;
 }
 .text-editor-btn.primary:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .text-editor-icon-btn {
@@ -624,7 +624,7 @@
   color: var(--accent);
 }
 .text-editor-icon-btn:disabled {
-  opacity: 0.4;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 .text-editor-icon-btn:disabled:hover {

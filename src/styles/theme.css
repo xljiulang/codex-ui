@@ -25,6 +25,8 @@
   --ctrl-h-xs: 24px;
   --ctrl-h-sm: 28px;
   --ctrl-h-md: 32px;
+  /* 面板头部高度 */
+  --head-h: 48px;
   /* 间距刻度：space-N = N*2px 的阶梯（4/6/8/10/12/14/16/20/24） */
   --space-1: 4px;
   --space-2: 6px;
@@ -42,6 +44,9 @@
   /* 动效时长 */
   --ease: 0.15s ease;
   --ease-slow: 0.2s ease;
+  /* 状态透明度 */
+  --opacity-disabled: 0.45;
+  --opacity-busy: 0.75;
   --mono: "Cascadia Code", Consolas, "Courier New", monospace;
   /* 代码块容器：全主题保持深色“终端”质感（扁平纯色） */
   --code-bg: #141a23;
@@ -433,7 +438,7 @@ select:focus-visible,
 }
 
 button:disabled {
-  opacity: 0.45;
+  opacity: var(--opacity-disabled);
   cursor: default;
 }
 
