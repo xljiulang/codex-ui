@@ -663,7 +663,6 @@ async function toggleSkill(s: SkillsItem) {
 const mcpState = reactive({
   loading: false,
   saving: false,
-  config_path: "",
   servers: [] as McpServerInfo[],
 });
 
@@ -702,7 +701,6 @@ async function loadMcp() {
   try {
     const res = await invoke<McpServersState | null>("mcp_servers_read");
     if (res) {
-      mcpState.config_path = res.config_path;
       mcpState.servers = (res.servers ?? []).map((s) => ({ ...s }));
     }
   } catch (e) {
@@ -1186,7 +1184,7 @@ function canInstall(p: PluginCatalogItem): boolean {
                   v-model="modelConfig.model_catalog_json"
                   type="text"
                   :disabled="modelConfig.loading"
-                  placeholder="如 models.json 或绝对路径"
+                  placeholder="如 models.json、绝对路径或 ~/.codex/models.json"
                 />
               </div>
             </div>
@@ -1773,9 +1771,6 @@ function canInstall(p: PluginCatalogItem): boolean {
                     <path :d="ICON_REFRESH" />
                   </svg>
                 </button>
-                <div class="model-config-path">
-                  {{ mcpState.config_path || "正在读取路径…" }}
-                </div>
               </div>
             </div>
             <div class="mcp-servers-list">

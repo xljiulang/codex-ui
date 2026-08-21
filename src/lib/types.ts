@@ -248,7 +248,6 @@ export interface McpServerInfo {
 
 /** mcp_servers_read 返回结构（与 Rust 端一致） */
 export interface McpServersState {
-  config_path: string;
   servers: McpServerInfo[];
 }
 

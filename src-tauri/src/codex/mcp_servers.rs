@@ -41,7 +41,6 @@ pub struct McpEnvEntry {
 /// `mcp_servers_read` 的返回结构。
 #[derive(Debug, Clone, Serialize)]
 pub struct McpServersState {
-    pub config_path: String,
     pub servers: Vec<McpServerInfo>,
 }
 
@@ -109,10 +108,7 @@ fn read_state_in(home: &Path) -> Result<McpServersState, String> {
             });
         }
     }
-    Ok(McpServersState {
-        config_path: config_path.to_string_lossy().into_owned(),
-        servers,
-    })
+    Ok(McpServersState { servers })
 }
 
 /// 读取 env / http_headers 等键值表（兼容正式表与内联表）。
