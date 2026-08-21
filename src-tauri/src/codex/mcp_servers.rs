@@ -8,11 +8,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use toml_edit::{value, Array, DocumentMut, Item, Table, Value};
 
-use super::model_config::{atomic_write, codex_home};
+use super::model_config::{atomic_write, codex_home, config_path_in};
 
 /// 单个 MCP 服务器条目（env 用有序键值对，便于 UI 增删）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,10 +48,6 @@ pub struct McpServersState {
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpServersEdit {
     pub servers: Vec<McpServerInfo>,
-}
-
-fn config_path_in(home: &Path) -> PathBuf {
-    home.join("config.toml")
 }
 
 /// 读取 MCP 服务器配置（真实 CODEX_HOME）。

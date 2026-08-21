@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 use toml_edit::{value, DocumentMut, Item, Table};
 
+use crate::codex::path_util::clean_path;
+
 /// 自动创建 model_catalog_json 目标文件时的默认内容（空模型目录，与 codex 目录格式一致）。
 pub const DEFAULT_MODEL_CATALOG_CONTENT: &str = "{\"models\":[]}";
 
@@ -89,7 +91,7 @@ pub fn codex_home() -> Result<PathBuf, String> {
     Err("无法定位 CODEX_HOME（未设置 CODEX_HOME 且找不到 %USERPROFILE%）".to_string())
 }
 
-fn config_path_in(home: &Path) -> PathBuf {
+pub(crate) fn config_path_in(home: &Path) -> PathBuf {
     home.join("config.toml")
 }
 
@@ -253,12 +255,12 @@ fn read_state_in(home: &Path) -> Result<ModelConfigState, String> {
         _ => (false, String::new()),
     };
     Ok(ModelConfigState {
-        config_path: config_path.to_string_lossy().into_owned(),
+        config_path: clean_path(&config_path),
         config_exists: true,
         config_content,
         model_catalog_json: structured.model_catalog_json,
         model_catalog_path: catalog_target
-            .map(|p| p.to_string_lossy().into_owned())
+            .map(|p| clean_path(&p))
             .unwrap_or_default(),
         model_catalog_exists,
         model_catalog,

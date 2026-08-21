@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::app_server::CodexServer;
 use super::model_config::codex_home;
+use crate::codex::path_util::{clean_path, norm_path_key, rel_path_of};
 
 /// 单个本地技能条目。
 #[derive(Debug, Clone, Serialize)]
@@ -75,7 +76,7 @@ pub async fn read_state(server: &CodexServer, force_reload: bool) -> Result<Skil
     let res = server.request("skills/list", params, None).await?;
     let (items, errors) = parse_skill_items(&res)?;
     Ok(SkillsState {
-        skills_dir: skills_dir.to_string_lossy().into_owned(),
+        skills_dir: clean_path(&skills_dir),
         items: filter_local_skills(&items, &skills_dir),
         errors,
     })
@@ -132,13 +133,10 @@ fn filter_local_skills(items: &[SkillListItem], skills_dir: &Path) -> Vec<SkillI
             }
         } else {
             // 旧版本无 scope：回退路径判定（位于 skills_dir 内且不以 `.` 开头）
-            let Some(rel) = relative_under(&path, skills_dir) else {
+            let Some(rel) = rel_path_of(skills_dir, &path) else {
                 continue;
             };
-            if rel
-                .components()
-                .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
-            {
+            if rel.split('/').any(|c| c.starts_with('.')) {
                 continue;
             }
         }
@@ -158,7 +156,7 @@ fn filter_local_skills(items: &[SkillListItem], skills_dir: &Path) -> Vec<SkillI
         };
         out.push(SkillInfo {
             name: item.name.clone(),
-            path: item.path.clone(),
+            path: clean_path(&path),
             description,
             enabled: item.enabled,
             scope: item.scope.clone(),
@@ -170,46 +168,7 @@ fn filter_local_skills(items: &[SkillListItem], skills_dir: &Path) -> Vec<SkillI
 
 /// 是否为插件缓存下的技能路径（大小写不敏感、统一分隔符、兼容 `\\?\` 前缀）。
 fn is_plugin_cache_path(path: &Path) -> bool {
-    let s = path.to_string_lossy().replace('/', "\\").to_lowercase();
-    let s = if let Some(rest) = s.strip_prefix(r"\\?\unc\") {
-        format!("\\\\{rest}")
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        rest.to_string()
-    } else {
-        s
-    };
-    s.contains(r"\plugins\cache\")
-}
-
-/// 返回 path 相对 dir 的相对路径；path 不在 dir 内（或等于 dir）时返回 None。
-/// Windows 下路径比较大小写不敏感、统一分隔符。
-fn relative_under(path: &Path, dir: &Path) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        let dir_key = path_key(dir);
-        let child_key = path_key(path);
-        let prefix = format!("{}\\", dir_key);
-        let rest = child_key.strip_prefix(&prefix)?;
-        if rest.is_empty() {
-            return None;
-        }
-        Some(PathBuf::from(rest.replace('\\', "/")))
-    }
-    #[cfg(not(windows))]
-    {
-        path.strip_prefix(dir)
-            .ok()
-            .filter(|r| !r.as_os_str().is_empty())
-            .map(PathBuf::from)
-    }
-}
-
-#[cfg(windows)]
-fn path_key(p: &Path) -> String {
-    p.components()
-        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
-        .collect::<Vec<_>>()
-        .join("\\")
+    norm_path_key(path).contains(r"\plugins\cache\")
 }
 
 #[cfg(test)]

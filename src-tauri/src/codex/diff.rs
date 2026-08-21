@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::codex::path_util::resolve_abs_path;
+
 /// diff 预览参数（由主窗口传入新窗口）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffPreviewParams {
@@ -341,30 +343,10 @@ fn build_hunk_rows(h: &DiffHunk) -> Vec<DiffRow> {
     rows
 }
 
-/// Windows 路径解析：绝对盘符路径/UNC 直接返回，相对路径按工作目录拼接；
-/// drive-relative（`C:foo`）无法确定驱动器当前目录，直接报错。
-fn resolve_path(p: &str, root: &str) -> Result<String, String> {
-    let h = p.replace('\\', "/");
-    let bytes = h.as_bytes();
-    let is_drive_abs = bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'/';
-    if is_drive_abs || h.starts_with("//") {
-        return Ok(h.replace('/', "\\"));
-    }
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return Err(format!("不支持驱动器相对路径: {p}"));
-    }
-    let trimmed = h.trim_start_matches('/');
-    let base = root.replace('\\', "/").trim_end_matches('/').to_string();
-    Ok(format!("{}/{}", base, trimmed).replace('/', "\\"))
-}
-
 /// 一次 IPC 完成：路径解析 + 读文件 + 反向重建 + 内联行生成
 #[tauri::command]
 pub fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
-    let abs = resolve_path(&params.path, &params.workspace)?;
+    let abs = resolve_abs_path(&params.path, &params.workspace)?;
     let new_content = if params.kind == "delete" {
         String::new()
     } else {
@@ -550,23 +532,23 @@ mod tests {
     #[test]
     fn resolve_path_rules() {
         // 绝对盘符路径原样返回（反斜杠）
-        assert_eq!(resolve_path("C:/a/b.txt", "D:\\root").unwrap(), "C:\\a\\b.txt");
+        assert_eq!(resolve_abs_path("C:/a/b.txt", "D:\\root").unwrap(), "C:\\a\\b.txt");
         // UNC 路径原样返回
         assert_eq!(
-            resolve_path(r"\\srv\share\f.txt", "D:\\root").unwrap(),
+            resolve_abs_path(r"\\srv\share\f.txt", "D:\\root").unwrap(),
             "\\\\srv\\share\\f.txt"
         );
         // 相对路径按 root 拼接，根目录尾分隔符不产生双斜杠
         assert_eq!(
-            resolve_path("src/a.txt", "D:\\root").unwrap(),
+            resolve_abs_path("src/a.txt", "D:\\root").unwrap(),
             "D:\\root\\src\\a.txt"
         );
         assert_eq!(
-            resolve_path("a.txt", "D:\\root\\").unwrap(),
+            resolve_abs_path("a.txt", "D:\\root\\").unwrap(),
             "D:\\root\\a.txt"
         );
         // drive-relative（C:foo）无法确定基准，直接拒绝
-        assert!(resolve_path("C:foo", "D:\\root").is_err());
+        assert!(resolve_abs_path("C:foo", "D:\\root").is_err());
     }
 
     #[test]

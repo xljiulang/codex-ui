@@ -11,6 +11,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 
+use crate::codex::path_util::clean_path;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::session_log::SessionLog;
 
@@ -665,8 +666,8 @@ impl CodexServer {
         let inner = self.shared.inner.lock().await;
         json!({
             "connected": inner.connected,
-            "startupWorkspace": self.workspace.to_string_lossy(),
-            "codexPath": inner.codex_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            "startupWorkspace": clean_path(&self.workspace),
+            "codexPath": inner.codex_path.as_ref().map(|p| clean_path(Path::new(p))),
             "logs": inner.logs.clone(),
         })
     }
@@ -796,7 +797,7 @@ fn bundled_marketplace_paths_in(marketplaces_dir: &Path) -> Vec<String> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            paths.push(path.to_string_lossy().into_owned());
+            paths.push(clean_path(&path));
         }
     }
     paths.sort();

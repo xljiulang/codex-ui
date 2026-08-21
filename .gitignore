@@ -7,3 +7,6 @@ src-tauri/gen
 .DS_Store
 .vs/
 /.playwright-cli/
+/setup/bin/*.exe
+/setup/output/*.exe
+/setup/*.exe

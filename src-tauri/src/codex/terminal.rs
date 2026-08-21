@@ -8,8 +8,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::codex::app_server::{app_exe_dir, prepend_bin_path};
-use crate::codex::path_util::clean_path;
 use crate::codex::settings;
+use crate::codex::util::resolve_workspace_dir;
 
 /// 终端会话：持有 ConPTY 主端、写端与子进程。
 /// reader 线程在输出 EOF（进程退出或被 kill）后自行清理 map 条目。
@@ -155,19 +155,6 @@ fn shell_command(shell: &str) -> (String, Vec<String>) {
     }
 }
 
-/// 校验工作区为存在的绝对目录（与 session_fs 的 resolve_workspace 语义一致）
-fn validate_workspace(workspace: &str) -> Result<PathBuf, String> {
-    let p = PathBuf::from(workspace);
-    if !p.is_absolute() {
-        return Err("工作目录必须为绝对路径".into());
-    }
-    let meta = std::fs::metadata(&p).map_err(|e| format!("无法访问目录 {}: {e}", clean_path(&p)))?;
-    if !meta.is_dir() {
-        return Err(format!("不是目录: {}", clean_path(&p)));
-    }
-    Ok(p)
-}
-
 /// 结束并移除指定会话；会话不存在时视为已清理（幂等）
 fn kill_session(state: &TerminalState, id: &str) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -195,7 +182,7 @@ pub fn terminal_spawn(
     if id.trim().is_empty() {
         return Err("终端 id 不能为空".into());
     }
-    let dir = validate_workspace(&workspace)?;
+    let dir = resolve_workspace_dir(&workspace)?;
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         if guard.contains_key(&id) {
@@ -417,16 +404,16 @@ mod tests {
 
     #[test]
     fn spawn_rejects_invalid_cwd() {
-        assert!(validate_workspace("relative/path").is_err());
+        assert!(resolve_workspace_dir("relative/path").is_err());
         let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("no_such_dir_for_terminal_test");
-        assert!(validate_workspace(missing.to_str().unwrap()).is_err());
+        assert!(resolve_workspace_dir(missing.to_str().unwrap()).is_err());
     }
 
     #[test]
     fn spawn_accepts_existing_dir() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        assert!(validate_workspace(dir.to_str().unwrap()).is_ok());
+        assert!(resolve_workspace_dir(dir.to_str().unwrap()).is_ok());
     }
 
     #[test]

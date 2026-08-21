@@ -13,3 +13,4 @@ pub mod session_log;
 pub mod settings;
 pub mod skills;
 pub mod terminal;
+pub mod util;

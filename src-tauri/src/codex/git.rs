@@ -10,8 +10,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::codex::diff::DiffRow;
-use crate::codex::path_util::{clean_path, norm_key};
+use crate::codex::path_util::{clean_path, norm_key, rel_path_of as shared_rel_path_of};
 use crate::codex::session_fs::looks_text;
+use crate::codex::util::{BlockingError, spawn_blocking_timeout};
 
 /// 单文件大小上限（diff 等全量读入内存的操作），超过直接报错
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
@@ -2229,21 +2230,22 @@ fn extract_conflict_paths(combined: &str) -> String {
     }
 }
 
-/// 在阻塞线程中执行同步 git 操作，带指定超时（秒）
+/// 在阻塞线程中执行同步 git 操作，带指定超时（秒）；错误文案与旧实现保持一致。
 async fn run_blocking_with_timeout<T: Send + 'static>(
     timeout_secs: u64,
     f: impl FnOnce() -> Result<T, GitError> + Send + 'static,
 ) -> Result<T, GitError> {
-    let task = tokio::task::spawn_blocking(move || {
+    let task_f = move || {
         // 锁在任务内部持有，超时后任务仍在后台执行时，后续 git 操作会排队等待，
         // 避免与未结束的操作并发读写同一仓库。
         let _guard = git_op_lock().lock().unwrap_or_else(|e| e.into_inner());
         f()
-    });
-    match tokio::time::timeout(Duration::from_secs(timeout_secs), task).await {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => Err(git_err(format!("git 任务异常: {e}"))),
-        Err(_) => Err(git_err(format!("git 操作超时（{timeout_secs} 秒）"))),
+    };
+    match spawn_blocking_timeout(timeout_secs, task_f).await {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => Err(e),
+        Err(BlockingError::Timeout(secs)) => Err(git_err(format!("git 操作超时（{secs} 秒）"))),
+        Err(BlockingError::Join(e)) => Err(git_err(format!("git 任务异常: {e}"))),
     }
 }
 
@@ -2445,20 +2447,20 @@ pub async fn git_changes_ignore(workspace: String, path: String) -> Result<GitSt
 /// 事件路径是否位于需要排除的“点目录”下（除 .git 外的 . 开头目录，任意深度）。
 /// 组件是否目录用路径前缀 is_dir() 判断：`.gitignore`、`.env` 等点文件不排除。
 fn path_under_excluded_dot_dir(root: &Path, p: &Path) -> bool {
-    let Ok(rel) = p.strip_prefix(root) else {
+    let Some(rel) = shared_rel_path_of(root, p) else {
         return false;
     };
     let mut acc = root.to_path_buf();
-    for c in rel.components() {
-        if let Component::Normal(n) = c {
-            acc.push(n);
-            let s = n.to_string_lossy();
-            if s.starts_with('.') && s.len() > 1 && s != ".git" && acc.is_dir() {
-                return true;
-            }
-            if s.eq_ignore_ascii_case("node_modules") && acc.is_dir() {
-                return true;
-            }
+    for c in rel.split('/') {
+        if c.is_empty() || c == "." || c == ".." {
+            continue;
+        }
+        acc.push(c);
+        if c.starts_with('.') && c.len() > 1 && c != ".git" && acc.is_dir() {
+            return true;
+        }
+        if c.eq_ignore_ascii_case("node_modules") && acc.is_dir() {
+            return true;
         }
     }
     false
@@ -2601,11 +2603,10 @@ pub async fn git_changes_watch_start(
                 }
                 // 忽略快照过滤：命中 gitignore 的路径不再触发刷新（真实变更仍由
                 // 防抖后的 git status 原生过滤）
-                if let Ok(rel) = p.strip_prefix(&root_for_filter) {
-                    let rel_str = rel.to_string_lossy();
+                if let Some(rel) = shared_rel_path_of(&root_for_filter, &p) {
                     if ignore_snapshot_cb
                         .lock()
-                        .map(|s| s.is_ignored(&rel_str))
+                        .map(|s| s.is_ignored(&rel))
                         .unwrap_or(false)
                     {
                         continue;

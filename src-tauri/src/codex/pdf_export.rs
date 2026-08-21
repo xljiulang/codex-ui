@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
+use crate::codex::path_util::clean_path;
+
 const PRINT_WINDOW_LABEL: &str = "pdf-export";
 
 /// 打印 HTML 的临时存储：id → 完整打印文档（`print-export://` 协议处理器读取）。
@@ -71,7 +73,7 @@ pub async fn export_markdown_pdf(
                     dialog = dialog.set_directory(dir);
                 }
             }
-            dialog.save_file().map(|p| p.to_string_lossy().into_owned())
+            dialog.save_file().map(|p| clean_path(&p))
         }
     })
     .await
@@ -128,7 +130,7 @@ pub async fn export_markdown_pdf(
         .remove(&id);
 
     result?;
-    Ok(Some(save_path.to_string_lossy().into_owned()))
+    Ok(Some(clean_path(&save_path)))
 }
 
 /// 导航确认 + 图片等待 + WebView2 打印。

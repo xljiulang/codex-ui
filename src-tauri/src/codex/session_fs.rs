@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::Read;
@@ -9,8 +9,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use crate::codex::path_util::{clean_path, is_inside_path, norm_key};
+use crate::codex::path_util::{clean_path, is_inside_path, norm_key, rel_path_of as shared_rel_path_of};
 use crate::codex::file_icon::{icon_data_uri, icon_data_uri_for_ext};
+use crate::codex::util::{BlockingError, resolve_workspace_dir, spawn_blocking_timeout};
 
 /// 会话资源条目（camelCase 序列化，供前端直接使用）
 #[derive(Debug, Clone, Serialize)]
@@ -47,24 +48,10 @@ fn is_noise_dir(name: &str) -> bool {
     is_dot_dir(name) || name.eq_ignore_ascii_case("node_modules")
 }
 
-/// 规范化路径键：统一反斜杠、去尾部分隔符、小写（Windows 大小写不敏感）
-/// 相对 root 的相对路径（. 表示根）；对规范化/原始路径混用做大小写不敏感匹配，
-/// 输出保留原始大小写、统一正斜杠分隔。
+/// 相对 root 的相对路径（. 表示根）；root 外时回退为清洗后的全路径（正斜杠）。
+/// 比较/相对化统一走 path_util::rel_path_of（大小写不敏感、兼容 `\\?\` 前缀）。
 fn rel_path_of(root: &Path, path: &Path) -> String {
-    let root_s = clean_path(root).replace('/', "\\");
-    let path_s = clean_path(path).replace('/', "\\");
-    let root_l = root_s.to_lowercase();
-    let path_l = path_s.to_lowercase();
-    if path_l == root_l {
-        return ".".to_string();
-    }
-    if let Some(rest) = path_l.strip_prefix(&root_l) {
-        if rest.starts_with('\\') {
-            let orig_rest = &path_s[root_l.len() + 1..];
-            return orig_rest.replace('\\', "/");
-        }
-    }
-    path_s.replace('\\', "/")
+    shared_rel_path_of(root, path).unwrap_or_else(|| clean_path(path).replace('\\', "/"))
 }
 
 /// target 必须位于 root 内（规范化后，Windows 大小写不敏感）。
@@ -87,18 +74,6 @@ fn ensure_inside(root: &Path, target: &Path) -> Result<PathBuf, String> {
     } else {
         Err(format!("路径越界: {}", clean_path(target)))
     }
-}
-
-fn resolve_workspace(workspace: &str) -> Result<PathBuf, String> {
-    let p = PathBuf::from(workspace);
-    if !p.is_absolute() {
-        return Err("工作目录必须为绝对路径".into());
-    }
-    let meta = std::fs::metadata(&p).map_err(|e| format!("无法访问工作目录 {workspace}: {e}"))?;
-    if !meta.is_dir() {
-        return Err(format!("工作目录不是目录: {workspace}"));
-    }
-    Ok(p)
 }
 
 fn validate_name(name: &str) -> Result<(), String> {
@@ -415,7 +390,7 @@ fn move_impl(root: &Path, src: &Path, dest_dir: &Path) -> Result<FsEntry, String
 #[tauri::command]
 pub async fn session_fs_list(workspace: String, dir: String) -> Result<Vec<FsEntry>, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         list_impl(&root_p, Path::new(&dir))
     })
     .await
@@ -428,7 +403,7 @@ pub async fn session_fs_search(
     limit: Option<usize>,
 ) -> Result<Vec<FsEntry>, String> {
     run_blocking(120, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         search_impl(&root_p, &query, limit.unwrap_or(200))
     })
     .await
@@ -437,7 +412,7 @@ pub async fn session_fs_search(
 #[tauri::command]
 pub async fn session_fs_metadata(workspace: String, path: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         metadata_impl(&root_p, Path::new(&path))
     })
     .await
@@ -450,7 +425,7 @@ pub async fn session_fs_rename(
     new_name: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         rename_impl(&root_p, Path::new(&path), &new_name)
     })
     .await
@@ -459,7 +434,7 @@ pub async fn session_fs_rename(
 #[tauri::command]
 pub async fn session_fs_delete(workspace: String, path: String) -> Result<(), String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         delete_impl(&root_p, Path::new(&path))
     })
     .await
@@ -472,7 +447,7 @@ pub async fn session_fs_copy(
     dest_dir: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         copy_impl(&root_p, Path::new(&src), Path::new(&dest_dir))
     })
     .await
@@ -485,7 +460,7 @@ pub async fn session_fs_paste(
     sources: Vec<String>,
 ) -> Result<Vec<FsEntry>, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         paste_impl(&root_p, Path::new(&dest_dir), &sources)
     })
     .await
@@ -498,7 +473,7 @@ pub async fn session_fs_move(
     dest_dir: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         move_impl(&root_p, Path::new(&src), Path::new(&dest_dir))
     })
     .await
@@ -542,23 +517,23 @@ fn read_impl(root: &Path, path: &Path) -> Result<TextFileContent, String> {
     })
 }
 
-/// 在阻塞线程中执行同步文件操作，带超时（秒）
+/// 在阻塞线程中执行同步文件操作，带超时（秒）；错误文案与旧实现保持一致。
 async fn run_blocking<T: Send + 'static>(
     timeout_secs: u64,
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
-    let task = tokio::task::spawn_blocking(f);
-    match tokio::time::timeout(Duration::from_secs(timeout_secs), task).await {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => Err(format!("文件操作任务异常: {e}")),
-        Err(_) => Err(format!("文件操作超时（{timeout_secs} 秒）")),
+    match spawn_blocking_timeout(timeout_secs, f).await {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => Err(e),
+        Err(BlockingError::Timeout(secs)) => Err(format!("文件操作超时（{secs} 秒）")),
+        Err(BlockingError::Join(e)) => Err(format!("文件操作任务异常: {e}")),
     }
 }
 
 #[tauri::command]
 pub async fn session_fs_read(workspace: String, path: String) -> Result<TextFileContent, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         read_impl(&root_p, Path::new(&path))
     })
     .await
@@ -592,7 +567,7 @@ pub async fn session_fs_write(
     content: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         write_impl(&root_p, Path::new(&path), &content)
     })
     .await
@@ -635,7 +610,7 @@ pub async fn session_fs_write_bytes(
     content: String,
 ) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         write_bytes_impl(&root_p, Path::new(&path), &content, MAX_PREVIEW_BYTES)
     })
     .await
@@ -684,7 +659,7 @@ fn create_dir_impl(root: &Path, dir: &Path) -> Result<FsEntry, String> {
 #[tauri::command]
 pub async fn session_fs_create_file(workspace: String, dir: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         create_file_impl(&root_p, Path::new(&dir))
     })
     .await
@@ -693,7 +668,7 @@ pub async fn session_fs_create_file(workspace: String, dir: String) -> Result<Fs
 #[tauri::command]
 pub async fn session_fs_create_dir(workspace: String, dir: String) -> Result<FsEntry, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         create_dir_impl(&root_p, Path::new(&dir))
     })
     .await
@@ -745,7 +720,7 @@ fn probe_text_impl(root: &Path, path: &Path) -> Result<bool, String> {
 #[tauri::command]
 pub async fn session_fs_probe_text(workspace: String, path: String) -> Result<bool, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         probe_text_impl(&root_p, Path::new(&path))
     })
     .await
@@ -775,7 +750,7 @@ fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec<u8>, 
 #[tauri::command]
 pub async fn session_fs_read_bytes(workspace: String, path: String) -> Result<Vec<u8>, String> {
     run_blocking(120, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         read_bytes_impl(&root_p, Path::new(&path), MAX_PREVIEW_BYTES)
     })
     .await
@@ -823,7 +798,7 @@ pub async fn session_fs_icons(
     size: Option<u32>,
 ) -> Result<Vec<IconResult>, String> {
     run_blocking(60, move || {
-        let root_p = resolve_workspace(&workspace)?;
+        let root_p = resolve_workspace_dir(&workspace)?;
         Ok(icons_impl(&root_p, &requests, size.unwrap_or(16)))
     })
     .await
@@ -857,22 +832,11 @@ pub async fn session_fs_icon_for_ext(ext: String) -> Result<Option<String>, Stri
 }
 
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
-    p.strip_prefix(root)
+    shared_rel_path_of(root, p)
         .map(|rel| {
-            rel.components().any(|c| {
-                matches!(c, Component::Normal(n) if {
-                    let s = n.to_string_lossy();
-                    is_noise_dir(&s)
-                })
-            })
+            rel.split('/').any(is_noise_dir)
         })
         .unwrap_or(false)
-}
-
-fn path_to_rel(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root)
-        .map(|r| r.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| p.to_string_lossy().replace('\\', "/"))
 }
 
 #[tauri::command]
@@ -881,7 +845,7 @@ pub async fn session_fs_watch_start(
     state: State<'_, FsWatcherState>,
     workspace: String,
 ) -> Result<(), String> {
-    let root_p = resolve_workspace(&workspace)?;
+    let root_p = resolve_workspace_dir(&workspace)?;
     let root_c = root_p
         .canonicalize()
         .map_err(|e| format!("无法解析工作目录 {}: {e}", workspace))?;
@@ -932,7 +896,7 @@ pub async fn session_fs_watch_start(
             tokio::select! {
                 maybe = rx.recv() => match maybe {
                     Some(p) => {
-                        pending.push(path_to_rel(&root_for_task, &p));
+                        pending.push(rel_path_of(&root_for_task, &p));
                         last_event = Some(tokio::time::Instant::now());
                     }
                     None => break,

@@ -8,6 +8,7 @@ use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
 use crate::codex::custom_instructions;
 use crate::codex::mcp_servers;
 use crate::codex::model_config;
+use crate::codex::path_util::clean_path;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
 
@@ -307,7 +308,7 @@ pub async fn auth_logout(server: State<'_, Server>) -> Result<Value, String> {
 
 #[tauri::command]
 pub fn startup_workspace(server: State<'_, Server>) -> String {
-    server.workspace().to_string_lossy().into_owned()
+    clean_path(server.workspace())
 }
 
 #[tauri::command]
@@ -339,18 +340,29 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     Err(format!("文件或目录不存在: {}", path))
 }
 
+/// 应用非空初始目录到原生文件对话框
+fn dialog_with_initial_dir(
+    mut dialog: rfd::FileDialog,
+    initial_dir: Option<String>,
+) -> rfd::FileDialog {
+    if let Some(d) = initial_dir.as_deref() {
+        if !d.is_empty() {
+            dialog = dialog.set_directory(d);
+        }
+    }
+    dialog
+}
+
 #[tauri::command]
 pub async fn pick_files(
     multiple: bool,
     initial_dir: Option<String>,
 ) -> Result<Vec<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let mut dialog = rfd::FileDialog::new().add_filter("所有文件", &["*"]);
-        if let Some(d) = initial_dir.as_deref() {
-            if !d.is_empty() {
-                dialog = dialog.set_directory(d);
-            }
-        }
+        let dialog = dialog_with_initial_dir(
+            rfd::FileDialog::new().add_filter("所有文件", &["*"]),
+            initial_dir,
+        );
         let picked = if multiple {
             dialog.pick_files()
         } else {
@@ -359,7 +371,7 @@ pub async fn pick_files(
         Ok(picked
             .unwrap_or_default()
             .into_iter()
-            .map(|p| p.to_string_lossy().into_owned())
+            .map(|p| clean_path(&p))
             .collect::<Vec<_>>())
     })
     .await
@@ -372,13 +384,8 @@ pub async fn pick_directory(initial_dir: Option<String>) -> Result<Option<String
         // 锁在阻塞任务内获取并持有到对话框关闭：与 git_op_lock 同模式，
         // 保证排队等待的后续调用在对话框真正关闭前不会并发弹窗。
         let _guard = pick_directory_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let mut dialog = rfd::FileDialog::new();
-        if let Some(d) = initial_dir.as_deref() {
-            if !d.is_empty() {
-                dialog = dialog.set_directory(d);
-            }
-        }
-        Ok(dialog.pick_folder().map(|p| p.to_string_lossy().into_owned()))
+        let dialog = dialog_with_initial_dir(rfd::FileDialog::new(), initial_dir);
+        Ok(dialog.pick_folder().map(|p| clean_path(&p)))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -395,12 +402,10 @@ fn is_codex_exe(p: &std::path::Path) -> bool {
 #[tauri::command]
 pub async fn pick_codex_file(initial_dir: Option<String>) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
-        let mut dialog = rfd::FileDialog::new().add_filter("Codex 可执行文件", &["exe"]);
-        if let Some(d) = initial_dir.as_deref() {
-            if !d.is_empty() {
-                dialog = dialog.set_directory(d);
-            }
-        }
+        let dialog = dialog_with_initial_dir(
+            rfd::FileDialog::new().add_filter("Codex 可执行文件", &["exe"]),
+            initial_dir,
+        );
         let Some(picked) = dialog.pick_file() else {
             return Ok(None);
         };
@@ -410,7 +415,7 @@ pub async fn pick_codex_file(initial_dir: Option<String>) -> Result<Option<Strin
                 picked.display()
             ));
         }
-        Ok(Some(picked.to_string_lossy().into_owned()))
+        Ok(Some(clean_path(&picked)))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -452,7 +457,7 @@ fn save_image_bytes(
     let path = dir.join(name);
     std::fs::write(&path, bytes)
         .map_err(|e| format!("写入图片失败 {}: {e}", path.display()))?;
-    Ok(path.to_string_lossy().into_owned())
+    Ok(clean_path(&path))
 }
 
 /// 清理目录中超过 `max_age` 的旧文件（粘贴图片临时目录防无限累积；尽力而为）

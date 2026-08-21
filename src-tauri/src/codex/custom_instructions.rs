@@ -8,6 +8,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::codex::model_config::{atomic_write, codex_home};
+use crate::codex::path_util::clean_path;
 
 /// `custom_instructions_read` 的返回结构。
 #[derive(Debug, Clone, Serialize)]
@@ -34,7 +35,7 @@ fn read_state_in(home: &Path) -> Result<CustomInstructionsState, String> {
     }
     let content = fs::read_to_string(&path).map_err(|e| format!("读取 AGENTS.md 失败: {e}"))?;
     Ok(CustomInstructionsState {
-        agents_path: path.to_string_lossy().into_owned(),
+        agents_path: clean_path(&path),
         exists: true,
         content,
     })
