@@ -128,7 +128,10 @@ export const editorThemeSpec = {
     color: "var(--text-dim)",
   },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-    backgroundColor: "rgba(var(--accent-rgb), 0.28)",
+    // !important 压过 CodeMirror 基础主题 &dark 聚焦选区规则（.cm-selectionBackground 背景 #222），
+    // 保证浅色主题下选区为浅蓝底深字；颜色用 --text-bright，随主题在深浅间切换
+    backgroundColor: "rgba(var(--accent-rgb), 0.30) !important",
+    color: "var(--text-bright)",
   },
   ".cm-cursor, .cm-dropCursor": {
     borderLeftColor: "var(--accent)",
@@ -139,6 +142,12 @@ export const editorThemeSpec = {
   },
   ".cm-panels.cm-panels-top": {
     borderBottom: "1px solid var(--border)",
+  },
+  ".cm-search": {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: "6px",
   },
   ".cm-panels .cm-textfield": {
     backgroundColor: "var(--bg-input)",
@@ -159,8 +168,19 @@ export const editorThemeSpec = {
     fontSize: "12px",
   },
   ".cm-panels label": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "4px",
+    margin: "0",
+    whiteSpace: "nowrap",
+    lineHeight: "1",
     color: "var(--text-dim)",
     fontSize: "12px",
+  },
+  ".cm-panels input[type='checkbox']": {
+    margin: "0",
+    flex: "none",
+    accentColor: "var(--accent)",
   },
   ".cm-searchMatch": {
     backgroundColor: "rgba(var(--accent-rgb), 0.32)",

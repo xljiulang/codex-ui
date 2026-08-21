@@ -73,3 +73,30 @@ describe("editorTheme 查找面板按钮", () => {
     expect(btn.color).toBe("var(--text-bright)");
   });
 });
+
+describe("editorTheme 搜索面板与选区", () => {
+  it("搜索面板复选框与文字水平对齐", () => {
+    const search = editorThemeSpec[".cm-search"];
+    expect(search.display).toBe("flex");
+    expect(search.alignItems).toBe("center");
+    expect(search.flexWrap).toBe("wrap");
+
+    const label = editorThemeSpec[".cm-panels label"];
+    expect(label.display).toBe("inline-flex");
+    expect(label.alignItems).toBe("center");
+    expect(label.margin).toBe("0");
+
+    const checkbox = editorThemeSpec[".cm-panels input[type='checkbox']"];
+    expect(checkbox.margin).toBe("0");
+    expect(checkbox.flex).toBe("none");
+  });
+
+  it("选区显式着色并压过基础主题深色背景", () => {
+    const sel =
+      editorThemeSpec[
+        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection"
+      ];
+    expect(sel.color).toBe("var(--text-bright)");
+    expect(sel.backgroundColor).toBe("rgba(var(--accent-rgb), 0.30) !important");
+  });
+});
