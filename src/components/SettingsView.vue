@@ -29,7 +29,6 @@ import { openPathInApp } from "../composables/useSessionFs";
 import {
   ICON_CHEVRON_DOWN,
   ICON_CHECK,
-  ICON_CLOSE,
   ICON_DELETE,
   ICON_DOWNLOAD,
   ICON_EDIT,
@@ -63,6 +62,7 @@ import type {
   SkillsState,
   TerminalShell,
 } from "../lib/types";
+import ModalDialog from "./ModalDialog.vue";
 
 const codexPath = ref(store.settings.codex_path ?? "");
 const sound = ref(store.settings.sound_enabled);
@@ -1258,134 +1258,129 @@ function canInstall(p: PluginCatalogItem): boolean {
               </p>
             </div>
 
-            <div v-if="providerForm.open" class="model-provider-form">
-              <div
-                class="setting-row"
-                :class="{ 'model-config-row-error': providerFormErrors.key }"
-              >
-                <label>
-                  标识（key）
-                  <span class="model-config-required" title="必填">*</span>
-                </label>
-                <input
-                  v-model="providerForm.key"
-                  type="text"
-                  :disabled="providerForm.editingIndex >= 0"
-                  placeholder="如 my-provider"
-                  :class="{ 'model-config-input-error': providerFormErrors.key }"
-                />
-                <p
-                  v-if="providerFormErrors.key"
-                  class="model-config-field-error"
+            <ModalDialog
+              v-if="providerForm.open"
+              :title="providerForm.editingIndex >= 0 ? '编辑模型提供方' : '添加模型提供方'"
+              closable
+              @close="closeProviderForm"
+            >
+              <div class="model-provider-form">
+                <div
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': providerFormErrors.key }"
                 >
-                  {{ providerFormErrors.key }}
-                </p>
-              </div>
-              <div
-                class="setting-row"
-                :class="{ 'model-config-row-error': providerFormErrors.name }"
-              >
-                <label>
-                  名称（name）
-                  <span class="model-config-required" title="必填">*</span>
-                </label>
-                <input
-                  v-model="providerForm.name"
-                  type="text"
-                  placeholder="如 DeepSeek"
-                  :class="{ 'model-config-input-error': providerFormErrors.name }"
-                />
-                <p
-                  v-if="providerFormErrors.name"
-                  class="model-config-field-error"
+                  <label>
+                    标识（key）
+                    <span class="model-config-required" title="必填">*</span>
+                  </label>
+                  <input
+                    v-model="providerForm.key"
+                    type="text"
+                    :disabled="providerForm.editingIndex >= 0"
+                    placeholder="如 my-provider"
+                    :class="{ 'model-config-input-error': providerFormErrors.key }"
+                  />
+                  <p
+                    v-if="providerFormErrors.key"
+                    class="model-config-field-error"
+                  >
+                    {{ providerFormErrors.key }}
+                  </p>
+                </div>
+                <div
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': providerFormErrors.name }"
                 >
-                  {{ providerFormErrors.name }}
-                </p>
-              </div>
-              <div
-                class="setting-row"
-                :class="{ 'model-config-row-error': providerFormErrors.base_url }"
-              >
-                <label>
-                  base_url
-                  <span class="model-config-required" title="必填">*</span>
-                </label>
-                <input
-                  v-model="providerForm.base_url"
-                  type="text"
-                  placeholder="https://api.example.com/v1"
-                  :class="{
-                    'model-config-input-error': providerFormErrors.base_url,
-                  }"
-                />
-                <p
-                  v-if="providerFormErrors.base_url"
-                  class="model-config-field-error"
+                  <label>
+                    名称（name）
+                    <span class="model-config-required" title="必填">*</span>
+                  </label>
+                  <input
+                    v-model="providerForm.name"
+                    type="text"
+                    placeholder="如 DeepSeek"
+                    :class="{ 'model-config-input-error': providerFormErrors.name }"
+                  />
+                  <p
+                    v-if="providerFormErrors.name"
+                    class="model-config-field-error"
+                  >
+                    {{ providerFormErrors.name }}
+                  </p>
+                </div>
+                <div
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': providerFormErrors.base_url }"
                 >
-                  {{ providerFormErrors.base_url }}
-                </p>
-              </div>
-              <div class="setting-row">
-                <label>env_key（环境变量名）</label>
-                <input
-                  v-model="providerForm.env_key"
-                  type="text"
-                  placeholder="如 OPENAI_API_KEY"
-                />
-              </div>
-              <div
-                class="setting-row"
-                :class="{ 'model-config-row-error': providerFormErrors.auth }"
-              >
-                <label>experimental_bearer_token</label>
-                <input
-                  v-model="providerForm.experimental_bearer_token"
-                  type="password"
-                  placeholder="API Key"
-                />
-                <p
-                  v-if="providerFormErrors.auth"
-                  class="model-config-field-error"
+                  <label>
+                    base_url
+                    <span class="model-config-required" title="必填">*</span>
+                  </label>
+                  <input
+                    v-model="providerForm.base_url"
+                    type="text"
+                    placeholder="https://api.example.com/v1"
+                    :class="{
+                      'model-config-input-error': providerFormErrors.base_url,
+                    }"
+                  />
+                  <p
+                    v-if="providerFormErrors.base_url"
+                    class="model-config-field-error"
+                  >
+                    {{ providerFormErrors.base_url }}
+                  </p>
+                </div>
+                <div class="setting-row">
+                  <label>env_key（环境变量名）</label>
+                  <input
+                    v-model="providerForm.env_key"
+                    type="text"
+                    placeholder="如 OPENAI_API_KEY"
+                  />
+                </div>
+                <div
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': providerFormErrors.auth }"
                 >
-                  {{ providerFormErrors.auth }}
-                </p>
-                <p
-                  v-else-if="modelConfig.openai_api_key_present"
-                  class="model-config-auth-hint"
-                >
-                  已检测到全局 OPENAI_API_KEY，env_key / API Key 可留空
-                </p>
+                  <label>experimental_bearer_token</label>
+                  <input
+                    v-model="providerForm.experimental_bearer_token"
+                    type="password"
+                    placeholder="API Key"
+                  />
+                  <p
+                    v-if="providerFormErrors.auth"
+                    class="model-config-field-error"
+                  >
+                    {{ providerFormErrors.auth }}
+                  </p>
+                  <p
+                    v-else-if="modelConfig.openai_api_key_present"
+                    class="model-config-auth-hint"
+                  >
+                    已检测到全局 OPENAI_API_KEY，env_key / API Key 可留空
+                  </p>
+                </div>
+                <div class="setting-row">
+                  <label>wire_api</label>
+                  <select v-model="providerForm.wire_api">
+                    <option value="responses">responses</option>
+                    <option value="chat">chat</option>
+                  </select>
+                </div>
               </div>
-              <div class="setting-row">
-                <label>wire_api</label>
-                <select v-model="providerForm.wire_api">
-                  <option value="responses">responses</option>
-                  <option value="chat">chat</option>
-                </select>
-              </div>
-              <div class="model-config-actions">
+              <template #foot>
+                <button class="btn" @click="closeProviderForm">取消</button>
                 <button
-                  class="btn btn-icon primary provider-form-submit"
-                  :title="
-                    providerForm.editingIndex >= 0 ? '保存修改' : '添加'
-                  "
+                  class="btn primary provider-form-submit"
+                  :disabled="modelConfig.savingProviders || modelConfig.loading"
                   @click="confirmProviderForm"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_CHECK" />
-                  </svg>
+                  {{ providerForm.editingIndex >= 0 ? "保存修改" : "添加" }}
                 </button>
-                <button
-                  class="btn btn-icon provider-form-cancel"
-                  title="取消"
-                  @click="closeProviderForm"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_CLOSE" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+              </template>
+            </ModalDialog>
 
             <p
               v-if="modelConfigErrors.catalogWarning"
@@ -1833,216 +1828,214 @@ function canInstall(p: PluginCatalogItem): boolean {
               </div>
             </div>
 
-            <div v-if="mcpForm.open" class="mcp-server-form">
-              <div
-                class="setting-row"
-                :class="{ 'model-config-row-error': mcpFormErrors.name }"
-              >
-                <label>
-                  名称（name）
-                  <span class="model-config-required" title="必填">*</span>
-                </label>
-                <input
-                  v-model="mcpForm.name"
-                  type="text"
-                  :disabled="mcpForm.editingIndex >= 0"
-                  placeholder="如 filesystem"
-                  :class="{ 'model-config-input-error': mcpFormErrors.name }"
-                />
-                <p v-if="mcpFormErrors.name" class="model-config-field-error">
-                  {{ mcpFormErrors.name }}
-                </p>
-              </div>
-              <div class="setting-row">
-                <label for="mcp-form-transport">传输方式</label>
-                <select
-                  id="mcp-form-transport"
-                  v-model="mcpForm.transport"
+            <ModalDialog
+              v-if="mcpForm.open"
+              :title="mcpForm.editingIndex >= 0 ? '编辑 MCP 服务器' : '添加 MCP 服务器'"
+              closable
+              @close="closeMcpForm"
+            >
+              <div class="mcp-server-form">
+                <div
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': mcpFormErrors.name }"
                 >
-                  <option value="stdio">stdio</option>
-                  <option value="http">Streamable HTTP</option>
-                </select>
-              </div>
-              <div
-                v-if="mcpForm.transport === 'stdio'"
-                class="setting-row"
-                :class="{ 'model-config-row-error': mcpFormErrors.command }"
-              >
-                <label>
-                  command
-                  <span class="model-config-required" title="必填">*</span>
-                </label>
-                <input
-                  v-model="mcpForm.command"
-                  type="text"
-                  placeholder="如 npx"
-                  :class="{ 'model-config-input-error': mcpFormErrors.command }"
-                />
-                <p
-                  v-if="mcpFormErrors.command"
-                  class="model-config-field-error"
-                >
-                  {{ mcpFormErrors.command }}
-                </p>
-              </div>
-              <div
-                v-if="mcpForm.transport === 'stdio'"
-                class="setting-row"
-              >
-                <label>args（空格分隔）</label>
-                <input
-                  class="mcp-args-input"
-                  v-model="mcpForm.argsText"
-                  type="text"
-                  placeholder="如 -y @modelcontextprotocol/server-filesystem ."
-                />
-              </div>
-              <div
-                v-if="mcpForm.transport === 'stdio'"
-                class="setting-row mcp-env-block"
-                :class="{ 'model-config-row-error': mcpFormErrors.env }"
-              >
-                <label>env（环境变量）</label>
-                <div class="mcp-env-rows">
-                  <div
-                    v-for="(e, i) in mcpForm.env"
-                    :key="i"
-                    class="mcp-env-row"
-                  >
-                    <input
-                      v-model="e.key"
-                      type="text"
-                      placeholder="环境变量名"
-                    />
-                    <input
-                      v-model="e.value"
-                      type="text"
-                      placeholder="值"
-                    />
-                    <button
-                      class="btn btn-icon danger"
-                      title="删除该环境变量"
-                      @click="removeMcpEnvRow(i)"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="ICON_DELETE" />
-                      </svg>
-                    </button>
-                  </div>
+                  <label>
+                    名称（name）
+                    <span class="model-config-required" title="必填">*</span>
+                  </label>
+                  <input
+                    v-model="mcpForm.name"
+                    type="text"
+                    :disabled="mcpForm.editingIndex >= 0"
+                    placeholder="如 filesystem"
+                    :class="{ 'model-config-input-error': mcpFormErrors.name }"
+                  />
+                  <p v-if="mcpFormErrors.name" class="model-config-field-error">
+                    {{ mcpFormErrors.name }}
+                  </p>
                 </div>
-                <p v-if="mcpFormErrors.env" class="model-config-field-error">
-                  {{ mcpFormErrors.env }}
-                </p>
-              </div>
-              <div
-                v-if="mcpForm.transport === 'http'"
-                class="setting-row"
-                :class="{ 'model-config-row-error': mcpFormErrors.url }"
-              >
-                <label>
-                  url
-                  <span class="model-config-required" title="必填">*</span>
-                </label>
-                <input
-                  v-model="mcpForm.url"
-                  type="text"
-                  placeholder="如 https://example.com/mcp"
-                  :class="{ 'model-config-input-error': mcpFormErrors.url }"
-                />
-                <p v-if="mcpFormErrors.url" class="model-config-field-error">
-                  {{ mcpFormErrors.url }}
-                </p>
-              </div>
-              <div
-                v-if="mcpForm.transport === 'http'"
-                class="setting-row"
-              >
-                <label>bearer_token_env_var（Bearer 令牌环境变量名）</label>
-                <input
-                  v-model="mcpForm.bearer_token_env_var"
-                  type="text"
-                  placeholder="如 MY_MCP_TOKEN"
-                />
-              </div>
-              <div
-                v-if="mcpForm.transport === 'http'"
-                class="setting-row mcp-env-block"
-                :class="{ 'model-config-row-error': mcpFormErrors.env }"
-              >
-                <label>http_headers（静态请求头）</label>
-                <div class="mcp-env-rows">
-                  <div
-                    v-for="(h, i) in mcpForm.headers"
-                    :key="i"
-                    class="mcp-env-row"
+                <div class="setting-row">
+                  <label for="mcp-form-transport">传输方式</label>
+                  <select
+                    id="mcp-form-transport"
+                    v-model="mcpForm.transport"
                   >
-                    <input
-                      v-model="h.key"
-                      type="text"
-                      placeholder="请求头名"
-                    />
-                    <input
-                      v-model="h.value"
-                      type="text"
-                      placeholder="值"
-                    />
-                    <button
-                      class="btn btn-icon danger"
-                      title="删除该请求头"
-                      @click="removeMcpHeaderRow(i)"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="ICON_DELETE" />
-                      </svg>
-                    </button>
-                  </div>
+                    <option value="stdio">stdio</option>
+                    <option value="http">Streamable HTTP</option>
+                  </select>
                 </div>
-                <p v-if="mcpFormErrors.env" class="model-config-field-error">
-                  {{ mcpFormErrors.env }}
-                </p>
-              </div>
-              <div class="model-config-actions">
-                <button
+                <div
                   v-if="mcpForm.transport === 'stdio'"
-                  class="btn btn-icon mcp-kv-add-btn"
-                  title="添加环境变量"
-                  @click="addMcpEnvRow"
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': mcpFormErrors.command }"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_PLUS" />
-                  </svg>
-                </button>
-                <button
-                  v-else
-                  class="btn btn-icon mcp-kv-add-btn"
-                  title="添加请求头"
-                  @click="addMcpHeaderRow"
+                  <label>
+                    command
+                    <span class="model-config-required" title="必填">*</span>
+                  </label>
+                  <input
+                    v-model="mcpForm.command"
+                    type="text"
+                    placeholder="如 npx"
+                    :class="{ 'model-config-input-error': mcpFormErrors.command }"
+                  />
+                  <p
+                    v-if="mcpFormErrors.command"
+                    class="model-config-field-error"
+                  >
+                    {{ mcpFormErrors.command }}
+                  </p>
+                </div>
+                <div
+                  v-if="mcpForm.transport === 'stdio'"
+                  class="setting-row"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_PLUS" />
-                  </svg>
-                </button>
+                  <label>args（空格分隔）</label>
+                  <input
+                    class="mcp-args-input"
+                    v-model="mcpForm.argsText"
+                    type="text"
+                    placeholder="如 -y @modelcontextprotocol/server-filesystem ."
+                  />
+                </div>
+                <div
+                  v-if="mcpForm.transport === 'stdio'"
+                  class="setting-row mcp-env-block"
+                  :class="{ 'model-config-row-error': mcpFormErrors.env }"
+                >
+                  <label>env（环境变量）</label>
+                  <div class="mcp-env-rows">
+                    <div
+                      v-for="(e, i) in mcpForm.env"
+                      :key="i"
+                      class="mcp-env-row"
+                    >
+                      <input
+                        v-model="e.key"
+                        type="text"
+                        placeholder="环境变量名"
+                      />
+                      <input
+                        v-model="e.value"
+                        type="text"
+                        placeholder="值"
+                      />
+                      <button
+                        class="btn btn-icon danger"
+                        title="删除该环境变量"
+                        @click="removeMcpEnvRow(i)"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path :d="ICON_DELETE" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <p v-if="mcpFormErrors.env" class="model-config-field-error">
+                    {{ mcpFormErrors.env }}
+                  </p>
+                </div>
+                <div
+                  v-if="mcpForm.transport === 'http'"
+                  class="setting-row"
+                  :class="{ 'model-config-row-error': mcpFormErrors.url }"
+                >
+                  <label>
+                    url
+                    <span class="model-config-required" title="必填">*</span>
+                  </label>
+                  <input
+                    v-model="mcpForm.url"
+                    type="text"
+                    placeholder="如 https://example.com/mcp"
+                    :class="{ 'model-config-input-error': mcpFormErrors.url }"
+                  />
+                  <p v-if="mcpFormErrors.url" class="model-config-field-error">
+                    {{ mcpFormErrors.url }}
+                  </p>
+                </div>
+                <div
+                  v-if="mcpForm.transport === 'http'"
+                  class="setting-row"
+                >
+                  <label>bearer_token_env_var（Bearer 令牌环境变量名）</label>
+                  <input
+                    v-model="mcpForm.bearer_token_env_var"
+                    type="text"
+                    placeholder="如 MY_MCP_TOKEN"
+                  />
+                </div>
+                <div
+                  v-if="mcpForm.transport === 'http'"
+                  class="setting-row mcp-env-block"
+                  :class="{ 'model-config-row-error': mcpFormErrors.env }"
+                >
+                  <label>http_headers（静态请求头）</label>
+                  <div class="mcp-env-rows">
+                    <div
+                      v-for="(h, i) in mcpForm.headers"
+                      :key="i"
+                      class="mcp-env-row"
+                    >
+                      <input
+                        v-model="h.key"
+                        type="text"
+                        placeholder="请求头名"
+                      />
+                      <input
+                        v-model="h.value"
+                        type="text"
+                        placeholder="值"
+                      />
+                      <button
+                        class="btn btn-icon danger"
+                        title="删除该请求头"
+                        @click="removeMcpHeaderRow(i)"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path :d="ICON_DELETE" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <p v-if="mcpFormErrors.env" class="model-config-field-error">
+                    {{ mcpFormErrors.env }}
+                  </p>
+                </div>
+                <div class="model-config-actions">
+                  <button
+                    v-if="mcpForm.transport === 'stdio'"
+                    class="btn btn-icon mcp-kv-add-btn"
+                    title="添加环境变量"
+                    @click="addMcpEnvRow"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_PLUS" />
+                    </svg>
+                  </button>
+                  <button
+                    v-else
+                    class="btn btn-icon mcp-kv-add-btn"
+                    title="添加请求头"
+                    @click="addMcpHeaderRow"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_PLUS" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <template #foot>
+                <button class="btn" @click="closeMcpForm">取消</button>
                 <button
-                  class="btn btn-icon primary mcp-form-submit"
-                  :title="mcpForm.editingIndex >= 0 ? '保存修改' : '添加'"
+                  class="btn primary mcp-form-submit"
                   :disabled="mcpState.saving || mcpState.loading"
                   @click="confirmMcpForm"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_CHECK" />
-                  </svg>
+                  {{ mcpForm.editingIndex >= 0 ? "保存修改" : "添加" }}
                 </button>
-                <button
-                  class="btn btn-icon mcp-form-cancel"
-                  title="取消"
-                  @click="closeMcpForm"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_CLOSE" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+              </template>
+            </ModalDialog>
 
           </div>
         </section>

@@ -520,6 +520,60 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.findAll(".model-provider-row").length).toBe(2);
   });
 
+  it("新增提供方以弹窗呈现：标题、遮罩与表单均在弹窗内", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(true);
+    expect(wrapper.find(".modal-title").text()).toBe("添加模型提供方");
+    expect(wrapper.find(".modal-body .model-provider-form").exists()).toBe(true);
+    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("添加");
+  });
+
+  it("编辑提供方以弹窗呈现：标题为编辑且标识只读", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".model-provider-row")[1]
+      .find(".provider-row-edit")
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-title").text()).toBe("编辑模型提供方");
+    expect(
+      wrapper.find('input[placeholder="如 my-provider"]').attributes("disabled"),
+    ).toBeDefined();
+    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("保存修改");
+  });
+
+  it("提供方弹窗取消/×关闭且列表不变，重新打开表单复位", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper.find('input[placeholder="如 my-provider"]').setValue("temp");
+    // 点击遮罩不关闭（maskClose=false）
+    await wrapper.find(".modal-mask").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(true);
+    // × 关闭
+    await wrapper.find(".modal-close").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(wrapper.findAll(".model-provider-row").length).toBe(2);
+    // 重新打开表单复位
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    expect(
+      (wrapper.find('input[placeholder="如 my-provider"]')
+        .element as HTMLInputElement).value,
+    ).toBe("");
+    // 取消关闭
+    await wrapper.find(".modal-foot .btn:not(.primary)").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+  });
+
   it("编辑提供方后保存调用 model_config_ui_save", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
@@ -1260,6 +1314,61 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
         ([name]) => name === "mcp_servers_save",
       ).length,
     ).toBe(0);
+  });
+
+  it("新增 MCP 服务器以弹窗呈现，取消/×关闭且列表不变", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(true);
+    expect(wrapper.find(".modal-title").text()).toBe("添加 MCP 服务器");
+    expect(wrapper.find(".modal-body .mcp-server-form").exists()).toBe(true);
+    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("添加");
+    await wrapper.find(".modal-close").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+    expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
+    // 重新打开后传输方式回到 stdio、名称为空
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    expect(
+      (wrapper.find("#mcp-form-transport").element as HTMLSelectElement).value,
+    ).toBe("stdio");
+    expect(
+      (wrapper.find('.mcp-server-form input[placeholder="如 filesystem"]')
+        .element as HTMLInputElement).value,
+    ).toBe("");
+    await wrapper.find(".modal-foot .btn:not(.primary)").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-mask").exists()).toBe(false);
+  });
+
+  it("编辑 MCP 服务器弹窗标题为编辑且名称只读", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-edit")
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal-title").text()).toBe("编辑 MCP 服务器");
+    expect(
+      wrapper
+        .find('.mcp-server-form input[placeholder="如 filesystem"]')
+        .attributes("disabled"),
+    ).toBeDefined();
+    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("保存修改");
   });
 });
 
@@ -2026,7 +2135,7 @@ describe("SettingsView 按钮图标", () => {
   it("导航与主要操作按钮均渲染图标且文案不以省略号结尾", async () => {
     wrapper = mount(SettingsView);
     await flushPromises();
-    // 打开提供方表单，覆盖表单按钮（取消/添加）
+    // 打开提供方弹窗，覆盖弹窗底部按钮（取消/添加）
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
     const selectors = [
@@ -2035,7 +2144,6 @@ describe("SettingsView 按钮图标", () => {
       ".model-config-actions button.primary",
       ".model-config-reload-btn",
       ".model-provider-actions .btn",
-      ".model-provider-form .btn",
       "button.codex-pick-btn",
       "button.codex-clear-btn",
       "button.memory-reset-btn",
@@ -2055,6 +2163,13 @@ describe("SettingsView 按钮图标", () => {
           `${sel} 文案不应以省略号结尾`,
         ).toBe(false);
       }
+    }
+    // 弹窗底部为文字按钮（取消/添加），无需图标但文案完整
+    const footButtons = wrapper.findAll(".modal-foot .btn");
+    expect(footButtons.length).toBe(2);
+    for (const btn of footButtons) {
+      expect(btn.text().trim().length).toBeGreaterThan(0);
+      expect(btn.text().trim().endsWith("…")).toBe(false);
     }
   });
 });
