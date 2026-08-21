@@ -4,12 +4,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 4px 10px;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-4);
   border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color 0.14s ease, border-color 0.14s ease;
+  transition: background-color var(--ease), border-color var(--ease);
   position: relative;
 }
 
@@ -75,7 +75,7 @@
 
 .resource-name {
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-bright);
   white-space: nowrap;
   overflow: hidden;
@@ -83,7 +83,7 @@
 }
 
 .resource-relpath {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -94,12 +94,12 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   max-width: 45%;
 }
 
 .resource-time {
-  font-size: 11px;
+  font-size: var(--font-sm);
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -109,13 +109,13 @@
 
 .resource-count {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: 600;
   color: var(--text-faint);
   background: var(--bg-active);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 1px var(--space-3);
   min-width: 22px;
   text-align: center;
 }
@@ -130,8 +130,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -139,8 +139,8 @@
   color: var(--text-dim);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease,
-    border-color 0.14s ease;
+  transition: opacity var(--ease), color var(--ease), background-color var(--ease),
+    border-color var(--ease);
 }
 
 .resource-add svg {
@@ -186,14 +186,14 @@ body.resource-dragging .resource-add {
   pointer-events: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
   border-radius: var(--radius);
   background: var(--bg-input);
   border: 1px solid rgba(var(--accent-rgb), 0.45);
   box-shadow: var(--shadow-lg);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   transform: translate(-50%, -130%);
   opacity: 0.92;
   max-width: 260px;
@@ -218,13 +218,13 @@ body.resource-dragging .resource-add {
 .resource-props {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-4);
 }
 
 .resource-prop {
   display: flex;
-  gap: 12px;
-  font-size: 12.5px;
+  gap: var(--space-5);
+  font-size: var(--font-md);
   line-height: 1.5;
 }
 

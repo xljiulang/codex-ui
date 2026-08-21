@@ -13,6 +13,35 @@
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  /* 字号刻度：xs=10（徽章/辅助）、sm=11（说明）、md=12（正文小）、
+     base=13（正文基准）、lg=14（小标题）、xl=16（大标题） */
+  --font-xs: 10px;
+  --font-sm: 11px;
+  --font-md: 12px;
+  --font-base: 13px;
+  --font-lg: 14px;
+  --font-xl: 16px;
+  /* 控件高度刻度：xs=24（小图标按钮）、sm=28（紧凑按钮/输入）、md=32（默认） */
+  --ctrl-h-xs: 24px;
+  --ctrl-h-sm: 28px;
+  --ctrl-h-md: 32px;
+  /* 间距刻度：space-N = N*2px 的阶梯（4/6/8/10/12/14/16/20/24） */
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  --space-6: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  /* 语义色 */
+  --on-accent: #ffffff;
+  --yellow-soft: rgba(229, 214, 160, 0.14);
+  --neutral-soft: rgba(127, 127, 127, 0.08);
+  /* 动效时长 */
+  --ease: 0.15s ease;
+  --ease-slow: 0.2s ease;
   --mono: "Cascadia Code", Consolas, "Courier New", monospace;
   /* 代码块容器：全主题保持深色“终端”质感（扁平纯色） */
   --code-bg: #141a23;
@@ -365,7 +394,7 @@ body,
 
 body {
   font-family: "Segoe UI", "Microsoft YaHei", -apple-system, sans-serif;
-  font-size: 13.5px;
+  font-size: var(--font-base);
   line-height: 1.55;
   color: var(--text);
   background: var(--bg);
@@ -386,9 +415,9 @@ button {
   background: none;
   border: none;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease,
-    border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease,
-    opacity 0.15s ease;
+  transition: background-color var(--ease), color var(--ease),
+    border-color var(--ease), box-shadow var(--ease), transform var(--ease),
+    opacity var(--ease);
 }
 
 button:focus-visible,
@@ -411,15 +440,15 @@ button:disabled {
 input,
 textarea {
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text-bright);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-3);
   outline: none;
   resize: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--ease), box-shadow var(--ease);
 }
 
 input:focus,
@@ -430,14 +459,14 @@ textarea:focus {
 
 select {
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text-bright);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 6px 8px;
+  padding: var(--space-2) var(--space-3);
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--ease), box-shadow var(--ease);
 }
 
 select:focus {

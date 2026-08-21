@@ -6,8 +6,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  font-size: 12.5px;
+  gap: var(--space-8);
+  font-size: var(--font-md);
 }
 
 /* 零会话标签空状态：主区域居中纯提示 */
@@ -17,12 +17,12 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: var(--space-8);
   color: var(--text-faint);
 }
 
 .no-session-state .no-session-hint {
-  font-size: 13px;
+  font-size: var(--font-base);
 }
 
 /* 空状态 Logo：与 AppHeader 相同的圆角方块 + 六边形 C 标 */
@@ -74,16 +74,16 @@
   color: var(--text-bright);
   border: 1px solid var(--border-light);
   border-radius: 999px;
-  padding: 9px 18px;
-  font-size: 12.5px;
+  padding: var(--space-3) var(--space-8);
+  font-size: var(--font-md);
   font-weight: 600;
   z-index: 200;
   max-width: 80vw;
   box-shadow: var(--shadow-md);
-  animation: toast-in 0.18s ease;
+  animation: toast-in var(--ease-slow);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .toast::before {
@@ -104,20 +104,20 @@
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
-  padding: 5px;
+  padding: var(--space-1);
   display: flex;
   flex-direction: column;
-  animation: menu-in 0.12s ease;
+  animation: menu-in var(--ease);
 }
 
 .ctx-menu-item {
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 11px;
+  gap: var(--space-3);
+  padding: var(--space-3) 11px;
   border-radius: var(--radius);
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   width: 100%;
 }
@@ -162,9 +162,9 @@
   position: fixed;
   z-index: 500;
   max-width: 340px;
-  padding: 7px 11px;
+  padding: var(--space-3) 11px;
   border-radius: var(--radius);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   line-height: 1.5;
   color: var(--text-bright);
   background: var(--tooltip-bg);
@@ -173,7 +173,7 @@
   pointer-events: none;
   word-break: break-word;
   white-space: pre-wrap;
-  animation: tooltip-in 0.12s ease;
+  animation: tooltip-in var(--ease);
 }
 
 @keyframes tooltip-in {
