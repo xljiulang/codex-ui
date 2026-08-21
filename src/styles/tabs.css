@@ -52,7 +52,7 @@
   height: 32px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
@@ -81,7 +81,7 @@
   padding: 0 8px 0 12px;
   border: 1px solid transparent;
   border-bottom: none;
-  border-radius: 9px 9px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
   color: var(--text-dim);
   font-family: inherit;
@@ -179,7 +179,6 @@
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
   animation: breathe 1.6s ease-in-out infinite;
   pointer-events: none;
 }
@@ -196,14 +195,13 @@
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--yellow);
   color: var(--bg);
   font-size: 10px;
   font-weight: 700;
   line-height: 15px;
   text-align: center;
-  box-shadow: 0 0 8px rgba(255, 190, 0, 0.35);
   pointer-events: auto;
   flex-shrink: 0;
 }
@@ -216,7 +214,7 @@
   width: 30px;
   height: 30px;
   margin: 0 6px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--text-dim);
   flex-shrink: 0;
 }
@@ -305,7 +303,7 @@
   width: 18px;
   height: 18px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
@@ -457,7 +455,7 @@
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .preview-image img.zoomed {
   max-width: none;
@@ -471,7 +469,7 @@
   justify-content: center;
   min-width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text-dim);
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -522,7 +520,7 @@
   justify-content: center;
   min-width: 24px;
   height: 24px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text-dim);
   background: var(--bg-input);
   border: 1px solid var(--border);
@@ -600,7 +598,7 @@
   height: 24px;
   max-width: 180px;
   padding: 0 10px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text-dim);
   background: var(--bg-input);
   border: 1px solid var(--border);

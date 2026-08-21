@@ -4,23 +4,20 @@
   border-top: 1px solid var(--border);
   padding: 10px 14px 14px;
   background: var(--footer-bg);
-  backdrop-filter: blur(12px);
   position: relative;
-  /* backdrop-filter 会创建独立层叠上下文：菜单（z-index 40）被困在内部、
-     整体低于 .app-header（z-index 30）。提升整个 composer 层即可让
+  /* 提升整个 composer 层即可让
      @/$ 等弹出菜单显示在头部之上；menu-backdrop 已 Teleport 到 body，
      仍保持 z-index 29 位于头部之下，头部保持可点击。
      权限/任务/模型三个按钮弹出层的外部关闭改由 window mousedown 判定
      （点击任意非弹出层区域自动关闭），menu-backdrop 仅兜底 mention 菜单。 */
   z-index: 31;
   flex-shrink: 0;
-  box-shadow: var(--footer-shadow);
 }
 
 .composer.dragover {
   outline: 2px dashed var(--accent-dim);
   outline-offset: -6px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 
 .composer-input-row {
@@ -34,7 +31,7 @@
   align-items: center;
   justify-content: center;
   cursor: ns-resize;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   user-select: none;
   touch-action: none;
   transition: background-color 0.14s ease;
@@ -77,20 +74,17 @@ body.resizing-composer {
   padding: 13px 14px 42px;
   background: var(--composer-bg);
   border: 1px solid var(--border-light);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   outline: none;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  box-shadow: var(--inset-shadow-md), var(--shadow-sm);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .rich-editor .ProseMirror:focus {
   border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: var(--inset-shadow),
-    0 0 0 3px rgba(var(--accent-rgb), 0.12),
-    0 6px 22px rgba(var(--accent-rgb), 0.08);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
 .rich-editor .ProseMirror p {
@@ -108,7 +102,7 @@ body.resizing-composer {
 .ref-chip {
   display: inline-block;
   vertical-align: baseline;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 0 7px;
   margin: 0 1px;
   font-size: 12px;
@@ -149,13 +143,11 @@ body.resizing-composer {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.09);
   border: 1px solid rgba(var(--accent-rgb), 0.28);
-  backdrop-filter: blur(6px);
 }
 
 .perm-chip:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .perm-chip svg {
@@ -181,13 +173,11 @@ body.resizing-composer {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.09);
   border: 1px solid rgba(var(--accent-rgb), 0.28);
-  backdrop-filter: blur(6px);
 }
 
 .task-chip:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .task-chip svg {
@@ -211,7 +201,6 @@ body.resizing-composer {
   color: var(--text-faint);
   background: rgba(127, 127, 127, 0.08);
   border: 1px solid var(--border-light);
-  backdrop-filter: blur(6px);
   transition: border-color 0.15s ease, background-color 0.15s ease,
     box-shadow 0.15s ease;
 }
@@ -230,7 +219,6 @@ body.resizing-composer {
 .goal-chip.has-goal:hover {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .goal-icon-btn {
@@ -241,7 +229,7 @@ body.resizing-composer {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text-faint);
   background: transparent;
   border: none;
@@ -260,7 +248,6 @@ body.resizing-composer {
   height: 10px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
   pointer-events: none;
 }
 
@@ -270,7 +257,6 @@ body.resizing-composer {
 
 .goal-icon-btn:hover {
   background: rgba(var(--accent-rgb), 0.14);
-  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.15);
 }
 
 .goal-icon-btn svg {
@@ -291,14 +277,12 @@ body.resizing-composer {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.09);
   border: 1px solid rgba(var(--accent-rgb), 0.28);
-  backdrop-filter: blur(6px);
 }
 
 .model-chip:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .model-chip svg {
@@ -342,7 +326,6 @@ body.resizing-composer {
   color: var(--accent);
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.18);
 }
 
 .ctx-window:disabled {
@@ -360,7 +343,7 @@ body.resizing-composer {
   border-radius: 10px;
   font-size: 12.5px;
   font-weight: 700;
-  background: var(--btn-grad);
+  background: var(--send-btn-grad);
   color: #ffffff;
   box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
@@ -456,7 +439,7 @@ body.resizing-composer {
   width: 24px;
   height: 24px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 /* 窄窗口适配 */

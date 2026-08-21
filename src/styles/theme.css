@@ -7,13 +7,15 @@
 
 /* 跨主题共享的几何/字体令牌 */
 :root {
-  --radius: 10px;
+  /* 圆角统一刻度：sm=6px（标签/徽章/小元素）、默认=8px（控件/输入/列表）、
+     lg=12px（卡片/气泡/菜单）、xl=16px（弹窗/大表面） */
   --radius-sm: 6px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --mono: "Cascadia Code", Consolas, "Courier New", monospace;
-  /* 代码块容器：全主题保持深色“终端”质感 */
-  --code-bg: linear-gradient(180deg, #161c25 0%, #0e1218 100%);
+  /* 代码块容器：全主题保持深色“终端”质感（扁平纯色） */
+  --code-bg: #141a23;
 }
 
 /* 主题一：蓝夜（默认） */
@@ -44,7 +46,7 @@
   --accent-rgb: 77, 166, 255;
   --accent-dim-rgb: 47, 127, 224;
   --accent-soft: rgba(var(--accent-rgb), 0.12);
-  --accent-glow: rgba(var(--accent-rgb), 0.42);
+  --accent-glow: rgba(var(--accent-rgb), 0.32);
 
   --green: #46d5a8;
   --green-rgb: 70, 213, 168;
@@ -56,49 +58,25 @@
   --purple: #c792ea;
   --purple-rgb: 199, 146, 234;
 
-  /* 表面渐变与玻璃 */
-  --header-bg: linear-gradient(
-    180deg,
-    rgba(31, 38, 49, 0.92),
-    rgba(21, 26, 33, 0.97)
-  );
-  --panel-bg: linear-gradient(
-    180deg,
-    rgba(21, 26, 33, 0.92),
-    rgba(15, 19, 25, 0.97)
-  );
-  --footer-bg: linear-gradient(
-    180deg,
-    rgba(21, 26, 33, 0.94),
-    rgba(14, 17, 22, 0.98)
-  );
-  --diff-head-bg: linear-gradient(
-    180deg,
-    rgba(31, 38, 49, 0.9),
-    rgba(21, 26, 33, 0.95)
-  );
-  --tool-card-bg: linear-gradient(
-    180deg,
-    rgba(var(--input-rgb), 0.9),
-    rgba(18, 23, 30, 0.95)
-  );
-  --composer-bg: linear-gradient(180deg, #1d242e, #181e27);
-  --editor-menu-bg: linear-gradient(180deg, #222a36, #1a2029);
-  --modal-bg: linear-gradient(180deg, #1a2029, #151a21);
-  --chip-bg: linear-gradient(180deg, #242c38, #1c222c);
-  --chip-bg-hover: linear-gradient(180deg, #2a3341, #202834);
-  --table-head-bg: linear-gradient(180deg, #202836, #1b222d);
-  --reasoning-bg: linear-gradient(
-    180deg,
-    rgba(var(--purple-rgb), 0.05),
-    rgba(var(--panel-rgb), 0.4)
-  );
+  /* 表面纯色（扁平，靠 1px 描边与层级色差区分） */
+  --header-bg: #171d27;
+  --panel-bg: #151a21;
+  --footer-bg: #12171e;
+  --diff-head-bg: #1a212b;
+  --tool-card-bg: #181e28;
+  --composer-bg: #1a2029;
+  --editor-menu-bg: #1e2530;
+  --modal-bg: #171d26;
+  --chip-bg: #1b212a;
+  --chip-bg-hover: #232b37;
+  --table-head-bg: #1c232e;
+  --reasoning-bg: rgba(var(--purple-rgb), 0.05);
 
   --panel-rgb: 21, 26, 33;
   --glass-rgb: 38, 48, 61;
   --input-rgb: 27, 33, 42;
-  --menu-bg: rgba(23, 28, 36, 0.97);
-  --tooltip-bg: rgba(28, 34, 44, 0.97);
+  --menu-bg: #171d26;
+  --tooltip-bg: #1c222c;
 
   /* 终端质感：代码块与命令输出（深色容器、浅色文字） */
   --console-bg: rgba(10, 14, 19, 0.92);
@@ -136,21 +114,22 @@
   --syntax-deletion: #f44747;
   --code-head-tint: rgba(255, 255, 255, 0.03);
 
-  --brand-grad: linear-gradient(90deg, #f2f7ff, #9db8dd);
-  --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
+  --brand-grad: #eef2f8;
+  --btn-grad: var(--accent-dim);
+  --send-btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
   --link-hover: #9ccbff;
   --diff-del-text: #f0a0a0;
   --diff-add-text: #9fe3d4;
 
   --overlay-rgb: 255, 255, 255;
-  --header-shadow: 0 1px 12px rgba(0, 0, 0, 0.28);
-  --footer-shadow: 0 -8px 24px rgba(0, 0, 0, 0.22);
-  --inset-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
-  --inset-shadow-md: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+  --header-shadow: none;
+  --footer-shadow: none;
+  --inset-shadow: none;
+  --inset-shadow-md: none;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.38);
-  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.28);
 }
 
 /* 主题二：曜黑（近黑画布 + 霓虹紫，更冷峻凌厉） */
@@ -177,7 +156,7 @@
   --accent-rgb: 167, 139, 250;
   --accent-dim-rgb: 123, 93, 240;
   --accent-soft: rgba(var(--accent-rgb), 0.13);
-  --accent-glow: rgba(var(--accent-rgb), 0.38);
+  --accent-glow: rgba(var(--accent-rgb), 0.32);
 
   --green: #55e0b3;
   --green-rgb: 85, 224, 179;
@@ -189,48 +168,24 @@
   --purple: #c792ea;
   --purple-rgb: 199, 146, 234;
 
-  --header-bg: linear-gradient(
-    180deg,
-    rgba(24, 25, 34, 0.92),
-    rgba(13, 14, 21, 0.97)
-  );
-  --panel-bg: linear-gradient(
-    180deg,
-    rgba(18, 19, 27, 0.92),
-    rgba(11, 12, 18, 0.97)
-  );
-  --footer-bg: linear-gradient(
-    180deg,
-    rgba(18, 19, 27, 0.94),
-    rgba(10, 11, 17, 0.98)
-  );
-  --diff-head-bg: linear-gradient(
-    180deg,
-    rgba(24, 25, 34, 0.9),
-    rgba(13, 14, 21, 0.95)
-  );
-  --tool-card-bg: linear-gradient(
-    180deg,
-    rgba(24, 25, 35, 0.92),
-    rgba(14, 15, 22, 0.96)
-  );
-  --composer-bg: linear-gradient(180deg, #191a26, #13141e);
-  --editor-menu-bg: linear-gradient(180deg, #1d1e2b, #151622);
-  --modal-bg: linear-gradient(180deg, #161724, #101118);
-  --chip-bg: linear-gradient(180deg, #1f202e, #171824);
-  --chip-bg-hover: linear-gradient(180deg, #272838, #1b1c29);
-  --table-head-bg: linear-gradient(180deg, #1d1e2c, #151624);
-  --reasoning-bg: linear-gradient(
-    180deg,
-    rgba(167, 139, 250, 0.06),
-    rgba(18, 19, 27, 0.4)
-  );
+  --header-bg: #14151d;
+  --panel-bg: #12131a;
+  --footer-bg: #0e0f15;
+  --diff-head-bg: #16171f;
+  --tool-card-bg: #151620;
+  --composer-bg: #161721;
+  --editor-menu-bg: #1a1b26;
+  --modal-bg: #13141c;
+  --chip-bg: #181a23;
+  --chip-bg-hover: #1f2130;
+  --table-head-bg: #171823;
+  --reasoning-bg: rgba(var(--purple-rgb), 0.06);
 
   --panel-rgb: 18, 19, 27;
   --glass-rgb: 32, 33, 46;
   --input-rgb: 24, 25, 35;
-  --menu-bg: rgba(16, 17, 24, 0.97);
-  --tooltip-bg: rgba(22, 23, 31, 0.97);
+  --menu-bg: #13141c;
+  --tooltip-bg: #181925;
 
   --console-bg: rgba(9, 10, 15, 0.92);
   --console-bg-deep: rgba(12, 13, 20, 0.9);
@@ -267,21 +222,22 @@
   --syntax-deletion: #f44747;
   --code-head-tint: rgba(255, 255, 255, 0.03);
 
-  --brand-grad: linear-gradient(90deg, #f4f1ff, #b9aee6);
-  --btn-grad: linear-gradient(135deg, #7557ec, #6d54e8);
+  --brand-grad: #f1effc;
+  --btn-grad: var(--accent-dim);
+  --send-btn-grad: linear-gradient(135deg, #7557ec, #6d54e8);
   --link-hover: #c5b6fd;
   --diff-del-text: #f2a3a9;
   --diff-add-text: #8fe6c8;
 
   --overlay-rgb: 255, 255, 255;
-  --header-shadow: 0 1px 12px rgba(0, 0, 0, 0.34);
-  --footer-shadow: 0 -8px 24px rgba(0, 0, 0, 0.28);
-  --inset-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.36);
-  --inset-shadow-md: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  --header-shadow: none;
+  --footer-shadow: none;
+  --inset-shadow: none;
+  --inset-shadow-md: none;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.42);
-  --shadow-lg: 0 16px 44px rgba(0, 0, 0, 0.52);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.26);
+  --shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.34);
 }
 
 /* 主题三：晨光（通透明亮，蓝主色加深保证对比度） */
@@ -308,7 +264,7 @@
   --accent-rgb: 37, 99, 235;
   --accent-dim-rgb: 29, 95, 196;
   --accent-soft: rgba(var(--accent-rgb), 0.1);
-  --accent-glow: rgba(var(--accent-rgb), 0.28);
+  --accent-glow: rgba(var(--accent-rgb), 0.3);
 
   --green: #0e7a58;
   --green-rgb: 14, 122, 88;
@@ -320,55 +276,31 @@
   --purple: #7c3aed;
   --purple-rgb: 124, 58, 237;
 
-  --header-bg: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.94),
-    rgba(241, 245, 251, 0.98)
-  );
-  --panel-bg: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96),
-    rgba(244, 247, 252, 0.99)
-  );
-  --footer-bg: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.96),
-    rgba(238, 242, 249, 0.99)
-  );
-  --diff-head-bg: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.92),
-    rgba(241, 245, 251, 0.96)
-  );
-  --tool-card-bg: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.95),
-    rgba(241, 245, 251, 0.98)
-  );
-  --composer-bg: linear-gradient(180deg, #ffffff, #eef2f9);
-  --editor-menu-bg: linear-gradient(180deg, #f4f7fc, #e9eef6);
-  --modal-bg: linear-gradient(180deg, #ffffff, #f2f5fa);
-  --chip-bg: linear-gradient(180deg, #ffffff, #eef1f7);
-  --chip-bg-hover: linear-gradient(180deg, #f2f5fa, #e5eaf2);
-  --table-head-bg: linear-gradient(180deg, #edf1f8, #e2e8f1);
-  --reasoning-bg: linear-gradient(
-    180deg,
-    rgba(124, 58, 237, 0.08),
-    rgba(255, 255, 255, 0.55)
-  );
+  --header-bg: #ffffff;
+  --panel-bg: #ffffff;
+  --footer-bg: #f8fafd;
+  --diff-head-bg: #f0f3f9;
+  --tool-card-bg: #ffffff;
+  --composer-bg: #ffffff;
+  --editor-menu-bg: #f3f6fb;
+  --modal-bg: #ffffff;
+  --chip-bg: #ffffff;
+  --chip-bg-hover: #eef1f7;
+  --table-head-bg: #eef1f7;
+  --reasoning-bg: rgba(var(--purple-rgb), 0.05);
 
   --panel-rgb: 255, 255, 255;
   --glass-rgb: 255, 255, 255;
   --input-rgb: 255, 255, 255;
-  --menu-bg: rgba(255, 255, 255, 0.97);
-  --tooltip-bg: rgba(255, 255, 255, 0.97);
+  --menu-bg: #ffffff;
+  --tooltip-bg: #ffffff;
 
   /* 控制台表面：晨光主题下为浅色容器、深色文字 */
   --console-bg: rgba(238, 243, 250, 0.95);
   --console-bg-deep: rgba(231, 236, 244, 0.95);
   --console-text: #3e4756;
   --code-text: #3e4756;
-  --code-bg: linear-gradient(180deg, #ffffff 0%, #eef2f9 100%);
+  --code-bg: #ffffff;
   /* 终端 ANSI 16 色 + 光标前景：xterm 主题同步使用 */
   --console-ansi-black: #24292f;
   --console-ansi-red: #cf222e;
@@ -400,21 +332,22 @@
   --syntax-deletion: #b62324;
   --code-head-tint: rgba(0, 0, 0, 0.04);
 
-  --brand-grad: linear-gradient(90deg, #202a3a, #64748b);
-  --btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
+  --brand-grad: #151b26;
+  --btn-grad: var(--accent);
+  --send-btn-grad: linear-gradient(135deg, #2563eb, #1d5fc4);
   --link-hover: #1a56c4;
   --diff-del-text: #c23a45;
   --diff-add-text: #0e7a58;
 
   --overlay-rgb: 25, 35, 52;
-  --header-shadow: 0 1px 12px rgba(30, 40, 60, 0.08);
-  --footer-shadow: 0 -8px 24px rgba(30, 40, 60, 0.07);
-  --inset-shadow: inset 0 1px 2px rgba(30, 40, 60, 0.08);
-  --inset-shadow-md: inset 0 1px 3px rgba(30, 40, 60, 0.1);
+  --header-shadow: none;
+  --footer-shadow: none;
+  --inset-shadow: none;
+  --inset-shadow-md: none;
 
-  --shadow-sm: 0 1px 2px rgba(30, 40, 60, 0.07);
-  --shadow-md: 0 6px 20px rgba(30, 40, 60, 0.1);
-  --shadow-lg: 0 16px 44px rgba(30, 40, 60, 0.14);
+  --shadow-sm: 0 1px 2px rgba(30, 40, 60, 0.05);
+  --shadow-md: 0 2px 10px rgba(30, 40, 60, 0.08);
+  --shadow-lg: 0 6px 24px rgba(30, 40, 60, 0.11);
 }
 
 * {
@@ -436,17 +369,6 @@ body {
   line-height: 1.55;
   color: var(--text);
   background: var(--bg);
-  background-image: radial-gradient(
-      1100px 420px at 50% -180px,
-      rgba(var(--accent-rgb), 0.055),
-      transparent 70%
-    ),
-    radial-gradient(
-      900px 380px at 85% -120px,
-      rgba(var(--accent-rgb), 0.045),
-      transparent 65%
-    );
-  background-attachment: fixed;
   user-select: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
