@@ -58,6 +58,7 @@ import type {
   ModelConfigUiEdit,
   ModelConfigState,
   ModelProviderInfo,
+  SkillErrorInfo,
   SkillsItem,
   SkillsState,
   TerminalShell,
@@ -616,6 +617,7 @@ function openAgentsFile() {
 const skillsState = reactive({
   loading: false,
   items: [] as SkillsItem[],
+  errors: [] as SkillErrorInfo[],
   busy: {} as Record<string, boolean>,
 });
 
@@ -628,6 +630,7 @@ async function loadSkills(forceReload = false) {
       forceReload,
     });
     skillsState.items = res?.items ?? [];
+    skillsState.errors = res?.errors ?? [];
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -1679,6 +1682,17 @@ function canInstall(p: PluginCatalogItem): boolean {
                 class="plugin-empty"
               >
                 正在加载技能…
+              </div>
+              <div
+                v-else-if="!skillsState.items.length && skillsState.errors.length"
+                class="plugin-empty"
+              >
+                {{ skillsState.errors.length }} 个技能因格式问题未加载
+                <ul class="skill-error-list">
+                  <li v-for="e in skillsState.errors" :key="e.path">
+                    {{ e.message }}（{{ e.path }}）
+                  </li>
+                </ul>
               </div>
               <div v-else-if="!skillsState.items.length" class="plugin-empty">
                 暂无可用技能

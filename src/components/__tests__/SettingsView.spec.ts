@@ -801,6 +801,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
   };
   const sampleSkillsState = {
     skills_dir: "C:/apps/codex-ui/.codex/skills",
+    errors: [],
     items: [
       {
         name: "pdf",
@@ -913,6 +914,37 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       ([name]) => name === "skills_read",
     ).length;
     expect(after).toBe(before + 1);
+  });
+
+  it("技能为空但有加载错误时展示格式问题提示", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    mockedInvoke.mockImplementationOnce((cmd: string) => {
+      if (cmd === "skills_read")
+        return Promise.resolve({
+          skills_dir: "C:/apps/codex-ui/.codex/skills",
+          items: [],
+          errors: [
+            {
+              message: "missing field `description`",
+              path: "C:/apps/codex-ui/.codex/skills/bad/SKILL.md",
+            },
+          ],
+        });
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    await wrapper
+      .find(".settings-section-skills .model-config-reload-btn")
+      .trigger("click");
+    await flushPromises();
+    const empty = wrapper.find(".settings-section-skills .plugin-empty");
+    expect(empty.text()).toContain("1 个技能因格式问题未加载");
+    expect(empty.text()).toContain("missing field `description`");
   });
 
   it("禁用技能行显示状态与启用按钮，点击后写配置并强制刷新", async () => {

@@ -265,10 +265,18 @@ export interface SkillsItem {
   enabled: boolean;
 }
 
+/** skills/list 返回的单个技能加载错误（skills_read 透出） */
+export interface SkillErrorInfo {
+  message: string;
+  /** 加载失败的 SKILL.md 路径 */
+  path: string;
+}
+
 /** skills_read 返回结构（与 Rust 端一致） */
 export interface SkillsState {
   skills_dir: string;
   items: SkillsItem[];
+  errors: SkillErrorInfo[];
 }
 
 export interface AuthStatus {

@@ -450,6 +450,23 @@
   border-radius: 12px;
 }
 
+.skill-error-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--red);
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.skill-error-list li + li {
+  margin-top: 4px;
+}
+
 .plugin-empty.small {
   padding: 10px;
   font-size: 12px;
