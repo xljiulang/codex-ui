@@ -216,7 +216,7 @@ impl CodexServer {
             "id": handshake_id,
             "method": "initialize",
             "params": {
-                "clientInfo": { "name": "codex-ui", "title": "Codex UI", "version": "0.1.0" },
+                "clientInfo": { "name": "codex-ui", "title": "Codex UI", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": { "experimentalApi": true, "requestAttestation": false }
             }
         });

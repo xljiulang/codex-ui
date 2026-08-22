@@ -4,9 +4,14 @@ import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { activeTabId } from "../useEditorTabs";
 import { capturedListeners, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: vi.fn(),
+}));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -35,6 +40,7 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
+const mockedGetVersion = vi.mocked(getVersion);
 
 beforeEach(() => {
   resetUseCodexState(mockedInvoke, mockedListen);
@@ -109,5 +115,27 @@ describe("启动加载态 booting 状态", () => {
     expect(
       (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__,
     ).toBeUndefined();
+  });
+});
+
+describe("主窗口标题显示版本号", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，避免 init() 内的 wireEvents 与其它用例互相干扰
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedGetVersion.mockReset();
+    mockWin.setTitle.mockClear();
+  });
+
+  it("Tauri 环境（getVersion 可用）时标题为 Codex UI v<版本>", async () => {
+    mockedGetVersion.mockResolvedValue("0.1.1");
+    await init();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI v0.1.1");
+  });
+
+  it("getVersion 不可用（非 Tauri）时回退无版本标题 Codex UI", async () => {
+    mockedGetVersion.mockRejectedValue(new Error("not in tauri"));
+    await init();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI");
   });
 });

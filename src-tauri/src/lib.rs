@@ -222,7 +222,7 @@ pub fn run() {
                 .theme;
             let (r, g, b, a) = codex::settings::theme_background_rgba(&theme);
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Codex UI")
+                .title(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
                 .inner_size(1280.0, 720.0)
                 .min_inner_size(400.0, 560.0)
                 .resizable(true)
