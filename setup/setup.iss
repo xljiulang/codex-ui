@@ -17,6 +17,11 @@ OutputDir=.\output
 OutputBaseFilename={#MyAppName}-win-x64
 SetupIconFile=..\src-tauri\icons\icon.ico
 
+; 压缩配置：显式 lzma2/max + 4 线程并行压缩大文件（bin\codex.exe 约 284 MB），
+; 保持压缩率的同时大幅缩短编译耗时；SolidCompression 保持默认 no（逐文件压缩）。
+Compression=lzma2/max
+LZMANumBlockThreads=4
+
 WizardStyle=modern
 PrivilegesRequired=lowest
 DisableDirPage=false
