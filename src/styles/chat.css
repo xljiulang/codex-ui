@@ -9,13 +9,6 @@
   position: relative;
 }
 
-/* 回合进行中的流光进度线 */
-.thinking-bar {
-  height: 3px;
-  flex-shrink: 0;
-  background: var(--accent);
-}
-
 /* “思考中”发光提示 */
 .thinking-chip {
   display: inline-flex;

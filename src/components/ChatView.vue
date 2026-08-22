@@ -209,7 +209,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="chat">
-    <div v-if="tab.turnActive" class="thinking-bar"></div>
     <div class="chat-scroll-wrap">
       <div ref="scroller" class="chat-scroll" @scroll="onScroll">
         <div v-if="items.length === 0" class="chat-empty">
