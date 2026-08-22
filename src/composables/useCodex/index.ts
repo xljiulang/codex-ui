@@ -19,10 +19,9 @@ export { setToast, toastError } from "./toast";
 export { askConfirm, settleConfirm } from "./confirm";
 export {
   __resetPinnedSectionForTest,
-  __resetTitleHelperCapabilityForTest,
+  getPinnedSectionId,
   sortThreads,
 } from "./capabilities";
-export type { PinCapability, PinProtocol, TitleHelperCapability } from "./capabilities";
 export { resolveSessionWorkspace, workspace } from "./items";
 export { currentItems, currentOriginLabel, permissionChip, threadTitle } from "./selectors";
 export {

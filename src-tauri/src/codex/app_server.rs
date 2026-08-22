@@ -47,6 +47,10 @@ struct Inner {
     ready: bool,
     logs: Vec<String>,
     codex_path: Option<PathBuf>,
+    /// 启动后探测到的 codex 版本号（`codex --version` 输出）；未探测为 None。
+    codex_version: Option<String>,
+    /// 版本是否低于 0.149.0（仅低版本警告）；未探测为 None。
+    version_too_old: Option<bool>,
 }
 
 impl Inner {
@@ -59,6 +63,8 @@ impl Inner {
             ready: false,
             logs: Vec::new(),
             codex_path: None,
+            codex_version: None,
+            version_too_old: None,
         }
     }
 
@@ -285,6 +291,12 @@ impl CodexServer {
         .await;
         self.emit_status().await;
 
+        // 后台探测 codex 版本：仅低于 0.149 时警告，不阻断主流程
+        let server = self.clone();
+        tauri::async_runtime::spawn(async move {
+            server.probe_codex_version().await;
+        });
+
         // 初始化成功后隐式尝试添加内置插件市场（失败静默，仅作尝试）：
         // <应用目录>/marketplaces/openai-bundled 与 .../openai-primary-runtime。
         // 与设置页「添加市场」走同一 marketplace/add RPC；目录缺失或
@@ -382,7 +394,7 @@ impl CodexServer {
             .map_err(|e| e.message)
     }
 
-    /// 保留 JSON-RPC error code 的请求变体，供能力探测等需要区分错误类型的场景使用。
+    /// 保留 JSON-RPC error code 的请求变体，供需要区分错误类型的场景使用。
     /// 外层记录出站请求与响应（含耗时/错误码），内层实现真实收发。
     pub async fn request_verbose(
         &self,
@@ -508,139 +520,27 @@ impl CodexServer {
 
     /// 稳定内置 Pinned 分区 id（与 codex 源码常量一致，与 CODEX_HOME 无关）。
     const PINNED_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
-    /// 探测用假线程 id：合法 UUID 格式，任何真实 codex 都会在字段校验后报 thread not found。
-    const PROBE_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
-    /// 分区移动方法的探测顺序：0.146 及此前为 `threadSection/move`，
-    /// 新版（0.147+）改名为 `thread/section/move`（`threadSection/list` 保留）。
-    const SECTION_MOVE_METHODS: [&str; 2] = ["threadSection/move", "thread/section/move"];
-
-    fn method_unavailable(e: &RpcError) -> bool {
-        e.code == Some(-32601) || e.message.contains("unknown variant")
-    }
-
-    /// 探测当前 codex 的置顶协议能力（只读，不修改任何线程状态）。
-    /// 返回 `{ protocol, pinnedSectionId, sectionMoveMethod? }`：
-    /// - `section_move`：新版分区协议（`sectionMoveMethod` 为实际可用的移动方法名）；
-    /// - `metadata_section`：分区时代 `thread/metadata/update { sectionId }`；
-    /// - `metadata_is_pinned`：旧版 `thread/metadata/update { isPinned }`；
-    /// - `unsupported`：完全不支持置顶。
-    pub async fn pin_capability(&self) -> Result<Value, String> {
-        match self
-            .request_verbose("threadSection/list", json!({ "limit": 50 }), None)
-            .await
-        {
-            Ok(resp) => {
-                let section_id = resp["data"]
-                    .as_array()
-                    .and_then(|arr| {
+    /// 只读获取当前 codex 的内置 Pinned 分区 id（不修改任何线程状态）。
+    /// 置顶协议已固定为 `thread/section/move`（0.149+），此处仅负责定位
+    /// Pinned 分区：优先按名称匹配，其次按内置常量 id 匹配，都找不到时
+    /// 回退常量本身；`threadSection/list` 失败同样回退常量，不报错。
+    pub async fn pinned_section_id(&self) -> Result<String, String> {
+        let resp = self
+            .request("threadSection/list", json!({ "limit": 50 }), None)
+            .await?;
+        let section_id = resp["data"]
+            .as_array()
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|s| s["name"].as_str() == Some("Pinned"))
+                    .or_else(|| {
                         arr.iter()
-                            .find(|s| s["name"].as_str() == Some("Pinned"))
-                            .or_else(|| {
-                                arr.iter()
-                                    .find(|s| s["id"].as_str() == Some(Self::PINNED_SECTION_ID))
-                            })
-                            .and_then(|s| s["id"].as_str().map(|x| x.to_string()))
+                            .find(|s| s["id"].as_str() == Some(Self::PINNED_SECTION_ID))
                     })
-                    .unwrap_or_else(|| Self::PINNED_SECTION_ID.to_string());
-                // 依次探测两个分区移动方法名；任一可用即采用（假线程 id 会报
-                // thread not found，视为方法存在）。
-                let mut move_method: Option<&'static str> = None;
-                for m in Self::SECTION_MOVE_METHODS {
-                    match self
-                        .request_verbose(
-                            m,
-                            json!({ "threadId": Self::PROBE_THREAD_ID, "sectionId": null }),
-                            None,
-                        )
-                        .await
-                    {
-                        Err(e) if Self::method_unavailable(&e) => continue,
-                        Err(e) if e.code.is_none() => return Err(e.message),
-                        _ => {
-                            move_method = Some(m);
-                            break;
-                        }
-                    }
-                }
-                match move_method {
-                    Some(m) => Ok(json!({
-                        "protocol": "section_move",
-                        "pinnedSectionId": section_id,
-                        "sectionMoveMethod": m,
-                    })),
-                    None => Ok(json!({
-                        "protocol": "metadata_section",
-                        "pinnedSectionId": section_id,
-                    })),
-                }
-            }
-            Err(e) if Self::method_unavailable(&e) => match self
-                .request_verbose(
-                    "thread/metadata/update",
-                    json!({ "threadId": Self::PROBE_THREAD_ID, "isPinned": true }),
-                    None,
-                )
-                .await
-            {
-                Err(e) if e.message.contains("must include at least one field") => Ok(json!({
-                    "protocol": "unsupported",
-                    "pinnedSectionId": null,
-                })),
-                Err(e) if e.code.is_none() => Err(e.message),
-                _ => Ok(json!({
-                    "protocol": "metadata_is_pinned",
-                    "pinnedSectionId": null,
-                })),
-            },
-            Err(e) => Err(e.message),
-        }
-    }
-
-    /// 探测当前 codex 的“临时线程标题总结”能力（仿 VS Code：ephemeral 线程
-    /// 总结首条消息，使用默认模型）。探测本身只创建一个内存线程并立即释放，不落盘。
-    /// 返回 `{ experimentalApi, ephemeral }`：
-    /// - `{ experimentalApi: true, ephemeral: true }`：支持临时线程 + 实验字段回退；
-    /// - `{ experimentalApi: true, ephemeral: false }`：支持实验 API 但不支持临时线程；
-    /// - `{ experimentalApi: false }`：不支持实验 API，标题总结整体跳过。
-    pub async fn title_helper_capability(&self) -> Result<Value, String> {
-        match self
-            .request_verbose(
-                "thread/start",
-                json!({
-                    "cwd": self.workspace,
-                    "ephemeral": true,
-                    "allowProviderModelFallback": true,
-                    "approvalPolicy": "never",
-                    "sandbox": "read-only",
-                }),
-                Some(Duration::from_secs(30)),
-            )
-            .await
-        {
-            Ok(resp) => {
-                let thread_id = resp["thread"]["id"]
-                    .as_str()
-                    .map(|s| s.to_string());
-                if let Some(tid) = thread_id {
-                    let _ = self
-                        .request("thread/unsubscribe", json!({ "threadId": tid }), None)
-                        .await;
-                }
-                Ok(json!({ "experimentalApi": true, "ephemeral": true }))
-            }
-            Err(e) if e.code.is_none() => Err(e.message),
-            Err(e) => {
-                let msg = e.message.to_lowercase();
-                if msg.contains("experimentalapi") {
-                    Ok(json!({ "experimentalApi": false, "ephemeral": false }))
-                } else if msg.contains("unknown field") || msg.contains("ephemeral") {
-                    Ok(json!({ "experimentalApi": true, "ephemeral": false }))
-                } else {
-                    // 其它错误（如字段被拒/参数不识别）：保守按不支持处理
-                    Ok(json!({ "experimentalApi": false, "ephemeral": false }))
-                }
-            }
-        }
+                    .and_then(|s| s["id"].as_str().map(|x| x.to_string()))
+            })
+            .unwrap_or_else(|| Self::PINNED_SECTION_ID.to_string());
+        Ok(section_id)
     }
 
     /// 应答服务端反向请求（approval / user input / elicitation）。
@@ -668,6 +568,8 @@ impl CodexServer {
             "connected": inner.connected,
             "startupWorkspace": clean_path(&self.workspace),
             "codexPath": inner.codex_path.as_ref().map(|p| clean_path(Path::new(p))),
+            "codexVersion": inner.codex_version,
+            "versionTooOld": inner.version_too_old,
             "logs": inner.logs.clone(),
         })
     }
@@ -704,6 +606,78 @@ impl CodexServer {
     async fn emit_status(&self) {
         let status = self.status().await;
         let _ = self.app.emit("server/status", status);
+    }
+
+    /// 执行 `codex --version` 探测版本（非阻断）：解析 major.minor，
+    /// 仅低于 0.149.0 时记 warn 日志并标记 `versionTooOld`，其余记 info；
+    /// 探测失败/无法解析只记日志，不警告。
+    async fn probe_codex_version(self: &Arc<Self>) {
+        let codex = match self.resolve_codex().await {
+            Ok(p) => p,
+            Err(e) => {
+                self.push_log("warn", format!("探测 codex 版本失败：{e}")).await;
+                return;
+            }
+        };
+        let mut cmd = Command::new(&codex);
+        cmd.arg("--version");
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        apply_codex_env(cmd.as_std_mut());
+        let output = match cmd.spawn() {
+            Ok(child) => match tokio::time::timeout(
+                Duration::from_secs(5),
+                child.wait_with_output(),
+            )
+            .await
+            {
+                Ok(Ok(o)) => o,
+                Ok(Err(e)) => {
+                    self.push_log("warn", format!("执行 codex --version 失败: {e}"))
+                        .await;
+                    return;
+                }
+                Err(_) => {
+                    self.push_log("warn", "探测 codex 版本超时".into()).await;
+                    return;
+                }
+            },
+            Err(e) => {
+                self.push_log("warn", format!("启动 codex --version 失败: {e}"))
+                    .await;
+                return;
+            }
+        };
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        match parse_codex_version(&text) {
+            Some((major, minor)) => {
+                let too_old = (major, minor) < (0, 149);
+                {
+                    let mut inner = self.shared.inner.lock().await;
+                    inner.codex_version = Some(text.clone());
+                    inner.version_too_old = Some(too_old);
+                }
+                if too_old {
+                    self.push_log(
+                        "warn",
+                        format!("当前 codex 版本 {text} 低于 0.149.0，仅支持 0.149.x，部分功能可能异常"),
+                    )
+                    .await;
+                } else {
+                    self.push_log("info", format!("codex 版本: {text}")).await;
+                }
+                self.emit_status().await;
+            }
+            None => {
+                self.push_log("info", format!("无法解析 codex 版本输出: {text:?}"))
+                    .await;
+            }
+        }
     }
 
     async fn resolve_codex(&self) -> Result<PathBuf, String> {
@@ -940,6 +914,40 @@ fn static_path_candidates() -> Vec<PathBuf> {
     out
 }
 
+/// 从 `codex --version` 输出中解析 major.minor（如 "codex-cli 0.149.0" → (0, 149)）。
+/// 取首个形如 `<数字>.<数字>` 的片段；解析不到返回 None。
+fn parse_codex_version(s: &str) -> Option<(u64, u64)> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if start == i {
+            i += 1;
+            continue;
+        }
+        let major_str = &s[start..i];
+        if i >= bytes.len() || bytes[i] != b'.' {
+            continue;
+        }
+        i += 1;
+        let minor_start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if minor_start == i {
+            continue;
+        }
+        let minor_str = &s[minor_start..i];
+        let major = major_str.parse::<u64>().ok()?;
+        let minor = minor_str.parse::<u64>().ok()?;
+        return Some((major, minor));
+    }
+    None
+}
+
 /// Synchronous codex.exe discovery shared by the server and auth login.
 /// 顺序：settings 路径 → 应用自身目录 bin → CODEX_BIN →
 /// 官方安装（最新）→ PATH/APPDATA npm/nvm-windows 静态布局 → 报错。
@@ -989,6 +997,23 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+
+    #[test]
+    fn parse_codex_version_variants() {
+        assert_eq!(parse_codex_version("codex-cli 0.149.0"), Some((0, 149)));
+        assert_eq!(parse_codex_version("0.149.0"), Some((0, 149)));
+        assert_eq!(
+            parse_codex_version("codex-cli 0.149.0-alpha.9.2"),
+            Some((0, 149))
+        );
+        assert_eq!(parse_codex_version("codex-cli 0.148.2"), Some((0, 148)));
+        assert_eq!(parse_codex_version("codex-cli 0.150.0"), Some((0, 150)));
+        assert_eq!(parse_codex_version("version 1.2.3"), Some((1, 2)));
+        assert_eq!(parse_codex_version(""), None);
+        assert_eq!(parse_codex_version("codex"), None);
+        assert_eq!(parse_codex_version("0."), None);
+        assert_eq!(parse_codex_version("0..1"), None);
+    }
 
     /// 串行设置/恢复多个环境变量（避免并行测试互相干扰；Mutex 不可重入，勿嵌套）
     fn with_envs(pairs: &[(&str, Option<&str>)], f: impl FnOnce()) {

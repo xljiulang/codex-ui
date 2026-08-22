@@ -268,17 +268,6 @@ fn app_server_handshake_list_start_turn() {
 
 /// 稳定内置 Pinned 分区 id（与 codex 源码常量一致）。
 const PINNED_SECTION_ID: &str = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
-/// 探测用假线程 id：合法 UUID 格式，任何真实 codex 都会在字段校验后报 thread not found。
-const PROBE_THREAD_ID: &str = "00000000-0000-0000-0000-000000000000";
-
-/// JSON-RPC 方法是否“不存在”：兼容 -32601 method not found 与
-/// 旧版 app-server 的 -32600 “unknown variant `method`” 两种形态。
-fn method_unavailable(resp: &Value) -> bool {
-    resp["error"]["code"].as_i64() == Some(-32601)
-        || resp["error"]["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("unknown variant"))
-}
 
 /// 初始化握手并创建线程，返回 thread_id（新集成测试共用）。
 fn start_thread(server: &mut Server, cwd: &Path, deadline: Instant) -> String {
@@ -514,7 +503,7 @@ fn app_server_turns_list_full_and_search() {
 }
 
 #[test]
-fn app_server_pin_unpin_via_probe() {
+fn app_server_pin_unpin_section_move() {
     if codex_bin().is_none() {
         eprintln!("跳过：未设置 CODEX_BIN");
         return;
@@ -536,71 +525,22 @@ fn app_server_pin_unpin_via_probe() {
     assert!(init_resp.get("result").is_some(), "initialize 应成功: {init_resp}");
     server.notify("initialized");
 
-    // 探测置顶协议（与 codex_pin_capability 相同的判定逻辑，覆盖三代 codex）
+    // 固定协议（0.149+）：threadSection/list 定位 Pinned 分区 → thread/section/move
     let sec_id = server.request("threadSection/list", json!({ "limit": 50 }));
     let sec_resp = server
         .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(sec_id))
         .expect("threadSection/list response");
-
-    enum PinEra {
-        SectionMove { pinned_id: String, move_method: String },
-        MetadataSection { pinned_id: String },
-        IsPinned,
-    }
-
-    let era = if let Some(result) = sec_resp.get("result") {
-        let data = result["data"].as_array().expect("sections array");
-        let pinned_id = data
-            .iter()
-            .find(|s| s["name"] == "Pinned")
-            .or_else(|| data.iter().find(|s| s["id"] == PINNED_SECTION_ID))
-            .or_else(|| data.first())
-            .and_then(|s| s["id"].as_str())
-            .unwrap_or(PINNED_SECTION_ID)
-            .to_string();
-        // 探针：threadSection/move（旧）→ thread/section/move（新），任一可用即采用
-        let mut move_method: Option<String> = None;
-        for m in ["threadSection/move", "thread/section/move"] {
-            let move_id = server.request(
-                m,
-                json!({ "threadId": PROBE_THREAD_ID, "sectionId": null }),
-            );
-            let move_resp = server
-                .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(move_id))
-                .expect("section move probe response");
-            if !method_unavailable(&move_resp) {
-                move_method = Some(m.to_string());
-                break;
-            }
-        }
-        match move_method {
-            Some(m) => PinEra::SectionMove { pinned_id, move_method: m },
-            None => PinEra::MetadataSection { pinned_id },
-        }
-    } else {
-        assert!(
-            method_unavailable(&sec_resp),
-            "threadSection/list 应成功或明确不支持: {sec_resp}"
-        );
-        // 旧版：探测 metadata/update 是否认 isPinned 字段
-        let up_id = server.request(
-            "thread/metadata/update",
-            json!({ "threadId": PROBE_THREAD_ID, "isPinned": true }),
-        );
-        let up_resp = server
-            .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(up_id))
-            .expect("metadata/update isPinned probe response");
-        if up_resp["error"]["message"]
-            .as_str()
-            .is_some_and(|m| m.contains("must include at least one field"))
-        {
-            eprintln!("跳过：当前 codex 不支持置顶（{up_resp}）");
-            server.child.kill().ok();
-            let _ = server.child.wait();
-            return;
-        }
-        PinEra::IsPinned
-    };
+    let sec_result = sec_resp
+        .get("result")
+        .expect("threadSection/list 应成功: {sec_resp}");
+    let data = sec_result["data"].as_array().expect("sections array");
+    let pinned_id = data
+        .iter()
+        .find(|s| s["name"] == "Pinned")
+        .or_else(|| data.iter().find(|s| s["id"] == PINNED_SECTION_ID))
+        .and_then(|s| s["id"].as_str())
+        .unwrap_or(PINNED_SECTION_ID)
+        .to_string();
 
     // 需要一个已持久化（出现在列表里）的线程：跑完一个回合
     let start_id = server.request(
@@ -637,28 +577,17 @@ fn app_server_pin_unpin_via_probe() {
         .expect("turn/completed");
     assert_eq!(completed["params"]["turn"]["status"].as_str().unwrap_or(""), "completed");
 
-    // 按探测到的协议置顶
-    let (pin_method, pin_params) = match &era {
-        PinEra::SectionMove { pinned_id, move_method } => (
-            move_method.as_str(),
-            json!({ "threadId": thread_id, "sectionId": pinned_id }),
-        ),
-        PinEra::MetadataSection { pinned_id } => (
-            "thread/metadata/update",
-            json!({ "threadId": thread_id, "sectionId": pinned_id }),
-        ),
-        PinEra::IsPinned => (
-            "thread/metadata/update",
-            json!({ "threadId": thread_id, "isPinned": true }),
-        ),
-    };
-    let pin_id = server.request(pin_method, pin_params);
+    // thread/section/move 置顶
+    let pin_id = server.request(
+        "thread/section/move",
+        json!({ "threadId": thread_id, "sectionId": pinned_id }),
+    );
     let pin_resp = server
         .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(pin_id))
         .expect("pin response");
     assert!(pin_resp.get("result").is_some(), "置顶应成功: {pin_resp}");
 
-    // 读回：分区协议看 section，旧版看 isPinned
+    // 读回：验证 section 指向 Pinned 分区
     let read_id = server.request(
         "thread/read",
         json!({ "threadId": thread_id, "includeTurns": false }),
@@ -667,42 +596,20 @@ fn app_server_pin_unpin_via_probe() {
         .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(read_id))
         .expect("thread/read response");
     let thread = &read_resp["result"]["thread"];
-    match &era {
-        PinEra::SectionMove { pinned_id, .. } | PinEra::MetadataSection { pinned_id } => {
-            let section = thread["section"]
-                .as_object()
-                .expect("置顶后 thread/read 应返回 section");
-            assert_eq!(
-                section["id"].as_str().unwrap_or(""),
-                pinned_id,
-                "section id 应等于 Pinned: {read_resp}"
-            );
-        }
-        PinEra::IsPinned => {
-            assert_eq!(
-                thread["isPinned"].as_bool(),
-                Some(true),
-                "置顶后 isPinned 应为 true: {read_resp}"
-            );
-        }
-    }
+    let section = thread["section"]
+        .as_object()
+        .expect("置顶后 thread/read 应返回 section");
+    assert_eq!(
+        section["id"].as_str().unwrap_or(""),
+        pinned_id,
+        "section id 应等于 Pinned: {read_resp}"
+    );
 
-    // 按探测到的协议取消置顶
-    let (un_method, un_params) = match &era {
-        PinEra::SectionMove { move_method, .. } => (
-            move_method.as_str(),
-            json!({ "threadId": thread_id, "sectionId": null }),
-        ),
-        PinEra::MetadataSection { .. } => (
-            "thread/metadata/update",
-            json!({ "threadId": thread_id, "sectionId": null }),
-        ),
-        PinEra::IsPinned => (
-            "thread/metadata/update",
-            json!({ "threadId": thread_id, "isPinned": false }),
-        ),
-    };
-    let un_id = server.request(un_method, un_params);
+    // thread/section/move 取消置顶
+    let un_id = server.request(
+        "thread/section/move",
+        json!({ "threadId": thread_id, "sectionId": null }),
+    );
     let un_resp = server
         .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(un_id))
         .expect("unpin response");
@@ -716,21 +623,10 @@ fn app_server_pin_unpin_via_probe() {
         .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(read2_id))
         .expect("thread/read response 2");
     let thread2 = &read2_resp["result"]["thread"];
-    match &era {
-        PinEra::SectionMove { .. } | PinEra::MetadataSection { .. } => {
-            assert!(
-                thread2["section"].is_null(),
-                "取消置顶后 section 应为 null: {read2_resp}"
-            );
-        }
-        PinEra::IsPinned => {
-            assert_eq!(
-                thread2["isPinned"].as_bool(),
-                Some(false),
-                "取消置顶后 isPinned 应为 false: {read2_resp}"
-            );
-        }
-    }
+    assert!(
+        thread2["section"].is_null(),
+        "取消置顶后 section 应为 null: {read2_resp}"
+    );
 
     let delete_id = server.request("thread/delete", json!({ "threadId": thread_id }));
     let _ = server.wait_for(deadline, |v| {

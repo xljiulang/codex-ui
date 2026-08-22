@@ -416,9 +416,6 @@ describe("新建会话应用记忆模式", () => {
       if (cmd === "thread_list") {
         return Promise.resolve({ data: [], nextCursor: null });
       }
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve(null);
-      }
       if (cmd === "codex_rpc") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
@@ -461,9 +458,6 @@ describe("新建会话应用记忆模式", () => {
       if (cmd === "thread_list") {
         return Promise.resolve({ data: [], nextCursor: null });
       }
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve(null);
-      }
       if (cmd === "goal_set") return Promise.reject(new Error("挂载失败"));
       if (cmd === "codex_rpc") return Promise.resolve({});
       return Promise.resolve(undefined);
@@ -497,9 +491,6 @@ describe("新建会话应用记忆模式", () => {
       }
       if (cmd === "thread_list") {
         return Promise.resolve({ data: [], nextCursor: null });
-      }
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve(null);
       }
       if (cmd === "codex_rpc") return Promise.reject(new Error("记忆不可用"));
       return Promise.resolve(undefined);

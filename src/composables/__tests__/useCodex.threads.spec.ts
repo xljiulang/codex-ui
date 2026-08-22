@@ -1,4 +1,4 @@
-import { __resetPinnedSectionForTest, __resetTitleHelperCapabilityForTest, sortThreads } from "../useCodex/capabilities";
+import { __resetPinnedSectionForTest, sortThreads } from "../useCodex/capabilities";
 import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
@@ -47,7 +47,7 @@ beforeEach(() => {
   resetUseCodexState(mockedInvoke, mockedListen);
 });
 
-describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
+describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetPinnedSectionForTest();
@@ -64,20 +64,18 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     );
   }
 
-  function capabilityCalls() {
+  function pinnedSectionIdCalls() {
     return mockedInvoke.mock.calls.filter(
-      ([cmd]) => cmd === "codex_pin_capability",
+      ([cmd]) => cmd === "codex_pinned_section_id",
     );
   }
 
-  function mockCapability(
-    protocol: string,
-    pinnedSectionId: string | null,
-    refreshedPinned = true,
-  ) {
+  function mockPinnedSectionId(pinnedSectionId: string | null, refreshedPinned = true) {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_pin_capability") {
-        return Promise.resolve({ protocol, pinnedSectionId });
+      if (cmd === "codex_pinned_section_id") {
+        return pinnedSectionId === null
+          ? Promise.reject(new Error("not available"))
+          : Promise.resolve(pinnedSectionId);
       }
       if (cmd === "codex_rpc") {
         return Promise.resolve({ thread: { id: "t1" } });
@@ -100,113 +98,8 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     });
   }
 
-  it("metadata_section 置顶：探测到分区协议后用 Pinned 分区 id 调用 metadata/update", async () => {
-    mockCapability("metadata_section", "sec-1", true);
-    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
-
-    await togglePin("t1", true);
-
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
-    expect(rpcCalls("thread/metadata/update")[0][1]).toEqual({
-      method: "thread/metadata/update",
-      params: { threadId: "t1", sectionId: "sec-1" },
-    });
-    expect(store.threads[0].isPinned).toBe(true);
-    expect(mockedInvoke).toHaveBeenCalledWith("thread_list", {
-      limit: 50,
-      cursor: null,
-    });
-  });
-
-  it("metadata_section 取消置顶：sectionId 传 null", async () => {
-    mockCapability("metadata_section", "sec-1", false);
-    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
-
-    await togglePin("t1", false);
-
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
-    expect(rpcCalls("thread/metadata/update")[0][1]).toEqual({
-      method: "thread/metadata/update",
-      params: { threadId: "t1", sectionId: null },
-    });
-    expect(store.threads[0].isPinned).toBe(false);
-  });
-
-  it("section_move 置顶/取消：走新版 threadSection/move 协议", async () => {
-    let refreshedPinned = true;
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_pin_capability") {
-        return Promise.resolve({ protocol: "section_move", pinnedSectionId: "sec-1" });
-      }
-      if (cmd === "codex_rpc") {
-        return Promise.resolve({ thread: { id: "t1" } });
-      }
-      if (cmd === "thread_list") {
-        return Promise.resolve({
-          data: [
-            {
-              id: "t1",
-              name: "会话",
-              createdAt: 0,
-              recencyAt: 0,
-              isPinned: refreshedPinned,
-            },
-          ],
-          nextCursor: null,
-        });
-      }
-      return Promise.resolve(undefined);
-    });
-    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
-
-    await togglePin("t1", true);
-
-    expect(rpcCalls("threadSection/move")).toHaveLength(1);
-    expect(rpcCalls("threadSection/move")[0][1]).toEqual({
-      method: "threadSection/move",
-      params: { threadId: "t1", sectionId: "sec-1" },
-    });
-    expect(store.threads[0].isPinned).toBe(true);
-
-    refreshedPinned = false;
-    await togglePin("t1", false);
-
-    expect(rpcCalls("threadSection/move")).toHaveLength(2);
-    expect(rpcCalls("threadSection/move")[1][1]).toEqual({
-      method: "threadSection/move",
-      params: { threadId: "t1", sectionId: null },
-    });
-    expect(store.threads[0].isPinned).toBe(false);
-  });
-
-  it("section_move 新方法名：探测返回 thread/section/move 时按其调用", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_pin_capability") {
-        return Promise.resolve({
-          protocol: "section_move",
-          pinnedSectionId: "sec-1",
-          sectionMoveMethod: "thread/section/move",
-        });
-      }
-      if (cmd === "codex_rpc") {
-        return Promise.resolve({ thread: { id: "t1" } });
-      }
-      if (cmd === "thread_list") {
-        return Promise.resolve({
-          data: [
-            {
-              id: "t1",
-              name: "会话",
-              createdAt: 0,
-              recencyAt: 0,
-              isPinned: true,
-            },
-          ],
-          nextCursor: null,
-        });
-      }
-      return Promise.resolve(undefined);
-    });
+  it("置顶：thread/section/move 携带 Pinned 分区 id", async () => {
+    mockPinnedSectionId("sec-1", true);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
     await togglePin("t1", true);
@@ -216,102 +109,54 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
       method: "thread/section/move",
       params: { threadId: "t1", sectionId: "sec-1" },
     });
-    expect(rpcCalls("threadSection/move")).toHaveLength(0);
     expect(store.threads[0].isPinned).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_list", {
+      limit: 50,
+      cursor: null,
+    });
   });
 
-  it("metadata_is_pinned 置顶/取消：旧版走 metadata/update isPinned 布尔", async () => {
-    let refreshedPinned = true;
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_pin_capability") {
-        return Promise.resolve({ protocol: "metadata_is_pinned", pinnedSectionId: null });
-      }
-      if (cmd === "codex_rpc") {
-        return Promise.resolve({ thread: { id: "t1" } });
-      }
-      if (cmd === "thread_list") {
-        return Promise.resolve({
-          data: [
-            {
-              id: "t1",
-              name: "会话",
-              createdAt: 0,
-              recencyAt: 0,
-              isPinned: refreshedPinned,
-            },
-          ],
-          nextCursor: null,
-        });
-      }
-      return Promise.resolve(undefined);
-    });
+  it("取消置顶：sectionId 传 null", async () => {
+    mockPinnedSectionId("sec-1", false);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
-    await togglePin("t1", true);
-
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
-    expect(rpcCalls("thread/metadata/update")[0][1]).toEqual({
-      method: "thread/metadata/update",
-      params: { threadId: "t1", isPinned: true },
-    });
-    expect(store.threads[0].isPinned).toBe(true);
-
-    refreshedPinned = false;
     await togglePin("t1", false);
 
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(2);
-    expect(rpcCalls("thread/metadata/update")[1][1]).toEqual({
-      method: "thread/metadata/update",
-      params: { threadId: "t1", isPinned: false },
+    expect(rpcCalls("thread/section/move")).toHaveLength(1);
+    expect(rpcCalls("thread/section/move")[0][1]).toEqual({
+      method: "thread/section/move",
+      params: { threadId: "t1", sectionId: null },
     });
     expect(store.threads[0].isPinned).toBe(false);
   });
 
-  it("unsupported：只弹提示不发请求，本地状态不变", async () => {
-    mockCapability("unsupported", null);
+  it("取不到分区 id：只弹提示不发请求，本地状态不变", async () => {
+    mockPinnedSectionId(null);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
     await togglePin("t1", true);
 
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(0);
-    expect(rpcCalls("threadSection/move")).toHaveLength(0);
+    expect(rpcCalls("thread/section/move")).toHaveLength(0);
     expect(store.threads[0].isPinned).toBeUndefined();
     expect(store.toast).toContain("不支持置顶");
   });
 
-  it("探测失败：提示且不发起置顶请求，便于下次重试", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_pin_capability") {
-        return Promise.reject(new Error("server not ready"));
-      }
-      return Promise.resolve(undefined);
-    });
-    store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
-
-    await togglePin("t1", true);
-
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(0);
-    expect(rpcCalls("threadSection/move")).toHaveLength(0);
-    expect(store.threads[0].isPinned).toBeUndefined();
-    expect(store.toast).toContain("不支持置顶");
-  });
-
-  it("探测结果缓存：连续两次置顶只探测一次", async () => {
-    mockCapability("metadata_is_pinned", null);
+  it("分区 id 缓存：连续两次置顶只拉取一次", async () => {
+    mockPinnedSectionId("sec-1");
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
     await togglePin("t1", true);
     await togglePin("t1", false);
 
-    expect(capabilityCalls()).toHaveLength(1);
+    expect(pinnedSectionIdCalls()).toHaveLength(1);
   });
 
   it("写失败时回滚本地置顶状态并提示", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_pin_capability") {
-        return Promise.resolve({ protocol: "metadata_section", pinnedSectionId: "sec-1" });
+      if (cmd === "codex_pinned_section_id") {
+        return Promise.resolve("sec-1");
       }
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/metadata/update") {
+      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/section/move") {
         return Promise.reject(new Error("update failed"));
       }
       return Promise.resolve(undefined);
@@ -321,7 +166,7 @@ describe("置顶 togglePin（新版 Pinned 分区协议）", () => {
     await togglePin("t1", true);
 
     expect(store.threads[0].isPinned).toBeUndefined();
-    expect(rpcCalls("thread/metadata/update")).toHaveLength(1);
+    expect(rpcCalls("thread/section/move")).toHaveLength(1);
   });
 
   it("sortThreads 从 section 推导置顶：固定优先，再按最近时间降序", () => {
@@ -355,24 +200,12 @@ describe("autoTitleThread 临时线程标题总结", () => {
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
     mockListenCapture();
     mockedInvoke.mockReset();
-    __resetTitleHelperCapabilityForTest();
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
     store.toast = "";
     store.server.startupWorkspace = "D:/repo";
     store.threads = [{ id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 }];
-  });
-
-  it("不支持 experimentalApi：完全不发起临时线程", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: false, ephemeral: false });
-      }
-      return Promise.resolve(undefined);
-    });
-    await autoTitleThread("t1", LONG_TEXT);
-    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
   });
 
   it("短文保持默认标题，不消耗模型", async () => {
@@ -382,9 +215,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
 
   it("阈值边界：纯文本 15 字不触发，16 字触发", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: true });
-      }
       if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       return Promise.resolve(undefined);
@@ -424,9 +254,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
     tab.name = "帮我修复登录页面报错";
     tab.nameIsFirstMessage = true;
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: true });
-      }
       if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       if (cmd === "thread_set_name") return Promise.resolve({});
@@ -469,9 +296,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
 
   it("ephemeral 路径：模型标题写回，临时线程注销", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: true });
-      }
       if (cmd === "thread_start") {
         const params = (args as { params?: Record<string, unknown> }).params ?? {};
         expect(params.ephemeral).toBe(true);
@@ -527,58 +351,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
     }, { timeout: 3000, interval: 20 });
   });
 
-  it("不支持 ephemeral：普通线程总结后删除", async () => {
-    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: false });
-      }
-      if (cmd === "thread_start") {
-        const params = (args as { params?: Record<string, unknown> }).params ?? {};
-        expect(params.ephemeral).toBeUndefined();
-        expect(params.model).toBeUndefined();
-        expect(params.sandbox).toBe("read-only");
-        return Promise.resolve({ thread: { id: "helper1" } });
-      }
-      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
-      if (cmd === "thread_set_name") return Promise.resolve({});
-      if (cmd === "thread_list")
-        return Promise.resolve({ data: [], nextCursor: null });
-      return Promise.resolve(undefined);
-    });
-
-    const p = autoTitleThread("t1", LONG_TEXT);
-    await p;
-    fireListen("item/agentMessage/delta", {
-      threadId: "helper1",
-      itemId: "m1",
-      delta: "重构模块",
-    });
-    fireListen("turn/completed", {
-      threadId: "helper1",
-      turn: { id: "ht1", status: "completed" },
-    });
-
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
-        threadId: "t1",
-        name: "重构模块",
-      });
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(store.toast).toContain("当前会话的标题已简化");
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("thread_delete", {
-        threadId: "helper1",
-      });
-    }, { timeout: 3000, interval: 20 });
-  });
-
   it("回合失败：不写回标题，仍清理临时线程", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: true });
-      }
       if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       return Promise.resolve(undefined);
@@ -606,9 +380,6 @@ describe("autoTitleThread 临时线程标题总结", () => {
 
   it("后台临时线程事件被隔离：不影响全局进行中状态", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: true });
-      }
       if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       if (cmd === "thread_set_name") return Promise.resolve({});

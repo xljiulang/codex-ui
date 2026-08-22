@@ -1,6 +1,6 @@
 # codex.exe app-server 协议完整参考
 
-> 本文档基于本机 `codex.exe`（**codex-cli 0.146.0-alpha.9.2**，2026-08-15）实测生成：`codex app-server generate-ts --experimental` 与 `codex app-server generate-json-schema --experimental` 的产物，以及官方 `openai/codex` 仓库 `codex-rs/app-server/README.md`（rust-v0.146.0 分支）的协议说明。
+> 本文档基于本机 `codex.exe`（**codex-cli 0.149.0**，2026-08-23）实测生成：`codex app-server generate-ts --experimental` 与 `codex app-server generate-json-schema --experimental` 的产物，以及官方 `openai/codex` 仓库 `codex-rs/app-server/README.md`（rust-v0.149.0 分支）的协议说明。
 > 协议为实验性（`[experimental]`），随 codex 版本演进；生成产物与运行版本一一对应，升级 codex 后应重新生成并核对。
 
 ---
@@ -77,7 +77,7 @@ codex app-server --listen off            # 不暴露本地传输
 - `JSONRPCError`：`{ code: int, message: string, data?: any }`。
 - 服务端通知可选带 `emittedAtMs`（Unix 毫秒，app-server 向各连接扇出前的时间戳；旧版本可能缺失）——即 `ServerNotificationEnvelope`。
 
-> codex-ui 实测：本项目的 Rust 后端在请求报文中显式携带 `"jsonrpc":"2.0"`（如 `{"jsonrpc":"2.0","id":1,"method":…}`），真实 app-server 0.146.0-alpha.9.2 正常接受。
+> codex-ui 实测：本项目的 Rust 后端在请求报文中显式携带 `"jsonrpc":"2.0"`（如 `{"jsonrpc":"2.0","id":1,"method":…}`），真实 app-server 0.149.0 正常接受。
 
 ## 3. 生命周期
 
@@ -378,7 +378,7 @@ type InitializeResponse = {
 | `remoteControl/client/list` | `v2/RemoteControlClientsListParams` | 列出已授权控制器设备（实验） |
 | `remoteControl/client/revoke` | `v2/RemoteControlClientsRevokeParams` | 吊销设备授权（实验） |
 
-> 注：codex-ui 另有 `threadSection/list` / `threadSection/move` 能力探测（置顶协议），这两个方法不在 0.146 生成绑定中，属旧版/未公开协议；探测失败会回退到 `thread/metadata/update { isPinned }`。
+> 注：codex-ui 置顶固定使用 `threadSection/list`（定位内置 `Pinned` 分区）→ `thread/section/move`（置顶/取消）；`threadSection/move` 与 `thread/metadata/update { isPinned/sectionId }` 已随旧版本支持一并移除，不再探测回退。
 
 ## 6. 服务端 → 客户端请求（11 个）
 
@@ -766,7 +766,7 @@ type ThreadSourceKind = "cli" | "vscode" | "exec" | "appServer" | "subAgent"
 ## 11. 完整 Schema 再生成
 
 ```powershell
-# TypeScript 绑定（本机 0.146.0-alpha.9.2）
+# TypeScript 绑定（本机 0.149.0）
 codex app-server generate-ts --experimental --out <DIR>
 
 # JSON Schema 全量包（含全部类型定义与字段描述，最权威机器可读源）
@@ -859,6 +859,6 @@ codex app-server generate-json-schema --experimental --out <DIR>
 
 ## 参考
 
-- 官方 README：`openai/codex` → `codex-rs/app-server/README.md`（rust-v0.146.0）
-- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（codex-cli 0.146.0-alpha.9.2）
+- 官方 README：`openai/codex` → `codex-rs/app-server/README.md`（rust-v0.149.0）
+- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（codex-cli 0.149.0）
 - 本地实测：`src-tauri/tests/app_server_integration.rs`、`docs/协议盘点.md`

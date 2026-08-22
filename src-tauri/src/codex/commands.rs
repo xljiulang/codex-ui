@@ -90,18 +90,10 @@ pub async fn codex_rpc_long(
         .await
 }
 
-/// 探测当前 codex 的置顶协议能力（只读，不修改任何线程状态）。
+/// 只读获取当前 codex 的内置 Pinned 分区 id（不修改任何线程状态）。
 #[tauri::command]
-pub async fn codex_pin_capability(server: State<'_, Server>) -> Result<Value, String> {
-    server.pin_capability().await
-}
-
-/// 探测当前 codex 的临时线程标题总结能力（创建内存线程后立即释放）。
-#[tauri::command]
-pub async fn codex_title_helper_capability(
-    server: State<'_, Server>,
-) -> Result<Value, String> {
-    server.title_helper_capability().await
+pub async fn codex_pinned_section_id(server: State<'_, Server>) -> Result<String, String> {
+    server.pinned_section_id().await
 }
 
 /// Respond to a server-initiated request (approval / user input / elicitation).
@@ -266,8 +258,8 @@ pub async fn goal_clear(
 
 #[tauri::command]
 pub async fn auth_status(server: State<'_, Server>) -> Result<Value, String> {
-    // `getAuthStatus` 已不在 0.146 协议 schema 中（文档标“兼容旧接口”，实际会
-    // method not found）；改用正式的 `account/read`。前端当前未调用本命令。
+    // 协议核对（0.149.0）：`getAuthStatus` 为兼容旧接口保留，正式接口为
+    // `account/read`，这里使用正式接口。前端当前未调用本命令。
     server.request("account/read", json!({}), None).await
 }
 

@@ -1,5 +1,4 @@
 import { dismissPlanPrompt, executePlan, exitPlanMode } from "../useCodex/actions";
-import { __resetTitleHelperCapabilityForTest } from "../useCodex/capabilities";
 import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { backgroundThreadIds, store } from "../useCodex/store";
@@ -830,7 +829,6 @@ describe("后台临时线程 delta 事件隔离", () => {
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
     mockListenCapture();
     mockedInvoke.mockReset();
-    __resetTitleHelperCapabilityForTest();
     store.toast = "";
     store.server.startupWorkspace = "D:/repo";
     store.threads = [
@@ -847,9 +845,6 @@ describe("后台临时线程 delta 事件隔离", () => {
 
   it("命令输出/思考/文件变更 delta 不进入全局状态", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "codex_title_helper_capability") {
-        return Promise.resolve({ experimentalApi: true, ephemeral: true });
-      }
       if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       return Promise.resolve(undefined);

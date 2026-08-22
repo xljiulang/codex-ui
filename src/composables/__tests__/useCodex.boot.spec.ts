@@ -139,3 +139,64 @@ describe("主窗口标题显示版本号", () => {
     expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI");
   });
 });
+
+describe("启动版本警告（仅低于 0.149.0）", () => {
+  beforeEach(() => {
+    disposeEvents(); // 重置 wired，避免 init() 内的 wireEvents 与其它用例互相干扰
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    __resetSessionTabsForTest();
+    store.booting = true;
+    store.toast = "";
+  });
+
+  it("versionTooOld=true：一次性提示未适配并带版本号", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "server_status") {
+        return Promise.resolve({
+          connected: true,
+          startupWorkspace: "D:/repo",
+          codexPath: null,
+          codexVersion: "codex-cli 0.148.2",
+          versionTooOld: true,
+          logs: [],
+        });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await init();
+
+    await vi.waitFor(() => {
+      expect(store.toast).toContain("codex-cli 0.148.2");
+      expect(store.toast).toContain("低于 0.149.0");
+    }, { timeout: 3000, interval: 20 });
+  });
+
+  it("versionTooOld=false（0.149.x 或更高）：不提示", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "server_status") {
+        return Promise.resolve({
+          connected: true,
+          startupWorkspace: "D:/repo",
+          codexPath: null,
+          codexVersion: "codex-cli 0.149.0",
+          versionTooOld: false,
+          logs: [],
+        });
+      }
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await init();
+    await new Promise((r) => setTimeout(r, 500));
+    expect(store.toast).toBe("");
+  });
+});

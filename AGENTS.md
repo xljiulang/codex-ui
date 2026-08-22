@@ -63,5 +63,5 @@ npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，
 - **会话状态隔离**：会话级字段只读写会话标签对象（`tab.*`），不落全局 `store.*`；回合事件按 `threadId` 路由归属，禁止用 `activeSessionTab()` 给缺失身份的事件兜底。已移除的 store 字段清单与正确写法见 docs/前端模块地图.md。
 - **语言与风格**：UI 文案、注释、文档用中文；LF 行尾（`.gitattributes`）；TypeScript `strict`（含 `noUnusedLocals` / `noUnusedParameters`）。
 - **不提交**：`dist/`、`coverage/`、`src-tauri/target`、`src-tauri/gen`、`node_modules`、日志（已在 `.gitignore`）。
-- **codex 协议**：基线 0.146.0-alpha.9.2；后端只实现所需字段，未知通知忽略并记日志；协议变更后用 `codex app-server generate-ts --experimental` 重新生成绑定核对（置顶/标题总结有版本探测逻辑，见 README）。
+- **codex 协议**：仅适配 codex-cli 0.149.x（验证基线 0.149.0，启动时探测版本、仅低版本警告）；后端只实现所需字段，未知通知忽略并记日志；协议变更后用 `codex app-server generate-ts --experimental` 重新生成绑定核对（详见 README）。
 - **修改功能流程**：前端改动通常联动「组件 + 对应 composable + 必要时后端命令」；涉及用户可见行为时同步更新 [README.md](README.md) 与 [docs/变更记录.md](docs/变更记录.md)。

@@ -1,6 +1,11 @@
 // useCodex 拆分模块：全局 store 与共享模块状态（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { reactive } from "vue";
-import type { PendingInteraction, ThreadItem, ThreadSummary } from "../../lib/types";
+import type {
+  PendingInteraction,
+  ServerStatus,
+  ThreadItem,
+  ThreadSummary,
+} from "../../lib/types";
 import {
   defaultSettings,
   type ConfirmRequest,
@@ -14,8 +19,10 @@ export const store = reactive({
     connected: false,
     startupWorkspace: "",
     codexPath: null as string | null,
+    codexVersion: null as string | null,
+    versionTooOld: undefined as boolean | undefined,
     logs: [] as string[],
-  },
+  } as ServerStatus,
   threads: [] as ThreadSummary[],
   searchActive: false,
   searchSnippets: {} as Record<string, string>,

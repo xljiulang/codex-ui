@@ -58,7 +58,7 @@ codex-ui.exe（Tauri 2 窗口）
 - Windows 10/11（自带 WebView2）
 - Rust stable-msvc（rustup）+ VS C++ 构建工具
 - Node.js 18+
-- `codex` CLI（可在设置页指定路径；验证基线 0.146.0-alpha.9.2）
+- `codex` CLI（可在设置页指定路径；当前仅适配 codex-cli 0.149.x，验证基线 0.149.0）
 - 全部 Git 功能需要系统已安装 **Git**（启动时探测 `git --version` 并缓存；未安装时功能禁用/报错并提示安装）
 
 ## 开发
@@ -129,25 +129,19 @@ E2E 探针自建临时目录与会话，结束时自动清理；CDP 端口被占
 - **设置文件**：`%APPDATA%\com.codexui.app\settings.json`，仅保存 codex 路径、Enter 快捷发送、跟进处理方式、提示音开关、主题、权限模式初始值与记忆模式。
 - **登录**：界面不提供登录入口，请使用其它入口（如 `codex login` 或 API Key）完成认证。
 
-## 协议兼容性
+## 协议与版本支持
 
-以 `codex app-server generate-ts --experimental` 输出的协议绑定为参考（验证基线 0.146.0-alpha.9.2）。后端只实现本项目所需字段，未知通知忽略并记录日志。codex CLI 升级后如协议变化，可重新生成绑定核对：
+当前版本**仅适配 codex-cli 0.149.x**（验证基线 0.149.0）。应用启动时会探测 `codex --version`：版本**低于 0.149.0** 时在状态栏提示“未适配”、但照常运行；0.149.x 与更高版本不提示。高版本不警告意味着未来 codex 协议变化时应用可能静默异常，升级 codex 后请留意功能是否正常。
+
+以 `codex app-server generate-ts --experimental` 输出的协议绑定为参考。后端只实现本项目所需字段，未知通知忽略并记录日志。codex CLI 升级后如协议变化，可重新生成绑定核对：
 
 ```powershell
 codex app-server generate-ts --out <dir> --experimental
 ```
 
-**置顶协议随 codex 版本变化**，应用启动后首次点击置顶时自动探测并选择对应协议：
+**置顶**（0.149.x 固定协议）：`threadSection/list` 定位内置 `Pinned` 分区 → `thread/section/move { sectionId }` 置顶 / `{ sectionId: null }` 取消。`threadSection/list` 失败时回退内置 Pinned 分区常量 id。
 
-| codex 时代 | 版本示例 | 使用的协议 |
-| --- | --- | --- |
-| `isPinned` 元数据 | 0.146.0-alpha.9.2 | `thread/metadata/update { isPinned }` |
-| 分区 + `sectionId` | 0.147.0-alpha.1.2 | `thread/metadata/update { sectionId }` |
-| 分区 + `threadSection/move` | v0.147.0 及更新 | `threadSection/move { sectionId }` |
-
-探测逻辑（`codex_pin_capability`）：先试 `threadSection/list`，存在分区则继续试 `threadSection/move`（方法不存在则回退 `metadata/update { sectionId }`）；无分区接口则试 `metadata/update { isPinned }`，字段不被认（报 "must include at least one field"）时视为不支持置顶。探测仅读取能力、不修改任何会话状态。
-
-**标题自动总结**依赖临时线程协议，启动后由 `codex_title_helper_capability` 只读探测（创建内存线程后立即释放）：支持 `experimentalApi` + `ephemeral` 时用内存临时线程；支持 `experimentalApi` 但不支持 `ephemeral` 时用普通线程总结后删除；不支持 `experimentalApi` 时跳过标题总结。
+**标题自动总结**（0.149.x 固定协议）：新建会话后恒用 ephemeral 临时线程总结首条消息并立即注销，失败静默保留默认标题。
 
 ## 常见问题
 

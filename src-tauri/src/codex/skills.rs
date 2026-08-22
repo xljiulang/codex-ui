@@ -1,15 +1,14 @@
 //! 技能管理：从 codex app-server 的 `skills/list` 聚合列表中过滤出本地技能。
 //!
-//! 本地用户技能判定：`scope == "user"`（旧版本缺失 scope 时回退路径判定），且
-//! SKILL.md 路径位于 `{CODEX_HOME}/skills` 目录内、相对路径不以 `.` 开头
-//! （跳过 `.system` 等系统目录）。展示包含禁用技能（不做 enabled 过滤）。
+//! 本地用户技能判定：`scope == "user"`（0.149 协议中 scope 为必填枚举），
+//! 并排除插件缓存路径（plugins/cache）。展示包含禁用技能（不做 enabled 过滤）。
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use super::app_server::CodexServer;
 use super::model_config::codex_home;
-use crate::codex::path_util::{clean_path, norm_path_key, rel_path_of};
+use crate::codex::path_util::{clean_path, norm_path_key};
 
 /// 单个本地技能条目。
 #[derive(Debug, Clone, Serialize)]
@@ -19,7 +18,7 @@ pub struct SkillInfo {
     pub path: String,
     pub description: String,
     pub enabled: bool,
-    /// skills/list 返回的 scope（user/repo/system/admin；旧版本缺失时为空串）。
+    /// skills/list 返回的 scope（user/repo/system/admin）。
     pub scope: String,
 }
 
@@ -40,32 +39,15 @@ pub struct SkillErrorInfo {
     pub path: String,
 }
 
-/// `skills/list` 返回的单个技能条目（只声明需要的字段，缺省字段给默认值）。
+/// `skills/list` 返回的单个技能条目（只声明需要的字段；0.149 中
+/// name/description/path/scope/enabled 均为必填）。
 #[derive(Debug, Clone, Deserialize)]
 struct SkillListItem {
     name: String,
-    #[serde(default)]
     path: String,
-    #[serde(default)]
     description: String,
-    /// 防御旧形状：部分实现可能用 `desc` 提供描述。
-    #[serde(default)]
-    desc: String,
-    #[serde(default, rename = "shortDescription")]
-    short_description: Option<String>,
-    #[serde(default)]
-    interface: Option<SkillInterface>,
-    #[serde(default)]
     enabled: bool,
-    #[serde(default)]
     scope: String,
-}
-
-/// `skills/list` 条目中的 interface 字段（取 shortDescription）。
-#[derive(Debug, Clone, Deserialize)]
-struct SkillInterface {
-    #[serde(default, rename = "shortDescription")]
-    short_description: Option<String>,
 }
 
 /// 读取本地技能列表：请求 `skills/list` 后按路径过滤出 `{CODEX_HOME}/skills` 下的技能。
@@ -77,7 +59,7 @@ pub async fn read_state(server: &CodexServer, force_reload: bool) -> Result<Skil
     let (items, errors) = parse_skill_items(&res)?;
     Ok(SkillsState {
         skills_dir: clean_path(&skills_dir),
-        items: filter_local_skills(&items, &skills_dir),
+        items: filter_local_skills(&items),
         errors,
     })
 }
@@ -114,50 +96,26 @@ fn parse_skill_items(
     Ok((items, errors))
 }
 
-/// 过滤出本地用户技能：`scope == "user"`（scope 缺失时回退路径判定），
-/// path 非空且不属于插件缓存（plugins/cache）路径。不做 enabled 过滤。
-fn filter_local_skills(items: &[SkillListItem], skills_dir: &Path) -> Vec<SkillInfo> {
+/// 过滤出本地用户技能：`scope == "user"`、path 非空且不属于插件缓存
+/// （plugins/cache）路径。不做 enabled 过滤。
+fn filter_local_skills(items: &[SkillListItem]) -> Vec<SkillInfo> {
     let mut out = Vec::new();
     for item in items {
-        if !item.scope.is_empty() && item.scope != "user" {
+        if item.scope != "user" {
             continue;
         }
         let path = PathBuf::from(&item.path);
         if path.as_os_str().is_empty() {
             continue;
         }
-        if !item.scope.is_empty() {
-            // 插件技能 scope 也是 user：按插件缓存路径排除
-            if is_plugin_cache_path(&path) {
-                continue;
-            }
-        } else {
-            // 旧版本无 scope：回退路径判定（位于 skills_dir 内且不以 `.` 开头）
-            let Some(rel) = rel_path_of(skills_dir, &path) else {
-                continue;
-            };
-            if rel.split('/').any(|c| c.starts_with('.')) {
-                continue;
-            }
+        // 插件技能 scope 也是 user：按插件缓存路径排除
+        if is_plugin_cache_path(&path) {
+            continue;
         }
-        let description = if !item.description.is_empty() {
-            item.description.clone()
-        } else if let Some(short) = item
-            .interface
-            .as_ref()
-            .and_then(|i| i.short_description.as_ref())
-            .or(item.short_description.as_ref())
-        {
-            short.clone()
-        } else if !item.desc.is_empty() {
-            item.desc.clone()
-        } else {
-            String::new()
-        };
         out.push(SkillInfo {
             name: item.name.clone(),
             path: clean_path(&path),
-            description,
+            description: item.description.clone(),
             enabled: item.enabled,
             scope: item.scope.clone(),
         });
@@ -180,9 +138,6 @@ mod tests {
             name: name.to_string(),
             path: path.to_string(),
             description: description.to_string(),
-            desc: String::new(),
-            short_description: None,
-            interface: None,
             enabled,
             scope: "user".to_string(),
         }
@@ -195,7 +150,6 @@ mod tests {
 
     #[test]
     fn keeps_user_scope_skills_excluding_plugin_cache() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![
             list_item(
                 "pdf",
@@ -211,7 +165,7 @@ mod tests {
             ),
             list_item("outside", "D:/elsewhere/SKILL.md", true, "外部"),
         ];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 2);
         assert!(out
             .iter()
@@ -222,7 +176,6 @@ mod tests {
 
     #[test]
     fn keeps_only_user_scope_skills() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![
             list_item(
                 "user-skill",
@@ -258,80 +211,40 @@ mod tests {
                 "admin",
             ),
         ];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "user-skill");
         assert_eq!(out[0].scope, "user");
     }
 
     #[test]
-    fn falls_back_to_path_when_scope_missing() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
-        let items = vec![
-            with_scope(
-                list_item(
-                    "ok",
-                    "C:/apps/codex-ui/.codex/skills/ok/SKILL.md",
-                    true,
-                    "",
-                ),
-                "",
-            ),
-            with_scope(
-                list_item(
-                    "sys",
-                    "C:/apps/codex-ui/.codex/skills/.system/sys/SKILL.md",
-                    true,
-                    "",
-                ),
-                "",
-            ),
-            with_scope(
-                list_item(
-                    "outside",
-                    "D:/elsewhere/SKILL.md",
-                    true,
-                    "",
-                ),
-                "",
-            ),
-        ];
-        let out = filter_local_skills(&items, dir);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "ok");
-    }
-
-    #[test]
     fn keeps_user_scope_skills_outside_skills_dir() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![list_item(
             "aspnet-core",
             "D:/elsewhere/aspnet-core/SKILL.md",
             true,
             "",
         )];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "aspnet-core");
     }
 
     #[test]
     fn keeps_verbatim_prefixed_user_skill() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![list_item(
             "playwright",
             r"\\?\C:\Users\colleague\.codex\skills\playwright\SKILL.md",
             true,
             "",
         )];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "playwright");
     }
 
     #[test]
     fn excludes_plugin_skills_by_cache_path() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![
             list_item(
                 "p1",
@@ -346,28 +259,26 @@ mod tests {
                 "",
             ),
         ];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert!(out.is_empty());
     }
 
     #[test]
     fn excludes_empty_path_user_skill() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![list_item("nopath", "", true, "")];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert!(out.is_empty());
     }
 
     #[test]
     fn keeps_user_dir_named_plugins_without_cache() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![list_item(
             "ok",
             "C:/apps/codex-ui/.codex/skills/plugins/foo/SKILL.md",
             true,
             "",
         )];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "ok");
     }
@@ -391,52 +302,22 @@ mod tests {
         assert_eq!(errors[0].message, "missing field `description`");
     }
 
-    #[test]
-    fn skips_dot_segments_in_fallback() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
-        let items = vec![
-            with_scope(
-                list_item(
-                    "sys",
-                    "C:/apps/codex-ui/.codex/skills/.system/sys/SKILL.md",
-                    true,
-                    "系统技能",
-                ),
-                "",
-            ),
-            with_scope(
-                list_item(
-                    "ok",
-                    "C:/apps/codex-ui/.codex/skills/ok/SKILL.md",
-                    true,
-                    "",
-                ),
-                "",
-            ),
-        ];
-        let out = filter_local_skills(&items, dir);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "ok");
-    }
-
     #[cfg(windows)]
     #[test]
     fn path_compare_is_case_insensitive_on_windows() {
-        let dir = Path::new("C:/Apps/Codex-UI/.codex/Skills");
         let items = vec![list_item(
             "pdf",
             "c:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
             false,
             "",
         )];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 1);
         assert!(!out[0].enabled);
     }
 
     #[test]
     fn keeps_disabled_skills() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![
             list_item(
                 "on",
@@ -451,38 +332,25 @@ mod tests {
                 "",
             ),
         ];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.len(), 2);
         assert!(out.iter().any(|s| s.name == "off" && !s.enabled));
     }
 
     #[test]
-    fn description_precedence() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
-        let mut from_interface = list_item(
+    fn uses_description_field_directly() {
+        let items = vec![list_item(
             "a",
             "C:/apps/codex-ui/.codex/skills/a/SKILL.md",
             true,
-            "",
-        );
-        from_interface.interface = Some(SkillInterface {
-            short_description: Some("interface 短描述".to_string()),
-        });
-        let mut from_desc = list_item(
-            "b",
-            "C:/apps/codex-ui/.codex/skills/b/SKILL.md",
-            true,
-            "",
-        );
-        from_desc.desc = "desc 字段".to_string();
-        let out = filter_local_skills(&[from_interface, from_desc], dir);
-        assert_eq!(out[0].description, "interface 短描述");
-        assert_eq!(out[1].description, "desc 字段");
+            "SKILL.md 必填 description",
+        )];
+        let out = filter_local_skills(&items);
+        assert_eq!(out[0].description, "SKILL.md 必填 description");
     }
 
     #[test]
     fn sorts_by_name_case_insensitive() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![
             list_item(
                 "beta",
@@ -497,7 +365,7 @@ mod tests {
                 "",
             ),
         ];
-        let out = filter_local_skills(&items, dir);
+        let out = filter_local_skills(&items);
         assert_eq!(out.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), [
             "Alpha",
             "beta"
@@ -506,14 +374,12 @@ mod tests {
 
     #[test]
     fn empty_list_returns_empty() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
-        assert!(filter_local_skills(&[], dir).is_empty());
+        assert!(filter_local_skills(&[]).is_empty());
     }
 
     #[test]
     fn missing_path_is_excluded() {
-        let dir = Path::new("C:/apps/codex-ui/.codex/skills");
         let items = vec![list_item("nopath", "", true, "")];
-        assert!(filter_local_skills(&items, dir).is_empty());
+        assert!(filter_local_skills(&items).is_empty());
     }
 }

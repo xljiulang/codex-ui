@@ -2,10 +2,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getPinnedSectionId } from "./capabilities";
 import { wireEvents } from "./events";
 import { loadModels, loadSettings, refreshServer } from "./settings";
 import { store } from "./store";
 import { refreshThreads } from "./threads";
+import { setToast } from "./toast";
 
 
 /** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
@@ -56,6 +58,20 @@ export async function init() {
     await wireEvents();
     // 监听注册后补取一次状态：避免后端启动成功的首次推送早于监听注册被丢弃
     void refreshServer().catch(() => undefined);
+    // 预取置顶分区 id（失败静默，首次点击置顶时再重试）
+    void getPinnedSectionId();
+    // 等待后端探测 codex 版本（最多 5s）：仅低于 0.149.0 时一次性提示
+    void (async () => {
+      for (let i = 0; i < 25; i++) {
+        if (store.server.versionTooOld === true) {
+          const v = store.server.codexVersion ?? "未知版本";
+          setToast(`当前 codex 版本 ${v} 低于 0.149.0，仅支持 0.149.x，部分功能可能异常`);
+          return;
+        }
+        if (store.server.versionTooOld === false) return;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    })();
   } finally {
     window.clearTimeout(bootTimer);
     store.booting = false;

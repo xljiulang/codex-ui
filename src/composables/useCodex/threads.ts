@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { buildTurnInput } from "../../lib/mention";
 import type { ThreadSummary } from "../../lib/types";
-import { getPinCapability, getTitleHelperCapability, sortThreads } from "./capabilities";
+import { getPinnedSectionId, sortThreads } from "./capabilities";
 import { resolveSessionWorkspace } from "./items";
 import { findSessionTabByThread, sessionTabTitle } from "./sessionState";
 import { backgroundThreadIds, store } from "./store";
@@ -166,8 +166,7 @@ export function sanitizeTitle(raw: string): string {
 
 /**
  * 仿 VS Code：临时线程总结首条消息，为会话生成短标题（不指定模型，用默认模型）。
- * 与主回合并行执行、失败静默（保留默认标题）；支持 experimentalApi 才执行，
- * 不支持 ephemeral 时退化为普通线程总结后删除。
+ * 与主回合并行执行、失败静默（保留默认标题）；0.149.x 恒用 ephemeral 临时线程。
  */
 export async function autoTitleThread(threadId: string, firstMessagePlain: string) {
   const text = firstMessagePlain.replace(/\s+/g, " ").trim();
@@ -177,8 +176,6 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
   if (tab?.name && !tab.nameIsFirstMessage) return;
   const t = store.threads.find((x) => x.id === threadId);
   if ((!tab?.name || !tab.nameIsFirstMessage) && (t?.name || tab?.name)) return;
-  const cap = await getTitleHelperCapability();
-  if (!cap?.experimentalApi) return; // 不支持 experimentalApi：不总结
 
   let helperThreadId: string | null = null;
   let helperTurnId: string | null = null;
@@ -203,14 +200,10 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     if (!helperThreadId) return;
     backgroundThreadIds.delete(helperThreadId);
     try {
-      if (cap.ephemeral) {
-        await invoke("codex_rpc", {
-          method: "thread/unsubscribe",
-          params: { threadId: helperThreadId },
-        });
-      } else {
-        await invoke("thread_delete", { threadId: helperThreadId });
-      }
+      await invoke("codex_rpc", {
+        method: "thread/unsubscribe",
+        params: { threadId: helperThreadId },
+      });
     } catch {
       // 清理失败不影响主会话
     }
@@ -244,10 +237,8 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
       cwd: resolveSessionWorkspace(),
       approvalPolicy: "never",
       sandbox: "read-only",
+      ephemeral: true,
     };
-    if (cap.ephemeral) {
-      startParams.ephemeral = true;
-    }
     const started = await invoke<{ thread?: { id?: string } }>("thread_start", {
       params: startParams,
     });
@@ -331,40 +322,17 @@ export async function togglePin(threadId: string, pinned: boolean) {
   const t = store.threads.find((x) => x.id === threadId);
   const prev = t?.isPinned;
   try {
-    const cap = await getPinCapability();
-    if (!cap || cap.protocol === "unsupported") {
+    const pinnedSectionId = await getPinnedSectionId();
+    if (!pinnedSectionId) {
       setToast("当前 Codex 版本不支持置顶");
       return;
     }
     if (t) t.isPinned = pinned;
-    if (cap.protocol === "metadata_is_pinned") {
-      // 旧版协议：isPinned 布尔元数据
-      await invoke("codex_rpc", {
-        method: "thread/metadata/update",
-        params: { threadId, isPinned: pinned },
-      });
-    } else {
-      const sectionId = pinned ? cap.pinnedSectionId : null;
-      if (pinned && !sectionId) {
-        if (t) t.isPinned = prev;
-        setToast("当前 Codex 版本不支持置顶");
-        return;
-      }
-      if (cap.protocol === "section_move") {
-        // 新版协议：threadSection/move（0.147+ 改名为 thread/section/move，按探测结果调用）
-        const method = cap.sectionMoveMethod ?? "threadSection/move";
-        await invoke("codex_rpc", {
-          method,
-          params: { threadId, sectionId },
-        });
-      } else {
-        // 分区时代协议：metadata/update 携带 sectionId
-        await invoke("codex_rpc", {
-          method: "thread/metadata/update",
-          params: { threadId, sectionId },
-        });
-      }
-    }
+    // 0.149.x 固定协议：thread/section/move
+    await invoke("codex_rpc", {
+      method: "thread/section/move",
+      params: { threadId, sectionId: pinned ? pinnedSectionId : null },
+    });
     await refreshThreads();
   } catch (e) {
     if (t) t.isPinned = prev;
