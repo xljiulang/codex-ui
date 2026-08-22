@@ -345,6 +345,27 @@ describe("SettingsView 模型配置", () => {
     });
   });
 
+  it("渲染 DeepSeek 接入文档链接", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const link = wrapper.find(".model-config-docs-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe("DeepSeek 接入文档");
+    expect(
+      wrapper.find(".model-config-card-head + .model-config-docs-row").exists(),
+    ).toBe(true);
+  });
+
+  it("点击 DeepSeek 接入文档链接用默认浏览器打开文档", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-docs-link").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
+      url: "https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex/",
+    });
+  });
+
   it("模型提供方重读不重置 model_catalog_json 文本框", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();

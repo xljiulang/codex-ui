@@ -37,6 +37,7 @@ import {
   ICON_FOLDER_OPEN,
   ICON_BRACES,
   ICON_IGNORE,
+  ICON_LINK,
   ICON_MCP,
   ICON_PALETTE,
   ICON_PLUS,
@@ -175,6 +176,10 @@ function selectTheme(id: ThemeId) {
 }
 
 // ---------- 模型配置 ----------
+
+/** DeepSeek Codex 接入文档（模型提供方配置参考，浏览器打开） */
+const DEEPSEEK_CODEX_DOCS_URL =
+  "https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex/";
 
 /** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
@@ -565,6 +570,13 @@ function openModelConfigFile() {
 
 function openCatalogFile() {
   void openPathInAppOrReveal(modelConfig.model_catalog_path);
+}
+
+/** 打开 DeepSeek Codex 接入文档（默认浏览器） */
+function openDeepSeekDocs() {
+  void invoke("open_url", { url: DEEPSEEK_CODEX_DOCS_URL }).catch(
+    () => undefined,
+  );
 }
 
 // ---------- AGENTS.md 自定义指令 ----------
@@ -1125,6 +1137,20 @@ function canInstall(p: PluginCatalogItem): boolean {
                   </svg>
                 </button>
               </div>
+            </div>
+
+            <div class="model-config-docs-row">
+              <button
+                type="button"
+                class="model-config-docs-link"
+                title="DeepSeek Codex 接入文档（浏览器打开）"
+                @click="openDeepSeekDocs"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_LINK" />
+                </svg>
+                DeepSeek 接入文档
+              </button>
             </div>
 
             <div class="settings">
