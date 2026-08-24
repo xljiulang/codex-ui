@@ -39,20 +39,16 @@ ArchitecturesInstallIn64BitMode=x64 arm64
 [Languages]
 Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 
-[Components]
-Name: openai_bundled; Description: openai-bundled 内置插件市场（browser / computer-use / visualize 等）
-Name: openai_primary_runtime; Description: openai-primary-runtime 插件市场（documents / pdf / spreadsheets / presentations 等，含完整运行时）
-
 [Files]
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
-; 内置插件市场所需的 codex primary-runtime（含完整 dependencies），复制到 codex 缓存位置；
-; 按文件判断：目标已存在则跳过、缺失才补齐（onlyifdoesntexist），断电重装可自愈同版本残缺；
-; 卸载 codex-ui 时保留该 codex 资源。
-Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:CodexUserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs uninsneveruninstall onlyifdoesntexist; Components: openai_primary_runtime
-; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；按文件判断：已存在跳过、缺失补齐；
-; 卸载 codex-ui 时保留该 codex 资源。
-Source: .\bundled-marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs uninsneveruninstall onlyifdoesntexist; Components: openai_bundled
+; 两个 codex 插件市场以 tar.xz 打包进安装包（已 xz 压缩，仅 160MB/17MB 供 Inno 压缩，构建快），安装时由自带 tar.exe 解压；
+; 解压带 -k：目标文件已存在则跳过、不覆盖；卸载 codex-ui 时保留该 codex 资源。
+Source: .\Components\codex-primary-runtime.tar.xz; DestDir: {tmp}
+; openai-bundled 市场包；同上，解压到 bundled-marketplaces 位置。
+Source: .\Components\openai-bundled.tar.xz; DestDir: {tmp}
+; 自包含 tar.exe（用于安装时解压两个包），始终随包提供。
+Source: .\Components\tar.exe; DestDir: {tmp}
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}
@@ -112,4 +108,42 @@ begin
     UnInstall();
   end;
   Result := true;
+end;
+
+// 目标 primary-runtime 是否已完整存在（以 runtime.json 为完成标记）。
+function ShouldExtractRuntime(): Boolean;
+begin
+  Result := not FileExists(CodexUserProfile('') + '\.cache\codex-runtimes\codex-primary-runtime\runtime.json');
+end;
+
+// openai-bundled 是否已物化（以 .materialization-key 为完成标记）。
+function ShouldExtractBundled(): Boolean;
+begin
+  Result := not FileExists(CodexHome('') + '\.tmp\bundled-marketplaces\openai-bundled\.materialization-key');
+end;
+
+// 用 {tmp}\tar.exe 把打包资源解压到 DestDir，目标文件已存在则不覆盖（-k）。
+procedure ExtractArchive(ArchiveName, DestDir: String);
+var
+  TarExe: String;
+  ResultCode: Integer;
+begin
+  ForceDirectories(DestDir);
+  TarExe := ExpandConstant('{tmp}\tar.exe');
+  if not Exec(TarExe, '-xf "' + ExpandConstant('{tmp}\' + ArchiveName) + '" -k -C "' + DestDir + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    MsgBox('无法启动 tar 解压 ' + ArchiveName, mbError, MB_OK)
+  else if ResultCode <> 0 then
+    MsgBox('解压 ' + ArchiveName + ' 失败（退出码 ' + IntToStr(ResultCode) + '）', mbError, MB_OK);
+end;
+
+// 安装完成阶段按所选组件解压对应市场包。
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if ShouldExtractRuntime() then
+      ExtractArchive('codex-primary-runtime.tar.xz', CodexUserProfile('') + '\.cache\codex-runtimes');
+    if ShouldExtractBundled() then
+      ExtractArchive('openai-bundled.tar.xz', CodexHome('') + '\.tmp\bundled-marketplaces');
+  end;
 end;

@@ -1,7 +1,7 @@
 # setup\download-codex-runtime.ps1
-# Download the codex-primary-runtime bundle from OpenAI static resources and
-# extract it into setup\codex-runtimes. The resulting layout matches the
-# .\codex-runtimes\codex-primary-runtime\* path referenced by setup.iss.
+# Download the codex-primary-runtime bundle into setup\Components\codex-primary-runtime.tar.xz.
+# That single file is the only gitignored build input (see .gitignore); openai-bundled.tar.xz
+# and tar.exe in setup\Components are committed, and both are installed by extracting at install.
 #
 # Usage:
 #   .\setup\download-codex-runtime.ps1                    # default 26.426.12240
@@ -13,45 +13,33 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$BaseUrl  = "https://persistent.oaistatic.com/codex-primary-runtime/$Version/codex-primary-runtime-win32-x64-$Version.tar.xz"
-$SetupDir = $PSScriptRoot                                            # setup\
-$DestDir  = [System.IO.Path]::GetFullPath((Join-Path $SetupDir 'codex-runtimes'))
-$Target   = Join-Path $DestDir 'codex-primary-runtime'
-$Marker   = Join-Path $Target 'runtime.json'
+$BaseUrl    = "https://persistent.oaistatic.com/codex-primary-runtime/$Version/codex-primary-runtime-win32-x64-$Version.tar.xz"
+$SetupDir   = $PSScriptRoot                                            # setup\
+$CompDir    = [System.IO.Path]::GetFullPath((Join-Path $SetupDir 'Components'))
+$RuntimeTar = Join-Path $CompDir 'codex-primary-runtime.tar.xz'
+$SysTar     = Join-Path $env:WINDIR 'System32\tar.exe'
 
-# Guard: keep the target directory inside the script's own setup folder.
-if (-not $DestDir.StartsWith($SetupDir, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing: target $DestDir is outside script directory $SetupDir"
+# Guard: keep output inside the script's own setup folder.
+if (-not $CompDir.StartsWith($SetupDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing: output $CompDir is outside script directory $SetupDir"
 }
 
-# Idempotence: skip if already present (unless -Force).
-if ((Test-Path $Marker) -and -not $Force) {
-    Write-Host "Existing $Target; skipping download. Use -Force to overwrite."
+# Idempotence: skip if the bundle already exists (unless -Force).
+if ((Test-Path $RuntimeTar) -and -not $Force) {
+    Write-Host "Existing $RuntimeTar; skipping download. Use -Force to overwrite."
     exit 0
 }
 
-New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+New-Item -ItemType Directory -Path $CompDir -Force | Out-Null
 
-$Archive = Join-Path $env:TEMP "codex-primary-runtime-win32-x64-$Version.tar.xz"
-try {
-    Write-Host "Downloading: $BaseUrl"
-    curl.exe -sSL -o $Archive $BaseUrl
-    if ($LASTEXITCODE -ne 0) { throw "Download failed (curl exit code $LASTEXITCODE)" }
+Write-Host "Downloading: $BaseUrl"
+curl.exe -sSL -o $RuntimeTar $BaseUrl
+if ($LASTEXITCODE -ne 0) { throw "Download failed (curl exit code $LASTEXITCODE)" }
 
-    if ($Force -and (Test-Path $Target)) {
-        Write-Host "Deleting old directory: $Target"
-        Remove-Item -LiteralPath $Target -Recurse -Force
-    }
+if (-not (Test-Path $RuntimeTar)) { throw "Missing expected output: $RuntimeTar" }
 
-    Write-Host "Extracting to: $DestDir"
-    tar -xf $Archive -C $DestDir
-    if ($LASTEXITCODE -ne 0) { throw "Extract failed (tar exit code $LASTEXITCODE)" }
+$first = (& $SysTar -tf $RuntimeTar | Select-Object -First 1)
+if ($LASTEXITCODE -ne 0) { throw "Listing archive failed" }
+if ($first -ne 'codex-primary-runtime/') { throw "Unexpected runtime archive top level: $first" }
 
-    if (-not (Test-Path $Marker)) {
-        throw "Extracted result is missing $Marker; unexpected layout"
-    }
-    Write-Host "Done: $Target"
-}
-finally {
-    if (Test-Path $Archive) { Remove-Item -LiteralPath $Archive -Force }
-}
+Write-Host "Done. Input ready: $RuntimeTar"
