@@ -39,15 +39,20 @@ ArchitecturesInstallIn64BitMode=x64 arm64
 [Languages]
 Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 
+[Components]
+Name: openai_bundled; Description: openai-bundled 内置插件市场（browser / computer-use / visualize 等）
+Name: openai_primary_runtime; Description: openai-primary-runtime 插件市场（documents / pdf / spreadsheets / presentations 等，含完整运行时）
+
 [Files]
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
 ; 内置插件市场所需的 codex primary-runtime（含完整 dependencies），复制到 codex 缓存位置；
-; 目标已存在则不覆盖（避免覆盖 codex 自己物化/更新的运行时）；卸载 codex-ui 时保留该 codex 资源。
-Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:CodexUserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallRuntime
-; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；目标已存在则不覆盖；
+; 按文件判断：目标已存在则跳过、缺失才补齐（onlyifdoesntexist），断电重装可自愈同版本残缺；
 ; 卸载 codex-ui 时保留该 codex 资源。
-Source: .\bundled-marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallBundled
+Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:CodexUserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs uninsneveruninstall onlyifdoesntexist; Components: openai_primary_runtime
+; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；按文件判断：已存在跳过、缺失补齐；
+; 卸载 codex-ui 时保留该 codex 资源。
+Source: .\bundled-marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs uninsneveruninstall onlyifdoesntexist; Components: openai_bundled
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}
@@ -78,18 +83,6 @@ begin
     Result := ch
   else
     Result := GetEnv('USERPROFILE') + '\.codex';
-end;
-
-// 仅当 primary-runtime 尚未物化到目标缓存位置时才安装，避免覆盖 codex 已有副本。
-function ShouldInstallRuntime(): Boolean;
-begin
-  Result := not DirExists(CodexUserProfile('') + '\.cache\codex-runtimes\codex-primary-runtime');
-end;
-
-// 仅当 openai-bundled 尚未物化到 bundled-marketplaces 位置时才安装，避免覆盖 codex 已有副本。
-function ShouldInstallBundled(): Boolean;
-begin
-  Result := not DirExists(CodexHome('') + '\.tmp\bundled-marketplaces\openai-bundled');
 end;
 
 // 执行卸载（升级时先静默卸载旧版本）
