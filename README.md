@@ -85,6 +85,8 @@ npm run tauri build
 
 > 注意：`Cargo.toml` 中 `tauri` 依赖已启用 `custom-protocol` 与 `protocol-asset` 特性。前者保证生产窗口加载打包的前端（否则会去连 `localhost:5173` 显示“拒绝连接”），后者用于 asset 协议加载本地图片。
 
+> `build-release.bat`（Inno Setup，`setup/setup.iss`）产物会把 `setup\codex-runtimes\codex-primary-runtime`（含完整 `dependencies`，约 1.1GB）一起打进安装包并复制到 `%USERPROFILE%\.cache\codex-runtimes`，使 `openai-primary-runtime` 插件离线可运行；因此安装包体积约 430MB。`setup\codex-runtimes\` 不入 git（见 `.gitignore`）。
+
 ## 测试
 
 ```powershell

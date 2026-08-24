@@ -43,6 +43,11 @@ Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
 Source: .\marketplaces\*; DestDir: {app}\marketplaces; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
+; 内置插件市场所需的 codex primary-runtime（含完整 dependencies），复制到 codex 缓存位置；
+; 目标已存在则不覆盖（避免覆盖 codex 自己物化/更新的运行时）。
+Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:UserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs ignoreversion overwritereadonly; Check: ShouldInstallRuntime
+; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；目标已存在则不覆盖。
+Source: .\marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs ignoreversion overwritereadonly; Check: ShouldInstallBundled
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}
@@ -56,6 +61,36 @@ Name: {autodesktop}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; Tasks: deskto
 Filename: {app}\{#MyAppExeName}; WorkingDir: {app}; Description: 运行 {#MyAppName}; Flags: postinstall nowait skipifsilent
 
 [Code]
+
+// 当前用户主目录（%USERPROFILE%），与 codex 判定 primary-runtime 缓存位置一致。
+function UserProfile(): String;
+begin
+  Result := GetEnv('USERPROFILE');
+end;
+
+// codex home：优先 CODEX_HOME，否则 %USERPROFILE%\.codex（与应用 codex_home() 一致）。
+function CodexHome(): String;
+var
+  ch: String;
+begin
+  ch := GetEnv('CODEX_HOME');
+  if ch <> '' then
+    Result := ch
+  else
+    Result := GetEnv('USERPROFILE') + '\.codex';
+end;
+
+// 仅当 primary-runtime 尚未物化到目标缓存位置时才安装，避免覆盖 codex 已有副本。
+function ShouldInstallRuntime(): Boolean;
+begin
+  Result := not DirExists(UserProfile() + '\.cache\codex-runtimes\codex-primary-runtime');
+end;
+
+// 仅当 openai-bundled 尚未物化到 bundled-marketplaces 位置时才安装，避免覆盖 codex 已有副本。
+function ShouldInstallBundled(): Boolean;
+begin
+  Result := not DirExists(CodexHome() + '\.tmp\bundled-marketplaces\openai-bundled');
+end;
 
 // 执行卸载（升级时先静默卸载旧版本）
 procedure UnInstall();
