@@ -314,6 +314,7 @@ impl CodexServer {
                         return;
                     }
                 };
+                let re_add_source = source.clone();
                 if let Err(e) = server
                     .request(
                         "marketplace/add",
@@ -322,12 +323,52 @@ impl CodexServer {
                     )
                     .await
                 {
-                    server
-                        .push_log(
-                            "warn",
-                            format!("添加内置插件市场 {name} 失败：{e}"),
-                        )
-                        .await;
+                    if is_conflicting_marketplace_source_error(&e) {
+                        // config.toml 里同名市场已登记到别的来源（如旧版 codex-ui
+                        // 写入的应用目录路径），导致以 canonical 来源注册被拒；
+                        // 先移除旧登记，再重试添加。
+                        if server
+                            .request(
+                                "marketplace/remove",
+                                json!({ "marketplaceName": name }),
+                                Some(Duration::from_secs(10)),
+                            )
+                            .await
+                            .is_ok()
+                        {
+                            if let Err(e2) = server
+                                .request(
+                                    "marketplace/add",
+                                    json!({ "source": re_add_source }),
+                                    Some(Duration::from_secs(10)),
+                                )
+                                .await
+                            {
+                                server
+                                    .push_log(
+                                        "warn",
+                                        format!(
+                                            "添加内置插件市场 {name}（移除旧来源后仍失败）：{e2}"
+                                        ),
+                                    )
+                                    .await;
+                            }
+                        } else {
+                            server
+                                .push_log(
+                                    "warn",
+                                    format!("移除内置插件市场 {name} 的旧来源登记失败"),
+                                )
+                                .await;
+                        }
+                    } else {
+                        server
+                            .push_log(
+                                "warn",
+                                format!("添加内置插件市场 {name} 失败：{e}"),
+                            )
+                            .await;
+                    }
                 }
             });
         }
@@ -889,6 +930,14 @@ fn resolve_bundled_marketplace_source(name: &str) -> Result<String, String> {
     Ok(clean_path(&target))
 }
 
+/// 判断 marketplace/add 是否因“同名市场已从不同来源登记”而失败；
+/// 此类需先移除旧登记再以新来源重加。
+fn is_conflicting_marketplace_source_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("already added")
+        && (m.contains("different source") || m.contains("remove it before"))
+}
+
 /// 应用自身目录下的 bin/codex.exe：current_exe 所在目录的 bin 子目录，
 /// 文件存在才返回；不是工作目录。
 fn bundled_codex_exe() -> Option<PathBuf> {
@@ -1301,6 +1350,20 @@ mod tests {
         std::fs::remove_file(dst.join("plugins/browser/SKILL.md")).unwrap();
         materialize_marketplace(&src, &dst).unwrap();
         assert!(!dst.join("plugins/browser/SKILL.md").exists());
+    }
+
+    #[test]
+    fn conflicting_marketplace_source_error_matches() {
+        assert!(is_conflicting_marketplace_source_error(
+            "marketplace 'openai-bundled' is already added from a different source; remove it before adding this source"
+        ));
+        assert!(is_conflicting_marketplace_source_error(
+            "marketplace 'openai-bundled' is already added from a different source"
+        ));
+        assert!(!is_conflicting_marketplace_source_error(
+            "marketplace `openai-primary-runtime` is reserved and cannot be added from this source"
+        ));
+        assert!(!is_conflicting_marketplace_source_error("unknown error"));
     }
 
     #[test]
