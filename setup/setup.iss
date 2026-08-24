@@ -44,7 +44,7 @@ Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly r
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
 ; 内置插件市场所需的 codex primary-runtime（含完整 dependencies），复制到 codex 缓存位置；
 ; 目标已存在则不覆盖（避免覆盖 codex 自己物化/更新的运行时）；卸载 codex-ui 时保留该 codex 资源。
-Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:UserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallRuntime
+Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:CodexUserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallRuntime
 ; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；目标已存在则不覆盖；
 ; 卸载 codex-ui 时保留该 codex 资源。
 Source: .\bundled-marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallBundled
@@ -63,13 +63,13 @@ Filename: {app}\{#MyAppExeName}; WorkingDir: {app}; Description: 运行 {#MyAppN
 [Code]
 
 // 当前用户主目录（%USERPROFILE%），与 codex 判定 primary-runtime 缓存位置一致。
-function UserProfile(): String;
+function CodexUserProfile(S: String): String;
 begin
   Result := GetEnv('USERPROFILE');
 end;
 
 // codex home：优先 CODEX_HOME，否则 %USERPROFILE%\.codex（与应用 codex_home() 一致）。
-function CodexHome(): String;
+function CodexHome(S: String): String;
 var
   ch: String;
 begin
@@ -83,13 +83,13 @@ end;
 // 仅当 primary-runtime 尚未物化到目标缓存位置时才安装，避免覆盖 codex 已有副本。
 function ShouldInstallRuntime(): Boolean;
 begin
-  Result := not DirExists(UserProfile() + '\.cache\codex-runtimes\codex-primary-runtime');
+  Result := not DirExists(CodexUserProfile('') + '\.cache\codex-runtimes\codex-primary-runtime');
 end;
 
 // 仅当 openai-bundled 尚未物化到 bundled-marketplaces 位置时才安装，避免覆盖 codex 已有副本。
 function ShouldInstallBundled(): Boolean;
 begin
-  Result := not DirExists(CodexHome() + '\.tmp\bundled-marketplaces\openai-bundled');
+  Result := not DirExists(CodexHome('') + '\.tmp\bundled-marketplaces\openai-bundled');
 end;
 
 // 执行卸载（升级时先静默卸载旧版本）
