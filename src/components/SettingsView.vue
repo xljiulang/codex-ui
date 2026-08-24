@@ -895,7 +895,7 @@ const pluginState = reactive({
   marketplaces: [] as PluginMarketplaceInfo[],
   loadErrors: [] as PluginMarketplaceLoadError[],
   busy: {} as Record<string, boolean>,
-  /** 市场折叠状态（按市场 name；默认展开，重开设置页重置） */
+  /** 市场折叠状态（按市场 name；默认折叠，重开设置页重置） */
   collapsed: {} as Record<string, boolean>,
   adding: false,
   source: "",
@@ -907,6 +907,10 @@ async function refreshPlugins(force = false) {
     const res = await loadPluginCatalog(force);
     pluginState.marketplaces = res.marketplaces;
     pluginState.loadErrors = res.marketplaceLoadErrors;
+    // 插件市场默认折叠；用 ??= 保留用户本次会话内已手动展开/折叠的选择
+    for (const mp of res.marketplaces) {
+      pluginState.collapsed[mp.name] ??= true;
+    }
   } catch (e) {
     setToast(toastError(e));
   } finally {

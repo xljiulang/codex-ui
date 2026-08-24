@@ -1815,13 +1815,22 @@ describe("SettingsView 插件管理", () => {
     await flushPromises();
     const mps = wrapper.findAll(".plugin-marketplace");
     expect(mps.length).toBe(2);
+    // 默认折叠：插件列表隐藏
+    expect(wrapper.find(".plugin-list").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Browser");
+    expect(wrapper.text()).not.toContain("PDF");
+    expect(wrapper.text()).not.toContain("Gmail");
+    // 头部（市场名/本地-远程标签）始终可见
+    expect(mps[0].text()).toContain("本地市场");
+    expect(mps[1].text()).toContain("官方远程目录");
+    // 展开后可见插件名与状态
+    await mps[0].find(".plugin-marketplace-head").trigger("click");
+    await mps[1].find(".plugin-marketplace-head").trigger("click");
     expect(wrapper.text()).toContain("Browser");
     expect(wrapper.text()).toContain("PDF");
     expect(wrapper.text()).toContain("Gmail");
     expect(wrapper.text()).toContain("已启用");
     expect(wrapper.text()).toContain("未安装");
-    expect(mps[0].text()).toContain("本地市场");
-    expect(mps[1].text()).toContain("官方远程目录");
   });
 
   it("点击市场标题折叠/展开插件列表", async () => {
@@ -1844,14 +1853,18 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
-    expect(wrapper.find(".plugin-list").exists()).toBe(true);
-    const head = wrapper.find(".plugin-marketplace-head");
-    await head.trigger("click");
+    // 默认折叠
     expect(wrapper.find(".plugin-list").exists()).toBe(false);
+    const head = wrapper.find(".plugin-marketplace-head");
     expect(head.classes()).toContain("collapsed");
+    // 点击展开
     await head.trigger("click");
     expect(wrapper.find(".plugin-list").exists()).toBe(true);
     expect(head.classes()).not.toContain("collapsed");
+    // 再点击折叠
+    await head.trigger("click");
+    expect(wrapper.find(".plugin-list").exists()).toBe(false);
+    expect(head.classes()).toContain("collapsed");
   });
 
   it("点击移除市场按钮不触发折叠", async () => {
@@ -1875,6 +1888,7 @@ describe("SettingsView 插件管理", () => {
     wrapper = mount(SettingsView);
     await flushPromises();
     const head = wrapper.find(".plugin-marketplace-head");
+    await head.trigger("click"); // 先展开，验证移除不把它折叠
     await wrapper.find(".plugin-market-remove").trigger("click");
     expect(store.confirm).toBeTruthy();
     expect(head.classes()).not.toContain("collapsed");
@@ -1915,6 +1929,7 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
     await wrapper.find(".plugin-install-btn").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
@@ -1948,6 +1963,7 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
     await wrapper.find(".plugin-install-btn").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
@@ -1983,6 +1999,7 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
     await wrapper.find(".plugin-install-btn").trigger("click");
     await flushPromises();
     expect(store.toast).toContain("需要账号登录");
@@ -2013,6 +2030,7 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
     await wrapper.find(".plugin-uninstall-btn").trigger("click");
     expect(store.confirm).toBeTruthy();
     settleConfirm(true);
@@ -2072,6 +2090,7 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
     expect(wrapper.text()).toContain("管理员已禁用");
     expect(wrapper.find(".plugin-install-btn").attributes("disabled")).toBeDefined();
   });
@@ -2156,6 +2175,7 @@ describe("SettingsView 按钮图标", () => {
   it("导航与主要操作按钮均渲染图标且文案不以省略号结尾", async () => {
     wrapper = mount(SettingsView);
     await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
     // 打开提供方弹窗，覆盖弹窗底部按钮（取消/添加）
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
