@@ -32,6 +32,7 @@ export {
   isThreadRunning,
   sessionTabTitle,
 } from "./sessionState";
+export { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
 export {
   currentModelId,
   effectiveEffort,

@@ -3,6 +3,8 @@ import { reactive, watch } from "vue";
 import { pathBaseName } from "../../lib/format";
 import { TabIcon, TabKind } from "../../lib/tabs";
 import { activeTab, activeTabId, activateTab, tabs } from "../useTabs";
+// 主窗口标题跟随活动 Tab 的模块级 watch（在此导入以确保在 useCodex 各模块图中均被接线）
+import "./windowTitle";
 import { resolveSessionWorkspace } from "./items";
 import { threadTitle } from "./selectors";
 import { store } from "./store";

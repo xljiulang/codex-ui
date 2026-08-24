@@ -1,9 +1,10 @@
 import { init } from "../useCodex/boot";
 import { disposeEvents } from "../useCodex/events";
-import { __resetSessionTabsForTest } from "../useCodex/sessionState";
+import { __resetSessionTabsForTest, freshSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { activeTabId } from "../useEditorTabs";
 import { capturedListeners, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { flushPromises } from "@vue/test-utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -137,6 +138,19 @@ describe("主窗口标题显示版本号", () => {
     mockedGetVersion.mockRejectedValue(new Error("not in tauri"));
     await init();
     expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI");
+  });
+
+  it("活动 tab 出现后窗口标题跟随其标题", async () => {
+    mockedGetVersion.mockResolvedValue("0.1.1");
+    await init();
+    mockWin.setTitle.mockClear();
+    __resetSessionTabsForTest();
+    const tab = freshSessionTab();
+    tab.title = "B / 新建会话";
+    tabs.push(tab);
+    activeTabId.value = tab.id;
+    await flushPromises();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("B / 新建会话");
   });
 });
 

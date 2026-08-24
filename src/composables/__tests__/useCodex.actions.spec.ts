@@ -7,6 +7,7 @@ import {
   SETTINGS_TAB_ID,
 } from "../useEditorTabs";
 import { DEFAULT_MODEL, makeSessionTab, PLUGINS_RESPONSE, resetUseCodexState, SKILLS_RESPONSE, tabs } from "./useCodexTestHarness";
+import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,7 +45,7 @@ beforeEach(() => {
   store.models = [DEFAULT_MODEL];
 });
 
-describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
+describe("主窗口标题跟随活动 tab 标题", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockWin.setTitle.mockClear();
@@ -59,13 +60,14 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("新建会话不再调用 setTitle（主窗口标题固定）", async () => {
+  it("新建会话后窗口标题跟随会话标签标题", async () => {
     await newEmptyChat("D:/projects/B");
     expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
-    expect(mockWin.setTitle).not.toHaveBeenCalled();
+    await flushPromises();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("B / 新建会话");
   });
 });
-describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
+describe("主窗口标题跟随活动 tab 标题", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockWin.setTitle.mockClear();
@@ -80,12 +82,13 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("切换会话标签不调用 setTitle", async () => {
+  it("切换会话标签时窗口标题跟随新 tab 标题", async () => {
     await newEmptyChat();
     const first = activeTabId.value;
     await newEmptyChat("D:/projects/B");
     expect(activeTabId.value).not.toBe(first);
-    expect(mockWin.setTitle).not.toHaveBeenCalled();
+    await flushPromises();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("B / 新建会话");
   });
 });
 describe("队列模式下发送提示", () => {

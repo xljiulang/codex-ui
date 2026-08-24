@@ -1,13 +1,13 @@
 // useCodex 拆分模块：启动（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getPinnedSectionId } from "./capabilities";
 import { wireEvents } from "./events";
 import { loadModels, loadSettings, refreshServer } from "./settings";
 import { store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
+import { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
 
 
 /** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
@@ -39,7 +39,7 @@ export async function init() {
   try {
     // 先拿到工作目录：沙箱可写根与资源/Git 面板需要它；历史列表有意展示全部目录的会话。
     await Promise.all([loadSettings(), refreshServer()]);
-    // 主窗口标题固定为 “Codex UI v<版本>”，与当前会话无关；
+    // 主窗口标题跟随活动 tab；无活动 tab 时回退 “Codex UI v<版本>”。
     // 非 Tauri 环境 getVersion 不可用，回退无版本标题；setTitle 失败同样静默忽略。
     let windowTitle = "Codex UI";
     try {
@@ -48,11 +48,8 @@ export async function init() {
     } catch {
       // 非 Tauri 环境：回退无版本标题
     }
-    try {
-      await getCurrentWindow().setTitle(windowTitle);
-    } catch {
-      // 忽略非 Tauri 环境
-    }
+    setWindowBaseTitle(windowTitle);
+    void updateWindowTitle();
     void loadModels();
     await refreshThreads();
     await wireEvents();

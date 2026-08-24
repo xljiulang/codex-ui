@@ -173,7 +173,7 @@ describe("任务栏进度条跟随工作标签", () => {
   });
 });
 
-describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
+describe("主窗口标题跟随活动 tab 标题", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockWin.setTitle.mockClear();
@@ -188,13 +188,13 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("thread/name/updated 更新会话标签名，不更新窗口标题", async () => {
+  it("thread/name/updated 更新会话标签名并更新窗口标题", async () => {
     disposeEvents();
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
     mockListenCapture();
     mockedInvoke.mockResolvedValue(undefined);
     __resetSessionTabsForTest();
-    tabs.push({
+    tabs.push(reactive({
       id: "s1",
       kind: "chat",
       title: "",
@@ -229,7 +229,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       loading: false,
       newChatWorkspace: null,
       interactions: [],
-    });
+    }));
     activeTabId.value = "s1";
     await wireEvents();
     fireListen("thread/name/updated", {
@@ -238,7 +238,8 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     });
     expect(tabs[0].name).toBe("新名");
     expect(activeSessionTab()?.name).toBe("新名");
-    expect(mockWin.setTitle).not.toHaveBeenCalled();
+    await flushPromises();
+    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 新名");
     disposeEvents();
   });
 });
