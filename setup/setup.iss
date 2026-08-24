@@ -59,6 +59,8 @@ Name: {group}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; WorkingDir: {app}
 Name: {autodesktop}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; Tasks: desktopicon
 
 [Run]
+Filename: {tmp}\tar.exe; Parameters: {code:TarRuntimeParams}; StatusMsg: 正在解压 openai-primary-runtime 插件市场...; Flags: runhidden waituntilterminated; Check: ShouldExtractRuntime
+Filename: {tmp}\tar.exe; Parameters: {code:TarBundledParams}; StatusMsg: 正在解压 openai-bundled 插件市场...; Flags: runhidden waituntilterminated; Check: ShouldExtractBundled
 Filename: {app}\{#MyAppExeName}; WorkingDir: {app}; Description: 运行 {#MyAppName}; Flags: postinstall nowait skipifsilent
 
 [Code]
@@ -122,28 +124,27 @@ begin
   Result := not FileExists(CodexHome('') + '\.tmp\bundled-marketplaces\openai-bundled\.materialization-key');
 end;
 
-// 用 {tmp}\tar.exe 把打包资源解压到 DestDir，目标文件已存在则不覆盖（-k）。
-procedure ExtractArchive(ArchiveName, DestDir: String);
-var
-  TarExe: String;
-  ResultCode: Integer;
+// 供 [Run] Parameters 使用：{code:} 调用需带一个 String 参数；返回带引号的完整参数串（运行时展开）。
+function TarRuntimeParams(S: String): String;
 begin
-  ForceDirectories(DestDir);
-  TarExe := ExpandConstant('{tmp}\tar.exe');
-  if not Exec(TarExe, '-xf "' + ExpandConstant('{tmp}\' + ArchiveName) + '" -k -C "' + DestDir + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    MsgBox('无法启动 tar 解压 ' + ArchiveName, mbError, MB_OK)
-  else if ResultCode <> 0 then
-    MsgBox('解压 ' + ArchiveName + ' 失败（退出码 ' + IntToStr(ResultCode) + '）', mbError, MB_OK);
+  Result := '-xf "' + ExpandConstant('{tmp}\codex-primary-runtime.tar.xz') + '" -k -C "' + CodexUserProfile('') + '\.cache\codex-runtimes"';
 end;
 
-// 安装完成阶段按所选组件解压对应市场包。
+function TarBundledParams(S: String): String;
+begin
+  Result := '-xf "' + ExpandConstant('{tmp}\openai-bundled.tar.xz') + '" -k -C "' + CodexHome('') + '\.tmp\bundled-marketplaces"';
+end;
+
+// 预建解压目标目录（tar -C 要求目录已存在）。
+procedure EnsureExtractionDirs();
+begin
+  ForceDirectories(CodexUserProfile('') + '\.cache\codex-runtimes');
+  ForceDirectories(CodexHome('') + '\.tmp\bundled-marketplaces');
+end;
+
+// 安装开始前预建解压目录；解压本身由 [Run] 条目执行（保持向导响应并显示进度）。
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
-  begin
-    if ShouldExtractRuntime() then
-      ExtractArchive('codex-primary-runtime.tar.xz', CodexUserProfile('') + '\.cache\codex-runtimes');
-    if ShouldExtractBundled() then
-      ExtractArchive('openai-bundled.tar.xz', CodexHome('') + '\.tmp\bundled-marketplaces');
-  end;
+  if CurStep = ssInstall then
+    EnsureExtractionDirs();
 end;
