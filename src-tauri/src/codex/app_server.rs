@@ -304,7 +304,7 @@ impl CodexServer {
         // openai-bundled / openai-primary-runtime 视为保留市场名，marketplace/add
         // 只接受 codex 自己管理位置的来源（而非应用自带副本），因此按固定市场名
         // 解析 canonical 来源并注册；来源目录未就绪（未由安装器/kodex 提供）则跳过。
-        // 文件复制由安装器负责，Rust 侧不复制、不读取 {app}/marketplaces。
+        // 文件复制由安装器负责，Rust 侧不复制、不扫描目录。
         for name in BUNDLED_MARKETPLACES {
             let server = self.clone();
             tauri::async_runtime::spawn(async move {
@@ -860,7 +860,7 @@ fn bundled_marketplace_source(name: &str) -> Option<PathBuf> {
 
 /// 解析内置市场应使用的 marketplace/add 来源。
 /// 保留名返回 codex 认可的 canonical 路径；目录未就绪（未由安装器/kodex 提供）则返回 Err 让其跳过。
-/// Rust 侧不做文件复制，也不读取应用自己的 marketplaces 目录。
+/// Rust 侧不做文件复制，也不扫描目录（应用的 `{app}\marketplaces` 已移除，由安装器提供 canonical 来源）。
 fn resolve_bundled_marketplace_source(name: &str) -> Result<String, String> {
     let Some(target) = bundled_marketplace_source(name) else {
         return Err(format!("未知内置市场名：{name}"));

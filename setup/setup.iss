@@ -42,12 +42,12 @@ Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 [Files]
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
-Source: .\marketplaces\*; DestDir: {app}\marketplaces; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
 ; 内置插件市场所需的 codex primary-runtime（含完整 dependencies），复制到 codex 缓存位置；
-; 目标已存在则不覆盖（避免覆盖 codex 自己物化/更新的运行时）。
-Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:UserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs ignoreversion overwritereadonly; Check: ShouldInstallRuntime
-; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；目标已存在则不覆盖。
-Source: .\marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs ignoreversion overwritereadonly; Check: ShouldInstallBundled
+; 目标已存在则不覆盖（避免覆盖 codex 自己物化/更新的运行时）；卸载 codex-ui 时保留该 codex 资源。
+Source: .\codex-runtimes\codex-primary-runtime\*; DestDir: {code:UserProfile}\.cache\codex-runtimes\codex-primary-runtime; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallRuntime
+; openai-bundled 复制到 codex 认可的 bundled-marketplaces 位置；目标已存在则不覆盖；
+; 卸载 codex-ui 时保留该 codex 资源。
+Source: .\bundled-marketplaces\openai-bundled\*; DestDir: {code:CodexHome}\.tmp\bundled-marketplaces\openai-bundled; Flags: recursesubdirs ignoreversion overwritereadonly uninsneveruninstall; Check: ShouldInstallBundled
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}
