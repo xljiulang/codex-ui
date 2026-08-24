@@ -18,6 +18,8 @@ use crate::codex::session_log::SessionLog;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
+/// 内置插件市场名（保留名）；来源由安装器提供的 canonical 位置，Rust 只注册不复制。
+const BUNDLED_MARKETPLACES: [&str; 2] = ["openai-bundled", "openai-primary-runtime"];
 
 /// JSON-RPC 错误；`code` 为 `None` 时表示本地传输层错误（未就绪/超时/断连）。
 #[derive(Debug, Clone)]
@@ -300,12 +302,13 @@ impl CodexServer {
 
         // 初始化成功后隐式尝试添加内置插件市场。codex-cli 0.149 把
         // openai-bundled / openai-primary-runtime 视为保留市场名，marketplace/add
-        // 只接受 codex 自己管理位置的来源（而非应用自带副本），因此按名字解析
-        // canonical 来源（必要时把自带副本物化过去）；失败仅记录、不打扰用户。
-        for name in bundled_marketplace_names() {
+        // 只接受 codex 自己管理位置的来源（而非应用自带副本），因此按固定市场名
+        // 解析 canonical 来源并注册；来源目录未就绪（未由安装器/kodex 提供）则跳过。
+        // 文件复制由安装器负责，Rust 侧不复制、不读取 {app}/marketplaces。
+        for name in BUNDLED_MARKETPLACES {
             let server = self.clone();
             tauri::async_runtime::spawn(async move {
-                let source = match resolve_bundled_marketplace_source(&name) {
+                let source = match resolve_bundled_marketplace_source(name) {
                     Ok(src) => src,
                     Err(msg) => {
                         server
@@ -820,34 +823,10 @@ pub(crate) fn app_exe_dir() -> Option<PathBuf> {
     std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
 }
 
-/// 枚举 marketplaces 目录下全部本层子目录名（内置插件市场名），排序（纯函数，便于测试）。
-/// 仅保留目录、按名称排序；目录不存在或不可读时返回空。
-fn bundled_marketplace_names_in(marketplaces_dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    let Ok(entries) = std::fs::read_dir(marketplaces_dir) else {
-        return names;
-    };
-    for entry in entries.flatten() {
-        if entry.path().is_dir() {
-            names.push(entry.file_name().to_string_lossy().into_owned());
-        }
-    }
-    names.sort();
-    names
-}
-
-/// 应用目录下待隐式注册的内置市场名；应用目录不可用时为空。
-fn bundled_marketplace_names() -> Vec<String> {
-    let Some(dir) = app_exe_dir() else {
-        return Vec::new();
-    };
-    bundled_marketplace_names_in(&dir.join("marketplaces"))
-}
-
 /// codex-cli 0.149 保留名市场的、codex 认可的 canonical 来源路径（纯函数，便于测试）。
 /// - openai-bundled -> <CODEX_HOME>/.tmp/bundled-marketplaces/openai-bundled
 /// - openai-primary-runtime -> %USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\plugins\openai-primary-runtime
-/// 其它名字返回 None（非保留名由调用方回退到应用自带路径）。
+/// 其它名字返回 None（调用方不应传非内置名）。
 fn bundled_marketplace_source_in(
     codex_home: &Path,
     userprofile: &Path,
@@ -879,53 +858,15 @@ fn bundled_marketplace_source(name: &str) -> Option<PathBuf> {
     bundled_marketplace_source_in(&home, &userprofile, name)
 }
 
-/// 递归拷贝目录（纯文件复制，不处理符号链接等特殊语义）。
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败 {dst:?}: {e}"))?;
-    let entries = std::fs::read_dir(src).map_err(|e| format!("读取目录失败 {src:?}: {e}"))?;
-    for entry in entries.flatten() {
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if from.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to).map_err(|e| format!("复制文件失败 {from:?}: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
-/// 幂等物化：目标目录已存在则跳过；不存在时把 source_dir 内容递归复制到 target_dir。
-fn materialize_marketplace(source_dir: &Path, target_dir: &Path) -> Result<(), String> {
-    if target_dir.exists() {
-        return Ok(());
-    }
-    if !source_dir.is_dir() {
-        return Err(format!("内置市场源目录不存在: {}", clean_path(source_dir)));
-    }
-    copy_dir_recursive(source_dir, target_dir)
-}
-
-/// 解析内置市场应使用的 marketplace/add 来源（含物化）。
-/// 保留名返回 codex 认可的 canonical 路径（openai-bundled 缺失时用应用自带副本物化；
-/// openai-primary-runtime 依赖 codex primary-runtime 已安装，未安装则返回 Err 让其跳过）；
-/// 非保留名回退到应用自带路径（与旧行为一致）。
+/// 解析内置市场应使用的 marketplace/add 来源。
+/// 保留名返回 codex 认可的 canonical 路径；目录未就绪（未由安装器/kodex 提供）则返回 Err 让其跳过。
+/// Rust 侧不做文件复制，也不读取应用自己的 marketplaces 目录。
 fn resolve_bundled_marketplace_source(name: &str) -> Result<String, String> {
     let Some(target) = bundled_marketplace_source(name) else {
-        let dir = app_exe_dir().ok_or_else(|| "无法定位应用目录".to_string())?;
-        return Ok(clean_path(&dir.join("marketplaces").join(name)));
+        return Err(format!("未知内置市场名：{name}"));
     };
-    let app_market = app_exe_dir()
-        .map(|d| d.join("marketplaces").join(name))
-        .ok_or_else(|| "无法定位应用目录".to_string())?;
-    if name == "openai-primary-runtime" {
-        // 保留名但依赖 codex 运行时安装：canonical 路径缺失时强行物化会造出缺依赖的
-        // 假运行时，codex 仍不接受；这里直接校验存在性，未安装时让调用方跳过并记录。
-        if !target.is_dir() {
-            return Err("codex primary-runtime 未安装，跳过该内置市场".to_string());
-        }
-    } else {
-        materialize_marketplace(&app_market, &target)?;
+    if !target.is_dir() {
+        return Err(format!("内置市场 {name} 的来源未就绪（安装器未提供），跳过"));
     }
     Ok(clean_path(&target))
 }
@@ -1292,26 +1233,6 @@ mod tests {
     }
 
     #[test]
-    fn bundled_marketplace_names_in_lists_first_level_dirs_sorted() {
-        let tmp = tempfile::tempdir().unwrap();
-        let marketplaces = tmp.path().join("marketplaces");
-        for name in ["openai-bundled", "openai-primary-runtime", "a-market"] {
-            std::fs::create_dir_all(marketplaces.join(name)).unwrap();
-        }
-        // 普通文件不算市场
-        std::fs::write(marketplaces.join("notes.txt"), "x").unwrap();
-
-        let names = bundled_marketplace_names_in(&marketplaces);
-        assert_eq!(names, vec!["a-market", "openai-bundled", "openai-primary-runtime"]);
-    }
-
-    #[test]
-    fn bundled_marketplace_names_in_missing_dir_is_empty() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert!(bundled_marketplace_names_in(&tmp.path().join("no-marketplaces")).is_empty());
-    }
-
-    #[test]
     fn bundled_marketplace_source_in_maps_reserved_names() {
         let home = Path::new("C:\\home\\codex");
         let user = Path::new("C:\\Users\\u");
@@ -1329,27 +1250,15 @@ mod tests {
     }
 
     #[test]
-    fn materialize_marketplace_is_idempotent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let src = tmp.path().join("src");
-        std::fs::create_dir_all(src.join("plugins/browser")).unwrap();
-        std::fs::create_dir_all(src.join(".agents/plugins")).unwrap();
-        std::fs::write(src.join("plugins/browser/SKILL.md"), "x").unwrap();
-        std::fs::write(src.join(".agents/plugins/marketplace.json"), "{}").unwrap();
-        let dst = tmp.path().join("dst");
-
-        // 源缺失 → Err（不 panic）
-        assert!(materialize_marketplace(&tmp.path().join("nope"), &dst).is_err());
-
-        // 首次复制
-        materialize_marketplace(&src, &dst).unwrap();
-        assert!(dst.join("plugins/browser/SKILL.md").is_file());
-        assert!(dst.join(".agents/plugins/marketplace.json").is_file());
-
-        // 已存在 → 跳过，不补回被删文件
-        std::fs::remove_file(dst.join("plugins/browser/SKILL.md")).unwrap();
-        materialize_marketplace(&src, &dst).unwrap();
-        assert!(!dst.join("plugins/browser/SKILL.md").exists());
+    fn bundled_marketplaces_const_all_resolve_to_canonical_source() {
+        let home = Path::new("C:\\home\\codex");
+        let user = Path::new("C:\\Users\\u");
+        for name in BUNDLED_MARKETPLACES {
+            assert!(
+                bundled_marketplace_source_in(home, user, name).is_some(),
+                "{name} 应能解析到 canonical 来源"
+            );
+        }
     }
 
     #[test]
