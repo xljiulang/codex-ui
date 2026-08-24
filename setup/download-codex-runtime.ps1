@@ -1,7 +1,8 @@
 # setup\download-codex-runtime.ps1
-# Download the codex-primary-runtime bundle into setup\Components\codex-primary-runtime.tar.xz.
+# Download the codex-primary-runtime bundle into setup\marketplaces\codex-primary-runtime.tar.xz.
 # That single file is the only gitignored build input (see .gitignore); openai-bundled.tar.xz
-# and tar.exe in setup\Components are committed, and both are installed by extracting at install.
+# in setup\marketplaces is committed. Both archives are shipped under {app}\marketplaces and extracted
+# by codex-ui at startup (Rust native xz+tar), so no tar.exe is bundled anymore.
 #
 # Usage:
 #   .\setup\download-codex-runtime.ps1                    # default 26.426.12240
@@ -15,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 $BaseUrl    = "https://persistent.oaistatic.com/codex-primary-runtime/$Version/codex-primary-runtime-win32-x64-$Version.tar.xz"
 $SetupDir   = $PSScriptRoot                                            # setup\
-$CompDir    = [System.IO.Path]::GetFullPath((Join-Path $SetupDir 'Components'))
+$CompDir    = [System.IO.Path]::GetFullPath((Join-Path $SetupDir 'marketplaces'))
 $RuntimeTar = Join-Path $CompDir 'codex-primary-runtime.tar.xz'
 $SysTar     = Join-Path $env:WINDIR 'System32\tar.exe'
 

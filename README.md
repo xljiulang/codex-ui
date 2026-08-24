@@ -85,7 +85,7 @@ npm run tauri build
 
 > 注意：`Cargo.toml` 中 `tauri` 依赖已启用 `custom-protocol` 与 `protocol-asset` 特性。前者保证生产窗口加载打包的前端（否则会去连 `localhost:5173` 显示“拒绝连接”），后者用于 asset 协议加载本地图片。
 
-> `build-release.bat`（Inno Setup，`setup/setup.iss`）把 `setup\Components` 下的 `codex-primary-runtime.tar.xz`（约 160MB）与 `openai-bundled.tar.xz` 打进安装包，安装时用自带的 `tar.exe` 解压到 `%USERPROFILE%\.cache\codex-runtimes` 与 `$CODEX_HOME\.tmp\bundled-marketplaces`，使 `openai-primary-runtime` / `openai-bundled` 插件离线可运行；因此安装包体积约 254MB。`setup\Components\codex-primary-runtime.tar.xz` 不入 git（见 `.gitignore`），需先运行 `setup\download-codex-runtime.ps1` 下载。
+> `build-release.bat`（Inno Setup，`setup/setup.iss`）把 `setup\marketplaces` 下的 `codex-primary-runtime.tar.xz`（约 160MB）与 `openai-bundled.tar.xz` 打进安装包（放到 `{app}\marketplaces`），由 codex-ui 启动时用 Rust 原生 xz+tar 后台解压到 `%USERPROFILE%\.cache\codex-runtimes` 与 `$CODEX_HOME\.tmp\bundled-marketplaces`，使 `openai-primary-runtime` / `openai-bundled` 插件离线可运行；因此安装包体积约 254MB。`setup\marketplaces\codex-primary-runtime.tar.xz` 不入 git（见 `.gitignore`），需先运行 `setup\download-codex-runtime.ps1` 下载。
 
 ## 测试
 

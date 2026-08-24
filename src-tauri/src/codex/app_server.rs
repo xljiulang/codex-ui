@@ -9,8 +9,9 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{Mutex, Notify, oneshot};
 
+use crate::codex::bundled;
 use crate::codex::path_util::clean_path;
 use crate::codex::model_config;
 use crate::codex::settings::{self, AppSettings};
@@ -18,8 +19,9 @@ use crate::codex::session_log::SessionLog;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
-/// 内置插件市场名（保留名）；来源由安装器提供的 canonical 位置，Rust 只注册不复制。
-const BUNDLED_MARKETPLACES: [&str; 2] = ["openai-bundled", "openai-primary-runtime"];
+/// 内置插件市场名（保留名）；来源为 codex 认可的 canonical 位置，由后台 `bundled::bootstrap`
+/// 解压到该位置，Rust 侧只注册（`marketplace/add`）、不复制。
+pub(crate) const BUNDLED_MARKETPLACES: [&str; 2] = ["openai-bundled", "openai-primary-runtime"];
 
 /// JSON-RPC 错误；`code` 为 `None` 时表示本地传输层错误（未就绪/超时/断连）。
 #[derive(Debug, Clone)]
@@ -40,6 +42,34 @@ pub struct CodexServer {
 struct Shared {
     inner: Mutex<Inner>,
     stop: AtomicBool,
+    bundled: BundledState,
+}
+
+/// 内置插件市场后台解压完成信号：`wait` 会阻塞到 `mark_done` 被调用，
+/// 避免市场登记在解压完成前即因「来源未就绪」被跳过。
+struct BundledState {
+    done: AtomicBool,
+    notify: Notify,
+}
+
+impl BundledState {
+    fn new() -> Self {
+        Self {
+            done: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+
+    fn mark_done(&self) {
+        self.done.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    async fn wait(&self) {
+        while !self.done.load(Ordering::SeqCst) {
+            self.notify.notified().await;
+        }
+    }
 }
 
 struct Inner {
@@ -92,6 +122,7 @@ impl CodexServer {
             shared: Arc::new(Shared {
                 inner: Mutex::new(Inner::new()),
                 stop: AtomicBool::new(false),
+                bundled: BundledState::new(),
             }),
             next_id: AtomicU64::new(0),
             workspace,
@@ -102,6 +133,16 @@ impl CodexServer {
 
     pub fn workspace(&self) -> &Path {
         &self.workspace
+    }
+
+    /// 后台解压完成信号：向等待方广播（供 `bundled::bootstrap` 调用）。
+    pub(crate) fn bundled_mark_done(&self) {
+        self.shared.bundled.mark_done();
+    }
+
+    /// 等待内置插件市场后台解压结束。
+    pub(crate) async fn bundled_wait(&self) {
+        self.shared.bundled.wait().await;
     }
 
     /// Spawns the background lifecycle task exactly once.
@@ -157,6 +198,11 @@ impl CodexServer {
     }
 
     async fn run(self: Arc<Self>) {
+        // 后台一次性解压内置插件市场（仅当完成标记缺失且归档存在时），结束后通知登记逻辑。
+        let boot = self.clone();
+        tauri::async_runtime::spawn(async move {
+            bundled::bootstrap(boot).await;
+        });
         while !self.shared.stop.load(Ordering::SeqCst) {
             if let Err(e) = self.spawn_and_read().await {
                 self.push_log("error", format!("codex app-server 错误: {e}")).await;
@@ -303,11 +349,13 @@ impl CodexServer {
         // 初始化成功后隐式尝试添加内置插件市场。codex-cli 0.149 把
         // openai-bundled / openai-primary-runtime 视为保留市场名，marketplace/add
         // 只接受 codex 自己管理位置的来源（而非应用自带副本），因此按固定市场名
-        // 解析 canonical 来源并注册；来源目录未就绪（未由安装器/kodex 提供）则跳过。
-        // 文件复制由安装器负责，Rust 侧不复制、不扫描目录。
+        // 解析 canonical 来源并注册；内置市场归档由后台 `bundled::bootstrap` 解压，
+        // 来源目录未就绪（归档未随包提供或解压失败）则跳过。Rust 侧只登记、不复制。
         for name in BUNDLED_MARKETPLACES {
             let server = self.clone();
             tauri::async_runtime::spawn(async move {
+                // 等待后台解压结束，避免市场尚未物化即被「来源未就绪」跳过。
+                server.bundled_wait().await;
                 let source = match resolve_bundled_marketplace_source(name) {
                     Ok(src) => src,
                     Err(msg) => {
@@ -859,14 +907,14 @@ fn bundled_marketplace_source(name: &str) -> Option<PathBuf> {
 }
 
 /// 解析内置市场应使用的 marketplace/add 来源。
-/// 保留名返回 codex 认可的 canonical 路径；目录未就绪（未由安装器/kodex 提供）则返回 Err 让其跳过。
-/// Rust 侧不做文件复制，也不扫描目录（应用的 `{app}\marketplaces` 已移除，由安装器提供 canonical 来源）。
+/// 保留名返回 codex 认可的 canonical 路径；目录未就绪（归档未随包提供或解压失败）则返回 Err 让其跳过。
+/// Rust 侧只登记、不复制、不扫描目录；catalog 由后台 `bundled::bootstrap` 解压到该 canonical 位置。
 fn resolve_bundled_marketplace_source(name: &str) -> Result<String, String> {
     let Some(target) = bundled_marketplace_source(name) else {
         return Err(format!("未知内置市场名：{name}"));
     };
     if !target.is_dir() {
-        return Err(format!("内置市场 {name} 的来源未就绪（安装器未提供），跳过"));
+        return Err(format!("内置市场 {name} 的来源未就绪（归档未随包提供或解压失败），跳过"));
     }
     Ok(clean_path(&target))
 }
@@ -1259,6 +1307,40 @@ mod tests {
                 "{name} 应能解析到 canonical 来源"
             );
         }
+    }
+
+    #[test]
+    fn bundled_state_wait_blocks_until_mark_done() {
+        let state = Arc::new(BundledState::new());
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let waiter = state.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let handle = rt.spawn(async move {
+            started_tx.send(()).unwrap();
+            waiter.wait().await;
+            true
+        });
+        // 等待任务真正进入 wait，再通知唤醒，验证“先等待后通知”能解除阻塞。
+        started_rx.recv().unwrap();
+        state.mark_done();
+        assert!(rt.block_on(handle).unwrap());
+    }
+
+    #[test]
+    fn bundled_state_wait_returns_immediately_after_mark_done() {
+        let state = Arc::new(BundledState::new());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        state.mark_done();
+        let waiter = state.clone();
+        // 已通知后再等待应立刻返回。
+        rt.block_on(async move { waiter.wait().await });
     }
 
     #[test]

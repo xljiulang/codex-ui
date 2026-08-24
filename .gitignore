@@ -7,8 +7,7 @@ src-tauri/gen
 .DS_Store
 .vs/
 /.playwright-cli/
-/setup/Components/codex-primary-runtime.tar.xz
-!/setup/Components/tar.exe
+/setup/marketplaces/codex-primary-runtime.tar.xz
 /setup/bin/*.exe
 /setup/output/*.exe
 /setup/*.exe
