@@ -115,8 +115,13 @@ fn materialize(archive: &Path, spec: &BundleSpec, target: &Path) -> Result<(), S
     std::fs::create_dir_all(&spec.dest)
         .map_err(|e| format!("创建目标根失败 {}: {e}", spec.dest.display()))?;
     let staging = spec.dest.join(format!(".codex-ui-extract-{}", spec.top));
-    // 清理上次失败可能留下的临时目录
-    let _ = std::fs::remove_dir_all(&staging);
+    // 清理上次失败可能留下的临时目录；`NotFound`（首次/已无残留）视为成功，
+    // 其它清理失败则直接失败，避免在脏暂存上继续解压，否则残留文件可能随整体改名进入目标目录。
+    match std::fs::remove_dir_all(&staging) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("清理暂存目录失败 {}: {e}", staging.display())),
+    }
     if let Err(e) = extract_tar_xz(archive, &staging) {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(e);
@@ -204,7 +209,7 @@ pub(crate) fn path_is_safe(path: &Path) -> bool {
 /// 用 Rust 原生 xz + tar 解压 `.tar.xz` 到 `dest`。
 /// - 创建 `dest`（等价 `tar -C` 要求目录存在）；
 /// - 路径越界/符号链接条目直接跳过（归档为自有、可信数据，此处双保险）；
-/// - 目标已存在则跳过（对齐安装器 `tar -k` 不覆盖语义）。
+/// - 以归档内容为准覆盖写出（暂存目录可销毁，无需保留已存在文件）。
 pub(crate) fn extract_tar_xz(archive: &Path, dest: &Path) -> Result<(), String> {
     std::fs::create_dir_all(dest)
         .map_err(|e| format!("创建解压目录失败 {}: {e}", dest.display()))?;
@@ -229,10 +234,6 @@ pub(crate) fn extract_tar_xz(archive: &Path, dest: &Path) -> Result<(), String> 
             entry.header().entry_type(),
             tar::EntryType::Symlink | tar::EntryType::Link
         ) {
-            continue;
-        }
-        // 对齐 tar -k：已存在不覆盖
-        if dest.join(&path).exists() {
             continue;
         }
         entry
@@ -325,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_tar_xz_keeps_existing_files_like_tar_k() {
+    fn extract_tar_xz_overwrites_existing_files() {
         let dir = TempDir::new().unwrap();
         let archive = build_tar_xz(
             dir.path(),
@@ -337,9 +338,8 @@ mod tests {
         fs::create_dir_all(marker.parent().unwrap()).unwrap();
         fs::write(&marker, "keep").unwrap();
         extract_tar_xz(&archive, &dest).unwrap();
-        // 已存在文件不被归档内容覆盖
-        assert_eq!(fs::read_to_string(&marker).unwrap(), "keep");
-        // 新增文件仍被解压
+        // 以归档为准覆盖写出（不再跳过已存在文件）
+        assert_eq!(fs::read_to_string(&marker).unwrap(), "v1");
         assert!(dest.join("openai-bundled/plugins/a.txt").is_file());
     }
 
@@ -398,6 +398,28 @@ mod tests {
         let spec = spec_for(&dest);
         assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::Extracted);
         assert!(dest.join("openai-bundled/.materialization-key").is_file());
+    }
+
+    #[test]
+    fn bootstrap_one_cleans_stale_staging() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("dest");
+        // 半路关闭留下的脏暂存目录（固定名 `.codex-ui-extract-<top>`），
+        // 以及最终目标不存在。
+        let stale = dest.join(".codex-ui-extract-openai-bundled");
+        fs::create_dir_all(stale.join("openai-bundled")).unwrap();
+        fs::write(stale.join("openai-bundled/stale.txt"), "partial").unwrap();
+        build_tar_xz(
+            dir.path(),
+            "openai-bundled",
+            &[(".materialization-key", "v1")],
+        );
+        let spec = spec_for(&dest);
+        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::Extracted);
+        // 脏暂存被清空重建，目标目录完整，无暂存残留
+        assert!(!stale.exists());
+        assert!(dest.join("openai-bundled/.materialization-key").is_file());
+        assert!(!dest.join(".codex-ui-extract-openai-bundled").exists());
     }
 
     #[test]
