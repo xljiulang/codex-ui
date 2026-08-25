@@ -142,7 +142,6 @@ pub fn run() {
             codex::commands::settings_set,
             codex::commands::model_config_read,
             codex::commands::model_config_save,
-            codex::commands::model_config_ui_save,
             codex::commands::model_catalog_save,
             codex::commands::model_catalog_target_exists,
             codex::commands::skills_read,

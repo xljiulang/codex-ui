@@ -547,13 +547,6 @@ pub fn model_config_save(content: String) -> Result<(), String> {
     model_config::save_config(&content)
 }
 
-/// 保存可视化模型配置（model / model_reasoning_effort / model_provider / 提供方列表）：
-/// 只写可视化覆盖的键与提供方表，其余 TOML 内容保留。
-#[tauri::command]
-pub fn model_config_ui_save(input: model_config::ModelConfigUiEdit) -> Result<(), String> {
-    model_config::save_config_ui(&input)
-}
-
 /// 保存 model_catalog_json 目标文件原文：目标路径从 config.toml 解析，
 /// 内容必须非空且为合法 JSON。
 #[tauri::command]

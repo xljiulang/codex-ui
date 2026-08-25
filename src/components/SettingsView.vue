@@ -8,9 +8,11 @@ import {
   installPlugin,
   isAuthRequiredError,
   loadMcpServers,
+  loadModelProviderConfig,
   loadPluginCatalog,
   removeMarketplace,
   saveMcpServers,
+  saveModelProviderConfig,
   saveSettings,
   setToast,
   store,
@@ -21,6 +23,7 @@ import type {
   PluginCatalogItem,
   PluginMarketplaceInfo,
   PluginMarketplaceLoadError,
+  ModelProviderConfigState,
 } from "../composables/useCodex";
 import {
   THEMES,
@@ -255,25 +258,24 @@ function applyCatalogCard(res: ModelConfigState) {
 }
 
 /** 应用「模型提供方」卡片字段（刷新该卡片时不影响其它卡片文本框） */
-function applyProvidersCard(res: ModelConfigState) {
-  modelConfig.model = res.model;
-  modelConfig.model_reasoning_effort = res.model_reasoning_effort;
-  modelConfig.model_provider = res.model_provider;
-  modelConfig.preferred_auth_method = res.preferred_auth_method;
-  modelConfig.forced_login_method = res.forced_login_method;
-  modelConfig.model_catalog_json = res.model_catalog_json;
-  modelConfig.openai_api_key_present = res.openai_api_key_present;
+function applyProvidersCard(pc: ModelProviderConfigState) {
+  modelConfig.model = pc.model;
+  modelConfig.model_reasoning_effort = pc.model_reasoning_effort;
+  modelConfig.model_provider = pc.model_provider;
+  modelConfig.preferred_auth_method = pc.preferred_auth_method;
+  modelConfig.forced_login_method = pc.forced_login_method;
+  modelConfig.model_catalog_json = pc.model_catalog_json;
   // 浅拷贝：组件内增删改不污染调用方数组引用（测试/热更新下尤其重要）
-  modelConfig.providers = (res.providers ?? []).map((p) => ({ ...p }));
+  modelConfig.providers = (pc.providers ?? []).map((p) => ({ ...p }));
   // 由 preferred_auth_method/forced_login_method 推导「认证方式」下拉
   if (
-    res.preferred_auth_method === "apikey" &&
-    res.forced_login_method === "api"
+    pc.preferred_auth_method === "apikey" &&
+    pc.forced_login_method === "api"
   ) {
     authMethod.value = "apikey";
   } else if (
-    res.preferred_auth_method === "chatgpt" &&
-    res.forced_login_method === "chatgpt"
+    pc.preferred_auth_method === "chatgpt" &&
+    pc.forced_login_method === "chatgpt"
   ) {
     authMethod.value = "chatgpt";
   } else {
@@ -287,7 +289,10 @@ async function loadModelConfig() {
     const res = await invoke<ModelConfigState>("model_config_read");
     applyConfigCard(res);
     applyCatalogCard(res);
-    applyProvidersCard(res);
+    // openai_api_key_present 是进程环境检查，config/read 不提供，由 model_config_read 补充
+    modelConfig.openai_api_key_present = res.openai_api_key_present;
+    const pc = await loadModelProviderConfig();
+    applyProvidersCard(pc);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -325,8 +330,8 @@ async function refreshCatalog() {
 async function refreshProviders() {
   modelConfig.loading = true;
   try {
-    const res = await invoke<ModelConfigState>("model_config_read");
-    applyProvidersCard(res);
+    const pc = await loadModelProviderConfig();
+    applyProvidersCard(pc);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -522,8 +527,8 @@ async function saveProviders() {
       model_catalog_json: catalogValue,
       providers: modelConfig.providers,
     };
-    await invoke("model_config_ui_save", { input });
-    setToast("模型配置已保存（重启应用后生效）");
+    await saveModelProviderConfig(input);
+    setToast("模型配置已保存");
     if (!catalogExists) {
       modelConfigErrors.catalogWarning =
         "已保存；model_catalog_json 目标文件将在读取时自动创建";

@@ -55,6 +55,11 @@ export {
 } from "./plugins";
 export { loadMcpServers, saveMcpServers } from "./mcp";
 export {
+  loadModelProviderConfig,
+  saveModelProviderConfig,
+  type ModelProviderConfigState,
+} from "./modelProviderConfig";
+export {
   autoTitleThread,
   clearSearch,
   refreshThreads,

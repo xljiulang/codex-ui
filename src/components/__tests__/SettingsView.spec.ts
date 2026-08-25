@@ -177,6 +177,41 @@ describe("SettingsView 模型配置", () => {
       },
     ],
   };
+  /** config/read 返回：用户层原始 [model_providers.*] 与顶层标量（与真实 app-server 形状一致） */
+  const sampleModelConfigRead = {
+    config: {},
+    layers: [
+      {
+        name: { type: "user", file: "C:/apps/codex-ui/.codex/config.toml", profile: null },
+        version: "sha256:abc",
+        config: {
+          model: "deepseek-v4-flash",
+          model_reasoning_effort: "high",
+          model_provider: "deepseek",
+          preferred_auth_method: "apikey",
+          forced_login_method: "api",
+          model_catalog_json: "",
+          model_providers: {
+            deepseek: {
+              name: "DeepSeek",
+              base_url: "https://api.deepseek.com/",
+              env_key: "",
+              experimental_bearer_token: "sk-test",
+              wire_api: "responses",
+            },
+            other: {
+              name: "Other",
+              base_url: "https://other.example.com/v1",
+              env_key: "OTHER_API_KEY",
+              experimental_bearer_token: "",
+              wire_api: "chat",
+            },
+          },
+        },
+        disabledReason: null,
+      },
+    ],
+  };
   const sampleAgentsState = {
     agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
     exists: true,
@@ -186,7 +221,10 @@ describe("SettingsView 模型配置", () => {
   beforeEach(() => {
     store.toast = "";
     mockedInvoke.mockReset();
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve(sampleModelConfigRead);
+      }
       if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
       if (cmd === "custom_instructions_read")
         return Promise.resolve(sampleAgentsState);
@@ -376,14 +414,19 @@ describe("SettingsView 模型配置", () => {
       .findAll("textarea.model-config-textarea")[0]
       .setValue('{\n  "models": [],\n  "edited": true\n}');
     const readCallsBefore = mockedInvoke.mock.calls.filter(
-      ([name]) => name === "model_config_read",
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/read",
     ).length;
     const cards = wrapper.findAll(".model-config-card");
     await cards[0].find(".model-config-reload-btn").trigger("click");
     await flushPromises();
     expect(
-      mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
-        .length,
+      mockedInvoke.mock.calls.filter(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method === "config/read",
+      ).length,
     ).toBe(readCallsBefore + 1);
     expect(
       (
@@ -420,7 +463,10 @@ describe("SettingsView 模型配置", () => {
 
   it("保存模型提供方成功后自动重读 model_catalog_json 卡片", async () => {
     let catalogContent = '{\n  "models": []\n}';
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve(sampleModelConfigRead);
+      }
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
@@ -444,7 +490,7 @@ describe("SettingsView 模型配置", () => {
     expect(
       mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
         .length,
-    ).toBe(readCallsBefore + 3);
+    ).toBe(readCallsBefore + 2);
     expect(
       (
         wrapper.findAll("textarea.model-config-textarea")[0]
@@ -598,7 +644,7 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
   });
 
-  it("编辑提供方后保存调用 model_config_ui_save", async () => {
+  it("编辑提供方后保存调用 config/batchWrite", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const rows = wrapper.findAll(".model-provider-row");
@@ -618,33 +664,36 @@ describe("SettingsView 模型配置", () => {
       .find(".model-config-save-btn")!
       .trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("model_config_ui_save", {
-      input: {
-        model: "deepseek-v4-flash",
-        model_reasoning_effort: "high",
-        model_provider: "deepseek",
-        preferred_auth_method: "apikey",
-        forced_login_method: "api",
-        model_catalog_json: "",
-        providers: [
-          {
-            key: "deepseek",
-            name: "DeepSeek",
-            base_url: "https://api.deepseek.com/",
-            env_key: "",
-            experimental_bearer_token: "sk-test",
-            wire_api: "responses",
-          },
-          {
-            key: "other",
-            name: "Other",
-            base_url: "https://new.example.com/v1",
-            env_key: "OTHER_API_KEY",
-            experimental_bearer_token: "",
-            wire_api: "chat",
-          },
-        ],
+    const saveCall = mockedInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    );
+    expect(saveCall).toBeTruthy();
+    const edits = (
+      saveCall![1] as {
+        params: { edits: { keyPath: string; value: unknown }[] };
+      }
+    ).params.edits;
+    expect(edits[0].keyPath).toBe("model_providers");
+    expect(edits[0].value).toEqual({
+      deepseek: {
+        name: "DeepSeek",
+        base_url: "https://api.deepseek.com/",
+        experimental_bearer_token: "sk-test",
+        wire_api: "responses",
       },
+      other: {
+        name: "Other",
+        base_url: "https://new.example.com/v1",
+        env_key: "OTHER_API_KEY",
+        wire_api: "chat",
+      },
+    });
+    expect(edits[1]).toEqual({
+      keyPath: "model_provider",
+      value: "deepseek",
+      mergeStrategy: "replace",
     });
     expect(store.toast).toContain("模型配置已保存");
   });
@@ -672,7 +721,27 @@ describe("SettingsView 模型配置", () => {
   });
 
   it("model 为空时保存被拦截并提示必填", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                model: "",
+                model_reasoning_effort: "",
+                model_provider: "deepseek",
+                preferred_auth_method: "",
+                forced_login_method: "",
+                model_catalog_json: "",
+                model_providers:
+                  sampleModelConfigRead.layers[0].config.model_providers,
+              },
+            },
+          ],
+        });
+      }
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
@@ -693,14 +762,37 @@ describe("SettingsView 模型配置", () => {
       .trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("请填写 model");
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "model_config_ui_save",
-      expect.anything(),
-    );
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method === "config/batchWrite",
+      ),
+    ).toBe(false);
   });
 
   it("认证方式默认不写入，选 API Key 时写入两个键", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                model: "deepseek-v4-flash",
+                model_reasoning_effort: "high",
+                model_provider: "deepseek",
+                preferred_auth_method: "",
+                forced_login_method: "",
+                model_catalog_json: "",
+                model_providers:
+                  sampleModelConfigRead.layers[0].config.model_providers,
+              },
+            },
+          ],
+        });
+      }
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
@@ -718,32 +810,63 @@ describe("SettingsView 模型配置", () => {
         .findAll(".model-config-card")[0]
         .find(".model-config-save-btn")!
         .trigger("click");
+    const lastAuthEdits = () => {
+      const calls = mockedInvoke.mock.calls.filter(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method === "config/batchWrite",
+      );
+      const last = calls[calls.length - 1];
+      return (
+        last![1] as {
+          params: { edits: { keyPath: string; value: string }[] };
+        }
+      ).params.edits;
+    };
     await save();
     await flushPromises();
-    const uiSaveCalls = mockedInvoke.mock.calls.filter(
-      ([name]) => name === "model_config_ui_save",
-    );
-    const last = uiSaveCalls[uiSaveCalls.length - 1]?.[1] as {
-      input: Record<string, unknown>;
-    };
-    expect(last.input.preferred_auth_method).toBe("");
-    expect(last.input.forced_login_method).toBe("");
+    let edits = lastAuthEdits();
+    expect(
+      edits.find((e) => e.keyPath === "preferred_auth_method")?.value,
+    ).toBe("");
+    expect(
+      edits.find((e) => e.keyPath === "forced_login_method")?.value,
+    ).toBe("");
 
     await wrapper.find("#model-config-ui-auth").setValue("apikey");
     await save();
     await flushPromises();
-    const uiSaveCalls2 = mockedInvoke.mock.calls.filter(
-      ([name]) => name === "model_config_ui_save",
-    );
-    const last2 = uiSaveCalls2[uiSaveCalls2.length - 1]?.[1] as {
-      input: Record<string, unknown>;
-    };
-    expect(last2.input.preferred_auth_method).toBe("apikey");
-    expect(last2.input.forced_login_method).toBe("api");
+    edits = lastAuthEdits();
+    expect(
+      edits.find((e) => e.keyPath === "preferred_auth_method")?.value,
+    ).toBe("apikey");
+    expect(
+      edits.find((e) => e.keyPath === "forced_login_method")?.value,
+    ).toBe("api");
   });
 
   it("model_catalog_json 目标不存在时黄色警告但允许保存", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                model: "deepseek-v4-flash",
+                model_reasoning_effort: "high",
+                model_provider: "deepseek",
+                preferred_auth_method: "",
+                forced_login_method: "",
+                model_catalog_json: "D:/missing/models.json",
+                model_providers:
+                  sampleModelConfigRead.layers[0].config.model_providers,
+              },
+            },
+          ],
+        });
+      }
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
@@ -770,18 +893,43 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain(
       "model_catalog_json 目标文件将在读取时自动创建",
     );
-    expect(mockedInvoke).toHaveBeenCalledWith(
-      "model_config_ui_save",
-      expect.objectContaining({
-        input: expect.objectContaining({
-          model_catalog_json: "D:/missing/models.json",
-        }),
-      }),
+    const saveCall = mockedInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
     );
+    expect(saveCall).toBeTruthy();
+    const edits = (
+      saveCall![1] as {
+        params: { edits: { keyPath: string; value: unknown }[] };
+      }
+    ).params.edits;
+    expect(
+      edits.find((e) => e.keyPath === "model_catalog_json")?.value,
+    ).toBe("D:/missing/models.json");
   });
 
   it("检测到全局 OPENAI_API_KEY 时表单可省略认证并显示提示", async () => {
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                model: "",
+                model_reasoning_effort: "",
+                model_provider: "",
+                preferred_auth_method: "",
+                forced_login_method: "",
+                model_catalog_json: "",
+                model_providers: {},
+              },
+            },
+          ],
+        });
+      }
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
@@ -2471,6 +2619,32 @@ describe("SettingsView 按钮图标", () => {
       if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
       if (cmd === "custom_instructions_read")
         return Promise.resolve(sampleAgentsState);
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                model: "deepseek-v4-flash",
+                model_reasoning_effort: "",
+                model_provider: "deepseek",
+                preferred_auth_method: "",
+                forced_login_method: "",
+                model_catalog_json: "",
+                model_providers: {
+                  deepseek: {
+                    name: "DeepSeek",
+                    base_url: "https://api.deepseek.com/",
+                    experimental_bearer_token: "sk-test",
+                    wire_api: "responses",
+                  },
+                },
+              },
+            },
+          ],
+        });
+      }
       return Promise.resolve({});
     });
     mockedSave.mockClear();
