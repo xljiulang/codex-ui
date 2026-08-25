@@ -777,6 +777,11 @@
   cursor: pointer;
 }
 
+.model-provider-radio input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .model-provider-name {
   font-size: var(--font-base);
   color: var(--text-bright);
