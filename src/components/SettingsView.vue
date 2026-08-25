@@ -25,6 +25,7 @@ import {
   previewTheme,
   type ThemeId,
 } from "../composables/useTheme";
+import { assetUrl } from "../lib/asset";
 import { openPathInApp } from "../composables/useSessionFs";
 import {
   ICON_CHEVRON_DOWN,
@@ -1017,6 +1018,26 @@ function statusLabel(p: PluginCatalogItem): string {
 
 function canInstall(p: PluginCatalogItem): boolean {
   return p.availability !== "DisabledByAdmin";
+}
+
+// ---------- 插件行图标（仅用 plugin/list 接口字段，远程 URL 优先，其次本地路径，最后品牌色首字母回退） ----------
+const brokenPluginIcons = ref(new Set<string>());
+
+function pluginIconSrc(p: PluginCatalogItem): string {
+  if (brokenPluginIcons.value.has(p.id)) return "";
+  if (p.iconUrl) return p.iconUrl;
+  if (p.iconPath) return assetUrl(p.iconPath);
+  return "";
+}
+
+function markIconError(id: string) {
+  const s = new Set(brokenPluginIcons.value);
+  s.add(id);
+  brokenPluginIcons.value = s;
+}
+
+function pluginInitial(p: PluginCatalogItem): string {
+  return (p.displayName.trim()[0] ?? "P").toUpperCase();
 }
 </script>
 
@@ -2154,8 +2175,11 @@ function canInstall(p: PluginCatalogItem): boolean {
                     </svg>
                   </span>
                   <span class="plugin-marketplace-name">{{ mp.displayName }}</span>
-                  <span class="plugin-marketplace-kind">
-                    {{ mp.isRemote ? "官方远程目录" : "本地市场" }}
+                  <span
+                    class="plugin-marketplace-count"
+                    :title="`${mp.plugins.length} 个插件`"
+                  >
+                    {{ mp.plugins.length }}
                   </span>
                   <button
                     v-if="!mp.isRemote"
@@ -2174,6 +2198,24 @@ function canInstall(p: PluginCatalogItem): boolean {
                   </div>
                   <div v-else class="plugin-list">
                     <div v-for="p in mp.plugins" :key="p.id" class="plugin-row">
+                      <span class="plugin-row-icon" aria-hidden="true">
+                        <img
+                          v-if="pluginIconSrc(p)"
+                          :src="pluginIconSrc(p)"
+                          alt=""
+                          loading="lazy"
+                          @error="markIconError(p.id)"
+                        />
+                        <span
+                          v-else
+                          class="plugin-icon-fallback"
+                          :style="
+                            p.brandColor ? { background: p.brandColor } : undefined
+                          "
+                        >
+                          {{ pluginInitial(p) }}
+                        </span>
+                      </span>
                       <div class="plugin-info">
                         <div class="plugin-name">
                           {{ p.displayName }}

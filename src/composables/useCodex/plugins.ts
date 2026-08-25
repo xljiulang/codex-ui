@@ -26,7 +26,9 @@ interface RawPluginSummary {
     displayName?: string;
     shortDescription?: string;
     longDescription?: string;
+    composerIcon?: string | null;
     composerIconUrl?: string | null;
+    brandColor?: string | null;
   };
   keywords?: string[];
 }
@@ -46,7 +48,7 @@ interface PluginInstallResponse {
   appsNeedingAuth?: unknown[];
 }
 
-/** 拉取插件目录：全部已配置本地市场（local）+ OpenAI 官方垂直目录（vertical） */
+/** 拉取插件目录：全部已配置带本地路径的市场（local）+ OpenAI 官方垂直目录（vertical） */
 export async function loadPluginCatalog(
   force = false,
 ): Promise<{
@@ -80,7 +82,9 @@ export async function loadPluginCatalog(
         displayName: p.interface?.displayName ?? p.name,
         description:
           p.interface?.shortDescription ?? p.interface?.longDescription ?? "",
+        iconPath: p.interface?.composerIcon ?? null,
         iconUrl: p.interface?.composerIconUrl ?? null,
+        brandColor: p.interface?.brandColor ?? null,
         keywords: p.keywords ?? [],
       })),
     }),
@@ -100,7 +104,7 @@ function isAuthRequiredError(e: unknown): boolean {
   return /auth|login|sign ?in|oauth|401|403/i.test(msg);
 }
 
-/** 安装插件：本地市场传 marketplacePath，远程目录市场传 remoteMarketplaceName */
+/** 安装插件：带本地路径的市场传 marketplacePath，远程目录市场传 remoteMarketplaceName */
 export async function installPlugin(
   marketplace: PluginMarketplaceInfo,
   plugin: PluginCatalogItem,

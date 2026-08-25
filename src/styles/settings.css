@@ -510,7 +510,7 @@
 /* 胶囊徽章基类：accent 系徽章共享，padding 差异保留在各自规则 */
 .plugin-status,
 .skill-status,
-.plugin-marketplace-kind,
+.plugin-marketplace-count,
 .model-provider-wire,
 .mcp-server-type,
 .git-remote-badge,
@@ -524,7 +524,7 @@
   flex-shrink: 0;
 }
 
-.plugin-marketplace-kind {
+.plugin-marketplace-count {
   padding: 1px var(--space-2);
 }
 
@@ -609,6 +609,40 @@
 .plugin-install-btn,
 .plugin-uninstall-btn {
   flex-shrink: 0;
+}
+
+/* 插件行左侧图标：远程 URL / 本地路径 / 品牌色首字母回退 */
+.plugin-row-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-active);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plugin-row-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.plugin-row-icon .plugin-icon-fallback {
+  width: 100%;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-bright);
+  background: var(--bg-active);
 }
 
 /* 通用卡片：模型配置 / 个性化 / 通用设置共用同一容器 */

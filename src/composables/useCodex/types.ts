@@ -192,16 +192,21 @@ export interface PluginCatalogItem {
   installPolicy: string;
   displayName: string;
   description: string;
+  /** 本地图标路径（interface.composerIcon）；null = 无本地图标 */
+  iconPath: string | null;
+  /** 远程图标 URL（interface.composerIconUrl）；null = 无远程图标 */
   iconUrl: string | null;
+  /** 品牌色（interface.brandColor），用于无图标时的首字母回退底色 */
+  brandColor: string | null;
   keywords: string[];
 }
 
 /** 插件市场（plugin/list 的 PluginMarketplaceEntry 归一化，供设置页插件管理） */
 export interface PluginMarketplaceInfo {
   name: string;
-  /** 本地市场路径；null = 纯远程目录（官方 curated 等） */
+  /** 市场本地路径；null = 纯远程目录（官方 curated 等） */
   path: string | null;
-  /** 远程目录市场：安装走 remoteMarketplaceName，本地市场走 marketplacePath */
+  /** 安装入参分支：远程目录市场走 remoteMarketplaceName，带本地路径的市场走 marketplacePath */
   isRemote: boolean;
   displayName: string;
   plugins: PluginCatalogItem[];

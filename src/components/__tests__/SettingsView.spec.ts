@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(),
+  convertFileSrc: (p: string) => "asset://mock/" + p,
+}));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, saveSettings: vi.fn() };
@@ -1773,7 +1776,7 @@ describe("SettingsView 插件管理", () => {
     wrapper = undefined;
   });
 
-  it("按市场分组渲染插件与状态标签，区分本地/远程目录", async () => {
+  it("按市场分组渲染插件与状态标签，头部显示插件数量", async () => {
     mockedInvoke.mockResolvedValue({
       marketplaces: [
         {
@@ -1820,9 +1823,9 @@ describe("SettingsView 插件管理", () => {
     expect(wrapper.text()).not.toContain("Browser");
     expect(wrapper.text()).not.toContain("PDF");
     expect(wrapper.text()).not.toContain("Gmail");
-    // 头部（市场名/本地-远程标签）始终可见
-    expect(mps[0].text()).toContain("本地市场");
-    expect(mps[1].text()).toContain("官方远程目录");
+    // 头部（市场名/插件数量）始终可见
+    expect(mps[0].find(".plugin-marketplace-count").text()).toBe("2");
+    expect(mps[1].find(".plugin-marketplace-count").text()).toBe("1");
     // 展开后可见插件名与状态
     await mps[0].find(".plugin-marketplace-head").trigger("click");
     await mps[1].find(".plugin-marketplace-head").trigger("click");
@@ -1905,7 +1908,7 @@ describe("SettingsView 插件管理", () => {
     expect(wrapper.find(".plugin-load-error").text()).toContain("git clone 失败");
   });
 
-  it("本地市场插件安装传 marketplacePath", async () => {
+  it("带本地路径的市场插件安装传 marketplacePath", async () => {
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "plugin/list") {
         return {
@@ -1939,7 +1942,7 @@ describe("SettingsView 插件管理", () => {
     expect(store.toast).toContain("已安装 PDF");
   });
 
-  it("本地市场 verbatim 路径剥离 \\?\\ 后传 marketplacePath", async () => {
+  it("带本地路径的市场 verbatim 路径剥离 \\?\\ 后传 marketplacePath", async () => {
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "plugin/list") {
         return {
@@ -2130,6 +2133,131 @@ describe("SettingsView 插件管理", () => {
     await wrapper.find(".plugin-marketplace-head").trigger("click");
     expect(wrapper.text()).toContain("管理员已禁用");
     expect(wrapper.find(".plugin-install-btn").attributes("disabled")).toBeDefined();
+  });
+
+  it("插件带远程图标时渲染 img 且 src 正确", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "browser",
+              name: "browser",
+              installed: true,
+              enabled: true,
+              interface: {
+                displayName: "Browser",
+                composerIconUrl: "https://cdn.example/browser.png",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    const img = wrapper.find(".plugin-row-icon img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://cdn.example/browser.png");
+    expect(wrapper.find(".plugin-icon-fallback").exists()).toBe(false);
+  });
+
+  it("插件本地图标路径经 assetUrl 转 asset://", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "pdf",
+              name: "pdf",
+              installed: false,
+              enabled: false,
+              interface: {
+                displayName: "PDF",
+                composerIcon: "C:/x/icon.png",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    const img = wrapper.find(".plugin-row-icon img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("asset://mock/C:/x/icon.png");
+  });
+
+  it("插件无任何图标但有品牌色时渲染首字母回退", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "chrome",
+              name: "chrome",
+              installed: false,
+              enabled: false,
+              interface: {
+                displayName: "Chrome",
+                brandColor: "#4678EB",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    const fallback = wrapper.find(".plugin-icon-fallback");
+    expect(wrapper.find(".plugin-row-icon img").exists()).toBe(false);
+    expect(fallback.exists()).toBe(true);
+    expect(fallback.text()).toBe("C");
+    expect(fallback.attributes("style")).toContain("#4678EB");
+  });
+
+  it("图标加载失败后切换到品牌色回退", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "broken",
+              name: "broken",
+              installed: false,
+              enabled: false,
+              interface: {
+                displayName: "Broken",
+                composerIconUrl: "https://cdn.example/broken.png",
+                brandColor: "#ff0000",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    const img = wrapper.find(".plugin-row-icon img");
+    expect(img.exists()).toBe(true);
+    await img.trigger("error");
+    expect(wrapper.find(".plugin-row-icon img").exists()).toBe(false);
+    const fallback = wrapper.find(".plugin-icon-fallback");
+    expect(fallback.exists()).toBe(true);
+    expect(fallback.text()).toBe("B");
+    expect(fallback.attributes("style")).toContain("#ff0000");
   });
 });
 
