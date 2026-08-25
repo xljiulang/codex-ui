@@ -9,6 +9,7 @@ pub mod mcp_servers;
 pub mod model_config;
 pub mod path_util;
 pub mod pdf_export;
+pub mod runtime_download;
 pub mod session_fs;
 pub mod session_log;
 pub mod settings;

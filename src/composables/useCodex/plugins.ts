@@ -8,6 +8,7 @@ import type {
   PluginMarketplaceInfo,
   PluginMarketplaceLoadError,
 } from "./types";
+import { stripWindowsVerbatim } from "../../lib/path";
 
 /** plugin/list 返回的原始市场/插件字段（取用子集，与服务端 schema 对齐） */
 interface RawPluginSummary {
@@ -62,7 +63,7 @@ export async function loadPluginCatalog(
   const marketplaces = (res?.marketplaces ?? []).map<PluginMarketplaceInfo>(
     (mp) => ({
       name: mp.name,
-      path: mp.path ?? null,
+      path: mp.path ? stripWindowsVerbatim(mp.path) : null,
       isRemote: !mp.path,
       displayName: mp.interface?.displayName ?? mp.name,
       plugins: (mp.plugins ?? []).map<PluginCatalogItem>((p) => ({
@@ -134,7 +135,7 @@ export async function uninstallPlugin(pluginId: string): Promise<void> {
 export async function addMarketplace(source: string): Promise<void> {
   await invoke("codex_rpc", {
     method: "marketplace/add",
-    params: { source },
+    params: { source: stripWindowsVerbatim(source) },
   });
 }
 

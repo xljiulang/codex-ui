@@ -7,7 +7,22 @@ import {
   normalizePathKey,
   pathEquals,
   relPathOf,
+  stripWindowsVerbatim,
 } from "../path";
+
+describe("stripWindowsVerbatim", () => {
+  it("剥离 \\?\\ 与 \\?\\UNC\\ 前缀，其余原样保留", () => {
+    expect(stripWindowsVerbatim("\\\\?\\C:\\a\\b")).toBe("C:\\a\\b");
+    expect(stripWindowsVerbatim("\\\\?\\UNC\\srv\\share\\f.txt")).toBe(
+      "\\\\srv\\share\\f.txt",
+    );
+    expect(stripWindowsVerbatim("C:\\a\\b")).toBe("C:\\a\\b");
+    expect(stripWindowsVerbatim("C:/x/bundled")).toBe("C:/x/bundled");
+    expect(stripWindowsVerbatim("https://example.com/repo.git")).toBe(
+      "https://example.com/repo.git",
+    );
+  });
+});
 
 describe("normalizeFsPath / normalizePathKey", () => {
   it("正斜杠统一为反斜杠，去尾分隔符，盘符根保留尾分隔符", () => {
@@ -15,11 +30,13 @@ describe("normalizeFsPath / normalizePathKey", () => {
     expect(normalizeFsPath("D:\\repo\\")).toBe("D:\\repo");
     expect(normalizeFsPath("D:\\")).toBe("D:\\");
     expect(normalizeFsPath("D:/")).toBe("D:\\");
+    expect(normalizeFsPath("\\\\?\\C:\\a\\b")).toBe("C:\\a\\b");
   });
 
   it("比较/键形态：反斜杠 + 小写 + 去尾（含盘符根）", () => {
     expect(normalizePathKey("D:/Repo\\src\\")).toBe("d:\\repo\\src");
     expect(normalizePathKey("D:\\")).toBe("d:");
+    expect(normalizePathKey("\\\\?\\C:\\A\\B")).toBe("c:\\a\\b");
   });
 });
 

@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["custom-protocol", "protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["process", "io-util", "sync", "rt-multi-thread", "time", "macros"] }
+tokio = { version = "1", features = ["process", "io-util", "sync", "rt-multi-thread", "time", "macros", "fs"] }
 rfd = "0.15"
 open = "5"
 clipboard-win = "5"
@@ -40,6 +40,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 toml_edit = "0.22"
 tar = "0.4"
 xz2 = "0.1"
+flate2 = "1"
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

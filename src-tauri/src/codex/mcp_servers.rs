@@ -605,7 +605,7 @@ bearer_token_env_var = "TOKEN"
         no_url.command = "npx".into(); // 有 command 但无 url → 视为 stdio，需 command 非空，应通过
         assert!(save_in(dir.path(), &McpServersEdit { servers: vec![no_url] }).is_ok());
 
-        let mut bad_scheme = make_http("a", "ftp://example.com/mcp");
+        let bad_scheme = make_http("a", "ftp://example.com/mcp");
         assert!(save_in(dir.path(), &McpServersEdit { servers: vec![bad_scheme] }).is_err());
 
         let mut empty_header_key = make_http("a", "https://example.com/mcp");

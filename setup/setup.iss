@@ -42,10 +42,9 @@ Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 [Files]
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
-; 两个 codex 插件市场以 tar.xz 打包进安装包（已 xz 压缩，仅 160MB/18MB 供 Inno 压缩，构建快），
-; 随包放到 {app}\marketplaces，由 codex-ui 启动时后台解压到 canonical 位置；卸载 codex-ui 时保留该 codex 资源。
-Source: .\marketplaces\codex-primary-runtime.tar.xz; DestDir: {app}\marketplaces; Flags: ignoreversion overwritereadonly replacesameversion
-Source: .\marketplaces\openai-bundled.tar.xz; DestDir: {app}\marketplaces; Flags: ignoreversion overwritereadonly replacesameversion
+; 随包只放 openai-bundled 插件市场（.tar.gz）；codex-primary-runtime 不再进安装包，
+; 由 codex-ui 启动后按需下载/升级到 canonical 位置；卸载 codex-ui 时保留该 codex 资源。
+Source: .\marketplaces\openai-bundled.tar.gz; DestDir: {app}\marketplaces; Flags: ignoreversion overwritereadonly replacesameversion
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}

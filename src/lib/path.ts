@@ -7,16 +7,24 @@
  *   normalizeFsPath / normalizePathKey，否则同一逻辑路径会因分隔符/大小写不同产生多个键。
  */
 
+/** 剥离 Windows 路径的 verbatim 前缀（`\\?\` / `\\?\UNC\`），保留其余原样；
+ * 与后端 path_util::clean_path 语义一致，用于读回/展示外部路径时去除 `\\?\`。 */
+export function stripWindowsVerbatim(p: string): string {
+  if (p.startsWith("\\\\?\\UNC\\")) return "\\\\" + p.slice(8);
+  if (p.startsWith("\\\\?\\")) return p.slice(4);
+  return p;
+}
+
 /** 存储/展示形态：统一反斜杠、去尾分隔符（盘符根保留）、保留大小写 */
 export function normalizeFsPath(p: string): string {
-  const bs = p.replace(/\//g, "\\");
+  const bs = stripWindowsVerbatim(p).replace(/\//g, "\\");
   if (/^[A-Za-z]:\\$/.test(bs)) return bs;
   return bs.replace(/\\+$/, "");
 }
 
 /** 比较/键形态：统一反斜杠、去尾分隔符（含盘符根）、小写 */
 export function normalizePathKey(p: string): string {
-  return p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return stripWindowsVerbatim(p).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
 }
 
 /** 路径相等（Windows 大小写不敏感，正/反斜杠等价） */

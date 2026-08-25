@@ -42,17 +42,18 @@ pub struct CodexServer {
 struct Shared {
     inner: Mutex<Inner>,
     stop: AtomicBool,
-    bundled: BundledState,
+    bundled: DoneState,
+    runtime: DoneState,
 }
 
-/// 内置插件市场后台解压完成信号：`wait` 会阻塞到 `mark_done` 被调用，
-/// 避免市场登记在解压完成前即因「来源未就绪」被跳过。
-struct BundledState {
+/// 后台完成信号：`wait` 会阻塞到 `mark_done` 被调用，避免市场登记在
+/// 解压/下载完成前即因「来源未就绪」被跳过。
+struct DoneState {
     done: AtomicBool,
     notify: Notify,
 }
 
-impl BundledState {
+impl DoneState {
     fn new() -> Self {
         Self {
             done: AtomicBool::new(false),
@@ -122,7 +123,8 @@ impl CodexServer {
             shared: Arc::new(Shared {
                 inner: Mutex::new(Inner::new()),
                 stop: AtomicBool::new(false),
-                bundled: BundledState::new(),
+                bundled: DoneState::new(),
+                runtime: DoneState::new(),
             }),
             next_id: AtomicU64::new(0),
             workspace,
@@ -143,6 +145,16 @@ impl CodexServer {
     /// 等待内置插件市场后台解压结束。
     pub(crate) async fn bundled_wait(&self) {
         self.shared.bundled.wait().await;
+    }
+
+    /// 运行时按需下载/升级完成信号：向等待方广播（供 `bundled::bootstrap` 调用）。
+    pub(crate) fn runtime_mark_done(&self) {
+        self.shared.runtime.mark_done();
+    }
+
+    /// 等待运行时下载/升级结束。
+    pub(crate) async fn runtime_wait(&self) {
+        self.shared.runtime.wait().await;
     }
 
     /// Spawns the background lifecycle task exactly once.
@@ -354,8 +366,12 @@ impl CodexServer {
         for name in BUNDLED_MARKETPLACES {
             let server = self.clone();
             tauri::async_runtime::spawn(async move {
-                // 等待后台解压结束，避免市场尚未物化即被「来源未就绪」跳过。
-                server.bundled_wait().await;
+                // openai-bundled 等随包归档解压；openai-primary-runtime 等运行时下载/升级完成。
+                if name == "openai-primary-runtime" {
+                    server.runtime_wait().await;
+                } else {
+                    server.bundled_wait().await;
+                }
                 let source = match resolve_bundled_marketplace_source(name) {
                     Ok(src) => src,
                     Err(msg) => {
@@ -365,8 +381,9 @@ impl CodexServer {
                         return;
                     }
                 };
+                let source_display = source.clone();
                 let re_add_source = source.clone();
-                if let Err(e) = server
+                match server
                     .request(
                         "marketplace/add",
                         json!({ "source": source }),
@@ -374,33 +391,57 @@ impl CodexServer {
                     )
                     .await
                 {
-                    if is_conflicting_marketplace_source_error(&e) {
-                        // config.toml 里同名市场已登记到别的来源（如旧版 codex-ui
-                        // 写入的应用目录路径），导致以 canonical 来源注册被拒；
-                        // 先移除旧登记，再重试添加。
-                        if server
-                            .request(
-                                "marketplace/remove",
-                                json!({ "marketplaceName": name }),
-                                Some(Duration::from_secs(10)),
+                    Ok(_) => {
+                        server
+                            .push_log(
+                                "info",
+                                format!("已注册内置插件市场 {name}（来源 {source_display}）"),
                             )
-                            .await
-                            .is_ok()
-                        {
-                            if let Err(e2) = server
+                            .await;
+                    }
+                    Err(e) => {
+                        if is_conflicting_marketplace_source_error(&e) {
+                            // config.toml 里同名市场已登记到别的来源（如旧版 codex-ui
+                            // 写入的应用目录路径），导致以 canonical 来源注册被拒；
+                            // 先移除旧登记，再重试添加。
+                            if server
                                 .request(
-                                    "marketplace/add",
-                                    json!({ "source": re_add_source }),
+                                    "marketplace/remove",
+                                    json!({ "marketplaceName": name }),
                                     Some(Duration::from_secs(10)),
                                 )
                                 .await
+                                .is_ok()
                             {
+                                if let Err(e2) = server
+                                    .request(
+                                        "marketplace/add",
+                                        json!({ "source": re_add_source }),
+                                        Some(Duration::from_secs(10)),
+                                    )
+                                    .await
+                                {
+                                    server
+                                        .push_log(
+                                            "warn",
+                                            format!(
+                                                "添加内置插件市场 {name}（移除旧来源后仍失败）：{e2}"
+                                            ),
+                                        )
+                                        .await;
+                                } else {
+                                    server
+                                        .push_log(
+                                            "info",
+                                            format!("已重新注册内置插件市场 {name}（来源 {source_display}）"),
+                                        )
+                                        .await;
+                                }
+                            } else {
                                 server
                                     .push_log(
                                         "warn",
-                                        format!(
-                                            "添加内置插件市场 {name}（移除旧来源后仍失败）：{e2}"
-                                        ),
+                                        format!("移除内置插件市场 {name} 的旧来源登记失败"),
                                     )
                                     .await;
                             }
@@ -408,17 +449,10 @@ impl CodexServer {
                             server
                                 .push_log(
                                     "warn",
-                                    format!("移除内置插件市场 {name} 的旧来源登记失败"),
+                                    format!("添加内置插件市场 {name} 失败：{e}"),
                                 )
                                 .await;
                         }
-                    } else {
-                        server
-                            .push_log(
-                                "warn",
-                                format!("添加内置插件市场 {name} 失败：{e}"),
-                            )
-                            .await;
                     }
                 }
             });
@@ -1310,8 +1344,8 @@ mod tests {
     }
 
     #[test]
-    fn bundled_state_wait_blocks_until_mark_done() {
-        let state = Arc::new(BundledState::new());
+    fn done_state_wait_blocks_until_mark_done() {
+        let state = Arc::new(DoneState::new());
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -1331,8 +1365,8 @@ mod tests {
     }
 
     #[test]
-    fn bundled_state_wait_returns_immediately_after_mark_done() {
-        let state = Arc::new(BundledState::new());
+    fn done_state_wait_returns_immediately_after_mark_done() {
+        let state = Arc::new(DoneState::new());
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

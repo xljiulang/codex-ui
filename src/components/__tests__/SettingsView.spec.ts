@@ -1939,6 +1939,43 @@ describe("SettingsView 插件管理", () => {
     expect(store.toast).toContain("已安装 PDF");
   });
 
+  it("本地市场 verbatim 路径剥离 \\?\\ 后传 marketplacePath", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-primary-runtime",
+              path: "\\\\?\\C:\\Users\\laojiu\\.cache\\codex-runtimes\\codex-primary-runtime\\plugins\\openai-primary-runtime",
+              plugins: [
+                {
+                  id: "pdf",
+                  name: "pdf",
+                  installed: false,
+                  interface: { displayName: "PDF" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "plugin/install",
+      params: {
+        marketplacePath:
+          "C:\\Users\\laojiu\\.cache\\codex-runtimes\\codex-primary-runtime\\plugins\\openai-primary-runtime",
+        pluginName: "pdf",
+      },
+    });
+  });
+
   it("远程目录插件安装传 remoteMarketplaceName", async () => {
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "plugin/list") {
