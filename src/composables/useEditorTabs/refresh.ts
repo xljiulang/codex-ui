@@ -109,6 +109,7 @@ export async function refreshActiveTabFromFs(
 ): Promise<void> {
   for (const t of [...tabs]) {
     if (!isFileLikeTab(t)) continue;
+    if (t.missing) continue;
     if (t.loading) continue;
     if (t.kind !== TabKind.Preview && t.saving) continue;
     if (!matchesPayload(t, payload)) continue;
@@ -116,7 +117,7 @@ export async function refreshActiveTabFromFs(
   }
   if (refreshing) return;
   const tab = tabs.find((t) => t.id === activeTabId.value);
-  if (!isFileLikeTab(tab) || !matchesPayload(tab, payload)) return;
+  if (!isFileLikeTab(tab) || tab.missing || !matchesPayload(tab, payload)) return;
   if (tab.kind === TabKind.File || tab.kind === TabKind.Docx) {
     const editable = tab as FileEditorTab | DocxEditorTab;
     if (editable.dirty) {
@@ -144,6 +145,10 @@ export async function refreshActiveTabFromFs(
 watch(activeTabId, (id) => {
   const tab = tabs.find((t) => t.id === id);
   if (!isFileLikeTab(tab) || !tab.stale) return;
+  if (tab.missing) {
+    tab.stale = false;
+    return;
+  }
   if (tab.loading) return;
   if (tab.kind !== TabKind.Preview && tab.saving) return;
   if (tab.kind === TabKind.File || tab.kind === TabKind.Docx) {
@@ -203,6 +208,7 @@ async function refreshFileTab(tab: FileEditorTab): Promise<void> {
     tab.dirty = false;
     tab.status = `已从磁盘刷新 ${formatTimeHMS(Date.now())}`;
   } catch {
+    tab.missing = true;
     tab.status = "外部刷新失败：文件可能已被删除";
   }
 }
@@ -242,6 +248,7 @@ async function refreshDocxTab(tab: DocxEditorTab): Promise<void> {
     tab.byteSize = buf.byteLength;
     tab.status = `已从磁盘刷新 ${formatTimeHMS(Date.now())}`;
   } catch {
+    tab.missing = true;
     tab.status = "外部刷新失败：文件可能已被删除";
   }
 }
@@ -265,6 +272,7 @@ async function refreshPreviewTab(tab: PreviewEditorTab): Promise<void> {
       }
     }
   } catch {
+    tab.missing = true;
     // 预览标签无状态栏：刷新失败静默（图片/PDF/XLSX 组件各自展示错误态）
   }
 }

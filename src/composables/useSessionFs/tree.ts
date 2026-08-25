@@ -15,6 +15,7 @@ import {
   expanded,
   loadingByPath,
   loadingRoot,
+  pruneDeadDir,
   rootEntry,
   rootError,
   searchActive,
@@ -33,8 +34,13 @@ export async function resolveFallbackRoot(): Promise<string> {
   return "";
 }
 
-/** 拉取一个目录的直接子项（懒加载；已缓存且非强制时直接返回） */
-export async function loadDir(path: string, force = false): Promise<void> {
+/** 拉取一个目录的直接子项（懒加载；已缓存且非强制时直接返回）。
+ *  `opts.silent` 用于程序化/自动刷新：列表失败时静默剪枝，不打扰用户。 */
+export async function loadDir(
+  path: string,
+  force = false,
+  opts: { silent?: boolean } = {},
+): Promise<void> {
   const root = normalizeFsPath(workspace.value);
   if (!root) return;
   if (!force && childrenByPath[path] !== undefined) return;
@@ -45,8 +51,10 @@ export async function loadDir(path: string, force = false): Promise<void> {
       dir: path,
     });
   } catch (e) {
-    if (childrenByPath[path] === undefined) childrenByPath[path] = [];
-    setToast(toastError(e));
+    // 目录已不可列（被删除/改名等）：从缓存剪枝，避免后续刷新反复重列并弹错；
+    // 自动刷新（silent）静默，用户主动操作（展开/刷新按钮）仍提示一次。
+    pruneDeadDir(path);
+    if (!opts.silent) setToast(toastError(e));
   } finally {
     loadingByPath[path] = false;
   }
@@ -132,7 +140,7 @@ export async function refreshAll() {
     ...Object.keys(childrenByPath).filter((p) => isPathUnderRoot(root, p)),
   ];
   for (const p of paths) {
-    await loadDir(p, true);
+    await loadDir(p, true, { silent: true });
   }
 }
 
@@ -191,7 +199,7 @@ async function revealAbsPath(
   for (const part of dirs) {
     cur = joinFsPath(cur, part);
     expanded.add(cur);
-    await loadDir(cur);
+    await loadDir(cur, false, { silent: true });
   }
   selectedPath.value = norm;
   clearSearch();

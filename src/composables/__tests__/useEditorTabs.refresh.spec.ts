@@ -301,6 +301,27 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     expect(tab.status).toContain("外部刷新失败");
   });
 
+  it("文件已删除：标记缺失后不再重复读取", async () => {
+    const tab = await openFile("a.txt", "hello");
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.reject(new Error("文件不存在"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    expect(tab.missing).toBe(true);
+    expect(tab.status).toContain("外部刷新失败");
+
+    mockedInvoke.mockClear();
+    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_read",
+      expect.anything(),
+    );
+  });
+
   it("docx 标签内容变化：setContent 并恢复选区、复位脏标记", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {

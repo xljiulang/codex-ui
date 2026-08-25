@@ -28,9 +28,12 @@ import {
   expanded,
   iconCacheKey,
   iconFor,
+  loadDir,
   loadingRoot,
   openPathInApp,
   pasteAvailable,
+  pruneDeadDir,
+  refreshAll,
   revealAbsPathInTree,
   rootEntry,
   selectedPath,
@@ -683,5 +686,95 @@ describe("revealAbsPathInTree 资源树定位", () => {
     expect(expanded.has(root + "\\src")).toBe(true);
     expect(expanded.has("D:/repo")).toBe(false);
     expect(selectedPath.value).toBe(root + "\\src\\main.ts");
+  });
+});
+
+describe("useSessionFs 目录剪枝（loadDir/refreshAll 失败静默）", () => {
+  beforeEach(() => {
+    __resetSessionFsForTest();
+    store.workspace = root;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    mockedInvoke.mockResolvedValue([]);
+  });
+
+  it("pruneDeadDir：删除自身及后代目录键并取消展开，无关路径不受影响", () => {
+    const a = root + "\\a";
+    const aSub = root + "\\a\\sub";
+    const b = root + "\\b";
+    childrenByPath[a] = [] as unknown as FsEntry[];
+    childrenByPath[aSub] = [] as unknown as FsEntry[];
+    childrenByPath[a + "\\sub\\f"] = [] as unknown as FsEntry[];
+    childrenByPath[b] = [] as unknown as FsEntry[];
+    expanded.add(a);
+    expanded.add(aSub);
+    expanded.add(b);
+
+    pruneDeadDir(a);
+
+    expect(childrenByPath[a]).toBeUndefined();
+    expect(childrenByPath[aSub]).toBeUndefined();
+    expect(childrenByPath[a + "\\sub\\f"]).toBeUndefined();
+    expect(childrenByPath[b]).toBeDefined();
+    expect(expanded.has(a)).toBe(false);
+    expect(expanded.has(aSub)).toBe(false);
+    expect(expanded.has(b)).toBe(true);
+  });
+
+  it("loadDir 失败：剪枝且 silent 不弹 toast，非 silent 仍提示一次", async () => {
+    const dir = root + "\\gone";
+    childrenByPath[dir] = [file("x", "gone/x")];
+    expanded.add(dir);
+
+    mockedInvoke.mockRejectedValueOnce(new Error("os error 2"));
+    await loadDir(dir, true, { silent: true });
+    expect(childrenByPath[dir]).toBeUndefined();
+    expect(expanded.has(dir)).toBe(false);
+    expect(store.toast).toBe("");
+
+    // 非 silent（用户主动展开/刷新）：仍提示一次并剪枝
+    childrenByPath[dir] = [file("x", "gone/x")];
+    expanded.add(dir);
+    mockedInvoke.mockRejectedValueOnce(new Error("os error 2"));
+    await loadDir(dir, true);
+    expect(childrenByPath[dir]).toBeUndefined();
+    expect(expanded.has(dir)).toBe(false);
+    expect(store.toast).not.toBe("");
+  });
+
+  it("refreshAll：含已删除目录时静默剪枝、不弹 toast，其余目录正常刷新", async () => {
+    const deadDir = root + "\\gone";
+    const okDir = root + "\\src";
+    childrenByPath[deadDir] = [file("x.txt", "gone/x.txt")];
+    childrenByPath[okDir] = [file("a.ts", "src/a.ts")];
+    expanded.add(deadDir);
+    expanded.add(okDir);
+
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "session_fs_metadata") {
+        return Promise.resolve(file("repo", ".", true));
+      }
+      if (cmd === "session_fs_list") {
+        const dir = (args as { dir: string }).dir;
+        if (dir === root) {
+          return Promise.resolve([
+            file("gone", "gone", true),
+            file("src", "src", true),
+          ]);
+        }
+        if (dir === okDir) return Promise.resolve([file("a.ts", "src/a.ts")]);
+        // deadDir：已删除
+        return Promise.reject(new Error("os error 2"));
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await refreshAll();
+
+    expect(childrenByPath[deadDir]).toBeUndefined();
+    expect(expanded.has(deadDir)).toBe(false);
+    expect(childrenByPath[okDir]).toBeDefined();
+    expect(expanded.has(okDir)).toBe(true);
+    expect(store.toast).toBe("");
   });
 });

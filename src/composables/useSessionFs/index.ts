@@ -16,6 +16,7 @@ export {
   searching,
   selectedPath,
   treeRows,
+  pruneDeadDir,
 } from "./state";
 export {
   ensureEntryIcons,

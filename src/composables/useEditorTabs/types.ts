@@ -36,6 +36,8 @@ export interface FileEditorTab extends EditorTabBase {
   scrollTop: number;
   /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
   stale: boolean;
+  /** 文件已从磁盘丢失（外部删除等）：后续自动刷新跳过，避免反复读不存在的文件 */
+  missing?: boolean;
   status: string;
   /** CodeMirror 状态（非响应式，避免深度代理开销）；切换标签时由编辑组件 setState */
   editorState: EditorState | null;
@@ -58,6 +60,8 @@ export interface DocxEditorTab extends EditorTabBase {
   byteSize: number | null;
   /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
   stale: boolean;
+  /** 文件已从磁盘丢失（外部删除等）：后续自动刷新跳过，避免反复读不存在的文件 */
+  missing?: boolean;
   /** 首次导入的 HTML（TipTap 数据源），markRaw 存储避免响应式代理 */
   initialHtml: string | null;
   /** TipTap 编辑器实例（markRaw），由 DocxEditorPane 创建后回填 */
@@ -103,6 +107,8 @@ export interface PreviewEditorTab extends EditorTabBase {
   pageCount: number | null;
   /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
   stale: boolean;
+  /** 文件已从磁盘丢失（外部删除等）：后续自动刷新跳过，避免反复读不存在的文件 */
+  missing?: boolean;
 }
 
 export interface TerminalEditorTab extends EditorTabBase {

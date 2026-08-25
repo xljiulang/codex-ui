@@ -61,3 +61,20 @@ export function pruneTreeToRoot(root: string) {
     selectedPath.value = "";
   }
 }
+
+/** 目录已不可列（被删除/改名等）时，从缓存中剪枝：移除自身及所有后代目录键并取消展开，
+ *  避免 refreshAll 每次 fs 事件都重列一个已消失的目录而反复弹「无法访问」。 */
+export function pruneDeadDir(path: string) {
+  const base = path.replace(/[\\/]+$/, "");
+  const isSelfOrDesc = (k: string) =>
+    k === base || k.startsWith(base + "\\") || k.startsWith(base + "/");
+  for (const k of Object.keys(childrenByPath)) {
+    if (isSelfOrDesc(k)) delete childrenByPath[k];
+  }
+  for (const k of Object.keys(loadingByPath)) {
+    if (isSelfOrDesc(k)) delete loadingByPath[k];
+  }
+  for (const k of [...expanded]) {
+    if (isSelfOrDesc(k)) expanded.delete(k);
+  }
+}
