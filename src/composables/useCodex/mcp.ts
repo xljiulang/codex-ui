@@ -19,6 +19,9 @@ interface RawConfigReadResponse {
 /** [mcp_servers.<name>] 原始表；保留 codex 自管字段（environment_id 等）与未知字段 */
 type RawMcpServer = Record<string, unknown>;
 
+/** omit_tools_from 合法暴露面（ToolExposureSurface） */
+const MCP_OMIT_TOOLS = new Set(["direct", "deferred", "code_mode"]);
+
 /** 读取 MCP 服务器配置：经 config/read 取用户层原始 [mcp_servers.*] 并归一化为 UI 模型。 */
 export async function loadMcpServers(): Promise<{
   servers: McpServerInfo[];
@@ -49,6 +52,7 @@ export async function loadMcpServers(): Promise<{
       url: str(t.url),
       headers: kvEntries(t.http_headers),
       bearer_token_env_var: str(t.bearer_token_env_var),
+      omit_tools_from: omitList(t.omit_tools_from),
     });
   }
   return { servers, raw: { ...rawMap } };
@@ -84,6 +88,10 @@ export async function saveMcpServers(
       delete base.http_headers;
       delete base.bearer_token_env_var;
     }
+    // omit_tools_from 与 transport 无关：非空写回（过滤非法 + 去重保序），为空删除交回 codex 默认
+    const omits = (s.omit_tools_from ?? []).map((x) => x.trim()).filter((x) => MCP_OMIT_TOOLS.has(x));
+    if (omits.length) base.omit_tools_from = Array.from(new Set(omits));
+    else delete base.omit_tools_from;
     merged[s.name.trim()] = base;
   }
   await invoke("codex_rpc", {
@@ -127,4 +135,17 @@ function setKv(obj: RawMcpServer, key: string, entries: McpEnvEntry[]) {
 function setOrRemove(obj: RawMcpServer, key: string, value: string) {
   if (value) obj[key] = value;
   else delete obj[key];
+}
+
+/** 归一化 omit_tools_from：支持数组或单字符串，仅保留合法暴露面，去重保序；缺失/非法 → [] */
+function omitList(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    return Array.from(
+      new Set(
+        v.filter((x): x is string => typeof x === "string" && MCP_OMIT_TOOLS.has(x)),
+      ),
+    );
+  }
+  if (typeof v === "string" && MCP_OMIT_TOOLS.has(v)) return [v];
+  return [];
 }

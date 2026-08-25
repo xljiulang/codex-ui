@@ -51,6 +51,7 @@ describe("useCodex/mcp", () => {
         url: "",
         headers: [],
         bearer_token_env_var: "",
+        omit_tools_from: [],
       },
       {
         name: "remote",
@@ -60,6 +61,7 @@ describe("useCodex/mcp", () => {
         url: "https://example.com/mcp",
         headers: [{ key: "Authorization", value: "Bearer x" }],
         bearer_token_env_var: "MY_TOKEN",
+        omit_tools_from: [],
       },
     ]);
     expect(raw.fs).toEqual({
@@ -200,5 +202,78 @@ describe("useCodex/mcp", () => {
         reloadUserConfig: true,
       },
     });
+  });
+
+  it("loadMcpServers 归一化 omit_tools_from：数组去重过滤、单字符串、缺失为空", async () => {
+    mockedInvoke.mockResolvedValueOnce({
+      config: {},
+      layers: [
+        {
+          name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+          version: "sha256:abc",
+          config: {
+            mcp_servers: {
+              a: {
+                command: "ca",
+                omit_tools_from: ["deferred", "direct", "deferred", "bogus"],
+              },
+              b: { command: "cb", omit_tools_from: "code_mode" },
+              c: { command: "cc", omit_tools_from: ["not-a-surface"] },
+              d: { command: "cd" },
+            },
+          },
+          disabledReason: null,
+        },
+      ],
+    });
+    const { servers } = await loadMcpServers();
+    expect(servers.find((s) => s.name === "a")?.omit_tools_from).toEqual([
+      "deferred",
+      "direct",
+    ]);
+    expect(servers.find((s) => s.name === "b")?.omit_tools_from).toEqual([
+      "code_mode",
+    ]);
+    expect(servers.find((s) => s.name === "c")?.omit_tools_from).toEqual([]);
+    expect(servers.find((s) => s.name === "d")?.omit_tools_from).toEqual([]);
+  });
+
+  it("saveMcpServers 非空写 omit_tools_from，空删除并保留其余未知字段", async () => {
+    await saveMcpServers(
+      [
+        {
+          name: "on",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          omit_tools_from: ["deferred", "deferred", "bogus"],
+        },
+        {
+          name: "off",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          omit_tools_from: [],
+        },
+      ],
+      {
+        on: { command: "old", custom: 1 },
+        off: { command: "old", omit_tools_from: ["deferred"], custom: 2 },
+      },
+    );
+    const value = (
+      mockedInvoke.mock.calls[0][1] as {
+        params: { edits: { value: Record<string, Record<string, unknown>> }[] };
+      }
+    ).params.edits[0].value;
+    expect(value.on).toEqual({ command: "npx", omit_tools_from: ["deferred"], custom: 1 });
+    expect(value.off).toEqual({ command: "npx", custom: 2 });
+    expect(value.off.omit_tools_from).toBeUndefined();
   });
 });

@@ -1000,6 +1000,18 @@
   padding: 1px var(--space-2);
 }
 
+.mcp-server-omit {
+  padding: 1px var(--space-2);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-muted);
+  background: rgba(var(--overlay-rgb), 0.08);
+  border-radius: 999px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .mcp-server-form {
   display: flex;
   flex-direction: column;
@@ -1029,6 +1041,99 @@
 
 .mcp-env-row input {
   flex: 1;
+}
+
+.mcp-omit-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mcp-omit-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-server-form .mcp-omit-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font-weight: 400;
+  font-size: var(--font-sm);
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.mcp-omit-option input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease);
+}
+
+.mcp-omit-option input[type="checkbox"]:hover {
+  border-color: var(--accent-dim);
+}
+
+.mcp-omit-option input[type="checkbox"]:focus-visible {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.mcp-omit-option input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.mcp-omit-option input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.mcp-omit-value {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  color: var(--text-bright);
+  flex-shrink: 0;
+}
+
+.mcp-omit-desc {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+}
+
+.mcp-omit-hint,
+.mcp-omit-note {
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.mcp-omit-hint {
+  color: var(--text-muted);
+}
+
+.mcp-omit-note {
+  color: var(--yellow);
 }
 
 .model-config-warning {

@@ -1138,6 +1138,19 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
 
     await wrapper.find(".mcp-config-add-btn").trigger("click");
     await flushPromises();
+    // 新增默认勾选 deferred（直接内联），direct/code_mode 不勾选
+    expect(
+      (
+        wrapper.find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      (
+        wrapper.find('.mcp-server-form .mcp-omit-option input[value="direct"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
     await wrapper
       .find('.mcp-server-form input[placeholder="如 filesystem"]')
       .setValue("memory");
@@ -1175,6 +1188,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
                 command: "npx",
                 args: ["-y", "mcp-server-memory"],
                 env: { API_KEY: "sk-123" },
+                omit_tools_from: ["deferred"],
               },
             },
             mergeStrategy: "replace",
@@ -1234,6 +1248,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
                 url: "https://developers.openai.com/mcp",
                 http_headers: { Authorization: "Bearer sk-docs" },
                 bearer_token_env_var: "DOCS_TOKEN",
+                omit_tools_from: ["deferred"],
               },
             },
             mergeStrategy: "replace",
@@ -1398,6 +1413,131 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
         .attributes("disabled"),
     ).toBeDefined();
     expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("保存修改");
+  });
+
+  it("新增 MCP 取消全部勾选保存后不含 omit_tools_from 字段", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    // 取消默认勾选的 deferred（回到 codex 默认，即延迟暴露）
+    await wrapper
+      .find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
+      .setValue(false);
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 filesystem"]')
+      .setValue("xapi");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 npx"]')
+      .setValue("npx");
+    await wrapper.find(".mcp-form-submit").trigger("click");
+    await flushPromises();
+    const batchWriteCall = mockedInvoke.mock.calls.find(
+      ([name, args]) =>
+        name === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    ) as [string, { params: { edits: { value: Record<string, Record<string, unknown>> }[] } }];
+    const value = batchWriteCall[1].params.edits[0].value;
+    expect(value.xapi.omit_tools_from).toBeUndefined();
+    expect(value.xapi).toEqual({ command: "npx" });
+  });
+
+  it("编辑 MCP 表单按当前 omit_tools_from 勾选；未配置的不勾选", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read")
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+              version: "x",
+              config: {
+                mcp_servers: {
+                  cfg: { command: "npx", omit_tools_from: ["code_mode"] },
+                  plain: { command: "npx" },
+                },
+              },
+              disabledReason: null,
+            },
+          ],
+        });
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          config_path: "C:/apps/codex-ui/.codex/config.toml",
+          config_exists: true,
+          config_content: "",
+          model_catalog_json: "",
+          model_catalog_path: "",
+          model_catalog_exists: false,
+          model_catalog: "",
+          model: "",
+          model_reasoning_effort: "",
+          model_provider: "",
+          preferred_auth_method: "",
+          forced_login_method: "",
+          openai_api_key_present: false,
+          providers: [],
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve({
+          agents_path: "C:/apps/codex-ui/.codex/AGENTS.md",
+          exists: true,
+          content: "",
+        });
+      return Promise.resolve(undefined);
+    });
+
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    // 编辑 cfg：code_mode 勾选，deferred/direct 不勾选
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-edit")
+      .trigger("click");
+    await flushPromises();
+    expect(
+      (
+        wrapper.find('.mcp-server-form .mcp-omit-option input[value="code_mode"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      (
+        wrapper.find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    await wrapper.find(".modal-foot .btn:not(.primary)").trigger("click");
+    await flushPromises();
+    // 编辑 plain：未配置 => 全不勾选
+    await wrapper
+      .findAll(".mcp-server-row")[1]
+      .find(".mcp-row-edit")
+      .trigger("click");
+    await flushPromises();
+    expect(
+      (
+        wrapper.find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(
+      (
+        wrapper.find('.mcp-server-form .mcp-omit-option input[value="code_mode"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
   });
 });
 

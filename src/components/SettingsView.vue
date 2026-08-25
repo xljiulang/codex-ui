@@ -684,6 +684,13 @@ const mcpState = reactive({
   raw: {} as Record<string, unknown>,
 });
 
+/** omit_tools_from 可选暴露面（勾选=从该面排除），UI 展示用中文备注 */
+const MCP_OMIT_OPTIONS = [
+  { value: "direct", label: "直接暴露" },
+  { value: "deferred", label: "延迟暴露" },
+  { value: "code_mode", label: "代码模式" },
+] as const;
+
 /** MCP 新增/编辑表单状态（editingIndex < 0 表示新增） */
 const mcpForm = reactive({
   open: false,
@@ -697,6 +704,7 @@ const mcpForm = reactive({
   url: "",
   headers: [] as McpEnvEntry[],
   bearer_token_env_var: "",
+  omit_tools_from: [] as string[],
 });
 
 const mcpFormErrors = reactive({
@@ -739,6 +747,7 @@ function openAddMcp() {
   mcpForm.url = "";
   mcpForm.headers = [];
   mcpForm.bearer_token_env_var = "";
+  mcpForm.omit_tools_from = ["deferred"];
   clearMcpFormErrors();
 }
 
@@ -756,6 +765,7 @@ function openEditMcp(index: number) {
   mcpForm.url = s.url ?? "";
   mcpForm.headers = (s.headers ?? []).map((e) => ({ ...e }));
   mcpForm.bearer_token_env_var = s.bearer_token_env_var ?? "";
+  mcpForm.omit_tools_from = [...(s.omit_tools_from ?? [])];
   clearMcpFormErrors();
 }
 
@@ -841,6 +851,7 @@ async function confirmMcpForm() {
       ? mcpForm.headers.map((e) => ({ key: e.key.trim(), value: e.value }))
       : [],
     bearer_token_env_var: isHttp ? mcpForm.bearer_token_env_var.trim() : "",
+    omit_tools_from: [...mcpForm.omit_tools_from],
   };
   const isNew = mcpForm.editingIndex < 0;
   if (isNew) {
@@ -1852,6 +1863,13 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <span class="mcp-server-type">
                     {{ s.url.trim() ? "http" : "stdio" }}
                   </span>
+                  <span
+                    v-if="s.omit_tools_from?.length"
+                    class="mcp-server-omit"
+                    :title="`omit_tools_from: ${s.omit_tools_from.join(', ')}`"
+                  >
+                    omit: {{ s.omit_tools_from.join("/") }}
+                  </span>
                 </div>
                 <div class="model-provider-actions">
                   <button
@@ -1913,6 +1931,30 @@ function pluginInitial(p: PluginCatalogItem): string {
                     <option value="stdio">stdio</option>
                     <option value="http">Streamable HTTP</option>
                   </select>
+                </div>
+                <div class="setting-row mcp-omit-row">
+                  <label>omit_tools_from（工具暴露面）</label>
+                  <div class="mcp-omit-options">
+                    <p class="mcp-omit-hint">
+                      勾选表示「从该暴露面排除」，该服务器工具不再以对应方式暴露给模型。
+                    </p>
+                    <label
+                      v-for="opt in MCP_OMIT_OPTIONS"
+                      :key="opt.value"
+                      class="mcp-omit-option"
+                    >
+                      <input
+                        type="checkbox"
+                        :value="opt.value"
+                        v-model="mcpForm.omit_tools_from"
+                      />
+                      <span class="mcp-omit-value">{{ opt.value }}</span>
+                      <span class="mcp-omit-desc">{{ opt.label }}</span>
+                    </label>
+                    <p class="mcp-omit-note">
+                      新增服务器默认勾选 deferred（直接内联，便于 DeepSeek 等模型使用）；若三个全勾选，工具将完全对模型隐藏。
+                    </p>
+                  </div>
                 </div>
                 <div
                   v-if="mcpForm.transport === 'stdio'"

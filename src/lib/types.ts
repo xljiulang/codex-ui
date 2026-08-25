@@ -248,6 +248,8 @@ export interface McpServerInfo {
   headers: McpEnvEntry[];
 /** Bearer 令牌来源环境变量名 */
   bearer_token_env_var: string;
+  /** 工具暴露面排除清单（omit_tools_from），直接暴露面：direct/deferred/code_mode */
+  omit_tools_from?: string[];
 }
 
 /** 单个本地技能条目（skills_read 返回） */
