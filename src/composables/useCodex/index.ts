@@ -53,6 +53,7 @@ export {
   removeMarketplace,
   uninstallPlugin,
 } from "./plugins";
+export { loadMcpServers, saveMcpServers } from "./mcp";
 export {
   autoTitleThread,
   clearSearch,

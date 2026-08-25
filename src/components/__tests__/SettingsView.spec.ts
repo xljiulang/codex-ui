@@ -854,26 +854,32 @@ describe("SettingsView 模型配置", () => {
 });
 
 describe("SettingsView 技能管理 / MCP 管理", () => {
-  const sampleMcpState = {
-    config_path: "C:/apps/codex-ui/.codex/config.toml",
-    servers: [
+  /** config/read 返回：用户层原始 [mcp_servers.*]（与真实 app-server 返回形状一致） */
+  const sampleMcpReadResponse = {
+    config: {},
+    layers: [
       {
-        name: "filesystem",
-        command: "npx",
-        args: ["-y", "mcp-server-filesystem"],
-        env: [{ key: "K1", value: "v1" }],
-        url: "",
-        headers: [],
-        bearer_token_env_var: "",
-      },
-      {
-        name: "remote",
-        command: "",
-        args: [],
-        env: [],
-        url: "https://example.com/mcp",
-        headers: [{ key: "Authorization", value: "Bearer x" }],
-        bearer_token_env_var: "MY_MCP_TOKEN",
+        name: {
+          type: "user",
+          file: "C:/apps/codex-ui/.codex/config.toml",
+          profile: null,
+        },
+        version: "sha256:abc",
+        config: {
+          mcp_servers: {
+            filesystem: {
+              command: "npx",
+              args: ["-y", "mcp-server-filesystem"],
+              env: { K1: "v1" },
+            },
+            remote: {
+              url: "https://example.com/mcp",
+              http_headers: { Authorization: "Bearer x" },
+              bearer_token_env_var: "MY_MCP_TOKEN",
+            },
+          },
+        },
+        disabledReason: null,
       },
     ],
   };
@@ -899,10 +905,10 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
   beforeEach(() => {
     store.toast = "";
     mockedInvoke.mockReset();
-    mockedInvoke.mockImplementation((cmd: string) => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
       if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
-      if (cmd === "mcp_servers_read")
-        return Promise.resolve(sampleMcpState);
+      if (cmd === "codex_rpc" && args?.method === "config/read")
+        return Promise.resolve(sampleMcpReadResponse);
       if (cmd === "model_config_read")
         return Promise.resolve({
           config_path: "C:/apps/codex-ui/.codex/config.toml",
@@ -1148,37 +1154,33 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await envInputs[1].setValue("sk-123");
     await wrapper.find(".mcp-form-submit").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
-      input: {
-        servers: [
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "config/batchWrite",
+      params: {
+        edits: [
           {
-            name: "filesystem",
-            command: "npx",
-            args: ["-y", "mcp-server-filesystem"],
-            env: [{ key: "K1", value: "v1" }],
-            url: "",
-            headers: [],
-            bearer_token_env_var: "",
-          },
-          {
-            name: "remote",
-            command: "",
-            args: [],
-            env: [],
-            url: "https://example.com/mcp",
-            headers: [{ key: "Authorization", value: "Bearer x" }],
-            bearer_token_env_var: "MY_MCP_TOKEN",
-          },
-          {
-            name: "memory",
-            command: "npx",
-            args: ["-y", "mcp-server-memory"],
-            env: [{ key: "API_KEY", value: "sk-123" }],
-            url: "",
-            headers: [],
-            bearer_token_env_var: "",
+            keyPath: "mcp_servers",
+            value: {
+              filesystem: {
+                command: "npx",
+                args: ["-y", "mcp-server-filesystem"],
+                env: { K1: "v1" },
+              },
+              remote: {
+                url: "https://example.com/mcp",
+                http_headers: { Authorization: "Bearer x" },
+                bearer_token_env_var: "MY_MCP_TOKEN",
+              },
+              memory: {
+                command: "npx",
+                args: ["-y", "mcp-server-memory"],
+                env: { API_KEY: "sk-123" },
+              },
+            },
+            mergeStrategy: "replace",
           },
         ],
+        reloadUserConfig: true,
       },
     });
     expect(store.toast).toContain("MCP 服务器已保存");
@@ -1211,37 +1213,33 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await headerInputs[1].setValue("Bearer sk-docs");
     await wrapper.find(".mcp-form-submit").trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
-      input: {
-        servers: [
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "config/batchWrite",
+      params: {
+        edits: [
           {
-            name: "filesystem",
-            command: "npx",
-            args: ["-y", "mcp-server-filesystem"],
-            env: [{ key: "K1", value: "v1" }],
-            url: "",
-            headers: [],
-            bearer_token_env_var: "",
-          },
-          {
-            name: "remote",
-            command: "",
-            args: [],
-            env: [],
-            url: "https://example.com/mcp",
-            headers: [{ key: "Authorization", value: "Bearer x" }],
-            bearer_token_env_var: "MY_MCP_TOKEN",
-          },
-          {
-            name: "docs",
-            command: "",
-            args: [],
-            env: [],
-            url: "https://developers.openai.com/mcp",
-            headers: [{ key: "Authorization", value: "Bearer sk-docs" }],
-            bearer_token_env_var: "DOCS_TOKEN",
+            keyPath: "mcp_servers",
+            value: {
+              filesystem: {
+                command: "npx",
+                args: ["-y", "mcp-server-filesystem"],
+                env: { K1: "v1" },
+              },
+              remote: {
+                url: "https://example.com/mcp",
+                http_headers: { Authorization: "Bearer x" },
+                bearer_token_env_var: "MY_MCP_TOKEN",
+              },
+              docs: {
+                url: "https://developers.openai.com/mcp",
+                http_headers: { Authorization: "Bearer sk-docs" },
+                bearer_token_env_var: "DOCS_TOKEN",
+              },
+            },
+            mergeStrategy: "replace",
           },
         ],
+        reloadUserConfig: true,
       },
     });
   });
@@ -1300,19 +1298,23 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await flushPromises();
     settleConfirm(true);
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("mcp_servers_save", {
-      input: {
-        servers: [
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "config/batchWrite",
+      params: {
+        edits: [
           {
-            name: "remote",
-            command: "",
-            args: [],
-            env: [],
-            url: "https://example.com/mcp",
-            headers: [{ key: "Authorization", value: "Bearer x" }],
-            bearer_token_env_var: "MY_MCP_TOKEN",
+            keyPath: "mcp_servers",
+            value: {
+              remote: {
+                url: "https://example.com/mcp",
+                http_headers: { Authorization: "Bearer x" },
+                bearer_token_env_var: "MY_MCP_TOKEN",
+              },
+            },
+            mergeStrategy: "replace",
           },
         ],
+        reloadUserConfig: true,
       },
     });
     expect(store.toast).toContain("已删除 MCP 服务器");
@@ -1335,7 +1337,10 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
     expect(
       mockedInvoke.mock.calls.filter(
-        ([name]) => name === "mcp_servers_save",
+        ([name, args]) =>
+          name === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method ===
+            "config/batchWrite",
       ).length,
     ).toBe(0);
   });

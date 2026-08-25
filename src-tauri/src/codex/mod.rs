@@ -5,7 +5,6 @@ pub mod custom_instructions;
 pub mod diff;
 pub mod file_icon;
 pub mod git;
-pub mod mcp_servers;
 pub mod model_config;
 pub mod path_util;
 pub mod pdf_export;

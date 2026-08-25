@@ -6,7 +6,6 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
 use crate::codex::custom_instructions;
-use crate::codex::mcp_servers;
 use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
 use crate::codex::settings::{self, AppSettings};
@@ -567,18 +566,6 @@ pub fn model_catalog_save(content: String) -> Result<(), String> {
 #[tauri::command]
 pub fn model_catalog_target_exists(value: String) -> Result<bool, String> {
     model_config::catalog_target_exists(&value)
-}
-
-/// 读取 MCP 服务器配置（config.toml 的 [mcp_servers.*]），供设置页「MCP 管理」使用。
-#[tauri::command]
-pub fn mcp_servers_read() -> Result<mcp_servers::McpServersState, String> {
-    mcp_servers::read_state()
-}
-
-/// 保存 MCP 服务器配置：整表同步（列表外的服务器删除），其余 TOML 内容保留。
-#[tauri::command]
-pub fn mcp_servers_save(input: mcp_servers::McpServersEdit) -> Result<(), String> {
-    mcp_servers::save(&input)
 }
 
 /// 读取本地技能列表（从 skills/list 聚合列表过滤 CODEX_HOME/skills 下的技能），

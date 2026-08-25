@@ -7,8 +7,10 @@ import {
   askConfirm,
   installPlugin,
   isAuthRequiredError,
+  loadMcpServers,
   loadPluginCatalog,
   removeMarketplace,
+  saveMcpServers,
   saveSettings,
   setToast,
   store,
@@ -54,8 +56,6 @@ import type {
   CustomInstructionsState,
   McpEnvEntry,
   McpServerInfo,
-  McpServersEdit,
-  McpServersState,
   ModelConfigUiEdit,
   ModelConfigState,
   ModelProviderInfo,
@@ -680,6 +680,8 @@ const mcpState = reactive({
   loading: false,
   saving: false,
   servers: [] as McpServerInfo[],
+  /** config/read 用户层原始 [mcp_servers.*]，用于保存时保留未知字段 */
+  raw: {} as Record<string, unknown>,
 });
 
 /** MCP 新增/编辑表单状态（editingIndex < 0 表示新增） */
@@ -715,10 +717,9 @@ async function loadMcp() {
   if (mcpState.loading) return;
   mcpState.loading = true;
   try {
-    const res = await invoke<McpServersState | null>("mcp_servers_read");
-    if (res) {
-      mcpState.servers = (res.servers ?? []).map((s) => ({ ...s }));
-    }
+    const res = await loadMcpServers();
+    mcpState.servers = res.servers.map((s) => ({ ...s }));
+    mcpState.raw = res.raw;
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -849,9 +850,8 @@ async function confirmMcpForm() {
   }
   mcpState.saving = true;
   try {
-    const input: McpServersEdit = { servers: mcpState.servers };
-    await invoke("mcp_servers_save", { input });
-    setToast("MCP 服务器已保存（重启应用后生效）");
+    await saveMcpServers(mcpState.servers, mcpState.raw);
+    setToast("MCP 服务器已保存");
     mcpForm.open = false;
     await loadMcp();
   } catch (e) {
@@ -877,9 +877,8 @@ async function removeMcp(index: number) {
   mcpState.servers.splice(index, 1);
   mcpState.saving = true;
   try {
-    const input: McpServersEdit = { servers: mcpState.servers };
-    await invoke("mcp_servers_save", { input });
-    setToast(`已删除 MCP 服务器「${s.name}」（重启应用后生效）`);
+    await saveMcpServers(mcpState.servers, mcpState.raw);
+    setToast(`已删除 MCP 服务器「${s.name}」`);
     await loadMcp();
   } catch (e) {
     setToast(toastError(e));

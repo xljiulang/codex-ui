@@ -246,18 +246,8 @@ export interface McpServerInfo {
   url: string;
   /** 静态 HTTP 请求头（http_headers） */
   headers: McpEnvEntry[];
-  /** Bearer 令牌来源环境变量名 */
+/** Bearer 令牌来源环境变量名 */
   bearer_token_env_var: string;
-}
-
-/** mcp_servers_read 返回结构（与 Rust 端一致） */
-export interface McpServersState {
-  servers: McpServerInfo[];
-}
-
-/** mcp_servers_save 输入（与 Rust 端一致） */
-export interface McpServersEdit {
-  servers: McpServerInfo[];
 }
 
 /** 单个本地技能条目（skills_read 返回） */
