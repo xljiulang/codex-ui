@@ -49,7 +49,7 @@ pub(crate) fn archive_cache_path(spec: &BundleSpec) -> PathBuf {
 }
 
 /// 把版本号按 `.` 拆段逐段比较（数值），如 `26.819.11345`。
-fn compare_versions(a: &str, b: &str) -> Ordering {
+pub(crate) fn compare_versions(a: &str, b: &str) -> Ordering {
     let parse = |s: &str| -> Vec<u64> {
         s.split('.')
             .map(|seg| seg.trim().parse::<u64>().unwrap_or(0))

@@ -6,9 +6,12 @@
 //! canonical 位置并通知登记逻辑，随后再异步处理运行时，二者互不阻塞。
 //!
 //! 为避免「标记先落、内容缺」的半成品：物化采用「临时目录完整解压 → 整体改名」，目标目录
-//! 只会由一次完整的 `rename` 产生。已存在且非空的目标目录默认视为已就位、跳过（`openai-bundled`）；
-//! 运行时升级场景允许 `replace=true` 覆盖非空目标。
+//! 只会由一次完整的 `rename` 产生。
+//! `openai-bundled` 在目标已存在且非空时，比对磁盘与随包归档的 `.materialization-key`：
+//! 磁盘缺失或 `appVersion` 低于归档版时以 `replace=true` 重新物化（仅升级、绝不降级）；
+//! 其余情况视为已就位。运行时升级场景始终允许 `replace=true` 覆盖非空目标。
 
+use std::cmp::Ordering;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,6 +44,8 @@ pub(crate) enum BootOutcome {
     ArchiveMissing,
     /// 已临时解压并整体改名到目标目录。
     Extracted,
+    /// 目标存在但磁盘 `.materialization-key` 缺失或 `appVersion` 低于归档版，已按归档重新物化。
+    Updated,
     /// 解压失败（目标未落，下次启动重试）。
     Failed(String),
 }
@@ -97,13 +102,32 @@ fn target_needs_materialize(target: &Path) -> bool {
     }
 }
 
-/// 单市场解压决策（纯函数，便于测试）：目标已就位则跳过；否则临时目录完整解压后整体改名。
+/// 单市场解压决策（纯函数，便于测试）：目标缺失/为空则物化；目标已存在且非空时按
+/// `.materialization-key` 版本判断——磁盘缺失或 `appVersion` 低于归档版则 `replace=true`
+/// 重新物化（仅升级、绝不降级），否则视为已就位；归档缺失时目标缺失返回 `ArchiveMissing`、
+/// 目标存在返回 `AlreadyPresent`（无法更新旧副本）。
 pub(crate) fn bootstrap_one(spec: &BundleSpec, archive_dir: &Path) -> BootOutcome {
     let target = spec.dest.join(spec.top);
-    if !target_needs_materialize(&target) {
-        return BootOutcome::AlreadyPresent;
-    }
     let archive = archive_dir.join(spec.archive_name);
+    if !target_needs_materialize(&target) {
+        // 目标已存在且非空：仅当能确认归档有更新的版本时才升级。
+        let Some(archive_version) = read_archive_app_version(&archive, spec.top) else {
+            return BootOutcome::AlreadyPresent;
+        };
+        match read_installed_app_version(&target) {
+            Some(installed)
+                if runtime_download::compare_versions(&installed, &archive_version) != Ordering::Less =>
+            {
+                return BootOutcome::AlreadyPresent;
+            }
+            _ => {
+                return match materialize(&archive, spec, &target, true) {
+                    Ok(()) => BootOutcome::Updated,
+                    Err(e) => BootOutcome::Failed(e),
+                };
+            }
+        }
+    }
     if !archive.is_file() {
         return BootOutcome::ArchiveMissing;
     }
@@ -111,6 +135,47 @@ pub(crate) fn bootstrap_one(spec: &BundleSpec, archive_dir: &Path) -> BootOutcom
         Ok(()) => BootOutcome::Extracted,
         Err(e) => BootOutcome::Failed(e),
     }
+}
+
+/// 读取磁盘上 `<target>/.materialization-key` 的 `appVersion`；缺失/非法 JSON/无该键返回 None。
+fn read_installed_app_version(target: &Path) -> Option<String> {
+    read_app_version_from_path(&target.join(".materialization-key"))
+}
+
+/// 读取单个 `.materialization-key` 文件里的 `appVersion` 字段。
+fn read_app_version_from_path(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<serde_json::Value>(&text)
+        .ok()?
+        .get("appVersion")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// 读取随包归档内 `<top>/.materialization-key` 的 `appVersion`（归档为 `.tar.gz` gzip）。
+/// 归档缺失/不可读/无该条目/无 `appVersion` 键均返回 None。
+fn read_archive_app_version(archive: &Path, top: &str) -> Option<String> {
+    let file = std::fs::File::open(archive).ok()?;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    let mut entries = archive.entries().ok()?;
+    let wanted = format!("{top}/.materialization-key");
+    while let Some(Ok(entry)) = entries.next() {
+        let is_wanted = match entry.path() {
+            Ok(path) => path.as_ref() == Path::new(&wanted),
+            Err(_) => false,
+        };
+        if is_wanted {
+            let mut content = String::new();
+            let mut entry = entry;
+            entry.read_to_string(&mut content).ok()?;
+            return serde_json::from_str::<serde_json::Value>(&content)
+                .ok()?
+                .get("appVersion")?
+                .as_str()
+                .map(str::to_owned);
+        }
+    }
+    None
 }
 
 /// 原子物化：先完整解压到 `dest/.codex-ui-extract-<top>`，校验后整体改名到目标目录。
@@ -214,6 +279,14 @@ pub(crate) async fn bootstrap(server: Arc<CodexServer>) {
                             .push_log(
                                 "info",
                                 format!("openai-bundled 已物化到 {}", target.display()),
+                            )
+                            .await;
+                    }
+                    BootOutcome::Updated => {
+                        server
+                            .push_log(
+                                "info",
+                                format!("openai-bundled 已按归档更新到新版本：{}", target.display()),
                             )
                             .await;
                     }
@@ -578,23 +651,149 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_one_skips_nonempty_target_dir() {
+    fn bootstrap_one_skips_nonempty_target_when_versions_equal() {
         let dir = TempDir::new().unwrap();
         let dest = dir.path().join("dest");
         fs::create_dir_all(dest.join("openai-bundled")).unwrap();
-        fs::write(dest.join("openai-bundled/.materialization-key"), "existing").unwrap();
+        fs::write(
+            dest.join("openai-bundled/.materialization-key"),
+            r#"{"appVersion":"26.730.61309"}"#,
+        )
+        .unwrap();
         build_tar_gz(
             dir.path(),
             "openai-bundled",
-            &[(".materialization-key", "v1")],
+            &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
         );
         let spec = spec_for(&dest);
         assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::AlreadyPresent);
-        // 非空目标不被覆盖
+        // 版本一致时不覆盖
         assert_eq!(
             fs::read_to_string(dest.join("openai-bundled/.materialization-key")).unwrap(),
-            "existing"
+            r#"{"appVersion":"26.730.61309"}"#
         );
+    }
+
+    #[test]
+    fn read_installed_app_version_handles_missing_invalid_and_valid() {
+        let dir = TempDir::new().unwrap();
+        // 文件不存在 → None
+        assert_eq!(read_installed_app_version(dir.path()), None);
+        // 非法 JSON → None
+        fs::write(dir.path().join(".materialization-key"), "not json").unwrap();
+        assert_eq!(read_installed_app_version(dir.path()), None);
+        // 合法 JSON 但没有 appVersion 键 → None
+        fs::write(dir.path().join(".materialization-key"), r#"{"version":1}"#).unwrap();
+        assert_eq!(read_installed_app_version(dir.path()), None);
+        // 有 appVersion → Some
+        fs::write(
+            dir.path().join(".materialization-key"),
+            r#"{"appVersion":"26.730.61309"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_installed_app_version(dir.path()),
+            Some("26.730.61309".to_string())
+        );
+    }
+
+    #[test]
+    fn read_archive_app_version_reads_marker_from_gzip() {
+        let dir = TempDir::new().unwrap();
+        let archive = build_tar_gz(
+            dir.path(),
+            "openai-bundled",
+            &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
+        );
+        assert_eq!(
+            read_archive_app_version(&archive, "openai-bundled"),
+            Some("26.730.61309".to_string())
+        );
+        // 顶层目录名不匹配 → None
+        assert_eq!(read_archive_app_version(&archive, "other"), None);
+    }
+
+    #[test]
+    fn bootstrap_one_updates_when_installed_version_below_archive() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("dest");
+        fs::create_dir_all(dest.join("openai-bundled")).unwrap();
+        fs::write(
+            dest.join("openai-bundled/.materialization-key"),
+            r#"{"appVersion":"26.730.61000"}"#,
+        )
+        .unwrap();
+        build_tar_gz(
+            dir.path(),
+            "openai-bundled",
+            &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
+        );
+        let spec = spec_for(&dest);
+        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::Updated);
+        assert_eq!(
+            fs::read_to_string(dest.join("openai-bundled/.materialization-key")).unwrap(),
+            r#"{"appVersion":"26.730.61309"}"#
+        );
+    }
+
+    #[test]
+    fn bootstrap_one_updates_when_installed_key_missing() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("dest");
+        // 目标非空但缺少 .materialization-key
+        fs::create_dir_all(dest.join("openai-bundled")).unwrap();
+        fs::write(dest.join("openai-bundled/keep.txt"), "x").unwrap();
+        build_tar_gz(
+            dir.path(),
+            "openai-bundled",
+            &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
+        );
+        let spec = spec_for(&dest);
+        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::Updated);
+        assert_eq!(
+            fs::read_to_string(dest.join("openai-bundled/.materialization-key")).unwrap(),
+            r#"{"appVersion":"26.730.61309"}"#
+        );
+    }
+
+    #[test]
+    fn bootstrap_one_skips_newer_target_without_downgrade() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("dest");
+        fs::create_dir_all(dest.join("openai-bundled")).unwrap();
+        fs::write(
+            dest.join("openai-bundled/.materialization-key"),
+            r#"{"appVersion":"26.730.61639"}"#,
+        )
+        .unwrap();
+        build_tar_gz(
+            dir.path(),
+            "openai-bundled",
+            &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
+        );
+        let spec = spec_for(&dest);
+        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::AlreadyPresent);
+        // 磁盘版本更高，不被降级覆盖
+        assert_eq!(
+            fs::read_to_string(dest.join("openai-bundled/.materialization-key")).unwrap(),
+            r#"{"appVersion":"26.730.61639"}"#
+        );
+    }
+
+    #[test]
+    fn bootstrap_one_archive_missing_keeps_present_target() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("dest");
+        fs::create_dir_all(dest.join("openai-bundled")).unwrap();
+        fs::write(
+            dest.join("openai-bundled/.materialization-key"),
+            r#"{"appVersion":"26.730.61000"}"#,
+        )
+        .unwrap();
+        // 归档缺失：目标存在 → AlreadyPresent，不动目标
+        let spec = spec_for(&dest);
+        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::AlreadyPresent);
+        assert!(dest.join("openai-bundled/.materialization-key").is_file());
     }
 
     #[test]
