@@ -570,10 +570,6 @@ async function openPathInAppOrReveal(path: string) {
   }
 }
 
-function openModelConfigFile() {
-  void openPathInAppOrReveal(modelConfig.config_path);
-}
-
 function openCatalogFile() {
   void openPathInAppOrReveal(modelConfig.model_catalog_path);
 }
@@ -1151,21 +1147,6 @@ function pluginInitial(p: PluginCatalogItem): string {
             <div class="model-config-card-head">
               <h3>模型提供方</h3>
               <div class="model-config-head-actions">
-                <div class="model-config-path">
-                  <button
-                    v-if="modelConfig.config_path"
-                    type="button"
-                    class="model-config-path-link"
-                    title="在编辑器中打开 config.toml"
-                    @click="openModelConfigFile"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FILE" />
-                    </svg>
-                    {{ modelConfig.config_path }}
-                  </button>
-                  <template v-else>正在读取路径…</template>
-                </div>
                 <button
                   class="btn btn-icon model-config-reload-btn"
                   title="重读"
@@ -1191,6 +1172,87 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </svg>
                 DeepSeek 接入文档
               </button>
+            </div>
+
+            <div class="model-providers-list">
+              <div class="model-providers-head">
+                <span class="model-providers-head-label">提供方</span>
+                <button
+                  class="btn primary model-config-add-btn"
+                  title="添加"
+                  aria-label="添加"
+                  :disabled="modelConfig.loading"
+                  @click="openAddProvider"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                  添加提供方
+                </button>
+              </div>
+              <div v-if="modelConfig.providers.length === 0" class="model-providers-empty">
+                还没有提供方，点击右上角「添加」创建。
+              </div>
+              <div
+                v-for="(p, i) in modelConfig.providers"
+                :key="p.key"
+                class="model-provider-row"
+                :class="{ 'model-provider-row-error': providerRowError(p) }"
+              >
+                <label class="model-provider-radio">
+                  <input
+                    type="radio"
+                    name="model-provider-active"
+                    :value="p.key"
+                    v-model="modelConfig.model_provider"
+                    :disabled="modelConfig.loading"
+                  />
+                  <span class="model-provider-name">
+                    {{ p.name || p.key }}
+                    <span class="model-config-required" title="必填">*</span>
+                  </span>
+                  <span class="model-provider-key">{{ p.key }}</span>
+                  <span v-if="p.wire_api" class="model-provider-wire">{{ p.wire_api }}</span>
+                </label>
+                <p
+                  v-if="providerRowError(p)"
+                  class="model-config-field-error model-provider-row-msg"
+                >
+                  {{ providerRowError(p) }}
+                </p>
+                <div class="model-provider-actions">
+                  <button
+                    class="btn btn-icon provider-row-edit"
+                    title="编辑"
+                    :disabled="modelConfig.loading"
+                    @click="openEditProvider(i)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_EDIT" />
+                    </svg>
+                  </button>
+                  <button
+                    class="btn btn-icon danger provider-row-delete"
+                    :disabled="modelConfig.loading || p.key === modelConfig.model_provider"
+                    :title="
+                      p.key === modelConfig.model_provider
+                        ? '先切换到其它提供方再删除'
+                        : '删除'
+                    "
+                    @click="removeProvider(i)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <p
+                v-if="modelConfigErrors.provider"
+                class="model-config-field-error"
+              >
+                {{ modelConfigErrors.provider }}
+              </p>
             </div>
 
             <div class="settings">
@@ -1256,72 +1318,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                   placeholder="如 models.json、绝对路径或 ~/.codex/models.json"
                 />
               </div>
-            </div>
-
-            <div class="model-providers-list">
-              <div v-if="modelConfig.providers.length === 0" class="model-providers-empty">
-                还没有提供方，点击下方「添加」创建。
-              </div>
-              <div
-                v-for="(p, i) in modelConfig.providers"
-                :key="p.key"
-                class="model-provider-row"
-                :class="{ 'model-provider-row-error': providerRowError(p) }"
-              >
-                <label class="model-provider-radio">
-                  <input
-                    type="radio"
-                    name="model-provider-active"
-                    :value="p.key"
-                    v-model="modelConfig.model_provider"
-                    :disabled="modelConfig.loading"
-                  />
-                  <span class="model-provider-name">
-                    {{ p.name || p.key }}
-                    <span class="model-config-required" title="必填">*</span>
-                  </span>
-                  <span class="model-provider-key">{{ p.key }}</span>
-                  <span v-if="p.wire_api" class="model-provider-wire">{{ p.wire_api }}</span>
-                </label>
-                <p
-                  v-if="providerRowError(p)"
-                  class="model-config-field-error model-provider-row-msg"
-                >
-                  {{ providerRowError(p) }}
-                </p>
-                <div class="model-provider-actions">
-                  <button
-                    class="btn btn-icon provider-row-edit"
-                    title="编辑"
-                    :disabled="modelConfig.loading"
-                    @click="openEditProvider(i)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_EDIT" />
-                    </svg>
-                  </button>
-                  <button
-                    class="btn btn-icon danger provider-row-delete"
-                    :disabled="modelConfig.loading || p.key === modelConfig.model_provider"
-                    :title="
-                      p.key === modelConfig.model_provider
-                        ? '先切换到其它提供方再删除'
-                        : '删除'
-                    "
-                    @click="removeProvider(i)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_DELETE" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <p
-                v-if="modelConfigErrors.provider"
-                class="model-config-field-error"
-              >
-                {{ modelConfigErrors.provider }}
-              </p>
             </div>
 
             <ModalDialog
@@ -1466,17 +1462,6 @@ function pluginInitial(p: PluginCatalogItem): string {
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
-                </svg>
-              </button>
-              <button
-                class="btn btn-icon primary model-config-add-btn"
-                title="添加"
-                aria-label="添加"
-                :disabled="modelConfig.loading"
-                @click="openAddProvider"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_PLUS" />
                 </svg>
               </button>
             </div>

@@ -271,6 +271,17 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
   });
 
+  it("模型提供方列表排在 model 等输入之前", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const listEl = wrapper.element.querySelector(".model-providers-list");
+    const modelEl = wrapper.element.querySelector("#model-config-ui-model");
+    expect(listEl).toBeTruthy();
+    expect(modelEl).toBeTruthy();
+    const pos = listEl!.compareDocumentPosition(modelEl!);
+    expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("文件缺失时读取自动创建：卡片均可编辑并显示路径链接", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
@@ -294,8 +305,8 @@ describe("SettingsView 模型配置", () => {
       wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 三条路径链接均可用（config / model_catalog_json / AGENTS）
-    expect(wrapper.findAll(".model-config-path-link").length).toBe(3);
+    // 两条路径链接均可用（model_catalog_json / AGENTS）
+    expect(wrapper.findAll(".model-config-path-link").length).toBe(2);
   });
 
   it("三张卡片保存按钮标题均为「保存」", async () => {
@@ -335,26 +346,11 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("点击 config 路径链接在应用内打开", async () => {
-    const wrapper = mount(SettingsView);
-    await flushPromises();
-    const links = wrapper.findAll(".model-config-path-link");
-    expect(links.length).toBe(3);
-    await links[0].trigger("click");
-    await flushPromises();
-    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
-      "C:/apps/codex-ui/.codex/config.toml",
-    );
-    expect(
-      mockedInvoke.mock.calls.some(([name]) => name === "reveal_path"),
-    ).toBe(false);
-  });
-
   it("点击 model_catalog_json 路径链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(".model-config-path-link");
-    await links[1].trigger("click");
+    await links[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/models.json",
@@ -365,7 +361,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(".model-config-path-link");
-    await links[2].trigger("click");
+    await links[1].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/AGENTS.md",
@@ -379,10 +375,10 @@ describe("SettingsView 模型配置", () => {
     await wrapper.findAll(".model-config-path-link")[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
-      "C:/apps/codex-ui/.codex/config.toml",
+      "C:/apps/codex-ui/.codex/models.json",
     );
     expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
-      path: "C:/apps/codex-ui/.codex/config.toml",
+      path: "C:/apps/codex-ui/.codex/models.json",
     });
   });
 
@@ -523,7 +519,7 @@ describe("SettingsView 模型配置", () => {
         .attributes("disabled"),
     ).toBeDefined();
     expect(wrapper.text()).toContain("config 未配置 model_catalog_json");
-    expect(wrapper.findAll(".model-config-path-link").length).toBe(2);
+    expect(wrapper.findAll(".model-config-path-link").length).toBe(1);
   });
 
   it("渲染提供方列表与激活单选", async () => {

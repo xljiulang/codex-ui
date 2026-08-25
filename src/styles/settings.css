@@ -750,6 +750,28 @@
   flex-direction: column;
 }
 
+/* 提供方列表头部：标题 + 右对齐「添加提供方」 */
+.model-providers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.model-providers-head-label {
+  font-size: var(--font-md);
+  font-weight: 500;
+  color: var(--text-bright);
+}
+
+/* 提供方列表与下方「模型 / 认证 / model_catalog_json」输入分区 */
+.model-providers-list + .settings {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
 .model-provider-row {
   display: flex;
   align-items: center;
