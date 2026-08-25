@@ -1148,6 +1148,28 @@ function pluginInitial(p: PluginCatalogItem): string {
               <h3>模型提供方</h3>
               <div class="model-config-head-actions">
                 <button
+                  type="button"
+                  class="model-config-docs-link"
+                  title="DeepSeek Codex 接入文档（浏览器打开）"
+                  @click="openDeepSeekDocs"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_LINK" />
+                  </svg>
+                  DeepSeek 接入文档
+                </button>
+                <button
+                  class="btn btn-icon primary model-config-add-btn"
+                  title="添加"
+                  aria-label="添加"
+                  :disabled="modelConfig.loading"
+                  @click="openAddProvider"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                </button>
+                <button
                   class="btn btn-icon model-config-reload-btn"
                   title="重读"
                   :disabled="modelConfig.loading"
@@ -1160,36 +1182,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
             </div>
 
-            <div class="model-config-docs-row">
-              <button
-                type="button"
-                class="model-config-docs-link"
-                title="DeepSeek Codex 接入文档（浏览器打开）"
-                @click="openDeepSeekDocs"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_LINK" />
-                </svg>
-                DeepSeek 接入文档
-              </button>
-            </div>
-
             <div class="model-providers-list">
-              <div class="model-providers-head">
-                <span class="model-providers-head-label">提供方</span>
-                <button
-                  class="btn primary model-config-add-btn"
-                  title="添加"
-                  aria-label="添加"
-                  :disabled="modelConfig.loading"
-                  @click="openAddProvider"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_PLUS" />
-                  </svg>
-                  添加提供方
-                </button>
-              </div>
               <div v-if="modelConfig.providers.length === 0" class="model-providers-empty">
                 还没有提供方，点击右上角「添加」创建。
               </div>

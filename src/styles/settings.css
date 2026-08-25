@@ -673,13 +673,6 @@
   flex-shrink: 0;
 }
 
-/* 卡片头部标题下一行、靠左的文档链接行 */
-.model-config-docs-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 2px;
-}
-
 .model-config-path {
   font-family: var(--mono);
   font-size: var(--font-sm);
@@ -748,21 +741,6 @@
 .model-providers-list {
   display: flex;
   flex-direction: column;
-}
-
-/* 提供方列表头部：标题 + 右对齐「添加提供方」 */
-.model-providers-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-}
-
-.model-providers-head-label {
-  font-size: var(--font-md);
-  font-weight: 500;
-  color: var(--text-bright);
 }
 
 /* 提供方列表与下方「模型 / 认证 / model_catalog_json」输入分区 */

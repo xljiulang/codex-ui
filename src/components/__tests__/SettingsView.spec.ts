@@ -389,7 +389,7 @@ describe("SettingsView 模型配置", () => {
     expect(link.exists()).toBe(true);
     expect(link.text()).toBe("DeepSeek 接入文档");
     expect(
-      wrapper.find(".model-config-card-head + .model-config-docs-row").exists(),
+      wrapper.find(".model-config-head-actions .model-config-docs-link").exists(),
     ).toBe(true);
   });
 
