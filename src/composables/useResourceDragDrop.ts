@@ -33,7 +33,7 @@ export function useResourceDragDrop(
   function onRowPointerDown(entry: FsEntry, e: PointerEvent) {
     if (e.button !== 0) return;
     const t = e.target as HTMLElement | null;
-    if (t?.closest?.(".rename-input, .resource-add, .resource-arrow")) return;
+    if (t?.closest?.(".rename-input, .resource-arrow")) return;
     dragStart.value = { entry, x: e.clientX, y: e.clientY };
   }
 

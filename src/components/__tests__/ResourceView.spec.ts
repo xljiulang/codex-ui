@@ -909,7 +909,7 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("无活动会话标签时：隐藏「添加为会话附件」菜单项与行 @ 按钮", async () => {
+  it("无活动会话标签时：隐藏「添加为会话附件」菜单项", async () => {
     __resetSessionTabsForTest();
     const wrapper = await mountPanel();
     // 目录右键菜单不含附件项
@@ -922,8 +922,6 @@ describe("ResourceView 文件树", () => {
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
     expect(fileLabels).not.toContain("添加为会话附件");
-    // 行悬停 @ 按钮隐藏
-    expect(wrapper.find(".resource-add").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -1245,65 +1243,9 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("文件/目录行有 @ 添加附件按钮，根目录行没有", async () => {
-    const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-root .resource-add").exists()).toBe(false);
-    expect(
-      wrapper.findAll(".resource-row.resource-dir .resource-add").length,
-    ).toBeGreaterThan(0);
-    expect(
-      wrapper.findAll(".resource-row.resource-file .resource-add").length,
-    ).toBeGreaterThan(0);
-    // @ 按钮位于行首（首个元素子节点）——文件行与目录行都在折叠箭头左侧
-    expect(
-      wrapper
-        .find(".resource-row.resource-file")
-        .element.firstElementChild?.classList.contains("resource-add"),
-    ).toBe(true);
-    expect(
-      wrapper
-        .findAll(".resource-row.resource-dir")[0]
-        .element.firstElementChild?.classList.contains("resource-add"),
-    ).toBe(true);
-    // 与右键菜单共用同一个 @ 图标
-    expect(
-      wrapper
-        .find(".resource-row.resource-file .resource-add svg path")
-        .attributes("d"),
-    ).toBe(ICON_AT);
-    wrapper.unmount();
-  });
-
-  it("点击 @ 按钮路由到活动会话的注册处理器，且不触发行点击", async () => {
-    const addAttachment = vi.fn();
-    registerComposerAddHandler("s1", addAttachment);
-    const wrapper = await mountPanel();
-
-    // 文件行：只添加附件，不打开文件（不触发内容探测）
-    await wrapper.find(".resource-row.resource-file .resource-add").trigger("click");
-    expect(addAttachment).toHaveBeenCalledWith({
-      type: "mention",
-      name: "a.txt",
-      path: "D:/codex/codex-ui/a.txt",
-    });
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "session_fs_probe_text",
-      expect.anything(),
-    );
-
-    // 目录行：只添加附件，不切换展开状态
-    const dirRow = wrapper.findAll(".resource-row.resource-dir")[0];
-    const wasCollapsed = dirRow.classes().includes("collapsed");
-    await dirRow.find(".resource-add").trigger("click");
-    expect(dirRow.classes().includes("collapsed")).toBe(wasCollapsed);
-    wrapper.unmount();
-  });
-
-  it("非会话视图（文件标签激活）时：隐藏「添加为会话附件」菜单项与行 @ 按钮", async () => {
+  it("非会话视图（文件标签激活）时：隐藏「添加为会话附件」菜单项", async () => {
     activeTabId.value = "file1";
     const wrapper = await mountPanel();
-    // 树行与搜索结果行均无 @ 按钮
-    expect(wrapper.find(".resource-add").exists()).toBe(false);
     // 文件右键菜单不含附件项
     await openRowCtx(wrapper, ".resource-row.resource-file");
     const fileLabels = wrapper
@@ -1316,26 +1258,6 @@ describe("ResourceView 文件树", () => {
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
     expect(dirLabels).not.toContain("添加为会话附件");
-    wrapper.unmount();
-  });
-
-  it("搜索结果行同样有 @ 添加附件按钮", async () => {
-    vi.useFakeTimers();
-    const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("main");
-    await vi.advanceTimersByTimeAsync(300);
-    await flushPromises();
-
-    expect(wrapper.find(".resource-result .resource-add").exists()).toBe(true);
-    // 搜索结果行同样为行首元素
-    expect(
-      wrapper
-        .find(".resource-result")
-        .element.firstElementChild?.classList.contains("resource-add"),
-    ).toBe(true);
-    expect(
-      wrapper.find(".resource-result .resource-add svg path").attributes("d"),
-    ).toBe(ICON_AT);
     wrapper.unmount();
   });
 

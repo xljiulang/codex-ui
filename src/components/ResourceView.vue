@@ -35,7 +35,6 @@ import {
   toggleDir,
   treeRows,
   loadingRoot,
-  addAsAttachment,
   createTextFile,
   createFolder,
   loadDir,
@@ -55,7 +54,6 @@ import { isDocxPath } from "../lib/docx";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
-  ICON_AT,
   ICON_FILE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
@@ -318,13 +316,6 @@ onBeforeUnmount(() => {
           @click="onSearchResultClick(entry)"
           @contextmenu="openEntryMenu(entry, $event)"
         >
-          <button
-            v-if="hasActiveSessionTab"
-            class="resource-add"
-            :aria-label="`添加 ${entry.name} 为会话附件`"
-            v-tooltip="'添加为会话附件'"
-            @click.stop="addAsAttachment(entry)"
-          ><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICON_AT" /></svg></button>
           <span class="resource-icon">
             <img
               v-if="fileIcon(entry)"
@@ -368,13 +359,6 @@ onBeforeUnmount(() => {
           @contextmenu="onRowContext(row, $event)"
           @pointerdown="row.kind !== 'root' && onRowPointerDown(row.entry, $event)"
         >
-          <button
-            v-if="hasActiveSessionTab && row.kind !== 'root'"
-            class="resource-add"
-            :aria-label="`添加 ${row.entry.name} 为会话附件`"
-            v-tooltip="'添加为会话附件'"
-            @click.stop="addAsAttachment(row.entry)"
-          ><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICON_AT" /></svg></button>
           <svg
             v-if="row.kind !== 'file'"
             class="resource-arrow"

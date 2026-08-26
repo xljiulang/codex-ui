@@ -120,42 +120,6 @@
   text-align: center;
 }
 
-/* 悬停“@”添加为会话附件按钮：内联排在行内容最左、文件图标（及目录行折叠/展开箭头）左侧；行悬停/聚焦时显示 */
-.resource-add {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--bg-input);
-  color: var(--text-dim);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--ease), color var(--ease), background-color var(--ease),
-    border-color var(--ease);
-}
-
-.resource-add svg {
-  width: 12px;
-  height: 12px;
-  fill: currentColor;
-}
-
-.resource-row:hover .resource-add,
-.resource-add:focus-visible {
-  opacity: 1;
-}
-
-.resource-add:hover {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
-  border-color: rgba(var(--accent-rgb), 0.45);
-}
-
 /* 树内拖拽移动：合法目标目录高亮 */
 .resource-row.resource-drop-target {
   background: rgba(var(--accent-rgb), 0.12);
@@ -163,16 +127,12 @@
   outline-offset: -1px;
 }
 
-/* 自绘指针拖拽：拖拽期间禁止文本选择、隐藏行内 @ 按钮、grabbing 光标 */
+/* 自绘指针拖拽：拖拽期间禁止文本选择、grabbing 光标 */
 body.resource-dragging {
   user-select: none;
 }
 body.resource-dragging .resource-row {
   cursor: grabbing;
-}
-body.resource-dragging .resource-add {
-  opacity: 0;
-  pointer-events: none;
 }
 
 /* 拖拽幽灵卡片：fixed 跟随指针，不参与命中 */
