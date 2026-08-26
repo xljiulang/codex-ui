@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { config, flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -28,6 +28,10 @@ import { __resetTabsForTest } from "../../composables/useTabs";
 import { __resetSessionTabsForTest } from "../../composables/useCodex/sessionState";
 import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
 import type { SessionTab } from "../../composables/useCodex";
+import { tooltipDirective } from "../../directives/tooltip";
+
+// SettingsView 大量使用 v-tooltip，统一注入该指令避免逐 mount 配置
+config.global.directives = { tooltip: tooltipDirective };
 
 const tabs = _tabs as unknown as SessionTab[];
 
@@ -58,7 +62,7 @@ describe("SettingsView codex 可执行文件选择", () => {
     const row = wrapper.find(".codex-path-row");
     expect(row.exists()).toBe(true);
     expect(row.find(".codex-path-value").text()).toContain("C:/tools/codex.exe");
-    expect(row.find("button.codex-pick-btn").attributes("title")).toBe("选择文件");
+    expect(row.find("button.codex-pick-btn").attributes("data-tip")).toBe("选择文件");
     expect(row.find('input[type="text"]').exists()).toBe(false);
   });
 
@@ -315,7 +319,7 @@ describe("SettingsView 模型配置", () => {
     const saveButtons = wrapper.findAll(
       ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
     );
-    expect(saveButtons.map((b) => b.attributes("title"))).toEqual([
+    expect(saveButtons.map((b) => b.attributes("data-tip"))).toEqual([
       "保存",
       "保存",
       "保存",

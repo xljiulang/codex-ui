@@ -1150,7 +1150,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <button
                   type="button"
                   class="model-config-docs-link"
-                  title="DeepSeek Codex 接入文档（浏览器打开）"
+                  v-tooltip="'DeepSeek Codex 接入文档（浏览器打开）'"
                   @click="openDeepSeekDocs"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1160,7 +1160,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </button>
                 <button
                   class="btn btn-icon primary model-config-add-btn"
-                  title="添加"
+                  v-tooltip="'添加'"
                   aria-label="添加"
                   :disabled="modelConfig.loading"
                   @click="openAddProvider"
@@ -1171,7 +1171,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </button>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  title="重读"
+                  aria-label="重读"
+                  v-tooltip="'重读'"
                   :disabled="modelConfig.loading"
                   @click="refreshProviders"
                 >
@@ -1202,7 +1203,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   />
                   <span class="model-provider-name">
                     {{ p.name || p.key }}
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </span>
                   <span class="model-provider-key">{{ p.key }}</span>
                   <span v-if="p.wire_api" class="model-provider-wire">{{ p.wire_api }}</span>
@@ -1216,7 +1217,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <div class="model-provider-actions">
                   <button
                     class="btn btn-icon provider-row-edit"
-                    title="编辑"
+                    aria-label="编辑"
+                    v-tooltip="'编辑'"
                     :disabled="modelConfig.loading"
                     @click="openEditProvider(i)"
                   >
@@ -1227,7 +1229,12 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <button
                     class="btn btn-icon danger provider-row-delete"
                     :disabled="modelConfig.loading || p.key === modelConfig.model_provider"
-                    :title="
+                    :aria-label="
+                      p.key === modelConfig.model_provider
+                        ? '先切换到其它提供方再删除'
+                        : '删除'
+                    "
+                    v-tooltip="
                       p.key === modelConfig.model_provider
                         ? '先切换到其它提供方再删除'
                         : '删除'
@@ -1255,7 +1262,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               >
                 <label for="model-config-ui-model">
                   model（模型名称）
-                  <span class="model-config-required" title="必填">*</span>
+                  <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                 </label>
                 <input
                   id="model-config-ui-model"
@@ -1326,7 +1333,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 >
                   <label>
                     标识（key）
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </label>
                   <input
                     v-model="providerForm.key"
@@ -1348,7 +1355,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 >
                   <label>
                     名称（name）
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </label>
                   <input
                     v-model="providerForm.name"
@@ -1369,7 +1376,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 >
                   <label>
                     base_url
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </label>
                   <input
                     v-model="providerForm.base_url"
@@ -1448,7 +1455,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               <button
                 class="btn btn-icon primary model-config-save-btn"
                 :class="{ loading: modelConfig.savingProviders }"
-                title="保存"
+                v-tooltip="'保存'"
                 aria-label="保存"
                 :disabled="modelConfig.savingProviders || modelConfig.loading"
                 @click="saveProviders"
@@ -1469,7 +1476,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                     <button
                       type="button"
                       class="model-config-path-link"
-                      title="在编辑器中打开文件"
+                      v-tooltip="'在编辑器中打开文件'"
                       @click="openCatalogFile"
                     >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1487,7 +1494,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </div>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  title="重读"
+                  aria-label="重读"
+                  v-tooltip="'重读'"
                   :disabled="modelConfig.loading"
                   @click="refreshCatalog"
                 >
@@ -1508,7 +1516,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               <button
                 class="btn btn-icon primary model-config-save-btn"
                 :class="{ loading: modelConfig.savingCatalog }"
-                title="保存"
+                v-tooltip="'保存'"
                 aria-label="保存"
                 :disabled="
                   modelConfig.savingCatalog ||
@@ -1533,7 +1541,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                     v-if="agents.agents_path"
                     type="button"
                     class="model-config-path-link"
-                    title="在编辑器中打开文件"
+                    v-tooltip="'在编辑器中打开文件'"
                     @click="openAgentsFile"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1548,7 +1556,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </div>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  title="重读"
+                  aria-label="重读"
+                  v-tooltip="'重读'"
                   :disabled="agents.loading || agents.saving"
                   @click="loadCustomInstructions"
                 >
@@ -1569,7 +1578,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               <button
                 class="btn btn-icon primary model-config-save-btn"
                 :class="{ loading: agents.saving }"
-                title="保存"
+                v-tooltip="'保存'"
                 aria-label="保存"
                 :disabled="agents.saving || agents.loading"
                 @click="saveCustomInstructions"
@@ -1641,7 +1650,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   </select>
                   <button
                     class="btn btn-icon danger memory-reset-btn"
-                    title="重置记忆"
+                    v-tooltip="'重置记忆'"
                     aria-label="重置记忆"
                     @click="resetMemory()"
                   >
@@ -1660,7 +1669,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   </div>
                   <button
                     class="btn btn-icon codex-pick-btn"
-                    title="选择文件"
+                    v-tooltip="'选择文件'"
                     aria-label="选择文件"
                     @click="pickCodexFile()"
                   >
@@ -1671,7 +1680,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <button
                     v-if="codexPath"
                     class="btn btn-icon danger codex-clear-btn"
-                    title="清除"
+                    v-tooltip="'清除'"
                     aria-label="清除"
                     @click="clearCodexPath()"
                   >
@@ -1705,7 +1714,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </div>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  title="刷新"
+                  aria-label="刷新"
+                  v-tooltip="'刷新'"
                   :disabled="skillsState.loading"
                   @click="loadSkills()"
                 >
@@ -1745,7 +1755,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <button
                     type="button"
                     class="skill-row-main"
-                    title="在编辑器中打开 SKILL.md"
+                    v-tooltip="'在编辑器中打开 SKILL.md'"
                     @click="openSkill(s)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1765,7 +1775,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                     type="button"
                     class="btn btn-icon"
                     :class="{ primary: !s.enabled, loading: !!skillsState.busy[s.path] }"
-                    :title="s.enabled ? '禁用' : '启用'"
+                    v-tooltip="s.enabled ? '禁用' : '启用'"
                     :aria-label="s.enabled ? '禁用' : '启用'"
                     :disabled="skillsState.loading || !!skillsState.busy[s.path]"
                     @click="toggleSkill(s)"
@@ -1794,7 +1804,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               <div class="model-config-head-actions">
                 <button
                   class="btn btn-icon primary mcp-config-add-btn"
-                  title="添加"
+                  v-tooltip="'添加'"
                   aria-label="添加"
                   :disabled="mcpState.loading || mcpState.saving"
                   @click="openAddMcp"
@@ -1805,7 +1815,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </button>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  title="重读"
+                  aria-label="重读"
+                  v-tooltip="'重读'"
                   :disabled="mcpState.loading"
                   @click="loadMcp"
                 >
@@ -1838,7 +1849,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <span
                     v-if="s.omit_tools_from?.length"
                     class="mcp-server-omit"
-                    :title="`omit_tools_from: ${s.omit_tools_from.join(', ')}`"
+                    v-tooltip="`omit_tools_from: ${s.omit_tools_from.join(', ')}`"
                   >
                     omit: {{ s.omit_tools_from.join("/") }}
                   </span>
@@ -1846,7 +1857,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <div class="model-provider-actions">
                   <button
                     class="btn btn-icon mcp-row-edit"
-                    title="编辑"
+                    aria-label="编辑"
+                    v-tooltip="'编辑'"
                     :disabled="mcpState.loading || mcpState.saving"
                     @click="openEditMcp(i)"
                   >
@@ -1856,7 +1868,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                   </button>
                   <button
                     class="btn btn-icon danger mcp-row-delete"
-                    title="删除"
+                    aria-label="删除"
+                    v-tooltip="'删除'"
                     :disabled="mcpState.loading || mcpState.saving"
                     @click="removeMcp(i)"
                   >
@@ -1881,7 +1894,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 >
                   <label>
                     名称（name）
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </label>
                   <input
                     v-model="mcpForm.name"
@@ -1935,7 +1948,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 >
                   <label>
                     command
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </label>
                   <input
                     v-model="mcpForm.command"
@@ -1986,7 +1999,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                       />
                       <button
                         class="btn btn-icon danger"
-                        title="删除该环境变量"
+                        aria-label="删除该环境变量"
+                        v-tooltip="'删除该环境变量'"
                         @click="removeMcpEnvRow(i)"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2006,7 +2020,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 >
                   <label>
                     url
-                    <span class="model-config-required" title="必填">*</span>
+                    <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                   </label>
                   <input
                     v-model="mcpForm.url"
@@ -2053,7 +2067,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                       />
                       <button
                         class="btn btn-icon danger"
-                        title="删除该请求头"
+                        aria-label="删除该请求头"
+                        v-tooltip="'删除该请求头'"
                         @click="removeMcpHeaderRow(i)"
                       >
                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2070,7 +2085,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <button
                     v-if="mcpForm.transport === 'stdio'"
                     class="btn btn-icon mcp-kv-add-btn"
-                    title="添加环境变量"
+                    aria-label="添加环境变量"
+                    v-tooltip="'添加环境变量'"
                     @click="addMcpEnvRow"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2080,7 +2096,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <button
                     v-else
                     class="btn btn-icon mcp-kv-add-btn"
-                    title="添加请求头"
+                    aria-label="添加请求头"
+                    v-tooltip="'添加请求头'"
                     @click="addMcpHeaderRow"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2119,7 +2136,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <button
                   class="btn btn-icon plugin-refresh-btn"
                   :class="{ loading: pluginState.loading }"
-                  title="刷新目录"
+                  v-tooltip="'刷新目录'"
                   aria-label="刷新目录"
                   :disabled="pluginState.loading"
                   @click="refreshPlugins(true)"
@@ -2140,7 +2157,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <button
                   class="btn btn-icon primary plugin-market-add-btn"
                   :class="{ loading: pluginState.adding }"
-                  title="添加市场"
+                  v-tooltip="'添加市场'"
                   aria-label="添加市场"
                   :disabled="pluginState.adding || !pluginState.source.trim()"
                   @click="doAddMarketplace"
@@ -2190,14 +2207,15 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <span class="plugin-marketplace-name">{{ mp.displayName }}</span>
                   <span
                     class="plugin-marketplace-count"
-                    :title="`${mp.plugins.length} 个插件`"
+                    v-tooltip="`${mp.plugins.length} 个插件`"
                   >
                     {{ mp.plugins.length }}
                   </span>
                   <button
                     v-if="!mp.isRemote"
                     class="btn btn-icon danger plugin-market-remove"
-                    title="移除市场"
+                    aria-label="移除市场"
+                    v-tooltip="'移除市场'"
                     @click.stop="doRemoveMarketplace(mp)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2253,7 +2271,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                         v-if="!p.installed"
                         class="btn btn-icon primary plugin-install-btn"
                         :class="{ loading: !!pluginState.busy[p.id] }"
-                        :title="pluginState.busy[p.id] ? '安装中…' : '安装'"
+                        v-tooltip="pluginState.busy[p.id] ? '安装中…' : '安装'"
                         :aria-label="pluginState.busy[p.id] ? '安装中' : '安装'"
                         :disabled="!canInstall(p) || !!pluginState.busy[p.id]"
                         @click="doInstall(mp, p)"
@@ -2266,7 +2284,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                         v-else
                         class="btn btn-icon danger plugin-uninstall-btn"
                         :class="{ loading: !!pluginState.busy[p.id] }"
-                        :title="pluginState.busy[p.id] ? '卸载中…' : '卸载'"
+                        v-tooltip="pluginState.busy[p.id] ? '卸载中…' : '卸载'"
                         :aria-label="pluginState.busy[p.id] ? '卸载中' : '卸载'"
                         :disabled="!!pluginState.busy[p.id]"
                         @click="doUninstall(p)"

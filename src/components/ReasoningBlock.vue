@@ -77,7 +77,7 @@ watch(
     <div
       v-if="!open && previewLine"
       class="reasoning-preview"
-      title="点击展开思考过程"
+      v-tooltip="'点击展开思考过程'"
       @click="open = true"
     >
       {{ previewLine }}

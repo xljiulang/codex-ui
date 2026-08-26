@@ -348,7 +348,7 @@ onBeforeUnmount(() => {
                 <span
                   v-if="isThreadRunning(row.thread.id)"
                   class="history-run-dot"
-                  title="后台运行中"
+                  v-tooltip="'后台运行中'"
                   aria-hidden="true"
                 ></span>
               </span>

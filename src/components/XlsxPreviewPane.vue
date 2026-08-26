@@ -261,7 +261,7 @@ watch(zoom, () => {
               v-for="(cell, c) in row"
               :key="c"
               class="xlsx-td"
-              :title="cell"
+              v-tooltip="cell"
             >
               {{ cell }}
             </td>

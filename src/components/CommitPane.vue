@@ -48,7 +48,7 @@ function openFileDiff(file: GitCommitFile) {
       <div class="commit-head">
         <div class="commit-title-row">
           <span class="commit-subject">{{ detail.subject }}</span>
-          <span class="commit-hash" :title="detail.hash">{{
+          <span class="commit-hash" v-tooltip="detail.hash">{{
             detail.shortHash
           }}</span>
         </div>
@@ -80,7 +80,7 @@ function openFileDiff(file: GitCommitFile) {
             v-for="f in detail.files"
             :key="f.path"
             class="commit-file"
-            :title="f.path"
+            v-tooltip="f.path"
             @click="openFileDiff(f)"
           >
             <span

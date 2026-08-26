@@ -256,7 +256,7 @@ function titleTooltip(tab: EditorTab): string {
         <span
           v-if="sessionTabPending(tab) > 0"
           class="interaction-badge"
-          :title="`${sessionTabPending(tab)} 个待处理交互`"
+          v-tooltip="`${sessionTabPending(tab)} 个待处理交互`"
         >
           {{ sessionTabPending(tab) }}
         </span>
@@ -356,7 +356,7 @@ function titleTooltip(tab: EditorTab): string {
             tab.dirty
           "
           class="editor-tab-dirty"
-          title="未保存"
+          v-tooltip="'未保存'"
         ></span>
         <span v-else-if="tab.kind === TabKind.Diff" class="editor-tab-kind">
           {{ diffKindLabel(tab.changeKind) }}

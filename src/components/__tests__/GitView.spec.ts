@@ -781,7 +781,7 @@ describe("GitView 提交历史", () => {
     expect(items[0].find(".git-log-meta").text()).toContain("tester");
     expect(items[0].find(".git-log-meta").text()).toContain("2023-");
     expect(items[0].find(".git-log-hash").text()).toBe("aaaaaaa");
-    expect(items[0].find(".git-log-hash").attributes("title")).toBe(
+    expect(items[0].find(".git-log-hash").attributes("data-tip")).toBe(
       "a".repeat(40),
     );
     expect(items[1].find(".git-log-subject").text()).toBe("fix: bug");

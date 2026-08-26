@@ -136,13 +136,13 @@ async function removeRemote(remote: GitRemote) {
               class="git-remote-badge"
             >当前</span>
           </span>
-          <span class="git-remote-url" :title="r.fetchUrl ?? undefined">
+          <span class="git-remote-url" v-tooltip="r.fetchUrl ?? undefined">
             {{ r.fetchUrl || "（未配置拉取地址）" }}
           </span>
           <span
             v-if="r.pushUrl && r.pushUrl !== r.fetchUrl"
             class="git-remote-url git-remote-push"
-            :title="r.pushUrl"
+            v-tooltip="r.pushUrl"
           >
             推送：{{ r.pushUrl }}
           </span>

@@ -96,7 +96,7 @@ watch(
           {{ c.author }} · {{ formatDateTime(c.timeSecs) }}
         </span>
       </div>
-      <span class="git-log-hash" :title="c.hash">{{ c.shortHash }}</span>
+      <span class="git-log-hash" v-tooltip="c.hash">{{ c.shortHash }}</span>
     </button>
     <button
       v-if="logHasMore"
