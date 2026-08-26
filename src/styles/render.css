@@ -461,6 +461,7 @@
   position: relative;
   padding: var(--space-5) var(--space-8);
   background: var(--console-bg-deep);
+  user-select: text;
 }
 
 /* diff 内联行语法高亮配色（与聊天区 hljs 配色一致；文本编辑器用 CodeMirror 主题） */

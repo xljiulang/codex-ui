@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { reactive } from "vue";
 import DiffPane from "../DiffPane.vue";
 import type { DiffEditorTab } from "../../composables/useEditorTabs";
+
+vi.mock("../../lib/clipboard", () => ({ copyText: vi.fn() }));
+import { copyText } from "../../lib/clipboard";
 
 function makeTab(over: Partial<DiffEditorTab> = {}): DiffEditorTab {
   return reactive({
@@ -84,5 +87,46 @@ describe("DiffPane 完整/简要切换", () => {
       expect(wrapper.find(".diff-window-actions button").exists()).toBe(false);
       wrapper.unmount();
     }
+  });
+});
+
+describe("DiffPane 右键复制菜单", () => {
+  beforeEach(() => {
+    vi.mocked(copyText).mockClear();
+  });
+
+  it("右键行弹出自定义菜单，点击复制该行纯文本（不含行号）", async () => {
+    const wrapper = mount(DiffPane, { props: { tab: makeTab() } });
+    const delRow = wrapper.find(".diff-row.del");
+    await delRow.trigger("contextmenu", { clientX: 100, clientY: 120 });
+
+    const menu = wrapper.find(".ctx-menu");
+    expect(menu.exists()).toBe(true);
+    const items = menu.findAll(".ctx-menu-item");
+    expect(items).toHaveLength(1);
+    expect(items[0].text()).toBe("复制");
+
+    await items[0].trigger("click");
+    expect(copyText).toHaveBeenCalledWith("old");
+    wrapper.unmount();
+  });
+
+  it("存在选区时优先复制选区文本", async () => {
+    const selection = {
+      isCollapsed: false,
+      toString: () => "selected diff",
+    } as unknown as Selection;
+    const spy = vi.spyOn(window, "getSelection").mockReturnValue(selection);
+    const wrapper = mount(DiffPane, { props: { tab: makeTab() } });
+    await wrapper
+      .find(".diff-window-body")
+      .trigger("contextmenu", { clientX: 50, clientY: 50 });
+
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items).toHaveLength(1);
+    await items[0].trigger("click");
+    expect(copyText).toHaveBeenCalledWith("selected diff");
+    spy.mockRestore();
+    wrapper.unmount();
   });
 });
