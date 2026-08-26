@@ -13,6 +13,7 @@ import {
   type ThreadItem,
 } from "../../lib/types";
 import { playNotificationSound } from "../../lib/sound";
+import { sessionLog } from "../../lib/sessionLog";
 import {
   bumpActive,
   findItem,
@@ -124,6 +125,33 @@ export async function wireEvents() {
             (i) => i.requestId !== p.requestId,
           );
         }
+      }
+    }),
+  );
+
+  unlisteners.push(
+    await listen("thread/settings/updated", (e) => {
+      const p = e.payload as {
+        threadId?: string;
+        threadSettings?: { collaborationMode?: { mode?: string } };
+      };
+      const tid = p.threadId;
+      if (!tid || isBackgroundThread(tid)) return;
+      const tab = findSessionTabByThread(tid);
+      if (!tab) return;
+      // 服务端「下一回合」实际生效的协作模式（权威事件源），与本地 taskMode 对账；
+      // 缺失/未知取值静默忽略，不 toast 不抛错（与现有 turn 事件防御一致）
+      const serverMode = p.threadSettings?.collaborationMode?.mode;
+      if (serverMode !== "plan" && serverMode !== "default") return;
+      if (tab.taskMode !== serverMode) {
+        const prev = tab.taskMode;
+        tab.taskMode = serverMode;
+        sessionLog(
+          "warn",
+          tid,
+          "task-mode-reconcile",
+          `prev=${prev} -> server=${serverMode}`,
+        );
       }
     }),
   );

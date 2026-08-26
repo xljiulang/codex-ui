@@ -33,7 +33,7 @@ describe("TaskModeMenu 任务模式菜单", () => {
     (tabs[0] as SessionTab).turnActive = true;
     const w = mount(TaskModeMenu);
     await w.findAll(".mode-menu-item")[1].trigger("click");
-    expect(activeSessionTab()?.taskMode).toBe("execute");
+    expect(activeSessionTab()?.taskMode).toBe("default");
     expect(w.emitted("close")).toBeUndefined();
   });
 });

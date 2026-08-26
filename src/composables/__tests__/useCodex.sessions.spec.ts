@@ -74,7 +74,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "我的标题",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "execute",
+      taskMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -132,7 +132,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "execute",
+      taskMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -187,7 +187,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "标题",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "execute",
+      taskMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -242,7 +242,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "execute",
+      taskMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -297,7 +297,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "execute",
+      taskMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -353,7 +353,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "execute",
+      taskMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -698,7 +698,7 @@ describe("会话标签状态与事件路由", () => {
         workspace: "D:/repo/b",
         planPrompt: { threadId: "t2", turnId: "tp2", planText: "计划B" },
         permissionMode: "help-me-approve",
-        taskMode: "execute",
+        taskMode: "default",
         model: "o3",
         effort: "low",
       }),
@@ -714,7 +714,7 @@ describe("会话标签状态与事件路由", () => {
     expect(activeSessionTab()?.turnActive).toBe(false);
     expect(activeSessionTab()?.planPrompt?.planText).toBe("计划B");
     expect(activeSessionTab()?.permissionMode).toBe("help-me-approve");
-    expect(activeSessionTab()?.taskMode).toBe("execute");
+    expect(activeSessionTab()?.taskMode).toBe("default");
     expect(activeSessionTab()?.model).toBe("o3");
     expect(activeSessionTab()?.effort).toBe("low");
 
@@ -1004,7 +1004,7 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     expect(activeSessionTab()?.turnActive).toBe(true);
   });
 
-  it("后台标签发送使用自己的任务模式：tab=plan、store=execute 时 collaborationMode.mode=plan", async () => {
+  it("后台标签发送使用自己的任务模式：tab=plan、store=default 时 collaborationMode.mode=plan", async () => {
     const tab = makeSessionTab("sB", "tB", {
       taskMode: "plan",
       resumedThreadId: "tB",

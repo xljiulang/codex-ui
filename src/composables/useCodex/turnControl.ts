@@ -48,9 +48,10 @@ export function buildTurnParams(
   // 协议要求 settings.model 为非空 string（实测 null 会被服务端拒绝），
   // 模型无法解析时 currentModelId 抛错，由发送方 toast 提示并中止发送。
   const collabModel = currentModelId(session);
-  const mode = session?.taskMode ?? "execute";
+  // mode 与 taskMode 已恒等（plan/default），直接取值，无需翻译映射
+  const mode = session?.taskMode ?? "default";
   params.collaborationMode = {
-    mode: mode === "plan" ? "plan" : "default",
+    mode,
     settings: {
       model: collabModel,
       reasoning_effort: session?.effort ?? null,
@@ -129,6 +130,8 @@ export async function continueTurnForTab(
         setToast(toastError(e));
       }
     }
+    const collabMode = (params.collaborationMode as { mode?: string } | undefined)?.mode ?? null;
+    sessionLog("info", threadId, "turn-start-mode", `collaborationMode.mode=${collabMode ?? "?"}`);
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", {
       params,
     });
@@ -186,6 +189,8 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
         tab.goalArmed = false;
       }
     }
+    const collabMode = (params.collaborationMode as { mode?: string } | undefined)?.mode ?? null;
+    sessionLog("info", threadId, "turn-start-mode", `collaborationMode.mode=${collabMode ?? "?"}`);
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
     if (tab) {
       // 回合状态写活动标签（tab 是唯一事实源）

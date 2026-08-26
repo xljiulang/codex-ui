@@ -438,7 +438,7 @@ describe("buildTurnParams 三面独立映射", () => {
       "D:/repo",
       {
         permissionMode: "help-me-approve",
-        taskMode: "execute",
+        taskMode: "default",
         model: null,
         effort: null,
       },

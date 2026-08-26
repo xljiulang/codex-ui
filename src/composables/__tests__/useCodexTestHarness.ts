@@ -47,7 +47,7 @@ export function makeSessionTab(
     name: "",
     nameIsFirstMessage: false,
     permissionMode: "ask-for-approval",
-    taskMode: "execute",
+    taskMode: "default",
     model: null,
     effort: null,
     plugins: { plugins: [], loaded: false },

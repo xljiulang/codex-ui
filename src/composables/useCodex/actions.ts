@@ -253,7 +253,7 @@ export function exitPlanMode() {
   const tab = activeSessionTab();
   if (tab) {
     tab.planPrompt = null;
-    tab.taskMode = "execute";
+    tab.taskMode = "default";
   }
 }
 
@@ -265,7 +265,7 @@ export async function executePlan() {
   if (!prompt) return;
   if (tab) tab.planPrompt = null;
   // 先切模式，使本轮 turn/start 显式携带 collaborationMode default（计划模式粘滞，需显式退出）
-  if (tab) tab.taskMode = "execute";
+  if (tab) tab.taskMode = "default";
   const text = `PLEASE IMPLEMENT THIS PLAN:\n${prompt.planText}`;
   // 目标勾选：执行计划即首条执行消息，目标=该合成消息（含计划全文）
   if (tab?.goalArmed) {

@@ -1,5 +1,5 @@
 export interface TaskMode {
-  id: "execute" | "plan";
+  id: "default" | "plan";
   label: string;
   desc: string;
   /** 24x24 SVG path（fill 风格），菜单与输入框 chip 共用 */
@@ -8,7 +8,7 @@ export interface TaskMode {
 
 export const TASK_MODES: TaskMode[] = [
   {
-    id: "execute",
+    id: "default",
     label: "执行模式",
     desc: "直接执行任务并给出结果",
     icon: "M8 5v14l11-7z", // 播放/执行
