@@ -120,13 +120,9 @@
   text-align: center;
 }
 
-/* 悬停“@”添加为会话附件按钮：绝对定位悬浮在行首，不占布局空间；行悬停/聚焦时显示 */
+/* 悬停“@”添加为会话附件按钮：内联排在行内容最左、文件图标（及目录行折叠/展开箭头）左侧；行悬停/聚焦时显示 */
 .resource-add {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  transform: translateY(-50%);
-  z-index: 1;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;

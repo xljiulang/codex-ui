@@ -1254,7 +1254,7 @@ describe("ResourceView 文件树", () => {
     expect(
       wrapper.findAll(".resource-row.resource-file .resource-add").length,
     ).toBeGreaterThan(0);
-    // @ 按钮位于行首（首个元素子节点）
+    // @ 按钮位于行首（首个元素子节点）——文件行与目录行都在折叠箭头左侧
     expect(
       wrapper
         .find(".resource-row.resource-file")
