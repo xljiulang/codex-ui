@@ -13,6 +13,20 @@ use crate::codex::skills;
 
 type Server = Arc<CodexServer>;
 
+/// 生成「纯参数透传」RPC 命令：命令签名统一为 `(State<Server>, params: Value)`，
+/// 仅转发到指定协议方法并携带超时。用于收敛 thread_start / thread_resume /
+/// turn_start / turn_steer 这四个同形 Tauri 命令，集中超时管理、避免方法名手写错。
+/// 其它需要拼装参数或不同签名的 RPC 命令（thread_read / goal_* / auth_* 等）不适用本宏，
+/// 仍保留手写。
+macro_rules! rpc_passthrough {
+    ($name:ident, $method:literal, $timeout:expr) => {
+        #[tauri::command]
+        pub async fn $name(server: State<'_, Server>, params: Value) -> Result<Value, String> {
+            server.request($method, params, $timeout).await
+        }
+    };
+}
+
 /// 全局串行化系统“选择文件夹”对话框：任何入口（头部新建会话、输入框目录附件等）
 /// 同一时刻只允许弹出一个，避免多个原生对话框叠加。
 static PICK_DIRECTORY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -125,15 +139,7 @@ pub async fn thread_list(
     server.request("thread/list", Value::Object(params), None).await
 }
 
-#[tauri::command]
-pub async fn thread_start(
-    server: State<'_, Server>,
-    params: Value,
-) -> Result<Value, String> {
-    server
-        .request("thread/start", params, Some(Duration::from_secs(60)))
-        .await
-}
+rpc_passthrough!(thread_start, "thread/start", Some(Duration::from_secs(60)));
 
 #[tauri::command]
 pub async fn thread_read(
@@ -150,15 +156,7 @@ pub async fn thread_read(
         .await
 }
 
-#[tauri::command]
-pub async fn thread_resume(
-    server: State<'_, Server>,
-    params: Value,
-) -> Result<Value, String> {
-    server
-        .request("thread/resume", params, Some(Duration::from_secs(60)))
-        .await
-}
+rpc_passthrough!(thread_resume, "thread/resume", Some(Duration::from_secs(60)));
 
 #[tauri::command]
 pub async fn thread_delete(
@@ -185,25 +183,9 @@ pub async fn thread_set_name(
         .await
 }
 
-#[tauri::command]
-pub async fn turn_start(
-    server: State<'_, Server>,
-    params: Value,
-) -> Result<Value, String> {
-    server
-        .request("turn/start", params, Some(Duration::from_secs(60)))
-        .await
-}
+rpc_passthrough!(turn_start, "turn/start", Some(Duration::from_secs(60)));
 
-#[tauri::command]
-pub async fn turn_steer(
-    server: State<'_, Server>,
-    params: Value,
-) -> Result<Value, String> {
-    server
-        .request("turn/steer", params, Some(Duration::from_secs(60)))
-        .await
-}
+rpc_passthrough!(turn_steer, "turn/steer", Some(Duration::from_secs(60)));
 
 #[tauri::command]
 pub async fn turn_interrupt(
