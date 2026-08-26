@@ -881,7 +881,7 @@ async function removeMcp(index: number) {
   if (!s || mcpState.saving || mcpState.loading) return;
   const ok = await askConfirm({
     title: "删除 MCP 服务器",
-    message: `确定删除 MCP 服务器「${s.name}」吗？删除后立即写入 config.toml。`,
+    message: `确定删除 MCP 服务器「${s.name}」吗？`,
     confirmLabel: "删除",
     cancelLabel: "取消",
   });
@@ -1797,7 +1797,7 @@ function pluginInitial(p: PluginCatalogItem): string {
         >
           <h2 class="settings-section-title">MCP 管理</h2>
           <p class="settings-section-desc">
-            配置 MCP 服务器（写入 config.toml，重启后生效）
+            配置 MCP 服务器
           </p>
           <div class="model-config-card">
             <div class="model-config-card-head">
