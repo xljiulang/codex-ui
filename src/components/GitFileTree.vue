@@ -71,7 +71,7 @@ defineEmits<{
           class="git-path"
           :class="{ 'git-path-strike': row.file.status === 'deleted' }"
         >
-          {{ row.file.path }}
+          {{ row.name }}
         </span>
         <span
           class="git-status-icon"

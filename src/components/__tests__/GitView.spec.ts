@@ -1451,7 +1451,7 @@ describe("GitView 变更文件树形目录", () => {
     const changesRows = sections[0].findAll(".git-tree-row");
     expect(changesRows).toHaveLength(5);
     expect(changesRows[0].find(".git-dir-name").text()).toBe("src");
-    expect(changesRows[1].text()).toContain("src/b.txt");
+    expect(changesRows[1].find(".git-path").text()).toBe("b.txt");
     expect(changesRows[2].find(".git-dir-name").text()).toBe("src2");
     expect(changesRows[4].text()).toContain("a.txt");
 
@@ -1460,7 +1460,7 @@ describe("GitView 变更文件树形目录", () => {
     expect(stagedRows).toHaveLength(3);
     expect(stagedRows[0].find(".git-dir-name").text()).toBe("src");
     expect(stagedRows[1].find(".git-dir-name").text()).toBe("deep");
-    expect(stagedRows[2].text()).toContain("src/deep/c.txt");
+    expect(stagedRows[2].find(".git-path").text()).toBe("c.txt");
     wrapper.unmount();
   });
 
@@ -1536,8 +1536,8 @@ describe("GitView 变更文件树形目录", () => {
     await flushPromises();
 
     const sections = wrapper.findAll(".git-section");
-    expect(sections[0].text()).toContain("src/deep/c.txt");
-    expect(sections[1].text()).toContain("src/deep/c.txt");
+    expect(sections[0].text()).toContain("c.txt");
+    expect(sections[1].text()).toContain("c.txt");
 
     await sections[0].find(".git-file").trigger("contextmenu");
     expect(menuLabels(wrapper)).toEqual(["打开", "暂存", "撤消更改"]);
@@ -2691,6 +2691,17 @@ describe("GitView diff 标签联动定位", () => {
     const row = wrapper.find('[data-git-path="src/deep/c.txt"]');
     expect(row.exists()).toBe(true);
     expect(row.classes()).toContain("selected");
+    wrapper.unmount();
+  });
+
+  it("嵌套文件行仅显示文件名而非完整相对路径", async () => {
+    mockRevealRepo();
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    const row = wrapper.find('[data-git-path="src/deep/c.txt"]');
+    expect(row.exists()).toBe(true);
+    expect(row.find(".git-path").text()).toBe("c.txt");
     wrapper.unmount();
   });
 

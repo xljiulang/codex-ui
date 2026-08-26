@@ -202,7 +202,7 @@ describe("RightPanel Tab 栏", () => {
       mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_status"),
     ).toBe(true);
     expect(wrapper.findComponent(GitView).exists()).toBe(true);
-    expect(wrapper.find(".git-view").text()).toContain("src/a.ts");
+    expect(wrapper.find(".git-view").text()).toContain("a.ts");
   });
 
   it("Tab 切换保留资源树展开状态（v-show）", async () => {
