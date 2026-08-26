@@ -689,7 +689,6 @@
 }
 
 .model-config-path-link,
-.skill-path-link,
 .model-config-docs-link {
   display: inline-flex;
   align-items: center;
@@ -710,14 +709,12 @@
 }
 
 .model-config-path-link:hover,
-.skill-path-link:hover,
 .model-config-docs-link:hover {
   color: var(--accent-dim);
   text-decoration: underline;
 }
 
 .model-config-path-link svg,
-.skill-path-link svg,
 .model-config-docs-link svg {
   width: 11px;
   height: 11px;

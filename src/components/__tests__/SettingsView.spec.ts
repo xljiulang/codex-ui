@@ -262,7 +262,7 @@ describe("SettingsView 模型配置", () => {
           .element as HTMLTextAreaElement
       ).value,
     ).toBe("# AGENTS.md\n\nWindows 环境。\n");
-    expect(wrapper.text()).toContain("config");
+    expect(wrapper.text()).toContain("模型提供方");
     expect(wrapper.text()).toContain("model_catalog_json");
     expect(wrapper.text()).toContain("AGENTS");
     expect(
@@ -1095,28 +1095,9 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(rows.length).toBe(2);
     expect(rows[0].text()).toContain("pdf");
     expect(rows[0].text()).toContain("读写 PDF 文件");
-    expect(rows[0].text()).toContain(
-      "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
-    );
     expect(rows[1].text()).toContain("csharp-code-rules");
     expect(rows[1].text()).toContain("C# 团队规范");
     await rows[0].find("button.skill-row-main").trigger("click");
-    await flushPromises();
-    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
-      "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
-    );
-  });
-
-  it("点击技能路径在应用内打开 SKILL.md", async () => {
-    const wrapper = mount(SettingsView);
-    await flushPromises();
-    await wrapper
-      .findAll(".settings-nav-item")
-      .find((i) => i.text().includes("技能管理"))!
-      .trigger("click");
-    await flushPromises();
-    const rows = wrapper.findAll(".skill-row");
-    await rows[0].find(".skill-path-link").trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",

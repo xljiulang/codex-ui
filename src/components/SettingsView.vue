@@ -1756,17 +1756,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <p v-if="s.description" class="skill-desc">
                     {{ s.description }}
                   </p>
-                  <button
-                    type="button"
-                    class="skill-path-link"
-                    title="在编辑器中打开 SKILL.md"
-                    @click="openSkill(s)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FILE" />
-                    </svg>
-                    {{ s.path }}
-                  </button>
                 </div>
                 <div class="skill-actions">
                   <span class="skill-status" :class="{ off: !s.enabled }">
