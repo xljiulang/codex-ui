@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import type { ThreadSummary } from "../lib/types";
 import {
   bindingOfThread,
@@ -7,6 +7,7 @@ import {
   setToast,
   store,
   toastError,
+  wechatCancelBind,
   wechatBindLoginStart,
   wechatUnbind,
 } from "../composables/useCodex";
@@ -71,6 +72,28 @@ async function onBind() {
   }
 }
 
+/** 打开弹窗即直达二维码：未绑定且当前无其它会话 pending 时自动发起扫码。 */
+async function maybeAutoBind() {
+  if (bindBusy.value || binding.value) return;
+  if (store.wechat?.pendingThreadId) return; // 本会话或其它会话已在扫码 → 不重复发起
+  await onBind();
+}
+
+onMounted(() => {
+  void (async () => {
+    await refreshWeChatState();
+    await maybeAutoBind();
+  })();
+});
+
+/** 关闭弹窗：若本会话正处于扫码中则先取消（释放单条 pending，避免阻塞其它会话绑定）。 */
+async function onClose() {
+  if (isPending.value) {
+    await wechatCancelBind();
+  }
+  emit("close");
+}
+
 async function onUnbind() {
   try {
     await wechatUnbind(props.thread.id);
@@ -125,6 +148,14 @@ async function onUnbind() {
         </div>
         <div v-else-if="isPending && store.wechat?.detail" class="wechat-detail">
           {{ store.wechat.detail }}
+          <button
+            type="button"
+            class="btn primary wechat-bind-btn"
+            :disabled="bindBusy"
+            @click="onBind"
+          >
+            重新生成二维码
+          </button>
         </div>
         <div v-else-if="isPending" class="wechat-detail">
           正在生成二维码，请稍候…
@@ -133,17 +164,18 @@ async function onUnbind() {
           已有其他会话正在绑定微信，请稍候或完成后再试。
         </div>
         <button
+          v-else
           type="button"
           class="btn primary wechat-bind-btn"
-          :disabled="bindBusy || !!store.wechat?.pendingThreadId"
+          :disabled="bindBusy"
           @click="onBind"
         >
-          {{ bindBusy ? "等待扫码…" : "扫码绑定" }}
+          {{ bindBusy ? "正在发起…" : "重新扫码绑定" }}
         </button>
       </template>
     </div>
     <template #foot>
-      <button class="btn" @click="emit('close')">关闭</button>
+      <button class="btn" @click="onClose">关闭</button>
     </template>
   </ModalDialog>
 </template>

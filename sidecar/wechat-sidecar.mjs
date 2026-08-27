@@ -32,7 +32,10 @@ function emit(obj) {
 
 let client = null;
 let clientReady = false;
-let loggingIn = false;
+/** 当前在途二维码登录：{ aborter, loginId }；新 login 会 abort 并接管，login_cancel 取消。 */
+let currentLogin = null;
+/** 兜底登录序号（桥端未带 loginId 时用）。 */
+let loginIdSeq = 0;
 /** 首次 init 的在途 Promise：并发/重复 init 幂等。 */
 let initPromise = null;
 /** 最近一次 init 的 stateDir：login 若早于 init 到达时用于补齐初始化。 */
@@ -115,30 +118,36 @@ async function ensureInit(stateDir) {
   return initPromise;
 }
 
-async function doLogin(timeoutMs) {
+/** 发起二维码登录：可被新登录接管或 login_cancel 取消；结果带 loginId 供宿主区分归属。 */
+async function doLogin(timeoutMs, loginId) {
   if (!clientReady) {
     emit({ event: "error", message: "尚未初始化（缺少 init）", kind: "login" });
     return;
   }
-  if (loggingIn) return;
-  loggingIn = true;
+  const aborter = new AbortController();
+  currentLogin = { aborter, loginId };
   try {
-    const result = await client.login({ force: true, timeoutMs });
+    const result = await client.login({ force: true, timeoutMs, signal: aborter.signal });
+    // 已被新登录接管/取消：丢弃结果，避免陈旧结果污染新 pending。
+    if (currentLogin?.loginId !== loginId) return;
     emit({
       event: "login_result",
       success: !!result.success,
       message: result.message ?? "",
       accountId: result.account?.id,
       userId: result.account?.userId,
+      loginId,
     });
   } catch (err) {
+    if (currentLogin?.loginId !== loginId) return;
     emit({
       event: "login_result",
       success: false,
       message: err?.message ?? String(err),
+      loginId,
     });
   } finally {
-    loggingIn = false;
+    if (currentLogin?.loginId === loginId) currentLogin = null;
   }
 }
 
@@ -173,11 +182,14 @@ async function handleCmd(cmd) {
     }
     case "login":
       // 桥端可能刚拉起 sidecar 就下发 login：先等 init 完成（幂等）再登录，
-      // 消除 login 早于 init 的竞态；初始化失败转为 error 事件。
+      // 新登录接管并取消上一个在途登录（避免残留阻塞后续绑定），
+      // 初始化失败转为 error 事件。
       void (async () => {
+        const loginId = cmd.loginId ?? `login-${(loginIdSeq += 1)}`;
+        if (currentLogin) currentLogin.aborter.abort();
         try {
           if (lastStateDir) await ensureInit(lastStateDir);
-          await doLogin(cmd.timeoutMs);
+          await doLogin(cmd.timeoutMs, loginId);
         } catch (err) {
           emit({
             event: "error",
@@ -186,6 +198,9 @@ async function handleCmd(cmd) {
           });
         }
       })();
+      return;
+    case "login_cancel":
+      if (currentLogin) currentLogin.aborter.abort();
       return;
     case "start":
       try {

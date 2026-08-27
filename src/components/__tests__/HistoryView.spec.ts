@@ -271,7 +271,7 @@ describe("HistoryView 右键菜单", () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "微信接入");
-    expect(wrapper.text()).toContain("扫码绑定");
+    expect(wrapper.text()).toContain("微信接入");
     expect(wrapper.find(".wechat-bind-dialog").exists()).toBe(true);
   });
 

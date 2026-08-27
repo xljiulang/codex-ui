@@ -60,6 +60,7 @@ export {
   bindingOfThread,
   refreshWeChatState,
   wechatBindLoginStart,
+  wechatCancelBind,
   wechatUnbind,
 } from "./wechat";
 export {

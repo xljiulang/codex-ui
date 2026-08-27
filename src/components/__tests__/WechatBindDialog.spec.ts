@@ -7,6 +7,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     ...mod,
     wechatBindLoginStart: vi.fn().mockResolvedValue(undefined),
     wechatUnbind: vi.fn().mockResolvedValue(undefined),
+    wechatCancelBind: vi.fn().mockResolvedValue(undefined),
     refreshWeChatState: vi.fn().mockResolvedValue(undefined),
     setToast: vi.fn(),
   };
@@ -17,6 +18,7 @@ vi.mock("qrcode", () => ({
 
 import { store } from "../../composables/useCodex";
 import {
+  wechatCancelBind,
   wechatBindLoginStart,
   wechatUnbind,
 } from "../../composables/useCodex";
@@ -24,6 +26,7 @@ import WechatBindDialog from "../WechatBindDialog.vue";
 
 const mockedBind = vi.mocked(wechatBindLoginStart);
 const mockedUnbind = vi.mocked(wechatUnbind);
+const mockedCancel = vi.mocked(wechatCancelBind);
 
 const thread = { id: "t1", name: "会话一", createdAt: 0, recencyAt: 0 };
 
@@ -36,12 +39,11 @@ describe("WechatBindDialog", () => {
     store.wechat = null;
     mockedBind.mockClear();
     mockedUnbind.mockClear();
+    mockedCancel.mockClear();
   });
 
-  it("未绑定态展示扫码绑定按钮并调用 bind_login_start", async () => {
-    const wrapper = mountDialog();
-    expect(wrapper.find(".wechat-bind-btn").exists()).toBe(true);
-    await wrapper.find(".wechat-bind-btn").trigger("click");
+  it("打开弹窗即自动调用 bind_login_start（直达二维码）", async () => {
+    mountDialog();
     await flushPromises();
     expect(mockedBind).toHaveBeenCalledWith("t1");
   });
@@ -60,8 +62,10 @@ describe("WechatBindDialog", () => {
       ],
     };
     const wrapper = mountDialog();
+    await flushPromises();
     expect(wrapper.text()).toContain("账号：bot-1");
     expect(wrapper.find(".wechat-unbind-btn").exists()).toBe(true);
+    expect(mockedBind).not.toHaveBeenCalled();
     await wrapper.find(".wechat-unbind-btn").trigger("click");
     await flushPromises();
     expect(mockedUnbind).toHaveBeenCalledWith("t1");
@@ -102,7 +106,7 @@ describe("WechatBindDialog", () => {
     expect(wrapper.text()).toContain("正在生成二维码，请稍候…");
   });
 
-  it("其它会话扫码中：提示等待且绑定按钮禁用", async () => {
+  it("其它会话扫码中：提示等待且不再自动发起", async () => {
     store.wechat = {
       running: true,
       connection: "awaiting_qr",
@@ -114,18 +118,39 @@ describe("WechatBindDialog", () => {
       bindings: [],
     };
     const wrapper = mountDialog();
+    await flushPromises();
     expect(wrapper.find(".wechat-qr-wrap img").exists()).toBe(false);
     expect(wrapper.text()).toContain("已有其他会话正在绑定微信");
-    expect(
-      (wrapper.find(".wechat-bind-btn").element as HTMLButtonElement).disabled,
-    ).toBe(true);
+    expect(mockedBind).not.toHaveBeenCalled();
   });
 
-  it("关闭按钮触发 close 事件", async () => {
+  it("非扫码中关闭：直接 close 且不取消", async () => {
     const wrapper = mountDialog();
+    await flushPromises();
     const footBtn = wrapper.findAll(".modal-foot .btn").find((b) => b.text().trim() === "关闭");
     expect(footBtn).toBeTruthy();
     await footBtn!.trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    expect(mockedCancel).not.toHaveBeenCalled();
+  });
+
+  it("本会话扫码中关闭：先取消再 close", async () => {
+    store.wechat = {
+      running: true,
+      connection: "awaiting_qr",
+      detail: null,
+      qrContent: "http://weixin/abc",
+      pendingThreadId: "t1",
+      queued: 0,
+      busy: false,
+      bindings: [],
+    };
+    const wrapper = mountDialog();
+    await flushPromises();
+    const footBtn = wrapper.findAll(".modal-foot .btn").find((b) => b.text().trim() === "关闭");
+    await footBtn!.trigger("click");
+    await flushPromises();
+    expect(mockedCancel).toHaveBeenCalled();
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 });

@@ -134,6 +134,7 @@ pub fn run() {
             codex::commands::wechat_bindings,
             codex::commands::wechat_bind_login_start,
             codex::commands::wechat_unbind,
+            codex::commands::wechat_cancel_bind,
             codex::commands::open_url,
             codex::commands::reveal_path,
             codex::diff::build_diff_preview,

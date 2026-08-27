@@ -317,6 +317,13 @@ pub async fn wechat_unbind(wechat: State<'_, WeChat>, thread_id: String) -> Resu
     wechat.unbind(&thread_id).await
 }
 
+/// 取消当前扫码绑定（弹窗关闭时调用）。
+#[tauri::command]
+pub async fn wechat_cancel_bind(wechat: State<'_, WeChat>) -> Result<(), String> {
+    wechat.cancel_bind().await;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn open_url(url: String) -> Result<(), String> {
     // ShellExecute 默认打开：URL 用浏览器、目录用资源管理器；无控制台窗口、不改写路径

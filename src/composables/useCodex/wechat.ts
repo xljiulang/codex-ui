@@ -39,6 +39,17 @@ export async function wechatUnbind(threadId: string): Promise<void> {
   await refreshWeChatState();
 }
 
+/** 取消当前扫码绑定（弹窗关闭时调用）：释放单条 pending，避免阻塞其它会话绑定。 */
+export async function wechatCancelBind(): Promise<void> {
+  await ensureWeChatEvents();
+  try {
+    await invoke("wechat_cancel_bind");
+  } catch {
+    // 取消失败不阻断关闭
+  }
+  await refreshWeChatState();
+}
+
 /** 指定会话是否已绑定微信（基于最新快照）。 */
 export function isThreadBound(threadId: string): boolean {
   return (store.wechat?.bindings ?? []).some((b) => b.threadId === threadId);

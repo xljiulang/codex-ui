@@ -239,6 +239,8 @@ struct BridgeInner {
     qr_content: Option<String>,
     /// 登录中的绑定目标线程 id（模态框扫码绑定流程的待落盘状态）。
     pending_bind: Option<String>,
+    /// 当前 pending 登录的关联 id（用于过滤被接管/取消后的陈旧 login_result）。
+    pending_login_id: Option<String>,
     /// 当前生效的「会话 ↔ 微信账号」绑定（内存镜像，变更即落盘 bindings.json）。
     bindings: Vec<Value>,
     /// 本代际 sidecar 中已下发过 start 的账号（防止重复启动接收器）。
@@ -280,6 +282,7 @@ impl Default for BridgeInner {
             detail: None,
             qr_content: None,
             pending_bind: None,
+            pending_login_id: None,
             bindings: Vec::new(),
             started_accounts: HashSet::new(),
             account_conn: HashMap::new(),
@@ -588,6 +591,7 @@ impl WeChatBridge {
         g.detail = None;
         g.qr_content = None;
         g.pending_bind = None;
+        g.pending_login_id = None;
         g.started_accounts.clear();
         g.account_conn.clear();
         g.queue.clear();
@@ -665,16 +669,44 @@ impl WeChatBridge {
             }
         }
         self.start_service().await?;
+        // 先取消上一个在途登录（若有），避免残留阻塞本次绑定。
+        if self.inner.lock().await.pending_login_id.is_some() {
+            let _ = self.send_cmd(json!({ "cmd": "login_cancel" })).await;
+        }
+        let login_id = self.next_message_id();
         {
             let mut g = self.inner.lock().await;
             g.pending_bind = Some(thread_id.to_string());
+            g.pending_login_id = Some(login_id.clone());
             g.qr_content = None;
             g.detail = None;
             g.conn = "starting";
         }
         self.emit_state().await;
-        self.send_cmd(json!({ "cmd": "login", "timeoutMs": 480_000 }))
+        self.send_cmd(json!({ "cmd": "login", "timeoutMs": 480_000, "loginId": login_id }))
             .await
+    }
+
+    /// 取消当前扫码绑定（弹窗关闭时调用）：取消在途登录并清待绑定目标（幂等）。
+    pub async fn cancel_bind(self: &Arc<Self>) {
+        let had_pending = {
+            let g = self.inner.lock().await;
+            g.pending_bind.is_some() || g.pending_login_id.is_some()
+        };
+        if !had_pending {
+            return;
+        }
+        if self.inner.lock().await.alive {
+            let _ = self.send_cmd(json!({ "cmd": "login_cancel" })).await;
+        }
+        {
+            let mut g = self.inner.lock().await;
+            g.pending_bind = None;
+            g.pending_login_id = None;
+            g.qr_content = None;
+            g.detail = None;
+        }
+        self.emit_state().await;
     }
 
     /// 解除指定会话的微信绑定：清除本地凭据、删除绑定、停止该账号接收（幂等）。
@@ -702,6 +734,7 @@ impl WeChatBridge {
             }
             if g.pending_bind.as_deref() == Some(thread_id) {
                 g.pending_bind = None;
+                g.pending_login_id = None;
             }
             if g.bindings.is_empty() {
                 g.conn = "offline";
@@ -739,6 +772,14 @@ impl WeChatBridge {
                 }
             }
             "login_result" => {
+                let login_id = v.get("loginId").and_then(|x| x.as_str()).map(str::to_string);
+                // 仅处理当前 pending 登录的结果；被新登录接管或已取消的陈旧结果直接忽略。
+                {
+                    let g = self.inner.lock().await;
+                    if g.pending_login_id.as_deref() != login_id.as_deref() {
+                        return;
+                    }
+                }
                 let success = v.get("success").and_then(|x| x.as_bool()).unwrap_or(false);
                 let message = v
                     .get("message")
@@ -776,6 +817,7 @@ impl WeChatBridge {
                                     let mut g = self.inner.lock().await;
                                     g.bindings.push(binding);
                                     g.pending_bind = None;
+                                    g.pending_login_id = None;
                                     g.qr_content = None;
                                     g.conn = "starting";
                                     g.detail = None;
@@ -819,6 +861,7 @@ impl WeChatBridge {
                     });
                     // 失败后清掉待绑定目标，允许用户重新发起扫码。
                     g.pending_bind = None;
+                    g.pending_login_id = None;
                 }
                 self.emit_state().await;
             }
@@ -942,6 +985,7 @@ impl WeChatBridge {
                 // 让弹窗按钮恢复可用、可重新发起扫码；已绑定账号的运行时错误不受影响。
                 if g.pending_bind.is_some() {
                     g.pending_bind = None;
+                    g.pending_login_id = None;
                     g.qr_content = None;
                 }
             }
