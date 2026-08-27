@@ -1,9 +1,8 @@
 //! 微信 ClawBot 接入桥。
 //!
-//! 架构：本模块负责 Node sidecar（wechat-channel 包装进程）的生命周期、
-//! 「会话 ↔ 微信账号」绑定（bindings.json）、回合编排与回复路由；微信协议细节
-//! 全部由 sidecar 内的 wechat-channel 库承担。两端通过 stdio 换行分隔 JSON 通信
-//! （与驱动 codex app-server 的模式一致）。
+//! 架构：本模块负责「会话 ↔ 微信账号」绑定（bindings.json）、回合编排与回复路由；
+//! 微信协议（ilink bot API）由纯 Rust 的 wechat_client 承担，事件经 mpsc 推送本模块
+//! 消费（语义对齐原 Node sidecar 的 stdio 事件，前端 wechat/event 协议不变）。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -13,15 +12,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::time::timeout;
 
 use crate::codex::app_server::CodexServer;
+use crate::codex::wechat_client::{WechatClient, WechatEvent};
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// 排队入站消息上限；溢出立即回忙碌提示且该条丢弃。
 const QUEUE_LIMIT: usize = 16;
 /// 回复超长时按可见字符数切分发送。
@@ -121,35 +117,6 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
     out
 }
 
-/// 从单行事件 JSON 提取二维码内容（event=qr）。
-fn extract_qr(v: &Value) -> Option<String> {
-    if v.get("event")?.as_str()? != "qr" {
-        return None;
-    }
-    v.get("content")
-        .and_then(|c| c.as_str())
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-/// 从单行事件 JSON 提取入站文本消息（event=message 且带非空 text）。
-/// 返回 (accountId, from, text)；媒体等无文本消息返回 None 由调用方忽略。
-fn extract_message(v: &Value) -> Option<(String, String, String)> {
-    if v.get("event")?.as_str()? != "message" {
-        return None;
-    }
-    let msg = v.get("message")?;
-    let account = msg.get("accountId").and_then(|x| x.as_str())?.to_string();
-    let from = msg.get("from").and_then(|x| x.as_str())?.to_string();
-    let text = msg
-        .get("text")
-        .and_then(|x| x.as_str())
-        .map(str::trim)
-        .filter(|t| !t.is_empty())?
-        .to_string();
-    Some((account, from, text))
-}
-
 /// turn/start 参数：完整能力 + 免审批（dangerFullAccess 沙箱策略）。
 fn build_turn_params(thread_id: &str, text: &str, model: &str, client_message_id: &str) -> Value {
     json!({
@@ -202,36 +169,12 @@ async fn load_bindings(root: &Path) -> Vec<Value> {
     serde_json::from_str(&text).unwrap_or_default()
 }
 
-/// sidecar 脚本定位顺序：
-/// ① 环境变量 CODEX_UI_WECHAT_SIDECAR 显式指定；
-/// ② 打包资源 <exe>/resources/wechat-sidecar/wechat-sidecar.mjs；
-/// ③ 开发构建产物 <workspace>/sidecar-dist/wechat-sidecar.mjs；
-/// ④ 开发源码直跑 <workspace>/sidecar/wechat-sidecar.mjs（ESM 邻近解析依赖）。
-fn resolve_sidecar_script() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("CODEX_UI_WECHAT_SIDECAR") {
-        let pb = PathBuf::from(p);
-        if pb.is_file() {
-            return Some(pb);
-        }
-    }
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let candidates = [
-        exe_dir.join("resources").join("wechat-sidecar").join("wechat-sidecar.mjs"),
-        manifest.join("..").join("sidecar-dist").join("wechat-sidecar.mjs"),
-        manifest.join("..").join("sidecar").join("wechat-sidecar.mjs"),
-    ];
-    candidates.into_iter().find(|p| p.is_file())
-}
-
 // ---------------------------------------------------------------------------
 // 桥本体状态
 // ---------------------------------------------------------------------------
 
 struct BridgeInner {
-    child: Option<Child>,
-    stdin: Option<ChildStdin>,
-    /// sidecar 进程是否存活。
+    /// 微信协议客户端是否已启用（决定快照 running 字段）。
     alive: bool,
     /// 连接状态：offline｜starting｜awaiting_qr｜connected｜session_expired｜error
     conn: &'static str,
@@ -243,7 +186,7 @@ struct BridgeInner {
     pending_login_id: Option<String>,
     /// 当前生效的「会话 ↔ 微信账号」绑定（内存镜像，变更即落盘 bindings.json）。
     bindings: Vec<Value>,
-    /// 本代际 sidecar 中已下发过 start 的账号（防止重复启动接收器）。
+    /// 已启动过接收器的账号（防止重复启动）。
     started_accounts: HashSet<String>,
     /// 各绑定账号的连接状态（offline/starting/connected/session_expired/error）。
     account_conn: HashMap<String, String>,
@@ -262,21 +205,13 @@ struct BridgeInner {
     job_rx: Option<mpsc::UnboundedReceiver<()>>,
     /// 回合完成信号接收端（首启被泵任务取走）。
     done_rx: Option<mpsc::UnboundedReceiver<(String, String)>>,
-    /// sidecar 退出信号接收端（首启被监督任务取走）。
-    exit_rx: Option<mpsc::UnboundedReceiver<()>>,
-    /// 进程意外退出后的自动重启次数（v1 仅尝试一次）。
-    restarts: u32,
     /// 已记过首次忽略日志的「账号|发送者」键（进程内去重，防日志刷屏）。
     ignored_logged: HashSet<String>,
-    /// 退出监督任务是否已启动。
-    supervisor_started: bool,
 }
 
 impl Default for BridgeInner {
     fn default() -> Self {
         Self {
-            child: None,
-            stdin: None,
             alive: false,
             conn: "offline",
             detail: None,
@@ -294,10 +229,7 @@ impl Default for BridgeInner {
             pumps_started: false,
             job_rx: None,
             done_rx: None,
-            exit_rx: None,
-            restarts: 0,
             ignored_logged: HashSet::new(),
-            supervisor_started: false,
         }
     }
 }
@@ -307,10 +239,13 @@ pub struct WeChatBridge {
     server: Arc<CodexServer>,
     /// 微信数据根目录：%APPDATA%/<identifier>/wechat/
     root: PathBuf,
+    /// 纯 Rust 微信协议客户端（登录/接收/发送/存储）。
+    client: WechatClient,
+    /// 当前扫码登录的取消信号（共享；notify_waiters 不残留 permit）。
+    login_cancel: Arc<Notify>,
     inner: Mutex<BridgeInner>,
     job_tx: mpsc::UnboundedSender<()>,
     done_tx: mpsc::UnboundedSender<(String, String)>,
-    exit_tx: mpsc::UnboundedSender<()>,
     seq: AtomicU64,
 }
 
@@ -326,22 +261,33 @@ impl WeChatBridge {
         let root = app_dir.join("wechat");
         let (job_tx, job_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = mpsc::unbounded_channel();
-        let (exit_tx, exit_rx) = mpsc::unbounded_channel();
-        Arc::new(Self {
+        let (wechat_tx, mut wechat_rx) = mpsc::unbounded_channel();
+        let client = WechatClient::new(root.clone(), wechat_tx);
+        let bridge = Arc::new(Self {
             app,
             server,
             root,
+            client,
+            login_cancel: Arc::new(Notify::new()),
             inner: Mutex::new(BridgeInner {
                 job_rx: Some(job_rx),
                 done_rx: Some(done_rx),
-                exit_rx: Some(exit_rx),
                 ..Default::default()
             }),
             job_tx,
             done_tx,
-            exit_tx,
             seq: AtomicU64::new(0),
-        })
+        });
+        // 协议事件循环：消费 wechat_client 的 mpsc 事件（语义对齐原 sidecar stdio 事件）。
+        {
+            let this = bridge.clone();
+            tauri::async_runtime::spawn(async move {
+                while let Some(ev) = wechat_rx.recv().await {
+                    this.handle_wechat_event(ev).await;
+                }
+            });
+        }
+        bridge
     }
 
     /// 是否存在生效绑定（内存镜像；autostart / 绑定变更时刷新）。
@@ -349,7 +295,7 @@ impl WeChatBridge {
         !self.inner.lock().await.bindings.is_empty()
     }
 
-    /// 从磁盘装载绑定到内存（应用启动与绑定文件外部变化时调用）。
+    /// 从磁盘装载绑定到内存。
     async fn reload_bindings(self: &Arc<Self>) {
         let list = load_bindings(&self.root).await;
         self.inner.lock().await.bindings = list;
@@ -364,10 +310,6 @@ impl WeChatBridge {
             .iter()
             .find(|b| b.get("threadId").and_then(|v| v.as_str()) == Some(thread_id))
             .cloned()
-    }
-
-    async fn log(&self, level: &str, line: String) {
-        self.server.push_log(level, format!("[wechat] {line}")).await;
     }
 
     async fn snapshot(&self) -> Value {
@@ -417,27 +359,8 @@ impl WeChatBridge {
         self.emit_state().await;
     }
 
-    /// 向 sidecar 写一行指令（串行单写者；未运行时报错）。
-    async fn send_cmd(&self, cmd: Value) -> Result<(), String> {
-        let mut g = self.inner.lock().await;
-        let stdin = g
-            .stdin
-            .as_mut()
-            .ok_or_else(|| "微信桥未启动".to_string())?;
-        let line = serde_json::to_string(&cmd).map_err(|e| e.to_string())?;
-        stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| format!("写微信桥指令失败: {e}"))?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| format!("写微信桥指令失败: {e}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| format!("写微信桥指令失败: {e}"))?;
-        Ok(())
+    async fn log(&self, level: &str, line: String) {
+        self.server.push_log(level, format!("[wechat] {line}")).await;
     }
 
     fn next_message_id(&self) -> String {
@@ -449,69 +372,11 @@ impl WeChatBridge {
         format!("wechat-{ms}-{n}")
     }
 
-    /// 常驻 sidecar 退出监督：仅在首个外部入口调用一次。绝不放进 start_service，
-    /// 否则 reader→exit→start_service 构成 future 类型自环，编译期无法证明 Send。
-    async fn ensure_supervisor(self: &Arc<Self>) {
-        let first = {
-            let mut g = self.inner.lock().await;
-            let first = !g.supervisor_started;
-            g.supervisor_started = true;
-            (first, g.exit_rx.take())
-        };
-        if let (true, Some(exit_rx)) = first {
-            tauri::async_runtime::spawn(Self::supervise_exits(self.clone(), exit_rx));
-        }
-    }
-
-    // -- 生命周期 -----------------------------------------------------------
-
-    /// 应用启动自动恢复：存在绑定则拉起 sidecar，accounts 快照到达后逐个恢复接收。
-    pub async fn autostart(self: &Arc<Self>) {
-        self.ensure_supervisor().await;
-        self.reload_bindings().await;
-        if !self.has_bindings().await {
-            return;
-        }
-        if let Err(e) = self.start_service().await {
-            self.set_error(format!("微信接入自动启动失败: {e}")).await;
-        }
-    }
-
-    /// 拉起 sidecar 进程与后台循环（幂等：已存活直接返回 Ok）。
-    pub async fn start_service(self: &Arc<Self>) -> Result<(), String> {
-        if self.inner.lock().await.alive {
-            return Ok(());
-        }
-        let script = resolve_sidecar_script()
-            .ok_or_else(|| "未找到 wechat-sidecar 脚本（请先执行 npm run build:sidecar）".to_string())?;
-        let mut cmd =
-            Command::new(std::env::var("CODEX_UI_NODE").unwrap_or_else(|_| "node".into()));
-        cmd.arg(&script)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        #[cfg(windows)]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        cmd.kill_on_drop(true);
-        let mut child = cmd.spawn().map_err(|e| {
-            format!("启动 Node 微信桥失败（确认本机已安装 node 且在 PATH 中）: {e}")
-        })?;
-        let stdin = child.stdin.take().ok_or("无法获取微信桥 stdin")?;
-        let stdout = child.stdout.take().ok_or("无法获取微信桥 stdout")?;
-        let stderr = child.stderr.take().ok_or("无法获取微信桥 stderr")?;
-
-        // 后台循环（泵/通知订阅）桥生命周期内只起一次；通道接收端只能取一次，
-        // 后续进程重启不再重建（事件通道与具体子进程解耦）。
+    /// 启用微信协议客户端（客户端对象常驻，此方法仅翻转 running 标记并启动泵）。
+    async fn ensure_client(self: &Arc<Self>) {
         {
             let mut g = self.inner.lock().await;
-            g.child = Some(child);
-            g.stdin = Some(stdin);
             g.alive = true;
-            g.conn = "starting";
-            g.detail = None;
-            g.qr_content = None;
-            // 新进程代际：接收器全部未启动，等待 accounts 快照按绑定逐个触发。
-            g.started_accounts.clear();
             let pumps_first = !g.pumps_started;
             g.pumps_started = true;
             if pumps_first {
@@ -523,69 +388,25 @@ impl WeChatBridge {
                 }
             }
         }
-
-        // stdout 读循环：每次拉起新进程都重建一个。
-        let this = self.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut reader = BufReader::new(stdout);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let trimmed = line.trim();
-                        if trimmed.is_empty() {
-                            continue;
-                        }
-                        match serde_json::from_str::<Value>(trimmed) {
-                            Ok(v) => this.handle_sidecar_event(v).await,
-                            Err(e) => {
-                                this.log("warn", format!("无法解析 sidecar 输出: {e}")).await
-                            }
-                        }
-                    }
-                }
-            }
-            // 退出后续处理交由常驻监督任务，避免 reader future 递归引用 start_service。
-            let _ = this.exit_tx.send(());
-        });
-        // stderr 仅记日志，便于排查库内部报错。
-        let srv = self.server.clone();
-        tauri::async_runtime::spawn(async move {
-            let mut reader = BufReader::new(stderr);
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let t = line.trim_end().to_string();
-                        if !t.is_empty() {
-                            srv.push_log("info", format!("[wechat][stderr] {t}")).await;
-                        }
-                    }
-                }
-            }
-        });
-
-        // 初始化指令：stateDir 指向应用数据目录，避免默认落到 ~/.wechannel。
-        let state_dir = self.root.join("wechannel-data");
-        self.send_cmd(json!({ "cmd": "init", "stateDir": state_dir.to_string_lossy() }))
-            .await?;
-        self.log("info", format!("sidecar 已启动：{}", script.display()))
-            .await;
-        self.emit_state().await;
-        Ok(())
     }
 
-    /// 停止 sidecar 并清空运行态（退出前 / 无绑定兜底调用）。绑定持久化数据保留。
-    pub async fn stop_service(&self) {
-        let mut g = self.inner.lock().await;
-        if let Some(mut child) = g.child.take() {
-            let _ = child.kill().await;
+    // -- 生命周期 -----------------------------------------------------------
+
+    /// 应用启动自动恢复：存在绑定则启用客户端，并按账号快照启动接收器。
+    pub async fn autostart(self: &Arc<Self>) {
+        self.reload_bindings().await;
+        if !self.has_bindings().await {
+            return;
         }
-        g.stdin = None;
+        self.ensure_client().await;
+        let accounts = self.client.accounts();
+        self.handle_wechat_event(WechatEvent::Accounts(accounts)).await;
+    }
+
+    /// 停止全部接收器并清空运行态（退出前调用）。绑定持久化数据保留。
+    pub async fn shutdown(&self) {
+        self.client.shutdown().await;
+        let mut g = self.inner.lock().await;
         g.alive = false;
         g.conn = "offline";
         g.detail = None;
@@ -597,49 +418,8 @@ impl WeChatBridge {
         g.queue.clear();
         g.overflow_notified.clear();
         g.active_thread = None;
-        g.restarts = 0;
     }
 
-}
-
-impl WeChatBridge {
-    /// sidecar 退出监督：存在绑定时静默重启一次。
-    async fn supervise_exits(self: Arc<Self>, mut rx: mpsc::UnboundedReceiver<()>) {
-        while rx.recv().await.is_some() {
-            let allow_restart = {
-                let mut g = self.inner.lock().await;
-                g.alive = false;
-                g.queue.clear();
-                g.overflow_notified.clear();
-                g.active_thread = None;
-                let allow = g.restarts < 1 && !g.bindings.is_empty();
-                if allow {
-                    g.restarts += 1;
-                    g.conn = "starting";
-                    g.detail = Some("进程退出，3 秒后尝试重启".into());
-                } else {
-                    g.conn = "offline";
-                    g.detail = None;
-                }
-                allow
-            };
-            self.emit_state().await;
-            if !allow_restart {
-                continue;
-            }
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            if !self.has_bindings().await {
-                continue;
-            }
-            if let Err(e) = self.start_service().await {
-                self.set_error(format!("微信桥重启失败: {e}")).await;
-                continue;
-            }
-        }
-    }
-}
-
-impl WeChatBridge {
     // -- 命令面（供 Tauri command 调用） ------------------------------------
 
     /// 当前状态快照。
@@ -656,9 +436,8 @@ impl WeChatBridge {
         })
     }
 
-    /// 对指定会话发起扫码绑定：校验未绑定 → 起 sidecar → 下发 login，二维码经事件回传。
+    /// 对指定会话发起扫码绑定：校验未绑定 → 启用客户端 → 发起登录（二维码经事件回传）。
     pub async fn bind_login_start(self: &Arc<Self>, thread_id: &str) -> Result<(), String> {
-        self.ensure_supervisor().await;
         {
             let g = self.inner.lock().await;
             if g.bindings
@@ -668,11 +447,9 @@ impl WeChatBridge {
                 return Err("该会话已绑定微信".into());
             }
         }
-        self.start_service().await?;
-        // 先取消上一个在途登录（若有），避免残留阻塞本次绑定。
-        if self.inner.lock().await.pending_login_id.is_some() {
-            let _ = self.send_cmd(json!({ "cmd": "login_cancel" })).await;
-        }
+        self.ensure_client().await;
+        // 取消上一个在途登录（若有），避免残留 QR/结果干扰本次绑定。
+        self.login_cancel.notify_waiters();
         let login_id = self.next_message_id();
         {
             let mut g = self.inner.lock().await;
@@ -683,8 +460,8 @@ impl WeChatBridge {
             g.conn = "starting";
         }
         self.emit_state().await;
-        self.send_cmd(json!({ "cmd": "login", "timeoutMs": 480_000, "loginId": login_id }))
-            .await
+        self.client.start_login(login_id, self.login_cancel.clone());
+        Ok(())
     }
 
     /// 取消当前扫码绑定（弹窗关闭时调用）：取消在途登录并清待绑定目标（幂等）。
@@ -696,9 +473,7 @@ impl WeChatBridge {
         if !had_pending {
             return;
         }
-        if self.inner.lock().await.alive {
-            let _ = self.send_cmd(json!({ "cmd": "login_cancel" })).await;
-        }
+        self.login_cancel.notify_waiters();
         {
             let mut g = self.inner.lock().await;
             g.pending_bind = None;
@@ -715,19 +490,18 @@ impl WeChatBridge {
         let Some(binding) = target else {
             return Ok(());
         };
-        let account_id = binding.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        // 尽力清除 sidecar 侧凭据与接收器（未运行/失败不影响解绑）。
-        if self.inner.lock().await.alive {
-            if !account_id.is_empty() {
-                let _ = self.send_cmd(json!({ "cmd": "logout", "accountId": account_id })).await;
-                let _ = self.send_cmd(json!({ "cmd": "stop", "accountId": account_id })).await;
-            }
+        let account_id = binding
+            .get("accountId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !account_id.is_empty() {
+            self.client.logout(&account_id).await;
         }
         {
             let mut g = self.inner.lock().await;
-            g.bindings.retain(|b| {
-                b.get("threadId").and_then(|v| v.as_str()) != Some(thread_id)
-            });
+            g.bindings
+                .retain(|b| b.get("threadId").and_then(|v| v.as_str()) != Some(thread_id));
             if !account_id.is_empty() {
                 g.started_accounts.remove(&account_id);
                 g.account_conn.remove(&account_id);
@@ -748,50 +522,34 @@ impl WeChatBridge {
         Ok(())
     }
 
-    // -- sidecar 事件分发 ----------------------------------------------------
+    // -- 协议事件处理 --------------------------------------------------------
 
-    async fn handle_sidecar_event(self: &Arc<Self>, v: Value) {
-        let ev = v.get("event").and_then(|x| x.as_str()).unwrap_or("");
+    async fn handle_wechat_event(self: &Arc<Self>, ev: WechatEvent) {
         match ev {
-            "ready" => {
-                {
-                    let mut g = self.inner.lock().await;
-                    g.detail = None;
-                }
+            WechatEvent::Qr(url) => {
+                let mut g = self.inner.lock().await;
+                g.qr_content = Some(url);
+                g.conn = "awaiting_qr";
+                g.detail = None;
+                drop(g);
                 self.emit_state().await;
             }
-            "qr" => {
-                if let Some(content) = extract_qr(&v) {
-                    {
-                        let mut g = self.inner.lock().await;
-                        g.qr_content = Some(content);
-                        g.conn = "awaiting_qr";
-                        g.detail = None;
-                    }
-                    self.emit_state().await;
-                }
-            }
-            "login_result" => {
-                let login_id = v.get("loginId").and_then(|x| x.as_str()).map(str::to_string);
-                // 仅处理当前 pending 登录的结果；被新登录接管或已取消的陈旧结果直接忽略。
+            WechatEvent::LoginResult {
+                login_id,
+                success,
+                message,
+                account_id,
+                user_id,
+            } => {
+                // 仅处理当前 pending 登录的结果；被接管/取消的陈旧结果直接忽略。
                 {
                     let g = self.inner.lock().await;
-                    if g.pending_login_id.as_deref() != login_id.as_deref() {
+                    if g.pending_login_id.as_deref() != Some(login_id.as_str()) {
                         return;
                     }
                 }
-                let success = v.get("success").and_then(|x| x.as_bool()).unwrap_or(false);
-                let message = v
-                    .get("message")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let account =
-                    v.get("accountId").and_then(|x| x.as_str()).map(str::to_string);
-                let user_id = v.get("userId").and_then(|x| x.as_str()).map(str::to_string);
-                let pending = self.inner.lock().await.pending_bind.clone();
                 if success {
-                    match (pending, account, user_id) {
+                    match (self.inner.lock().await.pending_bind.clone(), account_id, user_id) {
                         (Some(thread_id), Some(account), Some(user_id)) => {
                             let start_account = account.clone();
                             let conflict = {
@@ -834,12 +592,7 @@ impl WeChatBridge {
                                     format!("会话 {thread_id} 已绑定微信账号 {start_account}"),
                                 )
                                 .await;
-                                if let Err(e) = self
-                                    .send_cmd(json!({ "cmd": "start", "accountId": start_account }))
-                                    .await
-                                {
-                                    self.set_error(format!("启动消息接收失败: {e}")).await;
-                                }
+                                self.client.start_receiver(start_account).await;
                             }
                         }
                         _ => {
@@ -865,24 +618,19 @@ impl WeChatBridge {
                 }
                 self.emit_state().await;
             }
-            "session_status" => {
-                let status = v
-                    .pointer("/status/status")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("");
-                let account = v
-                    .pointer("/status/accountId")
-                    .and_then(|x| x.as_str())
-                    .map(str::to_string);
+            WechatEvent::SessionStatus {
+                account_id,
+                status,
+                error_code: _,
+                error_message: _,
+            } => {
                 {
                     let mut g = self.inner.lock().await;
-                    if let Some(id) = account.as_deref() {
-                        if g.bindings
-                            .iter()
-                            .any(|b| b.get("accountId").and_then(|v| v.as_str()) == Some(id))
-                        {
-                            g.account_conn.insert(id.to_string(), status.to_string());
-                        }
+                    if g.bindings
+                        .iter()
+                        .any(|b| b.get("accountId").and_then(|v| v.as_str()) == Some(account_id.as_str()))
+                    {
+                        g.account_conn.insert(account_id.clone(), status.clone());
                     }
                     // 桥级连接取「最优」状态：任一 connected → connected；否则有过期 →
                     // session_expired；否则有 disconnected → offline；否则维持原值。
@@ -902,83 +650,80 @@ impl WeChatBridge {
                 }
                 self.emit_state().await;
             }
-            "message" => {
-                if let Some((account, from, text)) = extract_message(&v) {
-                    let thread_id = {
-                        let g = self.inner.lock().await;
-                        find_binding_for_message(&g.bindings, &account, &from)
-                            .and_then(|b| b.get("threadId").and_then(|v| v.as_str()))
-                            .map(str::to_string)
-                    };
-                    if let Some(thread_id) = thread_id {
-                        self.enqueue_inbound(InboundMessage {
-                            account_id: account,
-                            thread_id,
-                            from,
-                            text,
-                        })
-                        .await;
-                    } else {
-                        // 「谁扫谁白」门禁：非绑定账号/非本人消息仅首次记一条日志，防刷屏。
-                        let key = format!("{account}|{from}");
-                        let first_ignore = {
-                            let mut g = self.inner.lock().await;
-                            g.ignored_logged.insert(key.clone())
-                        };
-                        if first_ignore {
-                            self.log(
-                                "info",
-                                format!("忽略非绑定消息：{from}（账号 {account} 未绑定该会话）"),
-                            )
-                            .await;
-                        }
-                    }
-                }
-                // 无文本（图片/语音等）按方案直接忽略。
-            }
-            "accounts" => {
-                // 重启复登：对所有已绑定且可启动的账号逐个恢复接收（每进程代际一次）。
-                if let Some(list) = v.get("accounts").and_then(|x| x.as_array()).cloned() {
-                    let mut started: Vec<String> = Vec::new();
-                    {
+            WechatEvent::Message {
+                account_id,
+                from,
+                to: _,
+                timestamp: _,
+                context_token: _,
+                text,
+            } => {
+                // 媒体等无文本消息直接忽略。
+                let Some(text) = text else {
+                    return;
+                };
+                let thread_id = {
+                    let g = self.inner.lock().await;
+                    find_binding_for_message(&g.bindings, &account_id, &from)
+                        .and_then(|b| b.get("threadId").and_then(|v| v.as_str()))
+                        .map(str::to_string)
+                };
+                if let Some(thread_id) = thread_id {
+                    self.enqueue_inbound(InboundMessage {
+                        account_id,
+                        thread_id,
+                        from,
+                        text,
+                    })
+                    .await;
+                } else {
+                    // 「谁扫谁白」门禁：非绑定账号/非本人消息仅首次记一条日志，防刷屏。
+                    let key = format!("{account_id}|{from}");
+                    let first_ignore = {
                         let mut g = self.inner.lock().await;
-                        let bound: Vec<String> = g
-                            .bindings
-                            .iter()
-                            .filter_map(|b| {
-                                b.get("accountId").and_then(|v| v.as_str()).map(str::to_string)
-                            })
-                            .collect();
-                        for acct in &list {
-                            let id = acct.get("id").and_then(|x| x.as_str()).unwrap_or("");
-                            if bound.iter().any(|b| b == id)
-                                && account_is_startable(acct)
-                                && !g.started_accounts.contains(id)
-                            {
-                                g.started_accounts.insert(id.to_string());
-                                g.account_conn.insert(id.to_string(), "starting".into());
-                                started.push(id.to_string());
-                            }
-                        }
+                        g.ignored_logged.insert(key.clone())
+                    };
+                    if first_ignore {
+                        self.log(
+                            "info",
+                            format!("忽略非绑定消息：{from}（账号 {account_id} 未绑定该会话）"),
+                        )
+                        .await;
                     }
-                    for id in started {
-                        self.log("info", format!("已自动恢复消息接收（{id}）")).await;
-                        if let Err(e) =
-                            self.send_cmd(json!({ "cmd": "start", "accountId": id })).await
-                        {
-                            self.set_error(format!("自动恢复消息接收失败: {e}")).await;
-                        }
-                    }
-                    self.emit_state().await;
                 }
             }
-            "error" => {
-                let message = v
-                    .get("message")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("未知错误")
-                    .to_string();
-                self.log("warn", format!("sidecar 错误: {message}")).await;
+            WechatEvent::Accounts(list) => {
+                // 重启复登：对所有已绑定且可启动的账号逐个恢复接收。
+                let mut started: Vec<String> = Vec::new();
+                {
+                    let mut g = self.inner.lock().await;
+                    let bound: Vec<String> = g
+                        .bindings
+                        .iter()
+                        .filter_map(|b| {
+                            b.get("accountId").and_then(|v| v.as_str()).map(str::to_string)
+                        })
+                        .collect();
+                    for acct in &list {
+                        let id = acct.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                        if bound.iter().any(|b| b == id)
+                            && account_is_startable(acct)
+                            && !g.started_accounts.contains(id)
+                        {
+                            g.started_accounts.insert(id.to_string());
+                            g.account_conn.insert(id.to_string(), "starting".into());
+                            started.push(id.to_string());
+                        }
+                    }
+                }
+                for id in started {
+                    self.log("info", format!("已自动恢复消息接收（{id}）")).await;
+                    self.client.start_receiver(id).await;
+                }
+                self.emit_state().await;
+            }
+            WechatEvent::Error { message, kind } => {
+                self.log("warn", format!("微信协议错误（{kind}）: {message}")).await;
                 let mut g = self.inner.lock().await;
                 g.detail = Some(message);
                 // 扫码绑定流程中的错误（pending 非空）：清掉待绑定目标与二维码，
@@ -989,7 +734,6 @@ impl WeChatBridge {
                     g.qr_content = None;
                 }
             }
-            _ => {}
         }
     }
 
@@ -997,7 +741,7 @@ impl WeChatBridge {
     async fn enqueue_inbound(self: &Arc<Self>, msg: InboundMessage) {
         let mut g = self.inner.lock().await;
         if !g.alive {
-            return; // 进程不在，静默丢弃（重启后新消息自然流入）
+            return; // 客户端未启用，静默丢弃（重启后新消息自然流入）
         }
         g.overflow_notified.remove(&msg.from);
         let full = queue_overflow(g.active_thread.is_some(), g.queue.len());
@@ -1019,22 +763,12 @@ impl WeChatBridge {
     /// 绕过队列的即时回复（忙碌提示 / 失败提示等系统文案）。
     async fn send_reply_now(self: &Arc<Self>, account_id: &str, peer: &str, text: &str) {
         for chunk in chunk_text(text, REPLY_CHUNK_CHARS) {
-            if let Err(e) = self
-                .send_cmd(json!({
-                    "cmd": "send_text",
-                    "accountId": account_id,
-                    "toUserId": peer,
-                    "text": chunk,
-                }))
-                .await
-            {
+            if let Err(e) = self.client.send_text(account_id, peer, &chunk).await {
                 self.log("warn", format!("回复 {peer} 失败: {e}")).await;
             }
         }
     }
-}
 
-impl WeChatBridge {
     // -- Codex 回合编排 ------------------------------------------------------
 
     /// 订阅 codex 服务器通知：收集 agentMessage 文本并在 turn/completed 时唤醒泵。
@@ -1047,7 +781,8 @@ impl WeChatBridge {
                     Ok((method, params)) => {
                         match method.as_str() {
                             "item/completed" => {
-                                let is_agent = params.pointer("/item/type").and_then(|t| t.as_str()) == Some("agentMessage");
+                                let is_agent = params.pointer("/item/type").and_then(|t| t.as_str())
+                                    == Some("agentMessage");
                                 if !is_agent {
                                     continue;
                                 }
@@ -1127,7 +862,13 @@ impl WeChatBridge {
                             current = Some(c); // 他线完成信号：放回继续等本线程
                             continue;
                         }
-                        let text = self.inner.lock().await.pending_reply.remove(&c.thread_id).unwrap_or_default();
+                        let text = self
+                            .inner
+                            .lock()
+                            .await
+                            .pending_reply
+                            .remove(&c.thread_id)
+                            .unwrap_or_default();
                         let final_text = normalize_turn_text(&text, &status);
                         self.finish_active(&c.account_id, &c.peer, &final_text).await;
                     }
@@ -1142,11 +883,17 @@ impl WeChatBridge {
     }
 
     /// 回合开始：在绑定线程上发起 turn/start；失败时返回 (账号, 联系人, 失败文案)。
-    async fn begin_turn(self: &Arc<Self>, job: InboundMessage) -> Result<ActiveTurn, (String, String, String)> {
+    async fn begin_turn(
+        self: &Arc<Self>,
+        job: InboundMessage,
+    ) -> Result<ActiveTurn, (String, String, String)> {
         let peer = job.from.clone();
         let account = job.account_id.clone();
         let thread_id = job.thread_id.clone();
-        match self.run_turn_on_thread(&account, &peer, &thread_id, &job.text).await {
+        match self
+            .run_turn_on_thread(&account, &peer, &thread_id, &job.text)
+            .await
+        {
             Ok(t) => Ok(t),
             Err((p, fail)) => {
                 // 绑定线程已被删除（外部删除/清理）：自动解除该会话的微信绑定并停止接收，
@@ -1299,11 +1046,8 @@ mod tests {
             { "threadId": "t-1", "accountId": "bot-1", "userId": "u-1" },
         ]);
         let list = bindings.as_array().unwrap();
-        // 同线程冲突
         assert!(binding_conflict(list, "t-1", "bot-2"));
-        // 同账号冲突
         assert!(binding_conflict(list, "t-2", "bot-1"));
-        // 均不冲突
         assert!(!binding_conflict(list, "t-2", "bot-2"));
     }
 
@@ -1314,20 +1058,17 @@ mod tests {
             { "threadId": "t-2", "accountId": "bot-2", "userId": "wx_other" },
         ]);
         let list = bindings.as_array().unwrap();
-        // 账号 + 本人命中；两侧 trim 后匹配
         let hit = find_binding_for_message(list, "bot-1", " wx_me ");
         assert_eq!(
             hit.and_then(|b| b.get("threadId").and_then(|v| v.as_str())),
             Some("t-1")
         );
-        // 非本人 / 非绑定账号不命中
         assert!(find_binding_for_message(list, "bot-1", "wx_friend").is_none());
         assert!(find_binding_for_message(list, "bot-9", "wx_me").is_none());
     }
 
     #[test]
     fn queue_overflow_only_when_busy_at_limit() {
-        // 空闲时不判满（泵会立即取走队首）；忙线且到达上限才丢弃。
         assert!(!queue_overflow(false, QUEUE_LIMIT));
         assert!(!queue_overflow(true, QUEUE_LIMIT - 1));
         assert!(queue_overflow(true, QUEUE_LIMIT));
@@ -1335,46 +1076,12 @@ mod tests {
 
     #[test]
     fn chunk_text_splits_utf8_safely() {
-        let text = "中文a🦞".repeat(700); // 2800 个可见字符，含多字节 emoji
+        let text = "中文a🦞".repeat(700);
         let chunks = chunk_text(&text, REPLY_CHUNK_CHARS);
         assert_eq!(chunks.len(), 2);
-        let joined: String = chunks.concat();
-        assert_eq!(joined, text);
-        // 空文本与短文本不分段
+        assert_eq!(chunks.concat(), text);
         assert_eq!(chunk_text("", 10), vec![String::new()]);
         assert_eq!(chunk_text("hi", 10).len(), 1);
-    }
-
-    #[test]
-    fn extract_qr_and_message_shape() {
-        let qr = json!({ "event": "qr", "content": "http://weixin/abc" });
-        assert_eq!(
-            extract_qr(&qr).as_deref(),
-            Some("http://weixin/abc")
-        );
-        assert!(extract_qr(&json!({ "event": "qr" })).is_none());
-        assert!(extract_qr(&json!({ "event": "other" })).is_none());
-
-        let msg = json!({
-            "event": "message",
-            "message": {
-                "accountId": "bot-1",
-                "from": "wx_alice",
-                "text": " 1 + 1 = ? ",
-                "image": { "path": "x.jpg" },
-            },
-        });
-        let (account, from, text) = extract_message(&msg).unwrap();
-        assert_eq!(account, "bot-1");
-        assert_eq!(from, "wx_alice");
-        assert_eq!(text, "1 + 1 = ?");
-
-        // 媒体消息无文本：返回 None 由调用方忽略
-        let media = json!({
-            "event": "message",
-            "message": { "accountId": "b", "from": "p", "image": {} },
-        });
-        assert!(extract_message(&media).is_none());
     }
 
     #[test]
@@ -1411,11 +1118,7 @@ mod tests {
         save_bindings(root, arr).await.unwrap();
         let loaded = load_bindings(root).await;
         assert_eq!(loaded.len(), 2);
-        assert_eq!(
-            loaded[0].get("threadId").and_then(|v| v.as_str()),
-            Some("t-a")
-        );
-        // 覆盖写不残留临时文件
+        assert_eq!(loaded[0].get("threadId").and_then(|v| v.as_str()), Some("t-a"));
         let list2 = json!([{ "threadId": "t-c", "accountId": "bot-c", "userId": "u-c" }]);
         save_bindings(root, list2.as_array().unwrap()).await.unwrap();
         assert_eq!(load_bindings(root).await.len(), 1);
@@ -1424,17 +1127,14 @@ mod tests {
 
     #[test]
     fn thread_not_found_detection() {
-        // 正例：codex 删除线程后 turn/start 的典型报错。
         assert!(is_thread_not_found(
             "⚠️ 执行失败：thread not found: 01a04189-376d-7660-a4a3-94afbe4b9d5d"
         ));
         assert!(is_thread_not_found("thread not found: abc"));
-        assert!(is_thread_not_found("Thread Not Found: abc")); // 大小写不敏感
+        assert!(is_thread_not_found("Thread Not Found: abc"));
         assert!(is_thread_not_found("thread does not exist: abc"));
-        // 反例：不误判其它 not found。
         assert!(!is_thread_not_found("⚠️ 执行失败：model not found"));
         assert!(!is_thread_not_found("⚠️ 执行失败：file not found: x"));
         assert!(!is_thread_not_found(""));
     }
-
 }

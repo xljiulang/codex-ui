@@ -16,3 +16,4 @@ pub mod skills;
 pub mod terminal;
 pub mod util;
 pub mod wechat_bridge;
+pub mod wechat_client;

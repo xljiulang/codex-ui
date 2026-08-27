@@ -285,7 +285,7 @@ pub fn run() {
                 if let Some(wechat) =
                     app_handle.try_state::<Arc<codex::wechat_bridge::WeChatBridge>>()
                 {
-                    tauri::async_runtime::block_on(wechat.stop_service());
+                    tauri::async_runtime::block_on(wechat.shutdown());
                 }
             }
         });

@@ -1,5 +1,4 @@
 node_modules
-sidecar/node_modules
 sidecar-dist
 dist
 coverage

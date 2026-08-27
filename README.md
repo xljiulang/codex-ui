@@ -58,7 +58,7 @@ codex-ui.exe（Tauri 2 窗口）
 
 - Windows 10/11（自带 WebView2）
 - Rust stable-msvc（rustup）+ VS C++ 构建工具
-- Node.js 18+
+- Node.js 18+（仅开发/构建需要；运行端不需要）
 - `codex` CLI（可在设置页指定路径；当前仅适配 codex-cli 0.149.x，验证基线 0.149.0）
 - 全部 Git 功能需要系统已安装 **Git**（启动时探测 `git --version` 并缓存；未安装时功能禁用/报错并提示安装）
 
@@ -84,7 +84,7 @@ cargo build --release --manifest-path src-tauri\Cargo.toml
 build-release.bat
 ```
 
-产物：`setup\output\codex-ui-win-x64.exe`。脚本自动依次执行前端构建（`npm run build`）→ 微信 sidecar 构建（`npm run build:sidecar`）→ Rust release（`cargo build --release`）→ 把 exe 与 sidecar 暂存到 `setup\` → Inno Setup 编译（`setup\setup.iss`）。
+产物：`setup\output\codex-ui-win-x64.exe`。脚本自动依次执行前端构建（`npm run build`）→ Rust release（`cargo build --release`）→ 把 exe 暂存到 `setup\` → Inno Setup 编译（`setup\setup.iss`）。
 
 > 注意：`Cargo.toml` 中 `tauri` 依赖已启用 `custom-protocol` 与 `protocol-asset` 特性。前者保证生产窗口加载打包的前端（否则会去连 `localhost:5173` 显示“拒绝连接”），后者用于 asset 协议加载本地图片。
 
@@ -139,24 +139,23 @@ E2E 探针自建临时目录与会话，结束时自动清理；CDP 端口被占
 经**微信官方 ClawBot 通道**（ilink bot API）把你的 Codex 带进微信聊天——在历史会话上右键「微信接入」扫码绑定后，直接在 ClawBot 联系人里发消息，就会驱动该会话中的 Codex 完成回合，并把回复以绑定的账号被动发回，实现「人在外面、Codex 在家里干活」的远控体验。
 
 启用步骤：
-1. 在本机安装 Node.js（与 codex 的 npm 安装前提一致）；
-2. 在历史会话面板右键目标会话 →「微信接入」；
-3. 点击「扫码绑定」并扫描二维码 —— 完成。门禁为**谁扫谁白**：只有扫码绑定的这个微信号本人发来的消息会交给该会话，其他联系人的消息一律忽略并记录，无需填写任何 ID。
+1. 在历史会话面板右键目标会话 →「微信接入」；
+2. 点击「扫码绑定」并扫描二维码 —— 完成。门禁为**谁扫谁白**：只有扫码绑定的这个微信号本人发来的消息会交给该会话，其他联系人的消息一律忽略并记录，无需填写任何 ID。
 
 行为约定与限制：
 
 - **按会话绑定**：一个会话最多绑定一个微信账号，一个微信账号也只能绑定一个会话；支持多个会话各自绑定不同微信账号。删除已绑定会话会自动解除绑定并停止该账号接收。
 - **文本 only**：图片 / 语音 / 文件 / 视频消息自动忽略；回复为最终 agent 文本，超长自动分段（约 1800 字/条）。
-- **回复保留 Markdown 原文**：Codex 回复按原始 Markdown 发送、不做纯文本剥离（`wechat-channel` 库的剥离逻辑已在 sidecar 构建期绕过），由微信端/ClawBot 侧负责渲染；忙碌/失败等系统提示仍为纯文本。
+- **回复保留 Markdown 原文**：Codex 回复按原始 Markdown 直接发送（协议由 Rust 内置实现，不做任何剥离），由微信端/ClawBot 侧负责渲染；忙碌/失败等系统提示仍为纯文本。
 - **被动回复窗口**：平台要求回复携带收到消息时的 `contextToken`，且 24 小时有效——只能回复来过消息的联系人，无法主动推送；过期后需要对方再发一条新消息重新开启窗口。
 - **免审批完整能力 + 本人门禁**：微信触发的回合固定使用「完全访问 + 免审批」（cwd 固定为应用启动工作区）；由于门禁只放行扫码绑定账号本人，请勿将该微信出借他人使用。
 - **在线范围**：bot 仅在 codex-ui 运行期间在线；窗口关闭即停止长轮询并使 bot 离线。绑定会话意外退出时会静默重启一次并恢复已绑定账号的接收。
-- **凭据存储**：登录 token 由 sidecar 保存在 `%APPDATA%\com.codexui.app\wechat\wechannel-data\`（应用数据目录内）；`会话 ↔ 微信账号` 绑定存于同目录 `bindings.json`。
+- **凭据存储**：登录 token 由应用保存在 `%APPDATA%\com.codexui.app\wechat\wechannel-data\`（应用数据目录内）；`会话 ↔ 微信账号` 绑定存于同目录 `bindings.json`。
 - **排队规则**：同一联系人的消息串行执行（FIFO，上限 16 条），溢出时回一条忙碌提示；单回合最长等待 10 分钟，超时按失败回复。
 
 排查提示：若绑定后聊天无响应而绑定弹窗状态已显示「已连接」，查看应用日志中「忽略非绑定消息：<ID>」——如该 ID 就是你的使用账号（个别版本平台可能不回传统一 userId），属协议行为差异；可在 GitHub 反馈补充场景信息。
 
-构建与自检：`npm run build:sidecar` 生成随包分发的单文件 sidecar；`npm run smoke:sidecar` 可在本地冒烟验证 sidecar 启动与 init 链路。
+微信协议由 Rust 内置实现（`wechat_client`），无需 Node sidecar 或额外运行时。
 
 ## 协议与版本支持
 
