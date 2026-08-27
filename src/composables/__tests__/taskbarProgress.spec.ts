@@ -35,9 +35,14 @@ vi.mock("@tauri-apps/api/window", () => ({
 import { activeTabId, tabs } from "../useEditorTabs";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import type { SessionTab } from "../useCodex/types";
-import { makeSessionTab, resetUseCodexState } from "./useCodexTestHarness";
+import {
+  fireListen,
+  makeSessionTab,
+  resetUseCodexState,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { wireEvents } from "../useCodex/events";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedListen = vi.mocked(listen);
@@ -78,5 +83,30 @@ describe("任务栏不确定进度条", () => {
     sessionTab().turnActive = true;
     await nextTick();
     expect(h.win.setProgressBar).not.toHaveBeenCalled();
+  });
+
+  it("taskbar-progress-refresh 事件：按当前工作态重新应用进度条", async () => {
+    sessionTab().turnActive = true;
+    await nextTick();
+    expect(h.win.setProgressBar).toHaveBeenLastCalledWith({
+      status: "indeterminate",
+    });
+
+    // 注册 wireEvents 以监听 taskbar-progress-refresh（模拟窗口从托盘恢复的通知）
+    await wireEvents();
+    h.win.setProgressBar.mockClear();
+    fireListen("taskbar-progress-refresh", undefined);
+    await nextTick();
+    expect(h.win.setProgressBar).toHaveBeenLastCalledWith({
+      status: "indeterminate",
+    });
+
+    // 无工作态时刷新 → none
+    sessionTab().turnActive = false;
+    await nextTick();
+    h.win.setProgressBar.mockClear();
+    fireListen("taskbar-progress-refresh", undefined);
+    await nextTick();
+    expect(h.win.setProgressBar).toHaveBeenLastCalledWith({ status: "none" });
   });
 });

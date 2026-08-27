@@ -95,6 +95,14 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
+    await listen("taskbar-progress-refresh", () => {
+      // 窗口从托盘恢复后重新应用任务栏进度：工作态未变时 watch 不会主动触发，
+      // 而 Windows 任务栏按钮重建会丢失进度条 overlay，故在此按当前状态重算一次。
+      void updateTaskbarProgress();
+    }),
+  );
+
+  unlisteners.push(
     await listen("interaction:request", async (e) => {
       const p = e.payload as {
         requestId: number | string;

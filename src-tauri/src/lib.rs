@@ -74,6 +74,9 @@ fn show_main(app: &AppHandle) {
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+    // 隐藏到托盘后再显示：Windows 任务栏按钮重建会丢失进度条动画，
+    // 通知前端按当前工作态重新应用任务栏进度。
+    let _ = app.emit("taskbar-progress-refresh", ());
 }
 
 pub fn run() {
