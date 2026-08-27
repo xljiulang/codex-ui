@@ -178,10 +178,20 @@ export interface AppSettings {
   memory_mode: MemoryMode;
   /** 新开终端使用的 Shell */
   terminal_shell: TerminalShell;
-  /** 微信接入总开关：开启后自动拉起 sidecar（门禁=谁扫谁白，仅本人可用） */
-  wechat_enabled: boolean;
 }
-/* 微信接入门禁固定为「谁扫谁白」：仅扫码绑定账号本人消息放行，无其他放行配置。 */
+
+/** 会话↔微信账号绑定信息（wechat_state 快照的 bindings 数组项） */
+export interface WeChatBindingInfo {
+  threadId: string;
+  accountId: string | null;
+  name?: string | null;
+  connection:
+    | "offline"
+    | "starting"
+    | "connected"
+    | "session_expired"
+    | "error";
+}
 
 /** 微信桥状态快照（wechat_state 命令与 wechat/event 事件共用） */
 export interface WeChatSnapshot {
@@ -195,11 +205,10 @@ export interface WeChatSnapshot {
     | "error";
   detail?: string | null;
   qrContent?: string | null;
-  accountId?: string | null;
-  botUserId?: string | null;
+  pendingThreadId?: string | null;
   queued: number;
   busy: boolean;
-  enabled: boolean;
+  bindings: WeChatBindingInfo[];
 }
 
 /** 模型配置（config.toml / model_catalog_json 目标文件）读取结果，字段与 Rust 端一致 */

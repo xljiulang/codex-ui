@@ -28,6 +28,7 @@ import {
 } from "./threads";
 import { setToast, toastError } from "./toast";
 import { clearGoal, continueTurn, setGoal, steerTurn } from "./turnControl";
+import { isThreadBound, wechatUnbind } from "./wechat";
 import {
   goalStatusToast,
   isGoalStatus,
@@ -475,6 +476,10 @@ export async function openHistorySession(threadId: string): Promise<void> {
 
 export async function deleteThread(threadId: string) {
   try {
+    // 删除已绑定微信的会话前先解除绑定（单条删除与「删除所有会话」组删共用此路径）
+    if (isThreadBound(threadId)) {
+      await wechatUnbind(threadId).catch(() => {});
+    }
     await invoke("thread_delete", { threadId });
     void sessionLog("warn", threadId, "thread-delete");
     store.threads = store.threads.filter((t) => t.id !== threadId);

@@ -12,7 +12,6 @@ export const defaultSettings = (): AppSettings => ({
   default_permission: "ask-for-approval",
   memory_mode: "disabled",
   terminal_shell: "cmd",
-  wechat_enabled: false,
 });
 
 

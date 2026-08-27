@@ -1,7 +1,7 @@
-// useCodex 拆分模块：微信接入（ClawBot）状态与动作。
+// useCodex 拆分模块：微信接入（ClawBot）会话绑定状态与动作。
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { WeChatSnapshot } from "../../lib/types";
+import type { WeChatBindingInfo, WeChatSnapshot } from "../../lib/types";
 import { store } from "./store";
 
 let unlisten: UnlistenFn | null = null;
@@ -25,22 +25,26 @@ export async function refreshWeChatState(): Promise<void> {
   }
 }
 
-/** 发起扫码登录：二维码内容随后经 wechat/event 推送。 */
-export async function wechatLoginStart(): Promise<void> {
+/** 对指定会话发起扫码绑定：二维码内容随后经 wechat/event 推送。 */
+export async function wechatBindLoginStart(threadId: string): Promise<void> {
   await ensureWeChatEvents();
-  await invoke("wechat_login_start");
-}
-
-/** 退出登录：清除本地凭据并回到未登录态。 */
-export async function wechatLogout(): Promise<void> {
-  await ensureWeChatEvents();
-  await invoke("wechat_logout");
+  await invoke("wechat_bind_login_start", { threadId });
   await refreshWeChatState();
 }
 
-/** 设置变更后的运行时对齐：按 settings.json 的开关启停 sidecar。 */
-export async function wechatServiceSync(): Promise<void> {
+/** 解除指定会话的微信绑定并停止对应账号接收。 */
+export async function wechatUnbind(threadId: string): Promise<void> {
   await ensureWeChatEvents();
-  await invoke("wechat_service_sync");
+  await invoke("wechat_unbind", { threadId });
   await refreshWeChatState();
+}
+
+/** 指定会话是否已绑定微信（基于最新快照）。 */
+export function isThreadBound(threadId: string): boolean {
+  return (store.wechat?.bindings ?? []).some((b) => b.threadId === threadId);
+}
+
+/** 指定会话的绑定信息（未绑定返回 null）。 */
+export function bindingOfThread(threadId: string): WeChatBindingInfo | null {
+  return (store.wechat?.bindings ?? []).find((b) => b.threadId === threadId) ?? null;
 }

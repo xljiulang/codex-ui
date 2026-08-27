@@ -290,30 +290,31 @@ pub fn startup_workspace(server: State<'_, Server>) -> String {
 
 // ---------------- 微信接入（ClawBot sidecar） ----------------
 
-/// 当前微信桥状态快照（供设置页轮询与事件兜底刷新）。
+/// 当前微信桥状态快照（供历史面板与绑定弹窗轮询、事件兜底刷新）。
 #[tauri::command]
 pub async fn wechat_state(wechat: State<'_, WeChat>) -> Result<Value, String> {
     Ok(wechat.state().await)
 }
 
-/// 发起扫码登录：二维码内容随后经 `wechat/event` 事件推送。
+/// 当前会话↔微信绑定列表（历史面板徽标用）。
 #[tauri::command]
-pub async fn wechat_login_start(wechat: State<'_, WeChat>) -> Result<(), String> {
-    wechat.login_start().await
+pub async fn wechat_bindings(wechat: State<'_, WeChat>) -> Result<Value, String> {
+    Ok(wechat.bindings().await)
 }
 
-/// 退出登录：删除本地凭据并回到未登录态。
+/// 对指定会话发起扫码绑定：二维码内容随后经 `wechat/event` 事件推送。
 #[tauri::command]
-pub async fn wechat_logout(wechat: State<'_, WeChat>) -> Result<(), String> {
-    wechat.logout().await
+pub async fn wechat_bind_login_start(
+    wechat: State<'_, WeChat>,
+    thread_id: String,
+) -> Result<(), String> {
+    wechat.bind_login_start(&thread_id).await
 }
 
-/// 设置项变更后的运行时对齐：按 settings.json 的开关启停 sidecar。
+/// 解除指定会话的微信绑定并停止对应账号接收。
 #[tauri::command]
-pub async fn wechat_service_sync(app: AppHandle) -> Result<(), String> {
-    let wechat = app.state::<WeChat>();
-    wechat.apply_enabled().await;
-    Ok(())
+pub async fn wechat_unbind(wechat: State<'_, WeChat>, thread_id: String) -> Result<(), String> {
+    wechat.unbind(&thread_id).await
 }
 
 #[tauri::command]

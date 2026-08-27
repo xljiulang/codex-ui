@@ -421,6 +421,116 @@
   fill: currentColor;
 }
 
+/* 历史会话行：微信绑定徽标（位于会话图标右侧，与 pin 徽标并存） */
+.history-wechat-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 2px 0 0 4px;
+  color: var(--accent);
+}
+
+.history-wechat-badge svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.wechat-bind-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wechat-bind-dialog .wechat-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wechat-bind-dialog .wechat-state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--bg-input);
+  color: var(--text-dim);
+}
+
+.wechat-bind-dialog .wechat-state-badge.st-connected {
+  background: rgba(70, 213, 168, 0.16);
+  color: #46d5a8;
+}
+
+.wechat-bind-dialog .wechat-state-badge.st-awaiting_qr,
+.wechat-bind-dialog .wechat-state-badge.st-starting {
+  color: var(--accent);
+}
+
+.wechat-bind-dialog .wechat-state-badge.st-error,
+.wechat-bind-dialog .wechat-state-badge.st-session_expired {
+  background: rgba(240, 86, 95, 0.14);
+  color: #f0565f;
+}
+
+.wechat-bind-dialog .wechat-detail,
+.wechat-bind-dialog .wechat-account {
+  color: var(--text-dim);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.wechat-bind-dialog .wechat-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 4px;
+}
+
+.wechat-bind-dialog .wechat-qr-wrap img {
+  width: 220px;
+  height: 220px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: #fff;
+}
+
+.wechat-bind-dialog .wechat-qr-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.wechat-bind-dialog .wechat-unbound-hint,
+.wechat-bind-dialog .wechat-bound-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.wechat-bind-dialog .wechat-bind-btn {
+  align-self: flex-start;
+}
+
+.wechat-bind-dialog .wechat-unbind-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wechat-bind-dialog .wechat-unbind-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
 .history-main {
   flex: 1;
   min-width: 0;

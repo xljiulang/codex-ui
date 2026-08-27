@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   activeSessionTab,
@@ -18,11 +18,6 @@ import {
   store,
   toastError,
   uninstallPlugin,
-  ensureWeChatEvents,
-  refreshWeChatState,
-  wechatLoginStart,
-  wechatLogout,
-  wechatServiceSync,
 } from "../composables/useCodex";
 import type {
   PluginCatalogItem,
@@ -83,9 +78,6 @@ const defaultPermission = ref(store.settings.default_permission);
 const memoryMode = ref(store.settings.memory_mode);
 const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
-/** 微信对话气泡图标（本页新增分类专用，风格对齐 icons.ts 的 fill 路径） */
-const ICON_WECHAT =
-  "M12 3C6.5 3 2 6.6 2 11c0 2.2 1.1 4.2 2.9 5.6L4 21l4.3-2c1.2.4 2.4.6 3.7.6 5.5 0 10-3.7 10-8.3S17.5 3 12 3z";
 const settingsSections = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
   { id: "general", label: "通用设置", icon: ICON_TUNE },
@@ -93,7 +85,6 @@ const settingsSections = [
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
-  { id: "wechat", label: "微信接入", icon: ICON_WECHAT },
 ] as const;
 type SettingsSectionId = (typeof settingsSections)[number]["id"];
 /** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
@@ -115,8 +106,6 @@ onMounted(() => {
   void loadCustomInstructions();
   void loadSkills();
   void loadMcp();
-  void ensureWeChatEvents();
-  void refreshWeChatState();
 });
 
 /** 即时保存：任何设置项变更立即持久化（成功静默，失败 toast） */
@@ -162,73 +151,6 @@ async function onMemoryModeChange() {
       method: "thread/memoryMode/set",
       params: { threadId, mode: memoryMode.value },
     });
-  } catch (e) {
-    setToast(toastError(e));
-  }
-}
-
-// ---------- 微信接入 ----------
-
-const wechatEnabled = ref(store.settings.wechat_enabled);
-const wxLoginBusy = ref(false);
-/** 二维码位图（内容由后端事件推送，本地仅负责转 dataURL 渲染） */
-const qrDataUrl = ref("");
-const wechat = computed(() => store.wechat);
-const wechatStateLabel = computed(() => {
-  const labels: Record<string, string> = {
-    offline: "未连接",
-    starting: "启动中…",
-    awaiting_qr: "等待扫码",
-    connected: "已连接",
-    session_expired: "会话过期，请重新扫码",
-    error: "异常",
-  };
-  return labels[wechat.value?.connection ?? "offline"] ?? "未连接";
-});
-watch(
-  () => wechat.value?.qrContent,
-  async (content) => {
-    if (!content) {
-      qrDataUrl.value = "";
-      return;
-    }
-    try {
-      const QRCode = await import("qrcode");
-      qrDataUrl.value = await QRCode.toDataURL(content, { width: 220, margin: 1 });
-    } catch {
-      qrDataUrl.value = "";
-    }
-  },
-  { immediate: true },
-);
-
-async function onWechatLogin() {
-  if (wxLoginBusy.value) return;
-  wxLoginBusy.value = true;
-  try {
-    await wechatLoginStart();
-    await refreshWeChatState();
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    wxLoginBusy.value = false;
-  }
-}
-
-async function onWechatLogout() {
-  try {
-    await wechatLogout();
-    qrDataUrl.value = "";
-    setToast("已退出微信登录");
-  } catch (e) {
-    setToast(toastError(e));
-  }
-}
-
-async function onWechatEnabledChange() {
-  try {
-    await persist({ wechat_enabled: wechatEnabled.value });
-    await wechatServiceSync();
   } catch (e) {
     setToast(toastError(e));
   }
@@ -2379,102 +2301,6 @@ function pluginInitial(p: PluginCatalogItem): string {
           </div>
         </section>
 
-        <section
-          v-show="activeSection === 'wechat'"
-          class="settings-section settings-section-wechat"
-        >
-          <h2 class="settings-section-title">微信接入</h2>
-          <p class="settings-section-desc">
-            经微信官方 ClawBot 通道把 Codex 带进微信（白名单自用模式）
-          </p>
-
-          <div class="settings-card">
-            <h3>连接状态</h3>
-            <div class="wechat-status-row">
-              <span
-                class="wechat-state-badge"
-                :class="`st-${wechat?.connection ?? 'offline'}`"
-                >{{ wechatStateLabel }}</span
-              >
-              <span v-if="wechat?.detail" class="wechat-detail">{{
-                wechat.detail
-              }}</span>
-              <span v-else-if="wechat?.accountId" class="setting-value"
-                >账号：{{ wechat.accountId }}</span
-              >
-            </div>
-            <div v-if="qrDataUrl" class="wechat-qr-wrap">
-              <img :src="qrDataUrl" alt="微信登录二维码" />
-              <p class="wechat-qr-hint">
-                请使用要绑定的微信扫码并确认授权（二维码约 8 分钟内有效）
-              </p>
-            </div>
-            <div class="setting-path-row">
-              <button
-                type="button"
-                class="btn primary wechat-login-btn"
-                :disabled="wxLoginBusy"
-                @click="onWechatLogin"
-              >
-                {{
-                  wxLoginBusy
-                    ? "等待扫码…"
-                    : wechat?.connection === "awaiting_qr"
-                      ? "重新生成二维码"
-                      : "扫码登录"
-                }}
-              </button>
-              <button
-                type="button"
-                class="btn btn-icon danger wechat-logout-btn"
-                :disabled="!wechat?.accountId"
-                aria-label="退出登录"
-                @click="onWechatLogout"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_DELETE" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <div class="settings-card">
-            <h3>启用</h3>
-            <p class="settings-card-desc">
-              门禁为「谁扫谁白」：仅扫码绑定的微信本人可触发 Codex，
-              其他联系人的消息将被忽略并记录。无需填写任何 ID。
-            </p>
-            <div class="setting-row checkbox-row">
-              <input
-                id="wechat-enabled"
-                v-model="wechatEnabled"
-                type="checkbox"
-                @change="onWechatEnabledChange"
-              />
-              <label for="wechat-enabled">
-                启用微信接入（开启后自动启动 sidecar；关闭立即停止并失效免审批）
-              </label>
-            </div>
-          </div>
-
-          <div class="wechat-risk-note">
-            <p>风险与限制说明：</p>
-            <ul>
-              <li>
-                微信触发的回合将以「完全访问权限 + 免审批」在您的电脑上真实执行文件修改与命令；
-                请仅绑定自己使用的账号，并把白名单限定为本人。
-              </li>
-              <li>
-                通道为微信官方实验性 ClawBot 接口，接口行为与风控策略可能变化；
-                使用第三方程序代管账号存在固有限制。
-              </li>
-              <li>
-                当前仅支持文本消息（图片 / 语音 / 文件自动忽略）；回复依赖 24
-                小时被动窗口，无法主动推送；应用关闭后 bot 即离线。
-              </li>
-            </ul>
-          </div>
-        </section>
       </div>
     </div>
   </div>

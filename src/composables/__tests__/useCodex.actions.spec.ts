@@ -215,6 +215,29 @@ describe("会话标签状态与事件路由", () => {
     expect(activeTabId.value).toBe("");
     expect(activeSessionTab()).toBeNull();
   });
+
+  it("deleteThread：已绑定微信的会话先解除绑定再删除", async () => {
+    store.wechat = {
+      running: true,
+      connection: "connected",
+      detail: null,
+      qrContent: null,
+      pendingThreadId: null,
+      queued: 0,
+      busy: false,
+      bindings: [
+        { threadId: "t1", accountId: "bot-1", connection: "connected" },
+      ],
+    };
+    mockedInvoke.mockResolvedValue(undefined);
+    await deleteThread("t1");
+    const calls = mockedInvoke.mock.calls.map(([c]) => c as string);
+    const unbindIdx = calls.indexOf("wechat_unbind");
+    const deleteIdx = calls.indexOf("thread_delete");
+    expect(unbindIdx).toBeGreaterThanOrEqual(0);
+    expect(deleteIdx).toBeGreaterThan(unbindIdx);
+    store.wechat = null;
+  });
 });
 describe("会话标签状态与事件路由", () => {
   beforeEach(() => {

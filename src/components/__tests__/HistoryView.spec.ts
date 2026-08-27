@@ -234,13 +234,13 @@ describe("HistoryView 右键菜单", () => {
     mockedOpenHistorySession.mockClear();
   });
 
-  it("右键会话行显示四项菜单：打开/重命名/置顶固定/删除会话", async () => {
+  it("右键会话行显示五项菜单：打开/重命名/置顶固定/微信接入/删除会话", async () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["打开", "重命名", "置顶固定", "删除会话"]);
+    expect(labels).toEqual(["打开", "重命名", "置顶固定", "微信接入", "删除会话"]);
   });
 
   it("置顶会话右键菜单显示“取消固定”", async () => {
@@ -260,11 +260,41 @@ describe("HistoryView 右键菜单", () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     const items = wrapper.findAll(".ctx-menu-item");
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(5);
     for (const it of items) {
       expect(it.find("svg").exists()).toBe(true);
     }
     expect(wrapper.findAll(".ctx-menu-item.danger")).toHaveLength(1);
+  });
+
+  it("点击「微信接入」打开该会话的绑定弹窗", async () => {
+    const wrapper = mount(HistoryView);
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "微信接入");
+    expect(wrapper.text()).toContain("扫码绑定");
+    expect(wrapper.find(".wechat-bind-dialog").exists()).toBe(true);
+  });
+
+  it("已绑定会话在会话图标右侧渲染微信徽标", async () => {
+    store.wechat = {
+      running: true,
+      connection: "connected",
+      detail: null,
+      qrContent: null,
+      pendingThreadId: null,
+      queued: 0,
+      busy: false,
+      bindings: [
+        { threadId: "t1", accountId: "bot-1", connection: "connected" },
+      ],
+    };
+    const wrapper = mount(HistoryView);
+    const rows = wrapper.findAll(".history-item");
+    const t1Row = rows.find((r) => r.text().includes("会话一"))!;
+    const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
+    expect(t1Row.find(".history-wechat-badge").exists()).toBe(true);
+    expect(t2Row.find(".history-wechat-badge").exists()).toBe(false);
+    store.wechat = null;
   });
 
   it("点击“打开”调用 openHistorySession 并关闭菜单", async () => {
@@ -855,7 +885,7 @@ describe("HistoryView 会话标签联动", () => {
     expect(labels).not.toContain("打开");
     expect(labels).not.toContain("关闭标签");
     expect(labels).not.toContain("删除会话");
-    expect(labels).toEqual(["重命名", "置顶固定"]);
+    expect(labels).toEqual(["重命名", "置顶固定", "微信接入"]);
     wrapper.unmount();
   });
 

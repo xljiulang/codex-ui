@@ -56,10 +56,11 @@ export {
 export { loadMcpServers, saveMcpServers } from "./mcp";
 export {
   ensureWeChatEvents,
+  isThreadBound,
+  bindingOfThread,
   refreshWeChatState,
-  wechatLoginStart,
-  wechatLogout,
-  wechatServiceSync,
+  wechatBindLoginStart,
+  wechatUnbind,
 } from "./wechat";
 export {
   loadModelProviderConfig,

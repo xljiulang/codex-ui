@@ -1,8 +1,8 @@
 //! 微信 ClawBot 接入桥。
 //!
-//! 架构：本模块负责 Node sidecar（wechat-channel 包装进程）的生命周期、白名单
-//! 策略、「微信联系人 ↔ Codex 线程」映射、回合编排与回复路由；微信协议细节全部
-//! 由 sidecar 内的 wechat-channel 库承担。两端通过 stdio 换行分隔 JSON 通信
+//! 架构：本模块负责 Node sidecar（wechat-channel 包装进程）的生命周期、
+//! 「会话 ↔ 微信账号」绑定（bindings.json）、回合编排与回复路由；微信协议细节
+//! 全部由 sidecar 内的 wechat-channel 库承担。两端通过 stdio 换行分隔 JSON 通信
 //! （与驱动 codex app-server 的模式一致）。
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -19,7 +19,6 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::time::timeout;
 
 use crate::codex::app_server::CodexServer;
-use crate::codex::settings;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -44,9 +43,13 @@ const TURN_TIMEOUT_SECS: u64 = 600;
 /// 前端事件名：状态每次变化全量推送快照。
 pub const WECHAT_EVENT: &str = "wechat/event";
 
-/// 一条已通过白名单的入站文本消息。
+/// 一条已通过「谁扫谁白」门禁的入站文本消息（携带目标绑定信息）。
 #[derive(Debug, Clone)]
 struct InboundMessage {
+    /// 消息所属微信账号（即绑定账号）。
+    account_id: String,
+    /// 绑定目标线程 id（消息将路由到该线程执行回合）。
+    thread_id: String,
     from: String,
     text: String,
 }
@@ -54,22 +57,6 @@ struct InboundMessage {
 // ---------------------------------------------------------------------------
 // 纯函数工具（单元测试覆盖）
 // ---------------------------------------------------------------------------
-
-/// 「重启后自动续跑接收」门禁：进程存活、总开关开启、本代际尚未下发过，
-/// 且当前不是 connected（已连接无需也无法再 start）。
-fn needs_receiver_autostart(alive: bool, enabled: bool, already_sent: bool, conn: &str) -> bool {
-    alive && enabled && !already_sent && conn != "connected"
-}
-
-/// 本人门禁「谁扫谁白」：仅放行扫码绑定账号自身的消息（两侧 trim、精确匹配；
-/// bot_user_id 未就绪时全部拒绝，此时本就不该有入站消息）。
-fn is_owner(bot_user_id: &Option<String>, peer: &str) -> bool {
-    bot_user_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .is_some_and(|owner| owner == peer.trim())
-}
 
 /// 溢出判定：仅当「已有回合执行中 且 队列达到上限」时丢弃新消息。
 fn queue_overflow(active_busy: bool, queued_len: usize) -> bool {
@@ -81,6 +68,35 @@ fn queue_overflow(active_busy: bool, queued_len: usize) -> bool {
 fn is_thread_not_found(err: &str) -> bool {
     let e = err.to_ascii_lowercase();
     e.contains("thread not found") || e.contains("thread does not exist")
+}
+
+/// accounts 快照中的账号是否可自动启动接收：已配置且未过期（session_expired 跳过）。
+fn account_is_startable(a: &Value) -> bool {
+    a.get("configured").and_then(|c| c.as_bool()) == Some(true)
+        && a.get("status").and_then(|s| s.as_str()) != Some("session_expired")
+}
+
+/// 绑定是否冲突：同一线程或同一微信账号已被占用（双向唯一）。
+fn binding_conflict(bindings: &[Value], thread_id: &str, account_id: &str) -> bool {
+    bindings.iter().any(|b| {
+        b.get("threadId").and_then(|v| v.as_str()) == Some(thread_id)
+            || b.get("accountId").and_then(|v| v.as_str()) == Some(account_id)
+    })
+}
+
+/// 按「账号 + 本人」路由：消息所属账号命中绑定，且发送者就是绑定账号本人（谁扫谁白）。
+fn find_binding_for_message<'a>(
+    bindings: &'a [Value],
+    account_id: &str,
+    from: &str,
+) -> Option<&'a Value> {
+    bindings.iter().find(|b| {
+        b.get("accountId").and_then(|v| v.as_str()) == Some(account_id)
+            && b.get("userId")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .is_some_and(|uid| uid == from.trim())
+    })
 }
 
 /// 超长文本切分：按可见字符（含换行）计数，UTF-8 安全。
@@ -134,16 +150,6 @@ fn extract_message(v: &Value) -> Option<(String, String, String)> {
     Some((account, from, text))
 }
 
-/// thread/start 参数：cwd 固定应用启动工作区；权限对齐桌面「完全访问」档位。
-fn build_thread_start_params(workspace: &str) -> Value {
-    json!({
-        "cwd": workspace,
-        "approvalPolicy": "never",
-        "sandbox": "danger-full-access",
-        "model": null,
-    })
-}
-
 /// turn/start 参数：完整能力 + 免审批（dangerFullAccess 沙箱策略）。
 fn build_turn_params(thread_id: &str, text: &str, model: &str, client_message_id: &str) -> Value {
     json!({
@@ -165,43 +171,35 @@ fn build_turn_params(thread_id: &str, text: &str, model: &str, client_message_id
     })
 }
 
-/// peer → threadId 映射文件路径：<root>/threads.json。
-fn threads_path(root: &Path) -> PathBuf {
-    root.join("threads.json")
+/// 绑定文件路径：<root>/bindings.json。
+fn bindings_path(root: &Path) -> PathBuf {
+    root.join("bindings.json")
 }
 
-/// 原子写映射表（临时文件 + 重命名，风格对齐 settings.rs）。
-async fn save_peer_threads(root: &Path, map: &HashMap<String, String>) -> Result<(), String> {
-    let p = threads_path(root);
+/// 原子写绑定表（临时文件 + 重命名，风格对齐 settings.rs）。
+async fn save_bindings(root: &Path, list: &[Value]) -> Result<(), String> {
+    let p = bindings_path(root);
     let tmp = p.with_extension("json.tmp");
-    let body = serde_json::to_string_pretty(map).map_err(|e| format!("序列化映射失败: {e}"))?;
+    let body = serde_json::to_string_pretty(list).map_err(|e| format!("序列化绑定失败: {e}"))?;
     tokio::fs::write(&tmp, body)
         .await
-        .map_err(|e| format!("写入映射失败: {e}"))?;
+        .map_err(|e| format!("写入绑定失败: {e}"))?;
     if p.exists() {
         tokio::fs::remove_file(&p)
             .await
-            .map_err(|e| format!("替换映射失败: {e}"))?;
+            .map_err(|e| format!("替换绑定失败: {e}"))?;
     }
     tokio::fs::rename(&tmp, &p)
         .await
-        .map_err(|e| format!("落盘映射失败: {e}"))
+        .map_err(|e| format!("落盘绑定失败: {e}"))
 }
 
-/// 读映射表；缺失视为空表。
-async fn load_peer_threads(root: &Path) -> HashMap<String, String> {
-    let Ok(text) = tokio::fs::read_to_string(threads_path(root)).await else {
-        return HashMap::new();
+/// 读绑定表；缺失视为空表。
+async fn load_bindings(root: &Path) -> Vec<Value> {
+    let Ok(text) = tokio::fs::read_to_string(bindings_path(root)).await else {
+        return Vec::new();
     };
     serde_json::from_str(&text).unwrap_or_default()
-}
-
-/// 丢弃某联系人残留线程映射并落盘（重建线程时调用）；只移除该条目，保留其它联系人。
-async fn drop_peer_thread_mapping(root: &Path, peer: &str) {
-    let mut map = load_peer_threads(root).await;
-    if map.remove(peer).is_some() {
-        let _ = save_peer_threads(root, &map).await;
-    }
 }
 
 /// sidecar 脚本定位顺序：
@@ -239,9 +237,14 @@ struct BridgeInner {
     conn: &'static str,
     detail: Option<String>,
     qr_content: Option<String>,
-    account_id: Option<String>,
-    /// 扫码绑定账号自身的微信 userId（「谁扫谁白」门禁依据）。
-    bot_user_id: Option<String>,
+    /// 登录中的绑定目标线程 id（模态框扫码绑定流程的待落盘状态）。
+    pending_bind: Option<String>,
+    /// 当前生效的「会话 ↔ 微信账号」绑定（内存镜像，变更即落盘 bindings.json）。
+    bindings: Vec<Value>,
+    /// 本代际 sidecar 中已下发过 start 的账号（防止重复启动接收器）。
+    started_accounts: HashSet<String>,
+    /// 各绑定账号的连接状态（offline/starting/connected/session_expired/error）。
+    account_conn: HashMap<String, String>,
     queue: VecDeque<InboundMessage>,
     /// 同一发送者连续溢出只回一次忙碌提示的去重集合（收到其新消息时解除）。
     overflow_notified: HashSet<String>,
@@ -261,10 +264,8 @@ struct BridgeInner {
     exit_rx: Option<mpsc::UnboundedReceiver<()>>,
     /// 进程意外退出后的自动重启次数（v1 仅尝试一次）。
     restarts: u32,
-    /// 已记过首次忽略日志的陌生联系人（进程内去重，防日志刷屏）。
+    /// 已记过首次忽略日志的「账号|发送者」键（进程内去重，防日志刷屏）。
     ignored_logged: HashSet<String>,
-    /// 本代际 sidecar 是否已自动下发过 start（防止重复启动接收器）。
-    receiver_autostarted: bool,
     /// 退出监督任务是否已启动。
     supervisor_started: bool,
 }
@@ -278,8 +279,10 @@ impl Default for BridgeInner {
             conn: "offline",
             detail: None,
             qr_content: None,
-            account_id: None,
-            bot_user_id: None,
+            pending_bind: None,
+            bindings: Vec::new(),
+            started_accounts: HashSet::new(),
+            account_conn: HashMap::new(),
             queue: VecDeque::new(),
             overflow_notified: HashSet::new(),
             active_thread: None,
@@ -291,7 +294,6 @@ impl Default for BridgeInner {
             exit_rx: None,
             restarts: 0,
             ignored_logged: HashSet::new(),
-            receiver_autostarted: false,
             supervisor_started: false,
         }
     }
@@ -302,8 +304,6 @@ pub struct WeChatBridge {
     server: Arc<CodexServer>,
     /// 微信数据根目录：%APPDATA%/<identifier>/wechat/
     root: PathBuf,
-    /// settings.json 所在目录（root 的父目录）；开关与白名单即时读取。
-    app_dir: PathBuf,
     inner: Mutex<BridgeInner>,
     job_tx: mpsc::UnboundedSender<()>,
     done_tx: mpsc::UnboundedSender<(String, String)>,
@@ -313,6 +313,7 @@ pub struct WeChatBridge {
 
 struct ActiveTurn {
     thread_id: String,
+    account_id: String,
     peer: String,
     deadline: std::time::Instant,
 }
@@ -327,7 +328,6 @@ impl WeChatBridge {
             app,
             server,
             root,
-            app_dir,
             inner: Mutex::new(BridgeInner {
                 job_rx: Some(job_rx),
                 done_rx: Some(done_rx),
@@ -341,9 +341,26 @@ impl WeChatBridge {
         })
     }
 
-    /// 总开关即时读盘：设置页切换后无需重启应用即生效。
-    pub(crate) fn enabled(&self) -> bool {
-        settings::load(&self.app_dir).wechat_enabled
+    /// 是否存在生效绑定（内存镜像；autostart / 绑定变更时刷新）。
+    async fn has_bindings(&self) -> bool {
+        !self.inner.lock().await.bindings.is_empty()
+    }
+
+    /// 从磁盘装载绑定到内存（应用启动与绑定文件外部变化时调用）。
+    async fn reload_bindings(self: &Arc<Self>) {
+        let list = load_bindings(&self.root).await;
+        self.inner.lock().await.bindings = list;
+    }
+
+    /// 取某线程的绑定（复制一份，避免跨 await 持锁）。
+    async fn binding_of_thread(&self, thread_id: &str) -> Option<Value> {
+        self.inner
+            .lock()
+            .await
+            .bindings
+            .iter()
+            .find(|b| b.get("threadId").and_then(|v| v.as_str()) == Some(thread_id))
+            .cloned()
     }
 
     async fn log(&self, level: &str, line: String) {
@@ -352,16 +369,32 @@ impl WeChatBridge {
 
     async fn snapshot(&self) -> Value {
         let inner = self.inner.lock().await;
+        let bindings: Vec<Value> = inner
+            .bindings
+            .iter()
+            .map(|b| {
+                let account_id = b.get("accountId").and_then(|v| v.as_str()).unwrap_or("");
+                json!({
+                    "threadId": b.get("threadId").and_then(|v| v.as_str()).unwrap_or(""),
+                    "accountId": account_id,
+                    "name": b.get("name").and_then(|v| v.as_str()),
+                    "connection": inner
+                        .account_conn
+                        .get(account_id)
+                        .map(String::as_str)
+                        .unwrap_or("offline"),
+                })
+            })
+            .collect();
         json!({
             "running": inner.alive,
             "connection": inner.conn,
             "detail": inner.detail,
             "qrContent": inner.qr_content,
-            "accountId": inner.account_id,
-            "botUserId": inner.bot_user_id,
+            "pendingThreadId": inner.pending_bind,
             "queued": inner.queue.len(),
             "busy": inner.active_thread.is_some(),
-            "enabled": self.enabled(),
+            "bindings": bindings,
         })
     }
 
@@ -429,30 +462,16 @@ impl WeChatBridge {
 
     // -- 生命周期 -----------------------------------------------------------
 
-    /// 应用启动自动恢复：总开关开启则拉起 sidecar 并复登已有账号。
+    /// 应用启动自动恢复：存在绑定则拉起 sidecar，accounts 快照到达后逐个恢复接收。
     pub async fn autostart(self: &Arc<Self>) {
         self.ensure_supervisor().await;
-        if !self.enabled() {
+        self.reload_bindings().await;
+        if !self.has_bindings().await {
             return;
         }
         if let Err(e) = self.start_service().await {
             self.set_error(format!("微信接入自动启动失败: {e}")).await;
         }
-    }
-
-    /// 设置页开关切换后的运行时对齐入口：开→确保启动；关→停止并清态。
-    pub async fn apply_enabled(self: &Arc<Self>) {
-        self.ensure_supervisor().await;
-        if self.enabled() {
-            if !self.inner.lock().await.alive {
-                if let Err(e) = self.start_service().await {
-                    self.set_error(format!("微信接入启动失败: {e}")).await;
-                }
-            }
-        } else {
-            self.stop_service().await;
-        }
-        self.emit_state().await;
     }
 
     /// 拉起 sidecar 进程与后台循环（幂等：已存活直接返回 Ok）。
@@ -488,8 +507,8 @@ impl WeChatBridge {
             g.conn = "starting";
             g.detail = None;
             g.qr_content = None;
-            // 新进程代际：自动续跑标记复位，等待 accounts 快照触发。
-            g.receiver_autostarted = false;
+            // 新进程代际：接收器全部未启动，等待 accounts 快照按绑定逐个触发。
+            g.started_accounts.clear();
             let pumps_first = !g.pumps_started;
             g.pumps_started = true;
             if pumps_first {
@@ -557,7 +576,7 @@ impl WeChatBridge {
         Ok(())
     }
 
-    /// 停止 sidecar 并清空运行态（开关关闭 / 退出前调用）。
+    /// 停止 sidecar 并清空运行态（退出前 / 无绑定兜底调用）。绑定持久化数据保留。
     pub async fn stop_service(&self) {
         let mut g = self.inner.lock().await;
         if let Some(mut child) = g.child.take() {
@@ -568,6 +587,9 @@ impl WeChatBridge {
         g.conn = "offline";
         g.detail = None;
         g.qr_content = None;
+        g.pending_bind = None;
+        g.started_accounts.clear();
+        g.account_conn.clear();
         g.queue.clear();
         g.overflow_notified.clear();
         g.active_thread = None;
@@ -577,7 +599,7 @@ impl WeChatBridge {
 }
 
 impl WeChatBridge {
-    /// sidecar 退出监督：仅当「有账号 + 开关开启」时静默重启一次。
+    /// sidecar 退出监督：存在绑定时静默重启一次。
     async fn supervise_exits(self: Arc<Self>, mut rx: mpsc::UnboundedReceiver<()>) {
         while rx.recv().await.is_some() {
             let allow_restart = {
@@ -586,7 +608,7 @@ impl WeChatBridge {
                 g.queue.clear();
                 g.overflow_notified.clear();
                 g.active_thread = None;
-                let allow = g.restarts < 1 && self.enabled() && g.account_id.is_some();
+                let allow = g.restarts < 1 && !g.bindings.is_empty();
                 if allow {
                     g.restarts += 1;
                     g.conn = "starting";
@@ -602,7 +624,7 @@ impl WeChatBridge {
                 continue;
             }
             tokio::time::sleep(Duration::from_secs(3)).await;
-            if !self.enabled() {
+            if !self.has_bindings().await {
                 continue;
             }
             if let Err(e) = self.start_service().await {
@@ -621,15 +643,31 @@ impl WeChatBridge {
         self.snapshot().await
     }
 
-    /// 发起扫码登录：确保 sidecar 在跑，再下发 login 指令；二维码随后经事件回传。
-    pub async fn login_start(self: &Arc<Self>) -> Result<(), String> {
+    /// 绑定列表（供历史面板徽标与模态框消费）。
+    pub async fn bindings(&self) -> Value {
+        let snap = self.snapshot().await;
+        json!({
+            "running": snap.get("running"),
+            "bindings": snap.get("bindings"),
+        })
+    }
+
+    /// 对指定会话发起扫码绑定：校验未绑定 → 起 sidecar → 下发 login，二维码经事件回传。
+    pub async fn bind_login_start(self: &Arc<Self>, thread_id: &str) -> Result<(), String> {
         self.ensure_supervisor().await;
-        if !self.enabled() {
-            return Err("请先在设置中开启微信接入".into());
+        {
+            let g = self.inner.lock().await;
+            if g.bindings
+                .iter()
+                .any(|b| b.get("threadId").and_then(|v| v.as_str()) == Some(thread_id))
+            {
+                return Err("该会话已绑定微信".into());
+            }
         }
         self.start_service().await?;
         {
             let mut g = self.inner.lock().await;
+            g.pending_bind = Some(thread_id.to_string());
             g.qr_content = None;
             g.detail = None;
             g.conn = "starting";
@@ -639,20 +677,40 @@ impl WeChatBridge {
             .await
     }
 
-    /// 退出登录：清除本地凭据并回到未登录态。
-    pub async fn logout(self: &Arc<Self>) -> Result<(), String> {
-        let account = self.inner.lock().await.account_id.clone();
-        if let Some(id) = account {
-            self.send_cmd(json!({ "cmd": "logout", "accountId": id })).await?;
+    /// 解除指定会话的微信绑定：清除本地凭据、删除绑定、停止该账号接收（幂等）。
+    pub async fn unbind(self: &Arc<Self>, thread_id: &str) -> Result<(), String> {
+        let target = self.binding_of_thread(thread_id).await;
+        let Some(binding) = target else {
+            return Ok(());
+        };
+        let account_id = binding.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        // 尽力清除 sidecar 侧凭据与接收器（未运行/失败不影响解绑）。
+        if self.inner.lock().await.alive {
+            if !account_id.is_empty() {
+                let _ = self.send_cmd(json!({ "cmd": "logout", "accountId": account_id })).await;
+                let _ = self.send_cmd(json!({ "cmd": "stop", "accountId": account_id })).await;
+            }
         }
         {
             let mut g = self.inner.lock().await;
-            g.account_id = None;
-            g.bot_user_id = None;
-            g.conn = "offline";
-            g.detail = None;
-            g.qr_content = None;
+            g.bindings.retain(|b| {
+                b.get("threadId").and_then(|v| v.as_str()) != Some(thread_id)
+            });
+            if !account_id.is_empty() {
+                g.started_accounts.remove(&account_id);
+                g.account_conn.remove(&account_id);
+            }
+            if g.pending_bind.as_deref() == Some(thread_id) {
+                g.pending_bind = None;
+            }
+            if g.bindings.is_empty() {
+                g.conn = "offline";
+                g.detail = None;
+                g.qr_content = None;
+            }
         }
+        let _ = save_bindings(&self.root, &self.inner.lock().await.bindings.clone()).await;
+        self.log("info", format!("已解除会话 {thread_id} 的微信绑定")).await;
         self.emit_state().await;
         Ok(())
     }
@@ -690,24 +748,65 @@ impl WeChatBridge {
                 let account =
                     v.get("accountId").and_then(|x| x.as_str()).map(str::to_string);
                 let user_id = v.get("userId").and_then(|x| x.as_str()).map(str::to_string);
+                let pending = self.inner.lock().await.pending_bind.clone();
                 if success {
-                    {
-                        let mut g = self.inner.lock().await;
-                        g.account_id.clone_from(&account);
-                        if let Some(uid) = user_id {
-                            g.bot_user_id = Some(uid);
+                    match (pending, account, user_id) {
+                        (Some(thread_id), Some(account), Some(user_id)) => {
+                            let start_account = account.clone();
+                            let conflict = {
+                                let g = self.inner.lock().await;
+                                binding_conflict(&g.bindings, &thread_id, &account)
+                            };
+                            if conflict {
+                                self.set_error("绑定冲突：该会话或该微信账号已被绑定".into())
+                                    .await;
+                            } else {
+                                let bound_at = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .map(|d| d.as_millis())
+                                    .unwrap_or(0);
+                                let binding = json!({
+                                    "threadId": thread_id,
+                                    "accountId": account,
+                                    "userId": user_id,
+                                    "name": null,
+                                    "boundAt": bound_at,
+                                });
+                                {
+                                    let mut g = self.inner.lock().await;
+                                    g.bindings.push(binding);
+                                    g.pending_bind = None;
+                                    g.qr_content = None;
+                                    g.conn = "starting";
+                                    g.detail = None;
+                                    g.started_accounts.insert(start_account.clone());
+                                    g.account_conn.insert(start_account.clone(), "starting".into());
+                                }
+                                let _ = save_bindings(
+                                    &self.root,
+                                    &self.inner.lock().await.bindings.clone(),
+                                )
+                                .await;
+                                self.log(
+                                    "info",
+                                    format!("会话 {thread_id} 已绑定微信账号 {start_account}"),
+                                )
+                                .await;
+                                if let Err(e) = self
+                                    .send_cmd(json!({ "cmd": "start", "accountId": start_account }))
+                                    .await
+                                {
+                                    self.set_error(format!("启动消息接收失败: {e}")).await;
+                                }
+                            }
                         }
-                        g.qr_content = None;
-                        g.conn = "starting";
-                        g.detail = None;
-                    }
-                    // 登录成功即开始收消息长轮询。
-                    if let Some(id) = account {
-                        if let Err(e) =
-                            self.send_cmd(json!({ "cmd": "start", "accountId": id })).await
-                        {
-                            self.set_error(format!("启动消息接收失败: {e}")).await;
-                            return;
+                        _ => {
+                            self.log(
+                                "warn",
+                                "收到未预期的登录成功（缺少待绑定会话或账号信息）".into(),
+                            )
+                            .await;
+                            self.emit_state().await;
                         }
                     }
                 } else {
@@ -718,6 +817,8 @@ impl WeChatBridge {
                     } else {
                         message
                     });
+                    // 失败后清掉待绑定目标，允许用户重新发起扫码。
+                    g.pending_bind = None;
                 }
                 self.emit_state().await;
             }
@@ -732,48 +833,59 @@ impl WeChatBridge {
                     .map(str::to_string);
                 {
                     let mut g = self.inner.lock().await;
-                    match status {
-                        "connected" => {
-                            if let Some(id) = account {
-                                g.account_id = Some(id);
-                            }
-                            g.conn = "connected";
-                            g.detail = None;
+                    if let Some(id) = account.as_deref() {
+                        if g.bindings
+                            .iter()
+                            .any(|b| b.get("accountId").and_then(|v| v.as_str()) == Some(id))
+                        {
+                            g.account_conn.insert(id.to_string(), status.to_string());
                         }
-                        "session_expired" => {
-                            g.conn = "session_expired";
-                            g.detail = Some("微信会话过期，请重新扫码".into());
-                        }
-                        "disconnected" => {
-                            // 接收器内部会自动重连；仅在非启动阶段提示。
-                            if g.conn != "starting" && g.conn != "offline" {
-                                g.conn = "offline";
-                                g.detail = Some("连接断开，等待重连".into());
-                            }
-                        }
-                        _ => {}
+                    }
+                    // 桥级连接取「最优」状态：任一 connected → connected；否则有过期 →
+                    // session_expired；否则有 disconnected → offline；否则维持原值。
+                    let any_connected = g.account_conn.values().any(|s| s == "connected");
+                    let any_expired = g.account_conn.values().any(|s| s == "session_expired");
+                    let any_disconnected = g.account_conn.values().any(|s| s == "disconnected");
+                    if any_connected {
+                        g.conn = "connected";
+                        g.detail = None;
+                    } else if any_expired {
+                        g.conn = "session_expired";
+                        g.detail = Some("微信会话过期，请重新扫码".into());
+                    } else if any_disconnected && g.conn != "starting" {
+                        g.conn = "offline";
+                        g.detail = Some("连接断开，等待重连".into());
                     }
                 }
                 self.emit_state().await;
             }
             "message" => {
-                if let Some((_account, from, text)) = extract_message(&v) {
-                    let owner = {
+                if let Some((account, from, text)) = extract_message(&v) {
+                    let thread_id = {
                         let g = self.inner.lock().await;
-                        is_owner(&g.bot_user_id, &from)
+                        find_binding_for_message(&g.bindings, &account, &from)
+                            .and_then(|b| b.get("threadId").and_then(|v| v.as_str()))
+                            .map(str::to_string)
                     };
-                    if owner {
-                        self.enqueue_inbound(InboundMessage { from, text }).await;
+                    if let Some(thread_id) = thread_id {
+                        self.enqueue_inbound(InboundMessage {
+                            account_id: account,
+                            thread_id,
+                            from,
+                            text,
+                        })
+                        .await;
                     } else {
-                        // 「谁扫谁白」门禁：陌生联系人仅首次记一条日志，防刷屏。
+                        // 「谁扫谁白」门禁：非绑定账号/非本人消息仅首次记一条日志，防刷屏。
+                        let key = format!("{account}|{from}");
                         let first_ignore = {
                             let mut g = self.inner.lock().await;
-                            g.ignored_logged.insert(from.clone())
+                            g.ignored_logged.insert(key.clone())
                         };
                         if first_ignore {
                             self.log(
                                 "info",
-                                format!("忽略非本人消息：{from}（门禁为“谁扫谁白”）"),
+                                format!("忽略非绑定消息：{from}（账号 {account} 未绑定该会话）"),
                             )
                             .await;
                         }
@@ -782,60 +894,39 @@ impl WeChatBridge {
                 // 无文本（图片/语音等）按方案直接忽略。
             }
             "accounts" => {
-                // 重启复登没有 login_result，从账户快照恢复本人身份。
-                let restored = v.get("accounts").and_then(|x| x.as_array()).and_then(|list| {
-                    list.iter()
-                        .find(|a| a.get("configured").and_then(|c| c.as_bool()) == Some(true))
-                });
-                if let Some(a) = restored {
-                    let user_id = a
-                        .get("userId")
-                        .and_then(|x| x.as_str())
-                        .filter(|s| !s.trim().is_empty())
-                        .map(str::trim)
-                        .map(str::to_string);
-                    let account_id = a.get("id").and_then(|x| x.as_str()).map(str::to_string);
-                    // 恢复身份 + 自动续跑接收（每个进程代际一次）：
-                    // 这是「重启后无需任何手动操作即可继续对话」的关键路径。
-                    let autostart_account = {
+                // 重启复登：对所有已绑定且可启动的账号逐个恢复接收（每进程代际一次）。
+                if let Some(list) = v.get("accounts").and_then(|x| x.as_array()).cloned() {
+                    let mut started: Vec<String> = Vec::new();
+                    {
                         let mut g = self.inner.lock().await;
-                        if let Some(uid) = user_id.clone() {
-                            g.bot_user_id = Some(uid);
-                        }
-                        if g.account_id.is_none() {
-                            g.account_id = account_id.clone();
-                        }
-                        let target = account_id.or_else(|| g.account_id.clone());
-                        if needs_receiver_autostart(
-                            g.alive,
-                            self.enabled(),
-                            g.receiver_autostarted,
-                            g.conn,
-                        ) {
-                            target
-                        } else {
-                            None
-                        }
-                    };
-                    match autostart_account {
-                        Some(id) => {
+                        let bound: Vec<String> = g
+                            .bindings
+                            .iter()
+                            .filter_map(|b| {
+                                b.get("accountId").and_then(|v| v.as_str()).map(str::to_string)
+                            })
+                            .collect();
+                        for acct in &list {
+                            let id = acct.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                            if bound.iter().any(|b| b == id)
+                                && account_is_startable(acct)
+                                && !g.started_accounts.contains(id)
                             {
-                                let mut g = self.inner.lock().await;
-                                g.receiver_autostarted = true;
-                            }
-                            self.log("info", format!("已自动恢复消息接收（{id}）")).await;
-                            if let Err(e) =
-                                self.send_cmd(json!({ "cmd": "start", "accountId": id })).await
-                            {
-                                self.set_error(format!("自动恢复消息接收失败: {e}")).await;
-                            }
-                        }
-                        None => {
-                            if user_id.is_some() {
-                                self.emit_state().await;
+                                g.started_accounts.insert(id.to_string());
+                                g.account_conn.insert(id.to_string(), "starting".into());
+                                started.push(id.to_string());
                             }
                         }
                     }
+                    for id in started {
+                        self.log("info", format!("已自动恢复消息接收（{id}）")).await;
+                        if let Err(e) =
+                            self.send_cmd(json!({ "cmd": "start", "accountId": id })).await
+                        {
+                            self.set_error(format!("自动恢复消息接收失败: {e}")).await;
+                        }
+                    }
+                    self.emit_state().await;
                 }
             }
             "error" => {
@@ -847,12 +938,18 @@ impl WeChatBridge {
                 self.log("warn", format!("sidecar 错误: {message}")).await;
                 let mut g = self.inner.lock().await;
                 g.detail = Some(message);
+                // 扫码绑定流程中的错误（pending 非空）：清掉待绑定目标与二维码，
+                // 让弹窗按钮恢复可用、可重新发起扫码；已绑定账号的运行时错误不受影响。
+                if g.pending_bind.is_some() {
+                    g.pending_bind = None;
+                    g.qr_content = None;
+                }
             }
             _ => {}
         }
     }
 
-    /// 入站文本消息入队（白名单已通过）；满队时立即回一次忙碌提示并丢弃该条。
+    /// 入站文本消息入队（绑定路由已通过）；满队时立即回一次忙碌提示并丢弃该条。
     async fn enqueue_inbound(self: &Arc<Self>, msg: InboundMessage) {
         let mut g = self.inner.lock().await;
         if !g.alive {
@@ -862,9 +959,11 @@ impl WeChatBridge {
         let full = queue_overflow(g.active_thread.is_some(), g.queue.len());
         if full {
             let peer = msg.from.clone();
+            let account = msg.account_id.clone();
             if g.overflow_notified.insert(peer.clone()) {
                 drop(g);
-                self.send_reply_now(&peer, "处理队列已满，稍后再试。").await;
+                self.send_reply_now(&account, &peer, "处理队列已满，稍后再试。")
+                    .await;
             }
             return;
         }
@@ -873,22 +972,19 @@ impl WeChatBridge {
         let _ = self.job_tx.send(());
     }
 
-    /// 绕过队列的即时回复（忙碌提示 / 登录引导等系统文案）。
-    async fn send_reply_now(self: &Arc<Self>, peer: &str, text: &str) {
-        let account = self.inner.lock().await.account_id.clone();
-        if let Some(account) = account {
-            for chunk in chunk_text(text, REPLY_CHUNK_CHARS) {
-                if let Err(e) = self
-                    .send_cmd(json!({
-                        "cmd": "send_text",
-                        "accountId": account,
-                        "toUserId": peer,
-                        "text": chunk,
-                    }))
-                    .await
-                {
-                    self.log("warn", format!("回复 {peer} 失败: {e}")).await;
-                }
+    /// 绕过队列的即时回复（忙碌提示 / 失败提示等系统文案）。
+    async fn send_reply_now(self: &Arc<Self>, account_id: &str, peer: &str, text: &str) {
+        for chunk in chunk_text(text, REPLY_CHUNK_CHARS) {
+            if let Err(e) = self
+                .send_cmd(json!({
+                    "cmd": "send_text",
+                    "accountId": account_id,
+                    "toUserId": peer,
+                    "text": chunk,
+                }))
+                .await
+            {
+                self.log("warn", format!("回复 {peer} 失败: {e}")).await;
             }
         }
     }
@@ -948,7 +1044,7 @@ impl WeChatBridge {
         });
     }
 
-    /// 核心串行泵：出队 → 建/复用线程 → 发起回合 → 等完成 → 回复 → 下一条。
+    /// 核心串行泵：出队 → 在绑定线程上发起回合 → 等完成 → 回复 → 下一条。
     async fn pump_loop(
         self: Arc<Self>,
         mut wake: mpsc::UnboundedReceiver<()>,
@@ -962,8 +1058,8 @@ impl WeChatBridge {
                 if let Some(job) = job {
                     match self.begin_turn(job).await {
                         Ok(t) => current = Some(t),
-                        Err((peer, fail_text)) => {
-                            self.send_reply_now(&peer, &fail_text).await;
+                        Err((account, peer, fail_text)) => {
+                            self.send_reply_now(&account, &peer, &fail_text).await;
                         }
                     }
                     continue;
@@ -978,7 +1074,7 @@ impl WeChatBridge {
                     Err(_elapsed) => {
                         // 超时：清理槽位并回复失败提示。
                         self.inner.lock().await.pending_reply.remove(&c.thread_id);
-                        self.finish_active(&c.peer, "⚠️ 执行失败：等待 Codex 回合超时")
+                        self.finish_active(&c.account_id, &c.peer, "⚠️ 执行失败：等待 Codex 回合超时")
                             .await;
                     }
                     Ok(None) => break, // 完成通道关闭（应用退出）
@@ -989,7 +1085,7 @@ impl WeChatBridge {
                         }
                         let text = self.inner.lock().await.pending_reply.remove(&c.thread_id).unwrap_or_default();
                         let final_text = normalize_turn_text(&text, &status);
-                        self.finish_active(&c.peer, &final_text).await;
+                        self.finish_active(&c.account_id, &c.peer, &final_text).await;
                     }
                 }
             } else {
@@ -1001,35 +1097,36 @@ impl WeChatBridge {
         }
     }
 
-    /// 回合开始：确保映射线程存在并发起 turn/start；失败时返回给联系人的失败文案。
-    async fn begin_turn(self: &Arc<Self>, job: InboundMessage) -> Result<ActiveTurn, (String, String)> {
+    /// 回合开始：在绑定线程上发起 turn/start；失败时返回 (账号, 联系人, 失败文案)。
+    async fn begin_turn(self: &Arc<Self>, job: InboundMessage) -> Result<ActiveTurn, (String, String, String)> {
         let peer = job.from.clone();
-        let thread_id = match self.ensure_thread(&peer).await {
-            Ok(id) => id,
-            Err(e) => return Err((peer, format!("⚠️ 执行失败：{e}"))),
-        };
-        match self.run_turn_on_thread(&peer, &thread_id, &job.text).await {
+        let account = job.account_id.clone();
+        let thread_id = job.thread_id.clone();
+        match self.run_turn_on_thread(&account, &peer, &thread_id, &job.text).await {
             Ok(t) => Ok(t),
             Err((p, fail)) => {
-                // 映射命中已删除线程（如应用内删除了该会话、或 codex 侧线程被清空）：
-                // 丢弃残留映射，为联系人新建线程后重试一次，消息不丢、对微信侧无感。
+                // 绑定线程已被删除（外部删除/清理）：自动解除该会话的微信绑定并停止接收，
+                // 不回自动重建（绑定语义下新线程不具原身份）。
                 if is_thread_not_found(&fail) {
-                    drop_peer_thread_mapping(&self.root, &peer).await;
-                    match self.ensure_thread(&peer).await {
-                        Ok(new_id) => self.run_turn_on_thread(&peer, &new_id, &job.text).await,
-                        Err(e) => Err((p, format!("⚠️ 执行失败：{e}"))),
-                    }
+                    self.log("info", format!("会话 {thread_id} 已不存在，自动解除微信绑定")).await;
+                    let _ = self.unbind(&thread_id).await;
+                    Err((
+                        account,
+                        peer,
+                        "⚠️ 该会话已被删除，微信绑定已解除，请重新绑定会话".into(),
+                    ))
                 } else {
-                    Err((p, fail))
+                    Err((account, p, fail))
                 }
             }
         }
     }
 
-    /// 在确认的线程上发起回合：设置活动线程 → 解析默认模型 → 组装参数 → turn/start。
-    /// 失败返回 (peer, 已格式化文案)；该文案用于识别「thread not found」以触发重建。
+    /// 在确认的线程上发起回合：设置活动线程 → 恢复(激活)线程 → 解析默认模型 → 组装参数 → turn/start。
+    /// 失败返回 (peer, 已格式化文案)；该文案用于识别「thread not found」以触发解绑。
     async fn run_turn_on_thread(
         self: &Arc<Self>,
+        account_id: &str,
         peer: &str,
         thread_id: &str,
         text: &str,
@@ -1037,6 +1134,21 @@ impl WeChatBridge {
         {
             let mut g = self.inner.lock().await;
             g.active_thread = Some(thread_id.to_string());
+        }
+        // 先 thread/resume 激活线程：codex 的 turn/start 只对已 resume 的线程可寻址，
+        // 否则会对存在于会话库的线程误报 thread not found（前端发送前也是先 resume）。
+        // 仅当 resume 也报 thread not found 时才判定线程确实缺失。
+        if let Err(e) = self
+            .server
+            .request(
+                "thread/resume",
+                json!({ "threadId": thread_id }),
+                Some(Duration::from_secs(30)),
+            )
+            .await
+        {
+            self.clear_active(thread_id).await;
+            return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
         }
         let model = match self.resolve_default_model().await {
             Ok(m) => m,
@@ -1063,6 +1175,7 @@ impl WeChatBridge {
         }
         Ok(ActiveTurn {
             thread_id: thread_id.to_string(),
+            account_id: account_id.to_string(),
             peer: peer.to_string(),
             deadline: std::time::Instant::now() + Duration::from_secs(TURN_TIMEOUT_SECS),
         })
@@ -1078,37 +1191,14 @@ impl WeChatBridge {
     }
 
     /// 回复联系人并把状态推进到空闲（触发下一条处理）。
-    async fn finish_active(self: &Arc<Self>, peer: &str, text: &str) {
+    async fn finish_active(self: &Arc<Self>, account_id: &str, peer: &str, text: &str) {
         {
             let mut g = self.inner.lock().await;
             g.active_thread = None;
             g.overflow_notified.clear();
         }
-        self.send_reply_now(peer, text).await;
+        self.send_reply_now(account_id, peer, text).await;
         let _ = self.job_tx.send(());
-    }
-
-    /// 取绑定线程；不存在则按启动工作区新建并写回映射文件。
-    async fn ensure_thread(self: &Arc<Self>, peer: &str) -> Result<String, String> {
-        let mut map = load_peer_threads(&self.root).await;
-        if let Some(id) = map.get(peer) {
-            return Ok(id.clone());
-        }
-        let workspace = self.server.workspace().to_string_lossy().into_owned();
-        let resp = self
-            .server
-            .request("thread/start", build_thread_start_params(&workspace), Some(Duration::from_secs(30)))
-            .await?;
-        let thread_id = resp
-            .pointer("/thread/id")
-            .and_then(|x| x.as_str())
-            .ok_or_else(|| format!("thread/start 响应缺少 thread.id: {resp}"))?
-            .to_string();
-        map.insert(peer.to_string(), thread_id.clone());
-        save_peer_threads(&self.root, &map).await?;
-        self.log("info", format!("为白名单联系人 {peer} 新建会话 {thread_id}"))
-            .await;
-        Ok(thread_id)
     }
 
     /// 默认模型解析（进程内缓存）：isDefault 优先，其次首个非 hidden。
@@ -1149,37 +1239,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_owner_gate_only_bound_account() {
-        let owner = Some("wx_me".to_string());
-        assert!(is_owner(&owner, "wx_me"));
-        // 两侧 trim 后精确匹配；大小写敏感
-        assert!(is_owner(&Some(" wx_me ".into()), " wx_me "));
-        assert!(!is_owner(&owner, "wx_ME"));
-        assert!(!is_owner(&owner, "wx_friend"));
-        assert!(!is_owner(&owner, ""));
+    fn account_is_startable_matrix() {
+        // 已配置且未过期 → 可启动
+        assert!(account_is_startable(&json!({ "configured": true })));
+        assert!(account_is_startable(&json!({ "configured": true, "status": "connected" })));
+        assert!(account_is_startable(&json!({ "configured": true, "status": "disconnected" })));
+        // session_expired 或未配置 → 不可启动
+        assert!(!account_is_startable(&json!({ "configured": true, "status": "session_expired" })));
+        assert!(!account_is_startable(&json!({ "configured": false, "status": "connected" })));
     }
 
     #[test]
-    fn is_owner_denies_when_identity_unknown() {
-        // bot_user_id 未恢复/为空时全部拒绝（此时不应有任何合法入站消息）。
-        assert!(!is_owner(&None, "wx_me"));
-        assert!(!is_owner(&Some(String::new()), "wx_me"));
-        assert!(!is_owner(&Some("   ".into()), "   "));
+    fn binding_conflict_matrix() {
+        let bindings = json!([
+            { "threadId": "t-1", "accountId": "bot-1", "userId": "u-1" },
+        ]);
+        let list = bindings.as_array().unwrap();
+        // 同线程冲突
+        assert!(binding_conflict(list, "t-1", "bot-2"));
+        // 同账号冲突
+        assert!(binding_conflict(list, "t-2", "bot-1"));
+        // 均不冲突
+        assert!(!binding_conflict(list, "t-2", "bot-2"));
     }
 
     #[test]
-    fn autostart_gate_combinations() {
-        // 正常路径：进程存活 + 开关开启 + 本代际未下发过 → 允许
-        assert!(needs_receiver_autostart(true, true, false, "starting"));
-        assert!(needs_receiver_autostart(true, true, false, "offline"));
-        // 已下发过（每代际一次）
-        assert!(!needs_receiver_autostart(true, true, true, "starting"));
-        // 进程不在（stop 后/退出中）
-        assert!(!needs_receiver_autostart(false, true, false, "starting"));
-        // 总开关关闭
-        assert!(!needs_receiver_autostart(true, false, false, "starting"));
-        // 已经 connected：无需也无法再 start
-        assert!(!needs_receiver_autostart(true, true, false, "connected"));
+    fn find_binding_for_message_routes_by_account_and_owner() {
+        let bindings = json!([
+            { "threadId": "t-1", "accountId": "bot-1", "userId": "wx_me" },
+            { "threadId": "t-2", "accountId": "bot-2", "userId": "wx_other" },
+        ]);
+        let list = bindings.as_array().unwrap();
+        // 账号 + 本人命中；两侧 trim 后匹配
+        let hit = find_binding_for_message(list, "bot-1", " wx_me ");
+        assert_eq!(
+            hit.and_then(|b| b.get("threadId").and_then(|v| v.as_str())),
+            Some("t-1")
+        );
+        // 非本人 / 非绑定账号不命中
+        assert!(find_binding_for_message(list, "bot-1", "wx_friend").is_none());
+        assert!(find_binding_for_message(list, "bot-9", "wx_me").is_none());
     }
 
     #[test]
@@ -1235,15 +1334,6 @@ mod tests {
     }
 
     #[test]
-    fn thread_start_params_pin_full_access() {
-        let v = build_thread_start_params("D:\\ws");
-        assert_eq!(v["cwd"], "D:\\ws");
-        assert_eq!(v["approvalPolicy"], "never");
-        assert_eq!(v["sandbox"], "danger-full-access");
-        assert!(v["model"].is_null());
-    }
-
-    #[test]
     fn turn_params_carry_never_policy_and_default_collab() {
         let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0");
         assert_eq!(v["threadId"], "t-1");
@@ -1265,23 +1355,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peer_thread_mapping_roundtrip_atomic() {
+    async fn bindings_roundtrip_atomic() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert!(load_peer_threads(root).await.is_empty());
-        let mut map = HashMap::new();
-        map.insert("wx_a".to_string(), "thread-a".to_string());
-        map.insert("wx_b".to_string(), "thread-b".to_string());
-        save_peer_threads(root, &map).await.unwrap();
-        let loaded = load_peer_threads(root).await;
-        assert_eq!(loaded.get("wx_a").map(String::as_str), Some("thread-a"));
+        assert!(load_bindings(root).await.is_empty());
+        let list = json!([
+            { "threadId": "t-a", "accountId": "bot-a", "userId": "u-a", "boundAt": 1 },
+            { "threadId": "t-b", "accountId": "bot-b", "userId": "u-b", "boundAt": 2 },
+        ]);
+        let arr = list.as_array().unwrap();
+        save_bindings(root, arr).await.unwrap();
+        let loaded = load_bindings(root).await;
         assert_eq!(loaded.len(), 2);
+        assert_eq!(
+            loaded[0].get("threadId").and_then(|v| v.as_str()),
+            Some("t-a")
+        );
         // 覆盖写不残留临时文件
-        map.insert("wx_a".to_string(), "thread-a2".to_string());
-        save_peer_threads(root, &map).await.unwrap();
-        let loaded2 = load_peer_threads(root).await;
-        assert_eq!(loaded2.get("wx_a").map(String::as_str), Some("thread-a2"));
-        assert!(!root.join("threads.json.tmp").exists());
+        let list2 = json!([{ "threadId": "t-c", "accountId": "bot-c", "userId": "u-c" }]);
+        save_bindings(root, list2.as_array().unwrap()).await.unwrap();
+        assert_eq!(load_bindings(root).await.len(), 1);
+        assert!(!root.join("bindings.json.tmp").exists());
     }
 
     #[test]
@@ -1299,22 +1393,4 @@ mod tests {
         assert!(!is_thread_not_found(""));
     }
 
-    #[tokio::test]
-    async fn drop_peer_thread_mapping_removes_only_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let mut map = HashMap::new();
-        map.insert("wx_a".to_string(), "thread-a".to_string());
-        map.insert("wx_b".to_string(), "thread-b".to_string());
-        save_peer_threads(root, &map).await.unwrap();
-        drop_peer_thread_mapping(root, "wx_a").await;
-        let loaded = load_peer_threads(root).await;
-        assert_eq!(loaded.get("wx_b").map(String::as_str), Some("thread-b"));
-        assert!(loaded.get("wx_a").is_none());
-        // 无临时文件残留
-        assert!(!root.join("threads.json.tmp").exists());
-        // 移除不存在的联系人：映射保持不变
-        drop_peer_thread_mapping(root, "wx_c").await;
-        assert_eq!(load_peer_threads(root).await.len(), 1);
-    }
 }

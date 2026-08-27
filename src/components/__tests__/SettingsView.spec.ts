@@ -1707,7 +1707,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
   });
 
-  it("个性化 / 通用设置 / 模型配置 / 技能管理 / MCP管理 / 插件管理 / 微信接入七个分区均渲染", () => {
+  it("个性化 / 通用设置 / 模型配置 / 技能管理 / MCP管理 / 插件管理六个分区均渲染", () => {
     wrapper = mount(SettingsView);
     const titles = wrapper.findAll(".settings-section-title").map((s) => s.text());
     expect(titles).toContain("个性化");
@@ -1716,10 +1716,9 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("技能管理");
     expect(titles).toContain("MCP 管理");
     expect(titles).toContain("插件管理");
-    expect(titles).toContain("微信接入");
   });
 
-  it("左侧导航渲染七个分类，默认选中第一个", () => {
+  it("左侧导航渲染六个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
@@ -1729,7 +1728,6 @@ describe("SettingsView 设置标签行为", () => {
       "技能管理",
       "MCP管理",
       "插件管理",
-      "微信接入",
     ]);
     expect(items[0].classes()).toContain("active");
     expect(items[1].classes()).not.toContain("active");
@@ -1737,7 +1735,6 @@ describe("SettingsView 设置标签行为", () => {
     expect(items[3].classes()).not.toContain("active");
     expect(items[4].classes()).not.toContain("active");
     expect(items[5].classes()).not.toContain("active");
-    expect(items[6].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;
@@ -1745,13 +1742,11 @@ describe("SettingsView 设置标签行为", () => {
     const skills = wrapper.find(".settings-section-skills").element as HTMLElement;
     const mcp = wrapper.find(".settings-section-mcp").element as HTMLElement;
     const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
-    const wechat = wrapper.find(".settings-section-wechat").element as HTMLElement;
     expect(personal.style.display).not.toBe("none");
     expect(general.style.display).toBe("none");
     expect(skills.style.display).toBe("none");
     expect(mcp.style.display).toBe("none");
     expect(plugins.style.display).toBe("none");
-    expect(wechat.style.display).toBe("none");
   });
 
   it("点击「插件管理」切换右侧面板", async () => {
@@ -2687,86 +2682,5 @@ describe("SettingsView 按钮图标", () => {
       expect(btn.text().trim().length).toBeGreaterThan(0);
       expect(btn.text().trim().endsWith("…")).toBe(false);
     }
-  });
-});
-
-describe("SettingsView 微信接入", () => {
-  /** 统一本地 mount：进入设置页并默认激活第一个分区 */
-  function mountWechat() {
-    openSettingsTab();
-    return mount(SettingsView);
-  }
-
-  beforeEach(() => {
-    __resetTabsForTest();
-    store.settings.wechat_enabled = false;
-    store.wechat = null;
-    store.toast = "";
-    mockedInvoke.mockReset();
-    mockedSave.mockReset();
-    mockedSave.mockResolvedValue(undefined);
-  });
-
-  it("未登录时展示扫码入口且退出登录不可用", async () => {
-    const wrapper = mountWechat();
-    await flushPromises();
-    wrapper.find('.settings-nav-item:nth-child(7)').trigger('click');
-    await flushPromises();
-    const section = wrapper.find(".settings-section-wechat").element as HTMLElement;
-    expect(section.style.display).not.toBe("none");
-    expect(wrapper.text()).toContain("扫码登录");
-    expect(wrapper.text()).toContain("未连接");
-    const logoutBtn = wrapper.find(".wechat-logout-btn");
-    expect(logoutBtn.attributes("disabled")).toBeDefined();
-  });
-
-  it("已连接快照渲染状态徽标与账号并允许退出", async () => {
-    store.wechat = {
-      running: true,
-      connection: "connected",
-      detail: null,
-      qrContent: null,
-      accountId: "bot-1",
-      queued: 0,
-      busy: false,
-      enabled: true,
-    };
-    const wrapper = mountWechat();
-    await flushPromises();
-    wrapper.find('.settings-nav-item:nth-child(7)').trigger('click');
-    await flushPromises();
-    expect(wrapper.find(".wechat-state-badge").text()).toBe("已连接");
-    expect(wrapper.text()).toContain("账号：bot-1");
-    expect(wrapper.find(".wechat-logout-btn").attributes("disabled")).toBeUndefined();
-  });
-
-  it("门禁简化为谁扫谁白：不再渲染白名单编辑入口", async () => {
-    const wrapper = mountWechat();
-    await flushPromises();
-    // 分区 DOM 始终渲染（v-show 隐藏），直接断言门禁文案与入口消失
-    expect(wrapper.find(".wechat-wl-input").exists()).toBe(false);
-    expect(wrapper.text()).toContain("仅扫码绑定的微信本人可触发 Codex");
-  });
-
-  it("切换总开关先保存设置再同步 sidecar 运行态", async () => {
-    (mockedInvoke as ReturnType<typeof vi.fn>).mockImplementation(async (cmdName: string) => {
-      if (cmdName === "wechat_service_sync" || cmdName === "wechat_state") return {};
-      return null;
-    });
-    const wrapper = mountWechat();
-    await flushPromises();
-    await wrapper.find("#wechat-enabled").setValue(true);
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalled();
-    const syncCalls = (mockedInvoke as ReturnType<typeof vi.fn>).mock.calls.filter(
-      ([c]) => c === "wechat_service_sync",
-    );
-    expect(syncCalls.length).toBeGreaterThan(0);
-    // 同步调用发生在保存之后
-    const saveIdx = mockedSave.mock.invocationCallOrder[0];
-    const syncIdx = (mockedInvoke as ReturnType<typeof vi.fn>).mock.invocationCallOrder[
-      (mockedInvoke as ReturnType<typeof vi.fn>).mock.calls.findIndex(([c]) => c === "wechat_service_sync")
-    ];
-    expect(saveIdx).toBeLessThan(syncIdx);
   });
 });

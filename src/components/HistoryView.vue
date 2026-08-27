@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import ContextMenu from "./ContextMenu.vue";
 import ModalDialog from "./ModalDialog.vue";
+import WechatBindDialog from "./WechatBindDialog.vue";
 import {
   computed,
   onBeforeUnmount,
@@ -14,10 +15,12 @@ import { openTerminalTab } from "../composables/useEditorTabs";
 import {
   activeSessionTab,
   clearSearch,
+  ensureWeChatEvents,
   isThreadOpen,
   isThreadRunning,
   openHistorySession,
   openNewSession,
+  refreshWeChatState,
   refreshThreads,
   searchThreads,
   setToast,
@@ -26,6 +29,7 @@ import {
   toastError,
   togglePin,
 } from "../composables/useCodex";
+import { isThreadBound } from "../composables/useCodex/wechat";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import { useHistoryDialogs } from "../composables/useHistoryDialogs";
 import { formatRelativeTime } from "../lib/format";
@@ -45,12 +49,15 @@ import {
   ICON_RENAME,
   SESSION_LOGO_PATHS,
   ICON_TERMINAL,
+  ICON_WECHAT,
 } from "../lib/icons";
 
 // 重命名/删除确认弹窗状态
 const confirmEl = ref<HTMLElement | null>(null);
 /** 嵌套属性访问保留 Ref 对象（顶层绑定会被模板自动解包） */
 const rootRefs = { confirmEl };
+/** 正在操作微信接入的会话（null 表示弹窗关闭） */
+const bindThread = ref<ThreadSummary | null>(null);
 const {
   confirmDelete,
   editingId,
@@ -168,6 +175,14 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
       icon: ICON_PIN,
       action: () => void togglePin(t.id, !t.isPinned),
     },
+    {
+      label: "微信接入",
+      icon: ICON_WECHAT,
+      action: () => {
+        bindThread.value = t;
+        void refreshWeChatState();
+      },
+    },
     ...(isThreadOpen(t.id)
       ? []
       : [
@@ -231,6 +246,9 @@ onMounted(() => {
   window.addEventListener("scroll", onWindowScroll, true);
   // 面板常驻：启动即全量拉取历史
   void refreshThreads();
+  // 微信绑定徽标与弹窗数据：启动即注册事件并拉取快照
+  void ensureWeChatEvents();
+  void refreshWeChatState();
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
@@ -323,6 +341,16 @@ onBeforeUnmount(() => {
               />
             </svg>
           </span>
+          <span
+            v-if="isThreadBound(row.thread.id)"
+            class="history-wechat-badge"
+            aria-label="已绑定微信"
+            v-tooltip="'已绑定微信'"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="ICON_WECHAT" />
+            </svg>
+          </span>
           <span class="history-main">
             <input
               v-if="editingId === row.thread.id"
@@ -390,5 +418,10 @@ onBeforeUnmount(() => {
         <button class="btn danger" @click="doDelete()">删除</button>
       </template>
     </ModalDialog>
+    <WechatBindDialog
+      v-if="bindThread"
+      :thread="bindThread"
+      @close="bindThread = null"
+    />
   </div>
 </template>

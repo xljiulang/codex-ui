@@ -35,6 +35,8 @@ let clientReady = false;
 let loggingIn = false;
 /** 首次 init 的在途 Promise：并发/重复 init 幂等。 */
 let initPromise = null;
+/** 最近一次 init 的 stateDir：login 若早于 init 到达时用于补齐初始化。 */
+let lastStateDir = null;
 
 /** 发送串行化：保证回复顺序与入队顺序一致，避免长轮询并发写冲突。 */
 let sendChain = Promise.resolve();
@@ -100,6 +102,8 @@ async function ensureInit(stateDir) {
         name: a.name ?? null,
         configured: !!a.configured,
         userId: a.userId ?? null,
+        // 会话状态供宿主在重启复登时优先选择未过期账号（跳过 session_expired）。
+        status: c.getSessionStatus(a.id).status ?? null,
       }));
       emit({ event: "accounts", accounts });
       client = c;
@@ -157,6 +161,7 @@ async function handleCmd(cmd) {
     case "init": {
       try {
         await ensureInit(cmd.stateDir);
+        lastStateDir = cmd.stateDir;
       } catch (err) {
         emit({
           event: "error",
@@ -167,7 +172,20 @@ async function handleCmd(cmd) {
       return;
     }
     case "login":
-      void doLogin(cmd.timeoutMs);
+      // 桥端可能刚拉起 sidecar 就下发 login：先等 init 完成（幂等）再登录，
+      // 消除 login 早于 init 的竞态；初始化失败转为 error 事件。
+      void (async () => {
+        try {
+          if (lastStateDir) await ensureInit(lastStateDir);
+          await doLogin(cmd.timeoutMs);
+        } catch (err) {
+          emit({
+            event: "error",
+            message: `登录失败: ${err?.message ?? err}`,
+            kind: "login",
+          });
+        }
+      })();
       return;
     case "start":
       try {
@@ -177,6 +195,18 @@ async function handleCmd(cmd) {
       }
       return;
     case "stop": {
+      if (!clientReady) return;
+      // 带 accountId：仅停止该账号接收器（解绑单个会话用）；不带则停全部。
+      if (cmd.accountId) {
+        if (client.isReceiving(cmd.accountId)) {
+          try {
+            await client.stop(cmd.accountId);
+          } catch {
+            // 停止失败不影响流程
+          }
+        }
+        return;
+      }
       const accounts = clientReady ? client.getAccounts() : [];
       for (const a of accounts) {
         if (a.configured && client.isReceiving(a.id)) {

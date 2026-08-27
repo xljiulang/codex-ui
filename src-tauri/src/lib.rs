@@ -131,9 +131,9 @@ pub fn run() {
             codex::commands::auth_logout,
             codex::commands::startup_workspace,
             codex::commands::wechat_state,
-            codex::commands::wechat_login_start,
-            codex::commands::wechat_logout,
-            codex::commands::wechat_service_sync,
+            codex::commands::wechat_bindings,
+            codex::commands::wechat_bind_login_start,
+            codex::commands::wechat_unbind,
             codex::commands::open_url,
             codex::commands::reveal_path,
             codex::diff::build_diff_preview,
@@ -251,7 +251,7 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
-            // 微信接入桥：数据根目录随应用数据目录；开关开启时后台自动恢复长轮询
+            // 微信接入桥：数据根目录随应用数据目录；存在绑定时后台自动恢复长轮询
             let wechat_app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             let wechat = codex::wechat_bridge::WeChatBridge::new(
                 app.handle().clone(),

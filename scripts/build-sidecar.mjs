@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const outdir = path.join(root, "sidecar-dist");
 const senderRel = path.join("wechat-channel", "dist", "messaging", "sender.js");
+const errorsRel = path.join("wechat-channel", "dist", "errors.js");
 
 /**
  * 绕过 wechat-channel@1.1.0 sendText 发送前的 markdown 剥离：
@@ -33,6 +34,28 @@ function patchSenderSource(source) {
   );
 }
 
+/**
+ * 收紧 wechat-channel@1.1.0 的会话过期判定：去掉 SESSION_EXPIRED_PATTERN 中的
+ * `timeout` 分支，避免长轮询首包的网关/网络瞬时超时被误判为「会话已过期」，
+ * 让这类错误走普通失败重试而非停止接收。真正的过期仍由 errcode === -14 或
+ * 明确 session/token expired 文案捕获。模式缺失时中止构建。
+ */
+function patchSessionPattern(source) {
+  const from = "token.*expired|timeout";
+  const to = "token.*expired";
+  if (source.includes(from)) {
+    return source.replace(from, to);
+  }
+  if (source.includes(to)) {
+    // 已补丁（就地补丁先于 esbuild 读取时）或重复构建：原样直通。
+    return source;
+  }
+  throw new Error(
+    `[build-sidecar] 未在 wechat-channel errors.js 中找到会话过期判定，` +
+      `请核对库结构后更新补丁（期望包含: ${from}）`,
+  );
+}
+
 // 打包期补丁：esbuild 解析到 sender.js 时直接返回替换后的源码。
 const markdownRawPlugin = {
   name: "wechat-channel-md-raw",
@@ -47,24 +70,42 @@ const markdownRawPlugin = {
   },
 };
 
+// 打包期补丁：esbuild 解析到 errors.js 时返回收紧后的源码。
+const sessionPatternPlugin = {
+  name: "wechat-channel-session-pattern",
+  setup(build) {
+    build.onLoad(
+      { filter: /wechat-channel[\\/]dist[\\/]errors\.js$/ },
+      async (args) => ({
+        contents: patchSessionPattern(await readFile(args.path, "utf8")),
+        loader: "js",
+      }),
+    );
+  },
+};
+
+// 就地补丁：未打包直接跑源码版 sidecar 时走 node_modules 原始模块，
+// 同样需要修补，保证两条运行路径行为一致（node_modules 为 gitignored 产物）。
+async function applyInPlacePatch(rel, patch, label) {
+  const p = path.join(root, "sidecar", "node_modules", ...rel.split(path.sep));
+  if (existsSync(p)) {
+    await writeFile(p, patch(await readFile(p, "utf8")), "utf8");
+    console.log(`[build-sidecar] patched ${path.relative(root, p)}`);
+  } else {
+    console.warn(`[build-sidecar] 未找到 ${path.relative(root, p)}，跳过就地补丁（${label}）`);
+  }
+}
+
 await rm(outdir, { recursive: true, force: true });
 await mkdir(outdir, { recursive: true });
 
-// 就地补丁：未打包直接跑源码版 sidecar（sidecar/wechat-sidecar.mjs）时，
-// 走 node_modules 原始模块，同样需要绕过剥离，保证两条运行路径行为一致。
-const senderPath = path.join(root, "sidecar", "node_modules", ...senderRel.split(path.sep));
-if (existsSync(senderPath)) {
-  const patched = patchSenderSource(await readFile(senderPath, "utf8"));
-  await writeFile(senderPath, patched, "utf8");
-  console.log(`[build-sidecar] patched ${path.relative(root, senderPath)}`);
-} else {
-  console.warn(`[build-sidecar] 未找到 ${path.relative(root, senderPath)}，跳过就地补丁`);
-}
+await applyInPlacePatch(senderRel, patchSenderSource, "markdown");
+await applyInPlacePatch(errorsRel, patchSessionPattern, "session");
 
 await build({
   entryPoints: [path.join(root, "sidecar", "wechat-sidecar.mjs")],
   outfile: path.join(outdir, "wechat-sidecar.mjs"),
-  plugins: [markdownRawPlugin],
+  plugins: [markdownRawPlugin, sessionPatternPlugin],
   bundle: true,
   format: "esm",
   platform: "node",
