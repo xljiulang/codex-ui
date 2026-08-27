@@ -22,6 +22,8 @@ use crate::codex::wechat_client::{WechatClient, WechatEvent};
 const QUEUE_LIMIT: usize = 16;
 /// 回复超长时按可见字符数切分发送。
 const REPLY_CHUNK_CHARS: usize = 1800;
+/// “正在输入”状态周期续发间隔（秒）。
+const TYPING_INTERVAL_SECS: u64 = 8;
 /// 把回合产物整理为回复文本：无文本/非正常结束给出对应中文兜底提示。
 fn normalize_turn_text(text: &str, status: &str) -> String {
     let trimmed = text.trim();
@@ -254,6 +256,8 @@ struct ActiveTurn {
     account_id: String,
     peer: String,
     deadline: std::time::Instant,
+    /// 周期续发“正在输入”的后台任务；回合结束/失败/超时时 abort。
+    typing_task: Option<tauri::async_runtime::JoinHandle<()>>,
 }
 
 impl WeChatBridge {
@@ -770,6 +774,26 @@ impl WeChatBridge {
         }
     }
 
+    /// 发送“正在输入”状态（best-effort：失败仅告警，绝不阻断回合）。
+    async fn set_typing(&self, account_id: &str, peer: &str, status: i32) {
+        if let Err(e) = self.client.send_typing(account_id, peer, status).await {
+            self.log("warn", format!("发送 typing 状态给 {peer} 失败: {e}")).await;
+        }
+    }
+
+    /// 启动周期续发“正在输入”的后台任务（首次发送 8s 后开始；靠 abort 停止）。
+    fn spawn_typing_refresh(self: &Arc<Self>, account_id: &str, peer: &str) -> tauri::async_runtime::JoinHandle<()> {
+        let this = Arc::clone(self);
+        let account_id = account_id.to_string();
+        let peer = peer.to_string();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(TYPING_INTERVAL_SECS)).await;
+                this.set_typing(&account_id, &peer, 1).await;
+            }
+        })
+    }
+
     // -- Codex 回合编排 ------------------------------------------------------
 
     /// 订阅 codex 服务器通知：收集 agentMessage 文本并在 turn/completed 时唤醒泵。
@@ -845,7 +869,7 @@ impl WeChatBridge {
                     continue;
                 }
             }
-            if let Some(c) = current.take() {
+            if let Some(mut c) = current.take() {
                 let remaining = c
                     .deadline
                     .checked_duration_since(std::time::Instant::now())
@@ -854,10 +878,22 @@ impl WeChatBridge {
                     Err(_elapsed) => {
                         // 超时：清理槽位并回复失败提示。
                         self.inner.lock().await.pending_reply.remove(&c.thread_id);
-                        self.finish_active(&c.account_id, &c.peer, "⚠️ 执行失败：等待 Codex 回合超时")
+                        let task = c.typing_task.take();
+                        self.finish_active(
+                            &c.account_id,
+                            &c.peer,
+                            task,
+                            "⚠️ 执行失败：等待 Codex 回合超时",
+                        )
                             .await;
                     }
-                    Ok(None) => break, // 完成通道关闭（应用退出）
+                    Ok(None) => {
+                        // 完成通道关闭（应用退出）：停止周期任务。
+                        if let Some(t) = c.typing_task.take() {
+                            t.abort();
+                        }
+                        break;
+                    }
                     Ok(Some((tid, status))) => {
                         if tid != c.thread_id {
                             current = Some(c); // 他线完成信号：放回继续等本线程
@@ -871,7 +907,8 @@ impl WeChatBridge {
                             .remove(&c.thread_id)
                             .unwrap_or_default();
                         let final_text = normalize_turn_text(&text, &status);
-                        self.finish_active(&c.account_id, &c.peer, &final_text).await;
+                        let task = c.typing_task.take();
+                        self.finish_active(&c.account_id, &c.peer, task, &final_text).await;
                     }
                 }
             } else {
@@ -926,6 +963,8 @@ impl WeChatBridge {
         {
             let mut g = self.inner.lock().await;
             g.active_thread = Some(thread_id.to_string());
+            // 纠偏：清除上一轮积存的回复文本，避免本轮无 agentMessage 时复用旧回复。
+            g.pending_reply.remove(thread_id);
         }
         // 先 thread/resume 激活线程：codex 的 turn/start 只对已 resume 的线程可寻址，
         // 否则会对存在于会话库的线程误报 thread not found（前端发送前也是先 resume）。
@@ -956,12 +995,17 @@ impl WeChatBridge {
                 "⚠️ 执行失败：无法解析默认模型（检查 codex 登录与模型列表）".into(),
             ));
         }
+        // 回合即将真正开始：点亮“正在输入”并周期续发。
+        let typing_task = self.spawn_typing_refresh(account_id, peer);
+        self.set_typing(account_id, peer, 1).await;
         let params = build_turn_params(thread_id, text, &model, &self.next_message_id());
         if let Err(e) = self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))
             .await
         {
+            typing_task.abort();
+            self.set_typing(account_id, peer, 2).await;
             self.clear_active(thread_id).await;
             return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
         }
@@ -970,6 +1014,7 @@ impl WeChatBridge {
             account_id: account_id.to_string(),
             peer: peer.to_string(),
             deadline: std::time::Instant::now() + Duration::from_secs(TURN_TIMEOUT_SECS),
+            typing_task: Some(typing_task),
         })
     }
 
@@ -983,13 +1028,23 @@ impl WeChatBridge {
     }
 
     /// 回复联系人并把状态推进到空闲（触发下一条处理）。
-    async fn finish_active(self: &Arc<Self>, account_id: &str, peer: &str, text: &str) {
+    async fn finish_active(
+        self: &Arc<Self>,
+        account_id: &str,
+        peer: &str,
+        typing_task: Option<tauri::async_runtime::JoinHandle<()>>,
+        text: &str,
+    ) {
+        if let Some(t) = typing_task {
+            t.abort();
+        }
         {
             let mut g = self.inner.lock().await;
             g.active_thread = None;
             g.overflow_notified.clear();
         }
         self.send_reply_now(account_id, peer, text).await;
+        self.set_typing(account_id, peer, 2).await;
         let _ = self.job_tx.send(());
     }
 

@@ -40,6 +40,8 @@ const RETRY_DELAY: Duration = Duration::from_secs(2);
 const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 /// 连续失败阈值。
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+/// getconfig / sendtyping 请求超时（正在输入状态指示相关）。
+const TYPING_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 统一 ID 计数器（替代随机源：唯一性足够，避免额外依赖）。
 static ID_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -362,6 +364,10 @@ pub trait WechatApi: Send + Sync {
     ) -> BoxFuture<'_, Result<Value, String>>;
     fn send_message(&self, base_url: &str, token: &str, body: Value)
         -> BoxFuture<'_, Result<Value, String>>;
+    fn get_config(&self, base_url: &str, token: &str, body: Value)
+        -> BoxFuture<'_, Result<Value, String>>;
+    fn send_typing(&self, base_url: &str, token: &str, body: Value)
+        -> BoxFuture<'_, Result<Value, String>>;
 }
 
 /// 真实 HTTP 实现（reqwest）。
@@ -505,6 +511,36 @@ impl WechatApi for ReqwestApi {
             Duration::from_secs(15),
         )
     }
+
+    fn get_config(
+        &self,
+        base_url: &str,
+        token: &str,
+        body: Value,
+    ) -> BoxFuture<'_, Result<Value, String>> {
+        self.post_json(
+            base_url,
+            "ilink/bot/getconfig",
+            Some(token),
+            body,
+            TYPING_REQUEST_TIMEOUT,
+        )
+    }
+
+    fn send_typing(
+        &self,
+        base_url: &str,
+        token: &str,
+        body: Value,
+    ) -> BoxFuture<'_, Result<Value, String>> {
+        self.post_json(
+            base_url,
+            "ilink/bot/sendtyping",
+            Some(token),
+            body,
+            TYPING_REQUEST_TIMEOUT,
+        )
+    }
 }
 
 fn urlencode(s: &str) -> String {
@@ -561,6 +597,8 @@ pub struct WechatClient<A: WechatApi = ReqwestApi> {
     api: Arc<A>,
     tx: mpsc::UnboundedSender<WechatEvent>,
     receivers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    /// typing_ticket 内存缓存：键为 (account_id, peer)。
+    typing_tickets: Mutex<HashMap<(String, String), String>>,
 }
 
 impl WechatClient<ReqwestApi> {
@@ -576,6 +614,7 @@ impl<A: WechatApi + 'static> WechatClient<A> {
             api: Arc::new(api),
             tx,
             receivers: Arc::new(Mutex::new(HashMap::new())),
+            typing_tickets: Mutex::new(HashMap::new()),
         }
     }
 
@@ -851,6 +890,105 @@ impl<A: WechatApi + 'static> WechatClient<A> {
         Ok(())
     }
 
+    /// 取回并缓存对端用户的 typing_ticket（按“账号+用户”缓存，取到即复用）。
+    async fn ensure_typing_ticket(&self, account_id: &str, to: &str) -> Result<String, String> {
+        let key = (account_id.to_string(), to.to_string());
+        if let Some(t) = self.typing_tickets.lock().await.get(&key).cloned() {
+            return Ok(t);
+        }
+        let account = load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
+        let token = account
+            .get("token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let base_url = account
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or(DEFAULT_BASE_URL)
+            .to_string();
+        let body = json!({
+            "ilink_user_id": to,
+            "context_token": get_context_token(&self.root, account_id, to).unwrap_or_default(),
+            "base_info": build_base_info(),
+        });
+        let resp = self.api.get_config(&base_url, &token, body).await?;
+        let ticket = resp
+            .get("typing_ticket")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if ticket.is_empty() {
+            return Err("未获取到 typing_ticket（可能该用户尚无上行消息或会话已失效）".into());
+        }
+        self.typing_tickets.lock().await.insert(key, ticket.clone());
+        Ok(ticket)
+    }
+
+    /// 发送“正在输入”状态（status=1 显示 / status=2 取消）。best-effort：账号未连接直接 Ok。
+    pub async fn send_typing(&self, account_id: &str, to: &str, status: i32) -> Result<(), String> {
+        let account = load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
+        let token = account
+            .get("token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let base_url = account
+            .get("baseUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or(DEFAULT_BASE_URL)
+            .to_string();
+        let session = load_session_status(&self.root, account_id);
+        let conn = session.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        if conn == "session_expired" || conn != "connected" {
+            // 过期或未连接：无意义，直接跳过（不打断调用方）。
+            return Ok(());
+        }
+        let ticket = self.ensure_typing_ticket(account_id, to).await?;
+        let body = json!({
+            "ilink_user_id": to,
+            "typing_ticket": ticket,
+            "status": status,
+            "base_info": build_base_info(),
+        });
+        let resp = self.api.send_typing(&base_url, &token, body).await?;
+        if is_api_error(&resp) {
+            // 任一错误清缓存自愈，下次重取；过期再发事件。
+            self.typing_tickets
+                .lock()
+                .await
+                .remove(&(account_id.to_string(), to.to_string()));
+            if is_session_expired_payload(&resp) {
+                let msg = resp
+                    .get("errmsg")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("session expired")
+                    .to_string();
+                save_session_status(
+                    &self.root,
+                    account_id,
+                    "session_expired",
+                    resp.get("errcode").and_then(|v| v.as_i64()),
+                    Some(&msg),
+                );
+                let _ = self.tx.send(WechatEvent::SessionStatus {
+                    account_id: account_id.to_string(),
+                    status: "session_expired".into(),
+                    error_code: resp.get("errcode").and_then(|v| v.as_i64()),
+                    error_message: Some(msg),
+                });
+                return Err("微信会话已过期，请重新扫码".into());
+            }
+            let msg = resp
+                .get("errmsg")
+                .and_then(|v| v.as_str())
+                .unwrap_or("发送 typing 状态失败")
+                .to_string();
+            return Err(msg);
+        }
+        Ok(())
+    }
+
     /// 停止全部接收器（应用退出时调用）。
     pub async fn shutdown(&self) {
         let ids: Vec<String> = {
@@ -1016,6 +1154,12 @@ mod tests {
         fn send_message(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
+        fn get_config(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "ret": 0, "typing_ticket": "ticket-1" })) })
+        }
+        fn send_typing(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "ret": 0 })) })
+        }
     }
 
     #[test]
@@ -1095,6 +1239,12 @@ mod tests {
             fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
+            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0, "typing_ticket": "ticket-x" })) })
+            }
+            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
         }
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
@@ -1142,5 +1292,58 @@ mod tests {
         assert!(qr_seen);
         assert!(ok);
         assert_eq!(acc.as_deref(), Some("bot-1@im.bot"));
+    }
+
+    #[tokio::test]
+    async fn send_typing_fetches_ticket_once_then_reuses_and_skips_when_disconnected() {
+        struct CountingApi {
+            get_config_calls: Arc<std::sync::Mutex<usize>>,
+            send_typing_calls: Arc<std::sync::Mutex<usize>>,
+        }
+        impl WechatApi for CountingApi {
+            fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "status": "wait" })) })
+            }
+            fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0, "msgs": [], "get_updates_buf": "" })) })
+            }
+            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                *self.get_config_calls.lock().unwrap() += 1;
+                Box::pin(async { Ok(json!({ "ret": 0, "typing_ticket": "ticket-1" })) })
+            }
+            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                *self.send_typing_calls.lock().unwrap() += 1;
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
+        save_session_status(&root, "bot-1", "connected", None, None);
+        set_context_token(&root, "bot-1", "u-1", "ctx-1", None);
+        let gcc = Arc::new(std::sync::Mutex::new(0usize));
+        let stc = Arc::new(std::sync::Mutex::new(0usize));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let client = WechatClient::with_api(
+            root.clone(),
+            tx,
+            CountingApi { get_config_calls: gcc.clone(), send_typing_calls: stc.clone() },
+        );
+        client.send_typing("bot-1", "u-1", 1).await.unwrap();
+        client.send_typing("bot-1", "u-1", 2).await.unwrap();
+        assert_eq!(*gcc.lock().unwrap(), 1); // ticket 只取一次
+        assert_eq!(*stc.lock().unwrap(), 2);
+
+        // 未连接账号：直接 Ok，不再发请求
+        save_session_status(&root, "bot-1", "disconnected", None, None);
+        client.send_typing("bot-1", "u-1", 1).await.unwrap();
+        assert_eq!(*stc.lock().unwrap(), 2); // 未新增请求
     }
 }
