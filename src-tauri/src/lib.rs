@@ -130,6 +130,10 @@ pub fn run() {
             codex::commands::auth_api_key_configured,
             codex::commands::auth_logout,
             codex::commands::startup_workspace,
+            codex::commands::wechat_state,
+            codex::commands::wechat_login_start,
+            codex::commands::wechat_logout,
+            codex::commands::wechat_service_sync,
             codex::commands::open_url,
             codex::commands::reveal_path,
             codex::diff::build_diff_preview,
@@ -247,6 +251,18 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
+            // 微信接入桥：数据根目录随应用数据目录；开关开启时后台自动恢复长轮询
+            let wechat_app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let wechat = codex::wechat_bridge::WeChatBridge::new(
+                app.handle().clone(),
+                server_handle.clone(),
+                wechat_app_dir,
+            );
+            app.manage(wechat.clone());
+            let wechat_boot = wechat.clone();
+            tauri::async_runtime::spawn(async move {
+                wechat_boot.autostart().await;
+            });
             app.manage(codex::pdf_export::PdfExportState(
                 std::sync::Mutex::new(std::collections::HashMap::new()),
             ));
@@ -264,6 +280,11 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(server) = app_handle.try_state::<Arc<CodexServer>>() {
                     server.shutdown();
+                }
+                if let Some(wechat) =
+                    app_handle.try_state::<Arc<codex::wechat_bridge::WeChatBridge>>()
+                {
+                    tauri::async_runtime::block_on(wechat.stop_service());
                 }
             }
         });

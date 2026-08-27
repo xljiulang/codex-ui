@@ -19,6 +19,8 @@ pub struct AppSettings {
     /// 终端 Shell：cmd（命令提示符，默认）｜powershell
     #[serde(default = "default_terminal_shell")]
     pub terminal_shell: String,
+    /// 微信接入总开关：开启后自动拉起 sidecar（门禁恒为「谁扫谁白」）
+    pub wechat_enabled: bool,
 }
 
 fn default_permission() -> String {
@@ -41,11 +43,12 @@ impl Default for AppSettings {
             enter_to_send: true,
             followup_mode: "adjust".into(),
             theme: "blue".into(),
-            default_permission: default_permission(),
-            memory_mode: default_memory_mode(),
-            terminal_shell: default_terminal_shell(),
-        }
+        default_permission: default_permission(),
+        memory_mode: default_memory_mode(),
+        terminal_shell: default_terminal_shell(),
+        wechat_enabled: false,
     }
+}
 }
 
 pub fn settings_path(app_dir: &Path) -> std::path::PathBuf {

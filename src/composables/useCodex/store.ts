@@ -1,6 +1,7 @@
 // useCodex 拆分模块：全局 store 与共享模块状态（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { reactive } from "vue";
 import type {
+  WeChatSnapshot,
   PendingInteraction,
   ServerStatus,
   ThreadItem,
@@ -38,6 +39,8 @@ export const store = reactive({
   userSendRev: 0,
   interactions: [] as PendingInteraction[],
   settings: defaultSettings(),
+  /** 微信接入桥状态快照（进入设置页后由 wechat_state / 事件填充） */
+  wechat: null as WeChatSnapshot | null,
   // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
   booting: true,
   loadingHistory: false,

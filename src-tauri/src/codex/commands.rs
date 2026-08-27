@@ -10,8 +10,12 @@ use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
+use crate::codex::wechat_bridge::WeChatBridge;
 
 type Server = Arc<CodexServer>;
+
+/// 微信桥托管句柄（与 Server 一致的 Arc 形态）。
+type WeChat = Arc<WeChatBridge>;
 
 /// 生成「纯参数透传」RPC 命令：命令签名统一为 `(State<Server>, params: Value)`，
 /// 仅转发到指定协议方法并携带超时。用于收敛 thread_start / thread_resume /
@@ -282,6 +286,34 @@ pub async fn auth_logout(server: State<'_, Server>) -> Result<Value, String> {
 #[tauri::command]
 pub fn startup_workspace(server: State<'_, Server>) -> String {
     clean_path(server.workspace())
+}
+
+// ---------------- 微信接入（ClawBot sidecar） ----------------
+
+/// 当前微信桥状态快照（供设置页轮询与事件兜底刷新）。
+#[tauri::command]
+pub async fn wechat_state(wechat: State<'_, WeChat>) -> Result<Value, String> {
+    Ok(wechat.state().await)
+}
+
+/// 发起扫码登录：二维码内容随后经 `wechat/event` 事件推送。
+#[tauri::command]
+pub async fn wechat_login_start(wechat: State<'_, WeChat>) -> Result<(), String> {
+    wechat.login_start().await
+}
+
+/// 退出登录：删除本地凭据并回到未登录态。
+#[tauri::command]
+pub async fn wechat_logout(wechat: State<'_, WeChat>) -> Result<(), String> {
+    wechat.logout().await
+}
+
+/// 设置项变更后的运行时对齐：按 settings.json 的开关启停 sidecar。
+#[tauri::command]
+pub async fn wechat_service_sync(app: AppHandle) -> Result<(), String> {
+    let wechat = app.state::<WeChat>();
+    wechat.apply_enabled().await;
+    Ok(())
 }
 
 #[tauri::command]

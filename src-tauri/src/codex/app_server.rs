@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{Mutex, Notify, oneshot};
+use tokio::sync::{Mutex, Notify, broadcast, oneshot};
 
 use crate::codex::bundled;
 use crate::codex::path_util::clean_path;
@@ -44,6 +44,9 @@ struct Shared {
     stop: AtomicBool,
     bundled: DoneState,
     runtime: DoneState,
+    /// 服务器通知广播口：除转发前端外，微信桥等 Rust 内部订阅者据此感知
+    /// thread/turn 事件（容量有限，滞后订阅者按 Lagged 自行容错）。
+    tap: broadcast::Sender<(String, Value)>,
 }
 
 /// 后台完成信号：`wait` 会阻塞到 `mark_done` 被调用，避免市场登记在
@@ -125,6 +128,7 @@ impl CodexServer {
                 stop: AtomicBool::new(false),
                 bundled: DoneState::new(),
                 runtime: DoneState::new(),
+                tap: broadcast::channel(256).0,
             }),
             next_id: AtomicU64::new(0),
             workspace,
@@ -135,6 +139,12 @@ impl CodexServer {
 
     pub fn workspace(&self) -> &Path {
         &self.workspace
+    }
+
+    /// 订阅 app-server 的全部服务器通知（method, params）。
+    /// 当前仅微信桥使用；迟到导致 Lagged 时由订阅方自行跳过补齐。
+    pub fn subscribe_notifications(&self) -> broadcast::Receiver<(String, Value)> {
+        self.shared.tap.subscribe()
     }
 
     /// 后台解压完成信号：向等待方广播（供 `bundled::bootstrap` 调用）。
@@ -523,6 +533,7 @@ impl CodexServer {
         if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
             let params = v.get("params").cloned().unwrap_or(Value::Null);
             self.log_event(method, method, &params);
+            let _ = self.shared.tap.send((method.to_string(), params.clone()));
             let _ = self.app.emit(method, params);
         }
     }

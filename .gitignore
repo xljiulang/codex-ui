@@ -1,4 +1,6 @@
 node_modules
+sidecar/node_modules
+sidecar-dist
 dist
 coverage
 src-tauri/target
@@ -8,5 +10,6 @@ src-tauri/gen
 .vs/
 /.playwright-cli/
 /setup/bin/*.exe
+/setup/resources/
 /setup/output/*.exe
 /setup/*.exe

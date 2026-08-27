@@ -55,6 +55,13 @@ export {
 } from "./plugins";
 export { loadMcpServers, saveMcpServers } from "./mcp";
 export {
+  ensureWeChatEvents,
+  refreshWeChatState,
+  wechatLoginStart,
+  wechatLogout,
+  wechatServiceSync,
+} from "./wechat";
+export {
   loadModelProviderConfig,
   saveModelProviderConfig,
   type ModelProviderConfigState,

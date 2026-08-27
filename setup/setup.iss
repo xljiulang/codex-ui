@@ -45,6 +45,9 @@ Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwri
 ; 随包只放 openai-bundled 插件市场（.tar.gz）；codex-primary-runtime 不再进安装包，
 ; 由 codex-ui 启动后按需下载/升级到 canonical 位置；卸载 codex-ui 时保留该 codex 资源。
 Source: .\marketplaces\openai-bundled.tar.gz; DestDir: {app}\marketplaces; Flags: ignoreversion overwritereadonly replacesameversion
+; 微信接入 sidecar（wechat-channel 的 self-contained ESM bundle，单文件）；
+; 布局对应 Rust 解析器候选 <exe>\resources\wechat-sidecar\wechat-sidecar.mjs。
+Source: .\resources\wechat-sidecar\*; DestDir: {app}\resources\wechat-sidecar; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}
