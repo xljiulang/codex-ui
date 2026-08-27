@@ -78,11 +78,13 @@ cargo build --release --manifest-path src-tauri\Cargo.toml
 # 产物：src-tauri\target\release\codex-ui.exe
 ```
 
-安装包（NSIS/MSI）：
+安装包（Inno Setup）：
 
 ```powershell
-npm run tauri build
+build-release.bat
 ```
+
+产物：`setup\output\codex-ui-win-x64.exe`。脚本自动依次执行前端构建（`npm run build`）→ 微信 sidecar 构建（`npm run build:sidecar`）→ Rust release（`cargo build --release`）→ 把 exe 与 sidecar 暂存到 `setup\` → Inno Setup 编译（`setup\setup.iss`）。
 
 > 注意：`Cargo.toml` 中 `tauri` 依赖已启用 `custom-protocol` 与 `protocol-asset` 特性。前者保证生产窗口加载打包的前端（否则会去连 `localhost:5173` 显示“拒绝连接”），后者用于 asset 协议加载本地图片。
 

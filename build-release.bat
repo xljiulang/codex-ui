@@ -36,6 +36,19 @@ if "%NEED_INSTALL%"=="1" (
   echo [1/6] Dependencies present, skipping npm install
 )
 
+rem WeChat sidecar deps (wechat-channel) live under sidecar\package.json;
+rem build:sidecar needs them to bundle, so install once if missing.
+if not exist "sidecar\node_modules\wechat-channel" (
+  echo [1/6] Installing WeChat sidecar dependencies ^(npm install --prefix sidecar^) ...
+  call npm install --prefix sidecar
+  if errorlevel 1 (
+    echo [ERROR] sidecar npm install failed.
+    exit /b 1
+  )
+) else (
+  echo [1/6] sidecar dependencies present, skipping install
+)
+
 echo [2/6] Building frontend (npm run build -^> dist/) ...
 call npm run build
 if errorlevel 1 (
@@ -76,7 +89,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem WeChat sidecar single-file bundle; layout matches Rust resolver
 rem WeChat sidecar single-file bundle; layout matches Rust resolver
 if not exist "setup\resources\wechat-sidecar" mkdir "setup\resources\wechat-sidecar"
 copy /Y "sidecar-dist\wechat-sidecar.mjs" "setup\resources\wechat-sidecar\" >nul

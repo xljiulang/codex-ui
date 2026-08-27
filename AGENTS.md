@@ -20,7 +20,8 @@ codex-ui 是 Codex CLI 的 Windows 桌面客户端（Tauri 2）：启动后拉�
 npm run dev                    # Vite 开发服务器（严格端口 5173）
 npm run build                  # vue-tsc --noEmit + vite build
 npm run tauri dev              # Vite 热更新 + Tauri 窗口
-npm run tauri build            # 打包 NSIS/MSI 安装包
+build-dev.bat                  # 开发入口：预检 + 依赖 + sidecar 构建 + tauri dev
+build-release.bat              # 发布打包（Inno Setup）→ setup\output\codex-ui-win-x64.exe
 
 npm test                       # 前端单元测试（等价 npm run test:unit）
 npm run test:unit              # vitest 单测

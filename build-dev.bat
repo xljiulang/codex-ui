@@ -42,17 +42,37 @@ if errorlevel 1 (
 )
 
 if not exist node_modules (
-  echo [1/2] Installing dependencies ^(npm install^) ...
+  echo [1/3] Installing dependencies ^(npm install^) ...
   call npm install
   if errorlevel 1 (
     echo [ERROR] npm install failed.
     exit /b 1
   )
 ) else (
-  echo [1/2] node_modules exists, skipping npm install
+  echo [1/3] node_modules exists, skipping npm install
 )
 
-echo [2/2] Starting npm run tauri dev ...
+rem WeChat sidecar deps (wechat-channel) live under sidecar\package.json;
+rem build:sidecar needs them to bundle, so install once if missing.
+if not exist "sidecar\node_modules\wechat-channel" (
+  echo [1/3] Installing WeChat sidecar dependencies ^(npm install --prefix sidecar^) ...
+  call npm install --prefix sidecar
+  if errorlevel 1 (
+    echo [ERROR] sidecar npm install failed.
+    exit /b 1
+  )
+) else (
+  echo [1/3] sidecar dependencies present, skipping install
+)
+
+echo [2/3] Building WeChat sidecar ^(npm run build:sidecar^) ...
+call npm run build:sidecar
+if errorlevel 1 (
+  echo [ERROR] sidecar build failed.
+  exit /b 1
+)
+
+echo [3/3] Starting npm run tauri dev ...
 echo   UI loads from http://localhost:5173 with HMR; keep this terminal open.
 echo   Running target\debug\codex-ui.exe directly loads the embedded dist/ and
 echo   will NOT reflect recent UI changes.
