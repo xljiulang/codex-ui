@@ -366,7 +366,11 @@ pub fn run() {
                 if let Some(wechat) =
                     app_handle.try_state::<Arc<codex::wechat_bridge::WeChatBridge>>()
                 {
-                    tauri::async_runtime::block_on(wechat.shutdown());
+                    // 兜底：桥异常挂起时也保证应用能退出（超时后不再等待微信收尾）。
+                    tauri::async_runtime::block_on(async {
+                        let _ =
+                            tokio::time::timeout(Duration::from_secs(5), wechat.shutdown()).await;
+                    });
                 }
             }
         });

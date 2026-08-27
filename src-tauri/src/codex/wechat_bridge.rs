@@ -516,7 +516,8 @@ impl WeChatBridge {
                 g.qr_content = None;
             }
         }
-        let _ = save_bindings(&self.root, &self.inner.lock().await.bindings.clone()).await;
+        let bindings = self.inner.lock().await.bindings.clone();
+        let _ = save_bindings(&self.root, &bindings).await;
         self.log("info", format!("已解除会话 {thread_id} 的微信绑定")).await;
         self.emit_state().await;
         Ok(())
@@ -549,7 +550,10 @@ impl WeChatBridge {
                     }
                 }
                 if success {
-                    match (self.inner.lock().await.pending_bind.clone(), account_id, user_id) {
+                    // 注意：锁必须取到局部变量后立即释放，不能写进 match scrutinee——
+                    // 临时锁会存活到整个 match 结束，分支内再次 lock 会自锁卡死事件循环。
+                    let pending_bind = self.inner.lock().await.pending_bind.clone();
+                    match (pending_bind, account_id, user_id) {
                         (Some(thread_id), Some(account), Some(user_id)) => {
                             let start_account = account.clone();
                             let conflict = {
@@ -582,11 +586,8 @@ impl WeChatBridge {
                                     g.started_accounts.insert(start_account.clone());
                                     g.account_conn.insert(start_account.clone(), "starting".into());
                                 }
-                                let _ = save_bindings(
-                                    &self.root,
-                                    &self.inner.lock().await.bindings.clone(),
-                                )
-                                .await;
+                                let bindings = self.inner.lock().await.bindings.clone();
+                                let _ = save_bindings(&self.root, &bindings).await;
                                 self.log(
                                     "info",
                                     format!("会话 {thread_id} 已绑定微信账号 {start_account}"),

@@ -6,6 +6,9 @@ import { store } from "./store";
 
 let unlisten: UnlistenFn | null = null;
 
+/** 取消扫码绑定的兜底超时：后端即便无响应，也要让弹窗能关闭（取消仍在后台幂等执行）。 */
+const CANCEL_TIMEOUT_MS = 2000;
+
 /** 注册 wechat/event 全局监听（幂等）：状态全量快照直接替换 store.wechat */
 export async function ensureWeChatEvents(): Promise<void> {
   if (unlisten) return;
@@ -43,7 +46,10 @@ export async function wechatUnbind(threadId: string): Promise<void> {
 export async function wechatCancelBind(): Promise<void> {
   await ensureWeChatEvents();
   try {
-    await invoke("wechat_cancel_bind");
+    await Promise.race([
+      invoke("wechat_cancel_bind"),
+      new Promise<void>((resolve) => setTimeout(resolve, CANCEL_TIMEOUT_MS)),
+    ]);
   } catch {
     // 取消失败不阻断关闭
   }
