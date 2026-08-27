@@ -7,14 +7,18 @@ use std::time::Duration;
 
 #[cfg(windows)]
 use tauri::AppHandle;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri::utils::config::Color;
 
 use codex::app_server::CodexServer;
 
 /// 主窗口一次性显示守卫：页面加载完成后首次触发，避免重复导航反复处理
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
+/// 是否允许退出：仅托盘「退出」置真；普通关窗（隐藏）不退出应用。
+static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
 /// 主窗口 F1-F12 默认浏览器行为拦截：
 /// WebView2 会把无修饰键的功能键（F5 刷新、F1 帮助、F11 全屏、F12 开发者工具等）当
@@ -59,6 +63,15 @@ fn disable_main_window_function_keys(app: &AppHandle) {
             let _ = controller.add_AcceleratorKeyPressed(&handler, &mut token);
         }
     });
+}
+
+/// 显示并聚焦主窗口（托盘左键 / 菜单「显示主窗口」共用）。
+fn show_main(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
 }
 
 pub fn run() {
@@ -222,7 +235,7 @@ pub fn run() {
                 .unwrap_or_default()
                 .theme;
             let (r, g, b, a) = codex::settings::theme_background_rgba(&theme);
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
                 .inner_size(1280.0, 720.0)
                 .min_inner_size(400.0, 560.0)
@@ -235,6 +248,52 @@ pub fn run() {
                     eprintln!("创建主窗口失败: {e}");
                     format!("创建主窗口失败: {e}")
                 })?;
+
+            // 关闭 → 隐藏：应用驻留托盘继续运行（codex/微信不随窗口关闭而停）。
+            {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let _ = win.hide();
+                        }
+                    }
+                });
+            }
+
+            // 系统托盘：常驻；左键显示主窗口，右键菜单仅「退出」。
+            {
+                let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+                let menu = MenuBuilder::new(app).item(&quit).build()?;
+                let icon = app
+                    .default_window_icon()
+                    .cloned()
+                    .ok_or_else(|| "缺少应用图标，无法创建系统托盘".to_string())?;
+                TrayIconBuilder::with_id("main-tray")
+                    .icon(icon)
+                    .tooltip("Codex UI")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| {
+                        // 托盘「退出」：放行退出并触发 RunEvent::Exit，统一关停 server/微信。
+                        if event.id().0.as_str() == "quit" {
+                            ALLOW_EXIT.store(true, Ordering::SeqCst);
+                            app.exit(0);
+                        }
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            show_main(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
+            }
 
             // 拦截主窗口 F1-F12 的 WebView2 默认行为（F5 刷新等）
             disable_main_window_function_keys(app.handle());
@@ -278,6 +337,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // 最后一个窗口关闭会触发 ExitRequested：普通关窗仅隐藏，不允许退出；
+            // 仅当托盘「退出」置位 ALLOW_EXIT 后才放行。
+            if let tauri::RunEvent::ExitRequested { ref api, .. } = event {
+                if !ALLOW_EXIT.load(Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 if let Some(server) = app_handle.try_state::<Arc<CodexServer>>() {
                     server.shutdown();
