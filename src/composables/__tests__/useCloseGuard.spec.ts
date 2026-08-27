@@ -1,71 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { registerCloseGuard } from "../useCloseGuard";
-import { settleConfirm, store } from "../useCodex";
-import {
-  __resetEditorTabsForTest,
-  tabs,
-  type TerminalEditorTab,
-} from "../useEditorTabs";
+import { interrupt } from "../useCodex";
+import { tabs } from "../useEditorTabs";
 import type { SessionTab } from "../useCodex";
+import type { TerminalEditorTab } from "../useEditorTabs";
 
 interface CloseEventLike {
   preventDefault: ReturnType<typeof vi.fn>;
-  isPreventDefault: ReturnType<typeof vi.fn>;
 }
 
 const h = vi.hoisted(() => {
   const state: {
-    handler: ((event: CloseEventLike) => void | Promise<void>) | null;
+    closeHandler: ((event: CloseEventLike) => void | Promise<void>) | null;
+    exitHandler: (() => void | Promise<void>) | null;
     shouldThrow: boolean;
+    tabs: Array<Record<string, unknown>>;
   } = {
-    handler: null,
+    closeHandler: null,
+    exitHandler: null,
     shouldThrow: false,
+    tabs: [],
   };
-  const win = {
-    onCloseRequested: vi.fn(
-      async (cb: (event: CloseEventLike) => void | Promise<void>) => {
-        state.handler = cb;
-        return () => {};
-      },
-    ),
-    destroy: vi.fn(async () => {}),
-  };
-  return { state, win };
+  return { state };
 });
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(),
-  convertFileSrc: (p: string) => "asset://mock/" + p,
-}));
-
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(),
-}));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => {
     if (h.state.shouldThrow) throw new Error("not in tauri");
-    return h.win;
+    return {
+      onCloseRequested: async (cb: (event: CloseEventLike) => void | Promise<void>) => {
+        h.state.closeHandler = cb;
+        return () => {};
+      },
+    };
   },
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: async (name: string, cb: (payload: unknown) => void | Promise<void>) => {
+    if (name === "app-exit-requested") h.state.exitHandler = cb as () => void | Promise<void>;
+    return () => {};
+  },
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+vi.mock("../useCodex", () => ({ interrupt: vi.fn() }));
+
+vi.mock("../useEditorTabs", () => ({ tabs: h.state.tabs }));
+
+vi.mock("../../lib/tabs", () => ({
+  isTabWorking: vi.fn((t: { working?: boolean }) => t.working === true),
+  TabKind: { Chat: "chat", Terminal: "terminal" },
+}));
+
 const mockedInvoke = vi.mocked(invoke);
+const mockedInterrupt = vi.mocked(interrupt);
 
-function makeCloseEvent(): CloseEventLike {
-  let prevented = false;
-  return {
-    preventDefault: vi.fn(() => {
-      prevented = true;
-    }),
-    isPreventDefault: vi.fn(() => prevented),
-  };
-}
-
-/** 构造工作/空闲会话标签 */
 function sessionTab(
-  over: Partial<SessionTab> = {},
-): SessionTab {
+  over: Partial<SessionTab> & { working?: boolean } = {},
+): SessionTab & { working: boolean } {
   return {
     id: "s1",
     kind: "chat",
@@ -101,11 +96,12 @@ function sessionTab(
     loading: false,
     newChatWorkspace: null,
     interactions: [],
+    working: false,
     ...over,
   };
 }
 
-function busyTerminal(id = "term-1"): TerminalEditorTab {
+function terminalTab(id = "term-1"): TerminalEditorTab & { working: boolean } {
   return {
     kind: "terminal",
     id,
@@ -114,149 +110,66 @@ function busyTerminal(id = "term-1"): TerminalEditorTab {
     icon: "terminal",
     loading: false,
     error: "",
-    busy: true,
+    busy: false,
     exited: false,
     exitCode: null,
+    working: true,
   };
 }
 
-describe("registerCloseGuard 关闭窗口守卫", () => {
+describe("registerCloseGuard 退出守卫", () => {
   beforeEach(() => {
-    h.state.handler = null;
+    h.state.closeHandler = null;
+    h.state.exitHandler = null;
     h.state.shouldThrow = false;
-    h.win.onCloseRequested.mockClear();
-    h.win.destroy.mockClear();
+    h.state.tabs.length = 0;
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue({});
-    store.confirm = null;
-    tabs.splice(0, tabs.length);
-    __resetEditorTabsForTest();
+    mockedInterrupt.mockReset();
+    mockedInterrupt.mockResolvedValue(undefined);
   });
 
-  it("无工作标签且无脏文件：不阻止关闭、不弹确认", async () => {
+  it("窗口关闭：统一 preventDefault，不触发 app_exit", async () => {
     await registerCloseGuard();
-    expect(h.state.handler).not.toBeNull();
-    const ev = makeCloseEvent();
-    await h.state.handler!(ev);
-    expect(ev.preventDefault).not.toHaveBeenCalled();
-    expect(store.confirm).toBeNull();
-    expect(h.win.destroy).not.toHaveBeenCalled();
+    expect(h.state.closeHandler).not.toBeNull();
+    const ev = { preventDefault: vi.fn() };
+    await h.state.closeHandler!(ev);
+    expect(ev.preventDefault).toHaveBeenCalledTimes(1);
+    expect(mockedInvoke).not.toHaveBeenCalledWith("app_exit", expect.anything());
   });
 
-  it("有工作会话：阻止关闭并弹出确认（提示会话数量）", async () => {
+  it("app-exit-requested：中断工作会话、终止工作终端，最后调用 app_exit", async () => {
     tabs.push(
-      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
-    );
-    await registerCloseGuard();
-    const ev = makeCloseEvent();
-    const pending = h.state.handler!(ev);
-    expect(ev.preventDefault).toHaveBeenCalled();
-    expect(store.confirm?.title).toBe("关闭应用");
-    expect(store.confirm?.message).toContain("1 个会话");
-    expect(store.confirm?.confirmLabel).toBe("停止并关闭");
-    expect(store.confirm?.cancelLabel).toBe("取消");
-    settleConfirm(false);
-    await pending;
-    expect(h.win.destroy).not.toHaveBeenCalled();
-  });
-
-  it("点击「停止并关闭」：停止所有工作会话（含后台标签）再关闭窗口", async () => {
-    tabs.push(
-      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
+      sessionTab({ id: "s1", threadId: "t1", currentTurnId: "turn-1", working: true }),
     );
     tabs.push(
-      sessionTab({
-        id: "s2",
-        threadId: "t2",
-        turnActive: true,
-        currentTurnId: "turn-2",
-      }),
+      sessionTab({ id: "s2", threadId: "t2", currentTurnId: "turn-2", working: false }),
     );
+    tabs.push(terminalTab("term-1"));
+
     await registerCloseGuard();
-    const ev = makeCloseEvent();
-    const pending = h.state.handler!(ev);
-    settleConfirm(true);
-    await pending;
-    expect(mockedInvoke).toHaveBeenCalledWith(
-      "turn_interrupt",
-      expect.objectContaining({ threadId: "t1", turnId: "turn-1" }),
-    );
-    expect(mockedInvoke).toHaveBeenCalledWith(
-      "turn_interrupt",
-      expect.objectContaining({ threadId: "t2", turnId: "turn-2" }),
-    );
-    expect(h.win.destroy).toHaveBeenCalledTimes(1);
+    expect(h.state.exitHandler).not.toBeNull();
+    await h.state.exitHandler!();
+
+    expect(mockedInterrupt).toHaveBeenCalledWith("t1", "turn-1");
+    // 非工作会话不中断
+    expect(mockedInterrupt).not.toHaveBeenCalledWith("t2", expect.anything());
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", { id: "term-1" });
+
+    const calls = mockedInvoke.mock.calls;
+    expect(calls[calls.length - 1][0]).toBe("app_exit");
   });
 
-  it("目标激活续跑（无进行中回合）也视为工作：确认后清目标", async () => {
+  it("app-exit-requested：中断抛错仍调用 app_exit（finally 兜底）", async () => {
     tabs.push(
-      sessionTab({ goalText: "目标", goalStatus: "active" }),
+      sessionTab({ id: "s1", threadId: "t1", currentTurnId: "turn-1", working: true }),
     );
-    await registerCloseGuard();
-    const ev = makeCloseEvent();
-    const pending = h.state.handler!(ev);
-    expect(store.confirm?.message).toContain("1 个会话");
-    settleConfirm(true);
-    await pending;
-    expect(mockedInvoke).toHaveBeenCalledWith(
-      "goal_clear",
-      expect.objectContaining({ threadId: "t1" }),
-    );
-    expect(h.win.destroy).toHaveBeenCalledTimes(1);
-  });
+    mockedInterrupt.mockRejectedValueOnce(new Error("中断失败"));
 
-  it("有运行中终端：阻止关闭，确认后 terminal_kill 再关闭", async () => {
-    tabs.push(busyTerminal());
     await registerCloseGuard();
-    const ev = makeCloseEvent();
-    const pending = h.state.handler!(ev);
-    expect(ev.preventDefault).toHaveBeenCalled();
-    expect(store.confirm?.message).toContain("1 个终端");
-    settleConfirm(true);
-    await pending;
-    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
-      id: "term-1",
-    });
-    expect(h.win.destroy).toHaveBeenCalledTimes(1);
-  });
+    await h.state.exitHandler!();
 
-  it("点击「取消」：不停止、不关闭窗口", async () => {
-    tabs.push(
-      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
-    );
-    await registerCloseGuard();
-    const ev = makeCloseEvent();
-    const pending = h.state.handler!(ev);
-    settleConfirm(false);
-    await pending;
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "turn_interrupt",
-      expect.anything(),
-    );
-    expect(h.win.destroy).not.toHaveBeenCalled();
-  });
-
-  it("已有确认框（如切换会话）时：仅阻止关闭，不覆盖原确认", async () => {
-    tabs.push(
-      sessionTab({ turnActive: true, currentTurnId: "turn-1" }),
-    );
-    const resolve = vi.fn();
-    const existing = {
-      title: "切换会话",
-      message: "当前会话仍在进行中，切换将停止当前回合。是否继续？",
-      confirmLabel: "停止并切换",
-      cancelLabel: "取消",
-      resolve,
-    };
-    store.confirm = existing;
-    await registerCloseGuard();
-    const ev = makeCloseEvent();
-    await h.state.handler!(ev);
-    expect(ev.preventDefault).toHaveBeenCalled();
-    expect(store.confirm).not.toBeNull();
-    expect(store.confirm?.title).toBe("切换会话");
-    expect(resolve).not.toHaveBeenCalled();
-    expect(h.win.destroy).not.toHaveBeenCalled();
+    expect(mockedInvoke).toHaveBeenCalledWith("app_exit");
   });
 
   it("非 Tauri 环境：注册返回 no-op 且不抛错", async () => {

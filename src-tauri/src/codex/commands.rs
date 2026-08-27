@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -29,6 +30,14 @@ macro_rules! rpc_passthrough {
             server.request($method, params, $timeout).await
         }
     };
+}
+
+/// 应用退出（前端安全收尾完成后调用）：放行并触发 RunEvent::Exit，
+/// 统一关停 codex server、微信与运行中终端。
+#[tauri::command]
+pub fn app_exit(app: AppHandle) {
+    crate::ALLOW_EXIT.store(true, Ordering::SeqCst);
+    app.exit(0);
 }
 
 /// 全局串行化系统“选择文件夹”对话框：任何入口（头部新建会话、输入框目录附件等）

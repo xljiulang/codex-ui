@@ -10,7 +10,7 @@ use tauri::AppHandle;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri::utils::config::Color;
 
 use codex::app_server::CodexServer;
@@ -18,7 +18,9 @@ use codex::app_server::CodexServer;
 /// 主窗口一次性显示守卫：页面加载完成后首次触发，避免重复导航反复处理
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
 /// 是否允许退出：仅托盘「退出」置真；普通关窗（隐藏）不退出应用。
-static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+pub(crate) static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+/// 托盘「退出」后前端安全收尾的兜底时长（秒）：超时仍未退出则强制退出。
+const EXIT_GRACE_SECONDS: u64 = 8;
 
 /// 主窗口 F1-F12 默认浏览器行为拦截：
 /// WebView2 会把无修饰键的功能键（F5 刷新、F1 帮助、F11 全屏、F12 开发者工具等）当
@@ -118,6 +120,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             codex::commands::test_hook_enabled,
+            codex::commands::app_exit,
             codex::commands::server_status,
             codex::commands::server_connect,
             codex::commands::server_logs,
@@ -249,7 +252,9 @@ pub fn run() {
                     format!("创建主窗口失败: {e}")
                 })?;
 
-            // 关闭 → 隐藏：应用驻留托盘继续运行（codex/微信不随窗口关闭而停）。
+            // 关闭 → 隐藏：取消关闭并隐藏到系统托盘（codex/微信不随窗口关闭而停）。
+            // 直接隐藏而不等待前端：前端关闭守卫只负责 preventDefault 阻止默认销毁，
+            // 隐藏时窗口不销毁，工作会话/未保存内容仍驻留内存，无需确认或清理。
             {
                 let app_handle = app.handle().clone();
                 main_window.on_window_event(move |event| {
@@ -276,10 +281,16 @@ pub fn run() {
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| {
-                        // 托盘「退出」：放行退出并触发 RunEvent::Exit，统一关停 server/微信。
+                        // 托盘「退出」：先通知前端做安全收尾（停止工作会话/终止运行中终端），
+                        // 由前端调用 app_exit 真正退出；WebView 无响应时用兜底超时强制退出。
                         if event.id().0.as_str() == "quit" {
-                            ALLOW_EXIT.store(true, Ordering::SeqCst);
-                            app.exit(0);
+                            let _ = app.emit("app-exit-requested", ());
+                            let handle = app.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_secs(EXIT_GRACE_SECONDS));
+                                crate::ALLOW_EXIT.store(true, Ordering::SeqCst);
+                                handle.exit(0);
+                            });
                         }
                     })
                     .on_tray_icon_event(|tray, event| {
@@ -345,6 +356,10 @@ pub fn run() {
                 }
             }
             if let tauri::RunEvent::Exit = event {
+                // 收尾：终止所有运行中终端（ConPTY 子进程），避免 cmd/powershell 孤儿残留
+                if let Some(terminals) = app_handle.try_state::<codex::terminal::TerminalState>() {
+                    codex::terminal::kill_all(&terminals);
+                }
                 if let Some(server) = app_handle.try_state::<Arc<CodexServer>>() {
                     server.shutdown();
                 }

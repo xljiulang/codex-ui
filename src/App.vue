@@ -16,6 +16,7 @@ const { ctxMenu } = useContextMenu();
 let unlistenClose: (() => void) | undefined;
 
 onMounted(async () => {
+  // 关闭守卫仅阻止 Tauri 默认销毁窗口；关闭即隐藏到系统托盘由 Rust 端处理
   unlistenClose = await registerCloseGuard();
   void init();
 });

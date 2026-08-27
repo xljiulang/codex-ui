@@ -169,6 +169,22 @@ fn kill_session(state: &TerminalState, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 终止并清空全部终端会话：应用退出时收尾，避免 ConPTY 子进程（cmd/powershell）孤儿残留。
+/// 与 kill_session 同一终止逻辑；遍历全部，drain 后 map 清空，可重复调用（重复杀安全）。
+pub fn kill_all(state: &TerminalState) {
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    for (_, session) in guard.drain() {
+        if let Ok(mut child_guard) = session.child.lock() {
+            if let Some(child) = child_guard.as_mut() {
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
 /// 创建新终端：以给定工作区按设置启动 cmd 或 PowerShell（ConPTY），
 /// 并启动 reader 线程转发输出。
 /// id 由前端生成（terminal:<uuid>），保证标签与后端会话一一对应，天然支持多开。
@@ -400,6 +416,48 @@ mod tests {
     fn kill_unknown_id_is_idempotent() {
         let s = state();
         assert!(kill_session(&s, "nope").is_ok());
+    }
+
+    #[test]
+    fn kill_all_empty_is_noop() {
+        let s = state();
+        kill_all(&s);
+        assert!(s.0.lock().unwrap().is_empty());
+    }
+
+    /// kill_all 应清空全部会话并终止各子进程（真实 ConPTY 冒烟，幂等可重复）。
+    #[test]
+    fn kill_all_drains_all_sessions() {
+        let s = state();
+        for i in 0..2 {
+            let pty_system = native_pty_system();
+            let pair = pty_system
+                .openpty(PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .expect("openpty");
+            let mut cmd = CommandBuilder::new("cmd.exe");
+            cmd.args(["/D", "/K", CMD_STARTUP]);
+            cmd.cwd(std::env::current_dir().unwrap());
+            let child = pair.slave.spawn_command(cmd).expect("spawn cmd");
+            drop(pair.slave);
+            let master: Box<dyn MasterPty + Send> = pair.master;
+            let writer = master.take_writer().expect("take writer");
+            let session = Arc::new(PtySession {
+                master: Arc::new(Mutex::new(master)),
+                writer: Mutex::new(writer),
+                child: Mutex::new(Some(child)),
+            });
+            s.0.lock().unwrap().insert(format!("term-{i}"), session);
+        }
+        assert_eq!(s.0.lock().unwrap().len(), 2);
+        kill_all(&s);
+        assert!(s.0.lock().unwrap().is_empty());
+        // 幂等：再次调用无副作用、不报错
+        kill_all(&s);
     }
 
     #[test]
