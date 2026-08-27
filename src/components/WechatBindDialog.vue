@@ -99,6 +99,8 @@ async function onUnbind() {
     await wechatUnbind(props.thread.id);
     qrDataUrl.value = "";
     setToast("已解除微信绑定");
+    // 解除后直接重新发起扫码，继续展示绑定二维码（无需再点「重新扫码绑定」）。
+    await maybeAutoBind();
   } catch (e) {
     setToast(toastError(e));
   }

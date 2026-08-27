@@ -48,7 +48,7 @@ describe("WechatBindDialog", () => {
     expect(mockedBind).toHaveBeenCalledWith("t1");
   });
 
-  it("已绑定态展示账号信息与解除绑定按钮", async () => {
+  it("已绑定态：解除后自动重新扫码并继续展示二维码", async () => {
     store.wechat = {
       running: true,
       connection: "connected",
@@ -61,6 +61,19 @@ describe("WechatBindDialog", () => {
         { threadId: "t1", accountId: "bot-1", connection: "connected" },
       ],
     };
+    mockedUnbind.mockImplementationOnce(async () => {
+      // 模拟后端解除后的快照：绑定移除、无 pending → 前端应自动重新发起扫码
+      store.wechat = {
+        running: true,
+        connection: "offline",
+        detail: null,
+        qrContent: null,
+        pendingThreadId: null,
+        queued: 0,
+        busy: false,
+        bindings: [],
+      };
+    });
     const wrapper = mountDialog();
     await flushPromises();
     expect(wrapper.text()).toContain("账号：bot-1");
@@ -69,6 +82,7 @@ describe("WechatBindDialog", () => {
     await wrapper.find(".wechat-unbind-btn").trigger("click");
     await flushPromises();
     expect(mockedUnbind).toHaveBeenCalledWith("t1");
+    expect(mockedBind).toHaveBeenCalledWith("t1");
   });
 
   it("本会话扫码中：渲染二维码并展示等待扫码", async () => {
