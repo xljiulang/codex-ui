@@ -77,7 +77,7 @@ fn show_main(app: &AppHandle) {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .on_page_load(|webview, payload| {
             // 主窗口页面加载完成（Vue 已挂载、加载动画已渲染）后再显示，
             // 避免窗体到 WebView 初始化完成之间的默认色闪屏。
@@ -224,7 +224,16 @@ pub fn run() {
             codex::git::git_changes_ignore,
             codex::git::git_changes_watch_start,
             codex::git::git_changes_watch_stop,
-        ])
+        ]);
+
+        // 单实例仅 release 打包生效：同一时刻只允许一个实例；重复启动时聚焦已有窗口。
+        // dev（debug_assertions）不注册，允许多开，便于调试/热更。
+        #[cfg(not(debug_assertions))]
+        let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app);
+        }));
+
+        builder
         .setup(|app| {
             // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
             codex::git::probe_git_at_startup();
