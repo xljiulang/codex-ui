@@ -58,6 +58,7 @@ describe("ModelMenu 模型与推理强度", () => {
       makeSessionTab("s1", "t1", {
         model: "gpt-5.2-codex",
         effort: "high",
+        resumedThreadId: "t1",
       }),
     );
     activeTabId.value = "s1";
@@ -122,6 +123,32 @@ describe("ModelMenu 模型与推理强度", () => {
     const w = mount(ModelMenu);
     await w.find("button.btn.primary").trigger("click");
     expect(store.toast).toContain("同步失败");
+    expect(w.emitted("close")).toBeTruthy();
+  });
+
+  it("历史会话未恢复：先 thread_resume 再同步 thread/settings/update", async () => {
+    (tabs[0] as SessionTab).resumedThreadId = null;
+    const w = mount(ModelMenu);
+    await w.find("button.btn.primary").trigger("click");
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_resume", {
+      params: { threadId: "t1" },
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/settings/update",
+      params: { threadId: "t1", model: "gpt-5.2-codex", effort: "high" },
+    });
+  });
+
+  it("thread_resume 报会话不存在：toast 且不同步、菜单关闭", async () => {
+    (tabs[0] as SessionTab).resumedThreadId = null;
+    mockedInvoke.mockRejectedValueOnce(new Error("thread not found: t1"));
+    const w = mount(ModelMenu);
+    await w.find("button.btn.primary").trigger("click");
+    expect(store.toast).toContain("会话已不存在");
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "codex_rpc",
+      expect.objectContaining({ method: "thread/settings/update" }),
+    );
     expect(w.emitted("close")).toBeTruthy();
   });
 });

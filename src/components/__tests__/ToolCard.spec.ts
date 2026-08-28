@@ -537,3 +537,49 @@ describe("ToolCard 头部图标", () => {
     expect(wrapper.find(".assistant-card-title").text()).toBe("工具");
   });
 });
+
+describe("dynamicToolCall 结果渲染", () => {
+  it("contentItems 渲染到 tool-output，空参数不显示 tool-json", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: {
+          id: "d1",
+          type: "dynamicToolCall",
+          namespace: "codexui",
+          tool: "compact_context",
+          arguments: {},
+          status: "completed",
+          contentItems: [{ type: "inputText", text: "已请求压缩上下文" }],
+          success: true,
+        } as ThreadItem,
+      },
+    });
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".tool-json").exists()).toBe(false);
+    expect(wrapper.find(".tool-output").text()).toContain("已请求压缩上下文");
+  });
+
+  it("多个 contentItems 按行拼接", async () => {
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: {
+          id: "d2",
+          type: "dynamicToolCall",
+          namespace: "codexui",
+          tool: "get_usage",
+          arguments: {},
+          status: "completed",
+          contentItems: [
+            { type: "inputText", text: "第一行" },
+            { type: "inputText", text: "第二行" },
+          ],
+          success: true,
+        } as ThreadItem,
+      },
+    });
+    await wrapper.find(".assistant-card-toggle").trigger("click");
+    const text = wrapper.find(".tool-output").text();
+    expect(text).toContain("第一行");
+    expect(text).toContain("第二行");
+  });
+});

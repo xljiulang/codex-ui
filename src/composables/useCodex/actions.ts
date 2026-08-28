@@ -518,3 +518,22 @@ export async function respondInteraction(interaction: PendingInteraction, result
     }
   }
 }
+
+/** 历史会话按需恢复（模型切换等操作需要线程已加载）；返回是否可继续 */
+export async function ensureThreadLoaded(tab: SessionTab): Promise<boolean> {
+  const threadId = tab.threadId;
+  if (!threadId || tab.resumedThreadId === threadId) return true;
+  try {
+    await invoke("thread_resume", { params: { threadId } });
+    tab.resumedThreadId = threadId;
+    return true;
+  } catch (e) {
+    if (isThreadNotFound(e)) {
+      resetToNewChat();
+      setToast("会话已不存在，已切换为新会话");
+    } else {
+      setToast(toastError(e));
+    }
+    return false;
+  }
+}

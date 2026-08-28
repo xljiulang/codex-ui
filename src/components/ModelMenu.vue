@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   activeSessionTab,
+  ensureThreadLoaded,
   loadModels,
   setToast,
   store,
@@ -53,6 +54,11 @@ async function apply() {
   // 有当前会话时立即同步到服务端：thread/settings/update 对后续回合即时生效
   // （model/effort 传 null 表示恢复默认，与 turn/start 的显式 null 语义一致）
   if (tab.threadId) {
+    // 历史会话打开时为只读、未恢复；settings/update 要求线程已加载，先按需 resume
+    if (!(await ensureThreadLoaded(tab))) {
+      emit("close");
+      return;
+    }
     try {
       await invoke("codex_rpc", {
         method: "thread/settings/update",

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import {
   isThreadItemType,
+  type DynamicToolCallItem,
   type FileChangeItem,
   type ImageGenerationItem,
   type McpToolCallItem,
@@ -234,6 +235,8 @@ async function copyCommand() {
 const argsJson = computed(() => {
   const a = props.item.arguments;
   if (a === undefined || a === null) return "";
+  // 空对象参数（如无入参工具）不展示，避免出现孤零零的 {}
+  if (typeof a === "object" && Object.keys(a as object).length === 0) return "";
   try {
     return JSON.stringify(a, null, 2);
   } catch {
@@ -242,9 +245,16 @@ const argsJson = computed(() => {
 });
 
 const resultText = computed(() => {
-  const r = props.item.result as { content?: unknown[] } | null | undefined;
-  if (!r?.content) return "";
-  return r.content
+  // dynamicToolCall 的结果在 contentItems（{type:"inputText", text} 等），MCP 在 result.content
+  const isDynamic = isThreadItemType<DynamicToolCallItem>(
+    props.item,
+    "dynamicToolCall",
+  );
+  const raw: unknown[] | null | undefined = isDynamic
+    ? props.item.contentItems
+    : (props.item.result as { content?: unknown[] } | null | undefined)?.content;
+  if (!raw || raw.length === 0) return "";
+  return raw
     .map((c) => {
       if (c && typeof c === "object" && "text" in c) {
         return String((c as { text: string }).text);
@@ -256,6 +266,7 @@ const resultText = computed(() => {
         return "";
       }
     })
+    .filter((s) => s !== "")
     .join("\n");
 });
 

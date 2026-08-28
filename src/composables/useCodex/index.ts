@@ -89,6 +89,7 @@ export {
 export {
   deleteThread,
   dismissPlanPrompt,
+  ensureThreadLoaded,
   executePlan,
   exitPlanMode,
   newEmptyChat,
