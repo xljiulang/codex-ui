@@ -6,6 +6,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   return {
     ...mod,
     deleteThread: vi.fn(),
+    forkThread: vi.fn(),
     openHistorySession: vi.fn(),
     openNewSession: vi.fn(),
     togglePin: vi.fn(),
@@ -26,6 +27,7 @@ import HistoryView from "../HistoryView.vue";
 import { ICON_SESSION, ICON_SESSION_LOGO_C } from "../../lib/icons";
 import {
   deleteThread,
+  forkThread,
   openHistorySession,
   openNewSession,
   refreshThreads,
@@ -36,6 +38,7 @@ import {
 import { tabs } from "../../composables/useEditorTabs";
 
 const mockedDelete = vi.mocked(deleteThread);
+const mockedFork = vi.mocked(forkThread);
 const mockedOpenNewSession = vi.mocked(openNewSession);
 const mockedOpenHistorySession = vi.mocked(openHistorySession);
 const mockedTogglePin = vi.mocked(togglePin);
@@ -234,13 +237,13 @@ describe("HistoryView 右键菜单", () => {
     mockedOpenHistorySession.mockClear();
   });
 
-  it("右键会话行显示五项菜单：打开/重命名/置顶固定/微信接入/删除会话", async () => {
+  it("右键会话行显示菜单：打开/重命名/分叉会话/置顶固定/微信接入/删除会话", async () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["打开", "重命名", "置顶固定", "微信接入", "删除会话"]);
+    expect(labels).toEqual(["打开", "重命名", "分叉会话", "置顶固定", "微信接入", "删除会话"]);
   });
 
   it("置顶会话右键菜单显示“取消固定”", async () => {
@@ -260,11 +263,18 @@ describe("HistoryView 右键菜单", () => {
     const wrapper = mount(HistoryView);
     await openCtxMenu(wrapper);
     const items = wrapper.findAll(".ctx-menu-item");
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     for (const it of items) {
       expect(it.find("svg").exists()).toBe(true);
     }
     expect(wrapper.findAll(".ctx-menu-item.danger")).toHaveLength(1);
+  });
+
+  it("点击「分叉会话」以当前会话线程调用 forkThread", async () => {
+    const wrapper = mount(HistoryView);
+    await openCtxMenu(wrapper);
+    await clickCtxItem(wrapper, "分叉会话");
+    expect(mockedFork).toHaveBeenCalledWith("t1");
   });
 
   it("点击「微信接入」打开该会话的绑定弹窗", async () => {
@@ -885,7 +895,7 @@ describe("HistoryView 会话标签联动", () => {
     expect(labels).not.toContain("打开");
     expect(labels).not.toContain("关闭标签");
     expect(labels).not.toContain("删除会话");
-    expect(labels).toEqual(["重命名", "置顶固定", "微信接入"]);
+    expect(labels).toEqual(["重命名", "分叉会话", "置顶固定", "微信接入"]);
     wrapper.unmount();
   });
 

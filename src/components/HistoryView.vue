@@ -16,6 +16,7 @@ import {
   activeSessionTab,
   clearSearch,
   ensureWeChatEvents,
+  forkThread,
   isThreadOpen,
   isThreadRunning,
   openHistorySession,
@@ -43,6 +44,7 @@ import {
   ICON_DELETE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
+  ICON_FORK,
   ICON_OPEN,
   ICON_PIN,
   ICON_REFRESH,
@@ -170,6 +172,11 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
           },
         ]),
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
+    {
+      label: "分叉会话",
+      icon: ICON_FORK,
+      action: () => void forkThread(t.id),
+    },
     {
       label: t.isPinned ? "取消固定" : "置顶固定",
       icon: ICON_PIN,

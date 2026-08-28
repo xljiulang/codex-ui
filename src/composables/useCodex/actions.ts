@@ -499,6 +499,52 @@ export async function deleteThread(threadId: string) {
 }
 
 
+/**
+ * 从历史会话分叉出新会话（整会话复制）：调用 thread/fork 复制源线程为新线程，
+ * 打开新会话标签并沿用源名称；失败只提示、不新建标签。
+ */
+export async function forkThread(threadId: string) {
+  const source = store.threads.find((t) => t.id === threadId);
+  try {
+    const res = await invoke<{
+      thread: {
+        id: string;
+        name?: string | null;
+        createdAt?: number;
+        updatedAt?: number;
+        recencyAt?: number | null;
+        cwd?: string | null;
+        source?: string;
+        historyMode?: string | null;
+      };
+    }>("thread_fork", { params: { threadId } });
+    const newId = res.thread.id;
+    const newName = res.thread.name ?? "";
+    // 面板一致性兜底：新线程可能尚未被 thread_list 返回，本地先写入摘要
+    upsertThreadSummary({
+      id: newId,
+      name: newName || source?.name || null,
+      createdAt: res.thread.createdAt ?? Date.now(),
+      updatedAt: res.thread.updatedAt ?? Date.now(),
+      recencyAt: res.thread.recencyAt ?? Date.now(),
+      cwd: res.thread.cwd ?? source?.cwd ?? undefined,
+      source: res.thread.source ?? "appServer",
+      historyMode: res.thread.historyMode ?? "",
+    });
+    await openSessionTabForThread(newId);
+    // 沿用源会话名称：仅当源有名称且新线程无名称时写入，覆盖服务端给定名
+    if (source?.name && !newName) {
+      await renameThread(newId, source.name);
+    }
+    void sessionLog("info", threadId, "thread-fork");
+    setToast("已创建分叉会话");
+    await finishSessionSwitch();
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+
 export async function respondInteraction(interaction: PendingInteraction, result: unknown) {
   try {
     await invoke("interaction_respond", {

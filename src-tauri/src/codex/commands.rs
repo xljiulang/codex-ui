@@ -171,6 +171,8 @@ pub async fn thread_read(
 
 rpc_passthrough!(thread_resume, "thread/resume", Some(Duration::from_secs(60)));
 
+rpc_passthrough!(thread_fork, "thread/fork", Some(Duration::from_secs(60)));
+
 #[tauri::command]
 pub async fn thread_delete(
     server: State<'_, Server>,

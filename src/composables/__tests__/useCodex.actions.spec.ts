@@ -1,4 +1,4 @@
-import { deleteThread, newEmptyChat, openHistorySession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
+import { deleteThread, forkThread, newEmptyChat, openHistorySession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import {
@@ -65,6 +65,127 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
     await flushPromises();
     expect(mockWin.setTitle).toHaveBeenCalledWith("B / 新建会话");
+  });
+});
+
+
+describe("forkThread 会话分叉", () => {
+  beforeEach(() => {
+    store.threads = [];
+    store.server = {
+      connected: false,
+      startupWorkspace: "D:/repo",
+      codexPath: null,
+      logs: [],
+    };
+  });
+
+  it("分叉成功：整会话复制为新线程、打开新标签、沿用源名称", async () => {
+    store.threads = [
+      { id: "t1", name: "源会话", createdAt: 1, updatedAt: 2, recencyAt: 3 },
+    ];
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_fork") {
+        return Promise.resolve({
+          thread: {
+            id: "t2",
+            name: null,
+            createdAt: 10,
+            updatedAt: 11,
+            recencyAt: 12,
+            cwd: "D:/repo",
+            source: "appServer",
+            historyMode: "paginated",
+          },
+        });
+      }
+      if (cmd === "thread_read") {
+        return Promise.resolve({ thread: { id: "t2", name: null, turns: [] } });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    await forkThread("t1");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_fork", {
+      params: { threadId: "t1" },
+    });
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(tabs).toHaveLength(1);
+    // 沿用源名称：新线程写入 thread_set_name
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+      threadId: "t2",
+      name: "源会话",
+    });
+    // 摘要 upsert 且名称被改写
+    expect(store.threads.find((t) => t.id === "t2")?.name).toBe("源会话");
+    expect(store.toast).toBe("已创建分叉会话");
+  });
+
+  it("源会话无名称：分叉成功后不调用 thread_set_name", async () => {
+    store.threads = [
+      { id: "t1", name: null, createdAt: 1, updatedAt: 2, recencyAt: 3 },
+    ];
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_fork") {
+        return Promise.resolve({
+          thread: {
+            id: "t2",
+            name: null,
+            createdAt: 10,
+            updatedAt: 11,
+            recencyAt: 12,
+          },
+        });
+      }
+      if (cmd === "thread_read") {
+        return Promise.resolve({ thread: { id: "t2", name: null, turns: [] } });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    await forkThread("t1");
+
+    const renameCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "thread_set_name",
+    );
+    expect(renameCalls).toHaveLength(0);
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(store.toast).toBe("已创建分叉会话");
+  });
+
+  it("分叉失败：提示错误且不创建新标签", async () => {
+    store.threads = [
+      { id: "t1", name: "源会话", createdAt: 1, updatedAt: 2, recencyAt: 3 },
+    ];
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_fork") {
+        return Promise.reject(new Error("thread not found"));
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await forkThread("t1");
+
+    expect(store.toast).not.toBe("");
+    expect(tabs).toHaveLength(0);
   });
 });
 describe("主窗口标题跟随活动 tab 标题", () => {

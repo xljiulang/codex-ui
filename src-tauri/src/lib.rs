@@ -136,6 +136,7 @@ pub fn run() {
             codex::commands::thread_start,
             codex::commands::thread_read,
             codex::commands::thread_resume,
+            codex::commands::thread_fork,
             codex::commands::thread_delete,
             codex::commands::thread_set_name,
             codex::commands::turn_start,

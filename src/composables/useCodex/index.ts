@@ -92,6 +92,7 @@ export {
   ensureThreadLoaded,
   executePlan,
   exitPlanMode,
+  forkThread,
   newEmptyChat,
   openHistorySession,
   openNewSession,
