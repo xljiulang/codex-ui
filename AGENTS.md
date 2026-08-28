@@ -40,7 +40,7 @@ npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，
 - 仓库已建立 `.codegraph/` 索引：理解/定位代码时**优先** `codegraph explore "<符号或问题>"`（输出相关符号源码与调用路径），再退回常规搜索。
 - 文本搜索：`rg`（ripgrep 15.0.0）。
 - 文件查找：`fd`（fd 10.4.2）。
-- AST 结构搜索/重写：`sg`（ast-grep 的旧命令名；当前环境未提供独立的 `ast-grep`，且 `sg` 运行时会提示弃用——在 ast-grep 可用前继续使用 `sg`）。
+- AST 结构搜索/重写：`ast-grep`（主名；`sg` 为兼容别名，`setup\bin` 下 `ast-grep.exe` + `sg.bat` 转发，任一可用）。注意 0.45.x 构建无论以何名调用都会打印 `sg` 弃用提示，属二进制内置、与调用名无关。
 
 ## 架构速览
 
