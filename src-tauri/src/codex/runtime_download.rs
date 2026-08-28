@@ -112,6 +112,16 @@ fn is_gzip(path: &Path) -> bool {
     magic == [0x1F, 0x8B]
 }
 
+/// 确保下载缓存归档的父目录存在（全新安装时 `%USERPROFILE%\.cache\codex-runtimes`
+/// 尚未创建，直接 `File::create` 会报“系统找不到指定的路径”）。
+fn ensure_cache_dir(dest: &Path) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建缓存目录失败 {}: {e}", parent.display()))?;
+    }
+    Ok(())
+}
+
 /// 带断点续传地下载到 `dest`，并在关键步骤写日志：
 /// - 已有部分文件则带 `Range: bytes=<len>-` 请求；响应 206 追加、200 忽略 Range 则截断重写；
 /// - 响应 416 说明本地已 >= 完整长度，视为已完成，不再写；
@@ -121,6 +131,8 @@ pub(crate) async fn download_with_resume(
     dest: &Path,
     server: &CodexServer,
 ) -> Result<(), String> {
+    ensure_cache_dir(dest)?;
+
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(30))
         .build()
@@ -319,5 +331,24 @@ mod tests {
         assert_eq!(compare_versions("26.426.12240", "26.819.11345"), Ordering::Less);
         assert_eq!(compare_versions("26.819.11346", "26.819.11345"), Ordering::Greater);
         assert_eq!(compare_versions("26.819", "26.819.0"), Ordering::Equal);
+    }
+
+    #[test]
+    fn ensure_cache_dir_creates_parent() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("codex-runtimes").join("codex-primary-runtime.tar.gz");
+        assert!(ensure_cache_dir(&dest).is_ok());
+        assert!(dest.parent().unwrap().is_dir());
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn ensure_cache_dir_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        let parent = dir.path().join("codex-runtimes");
+        std::fs::create_dir_all(&parent).unwrap();
+        let dest = parent.join("codex-primary-runtime.tar.gz");
+        assert!(ensure_cache_dir(&dest).is_ok());
+        assert!(parent.is_dir());
     }
 }
