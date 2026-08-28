@@ -26,6 +26,7 @@ import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import { clearGoal, continueTurn, continueTurnForTab } from "./turnControl";
+import { handleDynamicToolCall } from "./dynamicToolCall";
 import { tabs } from "../useTabs";
 import { isTabWorking } from "../../lib/tabs";
 import {
@@ -109,6 +110,11 @@ export async function wireEvents() {
         method: string;
         params: Record<string, unknown>;
       };
+      // codexui 动态工具调用（item/tool/call）：直接判定并应答，不进入交互气泡
+      if (p.method === "item/tool/call") {
+        void handleDynamicToolCall(p);
+        return;
+      }
       // 按线程路由到对应会话标签（协议确认审批/提问/elicitation 均带 threadId）；
       // 无 threadId 或线程未打开时回退全局列表（由活动标签展示）
       const threadId =

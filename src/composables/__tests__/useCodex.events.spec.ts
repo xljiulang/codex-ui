@@ -1,4 +1,5 @@
 import { dismissPlanPrompt, executePlan, exitPlanMode } from "../useCodex/actions";
+import { handleDynamicToolCall } from "../useCodex/dynamicToolCall";
 import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { backgroundThreadIds, store } from "../useCodex/store";
@@ -1442,5 +1443,118 @@ describe("thread/settings/updated 服务端任务模式对账", () => {
     await flushPromises();
 
     expect((tabs[0] as SessionTab).taskMode).toBe("plan");
+  });
+});
+
+describe("codexui 动态工具 item/tool/call 应答", () => {
+  it("get_usage 用会话用量拼文本并应答，不进入交互气泡", async () => {
+    tabs.push(
+      reactive(
+        makeSessionTab("s1", "t1", {
+          threadTokenUsage: {
+            used: 12000,
+            window: 128000,
+            input: 50000,
+            output: 9000,
+          },
+        }),
+      ),
+    );
+
+    await handleDynamicToolCall({
+      requestId: 7,
+      method: "item/tool/call",
+      params: {
+        threadId: "t1",
+        turnId: "t1",
+        callId: "c1",
+        namespace: "codexui",
+        tool: "get_usage",
+        arguments: {},
+      },
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("interaction_respond", {
+      requestId: 7,
+      result: {
+        contentItems: [
+          {
+            type: "inputText",
+            text: "上下文已用 12K/128K（约 9%）；会话累计输入 50K · 输出 9K",
+          },
+        ],
+        success: true,
+      },
+    });
+    expect(tabs[0].interactions).toHaveLength(0);
+  });
+
+  it("compact_context 发起 thread/compact/start 并应答 success true", async () => {
+    await handleDynamicToolCall({
+      requestId: 8,
+      method: "item/tool/call",
+      params: {
+        threadId: "t1",
+        turnId: "",
+        callId: "c2",
+        namespace: "codexui",
+        tool: "compact_context",
+        arguments: {},
+      },
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/compact/start",
+      params: { threadId: "t1" },
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("interaction_respond", {
+      requestId: 8,
+      result: {
+        contentItems: [{ type: "inputText", text: "已请求压缩上下文" }],
+        success: true,
+      },
+    });
+  });
+
+  it("compact_context 无 threadId 应答 success false", async () => {
+    await handleDynamicToolCall({
+      requestId: 9,
+      method: "item/tool/call",
+      params: {
+        turnId: "",
+        callId: "c3",
+        namespace: "codexui",
+        tool: "compact_context",
+        arguments: {},
+      },
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("interaction_respond", {
+      requestId: 9,
+      result: {
+        contentItems: [{ type: "inputText", text: "压缩失败：缺少 threadId" }],
+        success: false,
+      },
+    });
+  });
+
+  it("未知工具应答 success false", async () => {
+    await handleDynamicToolCall({
+      requestId: 10,
+      method: "item/tool/call",
+      params: {
+        threadId: "t1",
+        turnId: "",
+        callId: "c4",
+        namespace: "codexui",
+        tool: "nope",
+        arguments: {},
+      },
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("interaction_respond", {
+      requestId: 10,
+      result: expect.objectContaining({ success: false }),
+    });
   });
 });

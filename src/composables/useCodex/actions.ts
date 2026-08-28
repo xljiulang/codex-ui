@@ -2,6 +2,7 @@
 import { nextTick, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { focusComposer } from "../../lib/composerFocus";
+import { CODEXUI_DYNAMIC_TOOLS } from "../../lib/dynamicTools";
 import { stripMentionContext } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandbox } from "../../lib/permissions";
 import { sessionLog } from "../../lib/sessionLog";
@@ -85,6 +86,8 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       cwd,
       approvalPolicy: toApprovalPolicy(permission),
       sandbox: toSandbox(permission),
+      // 注入 codexui 动态工具：agent 可在会话内查询用量/压缩上下文（仅 thread/start 支持）
+      dynamicTools: CODEXUI_DYNAMIC_TOOLS,
     };
     const reviewer = toApprovalsReviewer(permission);
     if (reviewer) params.approvalsReviewer = reviewer;
