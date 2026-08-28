@@ -104,6 +104,88 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     expect(sessionTabTitle(tab)).toBe("sub / 我的标题");
   });
 });
+
+
+describe("打开历史会话即恢复（token 用量显示）", () => {
+  beforeEach(() => {
+    store.server = {
+      connected: false,
+      startupWorkspace: "D:/repo",
+      codexPath: null,
+      logs: [],
+    };
+  });
+
+  function baseMock(
+    goalResponse: Record<string, unknown>,
+    resumeError?: string,
+  ) {
+    return (cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({ thread: { id: "t2", name: null, turns: [] } });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve(goalResponse);
+      if (cmd === "thread_resume")
+        return resumeError
+          ? Promise.reject(new Error(resumeError))
+          : Promise.resolve({});
+      return Promise.resolve(undefined);
+    };
+  }
+
+  it("无目标：打开即调用 thread_resume 并置 resumedThreadId", async () => {
+    store.threads = [];
+    mockedInvoke.mockImplementation(baseMock({}));
+    expect(await openThread("t2")).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_resume", {
+      params: { threadId: "t2" },
+    });
+    expect(activeSessionTab()?.resumedThreadId).toBe("t2");
+  });
+
+  it("带活跃目标：打开不调用 thread_resume，resumedThreadId 保持 null", async () => {
+    store.threads = [];
+    mockedInvoke.mockImplementation(
+      baseMock({ goal: { objective: "改代码", status: "active" } }),
+    );
+    expect(await openThread("t2")).toBe(true);
+    const resumeCalls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "thread_resume",
+    );
+    expect(resumeCalls).toHaveLength(0);
+    expect(activeSessionTab()?.resumedThreadId).toBeNull();
+  });
+
+  it("带终态目标：目标被清后仍调用 thread_resume", async () => {
+    store.threads = [];
+    mockedInvoke.mockImplementation(
+      baseMock({ goal: { objective: "改代码", status: "complete" } }),
+    );
+    expect(await openThread("t2")).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("thread_resume", {
+      params: { threadId: "t2" },
+    });
+    expect(activeSessionTab()?.resumedThreadId).toBe("t2");
+  });
+
+  it("thread_resume 失败（非 not-found）：仍成功打开、不丢弃标签", async () => {
+    store.threads = [];
+    mockedInvoke.mockImplementation(
+      baseMock({}, "boom"),
+    );
+    expect(await openThread("t2")).toBe(true);
+    expect(tabs).toHaveLength(1);
+    expect(activeSessionTab()?.threadId).toBe("t2");
+    expect(activeSessionTab()?.resumedThreadId).toBeNull();
+  });
+});
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();

@@ -396,6 +396,18 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     }
     tab.goalText = goalText;
     tab.goalStatus = goalStatus;
+    // 打开即恢复：让服务端推送 thread/tokenUsage/updated（token 用量唯一来源），
+    // 使右上角立即显示累计用量。带活跃目标（goal 非终态）的会话不恢复，
+    // 避免「只看一眼」就触发服务端围绕目标自动续跑；用户真正发消息时才恢复。
+    if (!goalStatus) {
+      try {
+        await invoke("thread_resume", { params: { threadId } });
+        tab.resumedThreadId = threadId;
+      } catch (e) {
+        if (isThreadNotFound(e)) throw e; // 交给外层“会话已不存在”分支处理
+        // 其它失败：不阻断打开，token 用量可能随后续事件补上
+      }
+    }
     return true;
   } catch (e) {
     if (isThreadNotFound(e)) {
