@@ -206,8 +206,7 @@ describe("ToolCard 实时耗时", () => {
         item: makeItem({ status: "completed", durationMs: 100 }),
       },
     });
-    await wrapper.find(".assistant-card-toggle").trigger("click");
-    const btn = wrapper.find(".tool-command .copy-btn");
+    const btn = wrapper.find(".assistant-card-header .copy-btn");
     expect(btn.exists()).toBe(true);
     await btn.trigger("click");
     await flushPromises();

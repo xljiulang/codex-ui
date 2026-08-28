@@ -155,6 +155,12 @@ async function copyAgentMessage() {
   window.setTimeout(() => (copiedAgent.value = false), 1500);
 }
 
+const copiedUser = ref(false);
+async function copyUserMessage() {
+  copiedUser.value = await copyText(userText.value);
+  window.setTimeout(() => (copiedUser.value = false), 1500);
+}
+
 // ---------- 图片灯箱 / 加载失败占位 ----------
 const lightboxSrc = ref("");
 const attachmentImgErrors = ref(new Set<number>());
@@ -190,6 +196,15 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
 <template>
   <div v-if="item.type === 'userMessage'" class="msg msg-user">
     <div class="bubble">
+      <button
+        v-if="userText"
+        type="button"
+        class="copy-btn"
+        :aria-label="'复制'"
+        @click="copyUserMessage()"
+      >
+        {{ copiedUser ? "已复制" : "复制" }}
+      </button>
       <div
         v-if="bubbleFiles.length || bubbleImages.length"
         class="bubble-attachments"
@@ -267,19 +282,15 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
   </div>
   <div v-else-if="item.type === 'agentMessage'" class="msg msg-agent">
     <span v-if="item.phase === 'commentary' && item.streaming === true" class="phase-badge">进行中</span>
-    <div
-      v-if="isFinalAnswer && !item.streaming"
-      class="msg-actions agent-actions"
-    >
+    <div v-if="isFinalAnswer && !item.streaming" class="agent-final">
       <button
-        class="msg-action-btn"
-        :aria-label="'复制回复'"
+        type="button"
+        class="copy-btn"
+        :aria-label="'复制'"
         @click="copyAgentMessage()"
       >
         {{ copiedAgent ? "已复制" : "复制" }}
       </button>
-    </div>
-    <div v-if="isFinalAnswer && !item.streaming" class="agent-final">
       <MarkdownText :text="String(item.text ?? '')" />
       <span v-if="time" class="msg-time">{{ time }}</span>
       <div v-if="memoryList.length" class="memory-citation">

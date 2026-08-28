@@ -1080,22 +1080,6 @@
   transition: width var(--ease-slow);
 }
 
-/* 计划文本卡片：用户端“执行计划”与助理端 plan 条目共用（容器走共享 .assistant-card） */
-.plan-text-copy {
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  padding: 2px var(--space-3);
-  cursor: pointer;
-}
-
-.plan-text-copy:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 /* 推理折叠块：容器走共享 .assistant-card，保留紫色语义边框与底色 */
 .assistant-card--reasoning {
   border-left: 3px solid var(--purple);

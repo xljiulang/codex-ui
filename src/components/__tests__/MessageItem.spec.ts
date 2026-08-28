@@ -599,11 +599,35 @@ describe("用户消息中的图片附件", () => {
         } as ThreadItem,
       },
     });
-    const btn = wrapper.find(".agent-actions .msg-action-btn");
-    expect(btn.attributes("aria-label")).toBe("复制回复");
+    const btn = wrapper.find(".msg-agent .copy-btn");
+    expect(btn.attributes("aria-label")).toBe("复制");
     await btn.trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith("完整答案");
+    expect(btn.text()).toBe("已复制");
+  });
+
+  it("用户消息正文支持复制正文文本", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const wrapper = mount(MessageItem, {
+      props: {
+        tab: TEST_TAB,
+        item: userItem([
+          { type: "text", text: "要复制的用户文本", text_elements: [] },
+        ]),
+      },
+    });
+    await flushPromises();
+    const btn = wrapper.find(".msg-user .copy-btn");
+    expect(btn.exists()).toBe(true);
+    expect(btn.attributes("aria-label")).toBe("复制");
+    await btn.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("要复制的用户文本");
     expect(btn.text()).toBe("已复制");
   });
 

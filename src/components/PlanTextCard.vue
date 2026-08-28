@@ -45,11 +45,11 @@ async function copyPlan() {
       <button
         v-if="planText"
         type="button"
-        class="plan-text-copy"
-        :aria-label="'复制计划'"
+        class="copy-btn"
+        :aria-label="'复制'"
         @click="copyPlan()"
       >
-        {{ copied ? "已复制" : "复制计划" }}
+        {{ copied ? "已复制" : "复制" }}
       </button>
     </div>
     <Transition name="assistant-card-body">

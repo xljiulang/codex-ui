@@ -321,6 +321,15 @@ const effectiveExpanded = computed(() => expanded.value);
           <span v-if="timeLabel">{{ timeLabel }}</span>
         </span>
       </button>
+      <button
+        v-if="commandText"
+        type="button"
+        class="copy-btn"
+        :aria-label="'复制'"
+        @click.stop="copyCommand()"
+      >
+        {{ copied ? "已复制" : "复制" }}
+      </button>
     </div>
 
     <Transition name="assistant-card-body">
@@ -328,14 +337,6 @@ const effectiveExpanded = computed(() => expanded.value);
         <template v-if="type === 'commandExecution'">
         <div class="tool-command">
           <span class="tool-command-text">{{ commandText }}</span>
-          <button
-            v-if="commandText"
-            class="copy-btn"
-            :aria-label="'复制命令'"
-            @click.stop="copyCommand()"
-          >
-            {{ copied ? "已复制" : "复制命令" }}
-          </button>
         </div>
         <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
         <div v-if="outputTruncated" class="tool-output-cap">

@@ -63,7 +63,7 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
     const wrapper = mount(PlanTextCard, {
       props: { planText: "# 标题\n- 步骤" },
     });
-    await wrapper.find(".plan-text-copy").trigger("click");
+    await wrapper.find(".copy-btn").trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith("# 标题\n- 步骤");
     expect(wrapper.text()).toContain("已复制");
@@ -72,6 +72,6 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
   it("空 planText 容错：无复制按钮，仍可折叠", async () => {
     const wrapper = mount(PlanTextCard, { props: { planText: "" } });
     expect(wrapper.find(".assistant-card-toggle").exists()).toBe(true);
-    expect(wrapper.find(".plan-text-copy").exists()).toBe(false);
+    expect(wrapper.find(".copy-btn").exists()).toBe(false);
   });
 });

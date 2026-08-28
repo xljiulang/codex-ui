@@ -207,22 +207,9 @@
   background: var(--border);
 }
 
-/* 消息 hover 操作（复制/重试） */
-.msg-actions {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  opacity: 0;
-  transition: opacity var(--ease);
-}
-.msg-agent:hover .msg-actions,
-.msg-agent:focus-within .msg-actions {
-  opacity: 1;
-}
-.msg-agent .msg-actions {
-  margin-bottom: var(--space-1);
-}
-.msg-action-btn {
+/* 消息/卡片统一复制按钮（右上角；内容型 hover 显示） */
+.copy-btn {
+  flex-shrink: 0;
   font-size: var(--font-sm);
   line-height: 1;
   color: var(--text-dim);
@@ -231,14 +218,41 @@
   border-radius: 999px;
   padding: var(--space-1) var(--space-3);
   cursor: pointer;
+  transition: color var(--ease), border-color var(--ease),
+    background-color var(--ease), opacity var(--ease);
 }
-.msg-action-btn:hover:not(:disabled) {
+.copy-btn:hover {
   color: var(--text-bright);
   border-color: var(--text-dim);
+  background: var(--bg-hover);
 }
-.msg-action-btn:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
+
+/* 助手最终答复 / 用户内容：右上角悬浮复制，hover 显示 */
+.msg-agent .agent-final {
+  position: relative;
+}
+.msg-agent .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+}
+.msg-agent:hover .copy-btn,
+.msg-agent:focus-within .copy-btn {
+  opacity: 1;
+}
+.msg-user .bubble {
+  position: relative;
+}
+.msg-user .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+}
+.msg-user:hover .copy-btn,
+.msg-user:focus-within .copy-btn {
+  opacity: 1;
 }
 
 /* 图片灯箱与加载失败占位 */
@@ -310,21 +324,6 @@
   flex: 1;
   min-width: 0;
   word-break: break-all;
-}
-.tool-command .copy-btn {
-  flex-shrink: 0;
-  font-size: var(--font-sm);
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border-light);
-  border-radius: 999px;
-  padding: var(--space-1) var(--space-4);
-  cursor: pointer;
-}
-.tool-command .copy-btn:hover {
-  color: var(--text-bright);
-  border-color: var(--text-dim);
-  background: var(--bg-hover);
 }
 .tool-output-cap {
   font-size: var(--font-sm);
