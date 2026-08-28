@@ -32,9 +32,44 @@ fn normalize_turn_text(text: &str, status: &str) -> String {
     }
     match status {
         "interrupted" | "cancelled" | "canceled" => "⚠️ 回合已中断，本轮没有产生回复文本".into(),
-        "" => "⚠️ 执行失败：回合结束但未收到文本回复".into(),
+        "completed" => "⚠️ Codex 本轮没有输出文本回复".into(),
+        "" => "⚠️ 本轮回合未返回文本回复".into(),
         other => format!("⚠️ 执行失败：回合异常结束（{other}）"),
     }
+}
+
+/// 从 `thread/turns/list(itemsView=full)` 响应里取指定回合的最后一条非空 `agentMessage` 文本。
+/// 用于弥补通知订阅漏抓 `item/completed`(agentMessage) 的兜底。
+fn extract_turn_agent_text(resp: &Value, turn_id: &str) -> Option<String> {
+    let turns = resp.pointer("/data").and_then(|d| d.as_array())?;
+    let turn = turns
+        .iter()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(turn_id))?;
+    let items = turn.get("items")?.as_array()?;
+    for item in items.iter().rev() {
+        if item.get("type").and_then(|v| v.as_str()) == Some("agentMessage") {
+            let text = item.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            if !text.trim().is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 决定最终回复文本：已捕获文本优先；否则用回查取到的文本；均无则按状态兜底。
+fn final_reply_text(captured: &str, status: &str, fetched: Option<String>) -> String {
+    let trimmed = captured.trim();
+    if !trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    if let Some(f) = fetched {
+        let ft = f.trim();
+        if !ft.is_empty() {
+            return ft.to_string();
+        }
+    }
+    normalize_turn_text(captured, status)
 }
 /// 单个 Codex 回合最长等待时间；超时按失败回复，避免整条队列卡死。
 const TURN_TIMEOUT_SECS: u64 = 600;
@@ -899,14 +934,38 @@ impl WeChatBridge {
                             current = Some(c); // 他线完成信号：放回继续等本线程
                             continue;
                         }
-                        let text = self
+                        let captured = self
                             .inner
                             .lock()
                             .await
                             .pending_reply
                             .remove(&c.thread_id)
                             .unwrap_or_default();
-                        let final_text = normalize_turn_text(&text, &status);
+                        // 通知订阅可能漏抓 item/completed(agentMessage)：为空时回查线程取回复文本兜底。
+                        let final_text = if captured.trim().is_empty() {
+                            let fetched = self
+                                .fetch_turn_agent_text(&c.thread_id, &tid)
+                                .await;
+                            let got = fetched.as_deref().map_or(false, |s| !s.trim().is_empty());
+                            if got {
+                                self.log(
+                                    "info",
+                                    format!("回合 {tid} 通知漏抓，已回查取到回复文本"),
+                                )
+                                .await;
+                            } else {
+                                self.log(
+                                    "warn",
+                                    format!(
+                                        "回合 {tid} 结束状态={status} 未捕获到 agentMessage 文本"
+                                    ),
+                                )
+                                .await;
+                            }
+                            final_reply_text(&captured, &status, fetched)
+                        } else {
+                            final_reply_text(&captured, &status, None)
+                        };
                         let task = c.typing_task.take();
                         self.finish_active(&c.account_id, &c.peer, task, &final_text).await;
                     }
@@ -1025,6 +1084,25 @@ impl WeChatBridge {
             g.active_thread = None;
             g.overflow_notified.clear();
         }
+    }
+
+    /// 回查线程：取指定回合的最后一条非空 `agentMessage` 文本（best-effort，失败返回 None）。
+    async fn fetch_turn_agent_text(&self, thread_id: &str, turn_id: &str) -> Option<String> {
+        let resp = self
+            .server
+            .request(
+                "thread/turns/list",
+                json!({
+                    "threadId": thread_id,
+                    "limit": 5,
+                    "sortDirection": "desc",
+                    "itemsView": "full",
+                }),
+                Some(Duration::from_secs(5)),
+            )
+            .await
+            .ok()?;
+        extract_turn_agent_text(&resp, turn_id)
     }
 
     /// 回复联系人并把状态推进到空闲（触发下一条处理）。
@@ -1157,8 +1235,46 @@ mod tests {
     fn normalize_turn_text_falls_back_for_empty_results() {
         assert_eq!(normalize_turn_text(" ok ", "completed"), "ok");
         assert!(normalize_turn_text("", "interrupted").contains("已中断"));
-        assert!(normalize_turn_text("", "").contains("未收到"));
+        assert!(!normalize_turn_text("", "completed").contains("执行失败"));
+        assert!(normalize_turn_text("", "completed").contains("没有输出"));
+        assert!(normalize_turn_text("", "").contains("未返回"));
         assert!(normalize_turn_text("", "failed").contains("failed"));
+    }
+
+    #[test]
+    fn extract_turn_agent_text_returns_last_nonempty_for_turn() {
+        let resp = json!({
+            "data": [
+                {
+                    "id": "turn-a",
+                    "items": [
+                        { "type": "reasoning", "text": "思考" },
+                        { "type": "agentMessage", "text": "" },
+                        { "type": "agentMessage", "text": "  hello  " },
+                        { "type": "agentMessage", "text": "" },
+                    ],
+                },
+                { "id": "turn-b", "items": [ { "type": "agentMessage", "text": "other" } ] },
+            ],
+            "nextCursor": null,
+        });
+        assert_eq!(extract_turn_agent_text(&resp, "turn-a").as_deref(), Some("  hello  "));
+        assert_eq!(extract_turn_agent_text(&resp, "turn-b").as_deref(), Some("other"));
+        assert!(extract_turn_agent_text(&resp, "turn-none").is_none());
+        assert!(extract_turn_agent_text(&json!(null), "x").is_none());
+        let all_empty = json!({
+            "data": [ { "id": "a", "items": [ { "type": "agentMessage", "text": "" } ] } ]
+        });
+        assert!(extract_turn_agent_text(&all_empty, "a").is_none());
+    }
+
+    #[test]
+    fn final_reply_text_prefers_captured_then_fetched_else_fallback() {
+        assert_eq!(final_reply_text(" hi ", "completed", Some("x".into())), "hi");
+        assert_eq!(final_reply_text("", "completed", Some(" 回查文本 ".into())), "回查文本");
+        assert!(!final_reply_text("", "completed", None).contains("执行失败"));
+        assert!(final_reply_text("", "completed", Some(String::new())).contains("没有输出"));
+        assert!(final_reply_text("", "failed", Some(String::new())).contains("failed"));
     }
 
     #[tokio::test]
