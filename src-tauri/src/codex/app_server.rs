@@ -14,6 +14,7 @@ use tokio::sync::{Mutex, Notify, broadcast, oneshot};
 use crate::codex::bundled;
 use crate::codex::path_util::clean_path;
 use crate::codex::model_config;
+use crate::codex::logs_guard;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::session_log::SessionLog;
 
@@ -366,6 +367,13 @@ impl CodexServer {
         let server = self.clone();
         tauri::async_runtime::spawn(async move {
             server.probe_codex_version().await;
+        });
+
+        // 连接成功后为 codex 日志库应用阻断触发器（best-effort），
+        // 防止 logs_2.sqlite 及其 WAL 因持续写入 TRACE 日志而无限膨胀。
+        let server = self.clone();
+        tauri::async_runtime::spawn(async move {
+            server.apply_logs_guard().await;
         });
 
         // 初始化成功后隐式尝试添加内置插件市场。codex-cli 0.149 把
@@ -734,6 +742,49 @@ impl CodexServer {
         inner.push_log_locked(line.clone());
         drop(inner);
         self.log_file(level, None, "server-log", &[("msg".to_string(), line)]);
+    }
+
+    /// 连接成功后为 codex 日志库 `logs_2.sqlite` 应用阻断触发器（best-effort）。
+    /// 先短暂轮询等待库文件出现（codex 启动早期可能尚未创建），再执行幂等触发器；
+    /// 任何失败/缺失都只记日志，不阻断主流程、不向用户抛错。
+    async fn apply_logs_guard(&self) {
+        const DB_NAME: &str = "logs_2.sqlite";
+
+        // 等待库文件出现：最多 WAIT_STEPS 步，每步 WAIT_STEP 毫秒。
+        let mut waited: u32 = 0;
+        loop {
+            let existing = model_config::codex_home()
+                .map(|home| home.join(DB_NAME).is_file())
+                .unwrap_or(false);
+            if existing {
+                break;
+            }
+            if waited >= logs_guard::WAIT_STEPS {
+                self.push_log("info", format!("{DB_NAME} 尚未创建，跳过日志库防护"))
+                    .await;
+                return;
+            }
+            waited += 1;
+            tokio::time::sleep(logs_guard::WAIT_STEP).await;
+        }
+
+        match logs_guard::apply_at_codex_home(DB_NAME) {
+            Ok(Some(db)) => {
+                self.push_log(
+                    "info",
+                    format!("已为 codex 日志库 {DB_NAME} 应用阻断触发器：{}", db.display()),
+                )
+                .await;
+            }
+            Ok(None) => {
+                self.push_log("info", format!("{DB_NAME} 尚不存在，跳过日志库防护"))
+                    .await;
+            }
+            Err(e) => {
+                self.push_log("warn", format!("应用日志库阻断触发器失败：{e}"))
+                    .await;
+            }
+        }
     }
 
     async fn mark_disconnected(&self) {
