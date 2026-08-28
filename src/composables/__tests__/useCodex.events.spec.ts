@@ -110,6 +110,49 @@ describe("服务端 error/warning 事件 toast 本地化", () => {
   });
 });
 
+describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
+  it("按 threadId 写入归属标签的 input/output，并保留 used/window", async () => {
+    __resetSessionTabsForTest();
+    const tab = reactive(makeSessionTab("s1", "t1"));
+    tabs.push(tab);
+    await wireEvents();
+
+    fireListen("thread/tokenUsage/updated", {
+      threadId: "t1",
+      tokenUsage: {
+        total: { totalTokens: 1500, inputTokens: 1000, outputTokens: 500 },
+        last: { totalTokens: 900 },
+        modelContextWindow: 128000,
+      },
+    });
+
+    expect(tab.threadTokenUsage).toEqual({
+      used: 900,
+      window: 128000,
+      input: 1000,
+      output: 500,
+    });
+  });
+
+  it("total 缺输入/输出时不写入，保持 used/window", async () => {
+    __resetSessionTabsForTest();
+    const tab = reactive(makeSessionTab("s1", "t1"));
+    tabs.push(tab);
+    await wireEvents();
+
+    fireListen("thread/tokenUsage/updated", {
+      threadId: "t1",
+      tokenUsage: {
+        total: { totalTokens: 1500 },
+        last: { totalTokens: 900 },
+        modelContextWindow: 128000,
+      },
+    });
+
+    expect(tab.threadTokenUsage).toEqual({ used: 900, window: 128000 });
+  });
+});
+
 describe("任务栏进度条跟随工作标签", () => {
   beforeEach(() => {
     mockWin.setProgressBar.mockClear();

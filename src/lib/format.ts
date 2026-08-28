@@ -54,6 +54,13 @@ export function formatRelativeTime(ts?: number | null): string {
   });
 }
 
+/** 把 token 数按 K/M 缩写（<1K 原样、>=1K 四舍五入到 K、>=1M 一位小数 M） */
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(n);
+}
+
 /** 取路径最后一段（兼容 / 与 \），先去除末尾分隔符；空路径返回原值 */
 export function pathBaseName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");

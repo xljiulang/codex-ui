@@ -894,3 +894,38 @@ describe("ChatView Updated Plan 任务清单", () => {
     wrapper.unmount();
   });
 });
+
+describe("ChatView 右上角会话 token 用量", () => {
+  it("有输入/输出时渲染，缺失或缺一不渲染", async () => {
+    tab = reactive(makeTab());
+    tab.threadTokenUsage = {
+      used: 5000,
+      window: 10000,
+      input: 12000,
+      output: 34000,
+    };
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: { template: "<div class='msg-stub' />" },
+        },
+      },
+    });
+    const el = wrapper.find(".chat-token-usage");
+    expect(el.exists()).toBe(true);
+    expect(el.findAll(".token-usage-part svg")).toHaveLength(2);
+    expect(el.findAll(".token-usage-part").map((x) => x.text())).toEqual([
+      "12K",
+      "34K",
+    ]);
+    expect(el.text()).toContain("12K");
+    expect(el.text()).toContain("34K");
+
+    tab.threadTokenUsage = { used: 5000, window: 10000 };
+    await nextTick();
+    expect(wrapper.find(".chat-token-usage").exists()).toBe(false);
+    wrapper.unmount();
+  });
+});

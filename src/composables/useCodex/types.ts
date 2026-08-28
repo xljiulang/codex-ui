@@ -150,7 +150,14 @@ export interface SessionTab extends EditorTabBase {
   goalText: string | null;
   goalStatus: GoalStatus | null;
   goalArmed: boolean;
-  threadTokenUsage: { used: number; window: number | null } | null;
+  threadTokenUsage: {
+    used: number;
+    window: number | null;
+    /** 会话累计输入 token（thread/tokenUsage/updated 的 total.inputTokens） */
+    input?: number;
+    /** 会话累计输出 token（thread/tokenUsage/updated 的 total.outputTokens） */
+    output?: number;
+  } | null;
   followupQueue: { text: string; attachments: UserInput[] }[];
   attachments: UserInput[];
   planPrompt: PlanPrompt | null;

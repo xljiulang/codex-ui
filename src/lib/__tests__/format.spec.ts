@@ -3,6 +3,7 @@ import {
   formatDuration,
   formatElapsed,
   formatRelativeTime,
+  formatTokens,
   relPathOf,
 } from "../format";
 
@@ -52,5 +53,23 @@ describe("relPathOf", () => {
 
   it("非 root 下路径原样返回", () => {
     expect(relPathOf("D:\\repo", "D:\\other\\a.ts")).toBe("D:\\other\\a.ts");
+  });
+});
+
+describe("formatTokens", () => {
+  it("小于 1K 原样返回", () => {
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(999)).toBe("999");
+  });
+
+  it("1K 及以上四舍五入到 K", () => {
+    expect(formatTokens(1_000)).toBe("1K");
+    expect(formatTokens(12_000)).toBe("12K");
+    expect(formatTokens(34_000)).toBe("34K");
+  });
+
+  it("1M 及以上保留一位小数", () => {
+    expect(formatTokens(1_500_000)).toBe("1.5M");
+    expect(formatTokens(2_000_000)).toBe("2.0M");
   });
 });

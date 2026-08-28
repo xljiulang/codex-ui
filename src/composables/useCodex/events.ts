@@ -562,11 +562,14 @@ export async function wireEvents() {
       const p = e.payload as {
         threadId: string;
         tokenUsage?: {
-          total?: { totalTokens?: number };
+          total?: { totalTokens?: number; inputTokens?: number; outputTokens?: number };
           last?: { totalTokens?: number };
           modelContextWindow?: number | null;
         };
       };
+      // 会话累计的输入/输出 token（用于“输入/输出”实时展示）；缺省不写，避免污染为 undefined
+      const totalInput = p.tokenUsage?.total?.inputTokens;
+      const totalOutput = p.tokenUsage?.total?.outputTokens;
       const usage = {
         // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
         used:
@@ -574,6 +577,8 @@ export async function wireEvents() {
           p.tokenUsage?.total?.totalTokens ??
           0,
         window: p.tokenUsage?.modelContextWindow ?? null,
+        ...(typeof totalInput === "number" ? { input: totalInput } : {}),
+        ...(typeof totalOutput === "number" ? { output: totalOutput } : {}),
       };
       const tab = findSessionTabByThread(p.threadId);
       // token 用量一律写归属标签；未打开线程的事件无处可写 → 跳过

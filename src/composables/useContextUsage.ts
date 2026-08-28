@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { formatTokens } from "../lib/format";
 import { activeSessionTab, setToast, toastError } from "./useCodex";
 
 /** 上下文窗口使用情况：window 未知时不显示 */
@@ -22,12 +23,6 @@ export function useContextUsage() {
     if (!u) return "";
     return `上下文已用 ${formatTokens(u.used)}，共 ${formatTokens(u.window)}，双击进行压缩`;
   });
-
-  function formatTokens(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-    return String(n);
-  }
 
   /** 发起 thread/compact/start：回合进行中也可压缩，由服务端处理 */
   async function compactNow() {

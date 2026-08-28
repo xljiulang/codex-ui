@@ -86,6 +86,45 @@
   border-color: var(--accent-dim);
 }
 
+/* 会话累计输入/输出 token 用量（右上角固定信息，与“回到底部”对称） */
+.chat-token-usage {
+  position: absolute;
+  right: 14px;
+  top: 10px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-6);
+  border-radius: 999px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-md);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.chat-token-usage .token-usage-sep {
+  opacity: 0.6;
+}
+
+.chat-token-usage .token-usage-part {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.chat-token-usage svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
 /* 屏幕阅读器播报区域（视觉隐藏） */
 .sr-only {
   position: absolute;
