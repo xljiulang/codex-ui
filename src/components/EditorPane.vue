@@ -55,7 +55,7 @@ import {
   ICON_CLOSE_RIGHT,
   ICON_RENAME,
   ICON_REVEAL,
-  SESSION_LOGO_PATHS,
+  ICON_SESSION,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -269,7 +269,7 @@ function openAddMenu(e: MouseEvent) {
   const items: CtxItem[] = [
     {
       label: "新建会话",
-      paths: SESSION_LOGO_PATHS,
+      icon: ICON_SESSION,
       action: () => void pickAndOpenNewSession(),
     },
   ];

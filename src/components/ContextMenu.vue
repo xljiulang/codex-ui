@@ -43,7 +43,11 @@ const emit = defineEmits<{ close: [] }>();
             :class="{ 'logo-c': p.accent }"
           />
         </template>
-        <path v-else :d="it.icon" fill-rule="evenodd" />
+        <path
+          v-else
+          :d="it.icon"
+          :fill-rule="it.nonzero ? 'nonzero' : 'evenodd'"
+        />
       </svg>
       <span>{{ it.label }}</span>
     </button>

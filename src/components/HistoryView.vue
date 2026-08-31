@@ -49,7 +49,7 @@ import {
   ICON_PIN,
   ICON_REFRESH,
   ICON_RENAME,
-  SESSION_LOGO_PATHS,
+  ICON_SESSION,
   ICON_TERMINAL,
   ICON_WECHAT,
 } from "../lib/icons";
@@ -185,6 +185,7 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
     {
       label: "微信接入",
       icon: ICON_WECHAT,
+      nonzero: true,
       action: () => {
         bindThread.value = t;
         void refreshWeChatState();
@@ -209,7 +210,7 @@ function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
   const items: CtxItem[] = [
     {
       label: "新建会话",
-      paths: SESSION_LOGO_PATHS,
+      icon: ICON_SESSION,
       action: () => void openNewSession(group.path),
     },
     {
@@ -338,24 +339,14 @@ onBeforeUnmount(() => {
           @click="openHistorySession(row.thread.id)"
           @contextmenu="openCtxMenu(row.thread, $event)"
         >
-          <span class="history-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path
-                v-for="p in SESSION_LOGO_PATHS"
-                :key="p.d"
-                :d="p.d"
-                :class="{ 'logo-c': p.accent }"
-              />
-            </svg>
-          </span>
           <span
-            v-if="isThreadBound(row.thread.id)"
-            class="history-wechat-badge"
-            aria-label="已绑定微信"
-            v-tooltip="'已绑定微信'"
+            class="history-icon"
+            :aria-hidden="isThreadBound(row.thread.id) ? undefined : 'true'"
+            :aria-label="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
+            v-tooltip="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="ICON_WECHAT" />
+              <path :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION" />
             </svg>
           </span>
           <span class="history-main">

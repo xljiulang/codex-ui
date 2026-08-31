@@ -398,16 +398,10 @@
 .history-icon svg {
   width: 16px;
   height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
+  fill: currentColor;
 }
 
-.history-icon svg .logo-c {
-  stroke-linecap: round;
-  stroke-width: 2;
-}
-
+/* 会话行图标：已绑定微信 → 双气泡并保持强调色（与置顶徽标同风格） */
 .history-title {
   min-width: 0;
   font-size: var(--font-md);
@@ -445,22 +439,6 @@
 .pin-badge svg {
   width: 11px;
   height: 11px;
-  fill: currentColor;
-}
-
-/* 历史会话行：微信绑定徽标（位于会话图标右侧，与 pin 徽标并存） */
-.history-wechat-badge {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin: 2px 0 0 4px;
-  color: var(--accent);
-}
-
-.history-wechat-badge svg {
-  width: 12px;
-  height: 12px;
   fill: currentColor;
 }
 

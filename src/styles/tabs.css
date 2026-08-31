@@ -167,14 +167,7 @@
 .editor-tab-logo svg {
   width: 18px;
   height: 18px;
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2.2;
-}
-
-.editor-tab-logo svg .logo-c {
-  stroke-width: 2;
-  stroke-linecap: round;
+  fill: currentColor;
 }
 
 /* 会话主标签品牌文字：AppHeader .brand-name 同款渐变，按 Tab 高度缩放 */

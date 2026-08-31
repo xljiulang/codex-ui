@@ -18,6 +18,7 @@ import {
   ICON_CLOSE,
   ICON_FILE,
   ICON_GIT,
+  ICON_SESSION,
   ICON_SETTINGS,
   ICON_TERMINAL,
 } from "../lib/icons";
@@ -242,8 +243,7 @@ function titleTooltip(tab: EditorTab): string {
       >
         <span class="editor-tab-logo" aria-hidden="true">
           <svg viewBox="0 0 24 24">
-            <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
-            <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
+            <path :d="ICON_SESSION" />
           </svg>
         </span>
         <span class="editor-tab-label">{{ tab.title }}</span>

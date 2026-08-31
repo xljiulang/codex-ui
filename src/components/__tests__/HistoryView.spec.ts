@@ -24,7 +24,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import { invoke } from "@tauri-apps/api/core";
 import HistoryView from "../HistoryView.vue";
-import { ICON_SESSION, ICON_SESSION_LOGO_C } from "../../lib/icons";
+import { ICON_SESSION, ICON_WECHAT } from "../../lib/icons";
 import {
   deleteThread,
   forkThread,
@@ -218,13 +218,13 @@ describe("HistoryView 置顶", () => {
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", false);
   });
 
-  it("会话行显示会话 Logo 图标（六边形外框 + C 标记，与「新建会话」一致）", () => {
+  it("会话行显示会话气泡图标", () => {
     const wrapper = mount(HistoryView);
     const icons = wrapper.findAll(".history-icon");
     expect(icons.length).toBeGreaterThan(0);
     const paths = icons[0].findAll("path");
-    expect(paths).toHaveLength(2);
-    expect(paths[1].classes()).toContain("logo-c");
+    expect(paths).toHaveLength(1);
+    expect(paths[0].attributes("d")).toBe(ICON_SESSION);
     wrapper.unmount();
   });
 });
@@ -285,7 +285,7 @@ describe("HistoryView 右键菜单", () => {
     expect(wrapper.find(".wechat-bind-dialog").exists()).toBe(true);
   });
 
-  it("已绑定会话在会话图标右侧渲染微信徽标", async () => {
+  it("已绑定会话行图标为双气泡，未绑定为单气泡", async () => {
     store.wechat = {
       running: true,
       connection: "connected",
@@ -302,8 +302,9 @@ describe("HistoryView 右键菜单", () => {
     const rows = wrapper.findAll(".history-item");
     const t1Row = rows.find((r) => r.text().includes("会话一"))!;
     const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
-    expect(t1Row.find(".history-wechat-badge").exists()).toBe(true);
-    expect(t2Row.find(".history-wechat-badge").exists()).toBe(false);
+    expect(t1Row.find(".history-icon path").attributes("d")).toBe(ICON_WECHAT);
+    expect(t2Row.find(".history-icon path").attributes("d")).toBe(ICON_SESSION);
+    expect(t1Row.find(".history-wechat-badge").exists()).toBe(false);
     store.wechat = null;
   });
 
@@ -610,15 +611,13 @@ describe("HistoryView 文件夹右键菜单", () => {
       "在资源管理器中打开",
       "删除所有会话",
     ]);
-    // 「新建会话」复用会话标签同款 Logo：描边六边形 + C 标记（两条路径）
+    // 「新建会话」复用会话气泡图标（单路径）
     const item = wrapper
       .findAll(".ctx-menu-item")
       .find((b) => b.text().trim() === "新建会话")!;
     const sessionPaths = item.findAll("svg path");
-    expect(sessionPaths).toHaveLength(2);
+    expect(sessionPaths).toHaveLength(1);
     expect(sessionPaths[0].attributes("d")).toBe(ICON_SESSION);
-    expect(sessionPaths[1].attributes("d")).toBe(ICON_SESSION_LOGO_C);
-    expect(sessionPaths[1].classes()).toContain("logo-c");
     // 其它菜单项仍为单路径
     const term = wrapper
       .findAll(".ctx-menu-item")
