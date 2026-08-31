@@ -414,11 +414,9 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <div v-if="loadingRoot && !rootEntry" class="menu-note">加载中…</div>
-        <div v-if="rootError && !rootEntry" class="menu-note resource-error">
-          {{ rootError }}
-        </div>
-        <div v-if="!rootError && !rootEntry && !loadingRoot" class="menu-note">
-          暂无工作目录
+        <div v-else-if="!rootEntry" class="resource-empty">
+          <p class="resource-empty-title">无法获取资源树</p>
+          <p class="resource-empty-desc">{{ rootError || "暂无工作目录" }}</p>
         </div>
       </template>
     </div>

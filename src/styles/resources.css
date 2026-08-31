@@ -167,13 +167,28 @@ body.resource-dragging .resource-row {
   fill: currentColor;
 }
 
-.resource-error {
-  color: var(--red);
-  white-space: pre-wrap;
-  word-break: break-all;
+.resource-empty {
+  padding: 28px var(--space-8);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
 }
 
-/* 资源面板空态提示（暂无工作目录/加载中/搜索提示）水平居中 */
+.resource-empty-title {
+  font-size: var(--font-base);
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.resource-empty-desc {
+  font-size: var(--font-md);
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/* 资源面板空态提示（加载中/搜索提示）水平居中 */
 .resource-list .menu-note {
   text-align: center;
 }

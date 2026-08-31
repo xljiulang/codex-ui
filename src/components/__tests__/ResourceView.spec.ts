@@ -551,12 +551,25 @@ describe("ResourceView 文件树", () => {
   it("工作目录为空时显示暂无工作目录且不调用 startup_workspace", async () => {
     store.workspace = "";
     const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-error").text()).toContain("暂无工作目录");
+    expect(wrapper.find(".resource-empty-title").text()).toContain("无法获取资源树");
+    expect(wrapper.find(".resource-empty-desc").text()).toContain("暂无工作目录");
     expect(mockedInvoke).not.toHaveBeenCalledWith("startup_workspace");
     // 空态下不显示搜索/刷新框（对齐 Git 面板）
     expect(wrapper.find(".history-head").exists()).toBe(false);
     expect(wrapper.find(".history-search").exists()).toBe(false);
     expect(wrapper.find(".history-refresh").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("根加载失败时显示无法获取资源树与具体错误", async () => {
+    const base = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_metadata") return Promise.reject("模拟加载失败");
+      return base(cmd, args);
+    });
+    const wrapper = await mountPanel();
+    expect(wrapper.find(".resource-empty-title").text()).toContain("无法获取资源树");
+    expect(wrapper.find(".resource-empty-desc").text()).toContain("模拟加载失败");
     wrapper.unmount();
   });
 
