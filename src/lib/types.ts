@@ -1,6 +1,5 @@
 export interface ServerStatus {
   connected: boolean;
-  startupWorkspace: string;
   codexPath?: string | null;
   /** 启动后探测到的 codex 版本（`codex --version` 输出）；未探测为 null */
   codexVersion?: string | null;

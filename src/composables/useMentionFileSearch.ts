@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { resolveSessionWorkspace, setToast, toastError } from "./useCodex";
+import { setToast, toastError, workspace } from "./useCodex";
 import { debounce } from "../lib/debounce";
 import type { FuzzyFileResult } from "../lib/mention";
 
@@ -33,7 +33,8 @@ export function useMentionFileSearch() {
 
   async function runFileSearch(token: string) {
     const seq = ++searchSeq;
-    const root = resolveSessionWorkspace();
+    // 跟随全局工作区（与资源/Git 面板同源）；无确定工作区时不搜索
+    const root = workspace.value;
     if (!root) {
       searchingFiles.value = false;
       return;

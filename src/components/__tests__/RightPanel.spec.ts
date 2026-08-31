@@ -114,8 +114,7 @@ describe("RightPanel Tab 栏", () => {
   beforeEach(() => {
     store.threads = [];
     store.loadingHistory = false;
-    store.server.startupWorkspace = rootPath;
-    store.workspace = null;
+    store.workspace = rootPath;
     store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();
@@ -238,8 +237,7 @@ describe("RightPanel 宽度调节", () => {
     });
     store.threads = [];
     store.loadingHistory = false;
-    store.server.startupWorkspace = rootPath;
-    store.workspace = null;
+    store.workspace = rootPath;
     store.panelTab = "history";
     mockedInvoke.mockClear();
     mockFs();

@@ -38,7 +38,7 @@ const STATUS = {
 describe("useGitChanges 状态机与监听", () => {
   beforeEach(() => {
     __resetGitChangesForTest();
-    store.server.startupWorkspace = "";
+    store.workspace = "";
     store.workspace = "D:/repo";
     mockedInvoke.mockReset();
     mockListen.mockReset();

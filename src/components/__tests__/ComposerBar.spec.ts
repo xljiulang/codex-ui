@@ -160,7 +160,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
 
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -497,7 +497,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
     store.toast = "";
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -695,7 +695,7 @@ describe("ComposerBar 拖放图片/文件", () => {
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
     store.toast = "";
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -828,7 +828,7 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
       configurable: true,
     });
     activeSessionTab()?.attachments.splice(0);
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1207,7 +1207,7 @@ describe("ComposerBar 任务目标芯片", () => {
     __resetSessionTabsForTest();
     tab = defaultTab();
     activeSessionTab()?.attachments.splice(0);
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     store.confirm = null;
     mockedInvoke.mockReset();
@@ -1405,7 +1405,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
 
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();
@@ -1547,7 +1547,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
 
   beforeEach(() => {
     activeSessionTab()?.attachments.splice(0);
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.settings.enter_to_send = true;
     mockedInvoke.mockReset();
     mockedSendPrompt.mockReset();

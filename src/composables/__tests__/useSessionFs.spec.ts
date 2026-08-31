@@ -35,7 +35,9 @@ import {
   pruneDeadDir,
   refreshAll,
   revealAbsPathInTree,
+  rootError,
   rootEntry,
+  searchTerm,
   selectedPath,
   setSessionFsActive,
 } from "../useSessionFs";
@@ -66,7 +68,7 @@ describe("useSessionFs 文件图标缓存", () => {
   beforeEach(() => {
     __resetSessionFsForTest();
     store.workspace = null;
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     mockedInvoke.mockClear();
     mockedInvoke.mockResolvedValue([]);
   });
@@ -138,8 +140,7 @@ describe("useSessionFs 文件图标缓存", () => {
 });
 
 it("激活资源面板：session_fs_watch_start 传字符串工作区而非 computed（防循环引用）", async () => {
-  store.server.startupWorkspace = root;
-  store.workspace = null;
+  store.workspace = root;
   mockedInvoke.mockImplementation((cmd) => {
     if (cmd === "session_fs_metadata") {
       return Promise.resolve({
@@ -177,7 +178,7 @@ it("激活资源面板：session_fs_watch_start 传字符串工作区而非 comp
 
 it("工作区存在即启动监听；停用面板不停监听；清空工作区才停止", async () => {
   const watchWs = "D:\\watch-test-ws"; // 唯一路径，避免与残留会话工作区相等导致 computed 不变
-  store.server.startupWorkspace = "";
+  store.workspace = "";
   store.workspace = null;
   mockedInvoke.mockImplementation((cmd) => {
     if (cmd === "session_fs_watch_start") return Promise.resolve(undefined);
@@ -218,10 +219,45 @@ it("工作区存在即启动监听；停用面板不停监听；清空工作区�
   __resetSessionFsForTest();
 });
 
+it("工作区由非空变空：清残留搜索词并进入暂无工作目录空态", async () => {
+  store.workspace = root;
+  mockedInvoke.mockImplementation((cmd) => {
+    if (cmd === "session_fs_metadata") {
+      return Promise.resolve({
+        name: "repo",
+        path: root,
+        relPath: ".",
+        isDir: true,
+        size: null,
+        modifiedAtMs: 0,
+        createdAtMs: 0,
+        childCount: 0,
+      });
+    }
+    if (cmd === "session_fs_list") return Promise.resolve([]);
+    if (cmd === "session_fs_watch_start") return Promise.resolve(undefined);
+    return Promise.resolve(undefined);
+  });
+  setSessionFsActive(true);
+  await flushPromises();
+
+  // 模拟残留的搜索词：工作区变空时应被清空，避免空态误显示「无匹配结果」
+  searchTerm.value = "残留";
+  await flushPromises();
+
+  store.workspace = "";
+  await flushPromises();
+
+  expect(searchTerm.value).toBe("");
+  expect(rootError.value).toBe("暂无工作目录");
+  expect(rootEntry.value).toBeNull();
+  __resetSessionFsForTest();
+});
+
 describe("openPathInApp 对话链接应用内打开", () => {
   beforeEach(() => {
     __resetEditorTabsForTest();
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     store.toast = "";
     mockedInvoke.mockClear();
   });
@@ -386,7 +422,7 @@ describe("openPathInApp 对话链接应用内打开", () => {
 describe("useSessionFs 粘贴可用性与新建文本文件", () => {
   beforeEach(() => {
     __resetSessionFsForTest();
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     store.toast = "";
     copyBuffer.value = [];
     mockedInvoke.mockReset();
@@ -477,7 +513,7 @@ describe("useSessionFs 工作区切换保留旧数据", () => {
   beforeEach(() => {
     __resetSessionFsForTest();
     store.workspace = null;
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     store.toast = "";
     mockedInvoke.mockReset();
     mockedInvoke.mockImplementation((cmd: string) => {
@@ -587,7 +623,7 @@ describe("revealAbsPathInTree 资源树定位", () => {
   beforeEach(() => {
     __resetSessionFsForTest();
     store.workspace = root;
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     store.toast = "";
     mockedInvoke.mockReset();
     mockedInvoke.mockImplementation((cmd: string, args) => {

@@ -53,7 +53,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -110,7 +109,6 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
   beforeEach(() => {
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -193,7 +191,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -251,7 +248,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -259,7 +255,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("会话标签标题：无目录回退 workspace 目录名", () => {
+  it("会话标签标题：新建带目录为 目录名 / 名称", () => {
     const tab: SessionTab = {
       id: "s1",
       kind: "chat",
@@ -293,7 +289,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newChatWorkspace: "D:/repo",
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("repo / 标题");
@@ -306,7 +302,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -314,7 +309,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("会话标签标题：全新标签兜底 目录名 / 新建会话", () => {
+  it("会话标签标题：全新标签带目录为 目录名 / 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
       kind: "chat",
@@ -348,7 +343,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newChatWorkspace: "D:/repo",
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("repo / 新建会话");
@@ -361,7 +356,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -416,7 +410,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -425,7 +418,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
 
 
   it("会话标签标题：无 workspace 且无 cwd 时降级为仅标题", () => {
-    store.server.startupWorkspace = "";
+    store.workspace = "";
     const tab: SessionTab = {
       id: "s1",
       kind: "chat",
@@ -696,11 +689,10 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("会话标签 title 由同步点维护：新建带目录为 目录名 / 新建会话，改名后更新", async () => {
-    store.server.startupWorkspace = "D:/repo";
     await newEmptyChat("D:/projects/B");
     expect(tabs[0].title).toBe("B / 新建会话");
 
-    await newEmptyChat();
+    await newEmptyChat("D:/repo");
     const tab = tabs[1];
     expect(tab.title).toBe("repo / 新建会话");
     tab.name = "我的标题";

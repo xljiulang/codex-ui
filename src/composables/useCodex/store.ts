@@ -18,7 +18,6 @@ import {
 export const store = reactive({
   server: {
     connected: false,
-    startupWorkspace: "",
     codexPath: null as string | null,
     codexVersion: null as string | null,
     versionTooOld: undefined as boolean | undefined,
@@ -29,6 +28,8 @@ export const store = reactive({
   searchSnippets: {} as Record<string, string>,
   /** 活动标签工作区覆盖（文件/diff/预览/终端标签由 EditorPane 写入；null=跟随会话工作区） */
   workspace: null as string | null,
+  /** 最近一次使用的工作区（仅作目录选择器初始起点，内存态非持久化） */
+  lastWorkspace: "" as string,
   itemsByThread: {} as Record<string, ThreadItem[]>,
   // 每个线程“进行中工作”计数（流式文本/进行中工具），避免渲染时全量扫描
   activeWorkByThread: {} as Record<string, number>,

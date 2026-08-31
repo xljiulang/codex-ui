@@ -140,7 +140,7 @@ describe("RefChip 自定义悬浮卡片", () => {
   });
 
   it("点击文件 chip 触发 reveal_path（测试钩子）", async () => {
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = true;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
     const wrapper = mount(RefChip, {
@@ -158,7 +158,7 @@ describe("RefChip 自定义悬浮卡片", () => {
   });
 
   it("文本文件 chip 点击先应用内打开（probe 成功不调用 reveal_path）", async () => {
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
@@ -182,7 +182,7 @@ describe("RefChip 自定义悬浮卡片", () => {
   });
 
   it("二进制文件 chip 点击回退 reveal_path 定位", async () => {
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(false);
       return Promise.resolve(undefined);

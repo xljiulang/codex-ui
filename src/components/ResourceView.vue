@@ -75,6 +75,12 @@ const hasActiveSessionTab = computed(
     activeTab.value?.kind === TabKind.Chat,
 );
 
+/** 是否有可浏览的资源内容：仅当存在工作区且有根树（或处于搜索态）时显示搜索/刷新控件，
+ *  与 Git 面板仅在 ok 态显示头部一致；空工作区/首屏加载/根加载错误时隐藏。 */
+const showResourceControls = computed(
+  () => !!workspace.value && (!!rootEntry.value || searchActive.value),
+);
+
 const {
   ctxMenu,
   openCtx,
@@ -273,7 +279,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="resource-view">
-    <div class="history-head">
+    <div v-if="showResourceControls" class="history-head">
       <div class="history-search-group">
         <input
           v-model="searchTerm"

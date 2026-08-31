@@ -227,7 +227,7 @@ describe("文件变更：打开独立 diff 窗口", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue(null);
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.toast = "";
     __resetEditorTabsForTest();
   });

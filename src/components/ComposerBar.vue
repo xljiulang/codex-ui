@@ -14,11 +14,11 @@ import {
   modelDisplayName,
   permissionChip,
   registerComposerAddHandler,
-  resolveSessionWorkspace,
   sendPrompt,
   setToast,
   store,
   toastError,
+  workspace,
   type SessionTab,
   unregisterComposerAddHandler,
 } from "../composables/useCodex";
@@ -229,7 +229,7 @@ function refNameOf(a: UserInput): string {
 
 /** 文件/文件夹选择器的初始目录（与 @ 搜索同一工作区基准） */
 function mentionRoot(): string {
-  return resolveSessionWorkspace();
+  return workspace.value;
 }
 
 /** 菜单选中引用：插件/技能删除触发词后插入内联 chip；文件/图片删除触发词后进附件区 */

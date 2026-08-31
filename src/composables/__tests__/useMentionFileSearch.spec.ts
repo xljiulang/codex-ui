@@ -6,6 +6,7 @@ vi.mock("../useCodex", async (importOriginal) => {
   return {
     ...mod,
     resolveSessionWorkspace: vi.fn(() => "D:\\repo"),
+    workspace: { value: "D:\\repo" },
     setToast: vi.fn(),
   };
 });

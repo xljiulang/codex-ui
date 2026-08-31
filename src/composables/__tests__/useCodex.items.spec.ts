@@ -44,7 +44,6 @@ describe("resolveSessionWorkspace 工作目录解析", () => {
   beforeEach(() => {
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -59,25 +58,35 @@ describe("resolveSessionWorkspace 工作目录解析", () => {
     expect(resolveSessionWorkspace()).toBe("D:/projects/other");
   });
 
-  it("有会话但 cwd 缺失：回退 workspace，不读残留的 newChatWorkspace", () => {
+  it("有会话但 cwd 缺失：返回空串（不再回退启动目录）", () => {
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
-    expect(resolveSessionWorkspace()).toBe("D:/repo");
+    expect(resolveSessionWorkspace()).toBe("");
   });
 
-  it("无会话：优先 newChatWorkspace", () => {
+  it("无会话：返回空串（不降级到启动工作目录）", () => {
+    __resetSessionTabsForTest();
+    expect(resolveSessionWorkspace()).toBe("");
+  });
+
+  it("新建会话（无线程）：优先 newChatWorkspace，无则空串", () => {
     __resetSessionTabsForTest();
     tabs.push(
       makeSessionTab("s1", null, { newChatWorkspace: "D:/projects/B" }),
     );
     activeTabId.value = "s1";
     expect(resolveSessionWorkspace()).toBe("D:/projects/B");
+
+    // 未选目录的无线程会话：空串（不读启动目录）
+    __resetSessionTabsForTest();
+    tabs.push(makeSessionTab("s2", null));
+    activeTabId.value = "s2";
+    expect(resolveSessionWorkspace()).toBe("");
   });
 
   it("全部为空时返回空串", () => {
     __resetSessionTabsForTest();
-    store.server.startupWorkspace = "";
     expect(resolveSessionWorkspace()).toBe("");
   });
 });
@@ -97,7 +106,6 @@ describe("会话标签状态与事件路由", () => {
       makeSessionTab("s1", "t1", { workspace: "D:/session" }),
     );
     activeTabId.value = "s1";
-    store.server.startupWorkspace = "D:/startup";
     expect(workspace.value).toBe("D:/session");
 
     store.workspace = "D:/tab";

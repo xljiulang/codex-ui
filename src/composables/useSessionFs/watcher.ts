@@ -1,7 +1,7 @@
 import { watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { setToast, store, toastError, workspace } from "../useCodex";
+import { setToast, toastError, workspace } from "../useCodex";
 import { normalizeFsPath } from "../../lib/path";
 import {
   copyBuffer,
@@ -13,7 +13,6 @@ import {
 import {
   ensureRootLoaded,
   refreshAll,
-  resolveFallbackRoot,
 } from "./tree";
 import { ensureTextFileIcon } from "./icons";
 import { clearSearch, resetSearchState } from "./search";
@@ -72,16 +71,14 @@ async function syncWatcher() {
   }
 }
 
-/** 激活资源 Tab：解析工作区（含 startup_workspace 兜底）后加载树 */
+/** 激活资源 Tab：解析工作区后加载树；无确定工作区时重置为空态（不加载/监听） */
 async function activate() {
-  const root = normalizeFsPath(workspace.value) || (await resolveFallbackRoot());
+  const root = normalizeFsPath(workspace.value);
   if (!root) {
+    resetTree();
+    resetSearchState();
     rootError.value = "暂无工作目录";
     return;
-  }
-  if (!workspace.value) {
-    // 兜底结果回写全局，让头部等其它读取点保持一致
-    store.server.startupWorkspace = root;
   }
   // 预取「新建文本文件」菜单的系统 .txt 图标（写 ext:.txt 缓存）
   void ensureTextFileIcon();
@@ -131,6 +128,7 @@ watch(workspace, async (r, old) => {
     }
   } else {
     resetTree();
+    resetSearchState();
     rootError.value = "暂无工作目录";
   }
 });

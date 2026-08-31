@@ -138,10 +138,6 @@ impl CodexServer {
         }
     }
 
-    pub fn workspace(&self) -> &Path {
-        &self.workspace
-    }
-
     /// 订阅 app-server 的全部服务器通知（method, params）。
     /// 当前仅微信桥使用；迟到导致 Lagged 时由订阅方自行跳过补齐。
     pub fn subscribe_notifications(&self) -> broadcast::Receiver<(String, Value)> {
@@ -729,7 +725,6 @@ impl CodexServer {
         let inner = self.shared.inner.lock().await;
         json!({
             "connected": inner.connected,
-            "startupWorkspace": clean_path(&self.workspace),
             "codexPath": inner.codex_path.as_ref().map(|p| clean_path(Path::new(p))),
             "codexVersion": inner.codex_version,
             "versionTooOld": inner.version_too_old,

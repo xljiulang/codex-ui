@@ -173,6 +173,11 @@ body.resource-dragging .resource-row {
   word-break: break-all;
 }
 
+/* 资源面板空态提示（暂无工作目录/加载中/搜索提示）水平居中 */
+.resource-list .menu-note {
+  text-align: center;
+}
+
 .resource-props {
   display: flex;
   flex-direction: column;

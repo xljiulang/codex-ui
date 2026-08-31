@@ -294,11 +294,6 @@ pub async fn auth_logout(server: State<'_, Server>) -> Result<Value, String> {
     server.request("account/logout", Value::Null, None).await
 }
 
-#[tauri::command]
-pub fn startup_workspace(server: State<'_, Server>) -> String {
-    clean_path(server.workspace())
-}
-
 // ---------------- 微信接入（ClawBot sidecar） ----------------
 
 /// 当前微信桥状态快照（供历史面板与绑定弹窗轮询、事件兜底刷新）。

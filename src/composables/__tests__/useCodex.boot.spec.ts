@@ -170,7 +170,6 @@ describe("启动版本警告（仅低于 0.149.0）", () => {
       if (cmd === "server_status") {
         return Promise.resolve({
           connected: true,
-          startupWorkspace: "D:/repo",
           codexPath: null,
           codexVersion: "codex-cli 0.148.2",
           versionTooOld: true,
@@ -196,7 +195,6 @@ describe("启动版本警告（仅低于 0.149.0）", () => {
       if (cmd === "server_status") {
         return Promise.resolve({
           connected: true,
-          startupWorkspace: "D:/repo",
           codexPath: null,
           codexVersion: "codex-cli 0.149.0",
           versionTooOld: false,

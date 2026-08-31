@@ -204,7 +204,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
     store.toast = "";
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.threads = [{ id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 }];
   });
 
@@ -301,7 +301,7 @@ describe("autoTitleThread 临时线程标题总结", () => {
         expect(params.ephemeral).toBe(true);
         expect(params.model).toBeUndefined();
         expect(params.sandbox).toBe("read-only");
-        expect(params.cwd).toBe("D:/repo");
+        expect(params.cwd).toBe("");
         return Promise.resolve({ thread: { id: "helper1" } });
       }
       if (cmd === "turn_start") {

@@ -188,4 +188,5 @@ export function resetUseCodexState(
   });
   __resetSessionTabsForTest();
   store.booting = true;
+  store.lastWorkspace = "";
 }

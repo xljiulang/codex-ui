@@ -44,7 +44,6 @@ describe("refreshServer 服务状态同步", () => {
     mockedInvoke.mockReset();
     store.server = {
       connected: false,
-      startupWorkspace: "",
       codexPath: null,
       logs: [],
     };
@@ -53,7 +52,6 @@ describe("refreshServer 服务状态同步", () => {
   it("server_status 返回 codexPath 后写入 store.server.codexPath", async () => {
     mockedInvoke.mockResolvedValue({
       connected: true,
-      startupWorkspace: "D:/repo",
       codexPath: "D:/codex/codex.exe",
       logs: [],
     });
@@ -61,7 +59,6 @@ describe("refreshServer 服务状态同步", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("server_status");
     expect(store.server.codexPath).toBe("D:/codex/codex.exe");
     expect(store.server.connected).toBe(true);
-    expect(store.server.startupWorkspace).toBe("D:/repo");
   });
 });
 describe("ensureThreadPlugins 会话级插件缓存", () => {

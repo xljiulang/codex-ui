@@ -170,7 +170,6 @@ function mockFs() {
     if (cmd === "session_fs_read") {
       return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
     }
-    if (cmd === "startup_workspace") return Promise.resolve(rootPath);
     if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
     if (cmd === "session_fs_create_dir") {
       createdFolder = {
@@ -262,8 +261,7 @@ function fireWindowPointer(type: string, x: number, y: number) {
 
 describe("ResourceView 文件树", () => {
   beforeEach(() => {
-    store.server.startupWorkspace = rootPath;
-    store.workspace = null;
+    store.workspace = rootPath;
     store.toast = "";
     clipboardFiles = [aTxt.path];
     createdFolder = null;
@@ -333,6 +331,8 @@ describe("ResourceView 文件树", () => {
       workspace: rootPath,
       path: rootPath,
     });
+    // 有工作区时搜索/刷新头部可见
+    expect(wrapper.find(".history-head").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -548,15 +548,15 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("工作目录均未就绪时用 workspace_dir 兜底", async () => {
-    store.server.startupWorkspace = "";
+  it("工作目录为空时显示暂无工作目录且不调用 startup_workspace", async () => {
+    store.workspace = "";
     const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-root").text()).toContain("codex-ui");
-    expect(mockedInvoke).toHaveBeenCalledWith("startup_workspace");
-    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_metadata", {
-      workspace: rootPath,
-      path: rootPath,
-    });
+    expect(wrapper.find(".resource-error").text()).toContain("暂无工作目录");
+    expect(mockedInvoke).not.toHaveBeenCalledWith("startup_workspace");
+    // 空态下不显示搜索/刷新框（对齐 Git 面板）
+    expect(wrapper.find(".history-head").exists()).toBe(false);
+    expect(wrapper.find(".history-search").exists()).toBe(false);
+    expect(wrapper.find(".history-refresh").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -1338,8 +1338,7 @@ describe("ResourceView 文件树", () => {
 
 describe("ResourceView 工作区切换", () => {
   beforeEach(() => {
-    store.server.startupWorkspace = rootPath;
-    store.workspace = null;
+    store.workspace = rootPath;
     store.toast = "";
     mockedInvoke.mockClear();
     mockFs();

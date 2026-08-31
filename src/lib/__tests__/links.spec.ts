@@ -13,6 +13,7 @@ vi.mock("../../composables/useCodex", () => ({
   }),
   toastError: (e: unknown) => String(e),
   resolveSessionWorkspace: () => "D:/repo",
+  workspace: { value: "D:/repo" },
   setToast: (msg: string) => {
     store.toast = msg;
   },

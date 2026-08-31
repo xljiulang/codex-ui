@@ -52,7 +52,6 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -74,7 +73,6 @@ describe("forkThread 会话分叉", () => {
     store.threads = [];
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -195,7 +193,6 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -247,7 +244,7 @@ describe("会话标签状态与事件路由", () => {
       makeSessionTab("s1", null, { newChatWorkspace: "D:/repo" }),
     );
     activeTabId.value = "s1";
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_start") {
         return Promise.resolve({
@@ -286,7 +283,7 @@ describe("会话标签状态与事件路由", () => {
       makeSessionTab("s1", null, { newChatWorkspace: "D:/repo" }),
     );
     activeTabId.value = "s1";
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_start") {
         return Promise.resolve({
@@ -371,7 +368,7 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("pickAndOpenNewSession：弹目录选择（初始为 workspace），选中后新建会话", async () => {
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "pick_directory") {
         return Promise.resolve("D:/project");
@@ -398,7 +395,6 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("pickAndOpenNewSession：有会话时初始目录为线程 cwd", async () => {
-    store.server.startupWorkspace = "D:/repo";
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1", { workspace: "D:/session" }));
     activeTabId.value = "s1";
@@ -420,7 +416,7 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("pickAndOpenNewSession：取消选择不新建", async () => {
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     mockedInvoke.mockResolvedValue(null);
     await pickAndOpenNewSession();
     expect(tabs).toHaveLength(0);

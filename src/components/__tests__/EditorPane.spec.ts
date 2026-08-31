@@ -1880,7 +1880,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   });
 
   it("激活文件标签：资源树同步选中并展开所在目录", async () => {
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     const mainTs = root + "\\src\\main.ts";
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
@@ -1919,7 +1919,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   });
 
   it("激活 Diff 标签：同样同步资源树定位", async () => {
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") return Promise.resolve([]);
       if (cmd === "session_fs_metadata") {
@@ -1959,7 +1959,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   });
 
   it("工作区外文件标签激活：资源树跟随该文件工作区并选中", async () => {
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     const outside = "D:\\outside";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));
@@ -2028,7 +2028,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   });
 
   it("搜索态下激活文件标签：退出搜索并定位到树", async () => {
-    store.server.startupWorkspace = root;
+    store.workspace = root;
     searchTerm.value = "main";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") return Promise.resolve(fileContent("x"));

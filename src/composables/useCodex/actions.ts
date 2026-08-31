@@ -83,12 +83,13 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     const permission =
       active?.permissionMode ?? store.settings.default_permission;
     const params: Record<string, unknown> = {
-      cwd,
       approvalPolicy: toApprovalPolicy(permission),
       sandbox: toSandbox(permission),
       // 注入 codexui 动态工具：agent 可在会话内查询用量/压缩上下文（仅 thread/start 支持）
       dynamicTools: CODEXUI_DYNAMIC_TOOLS,
     };
+    // 无确定工作区时不传 cwd（交由 codex 用服务端默认目录），避免 cwd 为空串
+    if (cwd) params.cwd = cwd;
     const reviewer = toApprovalsReviewer(permission);
     if (reviewer) params.approvalsReviewer = reviewer;
     // 显式携带（null 表示用默认），避免旧值在会话里粘滞；effort 由随后的 turn/start 携带
@@ -299,7 +300,10 @@ export async function executePlan() {
  */
 export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
   const tab = freshSessionTab();
-  if (cwd) tab.newChatWorkspace = cwd;
+  if (cwd) {
+    tab.newChatWorkspace = cwd;
+    store.lastWorkspace = cwd;
+  }
   tab.title = sessionTabTitle(tab);
   insertTab(tab);
   activateTab(tab.id); // live 字段由投影 watch 同步
@@ -362,6 +366,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     ).filter((x) => isActiveItem(x)).length;
     const name = res.thread.name ?? "";
     const cwd = res.thread.cwd ?? null;
+    if (cwd) store.lastWorkspace = cwd;
     // 回合/计划/目标等状态一律写标签（tab 是唯一事实源，不再写 store）
     tab.threadId = threadId;
     tab.name = name;
@@ -467,9 +472,11 @@ export async function pickAndOpenNewSession(): Promise<void> {
   pickingNewSessionDir.value = true;
   try {
     const dir = await invoke<string | null>("pick_directory", {
-      initialDir: workspace.value,
+      // 有工作区（会话/编辑器标签）时以其为起点；无工作区时用最近一次，无则空
+      initialDir: workspace.value || store.lastWorkspace || "",
     });
     if (!dir) return;
+    store.lastWorkspace = dir;
     await openNewSession(dir);
   } catch (e) {
     setToast(toastError(e));

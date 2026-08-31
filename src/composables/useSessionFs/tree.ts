@@ -23,17 +23,6 @@ import {
 } from "./state";
 import { clearSearch, runSearchNow } from "./search";
 
-/** 兜底：从后端直接取启动工作目录（store 尚未就绪时用） */
-export async function resolveFallbackRoot(): Promise<string> {
-  try {
-    const w = await invoke<string>("startup_workspace");
-    if (w && w.trim()) return normalizeFsPath(w.trim());
-  } catch {
-    // 忽略，沿用空根
-  }
-  return "";
-}
-
 /** 拉取一个目录的直接子项（懒加载；已缓存且非强制时直接返回）。
  *  `opts.silent` 用于程序化/自动刷新：列表失败时静默剪枝，不打扰用户。 */
 export async function loadDir(

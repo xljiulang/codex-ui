@@ -363,7 +363,7 @@ describe("用户消息中的图片附件", () => {
   });
 
   it("文件/技能 chip 可点击（测试钩子下回退 reveal_path），插件 chip 不可点击", async () => {
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = true;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
     const wrapper = mount(MessageItem, {

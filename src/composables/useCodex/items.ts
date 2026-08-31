@@ -113,18 +113,16 @@ export async function loadFullItems(threadId: string): Promise<ThreadItem[] | nu
 
 /**
  * 会话工作区解析（所有入口共用，避免优先级不一致）：
- * 有会话时以会话工作区为准（忽略残留的 newChatWorkspace），无会话（新建会话中）
- * 优先待新建目录，其次启动工作区；均跳过空串。
+ * 有会话时以会话工作区为准（忽略残留的 newChatWorkspace），无会话（未打开/创建任何
+ * 会话）返回空串——不降级到启动工作目录（app 目录），资源面板与 Git 面板据此进入
+ * 「无工作目录」状态，不加载/监听任何目录。会话 cwd 缺失、新建会话未选目录同样为空。
  * 传 tab 时按指定会话标签解析（后台标签发送回合时沙箱可写根等应跟随该标签）。
  */
 export function resolveSessionWorkspace(tab?: SessionTab): string {
   const session = tab ?? activeSessionTab();
-  const cwd = session
-    ? session.threadId
-      ? session.workspace
-      : session.newChatWorkspace
-    : "";
-  return cwd?.trim() || store.server.startupWorkspace?.trim() || "";
+  if (!session) return "";
+  const cwd = session.threadId ? session.workspace : session.newChatWorkspace;
+  return cwd?.trim() || "";
 }
 
 

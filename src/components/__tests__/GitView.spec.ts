@@ -76,7 +76,7 @@ function mockWatcherAndDefaults() {
 
 beforeEach(() => {
   store.threads = [];
-  store.server.startupWorkspace = rootPath;
+  store.workspace = rootPath;
   mockedInvoke.mockClear();
   __resetGitChangesForTest();
   __resetSessionFsForTest();
@@ -358,7 +358,7 @@ describe("GitView 文件列表与 diff", () => {
 describe("GitView 分支管理", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
   });
@@ -688,7 +688,7 @@ describe("GitView 分支管理", () => {
 describe("GitView 提交历史", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
   });
@@ -948,7 +948,7 @@ describe("GitView 提交历史", () => {
 describe("GitView 分区折叠", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.toast = "";
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
@@ -1092,7 +1092,7 @@ describe("GitView 分区折叠", () => {
 describe("GitView 变更文件右键菜单", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
@@ -1359,7 +1359,7 @@ describe("GitView 变更文件右键菜单", () => {
 describe("GitView 变更文件树形目录", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();
@@ -1688,7 +1688,7 @@ describe("GitView 变更文件树形目录", () => {
 describe("GitView 提交", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -1806,7 +1806,7 @@ describe("GitView 提交", () => {
 describe("GitView 拉取", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -1933,7 +1933,7 @@ describe("GitView 拉取", () => {
 describe("GitView 推送", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -2039,7 +2039,7 @@ describe("GitView 推送", () => {
 describe("GitView 状态字母与全部暂存/取消暂存", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -2190,7 +2190,7 @@ describe("GitView 状态字母与全部暂存/取消暂存", () => {
 describe("GitView 远端管理", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -2403,7 +2403,7 @@ describe("GitView 远端管理", () => {
 describe("GitView 远程分支管理", () => {
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     store.toast = "";
     mockedInvoke.mockClear();
@@ -2638,7 +2638,7 @@ describe("GitView diff 标签联动定位", () => {
 
   beforeEach(() => {
     store.threads = [];
-    store.server.startupWorkspace = rootPath;
+    store.workspace = rootPath;
     store.confirm = null;
     mockedInvoke.mockClear();
     __resetGitChangesForTest();

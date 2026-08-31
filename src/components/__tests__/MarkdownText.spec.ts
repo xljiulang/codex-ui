@@ -19,7 +19,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
 
   beforeEach(() => {
     mockedInvoke.mockClear();
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     // 测试环境固定走同步回退解析，避免 happy-dom Worker 挂起
     (globalThis as Record<string, unknown>).Worker = undefined;
   });

@@ -149,7 +149,6 @@ pub fn run() {
             codex::commands::auth_login,
             codex::commands::auth_api_key_configured,
             codex::commands::auth_logout,
-            codex::commands::startup_workspace,
             codex::commands::wechat_state,
             codex::commands::wechat_bindings,
             codex::commands::wechat_bind_login_start,

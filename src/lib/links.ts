@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { resolveSessionWorkspace, setToast, toastError } from "../composables/useCodex";
+import { setToast, toastError, workspace } from "../composables/useCodex";
 
 export type LinkClassification =
   | { kind: "web"; url: string }
@@ -66,7 +66,7 @@ export function displayHref(href: string, workspaceRoot: string): string {
 }
 
 export function sessionWorkspace(): string {
-  return resolveSessionWorkspace();
+  return workspace.value;
 }
 
 interface TestHookWindow {

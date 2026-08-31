@@ -224,7 +224,6 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     __resetSessionTabsForTest();
     store.server = {
       connected: false,
-      startupWorkspace: "D:/repo",
       codexPath: null,
       logs: [],
     };
@@ -257,7 +256,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
       draftAttachments: [],
       draftRefs: {},
       origin: "history",
-      workspace: null,
+      workspace: "D:/repo",
       resumedThreadId: null,
       turnActive: false,
       currentTurnId: null,
@@ -875,7 +874,7 @@ describe("后台临时线程 delta 事件隔离", () => {
     mockListenCapture();
     mockedInvoke.mockReset();
     store.toast = "";
-    store.server.startupWorkspace = "D:/repo";
+    store.workspace = "D:/repo";
     store.threads = [
       { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
     ];
