@@ -1,28 +1,19 @@
 <script setup lang="ts">
 import {
-  pickAndOpenNewSession,
-  pickingNewSessionDir,
-} from "../composables/useCodex";
-import {
-  closeAnyTab,
   openSettingsTab,
   SETTINGS_TAB_ID,
 } from "../composables/useEditorTabs";
-import { activeTabId, activateTab, tabs } from "../composables/useTabs";
-import { ICON_PLUS, ICON_SETTINGS } from "../lib/icons";
+import { activateTab, tabs } from "../composables/useTabs";
+import { ICON_SETTINGS } from "../lib/icons";
 
-/** 设置按钮：无设置标签则创建并激活；已存在未激活则激活；已激活则关闭（保持原 toggle 习惯） */
+/** 设置按钮：无设置标签则创建并激活；已存在（无论是否激活）仅聚焦激活 */
 function onSettings() {
   const existing = tabs.find((t) => t.id === SETTINGS_TAB_ID);
   if (!existing) {
     openSettingsTab();
     return;
   }
-  if (activeTabId.value === SETTINGS_TAB_ID) {
-    void closeAnyTab(existing);
-  } else {
-    activateTab(SETTINGS_TAB_ID);
-  }
+  activateTab(SETTINGS_TAB_ID);
 }
 </script>
 
@@ -38,21 +29,6 @@ function onSettings() {
       <span class="brand-name">CODEX</span>
     </div>
     <div class="header-actions">
-      <button
-        class="icon-btn new-chat-btn"
-        aria-label="新建会话"
-        :disabled="pickingNewSessionDir"
-        v-tooltip="
-          pickingNewSessionDir
-            ? '正在选择文件夹…'
-            : '新建会话（选择工作目录）'
-        "
-        @click="pickAndOpenNewSession()"
-      >
-        <svg viewBox="0 0 24 24">
-          <path :d="ICON_PLUS" />
-        </svg>
-      </button>
       <button
         class="icon-btn"
         aria-label="设置"

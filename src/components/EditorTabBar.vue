@@ -26,7 +26,6 @@ const props = defineProps<{
   sessionTabs: SessionTab[];
   editorTabs: EditorTab[];
   activeTabId: string;
-  hasActiveTab: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -375,7 +374,6 @@ function titleTooltip(tab: EditorTab): string {
         </button>
       </div>
       <button
-        v-if="hasActiveTab"
         class="editor-tab-add"
         aria-label="新建会话或终端"
         v-tooltip="'新建会话 / 新建终端'"

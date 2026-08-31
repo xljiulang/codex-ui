@@ -51,6 +51,11 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
+vi.mock("../../composables/useCodex", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  return { ...mod, pickAndOpenNewSession: vi.fn() };
+});
+
 import { invoke } from "@tauri-apps/api/core";
 import EditorPane from "../EditorPane.vue";
 import {
@@ -76,6 +81,7 @@ import {
   selectedPath,
 } from "../../composables/useSessionFs";
 import {
+  pickAndOpenNewSession,
   __resetSessionTabsForTest,
   settleConfirm,
   store,
@@ -92,6 +98,7 @@ import {
 } from "../../composables/useGitChanges";
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedPickAndOpenNewSession = vi.mocked(pickAndOpenNewSession);
 const root = "D:\\repo";
 const aTxt = root + "\\a.txt";
 const bTxt = root + "\\b.txt";
@@ -145,6 +152,7 @@ function mountPane() {
 describe("EditorPane 左侧多标签编辑区", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
+    mockedPickAndOpenNewSession.mockClear();
     termFocus.calls = 0;
     __resetEditorTabsForTest();
     __resetSessionFsForTest();
@@ -203,12 +211,12 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("零会话零文件标签时：空状态显示 Logo 与提示文案（无新建按钮），无活动标签「+」隐藏", () => {
+  it("零会话零文件标签时：空状态显示 Logo 与提示文案（无新建按钮），「+」无条件显示", () => {
     tabs.splice(0, tabs.length);
     activeTabId.value = "";
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tabs").exists()).toBe(true);
-    expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
     expect(wrapper.find(".no-session-state").exists()).toBe(true);
     expect(wrapper.find(".no-session-state .empty-logo").exists()).toBe(true);
     expect(wrapper.find(".no-session-state").text()).toContain(
@@ -218,7 +226,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("仅有设置标签时：「+」隐藏（除设置外无任何标签）", () => {
+  it("仅有设置标签时：「+」仍显示", () => {
     tabs.splice(0, tabs.length);
     tabs.push({
       id: "settings",
@@ -230,7 +238,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     });
     activeTabId.value = "settings";
     const wrapper = mountPane();
-    expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -287,7 +295,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("关闭最后一个会话标签后：无活动标签，「+」隐藏", async () => {
+  it("关闭最后一个会话标签后：无活动标签，「+」仍显示", async () => {
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
     const tabEl = wrapper
@@ -296,7 +304,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await tabEl.find(".editor-tab-close").trigger("click");
     await settle();
     expect(tabs.length).toBe(0);
-    expect(wrapper.find(".editor-tab-add").exists()).toBe(false);
+    expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
     expect(wrapper.find(".no-session-state").exists()).toBe(true);
     wrapper.unmount();
   });
@@ -325,17 +333,22 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("点击「新建会话」：以活动标签工作区作为新会话目录", async () => {
-    tabs[0].workspace = "D:/repo";
+  it("无工作区时点「+」：菜单仅为「新建会话」，隐藏「新建终端」", async () => {
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    const items = wrapper.findAll(".ctx-menu-item");
+    expect(items.map((i) => i.text().trim())).toEqual(["新建会话"]);
+    expect(
+      items.some((i) => i.text().trim() === "新建终端"),
+    ).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("点击「新建会话」：调用与头部一致的工作目录选择入口", async () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
     await wrapper.findAll(".ctx-menu-item")[0].trigger("click");
-    const added = tabs.find(
-      (t): t is SessionTab =>
-        t.kind === "chat" && t.threadId === null && t.id !== "sess-1",
-    );
-    expect(added).toBeTruthy();
-    expect(added!.newChatWorkspace).toBe("D:/repo");
+    expect(mockedPickAndOpenNewSession).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 

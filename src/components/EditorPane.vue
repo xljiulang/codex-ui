@@ -42,7 +42,7 @@ import { revealGitFile } from "../composables/useGitChanges";
 import { joinFsPath } from "../lib/sessionFs";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
 import {
-  newEmptyChat,
+  pickAndOpenNewSession,
   setToast,
   store,
   workspace,
@@ -258,37 +258,30 @@ watch(activeTab, (tab) => {
   void revealAbsPathInTree(tabAbsPath(tab));
 });
 
-/** 活动标签的工作区（会话/文件/diff/预览/终端统一取 tab.workspace） */
-const activeWorkspace = computed((): string | null => activeTab.value?.workspace ?? null);
-
-/**
- * 标签栏末尾「+」是否显示：存在非设置标签时显示。
- * 空列表或仅有设置标签（无会话/文件/终端等）时隐藏。
- */
-const hasActiveTab = computed(() =>
-  tabs.some((t) => t.kind !== TabKind.Settings),
-);
-
 /** 设置标签是否存在：存在期间常驻挂载（v-show 切换），关闭后销毁重置 */
 const settingsTabOpen = computed(() =>
   tabs.some((t) => t.id === SETTINGS_TAB_ID),
 );
 
-/** 标签栏末尾「+」：选择新建会话或新建终端，均使用活动标签工作区启动 */
+/** 标签栏末尾「+」：新建会话走与头部一致的工作目录选择；新建终端与选择器起点一致 */
 function openAddMenu(e: MouseEvent) {
-  const ws = activeWorkspace.value || workspace.value || "";
-  openCtx(e, [
+  const ws = workspace.value || store.lastWorkspace || "";
+  const items: CtxItem[] = [
     {
       label: "新建会话",
       paths: SESSION_LOGO_PATHS,
-      action: () => void newEmptyChat(ws || null),
+      action: () => void pickAndOpenNewSession(),
     },
-    {
+  ];
+  // 无确定工作目录时隐藏「新建终端」，避免以空/回退目录启动终端
+  if (ws) {
+    items.push({
       label: "新建终端",
       icon: ICON_TERMINAL,
       action: () => void openTerminalTab(ws),
-    },
-  ]);
+    });
+  }
+  openCtx(e, items);
 }
 
 </script>
@@ -301,7 +294,6 @@ function openAddMenu(e: MouseEvent) {
         :session-tabs="sessionTabs"
         :editor-tabs="editorTabs"
         :active-tab-id="activeTabId"
-        :has-active-tab="hasActiveTab"
         @activate="activateTab"
         @close="closeAnyTab"
         @context="openTabMenu"
