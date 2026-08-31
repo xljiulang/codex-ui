@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { flushPromises, mount } from "@vue/test-utils";
 
 import AppHeader from "../AppHeader.vue";
 import { tooltipDirective } from "../../directives/tooltip";
@@ -18,6 +18,25 @@ import type { SessionTab } from "../../composables/useCodex";
 
 const tabs = _tabs as unknown as SessionTab[];
 
+const h = vi.hoisted(() => {
+  const win = {
+    minimize: vi.fn(async () => {}),
+    toggleMaximize: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+    isMaximized: vi.fn(async () => false),
+    onResized: vi.fn(async () => () => {}),
+    startDragging: vi.fn(async () => {}),
+  };
+  return { shouldThrow: false, win };
+});
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => {
+    if (h.shouldThrow) throw new Error("not in tauri");
+    return h.win;
+  },
+}));
+
 function mountHeader() {
   return mount(AppHeader, {
     global: { directives: { tooltip: tooltipDirective } },
@@ -30,6 +49,11 @@ describe("AppHeader 导航", () => {
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
+    h.win.minimize.mockClear();
+    h.win.toggleMaximize.mockClear();
+    h.win.close.mockClear();
+    h.win.isMaximized.mockClear();
+    h.win.startDragging.mockClear();
   });
 
   it("点设置创建设置标签并激活", async () => {
@@ -66,15 +90,72 @@ describe("AppHeader 导航", () => {
   });
 });
 
-describe("AppHeader 图标布局", () => {
-  it("工作目录与新建会话按钮已移除，头部只剩设置图标按钮", () => {
+describe("AppHeader 标题栏与窗口控制", () => {
+  beforeEach(() => {
+    __resetTabsForTest();
+    __resetSessionTabsForTest();
+    h.win.minimize.mockClear();
+    h.win.toggleMaximize.mockClear();
+    h.win.close.mockClear();
+    h.win.isMaximized.mockClear();
+    h.win.startDragging.mockClear();
+  });
+
+  it("头部顺序：设置 / 最小化 / 最大化 / 关闭", async () => {
     const wrapper = mountHeader();
-    expect(wrapper.find("button.brand-cwd").exists()).toBe(false);
-    expect(wrapper.find(".cwd-group").exists()).toBe(false);
-    expect(wrapper.find('button[aria-label="新建会话"]').exists()).toBe(false);
+    await flushPromises();
     const actions = wrapper.findAll(".header-actions > *");
     expect(actions.map((a) => a.attributes("aria-label"))).toEqual([
       "设置",
+      "最小化",
+      "最大化",
+      "关闭",
     ]);
+  });
+
+  it("点最小化调用窗口 minimize", async () => {
+    const wrapper = mountHeader();
+    await wrapper.find('button[aria-label="最小化"]').trigger("click");
+    expect(h.win.minimize).toHaveBeenCalledTimes(1);
+  });
+
+  it("点最大化调用窗口 toggleMaximize", async () => {
+    const wrapper = mountHeader();
+    await wrapper.find('button[aria-label="最大化"]').trigger("click");
+    expect(h.win.toggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("点关闭调用窗口 close", async () => {
+    const wrapper = mountHeader();
+    await wrapper.find('button[aria-label="关闭"]').trigger("click");
+    expect(h.win.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("最大化时按钮显示还原态（aria-label=还原）", async () => {
+    h.win.isMaximized.mockResolvedValue(true);
+    const wrapper = mountHeader();
+    await flushPromises();
+    const maxBtn = wrapper.find(
+      '.header-actions button[aria-label="还原"]',
+    );
+    expect(maxBtn.exists()).toBe(true);
+  });
+
+  it("非 Tauri 环境：标题栏仍可渲染，不抛错", async () => {
+    h.shouldThrow = true;
+    const wrapper = mountHeader();
+    await flushPromises();
+    expect(wrapper.find(".app-header").exists()).toBe(true);
+    // 点击窗口按钮应静默降级，不再调用窗口 API
+    await wrapper.find('button[aria-label="关闭"]').trigger("click");
+    expect(h.win.close).not.toHaveBeenCalled();
+  });
+
+  it("点击窗口按钮不触发标题栏拖动", async () => {
+    const wrapper = mountHeader();
+    await wrapper
+      .find('button[aria-label="最小化"]')
+      .trigger("mousedown", { button: 0 });
+    expect(h.win.startDragging).not.toHaveBeenCalled();
   });
 });

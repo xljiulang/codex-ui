@@ -255,6 +255,10 @@ pub fn run() {
                 .inner_size(1280.0, 720.0)
                 .min_inner_size(400.0, 560.0)
                 .resizable(true)
+                // 自绘标题栏：隐藏原生标题栏与最小化/最大化/关闭按钮，
+                // 改由前端 AppHeader 标题栏提供拖动与窗口控制（关闭仍走下方
+                // on_window_event 的“关闭→隐藏到系统托盘”逻辑）。
+                .decorations(false)
                 .center()
                 .visible(false)
                 .background_color(Color(r, g, b, a))

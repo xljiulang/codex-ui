@@ -58,6 +58,14 @@ export const ICON_REFRESH =
 /** 关闭（×） */
 export const ICON_CLOSE =
   "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
+/** 窗口控制：最小化（底部横线） */
+export const ICON_WINDOW_MIN = "M6 18h12v2H6z";
+/** 窗口控制：最大化（方形边框） */
+export const ICON_WINDOW_MAX =
+  "M19 5H5c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 12H5V7h14v10z";
+/** 窗口控制：还原（重叠双层方框） */
+export const ICON_WINDOW_RESTORE =
+  "M7 3h10c1.1 0 2 .9 2 2v10h-2V5H7V3zM5 7h10c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2V9c0-1.1.9-2 2-2zm0 12h10V9H5v10z";
 /** 勾选（提交/完成） */
 export const ICON_CHECK =
   "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z";

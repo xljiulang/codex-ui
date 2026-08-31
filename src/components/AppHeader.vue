@@ -4,7 +4,23 @@ import {
   SETTINGS_TAB_ID,
 } from "../composables/useEditorTabs";
 import { activateTab, tabs } from "../composables/useTabs";
-import { ICON_SETTINGS } from "../lib/icons";
+import { useWindowControls } from "../composables/useWindowControls";
+import {
+  ICON_SETTINGS,
+  ICON_CLOSE,
+  ICON_WINDOW_MIN,
+  ICON_WINDOW_MAX,
+  ICON_WINDOW_RESTORE,
+} from "../lib/icons";
+
+// 自绘标题栏窗口控制：最小化/最大化(还原)/关闭 + 拖动窗口 + 双击最大化
+const {
+  isMaximized,
+  minimize,
+  toggleMaximize,
+  close,
+  onTitlebarMouseDown,
+} = useWindowControls();
 
 /** 设置按钮：无设置标签则创建并激活；已存在（无论是否激活）仅聚焦激活 */
 function onSettings() {
@@ -18,7 +34,10 @@ function onSettings() {
 </script>
 
 <template>
-  <header class="app-header">
+  <header
+    class="app-header"
+    @mousedown="onTitlebarMouseDown"
+  >
     <div class="brand">
       <span class="brand-logo">
         <svg viewBox="0 0 24 24">
@@ -37,6 +56,36 @@ function onSettings() {
       >
         <svg viewBox="0 0 24 24">
           <path :d="ICON_SETTINGS" />
+        </svg>
+      </button>
+      <button
+        class="icon-btn win-btn"
+        aria-label="最小化"
+        v-tooltip="'最小化'"
+        @click="minimize()"
+      >
+        <svg viewBox="0 0 24 24">
+          <path :d="ICON_WINDOW_MIN" />
+        </svg>
+      </button>
+      <button
+        class="icon-btn win-btn"
+        :aria-label="isMaximized ? '还原' : '最大化'"
+        v-tooltip="isMaximized ? '还原' : '最大化'"
+        @click="toggleMaximize()"
+      >
+        <svg viewBox="0 0 24 24">
+          <path :d="isMaximized ? ICON_WINDOW_RESTORE : ICON_WINDOW_MAX" />
+        </svg>
+      </button>
+      <button
+        class="icon-btn win-btn win-btn-close"
+        aria-label="关闭"
+        v-tooltip="'关闭'"
+        @click="close()"
+      >
+        <svg viewBox="0 0 24 24">
+          <path :d="ICON_CLOSE" />
         </svg>
       </button>
     </div>

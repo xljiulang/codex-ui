@@ -118,6 +118,26 @@
   height: 18px;
 }
 
+/* 自绘标题栏（无边框窗口）：标题栏整体可按住拖动，禁止选中文字；
+   点击品牌/按钮等交互元素不触发拖动（由 AppHeader 的 mousedown 判定） */
+.app-header {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 自绘标题栏窗口控制按钮（最小化/还原最大化/关闭）：沿用 .icon-btn 规格，
+   关闭按钮悬停用系统红以暗示「关闭→隐藏到系统托盘」的语义 */
+.win-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* 启动加载页作为 .app-body 内容时填满剩余空间（无边框窗口启动期仍可拖动/关闭标题栏） */
+.app-body > .loading-screen {
+  flex: 1;
+  width: 100%;
+}
+
 /* 右侧面板 */
 .right-panel {
   flex-shrink: 0;

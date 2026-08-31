@@ -28,13 +28,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <LoadingScreen v-if="store.booting" />
-  <div v-else class="app">
+  <div class="app">
     <div class="app-ambient" aria-hidden="true"></div>
     <AppHeader />
     <div class="app-body">
-      <EditorPane />
-      <RightPanel />
+      <LoadingScreen v-if="store.booting" />
+      <template v-else>
+        <EditorPane />
+        <RightPanel />
+      </template>
     </div>
     <ConfirmDialog />
     <div v-if="store.toast" class="toast">{{ store.toast }}</div>
