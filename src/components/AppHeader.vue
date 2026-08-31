@@ -61,7 +61,6 @@ function onSettings() {
       <button
         class="icon-btn win-btn"
         aria-label="最小化"
-        v-tooltip="'最小化'"
         @click="minimize()"
       >
         <svg viewBox="0 0 24 24">
@@ -71,7 +70,6 @@ function onSettings() {
       <button
         class="icon-btn win-btn"
         :aria-label="isMaximized ? '还原' : '最大化'"
-        v-tooltip="isMaximized ? '还原' : '最大化'"
         @click="toggleMaximize()"
       >
         <svg viewBox="0 0 24 24">
@@ -81,7 +79,6 @@ function onSettings() {
       <button
         class="icon-btn win-btn win-btn-close"
         aria-label="关闭"
-        v-tooltip="'关闭'"
         @click="close()"
       >
         <svg viewBox="0 0 24 24">

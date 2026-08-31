@@ -9,6 +9,7 @@ import type {
 } from "../composables/useEditorTabs";
 import type { SessionTab } from "../composables/useCodex";
 import { store } from "../composables/useCodex";
+import { isThreadBound } from "../composables/useCodex/wechat";
 import { ensureEntryIcons, iconFor } from "../composables/useSessionFs";
 import { diffKindLabel } from "../lib/gitChanges";
 import { relPathOf } from "../lib/format";
@@ -21,6 +22,7 @@ import {
   ICON_SESSION,
   ICON_SETTINGS,
   ICON_TERMINAL,
+  ICON_WECHAT,
 } from "../lib/icons";
 
 const props = defineProps<{
@@ -185,11 +187,6 @@ watch(
   { immediate: true },
 );
 
-/** 会话标签悬停提示：进行中显示“会话（进行中）” */
-function sessionTabTooltip(tab: SessionTab): string {
-  return isTabWorking(tab) ? "会话（进行中）" : "会话";
-}
-
 /** 会话标签待处理交互计数：绑定线程读标签记录，新对话（无线程）回退全局 */
 function sessionTabPending(tab: SessionTab): number {
   return tab.threadId ? (tab.interactions?.length ?? 0) : store.interactions.length;
@@ -234,7 +231,6 @@ function titleTooltip(tab: EditorTab): string {
         :aria-selected="tab.id === activeTabId"
         :aria-label="tab.title"
         :tabindex="tab.id === activeTabId ? 0 : -1"
-        v-tooltip="sessionTabTooltip(tab)"
         @click="emit('activate', tab.id)"
         @keydown.enter.prevent="emit('activate', tab.id)"
         @keydown.space.prevent="emit('activate', tab.id)"
@@ -243,7 +239,7 @@ function titleTooltip(tab: EditorTab): string {
       >
         <span class="editor-tab-logo" aria-hidden="true">
           <svg viewBox="0 0 24 24">
-            <path :d="ICON_SESSION" />
+            <path :d="isThreadBound(tab.threadId) ? ICON_WECHAT : ICON_SESSION" />
           </svg>
         </span>
         <span class="editor-tab-label">{{ tab.title }}</span>

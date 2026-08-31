@@ -300,7 +300,6 @@ onBeforeUnmount(() => {
         <button
           class="panel-refresh"
           aria-label="刷新"
-          v-tooltip="'刷新'"
           @click="onRefresh()"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">

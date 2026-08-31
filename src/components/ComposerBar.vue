@@ -571,7 +571,6 @@ function taskModeLabel(): string {
         <div class="menu-anchor">
           <button
             class="model-chip"
-            v-tooltip="'模型'"
             @click="toggleMenu('model')"
           >
             <svg class="model-chip-icon" viewBox="0 0 24 24">
@@ -589,7 +588,6 @@ function taskModeLabel(): string {
         <button
           v-if="tab.turnActive"
           class="send-btn stop"
-          v-tooltip="'停止生成'"
           @click="interrupt()"
         >
           <svg viewBox="0 0 24 24">
@@ -600,7 +598,6 @@ function taskModeLabel(): string {
         <button
           v-else
           class="send-btn"
-          v-tooltip="'发送'"
           :class="{ lit: !!(hasText || tab.attachments.length) }"
           :disabled="!hasText && tab.attachments.length === 0"
           @click="submit()"

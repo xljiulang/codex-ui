@@ -91,6 +91,7 @@ import {
   ICON_GIT,
   ICON_SESSION,
   ICON_TERMINAL,
+  ICON_WECHAT,
 } from "../../lib/icons";
 import {
   __resetGitChangesForTest,
@@ -433,6 +434,32 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(scrollerTabs[0].text()).toContain("新建会话");
     expect(scrollerTabs[1].text()).toContain("a.txt");
     expect(scrollerTabs[0].classes()).not.toContain("pinned");
+    wrapper.unmount();
+  });
+
+  it("会话标签图标随微信绑定态：已绑定显示双气泡，未绑定显示单气泡", async () => {
+    const wrapper = mountPane();
+    const logo = () => wrapper.find(".session-tab .editor-tab-logo path");
+    // 未绑定（store.wechat 为空）：单气泡
+    expect(logo().attributes("d")).toBe(ICON_SESSION);
+
+    // 已绑定：双气泡微信 Logo（与会话列表绑定行一致）
+    store.wechat = {
+      running: true,
+      connection: "connected",
+      detail: null,
+      qrContent: null,
+      pendingThreadId: null,
+      queued: 0,
+      busy: false,
+      bindings: [
+        { threadId: "t1", accountId: "bot-1", connection: "connected" },
+      ],
+    };
+    await nextTick();
+    expect(logo().attributes("d")).toBe(ICON_WECHAT);
+
+    store.wechat = null;
     wrapper.unmount();
   });
 

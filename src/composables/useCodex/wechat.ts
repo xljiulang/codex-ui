@@ -56,8 +56,8 @@ export async function wechatCancelBind(): Promise<void> {
   await refreshWeChatState();
 }
 
-/** 指定会话是否已绑定微信（基于最新快照）。 */
-export function isThreadBound(threadId: string): boolean {
+/** 指定会话是否已绑定微信（基于最新快照）；null/undefined 视为未绑定。 */
+export function isThreadBound(threadId: string | null | undefined): boolean {
   return (store.wechat?.bindings ?? []).some((b) => b.threadId === threadId);
 }
 
