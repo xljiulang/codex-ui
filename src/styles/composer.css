@@ -3,7 +3,11 @@
 .composer {
   border-top: 1px solid var(--border);
   padding: var(--space-4) var(--space-6) var(--space-6);
-  background: var(--footer-bg);
+  background: var(--glass-bg);
+  background-image: var(--surface-grad);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--footer-shadow);
   position: relative;
   /* 提升整个 composer 层即可让
      @/$ 等弹出菜单显示在头部之上；menu-backdrop 已 Teleport 到 body，
@@ -74,6 +78,7 @@ body.resizing-composer {
   padding: var(--space-5) var(--space-6) 42px;
   background: var(--composer-bg);
   border: 1px solid var(--border-light);
+  box-shadow: var(--inset-shadow-md);
   border-radius: var(--radius-lg);
   outline: none;
   overflow-y: auto;
@@ -199,7 +204,7 @@ body.resizing-composer {
 
 .goal-chip:hover {
   border-color: var(--text-faint);
-  background: rgba(127, 127, 127, 0.13);
+  background: var(--neutral-soft-hover);
 }
 
 .goal-chip.has-goal {
@@ -304,13 +309,12 @@ body.resizing-composer {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 12.5px;
   font-weight: 700;
-  background: var(--send-btn-grad);
-  color: #ffffff;
-  box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background: var(--btn-primary-grad);
+  color: var(--on-accent);
+  box-shadow: var(--btn-glow);
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
 
@@ -327,8 +331,7 @@ body.resizing-composer {
 .send-btn:hover:not(:disabled) {
   transform: scale(1.08);
   filter: brightness(1.06);
-  box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: var(--btn-glow-hover);
 }
 
 .send-btn:active:not(:disabled) {
@@ -342,8 +345,7 @@ body.resizing-composer {
 @keyframes send-pulse {
   0%,
   100% {
-    box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
-      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    box-shadow: var(--btn-glow);
   }
   50% {
     box-shadow: 0 2px 22px rgba(var(--accent-rgb), 0.6),

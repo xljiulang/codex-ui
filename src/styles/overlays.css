@@ -4,8 +4,10 @@
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  background: var(--menu-bg);
-  border: 1px solid var(--border-light);
+  background: var(--float-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   min-width: 300px;
@@ -237,7 +239,9 @@
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(5, 7, 10, 0.62);
+  background: var(--overlay-dim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -246,10 +250,13 @@
 }
 
 .modal {
-  background: var(--modal-bg);
-  border: 1px solid var(--border-light);
+  background: var(--glass-bg);
+  background-image: var(--surface-grad);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-lg), var(--inset-shadow);
   width: min(540px, 94vw);
   max-height: 85vh;
   display: flex;
@@ -338,16 +345,17 @@
 }
 
 .btn.primary {
-  background: var(--accent);
+  background: var(--btn-primary-grad);
   border-color: transparent;
   color: var(--on-accent);
   font-weight: 700;
-  box-shadow: none;
+  box-shadow: var(--btn-glow);
   transition: background-color var(--ease);
 }
 
 .btn.primary:hover {
-  background: var(--accent-dim);
+  box-shadow: var(--btn-glow-hover);
+  filter: brightness(1.08);
 }
 
 .btn.danger {

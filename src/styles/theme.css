@@ -8,9 +8,10 @@
 /* 跨主题共享的几何/字体令牌 */
 :root {
   /* 圆角统一刻度：sm=6px（标签/徽章/小元素）、默认=8px（控件/输入/列表）、
-     lg=12px（卡片/气泡/菜单）、xl=16px（弹窗/大表面） */
+     md=10px（主按钮/强调控件）、lg=12px（卡片/气泡/菜单）、xl=16px（弹窗/大表面） */
   --radius-sm: 6px;
   --radius: 8px;
+  --radius-md: 10px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   /* 字号刻度：xs=10（徽章/辅助）、sm=11（说明）、md=12（正文小）、
@@ -41,9 +42,17 @@
   --on-accent: #ffffff;
   --yellow-soft: rgba(229, 214, 160, 0.14);
   --neutral-soft: rgba(127, 127, 127, 0.08);
+  --neutral-soft-hover: rgba(127, 127, 127, 0.13);
+  /* 文档类预览底色恒为白（PDF/XLSX/二维码等真实文档表面） */
+  --doc-bg: #ffffff;
+  /* 玻璃模糊强度：浅色主题下饱和度降为 1.1（见 light 主题覆盖） */
+  --glass-blur: blur(18px) saturate(1.4);
   /* 动效时长 */
   --ease: 0.15s ease;
   --ease-slow: 0.2s ease;
+  /* 历史遗留别名（此前个别文件直接引用未定义令牌）：统一指向既有语义 */
+  --text-muted: var(--text-faint);
+  --font-mono: var(--mono);
   /* 状态透明度 */
   --opacity-disabled: 0.45;
   --opacity-busy: 0.75;
@@ -91,6 +100,14 @@
   --blue: #79b8ff;
   --purple: #c792ea;
   --purple-rgb: 199, 146, 234;
+  /* 状态弱底色（徽章/标记，随主题色相） */
+  --green-soft: rgba(70, 213, 168, 0.14);
+  --red-soft: rgba(240, 86, 95, 0.13);
+  /* 遮罩与代码块悬浮控件 */
+  --overlay-dim: rgba(5, 7, 10, 0.62);
+  --overlay-deep: rgba(4, 6, 9, 0.85);
+  --code-float-bg: rgba(255, 255, 255, 0.07);
+  --code-float-bg-hover: rgba(255, 255, 255, 0.12);
 
   /* 表面纯色（扁平，靠 1px 描边与层级色差区分） */
   --header-bg: #171d27;
@@ -156,14 +173,38 @@
   --diff-add-text: #9fe3d4;
 
   --overlay-rgb: 255, 255, 255;
-  --header-shadow: none;
-  --footer-shadow: none;
-  --inset-shadow: none;
-  --inset-shadow-md: none;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16);
-  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.22);
-  --shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.28);
+  /* 光影体系：层级阴影（双层环境光+聚光）+ 玻璃面 + 表面渐变 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18), 0 1px 1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.22), 0 10px 28px rgba(0, 0, 0, 0.14);
+  --shadow-lg: 0 4px 14px rgba(0, 0, 0, 0.28), 0 18px 48px rgba(0, 0, 0, 0.2);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.24), 0 12px 32px rgba(0, 0, 0, 0.16);
+  --shadow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.16),
+    0 4px 18px rgba(var(--accent-rgb), 0.3);
+  --header-shadow: 0 1px 0 var(--border), 0 8px 24px rgba(0, 0, 0, 0.1);
+  --footer-shadow: 0 -1px 0 var(--border), 0 -12px 32px rgba(0, 0, 0, 0.08);
+  --panel-shadow: -16px 0 40px rgba(0, 0, 0, 0.06);
+  --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --inset-shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 0 28px rgba(0, 0, 0, 0.05);
+  --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.28), 0 14px 36px rgba(0, 0, 0, 0.18);
+  /* 玻璃面：半透明底色 + 模糊，应用于头部/composer/菜单/弹窗 */
+  --glass-bg: rgba(38, 48, 61, 0.68);
+  --glass-border: rgba(151, 167, 190, 0.18);
+  /* 内容承载型浮动层：近不透明，保证菜单文字清晰可读 */
+  --float-bg: rgba(23, 29, 38, 0.94);
+  /* 表面与主按钮渐变/辉光 */
+  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.028),
+    rgba(255, 255, 255, 0) 42%);
+  --btn-primary-grad: var(--send-btn-grad);
+  --btn-glow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --btn-glow-hover: 0 4px 22px rgba(var(--accent-rgb), 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  /* 背景氛围光：顶部/底部两团径向渐变（.app-ambient） */
+  --ambient-grad: radial-gradient(680px 340px at 12% -10%,
+      rgba(var(--accent-rgb), 0.07), transparent 62%),
+    radial-gradient(760px 380px at 88% 112%,
+      rgba(var(--purple-rgb), 0.05), transparent 62%);
 }
 
 /* 主题二：曜黑（近黑画布 + 霓虹紫，更冷峻凌厉） */
@@ -201,6 +242,13 @@
   --blue: #8fb3ff;
   --purple: #c792ea;
   --purple-rgb: 199, 146, 234;
+  /* 状态弱底色（随曜黑主题色相） */
+  --green-soft: rgba(85, 224, 179, 0.14);
+  --red-soft: rgba(255, 107, 116, 0.13);
+  --overlay-dim: rgba(2, 3, 6, 0.68);
+  --overlay-deep: rgba(2, 3, 6, 0.88);
+  --code-float-bg: rgba(255, 255, 255, 0.07);
+  --code-float-bg-hover: rgba(255, 255, 255, 0.12);
 
   --header-bg: #14151d;
   --panel-bg: #12131a;
@@ -264,14 +312,34 @@
   --diff-add-text: #8fe6c8;
 
   --overlay-rgb: 255, 255, 255;
-  --header-shadow: none;
-  --footer-shadow: none;
-  --inset-shadow: none;
-  --inset-shadow-md: none;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.26);
-  --shadow-lg: 0 6px 24px rgba(0, 0, 0, 0.34);
+  /* 光影体系（曜黑更深邃：阴影略重、氛围光略强） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22), 0 1px 1px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.26), 0 10px 28px rgba(0, 0, 0, 0.17);
+  --shadow-lg: 0 4px 14px rgba(0, 0, 0, 0.32), 0 18px 48px rgba(0, 0, 0, 0.24);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.19);
+  --shadow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.18),
+    0 4px 18px rgba(var(--accent-rgb), 0.34);
+  --header-shadow: 0 1px 0 var(--border), 0 8px 24px rgba(0, 0, 0, 0.14);
+  --footer-shadow: 0 -1px 0 var(--border), 0 -12px 32px rgba(0, 0, 0, 0.1);
+  --panel-shadow: -16px 0 40px rgba(0, 0, 0, 0.08);
+  --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --inset-shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 0 28px rgba(0, 0, 0, 0.06);
+  --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.32), 0 14px 36px rgba(0, 0, 0, 0.22);
+  --glass-bg: rgba(32, 33, 46, 0.7);
+  --glass-border: rgba(173, 168, 212, 0.18);
+  --float-bg: rgba(19, 20, 28, 0.95);
+  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.03),
+    rgba(255, 255, 255, 0) 42%);
+  --btn-primary-grad: var(--send-btn-grad);
+  --btn-glow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  --btn-glow-hover: 0 4px 22px rgba(var(--accent-rgb), 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  --ambient-grad: radial-gradient(680px 340px at 12% -10%,
+      rgba(var(--accent-rgb), 0.09), transparent 62%),
+    radial-gradient(760px 380px at 88% 112%,
+      rgba(var(--purple-rgb), 0.07), transparent 62%);
 }
 
 /* 主题三：晨光（通透明亮，蓝主色加深保证对比度） */
@@ -309,6 +377,13 @@
   --blue: #2563eb;
   --purple: #7c3aed;
   --purple-rgb: 124, 58, 237;
+  /* 状态弱底色（晨光主题：低饱和浅底保证对比） */
+  --green-soft: rgba(14, 122, 88, 0.1);
+  --red-soft: rgba(194, 58, 69, 0.09);
+  --overlay-dim: rgba(25, 35, 52, 0.45);
+  --overlay-deep: rgba(15, 22, 34, 0.62);
+  --code-float-bg: rgba(255, 255, 255, 0.9);
+  --code-float-bg-hover: #ffffff;
 
   --header-bg: #ffffff;
   --panel-bg: #ffffff;
@@ -374,14 +449,35 @@
   --diff-add-text: #0e7a58;
 
   --overlay-rgb: 25, 35, 52;
-  --header-shadow: none;
-  --footer-shadow: none;
-  --inset-shadow: none;
-  --inset-shadow-md: none;
-
-  --shadow-sm: 0 1px 2px rgba(30, 40, 60, 0.05);
-  --shadow-md: 0 2px 10px rgba(30, 40, 60, 0.08);
-  --shadow-lg: 0 6px 24px rgba(30, 40, 60, 0.11);
+  /* 光影体系（晨光：低透明冷灰阴影，保持通透明亮） */
+  --shadow-sm: 0 1px 2px rgba(30, 40, 60, 0.06), 0 1px 1px rgba(30, 40, 60, 0.04);
+  --shadow-md: 0 2px 8px rgba(30, 40, 60, 0.08), 0 10px 28px rgba(30, 40, 60, 0.07);
+  --shadow-lg: 0 4px 14px rgba(30, 40, 60, 0.1), 0 18px 44px rgba(30, 40, 60, 0.09);
+  --shadow-hover: 0 4px 12px rgba(30, 40, 60, 0.1), 0 12px 30px rgba(30, 40, 60, 0.08);
+  --shadow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.14),
+    0 4px 18px rgba(var(--accent-rgb), 0.18);
+  --header-shadow: 0 1px 0 var(--border), 0 6px 20px rgba(30, 40, 60, 0.05);
+  --footer-shadow: 0 -1px 0 var(--border), 0 -10px 28px rgba(30, 40, 60, 0.04);
+  --panel-shadow: -16px 0 32px rgba(30, 40, 60, 0.05);
+  --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --inset-shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    inset 0 0 24px rgba(255, 255, 255, 0.5);
+  --doc-shadow: 0 2px 8px rgba(30, 40, 60, 0.12), 0 14px 32px rgba(30, 40, 60, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(60, 76, 101, 0.16);
+  --float-bg: rgba(255, 255, 255, 0.96);
+  --glass-blur: blur(18px) saturate(1.1);
+  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.7),
+    rgba(255, 255, 255, 0) 40%);
+  --btn-primary-grad: var(--send-btn-grad);
+  --btn-glow: 0 2px 10px rgba(var(--accent-rgb), 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  --btn-glow-hover: 0 6px 22px rgba(var(--accent-rgb), 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --ambient-grad: radial-gradient(680px 340px at 12% -10%,
+      rgba(var(--accent-rgb), 0.06), transparent 62%),
+    radial-gradient(760px 380px at 88% 112%,
+      rgba(var(--purple-rgb), 0.05), transparent 62%);
 }
 
 * {
@@ -488,10 +584,22 @@ select option {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
+}
+
+/* 背景氛围光层：固定两团主题色径向渐变，位于内容层之下 */
+.app-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--ambient-grad);
 }
 
 .app-body {
   display: flex;
   flex: 1;
   min-height: 0;
+  position: relative;
+  z-index: 1;
 }

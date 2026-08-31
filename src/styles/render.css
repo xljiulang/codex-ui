@@ -12,7 +12,7 @@
   letter-spacing: 0.8px;
   font-weight: 600;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--code-float-bg);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px var(--space-3);
@@ -260,7 +260,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(4, 6, 9, 0.85);
+  background: var(--overlay-deep);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -595,8 +595,13 @@
 }
 .text-editor-btn.primary {
   color: var(--on-accent);
-  background: var(--btn-grad);
+  background: var(--btn-primary-grad);
   border-color: transparent;
+  box-shadow: var(--btn-glow);
+}
+.text-editor-btn.primary:hover:not(:disabled) {
+  box-shadow: var(--btn-glow-hover);
+  filter: brightness(1.08);
 }
 .text-editor-btn.primary:disabled {
   opacity: var(--opacity-disabled);
@@ -699,15 +704,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--overlay-dim);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   z-index: 100;
 }
 .text-editor-confirm {
   width: min(420px, calc(100vw - 48px));
-  background: var(--modal-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
+  background: var(--glass-bg);
+  background-image: var(--surface-grad);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), var(--inset-shadow);
   padding: var(--space-8);
 }
 .text-editor-confirm-msg {
@@ -737,17 +747,20 @@
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg-input);
+  box-shadow: var(--shadow-sm), var(--inset-shadow);
   transition: border-color var(--ease), box-shadow var(--ease),
-  transform var(--ease);
+    transform var(--ease);
 }
 
 .theme-card:hover {
   border-color: var(--border-light);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-hover), var(--inset-shadow);
 }
 
 .theme-card.selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent);
+  box-shadow: var(--shadow-accent), var(--inset-shadow);
 }
 
 .theme-swatch {

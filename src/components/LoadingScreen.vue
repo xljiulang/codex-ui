@@ -30,6 +30,10 @@
   animation: loading-spin 1.5s linear infinite;
 }
 
+.loading-screen__logo {
+  animation: logo-breathe 2.4s ease-in-out infinite;
+}
+
 .loading-screen__logo svg .logo-c {
   stroke-width: 2;
   stroke-linecap: round;
@@ -42,6 +46,16 @@
 @keyframes loading-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes logo-breathe {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 10px rgba(var(--accent-rgb), 0.2));
+  }
+  50% {
+    filter: drop-shadow(0 0 26px rgba(var(--accent-rgb), 0.45));
   }
 }
 </style>

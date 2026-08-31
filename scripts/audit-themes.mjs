@@ -108,12 +108,12 @@ async function setTheme(id) {
 
 async function openSettings() {
   await evalJs(`document.querySelector('button[aria-label="设置"]').click()`);
-  await waitFor("设置弹窗", `!!document.querySelector(".settings-modal")`, 5000);
+  await waitFor("设置页", `!!document.querySelector(".settings-page")`, 5000);
   await sleep(400);
 }
 
 async function closeSettings() {
-  await evalJs(`document.querySelector(".settings-modal .modal-close").click()`);
+  await evalJs(`document.querySelector('button[aria-label="设置"]').click()`);
   await sleep(300);
 }
 

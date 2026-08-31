@@ -30,6 +30,7 @@ onBeforeUnmount(() => {
 <template>
   <LoadingScreen v-if="store.booting" />
   <div v-else class="app">
+    <div class="app-ambient" aria-hidden="true"></div>
     <AppHeader />
     <div class="app-body">
       <EditorPane />
