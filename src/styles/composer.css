@@ -43,20 +43,21 @@
 
 .composer-resize-handle:hover,
 .composer-resize-handle.active {
-  background: rgba(var(--accent-rgb), 0.09);
+  background: rgba(var(--accent-rgb), 0.07);
 }
 
 .composer-resize-grip {
   width: 30px;
   height: 3px;
   border-radius: 999px;
-  background: var(--border-light);
-  transition: background-color var(--ease);
+  background: rgba(var(--accent-rgb), 0.28);
+  opacity: 0;
+  transition: opacity var(--ease), background-color var(--ease);
 }
 
 .composer-resize-handle:hover .composer-resize-grip,
 .composer-resize-handle.active .composer-resize-grip {
-  background: var(--accent-dim);
+  opacity: 1;
 }
 
 body.resizing-composer {
