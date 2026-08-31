@@ -1041,6 +1041,9 @@ fn git_index_has_with(git_bin: &Path, root: &str, rel: &str) -> Result<bool, Git
     Ok(code == 0)
 }
 
+/// 单次 `git clean` 允许的累计路径长度上限（Windows 命令行上限约 32k 字符，留出余量）
+const GIT_CLEAN_PATH_CHUNK: usize = 8000;
+
 /// 还原单个文件：已跟踪 → `git restore --staged --worktree`（丢弃暂存+工作区改动）；
 /// 未跟踪 → `git clean -f` 删除
 fn git_restore_one_with(
@@ -1068,25 +1071,78 @@ fn git_restore_one_with(
     Ok(())
 }
 
-/// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）
-fn git_restore(root: &str, rel: &str) -> Result<GitStatus, GitError> {
+/// 把未跟踪路径按累计长度分块，生成多组 `git clean -f -q -- <paths...>` 参数，
+/// 避免一次性拼出超长命令行超出 Windows 限制。
+fn git_clean_chunks(paths: &[String]) -> Vec<Vec<&str>> {
+    let mut chunks: Vec<Vec<&str>> = Vec::new();
+    let mut cur: Vec<&str> = Vec::new();
+    let mut cur_len = 0usize;
+    for p in paths {
+        let plen = p.len() + 1;
+        if !cur.is_empty() && cur_len + plen > GIT_CLEAN_PATH_CHUNK {
+            chunks.push(std::mem::take(&mut cur));
+            cur_len = 0;
+        }
+        cur_len += plen;
+        cur.push(p.as_str());
+    }
+    if !cur.is_empty() {
+        chunks.push(cur);
+    }
+    chunks
+        .into_iter()
+        .map(|mut c| {
+            let mut args = vec!["clean", "-f", "-q", "--"];
+            args.append(&mut c);
+            args
+        })
+        .collect()
+}
+
+/// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）。
+/// 目录分支批量化：已跟踪侧一次 `git restore --staged --worktree -- <目录>`，
+/// 未跟踪侧按上限分批 `git clean`，避免逐文件起 git 子进程。
+fn git_restore_with(git_bin: &Path, root: &str, rel: &str) -> Result<GitStatus, GitError> {
     let rel = validate_rel_path(rel)?;
-    let git_bin = git_bin()?;
-    let repo = git_rev_parse_with(&git_bin, root)?;
+    let repo = git_rev_parse_with(git_bin, root)?;
+    let workdir = &repo.workdir;
     if repo.workdir.join(&rel).is_dir() {
-        let st = git_status_with(&git_bin, root)?;
-        let rels: Vec<String> = files_under(&st.files, &rel)
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        for r in &rels {
-            let r = validate_rel_path(r)?;
-            git_restore_one_with(&git_bin, &repo.workdir, root, &r)?;
+        let st = git_status_with(git_bin, root)?;
+        // 按状态分类：未跟踪 → 清理；其余（改动/删除/新增/重命名/冲突）→ 已跟踪还原
+        let mut untracked_paths: Vec<String> = Vec::new();
+        let mut has_tracked = false;
+        for f in files_under(&st.files, &rel) {
+            if f.status == FileStatus::Untracked {
+                untracked_paths.push(f.path);
+            } else {
+                has_tracked = true;
+            }
+        }
+        if has_tracked {
+            // 目录 pathspec 一次调用：幂等、git 原子解析递归路径，规避逐文件 pathspec 错位
+            git_run_mapped(
+                git_bin,
+                root,
+                &["restore", "--staged", "--worktree", "--", &rel],
+                git_restore_failure_message,
+            )?;
+        }
+        for args in git_clean_chunks(&untracked_paths) {
+            git_run_mapped(git_bin, root, &args, git_clean_failure_message)?;
+        }
+        for p in &untracked_paths {
+            remove_empty_parents(workdir, &workdir.join(p));
         }
     } else {
-        git_restore_one_with(&git_bin, &repo.workdir, root, &rel)?;
+        git_restore_one_with(git_bin, workdir, root, &rel)?;
     }
-    git_status_with(&git_bin, root)
+    git_status_with(git_bin, root)
+}
+
+/// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）
+fn git_restore(root: &str, rel: &str) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    git_restore_with(&git_bin, root, rel)
 }
 
 /// 删除文件：已跟踪 `git rm -f`（工作区+索引），未跟踪 `git clean -f`；
@@ -4040,6 +4096,82 @@ fn init_committed_repo(dir: &Path) {
         assert_eq!(std::fs::read_to_string(root.join("src/a.txt")).unwrap(), "one\n");
         assert_eq!(std::fs::read_to_string(root.join("src/b.txt")).unwrap(), "one\n");
         assert!(!root.join("src/c.txt").exists());
+    }
+
+    #[test]
+    fn restore_directory_untracked_only_cleans() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("base.txt"), "base\n").unwrap();
+        init_committed_repo(root);
+        // 目录内只有未跟踪文件：应只走 git clean 分支，不触发 git restore
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/u1.txt"), "u1\n").unwrap();
+        std::fs::write(root.join("src/u2.txt"), "u2\n").unwrap();
+
+        let st = git_restore(root.to_str().unwrap(), "src").unwrap();
+        assert!(st.files.is_empty());
+        assert!(!root.join("src").exists(), "清理后空目录应被移除");
+        assert_eq!(
+            std::fs::read_to_string(root.join("base.txt")).unwrap(),
+            "base\n"
+        );
+    }
+
+    #[test]
+    fn restore_directory_tracked_only_restores() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("src/b.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        // 对目录内文件改动 + 删除（均为已跟踪）：应只走 git restore 分支
+        std::fs::write(root.join("src/a.txt"), "two\n").unwrap();
+        std::fs::remove_file(root.join("src/b.txt")).unwrap();
+
+        let st = git_restore(root.to_str().unwrap(), "src").unwrap();
+        assert!(st.files.is_empty());
+        assert_eq!(std::fs::read_to_string(root.join("src/a.txt")).unwrap(), "one\n");
+        assert_eq!(std::fs::read_to_string(root.join("src/b.txt")).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn restore_directory_preserves_node_modules_and_cleans_untracked() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/keep.txt"), "keep\n").unwrap();
+        init_committed_repo(root);
+        // src/node_modules 未跟踪：status 解析阶段已过滤，清理不应误删
+        std::fs::create_dir_all(root.join("src/node_modules")).unwrap();
+        std::fs::write(root.join("src/node_modules/dep.js"), "dep\n").unwrap();
+        std::fs::write(root.join("src/extra.txt"), "extra\n").unwrap();
+
+        let st = git_restore(root.to_str().unwrap(), "src").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/keep.txt")).unwrap(),
+            "keep\n"
+        );
+        assert!(
+            root.join("src/node_modules/dep.js").exists(),
+            "node_modules 不应被 git clean 误删"
+        );
+        assert!(!root.join("src/extra.txt").exists());
+        let has_extra = st.files.iter().any(|f| f.path == "src/extra.txt");
+        assert!(!has_extra);
     }
 
     #[test]
