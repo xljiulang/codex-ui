@@ -1,16 +1,16 @@
 import type { ThreadSummary } from "./types";
 import { normalizePathKey } from "./path";
 
-/** 历史目录分组（key 为规范化路径，path 为原始完整路径用于 tooltip） */
-export interface HistoryGroup {
+/** 会话目录分组（key 为规范化路径，path 为原始完整路径用于 tooltip） */
+export interface SessionGroup {
   key: string;
   path: string;
   label: string;
   threads: ThreadSummary[];
 }
 
-export type HistoryRow =
-  | { kind: "group"; group: HistoryGroup }
+export type SessionRow =
+  | { kind: "group"; group: SessionGroup }
   | { kind: "item"; thread: ThreadSummary };
 
 /** 规范化目录分组键：复用全局共享比较/键形态（反斜杠 + 小写） */
@@ -44,7 +44,7 @@ function byPinThenRecency(a: ThreadSummary, b: ThreadSummary): number {
  * - 目录内与平铺会话均按置顶优先 + 最近时间倒序。
  */
 /** 目录行排序：按组内第一会话（置顶优先 + 时间倒序），并列按目录名 A-Z、key 兜底 */
-function byGroupFirstThenLabel(a: HistoryGroup, b: HistoryGroup): number {
+function byGroupFirstThenLabel(a: SessionGroup, b: SessionGroup): number {
   const firstA = a.threads[0];
   const firstB = b.threads[0];
   if (firstA && firstB) {
@@ -58,8 +58,8 @@ function byGroupFirstThenLabel(a: HistoryGroup, b: HistoryGroup): number {
   return byLabel || a.key.localeCompare(b.key);
 }
 
-export function groupThreads(list: ThreadSummary[]): HistoryRow[] {
-  const groups = new Map<string, HistoryGroup>();
+export function groupSessions(list: ThreadSummary[]): SessionRow[] {
+  const groups = new Map<string, SessionGroup>();
   const singles: ThreadSummary[] = [];
 
   for (const t of list) {
@@ -81,13 +81,13 @@ export function groupThreads(list: ThreadSummary[]): HistoryRow[] {
     group.threads.sort(byPinThenRecency);
   }
 
-  const folderRows: HistoryRow[] = [...groups.values()]
+  const folderRows: SessionRow[] = [...groups.values()]
     .sort(byGroupFirstThenLabel)
-    .map((group): HistoryRow => ({ kind: "group", group }));
+    .map((group): SessionRow => ({ kind: "group", group }));
 
   singles.sort(byPinThenRecency);
-  const singleRows: HistoryRow[] = singles.map(
-    (thread): HistoryRow => ({ kind: "item", thread }),
+  const singleRows: SessionRow[] = singles.map(
+    (thread): SessionRow => ({ kind: "item", thread }),
   );
 
   return [...folderRows, ...singleRows];

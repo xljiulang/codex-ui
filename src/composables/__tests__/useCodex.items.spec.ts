@@ -128,7 +128,7 @@ describe("历史全量加载（逐页拉取）", () => {
     store.threads = [];
     store.searchActive = false;
     store.searchSnippets = {};
-    store.loadingHistory = false;
+    store.loadingSessions = false;
     store.toast = "";
   });
 

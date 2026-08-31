@@ -19,7 +19,7 @@ import {
   forkThread,
   isThreadOpen,
   isThreadRunning,
-  openHistorySession,
+  openSession,
   openNewSession,
   refreshWeChatState,
   refreshThreads,
@@ -32,10 +32,10 @@ import {
 } from "../composables/useCodex";
 import { isThreadBound } from "../composables/useCodex/wechat";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
-import { useHistoryDialogs } from "../composables/useHistoryDialogs";
+import { useSessionDialogs } from "../composables/useSessionDialogs";
 import { formatRelativeTime } from "../lib/format";
-import { groupThreads } from "../lib/historyGroup";
-import type { HistoryGroup } from "../lib/historyGroup";
+import { groupSessions } from "../lib/sessionGroup";
+import type { SessionGroup } from "../lib/sessionGroup";
 import type { ThreadSummary } from "../lib/types";
 import { debounce } from "../lib/debounce";
 import {
@@ -73,7 +73,7 @@ const {
   doDelete,
   confirmTitle,
   confirmMessage,
-} = useHistoryDialogs({ confirmEl });
+} = useSessionDialogs({ confirmEl });
 const searchTerm = ref("");
 /** 右键操作菜单：记录菜单项与位置 */
 const {
@@ -82,7 +82,7 @@ const {
   onWindowClick,
   onWindowScroll,
   onKeydown: onMenuKeydown,
-} = useActionMenu({ width: 180, scrollScope: ".history-view" });
+} = useActionMenu({ width: 180, scrollScope: ".session-view" });
 /** 默认收起；记录用户展开过的目录 */
 const expandedDirs = reactive(new Set<string>());
 /** 首个目录仅首次载入时自动展开一次；之后完全由用户控制（含刷新后不重置） */
@@ -91,7 +91,7 @@ watch(
   () => store.threads,
   () => {
     if (firstFolderAutoExpanded) return;
-    const first = groupThreads(store.threads).find(
+    const first = groupSessions(store.threads).find(
       (r): r is Extract<typeof r, { kind: "group" }> => r.kind === "group",
     );
     if (!first) return;
@@ -103,7 +103,7 @@ watch(
 const debouncedSearch = debounce(() => void searchThreads(searchTerm.value), 300);
 
 type RenderRow =
-  | { kind: "folder"; group: HistoryGroup; collapsed: boolean }
+  | { kind: "folder"; group: SessionGroup; collapsed: boolean }
   | { kind: "item"; thread: ThreadSummary; inFolder: boolean };
 
 function toggleDir(key: string) {
@@ -119,9 +119,9 @@ function onFolderKeydown(key: string, e: KeyboardEvent) {
 }
 
 /** 按目录分组后的渲染行：目录行 + （展开时）内部会话行 + 平铺会话行 */
-const historyRows = computed<RenderRow[]>(() => {
+const sessionRows = computed<RenderRow[]>(() => {
   const rows: RenderRow[] = [];
-  for (const row of groupThreads(store.threads)) {
+  for (const row of groupSessions(store.threads)) {
     if (row.kind === "group") {
       const collapsed = !expandedDirs.has(row.group.key);
       rows.push({ kind: "folder", group: row.group, collapsed });
@@ -168,7 +168,7 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
           {
             label: "打开",
             icon: ICON_OPEN,
-            action: () => void openHistorySession(t.id),
+            action: () => void openSession(t.id),
           },
         ]),
     { label: "重命名", icon: ICON_RENAME, action: () => startRename(t) },
@@ -206,7 +206,7 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
 }
 
 /** 历史目录行右键菜单：新建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
-function openFolderCtxMenu(group: HistoryGroup, e: MouseEvent) {
+function openFolderCtxMenu(group: SessionGroup, e: MouseEvent) {
   const items: CtxItem[] = [
     {
       label: "新建会话",
@@ -267,19 +267,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="history-view">
-    <div class="history-head">
-      <div class="history-search-group">
+  <div class="session-view">
+    <div class="panel-head">
+      <div class="panel-search-group">
         <input
           v-model="searchTerm"
-          class="history-search"
+          class="panel-search"
           type="text"
           placeholder="搜索会话…"
           @input="onSearchInput()"
         />
         <button
           v-if="searchTerm"
-          class="history-search-clear"
+          class="panel-search-clear"
           aria-label="清除搜索"
           v-tooltip="'清除搜索'"
           @click="clearSearchInput()"
@@ -287,7 +287,7 @@ onBeforeUnmount(() => {
           ×
         </button>
         <button
-          class="history-refresh"
+          class="panel-refresh"
           aria-label="刷新"
           v-tooltip="'刷新'"
           @click="onRefresh()"
@@ -298,14 +298,14 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-    <div class="history-list">
+    <div class="panel-list">
       <template
-        v-for="row in historyRows"
+        v-for="row in sessionRows"
         :key="row.kind === 'folder' ? 'folder:' + row.group.key : row.thread.id"
       >
         <div
           v-if="row.kind === 'folder'"
-          class="history-folder"
+          class="session-folder"
           :class="{ collapsed: row.collapsed }"
           role="button"
           tabindex="0"
@@ -330,17 +330,17 @@ onBeforeUnmount(() => {
         </div>
         <div
           v-else
-          class="history-item"
+          class="session-item"
           :class="{
             active: row.thread.id === activeSessionTab()?.threadId,
             running: isThreadRunning(row.thread.id),
             'folder-item': row.inFolder,
           }"
-          @click="openHistorySession(row.thread.id)"
+          @click="openSession(row.thread.id)"
           @contextmenu="openCtxMenu(row.thread, $event)"
         >
           <span
-            class="history-icon"
+            class="session-icon"
             :aria-hidden="isThreadBound(row.thread.id) ? undefined : 'true'"
             :aria-label="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
             v-tooltip="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
@@ -349,7 +349,7 @@ onBeforeUnmount(() => {
               <path :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION" />
             </svg>
           </span>
-          <span class="history-main">
+          <span class="session-main">
             <input
               v-if="editingId === row.thread.id"
               v-model="editName"
@@ -360,7 +360,7 @@ onBeforeUnmount(() => {
               @blur="saveRename(row.thread)"
             />
             <template v-else>
-              <span class="history-title-row">
+              <span class="session-title-row">
                 <span
                   v-if="row.thread.isPinned"
                   class="pin-badge"
@@ -370,31 +370,31 @@ onBeforeUnmount(() => {
                     <path :d="ICON_PIN" />
                   </svg>
                 </span>
-                <span class="history-title">{{ threadTitle(row.thread) }}</span>
+                <span class="session-title">{{ threadTitle(row.thread) }}</span>
                 <span
                   v-if="isThreadRunning(row.thread.id)"
-                  class="history-run-dot"
+                  class="session-run-dot"
                   v-tooltip="'后台运行中'"
                   aria-hidden="true"
                 ></span>
               </span>
               <span
                 v-if="store.searchActive && store.searchSnippets[row.thread.id]"
-                class="history-snippet"
+                class="session-snippet"
               >
                 {{ store.searchSnippets[row.thread.id] }}
               </span>
           </template>
           </span>
-          <span class="history-time">{{
+          <span class="session-time">{{
             formatRelativeTime(row.thread.recencyAt ?? row.thread.updatedAt)
           }}</span>
         </div>
       </template>
-      <div v-if="!store.threads.length && !store.loadingHistory" class="menu-note">
+      <div v-if="!store.threads.length && !store.loadingSessions" class="menu-note">
         暂无会话
       </div>
-      <div v-if="store.loadingHistory && !store.threads.length" class="menu-note">
+      <div v-if="store.loadingSessions && !store.threads.length" class="menu-note">
         加载中…
       </div>
     </div>

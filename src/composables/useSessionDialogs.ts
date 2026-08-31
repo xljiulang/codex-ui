@@ -6,19 +6,19 @@ import {
   setToast,
   threadTitle,
 } from "./useCodex";
-import type { HistoryGroup } from "../lib/historyGroup";
+import type { SessionGroup } from "../lib/sessionGroup";
 import type { ThreadSummary } from "../lib/types";
 
 /** 删除确认目标：单条会话或整个目录分组 */
 export type ConfirmDelete =
   | { kind: "thread"; thread: ThreadSummary }
-  | { kind: "group"; group: HistoryGroup };
+  | { kind: "group"; group: SessionGroup };
 
 /**
- * 历史会话行级弹窗/内联编辑状态：
+ * 会话列表行级弹窗/内联编辑状态：
  * 重命名（内联输入）、删除确认（单条/整组，聚焦管理并回焦）。
  */
-export function useHistoryDialogs(options: {
+export function useSessionDialogs(options: {
   /** 删除确认弹窗模板 ref（用于聚焦危险按钮） */
   confirmEl: Ref<HTMLElement | null>;
 }) {
@@ -61,7 +61,7 @@ export function useHistoryDialogs(options: {
     focusDangerButton();
   }
 
-  function askDeleteGroup(group: HistoryGroup) {
+  function askDeleteGroup(group: SessionGroup) {
     confirmDelete.value = { kind: "group", group };
     lastFocus = document.activeElement as HTMLElement | null;
     focusDangerButton();

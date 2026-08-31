@@ -44,11 +44,11 @@ export const store = reactive({
   wechat: null as WeChatSnapshot | null,
   // 启动加载态：init() 完成（含超时兜底）前为 true，App 据此显示加载动画
   booting: true,
-  loadingHistory: false,
+  loadingSessions: false,
   models: [] as ModelInfo[],
   modelsLoaded: false,
   /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
-  panelTab: "history" as PanelTab,
+  panelTab: "session" as PanelTab,
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,

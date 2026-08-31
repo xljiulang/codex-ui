@@ -332,7 +332,7 @@ describe("ResourceView 文件树", () => {
       path: rootPath,
     });
     // 有工作区时搜索/刷新头部可见
-    expect(wrapper.find(".history-head").exists()).toBe(true);
+    expect(wrapper.find(".panel-head").exists()).toBe(true);
     wrapper.unmount();
   });
 
@@ -385,7 +385,7 @@ describe("ResourceView 文件树", () => {
   it("点击搜索结果文件：联动 Git 面板高亮（revealGitFile）", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("main");
+    await wrapper.find(".panel-search").setValue("main");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
@@ -555,9 +555,9 @@ describe("ResourceView 文件树", () => {
     expect(wrapper.find(".resource-empty-desc").text()).toContain("暂无工作目录");
     expect(mockedInvoke).not.toHaveBeenCalledWith("startup_workspace");
     // 空态下不显示搜索/刷新框（对齐 Git 面板）
-    expect(wrapper.find(".history-head").exists()).toBe(false);
-    expect(wrapper.find(".history-search").exists()).toBe(false);
-    expect(wrapper.find(".history-refresh").exists()).toBe(false);
+    expect(wrapper.find(".panel-head").exists()).toBe(false);
+    expect(wrapper.find(".panel-search").exists()).toBe(false);
+    expect(wrapper.find(".panel-refresh").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -618,7 +618,7 @@ describe("ResourceView 文件树", () => {
   it("搜索态结果行不带折叠箭头", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("main");
+    await wrapper.find(".panel-search").setValue("main");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
@@ -1277,7 +1277,7 @@ describe("ResourceView 文件树", () => {
   it("搜索：防抖后调用 session_fs_search，结果显示，清除恢复树", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("main");
+    await wrapper.find(".panel-search").setValue("main");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
@@ -1289,7 +1289,7 @@ describe("ResourceView 文件树", () => {
     expect(wrapper.find(".resource-result").exists()).toBe(true);
     expect(wrapper.text()).toContain("src/main.ts");
 
-    await wrapper.find(".history-search-clear").trigger("click");
+    await wrapper.find(".panel-search-clear").trigger("click");
     await flushPromises();
     expect(wrapper.find(".resource-result").exists()).toBe(false);
     expect(wrapper.find(".resource-root").exists()).toBe(true);
@@ -1299,14 +1299,14 @@ describe("ResourceView 文件树", () => {
   it("点击搜索结果：回树定位（展开祖先、清除搜索）", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("src");
+    await wrapper.find(".panel-search").setValue("src");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
     await wrapper.find(".resource-result").trigger("click");
     await flushPromises();
     expect(
-      (wrapper.find(".history-search").element as HTMLInputElement).value,
+      (wrapper.find(".panel-search").element as HTMLInputElement).value,
     ).toBe("");
     expect(wrapper.find(".resource-result").exists()).toBe(false);
     expect(wrapper.text()).toContain("main.ts");
@@ -1319,7 +1319,7 @@ describe("ResourceView 文件树", () => {
   it("搜索态单击文件结果打开预览", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("main");
+    await wrapper.find(".panel-search").setValue("main");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 
@@ -1335,7 +1335,7 @@ describe("ResourceView 文件树", () => {
   it("搜索态单击 PDF 结果：进入 PDF 预览", async () => {
     vi.useFakeTimers();
     const wrapper = await mountPanel();
-    await wrapper.find(".history-search").setValue("doc");
+    await wrapper.find(".panel-search").setValue("doc");
     await vi.advanceTimersByTimeAsync(300);
     await flushPromises();
 

@@ -52,7 +52,7 @@ describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () =
     mockedInvoke.mockReset();
     __resetPinnedSectionForTest();
     store.threads = [];
-    store.loadingHistory = false;
+    store.loadingSessions = false;
     store.toast = "";
   });
 

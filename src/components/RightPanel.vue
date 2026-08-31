@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import GitView from "./GitView.vue";
-import HistoryView from "./HistoryView.vue";
+import SessionView from "./SessionView.vue";
 import ResourceView from "./ResourceView.vue";
 import { store, type PanelTab } from "../composables/useCodex";
 import { ICON_GIT, ICON_SESSION } from "../lib/icons";
@@ -20,7 +20,7 @@ let resizeStartX = 0;
 let resizeStartW = initialPanelWidth();
 
 /** Tab 顺序：会话为第一个/默认 tab；供方向键切换使用 */
-const TAB_ORDER = ["history", "resources", "git"] as const;
+const TAB_ORDER = ["session", "resources", "git"] as const;
 
 /** 面板初始宽度：窗口宽度的 24%（1280 下约 307px，保持现状比例） */
 function initialPanelWidth() {
@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
       @pointerdown="startResize"
     ></div>
     <div class="panel-content">
-      <HistoryView v-show="activeTab === 'history'" />
+      <SessionView v-show="activeTab === 'session'" />
       <ResourceView
         v-show="activeTab === 'resources'"
         :active="activeTab === 'resources'"
@@ -108,11 +108,11 @@ onBeforeUnmount(() => {
     <div class="panel-tabs" role="tablist" @keydown="moveTab">
       <button
         class="panel-tab"
-        :class="{ active: activeTab === 'history' }"
+        :class="{ active: activeTab === 'session' }"
         role="tab"
-        :tabindex="activeTab === 'history' ? 0 : -1"
-        :aria-selected="activeTab === 'history'"
-        @click="store.panelTab = 'history'"
+        :tabindex="activeTab === 'session' ? 0 : -1"
+        :aria-selected="activeTab === 'session'"
+        @click="store.panelTab = 'session'"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path :d="ICON_SESSION" />

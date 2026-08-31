@@ -7,7 +7,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     ...mod,
     deleteThread: vi.fn(),
     forkThread: vi.fn(),
-    openHistorySession: vi.fn(),
+    openSession: vi.fn(),
     openNewSession: vi.fn(),
     togglePin: vi.fn(),
     refreshThreads: vi.fn(),
@@ -23,12 +23,12 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { invoke } from "@tauri-apps/api/core";
-import HistoryView from "../HistoryView.vue";
+import SessionView from "../SessionView.vue";
 import { ICON_SESSION, ICON_WECHAT } from "../../lib/icons";
 import {
   deleteThread,
   forkThread,
-  openHistorySession,
+  openSession,
   openNewSession,
   refreshThreads,
   searchThreads,
@@ -40,7 +40,7 @@ import { tabs } from "../../composables/useEditorTabs";
 const mockedDelete = vi.mocked(deleteThread);
 const mockedFork = vi.mocked(forkThread);
 const mockedOpenNewSession = vi.mocked(openNewSession);
-const mockedOpenHistorySession = vi.mocked(openHistorySession);
+const mockedOpenSession = vi.mocked(openSession);
 const mockedTogglePin = vi.mocked(togglePin);
 const mockedRefresh = vi.mocked(refreshThreads);
 const mockedSearch = vi.mocked(searchThreads);
@@ -53,7 +53,7 @@ const threads = [
 ];
 
 async function openCtxMenu(wrapper: VueWrapper, index = 0) {
-  await wrapper.findAll(".history-item")[index].trigger("contextmenu", {
+  await wrapper.findAll(".session-item")[index].trigger("contextmenu", {
     clientX: 200,
     clientY: 200,
   });
@@ -67,9 +67,9 @@ async function clickCtxItem(wrapper: VueWrapper, label: string) {
   await btn!.trigger("click");
 }
 
-function mockBasicHistory() {
+function mockBasicSessions() {
   store.threads = threads.map((t) => ({ ...t }));
-  store.loadingHistory = false;
+  store.loadingSessions = false;
 }
 
 /** 打开一个会话标签（用于“已打开不可删除”相关用例） */
@@ -92,7 +92,7 @@ function openTabFor(threadId: string) {
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "history",
+    origin: "session",
     workspace: null,
     resumedThreadId: null,
     turnActive: false,
@@ -112,9 +112,9 @@ function openTabFor(threadId: string) {
   });
 }
 
-describe("HistoryView 删除确认", () => {
+describe("SessionView 删除确认", () => {
   beforeEach(() => {
-    mockBasicHistory();
+    mockBasicSessions();
     tabs.splice(0, tabs.length);
     store.toast = "";
     mockedDelete.mockClear();
@@ -122,7 +122,7 @@ describe("HistoryView 删除确认", () => {
   });
 
   it("右键菜单点删除弹出确认框，且不直接删除", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "删除会话");
 
@@ -132,7 +132,7 @@ describe("HistoryView 删除确认", () => {
   });
 
   it("确认框弹出后聚焦「删除」按钮", async () => {
-    const wrapper = mount(HistoryView, { attachTo: document.body });
+    const wrapper = mount(SessionView, { attachTo: document.body });
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "删除会话");
     await wrapper.vm.$nextTick();
@@ -144,7 +144,7 @@ describe("HistoryView 删除确认", () => {
   });
 
   it("点击「取消」关闭确认框且不删除", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "删除会话");
     const cancel = wrapper
@@ -157,7 +157,7 @@ describe("HistoryView 删除确认", () => {
   });
 
   it("点击「删除」调用 deleteThread 并关闭确认框", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "删除会话");
     const del = wrapper
@@ -171,7 +171,7 @@ describe("HistoryView 删除确认", () => {
   });
 
   it("按 Escape 关闭确认框且不删除", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "删除会话");
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
@@ -184,15 +184,15 @@ describe("HistoryView 删除确认", () => {
   });
 });
 
-describe("HistoryView 置顶", () => {
+describe("SessionView 置顶", () => {
   beforeEach(() => {
-    mockBasicHistory();
+    mockBasicSessions();
     mockedTogglePin.mockClear();
     mockedTogglePin.mockResolvedValue(undefined);
   });
 
   it("未置顶会话不显示徽章，右键点置顶调用 togglePin(id, true)", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     expect(wrapper.find(".pin-badge").exists()).toBe(false);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "置顶固定");
@@ -204,13 +204,13 @@ describe("HistoryView 置顶", () => {
       { ...threads[0], isPinned: true },
       { ...threads[1] },
     ];
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     const badge = wrapper.find(".pin-badge");
     expect(badge.exists()).toBe(true);
     expect(badge.find("svg").exists()).toBe(true);
     expect(badge.attributes("aria-label")).toBe("已置顶");
     expect(badge.text()).not.toContain("置顶");
-    expect(wrapper.find(".history-title-row :first-child").classes()).toContain(
+    expect(wrapper.find(".session-title-row :first-child").classes()).toContain(
       "pin-badge",
     );
     await openCtxMenu(wrapper);
@@ -219,8 +219,8 @@ describe("HistoryView 置顶", () => {
   });
 
   it("会话行显示会话气泡图标", () => {
-    const wrapper = mount(HistoryView);
-    const icons = wrapper.findAll(".history-icon");
+    const wrapper = mount(SessionView);
+    const icons = wrapper.findAll(".session-icon");
     expect(icons.length).toBeGreaterThan(0);
     const paths = icons[0].findAll("path");
     expect(paths).toHaveLength(1);
@@ -229,16 +229,16 @@ describe("HistoryView 置顶", () => {
   });
 });
 
-describe("HistoryView 右键菜单", () => {
+describe("SessionView 右键菜单", () => {
   beforeEach(() => {
-    mockBasicHistory();
+    mockBasicSessions();
     store.searchActive = false;
     store.searchSnippets = {};
-    mockedOpenHistorySession.mockClear();
+    mockedOpenSession.mockClear();
   });
 
   it("右键会话行显示菜单：打开/重命名/分叉会话/置顶固定/微信接入/删除会话", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     const labels = wrapper
       .findAll(".ctx-menu-item")
@@ -251,7 +251,7 @@ describe("HistoryView 右键菜单", () => {
       { ...threads[0], isPinned: true },
       { ...threads[1] },
     ];
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     const labels = wrapper
       .findAll(".ctx-menu-item")
@@ -260,7 +260,7 @@ describe("HistoryView 右键菜单", () => {
   });
 
   it("菜单每项都带图标，删除项保留 danger 类", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items).toHaveLength(6);
@@ -271,14 +271,14 @@ describe("HistoryView 右键菜单", () => {
   });
 
   it("点击「分叉会话」以当前会话线程调用 forkThread", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "分叉会话");
     expect(mockedFork).toHaveBeenCalledWith("t1");
   });
 
   it("点击「微信接入」打开该会话的绑定弹窗", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "微信接入");
     expect(wrapper.text()).toContain("微信接入");
@@ -298,26 +298,26 @@ describe("HistoryView 右键菜单", () => {
         { threadId: "t1", accountId: "bot-1", connection: "connected" },
       ],
     };
-    const wrapper = mount(HistoryView);
-    const rows = wrapper.findAll(".history-item");
+    const wrapper = mount(SessionView);
+    const rows = wrapper.findAll(".session-item");
     const t1Row = rows.find((r) => r.text().includes("会话一"))!;
     const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
-    expect(t1Row.find(".history-icon path").attributes("d")).toBe(ICON_WECHAT);
-    expect(t2Row.find(".history-icon path").attributes("d")).toBe(ICON_SESSION);
+    expect(t1Row.find(".session-icon path").attributes("d")).toBe(ICON_WECHAT);
+    expect(t2Row.find(".session-icon path").attributes("d")).toBe(ICON_SESSION);
     expect(t1Row.find(".history-wechat-badge").exists()).toBe(false);
     store.wechat = null;
   });
 
-  it("点击“打开”调用 openHistorySession 并关闭菜单", async () => {
-    const wrapper = mount(HistoryView);
+  it("点击“打开”调用 openSession 并关闭菜单", async () => {
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     await clickCtxItem(wrapper, "打开");
-    expect(mockedOpenHistorySession).toHaveBeenCalledWith("t1");
+    expect(mockedOpenSession).toHaveBeenCalledWith("t1");
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });
 
   it("按 Escape 关闭菜单", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
 
@@ -328,7 +328,7 @@ describe("HistoryView 右键菜单", () => {
   });
 
   it("点击外部关闭菜单", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
 
@@ -339,7 +339,7 @@ describe("HistoryView 右键菜单", () => {
   });
 
   it("外部滚动不关闭菜单，面板内滚动关闭菜单", async () => {
-    const wrapper = mount(HistoryView, { attachTo: document.body });
+    const wrapper = mount(SessionView, { attachTo: document.body });
     await openCtxMenu(wrapper);
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
 
@@ -353,33 +353,33 @@ describe("HistoryView 右键菜单", () => {
     chatEl.remove();
 
     // 面板列表自身滚动仍应关闭菜单
-    wrapper.find(".history-list").element.dispatchEvent(new Event("scroll"));
+    wrapper.find(".panel-list").element.dispatchEvent(new Event("scroll"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
     wrapper.unmount();
   });
 });
 
-describe("HistoryView 单击打开会话", () => {
+describe("SessionView 单击打开会话", () => {
   beforeEach(() => {
-    mockBasicHistory();
+    mockBasicSessions();
     store.searchActive = false;
     store.searchSnippets = {};
-    mockedOpenHistorySession.mockClear();
+    mockedOpenSession.mockClear();
   });
 
-  it("单击会话行调用 openHistorySession", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.findAll(".history-item")[0].trigger("click");
+  it("单击会话行调用 openSession", async () => {
+    const wrapper = mount(SessionView);
+    await wrapper.findAll(".session-item")[0].trigger("click");
 
-    expect(mockedOpenHistorySession).toHaveBeenCalledWith("t1");
+    expect(mockedOpenSession).toHaveBeenCalledWith("t1");
     wrapper.unmount();
   });
 });
 
-describe("HistoryView 搜索刷新", () => {
+describe("SessionView 搜索刷新", () => {
   beforeEach(() => {
-    mockBasicHistory();
+    mockBasicSessions();
     store.searchActive = false;
     store.searchSnippets = {};
     mockedRefresh.mockClear();
@@ -387,7 +387,7 @@ describe("HistoryView 搜索刷新", () => {
   });
 
   it("普通态点击刷新调用 refreshThreads", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     mockedRefresh.mockClear();
     await wrapper.find('button[aria-label="刷新"]').trigger("click");
     expect(mockedRefresh).toHaveBeenCalledTimes(1);
@@ -396,27 +396,27 @@ describe("HistoryView 搜索刷新", () => {
 
   it("搜索态点击刷新重新执行当前搜索词", async () => {
     store.searchActive = true;
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     mockedRefresh.mockClear();
     mockedSearch.mockClear();
-    await wrapper.find(".history-search").setValue("codex");
+    await wrapper.find(".panel-search").setValue("codex");
     await wrapper.find('button[aria-label="刷新"]').trigger("click");
     expect(mockedSearch).toHaveBeenCalledWith("codex");
     expect(mockedRefresh).not.toHaveBeenCalled();
   });
 
   it("搜索框与刷新按钮组成胶囊组", () => {
-    const wrapper = mount(HistoryView);
-    const group = wrapper.find(".history-search-group");
-    expect(group.find("input.history-search").exists()).toBe(true);
+    const wrapper = mount(SessionView);
+    const group = wrapper.find(".panel-search-group");
+    expect(group.find("input.panel-search").exists()).toBe(true);
     expect(group.find('button[aria-label="刷新"]').exists()).toBe(true);
   });
 });
 
-describe("HistoryView 目录分组", () => {
+describe("SessionView 目录分组", () => {
   beforeEach(() => {
     store.threads = [];
-    store.loadingHistory = false;
+    store.loadingSessions = false;
     store.searchActive = false;
     store.searchSnippets = {};
   });
@@ -447,9 +447,9 @@ describe("HistoryView 目录分组", () => {
 
   it("相同 cwd 合并为目录行：显示目录名与数量，仅 1 条也建目录", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
 
-    const folders = wrapper.findAll(".history-folder");
+    const folders = wrapper.findAll(".session-folder");
     expect(folders).toHaveLength(2);
     // 组内第一会话时间倒序：codex-ui（3）在 codex-proxy（1）之前
     expect(folders[0].find(".folder-name").text()).toBe("codex-ui");
@@ -459,45 +459,45 @@ describe("HistoryView 目录分组", () => {
     // 首个目录（codex-ui）默认展开，其余目录仍收起
     expect(folders[0].classes()).not.toContain("collapsed");
     expect(folders[1].classes()).toContain("collapsed");
-    expect(wrapper.findAll(".history-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
   });
 
   it("第一个文件夹默认展开，点击可收起/再展开", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
-    const wrapper = mount(HistoryView);
-    expect(wrapper.findAll(".history-item")).toHaveLength(2);
-    expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
-    expect(wrapper.findAll(".history-folder")[1].classes()).toContain("collapsed");
+    const wrapper = mount(SessionView);
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".session-folder")[1].classes()).toContain("collapsed");
 
-    await wrapper.findAll(".history-folder")[0].trigger("click");
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
-    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
+    await wrapper.findAll(".session-folder")[0].trigger("click");
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
 
-    await wrapper.findAll(".history-folder")[0].trigger("click");
-    expect(wrapper.findAll(".history-item")).toHaveLength(2);
-    expect(wrapper.findAll(".history-folder")[0].classes()).not.toContain("collapsed");
+    await wrapper.findAll(".session-folder")[0].trigger("click");
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
   });
 
   it("目录行可聚焦，Enter/Space 键展开与收起", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
-    const wrapper = mount(HistoryView);
-    const folder = wrapper.findAll(".history-folder")[0];
+    const wrapper = mount(SessionView);
+    const folder = wrapper.findAll(".session-folder")[0];
 
     expect(folder.attributes("role")).toBe("button");
     expect(folder.attributes("tabindex")).toBe("0");
     expect(folder.attributes("aria-expanded")).toBe("true");
 
     await folder.trigger("keydown", { key: "Enter" });
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
-    expect(wrapper.findAll(".history-folder")[0].attributes("aria-expanded")).toBe(
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-folder")[0].attributes("aria-expanded")).toBe(
       "false",
     );
 
     await wrapper
-      .findAll(".history-folder")[0]
+      .findAll(".session-folder")[0]
       .trigger("keydown", { key: " ", code: "Space" });
-    expect(wrapper.findAll(".history-item")).toHaveLength(2);
-    expect(wrapper.findAll(".history-folder")[0].attributes("aria-expanded")).toBe(
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-folder")[0].attributes("aria-expanded")).toBe(
       "true",
     );
   });
@@ -508,7 +508,7 @@ describe("HistoryView 目录分组", () => {
       { ...dirThreads[0], isPinned: true },
       { ...dirThreads[1] },
     ];
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
 
     const names = wrapper.findAll(".folder-name").map((n) => n.text());
     // codex-ui 组内第一会话已置顶 → 目录排最前
@@ -522,24 +522,24 @@ describe("HistoryView 目录分组", () => {
       { id: "x", name: "平铺", createdAt: now, recencyAt: 5 },
       { id: "y", name: "目录内", createdAt: now, recencyAt: 4, cwd: "D:\\repo" },
     ];
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
 
-    expect(wrapper.findAll(".history-folder")).toHaveLength(1);
+    expect(wrapper.findAll(".session-folder")).toHaveLength(1);
     // 目录默认展开：目录内会话 + 平铺会话
-    expect(wrapper.findAll(".history-item")).toHaveLength(2);
-    expect(wrapper.findAll(".history-item:not(.folder-item)")).toHaveLength(1);
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-item:not(.folder-item)")).toHaveLength(1);
   });
 
   it("目录行带文件夹图标", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
-    const wrapper = mount(HistoryView);
-    expect(wrapper.findAll(".history-folder .folder-icon svg")).toHaveLength(2);
+    const wrapper = mount(SessionView);
+    expect(wrapper.findAll(".session-folder .folder-icon svg")).toHaveLength(2);
   });
 
   it("目录行带折叠/展开箭头：首个目录默认为下箭头，点击收起为右箭头", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
-    const wrapper = mount(HistoryView);
-    const folder = () => wrapper.findAll(".history-folder")[0];
+    const wrapper = mount(SessionView);
+    const folder = () => wrapper.findAll(".session-folder")[0];
 
     expect(folder().find(".folder-arrow").exists()).toBe(true);
     expect(folder().find(".folder-arrow path").attributes("d")).toBe(
@@ -554,20 +554,20 @@ describe("HistoryView 目录分组", () => {
 
   it("仅首载展开一次：手动收起后刷新列表不再自动展开", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
-    const wrapper = mount(HistoryView);
-    await wrapper.findAll(".history-folder")[0].trigger("click");
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    const wrapper = mount(SessionView);
+    await wrapper.findAll(".session-folder")[0].trigger("click");
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
 
     // 模拟列表刷新（store.threads 换成新数组）
     store.threads = dirThreads.map((t) => ({ ...t, recencyAt: t.recencyAt + 10 }));
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.findAll(".history-folder")[0].classes()).toContain("collapsed");
-    expect(wrapper.findAll(".history-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
   });
 });
 
-describe("HistoryView 文件夹右键菜单", () => {
+describe("SessionView 文件夹右键菜单", () => {
   beforeEach(() => {
     store.threads = [
       {
@@ -585,10 +585,10 @@ describe("HistoryView 文件夹右键菜单", () => {
         cwd: "D:\\codex\\codex-ui",
       },
     ];
-    store.loadingHistory = false;
+    store.loadingSessions = false;
     store.searchActive = false;
     store.searchSnippets = {};
-    store.panelTab = "history";
+    store.panelTab = "session";
     tabs.splice(0, tabs.length);
     store.toast = "";
     mockedInvoke.mockClear();
@@ -597,8 +597,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("文件夹行右键显示“新建会话”“在此打开终端”“在资源管理器中打开”“删除所有会话”", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -631,8 +631,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("点击“新建会话”预置分组目录并进入统一新建入口", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -644,8 +644,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("点击「在此打开终端」：以分组目录启动终端", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -662,8 +662,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("点击后调用 reveal_path 打开目录并关闭菜单", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -676,8 +676,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("点击「删除所有会话」弹出确认框且不直接删除", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -693,8 +693,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("分组删除确认框点「取消」关闭且不删除", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -710,8 +710,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("分组删除确认后对组内每个会话调用 deleteThread 并关闭确认框", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -731,8 +731,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   it("组内全部会话已打开：文件夹右键菜单不含「删除所有会话」", async () => {
     openTabFor("t1");
     openTabFor("t2");
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -745,8 +745,8 @@ describe("HistoryView 文件夹右键菜单", () => {
 
   it("组内部分未打开：文件夹右键菜单保留「删除所有会话」", async () => {
     openTabFor("t1");
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -759,8 +759,8 @@ describe("HistoryView 文件夹右键菜单", () => {
 
   it("混有已打开/未打开：「删除所有会话」仅删除未打开并提示跳过数量", async () => {
     openTabFor("t1");
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -782,8 +782,8 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 
   it("分组删除确认框按 Escape 关闭且不删除", async () => {
-    const wrapper = mount(HistoryView);
-    await wrapper.find(".history-folder").trigger("contextmenu", {
+    const wrapper = mount(SessionView);
+    await wrapper.find(".session-folder").trigger("contextmenu", {
       clientX: 200,
       clientY: 200,
     });
@@ -797,9 +797,9 @@ describe("HistoryView 文件夹右键菜单", () => {
   });
 });
 
-describe("HistoryView 会话标签联动", () => {
+describe("SessionView 会话标签联动", () => {
   beforeEach(() => {
-    mockBasicHistory();
+    mockBasicSessions();
     tabs.splice(0, tabs.length);
   });
 
@@ -822,7 +822,7 @@ describe("HistoryView 会话标签联动", () => {
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "history",
+      origin: "session",
       workspace: null,
       resumedThreadId: null,
       turnActive: true,
@@ -840,14 +840,14 @@ describe("HistoryView 会话标签联动", () => {
       newChatWorkspace: null,
       interactions: [],
     });
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await wrapper.vm.$nextTick();
 
-    const rows = wrapper.findAll(".history-item");
+    const rows = wrapper.findAll(".session-item");
     const t1Row = rows.find((r) => r.text().includes("会话一"))!;
     const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
-    expect(t1Row.find(".history-run-dot").exists()).toBe(true);
-    expect(t2Row.find(".history-run-dot").exists()).toBe(false);
+    expect(t1Row.find(".session-run-dot").exists()).toBe(true);
+    expect(t2Row.find(".session-run-dot").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -870,7 +870,7 @@ describe("HistoryView 会话标签联动", () => {
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "history",
+      origin: "session",
       workspace: null,
       resumedThreadId: null,
       turnActive: false,
@@ -888,7 +888,7 @@ describe("HistoryView 会话标签联动", () => {
       newChatWorkspace: null,
       interactions: [],
     });
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper, 0);
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).not.toContain("打开");
@@ -899,7 +899,7 @@ describe("HistoryView 会话标签联动", () => {
   });
 
   it("未打开的会话行右键菜单含「打开」与「删除会话」、不含「关闭标签」", async () => {
-    const wrapper = mount(HistoryView);
+    const wrapper = mount(SessionView);
     await openCtxMenu(wrapper, 1); // t2 未打开
     const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
     expect(labels).not.toContain("关闭标签");

@@ -141,7 +141,7 @@ export interface SessionTab extends EditorTabBase {
   draftAttachments: UserInput[];
   /** 会话私有：输入框内联引用 map（refId → 附件，ComposerBar 维护） */
   draftRefs: Record<string, UserInput>;
-  origin: "new" | "history" | null;
+  origin: "new" | "session" | null;
   workspace: string | null;
   resumedThreadId: string | null;
   turnActive: boolean;
@@ -238,7 +238,7 @@ export interface SkillItem {
 }
 
 /** 右侧面板 Tab：资源管理器 / 会话历史 / Git */
-export type PanelTab = "history" | "resources" | "git";
+export type PanelTab = "session" | "resources" | "git";
 
 
 export interface ConfirmRequest {

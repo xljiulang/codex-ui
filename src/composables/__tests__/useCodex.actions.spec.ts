@@ -1,4 +1,4 @@
-import { deleteThread, forkThread, newEmptyChat, openHistorySession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
+import { deleteThread, forkThread, newEmptyChat, openSession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import {
@@ -447,12 +447,12 @@ describe("会话标签状态与事件路由", () => {
     expect(mockedInvoke).toHaveBeenCalledTimes(1);
   });
 });
-describe("openNewSession / openHistorySession 统一收尾", () => {
+describe("openNewSession / openSession 统一收尾", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
     store.confirm = null;
-    store.panelTab = "history";
+    store.panelTab = "session";
   });
 
   it("openNewSession 成功后：设置标签不再激活、聚焦输入框、切回资源 Tab", async () => {
@@ -465,7 +465,7 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
       await openNewSession("D:/projects/B");
       expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
       expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
-      expect(store.panelTab).toBe("history");
+      expect(store.panelTab).toBe("session");
       expect(focus).toHaveBeenCalledTimes(1);
     } finally {
       delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
@@ -483,14 +483,14 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
       expect(store.confirm).toBeNull();
       expect(tabs.some((t) => t.threadId === null)).toBe(true);
       expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
-      expect(store.panelTab).toBe("history");
+      expect(store.panelTab).toBe("session");
       expect(focus).toHaveBeenCalledTimes(1);
     } finally {
       delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
     }
   });
 
-  it("openHistorySession 成功后：设置标签不再激活、聚焦输入框、切回资源 Tab", async () => {
+  it("openSession 成功后：设置标签不再激活、聚焦输入框、切回资源 Tab", async () => {
     openSettingsTab();
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
@@ -513,18 +513,18 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
       commands: { focus },
     };
     try {
-      await openHistorySession("t2");
+      await openSession("t2");
       expect(activeSessionTab()?.threadId).toBe("t2");
       expect(activeSessionTab()?.workspace).toBe("D:/projects/B");
       expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
-      expect(store.panelTab).toBe("history");
+      expect(store.panelTab).toBe("session");
       expect(focus).toHaveBeenCalledTimes(1);
     } finally {
       delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
     }
   });
 
-  it("openHistorySession：点击当前会话视为已打开，聚焦并切回资源 Tab", async () => {
+  it("openSession：点击当前会话视为已打开，聚焦并切回资源 Tab", async () => {
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
     const focus = vi.fn();
@@ -532,9 +532,9 @@ describe("openNewSession / openHistorySession 统一收尾", () => {
       commands: { focus },
     };
     try {
-      await openHistorySession("t1");
+      await openSession("t1");
       expect(focus).toHaveBeenCalledTimes(1);
-      expect(store.panelTab).toBe("history");
+      expect(store.panelTab).toBe("session");
     } finally {
       delete (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
     }

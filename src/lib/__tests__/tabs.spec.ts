@@ -22,7 +22,7 @@ function sessionTab(over: Partial<SessionTab> = {}): SessionTab {
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "history",
+    origin: "session",
     workspace: "D:/repo",
     resumedThreadId: null,
     turnActive: false,

@@ -206,7 +206,7 @@
   opacity: 1;
 }
 
-.history-head {
+.panel-head {
   position: relative;
   height: var(--head-h);
   padding: var(--space-3) var(--space-4);
@@ -215,7 +215,7 @@
   align-items: center;
 }
 
-.history-search-group {
+.panel-search-group {
   position: relative;
   display: flex;
   align-items: stretch;
@@ -227,12 +227,12 @@
   transition: border-color var(--ease), box-shadow var(--ease);
 }
 
-.history-search-group:focus-within {
+.panel-search-group:focus-within {
   border-color: var(--accent-dim);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 
-.history-search {
+.panel-search {
   width: 100%;
   height: var(--ctrl-h-sm);
   padding: 0 var(--space-4);
@@ -243,12 +243,12 @@
   border-radius: var(--radius) 0 0 var(--radius);
 }
 
-.history-search:focus {
+.panel-search:focus {
   border: none;
   box-shadow: none;
 }
 
-.history-search-clear {
+.panel-search-clear {
   position: absolute;
   right: 32px;
   top: 50%;
@@ -261,12 +261,12 @@
   line-height: 1;
 }
 
-.history-search-clear:hover {
+.panel-search-clear:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
 }
 
-.history-refresh {
+.panel-refresh {
   box-sizing: border-box;
   flex-shrink: 0;
   width: 30px;
@@ -282,24 +282,24 @@
   transition: color var(--ease), background-color var(--ease);
 }
 
-.history-refresh:hover {
+.panel-refresh:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
 }
 
-.history-refresh svg {
+.panel-refresh svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
 }
 
-.history-list {
+.panel-list {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-2);
 }
 
-.history-folder {
+.session-folder {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -311,12 +311,12 @@
   transition: background-color var(--ease), border-color var(--ease);
 }
 
-.history-folder:hover {
+.session-folder:hover {
   background: var(--bg-hover);
   border-color: var(--border);
 }
 
-.history-folder .folder-icon {
+.session-folder .folder-icon {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -324,14 +324,14 @@
   color: var(--text-dim);
 }
 
-.history-folder .folder-icon svg {
+.session-folder .folder-icon svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
 }
 
 /* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
-.history-folder .folder-arrow {
+.session-folder .folder-arrow {
   flex-shrink: 0;
   width: 12px;
   height: 12px;
@@ -339,7 +339,7 @@
   opacity: 0.55;
 }
 
-.history-folder .folder-name {
+.session-folder .folder-name {
   min-width: 0;
   flex: 1;
   font-size: var(--font-md);
@@ -350,7 +350,7 @@
   text-overflow: ellipsis;
 }
 
-.history-folder .folder-count {
+.session-folder .folder-count {
   flex-shrink: 0;
   font-size: var(--font-xs);
   font-weight: 600;
@@ -363,11 +363,11 @@
   text-align: center;
 }
 
-.history-item.folder-item {
+.session-item.folder-item {
   margin-left: var(--space-6);
 }
 
-.history-item {
+.session-item {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -380,13 +380,13 @@
   transition: background-color var(--ease), border-color var(--ease);
 }
 
-.history-item:hover {
+.session-item:hover {
   background: var(--bg-hover);
   border-color: var(--border);
 }
 
 /* 历史会话行：会话 Logo（与标签栏「+」新建会话同款，按行高缩放） */
-.history-icon {
+.session-icon {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -395,14 +395,14 @@
   color: var(--text);
 }
 
-.history-icon svg {
+.session-icon svg {
   width: 16px;
   height: 16px;
   fill: currentColor;
 }
 
 /* 会话行图标：已绑定微信 → 双气泡并保持强调色（与置顶徽标同风格） */
-.history-title {
+.session-title {
   min-width: 0;
   font-size: var(--font-md);
   color: var(--text-bright);
@@ -411,7 +411,7 @@
   text-overflow: ellipsis;
 }
 
-.history-title-row {
+.session-title-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -419,7 +419,7 @@
 }
 
 /* 历史会话行：后台运行呼吸点 */
-.history-run-dot {
+.session-run-dot {
   flex-shrink: 0;
   width: 7px;
   height: 7px;
@@ -537,7 +537,7 @@
   fill: currentColor;
 }
 
-.history-main {
+.session-main {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -545,7 +545,7 @@
   gap: 2px;
 }
 
-.history-snippet {
+.session-snippet {
   font-size: var(--font-sm);
   color: var(--text-faint);
   white-space: nowrap;
@@ -559,7 +559,7 @@
   padding: 2px var(--space-2);
 }
 
-.history-time {
+.session-time {
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
@@ -578,7 +578,7 @@
   flex-direction: column;
 }
 
-.history-view,
+.session-view,
 .resource-view {
   flex: 1;
   min-height: 0;

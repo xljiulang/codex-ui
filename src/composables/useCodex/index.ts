@@ -94,7 +94,7 @@ export {
   exitPlanMode,
   forkThread,
   newEmptyChat,
-  openHistorySession,
+  openSession,
   openNewSession,
   openSessionTabForThread,
   openThread,

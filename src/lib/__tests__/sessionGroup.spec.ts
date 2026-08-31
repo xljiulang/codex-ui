@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   dirLabel,
-  groupThreads,
+  groupSessions,
   normalizeDirKey,
-} from "../historyGroup";
+} from "../sessionGroup";
 import type { ThreadSummary } from "../types";
 
 function t(
@@ -18,9 +18,9 @@ function t(
   } as ThreadSummary;
 }
 
-describe("historyGroup 目录分组", () => {
+describe("sessionGroup 目录分组", () => {
   it("相同 cwd 的会话归入同一目录，仅 1 条也建目录", () => {
-    const rows = groupThreads([
+    const rows = groupSessions([
       t("a", { cwd: "D:\\codex\\codex-ui", recencyAt: 2 }),
       t("b", { cwd: "D:\\codex\\codex-ui", recencyAt: 1 }),
       t("c", { cwd: "D:\\codex\\codex-proxy", recencyAt: 3 }),
@@ -37,7 +37,7 @@ describe("historyGroup 目录分组", () => {
   });
 
   it("cwd 缺失或空串的会话保持平铺，不建目录", () => {
-    const rows = groupThreads([
+    const rows = groupSessions([
       t("a", { cwd: "" }),
       t("b", { cwd: "D:\\repo" }),
       t("c", { cwd: undefined }),
@@ -56,7 +56,7 @@ describe("historyGroup 目录分组", () => {
   });
 
   it("Windows 下大小写不同的同路径合并为同一目录（保留原路径展示）", () => {
-    const rows = groupThreads([
+    const rows = groupSessions([
       t("a", { cwd: "D:\\Codex\\Codex-UI" }),
       t("b", { cwd: "d:\\codex\\codex-ui" }),
     ]);
@@ -70,7 +70,7 @@ describe("historyGroup 目录分组", () => {
   });
 
   it("顶层排序：目录按组内第一会话的置顶优先 + 时间倒序", () => {
-    const rows = groupThreads([
+    const rows = groupSessions([
       t("old", { cwd: "D:\\a", recencyAt: 100 }),
       t("new", { cwd: "D:\\b", recencyAt: 200 }),
       t("pin", { cwd: "D:\\pin-dir", recencyAt: 50, isPinned: true }),
@@ -83,7 +83,7 @@ describe("historyGroup 目录分组", () => {
   });
 
   it("组内对话按置顶优先 + 最近时间倒序（与入参顺序无关）", () => {
-    const rows = groupThreads([
+    const rows = groupSessions([
       t("n2", { cwd: "D:\\x", recencyAt: 3 }),
       t("p1", { cwd: "D:\\x", recencyAt: 1, isPinned: true }),
       t("n1", { cwd: "D:\\x", recencyAt: 5 }),
@@ -96,7 +96,7 @@ describe("historyGroup 目录分组", () => {
   });
 
   it("目录按组内第一会话排序（并列时 A-Z 兜底），平铺会话在后", () => {
-    const rows = groupThreads([
+    const rows = groupSessions([
       t("s1", { recencyAt: 100 }),
       t("a1", { cwd: "D:\\zeta", recencyAt: 5 }),
       t("b1", { cwd: "D:\\alpha", recencyAt: 5 }),

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
-import type { HistoryGroup } from "../../lib/historyGroup";
+import type { SessionGroup } from "../../lib/sessionGroup";
 import type { ThreadSummary } from "../../lib/types";
 
 vi.mock("../useCodex", () => ({
@@ -18,7 +18,7 @@ import {
   setToast,
   threadTitle,
 } from "../useCodex";
-import { useHistoryDialogs } from "../useHistoryDialogs";
+import { useSessionDialogs } from "../useSessionDialogs";
 
 const mockedDelete = vi.mocked(deleteThread);
 const mockedIsOpen = vi.mocked(isThreadOpen);
@@ -37,10 +37,10 @@ function thread(overrides: Partial<ThreadSummary> = {}): ThreadSummary {
 }
 
 function setup() {
-  return useHistoryDialogs({ confirmEl: ref<HTMLElement | null>(null) });
+  return useSessionDialogs({ confirmEl: ref<HTMLElement | null>(null) });
 }
 
-describe("useHistoryDialogs 重命名", () => {
+describe("useSessionDialogs 重命名", () => {
   beforeEach(() => {
     mockedRename.mockClear();
   });
@@ -68,7 +68,7 @@ describe("useHistoryDialogs 重命名", () => {
   });
 });
 
-describe("useHistoryDialogs 删除确认", () => {
+describe("useSessionDialogs 删除确认", () => {
   beforeEach(() => {
     mockedDelete.mockClear();
     mockedToast.mockClear();
@@ -87,7 +87,7 @@ describe("useHistoryDialogs 删除确认", () => {
 
   it("整组删除：跳过已打开会话并提示计数", async () => {
     mockedIsOpen.mockImplementation((id) => id === "t1");
-    const group: HistoryGroup = {
+    const group: SessionGroup = {
       key: "D:\\repo",
       label: "repo",
       path: "D:\\repo",
@@ -104,7 +104,7 @@ describe("useHistoryDialogs 删除确认", () => {
   });
 
   it("整组全关闭时删除全部且不提示跳过", async () => {
-    const group: HistoryGroup = {
+    const group: SessionGroup = {
       key: "D:\\repo",
       label: "repo",
       path: "D:\\repo",

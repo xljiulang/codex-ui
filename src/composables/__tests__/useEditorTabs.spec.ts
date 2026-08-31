@@ -1112,7 +1112,7 @@ describe("closeAnyTab 统一关闭入口", () => {
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "history",
+      origin: "session",
       workspace: null,
       resumedThreadId: null,
       turnActive: false,

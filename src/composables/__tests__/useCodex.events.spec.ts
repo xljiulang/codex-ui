@@ -255,7 +255,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "history",
+      origin: "session",
       workspace: "D:/repo",
       resumedThreadId: null,
       turnActive: false,

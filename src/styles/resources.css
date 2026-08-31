@@ -20,7 +20,7 @@
 
 /* 统一选中态：会话/资源/Git 变更文件共用（原 Git 面板样式） */
 .git-tree-row.selected,
-.history-item.active,
+.session-item.active,
 .resource-row.active {
   background: var(--accent-soft);
   border-color: rgba(var(--accent-rgb), 0.35);

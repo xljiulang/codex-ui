@@ -466,7 +466,7 @@ impl WeChatBridge {
         self.snapshot().await
     }
 
-    /// 绑定列表（供历史面板徽标与模态框消费）。
+    /// 绑定列表（供会话面板徽标与模态框消费）。
     pub async fn bindings(&self) -> Value {
         let snap = self.snapshot().await;
         json!({

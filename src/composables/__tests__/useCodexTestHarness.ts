@@ -56,7 +56,7 @@ export function makeSessionTab(
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: threadId ? "history" : null,
+    origin: threadId ? "session" : null,
     workspace: null,
     resumedThreadId: null,
     turnActive: false,

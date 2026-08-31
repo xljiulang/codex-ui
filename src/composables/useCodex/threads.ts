@@ -17,8 +17,8 @@ export function isThreadNotFound(e: unknown): boolean {
 
 /** 全量加载历史会话：逐页拉取直至 cursor 为空（防死循环上限 200 页） */
 export async function refreshThreads() {
-  if (store.loadingHistory) return;
-  store.loadingHistory = true;
+  if (store.loadingSessions) return;
+  store.loadingSessions = true;
   const all: ThreadSummary[] = [];
   let cursor: string | null = null;
   try {
@@ -39,7 +39,7 @@ export async function refreshThreads() {
   } catch (e) {
     setToast(toastError(e));
   } finally {
-    store.loadingHistory = false;
+    store.loadingSessions = false;
   }
 }
 
@@ -66,8 +66,8 @@ export async function searchThreads(term: string) {
     clearSearch();
     return;
   }
-  if (store.loadingHistory) return;
-  store.loadingHistory = true;
+  if (store.loadingSessions) return;
+  store.loadingSessions = true;
   const all: { thread: ThreadSummary; snippet: string }[] = [];
   let cursor: string | null = null;
   try {
@@ -97,7 +97,7 @@ export async function searchThreads(term: string) {
   } catch (e) {
     setToast(toastError(e));
   } finally {
-    store.loadingHistory = false;
+    store.loadingSessions = false;
   }
 }
 

@@ -24,6 +24,6 @@ export function threadTitle(t: ThreadSummary): string {
 
 
 export function currentOriginLabel(): string {
-  if (activeSessionTab()?.origin === "history") return "历史会话";
+  if (activeSessionTab()?.origin === "session") return "历史会话";
   return "新会话";
 }

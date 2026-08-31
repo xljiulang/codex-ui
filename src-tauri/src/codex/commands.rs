@@ -296,13 +296,13 @@ pub async fn auth_logout(server: State<'_, Server>) -> Result<Value, String> {
 
 // ---------------- 微信接入（ClawBot sidecar） ----------------
 
-/// 当前微信桥状态快照（供历史面板与绑定弹窗轮询、事件兜底刷新）。
+/// 当前微信桥状态快照（供会话面板与绑定弹窗轮询、事件兜底刷新）。
 #[tauri::command]
 pub async fn wechat_state(wechat: State<'_, WeChat>) -> Result<Value, String> {
     Ok(wechat.state().await)
 }
 
-/// 当前会话↔微信绑定列表（历史面板徽标用）。
+/// 当前会话↔微信绑定列表（会话面板徽标用）。
 #[tauri::command]
 pub async fn wechat_bindings(wechat: State<'_, WeChat>) -> Result<Value, String> {
     Ok(wechat.bindings().await)

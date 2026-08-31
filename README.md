@@ -52,7 +52,7 @@ codex-ui.exe（Tauri 2 窗口）
     ├── composables/useSessionFs.ts  会话资源状态（懒加载/搜索/监听/图标缓存）
     ├── composables/useGitChanges.ts  Git 更改状态（检测/刷新/初始化/监听）
     ├── lib/tabs.ts  标签公共基类与统一判定（EditorTabBase / TabKind / TabIcon / isTabWorking）
-    └── components/              界面组件（RightPanel + HistoryView + ResourceView、EditorPane 多标签编辑区：TextEditorPane/DiffPane/PreviewPane/TerminalPane 等）
+    └── components/              界面组件（RightPanel + SessionView + ResourceView、EditorPane 多标签编辑区：TextEditorPane/DiffPane/PreviewPane/TerminalPane 等）
 ```
 
 后端负责 codex 子进程生命周期（断线自动重连）、JSON-RPC 请求/响应分发、服务端通知流式转发（`item/started`、`item/completed`、`item/agentMessage/delta`、`item/commandExecution/outputDelta`、`interaction:request` 等）与交互响应回写。前端通过 Tauri invoke/event 通信。

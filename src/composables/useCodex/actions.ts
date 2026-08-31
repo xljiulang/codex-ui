@@ -67,7 +67,7 @@ export async function openSessionTabForThread(
     if (i >= 0) tabs.splice(i, 1);
     return false;
   }
-  tab.origin = "history";
+  tab.origin = "session";
   return await loadThreadInto(tab, threadId);
 }
 
@@ -490,7 +490,7 @@ export async function pickAndOpenNewSession(): Promise<void> {
  * 打开历史会话统一入口（会话行单击 / 右键「打开」）：
  * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
  */
-export async function openHistorySession(threadId: string): Promise<void> {
+export async function openSession(threadId: string): Promise<void> {
   if (!(await openThread(threadId))) return;
   await finishSessionSwitch();
 }

@@ -113,9 +113,9 @@ function mockFs() {
 describe("RightPanel Tab 栏", () => {
   beforeEach(() => {
     store.threads = [];
-    store.loadingHistory = false;
+    store.loadingSessions = false;
     store.workspace = rootPath;
-    store.panelTab = "history";
+    store.panelTab = "session";
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
@@ -138,7 +138,7 @@ describe("RightPanel Tab 栏", () => {
     expect(tabs[0].classes()).toContain("active");
     // v-show 单根化后互斥生效（happy-dom 的 isVisible 不可靠，直接断言 inline style）
     expect(
-      (wrapper.find(".history-view").element as HTMLElement).style.display,
+      (wrapper.find(".session-view").element as HTMLElement).style.display,
     ).toBe("");
     expect(
       (wrapper.find(".resource-view").element as HTMLElement).style.display,
@@ -164,7 +164,7 @@ describe("RightPanel Tab 栏", () => {
       (wrapper.find(".resource-view").element as HTMLElement).style.display,
     ).toBe("");
     expect(
-      (wrapper.find(".history-view").element as HTMLElement).style.display,
+      (wrapper.find(".session-view").element as HTMLElement).style.display,
     ).toBe("none");
     expect(wrapper.find(".resource-root").exists()).toBe(true);
     expect(
@@ -176,7 +176,7 @@ describe("RightPanel Tab 栏", () => {
     await flushPromises();
     expect(wrapper.findAll(".panel-tab")[0].classes()).toContain("active");
     expect(
-      (wrapper.find(".history-view").element as HTMLElement).style.display,
+      (wrapper.find(".session-view").element as HTMLElement).style.display,
     ).toBe("");
     expect(
       (wrapper.find(".resource-view").element as HTMLElement).style.display,
@@ -195,7 +195,7 @@ describe("RightPanel Tab 栏", () => {
       (wrapper.find(".git-view").element as HTMLElement).style.display,
     ).toBe("");
     expect(
-      (wrapper.find(".history-view").element as HTMLElement).style.display,
+      (wrapper.find(".session-view").element as HTMLElement).style.display,
     ).toBe("none");
     expect(
       mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_status"),
@@ -236,9 +236,9 @@ describe("RightPanel 宽度调节", () => {
       configurable: true,
     });
     store.threads = [];
-    store.loadingHistory = false;
+    store.loadingSessions = false;
     store.workspace = rootPath;
-    store.panelTab = "history";
+    store.panelTab = "session";
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();

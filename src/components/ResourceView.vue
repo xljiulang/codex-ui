@@ -279,18 +279,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="resource-view">
-    <div v-if="showResourceControls" class="history-head">
-      <div class="history-search-group">
+    <div v-if="showResourceControls" class="panel-head">
+      <div class="panel-search-group">
         <input
           v-model="searchTerm"
-          class="history-search"
+          class="panel-search"
           type="text"
           placeholder="搜索资源…"
           @input="onSearchInput()"
         />
         <button
           v-if="searchTerm"
-          class="history-search-clear"
+          class="panel-search-clear"
           aria-label="清除搜索"
           v-tooltip="'清除搜索'"
           @click="clearSearch()"
@@ -298,7 +298,7 @@ onBeforeUnmount(() => {
           ×
         </button>
         <button
-          class="history-refresh"
+          class="panel-refresh"
           aria-label="刷新"
           v-tooltip="'刷新'"
           @click="onRefresh()"
@@ -310,7 +310,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div ref="listRef" class="history-list resource-list">
+    <div ref="listRef" class="panel-list resource-list">
       <!-- 搜索态：平铺结果 -->
       <template v-if="searchActive">
         <div

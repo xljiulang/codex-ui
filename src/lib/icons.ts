@@ -51,7 +51,7 @@ export const ICON_AT =
 export const ICON_PIN =
   "M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z";
 
-/** 加号：三处变体（HistoryView/GitView/AppHeader）归一为同一标准路径 */
+/** 加号：三处变体（SessionView/GitView/AppHeader）归一为同一标准路径 */
 export const ICON_PLUS = "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z";
 export const ICON_REFRESH =
   "M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";

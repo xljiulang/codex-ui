@@ -24,7 +24,7 @@ function tabFixture(): SessionTab {
     draftJson: "",
     draftAttachments: [],
     draftRefs: {},
-    origin: "history",
+    origin: "session",
     workspace: null,
     resumedThreadId: null,
     turnActive: false,

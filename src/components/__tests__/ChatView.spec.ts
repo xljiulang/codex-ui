@@ -72,7 +72,7 @@ function makeTab(): SessionTab {
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "history",
+    origin: "session",
     workspace: null,
     resumedThreadId: null,
     turnActive: false,
