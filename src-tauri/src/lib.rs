@@ -17,6 +17,10 @@ use codex::app_server::CodexServer;
 
 /// 主窗口一次性显示守卫：页面加载完成后首次触发，避免重复导航反复处理
 static MAIN_WINDOW_SHOWN: AtomicBool = AtomicBool::new(false);
+/// 用户是否已把主窗口关闭到系统托盘：置真后，启动期的自动显示（页面加载完成 / 5 秒兜底）
+/// 不再把窗口再弹出来，直到用户从托盘主动恢复（show_main 复位）。
+/// 用于修复「启动后立即关到托盘，初始化完成又把窗体显示回去」的 bug。
+static USER_HIDDEN_TO_TRAY: AtomicBool = AtomicBool::new(false);
 /// 是否允许退出：仅托盘「退出」置真；普通关窗（隐藏）不退出应用。
 pub(crate) static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 /// 托盘「退出」后前端安全收尾的兜底时长（秒）：超时仍未退出则强制退出。
@@ -70,6 +74,9 @@ fn disable_main_window_function_keys(app: &AppHandle) {
 /// 显示并聚焦主窗口（托盘左键 / 菜单「显示主窗口」共用）。
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
+        // 用户从托盘主动恢复窗口：复位「用户隐藏到托盘」标记，
+        // 避免后续任何自动显示逻辑误判为不应显示。
+        USER_HIDDEN_TO_TRAY.store(false, Ordering::SeqCst);
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
@@ -87,6 +94,7 @@ pub fn run() {
             if webview.label() == "main"
                 && payload.event() == PageLoadEvent::Finished
                 && !MAIN_WINDOW_SHOWN.swap(true, Ordering::SeqCst)
+                && !USER_HIDDEN_TO_TRAY.load(Ordering::SeqCst)
             {
                 let _ = webview.window().show();
             }
@@ -252,7 +260,7 @@ pub fn run() {
             let (r, g, b, a) = codex::settings::theme_background_rgba(&theme);
             let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
-                .inner_size(1280.0, 720.0)
+                .inner_size(1280.0, 800.0)
                 .min_inner_size(400.0, 560.0)
                 .resizable(true)
                 // 自绘标题栏：隐藏原生标题栏与最小化/最大化/关闭按钮，
@@ -276,6 +284,8 @@ pub fn run() {
                 main_window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
+                        // 用户主动关闭 → 隐藏到系统托盘，并记录以免启动期自动显示再弹回
+                        USER_HIDDEN_TO_TRAY.store(true, Ordering::SeqCst);
                         if let Some(win) = app_handle.get_webview_window("main") {
                             let _ = win.hide();
                         }
@@ -330,7 +340,10 @@ pub fn run() {
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(5));
                 if let Some(win) = fallback_handle.get_webview_window("main") {
-                    let _ = win.show();
+                    // 用户若已在此前关闭到托盘，则不再把窗口弹回
+                    if !USER_HIDDEN_TO_TRAY.load(Ordering::SeqCst) {
+                        let _ = win.show();
+                    }
                 }
             });
 
