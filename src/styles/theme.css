@@ -601,5 +601,9 @@ select option {
   flex: 1;
   min-height: 0;
   position: relative;
-  z-index: 1;
+  /* 不能设 z-index（含 0）：一旦形成层叠上下文，就会把 .composer 的 z-index:31
+     困在自身 z 内，导致 Teleport 到 body 的 .menu-backdrop(z-index:29) 反而盖住
+     composer 与所有弹出菜单（权限/任务/模型/@/$），菜单可看但点不动、无 hover。
+     内容层高于 .app-ambient 靠 position:relative + DOM 顺序即可，无需 stacking context。 */
+  z-index: auto;
 }
