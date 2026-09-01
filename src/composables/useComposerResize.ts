@@ -1,8 +1,9 @@
 import { ref } from "vue";
 
-/** 输入框高度：最低为窗口高 16% 与固定兜底 100px 取较大者，最高为窗口一半 */
+/** 空态整卡目标下限与编辑器↔整卡的高差（工具条 + 卡片边框），与 CSS 保持一致 */
+const CARD_MIN_H = 128;
+const COMPOSER_CHROME_H = 50;
 const MIN_COMPOSER_RATIO = 0.16;
-const MIN_COMPOSER_HEIGHT_PX = 100;
 
 /** 输入区垂直拖拽调整高度（WebView2 pointer 事件 + body 状态类防文本选择） */
 export function useComposerResize() {
@@ -11,11 +12,11 @@ export function useComposerResize() {
   let resizeStartY = 0;
   let resizeStartH = minComposerHeight();
 
-  /** 输入框最小高度：窗口高的 16% 与固定兜底 100px 取较大者 */
+  /** 输入框最小高度（编辑器盒高）：使空态整卡 = max(CARD_MIN_H, 16vh) */
   function minComposerHeight(): number {
-    return Math.max(
-      Math.round(window.innerHeight * MIN_COMPOSER_RATIO),
-      MIN_COMPOSER_HEIGHT_PX,
+    return (
+      Math.max(CARD_MIN_H, Math.round(window.innerHeight * MIN_COMPOSER_RATIO)) -
+      COMPOSER_CHROME_H
     );
   }
 

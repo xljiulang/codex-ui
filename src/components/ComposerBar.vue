@@ -503,110 +503,114 @@ function taskModeLabel(): string {
       >
         <span class="composer-resize-grip"></span>
       </div>
-      <div class="menu-anchor input-anchor">
-        <EditorContent :editor="editor" class="rich-editor" />
-        <MentionMenu
-          ref="mentionMenu"
-          v-if="mention"
-          :kind="mention.kind"
-          :token="mention.token"
-          :results="fileResults"
-          :searching="searchingFiles"
-          :tab="props.tab"
-          @close="mention = null"
-          @pick-files="onPickFiles()"
-          @pick-dir="onPickDir()"
-          @select-attachment="onSelectAttachment($event)"
-        />
-      </div>
-      <div class="composer-left">
-        <div class="menu-anchor">
-          <button
-            class="perm-chip"
-            v-tooltip="'权限模式'"
-            @click="toggleMenu('perm')"
-          >
-            <svg class="chip-icon" viewBox="0 0 24 24">
-              <path :d="permissionMode(tab.permissionMode).icon" />
-            </svg>
-            {{ permissionChip() }}
-            <svg class="chevron" viewBox="0 0 16 16">
-              <path :d="ICON_CHEVRON_DOWN" />
-            </svg>
-          </button>
-          <PermissionMenu v-if="permOpen" @close="permOpen = false" />
+      <div class="composer-card">
+        <div class="menu-anchor input-anchor">
+          <EditorContent :editor="editor" class="rich-editor" />
+          <MentionMenu
+            ref="mentionMenu"
+            v-if="mention"
+            :kind="mention.kind"
+            :token="mention.token"
+            :results="fileResults"
+            :searching="searchingFiles"
+            :tab="props.tab"
+            @close="mention = null"
+            @pick-files="onPickFiles()"
+            @pick-dir="onPickDir()"
+            @select-attachment="onSelectAttachment($event)"
+          />
         </div>
-        <div class="menu-anchor">
-          <button
-            class="task-chip"
-            v-tooltip="'任务模式'"
-            :disabled="tab.turnActive"
-            @click="toggleMenu('task')"
-          >
-            <svg class="chip-icon" viewBox="0 0 24 24">
-              <path :d="taskMode(tab.taskMode).icon" />
-            </svg>
-            {{ taskModeLabel() }}
-            <svg viewBox="0 0 16 16">
-            <path :d="ICON_CHEVRON_DOWN" />
-            </svg>
-          </button>
-          <TaskModeMenu v-if="taskOpen" @close="taskOpen = false" />
+        <div class="composer-toolbar">
+          <div class="composer-left">
+            <div class="menu-anchor">
+              <button
+                class="perm-chip"
+                v-tooltip="'权限模式'"
+                @click="toggleMenu('perm')"
+              >
+                <svg class="chip-icon" viewBox="0 0 24 24">
+                  <path :d="permissionMode(tab.permissionMode).icon" />
+                </svg>
+                {{ permissionChip() }}
+                <svg class="chevron" viewBox="0 0 16 16">
+                  <path :d="ICON_CHEVRON_DOWN" />
+                </svg>
+              </button>
+              <PermissionMenu v-if="permOpen" @close="permOpen = false" />
+            </div>
+            <div class="menu-anchor">
+              <button
+                class="task-chip"
+                v-tooltip="'任务模式'"
+                :disabled="tab.turnActive"
+                @click="toggleMenu('task')"
+              >
+                <svg class="chip-icon" viewBox="0 0 24 24">
+                  <path :d="taskMode(tab.taskMode).icon" />
+                </svg>
+                {{ taskModeLabel() }}
+                <svg viewBox="0 0 16 16">
+                <path :d="ICON_CHEVRON_DOWN" />
+                </svg>
+              </button>
+              <TaskModeMenu v-if="taskOpen" @close="taskOpen = false" />
+            </div>
+            <div class="menu-anchor">
+              <GoalChip :tab="tab" />
+            </div>
+          </div>
+          <div class="composer-right">
+            <button
+              v-if="ctxUsage"
+              class="ctx-window"
+              aria-label="压缩上下文"
+              :disabled="!tab.threadId || compacting"
+              v-tooltip="ctxTooltip"
+              @dblclick="compactNow()"
+            >
+              {{ ctxUsage.pct }}%
+            </button>
+            <div class="menu-anchor">
+              <button
+                class="model-chip"
+                @click="toggleMenu('model')"
+              >
+                <svg class="model-chip-icon" viewBox="0 0 24 24">
+                  <rect x="5" y="5" width="14" height="14" rx="2" />
+                  <rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+                  <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+                </svg>
+                {{ modelChipLabel() }}
+                <svg viewBox="0 0 16 16">
+                  <path :d="ICON_CHEVRON_DOWN" />
+                </svg>
+              </button>
+              <ModelMenu v-if="modelOpen" @close="modelOpen = false" />
+            </div>
+            <button
+              v-if="tab.turnActive"
+              class="send-btn stop"
+              @click="interrupt()"
+            >
+              <svg viewBox="0 0 24 24">
+                <rect x="6" y="6" width="12" height="12" rx="1.5" />
+              </svg>
+              停止
+            </button>
+            <button
+              v-else
+              class="send-btn"
+              :class="{ lit: !!(hasText || tab.attachments.length) }"
+              :disabled="!hasText && tab.attachments.length === 0"
+              @click="submit()"
+            >
+              <svg viewBox="0 0 24 24">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+              发送
+            </button>
+          </div>
         </div>
-        <div class="menu-anchor">
-          <GoalChip :tab="tab" />
-        </div>
-      </div>
-      <div class="composer-right">
-        <button
-          v-if="ctxUsage"
-          class="ctx-window"
-          aria-label="压缩上下文"
-          :disabled="!tab.threadId || compacting"
-          v-tooltip="ctxTooltip"
-          @dblclick="compactNow()"
-        >
-          {{ ctxUsage.pct }}%
-        </button>
-        <div class="menu-anchor">
-          <button
-            class="model-chip"
-            @click="toggleMenu('model')"
-          >
-            <svg class="model-chip-icon" viewBox="0 0 24 24">
-              <rect x="5" y="5" width="14" height="14" rx="2" />
-              <rect x="9.5" y="9.5" width="5" height="5" rx="1" />
-              <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
-            </svg>
-            {{ modelChipLabel() }}
-            <svg viewBox="0 0 16 16">
-              <path :d="ICON_CHEVRON_DOWN" />
-            </svg>
-          </button>
-          <ModelMenu v-if="modelOpen" @close="modelOpen = false" />
-        </div>
-        <button
-          v-if="tab.turnActive"
-          class="send-btn stop"
-          @click="interrupt()"
-        >
-          <svg viewBox="0 0 24 24">
-            <rect x="6" y="6" width="12" height="12" rx="1.5" />
-          </svg>
-          停止
-        </button>
-        <button
-          v-else
-          class="send-btn"
-          :class="{ lit: !!(hasText || tab.attachments.length) }"
-          :disabled="!hasText && tab.attachments.length === 0"
-          @click="submit()"
-        >
-          <svg viewBox="0 0 24 24">
-            <path d="M12 19V5M5 12l7-7 7 7" />
-          </svg>
-          发送
-        </button>
       </div>
     </div>
     <div v-if="rowAttachments.length" class="attachment-row">

@@ -9,6 +9,8 @@
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--footer-shadow);
   position: relative;
+  /* 底部工具条 + 卡片边框（编辑器为 border-box，内边距已含在自身高度内） */
+  --composer-chrome-h: 50px;
   /* 提升整个 composer 层即可让
      @/$ 等弹出菜单显示在头部之上；menu-backdrop 已 Teleport 到 body，
      仍保持 z-index 29 位于头部之下，头部保持可点击。
@@ -26,6 +28,18 @@
 
 .composer-input-row {
   position: relative;
+}
+
+/* 输入卡片：圆角边框 + 底色，内部为「编辑器滚动区 + 底部工具条」两段式 */
+.composer-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background: var(--composer-bg);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--inset-shadow-md);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--ease-slow), box-shadow var(--ease-slow);
 }
 
 .composer-resize-handle {
@@ -73,22 +87,18 @@ body.resizing-composer {
   display: block;
   width: 100%;
   height: var(--composer-h, auto);
-  min-height: max(16vh, 100px);
+  /* 空态整卡 = max(128px, 16vh)：1280×800 下约 128px，窗口放大随 16vh 增长 */
+  min-height: calc(max(128px, 16vh) - var(--composer-chrome-h));
   max-height: var(--composer-h, 18vh);
   line-height: 1.55;
-  padding: var(--space-5) var(--space-6) 42px;
-  background: var(--composer-bg);
-  border: 1px solid var(--border-light);
-  box-shadow: var(--inset-shadow-md);
-  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-6) var(--space-4);
   outline: none;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  transition: border-color var(--ease-slow), box-shadow var(--ease-slow);
 }
 
-.rich-editor .ProseMirror:focus {
+.composer-card:focus-within {
   border-color: rgba(var(--accent-rgb), 0.55);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
@@ -120,21 +130,20 @@ body.resizing-composer {
   user-select: none;
 }
 
+.composer-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
 .composer-left,
 .composer-right {
-  position: absolute;
-  bottom: 11px;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.composer-left {
-  left: 10px;
-}
-
-.composer-right {
-  right: 10px;
 }
 
 /* 输入区芯片基类 */
