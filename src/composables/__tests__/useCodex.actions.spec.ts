@@ -313,6 +313,45 @@ describe("会话标签状态与事件路由", () => {
     expect(found?.name).toBe("ABCDE");
     expect(store.threads[0]?.id).toBe("t1");
   });
+
+  it("只读访问新建会话：thread/start 下发 never + read-only 沙箱", async () => {
+    tabs.push(
+      makeSessionTab("s1", null, {
+        newChatWorkspace: "D:/repo",
+        permissionMode: "read-only",
+      }),
+    );
+    activeTabId.value = "s1";
+    store.workspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_start") {
+        return Promise.resolve({
+          thread: { id: "t1", name: null },
+          model: "gpt-5",
+        });
+      }
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      if (cmd === "codex_rpc") return Promise.resolve({});
+      return Promise.resolve(undefined);
+    });
+
+    await sendPrompt("你好");
+    const startCall = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "thread_start",
+    );
+    expect(startCall).toBeTruthy();
+    expect(
+      (startCall![1] as { params?: { approvalPolicy?: string; sandbox?: string } })
+        .params,
+    ).toMatchObject({
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    });
+  });
 });
 describe("会话标签状态与事件路由", () => {
   beforeEach(() => {

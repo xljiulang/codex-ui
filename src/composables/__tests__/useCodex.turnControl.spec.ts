@@ -429,6 +429,28 @@ describe("buildTurnParams 三面独立映射", () => {
     });
   });
 
+  it("只读访问 → never + readOnly 沙箱，无评审", () => {
+    store.models = [DEFAULT_MODEL];
+    const params = buildTurnParams(
+      "t1",
+      [{ type: "text", text: "hi", text_elements: [] }],
+      "cid-3",
+      "D:/repo",
+      {
+        permissionMode: "read-only",
+        taskMode: "default",
+        model: "gpt-5",
+        effort: null,
+      },
+    );
+    expect(params.approvalPolicy).toBe("never");
+    expect(params.sandboxPolicy).toEqual({
+      type: "readOnly",
+      networkAccess: true,
+    });
+    expect(params.approvalsReviewer).toBeUndefined();
+  });
+
   it("执行模式 + 标签未选模型时回退默认模型，权限面仍独立", () => {
     store.models = [DEFAULT_MODEL];
     const params = buildTurnParams(

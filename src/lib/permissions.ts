@@ -11,6 +11,13 @@ export interface PermissionMode {
 
 export const PERMISSION_MODES: PermissionMode[] = [
   {
+    id: "read-only",
+    label: "只读访问",
+    desc: "文件只读，可联网检索；不会修改任何文件",
+    chip: "只读",
+    icon: "M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 0 1 6 0v3H9zm3 4a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-3 0v-.5A1.5 1.5 0 0 1 12 14z",
+  },
+  {
     id: "ask-for-approval",
     label: "请求批准",
     desc: "编辑外部文件和使用互联网时始终询问",
@@ -34,7 +41,11 @@ export const PERMISSION_MODES: PermissionMode[] = [
 ];
 
 export function permissionMode(id: PermissionId): PermissionMode {
-  return PERMISSION_MODES.find((m) => m.id === id) ?? PERMISSION_MODES[2];
+  return (
+    PERMISSION_MODES.find((m) => m.id === id) ??
+    PERMISSION_MODES.find((m) => m.id === "full-access") ??
+    PERMISSION_MODES[PERMISSION_MODES.length - 1]
+  );
 }
 
 export function toApprovalPolicy(mode: PermissionId): "on-request" | "never" {
@@ -43,6 +54,8 @@ export function toApprovalPolicy(mode: PermissionId): "on-request" | "never" {
       return "on-request";
     case "help-me-approve":
       return "on-request";
+    case "read-only":
+      return "never";
     default:
       return "never";
   }
@@ -50,8 +63,10 @@ export function toApprovalPolicy(mode: PermissionId): "on-request" | "never" {
 
 export function toSandbox(
   mode: PermissionId,
-): "workspace-write" | "danger-full-access" {
+): "read-only" | "workspace-write" | "danger-full-access" {
   switch (mode) {
+    case "read-only":
+      return "read-only";
     case "ask-for-approval":
       return "workspace-write";
     case "help-me-approve":
@@ -81,6 +96,8 @@ export function toSandboxPolicy(
   workspace?: string,
 ): Record<string, unknown> {
   switch (mode) {
+    case "read-only":
+      return { type: "readOnly", networkAccess: true };
     case "ask-for-approval":
     case "help-me-approve":
       return {

@@ -1861,7 +1861,12 @@ describe("SettingsView 默认权限", () => {
       .findAll("select.default-permission-select option")
       .map((o) => o.text());
     expect(labels).toEqual(
-      expect.arrayContaining(["请求批准", "帮我批准", "完全访问权限"]),
+      expect.arrayContaining([
+        "只读访问",
+        "请求批准",
+        "帮我批准",
+        "完全访问权限",
+      ]),
     );
     wrapper.unmount();
   });

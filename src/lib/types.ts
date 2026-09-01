@@ -150,11 +150,12 @@ export interface PendingInteraction {
 /** 界面主题：blue（蓝夜，默认）｜dark（曜黑）｜light（晨光） */
 export type ThemeId = "blue" | "dark" | "light";
 
-/** 权限批准模式：ask-for-approval（请求批准）｜help-me-approve（帮我批准）｜full-access（完全访问） */
+/** 权限批准模式：read-only（只读访问）｜ask-for-approval（请求批准）｜help-me-approve（帮我批准）｜full-access（完全访问） */
 export type PermissionId =
   | "ask-for-approval"
   | "help-me-approve"
-  | "full-access";
+  | "full-access"
+  | "read-only";
 
 /** 记忆模式：disabled（关闭，默认）｜enabled（启用） */
 export type MemoryMode = "disabled" | "enabled";

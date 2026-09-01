@@ -10,7 +10,7 @@ pub struct AppSettings {
     pub enter_to_send: bool,
     pub followup_mode: String,
     pub theme: String,
-    /// 权限模式的启动初始值：ask-for-approval｜help-me-approve｜full-access
+    /// 权限模式的启动初始值：read-only｜ask-for-approval｜help-me-approve｜full-access
     #[serde(default = "default_permission")]
     pub default_permission: String,
     /// 记忆模式：disabled（关闭，默认）｜enabled（启用）

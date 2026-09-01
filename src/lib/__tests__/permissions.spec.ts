@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionId } from "../types";
 import {
+  PERMISSION_MODES,
   permissionMode,
   toApprovalPolicy,
   toApprovalsReviewer,
@@ -9,6 +10,16 @@ import {
 } from "../permissions";
 
 describe("权限模式映射", () => {
+  it("只读访问为权限模式首项", () => {
+    expect(PERMISSION_MODES[0].id).toBe("read-only");
+    expect(PERMISSION_MODES.map((m) => m.label)).toEqual([
+      "只读访问",
+      "请求批准",
+      "帮我批准",
+      "完全访问权限",
+    ]);
+  });
+
   it("请求批准 → on-request + workspace-write + user 评审", () => {
     expect(toApprovalPolicy("ask-for-approval")).toBe("on-request");
     expect(toSandbox("ask-for-approval")).toBe("workspace-write");
@@ -25,6 +36,12 @@ describe("权限模式映射", () => {
     expect(toApprovalPolicy("full-access")).toBe("never");
     expect(toSandbox("full-access")).toBe("danger-full-access");
     expect(toApprovalsReviewer("full-access")).toBeNull();
+  });
+
+  it("只读访问 → never + read-only 沙箱，无评审", () => {
+    expect(toApprovalPolicy("read-only")).toBe("never");
+    expect(toSandbox("read-only")).toBe("read-only");
+    expect(toApprovalsReviewer("read-only")).toBeNull();
   });
 
   it("未知模式回退到完全访问", () => {
@@ -48,6 +65,10 @@ describe("权限模式映射", () => {
     });
     expect(toSandboxPolicy("full-access")).toEqual({
       type: "dangerFullAccess",
+    });
+    expect(toSandboxPolicy("read-only")).toEqual({
+      type: "readOnly",
+      networkAccess: true,
     });
   });
 });
