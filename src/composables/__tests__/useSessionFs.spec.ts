@@ -22,7 +22,7 @@ import { store } from "../useCodex";
 import {
   __resetSessionFsForTest,
   childrenByPath,
-  copyBuffer,
+  copyEntry,
   createTextFile,
   ensureEntryIcons,
   expanded,
@@ -424,7 +424,6 @@ describe("useSessionFs 粘贴可用性与新建文本文件", () => {
     __resetSessionFsForTest();
     store.workspace = root;
     store.toast = "";
-    copyBuffer.value = [];
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue([]);
   });
@@ -433,7 +432,7 @@ describe("useSessionFs 粘贴可用性与新建文本文件", () => {
     __resetSessionFsForTest();
   });
 
-  it("pasteAvailable：无复制记录且剪贴板无文件时为 false", async () => {
+  it("pasteAvailable：剪贴板无文件时为 false", async () => {
     expect(await pasteAvailable()).toBe(false);
     expect(mockedInvoke).toHaveBeenCalledWith("clipboard_file_paths");
   });
@@ -443,15 +442,27 @@ describe("useSessionFs 粘贴可用性与新建文本文件", () => {
     expect(await pasteAvailable()).toBe(true);
   });
 
-  it("pasteAvailable：内部复制记录非空时为 true，不再查剪贴板", async () => {
-    copyBuffer.value = ["D:\\src\\a.txt"];
-    expect(await pasteAvailable()).toBe(true);
-    expect(mockedInvoke).not.toHaveBeenCalledWith("clipboard_file_paths");
-  });
-
   it("pasteAvailable：剪贴板读取失败按不可用处理", async () => {
     mockedInvoke.mockRejectedValue(new Error("剪贴板忙"));
     expect(await pasteAvailable()).toBe(false);
+  });
+
+  it("copyEntry：把路径以 CF_HDROP 写入系统剪贴板并提示", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    await copyEntry({
+      name: "a.txt",
+      path: "D:\\src\\a.txt",
+      relPath: "a.txt",
+      isDir: false,
+      size: 0,
+      modifiedAtMs: 0,
+      createdAtMs: 0,
+      childCount: null,
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_write_files", {
+      paths: ["D:\\src\\a.txt"],
+    });
+    expect(store.toast).toContain("已复制");
   });
 
   it("createTextFile：调用命令、提示并刷新", async () => {

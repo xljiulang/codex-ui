@@ -170,6 +170,7 @@ pub fn run() {
             codex::commands::pick_codex_file,
             codex::commands::save_pasted_image,
             codex::commands::clipboard_file_paths,
+            codex::commands::clipboard_write_files,
             codex::commands::settings_get,
             codex::commands::settings_set,
             codex::commands::model_config_read,

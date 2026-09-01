@@ -19,8 +19,6 @@ export const searchTerm = ref("");
 export const searchResults = ref<FsEntry[]>([]);
 export const searching = ref(false);
 export const selectedPath = ref("");
-/** 内部复制记录：粘贴时优先使用，为空回退系统剪贴板 */
-export const copyBuffer = ref<string[]>([]);
 /**
  * 文件类型图标缓存：键为 `ext:<小写扩展名>`（如 ext:.rs）或无扩展名文件的
  * `file:<relPath>`；值为 PNG data URI，null 表示取不到（不再重试）。
@@ -44,7 +42,6 @@ export function resetTree() {
   rootError.value = "";
   searchResults.value = [];
   selectedPath.value = "";
-  copyBuffer.value = [];
   iconCache.clear();
 }
 

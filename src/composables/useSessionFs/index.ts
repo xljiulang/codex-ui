@@ -3,7 +3,6 @@
 // 本文件仅做再导出，保证调用方 `import { ... } from "../useSessionFs"` 完全不变。
 export {
   childrenByPath,
-  copyBuffer,
   expanded,
   iconCache,
   loadingByPath,

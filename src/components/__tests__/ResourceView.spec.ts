@@ -1226,11 +1226,15 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("复制后目录上粘贴：内部剪贴板作为粘贴源", async () => {
+  it("复制后目录上粘贴：以系统剪贴板为粘贴源", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "复制");
     expect(store.toast).toContain("已复制");
+    // 复制把路径以 CF_HDROP 写入系统剪贴板
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_write_files", {
+      paths: [aTxt.path],
+    });
 
     await openRowCtx(wrapper, ".resource-row.resource-dir");
     await clickCtxItem(wrapper, "粘贴");

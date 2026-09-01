@@ -4,7 +4,6 @@ import { listen } from "@tauri-apps/api/event";
 import { setToast, toastError, workspace } from "../useCodex";
 import { normalizeFsPath } from "../../lib/path";
 import {
-  copyBuffer,
   pruneTreeToRoot,
   rootError,
   rootEntry,
@@ -89,7 +88,6 @@ async function activate() {
     if (ok) {
       pruneTreeToRoot(root);
       clearSearch();
-      copyBuffer.value = [];
     } else if (rootEntry.value && rootError.value) {
       setToast(rootError.value);
     }
@@ -121,7 +119,6 @@ watch(workspace, async (r, old) => {
       if (ok) {
         pruneTreeToRoot(root);
         clearSearch();
-        copyBuffer.value = [];
       } else if (rootEntry.value && rootError.value) {
         setToast(rootError.value);
       }

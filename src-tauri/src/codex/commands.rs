@@ -550,6 +550,21 @@ pub async fn clipboard_file_paths() -> Result<Vec<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// 把文件路径列表以 CF_HDROP 写入系统剪贴板（供资源管理器/微信/输入框等粘贴）
+#[tauri::command]
+pub async fn clipboard_write_files(paths: Vec<String>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        use clipboard_win::Setter;
+        let _clip = clipboard_win::Clipboard::new_attempts(10)
+            .map_err(|e| format!("打开剪贴板失败: {e}"))?;
+        clipboard_win::formats::FileList
+            .write_clipboard(&paths)
+            .map_err(|e| format!("写入剪贴板文件失败: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;

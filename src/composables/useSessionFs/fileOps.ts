@@ -1,12 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { setToast, toastError, workspace } from "../useCodex";
 import type { FsEntry } from "../../lib/sessionFs";
-import { copyBuffer } from "./state";
 import { refreshAll } from "./tree";
 
-export function copyEntry(entry: FsEntry) {
-  copyBuffer.value = [entry.path];
-  setToast(`已复制「${entry.name}」，可在目录上右键粘贴`);
+/** 复制：把文件/文件夹路径以 CF_HDROP 写入系统剪贴板，可在系统/资源管理器/输入框粘贴 */
+export async function copyEntry(entry: FsEntry) {
+  try {
+    await invoke("clipboard_write_files", { paths: [entry.path] });
+    setToast(`已复制「${entry.name}」，可粘贴到系统/资源管理器`);
+  } catch (e) {
+    setToast(toastError(e));
+  }
 }
 
 async function readClipboardPaths(): Promise<string[]> {
@@ -17,13 +21,11 @@ async function readClipboardPaths(): Promise<string[]> {
   }
 }
 
-/** 把内部复制记录（或系统剪贴板文件）粘贴进目标目录 */
+/** 把系统剪贴板中的文件粘贴进目标目录（优先读 CF_HDROP） */
 export async function pasteInto(targetDir: string) {
   const root = workspace.value;
   if (!root) return;
-  const sources = copyBuffer.value.length
-    ? [...copyBuffer.value]
-    : await readClipboardPaths();
+  const sources = await readClipboardPaths();
   if (!sources.length) {
     setToast("剪贴板中没有可粘贴的文件或文件夹");
     return;
@@ -34,7 +36,6 @@ export async function pasteInto(targetDir: string) {
       destDir: targetDir,
       sources,
     });
-    copyBuffer.value = [];
     setToast(`已粘贴 ${created.length} 项`);
     await refreshAll();
   } catch (e) {
@@ -42,9 +43,8 @@ export async function pasteInto(targetDir: string) {
   }
 }
 
-/** 粘贴是否可用：内部复制记录非空或系统剪贴板含文件（读取失败按不可用处理） */
+/** 粘贴是否可用：系统剪贴板含文件即可用（读取失败按不可用处理） */
 export async function pasteAvailable(): Promise<boolean> {
-  if (copyBuffer.value.length) return true;
   const paths = await readClipboardPaths();
   return paths.length > 0;
 }
