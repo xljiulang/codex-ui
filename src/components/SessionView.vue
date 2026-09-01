@@ -345,7 +345,10 @@ onBeforeUnmount(() => {
             v-tooltip="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION" />
+              <path
+                :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION"
+                fill-rule="evenodd"
+              />
             </svg>
           </span>
           <span class="session-main">

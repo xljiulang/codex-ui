@@ -239,7 +239,10 @@ function titleTooltip(tab: EditorTab): string {
       >
         <span class="editor-tab-logo" aria-hidden="true">
           <svg viewBox="0 0 24 24">
-            <path :d="isThreadBound(tab.threadId) ? ICON_WECHAT : ICON_SESSION" />
+            <path
+              :d="isThreadBound(tab.threadId) ? ICON_WECHAT : ICON_SESSION"
+              fill-rule="evenodd"
+            />
           </svg>
         </span>
         <span class="editor-tab-label">{{ tab.title }}</span>

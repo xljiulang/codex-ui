@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
         @click="store.panelTab = 'session'"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="ICON_SESSION" />
+          <path :d="ICON_SESSION" fill-rule="evenodd" />
         </svg>
         <span>会话</span>
       </button>
