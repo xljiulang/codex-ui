@@ -350,7 +350,8 @@ onBeforeUnmount(() => {
                 :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION"
                 :fill="isThreadBound(row.thread.id) ? 'currentColor' : 'none'"
                 :stroke="isThreadBound(row.thread.id) ? 'none' : 'currentColor'"
-                :stroke-width="isThreadBound(row.thread.id) ? undefined : 3"
+                :stroke-width="isThreadBound(row.thread.id) ? undefined : 2"
+                vector-effect="non-scaling-stroke"
                 stroke-linecap="round"
                 stroke-linejoin="round"
               />

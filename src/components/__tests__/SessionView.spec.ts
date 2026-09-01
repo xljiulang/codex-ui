@@ -309,7 +309,10 @@ describe("SessionView 右键菜单", () => {
     expect(t1Row.find(".session-icon path").attributes("stroke")).toBe("none");
     expect(t2Row.find(".session-icon path").attributes("fill")).toBe("none");
     expect(t2Row.find(".session-icon path").attributes("stroke")).toBe("currentColor");
-    expect(t2Row.find(".session-icon path").attributes("stroke-width")).toBe("3");
+    expect(t2Row.find(".session-icon path").attributes("stroke-width")).toBe("2");
+    expect(
+      t2Row.find(".session-icon path").attributes("vector-effect"),
+    ).toBe("non-scaling-stroke");
     expect(t1Row.find(".history-wechat-badge").exists()).toBe(false);
     store.wechat = null;
   });

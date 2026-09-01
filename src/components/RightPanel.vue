@@ -119,7 +119,8 @@ onBeforeUnmount(() => {
             :d="ICON_SESSION"
             fill="none"
             stroke="currentColor"
-            stroke-width="3"
+            stroke-width="2"
+            vector-effect="non-scaling-stroke"
             stroke-linecap="round"
             stroke-linejoin="round"
           />

@@ -49,7 +49,8 @@ const emit = defineEmits<{ close: [] }>();
           :fill-rule="it.nonzero ? 'nonzero' : 'evenodd'"
           :fill="it.stroke ? 'none' : 'currentColor'"
           :stroke="it.stroke ? 'currentColor' : 'none'"
-          :stroke-width="it.stroke ? 3 : undefined"
+          :stroke-width="it.stroke ? 2 : undefined"
+          vector-effect="non-scaling-stroke"
           stroke-linecap="round"
           stroke-linejoin="round"
         />
