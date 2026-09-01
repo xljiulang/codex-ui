@@ -1256,6 +1256,62 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
+  it("行悬停 @：点击添加到会话附件，且不触发该行打开", async () => {
+    const addAttachment = vi.fn();
+    registerComposerAddHandler("s1", addAttachment);
+    const wrapper = await mountPanel();
+    const fileRow = wrapper.find(".resource-row.resource-file");
+    // 存在活动会话标签时非根文件行渲染 @ 覆盖按钮
+    expect(fileRow.find(".resource-attach").exists()).toBe(true);
+    await fileRow.find(".resource-attach").trigger("pointerdown");
+    await fileRow.find(".resource-attach").trigger("click");
+    expect(addAttachment).toHaveBeenCalledWith({
+      type: "mention",
+      name: "a.txt",
+      path: "D:/codex/codex-ui/a.txt",
+    });
+    // @ 点击不触发行打开（文本文件打开会走 session_fs_read）
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_read",
+      expect.anything(),
+    );
+    wrapper.unmount();
+  });
+
+  it("行悬停 @：目录行与非根文件行均渲染，根行不渲染", async () => {
+    const wrapper = await mountPanel();
+    expect(wrapper.find(".resource-root .resource-attach").exists()).toBe(false);
+    // 标记类与实际渲染一致：根行不含 resource-attachable，非根行含之
+    expect(
+      wrapper.find(".resource-root").classes(),
+    ).not.toContain("resource-attachable");
+    expect(
+      wrapper.find(".resource-row.resource-dir .resource-attach").exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find(".resource-row.resource-dir").classes(),
+    ).toContain("resource-attachable");
+    expect(
+      wrapper.find(".resource-row.resource-file .resource-attach").exists(),
+    ).toBe(true);
+    expect(
+      wrapper.find(".resource-row.resource-file").classes(),
+    ).toContain("resource-attachable");
+    wrapper.unmount();
+  });
+
+  it("无活动会话标签时：非根行不渲染 @", async () => {
+    activeTabId.value = "";
+    const wrapper = await mountPanel();
+    expect(wrapper.find(".resource-attach").exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll(".resource-row")
+        .every((r) => !r.classes().includes("resource-attachable")),
+    ).toBe(true);
+    wrapper.unmount();
+  });
+
   it("非会话视图（文件标签激活）时：隐藏「添加为会话附件」菜单项", async () => {
     activeTabId.value = "file1";
     const wrapper = await mountPanel();

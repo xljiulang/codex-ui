@@ -36,6 +36,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
+  position: relative;
 }
 
 .resource-row.resource-file .resource-icon {
@@ -54,6 +55,46 @@
   height: 14px;
   flex-shrink: 0;
   object-fit: contain;
+}
+
+/* 资源行悬停：可添加为会话附件时，图标原位替换为 @，点击即添加到会话 */
+.resource-attach {
+  position: absolute;
+  inset: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--ease), background-color var(--ease);
+  z-index: 1;
+}
+
+.resource-row.resource-attachable:hover .resource-attach {
+  opacity: 1;
+}
+
+.resource-row.resource-attachable:hover .resource-attach:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+/* 悬停时隐藏原图标（文件系统 PNG 或内置 SVG），由 @ 覆盖呈现代替；
+   仅匹配直接子级，@ 按钮内的 svg 位于 <button> 内不受影响 */
+.resource-row.resource-attachable:hover .resource-icon > img,
+.resource-row.resource-attachable:hover .resource-icon > svg {
+  opacity: 0;
+}
+
+.resource-attach svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 
 /* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */

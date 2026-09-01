@@ -12,6 +12,7 @@ import { useResourceDragDrop } from "../composables/useResourceDragDrop";
 import { useResourceDialogs } from "../composables/useResourceDialogs";
 import { useResourceMenus } from "../composables/useResourceMenus";
 import {
+  addAsAttachment,
   clearSearch,
   ensureEntryIcons,
   expanded,
@@ -54,6 +55,7 @@ import { isDocxPath } from "../lib/docx";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
+  ICON_AT,
   ICON_FILE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
@@ -316,7 +318,10 @@ onBeforeUnmount(() => {
           v-for="entry in searchResults"
           :key="entry.path"
           class="resource-row resource-result"
-          :class="{ active: selectedPath === entry.path }"
+          :class="{
+            active: selectedPath === entry.path,
+            'resource-attachable': hasActiveSessionTab,
+          }"
           :data-fs-path="entry.path"
           @click="onSearchResultClick(entry)"
           @contextmenu="openEntryMenu(entry, $event)"
@@ -331,6 +336,17 @@ onBeforeUnmount(() => {
             <svg v-else viewBox="0 0 24 24" aria-hidden="true">
               <path :d="entryIcon(entry)" />
             </svg>
+            <button
+              v-if="hasActiveSessionTab"
+              class="resource-attach"
+              aria-label="添加为会话附件"
+              @click.stop="addAsAttachment(entry)"
+              @pointerdown.stop
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_AT" />
+              </svg>
+            </button>
           </span>
           <span class="resource-main">
             <span class="resource-name">{{ entry.name }}</span>
@@ -356,6 +372,10 @@ onBeforeUnmount(() => {
             collapsed: row.kind !== 'file' && row.collapsed,
             active: row.kind !== 'root' && selectedPath === row.entry.path,
             'resource-drop-target': dragOverPath === row.entry.path,
+            'resource-attachable':
+              hasActiveSessionTab &&
+              row.kind !== 'root' &&
+              editingPath !== row.entry.path,
           }"
           :style="{ paddingLeft: 10 + row.depth * 14 + 'px' }"
           :data-fs-path="row.entry.path"
@@ -382,6 +402,21 @@ onBeforeUnmount(() => {
             <svg v-else viewBox="0 0 24 24" aria-hidden="true">
               <path :d="entryIcon(row.entry)" />
             </svg>
+            <button
+              v-if="
+                hasActiveSessionTab &&
+                row.kind !== 'root' &&
+                editingPath !== row.entry.path
+              "
+              class="resource-attach"
+              aria-label="添加为会话附件"
+              @click.stop="addAsAttachment(row.entry)"
+              @pointerdown.stop
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_AT" />
+              </svg>
+            </button>
           </span>
           <span class="resource-main">
             <input
