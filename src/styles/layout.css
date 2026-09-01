@@ -164,18 +164,6 @@
   transition: background-color var(--ease);
 }
 
-/* 拖拽条中的分隔细线：默认隐现，悬停/拖动时点亮 */
-.right-panel-resize-handle::before {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--border);
-  transition: background-color var(--ease), box-shadow var(--ease);
-}
-
 /* 拖拽条中部的抓握手感点 */
 .right-panel-resize-handle::after {
   content: "";
@@ -194,11 +182,6 @@
 .right-panel-resize-handle:hover,
 .right-panel-resize-handle.dragging {
   background: rgba(var(--accent-rgb), 0.07);
-}
-
-.right-panel-resize-handle:hover::before,
-.right-panel-resize-handle.dragging::before {
-  background: var(--accent);
 }
 
 .right-panel-resize-handle:hover::after,
