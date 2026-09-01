@@ -370,7 +370,7 @@ export async function saveFileTab(id: string): Promise<boolean> {
   }
 }
 
-/** 打开 diff 预览标签：已打开则激活；否则取行数据后展示 */
+/** 打开 diff 预览标签：已打开则激活；否则立即建标签并异步取 diff + 构建行数据 */
 export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
   const id = diffTabId(params);
   if (tabs.some((t) => t.id === id)) {
@@ -394,7 +394,23 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
   insertTab(tab);
   activeTabId.value = id;
   try {
-    const rows = await invoke<DiffRow[]>("build_diff_preview", { params });
+    // Git 面板入口传入空 diff：先取差异文本（空则保持空态），再构建内联行
+    let diff = params.diff;
+    if (!diff) {
+      diff = await invoke<string>("git_changes_diff", {
+        workspace: params.workspace,
+        path: params.path,
+        kind: params.kind,
+      });
+      tab.fallback = diff;
+      if (!diff) {
+        tab.rows = [];
+        return;
+      }
+    }
+    const rows = await invoke<DiffRow[]>("build_diff_preview", {
+      params: { ...params, diff },
+    });
     tab.rows = rows ?? [];
   } catch (e) {
     tab.error = String(e);

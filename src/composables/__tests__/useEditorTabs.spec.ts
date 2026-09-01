@@ -49,6 +49,7 @@ import {
   saveFileTab,
   saveTabAndClose,
   tabs,
+  type DiffEditorTab,
   type DocxEditorTab,
   type FileEditorTab,
   type PreviewEditorTab,
@@ -476,6 +477,58 @@ describe("useEditorTabs 标签状态", () => {
       workspace: root,
     });
     expect(tabs.filter((t) => t.kind === "diff")).toHaveLength(1);
+  });
+
+  it("打开 diff 标签：空 diff 时先取差异文本再构建行，加载完成", async () => {
+    const diff = "diff --git a/b.txt b/b.txt\n@@ -1 +1 @@\n-a\n+b";
+    const rows = [{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }];
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_diff") return Promise.resolve(diff);
+      if (cmd === "build_diff_preview") {
+        return Promise.resolve(rows);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openDiffTab({
+      path: "b.txt",
+      kind: "modify",
+      diff: "",
+      workspace: root,
+    });
+    const diffTab = tabs.find(
+      (t): t is DiffEditorTab => t.kind === "diff",
+    )!;
+    expect(mockedInvoke).toHaveBeenCalledWith("git_changes_diff", {
+      workspace: root,
+      path: "b.txt",
+      kind: "modify",
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("build_diff_preview", {
+      params: { path: "b.txt", kind: "modify", diff, workspace: root },
+    });
+    expect(diffTab.loading).toBe(false);
+    expect(diffTab.rows).toEqual(rows);
+  });
+
+  it("打开 diff 标签：空 diff 保持空态且不报错", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_diff") return Promise.resolve("");
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openDiffTab({
+      path: "c.txt",
+      kind: "add",
+      diff: "",
+      workspace: root,
+    });
+    const diffTab = tabs.find(
+      (t): t is DiffEditorTab => t.kind === "diff",
+    )!;
+    expect(diffTab.loading).toBe(false);
+    expect(diffTab.error).toBe("");
+    expect(diffTab.rows).toEqual([]);
   });
 
   it("打开图像预览：创建标签、生成 asset URL、激活；重复打开去重", async () => {

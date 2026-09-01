@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { invoke } from "@tauri-apps/api/core";
 import ContextMenu from "./ContextMenu.vue";
 import ModalDialog from "./ModalDialog.vue";
 import GitSectionHead from "./GitSectionHead.vue";
@@ -8,7 +7,7 @@ import GitCommitBar from "./GitCommitBar.vue";
 import GitFileTree from "./GitFileTree.vue";
 import GitBranchMenu from "./GitBranchMenu.vue";
 import GitHistoryList from "./GitHistoryList.vue";
-import { setToast, toastError, workspace } from "../composables/useCodex";
+import { workspace } from "../composables/useCodex";
 import { useActionMenu } from "../composables/useActionMenu";
 import { useGitRemoteOps } from "../composables/useGitRemoteOps";
 import {
@@ -280,31 +279,19 @@ onBeforeUnmount(() => {
   window.removeEventListener("scroll", onWindowScroll, true);
 });
 
-async function openDiff(file: GitFile) {
+function openDiff(file: GitFile) {
   const root = gitStatus.value?.repoWorkspace;
   if (!root) return;
-  try {
-    const diff = await invoke<string>("git_changes_diff", {
-      workspace: root,
-      path: file.path,
-      kind: normalizeDiffKind(file.status),
-    });
-    if (!diff) {
-      setToast("该文件无内容变化（可能仅为重命名）");
-      return;
-    }
-    await openDiffTab({
-      path: file.path,
-      kind: normalizeDiffKind(file.status),
-      diff,
-      workspace: root,
-    });
-    // 直接联动资源树定位：与 EditorPane 标签激活 watch 双保险，覆盖
-    // 「Git 面板开 diff → 切资源面板」场景的时序/竞态
-    void revealAbsPathInTree(joinFsPath(root, file.path));
-  } catch (e) {
-    setToast(toastError(e));
-  }
+  // 立即打开标签：diff 文本与行构建交由 openDiffTab 在标签加载周期内完成
+  void openDiffTab({
+    path: file.path,
+    kind: normalizeDiffKind(file.status),
+    diff: "",
+    workspace: root,
+  });
+  // 直接联动资源树定位：与 EditorPane 标签激活 watch 双保险，覆盖
+  // 「Git 面板开 diff → 切资源面板」场景的时序/竞态
+  void revealAbsPathInTree(joinFsPath(root, file.path));
 }
 
 /** GitFileTree 行单击：目录折叠/展开，文件打开 diff */
