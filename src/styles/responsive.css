@@ -24,7 +24,7 @@
 
   /* 编辑器标签：限宽与栏内边距收紧 */
   .editor-tabs-bar {
-    padding: var(--space-4) var(--space-2) 0;
+    padding: var(--space-3) var(--space-2) 0;
   }
   .editor-tab {
     max-width: 160px;
