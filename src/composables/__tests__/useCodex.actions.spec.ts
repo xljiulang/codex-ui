@@ -63,7 +63,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     await newEmptyChat("D:/projects/B");
     expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
     await flushPromises();
-    expect(mockWin.setTitle).toHaveBeenCalledWith("B / 新建会话");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("新建会话");
   });
 });
 
@@ -206,7 +206,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     await newEmptyChat("D:/projects/B");
     expect(activeTabId.value).not.toBe(first);
     await flushPromises();
-    expect(mockWin.setTitle).toHaveBeenCalledWith("B / 新建会话");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("新建会话");
   });
 });
 describe("队列模式下发送提示", () => {

@@ -1,11 +1,9 @@
 // useCodex 拆分模块：会话标签底层状态（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { reactive, watch } from "vue";
-import { pathBaseName } from "../../lib/format";
 import { TabIcon, TabKind } from "../../lib/tabs";
 import { activeTab, activeTabId, activateTab, tabs } from "../useTabs";
 // 主窗口标题跟随活动 Tab 的模块级 watch（在此导入以确保在 useCodex 各模块图中均被接线）
 import "./windowTitle";
-import { resolveSessionWorkspace } from "./items";
 import { threadTitle } from "./selectors";
 import { store } from "./store";
 import type { SessionTab } from "./types";
@@ -105,18 +103,14 @@ export function allSessionTabs(): SessionTab[] {
 
 
 /**
- * 会话标签显示标题：恒为 `{sessionroot} / {标题内容}` 格式。
- * sessionroot 取标签解析后工作目录的目录名（线程 cwd → 新对话预选目录 → workspace 兜底）；
- * 标题内容取名称/摘要，无线程的新对话兜底“新建会话”；无任何可用目录时降级为仅标题内容。
+ * 会话标签显示标题：仅取标题内容（名称/摘要，无线程的新对话兜底“新建会话”）。
+ * 不再拼接工作目录名前缀（会话标签与窗口标题均使用本标题）。
  */
 export function sessionTabTitle(tab: SessionTab): string {
-  const root = resolveSessionWorkspace(tab);
-  const folder = root ? pathBaseName(root) : "";
   const summary = tab.threadId
     ? store.threads.find((t) => t.id === tab.threadId)
     : undefined;
-  const title = tab.name || (summary ? threadTitle(summary) : "新建会话");
-  return folder ? `${folder} / ${title}` : title;
+  return tab.name || (summary ? threadTitle(summary) : "新建会话");
 }
 
 

@@ -282,7 +282,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     expect(tabs[0].name).toBe("新名");
     expect(activeSessionTab()?.name).toBe("新名");
     await flushPromises();
-    expect(mockWin.setTitle).toHaveBeenCalledWith("repo / 新名");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("新名");
     disposeEvents();
   });
 });

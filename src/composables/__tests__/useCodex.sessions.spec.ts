@@ -60,7 +60,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("会话标签标题：目录名 / 会话标题", () => {
+  it("会话标签标题：会话标题", () => {
     store.threads = [
       { id: "t1", name: null, preview: "", createdAt: 0, recencyAt: 0 },
     ];
@@ -100,7 +100,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       newChatWorkspace: null,
       interactions: [],
     };
-    expect(sessionTabTitle(tab)).toBe("sub / 我的标题");
+    expect(sessionTabTitle(tab)).toBe("我的标题");
   });
 });
 
@@ -238,7 +238,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       newChatWorkspace: null,
       interactions: [],
     };
-    expect(sessionTabTitle(tab)).toBe("repo / 预览文本");
+    expect(sessionTabTitle(tab)).toBe("预览文本");
   });
 });
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
@@ -255,7 +255,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("会话标签标题：新建带目录为 目录名 / 名称", () => {
+  it("会话标签标题：新建带目录仅名称", () => {
     const tab: SessionTab = {
       id: "s1",
       kind: "chat",
@@ -292,7 +292,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       newChatWorkspace: "D:/repo",
       interactions: [],
     };
-    expect(sessionTabTitle(tab)).toBe("repo / 标题");
+    expect(sessionTabTitle(tab)).toBe("标题");
   });
 });
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
@@ -309,7 +309,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("会话标签标题：全新标签带目录为 目录名 / 新建会话", () => {
+  it("会话标签标题：全新标签为 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
       kind: "chat",
@@ -346,7 +346,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       newChatWorkspace: "D:/repo",
       interactions: [],
     };
-    expect(sessionTabTitle(tab)).toBe("repo / 新建会话");
+    expect(sessionTabTitle(tab)).toBe("新建会话");
   });
 });
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
@@ -363,7 +363,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   });
 
 
-  it("会话标签标题：新对话预选目录后为 目录名 / 新建会话", () => {
+  it("会话标签标题：新对话预选目录后为 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
       kind: "chat",
@@ -400,7 +400,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       newChatWorkspace: "D:/projects/B",
       interactions: [],
     };
-    expect(sessionTabTitle(tab)).toBe("B / 新建会话");
+    expect(sessionTabTitle(tab)).toBe("新建会话");
   });
 });
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {
@@ -688,17 +688,17 @@ describe("会话标签状态与事件路由", () => {
   });
 
 
-  it("会话标签 title 由同步点维护：新建带目录为 目录名 / 新建会话，改名后更新", async () => {
+  it("会话标签 title 由同步点维护：新建为 新建会话，改名后更新", async () => {
     await newEmptyChat("D:/projects/B");
-    expect(tabs[0].title).toBe("B / 新建会话");
+    expect(tabs[0].title).toBe("新建会话");
 
     await newEmptyChat("D:/repo");
     const tab = tabs[1];
-    expect(tab.title).toBe("repo / 新建会话");
+    expect(tab.title).toBe("新建会话");
     tab.name = "我的标题";
     tab.newChatWorkspace = "D:/projects/B/sub";
     tab.title = sessionTabTitle(tab);
-    expect(tab.title).toBe("sub / 我的标题");
+    expect(tab.title).toBe("我的标题");
   });
 });
 describe("会话标签状态与事件路由", () => {
