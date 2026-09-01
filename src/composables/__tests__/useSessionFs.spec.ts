@@ -462,7 +462,7 @@ describe("useSessionFs 粘贴可用性与新建文本文件", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("clipboard_write_files", {
       paths: ["D:\\src\\a.txt"],
     });
-    expect(store.toast).toContain("已复制");
+    expect(store.toast).toBe("已复制[a.txt]");
   });
 
   it("createTextFile：调用命令、提示并刷新", async () => {

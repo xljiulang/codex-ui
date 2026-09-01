@@ -272,15 +272,12 @@ function openAddMenu(e: MouseEvent) {
       icon: ICON_SESSION,
       action: () => void pickAndOpenNewSession(),
     },
-  ];
-  // 无确定工作目录时隐藏「新建终端」，避免以空/回退目录启动终端
-  if (ws) {
-    items.push({
+    {
       label: "新建终端",
       icon: ICON_TERMINAL,
       action: () => void openTerminalTab(ws),
-    });
-  }
+    },
+  ];
   openCtx(e, items);
 }
 

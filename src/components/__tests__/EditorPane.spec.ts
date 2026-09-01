@@ -330,14 +330,26 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("无工作区时点「+」：菜单仅为「新建会话」，隐藏「新建终端」", async () => {
+  it("无工作区时点「+」：菜单仍含「新建会话 / 新建终端」", async () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
     const items = wrapper.findAll(".ctx-menu-item");
-    expect(items.map((i) => i.text().trim())).toEqual(["新建会话"]);
     expect(
-      items.some((i) => i.text().trim() === "新建终端"),
-    ).toBe(false);
+      items.map((i) => i.text().trim()),
+    ).toEqual(["新建会话", "新建终端"]);
+    wrapper.unmount();
+  });
+
+  it("无工作区时点击「新建终端」：仍调用 terminal_spawn 并传入空工作目录", async () => {
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await settle();
+    const spawn = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "terminal_spawn",
+    );
+    expect(spawn).toBeTruthy();
+    expect((spawn![1] as { workspace?: string }).workspace).toBe("");
     wrapper.unmount();
   });
 

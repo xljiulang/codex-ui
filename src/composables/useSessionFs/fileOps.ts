@@ -7,7 +7,7 @@ import { refreshAll } from "./tree";
 export async function copyEntry(entry: FsEntry) {
   try {
     await invoke("clipboard_write_files", { paths: [entry.path] });
-    setToast(`已复制「${entry.name}」，可粘贴到系统/资源管理器`);
+    setToast(`已复制[${entry.name}]`);
   } catch (e) {
     setToast(toastError(e));
   }

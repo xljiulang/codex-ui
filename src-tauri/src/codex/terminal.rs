@@ -185,6 +185,16 @@ pub fn kill_all(state: &TerminalState) {
     }
 }
 
+/// 解析终端启动目录：显式工作区（绝对路径）直接校验；空串回退应用自身目录
+/// （`app_exe_dir`），使「+」菜单在无工作区时也能无条件打开终端。
+fn resolve_terminal_dir(workspace: &str) -> Result<PathBuf, String> {
+    if workspace.trim().is_empty() {
+        app_exe_dir().ok_or_else(|| "无法确定应用目录".into())
+    } else {
+        resolve_workspace_dir(workspace)
+    }
+}
+
 /// 创建新终端：以给定工作区按设置启动 cmd 或 PowerShell（ConPTY），
 /// 并启动 reader 线程转发输出。
 /// id 由前端生成（terminal:<uuid>），保证标签与后端会话一一对应，天然支持多开。
@@ -198,7 +208,7 @@ pub fn terminal_spawn(
     if id.trim().is_empty() {
         return Err("终端 id 不能为空".into());
     }
-    let dir = resolve_workspace_dir(&workspace)?;
+    let dir = resolve_terminal_dir(&workspace)?;
     {
         let guard = state.0.lock().map_err(|e| e.to_string())?;
         if guard.contains_key(&id) {
@@ -472,6 +482,24 @@ mod tests {
     fn spawn_accepts_existing_dir() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         assert!(resolve_workspace_dir(dir.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn resolve_terminal_dir_falls_back_to_app_dir_on_empty() {
+        let dir = resolve_terminal_dir("").unwrap();
+        assert_eq!(dir, app_exe_dir().unwrap());
+        assert!(dir.is_absolute());
+    }
+
+    #[test]
+    fn resolve_terminal_dir_keeps_workspace_validation() {
+        assert!(resolve_terminal_dir("relative/path").is_err());
+        assert!(resolve_terminal_dir("  ").is_ok());
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(
+            resolve_terminal_dir(dir.to_str().unwrap()).unwrap(),
+            resolve_workspace_dir(dir.to_str().unwrap()).unwrap()
+        );
     }
 
     #[test]

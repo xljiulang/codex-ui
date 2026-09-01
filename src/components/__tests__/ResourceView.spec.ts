@@ -1230,7 +1230,7 @@ describe("ResourceView 文件树", () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "复制");
-    expect(store.toast).toContain("已复制");
+    expect(store.toast).toBe("已复制[a.txt]");
     // 复制把路径以 CF_HDROP 写入系统剪贴板
     expect(mockedInvoke).toHaveBeenCalledWith("clipboard_write_files", {
       paths: [aTxt.path],
