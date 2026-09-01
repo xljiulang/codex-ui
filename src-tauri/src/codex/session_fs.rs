@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use crate::codex::path_util::{clean_path, is_inside_path, norm_key, rel_path_of as shared_rel_path_of};
-use crate::codex::file_icon::{icon_data_uri, icon_data_uri_for_ext};
+use crate::codex::file_icon::{DEFAULT_ICON_SIZE, icon_data_uri, icon_data_uri_for_ext};
 use crate::codex::util::{BlockingError, resolve_workspace_dir, spawn_blocking_timeout};
 
 /// 会话资源条目（camelCase 序列化，供前端直接使用）
@@ -799,7 +799,7 @@ pub async fn session_fs_icons(
 ) -> Result<Vec<IconResult>, String> {
     run_blocking(60, move || {
         let root_p = resolve_workspace_dir(&workspace)?;
-        Ok(icons_impl(&root_p, &requests, size.unwrap_or(16)))
+        Ok(icons_impl(&root_p, &requests, size.unwrap_or(DEFAULT_ICON_SIZE)))
     })
     .await
 }
@@ -823,7 +823,7 @@ fn validate_ext(ext: &str) -> Result<(), String> {
 /// 用于右键菜单等按类型取图场景；失败返回 None（前端回退内置 SVG）。
 fn icon_for_ext_impl(ext: &str) -> Result<Option<String>, String> {
     validate_ext(ext)?;
-    icon_data_uri_for_ext(ext, 16)
+    icon_data_uri_for_ext(ext, DEFAULT_ICON_SIZE)
 }
 
 #[tauri::command]

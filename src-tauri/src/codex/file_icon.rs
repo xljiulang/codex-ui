@@ -9,8 +9,8 @@ use std::path::Path;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 
-/// 列表图标默认请求尺寸（CSS 显示 14px，取 16px 保证清晰度）
-const DEFAULT_ICON_SIZE: u32 = 16;
+/// 列表图标默认请求尺寸（CSS 显示 14px/标签 16px，取 32px“大/中等”图标，高清屏缩小更清晰）
+pub const DEFAULT_ICON_SIZE: u32 = 32;
 
 /// SHGetFileInfo 非线程安全（共享系统镜像列表），进程级串行化所有取图标调用；
 /// 图标提取为亚毫秒级，串行开销可忽略。
@@ -85,7 +85,7 @@ unsafe fn shell_file_icon_data_uri(
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
     use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_FLAGS, SHGFI_ICON, SHGFI_SMALLICON,
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_FLAGS, SHGFI_ICON, SHGFI_LARGEICON,
         SHGFI_USEFILEATTRIBUTES,
     };
     use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
@@ -98,7 +98,7 @@ unsafe fn shell_file_icon_data_uri(
         Some(&mut info),
         std::mem::size_of::<SHFILEINFOW>() as u32,
         SHGFI_ICON
-            | SHGFI_SMALLICON
+            | SHGFI_LARGEICON
             | if use_file_attributes {
                 SHGFI_USEFILEATTRIBUTES
             } else {
