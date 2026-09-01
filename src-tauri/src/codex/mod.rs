@@ -1,5 +1,6 @@
 pub mod app_server;
 pub mod bundled;
+pub mod cli_tools;
 pub mod commands;
 pub mod custom_instructions;
 pub mod diff;

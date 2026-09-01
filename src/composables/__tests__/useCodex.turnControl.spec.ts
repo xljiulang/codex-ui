@@ -2,6 +2,7 @@ import { newEmptyChat, openThread, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { buildTurnParams, clearGoal, setGoal } from "../useCodex/turnControl";
+import { availableBundledTools } from "../useBundledTools";
 import { activeTabId } from "../useEditorTabs";
 import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
@@ -403,6 +404,10 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
 });
 
 describe("buildTurnParams 三面独立映射", () => {
+  beforeEach(() => {
+    availableBundledTools.value = [];
+  });
+
   it("权限/任务模式/模型各自独立派生，互不串扰", () => {
     store.models = [DEFAULT_MODEL];
     const params = buildTurnParams(
@@ -425,7 +430,11 @@ describe("buildTurnParams 三面独立映射", () => {
     // 计划模式面：mode 由 taskMode 决定，settings.model 取同一标签显式值
     expect(params.collaborationMode).toMatchObject({
       mode: "plan",
-      settings: { model: "gpt-5-extra", reasoning_effort: "high" },
+      settings: {
+        model: "gpt-5-extra",
+        reasoning_effort: "high",
+        developer_instructions: null,
+      },
     });
   });
 
@@ -449,6 +458,53 @@ describe("buildTurnParams 三面独立映射", () => {
       networkAccess: true,
     });
     expect(params.approvalsReviewer).toBeUndefined();
+  });
+
+  it("默认模式且检测到捆绑工具时注入 developer_instructions，计划模式保持 null", () => {
+    store.models = [DEFAULT_MODEL];
+    availableBundledTools.value = ["rg", "fd", "ast-grep"];
+    const params = buildTurnParams(
+      "t1",
+      [{ type: "text", text: "hi", text_elements: [] }],
+      "cid-4",
+      "D:/repo",
+      {
+        permissionMode: "full-access",
+        taskMode: "default",
+        model: "gpt-5",
+        effort: null,
+      },
+    );
+    const dev = (
+      params.collaborationMode as {
+        settings?: { developer_instructions?: string | null };
+      }
+    ).settings?.developer_instructions;
+    expect(dev).toBeTruthy();
+    expect(dev).toContain("rg：文本搜索");
+    expect(dev).toContain("fd：按名快速查找文件/目录");
+    expect(dev).toContain("ast-grep / sg");
+
+    // 计划模式（plan）不受工具提示影响，保持 null
+    const planParams = buildTurnParams(
+      "t1",
+      [{ type: "text", text: "hi", text_elements: [] }],
+      "cid-5",
+      "D:/repo",
+      {
+        permissionMode: "full-access",
+        taskMode: "plan",
+        model: "gpt-5",
+        effort: null,
+      },
+    );
+    expect(
+      (
+        planParams.collaborationMode as {
+          settings?: { developer_instructions?: string | null };
+        }
+      ).settings?.developer_instructions,
+    ).toBeNull();
   });
 
   it("执行模式 + 标签未选模型时回退默认模型，权限面仍独立", () => {

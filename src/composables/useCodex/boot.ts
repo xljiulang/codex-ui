@@ -8,6 +8,7 @@ import { store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
+import { loadBundledTools } from "../useBundledTools";
 
 
 /** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
@@ -39,6 +40,8 @@ export async function init() {
   try {
     // 先拿到工作目录：沙箱可写根与资源/Git 面板需要它；历史列表有意展示全部目录的会话。
     await Promise.all([loadSettings(), refreshServer()]);
+    // 预取捆绑 CLI 工具（ast-grep/fd/rg）可用性：供默认协作模式注入 developer_instructions
+    void loadBundledTools();
     // 主窗口标题跟随活动 tab；无活动 tab 时回退 “Codex UI v<版本>”。
     // 非 Tauri 环境 getVersion 不可用，回退无版本标题；setTitle 失败同样静默忽略。
     let windowTitle = "Codex UI";

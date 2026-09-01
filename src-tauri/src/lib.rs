@@ -180,6 +180,7 @@ pub fn run() {
             codex::commands::skills_read,
             codex::commands::custom_instructions_read,
             codex::commands::custom_instructions_save,
+            codex::cli_tools::cli_tools_available,
             codex::session_fs::session_fs_list,
             codex::session_fs::session_fs_search,
             codex::session_fs::session_fs_metadata,

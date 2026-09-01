@@ -1,5 +1,6 @@
 // useCodex 拆分模块：回合控制（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { invoke } from "@tauri-apps/api/core";
+import { bundledToolsDeveloperInstructions } from "../useBundledTools";
 import { buildTurnInput } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandboxPolicy } from "../../lib/permissions";
 import { sessionLog } from "../../lib/sessionLog";
@@ -55,7 +56,8 @@ export function buildTurnParams(
     settings: {
       model: collabModel,
       reasoning_effort: session?.effort ?? null,
-      developer_instructions: null,
+      developer_instructions:
+        mode === "default" ? bundledToolsDeveloperInstructions() : null,
     },
   };
   return params;
