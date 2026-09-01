@@ -47,6 +47,11 @@ const emit = defineEmits<{ close: [] }>();
           v-else
           :d="it.icon"
           :fill-rule="it.nonzero ? 'nonzero' : 'evenodd'"
+          :fill="it.stroke ? 'none' : 'currentColor'"
+          :stroke="it.stroke ? 'currentColor' : 'none'"
+          :stroke-width="it.stroke ? 3 : undefined"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         />
       </svg>
       <span>{{ it.label }}</span>

@@ -304,6 +304,12 @@ describe("SessionView 右键菜单", () => {
     const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
     expect(t1Row.find(".session-icon path").attributes("d")).toBe(ICON_WECHAT);
     expect(t2Row.find(".session-icon path").attributes("d")).toBe(ICON_SESSION);
+    // 微信绑定行保留填充渲染；未绑定会话行以描边渲染
+    expect(t1Row.find(".session-icon path").attributes("fill")).toBe("currentColor");
+    expect(t1Row.find(".session-icon path").attributes("stroke")).toBe("none");
+    expect(t2Row.find(".session-icon path").attributes("fill")).toBe("none");
+    expect(t2Row.find(".session-icon path").attributes("stroke")).toBe("currentColor");
+    expect(t2Row.find(".session-icon path").attributes("stroke-width")).toBe("3");
     expect(t1Row.find(".history-wechat-badge").exists()).toBe(false);
     store.wechat = null;
   });

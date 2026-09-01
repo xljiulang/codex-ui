@@ -6,6 +6,8 @@ export interface CtxItem {
   icon?: string;
   /** icon 路径按非零环绕（nonzero）渲染（如微信 Logo 重叠气泡）；缺省为 evenodd 挖空 */
   nonzero?: boolean;
+  /** icon 为描边图标（如会话圆气泡）：以 stroke 绘制、fill 置 none；与 nonzero/paths/img 互斥 */
+  stroke?: boolean;
   /**
    * 多路径图标（如会话 Logo：描边六边形 + C 标记），存在时优先于 icon 渲染；
    * accent 路径按描边 Logo 渲染（logo-c 类）。

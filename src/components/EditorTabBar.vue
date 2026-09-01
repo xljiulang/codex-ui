@@ -241,7 +241,11 @@ function titleTooltip(tab: EditorTab): string {
           <svg viewBox="0 0 24 24">
             <path
               :d="isThreadBound(tab.threadId) ? ICON_WECHAT : ICON_SESSION"
-              fill-rule="evenodd"
+              :fill="isThreadBound(tab.threadId) ? 'currentColor' : 'none'"
+              :stroke="isThreadBound(tab.threadId) ? 'none' : 'currentColor'"
+              :stroke-width="isThreadBound(tab.threadId) ? undefined : 3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
             />
           </svg>
         </span>

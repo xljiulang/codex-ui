@@ -211,6 +211,7 @@ function openFolderCtxMenu(group: SessionGroup, e: MouseEvent) {
     {
       label: "新建会话",
       icon: ICON_SESSION,
+      stroke: true,
       action: () => void openNewSession(group.path),
     },
     {
@@ -347,7 +348,11 @@ onBeforeUnmount(() => {
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path
                 :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION"
-                fill-rule="evenodd"
+                :fill="isThreadBound(row.thread.id) ? 'currentColor' : 'none'"
+                :stroke="isThreadBound(row.thread.id) ? 'none' : 'currentColor'"
+                :stroke-width="isThreadBound(row.thread.id) ? undefined : 3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
               />
             </svg>
           </span>
