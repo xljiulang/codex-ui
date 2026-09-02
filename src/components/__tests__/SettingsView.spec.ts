@@ -2093,7 +2093,7 @@ describe("SettingsView 基础设置", () => {
       method: "memory/reset",
       params: null,
     });
-    expect(store.toast).toContain("记忆已重置");
+    expect(store.toast).toContain("记忆已删除");
   });
 
   it("删除本地记忆：取消时不调用 memory/reset", async () => {

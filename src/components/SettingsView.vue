@@ -190,15 +190,15 @@ watch(activeSection, (id) => {
 
 async function resetMemory() {
   const ok = await askConfirm({
-    title: "重置记忆",
+    title: "删除记忆",
     message: "将清空全部已保存的记忆，且无法撤销。是否继续？",
-    confirmLabel: "重置记忆",
+    confirmLabel: "删除记忆",
     cancelLabel: "取消",
   });
   if (!ok) return;
   try {
     await invoke("codex_rpc", { method: "memory/reset", params: null });
-    setToast("记忆已重置");
+    setToast("记忆已删除");
   } catch (e) {
     setToast(toastError(e));
   }
