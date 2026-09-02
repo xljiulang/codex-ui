@@ -360,7 +360,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--console-bg-deep);
+  /* 终端背景与 tab 内容区同色：四周 padding 与 xterm 内容都显示 --bg，主题间无接缝 */
+  background: var(--bg);
 }
 
 .terminal-host {

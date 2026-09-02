@@ -75,14 +75,16 @@ interface TerminalTheme {
   brightWhite: string;
 }
 
-/** 从当前主题 CSS 变量读取 xterm 完整配色（变量缺失时回退到蓝夜默认值） */
+/** 从当前主题 CSS 变量读取 xterm 完整配色：背景用 tab 内容区底色 --bg（不透明），
+ * 其余用 console 配色（变量缺失时回退到蓝夜默认值）。--bg 为不透明色，避免半透明
+ * 双层合成导致内容区与四周 padding 的色差。 */
 function readTerminalTheme(): TerminalTheme {
   const cs = getComputedStyle(document.documentElement);
   const accentRgb = cs.getPropertyValue("--accent-rgb").trim();
   const v = (name: string, fallback: string) =>
     cs.getPropertyValue(name).trim() || fallback;
   return {
-    background: v("--console-bg-deep", "#0c1016"),
+    background: v("--bg", "#0e1116"),
     foreground: v("--console-text", "#d4dce8"),
     cursor: v("--accent", "#4f8cc9"),
     cursorAccent: v("--console-cursor-text", "#0c1016"),

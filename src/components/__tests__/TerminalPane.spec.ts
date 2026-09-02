@@ -134,6 +134,7 @@ function makeTab(over: Partial<TerminalEditorTab> = {}): TerminalEditorTab {
 /** 三套主题的 CSS 变量表（与 src/styles/theme.css 保持一致） */
 const THEME_VARS: Record<string, Record<string, string>> = {
   blue: {
+    "--bg": "#0e1116",
     "--console-bg-deep": "rgba(12, 16, 22, 0.9)",
     "--console-text": "#c6cdd8",
     "--accent": "#4da6ff",
@@ -157,6 +158,7 @@ const THEME_VARS: Record<string, Record<string, string>> = {
     "--console-ansi-bright-white": "#eef2f8",
   },
   dark: {
+    "--bg": "#0a0b10",
     "--console-bg-deep": "rgba(12, 13, 20, 0.9)",
     "--console-text": "#b9b8c9",
     "--accent": "#a78bfa",
@@ -180,6 +182,7 @@ const THEME_VARS: Record<string, Record<string, string>> = {
     "--console-ansi-bright-white": "#f1effc",
   },
   light: {
+    "--bg": "#f4f6fb",
     "--console-bg-deep": "rgba(231, 236, 244, 0.95)",
     "--console-text": "#3e4756",
     "--accent": "#2563eb",
@@ -243,7 +246,7 @@ function clearThemeVars() {
 function expectedTheme(id: string): Record<string, string> {
   const vars = THEME_VARS[id];
   const theme: Record<string, string> = {
-    background: vars["--console-bg-deep"],
+    background: vars["--bg"],
     foreground: vars["--console-text"],
     cursor: vars["--accent"],
     cursorAccent: vars["--console-cursor-text"],
