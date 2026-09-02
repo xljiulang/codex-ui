@@ -42,7 +42,6 @@ import {
   ICON_EXTENSION,
   ICON_FILE,
   ICON_FOLDER_OPEN,
-  ICON_IGNORE,
   ICON_LINK,
   ICON_MCP,
   ICON_MODEL_CUBE,
@@ -1577,29 +1576,32 @@ function pluginInitial(p: PluginCatalogItem): string {
 
           <div class="model-config-card">
             <div class="model-config-card-head">
-              <h3>model_catalog_json</h3>
+              <button
+                type="button"
+                class="model-config-title-link"
+                v-tooltip="'在编辑器中打开文件'"
+                :disabled="!modelConfig.model_catalog_path"
+                @click="openCatalogFile"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_FILE" />
+                </svg>
+                <span>model_catalog_json</span>
+              </button>
               <div class="model-config-head-actions">
-                <div class="model-config-path">
-                  <template v-if="modelConfig.model_catalog_path">
-                    <button
-                      type="button"
-                      class="model-config-path-link"
-                      v-tooltip="'在编辑器中打开文件'"
-                      @click="openCatalogFile"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="ICON_FILE" />
-                      </svg>
-                      {{ modelConfig.model_catalog_path }}
-                    </button>
-                    <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
-                      （文件不存在，无法编辑）
-                    </span>
-                  </template>
-                  <template v-else>
+                <template v-if="modelConfig.model_catalog_path">
+                  <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
+                    （文件不存在，无法编辑）
+                  </span>
+                </template>
+                <template v-else>
+                  <span
+                    class="model-config-path-status"
+                    :class="{ 'model-config-missing': !!modelConfig.config_path }"
+                  >
                     {{ modelConfig.config_path ? "（config 未配置 model_catalog_json）" : "正在读取路径…" }}
-                  </template>
-                </div>
+                  </span>
+                </template>
                 <button
                   class="btn btn-icon model-config-reload-btn"
                   aria-label="重读"
@@ -1651,26 +1653,22 @@ function pluginInitial(p: PluginCatalogItem): string {
           </p>
           <div class="model-config-card">
             <div class="model-config-card-head">
-              <h3>AGENTS</h3>
+              <button
+                type="button"
+                class="model-config-title-link"
+                v-tooltip="'在编辑器中打开文件'"
+                :disabled="!agents.agents_path"
+                @click="openAgentsFile"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_FILE" />
+                </svg>
+                <span>AGENTS</span>
+              </button>
               <div class="model-config-head-actions">
-                <div class="model-config-path">
-                  <button
-                    v-if="agents.agents_path"
-                    type="button"
-                    class="model-config-path-link"
-                    v-tooltip="'在编辑器中打开文件'"
-                    @click="openAgentsFile"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FILE" />
-                    </svg>
-                    {{ agents.agents_path }}
-                  </button>
-                  <template v-else>正在读取路径…</template>
-                  <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
-                    （文件不存在，保存时将新建）
-                  </span>
-                </div>
+                <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
+                  （文件不存在，保存时将新建）
+                </span>
                 <button
                   class="btn btn-icon model-config-reload-btn"
                   aria-label="重读"
@@ -1834,22 +1832,16 @@ function pluginInitial(p: PluginCatalogItem): string {
                   </p>
                 </div>
                 <div class="skill-actions">
-                  <span class="skill-status" :class="{ off: !s.enabled }">
-                    {{ s.enabled ? "已启用" : "已禁用" }}
-                  </span>
-                  <button
-                    type="button"
-                    class="btn btn-icon"
-                    :class="{ primary: !s.enabled, loading: !!skillsState.busy[s.path] }"
-                    v-tooltip="s.enabled ? '禁用' : '启用'"
-                    :aria-label="s.enabled ? '禁用' : '启用'"
-                    :disabled="skillsState.loading || !!skillsState.busy[s.path]"
-                    @click="toggleSkill(s)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="s.enabled ? ICON_IGNORE : ICON_CHECK" />
-                    </svg>
-                  </button>
+                  <label class="switch">
+                    <input
+                      type="checkbox"
+                      :checked="s.enabled"
+                      :disabled="skillsState.loading || !!skillsState.busy[s.path]"
+                      :aria-label="s.enabled ? '禁用技能' : '启用技能'"
+                      @change="toggleSkill(s)"
+                    />
+                    <span class="switch-track"></span>
+                  </label>
                 </div>
               </div>
             </div>

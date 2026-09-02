@@ -778,6 +778,53 @@
   flex-shrink: 0;
 }
 
+/* 卡片标题作为文件链接（AGENTS / model_catalog_json）：图标 + 标题，可点击打开文件 */
+.model-config-title-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-base);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-bright);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.model-config-title-link svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+.model-config-title-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.model-config-title-link:disabled {
+  cursor: default;
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+/* 未配置/读取中的路径状态提示（等宽、灰字；异常态再叠加 model-config-missing 变红） */
+.model-config-path-status {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  color: var(--text-dim);
+  user-select: text;
+  text-align: right;
+  min-width: 0;
+}
+
 .model-config-path {
   font-family: var(--mono);
   font-size: var(--font-sm);

@@ -319,8 +319,8 @@ describe("SettingsView 模型配置", () => {
       wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 两条路径链接均可用（model_catalog_json / AGENTS）
-    expect(wrapper.findAll(".model-config-path-link").length).toBe(2);
+    // 两条标题链接均可用（model_catalog_json / AGENTS）
+    expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
   });
 
   it("模型配置两张卡片保存按钮标题均为「保存」", async () => {
@@ -360,11 +360,11 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("点击 model_catalog_json 路径链接在应用内打开", async () => {
+  it("点击 model_catalog_json 标题链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(
-      ".settings-section-model-config .model-config-path-link",
+      ".settings-section-model-config .model-config-title-link",
     );
     await links[0].trigger("click");
     await flushPromises();
@@ -373,11 +373,11 @@ describe("SettingsView 模型配置", () => {
     );
   });
 
-  it("点击 AGENTS 路径链接在应用内打开", async () => {
+  it("点击 AGENTS 标题链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(
-      ".settings-section-global-instructions .model-config-path-link",
+      ".settings-section-global-instructions .model-config-title-link",
     );
     await links[0].trigger("click");
     await flushPromises();
@@ -390,7 +390,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(false);
     const wrapper = mount(SettingsView);
     await flushPromises();
-    await wrapper.findAll(".model-config-path-link")[0].trigger("click");
+    await wrapper.findAll(".model-config-title-link")[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/models.json",
@@ -542,7 +542,12 @@ describe("SettingsView 模型配置", () => {
         .attributes("disabled"),
     ).toBeDefined();
     expect(wrapper.text()).toContain("config 未配置 model_catalog_json");
-    expect(wrapper.findAll(".model-config-path-link").length).toBe(1);
+    expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
+    expect(
+      wrapper
+        .find(".settings-section-model-config .model-config-title-link")
+        .attributes("disabled"),
+    ).toBeDefined();
   });
 
   it("渲染提供方列表与激活单选", async () => {
@@ -1179,7 +1184,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(empty.text()).toContain("missing field `description`");
   });
 
-  it("禁用技能行显示状态与启用按钮，点击后写配置并强制刷新", async () => {
+  it("禁用技能 switch 开启后写配置并强制刷新", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
@@ -1188,8 +1193,11 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       .trigger("click");
     await flushPromises();
     const rows = wrapper.findAll(".skill-row");
-    expect(rows[1].text()).toContain("已禁用");
-    await rows[1].find(".skill-actions .btn").trigger("click");
+    expect(
+      (rows[1].find(".skill-actions .switch input").element as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    await rows[1].find(".skill-actions .switch input").setValue(true);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "skills/config/write",
@@ -1201,7 +1209,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(store.toast).toContain("已启用 csharp-code-rules");
   });
 
-  it("启用状态的技能点击后写禁用配置", async () => {
+  it("启用状态技能 switch 关闭后写禁用配置", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
@@ -1210,8 +1218,11 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       .trigger("click");
     await flushPromises();
     const rows = wrapper.findAll(".skill-row");
-    expect(rows[0].text()).toContain("已启用");
-    await rows[0].find(".skill-actions .btn").trigger("click");
+    expect(
+      (rows[0].find(".skill-actions .switch input").element as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    await rows[0].find(".skill-actions .switch input").setValue(false);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "skills/config/write",
@@ -1237,7 +1248,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       .trigger("click");
     await flushPromises();
     const rows = wrapper.findAll(".skill-row");
-    await rows[1].find(".skill-actions .btn").trigger("click");
+    await rows[1].find(".skill-actions .switch input").setValue(true);
     await flushPromises();
     expect(store.toast).toContain("配置写入失败");
     const forcedReloads = mockedInvoke.mock.calls.filter(
@@ -2725,7 +2736,7 @@ describe("SettingsView 按钮图标", () => {
     await flushPromises();
     const selectors = [
       ".settings-nav-item",
-      ".model-config-path-link",
+      ".model-config-title-link",
       ".model-config-actions button.primary",
       ".model-config-reload-btn",
       ".model-provider-actions .btn",
