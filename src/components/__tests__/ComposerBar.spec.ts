@@ -1417,7 +1417,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
     wrapper = null;
   });
 
-  it("回合进行中权限按钮仍可点击并切换模式", async () => {
+  it("空闲时权限按钮可点击并切换模式", async () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await flushPromises();
     const chip = wrapper.find(".perm-chip");
@@ -1431,6 +1431,16 @@ describe("ComposerBar 权限与草稿会话私有", () => {
     await fullAccessItem.trigger("click");
     await flushPromises();
     expect(activeSessionTab()?.permissionMode).toBe("full-access");
+    expect(wrapper.find(".popup-menu").exists()).toBe(false);
+  });
+
+  it("回合进行中权限按钮禁用", async () => {
+    const tab = defaultTab();
+    tab.turnActive = true;
+    wrapper = mount(ComposerBar, { props: { tab } });
+    await flushPromises();
+    expect(wrapper.find(".perm-chip").attributes("disabled")).toBeDefined();
+    await wrapper.find(".perm-chip").trigger("click");
     expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 

@@ -526,6 +526,7 @@ function taskModeLabel(): string {
               <button
                 class="perm-chip"
                 v-tooltip="'权限模式'"
+                :disabled="tab.turnActive"
                 @click="toggleMenu('perm')"
               >
                 <svg class="chip-icon" viewBox="0 0 24 24">

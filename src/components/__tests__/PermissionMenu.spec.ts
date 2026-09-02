@@ -53,4 +53,12 @@ describe("PermissionMenu 权限模式菜单", () => {
     expect(activeSessionTab()?.permissionMode).toBe("help-me-approve");
     expect(w.emitted("close")).toBeTruthy();
   });
+
+  it("回合进行中点击模式项不改变权限模式", async () => {
+    (tabs[0] as SessionTab).turnActive = true;
+    const w = mount(PermissionMenu);
+    await modeItem(w, "完全访问").trigger("click");
+    expect(activeSessionTab()?.permissionMode).not.toBe("full-access");
+    expect(w.emitted("close")).toBeFalsy();
+  });
 });

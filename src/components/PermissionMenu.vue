@@ -7,6 +7,7 @@ const emit = defineEmits<{ close: [] }>();
 
 function choose(id: PermissionId) {
   const tab = activeSessionTab();
+  if (tab?.turnActive) return; // 回合进行中不可切换（按钮本身已禁用，这里兜底）
   if (tab) {
     tab.permissionMode = id;
     void saveSessionState(tab); // 进程级生效 + 统一持久化
