@@ -16,8 +16,9 @@ describe("权限模式映射", () => {
       "只读访问",
       "请求批准",
       "帮我批准",
-      "完全访问权限",
+      "完全访问",
     ]);
+    expect(PERMISSION_MODES[3].desc).toBe("不受限制地访问互联网和您电脑的任何文件");
   });
 
   it("请求批准 → on-request + workspace-write + user 评审", () => {

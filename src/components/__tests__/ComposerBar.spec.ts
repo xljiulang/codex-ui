@@ -1427,7 +1427,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
     expect(wrapper.find(".popup-menu").exists()).toBe(true);
     const fullAccessItem = wrapper
       .findAll(".mode-menu-item")
-      .find((w) => w.text().includes("完全访问权限"))!;
+      .find((w) => w.text().includes("完全访问"))!;
     await fullAccessItem.trigger("click");
     await flushPromises();
     expect(activeSessionTab()?.permissionMode).toBe("full-access");
