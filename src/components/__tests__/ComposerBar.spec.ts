@@ -194,6 +194,17 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(wrapper.find("button.plus-btn").exists()).toBe(false);
   });
 
+  it("会话输入框右键事件被拦截（不弹右键菜单）", () => {
+    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    const el = wrapper.find(".rich-editor").element;
+    const ev = new MouseEvent("contextmenu", {
+      cancelable: true,
+      bubbles: true,
+    });
+    el.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
   it("新会话态不再渲染输入框上方的项目目录行", () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     expect(wrapper.find(".newchat-cwd-row").exists()).toBe(false);

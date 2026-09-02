@@ -505,7 +505,7 @@ function taskModeLabel(): string {
       </div>
       <div class="composer-card">
         <div class="menu-anchor input-anchor">
-          <EditorContent :editor="editor" class="rich-editor" />
+          <EditorContent :editor="editor" class="rich-editor" @contextmenu.prevent />
           <MentionMenu
             ref="mentionMenu"
             v-if="mention"
