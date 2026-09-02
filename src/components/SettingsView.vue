@@ -219,6 +219,9 @@ function selectTheme(id: ThemeId) {
 const DEEPSEEK_CODEX_DOCS_URL =
   "https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex/";
 
+/** GLM（智谱）Codex 接入文档（浏览器打开） */
+const GLM_CODEX_DOCS_URL = "https://docs.bigmodel.cn/cn/coding-plan/tool/codex";
+
 /** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
   loading: false,
@@ -574,11 +577,9 @@ async function openPathInAppOrReveal(path: string) {
   }
 }
 
-/** 打开 DeepSeek Codex 接入文档（默认浏览器） */
-function openDeepSeekDocs() {
-  void invoke("open_url", { url: DEEPSEEK_CODEX_DOCS_URL }).catch(
-    () => undefined,
-  );
+/** 打开 Codex 接入文档（默认浏览器） */
+function openDocs(url: string) {
+  void invoke("open_url", { url }).catch(() => undefined);
 }
 
 // ---------- AGENTS.md 自定义指令 ----------
@@ -1167,13 +1168,24 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <button
                   type="button"
                   class="model-config-docs-link"
-                  v-tooltip="'DeepSeek Codex 接入文档（浏览器打开）'"
-                  @click="openDeepSeekDocs"
+                  v-tooltip="'DeepSeek 接入文档（浏览器打开）'"
+                  @click="openDocs(DEEPSEEK_CODEX_DOCS_URL)"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_LINK" />
                   </svg>
-                  DeepSeek 接入文档
+                  DeepSeek
+                </button>
+                <button
+                  type="button"
+                  class="model-config-docs-link"
+                  v-tooltip="'GLM 接入文档（浏览器打开）'"
+                  @click="openDocs(GLM_CODEX_DOCS_URL)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_LINK" />
+                  </svg>
+                  GLM
                 </button>
                 <button
                   class="btn btn-icon primary model-config-add-btn"

@@ -413,15 +413,17 @@ describe("SettingsView 模型配置", () => {
     });
   });
 
-  it("渲染 DeepSeek 接入文档链接", async () => {
+  it("渲染 DeepSeek / GLM 接入文档链接", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const link = wrapper.find(".model-config-docs-link");
-    expect(link.exists()).toBe(true);
-    expect(link.text()).toBe("DeepSeek 接入文档");
+    const links = wrapper.findAll(".model-config-docs-link");
+    expect(links.length).toBe(2);
+    expect(links[0].text()).toBe("DeepSeek");
+    expect(links[1].text()).toBe("GLM");
     expect(
-      wrapper.find(".model-config-head-actions .model-config-docs-link").exists(),
-    ).toBe(true);
+      wrapper.findAll(".model-config-head-actions .model-config-docs-link")
+        .length,
+    ).toBe(2);
   });
 
   it("点击 DeepSeek 接入文档链接用默认浏览器打开文档", async () => {
@@ -431,6 +433,17 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
       url: "https://api-docs.deepseek.com/zh-cn/quick_start/agent_integrations/codex/",
+    });
+  });
+
+  it("点击 GLM 接入文档链接用默认浏览器打开文档", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const links = wrapper.findAll(".model-config-docs-link");
+    await links[1].trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
+      url: "https://docs.bigmodel.cn/cn/coding-plan/tool/codex",
     });
   });
 

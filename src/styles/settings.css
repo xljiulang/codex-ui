@@ -140,7 +140,7 @@
 .memory-row-title {
   font-size: var(--font-md);
   font-weight: 600;
-  color: var(--text-bright);
+  color: var(--text-dim);
   margin-bottom: var(--space-1);
 }
 
