@@ -76,7 +76,6 @@ describe("useCodex/modelProviderConfig", () => {
     expect(s.model_provider).toBe("deepseek");
     expect(s.preferred_auth_method).toBe("apikey");
     expect(s.forced_login_method).toBe("api");
-    expect(s.model_catalog_json).toBe("models.json");
     expect(s.providers).toEqual([
       {
         key: "deepseek",
@@ -232,6 +231,12 @@ describe("useCodex/modelProviderConfig", () => {
     expect(edits[2]).toEqual({
       keyPath: "model",
       value: "",
+      mergeStrategy: "replace",
+    });
+    // 空目录内容 → model_catalog_json 写 null（codex 删除该键）
+    expect(edits[6]).toEqual({
+      keyPath: "model_catalog_json",
+      value: null,
       mergeStrategy: "replace",
     });
   });

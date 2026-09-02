@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   addMarketplace,
@@ -8,6 +8,7 @@ import {
   isAuthRequiredError,
   loadMcpServers,
   loadMemoryConfig,
+  loadModels,
   loadModelProviderConfig,
   loadPluginCatalog,
   removeMarketplace,
@@ -219,12 +220,10 @@ const DEEPSEEK_CODEX_DOCS_URL =
 /** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
   loading: false,
-  savingCatalog: false,
-  savingProviders: false,
+  saving: false,
   config_path: "",
   config_exists: false,
   config_content: "",
-  model_catalog_json: "",
   model_catalog_path: "",
   model_catalog_exists: false,
   model_catalog: "",
@@ -237,11 +236,11 @@ const modelConfig = reactive({
   providers: [] as ModelProviderInfo[],
 });
 
-/** 模型提供方卡片校验状态：空串表示无错误；catalogWarning 为黄色警告（不阻断保存） */
+/** 模型配置卡片校验状态：空串表示无错误；catalog 为模型目录结构错误（阻断保存） */
 const modelConfigErrors = reactive({
   model: "",
   provider: "",
-  catalogWarning: "",
+  catalog: "",
 });
 
 /** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
@@ -295,7 +294,6 @@ function applyProvidersCard(pc: ModelProviderConfigState) {
   modelConfig.model_provider = pc.model_provider;
   modelConfig.preferred_auth_method = pc.preferred_auth_method;
   modelConfig.forced_login_method = pc.forced_login_method;
-  modelConfig.model_catalog_json = pc.model_catalog_json;
   // 浅拷贝：组件内增删改不污染调用方数组引用（测试/热更新下尤其重要）
   modelConfig.providers = (pc.providers ?? []).map((p) => ({ ...p }));
   // 由 preferred_auth_method/forced_login_method 推导「认证方式」下拉
@@ -322,45 +320,6 @@ async function loadModelConfig() {
     applyCatalogCard(res);
     // openai_api_key_present 是进程环境检查，config/read 不提供，由 model_config_read 补充
     modelConfig.openai_api_key_present = res.openai_api_key_present;
-    const pc = await loadModelProviderConfig();
-    applyProvidersCard(pc);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    modelConfig.loading = false;
-  }
-}
-
-/** config 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
-async function refreshModelConfig() {
-  modelConfig.loading = true;
-  try {
-    const res = await invoke<ModelConfigState>("model_config_read");
-    applyConfigCard(res);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    modelConfig.loading = false;
-  }
-}
-
-/** model_catalog_json 卡片刷新：重新从磁盘读取并只应用该卡片字段 */
-async function refreshCatalog() {
-  modelConfig.loading = true;
-  try {
-    const res = await invoke<ModelConfigState>("model_config_read");
-    applyCatalogCard(res);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    modelConfig.loading = false;
-  }
-}
-
-/** 模型提供方卡片刷新：重新从磁盘读取并只应用该卡片字段 */
-async function refreshProviders() {
-  modelConfig.loading = true;
-  try {
     const pc = await loadModelProviderConfig();
     applyProvidersCard(pc);
   } catch (e) {
@@ -488,6 +447,32 @@ function providerRowError(p: ModelProviderInfo): string {
   return "";
 }
 
+/** 由 model_catalog_json 编辑框内容提取模型 slug（缺失回退 id），供模型名输入建议 */
+const catalogModelIds = computed<string[]>(() => {
+  const content = (modelConfig.model_catalog ?? "").trim();
+  if (!content) return [];
+  try {
+    const parsed: unknown = JSON.parse(content);
+    const arr =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as { models?: unknown }).models
+        : undefined;
+    if (!Array.isArray(arr)) return [];
+    const ids: string[] = [];
+    for (const m of arr) {
+      if (!m || typeof m !== "object") continue;
+      const candid = m as Record<string, unknown>;
+      const id = typeof candid.slug === "string" ? candid.slug : candid.id;
+      if (typeof id === "string" && id.trim() && !ids.includes(id)) {
+        ids.push(id.trim());
+      }
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+});
+
 /** 认证方式下拉 → 顶层两个键（默认不写入） */
 function authMethodToEdit(): {
   preferred_auth_method: string;
@@ -505,12 +490,12 @@ function authMethodToEdit(): {
   return { preferred_auth_method: "", forced_login_method: "" };
 }
 
-/** 保存可视化模型配置：整状态同步，其余 TOML 内容由后端保留 */
-async function saveProviders() {
-  if (modelConfig.savingProviders || modelConfig.loading) return;
+/** 保存模型配置：提供方 + 模型标量 + 模型目录合并为一个保存；目录内容非法时提示并阻断 */
+async function saveModelConfig() {
+  if (modelConfig.saving || modelConfig.loading) return;
   modelConfigErrors.model = "";
   modelConfigErrors.provider = "";
-  modelConfigErrors.catalogWarning = "";
+  modelConfigErrors.catalog = "";
   let blocked = false;
   if (!modelConfig.model.trim()) {
     modelConfigErrors.model = "请填写 model（模型名称）";
@@ -529,24 +514,29 @@ async function saveProviders() {
   }
   if (blocked) return;
 
-  // model_catalog_json 目标文件存在性检查：不存在给出黄色警告，但允许保存
-  let catalogExists = true;
-  const catalogValue = modelConfig.model_catalog_json.trim();
-  if (catalogValue) {
+  // 模型目录内容：非空时先做 JSON 合法性提示，再去 Rust 做结构校验并落盘
+  const catalogContent = modelConfig.model_catalog.trim();
+  if (catalogContent) {
     try {
-      catalogExists = await invoke<boolean>("model_catalog_target_exists", {
-        value: catalogValue,
-      });
-    } catch (e) {
-      setToast(toastError(e));
+      JSON.parse(catalogContent);
+    } catch {
+      modelConfigErrors.catalog = "模型目录不是合法 JSON";
+      blocked = true;
+    }
+    if (!blocked) {
+      try {
+        await invoke("model_catalog_save", { content: catalogContent });
+      } catch (e) {
+        const msg = toastError(e);
+        modelConfigErrors.catalog = msg;
+        setToast(msg);
+        blocked = true;
+      }
     }
   }
-  if (!catalogExists) {
-    modelConfigErrors.catalogWarning =
-      "model_catalog_json 目标文件不存在，保存后将在读取时自动创建（空模型目录）";
-  }
+  if (blocked) return;
 
-  modelConfig.savingProviders = true;
+  modelConfig.saving = true;
   try {
     const auth = authMethodToEdit();
     const input: ModelConfigUiEdit = {
@@ -555,37 +545,18 @@ async function saveProviders() {
       model_provider: modelConfig.model_provider,
       preferred_auth_method: auth.preferred_auth_method,
       forced_login_method: auth.forced_login_method,
-      model_catalog_json: catalogValue,
+      model_catalog_json: catalogContent ? modelConfig.model_catalog_path : null,
       providers: modelConfig.providers,
     };
     await saveModelProviderConfig(input);
     setToast("模型配置已保存");
-    if (!catalogExists) {
-      modelConfigErrors.catalogWarning =
-        "已保存；model_catalog_json 目标文件将在读取时自动创建";
-    }
-    // config 内容已变化：重读提供方、原始 config 与 model_catalog_json 卡片
-    await refreshProviders();
-    await refreshModelConfig();
-    await refreshCatalog();
+    // 提供方/模型目录变化后强制重载模型列表，刷新各会话模型菜单
+    await loadModels(true);
+    await loadModelConfig();
   } catch (e) {
     setToast(toastError(e));
   } finally {
-    modelConfig.savingProviders = false;
-  }
-}
-
-async function saveCatalog() {
-  if (modelConfig.savingCatalog || modelConfig.loading) return;
-  modelConfig.savingCatalog = true;
-  try {
-    await invoke("model_catalog_save", { content: modelConfig.model_catalog });
-    modelConfig.model_catalog_exists = true;
-    setToast("model_catalog_json 已保存");
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    modelConfig.savingCatalog = false;
+    modelConfig.saving = false;
   }
 }
 
@@ -599,10 +570,6 @@ async function openPathInAppOrReveal(path: string) {
   } catch (e) {
     setToast(toastError(e));
   }
-}
-
-function openCatalogFile() {
-  void openPathInAppOrReveal(modelConfig.model_catalog_path);
 }
 
 /** 打开 DeepSeek Codex 接入文档（默认浏览器） */
@@ -1183,7 +1150,7 @@ function pluginInitial(p: PluginCatalogItem): string {
 
           <div class="model-config-card">
             <div class="model-config-card-head">
-              <h3>模型提供方</h3>
+              <h3>模型配置</h3>
               <div class="model-config-head-actions">
                 <button
                   type="button"
@@ -1198,8 +1165,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </button>
                 <button
                   class="btn btn-icon primary model-config-add-btn"
-                  v-tooltip="'添加'"
-                  aria-label="添加"
+                  v-tooltip="'添加模型提供方'"
+                  aria-label="添加模型提供方"
                   :disabled="modelConfig.loading"
                   @click="openAddProvider"
                 >
@@ -1212,7 +1179,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   aria-label="重读"
                   v-tooltip="'重读'"
                   :disabled="modelConfig.loading"
-                  @click="refreshProviders"
+                  @click="loadModelConfig"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_REFRESH" />
@@ -1306,10 +1273,18 @@ function pluginInitial(p: PluginCatalogItem): string {
                   id="model-config-ui-model"
                   v-model="modelConfig.model"
                   type="text"
+                  list="model-config-model-options"
                   :disabled="modelConfig.loading"
                   placeholder="如 deepseek-v4-flash"
                   :class="{ 'model-config-input-error': modelConfigErrors.model }"
                 />
+                <datalist id="model-config-model-options">
+                  <option
+                    v-for="mid in catalogModelIds"
+                    :key="mid"
+                    :value="mid"
+                  ></option>
+                </datalist>
                 <p
                   v-if="modelConfigErrors.model"
                   class="model-config-field-error"
@@ -1346,16 +1321,25 @@ function pluginInitial(p: PluginCatalogItem): string {
                   preferred_auth_method="apikey" 与 forced_login_method="api"
                 </p>
               </div>
-              <div class="setting-row">
-                <label for="model-config-ui-catalog">model_catalog_json</label>
-                <input
-                  id="model-config-ui-catalog"
-                  v-model="modelConfig.model_catalog_json"
-                  type="text"
-                  :disabled="modelConfig.loading"
-                  placeholder="如 models.json、绝对路径或 ~/.codex/models.json"
-                />
+            </div>
+
+            <div class="model-catalog-block">
+              <div class="model-catalog-head">
+                <span>模型目录（model_catalog_json）</span>
               </div>
+              <p class="model-config-path">
+                {{ modelConfig.model_catalog_path || "正在读取目录路径…" }}
+              </p>
+              <textarea
+                v-model="modelConfig.model_catalog"
+                class="model-config-textarea"
+                :disabled="modelConfig.loading"
+                placeholder='在此编辑模型目录内容（必须为合法 JSON，如 {"models":[]}）'
+                spellcheck="false"
+              ></textarea>
+              <p v-if="modelConfigErrors.catalog" class="model-config-field-error">
+                {{ modelConfigErrors.catalog }}
+              </p>
             </div>
 
             <ModalDialog
@@ -1474,7 +1458,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <button class="btn" @click="closeProviderForm">取消</button>
                 <button
                   class="btn primary provider-form-submit"
-                  :disabled="modelConfig.savingProviders || modelConfig.loading"
+                  :disabled="modelConfig.saving || modelConfig.loading"
                   @click="confirmProviderForm"
                 >
                   {{ providerForm.editingIndex >= 0 ? "保存修改" : "添加" }}
@@ -1482,88 +1466,13 @@ function pluginInitial(p: PluginCatalogItem): string {
               </template>
             </ModalDialog>
 
-            <p
-              v-if="modelConfigErrors.catalogWarning"
-              class="model-config-warning"
-            >
-              {{ modelConfigErrors.catalogWarning }}
-            </p>
-
             <div class="model-config-actions">
               <button
                 class="btn primary model-config-save-btn"
-                :class="{ loading: modelConfig.savingProviders }"
+                :class="{ loading: modelConfig.saving }"
                 aria-label="保存"
-                :disabled="modelConfig.savingProviders || modelConfig.loading"
-                @click="saveProviders"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_SAVE" />
-                </svg>
-                <span>保存</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="model-config-card">
-            <div class="model-config-card-head">
-              <button
-                type="button"
-                class="model-config-title-link"
-                v-tooltip="'在编辑器中打开文件'"
-                :disabled="!modelConfig.model_catalog_path"
-                @click="openCatalogFile"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_FILE" />
-                </svg>
-                <span>model_catalog_json</span>
-              </button>
-              <div class="model-config-head-actions">
-                <template v-if="modelConfig.model_catalog_path">
-                  <span v-if="!modelConfig.model_catalog_exists" class="model-config-missing">
-                    （文件不存在，无法编辑）
-                  </span>
-                </template>
-                <template v-else>
-                  <span
-                    class="model-config-path-status"
-                    :class="{ 'model-config-missing': !!modelConfig.config_path }"
-                  >
-                    {{ modelConfig.config_path ? "（config 未配置 model_catalog_json）" : "正在读取路径…" }}
-                  </span>
-                </template>
-                <button
-                  class="btn btn-icon model-config-reload-btn"
-                  aria-label="重读"
-                  v-tooltip="'重读'"
-                  :disabled="modelConfig.loading"
-                  @click="refreshCatalog"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_REFRESH" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <textarea
-              v-model="modelConfig.model_catalog"
-              class="model-config-textarea"
-              :disabled="modelConfig.loading || !modelConfig.model_catalog_exists"
-              placeholder="在此编辑 model_catalog_json 目标文件内容（必须是合法 JSON）"
-              spellcheck="false"
-            ></textarea>
-            <div class="model-config-actions">
-              <button
-                class="btn primary model-config-save-btn"
-                :class="{ loading: modelConfig.savingCatalog }"
-                aria-label="保存"
-                :disabled="
-                  modelConfig.savingCatalog ||
-                  modelConfig.loading ||
-                  !modelConfig.model_catalog_exists
-                "
-                @click="saveCatalog"
+                :disabled="modelConfig.saving || modelConfig.loading"
+                @click="saveModelConfig"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />

@@ -23,7 +23,6 @@ export interface ModelProviderConfigState {
   model_provider: string;
   preferred_auth_method: string;
   forced_login_method: string;
-  model_catalog_json: string;
   providers: ModelProviderInfo[];
   /** 用户层原始 [model_providers.*] 表（保存时作为未知字段基底） */
   raw: Record<string, unknown>;
@@ -61,7 +60,6 @@ export async function loadModelProviderConfig(): Promise<ModelProviderConfigStat
     model_provider: str(cfg.model_provider),
     preferred_auth_method: str(cfg.preferred_auth_method),
     forced_login_method: str(cfg.forced_login_method),
-    model_catalog_json: str(cfg.model_catalog_json),
     providers,
     raw: { ...rawMap },
   };
@@ -104,6 +102,8 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
     merged[key] = base;
   }
 
+  // model_catalog_json：非空写绝对路径；空/非字符串视为未配置，写 null 让 codex 删除该键
+  const catalogRaw = edit.model_catalog_json?.trim();
   await invoke("codex_rpc", {
     method: "config/batchWrite",
     params: {
@@ -128,7 +128,7 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
         },
         {
           keyPath: "model_catalog_json",
-          value: edit.model_catalog_json.trim(),
+          value: catalogRaw || null,
           mergeStrategy: "replace",
         },
       ],

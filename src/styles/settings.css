@@ -1328,6 +1328,25 @@
   border-color: var(--accent);
 }
 
+/* 模型目录区块：只读路径 + JSON 编辑器（与提供方输入区之间加分隔） */
+.model-catalog-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.model-catalog-head span {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.model-catalog-block .model-config-path {
+  text-align: left;
+}
+
 .custom-instructions-textarea {
   width: 100%;
   flex: 1;

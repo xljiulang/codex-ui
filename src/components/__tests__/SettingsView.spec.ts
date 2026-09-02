@@ -272,12 +272,12 @@ describe("SettingsView 模型配置", () => {
           .element as HTMLTextAreaElement
       ).value,
     ).toBe("# AGENTS.md\n\nWindows 环境。\n");
-    expect(wrapper.text()).toContain("模型提供方");
+    expect(wrapper.text()).toContain("模型配置");
     expect(wrapper.text()).toContain("model_catalog_json");
     expect(wrapper.text()).toContain("AGENTS");
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-card").length,
-    ).toBe(2);
+    ).toBe(1);
     expect(
       wrapper.findAll(".settings-section-global-instructions .model-config-card")
         .length,
@@ -296,7 +296,7 @@ describe("SettingsView 模型配置", () => {
     expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("文件缺失时读取自动创建：卡片均可编辑并显示路径链接", async () => {
+  it("文件缺失时可编辑，仅 AGENTS 保留标题链接", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
         return Promise.resolve({
@@ -313,37 +313,52 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const textareas = wrapper.findAll("textarea.model-config-textarea");
-    // 文件已自动创建：model_catalog_json 与 AGENTS 均可编辑
+    // 模型目录元数据与 AGENTS 均可编辑
     expect(textareas[0].attributes("disabled")).toBeUndefined();
     expect(
       wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 两条标题链接均可用（model_catalog_json / AGENTS）
-    expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
+    // 仅 AGENTS 保留标题链接，model_catalog_json 卡不再有
+    expect(
+      wrapper.findAll(".settings-section-model-config .model-config-title-link")
+        .length,
+    ).toBe(0);
+    expect(
+      wrapper.findAll(".settings-section-global-instructions .model-config-title-link")
+        .length,
+    ).toBe(1);
   });
 
-  it("模型配置两张卡片保存按钮文本均为「保存」", async () => {
+  it("模型配置合并为单卡且保存按钮文本为「保存」", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const saveButtons = wrapper.findAll(
       ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
     );
-    expect(saveButtons.map((b) => b.text().trim())).toEqual(["保存", "保存"]);
+    expect(saveButtons.length).toBe(1);
+    expect(saveButtons[0].text().trim()).toBe("保存");
   });
 
-  it("点 model_catalog_json 卡「保存」调用 model_catalog_save", async () => {
+  it("保存模型配置同时调用 model_catalog_save 与 config/batchWrite", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const cards = wrapper.findAll(
-      ".settings-section-model-config .model-config-card",
-    );
-    await cards[1].find(".model-config-actions button.primary").trigger("click");
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      )
+      .trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("model_catalog_save", {
       content: '{\n  "models": []\n}',
     });
-    expect(store.toast).toContain("model_catalog_json 已保存");
+    const batchWrite = mockedInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    );
+    expect(batchWrite).toBeTruthy();
+    expect(store.toast).toContain("模型配置已保存");
   });
 
   it("点 AGENTS 卡「保存」调用 custom_instructions_save", async () => {
@@ -360,17 +375,13 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("点击 model_catalog_json 标题链接在应用内打开", async () => {
+  it("模型配置卡不渲染 model_catalog_json 标题链接", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(
       ".settings-section-model-config .model-config-title-link",
     );
-    await links[0].trigger("click");
-    await flushPromises();
-    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
-      "C:/apps/codex-ui/.codex/models.json",
-    );
+    expect(links.length).toBe(0);
   });
 
   it("点击 AGENTS 标题链接在应用内打开", async () => {
@@ -390,13 +401,15 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(false);
     const wrapper = mount(SettingsView);
     await flushPromises();
-    await wrapper.findAll(".model-config-title-link")[0].trigger("click");
+    await wrapper
+      .find(".settings-section-global-instructions .model-config-title-link")
+      .trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
-      "C:/apps/codex-ui/.codex/models.json",
+      "C:/apps/codex-ui/.codex/AGENTS.md",
     );
     expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
-      path: "C:/apps/codex-ui/.codex/models.json",
+      path: "C:/apps/codex-ui/.codex/AGENTS.md",
     });
   });
 
@@ -421,19 +434,20 @@ describe("SettingsView 模型配置", () => {
     });
   });
 
-  it("模型提供方重读不重置 model_catalog_json 文本框", async () => {
+  it("重读模型配置会重新从磁盘读取（含目录内容）", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .findAll("textarea.model-config-textarea")[0]
+      .find("textarea.model-config-textarea")
       .setValue('{\n  "models": [],\n  "edited": true\n}');
     const readCallsBefore = mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
         (args as { method?: string } | undefined)?.method === "config/read",
     ).length;
-    const cards = wrapper.findAll(".model-config-card");
-    await cards[0].find(".model-config-reload-btn").trigger("click");
+    await wrapper
+      .find(".settings-section-model-config .model-config-reload-btn")
+      .trigger("click");
     await flushPromises();
     expect(
       mockedInvoke.mock.calls.filter(
@@ -442,15 +456,16 @@ describe("SettingsView 模型配置", () => {
           (args as { method?: string } | undefined)?.method === "config/read",
       ).length,
     ).toBe(readCallsBefore + 1);
+    // 重读会从磁盘回填目录内容（默认 sampleModelConfig.model_catalog）
     expect(
       (
-        wrapper.findAll("textarea.model-config-textarea")[0]
+        wrapper.find("textarea.model-config-textarea")
           .element as HTMLTextAreaElement
       ).value,
-    ).toBe('{\n  "models": [],\n  "edited": true\n}');
+    ).toBe('{\n  "models": []\n}');
   });
 
-  it("model_catalog_json 与 AGENTS 刷新重新从磁盘读取", async () => {
+  it("模型配置重读与 AGENTS 刷新重新从磁盘读取", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const readCallsBefore = mockedInvoke.mock.calls.filter(
@@ -459,10 +474,9 @@ describe("SettingsView 模型配置", () => {
     const agentsCallsBefore = mockedInvoke.mock.calls.filter(
       ([name]) => name === "custom_instructions_read",
     ).length;
-    const modelCards = wrapper.findAll(
-      ".settings-section-model-config .model-config-card",
-    );
-    await modelCards[1].find(".model-config-reload-btn").trigger("click");
+    await wrapper
+      .find(".settings-section-model-config .model-config-reload-btn")
+      .trigger("click");
     await flushPromises();
     const agentsCard = wrapper.find(
       ".settings-section-global-instructions .model-config-card",
@@ -480,7 +494,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe(agentsCallsBefore + 1);
   });
 
-  it("保存模型提供方成功后自动重读 model_catalog_json 卡片", async () => {
+  it("保存模型配置成功后自动重读目录卡片", async () => {
     let catalogContent = '{\n  "models": []\n}';
     mockedInvoke.mockImplementation((cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
@@ -502,28 +516,31 @@ describe("SettingsView 模型配置", () => {
     ).length;
     catalogContent = '{\n  "models": [{ "id": "gpt-x" }]\n}';
     await wrapper
-      .findAll(".model-config-card")[0]
-      .find(".model-config-actions button.primary")
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      )
       .trigger("click");
     await flushPromises();
     expect(
       mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
         .length,
-    ).toBe(readCallsBefore + 2);
+    ).toBe(readCallsBefore + 1);
     expect(
       (
-        wrapper.findAll("textarea.model-config-textarea")[0]
+        wrapper.find("textarea.model-config-textarea")
           .element as HTMLTextAreaElement
       ).value,
     ).toBe('{\n  "models": [{ "id": "gpt-x" }]\n}');
+    expect(store.toast).toContain("模型配置已保存");
   });
 
-  it("model_catalog_json 未配置时禁用编辑", async () => {
+  it("config 未配置 model_catalog_json 时仍可编辑（默认 models.json）", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
         return Promise.resolve({
           ...sampleModelConfig,
-          model_catalog_path: "",
+          model_catalog_json: "",
+          model_catalog_path: "C:/apps/codex-ui/.codex/models.json",
           model_catalog_exists: false,
           model_catalog: "",
         });
@@ -533,21 +550,44 @@ describe("SettingsView 模型配置", () => {
     });
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const textareas = wrapper.findAll("textarea.model-config-textarea");
-    expect(textareas[0].attributes("disabled")).toBeDefined();
+    // 未配置时使用默认解析路径，编辑器仍可编辑
     expect(
-      wrapper
-        .findAll(".model-config-card")[1]
-        .find(".model-config-actions button.primary")
-        .attributes("disabled"),
-    ).toBeDefined();
-    expect(wrapper.text()).toContain("config 未配置 model_catalog_json");
-    expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
+      wrapper.find("textarea.model-config-textarea").attributes("disabled"),
+    ).toBeUndefined();
     expect(
-      wrapper
-        .find(".settings-section-model-config .model-config-title-link")
-        .attributes("disabled"),
-    ).toBeDefined();
+      wrapper.find(".model-catalog-block .model-config-path").text(),
+    ).toContain("models.json");
+    // 不渲染 model_catalog_json 标题链接
+    expect(
+      wrapper.findAll(".settings-section-model-config .model-config-title-link")
+        .length,
+    ).toBe(0);
+  });
+
+  it("模型名称输入带 list，datalist 由模型目录 slug 生成", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .find("textarea.model-config-textarea")
+      .setValue(
+        '{\n  "models": [\n    { "slug": "m1", "display_name": "M1" },\n    { "slug": "m2", "display_name": "M2" }\n  ]\n}',
+      );
+    await flushPromises();
+    const input = wrapper.find("#model-config-ui-model");
+    expect(input.attributes("list")).toBe("model-config-model-options");
+    const options = wrapper
+      .findAll("#model-config-model-options option")
+      .map((o) => o.attributes("value"));
+    expect(options).toContain("m1");
+    expect(options).toContain("m2");
+  });
+
+  it("模型配置添加按钮 aria-label 为「添加模型提供方」", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(wrapper.find(".model-config-add-btn").attributes("aria-label")).toBe(
+      "添加模型提供方",
+    );
   });
 
   it("渲染提供方列表与激活单选", async () => {
@@ -869,54 +909,53 @@ describe("SettingsView 模型配置", () => {
     ).toBe("api");
   });
 
-  it("model_catalog_json 目标不存在时黄色警告但允许保存", async () => {
-    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
-      if (cmd === "codex_rpc" && args?.method === "config/read") {
-        return Promise.resolve({
-          config: {},
-          layers: [
-            {
-              name: { type: "user" },
-              config: {
-                model: "deepseek-v4-flash",
-                model_reasoning_effort: "high",
-                model_provider: "deepseek",
-                preferred_auth_method: "",
-                forced_login_method: "",
-                model_catalog_json: "D:/missing/models.json",
-                model_providers:
-                  sampleModelConfigRead.layers[0].config.model_providers,
-              },
-            },
-          ],
-        });
-      }
-      if (cmd === "model_config_read")
-        return Promise.resolve({
-          ...sampleModelConfig,
-          model_catalog_json: "D:/missing/models.json",
-          preferred_auth_method: "",
-          forced_login_method: "",
-        });
-      if (cmd === "model_catalog_target_exists")
-        return Promise.resolve(false);
-      if (cmd === "custom_instructions_read")
-        return Promise.resolve(sampleAgentsState);
-      return Promise.resolve(undefined);
-    });
+  it("模型目录内容非法 JSON 时提示并阻断保存（不写 config）", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .findAll(".model-config-card")[0]
-      .find(".model-config-save-btn")!
+      .find("textarea.model-config-textarea")
+      .setValue("{ not json");
+    const batchCallsBefore = mockedInvoke.mock.calls.filter(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    ).length;
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      )
       .trigger("click");
     await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("model_catalog_target_exists", {
-      value: "D:/missing/models.json",
+    // 红框行内错误，且未落盘 config
+    expect(
+      wrapper.find(".model-catalog-block .model-config-field-error").text(),
+    ).toContain("模型目录不是合法 JSON");
+    expect(mockedInvoke).not.toHaveBeenCalledWith("model_catalog_save", {
+      content: "{ not json",
     });
-    expect(wrapper.text()).toContain(
-      "model_catalog_json 目标文件将在读取时自动创建",
-    );
+    expect(
+      mockedInvoke.mock.calls.filter(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method ===
+            "config/batchWrite",
+      ).length,
+    ).toBe(batchCallsBefore);
+  });
+
+  it("模型目录为空时保存删除 config 的 model_catalog_json 键", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find("textarea.model-config-textarea").setValue("   ");
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      )
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith("model_catalog_save", {
+      content: "   ",
+    });
     const saveCall = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
@@ -930,7 +969,7 @@ describe("SettingsView 模型配置", () => {
     ).params.edits;
     expect(
       edits.find((e) => e.keyPath === "model_catalog_json")?.value,
-    ).toBe("D:/missing/models.json");
+    ).toBeNull();
   });
 
   it("检测到全局 OPENAI_API_KEY 时表单可省略认证并显示提示", async () => {

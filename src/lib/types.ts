@@ -256,7 +256,8 @@ export interface ModelConfigUiEdit {
   model_provider: string;
   preferred_auth_method: string;
   forced_login_method: string;
-  model_catalog_json: string;
+  /** model_catalog_json 目标绝对路径；null 表示删除 config 中的该键（未配置目录） */
+  model_catalog_json: string | null;
   providers: ModelProviderInfo[];
 }
 

@@ -628,13 +628,6 @@ pub fn model_catalog_save(content: String) -> Result<(), String> {
     model_config::save_model_catalog(&content)
 }
 
-/// 检查 model_catalog_json 配置值对应的目标文件当前是否存在（不创建文件），
-/// 供设置页保存前给出黄色警告。
-#[tauri::command]
-pub fn model_catalog_target_exists(value: String) -> Result<bool, String> {
-    model_config::catalog_target_exists(&value)
-}
-
 /// 读取本地技能列表（从 skills/list 聚合列表过滤 CODEX_HOME/skills 下的技能），
 /// 供设置页「技能管理」使用；force_reload 为 true 时绕过技能缓存强制重扫。
 #[tauri::command]

@@ -4,9 +4,9 @@
 //! `%USERPROFILE%\.codex`；codex 子进程不再被显式注入 CODEX_HOME，因此继承同一值，
 //! 两者保持一致。config.toml 与 model_catalog_json 目标文件均按用户编辑内容整文件
 //! 原样读写：config 保存前校验 TOML 可解析，不注入任何受管键；model_catalog_json
-//! 目标路径完全以 config.toml 中实际配置的值为准，不提供默认文件名。
-//! 读取时若文件缺失会自动创建：config.toml 创建空文件，model_catalog_json 目标
-//! 创建 `{"models":[]}`（该键未配置时不创建）。
+//! 目标路径统一由 resolve_catalog_path 解析——config 已配置则按实际值（绝对/相对/~），
+//! 未配置则默认 `CODEX_HOME/models.json`（绝对路径）。读取时不自动创建目录文件；
+//! 目录内容为空即视为未配置目录（由前端在保存时删除 config 中的 model_catalog_json 键）。
 
 use serde::Serialize;
 use std::fs;
@@ -15,9 +15,6 @@ use std::path::{Path, PathBuf};
 use toml_edit::{DocumentMut, Item};
 
 use crate::codex::path_util::clean_path;
-
-/// 自动创建 model_catalog_json 目标文件时的默认内容（空模型目录，与 codex 目录格式一致）。
-pub const DEFAULT_MODEL_CATALOG_CONTENT: &str = "{\"models\":[]}";
 
 /// `model_config_read` 的返回结构：config 整文件内容 + model_catalog_json 目标状态。
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +86,15 @@ fn model_catalog_json_value(config_path: &Path) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+/// model_catalog_json 的目标路径：config 已配置则按既有规则解析（绝对值原样、相对按
+/// CODEX_HOME 拼接、`~` 展开），未配置或值为空白则返回 `CODEX_HOME/models.json`（绝对路径）。
+fn resolve_catalog_path(home: &Path, config_value: Option<&str>) -> PathBuf {
+    match config_value {
+        Some(v) if !v.trim().is_empty() => model_catalog_path_in(home, v.trim()),
+        _ => home.join("models.json"),
+    }
+}
+
 /// model_catalog_json 目标路径：绝对路径原样使用，相对路径基于 CODEX_HOME 拼接；
 /// 独立首段 `~`（`~`、`~/...`、`~\...`）先展开为 %USERPROFILE%，再走上述判定。
 fn model_catalog_path_in(home: &Path, value: &str) -> PathBuf {
@@ -120,17 +126,6 @@ fn expand_tilde(value: &str) -> String {
     // 去掉前导分隔符：Windows 下 join 以 `/`/`\` 开头的路径会重置到盘符根目录
     let rest = rest.trim_start_matches(|c| c == '/' || c == '\\');
     profile.join(rest).to_string_lossy().into_owned()
-}
-
-/// 检查 model_catalog_json 配置值对应的目标文件是否存在（不创建文件）。
-/// 空值视为未配置，返回 false。
-pub fn catalog_target_exists(value: &str) -> Result<bool, String> {
-    let home = codex_home()?;
-    let value = value.trim();
-    if value.is_empty() {
-        return Ok(false);
-    }
-    Ok(model_catalog_path_in(&home, value).is_file())
 }
 
 /// 结构化读取的顶层键与全部 [model_providers.*]。
@@ -221,21 +216,16 @@ fn read_state_in(home: &Path) -> Result<ModelConfigState, String> {
     let config_content = fs::read_to_string(&config_path)
         .map_err(|e| format!("读取 config.toml 失败: {e}"))?;
     let structured = read_structured(&config_path);
-    let catalog_target = model_catalog_json_value(&config_path)
-        .map(|v| model_catalog_path_in(home, &v));
-    let (model_catalog_exists, model_catalog) = match catalog_target.as_deref() {
-        Some(p) if p.is_file() => (
+    let catalog_value = model_catalog_json_value(&config_path);
+    let catalog_target = resolve_catalog_path(home, catalog_value.as_deref());
+    // 仅在 config 显式配置了 model_catalog_json 键时才读取目录文件内容；
+    // 未配置（含清空后删除的键）即使默认 models.json 残留，也不回显其内容。
+    let (model_catalog_exists, model_catalog) = match catalog_value.as_deref() {
+        Some(_) if catalog_target.is_file() => (
             true,
-            fs::read_to_string(p).map_err(|e| format!("读取模型目录文件失败: {e}"))?,
+            fs::read_to_string(&catalog_target)
+                .map_err(|e| format!("读取模型目录文件失败: {e}"))?,
         ),
-        Some(p) => {
-            // 目标缺失：创建默认目录文件（空模型目录），再返回其内容
-            atomic_write(p, DEFAULT_MODEL_CATALOG_CONTENT)?;
-            (
-                true,
-                fs::read_to_string(p).map_err(|e| format!("读取模型目录文件失败: {e}"))?,
-            )
-        }
         _ => (false, String::new()),
     };
     Ok(ModelConfigState {
@@ -243,9 +233,7 @@ fn read_state_in(home: &Path) -> Result<ModelConfigState, String> {
         config_exists: true,
         config_content,
         model_catalog_json: structured.model_catalog_json,
-        model_catalog_path: catalog_target
-            .map(|p| clean_path(&p))
-            .unwrap_or_default(),
+        model_catalog_path: clean_path(&catalog_target),
         model_catalog_exists,
         model_catalog,
         model: structured.model,
@@ -272,23 +260,42 @@ fn save_config_in(home: &Path, content: &str) -> Result<(), String> {
     atomic_write(&config_path_in(home), content)
 }
 
-/// 保存 model_catalog_json 目标文件：目标路径从 config.toml 实时解析；
-/// 内容去空白后必须非空且为合法 JSON，合法后按原文原样写入。
+/// 保存 model_catalog_json 目标文件：目标路径实时解析（config 未配置时默认
+/// CODEX_HOME/models.json，不再报「未配置」）；内容去空白后必须非空，且经
+/// validate_model_catalog 校验（合理 JSON + codex 结构），通过后按原文原样写入。
 pub fn save_model_catalog(content: &str) -> Result<(), String> {
     save_model_catalog_in(&codex_home()?, content)
 }
 
 fn save_model_catalog_in(home: &Path, content: &str) -> Result<(), String> {
-    let Some(value) = model_catalog_json_value(&config_path_in(home)) else {
-        return Err("config.toml 未配置 model_catalog_json".to_string());
-    };
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return Err("模型目录内容不能为空".to_string());
     }
-    serde_json::from_str::<serde_json::Value>(trimmed)
+    validate_model_catalog(trimmed)?;
+    let target =
+        resolve_catalog_path(home, model_catalog_json_value(&config_path_in(home)).as_deref());
+    atomic_write(&target, content)
+}
+
+/// 校验模型目录 JSON：必须为合法 JSON、顶层为对象、含 `models` 数组，且数组每一项为对象。
+/// `models` 可为空数组（`[]` 属合法空目录）。返回中文错误。
+fn validate_model_catalog(trimmed: &str) -> Result<(), String> {
+    let value: serde_json::Value = serde_json::from_str(trimmed)
         .map_err(|e| format!("模型目录不是合法 JSON: {e}"))?;
-    atomic_write(&model_catalog_path_in(home, &value), content)
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "模型目录必须是顶层 JSON 对象（含 models 数组）".to_string())?;
+    let models = obj
+        .get("models")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "模型目录缺少 models 数组（应为 {\"models\":[...]}）".to_string())?;
+    for (i, m) in models.iter().enumerate() {
+        if !m.is_object() {
+            return Err(format!("模型目录中第 {} 个模型不是对象", i + 1));
+        }
+    }
+    Ok(())
 }
 
 /// 先写临时文件再替换，避免写入中途崩溃留下截断文件（与 settings.rs 同策略）。
@@ -389,9 +396,14 @@ mod tests {
         assert_eq!(state.config_content, "");
         assert!(config_path_in(dir.path()).is_file());
         assert_eq!(fs::read_to_string(config_path_in(dir.path())).unwrap(), "");
-        assert_eq!(state.model_catalog_path, "");
+        // 未配置时默认解析为 CODEX_HOME/models.json，但不自动创建文件
+        assert_eq!(
+            norm_path(&state.model_catalog_path),
+            norm_path(&dir.path().join("models.json").to_string_lossy())
+        );
         assert!(!state.model_catalog_exists);
         assert_eq!(state.model_catalog, "");
+        assert!(!dir.path().join("models.json").exists());
     }
 
     #[test]
@@ -403,9 +415,13 @@ mod tests {
         let state = read_state_in(dir.path()).unwrap();
         assert!(state.config_exists);
         assert_eq!(state.config_content, "not valid toml = = [");
-        // 解析失败 → model_catalog_json 无目标
-        assert_eq!(state.model_catalog_path, "");
+        // 解析失败 → 仍回退默认 CODEX_HOME/models.json（不创建文件）
+        assert_eq!(
+            norm_path(&state.model_catalog_path),
+            norm_path(&dir.path().join("models.json").to_string_lossy())
+        );
         assert!(!state.model_catalog_exists);
+        assert!(!dir.path().join("models.json").exists());
     }
 
     #[test]
@@ -452,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    fn read_state_creates_missing_catalog_target_with_default_content() {
+    fn read_state_does_not_create_missing_catalog_target() {
         let dir = TempDir::new().unwrap();
         fs::write(
             config_path_in(dir.path()),
@@ -466,14 +482,28 @@ mod tests {
             norm_path(&state.model_catalog_path),
             norm_path(&target.to_string_lossy())
         );
-        assert!(state.model_catalog_exists);
-        assert_eq!(state.model_catalog, DEFAULT_MODEL_CATALOG_CONTENT);
-        // 父目录与文件均已创建
-        assert_eq!(
-            fs::read_to_string(&target).unwrap(),
-            DEFAULT_MODEL_CATALOG_CONTENT
-        );
+        assert!(!state.model_catalog_exists);
+        assert_eq!(state.model_catalog, "");
+        // 读取不自动创建目录文件
+        assert!(!target.exists());
         assert!(!target.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn read_state_does_not_read_default_models_json_when_unconfigured() {
+        let dir = TempDir::new().unwrap();
+        // 仅创建默认 models.json（含旧内容），config 不配置 model_catalog_json 键
+        fs::write(dir.path().join("models.json"), r#"{"models":[{"slug":"old"}]}"#)
+            .unwrap();
+
+        let state = read_state_in(dir.path()).unwrap();
+        // 未配置键 → 不读取默认文件内容、不视为已配置
+        assert_eq!(
+            norm_path(&state.model_catalog_path),
+            norm_path(&dir.path().join("models.json").to_string_lossy())
+        );
+        assert!(!state.model_catalog_exists);
+        assert_eq!(state.model_catalog, "");
     }
 
     #[test]
@@ -482,7 +512,11 @@ mod tests {
         fs::write(config_path_in(dir.path()), "model_catalog_json = \"\"").unwrap();
 
         let state = read_state_in(dir.path()).unwrap();
-        assert_eq!(state.model_catalog_path, "");
+        // 空值 → 解析回退默认 CODEX_HOME/models.json（不视为已配置）
+        assert_eq!(
+            norm_path(&state.model_catalog_path),
+            norm_path(&dir.path().join("models.json").to_string_lossy())
+        );
         assert!(!state.model_catalog_exists);
         assert_eq!(state.model_catalog, "");
         // 未创建任何目标文件
@@ -535,9 +569,14 @@ mod tests {
     }
 
     #[test]
-    fn save_model_catalog_rejects_when_unconfigured() {
+    fn save_model_catalog_defaults_to_models_json_when_unconfigured() {
         let dir = TempDir::new().unwrap();
-        assert!(save_model_catalog_in(dir.path(), "[]").is_err());
+        let content = "{\"models\":[]}";
+        save_model_catalog_in(dir.path(), content).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("models.json")).unwrap(),
+            content
+        );
     }
 
     #[test]
@@ -551,6 +590,11 @@ mod tests {
 
         assert!(save_model_catalog_in(dir.path(), "   ").is_err());
         assert!(save_model_catalog_in(dir.path(), "{ not json").is_err());
+        // 结构校验：顶层非对象 / 缺 models 数组 / models 非数组 / 数组项非对象
+        assert!(save_model_catalog_in(dir.path(), "[]").is_err());
+        assert!(save_model_catalog_in(dir.path(), "{}").is_err());
+        assert!(save_model_catalog_in(dir.path(), "{\"models\":{}}").is_err());
+        assert!(save_model_catalog_in(dir.path(), "{\"models\":[1]}").is_err());
         assert!(!dir.path().join("models.json").exists());
     }
 
@@ -645,26 +689,9 @@ forced_login_method = "api"
         assert_eq!(state.model_catalog_json, "catalog/models.json");
         assert_eq!(state.preferred_auth_method, "apikey");
         assert_eq!(state.forced_login_method, "api");
-        // 目标文件仍按既有策略自动创建
-        assert!(state.model_catalog_exists);
-    }
-
-    #[test]
-    fn catalog_target_exists_checks_file_without_creating() {
-        let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        let home_s = home.to_string_lossy().into_owned();
-        with_envs(
-            &[("CODEX_HOME", Some(&home_s)), ("USERPROFILE", None)],
-            || {
-                assert!(!catalog_target_exists("models.json").unwrap());
-                assert!(!home.join("models.json").exists());
-                fs::create_dir_all(&home).unwrap();
-                fs::write(home.join("models.json"), "[]").unwrap();
-                assert!(catalog_target_exists("models.json").unwrap());
-                assert!(!catalog_target_exists("").unwrap());
-            },
-        );
+        // 读取不再自动创建目录文件
+        assert!(!state.model_catalog_exists);
+        assert_eq!(state.model_catalog, "");
     }
 
     #[test]
@@ -755,7 +782,7 @@ forced_login_method = "api"
     }
 
     #[test]
-    fn read_state_creates_missing_tilde_catalog_target() {
+    fn read_state_does_not_create_missing_tilde_catalog_target() {
         let dir = TempDir::new().unwrap();
         let profile = TempDir::new().unwrap();
         let profile_s = profile.path().to_string_lossy().into_owned();
@@ -774,29 +801,9 @@ forced_login_method = "api"
                     norm_path(&state.model_catalog_path),
                     norm_path(&target.to_string_lossy())
                 );
-                assert!(state.model_catalog_exists);
-                assert_eq!(state.model_catalog, DEFAULT_MODEL_CATALOG_CONTENT);
-                assert_eq!(
-                    fs::read_to_string(&target).unwrap(),
-                    DEFAULT_MODEL_CATALOG_CONTENT
-                );
-            },
-        );
-    }
-
-    #[test]
-    fn catalog_target_exists_resolves_tilde_against_userprofile() {
-        let tmp = TempDir::new().unwrap();
-        let profile = tmp.path().join("profile");
-        let profile_s = profile.to_string_lossy().into_owned();
-        with_envs(
-            &[("CODEX_HOME", None), ("USERPROFILE", Some(&profile_s))],
-            || {
-                assert!(!catalog_target_exists("~/models.json").unwrap());
-                assert!(!profile.join("models.json").exists());
-                fs::create_dir_all(&profile).unwrap();
-                fs::write(profile.join("models.json"), "[]").unwrap();
-                assert!(catalog_target_exists("~/models.json").unwrap());
+                assert!(!state.model_catalog_exists);
+                assert_eq!(state.model_catalog, "");
+                assert!(!target.exists());
             },
         );
     }
