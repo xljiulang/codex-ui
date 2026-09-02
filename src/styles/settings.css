@@ -1266,8 +1266,11 @@
 
 .custom-instructions-textarea {
   width: 100%;
-  min-height: 220px;
-  resize: vertical;
+  field-sizing: content;
+  min-height: 260px;
+  max-height: 50vh;
+  overflow-y: auto;
+  resize: none;
   box-sizing: border-box;
   font-family: var(--mono);
   font-size: var(--font-md);

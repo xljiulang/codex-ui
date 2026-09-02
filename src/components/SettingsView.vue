@@ -79,8 +79,8 @@ const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSections = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
-  { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
   { id: "memory", label: "本地记忆", icon: ICON_THINK },
+  { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
   { id: "model-config", label: "模型配置", icon: ICON_BRACES },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
@@ -1102,18 +1102,6 @@ function pluginInitial(p: PluginCatalogItem): string {
           <div class="settings-card">
             <div class="settings">
               <div class="setting-row">
-                <label>终端 Shell</label>
-                <select
-                  v-model="terminalShell"
-                  class="terminal-shell-select"
-                  @change="persist({ terminal_shell: terminalShell })"
-                >
-                  <option value="cmd">cmd（命令提示符）</option>
-                  <option value="powershell">PowerShell</option>
-                </select>
-              </div>
-
-              <div class="setting-row">
                 <label>codex 可执行文件（留空自动查找）</label>
                 <div class="setting-path-row codex-path-row">
                   <div class="setting-value codex-path-value">
@@ -1147,6 +1135,18 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
 
               <div class="setting-row">
+                <label>终端 Shell</label>
+                <select
+                  v-model="terminalShell"
+                  class="terminal-shell-select"
+                  @change="persist({ terminal_shell: terminalShell })"
+                >
+                  <option value="cmd">cmd（命令提示符）</option>
+                  <option value="powershell">PowerShell</option>
+                </select>
+              </div>
+
+              <div class="setting-row">
                 <label>默认权限</label>
                 <select
                   v-model="defaultPermission"
@@ -1160,27 +1160,14 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
 
               <div class="setting-row">
-                <label>主题外观</label>
-                <div class="theme-picker">
-                  <button
-                    v-for="t in THEMES"
-                    :key="t.id"
-                    class="theme-card"
-                    :class="{ selected: theme === t.id }"
-                    :data-theme-id="t.id"
-                    :aria-pressed="theme === t.id"
-                    @click="selectTheme(t.id)"
-                  >
-                    <span class="theme-swatch"></span>
-                    <span class="theme-name">{{ t.name }}</span>
-                    <span class="theme-desc">{{ t.desc }}</span>
-                    <span v-if="theme === t.id" class="theme-check" aria-hidden="true">
-                      <svg viewBox="0 0 24 24">
-                        <path :d="ICON_CHECK" />
-                      </svg>
-                    </span>
-                  </button>
-                </div>
+                <label>跟进处理方式</label>
+                <select
+                  v-model="followupMode"
+                  @change="persist({ followup_mode: followupMode })"
+                >
+                  <option value="adjust">调整方向</option>
+                  <option value="queue">加入队列</option>
+                </select>
               </div>
 
               <div class="setting-row checkbox-row">
@@ -1206,14 +1193,27 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
 
               <div class="setting-row">
-                <label>跟进处理方式</label>
-                <select
-                  v-model="followupMode"
-                  @change="persist({ followup_mode: followupMode })"
-                >
-                  <option value="adjust">调整方向</option>
-                  <option value="queue">加入队列</option>
-                </select>
+                <label>主题外观</label>
+                <div class="theme-picker">
+                  <button
+                    v-for="t in THEMES"
+                    :key="t.id"
+                    class="theme-card"
+                    :class="{ selected: theme === t.id }"
+                    :data-theme-id="t.id"
+                    :aria-pressed="theme === t.id"
+                    @click="selectTheme(t.id)"
+                  >
+                    <span class="theme-swatch"></span>
+                    <span class="theme-name">{{ t.name }}</span>
+                    <span class="theme-desc">{{ t.desc }}</span>
+                    <span v-if="theme === t.id" class="theme-check" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path :d="ICON_CHECK" />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

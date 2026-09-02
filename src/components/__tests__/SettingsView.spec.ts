@@ -244,14 +244,14 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 全局指令 → 本地记忆 → 模型配置", () => {
+  it("导航顺序：个性化 → 本地记忆 → 全局指令 → 模型配置", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
       .map((i) => i.text().trim());
     expect(labels.indexOf("个性化")).toBe(0);
-    expect(labels.indexOf("全局指令")).toBe(1);
-    expect(labels.indexOf("本地记忆")).toBe(2);
+    expect(labels.indexOf("本地记忆")).toBe(1);
+    expect(labels.indexOf("全局指令")).toBe(2);
     expect(labels.indexOf("模型配置")).toBe(3);
   });
 
@@ -1737,8 +1737,8 @@ describe("SettingsView 设置标签行为", () => {
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "个性化",
-      "全局指令",
       "本地记忆",
+      "全局指令",
       "模型配置",
       "技能管理",
       "MCP管理",
@@ -2092,13 +2092,14 @@ describe("SettingsView 终端 Shell", () => {
     expect(options).toEqual(["cmd", "powershell"]);
   });
 
-  it("终端 Shell 行位于个性化分区内第一项", () => {
+  it("codex 可执行文件行位于个性化分区内第一项", () => {
     wrapper = mount(SettingsView);
     const section = wrapper.find(".settings-section-personalization");
     const labels = section
       .findAll(".settings .setting-row")
       .map((row) => row.find("label").text());
-    expect(labels[0]).toBe("终端 Shell");
+    expect(labels[0]).toBe("codex 可执行文件（留空自动查找）");
+    expect(labels[1]).toBe("终端 Shell");
   });
 
   it("切换 PowerShell 后立即保存", async () => {
