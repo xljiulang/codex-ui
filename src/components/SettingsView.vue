@@ -50,7 +50,7 @@ import {
   ICON_REFRESH,
   ICON_SAVE,
   ICON_SKILL,
-  ICON_THINK,
+  ICON_TUNE,
 } from "../lib/icons";
 import { PERMISSION_MODES } from "../lib/permissions";
 import type {
@@ -95,7 +95,7 @@ interface SettingsSection {
 }
 const settingsSections: SettingsSection[] = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
-  { id: "memory", label: "本地记忆", icon: ICON_THINK },
+  { id: "memory", label: "基础设置", icon: ICON_TUNE },
   { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
   { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
@@ -159,7 +159,7 @@ async function clearCodexPath() {
 const memEnable = ref(false);
 const memAllowTool = ref(false);
 
-/** 读取 codex 配置回填记忆开关（进入「本地记忆」标签时） */
+/** 读取 codex 配置回填记忆开关（进入「基础设置」标签时） */
 async function loadMemorySection() {
   try {
     const s = await loadMemoryConfig();
@@ -182,7 +182,7 @@ async function saveMemorySection() {
   }
 }
 
-// 进入「本地记忆」标签时从 codex 配置回填开关
+// 进入「基础设置」标签时从 codex 配置回填开关
 watch(activeSection, (id) => {
   if (id === "memory") void loadMemorySection();
 });
@@ -1119,79 +1119,10 @@ function pluginInitial(p: PluginCatalogItem): string {
         >
           <h2 class="settings-section-title">个性化</h2>
           <p class="settings-section-desc">
-            主题、音效、消息发送、终端与权限等偏好设置
+            主题、音效与消息发送等个性化偏好
           </p>
           <div class="settings-card">
             <div class="settings">
-              <div class="setting-row">
-                <label>codex 可执行文件（留空自动查找）</label>
-                <div class="setting-path-row codex-path-row">
-                  <div class="setting-value codex-path-value">
-                    {{ codexPath || "未设置（自动查找）" }}
-                  </div>
-                  <button
-                    class="btn btn-icon codex-pick-btn"
-                    v-tooltip="'选择文件'"
-                    aria-label="选择文件"
-                    @click="pickCodexFile()"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FOLDER_OPEN" />
-                    </svg>
-                  </button>
-                  <button
-                    v-if="codexPath"
-                    class="btn btn-icon danger codex-clear-btn"
-                    v-tooltip="'清除'"
-                    aria-label="清除"
-                    @click="clearCodexPath()"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_DELETE" />
-                    </svg>
-                  </button>
-                </div>
-                <p v-if="!codexPath && store.server.codexPath" class="setting-note">
-                  当前使用（自动检测）：{{ store.server.codexPath }}
-                </p>
-              </div>
-
-              <div class="setting-row">
-                <label>终端 Shell</label>
-                <select
-                  v-model="terminalShell"
-                  class="terminal-shell-select"
-                  @change="persist({ terminal_shell: terminalShell })"
-                >
-                  <option value="cmd">cmd（命令提示符）</option>
-                  <option value="powershell">PowerShell</option>
-                </select>
-              </div>
-
-              <div class="setting-row">
-                <label>默认权限</label>
-                <select
-                  v-model="defaultPermission"
-                  class="default-permission-select"
-                  @change="persist({ default_permission: defaultPermission })"
-                >
-                  <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
-                    {{ m.label }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="setting-row">
-                <label>跟进处理方式</label>
-                <select
-                  v-model="followupMode"
-                  @change="persist({ followup_mode: followupMode })"
-                >
-                  <option value="adjust">调整方向</option>
-                  <option value="queue">加入队列</option>
-                </select>
-              </div>
-
               <div class="setting-row checkbox-row">
                 <input
                   id="sound"
@@ -1710,12 +1641,81 @@ function pluginInitial(p: PluginCatalogItem): string {
           v-show="activeSection === 'memory'"
           class="settings-section settings-section-memory"
         >
-          <h2 class="settings-section-title">本地记忆</h2>
+          <h2 class="settings-section-title">基础设置</h2>
           <p class="settings-section-desc">
-            设置在此电脑上如何收集、保留和整合本地记忆。
+            终端、权限、跟进处理与本地记忆等基础设置
           </p>
           <div class="settings-card">
             <div class="settings">
+              <div class="setting-row">
+                <label>codex 可执行文件（留空自动查找）</label>
+                <div class="setting-path-row codex-path-row">
+                  <div class="setting-value codex-path-value">
+                    {{ codexPath || "未设置（自动查找）" }}
+                  </div>
+                  <button
+                    class="btn btn-icon codex-pick-btn"
+                    v-tooltip="'选择文件'"
+                    aria-label="选择文件"
+                    @click="pickCodexFile()"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FOLDER_OPEN" />
+                    </svg>
+                  </button>
+                  <button
+                    v-if="codexPath"
+                    class="btn btn-icon danger codex-clear-btn"
+                    v-tooltip="'清除'"
+                    aria-label="清除"
+                    @click="clearCodexPath()"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                  </button>
+                </div>
+                <p v-if="!codexPath && store.server.codexPath" class="setting-note">
+                  当前使用（自动检测）：{{ store.server.codexPath }}
+                </p>
+              </div>
+
+              <div class="setting-row">
+                <label>终端 Shell</label>
+                <select
+                  v-model="terminalShell"
+                  class="terminal-shell-select"
+                  @change="persist({ terminal_shell: terminalShell })"
+                >
+                  <option value="cmd">cmd（命令提示符）</option>
+                  <option value="powershell">PowerShell</option>
+                </select>
+              </div>
+
+              <div class="setting-row">
+                <label>默认权限</label>
+                <select
+                  v-model="defaultPermission"
+                  class="default-permission-select"
+                  @change="persist({ default_permission: defaultPermission })"
+                >
+                  <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
+                    {{ m.label }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="setting-row">
+                <label>跟进处理方式</label>
+                <select
+                  v-model="followupMode"
+                  @change="persist({ followup_mode: followupMode })"
+                >
+                  <option value="adjust">调整方向</option>
+                  <option value="queue">加入队列</option>
+                </select>
+              </div>
+
               <div class="setting-row memory-row">
                 <div class="memory-row-main">
                   <div class="memory-row-title">启用本地记忆</div>
