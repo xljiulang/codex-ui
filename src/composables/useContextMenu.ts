@@ -126,6 +126,9 @@ function buildEditMenuItems(
  */
 export function useContextMenu(enabled = true, alwaysCopy = false) {
   const ctxMenu = ref<CtxMenuState | null>(null);
+  // 当前菜单的锚点元素（被右键的那个元素）：仅当被滚动的容器确实包含它时才关闭菜单，
+  // 避免会话流式吸底滚动（发生在别的容器）时误关菜单。
+  let ctxAnchor: HTMLElement | null = null;
 
   function onContextMenu(e: MouseEvent) {
     const target = e.target as HTMLElement;
@@ -138,6 +141,7 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
       const items = buildEditMenuItems(el);
       const pos = clampMenuPos(e.clientX, e.clientY, 180, items.length * 30 + 12);
       ctxMenu.value = { x: pos.x, y: pos.y, items };
+      ctxAnchor = target;
       return;
     }
     const editable =
@@ -148,6 +152,7 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
     // 其它可编辑元素（checkbox/radio/select/富文本编辑器）不拦截，放行给 WebView2 原生菜单。
     if (editable) {
       ctxMenu.value = null;
+      ctxAnchor = null;
       return;
     }
     e.preventDefault();
@@ -182,6 +187,7 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
     }
     if (!items.length) {
       ctxMenu.value = null;
+      ctxAnchor = null;
       return;
     }
     const pos = clampMenuPos(
@@ -191,6 +197,7 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
       items.length * 30 + 12,
     );
     ctxMenu.value = { x: pos.x, y: pos.y, items };
+    ctxAnchor = target;
   }
 
   function onGlobalClick() {
@@ -201,8 +208,15 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
     if (e.key === "Escape") ctxMenu.value = null;
   }
 
-  function onGlobalScroll() {
-    ctxMenu.value = null;
+  function onGlobalScroll(e: Event) {
+    if (!ctxMenu.value || !ctxAnchor) return;
+    // 仅当被滚动的容器（Element 或 Document）确实包含菜单锚点（锚点被滚走）时才关闭；
+    // 会话流式吸底滚动的是不含锚点的另一容器 → 忽略，避免菜单被误关。
+    const scroller = e.target;
+    if (scroller instanceof Node && scroller.contains(ctxAnchor)) {
+      ctxMenu.value = null;
+      ctxAnchor = null;
+    }
   }
 
   onMounted(() => {

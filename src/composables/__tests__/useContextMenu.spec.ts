@@ -89,6 +89,29 @@ const HostControls = defineComponent({
   },
 });
 
+/** 滚动范围测试：根容器下有两个兄弟容器——不含锚点的「其它容器」与包含 textarea 锚点的「锚点容器」。 */
+const HostScroll = defineComponent({
+  setup() {
+    const { ctxMenu } = useContextMenu();
+    return () =>
+      h("div", { class: "scroll-app" }, [
+        // 不含锚点，模拟会话/聊天流式吸底滚动所在容器
+        h("div", { class: "other-scroll" }, [h("p", {}, "流式内容")]),
+        // 包含锚点（textarea）的滚动容器
+        h("div", { class: "anchor-scroll" }, [h("textarea", { class: "ta" })]),
+        ctxMenu.value
+          ? h(
+              "div",
+              { class: "ctx-menu" },
+              ctxMenu.value.items.map((it) =>
+                h("button", { class: "ctx-menu-item" }, it.label),
+              ),
+            )
+          : null,
+      ]);
+  },
+});
+
 function mountHost() {
   return mount(Host, { attachTo: document.body });
 }
@@ -246,5 +269,45 @@ describe("useContextMenu 自定义右键菜单", () => {
     const menu = wrapper.find(".ctx-menu");
     expect(menu.exists()).toBe(true);
     expect(menu.text()).toContain("复制");
+  });
+
+  it("其它容器（不含锚点）滚动不关闭菜单：会话流式吸底不回关", async () => {
+    const wrapper = mount(HostScroll, { attachTo: document.body });
+    await flushPromises();
+    wrapper
+      .find("textarea")
+      .element.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 50,
+          clientY: 50,
+        }),
+      );
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+    wrapper.find(".other-scroll").element.dispatchEvent(new Event("scroll"));
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+  });
+
+  it("包含锚点自身的容器滚动时关闭菜单", async () => {
+    const wrapper = mount(HostScroll, { attachTo: document.body });
+    await flushPromises();
+    wrapper
+      .find("textarea")
+      .element.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 50,
+          clientY: 50,
+        }),
+      );
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(true);
+    wrapper.find(".anchor-scroll").element.dispatchEvent(new Event("scroll"));
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });
 });
