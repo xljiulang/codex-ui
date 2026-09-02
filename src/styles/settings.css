@@ -266,8 +266,8 @@
 
 /* 纯图标型：卡片头重读、键值对行删除 */
 .settings-page .btn-icon {
-  width: var(--ctrl-h-sm);
-  height: var(--ctrl-h-sm);
+  width: var(--ctrl-h-md);
+  height: var(--ctrl-h-md);
   border-color: transparent;
   box-shadow: none;
 }
@@ -307,8 +307,8 @@
 }
 
 .settings-page .btn-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   transition: transform var(--ease);
 }
 
