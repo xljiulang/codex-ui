@@ -10,7 +10,6 @@ export const defaultSettings = (): AppSettings => ({
   followup_mode: "adjust",
   theme: "blue",
   default_permission: "ask-for-approval",
-  memory_mode: "disabled",
   terminal_shell: "cmd",
 });
 

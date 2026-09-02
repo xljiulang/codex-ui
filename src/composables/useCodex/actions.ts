@@ -180,15 +180,6 @@ async function newChat(prompt: string, attachments: UserInput[]) {
         }
       }
     }
-    // 记忆模式：显式应用持久化设置（含关闭），保证新会话与设置一致；失败静默跳过
-    try {
-      await invoke("codex_rpc", {
-        method: "thread/memoryMode/set",
-        params: { threadId, mode: store.settings.memory_mode },
-      });
-    } catch {
-      // 服务端不支持记忆特性时静默跳过，不打扰新建流程
-    }
     await refreshThreads();
     if (prompt.trim() || attachments.length) {
       // 第 2 步：首条消息内容作为会话标题（AI 总结完成后由 autoTitleThread 覆盖）

@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  activeSessionTab,
   addMarketplace,
   askConfirm,
   installPlugin,
   isAuthRequiredError,
   loadMcpServers,
+  loadMemoryConfig,
   loadModelProviderConfig,
   loadPluginCatalog,
   removeMarketplace,
   saveMcpServers,
+  saveMemoryConfig,
   saveModelProviderConfig,
   saveSettings,
   setToast,
@@ -48,9 +49,9 @@ import {
   ICON_PALETTE,
   ICON_PLUS,
   ICON_REFRESH,
-  ICON_RESTART,
   ICON_SAVE,
   ICON_SKILL,
+  ICON_THINK,
   ICON_TUNE,
 } from "../lib/icons";
 import { PERMISSION_MODES } from "../lib/permissions";
@@ -75,12 +76,12 @@ const enterToSend = ref(store.settings.enter_to_send);
 const followupMode = ref(store.settings.followup_mode);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const defaultPermission = ref(store.settings.default_permission);
-const memoryMode = ref(store.settings.memory_mode);
 const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSections = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
   { id: "general", label: "通用设置", icon: ICON_TUNE },
+  { id: "memory", label: "本地记忆", icon: ICON_THINK },
   { id: "model-config", label: "模型配置", icon: ICON_BRACES },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
@@ -141,20 +142,36 @@ async function clearCodexPath() {
   await persist({ codex_path: null });
 }
 
-/** 记忆模式变更：立即保存并同步当前会话（失败 toast 不阻塞） */
-async function onMemoryModeChange() {
-  await persist({ memory_mode: memoryMode.value });
-  const threadId = activeSessionTab()?.threadId;
-  if (!threadId) return;
+const memEnable = ref(false);
+const memAllowTool = ref(false);
+
+/** 读取 codex 配置回填记忆开关（进入「本地记忆」标签时） */
+async function loadMemorySection() {
   try {
-    await invoke("codex_rpc", {
-      method: "thread/memoryMode/set",
-      params: { threadId, mode: memoryMode.value },
+    const s = await loadMemoryConfig();
+    memEnable.value = s.enable;
+    memAllowTool.value = s.allowToolGenerate;
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+/** 任一记忆开关变更：写回 codex 配置 */
+async function saveMemorySection() {
+  try {
+    await saveMemoryConfig({
+      enable: memEnable.value,
+      allowToolGenerate: memAllowTool.value,
     });
   } catch (e) {
     setToast(toastError(e));
   }
 }
+
+// 进入「本地记忆」标签时从 codex 配置回填开关
+watch(activeSection, (id) => {
+  if (id === "memory") void loadMemorySection();
+});
 
 async function resetMemory() {
   const ok = await askConfirm({
@@ -1638,30 +1655,6 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
 
               <div class="setting-row">
-                <label>记忆模式</label>
-                <div class="setting-path-row">
-                  <select
-                    v-model="memoryMode"
-                    class="memory-mode-select"
-                    @change="onMemoryModeChange"
-                  >
-                    <option value="disabled">关闭</option>
-                    <option value="enabled">启用</option>
-                  </select>
-                  <button
-                    class="btn btn-icon danger memory-reset-btn"
-                    v-tooltip="'重置记忆'"
-                    aria-label="重置记忆"
-                    @click="resetMemory()"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_RESTART" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              <div class="setting-row">
                 <label>codex 可执行文件（留空自动查找）</label>
                 <div class="setting-path-row codex-path-row">
                   <div class="setting-value codex-path-value">
@@ -1692,6 +1685,61 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <p v-if="!codexPath && store.server.codexPath" class="setting-note">
                   当前使用（自动检测）：{{ store.server.codexPath }}
                 </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-show="activeSection === 'memory'"
+          class="settings-section settings-section-memory"
+        >
+          <h2 class="settings-section-title">本地记忆</h2>
+          <p class="settings-section-desc">
+            设置在此电脑上如何收集、保留和整合本地记忆。
+          </p>
+          <div class="settings-card">
+            <div class="settings">
+              <div class="setting-row memory-row">
+                <div class="memory-row-main">
+                  <div class="memory-row-title">启用本地记忆</div>
+                  <div class="memory-row-desc">根据此电脑上的聊天创建记忆，并用于个性化此电脑上的未来聊天</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" v-model="memEnable" @change="saveMemorySection()" />
+                  <span class="switch-track"></span>
+                </label>
+              </div>
+              <div class="setting-row memory-row">
+                <div class="memory-row-main">
+                  <div class="memory-row-title">允许基于工具辅助聊天生成本地记忆</div>
+                  <div class="memory-row-desc">从使用过 MCP 工具或网页搜索的聊天生成记忆</div>
+                </div>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    v-model="memAllowTool"
+                    :disabled="!memEnable"
+                    @change="saveMemorySection()"
+                  />
+                  <span class="switch-track"></span>
+                </label>
+              </div>
+              <div class="setting-row memory-row">
+                <div class="memory-row-main">
+                  <div class="memory-row-title">删除本地记忆</div>
+                  <div class="memory-row-desc">删除存储在此电脑本地的所有记忆</div>
+                </div>
+                <button
+                  class="btn btn-icon danger memory-delete-btn"
+                  v-tooltip="'重置记忆'"
+                  aria-label="重置记忆"
+                  @click="resetMemory()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_DELETE" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>

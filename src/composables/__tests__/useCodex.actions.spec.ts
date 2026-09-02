@@ -579,12 +579,11 @@ describe("openNewSession / openSession 统一收尾", () => {
     }
   });
 });
-describe("新建会话应用记忆模式", () => {
+describe("新建会话挂载目标", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     activeSessionTab()?.attachments.splice(0);
     store.toast = "";
-    store.settings.memory_mode = "enabled";
   });
 
   function mockNewChatFlow() {
@@ -602,18 +601,6 @@ describe("新建会话应用记忆模式", () => {
       return Promise.resolve(undefined);
     });
   }
-
-  it("新建会话成功后显式应用持久化的记忆模式", async () => {
-    tabs.push(makeSessionTab("s-fresh", null));
-    activeTabId.value = "s-fresh";
-    mockNewChatFlow();
-    await sendPrompt("你好");
-    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-      method: "thread/memoryMode/set",
-      params: { threadId: "t-new", mode: "enabled" },
-    });
-    expect(activeSessionTab()?.threadId).toBe("t-new");
-  });
 
   it("待挂载目标（勾选后首条消息）在创建会话时挂载并置为 active", async () => {
     tabs.push(makeSessionTab("s-fresh", null, { goalText: "预填目标" }));
@@ -651,36 +638,6 @@ describe("新建会话应用记忆模式", () => {
     expect(store.toast).toContain("挂载失败");
   });
 
-  it("记忆模式关闭时也显式调用（保证确定性）", async () => {
-    store.settings.memory_mode = "disabled";
-    mockNewChatFlow();
-    await sendPrompt("你好");
-    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-      method: "thread/memoryMode/set",
-      params: { threadId: "t-new", mode: "disabled" },
-    });
-  });
-
-  it("记忆同步失败静默不打扰新建流程", async () => {
-    tabs.push(makeSessionTab("s-fresh", null));
-    activeTabId.value = "s-fresh";
-    mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "thread_start") {
-        return Promise.resolve({ thread: { id: "t-new" } });
-      }
-      if (cmd === "turn_start") {
-        return Promise.resolve({ turn: { id: "nt1" } });
-      }
-      if (cmd === "thread_list") {
-        return Promise.resolve({ data: [], nextCursor: null });
-      }
-      if (cmd === "codex_rpc") return Promise.reject(new Error("记忆不可用"));
-      return Promise.resolve(undefined);
-    });
-    await sendPrompt("你好");
-    expect(activeSessionTab()?.threadId).toBe("t-new");
-    expect(store.toast).not.toContain("记忆");
-  });
 });
 
 describe("模型不可用时的发送路径", () => {

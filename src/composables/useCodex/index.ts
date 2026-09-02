@@ -55,6 +55,11 @@ export {
 } from "./plugins";
 export { loadMcpServers, saveMcpServers } from "./mcp";
 export {
+  loadMemoryConfig,
+  saveMemoryConfig,
+  type MemoryConfigState,
+} from "./memoryConfig";
+export {
   ensureWeChatEvents,
   isThreadBound,
   bindingOfThread,

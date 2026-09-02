@@ -244,14 +244,15 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 通用设置 → 模型配置", () => {
+  it("导航顺序：个性化 → 通用设置 → 本地记忆 → 模型配置", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
       .map((i) => i.text().trim());
     expect(labels.indexOf("个性化")).toBe(0);
     expect(labels.indexOf("通用设置")).toBe(1);
-    expect(labels.indexOf("模型配置")).toBe(2);
+    expect(labels.indexOf("本地记忆")).toBe(2);
+    expect(labels.indexOf("模型配置")).toBe(3);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -1718,12 +1719,13 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染六个分类，默认选中第一个", () => {
+  it("左侧导航渲染七个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "个性化",
       "通用设置",
+      "本地记忆",
       "模型配置",
       "技能管理",
       "MCP管理",
@@ -1762,17 +1764,6 @@ describe("SettingsView 设置标签行为", () => {
     expect(plugins.style.display).not.toBe("none");
   });
 
-  it("记忆模式行合并：下拉与重置按钮同行，无说明文字", () => {
-    wrapper = mount(SettingsView);
-    const row = wrapper
-      .findAll(".settings-section-general .setting-row")
-      .find((r) => r.text().includes("记忆模式"))!;
-    expect(row.exists()).toBe(true);
-    expect(row.find("select.memory-mode-select").exists()).toBe(true);
-    expect(row.find("button.memory-reset-btn").exists()).toBe(true);
-    expect(row.find(".setting-value").exists()).toBe(false);
-    expect(row.text()).not.toContain("清空全部已保存的记忆");
-  });
 });
 
 describe("SettingsView 主题保存后生效", () => {
@@ -1884,7 +1875,7 @@ describe("SettingsView 默认权限", () => {
   });
 });
 
-describe("SettingsView 记忆管理", () => {
+describe("SettingsView 本地记忆", () => {
   let wrapper: ReturnType<typeof mount> | undefined;
 
   beforeEach(() => {
@@ -1892,7 +1883,6 @@ describe("SettingsView 记忆管理", () => {
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1"));
     activeTabId.value = "s1";
-    store.settings.memory_mode = "disabled";
     store.toast = "";
     store.confirm = null;
     mockedInvoke.mockReset();
@@ -1905,66 +1895,125 @@ describe("SettingsView 记忆管理", () => {
     wrapper = undefined;
   });
 
-  it("渲染记忆模式下拉并选中已保存值", () => {
-    store.settings.memory_mode = "enabled";
-    wrapper = mount(SettingsView);
-    const select = wrapper.find("select.memory-mode-select");
-    expect(select.exists()).toBe(true);
-    expect((select.element as HTMLSelectElement).value).toBe("enabled");
-    const labels = wrapper
-      .findAll("select.memory-mode-select option")
-      .map((o) => o.text());
-    expect(labels).toEqual(["关闭", "启用"]);
-    wrapper.unmount();
-  });
+  /** 点击左侧导航进入「本地记忆」标签 */
+  function openMemory(w: ReturnType<typeof mount>) {
+    return w
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().trim() === "本地记忆")!
+      .trigger("click");
+  }
 
-  it("切换记忆模式后立即保存", async () => {
-    wrapper = mount(SettingsView);
-    await wrapper.find("select.memory-mode-select").setValue("enabled");
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith(
-      expect.objectContaining({ memory_mode: "enabled" }),
-    );
-  });
-
-  it("有当前会话时切换记忆模式后同步 thread/memoryMode/set", async () => {
-    wrapper = mount(SettingsView);
-    await wrapper.find("select.memory-mode-select").setValue("enabled");
-    await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-      method: "thread/memoryMode/set",
-      params: { threadId: "t1", mode: "enabled" },
-    });
-  });
-
-  it("无当前会话时切换记忆模式不调用 thread/memoryMode/set", async () => {
-    __resetSessionTabsForTest();
-    wrapper = mount(SettingsView);
-    await wrapper.find("select.memory-mode-select").setValue("enabled");
-    await flushPromises();
-    expect(mockedInvoke).not.toHaveBeenCalledWith(
-      "codex_rpc",
-      expect.objectContaining({ method: "thread/memoryMode/set" }),
-    );
-  });
-
-  it("同步失败 toast 错误但设置仍已保存", async () => {
+  /** config/read 返回用户层 [features]/[memories] */
+  function mockMemoryConfig(enable: boolean, allowToolGenerate: boolean) {
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === "codex_rpc" && args?.method === "thread/memoryMode/set") {
-        throw new Error("同步记忆失败");
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return {
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                features: { memories: enable },
+                memories: {
+                  use_memories: enable,
+                  generate_memories: enable,
+                  disable_on_external_context: !allowToolGenerate,
+                },
+              },
+            },
+          ],
+        };
       }
       return {};
     });
+  }
+
+  it("切换到本地记忆标签：从配置回填两个开关", async () => {
+    mockMemoryConfig(true, false);
     wrapper = mount(SettingsView);
-    await wrapper.find("select.memory-mode-select").setValue("enabled");
+    await openMemory(wrapper);
     await flushPromises();
-    expect(mockedSave).toHaveBeenCalledTimes(1);
-    expect(store.toast).toContain("同步记忆失败");
+    const section = wrapper.find(".settings-section-memory");
+    expect(section.exists()).toBe(true);
+    const inputs = section.findAll(".switch input");
+    expect(inputs).toHaveLength(2);
+    expect((inputs[0].element as HTMLInputElement).checked).toBe(true);
+    expect((inputs[1].element as HTMLInputElement).checked).toBe(false);
   });
 
-  it("重置记忆需确认，确认后调用 memory/reset 并提示", async () => {
+  it("切换启用本地记忆：config/batchWrite 写 features.memories 与 use_memories", async () => {
+    mockMemoryConfig(true, false);
     wrapper = mount(SettingsView);
-    await wrapper.find("button.memory-reset-btn").trigger("click");
+    await openMemory(wrapper);
+    await flushPromises();
+    const inputs = wrapper.findAll(".settings-section-memory .switch input");
+    await inputs[0].setValue(false);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "config/batchWrite",
+      params: {
+        edits: [
+          {
+            keyPath: "features",
+            value: expect.objectContaining({ memories: false }),
+            mergeStrategy: "replace",
+          },
+          {
+            keyPath: "memories",
+            value: expect.objectContaining({
+              use_memories: false,
+              generate_memories: false,
+              disable_on_external_context: true,
+            }),
+            mergeStrategy: "replace",
+          },
+        ],
+        reloadUserConfig: true,
+      },
+    });
+  });
+
+  it("切换工具辅助生成：config/batchWrite 写 generate_memories", async () => {
+    mockMemoryConfig(true, false);
+    wrapper = mount(SettingsView);
+    await openMemory(wrapper);
+    await flushPromises();
+    const inputs = wrapper.findAll(".settings-section-memory .switch input");
+    await inputs[1].setValue(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "codex_rpc",
+      expect.objectContaining({
+        method: "config/batchWrite",
+        params: expect.objectContaining({
+          edits: expect.arrayContaining([
+            expect.objectContaining({
+              keyPath: "memories",
+              value: expect.objectContaining({
+                generate_memories: true,
+                use_memories: true,
+                disable_on_external_context: false,
+              }),
+            }),
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it("主开关关闭时，工具辅助开关禁用", async () => {
+    mockMemoryConfig(false, false);
+    wrapper = mount(SettingsView);
+    await openMemory(wrapper);
+    await flushPromises();
+    const inputs = wrapper.findAll(".settings-section-memory .switch input");
+    expect((inputs[1].element as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("删除本地记忆：确认后调用 memory/reset 并提示", async () => {
+    wrapper = mount(SettingsView);
+    await openMemory(wrapper);
+    await flushPromises();
+    await wrapper.find(".memory-delete-btn").trigger("click");
     expect(store.confirm).toBeTruthy();
     expect(mockedInvoke).not.toHaveBeenCalledWith("codex_rpc", {
       method: "memory/reset",
@@ -1979,9 +2028,11 @@ describe("SettingsView 记忆管理", () => {
     expect(store.toast).toContain("记忆已重置");
   });
 
-  it("重置记忆取消时不调用 memory/reset", async () => {
+  it("删除本地记忆：取消时不调用 memory/reset", async () => {
     wrapper = mount(SettingsView);
-    await wrapper.find("button.memory-reset-btn").trigger("click");
+    await openMemory(wrapper);
+    await flushPromises();
+    await wrapper.find(".memory-delete-btn").trigger("click");
     settleConfirm(false);
     await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalledWith("codex_rpc", {
@@ -2662,7 +2713,7 @@ describe("SettingsView 按钮图标", () => {
       ".model-provider-actions .btn",
       "button.codex-pick-btn",
       "button.codex-clear-btn",
-      "button.memory-reset-btn",
+      "button.memory-delete-btn",
       ".plugin-refresh-btn",
       ".plugin-market-add .btn",
       ".plugin-market-remove",

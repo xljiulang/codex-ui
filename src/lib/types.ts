@@ -157,9 +157,6 @@ export type PermissionId =
   | "full-access"
   | "read-only";
 
-/** 记忆模式：disabled（关闭，默认）｜enabled（启用） */
-export type MemoryMode = "disabled" | "enabled";
-
 /** 跟进处理方式：adjust（调整方向）｜queue（加入队列） */
 export type FollowupMode = "adjust" | "queue";
 
@@ -174,8 +171,6 @@ export interface AppSettings {
   theme: ThemeId;
   /** 权限模式的启动初始值 */
   default_permission: PermissionId;
-  /** 作为新建会话的初始值 */
-  memory_mode: MemoryMode;
   /** 新开终端使用的 Shell */
   terminal_shell: TerminalShell;
 }

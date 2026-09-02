@@ -50,9 +50,6 @@ export async function loadSettings() {
   ) {
     store.settings.default_permission = "ask-for-approval";
   }
-  if (!["enabled", "disabled"].includes(store.settings.memory_mode)) {
-    store.settings.memory_mode = "disabled";
-  }
   if (!["cmd", "powershell"].includes(store.settings.terminal_shell)) {
     store.settings.terminal_shell = "cmd";
   }

@@ -266,44 +266,6 @@ describe("loadSettings 默认权限初始值", () => {
     expect(activeSessionTab()?.permissionMode).toBe("ask-for-approval");
   });
 });
-describe("loadSettings 记忆模式", () => {
-  beforeEach(() => {
-    mockedInvoke.mockReset();
-  });
-
-  it("启动时按持久化的记忆模式加载", async () => {
-    mockedInvoke.mockResolvedValue({
-      codex_path: null,
-      sound_enabled: true,
-      enter_to_send: true,
-      followup_mode: "adjust",
-      theme: "blue",
-      default_permission: "ask-for-approval",
-      memory_mode: "enabled",
-    });
-
-    await loadSettings();
-
-    expect(store.settings.memory_mode).toBe("enabled");
-  });
-
-  it("持久化值非法或缺失时回退 disabled", async () => {
-    mockedInvoke.mockResolvedValue({
-      codex_path: null,
-      sound_enabled: true,
-      enter_to_send: true,
-      followup_mode: "adjust",
-      theme: "blue",
-      default_permission: "ask-for-approval",
-      memory_mode: "bogus",
-    });
-
-    await loadSettings();
-
-    expect(store.settings.memory_mode).toBe("disabled");
-  });
-});
-
 describe("loadSettings 终端 Shell", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
@@ -317,7 +279,6 @@ describe("loadSettings 终端 Shell", () => {
       followup_mode: "adjust",
       theme: "blue",
       default_permission: "ask-for-approval",
-      memory_mode: "disabled",
       terminal_shell: "powershell",
     });
 
@@ -334,7 +295,6 @@ describe("loadSettings 终端 Shell", () => {
       followup_mode: "adjust",
       theme: "blue",
       default_permission: "ask-for-approval",
-      memory_mode: "disabled",
       terminal_shell: "bogus",
     });
 
