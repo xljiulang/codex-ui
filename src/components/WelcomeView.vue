@@ -160,7 +160,6 @@ onMounted(async () => {
           <div class="highlight-item">蓝夜/曜黑/晨光三套主题</div>
           <div class="highlight-item">技能、MCP 与插件集中管理</div>
           <div class="highlight-item">本地记忆开关与记忆管理</div>
-          <div class="highlight-item">系统托盘常驻：关窗不退出、微信与 Codex 保持在线</div>
           <div class="highlight-item">为 agent 注入 rg / fd / ast-grep 工具说明</div>
         </div>
       </section>

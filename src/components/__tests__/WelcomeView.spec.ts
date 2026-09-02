@@ -62,7 +62,7 @@ describe("WelcomeView 欢迎介绍页", () => {
     const wrapper = mountView();
     const highlights = wrapper.findAll(".highlight-item").map((h) => h.text());
     expect(highlights.length).toBeGreaterThanOrEqual(8);
-    expect(highlights.join("|")).toContain("系统托盘常驻");
+    expect(highlights.join("|")).not.toContain("系统托盘常驻");
     expect(highlights.join("|")).toContain("权限");
     expect(wrapper.find(".welcome-foot").text()).toContain("0.149.x");
     wrapper.unmount();
