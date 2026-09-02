@@ -1311,7 +1311,7 @@
 .model-config-textarea {
   width: 100%;
   min-height: 220px;
-  resize: vertical;
+  resize: none;
   box-sizing: border-box;
   font-family: var(--mono);
   font-size: var(--font-md);
