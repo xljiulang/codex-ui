@@ -576,9 +576,7 @@ function taskModeLabel(): string {
                 @click="toggleMenu('model')"
               >
                 <svg class="model-chip-icon" viewBox="0 0 24 24">
-                  <rect x="5" y="5" width="14" height="14" rx="2" />
-                  <rect x="9.5" y="9.5" width="5" height="5" rx="1" />
-                  <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+                  <path d="M12 3L20 7.5L20 16.5L12 21L4 16.5L4 7.5Z M20 7.5L12 12L4 7.5 M12 12L12 21" />
                 </svg>
                 {{ modelChipLabel() }}
                 <svg viewBox="0 0 16 16">

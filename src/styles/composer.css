@@ -291,7 +291,7 @@ body.resizing-composer {
   height: 13px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
