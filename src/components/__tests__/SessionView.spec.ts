@@ -304,15 +304,13 @@ describe("SessionView 右键菜单", () => {
     const t2Row = rows.find((r) => r.text().includes("仅预览"))!;
     expect(t1Row.find(".session-icon path").attributes("d")).toBe(ICON_WECHAT);
     expect(t2Row.find(".session-icon path").attributes("d")).toBe(ICON_SESSION);
-    // 微信绑定行保留填充渲染；未绑定会话行以描边渲染
+    // 微信绑定行保留非零环绕填充；未绑定会话行单色填充 + evenodd 挖两孔
     expect(t1Row.find(".session-icon path").attributes("fill")).toBe("currentColor");
     expect(t1Row.find(".session-icon path").attributes("stroke")).toBe("none");
-    expect(t2Row.find(".session-icon path").attributes("fill")).toBe("none");
-    expect(t2Row.find(".session-icon path").attributes("stroke")).toBe("currentColor");
-    expect(t2Row.find(".session-icon path").attributes("stroke-width")).toBe("2");
-    expect(
-      t2Row.find(".session-icon path").attributes("vector-effect"),
-    ).toBe("non-scaling-stroke");
+    expect(t1Row.find(".session-icon path").attributes("fill-rule")).toBe("nonzero");
+    expect(t2Row.find(".session-icon path").attributes("fill")).toBe("currentColor");
+    expect(t2Row.find(".session-icon path").attributes("stroke")).toBe("none");
+    expect(t2Row.find(".session-icon path").attributes("fill-rule")).toBe("evenodd");
     expect(t1Row.find(".history-wechat-badge").exists()).toBe(false);
     store.wechat = null;
   });

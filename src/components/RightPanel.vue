@@ -117,12 +117,7 @@ onBeforeUnmount(() => {
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
             :d="ICON_SESSION"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            vector-effect="non-scaling-stroke"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+            fill-rule="evenodd"
           />
         </svg>
         <span>会话</span>

@@ -324,9 +324,10 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const sessionPaths = items[0].findAll("svg path");
     expect(sessionPaths).toHaveLength(1);
     expect(sessionPaths[0].attributes("d")).toBe(ICON_SESSION);
-    // 新建会话：会话图标以描边渲染（fill 置 none、stroke 用 currentColor）
-    expect(sessionPaths[0].attributes("fill")).toBe("none");
-    expect(sessionPaths[0].attributes("stroke")).toBe("currentColor");
+    // 新建会话：会话图标以单色填充渲染（fill 用 currentColor、evenodd 挖两孔）
+    expect(sessionPaths[0].attributes("fill")).toBe("currentColor");
+    expect(sessionPaths[0].attributes("stroke")).toBe("none");
+    expect(sessionPaths[0].attributes("fill-rule")).toBe("evenodd");
     // 新建终端：仍为单路径图标
     expect(items[1].findAll("svg path")).toHaveLength(1);
     expect(items[1].find("svg path").attributes("d")).toBe(ICON_TERMINAL);

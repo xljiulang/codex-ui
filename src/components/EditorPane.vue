@@ -270,7 +270,6 @@ function openAddMenu(e: MouseEvent) {
     {
       label: "新建会话",
       icon: ICON_SESSION,
-      stroke: true,
       action: () => void pickAndOpenNewSession(),
     },
     {
