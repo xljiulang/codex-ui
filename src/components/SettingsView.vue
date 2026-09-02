@@ -67,6 +67,7 @@ import type {
   SkillsState,
   TerminalShell,
 } from "../lib/types";
+import ModelConfigModelPicker from "./ModelConfigModelPicker.vue";
 import ModalDialog from "./ModalDialog.vue";
 
 const codexPath = ref(store.settings.codex_path ?? "");
@@ -1280,22 +1281,13 @@ function pluginInitial(p: PluginCatalogItem): string {
                   model（模型名称）
                   <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                 </label>
-                <input
+                <ModelConfigModelPicker
                   id="model-config-ui-model"
                   v-model="modelConfig.model"
-                  type="text"
-                  list="model-config-model-options"
+                  :options="catalogModelIds"
                   :disabled="modelConfig.loading"
-                  placeholder="如 deepseek-v4-flash"
-                  :class="{ 'model-config-input-error': modelConfigErrors.model }"
+                  :error="!!modelConfigErrors.model"
                 />
-                <datalist id="model-config-model-options">
-                  <option
-                    v-for="mid in catalogModelIds"
-                    :key="mid"
-                    :value="mid"
-                  ></option>
-                </datalist>
                 <p
                   v-if="modelConfigErrors.model"
                   class="model-config-field-error"

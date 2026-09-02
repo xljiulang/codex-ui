@@ -564,7 +564,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe(0);
   });
 
-  it("模型名称输入带 list，datalist 由模型目录 slug 生成", async () => {
+  it("模型名称输入点击展开全部候选（由模型目录 slug 生成，不过滤）", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
@@ -574,12 +574,16 @@ describe("SettingsView 模型配置", () => {
       );
     await flushPromises();
     const input = wrapper.find("#model-config-ui-model");
-    expect(input.attributes("list")).toBe("model-config-model-options");
-    const options = wrapper
-      .findAll("#model-config-model-options option")
-      .map((o) => o.attributes("value"));
-    expect(options).toContain("m1");
-    expect(options).toContain("m2");
+    // datalist 已移除，改为点击输入框展开的自定义下拉（不再有按值过滤的 list 属性）
+    expect(input.attributes("list")).toBeUndefined();
+    await input.trigger("click");
+    const opts = wrapper.findAll(".model-config-model-picker-menu .option-btn");
+    expect(opts.map((o) => o.text())).toEqual(["m1", "m2"]);
+    // 点击候选回填到模型名称
+    await opts[0].trigger("click");
+    expect(
+      (wrapper.find("#model-config-ui-model").element as HTMLInputElement).value,
+    ).toBe("m1");
   });
 
   it("模型配置添加按钮 aria-label 为「添加模型提供方」", async () => {
