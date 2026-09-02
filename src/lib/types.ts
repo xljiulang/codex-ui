@@ -173,7 +173,7 @@ export interface AppSettings {
   default_permission: PermissionId;
   /** 新开终端使用的 Shell */
   terminal_shell: TerminalShell;
-  /** 启动时是否打开「Codex-UI 介绍」欢迎标签页 */
+  /** 启动时是否打开「欢迎」介绍标签页 */
   open_welcome_on_startup: boolean;
 }
 

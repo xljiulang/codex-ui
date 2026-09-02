@@ -249,7 +249,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".welcome-section-title").exists()).toBe(true);
     const welcomeTab = wrapper
       .findAll(".editor-tab")
-      .find((w) => w.text().includes("Codex-UI 介绍"))!;
+      .find((w) => w.text().includes("欢迎"))!;
     const logoPaths = welcomeTab
       .find(".editor-tab-icon svg")!
       .findAll("path");

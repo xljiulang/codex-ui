@@ -23,7 +23,7 @@ describe("欢迎介绍标签生命周期", () => {
     expect(tabs).toHaveLength(1);
     expect(tabs[0]!.id).toBe(WELCOME_TAB_ID);
     expect(tabs[0]!.kind).toBe(TabKind.Welcome);
-    expect(tabs[0]!.title).toBe("Codex-UI 介绍");
+    expect(tabs[0]!.title).toBe("欢迎");
     expect(tabs[0]!.workspace).toBeNull();
     expect(activeTabId.value).toBe(WELCOME_TAB_ID);
   });

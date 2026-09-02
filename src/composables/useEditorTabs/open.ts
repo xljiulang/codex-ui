@@ -98,7 +98,7 @@ export function openWelcomeTab(): void {
   const tab: WelcomeTab = {
     id: WELCOME_TAB_ID,
     kind: TabKind.Welcome,
-    title: "Codex-UI 介绍",
+    title: "欢迎",
     icon: TabIcon.Welcome,
     workspace: null,
     loading: false,
