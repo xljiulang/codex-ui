@@ -162,6 +162,9 @@ pub fn run() {
             codex::commands::wechat_bind_login_start,
             codex::commands::wechat_unbind,
             codex::commands::wechat_cancel_bind,
+            codex::commands::sessions_get,
+            codex::commands::sessions_update,
+            codex::commands::sessions_remove,
             codex::commands::open_url,
             codex::commands::reveal_path,
             codex::diff::build_diff_preview,
@@ -355,10 +358,16 @@ pub fn run() {
             app.manage(server);
             // 微信接入桥：数据根目录随应用数据目录；存在绑定时后台自动恢复长轮询
             let wechat_app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let session_store = Arc::new(
+                codex::session_state::SessionStateStore::new(&wechat_app_dir)
+                    .map_err(|e| e.to_string())?,
+            );
+            app.manage(session_store.clone());
             let wechat = codex::wechat_bridge::WeChatBridge::new(
                 app.handle().clone(),
                 server_handle.clone(),
                 wechat_app_dir,
+                session_store,
             );
             app.manage(wechat.clone());
             let wechat_boot = wechat.clone();

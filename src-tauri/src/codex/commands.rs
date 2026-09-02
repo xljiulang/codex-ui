@@ -9,6 +9,7 @@ use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
 use crate::codex::custom_instructions;
 use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
+use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
 use crate::codex::wechat_bridge::WeChatBridge;
@@ -328,6 +329,36 @@ pub async fn wechat_unbind(wechat: State<'_, WeChat>, thread_id: String) -> Resu
 pub async fn wechat_cancel_bind(wechat: State<'_, WeChat>) -> Result<(), String> {
     wechat.cancel_bind().await;
     Ok(())
+}
+
+/// 读取某线程的统一会话状态（微信绑定/权限/模型/推理强度）。
+#[tauri::command]
+pub fn sessions_get(
+    store: State<'_, Arc<SessionStateStore>>,
+    thread_id: String,
+) -> Option<SessionState> {
+    store.get(&thread_id)
+}
+
+/// 写入某线程的权限/模型/推理强度（全量覆盖这三个字段，None 表示恢复默认，保留微信绑定）。
+#[tauri::command]
+pub fn sessions_update(
+    store: State<'_, Arc<SessionStateStore>>,
+    thread_id: String,
+    permission_mode: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+) -> Result<(), String> {
+    store.set_settings(&thread_id, permission_mode, model, effort)
+}
+
+/// 清空某线程的会话状态记录（删除会话时调用）。
+#[tauri::command]
+pub fn sessions_remove(
+    store: State<'_, Arc<SessionStateStore>>,
+    thread_id: String,
+) -> Result<(), String> {
+    store.remove(&thread_id)
 }
 
 #[tauri::command]

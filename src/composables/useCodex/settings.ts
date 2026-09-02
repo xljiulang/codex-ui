@@ -209,3 +209,26 @@ export function effectiveEffort(tab?: Pick<SessionTab, "model" | "effort">): str
     store.models.find((x) => x.isDefault);
   return m?.defaultReasoningEffort ?? "";
 }
+
+/** 新建会话固化用：解析会话实际生效的模型/推理强度（tab 显式值优先，否则默认模型/默认强度）。 */
+export function effectiveSessionModelEffort(
+  tab: Pick<SessionTab, "model" | "effort">,
+): { model: string | null; effort: string | null } {
+  let model = tab.model;
+  if (!model) {
+    try {
+      model = currentModelId(tab);
+    } catch {
+      model = null; // 模型列表未加载：保持默认
+    }
+  }
+  let effort = tab.effort;
+  if (!effort) {
+    try {
+      effort = effectiveEffort(tab) || null;
+    } catch {
+      effort = null;
+    }
+  }
+  return { model, effort };
+}

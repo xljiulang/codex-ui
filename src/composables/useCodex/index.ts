@@ -28,14 +28,18 @@ export {
   __resetSessionTabsForTest,
   activeSessionTab,
   findSessionTabByThread,
+  hydrateSessionState,
   isThreadOpen,
   isThreadRunning,
+  removeSessionState,
+  saveSessionState,
   sessionTabTitle,
 } from "./sessionState";
 export { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
 export {
   currentModelId,
   effectiveEffort,
+  effectiveSessionModelEffort,
   ensureSkills,
   ensureThreadPlugins,
   loadModels,

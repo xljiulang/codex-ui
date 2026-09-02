@@ -5,6 +5,7 @@ import {
   activeSessionTab,
   ensureThreadLoaded,
   loadModels,
+  saveSessionState,
   setToast,
   store,
   toastError,
@@ -72,6 +73,7 @@ async function apply() {
       setToast(toastError(e));
     }
   }
+  void saveSessionState(tab);
   emit("close");
 }
 </script>

@@ -13,6 +13,7 @@ pub mod pdf_export;
 pub mod runtime_download;
 pub mod session_fs;
 pub mod session_log;
+pub mod session_state;
 pub mod settings;
 pub mod skills;
 pub mod terminal;

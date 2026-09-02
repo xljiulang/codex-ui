@@ -188,6 +188,19 @@ export interface WeChatBindingInfo {
     | "error";
 }
 
+/** 会话统一持久化状态（sessions.json 单条记录，key=threadId）的字段，与 Rust SessionState 对齐 */
+export interface SessionStateInfo {
+  wechat?: {
+    accountId: string;
+    userId?: string | null;
+    name?: string | null;
+    boundAt?: number | null;
+  } | null;
+  permissionMode?: PermissionId | null;
+  model?: string | null;
+  effort?: string | null;
+}
+
 /** 微信桥状态快照（wechat_state 命令与 wechat/event 事件共用） */
 export interface WeChatSnapshot {
   running: boolean;

@@ -15,8 +15,23 @@ import type {
 } from "../../lib/types";
 import { activeTab, activateTab, insertTab, tabs } from "../useTabs";
 import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, workspace } from "./items";
-import { activeSessionTab, allSessionTabs, dropSessionTab, findSessionTabByThread, freshSessionTab, sessionTabTitle } from "./sessionState";
-import { ensureSkills, ensureThreadPlugins, resetToNewChat } from "./settings";
+import {
+  activeSessionTab,
+  allSessionTabs,
+  dropSessionTab,
+  findSessionTabByThread,
+  freshSessionTab,
+  hydrateSessionState,
+  removeSessionState,
+  saveSessionState,
+  sessionTabTitle,
+} from "./sessionState";
+import {
+  effectiveSessionModelEffort,
+  ensureSkills,
+  ensureThreadPlugins,
+  resetToNewChat,
+} from "./settings";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
 import {
@@ -66,10 +81,11 @@ export async function openSessionTabForThread(
     const i = tabs.indexOf(tab);
     if (i >= 0) tabs.splice(i, 1);
     return false;
+    }
+    tab.origin = "session";
+    await hydrateSessionState(tab);
+    return await loadThreadInto(tab, threadId);
   }
-  tab.origin = "session";
-  return await loadThreadInto(tab, threadId);
-}
 
 
 async function newChat(prompt: string, attachments: UserInput[]) {
@@ -122,6 +138,10 @@ async function newChat(prompt: string, attachments: UserInput[]) {
         tab.newChatWorkspace = null;
         tab.loading = false;
         tab.title = sessionTabTitle(tab);
+        const resolved = effectiveSessionModelEffort(tab);
+        tab.model = resolved.model;
+        tab.effort = resolved.effort;
+        void saveSessionState(tab, resolved);
       }
       // 面板一致性兜底：新线程可能尚未被 thread_list 返回，本地先写入摘要
       upsertThreadSummary({
@@ -148,6 +168,10 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       activeTab.newChatWorkspace = null; // 本次新建已消费，恢复默认
       activeTab.loading = false;
       activeTab.title = sessionTabTitle(activeTab);
+      const resolved = effectiveSessionModelEffort(activeTab);
+      activeTab.model = resolved.model;
+      activeTab.effort = resolved.effort;
+      void saveSessionState(activeTab, resolved);
     }
     // 会话级插件/技能缓存兜底：标签创建时已预取，此处失败重试
     if (activeTab) {
@@ -496,10 +520,12 @@ export async function deleteThread(threadId: string) {
     await invoke("thread_delete", { threadId });
     void sessionLog("warn", threadId, "thread-delete");
     store.threads = store.threads.filter((t) => t.id !== threadId);
-    // 释放该会话的本地缓存，避免历史列表长期累积内存
-    delete store.itemsByThread[threadId];
-    delete store.activeWorkByThread[threadId];
-    // 关闭绑定该线程的会话标签（线程已删除，无需确认/中断）
+      // 释放该会话的本地缓存，避免历史列表长期累积内存
+      delete store.itemsByThread[threadId];
+      delete store.activeWorkByThread[threadId];
+      // 清空会话统一状态记录
+      void removeSessionState(threadId);
+      // 关闭绑定该线程的会话标签（线程已删除，无需确认/中断）
     for (const tab of allSessionTabs().filter((t) => t.threadId === threadId)) {
       dropSessionTab(tab);
     }

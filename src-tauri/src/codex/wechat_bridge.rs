@@ -1,11 +1,11 @@
 //! 微信 ClawBot 接入桥。
 //!
-//! 架构：本模块负责「会话 ↔ 微信账号」绑定（bindings.json）、回合编排与回复路由；
+//! 架构：本模块负责「会话 ↔ 微信账号」绑定（存入统一会话状态 sessions.json）、回合编排与回复路由；
 //! 微信协议（ilink bot API）由纯 Rust 的 wechat_client 承担，事件经 mpsc 推送本模块
 //! 消费（语义对齐原 Node sidecar 的 stdio 事件，前端 wechat/event 协议不变）。
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, Mutex, Notify};
 use tokio::time::timeout;
 
 use crate::codex::app_server::CodexServer;
+use crate::codex::session_state::{SessionStateStore, WechatBinding};
 use crate::codex::wechat_client::{WechatClient, WechatEvent};
 
 /// 排队入站消息上限；溢出立即回忙碌提示且该条丢弃。
@@ -175,37 +176,6 @@ fn build_turn_params(thread_id: &str, text: &str, model: &str, client_message_id
     })
 }
 
-/// 绑定文件路径：<root>/bindings.json。
-fn bindings_path(root: &Path) -> PathBuf {
-    root.join("bindings.json")
-}
-
-/// 原子写绑定表（临时文件 + 重命名，风格对齐 settings.rs）。
-async fn save_bindings(root: &Path, list: &[Value]) -> Result<(), String> {
-    let p = bindings_path(root);
-    let tmp = p.with_extension("json.tmp");
-    let body = serde_json::to_string_pretty(list).map_err(|e| format!("序列化绑定失败: {e}"))?;
-    tokio::fs::write(&tmp, body)
-        .await
-        .map_err(|e| format!("写入绑定失败: {e}"))?;
-    if p.exists() {
-        tokio::fs::remove_file(&p)
-            .await
-            .map_err(|e| format!("替换绑定失败: {e}"))?;
-    }
-    tokio::fs::rename(&tmp, &p)
-        .await
-        .map_err(|e| format!("落盘绑定失败: {e}"))
-}
-
-/// 读绑定表；缺失视为空表。
-async fn load_bindings(root: &Path) -> Vec<Value> {
-    let Ok(text) = tokio::fs::read_to_string(bindings_path(root)).await else {
-        return Vec::new();
-    };
-    serde_json::from_str(&text).unwrap_or_default()
-}
-
 // ---------------------------------------------------------------------------
 // 桥本体状态
 // ---------------------------------------------------------------------------
@@ -274,8 +244,8 @@ impl Default for BridgeInner {
 pub struct WeChatBridge {
     app: AppHandle,
     server: Arc<CodexServer>,
-    /// 微信数据根目录：%APPDATA%/<identifier>/wechat/
-    root: PathBuf,
+    /// 统一会话状态存储（微信绑定写入 wechat 子字段）。
+    store: Arc<SessionStateStore>,
     /// 纯 Rust 微信协议客户端（登录/接收/发送/存储）。
     client: WechatClient,
     /// 当前扫码登录的取消信号（共享；notify_waiters 不残留 permit）。
@@ -296,7 +266,12 @@ struct ActiveTurn {
 }
 
 impl WeChatBridge {
-    pub fn new(app: AppHandle, server: Arc<CodexServer>, app_dir: PathBuf) -> Arc<Self> {
+    pub fn new(
+        app: AppHandle,
+        server: Arc<CodexServer>,
+        app_dir: PathBuf,
+        store: Arc<SessionStateStore>,
+    ) -> Arc<Self> {
         let root = app_dir.join("wechat");
         let (job_tx, job_rx) = mpsc::unbounded_channel();
         let (done_tx, done_rx) = mpsc::unbounded_channel();
@@ -305,7 +280,7 @@ impl WeChatBridge {
         let bridge = Arc::new(Self {
             app,
             server,
-            root,
+            store,
             client,
             login_cancel: Arc::new(Notify::new()),
             inner: Mutex::new(BridgeInner {
@@ -336,7 +311,7 @@ impl WeChatBridge {
 
     /// 从磁盘装载绑定到内存。
     async fn reload_bindings(self: &Arc<Self>) {
-        let list = load_bindings(&self.root).await;
+        let list = self.store.wechat_bindings();
         self.inner.lock().await.bindings = list;
     }
 
@@ -555,8 +530,9 @@ impl WeChatBridge {
                 g.qr_content = None;
             }
         }
-        let bindings = self.inner.lock().await.bindings.clone();
-        let _ = save_bindings(&self.root, &bindings).await;
+        if let Err(e) = self.store.set_wechat(thread_id, None) {
+            self.log("warn", format!("落盘解除绑定失败: {e}")).await;
+        }
         self.log("info", format!("已解除会话 {thread_id} 的微信绑定")).await;
         self.emit_state().await;
         Ok(())
@@ -614,6 +590,12 @@ impl WeChatBridge {
                                     "name": null,
                                     "boundAt": bound_at,
                                 });
+                                let stored_binding = WechatBinding {
+                                    account_id: account.clone(),
+                                    user_id: Some(user_id),
+                                    name: None,
+                                    bound_at: u64::try_from(bound_at).ok(),
+                                };
                                 {
                                     let mut g = self.inner.lock().await;
                                     g.bindings.push(binding);
@@ -625,8 +607,11 @@ impl WeChatBridge {
                                     g.started_accounts.insert(start_account.clone());
                                     g.account_conn.insert(start_account.clone(), "starting".into());
                                 }
-                                let bindings = self.inner.lock().await.bindings.clone();
-                                let _ = save_bindings(&self.root, &bindings).await;
+                                if let Err(e) =
+                                    self.store.set_wechat(&thread_id, Some(stored_binding))
+                                {
+                                    self.log("warn", format!("落盘绑定失败: {e}")).await;
+                                }
                                 self.log(
                                     "info",
                                     format!("会话 {thread_id} 已绑定微信账号 {start_account}"),
@@ -1277,24 +1262,37 @@ mod tests {
         assert!(final_reply_text("", "failed", Some(String::new())).contains("failed"));
     }
 
-    #[tokio::test]
-    async fn bindings_roundtrip_atomic() {
+    #[test]
+    fn wechat_bindings_persist_via_session_store() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        assert!(load_bindings(root).await.is_empty());
-        let list = json!([
-            { "threadId": "t-a", "accountId": "bot-a", "userId": "u-a", "boundAt": 1 },
-            { "threadId": "t-b", "accountId": "bot-b", "userId": "u-b", "boundAt": 2 },
-        ]);
-        let arr = list.as_array().unwrap();
-        save_bindings(root, arr).await.unwrap();
-        let loaded = load_bindings(root).await;
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0].get("threadId").and_then(|v| v.as_str()), Some("t-a"));
-        let list2 = json!([{ "threadId": "t-c", "accountId": "bot-c", "userId": "u-c" }]);
-        save_bindings(root, list2.as_array().unwrap()).await.unwrap();
-        assert_eq!(load_bindings(root).await.len(), 1);
-        assert!(!root.join("bindings.json.tmp").exists());
+        let store = crate::codex::session_state::SessionStateStore::new(dir.path()).unwrap();
+        store
+            .set_wechat(
+                "t-a",
+                Some(crate::codex::session_state::WechatBinding {
+                    account_id: "bot-a".into(),
+                    user_id: Some("u-a".into()),
+                    name: None,
+                    bound_at: Some(1),
+                }),
+            )
+            .unwrap();
+        store
+            .set_wechat(
+                "t-b",
+                Some(crate::codex::session_state::WechatBinding {
+                    account_id: "bot-b".into(),
+                    user_id: Some("u-b".into()),
+                    name: None,
+                    bound_at: Some(2),
+                }),
+            )
+            .unwrap();
+        let b = store.wechat_bindings();
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].get("threadId").and_then(|v| v.as_str()), Some("t-a"));
+        store.set_wechat("t-a", None).unwrap();
+        assert_eq!(store.wechat_bindings().len(), 1);
     }
 
     #[test]

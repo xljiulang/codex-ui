@@ -1,11 +1,14 @@
 // useCodex 拆分模块：会话标签底层状态（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { reactive, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { TabIcon, TabKind } from "../../lib/tabs";
 import { activeTab, activeTabId, activateTab, tabs } from "../useTabs";
+import type { SessionStateInfo } from "../../lib/types";
 // 主窗口标题跟随活动 Tab 的模块级 watch（在此导入以确保在 useCodex 各模块图中均被接线）
 import "./windowTitle";
 import { threadTitle } from "./selectors";
 import { store } from "./store";
+import { setToast } from "./toast";
 import type { SessionTab } from "./types";
 
 
@@ -171,6 +174,104 @@ export function dropSessionTab(tab: SessionTab) {
   ) {
     delete store.itemsByThread[tab.threadId];
     delete store.activeWorkByThread[tab.threadId];
+  }
+}
+
+/**
+ * 从统一会话状态（sessions.json）回填某会话标签的权限/模型/推理强度；
+ * 无记录或 threadId 为空时保持默认。仅在历史会话打开 / 恢复时调用。
+ * 模型/推理强度若已下架（不在当前模型列表），自动回退默认并写回 + toast 提示。
+ */
+export async function hydrateSessionState(tab: SessionTab): Promise<void> {
+  if (!tab.threadId) return;
+  try {
+    const s = await invoke<SessionStateInfo | null>("sessions_get", {
+      threadId: tab.threadId,
+    });
+    if (!s) return;
+    if (s.permissionMode) tab.permissionMode = s.permissionMode;
+    let model = s.model ?? null;
+    let effort = s.effort ?? null;
+    let note = "";
+    // 模型列表已加载才做可用性清洗（未加载时按原值应用，避免误判）
+    if (store.modelsLoaded && store.models.length) {
+      if (model) {
+        const known = store.models.find((m) => m.model === model);
+        if (!known) {
+          const fallback =
+            store.models.find((m) => m.isDefault) ?? store.models[0];
+          if (fallback) {
+            const orig = model;
+            model = fallback.model;
+            effort = fallback.defaultReasoningEffort || null;
+            note = `会话模型「${orig}」已不可用，已回退到「${fallback.displayName || fallback.model}」`;
+          }
+        } else if (effort) {
+          // 档位下架：受支持列表非空且不含当前档 → 恢复默认强度
+          const supported = known.supportedReasoningEfforts;
+          if (
+            supported.length &&
+            !supported.some((e) => e.reasoningEffort === effort)
+          ) {
+            const orig = effort;
+            effort = null;
+            note = `推理强度「${orig}」已不可用，已恢复默认`;
+          }
+        }
+      } else if (effort) {
+        // model 为默认：按默认模型校验强度
+        const def = store.models.find((m) => m.isDefault) ?? store.models[0];
+        if (
+          def &&
+          def.supportedReasoningEfforts.length &&
+          !def.supportedReasoningEfforts.some(
+            (e) => e.reasoningEffort === effort,
+          )
+        ) {
+          const orig = effort;
+          effort = null;
+          note = `推理强度「${orig}」已不可用，已恢复默认`;
+        }
+      }
+    }
+    tab.model = model;
+    tab.effort = effort;
+    if (note) {
+      void saveSessionState(tab); // 落盘回退后的值，避免每次打开重复回退
+      setToast(note);
+    }
+  } catch {
+    // 读取失败保持默认，不阻断会话打开
+  }
+}
+
+/**
+ * 把某会话标签的权限/模型/推理强度写入统一会话状态（保留微信绑定）。
+ * 可选 `resolved` 覆盖 model/effort（新建会话用实际生效值固化默认），不传则读 tab.*。
+ */
+export async function saveSessionState(
+  tab: SessionTab,
+  resolved?: { model?: string | null; effort?: string | null },
+): Promise<void> {
+  if (!tab.threadId) return;
+  try {
+    await invoke("sessions_update", {
+      threadId: tab.threadId,
+      permissionMode: tab.permissionMode,
+      model: resolved ? resolved.model ?? null : tab.model,
+      effort: resolved ? resolved.effort ?? null : tab.effort,
+    });
+  } catch {
+    // 写失败不阻断 UI（下次变更或会话打开会再尝试）
+  }
+}
+
+/** 删除会话时清空其统一状态记录。 */
+export async function removeSessionState(threadId: string): Promise<void> {
+  try {
+    await invoke("sessions_remove", { threadId });
+  } catch {
+    // 清空失败静默（记录残留无害）
   }
 }
 

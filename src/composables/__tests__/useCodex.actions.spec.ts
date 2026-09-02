@@ -270,8 +270,9 @@ describe("会话标签状态与事件路由", () => {
     expect(activeSessionTab()?.name).toBe("帮我修复登录页面报错");
     expect(tabs[0].name).toBe("帮我修复登录页面报错");
     expect(tabs[0].nameIsFirstMessage).toBe(true);
-    // 模型只存在于标签且由用户显式选择写入：thread_start 返回的 res.model 不回填
-    expect(activeSessionTab()?.model).toBeNull();
+    // 新建会话冻结创建时默认：模型解析为默认模型 gpt-5（thread_start 返回的 res.model 不回填）
+    expect(activeSessionTab()?.model).toBe("gpt-5");
+    expect(activeSessionTab()?.effort).toBeNull();
     expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
       threadId: "t1",
       name: "帮我修复登录页面报错",

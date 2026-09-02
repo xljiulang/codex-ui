@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { PERMISSION_MODES } from "../lib/permissions";
-import { activeSessionTab } from "../composables/useCodex";
+import { activeSessionTab, saveSessionState } from "../composables/useCodex";
 import type { PermissionId } from "../lib/types";
 
 const emit = defineEmits<{ close: [] }>();
 
 function choose(id: PermissionId) {
   const tab = activeSessionTab();
-  if (tab) tab.permissionMode = id; // 进程级生效，不写配置文件
+  if (tab) {
+    tab.permissionMode = id;
+    void saveSessionState(tab); // 进程级生效 + 统一持久化
+  }
   emit("close");
 }
 </script>
