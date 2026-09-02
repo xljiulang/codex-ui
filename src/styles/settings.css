@@ -326,6 +326,10 @@
   animation: settings-icon-spin 1s linear infinite;
 }
 
+.settings-page .btn.loading svg {
+  animation: settings-icon-spin 1s linear infinite;
+}
+
 @keyframes settings-icon-spin {
   to {
     transform: rotate(360deg);

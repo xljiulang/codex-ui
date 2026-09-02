@@ -1491,9 +1491,8 @@ function pluginInitial(p: PluginCatalogItem): string {
 
             <div class="model-config-actions">
               <button
-                class="btn btn-icon primary model-config-save-btn"
+                class="btn primary model-config-save-btn"
                 :class="{ loading: modelConfig.savingProviders }"
-                v-tooltip="'保存'"
                 aria-label="保存"
                 :disabled="modelConfig.savingProviders || modelConfig.loading"
                 @click="saveProviders"
@@ -1501,6 +1500,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
+                <span>保存</span>
               </button>
             </div>
           </div>
@@ -1555,9 +1555,8 @@ function pluginInitial(p: PluginCatalogItem): string {
             ></textarea>
             <div class="model-config-actions">
               <button
-                class="btn btn-icon primary model-config-save-btn"
+                class="btn primary model-config-save-btn"
                 :class="{ loading: modelConfig.savingCatalog }"
-                v-tooltip="'保存'"
                 aria-label="保存"
                 :disabled="
                   modelConfig.savingCatalog ||
@@ -1569,6 +1568,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
+                <span>保存</span>
               </button>
             </div>
           </div>
@@ -1622,9 +1622,8 @@ function pluginInitial(p: PluginCatalogItem): string {
             ></textarea>
             <div class="model-config-actions">
               <button
-                class="btn btn-icon primary model-config-save-btn"
+                class="btn primary model-config-save-btn"
                 :class="{ loading: agents.saving }"
-                v-tooltip="'保存'"
                 aria-label="保存"
                 :disabled="agents.saving || agents.loading"
                 @click="saveCustomInstructions"
@@ -1632,6 +1631,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_SAVE" />
                 </svg>
+                <span>保存</span>
               </button>
             </div>
           </div>
@@ -1748,8 +1748,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </div>
                 <button
                   class="btn btn-icon danger memory-delete-btn"
-                  v-tooltip="'重置记忆'"
-                  aria-label="重置记忆"
+                  v-tooltip="'删除记忆'"
+                  aria-label="删除记忆"
                   @click="resetMemory()"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">

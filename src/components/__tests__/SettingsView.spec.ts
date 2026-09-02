@@ -323,13 +323,13 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.findAll(".model-config-title-link").length).toBe(2);
   });
 
-  it("模型配置两张卡片保存按钮标题均为「保存」", async () => {
+  it("模型配置两张卡片保存按钮文本均为「保存」", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const saveButtons = wrapper.findAll(
       ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
     );
-    expect(saveButtons.map((b) => b.attributes("data-tip"))).toEqual(["保存", "保存"]);
+    expect(saveButtons.map((b) => b.text().trim())).toEqual(["保存", "保存"]);
   });
 
   it("点 model_catalog_json 卡「保存」调用 model_catalog_save", async () => {
