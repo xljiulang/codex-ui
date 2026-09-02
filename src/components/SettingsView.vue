@@ -8,10 +8,8 @@ import {
   isAuthRequiredError,
   loadMcpServers,
   loadMemoryConfig,
-  loadModels,
   loadModelProviderConfig,
   loadPluginCatalog,
-  refreshThreads,
   removeMarketplace,
   saveMcpServers,
   saveMemoryConfig,
@@ -242,9 +240,6 @@ const modelConfig = reactive({
   providers: [] as ModelProviderInfo[],
 });
 
-/** 最近一次读盘得到的已保存 model_provider（用于判断保存后是否变化，从而刷新会话列表） */
-const savedModelProvider = ref("");
-
 /** 模型配置卡片校验状态：空串表示无错误；catalog 为模型目录结构错误（阻断保存） */
 const modelConfigErrors = reactive({
   model: "",
@@ -301,7 +296,6 @@ function applyProvidersCard(pc: ModelProviderConfigState) {
   modelConfig.model = pc.model;
   modelConfig.model_reasoning_effort = pc.model_reasoning_effort;
   modelConfig.model_provider = pc.model_provider;
-  savedModelProvider.value = pc.model_provider;
   modelConfig.preferred_auth_method = pc.preferred_auth_method;
   modelConfig.forced_login_method = pc.forced_login_method;
   // 浅拷贝：组件内增删改不污染调用方数组引用（测试/热更新下尤其重要）
@@ -558,17 +552,9 @@ async function saveModelConfig() {
       model_catalog_json: catalogContent ? modelConfig.model_catalog_path : null,
       providers: modelConfig.providers,
     };
-    // 保存前记录提供方是否变化：变化则保存成功后重新加载会话列表（refreshThreads）
-    const providerChanged =
-      savedModelProvider.value.trim() !== modelConfig.model_provider.trim();
     await saveModelProviderConfig(input);
-    setToast("模型配置已保存");
-    // 提供方/模型目录变化后强制重载模型列表，刷新各会话模型菜单
-    await loadModels(true);
+    setToast("模型配置已保存，重启 codex-ui 后生效");
     await loadModelConfig();
-    if (providerChanged) {
-      await refreshThreads();
-    }
   } catch (e) {
     setToast(toastError(e));
   } finally {
