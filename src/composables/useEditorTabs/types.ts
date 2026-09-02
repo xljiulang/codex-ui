@@ -150,6 +150,16 @@ export interface SettingsTab extends EditorTabBase {
   loading: false;
 }
 
+/** 欢迎/介绍标签：启动默认打开的 Codex-UI 功能导览页（全应用唯一，可关闭） */
+export interface WelcomeTab extends EditorTabBase {
+  kind: (typeof TabKind)["Welcome"];
+  id: string;
+  title: string;
+  icon: (typeof TabIcon)["Welcome"];
+  workspace: null;
+  loading: false;
+}
+
 export type EditorTab =
   | FileEditorTab
   | DocxEditorTab
@@ -157,4 +167,5 @@ export type EditorTab =
   | PreviewEditorTab
   | TerminalEditorTab
   | CommitEditorTab
-  | SettingsTab;
+  | SettingsTab
+  | WelcomeTab;

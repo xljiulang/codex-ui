@@ -152,7 +152,8 @@ function tabIcon(tab: EditorTab): string {
   if (
     tab.kind === TabKind.Terminal ||
     tab.kind === TabKind.Commit ||
-    tab.kind === TabKind.Settings
+    tab.kind === TabKind.Settings ||
+    tab.kind === TabKind.Welcome
   ) {
     return "";
   }
@@ -163,7 +164,13 @@ function tabIcon(tab: EditorTab): string {
 watch(
   () =>
     props.editorTabs
-      .filter((t) => t.kind !== TabKind.Terminal && t.kind !== TabKind.Commit)
+      .filter(
+        (t) =>
+          t.kind !== TabKind.Terminal &&
+          t.kind !== TabKind.Commit &&
+          t.kind !== TabKind.Settings &&
+          t.kind !== TabKind.Welcome,
+      )
       .map((t) => t.id),
   () => {
     const byRoot = new Map<string, FsEntry[]>();
@@ -171,7 +178,8 @@ watch(
       if (
         tab.kind === TabKind.Terminal ||
         tab.kind === TabKind.Commit ||
-        tab.kind === TabKind.Settings
+        tab.kind === TabKind.Settings ||
+        tab.kind === TabKind.Welcome
       )
         continue;
       const t =
@@ -198,6 +206,7 @@ function sessionTabPending(tab: SessionTab): number {
  */
 function titleTooltip(tab: EditorTab): string {
   if (tab.kind === TabKind.Settings) return "";
+  if (tab.kind === TabKind.Welcome) return "";
   if (tab.kind === TabKind.Terminal) return "";
   if (tab.kind === TabKind.Commit) return tab.hash;
   const path = relPathOf(tab.workspace, tab.path);
@@ -313,6 +322,16 @@ function titleTooltip(tab: EditorTab): string {
         >
           <svg viewBox="0 0 24 24">
             <path :d="ICON_SETTINGS" />
+          </svg>
+        </span>
+        <span
+          v-else-if="tab.icon === TabIcon.Welcome"
+          class="editor-tab-icon editor-tab-welcome"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
+            <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
           </svg>
         </span>
         <span v-else class="editor-tab-icon" aria-hidden="true">
