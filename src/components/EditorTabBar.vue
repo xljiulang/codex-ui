@@ -346,11 +346,6 @@ function titleTooltip(tab: EditorTab): string {
             <path :d="ICON_FILE" />
           </svg>
         </span>
-        <span
-          v-if="isTabWorking(tab)"
-          class="editor-tab-run inline"
-          aria-hidden="true"
-        ></span>
         <input
           v-if="renamingId === tab.id"
           v-model="renameDraft"
@@ -369,6 +364,11 @@ function titleTooltip(tab: EditorTab): string {
         >
           {{ tab.title }}
         </span>
+        <span
+          v-if="isTabWorking(tab)"
+          class="editor-tab-run inline"
+          aria-hidden="true"
+        ></span>
         <span
           v-if="
             (tab.kind === TabKind.File || tab.kind === TabKind.Docx) &&
