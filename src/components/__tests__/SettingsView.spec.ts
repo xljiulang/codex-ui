@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
-  return { ...mod, saveSettings: vi.fn() };
+  return { ...mod, saveSettings: vi.fn(), refreshThreads: vi.fn() };
 });
 vi.mock("../../composables/useSessionFs", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useSessionFs")>();
@@ -19,7 +19,12 @@ vi.mock("../../composables/useSessionFs", async (importOriginal) => {
 
 import { invoke } from "@tauri-apps/api/core";
 import SettingsView from "../SettingsView.vue";
-import { saveSettings, settleConfirm, store } from "../../composables/useCodex";
+import {
+  refreshThreads,
+  saveSettings,
+  settleConfirm,
+  store,
+} from "../../composables/useCodex";
 import { openPathInApp } from "../../composables/useSessionFs";
 import {
   activeTabId,
@@ -41,6 +46,7 @@ const tabs = _tabs as unknown as SessionTab[];
 const mockedInvoke = vi.mocked(invoke);
 const mockedSave = vi.mocked(saveSettings);
 const mockedOpenPathInApp = vi.mocked(openPathInApp);
+const mockedRefresh = vi.mocked(refreshThreads);
 
 /** 打开设置标签并激活会话 s1（供「关闭/取消/保存」类测试使用） */
 function mountWithSettingsTab() {
@@ -242,6 +248,7 @@ describe("SettingsView 模型配置", () => {
     mockedSave.mockClear();
     mockedOpenPathInApp.mockReset();
     mockedOpenPathInApp.mockResolvedValue(true);
+    mockedRefresh.mockReset();
   });
 
   it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型配置", () => {
@@ -359,6 +366,33 @@ describe("SettingsView 模型配置", () => {
     );
     expect(batchWrite).toBeTruthy();
     expect(store.toast).toContain("模型配置已保存");
+  });
+
+  it("保存模型配置且提供方变化后刷新会话列表", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    // 切换到另一提供方 other（当前激活 deepseek）
+    const radios = wrapper.findAll('input[name="model-provider-active"]');
+    await radios[1].setValue(true);
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      )
+      .trigger("click");
+    await flushPromises();
+    expect(mockedRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("保存模型配置但提供方未变化时不刷新会话列表", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+      )
+      .trigger("click");
+    await flushPromises();
+    expect(mockedRefresh).not.toHaveBeenCalled();
   });
 
   it("点 AGENTS 卡「保存」调用 custom_instructions_save", async () => {
