@@ -498,7 +498,6 @@ function taskModeLabel(): string {
         class="composer-resize-handle"
         :class="{ active: resizingComposer }"
         aria-label="调整输入框高度"
-        v-tooltip="'拖动调整输入框高度'"
         @pointerdown="startComposerResize"
       >
         <span class="composer-resize-grip"></span>
