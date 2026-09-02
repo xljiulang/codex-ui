@@ -9,10 +9,23 @@ import {
   attachTerminal,
   type TerminalHandle,
 } from "../composables/useTerminalEvents";
+import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { copyText } from "../lib/clipboard";
+import { ICON_COPY, ICON_PASTE } from "../lib/icons";
+import ContextMenu from "./ContextMenu.vue";
 
 const props = defineProps<{ tab: TerminalEditorTab; active?: boolean }>();
 
 const hostRef = ref<HTMLDivElement | null>(null);
+
+/** 终端右键菜单：有选区时可复制，恒可粘贴（复用 useActionMenu 脚手架） */
+const {
+  ctxMenu,
+  openCtx,
+  onWindowClick,
+  onWindowScroll,
+  onKeydown: onMenuKeydown,
+} = useActionMenu({ width: 190, scrollScope: ".terminal-pane" });
 
 /** 后端 prompt 注入的空闲标记：cmd/PowerShell 每次回到提示符先输出 OSC 133;D */
 const PROMPT_MARKER = "\x1b]133;D";
@@ -113,6 +126,80 @@ function syncSize() {
   }).catch(() => {});
 }
 
+/** 终端右键菜单项：有选区时提供「复制」，恒提供「粘贴」 */
+function buildTerminalMenu(): CtxItem[] {
+  const items: CtxItem[] = [];
+  if (term?.hasSelection()) {
+    items.push({
+      label: "复制",
+      icon: ICON_COPY,
+      action: () => void copyTerminalSelection(),
+    });
+  }
+  items.push({
+    label: "粘贴",
+    icon: ICON_PASTE,
+    action: () => void pasteTerminalClipboard(),
+  });
+  return items;
+}
+
+/** 复制 xterm 当前选区（与系统剪贴板统一写入） */
+async function copyTerminalSelection() {
+  if (!term?.hasSelection()) return;
+  await copyText(term.getSelection());
+}
+
+/** 右键「粘贴」：经 Rust 读系统剪贴板文本后由 xterm 按预粘贴模式写入 ConPTY */
+async function pasteTerminalClipboard() {
+  if (disposed || props.tab.exited || props.tab.error) return;
+  let text = "";
+  try {
+    text = await invoke<string>("clipboard_read_text");
+  } catch {
+    return;
+  }
+  if (!text) return;
+  term?.paste(text);
+}
+
+/**
+ * 终端宿主右键：弹出自定义菜单（替换默认菜单，避免页面刷新）。
+ * 停用传播，让上层全局右键菜单（useContextMenu）不覆盖终端区。
+ */
+function onTerminalContextMenu(e: MouseEvent) {
+  if (disposed || props.tab.exited || props.tab.error) return;
+  openCtx(e, buildTerminalMenu());
+}
+
+/**
+ * Ctrl+V 粘贴：在捕获阶段拦截 paste，同步 preventDefault+stopPropagation，
+ * 避免 xterm 自带的 paste 处理重复写入，并修复 WebView2 下剪贴板文本进不了
+ * xterm（clipboardData 为空）的问题。优先取粘贴事件剪贴板文本，为空再回退
+ * Rust 读剪贴板（绕过 WebView2 读取权限确认框）。
+ */
+function onTerminalPaste(e: ClipboardEvent) {
+  if (disposed || props.tab.exited || props.tab.error) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const inline = e.clipboardData?.getData("text/plain") ?? "";
+  if (inline) {
+    term?.paste(inline);
+    return;
+  }
+  void invoke<string>("clipboard_read_text")
+    .then((text) => {
+      if (!text) return;
+      if (disposed || props.tab.exited || props.tab.error) return;
+      term?.paste(text);
+    })
+    .catch(() => {});
+}
+
+function onWindowKeydown(e: KeyboardEvent) {
+  if (onMenuKeydown(e)) return;
+}
+
 onMounted(() => {
   const host = hostRef.value;
   if (!host) return;
@@ -185,6 +272,13 @@ onMounted(() => {
     });
   }
 
+  // 自定义右键菜单 + Ctrl+V 粘贴；捕获阶段拦 paste 避免 xterm 重复处理
+  host.addEventListener("contextmenu", onTerminalContextMenu);
+  host.addEventListener("paste", onTerminalPaste, true);
+  window.addEventListener("keydown", onWindowKeydown);
+  window.addEventListener("click", onWindowClick);
+  window.addEventListener("scroll", onWindowScroll, true);
+
   if (props.active && !props.tab.exited && !props.tab.error) {
     term.focus();
   }
@@ -215,6 +309,11 @@ watch(
 
 onBeforeUnmount(() => {
   disposed = true;
+  hostRef.value?.removeEventListener("contextmenu", onTerminalContextMenu);
+  hostRef.value?.removeEventListener("paste", onTerminalPaste, true);
+  window.removeEventListener("keydown", onWindowKeydown);
+  window.removeEventListener("click", onWindowClick);
+  window.removeEventListener("scroll", onWindowScroll, true);
   handle?.detach();
   handle = null;
   themeObserver?.disconnect();
@@ -239,5 +338,12 @@ onBeforeUnmount(() => {
       </div>
       <div class="terminal-overlay-msg">可在标签上点 × 关闭该终端</div>
     </div>
+    <ContextMenu
+      v-if="ctxMenu"
+      :items="ctxMenu.items"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      @close="ctxMenu = null"
+    />
   </div>
 </template>

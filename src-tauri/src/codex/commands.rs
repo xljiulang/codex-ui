@@ -596,6 +596,18 @@ pub async fn clipboard_write_files(paths: Vec<String>) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// 读取系统剪贴板文本（CF_UNICODETEXT）。经 Rust 读剪贴板，避免调用
+/// navigator.clipboard.readText() 触发 WebView2「查看复制到剪贴板的文本和图像」
+/// 权限确认框；剪贴板无文本时返回空串。
+#[tauri::command]
+pub async fn clipboard_read_text() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        clipboard_win::get_clipboard_string().map_err(|e| format!("读取剪贴板文本失败: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;

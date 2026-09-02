@@ -174,6 +174,7 @@ pub fn run() {
             codex::commands::save_pasted_image,
             codex::commands::clipboard_file_paths,
             codex::commands::clipboard_write_files,
+            codex::commands::clipboard_read_text,
             codex::commands::settings_get,
             codex::commands::settings_set,
             codex::commands::model_config_read,

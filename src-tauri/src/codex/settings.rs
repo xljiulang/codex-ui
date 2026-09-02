@@ -16,6 +16,9 @@ pub struct AppSettings {
     /// 终端 Shell：cmd（命令提示符，默认）｜powershell
     #[serde(default = "default_terminal_shell")]
     pub terminal_shell: String,
+    /// 启动时是否打开「Codex-UI 介绍」欢迎标签页（默认勾选打开）
+    #[serde(default = "default_open_welcome")]
+    pub open_welcome_on_startup: bool,
 }
 
 fn default_permission() -> String {
@@ -26,6 +29,10 @@ fn default_terminal_shell() -> String {
     "cmd".into()
 }
 
+fn default_open_welcome() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -34,10 +41,11 @@ impl Default for AppSettings {
             enter_to_send: true,
             followup_mode: "adjust".into(),
             theme: "blue".into(),
-        default_permission: default_permission(),
-        terminal_shell: default_terminal_shell(),
+            default_permission: default_permission(),
+            terminal_shell: default_terminal_shell(),
+            open_welcome_on_startup: default_open_welcome(),
+        }
     }
-}
 }
 
 pub fn settings_path(app_dir: &Path) -> std::path::PathBuf {
@@ -95,6 +103,7 @@ mod tests {
         let s = load(dir.path());
         assert_eq!(s.default_permission, "ask-for-approval");
         assert_eq!(s.terminal_shell, "cmd");
+        assert!(s.open_welcome_on_startup, "缺失该字段应回退默认 true");
     }
 
     #[test]
@@ -103,6 +112,7 @@ mod tests {
         let s = AppSettings {
             default_permission: "full-access".into(),
             terminal_shell: "powershell".into(),
+            open_welcome_on_startup: false,
             ..AppSettings::default()
         };
 
@@ -110,10 +120,25 @@ mod tests {
         let loaded = load(dir.path());
         assert_eq!(loaded.default_permission, "full-access");
         assert_eq!(loaded.terminal_shell, "powershell");
+        assert!(!loaded.open_welcome_on_startup);
         // 原子写不应残留临时文件
         assert!(!settings_path(dir.path())
             .with_extension("json.tmp")
             .exists());
+    }
+
+    #[test]
+    fn load_missing_open_welcome_falls_back_true() {
+        let dir = TempDir::new().unwrap();
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue","default_permission":"ask-for-approval","terminal_shell":"cmd"}"#,
+        )
+        .unwrap();
+
+        let s = load(dir.path());
+        assert!(s.open_welcome_on_startup);
     }
 
     #[test]

@@ -22,8 +22,8 @@ onMounted(async () => {
   try {
     await init();
   } finally {
-    // 启动默认打开欢迎介绍标签：每次启动创建并激活（不持久化关闭状态）
-    openWelcomeTab();
+    // 启动按设置打开欢迎介绍标签（默认勾选）：每次启动创建并激活（不持久化关闭状态）
+    if (store.settings.open_welcome_on_startup) openWelcomeTab();
   }
 });
 

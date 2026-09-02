@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { nextTick, reactive } from "vue";
 
 const { bridgeState, xtermState } = vi.hoisted(() => ({
@@ -14,6 +14,8 @@ const { bridgeState, xtermState } = vi.hoisted(() => ({
   xtermState: {
     onData: null as null | ((d: string) => void),
     writeCalls: [] as string[],
+    pasteCalls: [] as string[],
+    selection: "",
     disposed: 0,
     focusCalls: 0,
     constructorOptions: null as Record<string, unknown> | null,
@@ -31,6 +33,17 @@ vi.mock("@xterm/xterm", () => {
     open() {}
     onData(cb: (d: string) => void) {
       xtermState.onData = cb;
+    }
+    hasSelection() {
+      return !!xtermState.selection;
+    }
+    getSelection() {
+      return xtermState.selection;
+    }
+    paste(d: string) {
+      xtermState.pasteCalls.push(d);
+      // 真实 xterm 触发 onData → 前端 terminal_write；mock 同步模拟
+      xtermState.onData?.(d);
     }
     write(d: string) {
       xtermState.writeCalls.push(d);
@@ -252,6 +265,8 @@ describe("TerminalPane", () => {
     bridgeState.bufferedExit.clear();
     xtermState.onData = null;
     xtermState.writeCalls.length = 0;
+    xtermState.pasteCalls.length = 0;
+    xtermState.selection = "";
     xtermState.disposed = 0;
     xtermState.focusCalls = 0;
     xtermState.constructorOptions = null;
@@ -539,6 +554,133 @@ describe("TerminalPane", () => {
     expect(xtermState.options.theme).toEqual(expectedTheme("light"));
 
     clearThemeVars();
+    wrapper.unmount();
+  });
+});
+
+describe("TerminalPane 复制 / 粘贴", () => {
+  function hostOf(wrapper: VueWrapper) {
+    return wrapper.find(".terminal-host").element as HTMLElement;
+  }
+
+  /** 让 clipboard_read_text 命令返回指定文本（其余命令静默成功） */
+  function mockClipboardRead(text: string) {
+    mockedInvoke.mockImplementation((cmd) =>
+      cmd === "clipboard_read_text"
+        ? Promise.resolve(text)
+        : Promise.resolve(undefined),
+    );
+  }
+
+  function rightClick(host: HTMLElement) {
+    host.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 40,
+        clientY: 40,
+      }),
+    );
+  }
+
+  /** 派发 paste 事件；传 text 时附带 clipboardData，否则走 clipboard_read_text 回退 */
+  function firePaste(host: HTMLElement, text?: string) {
+    const ev = new Event("paste", {
+      bubbles: true,
+      cancelable: true,
+    }) as ClipboardEvent;
+    if (text !== undefined) {
+      Object.defineProperty(ev, "clipboardData", {
+        value: { getData: () => text },
+        configurable: true,
+      });
+    }
+    host.dispatchEvent(ev);
+  }
+
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    mockedInvoke.mockResolvedValue(undefined);
+    xtermState.selection = "";
+    xtermState.pasteCalls.length = 0;
+  });
+
+  it("有选区时右键弹出「复制」「粘贴」，无选区仅「粘贴」", async () => {
+    const wrapper = mount(TerminalPane, { props: { tab: makeTab() } });
+    await flushPromises();
+    const host = hostOf(wrapper);
+
+    rightClick(host);
+    await nextTick();
+    expect(wrapper.findAll(".ctx-menu-item").map((b) => b.text())).toEqual([
+      "粘贴",
+    ]);
+
+    xtermState.selection = "abc";
+    rightClick(host);
+    await nextTick();
+    expect(wrapper.findAll(".ctx-menu-item").map((b) => b.text())).toEqual([
+      "复制",
+      "粘贴",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("右键「粘贴」经 Rust 读系统剪贴板并写入 ConPTY", async () => {
+    const tab = makeTab();
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    mockClipboardRead("pasted text");
+
+    rightClick(hostOf(wrapper));
+    await nextTick();
+    const pasteBtn = wrapper
+      .findAll(".ctx-menu-item")
+      .find((b) => b.text() === "粘贴")!;
+    await pasteBtn.trigger("click");
+    await flushPromises();
+
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_read_text");
+    expect(xtermState.pasteCalls).toEqual(["pasted text"]);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_write", {
+      id: tab.id,
+      data: "pasted text",
+    });
+    wrapper.unmount();
+  });
+
+  it("Ctrl+V：clipboardData 有文本时直接写入（不调用 clipboard_read_text）", async () => {
+    const tab = makeTab();
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+
+    firePaste(hostOf(wrapper), "inline text");
+    await flushPromises();
+
+    expect(mockedInvoke).not.toHaveBeenCalledWith("clipboard_read_text");
+    expect(xtermState.pasteCalls).toEqual(["inline text"]);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_write", {
+      id: tab.id,
+      data: "inline text",
+    });
+    wrapper.unmount();
+  });
+
+  it("Ctrl+V：clipboardData 为空时回退 clipboard_read_text", async () => {
+    const tab = makeTab();
+    const wrapper = mount(TerminalPane, { props: { tab } });
+    await flushPromises();
+    mockClipboardRead("fallback text");
+
+    firePaste(hostOf(wrapper));
+    await flushPromises();
+
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_read_text");
+    expect(xtermState.pasteCalls).toEqual(["fallback text"]);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_write", {
+      id: tab.id,
+      data: "fallback text",
+    });
     wrapper.unmount();
   });
 });

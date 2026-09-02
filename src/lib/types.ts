@@ -173,6 +173,8 @@ export interface AppSettings {
   default_permission: PermissionId;
   /** 新开终端使用的 Shell */
   terminal_shell: TerminalShell;
+  /** 启动时是否打开「Codex-UI 介绍」欢迎标签页 */
+  open_welcome_on_startup: boolean;
 }
 
 /** 会话↔微信账号绑定信息（wechat_state 快照的 bindings 数组项） */

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { EditorView } from "@codemirror/view";
 import { redo, selectAll, undo } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
@@ -230,13 +231,14 @@ async function cutSelection() {
   }
 }
 
-/** 粘贴：WebView2 不支持 execCommand("paste")，经 Clipboard API 读取后插入选区 */
+/** 粘贴：WebView2 不支持 execCommand("paste")，经 Rust 读系统剪贴板后插入选区
+ *（避免 navigator.clipboard.readText() 触发 WebView2 读取权限确认框） */
 async function pasteAtCursor() {
   const v = view;
   if (!v) return;
   let text = "";
   try {
-    text = await navigator.clipboard.readText();
+    text = await invoke<string>("clipboard_read_text");
   } catch {
     setToast("无法读取剪贴板");
     return;

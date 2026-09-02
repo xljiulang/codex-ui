@@ -34,6 +34,9 @@ async function openTab(path: string, content: string): Promise<FileEditorTab> {
     if (cmd === "session_fs_read") {
       return Promise.resolve(fileContent(content));
     }
+    if (cmd === "clipboard_read_text") {
+      return Promise.resolve("pasted-text");
+    }
     return Promise.reject(new Error(`unexpected ${cmd}`));
   });
   await openFileTab(root, path);
@@ -116,7 +119,6 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     Object.defineProperty(navigator, "clipboard", {
       value: {
         writeText: vi.fn().mockResolvedValue(undefined),
-        readText: vi.fn().mockResolvedValue("pasted-text"),
       },
       configurable: true,
     });
@@ -464,7 +466,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     view.dispatch({ selection: { anchor: 0 } });
     await openCtx(wrapper);
     await clickMenuItem(wrapper, "粘贴");
-    expect(navigator.clipboard.readText).toHaveBeenCalled();
+    expect(mockedInvoke).toHaveBeenCalledWith("clipboard_read_text");
     expect(view.state.doc.toString()).toBe("pasted-text");
     expect(tab.dirty).toBe(true);
     wrapper.unmount();
