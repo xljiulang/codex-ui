@@ -39,7 +39,7 @@ import {
   toUserAttachment,
 } from "../lib/mention";
 import { permissionMode } from "../lib/permissions";
-import { ICON_CHEVRON_DOWN } from "../lib/icons";
+import { ICON_CHEVRON_DOWN, ICON_MODEL_CUBE } from "../lib/icons";
 import GoalChip from "./GoalChip.vue";
 import {
   Reference,
@@ -576,7 +576,7 @@ function taskModeLabel(): string {
                 @click="toggleMenu('model')"
               >
                 <svg class="model-chip-icon" viewBox="0 0 24 24">
-                  <path d="M12 3L20 7.5L20 16.5L12 21L4 16.5L4 7.5Z M20 7.5L12 12L4 7.5 M12 12L12 21" />
+                  <path :d="ICON_MODEL_CUBE" />
                 </svg>
                 {{ modelChipLabel() }}
                 <svg viewBox="0 0 16 16">

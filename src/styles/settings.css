@@ -416,6 +416,8 @@
 .settings-panel {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   padding: var(--space-10) var(--space-12) 32px;
 }
@@ -426,6 +428,17 @@
   gap: var(--space-5);
   max-width: 920px;
   animation: settings-section-in var(--ease-slow);
+}
+
+/* 「全局指令」分区撑满右侧面板剩余高度，AGENTS 卡片与编辑器随内容填充 */
+.settings-section-global-instructions {
+  flex: 1;
+  min-height: 0;
+}
+
+.settings-section-global-instructions .model-config-card {
+  flex: 1;
+  min-height: 0;
 }
 
 @keyframes settings-section-in {
@@ -1266,9 +1279,8 @@
 
 .custom-instructions-textarea {
   width: 100%;
-  field-sizing: content;
-  min-height: 260px;
-  max-height: 50vh;
+  flex: 1;
+  min-height: 240px;
   overflow-y: auto;
   resize: none;
   box-sizing: border-box;

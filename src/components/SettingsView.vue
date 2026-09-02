@@ -42,10 +42,10 @@ import {
   ICON_EXTENSION,
   ICON_FILE,
   ICON_FOLDER_OPEN,
-  ICON_BRACES,
   ICON_IGNORE,
   ICON_LINK,
   ICON_MCP,
+  ICON_MODEL_CUBE,
   ICON_PALETTE,
   ICON_PLUS,
   ICON_REFRESH,
@@ -77,16 +77,32 @@ const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const defaultPermission = ref(store.settings.default_permission);
 const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
-const settingsSections = [
+const settingsSectionIds = [
+  "personalization",
+  "memory",
+  "global-instructions",
+  "model-config",
+  "skills",
+  "mcp",
+  "plugins",
+] as const;
+type SettingsSectionId = (typeof settingsSectionIds)[number];
+interface SettingsSection {
+  id: SettingsSectionId;
+  label: string;
+  icon: string;
+  /** 是否以描边渲染（当前仅「模型配置」用立方体线框） */
+  stroke?: boolean;
+}
+const settingsSections: SettingsSection[] = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
   { id: "memory", label: "本地记忆", icon: ICON_THINK },
   { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
-  { id: "model-config", label: "模型配置", icon: ICON_BRACES },
+  { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
-] as const;
-type SettingsSectionId = (typeof settingsSections)[number]["id"];
+];
 /** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
 const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
 
@@ -1085,7 +1101,14 @@ function pluginInitial(p: PluginCatalogItem): string {
           @click="activeSection = s.id"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="s.icon" />
+            <path
+              :d="s.icon"
+              :fill="s.stroke ? 'none' : 'currentColor'"
+              :stroke="s.stroke ? 'currentColor' : 'none'"
+              :stroke-width="s.stroke ? 1.5 : undefined"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
           {{ s.label }}
         </button>
