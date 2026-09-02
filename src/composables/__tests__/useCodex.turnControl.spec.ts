@@ -455,7 +455,7 @@ describe("buildTurnParams 三面独立映射", () => {
     expect(params.approvalPolicy).toBe("never");
     expect(params.sandboxPolicy).toEqual({
       type: "readOnly",
-      networkAccess: true,
+      networkAccess: false,
     });
     expect(params.approvalsReviewer).toBeUndefined();
   });

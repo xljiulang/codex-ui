@@ -13,7 +13,7 @@ export const PERMISSION_MODES: PermissionMode[] = [
   {
     id: "read-only",
     label: "只读访问",
-    desc: "文件只读，可联网检索；不会修改任何文件",
+    desc: "文件只读，不会联网",
     chip: "只读",
     icon: "M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 0 1 6 0v3H9zm3 4a1.5 1.5 0 0 1 1.5 1.5V16a1.5 1.5 0 0 1-3 0v-.5A1.5 1.5 0 0 1 12 14z",
   },
@@ -97,13 +97,13 @@ export function toSandboxPolicy(
 ): Record<string, unknown> {
   switch (mode) {
     case "read-only":
-      return { type: "readOnly", networkAccess: true };
+      return { type: "readOnly", networkAccess: false };
     case "ask-for-approval":
     case "help-me-approve":
       return {
         type: "workspaceWrite",
         writableRoots: workspace ? [workspace] : [],
-        networkAccess: false,
+        networkAccess: true,
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
       };

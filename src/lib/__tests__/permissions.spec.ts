@@ -19,6 +19,7 @@ describe("权限模式映射", () => {
       "完全访问",
     ]);
     expect(PERMISSION_MODES[3].desc).toBe("不受限制地访问互联网和您电脑的任何文件");
+    expect(PERMISSION_MODES[0].desc).toBe("文件只读，不会联网");
   });
 
   it("请求批准 → on-request + workspace-write + user 评审", () => {
@@ -53,14 +54,14 @@ describe("权限模式映射", () => {
     expect(toSandboxPolicy("ask-for-approval", "C:\\workspace")).toEqual({
       type: "workspaceWrite",
       writableRoots: ["C:\\workspace"],
-      networkAccess: false,
+      networkAccess: true,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
     });
     expect(toSandboxPolicy("help-me-approve", "C:\\workspace")).toEqual({
       type: "workspaceWrite",
       writableRoots: ["C:\\workspace"],
-      networkAccess: false,
+      networkAccess: true,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
     });
@@ -69,7 +70,7 @@ describe("权限模式映射", () => {
     });
     expect(toSandboxPolicy("read-only")).toEqual({
       type: "readOnly",
-      networkAccess: true,
+      networkAccess: false,
     });
   });
 });

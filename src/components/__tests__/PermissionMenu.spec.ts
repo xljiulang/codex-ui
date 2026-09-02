@@ -30,6 +30,7 @@ describe("PermissionMenu 权限模式菜单", () => {
     expect(w.text()).toContain("帮我批准");
     expect(w.text()).toContain("完全访问");
     expect(w.text()).toContain("不受限制地访问互联网和您电脑的任何文件");
+    expect(w.text()).toContain("文件只读，不会联网");
     expect(w.find(".mode-menu-item.selected").text()).toContain("完全访问");
   });
 
