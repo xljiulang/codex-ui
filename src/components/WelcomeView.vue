@@ -18,12 +18,6 @@ onMounted(async () => {
   <div class="welcome-view">
     <div class="welcome-inner">
       <header class="welcome-hero">
-        <div class="welcome-logo" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
-            <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
-          </svg>
-        </div>
         <h1 class="welcome-title">欢迎使用 Codex-UI</h1>
         <p class="welcome-tagline">
           基于 Rust + Tauri 2 的 Codex CLI Windows 桌面客户端：以本地桌面会话驱动

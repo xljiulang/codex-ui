@@ -26,31 +26,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-.welcome-logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 72px;
-  height: 72px;
-  border-radius: var(--radius-xl);
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
-  box-shadow: var(--inset-shadow), 0 0 28px rgba(var(--accent-rgb), 0.18);
-  margin-bottom: var(--space-8);
-}
-
-.welcome-logo svg {
-  width: 42px;
-  height: 42px;
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.9;
-}
-
-.welcome-logo svg .logo-c {
-  stroke-linecap: round;
-}
-
 .welcome-title {
   margin: 0;
   font-size: 26px;

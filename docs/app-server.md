@@ -145,7 +145,7 @@ codex-ui 实际发送（Rust 后端 `src-tauri/src/codex/app_server.rs`）：
 
 ```json
 { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-    "clientInfo": { "name": "codex-ui", "title": "Codex UI", "version": "0.1.1" },
+    "clientInfo": { "name": "codex-ui", "title": "Codex UI", "version": "0.1.2" },
     "capabilities": { "experimentalApi": true, "requestAttestation": false }
 } }
 ```
@@ -783,7 +783,7 @@ codex app-server generate-json-schema --experimental --out <DIR>
 
 ```json
 → { "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-    "clientInfo": { "name": "codex-ui", "title": "Codex UI", "version": "0.1.1" },
+    "clientInfo": { "name": "codex-ui", "title": "Codex UI", "version": "0.1.2" },
     "capabilities": { "experimentalApi": true, "requestAttestation": false } } }
 ← { "id": 1, "result": { "userAgent": "…", "codexHome": "C:\\Users\\Admin\\.codex",
     "platformFamily": "windows", "platformOs": "windows" } }
