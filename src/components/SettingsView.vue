@@ -52,7 +52,6 @@ import {
   ICON_SAVE,
   ICON_SKILL,
   ICON_THINK,
-  ICON_TUNE,
 } from "../lib/icons";
 import { PERMISSION_MODES } from "../lib/permissions";
 import type {
@@ -80,7 +79,7 @@ const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSections = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
-  { id: "general", label: "通用设置", icon: ICON_TUNE },
+  { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
   { id: "memory", label: "本地记忆", icon: ICON_THINK },
   { id: "model-config", label: "模型配置", icon: ICON_BRACES },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
@@ -1098,30 +1097,66 @@ function pluginInitial(p: PluginCatalogItem): string {
         >
           <h2 class="settings-section-title">个性化</h2>
           <p class="settings-section-desc">
-            主题外观、音效与消息发送偏好
+            主题、音效、消息发送、终端与权限等偏好设置
           </p>
           <div class="settings-card">
             <div class="settings">
-              <div class="setting-row checkbox-row">
-                <input
-                  id="sound"
-                  v-model="sound"
-                  type="checkbox"
-                  @change="persist({ sound_enabled: sound })"
-                />
-                <label for="sound">提权/交互时播放提示音</label>
+              <div class="setting-row">
+                <label>终端 Shell</label>
+                <select
+                  v-model="terminalShell"
+                  class="terminal-shell-select"
+                  @change="persist({ terminal_shell: terminalShell })"
+                >
+                  <option value="cmd">cmd（命令提示符）</option>
+                  <option value="powershell">PowerShell</option>
+                </select>
               </div>
 
-              <div class="setting-row checkbox-row">
-                <input
-                  id="enter"
-                  v-model="enterToSend"
-                  type="checkbox"
-                  @change="persist({ enter_to_send: enterToSend })"
-                />
-                <label for="enter">
-                  Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
-                </label>
+              <div class="setting-row">
+                <label>codex 可执行文件（留空自动查找）</label>
+                <div class="setting-path-row codex-path-row">
+                  <div class="setting-value codex-path-value">
+                    {{ codexPath || "未设置（自动查找）" }}
+                  </div>
+                  <button
+                    class="btn btn-icon codex-pick-btn"
+                    v-tooltip="'选择文件'"
+                    aria-label="选择文件"
+                    @click="pickCodexFile()"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_FOLDER_OPEN" />
+                    </svg>
+                  </button>
+                  <button
+                    v-if="codexPath"
+                    class="btn btn-icon danger codex-clear-btn"
+                    v-tooltip="'清除'"
+                    aria-label="清除"
+                    @click="clearCodexPath()"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                  </button>
+                </div>
+                <p v-if="!codexPath && store.server.codexPath" class="setting-note">
+                  当前使用（自动检测）：{{ store.server.codexPath }}
+                </p>
+              </div>
+
+              <div class="setting-row">
+                <label>默认权限</label>
+                <select
+                  v-model="defaultPermission"
+                  class="default-permission-select"
+                  @change="persist({ default_permission: defaultPermission })"
+                >
+                  <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
+                    {{ m.label }}
+                  </option>
+                </select>
               </div>
 
               <div class="setting-row">
@@ -1147,6 +1182,39 @@ function pluginInitial(p: PluginCatalogItem): string {
                   </button>
                 </div>
               </div>
+
+              <div class="setting-row checkbox-row">
+                <input
+                  id="sound"
+                  v-model="sound"
+                  type="checkbox"
+                  @change="persist({ sound_enabled: sound })"
+                />
+                <label for="sound">提权/交互时播放提示音</label>
+              </div>
+
+              <div class="setting-row checkbox-row">
+                <input
+                  id="enter"
+                  v-model="enterToSend"
+                  type="checkbox"
+                  @change="persist({ enter_to_send: enterToSend })"
+                />
+                <label for="enter">
+                  Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
+                </label>
+              </div>
+
+              <div class="setting-row">
+                <label>跟进处理方式</label>
+                <select
+                  v-model="followupMode"
+                  @change="persist({ followup_mode: followupMode })"
+                >
+                  <option value="adjust">调整方向</option>
+                  <option value="queue">加入队列</option>
+                </select>
+              </div>
             </div>
           </div>
         </section>
@@ -1157,7 +1225,7 @@ function pluginInitial(p: PluginCatalogItem): string {
         >
           <h2 class="settings-section-title">模型配置</h2>
           <p class="settings-section-desc">
-            模型、模型提供方与全局自定义指令
+            模型、模型提供方与模型目录
           </p>
 
           <div class="model-config-card">
@@ -1548,7 +1616,16 @@ function pluginInitial(p: PluginCatalogItem): string {
               </button>
             </div>
           </div>
+        </section>
 
+        <section
+          v-show="activeSection === 'global-instructions'"
+          class="settings-section settings-section-global-instructions"
+        >
+          <h2 class="settings-section-title">全局指令</h2>
+          <p class="settings-section-desc">
+            管理 CODEX_HOME 下的全局自定义指令（AGENTS.md）
+          </p>
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>AGENTS</h3>
@@ -1604,88 +1681,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <path :d="ICON_SAVE" />
                 </svg>
               </button>
-            </div>
-          </div>
-        </section>
-
-        <section
-          v-show="activeSection === 'general'"
-          class="settings-section settings-section-general"
-        >
-          <h2 class="settings-section-title">通用设置</h2>
-          <p class="settings-section-desc">
-            终端、权限与记忆等基础行为
-          </p>
-          <div class="settings-card">
-            <div class="settings">
-              <div class="setting-row">
-                <label>终端 Shell</label>
-                <select
-                  v-model="terminalShell"
-                  class="terminal-shell-select"
-                  @change="persist({ terminal_shell: terminalShell })"
-                >
-                  <option value="cmd">cmd（命令提示符）</option>
-                  <option value="powershell">PowerShell</option>
-                </select>
-              </div>
-
-              <div class="setting-row">
-                <label>跟进处理方式</label>
-                <select
-                  v-model="followupMode"
-                  @change="persist({ followup_mode: followupMode })"
-                >
-                  <option value="adjust">调整方向</option>
-                  <option value="queue">加入队列</option>
-                </select>
-              </div>
-
-              <div class="setting-row">
-                <label>默认权限</label>
-                <select
-                  v-model="defaultPermission"
-                  class="default-permission-select"
-                  @change="persist({ default_permission: defaultPermission })"
-                >
-                  <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
-                    {{ m.label }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="setting-row">
-                <label>codex 可执行文件（留空自动查找）</label>
-                <div class="setting-path-row codex-path-row">
-                  <div class="setting-value codex-path-value">
-                    {{ codexPath || "未设置（自动查找）" }}
-                  </div>
-                  <button
-                    class="btn btn-icon codex-pick-btn"
-                    v-tooltip="'选择文件'"
-                    aria-label="选择文件"
-                    @click="pickCodexFile()"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FOLDER_OPEN" />
-                    </svg>
-                  </button>
-                  <button
-                    v-if="codexPath"
-                    class="btn btn-icon danger codex-clear-btn"
-                    v-tooltip="'清除'"
-                    aria-label="清除"
-                    @click="clearCodexPath()"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_DELETE" />
-                    </svg>
-                  </button>
-                </div>
-                <p v-if="!codexPath && store.server.codexPath" class="setting-note">
-                  当前使用（自动检测）：{{ store.server.codexPath }}
-                </p>
-              </div>
             </div>
           </div>
         </section>

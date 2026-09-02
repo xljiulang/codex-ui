@@ -244,13 +244,13 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 通用设置 → 本地记忆 → 模型配置", () => {
+  it("导航顺序：个性化 → 全局指令 → 本地记忆 → 模型配置", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
       .map((i) => i.text().trim());
     expect(labels.indexOf("个性化")).toBe(0);
-    expect(labels.indexOf("通用设置")).toBe(1);
+    expect(labels.indexOf("全局指令")).toBe(1);
     expect(labels.indexOf("本地记忆")).toBe(2);
     expect(labels.indexOf("模型配置")).toBe(3);
   });
@@ -277,7 +277,11 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain("AGENTS");
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-card").length,
-    ).toBe(3);
+    ).toBe(2);
+    expect(
+      wrapper.findAll(".settings-section-global-instructions .model-config-card")
+        .length,
+    ).toBe(1);
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
   });
 
@@ -319,23 +323,21 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.findAll(".model-config-path-link").length).toBe(2);
   });
 
-  it("三张卡片保存按钮标题均为「保存」", async () => {
+  it("模型配置两张卡片保存按钮标题均为「保存」", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const saveButtons = wrapper.findAll(
       ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
     );
-    expect(saveButtons.map((b) => b.attributes("data-tip"))).toEqual([
-      "保存",
-      "保存",
-      "保存",
-    ]);
+    expect(saveButtons.map((b) => b.attributes("data-tip"))).toEqual(["保存", "保存"]);
   });
 
   it("点 model_catalog_json 卡「保存」调用 model_catalog_save", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const cards = wrapper.findAll(".model-config-card");
+    const cards = wrapper.findAll(
+      ".settings-section-model-config .model-config-card",
+    );
     await cards[1].find(".model-config-actions button.primary").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("model_catalog_save", {
@@ -347,8 +349,10 @@ describe("SettingsView 模型配置", () => {
   it("点 AGENTS 卡「保存」调用 custom_instructions_save", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const cards = wrapper.findAll(".model-config-card");
-    await cards[2].find(".model-config-actions button.primary").trigger("click");
+    const cards = wrapper.findAll(
+      ".settings-section-global-instructions .model-config-card",
+    );
+    await cards[0].find(".model-config-actions button.primary").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_save", {
       content: "# AGENTS.md\n\nWindows 环境。\n",
@@ -359,7 +363,9 @@ describe("SettingsView 模型配置", () => {
   it("点击 model_catalog_json 路径链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-path-link");
+    const links = wrapper.findAll(
+      ".settings-section-model-config .model-config-path-link",
+    );
     await links[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -370,8 +376,10 @@ describe("SettingsView 模型配置", () => {
   it("点击 AGENTS 路径链接在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-path-link");
-    await links[1].trigger("click");
+    const links = wrapper.findAll(
+      ".settings-section-global-instructions .model-config-path-link",
+    );
+    await links[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
       "C:/apps/codex-ui/.codex/AGENTS.md",
@@ -451,10 +459,15 @@ describe("SettingsView 模型配置", () => {
     const agentsCallsBefore = mockedInvoke.mock.calls.filter(
       ([name]) => name === "custom_instructions_read",
     ).length;
-    const cards = wrapper.findAll(".model-config-card");
-    await cards[1].find(".model-config-reload-btn").trigger("click");
+    const modelCards = wrapper.findAll(
+      ".settings-section-model-config .model-config-card",
+    );
+    await modelCards[1].find(".model-config-reload-btn").trigger("click");
     await flushPromises();
-    await cards[2].find(".model-config-reload-btn").trigger("click");
+    const agentsCard = wrapper.find(
+      ".settings-section-global-instructions .model-config-card",
+    );
+    await agentsCard.find(".model-config-reload-btn").trigger("click");
     await flushPromises();
     expect(
       mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
@@ -1708,12 +1721,12 @@ describe("SettingsView 设置标签行为", () => {
     expect(tabs.some((t) => t.id === SETTINGS_TAB_ID)).toBe(true);
   });
 
-  it("个性化 / 通用设置 / 模型配置 / 技能管理 / MCP管理 / 插件管理六个分区均渲染", () => {
+  it("个性化 / 全局指令 / 模型配置 / 技能管理 / MCP管理 / 插件管理六个分区均渲染", () => {
     wrapper = mount(SettingsView);
     const titles = wrapper.findAll(".settings-section-title").map((s) => s.text());
     expect(titles).toContain("个性化");
+    expect(titles).toContain("全局指令");
     expect(titles).toContain("模型配置");
-    expect(titles).toContain("通用设置");
     expect(titles).toContain("技能管理");
     expect(titles).toContain("MCP 管理");
     expect(titles).toContain("插件管理");
@@ -1724,7 +1737,7 @@ describe("SettingsView 设置标签行为", () => {
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "个性化",
-      "通用设置",
+      "全局指令",
       "本地记忆",
       "模型配置",
       "技能管理",
@@ -1740,12 +1753,14 @@ describe("SettingsView 设置标签行为", () => {
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;
-    const general = wrapper.find(".settings-section-general").element as HTMLElement;
+    const globalInstructions = wrapper
+      .find(".settings-section-global-instructions")
+      .element as HTMLElement;
     const skills = wrapper.find(".settings-section-skills").element as HTMLElement;
     const mcp = wrapper.find(".settings-section-mcp").element as HTMLElement;
     const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
     expect(personal.style.display).not.toBe("none");
-    expect(general.style.display).toBe("none");
+    expect(globalInstructions.style.display).toBe("none");
     expect(skills.style.display).toBe("none");
     expect(mcp.style.display).toBe("none");
     expect(plugins.style.display).toBe("none");
@@ -1758,9 +1773,11 @@ describe("SettingsView 设置标签行为", () => {
     await pluginItem.trigger("click");
     expect(items[0].classes()).not.toContain("active");
     expect(pluginItem.classes()).toContain("active");
-    const general = wrapper.find(".settings-section-general").element as HTMLElement;
+    const globalInstructions = wrapper
+      .find(".settings-section-global-instructions")
+      .element as HTMLElement;
     const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
-    expect(general.style.display).toBe("none");
+    expect(globalInstructions.style.display).toBe("none");
     expect(plugins.style.display).not.toBe("none");
   });
 
@@ -2075,9 +2092,9 @@ describe("SettingsView 终端 Shell", () => {
     expect(options).toEqual(["cmd", "powershell"]);
   });
 
-  it("终端 Shell 行位于通用分区内第一项", () => {
+  it("终端 Shell 行位于个性化分区内第一项", () => {
     wrapper = mount(SettingsView);
-    const section = wrapper.find(".settings-section-general");
+    const section = wrapper.find(".settings-section-personalization");
     const labels = section
       .findAll(".settings .setting-row")
       .map((row) => row.find("label").text());
