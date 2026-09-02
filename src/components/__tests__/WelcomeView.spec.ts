@@ -38,6 +38,7 @@ describe("WelcomeView 欢迎介绍页", () => {
     expect(wechatCard.exists()).toBe(true);
     expect(wechatCard.find(".feature-badge").text()).toContain("实验性");
     expect(wechatCard.text()).toContain("微信接入");
+    expect(wechatCard.text()).toContain("仅限工作目录的完全访问");
     expect(wechatCard.classes()).toEqual(["feature-card"]);
     wrapper.unmount();
   });
