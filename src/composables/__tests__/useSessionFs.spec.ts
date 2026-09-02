@@ -404,6 +404,43 @@ describe("openPathInApp 对话链接应用内打开", () => {
     );
     expect(tab).toBeTruthy();
     expect(tab?.workspace).toBe("D:\\other");
+    store.workspace = root;
+    await flushPromises();
+  });
+
+  it("无会话工作区时绝对文件仍以父目录为根打开", async () => {
+    store.workspace = null;
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_probe_text") return Promise.resolve(true);
+      if (cmd === "session_fs_read") {
+        return Promise.resolve({ content: "hi", validUtf8: true, byteSize: 2 });
+      }
+      return Promise.resolve(undefined);
+    });
+    const path = "D:\\other\\x.txt";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_probe_text", {
+      workspace: "D:\\other",
+      path: "x.txt",
+    });
+    const tab = tabs.find(
+      (t): t is FileEditorTab => t.kind === "file" && t.path === "x.txt",
+    );
+    expect(tab).toBeTruthy();
+    expect(tab?.workspace).toBe("D:\\other");
+  });
+
+  it("无会话工作区时相对路径仍返回 false 且不开标签", async () => {
+    store.workspace = null;
+    mockedInvoke.mockResolvedValue(false);
+    const ok = await openPathInApp("relative\\a.txt");
+    expect(ok).toBe(false);
+    expect(
+      tabs.some((t) => t.kind === "file" || t.kind === "preview"),
+    ).toBe(false);
+    store.workspace = root;
+    await flushPromises();
   });
 
   it("测试钩子开启时短路返回 false 且不调 IPC", async () => {

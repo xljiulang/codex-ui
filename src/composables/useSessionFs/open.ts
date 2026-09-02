@@ -76,6 +76,7 @@ export async function probeTextEntry(
  * 对话本地链接：支持则在应用内 tab 打开（PDF/图片/XLSX → 预览标签，文本 → 编辑器），
  * 返回 true；否则返回 false，由调用方降级为资源管理器。
  * 工作区外文件以父目录作为根（仅本次读取/打开，不改变会话工作区）。
+ * 无会话工作区时，绝对文件路径仍可按父目录打开（相对/无法解析的路径返回 false）。
  * 测试钩子（__CODEX_UI_TEST__）开启时直接返回 false，保持 E2E 现有
  * reveal_path 分发记录不回归。
  */
@@ -84,8 +85,7 @@ export async function openPathInApp(path: string): Promise<boolean> {
     const testWin = window as unknown as { __CODEX_UI_TEST__?: boolean };
     if (testWin.__CODEX_UI_TEST__) return false;
     const session = workspace.value;
-    if (!session) return false;
-    const underSession = isPathUnderRoot(session, path);
+    const underSession = session ? isPathUnderRoot(session, path) : false;
     const root = underSession ? session : dirNameOf(path);
     const relPath = underSession ? path : pathBaseName(path);
     if (!root || !relPath) return false;
