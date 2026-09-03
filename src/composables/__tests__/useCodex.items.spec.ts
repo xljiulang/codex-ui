@@ -1,8 +1,9 @@
-import { resolveSessionWorkspace, workspace } from "../useCodex/items";
+import { flattenTurns, resolveSessionWorkspace, workspace } from "../useCodex/items";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { refreshThreads, searchThreads } from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
+import type { Turn } from "../../lib/types";
 import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -224,5 +225,58 @@ describe("历史全量加载（逐页拉取）", () => {
       method: "thread/search",
       params: { searchTerm: "测试", limit: 50, cursor: "page2" },
     });
+  });
+});
+
+describe("flattenTurns 历史回合时间补齐", () => {
+  it("回合带 startedAt（秒）时为其下所有 item 补 startedAtMs（毫秒）", () => {
+    const turns = [
+      {
+        id: "t1",
+        status: "completed",
+        startedAt: 1788409453,
+        items: [
+          { type: "userMessage", id: "u1", content: [] },
+          { type: "agentMessage", id: "a1", text: "hi" },
+        ],
+      },
+    ] as unknown as Turn[];
+
+    const out = flattenTurns(turns);
+    expect(out).toHaveLength(2);
+    expect(out[0].startedAtMs).toBe(1788409453000);
+    expect(out[1].startedAtMs).toBe(1788409453000);
+  });
+
+  it("item 已有 startedAtMs 时不覆盖", () => {
+    const turns = [
+      {
+        id: "t1",
+        status: "completed",
+        startedAt: 1788409453,
+        items: [
+          { type: "userMessage", id: "u1", content: [], startedAtMs: 111 },
+          { type: "agentMessage", id: "a1", text: "hi" },
+        ],
+      },
+    ] as unknown as Turn[];
+
+    const out = flattenTurns(turns);
+    expect(out[0].startedAtMs).toBe(111);
+    expect(out[1].startedAtMs).toBe(1788409453000);
+  });
+
+  it("无 startedAt 的回合保持原样；空/undefined 输入返回空数组", () => {
+    const legacy = [
+      {
+        id: "t1",
+        status: "completed",
+        items: [{ type: "agentMessage", id: "a1", text: "x" }],
+      },
+    ] as unknown as Turn[];
+
+    const out = flattenTurns(legacy);
+    expect(out[0].startedAtMs).toBeUndefined();
+    expect(flattenTurns(undefined)).toEqual([]);
   });
 });

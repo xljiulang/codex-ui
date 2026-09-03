@@ -68,7 +68,16 @@ export function flattenTurns(turns?: Turn[]): ThreadItem[] {
   if (!turns) return [];
   const out: ThreadItem[] = [];
   for (const t of turns) {
-    out.push(...(t.items ?? []));
+    // 历史加载的 item 自身不带时间：用回合开始时间（Unix 秒）补齐 startedAtMs
+    // （毫秒），使历史消息的 HH:mm 与日期分隔线复用实时渲染逻辑；已有时间不覆盖。
+    const startedAtMs =
+      typeof t.startedAt === "number" ? t.startedAt * 1000 : undefined;
+    for (const item of t.items ?? []) {
+      if (startedAtMs !== undefined && typeof item.startedAtMs !== "number") {
+        item.startedAtMs = startedAtMs;
+      }
+      out.push(item);
+    }
   }
   return out;
 }
