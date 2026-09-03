@@ -283,7 +283,7 @@ describe("ResourceView 文件树", () => {
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },

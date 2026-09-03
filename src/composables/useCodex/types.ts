@@ -125,8 +125,8 @@ export interface SessionTab extends EditorTabBase {
   nameIsFirstMessage: boolean;
   /** 会话私有：权限模式（新会话取默认权限） */
   permissionMode: PermissionId;
-  /** 会话私有：任务模式 */
-  taskMode: "default" | "plan";
+  /** 会话私有：协作模式 */
+  collaborationMode: "default" | "plan";
   /** 会话私有：模型（null = 服务端默认） */
   model: string | null;
   /** 会话私有：推理强度（null = 默认） */

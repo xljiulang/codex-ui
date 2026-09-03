@@ -26,7 +26,7 @@ export function buildTurnParams(
   /** 发送目标标签（会话设置唯一事实源）；缺省时权限用默认设置、模型/强度为空 */
   session?: Pick<
     SessionTab,
-    "permissionMode" | "model" | "effort" | "taskMode"
+    "permissionMode" | "model" | "effort" | "collaborationMode"
   >,
 ): Record<string, unknown> {
   const params: Record<string, unknown> = {
@@ -44,13 +44,13 @@ export function buildTurnParams(
   params.model = session?.model ?? null;
   params.effort = session?.effort ?? null;
   // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
-  // 因此每轮都显式携带当前任务模式对应的 collaborationMode。
-  // 三面独立映射：mode 只由 taskMode 决定，settings.model 只由 currentModelId 解析；
+  // 因此每轮都显式携带当前会话协作模式对应的 collaborationMode 参数。
+  // 三面独立映射：mode 只由标签 collaborationMode 决定，settings.model 只由 currentModelId 解析；
   // 协议要求 settings.model 为非空 string（实测 null 会被服务端拒绝），
   // 模型无法解析时 currentModelId 抛错，由发送方 toast 提示并中止发送。
   const collabModel = currentModelId(session);
-  // mode 与 taskMode 已恒等（plan/default），直接取值，无需翻译映射
-  const mode = session?.taskMode ?? "default";
+  // mode 与标签 collaborationMode 恒等（plan/default），直接取值，无需翻译映射
+  const mode = session?.collaborationMode ?? "default";
   params.collaborationMode = {
     mode,
     settings: {
@@ -71,7 +71,7 @@ function buildUserTurn(
   cwd: string,
   session?: Pick<
     SessionTab,
-    "permissionMode" | "model" | "effort" | "taskMode"
+    "permissionMode" | "model" | "effort" | "collaborationMode"
   >,
 ): { clientId: string; input: UserInput[]; params: Record<string, unknown> } {
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

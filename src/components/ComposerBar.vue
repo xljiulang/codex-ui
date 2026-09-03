@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
-import TaskModeMenu from "./TaskModeMenu.vue";
+import CollaborationModeMenu from "./CollaborationModeMenu.vue";
 import {
   interrupt,
   effectiveEffort,
@@ -51,18 +51,18 @@ import {
   tokenStartPos,
   type EditorRun,
 } from "../lib/richEditor";
-import { taskMode } from "../lib/tasks";
+import { collaborationMode } from "../lib/collaborationModes";
 
 const props = defineProps<{ tab: SessionTab; active?: boolean }>();
 
 const mention = ref<null | { kind: "@" | "$"; token: string; start: number }>(
   null,
 );
-// 输入区三个按钮菜单（权限/任务/模型）开关与外部点击关闭；
+// 输入区三个按钮菜单（权限/协作模式/模型）开关与外部点击关闭；
 // 状态为组件局部 ref，多会话标签各自的输入区互不串扰
 const {
   permOpen,
-  taskOpen,
+  collabOpen,
   modelOpen,
   closeMenus,
   toggleMenu,
@@ -431,9 +431,9 @@ function submit(flip = false) {
     .filter((r) => r.kind === "ref")
     .map((r) => (r.kind === "ref" ? refsById.value.get(r.refId) : undefined))
     .filter((a): a is UserInput => !!a);
-  // 目标 flag：仅执行模式（非计划）下首条消息消费勾选，目标=该消息纯文本；
+  // 目标 flag：仅默认模式（非计划）下首条消息消费勾选，目标=该消息纯文本；
   // 计划模式消息不消费，arm 保持（“执行计划”按钮另行以计划内容挂载目标）
-  if (props.tab.goalArmed && props.tab.taskMode !== "plan" && plainText.trim()) {
+  if (props.tab.goalArmed && props.tab.collaborationMode !== "plan" && plainText.trim()) {
     props.tab.goalText = plainText.trim();
     props.tab.goalArmed = false;
     props.tab.goalStatus = null;
@@ -485,9 +485,9 @@ function modelChipLabel(): string {
   return effort ? `${name} (${effort})` : name;
 }
 
-function taskModeLabel(): string {
-  if (props.tab.taskMode === "plan") return "计划模式";
-  return "执行模式";
+function collaborationModeLabel(): string {
+  if (props.tab.collaborationMode === "plan") return "计划模式";
+  return "默认模式";
 }
 
 </script>
@@ -550,20 +550,20 @@ function taskModeLabel(): string {
             </div>
             <div class="menu-anchor">
               <button
-                class="task-chip"
-                v-tooltip="'任务模式'"
+                class="collab-chip"
+                v-tooltip="'协作模式'"
                 :disabled="tab.turnActive"
-                @click="toggleMenu('task')"
+                @click="toggleMenu('collab')"
               >
                 <svg class="chip-icon" viewBox="0 0 24 24">
-                  <path :d="taskMode(tab.taskMode).icon" />
+                  <path :d="collaborationMode(tab.collaborationMode).icon" />
                 </svg>
-                {{ taskModeLabel() }}
+                {{ collaborationModeLabel() }}
                 <svg viewBox="0 0 16 16">
                 <path :d="ICON_CHEVRON_DOWN" />
                 </svg>
               </button>
-              <TaskModeMenu v-if="taskOpen" @close="taskOpen = false" />
+              <CollaborationModeMenu v-if="collabOpen" @close="collabOpen = false" />
             </div>
             <div class="menu-anchor">
               <GoalChip :tab="tab" />
@@ -672,7 +672,7 @@ function taskModeLabel(): string {
       <div
         v-if="
           permOpen ||
-          taskOpen ||
+          collabOpen ||
           modelOpen ||
           mention
         "

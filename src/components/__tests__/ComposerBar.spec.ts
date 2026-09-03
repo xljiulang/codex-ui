@@ -989,7 +989,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await flushPromises();
     expect(wrapper.find(".popup-menu").exists()).toBe(false);
 
-    await wrapper.find(".task-chip").trigger("click");
+    await wrapper.find(".collab-chip").trigger("click");
     await flushPromises();
     expect(wrapper.find(".popup-menu").exists()).toBe(true);
     window.dispatchEvent(new MouseEvent("mousedown"));
@@ -1010,15 +1010,15 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await flushPromises();
     expect(wrapper.find(".popup-menu").text()).toContain("应如何批准 Codex 操作？");
 
-    await wrapper.find(".task-chip").trigger("click");
+    await wrapper.find(".collab-chip").trigger("click");
     await flushPromises();
-    expect(wrapper.find(".popup-menu").text()).toContain("任务模式");
+    expect(wrapper.find(".popup-menu").text()).toContain("协作模式");
     expect(wrapper.find(".popup-menu").text()).not.toContain("应如何批准 Codex 操作？");
 
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
     expect(wrapper.find(".popup-menu").text()).toContain("模型");
-    expect(wrapper.find(".popup-menu").text()).not.toContain("任务模式");
+    expect(wrapper.find(".popup-menu").text()).not.toContain("协作模式");
 
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
@@ -1400,7 +1400,7 @@ describe("ComposerBar 任务目标芯片", () => {
   });
 
   it("计划模式下发送消息：不消费勾选，目标保持待首条执行消息", async () => {
-    tab.taskMode = "plan";
+    tab.collaborationMode = "plan";
     wrapper = mount(ComposerBar, { props: { tab } });
     await flushPromises();
     await wrapper.find(".goal-icon-btn").trigger("click");
@@ -1462,7 +1462,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -1614,7 +1614,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },

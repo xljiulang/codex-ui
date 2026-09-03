@@ -130,7 +130,7 @@ onMounted(async () => {
             </p>
             <ul class="feature-list">
               <li>后台会话继续运行，回合完成/待交互以角标提示</li>
-              <li>每个会话独立权限模式、模型、任务模式与目标</li>
+              <li>每个会话独立权限模式、模型、协作模式与目标</li>
               <li>标签常驻挂载：切走不销毁编辑状态与进程</li>
             </ul>
           </article>
@@ -156,7 +156,7 @@ onMounted(async () => {
           <div class="highlight-item">首条消息自动总结标题，随时查看 token 用量</div>
           <div class="highlight-item">上下文窗口占用提示与一键压缩</div>
           <div class="highlight-item">只读/请求批准/帮我批准/完全访问四种权限</div>
-          <div class="highlight-item">执行/计划任务模式与目标旗子自动续跑</div>
+          <div class="highlight-item">默认/计划协作模式与目标旗子自动续跑</div>
           <div class="highlight-item">蓝夜/曜黑/晨光三套主题</div>
           <div class="highlight-item">技能、MCP 与插件集中管理</div>
           <div class="highlight-item">本地记忆开关与记忆管理</div>

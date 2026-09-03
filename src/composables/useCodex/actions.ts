@@ -268,24 +268,24 @@ export function dismissPlanPrompt() {
 }
 
 
-/** “退出计划模式”：切回执行模式并关闭弹窗，不发消息 */
+/** “退出计划模式”：切回默认模式并关闭弹窗，不发消息 */
 export function exitPlanMode() {
   const tab = activeSessionTab();
   if (tab) {
     tab.planPrompt = null;
-    tab.taskMode = "default";
+    tab.collaborationMode = "default";
   }
 }
 
 
-/** “执行计划”：仿 VS Code —— 发送 `PLEASE IMPLEMENT THIS PLAN:` 消息并切到执行模式 */
+/** “执行计划”：仿 VS Code —— 发送 `PLEASE IMPLEMENT THIS PLAN:` 消息并切到默认模式 */
 export async function executePlan() {
   const tab = activeSessionTab();
   const prompt = tab?.planPrompt;
   if (!prompt) return;
   if (tab) tab.planPrompt = null;
   // 先切模式，使本轮 turn/start 显式携带 collaborationMode default（计划模式粘滞，需显式退出）
-  if (tab) tab.taskMode = "default";
+  if (tab) tab.collaborationMode = "default";
   const text = `PLEASE IMPLEMENT THIS PLAN:\n${prompt.planText}`;
   // 目标勾选：执行计划即首条执行消息，目标=该合成消息（含计划全文）
   if (tab?.goalArmed) {

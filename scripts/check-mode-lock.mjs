@@ -1,4 +1,4 @@
-// 端到端验证：对话进行中权限/任务模式按钮禁用，空闲时恢复可用
+// 端到端验证：对话进行中权限/协作模式按钮禁用，空闲时恢复可用
 import { ensureSession } from "./lib/e2e.mjs";
 
 function arg(name, fallback) {
@@ -53,7 +53,7 @@ const sleep = (ms) => evalJs(`new Promise(r => setTimeout(r, ${ms}))`);
 function chipState() {
   return evalJs(`(() => {
     const p = document.querySelector('.perm-chip');
-    const t = document.querySelector('.task-chip');
+    const t = document.querySelector('.collab-chip');
     return JSON.stringify({
       permDisabled: p ? p.disabled : 'no-chip',
       taskDisabled: t ? t.disabled : 'no-chip',
@@ -70,7 +70,7 @@ ws.onopen = async () => {
     // 等待 UI 就绪
     for (let i = 0; i < 30; i++) {
       await sleep(300);
-      const ready = await evalJs(`!!document.querySelector('.perm-chip') && !!document.querySelector('.task-chip')`);
+      const ready = await evalJs(`!!document.querySelector('.perm-chip') && !!document.querySelector('.collab-chip')`);
       if (ready) break;
     }
     let st = JSON.parse(await chipState());

@@ -410,7 +410,7 @@ describe("buildTurnParams 三面独立映射", () => {
     availableBundledTools.value = [];
   });
 
-  it("权限/任务模式/模型各自独立派生，互不串扰", () => {
+  it("权限/协作模式/模型各自独立派生，互不串扰", () => {
     store.models = [DEFAULT_MODEL];
     const params = buildTurnParams(
       "t1",
@@ -419,7 +419,7 @@ describe("buildTurnParams 三面独立映射", () => {
       "D:/repo",
       {
         permissionMode: "full-access",
-        taskMode: "plan",
+        collaborationMode: "plan",
         model: "gpt-5-extra",
         effort: "high",
       },
@@ -429,7 +429,7 @@ describe("buildTurnParams 三面独立映射", () => {
     expect(params.sandboxPolicy).toEqual({ type: "dangerFullAccess" });
     // 模型面：params.model 取标签显式值
     expect(params.model).toBe("gpt-5-extra");
-    // 计划模式面：mode 由 taskMode 决定，settings.model 取同一标签显式值
+    // 计划模式面：mode 由 collaborationMode 决定，settings.model 取同一标签显式值
     expect(params.collaborationMode).toMatchObject({
       mode: "plan",
       settings: {
@@ -449,7 +449,7 @@ describe("buildTurnParams 三面独立映射", () => {
       "D:/repo",
       {
         permissionMode: "read-only",
-        taskMode: "default",
+        collaborationMode: "default",
         model: "gpt-5",
         effort: null,
       },
@@ -472,7 +472,7 @@ describe("buildTurnParams 三面独立映射", () => {
       "D:/repo",
       {
         permissionMode: "full-access",
-        taskMode: "default",
+        collaborationMode: "default",
         model: "gpt-5",
         effort: null,
       },
@@ -495,7 +495,7 @@ describe("buildTurnParams 三面独立映射", () => {
       "D:/repo",
       {
         permissionMode: "full-access",
-        taskMode: "plan",
+        collaborationMode: "plan",
         model: "gpt-5",
         effort: null,
       },
@@ -509,7 +509,7 @@ describe("buildTurnParams 三面独立映射", () => {
     ).toBeNull();
   });
 
-  it("执行模式 + 标签未选模型时回退默认模型，权限面仍独立", () => {
+  it("默认模式 + 标签未选模型时回退默认模型，权限面仍独立", () => {
     store.models = [DEFAULT_MODEL];
     const params = buildTurnParams(
       "t1",
@@ -518,7 +518,7 @@ describe("buildTurnParams 三面独立映射", () => {
       "D:/repo",
       {
         permissionMode: "help-me-approve",
-        taskMode: "default",
+        collaborationMode: "default",
         model: null,
         effort: null,
       },

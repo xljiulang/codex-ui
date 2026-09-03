@@ -148,7 +148,7 @@ body.resizing-composer {
 
 /* 输入区芯片基类 */
 .perm-chip,
-.task-chip,
+.collab-chip,
 .model-chip,
 .ctx-window,
 .goal-chip,
@@ -163,7 +163,7 @@ body.resizing-composer {
 
 /* accent 芯片 */
 .perm-chip,
-.task-chip,
+.collab-chip,
 .model-chip,
 .ctx-window,
 .token-usage-chip {
@@ -176,7 +176,7 @@ body.resizing-composer {
 }
 
 .perm-chip:hover:not(:disabled),
-.task-chip:hover:not(:disabled),
+.collab-chip:hover:not(:disabled),
 .model-chip:hover:not(:disabled),
 .ctx-window:hover:not(:disabled) {
   border-color: var(--accent);
@@ -218,13 +218,13 @@ body.resizing-composer {
   height: 10px;
 }
 
-.task-chip svg {
+.collab-chip svg {
   width: 10px;
   height: 10px;
   fill: currentColor;
 }
 
-.task-chip .chip-icon {
+.collab-chip .chip-icon {
   width: 13px;
   height: 13px;
 }
@@ -447,7 +447,7 @@ body.resizing-composer {
 /* 窄窗口适配 */
 @media (max-width: 720px) {
   .perm-chip,
-  .task-chip,
+  .collab-chip,
   .goal-chip,
   .model-chip {
     padding: 0 var(--space-2);

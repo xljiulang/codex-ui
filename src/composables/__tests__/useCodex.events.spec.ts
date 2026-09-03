@@ -246,7 +246,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -620,7 +620,7 @@ describe("thread/goal 事件同步与回合完成不清目标", () => {
     __resetSessionTabsForTest();
     tabs.push(
       makeSessionTab("s1", "t1", {
-        taskMode: "plan",
+        collaborationMode: "plan",
         goalText: "发布 v2",
         goalStatus: "active",
       }),
@@ -703,7 +703,7 @@ describe("消息变更计数器与回合结束清扫", () => {
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
+    tabs.push(makeSessionTab("s1", "t1", { collaborationMode: "plan" }));
     activeTabId.value = "s1";
     store.itemsRev = 0;
     store.activeWorkByThread = {};
@@ -942,7 +942,7 @@ describe("计划完成确认弹窗", () => {
       return Promise.resolve(undefined);
     });
     __resetSessionTabsForTest();
-    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
+    tabs.push(makeSessionTab("s1", "t1", { collaborationMode: "plan" }));
     activeTabId.value = "s1";
     store.itemsByThread = {};
   });
@@ -1071,12 +1071,12 @@ describe("计划完成确认弹窗", () => {
     expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
-  it("tab 为 plan、store 为 default：仍按标签模式弹出计划确认（不读全局 taskMode）", async () => {
+  it("tab 为 plan、store 为 default：仍按标签模式弹出计划确认（不读全局 collaborationMode）", async () => {
     await wireEvents();
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "计划A", status: "completed" },
     ];
-    (tabs[0] as SessionTab).taskMode = "plan";
+    (tabs[0] as SessionTab).collaborationMode = "plan";
 
     fireListen("turn/completed", {
       threadId: "t1",
@@ -1094,7 +1094,7 @@ describe("计划完成确认弹窗", () => {
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "计划A", status: "completed" },
     ];
-    (tabs[0] as SessionTab).taskMode = "default";
+    (tabs[0] as SessionTab).collaborationMode = "default";
 
     fireListen("turn/completed", {
       threadId: "t1",
@@ -1140,7 +1140,7 @@ describe("计划完成确认弹窗", () => {
 
   it("非计划模式回合完成不弹窗", async () => {
     await wireEvents();
-    (tabs[0] as SessionTab).taskMode = "default";
+    (tabs[0] as SessionTab).collaborationMode = "default";
     store.itemsByThread["t1"] = [
       { id: "p1", type: "plan", text: "# 计划", status: "completed" },
     ];
@@ -1163,7 +1163,7 @@ describe("计划完成确认弹窗", () => {
     expect(activeSessionTab()?.planPrompt).toBeNull();
   });
 
-  it("executePlan 发送 PLEASE IMPLEMENT THIS PLAN 消息并切到执行模式", async () => {
+  it("executePlan 发送 PLEASE IMPLEMENT THIS PLAN 消息并切到默认模式", async () => {
     await wireEvents();
     tabs[0].planPrompt = {
       threadId: "t1",
@@ -1182,7 +1182,7 @@ describe("计划完成确认弹窗", () => {
 
     await executePlan();
 
-    expect(activeSessionTab()?.taskMode).toBe("default");
+    expect(activeSessionTab()?.collaborationMode).toBe("default");
     expect(activeSessionTab()?.planPrompt).toBeNull();
     // 目标勾选被消费：目标=合成消息（含计划全文）
     expect(activeSessionTab()?.goalArmed).toBe(false);
@@ -1212,12 +1212,12 @@ describe("计划完成确认弹窗", () => {
     tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
     dismissPlanPrompt();
     expect(activeSessionTab()?.planPrompt).toBeNull();
-    expect(activeSessionTab()?.taskMode).toBe("plan");
+    expect(activeSessionTab()?.collaborationMode).toBe("plan");
 
     tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
     exitPlanMode();
     expect(activeSessionTab()?.planPrompt).toBeNull();
-    expect(activeSessionTab()?.taskMode).toBe("default");
+    expect(activeSessionTab()?.collaborationMode).toBe("default");
   });
 });
 
@@ -1247,14 +1247,14 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       makeSessionTab("sA", "tA", {
         turnActive: true,
         currentTurnId: "turn-a",
-        taskMode: "default",
+        collaborationMode: "default",
       }),
     );
     tabs.push(
       makeSessionTab("sB", "tB", {
         turnActive: true,
         currentTurnId: "turn-b",
-        taskMode: "plan",
+        collaborationMode: "plan",
       }),
     );
     activeTabId.value = "sA";
@@ -1285,7 +1285,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       makeSessionTab("sA", "tA", {
         turnActive: true,
         currentTurnId: "turn-a",
-        taskMode: "plan",
+        collaborationMode: "plan",
       }),
     );
     activeTabId.value = "sA";
@@ -1312,7 +1312,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       makeSessionTab("sA", "tA", {
         turnActive: true,
         currentTurnId: "turn-a",
-        taskMode: "plan",
+        collaborationMode: "plan",
       }),
     );
     activeTabId.value = "sA";
@@ -1333,7 +1333,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       makeSessionTab("sA", "tA", {
         turnActive: false,
         currentTurnId: "turn-a",
-        taskMode: "plan",
+        collaborationMode: "plan",
         planPrompt: { threadId: "tA", turnId: "turn-1", planText: "旧提示" },
       }),
     );
@@ -1341,7 +1341,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
       makeSessionTab("sB", "tB", {
         turnActive: false,
         currentTurnId: "turn-b",
-        taskMode: "default",
+        collaborationMode: "default",
       }),
     );
     activeTabId.value = "sA";
@@ -1380,7 +1380,7 @@ describe("事件路由：缺 threadId 时按回合 id 归因（不回退活动�
   });
 });
 
-describe("thread/settings/updated 服务端任务模式对账", () => {
+describe("thread/settings/updated 服务端协作模式对账", () => {
   beforeEach(() => {
     disposeEvents();
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
@@ -1394,8 +1394,8 @@ describe("thread/settings/updated 服务端任务模式对账", () => {
     });
   });
 
-  it("服务端 default：plan 标签 taskMode 切到 default 并记录 warn", async () => {
-    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
+  it("服务端 default：plan 标签 collaborationMode 切到 default 并记录 warn", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { collaborationMode: "plan" }));
     await wireEvents();
 
     fireListen("thread/settings/updated", {
@@ -1404,7 +1404,7 @@ describe("thread/settings/updated 服务端任务模式对账", () => {
     });
     await flushPromises();
 
-    expect((tabs[0] as SessionTab).taskMode).toBe("default");
+    expect((tabs[0] as SessionTab).collaborationMode).toBe("default");
     expect(mockedInvoke).toHaveBeenCalledWith(
       "session_log",
       expect.objectContaining({
@@ -1414,8 +1414,8 @@ describe("thread/settings/updated 服务端任务模式对账", () => {
     );
   });
 
-  it("服务端 plan：default 标签 taskMode 切到 plan", async () => {
-    tabs.push(makeSessionTab("s1", "t1", { taskMode: "default" }));
+  it("服务端 plan：default 标签 collaborationMode 切到 plan", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { collaborationMode: "default" }));
     await wireEvents();
 
     fireListen("thread/settings/updated", {
@@ -1424,11 +1424,11 @@ describe("thread/settings/updated 服务端任务模式对账", () => {
     });
     await flushPromises();
 
-    expect((tabs[0] as SessionTab).taskMode).toBe("plan");
+    expect((tabs[0] as SessionTab).collaborationMode).toBe("plan");
   });
 
   it("字段缺失/未知取值：不影响本地模式且不抛错", async () => {
-    tabs.push(makeSessionTab("s1", "t1", { taskMode: "plan" }));
+    tabs.push(makeSessionTab("s1", "t1", { collaborationMode: "plan" }));
     await wireEvents();
 
     fireListen("thread/settings/updated", {
@@ -1441,7 +1441,7 @@ describe("thread/settings/updated 服务端任务模式对账", () => {
     });
     await flushPromises();
 
-    expect((tabs[0] as SessionTab).taskMode).toBe("plan");
+    expect((tabs[0] as SessionTab).collaborationMode).toBe("plan");
   });
 });
 

@@ -5,24 +5,24 @@ export type ComposerMention =
   | { kind: "@" | "$"; token: string; start: number }
   | null;
 
-export type ComposerMenu = "perm" | "task" | "model";
+export type ComposerMenu = "perm" | "collab" | "model";
 
 /**
- * 输入区三个按钮菜单（权限/任务/模型）的开关与外部点击关闭语义。
+ * 输入区三个按钮菜单（权限/协作模式/模型）的开关与外部点击关闭语义。
  * 状态为组件局部 ref：每个 ComposerBar 实例各自持有，多会话标签互不串扰。
  */
 export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
   const permOpen = ref(false);
-  const taskOpen = ref(false);
+  const collabOpen = ref(false);
   const modelOpen = ref(false);
 
   function menuRef(which: ComposerMenu) {
-    return which === "perm" ? permOpen : which === "task" ? taskOpen : modelOpen;
+    return which === "perm" ? permOpen : which === "collab" ? collabOpen : modelOpen;
   }
 
   function closeAll() {
     permOpen.value = false;
-    taskOpen.value = false;
+    collabOpen.value = false;
     modelOpen.value = false;
   }
 
@@ -54,7 +54,7 @@ export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
     // 弹出层内部与三个触发按钮不自动关闭（按钮自身的 click 负责切换）
     if (
       e.target.closest(".popup-menu") ||
-      e.target.closest(".perm-chip, .task-chip, .model-chip, .goal-chip")
+      e.target.closest(".perm-chip, .collab-chip, .model-chip, .goal-chip")
     ) {
       return;
     }
@@ -63,7 +63,7 @@ export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
 
   return {
     permOpen,
-    taskOpen,
+    collabOpen,
     modelOpen,
     closeMenus,
     toggleMenu,

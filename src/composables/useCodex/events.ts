@@ -153,13 +153,13 @@ export async function wireEvents() {
       if (!tid || isBackgroundThread(tid)) return;
       const tab = findSessionTabByThread(tid);
       if (!tab) return;
-      // 服务端「下一回合」实际生效的协作模式（权威事件源），与本地 taskMode 对账；
+      // 服务端「下一回合」实际生效的协作模式（权威事件源），与本地 collaborationMode 对账；
       // 缺失/未知取值静默忽略，不 toast 不抛错（与现有 turn 事件防御一致）
       const serverMode = p.threadSettings?.collaborationMode?.mode;
       if (serverMode !== "plan" && serverMode !== "default") return;
-      if (tab.taskMode !== serverMode) {
-        const prev = tab.taskMode;
-        tab.taskMode = serverMode;
+      if (tab.collaborationMode !== serverMode) {
+        const prev = tab.collaborationMode;
+        tab.collaborationMode = serverMode;
         sessionLog(
           "warn",
           tid,
@@ -235,7 +235,7 @@ export async function wireEvents() {
       // 纯客户端 UX：协议层没有计划确认交互，由客户端在计划 item 完成后自行询问）
       if (
         tab &&
-        tab.taskMode === "plan" &&
+        tab.collaborationMode === "plan" &&
         !interrupted &&
         tab.followupQueue.length === 0 &&
         p.turn?.id &&

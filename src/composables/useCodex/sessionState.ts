@@ -32,7 +32,7 @@ export function freshSessionTab(): SessionTab {
     name: "",
     nameIsFirstMessage: false,
     permissionMode: store.settings.default_permission,
-    taskMode: "default",
+    collaborationMode: "default",
     model: null,
     effort: null,
     plugins: { plugins: [], loaded: false },

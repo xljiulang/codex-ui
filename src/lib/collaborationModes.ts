@@ -1,4 +1,4 @@
-export interface TaskMode {
+export interface CollaborationMode {
   id: "default" | "plan";
   label: string;
   desc: string;
@@ -6,12 +6,12 @@ export interface TaskMode {
   icon: string;
 }
 
-export const TASK_MODES: TaskMode[] = [
+export const COLLABORATION_MODES: CollaborationMode[] = [
   {
     id: "default",
-    label: "执行模式",
+    label: "默认模式",
     desc: "直接执行任务并给出结果",
-    icon: "M8 5v14l11-7z", // 播放/执行
+    icon: "M8 5v14l11-7z", // 播放/运行（默认模式）
   },
   {
     id: "plan",
@@ -21,6 +21,6 @@ export const TASK_MODES: TaskMode[] = [
   },
 ];
 
-export function taskMode(id: string): TaskMode {
-  return TASK_MODES.find((m) => m.id === id) ?? TASK_MODES[0];
+export function collaborationMode(id: string): CollaborationMode {
+  return COLLABORATION_MODES.find((m) => m.id === id) ?? COLLABORATION_MODES[0];
 }

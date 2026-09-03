@@ -73,7 +73,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "我的标题",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -211,7 +211,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -265,7 +265,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "标题",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -319,7 +319,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -373,7 +373,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -428,7 +428,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       name: "",
       nameIsFirstMessage: false,
       permissionMode: "ask-for-approval",
-      taskMode: "default",
+      collaborationMode: "default",
       model: null,
       effort: null,
       plugins: { plugins: [], loaded: false },
@@ -755,7 +755,7 @@ describe("会话标签状态与事件路由", () => {
     tabs.push(
       makeSessionTab("s1", "t1", {
         permissionMode: "full-access",
-        taskMode: "plan",
+        collaborationMode: "plan",
         model: "gpt-5",
         effort: "high",
         turnActive: true,
@@ -772,7 +772,7 @@ describe("会话标签状态与事件路由", () => {
         workspace: "D:/repo/b",
         planPrompt: { threadId: "t2", turnId: "tp2", planText: "计划B" },
         permissionMode: "help-me-approve",
-        taskMode: "default",
+        collaborationMode: "default",
         model: "o3",
         effort: "low",
       }),
@@ -788,7 +788,7 @@ describe("会话标签状态与事件路由", () => {
     expect(activeSessionTab()?.turnActive).toBe(false);
     expect(activeSessionTab()?.planPrompt?.planText).toBe("计划B");
     expect(activeSessionTab()?.permissionMode).toBe("help-me-approve");
-    expect(activeSessionTab()?.taskMode).toBe("default");
+    expect(activeSessionTab()?.collaborationMode).toBe("default");
     expect(activeSessionTab()?.model).toBe("o3");
     expect(activeSessionTab()?.effort).toBe("low");
 
@@ -800,7 +800,7 @@ describe("会话标签状态与事件路由", () => {
     expect(activeSessionTab()?.attachments).toHaveLength(1);
     expect(activeSessionTab()?.followupQueue).toHaveLength(1);
     expect(activeSessionTab()?.permissionMode).toBe("full-access");
-    expect(activeSessionTab()?.taskMode).toBe("plan");
+    expect(activeSessionTab()?.collaborationMode).toBe("plan");
     expect(activeSessionTab()?.model).toBe("gpt-5");
     expect(activeSessionTab()?.effort).toBe("high");
   });
@@ -816,10 +816,10 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("活动标签的 live 字段变化自动同步回标签记录", async () => {
-    tabs.push(makeSessionTab("s1", "t1", { name: "会话A", taskMode: "plan" }));
+    tabs.push(makeSessionTab("s1", "t1", { name: "会话A", collaborationMode: "plan" }));
     activeTabId.value = "s1";
     expect(tabs[0].name).toBe("会话A");
-    expect(tabs[0].taskMode).toBe("plan");
+    expect(tabs[0].collaborationMode).toBe("plan");
   });
 });
 describe("会话标签状态与事件路由", () => {
@@ -1078,9 +1078,9 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     expect(activeSessionTab()?.turnActive).toBe(true);
   });
 
-  it("后台标签发送使用自己的任务模式：tab=plan、store=default 时 collaborationMode.mode=plan", async () => {
+  it("后台标签发送使用自己的协作模式：tab=plan、store=default 时 collaborationMode.mode=plan", async () => {
     const tab = makeSessionTab("sB", "tB", {
-      taskMode: "plan",
+      collaborationMode: "plan",
       resumedThreadId: "tB",
     });
     tabs.push(tab);

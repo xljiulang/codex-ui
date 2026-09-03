@@ -14,11 +14,11 @@ describe("useComposerMenus", () => {
     const m = useComposerMenus({ mention: ref<ComposerMention>(null) });
     m.toggleMenu("perm");
     expect(m.permOpen.value).toBe(true);
-    m.toggleMenu("task");
+    m.toggleMenu("collab");
     expect(m.permOpen.value).toBe(false);
-    expect(m.taskOpen.value).toBe(true);
-    m.toggleMenu("task");
-    expect(m.taskOpen.value).toBe(false);
+    expect(m.collabOpen.value).toBe(true);
+    m.toggleMenu("collab");
+    expect(m.collabOpen.value).toBe(false);
   });
 
   it("closeMenus 清空全部菜单与 mention", () => {
@@ -28,7 +28,7 @@ describe("useComposerMenus", () => {
     m.modelOpen.value = true;
     m.closeMenus();
     expect(m.permOpen.value).toBe(false);
-    expect(m.taskOpen.value).toBe(false);
+    expect(m.collabOpen.value).toBe(false);
     expect(m.modelOpen.value).toBe(false);
     expect(mention.value).toBeNull();
   });
