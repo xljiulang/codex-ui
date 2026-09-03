@@ -180,7 +180,9 @@
 .turn-nav-list {
   overflow-y: auto;
   padding: var(--space-1);
-  max-height: min(51.2vh, 368px);
+  /* 可视区按整行对齐 15 条：15 × 25.5px（内容 16.5 + 内距 6 + 边框 2 + 行距 1）= 382.5px，
+     加上下内边距 var(--space-1) × 2 = 8px → 390.5px；62vh 仅作小窗口兜底 */
+  max-height: min(62vh, 390.5px);
 }
 
 .turn-nav-item {
