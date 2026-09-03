@@ -17,7 +17,7 @@ function choose(id: PermissionId) {
 </script>
 
 <template>
-  <div class="popup-menu" @click.stop>
+  <div class="popup-menu composer-menu" @click.stop>
     <div class="menu-group-title" style="padding: 6px 8px">
       应如何批准 Codex 操作？
     </div>

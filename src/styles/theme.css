@@ -192,6 +192,8 @@
   --glass-border: rgba(151, 167, 190, 0.18);
   /* 内容承载型浮动层：近不透明，保证菜单文字清晰可读 */
   --float-bg: rgba(23, 29, 38, 0.94);
+  /* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96，去玻璃模糊 */
+  --composer-menu-bg: rgba(23, 29, 38, 0.96);
   /* 表面与主按钮渐变/辉光 */
   --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.028),
     rgba(255, 255, 255, 0) 42%);
@@ -329,6 +331,8 @@
   --glass-bg: rgba(32, 33, 46, 0.7);
   --glass-border: rgba(173, 168, 212, 0.18);
   --float-bg: rgba(19, 20, 28, 0.95);
+  /* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96，去玻璃模糊 */
+  --composer-menu-bg: rgba(19, 20, 28, 0.96);
   --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.03),
     rgba(255, 255, 255, 0) 42%);
   --btn-primary-grad: var(--send-btn-grad);
@@ -466,6 +470,8 @@
   --glass-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(60, 76, 101, 0.16);
   --float-bg: rgba(255, 255, 255, 0.96);
+  /* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96，去玻璃模糊 */
+  --composer-menu-bg: rgba(255, 255, 255, 0.96);
   --glass-blur: blur(18px) saturate(1.1);
   --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.7),
     rgba(255, 255, 255, 0) 40%);

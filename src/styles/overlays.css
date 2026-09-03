@@ -34,6 +34,14 @@
   right: 0;
 }
 
+/* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96 背景并去掉玻璃模糊，避免深色主题透感
+   仅作用 composer-menu，不触碰全局 --float-bg 与设置页模型下拉等其它浮层 */
+.popup-menu.composer-menu {
+  background: var(--composer-menu-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .menu-anchor {
   position: relative;
   display: flex;

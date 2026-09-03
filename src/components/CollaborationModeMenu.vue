@@ -13,7 +13,7 @@ function choose(id: CollaborationMode["id"]) {
 </script>
 
 <template>
-  <div class="popup-menu" @click.stop>
+  <div class="popup-menu composer-menu" @click.stop>
     <div class="menu-group-title" style="padding: 6px 8px">协作模式</div>
     <button
       v-for="m in COLLABORATION_MODES"

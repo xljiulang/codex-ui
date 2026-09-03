@@ -79,7 +79,7 @@ async function apply() {
 </script>
 
 <template>
-  <div class="popup-menu right" @click.stop>
+  <div class="popup-menu right composer-menu" @click.stop>
     <div class="menu-group">
       <div class="menu-group-title">模型</div>
       <div v-if="store.models.length" class="question-options" style="padding: 0 8px 4px">

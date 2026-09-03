@@ -212,7 +212,7 @@ function pluginInitial(p: PluginItem): string {
 </script>
 
 <template>
-  <div class="popup-menu mention-menu" @click.stop>
+  <div class="popup-menu mention-menu composer-menu" @click.stop>
     <template v-if="kind === '@'">
       <div class="menu-group-title">引用文件</div>
       <div v-if="!token" class="menu-note mention-hint">
