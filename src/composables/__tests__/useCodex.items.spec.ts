@@ -1,9 +1,14 @@
-import { flattenTurns, resolveSessionWorkspace, workspace } from "../useCodex/items";
+import {
+  flattenTurns,
+  resolveSessionWorkspace,
+  upsertItem,
+  workspace,
+} from "../useCodex/items";
 import { __resetSessionTabsForTest } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { refreshThreads, searchThreads } from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
-import type { Turn } from "../../lib/types";
+import type { ThreadItem, Turn } from "../../lib/types";
 import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -278,5 +283,82 @@ describe("flattenTurns 历史回合时间补齐", () => {
     const out = flattenTurns(legacy);
     expect(out[0].startedAtMs).toBeUndefined();
     expect(flattenTurns(undefined)).toEqual([]);
+  });
+
+  it("历史加载为用户消息补齐 derived 派生摘要", () => {
+    const turns = [
+      {
+        id: "t1",
+        status: "completed",
+        items: [
+          {
+            type: "userMessage",
+            id: "u1",
+            content: [
+              {
+                type: "text",
+                text: "PLEASE IMPLEMENT THIS PLAN:\n# 历史计划",
+                text_elements: [],
+              },
+            ],
+          },
+          { type: "agentMessage", id: "a1", text: "hi" },
+        ],
+      },
+    ] as unknown as Turn[];
+
+    const out = flattenTurns(turns);
+    expect(out[0].derived).toMatchObject({
+      text: "PLEASE IMPLEMENT THIS PLAN:\n# 历史计划",
+      isExecutePlan: true,
+      planTitle: "历史计划",
+    });
+    expect("derived" in out[1]).toBe(false);
+  });
+});
+
+describe("upsertItem 用户消息派生摘要持久化", () => {
+  it("新插入 userMessage 写入 derived，非用户消息不写入", () => {
+    store.itemsByThread["t1"] = [];
+    upsertItem("t1", {
+      id: "u1",
+      type: "userMessage",
+      content: [{ type: "text", text: "问题1", text_elements: [] }],
+    } as ThreadItem);
+    upsertItem("t1", { id: "a1", type: "agentMessage", text: "回答" } as ThreadItem);
+
+    expect(store.itemsByThread["t1"][0].derived).toEqual({
+      text: "问题1",
+      navText: "问题1",
+      isExecutePlan: false,
+      executePlanText: "",
+      planTitle: "",
+    });
+    expect("derived" in store.itemsByThread["t1"][1]).toBe(false);
+  });
+
+  it("合并更新 userMessage 时按最新 content 重算 derived", () => {
+    store.itemsByThread["t1"] = [];
+    upsertItem("t1", {
+      id: "u1",
+      type: "userMessage",
+      content: [{ type: "text", text: "初版问题", text_elements: [] }],
+    } as ThreadItem);
+    upsertItem("t1", {
+      id: "u1",
+      type: "userMessage",
+      content: [
+        {
+          type: "text",
+          text: "PLEASE IMPLEMENT THIS PLAN:\n# 新计划",
+          text_elements: [],
+        },
+      ],
+    } as ThreadItem);
+
+    expect(store.itemsByThread["t1"][0].derived).toMatchObject({
+      isExecutePlan: true,
+      planTitle: "新计划",
+    });
   });
 });

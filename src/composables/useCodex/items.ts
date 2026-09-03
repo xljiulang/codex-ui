@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ThreadItem, Turn } from "../../lib/types";
+import { enrichUserMessage } from "../../lib/userMessage";
 import { activeSessionTab } from "./sessionState";
 import { store } from "./store";
 import type { SessionTab } from "./types";
@@ -35,6 +36,8 @@ export function upsertItem(threadId: string, item: ThreadItem) {
     );
   }
   const merged = idx >= 0 ? { ...arr[idx], ...item } : item;
+  // 用户消息入库即持久化派生摘要（content 替换/合并后按最新内容重算）
+  if (merged.type === "userMessage") enrichUserMessage(merged);
   if (idx >= 0) {
     if (isActiveItem(arr[idx])) bumpActive(threadId, -1);
     arr[idx] = merged;
@@ -76,6 +79,8 @@ export function flattenTurns(turns?: Turn[]): ThreadItem[] {
       if (startedAtMs !== undefined && typeof item.startedAtMs !== "number") {
         item.startedAtMs = startedAtMs;
       }
+      // 历史加载同样补齐用户消息派生摘要，供回合导航直接消费
+      if (item.type === "userMessage") enrichUserMessage(item);
       out.push(item);
     }
   }

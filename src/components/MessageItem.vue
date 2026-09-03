@@ -9,13 +9,18 @@ import { assetUrl } from "../lib/asset";
 import { formatChatTime, formatDuration } from "../lib/format";
 import { copyText } from "../lib/clipboard";
 import {
-  FILE_MENTION_HEADING,
-  MY_REQUEST_MARKER,
   parseInlineMentions,
   parseFileMentionSection,
   type InlineSegment,
 } from "../lib/mention";
-import { isUserInput, type ThreadItem, type UserInput } from "../lib/types";
+import { summarizeUserMessage, textItemBody } from "../lib/userMessage";
+import {
+  isThreadItemType,
+  isUserInput,
+  type ThreadItem,
+  type UserInput,
+  type UserMessageItem,
+} from "../lib/types";
 import type { SessionTab } from "../composables/useCodex";
 
 const props = defineProps<{ item: ThreadItem; tab: SessionTab }>();
@@ -26,29 +31,24 @@ const contentItems = computed(() => {
   return Array.isArray(content) ? content.filter(isUserInput) : [];
 });
 
-/** 执行计划消息：文本项拼接后命中 PLEASE IMPLEMENT THIS PLAN: 前缀时卡片化展示 */
-const EXECUTE_PLAN_PREFIX = "PLEASE IMPLEMENT THIS PLAN:";
-const userText = computed(() =>
-  contentItems.value.map((c) => bodyText(c)).join("\n"),
-);
-const isExecutePlan = computed(() =>
-  userText.value.trimStart().toUpperCase().startsWith(EXECUTE_PLAN_PREFIX),
-);
-const executePlanText = computed(() => {
-  const t = userText.value.trimStart();
-  if (!t.toUpperCase().startsWith(EXECUTE_PLAN_PREFIX)) return "";
-  return t.slice(EXECUTE_PLAN_PREFIX.length).trim();
-});
-
-/** 文本项正文：含 Files 段时取 `## My request:` 之后，否则整段 */
-function bodyText(c: UserInput): string {
-  if (c.type !== "text") return "";
-  const marker = `\n${MY_REQUEST_MARKER}\n`;
-  const idx = c.text.indexOf(marker);
-  if (idx >= 0 && c.text.includes(FILE_MENTION_HEADING)) {
-    return c.text.slice(idx + marker.length);
+/**
+ * 用户消息摘要：优先用入库时持久化的 derived，缺省（旧数据/直接构造）即时回退计算，
+ * 保证气泡复制/执行计划识别与回合导航消费同一份解析结果。
+ */
+const summary = computed(() => {
+  const it = props.item;
+  if (!isThreadItemType<UserMessageItem>(it, "userMessage")) {
+    return summarizeUserMessage(undefined);
   }
-  return c.text;
+  return it.derived ?? summarizeUserMessage(it.content);
+});
+const userText = computed(() => summary.value.text);
+const isExecutePlan = computed(() => summary.value.isExecutePlan);
+const executePlanText = computed(() => summary.value.executePlanText);
+
+/** 文本项正文：含 Files 段时取 `## My request:` 之后，否则整段（与摘要解析同源） */
+function bodyText(c: UserInput): string {
+  return c.type === "text" ? textItemBody(c.text) : "";
 }
 
 /** 解析文本项正文中的内联引用片段（Files 段文件不在此，由附件区渲染） */

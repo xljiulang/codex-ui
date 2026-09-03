@@ -321,7 +321,8 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     });
     expect(activeSessionTab()?.threadId).toBe("t2");
     expect(activeSessionTab()?.workspace).toBe("/ws");
-    expect(store.itemsByThread["t2"]).toEqual(items);
+    // 历史加载会给 userMessage 补客户端 derived，比较忽略该派生字段
+    expect(store.itemsByThread["t2"]).toMatchObject(items);
     expect(store.toast).toBe("");
   });
 
@@ -367,7 +368,8 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       includeTurns: true,
     });
     expect(activeSessionTab()?.threadId).toBe("t2");
-    expect(store.itemsByThread["t2"]).toEqual(summaryItems);
+    // 历史加载会给 userMessage 补客户端 derived，比较忽略该派生字段
+    expect(store.itemsByThread["t2"]).toMatchObject(summaryItems);
   });
 
   it("continueTurn：待挂载目标在回合启动前 goal_set 挂载", async () => {

@@ -447,4 +447,20 @@ export type DiffRow =
 export interface UserMessageItem extends ThreadItemBase {
   type: "userMessage";
   content: UserInput[];
+  /** 客户端入库时持久化的派生摘要：气泡与回合导航共用；旧数据/未入库直接构造时可缺省，消费方即时回退计算 */
+  derived?: UserMessageSummary;
+}
+
+/** 用户消息派生摘要（仅客户端，不回传协议；由 src/lib/userMessage.ts 统一计算） */
+export interface UserMessageSummary {
+  /** 各文本项剥离 Files 引用段后按原顺序以换行拼接的原始 Markdown（复制/执行计划识别用） */
+  text: string;
+  /** 导航全文：text 转纯文本后按内容顺序附加 [图片]/@name/$name 占位 */
+  navText: string;
+  /** 是否执行计划消息（忽略大小写命中 PLEASE IMPLEMENT THIS PLAN: 前缀） */
+  isExecutePlan: boolean;
+  /** 去前缀后的执行计划正文；非执行计划消息为空串 */
+  executePlanText: string;
+  /** 执行计划正文首个标题（splitPlanTitle，无标题回退“计划”）；非执行计划消息为空串 */
+  planTitle: string;
 }

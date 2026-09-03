@@ -13,9 +13,9 @@ import { ICON_LIST_UL } from "../lib/icons";
 import {
   createTurnsBuilder,
   findCurrentTurnIndex,
-  turnPreviewText,
   type Turn,
 } from "../lib/turns";
+import { getUserMessageSummary } from "../lib/userMessage";
 
 const scroller = ref<HTMLElement | null>(null);
 const props = defineProps<{ tab: SessionTab; active?: boolean }>();
@@ -59,6 +59,8 @@ const WARM_MAX_MS = 2000;
 const TURN_PREVIEW_MAX_CHARS = 200;
 // 回合跳转动画时长（自绘 rAF 缓动，不使用原生 scrollTo smooth）
 const NAV_ANIM_MS = 220;
+// 悬停移出导航按钮/卡片后的关闭延迟：覆盖按钮与卡片之间 10px 间隙的穿越防抖
+const NAV_HOVER_CLOSE_DELAY_MS = 150;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
   () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
@@ -72,6 +74,7 @@ const turnNavOpen = ref(false);
 const turnNavRoot = ref<HTMLElement | null>(null);
 const turnCardBody = ref<HTMLElement | null>(null);
 const highlightTimer = ref<number | undefined>(undefined);
+let navHoverCloseTimer: number | undefined;
 let anchorTops: number[] = [];
 let anchorSyncScheduled = false;
 let anchorSyncRaf: number | undefined;
@@ -93,12 +96,21 @@ const hasTurnNav = computed(
 
 /** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
 const turnEntries = computed(() => {
-  const out: { id: string; index: number; preview: string; time: string }[] = [];
+  const out: {
+    id: string;
+    index: number;
+    preview: string;
+    /** 未截断的完整标题源：普通消息为全文，执行计划消息为计划标题 */
+    full: string;
+    time: string;
+  }[] = [];
   let idx = -1;
   for (const item of items.value) {
     if (item.type !== "userMessage") continue;
     idx++;
-    const raw = turnPreviewText(item);
+    // 执行计划消息（气泡呈计划卡片）以计划标题为导航标题，其余沿用完整纯文本预览
+    const summary = getUserMessageSummary(item);
+    const raw = summary.isExecutePlan ? summary.planTitle : summary.navText;
     const preview =
       raw.length > TURN_PREVIEW_MAX_CHARS
         ? `${raw.slice(0, TURN_PREVIEW_MAX_CHARS).trimEnd()}…`
@@ -107,7 +119,7 @@ const turnEntries = computed(() => {
       typeof item.startedAtMs === "number"
         ? formatChatTime(item.startedAtMs)
         : "";
-    out.push({ id: item.id, index: idx, preview, time });
+    out.push({ id: item.id, index: idx, preview, full: raw, time });
   }
   return out;
 });
@@ -311,6 +323,7 @@ function resetTurnNav() {
   resetWarmState();
   cancelTurnAnimation();
   clearTurnHighlight();
+  cancelNavHoverClose();
   anchorTops = [];
   anchorCount.value = 0;
   currentIndex.value = -1;
@@ -327,6 +340,7 @@ function cancelTurnAnimation() {
 }
 
 function closeTurnNav() {
+  cancelNavHoverClose();
   turnNavOpen.value = false;
 }
 
@@ -339,9 +353,40 @@ async function openTurnNav() {
   active?.scrollIntoView?.({ block: "nearest" });
 }
 
+function cancelNavHoverClose() {
+  if (navHoverCloseTimer !== undefined) {
+    window.clearTimeout(navHoverCloseTimer);
+    navHoverCloseTimer = undefined;
+  }
+}
+
+/** 悬停进入按钮/卡片：未展开时立即展开（纯悬停开关，不固定） */
+function onTurnNavEnter() {
+  cancelNavHoverClose();
+  if (!turnNavOpen.value) void openTurnNav();
+}
+
+/** 悬停移出按钮/卡片：延迟关闭，期间重新进入即取消 */
+function onTurnNavLeave() {
+  if (!turnNavOpen.value) return;
+  cancelNavHoverClose();
+  navHoverCloseTimer = window.setTimeout(() => {
+    navHoverCloseTimer = undefined;
+    turnNavOpen.value = false;
+  }, NAV_HOVER_CLOSE_DELAY_MS);
+}
+
+/** 键盘路径（Enter/Space）：鼠标点击不再切换，仅无 hover 场景的激活方式 */
 function toggleTurnNav() {
+  cancelNavHoverClose();
   if (turnNavOpen.value) closeTurnNav();
   else void openTurnNav();
+}
+
+function onTurnNavKeydown(e: KeyboardEvent) {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  toggleTurnNav();
 }
 
 function selectTurn(index: number) {
@@ -349,18 +394,16 @@ function selectTurn(index: number) {
   void jumpToTurn(index);
 }
 
-/** 标题单行溢出时悬停显示完整提取文本 */
-function onTurnTitleEnter(e: MouseEvent, entry: { id: string }) {
+/** 标题单行溢出时悬停显示未截断的完整标题源 */
+function onTurnTitleEnter(e: MouseEvent, entry: { full: string }) {
   const el = e.currentTarget as HTMLElement;
   if (el.scrollWidth <= el.clientWidth) return;
-  const item = items.value.find((x) => x.id === entry.id);
-  if (!item) return;
   const card = turnCardBody.value?.closest<HTMLElement>(".turn-nav-card");
   const row = el.closest<HTMLElement>(".turn-nav-item")?.getBoundingClientRect();
   if (!card || !row) return;
   const cardRect = card.getBoundingClientRect();
   showTooltip(
-    turnPreviewText(item),
+    entry.full,
     {
       left: cardRect.left,
       top: row.top + row.height / 2,
@@ -661,6 +704,7 @@ onBeforeUnmount(() => {
   if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
   scrollRaf = undefined;
   cancelTurnAnimation();
+  cancelNavHoverClose();
   document.removeEventListener("pointerdown", onGlobalPointerDown);
   document.removeEventListener("keydown", onGlobalKeyDown);
   anchorSyncScheduled = false;
@@ -711,13 +755,19 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="tab.loading" class="loading-thread-note">加载会话…</div>
       </div>
-      <div v-if="hasTurnNav" ref="turnNavRoot" class="turn-nav">
+      <div
+        v-if="hasTurnNav"
+        ref="turnNavRoot"
+        class="turn-nav"
+        @mouseenter="onTurnNavEnter()"
+        @mouseleave="onTurnNavLeave()"
+      >
         <button
           type="button"
           class="turn-nav-btn"
           :aria-expanded="turnNavOpen ? 'true' : 'false'"
           aria-label="回合导航"
-          @click="toggleTurnNav()"
+          @keydown="onTurnNavKeydown"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_LIST_UL" />

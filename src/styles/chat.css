@@ -91,7 +91,8 @@
 .turn-nav {
   position: absolute;
   top: 50%;
-  right: 14px;
+  /* 右缘贴齐右侧 12px 原生滚动条左缘，不与滚动条重叠 */
+  right: 12px;
   transform: translateY(-50%);
   z-index: 30;
   display: flex;
@@ -175,9 +176,9 @@
 .turn-nav-item {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-2) var(--space-4);
+  padding: 3px var(--space-3);
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: transparent;
@@ -200,25 +201,18 @@
 }
 
 .turn-nav-item-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
+  min-width: 2ch;
+  text-align: center;
   font-size: var(--font-xs);
   font-weight: 600;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
   color: var(--text-faint);
-  background: var(--bg-active);
-  border: 1px solid var(--border);
 }
 
 .turn-nav-item.active .turn-nav-item-index {
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.14);
-  border-color: rgba(var(--accent-rgb), 0.3);
 }
 
 .turn-nav-item-time {

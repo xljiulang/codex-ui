@@ -1019,6 +1019,14 @@ describe("ChatView 回合定位按钮", () => {
     await flushPromises();
   }
 
+  /** 悬停导航按钮（根容器）展开卡片 */
+  async function openNavCard(
+    wrapper: ReturnType<typeof mountChat>,
+  ) {
+    await wrapper.find(".turn-nav").trigger("mouseenter");
+    await nextTick();
+  }
+
   it("预热完成前隐藏，完成后 ≥2 个回合显示单个导航按钮；0/1 个不显示", async () => {
     store.itemsByThread["t1"] = reactive(userThread(1));
     const single = mountChat();
@@ -1040,7 +1048,7 @@ describe("ChatView 回合定位按钮", () => {
     pair.unmount();
   });
 
-  it("点击导航按钮展开卡片：条目正序、含文本预览、当前回合高亮", async () => {
+  it("悬停导航按钮展开卡片：条目正序、含文本预览、当前回合高亮", async () => {
     store.itemsByThread["t1"] = reactive(userThread(3));
     const wrapper = mountChat();
     await warmReady();
@@ -1048,8 +1056,7 @@ describe("ChatView 回合定位按钮", () => {
     trustedScroll(scroller, 1000);
     await nextTick();
 
-    await wrapper.get(".turn-nav-btn").trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
     const items = wrapper.findAll(".turn-nav-item");
     expect(items).toHaveLength(3);
@@ -1078,8 +1085,7 @@ describe("ChatView 回合定位按钮", () => {
     ]);
     const wrapper = mountChat();
     await warmReady();
-    await wrapper.get(".turn-nav-btn").trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     expect(
       wrapper.findAll(".turn-nav-item-time").map((x) => x.text()),
     ).toEqual(["09:05", "8月9日 14:05"]);
@@ -1094,8 +1100,7 @@ describe("ChatView 回合定位按钮", () => {
     trustedScroll(scroller, 1000);
     await nextTick();
 
-    await wrapper.get(".turn-nav-btn").trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     await flushPromises();
     await wrapper.findAll(".turn-nav-item")[1].trigger("click");
     await nextTick();
@@ -1107,8 +1112,7 @@ describe("ChatView 回合定位按钮", () => {
     );
 
     // 再次开卡并点击更早回合：连续跳转仍然精确
-    await wrapper.get(".turn-nav-btn").trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     await wrapper.findAll(".turn-nav-item")[0].trigger("click");
     await nextTick();
     await flushPromises();
@@ -1116,30 +1120,84 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
-  it("再次点击收起，Escape 与点击外部均关闭卡片", async () => {
+  it("移出自动收起，Escape 与点击外部均关闭卡片", async () => {
     store.itemsByThread["t1"] = reactive(userThread(3));
     const wrapper = mountChat();
     await warmReady();
-    const btn = wrapper.get(".turn-nav-btn");
 
-    await btn.trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
-    await btn.trigger("click");
+    await wrapper.find(".turn-nav").trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(200);
     await nextTick();
     expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
 
-    await btn.trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await nextTick();
     expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
 
-    await btn.trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     document.body.dispatchEvent(
       new MouseEvent("pointerdown", { bubbles: true }) as unknown as PointerEvent,
     );
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("纯悬停开关：移出后重新进入立即重开；点击按钮不再切换开关", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(2));
+    const wrapper = mountChat();
+    await warmReady();
+
+    await openNavCard(wrapper);
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+
+    // 移出经 150ms 延迟关闭，再悬停立即重开（不依赖定时器）
+    await wrapper.find(".turn-nav").trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
+    await openNavCard(wrapper);
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+
+    // 鼠标点击按钮不再切换：展开状态下点击仍保持打开，移出后才关闭
+    await wrapper.get(".turn-nav-btn").trigger("click");
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+    await wrapper.find(".turn-nav").trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("间隙穿越不误关：移出后 150ms 内重新进入保持打开", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(2));
+    const wrapper = mountChat();
+    await warmReady();
+
+    await openNavCard(wrapper);
+    await wrapper.find(".turn-nav").trigger("mouseleave");
+    await wrapper.find(".turn-nav").trigger("mouseenter");
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("键盘 Enter/Space 可开合卡片（无 hover 的键盘路径）", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(2));
+    const wrapper = mountChat();
+    await warmReady();
+    const btn = wrapper.get(".turn-nav-btn");
+
+    await btn.trigger("keydown", { key: "Enter" });
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+
+    await btn.trigger("keydown", { key: " " });
     await nextTick();
     expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
     wrapper.unmount();
@@ -1178,13 +1236,40 @@ describe("ChatView 回合定位按钮", () => {
     ]);
     const wrapper = mountChat();
     await warmReady();
-    await wrapper.get(".turn-nav-btn").trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
     const texts = wrapper
       .findAll(".turn-nav-item-title")
       .map((x) => x.text());
     expect(texts[0]).toBe("[图片]");
     expect(texts[1]).toBe("只看图");
+    wrapper.unmount();
+  });
+
+  it("执行计划用户消息以计划标题作为导航标题，普通消息保持纯文本预览", async () => {
+    store.itemsByThread["t1"] = reactive([
+      {
+        id: "u1",
+        type: "userMessage",
+        content: [
+          {
+            type: "text",
+            text: "PLEASE IMPLEMENT THIS PLAN:\n# 重构方案\n- 步骤1",
+            text_elements: [],
+          },
+        ],
+      } as ThreadItem,
+      {
+        id: "u2",
+        type: "userMessage",
+        content: [{ type: "text", text: "普通问题", text_elements: [] }],
+      } as ThreadItem,
+    ]);
+    const wrapper = mountChat();
+    await warmReady();
+    await openNavCard(wrapper);
+    expect(
+      wrapper.findAll(".turn-nav-item-title").map((x) => x.text()),
+    ).toEqual(["重构方案", "普通问题"]);
     wrapper.unmount();
   });
 
@@ -1204,8 +1289,7 @@ describe("ChatView 回合定位按钮", () => {
     ]);
     const wrapper = mountChat();
     await warmReady();
-    await wrapper.get(".turn-nav-btn").trigger("click");
-    await nextTick();
+    await openNavCard(wrapper);
 
     const titles = wrapper.findAll(".turn-nav-item-title");
     const overflow = titles[0].element as HTMLElement;
