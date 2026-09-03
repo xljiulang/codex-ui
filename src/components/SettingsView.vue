@@ -221,6 +221,9 @@ const DEEPSEEK_CODEX_DOCS_URL =
 /** GLM（智谱）Codex 接入文档（浏览器打开） */
 const GLM_CODEX_DOCS_URL = "https://docs.bigmodel.cn/cn/coding-plan/tool/codex";
 
+/** Skills Catalog for Codex（浏览器打开） */
+const SKILLS_CATALOG_URL = "https://github.com/openai/skills";
+
 /** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
   loading: false,
@@ -1737,6 +1740,17 @@ function pluginInitial(p: PluginCatalogItem): string {
             <div class="model-config-card-head">
               <h3>已安装技能</h3>
               <div class="model-config-head-actions">
+                <button
+                  type="button"
+                  class="model-config-docs-link skill-catalog-link"
+                  v-tooltip="'Skills Catalog for Codex（浏览器打开）'"
+                  @click="openDocs(SKILLS_CATALOG_URL)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_LINK" />
+                  </svg>
+                  Skills Catalog for Codex
+                </button>
                 <button
                   class="btn btn-icon primary skill-add-btn"
                   v-tooltip="'添加技能'"

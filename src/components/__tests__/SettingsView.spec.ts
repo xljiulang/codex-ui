@@ -421,13 +421,16 @@ describe("SettingsView 模型配置", () => {
   it("渲染 DeepSeek / GLM 接入文档链接", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const links = wrapper.findAll(".model-config-docs-link");
+    const links = wrapper.findAll(
+      ".settings-section-model-config .model-config-docs-link",
+    );
     expect(links.length).toBe(2);
     expect(links[0].text()).toBe("DeepSeek");
     expect(links[1].text()).toBe("GLM");
     expect(
-      wrapper.findAll(".model-config-head-actions .model-config-docs-link")
-        .length,
+      wrapper.findAll(
+        ".settings-section-model-config .model-config-head-actions .model-config-docs-link",
+      ).length,
     ).toBe(2);
   });
 
@@ -449,6 +452,37 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
       url: "https://docs.bigmodel.cn/cn/coding-plan/tool/codex",
+    });
+  });
+
+  it("技能管理头部渲染 Skills Catalog 链接、位于加号之前且点击打开浏览器", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const head = wrapper.find(
+      ".settings-section-skills .model-config-head-actions",
+    );
+    const link = head.find(".skill-catalog-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe("Skills Catalog for Codex");
+    const buttons = head.findAll("button");
+    const linkIndex = buttons.findIndex((b) =>
+      b.classes().includes("skill-catalog-link"),
+    );
+    const addIndex = buttons.findIndex((b) =>
+      b.classes().includes("skill-add-btn"),
+    );
+    expect(linkIndex).toBeGreaterThanOrEqual(0);
+    expect(addIndex).toBeGreaterThanOrEqual(0);
+    expect(linkIndex).toBeLessThan(addIndex);
+    await link.trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("open_url", {
+      url: "https://github.com/openai/skills",
     });
   });
 
