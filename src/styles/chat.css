@@ -151,8 +151,8 @@
   right: calc(100% + 10px);
   transform: translateY(-50%);
   z-index: 30;
-  width: 380px;
-  max-width: min(72vw, 380px);
+  width: 304px;
+  max-width: min(57.6vw, 304px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -180,7 +180,7 @@
 .turn-nav-list {
   overflow-y: auto;
   padding: var(--space-1);
-  max-height: min(64vh, 460px);
+  max-height: min(51.2vh, 368px);
 }
 
 .turn-nav-item {
@@ -247,6 +247,45 @@
   font-size: var(--font-sm);
   line-height: 1.5;
   color: inherit;
+}
+
+/* 条目悬停的用户消息气泡预览：贴条目行左侧浮层显示（相对导航根定位 + translate 左伸） */
+.turn-nav-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  width: fit-content;
+  max-width: min(70vw, 420px);
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: var(--space-3);
+  background: var(--float-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  transform: translate(-100%, -50%);
+}
+
+/* 气泡复用：去除聊天流布局副作用，浮层内贴近整宽展示 */
+.turn-nav-preview .msg {
+  margin: 0;
+  animation: none;
+  content-visibility: visible;
+}
+
+.turn-nav-preview .msg-user {
+  justify-content: flex-end;
+  width: fit-content;
+  max-width: min(70vw, 420px);
+}
+
+.turn-nav-preview .msg-user .bubble {
+  width: fit-content;
+  max-width: min(70vw, 420px);
+  box-shadow: none;
 }
 
 .turn-nav-empty {

@@ -49,7 +49,6 @@ vi.mock("../../composables/useCodex", () => {
 
 import ChatView from "../ChatView.vue";
 import { respondInteraction, store } from "../../composables/useCodex";
-import { tooltip } from "../../composables/useTooltip";
 import type { ThreadItem } from "../../lib/types";
 import type { SessionTab } from "../../composables/useCodex";
 
@@ -1349,9 +1348,8 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
-  it("标题溢出时悬停显示 200 字截取后的 tooltip，移出或不溢出时不显示", async () => {
-    const rawLong = "长".repeat(220);
-    const preview = `${rawLong.slice(0, 200)}…`;
+  it("条目标题使用完整文本（不做 200 字截断，CSS 单行省略负责视觉）", async () => {
+    const rawLong = "长".repeat(300);
     store.itemsByThread["t1"] = reactive([
       {
         id: "u1",
@@ -1367,39 +1365,41 @@ describe("ChatView 回合定位按钮", () => {
     const wrapper = mountChat();
     await warmReady();
     await openNavCard(wrapper);
-
     const titles = wrapper.findAll(".turn-nav-item-title");
-    const overflow = titles[0].element as HTMLElement;
-    const fit = titles[1].element as HTMLElement;
-    expect(titles[0].text()).toBe(preview);
-    Object.defineProperty(overflow, "scrollWidth", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(overflow, "clientWidth", {
-      configurable: true,
-      value: 120,
-    });
-    Object.defineProperty(fit, "scrollWidth", {
-      configurable: true,
-      value: 80,
-    });
-    Object.defineProperty(fit, "clientWidth", {
-      configurable: true,
-      value: 300,
-    });
+    expect(titles[0].text()).toBe(rawLong);
+    expect(titles[1].text()).toBe("短标题");
+    wrapper.unmount();
+  });
 
-    await titles[0].trigger("mouseenter");
-    expect(tooltip.visible).toBe(true);
-    expect(tooltip.placement).toBe("left");
-    expect(tooltip.text).toBe(preview);
+  it("悬停任一条目显示用户消息气泡预览，移出/收起后隐藏", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(2));
+    const wrapper = mountChat();
+    await warmReady();
+    await openNavCard(wrapper);
 
-    await titles[0].trigger("mouseleave");
-    await vi.advanceTimersByTimeAsync(100);
-    expect(tooltip.visible).toBe(false);
+    const rows = wrapper.findAll(".turn-nav-item");
+    await rows[0].trigger("mouseenter");
+    await nextTick();
+    const preview = wrapper.find(".turn-nav-preview");
+    expect(preview.exists()).toBe(true);
+    // 预览内渲染该条 userMessage（MessageItem 桩文本为类型名）
+    expect(preview.find(".msg-stub").text()).toBe("userMessage");
 
-    await titles[1].trigger("mouseenter");
-    expect(tooltip.visible).toBe(false);
+    // 移出条目：短暂延迟后隐藏预览
+    await rows[0].trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    expect(wrapper.find(".turn-nav-preview").exists()).toBe(false);
+
+    // 悬停另一条目再次显示；收起卡片时预览一并消失
+    await rows[1].trigger("mouseenter");
+    await nextTick();
+    expect(wrapper.find(".turn-nav-preview").exists()).toBe(true);
+    await wrapper.find(".turn-nav").trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    expect(wrapper.find(".turn-nav-preview").exists()).toBe(false);
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
     wrapper.unmount();
   });
 });

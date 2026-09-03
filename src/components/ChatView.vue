@@ -7,7 +7,6 @@ import MessageItem from "./MessageItem.vue";
 import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
-import { hideTooltip, showTooltip } from "../composables/useTooltip";
 import { formatChatTime } from "../lib/format";
 import { ICON_ARROW_DOWN, ICON_LIST_UL } from "../lib/icons";
 import {
@@ -55,8 +54,6 @@ const UNPIN_DIST_PX = 32;
 // 首次跳转前的全文预热参数：渲染安静期与整体硬上限
 const WARM_QUIET_MS = 120;
 const WARM_MAX_MS = 2000;
-// 导航卡片单条预览的最大字符数（视觉上再按两行截断）
-const TURN_PREVIEW_MAX_CHARS = 200;
 // 回合跳转动画时长（自绘 rAF 缓动，不使用原生 scrollTo smooth）
 const NAV_ANIM_MS = 220;
 // 悬停移出导航按钮/卡片后的关闭延迟：覆盖按钮与卡片之间 10px 间隙的穿越防抖
@@ -75,6 +72,11 @@ const turnNavRoot = ref<HTMLElement | null>(null);
 const turnCardBody = ref<HTMLElement | null>(null);
 const highlightTimer = ref<number | undefined>(undefined);
 let navHoverCloseTimer: number | undefined;
+// 悬停条目时展示的用户消息气泡预览
+const previewItemId = ref<string | null>(null);
+const previewX = ref(-9999);
+const previewY = ref(-9999);
+let previewHideTimer: number | undefined;
 let anchorTops: number[] = [];
 let anchorSyncScheduled = false;
 let anchorSyncRaf: number | undefined;
@@ -99,7 +101,8 @@ const turnEntries = computed(() => {
   const out: {
     id: string;
     index: number;
-    preview: string;
+    /** 完整标题源（CSS 单行省略负责视觉截断）：普通消息为全文，执行计划消息为计划标题 */
+    title: string;
     time: string;
   }[] = [];
   let idx = -1;
@@ -108,18 +111,28 @@ const turnEntries = computed(() => {
     idx++;
     // 执行计划消息（气泡呈计划卡片）以计划标题为导航标题，其余沿用完整纯文本预览
     const summary = getUserMessageSummary(item);
-    const raw = summary.isExecutePlan ? summary.planTitle : summary.navText;
-    const preview =
-      raw.length > TURN_PREVIEW_MAX_CHARS
-        ? `${raw.slice(0, TURN_PREVIEW_MAX_CHARS).trimEnd()}…`
-        : raw;
     const time =
       typeof item.startedAtMs === "number"
         ? formatChatTime(item.startedAtMs)
         : "";
-    out.push({ id: item.id, index: idx, preview, time });
+    out.push({
+      id: item.id,
+      index: idx,
+      title: summary.isExecutePlan ? summary.planTitle : summary.navText,
+      time,
+    });
   }
   return out;
+});
+
+/** 当前悬停条目的用户消息（供气泡预览浮层渲染） */
+const previewItem = computed(() => {
+  const id = previewItemId.value;
+  if (!id) return null;
+  for (const item of items.value) {
+    if (item.id === id) return item.type === "userMessage" ? item : null;
+  }
+  return null;
 });
 
 function collectAnchorNodes(): HTMLElement[] {
@@ -322,6 +335,7 @@ function resetTurnNav() {
   cancelTurnAnimation();
   clearTurnHighlight();
   cancelNavHoverClose();
+  hideTurnPreview();
   anchorTops = [];
   anchorCount.value = 0;
   currentIndex.value = -1;
@@ -339,6 +353,7 @@ function cancelTurnAnimation() {
 
 function closeTurnNav() {
   cancelNavHoverClose();
+  hideTurnPreview();
   turnNavOpen.value = false;
 }
 
@@ -370,6 +385,7 @@ function onTurnNavLeave() {
   cancelNavHoverClose();
   navHoverCloseTimer = window.setTimeout(() => {
     navHoverCloseTimer = undefined;
+    hideTurnPreview();
     turnNavOpen.value = false;
   }, NAV_HOVER_CLOSE_DELAY_MS);
 }
@@ -392,29 +408,45 @@ function selectTurn(index: number) {
   void jumpToTurn(index);
 }
 
-/** 标题单行溢出时悬停显示 200 字内截取文本（与标题同源，补看 CSS 省略部分） */
-function onTurnTitleEnter(e: MouseEvent, entry: { preview: string }) {
-  const el = e.currentTarget as HTMLElement;
-  if (el.scrollWidth <= el.clientWidth) return;
-  const card = turnCardBody.value?.closest<HTMLElement>(".turn-nav-card");
-  const row = el.closest<HTMLElement>(".turn-nav-item")?.getBoundingClientRect();
-  if (!card || !row) return;
-  const cardRect = card.getBoundingClientRect();
-  showTooltip(
-    entry.preview,
-    {
-      left: cardRect.left,
-      top: row.top + row.height / 2,
-      width: 0,
-      height: 0,
-    },
-    el,
-    "left",
-  );
+function cancelPreviewHide() {
+  if (previewHideTimer !== undefined) {
+    window.clearTimeout(previewHideTimer);
+    previewHideTimer = undefined;
+  }
 }
 
-function onTurnTitleLeave() {
-  hideTooltip();
+/** 悬停条目：立即在条目行左侧显示该用户消息的气泡预览 */
+function onTurnItemEnter(e: MouseEvent, entry: { id: string }) {
+  cancelPreviewHide();
+  const row = e.currentTarget as HTMLElement;
+  previewItemId.value = entry.id;
+  const rect = row.getBoundingClientRect();
+  const rootRect = turnNavRoot.value?.getBoundingClientRect();
+  if (!rootRect) return;
+  // 预览右缘对齐条目行左侧留 8px；坐标换算为相对 .turn-nav 根容器（含 transform）
+  previewX.value = rect.left - 8 - rootRect.left;
+  previewY.value = rect.top + rect.height / 2 - rootRect.top;
+}
+
+/** 移出条目：短暂延迟后隐藏（覆盖移向预览浮层的穿越，进入预览即取消） */
+function onTurnItemLeave() {
+  cancelPreviewHide();
+  previewHideTimer = window.setTimeout(() => {
+    previewHideTimer = undefined;
+    hideTurnPreview();
+  }, NAV_HOVER_CLOSE_DELAY_MS);
+}
+
+/** 移入预览浮层：取消条目移出触发的隐藏 */
+function onTurnPreviewEnter() {
+  cancelPreviewHide();
+}
+
+function hideTurnPreview() {
+  cancelPreviewHide();
+  previewItemId.value = null;
+  previewX.value = -9999;
+  previewY.value = -9999;
 }
 
 function onGlobalPointerDown(e: PointerEvent) {
@@ -703,6 +735,7 @@ onBeforeUnmount(() => {
   scrollRaf = undefined;
   cancelTurnAnimation();
   cancelNavHoverClose();
+  cancelPreviewHide();
   document.removeEventListener("pointerdown", onGlobalPointerDown);
   document.removeEventListener("keydown", onGlobalKeyDown);
   anchorSyncScheduled = false;
@@ -781,14 +814,12 @@ onBeforeUnmount(() => {
                 class="turn-nav-item"
                 :class="{ active: entry.index === currentIndex }"
                 @click="selectTurn(entry.index)"
+                @mouseenter="onTurnItemEnter($event, entry)"
+                @mouseleave="onTurnItemLeave()"
               >
                 <span class="turn-nav-item-index">{{ entry.index + 1 }}</span>
-                <span
-                  class="turn-nav-item-title"
-                  @mouseenter="onTurnTitleEnter($event, entry)"
-                  @mouseleave="onTurnTitleLeave()"
-                >
-                  {{ entry.preview || "（无文字内容）" }}
+                <span class="turn-nav-item-title">
+                  {{ entry.title || "（无文字内容）" }}
                 </span>
                 <span v-if="entry.time" class="turn-nav-item-time">
                   {{ entry.time }}
@@ -797,6 +828,14 @@ onBeforeUnmount(() => {
             </template>
             <div v-else class="turn-nav-empty">暂无回合</div>
           </div>
+        </div>
+        <div
+          v-if="previewItem && turnNavOpen"
+          class="turn-nav-preview"
+          :style="{ left: previewX + 'px', top: previewY + 'px' }"
+          @mouseenter="onTurnPreviewEnter()"
+        >
+          <MessageItem :item="previewItem" :tab="props.tab" />
         </div>
       </div>
       <button
