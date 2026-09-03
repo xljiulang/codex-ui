@@ -750,19 +750,6 @@ html[data-glass="on"] .switch .switch-track {
   background-color: var(--app-composer-tint) !important;
 }
 
-/* 高亮芯片/徽标在玻璃态用半透明 accent，融入玻璃又不失强调 */
-html[data-glass="on"] .perm-chip,
-html[data-glass="on"] .collab-chip,
-html[data-glass="on"] .model-chip,
-html[data-glass="on"] .ctx-window,
-html[data-glass="on"] .goal-chip,
-html[data-glass="on"] .token-usage-chip,
-html[data-glass="on"] .tab-badge,
-html[data-glass="on"] .badge {
-  background-color: rgba(var(--accent-rgb), 0.42) !important;
-  border-color: rgba(var(--accent-rgb), 0.30) !important;
-}
-
 /* 勾选/单选在玻璃态弱化实色 accent（更融入背景） */
 html[data-glass="on"] .checkbox-row input[type="checkbox"],
 html[data-glass="on"] .model-provider-radio input[type="radio"],
