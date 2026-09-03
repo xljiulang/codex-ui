@@ -41,6 +41,11 @@ Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 
 [Files]
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
+; 必需：Codex 主程序 + Windows 沙箱助手（缺失任一则 Inno Setup 编译报错，避免静默发布缺件安装包）
+Source: .\bin\codex.exe; DestDir: {app}\bin; Flags: ignoreversion overwritereadonly replacesameversion
+Source: .\bin\codex-command-runner.exe; DestDir: {app}\bin; Flags: ignoreversion overwritereadonly replacesameversion
+Source: .\bin\codex-windows-sandbox-setup.exe; DestDir: {app}\bin; Flags: ignoreversion overwritereadonly replacesameversion
+; 其余 bin 内容（ast-grep/fd/rg/sg.bat 及后续新增）仍随通配符安装
 Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwritereadonly replacesameversion
 ; 随包只放 openai-bundled 插件市场（.tar.gz）；codex-primary-runtime 不再进安装包，
 ; 由 codex-ui 启动后按需下载/升级到 canonical 位置；卸载 codex-ui 时保留该 codex 资源。
