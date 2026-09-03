@@ -4,6 +4,11 @@ import {
   CODEXUI_DYNAMIC_TOOLS,
   CODEXUI_TOOL_COMPACT_CONTEXT,
   CODEXUI_TOOL_GET_USAGE,
+  buildInjectedDynamicTools,
+  dynamicToolDisplay,
+  dynamicToolKey,
+  dynamicToolRows,
+  isDynamicToolDisabled,
 } from "../dynamicTools";
 
 /** 协议里的保留命名空间（docs/app-server.md 6.5），codexui 不得与之冲突 */
@@ -47,5 +52,56 @@ describe("codexui 动态工具定义", () => {
         expect(t.inputSchema.type).toBe("object");
       }
     }
+  });
+});
+
+describe("codexui 动态工具注入过滤", () => {
+  it("dynamicToolKey/display 生成 namespace.tool 键与 namespace_tool 展示名", () => {
+    expect(dynamicToolKey("codexui", "get_usage")).toBe("codexui.get_usage");
+    expect(dynamicToolDisplay("codexui", "get_usage")).toBe(
+      "codexui_get_usage",
+    );
+  });
+
+  it("dynamicToolRows 展开全部工具行并携带 key/display/描述", () => {
+    const rows = dynamicToolRows();
+    const keys = rows.map((r) => r.key);
+    expect(keys).toContain("codexui.get_usage");
+    expect(keys).toContain("codexui.compact_context");
+    expect(rows.find((r) => r.tool === "get_usage")?.display).toBe(
+      "codexui_get_usage",
+    );
+  });
+
+  it("空 disabled 原样返回全部工具", () => {
+    const result = buildInjectedDynamicTools([]);
+    const names = result.flatMap((ns) => ns.tools.map((t) => t.name));
+    expect(names).toContain(CODEXUI_TOOL_GET_USAGE);
+    expect(names).toContain(CODEXUI_TOOL_COMPACT_CONTEXT);
+  });
+
+  it("禁用其一仅保留另一个工具", () => {
+    const result = buildInjectedDynamicTools(["codexui.get_usage"]);
+    const names = result.flatMap((ns) => ns.tools.map((t) => t.name));
+    expect(names).toEqual([CODEXUI_TOOL_COMPACT_CONTEXT]);
+  });
+
+  it("全部禁用返回空数组（整体不注入）", () => {
+    const result = buildInjectedDynamicTools([
+      "codexui.get_usage",
+      "codexui.compact_context",
+    ]);
+    expect(result).toEqual([]);
+  });
+
+  it("isDynamicToolDisabled 按 namespace.tool 键命中", () => {
+    expect(
+      isDynamicToolDisabled("codexui", "get_usage", ["codexui.get_usage"]),
+    ).toBe(true);
+    expect(
+      isDynamicToolDisabled("codexui", "compact_context", [
+        "codexui.get_usage",
+      ]),
+    ).toBe(false);
   });
 });

@@ -2,7 +2,7 @@
 import { nextTick, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { focusComposer } from "../../lib/composerFocus";
-import { CODEXUI_DYNAMIC_TOOLS } from "../../lib/dynamicTools";
+import { buildInjectedDynamicTools } from "../../lib/dynamicTools";
 import { stripMentionContext } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandbox } from "../../lib/permissions";
 import { sessionLog } from "../../lib/sessionLog";
@@ -101,9 +101,13 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     const params: Record<string, unknown> = {
       approvalPolicy: toApprovalPolicy(permission),
       sandbox: toSandbox(permission),
-      // 注入 codexui 动态工具：agent 可在会话内查询用量/压缩上下文（仅 thread/start 支持）
-      dynamicTools: CODEXUI_DYNAMIC_TOOLS,
     };
+    // 注入 codexui 动态工具：agent 可在会话内查询用量/压缩上下文（仅 thread/start 支持）；
+    // 按设置中被禁用的工具过滤，全部禁用则整体不注入
+    const dynamicTools = buildInjectedDynamicTools(
+      store.settings.dynamic_tools_disabled,
+    );
+    if (dynamicTools.length) params.dynamicTools = dynamicTools;
     // 无确定工作区时不传 cwd（交由 codex 用服务端默认目录），避免 cwd 为空串
     if (cwd) params.cwd = cwd;
     const reviewer = toApprovalsReviewer(permission);

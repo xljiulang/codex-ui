@@ -46,3 +46,59 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
     ],
   },
 ];
+
+/** 动态工具唯一键：`namespace.tool`（如 codexui.get_usage），用于设置持久化与注入过滤 */
+export function dynamicToolKey(namespace: string, tool: string): string {
+  return `${namespace}.${tool}`;
+}
+
+/** agent 侧展示名：`namespace_tool`（如 codexui_get_usage） */
+export function dynamicToolDisplay(namespace: string, tool: string): string {
+  return `${namespace}_${tool}`;
+}
+
+/** 设置页工具行（由静态定义展开，供开关 UI 渲染） */
+export interface DynamicToolRow {
+  key: string;
+  display: string;
+  description: string;
+  namespace: string;
+  tool: string;
+}
+
+export function dynamicToolRows(): DynamicToolRow[] {
+  return CODEXUI_DYNAMIC_TOOLS.flatMap((ns) =>
+    ns.tools.map((t) => ({
+      key: dynamicToolKey(ns.name, t.name),
+      display: dynamicToolDisplay(ns.name, t.name),
+      description: t.description,
+      namespace: ns.name,
+      tool: t.name,
+    })),
+  );
+}
+
+/**
+ * 按禁用键列表过滤出实际注入的动态工具：命中的工具移除，命名空间工具全部禁用则整体移除。
+ * disabled 为空视为全部启用（沿默认注入行为）。
+ */
+export function buildInjectedDynamicTools(
+  disabled: string[],
+): DynamicToolNamespaceSpec[] {
+  const disabledSet = new Set(disabled);
+  return CODEXUI_DYNAMIC_TOOLS.flatMap((ns) => {
+    const tools = ns.tools.filter(
+      (t) => !disabledSet.has(dynamicToolKey(ns.name, t.name)),
+    );
+    return tools.length ? [{ ...ns, tools }] : [];
+  });
+}
+
+/** 是否被禁用（按 `namespace.tool` 键命中） */
+export function isDynamicToolDisabled(
+  namespace: string,
+  tool: string,
+  disabled: string[],
+): boolean {
+  return disabled.includes(dynamicToolKey(namespace, tool));
+}

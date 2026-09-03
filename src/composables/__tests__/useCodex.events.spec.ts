@@ -1556,4 +1556,33 @@ describe("codexui 动态工具 item/tool/call 应答", () => {
       result: expect.objectContaining({ success: false }),
     });
   });
+
+  it("已禁用的工具返回禁用错误，不再执行", async () => {
+    store.settings.dynamic_tools_disabled = ["codexui.get_usage"];
+    await handleDynamicToolCall({
+      requestId: 11,
+      method: "item/tool/call",
+      params: {
+        threadId: "t1",
+        turnId: "",
+        callId: "c5",
+        namespace: "codexui",
+        tool: "get_usage",
+        arguments: {},
+      },
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("interaction_respond", {
+      requestId: 11,
+      result: {
+        contentItems: [{ type: "inputText", text: "该动态工具已被禁用" }],
+        success: false,
+      },
+    });
+    // 禁用后不应再触发用量查询逻辑（无 codex_rpc 调用）
+    expect(
+      mockedInvoke.mock.calls.filter(([c]) => c === "codex_rpc"),
+    ).toHaveLength(0);
+    store.settings.dynamic_tools_disabled = [];
+  });
 });

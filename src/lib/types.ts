@@ -175,6 +175,8 @@ export interface AppSettings {
   terminal_shell: TerminalShell;
   /** 启动时是否打开「欢迎」介绍标签页 */
   open_welcome_on_startup: boolean;
+  /** 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空数组 = 全部启用 */
+  dynamic_tools_disabled: string[];
 }
 
 /** 会话↔微信账号绑定信息（wechat_state 快照的 bindings 数组项） */

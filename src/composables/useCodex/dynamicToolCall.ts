@@ -2,12 +2,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatTokens } from "../../lib/format";
 import {
+  CODEXUI_DYNAMIC_NAMESPACE,
   CODEXUI_TOOL_COMPACT_CONTEXT,
   CODEXUI_TOOL_GET_USAGE,
+  isDynamicToolDisabled,
 } from "../../lib/dynamicTools";
 import type { PendingInteraction } from "../../lib/types";
 import { respondInteraction } from "./actions";
 import { findSessionTabByThread } from "./sessionState";
+import { store } from "./store";
 
 interface DynamicToolPayload {
   requestId: number | string;
@@ -54,6 +57,21 @@ export async function handleDynamicToolCall(p: DynamicToolPayload): Promise<void
   const tool = typeof p.params?.tool === "string" ? p.params.tool : "";
   const threadId =
     typeof p.params?.threadId === "string" ? p.params.threadId : undefined;
+
+  // 已被禁用的工具：即便历史/分叉线程仍暴露，也不再应答，返回禁用错误
+  if (
+    isDynamicToolDisabled(
+      CODEXUI_DYNAMIC_NAMESPACE,
+      tool,
+      store.settings.dynamic_tools_disabled,
+    )
+  ) {
+    await respondInteraction(interaction, {
+      contentItems: [{ type: "inputText", text: "该动态工具已被禁用" }],
+      success: false,
+    });
+    return;
+  }
 
   switch (tool) {
     case CODEXUI_TOOL_GET_USAGE: {

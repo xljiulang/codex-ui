@@ -68,7 +68,8 @@ onMounted(async () => {
             </ul>
             <p class="feature-note">
               动态工具依赖 experimentalApi 且仅随 Codex-UI 新建会话注入（历史/分叉线程无）；
-              用 Codex-UI 新建会话绑定微信后，远控回合即可自维护。
+              用 Codex-UI 新建会话绑定微信后，远控回合即可自维护。如需关闭，
+              可在 设置→动态工具 中禁用对应工具。
             </p>
           </article>
 

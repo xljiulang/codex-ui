@@ -248,7 +248,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型配置", () => {
+  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型配置 → 动态工具 → 技能管理", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
@@ -257,6 +257,8 @@ describe("SettingsView 模型配置", () => {
     expect(labels.indexOf("基础设置")).toBe(1);
     expect(labels.indexOf("全局指令")).toBe(2);
     expect(labels.indexOf("模型配置")).toBe(3);
+    expect(labels.indexOf("动态工具")).toBe(4);
+    expect(labels.indexOf("技能管理")).toBe(5);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -1126,6 +1128,68 @@ describe("SettingsView 模型配置", () => {
     mount(SettingsView);
     await flushPromises();
     expect(store.toast).toContain("config.toml 解析失败");
+  });
+});
+
+describe("SettingsView 动态工具", () => {
+  beforeEach(() => {
+    __resetTabsForTest();
+    store.toast = "";
+    mockedInvoke.mockReset();
+    mockedSave.mockReset();
+    // 模拟真实 saveSettings：合并 patch 回 store.settings，保证开关 reactive 依赖生效
+    mockedSave.mockImplementation(async (patch) => {
+      store.settings = { ...store.settings, ...patch };
+    });
+    (mockedInvoke as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => undefined,
+    );
+    store.settings.dynamic_tools_disabled = [];
+  });
+
+  it("导航位于模型配置与技能管理之间，渲染标题与两个工具行", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const nav = wrapper.findAll(".settings-nav-item");
+    const idx = (t: string) => nav.map((i) => i.text().trim()).indexOf(t);
+    expect(idx("模型配置")).toBe(3);
+    expect(idx("动态工具")).toBe(4);
+    expect(idx("技能管理")).toBe(5);
+    await nav[4].trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("动态工具");
+    expect(wrapper.text()).toContain("禁用后新会话不再注入");
+    const rows = wrapper.findAll(".dynamic-tool-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].text()).toContain("codexui_get_usage");
+    expect(rows[0].text()).toContain("查询当前会话的 token 消耗");
+    expect(rows[1].text()).toContain("codexui_compact_context");
+  });
+
+  it("切换开关写入 dynamic_tools_disabled（禁用后不再注入）", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const nav = wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("动态工具"))!;
+    await nav.trigger("click");
+    await flushPromises();
+
+    const firstSwitch = wrapper
+      .findAll(".dynamic-tool-row input[type='checkbox']")[0];
+    await firstSwitch.setValue(false);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({
+      dynamic_tools_disabled: ["codexui.get_usage"],
+    });
+
+    const disabledResult = wrapper
+      .findAll(".dynamic-tool-row input[type='checkbox']")[0];
+    await disabledResult.setValue(true);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({ dynamic_tools_disabled: [] });
+
+    wrapper.unmount();
   });
 });
 
@@ -2036,7 +2100,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染七个分类，默认选中第一个", () => {
+  it("左侧导航渲染八个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
@@ -2044,6 +2108,7 @@ describe("SettingsView 设置标签行为", () => {
       "基础设置",
       "全局指令",
       "模型配置",
+      "动态工具",
       "技能管理",
       "MCP管理",
       "插件管理",
@@ -2054,6 +2119,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(items[3].classes()).not.toContain("active");
     expect(items[4].classes()).not.toContain("active");
     expect(items[5].classes()).not.toContain("active");
+    expect(items[6].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;

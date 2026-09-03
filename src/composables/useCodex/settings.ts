@@ -53,6 +53,9 @@ export async function loadSettings() {
   if (!["cmd", "powershell"].includes(store.settings.terminal_shell)) {
     store.settings.terminal_shell = "cmd";
   }
+  if (!Array.isArray(store.settings.dynamic_tools_disabled)) {
+    store.settings.dynamic_tools_disabled = [];
+  }
   const tab = activeSessionTab();
   if (tab) tab.permissionMode = store.settings.default_permission;
   applyTheme(store.settings.theme);

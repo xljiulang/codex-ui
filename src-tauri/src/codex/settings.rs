@@ -19,6 +19,9 @@ pub struct AppSettings {
     /// 启动时是否打开「Codex-UI 介绍」欢迎标签页（默认勾选打开）
     #[serde(default = "default_open_welcome")]
     pub open_welcome_on_startup: bool,
+    /// 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空 = 全部启用
+    #[serde(default)]
+    pub dynamic_tools_disabled: Vec<String>,
 }
 
 fn default_permission() -> String {
@@ -44,6 +47,7 @@ impl Default for AppSettings {
             default_permission: default_permission(),
             terminal_shell: default_terminal_shell(),
             open_welcome_on_startup: default_open_welcome(),
+            dynamic_tools_disabled: Vec::new(),
         }
     }
 }
@@ -139,6 +143,29 @@ mod tests {
 
         let s = load(dir.path());
         assert!(s.open_welcome_on_startup);
+    }
+
+    #[test]
+    fn dynamic_tools_disabled_defaults_empty_and_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        // 缺失字段回退空（全部启用）
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        let s = load(dir.path());
+        assert!(s.dynamic_tools_disabled.is_empty());
+
+        // 保存自定义禁用列表往返一致
+        let s = AppSettings {
+            dynamic_tools_disabled: vec!["codexui.get_usage".into()],
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        let loaded = load(dir.path());
+        assert_eq!(loaded.dynamic_tools_disabled, vec!["codexui.get_usage"]);
     }
 
     #[test]
