@@ -118,6 +118,8 @@ function readTerminalTheme(): TerminalTheme {
 function applyThemeToTerminal() {
   if (!term) return;
   term.options.theme = readTerminalTheme();
+  // DOM renderer 需重建字符样式类：确保背景透明/主题切换立即生效
+  term.refresh(0, term.rows - 1);
 }
 
 /** 把 xterm 当前尺寸同步给后端 ConPTY */
