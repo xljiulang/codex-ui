@@ -53,14 +53,14 @@ describe("权限模式映射", () => {
   it("turn/start sandboxPolicy 映射", () => {
     expect(toSandboxPolicy("ask-for-approval", "C:\\workspace")).toEqual({
       type: "workspaceWrite",
-      writableRoots: ["C:\\workspace"],
+      writableRoots: [],
       networkAccess: true,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,
     });
     expect(toSandboxPolicy("help-me-approve", "C:\\workspace")).toEqual({
       type: "workspaceWrite",
-      writableRoots: ["C:\\workspace"],
+      writableRoots: [],
       networkAccess: true,
       excludeTmpdirEnvVar: false,
       excludeSlashTmp: false,

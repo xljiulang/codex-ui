@@ -155,36 +155,31 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
     out
 }
 
-/// 沙箱策略：有工作目录时「仅限工作目录的完全访问」（工作目录内可读写、目录外只读、允许联网），
-/// 读不到工作目录时回退为只读（不写任何文件、允许联网）。
-fn build_sandbox_policy(cwd: &str) -> Value {
-    if cwd.trim().is_empty() {
-        json!({ "type": "readOnly", "networkAccess": true })
-    } else {
-        json!({
-            "type": "workspaceWrite",
-            "writableRoots": [cwd],
-            "networkAccess": true,
-            "excludeTmpdirEnvVar": false,
-            "excludeSlashTmp": false,
-        })
-    }
+/// 沙箱策略：workspaceWrite 模式（工作目录内可读写、目录外只读、允许联网），
+/// 可写根固定为空（codex 默认会把当前工作目录与临时目录并入可写根）。
+fn build_sandbox_policy() -> Value {
+    json!({
+        "type": "workspaceWrite",
+        "writableRoots": [],
+        "networkAccess": true,
+        "excludeTmpdirEnvVar": false,
+        "excludeSlashTmp": false,
+    })
 }
 
-/// turn/start 参数：仅限工作目录的完全访问 + 免审批（workspaceWrite 沙箱策略，读不到目录时只读回退）。
+/// turn/start 参数：workspaceWrite 沙箱策略 + 免审批（可写根固定为空）。
 fn build_turn_params(
     thread_id: &str,
     text: &str,
     model: &str,
     client_message_id: &str,
-    cwd: &str,
 ) -> Value {
     json!({
         "threadId": thread_id,
         "input": [{ "type": "text", "text": text }],
         "clientUserMessageId": client_message_id,
         "approvalPolicy": "never",
-        "sandboxPolicy": build_sandbox_policy(cwd),
+        "sandboxPolicy": build_sandbox_policy(),
         "model": null,
         "effort": null,
         "collaborationMode": {
@@ -1064,15 +1059,7 @@ impl WeChatBridge {
         // 回合即将真正开始：点亮“正在输入”并周期续发。
         let typing_task = self.spawn_typing_refresh(account_id, peer);
         self.set_typing(account_id, peer, 1).await;
-        // 会话工作目录：限定沙箱可写范围（仅限工作目录）；读不到则只读回退。
-        let cwd = self.resolve_thread_cwd(thread_id).await;
-        let params = build_turn_params(
-            thread_id,
-            text,
-            &model,
-            &self.next_message_id(),
-            &cwd,
-        );
+        let params = build_turn_params(thread_id, text, &model, &self.next_message_id());
         if let Err(e) = self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))
@@ -1172,31 +1159,6 @@ impl WeChatBridge {
         self.inner.lock().await.default_model = Some(res.clone());
         res
     }
-
-    /// 会话工作目录（`thread/read` 的 `thread.cwd`）：用于限定沙箱可写范围（仅限工作目录）。
-    /// 读取失败/超时仅记 warn 并返回空串，不阻断回合（调用方按只读回退）。
-    async fn resolve_thread_cwd(self: &Arc<Self>, thread_id: &str) -> String {
-        match self
-            .server
-            .request(
-                "thread/read",
-                json!({ "threadId": thread_id, "includeTurns": false }),
-                Some(Duration::from_secs(30)),
-            )
-            .await
-        {
-            Ok(resp) => resp
-                .get("thread")
-                .and_then(|t| t.get("cwd"))
-                .and_then(|c| c.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            Err(e) => {
-                self.log("warn", format!("读取线程工作目录失败: {e}")).await;
-                String::new()
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1260,24 +1222,25 @@ mod tests {
 
     #[test]
     fn turn_params_carry_never_policy_and_default_collab() {
-        let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0", "D:\\work");
+        let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0");
         assert_eq!(v["threadId"], "t-1");
         assert_eq!(v["input"][0]["type"], "text");
         assert_eq!(v["input"][0]["text"], "hello");
         assert_eq!(v["clientUserMessageId"], "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
         assert_eq!(v["sandboxPolicy"]["type"], "workspaceWrite");
-        assert_eq!(v["sandboxPolicy"]["writableRoots"][0], "D:\\work");
+        assert_eq!(v["sandboxPolicy"]["writableRoots"], json!([]));
         assert_eq!(v["sandboxPolicy"]["networkAccess"], true);
         assert_eq!(v["collaborationMode"]["mode"], "default");
         assert_eq!(v["collaborationMode"]["settings"]["model"], "gpt-x");
     }
 
     #[test]
-    fn turn_params_fallback_read_only_without_cwd() {
-        let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0", "");
+    fn turn_params_always_workspace_write_with_empty_roots() {
+        let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
-        assert_eq!(v["sandboxPolicy"]["type"], "readOnly");
+        assert_eq!(v["sandboxPolicy"]["type"], "workspaceWrite");
+        assert_eq!(v["sandboxPolicy"]["writableRoots"], json!([]));
         assert_eq!(v["sandboxPolicy"]["networkAccess"], true);
     }
 

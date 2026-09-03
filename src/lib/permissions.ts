@@ -93,7 +93,7 @@ export function toApprovalsReviewer(
 /** turn/start 的沙箱覆盖参数是 sandboxPolicy 对象 */
 export function toSandboxPolicy(
   mode: PermissionId,
-  workspace?: string,
+  _workspace?: string,
 ): Record<string, unknown> {
   switch (mode) {
     case "read-only":
@@ -102,7 +102,7 @@ export function toSandboxPolicy(
     case "help-me-approve":
       return {
         type: "workspaceWrite",
-        writableRoots: workspace ? [workspace] : [],
+        writableRoots: [],
         networkAccess: true,
         excludeTmpdirEnvVar: false,
         excludeSlashTmp: false,
