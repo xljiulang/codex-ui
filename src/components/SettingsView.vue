@@ -1143,7 +1143,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   type="checkbox"
                   @change="persist({ open_welcome_on_startup: openWelcomeOnStartup })"
                 />
-                <label for="welcome">启动时打开介绍标签页</label>
+                <label for="welcome">启动时打开欢迎标签</label>
               </div>
 
               <div class="setting-row checkbox-row">
@@ -1243,8 +1243,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </button>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  aria-label="重读"
-                  v-tooltip="'重读'"
+                  aria-label="刷新"
+                  v-tooltip="'刷新'"
                   :disabled="modelConfig.loading"
                   @click="loadModelConfig"
                 >
@@ -1257,7 +1257,7 @@ function pluginInitial(p: PluginCatalogItem): string {
 
             <div class="model-providers-list">
               <div v-if="modelConfig.providers.length === 0" class="model-providers-empty">
-                还没有提供方，点击右上角「添加」创建。
+                还没有提供方，点击右上角「+」创建。
               </div>
               <div
                 v-for="(p, i) in modelConfig.providers"
@@ -1569,8 +1569,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </span>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  aria-label="重读"
-                  v-tooltip="'重读'"
+                  aria-label="刷新"
+                  v-tooltip="'刷新'"
                   :disabled="agents.loading || agents.saving"
                   @click="loadCustomInstructions"
                 >
@@ -1871,8 +1871,8 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </button>
                 <button
                   class="btn btn-icon model-config-reload-btn"
-                  aria-label="重读"
-                  v-tooltip="'重读'"
+                  aria-label="刷新"
+                  v-tooltip="'刷新'"
                   :disabled="mcpState.loading"
                   @click="loadMcp"
                 >

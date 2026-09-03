@@ -520,6 +520,17 @@ describe("SettingsView 模型配置", () => {
   it("模型配置重读与 AGENTS 刷新重新从磁盘读取", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
+    expect(
+      wrapper
+        .find(".settings-section-model-config .model-config-reload-btn")
+        .attributes("aria-label"),
+    ).toBe("刷新");
+    const agentsCard = wrapper.find(
+      ".settings-section-global-instructions .model-config-card",
+    );
+    expect(
+      agentsCard.find(".model-config-reload-btn").attributes("aria-label"),
+    ).toBe("刷新");
     const readCallsBefore = mockedInvoke.mock.calls.filter(
       ([name]) => name === "model_config_read",
     ).length;
@@ -530,9 +541,6 @@ describe("SettingsView 模型配置", () => {
       .find(".settings-section-model-config .model-config-reload-btn")
       .trigger("click");
     await flushPromises();
-    const agentsCard = wrapper.find(
-      ".settings-section-global-instructions .model-config-card",
-    );
     await agentsCard.find(".model-config-reload-btn").trigger("click");
     await flushPromises();
     expect(
@@ -676,6 +684,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     expect(wrapper.text()).toContain("还没有提供方");
+    expect(wrapper.text()).toContain("点击右上角「+」创建");
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
     expect(wrapper.find(".model-provider-form").exists()).toBe(true);
@@ -2091,6 +2100,9 @@ describe("SettingsView 启动打开介绍标签页开关", () => {
     const wrapper = mount(SettingsView);
     const input = wrapper.find("#welcome").element as HTMLInputElement;
     expect(input.checked).toBe(true);
+    expect(wrapper.find('label[for="welcome"]').text()).toBe(
+      "启动时打开欢迎标签",
+    );
   });
 
   it("取消勾选后即时保存 open_welcome_on_startup=false", async () => {
