@@ -155,19 +155,7 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
     out
 }
 
-/// 沙箱策略：workspaceWrite 模式（工作目录内可读写、目录外只读、允许联网），
-/// 可写根固定为空（codex 默认会把当前工作目录与临时目录并入可写根）。
-fn build_sandbox_policy() -> Value {
-    json!({
-        "type": "workspaceWrite",
-        "writableRoots": [],
-        "networkAccess": true,
-        "excludeTmpdirEnvVar": false,
-        "excludeSlashTmp": false,
-    })
-}
-
-/// turn/start 参数：workspaceWrite 沙箱策略 + 免审批（可写根固定为空）。
+/// turn/start 参数：完整能力 + 免审批（dangerFullAccess 沙箱策略）。
 fn build_turn_params(
     thread_id: &str,
     text: &str,
@@ -179,7 +167,7 @@ fn build_turn_params(
         "input": [{ "type": "text", "text": text }],
         "clientUserMessageId": client_message_id,
         "approvalPolicy": "never",
-        "sandboxPolicy": build_sandbox_policy(),
+        "sandboxPolicy": { "type": "dangerFullAccess" },
         "model": null,
         "effort": null,
         "collaborationMode": {
@@ -1228,20 +1216,24 @@ mod tests {
         assert_eq!(v["input"][0]["text"], "hello");
         assert_eq!(v["clientUserMessageId"], "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
-        assert_eq!(v["sandboxPolicy"]["type"], "workspaceWrite");
-        assert_eq!(v["sandboxPolicy"]["writableRoots"], json!([]));
-        assert_eq!(v["sandboxPolicy"]["networkAccess"], true);
+        assert_eq!(v["sandboxPolicy"]["type"], "dangerFullAccess");
         assert_eq!(v["collaborationMode"]["mode"], "default");
         assert_eq!(v["collaborationMode"]["settings"]["model"], "gpt-x");
     }
 
     #[test]
-    fn turn_params_always_workspace_write_with_empty_roots() {
+    fn turn_params_always_danger_full_access() {
         let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
-        assert_eq!(v["sandboxPolicy"]["type"], "workspaceWrite");
-        assert_eq!(v["sandboxPolicy"]["writableRoots"], json!([]));
-        assert_eq!(v["sandboxPolicy"]["networkAccess"], true);
+        assert_eq!(v["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert!(
+            v["sandboxPolicy"].get("writableRoots").is_none(),
+            "danger-full-access 变体不应带 writableRoots"
+        );
+        assert!(
+            v["sandboxPolicy"].get("networkAccess").is_none(),
+            "danger-full-access 变体不应带 networkAccess"
+        );
     }
 
     #[test]
