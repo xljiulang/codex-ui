@@ -472,7 +472,14 @@ describe("用户消息中的图片附件", () => {
   });
 
   it("用户消息与助手最终答复都显示时间戳", () => {
-    const ts = new Date(2026, 7, 9, 14, 5).getTime();
+    const today = new Date();
+    const ts = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate(),
+      14,
+      5,
+    ).getTime();
     const user = mount(MessageItem, {
       props: { tab: TEST_TAB,
         item: {
@@ -500,6 +507,28 @@ describe("用户消息中的图片附件", () => {
     });
     expect(agent.find(".msg-time").exists()).toBe(true);
     expect(agent.find(".msg-time").text()).toBe("14:05");
+  });
+
+  it("非当天消息时间带日期", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 3, 12, 0));
+    try {
+      const user = mount(MessageItem, {
+        props: {
+          tab: TEST_TAB,
+          item: {
+            id: "u3",
+            type: "userMessage",
+            startedAtMs: new Date(2026, 7, 9, 14, 5).getTime(),
+            content: [{ type: "text", text: "hi", text_elements: [] }],
+          } as ThreadItem,
+        },
+      });
+      expect(user.find(".msg-time").exists()).toBe(true);
+      expect(user.find(".msg-time").text()).toBe("8月9日 14:05");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("仅最终答复（非流式）包 agent-final 卡片，流式与 commentary 不包", async () => {

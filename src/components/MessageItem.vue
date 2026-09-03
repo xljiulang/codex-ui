@@ -6,7 +6,7 @@ import ReasoningBlock from "./ReasoningBlock.vue";
 import RefChip from "./RefChip.vue";
 import ToolCard from "./ToolCard.vue";
 import { assetUrl } from "../lib/asset";
-import { formatDuration, formatTimeHM } from "../lib/format";
+import { formatChatTime, formatDuration } from "../lib/format";
 import { copyText } from "../lib/clipboard";
 import {
   FILE_MENTION_HEADING,
@@ -141,7 +141,7 @@ const isTool =
 
 const time = computed(() =>
   typeof props.item.startedAtMs === "number"
-    ? formatTimeHM(props.item.startedAtMs as number)
+    ? formatChatTime(props.item.startedAtMs as number)
     : "",
 );
 const isFinalAnswer = computed(() => props.item.phase === "final_answer");

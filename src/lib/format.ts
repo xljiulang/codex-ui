@@ -25,6 +25,23 @@ export function formatTimeHM(ms: number): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+/** 消息时间：与 now 同一天仅显示 HH:MM；非当天带日期（同年 M月D日，跨年补年份） */
+export function formatChatTime(ms: number, now: number = Date.now()): string {
+  const d = new Date(ms);
+  const base = new Date(now);
+  const hhmm = formatTimeHM(ms);
+  const sameDay =
+    d.getFullYear() === base.getFullYear() &&
+    d.getMonth() === base.getMonth() &&
+    d.getDate() === base.getDate();
+  if (sameDay) return hhmm;
+  const date =
+    d.getFullYear() === base.getFullYear()
+      ? `${d.getMonth() + 1}月${d.getDate()}日`
+      : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${date} ${hhmm}`;
+}
+
 /** 毫秒时间戳 → HH:MM:SS */
 export function formatTimeHMS(ms: number): string {
   const d = new Date(ms);

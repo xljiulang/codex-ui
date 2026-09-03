@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatChatTime,
   formatDuration,
   formatElapsed,
   formatRelativeTime,
@@ -31,6 +32,28 @@ describe("耗时格式化", () => {
   it("超过 30 天显示两位数年份的紧凑日期（适配固定时间列）", () => {
     const past = Date.now() / 1000 - 40 * 86400;
     expect(formatRelativeTime(past)).toMatch(/^\d{2}\/\d{1,2}\/\d{1,2}$/);
+  });
+});
+
+describe("formatChatTime 消息时间", () => {
+  const now = new Date(2026, 8, 3, 9, 0).getTime();
+
+  it("当天仅显示 HH:mm", () => {
+    expect(formatChatTime(new Date(2026, 8, 3, 14, 5).getTime(), now)).toBe(
+      "14:05",
+    );
+  });
+
+  it("同年非当天带 M月D日", () => {
+    expect(formatChatTime(new Date(2026, 7, 9, 14, 5).getTime(), now)).toBe(
+      "8月9日 14:05",
+    );
+  });
+
+  it("跨年补年份", () => {
+    expect(formatChatTime(new Date(2025, 11, 31, 23, 59).getTime(), now)).toBe(
+      "2025年12月31日 23:59",
+    );
   });
 });
 
