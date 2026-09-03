@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildTurns, createTurnsBuilder, findCurrentTurnIndex } from "../turns";
+import {
+  buildTurns,
+  createTurnsBuilder,
+  findCurrentTurnIndex,
+  markdownToPlainText,
+  turnPreviewText,
+} from "../turns";
 import type { ThreadItem } from "../types";
 
 function msg(id: string, type: string, ts?: number): ThreadItem {
@@ -147,5 +153,59 @@ describe("findCurrentTurnIndex 当前回合判定", () => {
 
   it("超过最后一个锚点后返回末尾下标", () => {
     expect(findCurrentTurnIndex(tops, 600)).toBe(2);
+  });
+});
+
+describe("回合导航预览文本", () => {
+  it("markdown 标题/列表/代码块/链接转为纯文本", () => {
+    expect(
+      markdownToPlainText(
+        [
+          "# 标题",
+          "- 列表项 **加粗**",
+          "`inline` [链接](https://x)  ![图](a.png)",
+          "```ts\nconst x = 1;\n```",
+          "结尾",
+        ].join("\n"),
+      ),
+    ).toBe("标题 列表项 加粗 inline 链接 图 结尾");
+  });
+
+  it("用户消息正文剥离文件引用段", () => {
+    const item = {
+      id: "u1",
+      type: "userMessage",
+      content: [
+        {
+          type: "text",
+          text: [
+            "# Files mentioned by the user:",
+            "## a.cs: D:/a.cs",
+            "",
+            "## My request:",
+            "请看看 **这个** 文件",
+          ].join("\n"),
+          text_elements: [],
+        },
+      ],
+    } as const;
+    expect(turnPreviewText(item as unknown as import("../types").ThreadItem)).toBe(
+      "请看看 这个 文件",
+    );
+  });
+
+  it("纯图片/引用消息回退占位文本", () => {
+    const item = {
+      id: "u2",
+      type: "userMessage",
+      content: [
+        { type: "localImage", path: "D:/a.png" },
+        { type: "mention", name: "app.ts", path: "D:/app.ts" },
+        { type: "skill", name: "skill-a", path: "D:/SKILL.md" },
+      ],
+    } as const;
+    expect(turnPreviewText(item as unknown as import("../types").ThreadItem)).toBe(
+      "[图片] @app.ts $skill-a",
+    );
   });
 });

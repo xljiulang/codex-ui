@@ -6,7 +6,7 @@ const el = ref<HTMLElement | null>(null);
 
 // 锚定在目标元素上方居中；上方放不下则放到下方，并收进视口
 watch(
-  () => [tooltip.visible, tooltip.text, tooltip.anchor] as const,
+  () => [tooltip.visible, tooltip.text, tooltip.anchor, tooltip.placement] as const,
   () => {
     if (!tooltip.visible || !tooltip.anchor) return;
     const anchor = tooltip.anchor;
@@ -15,10 +15,17 @@ watch(
       if (!node) return;
       const rect = node.getBoundingClientRect();
       const pad = 8;
-      let x = anchor.left + anchor.width / 2 - rect.width / 2;
-      let y = anchor.top - rect.height - 8;
-      if (y < pad) {
-        y = anchor.top + anchor.height + 8;
+      let x: number;
+      let y: number;
+      if (tooltip.placement === "left") {
+        x = anchor.left - rect.width - pad;
+        y = anchor.top + anchor.height / 2 - rect.height / 2;
+      } else {
+        x = anchor.left + anchor.width / 2 - rect.width / 2;
+        y = anchor.top - rect.height - pad;
+        if (y < pad) {
+          y = anchor.top + anchor.height + pad;
+        }
       }
       x = Math.min(Math.max(pad, x), window.innerWidth - rect.width - pad);
       if (y + rect.height > window.innerHeight - pad) {

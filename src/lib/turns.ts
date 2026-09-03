@@ -1,4 +1,5 @@
-import type { ThreadItem } from "./types";
+import { FILE_MENTION_HEADING, MY_REQUEST_MARKER } from "./mention";
+import { isUserInput, type ThreadItem } from "./types";
 
 export type TurnRow =
   | { key: string; kind: "sep"; date: string }
@@ -34,6 +35,50 @@ export function findCurrentTurnIndex(
     else hi = mid;
   }
   return lo;
+}
+
+/** 把 Markdown 源文本转为卡片预览用的纯文本（不执行渲染，仅剥离常见语法） */
+export function markdownToPlainText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(?:```|$)/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/[*_~]{1,3}/g, "")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s*\n\s*/g, " ")
+    .trim();
+}
+
+/** 用户消息的导航预览：提取正文并转纯文本；无正文时回退附件/引用名称 */
+export function turnPreviewText(item: ThreadItem): string {
+  if (item.type !== "userMessage") return "";
+  const content = Array.isArray(item.content) ? item.content : [];
+  const parts: string[] = [];
+  for (const c of content) {
+    if (!isUserInput(c)) continue;
+    if (c.type === "text") {
+      const marker = `\n${MY_REQUEST_MARKER}\n`;
+      const idx = c.text.indexOf(marker);
+      const body =
+        idx >= 0 && c.text.includes(FILE_MENTION_HEADING)
+          ? c.text.slice(idx + marker.length)
+          : c.text;
+      const plain = markdownToPlainText(body);
+      if (plain) parts.push(plain);
+    } else if (c.type === "localImage") {
+      parts.push("[图片]");
+    } else if (c.type === "mention") {
+      parts.push(`@${c.name}`);
+    } else if (c.type === "skill") {
+      parts.push(`$${c.name}`);
+    }
+  }
+  return parts.join(" ");
 }
 
 /**

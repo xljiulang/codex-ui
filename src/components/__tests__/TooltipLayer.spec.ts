@@ -27,4 +27,20 @@ describe("TooltipLayer 全局 tooltip 渲染", () => {
     await w.vm.$nextTick();
     expect(w.find(".app-tooltip").exists()).toBe(false);
   });
+
+  it("placement=left 时 tooltip 定位到锚点左侧", async () => {
+    tooltip.visible = false;
+    tooltip.placement = "top";
+    const w = mount(TooltipLayer);
+    tooltip.visible = true;
+    tooltip.text = "左侧提示";
+    tooltip.placement = "left";
+    tooltip.anchor = { left: 500, top: 200, width: 0, height: 0 };
+    await w.vm.$nextTick();
+    await w.vm.$nextTick();
+    await w.vm.$nextTick();
+    const el = w.find(".app-tooltip");
+    expect(el.exists()).toBe(true);
+    expect(tooltip.x).toBeLessThan(500);
+  });
 });

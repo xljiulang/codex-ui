@@ -7,10 +7,13 @@ import MessageItem from "./MessageItem.vue";
 import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
-import { ICON_ARROW_DOWN, ICON_ARROW_UP } from "../lib/icons";
+import { hideTooltip, showTooltip } from "../composables/useTooltip";
+import { formatChatTime } from "../lib/format";
+import { ICON_LIST_UL } from "../lib/icons";
 import {
   createTurnsBuilder,
   findCurrentTurnIndex,
+  turnPreviewText,
   type Turn,
 } from "../lib/turns";
 
@@ -52,6 +55,8 @@ const UNPIN_DIST_PX = 32;
 // 首次跳转前的全文预热参数：渲染安静期与整体硬上限
 const WARM_QUIET_MS = 120;
 const WARM_MAX_MS = 2000;
+// 导航卡片单条预览的最大字符数（视觉上再按两行截断）
+const TURN_PREVIEW_MAX_CHARS = 200;
 // 回合跳转动画时长（自绘 rAF 缓动，不使用原生 scrollTo smooth）
 const NAV_ANIM_MS = 220;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
@@ -59,25 +64,53 @@ const hasActiveWork = computed(
   () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
 );
 
-// ---------- 回合定位：以 userMessage（data-turn-anchor）为切点上下跳转 ----------
+// ---------- 回合定位：导航按钮 + 卡片，以 userMessage（data-turn-anchor）为切点 ----------
 const anchorCount = ref(0);
 const currentIndex = ref(-1);
+const turnNavReady = ref(false);
+const turnNavOpen = ref(false);
+const turnNavRoot = ref<HTMLElement | null>(null);
+const turnCardBody = ref<HTMLElement | null>(null);
 const highlightTimer = ref<number | undefined>(undefined);
 let anchorTops: number[] = [];
 let anchorSyncScheduled = false;
 let anchorSyncRaf: number | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let highlightedNode: HTMLElement | null = null;
-// 本线程是否已完成“全文真实布局”预热：首次跳转前强制渲染所有消息并等异步内容稳定
+// 本线程是否已完成“全文真实布局”预热：完成后才显示导航按钮
 let layoutWarmed = false;
+let warmRunning = false;
+let warmSeq = 0;
+let settleRunning = false;
 // 回合跳转动画状态：自绘动画期间锁定索引，连点取消旧动画从当前位置继续
 let navAnimSeq = 0;
 let navAnimRaf: number | undefined;
 let navAnimating = false;
 
-const hasTurnNav = computed(() => anchorCount.value >= 2);
-const canGoPrev = computed(() => currentIndex.value > 0);
-const canGoNext = computed(() => currentIndex.value < anchorCount.value - 1);
+const hasTurnNav = computed(
+  () => anchorCount.value >= 2 && turnNavReady.value,
+);
+
+/** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
+const turnEntries = computed(() => {
+  const out: { id: string; index: number; preview: string; time: string }[] = [];
+  let idx = -1;
+  for (const item of items.value) {
+    if (item.type !== "userMessage") continue;
+    idx++;
+    const raw = turnPreviewText(item);
+    const preview =
+      raw.length > TURN_PREVIEW_MAX_CHARS
+        ? `${raw.slice(0, TURN_PREVIEW_MAX_CHARS).trimEnd()}…`
+        : raw;
+    const time =
+      typeof item.startedAtMs === "number"
+        ? formatChatTime(item.startedAtMs)
+        : "";
+    out.push({ id: item.id, index: idx, preview, time });
+  }
+  return out;
+});
 
 function collectAnchorNodes(): HTMLElement[] {
   return scroller.value
@@ -229,8 +262,53 @@ async function warmUpHistoryLayout() {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-function resetTurnNav() {
+/** 作废当前线程的预热结果（切换线程/重新加载时调用） */
+function resetWarmState() {
+  warmSeq++;
+  warmRunning = false;
   layoutWarmed = false;
+  turnNavReady.value = false;
+  turnNavOpen.value = false;
+}
+
+/**
+ * 会话打开后在后台执行一次全文预热；完成前不显示导航按钮。
+ * 预热按线程一次性执行，warmSeq/threadId 守卫防止旧线程结果误落新线程。
+ */
+function beginBackgroundWarm() {
+  if (layoutWarmed || warmRunning || settleRunning || props.tab.loading) return;
+  const threadId = props.tab.threadId;
+  const hasUserMessage = items.value.some((item) => item.type === "userMessage");
+  if (!threadId || !hasUserMessage || !scroller.value) return;
+  warmRunning = true;
+  const seq = warmSeq;
+  void warmUpHistoryLayout()
+    .catch(() => undefined)
+    .finally(() => {
+      if (seq !== warmSeq) return;
+      warmRunning = false;
+      layoutWarmed = true;
+      turnNavReady.value = true;
+      scheduleAnchorSync();
+    });
+}
+
+/** 内容刚出现且暂无可执行预热时机时，等 DOM 渲染后补一次后台预热 */
+function queueBackgroundWarm() {
+  if (
+    layoutWarmed ||
+    warmRunning ||
+    settleRunning ||
+    props.tab.loading ||
+    !items.value.some((item) => item.type === "userMessage")
+  ) {
+    return;
+  }
+  void nextTick().then(() => beginBackgroundWarm());
+}
+
+function resetTurnNav() {
+  resetWarmState();
   cancelTurnAnimation();
   clearTurnHighlight();
   anchorTops = [];
@@ -246,6 +324,66 @@ function cancelTurnAnimation() {
     cancelAnimationFrame(navAnimRaf);
     navAnimRaf = undefined;
   }
+}
+
+function closeTurnNav() {
+  turnNavOpen.value = false;
+}
+
+async function openTurnNav() {
+  turnNavOpen.value = true;
+  await nextTick();
+  const active = turnCardBody.value?.querySelector<HTMLElement>(
+    ".turn-nav-item.active",
+  );
+  active?.scrollIntoView?.({ block: "nearest" });
+}
+
+function toggleTurnNav() {
+  if (turnNavOpen.value) closeTurnNav();
+  else void openTurnNav();
+}
+
+function selectTurn(index: number) {
+  closeTurnNav();
+  void jumpToTurn(index);
+}
+
+/** 标题单行溢出时悬停显示完整提取文本 */
+function onTurnTitleEnter(e: MouseEvent, entry: { id: string }) {
+  const el = e.currentTarget as HTMLElement;
+  if (el.scrollWidth <= el.clientWidth) return;
+  const item = items.value.find((x) => x.id === entry.id);
+  if (!item) return;
+  const card = turnCardBody.value?.closest<HTMLElement>(".turn-nav-card");
+  const row = el.closest<HTMLElement>(".turn-nav-item")?.getBoundingClientRect();
+  if (!card || !row) return;
+  const cardRect = card.getBoundingClientRect();
+  showTooltip(
+    turnPreviewText(item),
+    {
+      left: cardRect.left,
+      top: row.top + row.height / 2,
+      width: 0,
+      height: 0,
+    },
+    el,
+    "left",
+  );
+}
+
+function onTurnTitleLeave() {
+  hideTooltip();
+}
+
+function onGlobalPointerDown(e: PointerEvent) {
+  const target = e.target as Node | null;
+  if (target && turnNavRoot.value?.contains(target)) return;
+  closeTurnNav();
+}
+
+function onGlobalKeyDown(e: KeyboardEvent) {
+  if (e.key === "Escape") closeTurnNav();
 }
 
 /**
@@ -360,11 +498,7 @@ async function jumpToTurn(target: number) {
   // 手动浏览历史：解除吸底，避免 MutationObserver/流式更新把位置拉回
   stickToBottom.value = false;
   currentIndex.value = target;
-  // 历史会话只真实渲染过底部附近时，坐标基于估算高度；首次跳转前先全文预热
-  if (!layoutWarmed) {
-    await warmUpHistoryLayout();
-    layoutWarmed = true;
-  }
+  // 导航按钮只在后台全文预热完成后出现；此处直接强制真实布局量取精确坐标
   // measuring 强制真实布局后量取内容坐标；移除类并稳定后再自绘动画到目标
   el.classList.add("measuring");
   let node: HTMLElement | null = null;
@@ -390,12 +524,6 @@ async function jumpToTurn(target: number) {
   flashTurn(node);
 }
 
-function goToTurn(delta: -1 | 1) {
-  const target = currentIndex.value + delta;
-  if (target < 0 || target >= anchorCount.value) return;
-  void jumpToTurn(target);
-}
-
 /**
  * 历史会话整批加载/切回后强制滚到最新：`.msg` 使用 content-visibility（未渲染时按
  * 80px 估算高度），直接 scrollTop=scrollHeight 会落在估算底部、高于真实底部，且
@@ -407,6 +535,7 @@ async function settleToBottom() {
   const el = scroller.value;
   if (!el) return;
   stickToBottom.value = true;
+  settleRunning = true;
   el.classList.add("measuring");
   try {
     await nextTick();
@@ -415,9 +544,11 @@ async function settleToBottom() {
     lastStickScrollTop = el.scrollTop;
   } finally {
     el.classList.remove("measuring");
+    settleRunning = false;
   }
   scheduleScroll();
   scheduleAnchorSync();
+  beginBackgroundWarm();
 }
 
 // 用户手动发送消息后强制恢复吸底：即使此前上滑查看历史已解除吸底，
@@ -439,6 +570,14 @@ watch(
   () => {
     scheduleScroll();
     scheduleAnchorSync();
+  },
+);
+
+// 新会话消息出现/内容由空转非空时补后台预热（历史会话由 loading/thread watcher 触发）
+watch(
+  () => items.value.length,
+  () => {
+    if (items.value.length > 0) queueBackgroundWarm();
   },
 );
 
@@ -465,13 +604,23 @@ watch(
   () => props.tab.loading,
   (v, old) => {
     if (old && !v) {
-      layoutWarmed = false;
+      resetWarmState();
       if (items.value.length > 0) {
         void settleToBottom();
       }
     }
   },
 );
+
+watch(turnNavOpen, (open) => {
+  if (open) {
+    document.addEventListener("pointerdown", onGlobalPointerDown);
+    document.addEventListener("keydown", onGlobalKeyDown);
+  } else {
+    document.removeEventListener("pointerdown", onGlobalPointerDown);
+    document.removeEventListener("keydown", onGlobalKeyDown);
+  }
+});
 
 // 懒加载/异步图片加载后高度变化没有 DOM 结构变更，补一次跟随
 function onImageLoad(e: Event) {
@@ -505,12 +654,15 @@ onMounted(() => {
   }
   scheduleScroll();
   scheduleAnchorSync();
+  queueBackgroundWarm();
 });
 
 onBeforeUnmount(() => {
   if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
   scrollRaf = undefined;
   cancelTurnAnimation();
+  document.removeEventListener("pointerdown", onGlobalPointerDown);
+  document.removeEventListener("keydown", onGlobalKeyDown);
   anchorSyncScheduled = false;
   if (anchorSyncRaf !== undefined) cancelAnimationFrame(anchorSyncRaf);
   anchorSyncRaf = undefined;
@@ -559,29 +711,45 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="tab.loading" class="loading-thread-note">加载会话…</div>
       </div>
-      <div v-if="hasTurnNav" class="turn-nav">
+      <div v-if="hasTurnNav" ref="turnNavRoot" class="turn-nav">
         <button
           type="button"
           class="turn-nav-btn"
-          :disabled="!canGoPrev"
-          aria-label="上一回合"
-          @click="goToTurn(-1)"
+          :aria-expanded="turnNavOpen ? 'true' : 'false'"
+          aria-label="回合导航"
+          @click="toggleTurnNav()"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_ARROW_UP" />
+            <path :d="ICON_LIST_UL" />
           </svg>
         </button>
-        <button
-          type="button"
-          class="turn-nav-btn"
-          :disabled="!canGoNext"
-          aria-label="下一回合"
-          @click="goToTurn(1)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_ARROW_DOWN" />
-          </svg>
-        </button>
+        <div v-if="turnNavOpen" class="turn-nav-card">
+          <div ref="turnCardBody" class="turn-nav-list">
+            <template v-if="turnEntries.length">
+              <button
+                v-for="entry in turnEntries"
+                :key="entry.id"
+                type="button"
+                class="turn-nav-item"
+                :class="{ active: entry.index === currentIndex }"
+                @click="selectTurn(entry.index)"
+              >
+                <span class="turn-nav-item-index">{{ entry.index + 1 }}</span>
+                <span
+                  class="turn-nav-item-title"
+                  @mouseenter="onTurnTitleEnter($event, entry)"
+                  @mouseleave="onTurnTitleLeave()"
+                >
+                  {{ entry.preview || "（无文字内容）" }}
+                </span>
+                <span v-if="entry.time" class="turn-nav-item-time">
+                  {{ entry.time }}
+                </span>
+              </button>
+            </template>
+            <div v-else class="turn-nav-empty">暂无回合</div>
+          </div>
+        </div>
       </div>
       <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
         ↓ 回到底部

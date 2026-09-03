@@ -13,6 +13,7 @@ export const tooltip = reactive({
   text: "",
   x: 0,
   y: 0,
+  placement: "top" as "top" | "left",
   anchor: null as TooltipAnchor | null,
   /** 当前 tooltip 的归属元素（指令悬停目标），用于隐藏/移除时兜底清理 */
   anchorEl: null as HTMLElement | null,
@@ -58,16 +59,22 @@ function removePointerGuard() {
   pointerGuard = null;
 }
 
-export function showTooltip(text: string, rect: DOMRect, el?: HTMLElement | null) {
+export function showTooltip(
+  text: string,
+  anchor: TooltipAnchor,
+  el?: HTMLElement | null,
+  placement: "top" | "left" = "top",
+) {
   const t = String(text ?? "").trim();
   if (!t) return;
   window.clearTimeout(hideTimer);
   tooltip.text = t;
+  tooltip.placement = placement;
   tooltip.anchor = {
-    left: rect.left,
-    top: rect.top,
-    width: rect.width,
-    height: rect.height,
+    left: anchor.left,
+    top: anchor.top,
+    width: anchor.width,
+    height: anchor.height,
   };
   tooltip.anchorEl = el ?? null;
   tooltip.visible = true;
@@ -81,6 +88,7 @@ export function hideTooltip() {
     tooltip.visible = false;
     tooltip.anchor = null;
     tooltip.anchorEl = null;
+    tooltip.placement = "top";
     removePointerGuard();
   }, 60);
 }

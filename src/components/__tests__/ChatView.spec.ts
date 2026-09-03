@@ -49,6 +49,7 @@ vi.mock("../../composables/useCodex", () => {
 
 import ChatView from "../ChatView.vue";
 import { respondInteraction, store } from "../../composables/useCodex";
+import { tooltip } from "../../composables/useTooltip";
 import type { ThreadItem } from "../../lib/types";
 import type { SessionTab } from "../../composables/useCodex";
 
@@ -926,7 +927,13 @@ describe("ChatView 回合定位按钮", () => {
       arr.push({
         id: `u${i}`,
         type: "userMessage",
-        text: `问题${i}`,
+        content: [
+          {
+            type: "text",
+            text: `问题${i}`,
+            text_elements: [],
+          },
+        ],
       } as ThreadItem);
       if (i < count) {
         arr.push({
@@ -1004,11 +1011,21 @@ describe("ChatView 回合定位按钮", () => {
     vi.restoreAllMocks();
   });
 
-  it("0/1 个用户消息时隐藏，≥2 个时显示两个圆形按钮", async () => {
+  /** 推进后台全文预热（waitForRenderQuiet 的 120ms + rAF 同步） */
+  async function warmReady() {
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(200);
+    await nextTick();
+    await flushPromises();
+  }
+
+  it("预热完成前隐藏，完成后 ≥2 个回合显示单个导航按钮；0/1 个不显示", async () => {
     store.itemsByThread["t1"] = reactive(userThread(1));
     const single = mountChat();
     await nextTick();
     await flushPromises();
+    expect(single.find(".turn-nav").exists()).toBe(false);
+    await warmReady();
     expect(single.find(".turn-nav").exists()).toBe(false);
     single.unmount();
 
@@ -1016,117 +1033,211 @@ describe("ChatView 回合定位按钮", () => {
     const pair = mountChat();
     await nextTick();
     await flushPromises();
+    expect(pair.find(".turn-nav").exists()).toBe(false);
+    await warmReady();
     expect(pair.find(".turn-nav").exists()).toBe(true);
-    expect(pair.findAll(".turn-nav-btn")).toHaveLength(2);
+    expect(pair.findAll(".turn-nav-btn")).toHaveLength(1);
     pair.unmount();
   });
 
-  it("首回合 ↑ 禁用、↓ 可用；点击 ↓ 跳到下一回合并高亮", async () => {
+  it("点击导航按钮展开卡片：条目正序、含文本预览、当前回合高亮", async () => {
     store.itemsByThread["t1"] = reactive(userThread(3));
     const wrapper = mountChat();
-    const scroller = await installGeometry(wrapper, [100, 300, 500]);
-    // 先按吸底同步到末回合，再可信滚动到首回合起始
-    trustedScroll(scroller, 100);
-    await nextTick();
-
-    let buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeDefined();
-    expect(buttons[1].attributes("disabled")).toBeUndefined();
-
-    await buttons[1].trigger("click");
-    await vi.advanceTimersByTimeAsync(200);
-    await nextTick();
-    await flushPromises();
-    expect(scroller.scrollTop).toBe(300);
-    expect(wrapper.findAll("[data-turn-anchor]")[1].classes()).toContain(
-      "turn-highlight",
-    );
-
-    buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeUndefined();
-    expect(buttons[1].attributes("disabled")).toBeUndefined();
-    wrapper.unmount();
-  });
-
-  it("中间位置两键可用，点击 ↑ 回到上一回合", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(3));
-    const wrapper = mountChat();
-    const scroller = await installGeometry(wrapper, [100, 300, 500]);
-    trustedScroll(scroller, 350);
-    await nextTick();
-
-    let buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeUndefined();
-    expect(buttons[1].attributes("disabled")).toBeUndefined();
-
-    await buttons[0].trigger("click");
-    await vi.advanceTimersByTimeAsync(200);
-    await nextTick();
-    await flushPromises();
-    expect(scroller.scrollTop).toBe(100);
-
-    buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeDefined();
-    expect(buttons[1].attributes("disabled")).toBeUndefined();
-    wrapper.unmount();
-  });
-
-  it("位于末回合时 ↓ 禁用、↑ 可用", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(3));
-    const wrapper = mountChat();
+    await warmReady();
     const scroller = await installGeometry(wrapper, [100, 300, 500]);
     trustedScroll(scroller, 1000);
     await nextTick();
 
-    const buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeUndefined();
-    expect(buttons[1].attributes("disabled")).toBeDefined();
+    await wrapper.get(".turn-nav-btn").trigger("click");
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+    const items = wrapper.findAll(".turn-nav-item");
+    expect(items).toHaveLength(3);
+    expect(
+      items.map((x) => x.find(".turn-nav-item-title").text()),
+    ).toEqual(["问题1", "问题2", "问题3"]);
+    expect(items[2].classes()).toContain("active");
+    wrapper.unmount();
+  });
+
+  it("卡片条目时间跟随消息规则：当天 HH:mm，非当天带日期", async () => {
+    vi.setSystemTime(new Date(2026, 8, 3, 12, 0));
+    store.itemsByThread["t1"] = reactive([
+      {
+        id: "u1",
+        type: "userMessage",
+        startedAtMs: new Date(2026, 8, 3, 9, 5).getTime(),
+        content: [{ type: "text", text: "今天的问题", text_elements: [] }],
+      } as ThreadItem,
+      {
+        id: "u2",
+        type: "userMessage",
+        startedAtMs: new Date(2026, 7, 9, 14, 5).getTime(),
+        content: [{ type: "text", text: "早前的问题", text_elements: [] }],
+      } as ThreadItem,
+    ]);
+    const wrapper = mountChat();
+    await warmReady();
+    await wrapper.get(".turn-nav-btn").trigger("click");
+    await nextTick();
+    expect(
+      wrapper.findAll(".turn-nav-item-time").map((x) => x.text()),
+    ).toEqual(["09:05", "8月9日 14:05"]);
+    wrapper.unmount();
+  });
+
+  it("点击卡片条目跳转到对应回合并自动关闭；连续两次点击连续推进", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 300, 500]);
+    trustedScroll(scroller, 1000);
+    await nextTick();
+
+    await wrapper.get(".turn-nav-btn").trigger("click");
+    await nextTick();
+    await flushPromises();
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(300);
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
+    expect(wrapper.findAll("[data-turn-anchor]")[1].classes()).toContain(
+      "turn-highlight",
+    );
+
+    // 再次开卡并点击更早回合：连续跳转仍然精确
+    await wrapper.get(".turn-nav-btn").trigger("click");
+    await nextTick();
+    await wrapper.findAll(".turn-nav-item")[0].trigger("click");
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(100);
+    wrapper.unmount();
+  });
+
+  it("再次点击收起，Escape 与点击外部均关闭卡片", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const btn = wrapper.get(".turn-nav-btn");
+
+    await btn.trigger("click");
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
+    await btn.trigger("click");
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
+
+    await btn.trigger("click");
+    await nextTick();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
+
+    await btn.trigger("click");
+    await nextTick();
+    document.body.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true }) as unknown as PointerEvent,
+    );
+    await nextTick();
+    expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
     wrapper.unmount();
   });
 
   it("切换线程后重置并隐藏回合定位控件", async () => {
     store.itemsByThread["t1"] = reactive(userThread(2));
     const wrapper = mountChat();
-    await nextTick();
-    await flushPromises();
+    await warmReady();
     expect(wrapper.find(".turn-nav").exists()).toBe(true);
 
-    store.itemsByThread["t2"] = [];
+    store.itemsByThread["t2"] = reactive(userThread(3));
     tab.threadId = "t2";
     await nextTick();
     await flushPromises();
     expect(wrapper.find(".turn-nav").exists()).toBe(false);
+    await warmReady();
+    expect(wrapper.find(".turn-nav").exists()).toBe(true);
     wrapper.unmount();
   });
 
-  it("无动画直接定位时快速连点按逻辑目标连续推进", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(3));
+  it("纯图片回合在卡片中回退为 [图片] 占位文本", async () => {
+    store.itemsByThread["t1"] = reactive([
+      {
+        id: "u1",
+        type: "userMessage",
+        content: [{ type: "localImage", path: "D:/a.png" }],
+      } as ThreadItem,
+      {
+        id: "u2",
+        type: "userMessage",
+        content: [
+          { type: "text", text: "只看图", text_elements: [] },
+        ],
+      } as ThreadItem,
+    ]);
     const wrapper = mountChat();
-    const scroller = await installGeometry(wrapper, [100, 300, 500]);
-    // 打开历史后位于末回合：↑ 可用、↓ 禁用
-    trustedScroll(scroller, 1000);
+    await warmReady();
+    await wrapper.get(".turn-nav-btn").trigger("click");
     await nextTick();
-    let buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeUndefined();
-    expect(buttons[1].attributes("disabled")).toBeDefined();
+    const texts = wrapper
+      .findAll(".turn-nav-item-title")
+      .map((x) => x.text());
+    expect(texts[0]).toBe("[图片]");
+    expect(texts[1]).toBe("只看图");
+    wrapper.unmount();
+  });
 
-    // 第一次点 ↑：从第 3 回合直接定位到第 2 回合
-    await buttons[0].trigger("click");
-    await vi.advanceTimersByTimeAsync(200);
+  it("标题溢出时悬停显示全文 tooltip，移出或不溢出时不显示", async () => {
+    const full = "这是一个非常长的问题标题，用来验证单行省略后的 tooltip 内容";
+    store.itemsByThread["t1"] = reactive([
+      {
+        id: "u1",
+        type: "userMessage",
+        content: [{ type: "text", text: full, text_elements: [] }],
+      } as ThreadItem,
+      {
+        id: "u2",
+        type: "userMessage",
+        content: [{ type: "text", text: "短标题", text_elements: [] }],
+      } as ThreadItem,
+    ]);
+    const wrapper = mountChat();
+    await warmReady();
+    await wrapper.get(".turn-nav-btn").trigger("click");
     await nextTick();
-    await flushPromises();
-    expect(scroller.scrollTop).toBe(300);
 
-    // 第二次点 ↑ 应继续推进到第 1 回合
-    buttons = wrapper.findAll(".turn-nav-btn");
-    await buttons[0].trigger("click");
-    await vi.advanceTimersByTimeAsync(200);
-    await nextTick();
-    await flushPromises();
-    expect(scroller.scrollTop).toBe(100);
-    buttons = wrapper.findAll(".turn-nav-btn");
-    expect(buttons[0].attributes("disabled")).toBeDefined();
-    expect(buttons[1].attributes("disabled")).toBeUndefined();
+    const titles = wrapper.findAll(".turn-nav-item-title");
+    const overflow = titles[0].element as HTMLElement;
+    const fit = titles[1].element as HTMLElement;
+    Object.defineProperty(overflow, "scrollWidth", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(overflow, "clientWidth", {
+      configurable: true,
+      value: 120,
+    });
+    Object.defineProperty(fit, "scrollWidth", {
+      configurable: true,
+      value: 80,
+    });
+    Object.defineProperty(fit, "clientWidth", {
+      configurable: true,
+      value: 300,
+    });
+
+    await titles[0].trigger("mouseenter");
+    expect(tooltip.visible).toBe(true);
+    expect(tooltip.placement).toBe("left");
+    expect(tooltip.text).toBe(full);
+
+    await titles[0].trigger("mouseleave");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(tooltip.visible).toBe(false);
+
+    await titles[1].trigger("mouseenter");
+    expect(tooltip.visible).toBe(false);
     wrapper.unmount();
   });
 });
