@@ -100,10 +100,11 @@
   max-width: 92%;
   margin-top: var(--space-12);
   margin-inline: auto;
-  border: 1px solid color-mix(in srgb, var(--yellow) 38%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
   border-left: 3px solid var(--yellow);
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--yellow) 5%, var(--bg-panel));
+  box-shadow: var(--shadow-sm);
   padding: var(--space-5) var(--space-6);
 }
 
@@ -171,6 +172,37 @@
   font-size: var(--font-base);
   font-weight: 700;
   color: var(--text-bright);
+  line-height: 1.35;
+}
+
+.interaction-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.approval-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-radius: 999px;
+  padding: 2px var(--space-3);
+}
+
+.approval-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--yellow);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--yellow) 16%, transparent);
 }
 
 .interaction-pending {
@@ -187,6 +219,23 @@
   margin-top: var(--space-5);
   padding-top: var(--space-5);
   border-top: 1px solid var(--border);
+}
+
+.interaction-foot .btn.primary {
+  min-height: var(--ctrl-h-md);
+  padding-inline: var(--space-8);
+}
+
+.interaction-foot .btn:not(.primary):not(.danger) {
+  color: var(--text-dim);
+  border-color: var(--border-light);
+  background: var(--neutral-soft);
+}
+
+.interaction-foot .btn:not(.primary):not(.danger):hover {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+  background: var(--neutral-soft-hover);
 }
 
 .date-sep {

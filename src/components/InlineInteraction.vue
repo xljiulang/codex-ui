@@ -45,12 +45,6 @@ const isElicitation = computed(() => current.value?.method === "mcpServer/elicit
 const isPermissionsApproval = computed(
   () => current.value?.method === "item/permissions/requestApproval",
 );
-const hasCommandDetails = computed(
-  () =>
-    Boolean(params.value.cwd) ||
-    commandActions().length > 0 ||
-    Boolean(params.value.additionalPermissions),
-);
 
 watch(current, () => {
   if (current.value) {
@@ -190,17 +184,23 @@ function onElicitationSubmit(content: Record<string, unknown> | null) {
   <div v-if="current" class="msg msg-agent">
     <div ref="bubbleEl" class="interaction-bubble" tabindex="-1">
       <div class="interaction-head">
-        <span class="interaction-title">
-          {{
-            isUserInput
-              ? "Codex 需要输入"
-              : isElicitation
-                ? "MCP 工具请求"
-                : isCommandApproval
-                  ? "批准执行命令"
-                  : "批准操作"
-          }}
-        </span>
+        <div class="interaction-title-wrap">
+          <span v-if="!isUserInput && !isElicitation" class="approval-status">
+            <i class="approval-status-dot" aria-hidden="true"></i>
+            待审批
+          </span>
+          <span class="interaction-title">
+            {{
+              isUserInput
+                ? "Codex 需要输入"
+                : isElicitation
+                  ? "MCP 工具请求"
+                  : isCommandApproval
+                    ? "批准执行命令"
+                    : "批准操作"
+            }}
+          </span>
+        </div>
         <span v-if="interactions.length > 1" class="interaction-pending">
           还有 {{ interactions.length - 1 }} 个待处理
         </span>
@@ -209,46 +209,54 @@ function onElicitationSubmit(content: Record<string, unknown> | null) {
       <div class="interaction-body">
         <!-- 命令审批 -->
         <template v-if="isCommandApproval">
-          <div class="approval-hero">
-            <div class="approval-label">将执行命令</div>
-            <div class="approval-command">{{ commandText() }}</div>
-            <div v-if="params.reason" class="approval-reason">{{ params.reason }}</div>
-          </div>
-          <details v-if="hasCommandDetails" class="approval-details">
-            <summary>详细信息</summary>
-            <div class="approval-meta">
-              <div v-if="params.cwd">
-                <b>工作目录：</b>{{ params.cwd }}
-              </div>
-              <div v-if="commandActions().length">
-                <b>操作：</b>{{ commandActions().join("；") }}
-              </div>
-              <div v-if="params.additionalPermissions">
-                <b>额外权限：</b>{{ permText(params.additionalPermissions) }}
+          <div class="approval-content">
+            <div class="approval-hero">
+              <div class="approval-reason">
+                {{ params.reason ?? "是否允许执行此命令？" }}
               </div>
             </div>
-          </details>
+            <details class="approval-details">
+              <summary>详细信息</summary>
+              <div class="approval-meta">
+                <div v-if="params.cwd">
+                  <b>工作目录：</b>{{ params.cwd }}
+                </div>
+                <div v-if="commandActions().length">
+                  <b>操作：</b>{{ commandActions().join("；") }}
+                </div>
+                <div v-if="params.additionalPermissions">
+                  <b>额外权限：</b>{{ permText(params.additionalPermissions) }}
+                </div>
+              </div>
+              <div class="approval-command">
+                <div class="approval-command-head">命令</div>
+                <code class="approval-command-text">{{ commandText() }}</code>
+              </div>
+            </details>
+          </div>
         </template>
 
         <!-- 其他审批（文件变更/权限） -->
         <template v-else-if="isReviewApproval">
-          <div class="approval-hero">
-            <div class="approval-label">请求的操作</div>
-            <div class="approval-reason">
-              {{ params.reason ?? "是否允许此操作？" }}
+          <div class="approval-content">
+            <div class="approval-hero">
+              <div class="approval-label">请求的操作</div>
+              <div class="approval-reason">
+                {{ params.reason ?? "是否允许此操作？" }}
+              </div>
             </div>
+            <details v-if="params.grantRoot || params.permissions" class="approval-details">
+              <summary>详细信息</summary>
+              <div class="approval-meta">
+                <div v-if="params.grantRoot">
+                  <b>授权目录：</b>{{ params.grantRoot }}
+                </div>
+                <div v-if="params.permissions">
+                  <b>请求的权限：</b>{{ permText(params.permissions) }}
+                </div>
+              </div>
+            </details>
           </div>
-          <details v-if="params.grantRoot || params.permissions" class="approval-details">
-            <summary>详细信息</summary>
-            <div class="approval-meta">
-              <div v-if="params.grantRoot">
-                <b>授权目录：</b>{{ params.grantRoot }}
-              </div>
-              <div v-if="params.permissions">
-                <b>请求的权限：</b>{{ permText(params.permissions) }}
-              </div>
-            </div>
-          </details>
         </template>
 
         <!-- 用户输入（分步提问，子组件持有选项/其他输入状态） -->
