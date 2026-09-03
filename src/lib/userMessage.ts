@@ -1,5 +1,9 @@
 import { marked } from "marked";
-import { FILE_MENTION_HEADING, MY_REQUEST_MARKER } from "./mention";
+import {
+  FILE_MENTION_HEADING,
+  MY_REQUEST_MARKER,
+  parseFileMentionSection,
+} from "./mention";
 import { splitPlanTitle } from "./planText";
 import {
   isThreadItemType,
@@ -136,10 +140,15 @@ export function summarizeUserMessage(
   const items = Array.isArray(content) ? content.filter(isUserInput) : [];
   const textParts: string[] = [];
   const navParts: string[] = [];
+  // 仅当整条消息提取不到任何文本/占位时，降级为 Files 段文件名（@name，与气泡 chip 同源）
+  const fileFallbackParts: string[] = [];
   for (const c of items) {
     if (c.type === "text") {
       const body = textItemBody(c.text);
       textParts.push(body);
+      for (const f of parseFileMentionSection(c.text)) {
+        fileFallbackParts.push(`@${f.name}`);
+      }
       const plain = markdownToPlainText(body);
       if (plain) navParts.push(plain);
       continue;
@@ -150,7 +159,7 @@ export function summarizeUserMessage(
     else if (c.type === "skill") navParts.push(`$${c.name}`);
   }
   const text = textParts.join("\n");
-  const navText = navParts.join(" ");
+  const navText = navParts.join(" ") || fileFallbackParts.join(" ");
   const trimmed = text.trimStart();
   const isExecutePlan =
     trimmed.toUpperCase().startsWith(EXECUTE_PLAN_PREFIX);

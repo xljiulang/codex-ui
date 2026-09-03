@@ -47,6 +47,65 @@ describe("summarizeUserMessage 用户消息派生摘要", () => {
     expect(summary.isExecutePlan).toBe(false);
   });
 
+  it("仅 Files 段无正文时：navText 降级为 @文件名（多文件空格连接）", () => {
+    const single = summarizeUserMessage([
+      textItem(
+        [
+          "# Files mentioned by the user:",
+          "## a.cs: D:/a.cs",
+          "",
+          "## My request:",
+          "",
+        ].join("\n"),
+      ),
+    ]);
+    expect(single.text).toBe("");
+    expect(single.navText).toBe("@a.cs");
+
+    const multi = summarizeUserMessage([
+      textItem(
+        [
+          "# Files mentioned by the user:",
+          "## a.cs: D:/a.cs",
+          "## b.ts: D:/b.ts",
+          "",
+          "## My request:",
+          "",
+        ].join("\n"),
+      ),
+    ]);
+    expect(multi.navText).toBe("@a.cs @b.ts");
+  });
+
+  it("有正文时 navText 不并入文件名；Files 段解析不到名称时仍为空", () => {
+    const withBody = summarizeUserMessage([
+      textItem(
+        [
+          "# Files mentioned by the user:",
+          "## a.cs: D:/a.cs",
+          "",
+          "## My request:",
+          "请看看这个",
+          "",
+        ].join("\n"),
+      ),
+    ]);
+    expect(withBody.navText).toBe("请看看这个");
+
+    const unparsed = summarizeUserMessage([
+      textItem(
+        [
+          "# Files mentioned by the user:",
+          "## 无冒号的坏行",
+          "",
+          "## My request:",
+          "",
+        ].join("\n"),
+      ),
+    ]);
+    expect(unparsed.navText).toBe("");
+  });
+
   it("执行计划消息：忽略大小写识别前缀，planTitle 取首个标题", () => {
     const summary = summarizeUserMessage([
       textItem("please implement this plan:\n# 重构方案\n- 步骤1\n- 步骤2"),

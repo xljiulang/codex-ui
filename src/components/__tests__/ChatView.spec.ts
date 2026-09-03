@@ -430,6 +430,48 @@ describe("ChatView 日期分隔线", () => {
     expect(scroller.scrollTop).toBe(900); // 已解除，不再被拉回
   });
 
+  it("上滑解除吸底后显示圆形回到底部图标按钮，点击后恢复吸底并隐藏", async () => {
+    const arr = reactive([
+      { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
+    ]);
+    store.itemsByThread["t1"] = (arr);
+    const wrapper = mount(ChatView, {
+      props: { tab },
+      global: {
+        stubs: {
+          ComposerBar: true,
+          MessageItem: true,
+        },
+      },
+    });
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    store.itemsRev++;
+    await nextTick(); // 基线：scrollTop = 1000，吸底中不显示按钮
+    expect(wrapper.find(".scroll-bottom-btn").exists()).toBe(false);
+
+    // 用户上滑 50px（dist 50 > 32）→ 解除吸底，显示图标按钮
+    scroller.scrollTop = 950;
+    const ev = new Event("scroll");
+    Object.defineProperty(ev, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(ev);
+    await nextTick();
+    const btn = wrapper.find(".scroll-bottom-btn");
+    expect(btn.exists()).toBe(true);
+    expect(btn.attributes("aria-label")).toBe("回到底部");
+    expect(btn.find("svg").exists()).toBe(true);
+
+    // 点击后回到底部并恢复吸底，按钮随即隐藏
+    await btn.trigger("click");
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+    expect(wrapper.find(".scroll-bottom-btn").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("上滑解除吸底后手动发送（userSendRev 递增）强制回到底部并继续吸底", async () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
@@ -1245,6 +1287,40 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
+  it("仅文件消息在导航卡片中降级为 @文件名", async () => {
+    store.itemsByThread["t1"] = reactive([
+      {
+        id: "u1",
+        type: "userMessage",
+        content: [
+          {
+            type: "text",
+            text: [
+              "# Files mentioned by the user:",
+              "## a.cs: D:/a.cs",
+              "",
+              "## My request:",
+              "",
+            ].join("\n"),
+            text_elements: [],
+          },
+        ],
+      } as ThreadItem,
+      {
+        id: "u2",
+        type: "userMessage",
+        content: [{ type: "text", text: "普通问题", text_elements: [] }],
+      } as ThreadItem,
+    ]);
+    const wrapper = mountChat();
+    await warmReady();
+    await openNavCard(wrapper);
+    expect(
+      wrapper.findAll(".turn-nav-item-title").map((x) => x.text()),
+    ).toEqual(["@a.cs", "普通问题"]);
+    wrapper.unmount();
+  });
+
   it("执行计划用户消息以计划标题作为导航标题，普通消息保持纯文本预览", async () => {
     store.itemsByThread["t1"] = reactive([
       {
@@ -1273,13 +1349,14 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
-  it("标题溢出时悬停显示全文 tooltip，移出或不溢出时不显示", async () => {
-    const full = "这是一个非常长的问题标题，用来验证单行省略后的 tooltip 内容";
+  it("标题溢出时悬停显示 200 字截取后的 tooltip，移出或不溢出时不显示", async () => {
+    const rawLong = "长".repeat(220);
+    const preview = `${rawLong.slice(0, 200)}…`;
     store.itemsByThread["t1"] = reactive([
       {
         id: "u1",
         type: "userMessage",
-        content: [{ type: "text", text: full, text_elements: [] }],
+        content: [{ type: "text", text: rawLong, text_elements: [] }],
       } as ThreadItem,
       {
         id: "u2",
@@ -1294,6 +1371,7 @@ describe("ChatView 回合定位按钮", () => {
     const titles = wrapper.findAll(".turn-nav-item-title");
     const overflow = titles[0].element as HTMLElement;
     const fit = titles[1].element as HTMLElement;
+    expect(titles[0].text()).toBe(preview);
     Object.defineProperty(overflow, "scrollWidth", {
       configurable: true,
       value: 400,
@@ -1314,7 +1392,7 @@ describe("ChatView 回合定位按钮", () => {
     await titles[0].trigger("mouseenter");
     expect(tooltip.visible).toBe(true);
     expect(tooltip.placement).toBe("left");
-    expect(tooltip.text).toBe(full);
+    expect(tooltip.text).toBe(preview);
 
     await titles[0].trigger("mouseleave");
     await vi.advanceTimersByTimeAsync(100);

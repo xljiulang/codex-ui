@@ -9,7 +9,7 @@ import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
 import { hideTooltip, showTooltip } from "../composables/useTooltip";
 import { formatChatTime } from "../lib/format";
-import { ICON_LIST_UL } from "../lib/icons";
+import { ICON_ARROW_DOWN, ICON_LIST_UL } from "../lib/icons";
 import {
   createTurnsBuilder,
   findCurrentTurnIndex,
@@ -100,8 +100,6 @@ const turnEntries = computed(() => {
     id: string;
     index: number;
     preview: string;
-    /** 未截断的完整标题源：普通消息为全文，执行计划消息为计划标题 */
-    full: string;
     time: string;
   }[] = [];
   let idx = -1;
@@ -119,7 +117,7 @@ const turnEntries = computed(() => {
       typeof item.startedAtMs === "number"
         ? formatChatTime(item.startedAtMs)
         : "";
-    out.push({ id: item.id, index: idx, preview, full: raw, time });
+    out.push({ id: item.id, index: idx, preview, time });
   }
   return out;
 });
@@ -394,8 +392,8 @@ function selectTurn(index: number) {
   void jumpToTurn(index);
 }
 
-/** 标题单行溢出时悬停显示未截断的完整标题源 */
-function onTurnTitleEnter(e: MouseEvent, entry: { full: string }) {
+/** 标题单行溢出时悬停显示 200 字内截取文本（与标题同源，补看 CSS 省略部分） */
+function onTurnTitleEnter(e: MouseEvent, entry: { preview: string }) {
   const el = e.currentTarget as HTMLElement;
   if (el.scrollWidth <= el.clientWidth) return;
   const card = turnCardBody.value?.closest<HTMLElement>(".turn-nav-card");
@@ -403,7 +401,7 @@ function onTurnTitleEnter(e: MouseEvent, entry: { full: string }) {
   if (!card || !row) return;
   const cardRect = card.getBoundingClientRect();
   showTooltip(
-    entry.full,
+    entry.preview,
     {
       left: cardRect.left,
       top: row.top + row.height / 2,
@@ -801,9 +799,17 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-      <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
-        ↓ 回到底部
-      </div>
+      <button
+        v-if="!stickToBottom"
+        type="button"
+        class="scroll-bottom-btn"
+        aria-label="回到底部"
+        @click="jumpToBottom()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="ICON_ARROW_DOWN" />
+        </svg>
+      </button>
     </div>
     <ComposerBar :tab="tab" :active="active" />
     <div class="sr-only" aria-live="polite">{{ liveAnnouncement }}</div>

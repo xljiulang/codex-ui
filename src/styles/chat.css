@@ -65,14 +65,18 @@
 }
 
 .scroll-bottom-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: absolute;
-  right: 14px;
+  /* 与回合导航按钮同列：右缘贴齐滚动条左侧 */
+  right: 12px;
   bottom: 10px;
   z-index: 20;
-  padding: var(--space-3) var(--space-6);
-  border-radius: 999px;
-  font-size: var(--font-sm);
-  font-weight: 600;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
   color: var(--text-bright);
   background: var(--bg-panel);
   border: 1px solid var(--border-light);
@@ -80,6 +84,12 @@
   cursor: pointer;
   opacity: 0.9;
   transition: opacity var(--ease), border-color var(--ease);
+}
+
+.scroll-bottom-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 
 .scroll-bottom-btn:hover {
