@@ -7,7 +7,12 @@ import MessageItem from "./MessageItem.vue";
 import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
-import { createTurnsBuilder, type Turn } from "../lib/turns";
+import { ICON_ARROW_DOWN, ICON_ARROW_UP } from "../lib/icons";
+import {
+  createTurnsBuilder,
+  findCurrentTurnIndex,
+  type Turn,
+} from "../lib/turns";
 
 const scroller = ref<HTMLElement | null>(null);
 const props = defineProps<{ tab: SessionTab; active?: boolean }>();
@@ -44,10 +49,249 @@ let lastStickScrollTop = 0;
 // 解除吸底所需的最小距底距离：轻微误触/抖动（< 32px）不解除，
 // 单次正常滚轮（约 80-100px）一次即解除
 const UNPIN_DIST_PX = 32;
+// 首次跳转前的全文预热参数：渲染安静期与整体硬上限
+const WARM_QUIET_MS = 120;
+const WARM_MAX_MS = 2000;
+// 回合跳转动画时长（自绘 rAF 缓动，不使用原生 scrollTo smooth）
+const NAV_ANIM_MS = 220;
 // 是否有正在流式输出或进行中的工具/命令（useCodex 按线程增量维护）
 const hasActiveWork = computed(
   () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
 );
+
+// ---------- 回合定位：以 userMessage（data-turn-anchor）为切点上下跳转 ----------
+const anchorCount = ref(0);
+const currentIndex = ref(-1);
+const highlightTimer = ref<number | undefined>(undefined);
+let anchorTops: number[] = [];
+let anchorSyncScheduled = false;
+let anchorSyncRaf: number | undefined;
+let resizeObserver: ResizeObserver | undefined;
+let highlightedNode: HTMLElement | null = null;
+// 本线程是否已完成“全文真实布局”预热：首次跳转前强制渲染所有消息并等异步内容稳定
+let layoutWarmed = false;
+// 回合跳转动画状态：自绘动画期间锁定索引，连点取消旧动画从当前位置继续
+let navAnimSeq = 0;
+let navAnimRaf: number | undefined;
+let navAnimating = false;
+
+const hasTurnNav = computed(() => anchorCount.value >= 2);
+const canGoPrev = computed(() => currentIndex.value > 0);
+const canGoNext = computed(() => currentIndex.value < anchorCount.value - 1);
+
+function collectAnchorNodes(): HTMLElement[] {
+  return scroller.value
+    ? Array.from(
+        scroller.value.querySelectorAll<HTMLElement>("[data-turn-anchor]"),
+      )
+    : [];
+}
+
+/** 重算锚点内容坐标；吸底状态下当前回合取最新一条，否则按视口顶部判定 */
+function syncAnchors() {
+  const el = scroller.value;
+  if (!el) return;
+  const nodes = collectAnchorNodes();
+  const containerTop = el.getBoundingClientRect().top;
+  anchorTops = nodes.map(
+    (node) => node.getBoundingClientRect().top - containerTop + el.scrollTop,
+  );
+  anchorCount.value = nodes.length;
+  currentIndex.value =
+    nodes.length === 0
+      ? -1
+      : stickToBottom.value
+        ? nodes.length - 1
+        : findCurrentTurnIndex(anchorTops, el.scrollTop);
+}
+
+/** 消息/布局变化后节流重算锚点：等 DOM 更新完成再取坐标 */
+function scheduleAnchorSync() {
+  if (anchorSyncScheduled) return;
+  anchorSyncScheduled = true;
+  void nextTick().then(() => {
+    if (!anchorSyncScheduled) return;
+    anchorSyncRaf = requestAnimationFrame(() => {
+      anchorSyncScheduled = false;
+      anchorSyncRaf = undefined;
+      syncAnchors();
+    });
+  });
+}
+
+function clearTurnHighlight() {
+  if (highlightedNode) {
+    highlightedNode.classList.remove("turn-highlight");
+    highlightedNode = null;
+  }
+  if (highlightTimer.value !== undefined) {
+    window.clearTimeout(highlightTimer.value);
+    highlightTimer.value = undefined;
+  }
+}
+
+/** 目标用户气泡短暂高亮约 1 秒，便于确认落点 */
+function flashTurn(node: HTMLElement) {
+  clearTurnHighlight();
+  node.classList.add("turn-highlight");
+  highlightedNode = node;
+  highlightTimer.value = window.setTimeout(() => {
+    clearTurnHighlight();
+  }, 1000);
+}
+
+/**
+ * 等待 Markdown Worker / 代码块装饰等异步 DOM 落地：
+ * 连续 WARM_QUIET_MS 无子树变化即认为稳定，WARM_MAX_MS 硬上限兜底。
+ */
+function waitForRenderQuiet(el: HTMLElement): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof MutationObserver === "undefined") {
+      window.setTimeout(resolve, WARM_QUIET_MS);
+      return;
+    }
+    let settled = false;
+    let quietTimer: number | undefined;
+    let hardTimer: number | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (quietTimer !== undefined) window.clearTimeout(quietTimer);
+      if (hardTimer !== undefined) window.clearTimeout(hardTimer);
+      observer.disconnect();
+      resolve();
+    };
+    const kickQuiet = () => {
+      if (quietTimer !== undefined) window.clearTimeout(quietTimer);
+      quietTimer = window.setTimeout(finish, WARM_QUIET_MS);
+    };
+    const observer = new MutationObserver(kickQuiet);
+    observer.observe(el, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style"],
+    });
+    kickQuiet();
+    hardTimer = window.setTimeout(finish, WARM_MAX_MS);
+  });
+}
+
+/** 临时把仍为懒加载的图片置为 eager 并等待解码，完成后恢复 lazy */
+async function loadPendingImages(el: HTMLElement): Promise<void> {
+  const pending = Array.from(
+    el.querySelectorAll<HTMLImageElement>("img"),
+  ).filter((img) => !img.complete);
+  if (pending.length === 0) return;
+  const eager: HTMLImageElement[] = [];
+  for (const img of pending) {
+    if (img.loading === "lazy") {
+      eager.push(img);
+      img.loading = "eager";
+    }
+  }
+  try {
+    await Promise.race([
+      Promise.allSettled(
+        pending.map((img) =>
+          img.complete
+            ? Promise.resolve()
+            : typeof img.decode === "function"
+              ? img.decode().catch(() => undefined)
+              : Promise.resolve(),
+        ),
+      ),
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, WARM_MAX_MS);
+      }),
+    ]);
+  } finally {
+    for (const img of eager) img.loading = "lazy";
+  }
+}
+
+/**
+ * 首次跳转前的全文预热：measuring 强制真实渲染，图片/异步 Markdown 稳定后再
+ * 移除类并等两帧，使 content-visibility 记住全部真实高度。不改变当前 scrollTop。
+ */
+async function warmUpHistoryLayout() {
+  const el = scroller.value;
+  if (!el) return;
+  el.classList.add("measuring");
+  try {
+    await nextTick();
+    await Promise.all([loadPendingImages(el), waitForRenderQuiet(el)]);
+  } finally {
+    el.classList.remove("measuring");
+  }
+  await nextTick();
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function resetTurnNav() {
+  layoutWarmed = false;
+  cancelTurnAnimation();
+  clearTurnHighlight();
+  anchorTops = [];
+  anchorCount.value = 0;
+  currentIndex.value = -1;
+}
+
+/** 取消正在进行的回合跳转动画（seq 递增使旧 rAF 回调失效） */
+function cancelTurnAnimation() {
+  navAnimSeq++;
+  navAnimating = false;
+  if (navAnimRaf !== undefined) {
+    cancelAnimationFrame(navAnimRaf);
+    navAnimRaf = undefined;
+  }
+}
+
+/**
+ * 自绘 ease-out 短动画：每帧写 scrollTop，结束帧强制落到目标并同步索引。
+ * 不用原生 scrollTo smooth / scrollend，避免 trusted scroll 事件时序干扰；
+ * 同步 rAF（测试/异常环境）两帧时间戳不推进时直接收尾，防死循环。
+ */
+function startAnimatedScroll(el: HTMLElement, top: number) {
+  cancelTurnAnimation();
+  const seq = navAnimSeq;
+  navAnimating = true;
+  const from = el.scrollTop;
+  const delta = top - from;
+  const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+  const finish = () => {
+    if (seq !== navAnimSeq) return;
+    el.scrollTop = top;
+    navAnimating = false;
+    navAnimRaf = undefined;
+    syncAnchors();
+  };
+  if (Math.abs(delta) < 1) {
+    finish();
+    return;
+  }
+  let start: number | undefined;
+  let prevNow = -1;
+  let sameFrames = 0;
+  const step = (now: number) => {
+    if (seq !== navAnimSeq) return;
+    if (start === undefined) start = now;
+    const p = Math.min(1, (now - start) / NAV_ANIM_MS);
+    el.scrollTop = from + delta * easeOutCubic(p);
+    if (now === prevNow) sameFrames++;
+    else {
+      sameFrames = 0;
+      prevNow = now;
+    }
+    if (p >= 1 || sameFrames >= 1) {
+      finish();
+      return;
+    }
+    navAnimRaf = requestAnimationFrame(step);
+  };
+  navAnimRaf = requestAnimationFrame(step);
+}
 
 // ---------- 无障碍播报（回合开始/结束） ----------
 const liveAnnouncement = ref("");
@@ -60,6 +304,8 @@ watch(
 );
 
 function onScroll(e: Event) {
+  // 自绘跳转动画期间的滚动事件不参与索引/吸底推导，结束后由 syncAnchors 收敛
+  if (navAnimating) return;
   const el = scroller.value;
   if (!el) return;
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -72,6 +318,11 @@ function onScroll(e: Event) {
     stickToBottom.value = true;
   }
   lastStickScrollTop = el.scrollTop;
+  // 仅可信用户滚动参与回合判定；直接定位产生的 scroll 事件会在结束后
+  // 把当前回合自然收敛到目标位置
+  if (e.isTrusted) {
+    currentIndex.value = findCurrentTurnIndex(anchorTops, el.scrollTop);
+  }
 }
 
 // 吸底滚动合并到每帧一次：流式高频变更时避免每次都强制整块布局
@@ -99,6 +350,50 @@ function scheduleScroll() {
 function jumpToBottom() {
   stickToBottom.value = true;
   scheduleScroll();
+  scheduleAnchorSync();
+}
+
+/** 直接滚到指定用户消息回合起点（顶部对齐），并短暂高亮目标气泡 */
+async function jumpToTurn(target: number) {
+  const el = scroller.value;
+  if (!el || target < 0 || target >= anchorCount.value) return;
+  // 手动浏览历史：解除吸底，避免 MutationObserver/流式更新把位置拉回
+  stickToBottom.value = false;
+  currentIndex.value = target;
+  // 历史会话只真实渲染过底部附近时，坐标基于估算高度；首次跳转前先全文预热
+  if (!layoutWarmed) {
+    await warmUpHistoryLayout();
+    layoutWarmed = true;
+  }
+  // measuring 强制真实布局后量取内容坐标；移除类并稳定后再自绘动画到目标
+  el.classList.add("measuring");
+  let node: HTMLElement | null = null;
+  let top = 0;
+  try {
+    await nextTick();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const nodes = collectAnchorNodes();
+    if (target >= nodes.length) return;
+    const containerTop = el.getBoundingClientRect().top;
+    anchorTops = nodes.map(
+      (node) => node.getBoundingClientRect().top - containerTop + el.scrollTop,
+    );
+    anchorCount.value = nodes.length;
+    top = anchorTops[target];
+    node = nodes[target];
+  } finally {
+    el.classList.remove("measuring");
+  }
+  if (!node) return;
+  await nextTick();
+  startAnimatedScroll(el, top);
+  flashTurn(node);
+}
+
+function goToTurn(delta: -1 | 1) {
+  const target = currentIndex.value + delta;
+  if (target < 0 || target >= anchorCount.value) return;
+  void jumpToTurn(target);
 }
 
 /**
@@ -122,6 +417,7 @@ async function settleToBottom() {
     el.classList.remove("measuring");
   }
   scheduleScroll();
+  scheduleAnchorSync();
 }
 
 // 用户手动发送消息后强制恢复吸底：即使此前上滑查看历史已解除吸底，
@@ -142,6 +438,7 @@ watch(
   ],
   () => {
     scheduleScroll();
+    scheduleAnchorSync();
   },
 );
 
@@ -150,6 +447,7 @@ watch(
 watch(
   () => props.tab.threadId,
   () => {
+    resetTurnNav();
     // 切回已加载会话：内容可能仍处 content-visibility 估算布局，直接吸底会停在最新消息之上
     if (items.value.length > 0) {
       void settleToBottom();
@@ -157,6 +455,7 @@ watch(
       stickToBottom.value = true;
       lastStickScrollTop = 0;
       scheduleScroll();
+      scheduleAnchorSync();
     }
   },
 );
@@ -165,15 +464,21 @@ watch(
 watch(
   () => props.tab.loading,
   (v, old) => {
-    if (old && !v && items.value.length > 0) {
-      void settleToBottom();
+    if (old && !v) {
+      layoutWarmed = false;
+      if (items.value.length > 0) {
+        void settleToBottom();
+      }
     }
   },
 );
 
 // 懒加载/异步图片加载后高度变化没有 DOM 结构变更，补一次跟随
 function onImageLoad(e: Event) {
-  if ((e.target as Element | null)?.tagName === "IMG") scheduleScroll();
+  if ((e.target as Element | null)?.tagName === "IMG") {
+    scheduleScroll();
+    scheduleAnchorSync();
+  }
 }
 
 // DOM 高度兜底：worker 渲染 markdown / 命令输出 HTML 落地晚于数据变更，
@@ -188,17 +493,30 @@ onMounted(() => {
         lastStickScrollTop = scroller.value.scrollTop;
       }
       scheduleScroll();
+      scheduleAnchorSync();
     });
     scrollObserver.observe(scroller.value, { childList: true, subtree: true });
     scroller.value.addEventListener("load", onImageLoad, true);
     lastStickScrollTop = scroller.value.scrollTop;
   }
+  if (scroller.value && typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(() => scheduleAnchorSync());
+    resizeObserver.observe(scroller.value);
+  }
   scheduleScroll();
+  scheduleAnchorSync();
 });
 
 onBeforeUnmount(() => {
   if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
   scrollRaf = undefined;
+  cancelTurnAnimation();
+  anchorSyncScheduled = false;
+  if (anchorSyncRaf !== undefined) cancelAnimationFrame(anchorSyncRaf);
+  anchorSyncRaf = undefined;
+  resizeObserver?.disconnect();
+  resizeObserver = undefined;
+  clearTurnHighlight();
   scrollObserver?.disconnect();
   scrollObserver = undefined;
   scroller.value?.removeEventListener("load", onImageLoad, true);
@@ -240,6 +558,30 @@ onBeforeUnmount(() => {
           <span class="dot"></span>
         </div>
         <div v-if="tab.loading" class="loading-thread-note">加载会话…</div>
+      </div>
+      <div v-if="hasTurnNav" class="turn-nav">
+        <button
+          type="button"
+          class="turn-nav-btn"
+          :disabled="!canGoPrev"
+          aria-label="上一回合"
+          @click="goToTurn(-1)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="ICON_ARROW_UP" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="turn-nav-btn"
+          :disabled="!canGoNext"
+          aria-label="下一回合"
+          @click="goToTurn(1)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="ICON_ARROW_DOWN" />
+          </svg>
+        </button>
       </div>
       <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
         ↓ 回到底部

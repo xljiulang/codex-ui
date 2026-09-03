@@ -194,7 +194,11 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
 </script>
 
 <template>
-  <div v-if="item.type === 'userMessage'" class="msg msg-user">
+  <div
+    v-if="item.type === 'userMessage'"
+    class="msg msg-user"
+    data-turn-anchor
+  >
     <div class="bubble">
       <button
         v-if="userText"

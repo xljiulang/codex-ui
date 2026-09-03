@@ -87,6 +87,53 @@
   border-color: var(--accent-dim);
 }
 
+/* 回合定位：滚动条左侧垂直居中的 ↑/↓ 圆形按钮 */
+.turn-nav {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.turn-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--text-bright);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  opacity: 0.92;
+  transition: opacity var(--ease), border-color var(--ease), color var(--ease);
+}
+
+.turn-nav-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.turn-nav-btn:hover:not(:disabled) {
+  opacity: 1;
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+
+.turn-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* 屏幕阅读器播报区域（视觉隐藏） */
 .sr-only {
   position: absolute;
@@ -166,6 +213,23 @@
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
+}
+
+.turn-highlight .bubble {
+  animation: turn-highlight-flash 1s ease;
+}
+
+@keyframes turn-highlight-flash {
+  0%,
+  100% {
+    box-shadow: var(--inset-shadow), 0 2px 12px rgba(var(--accent-rgb), 0.13);
+  }
+  30% {
+    box-shadow:
+      var(--inset-shadow),
+      0 0 0 2px rgba(var(--accent-rgb), 0.55),
+      0 0 20px rgba(var(--accent-rgb), 0.25);
+  }
 }
 
 .msg-user .bubble .user-image {

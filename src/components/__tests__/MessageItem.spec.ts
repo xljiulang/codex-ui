@@ -142,6 +142,8 @@ describe("用户消息中的图片附件", () => {
     const img = wrapper.find("img.user-image");
     expect(img.exists()).toBe(true);
     expect(img.attributes("loading")).toBe("lazy");
+    // imageView 只是图片回显，不充当回合切点
+    expect(wrapper.find(".msg-user").attributes("data-turn-anchor")).toBeUndefined();
   });
 
   it("流式中的助手消息显示闪烁光标，完成后消失", () => {
@@ -469,6 +471,8 @@ describe("用户消息中的图片附件", () => {
     await flushPromises();
     expect(wrapper.find(".msg-user .md h1").text()).toBe("标题");
     expect(wrapper.find(".msg-user .md strong").text()).toBe("加粗");
+    // 用户消息是回合跳转切点，根节点需带定位标记
+    expect(wrapper.get(".msg-user").attributes("data-turn-anchor")).toBeDefined();
   });
 
   it("用户消息与助手最终答复都显示时间戳", () => {

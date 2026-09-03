@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTurns, createTurnsBuilder } from "../turns";
+import { buildTurns, createTurnsBuilder, findCurrentTurnIndex } from "../turns";
 import type { ThreadItem } from "../types";
 
 function msg(id: string, type: string, ts?: number): ThreadItem {
@@ -115,5 +115,37 @@ describe("buildTurns 回合分组", () => {
     // 同一位置的分隔线复用同一行对象/key（旧实现每次 build 生成新 key 并缓存）
     expect(secondSep).toBe(firstSep);
     expect(secondSep?.key).toBe(firstSep?.key);
+  });
+});
+
+describe("findCurrentTurnIndex 当前回合判定", () => {
+  const tops = [100, 300, 500];
+
+  it("空锚点列表返回 -1", () => {
+    expect(findCurrentTurnIndex([], 100)).toBe(-1);
+  });
+
+  it("视口仍在首个锚点上方时返回 -1", () => {
+    expect(findCurrentTurnIndex(tops, 90)).toBe(-1);
+  });
+
+  it("恰好等于锚点顶时返回该下标", () => {
+    expect(findCurrentTurnIndex(tops, 100)).toBe(0);
+    expect(findCurrentTurnIndex(tops, 300)).toBe(1);
+    expect(findCurrentTurnIndex(tops, 500)).toBe(2);
+  });
+
+  it("位于两个锚点之间时返回上一个", () => {
+    expect(findCurrentTurnIndex(tops, 250)).toBe(0);
+    expect(findCurrentTurnIndex(tops, 450)).toBe(1);
+  });
+
+  it("容差内越过锚点顶部仍算当前回合", () => {
+    expect(findCurrentTurnIndex(tops, 101)).toBe(0);
+    expect(findCurrentTurnIndex(tops, 102)).toBe(0);
+  });
+
+  it("超过最后一个锚点后返回末尾下标", () => {
+    expect(findCurrentTurnIndex(tops, 600)).toBe(2);
   });
 });

@@ -12,6 +12,31 @@ export interface Turn {
 export type DayFormatter = (ts: number) => string;
 
 /**
+ * 回合定位容差（px）：用户消息顶边刚越过/正好位于视口顶边时仍视为当前回合，
+ * 吸收浮点误差与像素取整。
+ */
+const TURN_NAV_TOLERANCE_PX = 2;
+
+/**
+ * 返回最后一个“顶边不高于视口顶部（含容差）”的用户消息锚点下标；
+ * 锚点坐标应按内容顺序递增，找不到（视口在首个锚点上方或列表为空）返回 -1。
+ */
+export function findCurrentTurnIndex(
+  anchorTops: readonly number[],
+  scrollTop: number,
+): number {
+  const limit = scrollTop + TURN_NAV_TOLERANCE_PX;
+  let lo = -1;
+  let hi = anchorTops.length;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1;
+    if (anchorTops[mid] <= limit) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
  * 把消息序列按“回合”分组：userMessage 起始新回合，其后所有条目归入当前回合；
  * 首个用户消息之前的条目（历史续接）归入单一伪回合。
  * 日期分隔线随条目插入其所属回合（无时间戳的条目不产生分隔线）。
