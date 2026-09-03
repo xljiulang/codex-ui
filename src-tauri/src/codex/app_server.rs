@@ -1032,16 +1032,61 @@ fn bundled_codex_exe_in(dir: &Path) -> Option<PathBuf> {
 }
 
 /// 为 codex.exe 子进程设置启动环境变量：
-/// - PATH 前插应用自身目录的 bin（bin 存在时），让 codex 能调用其中的 CLI 工具；
+/// - PATH 前插应用自身目录的 bin（bin 存在时）与 codex-runtimes 的 node/python
+///   依赖目录（无条件预置，运行期才下载解压），让 codex 能调用 CLI 工具与
+///   node/python；
 /// - 不显式设置 CODEX_HOME：子进程继承 codex-ui 的环境变量，未设置时 codex
 ///   默认使用 `%USERPROFILE%\.codex`（与设置页模型配置目录一致）。
 pub fn apply_codex_env(cmd: &mut std::process::Command) {
     if let Some(dir) = app_exe_dir() {
-        apply_codex_env_in(cmd, &dir);
+        let userprofile = std::env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        apply_codex_env_in(cmd, &dir, &userprofile);
     }
 }
 
-/// 把 <app_dir>/bin 前插到现有 PATH：bin 目录存在时返回新 PATH 值，
+/// codex-runtimes 依赖目录（`%USERPROFILE%\.cache\codex-runtimes\
+/// codex-primary-runtime\dependencies`）下的 node/python 前缀目录。
+/// 固定返回三条、不检查是否已存在：运行时由后台任务下载解压，PATH 需在
+/// 安装完成前就预置，避免先启动的 codex/终端进程缺失这些条目。
+pub(crate) fn runtime_dependency_dirs(userprofile: &Path) -> Vec<PathBuf> {
+    if userprofile.as_os_str().is_empty() {
+        return Vec::new();
+    }
+    let deps = userprofile
+        .join(".cache")
+        .join("codex-runtimes")
+        .join("codex-primary-runtime")
+        .join("dependencies");
+    vec![
+        deps.join("node").join("bin"),
+        deps.join("python"),
+        deps.join("python").join("Scripts"),
+    ]
+}
+
+/// 把 <app_dir>/bin（存在时）与 codex-runtimes 依赖目录前插到现有 PATH；
+/// 依赖目录即使尚未下载也一并加入。无任何可前插项时返回 None（保持原 PATH）。
+pub(crate) fn prepend_bin_and_runtime_path(
+    existing: &str,
+    app_dir: &Path,
+    userprofile: &Path,
+) -> Option<std::ffi::OsString> {
+    let mut parts: Vec<PathBuf> = Vec::new();
+    let bin = app_dir.join("bin");
+    if bin.is_dir() {
+        parts.push(bin);
+    }
+    parts.extend(runtime_dependency_dirs(userprofile));
+    if parts.is_empty() {
+        return None;
+    }
+    parts.extend(std::env::split_paths(existing));
+    std::env::join_paths(parts).ok()
+}
+
+/// 只前插 <app_dir>/bin 的既有变体：bin 目录存在时返回新 PATH 值，
 /// 否则返回 None（保持原 PATH 不变）。
 pub(crate) fn prepend_bin_path(existing: &str, app_dir: &Path) -> Option<std::ffi::OsString> {
     let bin = app_dir.join("bin");
@@ -1053,10 +1098,14 @@ pub(crate) fn prepend_bin_path(existing: &str, app_dir: &Path) -> Option<std::ff
     std::env::join_paths(parts).ok()
 }
 
-/// apply_codex_env 的纯函数变体：app_dir 为应用自身目录，便于测试。
-fn apply_codex_env_in(cmd: &mut std::process::Command, app_dir: &Path) {
+/// apply_codex_env 的纯函数变体：app_dir/userprofile 显式传入，便于测试。
+fn apply_codex_env_in(
+    cmd: &mut std::process::Command,
+    app_dir: &Path,
+    userprofile: &Path,
+) {
     let existing = std::env::var("PATH").unwrap_or_default();
-    if let Some(joined) = prepend_bin_path(&existing, app_dir) {
+    if let Some(joined) = prepend_bin_and_runtime_path(&existing, app_dir, userprofile) {
         cmd.env("PATH", joined);
     }
 }
@@ -1320,16 +1369,17 @@ mod tests {
     }
 
     #[test]
-    fn apply_codex_env_in_prepends_bin_only() {
+    fn apply_codex_env_in_prepends_bin_and_runtime_paths() {
         use std::ffi::OsStr;
 
-        // bin 存在：PATH 前插 bin 目录，且保留原 PATH；不设置 CODEX_HOME
+        // bin 与 userprofile 都有：PATH 前插 bin 与三条 codex-runtimes 依赖目录，
+        // 且保留原 PATH；不设置 CODEX_HOME
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
         let old = tmp.path().join("old").join("bin").to_string_lossy().into_owned();
         with_envs(&[("PATH", Some(&old))], || {
             let mut cmd = std::process::Command::new("codex");
-            apply_codex_env_in(&mut cmd, tmp.path());
+            apply_codex_env_in(&mut cmd, tmp.path(), tmp.path());
             let envs: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> = cmd
                 .get_envs()
                 .map(|(k, v)| (k.to_os_string(), v.map(|s| s.to_os_string())))
@@ -1341,6 +1391,11 @@ mod tests {
                 .unwrap();
             let parts: Vec<_> = std::env::split_paths(&path).collect();
             assert_eq!(parts.first().unwrap(), &tmp.path().join("bin"));
+            assert_eq!(
+                &parts[1..4],
+                runtime_dependency_dirs(tmp.path()).as_slice(),
+                "依赖目录即使尚未下载也应收录在 bin 之后"
+            );
             assert!(parts.contains(&tmp.path().join("old").join("bin")));
 
             assert!(
@@ -1349,12 +1404,12 @@ mod tests {
             );
         });
 
-        // bin 缺失：PATH 不改写，也不设置 CODEX_HOME
+        // bin 缺失且 userprofile 为空：PATH 不改写，也不设置 CODEX_HOME
         let tmp2 = tempfile::tempdir().unwrap();
         let dir2_s = tmp2.path().to_string_lossy().into_owned();
         with_envs(&[("PATH", Some(&dir2_s))], || {
             let mut cmd = std::process::Command::new("codex");
-            apply_codex_env_in(&mut cmd, tmp2.path());
+            apply_codex_env_in(&mut cmd, tmp2.path(), Path::new(""));
             let envs: Vec<(std::ffi::OsString, Option<std::ffi::OsString>)> = cmd
                 .get_envs()
                 .map(|(k, v)| (k.to_os_string(), v.map(|s| s.to_os_string())))
@@ -1466,6 +1521,73 @@ mod tests {
         // bin 缺失 → None（保持原 PATH）
         let tmp2 = tempfile::tempdir().unwrap();
         assert!(prepend_bin_path(&existing.to_string_lossy(), tmp2.path()).is_none());
+    }
+
+    #[test]
+    fn runtime_dependency_dirs_fixed_order_and_empty_profile() {
+        let user = Path::new("C:\\Users\\u");
+        let dirs = runtime_dependency_dirs(user);
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from(
+                    "C:\\Users\\u\\.cache\\codex-runtimes\\codex-primary-runtime\
+                     \\dependencies\\node\\bin"
+                ),
+                PathBuf::from(
+                    "C:\\Users\\u\\.cache\\codex-runtimes\\codex-primary-runtime\
+                     \\dependencies\\python"
+                ),
+                PathBuf::from(
+                    "C:\\Users\\u\\.cache\\codex-runtimes\\codex-primary-runtime\
+                     \\dependencies\\python\\Scripts"
+                ),
+            ]
+        );
+        // 不要求目录已存在（运行期才下载解压）：无需创建任何目录
+        assert!(runtime_dependency_dirs(Path::new("")).is_empty());
+    }
+
+    #[test]
+    fn prepend_bin_and_runtime_path_prepends_bin_then_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
+        let existing = std::env::join_paths([
+            tmp.path().join("a"),
+            tmp.path().join("b"),
+        ])
+        .unwrap();
+
+        // bin 在最前，三条 runtime 目录随后，原 PATH 保留
+        let joined =
+            prepend_bin_and_runtime_path(&existing.to_string_lossy(), tmp.path(), tmp.path())
+                .unwrap();
+        let parts: Vec<_> = std::env::split_paths(&joined).collect();
+        assert_eq!(parts.first().unwrap(), &tmp.path().join("bin"));
+        assert_eq!(&parts[1..4], runtime_dependency_dirs(tmp.path()).as_slice());
+        assert!(parts.contains(&tmp.path().join("a")));
+        assert!(parts.contains(&tmp.path().join("b")));
+
+        // bin 缺失且 userprofile 为空：无可前插项 → None（保持原 PATH）
+        let tmp2 = tempfile::tempdir().unwrap();
+        assert!(
+            prepend_bin_and_runtime_path(
+                &existing.to_string_lossy(),
+                tmp2.path(),
+                Path::new(""),
+            )
+            .is_none()
+        );
+
+        // bin 缺失但 userprofile 非空：仍前插三条依赖目录（不检查存在性）
+        let joined2 =
+            prepend_bin_and_runtime_path(&existing.to_string_lossy(), tmp2.path(), tmp.path())
+                .unwrap();
+        let dirs = runtime_dependency_dirs(tmp.path());
+        let parts2: Vec<_> = std::env::split_paths(&joined2).collect();
+        assert_eq!(&parts2[..3], dirs.as_slice());
+        assert!(parts2.contains(&tmp.path().join("a")));
+        assert!(parts2.contains(&tmp.path().join("b")));
     }
 
     #[test]

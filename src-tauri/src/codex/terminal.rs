@@ -7,7 +7,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::codex::app_server::{app_exe_dir, prepend_bin_path};
+use crate::codex::app_server::{app_exe_dir, prepend_bin_and_runtime_path};
 use crate::codex::settings;
 use crate::codex::util::resolve_workspace_dir;
 
@@ -236,11 +236,17 @@ pub fn terminal_spawn(
     let mut cmd = CommandBuilder::new(&program);
     cmd.args(&args);
     cmd.cwd(&dir);
-    // 与应用启动 codex 一致：把应用自身目录的 bin 前插到终端 PATH，
-    // 使终端里可直接调用 bin 目录中的 CLI 工具（fd/rg/sg 等）。
+    // 与应用启动 codex 一致：把应用自身目录的 bin 与 codex-runtimes 的
+    // node/python 依赖目录前插到终端 PATH；依赖目录运行期才下载解压，
+    // 未就绪也照常预置，安装完成后终端即可直接解析。
     let existing_path = std::env::var("PATH").unwrap_or_default();
+    let userprofile = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     if let Some(app_dir) = app_exe_dir() {
-        if let Some(joined) = prepend_bin_path(&existing_path, &app_dir) {
+        if let Some(joined) =
+            prepend_bin_and_runtime_path(&existing_path, &app_dir, &userprofile)
+        {
             cmd.env("PATH", joined);
         }
     }
