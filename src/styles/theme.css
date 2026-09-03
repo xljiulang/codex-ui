@@ -371,7 +371,7 @@
   /* 输入卡片：比头部稍实一档，保证输入文字对比 */
   --app-composer-tint: rgba(244, 246, 251, 0.50);
   /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
-  --app-content-tint: rgba(244, 246, 251, 0.65);
+  --app-content-tint: rgba(244, 246, 251, 0.58);
   --bg-panel: #ffffff;
   --bg-input: #ffffff;
   --bg-hover: #e9edf4;
