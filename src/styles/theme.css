@@ -75,8 +75,6 @@
   --app-composer-tint: rgba(14, 17, 22, 0.45);
   /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
   --app-content-tint: rgba(14, 17, 22, 0.58);
-  /* 右侧资源面板：深色沿用内容档，浅色单独更透（与主内容 app 档一致） */
-  --app-panel-tint: var(--app-content-tint);
   --bg-panel: #151a21;
   --bg-input: #1b212a;
   --bg-hover: #1e2530;
@@ -230,8 +228,6 @@
   --app-composer-tint: rgba(10, 11, 16, 0.45);
   /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
   --app-content-tint: rgba(10, 11, 16, 0.58);
-  /* 右侧资源面板：深色沿用内容档，浅色单独更透（与主内容 app 档一致） */
-  --app-panel-tint: var(--app-content-tint);
   --bg-panel: #12131a;
   --bg-input: #181a23;
   --bg-hover: #1d1f2b;
@@ -376,8 +372,6 @@
   --app-composer-tint: rgba(244, 246, 251, 0.50);
   /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
   --app-content-tint: rgba(244, 246, 251, 0.58);
-  /* 右侧资源面板：深色沿用内容档，浅色单独更透（与主内容 app 档一致） */
-  --app-panel-tint: rgba(244, 246, 251, 0.45);
   --bg-panel: #ffffff;
   --bg-input: #ffffff;
   --bg-hover: #e9edf4;
@@ -665,7 +659,7 @@ html[data-glass="on"] .settings-page {
    头部与输入区外层用更透 tint，输入卡片稍实一档保输入可读；
    文字承载卡片仍为近不透明 */
 html[data-glass="on"] .right-panel {
-  background-color: var(--app-panel-tint);
+  background-color: var(--app-header-tint);
 }
 
 html[data-glass="on"] .app-header,
@@ -694,7 +688,7 @@ html[data-glass="on"] .panel-tabs {
 }
 
 html[data-glass="on"] .panel-tabs {
-  background-color: var(--app-panel-tint);
+  background-color: var(--app-header-tint);
 }
 
 /* 文本输入/编辑面玻璃化：普通输入框/富文本/代码编辑器与容器同用半透明 tint
@@ -780,7 +774,7 @@ html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
 html[data-glass="on"]:root {
   --bg: var(--app-content-tint);
   --bg-panel: var(--app-content-tint);
-  --panel-bg: var(--app-panel-tint);
+  --panel-bg: var(--app-header-tint);
   --glass-bg: var(--app-header-tint);
   --bg-input: var(--app-composer-tint);
   --bg-hover: var(--app-composer-tint);
@@ -803,6 +797,15 @@ html[data-glass="on"] .composer {
 /* docx 富文本纸张是“真实纸面”，保持恒白不玻璃化（PDF 预览页同理由图片/white 表面维持） */
 html[data-glass="on"] .docx-editor-host .tiptap {
   background-color: var(--doc-bg) !important;
+}
+
+/* 内容卡统一玻璃卡底：欢迎页与设置/模型配置卡与助手/工具卡同为内容档 0.58 */
+html[data-glass="on"] .welcome-hero,
+html[data-glass="on"] .feature-card,
+html[data-glass="on"] .highlight-grid,
+html[data-glass="on"] .settings-card,
+html[data-glass="on"] .model-config-card {
+  background-color: var(--app-content-tint) !important;
 }
 
 /* 模态对话框（添加 MCP/模型提供方等）毛玻璃态用内容档 tint，关闭时仍走 --float-bg 全实 */
