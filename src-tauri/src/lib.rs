@@ -181,6 +181,8 @@ pub fn run() {
             codex::commands::model_config_save,
             codex::commands::model_catalog_save,
             codex::commands::skills_read,
+            codex::commands::skills_add,
+            codex::commands::skills_remove,
             codex::commands::custom_instructions_read,
             codex::commands::custom_instructions_save,
             codex::cli_tools::cli_tools_available,

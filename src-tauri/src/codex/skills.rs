@@ -4,6 +4,7 @@
 //! 并排除插件缓存路径（plugins/cache）。展示包含禁用技能（不做 enabled 过滤）。
 
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::app_server::CodexServer;
@@ -129,9 +130,169 @@ fn is_plugin_cache_path(path: &Path) -> bool {
     norm_path_key(path).contains(r"\plugins\cache\")
 }
 
+/// 安装本地技能：把选中的 `SKILL.md` 所在文件夹复制/覆盖到 `{home}/skills/<文件夹名>`。
+///
+/// 校验规则（与 codex 技能目录约定一致）：
+/// - 文件名必须为 `SKILL.md`（大小写不敏感）；
+/// - SKILL.md frontmatter 的 `name` 与所在文件夹名一致（trim + 大小写不敏感）。
+///
+/// 目标目录已存在时按“覆盖更新”处理：先整体删除再复制，保证与源一致；
+/// 源目录与目标目录为同一路径时视为已是最新，直接成功、不删除源。
+pub fn install_in(source_md: &Path, home: &Path) -> Result<String, String> {
+    let file_name = source_md
+        .file_name()
+        .ok_or_else(|| "无法确定所选文件的文件名".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    if !file_name.eq_ignore_ascii_case("SKILL.md") {
+        return Err("请选择名为 SKILL.md 的文件".to_string());
+    }
+    let source_dir = source_md
+        .parent()
+        .ok_or_else(|| "无法确定 SKILL.md 所在文件夹".to_string())?
+        .to_path_buf();
+    let folder_name = source_dir
+        .file_name()
+        .ok_or_else(|| "无法确定 SKILL.md 所在文件夹名".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    if folder_name.is_empty() {
+        return Err("无法确定 SKILL.md 所在文件夹名".to_string());
+    }
+    let name = parse_skill_name(source_md)?;
+    if !name.trim().eq_ignore_ascii_case(&folder_name) {
+        return Err(format!(
+            "frontmatter name（{name}）与所在文件夹名（{folder_name}）不一致"
+        ));
+    }
+
+    let skills_dir = home.join("skills");
+    let target = skills_dir.join(&folder_name);
+    // 同路径选择（从 CODEX_HOME/skills 内重新选择）不删不改，视为已是最新
+    if paths_equivalent(&source_dir, &target) {
+        return Ok(name);
+    }
+    if target.exists() {
+        if target.is_dir() {
+            fs::remove_dir_all(&target)
+                .map_err(|e| format!("删除旧技能目录失败 {}: {e}", target.display()))?;
+        } else {
+            return Err(format!(
+                "目标路径存在同名文件，无法安装技能: {}",
+                target.display()
+            ));
+        }
+    }
+    fs::create_dir_all(&skills_dir)
+        .map_err(|e| format!("创建技能目录失败 {}: {e}", skills_dir.display()))?;
+    copy_dir_recursive(&source_dir, &target).map_err(|e| {
+        format!(
+            "复制技能目录失败 {} → {}: {e}",
+            source_dir.display(),
+            target.display()
+        )
+    })?;
+    Ok(name)
+}
+
+/// 解析 SKILL.md frontmatter 的 `name` 字段。
+fn parse_skill_name(skill_md: &Path) -> Result<String, String> {
+    let text = fs::read_to_string(skill_md)
+        .map_err(|e| format!("读取 SKILL.md 失败 {}: {e}", skill_md.display()))?;
+    let yaml_text = frontmatter_yaml(&text)
+        .ok_or_else(|| format!("SKILL.md 缺少 YAML frontmatter: {}", skill_md.display()))?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(yaml_text)
+        .map_err(|e| format!("SKILL.md frontmatter 解析失败: {e}"))?;
+    let name = doc
+        .get("name")
+        .and_then(serde_yaml::Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "SKILL.md frontmatter 缺少非空 name 字段: {}",
+                skill_md.display()
+            )
+        })?;
+    Ok(name.to_string())
+}
+
+/// 截取 frontmatter YAML 文本（支持 CRLF 与 UTF-8 BOM）。
+fn frontmatter_yaml(text: &str) -> Option<&str> {
+    let text = text.trim_start_matches('\u{feff}');
+    let rest = text
+        .strip_prefix("---\r\n")
+        .or_else(|| text.strip_prefix("---\n"))?;
+    let end = rest.find("\n---")?;
+    Some(&rest[..end])
+}
+
+/// 目标已存在时以 canonical 路径比较源/目标是否为同一目录。
+fn paths_equivalent(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// 递归复制目录（含子目录与隐藏文件）。
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+/// 删除本地技能：删除 SKILL.md 所在目录（不限 CODEX_HOME/skills）。
+pub fn remove_in(skill_md: &Path) -> Result<String, String> {
+    let file_name = skill_md
+        .file_name()
+        .ok_or_else(|| "无法确定所选文件的文件名".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    if !file_name.eq_ignore_ascii_case("SKILL.md") {
+        return Err("只能删除名为 SKILL.md 的技能文件".to_string());
+    }
+    let skill_dir = skill_md
+        .parent()
+        .ok_or_else(|| "无法确定技能所在目录".to_string())?;
+    if skill_dir.file_name().is_none() || skill_dir.parent().is_none() {
+        return Err("技能目录位于文件系统根层级，拒绝删除".to_string());
+    }
+    if !skill_dir.is_dir() {
+        return Err(format!("技能目录不存在: {}", skill_dir.display()));
+    }
+    let folder_name = skill_dir
+        .file_name()
+        .ok_or_else(|| "无法确定技能目录名".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    fs::remove_dir_all(skill_dir)
+        .map_err(|e| format!("删除技能目录失败 {}: {e}", skill_dir.display()))?;
+    Ok(folder_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write_skill(dir: &Path, name: &str, extra: Option<&str>) {
+        let content = format!("---\nname: {name}\ndescription: 测试技能\n---\n\n正文\n");
+        fs::write(dir.join("SKILL.md"), content).unwrap();
+        if let Some(file) = extra {
+            fs::write(dir.join(file), "payload").unwrap();
+        }
+    }
 
     fn list_item(name: &str, path: &str, enabled: bool, description: &str) -> SkillListItem {
         SkillListItem {
@@ -381,5 +542,147 @@ mod tests {
     fn missing_path_is_excluded() {
         let items = vec![list_item("nopath", "", true, "")];
         assert!(filter_local_skills(&items).is_empty());
+    }
+
+    #[test]
+    fn rejects_file_that_is_not_skill_md() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("foo");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("readme.md"), "# hi").unwrap();
+        let err = install_in(&src.join("readme.md"), tmp.path()).unwrap_err();
+        assert!(err.contains("SKILL.md"), "{err}");
+    }
+
+    #[test]
+    fn rejects_missing_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("bare");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("SKILL.md"), "# 无 frontmatter").unwrap();
+        let err = install_in(&src.join("SKILL.md"), tmp.path()).unwrap_err();
+        assert!(err.contains("frontmatter"), "{err}");
+    }
+
+    #[test]
+    fn rejects_frontmatter_without_name() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("noname");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("SKILL.md"),
+            "---\ndescription: 缺 name\n---\n\n正文\n",
+        )
+        .unwrap();
+        let err = install_in(&src.join("SKILL.md"), tmp.path()).unwrap_err();
+        assert!(err.contains("name"), "{err}");
+    }
+
+    #[test]
+    fn rejects_name_folder_mismatch() {
+        let tmp = TempDir::new().unwrap();
+        let src = tmp.path().join("wanted");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("SKILL.md"),
+            "---\nname: other\ndescription: 测试\n---\n",
+        )
+        .unwrap();
+        let err = install_in(&src.join("SKILL.md"), tmp.path()).unwrap_err();
+        assert!(err.contains("不一致"), "{err}");
+    }
+
+    #[test]
+    fn installs_skill_folder_with_extra_files() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join(".codex");
+        let src = tmp.path().join("demo-skill");
+        fs::create_dir_all(src.join("scripts")).unwrap();
+        write_skill(&src, "demo-skill", Some("scripts/run.ps1"));
+        let name = install_in(&src.join("SKILL.md"), &home).unwrap();
+        assert_eq!(name, "demo-skill");
+        let target = home.join("skills").join("demo-skill");
+        assert!(target.join("SKILL.md").is_file());
+        assert!(target.join("scripts").join("run.ps1").is_file());
+    }
+
+    #[test]
+    fn overwrite_replaces_existing_folder_and_removes_stale_files() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join(".codex");
+        let src = tmp.path().join("skill-x");
+        fs::create_dir_all(&src).unwrap();
+        write_skill(&src, "skill-x", Some("new.txt"));
+        let target = home.join("skills").join("skill-x");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("stale.txt"), "old").unwrap();
+        install_in(&src.join("SKILL.md"), &home).unwrap();
+        assert!(target.join("new.txt").is_file());
+        assert!(!target.join("stale.txt").exists());
+    }
+
+    #[test]
+    fn same_source_and_target_is_noop() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join(".codex");
+        let target = home.join("skills").join("same");
+        fs::create_dir_all(&target).unwrap();
+        write_skill(&target, "same", Some("keep.txt"));
+        install_in(&target.join("SKILL.md"), &home).unwrap();
+        assert!(target.join("keep.txt").is_file());
+    }
+
+    #[test]
+    fn accepts_case_insensitive_name_and_filename() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join(".codex");
+        let src = tmp.path().join("MySkill");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("skill.md"),
+            "---\nname: \"myskill\"\ndescription: 测试\n---\n",
+        )
+        .unwrap();
+        let name = install_in(&src.join("skill.md"), &home).unwrap();
+        assert_eq!(name, "myskill");
+        assert!(home.join("skills").join("MySkill").join("skill.md").is_file());
+    }
+
+    #[test]
+    fn remove_deletes_skill_dir_with_nested_files() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join("del-skill");
+        fs::create_dir_all(skill_dir.join("sub")).unwrap();
+        write_skill(&skill_dir, "del-skill", Some("sub/data.txt"));
+        let skill_md = skill_dir.join("SKILL.md");
+        let name = remove_in(&skill_md).unwrap();
+        assert_eq!(name, "del-skill");
+        assert!(!skill_dir.exists());
+        assert!(!tmp.path().join("del-skill").join("SKILL.md").exists());
+    }
+
+    #[test]
+    fn remove_rejects_non_skill_md() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("keep");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("readme.md"), "# hi").unwrap();
+        let err = remove_in(&dir.join("readme.md")).unwrap_err();
+        assert!(err.contains("SKILL.md"), "{err}");
+        assert!(dir.exists());
+    }
+
+    #[test]
+    fn remove_rejects_missing_directory() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("missing-skill").join("SKILL.md");
+        let err = remove_in(&missing).unwrap_err();
+        assert!(err.contains("不存在"), "{err}");
+    }
+
+    #[test]
+    fn remove_rejects_path_without_parent_folder() {
+        let err = remove_in(Path::new("SKILL.md")).unwrap_err();
+        assert!(err.contains("目录") || err.contains("根"), "{err}");
     }
 }

@@ -45,6 +45,7 @@ export async function loadMcpServers(): Promise<{
     servers.push({
       name,
       command: str(t.command),
+      cwd: str(t.cwd).trim() || undefined,
       args: Array.isArray(t.args)
         ? t.args.filter((a): a is string => typeof a === "string")
         : [],
@@ -76,10 +77,12 @@ export async function saveMcpServers(
       setOrRemove(base, "bearer_token_env_var", s.bearer_token_env_var.trim());
       setKv(base, "http_headers", s.headers);
       delete base.command;
+      delete base.cwd;
       delete base.args;
       delete base.env;
     } else {
       setOrRemove(base, "command", s.command.trim());
+      setOrRemove(base, "cwd", s.cwd?.trim() ?? "");
       const args = s.args.map((a) => a.trim()).filter(Boolean);
       if (args.length) base.args = args;
       else delete base.args;

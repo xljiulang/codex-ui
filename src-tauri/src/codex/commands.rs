@@ -650,6 +650,28 @@ pub async fn skills_read(
     skills::read_state(&server, force_reload.unwrap_or(false)).await
 }
 
+/// 添加技能：打开单文件对话框（Markdown 过滤）选择 SKILL.md，校验通过后把
+/// 所在文件夹复制/覆盖到 CODEX_HOME/skills；返回技能名，用户取消返回 null。
+#[tauri::command]
+pub async fn skills_add() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let dialog = rfd::FileDialog::new().add_filter("SKILL.md", &["md"]);
+        let Some(picked) = dialog.pick_file() else {
+            return Ok(None);
+        };
+        let home = model_config::codex_home()?;
+        skills::install_in(&picked, &home).map(Some)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 删除技能：删除该 SKILL.md 所在目录并返回目录名。
+#[tauri::command]
+pub fn skills_remove(skill_path: String) -> Result<String, String> {
+    skills::remove_in(std::path::Path::new(&skill_path))
+}
+
 /// 读取自定义指令（CODEX_HOME/AGENTS.md），供设置页「模型配置」Tab 使用。
 #[tauri::command]
 pub fn custom_instructions_read() -> Result<custom_instructions::CustomInstructionsState, String> {

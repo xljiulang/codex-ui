@@ -39,6 +39,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 toml_edit = "0.22"
+serde_yaml = "0.9"
 tar = "0.4"
 xz2 = "0.1"
 flate2 = "1"

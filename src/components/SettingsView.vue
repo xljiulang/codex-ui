@@ -628,10 +628,27 @@ function openAgentsFile() {
 
 const skillsState = reactive({
   loading: false,
+  adding: false,
   items: [] as SkillsItem[],
   errors: [] as SkillErrorInfo[],
   busy: {} as Record<string, boolean>,
 });
+
+/** 打开文件对话框选择 SKILL.md：校验通过后安装到 CODEX_HOME/skills 并刷新列表 */
+async function addSkill() {
+  if (skillsState.loading || skillsState.adding) return;
+  skillsState.adding = true;
+  try {
+    const name = await invoke<string | null>("skills_add");
+    if (!name) return; // 用户取消：文件未变化，不刷新
+    setToast(`已添加技能 ${name}`);
+    await loadSkills(true);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    skillsState.adding = false;
+  }
+}
 
 /** 拉取本地技能列表（skills_read：从 skills/list 过滤出 CODEX_HOME/skills 下的技能） */
 async function loadSkills(forceReload = false) {
@@ -673,6 +690,28 @@ async function toggleSkill(s: SkillsItem) {
   }
 }
 
+/** 删除技能：确认后删除 SKILL.md 所在目录并强制刷新列表 */
+async function removeSkill(s: SkillsItem) {
+  if (skillsState.loading || skillsState.busy[s.path]) return;
+  const ok = await askConfirm({
+    title: "删除技能",
+    message: `确定删除技能「${s.name}」吗？将删除该技能所在目录（${s.path}），此操作不可恢复。`,
+    confirmLabel: "删除",
+    cancelLabel: "取消",
+  });
+  if (!ok) return;
+  skillsState.busy[s.path] = true;
+  try {
+    await invoke("skills_remove", { skillPath: s.path });
+    setToast(`已删除技能 ${s.name}`);
+    await loadSkills(true);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    skillsState.busy[s.path] = false;
+  }
+}
+
 // ---------- MCP 管理 ----------
 
 const mcpState = reactive({
@@ -698,6 +737,7 @@ const mcpForm = reactive({
   transport: "stdio" as "stdio" | "http",
   name: "",
   command: "",
+  cwd: "",
   argsText: "",
   env: [] as McpEnvEntry[],
   url: "",
@@ -741,6 +781,7 @@ function openAddMcp() {
   mcpForm.transport = "stdio";
   mcpForm.name = "";
   mcpForm.command = "";
+  mcpForm.cwd = "";
   mcpForm.argsText = "";
   mcpForm.env = [];
   mcpForm.url = "";
@@ -759,6 +800,7 @@ function openEditMcp(index: number) {
   mcpForm.name = s.name;
   mcpForm.transport = s.url.trim() ? "http" : "stdio";
   mcpForm.command = s.command;
+  mcpForm.cwd = s.cwd ?? "";
   mcpForm.argsText = (s.args ?? []).join(" ");
   mcpForm.env = (s.env ?? []).map((e) => ({ ...e }));
   mcpForm.url = s.url ?? "";
@@ -843,6 +885,7 @@ async function confirmMcpForm() {
   const entry: McpServerInfo = {
     name,
     command: isHttp ? "" : mcpForm.command.trim(),
+    cwd: isHttp ? "" : mcpForm.cwd.trim(),
     args: isHttp ? [] : args,
     env: isHttp ? [] : mcpForm.env.map((e) => ({ key: e.key.trim(), value: e.value })),
     url: isHttp ? mcpForm.url.trim() : "",
@@ -1694,14 +1737,22 @@ function pluginInitial(p: PluginCatalogItem): string {
             <div class="model-config-card-head">
               <h3>已安装技能</h3>
               <div class="model-config-head-actions">
-                <div class="model-config-path">
-                  共 {{ skillsState.items.length }} 个
-                </div>
+                <button
+                  class="btn btn-icon primary skill-add-btn"
+                  v-tooltip="'添加技能'"
+                  aria-label="添加技能"
+                  :disabled="skillsState.loading || skillsState.adding"
+                  @click="addSkill"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLUS" />
+                  </svg>
+                </button>
                 <button
                   class="btn btn-icon model-config-reload-btn"
                   aria-label="刷新"
                   v-tooltip="'刷新'"
-                  :disabled="skillsState.loading"
+                  :disabled="skillsState.loading || skillsState.adding"
                   @click="loadSkills()"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1763,6 +1814,18 @@ function pluginInitial(p: PluginCatalogItem): string {
                     />
                     <span class="switch-track"></span>
                   </label>
+                  <button
+                    type="button"
+                    class="btn btn-icon danger skill-delete-btn"
+                    v-tooltip="'删除技能'"
+                    aria-label="删除技能"
+                    :disabled="skillsState.loading || !!skillsState.busy[s.path]"
+                    @click="removeSkill(s)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_DELETE" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             </div>
@@ -1941,6 +2004,17 @@ function pluginInitial(p: PluginCatalogItem): string {
                   >
                     {{ mcpFormErrors.command }}
                   </p>
+                </div>
+                <div
+                  v-if="mcpForm.transport === 'stdio'"
+                  class="setting-row"
+                >
+                  <label>cwd（工作目录）</label>
+                  <input
+                    v-model="mcpForm.cwd"
+                    type="text"
+                    placeholder="服务器进程启动目录，可留空（如 D:\\project）"
+                  />
                 </div>
                 <div
                   v-if="mcpForm.transport === 'stdio'"

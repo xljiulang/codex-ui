@@ -1320,6 +1320,190 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(forcedReloads.length).toBe(0);
   });
 
+  it("技能管理头部不显示数量文本并提供添加按钮", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const head = wrapper.find(
+      ".settings-section-skills .model-config-card-head",
+    );
+    expect(head.text()).not.toContain("共");
+    expect(head.text()).not.toContain("个");
+    const addBtn = head.find(".skill-add-btn");
+    expect(addBtn.exists()).toBe(true);
+    expect(addBtn.attributes("aria-label")).toBe("添加技能");
+  });
+
+  it("添加技能成功：toast 技能名并强制刷新列表", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "skills_add") return Promise.resolve("new-skill");
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await wrapper.find(".skill-add-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("skills_add");
+    expect(store.toast).toContain("已添加技能 new-skill");
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before + 1);
+    expect(
+      mockedInvoke.mock.calls[mockedInvoke.mock.calls.length - 1],
+    ).toEqual(["skills_read", { forceReload: true }]);
+  });
+
+  it("添加技能取消（null）：不 toast、不刷新", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "skills_add") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await wrapper.find(".skill-add-btn").trigger("click");
+    await flushPromises();
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before);
+    expect(store.toast).not.toContain("已添加技能");
+  });
+
+  it("添加技能失败：toast 错误且不刷新", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "skills_add") throw new Error("校验失败：文件夹名不一致");
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await wrapper.find(".skill-add-btn").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("校验失败：文件夹名不一致");
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before);
+  });
+
+  it("技能管理每行提供删除按钮；确认后调用 skills_remove 并强制刷新", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "skills_remove") return Promise.resolve("pdf");
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const row = wrapper.find(".skill-row");
+    const deleteBtn = row.find(".skill-delete-btn");
+    expect(deleteBtn.exists()).toBe(true);
+    expect(deleteBtn.attributes("aria-label")).toBe("删除技能");
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await deleteBtn.trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("skills_remove", {
+      skillPath: "C:/apps/codex-ui/.codex/skills/pdf/SKILL.md",
+    });
+    expect(store.toast).toContain("已删除技能 pdf");
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before + 1);
+  });
+
+  it("删除技能取消：不调用 skills_remove、不刷新", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await wrapper.find(".skill-delete-btn").trigger("click");
+    await flushPromises();
+    settleConfirm(false);
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.filter(([name]) => name === "skills_remove")
+        .length,
+    ).toBe(0);
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before);
+    expect(store.toast).not.toContain("已删除技能");
+  });
+
+  it("删除技能失败：toast 错误且不刷新", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "skills_read") return Promise.resolve(sampleSkillsState);
+      if (cmd === "skills_remove") throw new Error("删除失败：目录不存在");
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("技能管理"))!
+      .trigger("click");
+    await flushPromises();
+    const before = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    await wrapper.find(".skill-delete-btn").trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    expect(store.toast).toContain("删除失败：目录不存在");
+    const after = mockedInvoke.mock.calls.filter(
+      ([name]) => name === "skills_read",
+    ).length;
+    expect(after).toBe(before);
+  });
+
   it("MCP 管理渲染服务器名称与传输类型", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
@@ -1378,6 +1562,9 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       .find('.mcp-server-form input[placeholder="如 npx"]')
       .setValue("npx");
     await wrapper
+      .find('.mcp-server-form input[placeholder^="服务器进程启动目录"]')
+      .setValue("D:\\mcp-servers");
+    await wrapper
       .find(".mcp-server-form .mcp-args-input")
       .setValue("-y mcp-server-memory");
     await wrapper.find(".mcp-kv-add-btn").trigger("click");
@@ -1406,6 +1593,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
               },
               memory: {
                 command: "npx",
+                cwd: "D:\\mcp-servers",
                 args: ["-y", "mcp-server-memory"],
                 env: { API_KEY: "sk-123" },
                 omit_tools_from: ["deferred"],

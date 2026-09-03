@@ -282,6 +282,8 @@ export interface McpServerInfo {
   name: string;
   /** STDIO 启动命令（http 服务器为空） */
   command: string;
+  /** STDIO 服务器启动工作目录（可选；http 服务器不携带） */
+  cwd?: string;
   args: string[];
   env: McpEnvEntry[];
   /** Streamable HTTP 地址（stdio 服务器为空） */

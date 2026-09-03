@@ -276,4 +276,82 @@ describe("useCodex/mcp", () => {
     expect(value.off).toEqual({ command: "npx", custom: 2 });
     expect(value.off.omit_tools_from).toBeUndefined();
   });
+
+  it("loadMcpServers 归一化 cwd：trim 后有值保留，缺失/空为 undefined", async () => {
+    mockedInvoke.mockResolvedValue({
+      config: {},
+      layers: [
+        {
+          name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+          version: "sha256:abc",
+          config: {
+            mcp_servers: {
+              withCwd: { command: "cmd-a", cwd: "  C:/work  " },
+              emptyCwd: { command: "cmd-b", cwd: "   " },
+              noCwd: { command: "cmd-c" },
+            },
+          },
+          disabledReason: null,
+        },
+      ],
+    });
+    const { servers } = await loadMcpServers();
+    expect(servers.find((s) => s.name === "withCwd")?.cwd).toBe("C:/work");
+    expect(servers.find((s) => s.name === "emptyCwd")?.cwd).toBeUndefined();
+    expect(servers.find((s) => s.name === "noCwd")?.cwd).toBeUndefined();
+  });
+
+  it("saveMcpServers stdio 写 cwd、空值删除；HTTP 删除 cwd 并保留未知字段", async () => {
+    await saveMcpServers(
+      [
+        {
+          name: "stdio-a",
+          command: "npx",
+          cwd: "  D:/work  ",
+          args: ["-y", "srv"],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+        },
+        {
+          name: "stdio-b",
+          command: "npx",
+          cwd: "   ",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+        },
+        {
+          name: "http-x",
+          command: "",
+          cwd: "D:/ignored",
+          args: [],
+          env: [],
+          url: "https://example.com/mcp",
+          headers: [],
+          bearer_token_env_var: "",
+        },
+      ],
+      {
+        "stdio-b": { command: "old", cwd: "D:/old", custom: 1 },
+        "http-x": { command: "old", cwd: "D:/old", custom: 2 },
+      },
+    );
+    const value = (
+      mockedInvoke.mock.calls[0][1] as {
+        params: { edits: { value: Record<string, Record<string, unknown>> }[] };
+      }
+    ).params.edits[0].value;
+    expect(value["stdio-a"].cwd).toBe("D:/work");
+    expect(value["stdio-b"]).toEqual({ command: "npx", custom: 1 });
+    expect(value["stdio-b"].cwd).toBeUndefined();
+    expect(value["http-x"]).toEqual({
+      url: "https://example.com/mcp",
+      custom: 2,
+    });
+    expect(value["http-x"].cwd).toBeUndefined();
+  });
 });
