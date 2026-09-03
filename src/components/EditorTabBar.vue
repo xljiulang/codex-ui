@@ -396,7 +396,7 @@ function titleTooltip(tab: EditorTab): string {
       <button
         class="editor-tab-add"
         aria-label="新建会话或终端"
-        v-tooltip="'新建会话 / 新建终端'"
+        v-tooltip="'新建会话 / 新建终端(cmd) / 新建终端(PowerShell)'"
         @click="emit('add', $event)"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">

@@ -801,6 +801,45 @@ describe("useEditorTabs 标签状态", () => {
     store.settings.terminal_shell = "cmd";
   });
 
+  it("打开终端：显式传入 shell=cmd 覆盖设置，标题为「终端 (cmd)」且携带 shell", async () => {
+    store.settings.terminal_shell = "powershell";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root, "cmd");
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t!.title).toBe("终端 (cmd)");
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_spawn", {
+      id: t!.id,
+      workspace: root,
+      shell: "cmd",
+    });
+    store.settings.terminal_shell = "cmd";
+  });
+
+  it("打开终端：显式传入 shell=powershell 覆盖设置，标题为「终端 (PowerShell)」且携带 shell", async () => {
+    store.settings.terminal_shell = "cmd";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openTerminalTab(root, "powershell");
+    const t = tabs.find(
+      (x): x is TerminalEditorTab => x.kind === "terminal",
+    );
+    expect(t!.title).toBe("终端 (PowerShell)");
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_spawn", {
+      id: t!.id,
+      workspace: root,
+      shell: "powershell",
+    });
+  });
+
   it("打开终端：先建立全局监听/缓冲，再发起 spawn", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "terminal_spawn") return Promise.resolve({});

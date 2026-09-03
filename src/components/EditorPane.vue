@@ -272,7 +272,8 @@ const welcomeTabOpen = computed(() =>
   tabs.some((t) => t.id === WELCOME_TAB_ID),
 );
 
-/** 标签栏末尾「+」：新建会话走与头部一致的工作目录选择；新建终端与选择器起点一致 */
+/** 标签栏末尾「+」：新建会话走与头部一致的工作目录选择；
+ * 新建终端拆为 cmd / PowerShell 两项，按所选 Shell 强制启动 */
 function openAddMenu(e: MouseEvent) {
   const ws = workspace.value || store.lastWorkspace || "";
   const items: CtxItem[] = [
@@ -282,9 +283,14 @@ function openAddMenu(e: MouseEvent) {
       action: () => void pickAndOpenNewSession(),
     },
     {
-      label: "新建终端",
+      label: "新建终端(cmd)",
       icon: ICON_TERMINAL,
-      action: () => void openTerminalTab(ws),
+      action: () => void openTerminalTab(ws, "cmd"),
+    },
+    {
+      label: "新建终端(PowerShell)",
+      icon: ICON_TERMINAL,
+      action: () => void openTerminalTab(ws, "powershell"),
     },
   ];
   openCtx(e, items);

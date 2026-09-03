@@ -155,6 +155,16 @@ fn shell_command(shell: &str) -> (String, Vec<String>) {
     }
 }
 
+/// 依据显式 Shell 覆盖选择实际启动的 Shell（terminal_spawn 的 shell 参数）：
+/// powershell / cmd 使用显式值；None 或其它（非法）值一律回退 default（设置默认）。
+fn choose_shell(override_shell: Option<&str>, default: &str) -> String {
+    match override_shell {
+        Some("powershell") => "powershell".into(),
+        Some("cmd") => "cmd".into(),
+        _ => default.to_string(),
+    }
+}
+
 /// 结束并移除指定会话；会话不存在时视为已清理（幂等）
 fn kill_session(state: &TerminalState, id: &str) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -204,6 +214,7 @@ pub fn terminal_spawn(
     state: State<'_, TerminalState>,
     id: String,
     workspace: String,
+    shell: Option<String>,
 ) -> Result<TerminalSpawnResult, String> {
     if id.trim().is_empty() {
         return Err("终端 id 不能为空".into());
@@ -227,11 +238,12 @@ pub fn terminal_spawn(
         .map_err(|e| format!("创建终端失败: {e}"))?;
 
     // 与前端标签标题读取同一份 settings.json（settings_set 已先落盘），保证一致
-    let shell = app
+    let default_shell = app
         .path()
         .app_data_dir()
         .map(|dir| settings::load(&dir).terminal_shell)
         .unwrap_or_else(|_| "cmd".into());
+    let shell = choose_shell(shell.as_deref(), &default_shell);
     let (program, args) = shell_command(&shell);
     let mut cmd = CommandBuilder::new(&program);
     cmd.args(&args);
@@ -525,6 +537,16 @@ mod tests {
         let (prog, args) = shell_command("bogus");
         assert_eq!(prog, "cmd.exe");
         assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
+    }
+
+    #[test]
+    fn choose_shell_uses_override_or_default() {
+        assert_eq!(choose_shell(Some("powershell"), "cmd"), "powershell");
+        assert_eq!(choose_shell(Some("cmd"), "powershell"), "cmd");
+        // None / 非法值回退 default
+        assert_eq!(choose_shell(None, "powershell"), "powershell");
+        assert_eq!(choose_shell(None, "cmd"), "cmd");
+        assert_eq!(choose_shell(Some("bash"), "powershell"), "powershell");
     }
 
     #[test]

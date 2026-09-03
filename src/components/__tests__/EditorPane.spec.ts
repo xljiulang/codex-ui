@@ -351,7 +351,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("有活动标签时「+」可见，点击弹出「新建会话 / 新建终端」菜单（带图标）", async () => {
+  it("有活动标签时「+」可见，点击弹出「新建会话 / 新建终端(cmd) / 新建终端(PowerShell)」菜单（带图标）", async () => {
     tabs[0].workspace = "D:/repo";
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
@@ -359,7 +359,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "新建会话",
-      "新建终端",
+      "新建终端(cmd)",
+      "新建终端(PowerShell)",
     ]);
     // 新建会话：会话气泡图标（单路径）
     const sessionPaths = items[0].findAll("svg path");
@@ -369,23 +370,26 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(sessionPaths[0].attributes("fill")).toBe("currentColor");
     expect(sessionPaths[0].attributes("stroke")).toBe("none");
     expect(sessionPaths[0].attributes("fill-rule")).toBe("evenodd");
-    // 新建终端：仍为单路径图标
+    // 新建终端(cmd)：仍为单路径图标
     expect(items[1].findAll("svg path")).toHaveLength(1);
     expect(items[1].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
+    // 新建终端(PowerShell)：仍为单路径图标
+    expect(items[2].findAll("svg path")).toHaveLength(1);
+    expect(items[2].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
     wrapper.unmount();
   });
 
-  it("无工作区时点「+」：菜单仍含「新建会话 / 新建终端」", async () => {
+  it("无工作区时点「+」：菜单仍含「新建会话 / 新建终端(cmd) / 新建终端(PowerShell)」", async () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
     const items = wrapper.findAll(".ctx-menu-item");
     expect(
       items.map((i) => i.text().trim()),
-    ).toEqual(["新建会话", "新建终端"]);
+    ).toEqual(["新建会话", "新建终端(cmd)", "新建终端(PowerShell)"]);
     wrapper.unmount();
   });
 
-  it("无工作区时点击「新建终端」：仍调用 terminal_spawn 并传入空工作目录", async () => {
+  it("无工作区时点击「新建终端(cmd)」：仍调用 terminal_spawn 并传入空工作目录与 shell", async () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
     await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
@@ -395,6 +399,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     );
     expect(spawn).toBeTruthy();
     expect((spawn![1] as { workspace?: string }).workspace).toBe("");
+    expect((spawn![1] as { shell?: string }).shell).toBe("cmd");
     wrapper.unmount();
   });
 
@@ -406,7 +411,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("点击「新建终端」：以活动标签工作区启动终端", async () => {
+  it("点击「新建终端(cmd)」：以活动标签工作区启动终端并携带 shell=cmd", async () => {
     tabs[0].workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "terminal_spawn") return Promise.resolve({});
@@ -422,6 +427,26 @@ describe("EditorPane 左侧多标签编辑区", () => {
     );
     expect(spawn).toBeTruthy();
     expect((spawn![1] as { workspace?: string }).workspace).toBe("D:/repo");
+    expect((spawn![1] as { shell?: string }).shell).toBe("cmd");
+    wrapper.unmount();
+  });
+
+  it("点击「新建终端(PowerShell)」：携带 shell=powershell", async () => {
+    tabs[0].workspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_resize") return Promise.resolve(undefined);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[2].trigger("click");
+    await settle();
+    const spawn = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "terminal_spawn",
+    );
+    expect(spawn).toBeTruthy();
+    expect((spawn![1] as { shell?: string }).shell).toBe("powershell");
     wrapper.unmount();
   });
 

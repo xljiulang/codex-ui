@@ -13,7 +13,7 @@ import { assetUrl } from "../../lib/asset";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import { docxToHtml, jsonToDocx } from "../../lib/docx";
-import type { DiffRow } from "../../lib/types";
+import type { DiffRow, TerminalShell } from "../../lib/types";
 import {
   attachTerminal,
   ensureTerminalListeners,
@@ -255,19 +255,22 @@ export async function openCommitFileDiffTab(
 /**
  * 打开终端标签：每次调用都新建独立会话（支持同目录多开），生成唯一 id、
  * 激活标签后向后端发起 terminal_spawn；失败保留标签并记录错误。
+ * @param shell 显式 Shell（cmd/powershell）：按所选 Shell 启动并写入标题；
+ *              缺省沿用设置 terminal_shell（「+」菜单之外的入口保持原逻辑）。
  */
-export async function openTerminalTab(workspace: string): Promise<void> {
+export async function openTerminalTab(
+  workspace: string,
+  shell?: TerminalShell,
+): Promise<void> {
   const id = `terminal:${++terminalSeq}:${Date.now()}`;
+  const resolvedShell = shell ?? store.settings.terminal_shell;
   const tab = reactive({
     kind: TabKind.Terminal,
     id,
     workspace,
-    // 终端标签标题跟随所选 Shell（与后端 spawn 读取同一份设置），多开时同名；
+    // 终端标签标题跟随所选 Shell（显式 shell 或设置默认），多开时同名；
     // 格式为「终端 (cmd) / 终端 (PowerShell)」，用户可右键「重命名」覆盖
-    title:
-      store.settings.terminal_shell === "powershell"
-        ? "终端 (PowerShell)"
-        : "终端 (cmd)",
+    title: resolvedShell === "powershell" ? "终端 (PowerShell)" : "终端 (cmd)",
     icon: TabIcon.Terminal,
     loading: true,
     error: "",
@@ -282,7 +285,9 @@ export async function openTerminalTab(workspace: string): Promise<void> {
     // 查询）在懒加载面板挂载前丢失导致首个终端空白。
     await ensureTerminalListeners();
     attachTerminal(id);
-    await invoke("terminal_spawn", { id, workspace });
+    const payload: Record<string, unknown> = { id, workspace };
+    if (shell) payload.shell = shell;
+    await invoke("terminal_spawn", payload);
   } catch (e) {
     tab.error = String(e);
   } finally {
