@@ -5,8 +5,6 @@
   padding: var(--space-4) var(--space-6) var(--space-6);
   background: var(--glass-bg);
   background-image: var(--surface-grad);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   box-shadow: var(--footer-shadow);
   position: relative;
   /* 底部工具条 + 卡片边框（编辑器为 border-box，内边距已含在自身高度内） */

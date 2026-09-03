@@ -617,7 +617,10 @@ pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
 #[tauri::command]
 pub fn settings_set(app: AppHandle, settings: AppSettings) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    settings::save(&dir, &settings)
+    settings::save(&dir, &settings)?;
+    // 毛玻璃特效/主题变化即时反映到主窗口（仅 Windows 生效，失败不阻断保存）
+    crate::window_glass::apply(&app, &settings);
+    Ok(())
 }
 
 /// 读取模型配置（CODEX_HOME/config.toml 与 model_catalog_json 目标文件），

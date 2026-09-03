@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { PERMISSION_MODES } from "../../lib/permissions";
 import type { AppSettings, ServerStatus } from "../../lib/types";
-import { applyTheme } from "../useTheme";
+import { applyGlassEffect, applyTheme } from "../useTheme";
 import { activeSessionTab, sessionTabTitle } from "./sessionState";
 import { store } from "./store";
 import {
@@ -59,6 +59,7 @@ export async function loadSettings() {
   const tab = activeSessionTab();
   if (tab) tab.permissionMode = store.settings.default_permission;
   applyTheme(store.settings.theme);
+  applyGlassEffect(store.settings.glass_effect);
 }
 
 
@@ -66,6 +67,7 @@ export async function saveSettings(patch: Partial<AppSettings>) {
   store.settings = { ...store.settings, ...patch };
   await invoke("settings_set", { settings: store.settings });
   applyTheme(store.settings.theme);
+  applyGlassEffect(store.settings.glass_effect);
 }
 
 

@@ -1,4 +1,5 @@
 pub mod codex;
+pub(crate) mod window_glass;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,7 +97,15 @@ pub fn run() {
                 && !MAIN_WINDOW_SHOWN.swap(true, Ordering::SeqCst)
                 && !USER_HIDDEN_TO_TRAY.load(Ordering::SeqCst)
             {
-                let _ = webview.window().show();
+                let window = webview.window();
+                // Tauri v2 Windows 透明窗口激活：创建后先把尺寸归零再还原，
+                // 否则 WebView 透明可能不生效（页面看起来仍是不透明背景）。
+                let size = window.inner_size().ok();
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(0, 0)));
+                if let Some(size) = size {
+                    let _ = window.set_size(tauri::Size::Physical(size));
+                }
+                let _ = window.show();
             }
         })
         .register_asynchronous_uri_scheme_protocol("print-export", |ctx, request, responder| {
@@ -256,15 +265,14 @@ pub fn run() {
             // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
             codex::git::probe_git_at_startup();
 
-            // 先读取已保存主题，再以对应背景色创建主窗口：
-            // 窗口从创建那一刻起颜色即与主题一致，避免首帧错色/闪色（缺省按 blue）。
+            // 读取已保存设置：主题决定 Mica 深浅/回退着色，毛玻璃特效决定是否
+            // 应用系统背景。窗口常驻透明，启动期由「页面加载完成后再显示」避免
+            // 空窗透明/错色（缺省按 blue + 毛玻璃开启）。
             let app_dir = app.path().app_data_dir().ok();
-            let theme = app_dir
+            let loaded = app_dir
                 .as_deref()
                 .map(codex::settings::load)
-                .unwrap_or_default()
-                .theme;
-            let (r, g, b, a) = codex::settings::theme_background_rgba(&theme);
+                .unwrap_or_default();
             let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
                 .inner_size(1280.0, 800.0)
@@ -274,9 +282,14 @@ pub fn run() {
                 // 改由前端 AppHeader 标题栏提供拖动与窗口控制（关闭仍走下方
                 // on_window_event 的“关闭→隐藏到系统托盘”逻辑）。
                 .decorations(false)
+                // 毛玻璃特效：窗口透明以便露出 Windows Mica/Acrylic；关闭开关时
+                // 由前端纯色根背景兜底，视觉等同关闭（透明会失去系统阴影）。
+                .transparent(true)
+                // 无边框透明窗口与默认阴影冲突：禁用后透明才真正生效
+                .shadow(false)
                 .center()
                 .visible(false)
-                .background_color(Color(r, g, b, a))
+                .background_color(Color(0, 0, 0, 0))
                 .build()
                 .map_err(|e| {
                     eprintln!("创建主窗口失败: {e}");
@@ -341,6 +354,13 @@ pub fn run() {
 
             // 拦截主窗口 F1-F12 的 WebView2 默认行为（F5 刷新等）
             disable_main_window_function_keys(app.handle());
+
+            // 启动即按保存设置应用毛玻璃（Mica，非 Win11 回退 Acrylic）
+            window_glass::apply(app.handle(), &loaded);
+
+            // Windows 11 原生圆角：保留无阴影透明的同时由 DWM 裁剪四角
+            #[cfg(windows)]
+            window_glass::apply_round_corners(&main_window);
 
             // 兜底：页面加载失败/卡死时，窗口也能在 5 秒后出现（对已显示窗口是空操作）
             let fallback_handle = app.handle().clone();

@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyTheme, loadTheme, normalizeTheme, previewTheme } from "../useTheme";
+import {
+  applyGlassEffect,
+  applyTheme,
+  loadTheme,
+  normalizeTheme,
+  previewTheme,
+} from "../useTheme";
 
 const { storage } = vi.hoisted(() => ({
   storage: new Map<string, string>(),
@@ -59,5 +65,12 @@ describe("useTheme 主题管理", () => {
     expect(previewTheme("light")).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(localStorage.getItem("codex-ui-theme")).toBe("blue");
+  });
+
+  it("applyGlassEffect 写入根节点 data-glass", () => {
+    applyGlassEffect(true);
+    expect(document.documentElement.dataset.glass).toBe("on");
+    applyGlassEffect(false);
+    expect(document.documentElement.dataset.glass).toBe("off");
   });
 });

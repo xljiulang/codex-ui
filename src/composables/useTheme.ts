@@ -49,3 +49,8 @@ export function previewTheme(theme: string | null | undefined): ThemeId {
   document.documentElement.dataset.theme = id;
   return id;
 }
+
+/** 应用毛玻璃特效开关：写入根节点 data-glass（CSS 据此切换透明根背景） */
+export function applyGlassEffect(enabled: boolean) {
+  document.documentElement.dataset.glass = enabled ? "on" : "off";
+}

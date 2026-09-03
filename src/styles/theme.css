@@ -46,7 +46,6 @@
   /* 文档类预览底色恒为白（PDF/XLSX/二维码等真实文档表面） */
   --doc-bg: #ffffff;
   /* 玻璃模糊强度：浅色主题下饱和度降为 1.1（见 light 主题覆盖） */
-  --glass-blur: blur(18px) saturate(1.4);
   /* 动效时长 */
   --ease: 0.15s ease;
   --ease-slow: 0.2s ease;
@@ -68,6 +67,14 @@
 
   /* 基础画布：蓝黑深色，比纯黑更有层次 */
   --bg: #0e1116;
+  /* 毛玻璃特效下的应用底色（本体色 + 0.55 alpha，露出 Windows Mica/Acrylic） */
+  --app-glass-tint: rgba(14, 17, 22, 0.55);
+  /* 头部/标签栏/输入区外层：更透的 tint 增强玻璃感 */
+  --app-header-tint: rgba(14, 17, 22, 0.35);
+  /* 输入卡片：比头部稍实一档，保证输入文字对比 */
+  --app-composer-tint: rgba(14, 17, 22, 0.45);
+  /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
+  --app-content-tint: rgba(14, 17, 22, 0.62);
   --bg-panel: #151a21;
   --bg-input: #1b212a;
   --bg-hover: #1e2530;
@@ -191,9 +198,8 @@
   --glass-bg: rgba(38, 48, 61, 0.68);
   --glass-border: rgba(151, 167, 190, 0.18);
   /* 内容承载型浮动层：近不透明，保证菜单文字清晰可读 */
-  --float-bg: rgba(23, 29, 38, 0.94);
-  /* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96，去玻璃模糊 */
-  --composer-menu-bg: rgba(23, 29, 38, 0.96);
+  --float-bg: rgba(23, 29, 38, 0.85);
+  --float-bg-solid: #171d26;
   /* 表面与主按钮渐变/辉光 */
   --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.028),
     rgba(255, 255, 255, 0) 42%);
@@ -214,6 +220,14 @@
   color-scheme: dark;
 
   --bg: #0a0b10;
+  /* 毛玻璃特效下的应用底色（本体色 + 0.55 alpha，露出 Windows Mica/Acrylic） */
+  --app-glass-tint: rgba(10, 11, 16, 0.55);
+  /* 头部/标签栏/输入区外层：更透的 tint 增强玻璃感 */
+  --app-header-tint: rgba(10, 11, 16, 0.35);
+  /* 输入卡片：比头部稍实一档，保证输入文字对比 */
+  --app-composer-tint: rgba(10, 11, 16, 0.45);
+  /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
+  --app-content-tint: rgba(10, 11, 16, 0.62);
   --bg-panel: #12131a;
   --bg-input: #181a23;
   --bg-hover: #1d1f2b;
@@ -330,9 +344,8 @@
   --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.32), 0 14px 36px rgba(0, 0, 0, 0.22);
   --glass-bg: rgba(32, 33, 46, 0.7);
   --glass-border: rgba(173, 168, 212, 0.18);
-  --float-bg: rgba(19, 20, 28, 0.95);
-  /* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96，去玻璃模糊 */
-  --composer-menu-bg: rgba(19, 20, 28, 0.96);
+  --float-bg: rgba(19, 20, 28, 0.85);
+  --float-bg-solid: #13141c;
   --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.03),
     rgba(255, 255, 255, 0) 42%);
   --btn-primary-grad: var(--send-btn-grad);
@@ -351,6 +364,14 @@
   color-scheme: light;
 
   --bg: #f4f6fb;
+  /* 毛玻璃特效下的应用底色（本体色 + 0.72 alpha，浅色透感更弱保证可读） */
+  --app-glass-tint: rgba(244, 246, 251, 0.45);
+  /* 头部/标签栏/输入区外层：更透的 tint 增强玻璃感 */
+  --app-header-tint: rgba(244, 246, 251, 0.40);
+  /* 输入卡片：比头部稍实一档，保证输入文字对比 */
+  --app-composer-tint: rgba(244, 246, 251, 0.50);
+  /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
+  --app-content-tint: rgba(244, 246, 251, 0.65);
   --bg-panel: #ffffff;
   --bg-input: #ffffff;
   --bg-hover: #e9edf4;
@@ -469,10 +490,8 @@
   --doc-shadow: 0 2px 8px rgba(30, 40, 60, 0.12), 0 14px 32px rgba(30, 40, 60, 0.1);
   --glass-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(60, 76, 101, 0.16);
-  --float-bg: rgba(255, 255, 255, 0.96);
-  /* 输入框弹出菜单（权限/协作/模型/@$）：统一 0.96，去玻璃模糊 */
-  --composer-menu-bg: rgba(255, 255, 255, 0.96);
-  --glass-blur: blur(18px) saturate(1.1);
+  --float-bg: rgba(255, 255, 255, 0.88);
+  --float-bg-solid: #ffffff;
   --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.7),
     rgba(255, 255, 255, 0) 40%);
   --btn-primary-grad: var(--send-btn-grad);
@@ -612,4 +631,212 @@ select option {
      composer 与所有弹出菜单（权限/任务/模型/@/$），菜单可看但点不动、无 hover。
      内容层高于 .app-ambient 靠 position:relative + DOM 顺序即可，无需 stacking context。 */
   z-index: auto;
+}
+
+/* 毛玻璃特效（根节点 data-glass 由「设置 → 个性化 → 毛玻璃特效」开关写入）：
+   Windows Mica/Acrylic 需要根背景透明；关闭（off/未设置）时沿用上方不透明 body。
+   文字承载面（消息/输入框/卡片/编辑器/弹层）仍为近不透明，仅布局层透出系统模糊。 */
+html[data-glass="on"] body {
+  background: transparent;
+}
+
+html[data-glass="on"] .app {
+  background: var(--app-glass-tint);
+}
+
+/* 氛围光在玻璃态弱化，避免与系统模糊叠出杂色 */
+html[data-glass="on"] .app-ambient {
+  opacity: 0.45;
+}
+
+/* 主编辑器区与设置页整层透明：让窗口底色（Mica + tint）透出 */
+html[data-glass="on"] .editor-pane,
+html[data-glass="on"] .settings-page {
+  background: transparent;
+}
+
+/* 容器层玻璃化：只覆盖背景色、保留表面渐变；
+   头部与输入区外层用更透 tint，输入卡片稍实一档保输入可读；
+   文字承载卡片仍为近不透明 */
+html[data-glass="on"] .right-panel {
+  background-color: var(--app-glass-tint);
+}
+
+html[data-glass="on"] .app-header,
+html[data-glass="on"] .editor-tabs-bar,
+html[data-glass="on"] .composer {
+  background-color: var(--app-header-tint);
+}
+
+html[data-glass="on"] .composer-card {
+  background-color: var(--app-composer-tint);
+}
+
+/* 关键修复：头部/标签栏/输入区自带 blur(18px) 会在系统 Acrylic 之上二次模糊，
+   把背景压成均匀深色（看起来“不透明”）。玻璃态下去掉这层自身模糊，
+   让窗口层 Acrylic 直接透出 */
+html[data-glass="on"] .app-header,
+html[data-glass="on"] .editor-tabs-bar,
+html[data-glass="on"] .composer {
+  background-color: var(--app-header-tint);
+}
+
+/* tab 头玻璃化：激活编辑标签与右侧面板页签条（原为不透明实底） */
+html[data-glass="on"] .editor-tab.active,
+html[data-glass="on"] .panel-tabs {
+  background-color: var(--app-header-tint);
+}
+
+/* 文本输入/编辑面玻璃化：普通输入框/富文本/代码编辑器与容器同用半透明 tint
+   （关闭毛玻璃时保持原实色不变） */
+html[data-glass="on"] input,
+html[data-glass="on"] textarea {
+  background-color: var(--app-composer-tint);
+}
+
+/* 文本/代码编辑器（含文件编辑 tab 的 CodeMirror）玻璃化 */
+html[data-glass="on"] .cm-editor {
+  background-color: var(--app-content-tint) !important;
+}
+
+/* 主窗内嵌文件编辑器整层透明：露出 CodeMirror 的内容档 tint（独立窗口不受影响） */
+html[data-glass="on"] .text-editor-window.text-editor-embedded {
+  background-color: transparent !important;
+}
+
+/* 终端 xterm 玻璃化（覆盖 JS 同步注入的不透明 --bg 底色） */
+html[data-glass="on"] .terminal-pane .xterm,
+html[data-glass="on"] .terminal-pane .xterm-viewport {
+  background-color: var(--app-content-tint) !important;
+}
+
+/* 工具调用面板内部（命令/输出/JSON）玻璃化，代码文字保持原 console 色 */
+html[data-glass="on"] .tool-command,
+html[data-glass="on"] .tool-output,
+html[data-glass="on"] .tool-json {
+  background-color: var(--app-content-tint) !important;
+}
+
+/* 小控件/小面板玻璃化扫尾：搜索容器、Git 分支 chip、状态徽标、列表空态卡 */
+html[data-glass="on"] .panel-search-group,
+html[data-glass="on"] .git-branch,
+html[data-glass="on"] .wechat-state-badge,
+html[data-glass="on"] .resource-empty {
+  background-color: var(--app-composer-tint);
+}
+
+/* 内容承载面（终端/编辑器/预览/助手与计划卡）玻璃化：比控件略实，保证文字可读 */
+html[data-glass="on"] .terminal-pane,
+html[data-glass="on"] .preview-pane,
+html[data-glass="on"] .assistant-card,
+html[data-glass="on"] .text-editor-head,
+html[data-glass="on"] .diff-window-head,
+html[data-glass="on"] .preview-head {
+  background-color: var(--app-content-tint) !important;
+}
+
+/* 设置/插件/终端等控件的输入与选择面玻璃化（覆盖更具体的后续样式） */
+html[data-glass="on"] .setting-row input[type="text"],
+html[data-glass="on"] .setting-row input[type="password"],
+html[data-glass="on"] select,
+html[data-glass="on"] .plugin-market-add input,
+html[data-glass="on"] .mcp-env-row input,
+html[data-glass="on"] .switch .switch-track {
+  background-color: var(--app-composer-tint) !important;
+}
+
+/* 高亮芯片/徽标在玻璃态用半透明 accent，融入玻璃又不失强调 */
+html[data-glass="on"] .perm-chip,
+html[data-glass="on"] .collab-chip,
+html[data-glass="on"] .model-chip,
+html[data-glass="on"] .ctx-window,
+html[data-glass="on"] .goal-chip,
+html[data-glass="on"] .token-usage-chip,
+html[data-glass="on"] .tab-badge,
+html[data-glass="on"] .badge {
+  background-color: rgba(var(--accent-rgb), 0.42) !important;
+  border-color: rgba(var(--accent-rgb), 0.30) !important;
+}
+
+/* 勾选/单选在玻璃态弱化实色 accent（更融入背景） */
+html[data-glass="on"] .checkbox-row input[type="checkbox"],
+html[data-glass="on"] .model-provider-radio input[type="radio"],
+html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
+  accent-color: rgba(var(--accent-rgb), 0.6);
+}
+
+/* 关闭毛玻璃：所有弹层/浮层（沿用 --float-bg 的元素）完全不透明 */
+:root:not([data-glass="on"]) {
+  --float-bg: var(--float-bg-solid);
+}
+
+/* 毛玻璃全局收尾：把背景类变量统一指向半透 tint，任何引用它们的表面
+   （欢迎/工具/设置卡、资源/Git/会话行、代码与终端块、hover/active 交互态）
+   都自动玻璃化；文字/边框/accent/console 前景与弹层（--float-bg）不受影响。 */
+html[data-glass="on"]:root {
+  --bg: var(--app-content-tint);
+  --bg-panel: var(--app-content-tint);
+  --bg-input: var(--app-composer-tint);
+  --bg-hover: var(--app-composer-tint);
+  --bg-active: var(--app-content-tint);
+  --code-bg: var(--app-content-tint);
+  --console-bg: var(--app-content-tint);
+  --console-bg-deep: var(--app-content-tint);
+  --diff-head-bg: var(--app-content-tint);
+  --tool-card-bg: var(--app-content-tint);
+  --composer-bg: var(--app-composer-tint);
+}
+
+/* docx 富文本纸张是“真实纸面”，保持恒白不玻璃化（PDF 预览页同理由图片/white 表面维持） */
+html[data-glass="on"] .docx-editor-host .tiptap {
+  background-color: var(--doc-bg) !important;
+}
+
+/* 模态对话框（添加 MCP/模型提供方等）毛玻璃态用内容档 tint，关闭时仍走 --float-bg 全实 */
+html[data-glass="on"] .modal {
+  background-color: var(--app-content-tint) !important;
+}
+
+/* 勾选框/单选框毛玻璃外观（仅毛玻璃态；关闭时恢复原生 accent 控件） */
+html[data-glass="on"] .checkbox-row input[type="checkbox"],
+html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  background-color: var(--app-composer-tint);
+  cursor: pointer;
+  position: relative;
+}
+
+html[data-glass="on"] .checkbox-row input[type="checkbox"]:checked,
+html[data-glass="on"] .mcp-omit-option input[type="checkbox"]:checked {
+  background-color: rgba(var(--accent-rgb), 0.55);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+html[data-glass="on"] .model-provider-radio input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--accent-rgb), 0.5);
+  background-color: var(--app-composer-tint);
+  cursor: pointer;
+}
+
+html[data-glass="on"] .model-provider-radio input[type="radio"]:checked {
+  background: radial-gradient(
+    circle,
+    rgba(var(--accent-rgb), 0.9) 0 5px,
+    var(--app-composer-tint) 6px
+  );
 }

@@ -22,6 +22,9 @@ pub struct AppSettings {
     /// 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空 = 全部启用
     #[serde(default)]
     pub dynamic_tools_disabled: Vec<String>,
+    /// 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启
+    #[serde(default = "default_glass_effect")]
+    pub glass_effect: bool,
 }
 
 fn default_permission() -> String {
@@ -33,6 +36,10 @@ fn default_terminal_shell() -> String {
 }
 
 fn default_open_welcome() -> bool {
+    true
+}
+
+fn default_glass_effect() -> bool {
     true
 }
 
@@ -48,6 +55,7 @@ impl Default for AppSettings {
             terminal_shell: default_terminal_shell(),
             open_welcome_on_startup: default_open_welcome(),
             dynamic_tools_disabled: Vec::new(),
+            glass_effect: default_glass_effect(),
         }
     }
 }
@@ -87,6 +95,18 @@ pub fn theme_background_rgba(theme: &str) -> (u8, u8, u8, u8) {
         "light" => (0xf4, 0xf6, 0xfb, 0xff),
         _ => (0x0e, 0x11, 0x16, 0xff),
     }
+}
+
+/// 毛玻璃深色档：light 主题用浅色 Mica，其余（blue/dark）用深色，与应用主题一致
+pub fn glass_theme_dark(theme: &str) -> bool {
+    theme != "light"
+}
+
+/// 毛玻璃回退着色基色（Acrylic tint），与主题背景一致：
+/// dark→曜黑、light→晨光、其它含缺省→蓝夜
+pub fn glass_tint_rgb(theme: &str) -> (u8, u8, u8) {
+    let (r, g, b, _) = theme_background_rgba(theme);
+    (r, g, b)
 }
 
 #[cfg(test)]
@@ -179,5 +199,41 @@ mod tests {
     fn theme_background_falls_back_for_unknown_theme() {
         assert_eq!(theme_background_rgba(""), (0x0e, 0x11, 0x16, 0xff));
         assert_eq!(theme_background_rgba("neon"), (0x0e, 0x11, 0x16, 0xff));
+    }
+
+    #[test]
+    fn glass_effect_defaults_true_and_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        // 旧 settings.json 缺失 glass_effect：应回退默认 true（毛玻璃开启）
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        assert!(load(dir.path()).glass_effect);
+
+        // 显式关闭与开启均可往返一致
+        let s = AppSettings {
+            glass_effect: false,
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        assert!(!load(dir.path()).glass_effect);
+
+        let s = AppSettings::default();
+        save(dir.path(), &s).unwrap();
+        assert!(load(dir.path()).glass_effect);
+    }
+
+    #[test]
+    fn glass_helpers_follow_theme() {
+        assert!(glass_theme_dark("blue"));
+        assert!(glass_theme_dark("dark"));
+        assert!(!glass_theme_dark("light"));
+        assert_eq!(glass_tint_rgb("blue"), (0x0e, 0x11, 0x16));
+        assert_eq!(glass_tint_rgb("dark"), (0x0a, 0x0b, 0x10));
+        assert_eq!(glass_tint_rgb("light"), (0xf4, 0xf6, 0xfb));
+        assert_eq!(glass_tint_rgb(""), (0x0e, 0x11, 0x16));
     }
 }

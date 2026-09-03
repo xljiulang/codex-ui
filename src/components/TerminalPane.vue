@@ -75,16 +75,20 @@ interface TerminalTheme {
   brightWhite: string;
 }
 
-/** 从当前主题 CSS 变量读取 xterm 完整配色：背景用 tab 内容区底色 --bg（不透明），
- * 其余用 console 配色（变量缺失时回退到蓝夜默认值）。--bg 为不透明色，避免半透明
- * 双层合成导致内容区与四周 padding 的色差。 */
+/** 从当前主题 CSS 变量读取 xterm 完整配色：背景在毛玻璃开启时用全透明
+ * （#00000000 + allowTransparency，由 .terminal-pane .xterm 的 tint 呈现玻璃），
+ * 关闭时用 tab 内容区底色 --bg（不透明，避免半透明双层合成色差）；
+ * 其余用 console 配色（变量缺失回退蓝夜默认值）。 */
 function readTerminalTheme(): TerminalTheme {
   const cs = getComputedStyle(document.documentElement);
   const accentRgb = cs.getPropertyValue("--accent-rgb").trim();
   const v = (name: string, fallback: string) =>
     cs.getPropertyValue(name).trim() || fallback;
+  const glassOn = document.documentElement.dataset.glass === "on";
   return {
-    background: v("--bg", "#0e1116"),
+    background: glassOn
+      ? "#00000000"
+      : v("--bg", "#0e1116"),
     foreground: v("--console-text", "#d4dce8"),
     cursor: v("--accent", "#4f8cc9"),
     cursorAccent: v("--console-cursor-text", "#0c1016"),
@@ -265,12 +269,12 @@ onMounted(() => {
     resizeObserver.observe(host);
   }
 
-  // 主题切换（设置应用与预览都改 <html data-theme>）时同步 xterm 配色
+  // 主题/毛玻璃切换（<html data-theme / data-glass>）时同步 xterm 配色
   if (typeof MutationObserver !== "undefined") {
     themeObserver = new MutationObserver(applyThemeToTerminal);
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme"],
+      attributeFilter: ["data-theme", "data-glass"],
     });
   }
 

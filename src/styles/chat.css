@@ -158,8 +158,6 @@
   overflow: hidden;
   padding: 0;
   background: var(--float-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -263,8 +261,6 @@
   overflow-y: auto;
   padding: var(--space-3);
   background: var(--float-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -448,9 +444,7 @@
   z-index: 100;
   max-width: 320px;
   padding: var(--space-3) var(--space-4);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--float-bg);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);

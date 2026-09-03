@@ -2182,6 +2182,36 @@ describe("SettingsView 启动打开介绍标签页开关", () => {
   });
 });
 
+describe("SettingsView 毛玻璃特效开关", () => {
+  beforeEach(() => {
+    __resetTabsForTest();
+    store.settings.glass_effect = true;
+    store.toast = "";
+    mockedSave.mockReset();
+    mockedSave.mockResolvedValue(undefined);
+  });
+
+  it("个性化区首开关渲染为「毛玻璃特效」且默认勾选", () => {
+    const wrapper = mount(SettingsView);
+    const input = wrapper.find("#glass").element as HTMLInputElement;
+    expect(input.checked).toBe(true);
+    expect(wrapper.find('label[for="glass"]').text()).toBe("毛玻璃特效");
+    // 位于个性化区第一个开关位（在「启动时打开欢迎标签」之前）
+    const checkboxes = wrapper.findAll(".settings-section-personalization .setting-row.checkbox-row input");
+    expect(checkboxes[0]?.attributes("id")).toBe("glass");
+    expect(checkboxes[1]?.attributes("id")).toBe("welcome");
+  });
+
+  it("取消勾选后即时保存 glass_effect=false", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find("#glass").setValue(false);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({
+      glass_effect: false,
+    });
+  });
+});
+
 describe("SettingsView 主题保存后生效", () => {
   beforeEach(() => {
     __resetTabsForTest();

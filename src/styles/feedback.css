@@ -71,9 +71,7 @@
   bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--float-bg);
   color: var(--text-bright);
   border: 1px solid var(--glass-border);
   border-radius: 999px;
@@ -104,8 +102,6 @@
   z-index: 300;
   min-width: 140px;
   background: var(--float-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
@@ -160,9 +156,7 @@
   font-size: var(--font-sm);
   line-height: 1.5;
   color: var(--text-bright);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--float-bg);
   border: 1px solid var(--glass-border);
   box-shadow: var(--shadow-md);
   pointer-events: none;

@@ -177,6 +177,8 @@ export interface AppSettings {
   open_welcome_on_startup: boolean;
   /** 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空数组 = 全部启用 */
   dynamic_tools_disabled: string[];
+  /** 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启 */
+  glass_effect: boolean;
 }
 
 /** 会话↔微信账号绑定信息（wechat_state 快照的 bindings 数组项） */

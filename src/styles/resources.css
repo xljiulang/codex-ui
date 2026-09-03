@@ -186,9 +186,7 @@ body.resource-dragging .resource-row {
   gap: var(--space-2);
   padding: var(--space-1) var(--space-4);
   border-radius: var(--radius);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--float-bg);
   border: 1px solid rgba(var(--accent-rgb), 0.45);
   box-shadow: var(--shadow-lg), var(--inset-shadow);
   color: var(--text);

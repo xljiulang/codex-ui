@@ -13,6 +13,7 @@ export const defaultSettings = (): AppSettings => ({
   terminal_shell: "cmd",
   open_welcome_on_startup: true,
   dynamic_tools_disabled: [],
+  glass_effect: true,
 });
 
 

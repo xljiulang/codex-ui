@@ -754,16 +754,12 @@
   align-items: center;
   justify-content: center;
   background: var(--overlay-dim);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
   z-index: 100;
 }
 .text-editor-confirm {
   width: min(420px, calc(100vw - 48px));
-  background: var(--glass-bg);
+  background: var(--float-bg);
   background-image: var(--surface-grad);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg), var(--inset-shadow);

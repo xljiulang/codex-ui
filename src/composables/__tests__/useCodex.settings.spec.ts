@@ -5,7 +5,7 @@ import { activeTabId } from "../useEditorTabs";
 import { makeSessionTab, PLUGINS_RESPONSE, SKILLS_RESPONSE, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -340,5 +340,47 @@ describe("loadSettings 启动打开介绍标签页", () => {
     await loadSettings();
 
     expect(store.settings.open_welcome_on_startup).toBe(true);
+  });
+});
+
+describe("loadSettings 毛玻璃特效", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    delete document.documentElement.dataset.glass;
+  });
+
+  afterEach(() => {
+    delete document.documentElement.dataset.glass;
+  });
+
+  it("持久化值缺失时回退默认 true 并写入 data-glass=on", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+    });
+
+    await loadSettings();
+
+    expect(store.settings.glass_effect).toBe(true);
+    expect(document.documentElement.dataset.glass).toBe("on");
+  });
+
+  it("持久化 glass_effect=false 时加载并写入 data-glass=off", async () => {
+    mockedInvoke.mockResolvedValue({
+      codex_path: null,
+      sound_enabled: true,
+      enter_to_send: true,
+      followup_mode: "adjust",
+      theme: "blue",
+      glass_effect: false,
+    });
+
+    await loadSettings();
+
+    expect(store.settings.glass_effect).toBe(false);
+    expect(document.documentElement.dataset.glass).toBe("off");
   });
 });
