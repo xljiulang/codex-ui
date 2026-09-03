@@ -1210,6 +1210,84 @@ describe("ComposerBar 手动压缩上下文", () => {
   });
 });
 
+describe("ComposerBar 会话 token 用量芯片", () => {
+  let wrapper: VueWrapper | null = null;
+  let tab: SessionTab;
+
+  beforeEach(() => {
+    __resetSessionTabsForTest();
+    tab = defaultTab();
+    tab.threadId = "t1";
+    mockedInvoke.mockReset();
+    mockedSendPrompt.mockReset();
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+  });
+
+  it("输入/输出都有时在上下文窗口左侧渲染，缺失或缺一则不渲染", async () => {
+    tab.threadTokenUsage = {
+      used: 5000,
+      window: 10000,
+      input: 12000,
+      output: 34000,
+    };
+    wrapper = mount(ComposerBar, { props: { tab } });
+    await wrapper.vm.$nextTick();
+
+    const token = wrapper.find(".token-usage-chip");
+    expect(token.exists()).toBe(true);
+    expect(token.findAll(".token-usage-part svg")).toHaveLength(2);
+    expect(token.findAll(".token-usage-part").map((x) => x.text())).toEqual([
+      "12K",
+      "34K",
+    ]);
+    expect(token.text()).toContain("12K");
+    expect(token.text()).toContain("34K");
+
+    // 位于上下文窗口按钮左侧
+    const right = wrapper.find(".composer-right").element;
+    const tokenEl = right.querySelector(".token-usage-chip");
+    const ctxEl = right.querySelector(".ctx-window");
+    expect(tokenEl).toBeTruthy();
+    expect(ctxEl).toBeTruthy();
+    expect([...right.children].indexOf(tokenEl!)).toBeLessThan(
+      [...right.children].indexOf(ctxEl!),
+    );
+
+    // 缺 input/output 任一即隐藏
+    tab.threadTokenUsage = { used: 5000, window: 10000 };
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".token-usage-chip").exists()).toBe(false);
+  });
+
+  it("纯信息展示：非 button，双击不触发压缩", async () => {
+    tab.threadTokenUsage = {
+      used: 5000,
+      window: 10000,
+      input: 12000,
+      output: 34000,
+    };
+    wrapper = mount(ComposerBar, { props: { tab } });
+    await wrapper.vm.$nextTick();
+
+    const token = wrapper.find(".token-usage-chip");
+    expect(token.element.tagName).toBe("SPAN");
+    expect(token.attributes("aria-label")).toContain("输入");
+    expect(token.attributes("aria-label")).toContain("输出");
+
+    await token.trigger("dblclick");
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "codex_rpc",
+      expect.objectContaining({ method: "thread/compact/start" }),
+    );
+    expect(store.toast).not.toContain("已开始压缩上下文");
+  });
+});
+
 describe("ComposerBar 任务目标芯片", () => {
   let wrapper: VueWrapper | null = null;
   let tab: SessionTab;

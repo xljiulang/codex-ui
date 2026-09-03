@@ -151,7 +151,8 @@ body.resizing-composer {
 .task-chip,
 .model-chip,
 .ctx-window,
-.goal-chip {
+.goal-chip,
+.token-usage-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -164,7 +165,8 @@ body.resizing-composer {
 .perm-chip,
 .task-chip,
 .model-chip,
-.ctx-window {
+.ctx-window,
+.token-usage-chip {
   padding: 0 11px;
   font-size: var(--font-sm);
   font-weight: 600;
@@ -182,6 +184,30 @@ body.resizing-composer {
 }
 
 .perm-chip svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+/* token 用量芯片：纯信息展示，无悬停/点击态 */
+.token-usage-chip {
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.token-usage-chip .token-usage-sep {
+  opacity: 0.6;
+}
+
+.token-usage-chip .token-usage-part {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.token-usage-chip svg {
   width: 13px;
   height: 13px;
   fill: currentColor;

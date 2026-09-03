@@ -7,8 +7,6 @@ import MessageItem from "./MessageItem.vue";
 import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
-import { formatTokens } from "../lib/format";
-import { ICON_ARROW_DOWN, ICON_ARROW_UP } from "../lib/icons";
 import { createTurnsBuilder, type Turn } from "../lib/turns";
 
 const scroller = ref<HTMLElement | null>(null);
@@ -20,15 +18,6 @@ const items = computed(() =>
 const interactionItems = computed(() =>
   props.tab.threadId ? (props.tab.interactions ?? []) : store.interactions,
 );
-
-/** 本会话累计输入/输出 token（右上角固定展示）；缺任一不显示 */
-const tokenTotals = computed(() => {
-  const u = props.tab.threadTokenUsage;
-  if (!u || typeof u.input !== "number" || typeof u.output !== "number") {
-    return null;
-  }
-  return { input: u.input, output: u.output };
-});
 
 function formatDay(ts: number): string {
   const d = new Date(ts);
@@ -255,26 +244,6 @@ onBeforeUnmount(() => {
       <div v-if="!stickToBottom" class="scroll-bottom-btn" @click="jumpToBottom()">
         ↓ 回到底部
       </div>
-      <span
-        v-if="tokenTotals"
-        class="chat-token-usage"
-        v-tooltip="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
-        :aria-label="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
-      >
-        <span class="token-usage-part">
-          <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_ARROW_UP" />
-          </svg>
-          {{ formatTokens(tokenTotals.input) }}
-        </span>
-        <span class="token-usage-sep">·</span>
-        <span class="token-usage-part">
-          <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_ARROW_DOWN" />
-          </svg>
-          {{ formatTokens(tokenTotals.output) }}
-        </span>
-      </span>
     </div>
     <ComposerBar :tab="tab" :active="active" />
     <div class="sr-only" aria-live="polite">{{ liveAnnouncement }}</div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -39,7 +39,8 @@ import {
   toUserAttachment,
 } from "../lib/mention";
 import { permissionMode } from "../lib/permissions";
-import { ICON_CHEVRON_DOWN, ICON_MODEL_CUBE } from "../lib/icons";
+import { ICON_ARROW_DOWN, ICON_ARROW_UP, ICON_CHEVRON_DOWN, ICON_MODEL_CUBE } from "../lib/icons";
+import { formatTokens } from "../lib/format";
 import GoalChip from "./GoalChip.vue";
 import {
   Reference,
@@ -469,6 +470,15 @@ function rowAttName(a: UserInput): string {
 // 上下文窗口使用情况与手动压缩
 const { ctxUsage, ctxTooltip, compacting, compactNow } = useContextUsage();
 
+/** 本会话累计输入/输出 token（工具条展示）；缺任一不显示 */
+const tokenTotals = computed(() => {
+  const u = props.tab.threadTokenUsage;
+  if (!u || typeof u.input !== "number" || typeof u.output !== "number") {
+    return null;
+  }
+  return { input: u.input, output: u.output };
+});
+
 function modelChipLabel(): string {
   const name = modelDisplayName(props.tab.model ?? "");
   const effort = effectiveEffort(props.tab);
@@ -560,6 +570,26 @@ function taskModeLabel(): string {
             </div>
           </div>
           <div class="composer-right">
+            <span
+              v-if="tokenTotals"
+              class="token-usage-chip"
+              v-tooltip="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
+              :aria-label="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
+            >
+              <span class="token-usage-part">
+                <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_ARROW_UP" />
+                </svg>
+                {{ formatTokens(tokenTotals.input) }}
+              </span>
+              <span class="token-usage-sep">·</span>
+              <span class="token-usage-part">
+                <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_ARROW_DOWN" />
+                </svg>
+                {{ formatTokens(tokenTotals.output) }}
+              </span>
+            </span>
             <button
               v-if="ctxUsage"
               class="ctx-window"
