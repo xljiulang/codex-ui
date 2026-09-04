@@ -520,7 +520,7 @@ async function saveModelConfig() {
   modelConfigErrors.catalog = "";
   let blocked = false;
   if (!modelConfig.model.trim()) {
-    modelConfigErrors.model = "请填写 model（模型名称）";
+    modelConfigErrors.model = "请填写 model (slug)";
     blocked = true;
   }
   if (modelConfig.providers.length > 0 && !modelConfig.model_provider.trim()) {
@@ -1542,7 +1542,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 :class="{ 'model-config-row-error': modelConfigErrors.model }"
               >
                 <label for="model-config-ui-model">
-                  model（模型名称）
+                  model (slug)
                   <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
                 </label>
                 <ModelConfigModelPicker
@@ -1592,22 +1592,22 @@ function pluginInitial(p: PluginCatalogItem): string {
 
             <div class="model-catalog-block">
               <div class="model-catalog-head">
-                <button
-                  v-if="modelConfig.model_catalog_exists"
-                  type="button"
-                  class="model-config-title-link"
-                  v-tooltip="'在编辑器中打开文件'"
-                  :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
-                  @click="openModelConfigFile"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_FILE" />
-                  </svg>
-                  <span>模型目录（model_catalog_json）</span>
-                </button>
-                <span v-else>模型目录（model_catalog_json）</span>
+                <span>模型目录（model_catalog_json）</span>
               </div>
-              <p class="model-config-path">
+              <button
+                v-if="modelConfig.model_catalog_exists"
+                type="button"
+                class="model-config-path-link"
+                v-tooltip="'在编辑器中打开文件'"
+                :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
+                @click="openModelConfigFile"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_FILE" />
+                </svg>
+                <span>{{ modelConfig.model_catalog_path || "正在读取目录路径…" }}</span>
+              </button>
+              <p v-else class="model-config-path">
                 {{ modelConfig.model_catalog_path || "正在读取目录路径…" }}
               </p>
               <textarea

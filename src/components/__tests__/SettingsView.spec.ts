@@ -325,11 +325,11 @@ describe("SettingsView 模型配置", () => {
       wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 模型目录文件存在时渲染标题链接，AGENTS 也保留标题链接
+    // 模型配置标题本身是纯文本，链接位于下方路径行；AGENTS 标题保留链接
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-title-link")
         .length,
-    ).toBe(1);
+    ).toBe(0);
     expect(
       wrapper.findAll(".settings-section-global-instructions .model-config-title-link")
         .length,
@@ -382,17 +382,17 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("模型配置文件存在时渲染标题链接并在应用内打开", async () => {
+  it("模型配置文件存在时在路径行渲染链接并在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(
-      ".settings-section-model-config .model-config-title-link",
+      ".settings-section-model-config .model-config-path-link",
     );
     expect(links.length).toBe(1);
     expect(links[0].attributes("aria-label")).toBe(
       "在编辑器中打开 C:/apps/codex-ui/.codex/models.json",
     );
-    expect(links[0].text()).toContain("模型目录（model_catalog_json）");
+    expect(links[0].text()).toContain("C:/apps/codex-ui/.codex/models.json");
     await links[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -418,7 +418,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     expect(
-      wrapper.findAll(".settings-section-model-config .model-config-title-link")
+      wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
     ).toBe(0);
     expect(wrapper.find(".model-catalog-head").text()).toContain(
@@ -654,9 +654,9 @@ describe("SettingsView 模型配置", () => {
     expect(
       wrapper.find(".model-catalog-block .model-config-path").text(),
     ).toContain("models.json");
-    // 不渲染 model_catalog_json 标题链接
+    // 文件不存在时不渲染模型目录路径链接
     expect(
-      wrapper.findAll(".settings-section-model-config .model-config-title-link")
+      wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
     ).toBe(0);
   });
@@ -927,7 +927,7 @@ describe("SettingsView 模型配置", () => {
       .find(".model-config-save-btn")!
       .trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("请填写 model");
+    expect(wrapper.text()).toContain("请填写 model (slug)");
     expect(
       mockedInvoke.mock.calls.some(
         ([cmd, args]) =>
