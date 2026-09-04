@@ -186,3 +186,59 @@ describe("useGitFileActions 文件操作", () => {
     expect(mockedInvoke).not.toHaveBeenCalled();
   });
 });
+
+describe("useGitFileActions 分区菜单与分区撤销", () => {
+  const changesStatus: GitStatus = {
+    ...okStatus,
+    files: [
+      { path: "a.txt", status: "modified", staged: false, worktree: true },
+      { path: "b.txt", status: "untracked", staged: false, worktree: true },
+    ],
+  };
+  const stagedStatus: GitStatus = {
+    ...okStatus,
+    files: [
+      { path: "a.txt", status: "modified", staged: true, worktree: false },
+    ],
+  };
+
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    mockedAskConfirm.mockReset();
+  });
+
+  it("openSectionCtx：更改区为暂存/撤消更改，暂存区为取消暂存/撤消更改，空分区不弹", () => {
+    const { gitStatus, captured, actions } = setup();
+    actions.openSectionCtx("changes", mockEvent());
+    expect(captured.length).toBe(0);
+
+    gitStatus.value = changesStatus;
+    actions.openSectionCtx("changes", mockEvent());
+    expect(captured[0].map((i) => i.label)).toEqual(["暂存", "撤消更改"]);
+    expect(captured[0][1].danger).toBe(true);
+
+    gitStatus.value = stagedStatus;
+    actions.openSectionCtx("staged", mockEvent());
+    expect(captured[1].map((i) => i.label)).toEqual(["取消暂存", "撤消更改"]);
+  });
+
+  it("restoreSection：未确认不执行，确认后逐文件调用 restore", async () => {
+    const { gitStatus, actions } = setup();
+    gitStatus.value = changesStatus;
+
+    mockedAskConfirm.mockResolvedValueOnce(false);
+    await actions.restoreSection("changes");
+    expect(mockedInvoke).not.toHaveBeenCalled();
+
+    mockedAskConfirm.mockResolvedValueOnce(true);
+    mockedInvoke.mockResolvedValue(changesStatus);
+    await actions.restoreSection("changes");
+    expect(mockedAskConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "撤消更改", confirmLabel: "撤消更改" }),
+    );
+    const paths = mockedInvoke.mock.calls
+      .filter(([cmd]) => cmd === "git_changes_restore")
+      .map(([, args]) => (args as { path: string }).path);
+    expect(paths).toEqual(["a.txt", "b.txt"]);
+  });
+});

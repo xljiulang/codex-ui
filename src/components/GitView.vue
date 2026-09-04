@@ -45,11 +45,7 @@ import {
   type GitFileNode,
   type GitTreeNode,
 } from "../lib/gitTree";
-import {
-  ICON_ARROW_DOWN,
-  ICON_GIT,
-  ICON_PLUS,
-} from "../lib/icons";
+import { ICON_GIT, ICON_PLUS } from "../lib/icons";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -90,9 +86,6 @@ watch(repoWorkspace, () => {
   else branchBusy.value = false;
 });
 
-const ICON_ARROW_UP =
-  "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
-
 const {
   ctxMenu,
   openCtx,
@@ -104,8 +97,7 @@ const {
   gitActionBusy,
   openFileCtx,
   openDirCtx,
-  stageAll,
-  unstageAll,
+  openSectionCtx,
 } = useGitFileActions({ gitStatus, openCtx, openDiff });
 
 /** 手动折叠的目录集合；未记录 = 默认展开，折叠状态跨刷新保留 */
@@ -445,21 +437,11 @@ function toggleDirRow(node: GitDirNode) {
           label="更改"
           :collapsed="isSectionCollapsed('changes')"
           @toggle="toggleSection('changes')"
+          @contextmenu="openSectionCtx('changes', $event)"
         >
           <span v-if="changeCount > 0" class="git-section-count">{{
             changeCount
           }}</span>
-          <button
-            class="git-icon-btn git-section-action git-section-stage"
-            aria-label="全部暂存"
-            v-tooltip="'全部暂存'"
-            :disabled="gitActionBusy || !worktreeRows.length"
-            @click.stop="stageAll()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="ICON_ARROW_DOWN" />
-            </svg>
-          </button>
         </GitSectionHead>
         <template v-if="!isSectionCollapsed('changes')">
           <GitFileTree
@@ -479,21 +461,11 @@ function toggleDirRow(node: GitDirNode) {
           label="暂存更改"
           :collapsed="isSectionCollapsed('staged')"
           @toggle="toggleSection('staged')"
+          @contextmenu="openSectionCtx('staged', $event)"
         >
           <span v-if="stagedCount > 0" class="git-section-count">{{
             stagedCount
           }}</span>
-          <button
-            class="git-icon-btn git-section-action git-section-unstage"
-            aria-label="全部取消暂存"
-            v-tooltip="'全部取消暂存'"
-            :disabled="gitActionBusy || !stagedRows.length"
-            @click.stop="unstageAll()"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="ICON_ARROW_UP" />
-            </svg>
-          </button>
         </GitSectionHead>
         <template v-if="!isSectionCollapsed('staged')">
           <GitCommitBar

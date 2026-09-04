@@ -131,6 +131,64 @@ export function useGitFileActions(options: {
     void runGitAllOp("git_changes_unstage_all");
   }
 
+  /** 分区文件列表：更改区=工作区侧，暂存更改区=已暂存侧 */
+  function sectionFiles(section: GitSection): GitFile[] {
+    const st = options.gitStatus.value;
+    if (!st) return [];
+    return section === "changes"
+      ? st.files.filter((f) => f.worktree)
+      : st.files.filter((f) => f.staged);
+  }
+
+  /** 分区级撤消更改：一次确认后逐文件丢弃（与文件级同命令、同双侧语义） */
+  async function restoreSection(section: GitSection) {
+    if (gitActionBusy.value) return;
+    const files = sectionFiles(section);
+    if (!files.length) return;
+    const label = section === "changes" ? "更改" : "暂存更改";
+    const scope =
+      section === "changes"
+        ? "所有本地更改（含已暂存内容）"
+        : "所有更改（含未暂存部分）";
+    const ok = await askConfirm({
+      title: "撤消更改",
+      message: `将丢弃「${label}」分区 ${files.length} 个文件的${scope}，确定撤消吗？`,
+      confirmLabel: "撤消更改",
+    });
+    if (!ok) return;
+    for (const file of files) {
+      await runGitOp("git_changes_restore", file.path);
+    }
+  }
+
+  /** 分区标题右键菜单：全部暂存/取消暂存 + 分区级撤消更改（空分区不弹） */
+  function openSectionCtx(section: GitSection, e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!sectionFiles(section).length) return;
+    const items: CtxItem[] = [];
+    if (section === "changes") {
+      items.push({
+        label: "暂存",
+        icon: ICON_STAGE,
+        action: () => stageAll(),
+      });
+    } else {
+      items.push({
+        label: "取消暂存",
+        icon: ICON_UNSTAGE,
+        action: () => unstageAll(),
+      });
+    }
+    items.push({
+      label: "撤消更改",
+      icon: ICON_RESTORE,
+      danger: true,
+      action: () => void restoreSection(section),
+    });
+    options.openCtx(e, items);
+  }
+
   function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -245,5 +303,7 @@ export function useGitFileActions(options: {
     restoreDir,
     stageAll,
     unstageAll,
+    restoreSection,
+    openSectionCtx,
   };
 }

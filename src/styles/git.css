@@ -777,16 +777,6 @@
   text-align: center;
 }
 
-.git-section-head::before {
-  content: "";
-  flex-shrink: 0;
-  width: 3px;
-  height: 12px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  opacity: 0.75;
-}
-
 .git-section-empty {
   padding: var(--space-6) var(--space-5);
   font-size: var(--font-md);
@@ -883,31 +873,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-}
-
-.git-section-action {
-  width: var(--ctrl-h-xs);
-  height: var(--ctrl-h-xs);
-}
-
-.git-section-stage {
-  color: var(--green);
-}
-
-.git-section-stage:hover:not(:disabled) {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 14%, transparent);
-  border-color: color-mix(in srgb, var(--green) 42%, transparent);
-}
-
-.git-section-unstage {
-  color: var(--yellow);
-}
-
-.git-section-unstage:hover:not(:disabled) {
-  color: var(--yellow);
-  background: color-mix(in srgb, var(--yellow) 14%, transparent);
-  border-color: color-mix(in srgb, var(--yellow) 42%, transparent);
 }
 
 /* 提交历史列表 */
