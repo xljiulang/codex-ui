@@ -144,6 +144,13 @@ const hasTurnNav = computed(
   () => anchorCount.value >= 2 && turnNavReady.value,
 );
 
+// 导航按钮图标旋转提示：仅回合进行中旋转（等待响应慢速、执行工具中常速），悬停暂停由 CSS 处理
+const turnNavSpin = computed<"fast" | "slow" | null>(() => {
+  if (!props.tab.turnActive) return null;
+  if (hasActiveWork.value) return "fast";
+  return showThinking.value ? "slow" : null;
+});
+
 // ---------- 合并信息簇：上下文占用 / token 用量（回合导航卡片头部） ----------
 const { ctxUsage, compacting, compactNow } = useContextUsage(props.tab);
 
@@ -849,6 +856,10 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="turn-nav-btn"
+          :class="{
+            'spin-fast': turnNavSpin === 'fast',
+            'spin-slow': turnNavSpin === 'slow',
+          }"
           :aria-expanded="turnNavOpen ? 'true' : 'false'"
           aria-label="回合导航"
           @keydown="onTurnNavKeydown"

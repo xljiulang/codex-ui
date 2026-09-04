@@ -156,6 +156,19 @@
   fill: currentColor;
 }
 
+/* 回合进行中四宫格旋转提示：等待响应慢速、执行工具中常速；悬停导航区时原地暂停 */
+.turn-nav-btn.spin-slow svg {
+  animation: spin 8s linear infinite;
+}
+
+.turn-nav-btn.spin-fast svg {
+  animation: spin 1.5s linear infinite;
+}
+
+.turn-nav:hover .turn-nav-btn svg {
+  animation-play-state: paused;
+}
+
 .turn-nav-btn:hover:not(:disabled) {
   opacity: 1;
   border-color: var(--accent-dim);

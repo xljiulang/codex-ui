@@ -1110,6 +1110,39 @@ describe("ChatView 回合定位按钮", () => {
     pair.unmount();
   });
 
+  it("回合进行中导航图标旋转：等待响应慢速、执行工具中常速，结束后静止", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(2));
+    const wrapper = mountChat();
+    await warmReady();
+
+    // 回合未进行：静止
+    let btn = wrapper.find(".turn-nav-btn");
+    expect(btn.classes()).not.toContain("spin-slow");
+    expect(btn.classes()).not.toContain("spin-fast");
+
+    // 等待响应：回合进行中、无进行中工作 → 慢速
+    tab.turnActive = true;
+    store.activeWorkByThread = { t1: 0 };
+    await nextTick();
+    btn = wrapper.find(".turn-nav-btn");
+    expect(btn.classes()).toContain("spin-slow");
+
+    // 执行工具中：有进行中工作 → 常速
+    store.activeWorkByThread.t1 = 1;
+    await nextTick();
+    btn = wrapper.find(".turn-nav-btn");
+    expect(btn.classes()).toContain("spin-fast");
+    expect(btn.classes()).not.toContain("spin-slow");
+
+    // 回合结束 → 静止
+    tab.turnActive = false;
+    store.activeWorkByThread = {};
+    await nextTick();
+    btn = wrapper.find(".turn-nav-btn");
+    expect(btn.classes()).not.toContain("spin-fast");
+    expect(btn.classes()).not.toContain("spin-slow");
+  });
+
   it("悬停导航按钮展开卡片：条目正序、含文本预览、当前回合高亮", async () => {
     store.itemsByThread["t1"] = reactive(userThread(3));
     const wrapper = mountChat();
