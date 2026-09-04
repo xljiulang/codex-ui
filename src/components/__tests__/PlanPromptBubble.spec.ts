@@ -109,4 +109,23 @@ describe("PlanPromptBubble 计划已就绪气泡", () => {
     expect(mockedDismiss).toHaveBeenCalledTimes(1);
     expect(mockedExecute).not.toHaveBeenCalled();
   });
+
+  it("聚焦按钮按 Space 阻止默认点击行为", async () => {
+    const prompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 修复方案",
+    };
+    wrapper = mount(PlanPromptBubble, { props: { prompt } });
+    const buttons = wrapper.findAll(".interaction-foot .btn");
+
+    const evt = new KeyboardEvent("keydown", {
+      key: " ",
+      bubbles: true,
+      cancelable: true,
+    });
+    await buttons[2].element.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(true);
+    expect(mockedExecute).not.toHaveBeenCalled();
+  });
 });

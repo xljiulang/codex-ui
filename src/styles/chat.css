@@ -18,6 +18,8 @@
   border-radius: 999px;
   font-size: var(--font-sm);
   font-weight: 600;
+  /* 计时数字等宽，逐 100ms 刷新时宽度不抖动 */
+  font-variant-numeric: tabular-nums;
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid rgba(var(--accent-rgb), 0.32);

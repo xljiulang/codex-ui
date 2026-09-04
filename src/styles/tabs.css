@@ -114,19 +114,6 @@
   box-shadow: var(--inset-shadow-md);
 }
 
-/* 激活标签底部主题色短线：Raycast 式导航归属提示 */
-.editor-tab.active::before {
-  content: "";
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--accent);
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
-}
-
 .editor-tab.pinned.active .editor-tab-label {
   color: var(--accent);
 }

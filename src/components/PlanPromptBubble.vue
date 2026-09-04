@@ -48,7 +48,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
           计划已生成，确认后即可开始执行；完整计划见上方消息。
         </div>
       </div>
-      <div class="interaction-foot">
+      <!-- Space 阻止默认点击：主按钮自动聚焦，防止误按空格直接执行计划 -->
+      <div class="interaction-foot" @keydown.space.prevent>
         <button class="btn" @click="dismissPlanPrompt()">待在计划</button>
         <button class="btn" @click="exitPlanMode()">退出计划模式</button>
         <button class="btn primary" @click="executePlan()">执行计划</button>
