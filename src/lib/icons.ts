@@ -60,8 +60,14 @@ export const ICON_CLOSE =
   "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 /** 窗口控制：最小化（居中横线） */
 export const ICON_WINDOW_MIN = "M6 11h12v2H6z";
-/** 压缩/收缩：向内双箭头（用于上下文压缩） */
-export const ICON_COMPRESS = "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7";
+/** 压缩/收缩：向中心汇聚的四向箭头（用于上下文压缩） */
+export const ICON_COMPRESS =
+  "M11 2h2v7h-2zM8 6l4 4 4-4zM11 22h2v-7h-2zM8 18l4-4 4 4zM2 11h7v2H2zM6 8l4 4-4 4zM22 11h-7v2h7zM18 8l-4 4 4 4z";
+/** 代币硬币：三同心圆 evenodd 挖空成币边 + 中心（回合导航底栏 token 图标） */
+export const ICON_TOKEN =
+  "M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0";
+/** 窗口 + 标题栏：矩形 evenodd 挖空内容区（回合导航底栏上下文图标） */
+export const ICON_WINDOW = "M3 3h18v18H3zM5 8h14v11H5z";
 /** 四宫格（Windows 开始菜单风格：2×2 四个实心方格，用于回合导航按钮） */
 export const ICON_GRID_4 =
   "M2.75 2.75h8v8h-8zM13.25 2.75h8v8h-8zM2.75 13.25h8v8h-8zM13.25 13.25h8v8h-8z";

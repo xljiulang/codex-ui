@@ -1443,18 +1443,35 @@ describe("ChatView 回合定位按钮", () => {
     expect(foot.exists()).toBe(true);
     expect(foot.find(".turn-nav-title").exists()).toBe(false);
     const tokenEl = foot.find(".token-usage-chip");
+    expect(tokenEl.findAll(".token-usage-ico")).toHaveLength(3);
+    expect(tokenEl.findAll(".token-usage-part").map((x) => x.text())).toEqual([
+      "12K",
+      "34K",
+    ]);
     expect(tokenEl.text()).toContain("12K");
     expect(tokenEl.text()).toContain("34K");
+    expect(tokenEl.attributes("aria-label")).toContain("Token消耗");
+    expect(tokenEl.attributes("aria-label")).toContain("输入");
     const capsule = foot.find(".ctx-control-capsule");
     expect(capsule.exists()).toBe(true);
     const info = capsule.find(".ctx-usage-text");
     expect(info.text()).toContain("5K");
     expect(info.text()).toContain("/");
     expect(info.text()).toContain("10K");
-    expect(info.find("svg").exists()).toBe(false);
+    expect(info.text()).not.toContain("已用");
+    expect(info.text()).not.toContain("最大");
+    expect(info.find("svg").exists()).toBe(true);
+    expect(info.attributes("aria-label")).toContain("上下文窗口");
+    expect(info.attributes("aria-label")).toContain("已用");
     const compact = capsule.find(".ctx-compact-btn");
     expect(compact.find("svg").exists()).toBe(true);
     expect(compact.text()).toBe("");
+    // 胶囊内部顺序：用量文本 → 压缩按钮（分隔线由按钮左边框绘制）
+    expect(
+      capsule
+        .findAll(".ctx-usage-text, .ctx-compact-btn")
+        .map((x) => x.element.className),
+    ).toEqual(["ctx-usage-text", "ctx-compact-btn"]);
     const order = foot.findAll(".token-usage-chip, .ctx-control-capsule");
     expect(order.map((x) => x.element.className)).toEqual([
       "token-usage-chip",

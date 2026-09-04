@@ -189,7 +189,7 @@
   margin-left: auto;
   height: 30px;
   box-sizing: border-box;
-  padding: 0 4px 0 12px;
+  padding: 0 0 0 12px;
   border-radius: 999px;
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.09);
@@ -200,21 +200,34 @@
 }
 
 .ctx-usage-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   line-height: 1;
   font-size: var(--font-sm);
   font-weight: 600;
 }
 
+.ctx-usage-text svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+/* 压缩按钮：胶囊右侧全高分段，左边框即与用量文本之间的竖向分隔线 */
 .ctx-compact-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-left: var(--space-1);
-  padding: 0;
+  align-self: stretch;
+  width: auto;
+  height: auto;
+  margin-left: var(--space-2);
+  padding: 0 10px;
+  box-sizing: border-box;
   border: none;
-  border-radius: 999px;
+  border-left: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 0 999px 999px 0;
   color: var(--accent);
   background: transparent;
   cursor: pointer;

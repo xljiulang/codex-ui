@@ -14,6 +14,8 @@ import {
   ICON_ARROW_UP,
   ICON_COMPRESS,
   ICON_GRID_4,
+  ICON_TOKEN,
+  ICON_WINDOW,
 } from "../lib/icons";
 import {
   createTurnsBuilder,
@@ -850,9 +852,12 @@ onBeforeUnmount(() => {
             <span
               v-if="tokenTotals"
               class="token-usage-chip"
-              v-tooltip="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
-              :aria-label="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
+              v-tooltip="`Token消耗： 输入 ${formatTokens(tokenTotals.input)}，输出 ${formatTokens(tokenTotals.output)}`"
+              :aria-label="`Token消耗： 输入 ${formatTokens(tokenTotals.input)}，输出 ${formatTokens(tokenTotals.output)}`"
             >
+              <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_TOKEN" fill-rule="evenodd" />
+              </svg>
               <span class="token-usage-part">
                 <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="ICON_ARROW_UP" />
@@ -873,9 +878,12 @@ onBeforeUnmount(() => {
             >
               <span
                 class="ctx-usage-text"
-                v-tooltip="`上下文已用 ${formatTokens(ctxUsage.used)}，共 ${formatTokens(ctxUsage.window)}`"
-                :aria-label="`上下文已用 ${formatTokens(ctxUsage.used)}，共 ${formatTokens(ctxUsage.window)}`"
+                v-tooltip="`上下文窗口： 已用 ${formatTokens(ctxUsage.used)}，最大 ${formatTokens(ctxUsage.window)}`"
+                :aria-label="`上下文窗口： 已用 ${formatTokens(ctxUsage.used)}，最大 ${formatTokens(ctxUsage.window)}`"
               >
+                <svg class="ctx-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_WINDOW" fill-rule="evenodd" />
+                </svg>
                 {{ formatTokens(ctxUsage.used) }} / {{ formatTokens(ctxUsage.window) }}
               </span>
               <button
