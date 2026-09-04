@@ -77,4 +77,26 @@ describe("useContextUsage", () => {
     expect(mockedToast).toHaveBeenCalled();
     expect(u.compacting.value).toBe(false);
   });
+
+  it("传入 tab 时以该 tab 为准，而非活动会话", () => {
+    const other = reactive(makeSessionTab("s2", "t2"));
+    tabs.push(other);
+    (other as SessionTab).threadTokenUsage = { used: 2000, window: 4000 };
+    // 活动会话为 s1（无 window），传入 s2 时仍应基于 s2 计算
+    activeTabId.value = "s1";
+    const u = useContextUsage(other);
+    expect(u.ctxUsage.value).toEqual({ pct: 50, used: 2000, window: 4000 });
+  });
+
+  it("传入 tab 时压缩以该 tab 的 threadId 发起", async () => {
+    const other = reactive(makeSessionTab("s2", "t2"));
+    tabs.push(other);
+    mockedInvoke.mockResolvedValueOnce(undefined);
+    const u = useContextUsage(other);
+    await u.compactNow();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/compact/start",
+      params: { threadId: "t2" },
+    });
+  });
 });

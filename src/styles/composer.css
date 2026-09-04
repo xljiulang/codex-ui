@@ -148,7 +148,6 @@ body.resizing-composer {
 .perm-chip,
 .collab-chip,
 .model-chip,
-.ctx-window,
 .goal-chip,
 .token-usage-chip {
   display: inline-flex;
@@ -163,7 +162,6 @@ body.resizing-composer {
 .perm-chip,
 .collab-chip,
 .model-chip,
-.ctx-window,
 .token-usage-chip {
   padding: 0 11px;
   font-size: var(--font-sm);
@@ -175,8 +173,7 @@ body.resizing-composer {
 
 .perm-chip:hover:not(:disabled),
 .collab-chip:hover:not(:disabled),
-.model-chip:hover:not(:disabled),
-.ctx-window:hover:not(:disabled) {
+.model-chip:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
 }
@@ -318,22 +315,6 @@ body.resizing-composer {
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
-}
-
-.ctx-window {
-  justify-content: center;
-  min-width: 38px;
-  padding: 0 var(--space-3);
-  font-variant-numeric: tabular-nums;
-  font-family: inherit;
-  cursor: pointer;
-  transition: color var(--ease), border-color var(--ease), background-color var(--ease),
-    box-shadow var(--ease), opacity var(--ease);
-}
-
-.ctx-window:disabled {
-  cursor: default;
-  opacity: var(--opacity-disabled);
 }
 
 .send-btn {

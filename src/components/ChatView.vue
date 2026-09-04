@@ -7,8 +7,14 @@ import MessageItem from "./MessageItem.vue";
 import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
-import { formatChatTime } from "../lib/format";
-import { ICON_ARROW_DOWN, ICON_LIST_UL } from "../lib/icons";
+import { useContextUsage } from "../composables/useContextUsage";
+import { formatChatTime, formatTokens } from "../lib/format";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_UP,
+  ICON_COMPRESS,
+  ICON_GRID_4,
+} from "../lib/icons";
 import {
   createTurnsBuilder,
   findCurrentTurnIndex,
@@ -95,6 +101,18 @@ let navAnimating = false;
 const hasTurnNav = computed(
   () => anchorCount.value >= 2 && turnNavReady.value,
 );
+
+// ---------- 合并信息簇：上下文占用 / token 用量（回合导航卡片头部） ----------
+const { ctxUsage, compacting, compactNow } = useContextUsage(props.tab);
+
+/** 本会话累计输入/输出 token（导航头部展示）；缺任一不显示 */
+const tokenTotals = computed(() => {
+  const u = props.tab.threadTokenUsage;
+  if (!u || typeof u.input !== "number" || typeof u.output !== "number") {
+    return null;
+  }
+  return { input: u.input, output: u.output };
+});
 
 /** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
 const turnEntries = computed(() => {
@@ -801,7 +819,7 @@ onBeforeUnmount(() => {
           @keydown="onTurnNavKeydown"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_LIST_UL" />
+            <path :d="ICON_GRID_4" />
           </svg>
         </button>
         <div v-if="turnNavOpen" class="turn-nav-card">
@@ -827,6 +845,52 @@ onBeforeUnmount(() => {
               </button>
             </template>
             <div v-else class="turn-nav-empty">暂无回合</div>
+          </div>
+          <div v-if="tokenTotals || ctxUsage" class="turn-nav-foot">
+            <span
+              v-if="tokenTotals"
+              class="token-usage-chip"
+              v-tooltip="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
+              :aria-label="`输入 ${formatTokens(tokenTotals.input)} · 输出 ${formatTokens(tokenTotals.output)}`"
+            >
+              <span class="token-usage-part">
+                <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_ARROW_UP" />
+                </svg>
+                {{ formatTokens(tokenTotals.input) }}
+              </span>
+              <span class="token-usage-sep">·</span>
+              <span class="token-usage-part">
+                <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_ARROW_DOWN" />
+                </svg>
+                {{ formatTokens(tokenTotals.output) }}
+              </span>
+            </span>
+            <span
+              v-if="ctxUsage"
+              class="ctx-control-capsule"
+            >
+              <span
+                class="ctx-usage-text"
+                v-tooltip="`上下文已用 ${formatTokens(ctxUsage.used)}，共 ${formatTokens(ctxUsage.window)}`"
+                :aria-label="`上下文已用 ${formatTokens(ctxUsage.used)}，共 ${formatTokens(ctxUsage.window)}`"
+              >
+                {{ formatTokens(ctxUsage.used) }} / {{ formatTokens(ctxUsage.window) }}
+              </span>
+              <button
+                type="button"
+                class="ctx-compact-btn"
+                aria-label="压缩上下文"
+                v-tooltip="'压缩上下文'"
+                :disabled="!props.tab.threadId || compacting"
+                @click="compactNow()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path :d="ICON_COMPRESS" />
+                </svg>
+              </button>
+            </span>
           </div>
         </div>
         <div

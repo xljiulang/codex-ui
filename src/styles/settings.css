@@ -1386,6 +1386,23 @@
   gap: var(--space-5);
 }
 
+/* 主题行头部：标题与毛玻璃开关同在左侧、同行并列 */
+.theme-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.theme-row-head label:first-child {
+  margin-bottom: 0;
+}
+
+.theme-row-head .switch {
+  margin-bottom: 0;
+}
+
 .settings-page .theme-card {
   position: relative;
   flex: 1 1 150px;

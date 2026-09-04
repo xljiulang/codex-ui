@@ -19,7 +19,7 @@ const { bridgeState, xtermState } = vi.hoisted(() => ({
     disposed: 0,
     focusCalls: 0,
     constructorOptions: null as Record<string, unknown> | null,
-    options: {} as { theme?: Record<string, unknown> },
+    options: {} as Record<string, unknown>,
   },
 }));
 
@@ -53,6 +53,15 @@ vi.mock("@xterm/xterm", () => {
     }
     dispose() {
       xtermState.disposed++;
+    }
+    refresh(_start: number, _end: number) {
+      // 真实 xterm 6 的 renderer 刷新：mock 仅需 no-op，保证主题/毛玻璃切换仍同步
+    }
+    get rows() {
+      return Number(xtermState.options.rows ?? 24);
+    }
+    get cols() {
+      return Number(xtermState.options.cols ?? 80);
     }
     get options() {
       return xtermState.options;

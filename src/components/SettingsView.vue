@@ -1167,16 +1167,6 @@ function pluginInitial(p: PluginCatalogItem): string {
             <div class="settings">
               <div class="setting-row checkbox-row">
                 <input
-                  id="glass"
-                  v-model="glass"
-                  type="checkbox"
-                  @change="persist({ glass_effect: glass })"
-                />
-                <label for="glass">毛玻璃特效</label>
-              </div>
-
-              <div class="setting-row checkbox-row">
-                <input
                   id="welcome"
                   v-model="openWelcomeOnStartup"
                   type="checkbox"
@@ -1208,7 +1198,21 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
 
               <div class="setting-row">
-                <label>主题外观</label>
+                <div class="theme-row-head">
+                  <label>毛玻璃主题外观</label>
+                  <label
+                    class="switch"
+                    aria-label="毛玻璃特效"
+                  >
+                    <input
+                      id="glass"
+                      v-model="glass"
+                      type="checkbox"
+                      @change="persist({ glass_effect: glass })"
+                    />
+                    <span class="switch-track"></span>
+                  </label>
+                </div>
                 <div class="theme-picker">
                   <button
                     v-for="t in THEMES"

@@ -2182,7 +2182,7 @@ describe("SettingsView 启动打开介绍标签页开关", () => {
   });
 });
 
-describe("SettingsView 毛玻璃特效开关", () => {
+describe("SettingsView 毛玻璃主题外观开关", () => {
   beforeEach(() => {
     __resetTabsForTest();
     store.settings.glass_effect = true;
@@ -2191,15 +2191,20 @@ describe("SettingsView 毛玻璃特效开关", () => {
     mockedSave.mockResolvedValue(undefined);
   });
 
-  it("个性化区首开关渲染为「毛玻璃特效」且默认勾选", () => {
+  it("主题行头部渲染「毛玻璃主题外观」与开关且默认开启", () => {
     const wrapper = mount(SettingsView);
     const input = wrapper.find("#glass").element as HTMLInputElement;
     expect(input.checked).toBe(true);
-    expect(wrapper.find('label[for="glass"]').text()).toBe("毛玻璃特效");
-    // 位于个性化区第一个开关位（在「启动时打开欢迎标签」之前）
+    const head = wrapper.find(".settings-section-personalization .theme-row-head");
+    expect(head.find("label").text()).toBe("毛玻璃主题外观");
+    expect(head.find(".switch input").attributes("id")).toBe("glass");
+  });
+
+  it("毛玻璃开关不再属于复选框行，首复选框为启动欢迎", () => {
+    const wrapper = mount(SettingsView);
     const checkboxes = wrapper.findAll(".settings-section-personalization .setting-row.checkbox-row input");
-    expect(checkboxes[0]?.attributes("id")).toBe("glass");
-    expect(checkboxes[1]?.attributes("id")).toBe("welcome");
+    expect(checkboxes[0]?.attributes("id")).toBe("welcome");
+    expect(wrapper.find("#glass").element.closest(".checkbox-row")).toBeNull();
   });
 
   it("取消勾选后即时保存 glass_effect=false", async () => {
