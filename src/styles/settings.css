@@ -883,6 +883,12 @@
   font-family: inherit;
 }
 
+/* 模型目录路径链接：作为 column 容器 item 默认会被拉伸占满整行，
+   导致 tooltip 相对整行居中而偏到路径名右侧；限制为内容宽度使其只围绕路径名显示 */
+.model-config-path-link {
+  align-self: flex-start;
+}
+
 .model-config-actions {
   display: flex;
   align-items: center;
