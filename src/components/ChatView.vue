@@ -832,7 +832,7 @@ onBeforeUnmount(() => {
         <InlineInteraction :interactions="interactionItems" />
         <PlanPromptBubble :prompt="tab.planPrompt" />
         <div v-if="showThinking" class="thinking-chip">
-          等待模型响应中({{ thinkingSeconds }}s)
+          等待响应({{ thinkingSeconds }}s)
           <span class="dot"></span>
           <span class="dot"></span>
           <span class="dot"></span>

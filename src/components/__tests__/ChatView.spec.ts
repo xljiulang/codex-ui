@@ -219,11 +219,11 @@ describe("ChatView 日期分隔线", () => {
     });
     expect(wrapper.find(".thinking-chip").exists()).toBe(true);
     expect(wrapper.find(".thinking-chip").text()).toMatch(
-      /等待模型响应中\(\d+\.\d+s\)/,
+      /等待响应\(\d+\.\d+s\)/,
     );
     await vi.advanceTimersByTime(1500);
     expect(wrapper.find(".thinking-chip").text()).toMatch(
-      /等待模型响应中\([1-9]\d*\.\d+s\)/,
+      /等待响应\([1-9]\d*\.\d+s\)/,
     );
     store.activeWorkByThread.t1 = 1;
     await nextTick();
@@ -305,7 +305,7 @@ describe("ChatView 日期分隔线", () => {
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(true);
     expect(wrapper.find(".thinking-chip").text()).toMatch(
-      /等待模型响应中\(\d+\.\d+s\)/,
+      /等待响应\(\d+\.\d+s\)/,
     );
 
     tab.turnActive = false;

@@ -22,7 +22,7 @@
   background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid rgba(var(--accent-rgb), 0.32);
   box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.14);
-  margin-top: 2px;
+  margin-top: var(--space-4);
 }
 
 .thinking-chip .dot {
