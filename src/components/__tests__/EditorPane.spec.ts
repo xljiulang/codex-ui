@@ -61,7 +61,6 @@ import EditorPane from "../EditorPane.vue";
 import {
   __resetEditorTabsForTest,
   SETTINGS_TAB_ID,
-  WELCOME_TAB_ID,
   activateTab,
   activeTabId,
   closeTab,
@@ -213,7 +212,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("零会话零文件标签时：空状态显示 Logo、提示文案与「查看 Codex-UI 介绍」重开按钮，「+」无条件显示", () => {
+  it("零会话零文件标签时：空状态显示 Logo、提示文案，「+」无条件显示", () => {
     tabs.splice(0, tabs.length);
     activeTabId.value = "";
     const wrapper = mountPane();
@@ -224,47 +223,6 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(wrapper.find(".no-session-state").text()).toContain(
       "当前还没有任何打开的项",
     );
-    expect(wrapper.find(".no-session-state .btn").exists()).toBe(true);
-    expect(wrapper.find(".no-session-state .btn").text()).toContain(
-      "查看 Codex-UI 介绍",
-    );
-    wrapper.unmount();
-  });
-
-  it("欢迎介绍标签：打开渲染内容，关闭回空状态，空状态按钮可重新打开", async () => {
-    tabs.splice(0, tabs.length);
-    activeTabId.value = "";
-    const wrapper = mountPane();
-    expect(wrapper.find(".no-session-state").exists()).toBe(true);
-
-    await wrapper.find(".no-session-state .btn").trigger("click");
-    await settle();
-    expect(wrapper.find(".welcome-view").exists()).toBe(true);
-    expect(wrapper.find(".welcome-title").text()).toContain("欢迎使用 Codex-UI");
-    expect(
-      wrapper
-        .findAll(".feature-card")
-        .some((c) => c.text().includes("微信远控")),
-    ).toBe(true);
-    expect(wrapper.find(".welcome-section-title").exists()).toBe(true);
-    const welcomeTab = wrapper
-      .findAll(".editor-tab")
-      .find((w) => w.text().includes("欢迎"))!;
-    const logoPaths = welcomeTab
-      .find(".editor-tab-icon svg")!
-      .findAll("path");
-    expect(logoPaths).toHaveLength(2);
-    expect(logoPaths[1].attributes("class")).toBe("logo-c");
-
-    await closeTab(WELCOME_TAB_ID);
-    await settle();
-    expect(wrapper.find(".welcome-view").exists()).toBe(false);
-    expect(wrapper.find(".no-session-state").exists()).toBe(true);
-
-    await wrapper.find(".no-session-state .btn").trigger("click");
-    await settle();
-    expect(wrapper.find(".welcome-view").exists()).toBe(true);
-    expect(activeTabId.value).toBe(WELCOME_TAB_ID);
     wrapper.unmount();
   });
 

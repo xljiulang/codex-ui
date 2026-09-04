@@ -304,45 +304,6 @@ describe("loadSettings 终端 Shell", () => {
   });
 });
 
-describe("loadSettings 启动打开介绍标签页", () => {
-  beforeEach(() => {
-    mockedInvoke.mockReset();
-  });
-
-  it("启动时按持久化的 open_welcome_on_startup 加载", async () => {
-    mockedInvoke.mockResolvedValue({
-      codex_path: null,
-      sound_enabled: true,
-      enter_to_send: true,
-      followup_mode: "adjust",
-      theme: "blue",
-      default_permission: "ask-for-approval",
-      terminal_shell: "cmd",
-      open_welcome_on_startup: false,
-    });
-
-    await loadSettings();
-
-    expect(store.settings.open_welcome_on_startup).toBe(false);
-  });
-
-  it("持久化值缺失时回退默认 true（默认勾选）", async () => {
-    mockedInvoke.mockResolvedValue({
-      codex_path: null,
-      sound_enabled: true,
-      enter_to_send: true,
-      followup_mode: "adjust",
-      theme: "blue",
-      default_permission: "ask-for-approval",
-      terminal_shell: "cmd",
-    });
-
-    await loadSettings();
-
-    expect(store.settings.open_welcome_on_startup).toBe(true);
-  });
-});
-
 describe("loadSettings 毛玻璃特效", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();

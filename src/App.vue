@@ -10,7 +10,7 @@ import TooltipLayer from "./components/TooltipLayer.vue";
 import { disposeEvents, init, store } from "./composables/useCodex";
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
-import { openWelcomeTab } from "./composables/useEditorTabs";
+import { openSettingsTab } from "./composables/useEditorTabs";
 
 const { ctxMenu } = useContextMenu();
 
@@ -20,10 +20,10 @@ onMounted(async () => {
   // 关闭守卫仅阻止 Tauri 默认销毁窗口；关闭即隐藏到系统托盘由 Rust 端处理
   unlistenClose = await registerCloseGuard();
   try {
-    await init();
+  await init();
   } finally {
-    // 启动按设置打开欢迎介绍标签（默认勾选）：每次启动创建并激活（不持久化关闭状态）
-    if (store.settings.open_welcome_on_startup) openWelcomeTab();
+    // 启动无条件打开设置页：每次启动创建并激活（设置 tab 幂等，存在则仅激活）
+    openSettingsTab();
   }
 });
 

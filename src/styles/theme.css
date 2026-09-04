@@ -769,7 +769,7 @@ html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
 }
 
 /* 毛玻璃全局收尾：把背景类变量统一指向半透 tint，任何引用它们的表面
-   （欢迎/工具/设置卡、资源/Git/会话行、代码与终端块、hover/active 交互态）
+   （工具/设置卡、资源/Git/会话行、代码与终端块、hover/active 交互态）
    都自动玻璃化；文字/边框/accent/console 前景与弹层（--float-bg）不受影响。 */
 html[data-glass="on"]:root {
   --bg: var(--app-content-tint);
@@ -799,10 +799,7 @@ html[data-glass="on"] .docx-editor-host .tiptap {
   background-color: var(--doc-bg) !important;
 }
 
-/* 内容卡统一玻璃卡底：欢迎页与设置/模型配置卡与助手/工具卡同为内容档 0.58 */
-html[data-glass="on"] .welcome-hero,
-html[data-glass="on"] .feature-card,
-html[data-glass="on"] .highlight-grid,
+/* 内容卡统一玻璃卡底：设置/模型配置卡与助手/工具卡同为内容档 0.58 */
 html[data-glass="on"] .settings-card,
 html[data-glass="on"] .model-config-card {
   background-color: var(--app-content-tint) !important;

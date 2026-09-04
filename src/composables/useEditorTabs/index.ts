@@ -12,7 +12,6 @@ export type {
   PreviewEditorTab,
   SettingsTab,
   TerminalEditorTab,
-  WelcomeTab,
 } from "./types";
 export {
   isFileTabOpen,
@@ -28,8 +27,6 @@ export {
   openTerminalTab,
   saveFileTab,
   SETTINGS_TAB_ID,
-  openWelcomeTab,
-  WELCOME_TAB_ID,
 } from "./open";
 export { refreshActiveTabFromFs, type FsChangedPayload } from "./refresh";
 export {

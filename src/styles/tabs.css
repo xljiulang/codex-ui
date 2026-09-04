@@ -284,17 +284,6 @@
   color: var(--text-bright);
 }
 
-/* 欢迎标签：App/头部同款六边形 + 中间 C 描边 Logo（单色随文字，悬停/激活提亮） */
-.editor-tab-welcome svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-}
-
-.editor-tab-welcome svg .logo-c {
-  stroke-linecap: round;
-}
-
 .editor-tab-dirty {
   width: 7px;
   height: 7px;

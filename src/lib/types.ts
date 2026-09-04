@@ -173,8 +173,6 @@ export interface AppSettings {
   default_permission: PermissionId;
   /** 新开终端使用的 Shell */
   terminal_shell: TerminalShell;
-  /** 启动时是否打开「欢迎」介绍标签页 */
-  open_welcome_on_startup: boolean;
   /** 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空数组 = 全部启用 */
   dynamic_tools_disabled: string[];
   /** 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启 */

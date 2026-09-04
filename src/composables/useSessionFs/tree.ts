@@ -208,8 +208,7 @@ export async function revealActiveTab(): Promise<void> {
     tab.kind === TabKind.Terminal ||
     tab.kind === TabKind.Chat ||
     tab.kind === TabKind.Commit ||
-    tab.kind === TabKind.Settings ||
-    tab.kind === TabKind.Welcome
+    tab.kind === TabKind.Settings
   ) {
     return;
   }

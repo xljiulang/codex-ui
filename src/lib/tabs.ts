@@ -11,7 +11,6 @@ export const TabKind = {
   Terminal: "terminal",
   Commit: "commit",
   Settings: "settings",
-  Welcome: "welcome",
 } as const;
 export type TabKind = (typeof TabKind)[keyof typeof TabKind];
 
@@ -22,7 +21,6 @@ export const TabIcon = {
   File: "file",
   Commit: "commit",
   Settings: "settings",
-  Welcome: "welcome",
 } as const;
 export type TabIcon = (typeof TabIcon)[keyof typeof TabIcon];
 

@@ -2385,35 +2385,6 @@ describe("SettingsView 设置标签行为", () => {
 
 });
 
-describe("SettingsView 启动打开介绍标签页开关", () => {
-  beforeEach(() => {
-    __resetTabsForTest();
-    store.settings.open_welcome_on_startup = true;
-    store.toast = "";
-    mockedSave.mockReset();
-    mockedSave.mockResolvedValue(undefined);
-  });
-
-  it("个性化默认渲染为勾选状态", () => {
-    const wrapper = mount(SettingsView);
-    const input = wrapper.find("#welcome").element as HTMLInputElement;
-    expect(input.checked).toBe(true);
-    expect(wrapper.find('label[for="welcome"]').text()).toBe(
-      "启动时打开欢迎标签",
-    );
-  });
-
-  it("取消勾选后即时保存 open_welcome_on_startup=false", async () => {
-    const wrapper = mount(SettingsView);
-    const input = wrapper.find("#welcome");
-    await input.setValue(false);
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith({
-      open_welcome_on_startup: false,
-    });
-  });
-});
-
 describe("SettingsView 毛玻璃主题外观开关", () => {
   beforeEach(() => {
     __resetTabsForTest();
@@ -2432,10 +2403,10 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     expect(head.find(".switch input").attributes("id")).toBe("glass");
   });
 
-  it("毛玻璃开关不再属于复选框行，首复选框为启动欢迎", () => {
+  it("毛玻璃开关不再属于复选框行，首复选框为音效", () => {
     const wrapper = mount(SettingsView);
     const checkboxes = wrapper.findAll(".settings-section-personalization .setting-row.checkbox-row input");
-    expect(checkboxes[0]?.attributes("id")).toBe("welcome");
+    expect(checkboxes[0]?.attributes("id")).toBe("sound");
     expect(wrapper.find("#glass").element.closest(".checkbox-row")).toBeNull();
   });
 

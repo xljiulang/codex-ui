@@ -31,7 +31,6 @@ import type {
   PreviewEditorTab,
   SettingsTab,
   TerminalEditorTab,
-  WelcomeTab,
 } from "./types";
 
 /** 会话文件读取结果（与 Rust session_fs_read 返回结构一致） */
@@ -80,31 +79,6 @@ export function openSettingsTab(): void {
   };
   insertTab(tab);
   activateTab(SETTINGS_TAB_ID);
-}
-
-/** 欢迎标签固定 id：全应用唯一，启动默认打开，空状态可重开 */
-export const WELCOME_TAB_ID = "welcome";
-
-/**
- * 打开欢迎/介绍标签：不存在则创建（普通编辑器类排位）并激活，已存在则直接激活。
- * 关闭入口复用统一 closeAnyTab；每次启动由 App 启动流程调用一次。
- */
-export function openWelcomeTab(): void {
-  const existing = tabs.find((t) => t.id === WELCOME_TAB_ID);
-  if (existing) {
-    activateTab(WELCOME_TAB_ID);
-    return;
-  }
-  const tab: WelcomeTab = {
-    id: WELCOME_TAB_ID,
-    kind: TabKind.Welcome,
-    title: "欢迎",
-    icon: TabIcon.Welcome,
-    workspace: null,
-    loading: false,
-  };
-  insertTab(tab);
-  activateTab(WELCOME_TAB_ID);
 }
 
 /**

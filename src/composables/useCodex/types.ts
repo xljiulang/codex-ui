@@ -11,7 +11,6 @@ export const defaultSettings = (): AppSettings => ({
   theme: "blue",
   default_permission: "ask-for-approval",
   terminal_shell: "cmd",
-  open_welcome_on_startup: true,
   dynamic_tools_disabled: [],
   glass_effect: true,
 });

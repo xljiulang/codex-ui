@@ -88,7 +88,6 @@ const followupMode = ref(store.settings.followup_mode);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const defaultPermission = ref(store.settings.default_permission);
 const terminalShell = ref<TerminalShell>(store.settings.terminal_shell);
-const openWelcomeOnStartup = ref(store.settings.open_welcome_on_startup);
 const glass = ref(store.settings.glass_effect);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSectionIds = [
@@ -1331,16 +1330,6 @@ function pluginInitial(p: PluginCatalogItem): string {
           </p>
           <div class="settings-card">
             <div class="settings">
-              <div class="setting-row checkbox-row">
-                <input
-                  id="welcome"
-                  v-model="openWelcomeOnStartup"
-                  type="checkbox"
-                  @change="persist({ open_welcome_on_startup: openWelcomeOnStartup })"
-                />
-                <label for="welcome">启动时打开欢迎标签</label>
-              </div>
-
               <div class="setting-row checkbox-row">
                 <input
                   id="sound"

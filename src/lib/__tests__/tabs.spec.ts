@@ -63,13 +63,11 @@ describe("isTabWorking 统一工作中判定", () => {
     expect(TabKind.Terminal).toBe("terminal");
     expect(TabKind.Commit).toBe("commit");
     expect(TabKind.Settings).toBe("settings");
-    expect(TabKind.Welcome).toBe("welcome");
     expect(TabIcon.Chat).toBe("chat");
     expect(TabIcon.Terminal).toBe("terminal");
     expect(TabIcon.File).toBe("file");
     expect(TabIcon.Commit).toBe("commit");
     expect(TabIcon.Settings).toBe("settings");
-    expect(TabIcon.Welcome).toBe("welcome");
   });
 
   it("会话标签：回合进行中或目标激活为工作中", () => {

@@ -11,7 +11,6 @@ import ChatView from "./ChatView.vue";
 import ContextMenu from "./ContextMenu.vue";
 import EditorTabBar from "./EditorTabBar.vue";
 import SettingsView from "./SettingsView.vue";
-import WelcomeView from "./WelcomeView.vue";
 import {
   activeTab,
   activeTabId,
@@ -34,8 +33,6 @@ import {
   type PreviewEditorTab,
   type TerminalEditorTab,
   SETTINGS_TAB_ID,
-  WELCOME_TAB_ID,
-  openWelcomeTab,
 } from "../composables/useEditorTabs";
 import {
   revealAbsPathInTree,
@@ -254,8 +251,7 @@ watch(activeTab, (tab) => {
     tab.kind === TabKind.Terminal ||
     tab.kind === TabKind.Chat ||
     tab.kind === TabKind.Commit ||
-    tab.kind === TabKind.Settings ||
-    tab.kind === TabKind.Welcome
+    tab.kind === TabKind.Settings
   ) {
     return;
   }
@@ -265,11 +261,6 @@ watch(activeTab, (tab) => {
 /** 设置标签是否存在：存在期间常驻挂载（v-show 切换），关闭后销毁重置 */
 const settingsTabOpen = computed(() =>
   tabs.some((t) => t.id === SETTINGS_TAB_ID),
-);
-
-/** 欢迎标签是否存在：存在期间常驻挂载（v-show 切换），关闭后卸载销毁 */
-const welcomeTabOpen = computed(() =>
-  tabs.some((t) => t.id === WELCOME_TAB_ID),
 );
 
 /** 标签栏末尾「+」：新建会话走与头部一致的工作目录选择；
@@ -321,9 +312,6 @@ function openAddMenu(e: MouseEvent) {
           </svg>
         </div>
         <p class="no-session-hint">当前还没有任何打开的项</p>
-        <button class="btn welcome-reopen-btn" @click="openWelcomeTab()">
-          查看 Codex-UI 介绍
-        </button>
       </div>
       <ChatView
         v-for="tab in sessionTabs"
@@ -347,10 +335,6 @@ function openAddMenu(e: MouseEvent) {
       <SettingsView
         v-if="settingsTabOpen"
         v-show="activeTabId === SETTINGS_TAB_ID"
-      />
-      <WelcomeView
-        v-if="welcomeTabOpen"
-        v-show="activeTabId === WELCOME_TAB_ID"
       />
     </div>
     <div v-if="pendingTab" class="text-editor-overlay">
