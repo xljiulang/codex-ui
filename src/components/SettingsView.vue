@@ -580,6 +580,11 @@ async function saveModelConfig() {
   }
 }
 
+/** 在编辑器中打开模型目录文件（model_catalog_json 目标路径）；失败回退资源管理器定位 */
+function openModelConfigFile() {
+  void openPathInAppOrReveal(modelConfig.model_catalog_path);
+}
+
 /** 应用内打开文件（文本走编辑器标签），失败回退资源管理器定位 */
 async function openPathInAppOrReveal(path: string) {
   if (!path) return;
@@ -1587,7 +1592,20 @@ function pluginInitial(p: PluginCatalogItem): string {
 
             <div class="model-catalog-block">
               <div class="model-catalog-head">
-                <span>模型目录（model_catalog_json）</span>
+                <button
+                  v-if="modelConfig.model_catalog_exists"
+                  type="button"
+                  class="model-config-title-link"
+                  v-tooltip="'在编辑器中打开文件'"
+                  :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
+                  @click="openModelConfigFile"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_FILE" />
+                  </svg>
+                  <span>模型目录（model_catalog_json）</span>
+                </button>
+                <span v-else>模型目录（model_catalog_json）</span>
               </div>
               <p class="model-config-path">
                 {{ modelConfig.model_catalog_path || "正在读取目录路径…" }}

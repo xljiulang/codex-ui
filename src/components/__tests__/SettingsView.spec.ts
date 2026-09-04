@@ -325,11 +325,11 @@ describe("SettingsView 模型配置", () => {
       wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 仅 AGENTS 保留标题链接，model_catalog_json 卡不再有
+    // 模型目录文件存在时渲染标题链接，AGENTS 也保留标题链接
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-title-link")
         .length,
-    ).toBe(0);
+    ).toBe(1);
     expect(
       wrapper.findAll(".settings-section-global-instructions .model-config-title-link")
         .length,
@@ -382,13 +382,48 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("模型配置卡不渲染 model_catalog_json 标题链接", async () => {
+  it("模型配置文件存在时渲染标题链接并在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(
       ".settings-section-model-config .model-config-title-link",
     );
-    expect(links.length).toBe(0);
+    expect(links.length).toBe(1);
+    expect(links[0].attributes("aria-label")).toBe(
+      "在编辑器中打开 C:/apps/codex-ui/.codex/models.json",
+    );
+    expect(links[0].text()).toContain("模型目录（model_catalog_json）");
+    await links[0].trigger("click");
+    await flushPromises();
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith(
+      "C:/apps/codex-ui/.codex/models.json",
+    );
+  });
+
+  it("模型配置文件不存在时不渲染标题链接", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve(sampleModelConfigRead);
+      }
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          model_catalog_exists: false,
+          model_catalog: "",
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(
+      wrapper.findAll(".settings-section-model-config .model-config-title-link")
+        .length,
+    ).toBe(0);
+    expect(wrapper.find(".model-catalog-head").text()).toContain(
+      "模型目录（model_catalog_json）",
+    );
   });
 
   it("点击 AGENTS 标题链接在应用内打开", async () => {
