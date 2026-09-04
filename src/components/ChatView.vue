@@ -7,16 +7,8 @@ import MessageItem from "./MessageItem.vue";
 import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
-import { useContextUsage } from "../composables/useContextUsage";
-import { formatChatTime, formatTokens } from "../lib/format";
-import {
-  ICON_ARROW_DOWN,
-  ICON_ARROW_UP,
-  ICON_COMPRESS,
-  ICON_GRID_4,
-  ICON_TOKEN,
-  ICON_WINDOW,
-} from "../lib/icons";
+import { formatChatTime } from "../lib/format";
+import { ICON_ARROW_DOWN, ICON_GRID_4 } from "../lib/icons";
 import {
   createTurnsBuilder,
   findCurrentTurnIndex,
@@ -149,18 +141,6 @@ const turnNavSpin = computed<"fast" | "slow" | null>(() => {
   if (!props.tab.turnActive) return null;
   if (hasActiveWork.value) return "fast";
   return showWaiting.value ? "slow" : null;
-});
-
-// ---------- 合并信息簇：上下文占用 / token 用量（回合导航卡片头部） ----------
-const { ctxUsage, compacting, compactNow } = useContextUsage(props.tab);
-
-/** 本会话累计输入/输出 token（导航头部展示）；缺任一不显示 */
-const tokenTotals = computed(() => {
-  const u = props.tab.threadTokenUsage;
-  if (!u || typeof u.input !== "number" || typeof u.output !== "number") {
-    return null;
-  }
-  return { input: u.input, output: u.output };
 });
 
 /** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
@@ -892,58 +872,6 @@ onBeforeUnmount(() => {
             </template>
             <div v-else class="turn-nav-empty">暂无回合</div>
           </div>
-          <div v-if="tokenTotals || ctxUsage" class="turn-nav-foot">
-            <span
-              v-if="tokenTotals"
-              class="token-usage-chip"
-              v-tooltip="`Token消耗： 输入 ${formatTokens(tokenTotals.input)}，输出 ${formatTokens(tokenTotals.output)}`"
-              :aria-label="`Token消耗： 输入 ${formatTokens(tokenTotals.input)}，输出 ${formatTokens(tokenTotals.output)}`"
-            >
-              <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_TOKEN" fill-rule="evenodd" />
-              </svg>
-              <span class="token-usage-part">
-                <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_ARROW_UP" />
-                </svg>
-                {{ formatTokens(tokenTotals.input) }}
-              </span>
-              <span class="token-usage-sep">·</span>
-              <span class="token-usage-part">
-                <svg class="token-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_ARROW_DOWN" />
-                </svg>
-                {{ formatTokens(tokenTotals.output) }}
-              </span>
-            </span>
-            <span
-              v-if="ctxUsage"
-              class="ctx-control-capsule"
-            >
-              <span
-                class="ctx-usage-text"
-                v-tooltip="`上下文窗口： 已用 ${formatTokens(ctxUsage.used)}，最大 ${formatTokens(ctxUsage.window)}`"
-                :aria-label="`上下文窗口： 已用 ${formatTokens(ctxUsage.used)}，最大 ${formatTokens(ctxUsage.window)}`"
-              >
-                <svg class="ctx-usage-ico" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_WINDOW" fill-rule="evenodd" />
-                </svg>
-                {{ formatTokens(ctxUsage.used) }} / {{ formatTokens(ctxUsage.window) }}
-              </span>
-              <button
-                type="button"
-                class="ctx-compact-btn"
-                aria-label="压缩上下文"
-                v-tooltip="'压缩上下文'"
-                :disabled="!props.tab.threadId || compacting"
-                @click="compactNow()"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_COMPRESS" />
-                </svg>
-              </button>
-            </span>
-          </div>
         </div>
         <div
           v-if="previewItem && turnNavOpen"
@@ -965,17 +893,6 @@ onBeforeUnmount(() => {
           <path :d="ICON_ARROW_DOWN" />
         </svg>
       </button>
-      <div
-        v-if="ctxUsage"
-        class="ctx-usage-bar"
-        role="progressbar"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        :aria-valuenow="ctxUsage.pct"
-        :aria-label="`上下文窗口已用 ${formatTokens(ctxUsage.used)}，最大 ${formatTokens(ctxUsage.window)}`"
-      >
-        <div class="ctx-usage-bar-fill" :style="{ width: ctxUsage.pct + '%' }"></div>
-      </div>
     </div>
     <ComposerBar :tab="tab" :active="active" />
     <div class="sr-only" aria-live="polite">{{ liveAnnouncement }}</div>

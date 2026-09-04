@@ -8,6 +8,7 @@ import MentionMenu from "./MentionMenu.vue";
 import ModelMenu from "./ModelMenu.vue";
 import PermissionMenu from "./PermissionMenu.vue";
 import CollaborationModeMenu from "./CollaborationModeMenu.vue";
+import ContextUsageMenu from "./ContextUsageMenu.vue";
 import {
   interrupt,
   effectiveEffort,
@@ -556,6 +557,7 @@ function collaborationModeLabel(): string {
             </div>
           </div>
           <div class="composer-right">
+            <ContextUsageMenu :tab="tab" />
             <div class="menu-anchor">
               <button
                 class="model-chip"

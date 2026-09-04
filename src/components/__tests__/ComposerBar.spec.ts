@@ -211,6 +211,27 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(wrapper.text()).not.toContain("项目目录");
   });
 
+  it("有用量数据时模型按钮前渲染上下文圆环，无数据时不渲染", async () => {
+    const tab = defaultTab();
+    wrapper = mount(ComposerBar, { props: { tab } });
+    await flushPromises();
+    expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(false);
+
+    tab.threadTokenUsage = {
+      used: 5000,
+      window: 10000,
+      input: 12000,
+      output: 34000,
+    };
+    await flushPromises();
+    expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(true);
+    // 圆环位于模型选择按钮之前
+    const rightHtml = wrapper.find(".composer-right").element.innerHTML;
+    expect(rightHtml.indexOf("ctx-ring-anchor")).toBeLessThan(
+      rightHtml.indexOf("model-chip"),
+    );
+  });
+
   it("@ 空 token：菜单固定行在前、插件列表在后", async () => {
     const tab = defaultTab();
     await ensureThreadPlugins(tab);

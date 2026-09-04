@@ -148,8 +148,7 @@ body.resizing-composer {
 .perm-chip,
 .collab-chip,
 .model-chip,
-.goal-chip,
-.token-usage-chip {
+.goal-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -161,8 +160,7 @@ body.resizing-composer {
 /* accent 芯片 */
 .perm-chip,
 .collab-chip,
-.model-chip,
-.token-usage-chip {
+.model-chip {
   padding: 0 11px;
   font-size: var(--font-sm);
   font-weight: 600;
@@ -179,30 +177,6 @@ body.resizing-composer {
 }
 
 .perm-chip svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-}
-
-/* token 用量芯片：纯信息展示，无悬停/点击态 */
-.token-usage-chip {
-  cursor: default;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.token-usage-chip .token-usage-sep {
-  opacity: 0.6;
-}
-
-.token-usage-chip .token-usage-part {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.token-usage-chip svg {
   width: 13px;
   height: 13px;
   fill: currentColor;
@@ -441,4 +415,213 @@ body.resizing-composer {
   .composer-right {
     gap: var(--space-1);
   }
+}
+
+/* ---------- 上下文用量圆环（模型按钮前）：进度=上下文占用百分比，悬停向上弹出用量菜单 ---------- */
+.ctx-ring-anchor {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.ctx-ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ctx-ring svg {
+  width: 26px;
+  height: 26px;
+}
+
+.ctx-ring-track {
+  fill: none;
+  stroke: rgba(var(--border-rgb), 0.9);
+  stroke-width: 2;
+}
+
+.ctx-ring-bar {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--ease);
+}
+
+.ctx-ring-pct {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ---------- 上下文用量悬浮菜单（圆环正上方弹出） ---------- */
+/* 双类名提升特异性：覆盖 .popup-menu（overlays.css 在 composer.css 之后加载）的 left: 0 */
+.popup-menu.usage-menu {
+  width: 300px;
+  /* 定宽 300px 取一半偏移：菜单中心对齐圆环中心（不使用 transform，避免与 menu-in 动画冲突） */
+  left: 50%;
+  margin-left: -150px;
+}
+
+.usage-menu-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.usage-menu-title {
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.usage-menu-model {
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-menu-section {
+  padding: var(--space-3);
+  border-top: 1px solid rgba(var(--border-rgb), 0.45);
+}
+
+.usage-menu-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.usage-menu-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(var(--border-rgb), 0.5);
+  overflow: hidden;
+}
+
+.usage-menu-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width var(--ease);
+}
+
+/* 百分比 + 压缩图标合并胶囊：左数字右纯图标按钮，左边框即分隔线 */
+.usage-menu-capsule {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.09);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.usage-menu-capsule-pct {
+  padding: 0 0 0 10px;
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.usage-menu-capsule-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 26px;
+  margin-left: var(--space-2);
+  padding: 0;
+  box-sizing: border-box;
+  border: none;
+  border-left: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 0 999px 999px 0;
+  color: var(--accent);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ease), opacity var(--ease);
+}
+
+.usage-menu-capsule-btn:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.15);
+}
+
+.usage-menu-capsule-btn:disabled {
+  cursor: default;
+  opacity: var(--opacity-disabled);
+}
+
+.usage-menu-capsule-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.usage-menu-line {
+  margin-top: var(--space-2);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-menu-line.dim {
+  margin-top: 0;
+}
+
+.usage-menu-subtitle {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+
+.usage-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-menu-row.sub {
+  padding-left: var(--space-5);
+  color: var(--text-dim);
+}
+
+.usage-menu-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.usage-menu-ico {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.usage-menu-value {
+  font-weight: 600;
 }

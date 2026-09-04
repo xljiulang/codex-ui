@@ -568,23 +568,37 @@ export async function wireEvents() {
       const p = e.payload as {
         threadId: string;
         tokenUsage?: {
-          total?: { totalTokens?: number; inputTokens?: number; outputTokens?: number };
+          total?: {
+            totalTokens?: number;
+            inputTokens?: number;
+            outputTokens?: number;
+            cachedInputTokens?: number;
+            cacheWriteInputTokens?: number;
+            reasoningOutputTokens?: number;
+          };
           last?: { totalTokens?: number };
           modelContextWindow?: number | null;
         };
       };
-      // 会话累计的输入/输出 token（用于“输入/输出”实时展示）；缺省不写，避免污染为 undefined
-      const totalInput = p.tokenUsage?.total?.inputTokens;
-      const totalOutput = p.tokenUsage?.total?.outputTokens;
+      // 会话累计的输入/输出/细分 token（用于输入区圆环菜单展示）；缺省不写，避免污染为 undefined
+      const t = p.tokenUsage?.total;
+      const totalInput = t?.inputTokens;
+      const totalOutput = t?.outputTokens;
+      const totalAll = t?.totalTokens;
+      const cachedInput = t?.cachedInputTokens;
+      const cacheWriteInput = t?.cacheWriteInputTokens;
+      const reasoningOutput = t?.reasoningOutputTokens;
       const usage = {
         // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
         used:
-          p.tokenUsage?.last?.totalTokens ??
-          p.tokenUsage?.total?.totalTokens ??
-          0,
+          p.tokenUsage?.last?.totalTokens ?? p.tokenUsage?.total?.totalTokens ?? 0,
         window: p.tokenUsage?.modelContextWindow ?? null,
         ...(typeof totalInput === "number" ? { input: totalInput } : {}),
         ...(typeof totalOutput === "number" ? { output: totalOutput } : {}),
+        ...(typeof totalAll === "number" ? { totalTokens: totalAll } : {}),
+        ...(typeof cachedInput === "number" ? { cachedInput } : {}),
+        ...(typeof cacheWriteInput === "number" ? { cacheWriteInput } : {}),
+        ...(typeof reasoningOutput === "number" ? { reasoningOutput } : {}),
       };
       const tab = findSessionTabByThread(p.threadId);
       // token 用量一律写归属标签；未打开线程的事件无处可写 → 跳过

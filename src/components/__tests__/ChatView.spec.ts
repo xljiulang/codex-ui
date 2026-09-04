@@ -50,12 +50,9 @@ vi.mock("../../composables/useCodex", () => {
 });
 
 import ChatView from "../ChatView.vue";
-import { invoke } from "@tauri-apps/api/core";
-import { respondInteraction, setToast, store } from "../../composables/useCodex";
+import { respondInteraction, store } from "../../composables/useCodex";
 import type { ThreadItem } from "../../lib/types";
 import type { SessionTab } from "../../composables/useCodex";
-
-const mockedInvoke = vi.mocked(invoke);
 
 /** 会话标签 fixture：threadId 固定 t1，交互列表与 mock store 共享同一数组 */
 function makeTab(): SessionTab {
@@ -1474,134 +1471,6 @@ describe("ChatView 回合定位按钮", () => {
     expect(btn2.text()).toBe("");
     expect(btn2.find("svg").exists()).toBe(true);
     expect(btn2.classes()).not.toContain("has-pct");
-    wrapper.unmount();
-  });
-
-  it("底边渲染上下文占用进度条（宽度=占用率，带语义 aria），无数据时不渲染", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(2));
-    tab.threadTokenUsage = { used: 5000, window: 10000 };
-    const wrapper = mountChat();
-    await warmReady();
-    const bar = wrapper.find(".chat-scroll-wrap .ctx-usage-bar");
-    expect(bar.exists()).toBe(true);
-    expect(bar.attributes("role")).toBe("progressbar");
-    expect(bar.attributes("aria-valuenow")).toBe("50");
-    expect(bar.attributes("aria-valuemax")).toBe("100");
-    expect(bar.attributes("aria-label")).toContain("已用");
-    expect(bar.attributes("aria-label")).toContain("最大");
-    const fill = bar.find(".ctx-usage-bar-fill");
-    expect(fill.exists()).toBe(true);
-    expect(fill.attributes("style")).toContain("width: 50%");
-
-    // 无上下文数据时不渲染底边进度条
-    tab.threadTokenUsage = null;
-    await nextTick();
-    await flushPromises();
-    expect(wrapper.find(".ctx-usage-bar").exists()).toBe(false);
-    wrapper.unmount();
-  });
-
-  it("展开卡片头部渲染标题与 token/上下文/压缩顺序与文案", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(3));
-    tab.threadTokenUsage = {
-      used: 5000,
-      window: 10000,
-      input: 12000,
-      output: 34000,
-    };
-    const wrapper = mountChat();
-    await warmReady();
-    await openNavCard(wrapper);
-    const foot = wrapper.find(".turn-nav-foot");
-    expect(foot.exists()).toBe(true);
-    expect(foot.find(".turn-nav-title").exists()).toBe(false);
-    const tokenEl = foot.find(".token-usage-chip");
-    expect(tokenEl.findAll(".token-usage-ico")).toHaveLength(3);
-    expect(tokenEl.findAll(".token-usage-part").map((x) => x.text())).toEqual([
-      "12K",
-      "34K",
-    ]);
-    expect(tokenEl.text()).toContain("12K");
-    expect(tokenEl.text()).toContain("34K");
-    expect(tokenEl.attributes("aria-label")).toContain("Token消耗");
-    expect(tokenEl.attributes("aria-label")).toContain("输入");
-    const capsule = foot.find(".ctx-control-capsule");
-    expect(capsule.exists()).toBe(true);
-    const info = capsule.find(".ctx-usage-text");
-    expect(info.text()).toContain("5K");
-    expect(info.text()).toContain("/");
-    expect(info.text()).toContain("10K");
-    expect(info.text()).not.toContain("已用");
-    expect(info.text()).not.toContain("最大");
-    expect(info.find("svg").exists()).toBe(true);
-    expect(info.attributes("aria-label")).toContain("上下文窗口");
-    expect(info.attributes("aria-label")).toContain("已用");
-    const compact = capsule.find(".ctx-compact-btn");
-    expect(compact.find("svg").exists()).toBe(true);
-    expect(compact.text()).toBe("");
-    // 胶囊内部顺序：用量文本 → 压缩按钮（分隔线由按钮左边框绘制）
-    expect(
-      capsule
-        .findAll(".ctx-usage-text, .ctx-compact-btn")
-        .map((x) => x.element.className),
-    ).toEqual(["ctx-usage-text", "ctx-compact-btn"]);
-    const order = foot.findAll(".token-usage-chip, .ctx-control-capsule");
-    expect(order.map((x) => x.element.className)).toEqual([
-      "token-usage-chip",
-      "ctx-control-capsule",
-    ]);
-    wrapper.unmount();
-  });
-
-  it("点击压缩胶囊发起压缩并提示；压缩中按钮禁用，完成后恢复", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(2));
-    tab.threadId = "t1";
-    tab.threadTokenUsage = { used: 5000, window: 10000 };
-    mockedInvoke.mockClear();
-    let resolveInvoke!: (v: unknown) => void;
-    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
-      if (cmd === "codex_rpc" && args?.method === "thread/compact/start") {
-        return new Promise((resolve) => {
-          resolveInvoke = resolve;
-        });
-      }
-      return Promise.resolve({});
-    });
-    const wrapper = mountChat();
-    await warmReady();
-    await openNavCard(wrapper);
-    const btn = wrapper.find(".ctx-compact-btn");
-    expect((btn.element as HTMLButtonElement).disabled).toBe(false);
-    await btn.trigger("click");
-    await flushPromises();
-    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-      method: "thread/compact/start",
-      params: { threadId: "t1" },
-    });
-    expect(
-      (wrapper.find(".ctx-compact-btn").element as HTMLButtonElement).disabled,
-    ).toBe(true);
-    resolveInvoke({});
-    await flushPromises();
-    expect(
-      (wrapper.find(".ctx-compact-btn").element as HTMLButtonElement).disabled,
-    ).toBe(false);
-    expect(setToast).toHaveBeenCalledWith("已开始压缩上下文");
-    wrapper.unmount();
-  });
-
-  it("压缩失败时 toast 错误", async () => {
-    store.itemsByThread["t1"] = reactive(userThread(2));
-    tab.threadId = "t1";
-    tab.threadTokenUsage = { used: 5000, window: 10000 };
-    mockedInvoke.mockClear();
-    mockedInvoke.mockRejectedValueOnce(new Error("压缩失败"));
-    const wrapper = mountChat();
-    await warmReady();
-    await openNavCard(wrapper);
-    await wrapper.find(".ctx-compact-btn").trigger("click");
-    await flushPromises();
-    expect(setToast).toHaveBeenCalledWith("压缩失败");
     wrapper.unmount();
   });
 });

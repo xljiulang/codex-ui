@@ -158,6 +158,14 @@ export interface SessionTab extends EditorTabBase {
     input?: number;
     /** 会话累计输出 token（thread/tokenUsage/updated 的 total.outputTokens） */
     output?: number;
+    /** 会话累计总 token（total.totalTokens） */
+    totalTokens?: number;
+    /** 会话累计缓存读取输入（total.cachedInputTokens，输入的子集） */
+    cachedInput?: number;
+    /** 会话累计缓存写入输入（total.cacheWriteInputTokens，输入的子集） */
+    cacheWriteInput?: number;
+    /** 会话累计推理输出（total.reasoningOutputTokens，输出的子集） */
+    reasoningOutput?: number;
   } | null;
   followupQueue: { text: string; attachments: UserInput[] }[];
   attachments: UserInput[];

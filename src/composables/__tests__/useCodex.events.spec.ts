@@ -132,6 +132,7 @@ describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
       window: 128000,
       input: 1000,
       output: 500,
+      totalTokens: 1500,
     });
   });
 
@@ -150,7 +151,11 @@ describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
       },
     });
 
-    expect(tab.threadTokenUsage).toEqual({ used: 900, window: 128000 });
+    expect(tab.threadTokenUsage).toEqual({
+      used: 900,
+      window: 128000,
+      totalTokens: 1500,
+    });
   });
 });
 
