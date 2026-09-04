@@ -71,6 +71,46 @@ const hasActiveWork = computed(
   () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
 );
 
+// ---------- 等待模型响应中提示：chip 显示期间本地计时并高频刷新秒数 ----------
+const showThinking = computed(
+  () =>
+    props.tab.turnActive &&
+    !hasActiveWork.value &&
+    items.value.length > 0 &&
+    interactionItems.value.length === 0,
+);
+const thinkingElapsedMs = ref(0);
+let thinkingStartedAt = 0;
+let thinkingTimer: number | undefined;
+function stopThinkingTimer() {
+  if (thinkingTimer !== undefined) {
+    window.clearInterval(thinkingTimer);
+    thinkingTimer = undefined;
+  }
+}
+function startThinkingTimer() {
+  thinkingStartedAt = Date.now();
+  thinkingElapsedMs.value = 0;
+  stopThinkingTimer();
+  thinkingTimer = window.setInterval(() => {
+    thinkingElapsedMs.value = Date.now() - thinkingStartedAt;
+  }, 100);
+}
+watch(
+  showThinking,
+  (v) => {
+    if (v) startThinkingTimer();
+    else {
+      stopThinkingTimer();
+      thinkingElapsedMs.value = 0;
+    }
+  },
+  { immediate: true },
+);
+const thinkingSeconds = computed(() =>
+  (thinkingElapsedMs.value / 1000).toFixed(1),
+);
+
 // ---------- 回合定位：导航按钮 + 卡片，以 userMessage（data-turn-anchor）为切点 ----------
 const anchorCount = ref(0);
 const currentIndex = ref(-1);
@@ -767,6 +807,7 @@ onBeforeUnmount(() => {
   scrollObserver?.disconnect();
   scrollObserver = undefined;
   scroller.value?.removeEventListener("load", onImageLoad, true);
+  stopThinkingTimer();
   // 避免切换视图后残留滚动状态
   stickToBottom.value = true;
 });
@@ -790,16 +831,8 @@ onBeforeUnmount(() => {
         <PlanCard v-if="tab.plan" :plan="tab.plan" />
         <InlineInteraction :interactions="interactionItems" />
         <PlanPromptBubble :prompt="tab.planPrompt" />
-        <div
-          v-if="
-            tab.turnActive &&
-            !hasActiveWork &&
-            items.length &&
-            interactionItems.length === 0
-          "
-          class="thinking-chip"
-        >
-          思考中
+        <div v-if="showThinking" class="thinking-chip">
+          等待模型响应中({{ thinkingSeconds }}s)
           <span class="dot"></span>
           <span class="dot"></span>
           <span class="dot"></span>

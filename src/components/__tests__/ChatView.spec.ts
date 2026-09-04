@@ -203,6 +203,7 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("思考中提示随进行中计数显示/隐藏", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     tab.turnActive = true;
     store.activeWorkByThread = { t1: 0 };
     store.itemsByThread["t1"] = ([
@@ -217,11 +218,20 @@ describe("ChatView 日期分隔线", () => {
       },
     });
     expect(wrapper.find(".thinking-chip").exists()).toBe(true);
+    expect(wrapper.find(".thinking-chip").text()).toMatch(
+      /等待模型响应中\(\d+\.\d+s\)/,
+    );
+    await vi.advanceTimersByTime(1500);
+    expect(wrapper.find(".thinking-chip").text()).toMatch(
+      /等待模型响应中\([1-9]\d*\.\d+s\)/,
+    );
     store.activeWorkByThread.t1 = 1;
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(false);
     tab.turnActive = false;
     store.activeWorkByThread = {};
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it("待处理交互内嵌渲染在消息流末尾，回答后移除", async () => {
@@ -269,6 +279,7 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("交互挂起时不显示“思考中”提示", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     tab.turnActive = true;
     store.activeWorkByThread = { t1: 0 };
     store.interactions.push({
@@ -293,9 +304,14 @@ describe("ChatView 日期分隔线", () => {
     store.interactions.splice(0);
     await nextTick();
     expect(wrapper.find(".thinking-chip").exists()).toBe(true);
+    expect(wrapper.find(".thinking-chip").text()).toMatch(
+      /等待模型响应中\(\d+\.\d+s\)/,
+    );
 
     tab.turnActive = false;
     store.activeWorkByThread = {};
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it("无障碍播报区域随回合状态更新", async () => {
