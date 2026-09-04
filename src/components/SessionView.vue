@@ -42,6 +42,7 @@ import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
   ICON_DELETE,
+  ICON_EXTERNAL_LINK,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
   ICON_FORK,
@@ -220,7 +221,7 @@ function openFolderCtxMenu(group: SessionGroup, e: MouseEvent) {
     },
     {
       label: "在资源管理器中打开",
-      icon: ICON_FOLDER_OPEN,
+      icon: ICON_EXTERNAL_LINK,
       action: () => revealInExplorer(group.path),
     },
   ];

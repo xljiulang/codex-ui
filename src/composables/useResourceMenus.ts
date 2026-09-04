@@ -15,12 +15,12 @@ import {
   ICON_AT,
   ICON_COPY,
   ICON_DELETE,
+  ICON_EXTERNAL_LINK,
   ICON_INFO,
   ICON_OPEN,
   ICON_PASTE,
   ICON_PLUS,
   ICON_RENAME,
-  ICON_REVEAL,
   ICON_TERMINAL,
 } from "../lib/icons";
 
@@ -68,7 +68,7 @@ export function useResourceMenus(options: {
       },
       {
         label: "在资源管理器中打开",
-        icon: ICON_REVEAL,
+        icon: ICON_EXTERNAL_LINK,
         action: () => revealInExplorer(root.path),
       },
     ]);
@@ -125,7 +125,7 @@ export function useResourceMenus(options: {
       },
       {
         label: "在资源管理器中打开",
-        icon: ICON_REVEAL,
+        icon: ICON_EXTERNAL_LINK,
         action: () => revealInExplorer(entry.path),
       },
     ]);
@@ -170,7 +170,7 @@ export function useResourceMenus(options: {
         : []),
       {
         label: "在资源管理器中打开",
-        icon: ICON_REVEAL,
+        icon: ICON_EXTERNAL_LINK,
         action: () => revealInExplorer(entry.path),
       },
     ];

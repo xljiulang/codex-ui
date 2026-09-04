@@ -53,8 +53,8 @@ import {
   ICON_CLOSE_ALL,
   ICON_CLOSE_LEFT,
   ICON_CLOSE_RIGHT,
+  ICON_EXTERNAL_LINK,
   ICON_RENAME,
-  ICON_REVEAL,
   ICON_SESSION,
   ICON_TERMINAL,
 } from "../lib/icons";
@@ -204,7 +204,7 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
   ) {
     items.push({
       label: "在资源管理器中打开",
-      icon: ICON_REVEAL,
+      icon: ICON_EXTERNAL_LINK,
       action: () => revealInExplorer(fileTabAbsPath(tab)),
     });
   }
