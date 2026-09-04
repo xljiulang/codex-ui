@@ -217,17 +217,17 @@ describe("ChatView 日期分隔线", () => {
         },
       },
     });
-    expect(wrapper.find(".thinking-chip").exists()).toBe(true);
-    expect(wrapper.find(".thinking-chip").text()).toMatch(
+    expect(wrapper.find(".waiting-chip").exists()).toBe(true);
+    expect(wrapper.find(".waiting-chip").text()).toMatch(
       /等待响应\(\d+\.\d+s\)/,
     );
     await vi.advanceTimersByTime(1500);
-    expect(wrapper.find(".thinking-chip").text()).toMatch(
+    expect(wrapper.find(".waiting-chip").text()).toMatch(
       /等待响应\([1-9]\d*\.\d+s\)/,
     );
     store.activeWorkByThread.t1 = 1;
     await nextTick();
-    expect(wrapper.find(".thinking-chip").exists()).toBe(false);
+    expect(wrapper.find(".waiting-chip").exists()).toBe(false);
     tab.turnActive = false;
     store.activeWorkByThread = {};
     wrapper.unmount();
@@ -299,12 +299,12 @@ describe("ChatView 日期分隔线", () => {
         },
       },
     });
-    expect(wrapper.find(".thinking-chip").exists()).toBe(false);
+    expect(wrapper.find(".waiting-chip").exists()).toBe(false);
 
     store.interactions.splice(0);
     await nextTick();
-    expect(wrapper.find(".thinking-chip").exists()).toBe(true);
-    expect(wrapper.find(".thinking-chip").text()).toMatch(
+    expect(wrapper.find(".waiting-chip").exists()).toBe(true);
+    expect(wrapper.find(".waiting-chip").text()).toMatch(
       /等待响应\(\d+\.\d+s\)/,
     );
 

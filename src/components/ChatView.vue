@@ -71,44 +71,44 @@ const hasActiveWork = computed(
   () => (store.activeWorkByThread[props.tab.threadId ?? ""] ?? 0) > 0,
 );
 
-// ---------- 等待模型响应中提示：chip 显示期间本地计时并高频刷新秒数 ----------
-const showThinking = computed(
+// ---------- 等待响应提示：chip 显示期间本地计时并高频刷新秒数 ----------
+const showWaiting = computed(
   () =>
     props.tab.turnActive &&
     !hasActiveWork.value &&
     items.value.length > 0 &&
     interactionItems.value.length === 0,
 );
-const thinkingElapsedMs = ref(0);
-let thinkingStartedAt = 0;
-let thinkingTimer: number | undefined;
-function stopThinkingTimer() {
-  if (thinkingTimer !== undefined) {
-    window.clearInterval(thinkingTimer);
-    thinkingTimer = undefined;
+const waitingElapsedMs = ref(0);
+let waitingStartedAt = 0;
+let waitingTimer: number | undefined;
+function stopWaitingTimer() {
+  if (waitingTimer !== undefined) {
+    window.clearInterval(waitingTimer);
+    waitingTimer = undefined;
   }
 }
-function startThinkingTimer() {
-  thinkingStartedAt = Date.now();
-  thinkingElapsedMs.value = 0;
-  stopThinkingTimer();
-  thinkingTimer = window.setInterval(() => {
-    thinkingElapsedMs.value = Date.now() - thinkingStartedAt;
+function startWaitingTimer() {
+  waitingStartedAt = Date.now();
+  waitingElapsedMs.value = 0;
+  stopWaitingTimer();
+  waitingTimer = window.setInterval(() => {
+    waitingElapsedMs.value = Date.now() - waitingStartedAt;
   }, 100);
 }
 watch(
-  showThinking,
+  showWaiting,
   (v) => {
-    if (v) startThinkingTimer();
+    if (v) startWaitingTimer();
     else {
-      stopThinkingTimer();
-      thinkingElapsedMs.value = 0;
+      stopWaitingTimer();
+      waitingElapsedMs.value = 0;
     }
   },
   { immediate: true },
 );
-const thinkingSeconds = computed(() =>
-  (thinkingElapsedMs.value / 1000).toFixed(1),
+const waitingSeconds = computed(() =>
+  (waitingElapsedMs.value / 1000).toFixed(1),
 );
 
 // ---------- 回合定位：导航按钮 + 卡片，以 userMessage（data-turn-anchor）为切点 ----------
@@ -148,7 +148,7 @@ const hasTurnNav = computed(
 const turnNavSpin = computed<"fast" | "slow" | null>(() => {
   if (!props.tab.turnActive) return null;
   if (hasActiveWork.value) return "fast";
-  return showThinking.value ? "slow" : null;
+  return showWaiting.value ? "slow" : null;
 });
 
 // ---------- 合并信息簇：上下文占用 / token 用量（回合导航卡片头部） ----------
@@ -814,7 +814,7 @@ onBeforeUnmount(() => {
   scrollObserver?.disconnect();
   scrollObserver = undefined;
   scroller.value?.removeEventListener("load", onImageLoad, true);
-  stopThinkingTimer();
+  stopWaitingTimer();
   // 避免切换视图后残留滚动状态
   stickToBottom.value = true;
 });
@@ -838,8 +838,8 @@ onBeforeUnmount(() => {
         <PlanCard v-if="tab.plan" :plan="tab.plan" />
         <InlineInteraction :interactions="interactionItems" />
         <PlanPromptBubble :prompt="tab.planPrompt" />
-        <div v-if="showThinking" class="thinking-chip">
-          等待响应({{ thinkingSeconds }}s)
+        <div v-if="showWaiting" class="waiting-chip">
+          等待响应({{ waitingSeconds }}s)
           <span class="dot"></span>
           <span class="dot"></span>
           <span class="dot"></span>

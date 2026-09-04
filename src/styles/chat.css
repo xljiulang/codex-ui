@@ -9,8 +9,8 @@
   position: relative;
 }
 
-/* “思考中”发光提示 */
-.thinking-chip {
+/* “等待响应”发光提示 */
+.waiting-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -27,7 +27,7 @@
   margin-top: var(--space-4);
 }
 
-.thinking-chip .dot {
+.waiting-chip .dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
@@ -35,11 +35,11 @@
   animation: dot-blink 1.2s ease-in-out infinite;
 }
 
-.thinking-chip .dot:nth-child(2) {
+.waiting-chip .dot:nth-child(2) {
   animation-delay: 0.2s;
 }
 
-.thinking-chip .dot:nth-child(3) {
+.waiting-chip .dot:nth-child(3) {
   animation-delay: 0.4s;
 }
 
