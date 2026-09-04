@@ -3,6 +3,7 @@ import { ICON_ARROW_DOWN, ICON_ARROW_RIGHT } from "../lib/icons";
 
 defineProps<{
   label: string;
+  icon: string;
   collapsed: boolean;
 }>();
 
@@ -20,6 +21,9 @@ const emit = defineEmits<{ toggle: [] }>();
   >
     <svg class="git-section-arrow" viewBox="0 0 24 24" aria-hidden="true">
       <path :d="collapsed ? ICON_ARROW_RIGHT : ICON_ARROW_DOWN" />
+    </svg>
+    <svg class="git-section-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path :d="icon" />
     </svg>
     <span>{{ label }}</span>
     <span class="git-section-actions">

@@ -759,7 +759,18 @@
   transition: transform var(--ease), color var(--ease);
 }
 
-.git-section-head:hover .git-section-arrow {
+/* 分区标题图标（箭头与文字之间），配色跟随标题文字 */
+.git-section-icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  color: var(--text-dim);
+  transition: color var(--ease);
+}
+
+.git-section-head:hover .git-section-arrow,
+.git-section-head:hover .git-section-icon {
   color: var(--accent);
 }
 

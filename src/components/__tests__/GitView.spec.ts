@@ -1516,6 +1516,10 @@ describe("GitView 变更文件树形目录", () => {
     expect(heads[0].find("span").text()).toBe("更改");
     expect(heads[1].find("span").text()).toBe("暂存更改");
     expect(heads[2].find("span").text()).toBe("提交历史");
+    // 三个分区标题均在箭头与文字之间渲染图标
+    for (const head of heads) {
+      expect(head.find(".git-section-icon").exists()).toBe(true);
+    }
     // 分区徽章：更改总数 4（每个文件计一次），暂存数 1
     expect(heads[0].find(".git-section-count").text()).toBe("4");
     expect(heads[1].find(".git-section-count").text()).toBe("1");

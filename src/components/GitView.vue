@@ -45,7 +45,7 @@ import {
   type GitFileNode,
   type GitTreeNode,
 } from "../lib/gitTree";
-import { ICON_GIT, ICON_PLUS } from "../lib/icons";
+import { ICON_EDIT, ICON_GIT, ICON_HISTORY, ICON_PLUS, ICON_STAGE } from "../lib/icons";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -435,6 +435,7 @@ function toggleDirRow(node: GitDirNode) {
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('changes') }">
         <GitSectionHead
           label="更改"
+          :icon="ICON_EDIT"
           :collapsed="isSectionCollapsed('changes')"
           @toggle="toggleSection('changes')"
           @contextmenu="openSectionCtx('changes', $event)"
@@ -459,6 +460,7 @@ function toggleDirRow(node: GitDirNode) {
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('staged') }">
         <GitSectionHead
           label="暂存更改"
+          :icon="ICON_STAGE"
           :collapsed="isSectionCollapsed('staged')"
           @toggle="toggleSection('staged')"
           @contextmenu="openSectionCtx('staged', $event)"
@@ -488,6 +490,7 @@ function toggleDirRow(node: GitDirNode) {
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('history') }">
         <GitSectionHead
           label="提交历史"
+          :icon="ICON_HISTORY"
           :collapsed="isSectionCollapsed('history')"
           @toggle="toggleSection('history')"
         />
