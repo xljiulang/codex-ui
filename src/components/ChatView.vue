@@ -921,6 +921,17 @@ onBeforeUnmount(() => {
           <path :d="ICON_ARROW_DOWN" />
         </svg>
       </button>
+      <div
+        v-if="ctxUsage"
+        class="ctx-usage-bar"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        :aria-valuenow="ctxUsage.pct"
+        :aria-label="`上下文窗口已用 ${formatTokens(ctxUsage.used)}，最大 ${formatTokens(ctxUsage.window)}`"
+      >
+        <div class="ctx-usage-bar-fill" :style="{ width: ctxUsage.pct + '%' }"></div>
+      </div>
     </div>
     <ComposerBar :tab="tab" :active="active" />
     <div class="sr-only" aria-live="polite">{{ liveAnnouncement }}</div>

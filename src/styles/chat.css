@@ -64,6 +64,26 @@
   padding: var(--space-10) var(--space-12) var(--space-5);
 }
 
+/* 聊天滚动区底边：上下文窗口占用进度条（活动 tab 底边边框同款主题色 + 发光） */
+.ctx-usage-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  pointer-events: none;
+  z-index: 0;
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+.ctx-usage-bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
+  transition: width var(--ease-slow);
+}
+
 .scroll-bottom-btn {
   display: flex;
   align-items: center;

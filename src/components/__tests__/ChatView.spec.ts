@@ -1428,6 +1428,30 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
+  it("底边渲染上下文占用进度条（宽度=占用率，带语义 aria），无数据时不渲染", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(2));
+    tab.threadTokenUsage = { used: 5000, window: 10000 };
+    const wrapper = mountChat();
+    await warmReady();
+    const bar = wrapper.find(".chat-scroll-wrap .ctx-usage-bar");
+    expect(bar.exists()).toBe(true);
+    expect(bar.attributes("role")).toBe("progressbar");
+    expect(bar.attributes("aria-valuenow")).toBe("50");
+    expect(bar.attributes("aria-valuemax")).toBe("100");
+    expect(bar.attributes("aria-label")).toContain("已用");
+    expect(bar.attributes("aria-label")).toContain("最大");
+    const fill = bar.find(".ctx-usage-bar-fill");
+    expect(fill.exists()).toBe(true);
+    expect(fill.attributes("style")).toContain("width: 50%");
+
+    // 无上下文数据时不渲染底边进度条
+    tab.threadTokenUsage = null;
+    await nextTick();
+    await flushPromises();
+    expect(wrapper.find(".ctx-usage-bar").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("展开卡片头部渲染标题与 token/上下文/压缩顺序与文案", async () => {
     store.itemsByThread["t1"] = reactive(userThread(3));
     tab.threadTokenUsage = {
