@@ -790,15 +790,18 @@
 
 .git-section-empty {
   padding: var(--space-6) var(--space-5);
+  /* 空占位与文件树同缩进，保持「标题为根」的层级 */
+  padding-left: var(--space-10);
   font-size: var(--font-md);
   color: var(--text-dim);
-  text-align: center;
+  text-align: left;
 }
 
 .git-file-list {
   list-style: none;
   margin: 0;
-  padding: var(--space-2);
+  /* 左侧缩进：分区标题为根，文件树整体右移挂在标题之下 */
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-10);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -890,7 +893,8 @@
 .git-log-list {
   list-style: none;
   margin: 0;
-  padding: var(--space-2);
+  /* 与文件树同缩进：提交历史挂在「提交历史」标题之下 */
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-10);
   display: flex;
   flex-direction: column;
   gap: 1px;
