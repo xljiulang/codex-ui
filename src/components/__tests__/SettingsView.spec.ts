@@ -2054,6 +2054,203 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       ).checked,
     ).toBe(false);
   });
+
+  /** mcpServerStatus/list 样本：filesystem 已就绪并带工具/资源/模板 */
+  const sampleMcpStatusList = {
+    data: [
+      {
+        name: "filesystem",
+        pluginId: null,
+        serverInfo: {
+          title: "Filesystem Server",
+          version: "1.0.0",
+          description: "本地文件访问服务器",
+          websiteUrl: "https://example.com/fs",
+          icons: null,
+        },
+        tools: {
+          read_file: {
+            name: "read_file",
+            title: "读取文件",
+            description: "读取指定路径的文本文件",
+            inputSchema: {
+              type: "object",
+              properties: { path: { type: "string" } },
+            },
+          },
+          write_file: {
+            name: "write_file",
+            description: "写入文件",
+            inputSchema: { type: "object" },
+          },
+        },
+        resources: [
+          {
+            uri: "file:///data/a.txt",
+            name: "a.txt",
+            description: "示例数据",
+            mimeType: "text/plain",
+          },
+        ],
+        resourceTemplates: [
+          {
+            uriTemplate: "file:///data/{name}",
+            name: "data",
+            description: "数据目录文件",
+          },
+        ],
+        authStatus: "bearerToken",
+      },
+    ],
+  };
+
+  /** 在当前 mock 之上叠加 mcpServerStatus/list 的应答 */
+  function stubMcpStatus(list = sampleMcpStatusList) {
+    const baseImpl = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "mcpServerStatus/list")
+        return Promise.resolve(list);
+      return baseImpl(cmd, args);
+    });
+  }
+
+  it("MCP 行信息按钮打开详情弹窗，默认服务器信息 Tab 展示配置与元数据", async () => {
+    stubMcpStatus();
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".mcp-server-row");
+    expect(rows[0].find(".mcp-row-info").attributes("aria-label")).toBe(
+      "查看详情",
+    );
+    await rows[0].find(".mcp-row-info").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "mcpServerStatus/list",
+      params: { detail: "full" },
+    });
+    expect(wrapper.find(".modal-title").text()).toBe("filesystem");
+    expect(wrapper.findAll(".mcp-detail-tab")).toHaveLength(3);
+    expect(
+      wrapper.findAll(".mcp-detail-tab")[0].attributes("aria-selected"),
+    ).toBe("true");
+    const fields = wrapper.find(".mcp-detail-fields");
+    expect(fields.text()).toContain("filesystem");
+    expect(fields.text()).toContain("stdio");
+    expect(fields.text()).toContain("npx");
+    expect(fields.text()).toContain("Filesystem Server");
+    expect(fields.text()).toContain("1.0.0");
+    expect(fields.text()).toContain("Bearer Token");
+    await wrapper.find(".modal-close").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".mcp-detail").exists()).toBe(false);
+  });
+
+  it("MCP 详情工具 Tab 折叠展示输入参数 JSON 且带数量角标", async () => {
+    stubMcpStatus();
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-info")
+      .trigger("click");
+    await flushPromises();
+    const tabs = wrapper.findAll(".mcp-detail-tab");
+    expect(tabs[1].text()).toContain("工具");
+    expect(tabs[1].find(".mcp-detail-tab-count").text()).toBe("2");
+    await tabs[1].trigger("click");
+    await flushPromises();
+    expect(
+      wrapper.findAll(".mcp-detail-tab")[1].attributes("aria-selected"),
+    ).toBe("true");
+    expect(wrapper.find(".mcp-detail-tools").text()).toContain("read_file");
+    expect(wrapper.find(".mcp-detail-tools").text()).toContain(
+      "读取指定路径的文本文件",
+    );
+    expect(wrapper.findAll(".mcp-detail-schema")).toHaveLength(2);
+    expect(wrapper.find(".mcp-detail-schema pre").text()).toContain(
+      '"path"',
+    );
+  });
+
+  it("MCP 详情资源 Tab：分组渲染并复制 URI", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const clipboardDesc = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    stubMcpStatus();
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-info")
+      .trigger("click");
+    await flushPromises();
+    const tabs = wrapper.findAll(".mcp-detail-tab");
+    expect(tabs[2].find(".mcp-detail-tab-count").text()).toBe("2");
+    await tabs[2].trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("资源（1）");
+    expect(wrapper.text()).toContain("资源模板（1）");
+    expect(wrapper.text()).toContain("file:///data/a.txt");
+    await wrapper.find(".mcp-resource-copy-btn").trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith("file:///data/a.txt");
+    expect(store.toast).toContain("URI 已复制");
+    if (clipboardDesc) {
+      Object.defineProperty(navigator, "clipboard", clipboardDesc);
+    } else {
+      Reflect.deleteProperty(navigator, "clipboard");
+    }
+  });
+
+  it("MCP 详情未查询到状态时展示空态并可重新查询", async () => {
+    stubMcpStatus({ data: [] });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-info")
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".mcp-detail-empty").text()).toContain("未查询到");
+    const before = mockedInvoke.mock.calls.filter(
+      ([name, arg]) =>
+        name === "codex_rpc" &&
+        (arg as Record<string, unknown> | undefined)?.method ===
+          "mcpServerStatus/list",
+    ).length;
+    await wrapper.find(".mcp-detail-empty .btn").trigger("click");
+    await flushPromises();
+    const after = mockedInvoke.mock.calls.filter(
+      ([name, arg]) =>
+        name === "codex_rpc" &&
+        (arg as Record<string, unknown> | undefined)?.method ===
+          "mcpServerStatus/list",
+    ).length;
+    expect(after).toBe(before + 1);
+  });
 });
 
 describe("SettingsView 设置标签行为", () => {

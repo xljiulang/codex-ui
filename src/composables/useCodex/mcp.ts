@@ -1,7 +1,15 @@
 // useCodex 拆分模块：设置页 MCP 管理（经 app-server 接口 config/read + config/batchWrite 读写，
 // 不再由 Rust 直接操作 config.toml）。
 import { invoke } from "@tauri-apps/api/core";
-import type { McpEnvEntry, McpServerInfo } from "../../lib/types";
+import type {
+  McpAuthStatus,
+  McpEnvEntry,
+  McpResourceDetail,
+  McpResourceTemplateDetail,
+  McpServerDetail,
+  McpServerInfo,
+  McpToolDetail,
+} from "../../lib/types";
 
 /** config/read 返回的配置层（取子集，与服务端 schema 对齐） */
 interface RawConfigLayer {
@@ -21,6 +29,59 @@ type RawMcpServer = Record<string, unknown>;
 
 /** omit_tools_from 合法暴露面（ToolExposureSurface） */
 const MCP_OMIT_TOOLS = new Set(["direct", "deferred", "code_mode"]);
+
+/** mcpServerStatus/list 原始条目（取 codex 协议子集） */
+interface RawMcpServerStatus {
+  name?: string;
+  serverInfo?: {
+    title?: string | null;
+    version?: string;
+    description?: string | null;
+    websiteUrl?: string | null;
+    icons?: unknown[] | null;
+  } | null;
+  tools?: Record<string, RawMcpTool | undefined>;
+  resources?: RawMcpResource[];
+  resourceTemplates?: RawMcpResourceTemplate[];
+  authStatus?: string;
+}
+
+interface RawMcpTool {
+  name?: string;
+  title?: string;
+  description?: string;
+  inputSchema?: unknown;
+}
+
+interface RawMcpResource {
+  uri?: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+interface RawMcpResourceTemplate {
+  uriTemplate?: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+interface RawListMcpServerStatusResponse {
+  data?: RawMcpServerStatus[] | null;
+  nextCursor?: string | null;
+}
+
+/** McpAuthStatus 合法取值集合（缺失/非法统一回落 unknown） */
+const MCP_AUTH_STATUSES = new Set<McpAuthStatus>([
+  "unknown",
+  "unsupported",
+  "notLoggedIn",
+  "bearerToken",
+  "oAuth",
+]);
 
 /** 读取 MCP 服务器配置：经 config/read 取用户层原始 [mcp_servers.*] 并归一化为 UI 模型。 */
 export async function loadMcpServers(): Promise<{
@@ -57,6 +118,95 @@ export async function loadMcpServers(): Promise<{
     });
   }
   return { servers, raw: { ...rawMap } };
+}
+
+/** 读取指定 MCP 服务器的能力状态（工具/资源/模板/认证），找不到返回 null。 */
+export async function loadMcpServerStatus(
+  name: string,
+): Promise<McpServerDetail | null> {
+  const res = await invoke<RawListMcpServerStatusResponse>("codex_rpc", {
+    method: "mcpServerStatus/list",
+    params: { detail: "full" },
+  });
+  const raw = res?.data?.find((s) => s?.name === name) ?? null;
+  return raw ? normalizeMcpServerStatus(raw) : null;
+}
+
+/** 归一化 mcpServerStatus/list 条目 → UI 模型（纯函数，便于单测）。 */
+export function normalizeMcpServerStatus(
+  raw: RawMcpServerStatus,
+): McpServerDetail {
+  const tools: McpToolDetail[] = [];
+  for (const t of Object.values(raw.tools ?? {})) {
+    if (!t) continue;
+    const name = typeof t.name === "string" ? t.name.trim() : "";
+    if (!name) continue;
+    tools.push({
+      name,
+      title: typeof t.title === "string" ? t.title : undefined,
+      description: typeof t.description === "string" ? t.description : undefined,
+      inputSchema: t.inputSchema,
+    });
+  }
+  tools.sort((a, b) => a.name.localeCompare(b.name));
+
+  const resources: McpResourceDetail[] = [];
+  for (const r of raw.resources ?? []) {
+    if (!r || typeof r.uri !== "string" || !r.uri.trim()) continue;
+    resources.push({
+      uri: r.uri,
+      name: typeof r.name === "string" ? r.name : undefined,
+      title: typeof r.title === "string" ? r.title : undefined,
+      description: typeof r.description === "string" ? r.description : undefined,
+      mimeType: typeof r.mimeType === "string" ? r.mimeType : undefined,
+    });
+  }
+  resources.sort((a, b) => (a.uri || "").localeCompare(b.uri || ""));
+
+  const resourceTemplates: McpResourceTemplateDetail[] = [];
+  for (const rt of raw.resourceTemplates ?? []) {
+    if (!rt || typeof rt.uriTemplate !== "string" || !rt.uriTemplate.trim()) {
+      continue;
+    }
+    resourceTemplates.push({
+      uriTemplate: rt.uriTemplate,
+      name:
+        typeof rt.name === "string" && rt.name.trim()
+          ? rt.name.trim()
+          : rt.uriTemplate,
+      title: typeof rt.title === "string" ? rt.title : undefined,
+      description: typeof rt.description === "string" ? rt.description : undefined,
+      mimeType: typeof rt.mimeType === "string" ? rt.mimeType : undefined,
+    });
+  }
+  resourceTemplates.sort((a, b) =>
+    (a.uriTemplate || "").localeCompare(b.uriTemplate || ""),
+  );
+
+  const authStatus: McpAuthStatus = MCP_AUTH_STATUSES.has(
+    raw.authStatus as McpAuthStatus,
+  )
+    ? (raw.authStatus as McpAuthStatus)
+    : "unknown";
+  const serverInfo = raw.serverInfo
+    ? {
+        title: raw.serverInfo.title,
+        version: typeof raw.serverInfo.version === "string"
+          ? raw.serverInfo.version
+          : "",
+        description: raw.serverInfo.description,
+        websiteUrl: raw.serverInfo.websiteUrl,
+        icons: raw.serverInfo.icons,
+      }
+    : undefined;
+  return {
+    name: typeof raw.name === "string" ? raw.name : "",
+    serverInfo,
+    tools,
+    resources,
+    resourceTemplates,
+    authStatus,
+  };
 }
 
 /** 保存 MCP 服务器配置：整表同步（列表外的服务器删除），保留未知字段，经 config/batchWrite 写入用户层。 */

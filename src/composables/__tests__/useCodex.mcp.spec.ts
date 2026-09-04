@@ -1,4 +1,9 @@
-import { loadMcpServers, saveMcpServers } from "../useCodex/mcp";
+import {
+  loadMcpServerStatus,
+  loadMcpServers,
+  normalizeMcpServerStatus,
+  saveMcpServers,
+} from "../useCodex/mcp";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -353,5 +358,140 @@ describe("useCodex/mcp", () => {
       custom: 2,
     });
     expect(value["http-x"].cwd).toBeUndefined();
+  });
+
+  it("loadMcpServerStatus 命中时返回归一化详情并调用 full 列表", async () => {
+    mockedInvoke.mockResolvedValue({
+      data: [
+        {
+          name: "filesystem",
+          pluginId: null,
+          serverInfo: {
+            title: "Filesystem Server",
+            version: "1.0.0",
+            description: "本地文件访问",
+            websiteUrl: "https://example.com",
+            icons: null,
+          },
+          tools: {
+            write: {
+              name: "write",
+              description: "写文件",
+              inputSchema: { type: "object" },
+            },
+            read: {
+              name: "read",
+              description: "读文件",
+              inputSchema: { type: "object" },
+            },
+          },
+          resources: [
+            {
+              uri: "file:///b.txt",
+              name: "b.txt",
+              mimeType: "text/plain",
+            },
+            {
+              uri: "file:///a.txt",
+              name: "a.txt",
+              description: "示例资源",
+            },
+          ],
+          resourceTemplates: [
+            {
+              uriTemplate: "file:///{path}",
+              name: "file",
+              description: "按路径读取",
+            },
+          ],
+          authStatus: "oAuth",
+        },
+        { name: "other", tools: {}, resources: [], resourceTemplates: [] },
+      ],
+    });
+    const detail = await loadMcpServerStatus("filesystem");
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "mcpServerStatus/list",
+      params: { detail: "full" },
+    });
+    expect(detail).toEqual({
+      name: "filesystem",
+      serverInfo: {
+        title: "Filesystem Server",
+        version: "1.0.0",
+        description: "本地文件访问",
+        websiteUrl: "https://example.com",
+        icons: null,
+      },
+      tools: [
+        {
+          name: "read",
+          description: "读文件",
+          inputSchema: { type: "object" },
+        },
+        {
+          name: "write",
+          description: "写文件",
+          inputSchema: { type: "object" },
+        },
+      ],
+      resources: [
+        {
+          uri: "file:///a.txt",
+          name: "a.txt",
+          description: "示例资源",
+        },
+        {
+          uri: "file:///b.txt",
+          name: "b.txt",
+          mimeType: "text/plain",
+        },
+      ],
+      resourceTemplates: [
+        {
+          uriTemplate: "file:///{path}",
+          name: "file",
+          description: "按路径读取",
+        },
+      ],
+      authStatus: "oAuth",
+    });
+  });
+
+  it("loadMcpServerStatus 找不到 name 时返回 null", async () => {
+    mockedInvoke.mockResolvedValue({
+      data: [{ name: "other", tools: {}, resources: [], resourceTemplates: [] }],
+    });
+    const detail = await loadMcpServerStatus("missing");
+    expect(detail).toBeNull();
+  });
+
+  it("normalizeMcpServerStatus 容错：非法工具/资源/模板/认证状态被过滤回落", () => {
+    const detail = normalizeMcpServerStatus({
+      name: "demo",
+      serverInfo: null,
+      tools: {
+        ok: { name: "ok", description: "可用", inputSchema: { type: "object" } },
+        noName: { name: "   " },
+        empty: undefined,
+      },
+      resources: [
+        { uri: "file:///x", name: "x" },
+        { uri: "", name: "bad" },
+      ],
+      resourceTemplates: [
+        { uriTemplate: "file:///{p}", name: "p" },
+        { uriTemplate: "", name: "bad" },
+      ],
+      authStatus: "some-weird-value",
+    });
+    expect(detail).toEqual({
+      name: "demo",
+      serverInfo: undefined,
+      tools: [{ name: "ok", description: "可用", inputSchema: { type: "object" } }],
+      resources: [{ uri: "file:///x", name: "x" }],
+      resourceTemplates: [{ uriTemplate: "file:///{p}", name: "p" }],
+      authStatus: "unknown",
+    });
   });
 });

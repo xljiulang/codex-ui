@@ -300,6 +300,60 @@ export interface McpServerInfo {
   omit_tools_from?: string[];
 }
 
+/** mcpServerStatus/list 返回的认证状态（McpAuthStatus） */
+export type McpAuthStatus =
+  | "unknown"
+  | "unsupported"
+  | "notLoggedIn"
+  | "bearerToken"
+  | "oAuth";
+
+/** MCP 服务器元数据（协议 serverInfo 归一化） */
+export interface McpServerInfoDetail {
+  title?: string | null;
+  version?: string;
+  description?: string | null;
+  websiteUrl?: string | null;
+  icons?: unknown[] | null;
+}
+
+/** 单个 MCP 工具详情 */
+export interface McpToolDetail {
+  name: string;
+  title?: string;
+  description?: string;
+  /** JSON Schema（协议 JsonValue） */
+  inputSchema?: unknown;
+}
+
+/** 单个 MCP 资源详情 */
+export interface McpResourceDetail {
+  uri: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+/** 单个 MCP 资源模板详情 */
+export interface McpResourceTemplateDetail {
+  uriTemplate: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+}
+
+/** 单个 MCP 服务器能力详情（mcpServerStatus/list 归一化，供设置页信息弹窗） */
+export interface McpServerDetail {
+  name: string;
+  serverInfo?: McpServerInfoDetail;
+  tools: McpToolDetail[];
+  resources: McpResourceDetail[];
+  resourceTemplates: McpResourceTemplateDetail[];
+  authStatus: McpAuthStatus;
+}
+
 /** 单个本地技能条目（skills_read 返回） */
 export interface SkillsItem {
   name: string;

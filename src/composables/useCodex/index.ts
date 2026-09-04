@@ -57,7 +57,12 @@ export {
   removeMarketplace,
   uninstallPlugin,
 } from "./plugins";
-export { loadMcpServers, saveMcpServers } from "./mcp";
+export {
+  loadMcpServerStatus,
+  loadMcpServers,
+  normalizeMcpServerStatus,
+  saveMcpServers,
+} from "./mcp";
 export {
   loadMemoryConfig,
   saveMemoryConfig,
