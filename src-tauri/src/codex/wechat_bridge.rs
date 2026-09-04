@@ -104,6 +104,21 @@ fn is_thread_not_found(err: &str) -> bool {
     e.contains("thread not found") || e.contains("thread does not exist")
 }
 
+/// 完成信号是否属于当前进行中的回合：线程 id 必须匹配；回合 id 仅在双方非空时精确匹配，
+/// 允许 turn/start 响应缺 id 时按线程匹配兜底（避免永不完成）。
+fn is_this_turn_completion(
+    thread_id: &str,
+    turn_id: &str,
+    current_thread: &str,
+    current_turn: &str,
+) -> bool {
+    if thread_id != current_thread {
+        return false;
+    }
+    let exact_turn = !current_turn.is_empty() && !turn_id.is_empty();
+    !exact_turn || turn_id == current_turn
+}
+
 /// accounts 快照中的账号是否可自动启动接收：已配置且未过期（session_expired 跳过）。
 fn account_is_startable(a: &Value) -> bool {
     a.get("configured").and_then(|c| c.as_bool()) == Some(true)
@@ -216,7 +231,7 @@ struct BridgeInner {
     /// 出队唤醒信号接收端（首启被泵任务取走）。
     job_rx: Option<mpsc::UnboundedReceiver<()>>,
     /// 回合完成信号接收端（首启被泵任务取走）。
-    done_rx: Option<mpsc::UnboundedReceiver<(String, String)>>,
+    done_rx: Option<mpsc::UnboundedReceiver<(String, String, String)>>,
     /// 已记过首次忽略日志的「账号|发送者」键（进程内去重，防日志刷屏）。
     ignored_logged: HashSet<String>,
 }
@@ -257,12 +272,13 @@ pub struct WeChatBridge {
     login_cancel: Arc<Notify>,
     inner: Mutex<BridgeInner>,
     job_tx: mpsc::UnboundedSender<()>,
-    done_tx: mpsc::UnboundedSender<(String, String)>,
+    done_tx: mpsc::UnboundedSender<(String, String, String)>,
     seq: AtomicU64,
 }
 
 struct ActiveTurn {
     thread_id: String,
+    turn_id: String,
     account_id: String,
     peer: String,
     deadline: std::time::Instant,
@@ -858,7 +874,14 @@ impl WeChatBridge {
                                         .and_then(|x| x.as_str())
                                         .unwrap_or("")
                                         .to_string();
-                                    let _ = this.done_tx.send((tid.to_string(), status));
+                                    // 取真实 turn_id，泵仅按 (threadId, turnId) 双匹配才能结束当前回合，
+                                    // 避免同线程上残留的旧完成信号误判新回合。
+                                    let turn_id = params
+                                        .pointer("/turn/id")
+                                        .and_then(|x| x.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    let _ = this.done_tx.send((tid.to_string(), turn_id, status));
                                 }
                             }
                             _ => {}
@@ -877,7 +900,7 @@ impl WeChatBridge {
     async fn pump_loop(
         self: Arc<Self>,
         mut wake: mpsc::UnboundedReceiver<()>,
-        mut done: mpsc::UnboundedReceiver<(String, String)>,
+        mut done: mpsc::UnboundedReceiver<(String, String, String)>,
     ) {
         let mut current: Option<ActiveTurn> = None;
         loop {
@@ -919,9 +942,11 @@ impl WeChatBridge {
                         }
                         break;
                     }
-                    Ok(Some((tid, status))) => {
-                        if tid != c.thread_id {
-                            current = Some(c); // 他线完成信号：放回继续等本线程
+                    Ok(Some((tid, turn_id, status))) => {
+                        // 仅当线程与回合 id 都匹配才视为本回合完成；
+                        // 同线程残留的旧完成信号（后台压缩/重连遗留）不结束当前回合。
+                        if !is_this_turn_completion(&tid, &turn_id, &c.thread_id, &c.turn_id) {
+                            current = Some(c); // 非本回合完成信号：放回继续等本回合
                             continue;
                         }
                         let captured = self
@@ -934,7 +959,7 @@ impl WeChatBridge {
                         // 通知订阅可能漏抓 item/completed(agentMessage)：为空时回查线程取回复文本兜底。
                         let final_text = if captured.trim().is_empty() {
                             let fetched = self
-                                .fetch_turn_agent_text(&c.thread_id, &tid)
+                                .fetch_turn_agent_text(&c.thread_id, &turn_id)
                                 .await;
                             let got = fetched.as_deref().map_or(false, |s| !s.trim().is_empty());
                             if got {
@@ -1048,18 +1073,26 @@ impl WeChatBridge {
         let typing_task = self.spawn_typing_refresh(account_id, peer);
         self.set_typing(account_id, peer, 1).await;
         let params = build_turn_params(thread_id, text, &model, &self.next_message_id());
-        if let Err(e) = self
+        let turn_id = match self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))
             .await
         {
-            typing_task.abort();
-            self.set_typing(account_id, peer, 2).await;
-            self.clear_active(thread_id).await;
-            return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
-        }
+            Ok(resp) => resp
+                .pointer("/turn/id")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            Err(e) => {
+                typing_task.abort();
+                self.set_typing(account_id, peer, 2).await;
+                self.clear_active(thread_id).await;
+                return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
+            }
+        };
         Ok(ActiveTurn {
             thread_id: thread_id.to_string(),
+            turn_id,
             account_id: account_id.to_string(),
             peer: peer.to_string(),
             deadline: std::time::Instant::now() + Duration::from_secs(TURN_TIMEOUT_SECS),
@@ -1078,21 +1111,30 @@ impl WeChatBridge {
 
     /// 回查线程：取指定回合的最后一条非空 `agentMessage` 文本（best-effort，失败返回 None）。
     async fn fetch_turn_agent_text(&self, thread_id: &str, turn_id: &str) -> Option<String> {
-        let resp = self
-            .server
-            .request(
-                "thread/turns/list",
-                json!({
-                    "threadId": thread_id,
-                    "limit": 5,
-                    "sortDirection": "desc",
-                    "itemsView": "full",
-                }),
-                Some(Duration::from_secs(5)),
-            )
-            .await
-            .ok()?;
-        extract_turn_agent_text(&resp, turn_id)
+        // turn/completed 刚下发时回查可能尚未落库，短重试 2 次（各 200ms）防误报无输出。
+        for attempt in 0..2 {
+            let resp = self
+                .server
+                .request(
+                    "thread/turns/list",
+                    json!({
+                        "threadId": thread_id,
+                        "limit": 5,
+                        "sortDirection": "desc",
+                        "itemsView": "full",
+                    }),
+                    Some(Duration::from_secs(5)),
+                )
+                .await
+                .ok()?;
+            if let Some(text) = extract_turn_agent_text(&resp, turn_id) {
+                return Some(text);
+            }
+            if attempt == 0 {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }
+        None
     }
 
     /// 回复联系人并把状态推进到空闲（触发下一条处理）。
@@ -1280,6 +1322,26 @@ mod tests {
         assert!(!final_reply_text("", "completed", None).contains("执行失败"));
         assert!(final_reply_text("", "completed", Some(String::new())).contains("没有输出"));
         assert!(final_reply_text("", "failed", Some(String::new())).contains("failed"));
+    }
+
+    #[test]
+    fn turn_completion_matches_thread_and_turn() {
+        // 线程 + 回合全部匹配 → 命中
+        assert!(is_this_turn_completion("t-1", "turn-2", "t-1", "turn-2"));
+        // 线程不匹配 → 不命中（他线完成信号）
+        assert!(!is_this_turn_completion("t-2", "turn-2", "t-1", "turn-2"));
+        // 同线程但旧 turn 完成信号 → 不命中（关键：修复误判）
+        assert!(!is_this_turn_completion("t-1", "turn-old", "t-1", "turn-2"));
+    }
+
+    #[test]
+    fn turn_completion_falls_back_to_thread_when_turn_id_missing() {
+        // 当前回合被记录的 turn_id 缺省 → 仅按线程匹配（不误判永不完成）
+        assert!(is_this_turn_completion("t-1", "turn-x", "t-1", ""));
+        // 完成信号缺 turn_id → 命中当前回合
+        assert!(is_this_turn_completion("t-1", "", "t-1", "turn-2"));
+        // 两者都非空且不相等 → 不命中
+        assert!(!is_this_turn_completion("t-1", "turn-a", "t-1", "turn-b"));
     }
 
     #[test]
