@@ -299,7 +299,8 @@
   right: 8px;
   opacity: 0;
 }
-.msg-user:hover .copy-btn,
+/* 复制按钮悬停气泡才显示（而非悬停整行） */
+.msg-user .bubble:hover .copy-btn,
 .msg-user:focus-within .copy-btn {
   opacity: 1;
 }
