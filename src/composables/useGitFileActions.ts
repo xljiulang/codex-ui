@@ -2,7 +2,7 @@ import { ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, setToast, toastError } from "./useCodex";
 import { markGitStatusFresh, setGitOpInFlight } from "./useGitChanges";
-import type { CtxItem } from "./useActionMenu";
+import type { ActionMenuItem } from "./useActionMenu";
 import type { GitFile, GitStatus } from "../lib/gitChanges";
 import type { GitDirNode } from "../lib/gitTree";
 import {
@@ -24,7 +24,7 @@ export type GitSection = "changes" | "staged";
  */
 export function useGitFileActions(options: {
   gitStatus: Ref<GitStatus | null>;
-  openCtx: (e: MouseEvent, items: CtxItem[]) => void;
+  openCtx: (e: MouseEvent, items: ActionMenuItem[]) => void;
   openDiff: (file: GitFile) => void;
 }) {
   const gitActionBusy = ref(false);
@@ -166,7 +166,7 @@ export function useGitFileActions(options: {
     e.preventDefault();
     e.stopPropagation();
     if (!sectionFiles(section).length) return;
-    const items: CtxItem[] = [];
+    const items: ActionMenuItem[] = [];
     if (section === "changes") {
       items.push({
         label: "暂存",
@@ -192,7 +192,7 @@ export function useGitFileActions(options: {
   function openFileCtx(section: GitSection, file: GitFile, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    const items: CtxItem[] = [
+    const items: ActionMenuItem[] = [
       {
         label: "打开",
         icon: ICON_OPEN,
@@ -256,7 +256,7 @@ export function useGitFileActions(options: {
   function openDirCtx(section: GitSection, node: GitDirNode, e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    const items: CtxItem[] = [];
+    const items: ActionMenuItem[] = [];
     if (section === "changes") {
       // 目录出现在更改区即含工作区侧更改
       items.push({

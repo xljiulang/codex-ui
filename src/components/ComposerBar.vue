@@ -421,7 +421,7 @@ function setEditorPlainText(text: string) {
   }
 }
 
-function submit(flip = false) {
+function submit(invertFollowup = false) {
   closeMenus(); // 发送后关闭可能开着的菜单，避免回合中还能切换模式
   const runs = currentRuns();
   const wireInline = runsToWireText(runs, refsById.value);
@@ -450,7 +450,7 @@ function submit(flip = false) {
   if (plainText.trim()) {
     inputHistory.push(plainText);
   }
-  void sendPrompt(wireText, flip);
+  void sendPrompt(wireText, invertFollowup);
 }
 
 function removeRowAttachment(i: number) {

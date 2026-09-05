@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { CtxItem } from "../composables/useActionMenu";
+import type { ActionMenuItem } from "../composables/useActionMenu";
 
 defineProps<{
-  items: CtxItem[];
+  items: ActionMenuItem[];
   x: number;
   y: number;
   /** 菜单项整体禁用（如 Git 操作进行中） */

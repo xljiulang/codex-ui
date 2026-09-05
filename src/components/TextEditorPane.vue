@@ -8,7 +8,7 @@ import { formatFileSize } from "../lib/sessionFs";
 import { languageFromPath } from "../lib/highlight";
 import { relPathOf } from "../lib/format";
 import { saveFileTab, type FileEditorTab } from "../composables/useEditorTabs";
-import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
 import { setToast } from "../composables/useCodex";
 import { copyText } from "../lib/clipboard";
 import { formatDoc, isFormattablePath } from "../lib/codeFormat";
@@ -128,9 +128,9 @@ function onEditorContextMenu(e: MouseEvent) {
 }
 
 /** 常用功能菜单：剪切/复制仅在存在选区时显示 */
-function buildMenuItems(): CtxItem[] {
+function buildMenuItems(): ActionMenuItem[] {
   const hasSelection = view ? !view.state.selection.main.empty : false;
-  const items: CtxItem[] = [
+  const items: ActionMenuItem[] = [
     {
       label: "撤销",
       icon: ICON_UNDO,

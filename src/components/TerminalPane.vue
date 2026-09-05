@@ -9,7 +9,7 @@ import {
   attachTerminal,
   type TerminalHandle,
 } from "../composables/useTerminalEvents";
-import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
 import { copyText } from "../lib/clipboard";
 import { ICON_COPY, ICON_PASTE } from "../lib/icons";
 import ContextMenu from "./ContextMenu.vue";
@@ -135,8 +135,8 @@ function syncSize() {
 }
 
 /** 终端右键菜单项：有选区时提供「复制」，恒提供「粘贴」 */
-function buildTerminalMenu(): CtxItem[] {
-  const items: CtxItem[] = [];
+function buildTerminalMenu(): ActionMenuItem[] {
+  const items: ActionMenuItem[] = [];
   if (term?.hasSelection()) {
     items.push({
       label: "复制",

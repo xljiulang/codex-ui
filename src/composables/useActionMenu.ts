@@ -1,7 +1,7 @@
 import { ref } from "vue";
 import { clampMenuPos } from "../lib/ctxMenu";
 
-export interface CtxItem {
+export interface ActionMenuItem {
   label: string;
   icon?: string;
   /** icon 路径按非零环绕（nonzero）渲染（如微信 Logo 重叠气泡）；缺省为 evenodd 挖空 */
@@ -22,7 +22,7 @@ export interface CtxItem {
 export interface ActionMenuState {
   x: number;
   y: number;
-  items: CtxItem[];
+  items: ActionMenuItem[];
 }
 
 /**
@@ -38,7 +38,7 @@ export function useActionMenu(options?: {
   const scrollScope = options?.scrollScope ?? "";
   const ctxMenu = ref<ActionMenuState | null>(null);
 
-  function openCtx(e: MouseEvent, items: CtxItem[]) {
+  function openCtx(e: MouseEvent, items: ActionMenuItem[]) {
     e.preventDefault();
     e.stopPropagation();
     const pos = clampMenuPos(

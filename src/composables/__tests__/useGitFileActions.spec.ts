@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
-import type { CtxItem } from "../useActionMenu";
+import type { ActionMenuItem } from "../useActionMenu";
 import type { GitDirNode, GitFileNode } from "../../lib/gitTree";
 import type { GitStatus } from "../../lib/gitChanges";
 
@@ -56,8 +56,8 @@ function dirNode(overrides: Partial<GitDirNode> = {}): GitDirNode {
 
 function setup() {
   const gitStatus = ref<GitStatus | null>(okStatus);
-  const captured: CtxItem[][] = [];
-  const openCtx = vi.fn((_e: MouseEvent, items: CtxItem[]) => {
+  const captured: ActionMenuItem[][] = [];
+  const openCtx = vi.fn((_e: MouseEvent, items: ActionMenuItem[]) => {
     captured.push(items);
   });
   const openDiff = vi.fn();

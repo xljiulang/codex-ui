@@ -28,7 +28,7 @@ export {
   saveFileTab,
   SETTINGS_TAB_ID,
 } from "./open";
-export { refreshActiveTabFromFs, type FsChangedPayload } from "./refresh";
+export { refreshTabsFromFs, type FsChangedPayload } from "./refresh";
 export {
   __resetEditorTabsForTest,
   cancelClose,

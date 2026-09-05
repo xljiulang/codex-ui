@@ -15,7 +15,7 @@ import {
 } from "./tree";
 import { ensureTextFileIcon } from "./icons";
 import { clearSearch, resetSearchState } from "./search";
-import { refreshActiveTabFromFs } from "../useEditorTabs";
+import { refreshTabsFromFs } from "../useEditorTabs";
 
 let active = false;
 /** 已加载的根路径：同根重新激活时保留展开状态，仅刷新数据 */
@@ -34,7 +34,7 @@ async function syncWatcher() {
           const payload = e.payload as
             | { root?: unknown; paths?: unknown }
             | undefined;
-          void refreshActiveTabFromFs(
+          void refreshTabsFromFs(
             payload &&
               typeof payload.root === "string" &&
               Array.isArray(payload.paths) &&

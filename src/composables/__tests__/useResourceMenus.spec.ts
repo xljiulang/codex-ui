@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
-import type { CtxItem } from "../useActionMenu";
+import type { ActionMenuItem } from "../useActionMenu";
 import type { FsEntry } from "../../lib/sessionFs";
 
 vi.mock("../useEditorTabs", () => ({
@@ -46,8 +46,8 @@ function mockEvent() {
 }
 
 function setup(overrides: { paste?: boolean } = {}) {
-  const captured: CtxItem[][] = [];
-  const openCtx = vi.fn((_e: MouseEvent, items: CtxItem[]) => {
+  const captured: ActionMenuItem[][] = [];
+  const openCtx = vi.fn((_e: MouseEvent, items: ActionMenuItem[]) => {
     captured.push(items);
   });
   const menus = useResourceMenus({

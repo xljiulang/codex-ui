@@ -1,5 +1,5 @@
 import type { Ref } from "vue";
-import type { CtxItem } from "./useActionMenu";
+import type { ActionMenuItem } from "./useActionMenu";
 import { openTerminalTab, isFileTabOpen } from "./useEditorTabs";
 import {
   addAsAttachment,
@@ -26,7 +26,7 @@ import {
 
 /** 资源树右键菜单构建（根/目录/文件统一分发） */
 export function useResourceMenus(options: {
-  openCtx: (e: MouseEvent, items: CtxItem[]) => void;
+  openCtx: (e: MouseEvent, items: ActionMenuItem[]) => void;
   rootEntry: Ref<FsEntry | null>;
   hasActiveSessionTab: Ref<boolean>;
   onCreateFolder: (parent: FsEntry) => void;
@@ -132,7 +132,7 @@ export function useResourceMenus(options: {
   }
 
   function openFileMenu(entry: FsEntry, e: MouseEvent) {
-    const items: CtxItem[] = [
+    const items: ActionMenuItem[] = [
       ...(isFileTabOpen(workspace.value, entry.path)
         ? []
         : [

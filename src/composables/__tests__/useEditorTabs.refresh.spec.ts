@@ -31,7 +31,7 @@ import {
 import {
   __resetRefreshForTest,
   __setRefreshInteractionForTest,
-  refreshActiveTabFromFs,
+  refreshTabsFromFs,
 } from "../useEditorTabs/refresh";
 import { activeTabId } from "../useTabs";
 import { docxToHtml } from "../../lib/docx";
@@ -68,7 +68,7 @@ async function openFile(path: string, content: string): Promise<FileEditorTab> {
   return tab;
 }
 
-describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
+describe("refreshTabsFromFs 活动标签外部刷新", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedDocxToHtml.mockReset();
@@ -90,7 +90,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
 
     expect(tab.editorState!.doc.toString()).toBe("line1\nline2\nchanged\nline4");
     expect(tab.editorState!.selection.main.head).toBe(6); // line2 行首
@@ -106,7 +106,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(tab.editorState!.doc.toString()).toBe("hello");
     expect(tab.status).toBe("");
   });
@@ -115,7 +115,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     const tab = await openFile("a.txt", "hello");
     tab.dirty = true;
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "session_fs_read",
       expect.anything(),
@@ -131,7 +131,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     )!;
     mockedInvoke.mockClear();
     // 活动标签是 b.txt，payload 命中 a.txt：不触发任何读取
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "session_fs_read",
       expect.anything(),
@@ -145,7 +145,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["b.txt"] });
+    await refreshTabsFromFs({ root, paths: ["b.txt"] });
     const b = tabs.find(
       (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("b.txt"),
     )!;
@@ -163,12 +163,12 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     )!;
     mockedInvoke.mockClear();
 
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(a.stale).toBe(true); // 非活动命中：标记待补刷
     expect(b.stale).toBe(false); // 活动标签 b 未命中路径
 
     // 工作区不匹配：不标记
-    await refreshActiveTabFromFs({ root: "D:\\other", paths: ["a.txt"] });
+    await refreshTabsFromFs({ root: "D:\\other", paths: ["a.txt"] });
     expect(a.stale).toBe(true); // 维持此前标记
   });
 
@@ -180,7 +180,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     const a = tabs.find(
       (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
     )!;
@@ -195,7 +195,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] }); // 非活动 a 标记 stale
+    await refreshTabsFromFs({ root, paths: ["a.txt"] }); // 非活动 a 标记 stale
     expect(a.stale).toBe(true);
 
     mockedInvoke.mockImplementation((cmd) => {
@@ -217,7 +217,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     a.dirty = true;
 
     activeTabId.value = a.id;
@@ -237,7 +237,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.reject(new Error("文件不存在"));
@@ -265,7 +265,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     activeTabId.value = a.id; // 预览转非活动
     await flushPromises();
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["pic.png"] });
+    await refreshTabsFromFs({ root, paths: ["pic.png"] });
     expect(img.stale).toBe(true);
 
     activeTabId.value = img.id;
@@ -277,7 +277,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
   it("工作区不匹配跳过", async () => {
     const tab = await openFile("a.txt", "hello");
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({
+    await refreshTabsFromFs({
       root: "D:\\other",
       paths: ["a.txt"],
     });
@@ -296,7 +296,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(tab.editorState!.doc.toString()).toBe("hello");
     expect(tab.status).toContain("外部刷新失败");
   });
@@ -310,12 +310,12 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
 
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(tab.missing).toBe(true);
     expect(tab.status).toContain("外部刷新失败");
 
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    await refreshTabsFromFs({ root, paths: ["a.txt"] });
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "session_fs_read",
       expect.anything(),
@@ -344,7 +344,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
     } as unknown as DocxEditorTab["editor"];
 
     mockedDocxToHtml.mockResolvedValue({ html: "<p>B</p>", warnings: [] });
-    await refreshActiveTabFromFs({ root, paths: ["a.docx"] });
+    await refreshTabsFromFs({ root, paths: ["a.docx"] });
     expect(setContent).toHaveBeenCalledWith("<p>B</p>");
     expect(setTextSelection).toHaveBeenCalledWith(5);
     expect(tab.initialHtml).toBe("<p>B</p>");
@@ -371,7 +371,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       view: { dom: { closest: () => null } },
     } as unknown as DocxEditorTab["editor"];
 
-    await refreshActiveTabFromFs({ root, paths: ["a.docx"] });
+    await refreshTabsFromFs({ root, paths: ["a.docx"] });
     expect(setContent).not.toHaveBeenCalled();
     expect(tab.initialHtml).toBe("<p>A</p>");
   });
@@ -383,7 +383,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       (t): t is PreviewEditorTab => t.kind === "preview" && t.path === "pic.png",
     )!;
     expect(tab.previewType).toBe("image");
-    await refreshActiveTabFromFs({ root, paths: ["pic.png"] });
+    await refreshTabsFromFs({ root, paths: ["pic.png"] });
     expect(tab.imageUrl).toMatch(/asset:\/\/pic\.png\?t=\d+/);
   });
 
@@ -406,7 +406,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["doc.pdf"] });
+    await refreshTabsFromFs({ root, paths: ["doc.pdf"] });
     expect(tab.pdfData!.length).toBe(4);
   });
 
@@ -430,7 +430,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
-    await refreshActiveTabFromFs({ root, paths: ["book.xlsx"] });
+    await refreshTabsFromFs({ root, paths: ["book.xlsx"] });
     expect(tab.xlsxData!.length).toBe(4);
   });
 
@@ -452,7 +452,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
 
     // 非活动 xlsx 命中事件：只标记 stale，不读盘
     mockedInvoke.mockClear();
-    await refreshActiveTabFromFs({ root, paths: ["book.xlsx"] });
+    await refreshTabsFromFs({ root, paths: ["book.xlsx"] });
     expect(tab.stale).toBe(true);
     expect(tab.xlsxData!.length).toBe(3);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -485,7 +485,7 @@ describe("refreshActiveTabFromFs 活动标签外部刷新", () => {
 
     // 模拟约 100ms 前的交互：还需等约 900ms
     __setRefreshInteractionForTest(Date.now() + 100);
-    const p = refreshActiveTabFromFs({ root, paths: ["a.txt"] });
+    const p = refreshTabsFromFs({ root, paths: ["a.txt"] });
     await flushPromises();
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "session_fs_read",

@@ -31,7 +31,7 @@ import {
   setThreadPinned,
 } from "../composables/useCodex";
 import { isThreadBound } from "../composables/useCodex/wechat";
-import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
 import { useSessionDialogs } from "../composables/useSessionDialogs";
 import { formatRelativeTime } from "../lib/format";
 import { groupSessions } from "../lib/sessionGroup";
@@ -162,7 +162,7 @@ function onRefresh() {
 /** 打开会话行右键菜单；重命名输入框内右键放行给全局编辑菜单 */
 function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
   if ((e.target as HTMLElement).closest?.(".rename-input")) return;
-  const items: CtxItem[] = [
+  const items: ActionMenuItem[] = [
     ...(isThreadOpen(t.id)
       ? []
       : [
@@ -208,7 +208,7 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
 
 /** 历史目录行右键菜单：新建会话（预置该分组目录）+ 在资源管理器中打开该目录 */
 function openFolderCtxMenu(group: SessionGroup, e: MouseEvent) {
-  const items: CtxItem[] = [
+  const items: ActionMenuItem[] = [
     {
       label: "新建会话",
       icon: ICON_SESSION,

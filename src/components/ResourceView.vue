@@ -129,7 +129,7 @@ const {
   dragOverPath,
   dragGhost,
   suppressClick,
-  isDragging,
+  isDragInteraction,
   onRowPointerDown,
   cancelDrag,
 } = useResourceDragDrop(moveEntry, listRef);
@@ -256,7 +256,7 @@ function onRefresh() {
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
-  if (isDragging.value) {
+  if (isDragInteraction.value) {
     cancelDrag();
     return;
   }

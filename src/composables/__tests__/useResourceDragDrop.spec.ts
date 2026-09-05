@@ -66,7 +66,7 @@ describe("useResourceDragDrop", () => {
       entry("D:\\repo\\a.txt"),
       { button: 0, clientX: 10, clientY: 10 } as PointerEvent,
     );
-    expect(d.isDragging.value).toBe(true);
+    expect(d.isDragInteraction.value).toBe(true);
 
     // 移动 3px（阈值 5 内）→ 不激活
     window.dispatchEvent(pointer(13, 10));
@@ -83,7 +83,7 @@ describe("useResourceDragDrop", () => {
       new MouseEvent("pointerup") as unknown as PointerEvent,
     );
     expect(moveEntry).not.toHaveBeenCalled();
-    expect(d.isDragging.value).toBe(false);
+    expect(d.isDragInteraction.value).toBe(false);
     expect(document.body.classList.contains("resource-dragging")).toBe(false);
     wrapper.unmount();
   });
@@ -108,7 +108,7 @@ describe("useResourceDragDrop", () => {
     window.dispatchEvent(pointer(100, 100));
     expect(d.dragActive.value).toBe(true);
     d.cancelDrag();
-    expect(d.isDragging.value).toBe(false);
+    expect(d.isDragInteraction.value).toBe(false);
     expect(d.dragGhost.value).toBeNull();
     expect(d.dragOverPath.value).toBeNull();
     wrapper.unmount();
@@ -151,7 +151,7 @@ describe("useResourceDragDrop", () => {
     window.dispatchEvent(pointer(150, 150));
     window.dispatchEvent(new MouseEvent("pointerup") as unknown as PointerEvent);
     expect(moveEntry).not.toHaveBeenCalled();
-    expect(d.isDragging.value).toBe(false);
+    expect(d.isDragInteraction.value).toBe(false);
     expect(document.body.classList.contains("resource-dragging")).toBe(false);
     wrapper.unmount();
     list.remove();

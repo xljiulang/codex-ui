@@ -104,7 +104,7 @@ function matchesPayload(
  * - 活动标签命中时立即刷新：脏/保存中/加载中跳过，交互中延迟到空闲后单次重试；
  * - 文本/富文本刷新保留滚动与光标，PDF 由组件保持页/缩放。
  */
-export async function refreshActiveTabFromFs(
+export async function refreshTabsFromFs(
   payload?: FsChangedPayload,
 ): Promise<void> {
   for (const t of [...tabs]) {
@@ -130,7 +130,7 @@ export async function refreshActiveTabFromFs(
     if (deferredTimer) clearTimeout(deferredTimer);
     deferredTimer = setTimeout(() => {
       deferredTimer = null;
-      void refreshActiveTabFromFs(payload);
+      void refreshTabsFromFs(payload);
     }, idleWait);
     return;
   }

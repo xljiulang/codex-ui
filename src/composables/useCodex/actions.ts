@@ -233,7 +233,7 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
 }
 
 
-export async function sendPrompt(text: string, flip = false) {
+export async function sendPrompt(text: string, invertFollowup = false) {
   const tab = activeSessionTab();
   const attachments = tab?.attachments.splice(0) ?? [];
   if (!text.trim() && attachments.length === 0) return;
@@ -244,7 +244,7 @@ export async function sendPrompt(text: string, flip = false) {
   // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
   if (tab?.turnActive && tab.threadId) {
     const base = store.settings.followup_mode;
-    const mode = flip ? (base === "adjust" ? "queue" : "adjust") : base;
+    const mode = invertFollowup ? (base === "adjust" ? "queue" : "adjust") : base;
     if (mode === "adjust") {
       await steerTurn(text, attachments);
     } else {

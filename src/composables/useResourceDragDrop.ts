@@ -26,7 +26,7 @@ export function useResourceDragDrop(
   const suppressClick = ref(false);
 
   /** 拖拽进行中（含按下未激活），供 Escape 取消判定 */
-  const isDragging = computed(
+  const isDragInteraction = computed(
     () => dragActive.value || dragStart.value !== null,
   );
 
@@ -130,7 +130,7 @@ export function useResourceDragDrop(
     dragOverPath,
     dragGhost,
     suppressClick,
-    isDragging,
+    isDragInteraction,
     onRowPointerDown,
     cancelDrag,
   };

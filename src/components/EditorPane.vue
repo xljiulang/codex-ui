@@ -40,7 +40,7 @@ import {
 } from "../composables/useSessionFs";
 import { revealGitFile } from "../composables/useGitChanges";
 import { joinFsPath } from "../lib/sessionFs";
-import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
+import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
 import {
   pickAndOpenNewSession,
   setToast,
@@ -148,7 +148,7 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
   const idx = tabs.findIndex((t) => t.id === tab.id);
   const hasLeft = idx > 0;
   const hasRight = idx >= 0 && idx < tabs.length - 1;
-  const items: CtxItem[] = [
+  const items: ActionMenuItem[] = [
     {
       label: "关闭所有标签",
       icon: ICON_CLOSE_ALL,
@@ -264,7 +264,7 @@ const settingsTabOpen = computed(() =>
  * 新建终端拆为 cmd / PowerShell 两项，按所选 Shell 强制启动 */
 function openAddMenu(e: MouseEvent) {
   const ws = workspace.value || store.lastWorkspace || "";
-  const items: CtxItem[] = [
+  const items: ActionMenuItem[] = [
     {
       label: "新建会话",
       icon: ICON_SESSION,
