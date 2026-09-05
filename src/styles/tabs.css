@@ -558,6 +558,11 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  display: flex;
+}
+.docx-preview-sizer {
+  margin: auto;
+  width: max-content;
 }
 /* 库默认的灰色画布底改为跟随应用面板色，避免与 PDF/XLSX 预览观感不一致 */
 .docx-preview-stage .docx-wrapper {

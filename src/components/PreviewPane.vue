@@ -147,7 +147,7 @@ watch(
         :tab="tab"
         :actions-target="headActions"
       />
-      <DocxPreviewPane v-else :tab="tab" />
+      <DocxPreviewPane v-else :tab="tab" :actions-target="headActions" />
     </template>
   </div>
 </template>

@@ -26,6 +26,7 @@ import {
   type PreviewEditorTab,
 } from "../../composables/useEditorTabs";
 import { insertTab } from "../../composables/useTabs";
+import { tooltipDirective } from "../../directives/tooltip";
 
 const mockedRenderAsync = vi.mocked(renderAsync);
 const root = "D:\\repo";
@@ -55,26 +56,29 @@ function previewTab(overrides: Partial<PreviewEditorTab> = {}): PreviewEditorTab
 }
 
 async function mountPreview(tab: PreviewEditorTab) {
-  const wrapper = mount(DocxPreviewPane, { props: { tab } });
+  const wrapper = mount(DocxPreviewPane, {
+    props: { tab },
+    global: { directives: { tooltip: tooltipDirective } },
+  });
   await flushPromises();
   await nextTick();
   return wrapper;
 }
 
 describe("DocxPreviewPane .docx 排版预览", () => {
+  let wrapper: ReturnType<typeof mount> | undefined;
+
   beforeEach(() => {
     mockedRenderAsync.mockClear();
     __resetEditorTabsForTest();
   });
-
-  let wrapper: ReturnType<typeof mount> | undefined;
 
   afterEach(() => {
     wrapper?.unmount();
     wrapper = undefined;
   });
 
-  it("调用 docx-preview 渲染字节并展示分页容器", async () => {
+  it("调用 docx-preview 渲染字节到 sizer 并展示分页容器", async () => {
     const tab = previewTab();
     wrapper = await mountPreview(tab);
     await vi.waitFor(
@@ -85,9 +89,9 @@ describe("DocxPreviewPane .docx 排版预览", () => {
     );
     const [data, container, , options] = mockedRenderAsync.mock.calls[0];
     expect(Array.from(data as Uint8Array)).toEqual([80, 75]);
-    expect(container).toBe(wrapper!.find(".docx-preview-stage").element);
+    expect(container).toBe(wrapper!.find(".docx-preview-sizer").element);
     expect((options as { breakPages?: boolean }).breakPages).toBe(true);
-    expect(wrapper!.find(".docx-preview-stage").html()).toContain("春天");
+    expect(wrapper!.find(".docx-preview-sizer").html()).toContain("春天");
     expect(wrapper!.text()).not.toContain("无法预览");
   });
 
@@ -111,5 +115,24 @@ describe("DocxPreviewPane .docx 排版预览", () => {
       { timeout: 3000, interval: 20 },
     );
     expect(wrapper!.text()).toContain("bad zip");
+  });
+
+  it("缩放工具栏：放大/缩小按步进调整百分比并在端点禁用", async () => {
+    const tab = previewTab();
+    wrapper = await mountPreview(tab);
+    await vi.waitFor(
+      () => {
+        expect(mockedRenderAsync).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    expect(wrapper!.find(".pdf-toolbar-percent").text()).toBe("100%");
+
+    await wrapper!.find('button[aria-label="放大"]').trigger("click");
+    expect(wrapper!.find(".pdf-toolbar-percent").text()).toBe("125%");
+
+    await wrapper!.find('button[aria-label="缩小"]').trigger("click");
+    await wrapper!.find('button[aria-label="缩小"]').trigger("click");
+    expect(wrapper!.find(".pdf-toolbar-percent").text()).toBe("80%");
   });
 });
