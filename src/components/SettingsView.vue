@@ -78,7 +78,10 @@ import type {
   SkillsItem,
   SkillsState,
   TerminalShell,
+  FollowupMode,
+  PermissionId,
 } from "../lib/types";
+import AppSelect, { type AppSelectOption } from "./AppSelect.vue";
 import ModelConfigModelPicker from "./ModelConfigModelPicker.vue";
 import ModalDialog from "./ModalDialog.vue";
 
@@ -302,6 +305,50 @@ const providerFormErrors = reactive({
 
 /** 顶层认证方式："" 默认（不写入）/ "apikey" / "chatgpt" */
 const authMethod = ref("");
+
+/** AppSelect 下拉选项集（替换原生 select：弹出层可主题化/毛玻璃） */
+const reasoningEffortOptions: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  ...REASONING_EFFORT_VALUES.map((v) => ({ value: v, label: v })),
+];
+const authMethodOptions: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  { value: "apikey", label: "API Key" },
+  { value: "chatgpt", label: "ChatGPT 登录" },
+];
+const wireApiOptions: AppSelectOption[] = [
+  { value: "responses", label: "responses" },
+  { value: "chat", label: "chat" },
+];
+const terminalShellOptions: AppSelectOption[] = [
+  { value: "cmd", label: "cmd（命令提示符）" },
+  { value: "powershell", label: "PowerShell" },
+];
+const defaultPermissionOptions: AppSelectOption[] = PERMISSION_MODES.map(
+  (m) => ({ value: m.id, label: m.label }),
+);
+const followupModeOptions: AppSelectOption[] = [
+  { value: "adjust", label: "调整方向" },
+  { value: "queue", label: "加入队列" },
+];
+const transportOptions: AppSelectOption[] = [
+  { value: "stdio", label: "stdio" },
+  { value: "http", label: "Streamable HTTP" },
+];
+
+/** 写回持久化：AppSelect 回传 string，此处收窄为协议联合类型 */
+function onTerminalShellChange(v: string) {
+  terminalShell.value = v as TerminalShell;
+  persist({ terminal_shell: terminalShell.value });
+}
+function onDefaultPermissionChange(v: string) {
+  defaultPermission.value = v as PermissionId;
+  persist({ default_permission: defaultPermission.value });
+}
+function onFollowupModeChange(v: string) {
+  followupMode.value = v as FollowupMode;
+  persist({ followup_mode: followupMode.value });
+}
 
 function clearProviderFormErrors() {
   providerFormErrors.key = "";
@@ -1603,32 +1650,21 @@ function pluginInitial(p: PluginCatalogItem): string {
               </div>
               <div class="setting-row">
                 <label for="model-config-ui-effort">model_reasoning_effort</label>
-                <select
+                <AppSelect
                   id="model-config-ui-effort"
                   v-model="modelConfig.model_reasoning_effort"
                   :disabled="modelConfig.loading"
-                >
-                  <option value="">默认（不写入）</option>
-                  <option
-                    v-for="effort in REASONING_EFFORT_VALUES"
-                    :key="effort"
-                    :value="effort"
-                  >
-                    {{ effort }}
-                  </option>
-                </select>
+                  :options="reasoningEffortOptions"
+                />
               </div>
               <div class="setting-row">
                 <label for="model-config-ui-auth">认证方式</label>
-                <select
+                <AppSelect
                   id="model-config-ui-auth"
                   v-model="authMethod"
                   :disabled="modelConfig.loading"
-                >
-                  <option value="">默认（不写入）</option>
-                  <option value="apikey">API Key</option>
-                  <option value="chatgpt">ChatGPT 登录</option>
-                </select>
+                  :options="authMethodOptions"
+                />
                 <p class="model-config-advanced-note">
                   选「API Key」写入
                   preferred_auth_method="apikey" 与 forced_login_method="api"
@@ -1771,10 +1807,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </div>
                 <div class="setting-row">
                   <label>wire_api</label>
-                  <select v-model="providerForm.wire_api">
-                    <option value="responses">responses</option>
-                    <option value="chat">chat</option>
-                  </select>
+                  <AppSelect v-model="providerForm.wire_api" :options="wireApiOptions" />
                 </div>
               </div>
               <template #foot>
@@ -1911,38 +1944,31 @@ function pluginInitial(p: PluginCatalogItem): string {
 
               <div class="setting-row">
                 <label>终端 Shell</label>
-                <select
-                  v-model="terminalShell"
+                <AppSelect
+                  :model-value="terminalShell"
                   class="terminal-shell-select"
-                  @change="persist({ terminal_shell: terminalShell })"
-                >
-                  <option value="cmd">cmd（命令提示符）</option>
-                  <option value="powershell">PowerShell</option>
-                </select>
+                  :options="terminalShellOptions"
+                  @update:model-value="onTerminalShellChange"
+                />
               </div>
 
               <div class="setting-row">
                 <label>默认权限</label>
-                <select
-                  v-model="defaultPermission"
+                <AppSelect
+                  :model-value="defaultPermission"
                   class="default-permission-select"
-                  @change="persist({ default_permission: defaultPermission })"
-                >
-                  <option v-for="m in PERMISSION_MODES" :key="m.id" :value="m.id">
-                    {{ m.label }}
-                  </option>
-                </select>
+                  :options="defaultPermissionOptions"
+                  @update:model-value="onDefaultPermissionChange"
+                />
               </div>
 
               <div class="setting-row">
                 <label>跟进处理方式</label>
-                <select
-                  v-model="followupMode"
-                  @change="persist({ followup_mode: followupMode })"
-                >
-                  <option value="adjust">调整方向</option>
-                  <option value="queue">加入队列</option>
-                </select>
+                <AppSelect
+                  :model-value="followupMode"
+                  :options="followupModeOptions"
+                  @update:model-value="onFollowupModeChange"
+                />
               </div>
 
               <div class="setting-row memory-row">
@@ -2304,13 +2330,11 @@ function pluginInitial(p: PluginCatalogItem): string {
                 </div>
                 <div class="setting-row">
                   <label for="mcp-form-transport">传输方式</label>
-                  <select
+                  <AppSelect
                     id="mcp-form-transport"
                     v-model="mcpForm.transport"
-                  >
-                    <option value="stdio">stdio</option>
-                    <option value="http">Streamable HTTP</option>
-                  </select>
+                    :options="transportOptions"
+                  />
                 </div>
                 <div class="setting-row mcp-omit-row">
                   <label>omit_tools_from（工具暴露面）</label>

@@ -87,6 +87,9 @@ export const ICON_CHECK =
 export const ICON_MORE =
   "M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z";
 export const ICON_CHEVRON_DOWN = "M4 6l4 4 4-4z";
+/** 下拉选择：居中下箭头（AppSelect 触发器右侧展开指示） */
+export const ICON_SELECT_CHEVRON =
+  "M12 16.2L5.6 9.8l1.4-1.4 5 5 5-5 1.4 1.4z";
 
 /** 目标：旗帜（目标芯片的设置/取消按钮与状态展示共用） */
 export const ICON_GOAL = "M4 3h2v18H4zm2 1h13l-2.8 4 2.8 4H6z";

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { enableAutoUnmount, mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 
 // 每个用例结束后卸载组件，避免 window keydown 监听器跨用例累积
 enableAutoUnmount(afterEach);
@@ -375,10 +376,18 @@ describe("permissions / elicitation 应答按协议", () => {
     });
     const wrapper = mount(InlineInteraction);
 
-    // 单选 enum → select，布尔 → select，数字 → number input
-    const selects = wrapper.findAll("select");
-    expect(selects).toHaveLength(2);
-    await selects[0].setValue("careful");
+    // 单选 enum → AppSelect，布尔 → AppSelect，数字 → number input
+    const triggers = wrapper.findAll("button.app-select");
+    expect(triggers).toHaveLength(2);
+    // 展开模式下拉（弹层 Teleport 到 body）并选择「谨慎」
+    await triggers[0].trigger("click");
+    await nextTick();
+    const target = Array.from(
+      document.body.querySelectorAll<HTMLElement>(".app-select-option"),
+    ).find((o) => o.textContent?.trim() === "谨慎");
+    expect(target).toBeTruthy();
+    target!.click();
+    await nextTick();
     await wrapper.find('input[type="number"]').setValue("3");
 
     await wrapper

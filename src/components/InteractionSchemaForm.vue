@@ -4,6 +4,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { setToast } from "../composables/useCodex";
 import type { PendingInteraction } from "../lib/types";
 import { list, obj, str } from "../lib/interaction";
+import AppSelect, { type AppSelectOption } from "./AppSelect.vue";
+
+/** 布尔下拉选项（值沿用字符串 "true"/"false"，提交时转换） */
+const booleanOptions: AppSelectOption[] = [
+  { value: "true", label: "是" },
+  { value: "false", label: "否" },
+];
 
 const props = defineProps<{ interaction: PendingInteraction }>();
 
@@ -62,6 +69,11 @@ function enumOptions(s: Record<string, unknown>): { value: string; title: string
   const enums = list(s.enum).map(str);
   const names = list(s.enumNames).map(str);
   return enums.map((v, i) => ({ value: v, title: names[i] || v }));
+}
+
+/** schema 枚举转 AppSelect 选项（value/title → value/label） */
+function enumSelectOptions(s: Record<string, unknown>): AppSelectOption[] {
+  return enumOptions(s).map((o) => ({ value: o.value, label: o.title }));
 }
 
 /** 缺失的必填字段标题；全部填齐返回 null */
@@ -147,16 +159,12 @@ async function handleElicitation() {
         {{ prop.title ?? key }}
         <span v-if="isRequired(key)" class="required-mark"> *</span>
       </div>
-      <select
+      <AppSelect
         v-if="isEnumSchema(prop)"
         v-model="formValues[key]"
-        :placeholder="str(prop.description)"
-      >
-        <option value="" disabled>请选择</option>
-        <option v-for="opt in enumOptions(prop)" :key="opt.value" :value="opt.value">
-          {{ opt.title }}
-        </option>
-      </select>
+        placeholder="请选择"
+        :options="enumSelectOptions(prop)"
+      />
       <div v-else-if="isMultiEnum(prop)" class="multi-options">
         <label
           v-for="opt in enumOptions(obj(prop.items))"
@@ -167,10 +175,11 @@ async function handleElicitation() {
           {{ opt.title }}
         </label>
       </div>
-      <select v-else-if="prop.type === 'boolean'" v-model="formValues[key]">
-        <option value="true">是</option>
-        <option value="false">否</option>
-      </select>
+      <AppSelect
+        v-else-if="prop.type === 'boolean'"
+        v-model="formValues[key]"
+        :options="booleanOptions"
+      />
       <input
         v-else-if="prop.type === 'number' || prop.type === 'integer'"
         v-model="formValues[key]"

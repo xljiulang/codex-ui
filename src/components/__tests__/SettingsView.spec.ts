@@ -47,6 +47,22 @@ const mockedInvoke = vi.mocked(invoke);
 const mockedSave = vi.mocked(saveSettings);
 const mockedOpenPathInApp = vi.mocked(openPathInApp);
 
+/** 展开 AppSelect（触发按钮由 id 定位，弹层 Teleport 到 body）并点击指定文案的选项 */
+async function pickAppSelect(
+  host: ReturnType<typeof mount>,
+  id: string,
+  label: string,
+) {
+  await host.find(`button#${CSS.escape(id)}`).trigger("click");
+  await nextTick();
+  const target = Array.from(
+    document.body.querySelectorAll<HTMLElement>(".app-select-option"),
+  ).find((o) => o.textContent?.trim() === label);
+  expect(target).toBeTruthy();
+  target!.click();
+  await nextTick();
+}
+
 /** 打开设置标签并激活会话 s1（供「关闭/取消/保存」类测试使用） */
 function mountWithSettingsTab() {
   tabs.push(makeSessionTab("s1", "t1"));
@@ -1000,7 +1016,7 @@ describe("SettingsView 模型配置", () => {
       edits.find((e) => e.keyPath === "forced_login_method")?.value,
     ).toBe("");
 
-    await wrapper.find("#model-config-ui-auth").setValue("apikey");
+    await pickAppSelect(wrapper, "model-config-ui-auth", "API Key");
     await save();
     await flushPromises();
     edits = lastAuthEdits();
@@ -1761,7 +1777,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await flushPromises();
     await wrapper.find(".mcp-config-add-btn").trigger("click");
     await flushPromises();
-    await wrapper.find("#mcp-form-transport").setValue("http");
+    await pickAppSelect(wrapper, "mcp-form-transport", "Streamable HTTP");
     await wrapper
       .find('.mcp-server-form input[placeholder="如 filesystem"]')
       .setValue("docs");
@@ -1839,7 +1855,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await flushPromises();
     await wrapper.find(".mcp-config-add-btn").trigger("click");
     await flushPromises();
-    await wrapper.find("#mcp-form-transport").setValue("http");
+    await pickAppSelect(wrapper, "mcp-form-transport", "Streamable HTTP");
     await wrapper
       .find('.mcp-server-form input[placeholder="如 filesystem"]')
       .setValue("x");
@@ -1933,7 +1949,7 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await wrapper.find(".mcp-config-add-btn").trigger("click");
     await flushPromises();
     expect(
-      (wrapper.find("#mcp-form-transport").element as HTMLSelectElement).value,
+      wrapper.find("#mcp-form-transport .app-select-label").text().trim(),
     ).toBe("stdio");
     expect(
       (wrapper.find('.mcp-server-form input[placeholder="如 filesystem"]')
@@ -2498,15 +2514,19 @@ describe("SettingsView 默认权限", () => {
     mockedSave.mockClear();
   });
 
-  it("渲染默认权限下拉并选中已保存值", () => {
+  it("渲染默认权限下拉并选中已保存值", async () => {
     const wrapper = mount(SettingsView);
-    const select = wrapper.find("select.default-permission-select");
-    expect(select.exists()).toBe(true);
-    expect((select.element as HTMLSelectElement).value).toBe("ask-for-approval");
-    const labels = wrapper
-      .findAll("select.default-permission-select option")
-      .map((o) => o.text());
-    expect(labels).toEqual(
+    const trigger = wrapper.find("button.default-permission-select");
+    expect(trigger.exists()).toBe(true);
+    // AppSelect 弹层 Teleport 到 body：展开后从 document 读取选项
+    await trigger.trigger("click");
+    await nextTick();
+    const menu = document.body.querySelector(".app-select-menu");
+    expect(menu).toBeTruthy();
+    const opts = Array.from(
+      menu!.querySelectorAll<HTMLElement>(".app-select-option"),
+    );
+    expect(opts.map((o) => o.textContent?.trim())).toEqual(
       expect.arrayContaining([
         "只读访问",
         "请求批准",
@@ -2514,14 +2534,22 @@ describe("SettingsView 默认权限", () => {
         "完全访问",
       ]),
     );
+    const selected = opts.find((o) => o.classList.contains("selected"));
+    expect(selected?.textContent?.trim()).toBe("请求批准");
     wrapper.unmount();
   });
 
   it("切换默认权限后立即保存", async () => {
     const wrapper = mount(SettingsView);
     await wrapper
-      .find("select.default-permission-select")
-      .setValue("full-access");
+      .find("button.default-permission-select")
+      .trigger("click");
+    await nextTick();
+    const target = Array.from(
+      document.body.querySelectorAll<HTMLElement>(".app-select-option"),
+    ).find((o) => o.textContent?.trim() === "完全访问");
+    expect(target).toBeTruthy();
+    target!.click();
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ default_permission: "full-access" }),
@@ -2719,15 +2747,23 @@ describe("SettingsView 终端 Shell", () => {
     wrapper = undefined;
   });
 
-  it("渲染终端 Shell 下拉，默认选中 cmd", () => {
+  it("渲染终端 Shell 下拉，默认选中 cmd", async () => {
     wrapper = mount(SettingsView);
-    const select = wrapper.find("select.terminal-shell-select");
-    expect(select.exists()).toBe(true);
-    expect((select.element as HTMLSelectElement).value).toBe("cmd");
-    const options = wrapper
-      .findAll("select.terminal-shell-select option")
-      .map((o) => o.attributes("value"));
-    expect(options).toEqual(["cmd", "powershell"]);
+    const trigger = wrapper.find("button.terminal-shell-select");
+    expect(trigger.exists()).toBe(true);
+    await trigger.trigger("click");
+    await nextTick();
+    const menu = document.body.querySelector(".app-select-menu");
+    expect(menu).toBeTruthy();
+    const opts = Array.from(
+      menu!.querySelectorAll<HTMLElement>(".app-select-option"),
+    );
+    expect(opts.map((o) => o.textContent?.trim())).toEqual([
+      "cmd（命令提示符）",
+      "PowerShell",
+    ]);
+    const selected = opts.find((o) => o.classList.contains("selected"));
+    expect(selected?.textContent?.trim()).toBe("cmd（命令提示符）");
   });
 
   it("codex 可执行文件行位于基础设置分区内第一项", () => {
@@ -2742,7 +2778,13 @@ describe("SettingsView 终端 Shell", () => {
 
   it("切换 PowerShell 后立即保存", async () => {
     wrapper = mount(SettingsView);
-    await wrapper.find("select.terminal-shell-select").setValue("powershell");
+    await wrapper.find("button.terminal-shell-select").trigger("click");
+    await nextTick();
+    const target = Array.from(
+      document.body.querySelectorAll<HTMLElement>(".app-select-option"),
+    ).find((o) => o.textContent?.trim() === "PowerShell");
+    expect(target).toBeTruthy();
+    target!.click();
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith(
       expect.objectContaining({ terminal_shell: "powershell" }),

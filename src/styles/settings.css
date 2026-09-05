@@ -60,8 +60,7 @@
 }
 
 .setting-row input[type="text"],
-.setting-row input[type="password"],
-.setting-row select {
+.setting-row input[type="password"] {
   width: 100%;
 }
 
@@ -303,10 +302,9 @@
   }
 }
 
-/* 控件与按钮同高：输入框 / 下拉 / 按钮统一 32px 高 */
+/* 控件与按钮同高：输入框 / 下拉 / 按钮统一 32px 高（下拉为 AppSelect 自绘组件） */
 .settings-page input[type="text"],
-.settings-page input[type="password"],
-.settings-page select {
+.settings-page input[type="password"] {
   height: var(--ctrl-h-md);
   padding: var(--space-2) var(--space-4);
 }
