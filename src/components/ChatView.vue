@@ -137,67 +137,6 @@ const hasTurnNav = computed(
   () => anchorCount.value >= 1 && turnNavReady.value,
 );
 
-// 导航按钮图标旋转提示：仅回合进行中旋转（等待响应慢速、执行工具中常速），悬停暂停由 CSS 处理
-const turnNavSpin = computed<"fast" | "slow" | null>(() => {
-  if (!props.tab.turnActive) return null;
-  if (hasActiveWork.value) return "fast";
-  return showWaiting.value ? "slow" : null;
-});
-
-// 旋转沿用角度：CSS animation 换挡会从 0° 重转，故换挡时以「负 animation-delay」把新周期
-// 接续到当前角度（等待响应慢速 8s/圈、执行工具中常速 1.5s/圈）；悬停由 CSS 归位静止，
-// 移出后清相位从 0° 重转
-const navSpinStyle = ref<Record<string, string>>({});
-const navHover = ref(false);
-let navPrevSpeed: "fast" | "slow" | null = null;
-let navSegmentStart = 0;
-let navAccumDeg = 0;
-const NAV_SPIN_PERIOD_MS = { fast: 1500, slow: 8000 } as const;
-
-function applyNavSpinStyle(speed: "fast" | "slow", accumDeg: number) {
-  const delayMs = -Number(
-    ((accumDeg / 360) * NAV_SPIN_PERIOD_MS[speed]).toFixed(1),
-  );
-  navSpinStyle.value = {
-    animationDuration: `${NAV_SPIN_PERIOD_MS[speed]}ms`,
-    animationDelay: `${delayMs}ms`,
-  };
-}
-
-watch(turnNavSpin, (speed) => {
-  const now = Date.now();
-  if (!speed) {
-    navPrevSpeed = null;
-    navSegmentStart = 0;
-    navAccumDeg = 0;
-    navSpinStyle.value = {}; // 回合结束：移除动画，图标归位
-    return;
-  }
-  if (navHover.value) {
-    navAccumDeg = 0; // 悬停中换挡：视觉已归位静止，按 0° 起转记账
-  } else if (navPrevSpeed) {
-    // 换挡：当前段转过角度并入累计值，新周期接续同一角度
-    navAccumDeg =
-      (navAccumDeg +
-        ((now - navSegmentStart) * 360) / NAV_SPIN_PERIOD_MS[navPrevSpeed]) %
-      360;
-  } else {
-    navAccumDeg = 0;
-  }
-  navSegmentStart = now;
-  navPrevSpeed = speed;
-  applyNavSpinStyle(speed, navAccumDeg);
-});
-
-watch(navHover, (hover) => {
-  if (!hover && navPrevSpeed) {
-    // 移出导航区：清累计角度与负延迟，从初始状态重新起转
-    navAccumDeg = 0;
-    navSegmentStart = Date.now();
-    applyNavSpinStyle(navPrevSpeed, 0);
-  }
-});
-
 /** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
 const turnEntries = computed(() => {
   const out: {
@@ -475,16 +414,14 @@ function cancelNavHoverClose() {
   }
 }
 
-/** 悬停进入按钮/卡片：未展开时立即展开（纯悬停开关，不固定）；同时旋转归位 */
+/** 悬停进入按钮/卡片：未展开时立即展开（纯悬停开关，不固定） */
 function onTurnNavEnter() {
-  navHover.value = true;
   cancelNavHoverClose();
   if (!turnNavOpen.value) void openTurnNav();
 }
 
-/** 悬停移出按钮/卡片：旋转恢复（从初始状态重新起转），延迟关闭卡片，期间重新进入即取消 */
+/** 悬停移出按钮/卡片：延迟关闭卡片，期间重新进入即取消 */
 function onTurnNavLeave() {
-  navHover.value = false;
   if (!turnNavOpen.value) return;
   cancelNavHoverClose();
   navHoverCloseTimer = window.setTimeout(() => {
@@ -893,16 +830,11 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="turn-nav-btn"
-          :class="{
-            'spin-fast': turnNavSpin === 'fast',
-            'spin-slow': turnNavSpin === 'slow',
-          }"
           :aria-expanded="turnNavOpen ? 'true' : 'false'"
           aria-label="回合导航"
           @keydown="onTurnNavKeydown"
         >
-          <!-- spin-fast/spin-slow 仅标记旋转状态（供测试/调试），动画时长/相位由 JS 计算 -->
-          <svg viewBox="0 0 24 24" aria-hidden="true" :style="navSpinStyle">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_GRID_4" />
           </svg>
         </button>
