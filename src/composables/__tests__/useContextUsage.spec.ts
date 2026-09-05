@@ -43,14 +43,14 @@ describe("useContextUsage", () => {
     expect(u.ctxTooltip.value).toBe("");
   });
 
-  it("tooltip 按 K/M 格式化", () => {
+  it("tooltip 按万/亿格式化", () => {
     (tabs[0] as SessionTab).threadTokenUsage = {
       contextUsed: 1_500_000,
       window: 2_000_000,
     };
     const u = useContextUsage();
     expect(u.ctxTooltip.value).toBe(
-      "上下文已用 1.5M，共 2.0M，双击进行压缩",
+      "上下文已用 150万，共 200万，双击进行压缩",
     );
   });
 

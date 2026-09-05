@@ -93,8 +93,8 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
     expect(menu.exists()).toBe(true);
     expect(menu.find(".usage-menu-title").text()).toBe("上下文与 Token");
     expect(menu.find(".usage-menu-capsule-pct").text()).toBe("50%");
-    expect(menu.find(".usage-menu-line").text()).toContain("已用 5K / 窗口 10K");
-    expect(menu.find(".usage-menu-line").text()).toContain("剩余 5K");
+    expect(menu.find(".usage-menu-line").text()).toContain("已用 5000 / 窗口 1万");
+    expect(menu.find(".usage-menu-line").text()).toContain("剩余 5000");
     const compact = menu.find(".usage-menu-capsule-btn");
     expect(compact.exists()).toBe(true);
     expect(compact.find("svg").exists()).toBe(true);
@@ -115,12 +115,12 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
       "推理输出",
     ]);
     expect(rows.map((r) => r.find(".usage-menu-value").text())).toEqual([
-      "12K",
-      "34K",
-      "46K",
-      "8K",
-      "1K",
-      "2K",
+      "1.2万",
+      "3.4万",
+      "4.6万",
+      "8000",
+      "1000",
+      "2000",
     ]);
     // 缓存/推理为缩进的子集行
     expect(rows[0].classes()).not.toContain("sub");

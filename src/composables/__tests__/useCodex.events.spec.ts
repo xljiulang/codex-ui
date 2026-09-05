@@ -1484,7 +1484,7 @@ describe("codexui 动态工具 item/tool/call 应答", () => {
         contentItems: [
           {
             type: "inputText",
-            text: "上下文已用 12K/128K（约 9%）；会话累计输入 50K · 输出 9K",
+            text: "上下文已用 1.2万/12.8万（约 9%）；会话累计输入 5万 · 输出 9000",
           },
         ],
         success: true,

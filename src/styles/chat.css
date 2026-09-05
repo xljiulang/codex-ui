@@ -71,9 +71,10 @@
   align-items: center;
   justify-content: center;
   position: absolute;
-  /* 右缘贴齐滚动条左侧（回合导航按钮已覆盖滚动条位置） */
-  right: 12px;
+  /* 底部水平居中显示 */
+  left: 50%;
   bottom: 10px;
+  transform: translateX(-50%);
   z-index: 20;
   width: 30px;
   height: 30px;

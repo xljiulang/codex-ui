@@ -71,10 +71,11 @@ export function formatRelativeTime(ts?: number | null): string {
   });
 }
 
-/** 把 token 数按 K/M 缩写（<1K 原样、>=1K 四舍五入到 K、>=1M 一位小数 M） */
+/** 把 token 数按万/亿缩写（<1万原样、>=1万一位小数万、>=1亿一位小数亿；.0 省略） */
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  const trim = (s: string) => s.replace(/\.0$/, "");
+  if (n >= 100_000_000) return `${trim((n / 100_000_000).toFixed(1))}亿`;
+  if (n >= 10_000) return `${trim((n / 10_000).toFixed(1))}万`;
   return String(n);
 }
 
