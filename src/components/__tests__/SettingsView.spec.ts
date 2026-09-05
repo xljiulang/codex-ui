@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { config, flushPromises, mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -2909,6 +2910,50 @@ describe("SettingsView 插件管理", () => {
       .findAll(".model-config-card")[0];
     expect(card.find("h3").text()).toBe("已安装插件");
     expect(card.text()).toContain("还没有已安装的插件");
+  });
+
+  it("已安装插件超过 5 行：切入插件管理分区后限高生效（隐藏期测量无效不误清）", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: Array.from({ length: 6 }, (_, i) => ({
+            id: `p${i}`,
+            name: `p${i}`,
+            installed: true,
+            enabled: true,
+            version: "1.0.0",
+            interface: { displayName: `插件${i}` },
+          })),
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    // 默认停在「个性化」分区，插件分区 v-show 隐藏、offsetHeight 恒为 0：
+    // 隐藏期测量无效，列表不应写入 max-height（修复前此处会因 h=0 被清空且不再重算）
+    const list = wrapper.find(".installed-plugin-list");
+    expect((list.attributes("style") ?? "")).not.toContain("max-height");
+
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(30);
+    try {
+      // 切入插件管理分区（分区变为可见）触发重算：前 5 行 × 30px = 150px
+      const navItem = wrapper
+        .findAll(".settings-nav-item")
+        .find((i) => i.text().includes("插件管理"));
+      expect(navItem).toBeTruthy();
+      await navItem!.trigger("click");
+      await flushPromises();
+      await nextTick();
+      expect((list.attributes("style") ?? "")).toContain(
+        "max-height: 150px",
+      );
+    } finally {
+      heightSpy.mockRestore();
+    }
   });
 
   it("点击市场标题折叠/展开插件列表", async () => {

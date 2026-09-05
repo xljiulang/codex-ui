@@ -199,9 +199,11 @@ async function saveMemorySection() {
   }
 }
 
-// 进入「基础设置」标签时从 codex 配置回填开关
+// 进入「基础设置」标签时从 codex 配置回填开关；进入「插件管理」时分区变为可见，
+// 补算已安装插件列表的限高（隐藏期 offsetHeight 恒为 0，测量无效）
 watch(activeSection, (id) => {
   if (id === "basic") void loadMemorySection();
+  if (id === "plugins") void syncInstalledListHeight();
 });
 
 async function resetMemory() {
@@ -1305,7 +1307,10 @@ async function syncInstalledListHeight() {
   const h = rows
     .slice(0, INSTALLED_LIST_MAX_ROWS)
     .reduce((sum, row) => sum + row.offsetHeight, 0);
-  installedListMaxHeight.value = h > 0 ? `${h}px` : "";
+  // 分区处于 v-show 隐藏时 offsetHeight 全为 0，测量无效：保留现值，
+  // 待切入插件管理分区（分区可见）后再由 activeSection watch 重算
+  if (h <= 0) return;
+  installedListMaxHeight.value = `${h}px`;
 }
 
 watch(
