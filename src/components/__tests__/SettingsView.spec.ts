@@ -764,7 +764,7 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
     expect(wrapper.find(".modal-title").text()).toBe("添加模型提供方");
     expect(wrapper.find(".modal-body .model-provider-form").exists()).toBe(true);
-    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("添加");
+    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("确认");
   });
 
   it("编辑提供方以弹窗呈现：标题为编辑且标识只读", async () => {
@@ -779,7 +779,7 @@ describe("SettingsView 模型配置", () => {
     expect(
       wrapper.find('input[placeholder="如 my-provider"]').attributes("disabled"),
     ).toBeDefined();
-    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("保存修改");
+    expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("确认");
   });
 
   it("提供方弹窗取消/×关闭且列表不变，重新打开表单复位", async () => {
@@ -3362,7 +3362,6 @@ describe("SettingsView 按钮图标", () => {
     await flushPromises();
     const selectors = [
       ".settings-nav-item",
-      ".model-config-title-link",
       ".model-config-actions button.primary",
       ".model-config-reload-btn",
       ".model-provider-actions .btn",
@@ -3384,6 +3383,15 @@ describe("SettingsView 按钮图标", () => {
           btn.text().trim().endsWith("…"),
           `${sel} 文案不应以省略号结尾`,
         ).toBe(false);
+      }
+    }
+    // AGENTS / 模型目录路径链接为纯文字链接（无图标），仅验证文案完整
+    for (const sel of [".model-config-title-link", ".model-config-path-link"]) {
+      const buttons = wrapper.findAll(sel);
+      expect(buttons.length, `${sel} 未找到按钮`).toBeGreaterThan(0);
+      for (const btn of buttons) {
+        expect(btn.text().trim().length).toBeGreaterThan(0);
+        expect(btn.text().trim().endsWith("…")).toBe(false);
       }
     }
     // 弹窗底部为文字按钮（取消/添加），无需图标但文案完整

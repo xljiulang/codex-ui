@@ -1592,9 +1592,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                 :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
                 @click="openModelConfigFile"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_FILE" />
-                </svg>
                 <span>{{ modelConfig.model_catalog_path || "正在读取目录路径…" }}</span>
               </button>
               <p v-else class="model-config-path">
@@ -1731,7 +1728,7 @@ function pluginInitial(p: PluginCatalogItem): string {
                   :disabled="modelConfig.saving || modelConfig.loading"
                   @click="confirmProviderForm"
                 >
-                  {{ providerForm.editingIndex >= 0 ? "保存修改" : "添加" }}
+                  确认
                 </button>
               </template>
             </ModalDialog>
@@ -1770,9 +1767,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                 :disabled="!agents.agents_path"
                 @click="openAgentsFile"
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="ICON_FILE" />
-                </svg>
                 <span>AGENTS</span>
               </button>
               <div class="model-config-head-actions">

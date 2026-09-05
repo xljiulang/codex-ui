@@ -757,11 +757,10 @@
   flex-shrink: 0;
 }
 
-/* 卡片标题作为文件链接（AGENTS / model_catalog_json）：图标 + 标题，可点击打开文件 */
+/* 卡片标题作为文件链接（AGENTS / model_catalog_json）：纯文字，可点击打开文件 */
 .model-config-title-link {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
   border: none;
@@ -775,16 +774,8 @@
   flex-shrink: 0;
 }
 
-.model-config-title-link svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-  flex-shrink: 0;
-}
-
 .model-config-title-link:hover {
   color: var(--accent);
-  text-decoration: underline;
 }
 
 .model-config-title-link:disabled {
@@ -828,13 +819,15 @@
   user-select: text;
 }
 
-.model-config-path-link:hover,
+.model-config-path-link:hover {
+  color: var(--accent-dim);
+}
+
 .model-config-docs-link:hover {
   color: var(--accent-dim);
   text-decoration: underline;
 }
 
-.model-config-path-link svg,
 .model-config-docs-link svg {
   width: 11px;
   height: 11px;
