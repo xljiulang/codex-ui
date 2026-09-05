@@ -1,0 +1,105 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import { saveSettings, setToast, store, toastError } from "../../composables/useCodex";
+import { THEMES, previewTheme, type ThemeId } from "../../composables/useTheme";
+import { ICON_CHECK } from "../../lib/icons";
+import type { AppSettings } from "../../lib/types";
+
+defineProps<{ active: boolean }>();
+
+const sound = ref(store.settings.sound_enabled);
+const enterToSend = ref(store.settings.enter_to_send);
+const theme = ref<ThemeId>(store.settings.theme as ThemeId);
+const glass = ref(store.settings.glass_effect);
+
+/** 即时保存：任何设置项变更立即持久化（成功静默，失败 toast） */
+async function persist(patch: Partial<AppSettings>) {
+  try {
+    await saveSettings(patch);
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+function selectTheme(id: ThemeId) {
+  // 即时预览 + 立即持久化（saveSettings 内部 applyTheme 兜底一致）
+  theme.value = id;
+  previewTheme(id);
+  void persist({ theme: id });
+}
+</script>
+
+<template>
+  <section
+    v-show="active"
+    class="settings-section settings-section-personalization"
+  >
+    <h2 class="settings-section-title">个性化</h2>
+    <p class="settings-section-desc">
+      主题、音效与消息发送等个性化偏好
+    </p>
+    <div class="settings-card">
+      <div class="settings">
+        <div class="setting-row checkbox-row">
+          <input
+            id="sound"
+            v-model="sound"
+            type="checkbox"
+            @change="persist({ sound_enabled: sound })"
+          />
+          <label for="sound">提权/交互时播放提示音</label>
+        </div>
+
+        <div class="setting-row checkbox-row">
+          <input
+            id="enter"
+            v-model="enterToSend"
+            type="checkbox"
+            @change="persist({ enter_to_send: enterToSend })"
+          />
+          <label for="enter">
+            Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
+          </label>
+        </div>
+
+        <div class="setting-row">
+          <div class="theme-row-head">
+            <label>毛玻璃主题外观</label>
+            <label
+              class="switch"
+              aria-label="毛玻璃特效"
+            >
+              <input
+                id="glass"
+                v-model="glass"
+                type="checkbox"
+                @change="persist({ glass_effect: glass })"
+              />
+              <span class="switch-track"></span>
+            </label>
+          </div>
+          <div class="theme-picker">
+            <button
+              v-for="t in THEMES"
+              :key="t.id"
+              class="theme-card"
+              :class="{ selected: theme === t.id }"
+              :data-theme-id="t.id"
+              :aria-pressed="theme === t.id"
+              @click="selectTheme(t.id)"
+            >
+              <span class="theme-swatch"></span>
+              <span class="theme-name">{{ t.name }}</span>
+              <span class="theme-desc">{{ t.desc }}</span>
+              <span v-if="theme === t.id" class="theme-check" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path :d="ICON_CHECK" />
+                </svg>
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
