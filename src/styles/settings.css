@@ -571,6 +571,27 @@
   color: var(--text-bright);
 }
 
+/* 设置条目行首图标（市场 / MCP 服务器行）：对齐会话目录行 .folder-icon */
+.plugin-marketplace-icon,
+.mcp-server-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.plugin-marketplace-icon svg,
+.mcp-server-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 市场图标为填充风格（同导航 ICON_EXTENSION）；MCP 图标走描边属性，不可在此统一 fill */
+.plugin-marketplace-icon svg {
+  fill: currentColor;
+}
+
 /* 胶囊徽章基类：accent 系徽章共享，padding 差异保留在各自规则 */
 .plugin-status,
 .plugin-marketplace-count,

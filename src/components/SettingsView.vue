@@ -2164,6 +2164,18 @@ function pluginInitial(p: PluginCatalogItem): string {
                 class="mcp-server-row"
               >
                 <div class="mcp-server-info">
+                  <span class="mcp-server-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path
+                        :d="ICON_MCP"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </span>
                   <span class="mcp-server-name">{{ s.name }}</span>
                   <span class="mcp-server-type">
                     {{ s.url.trim() ? "http" : "stdio" }}
@@ -2854,6 +2866,11 @@ function pluginInitial(p: PluginCatalogItem): string {
                             : ICON_ARROW_DOWN
                         "
                       />
+                    </svg>
+                  </span>
+                  <span class="plugin-marketplace-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path :d="ICON_EXTENSION" />
                     </svg>
                   </span>
                   <span class="plugin-marketplace-name">{{ mp.displayName }}</span>
