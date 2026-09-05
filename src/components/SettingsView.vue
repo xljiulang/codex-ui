@@ -39,10 +39,6 @@ import {
   ICON_TOOL,
   ICON_TUNE,
 } from "../lib/icons";
-import {
-  dynamicToolRows,
-  type DynamicToolRow,
-} from "../lib/dynamicTools";
 import { PERMISSION_MODES } from "../lib/permissions";
 import type {
   AppSettings,
@@ -50,9 +46,6 @@ import type {
   ModelConfigUiEdit,
   ModelConfigState,
   ModelProviderInfo,
-  SkillErrorInfo,
-  SkillsItem,
-  SkillsState,
   TerminalShell,
   FollowupMode,
   PermissionId,
@@ -60,8 +53,10 @@ import type {
 import AppSelect, { type AppSelectOption } from "./AppSelect.vue";
 import ModelConfigModelPicker from "./ModelConfigModelPicker.vue";
 import ModalDialog from "./ModalDialog.vue";
+import DynamicToolsSection from "./settings/DynamicToolsSection.vue";
 import McpSection from "./settings/McpSection.vue";
 import PluginsSection from "./settings/PluginsSection.vue";
+import SkillsSection from "./settings/SkillsSection.vue";
 
 const codexPath = ref(store.settings.codex_path ?? "");
 const sound = ref(store.settings.sound_enabled);
@@ -116,7 +111,6 @@ function onNavKeydown(e: KeyboardEvent) {
 onMounted(() => {
   void loadModelConfig();
   void loadCustomInstructions();
-  void loadSkills();
 });
 
 /** 即时保存：任何设置项变更立即持久化（成功静默，失败 toast） */
@@ -214,9 +208,6 @@ const DEEPSEEK_CODEX_DOCS_URL =
 
 /** GLM（智谱）Codex 接入文档（浏览器打开） */
 const GLM_CODEX_DOCS_URL = "https://docs.bigmodel.cn/cn/coding-plan/tool/codex";
-
-/** Skills Catalog for Codex（浏览器打开） */
-const SKILLS_CATALOG_URL = "https://github.com/openai/skills";
 
 /** config / model_catalog_json 卡片状态（字段与 Rust 端 model_config_read 返回一致） */
 const modelConfig = reactive({
@@ -677,115 +668,6 @@ async function saveCustomInstructions() {
 
 function openAgentsFile() {
   void openPathInAppOrReveal(agents.agents_path);
-}
-
-// ---------- 技能管理 ----------
-
-const skillsState = reactive({
-  loading: false,
-  adding: false,
-  items: [] as SkillsItem[],
-  errors: [] as SkillErrorInfo[],
-  busy: {} as Record<string, boolean>,
-});
-
-/** 打开文件对话框选择 SKILL.md：校验通过后安装到 CODEX_HOME/skills 并刷新列表 */
-async function addSkill() {
-  if (skillsState.loading || skillsState.adding) return;
-  skillsState.adding = true;
-  try {
-    const name = await invoke<string | null>("skills_add");
-    if (!name) return; // 用户取消：文件未变化，不刷新
-    setToast(`已添加技能 ${name}`);
-    await loadSkills(true);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    skillsState.adding = false;
-  }
-}
-
-/** 拉取本地技能列表（skills_read：从 skills/list 过滤出 CODEX_HOME/skills 下的技能） */
-async function loadSkills(forceReload = false) {
-  if (skillsState.loading) return;
-  skillsState.loading = true;
-  try {
-    const res = await invoke<SkillsState | null>("skills_read", {
-      forceReload,
-    });
-    skillsState.items = res?.items ?? [];
-    skillsState.errors = res?.errors ?? [];
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    skillsState.loading = false;
-  }
-}
-
-function openSkill(s: SkillsItem) {
-  void openPathInAppOrReveal(s.path);
-}
-
-/** 启用/禁用技能：写用户级技能配置后强制重读列表 */
-async function toggleSkill(s: SkillsItem) {
-  if (skillsState.loading || skillsState.busy[s.path]) return;
-  skillsState.busy[s.path] = true;
-  const next = !s.enabled;
-  try {
-    await invoke("codex_rpc", {
-      method: "skills/config/write",
-      params: { name: s.name, enabled: next },
-    });
-    setToast(next ? `已启用 ${s.name}` : `已禁用 ${s.name}`);
-    await loadSkills(true);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    skillsState.busy[s.path] = false;
-  }
-}
-
-/** 删除技能：确认后删除 SKILL.md 所在目录并强制刷新列表 */
-async function removeSkill(s: SkillsItem) {
-  if (skillsState.loading || skillsState.busy[s.path]) return;
-  const ok = await askConfirm({
-    title: "删除技能",
-    message: `确定删除技能「${s.name}」吗？将删除该技能所在目录（${s.path}），此操作不可恢复。`,
-    confirmLabel: "删除",
-    cancelLabel: "取消",
-  });
-  if (!ok) return;
-  skillsState.busy[s.path] = true;
-  try {
-    await invoke("skills_remove", { skillPath: s.path });
-    setToast(`已删除技能 ${s.name}`);
-    await loadSkills(true);
-  } catch (e) {
-    setToast(toastError(e));
-  } finally {
-    skillsState.busy[s.path] = false;
-  }
-}
-
-// ---------- 动态工具 ----------
-
-/** 动态工具行（静态定义展开；当前为 codexui 命名空间两个工具），只提供启用/禁用 */
-const dynamicToolRowsList = dynamicToolRows();
-
-function isDynamicToolDisabled(key: string): boolean {
-  return (store.settings.dynamic_tools_disabled ?? []).includes(key);
-}
-
-/** 切换动态工具启用/禁用：写入应用设置，禁用的工具不再注入新会话 */
-async function toggleDynamicTool(tool: DynamicToolRow) {
-  const disabled = new Set(store.settings.dynamic_tools_disabled ?? []);
-  if (disabled.has(tool.key)) disabled.delete(tool.key);
-  else disabled.add(tool.key);
-  try {
-    await saveSettings({ dynamic_tools_disabled: Array.from(disabled) });
-  } catch (e) {
-    setToast(toastError(e));
-  }
 }
 
 </script>
@@ -1416,176 +1298,9 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
           </div>
         </section>
 
-        <section
-          v-show="activeSection === 'dynamic-tools'"
-          class="settings-section settings-section-dynamic-tools"
-        >
-          <h2 class="settings-section-title">动态工具</h2>
-          <p class="settings-section-desc">
-            控制 codex-ui 动态工具（codexui）是否随新建会话注入；禁用的工具不再注入
-          </p>
-          <div class="model-config-card">
-            <div class="model-config-card-head">
-              <h3>对话内动态工具</h3>
-              <div class="model-config-head-actions">
-                <span class="dynamic-tools-hint">禁用后新会话不再注入</span>
-              </div>
-            </div>
-            <div class="skills-list">
-              <div
-                v-for="tool in dynamicToolRowsList"
-                :key="tool.key"
-                class="dynamic-tool-row"
-              >
-                <div class="skill-info">
-                  <button
-                    type="button"
-                    class="skill-row-main"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_TOOL" />
-                    </svg>
-                    <span class="skill-name">{{ tool.display }}</span>
-                  </button>
-                  <p v-if="tool.description" class="skill-desc">
-                    {{ tool.description }}
-                  </p>
-                </div>
-                <div class="skill-actions">
-                  <label class="switch">
-                    <input
-                      type="checkbox"
-                      :checked="!isDynamicToolDisabled(tool.key)"
-                      :aria-label="
-                        isDynamicToolDisabled(tool.key) ? '启用工具' : '禁用工具'
-                      "
-                      @change="toggleDynamicTool(tool)"
-                    />
-                    <span class="switch-track"></span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <DynamicToolsSection :active="activeSection === 'dynamic-tools'" />
 
-        <section
-          v-show="activeSection === 'skills'"
-          class="settings-section settings-section-skills"
-        >
-          <h2 class="settings-section-title">技能管理</h2>
-          <p class="settings-section-desc">
-            管理 CODEX_HOME 下的本地技能（SKILL.md）
-          </p>
-          <div class="model-config-card">
-            <div class="model-config-card-head">
-              <h3>已安装技能</h3>
-              <div class="model-config-head-actions">
-                <button
-                  type="button"
-                  class="model-config-docs-link skill-catalog-link"
-                  v-tooltip="'Skills Catalog for Codex（浏览器打开）'"
-                  @click="openDocs(SKILLS_CATALOG_URL)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_LINK" />
-                  </svg>
-                  Skills Catalog for Codex
-                </button>
-                <button
-                  class="btn btn-icon primary skill-add-btn"
-                  v-tooltip="'添加技能'"
-                  aria-label="添加技能"
-                  :disabled="skillsState.loading || skillsState.adding"
-                  @click="addSkill"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_PLUS" />
-                  </svg>
-                </button>
-                <button
-                  class="btn btn-icon model-config-reload-btn"
-                  aria-label="刷新"
-                  v-tooltip="'刷新'"
-                  :disabled="skillsState.loading || skillsState.adding"
-                  @click="loadSkills()"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_REFRESH" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div class="skills-list">
-              <div
-                v-if="skillsState.loading && !skillsState.items.length"
-                class="plugin-empty"
-              >
-                正在加载技能…
-              </div>
-              <div
-                v-else-if="!skillsState.items.length && skillsState.errors.length"
-                class="plugin-empty"
-              >
-                {{ skillsState.errors.length }} 个技能因格式问题未加载
-                <ul class="skill-error-list">
-                  <li v-for="e in skillsState.errors" :key="e.path">
-                    {{ e.message }}（{{ e.path }}）
-                  </li>
-                </ul>
-              </div>
-              <div v-else-if="!skillsState.items.length" class="plugin-empty">
-                暂无可用技能
-              </div>
-              <div
-                v-for="s in skillsState.items"
-                :key="s.path"
-                class="skill-row"
-              >
-<div class="skill-info">
-                  <button
-                    type="button"
-                    class="skill-row-main"
-                    v-tooltip="'在编辑器中打开 SKILL.md'"
-                    @click="openSkill(s)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_SKILL" />
-                    </svg>
-                    <span class="skill-name">{{ s.name }}</span>
-                  </button>
-                  <p v-if="s.description" class="skill-desc">
-                    {{ s.description }}
-                  </p>
-                </div>
-                <div class="skill-actions">
-                  <label class="switch">
-                    <input
-                      type="checkbox"
-                      :checked="s.enabled"
-                      :disabled="skillsState.loading || !!skillsState.busy[s.path]"
-                      :aria-label="s.enabled ? '禁用技能' : '启用技能'"
-                      @change="toggleSkill(s)"
-                    />
-                    <span class="switch-track"></span>
-                  </label>
-                  <button
-                    type="button"
-                    class="btn btn-icon danger skill-delete-btn"
-                    v-tooltip="'删除技能'"
-                    aria-label="删除技能"
-                    :disabled="skillsState.loading || !!skillsState.busy[s.path]"
-                    @click="removeSkill(s)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_DELETE" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        <SkillsSection :active="activeSection === 'skills'" />
 
         <McpSection :active="activeSection === 'mcp'" />
 

@@ -49,7 +49,6 @@ export {
   openDocxPreview,
   openImagePreview,
   openPathInApp,
-  openPathInAppOrReveal,
   openPdfPreview,
   openTextEditor,
   openXlsxPreview,
