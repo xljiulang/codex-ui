@@ -728,7 +728,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-6) var(--space-1);
+  /* 垂直内边距对称，行内容在 hover 高亮框内垂直居中 */
+  padding: var(--space-2) var(--space-6);
   font-size: var(--font-md);
   font-weight: 700;
   color: var(--text-bright);
@@ -748,10 +749,6 @@
 /* 分区内容子容器：分区标题为真根，内容统一挂在其下并整体右移缩进 */
 .git-section-body {
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-10);
-}
-
-.git-section.collapsed .git-section-head {
-  padding-bottom: var(--space-4);
 }
 
 .git-section-arrow {
