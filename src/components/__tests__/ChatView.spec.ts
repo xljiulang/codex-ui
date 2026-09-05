@@ -1086,15 +1086,15 @@ describe("ChatView 回合定位按钮", () => {
     await nextTick();
   }
 
-  it("预热完成前隐藏，完成后 ≥1 个回合显示单个导航按钮；0 个不显示", async () => {
+  it("预热完成前隐藏，完成后 ≥2 个回合显示导航按钮；0/1 个不显示", async () => {
     store.itemsByThread["t1"] = reactive(userThread(1));
     const single = mountChat();
     await nextTick();
     await flushPromises();
     expect(single.find(".turn-nav").exists()).toBe(false);
     await warmReady();
-    expect(single.find(".turn-nav").exists()).toBe(true);
-    expect(single.findAll(".turn-nav-btn")).toHaveLength(1);
+    // 单回合无跳转意义，预热完成也不显示
+    expect(single.find(".turn-nav").exists()).toBe(false);
     single.unmount();
 
     store.itemsByThread["t1"] = reactive(userThread(0));

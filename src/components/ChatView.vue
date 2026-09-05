@@ -8,7 +8,7 @@ import PlanCard from "./PlanCard.vue";
 import PlanPromptBubble from "./PlanPromptBubble.vue";
 import { store, type SessionTab } from "../composables/useCodex";
 import { formatChatTime } from "../lib/format";
-import { ICON_ARROW_DOWN, ICON_GRID_4 } from "../lib/icons";
+import { ICON_ARROW_DOWN, ICON_LINES_4 } from "../lib/icons";
 import {
   createTurnsBuilder,
   findCurrentTurnIndex,
@@ -132,9 +132,9 @@ let navAnimSeq = 0;
 let navAnimRaf: number | undefined;
 let navAnimating = false;
 
-// 单个回合也提供导航（点击条目跳转该回合起点）；0 个不显示
+// ≥2 个回合才提供导航（单回合无跳转意义，按钮不显示）
 const hasTurnNav = computed(
-  () => anchorCount.value >= 1 && turnNavReady.value,
+  () => anchorCount.value >= 2 && turnNavReady.value,
 );
 
 /** 卡片条目：按消息顺序收集 userMessage，index 即 DOM 锚点顺序 */
@@ -834,8 +834,8 @@ onBeforeUnmount(() => {
           aria-label="回合导航"
           @keydown="onTurnNavKeydown"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_GRID_4" />
+          <svg viewBox="0 0 24 24" preserveAspectRatio="none" aria-hidden="true">
+            <path :d="ICON_LINES_4" />
           </svg>
         </button>
         <div v-if="turnNavOpen" class="turn-nav-card">

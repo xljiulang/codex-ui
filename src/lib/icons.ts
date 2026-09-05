@@ -68,9 +68,12 @@ export const ICON_TOKEN =
   "M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0";
 /** 窗口 + 标题栏：矩形 evenodd 挖空内容区（回合导航底栏上下文图标） */
 export const ICON_WINDOW = "M3 3h18v18H3zM5 8h14v11H5z";
-/** 四宫格（Windows 开始菜单风格：2×2 四个实心方格，用于回合导航按钮） */
+/** 四宫格（Windows 开始菜单风格：2×2 四个实心方格） */
 export const ICON_GRID_4 =
   "M2.75 2.75h8v8h-8zM13.25 2.75h8v8h-8zM2.75 13.25h8v8h-8zM13.25 13.25h8v8h-8z";
+/** 四条横线（等距实心横条，用于回合导航按钮） */
+export const ICON_LINES_4 =
+  "M3 3.2h18v2H3zM3 8.4h18v2H3zM3 13.6h18v2H3zM3 18.8h18v2H3z";
 /** 窗口控制：最大化（方形边框） */
 export const ICON_WINDOW_MAX =
   "M19 5H5c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 12H5V7h14v10z";

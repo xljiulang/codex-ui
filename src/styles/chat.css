@@ -71,7 +71,7 @@
   align-items: center;
   justify-content: center;
   position: absolute;
-  /* 与回合导航按钮同列：右缘贴齐滚动条左侧 */
+  /* 右缘贴齐滚动条左侧（回合导航按钮已覆盖滚动条位置） */
   right: 12px;
   bottom: 10px;
   z-index: 20;
@@ -99,47 +99,53 @@
   border-color: var(--accent-dim);
 }
 
-/* 回合定位：滚动条左侧垂直居中的导航按钮与回合卡片 */
+/* 回合定位：与滚动条同宽、完全贴右的全高锚点条，按钮垂直居中；卡片悬停后从按钮左侧全高弹出 */
 .turn-nav {
   position: absolute;
-  top: 50%;
-  /* 右缘贴齐右侧 12px 原生滚动条左缘，不与滚动条重叠 */
-  right: 12px;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: 0;
+  /* 覆盖右侧 12px 原生滚动条位置：宽度和滚动条一致、右缘完全贴齐 */
+  right: 0;
+  width: 12px;
   z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
+  justify-content: center;
+  /* 全高条本身不接收指针，滚动条上下段仍可拖动，仅按钮/卡片可交互 */
+  pointer-events: none;
 }
 
 .turn-nav-btn {
+  pointer-events: auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
+  /* 与滚动条滑块同款视觉：12px 轨道居中、可见宽度 10px（比滑块 8px 宽 2px 更好点按） */
+  width: 10px;
   height: 30px;
   padding: 0;
-  border-radius: 50%;
-  color: var(--text-bright);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-light);
-  box-shadow: var(--shadow-md);
+  /* 无背景无外圈：只留图标本体，淡灰拟态滚动条滑块（覆盖在滚动条位置上） */
+  border: none;
+  border-radius: 6px;
+  color: var(--text-faint);
+  background: none;
+  box-shadow: none;
   cursor: pointer;
-  opacity: 0.92;
-  transition: opacity var(--ease), border-color var(--ease), color var(--ease);
+  opacity: 0.8;
+  transition: opacity var(--ease), color var(--ease);
 }
 
 .turn-nav-btn svg {
-  width: 16px;
-  height: 16px;
+  /* 纵向铺满按钮：preserveAspectRatio="none" 拉伸，横条间距随高度均匀铺开 */
+  width: 100%;
+  height: 100%;
   fill: currentColor;
 }
 
 .turn-nav-btn:hover:not(:disabled) {
   opacity: 1;
-  border-color: var(--accent-dim);
-  color: var(--accent);
+  color: var(--text-dim);
 }
 
 .turn-nav-btn:disabled {
@@ -148,20 +154,25 @@
 }
 
 .turn-nav-card {
+  pointer-events: auto;
   position: absolute;
-  top: 50%;
-  right: calc(100% + 10px);
-  transform: translateY(-50%);
+  top: 0;
+  bottom: 0;
+  /* 从按钮左侧弹出：右缘贴齐锚点条左缘（即滚动条左侧），全高铺满 */
+  right: 100%;
   z-index: 30;
-  width: 336px;
-  max-width: min(70vw, 336px);
+  width: 280px;
+  max-width: min(70vw, 280px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding: 0;
   background: var(--float-bg);
   border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
+  /* 全高卡片上下顶到聊天区边缘，去掉上下边框避免与容器边线叠画 */
+  border-top: none;
+  border-bottom: none;
+  border-radius: 0;
   box-shadow: var(--shadow-lg);
   animation: turn-nav-card-in var(--ease);
 }
@@ -169,20 +180,20 @@
 @keyframes turn-nav-card-in {
   from {
     opacity: 0;
-    transform: translateY(-50%) translateX(6px) scale(0.98);
+    transform: translateX(8px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) translateX(0) scale(1);
+    transform: translateX(0) scale(1);
   }
 }
 
 .turn-nav-list {
   overflow-y: auto;
   padding: var(--space-1);
-  /* 可视区按整行对齐 15 条：15 × 25.5px（内容 16.5 + 内距 6 + 边框 2 + 行距 1）= 382.5px，
-     加上下内边距 var(--space-1) × 2 = 8px → 390.5px；62vh 仅作小窗口兜底 */
-  max-height: min(62vh, 390.5px);
+  /* auto 外边距：条目少时列表垂直居中，条目多时占满卡片高度并内部滚动 */
+  margin: auto 0;
+  max-height: 100%;
 }
 
 .turn-nav-item {
@@ -253,6 +264,7 @@
 
 /* 条目悬停的用户消息气泡预览：贴条目行左侧浮层显示（相对导航根定位 + translate 左伸） */
 .turn-nav-preview {
+  pointer-events: auto;
   position: absolute;
   left: 0;
   top: 0;
