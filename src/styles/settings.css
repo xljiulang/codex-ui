@@ -594,7 +594,6 @@
 
 /* 胶囊徽章基类：accent 系徽章共享，padding 差异保留在各自规则 */
 .plugin-status,
-.plugin-marketplace-count,
 .model-provider-wire,
 .mcp-server-type,
 .git-remote-badge,
@@ -608,12 +607,22 @@
   flex-shrink: 0;
 }
 
+/* 数量徽章：扁胶囊风格同会话目录行 .folder-count（中性色描边），尺寸略放大一档，
+   推到行尾、位于「移除市场」图标之前 */
 .plugin-marketplace-count {
-  padding: 1px var(--space-2);
-}
-
-.plugin-market-remove {
   margin-left: auto;
+  min-width: 26px;
+  padding: 3px var(--space-4);
+  box-sizing: border-box;
+  text-align: center;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .plugin-list {
