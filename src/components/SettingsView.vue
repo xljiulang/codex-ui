@@ -258,6 +258,19 @@ const modelConfig = reactive({
   providers: [] as ModelProviderInfo[],
 });
 
+/** app-server 协议 `model_reasoning_effort`（codex-cli ReasoningEffort）支持的档位。
+ *  空串代表「默认（不写入）」，由模板单独渲染；新增档位时同步此数组。 */
+const REASONING_EFFORT_VALUES = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+];
+
 /** 模型配置卡片校验状态：空串表示无错误；catalog 为模型目录结构错误（阻断保存） */
 const modelConfigErrors = reactive({
   model: "",
@@ -1591,9 +1604,13 @@ function pluginInitial(p: PluginCatalogItem): string {
                   :disabled="modelConfig.loading"
                 >
                   <option value="">默认（不写入）</option>
-                  <option value="low">low</option>
-                  <option value="high">high</option>
-                  <option value="max">max</option>
+                  <option
+                    v-for="effort in REASONING_EFFORT_VALUES"
+                    :key="effort"
+                    :value="effort"
+                  >
+                    {{ effort }}
+                  </option>
                 </select>
               </div>
               <div class="setting-row">
