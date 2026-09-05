@@ -2085,7 +2085,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <button
                     type="button"
                     class="skill-row-main"
-                    v-tooltip="tool.description"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="ICON_TOOL" />
@@ -2187,6 +2186,11 @@ function pluginInitial(p: PluginCatalogItem): string {
                 :key="s.path"
                 class="skill-row"
               >
+                <span class="skill-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path :d="ICON_SKILL" />
+                  </svg>
+                </span>
                 <div class="skill-info">
                   <button
                     type="button"
@@ -2194,9 +2198,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                     v-tooltip="'在编辑器中打开 SKILL.md'"
                     @click="openSkill(s)"
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path :d="ICON_FILE" />
-                    </svg>
                     <span class="skill-name">{{ s.name }}</span>
                   </button>
                   <p v-if="s.description" class="skill-desc">

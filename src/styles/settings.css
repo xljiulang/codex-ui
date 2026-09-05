@@ -1096,6 +1096,31 @@
   color: var(--text-dim);
 }
 
+/* 技能行首图标徽章（与 mode-icon 同款 accent 底） */
+.skill-icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+}
+
+.skill-icon svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* 技能标题为链接语义：悬停下划线提示可点击打开编辑器 */
+.skill-row-main:hover .skill-name {
+  text-decoration: underline;
+}
+
 /* MCP 管理 */
 .mcp-servers-list {
   display: flex;

@@ -559,6 +559,8 @@
   min-height: 0;
   overflow: auto;
   display: flex;
+  /* body 全局禁选（自绘标题栏拖动），文档内容单独放开选择/复制 */
+  user-select: text;
 }
 .docx-preview-sizer {
   margin: auto;
@@ -619,6 +621,7 @@
   min-height: 0;
   overflow: auto;
   background: var(--console-bg-deep);
+  user-select: text;
 }
 .xlsx-table {
   width: 100%;
