@@ -37,7 +37,8 @@ import { assetUrl } from "../lib/asset";
 import { copyText } from "../lib/clipboard";
 import { openPathInApp } from "../composables/useSessionFs";
 import {
-  ICON_CHEVRON_DOWN,
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
   ICON_CHECK,
   ICON_DELETE,
   ICON_DOWNLOAD,
@@ -2844,9 +2845,15 @@ function pluginInitial(p: PluginCatalogItem): string {
                   :class="{ collapsed: pluginState.collapsed[mp.name] }"
                   @click="toggleMarketplace(mp)"
                 >
-                  <span class="plugin-marketplace-chevron" aria-hidden="true">
+                  <span class="plugin-marketplace-arrow" aria-hidden="true">
                     <svg viewBox="0 0 24 24">
-                      <path :d="ICON_CHEVRON_DOWN" />
+                      <path
+                        :d="
+                          pluginState.collapsed[mp.name]
+                            ? ICON_ARROW_RIGHT
+                            : ICON_ARROW_DOWN
+                        "
+                      />
                     </svg>
                   </span>
                   <span class="plugin-marketplace-name">{{ mp.displayName }}</span>

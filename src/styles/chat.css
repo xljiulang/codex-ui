@@ -136,7 +136,8 @@
   fill: currentColor;
 }
 
-/* 回合进行中四宫格旋转提示：等待响应慢速、执行工具中常速；悬停导航区时图标归位静止 */
+/* 回合进行中四宫格旋转提示：等待响应慢速（8s/圈）、执行工具中常速（1.5s/圈）；
+   换挡沿用当前角度由 ChatView 以负 animation-delay 接续；悬停导航区时图标归位静止 */
 .turn-nav-btn.spin-slow svg {
   animation: spin 8s linear infinite;
 }
