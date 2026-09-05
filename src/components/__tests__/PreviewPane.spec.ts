@@ -20,6 +20,7 @@ function makeTab(
     imageUrl: "asset://D:/repo/assets/logo.png",
     pdfData: null,
     xlsxData: null,
+    docxData: null,
     xlsxSheetIndex: 0,
     pageCount: null,
     stale: false,

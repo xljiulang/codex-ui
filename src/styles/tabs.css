@@ -547,6 +547,23 @@
   align-self: flex-start;
 }
 
+/* DOCX 预览：docx-preview 按页渲染的只读视图（页白底与页阴影由库注入样式提供） */
+.docx-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.docx-preview-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* 库默认的灰色画布底改为跟随应用面板色，避免与 PDF/XLSX 预览观感不一致 */
+.docx-preview-stage .docx-wrapper {
+  background: transparent;
+}
+
 /* XLSX 预览：工作表切换工具栏 + 行虚拟滚动网格 */
 .xlsx-preview {
   flex: 1;

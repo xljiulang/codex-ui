@@ -1,17 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 
-const docxMock = vi.hoisted(() => ({
-  docxToHtml: vi.fn(),
-  jsonToDocx: vi.fn(),
-}));
-
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: vi.fn((p: string) => `asset://${p}`),
 }));
-vi.mock("../../lib/docx", () => docxMock);
-
 const terminalEventsMock = vi.hoisted(() => ({
   ensureTerminalListeners: vi.fn(() => Promise.resolve()),
   attachTerminal: vi.fn(() => ({
@@ -40,17 +33,14 @@ import {
   openCommitFileDiffTab,
   openCommitTab,
   openDiffTab,
-  openDocxTab,
   openFileTab,
   openPreviewTab,
   openTerminalTab,
   pendingCloseId,
-  saveDocxTab,
   saveFileTab,
   saveTabAndClose,
   tabs,
   type DiffEditorTab,
-  type DocxEditorTab,
   type FileEditorTab,
   type PreviewEditorTab,
   type TerminalEditorTab,
@@ -614,6 +604,29 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).toBe(preview!.id);
   });
 
+  it("打开 DOCX 预览：读取 session_fs_read_bytes 并解码为字节", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read_bytes") {
+        expect(args).toEqual({ workspace: root, path: "doc.docx" });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("docx", root, "doc.docx");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("docx");
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toBe("");
+    expect(Array.from(preview!.docxData ?? [])).toEqual([
+      104, 101, 108, 108, 111,
+    ]);
+    expect(activeTabId.value).toBe(preview!.id);
+  });
+
   it("XLSX 预览重复打开：去重并激活原标签", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {
@@ -1066,114 +1079,6 @@ describe("useEditorTabs 标签状态", () => {
       id: t!.id,
     });
     expect(tabs.some((x) => x.id === t!.id)).toBe(false);
-  });
-});
-
-describe("useEditorTabs .docx 标签", () => {
-  beforeEach(() => {
-    mockedInvoke.mockReset();
-    docxMock.docxToHtml.mockReset();
-    docxMock.jsonToDocx.mockReset();
-    __resetEditorTabsForTest();
-    store.confirm = null;
-  });
-
-  function openDocx(path: string) {
-    mockedInvoke.mockImplementation((cmd) => {
-      if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve({ content: btoa("PK"), byteSize: 2 });
-      }
-      return Promise.reject(new Error(`unexpected ${cmd}`));
-    });
-    docxMock.docxToHtml.mockResolvedValue({ html: "<p>hi</p>", warnings: [] });
-    return openDocxTab(root, path);
-  }
-
-  function docxEditorStub() {
-    return { getJSON: () => ({ type: "doc", content: [] }) } as unknown as DocxEditorTab["editor"];
-  }
-
-  it("打开 .docx 创建标签并激活；重复打开只激活不重建", async () => {
-    await openDocx("a.docx");
-    expect(tabs).toHaveLength(1);
-    const tab = tabs[0] as DocxEditorTab;
-    expect(tab.kind).toBe("docx");
-    expect(tab.title).toBe("a.docx");
-    expect(tab.initialHtml).toBe("<p>hi</p>");
-    expect(tab.loading).toBe(false);
-
-    await openDocx("a.docx");
-    expect(tabs.filter((t) => t.kind === "docx")).toHaveLength(1);
-    expect(activeTabId.value).toBe(tab.id);
-  });
-
-  it("保存 .docx 调用 session_fs_write_bytes 并复位脏标记", async () => {
-    await openDocx("a.docx");
-    const tab = tabs.find(
-      (t): t is DocxEditorTab => t.kind === "docx" && t.path === "a.docx",
-    )!;
-    tab.editor = docxEditorStub();
-    tab.dirty = true;
-    docxMock.jsonToDocx.mockResolvedValue({ base64: "UEsAAAA=", warnings: [] });
-    mockedInvoke.mockImplementation((cmd) => {
-      if (cmd === "session_fs_write_bytes") {
-        return Promise.resolve({ name: "a.docx" });
-      }
-      return Promise.reject(new Error(`unexpected ${cmd}`));
-    });
-
-    const ok = await saveDocxTab(tab.id);
-    expect(ok).toBe(true);
-    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write_bytes", {
-      workspace: root,
-      path: "a.docx",
-      content: "UEsAAAA=",
-    });
-    expect(tab.dirty).toBe(false);
-    expect(tab.status).toContain("已保存");
-  });
-
-  it("关闭脏 .docx 挂起确认；保存并关闭走 saveDocxTab", async () => {
-    await openDocx("a.docx");
-    const tab = tabs.find(
-      (t): t is DocxEditorTab => t.kind === "docx" && t.path === "a.docx",
-    )!;
-    tab.editor = docxEditorStub();
-    tab.dirty = true;
-    docxMock.jsonToDocx.mockResolvedValue({ base64: "UEsAAAA=", warnings: [] });
-    mockedInvoke.mockImplementation((cmd) => {
-      if (cmd === "session_fs_write_bytes") {
-        return Promise.resolve({ name: "a.docx" });
-      }
-      return Promise.reject(new Error(`unexpected ${cmd}`));
-    });
-
-    await closeTab(tab.id);
-    expect(pendingCloseId.value).toBe(tab.id);
-    await saveTabAndClose(tab.id);
-    expect(tabs.some((t) => t.id === tab.id)).toBe(false);
-    expect(mockedInvoke).toHaveBeenCalledWith(
-      "session_fs_write_bytes",
-      expect.anything(),
-    );
-  });
-
-  it("批量关闭跳过脏 .docx 并计数", async () => {
-    await openDocx("a.docx");
-    await openDocx("b.docx");
-    const a = tabs.find(
-      (t): t is DocxEditorTab => t.kind === "docx" && t.path === "a.docx",
-    )!;
-    const b = tabs.find(
-      (t): t is DocxEditorTab => t.kind === "docx" && t.path === "b.docx",
-    )!;
-    a.editor = docxEditorStub();
-    a.dirty = true;
-
-    const skipped = await closeAllTabs();
-    expect(skipped).toBe(1);
-    expect(tabs.some((t) => t.id === a.id)).toBe(true);
-    expect(tabs.some((t) => t.id === b.id)).toBe(false);
   });
 });
 

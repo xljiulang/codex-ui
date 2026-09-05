@@ -5,17 +5,15 @@ import { releaseTerminal } from "../useTerminalEvents";
 import { TabKind } from "../../lib/tabs";
 import { activeTabId, tabs } from "../useTabs";
 import type { Tab } from "../useTabs";
-import { isTerminalBusy, saveDocxTab, saveFileTab } from "./open";
-import type { DocxEditorTab, EditorTab, FileEditorTab } from "./types";
+import { isTerminalBusy, saveFileTab } from "./open";
+import type { EditorTab, FileEditorTab } from "./types";
 
 /** 待关闭的脏文件标签 id（由编辑面板弹确认层） */
 export const pendingCloseId = ref<string | null>(null);
 
-/** 有未保存更改的文件型标签（.txt 等文本 + .docx 富文本） */
+/** 有未保存更改的文件型标签（文本文件） */
 function isDirtyEditableTab(tab: EditorTab): boolean {
-  return (
-    (tab.kind === TabKind.File || tab.kind === TabKind.Docx) && tab.dirty
-  );
+  return tab.kind === TabKind.File && tab.dirty;
 }
 
 /** 释放标签后端资源：终端进程结束（幂等，失败静默） */
@@ -69,9 +67,7 @@ export function cancelClose(): void {
 
 export async function saveTabAndClose(id: string): Promise<void> {
   pendingCloseId.value = null;
-  const tab = tabs.find((t) => t.id === id);
-  const ok =
-    tab?.kind === TabKind.Docx ? await saveDocxTab(id) : await saveFileTab(id);
+  const ok = await saveFileTab(id);
   if (ok) removeTab(id);
 }
 
@@ -144,20 +140,17 @@ function removeTab(id: string): void {
   }
 }
 
-/** 有未保存更改的文件型标签（文本 + .docx，供关闭应用守卫使用） */
-export function dirtyEditableTabs(): (FileEditorTab | DocxEditorTab)[] {
+/** 有未保存更改的文件型标签（文本文件，供关闭应用守卫使用） */
+export function dirtyEditableTabs(): FileEditorTab[] {
   return tabs.filter(
-    (t): t is FileEditorTab | DocxEditorTab =>
-      (t.kind === TabKind.File || t.kind === TabKind.Docx) && t.dirty,
+    (t): t is FileEditorTab => t.kind === TabKind.File && t.dirty,
   );
 }
 
 /** 保存全部脏标签；全部成功返回 true（任一失败则不关闭应用） */
 export async function saveAllDirtyTabs(): Promise<boolean> {
   const results = await Promise.all(
-    dirtyEditableTabs().map((t) =>
-      t.kind === TabKind.Docx ? saveDocxTab(t.id) : saveFileTab(t.id),
-    ),
+    dirtyEditableTabs().map((t) => saveFileTab(t.id)),
   );
   return results.every(Boolean);
 }

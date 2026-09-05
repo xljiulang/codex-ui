@@ -11,6 +11,9 @@ const PdfPreviewPane = defineAsyncComponent(() => import("./PdfPreviewPane.vue")
 const XlsxPreviewPane = defineAsyncComponent(
   () => import("./XlsxPreviewPane.vue"),
 );
+const DocxPreviewPane = defineAsyncComponent(
+  () => import("./DocxPreviewPane.vue"),
+);
 
 const relPath = computed(() => relPathOf(props.tab.workspace, props.tab.path));
 const kindLabel = computed(() =>
@@ -18,7 +21,9 @@ const kindLabel = computed(() =>
     ? "PDF"
     : props.tab.previewType === "xlsx"
       ? "表格"
-      : "图像",
+      : props.tab.previewType === "docx"
+        ? "Word 文档"
+        : "图像",
 );
 const imgError = ref(false);
 /** 图像缩放：1 表示适应窗口（CSS contain），其余按原始像素等比放大 */
@@ -137,7 +142,12 @@ watch(
         :tab="tab"
         :actions-target="headActions"
       />
-      <XlsxPreviewPane v-else :tab="tab" :actions-target="headActions" />
+      <XlsxPreviewPane
+        v-else-if="tab.previewType === 'xlsx'"
+        :tab="tab"
+        :actions-target="headActions"
+      />
+      <DocxPreviewPane v-else :tab="tab" />
     </template>
   </div>
 </template>

@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises } from "@vue/test-utils";
 
-const docxMock = vi.hoisted(() => ({
-  docxToHtml: vi.fn(),
-  jsonToDocx: vi.fn(),
-  isDocxPath: vi.fn((name: string) => name.toLowerCase().endsWith(".docx")),
-}));
-
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: vi.fn((p: string) => `asset://${p}`),
@@ -14,17 +8,14 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
-vi.mock("../../lib/docx", () => docxMock);
 
 import { invoke } from "@tauri-apps/api/core";
 import {
   __resetEditorTabsForTest,
   activateTab,
-  openDocxTab,
   openFileTab,
   openPreviewTab,
   tabs,
-  type DocxEditorTab,
   type FileEditorTab,
   type PreviewEditorTab,
 } from "../useEditorTabs";
@@ -34,10 +25,7 @@ import {
   refreshTabsFromFs,
 } from "../useEditorTabs/refresh";
 import { activeTabId } from "../useTabs";
-import { docxToHtml } from "../../lib/docx";
-
 const mockedInvoke = vi.mocked(invoke);
-const mockedDocxToHtml = vi.mocked(docxToHtml);
 const root = "D:\\repo";
 
 function fileContent(content: string, validUtf8 = true) {
@@ -71,7 +59,6 @@ async function openFile(path: string, content: string): Promise<FileEditorTab> {
 describe("refreshTabsFromFs 活动标签外部刷新", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
-    mockedDocxToHtml.mockReset();
     __resetEditorTabsForTest();
     __resetRefreshForTest();
   });
@@ -322,60 +309,6 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     );
   });
 
-  it("docx 标签内容变化：setContent 并恢复选区、复位脏标记", async () => {
-    mockedInvoke.mockImplementation((cmd) => {
-      if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve(binaryContent("PK1"));
-      }
-      return Promise.reject(new Error(`unexpected ${cmd}`));
-    });
-    mockedDocxToHtml.mockResolvedValue({ html: "<p>A</p>", warnings: [] });
-    await openDocxTab(root, absPath("a.docx"));
-    const tab = tabs.find(
-      (t): t is DocxEditorTab =>
-        t.kind === "docx" && t.path === absPath("a.docx"),
-    )!;
-    const setContent = vi.fn();
-    const setTextSelection = vi.fn();
-    tab.editor = {
-      state: { selection: { from: 5 }, doc: { content: { size: 100 } } },
-      commands: { setContent, setTextSelection },
-      view: { dom: { closest: () => null } },
-    } as unknown as DocxEditorTab["editor"];
-
-    mockedDocxToHtml.mockResolvedValue({ html: "<p>B</p>", warnings: [] });
-    await refreshTabsFromFs({ root, paths: ["a.docx"] });
-    expect(setContent).toHaveBeenCalledWith("<p>B</p>");
-    expect(setTextSelection).toHaveBeenCalledWith(5);
-    expect(tab.initialHtml).toBe("<p>B</p>");
-    expect(tab.dirty).toBe(false);
-  });
-
-  it("docx 标签内容相同：不重写编辑器", async () => {
-    mockedInvoke.mockImplementation((cmd) => {
-      if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve(binaryContent("PK1"));
-      }
-      return Promise.reject(new Error(`unexpected ${cmd}`));
-    });
-    mockedDocxToHtml.mockResolvedValue({ html: "<p>A</p>", warnings: [] });
-    await openDocxTab(root, absPath("a.docx"));
-    const tab = tabs.find(
-      (t): t is DocxEditorTab =>
-        t.kind === "docx" && t.path === absPath("a.docx"),
-    )!;
-    const setContent = vi.fn();
-    tab.editor = {
-      state: { selection: { from: 0 }, doc: { content: { size: 10 } } },
-      commands: { setContent, setTextSelection: vi.fn() },
-      view: { dom: { closest: () => null } },
-    } as unknown as DocxEditorTab["editor"];
-
-    await refreshTabsFromFs({ root, paths: ["a.docx"] });
-    expect(setContent).not.toHaveBeenCalled();
-    expect(tab.initialHtml).toBe("<p>A</p>");
-  });
-
   it("图片预览：imageUrl 带时间戳击穿缓存", async () => {
     mockedInvoke.mockResolvedValue(undefined);
     await openPreviewTab("image", root, "pic.png");
@@ -432,6 +365,30 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     });
     await refreshTabsFromFs({ root, paths: ["book.xlsx"] });
     expect(tab.xlsxData!.length).toBe(4);
+  });
+
+  it("DOCX 预览：替换 docxData 字节", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("AAA"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openPreviewTab("docx", root, "doc.docx");
+    const tab = tabs.find(
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "doc.docx",
+    )!;
+    expect(tab.docxData!.length).toBe(3);
+
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("BBBB"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await refreshTabsFromFs({ root, paths: ["doc.docx"] });
+    expect(tab.docxData!.length).toBe(4);
   });
 
   it("XLSX 预览非活动标签：标记 stale，切回活动补刷并清除标记", async () => {

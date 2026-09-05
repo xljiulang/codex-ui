@@ -27,7 +27,6 @@ import {
   tabs,
   type EditorTab,
   type CommitEditorTab,
-  type DocxEditorTab,
   type FileEditorTab,
   type DiffEditorTab,
   type PreviewEditorTab,
@@ -63,9 +62,6 @@ import {
 const TextEditorPane = defineAsyncComponent(
   () => import("./TextEditorPane.vue"),
 );
-const DocxEditorPane = defineAsyncComponent(
-  () => import("./DocxEditorPane.vue"),
-);
 const DiffPane = defineAsyncComponent(() => import("./DiffPane.vue"));
 const PreviewPane = defineAsyncComponent(() => import("./PreviewPane.vue"));
 const TerminalPane = defineAsyncComponent(() => import("./TerminalPane.vue"));
@@ -77,11 +73,6 @@ const tabBarRef = ref<InstanceType<typeof EditorTabBar> | null>(null);
 const activeFileTab = computed<FileEditorTab | null>(() =>
   activeTab.value?.kind === TabKind.File
     ? (activeTab.value as FileEditorTab)
-    : null,
-);
-const activeDocxTab = computed<DocxEditorTab | null>(() =>
-  activeTab.value?.kind === TabKind.Docx
-    ? (activeTab.value as DocxEditorTab)
     : null,
 );
 const activeDiffTab = computed<DiffEditorTab | null>(() =>
@@ -122,7 +113,7 @@ const pendingTab = computed<EditorTab | null>(
 
 /** 文件型标签（file/preview/diff）的磁盘绝对路径：兼容相对路径与工作区外绝对路径 */
 function tabAbsPath(
-  tab: FileEditorTab | DocxEditorTab | DiffEditorTab | PreviewEditorTab,
+  tab: FileEditorTab | DiffEditorTab | PreviewEditorTab,
 ): string {
   const root = tab.workspace;
   return /^[A-Za-z]:[\\/]/.test(tab.path) ? tab.path : joinFsPath(root, tab.path);
@@ -130,7 +121,7 @@ function tabAbsPath(
 
 /** 文件型标签（file/preview）的磁盘绝对路径：兼容工作区内绝对路径与外部文件（root=父目录+文件名） */
 function fileTabAbsPath(
-  tab: FileEditorTab | DocxEditorTab | PreviewEditorTab,
+  tab: FileEditorTab | PreviewEditorTab,
 ): string {
   return tabAbsPath(tab);
 }
@@ -196,7 +187,6 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
   // 文件/预览标签（含对话打开的工作区外文件）可直达所在目录，置于菜单末尾
   if (
     tab.kind === TabKind.File ||
-    tab.kind === TabKind.Docx ||
     tab.kind === TabKind.Preview
   ) {
     items.push({
@@ -237,7 +227,6 @@ watch(activeTab, (tab) => {
   if (
     tab &&
     (tab.kind === TabKind.File ||
-      tab.kind === TabKind.Docx ||
       tab.kind === TabKind.Preview ||
       tab.kind === TabKind.Diff)
   ) {
@@ -318,7 +307,6 @@ function openAddMenu(e: MouseEvent) {
         :active="activeTabId === tab.id"
       />
       <TextEditorPane v-if="activeFileTab" :tab="activeFileTab" />
-      <DocxEditorPane v-else-if="activeDocxTab" :tab="activeDocxTab" />
       <DiffPane v-else-if="activeDiffTab" :tab="activeDiffTab" />
       <PreviewPane v-else-if="activePreviewTab" :tab="activePreviewTab" />
       <CommitPane v-else-if="activeCommitTab" :tab="activeCommitTab" />

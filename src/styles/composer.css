@@ -225,7 +225,6 @@ body.resizing-composer {
 
 /* 无边框图标按钮基类 */
 .text-editor-icon-btn,
-.docx-editor-tool-btn,
 .goal-icon-btn,
 .settings-page .btn-icon {
   display: inline-flex;

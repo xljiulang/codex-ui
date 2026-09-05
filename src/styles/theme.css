@@ -794,11 +794,6 @@ html[data-glass="on"] .composer {
   background-image: none;
 }
 
-/* docx 富文本纸张是“真实纸面”，保持恒白不玻璃化（PDF 预览页同理由图片/white 表面维持） */
-html[data-glass="on"] .docx-editor-host .tiptap {
-  background-color: var(--doc-bg) !important;
-}
-
 /* 内容卡统一玻璃卡底：设置/模型配置卡与助手/工具卡同为内容档 0.58 */
 html[data-glass="on"] .settings-card,
 html[data-glass="on"] .model-config-card {

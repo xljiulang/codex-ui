@@ -3,7 +3,6 @@ import type { EditorEol } from "../../lib/editorFile";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow } from "../../lib/types";
-import type { Editor } from "@tiptap/vue-3";
 import { TabIcon, TabKind, type EditorTabBase } from "../../lib/tabs";
 
 /** diff 预览参数（与 Rust DiffPreviewParams 结构一致） */
@@ -45,29 +44,6 @@ export interface FileEditorTab extends EditorTabBase {
   wrapCompartment: Compartment | null;
 }
 
-/** .docx 富文本编辑标签：TipTap 编辑器实例随标签持久（非响应式） */
-export interface DocxEditorTab extends EditorTabBase {
-  kind: (typeof TabKind)["Docx"];
-  id: string;
-  workspace: string;
-  path: string;
-  title: string;
-  loading: boolean;
-  error: string;
-  dirty: boolean;
-  saving: boolean;
-  status: string;
-  byteSize: number | null;
-  /** 外部变更已发生但尚未刷新（非活动期间被 watcher 标记，切回活动时补刷） */
-  stale: boolean;
-  /** 文件已从磁盘丢失（外部删除等）：后续自动刷新跳过，避免反复读不存在的文件 */
-  missing?: boolean;
-  /** 首次导入的 HTML（TipTap 数据源），markRaw 存储避免响应式代理 */
-  initialHtml: string | null;
-  /** TipTap 编辑器实例（markRaw），由 DocxEditorPane 创建后回填 */
-  editor: Editor | null;
-}
-
 export interface DiffEditorTab extends EditorTabBase {
   kind: (typeof TabKind)["Diff"];
   id: string;
@@ -101,6 +77,8 @@ export interface PreviewEditorTab extends EditorTabBase {
   pdfData: Uint8Array | null;
   /** XLSX 预览：后端读取的原始字节（SheetJS read 数据源，组件解析渲染） */
   xlsxData: Uint8Array | null;
+  /** DOCX 预览：后端读取的原始字节（docx-preview renderAsync 数据源，组件渲染） */
+  docxData: Uint8Array | null;
   /** XLSX 当前工作表序号：随标签持久，外部刷新后按新工作表数夹紧 */
   xlsxSheetIndex: number;
   /** PDF 页数：组件加载文档后回填 */
@@ -152,7 +130,6 @@ export interface SettingsTab extends EditorTabBase {
 
 export type EditorTab =
   | FileEditorTab
-  | DocxEditorTab
   | DiffEditorTab
   | PreviewEditorTab
   | TerminalEditorTab

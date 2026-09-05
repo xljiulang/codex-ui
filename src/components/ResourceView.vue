@@ -19,7 +19,7 @@ import {
   iconFor,
   onSearchInput,
   openTextEditor,
-  openDocxEditor,
+  openDocxPreview,
   probeTextEntry,
   refreshAll,
   revealActiveTab,
@@ -51,7 +51,6 @@ import {
   type ResourceRow,
 } from "../lib/sessionFs";
 import { previewTypeForName } from "../lib/preview";
-import { isDocxPath } from "../lib/docx";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
@@ -169,7 +168,7 @@ function fileMeta(entry: FsEntry): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-/** 打开前先按扩展名分发：PDF/图像/XLSX → 对应预览标签；.docx → 富文本编辑；其余探测内容：文本→编辑器；非文本→提示无法打开 */
+/** 打开前先按扩展名分发：PDF/图像/XLSX/DOCX → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
 async function requestOpen(entry: FsEntry) {
   const type = previewTypeForName(entry.name);
   if (type === "pdf") {
@@ -184,8 +183,8 @@ async function requestOpen(entry: FsEntry) {
     openXlsxPreview(entry);
     return;
   }
-  if (isDocxPath(entry.name)) {
-    openDocxEditor(entry);
+  if (type === "docx") {
+    openDocxPreview(entry);
     return;
   }
   const ok = await probeTextEntry(entry);

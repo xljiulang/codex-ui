@@ -46,7 +46,7 @@ export {
 } from "./fileOps";
 export {
   addAsAttachment,
-  openDocxEditor,
+  openDocxPreview,
   openImagePreview,
   openPathInApp,
   openPdfPreview,

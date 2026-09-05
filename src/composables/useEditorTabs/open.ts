@@ -12,7 +12,6 @@ import { languageFromPath } from "../../lib/highlight";
 import { assetUrl } from "../../lib/asset";
 import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
-import { docxToHtml, jsonToDocx } from "../../lib/docx";
 import type { DiffRow, TerminalShell } from "../../lib/types";
 import {
   attachTerminal,
@@ -23,7 +22,6 @@ import { activateTab, activeTabId, insertTab, tabs } from "../useTabs";
 import { store } from "../useCodex/store";
 import type {
   CommitEditorTab,
-  DocxEditorTab,
   DiffEditorTab,
   DiffPreviewParams,
   EditorTab,
@@ -425,8 +423,8 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
 }
 
 /**
- * 打开特殊文件预览标签（PDF / 图像 / XLSX）：已打开则激活；否则新建标签并异步准备数据。
- * 图像直接经 asset 协议取 URL；PDF / XLSX 经 session_fs_read_bytes 直取原始字节（ArrayBuffer）。
+ * 打开特殊文件预览标签（PDF / 图像 / XLSX / DOCX）：已打开则激活；否则新建标签并异步准备数据。
+ * 图像直接经 asset 协议取 URL；PDF / XLSX / DOCX 经 session_fs_read_bytes 直取原始字节（ArrayBuffer）。
  */
 export async function openPreviewTab(
   type: PreviewType,
@@ -451,6 +449,7 @@ export async function openPreviewTab(
     imageUrl: "",
     pdfData: null,
     xlsxData: null,
+    docxData: null,
     xlsxSheetIndex: 0,
     pageCount: null,
     stale: false,
@@ -469,93 +468,16 @@ export async function openPreviewTab(
       );
       if (type === "pdf") {
         tab.pdfData = bytes;
-      } else {
+      } else if (type === "xlsx") {
         tab.xlsxData = bytes;
+      } else {
+        tab.docxData = bytes;
       }
     }
   } catch (e) {
     tab.error = String(e);
   } finally {
     tab.loading = false;
-  }
-}
-
-/**
- * 打开 .docx 富文本编辑标签：已打开则直接激活；否则新建标签并异步读取
- * 二进制字节 → mammoth 转 HTML 存入标签，由 DocxEditorPane 创建 TipTap 实例。
- */
-export async function openDocxTab(
-  workspace: string,
-  path: string,
-): Promise<void> {
-  const id = fileTabId(workspace, path);
-  if (tabs.some((t) => t.id === id)) {
-    activeTabId.value = id;
-    return;
-  }
-  const tab = reactive({
-    kind: TabKind.Docx,
-    id,
-    workspace,
-    path,
-    title: pathBaseName(path) || path,
-    icon: TabIcon.File,
-    loading: true,
-    error: "",
-    dirty: false,
-    saving: false,
-    status: "",
-    byteSize: null,
-    stale: false,
-    initialHtml: null,
-    editor: null,
-  }) as unknown as DocxEditorTab;
-  insertTab(tab);
-  activeTabId.value = id;
-  try {
-    const buf = await invoke<ArrayBuffer>("session_fs_read_bytes", {
-      workspace,
-      path,
-    });
-    const { html, warnings } = await docxToHtml(buf);
-    tab.initialHtml = html;
-    tab.byteSize = buf.byteLength;
-    if (warnings.length > 0) {
-      tab.status = `导入提示：${warnings[0]}`;
-    }
-  } catch (e) {
-    tab.error = String(e);
-  } finally {
-    tab.loading = false;
-  }
-}
-
-/** 保存 .docx 标签：编辑器 JSON → docx 字节 → 直接覆盖原文件 */
-export async function saveDocxTab(id: string): Promise<boolean> {
-  const tab = tabs.find(
-    (t): t is DocxEditorTab => t.kind === TabKind.Docx && t.id === id,
-  );
-  if (!tab || !tab.editor || !tab.dirty || tab.saving) {
-    return false;
-  }
-  tab.saving = true;
-  try {
-    const { base64, warnings } = await jsonToDocx(tab.editor.getJSON());
-    await invoke("session_fs_write_bytes", {
-      workspace: tab.workspace,
-      path: tab.path,
-      content: base64,
-    });
-    tab.dirty = false;
-    tab.status = `已保存 ${formatTimeHMS(Date.now())}${
-      warnings.length > 0 ? `（${warnings[0]}）` : ""
-    }`;
-    return true;
-  } catch (e) {
-    tab.status = `保存失败：${String(e)}`;
-    return false;
-  } finally {
-    tab.saving = false;
   }
 }
 
@@ -568,9 +490,7 @@ export function isTerminalBusy(tab: EditorTab): boolean {
 export function isFileTabOpen(workspace: string, path: string): boolean {
   return tabs.some(
     (t) =>
-      (t.kind === TabKind.File ||
-        t.kind === TabKind.Preview ||
-        t.kind === TabKind.Docx) &&
+      (t.kind === TabKind.File || t.kind === TabKind.Preview) &&
       t.workspace === workspace &&
       t.path === path,
   );

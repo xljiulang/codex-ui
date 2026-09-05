@@ -5,7 +5,6 @@ import type { EditorTab } from "../composables/useEditorTabs";
 export const TabKind = {
   Session: "session",
   File: "file",
-  Docx: "docx",
   Diff: "diff",
   Preview: "preview",
   Terminal: "terminal",

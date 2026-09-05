@@ -34,6 +34,14 @@ describe("previewTypeForName 扩展名识别", () => {
     expect(previewTypeForName("a.xlsm")).toBeNull();
   });
 
+  it("docx 扩展名（大小写不敏感），doc 不命中", () => {
+    expect(previewTypeForName("a.docx")).toBe("docx");
+    expect(previewTypeForName("DIR/doc.DOCX")).toBe("docx");
+    expect(previewTypeForName("a.Docx")).toBe("docx");
+    expect(previewTypeForName("a.doc")).toBeNull();
+    expect(previewTypeForName("a.docx.txt")).toBeNull();
+  });
+
   it("其余类型返回 null", () => {
     expect(previewTypeForName("a.txt")).toBeNull();
     expect(previewTypeForName("Makefile")).toBeNull();

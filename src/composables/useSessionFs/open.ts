@@ -6,11 +6,10 @@ import {
   toastError,
   workspace,
 } from "../useCodex";
-import { openDocxTab, openFileTab, openPreviewTab } from "../useEditorTabs";
+import { openFileTab, openPreviewTab } from "../useEditorTabs";
 import { toUserAttachment } from "../../lib/mention";
 import { pathBaseName } from "../../lib/format";
 import { previewTypeForName } from "../../lib/preview";
-import { isDocxPath } from "../../lib/docx";
 import {
   dirNameOf,
   isPathUnderRoot,
@@ -45,11 +44,11 @@ export function openXlsxPreview(entry: FsEntry) {
   void openPreviewTab("xlsx", root, entry.path);
 }
 
-/** 应用内打开 .docx 富文本编辑：在主窗口左侧编辑器区打开/激活 .docx 标签 */
-export function openDocxEditor(entry: FsEntry) {
+/** 应用内打开 .docx 排版预览：在主窗口左侧编辑器区打开/激活只读 Word 预览标签 */
+export function openDocxPreview(entry: FsEntry) {
   const root = workspace.value;
   if (!root) return;
-  void openDocxTab(root, entry.path);
+  void openPreviewTab("docx", root, entry.path);
 }
 
 /**
@@ -73,7 +72,7 @@ export async function probeTextEntry(
 }
 
 /**
- * 对话本地链接：支持则在应用内 tab 打开（PDF/图片/XLSX → 预览标签，文本 → 编辑器），
+ * 对话本地链接：支持则在应用内 tab 打开（PDF/图片/XLSX/DOCX → 预览标签，文本 → 编辑器），
  * 返回 true；否则返回 false，由调用方降级为资源管理器。
  * 工作区外文件以父目录作为根（仅本次读取/打开，不改变会话工作区）。
  * 无会话工作区时，绝对文件路径仍可按父目录打开（相对/无法解析的路径返回 false）。
@@ -104,8 +103,8 @@ export async function openPathInApp(path: string): Promise<boolean> {
       void openPreviewTab("xlsx", root, relPath);
       return true;
     }
-    if (isDocxPath(relPath)) {
-      void openDocxTab(root, relPath);
+    if (type === "docx") {
+      void openPreviewTab("docx", root, relPath);
       return true;
     }
     try {
