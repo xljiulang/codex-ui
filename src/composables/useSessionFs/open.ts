@@ -126,6 +126,18 @@ export async function openPathInApp(path: string): Promise<boolean> {
   }
 }
 
+/** 应用内打开文件（文本走编辑器标签），失败回退资源管理器定位（reveal_path） */
+export async function openPathInAppOrReveal(path: string) {
+  if (!path) return;
+  const opened = await openPathInApp(path);
+  if (opened) return;
+  try {
+    await invoke("reveal_path", { path });
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
 /** 添加为会话附件：路由到当前活动会话的 ComposerBar；异常态兜底 push 活动标签附件 */
 export function addAsAttachment(entry: FsEntry) {
   const a = toUserAttachment(entry.name, entry.path);

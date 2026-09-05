@@ -97,3 +97,8 @@ export function openLink(href: string, workspace: string = sessionWorkspace()) {
     setToast(toastError(e));
   });
 }
+
+/** 用系统默认浏览器打开外部链接（如接入文档），失败静默（非关键路径） */
+export function openDocsUrl(url: string) {
+  void invoke("open_url", { url }).catch(() => undefined);
+}
