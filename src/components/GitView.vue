@@ -444,7 +444,7 @@ function toggleDirRow(node: GitDirNode) {
             changeCount
           }}</span>
         </GitSectionHead>
-        <template v-if="!isSectionCollapsed('changes')">
+        <div v-if="!isSectionCollapsed('changes')" class="git-section-body">
           <GitFileTree
             :rows="worktreeRows"
             section="changes"
@@ -454,7 +454,7 @@ function toggleDirRow(node: GitDirNode) {
             @row-click="onFileRowClick"
             @row-context="onFileRowContext"
           />
-        </template>
+        </div>
       </div>
 
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('staged') }">
@@ -469,7 +469,7 @@ function toggleDirRow(node: GitDirNode) {
             stagedCount
           }}</span>
         </GitSectionHead>
-        <template v-if="!isSectionCollapsed('staged')">
+        <div v-if="!isSectionCollapsed('staged')" class="git-section-body">
           <GitCommitBar
             :workspace="repoWorkspace"
             :staged-count="stagedCount"
@@ -484,7 +484,7 @@ function toggleDirRow(node: GitDirNode) {
             @row-click="onFileRowClick"
             @row-context="onFileRowContext"
           />
-        </template>
+        </div>
       </div>
 
       <div class="git-section" :class="{ collapsed: isSectionCollapsed('history') }">
@@ -494,9 +494,9 @@ function toggleDirRow(node: GitDirNode) {
           :collapsed="isSectionCollapsed('history')"
           @toggle="toggleSection('history')"
         />
-        <template v-if="!isSectionCollapsed('history')">
+        <div v-if="!isSectionCollapsed('history')" class="git-section-body">
           <GitHistoryList :workspace="repoWorkspace" :status-signal="gitStatus" />
-        </template>
+        </div>
       </div>
     </template>
 

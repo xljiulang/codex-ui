@@ -1041,6 +1041,45 @@ describe("GitView 分区折叠", () => {
     wrapper.unmount();
   });
 
+  it("分区标题支持 Space 键切换折叠（对齐会话目录行键盘习惯）", async () => {
+    mockRepo(okStatus, [
+      {
+        hash: "a".repeat(40),
+        shortHash: "aaaaaaa",
+        subject: "feat: init",
+        author: "t",
+        timeSecs: 1700000000,
+      },
+    ]);
+    const wrapper = mountGitView({ props: { active: true } });
+    await flushPromises();
+
+    // 提交历史默认折叠，Space 展开
+    const head = wrapper.findAll(".git-section")[2].find(".git-section-head");
+    expect(head.attributes("aria-expanded")).toBe("false");
+    await head.trigger("keydown", { key: " " });
+    await wrapper.vm.$nextTick();
+    expect(
+      wrapper.findAll(".git-section")[2].find(".git-section-head").attributes(
+        "aria-expanded",
+      ),
+    ).toBe("true");
+    expect(wrapper.findAll(".git-section")[2].find(".git-log-list").exists()).toBe(
+      true,
+    );
+
+    // 再按 Space 折叠
+    await wrapper
+      .findAll(".git-section")[2]
+      .find(".git-section-head")
+      .trigger("keydown", { key: " " });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".git-section")[2].find(".git-log-list").exists()).toBe(
+      false,
+    );
+    wrapper.unmount();
+  });
+
   it("折叠状态跨刷新保留", async () => {
     mockRepo(okStatus);
     const wrapper = mountGitView({ props: { active: true } });

@@ -723,6 +723,7 @@
   padding-top: var(--space-2);
 }
 
+/* 分区根行：与 .git-tree-row / .resource-row 行家族同形态（透明边框 + hover 整行高亮） */
 .git-section-head {
   display: flex;
   align-items: center;
@@ -733,10 +734,20 @@
   color: var(--text-bright);
   cursor: pointer;
   user-select: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  transition: background-color var(--ease), border-color var(--ease);
 }
 
 .git-section-head:hover {
   color: var(--accent);
+  background: var(--bg-hover);
+  border-color: var(--border-light);
+}
+
+/* 分区内容子容器：分区标题为真根，内容统一挂在其下并整体右移缩进 */
+.git-section-body {
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-10);
 }
 
 .git-section.collapsed .git-section-head {
@@ -783,8 +794,7 @@
 
 .git-section-empty {
   padding: var(--space-6) var(--space-5);
-  /* 空占位与文件树同缩进，保持「标题为根」的层级 */
-  padding-left: var(--space-10);
+  /* 缩进由 .git-section-body 统一承接（分区标题为根） */
   font-size: var(--font-md);
   color: var(--text-dim);
   text-align: left;
@@ -793,8 +803,8 @@
 .git-file-list {
   list-style: none;
   margin: 0;
-  /* 左侧缩进：分区标题为根，文件树整体右移挂在标题之下 */
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-10);
+  /* 缩进由 .git-section-body 统一承接（分区标题为根） */
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -886,8 +896,8 @@
 .git-log-list {
   list-style: none;
   margin: 0;
-  /* 与文件树同缩进：提交历史挂在「提交历史」标题之下 */
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-10);
+  /* 缩进由 .git-section-body 统一承接（分区标题为根） */
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 1px;
