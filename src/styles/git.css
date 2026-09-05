@@ -566,13 +566,6 @@
   cursor: default;
 }
 
-.git-remote-empty {
-  padding: var(--space-3);
-  font-size: var(--font-md);
-  color: var(--text-dim);
-  text-align: center;
-}
-
 .git-remote-add {
   display: flex;
   flex-direction: column;

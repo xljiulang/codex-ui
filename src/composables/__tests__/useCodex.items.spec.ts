@@ -76,10 +76,10 @@ describe("resolveSessionWorkspace 工作目录解析", () => {
     expect(resolveSessionWorkspace()).toBe("");
   });
 
-  it("新建会话（无线程）：优先 newChatWorkspace，无则空串", () => {
+  it("新建会话（无线程）：优先 newSessionWorkspace，无则空串", () => {
     __resetSessionTabsForTest();
     tabs.push(
-      makeSessionTab("s1", null, { newChatWorkspace: "D:/projects/B" }),
+      makeSessionTab("s1", null, { newSessionWorkspace: "D:/projects/B" }),
     );
     activeTabId.value = "s1";
     expect(resolveSessionWorkspace()).toBe("D:/projects/B");
@@ -120,9 +120,9 @@ describe("会话标签状态与事件路由", () => {
     store.workspace = null;
     expect(workspace.value).toBe("D:/session");
 
-    // 切到新建会话标签（无线程）：优先 newChatWorkspace
+    // 切到新建会话标签（无线程）：优先 newSessionWorkspace
     tabs.push(
-      makeSessionTab("s2", null, { newChatWorkspace: "D:/newchat" }),
+      makeSessionTab("s2", null, { newSessionWorkspace: "D:/newchat" }),
     );
     activeTabId.value = "s2";
     expect(workspace.value).toBe("D:/newchat");

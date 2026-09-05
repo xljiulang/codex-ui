@@ -21,7 +21,7 @@ const {
   onWindowClick: onMenuWindowClick,
   onWindowScroll: onMenuWindowScroll,
   onKeydown: onMenuKeydown,
-} = useActionMenu({ width: 150, scrollScope: ".diff-window-body" });
+} = useActionMenu({ width: 150, scrollScope: ".diff-pane-body" });
 
 const MAX_HIGHLIGHT_LINES = 20_000;
 const lang = computed(() => languageFromPath(props.tab.path));
@@ -131,7 +131,7 @@ function onKeydown(e: KeyboardEvent) {
 function onWindowScroll(e: Event) {
   // 右键菜单：仅 diff 正文自身滚动时关闭
   if (!(e.target instanceof Element)) return;
-  if (!e.target.closest(".diff-window-body")) return;
+  if (!e.target.closest(".diff-pane-body")) return;
   onMenuWindowScroll(e);
 }
 
@@ -149,15 +149,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="diff-window diff-embedded">
-    <div class="diff-window-head">
-      <span class="diff-window-title">
-        <span class="diff-window-path">{{ tab.path }}</span>
+  <div class="diff-pane diff-embedded">
+    <div class="diff-pane-head">
+      <span class="diff-pane-title">
+        <span class="diff-pane-path">{{ tab.path }}</span>
         <span class="change-kind" :class="tab.changeKind">
           {{ diffKindLabel(tab.changeKind) }}
         </span>
       </span>
-      <span class="diff-window-actions">
+      <span class="diff-pane-actions">
         <button
           v-if="!tab.loading && !tab.error && tab.rows.length"
           class="text-editor-icon-btn"
@@ -172,7 +172,7 @@ onBeforeUnmount(() => {
         </button>
       </span>
     </div>
-    <div class="diff-window-body" ref="bodyRef" @contextmenu="onDiffContext">
+    <div class="diff-pane-body" ref="bodyRef" @contextmenu="onDiffContext">
       <div v-if="tab.loading" class="diff-loading">正在加载文件内容…</div>
       <template v-else-if="tab.error || !tab.rows.length">
         <div class="diff-fallback-note">

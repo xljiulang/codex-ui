@@ -26,7 +26,7 @@ export async function registerCloseGuard(): Promise<UnlistenFn> {
       try {
         await Promise.all(
           workingTabs
-            .filter((t): t is SessionTab => t.kind === TabKind.Chat)
+            .filter((t): t is SessionTab => t.kind === TabKind.Session)
             .map((s) =>
               s.threadId
                 ? interrupt(s.threadId, s.currentTurnId)

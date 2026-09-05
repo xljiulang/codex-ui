@@ -106,15 +106,12 @@ const activeTerminalTabs = computed(() =>
 
 /** 会话标签视图（统一列表中的会话块，恒在前） */
 const sessionTabs = computed(() =>
-  tabs.filter((t): t is SessionTab => t.kind === TabKind.Chat),
+  tabs.filter((t): t is SessionTab => t.kind === TabKind.Session),
 );
 /** 文件/diff/预览/终端标签视图（统一列表中的其余部分，会话之后） */
 const editorTabs = computed<EditorTab[]>(() =>
-  tabs.filter((t): t is EditorTab => t.kind !== TabKind.Chat),
+  tabs.filter((t): t is EditorTab => t.kind !== TabKind.Session),
 );
-
-/** 标签栏常驻显示：所有标签关闭后仍保留「+」新建入口 */
-const showTabBar = computed(() => true);
 
 /** 待关闭确认的脏文件标签 */
 const pendingTab = computed<EditorTab | null>(
@@ -249,7 +246,7 @@ watch(activeTab, (tab) => {
   if (
     !tab ||
     tab.kind === TabKind.Terminal ||
-    tab.kind === TabKind.Chat ||
+    tab.kind === TabKind.Session ||
     tab.kind === TabKind.Commit ||
     tab.kind === TabKind.Settings
   ) {
@@ -291,7 +288,7 @@ function openAddMenu(e: MouseEvent) {
 
 <template>
   <div class="editor-pane">
-    <div v-if="showTabBar" class="editor-tabs-bar">
+    <div class="editor-tabs-bar">
       <EditorTabBar
         ref="tabBarRef"
         :session-tabs="sessionTabs"
@@ -304,14 +301,14 @@ function openAddMenu(e: MouseEvent) {
       />
     </div>
     <div class="editor-pane-body">
-      <div v-if="tabs.length === 0" class="no-session-state">
+      <div v-if="tabs.length === 0" class="no-tabs-state">
         <div class="empty-logo">
           <svg viewBox="0 0 24 24">
             <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" />
             <path class="logo-c" d="M14.9 9.1a4.5 4.5 0 1 0 0 5.8" />
           </svg>
         </div>
-        <p class="no-session-hint">当前还没有任何打开的项</p>
+        <p class="no-tabs-hint">当前还没有任何打开的项</p>
       </div>
       <ChatView
         v-for="tab in sessionTabs"
@@ -337,25 +334,25 @@ function openAddMenu(e: MouseEvent) {
         v-show="activeTabId === SETTINGS_TAB_ID"
       />
     </div>
-    <div v-if="pendingTab" class="text-editor-overlay">
-      <div class="text-editor-confirm">
-        <div class="text-editor-confirm-msg">
+    <div v-if="pendingTab" class="tab-confirm-overlay">
+      <div class="tab-confirm">
+        <div class="tab-confirm-msg">
           「{{ pendingTab.title }}」有未保存的更改，关闭将丢失这些更改。
         </div>
-        <div class="text-editor-confirm-actions">
+        <div class="tab-confirm-actions">
           <button
-            class="text-editor-btn primary"
+            class="tab-confirm-btn primary"
             @click="saveTabAndClose(pendingTab.id)"
           >
             保存并关闭
           </button>
           <button
-            class="text-editor-btn"
+            class="tab-confirm-btn"
             @click="discardTabAndClose(pendingTab.id)"
           >
             放弃并关闭
           </button>
-          <button class="text-editor-btn" @click="cancelClose">取消</button>
+          <button class="tab-confirm-btn" @click="cancelClose">取消</button>
         </div>
       </div>
     </div>

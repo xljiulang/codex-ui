@@ -80,7 +80,7 @@ describe("DocxEditorPane .docx 富文本编辑", () => {
 
     expect(wrapper.find(".docx-editor-toolbar").exists()).toBe(true);
     expect(
-      wrapper.find(".docx-editor-window.docx-editor-embedded").exists(),
+      wrapper.find(".docx-editor-pane.docx-editor-embedded").exists(),
     ).toBe(true);
     expect(wrapper.find(".docx-editor-host .tiptap").exists()).toBe(true);
     expect(wrapper.text()).toContain("标题");

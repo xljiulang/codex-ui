@@ -218,7 +218,7 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(false);
 
     tab.threadTokenUsage = {
-      used: 5000,
+      contextUsed: 5000,
       window: 10000,
       input: 12000,
       output: 34000,
@@ -1002,7 +1002,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await flushPromises();
     expect(wrapper.find(".popup-menu").exists()).toBe(false);
 
-    // 权限/任务/模型三个菜单：外部 mousedown 均自动关闭
+    // 权限/协作模式/模型三个菜单：外部 mousedown 均自动关闭
     await wrapper.find(".perm-chip").trigger("click");
     await flushPromises();
     expect(wrapper.find(".popup-menu").exists()).toBe(true);
@@ -1279,9 +1279,9 @@ describe("ComposerBar 权限与草稿会话私有", () => {
   function makeTab(over: Partial<SessionTab> = {}): SessionTab {
     return {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "会话",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -1291,7 +1291,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -1310,7 +1310,7 @@ describe("ComposerBar 权限与草稿会话私有", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
       ...over,
     };
@@ -1431,9 +1431,9 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
   function makeTab(id: string): SessionTab {
     return {
       id,
-      kind: "chat",
+      kind: "session",
       title: "会话",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -1443,7 +1443,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -1462,7 +1462,7 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     };
   }

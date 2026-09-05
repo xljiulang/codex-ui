@@ -835,13 +835,6 @@
   font-size: var(--font-sm);
 }
 
-.md table .md-caption {
-  display: block;
-  color: var(--text-faint);
-  font-size: var(--font-sm);
-  margin-top: var(--space-1);
-}
-
 /* 用户气泡内的 Markdown（布局适配，配色沿用共享 .md） */
 .msg-user .bubble .md {
   white-space: normal;
@@ -867,19 +860,6 @@
   padding: var(--space-3) var(--space-5);
   border-radius: var(--radius);
   line-height: 1.5;
-}
-
-.mention-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  background: rgba(var(--accent-rgb), 0.14);
-  border: 1px solid rgba(var(--accent-rgb), 0.24);
-  color: var(--link-hover);
-  border-radius: var(--radius-sm);
-  padding: 1px var(--space-3);
-  font-size: var(--font-md);
-  margin: 1px 3px;
 }
 
 /* 助手卡片：ToolCard/PlanTextCard/PlanCard/ReasoningBlock 共享容器、头部、正文结构 */

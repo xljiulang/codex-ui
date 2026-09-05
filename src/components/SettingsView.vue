@@ -92,7 +92,7 @@ const glass = ref(store.settings.glass_effect);
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSectionIds = [
   "personalization",
-  "memory",
+  "basic",
   "global-instructions",
   "model-config",
   "dynamic-tools",
@@ -110,7 +110,7 @@ interface SettingsSection {
 }
 const settingsSections: SettingsSection[] = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
-  { id: "memory", label: "基础设置", icon: ICON_TUNE },
+  { id: "basic", label: "基础设置", icon: ICON_TUNE },
   { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
   { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "dynamic-tools", label: "动态工具", icon: ICON_TOOL },
@@ -200,7 +200,7 @@ async function saveMemorySection() {
 
 // 进入「基础设置」标签时从 codex 配置回填开关
 watch(activeSection, (id) => {
-  if (id === "memory") void loadMemorySection();
+  if (id === "basic") void loadMemorySection();
 });
 
 async function resetMemory() {
@@ -1816,8 +1816,8 @@ function pluginInitial(p: PluginCatalogItem): string {
         </section>
 
         <section
-          v-show="activeSection === 'memory'"
-          class="settings-section settings-section-memory"
+          v-show="activeSection === 'basic'"
+          class="settings-section settings-section-basic"
         >
           <h2 class="settings-section-title">基础设置</h2>
           <p class="settings-section-desc">

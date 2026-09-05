@@ -302,11 +302,11 @@ export async function openDiffTab(client, targetText, timeoutMs = 30000) {
   await client.waitFor(
     "diff 标签内容就绪",
     `(() => {
-      const vis = Array.from(document.querySelectorAll(".diff-window")).find(
+      const vis = Array.from(document.querySelectorAll(".diff-pane")).find(
         (w) => w.offsetParent !== null,
       );
       if (!vis) return false;
-      const path = vis.querySelector(".diff-window-path")?.textContent ?? "";
+      const path = vis.querySelector(".diff-pane-path")?.textContent ?? "";
       if (!path.includes(${JSON.stringify(targetText)})) return false;
       return (
         !vis.querySelector(".diff-loading") &&

@@ -109,13 +109,13 @@ export interface TurnPlan {
 /**
  * 会话标签：左侧标签区的每个“会话”标签对应一个打开的会话
  * （threadId 非空 = 已绑定线程；null = 待发送首条消息的新对话）。
- * 活动标签的实时状态以 store 的 current* 字段为准（由自动同步 watch 落回本记录）；
- * 切换标签时以本记录恢复 live 字段。消息列表本身按线程存于 itemsByThread，无需复制。
+ * 会话实时状态全部落在标签对象上（标签即唯一事实源，活动标签直接读写本记录）；
+ * 消息列表本身按线程存于 itemsByThread，无需复制。
  */
 export interface SessionTab extends EditorTabBase {
-  kind: (typeof TabKind)["Chat"];
+  kind: (typeof TabKind)["Session"];
   title: string;
-  icon: (typeof TabIcon)["Chat"];
+  icon: (typeof TabIcon)["Session"];
   /** 标签唯一 id（线程绑定前后保持稳定，供编辑器标签 key 使用） */
   id: string;
   /** 绑定的线程 id；一个会话最多对应一个标签（唯一性约束） */
@@ -142,7 +142,8 @@ export interface SessionTab extends EditorTabBase {
   draftAttachments: UserInput[];
   /** 会话私有：输入框内联引用 map（refId → 附件，ComposerBar 维护） */
   draftRefs: Record<string, UserInput>;
-  origin: "new" | "session" | null;
+  /** 标签来源：new=新建会话（未发送首条消息），history=来自历史会话列表 */
+  origin: "new" | "history" | null;
   workspace: string | null;
   resumedThreadId: string | null;
   turnActive: boolean;
@@ -152,7 +153,8 @@ export interface SessionTab extends EditorTabBase {
   goalStatus: GoalStatus | null;
   goalArmed: boolean;
   threadTokenUsage: {
-    used: number;
+    /** 最近一次请求的上下文占用（tokenUsage.last，非会话累计） */
+    contextUsed: number;
     window: number | null;
     /** 会话累计输入 token（thread/tokenUsage/updated 的 total.inputTokens） */
     input?: number;
@@ -173,10 +175,10 @@ export interface SessionTab extends EditorTabBase {
   /** 当前回合的 Updated Plan 任务清单（turn/plan/updated 驱动，新回合重置） */
   plan: TurnPlan | null;
   loading: boolean;
-  /** 会话私有：正在创建新会话并发送首条消息（newChat 流程中） */
-  creatingChat: boolean;
+  /** 会话私有：正在创建新会话并发送首条消息（startNewSession 流程中） */
+  creatingSession: boolean;
   /** 新建对话时可选的项目目录（null = 使用启动工作目录） */
-  newChatWorkspace: string | null;
+  newSessionWorkspace: string | null;
   /** 该标签待处理的交互（审批/提问/elicitation），按 threadId 路由 */
   interactions: PendingInteraction[];
 }

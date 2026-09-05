@@ -95,12 +95,6 @@
   min-width: 0;
 }
 
-/* 记忆模式合并行：下拉与重置按钮并排，下拉拉长铺满剩余宽度 */
-.setting-path-row select.memory-mode-select {
-  flex: 1;
-  min-width: 0;
-}
-
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -214,33 +208,6 @@
 .switch input:disabled + .switch-track {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.server-logs {
-  font-family: var(--mono);
-  font-size: var(--font-sm);
-  background: var(--console-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-3);
-  max-height: 180px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  user-select: text;
-  color: var(--console-text);
-}
-
-.auth-banner {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  background: rgba(var(--accent-rgb), 0.08);
-  border: 1px solid rgba(var(--accent-rgb), 0.32);
-  color: var(--accent);
-  border-radius: var(--radius);
-  padding: 11px var(--space-6);
-  margin-bottom: var(--space-6);
-  font-size: var(--font-md);
 }
 
 /* 设置页（设置 Tab 全宽布局，替代原模态框） */
@@ -472,15 +439,6 @@
   color: var(--text-dim);
 }
 
-.settings-page-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-4);
-  padding: var(--space-5) var(--space-8);
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
 /* 插件管理 */
 .plugin-manage {
   display: flex;
@@ -618,7 +576,6 @@
 
 /* 胶囊徽章基类：accent 系徽章共享，padding 差异保留在各自规则 */
 .plugin-status,
-.skill-status,
 .plugin-marketplace-count,
 .model-provider-wire,
 .mcp-server-type,
@@ -816,17 +773,6 @@
   cursor: default;
   opacity: 0.55;
   text-decoration: none;
-}
-
-/* 未配置/读取中的路径状态提示（等宽、灰字；异常态再叠加 model-config-missing 变红） */
-.model-config-path-status {
-  font-family: var(--mono);
-  font-size: var(--font-sm);
-  line-height: 1.4;
-  color: var(--text-dim);
-  user-select: text;
-  text-align: right;
-  min-width: 0;
 }
 
 .model-config-path {
@@ -1087,15 +1033,6 @@
   flex-shrink: 0;
 }
 
-.skill-status {
-  padding: 1px var(--space-2);
-}
-
-.skill-status.off {
-  color: var(--text-dim);
-  background: rgba(var(--overlay-rgb), 0.05);
-}
-
 .skill-row-main {
   display: flex;
   align-items: center;
@@ -1313,17 +1250,6 @@
   color: var(--yellow);
 }
 
-.model-config-warning {
-  margin: 0;
-  font-size: var(--font-md);
-  line-height: 1.5;
-  color: var(--yellow);
-  background: rgba(var(--yellow-rgb), 0.08);
-  border: 1px solid rgba(var(--yellow-rgb), 0.3);
-  border-radius: var(--radius);
-  padding: var(--space-2) var(--space-4);
-}
-
 .model-config-textarea {
   width: 100%;
   min-height: 220px;
@@ -1448,12 +1374,6 @@
 }
 
 /* ---------------- 微信接入（ClawBot sidecar） ---------------- */
-
-.settings-page .settings-card-desc {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: var(--text-dim);
-}
 
 /* ---------------- MCP 详情弹窗 ---------------- */
 

@@ -96,7 +96,7 @@ async function activate() {
   }
 }
 
-/** 会话资源 Tab 激活状态：激活时启动监听并加载树，切走时停止监听 */
+/** 会话资源 Tab 激活状态：监听常驻（由 syncWatcher 跟随工作区），激活时额外加载/刷新树 */
 export function setSessionFsActive(v: boolean) {
   if (active === v) return;
   active = v;

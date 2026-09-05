@@ -743,7 +743,7 @@ async function main() {
           kw,
           has: kw > 0,
           text: document.querySelector(".diff-text")?.textContent ?? "",
-          path: document.querySelector(".diff-window-path")?.textContent ?? "",
+          path: document.querySelector(".diff-pane-path")?.textContent ?? "",
         };
       })()`);
       record("文件变更: 代码文件语法高亮", hl.has, JSON.stringify(hl));

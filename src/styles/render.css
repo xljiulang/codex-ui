@@ -465,13 +465,13 @@
 }
 
 /* 独立 diff 窗口布局与滚动条变更指示 */
-.diff-window {
+.diff-pane {
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: var(--bg);
 }
-.diff-window-head {
+.diff-pane-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -481,13 +481,13 @@
   flex-shrink: 0;
   background: var(--diff-head-bg);
 }
-.diff-window-title {
+.diff-pane-title {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
 }
-.diff-window-path {
+.diff-pane-path {
   font-family: var(--mono);
   font-size: var(--font-md);
   color: var(--text-bright);
@@ -497,13 +497,13 @@
   border-radius: 999px;
   padding: 3px 11px;
 }
-.diff-window-actions {
+.diff-pane-actions {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   flex-shrink: 0;
 }
-.diff-window-body {
+.diff-pane-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -563,7 +563,7 @@
 }
 
 /* 独立文本编辑器窗口布局（与 diff 窗口同风格） */
-.text-editor-window {
+.text-editor-pane {
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -625,7 +625,7 @@
   gap: var(--space-3);
   flex-shrink: 0;
 }
-.text-editor-btn {
+.tab-confirm-btn {
   font-family: inherit;
   font-size: var(--font-md);
   color: var(--text);
@@ -635,25 +635,25 @@
   padding: var(--space-1) var(--space-5);
   cursor: pointer;
 }
-.text-editor-btn:hover {
+.tab-confirm-btn:hover {
   background: var(--bg-hover);
 }
-.text-editor-btn.active {
+.tab-confirm-btn.active {
   color: var(--text-bright);
   border-color: rgba(var(--accent-rgb), 0.55);
   background: rgba(var(--accent-rgb), 0.14);
 }
-.text-editor-btn.primary {
+.tab-confirm-btn.primary {
   color: var(--on-accent);
   background: var(--btn-primary-grad);
   border-color: transparent;
   box-shadow: var(--btn-glow);
 }
-.text-editor-btn.primary:hover:not(:disabled) {
+.tab-confirm-btn.primary:hover:not(:disabled) {
   box-shadow: var(--btn-glow-hover);
   filter: brightness(1.08);
 }
-.text-editor-btn.primary:disabled {
+.tab-confirm-btn.primary:disabled {
   opacity: var(--opacity-disabled);
   cursor: default;
 }
@@ -693,7 +693,6 @@
   flex-direction: column;
   overflow: hidden;
 }
-.text-editor-loading,
 .text-editor-note {
   padding: var(--space-5);
   font-size: var(--font-md);
@@ -748,7 +747,7 @@
 }
 
 /* 未保存确认层 */
-.text-editor-overlay {
+.tab-confirm-overlay {
   position: fixed;
   inset: 0;
   display: flex;
@@ -757,7 +756,7 @@
   background: var(--overlay-dim);
   z-index: 100;
 }
-.text-editor-confirm {
+.tab-confirm {
   width: min(420px, calc(100vw - 48px));
   background: var(--float-bg);
   background-image: var(--surface-grad);
@@ -766,13 +765,13 @@
   box-shadow: var(--shadow-lg), var(--inset-shadow);
   padding: var(--space-8);
 }
-.text-editor-confirm-msg {
+.tab-confirm-msg {
   font-size: var(--font-base);
   color: var(--text);
   margin-bottom: var(--space-6);
   word-break: break-all;
 }
-.text-editor-confirm-actions {
+.tab-confirm-actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-3);

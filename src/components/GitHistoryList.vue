@@ -10,7 +10,7 @@ const props = defineProps<{
   /** 仓库根目录（git_changes_log 的 workspace 参数） */
   workspace: string;
   /** gitStatus 引用变化（刷新/提交/合并/切分支）时重载第一页 */
-  reloadKey: GitStatus | null;
+  statusSignal: GitStatus | null;
 }>();
 
 /** 提交历史（最新在前），git_changes_log 返回 */
@@ -20,7 +20,7 @@ const logBusy = ref(false);
 const logHasMore = ref(false);
 const LOG_LIMIT = 50;
 
-/** 重载提交历史第一页（最新在前）；由 reloadKey 变化/手动刷新触发 */
+/** 重载提交历史第一页（最新在前）；由 statusSignal 变化/手动刷新触发 */
 async function loadCommitLog() {
   const root = props.workspace;
   if (!root || logBusy.value) return;
@@ -74,7 +74,7 @@ function openCommit(commit: GitCommitEntry) {
 
 // gitStatus 每次刷新（含提交/合并/拉取/切分支）后同步刷新提交历史
 watch(
-  () => props.reloadKey,
+  () => props.statusSignal,
   () => void loadCommitLog(),
   { immediate: true },
 );

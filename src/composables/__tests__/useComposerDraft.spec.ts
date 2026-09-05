@@ -8,9 +8,9 @@ import { useComposerDraft } from "../useComposerDraft";
 function tabFixture(): SessionTab {
   return {
     id: "sess-1",
-    kind: "chat",
+    kind: "session",
     title: "会话",
-    icon: "chat",
+    icon: "session",
     threadId: "t1",
     name: "",
     nameIsFirstMessage: false,
@@ -20,11 +20,11 @@ function tabFixture(): SessionTab {
     effort: null,
     plugins: { plugins: [], loaded: false },
     skills: { skills: [], loaded: false },
-    creatingChat: false,
+    creatingSession: false,
     draftJson: "",
     draftAttachments: [],
     draftRefs: {},
-    origin: "session",
+    origin: "history",
     workspace: null,
     resumedThreadId: null,
     turnActive: false,
@@ -39,7 +39,7 @@ function tabFixture(): SessionTab {
     planPrompt: null,
     plan: null,
     loading: false,
-    newChatWorkspace: null,
+    newSessionWorkspace: null,
     interactions: [],
   };
 }

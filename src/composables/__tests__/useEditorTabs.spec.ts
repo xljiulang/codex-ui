@@ -32,7 +32,7 @@ import {
   activeTabId,
   activateTab,
   closeAnyTab,
-  closeAllOtherTabs,
+  closeAllTabs,
   closeTabsToLeftAll,
   closeTabsToRightAll,
   closeTab,
@@ -290,7 +290,7 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).toBe("");
   });
 
-  it("关闭其它所有标签：干净标签关闭，脏标签跳过并返回数量", async () => {
+  it("关闭全部标签：干净标签关闭，脏标签跳过并返回数量", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("x"));
@@ -316,7 +316,7 @@ describe("useEditorTabs 标签状态", () => {
       workspace: root,
     });
 
-    const skipped = closeAllOtherTabs();
+    const skipped = await closeAllTabs();
     expect(skipped).toBe(1);
     expect(tabs.map((t) => t.id)).toEqual([dirtyTab.id]);
     expect(tabs.some((t) => t.kind === "diff")).toBe(false);
@@ -755,7 +755,7 @@ describe("useEditorTabs 标签状态", () => {
     closeTab(previews[0].id);
     expect(tabs.some((t) => t.id === previews[0].id)).toBe(false);
 
-    const skipped = closeAllOtherTabs();
+    const skipped = await closeAllTabs();
     expect(skipped).toBe(0);
     expect(tabs.filter((t) => t.kind === "preview")).toHaveLength(0);
     expect(tabs).toHaveLength(0);
@@ -968,7 +968,7 @@ describe("useEditorTabs 标签状态", () => {
     });
   });
 
-  it("关闭其它所有标签：跳过运行中的终端并计入返回计数", async () => {
+  it("关闭全部标签：跳过运行中的终端并计入返回计数", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "terminal_spawn") return Promise.resolve({});
       if (cmd === "terminal_kill") return Promise.resolve({});
@@ -982,7 +982,7 @@ describe("useEditorTabs 标签状态", () => {
     );
     ts[0].busy = true;
 
-    const skipped = closeAllOtherTabs();
+    const skipped = await closeAllTabs();
     expect(skipped).toBe(1);
     expect(tabs.some((x) => x.id === ts[0].id)).toBe(true);
     expect(tabs.some((x) => x.id === ts[1].id)).toBe(false);
@@ -994,7 +994,7 @@ describe("useEditorTabs 标签状态", () => {
     });
   });
 
-  it("关闭其它所有标签：未保存文件与运行中终端合并跳过计数", async () => {
+  it("关闭全部标签：未保存文件与运行中终端合并跳过计数", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read") {
         return Promise.resolve(fileContent("hello"));
@@ -1015,7 +1015,7 @@ describe("useEditorTabs 标签状态", () => {
     )!;
     t.busy = true;
 
-    const skipped = closeAllOtherTabs();
+    const skipped = await closeAllTabs();
     expect(skipped).toBe(2);
     expect(tabs.some((x) => x.id === f.id)).toBe(true);
     expect(tabs.some((x) => x.id === t.id)).toBe(true);
@@ -1024,7 +1024,7 @@ describe("useEditorTabs 标签状态", () => {
     });
   });
 
-  it("关闭其它所有标签：终端一并结束进程", async () => {
+  it("关闭全部标签：终端一并结束进程", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "terminal_spawn") return Promise.resolve({});
       if (cmd === "terminal_kill") return Promise.resolve({});
@@ -1032,7 +1032,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const skipped = closeAllOtherTabs();
+    const skipped = await closeAllTabs();
     expect(skipped).toBe(0);
     expect(tabs).toHaveLength(0);
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
@@ -1170,7 +1170,7 @@ describe("useEditorTabs .docx 标签", () => {
     a.editor = docxEditorStub();
     a.dirty = true;
 
-    const skipped = closeAllOtherTabs();
+    const skipped = await closeAllTabs();
     expect(skipped).toBe(1);
     expect(tabs.some((t) => t.id === a.id)).toBe(true);
     expect(tabs.some((t) => t.id === b.id)).toBe(false);
@@ -1188,9 +1188,9 @@ describe("closeAnyTab 统一关闭入口", () => {
   it("会话标签：走 closeSessionTab 并移除", async () => {
     const tab: SessionTab = {
       id: "s1",
-      kind: TabKind.Chat,
+      kind: TabKind.Session,
       title: "会话",
-      icon: TabIcon.Chat,
+      icon: TabIcon.Session,
       threadId: "t1",
       name: "",
       nameIsFirstMessage: false,
@@ -1200,11 +1200,11 @@ describe("closeAnyTab 统一关闭入口", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "session",
+      origin: "history",
       workspace: null,
       resumedThreadId: null,
       turnActive: false,
@@ -1219,7 +1219,7 @@ describe("closeAnyTab 统一关闭入口", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     };
     tabs.push(tab);
@@ -1266,9 +1266,9 @@ describe("closeAnyTab 统一关闭入口", () => {
   function makeSessionTab(id: string, over: Partial<SessionTab> = {}): SessionTab {
     return {
       id,
-      kind: "chat",
+      kind: "session",
       title: "会话",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -1278,7 +1278,7 @@ describe("closeAnyTab 统一关闭入口", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -1297,7 +1297,7 @@ describe("closeAnyTab 统一关闭入口", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
       ...over,
     };

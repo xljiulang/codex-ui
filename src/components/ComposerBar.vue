@@ -233,7 +233,7 @@ function mentionRoot(): string {
 }
 
 /** 菜单选中引用：插件/技能删除触发词后插入内联 chip；文件/图片删除触发词后进附件区 */
-function onSelectAttachment(a: UserInput) {
+function onSelectFile(a: UserInput) {
   const ed = editor.value;
   if (!ed) return;
   const m = mention.value;
@@ -513,7 +513,7 @@ function collaborationModeLabel(): string {
             @close="mention = null"
             @pick-files="onPickFiles()"
             @pick-dir="onPickDir()"
-            @select-attachment="onSelectAttachment($event)"
+            @select-file="onSelectFile($event)"
           />
         </div>
         <div class="composer-toolbar">

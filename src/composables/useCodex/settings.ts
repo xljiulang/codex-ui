@@ -15,7 +15,7 @@ import {
 
 
 /** 当前会话已不存在（被删除等）时重置回新对话，避免继续发送一直报错 */
-export function resetToNewChat() {
+export function resetToNewSession() {
   const tab = activeSessionTab();
   if (!tab) return;
   tab.threadId = null;

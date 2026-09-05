@@ -6,7 +6,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   return {
     ...mod,
     deleteThread: vi.fn(),
-    togglePin: vi.fn(),
+    setThreadPinned: vi.fn(),
     refreshThreads: vi.fn(),
     searchThreads: vi.fn(),
   };

@@ -9,7 +9,7 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     forkThread: vi.fn(),
     openSession: vi.fn(),
     openNewSession: vi.fn(),
-    togglePin: vi.fn(),
+    setThreadPinned: vi.fn(),
     refreshThreads: vi.fn(),
     searchThreads: vi.fn(),
   };
@@ -33,7 +33,7 @@ import {
   refreshThreads,
   searchThreads,
   store,
-  togglePin,
+  setThreadPinned,
 } from "../../composables/useCodex";
 import { tabs } from "../../composables/useEditorTabs";
 
@@ -41,7 +41,7 @@ const mockedDelete = vi.mocked(deleteThread);
 const mockedFork = vi.mocked(forkThread);
 const mockedOpenNewSession = vi.mocked(openNewSession);
 const mockedOpenSession = vi.mocked(openSession);
-const mockedTogglePin = vi.mocked(togglePin);
+const mockedTogglePin = vi.mocked(setThreadPinned);
 const mockedRefresh = vi.mocked(refreshThreads);
 const mockedSearch = vi.mocked(searchThreads);
 const mockedInvoke = vi.mocked(invoke);
@@ -76,9 +76,9 @@ function mockBasicSessions() {
 function openTabFor(threadId: string) {
   tabs.push({
     id: "s-" + threadId,
-    kind: "chat",
+    kind: "session",
     title: "会话",
-    icon: "chat",
+    icon: "session",
     threadId,
     name: "",
     nameIsFirstMessage: false,
@@ -88,11 +88,11 @@ function openTabFor(threadId: string) {
     effort: null,
     plugins: { plugins: [], loaded: false },
     skills: { skills: [], loaded: false },
-    creatingChat: false,
+    creatingSession: false,
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "session",
+    origin: "history",
     workspace: null,
     resumedThreadId: null,
     turnActive: false,
@@ -107,7 +107,7 @@ function openTabFor(threadId: string) {
     planPrompt: null,
     plan: null,
     loading: false,
-    newChatWorkspace: null,
+    newSessionWorkspace: null,
     interactions: [],
   });
 }
@@ -191,7 +191,7 @@ describe("SessionView 置顶", () => {
     mockedTogglePin.mockResolvedValue(undefined);
   });
 
-  it("未置顶会话不显示徽章，右键点置顶调用 togglePin(id, true)", async () => {
+  it("未置顶会话不显示徽章，右键点置顶调用 setThreadPinned(id, true)", async () => {
     const wrapper = mount(SessionView);
     expect(wrapper.find(".pin-badge").exists()).toBe(false);
     await openCtxMenu(wrapper);
@@ -199,7 +199,7 @@ describe("SessionView 置顶", () => {
     expect(mockedTogglePin).toHaveBeenCalledWith("t1", true);
   });
 
-  it("置顶会话显示置顶图标，右键点取消置顶调用 togglePin(id, false)", async () => {
+  it("置顶会话显示置顶图标，右键点取消置顶调用 setThreadPinned(id, false)", async () => {
     store.threads = [
       { ...threads[0], isPinned: true },
       { ...threads[1] },
@@ -813,9 +813,9 @@ describe("SessionView 会话标签联动", () => {
   it("后台运行中的会话行显示呼吸点，未运行不显示", async () => {
     tabs.push({
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "会话",
-      icon: "chat",
+      icon: "session",
       threadId: "t1",
       name: "",
       nameIsFirstMessage: false,
@@ -825,11 +825,11 @@ describe("SessionView 会话标签联动", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "session",
+      origin: "history",
       workspace: null,
       resumedThreadId: null,
       turnActive: true,
@@ -844,7 +844,7 @@ describe("SessionView 会话标签联动", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     });
     const wrapper = mount(SessionView);
@@ -861,9 +861,9 @@ describe("SessionView 会话标签联动", () => {
   it("已打开会话行右键菜单不含「打开」「关闭标签」「删除会话」", async () => {
     tabs.push({
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "会话",
-      icon: "chat",
+      icon: "session",
       threadId: "t1",
       name: "",
       nameIsFirstMessage: false,
@@ -873,11 +873,11 @@ describe("SessionView 会话标签联动", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "session",
+      origin: "history",
       workspace: null,
       resumedThreadId: null,
       turnActive: false,
@@ -892,7 +892,7 @@ describe("SessionView 会话标签联动", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     });
     const wrapper = mount(SessionView);

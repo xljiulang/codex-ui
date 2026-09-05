@@ -32,7 +32,6 @@ export { refreshActiveTabFromFs, type FsChangedPayload } from "./refresh";
 export {
   __resetEditorTabsForTest,
   cancelClose,
-  closeAllOtherTabs,
   closeAllTabs,
   closeAnyTab,
   closeTab,

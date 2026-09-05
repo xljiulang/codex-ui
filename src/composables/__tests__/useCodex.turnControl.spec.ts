@@ -1,4 +1,4 @@
-import { newEmptyChat, openThread, sendPrompt } from "../useCodex/actions";
+import { newEmptySession, openSessionTabForThread, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { buildTurnParams, clearGoal, setGoal } from "../useCodex/turnControl";
@@ -123,7 +123,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }),
     );
     activeTabId.value = "s1";
-    expect(await newEmptyChat()).toBe(true);
+    expect(await newEmptySession()).toBe(true);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "goal_clear",
       expect.anything(),
@@ -156,7 +156,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       if (cmd === "goal_get") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "goal_clear",
@@ -166,7 +166,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(tabs[0].goalText).toBe("旧目标");
   });
 
-  it("openThread：goal_get 返回终态时 toast + 复位 + goal_clear", async () => {
+  it("openSessionTabForThread：goal_get 返回终态时 toast + 复位 + goal_clear", async () => {
     store.toast = "";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
@@ -186,7 +186,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     expect(activeSessionTab()?.threadId).toBe("t2");
     // 终态目标：打开即 toast 提示并复位（相当于没有目标），服务端同步清除
@@ -197,7 +197,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("goal_clear", { threadId: "t2" });
   });
 
-  it("openThread：goal_get 兼容 {goal:{objective,status}} 包裹返回", async () => {
+  it("openSessionTabForThread：goal_get 兼容 {goal:{objective,status}} 包裹返回", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -218,13 +218,13 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       }
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     expect(activeSessionTab()?.goalText).toBe("重构登录");
     expect(activeSessionTab()?.goalStatus).toBe("active");
   });
 
-  it("openThread：goal_get 失败或未挂目标时状态为空", async () => {
+  it("openSessionTabForThread：goal_get 失败或未挂目标时状态为空", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -241,13 +241,13 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       if (cmd === "goal_get") return Promise.reject(new Error("读取失败"));
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     expect(activeSessionTab()?.goalText).toBeNull();
     expect(activeSessionTab()?.goalStatus).toBeNull();
   });
 
-  it("openThread：loadFullItems 以 asc+full 拉取完整工具/命令详情", async () => {
+  it("openSessionTabForThread：loadFullItems 以 asc+full 拉取完整工具/命令详情", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
         return Promise.resolve({
@@ -264,7 +264,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       if (cmd === "goal_get") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/turns/list",
@@ -279,7 +279,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     });
   });
 
-  it("openThread：分页线程以 includeTurns=false 读元数据，消息来自 turns/list", async () => {
+  it("openSessionTabForThread：分页线程以 includeTurns=false 读元数据，消息来自 turns/list", async () => {
     const items = [
       { id: "i1", type: "userMessage", content: [{ type: "inputText", text: "hi" }] },
       { id: "i2", type: "agentMessage", content: [{ type: "outputText", text: "hello" }] },
@@ -308,7 +308,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       if (cmd === "goal_get") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     // 分页线程：只读元数据，绝不尝试 includeTurns=true
     expect(mockedInvoke).toHaveBeenCalledWith("thread_read", {
@@ -326,7 +326,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(store.toast).toBe("");
   });
 
-  it("openThread：legacy 线程 turns/list 失败时回退 includeTurns=true 摘要", async () => {
+  it("openSessionTabForThread：legacy 线程 turns/list 失败时回退 includeTurns=true 摘要", async () => {
     const summaryItems = [
       { id: "s1", type: "userMessage", content: [{ type: "inputText", text: "旧消息" }] },
     ];
@@ -357,7 +357,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
       if (cmd === "goal_get") return Promise.resolve({});
       return Promise.resolve(undefined);
     });
-    const p = openThread("t2");
+    const p = openSessionTabForThread("t2");
     expect(await p).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("thread_read", {
       threadId: "t2",
@@ -372,7 +372,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(store.itemsByThread["t2"]).toMatchObject(summaryItems);
   });
 
-  it("continueTurn：待挂载目标在回合启动前 goal_set 挂载", async () => {
+  it("startTurn：待挂载目标在回合启动前 goal_set 挂载", async () => {
     tabs.push(
       makeSessionTab("s1", "t1", {
         goalText: "修复登录",
@@ -416,7 +416,6 @@ describe("buildTurnParams 三面独立映射", () => {
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
       "cid-1",
-      "D:/repo",
       {
         permissionMode: "full-access",
         collaborationMode: "plan",
@@ -446,7 +445,6 @@ describe("buildTurnParams 三面独立映射", () => {
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
       "cid-3",
-      "D:/repo",
       {
         permissionMode: "read-only",
         collaborationMode: "default",
@@ -469,7 +467,6 @@ describe("buildTurnParams 三面独立映射", () => {
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
       "cid-4",
-      "D:/repo",
       {
         permissionMode: "full-access",
         collaborationMode: "default",
@@ -492,7 +489,6 @@ describe("buildTurnParams 三面独立映射", () => {
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
       "cid-5",
-      "D:/repo",
       {
         permissionMode: "full-access",
         collaborationMode: "plan",
@@ -515,7 +511,6 @@ describe("buildTurnParams 三面独立映射", () => {
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
       "cid-2",
-      "D:/repo",
       {
         permissionMode: "help-me-approve",
         collaborationMode: "default",

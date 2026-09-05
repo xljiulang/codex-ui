@@ -1,10 +1,10 @@
 import type { UserInput } from "../../lib/types";
-import { newEmptyChat, openThread } from "../useCodex/actions";
+import { newEmptySession, openSessionTabForThread } from "../useCodex/actions";
 import { settleConfirm } from "../useCodex/confirm";
 import { __resetSessionTabsForTest, activeSessionTab, isThreadOpen, isThreadRunning, sessionTabTitle } from "../useCodex/sessionState";
 import { addAttachmentToActiveSession, closeAllSessionTabs, closeSessionTab, registerComposerAddHandler, switchSessionTab, unregisterComposerAddHandler } from "../useCodex/sessionTabs";
 import { store } from "../useCodex/store";
-import { continueTurnForTab, interrupt } from "../useCodex/turnControl";
+import { startTurnForTab, interrupt } from "../useCodex/turnControl";
 import type { SessionTab } from "../useCodex/types";
 import { tabs as _tabs, activeTabId } from "../useEditorTabs";
 import { __resetTabsForTest, type Tab } from "../useTabs";
@@ -66,9 +66,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     ];
     const tab: SessionTab = {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: "t1",
       name: "我的标题",
       nameIsFirstMessage: false,
@@ -78,11 +78,11 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "session",
+      origin: "history",
       workspace: "D:/repo/sub",
       resumedThreadId: null,
       turnActive: false,
@@ -97,7 +97,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("我的标题");
@@ -141,7 +141,7 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
   it("无目标：打开即调用 thread_resume 并置 resumedThreadId", async () => {
     store.threads = [];
     mockedInvoke.mockImplementation(baseMock({}));
-    expect(await openThread("t2")).toBe(true);
+    expect(await openSessionTabForThread("t2")).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("thread_resume", {
       params: { threadId: "t2" },
     });
@@ -153,7 +153,7 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
     mockedInvoke.mockImplementation(
       baseMock({ goal: { objective: "改代码", status: "active" } }),
     );
-    expect(await openThread("t2")).toBe(true);
+    expect(await openSessionTabForThread("t2")).toBe(true);
     const resumeCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "thread_resume",
     );
@@ -166,7 +166,7 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
     mockedInvoke.mockImplementation(
       baseMock({ goal: { objective: "改代码", status: "complete" } }),
     );
-    expect(await openThread("t2")).toBe(true);
+    expect(await openSessionTabForThread("t2")).toBe(true);
     expect(mockedInvoke).toHaveBeenCalledWith("thread_resume", {
       params: { threadId: "t2" },
     });
@@ -178,7 +178,7 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
     mockedInvoke.mockImplementation(
       baseMock({}, "boom"),
     );
-    expect(await openThread("t2")).toBe(true);
+    expect(await openSessionTabForThread("t2")).toBe(true);
     expect(tabs).toHaveLength(1);
     expect(activeSessionTab()?.threadId).toBe("t2");
     expect(activeSessionTab()?.resumedThreadId).toBeNull();
@@ -204,9 +204,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     ];
     const tab: SessionTab = {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: "t1",
       name: "",
       nameIsFirstMessage: false,
@@ -216,11 +216,11 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "session",
+      origin: "history",
       workspace: "D:/repo",
       resumedThreadId: null,
       turnActive: false,
@@ -235,7 +235,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("预览文本");
@@ -258,9 +258,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   it("会话标签标题：新建带目录仅名称", () => {
     const tab: SessionTab = {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "标题",
       nameIsFirstMessage: false,
@@ -270,7 +270,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -289,7 +289,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: "D:/repo",
+      newSessionWorkspace: "D:/repo",
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("标题");
@@ -312,9 +312,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   it("会话标签标题：全新标签为 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -324,7 +324,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -343,7 +343,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: "D:/repo",
+      newSessionWorkspace: "D:/repo",
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("新建会话");
@@ -366,9 +366,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
   it("会话标签标题：新对话预选目录后为 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -378,7 +378,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -397,7 +397,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: "D:/projects/B",
+      newSessionWorkspace: "D:/projects/B",
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("新建会话");
@@ -421,9 +421,9 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.workspace = "";
     const tab: SessionTab = {
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -433,7 +433,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -452,7 +452,7 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     };
     expect(sessionTabTitle(tab)).toBe("新建会话");
@@ -471,7 +471,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
     );
     activeTabId.value = "s1";
 
-    expect(await newEmptyChat()).toBe(true);
+    expect(await newEmptySession()).toBe(true);
     expect(store.confirm).toBeNull();
     expect(tabs).toHaveLength(2);
     expect(activeTabId.value).toBe(tabs[1].id);
@@ -508,7 +508,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       return Promise.resolve(undefined);
     });
 
-    expect(await openThread("t2")).toBe(true);
+    expect(await openSessionTabForThread("t2")).toBe(true);
     expect(store.confirm).toBeNull();
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
@@ -533,7 +533,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       return Promise.resolve(undefined);
     });
 
-    expect(await openThread("t1")).toBe(true);
+    expect(await openSessionTabForThread("t1")).toBe(true);
     const interruptCalls = mockedInvoke.mock.calls.filter(
       ([cmd]) => cmd === "turn_interrupt",
     );
@@ -561,7 +561,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       return Promise.resolve(undefined);
     });
 
-    expect(await openThread("t2")).toBe(true);
+    expect(await openSessionTabForThread("t2")).toBe(true);
     expect(activeTabId.value).toBe("s2");
     expect(activeSessionTab()?.threadId).toBe("t2");
     expect(tabs).toHaveLength(2);
@@ -689,14 +689,14 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("会话标签 title 由同步点维护：新建为 新建会话，改名后更新", async () => {
-    await newEmptyChat("D:/projects/B");
+    await newEmptySession("D:/projects/B");
     expect(tabs[0].title).toBe("新建会话");
 
-    await newEmptyChat("D:/repo");
+    await newEmptySession("D:/repo");
     const tab = tabs[1];
     expect(tab.title).toBe("新建会话");
     tab.name = "我的标题";
-    tab.newChatWorkspace = "D:/projects/B/sub";
+    tab.newSessionWorkspace = "D:/projects/B/sub";
     tab.title = sessionTabTitle(tab);
     expect(tab.title).toBe("我的标题");
   });
@@ -712,7 +712,7 @@ describe("会话标签状态与事件路由", () => {
 
 
   it("会话标签 loading 字段读写一致", async () => {
-    await newEmptyChat();
+    await newEmptySession();
     const tab = tabs[0];
     expect(tab.loading).toBe(false);
     tab.loading = true;
@@ -1011,7 +1011,7 @@ describe("统一列表：活动会话 live 字段投影", () => {
       return Promise.resolve(undefined);
     });
 
-    expect(await openThread("t1")).toBe(true);
+    expect(await openSessionTabForThread("t1")).toBe(true);
     // 修复点：即使投影会话就是 s1，点击历史会话也必须把 s1 切回前台
     expect(activeTabId.value).toBe("s1");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -1092,7 +1092,7 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
       return Promise.resolve(undefined);
     });
 
-    await continueTurnForTab(tab, "hello", []);
+    await startTurnForTab(tab, "hello", []);
 
     const call = mockedInvoke.mock.calls.find(([c]) => c === "turn_start");
     const params = (call?.[1] as { params?: Record<string, unknown> })

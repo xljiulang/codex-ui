@@ -157,20 +157,6 @@
   fill: currentColor;
 }
 
-/* 会话主标签品牌文字：AppHeader .brand-name 同款渐变，按 Tab 高度缩放 */
-.editor-tab-brand {
-  flex-shrink: 0;
-  font-size: var(--font-md);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: 1.2px;
-  white-space: nowrap;
-  background: var(--brand-grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
 /* 呼吸圆点基础样式：会话标签（回合进行中）与终端标签（命令执行中）共用 */
 .editor-tab-run {
   width: 7px;

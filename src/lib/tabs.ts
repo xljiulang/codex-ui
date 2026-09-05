@@ -3,7 +3,7 @@ import type { EditorTab } from "../composables/useEditorTabs";
 
 /** 标签类型（标签领域枚举；其它领域的 kind 不混入） */
 export const TabKind = {
-  Chat: "chat",
+  Session: "session",
   File: "file",
   Docx: "docx",
   Diff: "diff",
@@ -16,7 +16,7 @@ export type TabKind = (typeof TabKind)[keyof typeof TabKind];
 
 /** 标签栏内置图标标识 */
 export const TabIcon = {
-  Chat: "chat",
+  Session: "session",
   Terminal: "terminal",
   File: "file",
   Commit: "commit",
@@ -34,7 +34,7 @@ export interface EditorTabBase {
   id: string;
   kind: TabKind;
   title: string;
-  /** 标签栏内置图标标识：chat=CODEX Logo，terminal=终端图标，file=文件图标（可叠加系统文件图标） */
+  /** 标签栏内置图标标识：session=CODEX Logo，terminal=终端图标，file=文件图标（可叠加系统文件图标） */
   icon: TabIcon;
   workspace: string | null;
   loading: boolean;
@@ -47,7 +47,7 @@ export interface EditorTabBase {
  * - 文件/diff/预览：不参与（保存/加载为瞬态）。
  */
 export function isTabWorking(tab: SessionTab | EditorTab): boolean {
-  if (tab.kind === TabKind.Chat) {
+  if (tab.kind === TabKind.Session) {
     return tab.turnActive || tab.goalStatus === "active";
   }
   if (tab.kind === TabKind.Terminal) {

@@ -1,4 +1,4 @@
-import { ensureSkills, ensureThreadPlugins, loadSettings, refreshServer, resetToNewChat } from "../useCodex/settings";
+import { ensureSkills, ensureThreadPlugins, loadSettings, refreshServer, resetToNewSession } from "../useCodex/settings";
 import { store } from "../useCodex/store";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { activeTabId } from "../useEditorTabs";
@@ -192,7 +192,7 @@ describe("ensureSkills 会话级技能缓存", () => {
     expect(calls).toHaveLength(1);
   });
 });
-describe("resetToNewChat 会话级缓存复位", () => {
+describe("resetToNewSession 会话级缓存复位", () => {
   it("复位插件/技能缓存为未加载（下次发送重新拉取）", () => {
     const tab = makeSessionTab("s1", "t1", {
       plugins: {
@@ -220,7 +220,7 @@ describe("resetToNewChat 会话级缓存复位", () => {
     tabs.push(tab);
     activeTabId.value = "s1";
 
-    resetToNewChat();
+    resetToNewSession();
 
     expect(tab.plugins).toEqual({ plugins: [], loaded: false });
     expect(tab.skills).toEqual({ skills: [], loaded: false });

@@ -105,17 +105,6 @@
   fill: currentColor;
 }
 
-/* 新建会话：与设置完全同形态（32px 圆角方形、同 hover 手感），
-   仅以更大的 18px 强调色加号区分主次 */
-.icon-btn.new-chat-btn {
-  color: var(--accent);
-}
-
-.icon-btn.new-chat-btn svg {
-  width: 18px;
-  height: 18px;
-}
-
 /* 自绘标题栏（无边框窗口）：标题栏整体可按住拖动，禁止选中文字；
    点击品牌/按钮等交互元素不触发拖动（由 AppHeader 的 mousedown 判定） */
 .app-header {

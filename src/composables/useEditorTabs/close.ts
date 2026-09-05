@@ -33,7 +33,7 @@ function disposeTab(tab: EditorTab): void {
 export async function closeTab(id: string): Promise<void> {
   const tab = tabs.find((t) => t.id === id);
   if (!tab) return;
-  if (tab.kind === TabKind.Chat) {
+  if (tab.kind === TabKind.Session) {
     await closeSessionTab(tab.id);
     return;
   }
@@ -81,38 +81,6 @@ export function discardTabAndClose(id: string): void {
 }
 
 /**
- * 按谓词批量关闭编辑器标签（会话标签不参与）：未保存文件与运行中的终端
- * 跳过计数、终端结束进程、其余直接移除。
- * 谓词基于遍历时的快照索引判定；快照遍历 + 按 id 移除，删除过程安全。
- */
-function closeTabsMatching(
-  pred: (tab: Tab, idx: number) => boolean,
-): number {
-  let skipped = 0;
-  for (const [idx, tab] of [...tabs].entries()) {
-    if (!pred(tab, idx)) continue;
-    if (tab.kind === TabKind.Chat) continue; // 会话标签由统一批量关闭处理
-    const t = tab as EditorTab;
-    if (isDirtyEditableTab(t)) {
-      skipped++;
-      continue;
-    }
-    if (isTerminalBusy(t)) {
-      skipped++;
-      continue;
-    }
-    disposeTab(t);
-    removeTab(t.id);
-  }
-  return skipped;
-}
-
-/** 关闭其它所有文件/diff/预览/终端标签；返回跳过的未保存标签数量 */
-export function closeAllOtherTabs(): number {
-  return closeTabsMatching(() => true);
-}
-
-/**
  * 按统一列表顺序关闭 [start, end) 区间内的标签（含会话标签）：运行中的会话
  * 跳过计数（不逐个确认），未保存文件/运行中终端跳过计数；返回跳过数量。
  */
@@ -120,7 +88,7 @@ async function closeTabRange(start: number, end: number): Promise<number> {
   let skipped = 0;
   const snapshot = [...tabs].slice(start, end);
   for (const tab of snapshot) {
-    if (tab.kind === TabKind.Chat) {
+    if (tab.kind === TabKind.Session) {
       if (tab.turnActive || tab.goalText) {
         skipped++;
         continue;
@@ -169,7 +137,7 @@ function removeTab(id: string): void {
   const wasActive = activeTabId.value === id;
   tabs.splice(idx, 1);
   if (kind === TabKind.Terminal) releaseTerminal(id);
-  if (kind === TabKind.Chat) return; // 会话标签的激活切换由 useCodex 的会话关闭流程处理
+  if (kind === TabKind.Session) return; // 会话标签的激活切换由 useCodex 的会话关闭流程处理
   if (wasActive) {
     const next = tabs[Math.max(0, idx - 1)] ?? tabs[0];
     activeTabId.value = next ? next.id : "";
@@ -196,7 +164,7 @@ export async function saveAllDirtyTabs(): Promise<boolean> {
 
 /** 测试专用：清空文件/diff/预览/终端标签（保留会话标签） */
 export function __resetEditorTabsForTest(): void {
-  const removed = tabs.filter((t) => t.kind !== TabKind.Chat);
+  const removed = tabs.filter((t) => t.kind !== TabKind.Session);
   for (const t of removed) tabs.splice(tabs.indexOf(t), 1);
   if (!tabs.some((t) => t.id === activeTabId.value)) {
     activeTabId.value = tabs[0]?.id ?? "";

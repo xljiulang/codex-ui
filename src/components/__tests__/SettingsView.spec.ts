@@ -2586,7 +2586,7 @@ describe("SettingsView 基础设置", () => {
     wrapper = mount(SettingsView);
     await openMemory(wrapper);
     await flushPromises();
-    const section = wrapper.find(".settings-section-memory");
+    const section = wrapper.find(".settings-section-basic");
     expect(section.exists()).toBe(true);
     const inputs = section.findAll(".switch input");
     expect(inputs).toHaveLength(2);
@@ -2599,7 +2599,7 @@ describe("SettingsView 基础设置", () => {
     wrapper = mount(SettingsView);
     await openMemory(wrapper);
     await flushPromises();
-    const inputs = wrapper.findAll(".settings-section-memory .switch input");
+    const inputs = wrapper.findAll(".settings-section-basic .switch input");
     await inputs[0].setValue(false);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
@@ -2631,7 +2631,7 @@ describe("SettingsView 基础设置", () => {
     wrapper = mount(SettingsView);
     await openMemory(wrapper);
     await flushPromises();
-    const inputs = wrapper.findAll(".settings-section-memory .switch input");
+    const inputs = wrapper.findAll(".settings-section-basic .switch input");
     await inputs[1].setValue(true);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith(
@@ -2659,7 +2659,7 @@ describe("SettingsView 基础设置", () => {
     wrapper = mount(SettingsView);
     await openMemory(wrapper);
     await flushPromises();
-    const inputs = wrapper.findAll(".settings-section-memory .switch input");
+    const inputs = wrapper.findAll(".settings-section-basic .switch input");
     expect((inputs[1].element as HTMLInputElement).disabled).toBe(true);
   });
 
@@ -2731,7 +2731,7 @@ describe("SettingsView 终端 Shell", () => {
 
   it("codex 可执行文件行位于基础设置分区内第一项", () => {
     wrapper = mount(SettingsView);
-    const section = wrapper.find(".settings-section-memory");
+    const section = wrapper.find(".settings-section-basic");
     const labels = section
       .findAll(".settings .setting-row label")
       .map((l) => l.text());

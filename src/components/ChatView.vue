@@ -805,7 +805,7 @@ onBeforeUnmount(() => {
     <div class="chat-scroll-wrap">
       <div ref="scroller" class="chat-scroll" @scroll="onScroll">
         <div v-if="items.length === 0" class="chat-empty">
-          <EmptyState :busy="tab.turnActive || tab.creatingChat" />
+          <EmptyState :busy="tab.turnActive || tab.creatingSession" />
         </div>
         <template v-for="turn in turns" :key="turn.key">
           <section class="turn">

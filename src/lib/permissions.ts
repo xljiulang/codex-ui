@@ -93,7 +93,6 @@ export function toApprovalsReviewer(
 /** turn/start 的沙箱覆盖参数是 sandboxPolicy 对象 */
 export function toSandboxPolicy(
   mode: PermissionId,
-  _workspace?: string,
 ): Record<string, unknown> {
   switch (mode) {
     case "read-only":

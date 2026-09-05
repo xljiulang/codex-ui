@@ -11,7 +11,7 @@
 }
 
 /* 零会话标签空状态：主区域居中纯提示 */
-.no-session-state {
+.no-tabs-state {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -21,7 +21,7 @@
   color: var(--text-faint);
 }
 
-.no-session-state .no-session-hint {
+.no-tabs-state .no-tabs-hint {
   font-size: var(--font-base);
 }
 
@@ -218,7 +218,7 @@
 }
 
 /* 加宽滚动条：diff 查看器、文本编辑器与会话区（其余面板保持 8px） */
-.diff-window-body::-webkit-scrollbar,
+.diff-pane-body::-webkit-scrollbar,
 .text-editor-host .cm-scroller::-webkit-scrollbar,
 .chat-scroll::-webkit-scrollbar,
 .text-editor-preview::-webkit-scrollbar {

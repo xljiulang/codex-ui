@@ -30,7 +30,7 @@ import {
   effectiveSessionModelEffort,
   ensureSkills,
   ensureThreadPlugins,
-  resetToNewChat,
+  resetToNewSession,
 } from "./settings";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
@@ -43,7 +43,7 @@ import {
   upsertThreadSummary,
 } from "./threads";
 import { setToast, toastError } from "./toast";
-import { clearGoal, continueTurn, setGoal, steerTurn } from "./turnControl";
+import { clearGoal, startTurn, setGoal, steerTurn } from "./turnControl";
 import { isThreadBound, wechatUnbind } from "./wechat";
 import {
   goalStatusToast,
@@ -65,7 +65,7 @@ export async function openSessionTabForThread(
   // activeSessionTab() 返回的是“最近投影”会话而非显示中的标签，点击历史会话
   // 仍必须走 switchSessionTab 把对应会话标签切回前台。
   const active = activeTab.value;
-  if (active && active.kind === TabKind.Chat && active.threadId === threadId) {
+  if (active && active.kind === TabKind.Session && active.threadId === threadId) {
     return true;
   }
   void sessionLog("info", threadId, "session-open");
@@ -82,19 +82,19 @@ export async function openSessionTabForThread(
     if (i >= 0) tabs.splice(i, 1);
     return false;
     }
-    tab.origin = "session";
+    tab.origin = "history";
     await hydrateSessionState(tab);
     return await loadThreadInto(tab, threadId);
   }
 
 
-async function newChat(prompt: string, attachments: UserInput[]) {
+async function startNewSession(prompt: string, attachments: UserInput[]) {
   const active = activeSessionTab();
   const tabId = active?.id ?? null;
   // 创建中标记写发起时的标签；即使创建期间用户切换标签，finally 也按 tabId 清回原标签
-  if (active) active.creatingChat = true;
+  if (active) active.creatingSession = true;
   try {
-    // newChat 仅在无当前会话时被调用，resolveSessionWorkspace 走 newChatWorkspace → workspace 分支
+    // startNewSession 仅在无当前会话时被调用，resolveSessionWorkspace 走 newSessionWorkspace → workspace 分支
     const cwd = resolveSessionWorkspace(active ?? undefined);
     const permission =
       active?.permissionMode ?? store.settings.default_permission;
@@ -131,7 +131,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
     // 创建期间用户已切换到其它标签：结果直接写入原标签记录，避免污染当前会话
     if (tabId !== null && activeSessionTab()?.id !== tabId) {
       const tab = tabs.find(
-        (t): t is SessionTab => t.kind === TabKind.Chat && t.id === tabId,
+        (t): t is SessionTab => t.kind === TabKind.Session && t.id === tabId,
       );
       if (tab) {
         tab.threadId = threadId;
@@ -139,7 +139,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
         tab.origin = "new";
         tab.workspace = cwd;
         tab.resumedThreadId = threadId;
-        tab.newChatWorkspace = null;
+        tab.newSessionWorkspace = null;
         tab.loading = false;
         tab.title = sessionTabTitle(tab);
         const resolved = effectiveSessionModelEffort(tab);
@@ -169,7 +169,7 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       activeTab.origin = "new";
       activeTab.workspace = cwd;
       activeTab.resumedThreadId = threadId;
-      activeTab.newChatWorkspace = null; // 本次新建已消费，恢复默认
+      activeTab.newSessionWorkspace = null; // 本次新建已消费，恢复默认
       activeTab.loading = false;
       activeTab.title = sessionTabTitle(activeTab);
       const resolved = effectiveSessionModelEffort(activeTab);
@@ -222,13 +222,13 @@ async function newChat(prompt: string, attachments: UserInput[]) {
       }
       // 仿 VS Code：后台临时线程总结首条消息生成短标题（不阻塞主回合）
       void autoTitleThread(threadId, stripMentionContext(prompt));
-      await continueTurn(prompt, attachments);
+      await startTurn(prompt, attachments);
     }
   } finally {
     const target = tabId
       ? allSessionTabs().find((t) => t.id === tabId)
       : undefined;
-    if (target) target.creatingChat = false;
+    if (target) target.creatingSession = false;
   }
 }
 
@@ -239,7 +239,7 @@ export async function sendPrompt(text: string, flip = false) {
   if (!text.trim() && attachments.length === 0) return;
   void sessionLog("info", tab?.threadId ?? null, "user-send", `chars=${text.length}`);
   // 手动发送标记：ChatView 据此在发送后强制恢复吸底回到底部
-  // （队列消息在回合结束后自动发送时走 continueTurn/newChat，不递增）
+  // （队列消息在回合结束后自动发送时走 startTurn/startNewSession，不递增）
   store.userSendRev++;
   // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
   if (tab?.turnActive && tab.threadId) {
@@ -255,9 +255,9 @@ export async function sendPrompt(text: string, flip = false) {
   }
   try {
     if (!tab?.threadId) {
-      await newChat(text, attachments);
+      await startNewSession(text, attachments);
     } else {
-      await continueTurn(text, attachments);
+      await startTurn(text, attachments);
     }
   } catch (e) {
     setToast(toastError(e));
@@ -299,9 +299,9 @@ export async function executePlan() {
   }
   try {
     if (tab?.threadId) {
-      await continueTurn(text, []);
+      await startTurn(text, []);
     } else {
-      await newChat(text, []);
+      await startNewSession(text, []);
     }
   } catch (e) {
     setToast(toastError(e));
@@ -310,32 +310,24 @@ export async function executePlan() {
 
 
 /**
- * 新建空会话（所有 UI 入口的统一函数）：可预置本次会话的工作目录 cwd。
- * 返回 true 表示已进入新会话；进行中会话确认被取消时返回 false（不切换）。
- */
-/**
  * 新建空会话标签（所有“新会话”入口的统一函数）：会话多开，不打断/不停止
  * 当前或后台标签的回合；可预置本次会话的工作目录 cwd。恒返回 true。
  */
-export async function newEmptyChat(cwd?: string | null): Promise<boolean> {
+export async function newEmptySession(cwd?: string | null): Promise<boolean> {
   const tab = freshSessionTab();
   if (cwd) {
-    tab.newChatWorkspace = cwd;
+    tab.newSessionWorkspace = cwd;
     store.lastWorkspace = cwd;
   }
   tab.title = sessionTabTitle(tab);
   insertTab(tab);
-  activateTab(tab.id); // live 字段由投影 watch 同步
+  activateTab(tab.id);
   void ensureThreadPlugins(tab); // 进入新对话编辑态即预初始化插件缓存
   void ensureSkills(tab); // 技能列表随会话拉取（$ 菜单与回显共用）
   return true;
 }
 
 
-/**
- * 打开历史会话：返回 true 表示成功切换到目标会话；
- * 点击当前会话（无操作）或进行中会话确认被取消时返回 false。
- */
 /**
  * 把历史会话加载进指定会话标签（结果按“是否仍为活动标签”写入 live 字段或标签记录，
  * 避免加载期间用户切换标签导致状态串味）。
@@ -436,7 +428,7 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
   } catch (e) {
     if (isThreadNotFound(e)) {
       if (isActive()) {
-        resetToNewChat();
+        resetToNewSession();
         setToast("会话已不存在，已切换为新会话");
       } else {
         dropSessionTab(tab);
@@ -452,15 +444,6 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
 }
 
 
-/**
- * 打开历史会话：统一走 openSessionTabForThread（唯一性约束：已打开则聚焦，
- * 未打开则新建标签加载）。返回 true 表示成功切换到目标会话。
- */
-export async function openThread(threadId: string): Promise<boolean> {
-  return openSessionTabForThread(threadId);
-}
-
-
 /** 切换会话成功后的统一收尾：聚焦输入框（右侧面板保持当前 Tab） */
 async function finishSessionSwitch() {
   await nextTick();
@@ -473,7 +456,7 @@ async function finishSessionSwitch() {
  * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
  */
 export async function openNewSession(cwd?: string | null): Promise<void> {
-  if (!(await newEmptyChat(cwd))) return;
+  if (!(await newEmptySession(cwd))) return;
   await finishSessionSwitch();
 }
 
@@ -510,7 +493,8 @@ export async function pickAndOpenNewSession(): Promise<void> {
  * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
  */
 export async function openSession(threadId: string): Promise<void> {
-  if (!(await openThread(threadId))) return;
+  // 唯一性约束：已打开则聚焦，未打开则新建标签加载
+  if (!(await openSessionTabForThread(threadId))) return;
   await finishSessionSwitch();
 }
 
@@ -605,8 +589,8 @@ export async function respondInteraction(interaction: PendingInteraction, result
   }
 }
 
-/** 历史会话按需恢复（模型切换等操作需要线程已加载）；返回是否可继续 */
-export async function ensureThreadLoaded(tab: SessionTab): Promise<boolean> {
+/** 历史会话按需恢复（模型切换等操作需要线程已恢复）；返回是否可继续 */
+export async function ensureThreadResumed(tab: SessionTab): Promise<boolean> {
   const threadId = tab.threadId;
   if (!threadId || tab.resumedThreadId === threadId) return true;
   try {
@@ -615,7 +599,7 @@ export async function ensureThreadLoaded(tab: SessionTab): Promise<boolean> {
     return true;
   } catch (e) {
     if (isThreadNotFound(e)) {
-      resetToNewChat();
+      resetToNewSession();
       setToast("会话已不存在，已切换为新会话");
     } else {
       setToast(toastError(e));

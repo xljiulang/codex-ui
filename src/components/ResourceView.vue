@@ -74,7 +74,7 @@ const props = defineProps<{ active: boolean }>();
 const hasActiveSessionTab = computed(
   () =>
     activeTabId.value !== "" &&
-    activeTab.value?.kind === TabKind.Chat,
+    activeTab.value?.kind === TabKind.Session,
 );
 
 /** 是否有可浏览的资源内容：仅当存在工作区且有根树（或处于搜索态）时显示搜索/刷新控件，

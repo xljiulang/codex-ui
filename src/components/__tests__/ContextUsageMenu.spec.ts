@@ -30,7 +30,7 @@ function makeTab(): SessionTab {
 }
 
 const FULL_USAGE = {
-  used: 5000,
+  contextUsed: 5000,
   window: 10000,
   input: 12000,
   output: 34000,
@@ -66,7 +66,7 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   });
 
   it("圆环渲染上下文占用百分比进度", async () => {
-    wrapper = await mountWith({ used: 5000, window: 10000 });
+    wrapper = await mountWith({ contextUsed: 5000, window: 10000 });
     const ring = wrapper.find(".ctx-ring");
     expect(ring.exists()).toBe(true);
     expect(ring.find(".ctx-ring-pct").text()).toBe("50");
@@ -77,16 +77,16 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   });
 
   it("环心数字一位数补 %，两位及以上纯数字", async () => {
-    wrapper = await mountWith({ used: 500, window: 10000 });
+    wrapper = await mountWith({ contextUsed: 500, window: 10000 });
     expect(wrapper.find(".ctx-ring-pct").text()).toBe("5%");
     wrapper!.unmount();
 
-    wrapper = await mountWith({ used: 9900, window: 10000 });
+    wrapper = await mountWith({ contextUsed: 9900, window: 10000 });
     expect(wrapper.find(".ctx-ring-pct").text()).toBe("99");
   });
 
   it("悬停向上展开菜单：窗口占用、剩余与压缩胶囊", async () => {
-    wrapper = await mountWith({ used: 5000, window: 10000 });
+    wrapper = await mountWith({ contextUsed: 5000, window: 10000 });
     expect(wrapper.find(".usage-menu").exists()).toBe(false);
     await wrapper.find(".ctx-ring-anchor").trigger("mouseenter");
     const menu = wrapper.find(".usage-menu");
@@ -128,7 +128,7 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   });
 
   it("窗口未知时不画进度，菜单提示窗口大小未知但仍展示累计", async () => {
-    wrapper = await mountWith({ used: 3000, window: null, input: 12000 });
+    wrapper = await mountWith({ contextUsed: 3000, window: null, input: 12000 });
     expect(wrapper.find(".ctx-ring-pct").exists()).toBe(false);
     expect(wrapper.find(".ctx-ring-bar").exists()).toBe(false);
     await wrapper.find(".ctx-ring-anchor").trigger("mouseenter");
@@ -144,7 +144,7 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   it("鼠标移出后延迟关闭菜单", async () => {
     vi.useFakeTimers();
     try {
-      wrapper = await mountWith({ used: 5000, window: 10000 });
+      wrapper = await mountWith({ contextUsed: 5000, window: 10000 });
       await wrapper.find(".ctx-ring-anchor").trigger("mouseenter");
       expect(wrapper.find(".usage-menu").exists()).toBe(true);
       await wrapper.find(".ctx-ring-anchor").trigger("mouseleave");
@@ -157,7 +157,7 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   });
 
   it("点击压缩按钮发起压缩并提示；压缩中禁用，完成后恢复", async () => {
-    wrapper = await mountWith({ used: 5000, window: 10000 });
+    wrapper = await mountWith({ contextUsed: 5000, window: 10000 });
     await wrapper.find(".ctx-ring-anchor").trigger("mouseenter");
     let resolveCompact!: (v: unknown) => void;
     mockedInvoke.mockImplementation(
@@ -183,7 +183,7 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   });
 
   it("压缩失败时 toast 错误", async () => {
-    wrapper = await mountWith({ used: 5000, window: 10000 });
+    wrapper = await mountWith({ contextUsed: 5000, window: 10000 });
     await wrapper.find(".ctx-ring-anchor").trigger("mouseenter");
     mockedInvoke.mockRejectedValueOnce(new Error("压缩失败"));
     await wrapper.find(".usage-menu-capsule-btn").trigger("click");

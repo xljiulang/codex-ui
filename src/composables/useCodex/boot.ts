@@ -1,7 +1,7 @@
 // useCodex 拆分模块：启动（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { getPinnedSectionId } from "./capabilities";
+import { getPinnedSectionId } from "./pinnedSection";
 import { wireEvents } from "./events";
 import { loadModels, loadSettings, refreshServer } from "./settings";
 import { store } from "./store";

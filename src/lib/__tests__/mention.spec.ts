@@ -8,7 +8,7 @@ import {
   parseFileMentionSection,
   parseInlineMentions,
   stripMentionContext,
-  stripSkillLinks,
+  stripLeadingRefLinks,
   toProtocolPath,
   toUserAttachment,
 } from "../mention";
@@ -331,11 +331,11 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     expect(stripMentionContext("普通文本")).toBe("普通文本");
   });
 
-  it("stripSkillLinks / stripMentionContext 剥离技能链接", () => {
-    expect(stripSkillLinks("[$a](C:/x/SKILL.md) [$b](C:/y/SKILL.md) hello")).toBe(
+  it("stripLeadingRefLinks / stripMentionContext 剥离技能链接", () => {
+    expect(stripLeadingRefLinks("[$a](C:/x/SKILL.md) [$b](C:/y/SKILL.md) hello")).toBe(
       "hello",
     );
-    expect(stripSkillLinks("普通文本")).toBe("普通文本");
+    expect(stripLeadingRefLinks("普通文本")).toBe("普通文本");
     // 带文件段时 stripMentionContext 也去掉技能链接
     const text =
       "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[$ida-pro-mcp:idapython](C:/x/SKILL.md) 逆向分析\n";

@@ -704,13 +704,13 @@ html[data-glass="on"] .cm-editor {
 }
 
 /* 主窗内嵌文件编辑器整层透明：露出 CodeMirror 的内容档 tint（独立窗口不受影响） */
-html[data-glass="on"] .text-editor-window.text-editor-embedded {
+html[data-glass="on"] .text-editor-pane.text-editor-embedded {
   background-color: transparent !important;
 }
 
 /* 主窗内嵌 diff 根透明：避免与正文两层 tint 叠加，表现与文件编辑 tab 对齐
    （独立 diff 窗口不受影响） */
-html[data-glass="on"] .diff-window.diff-embedded {
+html[data-glass="on"] .diff-pane.diff-embedded {
   background-color: transparent !important;
 }
 
@@ -741,7 +741,7 @@ html[data-glass="on"] .terminal-pane,
 html[data-glass="on"] .preview-pane,
 html[data-glass="on"] .assistant-card,
 html[data-glass="on"] .text-editor-head,
-html[data-glass="on"] .diff-window-head,
+html[data-glass="on"] .diff-pane-head,
 html[data-glass="on"] .preview-head {
   background-color: var(--app-content-tint) !important;
 }

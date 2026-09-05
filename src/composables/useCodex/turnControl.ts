@@ -5,9 +5,9 @@ import { buildTurnInput } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandboxPolicy } from "../../lib/permissions";
 import { sessionLog } from "../../lib/sessionLog";
 import type { UserInput } from "../../lib/types";
-import { resolveSessionWorkspace, upsertItem } from "./items";
+import { upsertItem } from "./items";
 import { activeSessionTab, dropSessionTab, findSessionTabByThread } from "./sessionState";
-import { currentModelId, resetToNewChat } from "./settings";
+import { currentModelId, resetToNewSession } from "./settings";
 import { store } from "./store";
 import { isThreadNotFound } from "./threads";
 import { setToast, toastError } from "./toast";
@@ -15,14 +15,12 @@ import type { SessionTab } from "./types";
 
 
 /**
- * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按发送目标标签（session）取值，
- * 沙箱可写根跟随传入的 cwd（活动标签用 resolveSessionWorkspace，后台标签用 resolveSessionWorkspace）。
+ * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按发送目标标签（session）取值。
  */
 export function buildTurnParams(
   threadId: string,
   input: UserInput[],
   clientId: string,
-  cwd: string,
   /** 发送目标标签（会话设置唯一事实源）；缺省时权限用默认设置、模型/强度为空 */
   session?: Pick<
     SessionTab,
@@ -37,7 +35,7 @@ export function buildTurnParams(
   // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
   const permission = session?.permissionMode ?? store.settings.default_permission;
   params.approvalPolicy = toApprovalPolicy(permission);
-  params.sandboxPolicy = toSandboxPolicy(permission, cwd);
+  params.sandboxPolicy = toSandboxPolicy(permission);
   const reviewer = toApprovalsReviewer(permission);
   if (reviewer) params.approvalsReviewer = reviewer;
   // 显式携带（null 表示用默认），避免旧值在会话里粘滞
@@ -68,7 +66,6 @@ function buildUserTurn(
   threadId: string,
   prompt: string,
   attachments: UserInput[],
-  cwd: string,
   session?: Pick<
     SessionTab,
     "permissionMode" | "model" | "effort" | "collaborationMode"
@@ -76,7 +73,7 @@ function buildUserTurn(
 ): { clientId: string; input: UserInput[]; params: Record<string, unknown> } {
   const clientId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const input = buildTurnInput(prompt, attachments);
-  const params = buildTurnParams(threadId, input, clientId, cwd, session);
+  const params = buildTurnParams(threadId, input, clientId, session);
   upsertItem(threadId, {
     id: clientId,
     clientId,
@@ -89,7 +86,7 @@ function buildUserTurn(
 
 
 /** 按标签发送回合（后台标签的队列消息等用）：状态写入目标标签记录，不触碰活动标签 */
-export async function continueTurnForTab(
+export async function startTurnForTab(
   tab: SessionTab,
   prompt: string,
   attachments: UserInput[],
@@ -117,7 +114,6 @@ export async function continueTurnForTab(
       threadId,
       prompt,
       attachments,
-      resolveSessionWorkspace(tab),
       tab,
     );
     // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
@@ -151,7 +147,7 @@ export async function continueTurnForTab(
 }
 
 
-export async function continueTurn(prompt: string, attachments: UserInput[]) {
+export async function startTurn(prompt: string, attachments: UserInput[]) {
   const tab = activeSessionTab();
   const threadId = tab?.threadId;
   if (!threadId) return;
@@ -163,7 +159,7 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
       if (tab) tab.resumedThreadId = threadId;
     } catch (e) {
       if (isThreadNotFound(e)) {
-        resetToNewChat();
+        resetToNewSession();
         setToast("会话已不存在，已切换为新会话");
       } else {
         setToast(toastError(e));
@@ -178,7 +174,6 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
       threadId,
       prompt,
       attachments,
-      resolveSessionWorkspace(),
       tab,
     );
     // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
@@ -202,7 +197,7 @@ export async function continueTurn(prompt: string, attachments: UserInput[]) {
     }
   } catch (e) {
     if (isThreadNotFound(e)) {
-      resetToNewChat();
+      resetToNewSession();
       setToast("会话已不存在，已切换为新会话");
     } else {
       setToast(toastError(e));
@@ -227,7 +222,6 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
         threadId,
         prompt,
         attachments,
-        resolveSessionWorkspace(),
         tab,
       );
     } catch (e) {

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { buildTurnInput } from "../../lib/mention";
 import type { ThreadSummary } from "../../lib/types";
-import { getPinnedSectionId, sortThreads } from "./capabilities";
+import { getPinnedSectionId, sortThreads } from "./pinnedSection";
 import { resolveSessionWorkspace } from "./items";
 import { findSessionTabByThread, sessionTabTitle } from "./sessionState";
 import { backgroundThreadIds, store } from "./store";
@@ -318,7 +318,7 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
 
 
 /** 固定/取消固定会话（置顶） */
-export async function togglePin(threadId: string, pinned: boolean) {
+export async function setThreadPinned(threadId: string, pinned: boolean) {
   const t = store.threads.find((x) => x.id === threadId);
   const prev = t?.isPinned;
   try {

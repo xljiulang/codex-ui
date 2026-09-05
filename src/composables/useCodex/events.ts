@@ -25,7 +25,7 @@ import { activeSessionTab, allSessionTabs, findSessionTabByThread, sessionTabTit
 import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
-import { clearGoal, continueTurn, continueTurnForTab } from "./turnControl";
+import { clearGoal, startTurn, startTurnForTab } from "./turnControl";
 import { handleDynamicToolCall } from "./dynamicToolCall";
 import { tabs } from "../useTabs";
 import { isTabWorking } from "../../lib/tabs";
@@ -272,10 +272,10 @@ export async function wireEvents() {
         const next = tab.followupQueue.shift()!;
         if (activeSessionTab()?.id === tab.id) {
           // 活动标签：走 live 字段路径（发送状态落到当前会话）
-          await continueTurn(next.text, next.attachments);
+          await startTurn(next.text, next.attachments);
         } else if (tab.threadId) {
           // 后台标签：状态写入标签记录，不触碰活动标签
-          await continueTurnForTab(tab, next.text, next.attachments);
+          await startTurnForTab(tab, next.text, next.attachments);
         }
       }
     }),
@@ -590,7 +590,7 @@ export async function wireEvents() {
       const reasoningOutput = t?.reasoningOutputTokens;
       const usage = {
         // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
-        used:
+        contextUsed:
           p.tokenUsage?.last?.totalTokens ?? p.tokenUsage?.total?.totalTokens ?? 0,
         window: p.tokenUsage?.modelContextWindow ?? null,
         ...(typeof totalInput === "number" ? { input: totalInput } : {}),

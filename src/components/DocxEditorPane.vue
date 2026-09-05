@@ -139,7 +139,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="docx-editor-window docx-editor-embedded">
+  <div class="docx-editor-pane docx-editor-embedded">
     <div class="docx-editor-head">
       <span class="docx-editor-title">
         <span class="docx-editor-path">{{ relPathOf(tab.workspace, tab.path) }}</span>

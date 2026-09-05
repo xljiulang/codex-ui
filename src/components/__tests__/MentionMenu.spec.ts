@@ -90,7 +90,7 @@ describe("MentionMenu @/$ 联合菜单", () => {
     const fileBtn = w.findAll(".menu-item").find((b) => b.text().includes("search.txt"));
     expect(fileBtn).toBeTruthy();
     await fileBtn!.trigger("click");
-    const emitted = w.emitted("select-attachment");
+    const emitted = w.emitted("select-file");
     expect(emitted?.[0]?.[0]).toEqual({
       type: "mention",
       name: "search.txt",
@@ -138,7 +138,7 @@ describe("MentionMenu @/$ 联合菜单", () => {
     expect(mockedEnsureSkills).toHaveBeenCalled();
     expect(w.text()).toContain("SkillA");
     await w.find(".menu-item").trigger("click");
-    expect(w.emitted("select-attachment")?.[0]?.[0]).toEqual({
+    expect(w.emitted("select-file")?.[0]?.[0]).toEqual({
       type: "skill",
       name: "skill-a",
       path: "C:/s/SKILL.md",

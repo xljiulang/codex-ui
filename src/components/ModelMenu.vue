@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   activeSessionTab,
-  ensureThreadLoaded,
+  ensureThreadResumed,
   loadModels,
   saveSessionState,
   setToast,
@@ -56,7 +56,7 @@ async function apply() {
   // （model/effort 传 null 表示恢复默认，与 turn/start 的显式 null 语义一致）
   if (tab.threadId) {
     // 历史会话打开时为只读、未恢复；settings/update 要求线程已加载，先按需 resume
-    if (!(await ensureThreadLoaded(tab))) {
+    if (!(await ensureThreadResumed(tab))) {
       emit("close");
       return;
     }

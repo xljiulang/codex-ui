@@ -14,8 +14,8 @@ export function useContextUsage(tab?: SessionTab) {
     const u = source.value?.threadTokenUsage;
     if (!u || u.window == null || u.window <= 0) return null;
     return {
-      pct: Math.min(100, Math.round((u.used / u.window) * 100)),
-      used: u.used,
+      pct: Math.min(100, Math.round((u.contextUsed / u.window) * 100)),
+      used: u.contextUsed,
       window: u.window,
     };
   });

@@ -25,9 +25,9 @@ function nextSessionTabId(): string {
 export function freshSessionTab(): SessionTab {
   return reactive({
     id: nextSessionTabId(),
-    kind: TabKind.Chat,
+    kind: TabKind.Session,
     title: "新建会话",
-    icon: TabIcon.Chat,
+    icon: TabIcon.Session,
     threadId: null,
     name: "",
     nameIsFirstMessage: false,
@@ -55,8 +55,8 @@ export function freshSessionTab(): SessionTab {
     planPrompt: null,
     plan: null,
     loading: false,
-    creatingChat: false,
-    newChatWorkspace: null,
+    creatingSession: false,
+    newSessionWorkspace: null,
     interactions: [],
   } as SessionTab);
 }
@@ -68,7 +68,7 @@ export function findSessionTabByThread(
 ): SessionTab | undefined {
   if (!threadId) return undefined;
   return tabs.find(
-    (t): t is SessionTab => t.kind === TabKind.Chat && t.threadId === threadId,
+    (t): t is SessionTab => t.kind === TabKind.Session && t.threadId === threadId,
   );
 }
 
@@ -92,16 +92,16 @@ let activeSessionTabId: string | null = null;
 /** 当前激活的会话标签（无则 null）：优先当前显示标签，否则最近投影的会话 */
 export function activeSessionTab(): SessionTab | null {
   const t = activeTab.value;
-  if (t && t.kind === TabKind.Chat) return t;
+  if (t && t.kind === TabKind.Session) return t;
   if (!activeSessionTabId) return null;
   const s = tabs.find((x) => x.id === activeSessionTabId);
-  return s && s.kind === TabKind.Chat ? s : null;
+  return s && s.kind === TabKind.Session ? s : null;
 }
 
 
 /** 统一列表中的会话标签集合（事件路由/批量处理用） */
 export function allSessionTabs(): SessionTab[] {
-  return tabs.filter((t): t is SessionTab => t.kind === TabKind.Chat);
+  return tabs.filter((t): t is SessionTab => t.kind === TabKind.Session);
 }
 
 
@@ -133,9 +133,9 @@ export function markSessionTabStopped(tab: SessionTab | null | undefined) {
  * 当前显示标签为会话时维护 activeSessionTabId（最近会话回退）；
  * 无任何标签时清空。会话状态已全部落在标签对象上，无需投影。
  */
-function syncActiveSessionProjection() {
+function trackActiveSessionTabId() {
   const t = activeTab.value;
-  if (t && t.kind === TabKind.Chat) {
+  if (t && t.kind === TabKind.Session) {
     activeSessionTabId = t.id;
     return;
   }
@@ -145,15 +145,15 @@ function syncActiveSessionProjection() {
 }
 
 
-// 活动标签变化（切换/关闭）时同步 live 字段投影；flush sync 保证切换后立即可用
-watch(activeTab, () => syncActiveSessionProjection(), {
+// 活动标签变化（切换/关闭）时更新最近会话标签 id；flush sync 保证切换后立即可用
+watch(activeTab, () => trackActiveSessionTabId(), {
   immediate: true,
   flush: "sync",
 });
 
 
 /**
- * 无条件移除会话标签（线程不存在等异常路径）：处理活动切换、live 投影与缓存清理。
+ * 无条件移除会话标签（线程不存在等异常路径）：处理活动切换、最近会话回退与缓存清理。
  */
 export function dropSessionTab(tab: SessionTab) {
   const idx = tabs.indexOf(tab);

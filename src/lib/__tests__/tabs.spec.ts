@@ -6,9 +6,9 @@ import type { EditorTab } from "../../composables/useEditorTabs";
 function sessionTab(over: Partial<SessionTab> = {}): SessionTab {
   return {
     id: "s1",
-    kind: TabKind.Chat,
+    kind: TabKind.Session,
     title: "会话",
-    icon: TabIcon.Chat,
+    icon: TabIcon.Session,
     threadId: "t1",
     name: "",
     nameIsFirstMessage: false,
@@ -18,11 +18,11 @@ function sessionTab(over: Partial<SessionTab> = {}): SessionTab {
     effort: null,
     plugins: { plugins: [], loaded: false },
     skills: { skills: [], loaded: false },
-    creatingChat: false,
+    creatingSession: false,
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "session",
+    origin: "history",
     workspace: "D:/repo",
     resumedThreadId: null,
     turnActive: false,
@@ -37,7 +37,7 @@ function sessionTab(over: Partial<SessionTab> = {}): SessionTab {
     planPrompt: null,
     plan: null,
     loading: false,
-    newChatWorkspace: null,
+    newSessionWorkspace: null,
     interactions: [],
     ...over,
   };
@@ -56,14 +56,14 @@ function plainTab(kind: string): EditorTab {
 
 describe("isTabWorking 统一工作中判定", () => {
   it("枚举值与既有字符串字面量一致", () => {
-    expect(TabKind.Chat).toBe("chat");
+    expect(TabKind.Session).toBe("session");
     expect(TabKind.File).toBe("file");
     expect(TabKind.Diff).toBe("diff");
     expect(TabKind.Preview).toBe("preview");
     expect(TabKind.Terminal).toBe("terminal");
     expect(TabKind.Commit).toBe("commit");
     expect(TabKind.Settings).toBe("settings");
-    expect(TabIcon.Chat).toBe("chat");
+    expect(TabIcon.Session).toBe("session");
     expect(TabIcon.Terminal).toBe("terminal");
     expect(TabIcon.File).toBe("file");
     expect(TabIcon.Commit).toBe("commit");

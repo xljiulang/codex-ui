@@ -21,7 +21,7 @@ export {
   __resetPinnedSectionForTest,
   getPinnedSectionId,
   sortThreads,
-} from "./capabilities";
+} from "./pinnedSection";
 export { resolveSessionWorkspace, workspace } from "./items";
 export { currentItems, currentOriginLabel, permissionChip, threadTitle } from "./selectors";
 export {
@@ -89,7 +89,7 @@ export {
   renameThread,
   sanitizeTitle,
   searchThreads,
-  togglePin,
+  setThreadPinned,
 } from "./threads";
 export { clearGoal, interrupt, setGoal } from "./turnControl";
 export {
@@ -103,15 +103,14 @@ export {
 export {
   deleteThread,
   dismissPlanPrompt,
-  ensureThreadLoaded,
+  ensureThreadResumed,
   executePlan,
   exitPlanMode,
   forkThread,
-  newEmptyChat,
+  newEmptySession,
   openSession,
   openNewSession,
   openSessionTabForThread,
-  openThread,
   pickAndOpenNewSession,
   pickingNewSessionDir,
   respondInteraction,

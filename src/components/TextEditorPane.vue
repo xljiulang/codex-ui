@@ -311,7 +311,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="text-editor-window text-editor-embedded">
+  <div class="text-editor-pane text-editor-embedded">
     <div class="text-editor-head">
       <span class="text-editor-title">
         <span class="text-editor-path">{{ relPathOf(tab.workspace, tab.path) }}</span>

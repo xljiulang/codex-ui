@@ -287,26 +287,24 @@ const mcpProgressPercent = computed(() =>
     : null,
 );
 
-// 默认折叠：不再因运行中/失败/文件变更自动展开，点击头部才展开
-const effectiveExpanded = computed(() => expanded.value);
 </script>
 
 <template>
   <div
     class="assistant-card"
     :class="{
-      expanded: effectiveExpanded,
+      expanded,
     }"
   >
     <div class="assistant-card-header">
       <button
         type="button"
         class="assistant-card-toggle"
-        :aria-expanded="effectiveExpanded"
+        :aria-expanded="expanded"
         @click="expanded = !expanded"
       >
         <span class="assistant-card-arrow">{{
-          effectiveExpanded ? "▾" : "▸"
+          expanded ? "▾" : "▸"
         }}</span>
         <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path :d="icon" />
@@ -333,7 +331,7 @@ const effectiveExpanded = computed(() => expanded.value);
     </div>
 
     <Transition name="assistant-card-body">
-      <div v-if="effectiveExpanded" class="assistant-card-body">
+      <div v-if="expanded" class="assistant-card-body">
         <template v-if="type === 'commandExecution'">
         <div class="tool-command">
           <span class="tool-command-text">{{ commandText }}</span>

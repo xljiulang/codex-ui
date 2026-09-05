@@ -52,7 +52,7 @@ export function addAttachmentToActiveSession(a: UserInput): boolean {
  */
 export async function switchSessionTab(id: string): Promise<boolean> {
   const target = tabs.find(
-    (t): t is SessionTab => t.kind === TabKind.Chat && t.id === id,
+    (t): t is SessionTab => t.kind === TabKind.Session && t.id === id,
   );
   if (!target) return false;
   if (activeTabId.value === id) return true;

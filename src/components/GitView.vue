@@ -495,7 +495,7 @@ function toggleDirRow(node: GitDirNode) {
           @toggle="toggleSection('history')"
         />
         <template v-if="!isSectionCollapsed('history')">
-          <GitHistoryList :workspace="repoWorkspace" :reload-key="gitStatus" />
+          <GitHistoryList :workspace="repoWorkspace" :status-signal="gitStatus" />
         </template>
       </div>
     </template>

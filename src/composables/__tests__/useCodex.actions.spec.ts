@@ -1,4 +1,4 @@
-import { deleteThread, forkThread, newEmptyChat, openSession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
+import { deleteThread, forkThread, newEmptySession, openSession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import {
@@ -60,8 +60,8 @@ describe("主窗口标题跟随活动 tab 标题", () => {
 
 
   it("新建会话后窗口标题跟随会话标签标题", async () => {
-    await newEmptyChat("D:/projects/B");
-    expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
+    await newEmptySession("D:/projects/B");
+    expect(activeSessionTab()?.newSessionWorkspace).toBe("D:/projects/B");
     await flushPromises();
     expect(mockWin.setTitle).toHaveBeenCalledWith("新建会话");
   });
@@ -201,9 +201,9 @@ describe("主窗口标题跟随活动 tab 标题", () => {
 
 
   it("切换会话标签时窗口标题跟随新 tab 标题", async () => {
-    await newEmptyChat();
+    await newEmptySession();
     const first = activeTabId.value;
-    await newEmptyChat("D:/projects/B");
+    await newEmptySession("D:/projects/B");
     expect(activeTabId.value).not.toBe(first);
     await flushPromises();
     expect(mockWin.setTitle).toHaveBeenCalledWith("新建会话");
@@ -241,7 +241,7 @@ describe("会话标签状态与事件路由", () => {
 
   it("新建会话发送首条消息：标题先取消息内容并标记首条消息名", async () => {
     tabs.push(
-      makeSessionTab("s1", null, { newChatWorkspace: "D:/repo" }),
+      makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }),
     );
     activeTabId.value = "s1";
     store.workspace = "D:/repo";
@@ -281,7 +281,7 @@ describe("会话标签状态与事件路由", () => {
 
   it("新建会话短首条消息：thread_list 未返回时也即时同步历史面板", async () => {
     tabs.push(
-      makeSessionTab("s1", null, { newChatWorkspace: "D:/repo" }),
+      makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }),
     );
     activeTabId.value = "s1";
     store.workspace = "D:/repo";
@@ -318,7 +318,7 @@ describe("会话标签状态与事件路由", () => {
   it("只读访问新建会话：thread/start 下发 never + read-only 沙箱", async () => {
     tabs.push(
       makeSessionTab("s1", null, {
-        newChatWorkspace: "D:/repo",
+        newSessionWorkspace: "D:/repo",
         permissionMode: "read-only",
       }),
     );
@@ -421,7 +421,7 @@ describe("会话标签状态与事件路由", () => {
     });
     expect(tabs).toHaveLength(1);
     expect(tabs[0].threadId).toBeNull();
-    expect(tabs[0].newChatWorkspace).toBe("D:/project");
+    expect(tabs[0].newSessionWorkspace).toBe("D:/project");
   });
 });
 describe("会话标签状态与事件路由", () => {
@@ -503,7 +503,7 @@ describe("openNewSession / openSession 统一收尾", () => {
     };
     try {
       await openNewSession("D:/projects/B");
-      expect(activeSessionTab()?.newChatWorkspace).toBe("D:/projects/B");
+      expect(activeSessionTab()?.newSessionWorkspace).toBe("D:/projects/B");
       expect(activeTabId.value).not.toBe(SETTINGS_TAB_ID);
       expect(store.panelTab).toBe("session");
       expect(focus).toHaveBeenCalledTimes(1);
@@ -680,7 +680,7 @@ describe("会话级插件/技能缓存生命周期", () => {
     store.threads = [];
   });
 
-  it("newEmptyChat 创建标签即触发 plugin/list 与 skills/list 并写入标签缓存", async () => {
+  it("newEmptySession 创建标签即触发 plugin/list 与 skills/list 并写入标签缓存", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "codex_rpc") {
         const method =
@@ -693,7 +693,7 @@ describe("会话级插件/技能缓存生命周期", () => {
       return Promise.resolve(undefined);
     });
 
-    await newEmptyChat();
+    await newEmptySession();
 
     await vi.waitFor(
       () => {
@@ -707,7 +707,7 @@ describe("会话级插件/技能缓存生命周期", () => {
   });
 });
 
-describe("会话创建中标记（creatingChat）", () => {
+describe("会话创建中标记（creatingSession）", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetSessionTabsForTest();
@@ -716,7 +716,7 @@ describe("会话创建中标记（creatingChat）", () => {
     store.threads = [];
   });
 
-  it("newChat 创建期间标记发起标签，切换标签后按原标签清回", async () => {
+  it("startNewSession 创建期间标记发起标签，切换标签后按原标签清回", async () => {
     const tabA = makeSessionTab("sA", null);
     tabs.push(tabA);
     activeTabId.value = "sA";
@@ -743,7 +743,7 @@ describe("会话创建中标记（creatingChat）", () => {
 
     const p = sendPrompt("你好");
     // thread_start 挂起期间：发起标签处于「创建中」
-    expect(tabA.creatingChat).toBe(true);
+    expect(tabA.creatingSession).toBe(true);
 
     // 创建期间切到另一标签：结果写回原标签，标记也按原标签清回
     const tabB = makeSessionTab("sB", null);
@@ -753,8 +753,8 @@ describe("会话创建中标记（creatingChat）", () => {
     resolveThread({ thread: { id: "t-new" } });
     await p;
 
-    expect(tabA.creatingChat).toBe(false);
-    expect(tabB.creatingChat).toBe(false);
+    expect(tabA.creatingSession).toBe(false);
+    expect(tabB.creatingSession).toBe(false);
     expect(tabA.threadId).toBe("t-new");
   });
 });

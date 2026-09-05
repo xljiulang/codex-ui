@@ -549,12 +549,12 @@ async function scenarioStopOnSwitch() {
   const stillIdle = await evalJs(
     `!document.querySelector(".send-btn.stop")`,
   );
-  const newChatEmpty = await evalJs(
+  const newSessionEmpty = await evalJs(
     `document.querySelectorAll(".msg-user").length === 0`,
   );
   record(
     "切换停止: 新建会话后旧回合自动中断，无残留进行中状态",
-    stillIdle && newChatEmpty,
+    stillIdle && newSessionEmpty,
   );
 }
 

@@ -1,4 +1,4 @@
-import { __resetPinnedSectionForTest, sortThreads } from "../useCodex/capabilities";
+import { __resetPinnedSectionForTest, sortThreads } from "../useCodex/pinnedSection";
 import { disposeEvents, wireEvents } from "../useCodex/events";
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
@@ -6,7 +6,7 @@ import {
   autoTitleThread,
   renameThread,
   sanitizeTitle,
-  togglePin,
+  setThreadPinned,
   upsertThreadSummary,
 } from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
@@ -47,7 +47,7 @@ beforeEach(() => {
   resetUseCodexState(mockedInvoke, mockedListen);
 });
 
-describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () => {
+describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     __resetPinnedSectionForTest();
@@ -102,7 +102,7 @@ describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () =
     mockPinnedSectionId("sec-1", true);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
-    await togglePin("t1", true);
+    await setThreadPinned("t1", true);
 
     expect(rpcCalls("thread/section/move")).toHaveLength(1);
     expect(rpcCalls("thread/section/move")[0][1]).toEqual({
@@ -120,7 +120,7 @@ describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () =
     mockPinnedSectionId("sec-1", false);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
-    await togglePin("t1", false);
+    await setThreadPinned("t1", false);
 
     expect(rpcCalls("thread/section/move")).toHaveLength(1);
     expect(rpcCalls("thread/section/move")[0][1]).toEqual({
@@ -134,7 +134,7 @@ describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () =
     mockPinnedSectionId(null);
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
-    await togglePin("t1", true);
+    await setThreadPinned("t1", true);
 
     expect(rpcCalls("thread/section/move")).toHaveLength(0);
     expect(store.threads[0].isPinned).toBeUndefined();
@@ -145,8 +145,8 @@ describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () =
     mockPinnedSectionId("sec-1");
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
-    await togglePin("t1", true);
-    await togglePin("t1", false);
+    await setThreadPinned("t1", true);
+    await setThreadPinned("t1", false);
 
     expect(pinnedSectionIdCalls()).toHaveLength(1);
   });
@@ -163,7 +163,7 @@ describe("置顶 togglePin（0.149.x 固定 thread/section/move 协议）", () =
     });
     store.threads = [{ id: "t1", name: "会话", createdAt: 0, recencyAt: 0 }];
 
-    await togglePin("t1", true);
+    await setThreadPinned("t1", true);
 
     expect(store.threads[0].isPinned).toBeUndefined();
     expect(rpcCalls("thread/section/move")).toHaveLength(1);

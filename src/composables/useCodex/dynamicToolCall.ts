@@ -25,12 +25,12 @@ function buildUsageText(threadId?: string): string {
   if (!u) return "暂无用量数据（会话未打开或尚未收到用量事件）";
   const parts: string[] = [];
   if (u.window != null && u.window > 0) {
-    const pct = Math.min(100, Math.round((u.used / u.window) * 100));
+    const pct = Math.min(100, Math.round((u.contextUsed / u.window) * 100));
     parts.push(
-      `上下文已用 ${formatTokens(u.used)}/${formatTokens(u.window)}（约 ${pct}%）`,
+      `上下文已用 ${formatTokens(u.contextUsed)}/${formatTokens(u.window)}（约 ${pct}%）`,
     );
   } else {
-    parts.push(`已用 ${formatTokens(u.used)} 个上下文 token`);
+    parts.push(`已用 ${formatTokens(u.contextUsed)} 个上下文 token`);
   }
   const input = u.input;
   const output = u.output;

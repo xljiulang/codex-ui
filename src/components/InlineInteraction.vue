@@ -35,7 +35,7 @@ const isCommandApproval = computed(
     current.value?.method === "item/commandExecution/requestApproval" ||
     current.value?.method === "execCommandApproval",
 );
-const isReviewApproval = computed(
+const isOtherApproval = computed(
   () =>
     !isCommandApproval.value &&
     (isV2Approval.value || isLegacyApproval.value),
@@ -237,7 +237,7 @@ function onElicitationSubmit(content: Record<string, unknown> | null) {
         </template>
 
         <!-- 其他审批（文件变更/权限） -->
-        <template v-else-if="isReviewApproval">
+        <template v-else-if="isOtherApproval">
           <div class="approval-content">
             <div class="approval-hero">
               <div class="approval-label">请求的操作</div>

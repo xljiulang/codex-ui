@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sortThreads } from "../../composables/useCodex";
-import type { ThreadSummary } from "../types";
+import { sortThreads } from "../useCodex";
+import type { ThreadSummary } from "../../lib/types";
 
 function t(id: string, recency: number, pinned = false): ThreadSummary {
   return {

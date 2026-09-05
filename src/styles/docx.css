@@ -1,5 +1,5 @@
 /* .docx 富文本编辑器（DocxEditorPane） */
-.docx-editor-window {
+.docx-editor-pane {
   display: flex;
   flex-direction: column;
   height: 100vh;

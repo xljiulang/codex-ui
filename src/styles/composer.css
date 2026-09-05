@@ -490,14 +490,6 @@ body.resizing-composer {
   color: var(--text-bright);
 }
 
-.usage-menu-model {
-  font-size: var(--font-xs);
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .usage-menu-section {
   padding: var(--space-3);
   border-top: 1px solid rgba(var(--border-rgb), 0.45);

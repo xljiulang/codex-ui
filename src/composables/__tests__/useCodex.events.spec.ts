@@ -112,7 +112,7 @@ describe("服务端 error/warning 事件 toast 本地化", () => {
 });
 
 describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
-  it("按 threadId 写入归属标签的 input/output，并保留 used/window", async () => {
+  it("按 threadId 写入归属标签的 input/output，并保留 contextUsed/window", async () => {
     __resetSessionTabsForTest();
     const tab = reactive(makeSessionTab("s1", "t1"));
     tabs.push(tab);
@@ -128,7 +128,7 @@ describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
     });
 
     expect(tab.threadTokenUsage).toEqual({
-      used: 900,
+      contextUsed: 900,
       window: 128000,
       input: 1000,
       output: 500,
@@ -136,7 +136,7 @@ describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
     });
   });
 
-  it("total 缺输入/输出时不写入，保持 used/window", async () => {
+  it("total 缺输入/输出时不写入，保持 contextUsed/window", async () => {
     __resetSessionTabsForTest();
     const tab = reactive(makeSessionTab("s1", "t1"));
     tabs.push(tab);
@@ -152,7 +152,7 @@ describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
     });
 
     expect(tab.threadTokenUsage).toEqual({
-      used: 900,
+      contextUsed: 900,
       window: 128000,
       totalTokens: 1500,
     });
@@ -244,9 +244,9 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     __resetSessionTabsForTest();
     tabs.push(reactive({
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "",
-      icon: "chat",
+      icon: "session",
       threadId: "t1",
       name: "",
       nameIsFirstMessage: false,
@@ -256,11 +256,11 @@ describe("主窗口标题跟随活动 tab 标题", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
-      origin: "session",
+      origin: "history",
       workspace: "D:/repo",
       resumedThreadId: null,
       turnActive: false,
@@ -275,7 +275,7 @@ describe("主窗口标题跟随活动 tab 标题", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     }));
     activeTabId.value = "s1";
@@ -1192,7 +1192,7 @@ describe("计划完成确认弹窗", () => {
     // 目标勾选被消费：目标=合成消息（含计划全文）
     expect(activeSessionTab()?.goalArmed).toBe(false);
     expect(activeSessionTab()?.goalText).toBe("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤");
-    expect(activeSessionTab()?.goalStatus).toBe("active"); // 随 continueTurn 已挂载
+    expect(activeSessionTab()?.goalStatus).toBe("active"); // 随 startTurn 已挂载
     expect(mockedInvoke).toHaveBeenCalledWith("goal_set", {
       threadId: "t1",
       objective: "PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤",
@@ -1456,7 +1456,7 @@ describe("codexui 动态工具 item/tool/call 应答", () => {
       reactive(
         makeSessionTab("s1", "t1", {
           threadTokenUsage: {
-            used: 12000,
+            contextUsed: 12000,
             window: 128000,
             input: 50000,
             output: 9000,

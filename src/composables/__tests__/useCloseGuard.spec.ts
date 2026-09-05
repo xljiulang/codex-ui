@@ -52,7 +52,7 @@ vi.mock("../useEditorTabs", () => ({ tabs: h.state.tabs }));
 
 vi.mock("../../lib/tabs", () => ({
   isTabWorking: vi.fn((t: { working?: boolean }) => t.working === true),
-  TabKind: { Chat: "chat", Terminal: "terminal" },
+  TabKind: { Session: "session", Terminal: "terminal" },
 }));
 
 const mockedInvoke = vi.mocked(invoke);
@@ -63,9 +63,9 @@ function sessionTab(
 ): SessionTab & { working: boolean } {
   return {
     id: "s1",
-    kind: "chat",
+    kind: "session",
     title: "会话",
-    icon: "chat",
+    icon: "session",
     threadId: "t1",
     name: "",
     nameIsFirstMessage: false,
@@ -75,11 +75,11 @@ function sessionTab(
     effort: null,
     plugins: { plugins: [], loaded: false },
     skills: { skills: [], loaded: false },
-    creatingChat: false,
+    creatingSession: false,
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "session",
+    origin: "history",
     workspace: "D:/repo",
     resumedThreadId: null,
     turnActive: false,
@@ -94,7 +94,7 @@ function sessionTab(
     planPrompt: null,
     plan: null,
     loading: false,
-    newChatWorkspace: null,
+    newSessionWorkspace: null,
     interactions: [],
     working: false,
     ...over,

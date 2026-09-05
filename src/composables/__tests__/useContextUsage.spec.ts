@@ -27,25 +27,25 @@ describe("useContextUsage", () => {
   });
 
   it("window 已知时计算百分比并截断到 100", () => {
-    (tabs[0] as SessionTab).threadTokenUsage = { used: 5000, window: 10000 };
+    (tabs[0] as SessionTab).threadTokenUsage = { contextUsed: 5000, window: 10000 };
     const u = useContextUsage();
     expect(u.ctxUsage.value).toEqual({ pct: 50, used: 5000, window: 10000 });
 
-    (tabs[0] as SessionTab).threadTokenUsage = { used: 12000, window: 10000 };
+    (tabs[0] as SessionTab).threadTokenUsage = { contextUsed: 12000, window: 10000 };
     expect(u.ctxUsage.value?.pct).toBe(100);
   });
 
   it("window 缺失/非正数时返回 null", () => {
     const u = useContextUsage();
     expect(u.ctxUsage.value).toBeNull();
-    (tabs[0] as SessionTab).threadTokenUsage = { used: 100, window: 0 };
+    (tabs[0] as SessionTab).threadTokenUsage = { contextUsed: 100, window: 0 };
     expect(u.ctxUsage.value).toBeNull();
     expect(u.ctxTooltip.value).toBe("");
   });
 
   it("tooltip 按 K/M 格式化", () => {
     (tabs[0] as SessionTab).threadTokenUsage = {
-      used: 1_500_000,
+      contextUsed: 1_500_000,
       window: 2_000_000,
     };
     const u = useContextUsage();
@@ -81,7 +81,7 @@ describe("useContextUsage", () => {
   it("传入 tab 时以该 tab 为准，而非活动会话", () => {
     const other = reactive(makeSessionTab("s2", "t2"));
     tabs.push(other);
-    (other as SessionTab).threadTokenUsage = { used: 2000, window: 4000 };
+    (other as SessionTab).threadTokenUsage = { contextUsed: 2000, window: 4000 };
     // 活动会话为 s1（无 window），传入 s2 时仍应基于 s2 计算
     activeTabId.value = "s1";
     const u = useContextUsage(other);

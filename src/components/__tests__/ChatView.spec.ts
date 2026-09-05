@@ -58,9 +58,9 @@ import type { SessionTab } from "../../composables/useCodex";
 function makeTab(): SessionTab {
   return {
     id: "tab-1",
-    kind: "chat",
+    kind: "session",
     title: "会话",
-    icon: "chat",
+    icon: "session",
     threadId: "t1",
     name: "",
     nameIsFirstMessage: false,
@@ -70,11 +70,11 @@ function makeTab(): SessionTab {
     effort: null,
     plugins: { plugins: [], loaded: false },
     skills: { skills: [], loaded: false },
-    creatingChat: false,
+    creatingSession: false,
     draftJson: JSON.stringify({ type: "doc", content: [] }),
     draftAttachments: [],
     draftRefs: {},
-    origin: "session",
+    origin: "history",
     workspace: null,
     resumedThreadId: null,
     turnActive: false,
@@ -89,7 +89,7 @@ function makeTab(): SessionTab {
     planPrompt: null,
     plan: null,
     loading: false,
-    newChatWorkspace: null,
+    newSessionWorkspace: null,
     interactions: store.interactions as unknown as SessionTab["interactions"],
   };
 }
@@ -1456,7 +1456,7 @@ describe("ChatView 回合定位按钮", () => {
 
   it("导航按钮始终渲染单个图标，不随上下文数据切换", async () => {
     store.itemsByThread["t1"] = reactive(userThread(2));
-    tab.threadTokenUsage = { used: 5000, window: 10000 };
+    tab.threadTokenUsage = { contextUsed: 5000, window: 10000 };
     const wrapper = mountChat();
     await warmReady();
     const btn = wrapper.find(".turn-nav-btn");

@@ -44,7 +44,7 @@ describe("DiffPane 完整/简要切换", () => {
   it("点击切换进入简要模式：隐藏 ctx，只保留变更行与分隔", async () => {
     const tab = makeTab();
     const wrapper = mount(DiffPane, { props: { tab } });
-    const btn = wrapper.find(".diff-window-actions button");
+    const btn = wrapper.find(".diff-pane-actions button");
     expect(btn.attributes("aria-label")).toBe("简要显示");
 
     await btn.trigger("click");
@@ -67,7 +67,7 @@ describe("DiffPane 完整/简要切换", () => {
   it("再次点击恢复完整模式", async () => {
     const tab = makeTab();
     const wrapper = mount(DiffPane, { props: { tab } });
-    const btn = wrapper.find(".diff-window-actions button");
+    const btn = wrapper.find(".diff-pane-actions button");
     await btn.trigger("click");
     expect(tab.brief).toBe(true);
     await btn.trigger("click");
@@ -84,7 +84,7 @@ describe("DiffPane 完整/简要切换", () => {
     ];
     for (const over of cases) {
       const wrapper = mount(DiffPane, { props: { tab: makeTab(over) } });
-      expect(wrapper.find(".diff-window-actions button").exists()).toBe(false);
+      expect(wrapper.find(".diff-pane-actions button").exists()).toBe(false);
       wrapper.unmount();
     }
   });
@@ -119,7 +119,7 @@ describe("DiffPane 右键复制菜单", () => {
     const spy = vi.spyOn(window, "getSelection").mockReturnValue(selection);
     const wrapper = mount(DiffPane, { props: { tab: makeTab() } });
     await wrapper
-      .find(".diff-window-body")
+      .find(".diff-pane-body")
       .trigger("contextmenu", { clientX: 50, clientY: 50 });
 
     const items = wrapper.findAll(".ctx-menu-item");

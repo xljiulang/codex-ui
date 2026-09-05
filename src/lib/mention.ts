@@ -156,7 +156,7 @@ export function parseFileMentionSection(
 }
 
 /** 移除文本开头的插件/技能引用链接 */
-export function stripSkillLinks(text: string): string {
+export function stripLeadingRefLinks(text: string): string {
   return text.replace(/^(?:\[[@$][^\]]+\]\([^)]+\)\s*)+/, "");
 }
 
@@ -172,7 +172,7 @@ export function stripMentionContext(text: string): string {
       ? text.slice(idx + marker.length)
       : text;
   const noInline = request.replace(/\[[^\]]+\]\([^)]+\)/g, "");
-  return stripSkillLinks(noInline)
+  return stripLeadingRefLinks(noInline)
     .replace(/\n$/, "")
     .replace(/ {2,}/g, " ")
     .trim();

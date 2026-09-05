@@ -276,9 +276,9 @@ describe("ResourceView 文件树", () => {
     // 默认存在一个活动会话标签：附件入口可见（隐藏场景由专门用例覆盖）
     tabs.push({
       id: "s1",
-      kind: "chat",
+      kind: "session",
       title: "会话",
-      icon: "chat",
+      icon: "session",
       threadId: null,
       name: "",
       nameIsFirstMessage: false,
@@ -288,7 +288,7 @@ describe("ResourceView 文件树", () => {
       effort: null,
       plugins: { plugins: [], loaded: false },
       skills: { skills: [], loaded: false },
-      creatingChat: false,
+      creatingSession: false,
       draftJson: JSON.stringify({ type: "doc", content: [] }),
       draftAttachments: [],
       draftRefs: {},
@@ -307,7 +307,7 @@ describe("ResourceView 文件树", () => {
       planPrompt: null,
       plan: null,
       loading: false,
-      newChatWorkspace: null,
+      newSessionWorkspace: null,
       interactions: [],
     });
     activeTabId.value = "s1";

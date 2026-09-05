@@ -33,7 +33,7 @@ export const treeRows = computed<ResourceRow[]>(() => {
   return flattenResourceTree(rootEntry.value, childrenByPath, expanded);
 });
 
-/** 清空全部树/搜索/剪贴板状态（根切换与测试重置共用） */
+/** 清空全部树/搜索状态（根切换与测试重置共用） */
 export function resetTree() {
   for (const k of Object.keys(childrenByPath)) delete childrenByPath[k];
   for (const k of Object.keys(loadingByPath)) delete loadingByPath[k];

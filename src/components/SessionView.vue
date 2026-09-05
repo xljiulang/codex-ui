@@ -28,7 +28,7 @@ import {
   store,
   threadTitle,
   toastError,
-  togglePin,
+  setThreadPinned,
 } from "../composables/useCodex";
 import { isThreadBound } from "../composables/useCodex/wechat";
 import { useActionMenu, type CtxItem } from "../composables/useActionMenu";
@@ -181,7 +181,7 @@ function openCtxMenu(t: ThreadSummary, e: MouseEvent) {
     {
       label: t.isPinned ? "取消固定" : "置顶固定",
       icon: ICON_PIN,
-      action: () => void togglePin(t.id, !t.isPinned),
+      action: () => void setThreadPinned(t.id, !t.isPinned),
     },
     {
       label: "微信接入",

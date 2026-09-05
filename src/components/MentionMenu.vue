@@ -25,7 +25,7 @@ const emit = defineEmits<{
   close: [];
   "pick-files": [];
   "pick-dir": [];
-  "select-attachment": [attachment: UserInput];
+  "select-file": [attachment: UserInput];
 }>();
 
 // ---------------- $ 分支：技能列表（会话级缓存） ----------------
@@ -131,7 +131,7 @@ function selectHighlighted() {
   }
   const s = filteredSkills.value[highlight.value];
   if (!s) return;
-  emit("select-attachment", {
+  emit("select-file", {
     type: "skill",
     name: s.key,
     path: s.path,
@@ -148,13 +148,13 @@ function selectRow(row: Row) {
     const full = root.endsWith("\\") || root.endsWith("/")
       ? root + path
       : root + "\\" + path;
-    emit("select-attachment", toUserAttachment(file_name, full));
+    emit("select-file", toUserAttachment(file_name, full));
   } else if (row.kind === "native-file") {
     emit("pick-files");
   } else if (row.kind === "native-dir") {
     emit("pick-dir");
   } else {
-    emit("select-attachment", {
+    emit("select-file", {
       type: "skill",
       name: row.plugin.name,
       path: row.plugin.path,
@@ -284,7 +284,7 @@ function pluginInitial(p: PluginItem): string {
           :class="{ active: highlight === i }"
           @mouseenter="highlight = i"
           @click="
-            emit('select-attachment', {
+            emit('select-file', {
               type: 'skill',
               name: s.key,
               path: s.path,
