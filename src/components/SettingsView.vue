@@ -2186,18 +2186,16 @@ function pluginInitial(p: PluginCatalogItem): string {
                 :key="s.path"
                 class="skill-row"
               >
-                <span class="skill-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path :d="ICON_SKILL" />
-                  </svg>
-                </span>
-                <div class="skill-info">
+<div class="skill-info">
                   <button
                     type="button"
                     class="skill-row-main"
                     v-tooltip="'在编辑器中打开 SKILL.md'"
                     @click="openSkill(s)"
                   >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="ICON_SKILL" />
+                    </svg>
                     <span class="skill-name">{{ s.name }}</span>
                   </button>
                   <p v-if="s.description" class="skill-desc">
