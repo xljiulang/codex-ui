@@ -2808,9 +2808,9 @@ describe("SettingsView 插件管理", () => {
     await flushPromises();
     const mps = wrapper.findAll(".plugin-marketplace");
     expect(mps.length).toBe(2);
-    // 默认折叠：插件列表隐藏
-    expect(wrapper.find(".plugin-list").exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("Browser");
+    // 默认折叠：市场内的插件列表隐藏（已安装插件卡片常显，不在此断言范围）
+    expect(mps[0].find(".plugin-list").exists()).toBe(false);
+    expect(mps[0].text()).not.toContain("Browser");
     expect(wrapper.text()).not.toContain("PDF");
     expect(wrapper.text()).not.toContain("Gmail");
     // 头部（市场名/插件数量）始终可见
@@ -2824,6 +2824,91 @@ describe("SettingsView 插件管理", () => {
     expect(wrapper.text()).toContain("Gmail");
     expect(wrapper.text()).toContain("已启用");
     expect(wrapper.text()).toContain("未安装");
+  });
+
+  it("已安装插件卡片仅汇总 installed 插件并显示来源市场", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "browser",
+              name: "browser",
+              installed: true,
+              enabled: true,
+              version: "1.2.0",
+              interface: { displayName: "Browser", shortDescription: "浏览器控制" },
+            },
+            {
+              id: "pdf",
+              name: "pdf",
+              installed: false,
+              enabled: false,
+              interface: { displayName: "PDF" },
+            },
+          ],
+        },
+        {
+          name: "openai-curated",
+          path: null,
+          plugins: [
+            {
+              id: "gmail",
+              name: "gmail",
+              installed: true,
+              enabled: false,
+              interface: { displayName: "Gmail" },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const section = wrapper.find(".settings-section-plugins");
+    const card = section.findAll(".model-config-card")[0];
+    // 卡片位于插件市场卡片之前
+    expect(card.find("h3").text()).toBe("已安装插件");
+    const rows = card.findAll(".plugin-row");
+    expect(rows.length).toBe(2);
+    expect(rows[0].text()).toContain("Browser");
+    expect(rows[0].text()).toContain("1.2.0");
+    expect(rows[0].text()).toContain("来源：openai-bundled");
+    expect(rows[1].text()).toContain("Gmail");
+    expect(rows[1].text()).toContain("来源：openai-curated");
+    // 未安装的 PDF 不出现在已安装卡片
+    expect(card.text()).not.toContain("PDF");
+    // 行内仅卸载按钮（无安装按钮）
+    expect(card.findAll(".plugin-uninstall-btn").length).toBe(2);
+    expect(card.find(".plugin-install-btn").exists()).toBe(false);
+  });
+
+  it("无已安装插件时已安装卡片显示空态", async () => {
+    mockedInvoke.mockResolvedValue({
+      marketplaces: [
+        {
+          name: "openai-bundled",
+          path: "C:/x/bundled",
+          plugins: [
+            {
+              id: "pdf",
+              name: "pdf",
+              installed: false,
+              interface: { displayName: "PDF" },
+            },
+          ],
+        },
+      ],
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const card = wrapper
+      .find(".settings-section-plugins")
+      .findAll(".model-config-card")[0];
+    expect(card.find("h3").text()).toBe("已安装插件");
+    expect(card.text()).toContain("还没有已安装的插件");
   });
 
   it("点击市场标题折叠/展开插件列表", async () => {
@@ -2846,17 +2931,23 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
-    // 默认折叠
-    expect(wrapper.find(".plugin-list").exists()).toBe(false);
+    // 默认折叠（断言市场内的列表，与已安装插件卡片的 .plugin-list 区分）
+    expect(wrapper.find(".plugin-marketplace .plugin-list").exists()).toBe(
+      false,
+    );
     const head = wrapper.find(".plugin-marketplace-head");
     expect(head.classes()).toContain("collapsed");
     // 点击展开
     await head.trigger("click");
-    expect(wrapper.find(".plugin-list").exists()).toBe(true);
+    expect(wrapper.find(".plugin-marketplace .plugin-list").exists()).toBe(
+      true,
+    );
     expect(head.classes()).not.toContain("collapsed");
     // 再点击折叠
     await head.trigger("click");
-    expect(wrapper.find(".plugin-list").exists()).toBe(false);
+    expect(wrapper.find(".plugin-marketplace .plugin-list").exists()).toBe(
+      false,
+    );
     expect(head.classes()).toContain("collapsed");
   });
 
@@ -2885,7 +2976,9 @@ describe("SettingsView 插件管理", () => {
     await wrapper.find(".plugin-market-remove").trigger("click");
     expect(store.confirm).toBeTruthy();
     expect(head.classes()).not.toContain("collapsed");
-    expect(wrapper.find(".plugin-list").exists()).toBe(true);
+    expect(wrapper.find(".plugin-marketplace .plugin-list").exists()).toBe(
+      true,
+    );
   });
 
   it("加载失败展示 marketplaceLoadErrors", async () => {

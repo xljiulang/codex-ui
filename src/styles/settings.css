@@ -630,6 +630,11 @@
   flex-direction: column;
 }
 
+/* 已安装插件列表：超过 5 行时滚动（max-height 由组件按实际行高计算写入内联样式） */
+.installed-plugin-list {
+  overflow-y: auto;
+}
+
 .plugin-row {
   display: flex;
   align-items: center;
@@ -661,10 +666,12 @@
   gap: var(--space-3);
 }
 
-.plugin-version {
+/* 版本号 / 来源市场：等宽胶囊（来源徽章用于已安装插件卡片） */
+.plugin-version,
+.plugin-source {
   font-size: var(--font-xs);
   font-weight: 400;
-  color: var(--text-faint);
+  color: var(--text-dim);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 999px;

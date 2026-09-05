@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -1265,6 +1265,40 @@ function statusLabel(p: PluginCatalogItem): string {
   if (p.installed) return "已安装（未启用）";
   return "未安装";
 }
+
+/** 已安装插件（跨市场汇总，携带来源市场用于展示；卸载只需插件 id） */
+const installedPlugins = computed(() =>
+  pluginState.marketplaces.flatMap((mp) =>
+    mp.plugins.filter((p) => p.installed).map((plugin) => ({ mp, plugin })),
+  ),
+);
+
+// 已安装列表最多显示 5 行、超出滚动：行高随描述/徽章可变，按实际行高计算容器 max-height
+const INSTALLED_LIST_MAX_ROWS = 5;
+const installedListEl = ref<HTMLElement | null>(null);
+const installedListMaxHeight = ref("");
+
+async function syncInstalledListHeight() {
+  await nextTick();
+  const rows = installedListEl.value
+    ? Array.from(
+        installedListEl.value.querySelectorAll<HTMLElement>(".plugin-row"),
+      )
+    : [];
+  if (rows.length <= INSTALLED_LIST_MAX_ROWS) {
+    installedListMaxHeight.value = "";
+    return;
+  }
+  const h = rows
+    .slice(0, INSTALLED_LIST_MAX_ROWS)
+    .reduce((sum, row) => sum + row.offsetHeight, 0);
+  installedListMaxHeight.value = h > 0 ? `${h}px` : "";
+}
+
+watch(
+  () => installedPlugins.value.map((x) => x.plugin.id).join(","),
+  syncInstalledListHeight,
+);
 
 function canInstall(p: PluginCatalogItem): boolean {
   return p.availability !== "DisabledByAdmin";
@@ -2781,6 +2815,85 @@ function pluginInitial(p: PluginCatalogItem): string {
           <p class="settings-section-desc">
             插件市场目录与本地安装管理
           </p>
+          <div class="model-config-card">
+            <div class="model-config-card-head">
+              <h3>已安装插件</h3>
+            </div>
+            <div
+              v-if="pluginState.loading && !installedPlugins.length"
+              class="plugin-empty"
+            >
+              正在加载已安装插件…
+            </div>
+            <div v-else-if="!installedPlugins.length" class="plugin-empty">
+              还没有已安装的插件，可在下方插件市场安装。
+            </div>
+            <div
+              v-else
+              ref="installedListEl"
+              class="plugin-list installed-plugin-list"
+              :style="{ maxHeight: installedListMaxHeight }"
+            >
+              <div
+                v-for="{ mp, plugin: p } in installedPlugins"
+                :key="p.id"
+                class="plugin-row"
+              >
+                <span class="plugin-row-icon" aria-hidden="true">
+                  <img
+                    v-if="pluginIconSrc(p)"
+                    :src="pluginIconSrc(p)"
+                    alt=""
+                    loading="lazy"
+                    @error="markIconError(p.id)"
+                  />
+                  <span
+                    v-else
+                    class="plugin-icon-fallback"
+                    :style="
+                      p.brandColor ? { background: p.brandColor } : undefined
+                    "
+                  >
+                    {{ pluginInitial(p) }}
+                  </span>
+                </span>
+                <div class="plugin-info">
+                  <div class="plugin-name">
+                    {{ p.displayName }}
+                    <span v-if="p.version" class="plugin-version">
+                      {{ p.version }}
+                    </span>
+                  </div>
+                  <div v-if="p.description" class="plugin-desc">
+                    {{ p.description }}
+                  </div>
+                  <div class="plugin-meta">
+                    <span class="plugin-status">{{ statusLabel(p) }}</span>
+                    <span class="plugin-source">来源：{{ mp.displayName }}</span>
+                    <span
+                      v-if="p.disabledReason"
+                      class="plugin-disabled-reason"
+                    >
+                      {{ p.disabledReason }}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  class="btn btn-icon danger plugin-uninstall-btn"
+                  :class="{ loading: !!pluginState.busy[p.id] }"
+                  v-tooltip="pluginState.busy[p.id] ? '卸载中…' : '卸载'"
+                  :aria-label="pluginState.busy[p.id] ? '卸载中' : '卸载'"
+                  :disabled="!!pluginState.busy[p.id]"
+                  @click="doUninstall(p)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_DELETE" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div class="model-config-card">
             <div class="model-config-card-head">
               <h3>插件市场</h3>
