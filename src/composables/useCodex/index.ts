@@ -50,12 +50,19 @@ export {
 } from "./settings";
 export {
   addMarketplace,
+  checkBrowserBridge,
   installPlugin,
   isAuthRequiredError,
+  isChromeBridgePlugin,
   loadPluginCatalog,
   refreshPluginCaches,
   removeMarketplace,
+  repairBrowserBridge,
   uninstallPlugin,
+} from "./plugins";
+export type {
+  BrowserBridgeRepairReport,
+  BrowserBridgeStatus,
 } from "./plugins";
 export {
   loadMcpServerStatus,

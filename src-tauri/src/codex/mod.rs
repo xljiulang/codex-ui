@@ -1,4 +1,5 @@
 pub mod app_server;
+pub mod browser_bridge;
 pub mod bundled;
 pub mod cli_tools;
 pub mod commands;

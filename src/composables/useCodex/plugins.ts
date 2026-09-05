@@ -1,4 +1,5 @@
-// useCodex 拆分模块：设置页插件管理（plugin/list + install/uninstall + marketplace 管理）。
+// useCodex 拆分模块：设置页插件管理（plugin/list + install/uninstall + marketplace 管理）
+// 与浏览器桥接自愈（chrome 插件安装后修复 latest junction / 原生宿主注册，Rust browser_bridge）。
 // 协议核对：openai/codex app-server-protocol v2 schema（PluginInstallParams 等）。
 import { invoke } from "@tauri-apps/api/core";
 import { activeSessionTab, allSessionTabs } from "./sessionState";
@@ -166,3 +167,45 @@ export async function refreshPluginCaches(): Promise<void> {
 }
 
 export { isAuthRequiredError };
+
+/** Rust browser_bridge_repair 的修复报告（camelCase） */
+export interface BrowserBridgeRepairReport {
+  /** ok：检查通过或修复成功；no-registration：本机无浏览器桥接注册；error：修复失败 */
+  status: "ok" | "no-registration" | "error";
+  /** none / already-ok / created / recreated */
+  latestAction: string;
+  latestTarget: string | null;
+  hostPathOk: boolean;
+  clientPathOk: boolean;
+  registryFixed: boolean;
+  message: string;
+}
+
+/** Rust browser_bridge_status 的进程状态（卸载预检用） */
+export interface BrowserBridgeStatus {
+  extensionHostRunning: boolean;
+  nodeReplRunning: boolean;
+}
+
+/** 是否为携带浏览器桥接的 chrome 插件（openai-bundled 的 chrome） */
+export function isChromeBridgePlugin(plugin: {
+  id: string;
+  name: string;
+}): boolean {
+  return plugin.name === "chrome" || plugin.id === "chrome@openai-bundled";
+}
+
+/**
+ * 浏览器桥接自愈：chrome 插件重装后 plugin/install 只恢复版本目录、不重建
+ * `latest` junction，注册表引用的 `...\chrome\latest\...` 路径会断裂，导致
+ * Chrome 扩展拉不起 extension-host、codex 无法控制浏览器。安装成功后调用
+ * 本函数即可恢复链路；本机无浏览器桥接注册时返回 no-registration，无需处理。
+ */
+export async function repairBrowserBridge(): Promise<BrowserBridgeRepairReport> {
+  return invoke<BrowserBridgeRepairReport>("browser_bridge_repair");
+}
+
+/** 卸载预检：桥接进程（extension-host/node_repl）运行中会锁住缓存目录，卸载将报 os error 5 */
+export async function checkBrowserBridge(): Promise<BrowserBridgeStatus> {
+  return invoke<BrowserBridgeStatus>("browser_bridge_status");
+}

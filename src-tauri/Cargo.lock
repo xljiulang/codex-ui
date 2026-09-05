@@ -560,6 +560,7 @@ dependencies = [
  "window-vibrancy 0.8.0",
  "windows 0.62.2",
  "windows-core 0.61.2",
+ "winreg 0.55.0",
  "xz2",
 ]
 

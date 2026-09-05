@@ -5,14 +5,17 @@ import { listen } from "@tauri-apps/api/event";
 import {
   addMarketplace,
   askConfirm,
+  checkBrowserBridge,
   installPlugin,
   isAuthRequiredError,
+  isChromeBridgePlugin,
   loadMcpServerStatus,
   loadMcpServers,
   loadMemoryConfig,
   loadModelProviderConfig,
   loadPluginCatalog,
   removeMarketplace,
+  repairBrowserBridge,
   saveMcpServers,
   saveMemoryConfig,
   saveModelProviderConfig,
@@ -1231,6 +1234,18 @@ async function refreshPlugins(force = false) {
   }
 }
 
+/** chrome 插件安装后的浏览器桥接自愈提示：ok → 已就绪，no-registration → 无需处理，error → 失败原因 */
+async function chromeBridgeToastSuffix(): Promise<string> {
+  try {
+    const report = await repairBrowserBridge();
+    if (report.status === "ok") return "，浏览器桥接已就绪";
+    if (report.status === "no-registration") return "";
+    return `，浏览器桥接自愈失败：${report.message}`;
+  } catch (e) {
+    return `，浏览器桥接自愈失败：${toastError(e)}`;
+  }
+}
+
 async function doInstall(
   mp: PluginMarketplaceInfo,
   plugin: PluginCatalogItem,
@@ -1242,12 +1257,16 @@ async function doInstall(
     const needsAuth =
       (res.appsNeedingAuth?.length ?? 0) > 0 ||
       /needs auth|requires auth|on install/i.test(res.authPolicy ?? "");
+    // chrome 插件重装只恢复版本目录、不重建 latest junction，装完自动自愈浏览器桥接
+    const bridgeSuffix = isChromeBridgePlugin(plugin)
+      ? await chromeBridgeToastSuffix()
+      : "";
     if (needsAuth) {
       setToast(
-        `已安装 ${plugin.displayName}，但部分能力需要账号登录（当前 API key 不可用）`,
+        `已安装 ${plugin.displayName}，但部分能力需要账号登录（当前 API key 不可用）${bridgeSuffix}`,
       );
     } else {
-      setToast(`已安装 ${plugin.displayName}`);
+      setToast(`已安装 ${plugin.displayName}${bridgeSuffix}`);
     }
     await refreshPlugins();
   } catch (e) {
@@ -1265,6 +1284,24 @@ async function doInstall(
 
 async function doUninstall(plugin: PluginCatalogItem) {
   if (pluginState.busy[plugin.id]) return;
+  if (isChromeBridgePlugin(plugin)) {
+    // 桥接进程运行中会锁住插件缓存目录（卸载报 os error 5），提前提示先关 Chrome
+    try {
+      const bridge = await checkBrowserBridge();
+      if (bridge.extensionHostRunning || bridge.nodeReplRunning) {
+        const proceed = await askConfirm({
+          title: "浏览器桥接进程运行中",
+          message:
+            "检测到浏览器桥接进程（extension-host / node_repl）正在运行，直接卸载可能因缓存文件被占用而失败。建议先完全退出 Chrome 再重试，仍要继续卸载吗？",
+          confirmLabel: "继续卸载",
+          cancelLabel: "取消",
+        });
+        if (!proceed) return;
+      }
+    } catch {
+      // 预检失败不阻断卸载
+    }
+  }
   const ok = await askConfirm({
     title: "卸载插件",
     message: `确定卸载「${plugin.displayName}」吗？`,
@@ -1278,7 +1315,14 @@ async function doUninstall(plugin: PluginCatalogItem) {
     setToast(`已卸载 ${plugin.displayName}`);
     await refreshPlugins();
   } catch (e) {
-    setToast(toastError(e));
+    const msg = toastError(e);
+    if (/os error 5|拒绝访问/i.test(msg)) {
+      setToast(
+        "卸载失败：插件缓存文件被浏览器桥接进程占用，请先完全退出 Chrome 后重试",
+      );
+    } else {
+      setToast(msg);
+    }
   } finally {
     pluginState.busy[plugin.id] = false;
   }

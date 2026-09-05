@@ -3112,6 +3112,167 @@ describe("SettingsView 插件管理", () => {
     expect(store.toast).toContain("已安装 PDF");
   });
 
+  it("安装 chrome 插件后调用 browser_bridge_repair 并提示桥接就绪", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "chrome@openai-bundled",
+                  name: "chrome",
+                  installed: false,
+                  interface: { displayName: "ChatGPT 浏览器插件" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (cmd === "browser_bridge_repair") {
+        return {
+          status: "ok",
+          latestAction: "created",
+          latestTarget: "C:/x/chrome/26.730.61309",
+          hostPathOk: true,
+          clientPathOk: true,
+          registryFixed: false,
+          message: "已重建浏览器桥接链接",
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("browser_bridge_repair");
+    expect(store.toast).toContain("已安装 ChatGPT 浏览器插件");
+    expect(store.toast).toContain("浏览器桥接已就绪");
+  });
+
+  it("安装 chrome 插件且自愈失败时提示原因", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "chrome@openai-bundled",
+                  name: "chrome",
+                  installed: false,
+                  interface: { displayName: "ChatGPT 浏览器插件" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (cmd === "browser_bridge_repair") {
+        return {
+          status: "error",
+          latestAction: "none",
+          latestTarget: null,
+          hostPathOk: false,
+          clientPathOk: false,
+          registryFixed: false,
+          message: "设置 reparse point 失败",
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("浏览器桥接自愈失败");
+    expect(store.toast).toContain("设置 reparse point 失败");
+  });
+
+  it("安装非 chrome 插件不触发浏览器桥接自愈", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "pdf",
+                  name: "pdf",
+                  installed: false,
+                  interface: { displayName: "PDF" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith("browser_bridge_repair");
+    expect(store.toast).toContain("已安装 PDF");
+  });
+
+  it("卸载 chrome 插件且桥接进程运行中时先弹预检确认", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "chrome@openai-bundled",
+                  name: "chrome",
+                  installed: true,
+                  interface: { displayName: "ChatGPT 浏览器插件" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (cmd === "browser_bridge_status") {
+        return { extensionHostRunning: true, nodeReplRunning: false };
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-uninstall-btn").trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("browser_bridge_status");
+    expect(store.confirm).toBeTruthy();
+    expect(store.confirm!.title).toBe("浏览器桥接进程运行中");
+    settleConfirm(true);
+    await flushPromises();
+    // 预检通过后仍有第二道卸载确认
+    expect(store.confirm).toBeTruthy();
+    expect(store.confirm!.title).toBe("卸载插件");
+    settleConfirm(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "plugin/uninstall",
+      params: { pluginId: "chrome@openai-bundled" },
+    });
+  });
+
   it("带本地路径的市场 verbatim 路径剥离 \\?\\ 后传 marketplacePath", async () => {
     mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "plugin/list") {
