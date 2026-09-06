@@ -84,23 +84,8 @@ const {
   onWindowScroll,
   onKeydown: onMenuKeydown,
 } = useActionMenu({ width: 180, scrollScope: ".session-view" });
-/** 默认收起；记录用户展开过的目录 */
+/** 默认收起；记录用户展开过的目录（启动恢复会话时经 pendingExpandGroupThread 展开对应分组） */
 const expandedDirs = reactive(new Set<string>());
-/** 首个目录仅首次载入时自动展开一次；之后完全由用户控制（含刷新后不重置） */
-let firstFolderAutoExpanded = false;
-watch(
-  () => store.threads,
-  () => {
-    if (firstFolderAutoExpanded) return;
-    const first = groupSessions(store.threads).find(
-      (r): r is Extract<typeof r, { kind: "group" }> => r.kind === "group",
-    );
-    if (!first) return;
-    expandedDirs.add(first.group.key);
-    firstFolderAutoExpanded = true;
-  },
-  { immediate: true },
-);
 /** 启动恢复会话：消费 store.pendingExpandGroupThread（线程 id），展开其所属目录分组 */
 watch(
   () => store.pendingExpandGroupThread,

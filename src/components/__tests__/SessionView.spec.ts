@@ -463,26 +463,25 @@ describe("SessionView 目录分组", () => {
     expect(folders[0].find(".folder-count").text()).toBe("2");
     expect(folders[1].find(".folder-name").text()).toBe("codex-proxy");
     expect(folders[1].find(".folder-count").text()).toBe("1");
-    // 首个目录（codex-ui）默认展开，其余目录仍收起
-    expect(folders[0].classes()).not.toContain("collapsed");
+    // 目录默认全部收起（展开仅由用户操作或启动恢复驱动）
+    expect(folders[0].classes()).toContain("collapsed");
     expect(folders[1].classes()).toContain("collapsed");
-    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
   });
 
-  it("第一个文件夹默认展开，点击可收起/再展开", async () => {
+  it("目录默认收起，点击可展开/再收起", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(SessionView);
-    expect(wrapper.findAll(".session-item")).toHaveLength(2);
-    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
-    expect(wrapper.findAll(".session-folder")[1].classes()).toContain("collapsed");
-
-    await wrapper.findAll(".session-folder")[0].trigger("click");
     expect(wrapper.findAll(".session-item")).toHaveLength(0);
     expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
 
     await wrapper.findAll(".session-folder")[0].trigger("click");
     expect(wrapper.findAll(".session-item")).toHaveLength(2);
     expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
+
+    await wrapper.findAll(".session-folder")[0].trigger("click");
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
   });
 
   it("目录行可聚焦，Enter/Space 键展开与收起", async () => {
@@ -492,20 +491,20 @@ describe("SessionView 目录分组", () => {
 
     expect(folder.attributes("role")).toBe("button");
     expect(folder.attributes("tabindex")).toBe("0");
-    expect(folder.attributes("aria-expanded")).toBe("true");
+    expect(folder.attributes("aria-expanded")).toBe("false");
 
     await folder.trigger("keydown", { key: "Enter" });
-    expect(wrapper.findAll(".session-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
     expect(wrapper.findAll(".session-folder")[0].attributes("aria-expanded")).toBe(
-      "false",
+      "true",
     );
 
     await wrapper
       .findAll(".session-folder")[0]
       .trigger("keydown", { key: " ", code: "Space" });
-    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    expect(wrapper.findAll(".session-item")).toHaveLength(0);
     expect(wrapper.findAll(".session-folder")[0].attributes("aria-expanded")).toBe(
-      "true",
+      "false",
     );
   });
 
@@ -520,7 +519,8 @@ describe("SessionView 目录分组", () => {
     const names = wrapper.findAll(".folder-name").map((n) => n.text());
     // codex-ui 组内第一会话已置顶 → 目录排最前
     expect(names).toEqual(["codex-ui", "codex-proxy"]);
-    // 首个目录默认展开，置顶徽章直接可见
+    // 目录默认收起：先展开才能看到置顶徽章
+    await wrapper.findAll(".session-folder")[0].trigger("click");
     expect(wrapper.findAll(".pin-badge")).toHaveLength(1);
   });
 
@@ -532,9 +532,11 @@ describe("SessionView 目录分组", () => {
     const wrapper = mount(SessionView);
 
     expect(wrapper.findAll(".session-folder")).toHaveLength(1);
-    // 目录默认展开：目录内会话 + 平铺会话
-    expect(wrapper.findAll(".session-item")).toHaveLength(2);
+    // 目录默认收起：仅平铺会话可见；展开后目录内会话出现
+    expect(wrapper.findAll(".session-item")).toHaveLength(1);
     expect(wrapper.findAll(".session-item:not(.folder-item)")).toHaveLength(1);
+    await wrapper.findAll(".session-folder")[0].trigger("click");
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
   });
 
   it("目录行带文件夹图标", async () => {
@@ -543,34 +545,34 @@ describe("SessionView 目录分组", () => {
     expect(wrapper.findAll(".session-folder .folder-icon svg")).toHaveLength(2);
   });
 
-  it("目录行带折叠/展开箭头：首个目录默认为下箭头，点击收起为右箭头", async () => {
+  it("目录行带折叠/展开箭头：默认右箭头（收起），点击展开为下箭头", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(SessionView);
     const folder = () => wrapper.findAll(".session-folder")[0];
 
     expect(folder().find(".folder-arrow").exists()).toBe(true);
     expect(folder().find(".folder-arrow path").attributes("d")).toBe(
-      "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z",
+      "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z",
     );
 
     await folder().trigger("click");
     expect(folder().find(".folder-arrow path").attributes("d")).toBe(
-      "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z",
+      "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z",
     );
   });
 
-  it("仅首载展开一次：手动收起后刷新列表不再自动展开", async () => {
+  it("刷新列表不重置用户展开状态", async () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(SessionView);
     await wrapper.findAll(".session-folder")[0].trigger("click");
-    expect(wrapper.findAll(".session-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
 
     // 模拟列表刷新（store.threads 换成新数组）
     store.threads = dirThreads.map((t) => ({ ...t, recencyAt: t.recencyAt + 10 }));
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
-    expect(wrapper.findAll(".session-item")).toHaveLength(0);
+    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".session-item")).toHaveLength(2);
   });
 });
 
@@ -928,28 +930,28 @@ describe("SessionView 启动恢复分组展开", () => {
     store.pendingExpandGroupThread = "";
   });
 
-  it("pendingExpandGroupThread 指向非首个分组：该分组被展开并清空标记", () => {
+  it("pendingExpandGroupThread 指向分组：仅展开该分组并清空标记", () => {
     store.threads = groupedThreads.map((t) => ({ ...t }));
     store.loadingSessions = false;
     store.pendingExpandGroupThread = "t2";
     const wrapper = mount(SessionView);
     const folders = wrapper.findAll(".session-folder");
     expect(folders).toHaveLength(2);
-    // 首个目录默认展开 + 恢复目标分组（proj-b）展开，组内会话行可见
-    expect(folders[0].attributes("aria-expanded")).toBe("true");
+    // 仅恢复目标分组（proj-b）展开，其余（含首个）保持收起，组内会话行可见
+    expect(folders[0].attributes("aria-expanded")).toBe("false");
     expect(folders[1].attributes("aria-expanded")).toBe("true");
     expect(wrapper.text()).toContain("B1");
     expect(store.pendingExpandGroupThread).toBe("");
     wrapper.unmount();
   });
 
-  it("无待展开标记：非首个分组保持收起", () => {
+  it("无待展开标记：所有分组均不展开", () => {
     store.threads = groupedThreads.map((t) => ({ ...t }));
     store.loadingSessions = false;
     const wrapper = mount(SessionView);
     const folders = wrapper.findAll(".session-folder");
     expect(folders).toHaveLength(2);
-    expect(folders[0].attributes("aria-expanded")).toBe("true");
+    expect(folders[0].attributes("aria-expanded")).toBe("false");
     expect(folders[1].attributes("aria-expanded")).toBe("false");
     expect(wrapper.text()).not.toContain("B1");
     wrapper.unmount();
