@@ -77,12 +77,14 @@
 .editor-tab {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1);
   position: relative;
   height: var(--editor-tab-h);
-  max-width: 220px;
-  min-width: 0;
-  padding: 0 var(--space-3) 0 var(--space-5);
+  max-width: 180px;
+  /* 空间不足时按内容宽度比例收缩平铺（触底 72px 后才溢出滚动），标题先省略 */
+  min-width: 72px;
+  flex: 0 1 auto;
+  padding: 0 var(--space-2) 0 var(--space-3);
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: var(--radius) var(--radius) 0 0;
@@ -91,7 +93,6 @@
   font-family: inherit;
   font-size: var(--font-md);
   cursor: pointer;
-  flex-shrink: 0;
   transition: background-color var(--ease), color var(--ease),
     border-color var(--ease), box-shadow var(--ease);
 }
@@ -195,7 +196,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--editor-tab-h);
+  width: 32px;
   height: var(--editor-tab-h);
   margin: 0 var(--space-2);
   border-radius: var(--radius);
@@ -284,8 +285,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
