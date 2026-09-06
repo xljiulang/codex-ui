@@ -249,8 +249,8 @@ function toggleResult(runId: number) {
                   "
                   v-tooltip="
                     row.task.busyPolicy === 'defer'
-                      ? '会话忙时：顺延执行（点击切换为跳过本次）'
-                      : '会话忙时：跳过本次（点击切换为顺延执行）'
+                      ? '会话忙时：顺延执行'
+                      : '会话忙时：跳过本次'
                   "
                   @click="onPolicyToggle(row.task)"
                 >
@@ -273,11 +273,11 @@ function toggleResult(runId: number) {
                 <button
                   class="btn btn-icon sched-session-btn"
                   aria-label="打开会话"
-                  v-tooltip="`打开绑定会话（${threadLabel(row.task.threadId)}）`"
+                  v-tooltip="'打开会话'"
                   @click="openSession(row.task.threadId)"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_SESSION" />
+                    <path :d="ICON_SESSION" fill-rule="evenodd" />
                   </svg>
                 </button>
                 <button

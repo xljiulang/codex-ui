@@ -48,27 +48,20 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
         type: "function",
         name: CODEXUI_TOOL_ADD_SCHEDULED_TASK,
         description:
-          "创建定时任务：到设定时间后，codex-ui 会在当前会话中自动发送 prompt 开启一个新回合（结果直接出现在本会话）。" +
-          "cron 为 6 字段「秒 分 时 日 月 周」表达式（本地时区，周字段 0-6 或 MON/TUE 等名称），" +
-          "如每天 9 点 = \"0 0 9 * * *\"；最小触发间隔 1 分钟（建议不低于 5 分钟），更小会被拒绝；" +
-          "单次任务用 7 字段末尾年份，如 2026-01-20 9 点 = \"0 0 9 20 1 * 2026\"。" +
-          "prompt 必须是自包含的完整指令（可引用会话历史，勿依赖短期上下文）。" +
-          "busyPolicy 为会话忙时策略：defer（顺延到会话空闲后执行，默认）或 skip（跳过本次）。" +
-          "调用前应向用户完整复述任务名、触发时间与 prompt 全文并在对话中获得其同意（codex-ui 不会弹出额外确认框，任务可能经微信等无人值守渠道发起，请务必在对话中确认）。",
+          "创建定时任务：到点后在当前会话自动发送 prompt 开启新回合。" +
+          "cron 为 6 字段「秒 分 时 日 月 周」，本地时区，最小间隔 1 分钟，每天 9 点=\"0 0 9 * * *\"，" +
+          "单次任务 7 字段末尾年份（如 2026-01-20=\"0 0 9 20 1 * 2026\"）。" +
+          "prompt 须自包含。busyPolicy：会话忙时 defer 顺延（默认）/skip 跳过。创建前需在对话中与用户确认。",
         inputSchema: {
           type: "object",
           properties: {
-            name: { type: "string", description: "任务名（简短，展示在设置页管理列表）" },
+            name: { type: "string", description: "任务名" },
             prompt: { type: "string", description: "到点执行的完整指令（自包含）" },
-            cron: {
-              type: "string",
-              description:
-                "6 字段「秒 分 时 日 月 周」cron 表达式（本地时区，最小间隔 1 分钟）；单次任务用 7 字段末尾年份",
-            },
+            cron: { type: "string", description: "6 字段 cron（最小间隔 1 分钟；单次 7 字段末尾年份）" },
             busyPolicy: {
               type: "string",
               enum: ["defer", "skip"],
-              description: "会话忙时策略：defer 顺延（默认）| skip 跳过本次",
+              description: "会话忙时：defer 顺延（默认）| skip 跳过",
             },
           },
           required: ["name", "prompt", "cron"],

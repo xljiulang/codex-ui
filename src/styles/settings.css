@@ -1852,21 +1852,7 @@ button.skill-row-main:hover .skill-name {
   min-width: 0;
 }
 
-.sched-run-result {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: zoom-in;
-  user-select: text;
-}
 
-.sched-run-result.open {
-  white-space: pre-wrap;
-  word-break: break-word;
-  cursor: zoom-out;
-}
 
 .sched-run-more {
   align-self: flex-start;
