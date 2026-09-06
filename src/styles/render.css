@@ -496,6 +496,7 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 11px;
+  user-select: text;
 }
 .diff-pane-actions {
   display: flex;
@@ -594,6 +595,7 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 11px;
+  user-select: text;
 }
 .text-editor-lang {
   font-size: var(--font-sm);

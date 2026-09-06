@@ -87,6 +87,7 @@
   line-height: 1.5;
   color: var(--text-dim);
   word-break: break-all;
+  user-select: text;
 }
 
 .setting-path-row .setting-value {
@@ -662,6 +663,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  user-select: text;
 }
 
 /* 版本号 / 来源市场：等宽胶囊（来源徽章用于已安装插件卡片） */
@@ -1087,6 +1089,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: text;
 }
 
 .skill-desc {
@@ -1138,6 +1141,7 @@
   font-size: var(--font-base);
   color: var(--text-bright);
   font-family: var(--mono);
+  user-select: text;
 }
 
 .mcp-server-type {
@@ -1514,6 +1518,7 @@
   color: var(--text);
   word-break: break-all;
   white-space: pre-wrap;
+  user-select: text;
 }
 
 .mcp-detail-field-value.mono {
@@ -1628,6 +1633,7 @@
   font-size: var(--font-xs);
   color: var(--text-dim);
   word-break: break-all;
+  user-select: text;
 }
 
 .mcp-resource-meta {
