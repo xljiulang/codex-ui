@@ -429,12 +429,19 @@ pub async fn pick_files(
 }
 
 #[tauri::command]
-pub async fn pick_directory(initial_dir: Option<String>) -> Result<Option<String>, String> {
+pub async fn pick_directory(
+    initial_dir: Option<String>,
+    title: Option<String>,
+) -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(move || {
         // 锁在阻塞任务内获取并持有到对话框关闭：与 git_op_lock 同模式，
         // 保证排队等待的后续调用在对话框真正关闭前不会并发弹窗。
         let _guard = pick_directory_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let dialog = dialog_with_initial_dir(rfd::FileDialog::new(), initial_dir);
+        let mut dialog = rfd::FileDialog::new();
+        if let Some(t) = title.as_deref().filter(|t| !t.is_empty()) {
+            dialog = dialog.set_title(t);
+        }
+        let dialog = dialog_with_initial_dir(dialog, initial_dir);
         Ok(dialog.pick_folder().map(|p| clean_path(&p)))
     })
     .await

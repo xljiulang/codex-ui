@@ -418,6 +418,7 @@ describe("会话标签状态与事件路由", () => {
     await pickAndOpenNewSession();
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
       initialDir: "D:/repo",
+      title: "选择会话的工作区",
     });
     expect(tabs).toHaveLength(1);
     expect(tabs[0].threadId).toBeNull();
@@ -442,6 +443,7 @@ describe("会话标签状态与事件路由", () => {
     await pickAndOpenNewSession();
     expect(mockedInvoke).toHaveBeenCalledWith("pick_directory", {
       initialDir: "D:/session",
+      title: "选择会话的工作区",
     });
   });
 });

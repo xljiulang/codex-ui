@@ -476,6 +476,8 @@ export async function pickAndOpenNewSession(): Promise<void> {
     const dir = await invoke<string | null>("pick_directory", {
       // 有工作区（会话/编辑器标签）时以其为起点；无工作区时用最近一次，无则空
       initialDir: workspace.value || store.lastWorkspace || "",
+      // 原生对话框标题，标明本次选择用于新建会话的工作区
+      title: "选择会话的工作区",
     });
     if (!dir) return;
     store.lastWorkspace = dir;
