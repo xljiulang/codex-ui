@@ -1103,8 +1103,9 @@ button.skill-row-main {
   color: var(--text-dim);
 }
 
-/* 技能标题为链接语义：悬停下划线提示可点击打开编辑器 */
-.skill-row-main:hover .skill-name {
+/* 技能标题为链接语义（button）：悬停下划线提示可点击打开编辑器；
+   动态工具行为纯展示 span，无链接语义不参与该规则 */
+button.skill-row-main:hover .skill-name {
   text-decoration: underline;
 }
 
