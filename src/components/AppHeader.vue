@@ -53,6 +53,16 @@ function onSettings() {
     <div class="header-actions">
       <button
         class="icon-btn"
+        aria-label="设置"
+        v-tooltip="'设置'"
+        @click="onSettings()"
+      >
+        <svg viewBox="0 0 24 24">
+          <path :d="ICON_SETTINGS" />
+        </svg>
+      </button>
+      <button
+        class="icon-btn"
         :aria-label="store.rightPanelHidden ? '显示右侧面板' : '隐藏右侧面板'"
         v-tooltip="store.rightPanelHidden ? '显示右侧面板' : '隐藏右侧面板'"
         @click="store.rightPanelHidden = !store.rightPanelHidden"
@@ -62,16 +72,6 @@ function onSettings() {
             :d="store.rightPanelHidden ? ICON_LAYOUT_SIDE_HIDDEN : ICON_LAYOUT_SIDE"
             fill-rule="evenodd"
           />
-        </svg>
-      </button>
-      <button
-        class="icon-btn"
-        aria-label="设置"
-        v-tooltip="'设置'"
-        @click="onSettings()"
-      >
-        <svg viewBox="0 0 24 24">
-          <path :d="ICON_SETTINGS" />
         </svg>
       </button>
       <button

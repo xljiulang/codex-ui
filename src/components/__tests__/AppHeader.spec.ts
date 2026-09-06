@@ -106,13 +106,13 @@ describe("AppHeader 标题栏与窗口控制", () => {
     store.rightPanelHidden = false;
   });
 
-  it("头部顺序：布局切换 / 设置 / 最小化 / 最大化 / 关闭", async () => {
+  it("头部顺序：设置 / 布局切换 / 最小化 / 最大化 / 关闭", async () => {
     const wrapper = mountHeader();
     await flushPromises();
     const actions = wrapper.findAll(".header-actions > *");
     expect(actions.map((a) => a.attributes("aria-label"))).toEqual([
-      "隐藏右侧面板",
       "设置",
+      "隐藏右侧面板",
       "最小化",
       "最大化",
       "关闭",
