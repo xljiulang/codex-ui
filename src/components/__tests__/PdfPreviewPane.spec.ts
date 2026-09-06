@@ -2,16 +2,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { reactive } from "vue";
 
-const { mockPage } = vi.hoisted(() => ({
+const { mockPage, mockTextLayers } = vi.hoisted(() => ({
   mockPage: {
-    getViewport: vi.fn(() => ({ width: 100, height: 200 })),
+    getViewport: vi.fn((opts?: { scale?: number }) => ({
+      width: 100,
+      height: 200,
+      scale: opts?.scale ?? 1,
+    })),
     render: vi.fn(() => ({ promise: Promise.resolve() })),
+    getTextContent: vi.fn(async () => ({ items: [], styles: {} })),
   },
+  mockTextLayers: [] as {
+    opts: Record<string, unknown>;
+    render: () => Promise<void>;
+    cancel: () => void;
+  }[],
 }));
 
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
   getDocument: vi.fn(),
+  TextLayer: class {
+    opts: Record<string, unknown>;
+    render = async () => {};
+    cancel = () => {};
+    constructor(opts: Record<string, unknown>) {
+      this.opts = opts;
+      mockTextLayers.push(this);
+    }
+  },
 }));
 
 vi.mock("pdfjs-dist/build/pdf.worker.min.mjs?url", () => ({ default: "" }));
@@ -62,6 +81,8 @@ describe("PdfPreviewPane PDF 预览", () => {
     mockedGetDocument.mockReset();
     mockPage.getViewport.mockClear();
     mockPage.render.mockClear();
+    mockPage.getTextContent.mockClear();
+    mockTextLayers.length = 0;
     mockDoc();
   });
 
@@ -76,6 +97,38 @@ describe("PdfPreviewPane PDF 预览", () => {
     const prev = w.find('[aria-label="上一页"]');
     expect(prev.attributes("disabled")).toBeDefined();
     expect(w.find('[aria-label="下一页"]').attributes("disabled")).toBeUndefined();
+  });
+
+  it("渲染页时构建文本选择层：容器写入缩放变量并交给 TextLayer 排版", async () => {
+    // jsdom 无 2D 画布实现：stub getContext 使画布分支正常渲染
+    const getContextSpy = vi
+      .spyOn(HTMLCanvasElement.prototype, "getContext")
+      .mockReturnValue({ fillRect: vi.fn() } as unknown as CanvasRenderingContext2D);
+    mockPage.getViewport.mockImplementation(
+      ({ scale }: { scale?: number } = {}) => ({
+        width: 100 * (scale ?? 1),
+        height: 200 * (scale ?? 1),
+        scale: scale ?? 1,
+      }),
+    );
+    const w = mount(PdfPreviewPane, { props: { tab: makeTab() } });
+    await flushPromises();
+    const layer = w.find(".pdf-text-layer");
+    expect(layer.exists()).toBe(true);
+    expect(mockTextLayers).toHaveLength(1);
+    expect(mockTextLayers[0].opts.viewport).toBeTruthy();
+    expect(mockTextLayers[0].opts.container).toBe(layer.element);
+    expect(
+      (layer.element as HTMLElement).style.getPropertyValue(
+        "--total-scale-factor",
+      ),
+    ).toBe("0.1");
+    // 翻页/缩放都会重建文本层
+    await w.find('[aria-label="下一页"]').trigger("click");
+    await flushPromises();
+    expect(mockTextLayers).toHaveLength(2);
+    w.unmount();
+    getContextSpy.mockRestore();
   });
 
   it("下一页/上一页切换页码，边界禁用", async () => {

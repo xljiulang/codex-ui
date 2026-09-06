@@ -548,6 +548,63 @@
   border-radius: 2px;
   align-self: flex-start;
 }
+.pdf-page-wrap {
+  position: relative;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+
+/* PDF 文本选择层（pdf.js TextLayer）：透明文字按视口排版覆盖画布，仅用于选择复制。
+   排版依赖容器上的 --total-scale-factor（渲染时写入 viewport.scale）；
+   全局 body 禁选（标题栏拖动）需在此单独放开。规则取自 pdf_viewer.css 的 .textLayer 核心子集。 */
+.pdf-text-layer {
+  color-scheme: only light;
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  text-align: initial;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor, 1) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+  user-select: text;
+}
+.pdf-text-layer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0 0;
+  user-select: text;
+}
+.pdf-text-layer > :not(.markedContent),
+.pdf-text-layer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+    scale(var(--min-font-size-inv));
+}
+.pdf-text-layer .markedContent {
+  display: contents;
+}
+.pdf-text-layer span[role="img"] {
+  user-select: none;
+  cursor: default;
+}
+/* 透明文字的选区高亮（跟随主题强调色） */
+.pdf-text-layer ::selection {
+  background: rgba(var(--accent-rgb), 0.35);
+}
 
 /* DOCX 预览：docx-preview 按页渲染的只读视图（页白底与页阴影由库注入样式提供） */
 .docx-preview {

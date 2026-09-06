@@ -28,11 +28,19 @@ const pageNo = ref(1);
 const zoom = ref(1);
 const canvasHost = ref<HTMLDivElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
+/** 文本选择层容器：透明文字覆盖画布，供选择复制 */
+const textLayerHost = ref<HTMLDivElement | null>(null);
 
 let doc: pdfjsLib.PDFDocumentProxy | null = null;
 let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
 let renderTask: pdfjsLib.RenderTask | null = null;
+let textLayerTask: pdfjsLib.TextLayer | null = null;
 let renderSeq = 0;
+
+function cancelTextLayer() {
+  textLayerTask?.cancel();
+  textLayerTask = null;
+}
 
 useCtrlWheelZoom(canvasHost, zoom, MIN_SCALE, MAX_SCALE, SCALE_STEP);
 
@@ -43,6 +51,7 @@ async function load() {
   error.value = "";
   renderTask?.cancel();
   renderTask = null;
+  cancelTextLayer();
   loadingTask?.destroy().catch(() => {});
   loadingTask = null;
   doc = null;
@@ -80,7 +89,7 @@ async function load() {
   await renderPage();
 }
 
-/** 渲染当前页到 canvas：以容器宽度为基准适配，乘以用户缩放倍率 */
+/** 渲染当前页到 canvas：以容器宽度为基准适配，乘以用户缩放倍率；同时重建文本选择层 */
 async function renderPage() {
   if (!doc) return;
   const seq = ++renderSeq;
@@ -104,10 +113,49 @@ async function renderPage() {
   renderTask?.cancel();
   const task = page.render({ canvas: c, viewport });
   renderTask = task;
+  // 文本层与画布并行渲染：失败/取消只影响选择复制，不干扰画布
+  const textPromise = renderTextLayer(page, viewport, seq);
   try {
     await task.promise;
   } finally {
     if (renderTask === task) renderTask = null;
+  }
+  await textPromise;
+}
+
+/** 重建文本选择层：透明文字按视口排版覆盖在画布上，供鼠标选择复制 */
+async function renderTextLayer(
+  page: pdfjsLib.PDFPageProxy,
+  viewport: pdfjsLib.PageViewport,
+  seq: number,
+) {
+  const host = textLayerHost.value;
+  if (!host) return;
+  cancelTextLayer();
+  host.replaceChildren();
+  // pdf.js 文本层排版依赖 --total-scale-factor 计算字号与变换
+  host.style.setProperty("--total-scale-factor", String(viewport.scale));
+  let content: Awaited<
+    ReturnType<pdfjsLib.PDFPageProxy["getTextContent"]>
+  > | null = null;
+  try {
+    content = await page.getTextContent();
+  } catch {
+    return; // 文本内容读取失败：仅影响选择复制
+  }
+  if (seq !== renderSeq) return;
+  const layer = new pdfjsLib.TextLayer({
+    textContentSource: content,
+    container: host,
+    viewport,
+  });
+  textLayerTask = layer;
+  try {
+    await layer.render();
+  } catch {
+    // 渲染取消/失败静默：选择复制不可用即可，不影响画布
+  } finally {
+    if (textLayerTask === layer) textLayerTask = null;
   }
 }
 
@@ -142,6 +190,7 @@ watch([pageNo, zoom], () => void renderPage());
 onBeforeUnmount(() => {
   renderTask?.cancel();
   renderTask = null;
+  cancelTextLayer();
   loadingTask?.destroy().catch(() => {});
   loadingTask = null;
 });
@@ -208,7 +257,10 @@ onBeforeUnmount(() => {
       无法预览该 PDF（{{ error }}）
     </div>
     <div v-else ref="canvasHost" class="pdf-canvas-host">
-      <canvas ref="canvas"></canvas>
+      <div class="pdf-page-wrap">
+        <canvas ref="canvas"></canvas>
+        <div ref="textLayerHost" class="pdf-text-layer"></div>
+      </div>
     </div>
   </div>
 </template>
