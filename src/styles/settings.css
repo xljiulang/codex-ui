@@ -1072,6 +1072,10 @@
   background: none;
   font: inherit;
   text-align: left;
+}
+
+/* 仅真正的链接行为（技能行打开 SKILL.md）显示手型光标；动态工具行为纯展示 span */
+button.skill-row-main {
   cursor: pointer;
 }
 

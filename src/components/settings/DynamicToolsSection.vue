@@ -50,15 +50,12 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
           class="dynamic-tool-row"
         >
           <div class="skill-info">
-            <button
-              type="button"
-              class="skill-row-main"
-            >
+            <span class="skill-row-main">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path :d="ICON_TOOL" />
               </svg>
               <span class="skill-name">{{ tool.display }}</span>
-            </button>
+            </span>
             <p v-if="tool.description" class="skill-desc">
               {{ tool.description }}
             </p>
