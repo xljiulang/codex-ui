@@ -28,14 +28,13 @@ import {
   removeScheduledTask,
   runScheduledTaskNow,
   setScheduledTaskBusyPolicy,
-  setScheduledTaskEnabled,
   store,
 } from "../../composables/useCodex";
+import { ICON_HISTORY, ICON_SKIP } from "../../lib/icons";
 
 const mockedRuns = vi.mocked(loadScheduledTaskRuns);
 const mockedRemove = vi.mocked(removeScheduledTask);
 const mockedRunNow = vi.mocked(runScheduledTaskNow);
-const mockedSetEnabled = vi.mocked(setScheduledTaskEnabled);
 const mockedSetPolicy = vi.mocked(setScheduledTaskBusyPolicy);
 const mockedConfirm = vi.mocked(askConfirm);
 const mockedOpenSession = vi.mocked(openSession);
@@ -104,34 +103,32 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     expect(wrapper.find(".sched-run-result").classes()).toContain("open");
   });
 
-  it("立即执行（图标按钮）/ 启停 switch / 打开会话 调用对应命令", async () => {
+  it("行内动作顺序与命令：忙时策略 → 立即执行 → 打开会话 → 删除", async () => {
     store.scheduledTasks = [{ ...activeTask }];
     const wrapper = mount(ScheduledTasksSection);
-    await wrapper.find(".sched-row-btn").trigger("click"); // 立即执行（图标）
-    expect(mockedRunNow).toHaveBeenCalledWith("task-1");
-    await wrapper.find(".sched-task-row .switch input").setValue(false); // switch 停用
-    expect(mockedSetEnabled).toHaveBeenCalledWith("task-1", false);
-    // 执行记录里的「打开会话」（会话图标按钮）
-    mockedRuns.mockResolvedValue([
-      { id: 1, taskId: "task-1", startedAt: now, status: "success" },
+    const actionBtns = wrapper.findAll(".model-provider-actions .btn-icon");
+    expect(actionBtns.map((b) => b.attributes("aria-label"))).toEqual([
+      "会话忙时顺延执行（切换为跳过本次）",
+      "立即执行",
+      "打开会话",
+      "删除",
     ]);
-    await wrapper.find(".sched-task-main").trigger("click");
-    await nextTick();
-    expect(wrapper.find(".sched-run-open").classes()).toContain("btn-icon");
-    await wrapper.find(".sched-run-open").trigger("click");
+    // 忙时策略图标：时钟（顺延态）→ 点击切为跳过
+    expect(actionBtns[0]!.find("path").attributes("d")).toBe(ICON_HISTORY);
+    await actionBtns[0]!.trigger("click");
+    expect(mockedSetPolicy).toHaveBeenCalledWith("task-1", "skip");
+    await actionBtns[1]!.trigger("click"); // 立即执行
+    expect(mockedRunNow).toHaveBeenCalledWith("task-1");
+    await actionBtns[2]!.trigger("click"); // 打开会话
     expect(mockedOpenSession).toHaveBeenCalledWith("t1");
   });
 
-  it("忙时策略 switch：关=跳过本次、开=顺延执行", async () => {
-    store.scheduledTasks = [{ ...activeTask, busyPolicy: "defer" }];
+  it("忙时策略图标随状态切换：跳过态显示快进图标，点击切回顺延", async () => {
+    store.scheduledTasks = [{ ...activeTask, busyPolicy: "skip" }];
     const wrapper = mount(ScheduledTasksSection);
-    const switches = wrapper.findAll(".sched-task-row .switch input");
-    expect(switches).toHaveLength(2); // 第一个为启停，第二个为忙时策略
-    // 关（skip）→ 调 setScheduledTaskBusyPolicy("skip")
-    await switches[1]!.setValue(false);
-    expect(mockedSetPolicy).toHaveBeenCalledWith("task-1", "skip");
-    // 开（defer）→ 调 setScheduledTaskBusyPolicy("defer")
-    await switches[1]!.setValue(true);
+    const btn = wrapper.find(".sched-policy-btn");
+    expect(btn.find("path").attributes("d")).toBe(ICON_SKIP);
+    await btn.trigger("click");
     expect(mockedSetPolicy).toHaveBeenCalledWith("task-1", "defer");
   });
 

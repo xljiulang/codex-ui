@@ -1750,10 +1750,6 @@ button.skill-row-main:hover .skill-name {
   font-size: var(--font-xs);
 }
 
-.sched-row-del {
-  color: var(--danger);
-}
-
 .sched-detail {
   padding: 0 0 var(--space-4) calc(var(--space-4) + 16px);
   display: flex;
@@ -1854,13 +1850,6 @@ button.skill-row-main:hover .skill-name {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-}
-
-.sched-run-open {
-  margin-left: auto;
-  flex-shrink: 0;
-  min-height: var(--ctrl-h-xs);
-  font-size: var(--font-xs);
 }
 
 .sched-run-result {

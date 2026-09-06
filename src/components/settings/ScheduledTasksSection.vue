@@ -9,7 +9,6 @@ import {
   removeScheduledTask,
   runScheduledTaskNow,
   setScheduledTaskBusyPolicy,
-  setScheduledTaskEnabled,
   setToast,
   toastError,
 } from "../../composables/useCodex";
@@ -22,6 +21,7 @@ import {
   ICON_PLAY,
   ICON_REFRESH,
   ICON_SESSION,
+  ICON_SKIP,
 } from "../../lib/icons";
 import type { ScheduledTask, TaskRunRecord, TaskRunStatus } from "../../lib/types";
 
@@ -143,16 +143,9 @@ watch(
   },
 );
 
-async function onToggleEnabled(t: ScheduledTask) {
-  try {
-    await setScheduledTaskEnabled(t.id, !t.enabled);
-  } catch (e) {
-    setToast(toastError(e));
-  }
-}
-
-async function onPolicyChange(t: ScheduledTask, policy: string) {
-  if (policy !== "defer" && policy !== "skip") return;
+/** 忙时策略图标切换：顺延（时钟）⇄ 跳过（快进） */
+async function onPolicyToggle(t: ScheduledTask) {
+  const policy = t.busyPolicy === "defer" ? "skip" : "defer";
   try {
     await setScheduledTaskBusyPolicy(t.id, policy);
   } catch (e) {
@@ -246,42 +239,25 @@ function toggleResult(runId: number) {
                 <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
               </button>
               <div class="model-provider-actions">
-                <label
+                <button
                   v-if="!row.task.done"
-                  class="switch"
-                  v-tooltip="row.task.enabled ? '停用' : '启用'"
-                >
-                  <input
-                    type="checkbox"
-                    :checked="row.task.enabled"
-                    :aria-label="row.task.enabled ? '停用任务' : '启用任务'"
-                    @change="onToggleEnabled(row.task)"
-                  />
-                  <span class="switch-track"></span>
-                </label>
-                <label
-                  v-if="!row.task.done"
-                  class="switch"
+                  class="btn btn-icon sched-policy-btn"
+                  :aria-label="
+                    row.task.busyPolicy === 'defer'
+                      ? '会话忙时顺延执行（切换为跳过本次）'
+                      : '会话忙时跳过本次（切换为顺延执行）'
+                  "
                   v-tooltip="
                     row.task.busyPolicy === 'defer'
-                      ? '会话忙时：顺延执行（切换为跳过本次）'
-                      : '会话忙时：跳过本次（切换为顺延执行）'
+                      ? '会话忙时：顺延执行（点击切换为跳过本次）'
+                      : '会话忙时：跳过本次（点击切换为顺延执行）'
                   "
+                  @click="onPolicyToggle(row.task)"
                 >
-                  <input
-                    type="checkbox"
-                    :checked="row.task.busyPolicy === 'defer'"
-                    :aria-label="
-                      row.task.busyPolicy === 'defer'
-                        ? '会话忙时改为跳过本次'
-                        : '会话忙时改为顺延执行'
-                    "
-                    @change="
-                      onPolicyChange(row.task, ($event.target as HTMLInputElement).checked ? 'defer' : 'skip')
-                    "
-                  />
-                  <span class="switch-track"></span>
-                </label>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="row.task.busyPolicy === 'defer' ? ICON_HISTORY : ICON_SKIP" />
+                  </svg>
+                </button>
                 <button
                   v-if="!row.task.done"
                   class="btn btn-icon sched-row-btn"
@@ -295,7 +271,17 @@ function toggleResult(runId: number) {
                   </svg>
                 </button>
                 <button
-                  class="btn btn-icon sched-row-del"
+                  class="btn btn-icon sched-session-btn"
+                  aria-label="打开会话"
+                  v-tooltip="`打开绑定会话（${threadLabel(row.task.threadId)}）`"
+                  @click="openSession(row.task.threadId)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_SESSION" />
+                  </svg>
+                </button>
+                <button
+                  class="btn btn-icon danger sched-row-del"
                   aria-label="删除"
                   v-tooltip="'删除'"
                   @click="onRemove(row.task)"
@@ -324,16 +310,6 @@ function toggleResult(runId: number) {
                       {{ fmtDuration(r.durationMs) }}
                     </span>
                     <span v-if="r.error" class="sched-run-error" v-tooltip="r.error">{{ r.error }}</span>
-                    <button
-                      class="btn btn-icon sched-run-open"
-                      aria-label="打开会话"
-                      v-tooltip="`打开绑定会话（${threadLabel(row.task.threadId)}）`"
-                      @click="openSession(row.task.threadId)"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path :d="ICON_SESSION" />
-                      </svg>
-                    </button>
                   </div>
                   <div
                     v-if="r.result"
