@@ -121,6 +121,21 @@ export async function closeTabsToRightAll(id: string): Promise<number> {
   return closeTabRange(idx + 1, tabs.length);
 }
 
+/**
+ * 关闭目标标签以外的所有标签（含会话标签，目标本身保留）；返回跳过数量。
+ * 左右两段分两次关闭：closeTabRange 按当前列表快照遍历，左侧关闭后目标索引前移，
+ * 需重新定位再关右侧。
+ */
+export async function closeOtherTabs(id: string): Promise<number> {
+  const idx = tabs.findIndex((t) => t.id === id);
+  if (idx < 0) return 0;
+  const skippedLeft = await closeTabRange(0, idx);
+  const next = tabs.findIndex((t) => t.id === id);
+  if (next < 0) return skippedLeft;
+  const skippedRight = await closeTabRange(next + 1, tabs.length);
+  return skippedLeft + skippedRight;
+}
+
 /** 关闭全部标签（会话+编辑器）；返回跳过数量 */
 export async function closeAllTabs(): Promise<number> {
   return closeTabRange(0, tabs.length);

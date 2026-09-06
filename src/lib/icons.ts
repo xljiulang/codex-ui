@@ -129,8 +129,13 @@ export const ICON_AGENTS =
 export const ICON_FORK =
   "M14 4l2.29 2.29-2.88 2.88 1.42 1.42 2.88-2.88L20 10V4h-6zm-4 0H4v6l2.29-2.29 4.71 4.7V20h2v-8.41l-5.29-5.3 2.29-2.29z";
 
-/** 关闭其它所有标签：交叠标签卡片 + 关闭叉（需配合 fill-rule="evenodd" 挖空） */
+/** 关闭所有标签：单张标签卡片 + 关闭叉（需配合 fill-rule="evenodd" 挖空） */
 export const ICON_CLOSE_ALL =
+  "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 3v12h14V6H5z" +
+  "M9.2 9.1l.9-.9 5.7 5.7-.9.9zM14 9.1l.9.9-5.7 5.7-.9-.9z";
+
+/** 关闭其它标签：交叠标签卡片 + 关闭叉（需配合 fill-rule="evenodd" 挖空） */
+export const ICON_CLOSE_OTHERS =
   "M5 3h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 3v8h8V6H5z" +
   "M10 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2zm0 3v7h7v-7h-7z" +
   "M11.5 12.5l1-1 5 5-1 1zM16.5 12.5l1-1-5 5-1-1z";

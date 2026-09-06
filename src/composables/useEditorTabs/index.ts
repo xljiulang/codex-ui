@@ -34,6 +34,7 @@ export {
   closeTab,
   closeTabsToLeftAll,
   closeTabsToRightAll,
+  closeOtherTabs,
   dirtyEditableTabs,
   discardTabAndClose,
   pendingCloseId,

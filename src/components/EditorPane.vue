@@ -18,6 +18,7 @@ import {
   cancelClose,
   closeAllTabs,
   closeAnyTab,
+  closeOtherTabs,
   closeTabsToLeftAll,
   closeTabsToRightAll,
   discardTabAndClose,
@@ -51,6 +52,7 @@ import { TabKind } from "../lib/tabs";
 import {
   ICON_CLOSE_ALL,
   ICON_CLOSE_LEFT,
+  ICON_CLOSE_OTHERS,
   ICON_CLOSE_RIGHT,
   ICON_EXTERNAL_LINK,
   ICON_RENAME,
@@ -126,15 +128,19 @@ function fileTabAbsPath(
   return tabAbsPath(tab);
 }
 
-/** 关闭所有标签（文件/diff/预览/终端 + 会话标签）：运行中会话/终端与未保存文件跳过并计数 */
-async function closeAllTabsWithToast() {
-  const skipped = await closeAllTabs();
+/** 批量关闭跳过提示：运行中会话/终端与未保存文件不逐个确认，仅计数 */
+function reportSkipped(skipped: number) {
   if (skipped > 0) {
     setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`);
   }
 }
 
-/** 统一标签右键菜单：关闭所有 + 关闭左边/右边（按统一列表整体顺序）+ 文件直达目录 */
+/** 关闭所有标签（文件/diff/预览/终端 + 会话标签） */
+async function closeAllTabsWithToast() {
+  reportSkipped(await closeAllTabs());
+}
+
+/** 统一标签右键菜单：关闭所有/其它 + 关闭左边/右边（按统一列表整体顺序）+ 文件直达目录 */
 function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
   const idx = tabs.findIndex((t) => t.id === tab.id);
   const hasLeft = idx > 0;
@@ -146,18 +152,21 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
       action: () => void closeAllTabsWithToast(),
     },
   ];
+  if (tabs.length > 1) {
+    items.push({
+      label: "关闭其它标签",
+      icon: ICON_CLOSE_OTHERS,
+      action: () => {
+        void closeOtherTabs(tab.id).then(reportSkipped);
+      },
+    });
+  }
   if (hasLeft) {
     items.push({
       label: "关闭左边所有标签",
       icon: ICON_CLOSE_LEFT,
       action: () => {
-        void closeTabsToLeftAll(tab.id).then((skipped) => {
-          if (skipped > 0) {
-            setToast(
-              `已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`,
-            );
-          }
-        });
+        void closeTabsToLeftAll(tab.id).then(reportSkipped);
       },
     });
   }
@@ -166,13 +175,7 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
       label: "关闭右边所有标签",
       icon: ICON_CLOSE_RIGHT,
       action: () => {
-        void closeTabsToRightAll(tab.id).then((skipped) => {
-          if (skipped > 0) {
-            setToast(
-              `已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`,
-            );
-          }
-        });
+        void closeTabsToRightAll(tab.id).then(reportSkipped);
       },
     });
   }

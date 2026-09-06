@@ -765,6 +765,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "关闭所有标签",
+      "关闭其它标签",
       "关闭右边所有标签",
     ]);
 
@@ -803,6 +804,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "关闭所有标签",
+      "关闭其它标签",
       "关闭左边所有标签",
       "关闭右边所有标签",
       "在资源管理器中打开",
@@ -836,6 +838,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
     ).toEqual([
       "关闭所有标签",
+      "关闭其它标签",
       "关闭左边所有标签",
       "关闭右边所有标签",
       "在资源管理器中打开",
@@ -847,7 +850,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await cEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
-    ).toEqual(["关闭所有标签", "关闭左边所有标签", "在资源管理器中打开"]);
+    ).toEqual(["关闭所有标签", "关闭其它标签", "关闭左边所有标签", "在资源管理器中打开"]);
     wrapper.unmount();
   });
 
@@ -910,8 +913,8 @@ describe("EditorPane 左侧多标签编辑区", () => {
       .find((w) => w.text().includes("a.txt"))!;
     await aEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     const items = wrapper.findAll(".ctx-menu-item");
-    expect(items[2].text().trim()).toBe("关闭右边所有标签");
-    await items[2].trigger("click");
+    expect(items[3].text().trim()).toBe("关闭右边所有标签");
+    await items[3].trigger("click");
     await flushPromises();
     expect(tabs.map((t) => t.title)).toEqual(["新建会话", "a.txt"]);
     wrapper.unmount();
@@ -938,10 +941,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "关闭所有标签",
+      "关闭其它标签",
       "关闭左边所有标签",
       "在资源管理器中打开",
     ]);
-    await items[2].trigger("click");
+    await items[3].trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", { path: aTxt });
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
@@ -969,10 +973,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "关闭所有标签",
+      "关闭其它标签",
       "关闭左边所有标签",
       "在资源管理器中打开",
     ]);
-    await items[2].trigger("click");
+    await items[3].trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
       path: "D:\\other\\x.txt",
@@ -998,10 +1003,11 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "关闭所有标签",
+      "关闭其它标签",
       "关闭左边所有标签",
       "在资源管理器中打开",
     ]);
-    await items[2].trigger("click");
+    await items[3].trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("reveal_path", {
       path: root + "\\pic.png",
@@ -2201,14 +2207,14 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const firstChat = wrapper.findAll(".editor-tab")[0];
     await firstChat.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim())).toEqual(
-      ["关闭所有标签", "关闭右边所有标签"],
+      ["关闭所有标签", "关闭其它标签", "关闭右边所有标签"],
     );
     await wrapper.find(".ctx-menu").trigger("click");
 
     const secondChat = wrapper.findAll(".editor-tab")[1];
     await secondChat.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim())).toEqual(
-      ["关闭所有标签", "关闭左边所有标签", "关闭右边所有标签"],
+      ["关闭所有标签", "关闭其它标签", "关闭左边所有标签", "关闭右边所有标签"],
     );
     wrapper.unmount();
   });

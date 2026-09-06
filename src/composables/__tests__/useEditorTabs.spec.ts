@@ -26,6 +26,7 @@ import {
   activateTab,
   closeAnyTab,
   closeAllTabs,
+  closeOtherTabs,
   closeTabsToLeftAll,
   closeTabsToRightAll,
   closeTab,
@@ -427,6 +428,59 @@ describe("useEditorTabs 标签状态", () => {
   it("关闭左边/右边：未知 id 返回 0", async () => {
     expect(await closeTabsToLeftAll("nope")).toBe(0);
     expect(await closeTabsToRightAll("nope")).toBe(0);
+  });
+
+  it("关闭其它标签：左右两侧一并关闭保留目标，跳过脏标签并计数", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openFileTab(root, "b.txt");
+    const dirtyTab = fileTab(activeTabId.value);
+    const { view, host } = mountView(dirtyTab);
+    view.dispatch({ changes: { from: 0, insert: "x" } });
+    expect(dirtyTab.dirty).toBe(true);
+    await openFileTab(root, "c.txt");
+    await openFileTab(root, "d.txt");
+    const cTab = tabs.find((t) => t.title === "c.txt")!;
+
+    const skipped = await closeOtherTabs(cTab.id);
+    expect(skipped).toBe(1);
+    // 左侧 a.txt 正常关闭、脏的 b.txt 跳过；右侧 d.txt 正常关闭
+    expect(tabs.map((t) => t.title)).toEqual(["b.txt", "c.txt"]);
+    view.destroy();
+    host.remove();
+  });
+
+  it("关闭其它标签：范围内的终端标签一并结束进程", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read") {
+        return Promise.resolve(fileContent("x"));
+      }
+      if (cmd === "terminal_spawn") return Promise.resolve({});
+      if (cmd === "terminal_kill") return Promise.resolve({});
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openFileTab(root, "a.txt");
+    await openTerminalTab(root);
+    await openFileTab(root, "b.txt");
+    const bTab = tabs.find((t) => t.title === "b.txt")!;
+
+    const skipped = await closeOtherTabs(bTab.id);
+    expect(skipped).toBe(0);
+    expect(tabs.map((t) => t.title)).toEqual(["b.txt"]);
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: expect.any(String),
+    });
+  });
+
+  it("关闭其它标签：未知 id 返回 0", async () => {
+    expect(await closeOtherTabs("nope")).toBe(0);
   });
 
   it("activateTab 忽略不存在的 id", () => {
