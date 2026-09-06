@@ -131,3 +131,13 @@ export {
   readLastSessionId,
   trackLastSession,
 } from "./lastSession";
+export {
+  addScheduledTask,
+  describeSchedule,
+  loadScheduledTaskRuns,
+  loadScheduledTasks,
+  removeScheduledTask,
+  runScheduledTaskNow,
+  setScheduledTaskBusyPolicy,
+  setScheduledTaskEnabled,
+} from "./scheduledTasks";

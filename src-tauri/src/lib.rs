@@ -186,6 +186,13 @@ pub fn run() {
             codex::commands::clipboard_read_text,
             codex::commands::settings_get,
             codex::commands::settings_set,
+            codex::commands::scheduled_tasks_list,
+            codex::commands::scheduled_task_add,
+            codex::commands::scheduled_task_remove,
+            codex::commands::scheduled_task_set_enabled,
+            codex::commands::scheduled_task_set_busy_policy,
+            codex::commands::scheduled_task_run_now,
+            codex::commands::scheduled_task_runs,
             codex::commands::model_config_read,
             codex::commands::model_config_save,
             codex::commands::model_catalog_save,
@@ -387,6 +394,21 @@ pub fn run() {
                     .map_err(|e| e.to_string())?,
             );
             app.manage(session_store.clone());
+            // 定时任务：自有 SQLite 库 + 调度器（到点在绑定会话内自动发回合）
+            let task_store = Arc::new(
+                codex::scheduled_tasks::ScheduledTaskStore::open(&wechat_app_dir)
+                    .map_err(|e| e.to_string())?,
+            );
+            app.manage(task_store.clone());
+            let scheduler = Arc::new(codex::scheduled_tasks::TaskScheduler::new(
+                app.handle().clone(),
+                server_handle.clone(),
+                task_store.clone(),
+                session_store.clone(),
+                wechat_app_dir.clone(),
+            ));
+            app.manage(scheduler.clone());
+            scheduler.start();
             let wechat = codex::wechat_bridge::WeChatBridge::new(
                 app.handle().clone(),
                 server_handle.clone(),

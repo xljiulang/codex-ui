@@ -181,6 +181,40 @@ export interface AppSettings {
   last_session_id?: string | null;
 }
 
+/** 定时任务执行记录状态 */
+export type TaskRunStatus = "running" | "success" | "failed" | "skipped" | "missed";
+
+/** 定时任务（绑定已有会话，到点在原会话中发送 prompt 开启回合） */
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  prompt: string;
+  /** 6 字段「秒 分 时 日 月 周」或 7 字段（末尾年份，单次）cron 表达式 */
+  cron: string;
+  threadId: string;
+  /** 会话忙时策略：defer（顺延，默认）| skip（跳过本次） */
+  busyPolicy: "defer" | "skip";
+  enabled: boolean;
+  /** 单次任务终态标记：触发点已过且无下一次 */
+  done: boolean;
+  createdAt: number;
+  /** 下次触发时刻（unix 秒）；null = 无下一次 */
+  nextRun: number | null;
+}
+
+/** 定时任务执行记录（按任务分开存储与查看，全量保存） */
+export interface TaskRunRecord {
+  id: number;
+  taskId: string;
+  startedAt: number;
+  status: TaskRunStatus;
+  durationMs?: number;
+  turnId?: string;
+  /** 执行结果：该回合最后一条 agent 消息摘要（超长截断） */
+  result?: string;
+  error?: string;
+}
+
 /** 会话↔微信账号绑定信息（wechat_state 快照的 bindings 数组项） */
 export interface WeChatBindingInfo {
   threadId: string;

@@ -3,6 +3,7 @@ import { reactive } from "vue";
 import type {
   WeChatSnapshot,
   PendingInteraction,
+  ScheduledTask,
   ServerStatus,
   ThreadItem,
   ThreadSummary,
@@ -53,6 +54,10 @@ export const store = reactive({
   rightPanelHidden: false,
   /** 启动恢复会话时请求会话列表展开其目录分组（值为线程 id，消费后清空） */
   pendingExpandGroupThread: "",
+  /** 定时任务列表（scheduled-tasks/event 快照驱动，管理区块消费） */
+  scheduledTasks: [] as ScheduledTask[],
+  /** 最近一次定时任务事件（seq 逐次递增保证可观察；taskId 为变更任务，供展开记录定向刷新） */
+  scheduledTaskChange: { seq: 0, taskId: "" },
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,

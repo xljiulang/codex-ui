@@ -9,6 +9,7 @@ import {
   type CommandExecutionItem,
   type McpToolCallItem,
   type ReasoningItem,
+  type ScheduledTask,
   type ServerStatus,
   type ThreadItem,
 } from "../../lib/types";
@@ -669,6 +670,19 @@ export async function wireEvents() {
     await listen("warning", (e) => {
       const p = e.payload as { message?: string };
       if (p?.message) setToast(friendlyServerMessage(p.message));
+    }),
+  );
+
+  // 定时任务快照：后端任务/执行记录变更时全量推送任务列表
+  unlisteners.push(
+    await listen("scheduled-tasks/event", (e) => {
+      const p = e.payload as { tasks?: ScheduledTask[]; changedTaskId?: string };
+      if (Array.isArray(p.tasks)) store.scheduledTasks = p.tasks;
+      // seq 递增：同一任务连续两次事件（如 started → completed）也能被 watch 感知
+      store.scheduledTaskChange = {
+        seq: store.scheduledTaskChange.seq + 1,
+        taskId: p.changedTaskId ?? "",
+      };
     }),
   );
 }

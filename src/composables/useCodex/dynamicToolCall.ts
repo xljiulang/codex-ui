@@ -3,12 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatTokens } from "../../lib/format";
 import {
   CODEXUI_DYNAMIC_NAMESPACE,
+  CODEXUI_TOOL_ADD_SCHEDULED_TASK,
   CODEXUI_TOOL_COMPACT_CONTEXT,
   CODEXUI_TOOL_GET_USAGE,
   isDynamicToolDisabled,
 } from "../../lib/dynamicTools";
 import type { PendingInteraction } from "../../lib/types";
 import { respondInteraction } from "./actions";
+import { addScheduledTask } from "./scheduledTasks";
 import { findSessionTabByThread } from "./sessionState";
 import { store } from "./store";
 
@@ -107,10 +109,70 @@ export async function handleDynamicToolCall(p: DynamicToolPayload): Promise<void
       }
       break;
     }
+    case CODEXUI_TOOL_ADD_SCHEDULED_TASK: {
+      await handleAddScheduledTask(interaction, p.params);
+      break;
+    }
     default:
       await respondInteraction(interaction, {
         contentItems: [{ type: "inputText", text: `未知的 codexui 工具：${tool || "(空)"}` }],
         success: false,
       });
+  }
+}
+
+/**
+ * `add_scheduled_task`：agent 提供参数，直接创建（不弹前端确认框——任务可能
+ * 经微信等无人值守渠道发起，弹窗会卡住回合；对用户的确认由 agent 在对话内完成）。
+ * arguments 形态来自协议 DynamicToolCallParams.arguments（JSON object）。
+ */
+async function handleAddScheduledTask(
+  interaction: PendingInteraction,
+  params: Record<string, unknown>,
+): Promise<void> {
+  const raw = params.arguments;
+  const args =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const name = typeof args.name === "string" ? args.name.trim() : "";
+  const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+  const cronExpr = typeof args.cron === "string" ? args.cron.trim() : "";
+  const busyPolicy = args.busyPolicy === "skip" ? "skip" : "defer";
+  if (!name || !prompt || !cronExpr) {
+    await respondInteraction(interaction, {
+      contentItems: [
+        { type: "inputText", text: "创建失败：name、prompt、cron 均为必填" },
+      ],
+      success: false,
+    });
+    return;
+  }
+
+  try {
+    const task = await addScheduledTask({
+      name,
+      prompt,
+      cron: cronExpr,
+      threadId: params.threadId as string,
+      busyPolicy,
+    });
+    const next = task.nextRun
+      ? new Date(task.nextRun * 1000).toLocaleString()
+      : "（无下一次触发）";
+    await respondInteraction(interaction, {
+      contentItems: [
+        {
+          type: "inputText",
+          text: `定时任务「${task.name}」已创建，下次触发：${next}。可在 设置 → 定时任务 中管理。`,
+        },
+      ],
+      success: true,
+    });
+  } catch (e) {
+    await respondInteraction(interaction, {
+      contentItems: [{ type: "inputText", text: `创建失败：${errText(e)}` }],
+      success: false,
+    });
   }
 }

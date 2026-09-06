@@ -410,6 +410,8 @@ html[data-glass="on"] .app-select-menu {
   padding: var(--space-8) var(--space-8);
   overflow-y: auto;
   flex: 1;
+  /* 多行确认文案（如定时任务创建确认）按换行展示；单行文案不受影响 */
+  white-space: pre-wrap;
 }
 
 .modal-foot {

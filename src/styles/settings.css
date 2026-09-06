@@ -1654,3 +1654,246 @@ button.skill-row-main:hover .skill-name {
   min-height: var(--ctrl-h-xs);
   font-size: var(--font-xs);
 }
+
+/* ---------------------------------------------------------------------------
+   定时任务（ScheduledTasksSection）：任务行 + 展开 detail（prompt/执行记录）
+   --------------------------------------------------------------------------- */
+
+.sched-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sched-task {
+  border-bottom: 1px solid var(--border);
+}
+
+.sched-task:last-child {
+  border-bottom: none;
+}
+
+.sched-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  transition: background var(--ease);
+}
+
+.sched-task-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  flex-wrap: wrap;
+}
+
+.sched-arrow {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: var(--text-muted);
+}
+
+.sched-name {
+  font-size: var(--font-base);
+  color: var(--text-bright);
+}
+
+.sched-chip {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(var(--overlay-rgb), 0.06);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sched-session {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.sched-next {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sched-done-task .sched-name,
+.sched-done-task .sched-chip,
+.sched-done-task .sched-session {
+  opacity: 0.6;
+}
+
+.sched-done-head {
+  padding: var(--space-3) 0 var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.sched-policy-select {
+  min-width: 108px;
+}
+
+.sched-row-btn {
+  min-height: var(--ctrl-h-xs);
+  font-size: var(--font-xs);
+}
+
+.sched-row-del {
+  color: var(--danger);
+}
+
+.sched-detail {
+  padding: 0 0 var(--space-4) calc(var(--space-4) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sched-detail-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.sched-detail-label svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--text-muted);
+}
+
+.sched-prompt {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow: auto;
+  user-select: text;
+}
+
+.sched-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.sched-run:last-child {
+  border-bottom: none;
+}
+
+.sched-run-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sched-run-status {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm, 4px);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.sched-run-status.st-running {
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+}
+
+.sched-run-status.st-success {
+  background: rgba(var(--success-rgb, 52, 168, 83), 0.14);
+  color: var(--success, rgb(52 168 83));
+}
+
+.sched-run-status.st-failed {
+  background: rgba(var(--danger-rgb, 234, 67, 53), 0.14);
+  color: var(--danger, rgb(234 67 53));
+}
+
+.sched-run-status.st-skipped,
+.sched-run-status.st-missed {
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text-muted);
+}
+
+.sched-run-time {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.sched-run-duration {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+
+.sched-run-error {
+  font-size: var(--font-xs);
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sched-run-open {
+  margin-left: auto;
+  flex-shrink: 0;
+  min-height: var(--ctrl-h-xs);
+  font-size: var(--font-xs);
+}
+
+.sched-run-result {
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: zoom-in;
+  user-select: text;
+}
+
+.sched-run-result.open {
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: zoom-out;
+}
+
+.sched-run-more {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: var(--space-2) 0 0;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.sched-run-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

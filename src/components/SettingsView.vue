@@ -3,6 +3,7 @@ import { ref } from "vue";
 import {
   ICON_EXTENSION,
   ICON_FILE,
+  ICON_HISTORY,
   ICON_MCP,
   ICON_MODEL_CUBE,
   ICON_PALETTE,
@@ -17,6 +18,7 @@ import McpSection from "./settings/McpSection.vue";
 import ModelConfigSection from "./settings/ModelConfigSection.vue";
 import PersonalizationSection from "./settings/PersonalizationSection.vue";
 import PluginsSection from "./settings/PluginsSection.vue";
+import ScheduledTasksSection from "./settings/ScheduledTasksSection.vue";
 import SkillsSection from "./settings/SkillsSection.vue";
 
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
@@ -26,6 +28,7 @@ const settingsSectionIds = [
   "global-instructions",
   "model-config",
   "dynamic-tools",
+  "scheduled-tasks",
   "skills",
   "mcp",
   "plugins",
@@ -44,6 +47,7 @@ const settingsSections: SettingsSection[] = [
   { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
   { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "dynamic-tools", label: "动态工具", icon: ICON_TOOL },
+  { id: "scheduled-tasks", label: "定时任务", icon: ICON_HISTORY },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
@@ -101,6 +105,8 @@ function onNavKeydown(e: KeyboardEvent) {
         <BasicSection :active="activeSection === 'basic'" />
 
         <DynamicToolsSection :active="activeSection === 'dynamic-tools'" />
+
+        <ScheduledTasksSection :active="activeSection === 'scheduled-tasks'" />
 
         <SkillsSection :active="activeSection === 'skills'" />
 

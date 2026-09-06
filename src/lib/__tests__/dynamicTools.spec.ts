@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CODEXUI_DYNAMIC_NAMESPACE,
   CODEXUI_DYNAMIC_TOOLS,
+  CODEXUI_TOOL_ADD_SCHEDULED_TASK,
   CODEXUI_TOOL_COMPACT_CONTEXT,
   CODEXUI_TOOL_GET_USAGE,
   buildInjectedDynamicTools,
@@ -34,12 +35,13 @@ describe("codexui 动态工具定义", () => {
     expect(RESERVED_NAMESPACES.has(CODEXUI_DYNAMIC_NAMESPACE)).toBe(false);
   });
 
-  it("包含 get_usage 与 compact_context 两条 function 工具且字段合法", () => {
+  it("包含 get_usage / compact_context / add_scheduled_task 三条 function 工具且字段合法", () => {
     const names = CODEXUI_DYNAMIC_TOOLS.flatMap((ns) =>
       ns.tools.map((t) => t.name),
     );
     expect(names).toContain(CODEXUI_TOOL_GET_USAGE);
     expect(names).toContain(CODEXUI_TOOL_COMPACT_CONTEXT);
+    expect(names).toContain(CODEXUI_TOOL_ADD_SCHEDULED_TASK);
     for (const ns of CODEXUI_DYNAMIC_TOOLS) {
       expect(ns.type).toBe("namespace");
       expect(ns.name).toBe(CODEXUI_DYNAMIC_NAMESPACE);
@@ -48,10 +50,20 @@ describe("codexui 动态工具定义", () => {
         expect(t.type).toBe("function");
         expect(t.name).toMatch(/^[a-zA-Z0-9_-]{1,128}$/);
         expect(t.description.length).toBeGreaterThan(0);
-        expect(t.inputSchema).toEqual({ type: "object", properties: {} });
         expect(t.inputSchema.type).toBe("object");
       }
     }
+    // 无参工具保持空 properties；add_scheduled_task 带必填参数 schema
+    const tool = (name: string) =>
+      CODEXUI_DYNAMIC_TOOLS.flatMap((ns) => ns.tools).find((t) => t.name === name)!;
+    expect(tool(CODEXUI_TOOL_GET_USAGE).inputSchema).toEqual({
+      type: "object",
+      properties: {},
+    });
+    const add = tool(CODEXUI_TOOL_ADD_SCHEDULED_TASK).inputSchema as {
+      required: string[];
+    };
+    expect(add.required).toEqual(["name", "prompt", "cron"]);
   });
 });
 
@@ -80,16 +92,20 @@ describe("codexui 动态工具注入过滤", () => {
     expect(names).toContain(CODEXUI_TOOL_COMPACT_CONTEXT);
   });
 
-  it("禁用其一仅保留另一个工具", () => {
+  it("禁用其一仅保留其余工具", () => {
     const result = buildInjectedDynamicTools(["codexui.get_usage"]);
     const names = result.flatMap((ns) => ns.tools.map((t) => t.name));
-    expect(names).toEqual([CODEXUI_TOOL_COMPACT_CONTEXT]);
+    expect(names).toEqual([
+      CODEXUI_TOOL_COMPACT_CONTEXT,
+      CODEXUI_TOOL_ADD_SCHEDULED_TASK,
+    ]);
   });
 
   it("全部禁用返回空数组（整体不注入）", () => {
     const result = buildInjectedDynamicTools([
       "codexui.get_usage",
       "codexui.compact_context",
+      "codexui.add_scheduled_task",
     ]);
     expect(result).toEqual([]);
   });

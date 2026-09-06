@@ -4,6 +4,7 @@
 export const CODEXUI_DYNAMIC_NAMESPACE = "codexui";
 export const CODEXUI_TOOL_GET_USAGE = "get_usage";
 export const CODEXUI_TOOL_COMPACT_CONTEXT = "compact_context";
+export const CODEXUI_TOOL_ADD_SCHEDULED_TASK = "add_scheduled_task";
 
 /** 与协议 `DynamicToolFunctionSpec` 对齐的最小结构（字段名以 generate-ts 绑定为准） */
 export interface DynamicToolFunctionSpec {
@@ -22,14 +23,14 @@ export interface DynamicToolNamespaceSpec {
   tools: DynamicToolFunctionSpec[];
 }
 
-/** 由 codex-ui 在 `thread/start` 时注入的动态工具（单一 `codexui` 命名空间，v1 两条） */
+/** 由 codex-ui 在 `thread/start` 时注入的动态工具（单一 `codexui` 命名空间，v1 三条） */
 // 注意：app-server 要求 inputSchema 是 JSON Schema 的 `type: "object"`（空对象 `{}` 会被拒，
-// 报 "schema must be a JSON Schema of type object, got type: null"）；两条均无参数，故用空 properties。
+// 报 "schema must be a JSON Schema of type object, got type: null"）；无参工具用空 properties。
 export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
   {
     type: "namespace",
     name: CODEXUI_DYNAMIC_NAMESPACE,
-    description: "codex-ui 管理工具：查询用量、压缩上下文",
+    description: "codex-ui 管理工具：查询用量、压缩上下文、创建定时任务",
     tools: [
       {
         type: "function",
@@ -42,6 +43,36 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
         name: CODEXUI_TOOL_COMPACT_CONTEXT,
         description: "压缩当前会话的上下文",
         inputSchema: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: CODEXUI_TOOL_ADD_SCHEDULED_TASK,
+        description:
+          "创建定时任务：到设定时间后，codex-ui 会在当前会话中自动发送 prompt 开启一个新回合（结果直接出现在本会话）。" +
+          "cron 为 6 字段「秒 分 时 日 月 周」表达式（本地时区，周字段 0-6 或 MON/TUE 等名称），" +
+          "如每天 9 点 = \"0 0 9 * * *\"；最小触发间隔 1 分钟（建议不低于 5 分钟），更小会被拒绝；" +
+          "单次任务用 7 字段末尾年份，如 2026-01-20 9 点 = \"0 0 9 20 1 * 2026\"。" +
+          "prompt 必须是自包含的完整指令（可引用会话历史，勿依赖短期上下文）。" +
+          "busyPolicy 为会话忙时策略：defer（顺延到会话空闲后执行，默认）或 skip（跳过本次）。" +
+          "调用前应向用户完整复述任务名、触发时间与 prompt 全文并在对话中获得其同意（codex-ui 不会弹出额外确认框，任务可能经微信等无人值守渠道发起，请务必在对话中确认）。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "任务名（简短，展示在设置页管理列表）" },
+            prompt: { type: "string", description: "到点执行的完整指令（自包含）" },
+            cron: {
+              type: "string",
+              description:
+                "6 字段「秒 分 时 日 月 周」cron 表达式（本地时区，最小间隔 1 分钟）；单次任务用 7 字段末尾年份",
+            },
+            busyPolicy: {
+              type: "string",
+              enum: ["defer", "skip"],
+              description: "会话忙时策略：defer 顺延（默认）| skip 跳过本次",
+            },
+          },
+          required: ["name", "prompt", "cron"],
+        },
       },
     ],
   },

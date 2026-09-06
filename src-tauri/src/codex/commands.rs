@@ -9,6 +9,7 @@ use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
 use crate::codex::custom_instructions;
 use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
+use crate::codex::scheduled_tasks::{self, ScheduledTask, ScheduledTaskStore, TaskScheduler, TaskRunRecord};
 use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
@@ -18,6 +19,10 @@ type Server = Arc<CodexServer>;
 
 /// 微信桥托管句柄（与 Server 一致的 Arc 形态）。
 type WeChat = Arc<WeChatBridge>;
+
+/// 定时任务存储/调度器托管句柄。
+type TaskStore = Arc<ScheduledTaskStore>;
+type Scheduler = Arc<TaskScheduler>;
 
 /// 生成「纯参数透传」RPC 命令：命令签名统一为 `(State<Server>, params: Value)`，
 /// 仅转发到指定协议方法并携带超时。用于收敛 thread_start / thread_resume /
@@ -177,11 +182,25 @@ rpc_passthrough!(thread_fork, "thread/fork", Some(Duration::from_secs(60)));
 #[tauri::command]
 pub async fn thread_delete(
     server: State<'_, Server>,
+    tasks: State<'_, TaskStore>,
+    scheduler: State<'_, Scheduler>,
     thread_id: String,
 ) -> Result<Value, String> {
-    server
+    let result = server
         .request("thread/delete", json!({ "threadId": thread_id }), None)
-        .await
+        .await;
+    // 会话删除成功 → 级联删除其绑定的定时任务与执行记录（幂等：无任务时为空）
+    if result.is_ok() {
+        if let Ok(ids) = tasks.remove_by_thread(&thread_id) {
+            for id in &ids {
+                scheduler.purge_task(id);
+            }
+            if !ids.is_empty() {
+                scheduler.notify_changed(None);
+            }
+        }
+    }
+    result
 }
 
 #[tauri::command]
@@ -276,6 +295,91 @@ pub fn auth_login(app: AppHandle) -> Result<(), String> {
     }
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// 定时任务：管理与执行记录查询；创建入口为动态工具 codexui.add_scheduled_task
+// 与本组命令（设置页管理操作），到点执行由 TaskScheduler 驱动。
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn scheduled_tasks_list(store: State<'_, TaskStore>) -> Result<Vec<ScheduledTask>, String> {
+    Ok(store.list())
+}
+
+#[tauri::command]
+pub async fn scheduled_task_add(
+    scheduler: State<'_, Scheduler>,
+    store: State<'_, TaskStore>,
+    name: String,
+    prompt: String,
+    cron: String,
+    thread_id: String,
+    busy_policy: Option<String>,
+) -> Result<ScheduledTask, String> {
+    let task = store.add(
+        &name,
+        &prompt,
+        &cron,
+        &thread_id,
+        busy_policy.as_deref().unwrap_or(scheduled_tasks::BUSY_POLICY_DEFER),
+    )?;
+    scheduler.notify_changed(Some(&task.id));
+    Ok(task)
+}
+
+#[tauri::command]
+pub async fn scheduled_task_remove(
+    scheduler: State<'_, Scheduler>,
+    store: State<'_, TaskStore>,
+    id: String,
+) -> Result<bool, String> {
+    let existed = store.remove(&id)?;
+    if existed {
+        // 级联删除已带走执行记录，清理调度器内存残留并推送快照
+        scheduler.purge_task(&id);
+        scheduler.notify_changed(Some(&id));
+    }
+    Ok(existed)
+}
+
+#[tauri::command]
+pub async fn scheduled_task_set_enabled(
+    scheduler: State<'_, Scheduler>,
+    store: State<'_, TaskStore>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    store.set_enabled(&id, enabled)?;
+    scheduler.notify_changed(Some(&id));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn scheduled_task_set_busy_policy(
+    scheduler: State<'_, Scheduler>,
+    store: State<'_, TaskStore>,
+    id: String,
+    policy: String,
+) -> Result<(), String> {
+    store.set_busy_policy(&id, &policy)?;
+    scheduler.notify_changed(Some(&id));
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn scheduled_task_run_now(scheduler: State<'_, Scheduler>, id: String) -> Result<(), String> {
+    scheduler.run_now(&id)
+}
+
+#[tauri::command]
+pub async fn scheduled_task_runs(
+    store: State<'_, TaskStore>,
+    task_id: String,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<TaskRunRecord>, String> {
+    store.list_runs(&task_id, limit.unwrap_or(20).clamp(1, 100), offset.unwrap_or(0).max(0))
 }
 
 #[tauri::command]

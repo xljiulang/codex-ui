@@ -10,6 +10,7 @@ import { setToast } from "./toast";
 import { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
 import { loadBundledTools } from "../useBundledTools";
 import { trackLastSession } from "./lastSession";
+import { loadScheduledTasks } from "./scheduledTasks";
 
 
 /** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
@@ -45,6 +46,8 @@ export async function init() {
     // 落盘到 settings.json 的 last_session_id）；设置加载完成后挂载，
     // 避免用默认值覆盖刚读到的持久化值。
     trackLastSession();
+    // 预取定时任务列表（此后由 scheduled-tasks/event 快照驱动更新）
+    void loadScheduledTasks();
     // 预取捆绑 CLI 工具（ast-grep/fd/rg）可用性：供默认协作模式注入 developer_instructions
     void loadBundledTools();
     // 主窗口标题跟随活动 tab；无活动 tab 时回退 “Codex UI v<版本>”。
