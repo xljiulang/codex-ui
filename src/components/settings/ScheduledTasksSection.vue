@@ -21,17 +21,11 @@ import {
   ICON_HISTORY,
   ICON_PLAY,
   ICON_REFRESH,
+  ICON_SESSION,
 } from "../../lib/icons";
 import type { ScheduledTask, TaskRunRecord, TaskRunStatus } from "../../lib/types";
-import AppSelect, { type AppSelectOption } from "../AppSelect.vue";
 
 const props = defineProps<{ active: boolean }>();
-
-/** 行内「会话忙时」策略选项（任务级，默认顺延） */
-const busyPolicyOptions: AppSelectOption[] = [
-  { value: "defer", label: "忙时顺延" },
-  { value: "skip", label: "忙时跳过" },
-];
 
 /** 展开的任务 id 与各任务的执行记录状态（按任务分开查看，无混排视图） */
 const expandedId = ref("");
@@ -252,25 +246,6 @@ function toggleResult(runId: number) {
                 <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
               </button>
               <div class="model-provider-actions">
-                <AppSelect
-                  v-if="!row.task.done"
-                  :model-value="row.task.busyPolicy"
-                  class="sched-policy-select"
-                  :options="busyPolicyOptions"
-                  @update:model-value="(v: string) => onPolicyChange(row.task, v)"
-                />
-                <button
-                  v-if="!row.task.done"
-                  class="btn btn-icon sched-row-btn"
-                  :disabled="!row.task.enabled"
-                  aria-label="立即执行"
-                  v-tooltip="'立即执行'"
-                  @click="onRunNow(row.task)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_PLAY" />
-                  </svg>
-                </button>
                 <label
                   v-if="!row.task.done"
                   class="switch"
@@ -284,6 +259,41 @@ function toggleResult(runId: number) {
                   />
                   <span class="switch-track"></span>
                 </label>
+                <label
+                  v-if="!row.task.done"
+                  class="switch"
+                  v-tooltip="
+                    row.task.busyPolicy === 'defer'
+                      ? '会话忙时：顺延执行（切换为跳过本次）'
+                      : '会话忙时：跳过本次（切换为顺延执行）'
+                  "
+                >
+                  <input
+                    type="checkbox"
+                    :checked="row.task.busyPolicy === 'defer'"
+                    :aria-label="
+                      row.task.busyPolicy === 'defer'
+                        ? '会话忙时改为跳过本次'
+                        : '会话忙时改为顺延执行'
+                    "
+                    @change="
+                      onPolicyChange(row.task, ($event.target as HTMLInputElement).checked ? 'defer' : 'skip')
+                    "
+                  />
+                  <span class="switch-track"></span>
+                </label>
+                <button
+                  v-if="!row.task.done"
+                  class="btn btn-icon sched-row-btn"
+                  :disabled="!row.task.enabled"
+                  aria-label="立即执行"
+                  v-tooltip="'立即执行'"
+                  @click="onRunNow(row.task)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_PLAY" />
+                  </svg>
+                </button>
                 <button
                   class="btn btn-icon sched-row-del"
                   aria-label="删除"
@@ -315,11 +325,14 @@ function toggleResult(runId: number) {
                     </span>
                     <span v-if="r.error" class="sched-run-error" v-tooltip="r.error">{{ r.error }}</span>
                     <button
-                      class="btn sched-run-open"
+                      class="btn btn-icon sched-run-open"
+                      aria-label="打开会话"
                       v-tooltip="`打开绑定会话（${threadLabel(row.task.threadId)}）`"
                       @click="openSession(row.task.threadId)"
                     >
-                      打开会话
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path :d="ICON_SESSION" />
+                      </svg>
                     </button>
                   </div>
                   <div

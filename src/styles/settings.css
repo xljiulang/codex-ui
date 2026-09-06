@@ -1745,10 +1745,6 @@ button.skill-row-main:hover .skill-name {
   border-bottom: 1px solid var(--border);
 }
 
-.sched-policy-select {
-  min-width: 108px;
-}
-
 .sched-row-btn {
   min-height: var(--ctrl-h-xs);
   font-size: var(--font-xs);
