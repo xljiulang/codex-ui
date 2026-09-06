@@ -2,22 +2,48 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { reactive } from "vue";
 
-const { mockPage, mockTextLayers } = vi.hoisted(() => ({
-  mockPage: {
-    getViewport: vi.fn((opts?: { scale?: number }) => ({
-      width: 100,
-      height: 200,
-      scale: opts?.scale ?? 1,
-    })),
-    render: vi.fn(() => ({ promise: Promise.resolve() })),
-    getTextContent: vi.fn(async () => ({ items: [], styles: {} })),
-  },
-  mockTextLayers: [] as {
-    opts: Record<string, unknown>;
-    render: () => Promise<void>;
-    cancel: () => void;
-  }[],
-}));
+const { mockPage, mockTextLayers, MockIntersectionObserver } = vi.hoisted(() => {
+  class MockIntersectionObserver {
+    static instances: MockIntersectionObserver[] = [];
+    private cb: IntersectionObserverCallback;
+    constructor(cb: IntersectionObserverCallback) {
+      this.cb = cb;
+      MockIntersectionObserver.instances.push(this);
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+    /** 手动触发指定目标的交叉回调（模拟滚入视口） */
+    trigger(target: Element): void {
+      this.cb(
+        [
+          {
+            isIntersecting: true,
+            target,
+          } as unknown as IntersectionObserverEntry,
+        ],
+        this as unknown as IntersectionObserver,
+      );
+    }
+  }
+  return {
+    mockPage: {
+      getViewport: vi.fn((opts?: { scale?: number }) => ({
+        width: 100,
+        height: 200,
+        scale: opts?.scale ?? 1,
+      })),
+      render: vi.fn(() => ({ promise: Promise.resolve() })),
+      getTextContent: vi.fn(async () => ({ items: [], styles: {} })),
+    },
+    mockTextLayers: [] as {
+      opts: Record<string, unknown>;
+      render: () => Promise<void>;
+      cancel: () => void;
+    }[],
+    MockIntersectionObserver,
+  };
+});
 
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
@@ -83,65 +109,59 @@ describe("PdfPreviewPane PDF 预览", () => {
     mockPage.render.mockClear();
     mockPage.getTextContent.mockClear();
     mockTextLayers.length = 0;
+    MockIntersectionObserver.instances.length = 0;
+    // happy-dom 无 IntersectionObserver：stub 后由用例手动触发滚入视口
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
     mockDoc();
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it("加载文档后渲染页码 1 / N，首页禁用上一页", async () => {
+  it("加载文档后渲染页码 1 / N，不再提供上一页/下一页按钮", async () => {
     const w = mount(PdfPreviewPane, { props: { tab: makeTab() } });
     await flushPromises();
     expect(w.text()).toContain("1 / 3");
-    const prev = w.find('[aria-label="上一页"]');
-    expect(prev.attributes("disabled")).toBeDefined();
-    expect(w.find('[aria-label="下一页"]').attributes("disabled")).toBeUndefined();
+    expect(w.find('[aria-label="上一页"]').exists()).toBe(false);
+    expect(w.find('[aria-label="下一页"]').exists()).toBe(false);
   });
 
-  it("渲染页时构建文本选择层：容器写入缩放变量并交给 TextLayer 排版", async () => {
-    // jsdom 无 2D 画布实现：stub getContext 使画布分支正常渲染
+  it("连续滚动：全部页面按占位平铺，滚入视口才渲染画布与文本层", async () => {
+    // jsdom/happy-dom 无 2D 画布：stub getContext 使渲染分支正常执行
     const getContextSpy = vi
       .spyOn(HTMLCanvasElement.prototype, "getContext")
-      .mockReturnValue({ fillRect: vi.fn() } as unknown as CanvasRenderingContext2D);
-    mockPage.getViewport.mockImplementation(
-      ({ scale }: { scale?: number } = {}) => ({
-        width: 100 * (scale ?? 1),
-        height: 200 * (scale ?? 1),
-        scale: scale ?? 1,
-      }),
-    );
+      .mockReturnValue({
+        fillRect: vi.fn(),
+      } as unknown as CanvasRenderingContext2D);
     const w = mount(PdfPreviewPane, { props: { tab: makeTab() } });
     await flushPromises();
-    const layer = w.find(".pdf-text-layer");
-    expect(layer.exists()).toBe(true);
+    // 三页占位全部平铺，尚未渲染
+    expect(w.findAll(".pdf-page-wrap")).toHaveLength(3);
+    expect(mockTextLayers).toHaveLength(0);
+
+    // 第 1 页滚入视口（IO 触发）→ 画布 + 文本层
+    const instances = MockIntersectionObserver.instances;
+    const io = instances[instances.length - 1];
+    io.trigger(w.find('.pdf-page-wrap[data-page="1"]').element);
+    await flushPromises();
     expect(mockTextLayers).toHaveLength(1);
+    const layer = w.find('.pdf-page-wrap[data-page="1"] .pdf-text-layer');
     expect(mockTextLayers[0].opts.viewport).toBeTruthy();
     expect(mockTextLayers[0].opts.container).toBe(layer.element);
+    // 缩放变量 = 适应宽度基准(0.1) × zoom(1)
     expect(
       (layer.element as HTMLElement).style.getPropertyValue(
         "--total-scale-factor",
       ),
     ).toBe("0.1");
-    // 翻页/缩放都会重建文本层
-    await w.find('[aria-label="下一页"]').trigger("click");
-    await flushPromises();
+
+    // 第 2 页滚入视口同样渲染
+    io.trigger(w.find('.pdf-page-wrap[data-page="2"]').element);    await flushPromises();
     expect(mockTextLayers).toHaveLength(2);
     w.unmount();
     getContextSpy.mockRestore();
-  });
-
-  it("下一页/上一页切换页码，边界禁用", async () => {
-    const w = mount(PdfPreviewPane, { props: { tab: makeTab() } });
-    await flushPromises();
-    await w.find('[aria-label="下一页"]').trigger("click");
-    expect(w.text()).toContain("2 / 3");
-    await w.find('[aria-label="下一页"]').trigger("click");
-    await w.find('[aria-label="下一页"]').trigger("click");
-    expect(w.text()).toContain("3 / 3");
-    expect(w.find('[aria-label="下一页"]').attributes("disabled")).toBeDefined();
-    await w.find('[aria-label="上一页"]').trigger("click");
-    expect(w.text()).toContain("2 / 3");
   });
 
   it("缩放夹在 25% ~ 400% 之间，适应宽度复位为 100%", async () => {
@@ -161,12 +181,10 @@ describe("PdfPreviewPane PDF 预览", () => {
     expect(w.text()).toContain("100%");
   });
 
-  it("pdfData 变化（外部刷新）触发重载并保持页码与缩放", async () => {
+  it("pdfData 变化（外部刷新）触发重载并保持缩放", async () => {
     const tab = reactive(makeTab());
     const w = mount(PdfPreviewPane, { props: { tab } });
     await flushPromises();
-    await w.find('[aria-label="下一页"]').trigger("click");
-    expect(w.text()).toContain("2 / 3");
     await w.find('[aria-label="放大"]').trigger("click");
     expect(w.text()).toContain("125%");
     const callsBefore = mockedGetDocument.mock.calls.length;
@@ -176,7 +194,7 @@ describe("PdfPreviewPane PDF 预览", () => {
     await flushPromises();
     expect(mockedGetDocument.mock.calls.length).toBeGreaterThan(callsBefore);
     await flushPromises();
-    expect(w.text()).toContain("2 / 3");
+    expect(w.text()).toContain("1 / 3");
     expect(w.text()).toContain("125%");
   });
 

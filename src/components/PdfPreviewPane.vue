@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { nextTick } from "vue";
 import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
 import type { PreviewEditorTab } from "../composables/useEditorTabs";
 
@@ -19,6 +18,8 @@ const MAX_SCALE = 4;
 const SCALE_STEP = 1.25;
 /** 画布相对容器两侧的留白（px） */
 const CANVAS_PADDING = 24;
+/** 视口外预渲染边距（px）：滚动到附近提前渲染，避免滚动等待 */
+const RENDER_MARGIN = 600;
 
 const loading = ref(true);
 const error = ref("");
@@ -27,40 +28,83 @@ const pageNo = ref(1);
 /** 缩放倍率：1 表示适应容器宽度 */
 const zoom = ref(1);
 const canvasHost = ref<HTMLDivElement | null>(null);
-const canvas = ref<HTMLCanvasElement | null>(null);
-/** 文本选择层容器：透明文字覆盖画布，供选择复制 */
-const textLayerHost = ref<HTMLDivElement | null>(null);
 
-let doc: pdfjsLib.PDFDocumentProxy | null = null;
-let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
-let renderTask: pdfjsLib.RenderTask | null = null;
-let textLayerTask: pdfjsLib.TextLayer | null = null;
-let renderSeq = 0;
+/** 每页基础尺寸（scale=1）：占位高度与统一缩放的依据 */
+interface PageBaseDims {
+  width: number;
+  height: number;
+}
+const pageDims = ref<PageBaseDims[]>([]);
+/** 适应宽度基准比例：全部页面统一，取最宽页计算（随容器宽度重算） */
+const baseFit = ref(1);
+const currentScale = computed(() => baseFit.value * zoom.value);
 
-function cancelTextLayer() {
-  textLayerTask?.cancel();
-  textLayerTask = null;
+// 每页渲染状态（非响应式：canvas/文本层容器经模板函数 ref 收集）
+const pageCanvases = new Map<number, HTMLCanvasElement>();
+const textHosts = new Map<number, HTMLDivElement>();
+const renderTasks = new Map<number, pdfjsLib.RenderTask>();
+const textLayers = new Map<number, pdfjsLib.TextLayer>();
+/** 已完成渲染的页 → 渲染比例：同比例重复请求直接跳过 */
+const renderedScale = new Map<number, number>();
+let io: IntersectionObserver | null = null;
+let scrollRaf: number | undefined;
+
+function setPageCanvas(n: number, el: unknown) {
+  if (el instanceof HTMLCanvasElement) pageCanvases.set(n, el);
+  else pageCanvases.delete(n);
+}
+
+function setTextHost(n: number, el: unknown) {
+  if (el instanceof HTMLDivElement) textHosts.set(n, el);
+  else textHosts.delete(n);
+}
+
+function cancelAllRenderTasks() {
+  for (const t of renderTasks.values()) t.cancel();
+  renderTasks.clear();
+  for (const l of textLayers.values()) l.cancel();
+  textLayers.clear();
+  renderedScale.clear();
 }
 
 useCtrlWheelZoom(canvasHost, zoom, MIN_SCALE, MAX_SCALE, SCALE_STEP);
 
 const percentLabel = computed(() => `${Math.round(zoom.value * 100)}%`);
 
+/** 页面占位尺寸：未渲染前即按统一比例占位，保证滚动位置稳定 */
+function pageStyle(n: number) {
+  const dims = pageDims.value[n - 1];
+  if (!dims) return undefined;
+  const s = currentScale.value;
+  return {
+    width: `${Math.floor(dims.width * s)}px`,
+    height: `${Math.floor(dims.height * s)}px`,
+  };
+}
+
+function recalcFit() {
+  const host = canvasHost.value;
+  if (!host || !pageDims.value.length) return;
+  const maxW = Math.max(...pageDims.value.map((p) => p.width));
+  baseFit.value = Math.max(0.1, (host.clientWidth - CANVAS_PADDING) / maxW);
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
-  renderTask?.cancel();
-  renderTask = null;
-  cancelTextLayer();
+  cancelAllRenderTasks();
+  io?.disconnect();
+  io = null;
   loadingTask?.destroy().catch(() => {});
   loadingTask = null;
   doc = null;
-  // 外部刷新（pdfData 替换）时保留当前页与缩放，加载完成后夹紧恢复
+  // 外部刷新（pdfData 替换）时保留当前页与缩放，加载完成后夹紧恢复并滚回该页
   const prevPage = pageNo.value;
   const prevZoom = zoom.value;
   pageCount.value = 0;
   pageNo.value = 1;
   zoom.value = 1;
+  pageDims.value = [];
   const data = props.tab.pdfData;
   if (!data || !data.length) {
     error.value = "PDF 内容为空";
@@ -76,62 +120,73 @@ async function load() {
     const d = await task.promise;
     doc = d;
     pageCount.value = d.numPages;
+    props.tab.pageCount = d.numPages;
+    // 预取每页基础尺寸：占位平铺与统一适应宽度都需要
+    const dims: PageBaseDims[] = [];
+    for (let n = 1; n <= d.numPages; n++) {
+      const p = await d.getPage(n);
+      const v = p.getViewport({ scale: 1 });
+      dims.push({ width: v.width, height: v.height });
+    }
+    pageDims.value = dims;
     pageNo.value = Math.min(prevPage, d.numPages);
     zoom.value = prevZoom;
-    props.tab.pageCount = d.numPages;
   } catch (e) {
     error.value = String(e);
   } finally {
     loading.value = false;
   }
   if (!doc) return; // 加载失败：错误信息已在 error 中展示
-  await nextTick(); // 等待 canvas 挂载后再绘制
-  await renderPage();
+  await nextTick(); // 等待全部页面占位挂载
+  recalcFit();
+  setupObserver();
+  scrollToPage(pageNo.value);
+  renderVisiblePages();
 }
 
-/** 渲染当前页到 canvas：以容器宽度为基准适配，乘以用户缩放倍率；同时重建文本选择层 */
-async function renderPage() {
-  if (!doc) return;
-  const seq = ++renderSeq;
-  const page = await doc.getPage(pageNo.value);
-  if (seq !== renderSeq) return;
-  const host = canvasHost.value;
-  const c = canvas.value;
-  if (!host || !c) return;
-  const base = page.getViewport({ scale: 1 });
-  const fit = Math.max(0.1, (host.clientWidth - CANVAS_PADDING) / base.width);
-  const viewport = page.getViewport({ scale: fit * zoom.value });
-  c.width = Math.floor(viewport.width);
-  c.height = Math.floor(viewport.height);
-  c.style.width = `${Math.floor(viewport.width)}px`;
-  c.style.height = `${Math.floor(viewport.height)}px`;
-  const ctx = c.getContext("2d");
+let doc: pdfjsLib.PDFDocumentProxy | null = null;
+let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null;
+
+/** 渲染单页（画布 + 文本层）：同比例已渲染则跳过；按页独立取消，滚动浏览互不干扰 */
+async function renderPage(n: number) {
+  const d = doc;
+  if (!d) return;
+  const s = currentScale.value;
+  if (renderedScale.get(n) === s) return;
+  const canvas = pageCanvases.get(n);
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
   if (!ctx) {
     error.value = "当前环境不支持画布渲染";
     return;
   }
-  renderTask?.cancel();
-  const task = page.render({ canvas: c, viewport });
-  renderTask = task;
-  // 文本层与画布并行渲染：失败/取消只影响选择复制，不干扰画布
-  const textPromise = renderTextLayer(page, viewport, seq);
+  const page = await d.getPage(n);
+  const viewport = page.getViewport({ scale: s });
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  renderTasks.get(n)?.cancel();
+  const task = page.render({ canvas, viewport });
+  renderTasks.set(n, task);
   try {
     await task.promise;
-  } finally {
-    if (renderTask === task) renderTask = null;
+  } catch {
+    return; // 渲染取消/失败：保留占位，滚动重新进入时重试
   }
-  await textPromise;
+  if (renderTasks.get(n) === task) renderTasks.delete(n);
+  renderedScale.set(n, s);
+  await buildTextLayer(n, page, viewport);
 }
 
-/** 重建文本选择层：透明文字按视口排版覆盖在画布上，供鼠标选择复制 */
-async function renderTextLayer(
+/** 重建单页文本选择层：透明文字按视口排版覆盖在画布上，供鼠标选择复制 */
+async function buildTextLayer(
+  n: number,
   page: pdfjsLib.PDFPageProxy,
   viewport: pdfjsLib.PageViewport,
-  seq: number,
 ) {
-  const host = textLayerHost.value;
+  const host = textHosts.get(n);
   if (!host) return;
-  cancelTextLayer();
+  textLayers.get(n)?.cancel();
+  textLayers.delete(n);
   host.replaceChildren();
   // pdf.js 文本层排版依赖 --total-scale-factor 计算字号与变换
   host.style.setProperty("--total-scale-factor", String(viewport.scale));
@@ -143,28 +198,97 @@ async function renderTextLayer(
   } catch {
     return; // 文本内容读取失败：仅影响选择复制
   }
-  if (seq !== renderSeq) return;
   const layer = new pdfjsLib.TextLayer({
     textContentSource: content,
     container: host,
     viewport,
   });
-  textLayerTask = layer;
+  textLayers.set(n, layer);
   try {
     await layer.render();
   } catch {
     // 渲染取消/失败静默：选择复制不可用即可，不影响画布
   } finally {
-    if (textLayerTask === layer) textLayerTask = null;
+    if (textLayers.get(n) === layer) textLayers.delete(n);
   }
 }
 
-function prevPage() {
-  if (pageNo.value > 1) pageNo.value--;
+/** 懒渲染：页面滚入视口（含预渲染边距）时触发；无 IO 环境（测试/旧内核）全量兜底 */
+function setupObserver() {
+  io?.disconnect();
+  const host = canvasHost.value;
+  if (!host) return;
+  if (typeof IntersectionObserver === "undefined") {
+    for (let n = 1; n <= pageCount.value; n++) void renderPage(n);
+    return;
+  }
+  io = new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const n = Number((e.target as HTMLElement).dataset.page);
+        if (n) void renderPage(n);
+      }
+    },
+    { root: host, rootMargin: `${RENDER_MARGIN}px 0px` },
+  );
+  for (const el of host.querySelectorAll(".pdf-page-wrap")) io.observe(el);
 }
 
-function nextPage() {
-  if (pageNo.value < pageCount.value) pageNo.value++;
+/** 显式渲染视口附近页面：缩放/容器尺寸变化后调用（IO 仅在交叉状态变化时触发） */
+function renderVisiblePages() {
+  const host = canvasHost.value;
+  if (!host) return;
+  const hostRect = host.getBoundingClientRect();
+  for (let n = 1; n <= pageCount.value; n++) {
+    const el = host.querySelector<HTMLElement>(
+      `.pdf-page-wrap[data-page="${n}"]`,
+    );
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    // 未占位/零尺寸（无布局环境）视为不可见，跳过
+    if (r.width === 0 && r.height === 0) continue;
+    if (r.bottom < hostRect.top - RENDER_MARGIN) continue;
+    if (r.top > hostRect.bottom + RENDER_MARGIN) continue;
+    void renderPage(n);
+  }
+}
+
+/** 滚动定位到指定页顶部（恢复阅读位置 / 上一页下一页按钮共用） */
+function scrollToPage(n: number) {
+  const host = canvasHost.value;
+  if (!host || typeof host.scrollTo !== "function") return;
+  const el = host.querySelector<HTMLElement>(
+    `.pdf-page-wrap[data-page="${n}"]`,
+  );
+  if (!el) return;
+  try {
+    host.scrollTo({ top: Math.max(0, el.offsetTop - 8) });
+  } catch {
+    // jsdom 等无滚动实现环境忽略
+  }
+}
+
+// 滚动跟随页码：取视口垂直中点所在的页，rAF 合并高频滚动
+function onHostScroll() {
+  if (scrollRaf !== undefined) return;
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = undefined;
+    const host = canvasHost.value;
+    if (!host) return;
+    const hostRect = host.getBoundingClientRect();
+    const mid = hostRect.top + hostRect.height / 2;
+    let cur = 1;
+    for (let n = 1; n <= pageCount.value; n++) {
+      const el = host.querySelector<HTMLElement>(
+        `.pdf-page-wrap[data-page="${n}"]`,
+      );
+      if (!el) continue;
+      if (el.getBoundingClientRect().top <= mid) cur = n;
+      else break;
+    }
+    if (cur !== pageNo.value) pageNo.value = cur;
+  });
 }
 
 function zoomIn() {
@@ -179,18 +303,31 @@ function fitWidth() {
   zoom.value = 1;
 }
 
-// 切换标签或外部刷新替换 pdfData：重新加载文档；页码与缩放变化：重绘当前页
+// 切换标签或外部刷新替换 pdfData：重新加载文档；缩放变化：重渲染视口附近页面
 watch(
   [() => props.tab, () => props.tab.pdfData],
   () => void load(),
   { immediate: true },
 );
-watch([pageNo, zoom], () => void renderPage());
+watch(zoom, () => renderVisiblePages());
+
+// 窗口尺寸变化：适应宽度基准随容器宽度重算并重渲染
+function onWindowResize() {
+  recalcFit();
+  renderVisiblePages();
+}
+
+onMounted(() => {
+  window.addEventListener("resize", onWindowResize);
+});
 
 onBeforeUnmount(() => {
-  renderTask?.cancel();
-  renderTask = null;
-  cancelTextLayer();
+  window.removeEventListener("resize", onWindowResize);
+  cancelAllRenderTasks();
+  io?.disconnect();
+  io = null;
+  if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf);
+  scrollRaf = undefined;
   loadingTask?.destroy().catch(() => {});
   loadingTask = null;
 });
@@ -200,28 +337,6 @@ onBeforeUnmount(() => {
   <div class="pdf-preview">
     <Teleport :to="props.actionsTarget" :disabled="!props.actionsTarget">
       <div class="pdf-toolbar">
-        <button
-          class="pdf-toolbar-btn"
-          :disabled="pageNo <= 1"
-          aria-label="上一页"
-          v-tooltip="'上一页'"
-          @click="prevPage()"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
-          </svg>
-        </button>
-        <button
-          class="pdf-toolbar-btn"
-          :disabled="pageNo >= pageCount"
-          aria-label="下一页"
-          v-tooltip="'下一页'"
-          @click="nextPage()"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z" />
-          </svg>
-        </button>
         <span class="pdf-toolbar-page">{{ pageNo }} / {{ pageCount }}</span>
         <span class="pdf-toolbar-sep"></span>
         <button
@@ -256,10 +371,21 @@ onBeforeUnmount(() => {
     <div v-else-if="error" class="preview-note preview-error">
       无法预览该 PDF（{{ error }}）
     </div>
-    <div v-else ref="canvasHost" class="pdf-canvas-host">
-      <div class="pdf-page-wrap">
-        <canvas ref="canvas"></canvas>
-        <div ref="textLayerHost" class="pdf-text-layer"></div>
+    <div
+      v-else
+      ref="canvasHost"
+      class="pdf-canvas-host"
+      @scroll.passive="onHostScroll"
+    >
+      <div
+        v-for="n in pageCount"
+        :key="n"
+        class="pdf-page-wrap"
+        :data-page="n"
+        :style="pageStyle(n)"
+      >
+        <canvas :ref="(el) => setPageCanvas(n, el)"></canvas>
+        <div class="pdf-text-layer" :ref="(el) => setTextHost(n, el)"></div>
       </div>
     </div>
   </div>

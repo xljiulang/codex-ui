@@ -539,18 +539,21 @@
   min-height: 0;
   overflow: auto;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
   padding: var(--space-5);
 }
 .pdf-canvas-host canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
   box-shadow: var(--doc-shadow);
   background: var(--doc-bg);
   border-radius: 2px;
-  align-self: flex-start;
 }
 .pdf-page-wrap {
   position: relative;
-  align-self: flex-start;
   flex-shrink: 0;
 }
 
