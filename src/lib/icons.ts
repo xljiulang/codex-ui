@@ -254,8 +254,8 @@ export const ICON_RESTART =
 export const ICON_DOWNLOAD = "M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z";
 /** 播放/执行（定时任务「立即执行」按钮） */
 export const ICON_PLAY = "M8 5v14l11-7z";
-/** 跳过（定时任务忙时策略「跳过本次」图标；Material skip_next） */
-export const ICON_SKIP = "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
+/** 跳过（定时任务忙时策略「跳过本次」图标；跳转弯箭头，Material redo） */
+export const ICON_SKIP = "M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h7V9l-1.6 1.6z";
 /** 历史/时钟（GitView「提交历史」分区标题） */
 export const ICON_HISTORY =
   "M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z";
