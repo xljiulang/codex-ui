@@ -49,6 +49,8 @@ export const store = reactive({
   modelsLoaded: false,
   /** 右侧面板当前激活 Tab：会话/资源/Git，默认会话（首个 Tab） */
   panelTab: "session" as PanelTab,
+  /** 右侧面板显隐：标题栏布局按钮切换（仅本次运行生效，不持久化） */
+  rightPanelHidden: false,
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,

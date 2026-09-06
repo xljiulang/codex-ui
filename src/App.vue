@@ -41,7 +41,7 @@ onBeforeUnmount(() => {
       <LoadingScreen v-if="store.booting" />
       <template v-else>
         <EditorPane />
-        <RightPanel />
+        <RightPanel v-show="!store.rightPanelHidden" />
       </template>
     </div>
     <ConfirmDialog />

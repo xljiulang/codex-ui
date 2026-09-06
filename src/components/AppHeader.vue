@@ -8,10 +8,13 @@ import { useWindowControls } from "../composables/useWindowControls";
 import {
   ICON_SETTINGS,
   ICON_CLOSE,
+  ICON_LAYOUT_SIDE,
+  ICON_LAYOUT_SIDE_HIDDEN,
   ICON_WINDOW_MIN,
   ICON_WINDOW_MAX,
   ICON_WINDOW_RESTORE,
 } from "../lib/icons";
+import { store } from "../composables/useCodex";
 
 // 自绘标题栏窗口控制：最小化/最大化(还原)/关闭 + 拖动窗口 + 双击最大化
 const {
@@ -48,6 +51,19 @@ function onSettings() {
       <span class="brand-name">CODEX</span>
     </div>
     <div class="header-actions">
+      <button
+        class="icon-btn"
+        :aria-label="store.rightPanelHidden ? '显示右侧面板' : '隐藏右侧面板'"
+        v-tooltip="store.rightPanelHidden ? '显示右侧面板' : '隐藏右侧面板'"
+        @click="store.rightPanelHidden = !store.rightPanelHidden"
+      >
+        <svg viewBox="0 0 24 24">
+          <path
+            :d="store.rightPanelHidden ? ICON_LAYOUT_SIDE_HIDDEN : ICON_LAYOUT_SIDE"
+            fill-rule="evenodd"
+          />
+        </svg>
+      </button>
       <button
         class="icon-btn"
         aria-label="设置"
