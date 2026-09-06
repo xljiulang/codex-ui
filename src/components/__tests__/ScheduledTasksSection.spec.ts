@@ -103,14 +103,13 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     expect(wrapper.find(".sched-run-result").classes()).toContain("open");
   });
 
-  it("行内动作顺序与命令：忙时策略 → 立即执行 → 打开会话 → 删除", async () => {
+  it("行内动作顺序与命令：忙时策略 → 立即执行 → 删除；会话名点击打开会话", async () => {
     store.scheduledTasks = [{ ...activeTask }];
     const wrapper = mount(ScheduledTasksSection);
     const actionBtns = wrapper.findAll(".model-provider-actions .btn-icon");
     expect(actionBtns.map((b) => b.attributes("aria-label"))).toEqual([
       "会话忙时顺延执行（切换为跳过本次）",
       "立即执行",
-      "打开会话",
       "删除",
     ]);
     // 忙时策略图标：时钟（顺延态）→ 点击切为跳过
@@ -119,7 +118,8 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     expect(mockedSetPolicy).toHaveBeenCalledWith("task-1", "skip");
     await actionBtns[1]!.trigger("click"); // 立即执行
     expect(mockedRunNow).toHaveBeenCalledWith("task-1");
-    await actionBtns[2]!.trigger("click"); // 打开会话
+    // 点击会话名打开绑定会话
+    await wrapper.find(".sched-session").trigger("click");
     expect(mockedOpenSession).toHaveBeenCalledWith("t1");
   });
 

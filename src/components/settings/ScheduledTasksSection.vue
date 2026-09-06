@@ -20,7 +20,6 @@ import {
   ICON_HISTORY,
   ICON_PLAY,
   ICON_REFRESH,
-  ICON_SESSION,
   ICON_SKIP,
 } from "../../lib/icons";
 import type { ScheduledTask, TaskRunRecord, TaskRunStatus } from "../../lib/types";
@@ -233,7 +232,12 @@ function toggleResult(runId: number) {
                 </svg>
                 <span class="sched-name">{{ row.task.name }}</span>
                 <span class="sched-chip">{{ describeSchedule(row.task.cron) }}</span>
-                <span class="sched-session" v-tooltip="row.task.threadId">
+                <span
+                  class="sched-session"
+                  role="button"
+                  :aria-label="`打开会话（${threadLabel(row.task.threadId)}）`"
+                  @click.stop="openSession(row.task.threadId)"
+                >
                   {{ threadLabel(row.task.threadId) }}
                 </span>
                 <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
@@ -268,16 +272,6 @@ function toggleResult(runId: number) {
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_PLAY" />
-                  </svg>
-                </button>
-                <button
-                  class="btn btn-icon sched-session-btn"
-                  aria-label="打开会话"
-                  v-tooltip="'打开会话'"
-                  @click="openSession(row.task.threadId)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="ICON_SESSION" fill-rule="evenodd" />
                   </svg>
                 </button>
                 <button

@@ -1717,14 +1717,7 @@ button.skill-row-main:hover .skill-name {
   white-space: nowrap;
 }
 
-.sched-session {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 180px;
-}
+
 
 .sched-next {
   font-size: var(--font-xs);
