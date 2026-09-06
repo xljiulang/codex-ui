@@ -9,6 +9,7 @@ import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
 import { loadBundledTools } from "../useBundledTools";
+import { trackLastSession } from "./lastSession";
 
 
 /** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
@@ -40,6 +41,10 @@ export async function init() {
   try {
     // 先拿到工作目录：沙箱可写根与资源/Git 面板需要它；历史列表有意展示全部目录的会话。
     await Promise.all([loadSettings(), refreshServer()]);
+    // 跟踪会话标签激活并记录最后活跃会话 id 到内存（退出时由 useCloseGuard
+    // 落盘到 settings.json 的 last_session_id）；设置加载完成后挂载，
+    // 避免用默认值覆盖刚读到的持久化值。
+    trackLastSession();
     // 预取捆绑 CLI 工具（ast-grep/fd/rg）可用性：供默认协作模式注入 developer_instructions
     void loadBundledTools();
     // 主窗口标题跟随活动 tab；无活动 tab 时回退 “Codex UI v<版本>”。

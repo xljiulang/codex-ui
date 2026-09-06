@@ -51,6 +51,8 @@ export const store = reactive({
   panelTab: "session" as PanelTab,
   /** 右侧面板显隐：标题栏布局按钮切换（仅本次运行生效，不持久化） */
   rightPanelHidden: false,
+  /** 启动恢复会话时请求会话列表展开其目录分组（值为线程 id，消费后清空） */
+  pendingExpandGroupThread: "",
   toast: "",
   /** 全局确认弹窗（会话切换等需用户选择） */
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,

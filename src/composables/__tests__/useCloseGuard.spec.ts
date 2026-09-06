@@ -46,7 +46,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-vi.mock("../useCodex", () => ({ interrupt: vi.fn() }));
+vi.mock("../useCodex", () => ({
+  interrupt: vi.fn(),
+  flushLastSession: vi.fn(async () => {}),
+}));
 
 vi.mock("../useEditorTabs", () => ({ tabs: h.state.tabs }));
 

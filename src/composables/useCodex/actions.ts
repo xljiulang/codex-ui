@@ -32,6 +32,7 @@ import {
   ensureThreadPlugins,
   resetToNewSession,
 } from "./settings";
+import { readLastSessionId } from "./lastSession";
 import { switchSessionTab } from "./sessionTabs";
 import { store } from "./store";
 import {
@@ -498,6 +499,21 @@ export async function openSession(threadId: string): Promise<void> {
   // 唯一性约束：已打开则聚焦，未打开则新建标签加载
   if (!(await openSessionTabForThread(threadId))) return;
   await finishSessionSwitch();
+}
+
+
+/**
+ * 启动恢复最后活跃会话：读取配置文件持久化的会话 id（settings.json 的
+ * last_session_id），线程仍在历史中才打开会话标签并请求会话列表展开其目录
+ * 分组；无记录 / 已删除 / 打开失败返回 false，由调用方回退打开设置标签。
+ */
+export async function restoreLastSession(): Promise<boolean> {
+  const lastId = readLastSessionId();
+  if (!lastId || !store.threads.some((t) => t.id === lastId)) return false;
+  if (!(await openSessionTabForThread(lastId))) return false;
+  store.pendingExpandGroupThread = lastId;
+  await finishSessionSwitch();
+  return true;
 }
 
 

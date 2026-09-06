@@ -121,7 +121,13 @@ export {
   pickAndOpenNewSession,
   pickingNewSessionDir,
   respondInteraction,
+  restoreLastSession,
   sendPrompt,
 } from "./actions";
 export { disposeEvents, wireEvents } from "./events";
 export { init } from "./boot";
+export {
+  flushLastSession,
+  readLastSessionId,
+  trackLastSession,
+} from "./lastSession";

@@ -101,6 +101,20 @@ watch(
   },
   { immediate: true },
 );
+/** 启动恢复会话：消费 store.pendingExpandGroupThread（线程 id），展开其所属目录分组 */
+watch(
+  () => store.pendingExpandGroupThread,
+  (id) => {
+    if (!id) return;
+    store.pendingExpandGroupThread = "";
+    const hit = groupSessions(store.threads).find(
+      (r): r is Extract<typeof r, { kind: "group" }> =>
+        r.kind === "group" && r.group.threads.some((t) => t.id === id),
+    );
+    if (hit) expandedDirs.add(hit.group.key);
+  },
+  { immediate: true },
+);
 const debouncedSearch = debounce(() => void searchThreads(searchTerm.value), 300);
 
 type RenderRow =

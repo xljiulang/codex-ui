@@ -915,3 +915,43 @@ describe("SessionView 会话标签联动", () => {
     wrapper.unmount();
   });
 });
+
+describe("SessionView 启动恢复分组展开", () => {
+  const groupedThreads = [
+    { id: "t1", name: "A1", preview: "", createdAt: now, recencyAt: now, cwd: "D:\proj-a" },
+    { id: "t2", name: "B1", preview: "", createdAt: now, recencyAt: now, cwd: "D:\proj-b" },
+  ];
+
+  beforeEach(() => {
+    tabs.splice(0, tabs.length);
+    store.toast = "";
+    store.pendingExpandGroupThread = "";
+  });
+
+  it("pendingExpandGroupThread 指向非首个分组：该分组被展开并清空标记", () => {
+    store.threads = groupedThreads.map((t) => ({ ...t }));
+    store.loadingSessions = false;
+    store.pendingExpandGroupThread = "t2";
+    const wrapper = mount(SessionView);
+    const folders = wrapper.findAll(".session-folder");
+    expect(folders).toHaveLength(2);
+    // 首个目录默认展开 + 恢复目标分组（proj-b）展开，组内会话行可见
+    expect(folders[0].attributes("aria-expanded")).toBe("true");
+    expect(folders[1].attributes("aria-expanded")).toBe("true");
+    expect(wrapper.text()).toContain("B1");
+    expect(store.pendingExpandGroupThread).toBe("");
+    wrapper.unmount();
+  });
+
+  it("无待展开标记：非首个分组保持收起", () => {
+    store.threads = groupedThreads.map((t) => ({ ...t }));
+    store.loadingSessions = false;
+    const wrapper = mount(SessionView);
+    const folders = wrapper.findAll(".session-folder");
+    expect(folders).toHaveLength(2);
+    expect(folders[0].attributes("aria-expanded")).toBe("true");
+    expect(folders[1].attributes("aria-expanded")).toBe("false");
+    expect(wrapper.text()).not.toContain("B1");
+    wrapper.unmount();
+  });
+});

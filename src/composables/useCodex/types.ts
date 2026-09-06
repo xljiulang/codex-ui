@@ -13,6 +13,7 @@ export const defaultSettings = (): AppSettings => ({
   terminal_shell: "cmd",
   dynamic_tools_disabled: [],
   glass_effect: true,
+  last_session_id: null,
 });
 
 

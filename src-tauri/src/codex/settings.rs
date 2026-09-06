@@ -22,6 +22,9 @@ pub struct AppSettings {
     /// 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启
     #[serde(default = "default_glass_effect")]
     pub glass_effect: bool,
+    /// 最后活跃会话 id：退出后留档，下次启动恢复该会话（None = 无记录，启动开设置页）
+    #[serde(default)]
+    pub last_session_id: Option<String>,
 }
 
 fn default_permission() -> String {
@@ -48,6 +51,7 @@ impl Default for AppSettings {
             terminal_shell: default_terminal_shell(),
             dynamic_tools_disabled: Vec::new(),
             glass_effect: default_glass_effect(),
+            last_session_id: None,
         }
     }
 }
@@ -210,5 +214,33 @@ mod tests {
         assert_eq!(glass_tint_rgb("dark"), (0x0a, 0x0b, 0x10));
         assert_eq!(glass_tint_rgb("light"), (0xf4, 0xf6, 0xfb));
         assert_eq!(glass_tint_rgb(""), (0x0e, 0x11, 0x16));
+    }
+
+    #[test]
+    fn last_session_id_defaults_none_and_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        // 旧 settings.json 缺失 last_session_id：应回退 None（启动开设置页）
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        assert_eq!(load(dir.path()).last_session_id, None);
+
+        // 保存会话 id 后往返一致；显式置回 None 同样往返
+        let s = AppSettings {
+            last_session_id: Some("thr-abc".into()),
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        assert_eq!(
+            load(dir.path()).last_session_id.as_deref(),
+            Some("thr-abc")
+        );
+
+        let s = AppSettings::default();
+        save(dir.path(), &s).unwrap();
+        assert_eq!(load(dir.path()).last_session_id, None);
     }
 }

@@ -177,6 +177,8 @@ export interface AppSettings {
   dynamic_tools_disabled: string[];
   /** 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启 */
   glass_effect: boolean;
+  /** 最后活跃会话 id：下次启动恢复该会话；null/缺省 = 无记录，启动开设置标签 */
+  last_session_id?: string | null;
 }
 
 /** 会话↔微信账号绑定信息（wechat_state 快照的 bindings 数组项） */
