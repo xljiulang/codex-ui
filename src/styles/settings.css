@@ -686,6 +686,7 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  user-select: text;
 }
 
 .plugin-meta {
@@ -1101,6 +1102,7 @@ button.skill-row-main {
   font-size: var(--font-md);
   line-height: 1.5;
   color: var(--text-dim);
+  user-select: text;
 }
 
 /* 技能标题为链接语义（button）：悬停下划线提示可点击打开编辑器；
