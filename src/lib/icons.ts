@@ -75,19 +75,21 @@ export const ICON_GRID_4 =
 export const ICON_LINES_4 =
   "M3 3.2h18v2H3zM3 8.4h18v2H3zM3 13.6h18v2H3zM3 18.8h18v2H3z";
 /**
- * 左右布局（右侧面板显示）：圆角外框 evenodd 挖空内容区 + 右侧实心栏。
+ * 左右布局（右侧面板显示）：窗口缩影——圆角外框 evenodd 挖空 + 顶部实心横条（标题栏）
+ * + 下方竖分隔线（下左=编辑区、下右=右侧面板）。
  * 与 ICON_LAYOUT_SIDE_HIDDEN 组成标题栏右面板显隐切换的一对状态图标。
  */
 export const ICON_LAYOUT_SIDE =
   "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +
-  "M5 6v12h14V6zM14.5 6v12H19V6z";
+  "M5 6v12h14V6zM5 6h14v3H5zM13.5 9h2.5v9h-2.5z";
 /**
- * 右侧面板隐藏：圆角外框 evenodd 挖空内容区 + 内容区右向箭头（示意可展开恢复）。
+ * 右侧面板隐藏：窗口缩影——圆角外框 evenodd 挖空 + 顶部实心横条（标题栏），
+ * 下方为单一整区（无分隔线，示意右面板已隐藏）。
  * 与 ICON_LAYOUT_SIDE 组成标题栏右面板显隐切换的一对状态图标。
  */
 export const ICON_LAYOUT_SIDE_HIDDEN =
   "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" +
-  "M5 6v12h14V6zM8 10.8h5.2V8.6l3.3 3.4-3.3 3.4v-2.2H8z";
+  "M5 6v12h14V6zM5 6h14v3H5z";
 /** 窗口控制：最大化（方形边框） */
 export const ICON_WINDOW_MAX =
   "M19 5H5c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 12H5V7h14v10z";
