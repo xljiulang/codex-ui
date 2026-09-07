@@ -112,15 +112,8 @@
 }
 
 .ctx-menu-item {
-  text-align: left;
-  display: flex;
-  align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) 11px;
-  border-radius: var(--radius);
-  font-size: var(--font-md);
-  color: var(--text);
-  width: 100%;
 }
 
 .ctx-menu-item svg {
@@ -135,11 +128,6 @@
   height: 14px;
   flex-shrink: 0;
   object-fit: contain;
-}
-
-.ctx-menu-item:hover {
-  background: rgba(var(--accent-rgb), 0.1);
-  color: var(--text-bright);
 }
 
 .ctx-menu-item.danger:hover {

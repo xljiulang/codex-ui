@@ -143,7 +143,7 @@ watch(open, (v) => {
       <div
         v-for="p in profiles"
         :key="p"
-        class="git-branch-menu-item config-profile-row"
+        class="config-profile-row popup-menu-item"
       >
         <span class="git-branch-name">{{ p }}</span>
         <button
@@ -259,7 +259,8 @@ watch(open, (v) => {
 
 .config-profile-row {
   cursor: default;
-  color: var(--text);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
 }
 
 .config-apply-btn {

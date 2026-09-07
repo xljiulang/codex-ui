@@ -63,6 +63,15 @@ describe("ConfigSwitchMenu", () => {
     expect(wrapper.text()).toContain("b");
   });
 
+  it("配置行使用共享菜单项基线类 .popup-menu-item（不再借用 .git-branch-menu-item）", async () => {
+    const wrapper = mountMenu();
+    await wrapper.find('button[aria-label="配置快照"]').trigger("click");
+    await flushPromises();
+    const row = wrapper.find(".config-profile-row");
+    expect(row.classes()).toContain("popup-menu-item");
+    expect(row.classes()).not.toContain("git-branch-menu-item");
+  });
+
   it("触发按钮为纯图标（内联单色 {} 花括号，无文字）", async () => {
     const wrapper = mountMenu();
     const btn = wrapper.find('button[aria-label="配置快照"]');
@@ -99,7 +108,7 @@ describe("ConfigSwitchMenu", () => {
     const del = wrapper.find('button[aria-label="删除配置快照b"]');
     expect(del.find("path").attributes("d")).toBe(ICON_CLOSE);
     // 同一行内 还原 → 删除 → 打开（name → 还原 → 删除 → 打开）
-    const row = del.element.closest(".git-branch-menu-item") as HTMLElement;
+    const row = del.element.closest(".config-profile-row") as HTMLElement;
     const restore = row.querySelector('button[aria-label="还原配置快照b"]');
     const openBtn = row.querySelector('button[aria-label="打开配置快照b"]');
     expect(restore).toBeTruthy();

@@ -17,7 +17,7 @@ const emit = defineEmits<{ close: [] }>();
     <button
       v-for="it in items"
       :key="it.label"
-      class="ctx-menu-item"
+      class="ctx-menu-item popup-menu-item"
       :class="{ danger: it.danger }"
       :disabled="disabled"
       @click="it.action(); emit('close')"

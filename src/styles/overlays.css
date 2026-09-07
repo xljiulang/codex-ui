@@ -16,6 +16,22 @@
   animation: menu-in var(--ease);
 }
 
+/* 弹层菜单项基线：统一文字色/字号/圆角/整行悬停，供各弹层（右键菜单、配置快照等）复用 */
+.popup-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius);
+  font-size: var(--font-md);
+  color: var(--text);
+}
+
+.popup-menu-item:hover {
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--text-bright);
+}
+
 @keyframes menu-in {
   from {
     opacity: 0;
