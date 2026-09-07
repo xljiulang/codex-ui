@@ -1701,6 +1701,14 @@ button.skill-row-main:hover .skill-name {
   min-width: 0;
 }
 
+/* 标题行：展开箭头 + 名称横排（箭头不再占行首，与行首图标分离） */
+.sched-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .sched-badges {
   display: flex;
   align-items: center;
@@ -1716,8 +1724,12 @@ button.skill-row-main:hover .skill-name {
 }
 
 .sched-name {
+  min-width: 0;
   font-size: var(--font-base);
   color: var(--text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sched-chip {

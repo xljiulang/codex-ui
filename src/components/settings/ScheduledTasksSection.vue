@@ -228,11 +228,18 @@ function toggleResult(runId: number) {
                 :aria-expanded="expandedId === row.task.id"
                 @click="toggleExpand(row.task)"
               >
-                <svg class="sched-arrow" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="expandedId === row.task.id ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
-                </svg>
+                <span class="row-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path :d="ICON_HISTORY" fill="currentColor" />
+                  </svg>
+                </span>
                 <span class="sched-meta">
-                  <span class="sched-name">{{ row.task.name }}</span>
+                  <span class="sched-title-row">
+                    <svg class="sched-arrow" viewBox="0 0 24 24" aria-hidden="true">
+                      <path :d="expandedId === row.task.id ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
+                    </svg>
+                    <span class="sched-name">{{ row.task.name }}</span>
+                  </span>
                   <span class="sched-badges">
                     <span class="sched-chip">{{ describeSchedule(row.task.cron) }}</span>
                     <span
