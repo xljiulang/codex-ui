@@ -259,6 +259,7 @@ watch(open, (v) => {
 
 .config-profile-row {
   cursor: default;
+  color: var(--text);
 }
 
 .config-apply-btn {
