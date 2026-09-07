@@ -10,6 +10,7 @@ import {
   runScheduledTaskNow,
   setScheduledTaskBusyPolicy,
   setToast,
+  threadTitle,
   toastError,
 } from "../../composables/useCodex";
 import { store } from "../../composables/useCodex";
@@ -63,7 +64,7 @@ const rows = computed<Row[]>(() => {
 /** 会话信息实时解析：改名自动跟随；线程不在列表显示「会话已删除」 */
 function threadLabel(threadId: string): string {
   const t = store.threads.find((x) => x.id === threadId);
-  return t ? t.name || t.id : "会话已删除";
+  return t ? threadTitle(t) : "会话已删除";
 }
 
 function nextRunLabel(t: ScheduledTask): string {

@@ -193,4 +193,31 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     const wrapper = mount(ScheduledTasksSection);
     expect(wrapper.text()).toContain("会话已删除");
   });
+
+  it("会话无 name 但有 preview：绑定会话显示摘要而非会话 ID", () => {
+    store.scheduledTasks = [{ ...activeTask, threadId: "t2" }];
+    store.threads = [
+      { id: "t2", name: "", preview: "首条消息摘要", createdAt: now, recencyAt: now, cwd: "D:\\repo" },
+    ] as never;
+    const wrapper = mount(ScheduledTasksSection);
+    expect(wrapper.text()).toContain("首条消息摘要");
+    expect(wrapper.text()).not.toContain("t2");
+  });
+
+  it("会话无 name 且无 preview：绑定会话显示「新会话」而非会话 ID", () => {
+    store.scheduledTasks = [{ ...activeTask, threadId: "t3" }];
+    store.threads = [
+      { id: "t3", name: "", preview: "", createdAt: now, recencyAt: now, cwd: "D:\\repo" },
+    ] as never;
+    const wrapper = mount(ScheduledTasksSection);
+    expect(wrapper.text()).toContain("新会话");
+    expect(wrapper.text()).not.toContain("t3");
+  });
+
+  it("点击绑定会话仍以原 threadId 打开会话", async () => {
+    store.scheduledTasks = [{ ...activeTask, threadId: "t1" }];
+    const wrapper = mount(ScheduledTasksSection);
+    await wrapper.find(".sched-session").trigger("click");
+    expect(mockedOpenSession).toHaveBeenCalledWith("t1");
+  });
 });
