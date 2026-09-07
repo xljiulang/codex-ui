@@ -231,17 +231,21 @@ function toggleResult(runId: number) {
                 <svg class="sched-arrow" viewBox="0 0 24 24" aria-hidden="true">
                   <path :d="expandedId === row.task.id ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
                 </svg>
-                <span class="sched-name">{{ row.task.name }}</span>
-                <span class="sched-chip">{{ describeSchedule(row.task.cron) }}</span>
-                <span
-                  class="sched-session"
-                  role="button"
-                  :aria-label="`打开会话（${threadLabel(row.task.threadId)}）`"
-                  @click.stop="openSession(row.task.threadId)"
-                >
-                  {{ threadLabel(row.task.threadId) }}
+                <span class="sched-meta">
+                  <span class="sched-name">{{ row.task.name }}</span>
+                  <span class="sched-badges">
+                    <span class="sched-chip">{{ describeSchedule(row.task.cron) }}</span>
+                    <span
+                      class="sched-session"
+                      role="button"
+                      :aria-label="`打开会话（${threadLabel(row.task.threadId)}）`"
+                      @click.stop="openSession(row.task.threadId)"
+                    >
+                      {{ threadLabel(row.task.threadId) }}
+                    </span>
+                    <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
+                  </span>
                 </span>
-                <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
               </button>
               <div class="model-provider-actions">
                 <button

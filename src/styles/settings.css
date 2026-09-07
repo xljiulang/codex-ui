@@ -1675,7 +1675,7 @@ button.skill-row-main:hover .skill-name {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) 0;
+  padding: var(--space-4) 0;
   transition: background var(--ease);
 }
 
@@ -1691,6 +1691,20 @@ button.skill-row-main:hover .skill-name {
   padding: 0;
   cursor: pointer;
   color: inherit;
+}
+
+/* 定时任务信息列：名称行 + 徽章行竖排（与其它区块行骨架一致） */
+.sched-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.sched-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
@@ -1707,39 +1721,60 @@ button.skill-row-main:hover .skill-name {
 }
 
 .sched-chip {
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-sm, 4px);
-  background: rgba(var(--overlay-rgb), 0.06);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
   white-space: nowrap;
 }
 
 
 
 .sched-next {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
 .sched-done-task .sched-name,
-.sched-done-task .sched-chip,
-.sched-session {
+.sched-done-task .sched-chip {
   font-size: var(--font-xs);
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 180px;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
 }
 
 .sched-done-task .sched-session {
   opacity: 0.6;
+}
+
+/* 绑定会话：可点击胶囊（保留打开会话语义），hover 下划线提示 */
+.sched-session {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 .sched-session:hover {
