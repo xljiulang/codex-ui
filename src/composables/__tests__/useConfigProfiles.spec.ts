@@ -12,17 +12,11 @@ import {
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const mockedInvoke = vi.mocked(invoke);
 
-const mockStore = vi.hoisted(() => ({
-  settings: { active_config: null as string | null },
-}));
-const mockSaveSettings = vi.hoisted(() => vi.fn());
 const mockSetToast = vi.hoisted(() => vi.fn());
 const mockAskConfirm = vi.hoisted(() => vi.fn());
 const mockOpenPath = vi.hoisted(() => vi.fn());
 
 vi.mock("../useCodex", () => ({
-  store: mockStore,
-  saveSettings: mockSaveSettings,
   setToast: mockSetToast,
   askConfirm: mockAskConfirm,
 }));
@@ -34,11 +28,9 @@ vi.mock("../usePathOpen", () => ({
 describe("useConfigProfiles", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
-    mockSaveSettings.mockReset();
     mockSetToast.mockReset();
     mockAskConfirm.mockReset();
     mockOpenPath.mockReset();
-    mockStore.settings.active_config = null;
   });
 
   it("listConfigProfiles 读取配置快照名列表", async () => {
@@ -53,8 +45,7 @@ describe("useConfigProfiles", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("config_profiles_save", {
       name: "dev",
     });
-    // 新建即把新快照设为激活（不还原文件、不触发应用/热重载）
-    expect(mockSaveSettings).toHaveBeenCalledWith({ active_config: "dev" });
+    // 新建仅快照当前状态，不自动激活/应用/热重载
     expect(
       mockedInvoke.mock.calls.some(
         ([cmd]) => cmd === "config_profiles_apply",
@@ -67,7 +58,7 @@ describe("useConfigProfiles", () => {
     ).toBe(false);
   });
 
-  it("applyConfigProfile 覆盖文件、热重载并持久化激活配置、toast 提示", async () => {
+  it("applyConfigProfile 覆盖文件、热重载并 toast 提示（无激活记录）", async () => {
     mockedInvoke.mockResolvedValue(undefined);
     await applyConfigProfile("dev");
 
@@ -87,10 +78,9 @@ describe("useConfigProfiles", () => {
       (batch![1] as { params: { reloadUserConfig: boolean } }).params
         .reloadUserConfig,
     ).toBe(true);
-    // 持久化激活配置 + toast
-    expect(mockSaveSettings).toHaveBeenCalledWith({ active_config: "dev" });
+    // toast 提示（不再记录/切换激活项）
     expect(mockSetToast).toHaveBeenCalledWith(
-      '已切换到「dev」配置，重启 codex-ui 后生效',
+      '已应用配置快照「dev」，重启 codex-ui 后生效',
     );
   });
 
@@ -121,8 +111,7 @@ describe("useConfigProfiles", () => {
     expect((params.edits as { value: string }[])[0].value).toBe("gpt");
   });
 
-  it("deleteConfigProfile 确认后删除，并清空激活配置标记", async () => {
-    mockStore.settings.active_config = "dev";
+  it("deleteConfigProfile 确认后删除并 toast", async () => {
     mockAskConfirm.mockResolvedValue(true);
     mockedInvoke.mockResolvedValue(undefined);
 
@@ -132,12 +121,10 @@ describe("useConfigProfiles", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("config_profiles_delete", {
       name: "dev",
     });
-    expect(mockSaveSettings).toHaveBeenCalledWith({ active_config: null });
     expect(mockSetToast).toHaveBeenCalledWith('已删除配置「dev」');
   });
 
-  it("deleteConfigProfile 取消确认时不删除也不清空", async () => {
-    mockStore.settings.active_config = "dev";
+  it("deleteConfigProfile 取消确认时不删除也不提示", async () => {
     mockAskConfirm.mockResolvedValue(false);
     mockedInvoke.mockResolvedValue(undefined);
 
@@ -146,7 +133,7 @@ describe("useConfigProfiles", () => {
     expect(mockedInvoke).not.toHaveBeenCalledWith("config_profiles_delete", {
       name: "dev",
     });
-    expect(mockSaveSettings).not.toHaveBeenCalled();
+    expect(mockSetToast).not.toHaveBeenCalled();
   });
 
   it("openConfigProfile 拉取快照文件并在编辑器逐个打开", async () => {

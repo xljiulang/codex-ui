@@ -1,8 +1,8 @@
 // 配置快照：标题栏「配置」下拉的列表/新建/应用/删除。
 // 后端在 CODEX_HOME/codex-ui/<配置名> 下管理 config.toml + models.json 快照，
-// 前端仅负责调用命令、应用后触发 codex 热重载、并持久化当前激活配置名。
+// 前端仅负责调用命令、应用后触发 codex 热重载。快照间不再记录/维护「当前激活」关系。
 import { invoke } from "@tauri-apps/api/core";
-import { askConfirm, saveSettings, setToast, store } from "./useCodex";
+import { askConfirm, setToast } from "./useCodex";
 import { openPathInAppOrReveal } from "./usePathOpen";
 
 /** config/read 返回的配置层（取子集，与服务端 schema 对齐） */
@@ -18,19 +18,16 @@ export async function listConfigProfiles(): Promise<string[]> {
 /** 新建/覆盖配置快照：把当前 codex-home 的 config.toml 与 model_catalog 内容快照到该配置目录。 */
 export async function createConfigProfile(name: string): Promise<void> {
   await invoke("config_profiles_save", { name });
-  // 快照内容即当前 codex-home 状态，直接把它设为激活项（不还原文件、不热重载）。
-  await saveSettings({ active_config: name });
 }
 
-/** 应用（使用）配置：覆盖 codex-home 文件并触发 codex 热重载，随后持久化激活配置名。 */
+/** 还原配置快照：覆盖 codex-home 文件并触发 codex 热重载。 */
 export async function applyConfigProfile(name: string): Promise<void> {
   await invoke("config_profiles_apply", { name });
   await reloadUserConfig();
-  await saveSettings({ active_config: name });
-  setToast(`已切换到「${name}」配置，重启 codex-ui 后生效`);
+  setToast(`已应用配置快照「${name}」，重启 codex-ui 后生效`);
 }
 
-/** 删除配置：先全局确认，删除后若删的是当前激活项则清空激活标记。 */
+/** 删除配置：先全局确认，再删除对应快照目录。 */
 export async function deleteConfigProfile(name: string): Promise<void> {
   const ok = await askConfirm({
     title: "删除配置",
@@ -40,9 +37,6 @@ export async function deleteConfigProfile(name: string): Promise<void> {
   });
   if (!ok) return;
   await invoke("config_profiles_delete", { name });
-  if (store.settings.active_config === name) {
-    await saveSettings({ active_config: null });
-  }
   setToast(`已删除配置「${name}」`);
 }
 

@@ -5,9 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 const mockSetToast = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => (e: unknown) => String(e));
-const mockStore = vi.hoisted(() => ({
-  settings: { active_config: null as string | null },
-}));
+const mockStore = vi.hoisted(() => ({}));
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<
@@ -53,7 +51,6 @@ describe("ConfigSwitchMenu", () => {
     mockDelete.mockReset();
     mockOpen.mockReset();
     mockSetToast.mockReset();
-    mockStore.settings.active_config = null;
   });
 
   it("点配置快照按钮展开菜单并拉取配置列表", async () => {
@@ -82,7 +79,6 @@ describe("ConfigSwitchMenu", () => {
   });
 
   it("点还原按钮还原配置快照", async () => {
-    mockStore.settings.active_config = "a";
     const wrapper = mountMenu();
     await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();

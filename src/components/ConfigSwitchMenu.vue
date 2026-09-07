@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ICON_CLOSE,
   ICON_OPEN,
   ICON_PLUS,
   ICON_RESTORE,
 } from "../lib/icons";
-import { setToast, store, toastError } from "../composables/useCodex";
+import { setToast, toastError } from "../composables/useCodex";
 import {
   applyConfigProfile,
   createConfigProfile,
@@ -20,8 +20,6 @@ const loading = ref(false);
 const profiles = ref<string[]>([]);
 const newName = ref("");
 const root = ref<HTMLElement | null>(null);
-
-const activeConfig = computed(() => store.settings.active_config ?? null);
 
 /** 打开时拉取配置列表；已打开则关闭。 */
 async function toggle() {
@@ -50,7 +48,7 @@ async function create(name: string) {
     await createConfigProfile(n);
     newName.value = "";
     profiles.value = await listConfigProfiles();
-    setToast(`已创建并切换到配置快照「${n}」`);
+    setToast(`已创建配置快照「${n}」`);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -146,12 +144,10 @@ watch(open, (v) => {
         v-for="p in profiles"
         :key="p"
         class="git-branch-menu-item config-profile-row"
-        :class="{ current: p === activeConfig }"
       >
         <span class="git-branch-name">{{ p }}</span>
         <button
           class="config-apply-btn"
-          :class="{ active: p === activeConfig }"
           :aria-label="`还原配置快照${p}`"
           v-tooltip="'还原配置快照'"
           :disabled="loading"
@@ -280,10 +276,6 @@ watch(open, (v) => {
 .config-apply-btn:hover:not(:disabled) {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.14);
-}
-
-.config-apply-btn.active {
-  color: var(--accent);
 }
 
 .config-apply-btn:disabled {

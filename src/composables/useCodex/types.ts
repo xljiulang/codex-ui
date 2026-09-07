@@ -14,7 +14,6 @@ export const defaultSettings = (): AppSettings => ({
     dynamic_tools_disabled: [],
     glass_effect: true,
     last_session_id: null,
-    active_config: null,
   });
 
 

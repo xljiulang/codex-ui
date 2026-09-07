@@ -25,9 +25,6 @@ pub struct AppSettings {
     /// 最后活跃会话 id：退出后留档，下次启动恢复该会话（None = 无记录，启动开设置页）
     #[serde(default)]
     pub last_session_id: Option<String>,
-    /// 当前应用的配置快照名（标题栏配置下拉的激活项标记；None = 未记录，非严格同步）
-    #[serde(default)]
-    pub active_config: Option<String>,
 }
 
 fn default_permission() -> String {
@@ -55,7 +52,6 @@ impl Default for AppSettings {
             dynamic_tools_disabled: Vec::new(),
             glass_effect: default_glass_effect(),
             last_session_id: None,
-            active_config: None,
         }
     }
 }
