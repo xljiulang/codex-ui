@@ -149,7 +149,7 @@ watch(open, (v) => {
         <button
           class="config-apply-btn"
           :aria-label="`还原配置快照${p}`"
-          v-tooltip="'还原配置快照'"
+          v-tooltip="'还原'"
           :disabled="loading"
           @click="apply(p)"
         >
@@ -160,7 +160,7 @@ watch(open, (v) => {
         <button
           class="git-branch-delete"
           :aria-label="`删除配置快照${p}`"
-          v-tooltip="'删除配置快照'"
+          v-tooltip="'删除'"
           :disabled="loading"
           @click="del(p)"
         >
@@ -171,7 +171,7 @@ watch(open, (v) => {
         <button
           class="config-open-btn"
           :aria-label="`打开配置快照${p}`"
-          v-tooltip="'打开配置快照'"
+          v-tooltip="'打开'"
           :disabled="loading"
           @click="openConfigProfile(p)"
         >
