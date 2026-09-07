@@ -2,6 +2,9 @@
 #define MyAppExeName "codex-ui.exe"
 #define MyAppVersion GetVersionNumbersString(".\codex-ui.exe")
 #define MyAppGuid "{CF89B894-F2A3-4CAE-A90C-5D22A2BF257F}"
+; Windows toast 归属用 AUMID（与 src-tauri/tauri.conf.json 的 identifier 一致），
+; 应用快捷方式需携带它，安装版 toast 才会以应用图标/名称归属显示。
+#define MyAppUserModelId "com.codexui.app"
 
 [Setup]
 AppId={{#MyAppGuid}
@@ -56,8 +59,8 @@ Name: desktopicon; Description: {cm:CreateDesktopIcon}
 
 [Icons]
 Name: {group}\{#MyAppName} 卸载; Filename: {uninstallexe}
-Name: {group}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; WorkingDir: {app}
-Name: {autodesktop}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; Tasks: desktopicon
+Name: {group}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; WorkingDir: {app}; AppUserModelID: {#MyAppUserModelId}
+Name: {autodesktop}\{#MyAppName}; Filename: {app}\{#MyAppExeName}; Tasks: desktopicon; AppUserModelID: {#MyAppUserModelId}
 
 [Run]
 Filename: {app}\{#MyAppExeName}; WorkingDir: {app}; Description: 运行 {#MyAppName}; Flags: postinstall nowait skipifsilent
