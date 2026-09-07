@@ -11,10 +11,11 @@ export const defaultSettings = (): AppSettings => ({
   theme: "blue",
   default_permission: "ask-for-approval",
   terminal_shell: "cmd",
-  dynamic_tools_disabled: [],
-  glass_effect: true,
-  last_session_id: null,
-});
+    dynamic_tools_disabled: [],
+    glass_effect: true,
+    last_session_id: null,
+    active_config: null,
+  });
 
 
 export interface ModelInfo {

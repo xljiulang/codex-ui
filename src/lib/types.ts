@@ -179,6 +179,8 @@ export interface AppSettings {
   glass_effect: boolean;
   /** 最后活跃会话 id：下次启动恢复该会话；null/缺省 = 无记录，启动开设置标签 */
   last_session_id?: string | null;
+  /** 当前应用的配置快照名（标题栏配置下拉的激活项标记；null/缺省 = 未记录，非严格同步） */
+  active_config?: string | null;
 }
 
 /** 定时任务执行记录状态 */

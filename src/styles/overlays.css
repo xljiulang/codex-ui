@@ -142,6 +142,12 @@ html[data-glass="on"] .app-select-menu {
   right: 0;
 }
 
+/* 标题栏配置下拉：向下展开（默认 .popup-menu 向上） */
+.popup-menu.below {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+
 .menu-anchor {
   position: relative;
   display: flex;

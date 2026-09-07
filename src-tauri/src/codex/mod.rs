@@ -2,6 +2,7 @@ pub mod app_server;
 pub mod browser_bridge;
 pub mod bundled;
 pub mod cli_tools;
+pub mod config_profiles;
 pub mod commands;
 pub mod custom_instructions;
 pub mod diff;

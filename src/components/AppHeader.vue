@@ -5,6 +5,7 @@ import {
 } from "../composables/useEditorTabs";
 import { activateTab, tabs } from "../composables/useTabs";
 import { useWindowControls } from "../composables/useWindowControls";
+import ConfigSwitchMenu from "./ConfigSwitchMenu.vue";
 import {
   ICON_SETTINGS,
   ICON_CLOSE,
@@ -74,6 +75,7 @@ function onSettings() {
           />
         </svg>
       </button>
+      <ConfigSwitchMenu />
       <button
         class="icon-btn win-btn"
         aria-label="最小化"

@@ -78,7 +78,7 @@ pub(crate) fn config_path_in(home: &Path) -> PathBuf {
 
 /// 解析 config.toml 中的 model_catalog_json：字符串值原样返回；
 /// 文件缺失、解析失败、未配置或值为空白时返回 None（不提供默认文件名）。
-fn model_catalog_json_value(config_path: &Path) -> Option<String> {
+pub(crate) fn model_catalog_json_value(config_path: &Path) -> Option<String> {
     let text = fs::read_to_string(config_path).ok()?;
     let doc = text.parse::<DocumentMut>().ok()?;
     let value = doc.get("model_catalog_json").and_then(|v| v.as_str())?;
@@ -88,7 +88,7 @@ fn model_catalog_json_value(config_path: &Path) -> Option<String> {
 
 /// model_catalog_json 的目标路径：config 已配置则按既有规则解析（绝对值原样、相对按
 /// CODEX_HOME 拼接、`~` 展开），未配置或值为空白则返回 `CODEX_HOME/models.json`（绝对路径）。
-fn resolve_catalog_path(home: &Path, config_value: Option<&str>) -> PathBuf {
+pub(crate) fn resolve_catalog_path(home: &Path, config_value: Option<&str>) -> PathBuf {
     match config_value {
         Some(v) if !v.trim().is_empty() => model_catalog_path_in(home, v.trim()),
         _ => home.join("models.json"),
@@ -253,7 +253,7 @@ pub fn save_config(content: &str) -> Result<(), String> {
     save_config_in(&codex_home()?, content)
 }
 
-fn save_config_in(home: &Path, content: &str) -> Result<(), String> {
+pub(crate) fn save_config_in(home: &Path, content: &str) -> Result<(), String> {
     content
         .parse::<DocumentMut>()
         .map_err(|e| format!("config 不是合法 TOML: {e}"))?;
