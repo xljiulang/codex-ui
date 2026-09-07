@@ -250,9 +250,11 @@ watch(open, (v) => {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  font-weight: 600;
-  color: var(--text-bright);
+  padding: var(--space-1) var(--space-3) 2px;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
 }
 
 .config-profile-row {
