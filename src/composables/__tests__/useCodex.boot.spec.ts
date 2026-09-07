@@ -129,9 +129,9 @@ describe("主窗口标题显示版本号", () => {
   });
 
   it("Tauri 环境（getVersion 可用）时标题为 Codex UI v<版本>", async () => {
-    mockedGetVersion.mockResolvedValue("0.1.2");
+    mockedGetVersion.mockResolvedValue("1.0.0");
     await init();
-    expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI v0.1.2");
+    expect(mockWin.setTitle).toHaveBeenCalledWith("Codex UI v1.0.0");
   });
 
   it("getVersion 不可用（非 Tauri）时回退无版本标题 Codex UI", async () => {
@@ -141,7 +141,7 @@ describe("主窗口标题显示版本号", () => {
   });
 
   it("活动 tab 出现后窗口标题跟随其标题", async () => {
-    mockedGetVersion.mockResolvedValue("0.1.2");
+    mockedGetVersion.mockResolvedValue("1.0.0");
     await init();
     mockWin.setTitle.mockClear();
     __resetSessionTabsForTest();

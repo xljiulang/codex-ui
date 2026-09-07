@@ -1,6 +1,6 @@
 [package]
 name = "codex-ui"
-version = "0.1.2"
+version = "1.0.0"
 description = "Codex CLI desktop UI wrapper"
 authors = ["codex-ui"]
 edition = "2021"
