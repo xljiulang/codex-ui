@@ -268,9 +268,41 @@ pub fn run() {
         ]);
 
         // 单实例仅 release 打包生效：同一时刻只允许一个实例；重复启动时聚焦已有窗口。
-        // dev（debug_assertions）不注册，允许多开，便于调试/热更。
+        // 定时任务 toast 的前台激活对未打包 Win32 应用，可能由系统按 AUMID 经快捷方式
+        // 二次启动本 exe 并透传激活串（协议串 `codexui://open-session/<threadId>`），
+        // 由此回调在「运行中的首实例」里解析参数并打开绑定会话。dev（debug_assertions）
+        // 不注册，允许多开，便于调试/热更。
         #[cfg(not(debug_assertions))]
-        let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // 无论是否命中，都把二次启动收到的参数记入会话日志，便于诊断 toast 点击路由。
+            if let Some(server) = app.try_state::<Arc<codex::app_server::CodexServer>>() {
+                server.session_log(
+                    "info".into(),
+                    None,
+                    "sched-toast-relaunch".into(),
+                    Some(format!(
+                        "args={}",
+                        args.iter()
+                            .map(|s| s.replace(' ', "\\ "))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    ))
+                    .into(),
+                );
+            }
+            if let Some(thread) = codex::scheduled_tasks::parse_activation_thread(&args) {
+                if let Some(server) = app.try_state::<Arc<codex::app_server::CodexServer>>() {
+                    server.session_log(
+                        "info".into(),
+                        None,
+                        "sched-toast-open-session".into(),
+                        Some(format!("via=relaunch thread={thread}")).into(),
+                    );
+                }
+                show_main(app);
+                let _ = app.emit("scheduled-task-notification-open", &thread);
+                return;
+            }
             show_main(app);
         }));
 

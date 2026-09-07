@@ -13,6 +13,7 @@ import { disposeEvents, init, openSession, restoreLastSession, store } from "./c
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { openSettingsTab } from "./composables/useEditorTabs";
+import { sessionLog } from "./lib/sessionLog";
 
 const { ctxMenu } = useContextMenu();
 
@@ -24,11 +25,13 @@ onMounted(async () => {
   unlistenNotification = await listen<string>("scheduled-task-notification-open", async (e) => {
     const threadId = e.payload;
     if (!threadId) return;
+    await sessionLog("info", null, "sched-toast-open-session", `frontend-received thread=${threadId}`);
     const win = getCurrentWindow();
     await win.show();
     await win.unminimize();
     await win.setFocus();
     await openSession(threadId);
+    await sessionLog("info", null, "sched-toast-open-session", "frontend-openSession-done");
   });
   // 关闭守卫仅阻止 Tauri 默认销毁窗口；关闭即隐藏到系统托盘由 Rust 端处理
   unlistenClose = await registerCloseGuard();

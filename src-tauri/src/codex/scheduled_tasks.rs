@@ -65,6 +65,31 @@ const APP_USER_MODEL_ID: &str = "com.codexui.app";
 const DEV_AUMID: &str =
     "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
 
+/// toast 前台激活携带的「打开会话」协议串前缀。安装版下点击按钮可能不经进程内
+/// WinRT `Activated` 事件，而是由系统按 AUMID 经快捷方式二次启动本 exe，激活参数
+/// 随命令行透传；统一用该协议串承载 thread id，进程内回调与命令行两条路径都能解析。
+pub const OPEN_SESSION_SCHEME: &str = "codexui://open-session/";
+
+/// 从二次启动的命令行参数中解析「打开会话」的 thread id：扫描是否存在
+/// [`OPEN_SESSION_SCHEME`] 协议串，命中则取其后的 id（截断可能跟随的空白/引号）。
+/// 仅按协议串匹配，避免把 argv[0]（exe 路径）等误判为 thread id。
+pub fn parse_activation_thread(args: &[String]) -> Option<String> {
+    for a in args {
+        if let Some(pos) = a.find(OPEN_SESSION_SCHEME) {
+            let rest = &a[pos + OPEN_SESSION_SCHEME.len()..];
+            let id = rest
+                .split(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// 选择 Windows toast 的 AUMID：从 `target/debug`、`target/release` 运行视为开发版，
 /// 回退 PowerShell 默认（否则未注册快捷方式时 toast 不显示）；打包安装版用应用 AUMID。
 fn notification_app_id() -> &'static str {
@@ -133,21 +158,27 @@ static ALIVE_TOASTS: Mutex<VecDeque<ToastNotification>> = Mutex::new(VecDeque::n
 const MAX_ALIVE_TOASTS: usize = 128;
 
 /// 用 `windows` crate 直接发送 WinRT toast，并**把 `ToastNotification` 常驻**以接收点击事件。
-/// 在带消息泵的主线程调用；点击「打开会话」按钮后从按钮参数取出 thread_id 经
-/// `scheduled-task-notification-open` 事件通知前端聚焦窗口并打开绑定会话。
+/// 在带消息泵的主线程调用。点击「打开会话」有两条投递通道，均已埋日志：
+/// 1) 进程内 WinRT `Activated` 事件（toast 对象常驻才有效）；
+/// 2) 未打包 Win32 应用的前台激活：系统按 AUMID 经快捷方式二次启动本 exe，
+///    激活串（`launch` / 按钮 `arguments`）随命令行透传，由单实例回调
+///    [`parse_activation_thread`] 解析后经事件通知前端。
 #[cfg(windows)]
 fn show_winrt_toast(
     app: &AppHandle,
+    server: &Arc<CodexServer>,
     app_id: &str,
     title: &str,
     body: &str,
     thread_id: &str,
 ) -> Result<(), String> {
+    let activation = format!("{}{}", OPEN_SESSION_SCHEME, thread_id);
     let xml = format!(
-        r#"<toast duration="short"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual><actions><action content="打开会话" arguments="{}"/></actions></toast>"#,
+        r#"<toast duration="short" launch="{}"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual><actions><action content="打开会话" arguments="{}" activationType="foreground"/></actions></toast>"#,
+        xml_escape(&activation),
         xml_escape(title),
         xml_escape(body),
-        xml_escape(thread_id),
+        xml_escape(&activation),
     );
     let doc = XmlDocument::new().map_err(|e| e.to_string())?;
     doc.LoadXml(&HSTRING::from(xml)).map_err(|e| e.to_string())?;
@@ -155,19 +186,31 @@ fn show_winrt_toast(
         ToastNotification::CreateToastNotification(&doc).map_err(|e| e.to_string())?;
 
     let app_for_cb = app.clone();
+    let server_for_cb = server.clone();
     let activated = TypedEventHandler::<ToastNotification, IInspectable>::new(
         move |_sender, insp| {
-            if let Some(insp_ref) = insp.as_ref() {
-                if let Ok(args) = insp_ref.cast::<ToastActivatedEventArgs>() {
-                    if let Ok(arguments) = args.Arguments() {
-                        if !arguments.is_empty() {
-                            let _ = app_for_cb.emit(
-                                "scheduled-task-notification-open",
-                                &arguments.to_string(),
-                            );
-                        }
-                    }
-                }
+            // 通道 1：进程内 WinRT 激活事件。能进到这里说明 toast 对象常驻生效。
+            // arguments / launch 均为协议串，需解析出 thread id 再通知前端。
+            let raw = insp
+                .as_ref()
+                .and_then(|i| i.cast::<ToastActivatedEventArgs>().ok())
+                .and_then(|args| args.Arguments().ok())
+                .map(|a| a.to_string())
+                .unwrap_or_default();
+            server_for_cb.session_log(
+                "info".into(),
+                None,
+                "sched-toast-activated".into(),
+                Some(format!("raw={raw}")).into(),
+            );
+            if let Some(thread) = parse_activation_thread(&[raw]) {
+                server_for_cb.session_log(
+                    "info".into(),
+                    None,
+                    "sched-toast-open-session".into(),
+                    Some(format!("via=winrt-activated thread={thread}")).into(),
+                );
+                let _ = app_for_cb.emit("scheduled-task-notification-open", &thread);
             }
             Ok(())
         },
@@ -179,6 +222,12 @@ fn show_winrt_toast(
     let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))
         .map_err(|e| e.to_string())?;
     notifier.Show(&toast).map_err(|e| e.to_string())?;
+    server.session_log(
+        "info".into(),
+        None,
+        "sched-toast-shown".into(),
+        Some(format!("app_id={app_id} thread={thread_id}")).into(),
+    );
 
     // 关键：把 ToastNotification 存入常驻队列，防止 Drop 后点击回调失效。
     if let Ok(mut alive) = ALIVE_TOASTS.lock() {
@@ -834,18 +883,26 @@ impl TaskScheduler {
     /// `ToastNotification` 被存入常驻队列，避免 Drop 后点击回调失效（见 `show_winrt_toast`）。
     fn notify_task(&self, title: &str, body: &str, thread_id: &str) {
         let app = self.app.clone();
+        let server = self.server.clone();
         let title = title.to_string();
         let body = body.to_string();
         let thread_id = thread_id.to_string();
         #[cfg(windows)]
         {
             let _ = app.clone().run_on_main_thread(move || {
-                let _ = show_winrt_toast(&app, notification_app_id(), &title, &body, &thread_id);
+                let _ = show_winrt_toast(
+                    &app,
+                    &server,
+                    notification_app_id(),
+                    &title,
+                    &body,
+                    &thread_id,
+                );
             });
         }
         #[cfg(not(windows))]
         {
-            let _ = (app, title, body, thread_id);
+            let _ = (app, server, title, body, thread_id);
         }
     }
 
@@ -1340,6 +1397,27 @@ mod tests {
     fn xml_escape_escapes_special_chars() {
         assert_eq!(xml_escape("a&b<c>d\"e'f"), "a&amp;b&lt;c&gt;d&quot;e&apos;f");
         assert_eq!(xml_escape("无特殊字符"), "无特殊字符");
+    }
+
+    #[test]
+    fn parse_activation_thread_scans_scheme() {
+        assert_eq!(
+            parse_activation_thread(&[
+                "C:\\app\\codex-ui.exe".into(),
+                "codexui://open-session/task-thread-123".into(),
+            ]),
+            Some("task-thread-123".into()),
+        );
+        // 命中后截断紧随其后的引号/空白（激活器可能包裹或拼接其它 token）
+        assert_eq!(
+            parse_activation_thread(&["codexui://open-session/abc\"extra".into()]),
+            Some("abc".into()),
+        );
+        // 未命中协议串
+        assert_eq!(
+            parse_activation_thread(&["-AppUserModelId".into(), "codex-ui".into()]),
+            None,
+        );
     }
 
     #[test]
