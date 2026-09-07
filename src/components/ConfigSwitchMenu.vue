@@ -118,10 +118,10 @@ watch(open, (v) => {
           <path fill="none" vector-effect="non-scaling-stroke" d="M6.5 3.1c-1.4 0-2.1.8-2.1 2.2v1c0 .6-.4 1.1-1 1.2v.9c.6.1 1 .6 1 1.2v1c0 1.4.7 2.2 2.1 2.2" />
           <path fill="none" vector-effect="non-scaling-stroke" d="M9.5 3.1c1.4 0 2.1.8 2.1 2.2v1c0 .6.4 1.1 1 1.2v.9c-.6.1-1 .6-1 1.2v1c0 1.4-.7 2.2-2.1 2.2" />
         </g>
-        <path fill="none" d="M1.7 4.3V1.7H4.3" />
-        <path fill="none" d="M14.3 4.3V1.7H11.7" />
-        <path fill="none" d="M1.7 11.7V14.3H4.3" />
-        <path fill="none" d="M14.3 11.7V14.3H11.7" />
+        <path fill="none" d="M2.2 4.8V2.2H4.8" />
+        <path fill="none" d="M13.8 4.8V2.2H11.2" />
+        <path fill="none" d="M2.2 11.2V13.8H4.8" />
+        <path fill="none" d="M13.8 11.2V13.8H11.2" />
       </svg>
     </button>
 
@@ -132,10 +132,10 @@ watch(open, (v) => {
             <path fill="none" vector-effect="non-scaling-stroke" d="M6.5 3.1c-1.4 0-2.1.8-2.1 2.2v1c0 .6-.4 1.1-1 1.2v.9c.6.1 1 .6 1 1.2v1c0 1.4.7 2.2 2.1 2.2" />
             <path fill="none" vector-effect="non-scaling-stroke" d="M9.5 3.1c1.4 0 2.1.8 2.1 2.2v1c0 .6.4 1.1 1 1.2v.9c-.6.1-1 .6-1 1.2v1c0 1.4-.7 2.2-2.1 2.2" />
           </g>
-          <path fill="none" d="M1.7 4.3V1.7H4.3" />
-          <path fill="none" d="M14.3 4.3V1.7H11.7" />
-          <path fill="none" d="M1.7 11.7V14.3H4.3" />
-          <path fill="none" d="M14.3 11.7V14.3H11.7" />
+          <path fill="none" d="M2.2 4.8V2.2H4.8" />
+          <path fill="none" d="M13.8 4.8V2.2H11.2" />
+          <path fill="none" d="M2.2 11.2V13.8H4.8" />
+          <path fill="none" d="M13.8 11.2V13.8H11.2" />
         </svg>
         <span>配置快照</span>
       </div>
