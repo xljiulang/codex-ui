@@ -3,6 +3,7 @@
 // 前端仅负责调用命令、应用后触发 codex 热重载、并持久化当前激活配置名。
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, saveSettings, setToast, store } from "./useCodex";
+import { openPathInAppOrReveal } from "./usePathOpen";
 
 /** config/read 返回的配置层（取子集，与服务端 schema 对齐） */
 interface RawConfigReadResponse {
@@ -43,6 +44,14 @@ export async function deleteConfigProfile(name: string): Promise<void> {
     await saveSettings({ active_config: null });
   }
   setToast(`已删除配置「${name}」`);
+}
+
+/** 打开配置快照：把该快照目录下的 config.toml 与模型目录文件在编辑器打开。 */
+export async function openConfigProfile(name: string): Promise<void> {
+  const files = await invoke<string[]>("config_profiles_open", { name });
+  for (const f of files) {
+    await openPathInAppOrReveal(f);
+  }
 }
 
 /** 让 codex 重读已覆盖到磁盘的 config.toml：优先空编辑触发 reloadUserConfig，

@@ -1,13 +1,13 @@
 //! 配置快照管理：在 `CODEX_HOME/codex-ui/<配置名>` 下保存/切换 codex 配置快照。
 //!
-//! 快照目录成员固定为：
+//! 快照目录成员：
 //! - `config.toml`：`CODEX_HOME/config.toml` 的原文复制，**绝不改写结构**；
-//! - `models.json`：`model_catalog_json` 解析目标文件的内容（统一固定文件名）。
+//! - 模型目录文件：`model_catalog_json` 解析目标文件的内容，按源文件 basename 存放。
 //!
 //! 语义：
 //! - 保存：把当前 codex-home 的 config.toml 与 model_catalog 值内容快照到
 //!   `codex-ui/<配置名>/`（同名已存在则覆盖更新）。
-//! - 应用：把快照 config.toml 覆盖回 codex-home/config.toml，并把快照 `models.json`
+//! - 应用：把快照 config.toml 覆盖回 codex-home/config.toml，并把快照模型目录文件
 //!   内容写回 config 解析出的 model_catalog 目标文件（目标可能在 codex-home 之外）。
 //! - 删除：删除该快照目录，仅允许位于 codex-home/codex-ui 之下。
 
@@ -15,6 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::codex::model_config::{self, atomic_write};
+use crate::codex::path_util::clean_path;
 
 /// codex-home 下存放全部配置快照的根目录。
 fn profiles_root(home: &Path) -> PathBuf {
@@ -24,6 +25,17 @@ fn profiles_root(home: &Path) -> PathBuf {
 /// 单个配置快照目录。
 fn profile_dir(home: &Path, name: &str) -> PathBuf {
     profiles_root(home).join(name)
+}
+
+/// 从 `model_catalog_json` 原始值中取文件 basename（如 `catalog/custom.json` → `custom.json`）。
+/// 值为空或无法取文件名时返回 None。
+fn catalog_file_name(value: &str) -> Option<String> {
+    let name = Path::new(value).file_name()?.to_str()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 /// 校验配置名（Windows 文件夹名）：非空、不是 `.`/`..`、不含非法字符、
@@ -98,15 +110,15 @@ fn save_in(home: &Path, name: &str) -> Result<(), String> {
     };
     atomic_write(&dir.join("config.toml"), &config_content)?;
 
-    // 仅当 config 引用了 model_catalog 且目标文件存在时，记录其内容（固定名 models.json）。
+    // 仅当 config 引用了 model_catalog 且目标文件存在时，按源文件名记录其内容。
     if let Some(value) = model_config::model_catalog_json_value(&config_path) {
-        if !value.trim().is_empty() {
+        if let Some(name) = catalog_file_name(value.trim()) {
             let target = model_config::resolve_catalog_path(home, Some(value.as_str()));
             if target.is_file() {
                 let content = fs::read_to_string(&target)
                     .map_err(|e| format!("读取模型目录文件失败: {e}"))?;
                 if !content.is_empty() {
-                    atomic_write(&dir.join("models.json"), &content)?;
+                    atomic_write(&dir.join(name), &content)?;
                 }
             }
         }
@@ -134,9 +146,18 @@ fn apply_in(home: &Path, name: &str) -> Result<(), String> {
     // 依据刚应用的 config 重新解析 model_catalog 目标并回写快照内容（相对/绝对/`~` 统一处理）。
     let config_path = model_config::config_path_in(home);
     if let Some(value) = model_config::model_catalog_json_value(&config_path) {
-        if !value.trim().is_empty() {
-            let models_path = dir.join("models.json");
-            if models_path.is_file() {
+        if let Some(name) = catalog_file_name(value.trim()) {
+            // 优先按源名读取；旧快照曾固定存为 models.json，找不到时回退兼容。
+            let name_path = dir.join(name);
+            let fallback_path = dir.join("models.json");
+            let models_path = if name_path.is_file() {
+                Some(name_path)
+            } else if fallback_path.is_file() {
+                Some(fallback_path)
+            } else {
+                None
+            };
+            if let Some(models_path) = models_path {
                 let content = fs::read_to_string(&models_path)
                     .map_err(|e| format!("读取模型目录快照失败: {e}"))?;
                 let target = model_config::resolve_catalog_path(home, Some(value.as_str()));
@@ -167,6 +188,37 @@ fn delete_in(home: &Path, name: &str) -> Result<(), String> {
         fs::remove_dir_all(&dir).map_err(|e| format!("删除配置快照失败: {e}"))?;
     }
     Ok(())
+}
+
+/// 列出配置快照目录下所有文件（config.toml 置顶 + 模型目录文件）的绝对路径，供编辑器打开。
+pub fn open_files(name: &str) -> Result<Vec<String>, String> {
+    open_files_in(&model_config::codex_home()?, name)
+}
+
+fn open_files_in(home: &Path, name: &str) -> Result<Vec<String>, String> {
+    validate_name(name)?;
+    let root = profiles_root(home);
+    let dir = profile_dir(home, name);
+    if dir.parent() != Some(root.as_path()) || !dir.starts_with(&root) {
+        return Err(format!("非法的配置路径「{name}」"));
+    }
+    if !dir.is_dir() {
+        return Err(format!("配置快照「{name}」不存在"));
+    }
+    let mut files: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| format!("读取配置快照目录失败: {e}"))? {
+        let entry = entry.map_err(|e| format!("读取配置快照目录项失败: {e}"))?;
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            files.push(entry.path());
+        }
+    }
+    // config.toml 置顶，其余按文件名排序。
+    files.sort_by(|a, b| {
+        let a_cfg = a.file_name().map(|f| f == "config.toml").unwrap_or(false);
+        let b_cfg = b.file_name().map(|f| f == "config.toml").unwrap_or(false);
+        b_cfg.cmp(&a_cfg).then_with(|| a.cmp(b))
+    });
+    Ok(files.into_iter().map(|p| clean_path(&p)).collect())
 }
 
 #[cfg(test)]
@@ -249,6 +301,50 @@ mod tests {
             "model = \"gpt2\"\n"
         );
         assert_eq!(list_in(home).unwrap(), vec!["dev".to_string()]);
+    }
+
+    #[test]
+    fn save_uses_source_basename_for_catalog() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        write(
+            home,
+            "config.toml",
+            "model = \"gpt\"\nmodel_catalog_json = \"catalog/custom.json\"\n",
+        );
+        write(home, "catalog/custom.json", r#"{"models":[{"slug":"x"}]}"#);
+
+        save_in(home, "dev").unwrap();
+        let snap = profile_dir(home, "dev");
+        // 按源文件名存储，而非固定 models.json
+        assert!(snap.join("custom.json").is_file());
+        assert!(!snap.join("models.json").exists());
+        assert_eq!(
+            fs::read_to_string(snap.join("custom.json")).unwrap(),
+            r#"{"models":[{"slug":"x"}]}"#
+        );
+        // 应用写回解析目标
+        write(home, "catalog/custom.json", r#"{"models":[{"slug":"changed"}]}"#);
+        apply_in(home, "dev").unwrap();
+        assert_eq!(
+            fs::read_to_string(home.join("catalog").join("custom.json")).unwrap(),
+            r#"{"models":[{"slug":"x"}]}"#
+        );
+    }
+
+    #[test]
+    fn open_files_lists_snapshot_files_config_first() {
+        let dir = TempDir::new().unwrap();
+        let home = dir.path();
+        write(home, "config.toml", "model = \"gpt\"\nmodel_catalog_json = \"custom.json\"\n");
+        write(home, "custom.json", "[]");
+        save_in(home, "dev").unwrap();
+
+        let files = open_files_in(home, "dev").unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files[0].ends_with("config.toml"));
+        assert!(files.iter().any(|f| f.ends_with("custom.json")));
+        assert!(open_files_in(home, "nope").is_err());
     }
 
     #[test]

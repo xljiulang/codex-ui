@@ -794,6 +794,12 @@ pub fn config_profiles_delete(name: String) -> Result<(), String> {
     config_profiles::delete_profile(&name)
 }
 
+/// 列出配置快照目录下所有文件（config.toml 置顶 + 模型目录文件）的绝对路径。
+#[tauri::command]
+pub fn config_profiles_open(name: String) -> Result<Vec<String>, String> {
+    config_profiles::open_files(&name)
+}
+
 /// 读取本地技能列表（从 skills/list 聚合列表过滤 CODEX_HOME/skills 下的技能），
 /// 供设置页「技能管理」使用；force_reload 为 true 时绕过技能缓存强制重扫。
 #[tauri::command]

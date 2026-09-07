@@ -205,6 +205,7 @@ pub fn run() {
               codex::commands::config_profiles_save,
               codex::commands::config_profiles_apply,
               codex::commands::config_profiles_delete,
+              codex::commands::config_profiles_open,
               codex::commands::skills_read,
             codex::commands::skills_add,
             codex::commands::skills_remove,

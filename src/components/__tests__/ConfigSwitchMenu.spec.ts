@@ -25,17 +25,19 @@ const mockList = vi.hoisted(() => vi.fn());
 const mockCreate = vi.hoisted(() => vi.fn());
 const mockApply = vi.hoisted(() => vi.fn());
 const mockDelete = vi.hoisted(() => vi.fn());
+const mockOpen = vi.hoisted(() => vi.fn());
 
 vi.mock("../../composables/useConfigProfiles", () => ({
   listConfigProfiles: mockList,
   createConfigProfile: mockCreate,
   applyConfigProfile: mockApply,
   deleteConfigProfile: mockDelete,
+  openConfigProfile: mockOpen,
 }));
 
 import ConfigSwitchMenu from "../ConfigSwitchMenu.vue";
 import { tooltipDirective } from "../../directives/tooltip";
-import { ICON_CLOSE } from "../../lib/icons";
+import { ICON_CLOSE, ICON_OPEN, ICON_RESTORE } from "../../lib/icons";
 
 function mountMenu() {
   return mount(ConfigSwitchMenu, {
@@ -49,6 +51,7 @@ describe("ConfigSwitchMenu", () => {
     mockCreate.mockReset();
     mockApply.mockReset();
     mockDelete.mockReset();
+    mockOpen.mockReset();
     mockSetToast.mockReset();
     mockStore.settings.active_config = null;
   });
@@ -77,12 +80,14 @@ describe("ConfigSwitchMenu", () => {
     expect(btn.text().trim()).toBe("");
   });
 
-  it("点 ✓ 应用配置", async () => {
+  it("点还原按钮还原配置快照", async () => {
     mockStore.settings.active_config = "a";
     const wrapper = mountMenu();
     await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();
-    await wrapper.find('button[aria-label="应用配置a"]').trigger("click");
+    const restore = wrapper.find('button[aria-label="还原配置快照a"]');
+    expect(restore.find("path").attributes("d")).toBe(ICON_RESTORE);
+    await restore.trigger("click");
     await flushPromises();
     expect(mockApply).toHaveBeenCalledWith("a");
     expect(mockSetToast).not.toHaveBeenCalledWith(
@@ -94,23 +99,38 @@ describe("ConfigSwitchMenu", () => {
     const wrapper = mountMenu();
     await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();
-    const del = wrapper.find('button[aria-label="删除配置b"]');
+    const del = wrapper.find('button[aria-label="删除配置快照b"]');
     expect(del.find("path").attributes("d")).toBe(ICON_CLOSE);
-    // 同一行内 ✓ 应用按钮需在 × 删除按钮之前（name → ✓ → ×）
+    // 同一行内 还原 → 删除 → 打开（name → 还原 → 删除 → 打开）
     const row = del.element.closest(".git-branch-menu-item") as HTMLElement;
-    const apply = row.querySelector('button[aria-label="应用配置b"]');
-    expect(apply).toBeTruthy();
+    const restore = row.querySelector('button[aria-label="还原配置快照b"]');
+    const openBtn = row.querySelector('button[aria-label="打开配置快照b"]');
+    expect(restore).toBeTruthy();
+    expect(openBtn).toBeTruthy();
     expect(
-      Array.prototype.indexOf.call(
-        row.children,
-        apply,
-      ),
+      Array.prototype.indexOf.call(row.children, restore),
     ).toBeLessThan(
       Array.prototype.indexOf.call(row.children, del.element),
+    );
+    expect(
+      Array.prototype.indexOf.call(row.children, del.element),
+    ).toBeLessThan(
+      Array.prototype.indexOf.call(row.children, openBtn),
     );
     await del.trigger("click");
     await flushPromises();
     expect(mockDelete).toHaveBeenCalledWith("b");
+  });
+
+  it("点打开按钮打开配置快照文件", async () => {
+    const wrapper = mountMenu();
+    await wrapper.find('button[aria-label="配置快照"]').trigger("click");
+    await flushPromises();
+    const openBtn = wrapper.find('button[aria-label="打开配置快照b"]');
+    expect(openBtn.find("path").attributes("d")).toBe(ICON_OPEN);
+    await openBtn.trigger("click");
+    await flushPromises();
+    expect(mockOpen).toHaveBeenCalledWith("b");
   });
 
   it("底部新建：输入名字并点新建创建配置", async () => {

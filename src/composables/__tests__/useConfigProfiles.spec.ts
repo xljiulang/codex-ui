@@ -6,6 +6,7 @@ import {
   createConfigProfile,
   deleteConfigProfile,
   listConfigProfiles,
+  openConfigProfile,
 } from "../useConfigProfiles";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -17,6 +18,7 @@ const mockStore = vi.hoisted(() => ({
 const mockSaveSettings = vi.hoisted(() => vi.fn());
 const mockSetToast = vi.hoisted(() => vi.fn());
 const mockAskConfirm = vi.hoisted(() => vi.fn());
+const mockOpenPath = vi.hoisted(() => vi.fn());
 
 vi.mock("../useCodex", () => ({
   store: mockStore,
@@ -25,12 +27,17 @@ vi.mock("../useCodex", () => ({
   askConfirm: mockAskConfirm,
 }));
 
+vi.mock("../usePathOpen", () => ({
+  openPathInAppOrReveal: mockOpenPath,
+}));
+
 describe("useConfigProfiles", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockSaveSettings.mockReset();
     mockSetToast.mockReset();
     mockAskConfirm.mockReset();
+    mockOpenPath.mockReset();
     mockStore.settings.active_config = null;
   });
 
@@ -140,5 +147,27 @@ describe("useConfigProfiles", () => {
       name: "dev",
     });
     expect(mockSaveSettings).not.toHaveBeenCalled();
+  });
+
+  it("openConfigProfile 拉取快照文件并在编辑器逐个打开", async () => {
+    mockedInvoke.mockResolvedValue([
+      "/home/.codex/codex-ui/dev/config.toml",
+      "/home/.codex/codex-ui/dev/custom.json",
+    ]);
+
+    await openConfigProfile("dev");
+
+    expect(mockedInvoke).toHaveBeenCalledWith("config_profiles_open", {
+      name: "dev",
+    });
+    expect(mockOpenPath).toHaveBeenCalledTimes(2);
+    expect(mockOpenPath).toHaveBeenNthCalledWith(
+      1,
+      "/home/.codex/codex-ui/dev/config.toml",
+    );
+    expect(mockOpenPath).toHaveBeenNthCalledWith(
+      2,
+      "/home/.codex/codex-ui/dev/custom.json",
+    );
   });
 });

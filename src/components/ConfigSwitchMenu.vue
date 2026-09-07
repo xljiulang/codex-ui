@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
-  ICON_CHECK,
   ICON_CLOSE,
+  ICON_OPEN,
   ICON_PLUS,
+  ICON_RESTORE,
 } from "../lib/icons";
 import { setToast, store, toastError } from "../composables/useCodex";
 import {
@@ -11,6 +12,7 @@ import {
   createConfigProfile,
   deleteConfigProfile,
   listConfigProfiles,
+  openConfigProfile,
 } from "../composables/useConfigProfiles";
 
 const open = ref(false);
@@ -138,24 +140,35 @@ watch(open, (v) => {
         <button
           class="config-apply-btn"
           :class="{ active: p === activeConfig }"
-          :aria-label="`应用配置${p}`"
-          v-tooltip="'使用此配置'"
+          :aria-label="`还原配置快照${p}`"
+          v-tooltip="'还原配置快照'"
           :disabled="loading"
           @click="apply(p)"
         >
           <svg viewBox="0 0 24 24">
-            <path :d="ICON_CHECK" />
+            <path :d="ICON_RESTORE" />
           </svg>
         </button>
         <button
           class="git-branch-delete"
-          :aria-label="`删除配置${p}`"
-          v-tooltip="'删除此配置'"
+          :aria-label="`删除配置快照${p}`"
+          v-tooltip="'删除配置快照'"
           :disabled="loading"
           @click="del(p)"
         >
           <svg viewBox="0 0 24 24">
             <path :d="ICON_CLOSE" />
+          </svg>
+        </button>
+        <button
+          class="config-open-btn"
+          :aria-label="`打开配置快照${p}`"
+          v-tooltip="'打开配置快照'"
+          :disabled="loading"
+          @click="openConfigProfile(p)"
+        >
+          <svg viewBox="0 0 24 24">
+            <path :d="ICON_OPEN" />
           </svg>
         </button>
       </div>
@@ -267,6 +280,36 @@ watch(open, (v) => {
 }
 
 .config-apply-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.config-open-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.config-open-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+
+.config-open-btn:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+.config-open-btn svg {
   width: 12px;
   height: 12px;
   fill: currentColor;
