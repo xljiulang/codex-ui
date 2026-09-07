@@ -77,6 +77,36 @@ fn notification_dev_app_id() -> &'static str {
     APP_USER_MODEL_ID
 }
 
+/// 让本进程显式声明 Windows AppUserModelID：安装版下 toast 按钮的前台激活因此会被
+/// Windows 投递到「当前已运行进程」的 `ToastNotification.Activated` 事件（`on_activated`），
+/// 从而聚焦窗口并打开绑定会话；否则 Windows 会经安装版快捷方式尝试拉起新实例，
+/// 被单实例插件截获后仅「聚焦窗口」，会话打开逻辑永远不执行。
+///
+/// 仅安装版（exe 不在 `target/debug`、`target/release`）设置；开发版 toast 仍回退
+/// PowerShell AUMID 仅为「能显示」，其点击路由本就不在本端，故不为其设置进程 AUMID，
+/// 避免把本进程伪装成 PowerShell。
+pub fn ensure_process_app_user_model_id() {
+    #[cfg(windows)]
+    {
+        if notification_app_id() == APP_USER_MODEL_ID {
+            // 手动构造以 NUL 结尾的 UTF-16 宽字符串，避免 windows / windows-core
+            // 两个版本不一致导致 HSTRING 无法传入 Param<PCWSTR>；进程 AUMID 声明一次，
+            // 既是任务栏分组归属，也是 toast 激活路由的依据，失败仅记日志不影响功能。
+            let mut wide: Vec<u16> = APP_USER_MODEL_ID.encode_utf16().collect();
+            wide.push(0);
+            unsafe {
+                let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
+                    windows::core::PCWSTR::from_raw(wide.as_ptr()),
+                );
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        // 项目仅面向 Windows，此分支不会在目标构建中用到。
+    }
+}
+
 /// 归一化忙碌策略：非法值回退 defer。
 pub fn normalize_busy_policy(v: &str) -> &'static str {
     if v.eq_ignore_ascii_case(BUSY_POLICY_SKIP) {

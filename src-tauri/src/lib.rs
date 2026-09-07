@@ -88,6 +88,10 @@ fn show_main(app: &AppHandle) {
 }
 
 pub fn run() {
+    // 尽早声明进程 AUMID（安装版），确保定时任务 toast 按钮的前台激活投递到本运行进程，
+    // 而非经快捷方式拉起新实例（那样会丢失点击上下文，无法聚焦并打开绑定会话）。
+    codex::scheduled_tasks::ensure_process_app_user_model_id();
+
     let builder = tauri::Builder::default()
         .on_page_load(|webview, payload| {
             // 主窗口页面加载完成（Vue 已挂载、加载动画已渲染）后再显示，

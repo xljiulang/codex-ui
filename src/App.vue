@@ -26,6 +26,7 @@ onMounted(async () => {
     if (!threadId) return;
     const win = getCurrentWindow();
     await win.show();
+    await win.unminimize();
     await win.setFocus();
     await openSession(threadId);
   });
