@@ -17,6 +17,8 @@ export async function listConfigProfiles(): Promise<string[]> {
 /** 新建/覆盖配置快照：把当前 codex-home 的 config.toml 与 model_catalog 内容快照到该配置目录。 */
 export async function createConfigProfile(name: string): Promise<void> {
   await invoke("config_profiles_save", { name });
+  // 快照内容即当前 codex-home 状态，直接把它设为激活项（不还原文件、不热重载）。
+  await saveSettings({ active_config: name });
 }
 
 /** 应用（使用）配置：覆盖 codex-home 文件并触发 codex 热重载，随后持久化激活配置名。 */

@@ -123,7 +123,7 @@ describe("ConfigSwitchMenu", () => {
     await wrapper.find(".git-branch-create-btn").trigger("click");
     await flushPromises();
     expect(mockCreate).toHaveBeenCalledWith("dev");
-    // 新建成功后菜单关闭（输入框随 popup 一并卸载）
-    expect(wrapper.find(".config-profiles-menu").exists()).toBe(false);
+    // 新建成功后菜单保持打开，便于直接看到新快照被勾选
+    expect(wrapper.find(".config-profiles-menu").exists()).toBe(true);
   });
 });

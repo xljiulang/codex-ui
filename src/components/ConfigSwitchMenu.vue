@@ -47,9 +47,8 @@ async function create(name: string) {
   try {
     await createConfigProfile(n);
     newName.value = "";
-    open.value = false;
     profiles.value = await listConfigProfiles();
-    setToast(`已保存配置「${n}」`);
+    setToast(`已创建并切换到配置快照「${n}」`);
   } catch (e) {
     setToast(toastError(e));
   } finally {

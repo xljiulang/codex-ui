@@ -46,6 +46,18 @@ describe("useConfigProfiles", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("config_profiles_save", {
       name: "dev",
     });
+    // 新建即把新快照设为激活（不还原文件、不触发应用/热重载）
+    expect(mockSaveSettings).toHaveBeenCalledWith({ active_config: "dev" });
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd]) => cmd === "config_profiles_apply",
+      ),
+    ).toBe(false);
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd]) => cmd === "codex_rpc",
+      ),
+    ).toBe(false);
   });
 
   it("applyConfigProfile 覆盖文件、热重载并持久化激活配置、toast 提示", async () => {
