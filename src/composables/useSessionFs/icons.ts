@@ -5,14 +5,23 @@ import type {
   IconRequest,
   IconResult,
 } from "../../lib/sessionFs";
+import {
+  BUILTIN_ICON_NAMES,
+  builtinFileIcon,
+} from "../../lib/fileTypeIcons";
 import { iconCache } from "./state";
 
 /** 图标缓存上限：超限按插入顺序淘汰最旧 */
 const ICON_CACHE_MAX = 1000;
 
-/** 图标缓存键：目录返回 null（不在范围）；文件按扩展名/无扩展名路径 */
+/** 内置图标覆盖的特殊文件名集合（Dockerfile/Makefile/.gitignore/.env 等） */
+const SPECIAL_ICON_NAMES = new Set(BUILTIN_ICON_NAMES);
+
+/** 图标缓存键：目录返回 null（不在范围）；特殊文件名/按扩展名共享，其余按路径 */
 export function iconCacheKey(entry: FsEntry): string | null {
   if (entry.isDir) return null;
+  const lowerName = entry.name.toLowerCase();
+  if (SPECIAL_ICON_NAMES.has(lowerName)) return `ext:${lowerName}`;
   const dot = entry.name.lastIndexOf(".");
   if (dot > 0 && dot < entry.name.length - 1) {
     return `ext:${entry.name.slice(dot).toLowerCase()}`;
@@ -44,6 +53,13 @@ export async function ensureEntryIcons(
   root: string = workspace.value,
 ): Promise<void> {
   if (!root || !entries.length) return;
+  // 内置代码文件图标优先：命中即写缓存，不再发起系统图标请求
+  for (const e of entries) {
+    const key = iconCacheKey(e);
+    if (!key || iconCache.has(key)) continue;
+    const builtin = builtinFileIcon(e.name);
+    if (builtin) setIconCache(key, builtin);
+  }
   const byKey = new Map<string, FsEntry>();
   for (const e of entries) {
     const key = iconCacheKey(e);

@@ -75,6 +75,51 @@ describe("useSessionFs 文件图标缓存", () => {
     expect(iconCacheKey(file("src", "src", true))).toBeNull();
   });
 
+  it("iconCacheKey：特殊文件名归一为共享键（大小写不敏感）", () => {
+    expect(iconCacheKey(file("Dockerfile", "Dockerfile"))).toBe("ext:dockerfile");
+    expect(iconCacheKey(file("Makefile", "build/Makefile"))).toBe("ext:makefile");
+    expect(iconCacheKey(file(".gitignore", ".gitignore"))).toBe("ext:.gitignore");
+    expect(iconCacheKey(file(".env", "conf/.env"))).toBe("ext:.env");
+  });
+
+  it("ensureEntryIcons：内置扩展名直接用内置图标，不发起系统图标请求", async () => {
+    const a = file("a.ts", "a.ts");
+    await ensureEntryIcons([a]);
+    expect(mockedInvoke).not.toHaveBeenCalled();
+    expect(iconFor(a)).toMatch(/^data:image\/svg\+xml,/);
+  });
+
+  it("ensureEntryIcons：内置与系统图标混排，只为未覆盖扩展名发请求", async () => {
+    const ts = file("a.ts", "a.ts");
+    const ini = file("b.ini", "b.ini");
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_icons") {
+        const req = (args as { requests: { path: string }[] }).requests;
+        return Promise.resolve(
+          req.map((r) => ({ path: r.path, dataUri: "data:image/png;base64,CCCC" })),
+        );
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await ensureEntryIcons([ts, ini]);
+
+    expect(mockedInvoke).toHaveBeenCalledTimes(1);
+    const [, args] = mockedInvoke.mock.calls[0];
+    expect((args as { requests: { path: string }[] }).requests).toEqual([
+      { path: ini.path },
+    ]);
+    expect(iconFor(ts)).toMatch(/^data:image\/svg\+xml,/);
+    expect(iconFor(ini)).toBe("data:image/png;base64,CCCC");
+  });
+
+  it("ensureEntryIcons：特殊文件名用内置图标且不发起请求", async () => {
+    const a = file("Dockerfile", "Dockerfile");
+    await ensureEntryIcons([a]);
+    expect(mockedInvoke).not.toHaveBeenCalled();
+    expect(iconFor(a)).toMatch(/^data:image\/svg\+xml,/);
+  });
+
   it("ensureEntryIcons：同扩展名去重只发一次请求，结果回填缓存", async () => {
     const a = file("a.txt", "a.txt");
     const b = file("b.txt", "sub/b.txt");
