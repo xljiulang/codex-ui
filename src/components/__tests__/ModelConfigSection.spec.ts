@@ -85,8 +85,18 @@ describe("ModelConfigSection 回复风格与输出详细程度", () => {
     const wrapper = await mountSection();
     const rows = wrapper.findAll(".settings .setting-row");
     const labels = rows.map((r) => r.find("label").text());
+    expect(labels).toContain("model_reasoning_effort（推理强度）");
+    expect(labels).toContain("preferred_auth_method（认证方式）");
     expect(labels).toContain("personality（回复风格）");
     expect(labels).toContain("model_verbosity（输出详细程度）");
+    // 顺序：effort → 认证方式 → personality → verbosity
+    const iEffort = labels.indexOf("model_reasoning_effort（推理强度）");
+    const iAuth = labels.indexOf("preferred_auth_method（认证方式）");
+    const iPersonality = labels.indexOf("personality（回复风格）");
+    const iVerbosity = labels.indexOf("model_verbosity（输出详细程度）");
+    expect(iAuth).toBeGreaterThan(iEffort);
+    expect(iPersonality).toBeGreaterThan(iAuth);
+    expect(iVerbosity).toBeGreaterThan(iPersonality);
     // AppSelect 触发按钮显示选中项 label
     const personalitySelect = wrapper.find("#model-config-ui-personality");
     expect(personalitySelect.text()).toContain("pragmatic（务实简洁）");

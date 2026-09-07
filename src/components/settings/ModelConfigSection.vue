@@ -595,13 +595,26 @@ function openModelConfigFile() {
           </p>
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-effort">model_reasoning_effort</label>
+          <label for="model-config-ui-effort">model_reasoning_effort（推理强度）</label>
           <AppSelect
             id="model-config-ui-effort"
             v-model="modelConfig.model_reasoning_effort"
             :disabled="modelConfig.loading"
             :options="reasoningEffortOptions"
           />
+        </div>
+        <div class="setting-row">
+          <label for="model-config-ui-auth">preferred_auth_method（认证方式）</label>
+          <AppSelect
+            id="model-config-ui-auth"
+            v-model="authMethod"
+            :disabled="modelConfig.loading"
+            :options="authMethodOptions"
+          />
+          <p class="model-config-advanced-note">
+            选「API Key」写入
+            preferred_auth_method="apikey" 与 forced_login_method="api"
+          </p>
         </div>
         <div class="setting-row">
           <label for="model-config-ui-personality">personality（回复风格）</label>
@@ -625,19 +638,6 @@ function openModelConfigFile() {
           />
           <p class="model-config-advanced-note">
             控制回答长短，不影响推理；选「low」可减少输出 token
-          </p>
-        </div>
-        <div class="setting-row">
-          <label for="model-config-ui-auth">认证方式</label>
-          <AppSelect
-            id="model-config-ui-auth"
-            v-model="authMethod"
-            :disabled="modelConfig.loading"
-            :options="authMethodOptions"
-          />
-          <p class="model-config-advanced-note">
-            选「API Key」写入
-            preferred_auth_method="apikey" 与 forced_login_method="api"
           </p>
         </div>
       </div>
