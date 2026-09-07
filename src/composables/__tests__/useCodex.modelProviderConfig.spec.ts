@@ -58,21 +58,26 @@ describe("useCodex/modelProviderConfig", () => {
 
   it("loadModelProviderConfig 取用户层 model_providers/model_provider 归一化并保留 raw", async () => {
     mockedInvoke.mockResolvedValue(
-      readResponse({
-        deepseek: {
-          name: "DeepSeek",
-          base_url: "https://api.deepseek.com/",
-          env_key: "DS",
-          experimental_bearer_token: "sk-1",
-          wire_api: "responses",
-          custom: 42,
+      readResponse(
+        {
+          deepseek: {
+            name: "DeepSeek",
+            base_url: "https://api.deepseek.com/",
+            env_key: "DS",
+            experimental_bearer_token: "sk-1",
+            wire_api: "responses",
+            custom: 42,
+          },
+          other: { name: "Other", base_url: "https://o.example/v1", wire_api: "chat" },
         },
-        other: { name: "Other", base_url: "https://o.example/v1", wire_api: "chat" },
-      }),
+        { personality: "pragmatic", model_verbosity: "low" },
+      ),
     );
     const s = await loadModelProviderConfig();
     expect(s.model).toBe("gpt-x");
     expect(s.model_reasoning_effort).toBe("high");
+    expect(s.personality).toBe("pragmatic");
+    expect(s.model_verbosity).toBe("low");
     expect(s.model_provider).toBe("deepseek");
     expect(s.preferred_auth_method).toBe("apikey");
     expect(s.forced_login_method).toBe("api");
@@ -140,6 +145,8 @@ describe("useCodex/modelProviderConfig", () => {
     await saveModelProviderConfig({
       model: "gpt-x",
       model_reasoning_effort: "high",
+      personality: "pragmatic",
+      model_verbosity: "low",
       model_provider: "deepseek",
       preferred_auth_method: "apikey",
       forced_login_method: "api",
@@ -177,6 +184,16 @@ describe("useCodex/modelProviderConfig", () => {
             mergeStrategy: "replace",
           },
           {
+            keyPath: "personality",
+            value: "pragmatic",
+            mergeStrategy: "replace",
+          },
+          {
+            keyPath: "model_verbosity",
+            value: "low",
+            mergeStrategy: "replace",
+          },
+          {
             keyPath: "preferred_auth_method",
             value: "apikey",
             mergeStrategy: "replace",
@@ -207,6 +224,8 @@ describe("useCodex/modelProviderConfig", () => {
     await saveModelProviderConfig({
       model: "",
       model_reasoning_effort: "",
+      personality: "",
+      model_verbosity: "",
       model_provider: "a",
       preferred_auth_method: "",
       forced_login_method: "",
@@ -233,8 +252,19 @@ describe("useCodex/modelProviderConfig", () => {
       value: "",
       mergeStrategy: "replace",
     });
+    // 空串 personality / model_verbosity 写 null（codex 删除该键，回退内置默认）
+    expect(edits[4]).toEqual({
+      keyPath: "personality",
+      value: null,
+      mergeStrategy: "replace",
+    });
+    expect(edits[5]).toEqual({
+      keyPath: "model_verbosity",
+      value: null,
+      mergeStrategy: "replace",
+    });
     // 空目录内容 → model_catalog_json 写 null（codex 删除该键）
-    expect(edits[6]).toEqual({
+    expect(edits[8]).toEqual({
       keyPath: "model_catalog_json",
       value: null,
       mergeStrategy: "replace",
@@ -245,6 +275,8 @@ describe("useCodex/modelProviderConfig", () => {
     const base = {
       model: "x",
       model_reasoning_effort: "",
+      personality: "",
+      model_verbosity: "",
       model_provider: "",
       preferred_auth_method: "",
       forced_login_method: "",

@@ -20,6 +20,10 @@ interface RawConfigReadResponse {
 export interface ModelProviderConfigState {
   model: string;
   model_reasoning_effort: string;
+  /** 回复风格 personality（friendly/pragmatic/none），空串表示未配置 */
+  personality: string;
+  /** 输出详细程度 model_verbosity（low/medium/high），空串表示未配置 */
+  model_verbosity: string;
   model_provider: string;
   preferred_auth_method: string;
   forced_login_method: string;
@@ -57,6 +61,8 @@ export async function loadModelProviderConfig(): Promise<ModelProviderConfigStat
   return {
     model: str(cfg.model),
     model_reasoning_effort: str(cfg.model_reasoning_effort),
+    personality: str(cfg.personality),
+    model_verbosity: str(cfg.model_verbosity),
     model_provider: str(cfg.model_provider),
     preferred_auth_method: str(cfg.preferred_auth_method),
     forced_login_method: str(cfg.forced_login_method),
@@ -114,6 +120,17 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
         {
           keyPath: "model_reasoning_effort",
           value: edit.model_reasoning_effort.trim(),
+          mergeStrategy: "replace",
+        },
+        {
+          // personality / model_verbosity：空串写 null 让 codex 删除该键（回退内置默认）
+          keyPath: "personality",
+          value: edit.personality.trim() || null,
+          mergeStrategy: "replace",
+        },
+        {
+          keyPath: "model_verbosity",
+          value: edit.model_verbosity.trim() || null,
           mergeStrategy: "replace",
         },
         {

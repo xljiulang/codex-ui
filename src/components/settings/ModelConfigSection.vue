@@ -50,6 +50,8 @@ const modelConfig = reactive({
   model_catalog: "",
   model: "",
   model_reasoning_effort: "",
+  personality: "",
+  model_verbosity: "",
   model_provider: "",
   preferred_auth_method: "",
   forced_login_method: "",
@@ -68,6 +70,24 @@ const REASONING_EFFORT_VALUES = [
   "xhigh",
   "max",
   "ultra",
+];
+
+/** config.toml `personality` 支持的档位（codex-cli Personality）。
+ *  friendly 亲和（默认，较啰嗦）、pragmatic 务实简洁、none 无人格；省输出 token 选 pragmatic。 */
+const PERSONALITY_OPTIONS: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  { value: "friendly", label: "friendly（亲和）" },
+  { value: "pragmatic", label: "pragmatic（务实简洁）" },
+  { value: "none", label: "none（无人格）" },
+];
+
+/** config.toml `model_verbosity` 支持的档位（GPT-5 系输出详细程度）。
+ *  控制最终回答的长短，不影响推理；省输出 token 选 low。 */
+const VERBOSITY_OPTIONS: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  { value: "low", label: "low（简洁）" },
+  { value: "medium", label: "medium（适中）" },
+  { value: "high", label: "high（详细）" },
 ];
 
 /** 模型配置卡片校验状态：空串表示无错误；catalog 为模型目录结构错误（阻断保存） */
@@ -140,6 +160,8 @@ function applyCatalogCard(res: ModelConfigState) {
 function applyProvidersCard(pc: ModelProviderConfigState) {
   modelConfig.model = pc.model;
   modelConfig.model_reasoning_effort = pc.model_reasoning_effort;
+  modelConfig.personality = pc.personality;
+  modelConfig.model_verbosity = pc.model_verbosity;
   modelConfig.model_provider = pc.model_provider;
   modelConfig.preferred_auth_method = pc.preferred_auth_method;
   modelConfig.forced_login_method = pc.forced_login_method;
@@ -395,6 +417,8 @@ async function saveModelConfig() {
     const input: ModelConfigUiEdit = {
       model: modelConfig.model.trim(),
       model_reasoning_effort: modelConfig.model_reasoning_effort.trim(),
+      personality: modelConfig.personality,
+      model_verbosity: modelConfig.model_verbosity,
       model_provider: modelConfig.model_provider,
       preferred_auth_method: auth.preferred_auth_method,
       forced_login_method: auth.forced_login_method,
@@ -578,6 +602,30 @@ function openModelConfigFile() {
             :disabled="modelConfig.loading"
             :options="reasoningEffortOptions"
           />
+        </div>
+        <div class="setting-row">
+          <label for="model-config-ui-personality">personality（回复风格）</label>
+          <AppSelect
+            id="model-config-ui-personality"
+            v-model="modelConfig.personality"
+            :disabled="modelConfig.loading"
+            :options="PERSONALITY_OPTIONS"
+          />
+          <p class="model-config-advanced-note">
+            选「pragmatic」回答更简洁，可减少输出 token
+          </p>
+        </div>
+        <div class="setting-row">
+          <label for="model-config-ui-verbosity">model_verbosity（输出详细程度）</label>
+          <AppSelect
+            id="model-config-ui-verbosity"
+            v-model="modelConfig.model_verbosity"
+            :disabled="modelConfig.loading"
+            :options="VERBOSITY_OPTIONS"
+          />
+          <p class="model-config-advanced-note">
+            控制回答长短，不影响推理；选「low」可减少输出 token
+          </p>
         </div>
         <div class="setting-row">
           <label for="model-config-ui-auth">认证方式</label>

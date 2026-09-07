@@ -293,6 +293,10 @@ export interface ModelProviderInfo {
 export interface ModelConfigUiEdit {
   model: string;
   model_reasoning_effort: string;
+  /** 回复风格 personality（friendly/pragmatic/none）；空串表示不写入该键 */
+  personality: string;
+  /** 输出详细程度 model_verbosity（low/medium/high）；空串表示不写入该键 */
+  model_verbosity: string;
   model_provider: string;
   preferred_auth_method: string;
   forced_login_method: string;
