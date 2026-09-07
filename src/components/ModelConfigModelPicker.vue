@@ -63,6 +63,7 @@ onBeforeUnmount(() => {
       v-bind="attrs"
       :value="modelValue"
       type="text"
+      autocomplete="off"
       :disabled="disabled"
       placeholder="如 deepseek-v4-flash"
       :class="{ 'model-config-input-error': error }"

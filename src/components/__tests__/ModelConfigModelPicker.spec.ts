@@ -23,6 +23,11 @@ function mountPicker(props: Record<string, unknown> = {}) {
 }
 
 describe("ModelConfigModelPicker 模型候选下拉", () => {
+  it("输入框禁用浏览器自动填充（规避「保存的信息」下拉）", () => {
+    const w = mountPicker();
+    expect(w.find("input").attributes("autocomplete")).toBe("off");
+  });
+
   it("点击输入框才展开，列表包含全部候选", async () => {
     const w = mountPicker();
     expect(w.find(".popup-menu").exists()).toBe(false);
