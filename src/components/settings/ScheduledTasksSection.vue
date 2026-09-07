@@ -24,9 +24,16 @@ import {
   ICON_REFRESH,
 } from "../../lib/icons";
 import type { ScheduledTask, TaskRunRecord, TaskRunStatus } from "../../lib/types";
+import AppSelect, { type AppSelectOption } from "../AppSelect.vue";
 import ModalDialog from "../ModalDialog.vue";
 
 const props = defineProps<{ active: boolean }>();
+
+/** 编辑弹窗忙时策略选项（AppSelect） */
+const busyPolicyOptions: AppSelectOption[] = [
+  { value: "defer", label: "忙时顺延" },
+  { value: "skip", label: "忙时跳过" },
+];
 
 /** 展开的任务 id 与各任务的执行记录状态（按任务分开查看，无混排视图） */
 const expandedId = ref("");
@@ -155,7 +162,7 @@ async function onRunNow(t: ScheduledTask) {
 
 /** 编辑弹窗状态与表单（编辑任务名、提示词、忙时策略；cron/绑定会话只读） */
 const editTask = ref<ScheduledTask | null>(null);
-const editForm = reactive({ name: "", prompt: "", busyPolicy: "defer" as "defer" | "skip" });
+const editForm = reactive({ name: "", prompt: "", busyPolicy: "defer" });
 const editSaving = ref(false);
 
 function openEdit(t: ScheduledTask) {
@@ -184,7 +191,7 @@ async function saveEdit() {
     await updateScheduledTask(t.id, {
       name,
       prompt,
-      busyPolicy: editForm.busyPolicy,
+      busyPolicy: editForm.busyPolicy === "skip" ? "skip" : "defer",
     });
     setToast(`任务「${name}」已更新`);
     editTask.value = null;
@@ -375,7 +382,7 @@ function toggleResult(runId: number) {
       <div class="sched-edit-form">
         <div class="setting-row">
           <label>
-            任务标题（name）
+            任务标题
           </label>
           <input
             v-model="editForm.name"
@@ -386,7 +393,7 @@ function toggleResult(runId: number) {
         </div>
         <div class="setting-row">
           <label>
-            提示词（prompt）
+            提示词
           </label>
           <textarea
             v-model="editForm.prompt"
@@ -397,22 +404,23 @@ function toggleResult(runId: number) {
         </div>
         <div class="setting-row">
           <label>
-            忙时策略（busyPolicy）
+            忙时策略
           </label>
-          <select v-model="editForm.busyPolicy" :disabled="editSaving">
-            <option value="defer">忙时顺延</option>
-            <option value="skip">忙时跳过</option>
-          </select>
+          <AppSelect
+            v-model="editForm.busyPolicy"
+            :options="busyPolicyOptions"
+            :disabled="editSaving"
+          />
         </div>
         <div class="setting-row sched-edit-readonly">
           <label>
-            调度表达式（只读）
+            调度表达式
           </label>
           <span class="sched-edit-readonly-value">{{ describeSchedule(editTask.cron) }}</span>
         </div>
         <div class="setting-row sched-edit-readonly">
           <label>
-            绑定会话（只读）
+            绑定会话
           </label>
           <span class="sched-edit-readonly-value">{{ threadLabel(editTask.threadId) }}</span>
         </div>
