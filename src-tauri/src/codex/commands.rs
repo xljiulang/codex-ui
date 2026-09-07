@@ -783,9 +783,8 @@ pub fn config_profiles_save(name: String) -> Result<(), String> {
 }
 
 /// 应用配置快照：覆盖 codex-home/config.toml，并把快照 models.json 写回 model_catalog 目标。
-/// 返回被写回的模型目录目标路径（仅当其在 codex-home 之外时返回 Some），供前端提示。
 #[tauri::command]
-pub fn config_profiles_apply(name: String) -> Result<Option<String>, String> {
+pub fn config_profiles_apply(name: String) -> Result<(), String> {
     config_profiles::apply(&name)
 }
 

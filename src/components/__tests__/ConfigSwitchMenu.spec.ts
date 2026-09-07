@@ -53,19 +53,19 @@ describe("ConfigSwitchMenu", () => {
     mockStore.settings.active_config = null;
   });
 
-  it("点配置切换按钮展开菜单并拉取配置列表", async () => {
+  it("点配置快照按钮展开菜单并拉取配置列表", async () => {
     const wrapper = mountMenu();
-    await wrapper.find('button[aria-label="配置切换"]').trigger("click");
+    await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();
     expect(mockList).toHaveBeenCalledOnce();
-    expect(wrapper.find(".config-menu-title").text()).toContain("配置切换");
+    expect(wrapper.find(".config-menu-title").text()).toContain("配置快照");
     expect(wrapper.text()).toContain("a");
     expect(wrapper.text()).toContain("b");
   });
 
   it("触发按钮为纯图标（内联单色 {} 花括号，无文字）", async () => {
     const wrapper = mountMenu();
-    const btn = wrapper.find('button[aria-label="配置切换"]');
+    const btn = wrapper.find('button[aria-label="配置快照"]');
     // 不再使用彩色 CSS 文件类型 <img>，改为内联单色 <svg>
     expect(btn.find("img").exists()).toBe(false);
     const brace = btn.find(".config-brace");
@@ -80,7 +80,7 @@ describe("ConfigSwitchMenu", () => {
   it("点 ✓ 应用配置", async () => {
     mockStore.settings.active_config = "a";
     const wrapper = mountMenu();
-    await wrapper.find('button[aria-label="配置切换"]').trigger("click");
+    await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();
     await wrapper.find('button[aria-label="应用配置a"]').trigger("click");
     await flushPromises();
@@ -92,10 +92,22 @@ describe("ConfigSwitchMenu", () => {
 
   it("点 × 删除配置（复用 git 分支删除图标 ICON_CLOSE）", async () => {
     const wrapper = mountMenu();
-    await wrapper.find('button[aria-label="配置切换"]').trigger("click");
+    await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();
     const del = wrapper.find('button[aria-label="删除配置b"]');
     expect(del.find("path").attributes("d")).toBe(ICON_CLOSE);
+    // 同一行内 ✓ 应用按钮需在 × 删除按钮之前（name → ✓ → ×）
+    const row = del.element.closest(".git-branch-menu-item") as HTMLElement;
+    const apply = row.querySelector('button[aria-label="应用配置b"]');
+    expect(apply).toBeTruthy();
+    expect(
+      Array.prototype.indexOf.call(
+        row.children,
+        apply,
+      ),
+    ).toBeLessThan(
+      Array.prototype.indexOf.call(row.children, del.element),
+    );
     await del.trigger("click");
     await flushPromises();
     expect(mockDelete).toHaveBeenCalledWith("b");
@@ -103,7 +115,7 @@ describe("ConfigSwitchMenu", () => {
 
   it("底部新建：输入名字并点新建创建配置", async () => {
     const wrapper = mountMenu();
-    await wrapper.find('button[aria-label="配置切换"]').trigger("click");
+    await wrapper.find('button[aria-label="配置快照"]').trigger("click");
     await flushPromises();
     const input = wrapper.find(".git-branch-input");
     expect(input.attributes("placeholder")).toBe("新建配置快照");

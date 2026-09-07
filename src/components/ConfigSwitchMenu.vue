@@ -108,8 +108,8 @@ watch(open, (v) => {
   <div ref="root" class="config-switch" @mousedown.stop>
     <button
       class="icon-btn config-switch-btn"
-      aria-label="配置切换"
-      v-tooltip="'配置切换'"
+      aria-label="配置快照"
+      v-tooltip="'配置快照'"
       :aria-expanded="open ? 'true' : 'false'"
       @click="toggle()"
     >
@@ -128,7 +128,7 @@ watch(open, (v) => {
           <path fill="none" d="M6.5 3.1c-1.4 0-2.1.8-2.1 2.2v1c0 .6-.4 1.1-1 1.2v.9c.6.1 1 .6 1 1.2v1c0 1.4.7 2.2 2.1 2.2" />
           <path fill="none" d="M9.5 3.1c1.4 0 2.1.8 2.1 2.2v1c0 .6.4 1.1 1 1.2v.9c-.6.1-1 .6-1 1.2v1c0 1.4-.7 2.2-2.1 2.2" />
         </svg>
-        <span>配置切换</span>
+        <span>配置快照</span>
       </div>
 
       <div v-if="profiles.length === 0" class="git-branch-menu-empty">暂无配置快照</div>
@@ -139,6 +139,7 @@ watch(open, (v) => {
         class="git-branch-menu-item config-profile-row"
         :class="{ current: p === activeConfig }"
       >
+        <span class="git-branch-name">{{ p }}</span>
         <button
           class="config-apply-btn"
           :class="{ active: p === activeConfig }"
@@ -151,7 +152,6 @@ watch(open, (v) => {
             <path :d="ICON_CHECK" />
           </svg>
         </button>
-        <span class="git-branch-name">{{ p }}</span>
         <button
           class="git-branch-delete"
           :aria-label="`删除配置${p}`"

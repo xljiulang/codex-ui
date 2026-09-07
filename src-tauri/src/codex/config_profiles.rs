@@ -15,7 +15,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::codex::model_config::{self, atomic_write};
-use crate::codex::path_util::clean_path;
 
 /// codex-home 下存放全部配置快照的根目录。
 fn profiles_root(home: &Path) -> PathBuf {
@@ -116,12 +115,11 @@ fn save_in(home: &Path, name: &str) -> Result<(), String> {
 }
 
 /// 应用配置快照：覆盖 codex-home/config.toml，并把快照 models.json 写回 model_catalog 目标。
-/// 返回写入的模型目录目标路径（仅当其在 codex-home 之外时返回 Some），供前端提示。
-pub fn apply(name: &str) -> Result<Option<String>, String> {
+pub fn apply(name: &str) -> Result<(), String> {
     apply_in(&model_config::codex_home()?, name)
 }
 
-fn apply_in(home: &Path, name: &str) -> Result<Option<String>, String> {
+fn apply_in(home: &Path, name: &str) -> Result<(), String> {
     validate_name(name)?;
     let dir = profile_dir(home, name);
     let cfg_path = dir.join("config.toml");
@@ -133,8 +131,7 @@ fn apply_in(home: &Path, name: &str) -> Result<Option<String>, String> {
     // 校验 TOML（非法拒绝）并原文写回 codex-home.
     model_config::save_config_in(home, &config_content)?;
 
-    // 依据刚应用的 config 重新解析 model_catalog 目标并回写快照内容（目标可能在 codex-home 外）。
-    let mut external_catalog: Option<String> = None;
+    // 依据刚应用的 config 重新解析 model_catalog 目标并回写快照内容（相对/绝对/`~` 统一处理）。
     let config_path = model_config::config_path_in(home);
     if let Some(value) = model_config::model_catalog_json_value(&config_path) {
         if !value.trim().is_empty() {
@@ -147,13 +144,10 @@ fn apply_in(home: &Path, name: &str) -> Result<Option<String>, String> {
                     fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
                 }
                 atomic_write(&target, &content)?;
-                if !target.starts_with(home) {
-                    external_catalog = Some(clean_path(&target));
-                }
             }
         }
     }
-    Ok(external_catalog)
+    Ok(())
 }
 
 /// 删除配置快照目录。
@@ -302,12 +296,11 @@ mod tests {
         save_in(&home, "ext").unwrap();
         // 外部文件被改，应用应回写
         fs::write(&abs, r#"{"models":[{"slug":"changed"}]}"#).unwrap();
-        let external = apply_in(&home, "ext").unwrap();
+        apply_in(&home, "ext").unwrap();
         assert_eq!(
             fs::read_to_string(&abs).unwrap(),
             r#"{"models":[{"slug":"a"}]}"#
         );
-        assert!(external.is_some());
     }
 
     #[test]

@@ -106,14 +106,14 @@ describe("AppHeader 标题栏与窗口控制", () => {
     store.rightPanelHidden = false;
   });
 
-  it("头部顺序：设置 / 布局切换 / 配置切换 / 最小化 / 最大化 / 关闭", async () => {
+  it("头部顺序：设置 / 布局切换 / 配置快照 / 最小化 / 最大化 / 关闭", async () => {
     const wrapper = mountHeader();
     await flushPromises();
     const actions = wrapper.findAll(".header-actions > *");
     expect(actions[0].attributes("aria-label")).toBe("设置");
     expect(actions[1].attributes("aria-label")).toBe("隐藏右侧面板");
-    // 配置切换是纯图标按钮，位于布局切换之后、最小化之前（无文字）
-    const configBtn = actions[2].find('button[aria-label="配置切换"]');
+    // 配置快照是纯图标按钮，位于布局切换之后、最小化之前（无文字）
+    const configBtn = actions[2].find('button[aria-label="配置快照"]');
     expect(configBtn.exists()).toBe(true);
     expect(configBtn.text().trim()).toBe("");
     expect(actions[3].attributes("aria-label")).toBe("最小化");

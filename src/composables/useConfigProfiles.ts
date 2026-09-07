@@ -21,16 +21,10 @@ export async function createConfigProfile(name: string): Promise<void> {
 
 /** 应用（使用）配置：覆盖 codex-home 文件并触发 codex 热重载，随后持久化激活配置名。 */
 export async function applyConfigProfile(name: string): Promise<void> {
-  const externalCatalog = await invoke<string | null>("config_profiles_apply", {
-    name,
-  });
+  await invoke("config_profiles_apply", { name });
   await reloadUserConfig();
   await saveSettings({ active_config: name });
-  setToast(
-    externalCatalog
-      ? `已切换到「${name}」配置，重启 codex-ui 后生效（模型目录已写入外部路径 ${externalCatalog}）`
-      : `已切换到「${name}」配置，重启 codex-ui 后生效`,
-  );
+  setToast(`已切换到「${name}」配置，重启 codex-ui 后生效`);
 }
 
 /** 删除配置：先全局确认，删除后若删的是当前激活项则清空激活标记。 */
