@@ -9,6 +9,7 @@
 //! - 删除路径全部级联：删会话删任务、删任务删执行记录。
 
 use std::collections::{HashMap, HashSet};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,7 +23,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
-use tauri_winrt_notification::{Duration as ToastDuration, Toast};
+use windows::core::{HSTRING, IInspectable, Interface};
+#[cfg(windows)]
+use windows::Data::Xml::Dom::XmlDocument;
+#[cfg(windows)]
+use windows::Foundation::TypedEventHandler;
+#[cfg(windows)]
+use windows::UI::Notifications::{
+    ToastActivatedEventArgs, ToastNotification, ToastNotificationManager,
+};
 
 use crate::codex::app_server::CodexServer;
 use crate::codex::session_state::SessionStateStore;
@@ -50,6 +59,12 @@ pub const BUSY_POLICY_SKIP: &str = "skip";
 /// 安装版快捷方式需携带该 AUMID，通知才会以应用图标归属显示；开发版回退 PowerShell。
 const APP_USER_MODEL_ID: &str = "com.codexui.app";
 
+/// 开发版（target/debug、target/release）回退 PowerShell 默认 AUMID，确保未注册
+/// 快捷方式的场景下 toast 也能显示（其点击路由依赖系统快捷方式，本端不处理）。
+#[cfg(windows)]
+const DEV_AUMID: &str =
+    "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
+
 /// 选择 Windows toast 的 AUMID：从 `target/debug`、`target/release` 运行视为开发版，
 /// 回退 PowerShell 默认（否则未注册快捷方式时 toast 不显示）；打包安装版用应用 AUMID。
 fn notification_app_id() -> &'static str {
@@ -68,7 +83,7 @@ fn notification_app_id() -> &'static str {
 /// 开发版（target/debug、target/release）回退 PowerShell 默认 AUMID，确保 toast 可显示。
 #[cfg(windows)]
 fn notification_dev_app_id() -> &'static str {
-    Toast::POWERSHELL_APP_ID
+    DEV_AUMID
 }
 
 /// 非 Windows 平台占位（项目仅面向 Windows，此分支不会在目标构建中用到）。
@@ -105,6 +120,84 @@ pub fn ensure_process_app_user_model_id() {
     {
         // 项目仅面向 Windows，此分支不会在目标构建中用到。
     }
+}
+
+/// 常驻的 `ToastNotification` 队列：WinRT 要求在 toast 停留期间其对象存活，否则点击
+/// 「打开会话」按钮触发的 `Activated` 事件不再回调（对象 Drop 后事件回调失效）。
+/// 仅按 FIFO 淘汰最旧的（早已被系统关闭的 toast），避免长期运行无限增长。
+#[cfg(windows)]
+static ALIVE_TOASTS: Mutex<VecDeque<ToastNotification>> = Mutex::new(VecDeque::new());
+
+/// 常驻队列上限：超过则弹出最旧 toast 并释放其引用。通常同一时刻仅 0~2 条 toast。
+#[cfg(windows)]
+const MAX_ALIVE_TOASTS: usize = 128;
+
+/// 用 `windows` crate 直接发送 WinRT toast，并**把 `ToastNotification` 常驻**以接收点击事件。
+/// 在带消息泵的主线程调用；点击「打开会话」按钮后从按钮参数取出 thread_id 经
+/// `scheduled-task-notification-open` 事件通知前端聚焦窗口并打开绑定会话。
+#[cfg(windows)]
+fn show_winrt_toast(
+    app: &AppHandle,
+    app_id: &str,
+    title: &str,
+    body: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    let xml = format!(
+        r#"<toast duration="short"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual><actions><action content="打开会话" arguments="{}"/></actions></toast>"#,
+        xml_escape(title),
+        xml_escape(body),
+        xml_escape(thread_id),
+    );
+    let doc = XmlDocument::new().map_err(|e| e.to_string())?;
+    doc.LoadXml(&HSTRING::from(xml)).map_err(|e| e.to_string())?;
+    let toast =
+        ToastNotification::CreateToastNotification(&doc).map_err(|e| e.to_string())?;
+
+    let app_for_cb = app.clone();
+    let activated = TypedEventHandler::<ToastNotification, IInspectable>::new(
+        move |_sender, insp| {
+            if let Some(insp_ref) = insp.as_ref() {
+                if let Ok(args) = insp_ref.cast::<ToastActivatedEventArgs>() {
+                    if let Ok(arguments) = args.Arguments() {
+                        if !arguments.is_empty() {
+                            let _ = app_for_cb.emit(
+                                "scheduled-task-notification-open",
+                                &arguments.to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+            Ok(())
+        },
+    );
+    toast
+        .Activated(&activated)
+        .map_err(|e| e.to_string())?;
+
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))
+        .map_err(|e| e.to_string())?;
+    notifier.Show(&toast).map_err(|e| e.to_string())?;
+
+    // 关键：把 ToastNotification 存入常驻队列，防止 Drop 后点击回调失效。
+    if let Ok(mut alive) = ALIVE_TOASTS.lock() {
+        alive.push_back(toast);
+        if alive.len() > MAX_ALIVE_TOASTS {
+            alive.pop_front();
+        }
+    }
+    Ok(())
+}
+
+/// XML 转义（toast 标题/正文可能来自用户任务名与执行结果，需保证 XML 合法）。
+#[cfg(windows)]
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// 归一化忙碌策略：非法值回退 defer。
@@ -736,8 +829,9 @@ impl TaskScheduler {
     }
 
     /// 发送 Windows 原生通知（系统 toast/操作中心，非托盘 tooltip）。
-    /// 在带消息泵的主线程显示（保证 `on_activated` 可被投递），并附「打开会话」按钮；
+    /// 在带消息泵的主线程显示（保证 `Activated` 事件可被投递），并附「打开会话」按钮；
     /// 点击按钮携带 thread_id，经 Tauri 事件通知前端聚焦窗口并打开绑定会话。
+    /// `ToastNotification` 被存入常驻队列，避免 Drop 后点击回调失效（见 `show_winrt_toast`）。
     fn notify_task(&self, title: &str, body: &str, thread_id: &str) {
         let app = self.app.clone();
         let title = title.to_string();
@@ -746,18 +840,7 @@ impl TaskScheduler {
         #[cfg(windows)]
         {
             let _ = app.clone().run_on_main_thread(move || {
-                let toast = Toast::new(notification_app_id())
-                    .title(&title)
-                    .text1(&body)
-                    .duration(ToastDuration::Short)
-                    .add_button("打开会话", &thread_id)
-                    .on_activated(move |action| {
-                        if let Some(thread_id) = action {
-                            let _ = app.emit("scheduled-task-notification-open", &thread_id);
-                        }
-                        Ok(())
-                    });
-                let _ = toast.show();
+                let _ = show_winrt_toast(&app, notification_app_id(), &title, &body, &thread_id);
             });
         }
         #[cfg(not(windows))]
@@ -1250,6 +1333,13 @@ mod tests {
 
     fn tz() -> FixedOffset {
         FixedOffset::east_opt(8 * 3600).unwrap()
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn xml_escape_escapes_special_chars() {
+        assert_eq!(xml_escape("a&b<c>d\"e'f"), "a&amp;b&lt;c&gt;d&quot;e&apos;f");
+        assert_eq!(xml_escape("无特殊字符"), "无特殊字符");
     }
 
     #[test]
