@@ -330,10 +330,7 @@ function toggleResult(runId: number) {
               </div>
             </div>
             <div v-if="expandedId === row.task.id" class="sched-detail">
-              <div class="sched-detail-label">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICON_HISTORY" /></svg>
-                执行记录
-              </div>
+              <div class="sched-detail-label">执行记录</div>
               <div v-if="runsState[row.task.id]?.items.length" class="sched-runs">
                 <div v-for="r in runsState[row.task.id].items" :key="r.id" class="sched-run">
                   <div class="sched-run-line">
@@ -421,16 +418,14 @@ function toggleResult(runId: number) {
         </div>
       </div>
       <template #foot>
-        <div class="modal-footer">
-          <button class="btn" :disabled="editSaving" @click="closeEdit">取消</button>
-          <button
-            class="btn primary"
-            :disabled="editSaving"
-            @click="saveEdit"
-          >
-            {{ editSaving ? "保存中…" : "保存" }}
-          </button>
-        </div>
+        <button class="btn" :disabled="editSaving" @click="closeEdit">取消</button>
+        <button
+          class="btn primary"
+          :disabled="editSaving"
+          @click="saveEdit"
+        >
+          {{ editSaving ? "保存中…" : "保存" }}
+        </button>
       </template>
     </ModalDialog>
   </section>
