@@ -313,9 +313,6 @@ function pluginInitial(p: PluginCatalogItem): string {
             <span
               v-else
               class="plugin-icon-fallback"
-              :style="
-                p.brandColor ? { background: p.brandColor } : undefined
-              "
             >
               {{ pluginInitial(p) }}
             </span>
@@ -479,9 +476,6 @@ function pluginInitial(p: PluginCatalogItem): string {
                   <span
                     v-else
                     class="plugin-icon-fallback"
-                    :style="
-                      p.brandColor ? { background: p.brandColor } : undefined
-                    "
                   >
                     {{ pluginInitial(p) }}
                   </span>

@@ -3533,7 +3533,7 @@ describe("SettingsView 插件管理", () => {
     expect(img.attributes("src")).toBe("asset://mock/C:/x/icon.png");
   });
 
-  it("插件无任何图标但有品牌色时渲染首字母回退", async () => {
+  it("插件无任何图标时渲染中性描边方框首字母回退", async () => {
     mockedInvoke.mockResolvedValue({
       marketplaces: [
         {
@@ -3561,10 +3561,10 @@ describe("SettingsView 插件管理", () => {
     expect(wrapper.find(".plugin-row-icon img").exists()).toBe(false);
     expect(fallback.exists()).toBe(true);
     expect(fallback.text()).toBe("C");
-    expect(fallback.attributes("style")).toContain("#4678EB");
+    expect(fallback.attributes("style")).toBeUndefined();
   });
 
-  it("图标加载失败后切换到品牌色回退", async () => {
+  it("图标加载失败后切换到中性描边方框首字母回退", async () => {
     mockedInvoke.mockResolvedValue({
       marketplaces: [
         {
@@ -3596,7 +3596,7 @@ describe("SettingsView 插件管理", () => {
     const fallback = wrapper.find(".plugin-icon-fallback");
     expect(fallback.exists()).toBe(true);
     expect(fallback.text()).toBe("B");
-    expect(fallback.attributes("style")).toContain("#ff0000");
+    expect(fallback.attributes("style")).toBeUndefined();
   });
 });
 

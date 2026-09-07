@@ -721,15 +721,23 @@
 
 /* 列表项首统一图标容器：技能 / 动态工具 / MCP 线性图标与插件品牌图共用。
    浅色圆角小方块，线性图标以 currentColor 着色（text-dim），插件图片/首字母仍放容器内。 */
-.row-icon,
+.row-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+/* 插件品牌图标容器：与 .row-icon 同规格，去底色去边框（纯净图标） */
 .plugin-row-icon {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
   overflow: hidden;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-active);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -749,16 +757,16 @@
 }
 
 .plugin-row-icon .plugin-icon-fallback {
-  width: 100%;
-  height: 100%;
+  width: 14px;
+  height: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  font-size: var(--font-sm);
+  border: 1px solid var(--border);
+  font-size: var(--font-xs);
   font-weight: 600;
-  color: var(--text-bright);
-  background: var(--bg-active);
+  color: var(--text-dim);
 }
 
 /* 通用卡片：模型配置 / 个性化 / 通用设置共用同一容器 */
