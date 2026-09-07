@@ -111,7 +111,7 @@ describe("AppHeader 标题栏与窗口控制", () => {
     await flushPromises();
     const actions = wrapper.findAll(".header-actions > *");
     expect(actions[0].attributes("aria-label")).toBe("设置");
-    expect(actions[1].attributes("aria-label")).toBe("隐藏右侧面板");
+    expect(actions[1].attributes("aria-label")).toBe("切换布局");
     // 配置快照是纯图标按钮，位于布局切换之后、最小化之前（无文字）
     const configBtn = actions[2].find('button[aria-label="配置快照"]');
     expect(configBtn.exists()).toBe(true);
@@ -177,23 +177,20 @@ describe("AppHeader 右侧面板显隐切换", () => {
 
   it("初始为左右布局图标（面板显示态），点击后切为隐藏态图标", async () => {
     const wrapper = mountHeader();
-    const btn = wrapper.find('button[aria-label="隐藏右侧面板"]');
+    const btn = wrapper.find('button[aria-label="切换布局"]');
     expect(btn.find("path").attributes("d")).toBe(ICON_LAYOUT_SIDE);
     await btn.trigger("click");
     expect(store.rightPanelHidden).toBe(true);
-    const shown = wrapper.find('button[aria-label="显示右侧面板"]');
-    expect(shown.find("path").attributes("d")).toBe(ICON_LAYOUT_SIDE_HIDDEN);
+    expect(btn.find("path").attributes("d")).toBe(ICON_LAYOUT_SIDE_HIDDEN);
   });
 
   it("隐藏态再点击恢复显示（状态取反往返）", async () => {
     store.rightPanelHidden = true;
     const wrapper = mountHeader();
-    const btn = wrapper.find('button[aria-label="显示右侧面板"]');
+    const btn = wrapper.find('button[aria-label="切换布局"]');
     expect(btn.find("path").attributes("d")).toBe(ICON_LAYOUT_SIDE_HIDDEN);
     await btn.trigger("click");
     expect(store.rightPanelHidden).toBe(false);
-    expect(
-      wrapper.find('button[aria-label="隐藏右侧面板"]').exists(),
-    ).toBe(true);
+    expect(btn.find("path").attributes("d")).toBe(ICON_LAYOUT_SIDE);
   });
 });

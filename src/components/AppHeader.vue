@@ -64,8 +64,8 @@ function onSettings() {
       </button>
       <button
         class="icon-btn"
-        :aria-label="store.rightPanelHidden ? '显示右侧面板' : '隐藏右侧面板'"
-        v-tooltip="store.rightPanelHidden ? '显示右侧面板' : '隐藏右侧面板'"
+        aria-label="切换布局"
+        v-tooltip="'切换布局'"
         @click="store.rightPanelHidden = !store.rightPanelHidden"
       >
         <svg viewBox="0 0 24 24">
