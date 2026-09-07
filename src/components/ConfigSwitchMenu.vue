@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   ICON_CHECK,
-  ICON_CHEVRON_DOWN,
   ICON_CLOSE,
   ICON_PLUS,
 } from "../lib/icons";
@@ -117,9 +116,6 @@ watch(open, (v) => {
         <path fill="none" d="M6.5 3.1c-1.4 0-2.1.8-2.1 2.2v1c0 .6-.4 1.1-1 1.2v.9c.6.1 1 .6 1 1.2v1c0 1.4.7 2.2 2.1 2.2" />
         <path fill="none" d="M9.5 3.1c1.4 0 2.1.8 2.1 2.2v1c0 .6.4 1.1 1 1.2v.9c-.6.1-1 .6-1 1.2v1c0 1.4-.7 2.2-2.1 2.2" />
       </svg>
-      <svg v-if="open" class="config-switch-chevron" viewBox="0 0 24 24">
-        <path :d="ICON_CHEVRON_DOWN" />
-      </svg>
     </button>
 
     <div v-if="open" class="popup-menu below config-profiles-menu">
@@ -221,16 +217,6 @@ watch(open, (v) => {
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-
-.config-switch-chevron {
-  position: absolute;
-  right: -1px;
-  bottom: 1px;
-  width: 8px;
-  height: 8px;
-  fill: currentColor;
-  opacity: 0.8;
 }
 
 .config-profiles-menu {
