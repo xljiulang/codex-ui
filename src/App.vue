@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import AppHeader from "./components/AppHeader.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import EditorPane from "./components/EditorPane.vue";
@@ -7,7 +9,7 @@ import RightPanel from "./components/RightPanel.vue";
 import LoadingScreen from "./components/LoadingScreen.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import TooltipLayer from "./components/TooltipLayer.vue";
-import { disposeEvents, init, restoreLastSession, store } from "./composables/useCodex";
+import { disposeEvents, init, openSession, restoreLastSession, store } from "./composables/useCodex";
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { openSettingsTab } from "./composables/useEditorTabs";
@@ -15,8 +17,18 @@ import { openSettingsTab } from "./composables/useEditorTabs";
 const { ctxMenu } = useContextMenu();
 
 let unlistenClose: (() => void) | undefined;
+let unlistenNotification: (() => void) | undefined;
 
 onMounted(async () => {
+  // 定时任务通知「打开会话」：由 Rust 端处理 toast 点击后发事件，此处聚焦窗口并打开绑定会话
+  unlistenNotification = await listen<string>("scheduled-task-notification-open", async (e) => {
+    const threadId = e.payload;
+    if (!threadId) return;
+    const win = getCurrentWindow();
+    await win.show();
+    await win.setFocus();
+    await openSession(threadId);
+  });
   // 关闭守卫仅阻止 Tauri 默认销毁窗口；关闭即隐藏到系统托盘由 Rust 端处理
   unlistenClose = await registerCloseGuard();
   try {
@@ -29,6 +41,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  unlistenNotification?.();
   unlistenClose?.();
   disposeEvents();
 });

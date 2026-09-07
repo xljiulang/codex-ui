@@ -21,6 +21,8 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
+#[cfg(windows)]
+use tauri_winrt_notification::{Duration as ToastDuration, Toast};
 
 use crate::codex::app_server::CodexServer;
 use crate::codex::session_state::SessionStateStore;
@@ -43,6 +45,37 @@ const RESULT_MAX_CHARS: usize = 4000;
 pub const BUSY_POLICY_DEFER: &str = "defer";
 /// 忙碌策略：跳过本次（等下一个触发点）。
 pub const BUSY_POLICY_SKIP: &str = "skip";
+
+/// Windows 通知归属的应用 AppUserModelID（与 tauri.conf.json `identifier` 一致）。
+/// 安装版快捷方式需携带该 AUMID，通知才会以应用图标归属显示；开发版回退 PowerShell。
+const APP_USER_MODEL_ID: &str = "com.codexui.app";
+
+/// 选择 Windows toast 的 AUMID：从 `target/debug`、`target/release` 运行视为开发版，
+/// 回退 PowerShell 默认（否则未注册快捷方式时 toast 不显示）；打包安装版用应用 AUMID。
+fn notification_app_id() -> &'static str {
+    if let Ok(exe) = std::env::current_exe() {
+        let dir = exe
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if dir.ends_with("/target/debug") || dir.ends_with("/target/release") {
+            return notification_dev_app_id();
+        }
+    }
+    APP_USER_MODEL_ID
+}
+
+/// 开发版（target/debug、target/release）回退 PowerShell 默认 AUMID，确保 toast 可显示。
+#[cfg(windows)]
+fn notification_dev_app_id() -> &'static str {
+    Toast::POWERSHELL_APP_ID
+}
+
+/// 非 Windows 平台占位（项目仅面向 Windows，此分支不会在目标构建中用到）。
+#[cfg(not(windows))]
+fn notification_dev_app_id() -> &'static str {
+    APP_USER_MODEL_ID
+}
 
 /// 归一化忙碌策略：非法值回退 defer。
 pub fn normalize_busy_policy(v: &str) -> &'static str {
@@ -149,6 +182,35 @@ pub fn truncate_chars(text: &str, max: usize) -> String {
     let mut out: String = text.chars().take(max).collect();
     out.push('…');
     out
+}
+
+/// 拼装任务终态通知的标题与正文（纯函数，便于单测）：成功带耗时与结果摘要，失败带错误。
+pub fn task_finish_notice(
+    name: &str,
+    status: &str,
+    duration_ms: Option<i64>,
+    result: Option<&str>,
+    error: Option<&str>,
+) -> (String, String) {
+    if status == "success" {
+        let dur = duration_ms
+            .map(|ms| format!("{} 秒", ms / 1000))
+            .unwrap_or_else(|| "—".to_string());
+        let mut body = format!("「{}」执行完成，耗时 {}", name, dur);
+        if let Some(r) = result {
+            let r = truncate_chars(r, 60);
+            if !r.is_empty() {
+                body.push_str(&format!("\n{r}"));
+            }
+        }
+        ("定时任务执行完成".to_string(), body)
+    } else {
+        let msg = error.unwrap_or("未知错误");
+        (
+            "定时任务执行失败".to_string(),
+            format!("「{}」执行失败：{}", name, msg),
+        )
+    }
 }
 
 /// 单次触发决策：线程空闲即执行；忙时按任务策略顺延或跳过。
@@ -643,6 +705,53 @@ impl TaskScheduler {
         self.emit_tasks(changed_task_id);
     }
 
+    /// 发送 Windows 原生通知（系统 toast/操作中心，非托盘 tooltip）。
+    /// 在带消息泵的主线程显示（保证 `on_activated` 可被投递），并附「打开会话」按钮；
+    /// 点击按钮携带 thread_id，经 Tauri 事件通知前端聚焦窗口并打开绑定会话。
+    fn notify_task(&self, title: &str, body: &str, thread_id: &str) {
+        let app = self.app.clone();
+        let title = title.to_string();
+        let body = body.to_string();
+        let thread_id = thread_id.to_string();
+        #[cfg(windows)]
+        {
+            let _ = app.clone().run_on_main_thread(move || {
+                let toast = Toast::new(notification_app_id())
+                    .title(&title)
+                    .text1(&body)
+                    .duration(ToastDuration::Short)
+                    .add_button("打开会话", &thread_id)
+                    .on_activated(move |action| {
+                        if let Some(thread_id) = action {
+                            let _ = app.emit("scheduled-task-notification-open", &thread_id);
+                        }
+                        Ok(())
+                    });
+                let _ = toast.show();
+            });
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (app, title, body, thread_id);
+        }
+    }
+
+    /// 任务执行终态通知（成功/失败）；未命中任务（已被删除）则不发。
+    fn notify_finished(
+        &self,
+        task_id: &str,
+        status: &str,
+        duration_ms: Option<i64>,
+        result: Option<&str>,
+        error: Option<&str>,
+    ) {
+        let Some(task) = self.store.get(task_id) else {
+            return;
+        };
+        let (title, body) = task_finish_notice(&task.name, status, duration_ms, result, error);
+        self.notify_task(&title, &body, &task.thread_id);
+    }
+
     /// 默认模型解析（进程内缓存）：isDefault 优先，其次首个非 hidden（微信桥同款）。
     async fn resolve_default_model(&self) -> Result<String, String> {
         {
@@ -776,6 +885,7 @@ impl TaskScheduler {
             let _ = self
                 .store
                 .finish_run(run_id, "failed", None, None, Some("执行超时（30 分钟）"));
+            self.notify_finished(&task_id, "failed", None, None, Some("执行超时（30 分钟）"));
             self.emit_tasks(Some(&task_id));
         }
     }
@@ -795,6 +905,11 @@ impl TaskScheduler {
     /// 执行任务：解析权限/模型 → resume → turn/start → 落 running，完成由通知泵收敛。
     async fn execute(&self, task: ScheduledTask) {
         let started_at = Local::now().timestamp();
+        self.notify_task(
+            "定时任务开始执行",
+            &format!("「{}」已开始执行", task.name),
+            &task.thread_id,
+        );
         let session = self.session_store.get(&task.thread_id);
         let permission = session
             .as_ref()
@@ -811,6 +926,13 @@ impl TaskScheduler {
                     if let Some(run_id) = self.store.start_run(&task.id, started_at, None).ok().flatten() {
                         let _ = self.store.finish_run(
                             run_id,
+                            "failed",
+                            None,
+                            None,
+                            Some(&format!("无法解析默认模型：{e}")),
+                        );
+                        self.notify_finished(
+                            &task.id,
                             "failed",
                             None,
                             None,
@@ -850,6 +972,7 @@ impl TaskScheduler {
                 let _ = self
                     .store
                     .finish_run(run_id, "failed", None, None, Some(&err_text));
+                self.notify_finished(&task.id, "failed", None, None, Some(&err_text));
             }
             self.emit_tasks(Some(&task.id));
             return;
@@ -918,6 +1041,13 @@ impl TaskScheduler {
                     let _ = self
                         .store
                         .finish_run(run_id, "failed", None, None, Some(&format!("启动回合失败：{e}")));
+                    self.notify_finished(
+                        &task.id,
+                        "failed",
+                        None,
+                        None,
+                        Some(&format!("启动回合失败：{e}")),
+                    );
                 }
                 self.emit_tasks(Some(&task.id));
             }
@@ -1007,6 +1137,13 @@ impl TaskScheduler {
                 };
                 let _ = self.store.finish_run(
                     run.run_id,
+                    status,
+                    Some(duration_ms),
+                    result.as_deref(),
+                    error.as_deref(),
+                );
+                self.notify_finished(
+                    &task_id,
                     status,
                     Some(duration_ms),
                     result.as_deref(),
@@ -1194,6 +1331,30 @@ mod tests {
         assert_eq!(truncate_chars("abc", 10), "abc");
         assert_eq!(truncate_chars("你好世界", 2), "你好…");
         assert_eq!(truncate_chars("", 5), "");
+    }
+
+    #[test]
+    fn task_finish_notice_builds_success_with_duration_and_result() {
+        let (title, body) =
+            task_finish_notice("测试任务", "success", Some(1500), Some("已完成总结"), None);
+        assert_eq!(title, "定时任务执行完成");
+        assert!(body.contains("「测试任务」执行完成，耗时 1 秒"));
+        assert!(body.contains("已完成总结"));
+    }
+
+    #[test]
+    fn task_finish_notice_builds_failure_with_error() {
+        let (title, body) =
+            task_finish_notice("测试任务", "failed", None, None, Some("启动回合失败：boom"));
+        assert_eq!(title, "定时任务执行失败");
+        assert!(body.contains("「测试任务」执行失败：启动回合失败：boom"));
+    }
+
+    #[test]
+    fn task_finish_notice_falls_back_to_unknown_error() {
+        let (title, body) = task_finish_notice("测试任务", "failed", None, None, None);
+        assert_eq!(title, "定时任务执行失败");
+        assert!(body.contains("「测试任务」执行失败：未知错误"));
     }
 
     #[test]
