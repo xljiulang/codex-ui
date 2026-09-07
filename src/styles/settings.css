@@ -1813,13 +1813,17 @@ button.skill-row-main:hover .skill-name {
   font-size: var(--font-xs);
   font-weight: 600;
   line-height: 1;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .sched-busy-badge.badge-defer {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
 }
 
 .sched-busy-badge.badge-skip {

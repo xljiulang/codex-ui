@@ -274,7 +274,6 @@ function toggleResult(runId: number) {
                     <span class="sched-name">{{ row.task.name }}</span>
                   </span>
                   <span class="sched-badges">
-                    <span class="sched-chip">{{ describeSchedule(row.task.cron) }}</span>
                     <span
                       class="sched-session"
                       role="button"
@@ -283,17 +282,18 @@ function toggleResult(runId: number) {
                     >
                       {{ threadLabel(row.task.threadId) }}
                     </span>
+                    <span
+                      class="sched-busy-badge"
+                      :class="row.task.busyPolicy === 'skip' ? 'badge-skip' : 'badge-defer'"
+                    >
+                      {{ row.task.busyPolicy === 'skip' ? '忙时跳过' : '忙时顺延' }}
+                    </span>
+                    <span class="sched-chip">{{ describeSchedule(row.task.cron) }}</span>
                     <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
                   </span>
                 </span>
               </button>
               <div class="model-provider-actions">
-                <span
-                  class="sched-busy-badge"
-                  :class="row.task.busyPolicy === 'skip' ? 'badge-skip' : 'badge-defer'"
-                >
-                  {{ row.task.busyPolicy === 'skip' ? '忙时跳过' : '忙时顺延' }}
-                </span>
                 <button
                   v-if="!row.task.done"
                   class="btn btn-icon sched-row-btn"

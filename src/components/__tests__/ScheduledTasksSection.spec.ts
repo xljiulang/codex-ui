@@ -119,6 +119,10 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     // 点击会话名打开绑定会话
     await wrapper.find(".sched-session").trigger("click");
     expect(mockedOpenSession).toHaveBeenCalledWith("t1");
+    // 会话标题徽章固定排第一，忙时徽章紧接着（左对齐同排）
+    const badges = wrapper.findAll(".sched-badges > span");
+    expect(badges[0]!.classes()).toContain("sched-session");
+    expect(badges[1]!.classes()).toContain("sched-busy-badge");
   });
 
   it("忙时策略跳过态显示「忙时跳过」胶囊", async () => {
