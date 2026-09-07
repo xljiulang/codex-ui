@@ -140,4 +140,5 @@ export {
   runScheduledTaskNow,
   setScheduledTaskBusyPolicy,
   setScheduledTaskEnabled,
+  updateScheduledTask,
 } from "./scheduledTasks";

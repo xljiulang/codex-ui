@@ -52,6 +52,23 @@ export async function setScheduledTaskBusyPolicy(
   await invoke("scheduled_task_set_busy_policy", { id, policy });
 }
 
+/** 编辑定时任务：更新标题、提示词与忙时策略（cron/绑定会话不变）。 */
+export async function updateScheduledTask(
+  id: string,
+  input: { name: string; prompt: string; busyPolicy: "defer" | "skip" },
+): Promise<ScheduledTask> {
+  const task = await invoke<ScheduledTask>("scheduled_task_update", {
+    id,
+    name: input.name,
+    prompt: input.prompt,
+    busyPolicy: input.busyPolicy,
+  });
+  store.scheduledTasks = store.scheduledTasks.map((t) =>
+    t.id === task.id ? task : t,
+  );
+  return task;
+}
+
 export async function runScheduledTaskNow(id: string): Promise<void> {
   await invoke("scheduled_task_run_now", { id });
 }

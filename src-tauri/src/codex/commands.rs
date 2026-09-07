@@ -368,6 +368,20 @@ pub async fn scheduled_task_set_busy_policy(
 }
 
 #[tauri::command]
+pub async fn scheduled_task_update(
+    scheduler: State<'_, Scheduler>,
+    store: State<'_, TaskStore>,
+    id: String,
+    name: String,
+    prompt: String,
+    busy_policy: String,
+) -> Result<ScheduledTask, String> {
+    let task = store.update(&id, &name, &prompt, &busy_policy)?;
+    scheduler.notify_changed(Some(&id));
+    Ok(task)
+}
+
+#[tauri::command]
 pub async fn scheduled_task_run_now(scheduler: State<'_, Scheduler>, id: String) -> Result<(), String> {
     scheduler.run_now(&id)
 }

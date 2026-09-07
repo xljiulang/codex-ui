@@ -420,6 +420,35 @@ impl ScheduledTaskStore {
         Ok(())
     }
 
+    /// 编辑任务：更新标题、提示词与忙时策略（cron/绑定会话/启用/完成态不变）。
+    /// 返回更新后的完整任务；任务不存在返回错误。
+    pub fn update(
+        &self,
+        id: &str,
+        name: &str,
+        prompt: &str,
+        busy_policy: &str,
+    ) -> Result<ScheduledTask, String> {
+        let name = name.trim();
+        let prompt = prompt.trim();
+        if name.is_empty() || prompt.is_empty() {
+            return Err("任务名与 prompt 不能为空".to_string());
+        }
+        let policy = normalize_busy_policy(busy_policy);
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let n = conn
+            .execute(
+                "UPDATE scheduled_tasks SET name = ?1, prompt = ?2, busy_policy = ?3 WHERE id = ?4",
+                rusqlite::params![name, prompt, policy, id],
+            )
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("定时任务不存在".to_string());
+        }
+        conn.query_row("SELECT * FROM scheduled_tasks WHERE id = ?1", [id], row_to_task)
+            .map_err(|e| e.to_string())
+    }
+
     pub fn set_next_run(&self, id: &str, next_run: Option<i64>) -> Result<(), String> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute(

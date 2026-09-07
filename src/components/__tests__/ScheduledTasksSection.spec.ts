@@ -11,8 +11,8 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     openSession: vi.fn(async () => {}),
     removeScheduledTask: vi.fn(async () => {}),
     runScheduledTaskNow: vi.fn(async () => {}),
-    setScheduledTaskBusyPolicy: vi.fn(async () => {}),
     setScheduledTaskEnabled: vi.fn(async () => {}),
+    updateScheduledTask: vi.fn(async () => ({})),
     askConfirm: vi.fn(async () => true),
     setToast: vi.fn(),
     toastError: vi.fn((e: unknown) => String(e)),
@@ -27,15 +27,14 @@ import {
   openSession,
   removeScheduledTask,
   runScheduledTaskNow,
-  setScheduledTaskBusyPolicy,
   store,
+  updateScheduledTask,
 } from "../../composables/useCodex";
-import { ICON_HISTORY, ICON_SKIP } from "../../lib/icons";
 
 const mockedRuns = vi.mocked(loadScheduledTaskRuns);
 const mockedRemove = vi.mocked(removeScheduledTask);
 const mockedRunNow = vi.mocked(runScheduledTaskNow);
-const mockedSetPolicy = vi.mocked(setScheduledTaskBusyPolicy);
+const mockedUpdate = vi.mocked(updateScheduledTask);
 const mockedConfirm = vi.mocked(askConfirm);
 const mockedOpenSession = vi.mocked(openSession);
 
@@ -103,33 +102,53 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     expect(wrapper.find(".sched-run-result").classes()).toContain("open");
   });
 
-  it("行内动作顺序与命令：忙时策略 → 立即执行 → 删除；会话名点击打开会话", async () => {
+  it("行内展示忙时策略胶囊，动作顺序：编辑 → 立即执行 → 删除；会话名点击打开会话", async () => {
     store.scheduledTasks = [{ ...activeTask }];
     const wrapper = mount(ScheduledTasksSection);
+    // 忙时策略为纯展示胶囊，不再是图标切换按钮
+    expect(wrapper.find(".sched-policy-btn").exists()).toBe(false);
+    expect(wrapper.find(".sched-busy-badge").text()).toBe("忙时顺延");
     const actionBtns = wrapper.findAll(".model-provider-actions .btn-icon");
     expect(actionBtns.map((b) => b.attributes("aria-label"))).toEqual([
-      "会话忙时顺延执行（切换为跳过本次）",
       "立即执行",
+      "编辑",
       "删除",
     ]);
-    // 忙时策略图标：时钟（顺延态）→ 点击切为跳过
-    expect(actionBtns[0]!.find("path").attributes("d")).toBe(ICON_HISTORY);
-    await actionBtns[0]!.trigger("click");
-    expect(mockedSetPolicy).toHaveBeenCalledWith("task-1", "skip");
-    await actionBtns[1]!.trigger("click"); // 立即执行
+    await actionBtns[0]!.trigger("click"); // 立即执行
     expect(mockedRunNow).toHaveBeenCalledWith("task-1");
     // 点击会话名打开绑定会话
     await wrapper.find(".sched-session").trigger("click");
     expect(mockedOpenSession).toHaveBeenCalledWith("t1");
   });
 
-  it("忙时策略图标随状态切换：跳过态显示快进图标，点击切回顺延", async () => {
+  it("忙时策略跳过态显示「忙时跳过」胶囊", async () => {
     store.scheduledTasks = [{ ...activeTask, busyPolicy: "skip" }];
     const wrapper = mount(ScheduledTasksSection);
-    const btn = wrapper.find(".sched-policy-btn");
-    expect(btn.find("path").attributes("d")).toBe(ICON_SKIP);
-    await btn.trigger("click");
-    expect(mockedSetPolicy).toHaveBeenCalledWith("task-1", "defer");
+    expect(wrapper.find(".sched-busy-badge").text()).toBe("忙时跳过");
+  });
+
+  it("点击编辑打开弹窗并预填，保存调用 updateScheduledTask", async () => {
+    store.scheduledTasks = [{ ...activeTask }];
+    mockedUpdate.mockResolvedValue({ ...activeTask, name: "新标题" } as never);
+    const wrapper = mount(ScheduledTasksSection);
+    await wrapper.find(".sched-row-edit").trigger("click");
+    expect(wrapper.find(".sched-edit-form").exists()).toBe(true);
+    expect(
+      (wrapper.find(".sched-edit-form input").element as HTMLInputElement).value,
+    ).toBe("每日总结");
+    expect(
+      (wrapper.find(".sched-edit-form textarea").element as HTMLTextAreaElement).value,
+    ).toBe("总结昨天的提交");
+    // 修改标题后保存
+    await wrapper.find(".sched-edit-form input").setValue("新标题");
+    await wrapper.find(".modal-foot .btn.primary").trigger("click");
+    await nextTick();
+    expect(mockedUpdate).toHaveBeenCalledWith("task-1", {
+      name: "新标题",
+      prompt: "总结昨天的提交",
+      busyPolicy: "defer",
+    });
+    expect(wrapper.find(".sched-edit-form").exists()).toBe(false);
   });
 
   it("删除需确认，确认后调用删除（记录一并删除）", async () => {

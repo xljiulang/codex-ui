@@ -191,6 +191,7 @@ pub fn run() {
             codex::commands::scheduled_task_remove,
             codex::commands::scheduled_task_set_enabled,
             codex::commands::scheduled_task_set_busy_policy,
+            codex::commands::scheduled_task_update,
             codex::commands::scheduled_task_run_now,
             codex::commands::scheduled_task_runs,
             codex::commands::model_config_read,

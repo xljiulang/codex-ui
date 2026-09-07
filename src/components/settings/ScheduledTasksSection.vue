@@ -8,22 +8,23 @@ import {
   openSession,
   removeScheduledTask,
   runScheduledTaskNow,
-  setScheduledTaskBusyPolicy,
   setToast,
   threadTitle,
   toastError,
+  updateScheduledTask,
 } from "../../composables/useCodex";
 import { store } from "../../composables/useCodex";
 import {
   ICON_ARROW_DOWN,
   ICON_ARROW_RIGHT,
   ICON_DELETE,
+  ICON_EDIT,
   ICON_HISTORY,
   ICON_PLAY,
   ICON_REFRESH,
-  ICON_SKIP,
 } from "../../lib/icons";
 import type { ScheduledTask, TaskRunRecord, TaskRunStatus } from "../../lib/types";
+import ModalDialog from "../ModalDialog.vue";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -143,22 +144,54 @@ watch(
   },
 );
 
-/** 忙时策略图标切换：顺延（时钟）⇄ 跳过（快进） */
-async function onPolicyToggle(t: ScheduledTask) {
-  const policy = t.busyPolicy === "defer" ? "skip" : "defer";
-  try {
-    await setScheduledTaskBusyPolicy(t.id, policy);
-  } catch (e) {
-    setToast(toastError(e));
-  }
-}
-
 async function onRunNow(t: ScheduledTask) {
   try {
     await runScheduledTaskNow(t.id);
     setToast(`任务「${t.name}」已开始执行`);
   } catch (e) {
     setToast(toastError(e));
+  }
+}
+
+/** 编辑弹窗状态与表单（编辑任务名、提示词、忙时策略；cron/绑定会话只读） */
+const editTask = ref<ScheduledTask | null>(null);
+const editForm = reactive({ name: "", prompt: "", busyPolicy: "defer" as "defer" | "skip" });
+const editSaving = ref(false);
+
+function openEdit(t: ScheduledTask) {
+  editTask.value = t;
+  editForm.name = t.name;
+  editForm.prompt = t.prompt;
+  editForm.busyPolicy = t.busyPolicy === "skip" ? "skip" : "defer";
+}
+
+function closeEdit() {
+  if (editSaving.value) return;
+  editTask.value = null;
+}
+
+async function saveEdit() {
+  const t = editTask.value;
+  if (!t || editSaving.value) return;
+  const name = editForm.name.trim();
+  const prompt = editForm.prompt.trim();
+  if (!name || !prompt) {
+    setToast("任务名与提示词不能为空");
+    return;
+  }
+  editSaving.value = true;
+  try {
+    await updateScheduledTask(t.id, {
+      name,
+      prompt,
+      busyPolicy: editForm.busyPolicy,
+    });
+    setToast(`任务「${name}」已更新`);
+    editTask.value = null;
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    editSaving.value = false;
   }
 }
 
@@ -255,25 +288,12 @@ function toggleResult(runId: number) {
                 </span>
               </button>
               <div class="model-provider-actions">
-                <button
-                  v-if="!row.task.done"
-                  class="btn btn-icon sched-policy-btn"
-                  :aria-label="
-                    row.task.busyPolicy === 'defer'
-                      ? '会话忙时顺延执行（切换为跳过本次）'
-                      : '会话忙时跳过本次（切换为顺延执行）'
-                  "
-                  v-tooltip="
-                    row.task.busyPolicy === 'defer'
-                      ? '会话忙时：顺延执行'
-                      : '会话忙时：跳过本次'
-                  "
-                  @click="onPolicyToggle(row.task)"
+                <span
+                  class="sched-busy-badge"
+                  :class="row.task.busyPolicy === 'skip' ? 'badge-skip' : 'badge-defer'"
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path :d="row.task.busyPolicy === 'defer' ? ICON_HISTORY : ICON_SKIP" />
-                  </svg>
-                </button>
+                  {{ row.task.busyPolicy === 'skip' ? '忙时跳过' : '忙时顺延' }}
+                </span>
                 <button
                   v-if="!row.task.done"
                   class="btn btn-icon sched-row-btn"
@@ -284,6 +304,16 @@ function toggleResult(runId: number) {
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path :d="ICON_PLAY" />
+                  </svg>
+                </button>
+                <button
+                  class="btn btn-icon sched-row-edit"
+                  aria-label="编辑"
+                  v-tooltip="'编辑'"
+                  @click="openEdit(row.task)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path :d="ICON_EDIT" />
                   </svg>
                 </button>
                 <button
@@ -339,5 +369,70 @@ function toggleResult(runId: number) {
         </template>
       </div>
     </div>
+
+    <ModalDialog
+      v-if="editTask"
+      title="编辑定时任务"
+      closable
+      @close="closeEdit"
+    >
+      <div class="sched-edit-form">
+        <div class="setting-row">
+          <label>
+            任务标题（name）
+          </label>
+          <input
+            v-model="editForm.name"
+            type="text"
+            :disabled="editSaving"
+            placeholder="例如：每日总结"
+          />
+        </div>
+        <div class="setting-row">
+          <label>
+            提示词（prompt）
+          </label>
+          <textarea
+            v-model="editForm.prompt"
+            :disabled="editSaving"
+            rows="4"
+            placeholder="到点后发送给会话的指令"
+          />
+        </div>
+        <div class="setting-row">
+          <label>
+            忙时策略（busyPolicy）
+          </label>
+          <select v-model="editForm.busyPolicy" :disabled="editSaving">
+            <option value="defer">忙时顺延</option>
+            <option value="skip">忙时跳过</option>
+          </select>
+        </div>
+        <div class="setting-row sched-edit-readonly">
+          <label>
+            调度表达式（只读）
+          </label>
+          <span class="sched-edit-readonly-value">{{ describeSchedule(editTask.cron) }}</span>
+        </div>
+        <div class="setting-row sched-edit-readonly">
+          <label>
+            绑定会话（只读）
+          </label>
+          <span class="sched-edit-readonly-value">{{ threadLabel(editTask.threadId) }}</span>
+        </div>
+      </div>
+      <template #foot>
+        <div class="modal-footer">
+          <button class="btn" :disabled="editSaving" @click="closeEdit">取消</button>
+          <button
+            class="btn primary"
+            :disabled="editSaving"
+            @click="saveEdit"
+          >
+            {{ editSaving ? "保存中…" : "保存" }}
+          </button>
+        </div>
+      </template>
+    </ModalDialog>
   </section>
 </template>

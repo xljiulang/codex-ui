@@ -1806,6 +1806,70 @@ button.skill-row-main:hover .skill-name {
   font-size: var(--font-xs);
 }
 
+/* 忙时策略胶囊（纯展示，不可点击）：顺延用强调色，跳过用中性色 */
+.sched-busy-badge {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sched-busy-badge.badge-defer {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.sched-busy-badge.badge-skip {
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+/* 编辑定时任务弹窗表单：去卡片装饰，字段纵排，分隔线分隔 */
+.sched-edit-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.sched-edit-form .setting-row {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid rgba(var(--border-rgb), 0.45);
+}
+
+.sched-edit-form .setting-row:last-child {
+  border-bottom: none;
+}
+
+.sched-edit-form input[type="text"],
+.sched-edit-form textarea,
+.sched-edit-form select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-bright);
+  font-size: var(--font-md);
+}
+
+.sched-edit-form textarea {
+  resize: vertical;
+  font-family: var(--mono);
+}
+
+.sched-edit-readonly-value {
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+}
+
 .sched-detail {
   padding: 0 0 var(--space-4) calc(var(--space-4) + 16px);
   display: flex;
