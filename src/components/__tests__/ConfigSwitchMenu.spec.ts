@@ -73,7 +73,8 @@ describe("ConfigSwitchMenu", () => {
     expect(btn.find("img").exists()).toBe(false);
     const brace = btn.find(".config-brace");
     expect(brace.exists()).toBe(true);
-    expect(brace.findAll("path").length).toBe(2);
+    // 2 个花括号 + 4 个直角边框
+    expect(brace.findAll("path").length).toBe(6);
     expect(brace.findAll("path").every((p) => p.attributes("fill") === "none")).toBe(
       true,
     );
