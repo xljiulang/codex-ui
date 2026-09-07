@@ -77,7 +77,7 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     expect(wrapper.text()).not.toContain("已完成（");
   });
 
-  it("展开任务显示 prompt 全文与按任务分开的执行记录", async () => {
+  it("行内常驻显示任务指令，展开显示按任务分开的执行记录", async () => {
     store.scheduledTasks = [{ ...activeTask }];
     mockedRuns.mockResolvedValue([
       {
@@ -94,7 +94,9 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     await wrapper.find(".sched-task-main").trigger("click");
     await nextTick();
     expect(mockedRuns).toHaveBeenCalledWith("task-1", 20, 0);
-    expect(wrapper.find(".sched-prompt").text()).toBe("总结昨天的提交");
+    // prompt 常驻于标题与徽章之间，展开前即可见
+    expect(wrapper.find(".sched-prompt-desc").text()).toBe("总结昨天的提交");
+    expect(wrapper.find(".sched-prompt").exists()).toBe(false);
     expect(wrapper.find(".sched-run-status").classes()).toContain("st-success");
     expect(wrapper.text()).toContain("已完成总结");
     // 点击结果摘要展开全文

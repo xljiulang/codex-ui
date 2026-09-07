@@ -268,11 +268,12 @@ function toggleResult(runId: number) {
                 </span>
                 <span class="sched-meta">
                   <span class="sched-title-row">
+                    <span class="sched-name">{{ row.task.name }}</span>
                     <svg class="sched-arrow" viewBox="0 0 24 24" aria-hidden="true">
                       <path :d="expandedId === row.task.id ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
                     </svg>
-                    <span class="sched-name">{{ row.task.name }}</span>
                   </span>
+                  <span class="sched-prompt-desc">{{ row.task.prompt }}</span>
                   <span class="sched-badges">
                     <span
                       class="sched-session"
@@ -329,8 +330,6 @@ function toggleResult(runId: number) {
               </div>
             </div>
             <div v-if="expandedId === row.task.id" class="sched-detail">
-              <div class="sched-detail-label">任务指令（prompt）</div>
-              <pre class="sched-prompt">{{ row.task.prompt }}</pre>
               <div class="sched-detail-label">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="ICON_HISTORY" /></svg>
                 执行记录

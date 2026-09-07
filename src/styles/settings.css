@@ -757,16 +757,16 @@
 }
 
 .plugin-row-icon .plugin-icon-fallback {
-  width: 14px;
-  height: 14px;
+  width: 100%;
+  height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  font-size: var(--font-xs);
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-dim);
+  user-select: none;
 }
 
 /* 通用卡片：模型配置 / 个性化 / 通用设置共用同一容器 */
@@ -1903,17 +1903,14 @@ button.skill-row-main:hover .skill-name {
   fill: var(--text-muted);
 }
 
-.sched-prompt {
+/* 任务指令常驻描述（标题与徽章之间）：样式对齐技能管理的 skill-desc */
+.sched-prompt-desc {
   margin: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 4px);
-  font-family: var(--mono);
-  font-size: var(--font-xs);
+  font-size: var(--font-md);
+  line-height: 1.5;
+  color: var(--text-dim);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 160px;
-  overflow: auto;
   user-select: text;
 }
 
