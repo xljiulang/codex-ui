@@ -175,6 +175,7 @@ fn build_turn_params(
     thread_id: &str,
     text: &str,
     model: &str,
+    effort: Option<&str>,
     client_message_id: &str,
 ) -> Value {
     json!({
@@ -183,13 +184,13 @@ fn build_turn_params(
         "clientUserMessageId": client_message_id,
         "approvalPolicy": "never",
         "sandboxPolicy": { "type": "dangerFullAccess" },
-        "model": null,
-        "effort": null,
+        "model": model,
+        "effort": effort,
         "collaborationMode": {
             "mode": "default",
             "settings": {
                 "model": model,
-                "reasoning_effort": null,
+                "reasoning_effort": effort,
                 "developer_instructions": null,
             },
         },
@@ -1055,12 +1056,18 @@ impl WeChatBridge {
             self.clear_active(thread_id).await;
             return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
         }
-        let model = match self.resolve_default_model().await {
-            Ok(m) => m,
-            Err(e) => {
-                self.log("warn", e).await;
-                String::new()
-            }
+        // 与定时任务 execute 一致：优先使用会话保存的 model，缺省才回退默认模型。
+        let session = self.store.get(thread_id);
+        let saved_model = session.as_ref().and_then(|s| s.model.clone());
+        let model = match saved_model {
+            Some(m) if !m.is_empty() => m,
+            _ => match self.resolve_default_model().await {
+                Ok(m) => m,
+                Err(e) => {
+                    self.log("warn", e).await;
+                    String::new()
+                }
+            },
         };
         if model.is_empty() {
             self.clear_active(thread_id).await;
@@ -1069,10 +1076,11 @@ impl WeChatBridge {
                 "⚠️ 执行失败：无法解析默认模型（检查 codex 登录与模型列表）".into(),
             ));
         }
+        let effort = session.as_ref().and_then(|s| s.effort.as_deref());
         // 回合即将真正开始：点亮“正在输入”并周期续发。
         let typing_task = self.spawn_typing_refresh(account_id, peer);
         self.set_typing(account_id, peer, 1).await;
-        let params = build_turn_params(thread_id, text, &model, &self.next_message_id());
+        let params = build_turn_params(thread_id, text, &model, effort, &self.next_message_id());
         let turn_id = match self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))
@@ -1252,20 +1260,23 @@ mod tests {
 
     #[test]
     fn turn_params_carry_never_policy_and_default_collab() {
-        let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0");
+        let v = build_turn_params("t-1", "hello", "gpt-x", Some("high"), "wechat-1-0");
         assert_eq!(v["threadId"], "t-1");
         assert_eq!(v["input"][0]["type"], "text");
         assert_eq!(v["input"][0]["text"], "hello");
         assert_eq!(v["clientUserMessageId"], "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
         assert_eq!(v["sandboxPolicy"]["type"], "dangerFullAccess");
+        assert_eq!(v["model"], "gpt-x");
+        assert_eq!(v["effort"], "high");
         assert_eq!(v["collaborationMode"]["mode"], "default");
         assert_eq!(v["collaborationMode"]["settings"]["model"], "gpt-x");
+        assert_eq!(v["collaborationMode"]["settings"]["reasoning_effort"], "high");
     }
 
     #[test]
     fn turn_params_always_danger_full_access() {
-        let v = build_turn_params("t-1", "hello", "gpt-x", "wechat-1-0");
+        let v = build_turn_params("t-1", "hello", "gpt-x", None, "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
         assert_eq!(v["sandboxPolicy"]["type"], "dangerFullAccess");
         assert!(
@@ -1276,6 +1287,8 @@ mod tests {
             v["sandboxPolicy"].get("networkAccess").is_none(),
             "danger-full-access 变体不应带 networkAccess"
         );
+        assert_eq!(v["effort"], serde_json::Value::Null);
+        assert_eq!(v["collaborationMode"]["settings"]["reasoning_effort"], serde_json::Value::Null);
     }
 
     #[test]
