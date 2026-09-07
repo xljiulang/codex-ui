@@ -321,30 +321,30 @@ function openMcpDetail(index: number) {
           :key="s.name"
           class="mcp-server-row"
         >
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path
+                :d="ICON_MCP"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
           <div class="mcp-server-info">
-            <span class="mcp-server-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24">
-                <path
-                  :d="ICON_MCP"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </span>
             <span class="mcp-server-name">{{ s.name }}</span>
-            <span class="mcp-server-type">
-              {{ s.url.trim() ? "http" : "stdio" }}
-            </span>
-            <span
-              v-if="s.omit_tools_from?.length"
-              class="mcp-server-omit"
-              v-tooltip="`omit_tools_from: ${s.omit_tools_from.join(', ')}`"
-            >
-              omit: {{ s.omit_tools_from.join("/") }}
-            </span>
+            <div class="mcp-server-meta">
+              <span class="mcp-server-type">{{ s.url.trim() ? "http" : "stdio" }}</span>
+              <span
+                v-if="s.omit_tools_from?.length"
+                class="mcp-server-omit"
+                v-tooltip="`omit_tools_from: ${s.omit_tools_from.join(', ')}`"
+              >
+                omit: {{ s.omit_tools_from.join("/") }}
+              </span>
+            </div>
           </div>
           <div class="model-provider-actions">
             <button

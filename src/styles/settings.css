@@ -570,9 +570,8 @@
   color: var(--text-bright);
 }
 
-/* 设置条目行首图标（市场 / MCP 服务器行）：对齐会话目录行 .folder-icon */
-.plugin-marketplace-icon,
-.mcp-server-icon {
+/* 设置条目行首图标（市场行）：对齐会话目录行 .folder-icon */
+.plugin-marketplace-icon {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -580,8 +579,7 @@
   color: var(--text-dim);
 }
 
-.plugin-marketplace-icon svg,
-.mcp-server-icon svg {
+.plugin-marketplace-icon svg {
   width: 14px;
   height: 14px;
 }
@@ -591,19 +589,31 @@
   fill: currentColor;
 }
 
-/* 胶囊徽章基类：accent 系徽章共享，padding 差异保留在各自规则 */
+/* 统一胶囊徽章基类：尺寸/字号/内边距恒定，语义色由修饰类控制 */
+.plugin-status,
+.model-provider-wire,
+.mcp-server-type,
+.git-remote-badge,
+.git-remote-branch-badge,
+.plugin-version,
+.plugin-source,
+.mcp-server-omit {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 999px;
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+}
+
+/* 强调语义：状态/传输类型/提供方接线等强调徽章 */
 .plugin-status,
 .model-provider-wire,
 .mcp-server-type,
 .git-remote-badge,
 .git-remote-branch-badge {
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 999px;
-  flex-shrink: 0;
 }
 
 /* 数量徽章：扁胶囊风格同会话目录行 .folder-count（中性色描边），尺寸略放大一档，
@@ -637,8 +647,8 @@
 .plugin-row {
   display: flex;
   align-items: center;
-  gap: var(--space-5);
-  padding: var(--space-4) var(--space-1);
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--border);
   transition: background var(--ease);
 }
@@ -666,16 +676,17 @@
   user-select: text;
 }
 
-/* 版本号 / 来源市场：等宽胶囊（来源徽章用于已安装插件卡片） */
+/* 版本号 / 来源市场：中性胶囊（等宽描边风格），复用统一基类 */
 .plugin-version,
-.plugin-source {
-  font-size: var(--font-xs);
-  font-weight: 400;
+.plugin-source,
+.mcp-server-omit {
   color: var(--text-dim);
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px var(--space-3);
+}
+
+.mcp-server-omit {
+  white-space: nowrap;
 }
 
 .plugin-desc {
@@ -697,10 +708,6 @@
   flex-wrap: wrap;
 }
 
-.plugin-status {
-  padding: 1px var(--space-2);
-}
-
 .plugin-disabled-reason {
   font-size: var(--font-sm);
   color: var(--red);
@@ -712,7 +719,9 @@
   flex-shrink: 0;
 }
 
-/* 插件行左侧图标：远程 URL / 本地路径 / 品牌色首字母回退 */
+/* 列表项首统一图标容器：技能 / 动态工具 / MCP 线性图标与插件品牌图共用。
+   浅色圆角小方块，线性图标以 currentColor 着色（text-dim），插件图片/首字母仍放容器内。 */
+.row-icon,
 .plugin-row-icon {
   width: 22px;
   height: 22px;
@@ -724,6 +733,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: var(--text-dim);
+}
+
+.row-icon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .plugin-row-icon img {
@@ -1051,7 +1066,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
 }
 
 .skill-actions {
@@ -1078,13 +1093,6 @@
 /* 仅真正的链接行为（技能行打开 SKILL.md）显示手型光标；动态工具行为纯展示 span */
 button.skill-row-main {
   cursor: pointer;
-}
-
-.skill-row-main svg {
-  width: 13px;
-  height: 13px;
-  fill: var(--accent);
-  flex-shrink: 0;
 }
 
 .skill-name {
@@ -1137,10 +1145,16 @@ button.skill-row-main:hover .skill-name {
 
 .mcp-server-info {
   display: flex;
-  align-items: center;
-  gap: var(--space-3);
+  flex-direction: column;
+  gap: var(--space-1);
   flex: 1;
   min-width: 0;
+}
+
+.mcp-server-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
@@ -1149,22 +1163,6 @@ button.skill-row-main:hover .skill-name {
   color: var(--text-bright);
   font-family: var(--mono);
   user-select: text;
-}
-
-.mcp-server-type {
-  padding: 1px var(--space-2);
-}
-
-.mcp-server-omit {
-  padding: 1px var(--space-2);
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-muted);
-  background: rgba(var(--overlay-rgb), 0.08);
-  border-radius: 999px;
-  flex-shrink: 0;
-  white-space: nowrap;
 }
 
 .mcp-server-form {

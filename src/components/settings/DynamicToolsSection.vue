@@ -49,11 +49,13 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
           :key="tool.key"
           class="dynamic-tool-row"
         >
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path :d="ICON_TOOL" fill="currentColor" />
+            </svg>
+          </span>
           <div class="skill-info">
             <span class="skill-row-main">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_TOOL" />
-              </svg>
               <span class="skill-name">{{ tool.display }}</span>
             </span>
             <p v-if="tool.description" class="skill-desc">

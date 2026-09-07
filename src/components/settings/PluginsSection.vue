@@ -323,14 +323,14 @@ function pluginInitial(p: PluginCatalogItem): string {
           <div class="plugin-info">
             <div class="plugin-name">
               {{ p.displayName }}
-              <span v-if="p.version" class="plugin-version">
-                {{ p.version }}
-              </span>
             </div>
             <div v-if="p.description" class="plugin-desc">
               {{ p.description }}
             </div>
             <div class="plugin-meta">
+              <span v-if="p.version" class="plugin-version">
+                {{ p.version }}
+              </span>
               <span class="plugin-status">{{ statusLabel(p) }}</span>
               <span class="plugin-source">来源：{{ mp.displayName }}</span>
               <span
@@ -489,14 +489,14 @@ function pluginInitial(p: PluginCatalogItem): string {
                 <div class="plugin-info">
                   <div class="plugin-name">
                     {{ p.displayName }}
-                    <span v-if="p.version" class="plugin-version">
-                      {{ p.version }}
-                    </span>
                   </div>
                   <div v-if="p.description" class="plugin-desc">
                     {{ p.description }}
                   </div>
                   <div class="plugin-meta">
+                    <span v-if="p.version" class="plugin-version">
+                      {{ p.version }}
+                    </span>
                     <span class="plugin-status">{{ statusLabel(p) }}</span>
                     <span
                       v-if="p.disabledReason"

@@ -184,6 +184,11 @@ async function removeSkill(s: SkillsItem) {
           :key="s.path"
           class="skill-row"
         >
+          <span class="row-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path :d="ICON_SKILL" fill="currentColor" />
+            </svg>
+          </span>
           <div class="skill-info">
             <button
               type="button"
@@ -191,9 +196,6 @@ async function removeSkill(s: SkillsItem) {
               v-tooltip="'在编辑器中打开 SKILL.md'"
               @click="openSkill(s)"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_SKILL" />
-              </svg>
               <span class="skill-name">{{ s.name }}</span>
             </button>
             <p v-if="s.description" class="skill-desc">

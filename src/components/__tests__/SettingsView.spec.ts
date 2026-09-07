@@ -265,7 +265,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型配置 → 动态工具 → 定时任务 → 技能管理", () => {
+  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型配置 → 动态工具 → 技能管理 → MCP管理 → 插件管理 → 定时任务", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
@@ -275,8 +275,10 @@ describe("SettingsView 模型配置", () => {
     expect(labels.indexOf("全局指令")).toBe(2);
     expect(labels.indexOf("模型配置")).toBe(3);
     expect(labels.indexOf("动态工具")).toBe(4);
-    expect(labels.indexOf("定时任务")).toBe(5);
-    expect(labels.indexOf("技能管理")).toBe(6);
+    expect(labels.indexOf("技能管理")).toBe(5);
+    expect(labels.indexOf("MCP管理")).toBe(6);
+    expect(labels.indexOf("插件管理")).toBe(7);
+    expect(labels.indexOf("定时任务")).toBe(8);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -1207,8 +1209,10 @@ describe("SettingsView 动态工具", () => {
     const idx = (t: string) => nav.map((i) => i.text().trim()).indexOf(t);
     expect(idx("模型配置")).toBe(3);
     expect(idx("动态工具")).toBe(4);
-    expect(idx("定时任务")).toBe(5);
-    expect(idx("技能管理")).toBe(6);
+    expect(idx("技能管理")).toBe(5);
+    expect(idx("MCP管理")).toBe(6);
+    expect(idx("插件管理")).toBe(7);
+    expect(idx("定时任务")).toBe(8);
     await nav[4].trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("动态工具");
@@ -2361,10 +2365,10 @@ describe("SettingsView 设置标签行为", () => {
       "全局指令",
       "模型配置",
       "动态工具",
-      "定时任务",
       "技能管理",
       "MCP管理",
       "插件管理",
+      "定时任务",
     ]);
     expect(items[0].classes()).toContain("active");
     expect(items[1].classes()).not.toContain("active");
