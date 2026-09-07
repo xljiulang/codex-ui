@@ -26,12 +26,36 @@ onMounted(async () => {
     const threadId = e.payload;
     if (!threadId) return;
     await sessionLog("info", null, "sched-toast-open-session", `frontend-received thread=${threadId}`);
-    const win = getCurrentWindow();
-    await win.show();
-    await win.unminimize();
-    await win.setFocus();
-    await openSession(threadId);
-    await sessionLog("info", null, "sched-toast-open-session", "frontend-openSession-done");
+    // 窗口前置操作用 try/catch 隔离：即使失败也不阻断打开绑定会话（仅影响视觉前置）。
+    try {
+      const win = getCurrentWindow();
+      await win.show();
+      await win.unminimize();
+      await win.setFocus();
+    } catch (err) {
+      await sessionLog(
+        "error",
+        null,
+        "sched-toast-open-session",
+        `frontend-window-error=${String(err)}`,
+      );
+    }
+    try {
+      await openSession(threadId);
+      await sessionLog(
+        "info",
+        null,
+        "sched-toast-open-session",
+        "frontend-openSession-done",
+      );
+    } catch (err) {
+      await sessionLog(
+        "error",
+        null,
+        "sched-toast-open-session",
+        `frontend-openSession-error=${String(err)}`,
+      );
+    }
   });
   // 关闭守卫仅阻止 Tauri 默认销毁窗口；关闭即隐藏到系统托盘由 Rust 端处理
   unlistenClose = await registerCloseGuard();
