@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { type SessionTab } from "../composables/useCodex";
 import { useContextUsage } from "../composables/useContextUsage";
 import { formatTokens } from "../lib/format";
-import { ICON_ARROW_DOWN, ICON_ARROW_UP, ICON_COMPRESS } from "../lib/icons";
+import { ICON_ARROW_DOWN, ICON_ARROW_UP, ICON_COMPRESS, ICON_SIGMA } from "../lib/icons";
 
 const props = defineProps<{ tab: SessionTab }>();
 
@@ -120,7 +120,12 @@ const totalRows = computed<UsageRow[]>(() => {
     rows.push({ key: "output", label: "输出", value: formatTokens(t.output), icon: ICON_ARROW_DOWN });
   }
   if (typeof t.totalTokens === "number") {
-    rows.push({ key: "total", label: "合计", value: formatTokens(t.totalTokens) });
+    rows.push({
+      key: "total",
+      label: "合计",
+      value: formatTokens(t.totalTokens),
+      icon: ICON_SIGMA,
+    });
   }
   if (typeof t.cachedInput === "number") {
     rows.push({ key: "cachedInput", label: "缓存读取", value: formatTokens(t.cachedInput), sub: true });

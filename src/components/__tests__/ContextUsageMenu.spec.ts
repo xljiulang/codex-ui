@@ -15,6 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ContextUsageMenu from "../ContextUsageMenu.vue";
 import { setToast, type SessionTab } from "../../composables/useCodex";
 import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
+import { ICON_SIGMA } from "../../lib/icons";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedSetToast = vi.mocked(setToast);
@@ -122,6 +123,12 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
       "1000",
       "2000",
     ]);
+    // 合计行带 Σ 求和图标（与输入/输出箭头行同风格图标）
+    const totalRow = rows[2];
+    expect(totalRow.find(".usage-menu-label svg").exists()).toBe(true);
+    expect(totalRow.find(".usage-menu-label svg path").attributes("d")).toBe(
+      ICON_SIGMA,
+    );
     // 缓存/推理为缩进的子集行
     expect(rows[0].classes()).not.toContain("sub");
     expect(rows[3].classes()).toContain("sub");

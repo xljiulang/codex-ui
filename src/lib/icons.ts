@@ -6,6 +6,9 @@ export const ICON_ARROW_DOWN =
   "M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z";
 export const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
+/** 求和符号 Σ：上下文用量「合计」行（与输入/输出箭头图标同风格） */
+export const ICON_SIGMA =
+  "M18 6H8.83l6 6-6 6H18v2H6v-2l6-6-6-6V4h12z";
 
 export const ICON_FOLDER_CLOSED =
   "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
