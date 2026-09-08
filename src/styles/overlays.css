@@ -281,19 +281,6 @@ html[data-glass="on"] .app-select-menu {
   margin-top: var(--space-2);
 }
 
-.menu-result {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--font-md);
-  color: var(--text);
-}
-
-.menu-result:hover {
-  background: rgba(var(--accent-rgb), 0.08);
-  color: var(--text-bright);
-}
-
 .menu-note {
   color: var(--text-faint);
   font-size: var(--font-sm);

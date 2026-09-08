@@ -963,7 +963,7 @@
 
 .git-log-hash {
   flex-shrink: 0;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono, monospace);
   font-size: var(--font-xs);
   color: var(--text-dim);
   opacity: 0.85;
@@ -1084,7 +1084,7 @@
 
 .commit-hash {
   flex-shrink: 0;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono, monospace);
   font-size: var(--font-xs);
   color: var(--text-dim);
   padding: 1px var(--space-2);
@@ -1178,7 +1178,7 @@
 
 .commit-file-stats {
   flex-shrink: 0;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono, monospace);
   font-size: var(--font-xs);
 }
 

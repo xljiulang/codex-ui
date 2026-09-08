@@ -49,9 +49,6 @@
   /* 动效时长 */
   --ease: 0.15s ease;
   --ease-slow: 0.2s ease;
-  /* 历史遗留别名（此前个别文件直接引用未定义令牌）：统一指向既有语义 */
-  --text-muted: var(--text-faint);
-  --font-mono: var(--mono);
   /* 状态透明度 */
   --opacity-disabled: 0.45;
   --opacity-busy: 0.75;

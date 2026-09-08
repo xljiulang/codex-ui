@@ -439,12 +439,6 @@
 }
 
 /* 插件管理 */
-.plugin-manage {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
-
 .plugin-manage-toolbar {
   display: flex;
   align-items: center;
@@ -1280,7 +1274,7 @@ button.skill-row-main:hover .skill-name {
   flex: 1;
   min-width: 0;
   font-size: var(--font-sm);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .mcp-omit-hint,
@@ -1290,7 +1284,7 @@ button.skill-row-main:hover .skill-name {
 }
 
 .mcp-omit-hint {
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .mcp-omit-note {
@@ -1522,7 +1516,7 @@ button.skill-row-main:hover .skill-name {
 
 .mcp-detail-field-label {
   flex: 0 0 92px;
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .mcp-detail-field-value {
@@ -1570,7 +1564,7 @@ button.skill-row-main:hover .skill-name {
 
 .mcp-detail-tool-title {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .mcp-detail-tool-desc {
@@ -1582,7 +1576,7 @@ button.skill-row-main:hover .skill-name {
 
 .mcp-detail-schema summary {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   cursor: pointer;
   user-select: none;
 }
@@ -1651,7 +1645,7 @@ button.skill-row-main:hover .skill-name {
 
 .mcp-resource-meta {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   word-break: break-word;
 }
 
@@ -1728,7 +1722,7 @@ button.skill-row-main:hover .skill-name {
   width: 16px;
   height: 16px;
   flex-shrink: 0;
-  fill: var(--text-muted);
+  fill: var(--text-faint);
 }
 
 .sched-name {
@@ -1762,22 +1756,8 @@ button.skill-row-main:hover .skill-name {
   font-size: var(--font-xs);
   font-weight: 600;
   line-height: 1;
-  color: var(--text-muted);
+  color: var(--text-faint);
   white-space: nowrap;
-}
-
-.sched-done-task .sched-name,
-.sched-done-task .sched-chip {
-  font-size: var(--font-xs);
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 180px;
-}
-
-.sched-done-task .sched-session {
-  opacity: 0.6;
 }
 
 /* 绑定会话：可点击胶囊（保留打开会话语义），hover 下划线提示 */
@@ -1805,7 +1785,7 @@ button.skill-row-main:hover .skill-name {
 .sched-done-head {
   padding: var(--space-3) 0 var(--space-2);
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1891,7 +1871,7 @@ button.skill-row-main:hover .skill-name {
 
 .sched-detail-label {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 /* 任务指令常驻描述（标题与徽章之间）：样式对齐技能管理的 skill-desc */
@@ -1926,7 +1906,7 @@ button.skill-row-main:hover .skill-name {
 
 .sched-run-status {
   padding: 1px var(--space-2);
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   font-size: var(--font-xs);
   white-space: nowrap;
 }
@@ -1937,35 +1917,35 @@ button.skill-row-main:hover .skill-name {
 }
 
 .sched-run-status.st-success {
-  background: rgba(var(--success-rgb, 52, 168, 83), 0.14);
-  color: var(--success, rgb(52 168 83));
+  background: rgba(var(--green-rgb), 0.14);
+  color: var(--green);
 }
 
 .sched-run-status.st-failed {
-  background: rgba(var(--danger-rgb, 234, 67, 53), 0.14);
-  color: var(--danger, rgb(234 67 53));
+  background: rgba(var(--red-rgb), 0.14);
+  color: var(--red);
 }
 
 .sched-run-status.st-skipped,
 .sched-run-status.st-missed {
   background: rgba(var(--overlay-rgb), 0.08);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .sched-run-time {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-family: var(--mono);
 }
 
 .sched-run-duration {
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .sched-run-error {
   font-size: var(--font-xs);
-  color: var(--danger);
+  color: var(--red);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1980,7 +1960,7 @@ button.skill-row-main:hover .skill-name {
   border: none;
   padding: var(--space-2) 0 0;
   font-size: var(--font-xs);
-  color: var(--text-muted);
+  color: var(--text-faint);
   cursor: pointer;
 }
 
