@@ -207,13 +207,13 @@ const CSS = bracesGlyph("#1572B6");
 const SCSS = bracesGlyph("#CF649A");
 const LESS = bracesGlyph("#2B5E84");
 
-/* 图像：绿色底徽 + 白色照片（太阳 + 山） */
+/* 图像：黛青底徽 + 双层远山 + 太阳（山水画风格） */
 const IMAGE = svg(
   badge(
-    "#4CAF50",
-    `<rect x="3.6" y="4.4" width="8.8" height="7.2" rx="1.1" fill="#fff"/>` +
-      `<circle cx="6.1" cy="6.9" r="1.05" fill="#4CAF50"/>` +
-      `<path d="M4.6 11.2 7.2 8.2l1.5 1.7 1.4-1.5 2 2.8z" fill="#4CAF50"/>`,
+    "#2E7D8C",
+    `<circle cx="10.7" cy="4.8" r="1.3" fill="#fff" opacity=".92"/>` +
+      `<path d="M2.3 12.3 5.5 7 7.2 9.6 8.7 7.7 13 12.3z" fill="#fff" opacity=".5"/>` +
+      `<path d="M4.4 12.3 7.4 8.2 9 10.3 10.2 9 13.7 12.3z" fill="#fff"/>`,
   ),
 );
 

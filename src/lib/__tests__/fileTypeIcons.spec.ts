@@ -67,6 +67,17 @@ describe("fileTypeIcons 内置代码文件图标", () => {
     }
   });
 
+  it("图片图标为山水风格（黛青底徽 + 双层远山 + 太阳）", () => {
+    const uri = builtinFileIcon("pic.png")!;
+    const decoded = decodeURIComponent(uri.slice("data:image/svg+xml,".length));
+    // 底徽黛青色
+    expect(decoded).toContain('fill="#2E7D8C"');
+    // 近山主体路径
+    expect(decoded).toContain("M4.4 12.3 7.4 8.2 9 10.3 10.2 9 13.7 12.3z");
+    // 后层远山（半透明）
+    expect(decoded).toContain("M2.3 12.3 5.5 7 7.2 9.6 8.7 7.7 13 12.3z");
+  });
+
   it("未覆盖的扩展名与无扩展名文件返回 null（走系统图标）", () => {
     expect(builtinFileIcon("config.ini")).toBeNull();
     expect(builtinFileIcon("a.txt")).toBeNull();
