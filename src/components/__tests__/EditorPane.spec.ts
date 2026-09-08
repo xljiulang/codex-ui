@@ -1678,7 +1678,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("打开图像预览：标签栏显示「预览」徽标并渲染预览区", async () => {
+  it("打开图像预览：标签栏不显示类型徽标并渲染预览区", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_icons") {
         return Promise.resolve([]);
@@ -1693,7 +1693,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("pic.png");
-    expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
+    expect(tabEls[1].find(".editor-tab-kind").exists()).toBe(false);
     // 根目录文件：标题与相对路径相同，header 与标题均不显示 tooltip
     expect(tabEls[1].attributes("data-tip")).toBeUndefined();
     expect(tabEls[1].find(".editor-tab-label").attributes("data-tip")).toBe("");
@@ -1803,7 +1803,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const tabEls = wrapper.findAll(".editor-tab");
     expect(tabEls).toHaveLength(2);
     expect(tabEls[1].find(".editor-tab-label").text()).toBe("doc.pdf");
-    expect(tabEls[1].find(".editor-tab-kind").text()).toBe("预览");
+    expect(tabEls[1].find(".editor-tab-kind").exists()).toBe(false);
     await waitForEl(wrapper, ".preview-pane");
     wrapper.unmount();
   });

@@ -362,9 +362,6 @@ function titleTooltip(tab: EditorTab): string {
         <span v-else-if="tab.kind === TabKind.Diff" class="editor-tab-kind">
           {{ diffKindLabel(tab.changeKind) }}
         </span>
-        <span v-else-if="tab.kind === TabKind.Preview" class="editor-tab-kind">
-          预览
-        </span>
         <button
           class="editor-tab-close"
           :aria-label="'关闭 ' + tab.title"
