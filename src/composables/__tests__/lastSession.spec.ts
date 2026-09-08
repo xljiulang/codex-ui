@@ -77,6 +77,38 @@ describe("lastSession 最后活跃会话记录与退出落盘", () => {
     expect(mockedSave).not.toHaveBeenCalled();
   });
 
+  it("最近激活会话的 tab 已被关闭：flush 落盘空值", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activateTab("s1");
+    await nextTick();
+    // 上次退出持久化过 t1；本次用户关闭该会话标签（应用仍运行，仅退出前收尾）
+    store.settings.last_session_id = "t1";
+    tabs.splice(0, tabs.length);
+    await flushLastSession();
+    expect(mockedSave).toHaveBeenCalledWith({ last_session_id: "" });
+  });
+
+  it("最近激活会话的 tab 仍打开：flush 落盘其 threadId", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    activateTab("s1");
+    await nextTick();
+    store.settings.last_session_id = "t-old";
+    await flushLastSession();
+    expect(mockedSave).toHaveBeenCalledWith({ last_session_id: "t1" });
+  });
+
+  it("激活多个会话后仅关掉最近的一个：落盘空值", async () => {
+    tabs.push(makeSessionTab("s1", "t1"));
+    tabs.push(makeSessionTab("s2", "t2"));
+    activateTab("s2");
+    await nextTick();
+    store.settings.last_session_id = "t2";
+    // 最近激活的 s2 被关闭，仅存活的 s1 不是最近激活者
+    tabs.splice(tabs.findIndex((t) => t.id === "s2"), 1);
+    await flushLastSession();
+    expect(mockedSave).toHaveBeenCalledWith({ last_session_id: "" });
+  });
+
   it("readLastSessionId：读 store.settings.last_session_id，缺省空串", () => {
     expect(readLastSessionId()).toBe("");
     store.settings.last_session_id = "t9";

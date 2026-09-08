@@ -1,7 +1,8 @@
 // useCodex 拆分模块：最后活跃会话 id 记录与退出落盘（settings.json 的 last_session_id）
 import { watch } from "vue";
+import type { SessionTab } from "./types";
 import { TabKind } from "../../lib/tabs";
-import { activeTab } from "../useTabs";
+import { activeTab, tabs } from "../useTabs";
 import { saveSettings } from "./settings";
 import { store } from "./store";
 
@@ -20,15 +21,26 @@ export function readLastSessionId(): string {
 
 /**
  * 退出时把内存记录落盘到 settings.json 的 last_session_id：
- * 本次运行未激活过会话或值未变化则跳过，避免多余配置文件写入。
+ * 仅当「最近激活会话」的会话标签仍在打开状态时才持久化其 threadId，
+ * 标签已关闭则写空（避免下次启动恢复一个已关闭的会话）；本次运行未激活过
+ * 会话则跳过（保留上次持久化值）；值未变化同样跳过，避免多余配置文件写入。
  */
 export async function flushLastSession(): Promise<void> {
-  if (!activeSessionId || readLastSessionId() === activeSessionId) return;
+  if (!activeSessionId) return;
+  const value = isSessionTabOpen(activeSessionId) ? activeSessionId : "";
+  if (readLastSessionId() === value) return;
   try {
-    await saveSettings({ last_session_id: activeSessionId });
+    await saveSettings({ last_session_id: value });
   } catch {
     // 落盘失败仅影响下次启动恢复，不打断退出流程
   }
+}
+
+/** 最近激活会话 threadId 是否仍有打开的会话标签（kind=session 且 threadId 匹配） */
+function isSessionTabOpen(threadId: string): boolean {
+  return tabs.some(
+    (t) => t.kind === TabKind.Session && (t as SessionTab).threadId === threadId,
+  );
 }
 
 let tracking = false;
