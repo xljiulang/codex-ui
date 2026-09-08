@@ -130,6 +130,16 @@ const totalRows = computed<UsageRow[]>(() => {
   if (typeof t.cachedInput === "number") {
     rows.push({ key: "cachedInput", label: "缓存读取", value: formatTokens(t.cachedInput), sub: true });
   }
+  if (typeof t.input === "number" && typeof t.cachedInput === "number") {
+    // 输入缓存命中率 = 缓存读取输入 / 总输入（cachedInput 是 input 的子集）
+    const pct = t.input > 0 ? (t.cachedInput / t.input) * 100 : 0;
+    rows.push({
+      key: "inputCacheHitRate",
+      label: "输入缓存命中率",
+      value: `${pct.toFixed(2)}%`,
+      sub: true,
+    });
+  }
   if (typeof t.cacheWriteInput === "number") {
     rows.push({ key: "cacheWriteInput", label: "缓存写入", value: formatTokens(t.cacheWriteInput), sub: true });
   }
