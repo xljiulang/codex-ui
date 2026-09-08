@@ -190,7 +190,7 @@ watch(open, (v) => {
           @keyup.enter="onNew()"
         />
         <button
-          class="git-branch-create-btn"
+          class="btn sm git-branch-create-btn"
           :disabled="loading || !newName.trim()"
           @click="onNew()"
         >

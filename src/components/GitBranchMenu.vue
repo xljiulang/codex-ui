@@ -420,7 +420,7 @@ onBeforeUnmount(() => {
         @keydown.enter="createBranch()"
       />
       <button
-        class="git-branch-create-btn"
+        class="btn sm git-branch-create-btn"
         :disabled="branchBusy || !newBranchName.trim()"
         @click="createBranch()"
       >

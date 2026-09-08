@@ -246,38 +246,6 @@
   gap: var(--space-3);
   flex-shrink: 0;
 }
-.tab-confirm-btn {
-  font-family: inherit;
-  font-size: var(--font-md);
-  color: var(--text);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--space-1) var(--space-5);
-  cursor: pointer;
-}
-.tab-confirm-btn:hover {
-  background: var(--bg-hover);
-}
-.tab-confirm-btn.active {
-  color: var(--text-bright);
-  border-color: rgba(var(--accent-rgb), 0.55);
-  background: rgba(var(--accent-rgb), 0.14);
-}
-.tab-confirm-btn.primary {
-  color: var(--on-accent);
-  background: var(--btn-primary-grad);
-  border-color: transparent;
-  box-shadow: var(--btn-glow);
-}
-.tab-confirm-btn.primary:hover:not(:disabled) {
-  box-shadow: var(--btn-glow-hover);
-  filter: brightness(1.08);
-}
-.tab-confirm-btn.primary:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
-}
 .text-editor-icon-btn {
   width: var(--ctrl-h-xs);
   height: var(--ctrl-h-xs);

@@ -551,6 +551,19 @@
   background: rgba(var(--red-rgb), 0.12);
   border-color: rgba(var(--red-rgb), 0.7);
 }
+/* 紧凑尺码命令按钮（Git 提交/新建分支/添加远端等），沿用 .btn 基底 */
+.btn.sm {
+  height: var(--ctrl-h-sm);
+  padding: 0 var(--space-5);
+  gap: var(--space-1);
+}
+.btn.sm:hover:not(:disabled) {
+  background: var(--chip-bg-hover);
+}
+.btn.sm:disabled {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
 /* 纯图标按钮（标题栏/面板） */
 .icon-btn {
   display: inline-flex;

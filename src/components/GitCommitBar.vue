@@ -69,7 +69,7 @@ async function doCommit() {
     ></textarea>
     <div class="git-commit-row">
       <button
-        class="git-commit-btn"
+        class="btn sm git-commit-btn"
         :disabled="!canCommit"
         @click="doCommit()"
       >

@@ -198,7 +198,7 @@ async function removeRemote(remote: GitRemote) {
         @keydown.enter="addRemote()"
       />
       <button
-        class="git-remote-add-btn"
+        class="btn sm git-remote-add-btn"
         :disabled="remoteBusy || !newRemoteName.trim() || !newRemoteUrl.trim()"
         @click="addRemote()"
       >

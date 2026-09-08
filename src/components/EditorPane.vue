@@ -332,18 +332,18 @@ function openAddMenu(e: MouseEvent) {
         </div>
         <div class="tab-confirm-actions">
           <button
-            class="tab-confirm-btn primary"
+            class="btn primary tab-confirm-btn"
             @click="saveTabAndClose(pendingTab.id)"
           >
             保存并关闭
           </button>
           <button
-            class="tab-confirm-btn"
+            class="btn tab-confirm-btn"
             @click="discardTabAndClose(pendingTab.id)"
           >
             放弃并关闭
           </button>
-          <button class="tab-confirm-btn" @click="cancelClose">取消</button>
+          <button class="btn tab-confirm-btn" @click="cancelClose">取消</button>
         </div>
       </div>
     </div>

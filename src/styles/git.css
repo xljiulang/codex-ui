@@ -282,28 +282,6 @@
   border-color: var(--accent);
 }
 
-/* 主按钮组：Git 初始化/分支创建/远端添加/提交共用 */
-.git-branch-create-btn,
-.git-remote-add-btn,
-.git-commit-btn,
-.git-init-btn.primary {
-  flex-shrink: 0;
-  height: var(--ctrl-h-sm);
-  padding: 0 var(--space-5);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-1);
-  border: none;
-  border-radius: var(--radius);
-  font-size: var(--font-md);
-  font-weight: 700;
-  color: var(--on-accent);
-  background: var(--accent);
-  cursor: pointer;
-  transition: background-color var(--ease);
-}
-
 .git-branch-create-btn svg,
 .git-remote-add-btn svg,
 .git-commit-btn svg {
@@ -311,21 +289,6 @@
   height: 13px;
   fill: currentColor;
   flex-shrink: 0;
-}
-
-.git-branch-create-btn:hover:not(:disabled),
-.git-remote-add-btn:hover:not(:disabled),
-.git-commit-btn:hover:not(:disabled),
-.git-init-btn.primary:hover {
-  background: var(--accent-dim);
-}
-
-.git-branch-create-btn:disabled,
-.git-remote-add-btn:disabled,
-.git-commit-btn:disabled,
-.git-init-btn.primary:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
 }
 
 /* 分支弹层分区标题 */
