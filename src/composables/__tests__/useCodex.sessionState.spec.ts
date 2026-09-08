@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_MODEL, makeSessionTab } from "./useCodexTestHarness";
 import {
+  applyResumedSettings,
   hydrateSessionState,
   removeSessionState,
   saveSessionState,
@@ -175,5 +176,29 @@ describe("useCodex 会话状态持久化", () => {
       model: null,
       effort: null,
     });
+  });
+
+  it("applyResumedSettings 用 thread/resume 返回值回填并落盘", () => {
+    const tab = makeSessionTab("s1", "t1", { model: null, effort: null });
+    applyResumedSettings(tab, { model: "gpt-5", reasoningEffort: "high" });
+    expect(tab.model).toBe("gpt-5");
+    expect(tab.effort).toBe("high");
+    expect(invoke).toHaveBeenCalledWith("sessions_update", {
+      threadId: "t1",
+      permissionMode: "ask-for-approval",
+      model: "gpt-5",
+      effort: "high",
+    });
+  });
+
+  it("applyResumedSettings 字段缺失时不覆盖、不落盘", () => {
+    const tab = makeSessionTab("s1", "t1", {
+      model: "gpt-5",
+      effort: "high",
+    });
+    applyResumedSettings(tab, {});
+    expect(tab.model).toBe("gpt-5");
+    expect(tab.effort).toBe("high");
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

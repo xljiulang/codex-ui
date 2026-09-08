@@ -270,12 +270,48 @@ describe("会话标签状态与事件路由", () => {
     expect(activeSessionTab()?.name).toBe("帮我修复登录页面报错");
     expect(tabs[0].name).toBe("帮我修复登录页面报错");
     expect(tabs[0].nameIsFirstMessage).toBe(true);
-    // 新建会话冻结创建时默认：模型解析为默认模型 gpt-5（thread_start 返回的 res.model 不回填）
+    // 新建会话固定创建时默认：thread_start 返回的 res.model 优先（与目录默认一致）
     expect(activeSessionTab()?.model).toBe("gpt-5");
     expect(activeSessionTab()?.effort).toBeNull();
     expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
       threadId: "t1",
       name: "帮我修复登录页面报错",
+    });
+  });
+
+  it("新建会话回填 thread_start 返回的模型/强度（优先于本地默认解析）", async () => {
+    tabs.push(
+      makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }),
+    );
+    activeTabId.value = "s1";
+    store.workspace = "D:/repo";
+    store.models = [
+      { ...DEFAULT_MODEL, id: "catalog-default", model: "catalog-default" },
+    ];
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_start") {
+        return Promise.resolve({
+          thread: { id: "t1", name: null },
+          model: "config-model",
+          reasoningEffort: "high",
+        });
+      }
+      if (cmd === "thread_set_name") return Promise.resolve({});
+      if (cmd === "turn_start") return Promise.resolve({ turn: { id: "nt1" } });
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await sendPrompt("hi");
+    expect(activeSessionTab()?.model).toBe("config-model");
+    expect(activeSessionTab()?.effort).toBe("high");
+    expect(mockedInvoke).toHaveBeenCalledWith("sessions_update", {
+      threadId: "t1",
+      permissionMode: "ask-for-approval",
+      model: "config-model",
+      effort: "high",
     });
   });
 

@@ -3,8 +3,10 @@ import { computed, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   activeSessionTab,
+  effectiveEffort,
   ensureThreadResumed,
   loadModels,
+  resolveSessionWorkspace,
   saveSessionState,
   setToast,
   store,
@@ -33,7 +35,7 @@ const defaultEffort = computed(() => {
 });
 
 function selectModel(m: (typeof store.models)[number]) {
-  // 默认模型 = 服务端默认（model 置空）；其它模型显式选择
+  // 默认项（配置 model 或服务端 isDefault）→ 内部空串表示跟随默认；其它显式选择
   model.value = m.isDefault ? "" : m.model;
   // 当前强度不在该模型支持范围内时，回到默认
   if (
@@ -44,17 +46,28 @@ function selectModel(m: (typeof store.models)[number]) {
   }
 }
 
-onMounted(() => void loadModels());
+// 菜单打开时按活动会话 cwd 重读有效配置（含项目层），刷新默认项
+onMounted(() =>
+  void loadModels(true, resolveSessionWorkspace(activeSessionTab() ?? undefined)),
+);
 
 async function apply() {
-  // 进程级生效，不写配置文件
   const tab = activeSessionTab();
   if (!tab) return;
-  tab.model = model.value.trim() ? model.value.trim() : null;
-  tab.effort = effort.value || null;
-  // 有当前会话时立即同步到服务端：thread/settings/update 对后续回合即时生效
-  // （model/effort 传 null 表示恢复默认，与 turn/start 的显式 null 语义一致）
+  const explicitModel = model.value.trim();
+  // 选中"默认"时解析成具体 id：thread/settings/update 的 model 传 null 等于
+  // "不修改"，只有发送具体值才能真正切回默认（协议无清除覆盖的语义）。
+  const defaultModel = store.models.find((m) => m.isDefault)?.model ?? "";
+  const targetModel = explicitModel || defaultModel;
+  const targetEffort =
+    effort.value ||
+    effectiveEffort({ model: targetModel || tab.model, effort: "" }) ||
+    "";
   if (tab.threadId) {
+    // 进程级生效，不写配置文件；本地固化具体值，保证后续 turn/start 的
+    // collaborationMode 与恢复后的服务端状态一致
+    tab.model = targetModel || null;
+    tab.effort = targetEffort || null;
     // 历史会话打开时为只读、未恢复；settings/update 要求线程已加载，先按需 resume
     if (!(await ensureThreadResumed(tab))) {
       emit("close");
@@ -72,6 +85,10 @@ async function apply() {
     } catch (e) {
       setToast(toastError(e));
     }
+  } else {
+    // 未创建线程：保持"跟随默认"，由 thread/start 的 null 交给服务端解析
+    tab.model = explicitModel || null;
+    tab.effort = effort.value || null;
   }
   void saveSessionState(tab);
   emit("close");

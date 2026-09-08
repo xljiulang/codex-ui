@@ -27,6 +27,7 @@ export { currentItems, currentOriginLabel, permissionChip, threadTitle } from ".
 export {
   __resetSessionTabsForTest,
   activeSessionTab,
+  applyResumedSettings,
   findSessionTabByThread,
   hydrateSessionState,
   isThreadOpen,

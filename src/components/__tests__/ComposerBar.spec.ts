@@ -1107,7 +1107,8 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await wrapper.find(".popup-menu .btn.primary").trigger("click");
     await flushPromises();
     expect(store.toast).toContain("同步失败");
-    expect(activeSessionTab()?.model).toBeNull();
+    // 默认项在应用时解析成具体 id（thread/settings/update 的 null 是 no-op）
+    expect(activeSessionTab()?.model).toBe("gpt-5");
     expect(wrapper.find(".popup-menu").exists()).toBe(false);
   });
 });

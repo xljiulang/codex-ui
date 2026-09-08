@@ -81,6 +81,13 @@ describe("ModelMenu 模型与推理强度", () => {
     expect(w.text()).toContain("默认");
   });
 
+  it("挂载时按活动会话工作区强制刷新模型列表", async () => {
+    (tabs[0] as SessionTab).workspace = "D:/repo";
+    mount(ModelMenu);
+    await flushPromises();
+    expect(mockedLoadModels).toHaveBeenCalledWith(true, "D:/repo");
+  });
+
   it("推理强度跟随所选模型（默认模型带 low/high 档位）", async () => {
     const w = mount(ModelMenu);
     expect(w.text()).toContain("low");
@@ -97,15 +104,17 @@ describe("ModelMenu 模型与推理强度", () => {
     expect(w.emitted("close")).toBeTruthy();
   });
 
-  it("选择默认模型后应用：model/effort 以 null 同步（恢复默认）", async () => {
+  it("选择默认模型后应用：发送具体默认 model/effort（协议 null 是 no-op）", async () => {
     (tabs[0] as SessionTab).effort = ""; // 默认模型支持档位不强制清空；初始无强度时应用 null
     const w = mount(ModelMenu);
     await w.findAll(".option-btn")[0].trigger("click"); // 默认模型行
     await w.find("button.btn.primary").trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/settings/update",
-      params: { threadId: "t1", model: null, effort: null },
+      params: { threadId: "t1", model: "gpt-5.2-codex", effort: "low" },
     });
+    expect(activeSessionTab()?.model).toBe("gpt-5.2-codex");
+    expect(activeSessionTab()?.effort).toBe("low");
   });
 
   it("无当前会话时应用不调用 thread/settings/update", async () => {

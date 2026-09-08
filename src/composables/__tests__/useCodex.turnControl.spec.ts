@@ -525,4 +525,23 @@ describe("buildTurnParams 三面独立映射", () => {
       settings: { model: "gpt-5" },
     });
   });
+
+  it("标签未选强度时 collaborationMode 携带解析出的默认强度", () => {
+    store.models = [{ ...DEFAULT_MODEL, defaultReasoningEffort: "high" }];
+    const params = buildTurnParams(
+      "t1",
+      [{ type: "text", text: "hi", text_elements: [] }],
+      "cid-effort",
+      {
+        permissionMode: "full-access",
+        collaborationMode: "default",
+        model: null,
+        effort: null,
+      },
+    );
+    expect(params.collaborationMode).toMatchObject({
+      mode: "default",
+      settings: { model: "gpt-5", reasoning_effort: "high" },
+    });
+  });
 });

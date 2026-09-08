@@ -6,8 +6,13 @@ import { toApprovalPolicy, toApprovalsReviewer, toSandboxPolicy } from "../../li
 import { sessionLog } from "../../lib/sessionLog";
 import type { UserInput } from "../../lib/types";
 import { upsertItem } from "./items";
-import { activeSessionTab, dropSessionTab, findSessionTabByThread } from "./sessionState";
-import { currentModelId, resetToNewSession } from "./settings";
+import {
+  activeSessionTab,
+  applyResumedSettings,
+  dropSessionTab,
+  findSessionTabByThread,
+} from "./sessionState";
+import { currentModelId, effectiveEffort, resetToNewSession } from "./settings";
 import { store } from "./store";
 import { isThreadNotFound } from "./threads";
 import { setToast, toastError } from "./toast";
@@ -38,7 +43,8 @@ export function buildTurnParams(
   params.sandboxPolicy = toSandboxPolicy(permission);
   const reviewer = toApprovalsReviewer(permission);
   if (reviewer) params.approvalsReviewer = reviewer;
-  // 显式携带（null 表示用默认），避免旧值在会话里粘滞
+  // 显式携带（null 表示用默认）；注意：携带 collaborationMode 时服务端以
+  // collaborationMode.settings 为准，下面两个字段实际被覆盖（保留仅为字段完整性）
   params.model = session?.model ?? null;
   params.effort = session?.effort ?? null;
   // 协作模式会粘滞在会话上：计划模式需要显式切回 default 才能退出；
@@ -53,7 +59,9 @@ export function buildTurnParams(
     mode,
     settings: {
       model: collabModel,
-      reasoning_effort: session?.effort ?? null,
+      // 显式解析默认强度：collaborationMode 会整体替换服务端设置，传 null 会回落到
+      // 模型自带默认而非 config.toml 的 model_reasoning_effort
+      reasoning_effort: session?.effort ?? (effectiveEffort(session) || null),
       developer_instructions:
         mode === "default" ? bundledToolsDeveloperInstructions() : null,
     },
@@ -96,7 +104,8 @@ export async function startTurnForTab(
   // 后台历史会话同样按需恢复；新会话（thread/start 创建）已订阅无需恢复
   if (tab.resumedThreadId !== threadId) {
     try {
-      await invoke("thread_resume", { params: { threadId } });
+      const res = await invoke("thread_resume", { params: { threadId } });
+      applyResumedSettings(tab, res);
       tab.resumedThreadId = threadId;
     } catch (e) {
       if (isThreadNotFound(e)) {
@@ -155,8 +164,11 @@ export async function startTurn(prompt: string, attachments: UserInput[]) {
   // 用户真正发消息时才恢复（thread/start 新建的会话已订阅，无需恢复）。
   if (tab?.resumedThreadId !== threadId) {
     try {
-      await invoke("thread_resume", { params: { threadId } });
-      if (tab) tab.resumedThreadId = threadId;
+      const res = await invoke("thread_resume", { params: { threadId } });
+      if (tab) {
+        applyResumedSettings(tab, res);
+        tab.resumedThreadId = threadId;
+      }
     } catch (e) {
       if (isThreadNotFound(e)) {
         resetToNewSession();

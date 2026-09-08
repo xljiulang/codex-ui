@@ -77,19 +77,153 @@ export async function refreshServer() {
 }
 
 
-/** 拉取可用模型列表（幂等），供模型菜单与输入区按钮共用 */
-export async function loadModels(force = false) {
-  if (store.modelsLoaded && !force) return;
+/** app-server 协议 ReasoningEffort 合法值（与设置页档位列表一致） */
+const REASONING_EFFORTS = new Set([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "ultra",
+]);
+
+/** config/read 返回结构中本模块用到的字段 */
+interface RawConfigReadResponse {
+  config?: {
+    model?: unknown;
+    model_reasoning_effort?: unknown;
+  } | null;
+}
+
+/** 活动会话 cwd 的有效配置默认值（model/model_reasoning_effort）；null 表示读取失败 */
+interface EffectiveDefaults {
+  model: string;
+  reasoningEffort: string;
+}
+
+/** 调用 config/read（cwd 为空则省略，返回线程无关配置）；响应形状非法按失败处理 */
+async function invokeConfigRead(
+  cwd: string,
+): Promise<RawConfigReadResponse | null> {
+  const params: Record<string, unknown> = { includeLayers: true };
+  if (cwd) params.cwd = cwd;
   try {
-    const res = await invoke<{ data: ModelInfo[] }>("codex_rpc", {
+    const res = await invoke<RawConfigReadResponse>("codex_rpc", {
+      method: "config/read",
+      params,
+    });
+    if (!res || typeof res !== "object" || !res.config || typeof res.config !== "object") {
+      return null;
+    }
+    return res;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 读取活动会话 cwd 的有效配置默认 model/强度：与 thread/start 使用同一 cwd
+ * （含项目层/托管覆盖）。带 cwd 读取失败时重试一次线程无关配置；仍失败返回 null。
+ */
+async function readEffectiveDefaults(
+  cwd: string,
+): Promise<EffectiveDefaults | null> {
+  let res = await invokeConfigRead(cwd);
+  if (!res && cwd) res = await invokeConfigRead("");
+  if (!res) return null;
+  const rawModel = res.config?.model;
+  const rawEffort = res.config?.model_reasoning_effort;
+  const effort = typeof rawEffort === "string" ? rawEffort.trim() : "";
+  return {
+    model: typeof rawModel === "string" ? rawModel.trim() : "",
+    reasoningEffort: REASONING_EFFORTS.has(effort) ? effort : "",
+  };
+}
+
+/** 拉取 model/list 目录（过滤 hidden）；失败或响应形状非法返回 null */
+async function fetchModelCatalog(): Promise<ModelInfo[] | null> {
+  try {
+    const res = await invoke<{ data?: unknown }>("codex_rpc", {
       method: "model/list",
       params: {},
     });
-    store.models = (res.data ?? []).filter((m) => !m.hidden);
-    store.modelsLoaded = true;
+    if (!res || !Array.isArray(res.data)) return null;
+    return (res.data as ModelInfo[]).filter((m) => !m.hidden);
   } catch {
-    // 模型列表不可用时保持空，UI 回退
+    return null;
   }
+}
+
+/**
+ * 按有效配置合成 UI 模型列表：
+ * - 配置 model 命中目录：原顺序不变，仅命中行 isDefault；
+ * - 配置 model 未命中（含被 hidden 过滤）：置顶合成项并标记默认；
+ * - 配置 model 为空：不插合成项，沿用服务端 isDefault（缺失则首项）；
+ * - 配置读取失败（null）：同"为空"分支沿用服务端 isDefault；
+ * - 默认项强度：config model_reasoning_effort 非空时覆盖该项 defaultReasoningEffort。
+ */
+function composeModels(
+  catalog: ModelInfo[],
+  defaults: EffectiveDefaults | null,
+): ModelInfo[] {
+  const list = catalog.map((m) => ({ ...m }));
+  if (defaults === null || !defaults.model) {
+    if (!list.some((m) => m.isDefault) && list.length) list[0].isDefault = true;
+    if (defaults?.reasoningEffort) {
+      const idx = list.findIndex((m) => m.isDefault);
+      if (idx >= 0) {
+        list[idx] = {
+          ...list[idx],
+          defaultReasoningEffort: defaults.reasoningEffort,
+        };
+      }
+    }
+    return list;
+  }
+  const configModel = defaults.model;
+  const idx = list.findIndex((m) => m.model === configModel);
+  if (idx >= 0) {
+    return list.map((m, i) => ({
+      ...m,
+      isDefault: i === idx,
+      defaultReasoningEffort:
+        i === idx && defaults.reasoningEffort
+          ? defaults.reasoningEffort
+          : m.defaultReasoningEffort,
+    }));
+  }
+  return [
+    {
+      id: configModel,
+      model: configModel,
+      displayName: configModel,
+      description: "config.toml 中配置的默认模型",
+      hidden: false,
+      isDefault: true,
+      supportedReasoningEfforts: [],
+      defaultReasoningEffort: defaults.reasoningEffort || "",
+    },
+    ...list.map((m) => ({ ...m, isDefault: false })),
+  ];
+}
+
+/**
+ * 拉取可用模型列表（幂等），供模型菜单与输入区按钮共用。
+ * cwd 传活动会话工作区（与 thread/start 一致）：配置里的 model 会被标为默认；
+ * force=true 时重读 config/read 与 model/list（菜单打开时刷新）。
+ */
+export async function loadModels(force = false, cwd = "") {
+  if (store.modelsLoaded && !force) return;
+  const [catalog, defaults] = await Promise.all([
+    fetchModelCatalog(),
+    readEffectiveDefaults(cwd),
+  ]);
+  // 目录与配置都不可用（含目录失败且无配置模型）：保持现有列表，不误清空
+  if (catalog === null && !defaults?.model) return;
+  store.models = composeModels(catalog ?? [], defaults);
+  store.modelsLoaded = true;
 }
 
 

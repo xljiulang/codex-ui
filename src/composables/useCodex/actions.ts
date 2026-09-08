@@ -18,6 +18,7 @@ import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, wor
 import {
   activeSessionTab,
   allSessionTabs,
+  applyResumedSettings,
   dropSessionTab,
   findSessionTabByThread,
   freshSessionTab,
@@ -89,6 +90,23 @@ export async function openSessionTabForThread(
   }
 
 
+/**
+ * 新建会话完成后回填服务端解析出的模型/强度：res.model 优先（服务端可能按
+ * provider 回退），缺失时回退本地解析；随后落盘固定，保证后续 turn/start 的
+ * collaborationMode 与该线程实际模型一致。
+ */
+function applyNewThreadModelEffort(
+  tab: SessionTab,
+  res: { model?: string; reasoningEffort?: string | null },
+) {
+  const fallback = effectiveSessionModelEffort(tab);
+  const serverModel = (res.model ?? "").trim();
+  tab.model = serverModel || fallback.model;
+  tab.effort = tab.effort || (res.reasoningEffort ?? "") || fallback.effort;
+  void saveSessionState(tab);
+}
+
+
 async function startNewSession(prompt: string, attachments: UserInput[]) {
   const active = activeSessionTab();
   const tabId = active?.id ?? null;
@@ -115,10 +133,11 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
     if (reviewer) params.approvalsReviewer = reviewer;
     // 显式携带（null 表示用默认），避免旧值在会话里粘滞；effort 由随后的 turn/start 携带
     params.model = active?.model ?? null;
-    const res = await invoke<{ thread: ThreadSummary; model?: string }>(
-      "thread_start",
-      { params },
-    );
+    const res = await invoke<{
+      thread: ThreadSummary;
+      model?: string;
+      reasoningEffort?: string | null;
+    }>("thread_start", { params });
     const threadId = res.thread.id;
     // 防御：该新线程已被其它标签绑定（异常路径），聚焦已有标签并释放当前标签
     const existing = findSessionTabByThread(threadId);
@@ -143,10 +162,7 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
         tab.newSessionWorkspace = null;
         tab.loading = false;
         tab.title = sessionTabTitle(tab);
-        const resolved = effectiveSessionModelEffort(tab);
-        tab.model = resolved.model;
-        tab.effort = resolved.effort;
-        void saveSessionState(tab, resolved);
+        applyNewThreadModelEffort(tab, res);
       }
       // 面板一致性兜底：新线程可能尚未被 thread_list 返回，本地先写入摘要
       upsertThreadSummary({
@@ -173,10 +189,7 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
       activeTab.newSessionWorkspace = null; // 本次新建已消费，恢复默认
       activeTab.loading = false;
       activeTab.title = sessionTabTitle(activeTab);
-      const resolved = effectiveSessionModelEffort(activeTab);
-      activeTab.model = resolved.model;
-      activeTab.effort = resolved.effort;
-      void saveSessionState(activeTab, resolved);
+      applyNewThreadModelEffort(activeTab, res);
     }
     // 会话级插件/技能缓存兜底：标签创建时已预取，此处失败重试
     if (activeTab) {
@@ -418,7 +431,8 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
     // 避免「只看一眼」就触发服务端围绕目标自动续跑；用户真正发消息时才恢复。
     if (!goalStatus) {
       try {
-        await invoke("thread_resume", { params: { threadId } });
+        const res = await invoke("thread_resume", { params: { threadId } });
+        applyResumedSettings(tab, res);
         tab.resumedThreadId = threadId;
       } catch (e) {
         if (isThreadNotFound(e)) throw e; // 交给外层“会话已不存在”分支处理
@@ -612,7 +626,8 @@ export async function ensureThreadResumed(tab: SessionTab): Promise<boolean> {
   const threadId = tab.threadId;
   if (!threadId || tab.resumedThreadId === threadId) return true;
   try {
-    await invoke("thread_resume", { params: { threadId } });
+    const res = await invoke("thread_resume", { params: { threadId } });
+    applyResumedSettings(tab, res);
     tab.resumedThreadId = threadId;
     return true;
   } catch (e) {

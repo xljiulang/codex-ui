@@ -266,6 +266,30 @@ export async function saveSessionState(
   }
 }
 
+/**
+ * 用 thread/resume 返回的已解析模型/强度回填标签并落盘：服务端为唯一事实源
+ * （含持久化的线程模型），避免本地 sessions.json 旧值/缺失时显示与实际不一致。
+ * 仅当字段存在时覆盖；返回空 model 视为无效不动。
+ */
+export function applyResumedSettings(tab: SessionTab, res: unknown): void {
+  if (!res || typeof res !== "object") return;
+  const r = res as { model?: unknown; reasoningEffort?: unknown };
+  const model = typeof r.model === "string" ? r.model.trim() : "";
+  let changed = false;
+  if (model && model !== tab.model) {
+    tab.model = model;
+    changed = true;
+  }
+  if ("reasoningEffort" in r) {
+    const effort = typeof r.reasoningEffort === "string" ? r.reasoningEffort : null;
+    if (effort !== tab.effort) {
+      tab.effort = effort;
+      changed = true;
+    }
+  }
+  if (changed) void saveSessionState(tab);
+}
+
 /** 删除会话时清空其统一状态记录。 */
 export async function removeSessionState(threadId: string): Promise<void> {
   try {
