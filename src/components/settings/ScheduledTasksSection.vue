@@ -31,8 +31,8 @@ const props = defineProps<{ active: boolean }>();
 
 /** 编辑弹窗忙时策略选项（AppSelect） */
 const busyPolicyOptions: AppSelectOption[] = [
-  { value: "defer", label: "忙时顺延" },
   { value: "skip", label: "忙时跳过" },
+  { value: "defer", label: "忙时顺延" },
 ];
 
 /** 展开的任务 id 与各任务的执行记录状态（按任务分开查看，无混排视图） */
@@ -162,7 +162,7 @@ async function onRunNow(t: ScheduledTask) {
 
 /** 编辑弹窗状态与表单（编辑任务名、提示词、忙时策略；cron/绑定会话只读） */
 const editTask = ref<ScheduledTask | null>(null);
-const editForm = reactive({ name: "", prompt: "", busyPolicy: "defer" });
+const editForm = reactive({ name: "", prompt: "", busyPolicy: "skip" });
 const editSaving = ref(false);
 
 function openEdit(t: ScheduledTask) {

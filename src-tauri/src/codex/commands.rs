@@ -323,7 +323,9 @@ pub async fn scheduled_task_add(
         &prompt,
         &cron,
         &thread_id,
-        busy_policy.as_deref().unwrap_or(scheduled_tasks::BUSY_POLICY_DEFER),
+        busy_policy
+            .as_deref()
+            .unwrap_or(scheduled_tasks::BUSY_POLICY_SKIP),
     )?;
     scheduler.notify_changed(Some(&task.id));
     Ok(task)

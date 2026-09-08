@@ -75,15 +75,25 @@ describe("动态工具 add_scheduled_task（直接创建，无前端确认框）
     expect(store.confirm).toBeNull();
   });
 
-  it("busyPolicy 透传给创建命令，缺省 defer", async () => {
+  it("busyPolicy 透传给创建命令：显式 defer 则 defer，缺省/未知则 skip", async () => {
     await handleDynamicToolCall(
-      payload({ name: "n", prompt: "p", cron: "0 0 9 * * *", busyPolicy: "skip" }),
+      payload({ name: "n", prompt: "p", cron: "0 0 9 * * *", busyPolicy: "defer" }),
     );
     await flushPromises();
     const [, args] = mockedInvoke.mock.calls.find(
       ([cmd]) => cmd === "scheduled_task_add",
     )!;
-    expect((args as { busyPolicy: string }).busyPolicy).toBe("skip");
+    expect((args as { busyPolicy: string }).busyPolicy).toBe("defer");
+
+    mockedInvoke.mockClear();
+    await handleDynamicToolCall(
+      payload({ name: "n", prompt: "p", cron: "0 0 9 * * *" }),
+    );
+    await flushPromises();
+    const [, defaultArgs] = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "scheduled_task_add",
+    )!;
+    expect((defaultArgs as { busyPolicy: string }).busyPolicy).toBe("skip");
   });
 
   it("工具被禁用时应答 failure（dynamic_tools_disabled 过滤）", async () => {

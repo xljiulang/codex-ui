@@ -249,12 +249,12 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-/// 归一化忙碌策略：非法值回退 defer。
+/// 归一化忙碌策略：非法值回退 skip（忙时跳过，创建默认值）。
 pub fn normalize_busy_policy(v: &str) -> &'static str {
-    if v.eq_ignore_ascii_case(BUSY_POLICY_SKIP) {
-        BUSY_POLICY_SKIP
-    } else {
+    if v.eq_ignore_ascii_case(BUSY_POLICY_DEFER) {
         BUSY_POLICY_DEFER
+    } else {
+        BUSY_POLICY_SKIP
     }
 }
 
@@ -453,7 +453,7 @@ const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL,
   cron TEXT NOT NULL, thread_id TEXT NOT NULL,
-  busy_policy TEXT NOT NULL DEFAULT 'defer',
+  busy_policy TEXT NOT NULL DEFAULT 'skip',
   enabled INTEGER NOT NULL DEFAULT 1,
   done INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, next_run INTEGER);
@@ -1472,8 +1472,9 @@ mod tests {
         assert_eq!(normalize_busy_policy("defer"), "defer");
         assert_eq!(normalize_busy_policy("skip"), "skip");
         assert_eq!(normalize_busy_policy("SKIP"), "skip");
-        assert_eq!(normalize_busy_policy("whatever"), "defer");
-        assert_eq!(normalize_busy_policy(""), "defer");
+        // 创建默认/非法值回退为跳过
+        assert_eq!(normalize_busy_policy("whatever"), "skip");
+        assert_eq!(normalize_busy_policy(""), "skip");
     }
 
     #[test]
@@ -1498,8 +1499,8 @@ mod tests {
         // 忙时按任务策略：defer 顺延 / skip 跳过
         assert_eq!(decide_fire(true, "defer"), FireAction::Defer);
         assert_eq!(decide_fire(true, "skip"), FireAction::Skip);
-        // 非法策略回退 defer
-        assert_eq!(decide_fire(true, "bad"), FireAction::Defer);
+        // 非法策略回退 skip（创建默认）
+        assert_eq!(decide_fire(true, "bad"), FireAction::Skip);
     }
 
     #[test]

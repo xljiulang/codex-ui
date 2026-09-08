@@ -138,7 +138,7 @@ async function handleAddScheduledTask(
   const name = typeof args.name === "string" ? args.name.trim() : "";
   const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
   const cronExpr = typeof args.cron === "string" ? args.cron.trim() : "";
-  const busyPolicy = args.busyPolicy === "skip" ? "skip" : "defer";
+  const busyPolicy = args.busyPolicy === "defer" ? "defer" : "skip";
   if (!name || !prompt || !cronExpr) {
     await respondInteraction(interaction, {
       contentItems: [

@@ -28,7 +28,7 @@ export async function addScheduledTask(input: {
     prompt: input.prompt,
     cron: input.cron,
     threadId: input.threadId,
-    busyPolicy: input.busyPolicy ?? null,
+    busyPolicy: input.busyPolicy ?? "skip",
   });
   store.scheduledTasks = [
     ...store.scheduledTasks.filter((t) => t.id !== task.id),

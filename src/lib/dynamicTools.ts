@@ -51,7 +51,7 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
           "创建定时任务：到点后在当前会话自动发送 prompt 开启新回合。" +
           "cron 为 6 字段「秒 分 时 日 月 周」，本地时区，最小间隔 1 分钟，每天 9 点=\"0 0 9 * * *\"，" +
           "单次任务 7 字段末尾年份（如 2026-01-20=\"0 0 9 20 1 * 2026\"）。" +
-          "prompt 须自包含。busyPolicy：会话忙时 defer 顺延（默认）/skip 跳过。创建前需在对话中与用户确认。",
+          "prompt 须自包含。busyPolicy：会话忙时 skip 跳过（默认）/defer 顺延。创建前需在对话中与用户确认。",
         inputSchema: {
           type: "object",
           properties: {
@@ -61,7 +61,7 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
             busyPolicy: {
               type: "string",
               enum: ["defer", "skip"],
-              description: "会话忙时：defer 顺延（默认）| skip 跳过",
+              description: "会话忙时：skip 跳过（默认）| defer 顺延",
             },
           },
           required: ["name", "prompt", "cron"],
