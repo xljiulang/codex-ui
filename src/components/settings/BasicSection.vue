@@ -317,13 +317,14 @@ watch(
 }
 
 /* 基础设置「选择文件 / 清除 / 删除记忆」图标按钮：加中性芯片底色，更像可点按钮 */
-.codex-pick-btn,
-.codex-clear-btn {
+/* 用完整类链提高特异性，覆盖全局 .settings-page .btn-icon 的透明底 */
+.btn.btn-icon.codex-pick-btn,
+.btn.btn-icon.codex-clear-btn {
   background: var(--chip-bg);
 }
 
 /* 删除记忆带 danger，提高特异性以覆盖 .settings-page .btn-icon.danger 的透明底 */
-.btn-icon.memory-delete-btn {
+.btn.btn-icon.danger.memory-delete-btn {
   background: var(--chip-bg);
 }
 </style>
