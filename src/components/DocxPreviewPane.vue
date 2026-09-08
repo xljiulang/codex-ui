@@ -91,6 +91,10 @@ async function load() {
         renderHeaders: true,
         renderFooters: true,
         ignoreLastRenderedPageBreak: false,
+        // 嵌入图片/字体改为 base64 data URL：应用 CSP 的 img-src 未放行 blob:，
+        // 而 docx-preview 默认用 URL.createObjectURL → blob: 会被拦截致图片加载失败；
+        // data: 已在 img-src/font-src 中放行（useBase64URL 为 docx-preview 专为此场景提供的选项）。
+        useBase64URL: true,
       },
     );
     if (seq !== renderSeq) return;

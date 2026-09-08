@@ -91,6 +91,9 @@ describe("DocxPreviewPane .docx 排版预览", () => {
     expect(Array.from(data as Uint8Array)).toEqual([80, 75]);
     expect(container).toBe(wrapper!.find(".docx-preview-sizer").element);
     expect((options as { breakPages?: boolean }).breakPages).toBe(true);
+    // 关键回归：应用 CSP 的 img-src 未放行 blob:，docx-preview 须改用 base64 data URL，
+    // 否则嵌入图片经 URL.createObjectURL 生成 blob: 被拦截而加载失败
+    expect((options as { useBase64URL?: boolean }).useBase64URL).toBe(true);
     expect(wrapper!.find(".docx-preview-sizer").html()).toContain("春天");
     expect(wrapper!.text()).not.toContain("无法预览");
   });
