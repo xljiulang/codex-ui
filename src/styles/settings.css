@@ -144,6 +144,14 @@
 }
 /* 纯图标型：卡片头重读、键值对行删除 */
 .settings-page .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  cursor: pointer;
   width: var(--ctrl-h-md);
   height: var(--ctrl-h-md);
   border-color: transparent;
