@@ -315,5 +315,15 @@ watch(
   line-height: 1.5;
   color: var(--text-dim);
 }
-</style>
 
+/* 基础设置「选择文件 / 清除 / 删除记忆」图标按钮：加中性芯片底色，更像可点按钮 */
+.codex-pick-btn,
+.codex-clear-btn {
+  background: var(--chip-bg);
+}
+
+/* 删除记忆带 danger，提高特异性以覆盖 .settings-page .btn-icon.danger 的透明底 */
+.btn-icon.memory-delete-btn {
+  background: var(--chip-bg);
+}
+</style>
