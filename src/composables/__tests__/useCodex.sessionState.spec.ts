@@ -201,4 +201,53 @@ describe("useCodex 会话状态持久化", () => {
     expect(tab.effort).toBe("high");
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it("applyResumedSettings：resume 模型已下架时保留本地回退值", () => {
+    store.models = [{ ...DEFAULT_MODEL, defaultReasoningEffort: "high" }];
+    store.modelsLoaded = true;
+    const tab = makeSessionTab("s1", "t1", {
+      model: DEFAULT_MODEL.model,
+      effort: "high",
+    });
+    applyResumedSettings(tab, {
+      model: "gone-model",
+      reasoningEffort: "max",
+    });
+    expect(tab.model).toBe(DEFAULT_MODEL.model);
+    expect(tab.effort).toBe("high");
+    expect(store.toast).toBe("");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("applyResumedSettings：resume 模型已下架且本地为空时回退默认并提示", () => {
+    store.models = [{ ...DEFAULT_MODEL, defaultReasoningEffort: "high" }];
+    store.modelsLoaded = true;
+    const tab = makeSessionTab("s1", "t1", { model: null, effort: null });
+    applyResumedSettings(tab, {
+      model: "gone-model",
+      reasoningEffort: "max",
+    });
+    expect(tab.model).toBe(DEFAULT_MODEL.model);
+    expect(tab.effort).toBe("high");
+    expect(store.toast).toContain("已回退");
+    expect(invoke).toHaveBeenCalledWith("sessions_update", {
+      threadId: "t1",
+      permissionMode: "ask-for-approval",
+      model: DEFAULT_MODEL.model,
+      effort: "high",
+    });
+  });
+
+  it("applyResumedSettings：本地模型同样不可用时回退默认", () => {
+    store.models = [DEFAULT_MODEL];
+    store.modelsLoaded = true;
+    const tab = makeSessionTab("s1", "t1", {
+      model: "gone-local",
+      effort: "max",
+    });
+    applyResumedSettings(tab, { model: "gone-server" });
+    expect(tab.model).toBe(DEFAULT_MODEL.model);
+    expect(tab.effort).toBeNull();
+    expect(store.toast).toContain("已回退");
+  });
 });

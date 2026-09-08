@@ -8,7 +8,7 @@ import { startTurnForTab, interrupt } from "../useCodex/turnControl";
 import type { SessionTab } from "../useCodex/types";
 import { tabs as _tabs, activeTabId } from "../useEditorTabs";
 import { __resetTabsForTest, type Tab } from "../useTabs";
-import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { flushPromises } from "@vue/test-utils";
@@ -182,6 +182,41 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
     expect(tabs).toHaveLength(1);
     expect(activeSessionTab()?.threadId).toBe("t2");
     expect(activeSessionTab()?.resumedThreadId).toBeNull();
+  });
+
+  it("历史会话模型已下架：hydrate 回退不被 thread_resume 覆盖", async () => {
+    store.threads = [];
+    store.models = [DEFAULT_MODEL];
+    store.modelsLoaded = true;
+    store.toast = "";
+    mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "thread_read") {
+        return Promise.resolve({ thread: { id: "t2", name: null, turns: [] } });
+      }
+      if (cmd === "codex_rpc") {
+        const method = (args as { params?: { method?: string } })?.params
+          ?.method;
+        if (method === "thread/turns/list") {
+          return Promise.resolve({ data: [], nextCursor: null });
+        }
+      }
+      if (cmd === "goal_get") return Promise.resolve({});
+      if (cmd === "sessions_get") {
+        return Promise.resolve({ model: "gone-model", effort: "max" });
+      }
+      if (cmd === "thread_resume") {
+        return Promise.resolve({
+          model: "gone-model",
+          reasoningEffort: "max",
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    expect(await openSessionTabForThread("t2")).toBe(true);
+    expect(activeSessionTab()?.model).toBe(DEFAULT_MODEL.model);
+    expect(activeSessionTab()?.effort).toBeNull();
+    expect(store.toast).toContain("已回退");
   });
 });
 describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体格式", () => {

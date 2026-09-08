@@ -177,6 +177,27 @@ export function dropSessionTab(tab: SessionTab) {
   }
 }
 
+/** 模型是否仍在当前列表；列表未加载时不判定（返回 true） */
+function isModelKnown(model: string): boolean {
+  if (!store.modelsLoaded || !store.models.length) return true;
+  return store.models.some((m) => m.model === model);
+}
+
+/**
+ * 模型已不可用时回退到默认项：写入标签模型/强度并 toast 提示，返回是否发生回退。
+ * 不落盘，由调用方统一 saveSessionState（避免同一路径重复写入）。
+ */
+function fallbackUnavailableModel(tab: SessionTab, orig: string): boolean {
+  const fallback = store.models.find((m) => m.isDefault) ?? store.models[0];
+  if (!fallback) return false;
+  tab.model = fallback.model;
+  tab.effort = fallback.defaultReasoningEffort || null;
+  setToast(
+    `会话模型「${orig}」已不可用，已回退到「${fallback.displayName || fallback.model}」`,
+  );
+  return true;
+}
+
 /**
  * 从统一会话状态（sessions.json）回填某会话标签的权限/模型/推理强度；
  * 无记录或 threadId 为空时保持默认。仅在历史会话打开 / 恢复时调用。
@@ -190,22 +211,16 @@ export async function hydrateSessionState(tab: SessionTab): Promise<void> {
     });
     if (!s) return;
     if (s.permissionMode) tab.permissionMode = s.permissionMode;
-    let model = s.model ?? null;
+    const model = s.model ?? null;
     let effort = s.effort ?? null;
     let note = "";
+    let fellBack = false;
     // 模型列表已加载才做可用性清洗（未加载时按原值应用，避免误判）
     if (store.modelsLoaded && store.models.length) {
       if (model) {
         const known = store.models.find((m) => m.model === model);
         if (!known) {
-          const fallback =
-            store.models.find((m) => m.isDefault) ?? store.models[0];
-          if (fallback) {
-            const orig = model;
-            model = fallback.model;
-            effort = fallback.defaultReasoningEffort || null;
-            note = `会话模型「${orig}」已不可用，已回退到「${fallback.displayName || fallback.model}」`;
-          }
+          fellBack = fallbackUnavailableModel(tab, model);
         } else if (effort) {
           // 档位下架：受支持列表非空且不含当前档 → 恢复默认强度
           const supported = known.supportedReasoningEfforts;
@@ -234,11 +249,13 @@ export async function hydrateSessionState(tab: SessionTab): Promise<void> {
         }
       }
     }
-    tab.model = model;
-    tab.effort = effort;
-    if (note) {
+    if (!fellBack) {
+      tab.model = model;
+      tab.effort = effort;
+    }
+    if (fellBack || note) {
       void saveSessionState(tab); // 落盘回退后的值，避免每次打开重复回退
-      setToast(note);
+      if (note) setToast(note);
     }
   } catch {
     // 读取失败保持默认，不阻断会话打开
@@ -269,18 +286,31 @@ export async function saveSessionState(
 /**
  * 用 thread/resume 返回的已解析模型/强度回填标签并落盘：服务端为唯一事实源
  * （含持久化的线程模型），避免本地 sessions.json 旧值/缺失时显示与实际不一致。
- * 仅当字段存在时覆盖；返回空 model 视为无效不动。
+ * 但服务端模型已不在当前列表时不覆盖本地回退值（否则 hydrate 的回退会被撤销）；
+ * 本地无可用回退值（为空或同样不可用）时才回退默认并提示。返回空 model 不动。
  */
 export function applyResumedSettings(tab: SessionTab, res: unknown): void {
   if (!res || typeof res !== "object") return;
   const r = res as { model?: unknown; reasoningEffort?: unknown };
   const model = typeof r.model === "string" ? r.model.trim() : "";
   let changed = false;
-  if (model && model !== tab.model) {
-    tab.model = model;
-    changed = true;
+  let modelRejected = false;
+  if (model) {
+    if (isModelKnown(model)) {
+      if (model !== tab.model) {
+        tab.model = model;
+        changed = true;
+      }
+    } else {
+      // 服务端持久化模型已不在当前列表：不用它覆盖本地回退值；
+      // 本地没有可用回退值（为空或同样不可用）时才回退默认并提示
+      modelRejected = true;
+      if (!tab.model || !isModelKnown(tab.model)) {
+        if (fallbackUnavailableModel(tab, model)) changed = true;
+      }
+    }
   }
-  if ("reasoningEffort" in r) {
+  if (!modelRejected && "reasoningEffort" in r) {
     const effort = typeof r.reasoningEffort === "string" ? r.reasoningEffort : null;
     if (effort !== tab.effort) {
       tab.effort = effort;
