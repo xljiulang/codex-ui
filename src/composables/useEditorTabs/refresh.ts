@@ -199,7 +199,7 @@ async function refreshFileTab(tab: FileEditorTab): Promise<void> {
   }
 }
 
-/** 预览标签：图片击穿缓存重取，PDF / XLSX / DOCX 替换字节由组件重载（保持页/表/滚动） */
+/** 预览标签：图片击穿缓存重取，PDF / XLSX / DOCX / PPTX 替换字节由组件重载（保持页/表/滚动） */
 async function refreshPreviewTab(tab: PreviewEditorTab): Promise<void> {
   try {
     if (tab.previewType === "image") {
@@ -215,6 +215,8 @@ async function refreshPreviewTab(tab: PreviewEditorTab): Promise<void> {
         tab.pdfData = bytes;
       } else if (tab.previewType === "docx") {
         tab.docxData = bytes;
+      } else if (tab.previewType === "pptx") {
+        tab.pptxData = bytes;
       } else {
         tab.xlsxData = bytes;
       }

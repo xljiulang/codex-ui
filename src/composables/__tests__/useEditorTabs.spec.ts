@@ -681,6 +681,29 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).toBe(preview!.id);
   });
 
+  it("打开 PPTX 预览：读取 session_fs_read_bytes 并解码为字节", async () => {
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_read_bytes") {
+        expect(args).toEqual({ workspace: root, path: "deck.pptx" });
+        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openPreviewTab("pptx", root, "deck.pptx");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("pptx");
+    expect(preview!.loading).toBe(false);
+    expect(preview!.error).toBe("");
+    expect(Array.from(preview!.pptxData ?? [])).toEqual([
+      104, 101, 108, 108, 111,
+    ]);
+    expect(activeTabId.value).toBe(preview!.id);
+  });
+
   it("XLSX 预览重复打开：去重并激活原标签", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {

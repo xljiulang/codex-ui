@@ -21,6 +21,7 @@ function makeTab(
     pdfData: null,
     xlsxData: null,
     docxData: null,
+    pptxData: null,
     xlsxSheetIndex: 0,
     pageCount: null,
     stale: false,

@@ -633,6 +633,30 @@
   background: transparent;
 }
 
+/* PPTX 预览：pptx-preview 按幻灯片纵向平铺的只读视图（幻灯片白底由库注入样式提供） */
+.pptx-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pptx-preview-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  /* body 全局禁选（自绘标题栏拖动），文档内容单独放开选择/复制 */
+  user-select: text;
+}
+.pptx-preview-sizer {
+  margin: auto;
+  width: max-content;
+}
+/* 库默认的黑色画布底改为跟随应用面板色，避免与 PDF/XLSX 预览观感不一致 */
+.pptx-preview-stage .pptx-preview-wrapper {
+  background: transparent;
+}
+
 /* XLSX 预览：工作表切换工具栏 + 行虚拟滚动网格 */
 .xlsx-preview {
   flex: 1;

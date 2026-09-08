@@ -82,6 +82,7 @@ function makeTab(over: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
     pdfData: new Uint8Array([1, 2, 3]),
     xlsxData: null,
     docxData: null,
+    pptxData: null,
     xlsxSheetIndex: 0,
     pageCount: null,
     stale: false,

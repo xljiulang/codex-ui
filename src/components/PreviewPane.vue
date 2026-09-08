@@ -14,6 +14,9 @@ const XlsxPreviewPane = defineAsyncComponent(
 const DocxPreviewPane = defineAsyncComponent(
   () => import("./DocxPreviewPane.vue"),
 );
+const PptxPreviewPane = defineAsyncComponent(
+  () => import("./PptxPreviewPane.vue"),
+);
 
 const relPath = computed(() => relPathOf(props.tab.workspace, props.tab.path));
 const kindLabel = computed(() =>
@@ -23,7 +26,9 @@ const kindLabel = computed(() =>
       ? "表格"
       : props.tab.previewType === "docx"
         ? "Word 文档"
-        : "图像",
+        : props.tab.previewType === "pptx"
+          ? "演示文稿"
+          : "图像",
 );
 const imgError = ref(false);
 /** 图像缩放：1 表示适应窗口（CSS contain），其余按原始像素等比放大 */
@@ -147,7 +152,16 @@ watch(
         :tab="tab"
         :actions-target="headActions"
       />
-      <DocxPreviewPane v-else :tab="tab" :actions-target="headActions" />
+      <DocxPreviewPane
+        v-else-if="tab.previewType === 'docx'"
+        :tab="tab"
+        :actions-target="headActions"
+      />
+      <PptxPreviewPane
+        v-else-if="tab.previewType === 'pptx'"
+        :tab="tab"
+        :actions-target="headActions"
+      />
     </template>
   </div>
 </template>

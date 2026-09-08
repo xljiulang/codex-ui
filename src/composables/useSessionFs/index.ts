@@ -50,6 +50,7 @@ export {
   openImagePreview,
   openPathInApp,
   openPdfPreview,
+  openPptxPreview,
   openTextEditor,
   openXlsxPreview,
   probeTextEntry,

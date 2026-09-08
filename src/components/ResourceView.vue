@@ -42,6 +42,7 @@ import {
   moveEntry,
   openImagePreview,
   openPdfPreview,
+  openPptxPreview,
   openXlsxPreview,
 } from "../composables/useSessionFs";
 import {
@@ -168,7 +169,7 @@ function fileMeta(entry: FsEntry): string {
   return parts.filter(Boolean).join(" · ");
 }
 
-/** 打开前先按扩展名分发：PDF/图像/XLSX/DOCX → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
+/** 打开前先按扩展名分发：PDF/图像/XLSX/DOCX/PPTX → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
 async function requestOpen(entry: FsEntry) {
   const type = previewTypeForName(entry.name);
   if (type === "pdf") {
@@ -185,6 +186,10 @@ async function requestOpen(entry: FsEntry) {
   }
   if (type === "docx") {
     openDocxPreview(entry);
+    return;
+  }
+  if (type === "pptx") {
+    openPptxPreview(entry);
     return;
   }
   const ok = await probeTextEntry(entry);

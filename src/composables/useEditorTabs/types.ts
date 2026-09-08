@@ -79,6 +79,8 @@ export interface PreviewEditorTab extends EditorTabBase {
   xlsxData: Uint8Array | null;
   /** DOCX 预览：后端读取的原始字节（docx-preview renderAsync 数据源，组件渲染） */
   docxData: Uint8Array | null;
+  /** PPTX 预览：后端读取的原始字节（pptx-preview preview 数据源，组件渲染） */
+  pptxData: Uint8Array | null;
   /** XLSX 当前工作表序号：随标签持久，外部刷新后按新工作表数夹紧 */
   xlsxSheetIndex: number;
   /** PDF 页数：组件加载文档后回填 */

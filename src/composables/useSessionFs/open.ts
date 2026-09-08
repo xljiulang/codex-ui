@@ -51,6 +51,13 @@ export function openDocxPreview(entry: FsEntry) {
   void openPreviewTab("docx", root, entry.path);
 }
 
+/** 应用内打开 .pptx 版式预览：在主窗口左侧编辑器区打开/激活只读演示文稿预览标签 */
+export function openPptxPreview(entry: FsEntry) {
+  const root = workspace.value;
+  if (!root) return;
+  void openPreviewTab("pptx", root, entry.path);
+}
+
 /**
  * 打开前探测文件内容是否为文本：true=文本、false=二进制/非文本、
  * null=探测失败（已 toast 错误；无工作目录时静默返回 null）
@@ -105,6 +112,10 @@ export async function openPathInApp(path: string): Promise<boolean> {
     }
     if (type === "docx") {
       void openPreviewTab("docx", root, relPath);
+      return true;
+    }
+    if (type === "pptx") {
+      void openPreviewTab("pptx", root, relPath);
       return true;
     }
     try {

@@ -391,6 +391,30 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     expect(tab.docxData!.length).toBe(4);
   });
 
+  it("PPTX 预览：替换 pptxData 字节", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("AAA"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await openPreviewTab("pptx", root, "deck.pptx");
+    const tab = tabs.find(
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "deck.pptx",
+    )!;
+    expect(tab.pptxData!.length).toBe(3);
+
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "session_fs_read_bytes") {
+        return Promise.resolve(binaryContent("BBBB"));
+      }
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+    await refreshTabsFromFs({ root, paths: ["deck.pptx"] });
+    expect(tab.pptxData!.length).toBe(4);
+  });
+
   it("XLSX 预览非活动标签：标记 stale，切回活动补刷并清除标记", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {

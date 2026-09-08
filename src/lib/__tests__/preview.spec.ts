@@ -42,6 +42,14 @@ describe("previewTypeForName 扩展名识别", () => {
     expect(previewTypeForName("a.docx.txt")).toBeNull();
   });
 
+  it("pptx 扩展名（大小写不敏感），ppt 不命中", () => {
+    expect(previewTypeForName("a.pptx")).toBe("pptx");
+    expect(previewTypeForName("DIR/deck.PPTX")).toBe("pptx");
+    expect(previewTypeForName("a.Pptx")).toBe("pptx");
+    expect(previewTypeForName("a.ppt")).toBeNull();
+    expect(previewTypeForName("a.pptx.txt")).toBeNull();
+  });
+
   it("其余类型返回 null", () => {
     expect(previewTypeForName("a.txt")).toBeNull();
     expect(previewTypeForName("Makefile")).toBeNull();
