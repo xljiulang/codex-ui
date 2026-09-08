@@ -449,6 +449,25 @@
   max-height: none;
 }
 
+/* 视频/音频预览：媒体元素居中，视频按窗口等比缩放，音频固定宽度播放条 */
+.preview-media {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+.preview-media video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+  background: #000;
+}
+.preview-media-audio audio {
+  width: min(560px, 100%);
+}
+
 /* 工具栏小按钮组：预览缩放 / PDF / XLSX 共用 */
 .preview-zoom-btn,
 .pdf-toolbar-btn,

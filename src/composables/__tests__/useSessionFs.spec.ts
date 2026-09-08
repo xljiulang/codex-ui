@@ -350,6 +350,34 @@ describe("openPathInApp 对话链接应用内打开", () => {
     );
   });
 
+  it("工作区内视频：打开视频预览标签（asset 协议，不读字节）", async () => {
+    const path = root + "\\a.mp4";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_read_bytes",
+      expect.anything(),
+    );
+    const tab = tabs.find((t) => t.kind === "preview" && t.path === path);
+    expect((tab as { previewType?: string } | undefined)?.previewType).toBe(
+      "video",
+    );
+  });
+
+  it("工作区内音频：打开音频预览标签（asset 协议，不读字节）", async () => {
+    const path = root + "\\a.mp3";
+    const ok = await openPathInApp(path);
+    expect(ok).toBe(true);
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_read_bytes",
+      expect.anything(),
+    );
+    const tab = tabs.find((t) => t.kind === "preview" && t.path === path);
+    expect((tab as { previewType?: string } | undefined)?.previewType).toBe(
+      "audio",
+    );
+  });
+
   it("工作区内 .docx：直接打开 Word 预览标签（不做文本探测）", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {

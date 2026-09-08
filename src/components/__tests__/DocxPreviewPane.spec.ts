@@ -43,6 +43,7 @@ function previewTab(overrides: Partial<PreviewEditorTab> = {}): PreviewEditorTab
     loading: false,
     error: "",
     imageUrl: "",
+    mediaUrl: "",
     pdfData: null,
     xlsxData: null,
     docxData: new Uint8Array([80, 75]),

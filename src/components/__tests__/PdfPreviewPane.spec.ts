@@ -79,6 +79,7 @@ function makeTab(over: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
     loading: false,
     error: "",
     imageUrl: "",
+    mediaUrl: "",
     pdfData: new Uint8Array([1, 2, 3]),
     xlsxData: null,
     docxData: null,

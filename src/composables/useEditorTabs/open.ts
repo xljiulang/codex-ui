@@ -423,8 +423,8 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
 }
 
 /**
- * 打开特殊文件预览标签（PDF / 图像 / XLSX / DOCX / PPTX）：已打开则激活；否则新建标签并异步准备数据。
- * 图像直接经 asset 协议取 URL；PDF / XLSX / DOCX / PPTX 经 session_fs_read_bytes 直取原始字节（ArrayBuffer）。
+ * 打开特殊文件预览标签（PDF / 图像 / 视频 / 音频 / XLSX / DOCX / PPTX）：已打开则激活；否则新建标签并异步准备数据。
+ * 图像与视频/音频直接经 asset 协议取 URL；PDF / XLSX / DOCX / PPTX 经 session_fs_read_bytes 直取原始字节（ArrayBuffer）。
  */
 export async function openPreviewTab(
   type: PreviewType,
@@ -447,6 +447,7 @@ export async function openPreviewTab(
     loading: true,
     error: "",
     imageUrl: "",
+    mediaUrl: "",
     pdfData: null,
     xlsxData: null,
     docxData: null,
@@ -460,6 +461,9 @@ export async function openPreviewTab(
   try {
     if (type === "image") {
       tab.imageUrl = assetUrl(path);
+    } else if (type === "video" || type === "audio") {
+      // 视频/音频走 asset 协议流式加载（不读整文件字节），需要绝对路径
+      tab.mediaUrl = assetUrl(path);
     } else {
       const bytes = new Uint8Array(
         await invoke<ArrayBuffer>("session_fs_read_bytes", {

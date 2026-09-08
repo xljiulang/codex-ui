@@ -647,14 +647,22 @@ describe("ResourceView 文件树", () => {
     expect(txtImg.exists()).toBe(true);
     expect(txtImg.attributes("src")).toBe("data:image/png;base64,TXTICON");
 
-    // 展开 src 后其它文件走 session_fs_icons 批量取图
+    // 展开 src 后未内置覆盖的类型（.pdf）走 session_fs_icons 批量取图
     await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
     await flushPromises();
-    const tsImg = wrapper
-      .findAll(".resource-row.resource-file")[1]
-      .find(".resource-icon-img");
-    expect(tsImg.exists()).toBe(true);
-    expect(tsImg.attributes("src")).toBe("data:image/png;base64,ICON");
+    const pdfRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((r) => r.text().includes("doc.pdf"))!;
+    const pdfImg = pdfRow.find(".resource-icon-img");
+    expect(pdfImg.exists()).toBe(true);
+    expect(pdfImg.attributes("src")).toBe("data:image/png;base64,ICON");
+    // 图片已由内置图标覆盖，不再走系统图标
+    const pngRow = wrapper
+      .findAll(".resource-row.resource-file")
+      .find((r) => r.text().includes("pic.png"))!;
+    expect(pngRow.find(".resource-icon-img").attributes("src")).toMatch(
+      /^data:image\/svg\+xml,/,
+    );
     expect(
       wrapper.find(".resource-row.resource-dir .resource-icon svg").exists(),
     ).toBe(true);
@@ -742,6 +750,7 @@ describe("ResourceView 文件树", () => {
       loading: false,
       error: "",
       imageUrl: "",
+      mediaUrl: "",
       pdfData: null,
       pageCount: null,
     } as unknown as PreviewEditorTab);

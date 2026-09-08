@@ -207,6 +207,31 @@ const CSS = bracesGlyph("#1572B6");
 const SCSS = bracesGlyph("#CF649A");
 const LESS = bracesGlyph("#2B5E84");
 
+/* 图像：绿色底徽 + 白色照片（太阳 + 山） */
+const IMAGE = svg(
+  badge(
+    "#4CAF50",
+    `<rect x="3.6" y="4.4" width="8.8" height="7.2" rx="1.1" fill="#fff"/>` +
+      `<circle cx="6.1" cy="6.9" r="1.05" fill="#4CAF50"/>` +
+      `<path d="M4.6 11.2 7.2 8.2l1.5 1.7 1.4-1.5 2 2.8z" fill="#4CAF50"/>`,
+  ),
+);
+
+/* 视频：红色底徽 + 白色播放三角 */
+const VIDEO = svg(
+  badge("#E53935", `<path d="M6.4 4.9 11 8l-4.6 3.1z" fill="#fff"/>`),
+);
+
+/* 音频：紫色底徽 + 白色音符 */
+const AUDIO = svg(
+  badge(
+    "#7E57C2",
+    `<circle cx="6.2" cy="11.1" r="1.7" fill="#fff"/>` +
+      `<rect x="7.4" y="4.1" width="1.3" height="7.1" rx=".65" fill="#fff"/>` +
+      `<path d="M8.7 4.1 11.8 3v2.5L8.7 6.6z" fill="#fff"/>`,
+  ),
+);
+
 /** 扩展名（小写，不含点）→ 图标；未列出的走系统图标 */
 const EXT_ICONS: Record<string, string> = {
   ts: TS,
@@ -265,6 +290,43 @@ const EXT_ICONS: Record<string, string> = {
   ps1: PS1,
   psm1: PS1,
   psd1: PS1,
+  // 图像
+  png: IMAGE,
+  jpg: IMAGE,
+  jpeg: IMAGE,
+  gif: IMAGE,
+  webp: IMAGE,
+  bmp: IMAGE,
+  svg: IMAGE,
+  ico: IMAGE,
+  avif: IMAGE,
+  // 视频
+  mp4: VIDEO,
+  webm: VIDEO,
+  mkv: VIDEO,
+  mov: VIDEO,
+  avi: VIDEO,
+  m4v: VIDEO,
+  ogv: VIDEO,
+  mpg: VIDEO,
+  mpeg: VIDEO,
+  wmv: VIDEO,
+  flv: VIDEO,
+  "3gp": VIDEO,
+  // 音频
+  mp3: AUDIO,
+  wav: AUDIO,
+  ogg: AUDIO,
+  oga: AUDIO,
+  flac: AUDIO,
+  m4a: AUDIO,
+  aac: AUDIO,
+  opus: AUDIO,
+  wma: AUDIO,
+  mid: AUDIO,
+  midi: AUDIO,
+  aiff: AUDIO,
+  ape: AUDIO,
 };
 
 /** 特殊文件名（小写）→ 图标：无扩展名/点文件的常见配置 */

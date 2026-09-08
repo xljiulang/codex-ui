@@ -37,6 +37,20 @@ export function openImagePreview(entry: FsEntry) {
   void openPreviewTab("image", root, entry.path);
 }
 
+/** 应用内打开视频预览：在主窗口左侧编辑器区打开/激活视频播放标签 */
+export function openVideoPreview(entry: FsEntry) {
+  const root = workspace.value;
+  if (!root) return;
+  void openPreviewTab("video", root, entry.path);
+}
+
+/** 应用内打开音频预览：在主窗口左侧编辑器区打开/激活音频播放标签 */
+export function openAudioPreview(entry: FsEntry) {
+  const root = workspace.value;
+  if (!root) return;
+  void openPreviewTab("audio", root, entry.path);
+}
+
 /** 应用内打开 .xlsx 预览：在主窗口左侧编辑器区打开/激活只读表格预览标签 */
 export function openXlsxPreview(entry: FsEntry) {
   const root = workspace.value;
@@ -104,6 +118,11 @@ export async function openPathInApp(path: string): Promise<boolean> {
     if (type === "image") {
       // 图片走 asset 协议，需要绝对路径；root 仅作标签元数据
       void openPreviewTab("image", root, path);
+      return true;
+    }
+    if (type === "video" || type === "audio") {
+      // 视频/音频走 asset 协议流式播放，需要绝对路径；root 仅作标签元数据
+      void openPreviewTab(type, root, path);
       return true;
     }
     if (type === "xlsx") {

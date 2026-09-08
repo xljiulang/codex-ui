@@ -17,18 +17,25 @@ const DocxPreviewPane = defineAsyncComponent(
 const PptxPreviewPane = defineAsyncComponent(
   () => import("./PptxPreviewPane.vue"),
 );
+const MediaPreviewPane = defineAsyncComponent(
+  () => import("./MediaPreviewPane.vue"),
+);
 
 const relPath = computed(() => relPathOf(props.tab.workspace, props.tab.path));
 const kindLabel = computed(() =>
   props.tab.previewType === "pdf"
     ? "PDF"
-    : props.tab.previewType === "xlsx"
-      ? "表格"
-      : props.tab.previewType === "docx"
-        ? "Word 文档"
-        : props.tab.previewType === "pptx"
-          ? "演示文稿"
-          : "图像",
+    : props.tab.previewType === "video"
+      ? "视频"
+      : props.tab.previewType === "audio"
+        ? "音频"
+        : props.tab.previewType === "xlsx"
+          ? "表格"
+          : props.tab.previewType === "docx"
+            ? "Word 文档"
+            : props.tab.previewType === "pptx"
+              ? "演示文稿"
+              : "图像",
 );
 const imgError = ref(false);
 /** 图像缩放：1 表示适应窗口（CSS contain），其余按原始像素等比放大 */
@@ -161,6 +168,10 @@ watch(
         v-else-if="tab.previewType === 'pptx'"
         :tab="tab"
         :actions-target="headActions"
+      />
+      <MediaPreviewPane
+        v-else-if="tab.previewType === 'video' || tab.previewType === 'audio'"
+        :tab="tab"
       />
     </template>
   </div>

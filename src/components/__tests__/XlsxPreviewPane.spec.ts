@@ -22,6 +22,7 @@ function makeTab(xlsxData: Uint8Array | null): PreviewEditorTab {
     loading: false,
     error: "",
     imageUrl: "",
+    mediaUrl: "",
     pdfData: null,
     xlsxData,
     xlsxSheetIndex: 0,

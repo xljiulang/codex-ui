@@ -40,9 +40,11 @@ import {
   createFolder,
   loadDir,
   moveEntry,
+  openAudioPreview,
   openImagePreview,
   openPdfPreview,
   openPptxPreview,
+  openVideoPreview,
   openXlsxPreview,
 } from "../composables/useSessionFs";
 import {
@@ -178,6 +180,14 @@ async function requestOpen(entry: FsEntry) {
   }
   if (type === "image") {
     openImagePreview(entry);
+    return;
+  }
+  if (type === "video") {
+    openVideoPreview(entry);
+    return;
+  }
+  if (type === "audio") {
+    openAudioPreview(entry);
     return;
   }
   if (type === "xlsx") {

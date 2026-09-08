@@ -26,6 +26,42 @@ describe("previewTypeForName 扩展名识别", () => {
     }
   });
 
+  it("常见视频扩展名（大小写不敏感）", () => {
+    const exts = [
+      "mp4",
+      "webm",
+      "mkv",
+      "mov",
+      "avi",
+      "m4v",
+      "ogv",
+      "mpeg",
+      "3gp",
+    ];
+    for (const ext of exts) {
+      expect(previewTypeForName(`clip.${ext}`)).toBe("video");
+      expect(previewTypeForName(`clip.${ext.toUpperCase()}`)).toBe("video");
+    }
+  });
+
+  it("常见音频扩展名（大小写不敏感）", () => {
+    const exts = [
+      "mp3",
+      "wav",
+      "ogg",
+      "flac",
+      "m4a",
+      "aac",
+      "opus",
+      "wma",
+      "midi",
+    ];
+    for (const ext of exts) {
+      expect(previewTypeForName(`song.${ext}`)).toBe("audio");
+      expect(previewTypeForName(`song.${ext.toUpperCase()}`)).toBe("audio");
+    }
+  });
+
   it("xlsx 扩展名（大小写不敏感），xls 不命中", () => {
     expect(previewTypeForName("a.xlsx")).toBe("xlsx");
     expect(previewTypeForName("DIR/report.XLSX")).toBe("xlsx");

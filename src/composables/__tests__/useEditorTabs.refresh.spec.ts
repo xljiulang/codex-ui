@@ -320,6 +320,18 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     expect(tab.imageUrl).toMatch(/asset:\/\/pic\.png\?t=\d+/);
   });
 
+  it("视频预览：mediaUrl 带时间戳击穿缓存", async () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    await openPreviewTab("video", root, "clip.mp4");
+    const tab = tabs.find(
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "clip.mp4",
+    )!;
+    expect(tab.previewType).toBe("video");
+    await refreshTabsFromFs({ root, paths: ["clip.mp4"] });
+    expect(tab.mediaUrl).toMatch(/asset:\/\/clip\.mp4\?t=\d+/);
+  });
+
   it("PDF 预览：替换 pdfData 字节", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {

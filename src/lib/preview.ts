@@ -1,6 +1,13 @@
-/** 特殊文件类型预览：扩展名识别与字节解码（PDF / 图像 / XLSX / DOCX / PPTX） */
+/** 特殊文件类型预览：扩展名识别与字节解码（PDF / 图像 / 视频 / 音频 / XLSX / DOCX / PPTX） */
 
-export type PreviewType = "pdf" | "image" | "xlsx" | "docx" | "pptx";
+export type PreviewType =
+  | "pdf"
+  | "image"
+  | "video"
+  | "audio"
+  | "xlsx"
+  | "docx"
+  | "pptx";
 
 const PDF_EXT = "pdf";
 const XLSX_EXT = "xlsx";
@@ -17,6 +24,35 @@ const IMAGE_EXTS = [
   "ico",
   "avif",
 ];
+const VIDEO_EXTS = [
+  "mp4",
+  "webm",
+  "mkv",
+  "mov",
+  "avi",
+  "m4v",
+  "ogv",
+  "mpg",
+  "mpeg",
+  "wmv",
+  "flv",
+  "3gp",
+];
+const AUDIO_EXTS = [
+  "mp3",
+  "wav",
+  "ogg",
+  "oga",
+  "flac",
+  "m4a",
+  "aac",
+  "opus",
+  "wma",
+  "mid",
+  "midi",
+  "aiff",
+  "ape",
+];
 
 /** 取文件名小写扩展名（含点）；无扩展名/点文件返回 null */
 export function extOf(name: string): string | null {
@@ -26,9 +62,10 @@ export function extOf(name: string): string | null {
 }
 
 /**
- * 按扩展名判定预览类型：.pdf → "pdf"；常见图像格式 → "image"；.xlsx → "xlsx"；
- * .docx → "docx"（docx-preview 排版预览）；.pptx → "pptx"（pptx-preview 版式预览）；
- * 其余返回 null（走原有文本探测/编辑器逻辑）。大小写不敏感。
+ * 按扩展名判定预览类型：.pdf → "pdf"；常见图像格式 → "image"；常见视频/音频格式 →
+ * "video"/"audio"（asset 协议流式播放）；.xlsx → "xlsx"；.docx → "docx"（docx-preview
+ * 排版预览）；.pptx → "pptx"（pptx-preview 版式预览）；其余返回 null（走原有文本探测/编辑器逻辑）。
+ * 大小写不敏感。
  */
 export function previewTypeForName(name: string): PreviewType | null {
   const ext = extOf(name);
@@ -38,5 +75,7 @@ export function previewTypeForName(name: string): PreviewType | null {
   if (ext === DOCX_EXT) return "docx";
   if (ext === PPTX_EXT) return "pptx";
   if (IMAGE_EXTS.includes(ext)) return "image";
+  if (VIDEO_EXTS.includes(ext)) return "video";
+  if (AUDIO_EXTS.includes(ext)) return "audio";
   return null;
 }

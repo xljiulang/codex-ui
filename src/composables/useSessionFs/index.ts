@@ -46,12 +46,14 @@ export {
 } from "./fileOps";
 export {
   addAsAttachment,
+  openAudioPreview,
   openDocxPreview,
   openImagePreview,
   openPathInApp,
   openPdfPreview,
   openPptxPreview,
   openTextEditor,
+  openVideoPreview,
   openXlsxPreview,
   probeTextEntry,
 } from "./open";

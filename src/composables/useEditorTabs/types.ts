@@ -63,7 +63,7 @@ export interface DiffEditorTab extends EditorTabBase {
 
 export interface PreviewEditorTab extends EditorTabBase {
   kind: (typeof TabKind)["Preview"];
-  /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显；xlsx → 表格预览 */
+  /** 预览类型：pdf → pdf.js 渲染；image → asset URL 直显；video/audio → asset URL 播放；xlsx → 表格预览 */
   previewType: PreviewType;
   id: string;
   workspace: string;
@@ -73,6 +73,8 @@ export interface PreviewEditorTab extends EditorTabBase {
   error: string;
   /** 图像预览：convertFileSrc(path) 的 asset URL */
   imageUrl: string;
+  /** 视频/音频预览：convertFileSrc(path) 的 asset URL（媒体元素流式加载） */
+  mediaUrl: string;
   /** PDF 预览：后端读取的原始字节（pdf.js getDocument 数据源） */
   pdfData: Uint8Array | null;
   /** XLSX 预览：后端读取的原始字节（SheetJS read 数据源，组件解析渲染） */

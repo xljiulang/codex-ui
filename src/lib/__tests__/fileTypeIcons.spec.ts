@@ -42,6 +42,31 @@ describe("fileTypeIcons 内置代码文件图标", () => {
     }
   });
 
+  it("图像/视频/音频扩展名命中内置图标", () => {
+    for (const name of [
+      "a.png",
+      "b.JPG",
+      "c.jpeg",
+      "d.gif",
+      "e.webp",
+      "f.svg",
+      "g.avif",
+      "v.mp4",
+      "v.MKV",
+      "v.mov",
+      "v.webm",
+      "v.3gp",
+      "s.mp3",
+      "s.WAV",
+      "s.flac",
+      "s.m4a",
+    ]) {
+      const icon = builtinFileIcon(name);
+      expect(icon, `${name} 应有内置图标`).toBeTruthy();
+      expect(icon!.startsWith("data:image/svg+xml,")).toBe(true);
+    }
+  });
+
   it("未覆盖的扩展名与无扩展名文件返回 null（走系统图标）", () => {
     expect(builtinFileIcon("config.ini")).toBeNull();
     expect(builtinFileIcon("a.txt")).toBeNull();

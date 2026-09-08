@@ -594,6 +594,34 @@ describe("useEditorTabs 标签状态", () => {
     expect(activeTabId.value).toBe(preview!.id);
   });
 
+  it("打开视频预览：asset URL 流式播放，不读整文件字节", async () => {
+    await openPreviewTab("video", root, "clip.mp4");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("video");
+    expect(preview!.loading).toBe(false);
+    expect(preview!.mediaUrl).toBe("asset://clip.mp4");
+    expect(mockedConvertFileSrc).toHaveBeenCalledWith("clip.mp4");
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "session_fs_read_bytes"),
+    ).toBe(false);
+  });
+
+  it("打开音频预览：asset URL 流式播放，不读整文件字节", async () => {
+    await openPreviewTab("audio", root, "song.mp3");
+    const preview = tabs.find(
+      (t): t is PreviewEditorTab => t.kind === "preview",
+    );
+    expect(preview).toBeTruthy();
+    expect(preview!.previewType).toBe("audio");
+    expect(preview!.mediaUrl).toBe("asset://song.mp3");
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "session_fs_read_bytes"),
+    ).toBe(false);
+  });
+
   it("打开 PDF 预览：读取 session_fs_read_bytes 并解码为字节", async () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {

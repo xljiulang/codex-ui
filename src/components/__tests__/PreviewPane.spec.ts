@@ -18,6 +18,7 @@ function makeTab(
     loading: false,
     error: "",
     imageUrl: "asset://D:/repo/assets/logo.png",
+    mediaUrl: "",
     pdfData: null,
     xlsxData: null,
     docxData: null,
@@ -162,5 +163,35 @@ describe("PreviewPane 预览标签", () => {
     });
     expect(w.find(".pdf-stub").exists()).toBe(true);
     expect(w.text()).toContain("PDF");
+  });
+
+  it("视频类型委托给 MediaPreviewPane 且类型标签为「视频」", () => {
+    const w = mount(PreviewPane, {
+      props: {
+        tab: makeTab({ previewType: "video", mediaUrl: "asset://clip.mp4" }),
+      },
+      global: {
+        stubs: {
+          MediaPreviewPane: { template: '<div class="media-stub" />' },
+        },
+      },
+    });
+    expect(w.find(".media-stub").exists()).toBe(true);
+    expect(w.text()).toContain("视频");
+  });
+
+  it("音频类型委托给 MediaPreviewPane 且类型标签为「音频」", () => {
+    const w = mount(PreviewPane, {
+      props: {
+        tab: makeTab({ previewType: "audio", mediaUrl: "asset://song.mp3" }),
+      },
+      global: {
+        stubs: {
+          MediaPreviewPane: { template: '<div class="media-stub" />' },
+        },
+      },
+    });
+    expect(w.find(".media-stub").exists()).toBe(true);
+    expect(w.text()).toContain("音频");
   });
 });
