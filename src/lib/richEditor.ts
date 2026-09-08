@@ -52,10 +52,15 @@ export const Reference = Node.create({
   },
 });
 
-/** 把编辑器 doc JSON 序列化为有序 runs：文本按块以 \n 连接，引用按文档顺序保留 */
+/**
+ * 把编辑器 doc JSON 序列化为有序 runs：文本按块以 \n 连接，引用按文档顺序保留。
+ *
+ * 递归遍历整棵 doc 树，而不仅是顶层块的直接子节点——否则粘贴/输入的列表、块引用、
+ * 代码块等嵌套结构（doc > bulletList > listItem > paragraph > text）会取不到里层文本，
+ * 导致输入框可见文本但 runsToText 为空、发送按钮被误禁用。
+ */
 export function docToRuns(doc: JSONContent): EditorRun[] {
   const runs: EditorRun[] = [];
-  const blocks = Array.isArray(doc.content) ? doc.content : [];
   const pushText = (s: string) => {
     if (!s) return;
     const last = runs[runs.length - 1];
@@ -63,23 +68,37 @@ export function docToRuns(doc: JSONContent): EditorRun[] {
     else runs.push({ kind: "text", text: s });
   };
 
-  blocks.forEach((block, bi) => {
-    const items = Array.isArray(block.content) ? block.content : [];
-    for (const item of items) {
-      if (item.type === "text" && typeof item.text === "string" && item.text) {
-        pushText(item.text);
-      } else if (item.type === "reference" && item.attrs) {
-        const kind = item.attrs.kind === "skill" ? "skill" : "plugin";
+  // 块级容器：其子块之间以 \n 分隔（doc/有序或无序列表/列表项/块引用/代码块）。
+  // 行内文本块（paragraph/heading 等）的子节点间不插入换行，保持现有单段内文本顺序。
+  const isBlockContainer = (t: string) =>
+    ["doc", "bulletList", "orderedList", "listItem", "blockquote", "codeBlock"].includes(t);
+
+  const walk = (node: JSONContent) => {
+    const type = node.type ?? "";
+    if (type === "text") {
+      if (typeof node.text === "string" && node.text) pushText(node.text);
+      return;
+    }
+    if (type === "reference") {
+      if (node.attrs) {
+        const kind = node.attrs.kind === "skill" ? "skill" : "plugin";
         runs.push({
           kind: "ref",
-          refId: String(item.attrs.refId ?? ""),
-          refKind: item.attrs.kind === "file" ? "file" : kind,
-          label: String(item.attrs.label ?? ""),
+          refId: String(node.attrs.refId ?? ""),
+          refKind: node.attrs.kind === "file" ? "file" : kind,
+          label: String(node.attrs.label ?? ""),
         });
       }
+      return;
     }
-    if (bi < blocks.length - 1) pushText("\n");
-  });
+    const content = Array.isArray(node.content) ? node.content : [];
+    content.forEach((child, i) => {
+      walk(child);
+      if (isBlockContainer(type) && i < content.length - 1) pushText("\n");
+    });
+  };
+
+  walk(doc);
   return runs;
 }
 

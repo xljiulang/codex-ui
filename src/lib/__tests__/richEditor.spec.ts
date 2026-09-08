@@ -74,6 +74,106 @@ describe("docToRuns / runsToText", () => {
     ]);
     expect(runsToText(runs)).toBe("第一行\n第二行");
   });
+
+  it("嵌套列表（bulletList/listItem）文本按顺序提取，避免发送按钮误禁用", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "第一项" }] },
+              ],
+            },
+            {
+              type: "listItem",
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "第二项" }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const runs = docToRuns(doc);
+    expect(runsToText(runs).trim().length).toBeGreaterThan(0);
+    expect(runsToText(runs)).toBe("第一项\n第二项");
+  });
+
+  it("块引用/代码块内文本可提取", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "blockquote",
+          content: [
+            { type: "paragraph", content: [{ type: "text", text: "引用行" }] },
+          ],
+        },
+        {
+          type: "codeBlock",
+          content: [{ type: "text", text: "code 内容" }],
+        },
+      ],
+    };
+    expect(runsToText(docToRuns(doc))).toBe("引用行\ncode 内容");
+  });
+
+  it("列表项内嵌引用 chip 仍按顺序产出 ref run", () => {
+    const doc = {
+      type: "doc",
+      content: [
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [
+                    { type: "text", text: "用 " },
+                    refJSON("r1", "file", "a.cs"),
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const runs = docToRuns(doc);
+    expect(runsToText(runs)).toBe("用 ");
+    expect(runs[1]).toEqual({
+      kind: "ref",
+      refId: "r1",
+      refKind: "file",
+      label: "a.cs",
+    });
+  });
+
+  it("真实编辑器创建 bulletList 后 runsToText 非空（复现输入 `- 内容`）", () => {
+    const editor = createEditor([
+      {
+        type: "bulletList",
+        content: [
+          {
+            type: "listItem",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "内容" }] },
+            ],
+          },
+        ],
+      },
+    ]);
+    const runs = docToRuns(editor.getJSON());
+    expect(runsToText(runs).trim().length).toBeGreaterThan(0);
+    expect(editor.getText()).toContain("内容");
+    editor.destroy();
+  });
 });
 
 describe("runsToWireText 内联链接序列化", () => {
