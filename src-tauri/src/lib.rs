@@ -374,7 +374,7 @@ pub fn run() {
                     .ok_or_else(|| "缺少应用图标，无法创建系统托盘".to_string())?;
                 TrayIconBuilder::with_id("main-tray")
                     .icon(icon)
-                    .tooltip("Codex UI")
+                    .tooltip(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| {
