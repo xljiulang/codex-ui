@@ -438,3 +438,303 @@ function toggleResult(runId: number) {
     </ModalDialog>
   </section>
 </template>
+
+<style scoped>
+/* ---------------------------------------------------------------------------
+   定时任务（ScheduledTasksSection）：任务行 + 展开 detail（prompt/执行记录）
+   --------------------------------------------------------------------------- */
+.sched-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sched-task {
+  border-bottom: 1px solid var(--border);
+}
+
+.sched-task:last-child {
+  border-bottom: none;
+}
+
+.sched-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  transition: background var(--ease);
+}
+
+.sched-task-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+
+/* 定时任务信息列：名称行 + 徽章行竖排（与其它区块行骨架一致） */
+.sched-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* 标题行：展开箭头 + 名称横排（箭头不再占行首，与行首图标分离） */
+.sched-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.sched-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.sched-arrow {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  fill: var(--text-faint);
+}
+
+.sched-name {
+  min-width: 0;
+  font-size: var(--font-base);
+  color: var(--text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sched-chip {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.sched-next {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 绑定会话：可点击胶囊（保留打开会话语义），hover 下划线提示 */
+.sched-session {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sched-session:hover {
+  color: var(--text-bright);
+  text-decoration: underline;
+}
+
+.sched-done-head {
+  padding: var(--space-3) 0 var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+}
+
+.sched-row-btn {
+  min-height: var(--ctrl-h-xs);
+  font-size: var(--font-xs);
+}
+
+/* 忙时策略胶囊（纯展示，不可点击）：顺延用强调色，跳过用中性色 */
+.sched-busy-badge {
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sched-busy-badge.badge-defer {
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+.sched-busy-badge.badge-skip {
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
+
+/* 编辑定时任务弹窗表单：去卡片装饰，字段纵排，分隔线分隔 */
+.sched-edit-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.sched-edit-form input[type="text"],
+.sched-edit-form textarea,
+.sched-edit-form select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-bright);
+  font-size: var(--font-md);
+}
+
+.sched-edit-form textarea {
+  resize: vertical;
+  font-family: var(--mono);
+}
+
+.sched-edit-readonly-value {
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+}
+
+.sched-detail {
+  padding: 0 0 var(--space-4) calc(var(--space-4) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sched-detail-label {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+/* 任务指令常驻描述（标题与徽章之间）：样式对齐技能管理的 skill-desc */
+.sched-prompt-desc {
+  margin: 0;
+  font-size: var(--font-md);
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.sched-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.sched-run:last-child {
+  border-bottom: none;
+}
+
+.sched-run-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sched-run-status {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.sched-run-status.st-running {
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+}
+
+.sched-run-status.st-success {
+  background: rgba(var(--green-rgb), 0.14);
+  color: var(--green);
+}
+
+.sched-run-status.st-failed {
+  background: rgba(var(--red-rgb), 0.14);
+  color: var(--red);
+}
+
+.sched-run-status.st-skipped,
+.sched-run-status.st-missed {
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text-faint);
+}
+
+.sched-run-time {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.sched-run-duration {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+.sched-run-error {
+  font-size: var(--font-xs);
+  color: var(--red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.sched-run-more {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: var(--space-2) 0 0;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.sched-run-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+</style>
+

@@ -231,3 +231,23 @@ async function removeSkill(s: SkillsItem) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.skill-error-list {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: var(--font-sm);
+  font-family: var(--mono);
+  color: var(--red);
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.skill-error-list li + li {
+  margin-top: var(--space-1);
+}
+</style>
+

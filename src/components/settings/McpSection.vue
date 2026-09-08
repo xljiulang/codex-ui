@@ -639,3 +639,180 @@ function openMcpDetail(index: number) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.mcp-server-omit {
+  white-space: nowrap;
+}
+
+/* MCP 管理 */
+.mcp-servers-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.mcp-server-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--ease);
+}
+
+.mcp-server-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
+}
+
+.mcp-server-row:last-child {
+  border-bottom: none;
+}
+
+.mcp-server-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-server-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.mcp-server-name {
+  font-size: var(--font-base);
+  color: var(--text-bright);
+  font-family: var(--mono);
+  user-select: text;
+}
+
+.mcp-server-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-8);
+  background: rgba(var(--overlay-rgb), 0.02);
+}
+
+.mcp-env-block {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mcp-env-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-env-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mcp-env-row input {
+  flex: 1;
+}
+
+.mcp-omit-row {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.mcp-omit-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-server-form .mcp-omit-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font-weight: 400;
+  font-size: var(--font-sm);
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.mcp-omit-option input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease);
+}
+
+.mcp-omit-option input[type="checkbox"]:hover {
+  border-color: var(--accent-dim);
+}
+
+.mcp-omit-option input[type="checkbox"]:focus-visible {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
+}
+
+.mcp-omit-option input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.mcp-omit-option input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--on-accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.mcp-omit-value {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  color: var(--text-bright);
+  flex-shrink: 0;
+}
+
+.mcp-omit-desc {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+}
+
+.mcp-omit-hint,
+.mcp-omit-note {
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.mcp-omit-hint {
+  color: var(--text-faint);
+}
+
+.mcp-omit-note {
+  color: var(--yellow);
+}
+</style>
+

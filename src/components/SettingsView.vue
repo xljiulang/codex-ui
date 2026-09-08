@@ -118,3 +118,90 @@ function onNavKeydown(e: KeyboardEvent) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 设置页（设置 Tab 全宽布局，替代原模态框） */
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+.settings-page-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* 控件与按钮同高：输入框 / 下拉 / 按钮统一 32px 高（下拉为 AppSelect 自绘组件） */
+.settings-page :deep(input[type="text"]),
+.settings-page :deep(input[type="password"]) {
+  height: var(--ctrl-h-md);
+  padding: var(--space-2) var(--space-4);
+}
+
+/* 左侧分类导航 */
+.settings-nav {
+  width: 176px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-6) var(--space-4);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-5);
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease);
+}
+
+.settings-nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: height var(--ease);
+}
+
+.settings-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+}
+
+.settings-nav-item svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
+/* 右侧内容面板 */
+.settings-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: var(--space-10) var(--space-12) 32px;
+}
+</style>

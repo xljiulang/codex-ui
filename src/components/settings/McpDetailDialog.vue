@@ -474,3 +474,224 @@ function mcpDetailAuthLabel(): string {
     </div>
   </ModalDialog>
 </template>
+
+<style scoped>
+.mcp-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+}
+
+.mcp-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.mcp-detail-tab {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  transition: color var(--ease), background var(--ease), border-color var(--ease);
+}
+
+.mcp-detail-tab:hover {
+  color: var(--text-bright);
+  background: rgba(var(--overlay-rgb), 0.05);
+}
+
+.mcp-detail-tab-count {
+  margin-left: 4px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.mcp-detail-body-inner {
+  min-height: 160px;
+  overflow-y: auto;
+}
+
+.mcp-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.mcp-detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-4);
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.mcp-detail-empty p {
+  margin: 0;
+}
+
+.mcp-detail-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mcp-detail-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  font-size: var(--font-sm);
+}
+
+.mcp-detail-field-label {
+  flex: 0 0 92px;
+  color: var(--text-faint);
+}
+
+.mcp-detail-field-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  word-break: break-all;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.mcp-detail-field-value.mono {
+  font-family: var(--mono);
+}
+
+.mcp-detail-tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mcp-detail-tool {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--overlay-rgb), 0.02);
+}
+
+.mcp-detail-tool-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.mcp-detail-tool-name {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.mcp-detail-tool-title {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+.mcp-detail-tool-desc {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.mcp-detail-schema summary {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mcp-detail-schema pre {
+  margin: var(--space-2) 0 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.mcp-detail-group-title {
+  margin: 0;
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mcp-detail-resources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mcp-resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(var(--overlay-rgb), 0.02);
+}
+
+.mcp-resource-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mcp-resource-title {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.mcp-resource-uri {
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+}
+
+.mcp-resource-meta {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  word-break: break-word;
+}
+
+.mcp-resource-copy-btn {
+  flex-shrink: 0;
+  min-height: var(--ctrl-h-xs);
+  font-size: var(--font-xs);
+}
+</style>
+

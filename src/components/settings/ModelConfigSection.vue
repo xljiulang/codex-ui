@@ -809,3 +809,170 @@ function openModelConfigFile() {
     </div>
   </section>
 </template>
+
+<style scoped>
+.model-config-path {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+  text-align: right;
+  min-width: 0;
+}
+
+.model-config-path-link:hover {
+  color: var(--accent-dim);
+}
+
+/* 模型目录路径链接：作为 column 容器 item 默认会被拉伸占满整行，
+   导致 tooltip 相对整行居中而偏到路径名右侧；限制为内容宽度使其只围绕路径名显示 */
+.model-config-path-link {
+  align-self: flex-start;
+}
+
+/* 模型提供方列表与表单 */
+.model-providers-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-provider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--ease);
+}
+
+.model-provider-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
+}
+
+.model-provider-row:last-child {
+  border-bottom: none;
+}
+
+.model-provider-radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.model-provider-radio input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.model-provider-name {
+  font-size: var(--font-base);
+  color: var(--text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-provider-key {
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-provider-wire {
+  padding: 1px var(--space-2);
+}
+
+.model-providers-empty {
+  padding: var(--space-8);
+  text-align: center;
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  background: rgba(var(--overlay-rgb), 0.02);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.model-provider-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-8);
+  background: rgba(var(--overlay-rgb), 0.02);
+}
+
+.model-provider-row-error {
+  border: 1px solid rgba(var(--red-rgb), 0.35);
+  border-radius: var(--radius);
+  background: rgba(var(--red-rgb), 0.06);
+  padding: var(--space-2) var(--space-3);
+}
+
+.model-provider-row-msg {
+  flex: 0 0 100%;
+}
+
+.model-config-auth-hint {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  color: var(--green);
+}
+
+.model-config-advanced-note {
+  margin: 0;
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.model-config-textarea {
+  width: 100%;
+  min-height: 220px;
+  resize: none;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: var(--font-md);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+}
+
+.model-config-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 模型目录区块：只读路径 + JSON 编辑器（与提供方输入区之间加分隔） */
+.model-catalog-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.model-catalog-head span {
+  font-size: var(--font-sm);
+  font-weight: 700;
+  color: var(--text-bright);
+}
+
+.model-catalog-block .model-config-path {
+  text-align: left;
+}
+</style>
+

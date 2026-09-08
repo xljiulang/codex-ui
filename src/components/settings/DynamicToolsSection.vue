@@ -80,3 +80,13 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
     </div>
   </section>
 </template>
+
+<style scoped>
+/* 动态工具卡片头部摘要提示 */
+.dynamic-tools-hint {
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+</style>
+

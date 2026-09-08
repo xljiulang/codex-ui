@@ -257,3 +257,63 @@ watch(
     </div>
   </section>
 </template>
+
+<style scoped>
+.setting-value {
+  font-size: var(--font-md);
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  word-break: break-all;
+  user-select: text;
+}
+
+.setting-path-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.setting-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+  word-break: break-all;
+  user-select: text;
+}
+
+.setting-path-row .setting-value {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 本地记忆：三行卡片（标题 + 描述 + 右侧 switch / 删除图标） */
+.memory-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.memory-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-row-title {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: var(--space-1);
+}
+
+.memory-row-desc {
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+</style>
+

@@ -117,3 +117,65 @@ function openAgentsFile() {
     </div>
   </section>
 </template>
+
+<style scoped>
+/* 「全局指令」分区撑满右侧面板剩余高度，AGENTS 卡片与编辑器随内容填充 */
+.settings-section-global-instructions {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 卡片标题作为文件链接（AGENTS / model_catalog_json）：纯文字，可点击打开文件 */
+.model-config-title-link {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--font-base);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-bright);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.model-config-title-link:hover {
+  color: var(--accent);
+}
+
+.model-config-title-link:disabled {
+  cursor: default;
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+.model-config-missing {
+  color: var(--red);
+}
+
+.custom-instructions-textarea {
+  width: 100%;
+  flex: 1;
+  min-height: 240px;
+  overflow-y: auto;
+  resize: none;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-size: var(--font-md);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+}
+
+.custom-instructions-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+</style>
+

@@ -536,3 +536,227 @@ function pluginInitial(p: PluginCatalogItem): string {
     </div>
   </section>
 </template>
+
+<style scoped>
+/* 插件管理 */
+.plugin-manage-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.plugin-market-add {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 280px;
+}
+
+.plugin-market-add input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-bright);
+  font-size: var(--font-md);
+}
+
+.plugin-load-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plugin-load-error {
+  margin: 0;
+  font-size: var(--font-md);
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.07);
+  border: 1px solid rgba(var(--red-rgb), 0.3);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  word-break: break-all;
+}
+
+.plugin-marketplaces {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.plugin-marketplace {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-marketplace-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-1);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--ease);
+}
+
+.plugin-marketplace-head:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
+}
+
+/* 折叠/展开箭头：对齐会话目录行 .folder-arrow（双箭头随状态切换，不旋转） */
+.plugin-marketplace-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+
+.plugin-marketplace-arrow svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.plugin-marketplace-name {
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+/* 设置条目行首图标（市场行）：对齐会话目录行 .folder-icon */
+.plugin-marketplace-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.plugin-marketplace-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 市场图标为填充风格（同导航 ICON_EXTENSION）；MCP 图标走描边属性，不可在此统一 fill */
+.plugin-marketplace-icon svg {
+  fill: currentColor;
+}
+
+/* 数量徽章：扁胶囊风格同会话目录行 .folder-count（中性色描边），尺寸略放大一档，
+   推到行尾、位于「移除市场」图标之前 */
+.plugin-marketplace-count {
+  margin-left: auto;
+  min-width: 26px;
+  padding: 3px var(--space-4);
+  box-sizing: border-box;
+  text-align: center;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 已安装插件列表：超过 5 行时滚动（max-height 由组件按实际行高计算写入内联样式） */
+.installed-plugin-list {
+  overflow-y: auto;
+}
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--ease);
+}
+
+.plugin-row:hover {
+  background: rgba(var(--overlay-rgb), 0.025);
+}
+
+.plugin-row:last-child {
+  border-bottom: none;
+}
+
+.plugin-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-name {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  user-select: text;
+}
+
+.plugin-desc {
+  margin-top: 3px;
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  user-select: text;
+}
+
+.plugin-meta {
+  margin-top: var(--space-1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.plugin-disabled-reason {
+  font-size: var(--font-sm);
+  color: var(--red);
+  word-break: break-all;
+}
+
+.plugin-install-btn,
+.plugin-uninstall-btn {
+  flex-shrink: 0;
+}
+
+/* 插件品牌图标容器：与 .row-icon 同规格，去底色去边框（纯净图标） */
+.plugin-row-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+}
+
+.plugin-row-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+</style>
+

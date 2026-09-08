@@ -103,3 +103,115 @@ function selectTheme(id: ThemeId) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.theme-card {
+  flex: 1 1 150px;
+  min-width: 120px;
+  text-align: left;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  box-shadow: var(--shadow-sm), var(--inset-shadow);
+  transition: border-color var(--ease), box-shadow var(--ease),
+    transform var(--ease);
+}
+.theme-card:hover {
+  border-color: var(--border-light);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-hover), var(--inset-shadow);
+}
+.theme-card.selected {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-accent), var(--inset-shadow);
+}
+.theme-swatch {
+  display: block;
+  position: relative;
+  height: 46px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+}
+.theme-swatch::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  bottom: 9px;
+  width: 38%;
+  height: 7px;
+  border-radius: 999px;
+}
+.theme-card[data-theme-id="blue"] .theme-swatch {
+  background: #0e1116;
+}
+.theme-card[data-theme-id="blue"] .theme-swatch::after {
+  background: #4da6ff;
+}
+.theme-card[data-theme-id="dark"] .theme-swatch {
+  background: #0a0b10;
+}
+.theme-card[data-theme-id="dark"] .theme-swatch::after {
+  background: #a78bfa;
+}
+.theme-card[data-theme-id="light"] .theme-swatch {
+  background: #f4f6fb;
+}
+.theme-card[data-theme-id="light"] .theme-swatch::after {
+  background: #2563eb;
+}
+.theme-name {
+  display: block;
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+.theme-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+}
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--font-md);
+  color: var(--text);
+}
+
+.checkbox-row label {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* 主题行头部：标题与毛玻璃开关同在左侧、同行并列 */
+.theme-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.theme-row-head label:first-child {
+  margin-bottom: 0;
+}
+</style>
