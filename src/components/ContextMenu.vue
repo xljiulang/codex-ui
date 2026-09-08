@@ -59,3 +59,42 @@ const emit = defineEmits<{ close: [] }>();
     </button>
   </div>
 </template>
+
+<style scoped>
+.ctx-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 140px;
+  background: var(--float-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  animation: menu-in var(--ease);
+}
+
+.ctx-menu-item {
+  gap: var(--space-3);
+  padding: var(--space-3) 11px;
+}
+
+.ctx-menu-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+.ctx-menu-item-img {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.ctx-menu-item.danger:hover {
+  color: var(--red);
+}
+</style>

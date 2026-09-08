@@ -210,3 +210,95 @@ onBeforeUnmount(() => {
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.app-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  height: var(--ctrl-h-md);
+  padding: var(--space-2) var(--space-4);
+  font: inherit;
+  font-size: var(--font-md);
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-select:hover:not(:disabled),
+.app-select:focus-visible {
+  border-color: var(--accent-dim);
+}
+
+.app-select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.app-select-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.app-select-label.is-placeholder {
+  color: var(--text-faint);
+}
+
+.app-select-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  fill: currentColor;
+  color: var(--text-faint);
+  transition: transform var(--ease);
+}
+
+.app-select[aria-expanded="true"] .app-select-chevron {
+  transform: rotate(180deg);
+}
+
+.app-select-menu {
+  position: fixed;
+  z-index: 140;
+  min-width: 160px;
+  padding: var(--space-1);
+  background: var(--float-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow-y: auto;
+  animation: menu-in var(--ease);
+}
+
+.app-select-option {
+  display: block;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app-select-option.highlighted {
+  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--accent-rgb), 0.14);
+}
+
+.app-select-option.selected {
+  color: var(--text-bright);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.28);
+}
+</style>

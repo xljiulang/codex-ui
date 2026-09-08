@@ -14,13 +14,11 @@
   position: relative;
   z-index: 30;
 }
-
 .brand {
   display: flex;
   align-items: center;
   gap: var(--space-4);
 }
-
 .brand-logo {
   display: inline-flex;
   align-items: center;
@@ -34,7 +32,6 @@
   border: 1px solid rgba(var(--accent-rgb), 0.3);
   box-shadow: var(--inset-shadow), 0 2px 10px rgba(var(--accent-rgb), 0.16);
 }
-
 .brand-logo svg {
   width: 17px;
   height: 17px;
@@ -42,12 +39,10 @@
   stroke: var(--accent);
   stroke-width: 2.2;
 }
-
 .brand-logo svg .logo-c {
   stroke-width: 2;
   stroke-linecap: round;
 }
-
 .brand-name {
   font-size: var(--font-lg);
   font-weight: 800;
@@ -59,72 +54,28 @@
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-
 .header-actions {
   display: flex;
   gap: var(--space-2);
   align-items: center;
 }
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--ctrl-h-md);
-  height: var(--ctrl-h-md);
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  position: relative;
-}
-
-.icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
-
-.icon-btn.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.icon-btn.active::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -7px;
-  transform: translateX(-50%);
-  width: 16px;
-  height: 2px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-}
-
-.icon-btn svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-
 /* 自绘标题栏（无边框窗口）：标题栏整体可按住拖动，禁止选中文字；
    点击品牌/按钮等交互元素不触发拖动（由 AppHeader 的 mousedown 判定） */
 .app-header {
   -webkit-user-select: none;
   user-select: none;
 }
-
 /* 自绘标题栏窗口控制按钮（最小化/还原最大化/关闭）：沿用 .icon-btn 规格，
    关闭按钮悬停用系统红以暗示「关闭→隐藏到系统托盘」的语义 */
 .win-btn-close:hover {
   background: #e81123;
   color: #fff;
 }
-
 /* 启动加载页作为 .app-body 内容时填满剩余空间（无边框窗口启动期仍可拖动/关闭标题栏） */
 .app-body > .loading-screen {
   flex: 1;
   width: 100%;
 }
-
 /* 右侧面板 */
 .right-panel {
   flex-shrink: 0;
@@ -137,7 +88,6 @@
   overflow: hidden;
   position: relative;
 }
-
 /* 宽度拖拽条（面板左缘） */
 .right-panel-resize-handle {
   position: absolute;
@@ -150,7 +100,6 @@
   touch-action: none;
   transition: background-color var(--ease);
 }
-
 /* 拖拽条中部的抓握手感点 */
 .right-panel-resize-handle::after {
   content: "";
@@ -165,17 +114,14 @@
   opacity: 0;
   transition: opacity var(--ease), background-color var(--ease);
 }
-
 .right-panel-resize-handle:hover,
 .right-panel-resize-handle.dragging {
   background: rgba(var(--accent-rgb), 0.07);
 }
-
 .right-panel-resize-handle:hover::after,
 .right-panel-resize-handle.dragging::after {
   opacity: 1;
 }
-
 .panel-head {
   position: relative;
   height: var(--head-h);
@@ -184,7 +130,6 @@
   display: flex;
   align-items: center;
 }
-
 .panel-search-group {
   position: relative;
   display: flex;
@@ -196,12 +141,10 @@
   border-radius: var(--radius);
   transition: border-color var(--ease), box-shadow var(--ease);
 }
-
 .panel-search-group:focus-within {
   border-color: var(--accent-dim);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
-
 .panel-search {
   width: 100%;
   height: var(--ctrl-h-sm);
@@ -212,12 +155,10 @@
   background: transparent;
   border-radius: var(--radius) 0 0 var(--radius);
 }
-
 .panel-search:focus {
   border: none;
   box-shadow: none;
 }
-
 .panel-search-clear {
   position: absolute;
   right: 32px;
@@ -230,12 +171,10 @@
   font-size: var(--font-lg);
   line-height: 1;
 }
-
 .panel-search-clear:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
 }
-
 .panel-refresh {
   box-sizing: border-box;
   flex-shrink: 0;
@@ -251,24 +190,20 @@
   cursor: pointer;
   transition: color var(--ease), background-color var(--ease);
 }
-
 .panel-refresh:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
 }
-
 .panel-refresh svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
 }
-
 .panel-list {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-2);
 }
-
 .session-folder {
   display: flex;
   align-items: center;
@@ -280,12 +215,10 @@
   border: 1px solid transparent;
   transition: background-color var(--ease), border-color var(--ease);
 }
-
 .session-folder:hover {
   background: var(--bg-hover);
   border-color: var(--border);
 }
-
 .session-folder .folder-icon {
   flex-shrink: 0;
   display: inline-flex;
@@ -293,13 +226,11 @@
   justify-content: center;
   color: var(--text-dim);
 }
-
 .session-folder .folder-icon svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
 }
-
 /* 目录行折叠/展开箭头（与 GitView .git-dir-arrow 保持一致） */
 .session-folder .folder-arrow {
   flex-shrink: 0;
@@ -308,7 +239,6 @@
   fill: currentColor;
   opacity: 0.55;
 }
-
 .session-folder .folder-name {
   min-width: 0;
   flex: 1;
@@ -319,7 +249,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .session-folder .folder-count {
   flex-shrink: 0;
   font-size: var(--font-xs);
@@ -332,11 +261,9 @@
   min-width: 22px;
   text-align: center;
 }
-
 .session-item.folder-item {
   margin-left: var(--space-6);
 }
-
 .session-item {
   display: flex;
   align-items: flex-start;
@@ -349,12 +276,10 @@
   border: 1px solid transparent;
   transition: background-color var(--ease), border-color var(--ease);
 }
-
 .session-item:hover {
   background: var(--bg-hover);
   border-color: var(--border);
 }
-
 /* 历史会话行：会话 Logo（与标签栏「+」新建会话同款，按行高缩放） */
 .session-icon {
   flex-shrink: 0;
@@ -364,13 +289,11 @@
   margin-top: 1px;
   color: var(--text);
 }
-
 .session-icon svg {
   width: 16px;
   height: 16px;
   fill: currentColor;
 }
-
 /* 会话行图标：已绑定微信 → 双气泡并保持强调色（与置顶徽标同风格） */
 .session-title {
   min-width: 0;
@@ -380,14 +303,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .session-title-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
 }
-
 /* 历史会话行：后台运行呼吸点 */
 .session-run-dot {
   flex-shrink: 0;
@@ -397,7 +318,6 @@
   background: var(--accent);
   animation: breathe 1.6s ease-in-out infinite;
 }
-
 .pin-badge {
   flex-shrink: 0;
   display: inline-flex;
@@ -405,26 +325,22 @@
   justify-content: center;
   color: var(--accent);
 }
-
 .pin-badge svg {
   width: 11px;
   height: 11px;
   fill: currentColor;
 }
-
 .wechat-bind-dialog {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-
 .wechat-bind-dialog .wechat-status-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
 }
-
 .wechat-bind-dialog .wechat-state-badge {
   display: inline-flex;
   align-items: center;
@@ -434,30 +350,25 @@
   background: var(--bg-input);
   color: var(--text-dim);
 }
-
 .wechat-bind-dialog .wechat-state-badge.st-connected {
   background: var(--green-soft);
   color: var(--green);
 }
-
 .wechat-bind-dialog .wechat-state-badge.st-awaiting_qr,
 .wechat-bind-dialog .wechat-state-badge.st-starting {
   color: var(--accent);
 }
-
 .wechat-bind-dialog .wechat-state-badge.st-error,
 .wechat-bind-dialog .wechat-state-badge.st-session_expired {
   background: var(--red-soft);
   color: var(--red);
 }
-
 .wechat-bind-dialog .wechat-detail,
 .wechat-bind-dialog .wechat-account {
   color: var(--text-dim);
   font-size: 12px;
   word-break: break-all;
 }
-
 .wechat-bind-dialog .wechat-qr-wrap {
   display: flex;
   flex-direction: column;
@@ -465,7 +376,6 @@
   gap: 8px;
   padding: 12px 0 4px;
 }
-
 .wechat-bind-dialog .wechat-qr-wrap img {
   width: 220px;
   height: 220px;
@@ -474,14 +384,12 @@
   background: var(--doc-bg);
   box-shadow: var(--shadow-sm);
 }
-
 .wechat-bind-dialog .wechat-qr-hint {
   margin: 0;
   font-size: 12px;
   color: var(--text-dim);
   text-align: center;
 }
-
 .wechat-bind-dialog .wechat-unbound-hint,
 .wechat-bind-dialog .wechat-bound-note {
   margin: 0;
@@ -489,24 +397,20 @@
   color: var(--text-dim);
   line-height: 1.6;
 }
-
 .wechat-bind-dialog .wechat-bind-btn {
   align-self: flex-start;
 }
-
 .wechat-bind-dialog .wechat-unbind-btn {
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
-
 .wechat-bind-dialog .wechat-unbind-btn svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
 }
-
 .session-main {
   flex: 1;
   min-width: 0;
@@ -514,7 +418,6 @@
   flex-direction: column;
   gap: 2px;
 }
-
 .session-snippet {
   font-size: var(--font-sm);
   color: var(--text-faint);
@@ -522,13 +425,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.rename-input {
-  width: 100%;
-  font-size: var(--font-md);
-  padding: 2px var(--space-2);
-}
-
 .session-time {
   text-align: right;
   white-space: nowrap;
@@ -539,7 +435,6 @@
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
-
 /* 右侧面板外壳内容区与底部 Tab 栏 */
 .panel-content {
   flex: 1;
@@ -547,7 +442,6 @@
   display: flex;
   flex-direction: column;
 }
-
 .session-view,
 .resource-view {
   flex: 1;
@@ -556,7 +450,6 @@
   flex-direction: column;
   overflow: hidden;
 }
-
 .git-view {
   flex: 1;
   min-height: 0;
@@ -565,7 +458,6 @@
   overflow-x: hidden;
   overflow-y: auto;
 }
-
 .panel-tabs {
   flex-shrink: 0;
   display: flex;
@@ -573,7 +465,6 @@
   background: var(--panel-bg);
   padding: 0 var(--space-2);
 }
-
 .panel-tab {
   flex: 1;
   display: inline-flex;
@@ -590,7 +481,6 @@
   cursor: pointer;
   transition: color var(--ease), border-color var(--ease);
 }
-
 .panel-tab svg {
   flex-shrink: 0;
   width: 14px;
@@ -598,13 +488,11 @@
   fill: currentColor;
   opacity: 0.82;
 }
-
 .panel-tab span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .panel-tab .tab-badge {
   flex-shrink: 0;
   min-width: 16px;
@@ -620,20 +508,16 @@
   color: var(--on-accent);
   background: var(--accent);
 }
-
 .panel-tab:hover {
   color: var(--text-bright);
 }
-
 .panel-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
-
 .panel-tab.active svg {
   opacity: 1;
 }
-
 .panel-tab:focus-visible {
   outline: 2px solid var(--accent-glow);
   outline-offset: -1px;

@@ -122,3 +122,17 @@ async function apply() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.option-btn .option-default-tag {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.36);
+  border-radius: 999px;
+  padding: 1px var(--space-3);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+</style>

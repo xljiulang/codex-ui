@@ -50,3 +50,23 @@ watch(
     {{ tooltip.text }}
   </div>
 </template>
+
+<style scoped>
+.app-tooltip {
+  position: fixed;
+  z-index: 500;
+  max-width: 340px;
+  padding: var(--space-3) 11px;
+  border-radius: var(--radius);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--text-bright);
+  background: var(--float-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  word-break: break-word;
+  white-space: pre-wrap;
+  animation: tooltip-in var(--ease);
+}
+</style>

@@ -17,17 +17,14 @@
   z-index: 31;
   flex-shrink: 0;
 }
-
 .composer.dragover {
   outline: 2px dashed var(--accent-dim);
   outline-offset: -6px;
   border-radius: var(--radius-lg);
 }
-
 .composer-input-row {
   position: relative;
 }
-
 /* 输入卡片：圆角边框 + 底色，内部为「编辑器滚动区 + 底部工具条」两段式 */
 .composer-card {
   box-sizing: border-box;
@@ -39,7 +36,6 @@
   border-radius: var(--radius-lg);
   transition: border-color var(--ease-slow), box-shadow var(--ease-slow);
 }
-
 .composer-resize-handle {
   height: 8px;
   margin-bottom: 2px;
@@ -52,12 +48,10 @@
   touch-action: none;
   transition: background-color var(--ease);
 }
-
 .composer-resize-handle:hover,
 .composer-resize-handle.active {
   background: rgba(var(--accent-rgb), 0.07);
 }
-
 .composer-resize-grip {
   width: 30px;
   height: 3px;
@@ -66,21 +60,17 @@
   opacity: 0;
   transition: opacity var(--ease), background-color var(--ease);
 }
-
 .composer-resize-handle:hover .composer-resize-grip,
 .composer-resize-handle.active .composer-resize-grip {
   opacity: 1;
 }
-
 body.resizing-composer {
   user-select: none;
   cursor: ns-resize;
 }
-
 .rich-editor {
   width: 100%;
 }
-
 .rich-editor .ProseMirror {
   display: block;
   width: 100%;
@@ -95,16 +85,13 @@ body.resizing-composer {
   white-space: pre-wrap;
   word-break: break-word;
 }
-
 .composer-card:focus-within {
   border-color: rgba(var(--accent-rgb), 0.55);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
-
 .rich-editor .ProseMirror p {
   margin: 0;
 }
-
 .rich-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
@@ -112,7 +99,6 @@ body.resizing-composer {
   pointer-events: none;
   height: 0;
 }
-
 .ref-chip {
   display: inline-block;
   vertical-align: baseline;
@@ -127,7 +113,6 @@ body.resizing-composer {
   cursor: default;
   user-select: none;
 }
-
 .composer-toolbar {
   flex-shrink: 0;
   display: flex;
@@ -136,14 +121,12 @@ body.resizing-composer {
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4) var(--space-4);
 }
-
 .composer-left,
 .composer-right {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
-
 /* 输入区芯片基类 */
 .perm-chip,
 .collab-chip,
@@ -156,7 +139,6 @@ body.resizing-composer {
   box-sizing: border-box;
   border-radius: var(--radius);
 }
-
 /* accent 芯片 */
 .perm-chip,
 .collab-chip,
@@ -168,36 +150,30 @@ body.resizing-composer {
   background: rgba(var(--accent-rgb), 0.09);
   border: 1px solid rgba(var(--accent-rgb), 0.28);
 }
-
 .perm-chip:hover:not(:disabled),
 .collab-chip:hover:not(:disabled),
 .model-chip:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
 }
-
 .perm-chip svg {
   width: 13px;
   height: 13px;
   fill: currentColor;
 }
-
 .perm-chip .chevron {
   width: 10px;
   height: 10px;
 }
-
 .collab-chip svg {
   width: 10px;
   height: 10px;
   fill: currentColor;
 }
-
 .collab-chip .chip-icon {
   width: 13px;
   height: 13px;
 }
-
 .goal-chip {
   padding: 0 var(--space-2);
   color: var(--text-faint);
@@ -206,27 +182,22 @@ body.resizing-composer {
   transition: border-color var(--ease), background-color var(--ease),
     box-shadow var(--ease);
 }
-
 .goal-chip:hover {
   border-color: var(--text-faint);
   background: var(--neutral-soft-hover);
 }
-
 .goal-chip.has-goal {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.09);
   border-color: rgba(var(--accent-rgb), 0.28);
 }
-
 .goal-chip.has-goal:hover {
   border-color: var(--accent);
   background: rgba(var(--accent-rgb), 0.15);
 }
-
 /* 无边框图标按钮基类 */
 .text-editor-icon-btn,
-.goal-icon-btn,
-.settings-page .btn-icon {
+.goal-icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -236,7 +207,6 @@ body.resizing-composer {
   background: transparent;
   cursor: pointer;
 }
-
 .goal-icon-btn {
   position: relative;
   width: var(--ctrl-h-xs);
@@ -244,11 +214,9 @@ body.resizing-composer {
   flex-shrink: 0;
   color: var(--text-faint);
 }
-
 .goal-icon-btn.has-goal {
   color: var(--accent);
 }
-
 .goal-check {
   position: absolute;
   top: -3px;
@@ -259,27 +227,22 @@ body.resizing-composer {
   background: var(--accent);
   pointer-events: none;
 }
-
 .goal-icon-btn.status-active .goal-check {
   animation: pulse 1s infinite;
 }
-
 .goal-icon-btn:hover {
   background: rgba(var(--accent-rgb), 0.14);
 }
-
 .goal-icon-btn svg {
   width: 15px;
   height: 15px;
   fill: currentColor;
 }
-
 .model-chip svg {
   width: 10px;
   height: 10px;
   fill: currentColor;
 }
-
 .model-chip .model-chip-icon {
   width: 13px;
   height: 13px;
@@ -289,7 +252,6 @@ body.resizing-composer {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
-
 .send-btn {
   height: 30px;
   padding: 0 18px;
@@ -305,7 +267,6 @@ body.resizing-composer {
   box-shadow: var(--btn-glow);
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
 }
-
 .send-btn svg {
   width: 13px;
   height: 13px;
@@ -315,21 +276,17 @@ body.resizing-composer {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-
 .send-btn:hover:not(:disabled) {
   transform: scale(1.08);
   filter: brightness(1.06);
   box-shadow: var(--btn-glow-hover);
 }
-
 .send-btn:active:not(:disabled) {
   transform: scale(0.94);
 }
-
 .send-btn.lit {
   animation: send-pulse 1.6s ease-in-out infinite;
 }
-
 @keyframes send-pulse {
   0%,
   100% {
@@ -340,27 +297,23 @@ body.resizing-composer {
       inset 0 1px 0 rgba(255, 255, 255, 0.35);
   }
 }
-
 .send-btn.stop {
   background: rgba(var(--red-rgb), 0.13);
   color: var(--red);
   border: 1px solid rgba(var(--red-rgb), 0.35);
   box-shadow: none;
 }
-
 .send-btn.stop:hover:not(:disabled) {
   background: rgba(var(--red-rgb), 0.2);
   box-shadow: 0 0 14px rgba(var(--red-rgb), 0.18);
   filter: none;
 }
-
 .attachment-row {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
-
 .attachment-chip {
   display: inline-flex;
   align-items: center;
@@ -372,7 +325,6 @@ body.resizing-composer {
   padding: 3px var(--space-4);
   font-size: var(--font-sm);
 }
-
 .attachment-chip button {
   color: var(--text-dim);
   line-height: 1;
@@ -383,19 +335,16 @@ body.resizing-composer {
   align-items: center;
   justify-content: center;
 }
-
 .attachment-chip button:hover {
   color: var(--red);
   background: rgba(var(--red-rgb), 0.12);
 }
-
 .attachment-thumb {
   width: 24px;
   height: 24px;
   object-fit: cover;
   border-radius: var(--radius-sm);
 }
-
 /* 窄窗口适配 */
 @media (max-width: 720px) {
   .perm-chip,
@@ -405,214 +354,11 @@ body.resizing-composer {
     padding: 0 var(--space-2);
     font-size: var(--font-sm);
   }
-
   .goal-chip {
     padding: 0 var(--space-1);
   }
-
   .composer-left,
   .composer-right {
     gap: var(--space-1);
   }
-}
-
-/* ---------- 上下文用量圆环（模型按钮前）：进度=上下文占用百分比，悬停向上弹出用量菜单 ---------- */
-.ctx-ring-anchor {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.ctx-ring {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-}
-
-.ctx-ring svg {
-  width: 26px;
-  height: 26px;
-}
-
-.ctx-ring-track {
-  fill: none;
-  stroke: rgba(var(--border-rgb), 0.9);
-  stroke-width: 2;
-}
-
-.ctx-ring-bar {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  transition: stroke-dasharray var(--ease);
-}
-
-.ctx-ring-pct {
-  position: absolute;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  user-select: none;
-}
-
-/* ---------- 上下文用量悬浮菜单（圆环正上方弹出） ---------- */
-/* 双类名提升特异性：覆盖 .popup-menu（overlays.css 在 composer.css 之后加载）的 left: 0 */
-.popup-menu.usage-menu {
-  width: 300px;
-  /* 定宽 300px 取一半偏移：菜单中心对齐圆环中心（不使用 transform，避免与 menu-in 动画冲突） */
-  left: 50%;
-  margin-left: -150px;
-}
-
-.usage-menu-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3) var(--space-3);
-}
-
-.usage-menu-title {
-  font-weight: 600;
-  color: var(--text-bright);
-}
-
-.usage-menu-section {
-  padding: var(--space-3);
-  border-top: 1px solid rgba(var(--border-rgb), 0.45);
-}
-
-.usage-menu-bar-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.usage-menu-bar {
-  flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(var(--border-rgb), 0.5);
-  overflow: hidden;
-}
-
-.usage-menu-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--accent);
-  transition: width var(--ease);
-}
-
-/* 百分比 + 压缩图标合并胶囊：左数字右纯图标按钮，左边框即分隔线 */
-.usage-menu-capsule {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  box-sizing: border-box;
-  flex-shrink: 0;
-  border-radius: 999px;
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  user-select: none;
-}
-
-.usage-menu-capsule-pct {
-  padding: 0 0 0 10px;
-  font-size: var(--font-sm);
-  font-weight: 600;
-}
-
-.usage-menu-capsule-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  align-self: stretch;
-  width: 26px;
-  margin-left: var(--space-2);
-  padding: 0;
-  box-sizing: border-box;
-  border: none;
-  border-left: 1px solid rgba(var(--accent-rgb), 0.35);
-  border-radius: 0 999px 999px 0;
-  color: var(--accent);
-  background: transparent;
-  cursor: pointer;
-  transition: background var(--ease), opacity var(--ease);
-}
-
-.usage-menu-capsule-btn:hover:not(:disabled) {
-  background: rgba(var(--accent-rgb), 0.15);
-}
-
-.usage-menu-capsule-btn:disabled {
-  cursor: default;
-  opacity: var(--opacity-disabled);
-}
-
-.usage-menu-capsule-btn svg {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-}
-
-.usage-menu-line {
-  margin-top: var(--space-2);
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-.usage-menu-line.dim {
-  margin-top: 0;
-}
-
-.usage-menu-subtitle {
-  margin-bottom: var(--space-2);
-  font-size: var(--font-xs);
-  color: var(--text-dim);
-  letter-spacing: 0.02em;
-}
-
-.usage-menu-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 24px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.usage-menu-row.sub {
-  padding-left: var(--space-5);
-  color: var(--text-dim);
-}
-
-.usage-menu-label {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.usage-menu-ico {
-  width: 13px;
-  height: 13px;
-  fill: currentColor;
-}
-
-.usage-menu-value {
-  font-weight: 600;
 }

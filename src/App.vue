@@ -98,3 +98,35 @@ onBeforeUnmount(() => {
   </div>
   <TooltipLayer />
 </template>
+
+<style scoped>
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--float-bg);
+  color: var(--text-bright);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  padding: var(--space-3) var(--space-8);
+  font-size: var(--font-md);
+  font-weight: 600;
+  z-index: 200;
+  max-width: 80vw;
+  box-shadow: var(--shadow-md);
+  animation: toast-in var(--ease-slow);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.toast::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+</style>

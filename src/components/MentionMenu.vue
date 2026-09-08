@@ -304,3 +304,86 @@ function pluginInitial(p: PluginItem): string {
     </template>
   </div>
 </template>
+
+<style scoped>
+.mention-menu {
+  min-width: 320px;
+}
+
+.mention-menu .menu-item.active {
+  background: rgba(var(--accent-rgb), 0.09);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.24);
+}
+
+.menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.menu-item:hover {
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.menu-item-icon {
+  width: var(--ctrl-h-xs);
+  height: var(--ctrl-h-xs);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  background: var(--editor-menu-bg);
+  border: 1px solid var(--border);
+}
+
+.menu-item-icon img {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  display: block;
+}
+
+.menu-item-icon .plugin-icon-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-bright);
+  background: var(--bg-active);
+}
+
+.menu-item-label {
+  color: var(--text-bright);
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+.menu-item-desc {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  margin-top: 1px;
+}
+
+.menu-item .check {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: var(--font-base);
+}
+
+.menu-results {
+  margin-top: var(--space-2);
+}
+</style>
