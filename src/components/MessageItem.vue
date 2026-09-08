@@ -381,3 +381,236 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     <img :src="lightboxSrc" alt="图片预览" @click.stop />
   </div>
 </template>
+
+<style scoped>
+/* 用户消息 */
+.msg-user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.msg-user .bubble {
+  max-width: 86%;
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  color: var(--text-bright);
+  box-shadow: var(--inset-shadow), 0 2px 12px rgba(var(--accent-rgb), 0.13);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  position: relative;
+}
+
+.msg-user .bubble .user-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: var(--radius-sm);
+  margin: var(--space-1) 0;
+}
+
+.msg-user .bubble .bubble-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.msg-user .bubble .bubble-attachments .attachment-image {
+  width: 68px;
+  height: 68px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color var(--ease);
+}
+
+.msg-user .bubble .bubble-attachments .attachment-image:hover {
+  border-color: var(--accent-dim);
+}
+
+.msg-user .bubble .md-inline {
+  display: inline-block;
+  vertical-align: baseline;
+  max-width: 100%;
+}
+
+.msg-user .bubble .md-inline :deep(.md > :last-child) {
+  margin-bottom: 0;
+}
+
+/* 助手最终答复卡片：与工具卡同语言，左侧强调条突出“这一轮的回答” */
+.agent-final {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--accent-rgb), 0.04);
+  padding: var(--space-5) var(--space-6);
+}
+
+.msg-time {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-agent .msg-time {
+  text-align: left;
+}
+
+.msg-agent .agent-final {
+  position: relative;
+}
+.msg-agent .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+}
+.msg-agent:hover .copy-btn,
+.msg-agent:focus-within .copy-btn {
+  opacity: 1;
+}
+.msg-user .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+}
+.msg-user .bubble:hover .copy-btn,
+.msg-user:focus-within .copy-btn {
+  opacity: 1;
+}
+
+/* 用户气泡内的 Markdown（布局适配，配色沿用共享 .md） */
+.msg-user .bubble :deep(.md) {
+  white-space: normal;
+  line-height: 1.5;
+}
+.msg-user .bubble :deep(.md p) {
+  margin-bottom: var(--space-2);
+}
+.msg-user .bubble :deep(.md > div > :last-child),
+.msg-user .bubble :deep(.md > :last-child) {
+  margin-bottom: 0;
+}
+.msg-user .bubble :deep(.md pre) {
+  margin: var(--space-2) 0;
+}
+
+.msg-error {
+  color: var(--red);
+  font-size: var(--font-md);
+  background: rgba(var(--red-rgb), 0.08);
+  border: 1px solid rgba(var(--red-rgb), 0.3);
+  border-left: 3px solid var(--red);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius);
+  line-height: 1.5;
+}
+
+.phase-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: 999px;
+  padding: 2px var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.phase-badge::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dot-blink 1.1s ease-in-out infinite;
+}
+
+.stream-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.memory-citation {
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+  margin-top: var(--space-2);
+  line-height: 1.6;
+}
+
+.memory-citation-entry {
+  display: block;
+}
+
+.context-compaction-note,
+.unknown-item {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  padding: var(--space-2) 0;
+}
+
+/* 未知类型兜底 */
+.unknown-toggle {
+  margin-left: var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+.unknown-toggle:hover {
+  color: var(--text-bright);
+}
+.unknown-raw {
+  max-height: 240px;
+  overflow: auto;
+  font-size: var(--font-sm);
+  color: var(--console-text);
+  background: var(--console-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin: var(--space-2) 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 子代理活动提示（subAgentActivity） */
+.sub-agent-note {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  background: var(--reasoning-bg);
+  margin-bottom: var(--space-3);
+}
+</style>

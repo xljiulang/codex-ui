@@ -1,0 +1,355 @@
+/* ===== 中央视觉基元 =====
+ * 收敛自 chat.css / render.css 等：跨组件复用的视觉基元与动效，集中一处、每类只定义一次。
+ * 全局级联顺序：紧跟 theme.css 之后（index.css 中先于功能域文件）。
+ * 全局 scoped 化的组件专属规则不在此列（见各组件 <style scoped>）。
+ */
+
+/* 消息容器：MessageItem / InlineInteraction / PlanPromptBubble 共用 */
+.msg {
+  margin-bottom: var(--space-8);
+  animation: fadeIn var(--ease-slow);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 助手卡片：ToolCard / PlanTextCard / PlanCard / ReasoningBlock 共享容器、头部、正文结构 */
+.assistant-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--tool-card-bg);
+  background-image: var(--surface-grad);
+  box-shadow: var(--shadow-sm), var(--inset-shadow);
+  margin-bottom: var(--space-8);
+  overflow: hidden;
+  transition: border-color var(--ease), box-shadow var(--ease),
+    transform var(--ease);
+}
+
+.assistant-card:hover {
+  box-shadow: var(--shadow-hover), var(--inset-shadow);
+  transform: translateY(-1px);
+}
+
+.assistant-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid transparent;
+  transition: background-color var(--ease);
+}
+
+.assistant-card-header:hover {
+  background: rgba(var(--overlay-rgb), 0.02);
+}
+
+.assistant-card.expanded .assistant-card-header {
+  border-bottom-color: var(--border);
+}
+
+.assistant-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-card-arrow {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.assistant-card-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+  fill: currentColor;
+}
+
+.assistant-card-body-enter-active,
+.assistant-card-body-leave-active {
+  transition: opacity var(--ease-slow), transform var(--ease-slow);
+}
+
+.assistant-card-body-enter-from,
+.assistant-card-body-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.assistant-card-title {
+  font-weight: 600;
+  color: var(--text-bright);
+  font-size: var(--font-md);
+  flex-shrink: 0;
+}
+
+.assistant-card-sub {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-family: var(--mono);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.assistant-card-status {
+  font-size: var(--font-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.running {
+  background: var(--accent);
+  color: var(--accent);
+  animation: pulse 1s infinite;
+}
+
+.status-dot.ok {
+  background: var(--green);
+  color: var(--green);
+}
+
+.status-dot.fail {
+  background: var(--red);
+  color: var(--red);
+}
+
+.status-dot.declined {
+  background: var(--yellow);
+  color: var(--yellow);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.assistant-card-body {
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--font-md);
+}
+
+/* 待处理交互气泡骨架：InlineInteraction / PlanPromptBubble / 两个交互表单共用 */
+.interaction-bubble {
+  max-width: 92%;
+  margin-top: var(--space-12);
+  margin-inline: auto;
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-left: 3px solid var(--yellow);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--yellow) 5%, var(--bg-panel));
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5) var(--space-6);
+}
+
+.interaction-bubble select,
+.interaction-bubble input[type="text"],
+.interaction-bubble input[type="number"],
+.interaction-bubble input[type="password"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  font-size: var(--font-md);
+  color: var(--text);
+  background: rgba(var(--input-rgb), 0.8);
+}
+
+.interaction-bubble select:focus,
+.interaction-bubble input:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.interaction-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.interaction-title {
+  font-size: var(--font-base);
+  font-weight: 700;
+  color: var(--text-bright);
+  line-height: 1.35;
+}
+
+.interaction-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.interaction-pending {
+  font-size: var(--font-sm);
+  color: var(--yellow);
+  white-space: nowrap;
+}
+
+.interaction-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.interaction-foot .btn.primary {
+  min-height: var(--ctrl-h-md);
+  padding-inline: var(--space-8);
+}
+
+.interaction-foot .btn:not(.primary):not(.danger) {
+  color: var(--text-dim);
+  border-color: var(--border-light);
+  background: var(--neutral-soft);
+}
+
+.interaction-foot .btn:not(.primary):not(.danger):hover {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+  background: var(--neutral-soft-hover);
+}
+
+/* 消息/卡片统一复制按钮（内容型 hover 显示，定位随场景在组件内） */
+.copy-btn {
+  flex-shrink: 0;
+  font-size: var(--font-sm);
+  line-height: 1;
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-3);
+  cursor: pointer;
+  transition: color var(--ease), border-color var(--ease),
+    background-color var(--ease), opacity var(--ease);
+}
+
+.copy-btn:hover {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+  background: var(--bg-hover);
+}
+
+/* 通用元信息 / JSON 文本（多组件共用） */
+.tool-meta {
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  margin-bottom: var(--space-2);
+  word-break: break-all;
+}
+
+.tool-json {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  background: var(--console-bg-deep);
+  color: var(--console-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  max-height: 180px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* 图片灯箱与加载失败占位（MessageItem / ImageGenerationCard 共用） */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--overlay-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: fadeIn var(--ease);
+}
+
+.lightbox img {
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+}
+
+.user-image.clickable {
+  cursor: zoom-in;
+}
+
+.img-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  min-width: 120px;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  background: var(--bg-input);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  margin: var(--space-1) 0;
+}
+
+/* 共享动效：等待提示圆点 / 阶段徽标圆点 */
+@keyframes dot-blink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}

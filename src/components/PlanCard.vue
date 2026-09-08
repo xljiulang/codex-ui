@@ -58,3 +58,48 @@ const sub = computed(() => {
     </Transition>
   </div>
 </template>
+
+<style scoped>
+/* 底部实时计划卡与上方回合内容保持间距（回合内间距已由 .turn flex gap 控制） */
+.plan-card {
+  margin-top: var(--space-8);
+}
+
+/* Updated Plan 任务清单正文（容器走共享 .assistant-card） */
+.plan-explanation {
+  color: var(--text-dim);
+  font-size: var(--font-md);
+  margin-bottom: var(--space-1);
+}
+
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px var(--space-2);
+  font-size: var(--font-md);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+}
+
+.plan-step .plan-step-icon {
+  color: var(--text-faint);
+}
+
+.plan-step.in-progress {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.plan-step.in-progress .plan-step-icon {
+  color: var(--accent);
+}
+
+.plan-step.done .plan-step-icon {
+  color: var(--green);
+}
+
+.plan-step.done .plan-step-text {
+  text-decoration: line-through;
+}
+</style>

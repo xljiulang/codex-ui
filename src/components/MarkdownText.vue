@@ -217,3 +217,275 @@ async function copyCode(pre: HTMLPreElement, btn: HTMLButtonElement) {
 <template>
   <div ref="root" class="md"></div>
 </template>
+
+<style scoped>
+.md {
+  line-height: 1.65;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.md :deep(p) {
+  margin-bottom: var(--space-3);
+}
+
+.md :deep(pre) {
+  background: var(--code-bg);
+  color: var(--code-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-5);
+  padding-top: 38px;
+  position: relative;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: var(--font-md);
+  margin: var(--space-3) 0;
+}
+
+.md :deep(pre::before) {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  background: var(--code-head-tint);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  pointer-events: none;
+}
+
+.md :deep(pre .code-lang) {
+  position: absolute;
+  top: 7px;
+  left: 12px;
+  z-index: 2;
+  font-size: var(--font-xs);
+  line-height: 1;
+  letter-spacing: 0.8px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--code-float-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px var(--space-3);
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.md :deep(pre .code-copy-btn) {
+  position: absolute;
+  top: 7px;
+  right: 10px;
+  z-index: 2;
+  font-size: var(--font-xs);
+  line-height: 1;
+  color: var(--text-dim);
+  background: var(--code-float-bg);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  padding: var(--space-1) var(--space-4);
+  opacity: 0.6;
+  transition: opacity var(--ease), color var(--ease), border-color var(--ease),
+    background-color var(--ease);
+  cursor: pointer;
+}
+
+.md :deep(pre:hover .code-copy-btn),
+.md :deep(.code-copy-btn:hover),
+.md :deep(.code-copy-btn:focus) {
+  opacity: 1;
+}
+
+.md :deep(.code-copy-btn:hover) {
+  color: var(--text-bright);
+  border-color: var(--text-dim);
+  background: var(--code-float-bg-hover);
+}
+
+.md :deep(pre code.hljs) {
+  background: transparent;
+  padding: 0;
+}
+
+.md :deep(code) {
+  font-family: var(--mono);
+  font-size: var(--font-md);
+  background: rgba(var(--border-rgb), 0.12);
+  border: 1px solid rgba(var(--border-rgb), 0.1);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.md :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.md :deep(ul),
+.md :deep(ol) {
+  padding-left: var(--space-10);
+  margin-bottom: var(--space-3);
+}
+
+.md :deep(h1),
+.md :deep(h2),
+.md :deep(h3) {
+  color: var(--text-bright);
+  margin: var(--space-5) 0 var(--space-3);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.md :deep(h1) {
+  font-size: 1.35em;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.md :deep(h2) {
+  font-size: 1.2em;
+}
+
+.md :deep(h3) {
+  font-size: 1.08em;
+}
+
+.md :deep(a) {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.md :deep(a:hover) {
+  text-decoration: underline;
+  color: var(--link-hover);
+}
+
+.md :deep(blockquote) {
+  border-left: 3px solid var(--accent-dim);
+  background: rgba(var(--accent-rgb), 0.05);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: var(--space-2) var(--space-5);
+  color: var(--text-dim);
+  margin: var(--space-3) 0;
+}
+
+.md :deep(img) {
+  max-width: 100%;
+  border-radius: var(--radius);
+  margin: var(--space-2) 0;
+}
+
+.md :deep(input[type="checkbox"]) {
+  accent-color: var(--accent);
+  margin-right: var(--space-2);
+  vertical-align: -2px;
+}
+
+.md :deep(table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  margin: var(--space-4) 0;
+  font-size: var(--font-md);
+  display: block;
+  overflow-x: auto;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+}
+
+.md :deep(th),
+.md :deep(td) {
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-3) 11px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.md :deep(th:last-child),
+.md :deep(td:last-child) {
+  border-right: none;
+}
+
+.md :deep(tr:last-child td) {
+  border-bottom: none;
+}
+
+.md :deep(th) {
+  background: var(--table-head-bg);
+  color: var(--text-bright);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.md :deep(tr:nth-child(even) td) {
+  background: rgba(var(--overlay-rgb), 0.015);
+}
+
+.md :deep(tr:hover td) {
+  background: rgba(var(--accent-rgb), 0.05);
+}
+
+.md :deep(td code),
+.md :deep(th code) {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--link-hover);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+}
+
+/* highlight.js 暗色配色（对齐现有 VS Code 风格变量） */
+.md :deep(.hljs-comment),
+.md :deep(.hljs-quote) {
+  color: var(--syntax-comment);
+}
+.md :deep(.hljs-keyword),
+.md :deep(.hljs-selector-tag),
+.md :deep(.hljs-literal) {
+  color: var(--syntax-keyword);
+}
+.md :deep(.hljs-string),
+.md :deep(.hljs-regexp),
+.md :deep(.hljs-addition) {
+  color: var(--syntax-string);
+}
+.md :deep(.hljs-number),
+.md :deep(.hljs-meta) {
+  color: var(--syntax-number);
+}
+.md :deep(.hljs-title),
+.md :deep(.hljs-section) {
+  color: var(--syntax-function);
+}
+.md :deep(.hljs-attr),
+.md :deep(.hljs-attribute),
+.md :deep(.hljs-variable),
+.md :deep(.hljs-template-variable),
+.md :deep(.hljs-type),
+.md :deep(.hljs-class .hljs-title) {
+  color: var(--syntax-type);
+}
+.md :deep(.hljs-built_in),
+.md :deep(.hljs-builtin-name) {
+  color: var(--syntax-const);
+}
+.md :deep(.hljs-symbol),
+.md :deep(.hljs-bullet) {
+  color: var(--syntax-symbol);
+}
+.md :deep(.hljs-deletion) {
+  color: var(--syntax-deletion);
+}
+.md :deep(.hljs-emphasis) {
+  font-style: italic;
+}
+.md :deep(.hljs-strong) {
+  font-weight: 600;
+}
+</style>

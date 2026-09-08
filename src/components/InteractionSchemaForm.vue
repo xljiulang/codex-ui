@@ -206,3 +206,31 @@ async function handleElicitation() {
     </button>
   </div>
 </template>
+
+<style scoped>
+.required-mark {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.multi-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.multi-options .option-btn {
+  width: auto;
+  cursor: pointer;
+}
+
+.multi-options .option-btn::before {
+  border-radius: var(--radius-sm);
+}
+
+.multi-options .option-btn:has(input:checked) {
+  border-color: var(--accent-dim);
+  color: var(--text-bright);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+</style>

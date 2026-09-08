@@ -160,3 +160,93 @@ onBeforeUnmount(() => {
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.mention-inline {
+  display: inline-block;
+  background: rgba(var(--accent-rgb), 0.18);
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-3);
+  margin: 0 2px;
+  font-size: var(--font-md);
+}
+
+.mention-inline.clickable {
+  cursor: pointer;
+}
+
+.mention-inline.clickable:hover {
+  background: rgba(var(--accent-rgb), 0.28);
+}
+
+.ref-tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: 320px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--float-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-md);
+  color: var(--text-bright);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity var(--ease), transform var(--ease);
+  pointer-events: none;
+  word-break: break-word;
+}
+
+.ref-tooltip--below {
+  transform: translateY(-4px);
+}
+
+.ref-tooltip--placed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ref-tooltip-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.ref-tooltip-kind {
+  font-size: var(--font-xs);
+  font-weight: 400;
+  color: var(--text-dim);
+  background: rgba(var(--overlay-rgb), 0.08);
+  border-radius: var(--radius-sm);
+  padding: 1px var(--space-1);
+}
+
+.ref-tooltip-desc {
+  margin-top: 3px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+.ref-tooltip-arrow {
+  position: absolute;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  background: var(--bg-active);
+  border-right: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.ref-tooltip--below .ref-tooltip-arrow {
+  top: -5px;
+  bottom: auto;
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid var(--border-light);
+  border-top: 1px solid var(--border-light);
+}
+</style>

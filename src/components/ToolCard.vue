@@ -422,3 +422,80 @@ const mcpProgressPercent = computed(() =>
   </div>
 
 </template>
+
+<style scoped>
+.tool-command {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--mono);
+  font-size: var(--font-md);
+  background: var(--console-bg-deep);
+  color: var(--console-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-3);
+  margin-bottom: var(--space-2);
+  word-break: break-all;
+  user-select: text;
+}
+
+.tool-command-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.tool-output {
+  font-family: var(--mono);
+  font-size: var(--font-sm);
+  background: var(--console-bg);
+  color: var(--console-text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.tool-output.collapsed {
+  max-height: 72px;
+}
+
+.tool-output-cap {
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+  margin: var(--space-1) 0;
+}
+
+.tool-toggle {
+  color: var(--blue);
+  font-size: var(--font-sm);
+  margin-top: var(--space-1);
+  font-weight: 600;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.tool-toggle:hover {
+  color: var(--link-hover);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.tool-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  overflow: hidden;
+  margin: var(--space-1) 0;
+}
+
+.tool-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--ease-slow);
+}
+</style>

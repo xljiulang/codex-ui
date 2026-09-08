@@ -1,5 +1,6 @@
 /* style.css 拆分入口：按原文件顺序引入，勿调整顺序（全局级联依赖顺序） */
 @import "./theme.css";
+@import "./primitives.css";
 @import "./layout.css";
 @import "./git.css";
 @import "./resources.css";

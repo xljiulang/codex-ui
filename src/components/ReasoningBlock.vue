@@ -88,3 +88,41 @@ watch(
     </Transition>
   </div>
 </template>
+
+<style scoped>
+/* 推理折叠块：容器走共享 .assistant-card，保留紫色语义边框与底色 */
+.assistant-card--reasoning {
+  border-left: 3px solid var(--purple);
+  background: var(--reasoning-bg);
+}
+
+.reasoning-time {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.reasoning-preview {
+  padding: 0 var(--space-5) var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  user-select: none;
+}
+
+.reasoning-preview:hover {
+  color: var(--text-bright);
+}
+
+.reasoning-content {
+  color: var(--text-dim);
+  font-size: var(--font-md);
+  white-space: pre-wrap;
+  user-select: text;
+  line-height: 1.55;
+}
+</style>
