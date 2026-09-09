@@ -102,7 +102,7 @@ function openAgentsFile() {
       ></textarea>
       <div class="model-config-actions">
         <button
-          class="btn primary model-config-save-btn"
+          class="btn model-config-save-btn"
           :class="{ loading: agents.saving }"
           aria-label="保存"
           :disabled="agents.saving || agents.loading"
@@ -178,4 +178,3 @@ function openAgentsFile() {
   border-color: var(--accent);
 }
 </style>
-

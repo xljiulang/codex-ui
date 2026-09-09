@@ -41,6 +41,7 @@ describe("ZenProxySection", () => {
     await flushPromises();
     expect(wrapper.find(".settings-section-title").text()).toContain("Zen 本地代理");
     expect(wrapper.text()).toContain("运行中");
+    expect(wrapper.find(".zen-proxy-port-badge").text()).toContain("18080");
     // 说明文案含 Responses 与 Zen
     expect(wrapper.text()).toContain("Responses");
     expect(wrapper.text()).toContain("OpenCode Zen");
@@ -50,10 +51,11 @@ describe("ZenProxySection", () => {
     const wrapper = mount(ZenProxySection, { props: { active: true } });
     const input = wrapper.find("input[type='number']");
     await input.setValue("80");
-    const btn = wrapper.findAll("button").find((b) => b.text().includes("应用端口"));
+    const btn = wrapper.findAll("button").find((b) => b.text().includes("应用"));
     await btn!.trigger("click");
     expect(wrapper.find(".zen-proxy-error").exists()).toBe(true);
     expect(mockedToggle).not.toHaveBeenCalled();
+    expect(mockedApply).not.toHaveBeenCalled();
   });
 
   it("开启开关时调用 toggleZenProxy", async () => {
@@ -61,16 +63,27 @@ describe("ZenProxySection", () => {
     const checkbox = wrapper.find("input[type='checkbox']");
     await checkbox.setValue(true);
     await checkbox.trigger("change");
-    // 默认端口 18080 通过校验
-    expect(mockedToggle).toHaveBeenCalledWith(true, 18080);
+    // 默认端口 18080 通过校验，默认 base_url
+    expect(mockedToggle).toHaveBeenCalledWith(
+      true,
+      18080,
+      "https://opencode.ai/zen/v1",
+    );
   });
 
-  it("应用合法端口调用 applyZenProxy", async () => {
+  it("应用合法端口与 API 地址调用 applyZenProxy", async () => {
     const wrapper = mount(ZenProxySection, { props: { active: true } });
     const input = wrapper.find("input[type='number']");
     await input.setValue("19090");
-    const btn = wrapper.findAll("button").find((b) => b.text().includes("应用端口"));
+    const urlInput = wrapper.find("input[type='text']");
+    await urlInput.setValue("https://custom.example.com/v1");
+    const btn = wrapper.findAll("button").find((b) => b.text().includes("应用"));
     await btn!.trigger("click");
-    expect(mockedApply).toHaveBeenCalledWith(false, 19090, true);
+    expect(mockedApply).toHaveBeenCalledWith(
+      false,
+      19090,
+      "https://custom.example.com/v1",
+      true,
+    );
   });
 });

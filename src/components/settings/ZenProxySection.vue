@@ -9,16 +9,21 @@ import {
   toastError,
   type ZenProxyStatus,
 } from "../../composables/useCodex";
-import { ICON_INFO } from "../../lib/icons";
+import { ICON_SAVE } from "../../lib/icons";
 
 defineProps<{ active: boolean }>();
 
 const DEFAULT_PORT = 18080;
+const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
 
 /** 本地代理运行状态（由 zen_proxy_status 驱动；未获取时默认停止） */
 const status = ref<ZenProxyStatus>({ running: false, port: DEFAULT_PORT });
 /** 端口输入（本地缓冲，保存时写回） */
 const portInput = ref<string>(String(store.settings.zen_proxy_port ?? DEFAULT_PORT));
+/** API 请求地址输入（本地缓冲，保存时写回；空回退默认） */
+const apiUrlInput = ref<string>(
+  store.settings.zen_proxy_base_url ?? DEFAULT_BASE_URL,
+);
 /** 输入校验错误信息 */
 const portError = ref<string>("");
 
@@ -48,7 +53,8 @@ async function onToggle(checked: boolean) {
     setToast("端口无效，请检查输入");
     return;
   }
-  const ok = await toggleZenProxy(checked, port);
+  const baseUrl = apiUrlInput.value.trim() || DEFAULT_BASE_URL;
+  const ok = await toggleZenProxy(checked, port, baseUrl);
   if (ok !== checked) {
     status.value = await readZenProxyStatus().catch(() => status.value);
   } else {
@@ -57,17 +63,18 @@ async function onToggle(checked: boolean) {
   await refresh();
 }
 
-/** 应用端口变更（仅影响运行时，保存设置即重启代理） */
-async function onApplyPort() {
+/** 应用端口 + API 地址变更（保存设置并重启代理） */
+async function onApply() {
   const port = validatePort(portInput.value);
   if (!port) return;
   const enabled = store.settings.zen_proxy_enabled ?? false;
+  const baseUrl = apiUrlInput.value.trim() || DEFAULT_BASE_URL;
   try {
-    const st = await applyZenProxy(enabled, port, true);
+    const st = await applyZenProxy(enabled, port, baseUrl, true);
     if (enabled) {
       setToast(st.error ?? `代理已重启（端口 ${st.port}）`);
     } else {
-      setToast(`端口已设为 ${port}`);
+      setToast(`设置已保存（端口 ${port}）`);
     }
   } catch (e) {
     setToast(toastError(e));
@@ -88,93 +95,113 @@ onBeforeUnmount(refresh);
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
-        <h3>Zen 代理服务</h3>
+        <div class="zen-proxy-head-main">
+          <h3>Zen 代理服务</h3>
+          <p class="zen-proxy-head-desc">
+            model 为 zen 免费模型，base_url 为 http://127.0.0.1:{{
+              store.settings.zen_proxy_port ?? DEFAULT_PORT
+            }}/v1，experimental_bearer_token 为 public 或你自己的 key
+          </p>
+          <div class="zen-proxy-badges">
+            <span
+              class="zen-proxy-status"
+              :class="status.running ? 'is-running' : 'is-stopped'"
+            >
+              {{ status.running ? "运行中" : "已停止" }}
+            </span>
+            <span class="zen-proxy-port-badge">{{ status.port }}</span>
+          </div>
+        </div>
         <div class="model-config-head-actions">
-          <span
-            class="zen-proxy-status"
-            :class="status.running ? 'is-running' : 'is-stopped'"
-          >
-            {{ status.running ? "运行中" : "已停止" }}
-          </span>
+          <label class="switch" aria-label="Zen 本地代理开关">
+            <input
+              type="checkbox"
+              :checked="store.settings.zen_proxy_enabled ?? false"
+              @change="onToggle(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="switch-track"></span>
+          </label>
         </div>
       </div>
 
-      <div class="zen-proxy-row">
-        <label class="switch" aria-label="Zen 本地代理开关">
+      <div class="model-provider-form">
+        <div class="setting-row">
+          <label>监听端口</label>
           <input
-            type="checkbox"
-            :checked="store.settings.zen_proxy_enabled ?? false"
-            @change="onToggle(($event.target as HTMLInputElement).checked)"
+            type="number"
+            class="zen-proxy-port-input"
+            :value="portInput"
+            min="1024"
+            max="65535"
+            @input="portInput = ($event.target as HTMLInputElement).value"
           />
-          <span class="switch-track"></span>
-        </label>
-        <span class="zen-proxy-row-label">启用 Zen 本地代理</span>
+          <p v-if="portError" class="zen-proxy-error">{{ portError }}</p>
+        </div>
+
+        <div class="setting-row">
+          <label>Api 请求地址</label>
+          <input
+            type="text"
+            class="zen-proxy-url-input"
+            :value="apiUrlInput"
+            placeholder="https://opencode.ai/zen/v1"
+            @input="
+              apiUrlInput = ($event.target as HTMLInputElement).value
+            "
+          />
+        </div>
       </div>
 
-      <div class="zen-proxy-row">
-        <span class="zen-proxy-row-label">监听端口</span>
-        <input
-          type="number"
-          class="zen-proxy-port-input"
-          :value="portInput"
-          min="1024"
-          max="65535"
-          @input="portInput = ($event.target as HTMLInputElement).value"
-        />
-        <button class="btn zen-proxy-apply-btn" @click="onApplyPort">
-          应用端口
+      <div class="zen-proxy-actions">
+        <button class="btn zen-proxy-apply-btn" @click="onApply">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path :d="ICON_SAVE" />
+          </svg>
+          <span>应用</span>
         </button>
-      </div>
-      <p v-if="portError" class="zen-proxy-error">{{ portError }}</p>
-
-      <div class="zen-proxy-hint">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="ICON_INFO" fill="currentColor" />
-        </svg>
-        <span class="zen-proxy-hint-body">
-          在「模型配置」页手动添加 provider，按下面填写（key 可用
-          <code>public</code>）：
-          <br />
-          <code>base_url = http://127.0.0.1:{{
-            store.settings.zen_proxy_port ?? DEFAULT_PORT
-          }}/v1</code>
-          <br />
-          <code>wire_api = "responses"</code>
-          <br />
-          <code>experimental_bearer_token = "public"</code>
-          <br />
-          <span class="zen-proxy-hint-note">
-            模型名填 Zen 支持的 ID，代理会原样透传。
-          </span>
-        </span>
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.zen-proxy-row {
+.model-config-card-head {
+  align-items: center;
+}
+.zen-proxy-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.zen-proxy-head-desc {
+  margin: 0;
+  font-size: var(--font-md);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.zen-proxy-badges {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--border);
-}
-.zen-proxy-row:last-of-type {
-  border-bottom: none;
-}
-.zen-proxy-row-label {
-  font-size: var(--font-md);
-  color: var(--text-bright);
-  flex-shrink: 0;
+  gap: var(--space-2);
 }
 .zen-proxy-port-input {
-  width: 120px;
+  width: 100%;
   height: var(--ctrl-h-md);
   padding: var(--space-2) var(--space-4);
 }
+.zen-proxy-url-input {
+  width: 100%;
+  height: var(--ctrl-h-md);
+  padding: var(--space-2) var(--space-4);
+}
+.zen-proxy-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-4) 0 0;
+}
 .zen-proxy-apply-btn {
-  margin-left: auto;
+  flex-shrink: 0;
 }
 .zen-proxy-status {
   font-size: var(--font-xs);
@@ -192,31 +219,20 @@ onBeforeUnmount(refresh);
   color: var(--text-faint);
   background: var(--bg-2);
 }
+.zen-proxy-port-badge {
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1;
+  border-radius: 999px;
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+}
 .zen-proxy-error {
   color: var(--danger);
   font-size: var(--font-xs);
   margin: 0 0 var(--space-2);
-}
-.zen-proxy-hint {
-  display: flex;
-  gap: var(--space-2);
-  align-items: flex-start;
-  font-size: var(--font-xs);
-  color: var(--text-faint);
-  background: var(--bg-2);
-  border-radius: var(--radius-md);
-  padding: var(--space-3) var(--space-4);
-  line-height: 1.6;
-}
-.zen-proxy-hint svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.zen-proxy-hint code {
-  background: var(--float-bg);
-  border-radius: 4px;
-  padding: 0 4px;
 }
 </style>

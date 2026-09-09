@@ -237,7 +237,11 @@ impl CodexServer {
             .unwrap_or_default();
         let settings = settings::load(&app_dir);
         let status = self
-            .apply_zen_proxy(settings.zen_proxy_enabled, settings.zen_proxy_port)
+            .apply_zen_proxy(
+                settings.zen_proxy_enabled,
+                settings.zen_proxy_port,
+                settings.zen_proxy_base_url,
+            )
             .await;
         if !status.running {
             if let Some(e) = status.error {
@@ -270,9 +274,10 @@ impl CodexServer {
         &self,
         enabled: bool,
         port: u16,
+        base_url: String,
     ) -> zen_proxy::ZenProxyStatus {
         let mut inner = self.shared.inner.lock().await;
-        zen_proxy::apply(&mut inner.zen_proxy, enabled, port, self.log.clone()).await
+        zen_proxy::apply(&mut inner.zen_proxy, enabled, port, base_url, self.log.clone()).await
     }
 
     /// Zen 代理当前状态（运行中返回端口；未开启或未启动返回默认端口）。

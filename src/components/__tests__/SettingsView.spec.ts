@@ -371,7 +371,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper
       .find(
-        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+        ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
       )
       .trigger("click");
     await flushPromises();
@@ -394,7 +394,7 @@ describe("SettingsView 模型配置", () => {
     const cards = wrapper.findAll(
       ".settings-section-global-instructions .model-config-card",
     );
-    await cards[0].find(".model-config-actions button.primary").trigger("click");
+    await cards[0].find(".model-config-actions .model-config-save-btn").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_save", {
       content: "# AGENTS.md\n\nWindows 环境。\n",
@@ -634,7 +634,7 @@ describe("SettingsView 模型配置", () => {
     catalogContent = '{\n  "models": [{ "id": "gpt-x" }]\n}';
     await wrapper
       .find(
-        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+        ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
       )
       .trigger("click");
     await flushPromises();
@@ -1044,7 +1044,7 @@ describe("SettingsView 模型配置", () => {
     ).length;
     await wrapper
       .find(
-        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+        ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
       )
       .trigger("click");
     await flushPromises();
@@ -1071,7 +1071,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find("textarea.model-config-textarea").setValue("   ");
     await wrapper
       .find(
-        ".settings-section-model-config .model-config-card .model-config-actions button.primary",
+        ".settings-section-model-config .model-config-card .model-config-actions .model-config-save-btn",
       )
       .trigger("click");
     await flushPromises();
@@ -3712,7 +3712,7 @@ describe("SettingsView 按钮图标", () => {
     await flushPromises();
     const selectors = [
       ".settings-nav-item",
-      ".model-config-actions button.primary",
+      ".model-config-actions .model-config-save-btn",
       ".model-config-reload-btn",
       ".model-provider-actions .btn",
       "button.codex-pick-btn",

@@ -31,10 +31,17 @@ pub struct AppSettings {
     /// Zen 本地代理监听端口（默认 18080）
     #[serde(default = "default_zen_proxy_port")]
     pub zen_proxy_port: u16,
+    /// Zen 代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
+    #[serde(default = "default_zen_proxy_base_url")]
+    pub zen_proxy_base_url: String,
 }
 
 fn default_zen_proxy_port() -> u16 {
     crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT
+}
+
+fn default_zen_proxy_base_url() -> String {
+    crate::codex::zen_proxy::DEFAULT_ZEN_BASE_URL.to_string()
 }
 
 fn default_permission() -> String {
@@ -64,6 +71,7 @@ impl Default for AppSettings {
             last_session_id: None,
             zen_proxy_enabled: false,
             zen_proxy_port: default_zen_proxy_port(),
+            zen_proxy_base_url: default_zen_proxy_base_url(),
         }
     }
 }
@@ -269,16 +277,22 @@ mod tests {
         let s = load(dir.path());
         assert!(!s.zen_proxy_enabled);
         assert_eq!(s.zen_proxy_port, crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT);
+        assert_eq!(
+            s.zen_proxy_base_url,
+            crate::codex::zen_proxy::DEFAULT_ZEN_BASE_URL
+        );
 
         // 自定义端口与开关往返一致
         let s = AppSettings {
             zen_proxy_enabled: true,
             zen_proxy_port: 19090,
+            zen_proxy_base_url: "https://custom.example.com/v1".into(),
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
         assert!(loaded.zen_proxy_enabled);
         assert_eq!(loaded.zen_proxy_port, 19090);
+        assert_eq!(loaded.zen_proxy_base_url, "https://custom.example.com/v1");
     }
 }

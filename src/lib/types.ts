@@ -183,6 +183,8 @@ export interface AppSettings {
   zen_proxy_enabled?: boolean;
   /** Zen 本地代理监听端口（默认 18080） */
   zen_proxy_port?: number;
+  /** Zen 代理转发上游 API 请求地址（默认 https://opencode.ai/zen/v1） */
+  zen_proxy_base_url?: string;
 }
 
 /** 定时任务执行记录状态 */

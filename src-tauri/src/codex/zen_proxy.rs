@@ -29,8 +29,8 @@ pub(crate) const DEFAULT_ZEN_PROXY_PORT: u16 = 18080;
 /// 模拟 opencode 桌面客户端的固定识别头（随请求发往 Zen）。
 const OPENCODE_CLIENT: &str = "desktop";
 const OPENCODE_PROJECT: &str = "global";
-/// OpenCode Zen 上游 base URL（固定）。
-const ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
+/// OpenCode Zen 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
+pub(crate) const DEFAULT_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
 /// 请求上游时固定的 User-Agent（与 opencode 官方客户端一致）。
 const ZEN_USER_AGENT: &str =
     "opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24";
@@ -69,16 +69,22 @@ impl ZenProxyStatus {
 }
 
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
-pub async fn start(port: u16, log: ZenLog) -> Result<ZenProxyHandle, String> {
+pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyHandle, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("代理端口 {port} 启动失败（可能被占用）：{e}"))?;
+    let base_url = if base_url.trim().is_empty() {
+        DEFAULT_ZEN_BASE_URL.to_string()
+    } else {
+        base_url
+    };
     let app = Router::new()
         .route("/v1/responses", post(handle_responses))
         .route("/v1/models", get(handle_models))
         .with_state(ProxyState {
             session: random_id("ses"),
+            base_url,
             log,
         });
     let task = tokio::spawn(async move {
@@ -95,6 +101,7 @@ pub async fn apply(
     handle: &mut Option<ZenProxyHandle>,
     enabled: bool,
     port: u16,
+    base_url: String,
     log: ZenLog,
 ) -> ZenProxyStatus {
     let running_port = handle.as_ref().map(|h| h.port);
@@ -105,7 +112,7 @@ pub async fn apply(
         }
     }
     if need_start {
-        match start(port, log).await {
+        match start(port, base_url, log).await {
             Ok(h) => {
                 *handle = Some(h);
                 ZenProxyStatus {
@@ -139,6 +146,7 @@ pub async fn apply(
 #[derive(Clone)]
 struct ProxyState {
     session: String,
+    base_url: String,
     log: ZenLog,
 }
 
@@ -214,11 +222,12 @@ async fn handle_responses(
     );
 
     let started = Instant::now();
+    let base_url = state.base_url.clone();
     match forward(
         &req,
         &headers,
         want_stream,
-        ZEN_BASE_URL,
+        &base_url,
         http_client(),
         &state.session,
     )
@@ -230,7 +239,7 @@ async fn handle_responses(
                 "info",
                 "zen_proxy.forward",
                 &[
-                    ("url", ZEN_BASE_URL.to_string()),
+                    ("url", base_url.clone()),
                     ("status", status.as_u16().to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
                 ],
@@ -250,7 +259,7 @@ async fn handle_responses(
                 "warn",
                 "zen_proxy.forward_error",
                 &[
-                    ("url", ZEN_BASE_URL.to_string()),
+                    ("url", base_url),
                     ("error", msg.clone()),
                 ],
             );
@@ -269,7 +278,7 @@ async fn handle_models(
 }
 
 /// 翻译请求并转发到 Zen；返回 (状态码, 响应)。
-/// `base_url` 默认取 `ZEN_BASE_URL`（测试时可指向本地 mock）。
+/// `base_url` 由配置传入（测试时可指向本地 mock）。
 async fn forward(
     req: &Value,
     headers: &HeaderMap,

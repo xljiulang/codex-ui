@@ -11,6 +11,7 @@ export interface ZenProxyStatus {
 }
 
 const DEFAULT_PORT = 18080;
+const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
 
 /** 查询本地代理当前状态。 */
 export async function readZenProxyStatus(): Promise<ZenProxyStatus> {
@@ -22,15 +23,23 @@ export async function readZenProxyStatus(): Promise<ZenProxyStatus> {
 export async function applyZenProxy(
   enabled: boolean,
   port: number,
+  baseUrl: string,
   persist = true,
 ): Promise<ZenProxyStatus> {
   const targetPort = port > 0 ? port : DEFAULT_PORT;
+  const targetBaseUrl =
+    baseUrl.trim() === "" ? DEFAULT_BASE_URL : baseUrl.trim();
   if (persist) {
-    await saveSettings({ zen_proxy_enabled: enabled, zen_proxy_port: targetPort });
+    await saveSettings({
+      zen_proxy_enabled: enabled,
+      zen_proxy_port: targetPort,
+      zen_proxy_base_url: targetBaseUrl,
+    });
   }
   return invoke<ZenProxyStatus>("zen_proxy_apply", {
     enabled,
     port: targetPort,
+    baseUrl: targetBaseUrl,
   });
 }
 
@@ -38,9 +47,10 @@ export async function applyZenProxy(
 export async function toggleZenProxy(
   enabled: boolean,
   port: number,
+  baseUrl: string,
 ): Promise<boolean> {
   try {
-    const status = await applyZenProxy(enabled, port, true);
+    const status = await applyZenProxy(enabled, port, baseUrl, true);
     if (status.running) {
       setToast(`Zen 本地代理已启动（端口 ${status.port}）`);
     } else {

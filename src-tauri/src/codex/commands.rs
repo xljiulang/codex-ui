@@ -95,10 +95,12 @@ pub async fn zen_proxy_apply(
     server: State<'_, Server>,
     enabled: bool,
     port: Option<u16>,
+    base_url: Option<String>,
 ) -> Result<zen_proxy::ZenProxyStatus, String> {
     let current = server.zen_proxy_status().await;
     let port = port.unwrap_or(current.port);
-    Ok(server.apply_zen_proxy(enabled, port).await)
+    let base_url = base_url.unwrap_or_else(|| zen_proxy::DEFAULT_ZEN_BASE_URL.to_string());
+    Ok(server.apply_zen_proxy(enabled, port, base_url).await)
 }
 
 /// 查询 Zen 本地代理当前状态。

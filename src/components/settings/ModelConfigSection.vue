@@ -794,7 +794,7 @@ function openModelConfigFile() {
 
       <div class="model-config-actions">
         <button
-          class="btn primary model-config-save-btn"
+          class="btn model-config-save-btn"
           :class="{ loading: modelConfig.saving }"
           aria-label="保存"
           :disabled="modelConfig.saving || modelConfig.loading"
@@ -975,4 +975,3 @@ function openModelConfigFile() {
   text-align: left;
 }
 </style>
-
