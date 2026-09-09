@@ -2,7 +2,11 @@
 import { watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
-import { friendlyServerError, friendlyServerMessage } from "../../lib/serverMessages";
+import {
+  friendlyServerError,
+  friendlyServerMessage,
+  isIgnoredWarning,
+} from "../../lib/serverMessages";
 import {
   isThreadItemType,
   type AgentMessageItem,
@@ -669,7 +673,10 @@ export async function wireEvents() {
     }),
     await listen("warning", (e) => {
       const p = e.payload as { message?: string };
-      if (p?.message) setToast(friendlyServerMessage(p.message));
+      if (p?.message) {
+        if (isIgnoredWarning(p.message)) return;
+        setToast(friendlyServerMessage(p.message));
+      }
     }),
   );
 
