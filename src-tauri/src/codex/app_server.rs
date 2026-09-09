@@ -1125,6 +1125,7 @@ pub(crate) fn runtime_dependency_dirs(userprofile: &Path) -> Vec<PathBuf> {
 
 /// 把 <app_dir>/bin（存在时）与 codex-runtimes 依赖目录前插到现有 PATH；
 /// 依赖目录即使尚未下载也一并加入。无任何可前插项时返回 None（保持原 PATH）。
+/// codex 与终端子进程统一使用本函数注入 PATH（唯一的 PATH 前插实现）。
 pub(crate) fn prepend_bin_and_runtime_path(
     existing: &str,
     app_dir: &Path,
@@ -1140,18 +1141,6 @@ pub(crate) fn prepend_bin_and_runtime_path(
         return None;
     }
     parts.extend(std::env::split_paths(existing));
-    std::env::join_paths(parts).ok()
-}
-
-/// 只前插 <app_dir>/bin 的既有变体：bin 目录存在时返回新 PATH 值，
-/// 否则返回 None（保持原 PATH 不变）。
-pub(crate) fn prepend_bin_path(existing: &str, app_dir: &Path) -> Option<std::ffi::OsString> {
-    let bin = app_dir.join("bin");
-    if !bin.is_dir() {
-        return None;
-    }
-    let mut parts: Vec<_> = std::env::split_paths(existing).collect();
-    parts.insert(0, bin);
     std::env::join_paths(parts).ok()
 }
 
@@ -1558,26 +1547,6 @@ mod tests {
             "marketplace `openai-primary-runtime` is reserved and cannot be added from this source"
         ));
         assert!(!is_conflicting_marketplace_source_error("unknown error"));
-    }
-
-    #[test]
-    fn prepend_bin_path_prepends_bin_when_present() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
-        let existing = std::env::join_paths([
-            tmp.path().join("a"),
-            tmp.path().join("b"),
-        ])
-        .unwrap();
-        let joined = prepend_bin_path(&existing.to_string_lossy(), tmp.path()).unwrap();
-        let parts: Vec<_> = std::env::split_paths(&joined).collect();
-        assert_eq!(parts.first().unwrap(), &tmp.path().join("bin"));
-        assert!(parts.contains(&tmp.path().join("a")));
-        assert!(parts.contains(&tmp.path().join("b")));
-
-        // bin 缺失 → None（保持原 PATH）
-        let tmp2 = tempfile::tempdir().unwrap();
-        assert!(prepend_bin_path(&existing.to_string_lossy(), tmp2.path()).is_none());
     }
 
     #[test]
