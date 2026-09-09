@@ -13,10 +13,10 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
-use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{OriginalUri, State};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use futures_util::stream::{self, StreamExt};
 use serde_json::{Value, json};
@@ -34,6 +34,17 @@ pub(crate) const DEFAULT_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
 /// 请求上游时固定的 User-Agent（与 opencode 官方客户端一致）。
 const ZEN_USER_AGENT: &str =
     "opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24";
+/// 反向代理时不应转发的逐跳请求/响应头。
+const HOP_BY_HOP_HEADERS: [&str; 8] = [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
@@ -81,7 +92,7 @@ pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyH
     };
     let app = Router::new()
         .route("/v1/responses", post(handle_responses))
-        .route("/v1/models", get(handle_models))
+        .fallback(handle_passthrough)
         .with_state(ProxyState {
             session: random_id("ses"),
             base_url,
@@ -268,13 +279,116 @@ async fn handle_responses(
     }
 }
 
-async fn handle_models(
+/// 非 `/v1/responses` 请求：按 base_url 路径前缀直接透传到 Zen。
+async fn handle_passthrough(
     State(state): State<ProxyState>,
-    _headers: HeaderMap,
-) -> Result<Json<Value>, ()> {
-    log_at(&state.log, "info", "zen_proxy.models", &[]);
-    // codex 的模型列表来自 model_catalog_json，不会依赖该端点；保留近似形状供探测。
-    Ok(Json(json!({ "object": "list", "data": [] })))
+    method: Method,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    forward_passthrough(&state, method, &uri, &headers, body).await
+}
+
+/// 透传核心（便于单测）：构造上游 URL、转发请求并流式回传响应。
+async fn forward_passthrough(
+    state: &ProxyState,
+    method: Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: Body,
+) -> Response {
+    let url = match passthrough_url(&state.base_url, uri) {
+        Ok(url) => url,
+        Err(e) => return error_json(StatusCode::BAD_GATEWAY, e),
+    };
+    let mut rq = http_client()
+        .request(to_reqwest_method(&method), url)
+        .headers(forwarded_request_headers(headers, &state.session));
+    if method_has_body(&method) {
+        rq = rq.body(reqwest::Body::wrap_stream(body.into_data_stream()));
+    }
+    match rq.send().await {
+        Ok(resp) => passthrough_response(resp).await,
+        Err(e) => error_json(StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")),
+    }
+}
+
+/// 把本地 `/v1` 前缀替换为 base_url 的路径前缀，保留 query。
+fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|e| format!("Zen 代理转发地址无效: {e}"))?;
+    let base_path = url.path().trim_end_matches('/').to_string();
+    let incoming = uri.path();
+    let suffix = incoming.strip_prefix("/v1").unwrap_or(incoming);
+    let mut path = format!("{base_path}{suffix}");
+    if path.is_empty() {
+        path.push('/');
+    }
+    url.set_path(&path);
+    url.set_query(uri.query());
+    url.set_fragment(None);
+    Ok(url)
+}
+
+/// 构造转发给上游的请求头：保留入站头，剔除逐跳头并附加固定 opencode 识别头。
+fn forwarded_request_headers(headers: &HeaderMap, session: &str) -> HeaderMap {
+    let mut out = headers.clone();
+    for name in HOP_BY_HOP_HEADERS {
+        out.remove(name);
+    }
+    out.remove(header::HOST);
+    out.remove(header::CONTENT_LENGTH);
+    // 保持固定 opencode User-Agent，不沿用入站客户端 UA
+    out.remove(header::USER_AGENT);
+    out.insert(
+        "x-opencode-client",
+        HeaderValue::from_static(OPENCODE_CLIENT),
+    );
+    out.insert(
+        "x-opencode-project",
+        HeaderValue::from_static(OPENCODE_PROJECT),
+    );
+    if let Ok(value) = HeaderValue::from_str(&random_id("msg")) {
+        out.insert("x-opencode-request", value);
+    }
+    if let Ok(value) = HeaderValue::from_str(session) {
+        out.insert("x-opencode-session", value);
+    }
+    out
+}
+
+/// 构造回传给客户端的响应头：剔除逐跳头与长度头，保留内容类型/缓存等。
+fn forwarded_response_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut out = headers.clone();
+    for name in HOP_BY_HOP_HEADERS {
+        out.remove(name);
+    }
+    out.remove(header::CONTENT_LENGTH);
+    out
+}
+
+fn method_has_body(method: &Method) -> bool {
+    method != Method::GET && method != Method::HEAD && method != Method::OPTIONS
+}
+
+fn to_reqwest_method(method: &Method) -> reqwest::Method {
+    reqwest::Method::from_bytes(method.as_str().as_bytes()).unwrap_or(reqwest::Method::GET)
+}
+
+async fn passthrough_response(resp: reqwest::Response) -> Response {
+    let status = resp.status();
+    let headers = forwarded_response_headers(resp.headers());
+    let stream = resp
+        .bytes_stream()
+        .map(|chunk| chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)));
+    let mut builder = Response::builder().status(status);
+    for (name, value) in headers.iter() {
+        builder = builder.header(name.clone(), value.clone());
+    }
+    builder
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into()))
 }
 
 /// 翻译请求并转发到 Zen；返回 (状态码, 响应)。
@@ -1094,6 +1208,36 @@ mod tests {
     }
 
     #[test]
+    fn passthrough_url_maps_v1_prefix_and_query() {
+        let uri: Uri = "/v1/models?foo=bar".parse().unwrap();
+        let url = passthrough_url("https://opencode.ai/zen/v1", &uri).unwrap();
+        assert_eq!(url.as_str(), "https://opencode.ai/zen/v1/models?foo=bar");
+    }
+
+    #[test]
+    fn passthrough_url_maps_custom_base_path() {
+        let uri: Uri = "/v1/chat/completions?x=1".parse().unwrap();
+        let url = passthrough_url("https://custom.example.com/api/v1/", &uri).unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://custom.example.com/api/v1/chat/completions?x=1"
+        );
+    }
+
+    #[test]
+    fn passthrough_url_appends_non_v1_path() {
+        let uri: Uri = "/health".parse().unwrap();
+        let url = passthrough_url("https://example.com/v1", &uri).unwrap();
+        assert_eq!(url.as_str(), "https://example.com/v1/health");
+    }
+
+    #[test]
+    fn passthrough_url_rejects_invalid_base() {
+        let uri: Uri = "/v1/models".parse().unwrap();
+        assert!(passthrough_url("not a url", &uri).is_err());
+    }
+
+    #[test]
     fn responses_to_chat_string_input() {
         let req = json!({
             "model": "zen/gpt-5-mini",
@@ -1389,6 +1533,20 @@ mod integration_tests {
         opencode_session: Option<String>,
     }
 
+    #[derive(Debug, Default, Clone)]
+    struct PassthroughReceived {
+        method: String,
+        path: String,
+        query: Option<String>,
+        body: Value,
+        authorization: Option<String>,
+        user_agent: Option<String>,
+        opencode_client: Option<String>,
+        opencode_project: Option<String>,
+        opencode_request: Option<String>,
+        opencode_session: Option<String>,
+    }
+
     /// 起一个本地 mock Zen 服务，返回监听地址与接收记录。
     async fn spawn_mock_zen(rec: Arc<AsyncMutex<Option<Received>>>) -> String {
         let app = Router::new().route(
@@ -1446,6 +1604,103 @@ mod integration_tests {
         format!("http://{addr}")
     }
 
+    /// 起一个本地 mock Zen 透传端点，返回带 `/v1` 前缀的 base URL。
+    async fn spawn_mock_passthrough(
+        rec: Arc<AsyncMutex<Option<PassthroughReceived>>>,
+    ) -> String {
+        let rec_get = rec.clone();
+        let app = Router::new()
+            .route(
+                "/v1/models",
+                axum::routing::get(move |headers: HeaderMap, uri: Uri| {
+                    let rec = rec_get.clone();
+                    async move {
+                        *rec.lock().await = Some(PassthroughReceived {
+                            method: "GET".into(),
+                            path: uri.path().to_string(),
+                            query: uri.query().map(str::to_string),
+                            body: Value::Null,
+                            authorization: headers
+                                .get(header::AUTHORIZATION)
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            user_agent: headers
+                                .get(header::USER_AGENT)
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            opencode_client: headers
+                                .get("x-opencode-client")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            opencode_project: headers
+                                .get("x-opencode-project")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            opencode_request: headers
+                                .get("x-opencode-request")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                            opencode_session: headers
+                                .get("x-opencode-session")
+                                .and_then(|h| h.to_str().ok())
+                                .map(str::to_string),
+                        });
+                        Json(json!({
+                            "object": "list",
+                            "data": [{ "id": "zen-model" }]
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/v1/echo",
+                axum::routing::post(
+                    move |headers: HeaderMap, uri: Uri, Json(body): Json<Value>| {
+                        let rec = rec.clone();
+                        async move {
+                            *rec.lock().await = Some(PassthroughReceived {
+                                method: "POST".into(),
+                                path: uri.path().to_string(),
+                                query: uri.query().map(str::to_string),
+                                body: body.clone(),
+                                authorization: headers
+                                    .get(header::AUTHORIZATION)
+                                    .and_then(|h| h.to_str().ok())
+                                    .map(str::to_string),
+                                user_agent: headers
+                                    .get(header::USER_AGENT)
+                                    .and_then(|h| h.to_str().ok())
+                                    .map(str::to_string),
+                                opencode_client: headers
+                                    .get("x-opencode-client")
+                                    .and_then(|h| h.to_str().ok())
+                                    .map(str::to_string),
+                                opencode_project: headers
+                                    .get("x-opencode-project")
+                                    .and_then(|h| h.to_str().ok())
+                                    .map(str::to_string),
+                                opencode_request: headers
+                                    .get("x-opencode-request")
+                                    .and_then(|h| h.to_str().ok())
+                                    .map(str::to_string),
+                                opencode_session: headers
+                                    .get("x-opencode-session")
+                                    .and_then(|h| h.to_str().ok())
+                                    .map(str::to_string),
+                            });
+                            Json(body)
+                        }
+                    },
+                ),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}/v1")
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn forwards_chat_with_auth_and_user_agent() {
         let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
@@ -1498,5 +1753,63 @@ mod integration_tests {
         assert_eq!(got.authorization, None);
         assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
         assert_eq!(got.opencode_request.as_deref().map(|s| &s[..4]), Some("msg_"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn passthrough_forwards_models_and_post_body() {
+        let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
+            Arc::new(AsyncMutex::new(None));
+        let base_url = spawn_mock_passthrough(rec.clone()).await;
+        let state = ProxyState {
+            session: "ses_fixed123".into(),
+            base_url,
+            log: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer public"),
+        );
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+
+        let uri: Uri = "/v1/models?foo=bar".parse().unwrap();
+        let resp =
+            forward_passthrough(&state, Method::GET, &uri, &headers, Body::empty()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("zen-model"));
+        let got = rec.lock().await.clone().expect("mock 应已收到 GET 请求");
+        assert_eq!(got.method, "GET");
+        assert_eq!(got.path, "/v1/models");
+        assert_eq!(got.query.as_deref(), Some("foo=bar"));
+        assert_eq!(got.authorization.as_deref(), Some("Bearer public"));
+        assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
+        assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
+        assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
+        assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
+        assert_eq!(
+            got.opencode_request.as_deref().map(|s| &s[..4]),
+            Some("msg_")
+        );
+
+        let uri: Uri = "/v1/echo".parse().unwrap();
+        let resp = forward_passthrough(
+            &state,
+            Method::POST,
+            &uri,
+            &headers,
+            Body::from(r#"{"a":1}"#),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let got = rec.lock().await.clone().expect("mock 应已收到 POST 请求");
+        assert_eq!(got.method, "POST");
+        assert_eq!(got.path, "/v1/echo");
+        assert_eq!(got.body["a"], 1);
     }
 }
