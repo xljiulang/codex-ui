@@ -134,7 +134,7 @@ async function apply() {
         </div>
       </template>
       <div class="modal-foot" style="border-top: none; padding: 8px 8px 2px">
-        <button class="btn primary" @click="apply()">应用</button>
+        <button class="btn model-menu-apply-btn" @click="apply()">应用</button>
       </div>
     </div>
   </div>

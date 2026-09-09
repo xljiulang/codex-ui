@@ -96,7 +96,10 @@ describe("ModelMenu 模型与推理强度", () => {
 
   it("应用模型/强度：有当前会话时立即同步 thread/settings/update", async () => {
     const w = mount(ModelMenu);
-    await w.find("button.btn.primary").trigger("click");
+    const applyBtn = w.find(".model-menu-apply-btn");
+    expect(applyBtn.classes()).toContain("btn");
+    expect(applyBtn.classes()).not.toContain("primary");
+    await applyBtn.trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/settings/update",
       params: { threadId: "t1", model: "gpt-5.2-codex", effort: "high" },
@@ -108,7 +111,7 @@ describe("ModelMenu 模型与推理强度", () => {
     (tabs[0] as SessionTab).effort = ""; // 默认模型支持档位不强制清空；初始无强度时应用 null
     const w = mount(ModelMenu);
     await w.findAll(".option-btn")[0].trigger("click"); // 默认模型行
-    await w.find("button.btn.primary").trigger("click");
+    await w.find(".model-menu-apply-btn").trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/settings/update",
       params: { threadId: "t1", model: "gpt-5.2-codex", effort: "low" },
@@ -121,7 +124,7 @@ describe("ModelMenu 模型与推理强度", () => {
     (tabs[0] as SessionTab).threadId = null; // 编辑态新对话：本地生效但不同步服务端
     const w = mount(ModelMenu);
     await w.findAll(".option-btn")[1].trigger("click"); // 选择其它模型
-    await w.find("button.btn.primary").trigger("click");
+    await w.find(".model-menu-apply-btn").trigger("click");
     expect(mockedInvoke).not.toHaveBeenCalled();
     expect(activeSessionTab()?.model).toBe("other-model");
     expect(w.emitted("close")).toBeTruthy();
@@ -130,7 +133,7 @@ describe("ModelMenu 模型与推理强度", () => {
   it("同步失败时 toast 提示但仍关闭菜单", async () => {
     mockedInvoke.mockRejectedValue(new Error("同步失败"));
     const w = mount(ModelMenu);
-    await w.find("button.btn.primary").trigger("click");
+    await w.find(".model-menu-apply-btn").trigger("click");
     expect(store.toast).toContain("同步失败");
     expect(w.emitted("close")).toBeTruthy();
   });
@@ -138,7 +141,7 @@ describe("ModelMenu 模型与推理强度", () => {
   it("历史会话未恢复：先 thread_resume 再同步 thread/settings/update", async () => {
     (tabs[0] as SessionTab).resumedThreadId = null;
     const w = mount(ModelMenu);
-    await w.find("button.btn.primary").trigger("click");
+    await w.find(".model-menu-apply-btn").trigger("click");
     expect(mockedInvoke).toHaveBeenCalledWith("thread_resume", {
       params: { threadId: "t1" },
     });
@@ -152,7 +155,7 @@ describe("ModelMenu 模型与推理强度", () => {
     (tabs[0] as SessionTab).resumedThreadId = null;
     mockedInvoke.mockRejectedValueOnce(new Error("thread not found: t1"));
     const w = mount(ModelMenu);
-    await w.find("button.btn.primary").trigger("click");
+    await w.find(".model-menu-apply-btn").trigger("click");
     expect(store.toast).toContain("会话已不存在");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "codex_rpc",

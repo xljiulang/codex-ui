@@ -1061,7 +1061,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     const low = optionBtns().find((b) => b.text().trim() === "low")!;
     await low.trigger("click");
     await flushPromises();
-    await wrapper.find(".popup-menu .btn.primary").trigger("click");
+    await wrapper.find(".popup-menu .model-menu-apply-btn").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
       method: "thread/settings/update",
@@ -1082,7 +1082,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     await flushPromises();
     await wrapper.findAll(".popup-menu .option-btn")[1].trigger("click");
     await flushPromises();
-    await wrapper.find(".popup-menu .btn.primary").trigger("click");
+    await wrapper.find(".popup-menu .model-menu-apply-btn").trigger("click");
     await flushPromises();
     expect(activeSessionTab()?.model).toBe("gpt-5-extra");
     expect(mockedInvoke).not.toHaveBeenCalledWith(
@@ -1104,7 +1104,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
-    await wrapper.find(".popup-menu .btn.primary").trigger("click");
+    await wrapper.find(".popup-menu .model-menu-apply-btn").trigger("click");
     await flushPromises();
     expect(store.toast).toContain("同步失败");
     // 默认项在应用时解析成具体 id（thread/settings/update 的 null 是 no-op）
