@@ -1009,13 +1009,17 @@ function openModelConfigFile() {
                 v-model="catalogPicker.selectedIds"
                 :disabled="!model.matched"
               />
-              <span class="model-catalog-picker-text">
+              <span
+                class="model-catalog-picker-text"
+                @click.stop.prevent
+              >
                 <span class="model-catalog-picker-id">{{ model.id }}</span>
                 <span class="model-catalog-picker-name">{{ model.display_name }}</span>
               </span>
               <span
                 v-if="!model.matched"
                 class="model-catalog-picker-status"
+                @click.stop.prevent
               >
                 无匹配资料，将跳过
               </span>

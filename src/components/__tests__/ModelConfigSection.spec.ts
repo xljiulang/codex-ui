@@ -256,6 +256,38 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(confirm.classes()).not.toContain("primary");
   });
 
+  it("点击模型文字不切换复选框，点击复选框仍可正常选择", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+
+    await wrapper.find(".model-catalog-picker-id").trigger("click");
+    const firstCheckbox = wrapper.find(
+      ".model-catalog-picker-row input[type='checkbox']",
+    );
+    expect((firstCheckbox.element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.find(".model-catalog-picker-confirm").attributes("disabled"))
+      .toBeDefined();
+
+    await firstCheckbox.setValue(true);
+    expect((firstCheckbox.element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.find(".model-catalog-picker-confirm").text()).toContain(
+      "生成 1 个条目",
+    );
+  });
+
   it("三态全选复选框覆盖全部、部分和未选状态", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({ providers: [providerWithKey] }),
