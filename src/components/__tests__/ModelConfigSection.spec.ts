@@ -18,8 +18,11 @@ import ModelConfigSection from "../settings/ModelConfigSection.vue";
 import {
   loadModelProviderConfig,
   saveModelProviderConfig,
+  setToast,
+  toastError,
 } from "../../composables/useCodex";
 import type { ModelProviderConfigState } from "../../composables/useCodex";
+import { ICON_SWAP_HORIZ } from "../../lib/icons";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedLoad = vi.mocked(loadModelProviderConfig);
@@ -124,5 +127,356 @@ describe("ModelConfigSection 回复风格与输出详细程度", () => {
     const input = mockedSave.mock.calls[0]![0];
     expect(input.personality).toBe("pragmatic");
     expect(input.model_verbosity).toBe("low");
+  });
+});
+
+describe("ModelConfigSection 生成模型目录", () => {
+  const providerWithKey = {
+    key: "deepseek",
+    name: "DeepSeek",
+    base_url: "https://api.deepseek.com/v1",
+    env_key: "",
+    experimental_bearer_token: "sk-test",
+    wire_api: "responses",
+  };
+  const providerWithoutKey = {
+    key: "other",
+    name: "Other",
+    base_url: "https://other.example.com/v1",
+    env_key: "OTHER_API_KEY",
+    experimental_bearer_token: "",
+    wire_api: "chat",
+  };
+
+  function catalogResult() {
+    return {
+      catalog: JSON.stringify(
+        {
+          models: [
+            {
+              slug: "deepseek-chat",
+              display_name: "Deepseek-Chat",
+              priority: 1,
+            },
+            {
+              slug: "deepseek-reasoner",
+              display_name: "Deepseek-Reasoner",
+              priority: 2,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      total: 3,
+      matched: 2,
+      skipped: 1,
+      models: [
+        {
+          id: "deepseek-chat",
+          display_name: "Deepseek-Chat",
+          matched: true,
+        },
+        {
+          id: "deepseek-reasoner",
+          display_name: "Deepseek-Reasoner",
+          matched: true,
+        },
+        {
+          id: "unknown-model",
+          display_name: "Unknown-Model",
+          matched: false,
+        },
+      ],
+    };
+  }
+
+  it("仅对有 base_url 和 API Key 的提供方显示生成按钮", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey, providerWithoutKey] }),
+    );
+    const wrapper = await mountSection();
+    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    expect(rows[0].find(".provider-row-generate").exists()).toBe(true);
+    expect(rows[0].find(".provider-row-generate svg").exists()).toBe(true);
+    expect(
+      rows[0].find(".provider-row-generate path").attributes("d"),
+    ).toBe(ICON_SWAP_HORIZ);
+    expect(rows[1].find(".provider-row-generate").exists()).toBe(false);
+  });
+
+  it("点击后打开选择弹窗且确认前不修改编辑框", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") {
+        return Promise.resolve({
+          ...modelConfigReadResult(),
+          model_catalog: "old-catalog",
+        });
+      }
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "model_catalog_generate_from_provider",
+      {
+        baseUrl: "https://api.deepseek.com/v1",
+        apiKey: "sk-test",
+      },
+    );
+    expect(
+      (wrapper.find(".model-config-textarea").element as HTMLTextAreaElement)
+        .value,
+    ).toBe("old-catalog");
+    const checkboxes = wrapper.findAll(
+      ".model-catalog-picker-row input[type='checkbox']",
+    );
+    expect(checkboxes).toHaveLength(3);
+    expect((checkboxes[0].element as HTMLInputElement).checked).toBe(false);
+    expect((checkboxes[1].element as HTMLInputElement).checked).toBe(false);
+    expect((checkboxes[2].element as HTMLInputElement).checked).toBe(false);
+    expect((checkboxes[2].element as HTMLInputElement).disabled).toBe(true);
+    const selectAll = wrapper.find(
+      ".model-catalog-picker-select-all input[type='checkbox']",
+    );
+    expect((selectAll.element as HTMLInputElement).checked).toBe(false);
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(false);
+    const confirm = wrapper.find(".model-catalog-picker-confirm");
+    expect(confirm.text()).toContain("生成 0 个条目");
+    expect(confirm.attributes("disabled")).toBeDefined();
+    expect(confirm.classes()).not.toContain("primary");
+  });
+
+  it("三态全选复选框覆盖全部、部分和未选状态", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+
+    expect(wrapper.find(".model-catalog-picker-toolbar .btn").exists()).toBe(
+      false,
+    );
+    const selectAll = wrapper.find(
+      ".model-catalog-picker-select-all input[type='checkbox']",
+    );
+    expect((selectAll.element as HTMLInputElement).checked).toBe(false);
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(false);
+
+    await selectAll.trigger("change");
+    expect((selectAll.element as HTMLInputElement).checked).toBe(true);
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(false);
+    expect(wrapper.find(".model-catalog-picker-count").text()).toContain(
+      "已选 2",
+    );
+
+    await wrapper
+      .findAll(".model-catalog-picker-row input[type='checkbox']")[0]
+      .setValue(false);
+    expect((selectAll.element as HTMLInputElement).checked).toBe(false);
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(true);
+
+    await selectAll.trigger("change");
+    expect((selectAll.element as HTMLInputElement).checked).toBe(true);
+
+    await selectAll.trigger("change");
+    expect((selectAll.element as HTMLInputElement).checked).toBe(false);
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(false);
+    expect(
+      wrapper.find(".model-catalog-picker-confirm").attributes("disabled"),
+    ).toBeDefined();
+  });
+
+  it("搜索时三态全选只操作当前结果并保留隐藏项", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+
+    const search = wrapper.find(".model-catalog-picker-search");
+    const selectAll = wrapper.find(
+      ".model-catalog-picker-select-all input[type='checkbox']",
+    );
+    await selectAll.trigger("change");
+    await search.setValue("reasoner");
+    expect(wrapper.findAll(".model-catalog-picker-row")).toHaveLength(1);
+    expect((selectAll.element as HTMLInputElement).checked).toBe(true);
+
+    await selectAll.trigger("change");
+    expect(
+      (
+        wrapper.find(".model-catalog-picker-row input[type='checkbox']")
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(wrapper.find(".model-catalog-picker-count").text()).toContain(
+      "已选 1",
+    );
+
+    await search.setValue("");
+    expect((selectAll.element as HTMLInputElement).indeterminate).toBe(true);
+    const rows = wrapper.findAll(".model-catalog-picker-row input[type='checkbox']");
+    expect((rows[0].element as HTMLInputElement).checked).toBe(true);
+    expect((rows[1].element as HTMLInputElement).checked).toBe(false);
+
+    await selectAll.trigger("change");
+    expect((selectAll.element as HTMLInputElement).checked).toBe(true);
+
+    await search.setValue("unknown");
+    expect((selectAll.element as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("确认后只写入选中模型、重排 priority 并提示数量", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") {
+        return Promise.resolve({
+          ...modelConfigReadResult(),
+          model_catalog: "old-catalog",
+        });
+      }
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+
+    await wrapper
+      .findAll(".model-catalog-picker-row input[type='checkbox']")[1]
+      .setValue(true);
+    await wrapper.find(".model-catalog-picker-confirm").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(false),
+    );
+
+    const catalog = JSON.parse(
+      (wrapper.find(".model-config-textarea").element as HTMLTextAreaElement)
+        .value,
+    ) as { models: Array<{ slug: string; priority: number }> };
+    expect(catalog.models).toEqual([
+      { slug: "deepseek-reasoner", display_name: "Deepseek-Reasoner", priority: 1 },
+    ]);
+    expect(setToast).toHaveBeenCalledWith(
+      "已生成 1 个模型条目，跳过 1 个未匹配模型，保存并重启 codex-ui 后生效",
+    );
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "model_catalog_save",
+      expect.anything(),
+    );
+  });
+
+  it("取消选择不修改编辑框", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") {
+        return Promise.resolve({
+          ...modelConfigReadResult(),
+          model_catalog: "old-catalog",
+        });
+      }
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+    await wrapper.find(".modal-foot .btn").trigger("click");
+    expect(wrapper.find(".model-catalog-picker").exists()).toBe(false);
+    expect(
+      (wrapper.find(".model-config-textarea").element as HTMLTextAreaElement)
+        .value,
+    ).toBe("old-catalog");
+  });
+
+  it("生成失败时不打开弹窗、不修改编辑框并提示错误", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") {
+        return Promise.resolve({
+          ...modelConfigReadResult(),
+          model_catalog: "old-catalog",
+        });
+      }
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.reject(new Error("请求失败"));
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(wrapper.find(".model-catalog-picker").exists()).toBe(false);
+    expect(
+      (wrapper.find(".model-config-textarea").element as HTMLTextAreaElement)
+        .value,
+    ).toBe("old-catalog");
+  });
+
+  it("生成期间按钮禁用", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    let resolveGenerate!: (value: unknown) => void;
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_catalog_generate_from_provider") {
+        return new Promise((resolve) => {
+          resolveGenerate = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    const button = wrapper.find(".provider-row-generate");
+    await button.trigger("click");
+    await vi.waitFor(() => expect(button.attributes("disabled")).toBeDefined());
+    resolveGenerate(catalogResult());
+    await vi.waitFor(() => expect(button.attributes("disabled")).toBeUndefined());
+    expect(wrapper.find(".model-catalog-picker").exists()).toBe(true);
   });
 });

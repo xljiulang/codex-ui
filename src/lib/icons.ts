@@ -238,6 +238,9 @@ export const ICON_PALETTE =
 /** 模型选择/模型配置共用：立方体线框（描边渲染，fill 置 none，与输入区「模型切换」按钮一致） */
 export const ICON_MODEL_CUBE =
   "M12 3L20 7.5L20 16.5L12 21L4 16.5L4 7.5Z M20 7.5L12 12L4 7.5 M12 12L12 21";
+/** 生成模型目录：双向交换箭头（Material swap_horiz，填充渲染） */
+export const ICON_SWAP_HORIZ =
+  "M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z";
 /** 设置页「技能管理」导航：打开的书（book-open） */
 export const ICON_SKILL =
   "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z";

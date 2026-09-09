@@ -9,6 +9,7 @@ use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
 use crate::codex::custom_instructions;
 use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
+use crate::codex::provider_catalog;
 use crate::codex::scheduled_tasks::{self, ScheduledTask, ScheduledTaskStore, TaskScheduler, TaskRunRecord};
 use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
@@ -791,6 +792,17 @@ pub fn model_config_save(content: String) -> Result<(), String> {
 #[tauri::command]
 pub fn model_catalog_save(content: String) -> Result<(), String> {
     model_config::save_model_catalog(&content)
+}
+
+/// 从指定模型提供者的 `/models` 生成完整模型目录，供前端回填模型目录编辑框。
+#[tauri::command]
+pub async fn model_catalog_generate_from_provider(
+    app: AppHandle,
+    base_url: String,
+    api_key: String,
+) -> Result<provider_catalog::ModelCatalogGenerateResult, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    provider_catalog::generate_from_provider(&app_dir, &base_url, &api_key).await
 }
 
 /// 读取本地技能列表（从 skills/list 聚合列表过滤 CODEX_HOME/skills 下的技能），

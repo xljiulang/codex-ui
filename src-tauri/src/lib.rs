@@ -203,6 +203,7 @@ pub fn run() {
               codex::commands::model_config_read,
               codex::commands::model_config_save,
               codex::commands::model_catalog_save,
+              codex::commands::model_catalog_generate_from_provider,
               codex::model_snapshots::model_snapshots_list,
               codex::model_snapshots::model_snapshots_save,
               codex::model_snapshots::model_snapshots_apply,
@@ -318,6 +319,14 @@ pub fn run() {
         .setup(|app| {
             // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
             codex::git::probe_git_at_startup();
+
+            // 启动时后台刷新 OpenRouter 模型元数据缓存；失败不影响启动，生成时回退内置资源。
+            if let Ok(openrouter_app_dir) = app.path().app_data_dir() {
+                tauri::async_runtime::spawn(async move {
+                    codex::provider_catalog::refresh_openrouter_models_cache(&openrouter_app_dir)
+                        .await;
+                });
+            }
 
             // 读取已保存设置：主题决定 Mica 深浅/回退着色，毛玻璃特效决定是否
             // 应用系统背景。窗口常驻透明，启动期由「页面加载完成后再显示」避免

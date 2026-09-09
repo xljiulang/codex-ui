@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   loadModelProviderConfig,
@@ -12,6 +12,7 @@ import type {
 } from "../../composables/useCodex";
 import { openPathInAppOrReveal } from "../../composables/usePathOpen";
 import { openDocsUrl } from "../../lib/links";
+import { filterCatalogByModelIds } from "../../lib/modelCatalog";
 import {
   ICON_DELETE,
   ICON_EDIT,
@@ -19,8 +20,11 @@ import {
   ICON_PLUS,
   ICON_REFRESH,
   ICON_SAVE,
+  ICON_SWAP_HORIZ,
 } from "../../lib/icons";
 import type {
+  ModelCatalogGenerateResult,
+  ModelCatalogModelOption,
   ModelConfigUiEdit,
   ModelConfigState,
   ModelProviderInfo,
@@ -95,6 +99,23 @@ const modelConfigErrors = reactive({
   model: "",
   provider: "",
   catalog: "",
+});
+
+/** 正在生成模型目录的提供方 key；空串表示没有生成任务。 */
+const catalogGenerating = ref("");
+
+/** 获取模型后选择要写入目录的模型。 */
+const catalogPicker = reactive({
+  open: false,
+  providerName: "",
+  baseUrl: "",
+  total: 0,
+  matched: 0,
+  skipped: 0,
+  catalog: "",
+  models: [] as ModelCatalogModelOption[],
+  selectedIds: [] as string[],
+  query: "",
 });
 
 /** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
@@ -307,6 +328,137 @@ function removeProvider(index: number) {
     modelConfig.model_provider = "";
   }
   modelConfig.providers.splice(index, 1);
+}
+
+/** 仅当提供方同时有 base_url 和 API Key 时允许生成模型目录。 */
+function canGenerateModelCatalog(p: ModelProviderInfo): boolean {
+  return !!(p.base_url ?? "").trim() && !!(p.experimental_bearer_token ?? "").trim();
+}
+
+/** 按搜索条件过滤候选模型；未匹配项保留用于禁用展示。 */
+const filteredCatalogModels = computed(() => {
+  const query = catalogPicker.query.trim().toLowerCase();
+  if (!query) return catalogPicker.models;
+  return catalogPicker.models.filter(
+    (model) =>
+      model.id.toLowerCase().includes(query) ||
+      model.display_name.toLowerCase().includes(query),
+  );
+});
+
+const visibleMatchedCatalogModels = computed(() =>
+  filteredCatalogModels.value.filter((model) => model.matched),
+);
+
+const allVisibleCatalogModelsSelected = computed(
+  () =>
+    visibleMatchedCatalogModels.value.length > 0 &&
+    visibleMatchedCatalogModels.value.every((model) =>
+      catalogPicker.selectedIds.includes(model.id),
+    ),
+);
+
+const someVisibleCatalogModelsSelected = computed(() =>
+  visibleMatchedCatalogModels.value.some((model) =>
+    catalogPicker.selectedIds.includes(model.id),
+  ),
+);
+
+/** 打开模型选择弹窗，默认不选择模型。 */
+function openCatalogPicker(
+  p: ModelProviderInfo,
+  res: ModelCatalogGenerateResult,
+) {
+  catalogPicker.open = true;
+  catalogPicker.providerName = p.name || p.key;
+  catalogPicker.baseUrl = p.base_url.trim();
+  catalogPicker.total = res.total;
+  catalogPicker.matched = res.matched;
+  catalogPicker.skipped = res.skipped;
+  catalogPicker.catalog = res.catalog;
+  catalogPicker.models = res.models.map((model) => ({ ...model }));
+  catalogPicker.selectedIds = [];
+  catalogPicker.query = "";
+}
+
+function closeCatalogPicker() {
+  catalogPicker.open = false;
+  catalogPicker.providerName = "";
+  catalogPicker.baseUrl = "";
+  catalogPicker.total = 0;
+  catalogPicker.matched = 0;
+  catalogPicker.skipped = 0;
+  catalogPicker.catalog = "";
+  catalogPicker.models = [];
+  catalogPicker.selectedIds = [];
+  catalogPicker.query = "";
+}
+
+/** 三态全选：全部选中时取消当前结果，否则选中当前结果。 */
+function toggleVisibleCatalogModels() {
+  const visibleIds = new Set(
+    visibleMatchedCatalogModels.value.map((model) => model.id),
+  );
+  if (allVisibleCatalogModelsSelected.value) {
+    catalogPicker.selectedIds = catalogPicker.selectedIds.filter(
+      (id) => !visibleIds.has(id),
+    );
+    return;
+  }
+  for (const model of visibleMatchedCatalogModels.value) {
+    if (!catalogPicker.selectedIds.includes(model.id)) {
+      catalogPicker.selectedIds.push(model.id);
+    }
+  }
+}
+
+/** 用选中的模型覆盖编辑框；不自动保存。 */
+function confirmCatalogPicker() {
+  if (!catalogPicker.selectedIds.length) return;
+  try {
+    modelConfig.model_catalog = filterCatalogByModelIds(
+      catalogPicker.catalog,
+      catalogPicker.selectedIds,
+    );
+    modelConfigErrors.catalog = "";
+    const skipped =
+      catalogPicker.skipped > 0
+        ? `，跳过 ${catalogPicker.skipped} 个未匹配模型`
+        : "";
+    setToast(
+      `已生成 ${catalogPicker.selectedIds.length} 个模型条目${skipped}，保存并重启 codex-ui 后生效`,
+    );
+    closeCatalogPicker();
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
+/** 从当前提供方的 `/models` 获取候选模型，打开选择弹窗；不自动保存。 */
+async function generateModelCatalog(p: ModelProviderInfo) {
+  if (
+    modelConfig.loading ||
+    modelConfig.saving ||
+    catalogGenerating.value ||
+    !canGenerateModelCatalog(p)
+  ) {
+    return;
+  }
+  catalogGenerating.value = p.key;
+  try {
+    const res = await invoke<ModelCatalogGenerateResult>(
+      "model_catalog_generate_from_provider",
+      {
+        baseUrl: p.base_url.trim(),
+        apiKey: p.experimental_bearer_token.trim(),
+      },
+    );
+    openCatalogPicker(p, res);
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    catalogGenerating.value = "";
+  }
 }
 
 /** 校验单个提供方必填字段，返回错误文案（空串表示通过） */
@@ -524,6 +676,18 @@ function openModelConfigFile() {
             {{ providerRowError(p) }}
           </p>
           <div class="model-provider-actions">
+            <button
+              v-if="canGenerateModelCatalog(p)"
+              class="btn btn-icon provider-row-generate"
+              :disabled="modelConfig.loading || !!catalogGenerating"
+              aria-label="生成模型目录"
+              v-tooltip="'生成模型目录（使用该提供者的 API Key）'"
+              @click="generateModelCatalog(p)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_SWAP_HORIZ" />
+              </svg>
+            </button>
             <button
               class="btn btn-icon provider-row-edit"
               aria-label="编辑"
@@ -778,6 +942,103 @@ function openModelConfigFile() {
             @click="confirmProviderForm"
           >
             确认
+          </button>
+        </template>
+      </ModalDialog>
+
+      <ModalDialog
+        v-if="catalogPicker.open"
+        title="选择要生成的模型"
+        body-class="model-catalog-picker-body"
+        closable
+        @close="closeCatalogPicker"
+      >
+        <div class="model-catalog-picker">
+          <div class="model-catalog-picker-meta">
+            <div class="model-catalog-picker-provider">
+              <span>{{ catalogPicker.providerName }}</span>
+              <span class="model-catalog-picker-url">{{ catalogPicker.baseUrl }}</span>
+            </div>
+            <p>
+              获取 {{ catalogPicker.total }} 个模型，可生成
+              {{ catalogPicker.matched }} 个；{{ catalogPicker.skipped }}
+              个未匹配资料，将跳过。
+            </p>
+          </div>
+          <div class="model-catalog-picker-toolbar">
+            <input
+              v-model="catalogPicker.query"
+              type="search"
+              class="model-catalog-picker-search"
+              placeholder="搜索模型 ID 或显示名..."
+            />
+            <label
+              class="model-catalog-picker-select-all"
+              :class="{
+                'is-disabled': visibleMatchedCatalogModels.length === 0,
+              }"
+            >
+              <input
+                type="checkbox"
+                :checked="allVisibleCatalogModelsSelected"
+                :indeterminate="
+                  someVisibleCatalogModelsSelected &&
+                  !allVisibleCatalogModelsSelected
+                "
+                :disabled="visibleMatchedCatalogModels.length === 0"
+                aria-label="全选当前搜索结果"
+                @change="toggleVisibleCatalogModels"
+              />
+              <span>全选</span>
+            </label>
+          </div>
+          <div class="model-catalog-picker-count">
+            已选 {{ catalogPicker.selectedIds.length }} / 可生成
+            {{ catalogPicker.matched }}
+          </div>
+          <div class="model-catalog-picker-list">
+            <label
+              v-for="model in filteredCatalogModels"
+              :key="model.id"
+              class="model-catalog-picker-row"
+              :class="{ 'is-unmatched': !model.matched }"
+            >
+              <input
+                type="checkbox"
+                :value="model.id"
+                v-model="catalogPicker.selectedIds"
+                :disabled="!model.matched"
+              />
+              <span class="model-catalog-picker-text">
+                <span class="model-catalog-picker-id">{{ model.id }}</span>
+                <span class="model-catalog-picker-name">{{ model.display_name }}</span>
+              </span>
+              <span
+                v-if="!model.matched"
+                class="model-catalog-picker-status"
+              >
+                无匹配资料，将跳过
+              </span>
+            </label>
+            <p
+              v-if="filteredCatalogModels.length === 0"
+              class="model-catalog-picker-empty"
+            >
+              没有匹配的模型
+            </p>
+          </div>
+        </div>
+        <template #foot>
+          <button class="btn" type="button" @click="closeCatalogPicker">
+            取消
+          </button>
+          <button
+            class="btn model-catalog-picker-confirm"
+            type="button"
+            :disabled="catalogPicker.selectedIds.length === 0"
+            @click="confirmCatalogPicker"
+          >
+            生成 {{ catalogPicker.selectedIds.length }} 个条目
           </button>
         </template>
       </ModalDialog>

@@ -307,6 +307,22 @@ export interface ModelProviderInfo {
   requires_openai_auth?: boolean;
 }
 
+/** `model_catalog_generate_from_provider` 返回的单个模型候选。 */
+export interface ModelCatalogModelOption {
+  id: string;
+  display_name: string;
+  matched: boolean;
+}
+
+/** `model_catalog_generate_from_provider` 返回结果。 */
+export interface ModelCatalogGenerateResult {
+  catalog: string;
+  total: number;
+  matched: number;
+  skipped: number;
+  models: ModelCatalogModelOption[];
+}
+
 /** 可视化模型配置保存载荷（与 Rust 端 ModelConfigUiEdit 一致） */
 export interface ModelConfigUiEdit {
   model: string;

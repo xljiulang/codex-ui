@@ -756,7 +756,9 @@ html[data-glass="on"] .switch .switch-track {
 /* 勾选/单选在玻璃态弱化实色 accent（更融入背景） */
 html[data-glass="on"] .checkbox-row input[type="checkbox"],
 html[data-glass="on"] .model-provider-radio input[type="radio"],
-html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
+html[data-glass="on"] .mcp-omit-option input[type="checkbox"],
+html[data-glass="on"] .model-catalog-picker-select-all input[type="checkbox"],
+html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"] {
   accent-color: rgba(var(--accent-rgb), 0.6);
 }
 
@@ -804,7 +806,9 @@ html[data-glass="on"] .modal {
 
 /* 勾选框/单选框毛玻璃外观（仅毛玻璃态；关闭时恢复原生 accent 控件） */
 html[data-glass="on"] .checkbox-row input[type="checkbox"],
-html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
+html[data-glass="on"] .mcp-omit-option input[type="checkbox"],
+html[data-glass="on"] .model-catalog-picker-select-all input[type="checkbox"],
+html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   width: 16px;
@@ -818,9 +822,20 @@ html[data-glass="on"] .mcp-omit-option input[type="checkbox"] {
 }
 
 html[data-glass="on"] .checkbox-row input[type="checkbox"]:checked,
-html[data-glass="on"] .mcp-omit-option input[type="checkbox"]:checked {
+html[data-glass="on"] .mcp-omit-option input[type="checkbox"]:checked,
+html[data-glass="on"] .model-catalog-picker-select-all input[type="checkbox"]:checked,
+html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"]:checked {
   background-color: rgba(var(--accent-rgb), 0.55);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 12px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+html[data-glass="on"] .model-catalog-picker-select-all input[type="checkbox"]:indeterminate,
+html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"]:indeterminate {
+  background-color: rgba(var(--accent-rgb), 0.55);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-size: 12px;
   background-position: center;
   background-repeat: no-repeat;
