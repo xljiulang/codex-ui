@@ -25,6 +25,16 @@ pub struct AppSettings {
     /// 最后活跃会话 id：退出后留档，下次启动恢复该会话（None = 无记录，启动开设置页）
     #[serde(default)]
     pub last_session_id: Option<String>,
+    /// Zen 本地代理开关（默认关闭）
+    #[serde(default)]
+    pub zen_proxy_enabled: bool,
+    /// Zen 本地代理监听端口（默认 18080）
+    #[serde(default = "default_zen_proxy_port")]
+    pub zen_proxy_port: u16,
+}
+
+fn default_zen_proxy_port() -> u16 {
+    crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT
 }
 
 fn default_permission() -> String {
@@ -52,6 +62,8 @@ impl Default for AppSettings {
             dynamic_tools_disabled: Vec::new(),
             glass_effect: default_glass_effect(),
             last_session_id: None,
+            zen_proxy_enabled: false,
+            zen_proxy_port: default_zen_proxy_port(),
         }
     }
 }
@@ -242,5 +254,31 @@ mod tests {
         let s = AppSettings::default();
         save(dir.path(), &s).unwrap();
         assert_eq!(load(dir.path()).last_session_id, None);
+    }
+
+    #[test]
+    fn zen_proxy_defaults_and_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        // 旧 settings.json 缺失 zen_proxy 字段：回退关闭 + 默认端口
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        let s = load(dir.path());
+        assert!(!s.zen_proxy_enabled);
+        assert_eq!(s.zen_proxy_port, crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT);
+
+        // 自定义端口与开关往返一致
+        let s = AppSettings {
+            zen_proxy_enabled: true,
+            zen_proxy_port: 19090,
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        let loaded = load(dir.path());
+        assert!(loaded.zen_proxy_enabled);
+        assert_eq!(loaded.zen_proxy_port, 19090);
     }
 }

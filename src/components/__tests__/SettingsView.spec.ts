@@ -2356,7 +2356,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染九个分类，默认选中第一个", () => {
+  it("左侧导航渲染十个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
@@ -2369,6 +2369,7 @@ describe("SettingsView 设置标签行为", () => {
       "MCP管理",
       "插件管理",
       "定时任务",
+      "Zen 代理",
     ]);
     expect(items[0].classes()).toContain("active");
     expect(items[1].classes()).not.toContain("active");

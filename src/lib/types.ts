@@ -179,6 +179,10 @@ export interface AppSettings {
   glass_effect: boolean;
   /** 最后活跃会话 id：下次启动恢复该会话；null/缺省 = 无记录，启动开设置标签 */
   last_session_id?: string | null;
+  /** Zen 本地代理开关（默认关闭） */
+  zen_proxy_enabled?: boolean;
+  /** Zen 本地代理监听端口（默认 18080） */
+  zen_proxy_port?: number;
 }
 
 /** 定时任务执行记录状态 */

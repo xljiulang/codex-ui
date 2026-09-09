@@ -16,6 +16,12 @@ export type {
   SkillItem,
 } from "./types";
 export { setToast, toastError } from "./toast";
+export {
+  applyZenProxy,
+  readZenProxyStatus,
+  toggleZenProxy,
+  type ZenProxyStatus,
+} from "./zenProxy";
 export { askConfirm, settleConfirm } from "./confirm";
 export {
   __resetPinnedSectionForTest,

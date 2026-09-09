@@ -14,6 +14,8 @@ export const defaultSettings = (): AppSettings => ({
     dynamic_tools_disabled: [],
     glass_effect: true,
     last_session_id: null,
+    zen_proxy_enabled: false,
+    zen_proxy_port: 18080,
   });
 
 

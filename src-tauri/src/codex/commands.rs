@@ -15,6 +15,7 @@ use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
 use crate::codex::wechat_bridge::WeChatBridge;
+use crate::codex::zen_proxy;
 
 type Server = Arc<CodexServer>;
 
@@ -86,6 +87,26 @@ pub async fn server_logs(server: State<'_, Server>) -> Result<Vec<String>, Strin
                 .collect::<Option<Vec<_>>>()
         })
         .unwrap_or_default())
+}
+
+/// 开启/关闭 Zen 本地代理并返回状态；端口变化时自动重启。
+#[tauri::command]
+pub async fn zen_proxy_apply(
+    server: State<'_, Server>,
+    enabled: bool,
+    port: Option<u16>,
+) -> Result<zen_proxy::ZenProxyStatus, String> {
+    let current = server.zen_proxy_status().await;
+    let port = port.unwrap_or(current.port);
+    Ok(server.apply_zen_proxy(enabled, port).await)
+}
+
+/// 查询 Zen 本地代理当前状态。
+#[tauri::command]
+pub async fn zen_proxy_status(
+    server: State<'_, Server>,
+) -> Result<zen_proxy::ZenProxyStatus, String> {
+    Ok(server.zen_proxy_status().await)
 }
 
 /// 前端用户动作日志（仅允许安全字段；调用方负责不传敏感内容，失败静默）。

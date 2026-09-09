@@ -17,6 +17,7 @@ use crate::codex::model_config;
 use crate::codex::logs_guard;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::session_log::SessionLog;
+use crate::codex::zen_proxy::{self, ZenProxyHandle};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
@@ -37,7 +38,7 @@ pub struct CodexServer {
     next_id: AtomicU64,
     workspace: PathBuf,
     run_started: AtomicBool,
-    log: Option<SessionLog>,
+    log: Option<Arc<SessionLog>>,
 }
 
 struct Shared {
@@ -89,6 +90,8 @@ struct Inner {
     codex_version: Option<String>,
     /// 版本是否低于 0.149.0（仅低版本警告）；未探测为 None。
     version_too_old: Option<bool>,
+    /// Zen 本地代理运行句柄（设置开启且启动成功时为 Some）。
+    zen_proxy: Option<ZenProxyHandle>,
 }
 
 impl Inner {
@@ -103,6 +106,7 @@ impl Inner {
             codex_path: None,
             codex_version: None,
             version_too_old: None,
+            zen_proxy: None,
         }
     }
 
@@ -121,7 +125,7 @@ impl CodexServer {
             .path()
             .app_data_dir()
             .ok()
-            .map(|d| SessionLog::new(d.join("logs")));
+            .map(|d| Arc::new(SessionLog::new(d.join("logs"))));
         Self {
             app,
             shared: Arc::new(Shared {
@@ -178,6 +182,9 @@ impl CodexServer {
         if let Some(child) = inner.child.as_mut() {
             let _ = child.start_kill();
         }
+        if let Some(h) = inner.zen_proxy.take() {
+            h.stop();
+        }
     }
 
     /// 写一条日志文件条目；日志目录不可用/写盘失败时静默忽略。
@@ -222,6 +229,27 @@ impl CodexServer {
         tauri::async_runtime::spawn(async move {
             bundled::bootstrap(boot).await;
         });
+        // 按保存设置启动 Zen 本地代理（app-server 解码前确保端口可用；失败仅记日志不阻断）。
+        let app_dir = self
+            .app
+            .path()
+            .app_data_dir()
+            .unwrap_or_default();
+        let settings = settings::load(&app_dir);
+        let status = self
+            .apply_zen_proxy(settings.zen_proxy_enabled, settings.zen_proxy_port)
+            .await;
+        if !status.running {
+            if let Some(e) = status.error {
+                self.push_log("warn", format!("Zen 本地代理未启动：{e}")).await;
+            }
+        } else {
+            self.push_log(
+                "info",
+                format!("Zen 本地代理已启动，端口 {}", status.port),
+            )
+            .await;
+        }
         while !self.shared.stop.load(Ordering::SeqCst) {
             if let Err(e) = self.spawn_and_read().await {
                 self.push_log("error", format!("codex app-server 错误: {e}")).await;
@@ -234,6 +262,30 @@ impl CodexServer {
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
+        }
+    }
+
+    /// 应用 Zen 代理开关与端口：按需启动/停止/重启，返回最新状态。
+    pub(crate) async fn apply_zen_proxy(
+        &self,
+        enabled: bool,
+        port: u16,
+    ) -> zen_proxy::ZenProxyStatus {
+        let mut inner = self.shared.inner.lock().await;
+        zen_proxy::apply(&mut inner.zen_proxy, enabled, port, self.log.clone()).await
+    }
+
+    /// Zen 代理当前状态（运行中返回端口；未开启或未启动返回默认端口）。
+    pub(crate) async fn zen_proxy_status(&self) -> zen_proxy::ZenProxyStatus {
+        let inner = self.shared.inner.lock().await;
+        if let Some(h) = &inner.zen_proxy {
+            zen_proxy::ZenProxyStatus {
+                running: true,
+                port: h.port,
+                error: None,
+            }
+        } else {
+            zen_proxy::ZenProxyStatus::stopped()
         }
     }
 
