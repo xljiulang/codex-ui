@@ -89,6 +89,7 @@ describe("useCodex/modelProviderConfig", () => {
         env_key: "DS",
         experimental_bearer_token: "sk-1",
         wire_api: "responses",
+        requires_openai_auth: false,
       },
       {
         key: "other",
@@ -97,6 +98,7 @@ describe("useCodex/modelProviderConfig", () => {
         env_key: "",
         experimental_bearer_token: "",
         wire_api: "chat",
+        requires_openai_auth: false,
       },
     ]);
     expect(s.raw.deepseek).toEqual({

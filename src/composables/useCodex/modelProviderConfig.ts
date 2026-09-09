@@ -56,6 +56,7 @@ export async function loadModelProviderConfig(): Promise<ModelProviderConfigStat
       env_key: str(t.env_key),
       experimental_bearer_token: str(t.experimental_bearer_token),
       wire_api: str(t.wire_api),
+      requires_openai_auth: !!t.requires_openai_auth,
     });
   }
   return {
@@ -105,6 +106,7 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
     setOrRemove(base, "env_key", p.env_key.trim());
     setOrRemove(base, "experimental_bearer_token", p.experimental_bearer_token.trim());
     setOrRemove(base, "wire_api", p.wire_api.trim());
+    setOrRemoveBool(base, "requires_openai_auth", !!p.requires_openai_auth);
     merged[key] = base;
   }
 
@@ -161,5 +163,10 @@ function str(v: unknown): string {
 /** 写入字符串值；空串时移除该键（与旧 Rust 直写语义一致）。 */
 function setOrRemove(obj: Record<string, unknown>, key: string, value: string) {
   if (value) obj[key] = value;
+  else delete obj[key];
+}
+
+function setOrRemoveBool(obj: Record<string, unknown>, key: string, value: boolean) {
+  if (value) obj[key] = true;
   else delete obj[key];
 }

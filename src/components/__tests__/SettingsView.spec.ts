@@ -714,14 +714,74 @@ describe("SettingsView 模型配置", () => {
   it("渲染提供方列表与激活单选", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row");
+    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
     expect(rows.length).toBe(2);
     expect(rows[0].text()).toContain("DeepSeek");
     expect(rows[0].text()).toContain("deepseek");
     const radios = wrapper.findAll('input[name="model-provider-active"]');
-    expect(radios.length).toBe(2);
-    expect((radios[0].element as HTMLInputElement).checked).toBe(true);
-    expect((radios[1].element as HTMLInputElement).checked).toBe(false);
+    expect(radios.length).toBe(3);
+    // 首项为固定的「无提供者」（value 为空），本例未激活，不选中
+    expect((radios[0].element as HTMLInputElement).value).toBe("");
+    expect((radios[0].element as HTMLInputElement).checked).toBe(false);
+    expect((radios[1].element as HTMLInputElement).checked).toBe(true);
+    expect((radios[2].element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("固定的「无提供者」项无编辑/删除按钮，选中表示不选提供方", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const noneRow = wrapper.find(".model-provider-row.model-provider-none");
+    expect(noneRow.exists()).toBe(true);
+    expect(noneRow.find(".provider-row-edit").exists()).toBe(false);
+    expect(noneRow.find(".provider-row-delete").exists()).toBe(false);
+    expect(noneRow.text()).toContain("无提供者");
+    // 选中「无提供者」后 model_provider 为空
+    const noneRadio = noneRow.find('input[name="model-provider-active"]');
+    await noneRadio.setValue();
+    expect((noneRadio.element as HTMLInputElement).checked).toBe(true);
+    expect(
+      (wrapper.find('input[name="model-provider-active"]').element as HTMLInputElement)
+        .value,
+    ).toBe("");
+  });
+
+  it("requires_openai_auth 提供者不报缺认证", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve({
+          ...sampleModelConfigRead,
+          layers: [{
+            name: { type: "user" },
+            config: {
+              model: "gpt-5.6-luna",
+              model_reasoning_effort: "max",
+              model_provider: "newapi",
+              model_providers: {
+                newapi: {
+                  name: "NewAPI",
+                  base_url: "https://newpi.bond/v1",
+                  wire_api: "responses",
+                  requires_openai_auth: true,
+                },
+              },
+            },
+          }],
+        });
+      }
+      if (cmd === "model_config_read")
+        return Promise.resolve({
+          ...sampleModelConfig,
+          providers: [],
+        });
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const row = wrapper.find(".model-provider-row:not(.model-provider-none)");
+    expect(row.text()).toContain("NewAPI");
+    expect(row.find(".model-provider-row-msg").exists()).toBe(false);
   });
 
   it("空列表时添加首个提供方自动激活", async () => {
@@ -760,8 +820,10 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     const radios = wrapper.findAll('input[name="model-provider-active"]');
-    expect(radios.length).toBe(1);
-    expect((radios[0].element as HTMLInputElement).checked).toBe(true);
+    expect(radios.length).toBe(2);
+    // 首项「无提供者」未选中，新增的 first 自动激活
+    expect((radios[0].element as HTMLInputElement).checked).toBe(false);
+    expect((radios[1].element as HTMLInputElement).checked).toBe(true);
   });
 
   it("重复提供方标识被拦截", async () => {
@@ -773,7 +835,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("提供方标识已存在");
-    expect(wrapper.findAll(".model-provider-row").length).toBe(2);
+    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
   });
 
   it("新增提供方以弹窗呈现：标题、遮罩与表单均在弹窗内", async () => {
@@ -791,7 +853,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .findAll(".model-provider-row")[1]
+      .findAll(".model-provider-row:not(.model-provider-none)")[1]
       .find(".provider-row-edit")
       .trigger("click");
     await flushPromises();
@@ -816,7 +878,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".modal-close").trigger("click");
     await flushPromises();
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
-    expect(wrapper.findAll(".model-provider-row").length).toBe(2);
+    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
     // 重新打开表单复位
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
@@ -833,7 +895,7 @@ describe("SettingsView 模型配置", () => {
   it("编辑提供方后保存调用 config/batchWrite", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row");
+    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
     await rows[1].find(".provider-row-edit").trigger("click");
     await flushPromises();
     expect(wrapper.find(".model-provider-form").exists()).toBe(true);
@@ -884,19 +946,19 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("模型配置已保存");
   });
 
-  it("删除激活项按钮禁用，非激活项可删除", async () => {
+  it("激活项与非激活项都可删除，删除激活项后清空激活", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row");
+    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
     const delBtns = rows.map(
       (r) => r.find(".provider-row-delete")!,
     );
-    expect(delBtns[0].attributes("disabled")).toBeDefined();
+    expect(delBtns[0].attributes("disabled")).toBeUndefined();
     expect(delBtns[1].attributes("disabled")).toBeUndefined();
     expect(delBtns[1].classes()).toContain("danger");
-    await delBtns[1].trigger("click");
+    await delBtns[0].trigger("click");
     await flushPromises();
-    expect(wrapper.findAll(".model-provider-row").length).toBe(1);
+    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(1);
   });
 
   it("不再展示固定值 UI", async () => {
@@ -906,7 +968,7 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).not.toContain("固定值");
   });
 
-  it("model 为空时保存被拦截并提示必填", async () => {
+  it("model 为空时允许保存并写入 config", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
         return Promise.resolve({
@@ -947,17 +1009,16 @@ describe("SettingsView 模型配置", () => {
       .find(".model-config-save-btn")!
       .trigger("click");
     await flushPromises();
-    expect(wrapper.text()).toContain("请填写 model (slug)");
     expect(
       mockedInvoke.mock.calls.some(
         ([cmd, args]) =>
           cmd === "codex_rpc" &&
           (args as { method?: string } | undefined)?.method === "config/batchWrite",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("认证方式默认不写入，选 API Key 时写入两个键", async () => {
+  it("认证两字段默认不写入，分别选择后各自写入", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
         return Promise.resolve({
@@ -1020,6 +1081,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe("");
 
     await pickAppSelect(wrapper, "model-config-ui-auth", "API Key");
+    await pickAppSelect(wrapper, "model-config-ui-forced", "api");
     await save();
     await flushPromises();
     edits = lastAuthEdits();
@@ -1148,7 +1210,7 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain("已检测到全局 OPENAI_API_KEY");
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
-    expect(wrapper.findAll(".model-provider-row").length).toBe(1);
+    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(1);
   });
 
   it("提供方表单缺少名称/base_url/认证时逐字段提示", async () => {
@@ -1168,8 +1230,8 @@ describe("SettingsView 模型配置", () => {
       .find('input[placeholder="https://api.example.com/v1"]')
       .setValue("https://x.example.com/v1");
     await add();
-    expect(wrapper.text()).toContain("请填写 env_key 或 API Key");
-    expect(wrapper.findAll(".model-provider-row").length).toBe(2);
+    expect(wrapper.text()).toContain("请填写 env_key、API Key 或选择 OpenAI 登录认证");
+    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
   });
 
   it("读取失败时展示错误提示", async () => {

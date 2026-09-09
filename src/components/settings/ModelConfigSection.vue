@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   loadModelProviderConfig,
@@ -107,6 +107,7 @@ const providerForm = reactive({
   env_key: "",
   experimental_bearer_token: "",
   wire_api: "responses",
+  requires_openai_auth: false,
 });
 
 /** 提供方表单逐字段校验状态 */
@@ -117,18 +118,24 @@ const providerFormErrors = reactive({
   auth: "",
 });
 
-/** 顶层认证方式："" 默认（不写入）/ "apikey" / "chatgpt" */
-const authMethod = ref("");
+/** 顶层 preferred_auth_method："" 默认（不写入）/ "apikey" / "chatgpt" */
+const preferredAuthOptions: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  { value: "apikey", label: "API Key" },
+  { value: "chatgpt", label: "ChatGPT 登录" },
+];
+
+/** 顶层 forced_login_method："" 默认（不写入）/ "api" / "chatgpt" */
+const forcedAuthOptions: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  { value: "api", label: "api" },
+  { value: "chatgpt", label: "chatgpt" },
+];
 
 /** AppSelect 下拉选项集（替换原生 select：弹出层可主题化/毛玻璃） */
 const reasoningEffortOptions: AppSelectOption[] = [
   { value: "", label: "默认（不写入）" },
   ...REASONING_EFFORT_VALUES.map((v) => ({ value: v, label: v })),
-];
-const authMethodOptions: AppSelectOption[] = [
-  { value: "", label: "默认（不写入）" },
-  { value: "apikey", label: "API Key" },
-  { value: "chatgpt", label: "ChatGPT 登录" },
 ];
 const wireApiOptions: AppSelectOption[] = [
   { value: "responses", label: "responses" },
@@ -167,20 +174,6 @@ function applyProvidersCard(pc: ModelProviderConfigState) {
   modelConfig.forced_login_method = pc.forced_login_method;
   // 浅拷贝：组件内增删改不污染调用方数组引用（测试/热更新下尤其重要）
   modelConfig.providers = (pc.providers ?? []).map((p) => ({ ...p }));
-  // 由 preferred_auth_method/forced_login_method 推导「认证方式」下拉
-  if (
-    pc.preferred_auth_method === "apikey" &&
-    pc.forced_login_method === "api"
-  ) {
-    authMethod.value = "apikey";
-  } else if (
-    pc.preferred_auth_method === "chatgpt" &&
-    pc.forced_login_method === "chatgpt"
-  ) {
-    authMethod.value = "chatgpt";
-  } else {
-    authMethod.value = "";
-  }
 }
 
 onMounted(() => {
@@ -214,6 +207,7 @@ function openAddProvider() {
   providerForm.env_key = "";
   providerForm.experimental_bearer_token = "";
   providerForm.wire_api = "responses";
+  providerForm.requires_openai_auth = false;
   clearProviderFormErrors();
 }
 
@@ -229,6 +223,7 @@ function openEditProvider(index: number) {
   providerForm.env_key = p.env_key;
   providerForm.experimental_bearer_token = p.experimental_bearer_token;
   providerForm.wire_api = p.wire_api || "responses";
+  providerForm.requires_openai_auth = !!p.requires_openai_auth;
   clearProviderFormErrors();
 }
 
@@ -265,10 +260,11 @@ function confirmProviderForm() {
   const hasAuth =
     !!providerForm.env_key.trim() ||
     !!providerForm.experimental_bearer_token.trim() ||
+    providerForm.requires_openai_auth ||
     modelConfig.openai_api_key_present;
   if (!hasAuth) {
     providerFormErrors.auth =
-      "请填写 env_key 或 API Key（也可仅设置全局 OPENAI_API_KEY 环境变量）";
+      "请填写 env_key、API Key 或选择 OpenAI 登录认证（也可仅设置全局 OPENAI_API_KEY）";
     return;
   }
   if (providerForm.editingIndex < 0) {
@@ -279,6 +275,7 @@ function confirmProviderForm() {
       env_key: providerForm.env_key.trim(),
       experimental_bearer_token: providerForm.experimental_bearer_token.trim(),
       wire_api: providerForm.wire_api,
+      requires_openai_auth: providerForm.requires_openai_auth,
     });
     // 第一个提供方自动激活，减少新手配置步骤
     if (modelConfig.providers.length === 1) {
@@ -292,17 +289,17 @@ function confirmProviderForm() {
     p.env_key = providerForm.env_key.trim();
     p.experimental_bearer_token = providerForm.experimental_bearer_token.trim();
     p.wire_api = providerForm.wire_api;
+    p.requires_openai_auth = providerForm.requires_openai_auth;
   }
   providerForm.open = false;
 }
 
-/** 删除提供方：激活项禁止删除 */
+/** 删除提供方：删除当前激活项时清空激活选择 */
 function removeProvider(index: number) {
   const p = modelConfig.providers[index];
   if (!p) return;
   if (p.key === modelConfig.model_provider) {
-    setToast("请先切换到其它提供方，再删除当前激活项");
-    return;
+    modelConfig.model_provider = "";
   }
   modelConfig.providers.splice(index, 1);
 }
@@ -315,6 +312,7 @@ function providerRowError(p: ModelProviderInfo): string {
   if (
     !(p.env_key ?? "").trim() &&
     !(p.experimental_bearer_token ?? "").trim() &&
+    !p.requires_openai_auth &&
     !modelConfig.openai_api_key_present
   ) {
     return "缺少认证方式（env_key / API Key / 全局 OPENAI_API_KEY）";
@@ -348,23 +346,6 @@ const catalogModelIds = computed<string[]>(() => {
   }
 });
 
-/** 认证方式下拉 → 顶层两个键（默认不写入） */
-function authMethodToEdit(): {
-  preferred_auth_method: string;
-  forced_login_method: string;
-} {
-  if (authMethod.value === "apikey") {
-    return { preferred_auth_method: "apikey", forced_login_method: "api" };
-  }
-  if (authMethod.value === "chatgpt") {
-    return {
-      preferred_auth_method: "chatgpt",
-      forced_login_method: "chatgpt",
-    };
-  }
-  return { preferred_auth_method: "", forced_login_method: "" };
-}
-
 /** 保存模型配置：提供方 + 模型标量 + 模型目录合并为一个保存；目录内容非法时提示并阻断 */
 async function saveModelConfig() {
   if (modelConfig.saving || modelConfig.loading) return;
@@ -372,14 +353,6 @@ async function saveModelConfig() {
   modelConfigErrors.provider = "";
   modelConfigErrors.catalog = "";
   let blocked = false;
-  if (!modelConfig.model.trim()) {
-    modelConfigErrors.model = "请填写 model (slug)";
-    blocked = true;
-  }
-  if (modelConfig.providers.length > 0 && !modelConfig.model_provider.trim()) {
-    modelConfigErrors.provider = "请选择一个模型提供方";
-    blocked = true;
-  }
   for (const p of modelConfig.providers) {
     const err = providerRowError(p);
     if (err) {
@@ -413,15 +386,14 @@ async function saveModelConfig() {
 
   modelConfig.saving = true;
   try {
-    const auth = authMethodToEdit();
     const input: ModelConfigUiEdit = {
       model: modelConfig.model.trim(),
       model_reasoning_effort: modelConfig.model_reasoning_effort.trim(),
       personality: modelConfig.personality,
       model_verbosity: modelConfig.model_verbosity,
       model_provider: modelConfig.model_provider,
-      preferred_auth_method: auth.preferred_auth_method,
-      forced_login_method: auth.forced_login_method,
+      preferred_auth_method: modelConfig.preferred_auth_method.trim(),
+      forced_login_method: modelConfig.forced_login_method.trim(),
       model_catalog_json: catalogContent ? modelConfig.model_catalog_path : null,
       providers: modelConfig.providers,
     };
@@ -500,7 +472,23 @@ function openModelConfigFile() {
       </div>
 
       <div class="model-providers-list">
-        <div v-if="modelConfig.providers.length === 0" class="model-providers-empty">
+        <div class="model-provider-row model-provider-none">
+          <label class="model-provider-radio">
+            <input
+              type="radio"
+              name="model-provider-active"
+              :value="''"
+              v-model="modelConfig.model_provider"
+              :disabled="modelConfig.loading"
+            />
+            <span class="model-provider-name">无提供者</span>
+            <span class="model-provider-key">(none)</span>
+          </label>
+        </div>
+        <div
+          v-if="modelConfig.providers.length === 0"
+          class="model-providers-empty"
+        >
           还没有提供方，点击右上角「+」创建。
         </div>
         <div
@@ -544,17 +532,9 @@ function openModelConfigFile() {
             </button>
             <button
               class="btn btn-icon danger provider-row-delete"
-              :disabled="modelConfig.loading || p.key === modelConfig.model_provider"
-              :aria-label="
-                p.key === modelConfig.model_provider
-                  ? '先切换到其它提供方再删除'
-                  : '删除'
-              "
-              v-tooltip="
-                p.key === modelConfig.model_provider
-                  ? '先切换到其它提供方再删除'
-                  : '删除'
-              "
+              :disabled="modelConfig.loading"
+              aria-label="删除"
+              v-tooltip="'删除'"
               @click="removeProvider(i)"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -578,7 +558,6 @@ function openModelConfigFile() {
         >
           <label for="model-config-ui-model">
             model (slug)
-            <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
           </label>
           <ModelConfigModelPicker
             id="model-config-ui-model"
@@ -604,16 +583,27 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-auth">preferred_auth_method（认证方式）</label>
+          <label for="model-config-ui-auth">preferred_auth_method（优先认证方式）</label>
           <AppSelect
             id="model-config-ui-auth"
-            v-model="authMethod"
+            v-model="modelConfig.preferred_auth_method"
             :disabled="modelConfig.loading"
-            :options="authMethodOptions"
+            :options="preferredAuthOptions"
           />
           <p class="model-config-advanced-note">
-            选「API Key」写入
-            preferred_auth_method="apikey" 与 forced_login_method="api"
+            认证方式（API Key / ChatGPT 登录）
+          </p>
+        </div>
+        <div class="setting-row">
+          <label for="model-config-ui-forced">forced_login_method（强制登录方式）</label>
+          <AppSelect
+            id="model-config-ui-forced"
+            v-model="modelConfig.forced_login_method"
+            :disabled="modelConfig.loading"
+            :options="forcedAuthOptions"
+          />
+          <p class="model-config-advanced-note">
+            强制登录方式（api / chatgpt）
           </p>
         </div>
         <div class="setting-row">
@@ -776,6 +766,18 @@ function openModelConfigFile() {
             </p>
           </div>
           <div class="setting-row">
+            <div class="checkbox-row">
+              <input
+                id="provider-openai-auth"
+                v-model="providerForm.requires_openai_auth"
+                type="checkbox"
+              />
+              <label for="provider-openai-auth">
+                OpenAI 登录认证（requires_openai_auth）
+              </label>
+            </div>
+          </div>
+          <div class="setting-row">
             <label>wire_api</label>
             <AppSelect v-model="providerForm.wire_api" :options="wireApiOptions" />
           </div>
@@ -856,6 +858,10 @@ function openModelConfigFile() {
   border-bottom: none;
 }
 
+.model-provider-none .model-provider-name {
+  color: var(--text-dim);
+}
+
 .model-provider-radio {
   display: flex;
   align-items: center;
@@ -927,6 +933,27 @@ function openModelConfigFile() {
   font-size: var(--font-sm);
   line-height: 1.4;
   color: var(--green);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.checkbox-row label {
+  margin: 0;
+  font-size: var(--font-md);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
 }
 
 .model-config-advanced-note {

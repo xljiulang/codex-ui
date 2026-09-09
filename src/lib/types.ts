@@ -293,6 +293,8 @@ export interface ModelProviderInfo {
   env_key: string;
   experimental_bearer_token: string;
   wire_api: string;
+  /** 是否使用 OpenAI/ChatGPT 登录认证（requires_openai_auth）；true 视为已认证 */
+  requires_openai_auth?: boolean;
 }
 
 /** 可视化模型配置保存载荷（与 Rust 端 ModelConfigUiEdit 一致） */
