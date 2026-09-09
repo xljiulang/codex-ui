@@ -118,7 +118,8 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
       edits: [
         { keyPath: "model_providers", value: merged, mergeStrategy: "replace" },
         { keyPath: "model_provider", value: active, mergeStrategy: "replace" },
-        { keyPath: "model", value: edit.model.trim(), mergeStrategy: "replace" },
+        // model：空串写 null 让 codex 删除该键（回退默认）
+        { keyPath: "model", value: edit.model.trim() || null, mergeStrategy: "replace" },
         {
           keyPath: "model_reasoning_effort",
           value: edit.model_reasoning_effort.trim(),
@@ -136,13 +137,14 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
           mergeStrategy: "replace",
         },
         {
+          // preferred_auth_method / forced_login_method：空串写 null 让 codex 删除该键（回退默认）
           keyPath: "preferred_auth_method",
-          value: edit.preferred_auth_method.trim(),
+          value: edit.preferred_auth_method.trim() || null,
           mergeStrategy: "replace",
         },
         {
           keyPath: "forced_login_method",
-          value: edit.forced_login_method.trim(),
+          value: edit.forced_login_method.trim() || null,
           mergeStrategy: "replace",
         },
         {

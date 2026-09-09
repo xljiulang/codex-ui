@@ -122,14 +122,14 @@ const providerFormErrors = reactive({
 const preferredAuthOptions: AppSelectOption[] = [
   { value: "", label: "默认（不写入）" },
   { value: "apikey", label: "API Key" },
-  { value: "chatgpt", label: "ChatGPT 登录" },
+  { value: "chatgpt", label: "ChatGPT/OpenAI 登录" },
 ];
 
 /** 顶层 forced_login_method："" 默认（不写入）/ "api" / "chatgpt" */
 const forcedAuthOptions: AppSelectOption[] = [
   { value: "", label: "默认（不写入）" },
   { value: "api", label: "api" },
-  { value: "chatgpt", label: "chatgpt" },
+  { value: "chatgpt", label: "ChatGPT/OpenAI 登录" },
 ];
 
 /** AppSelect 下拉选项集（替换原生 select：弹出层可主题化/毛玻璃） */
@@ -264,8 +264,13 @@ function confirmProviderForm() {
     modelConfig.openai_api_key_present;
   if (!hasAuth) {
     providerFormErrors.auth =
-      "请填写 env_key、API Key 或选择 OpenAI 登录认证（也可仅设置全局 OPENAI_API_KEY）";
+      "请填写 env_key、API Key 或选择 ChatGPT/OpenAI 登录认证（也可仅设置全局 OPENAI_API_KEY）";
     return;
+  }
+  // 选择 ChatGPT/OpenAI 登录认证时不依赖 API Key，清空避免与登录路径产生矛盾配置
+  if (providerForm.requires_openai_auth) {
+    providerForm.env_key = "";
+    providerForm.experimental_bearer_token = "";
   }
   if (providerForm.editingIndex < 0) {
     modelConfig.providers.push({
@@ -590,9 +595,6 @@ function openModelConfigFile() {
             :disabled="modelConfig.loading"
             :options="preferredAuthOptions"
           />
-          <p class="model-config-advanced-note">
-            认证方式（API Key / ChatGPT 登录）
-          </p>
         </div>
         <div class="setting-row">
           <label for="model-config-ui-forced">forced_login_method（强制登录方式）</label>
@@ -602,9 +604,6 @@ function openModelConfigFile() {
             :disabled="modelConfig.loading"
             :options="forcedAuthOptions"
           />
-          <p class="model-config-advanced-note">
-            强制登录方式（api / chatgpt）
-          </p>
         </div>
         <div class="setting-row">
           <label for="model-config-ui-personality">personality（回复风格）</label>
@@ -614,9 +613,6 @@ function openModelConfigFile() {
             :disabled="modelConfig.loading"
             :options="PERSONALITY_OPTIONS"
           />
-          <p class="model-config-advanced-note">
-            选「pragmatic」回答更简洁，可减少输出 token
-          </p>
         </div>
         <div class="setting-row">
           <label for="model-config-ui-verbosity">model_verbosity（输出详细程度）</label>
@@ -626,9 +622,6 @@ function openModelConfigFile() {
             :disabled="modelConfig.loading"
             :options="VERBOSITY_OPTIONS"
           />
-          <p class="model-config-advanced-note">
-            控制回答长短，不影响推理；选「low」可减少输出 token
-          </p>
         </div>
       </div>
 
@@ -735,6 +728,18 @@ function openModelConfigFile() {
             </p>
           </div>
           <div class="setting-row">
+            <div class="checkbox-row">
+              <input
+                id="provider-openai-auth"
+                v-model="providerForm.requires_openai_auth"
+                type="checkbox"
+              />
+              <label for="provider-openai-auth">
+                ChatGPT/OpenAI 登录认证（requires_openai_auth）
+              </label>
+            </div>
+          </div>
+          <div v-if="!providerForm.requires_openai_auth" class="setting-row">
             <label>env_key（环境变量名）</label>
             <input
               v-model="providerForm.env_key"
@@ -743,10 +748,11 @@ function openModelConfigFile() {
             />
           </div>
           <div
+            v-if="!providerForm.requires_openai_auth"
             class="setting-row"
             :class="{ 'model-config-row-error': providerFormErrors.auth }"
           >
-            <label>experimental_bearer_token</label>
+            <label>API Key（sk-*，experimental_bearer_token）</label>
             <input
               v-model="providerForm.experimental_bearer_token"
               type="password"
@@ -758,24 +764,6 @@ function openModelConfigFile() {
             >
               {{ providerFormErrors.auth }}
             </p>
-            <p
-              v-else-if="modelConfig.openai_api_key_present"
-              class="model-config-auth-hint"
-            >
-              已检测到全局 OPENAI_API_KEY，env_key / API Key 可留空
-            </p>
-          </div>
-          <div class="setting-row">
-            <div class="checkbox-row">
-              <input
-                id="provider-openai-auth"
-                v-model="providerForm.requires_openai_auth"
-                type="checkbox"
-              />
-              <label for="provider-openai-auth">
-                OpenAI 登录认证（requires_openai_auth）
-              </label>
-            </div>
           </div>
           <div class="setting-row">
             <label>wire_api</label>
@@ -928,13 +916,6 @@ function openModelConfigFile() {
   flex: 0 0 100%;
 }
 
-.model-config-auth-hint {
-  margin: 0;
-  font-size: var(--font-sm);
-  line-height: 1.4;
-  color: var(--green);
-}
-
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -954,13 +935,6 @@ function openModelConfigFile() {
   width: 16px;
   height: 16px;
   cursor: pointer;
-}
-
-.model-config-advanced-note {
-  margin: 0;
-  font-size: var(--font-sm);
-  line-height: 1.4;
-  color: var(--text-dim);
 }
 
 .model-config-textarea {

@@ -248,10 +248,10 @@ describe("useCodex/modelProviderConfig", () => {
     expect(edits[0].value).toEqual({
       a: { name: "A", wire_api: "responses", custom: 1 },
     });
-    // 标量空串写入（codex 视为未设置）
+    // 标量空串写 null（codex 删除该键，回退默认）
     expect(edits[2]).toEqual({
       keyPath: "model",
-      value: "",
+      value: null,
       mergeStrategy: "replace",
     });
     // 空串 personality / model_verbosity 写 null（codex 删除该键，回退内置默认）
@@ -262,6 +262,17 @@ describe("useCodex/modelProviderConfig", () => {
     });
     expect(edits[5]).toEqual({
       keyPath: "model_verbosity",
+      value: null,
+      mergeStrategy: "replace",
+    });
+    // 空串 preferred_auth_method / forced_login_method 写 null（codex 删除该键，回退默认）
+    expect(edits[6]).toEqual({
+      keyPath: "preferred_auth_method",
+      value: null,
+      mergeStrategy: "replace",
+    });
+    expect(edits[7]).toEqual({
+      keyPath: "forced_login_method",
       value: null,
       mergeStrategy: "replace",
     });

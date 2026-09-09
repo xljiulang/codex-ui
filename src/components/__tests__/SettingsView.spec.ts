@@ -1075,10 +1075,10 @@ describe("SettingsView 模型配置", () => {
     let edits = lastAuthEdits();
     expect(
       edits.find((e) => e.keyPath === "preferred_auth_method")?.value,
-    ).toBe("");
+    ).toBe(null);
     expect(
       edits.find((e) => e.keyPath === "forced_login_method")?.value,
-    ).toBe("");
+    ).toBe(null);
 
     await pickAppSelect(wrapper, "model-config-ui-auth", "API Key");
     await pickAppSelect(wrapper, "model-config-ui-forced", "api");
@@ -1206,8 +1206,8 @@ describe("SettingsView 模型配置", () => {
       .find('input[placeholder="https://api.example.com/v1"]')
       .setValue("https://env.example.com/v1");
     await flushPromises();
-    // 表单打开期间应看到全局 OPENAI_API_KEY 的绿色提示
-    expect(wrapper.text()).toContain("已检测到全局 OPENAI_API_KEY");
+    // 全局 OPENAI_API_KEY 存在时认证可省略；行下不再显示额外提示
+    expect(wrapper.text()).not.toContain("已检测到全局 OPENAI_API_KEY");
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(1);
@@ -1230,8 +1230,68 @@ describe("SettingsView 模型配置", () => {
       .find('input[placeholder="https://api.example.com/v1"]')
       .setValue("https://x.example.com/v1");
     await add();
-    expect(wrapper.text()).toContain("请填写 env_key、API Key 或选择 OpenAI 登录认证");
+    expect(wrapper.text()).toContain(
+      "请填写 env_key、API Key 或选择 ChatGPT/OpenAI 登录认证",
+    );
     expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
+  });
+
+  it("勾选 ChatGPT/OpenAI 登录认证后隐藏 env_key / API Key 字段，取消恢复", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".model-config-add-btn").trigger("click");
+    await flushPromises();
+    const envInput = () => wrapper.find('input[placeholder="如 OPENAI_API_KEY"]');
+    const tokenInput = () => wrapper.find('input[placeholder="API Key"]');
+    expect(envInput().exists()).toBe(true);
+    expect(tokenInput().exists()).toBe(true);
+    await wrapper.find("#provider-openai-auth").setValue(true);
+    await flushPromises();
+    expect(envInput().exists()).toBe(false);
+    expect(tokenInput().exists()).toBe(false);
+    await wrapper.find("#provider-openai-auth").setValue(false);
+    await flushPromises();
+    expect(envInput().exists()).toBe(true);
+    expect(tokenInput().exists()).toBe(true);
+  });
+
+  it("勾选 ChatGPT/OpenAI 登录认证并保存后清空 env_key / experimental_bearer_token", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    await rows[1].find(".provider-row-edit").trigger("click");
+    await flushPromises();
+    await wrapper.find("#provider-openai-auth").setValue(true);
+    await flushPromises();
+    await wrapper.find(".provider-form-submit").trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".model-config-card")[0]
+      .find(".model-config-save-btn")!
+      .trigger("click");
+    await flushPromises();
+    const saveCall = mockedInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    );
+    expect(saveCall).toBeTruthy();
+    const edits = (
+      saveCall![1] as {
+        params: { edits: { keyPath: string; value: unknown }[] };
+      }
+    ).params.edits;
+    const providers = edits[0].value as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(edits[0].keyPath).toBe("model_providers");
+    expect(providers.other).toEqual({
+      name: "Other",
+      base_url: "https://other.example.com/v1",
+      wire_api: "chat",
+      requires_openai_auth: true,
+    });
   });
 
   it("读取失败时展示错误提示", async () => {
