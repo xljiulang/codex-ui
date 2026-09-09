@@ -121,7 +121,7 @@ const providerFormErrors = reactive({
 /** 顶层 preferred_auth_method："" 默认（不写入）/ "apikey" / "chatgpt" */
 const preferredAuthOptions: AppSelectOption[] = [
   { value: "", label: "默认（不写入）" },
-  { value: "apikey", label: "API Key" },
+  { value: "apikey", label: "apikey" },
   { value: "chatgpt", label: "ChatGPT/OpenAI 登录" },
 ];
 
@@ -562,7 +562,7 @@ function openModelConfigFile() {
           :class="{ 'model-config-row-error': modelConfigErrors.model }"
         >
           <label for="model-config-ui-model">
-            model (slug)
+            model（模型标识）
           </label>
           <ModelConfigModelPicker
             id="model-config-ui-model"
@@ -627,7 +627,7 @@ function openModelConfigFile() {
 
       <div class="model-catalog-block">
         <div class="model-catalog-head">
-          <span>模型目录（model_catalog_json）</span>
+          <span>model_catalog_json（模型目录）</span>
         </div>
         <button
           v-if="modelConfig.model_catalog_exists"
@@ -666,7 +666,7 @@ function openModelConfigFile() {
             :class="{ 'model-config-row-error': providerFormErrors.key }"
           >
             <label>
-              标识（key）
+              key（标识）
               <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
             </label>
             <input
@@ -688,7 +688,7 @@ function openModelConfigFile() {
             :class="{ 'model-config-row-error': providerFormErrors.name }"
           >
             <label>
-              名称（name）
+              name（名称）
               <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
             </label>
             <input
@@ -709,7 +709,7 @@ function openModelConfigFile() {
             :class="{ 'model-config-row-error': providerFormErrors.base_url }"
           >
             <label>
-              base_url
+              base_url（接口地址）
               <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
             </label>
             <input
@@ -735,7 +735,7 @@ function openModelConfigFile() {
                 type="checkbox"
               />
               <label for="provider-openai-auth">
-                ChatGPT/OpenAI 登录认证（requires_openai_auth）
+                requires_openai_auth（ChatGPT/OpenAI 登录认证）
               </label>
             </div>
           </div>
@@ -752,7 +752,7 @@ function openModelConfigFile() {
             class="setting-row"
             :class="{ 'model-config-row-error': providerFormErrors.auth }"
           >
-            <label>API Key（sk-*，experimental_bearer_token）</label>
+            <label>experimental_bearer_token（API Key，一般是 sk-* 前缀）</label>
             <input
               v-model="providerForm.experimental_bearer_token"
               type="password"
@@ -766,7 +766,7 @@ function openModelConfigFile() {
             </p>
           </div>
           <div class="setting-row">
-            <label>wire_api</label>
+            <label>wire_api（接口协议）</label>
             <AppSelect v-model="providerForm.wire_api" :options="wireApiOptions" />
           </div>
         </div>

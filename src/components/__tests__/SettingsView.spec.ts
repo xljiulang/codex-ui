@@ -442,7 +442,7 @@ describe("SettingsView 模型配置", () => {
         .length,
     ).toBe(0);
     expect(wrapper.find(".model-catalog-head").text()).toContain(
-      "模型目录（model_catalog_json）",
+      "model_catalog_json（模型目录）",
     );
   });
 
@@ -1080,7 +1080,7 @@ describe("SettingsView 模型配置", () => {
       edits.find((e) => e.keyPath === "forced_login_method")?.value,
     ).toBe(null);
 
-    await pickAppSelect(wrapper, "model-config-ui-auth", "API Key");
+    await pickAppSelect(wrapper, "model-config-ui-auth", "apikey");
     await pickAppSelect(wrapper, "model-config-ui-forced", "api");
     await save();
     await flushPromises();
