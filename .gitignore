@@ -9,7 +9,6 @@ src-tauri/gen
 .vs/
 .zcode/
 /.playwright-cli/
-/setup/bin/*.exe
-/setup/resources/
+/setup/bin/*.exe 
 /setup/output/*.exe
 /setup/*.exe
