@@ -8,20 +8,20 @@ import {
 } from "../lib/icons";
 import { setToast, toastError } from "../composables/useCodex";
 import {
-  applyConfigProfile,
-  createConfigProfile,
-  deleteConfigProfile,
-  listConfigProfiles,
-  openConfigProfile,
-} from "../composables/useConfigProfiles";
+  applyModelSnapshot,
+  createModelSnapshot,
+  deleteModelSnapshot,
+  listModelSnapshots,
+  openModelSnapshot,
+} from "../composables/useModelSnapshots";
 
 const open = ref(false);
 const loading = ref(false);
-const profiles = ref<string[]>([]);
+const snapshots = ref<string[]>([]);
 const newName = ref("");
 const root = ref<HTMLElement | null>(null);
 
-/** 打开时拉取配置列表；已打开则关闭。 */
+/** 打开时拉取快照列表；已打开则关闭。 */
 async function toggle() {
   if (open.value) {
     open.value = false;
@@ -29,7 +29,7 @@ async function toggle() {
   }
   open.value = true;
   try {
-    profiles.value = await listConfigProfiles();
+    snapshots.value = await listModelSnapshots();
   } catch (e) {
     setToast(toastError(e));
   }
@@ -39,16 +39,15 @@ async function toggle() {
 async function create(name: string) {
   const n = name.trim();
   if (!n) {
-    setToast("请输入配置名");
+    setToast("请输入快照名");
     return;
   }
   if (loading.value) return;
   loading.value = true;
   try {
-    await createConfigProfile(n);
+    await createModelSnapshot(n);
     newName.value = "";
-    profiles.value = await listConfigProfiles();
-    setToast(`已创建配置快照「${n}」`);
+    snapshots.value = await listModelSnapshots();
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -56,12 +55,12 @@ async function create(name: string) {
   }
 }
 
-/** 应用配置：覆盖 codex-home 文件 + 热重载 + 记录激活。 */
+/** 还原快照：直接写配置文件，重启 codex-ui 后生效。 */
 async function apply(name: string) {
   if (loading.value) return;
   loading.value = true;
   try {
-    await applyConfigProfile(name);
+    await applyModelSnapshot(name);
     open.value = false;
   } catch (e) {
     setToast(toastError(e));
@@ -70,13 +69,25 @@ async function apply(name: string) {
   }
 }
 
-/** 删除配置：组件内确认由 deleteConfigProfile 的 askConfirm 负责。 */
+/** 删除快照：组件内确认由 deleteModelSnapshot 的 askConfirm 负责。 */
 async function del(name: string) {
   if (loading.value) return;
   loading.value = true;
   try {
-    await deleteConfigProfile(name);
-    profiles.value = await listConfigProfiles();
+    await deleteModelSnapshot(name);
+    snapshots.value = await listModelSnapshots();
+  } catch (e) {
+    setToast(toastError(e));
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function openSnapshot(name: string) {
+  if (loading.value) return;
+  loading.value = true;
+  try {
+    await openModelSnapshot(name);
   } catch (e) {
     setToast(toastError(e));
   } finally {
@@ -103,52 +114,49 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <div ref="root" class="config-switch" @mousedown.stop>
+  <div ref="root" class="model-snapshot-switch" @mousedown.stop>
     <button
-      class="icon-btn config-switch-btn"
-      aria-label="配置快照"
-      v-tooltip="'配置快照'"
+      class="icon-btn model-snapshot-btn"
+      aria-label="模型快照"
+      v-tooltip="'模型快照'"
       :aria-expanded="open ? 'true' : 'false'"
       @click="toggle()"
     >
-      <svg class="config-switch-icon config-brace" viewBox="0 0 16 16" aria-hidden="true">
-        <g transform="translate(8 8) scale(0.62) translate(-8 -7.95)">
-          <path fill="none" vector-effect="non-scaling-stroke" d="M6.5 3.1c-1.4 0-2.1.8-2.1 2.2v1c0 .6-.4 1.1-1 1.2v.9c.6.1 1 .6 1 1.2v1c0 1.4.7 2.2 2.1 2.2" />
-          <path fill="none" vector-effect="non-scaling-stroke" d="M9.5 3.1c1.4 0 2.1.8 2.1 2.2v1c0 .6.4 1.1 1 1.2v.9c-.6.1-1 .6-1 1.2v1c0 1.4-.7 2.2-2.1 2.2" />
-        </g>
+      <svg class="model-snapshot-icon model-snapshot-brace" viewBox="0 0 16 16" aria-hidden="true">
         <path fill="none" d="M2.2 4.8V2.2H4.8" />
         <path fill="none" d="M13.8 4.8V2.2H11.2" />
         <path fill="none" d="M2.2 11.2V13.8H4.8" />
         <path fill="none" d="M13.8 11.2V13.8H11.2" />
+        <path fill="none" d="M5.1 10.6V5.4l2.9 3.2 2.9-3.2v5.2" />
       </svg>
     </button>
 
-    <div v-if="open" class="popup-menu below config-profiles-menu">
-      <div class="config-menu-title">
-        <svg class="config-menu-icon config-brace" viewBox="0 0 16 16" aria-hidden="true">
-          <g transform="translate(8 8) scale(0.62) translate(-8 -7.95)">
-            <path fill="none" vector-effect="non-scaling-stroke" d="M6.5 3.1c-1.4 0-2.1.8-2.1 2.2v1c0 .6-.4 1.1-1 1.2v.9c.6.1 1 .6 1 1.2v1c0 1.4.7 2.2 2.1 2.2" />
-            <path fill="none" vector-effect="non-scaling-stroke" d="M9.5 3.1c1.4 0 2.1.8 2.1 2.2v1c0 .6.4 1.1 1 1.2v.9c-.6.1-1 .6-1 1.2v1c0 1.4-.7 2.2-2.1 2.2" />
-          </g>
+    <div v-if="open" class="popup-menu below model-snapshot-menu">
+      <div class="model-snapshot-title">
+        <svg class="model-snapshot-menu-icon model-snapshot-brace" viewBox="0 0 16 16" aria-hidden="true">
           <path fill="none" d="M2.2 4.8V2.2H4.8" />
           <path fill="none" d="M13.8 4.8V2.2H11.2" />
           <path fill="none" d="M2.2 11.2V13.8H4.8" />
           <path fill="none" d="M13.8 11.2V13.8H11.2" />
+          <path fill="none" d="M5.1 10.6V5.4l2.9 3.2 2.9-3.2v5.2" />
         </svg>
-        <span>配置快照</span>
+        <span>模型快照</span>
       </div>
+      <p class="model-snapshot-hint">
+        包含模型提供方与目录内容，可能含 API Key，请谨慎分享。
+      </p>
 
-      <div v-if="profiles.length === 0" class="git-branch-menu-empty">暂无配置快照</div>
+      <div v-if="snapshots.length === 0" class="git-branch-menu-empty">暂无模型快照</div>
 
       <div
-        v-for="p in profiles"
+        v-for="p in snapshots"
         :key="p"
-        class="config-profile-row popup-menu-item"
+        class="model-snapshot-row popup-menu-item"
       >
         <span class="git-branch-name">{{ p }}</span>
         <button
-          class="config-apply-btn"
-          :aria-label="`还原配置快照${p}`"
+          class="model-snapshot-apply-btn"
+          :aria-label="`还原模型快照${p}`"
           v-tooltip="'还原'"
           :disabled="loading"
           @click="apply(p)"
@@ -159,7 +167,7 @@ watch(open, (v) => {
         </button>
         <button
           class="git-branch-delete"
-          :aria-label="`删除配置快照${p}`"
+          :aria-label="`删除模型快照${p}`"
           v-tooltip="'删除'"
           :disabled="loading"
           @click="del(p)"
@@ -169,11 +177,11 @@ watch(open, (v) => {
           </svg>
         </button>
         <button
-          class="config-open-btn"
-          :aria-label="`打开配置快照${p}`"
+          class="model-snapshot-open-btn"
+          :aria-label="`打开模型快照${p}`"
           v-tooltip="'打开'"
           :disabled="loading"
-          @click="openConfigProfile(p)"
+          @click="openSnapshot(p)"
         >
           <svg viewBox="0 0 24 24">
             <path :d="ICON_OPEN" />
@@ -185,7 +193,7 @@ watch(open, (v) => {
         <input
           v-model="newName"
           class="git-branch-input"
-          placeholder="新建配置快照"
+          placeholder="新建模型快照"
           :disabled="loading"
           @keyup.enter="onNew()"
         />
@@ -205,33 +213,33 @@ watch(open, (v) => {
 </template>
 
 <style scoped>
-.config-switch {
+.model-snapshot-switch {
   position: relative;
   display: flex;
   align-items: center;
 }
 
-.config-switch-btn {
+.model-snapshot-btn {
   position: relative;
 }
 
-.config-switch-icon,
-.config-menu-icon {
+.model-snapshot-icon,
+.model-snapshot-menu-icon {
   display: block;
 }
 
-.config-switch-icon {
+.model-snapshot-icon {
   width: 16px;
   height: 16px;
 }
 
-.config-menu-icon {
+.model-snapshot-menu-icon {
   width: 15px;
   height: 15px;
 }
 
-/* 单色花括号：stroke 用 currentColor 跟随按钮/标题颜色（与相邻 .icon-btn 一致） */
-.config-brace path {
+/* 单色外框 + 字段 M：stroke 用 currentColor 跟随按钮/标题颜色 */
+.model-snapshot-brace path {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
@@ -239,14 +247,14 @@ watch(open, (v) => {
   stroke-linejoin: round;
 }
 
-.config-profiles-menu {
+.model-snapshot-menu {
   right: 0;
   left: auto;
-  min-width: 280px;
+  min-width: 300px;
   padding: var(--space-2);
 }
 
-.config-menu-title {
+.model-snapshot-title {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -257,13 +265,22 @@ watch(open, (v) => {
   letter-spacing: 0.5px;
 }
 
-.config-profile-row {
+.model-snapshot-hint {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+.model-snapshot-row {
   cursor: default;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
 }
 
-.config-apply-btn {
+.model-snapshot-apply-btn,
+.model-snapshot-open-btn {
   flex-shrink: 0;
   width: 20px;
   height: 20px;
@@ -277,47 +294,20 @@ watch(open, (v) => {
   cursor: pointer;
 }
 
-.config-apply-btn:hover:not(:disabled) {
+.model-snapshot-apply-btn:hover:not(:disabled),
+.model-snapshot-open-btn:hover:not(:disabled) {
   color: var(--accent);
   background: rgba(var(--accent-rgb), 0.14);
 }
 
-.config-apply-btn:disabled {
+.model-snapshot-apply-btn:disabled,
+.model-snapshot-open-btn:disabled {
   opacity: var(--opacity-disabled);
   cursor: default;
 }
 
-.config-apply-btn svg {
-  width: 12px;
-  height: 12px;
-  fill: currentColor;
-}
-
-.config-open-btn {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.config-open-btn:hover:not(:disabled) {
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.14);
-}
-
-.config-open-btn:disabled {
-  opacity: var(--opacity-disabled);
-  cursor: default;
-}
-
-.config-open-btn svg {
+.model-snapshot-apply-btn svg,
+.model-snapshot-open-btn svg {
   width: 12px;
   height: 12px;
   fill: currentColor;

@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
 
 use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
-use crate::codex::config_profiles;
 use crate::codex::custom_instructions;
 use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
@@ -792,37 +791,6 @@ pub fn model_config_save(content: String) -> Result<(), String> {
 #[tauri::command]
 pub fn model_catalog_save(content: String) -> Result<(), String> {
     model_config::save_model_catalog(&content)
-}
-
-/// 列出全部配置快照名（遍历 CODEX_HOME/codex-ui 下的文件夹）供标题栏配置下拉使用。
-#[tauri::command]
-pub fn config_profiles_list() -> Result<Vec<String>, String> {
-    config_profiles::list()
-}
-
-/// 新建/覆盖配置快照：把当前 codex-home 的 config.toml 与 model_catalog 内容快照到
-/// `codex-home/codex-ui/<name>/`（同名已存在则覆盖更新）。
-#[tauri::command]
-pub fn config_profiles_save(name: String) -> Result<(), String> {
-    config_profiles::save(&name)
-}
-
-/// 应用配置快照：覆盖 codex-home/config.toml，并把快照 models.json 写回 model_catalog 目标。
-#[tauri::command]
-pub fn config_profiles_apply(name: String) -> Result<(), String> {
-    config_profiles::apply(&name)
-}
-
-/// 删除配置快照目录。
-#[tauri::command]
-pub fn config_profiles_delete(name: String) -> Result<(), String> {
-    config_profiles::delete_profile(&name)
-}
-
-/// 列出配置快照目录下所有文件（config.toml 置顶 + 模型目录文件）的绝对路径。
-#[tauri::command]
-pub fn config_profiles_open(name: String) -> Result<Vec<String>, String> {
-    config_profiles::open_files(&name)
 }
 
 /// 读取本地技能列表（从 skills/list 聚合列表过滤 CODEX_HOME/skills 下的技能），

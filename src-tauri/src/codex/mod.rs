@@ -1,7 +1,6 @@
 pub mod app_server;
 pub mod browser_bridge;
 pub mod bundled;
-pub mod config_profiles;
 pub mod commands;
 pub mod custom_instructions;
 pub mod diff;
@@ -9,6 +8,7 @@ pub mod file_icon;
 pub mod git;
 pub mod logs_guard;
 pub mod model_config;
+pub mod model_snapshots;
 pub mod path_util;
 pub mod pdf_export;
 pub mod runtime_download;
