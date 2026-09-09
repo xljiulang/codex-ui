@@ -9,7 +9,7 @@ import {
   toastError,
   type ZenProxyStatus,
 } from "../../composables/useCodex";
-import { ICON_WINDOW } from "../../lib/icons";
+import { ICON_INFO } from "../../lib/icons";
 
 defineProps<{ active: boolean }>();
 
@@ -129,7 +129,7 @@ onBeforeUnmount(refresh);
 
       <div class="zen-proxy-hint">
         <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path :d="ICON_WINDOW" fill="currentColor" />
+          <path :d="ICON_INFO" fill="currentColor" />
         </svg>
         <span class="zen-proxy-hint-body">
           在「模型配置」页手动添加 provider，按下面填写（key 可用
