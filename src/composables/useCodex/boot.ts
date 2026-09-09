@@ -8,7 +8,6 @@ import { store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
-import { loadBundledTools } from "../useBundledTools";
 import { trackLastSession } from "./lastSession";
 import { loadScheduledTasks } from "./scheduledTasks";
 
@@ -48,8 +47,6 @@ export async function init() {
     trackLastSession();
     // 预取定时任务列表（此后由 scheduled-tasks/event 快照驱动更新）
     void loadScheduledTasks();
-    // 预取捆绑 CLI 工具（ast-grep/fd/rg）可用性：供默认协作模式注入 developer_instructions
-    void loadBundledTools();
     // 主窗口标题跟随活动 tab；无活动 tab 时回退 “Codex UI v<版本>”。
     // 非 Tauri 环境 getVersion 不可用，回退无版本标题；setTitle 失败同样静默忽略。
     let windowTitle = "Codex UI";

@@ -1,6 +1,5 @@
 // useCodex 拆分模块：回合控制（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { invoke } from "@tauri-apps/api/core";
-import { bundledToolsDeveloperInstructions } from "../useBundledTools";
 import { buildTurnInput } from "../../lib/mention";
 import { toApprovalPolicy, toApprovalsReviewer, toSandboxPolicy } from "../../lib/permissions";
 import { sessionLog } from "../../lib/sessionLog";
@@ -62,8 +61,7 @@ export function buildTurnParams(
       // 显式解析默认强度：collaborationMode 会整体替换服务端设置，传 null 会回落到
       // 模型自带默认而非 config.toml 的 model_reasoning_effort
       reasoning_effort: session?.effort ?? (effectiveEffort(session) || null),
-      developer_instructions:
-        mode === "default" ? bundledToolsDeveloperInstructions() : null,
+      developer_instructions: null,
     },
   };
   return params;

@@ -2,7 +2,6 @@ import { newEmptySession, openSessionTabForThread, sendPrompt } from "../useCode
 import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { buildTurnParams, clearGoal, setGoal } from "../useCodex/turnControl";
-import { availableBundledTools } from "../useBundledTools";
 import { activeTabId } from "../useEditorTabs";
 import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
@@ -406,10 +405,6 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
 });
 
 describe("buildTurnParams 三面独立映射", () => {
-  beforeEach(() => {
-    availableBundledTools.value = [];
-  });
-
   it("权限/协作模式/模型各自独立派生，互不串扰", () => {
     store.models = [DEFAULT_MODEL];
     const params = buildTurnParams(
@@ -460,9 +455,8 @@ describe("buildTurnParams 三面独立映射", () => {
     expect(params.approvalsReviewer).toBeUndefined();
   });
 
-  it("默认模式且检测到捆绑工具时注入 developer_instructions，计划模式保持 null", () => {
+  it("默认与计划模式的 developer_instructions 均为 null", () => {
     store.models = [DEFAULT_MODEL];
-    availableBundledTools.value = ["rg", "fd", "ast-grep"];
     const params = buildTurnParams(
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
@@ -479,12 +473,9 @@ describe("buildTurnParams 三面独立映射", () => {
         settings?: { developer_instructions?: string | null };
       }
     ).settings?.developer_instructions;
-    expect(dev).toBeTruthy();
-    expect(dev).toContain("rg：文本搜索");
-    expect(dev).toContain("fd：按名快速查找文件/目录");
-    expect(dev).toContain("ast-grep / sg");
+    expect(dev).toBeNull();
 
-    // 计划模式（plan）不受工具提示影响，保持 null
+    // 计划模式同样不注入
     const planParams = buildTurnParams(
       "t1",
       [{ type: "text", text: "hi", text_elements: [] }],
