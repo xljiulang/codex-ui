@@ -94,7 +94,7 @@ onBeforeUnmount(refresh);
             class="zen-proxy-status"
             :class="status.running ? 'is-running' : 'is-stopped'"
           >
-            {{ status.running ? `运行中（端口 ${status.port}）` : "已停止" }}
+            {{ status.running ? "运行中" : "已停止" }}
           </span>
         </div>
       </div>
@@ -179,12 +179,14 @@ onBeforeUnmount(refresh);
 .zen-proxy-status {
   font-size: var(--font-xs);
   font-weight: 600;
-  padding: 2px var(--space-3);
+  line-height: 1;
   border-radius: 999px;
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
 }
 .zen-proxy-status.is-running {
-  color: var(--ok);
-  background: rgba(var(--ok-rgb, 76, 175, 80), 0.12);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 .zen-proxy-status.is-stopped {
   color: var(--text-faint);
