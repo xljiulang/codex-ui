@@ -10,11 +10,14 @@ import {
   type ZenProxyStatus,
 } from "../../composables/useCodex";
 import { ICON_SAVE } from "../../lib/icons";
+import { openDocsUrl } from "../../lib/links";
 
 defineProps<{ active: boolean }>();
 
 const DEFAULT_PORT = 18080;
 const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
+const ZEN_PRICING_DOCS_URL =
+  "https://open-code.ai/zh/docs/zen#%E5%AE%9A%E4%BB%B7";
 
 /** 本地代理运行状态（由 zen_proxy_status 驱动；未获取时默认停止） */
 const status = ref<ZenProxyStatus>({ running: false, port: DEFAULT_PORT });
@@ -63,8 +66,8 @@ async function onToggle(checked: boolean) {
   await refresh();
 }
 
-/** 应用端口 + API 地址变更（保存设置并重启代理） */
-async function onApply() {
+/** 保存端口 + API 地址变更（保存设置并重启代理） */
+async function onSave() {
   const port = validatePort(portInput.value);
   if (!port) return;
   const enabled = store.settings.zen_proxy_enabled ?? false;
@@ -88,7 +91,7 @@ onBeforeUnmount(refresh);
 
 <template>
   <section v-show="active" class="settings-section settings-section-zen-proxy">
-    <h2 class="settings-section-title">Zen 本地代理</h2>
+    <h2 class="settings-section-title">Zen 代理</h2>
     <p class="settings-section-desc">
       在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions 转发到 OpenCode
       Zen 免费模型
@@ -96,9 +99,15 @@ onBeforeUnmount(refresh);
     <div class="model-config-card">
       <div class="model-config-card-head">
         <div class="zen-proxy-head-main">
-          <h3>Zen 代理服务</h3>
+          <h3>Zen 本地代理服务</h3>
           <p class="zen-proxy-head-desc">
-            model 为 zen 免费模型，base_url 为 http://127.0.0.1:{{
+            model 为
+            <a
+              class="zen-proxy-docs-link"
+              :href="ZEN_PRICING_DOCS_URL"
+              v-tooltip="'Zen 定价文档（浏览器打开）'"
+              @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
+            >Zen 免费模型</a>，base_url 为 http://127.0.0.1:{{
               store.settings.zen_proxy_port ?? DEFAULT_PORT
             }}/v1，experimental_bearer_token 为 public 或你自己的 key
           </p>
@@ -153,11 +162,11 @@ onBeforeUnmount(refresh);
       </div>
 
       <div class="zen-proxy-actions">
-        <button class="btn zen-proxy-apply-btn" @click="onApply">
+        <button class="btn zen-proxy-apply-btn" @click="onSave">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_SAVE" />
           </svg>
-          <span>应用</span>
+          <span>保存</span>
         </button>
       </div>
     </div>
@@ -179,6 +188,18 @@ onBeforeUnmount(refresh);
   font-size: var(--font-md);
   line-height: 1.5;
   color: var(--text-dim);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.zen-proxy-docs-link {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+  user-select: text;
+}
+.zen-proxy-docs-link:hover {
+  color: var(--accent-dim);
+  text-decoration: underline;
 }
 .zen-proxy-badges {
   display: flex;
@@ -210,14 +231,16 @@ onBeforeUnmount(refresh);
   border-radius: 999px;
   flex-shrink: 0;
   padding: 1px var(--space-2);
+  border: 1px solid transparent;
 }
 .zen-proxy-status.is-running {
   color: var(--accent);
   background: var(--accent-soft);
 }
 .zen-proxy-status.is-stopped {
-  color: var(--text-faint);
-  background: var(--bg-2);
+  color: var(--text-dim);
+  background: var(--bg-input);
+  border-color: var(--border);
 }
 .zen-proxy-port-badge {
   font-size: var(--font-xs);
