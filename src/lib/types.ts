@@ -8,6 +8,16 @@ export interface ServerStatus {
   logs: string[];
 }
 
+/** codex app-server error/warning 诊断消息（后端 `codex/message` 事件） */
+export interface CodexMessageEvent {
+  level: "error" | "warn";
+  method: "error" | "warning";
+  message: string;
+  codexErrorInfo?: unknown;
+  threadId?: string;
+  turnId?: string;
+}
+
 export interface ThreadSummary {
   id: string;
   name?: string | null;

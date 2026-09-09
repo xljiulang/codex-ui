@@ -366,6 +366,8 @@ E2E 探针自建临时目录与会话，结束时自动清理；CDP 端口被占
 codex app-server generate-ts --out <dir> --experimental
 ```
 
+`error`/`warning` 通知统一写入 `%APPDATA%\com.codexui.app\logs\codex-YYYY-MM-DD.log`（保留 7 天）；DEBUG 构建下两者都弹 toast，Release 构建下仅 `error` 弹，`warning` 只落盘不提示。
+
 **置顶**（0.149.x 固定协议）：`threadSection/list` 定位内置 `Pinned` 分区 → `thread/section/move { sectionId }` 置顶 / `{ sectionId: null }` 取消。`threadSection/list` 失败时回退内置 Pinned 分区常量 id。
 
 **标题自动总结**（0.149.x 固定协议）：新建会话后恒用 ephemeral 临时线程总结首条消息并立即注销，失败静默保留默认标题。

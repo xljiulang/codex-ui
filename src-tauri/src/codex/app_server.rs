@@ -39,6 +39,8 @@ pub struct CodexServer {
     workspace: PathBuf,
     run_started: AtomicBool,
     log: Option<Arc<SessionLog>>,
+    /// codex app-server 的 error/warning 消息日志（`codex-YYYY-MM-DD.log`）。
+    codex_log: Option<Arc<SessionLog>>,
 }
 
 struct Shared {
@@ -121,11 +123,17 @@ impl Inner {
 
 impl CodexServer {
     pub fn new(app: AppHandle, workspace: PathBuf) -> Self {
-        let log = app
+        let logs_dir = app
             .path()
             .app_data_dir()
             .ok()
-            .map(|d| Arc::new(SessionLog::new(d.join("logs"))));
+            .map(|d| d.join("logs"));
+        let log = logs_dir
+            .as_ref()
+            .map(|d| Arc::new(SessionLog::new(d.clone())));
+        let codex_log = logs_dir
+            .as_ref()
+            .map(|d| Arc::new(SessionLog::with_prefix(d.clone(), "codex-")));
         Self {
             app,
             shared: Arc::new(Shared {
@@ -139,6 +147,7 @@ impl CodexServer {
             workspace,
             run_started: AtomicBool::new(false),
             log,
+            codex_log,
         }
     }
 
@@ -221,6 +230,47 @@ impl CodexServer {
             .map(|d| vec![("msg".to_string(), d)])
             .unwrap_or_default();
         self.log_file(&level, thread_id.as_deref(), &event, &kv);
+    }
+
+    /// 记录并转发 codex 的 error/warning 通知：
+    /// 两类消息都写 `codex-YYYY-MM-DD.log`；DEBUG 构建向前端发送全部，
+    /// Release 构建只发送 error（warning 仅落盘）。
+    fn log_codex_message(&self, method: &str, params: &Value) {
+        let Some(level) = codex_message_level(method) else {
+            return;
+        };
+        let message = codex_message_text(method, params);
+        let thread = params.get("threadId").and_then(|v| v.as_str());
+        let turn_id = params.get("turnId").and_then(|v| v.as_str());
+        let error_info = params.pointer("/error/codexErrorInfo").cloned();
+        let mut kv = vec![("message".to_string(), message.clone())];
+        if let Some(turn_id) = turn_id {
+            kv.push(("turnId".to_string(), turn_id.to_string()));
+        }
+        if let Some(info) = &error_info {
+            kv.push(("codexErrorInfo".to_string(), json_value_text(info)));
+        }
+        if let Some(log) = &self.codex_log {
+            log.write(level, thread, method, &kv);
+        }
+        if !should_emit_codex_message(level, cfg!(debug_assertions)) {
+            return;
+        }
+        let mut payload = json!({
+            "level": level,
+            "method": method,
+            "message": message,
+        });
+        if let Some(thread) = thread {
+            payload["threadId"] = json!(thread);
+        }
+        if let Some(turn_id) = turn_id {
+            payload["turnId"] = json!(turn_id);
+        }
+        if let Some(info) = error_info {
+            payload["codexErrorInfo"] = info;
+        }
+        let _ = self.app.emit("codex/message", payload);
     }
 
     async fn run(self: Arc<Self>) {
@@ -594,6 +644,7 @@ impl CodexServer {
         if let Some(method) = v.get("method").and_then(|m| m.as_str()) {
             let params = v.get("params").cloned().unwrap_or(Value::Null);
             self.log_event(method, method, &params);
+            self.log_codex_message(method, &params);
             let _ = self.shared.tap.send((method.to_string(), params.clone()));
             let _ = self.app.emit(method, params);
         }
@@ -966,6 +1017,44 @@ fn truncate(s: &str, max: usize) -> String {
         out.push('…');
         out
     }
+}
+
+/// codex 诊断通知级别：当前只处理 error/warning 两类。
+fn codex_message_level(method: &str) -> Option<&'static str> {
+    match method {
+        "error" => Some("error"),
+        "warning" => Some("warn"),
+        _ => None,
+    }
+}
+
+/// 提取 codex error/warning 的消息正文；缺失时回退为截断后的紧凑 JSON。
+fn codex_message_text(method: &str, params: &Value) -> String {
+    let raw = match method {
+        "error" => params
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .or_else(|| params.get("message").and_then(|v| v.as_str())),
+        "warning" => params.get("message").and_then(|v| v.as_str()),
+        _ => None,
+    };
+    if let Some(text) = raw.filter(|s| !s.trim().is_empty()) {
+        return truncate(text, 500);
+    }
+    truncate(&params.to_string(), 500)
+}
+
+/// DEBUG 构建发送全部诊断消息；Release 只发送 error。
+fn should_emit_codex_message(level: &str, debug: bool) -> bool {
+    level == "error" || debug
+}
+
+/// JSON 值转日志文本：字符串原样，其它类型序列化。
+fn json_value_text(value: &Value) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
 }
 
 /// 判断通知是否为流式增量事件：事件名最后一段包含 delta（大小写不敏感），
@@ -1394,6 +1483,35 @@ mod tests {
         ] {
             assert!(!is_streaming_delta(e), "{e} 不应视为流式事件");
         }
+    }
+
+    #[test]
+    fn codex_message_level_only_maps_error_and_warning() {
+        assert_eq!(codex_message_level("error"), Some("error"));
+        assert_eq!(codex_message_level("warning"), Some("warn"));
+        assert_eq!(codex_message_level("configWarning"), None);
+        assert_eq!(codex_message_level("turn/started"), None);
+    }
+
+    #[test]
+    fn codex_message_text_extracts_error_and_warning() {
+        let error = serde_json::json!({
+            "error": { "message": "boom", "codexErrorInfo": "serverOverloaded" }
+        });
+        assert_eq!(codex_message_text("error", &error), "boom");
+        let warning = serde_json::json!({ "message": "careful" });
+        assert_eq!(codex_message_text("warning", &warning), "careful");
+        // 缺正文时回退为紧凑 JSON，且空字符串不会被当作有效消息
+        let fallback = serde_json::json!({ "error": { "message": "  " }, "threadId": "t1" });
+        assert!(codex_message_text("error", &fallback).contains("threadId"));
+    }
+
+    #[test]
+    fn should_emit_codex_message_filters_warning_in_release() {
+        assert!(should_emit_codex_message("error", false));
+        assert!(should_emit_codex_message("error", true));
+        assert!(should_emit_codex_message("warn", true));
+        assert!(!should_emit_codex_message("warn", false));
     }
 
     #[test]

@@ -5,9 +5,9 @@ import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import {
   friendlyServerError,
   friendlyServerMessage,
-  isIgnoredWarning,
 } from "../../lib/serverMessages";
 import {
+  type CodexMessageEvent,
   isThreadItemType,
   type AgentMessageItem,
   type CommandExecutionItem,
@@ -660,23 +660,19 @@ export async function wireEvents() {
   );
 
   unlisteners.push(
-    await listen("error", (e) => {
-      const p = e.payload as {
-        error?: { message?: string; codexErrorInfo?: unknown };
-      };
-      const err = p.error;
-      setToast(
-        err && (err.message || err.codexErrorInfo)
-          ? friendlyServerError(err)
-          : "codex 发生错误",
-      );
-    }),
-    await listen("warning", (e) => {
-      const p = e.payload as { message?: string };
-      if (p?.message) {
-        if (isIgnoredWarning(p.message)) return;
-        setToast(friendlyServerMessage(p.message));
+    await listen("codex/message", (e) => {
+      const p = e.payload as CodexMessageEvent;
+      if (!p?.message) return;
+      if (p.level === "error") {
+        setToast(
+          friendlyServerError({
+            error: { message: p.message, codexErrorInfo: p.codexErrorInfo },
+          }),
+        );
+        return;
       }
+      // 非 error 只会在 DEBUG 构建由后端发送；Release 下 warning 仅落盘
+      setToast(friendlyServerMessage(p.message));
     }),
   );
 

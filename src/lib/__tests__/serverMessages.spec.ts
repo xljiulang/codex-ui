@@ -3,7 +3,6 @@ import {
   extractErrorMessage,
   friendlyServerError,
   friendlyServerMessage,
-  isIgnoredWarning,
 } from "../serverMessages";
 
 describe("friendlyServerMessage 服务端消息本地化", () => {
@@ -120,33 +119,5 @@ describe("extractErrorMessage 提取优先级", () => {
     expect(extractErrorMessage("raw")).toBe("raw");
     expect(extractErrorMessage(42)).toBe("42");
     expect(extractErrorMessage(null)).toBe("null");
-  });
-});
-
-describe("isIgnoredWarning 模型 metadata 回退提示", () => {
-  it("命中原样大小写消息", () => {
-    expect(
-      isIgnoredWarning(
-        "Model metadata for `deepseek-v4.1-flash-expires-on-0910` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
-      ),
-    ).toBe(true);
-  });
-
-  it("小写变体同样命中", () => {
-    expect(
-      isIgnoredWarning(
-        "model metadata for `x` not found. defaulting to fallback metadata",
-      ),
-    ).toBe(true);
-  });
-
-  it("仅含 metadata/fallback 关键词不误判", () => {
-    expect(isIgnoredWarning("metadata updated")).toBe(false);
-    expect(isIgnoredWarning("using fallback config")).toBe(false);
-  });
-
-  it("无关警告不命中", () => {
-    expect(isIgnoredWarning("thread is busy")).toBe(false);
-    expect(isIgnoredWarning("")).toBe(false);
   });
 });

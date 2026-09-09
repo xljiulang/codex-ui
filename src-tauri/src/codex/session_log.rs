@@ -10,10 +10,11 @@ use std::sync::Mutex;
 
 /// 保留天数（含当天共 7 个自然日）
 const KEEP_DAYS: i64 = 7;
-const FILE_PREFIX: &str = "session-";
+const DEFAULT_PREFIX: &str = "session-";
 
 pub struct SessionLog {
     dir: PathBuf,
+    prefix: String,
     inner: Mutex<Inner>,
 }
 
@@ -26,9 +27,15 @@ struct Inner {
 
 impl SessionLog {
     pub fn new(dir: PathBuf) -> Self {
+        Self::with_prefix(dir, DEFAULT_PREFIX)
+    }
+
+    /// 使用自定义文件名前缀创建日志（如 `codex-`）；目录不可创建时写入静默失败。
+    pub fn with_prefix(dir: PathBuf, prefix: &str) -> Self {
         let _ = fs::create_dir_all(&dir);
         Self {
             dir,
+            prefix: prefix.to_string(),
             inner: Mutex::new(Inner {
                 current: None,
                 last_cleanup: None,
@@ -56,11 +63,11 @@ impl SessionLog {
             Err(e) => e.into_inner(),
         };
         if inner.current.as_ref().map(|(d, _)| d.as_str()) != Some(date.as_str()) {
-            inner.current = open_file(&self.dir, &date)
+            inner.current = open_file(&self.dir, &date, &self.prefix)
                 .ok()
                 .map(|f| (date.clone(), f));
             if inner.last_cleanup.as_deref() != Some(date.as_str()) {
-                cleanup_impl(&self.dir, &date);
+                cleanup_impl(&self.dir, &date, &self.prefix);
                 inner.last_cleanup = Some(date);
             }
         }
@@ -143,15 +150,15 @@ fn value_str(v: &Value) -> String {
         .unwrap_or_else(|| v.to_string())
 }
 
-fn open_file(dir: &Path, date: &str) -> std::io::Result<File> {
+fn open_file(dir: &Path, date: &str, prefix: &str) -> std::io::Result<File> {
     OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join(format!("{FILE_PREFIX}{date}.log")))
+        .open(dir.join(format!("{prefix}{date}.log")))
 }
 
 /// 删除日期早于今天-6 天的日志文件（含今天共保留 7 个自然日）。
-fn cleanup_impl(dir: &Path, today: &str) {
+fn cleanup_impl(dir: &Path, today: &str, prefix: &str) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -161,7 +168,7 @@ fn cleanup_impl(dir: &Path, today: &str) {
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(date) = name
-            .strip_prefix(FILE_PREFIX)
+            .strip_prefix(prefix)
             .and_then(|s| s.strip_suffix(".log"))
         else {
             continue;
@@ -248,9 +255,9 @@ mod tests {
         let dir = tmp_dir();
         for day in 10..=17 {
             let date = format!("2026-08-{day:02}");
-            let _ = open_file(dir.path(), &date).unwrap();
+            let _ = open_file(dir.path(), &date, DEFAULT_PREFIX).unwrap();
         }
-        cleanup_impl(dir.path(), "2026-08-17");
+        cleanup_impl(dir.path(), "2026-08-17", DEFAULT_PREFIX);
         let names: Vec<String> = fs::read_dir(dir.path())
             .unwrap()
             .flatten()
@@ -260,6 +267,33 @@ mod tests {
         for day in 11..=17 {
             assert!(names.iter().any(|n| n.contains(&format!("2026-08-{day:02}"))));
         }
+    }
+
+    #[test]
+    fn custom_prefix_writes_codex_file_and_cleanup_is_isolated() {
+        let dir = tmp_dir();
+        let codex = SessionLog::with_prefix(dir.path().to_path_buf(), "codex-");
+        codex.write_at(local(2026, 9, 9, 12, 0, 0), "warn", Some("t"), "warning", &[]);
+        let session = SessionLog::new(dir.path().to_path_buf());
+        session.write_at(local(2026, 9, 9, 12, 0, 0), "info", Some("t"), "ev", &[]);
+        let names: Vec<String> = read_files(dir.path())
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert!(names.iter().any(|n| n == "codex-2026-09-09.log"));
+        assert!(names.iter().any(|n| n == "session-2026-09-09.log"));
+
+        // codex 前缀清理不删除 session 文件，反之亦然
+        let _ = open_file(dir.path(), "2026-09-02", "codex-").unwrap();
+        let _ = open_file(dir.path(), "2026-09-02", DEFAULT_PREFIX).unwrap();
+        cleanup_impl(dir.path(), "2026-09-09", "codex-");
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(!names.iter().any(|n| n == "codex-2026-09-02.log"));
+        assert!(names.iter().any(|n| n == "session-2026-09-02.log"));
     }
 
     #[test]

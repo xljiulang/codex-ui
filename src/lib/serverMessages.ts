@@ -114,20 +114,6 @@ export function friendlyServerMessage(raw: string): string {
   return raw;
 }
 
-/**
- * 是否为「模型 metadata 未找到，回退到 fallback metadata」的警告。
- * 该提示只在 warning 通道以 message 字符串下发，无结构化 codexErrorInfo，
- * 因此按文本匹配；同时命中三个子串才判真，避免误吞其它 metadata/fallback 类消息。
- */
-export function isIgnoredWarning(raw: string): boolean {
-  const lower = raw.toLowerCase();
-  return (
-    lower.includes("model metadata for") &&
-    lower.includes("not found") &&
-    lower.includes("defaulting to fallback metadata")
-  );
-}
-
 /** 错误对象/值 → 友好中文：优先结构化 codexErrorInfo，其次消息文本匹配，未匹配保留原文 */
 export function friendlyServerError(e: unknown): string {
   if (e && typeof e === "object") {
