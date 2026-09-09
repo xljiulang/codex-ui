@@ -11,6 +11,7 @@ export {
   rootError,
   searchActive,
   searchResults,
+  searchSnippets,
   searchTerm,
   searching,
   selectedPath,
@@ -32,7 +33,7 @@ export {
   revealInTree,
   toggleDir,
 } from "./tree";
-export { clearSearch, onSearchInput, runSearchNow } from "./search";
+export { clearSearch, onSearchInput, runSearchNow, searchSnippet } from "./search";
 export {
   copyEntry,
   createFolder,

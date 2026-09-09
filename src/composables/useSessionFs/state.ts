@@ -4,6 +4,7 @@ import {
   isPathUnderRoot,
   type FsEntry,
   type ResourceRow,
+  type SearchSnippet,
 } from "../../lib/sessionFs";
 
 export const rootEntry = ref<FsEntry | null>(null);
@@ -17,6 +18,8 @@ export const loadingByPath = reactive<Record<string, boolean>>({});
 
 export const searchTerm = ref("");
 export const searchResults = ref<FsEntry[]>([]);
+/** 内容命中摘要：键为 normalizePathKey(entry.path) */
+export const searchSnippets = ref<Record<string, SearchSnippet>>({});
 export const searching = ref(false);
 export const selectedPath = ref("");
 /**
@@ -41,6 +44,7 @@ export function resetTree() {
   rootEntry.value = null;
   rootError.value = "";
   searchResults.value = [];
+  searchSnippets.value = {};
   selectedPath.value = "";
   iconCache.clear();
 }

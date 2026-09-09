@@ -217,6 +217,8 @@ pub fn run() {
             codex::browser_bridge::browser_bridge_status,
             codex::session_fs::session_fs_list,
             codex::session_fs::session_fs_search,
+            codex::session_fs::session_fs_rg_status,
+            codex::session_fs::session_fs_search_rg,
             codex::session_fs::session_fs_metadata,
             codex::session_fs::session_fs_rename,
             codex::session_fs::session_fs_delete,

@@ -131,6 +131,15 @@
   text-overflow: ellipsis;
 }
 
+.resource-search-snippet {
+  min-width: 0;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .resource-side {
   flex-shrink: 0;
   display: inline-flex;

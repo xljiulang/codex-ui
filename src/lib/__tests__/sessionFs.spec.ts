@@ -6,7 +6,9 @@ import {
   formatFileTime,
   isPathUnderRoot,
   joinFsPath,
+  mergeSearchResults,
   type FsEntry,
+  type RgHit,
 } from "../sessionFs";
 
 const root: FsEntry = {
@@ -100,6 +102,62 @@ describe("flattenResourceTree", () => {
   it("未加载目录不产生子行（懒加载缓存为空）", () => {
     const rows = flattenResourceTree(root, { "D:\\repo": [src] }, new Set([root.path]));
     expect(rows).toHaveLength(2);
+  });
+});
+
+describe("mergeSearchResults", () => {
+  const contentA: FsEntry = {
+    name: "z.ts",
+    path: "D:\\repo\\z.ts",
+    relPath: "z.ts",
+    isDir: false,
+    size: 1,
+    modifiedAtMs: 0,
+    createdAtMs: 0,
+    childCount: null,
+  };
+  const contentB: FsEntry = {
+    name: "b.ts",
+    path: "D:\\repo\\src\\b.ts",
+    relPath: "src/b.ts",
+    isDir: false,
+    size: 1,
+    modifiedAtMs: 0,
+    createdAtMs: 0,
+    childCount: null,
+  };
+
+  it("文件名结果在前，内容-only 结果去重排序并附首个命中摘要", () => {
+    const hits: RgHit[] = [
+      { entry: main, lineNumber: 12, lineText: "const needle = 1;" },
+      { entry: main, lineNumber: 99, lineText: "later duplicate" },
+      { entry: contentA, lineNumber: 3, lineText: "z hit" },
+      { entry: contentB, lineNumber: 4, lineText: "b hit" },
+    ];
+    const merged = mergeSearchResults([main, main, readme], hits);
+    expect(merged.results.map((e) => e.relPath)).toEqual([
+      "src/main.ts",
+      "README.md",
+      "src/b.ts",
+      "z.ts",
+    ]);
+    expect(merged.snippets["d:\\repo\\src\\main.ts"]).toEqual({
+      lineNumber: 12,
+      text: "const needle = 1;",
+    });
+    expect(merged.snippets["d:\\repo\\src\\b.ts"]).toEqual({
+      lineNumber: 4,
+      text: "b hit",
+    });
+  });
+
+  it("无内容命中时保持文件名结果原顺序", () => {
+    const merged = mergeSearchResults([readme, main], []);
+    expect(merged.results.map((e) => e.relPath)).toEqual([
+      "README.md",
+      "src/main.ts",
+    ]);
+    expect(merged.snippets).toEqual({});
   });
 });
 

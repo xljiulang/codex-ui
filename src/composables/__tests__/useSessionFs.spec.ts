@@ -30,6 +30,7 @@ import {
   revealAbsPathInTree,
   rootError,
   rootEntry,
+  searchSnippets,
   searchTerm,
   selectedPath,
   setSessionFsActive,
@@ -281,12 +282,16 @@ it("工作区由非空变空：清残留搜索词并进入暂无工作目录空�
 
   // 模拟残留的搜索词：工作区变空时应被清空，避免空态误显示「无匹配结果」
   searchTerm.value = "残留";
+  searchSnippets.value = {
+    "d:\\repo\\a.txt": { lineNumber: 1, text: "残留摘要" },
+  };
   await flushPromises();
 
   store.workspace = "";
   await flushPromises();
 
   expect(searchTerm.value).toBe("");
+  expect(searchSnippets.value).toEqual({});
   expect(rootError.value).toBe("暂无工作目录");
   expect(rootEntry.value).toBeNull();
   __resetSessionFsForTest();

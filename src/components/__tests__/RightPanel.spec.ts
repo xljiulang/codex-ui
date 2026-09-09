@@ -79,6 +79,10 @@ function mockFs() {
       return Promise.resolve([]);
     }
     if (cmd === "session_fs_search") return Promise.resolve([mainTs]);
+    if (cmd === "session_fs_rg_status")
+      return Promise.resolve({ available: false, path: null });
+    if (cmd === "session_fs_search_rg")
+      return Promise.resolve({ available: false, hits: [] });
     if (
       cmd === "session_fs_watch_start" ||
       cmd === "session_fs_watch_stop" ||

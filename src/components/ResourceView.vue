@@ -28,6 +28,7 @@ import {
   rootError,
   runSearchNow,
   searchActive,
+  searchSnippet,
   searching,
   searchResults,
   searchTerm,
@@ -169,6 +170,12 @@ function fileIcon(entry: FsEntry): string | undefined {
 function fileMeta(entry: FsEntry): string {
   const parts = [formatFileSize(entry.size), formatFileTime(entry.modifiedAtMs)];
   return parts.filter(Boolean).join(" · ");
+}
+
+/** 内容命中摘要：行号 + 命中行文本；无摘要返回空字符串 */
+function searchSnippetLabel(entry: FsEntry): string {
+  const snippet = searchSnippet(entry);
+  return snippet ? `${snippet.lineNumber}: ${snippet.text}` : "";
 }
 
 /** 打开前先按扩展名分发：PDF/图像/XLSX/DOCX/PPTX → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
@@ -365,6 +372,10 @@ onBeforeUnmount(() => {
           <span class="resource-main">
             <span class="resource-name">{{ entry.name }}</span>
             <span class="resource-relpath">{{ entry.relPath }}</span>
+            <span
+              v-if="searchSnippetLabel(entry)"
+              class="resource-search-snippet"
+            >{{ searchSnippetLabel(entry) }}</span>
           </span>
         </div>
         <div v-if="!searching && !searchResults.length" class="menu-note">

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::io::Read;
@@ -9,6 +10,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
+use crate::codex::app_server::app_exe_dir;
 use crate::codex::path_util::{clean_path, is_inside_path, norm_key, rel_path_of as shared_rel_path_of};
 use crate::codex::file_icon::{DEFAULT_ICON_SIZE, icon_data_uri, icon_data_uri_for_ext};
 use crate::codex::util::{BlockingError, resolve_workspace_dir, spawn_blocking_timeout};
@@ -28,6 +30,31 @@ pub struct FsEntry {
     pub created_at_ms: i64,
     /// 目录的直接可见子项数（文件为 None）
     pub child_count: Option<u64>,
+}
+
+/// 捆绑 rg 可用状态（camelCase 序列化）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RgStatus {
+    pub available: bool,
+    pub path: Option<String>,
+}
+
+/// rg 内容命中：每个文件只取首个命中行
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RgHit {
+    pub entry: FsEntry,
+    pub line_number: u64,
+    pub line_text: String,
+}
+
+/// rg 内容搜索结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RgSearchResult {
+    pub available: bool,
+    pub hits: Vec<RgHit>,
 }
 
 /// 文件监听句柄（sender 被 drop 时防抖任务随 rx 关闭退出）
@@ -222,6 +249,169 @@ fn search_impl(root: &Path, query: &str, limit: usize) -> Result<Vec<FsEntry>, S
     Ok(out)
 }
 
+/// <应用目录>/bin/rg.exe，存在才返回（纯函数，便于测试）
+fn rg_exe_in(app_dir: &Path) -> Option<PathBuf> {
+    let p = app_dir.join("bin").join("rg.exe");
+    p.is_file().then_some(p)
+}
+
+/// 当前应用目录下捆绑的 rg；无法定位应用目录或文件缺失时返回 None。
+fn bundled_rg_exe() -> Option<PathBuf> {
+    let dir = app_exe_dir()?;
+    rg_exe_in(&dir)
+}
+
+/// Windows GUI 应用下隐藏 rg 控制台窗口
+fn rg_command(rg: &Path) -> Command {
+    let mut cmd = Command::new(rg);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// 资源面板内容搜索参数：普通文本、忽略大小写、每文件首个命中、
+/// 跳过 node_modules 与超大文件；`--` 保证以 `-` 开头的查询不被当作选项。
+fn rg_args(query: &str, root: &Path) -> Vec<String> {
+    vec![
+        "--json".into(),
+        "--fixed-strings".into(),
+        "--ignore-case".into(),
+        "--max-count".into(),
+        "1".into(),
+        "--max-filesize".into(),
+        "2M".into(),
+        "--no-messages".into(),
+        "--glob".into(),
+        "!**/node_modules/**".into(),
+        "--".into(),
+        query.into(),
+        root.to_string_lossy().into_owned(),
+    ]
+}
+
+/// 命中行摘要：去掉首尾空白，超过上限时截断并追加省略号。
+fn truncate_snippet(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars).collect();
+    out.push('…');
+    out
+}
+
+/// 解析 `rg --json` 输出中的 match 事件；跳过畸形行、root 外路径与重复文件。
+fn parse_rg_json(stdout: &str, root: &Path, limit: usize) -> Vec<RgHit> {
+    const MAX_HITS: usize = 200;
+    const MAX_SNIPPET_CHARS: usize = 200;
+    let max = limit.min(MAX_HITS);
+    let mut hits = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in stdout.lines() {
+        if hits.len() >= max {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value.get("type").and_then(|t| t.as_str()) != Some("match") {
+            continue;
+        }
+        let Some(data) = value.get("data") else {
+            continue;
+        };
+        let Some(path_text) = data.pointer("/path/text").and_then(|p| p.as_str()) else {
+            continue;
+        };
+        let raw_path = PathBuf::from(path_text);
+        let raw_path = if raw_path.is_absolute() {
+            raw_path
+        } else {
+            root.join(raw_path)
+        };
+        let Ok(target) = ensure_inside(root, &raw_path) else {
+            continue;
+        };
+        if !target.is_file() {
+            continue;
+        }
+        if !seen.insert(norm_key(&target)) {
+            continue;
+        }
+        let Ok(entry) = entry_from_path(root, &target) else {
+            continue;
+        };
+        let line_number = data
+            .get("line_number")
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0);
+        let line_text = data
+            .pointer("/lines/text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .trim();
+        hits.push(RgHit {
+            entry,
+            line_number,
+            line_text: truncate_snippet(line_text, MAX_SNIPPET_CHARS),
+        });
+    }
+    hits.sort_by(|a, b| {
+        a.entry
+            .rel_path
+            .to_lowercase()
+            .cmp(&b.entry.rel_path.to_lowercase())
+            .then_with(|| a.entry.rel_path.cmp(&b.entry.rel_path))
+    });
+    hits
+}
+
+/// 执行一次 rg 内容搜索；rg 缺失/执行失败/超时均由调用方转为静默空结果。
+fn search_rg_impl(
+    root: &Path,
+    query: &str,
+    limit: usize,
+    rg: Option<&Path>,
+) -> RgSearchResult {
+    let q = query.trim();
+    let Some(rg) = rg else {
+        return RgSearchResult {
+            available: false,
+            hits: Vec::new(),
+        };
+    };
+    if q.is_empty() {
+        return RgSearchResult {
+            available: true,
+            hits: Vec::new(),
+        };
+    }
+    let output = match rg_command(rg).args(rg_args(q, root)).output() {
+        Ok(out) => out,
+        Err(_) => {
+            return RgSearchResult {
+                available: true,
+                hits: Vec::new(),
+            }
+        }
+    };
+    // rg: 0 = 有匹配，1 = 无匹配，其余视为执行失败（静默回退文件名结果）
+    if !matches!(output.status.code(), Some(0) | Some(1)) {
+        return RgSearchResult {
+            available: true,
+            hits: Vec::new(),
+        };
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    RgSearchResult {
+        available: true,
+        hits: parse_rg_json(&stdout, root, limit),
+    }
+}
+
 fn metadata_impl(root: &Path, path: &Path) -> Result<FsEntry, String> {
     let c = ensure_inside(root, path)?;
     entry_from_path(root, &c)
@@ -405,6 +595,34 @@ pub async fn session_fs_search(
     run_blocking(120, move || {
         let root_p = resolve_workspace_dir(&workspace)?;
         search_impl(&root_p, &query, limit.unwrap_or(200))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn session_fs_rg_status() -> Result<RgStatus, String> {
+    let path = bundled_rg_exe();
+    Ok(RgStatus {
+        available: path.is_some(),
+        path: path.map(|p| clean_path(&p)),
+    })
+}
+
+#[tauri::command]
+pub async fn session_fs_search_rg(
+    workspace: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<RgSearchResult, String> {
+    let rg = bundled_rg_exe();
+    run_blocking(30, move || {
+        let root_p = resolve_workspace_dir(&workspace)?;
+        Ok(search_rg_impl(
+            &root_p,
+            &query,
+            limit.unwrap_or(100),
+            rg.as_deref(),
+        ))
     })
     .await
 }
@@ -1169,6 +1387,137 @@ mod tests {
         // 空查询与上限
         assert!(search_impl(&root, "  ", 100).unwrap().is_empty());
         assert!(search_impl(&root, "a", 1).unwrap().len() <= 1);
+    }
+
+    #[test]
+    fn rg_exe_in_requires_regular_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(rg_exe_in(tmp.path()).is_none());
+        std::fs::create_dir_all(tmp.path().join("bin").join("rg.exe")).unwrap();
+        assert!(rg_exe_in(tmp.path()).is_none());
+        std::fs::remove_dir_all(tmp.path().join("bin").join("rg.exe")).unwrap();
+        std::fs::write(tmp.path().join("bin").join("rg.exe"), b"MZ").unwrap();
+        assert_eq!(
+            rg_exe_in(tmp.path()),
+            Some(tmp.path().join("bin").join("rg.exe"))
+        );
+    }
+
+    #[test]
+    fn rg_args_lock_search_semantics() {
+        let args = rg_args("needle", Path::new("C:\\repo"));
+        for expected in [
+            "--json",
+            "--fixed-strings",
+            "--ignore-case",
+            "--max-count",
+            "1",
+            "--max-filesize",
+            "2M",
+            "--no-messages",
+            "--glob",
+            "!**/node_modules/**",
+            "--",
+            "needle",
+            "C:\\repo",
+        ] {
+            assert!(args.iter().any(|a| a == expected), "missing {expected}");
+        }
+        assert_eq!(args[args.len() - 2], "needle");
+    }
+
+    #[test]
+    fn parse_rg_json_extracts_first_match_and_skips_invalid() {
+        let (tmp, root) = tree();
+        std::fs::write(root.join("a.txt"), "needle\n").unwrap();
+        std::fs::write(root.join("src").join("main.ts"), "const needle = 1;\n").unwrap();
+        let outside = tmp.path().parent().unwrap().join("outside-rg.txt");
+        std::fs::write(&outside, "needle").unwrap();
+        let a_path = root.join("a.txt").to_string_lossy().into_owned();
+        let main_path = root
+            .join("src")
+            .join("main.ts")
+            .to_string_lossy()
+            .into_owned();
+        let outside_path = outside.to_string_lossy().into_owned();
+        let lines = [
+            serde_json::json!({
+                "type": "match",
+                "data": {
+                    "path": { "text": a_path.as_str() },
+                    "line_number": 2,
+                    "lines": { "text": "  needle here  \n" }
+                }
+            })
+            .to_string(),
+            "not-json".to_string(),
+            serde_json::json!({
+                "type": "match",
+                "data": {
+                    "path": { "text": a_path.as_str() },
+                    "line_number": 3,
+                    "lines": { "text": "duplicate" }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "match",
+                "data": {
+                    "path": { "text": outside_path.as_str() },
+                    "line_number": 1,
+                    "lines": { "text": "outside" }
+                }
+            })
+            .to_string(),
+            serde_json::json!({
+                "type": "match",
+                "data": {
+                    "path": { "text": main_path.as_str() },
+                    "line_number": 4,
+                    "lines": { "text": "const needle = 1;\n" }
+                }
+            })
+            .to_string(),
+        ]
+        .join("\n");
+        let hits = parse_rg_json(&lines, &root, 10);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].entry.rel_path, "a.txt");
+        assert_eq!(hits[0].line_number, 2);
+        assert_eq!(hits[0].line_text, "needle here");
+        assert_eq!(hits[1].entry.rel_path, "src/main.ts");
+        assert_eq!(hits[1].line_number, 4);
+        let _ = std::fs::remove_file(outside);
+        let _ = tmp;
+    }
+
+    #[test]
+    fn parse_rg_json_truncates_and_respects_limit() {
+        let (_tmp, root) = tree();
+        let long = "x".repeat(250);
+        let a_path = root.join("a.txt").to_string_lossy().into_owned();
+        let line = serde_json::json!({
+            "type": "match",
+            "data": {
+                "path": { "text": a_path },
+                "line_number": 1,
+                "lines": { "text": long }
+            }
+        })
+        .to_string();
+        let hits = parse_rg_json(&line, &root, 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line_text.chars().count(), 201);
+        assert!(hits[0].line_text.ends_with('…'));
+        assert!(parse_rg_json(&line, &root, 0).is_empty());
+    }
+
+    #[test]
+    fn search_rg_impl_missing_binary_is_unavailable() {
+        let (_tmp, root) = tree();
+        let result = search_rg_impl(&root, "x", 10, None);
+        assert!(!result.available);
+        assert!(result.hits.is_empty());
     }
 
     #[test]

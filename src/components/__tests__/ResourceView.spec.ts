@@ -43,7 +43,7 @@ import {
   type PreviewEditorTab,
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
-import type { FsEntry } from "../../lib/sessionFs";
+import type { FsEntry, RgHit } from "../../lib/sessionFs";
 import { ICON_AT } from "../../lib/icons";
 import { TabIcon, TabKind } from "../../lib/tabs";
 
@@ -129,6 +129,9 @@ let createdFolder: FsEntry | null = null;
 let createdTextFile: FsEntry | null = null;
 /** 「新建文本文件」菜单系统图标（默认可用；置 null 验证回退 SVG） */
 let txtIconUri: string | null = "data:image/png;base64,TXTICON";
+/** rg 状态与内容命中（默认不可用，按需在用例中开启） */
+let rgAvailable = false;
+let rgHits: RgHit[] = [];
 
 function mockFs() {
   mockedInvoke.mockImplementation((cmd, args) => {
@@ -158,6 +161,15 @@ function mockFs() {
       if (query.toLowerCase().includes("src")) return Promise.resolve([srcDir]);
       if (query.toLowerCase().includes("doc")) return Promise.resolve([docPdf]);
       return Promise.resolve([]);
+    }
+    if (cmd === "session_fs_rg_status") {
+      return Promise.resolve({
+        available: rgAvailable,
+        path: rgAvailable ? rootPath + "\\bin\\rg.exe" : null,
+      });
+    }
+    if (cmd === "session_fs_search_rg") {
+      return Promise.resolve({ available: rgAvailable, hits: rgHits });
     }
     if (cmd === "session_fs_icons") return Promise.resolve([]);
     if (cmd === "session_fs_probe_text") {
@@ -267,6 +279,8 @@ describe("ResourceView 文件树", () => {
     createdFolder = null;
     createdTextFile = null;
     txtIconUri = "data:image/png;base64,TXTICON";
+    rgAvailable = false;
+    rgHits = [];
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
@@ -1345,6 +1359,8 @@ describe("ResourceView 文件树", () => {
 
   it("搜索：防抖后调用 session_fs_search，结果显示，清除恢复树", async () => {
     vi.useFakeTimers();
+    rgAvailable = true;
+    rgHits = [{ entry: mainTs, lineNumber: 5, lineText: "needle" }];
     const wrapper = await mountPanel();
     await wrapper.find(".panel-search").setValue("main");
     await vi.advanceTimersByTimeAsync(300);
@@ -1357,11 +1373,54 @@ describe("ResourceView 文件树", () => {
     });
     expect(wrapper.find(".resource-result").exists()).toBe(true);
     expect(wrapper.text()).toContain("src/main.ts");
+    expect(wrapper.text()).toContain("5: needle");
 
     await wrapper.find(".panel-search-clear").trigger("click");
     await flushPromises();
     expect(wrapper.find(".resource-result").exists()).toBe(false);
+    expect(wrapper.find(".resource-search-snippet").exists()).toBe(false);
     expect(wrapper.find(".resource-root").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("搜索：内容-only 命中追加到文件名结果并显示摘要", async () => {
+    vi.useFakeTimers();
+    rgAvailable = true;
+    rgHits = [{ entry: docPdf, lineNumber: 7, lineText: "needle in pdf" }];
+    const wrapper = await mountPanel();
+    await wrapper.find(".panel-search").setValue("zzz");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_search_rg", {
+      workspace: rootPath,
+      query: "zzz",
+      limit: 100,
+    });
+    expect(wrapper.findAll(".resource-result")).toHaveLength(1);
+    expect(wrapper.text()).toContain("src/doc.pdf");
+    expect(wrapper.text()).toContain("7: needle in pdf");
+    wrapper.unmount();
+  });
+
+  it("搜索：rg 不可用时静默只做文件名搜索", async () => {
+    vi.useFakeTimers();
+    const wrapper = await mountPanel();
+    await wrapper.find(".panel-search").setValue("main");
+    await vi.advanceTimersByTimeAsync(300);
+    await flushPromises();
+
+    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_search", {
+      workspace: rootPath,
+      query: "main",
+      limit: 200,
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_search_rg",
+      expect.anything(),
+    );
+    expect(wrapper.find(".resource-search-snippet").exists()).toBe(false);
+    expect(store.toast).toBe("");
     wrapper.unmount();
   });
 
@@ -1422,6 +1481,8 @@ describe("ResourceView 工作区切换", () => {
   beforeEach(() => {
     store.workspace = rootPath;
     store.toast = "";
+    rgAvailable = false;
+    rgHits = [];
     mockedInvoke.mockClear();
     mockFs();
     __resetSessionFsForTest();
