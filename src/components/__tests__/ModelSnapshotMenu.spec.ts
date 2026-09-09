@@ -61,7 +61,6 @@ describe("ModelSnapshotMenu", () => {
     expect(wrapper.find(".model-snapshot-title").text()).toContain("模型快照");
     expect(wrapper.text()).toContain("a");
     expect(wrapper.text()).toContain("b");
-    expect(wrapper.text()).toContain("可能含 API Key");
   });
 
   it("触发按钮为纯图标（外框 + M，无文字）", async () => {

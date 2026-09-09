@@ -142,9 +142,6 @@ watch(open, (v) => {
         </svg>
         <span>模型快照</span>
       </div>
-      <p class="model-snapshot-hint">
-        包含模型提供方与目录内容，可能含 API Key，请谨慎分享。
-      </p>
 
       <div v-if="snapshots.length === 0" class="git-branch-menu-empty">暂无模型快照</div>
 
@@ -263,14 +260,6 @@ watch(open, (v) => {
   font-weight: 700;
   color: var(--text-faint);
   letter-spacing: 0.5px;
-}
-
-.model-snapshot-hint {
-  margin: 0;
-  padding: 0 var(--space-3) var(--space-2);
-  font-size: var(--font-xs);
-  color: var(--text-faint);
-  line-height: 1.4;
 }
 
 .model-snapshot-row {
