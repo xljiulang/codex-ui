@@ -91,7 +91,7 @@ onBeforeUnmount(refresh);
     <h2 class="settings-section-title">Zen 本地代理</h2>
     <p class="settings-section-desc">
       在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions 转发到 OpenCode
-      Zen 免费模型，供 codex 使用（无需 wire_api="chat"）
+      Zen 免费模型
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
@@ -126,7 +126,7 @@ onBeforeUnmount(refresh);
 
       <div class="model-provider-form">
         <div class="setting-row">
-          <label>监听端口</label>
+          <label>监听回环端口</label>
           <input
             type="number"
             class="zen-proxy-port-input"
@@ -139,7 +139,7 @@ onBeforeUnmount(refresh);
         </div>
 
         <div class="setting-row">
-          <label>Api 请求地址</label>
+          <label>转发目标地址</label>
           <input
             type="text"
             class="zen-proxy-url-input"
