@@ -168,9 +168,9 @@ const reasoningEffortOptions: AppSelectOption[] = [
   { value: "", label: "默认（不写入）" },
   ...REASONING_EFFORT_VALUES.map((v) => ({ value: v, label: v })),
 ];
+// codex 0.149.x 起仅支持 responses（chat 会让整份配置失效）
 const wireApiOptions: AppSelectOption[] = [
   { value: "responses", label: "responses" },
-  { value: "chat", label: "chat" },
 ];
 
 function clearProviderFormErrors() {
@@ -253,7 +253,8 @@ function openEditProvider(index: number) {
   providerForm.base_url = p.base_url;
   providerForm.env_key = p.env_key;
   providerForm.experimental_bearer_token = p.experimental_bearer_token;
-  providerForm.wire_api = p.wire_api || "responses";
+  // 仅 responses 合法：历史 chat 值在编辑时直接回填 responses，保存即修正
+  providerForm.wire_api = "responses";
   providerForm.requires_openai_auth = !!p.requires_openai_auth;
   clearProviderFormErrors();
 }
@@ -476,6 +477,10 @@ function providerRowError(p: ModelProviderInfo): string {
   if (!(p.name ?? "").trim()) return "缺少名称（name）";
   if (!(p.base_url ?? "").trim()) return "缺少 base_url";
   if (!(p.wire_api ?? "").trim()) return "缺少 wire_api";
+  // codex 0.149.x 仅支持 responses：历史 chat 值会让配置失效（用户层读不到、提供方消失）
+  if ((p.wire_api ?? "").trim() !== "responses") {
+    return `wire_api 仅支持 responses（当前 ${p.wire_api}）`;
+  }
   if (
     !(p.env_key ?? "").trim() &&
     !(p.experimental_bearer_token ?? "").trim() &&
@@ -650,7 +655,7 @@ function openModelConfigFile() {
               v-model="modelConfig.model_provider"
               :disabled="modelConfig.loading"
             />
-            <span class="model-provider-name">无提供者</span>
+            <span class="model-provider-name">不使用提供者</span>
             <span class="model-provider-key">(none)</span>
           </label>
         </div>

@@ -83,6 +83,13 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
     if (!/^[A-Za-z0-9_-]+$/.test(key)) {
       throw new Error(`提供方标识「${key}」只能包含字母、数字、下划线与连字符`);
     }
+    // codex 0.149.x 已不支持 chat：写入会让整份配置失效（用户层读不到）
+    const wireApi = p.wire_api.trim();
+    if (wireApi && wireApi !== "responses") {
+      throw new Error(
+        `提供方「${key}」的 wire_api 仅支持 "responses"（codex 0.149.x 已不支持 chat，当前为 "${wireApi}"）`,
+      );
+    }
     if (seen.includes(key)) throw new Error(`提供方标识「${key}」重复`);
     seen.push(key);
   }
@@ -117,12 +124,19 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
     params: {
       edits: [
         { keyPath: "model_providers", value: merged, mergeStrategy: "replace" },
-        { keyPath: "model_provider", value: active, mergeStrategy: "replace" },
+        {
+          // 空值删键：写空串会让 codex 判定配置无效（用户层直接从 config/read 消失），
+          // 进而让设置页读到空提供方列表、下次保存把 model_providers 整表覆盖为空
+          keyPath: "model_provider",
+          value: active || null,
+          mergeStrategy: "replace",
+        },
         // model：空串写 null 让 codex 删除该键（回退默认）
         { keyPath: "model", value: edit.model.trim() || null, mergeStrategy: "replace" },
         {
           keyPath: "model_reasoning_effort",
-          value: edit.model_reasoning_effort.trim(),
+          // 空值删键：写空串会被 codex 拒绝（reasoning_effort must not be empty），导致保存失败
+          value: edit.model_reasoning_effort.trim() || null,
           mergeStrategy: "replace",
         },
         {

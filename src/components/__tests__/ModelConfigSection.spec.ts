@@ -160,7 +160,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     base_url: "https://other.example.com/v1",
     env_key: "OTHER_API_KEY",
     experimental_bearer_token: "",
-    wire_api: "chat",
+    wire_api: "responses",
   };
 
   function catalogResult() {
@@ -231,6 +231,44 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(generateButton.attributes("data-tip")).toBe("生成模型目录");
     expect(generateButton.attributes("data-tip")).not.toContain("API Key");
     expect(rows[1].find(".provider-row-generate").exists()).toBe(false);
+  });
+
+  it("wire_api 仅支持 responses：历史 chat 行内报错并回填 responses", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({
+        providers: [
+          {
+            key: "legacy",
+            name: "Legacy",
+            base_url: "https://legacy.example.com/v1",
+            env_key: "",
+            experimental_bearer_token: "sk-legacy",
+            wire_api: "chat",
+          },
+        ],
+      }),
+    );
+    const wrapper = await mountSection();
+
+    const row = wrapper.find(".model-provider-row:not(.model-provider-none)");
+    expect(row.classes()).toContain("model-provider-row-error");
+    expect(row.text()).toContain("wire_api 仅支持 responses（当前 chat）");
+
+    // 打开编辑弹窗：唯一合法值 responses 已回填（保存一次即修正历史 chat）
+    await row.find(".provider-row-edit").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".modal .app-select").text()).toBe("responses");
+    // wire_api 选项只剩 responses（弹层 Teleport 到 body）
+    await wrapper.find(".modal .app-select").trigger("click");
+    await flushPromises();
+    expect(
+      [
+        ...document.body.querySelectorAll(
+          ".app-select-menu .app-select-option",
+        ),
+      ].map((el) => el.textContent?.trim()),
+    ).toEqual(["responses"]);
+    wrapper.unmount();
   });
 
   it("点击后打开选择弹窗且确认前不修改编辑框", async () => {

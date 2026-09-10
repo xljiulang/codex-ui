@@ -317,4 +317,56 @@ describe("useCodex/modelProviderConfig", () => {
       }),
     ).rejects.toThrow("不存在");
   });
+
+  it("saveModelProviderConfig 空值删键：model_provider / model_reasoning_effort 写 null", async () => {
+    mockedInvoke.mockResolvedValueOnce(readResponse({ a: { name: "A" } }));
+    await saveModelProviderConfig({
+      model: "",
+      model_reasoning_effort: "",
+      personality: "",
+      model_verbosity: "",
+      model_provider: "",
+      preferred_auth_method: "",
+      forced_login_method: "",
+      model_catalog_json: "",
+      providers: [provider("a", { name: "A", base_url: "https://a.example/v1" })],
+    });
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    )!;
+    const edits = (
+      call[1] as { params: { edits: { keyPath: string; value: unknown }[] } }
+    ).params.edits;
+    // 空 provider 写空串会让 codex 判配置无效（用户层消失 → 下次保存误删提供方）
+    expect(edits.find((e) => e.keyPath === "model_provider")?.value).toBeNull();
+    // 空推理强度写空串会被 codex 拒绝保存
+    expect(
+      edits.find((e) => e.keyPath === "model_reasoning_effort")?.value,
+    ).toBeNull();
+    // 提供方表仍按完整列表写入（选择“不使用提供者”不删除既有提供方）
+    expect(
+      Object.keys(
+        (edits.find((e) => e.keyPath === "model_providers")?.value ??
+          {}) as Record<string, unknown>,
+      ),
+    ).toEqual(["a"]);
+  });
+
+  it("saveModelProviderConfig 校验：wire_api 仅支持 responses", async () => {
+    await expect(
+      saveModelProviderConfig({
+        model: "m",
+        model_reasoning_effort: "",
+        personality: "",
+        model_verbosity: "",
+        model_provider: "",
+        preferred_auth_method: "",
+        forced_login_method: "",
+        model_catalog_json: "",
+        providers: [provider("a", { name: "A", wire_api: "chat" })],
+      }),
+    ).rejects.toThrow('仅支持 "responses"');
+  });
 });

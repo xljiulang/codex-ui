@@ -203,7 +203,7 @@ describe("SettingsView 模型配置", () => {
         base_url: "https://other.example.com/v1",
         env_key: "OTHER_API_KEY",
         experimental_bearer_token: "",
-        wire_api: "chat",
+        wire_api: "responses",
       },
     ],
   };
@@ -234,7 +234,7 @@ describe("SettingsView 模型配置", () => {
               base_url: "https://other.example.com/v1",
               env_key: "OTHER_API_KEY",
               experimental_bearer_token: "",
-              wire_api: "chat",
+              wire_api: "responses",
             },
           },
         },
@@ -720,22 +720,22 @@ describe("SettingsView 模型配置", () => {
     expect(rows[0].text()).toContain("deepseek");
     const radios = wrapper.findAll('input[name="model-provider-active"]');
     expect(radios.length).toBe(3);
-    // 首项为固定的「无提供者」（value 为空），本例未激活，不选中
+    // 首项为固定的「不使用提供者」（value 为空），本例未激活，不选中
     expect((radios[0].element as HTMLInputElement).value).toBe("");
     expect((radios[0].element as HTMLInputElement).checked).toBe(false);
     expect((radios[1].element as HTMLInputElement).checked).toBe(true);
     expect((radios[2].element as HTMLInputElement).checked).toBe(false);
   });
 
-  it("固定的「无提供者」项无编辑/删除按钮，选中表示不选提供方", async () => {
+  it("固定的「不使用提供者」项无编辑/删除按钮，选中表示不选提供方", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const noneRow = wrapper.find(".model-provider-row.model-provider-none");
     expect(noneRow.exists()).toBe(true);
     expect(noneRow.find(".provider-row-edit").exists()).toBe(false);
     expect(noneRow.find(".provider-row-delete").exists()).toBe(false);
-    expect(noneRow.text()).toContain("无提供者");
-    // 选中「无提供者」后 model_provider 为空
+    expect(noneRow.text()).toContain("不使用提供者");
+    // 选中「不使用提供者」后 model_provider 为空
     const noneRadio = noneRow.find('input[name="model-provider-active"]');
     await noneRadio.setValue();
     expect((noneRadio.element as HTMLInputElement).checked).toBe(true);
@@ -743,6 +743,78 @@ describe("SettingsView 模型配置", () => {
       (wrapper.find('input[name="model-provider-active"]').element as HTMLInputElement)
         .value,
     ).toBe("");
+  });
+
+  it("选中「不使用提供者」保存：不删既有提供方，model_provider 写 null", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .find('.model-provider-row.model-provider-none input[name="model-provider-active"]')
+      .setValue();
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-actions .model-config-save-btn",
+      )
+      .trigger("click");
+    await flushPromises();
+
+    const batchWrite = mockedInvoke.mock.calls.find(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+    );
+    expect(batchWrite).toBeTruthy();
+    const edits = (
+      batchWrite![1] as {
+        params: { edits: { keyPath: string; value: unknown }[] };
+      }
+    ).params.edits;
+    // 空 provider 删键（写空串会让 codex 判配置无效 → 用户层消失 → 提供方被误删）
+    expect(edits.find((e) => e.keyPath === "model_provider")?.value).toBeNull();
+    // 提供方表仍按完整列表写入：既有 deepseek / other 都保留
+    expect(
+      Object.keys(
+        edits.find((e) => e.keyPath === "model_providers")?.value as object,
+      ),
+    ).toEqual(["deepseek", "other"]);
+    expect(store.toast).toContain("模型配置已保存");
+  });
+
+  it("历史 wire_api=chat：行内提示且保存被阻断", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        const read = structuredClone(sampleModelConfigRead);
+        read.layers[0].config.model_providers.other.wire_api = "chat";
+        return Promise.resolve(read);
+      }
+      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+
+    expect(
+      wrapper.find(".model-provider-row.model-provider-row-error").text(),
+    ).toContain("wire_api 仅支持 responses");
+    await wrapper
+      .find(
+        ".settings-section-model-config .model-config-actions .model-config-save-btn",
+      )
+      .trigger("click");
+    await flushPromises();
+    // 组件在保存前按行校验并阻断（提示即行内错误文案）
+    expect(store.toast).toContain("wire_api 仅支持 responses");
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method ===
+            "config/batchWrite",
+      ),
+    ).toBe(false);
+    wrapper.unmount();
   });
 
   it("requires_openai_auth 提供者不报缺认证", async () => {
@@ -821,7 +893,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     const radios = wrapper.findAll('input[name="model-provider-active"]');
     expect(radios.length).toBe(2);
-    // 首项「无提供者」未选中，新增的 first 自动激活
+    // 首项「不使用提供者」未选中，新增的 first 自动激活
     expect((radios[0].element as HTMLInputElement).checked).toBe(false);
     expect((radios[1].element as HTMLInputElement).checked).toBe(true);
   });
@@ -934,7 +1006,7 @@ describe("SettingsView 模型配置", () => {
         name: "Other",
         base_url: "https://new.example.com/v1",
         env_key: "OTHER_API_KEY",
-        wire_api: "chat",
+        wire_api: "responses",
       },
     });
     expect(edits[1]).toEqual({
@@ -1285,7 +1357,7 @@ describe("SettingsView 模型配置", () => {
     expect(providers.other).toEqual({
       name: "Other",
       base_url: "https://other.example.com/v1",
-      wire_api: "chat",
+      wire_api: "responses",
       requires_openai_auth: true,
     });
   });
