@@ -118,6 +118,15 @@ const catalogPicker = reactive({
   query: "",
 });
 
+/** 候选模型的资料来源标记（只读展示，不影响勾选与生成流程）。 */
+function catalogSourceLabel(model: ModelCatalogModelOption): string {
+  const labels: string[] = [];
+  if (model.official) labels.push("官方条目");
+  if (model.models_dev) labels.push("models.dev");
+  if (model.openrouter) labels.push("OpenRouter");
+  return labels.join(" + ");
+}
+
 /** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
 const providerForm = reactive({
   open: false,
@@ -1015,6 +1024,13 @@ function openModelConfigFile() {
               >
                 <span class="model-catalog-picker-id">{{ model.id }}</span>
                 <span class="model-catalog-picker-name">{{ model.display_name }}</span>
+              </span>
+              <span
+                v-if="model.matched"
+                class="model-catalog-picker-source"
+                @click.stop.prevent
+              >
+                {{ catalogSourceLabel(model) }}
               </span>
               <span
                 v-if="!model.matched"

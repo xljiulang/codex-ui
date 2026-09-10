@@ -320,10 +320,11 @@ pub fn run() {
             // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
             codex::git::probe_git_at_startup();
 
-            // 启动时后台刷新 OpenRouter 模型元数据缓存；失败不影响启动，生成时回退内置资源。
-            if let Ok(openrouter_app_dir) = app.path().app_data_dir() {
+            // 启动时后台刷新各模型元数据源缓存（OpenRouter / models.dev）；
+            // 失败不影响启动，生成时回退内置资源。
+            if let Ok(model_source_app_dir) = app.path().app_data_dir() {
                 tauri::async_runtime::spawn(async move {
-                    codex::provider_catalog::refresh_openrouter_models_cache(&openrouter_app_dir)
+                    codex::model_catalog::refresh_source_caches(&model_source_app_dir)
                         .await;
                 });
             }

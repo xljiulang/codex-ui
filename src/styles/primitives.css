@@ -1367,6 +1367,18 @@ button.skill-row-main:hover .skill-name {
   user-select: text;
   -webkit-user-select: text;
 }
+.model-catalog-picker-source {
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 var(--space-4);
+  line-height: 1.5;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
 .model-catalog-picker-empty {
   margin: 0;
   padding: var(--space-8);

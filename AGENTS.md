@@ -47,6 +47,7 @@ npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，
 后端（`src-tauri/src/codex/`）：
 
 - `app_server.rs`：`codex app-server --stdio` 子进程与换行分隔 JSON-RPC。
+- `model_catalog/`：模型目录生成管线（`sources/` 多数据源提取 → 合并 → 模板渲染，含官方条目整条复用），字段与匹配规则见 [docs/model_catalog_json.md](docs/model_catalog_json.md)。
 - `commands.rs`：Tauri 命令层；`session_fs.rs` 文件系统 + notify 监听；`terminal.rs` ConPTY 终端；`git.rs` 调用系统 git.exe；`settings.rs` 设置读写（`%APPDATA%\com.codexui.app\settings.json`）；`path_util.rs` 路径清洗；`file_icon.rs` / `diff.rs` / `pdf_export.rs` / `skills.rs` / `mcp_servers.rs` / `model_config.rs` 等按职责拆分。
 
 集成测试位于 `src-tauri/tests/app_server_integration.rs`（真实 app-server 握手/回合、目标、记忆、线程设置等，需 `CODEX_BIN`）。

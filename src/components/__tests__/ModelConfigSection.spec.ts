@@ -176,16 +176,25 @@ describe("ModelConfigSection 生成模型目录", () => {
           id: "deepseek-chat",
           display_name: "Deepseek-Chat",
           matched: true,
+          official: false,
+          models_dev: true,
+          openrouter: true,
         },
         {
           id: "deepseek-reasoner",
           display_name: "Deepseek-Reasoner",
           matched: true,
+          official: true,
+          models_dev: false,
+          openrouter: false,
         },
         {
           id: "unknown-model",
           display_name: "Unknown-Model",
           matched: false,
+          official: false,
+          models_dev: false,
+          openrouter: false,
         },
       ],
     };
@@ -254,6 +263,33 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(confirm.text()).toContain("生成 0 个条目");
     expect(confirm.attributes("disabled")).toBeDefined();
     expect(confirm.classes()).not.toContain("primary");
+  });
+
+  it("弹窗展示每个候选命中资料的来源标记", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") {
+        return Promise.resolve(modelConfigReadResult());
+      }
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve(catalogResult());
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+
+    const labels = wrapper
+      .findAll(".model-catalog-picker-source")
+      .map((label) => label.text());
+    expect(labels).toEqual(["models.dev + OpenRouter", "官方条目"]);
+    // 未命中的模型只显示跳过提示，不给来源标记
+    expect(wrapper.findAll(".model-catalog-picker-status")).toHaveLength(1);
   });
 
   it("点击模型文字不切换复选框，点击复选框仍可正常选择", async () => {
