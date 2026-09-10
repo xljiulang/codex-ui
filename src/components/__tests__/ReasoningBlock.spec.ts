@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import ReasoningBlock from "../ReasoningBlock.vue";
 import type { ThreadItem } from "../../lib/types";
-import { ICON_THINK } from "../../lib/icons";
+import { ICON_ARROW_DOWN, ICON_ARROW_RIGHT, ICON_THINK } from "../../lib/icons";
 
 function reasoningItem(lines: number, streaming = true): ThreadItem {
   const content = Array.from({ length: lines }, (_, i) => `第 ${i + 1} 行思考内容`);
@@ -50,9 +50,16 @@ describe("ReasoningBlock 完整展示", () => {
     expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
       "false",
     );
+    // 折叠/展开指示与会话分组同款
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_RIGHT,
+    );
     await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
       "true",
+    );
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_DOWN,
     );
     expect(wrapper.find(".reasoning-content").exists()).toBe(true);
   });

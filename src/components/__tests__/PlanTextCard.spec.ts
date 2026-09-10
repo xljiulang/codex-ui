@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import PlanTextCard from "../PlanTextCard.vue";
-import { ICON_PLAN } from "../../lib/icons";
+import { ICON_ARROW_DOWN, ICON_ARROW_RIGHT, ICON_PLAN } from "../../lib/icons";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -47,10 +47,20 @@ describe("PlanTextCard 计划文本卡片（标题取自计划本身）", () => 
     const wrapper = mount(PlanTextCard, {
       props: { planText: "# 方案\n- 步骤1" },
     });
+    // 折叠态为右箭头（与会话分组一致）
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_RIGHT,
+    );
     await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_DOWN,
+    );
     expect(wrapper.find(".assistant-card-body").exists()).toBe(true);
     expect(wrapper.text()).toContain("步骤1");
     await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_RIGHT,
+    );
     expect(wrapper.find(".assistant-card-body").exists()).toBe(false);
   });
 

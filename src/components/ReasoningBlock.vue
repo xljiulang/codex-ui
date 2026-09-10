@@ -5,7 +5,7 @@ import type { ThreadItem } from "../lib/types";
 import { useElapsed } from "../composables/useElapsed";
 import { useThrottledRef } from "../composables/useThrottledRef";
 import { formatDuration, formatElapsed } from "../lib/format";
-import { ICON_THINK } from "../lib/icons";
+import { ICON_ARROW_DOWN, ICON_ARROW_RIGHT, ICON_THINK } from "../lib/icons";
 
 const props = defineProps<{ item: ThreadItem }>();
 const open = ref(false);
@@ -66,7 +66,9 @@ watch(
         :aria-label="'思考过程'"
         @click="open = !open"
       >
-        <span class="assistant-card-arrow">{{ open ? "▾" : "▸" }}</span>
+        <svg class="assistant-card-arrow" viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="open ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
+        </svg>
         <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path :d="ICON_THINK" />
         </svg>

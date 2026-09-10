@@ -67,9 +67,9 @@
 .assistant-card-arrow {
   flex-shrink: 0;
   width: 12px;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
+  height: 12px;
+  fill: currentColor;
+  opacity: 0.55;
 }
 .assistant-card-icon {
   flex-shrink: 0;

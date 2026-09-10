@@ -12,6 +12,8 @@ import { store } from "../../composables/useCodex";
 import { __resetEditorTabsForTest } from "../../composables/useEditorTabs";
 import {
   ICON_AGENTS,
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
   ICON_CHECKLIST,
   ICON_EDIT,
   ICON_GLOBE,
@@ -90,7 +92,13 @@ describe("ToolCard 实时耗时", () => {
     );
     expect(wrapper.text()).toContain("失败");
     // 卡片默认折叠，展开后显示退出码
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_RIGHT,
+    );
     await wrapper.find(".assistant-card-toggle").trigger("click");
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_DOWN,
+    );
     expect(wrapper.text()).toContain("退出码：1");
   });
 

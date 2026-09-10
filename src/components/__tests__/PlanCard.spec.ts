@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import PlanCard from "../PlanCard.vue";
-import { ICON_CHECKLIST } from "../../lib/icons";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
+  ICON_CHECKLIST,
+} from "../../lib/icons";
 
 describe("PlanCard Updated Plan 任务清单", () => {
   it("头部渲染计划单勾选清单图标", () => {
@@ -60,15 +64,25 @@ describe("PlanCard Updated Plan 任务清单", () => {
       },
     });
     expect(wrapper.findAll(".plan-step")).toHaveLength(2);
+    // 展开指示与会话分组同款：展开为下箭头
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_DOWN,
+    );
     await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(
       wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
     ).toBe("false");
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_RIGHT,
+    );
     expect(wrapper.findAll(".plan-step")).toHaveLength(0);
     await wrapper.find(".assistant-card-toggle").trigger("click");
     expect(
       wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
     ).toBe("true");
+    expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
+      ICON_ARROW_DOWN,
+    );
     expect(wrapper.findAll(".plan-step")).toHaveLength(2);
   });
 });

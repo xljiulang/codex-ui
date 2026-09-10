@@ -18,6 +18,8 @@ import { ansiToHtmlWithState, type AnsiStyle } from "../lib/ansi";
 import { copyText } from "../lib/clipboard";
 import {
   ICON_AGENTS,
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
   ICON_CHECKLIST,
   ICON_EDIT,
   ICON_GLOBE,
@@ -303,9 +305,9 @@ const mcpProgressPercent = computed(() =>
         :aria-expanded="expanded"
         @click="expanded = !expanded"
       >
-        <span class="assistant-card-arrow">{{
-          expanded ? "▾" : "▸"
-        }}</span>
+        <svg class="assistant-card-arrow" viewBox="0 0 24 24" aria-hidden="true">
+          <path :d="expanded ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
+        </svg>
         <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path :d="icon" />
         </svg>
