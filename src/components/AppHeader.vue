@@ -62,6 +62,7 @@ function onSettings() {
           <path :d="ICON_SETTINGS" />
         </svg>
       </button>
+      <ModelSnapshotMenu />
       <button
         class="icon-btn"
         aria-label="切换布局"
@@ -75,7 +76,6 @@ function onSettings() {
           />
         </svg>
       </button>
-      <ModelSnapshotMenu />
       <button
         class="icon-btn win-btn"
         aria-label="最小化"
