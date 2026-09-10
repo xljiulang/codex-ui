@@ -40,35 +40,39 @@ function selectTheme(id: ThemeId) {
     </p>
     <div class="settings-card">
       <div class="settings">
-        <div class="setting-row checkbox-row">
-          <input
-            id="sound"
-            v-model="sound"
-            type="checkbox"
-            @change="persist({ sound_enabled: sound })"
-          />
-          <label for="sound">提权/交互时播放提示音</label>
+        <div class="setting-row switch-row">
+          <label class="switch">
+            <input
+              id="sound"
+              v-model="sound"
+              type="checkbox"
+              @change="persist({ sound_enabled: sound })"
+            />
+            <span class="switch-track"></span>
+          </label>
+          <label class="switch-text" for="sound">
+            提权/交互时播放提示音
+          </label>
         </div>
 
-        <div class="setting-row checkbox-row">
-          <input
-            id="enter"
-            v-model="enterToSend"
-            type="checkbox"
-            @change="persist({ enter_to_send: enterToSend })"
-          />
-          <label for="enter">
+        <div class="setting-row switch-row">
+          <label class="switch">
+            <input
+              id="enter"
+              v-model="enterToSend"
+              type="checkbox"
+              @change="persist({ enter_to_send: enterToSend })"
+            />
+            <span class="switch-track"></span>
+          </label>
+          <label class="switch-text" for="enter">
             Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
           </label>
         </div>
 
         <div class="setting-row">
           <div class="theme-row-head">
-            <label>毛玻璃主题外观</label>
-            <label
-              class="switch"
-              aria-label="毛玻璃特效"
-            >
+            <label class="switch">
               <input
                 id="glass"
                 v-model="glass"
@@ -77,6 +81,7 @@ function selectTheme(id: ThemeId) {
               />
               <span class="switch-track"></span>
             </label>
+            <label class="switch-text" for="glass">毛玻璃主题外观</label>
           </div>
           <div class="theme-picker">
             <button
@@ -179,39 +184,33 @@ function selectTheme(id: ThemeId) {
   font-size: var(--font-sm);
   color: var(--text-faint);
 }
-.checkbox-row {
+/* 开关在左、文字在右（仅本 Tab 的排布；其它分区仍是文字在左、开关在右） */
+.switch-row {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  font-size: var(--font-md);
-  color: var(--text);
 }
 
-.checkbox-row label {
-  margin: 0;
+/* 抵消全局 .setting-row label 的 margin-bottom（文字标签与开关标签） */
+.switch-row .switch,
+.switch-text {
+  margin-bottom: 0;
+}
+
+/* 抵消全局 .setting-row label 的 600 字重 / --text-dim，沿用原 checkbox 行观感 */
+.switch-text {
   font-size: var(--font-md);
   font-weight: 400;
   line-height: 1.5;
   color: var(--text);
 }
 
-.checkbox-row input[type="checkbox"] {
-  accent-color: var(--accent);
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-/* 主题行头部：标题与毛玻璃开关同在左侧、同行并列 */
+/* 主题行头部：毛玻璃开关在左、标题在右，同行并列 */
 .theme-row-head {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: var(--space-4);
   margin-bottom: var(--space-4);
-}
-
-.theme-row-head label:first-child {
-  margin-bottom: 0;
 }
 </style>

@@ -2615,15 +2615,32 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     const input = wrapper.find("#glass").element as HTMLInputElement;
     expect(input.checked).toBe(true);
     const head = wrapper.find(".settings-section-personalization .theme-row-head");
-    expect(head.find("label").text()).toBe("毛玻璃主题外观");
+    expect(head.find(".switch-text").text()).toBe("毛玻璃主题外观");
     expect(head.find(".switch input").attributes("id")).toBe("glass");
+    // 开关在左、文字在右：头部第一个 label 是开关，文字标签紧随其后
+    const labels = head.findAll("label");
+    expect(labels[0].classes()).toContain("switch");
+    expect(labels[1].classes()).toContain("switch-text");
   });
 
-  it("毛玻璃开关不再属于复选框行，首复选框为音效", () => {
+  it("个性化两行已改 switch，且毛玻璃开关不在其行内", () => {
     const wrapper = mount(SettingsView);
-    const checkboxes = wrapper.findAll(".settings-section-personalization .setting-row.checkbox-row input");
-    expect(checkboxes[0]?.attributes("id")).toBe("sound");
-    expect(wrapper.find("#glass").element.closest(".checkbox-row")).toBeNull();
+    const rows = wrapper.findAll(
+      ".settings-section-personalization .setting-row.switch-row",
+    );
+    expect(rows).toHaveLength(2);
+    // 控件在左：switch 里的 input 与文字标签通过 id/for 关联（点文字也能切换）
+    expect(rows[0].find(".switch > input").attributes("id")).toBe("sound");
+    expect(rows[1].find(".switch > input").attributes("id")).toBe("enter");
+    expect(rows[0].find(".switch-text").attributes("for")).toBe("sound");
+    expect(rows[1].find(".switch-text").attributes("for")).toBe("enter");
+    // 个性化里不再有原生复选框行
+    expect(
+      wrapper
+        .find(".settings-section-personalization .setting-row.checkbox-row")
+        .exists(),
+    ).toBe(false);
+    expect(wrapper.find("#glass").element.closest(".switch-row")).toBeNull();
   });
 
   it("取消勾选后即时保存 glass_effect=false", async () => {
@@ -2633,6 +2650,17 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     expect(mockedSave).toHaveBeenCalledWith({
       glass_effect: false,
     });
+  });
+
+  it("个性化两行 switch 切换后即时保存", async () => {
+    const wrapper = mount(SettingsView);
+    await wrapper.find("#sound").setValue(false);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({ sound_enabled: false });
+
+    await wrapper.find("#enter").setValue(false);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({ enter_to_send: false });
   });
 });
 
