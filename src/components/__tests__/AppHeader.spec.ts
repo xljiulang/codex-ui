@@ -106,19 +106,16 @@ describe("AppHeader 标题栏与窗口控制", () => {
     store.rightPanelHidden = false;
   });
 
-  it("头部顺序：设置 / 模型快照 / 布局切换 / 最小化 / 最大化 / 关闭", async () => {
+  it("头部顺序：设置 / 布局切换 / 最小化 / 最大化 / 关闭", async () => {
     const wrapper = mountHeader();
     await flushPromises();
     const actions = wrapper.findAll(".header-actions > *");
+    expect(actions).toHaveLength(5);
     expect(actions[0].attributes("aria-label")).toBe("设置");
-    // 模型快照是纯图标按钮，位于设置之后、布局切换之前（无文字）
-    const snapshotBtn = actions[1].find('button[aria-label="模型快照"]');
-    expect(snapshotBtn.exists()).toBe(true);
-    expect(snapshotBtn.text().trim()).toBe("");
-    expect(actions[2].attributes("aria-label")).toBe("切换布局");
-    expect(actions[3].attributes("aria-label")).toBe("最小化");
-    expect(actions[4].attributes("aria-label")).toBe("最大化");
-    expect(actions[5].attributes("aria-label")).toBe("关闭");
+    expect(actions[1].attributes("aria-label")).toBe("切换布局");
+    expect(actions[2].attributes("aria-label")).toBe("最小化");
+    expect(actions[3].attributes("aria-label")).toBe("最大化");
+    expect(actions[4].attributes("aria-label")).toBe("关闭");
   });
 
   it("点最小化调用窗口 minimize", async () => {

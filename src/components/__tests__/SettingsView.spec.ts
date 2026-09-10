@@ -303,7 +303,7 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain("AGENTS");
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-card").length,
-    ).toBe(1);
+    ).toBe(2);
     expect(
       wrapper.findAll(".settings-section-global-instructions .model-config-card")
         .length,
@@ -356,7 +356,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe(1);
   });
 
-  it("模型配置合并为单卡且保存按钮文本为「保存」", async () => {
+  it("模型配置卡片保留唯一保存按钮且文本为「保存」", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const saveButtons = wrapper.findAll(
@@ -555,7 +555,7 @@ describe("SettingsView 模型配置", () => {
         (args as { method?: string } | undefined)?.method === "config/read",
     ).length;
     await wrapper
-      .find(".settings-section-model-config .model-config-reload-btn")
+      .find(".settings-section-model-config .model-config-card:not(.model-snapshot-card) .model-config-reload-btn")
       .trigger("click");
     await flushPromises();
     expect(
@@ -579,7 +579,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(
       wrapper
-        .find(".settings-section-model-config .model-config-reload-btn")
+        .find(".settings-section-model-config .model-config-card:not(.model-snapshot-card) .model-config-reload-btn")
         .attributes("aria-label"),
     ).toBe("刷新");
     const agentsCard = wrapper.find(
@@ -595,7 +595,7 @@ describe("SettingsView 模型配置", () => {
       ([name]) => name === "custom_instructions_read",
     ).length;
     await wrapper
-      .find(".settings-section-model-config .model-config-reload-btn")
+      .find(".settings-section-model-config .model-config-card:not(.model-snapshot-card) .model-config-reload-btn")
       .trigger("click");
     await flushPromises();
     await agentsCard.find(".model-config-reload-btn").trigger("click");
@@ -908,8 +908,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     await wrapper
-      .findAll(".model-config-card")[0]
-      .find(".model-config-save-btn")!
+      .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
       .trigger("click");
     await flushPromises();
     const saveCall = mockedInvoke.mock.calls.find(
@@ -1005,8 +1004,7 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .findAll(".model-config-card")[0]
-      .find(".model-config-save-btn")!
+      .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
       .trigger("click");
     await flushPromises();
     expect(
@@ -1054,8 +1052,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     const save = () =>
       wrapper
-        .findAll(".model-config-card")[0]
-        .find(".model-config-save-btn")!
+        .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
         .trigger("click");
     const lastAuthEdits = () => {
       const calls = mockedInvoke.mock.calls.filter(
@@ -1266,8 +1263,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     await wrapper
-      .findAll(".model-config-card")[0]
-      .find(".model-config-save-btn")!
+      .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
       .trigger("click");
     await flushPromises();
     const saveCall = mockedInvoke.mock.calls.find(

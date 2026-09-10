@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
@@ -12,6 +12,16 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     toastError: vi.fn((e: unknown) => String(e)),
   };
 });
+
+const mockSnapshotList = vi.hoisted(() => vi.fn());
+const mockSnapshotApply = vi.hoisted(() => vi.fn());
+vi.mock("../../composables/useModelSnapshots", () => ({
+  listModelSnapshots: mockSnapshotList,
+  createModelSnapshot: vi.fn(),
+  applyModelSnapshot: mockSnapshotApply,
+  deleteModelSnapshot: vi.fn(),
+  openModelSnapshot: vi.fn(),
+}));
 
 import { invoke } from "@tauri-apps/api/core";
 import ModelConfigSection from "../settings/ModelConfigSection.vue";
@@ -555,5 +565,33 @@ describe("ModelConfigSection 生成模型目录", () => {
     resolveGenerate(catalogResult());
     await vi.waitFor(() => expect(button.attributes("disabled")).toBeUndefined());
     expect(wrapper.find(".model-catalog-picker").exists()).toBe(true);
+  });
+});
+
+describe("ModelConfigSection 模型快照联动", () => {
+  beforeEach(() => {
+    mockedInvoke.mockReset();
+    mockedInvoke.mockResolvedValue(modelConfigReadResult());
+    mockedLoad.mockResolvedValue(providerConfigState());
+    mockSnapshotList.mockReset().mockResolvedValue(["dev"]);
+    mockSnapshotApply.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("还原模型快照后自动重读一次模型配置", async () => {
+    const wrapper = await mountSection();
+    const readCount = () =>
+      mockedInvoke.mock.calls.filter(
+        ([cmd]) => cmd === "model_config_read",
+      ).length;
+    expect(readCount()).toBe(1);
+
+    await wrapper
+      .find('button[aria-label="还原模型快照dev"]')
+      .trigger("click");
+    await flushPromises();
+
+    expect(mockSnapshotApply).toHaveBeenCalledWith("dev");
+    expect(readCount()).toBe(2);
+    wrapper.unmount();
   });
 });

@@ -1076,12 +1076,14 @@
   color: var(--red);
 }
 /* 技能管理 */
-.skills-list {
+.skills-list,
+.model-snapshot-list {
   display: flex;
   flex-direction: column;
 }
 .skill-row,
-.dynamic-tool-row {
+.dynamic-tool-row,
+.model-snapshot-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1091,11 +1093,13 @@
   transition: background var(--ease);
 }
 .skill-row:hover,
-.dynamic-tool-row:hover {
+.dynamic-tool-row:hover,
+.model-snapshot-row:hover {
   background: rgba(var(--overlay-rgb), 0.025);
 }
 .skill-row:last-child,
-.dynamic-tool-row:last-child {
+.dynamic-tool-row:last-child,
+.model-snapshot-row:last-child {
   border-bottom: none;
 }
 .skill-info {
@@ -1105,7 +1109,8 @@
   flex-direction: column;
   gap: var(--space-1);
 }
-.skill-actions {
+.skill-actions,
+.model-snapshot-actions {
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -1128,7 +1133,8 @@
 button.skill-row-main {
   cursor: pointer;
 }
-.skill-name {
+.skill-name,
+.model-snapshot-name {
   min-width: 0;
   font-size: var(--font-base);
   color: var(--text-bright);

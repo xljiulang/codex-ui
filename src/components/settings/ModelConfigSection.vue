@@ -32,6 +32,7 @@ import type {
 import AppSelect, { type AppSelectOption } from "../AppSelect.vue";
 import ModelConfigModelPicker from "../ModelConfigModelPicker.vue";
 import ModalDialog from "../ModalDialog.vue";
+import ModelSnapshotCard from "./ModelSnapshotCard.vue";
 
 defineProps<{ active: boolean }>();
 
@@ -583,8 +584,10 @@ function openModelConfigFile() {
   <section v-show="active" class="settings-section settings-section-model-config">
     <h2 class="settings-section-title">模型配置</h2>
     <p class="settings-section-desc">
-      模型、模型提供方与模型目录
+      模型、模型提供方、模型目录与模型快照
     </p>
+
+    <ModelSnapshotCard :active="active" @applied="() => void loadModelConfig()" />
 
     <div class="model-config-card">
       <div class="model-config-card-head">
