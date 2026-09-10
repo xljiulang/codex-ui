@@ -153,7 +153,8 @@ pub async fn apply(
 // HTTP 入口
 // ---------------------------------------------------------------------------
 
-/// 代理运行期共享状态；`session` 与真实 opencode 客户端一致，在代理生命周期内保持稳定。
+/// 代理运行期共享状态；`session` 与真实 opencode 客户端一致，在代理生命周期内保持稳定，
+/// 作为客户端未提供 `session-id` 请求头时的 `x-opencode-session` 回落值。
 #[derive(Clone)]
 struct ProxyState {
     session: String,
@@ -331,8 +332,27 @@ fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
     Ok(url)
 }
 
+/// 上游 `x-opencode-session` 取值：优先用客户端请求头 `session-id`（OpenAI 协议会话标识，
+/// codex 每次请求都会带上），统一加 `ses_` 前缀（已带前缀则不重复）；
+/// 缺失、空白或非法值时回落到代理生命周期内稳定的 `ses_*`。
+fn opencode_session(headers: &HeaderMap, fallback: &str) -> String {
+    headers
+        .get("session-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.starts_with("ses_") {
+                value.to_string()
+            } else {
+                format!("ses_{value}")
+            }
+        })
+        .unwrap_or_else(|| fallback.to_string())
+}
+
 /// 构造转发给上游的请求头：保留入站头，剔除逐跳头并附加固定 opencode 识别头。
-fn forwarded_request_headers(headers: &HeaderMap, session: &str) -> HeaderMap {
+fn forwarded_request_headers(headers: &HeaderMap, fallback_session: &str) -> HeaderMap {
     let mut out = headers.clone();
     for name in HOP_BY_HOP_HEADERS {
         out.remove(name);
@@ -352,7 +372,7 @@ fn forwarded_request_headers(headers: &HeaderMap, session: &str) -> HeaderMap {
     if let Ok(value) = HeaderValue::from_str(&random_id("msg")) {
         out.insert("x-opencode-request", value);
     }
-    if let Ok(value) = HeaderValue::from_str(session) {
+    if let Ok(value) = HeaderValue::from_str(&opencode_session(headers, fallback_session)) {
         out.insert("x-opencode-session", value);
     }
     out
@@ -393,13 +413,14 @@ async fn passthrough_response(resp: reqwest::Response) -> Response {
 
 /// 翻译请求并转发到 Zen；返回 (状态码, 响应)。
 /// `base_url` 由配置传入（测试时可指向本地 mock）。
+/// `fallback_session` 仅在客户端未提供 `session-id` 时用作 `x-opencode-session`。
 async fn forward(
     req: &Value,
     headers: &HeaderMap,
     want_stream: bool,
     base_url: &str,
     client: &reqwest::Client,
-    session: &str,
+    fallback_session: &str,
 ) -> Result<(StatusCode, reqwest::Response), (StatusCode, String)> {
     let chat = responses_to_chat(req, want_stream)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
@@ -409,7 +430,10 @@ async fn forward(
         .header("x-opencode-client", OPENCODE_CLIENT)
         .header("x-opencode-project", OPENCODE_PROJECT)
         .header("x-opencode-request", random_id("msg"))
-        .header("x-opencode-session", session);
+        .header(
+            "x-opencode-session",
+            opencode_session(headers, fallback_session),
+        );
     if let Some(auth) = headers.get(header::AUTHORIZATION) {
         if let Ok(v) = auth.to_str() {
             rq = rq.header(header::AUTHORIZATION, v.to_string());
@@ -1469,6 +1493,45 @@ mod tests {
     }
 
     #[test]
+    fn opencode_session_prefers_client_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "session-id",
+            HeaderValue::from_static("3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"),
+        );
+        // 客户端值不带 ses_ 前缀时统一补前缀
+        assert_eq!(
+            opencode_session(&headers, "ses_fixed123"),
+            "ses_3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+        );
+
+        // 已带前缀则不重复添加
+        let mut prefixed = HeaderMap::new();
+        prefixed.insert("session-id", HeaderValue::from_static("ses_abc"));
+        assert_eq!(opencode_session(&prefixed, "ses_fixed123"), "ses_abc");
+
+        // 前后空白先 trim 再加前缀
+        let mut padded = HeaderMap::new();
+        padded.insert("session-id", HeaderValue::from_static("  abc  "));
+        assert_eq!(opencode_session(&padded, "ses_fixed123"), "ses_abc");
+
+        // 缺失 / 纯空白 / 非可见 ASCII：回落到代理稳定值
+        assert_eq!(
+            opencode_session(&HeaderMap::new(), "ses_fixed123"),
+            "ses_fixed123"
+        );
+        let mut blank = HeaderMap::new();
+        blank.insert("session-id", HeaderValue::from_static("   "));
+        assert_eq!(opencode_session(&blank, "ses_fixed123"), "ses_fixed123");
+        let mut invalid = HeaderMap::new();
+        invalid.insert(
+            "session-id",
+            HeaderValue::from_bytes(b"caf\xe9").unwrap(),
+        );
+        assert_eq!(opencode_session(&invalid, "ses_fixed123"), "ses_fixed123");
+    }
+
+    #[test]
     fn log_at_writes_safe_events_to_session_log() {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
@@ -1740,6 +1803,30 @@ mod integration_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn forwards_chat_prefers_client_session_header() {
+        let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+        let base_url = spawn_mock_zen(rec.clone()).await;
+
+        let req = json!({ "model": "m", "input": "hi", "stream": false });
+        let mut headers = HeaderMap::new();
+        headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
+            .await
+            .expect("forward 应成功");
+        assert!(resp.0.is_success());
+
+        let got = rec.lock().await.clone().expect("mock 应已收到请求");
+        // 客户端 session-id 优先，并补上 ses_ 前缀
+        assert_eq!(got.opencode_session.as_deref(), Some("ses_3f1a2b3c"));
+        assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
+        assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
+        assert!(got
+            .opencode_request
+            .as_deref()
+            .is_some_and(|id| id.starts_with("msg_")));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn forwards_without_auth_when_client_sends_none() {
         let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
         let base_url = spawn_mock_zen(rec.clone()).await;
@@ -1811,5 +1898,30 @@ mod integration_tests {
         assert_eq!(got.method, "POST");
         assert_eq!(got.path, "/v1/echo");
         assert_eq!(got.body["a"], 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn passthrough_prefers_client_session_header() {
+        let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
+            Arc::new(AsyncMutex::new(None));
+        let base_url = spawn_mock_passthrough(rec.clone()).await;
+        let state = ProxyState {
+            session: "ses_fixed123".into(),
+            base_url,
+            log: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("session-id", HeaderValue::from_static("client-session-42"));
+
+        let uri: Uri = "/v1/models".parse().unwrap();
+        let resp =
+            forward_passthrough(&state, Method::GET, &uri, &headers, Body::empty()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let got = rec.lock().await.clone().expect("mock 应已收到 GET 请求");
+        assert_eq!(
+            got.opencode_session.as_deref(),
+            Some("ses_client-session-42")
+        );
     }
 }
