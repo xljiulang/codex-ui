@@ -14,13 +14,13 @@ import { openPathInAppOrReveal } from "../../composables/usePathOpen";
 import { openDocsUrl } from "../../lib/links";
 import { filterCatalogByModelIds } from "../../lib/modelCatalog";
 import {
+  ICON_ARROW_CIRCLE_RIGHT,
   ICON_DELETE,
   ICON_EDIT,
   ICON_LINK,
   ICON_PLUS,
   ICON_REFRESH,
   ICON_SAVE,
-  ICON_SWAP_HORIZ,
 } from "../../lib/icons";
 import type {
   ModelCatalogGenerateResult,
@@ -690,11 +690,11 @@ function openModelConfigFile() {
               class="btn btn-icon provider-row-generate"
               :disabled="modelConfig.loading || !!catalogGenerating"
               aria-label="生成模型目录"
-              v-tooltip="'生成模型目录（使用该提供者的 API Key）'"
+              v-tooltip="'生成模型目录'"
               @click="generateModelCatalog(p)"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_SWAP_HORIZ" />
+                <path :d="ICON_ARROW_CIRCLE_RIGHT" />
               </svg>
             </button>
             <button

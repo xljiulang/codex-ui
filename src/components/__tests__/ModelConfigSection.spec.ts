@@ -22,7 +22,8 @@ import {
   toastError,
 } from "../../composables/useCodex";
 import type { ModelProviderConfigState } from "../../composables/useCodex";
-import { ICON_SWAP_HORIZ } from "../../lib/icons";
+import { tooltipDirective } from "../../directives/tooltip";
+import { ICON_ARROW_CIRCLE_RIGHT } from "../../lib/icons";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedLoad = vi.mocked(loadModelProviderConfig);
@@ -67,7 +68,11 @@ function providerConfigState(
 }
 
 async function mountSection() {
-  const wrapper = mount(ModelConfigSection, { props: { active: true } });
+  const wrapper = mount(ModelConfigSection, {
+    props: { active: true },
+    // 注册真实 tooltip 指令：与 app 行为一致，并让 data-tip 可断言
+    global: { directives: { tooltip: tooltipDirective } },
+  });
   // 等待 onMounted 异步加载完成
   await vi.waitFor(() => expect(mockedLoad).toHaveBeenCalled());
   await vi.waitFor(() => expect(wrapper.find("#model-config-ui-personality").exists()).toBe(true));
@@ -207,10 +212,14 @@ describe("ModelConfigSection 生成模型目录", () => {
     const wrapper = await mountSection();
     const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
     expect(rows[0].find(".provider-row-generate").exists()).toBe(true);
-    expect(rows[0].find(".provider-row-generate svg").exists()).toBe(true);
+    const generateButton = rows[0].find(".provider-row-generate");
+    expect(generateButton.find("svg").exists()).toBe(true);
     expect(
-      rows[0].find(".provider-row-generate path").attributes("d"),
-    ).toBe(ICON_SWAP_HORIZ);
+      generateButton.find("path").attributes("d"),
+    ).toBe(ICON_ARROW_CIRCLE_RIGHT);
+    expect(generateButton.attributes("aria-label")).toBe("生成模型目录");
+    expect(generateButton.attributes("data-tip")).toBe("生成模型目录");
+    expect(generateButton.attributes("data-tip")).not.toContain("API Key");
     expect(rows[1].find(".provider-row-generate").exists()).toBe(false);
   });
 
