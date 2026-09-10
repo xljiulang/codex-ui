@@ -178,7 +178,7 @@ function searchSnippetLabel(entry: FsEntry): string {
   return snippet ? `${snippet.lineNumber}: ${snippet.text}` : "";
 }
 
-/** 打开前先按扩展名分发：PDF/图像/XLSX/DOCX/PPTX → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
+/** 打开前先按扩展名分发：PDF/图像/视频/音频/表格类（xlsx/xlsm/xlsb/xls/ods/csv/tsv）/DOCX/PPTX → 对应预览标签；其余探测内容：文本→编辑器；非文本→提示无法打开 */
 async function requestOpen(entry: FsEntry) {
   const type = previewTypeForName(entry.name);
   if (type === "pdf") {

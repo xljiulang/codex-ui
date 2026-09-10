@@ -8,6 +8,38 @@ function workbookBytes(wb: XLSX.WorkBook): Uint8Array {
   return new Uint8Array(out as ArrayBuffer);
 }
 
+/** 指定格式的工作簿字节（xlsb/biff8/ods 等） */
+function bookBytes(wb: XLSX.WorkBook, bookType: XLSX.BookType): Uint8Array {
+  const out = XLSX.write(wb, { type: "array", bookType });
+  return new Uint8Array(out as ArrayBuffer);
+}
+
+/** UTF-16LE + BOM 字节（模拟 Excel「Unicode 文本」导出） */
+function utf16leBytes(text: string): Uint8Array {
+  const bytes = new Uint8Array(2 + text.length * 2);
+  bytes[0] = 0xff;
+  bytes[1] = 0xfe;
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    bytes[2 + i * 2] = code & 0xff;
+    bytes[3 + i * 2] = code >> 8;
+  }
+  return bytes;
+}
+
+function simpleWorkbook(): XLSX.WorkBook {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.aoa_to_sheet([
+      ["名称", "数量"],
+      ["苹果", 3],
+    ]),
+    "数据",
+  );
+  return wb;
+}
+
 describe("parseXlsx 工作簿解析", () => {
   it("多工作表：返回工作表名与逐表网格", () => {
     const wb = XLSX.utils.book_new();
@@ -78,5 +110,47 @@ describe("parseXlsx 工作簿解析", () => {
 
   it("非法字节：抛出解析错误", () => {
     expect(() => parseXlsx(new Uint8Array([1, 2, 3, 4]))).toThrow();
+  });
+
+  it("xls（BIFF8，CFB 容器）：按扩展名解析", () => {
+    const parsed = parseXlsx(bookBytes(simpleWorkbook(), "biff8"), "xls");
+    expect(parsed.sheetNames).toEqual(["数据"]);
+    expect(parsed.sheets[0].rows[0]).toEqual(["名称", "数量"]);
+    expect(parsed.sheets[0].rows[1]).toEqual(["苹果", "3"]);
+  });
+
+  it("xlsb 与 ods（ZIP 容器家族）：按扩展名解析", () => {
+    for (const [ext, bookType] of [
+      ["xlsb", "xlsb"],
+      ["ods", "ods"],
+    ] as const) {
+      const parsed = parseXlsx(bookBytes(simpleWorkbook(), bookType), ext);
+      expect(parsed.sheets[0].rows[1], ext).toEqual(["苹果", "3"]);
+    }
+  });
+
+  it("csv（无 BOM 的 UTF-8 中文）：走文本路径解码，不出现乱码", () => {
+    const bytes = new TextEncoder().encode("名称,数量\n苹果,3");
+    const sheet = parseXlsx(bytes, "csv").sheets[0];
+    expect(sheet.rows[0]).toEqual(["名称", "数量"]);
+    expect(sheet.rows[1]).toEqual(["苹果", "3"]);
+  });
+
+  it("tsv：按制表符分列", () => {
+    const bytes = new TextEncoder().encode("名称\t数量\n苹果\t3");
+    const sheet = parseXlsx(bytes, "tsv").sheets[0];
+    expect(sheet.colCount).toBe(2);
+    expect(sheet.rows[0]).toEqual(["名称", "数量"]);
+    expect(sheet.rows[1]).toEqual(["苹果", "3"]);
+  });
+
+  it("UTF-16LE 文本（Excel 导出的 Unicode 文本）：按 BOM 解码", () => {
+    const bytes = utf16leBytes("名称,数量\n苹果,3");
+    const sheet = parseXlsx(bytes, "csv").sheets[0];
+    expect(sheet.rows[1]).toEqual(["苹果", "3"]);
+  });
+
+  it("xls 扩展名但文件头不匹配：抛出解析错误", () => {
+    expect(() => parseXlsx(new Uint8Array([1, 2, 3, 4]), "xls")).toThrow();
   });
 });

@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
 import type { PreviewEditorTab } from "../composables/useEditorTabs";
+import { extOf } from "../lib/preview";
 import {
   parseXlsx,
   type XlsxSheetData,
@@ -128,7 +129,7 @@ async function load() {
   }
   await nextTick(); // 先渲染 loading 态，再同步解析（大表避免无反馈卡顿）
   try {
-    const wb = parseXlsx(bytes);
+    const wb = parseXlsx(bytes, extOf(props.tab.path) ?? "xlsx");
     workbook.value = wb;
     if (wb.sheets.length > 0) {
       const saved = props.tab.xlsxSheetIndex;

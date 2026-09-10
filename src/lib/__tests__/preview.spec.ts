@@ -62,12 +62,19 @@ describe("previewTypeForName 扩展名识别", () => {
     }
   });
 
-  it("xlsx 扩展名（大小写不敏感），xls 不命中", () => {
+  it("表格类扩展名统一为 xlsx 预览类型（大小写不敏感）", () => {
     expect(previewTypeForName("a.xlsx")).toBe("xlsx");
     expect(previewTypeForName("DIR/report.XLSX")).toBe("xlsx");
     expect(previewTypeForName("a.Xlsx")).toBe("xlsx");
-    expect(previewTypeForName("a.xls")).toBeNull();
-    expect(previewTypeForName("a.xlsm")).toBeNull();
+    for (const ext of ["xlsm", "xlsb", "xls", "ods", "csv", "tsv"]) {
+      expect(previewTypeForName(`book.${ext}`), ext).toBe("xlsx");
+      expect(previewTypeForName(`DIR/TABLE.${ext.toUpperCase()}`), ext).toBe(
+        "xlsx",
+      );
+    }
+    // 非表格类同族后缀（旧版 Excel 二进制演示/文档）不命中
+    expect(previewTypeForName("a.txt")).toBeNull();
+    expect(previewTypeForName("a.ods.bak")).toBeNull();
   });
 
   it("docx 扩展名（大小写不敏感），doc 不命中", () => {

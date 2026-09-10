@@ -178,4 +178,15 @@ describe("XlsxPreviewPane 表格预览", () => {
     await flushPromises();
     expect(wrapper.find(".preview-zoom-percent").text()).toBe("125%");
   });
+
+  it("CSV（扩展名透传到解析层）：渲染表格内容", async () => {
+    const tab = makeTab(new TextEncoder().encode("名称,数量\n苹果,3"));
+    tab.path = "data.csv";
+    const wrapper = mount(XlsxPreviewPane, { props: { tab } });
+    await flushPromises();
+
+    expect(wrapper.find(".preview-error").exists()).toBe(false);
+    expect(wrapper.find(".xlsx-meta").text()).toBe("2 行 × 2 列");
+    expect(wrapper.text()).toContain("苹果");
+  });
 });

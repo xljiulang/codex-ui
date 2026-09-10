@@ -51,7 +51,7 @@ export function openAudioPreview(entry: FsEntry) {
   void openPreviewTab("audio", root, entry.path);
 }
 
-/** 应用内打开 .xlsx 预览：在主窗口左侧编辑器区打开/激活只读表格预览标签 */
+/** 应用内打开表格预览（xlsx/xlsm/xlsb/xls/ods/csv/tsv）：打开/激活只读表格预览标签 */
 export function openXlsxPreview(entry: FsEntry) {
   const root = workspace.value;
   if (!root) return;
@@ -93,7 +93,7 @@ export async function probeTextEntry(
 }
 
 /**
- * 对话本地链接：支持则在应用内 tab 打开（PDF/图片/XLSX/DOCX → 预览标签，文本 → 编辑器），
+ * 对话本地链接：支持则在应用内 tab 打开（PDF/图片/视频/音频/表格类/DOCX/PPTX → 预览标签，文本 → 编辑器），
  * 返回 true；否则返回 false，由调用方降级为资源管理器。
  * 工作区外文件以父目录作为根（仅本次读取/打开，不改变会话工作区）。
  * 无会话工作区时，绝对文件路径仍可按父目录打开（相对/无法解析的路径返回 false）。
