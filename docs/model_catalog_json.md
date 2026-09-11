@@ -83,23 +83,56 @@
 
 ## 字段来源
 
-生成器写入的字段只有两类：**数据驱动**（来自字段源）、**固定值**（来自模板）。
+生成器写入的字段有三类来源：**数据驱动**（字段源）、**派生**（渲染规则）、**固定值**（模板）。
+
+### 两个字段源各自提取什么
+
+两个源产出的是同一套 `ModelFacts`（`facts.rs`，12 个可合并字段），差别只在从上游 JSON 的哪个路径取值：
+
+| ModelFacts 字段 | OpenRouter 取值 | models.dev 取值 | 落到生成条目 / 用途 |
+| --- | --- | --- | --- |
+| `context_window` | `context_length`（>0） | `limit.context`（>0） | `context_window` |
+| `max_context_window` | 同 `context_length`（OpenRouter 没有独立的 max 字段） | 同 `limit.context` | `max_context_window` |
+| `input_token_limit` | —（不提供） | `limit.input`（需 >0 且 < context） | 仅用于派生：`effective_context_window_percent = min(95, floor(input/context*100))`、`auto_compact_token_limit = floor(input*0.9)` |
+| `input_modalities` | `architecture.input_modalities` | `modalities.input` | `input_modalities`；并派生 `supports_image_detail_original`（含 `image` 才 true）。两边都只保留并去重 `text` / `image` / `audio` |
+| `reasoning_levels` | `reasoning.supported_efforts[]` | `reasoning_options[type=effort].values[]` | `supported_reasoning_levels`（只写字段源给出的档位；描述文案另取基底表） |
+| `default_reasoning_level` | `reasoning.default_effort`（小写） | —（不提供） | `default_reasoning_level`，仅当它落在档位列表里，否则 `null` |
+| `description` | `description` | `description` | `description`（空则用占位文案「由模型提供者目录生成」） |
+| `support_verbosity` | `supported_parameters` 含 `verbosity` | —（不提供） | `support_verbosity`；源明确给值时同时把 `default_verbosity` 写 `null` |
+| `supports_search_tool` | `supported_parameters` 含 `web_search_options` 或 `web_search` | —（不提供） | `supports_search_tool` |
+| `supports_tool_calls` | `supported_parameters` 含 `tools` | `tool_call`（bool） | **不写入目录**，只做兼容判定：`false` → 候选标 `incompatible` |
+| `status` | `status` | `status`（小写） | 写入条目 `status`；`beta` → 候选警告；`deprecated` → `incompatible` |
+| `supports_reasoning` | `reasoning` 存在且（`mandatory` / `supported_efforts` 非空 / `default_effort` 非空） | `reasoning === true` 或 `reasoning_options` 非空 | **目前无消费者**（只有单测断言），接上用途或删除前不必关注 |
+
+> OpenRouter 的 `supported_parameters` 是「集合存在即为显式声明」：`verbosity` / `web_search*` / `tools`
+> 不在集合里即记 `false`（明确不支持，而不是未知）。models.dev 没有这三个字段，所以这三项实际由
+> OpenRouter 独家提供。
+
+### 只用于候选匹配、不进 ModelFacts 的字段
+
+| 用途 | OpenRouter | models.dev |
+| --- | --- | --- |
+| 候选主键（输出 slug 仍用提供方返回的原始 ID） | `id` | `providers[*].models` 的 map key（条目缺 `id` 时用 key） |
+| 权威别名（匹配级别 alias） | `canonical_slug`、`alias_target.slug` | `family` |
+| 发布时间（相似度相同时取新） | `created` | `release_date`，缺失回退 `last_updated` |
+| 变体/实验标记（排序时靠后） | `status` | `status` |
+| 数据形态 | `data[]` 或 `models[]`，每条必须有非空 `id` | `{ models, providers }`：providers 全量展平（同 ID 取分组 id 字典序第一份）+ `models` 补缺 |
+
+### 合并与派生
+
+- 注册顺序 `openrouter` → `models.dev`；质量分 = 来源基础分（**models.dev 30 / OpenRouter 20**）+ 匹配级别
+  加成（exact 4 / alias 3 / normalized 2 / fuzzy 1），`quality >= 当前值` 才覆盖——同分时 models.dev
+  胜出，低分源只能补空字段。例：`deepseek-v4-flash-vision-exp` 的上下文取 models.dev 的 1,000,000，
+  而不是 OpenRouter 的 1,048,576。
+- 档位过滤：只丢弃空值、`default`、`null` 哨兵，保留自定义档位。
+
+### 其余写入字段
 
 | 字段 | 来源 |
 | --- | --- |
-| `context_window` / `max_context_window` | models.dev `limit.context` 或 OpenRouter `context_length`；两者都表示总上下文 |
-| `effective_context_window_percent` / `auto_compact_token_limit` | 若 models.dev `limit.input < limit.context`：分别为 `min(95, floor(input/context*100))` 与 `floor(input*0.9)` |
-| `input_modalities` | models.dev `modalities.input` → OpenRouter `architecture.input_modalities`（过滤为 text/image/audio） |
-| `supported_reasoning_levels` | models.dev `reasoning_options[type=effort].values` / OpenRouter `reasoning.supported_efforts`；保留合法自定义值，只过滤空值、`default`、`null` 哨兵 |
-| `default_reasoning_level` | 仅数据源明确给出且该值存在于档位列表时写入，不自行猜测 |
-| `description` | models.dev → OpenRouter → 占位文案 |
 | `supports_reasoning_summary_parameter` | 模板生成条目固定为 false；官方完整条目保持原值 |
-| `support_verbosity` / `default_verbosity` | 默认 false 且不写默认 verbosity；仅数据源明确声明 `verbosity` 时开启 |
-| `supports_search_tool` | 默认 false；仅数据源明确声明 `web_search_options` / `web_search` 时开启 |
-| `status` | models.dev 的有效状态写入生成条目；`beta` 正常生成并显示警告 |
-| 可用性 | models.dev `tool_call=false` 或 `status=deprecated` → `incompatible`；不兼容条目不会写入目录 |
-| `supports_image_detail_original` | 派生：`input_modalities` 含 `image` 则为 true |
 | `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；`display_name` 按 slug 格式化；`priority` 按勾选顺序从 1 重排 |
+| 可用性 | `tool_call=false` 或 `status=deprecated` → `incompatible`；不兼容条目不会写入目录 |
 
 命令返回的每个候选包含 `status`（`ready` / `incompatible` / `unmatched`）、`selectable`、
 `warnings` 与 `sources[]`。来源证据包括来源名、继承目标 `matched_id`、匹配类型与分数，
