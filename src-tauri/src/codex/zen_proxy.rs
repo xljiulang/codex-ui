@@ -370,6 +370,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
         http_client(),
         &state.session,
         &state.requires_reasoning_rc,
+        &state.log,
     )
     .await
     {
@@ -638,6 +639,45 @@ struct ReasoningRcChange {
     detail: String,
 }
 
+/// chat 消息形态统计（诊断用）：只看 assistant 消息里带 `tool_calls` / 带 `content`
+/// 的条数，以及各自带回传字段 `reasoning_content` 的条数。
+#[derive(Debug, Default, PartialEq, Eq)]
+struct MessageShape {
+    total: usize,
+    with_tools: usize,
+    with_tools_rc: usize,
+    with_content: usize,
+    with_content_rc: usize,
+}
+
+fn message_shape(body: &Value) -> MessageShape {
+    let mut shape = MessageShape::default();
+    let Some(messages) = body.get("messages").and_then(Value::as_array) else {
+        return shape;
+    };
+    shape.total = messages.len();
+    for message in messages {
+        if message.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let has_rc = message.get("reasoning_content").is_some();
+        if message.get("tool_calls").is_some() {
+            shape.with_tools += 1;
+            if has_rc {
+                shape.with_tools_rc += 1;
+            }
+        }
+        // content 为 null 的（聚合出的 tool_calls 消息）不算"文本消息"
+        if message.get("content").is_some_and(|c| !c.is_null()) {
+            shape.with_content += 1;
+            if has_rc {
+                shape.with_content_rc += 1;
+            }
+        }
+    }
+    shape
+}
+
 /// 一次转发的完整结果：状态、响应载体、历史修复统计、被摘掉的可选字段。
 struct Forwarded {
     status: StatusCode,
@@ -753,12 +793,15 @@ async fn forward(
     client: &reqwest::Client,
     fallback_session: &str,
     requires_reasoning_rc: &AtomicBool,
+    log: &ZenLog,
 ) -> Result<Forwarded, (StatusCode, String)> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let optional = optional_fields(req, want_stream);
     let mut dropped: Vec<&'static str> = Vec::new();
     let mut reasoning_rc = requires_reasoning_rc.load(Ordering::Relaxed);
     let mut reasoning_rc_change: Option<ReasoningRcChange> = None;
+    // 一次请求内最多切换一次 reasoning_content 回传方向，避免"开了又关"地来回重试。
+    let mut reasoning_toggled = false;
     let mut attempts = 0usize;
     loop {
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
@@ -780,6 +823,25 @@ async fn forward(
         if attempts + 1 < FORWARD_MAX_ATTEMPTS && status.is_client_error() {
             attempts += 1;
             let text = resp.text().await.unwrap_or_default();
+            let shape = message_shape(&body);
+            log_at(
+                log,
+                "warn",
+                "zen_proxy.forward_attempt",
+                &[
+                    ("attempt", attempts.to_string()),
+                    ("status", status.as_u16().to_string()),
+                    ("detail", truncate_chars(&text, 200)),
+                    ("messages", shape.total.to_string()),
+                    ("assistant_with_tools", shape.with_tools.to_string()),
+                    ("assistant_with_tools_rc", shape.with_tools_rc.to_string()),
+                    ("assistant_with_content", shape.with_content.to_string()),
+                    (
+                        "assistant_with_content_rc",
+                        shape.with_content_rc.to_string(),
+                    ),
+                ],
+            );
             let hit: Vec<&'static str> = optional
                 .iter()
                 .filter(|field| {
@@ -791,10 +853,11 @@ async fn forward(
                 dropped.extend(hit);
                 continue;
             }
-            // DeepSeek 思考模式：历史里带 tool_calls 的 assistant 消息必须回传 reasoning_content。
-            // 上游既然明确要求，就打开开关（反向：本已回传却被拒绝，则关掉）并重试一次；
-            // 400 不产生副作用，重试安全。
-            if mentions_field(&text, &["reasoning_content"]) {
+            // DeepSeek 思考模式：本轮 assistant 消息（带 tool_calls 的与带 content 的）都要回传
+            // reasoning_content。上游既然明确要求，就打开开关（反向：本已回传却被拒绝，则关掉）
+            // 并重试一次——一次请求最多翻转一次；400 不产生副作用，重试安全。
+            if !reasoning_toggled && mentions_field(&text, &["reasoning_content"]) {
+                reasoning_toggled = true;
                 let enabled = !reasoning_rc;
                 reasoning_rc = enabled;
                 requires_reasoning_rc.store(enabled, Ordering::Relaxed);
@@ -1195,18 +1258,34 @@ fn responses_to_chat(
                 let Some(obj) = item.as_object() else { continue };
                 match obj.get("type").and_then(|t| t.as_str()).unwrap_or("") {
                     "message" => {
-                        flush(&mut messages, &mut pending);
                         let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("user");
                         let role = chat_role(role);
-                        if role != "assistant" {
+                        if role == "assistant" {
+                            // 同一轮的文本消息也要带该轮思维链：上游声明 tools 时（DeepSeek 实测）
+                            // 校验会一直查到这条"进度文本"消息，只补 tool_calls 那条不够。
+                            // 先推文本、再落地 tool_calls 聚合消息，保证 tool_calls 紧跟其工具结果。
+                            let mut message = json!({
+                                "role": role,
+                                "content": message_content(item),
+                            });
+                            if attach_reasoning {
+                                message["reasoning_content"] =
+                                    Value::String(pending_reasoning.clone().unwrap_or_default());
+                            }
+                            messages.push(message);
+                            flush(&mut messages, &mut pending);
+                        } else {
                             // 非 assistant 的 message 意味着进入新一轮，丢弃未被消费的思维链，
                             // 避免把上一轮的推理挂到下一轮的工具调用上。
                             pending_reasoning = None;
+                            flush(&mut messages, &mut pending);
+                            messages.push(json!({
+                                "role": role,
+                                "content": message_content(item),
+                            }));
                         }
-                        let content = message_content(item);
-                        messages.push(json!({ "role": role, "content": content }));
                     }
-                    // 思维链：Responses 用 `reasoning` item 回放，chat 侧只在工具调用消息上要它。
+                    // 思维链：Responses 用 `reasoning` item 回放，chat 侧按需挂到本轮 assistant 消息上。
                     "reasoning" => {
                         if let Some(text) = reasoning_item_text(item) {
                             pending_reasoning = Some(text);
@@ -2442,6 +2521,7 @@ mod tests {
     fn responses_to_chat_omits_reasoning_content_by_default() {
         let (chat, _) = responses_to_chat(&reasoning_history(), false, false).unwrap();
         assert_eq!(chat["messages"][0]["role"], "assistant");
+        assert!(chat["messages"][0].get("reasoning_content").is_none());
         assert!(chat["messages"][1].get("tool_calls").is_some());
         assert!(chat["messages"][1].get("reasoning_content").is_none());
     }
@@ -2449,13 +2529,30 @@ mod tests {
     #[test]
     fn responses_to_chat_attaches_reasoning_content_when_required() {
         let (chat, _) = responses_to_chat(&reasoning_history(), false, true).unwrap();
-        // 文本消息不带（chat 侧不需要，避免无谓的 token 膨胀）
+        // 文本消息也带同一轮的思维链：上游声明 tools 时会一路校验到这条进度文本消息
         assert_eq!(chat["messages"][0]["content"], "我先看一下");
-        assert!(chat["messages"][0].get("reasoning_content").is_none());
+        assert_eq!(chat["messages"][0]["reasoning_content"], "先看代码");
         // 工具调用消息带，且内容就是回放的思维链文本
         assert_eq!(chat["messages"][1]["reasoning_content"], "先看代码");
         // 工具结果消息不受影响
         assert_eq!(chat["messages"][2]["role"], "tool");
+    }
+
+    #[test]
+    fn responses_to_chat_content_message_gets_empty_reasoning_without_item() {
+        // 该轮没有回放的 reasoning item：文本消息与工具调用消息都写空串（DeepSeek 实测接受）。
+        let req = json!({
+            "model": "m",
+            "input": [
+                { "type": "message", "role": "user", "content": "hi" },
+                { "type": "message", "role": "assistant", "content": "我先看一下" },
+                { "type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, false, true).unwrap();
+        assert_eq!(chat["messages"][1]["reasoning_content"], "");
+        assert_eq!(chat["messages"][2]["reasoning_content"], "");
     }
 
     #[test]
@@ -2488,6 +2585,8 @@ mod tests {
             ]
         });
         let (chat, _) = responses_to_chat(&req, false, true).unwrap();
+        // 该轮的文本消息拿到的仍是本轮思维链
+        assert_eq!(chat["messages"][0]["reasoning_content"], "上一轮的思维链");
         // 新轮开始后旧思维链被丢弃 → 空串而不是上一轮的文本
         assert_eq!(chat["messages"][2]["reasoning_content"], "");
     }
@@ -3635,7 +3734,7 @@ mod integration_tests {
             header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer public"),
         );
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false))
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None)
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3665,7 +3764,7 @@ mod integration_tests {
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false))
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None)
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3687,7 +3786,7 @@ mod integration_tests {
         let base_url = spawn_mock_zen(rec.clone()).await;
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let headers = HeaderMap::new();
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false))
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None)
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -4096,8 +4195,8 @@ mod integration_tests {
         assert!(handle.is_none());
     }
 
-    /// 起一个"模仿 DeepSeek 思考模式"的 mock：历史里带 tool_calls 的 assistant 消息
-    /// 没有 `reasoning_content` 就回 400（原文照抄），带上了则 200。
+    /// 起一个"模仿 DeepSeek 思考模式 + 声明 tools"的 mock：**任一** assistant 消息
+    /// （带 content 或带 tool_calls）缺 `reasoning_content` 就回 400（原文照抄），全带上则 200。
     /// 每次请求记录一行 `rc=on|off`。
     async fn spawn_mock_requiring_reasoning_rc(
         rec: Arc<AsyncMutex<Vec<String>>>,
@@ -4113,16 +4212,18 @@ mod integration_tests {
                         .and_then(Value::as_array)
                         .cloned()
                         .unwrap_or_default();
-                    let tool_calls = messages
+                    let assistants = messages
                         .iter()
-                        .filter(|m| m.get("tool_calls").is_some())
+                        .filter(|m| m.get("role").and_then(Value::as_str) == Some("assistant"))
                         .collect::<Vec<_>>();
-                    let all_have_rc =
-                        !tool_calls.is_empty() && tool_calls.iter().all(|m| m.get("reasoning_content").is_some());
+                    let all_have_rc = !assistants.is_empty()
+                        && assistants
+                            .iter()
+                            .all(|m| m.get("reasoning_content").is_some());
                     rec.lock()
                         .await
                         .push(format!("rc={}", if all_have_rc { "on" } else { "off" }));
-                    if !tool_calls.is_empty() && !all_have_rc {
+                    if !assistants.is_empty() && !all_have_rc {
                         return (
                             StatusCode::BAD_REQUEST,
                             Json(json!({ "error": {
@@ -4177,10 +4278,11 @@ mod integration_tests {
                     "model": "m",
                     "stream": false,
                     "input": [
+                        { "type": "message", "role": "user", "content": "hi" },
                         { "type": "reasoning", "id": "rs_1", "summary": [
                             { "type": "summary_text", "text": "先看代码" }
                         ] },
-                        { "type": "message", "role": "user", "content": "hi" },
+                        { "type": "message", "role": "assistant", "content": "我先看一下" },
                         { "type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{}" },
                         { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
                     ]
@@ -4220,6 +4322,9 @@ mod integration_tests {
             .join("\n");
         assert!(
             logged.contains("zen_proxy.reasoning_content_enabled")
+                && logged.contains("zen_proxy.forward_attempt")
+                && logged.contains("assistant_with_content=1")
+                && logged.contains("assistant_with_content_rc=0")
                 && logged.contains("zen_proxy.forward")
                 && logged.contains("reasoning_rc=on"),
             "{logged}"
@@ -4319,6 +4424,7 @@ mod integration_tests {
             http_client(),
             "ses_fixed123",
             &AtomicBool::new(false),
+            &None,
         )
         .await
         .expect("forward 应成功");
@@ -4346,6 +4452,7 @@ mod integration_tests {
             http_client(),
             "ses_fixed123",
             &AtomicBool::new(false),
+            &None,
         )
         .await
         .expect("forward 应成功");
@@ -4383,6 +4490,7 @@ mod integration_tests {
             http_client(),
             "ses_fixed123",
             &AtomicBool::new(false),
+            &None,
         )
         .await
         .expect("forward 应成功");
@@ -4412,12 +4520,18 @@ mod integration_tests {
             http_client(),
             "ses_fixed123",
             &AtomicBool::new(false),
+            &None,
         )
         .await
         .expect("forward 应成功");
         assert!(!resp.status.is_success());
         assert!(resp.dropped_fields.is_empty(), "未指名可选字段时不应摘字段");
         assert_eq!(*count.lock().await, 1, "不应重试");
+        assert!(
+            resp.reasoning_rc_change.is_none(),
+            "未提及 reasoning_content 时不应翻转回传开关"
+        );
+        assert!(!resp.reasoning_rc);
         match resp.payload {
             ForwardPayload::Text(text) => {
                 assert!(text.contains("valid JSON"), "错误体应原样透传：{text}")
