@@ -124,8 +124,7 @@ onBeforeUnmount(refresh);
               v-tooltip="'Zen 定价文档（浏览器打开）'"
               @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
             >Zen 免费模型</a>，本地 provider 的 base_url 为
-            {{ localBaseUrlHint }}（本机地址 + 模型提供方 base_url 的路径，只换
-            host），experimental_bearer_token 为 public 或 <a
+            {{ localBaseUrlHint }}，experimental_bearer_token 为 public 或 <a
             class="zen-proxy-docs-link"
             :href="ZEN_KEY_DOCS_URL"
             v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
