@@ -56,6 +56,8 @@ pub struct ModelCatalogModelOption {
     pub sources: Vec<ModelCatalogSourceEvidence>,
     pub warnings: Vec<String>,
     pub selectable: bool,
+    /// 仅内部使用的字段来源依据（合并与校验依赖它），不发给前端。
+    #[serde(skip)]
     pub field_provenance: Provenance,
 }
 
@@ -424,6 +426,22 @@ mod tests {
         assert_eq!(result.models[0].field_provenance["context_window"].source, "openrouter");
         assert_eq!(result.models[0].field_provenance["description"].source, "models_dev");
         assert!(result.models[0].warnings.iter().any(|warning| warning.contains("近似")));
+    }
+
+    #[test]
+    fn response_keeps_source_badges_but_hides_field_provenance() {
+        let dir = tempdir().unwrap();
+        write_source_fixture(dir.path(),
+            json!({"data":[{"id":"review-model-v5","context_length":128000,
+                "supported_parameters":["tools"]}]}),
+            json!({"providers":{"relay":{"models":{"zzzzzzz":{"tool_call":true}}}}}));
+        let result = build_catalog_result(&["review-model-v5".into()], dir.path(), "https://relay.example.com").unwrap();
+        // 候选行来源徽章仍需要 sources[]；字段来源面板已下线，故不再发给前端
+        let payload = serde_json::to_value(&result).unwrap();
+        let option = &payload["models"][0];
+        assert!(option.get("sources").is_some(), "来源徽章数据必须保留");
+        assert!(option.get("field_provenance").is_none(), "参数来源面板已下线");
+        assert!(result.models[0].field_provenance.contains_key("context_window"));
     }
 
     #[test]

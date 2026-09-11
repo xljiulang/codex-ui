@@ -1249,6 +1249,17 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
+  it("树行只显示文件大小与目录项数，不再显示时间", async () => {
+    const wrapper = await mountPanel();
+    // 行内时间已下线：文件行只留大小，目录行只留项数徽章
+    expect(wrapper.find(".resource-time").exists()).toBe(false);
+    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
+      "1.5 KB",
+    );
+    expect(wrapper.find(".resource-row.resource-dir .resource-side").text()).toBe("1");
+    wrapper.unmount();
+  });
+
   it("复制后目录上粘贴：以系统剪贴板为粘贴源", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");

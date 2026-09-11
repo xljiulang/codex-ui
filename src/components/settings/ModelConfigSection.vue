@@ -106,7 +106,6 @@ const modelConfigErrors = reactive({
 const catalogGenerating = ref("");
 let catalogGenerationId = 0;
 let componentAlive = true;
-const expandedCatalogModels = ref<string[]>([]);
 onBeforeUnmount(() => {
   componentAlive = false;
   catalogGenerationId++;
@@ -156,17 +155,6 @@ function catalogStatusLabel(model: ModelCatalogModelOption): string {
   if (model.warnings.length) return model.warnings.join("；");
   if (model.status === "invalid") return "生成参数校验失败";
   return model.status === "incompatible" ? "与 Codex 不兼容" : "无匹配资料";
-}
-
-function toggleCatalogProvenance(id: string) {
-  expandedCatalogModels.value = expandedCatalogModels.value.includes(id)
-    ? expandedCatalogModels.value.filter((value) => value !== id)
-    : [...expandedCatalogModels.value, id];
-}
-
-function catalogFieldValue(value: unknown): string {
-  const text = JSON.stringify(value) ?? "未知";
-  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
 /** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
@@ -433,7 +421,6 @@ function openCatalogPicker(
   catalogPicker.models = res.models.map((model) => ({ ...model }));
   catalogPicker.selectedIds = [];
   catalogPicker.query = "";
-  expandedCatalogModels.value = [];
 }
 
 function closeCatalogPicker() {
@@ -449,7 +436,6 @@ function closeCatalogPicker() {
   catalogPicker.models = [];
   catalogPicker.selectedIds = [];
   catalogPicker.query = "";
-  expandedCatalogModels.value = [];
 }
 
 /** 三态全选：全部选中时取消当前结果，否则选中当前结果。 */
@@ -1111,29 +1097,6 @@ function openModelConfigFile() {
                   class="model-catalog-picker-status"
                 >
                   {{ catalogStatusLabel(model) }}
-                </span>
-                <button
-                  v-if="Object.keys(model.field_provenance ?? {}).length"
-                  type="button"
-                  class="model-catalog-provenance-toggle"
-                  :aria-expanded="expandedCatalogModels.includes(model.id)"
-                  @click.stop.prevent="toggleCatalogProvenance(model.id)"
-                >
-                  参数来源（只读）
-                </button>
-                <span
-                  v-if="expandedCatalogModels.includes(model.id)"
-                  class="model-catalog-provenance"
-                >
-                  <span
-                    v-for="(origin, field) in model.field_provenance"
-                    :key="field"
-                    class="model-catalog-provenance-field"
-                  >
-                    <code>{{ field }} = {{ catalogFieldValue(origin.value) }}</code>
-                    <span>{{ origin.source }}<template v-if="origin.provider_id"> / {{ origin.provider_id }}</template><template v-if="origin.matched_id"> · {{ origin.matched_id }}</template> · {{ origin.match_kind }}</span>
-                    <span>{{ origin.reason }}</span>
-                  </span>
                 </span>
               </span>
             </label>

@@ -3,7 +3,6 @@ import {
   dirNameOf,
   flattenResourceTree,
   formatFileSize,
-  formatFileTime,
   isPathUnderRoot,
   joinFsPath,
   mergeSearchResults,
@@ -60,12 +59,6 @@ describe("formatFileSize", () => {
     expect(formatFileSize(1536)).toBe("1.5 KB");
     expect(formatFileSize(1024 * 1024)).toBe("1.0 MB");
     expect(formatFileSize(1024 * 1024 * 1024 * 2)).toBe("2.0 GB");
-  });
-});
-
-describe("formatFileTime", () => {
-  it("0 与缺失返回空串", () => {
-    expect(formatFileTime(0)).toBe("");
   });
 });
 

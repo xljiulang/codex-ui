@@ -50,7 +50,6 @@ import {
 } from "../composables/useSessionFs";
 import {
   formatFileSize,
-  formatFileTime,
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
@@ -165,11 +164,6 @@ function entryIcon(entry: FsEntry): string {
 /** 文件系统图标（仅文件）；未缓存/取不到返回 undefined，渲染层回退 SVG */
 function fileIcon(entry: FsEntry): string | undefined {
   return iconFor(entry) ?? undefined;
-}
-
-function fileMeta(entry: FsEntry): string {
-  const parts = [formatFileSize(entry.size), formatFileTime(entry.modifiedAtMs)];
-  return parts.filter(Boolean).join(" · ");
 }
 
 /** 内容命中摘要：行号 + 命中行文本；无摘要返回空字符串 */
@@ -460,16 +454,12 @@ onBeforeUnmount(() => {
           <span class="resource-side">
             <span
               v-if="row.kind !== 'file'"
-              class="resource-time"
-            >{{ formatFileTime(row.entry.modifiedAtMs) }}</span>
-            <span
-              v-if="row.kind !== 'file'"
               class="resource-count"
             >{{ row.entry.childCount ?? 0 }}</span>
             <span
               v-else
-              class="resource-time"
-            >{{ fileMeta(row.entry) }}</span>
+              class="resource-size"
+            >{{ formatFileSize(row.entry.size) }}</span>
           </span>
         </div>
         <div v-if="loadingRoot && !rootEntry" class="menu-note">加载中…</div>

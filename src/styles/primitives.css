@@ -1414,30 +1414,6 @@ button.skill-row-main:hover .skill-name {
   color: var(--text-dim);
 }
 
-/* 仅展开自动参数的只读依据，不提供手动参数输入。 */
-.model-catalog-provenance-toggle {
-  color: var(--accent);
-  background: transparent;
-  border: 0;
-  padding: 2px 0;
-  cursor: pointer;
-  text-align: left;
-  font-size: var(--font-xs);
-}
-.model-catalog-provenance,
-.model-catalog-provenance-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.model-catalog-provenance {
-  max-height: 260px;
-  overflow: auto;
-  gap: 8px;
-  font-size: var(--font-xs);
-}
 .mcp-detail-tab.active {
   color: var(--text-bright);
   border-color: var(--border);

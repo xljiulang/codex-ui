@@ -699,7 +699,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(wrapper.find(".model-catalog-picker").exists()).toBe(true);
   });
 
-  it("参数来源只读展开不改变勾选，确定后直接回填且不保存", async () => {
+  it("校验失败条目禁用勾选，确定后只回填选中项且不保存", async () => {
     mockedLoad.mockResolvedValue(providerConfigState({ providers: [providerWithKey] }));
     const result = catalogResult();
     const parsed = JSON.parse(result.catalog);
@@ -710,18 +710,10 @@ describe("ModelConfigSection 生成模型目录", () => {
       invalid: 1,
       total: 4,
       models: [
-        {
-          ...result.models[0],
-          field_provenance: {
-            context_window: {
-              source: "openrouter", matched_id: "deepseek-chat", match_kind: "exact",
-              provider_id: null, value: 128000, reason: "精确资料优先于近似资料",
-            },
-          },
-        },
+        result.models[0],
         ...result.models.slice(1),
         { id: "broken", display_name: "Broken", status: "invalid", selectable: false,
-          sources: [], warnings: ["上下文参数无效"], field_provenance: {} },
+          sources: [], warnings: ["上下文参数无效"] },
       ],
     };
     mockedInvoke.mockImplementation(async (cmd) => {
@@ -733,11 +725,10 @@ describe("ModelConfigSection 生成模型目录", () => {
     await flushPromises();
     expect(wrapper.find(".model-catalog-picker").text()).toContain("校验失败 1 个");
     const checkbox = wrapper.find(".model-catalog-picker-row input");
-    await wrapper.find(".model-catalog-provenance-toggle").trigger("click");
     expect((checkbox.element as HTMLInputElement).checked).toBe(false);
-    expect(wrapper.find(".model-catalog-provenance").text()).toContain("context_window = 128000");
-    expect(wrapper.find(".model-catalog-provenance").text()).toContain("精确资料优先于近似资料");
-    expect(wrapper.find(".model-catalog-provenance input").exists()).toBe(false);
+    // 弹窗不再提供参数来源入口
+    expect(wrapper.find(".model-catalog-provenance-toggle").exists()).toBe(false);
+    expect(wrapper.find(".model-catalog-provenance").exists()).toBe(false);
     expect(wrapper.find(".is-invalid input").attributes("disabled")).toBeDefined();
     await checkbox.setValue(true);
     await wrapper.find(".model-catalog-picker-confirm").trigger("click");
@@ -758,7 +749,7 @@ describe("ModelConfigSection 生成模型目录", () => {
       if (cmd === "model_catalog_generate_from_provider") return {
         catalog: '{"models":[]}', total: 1, ready: 0, unmatched: 0, incompatible: 0, invalid: 1,
         models: [{ id: "broken", display_name: "Broken", status: "invalid", selectable: false,
-          sources: [], warnings: ["上下文参数无效"], field_provenance: {} }],
+          sources: [], warnings: ["上下文参数无效"] }],
       };
     });
     const wrapper = await mountSection();
