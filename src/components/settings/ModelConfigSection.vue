@@ -14,7 +14,7 @@ import { openPathInAppOrReveal } from "../../composables/usePathOpen";
 import { openDocsUrl } from "../../lib/links";
 import { filterCatalogByModelIds } from "../../lib/modelCatalog";
 import {
-  ICON_ARROW_CIRCLE_RIGHT,
+  ICON_ARROW_CIRCLE_DOWN,
   ICON_DELETE,
   ICON_EDIT,
   ICON_LINK,
@@ -387,6 +387,40 @@ function canGenerateModelCatalog(p: ModelProviderInfo): boolean {
   return !!(p.base_url ?? "").trim() && !!(p.experimental_bearer_token ?? "").trim();
 }
 
+/** 当前选中的提供方（未选「不使用提供者」或选择项已不存在时为 null）。 */
+const activeProvider = computed<ModelProviderInfo | null>(
+  () =>
+    modelConfig.providers.find((p) => p.key === modelConfig.model_provider) ?? null,
+);
+
+/** 「生成模型目录」按钮可用性：绑定当前选择的提供方（需同时有 base_url 与 API Key）。 */
+const catalogGenerateEnabled = computed(() => {
+  const p = activeProvider.value;
+  return (
+    !!p &&
+    canGenerateModelCatalog(p) &&
+    !modelConfig.loading &&
+    !modelConfig.saving &&
+    !catalogGenerating.value
+  );
+});
+
+/** 「生成模型目录」按钮提示：可用时为动作名，不可用时说明原因。 */
+const catalogGenerateTip = computed(() => {
+  const p = activeProvider.value;
+  if (!p) return "请先选择一个模型提供方";
+  return canGenerateModelCatalog(p)
+    ? "生成模型目录"
+    : "当前提供方缺少 base_url 或 API Key";
+});
+
+/** 为当前选中的提供方生成模型目录（模型目录区块右上角按钮入口）。 */
+function generateModelCatalogForActiveProvider() {
+  const p = activeProvider.value;
+  if (!p || !catalogGenerateEnabled.value) return;
+  void generateModelCatalog(p);
+}
+
 /** 按搜索条件过滤候选模型；未匹配项保留用于禁用展示。 */
 const filteredCatalogModels = computed(() => {
   const query = catalogPicker.query.trim().toLowerCase();
@@ -747,18 +781,6 @@ function openModelConfigFile() {
           </p>
           <div class="model-provider-actions">
             <button
-              v-if="canGenerateModelCatalog(p)"
-              class="btn btn-icon provider-row-generate"
-              :disabled="modelConfig.loading || !!catalogGenerating"
-              aria-label="生成模型目录"
-              v-tooltip="'生成模型目录'"
-              @click="generateModelCatalog(p)"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_ARROW_CIRCLE_RIGHT" />
-              </svg>
-            </button>
-            <button
               class="btn btn-icon provider-row-edit"
               aria-label="编辑"
               v-tooltip="'编辑'"
@@ -787,6 +809,48 @@ function openModelConfigFile() {
           class="model-config-field-error"
         >
           {{ modelConfigErrors.provider }}
+        </p>
+      </div>
+
+      <div class="model-catalog-block">
+        <div class="model-catalog-head">
+          <span class="model-catalog-title">model_catalog_json（模型目录）</span>
+          <!-- 禁用按钮不派发鼠标事件，tooltip 挂在包裹元素上 -->
+          <span class="model-catalog-generate-wrap" v-tooltip="catalogGenerateTip">
+            <button
+              class="btn btn-icon model-catalog-generate"
+              :disabled="!catalogGenerateEnabled"
+              aria-label="生成模型目录"
+              @click="generateModelCatalogForActiveProvider"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_ARROW_CIRCLE_DOWN" />
+              </svg>
+            </button>
+          </span>
+        </div>
+        <button
+          v-if="modelConfig.model_catalog_exists"
+          type="button"
+          class="model-config-path-link"
+          v-tooltip="'在编辑器中打开文件'"
+          :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
+          @click="openModelConfigFile"
+        >
+          <span>{{ modelConfig.model_catalog_path || "正在读取目录路径…" }}</span>
+        </button>
+        <p v-else class="model-config-path">
+          {{ modelConfig.model_catalog_path || "正在读取目录路径…" }}
+        </p>
+        <textarea
+          v-model="modelConfig.model_catalog"
+          class="model-config-textarea"
+          :disabled="modelConfig.loading"
+          placeholder='在此编辑模型目录内容（必须为合法 JSON，如 {"models":[]}）'
+          spellcheck="false"
+        ></textarea>
+        <p v-if="modelConfigErrors.catalog" class="model-config-field-error">
+          {{ modelConfigErrors.catalog }}
         </p>
       </div>
 
@@ -866,35 +930,6 @@ function openModelConfigFile() {
             :options="VERBOSITY_OPTIONS"
           />
         </div>
-      </div>
-
-      <div class="model-catalog-block">
-        <div class="model-catalog-head">
-          <span>model_catalog_json（模型目录）</span>
-        </div>
-        <button
-          v-if="modelConfig.model_catalog_exists"
-          type="button"
-          class="model-config-path-link"
-          v-tooltip="'在编辑器中打开文件'"
-          :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
-          @click="openModelConfigFile"
-        >
-          <span>{{ modelConfig.model_catalog_path || "正在读取目录路径…" }}</span>
-        </button>
-        <p v-else class="model-config-path">
-          {{ modelConfig.model_catalog_path || "正在读取目录路径…" }}
-        </p>
-        <textarea
-          v-model="modelConfig.model_catalog"
-          class="model-config-textarea"
-          :disabled="modelConfig.loading"
-          placeholder='在此编辑模型目录内容（必须为合法 JSON，如 {"models":[]}）'
-          spellcheck="false"
-        ></textarea>
-        <p v-if="modelConfigErrors.catalog" class="model-config-field-error">
-          {{ modelConfigErrors.catalog }}
-        </p>
       </div>
 
       <ModalDialog
@@ -1329,10 +1364,23 @@ function openModelConfigFile() {
   border-top: 1px solid var(--border);
 }
 
-.model-catalog-head span {
+.model-catalog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.model-catalog-title {
   font-size: var(--font-sm);
   font-weight: 700;
   color: var(--text-bright);
+}
+
+/* 生成按钮包裹层：原生 disabled 按钮不派发鼠标事件，tooltip 挂这里才能在禁用态显示 */
+.model-catalog-generate-wrap {
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
 .model-catalog-block .model-config-path {

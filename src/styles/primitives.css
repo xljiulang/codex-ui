@@ -1044,8 +1044,8 @@
   justify-content: flex-end;
   gap: var(--space-3);
 }
-/* 提供方列表与下方「模型 / 认证 / model_catalog_json」输入分区 */
-.model-providers-list + .settings {
+/* 模型目录区块与下方「模型 / 推理 / 认证」标量输入分区 */
+.model-catalog-block + .settings {
   margin-top: var(--space-5);
   padding-top: var(--space-5);
   border-top: 1px solid var(--border);
