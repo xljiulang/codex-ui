@@ -885,6 +885,15 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
+          <label for="model-config-ui-reasoning-summary">model_reasoning_summary（推理摘要）</label>
+          <AppSelect
+            id="model-config-ui-reasoning-summary"
+            v-model="modelConfig.model_reasoning_summary"
+            :disabled="modelConfig.loading"
+            :options="REASONING_SUMMARY_OPTIONS"
+          />
+        </div>
+        <div class="setting-row">
           <label for="model-config-ui-auth">preferred_auth_method（优先认证方式）</label>
           <AppSelect
             id="model-config-ui-auth"
@@ -909,15 +918,6 @@ function openModelConfigFile() {
             v-model="modelConfig.personality"
             :disabled="modelConfig.loading"
             :options="PERSONALITY_OPTIONS"
-          />
-        </div>
-        <div class="setting-row">
-          <label for="model-config-ui-reasoning-summary">model_reasoning_summary（推理摘要）</label>
-          <AppSelect
-            id="model-config-ui-reasoning-summary"
-            v-model="modelConfig.model_reasoning_summary"
-            :disabled="modelConfig.loading"
-            :options="REASONING_SUMMARY_OPTIONS"
           />
         </div>
         <div class="setting-row">

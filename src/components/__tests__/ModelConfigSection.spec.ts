@@ -114,18 +114,25 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
     expect(labels).toContain("personality（回复风格）");
     expect(labels).toContain("model_reasoning_summary（推理摘要）");
     expect(labels).toContain("model_verbosity（输出详细程度）");
-    // 顺序：effort → 优先认证 → 强制登录 → personality → 推理摘要 → verbosity
+    // 顺序：effort → 推理摘要 → 优先认证 → 强制登录 → personality → verbosity
     const iEffort = labels.indexOf("model_reasoning_effort（推理强度）");
     const iAuth = labels.indexOf("preferred_auth_method（优先认证方式）");
     const iForced = labels.indexOf("forced_login_method（强制登录方式）");
     const iPersonality = labels.indexOf("personality（回复风格）");
     const iSummary = labels.indexOf("model_reasoning_summary（推理摘要）");
     const iVerbosity = labels.indexOf("model_verbosity（输出详细程度）");
-    expect(iAuth).toBeGreaterThan(iEffort);
+    expect(iSummary).toBeGreaterThan(iEffort);
+    expect(iAuth).toBeGreaterThan(iSummary);
     expect(iForced).toBeGreaterThan(iAuth);
     expect(iPersonality).toBeGreaterThan(iForced);
-    expect(iSummary).toBeGreaterThan(iPersonality);
-    expect(iVerbosity).toBeGreaterThan(iSummary);
+    expect(iVerbosity).toBeGreaterThan(iPersonality);
+    // 推理强度与推理摘要相邻（两个一起改好操作）
+    const uiFieldIds = wrapper
+      .findAll("label[for^='model-config-ui-']")
+      .map((label) => label.attributes("for"));
+    expect(uiFieldIds[uiFieldIds.indexOf("model-config-ui-effort") + 1]).toBe(
+      "model-config-ui-reasoning-summary",
+    );
     // AppSelect 触发按钮显示选中项 label
     const personalitySelect = wrapper.find("#model-config-ui-personality");
     expect(personalitySelect.text()).toContain("pragmatic（务实简洁）");

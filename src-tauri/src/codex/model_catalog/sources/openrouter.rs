@@ -167,6 +167,8 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
             modalities.push(modality);
         }
     }
+    // 注意：空数组是「显式声明没有可用输入模态」，不是「未声明」——与推理档位不同，
+    // `template::render` 有专门用例保证它不会继承模板的 `["text"]`。
     Some(modalities)
 }
 
@@ -183,6 +185,11 @@ fn reasoning_levels(model: &Value) -> Option<Vec<String>> {
         .collect();
     let mut seen = HashSet::new();
     levels.retain(|level| seen.insert(level.clone()));
+    // 空数组：条目声明了推理却没有档位（toggle 型）时视为"未知"，交给其它来源补；
+    // 未声明推理时才当作"明确无档位"——与 models.dev 的规则保持一致。
+    if levels.is_empty() && reasoning_present(model) == Some(true) {
+        return None;
+    }
     Some(levels)
 }
 
@@ -277,6 +284,19 @@ mod tests {
             "reasoning": { "supported_efforts": ["low", "HIGH"], "default_effort": "high" },
             "supported_parameters": ["verbosity", "temperature"]
         })
+    }
+
+    #[test]
+    fn empty_efforts_with_reasoning_declared_is_unknown() {
+        // 声明了推理却没有档位（toggle 型）→ 未知，交给其它来源补，
+        // 避免以更高的来源质量清掉别的来源给出的档位（与 models.dev 规则一致）
+        let mut entry = model("relay/demo");
+        entry["reasoning"] = json!({ "mandatory": true, "supported_efforts": [] });
+        assert_eq!(facts_from_model(&entry).reasoning_levels, None);
+        // 未声明推理的空数组 → 保持"明确无档位"
+        let mut entry = model("relay/demo");
+        entry["reasoning"] = json!({ "mandatory": false, "supported_efforts": [] });
+        assert_eq!(facts_from_model(&entry).reasoning_levels, Some(Vec::new()));
     }
 
     #[test]

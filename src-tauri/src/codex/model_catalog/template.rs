@@ -256,6 +256,7 @@ pub fn render(
     }
 
     // 输入模态：同时决定图片细节能力（纯文本模型不应声称支持 image detail original）。
+    // 空数组是显式声明（"没有可用输入模态"），因此**不**回退模板的 `["text"]`。
     let modalities = facts.input_modalities.as_deref().map(normalize_modalities)
         .unwrap_or_else(|| vec!["text".to_string()]);
     entry.insert(

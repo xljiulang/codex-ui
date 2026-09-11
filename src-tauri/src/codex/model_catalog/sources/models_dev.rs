@@ -240,6 +240,8 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
             modalities.push(modality);
         }
     }
+    // 注意：空数组是「显式声明没有可用输入模态」，不是「未声明」——与推理档位不同，
+    // `template::render` 有专门用例保证它不会继承模板的 `["text"]`。
     Some(modalities)
 }
 
