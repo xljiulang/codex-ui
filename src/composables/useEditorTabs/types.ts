@@ -42,6 +42,8 @@ export interface FileEditorTab extends EditorTabBase {
   editorState: EditorState | null;
   savedText: Text | null;
   wrapCompartment: Compartment | null;
+  /** 文档存在超长单行而停用了语言扩展（纯文本打开，避免长行解析拖慢 UI） */
+  languageDisabled: boolean;
 }
 
 export interface DiffEditorTab extends EditorTabBase {

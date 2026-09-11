@@ -182,3 +182,14 @@ export function diffKindLabel(kind: DiffPreviewKind): string {
   if (kind === "delete") return "删除";
   return "修改";
 }
+
+/**
+ * 默认折叠未变更行的行数阈值：内联 diff 会给「hunk 之外未变化的每一行」出行，
+ * 大文件（几万行）即使只改一行也会渲染几万行 DOM，故超过该行数时默认进简要显示。
+ */
+export const DIFF_AUTO_BRIEF_ROWS = 2000;
+
+/** diff 行数是否达到「默认简要显示（只渲染变更行）」的阈值 */
+export function shouldBriefDiffRows(rowCount: number): boolean {
+  return rowCount > DIFF_AUTO_BRIEF_ROWS;
+}

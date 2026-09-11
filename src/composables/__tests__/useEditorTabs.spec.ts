@@ -20,6 +20,7 @@ const terminalEventsMock = vi.hoisted(() => ({
 vi.mock("../useTerminalEvents", () => terminalEventsMock);
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { DIFF_AUTO_BRIEF_ROWS } from "../../lib/gitChanges";
 import {
   __resetEditorTabsForTest,
   activeTabId,
@@ -521,6 +522,46 @@ describe("useEditorTabs 标签状态", () => {
       workspace: root,
     });
     expect(tabs.filter((t) => t.kind === "diff")).toHaveLength(1);
+  });
+
+  it("打开 diff 标签：行数超过阈值时默认折叠未变更行", async () => {
+    const rows = Array.from({ length: DIFF_AUTO_BRIEF_ROWS + 1 }, (_, i) => ({
+      kind: "ctx" as const,
+      oldNo: i + 1,
+      newNo: i + 1,
+      text: "x",
+    }));
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "build_diff_preview") return Promise.resolve(rows);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openDiffTab({
+      path: "big.json",
+      kind: "modify",
+      diff: "diff --git a/big.json b/big.json\n@@ -1 +1 @@\n-a\n+b",
+      workspace: root,
+    });
+    const diffTab = tabs.find((t): t is DiffEditorTab => t.kind === "diff")!;
+    expect(diffTab.rows).toHaveLength(DIFF_AUTO_BRIEF_ROWS + 1);
+    expect(diffTab.brief).toBe(true);
+  });
+
+  it("打开提交内文件 diff：行数超过阈值时同样默认折叠", async () => {
+    const rows = Array.from({ length: DIFF_AUTO_BRIEF_ROWS + 1 }, (_, i) => ({
+      kind: "ctx" as const,
+      oldNo: i + 1,
+      newNo: i + 1,
+      text: "x",
+    }));
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "git_changes_commit_file_diff") return Promise.resolve(rows);
+      return Promise.reject(new Error(`unexpected ${cmd}`));
+    });
+
+    await openCommitFileDiffTab(root, "abc1234", "big.json", "modify");
+    const diffTab = tabs.find((t): t is DiffEditorTab => t.kind === "diff")!;
+    expect(diffTab.brief).toBe(true);
   });
 
   it("打开 diff 标签：空 diff 时先取差异文本再构建行，加载完成", async () => {

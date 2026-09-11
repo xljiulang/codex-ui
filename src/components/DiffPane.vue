@@ -3,6 +3,11 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import hljs, { languageFromPath } from "../lib/highlight";
 import { ICON_COPY, ICON_SUMMARY } from "../lib/icons";
 import { diffKindLabel } from "../lib/gitChanges";
+import {
+  DIFF_MAX_RENDER_ROWS,
+  canHighlightDiffRows,
+  sliceDiffRows,
+} from "../lib/diffView";
 import ContextMenu from "./ContextMenu.vue";
 import { useActionMenu } from "../composables/useActionMenu";
 import { copyText } from "../lib/clipboard";
@@ -23,7 +28,6 @@ const {
   onKeydown: onMenuKeydown,
 } = useActionMenu({ width: 150, scrollScope: ".diff-pane-body" });
 
-const MAX_HIGHLIGHT_LINES = 20_000;
 const lang = computed(() => languageFromPath(props.tab.path));
 
 function fallbackLineCls(l: string): string {
@@ -50,10 +54,14 @@ function rowText(r: DiffRow): string {
   return r.kind === "sep" ? "" : r.text;
 }
 
-/** 逐行语法高亮：未知语言/空行/超大文件回退纯文本 */
+/** 整份 diff 是否可以逐行高亮（未知语言、行数或文本量超预算时整块回退纯文本） */
+const highlightEnabled = computed(() =>
+  canHighlightDiffRows(!!lang.value, props.tab.rows),
+);
+
+/** 单行语法高亮；未启用或空行返回 null（模板回退纯文本渲染） */
 function highlightLine(r: DiffRow): string | null {
   if (r.kind === "sep" || !r.text || !lang.value) return null;
-  if (props.tab.rows.length > MAX_HIGHLIGHT_LINES) return null;
   try {
     return hljs.highlight(r.text, {
       language: lang.value,
@@ -64,18 +72,37 @@ function highlightLine(r: DiffRow): string | null {
   }
 }
 
-const renderedRows = computed(() =>
-  props.tab.rows.map((r) => ({ ...r, html: highlightLine(r) })),
+type RenderedRow = DiffRow & { html?: string | null };
+
+const renderedRows = computed<RenderedRow[]>(() =>
+  highlightEnabled.value
+    ? props.tab.rows.map((r) => ({ ...r, html: highlightLine(r) }))
+    : props.tab.rows,
 );
 
 const brief = computed(() => props.tab.brief);
 
 /** 简要模式：仅显示变更行与新旧分隔，隐藏未变化上下文 */
-const displayedRows = computed(() =>
+const filteredRows = computed(() =>
   brief.value
     ? renderedRows.value.filter((r) => r.kind !== "ctx")
     : renderedRows.value,
 );
+
+/** 实际渲染的行（超过上限截断）与提示所需的计数 */
+const displayed = computed(() => sliceDiffRows(filteredRows.value));
+const displayedRows = computed(() => displayed.value.visible);
+const truncatedRows = computed(() => displayed.value.truncated);
+const hiddenCtxRows = computed(() =>
+  brief.value
+    ? renderedRows.value.reduce((count, r) => (r.kind === "ctx" ? count + 1 : count), 0)
+    : 0,
+);
+
+/** 回退展示的原始 diff 行（同样受渲染上限保护） */
+const fallbackDisplay = computed(() => sliceDiffRows(fallbackLines.value));
+const fallbackRows = computed(() => fallbackDisplay.value.visible);
+const truncatedFallbackRows = computed(() => fallbackDisplay.value.truncated);
 
 function toggleBrief() {
   props.tab.brief = !props.tab.brief;
@@ -182,31 +209,44 @@ onBeforeUnmount(() => {
               : "暂无差异内容"
           }}
         </div>
+        <div v-if="truncatedFallbackRows" class="diff-fallback-note">
+          差异过大：仅显示前 {{ DIFF_MAX_RENDER_ROWS }} 行，已省略
+          {{ truncatedFallbackRows }} 行
+        </div>
         <pre class="diff-view diff-preview">
           <div
-            v-for="(l, j) in fallbackLines"
+            v-for="(l, j) in fallbackRows"
             :key="j"
             class="diff-line"
             :class="l.cls"
           >{{ l.text }}</div>
         </pre>
       </template>
-      <div v-else class="diff-inline">
-        <div
-          v-for="(r, i) in displayedRows"
-          :key="i"
-          class="diff-row"
-          :class="r.kind"
-        >
-          <span class="diff-no old">{{ rowOldNo(r) }}</span>
-          <span class="diff-no new">{{ rowNewNo(r) }}</span>
-          <span v-if="r.kind === 'sep'" class="diff-sep-text">旧 | 新</span>
-          <span v-else class="diff-text">
-            <span v-if="r.html" v-html="r.html"></span>
-            <template v-else>{{ rowText(r) }}</template>
-          </span>
+      <template v-else>
+        <div v-if="hiddenCtxRows" class="diff-fallback-note">
+          行数较多，已折叠未变更的 {{ hiddenCtxRows }} 行（右上角按钮可显示完整差异）
         </div>
-      </div>
+        <div v-if="truncatedRows" class="diff-fallback-note">
+          差异过大：仅渲染前 {{ DIFF_MAX_RENDER_ROWS }} 行，已省略
+          {{ truncatedRows }} 行
+        </div>
+        <div class="diff-inline">
+          <div
+            v-for="(r, i) in displayedRows"
+            :key="i"
+            class="diff-row"
+            :class="r.kind"
+          >
+            <span class="diff-no old">{{ rowOldNo(r) }}</span>
+            <span class="diff-no new">{{ rowNewNo(r) }}</span>
+            <span v-if="r.kind === 'sep'" class="diff-sep-text">旧 | 新</span>
+            <span v-else class="diff-text">
+              <span v-if="r.html" v-html="r.html"></span>
+              <template v-else>{{ rowText(r) }}</template>
+            </span>
+          </div>
+        </div>
+      </template>
     </div>
 
     <ContextMenu

@@ -343,18 +343,59 @@ fn build_hunk_rows(h: &DiffHunk) -> Vec<DiffRow> {
     rows
 }
 
-/// 一次 IPC 完成：路径解析 + 读文件 + 反向重建 + 内联行生成
+/// 逐行预览的文件大小上限：超过则报错，由前端回退展示原始 unified diff
+/// （逐行预览要读整文件 + 反向重建 + 生成每一行的行数据，几 MB 以上会明显拖慢）。
+const MAX_DIFF_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
+
+/// 一次 IPC 完成：路径解析 + 读文件 + 反向重建 + 内联行生成。
+///
+/// 重活必须离开主线程（同步命令在主线程执行，会阻塞整个 IPC）：
+/// 走 `spawn_blocking` + 60s 超时，与 `session_fs` / `git_changes_*` 同一约定。
 #[tauri::command]
-pub fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
+pub async fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
+    match crate::codex::util::spawn_blocking_timeout(60, move || {
+        build_diff_preview_impl(params)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(crate::codex::util::BlockingError::Timeout(secs)) => {
+            Err(format!("生成差异预览超时（{secs} 秒）"))
+        }
+        Err(crate::codex::util::BlockingError::Join(e)) => {
+            Err(format!("生成差异预览任务异常: {e}"))
+        }
+    }
+}
+
+fn build_diff_preview_impl(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
     let abs = resolve_abs_path(&params.path, &params.workspace)?;
     let new_content = if params.kind == "delete" {
         String::new()
     } else {
+        let meta = std::fs::metadata(&abs)
+            .map_err(|e| format!("无法读取文件 {}: {}", abs, e))?;
+        if meta.len() > MAX_DIFF_PREVIEW_BYTES {
+            return Err(format!(
+                "文件过大（{}），不支持逐行预览",
+                format_bytes(meta.len())
+            ));
+        }
         std::fs::read_to_string(&abs)
             .map_err(|e| format!("无法读取文件 {}: {}", abs, e))?
     };
     let old_content = apply_reverse_unified_diff(&new_content, &params.diff)?;
     build_inline_rows(&old_content, &new_content, &params.diff)
+}
+
+/// 字节数 → 人类可读（仅用于错误文案）
+fn format_bytes(bytes: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    if bytes as f64 >= MB {
+        format!("{:.1} MB", bytes as f64 / MB)
+    } else {
+        format!("{:.0} KB", bytes as f64 / 1024.0)
+    }
 }
 
 #[cfg(test)]
@@ -576,7 +617,7 @@ mod tests {
             diff: REPLACE_DIFF.to_string(),
             workspace: dir.to_string_lossy().into_owned(),
         };
-        let rows = build_diff_preview(params).unwrap();
+        let rows = build_diff_preview_impl(params).unwrap();
         assert_eq!(rows.len(), 5);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -592,7 +633,7 @@ mod tests {
             diff: REPLACE_DIFF.to_string(),
             workspace: dir.to_string_lossy().into_owned(),
         };
-        assert_eq!(build_diff_preview(params).unwrap().len(), 5);
+        assert_eq!(build_diff_preview_impl(params).unwrap().len(), 5);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -604,7 +645,25 @@ mod tests {
             diff: REPLACE_DIFF.to_string(),
             workspace: String::new(),
         };
-        assert!(build_diff_preview(params).is_err());
+        assert!(build_diff_preview_impl(params).is_err());
+    }
+
+    #[test]
+    fn build_diff_preview_rejects_oversize_file() {
+        let dir = std::env::temp_dir().join(format!("codexui-diff-big-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("big.json");
+        // 超过逐行预览上限（2 MB）：写 2 MB + 1 字节
+        std::fs::write(&p, vec![b'a'; (MAX_DIFF_PREVIEW_BYTES + 1) as usize]).unwrap();
+        let params = DiffPreviewParams {
+            path: p.to_string_lossy().into_owned(),
+            kind: "update".into(),
+            diff: String::new(),
+            workspace: dir.to_string_lossy().into_owned(),
+        };
+        let err = build_diff_preview_impl(params).unwrap_err();
+        assert!(err.contains("文件过大"), "实际错误：{err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

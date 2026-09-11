@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { reactive } from "vue";
 import DiffPane from "../DiffPane.vue";
 import type { DiffEditorTab } from "../../composables/useEditorTabs";
+import { DIFF_MAX_RENDER_ROWS } from "../../lib/diffView";
 
 vi.mock("../../lib/clipboard", () => ({ copyText: vi.fn() }));
 import { copyText } from "../../lib/clipboard";
@@ -87,6 +88,64 @@ describe("DiffPane 完整/简要切换", () => {
       expect(wrapper.find(".diff-pane-actions button").exists()).toBe(false);
       wrapper.unmount();
     }
+  });
+});
+
+describe("DiffPane 大文件保护", () => {
+  it("压缩成一行的大 JSON：整份不高亮，按纯文本渲染", () => {
+    const long = "{".repeat(5_000);
+    const tab = makeTab({
+      path: "big.json",
+      rows: [
+        { kind: "del", oldNo: 1, text: long },
+        { kind: "sep" },
+        { kind: "add", newNo: 1, text: `${long}x` },
+      ],
+    });
+    const wrapper = mount(DiffPane, { props: { tab } });
+    expect(wrapper.findAll(".diff-row")).toHaveLength(3);
+    // 高亮启用时会渲染 <span v-html>，此处应无内部 span（纯文本直出）
+    expect(wrapper.find(".diff-text > span").exists()).toBe(false);
+    expect(wrapper.find(".diff-text").text()).toBe(long);
+    wrapper.unmount();
+  });
+
+  it("普通大小的 JSON diff 仍逐行高亮", () => {
+    const tab = makeTab({
+      path: "a.json",
+      rows: [
+        { kind: "del", oldNo: 1, text: '{"a": 1}' },
+        { kind: "sep" },
+        { kind: "add", newNo: 1, text: '{"a": 2}' },
+      ],
+    });
+    const wrapper = mount(DiffPane, { props: { tab } });
+    expect(wrapper.find(".diff-text > span").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  // 该用例一次挂 1 万个 DOM 行（正是要验证的上限），并行跑全量时给足超时
+  it("行数超上限时截断渲染并提示省略行数", { timeout: 20_000 }, () => {
+    const rows = Array.from({ length: DIFF_MAX_RENDER_ROWS + 3 }, (_, i) => ({
+      kind: "ctx" as const,
+      oldNo: i + 1,
+      newNo: i + 1,
+      text: "x",
+    }));
+    const tab = makeTab({ rows });
+    const wrapper = mount(DiffPane, { props: { tab } });
+    expect(wrapper.findAll(".diff-row")).toHaveLength(DIFF_MAX_RENDER_ROWS);
+    expect(wrapper.text()).toContain("差异过大");
+    expect(wrapper.text()).toContain("已省略 3 行");
+    wrapper.unmount();
+  });
+
+  it("简要模式提示折叠的未变更行数", () => {
+    const tab = makeTab({ brief: true });
+    const wrapper = mount(DiffPane, { props: { tab } });
+    expect(wrapper.findAll(".diff-row")).toHaveLength(3);
+    expect(wrapper.text()).toContain("已折叠未变更的 2 行");
+    wrapper.unmount();
   });
 });
 

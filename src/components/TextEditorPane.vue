@@ -316,6 +316,11 @@ onBeforeUnmount(() => {
       <span class="text-editor-title">
         <span class="text-editor-path">{{ relPathOf(tab.workspace, tab.path) }}</span>
         <span class="text-editor-lang">{{ langLabel }}</span>
+        <span
+          v-if="tab.languageDisabled"
+          class="text-editor-ro"
+          v-tooltip="'文件存在超长行，已停用语法高亮以保持流畅'"
+        >纯文本</span>
         <span v-if="tab.dirty" class="text-editor-dirty">未保存</span>
         <span v-if="tab.readOnly" class="text-editor-ro">只读</span>
       </span>
@@ -375,7 +380,7 @@ onBeforeUnmount(() => {
     </div>
     <div class="text-editor-status">
       <span v-if="!previewMode">行 {{ tab.cursor.line }}，列 {{ tab.cursor.col }}</span>
-      <span>{{ langLabel }}</span>
+      <span>{{ tab.languageDisabled ? "纯文本（超长行，已停用语法高亮）" : langLabel }}</span>
       <span>UTF-8{{ tab.readOnly ? "（只读）" : "" }}</span>
       <span v-if="byteSizeLabel">{{ byteSizeLabel }}</span>
       <span>{{ tab.eol === "\r\n" ? "CRLF" : "LF" }}</span>

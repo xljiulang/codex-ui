@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  DIFF_AUTO_BRIEF_ROWS,
   diffKindLabel,
   gitStatusLetter,
   normalizeDiffKind,
+  shouldBriefDiffRows,
 } from "../gitChanges";
 
 describe("gitChanges 状态映射", () => {
@@ -39,5 +41,11 @@ describe("gitChanges 状态映射", () => {
     expect(diffKindLabel("add")).toBe("新增");
     expect(diffKindLabel("delete")).toBe("删除");
     expect(diffKindLabel("modify")).toBe("修改");
+  });
+
+  it("diff 行数超过阈值时默认进简要显示", () => {
+    expect(shouldBriefDiffRows(0)).toBe(false);
+    expect(shouldBriefDiffRows(DIFF_AUTO_BRIEF_ROWS)).toBe(false);
+    expect(shouldBriefDiffRows(DIFF_AUTO_BRIEF_ROWS + 1)).toBe(true);
   });
 });

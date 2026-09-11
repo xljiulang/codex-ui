@@ -10,7 +10,11 @@ import {
 import { formatTimeHMS, pathBaseName } from "../../lib/format";
 import { languageFromPath } from "../../lib/highlight";
 import { assetUrl } from "../../lib/asset";
-import type { DiffPreviewKind, GitCommitDetail } from "../../lib/gitChanges";
+import {
+  shouldBriefDiffRows,
+  type DiffPreviewKind,
+  type GitCommitDetail,
+} from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow, TerminalShell } from "../../lib/types";
 import {
@@ -58,6 +62,25 @@ function previewTabId(
 export const SETTINGS_TAB_ID = "settings";
 
 /**
+ * 单行超长（压缩后的 JSON / 单行日志）时停用语言扩展：解析器必须覆盖整行才能高亮视口，
+ * 否则会反复分片解析、持续重算高亮，把主线程拖到假死。仅影响这类机器生成的单行文件。
+ */
+const MAX_LANGUAGE_LINE_CHARS = 100_000;
+
+/** 文档是否存在超长单行（逐行扫描，命中即返回） */
+function hasOverlongLine(doc: string): boolean {
+  let start = 0;
+  while (start <= doc.length) {
+    const nl = doc.indexOf("\n", start);
+    const end = nl < 0 ? doc.length : nl;
+    if (end - start > MAX_LANGUAGE_LINE_CHARS) return true;
+    if (nl < 0) break;
+    start = nl + 1;
+  }
+  return false;
+}
+
+/**
  * 打开设置标签：不存在则创建（统一列表恒在最后）并激活，已存在则直接激活。
  * 关闭入口复用统一 closeAnyTab（关闭活动标签自动回到相邻标签）。
  */
@@ -99,10 +122,13 @@ export async function buildFileEditorState(
   if (!tab.wrapCompartment) {
     tab.wrapCompartment = markRaw(wrapCompartment);
   }
+  const language = languageForPath(tab.path);
+  const languageDisabled = language !== null && hasOverlongLine(doc);
+  tab.languageDisabled = languageDisabled;
   return createEditorState(
     doc,
     buildEditorExtensions({
-      language: languageForPath(tab.path),
+      language: languageDisabled ? null : language,
       readOnly: !validUtf8,
       wrap: tab.wrap,
       wrapCompartment,
@@ -217,6 +243,8 @@ export async function openCommitFileDiffTab(
       path,
     });
     tab.rows = rows ?? [];
+    // 行数过多时默认折叠未变更行，避免一次渲染几万行 DOM
+    tab.brief = shouldBriefDiffRows(tab.rows.length);
   } catch (e) {
     tab.error = String(e);
   } finally {
@@ -312,6 +340,7 @@ export async function openFileTab(
     editorState: null,
     savedText: null,
     wrapCompartment: null,
+    languageDisabled: false,
   }) as unknown as FileEditorTab;
   insertTab(tab);
   activeTabId.value = id;
@@ -415,6 +444,8 @@ export async function openDiffTab(params: DiffPreviewParams): Promise<void> {
       params: { ...params, diff },
     });
     tab.rows = rows ?? [];
+    // 行数过多时默认折叠未变更行，避免一次渲染几万行 DOM
+    tab.brief = shouldBriefDiffRows(tab.rows.length);
   } catch (e) {
     tab.error = String(e);
   } finally {

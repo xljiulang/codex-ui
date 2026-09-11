@@ -317,6 +317,24 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     }
   });
 
+  it("超长单行文件停用语法高亮（纯文本打开并提示）", async () => {
+    const overlong = `{"k":"${"x".repeat(100_001)}"}`;
+    const tab = await openTab("big.json", overlong);
+    const wrapper = await mountEditor(tab);
+    expect(tab.languageDisabled).toBe(true);
+    expect(wrapper.find(".text-editor-ro").text()).toBe("纯文本");
+    expect(wrapper.text()).toContain("纯文本（超长行，已停用语法高亮）");
+    wrapper.unmount();
+  });
+
+  it("普通 JSON 文件仍保留语法高亮", async () => {
+    const tab = await openTab("a.json", '{"a":1,"b":[1,2]}');
+    const wrapper = await mountEditor(tab);
+    expect(tab.languageDisabled).toBe(false);
+    expect(wrapper.text()).not.toContain("已停用语法高亮");
+    wrapper.unmount();
+  });
+
   it("不可格式化文件（txt/无扩展名）不显示「代码格式化」", async () => {
     const tab = await openTab("a.txt", "hello");
     const wrapper = await mountEditor(tab);

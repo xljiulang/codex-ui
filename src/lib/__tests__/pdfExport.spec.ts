@@ -50,6 +50,7 @@ function fakeTab(content: string): FileEditorTab {
     } as unknown as FileEditorTab["editorState"],
     savedText: null,
     wrapCompartment: null,
+    languageDisabled: false,
   };
 }
 
