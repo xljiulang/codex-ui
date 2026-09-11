@@ -720,22 +720,22 @@ describe("SettingsView 模型配置", () => {
     expect(rows[0].text()).toContain("deepseek");
     const radios = wrapper.findAll('input[name="model-provider-active"]');
     expect(radios.length).toBe(3);
-    // 首项为固定的「不使用提供者」（value 为空），本例未激活，不选中
+    // 首项为固定的「不使用模型提供方」（value 为空），本例未激活，不选中
     expect((radios[0].element as HTMLInputElement).value).toBe("");
     expect((radios[0].element as HTMLInputElement).checked).toBe(false);
     expect((radios[1].element as HTMLInputElement).checked).toBe(true);
     expect((radios[2].element as HTMLInputElement).checked).toBe(false);
   });
 
-  it("固定的「不使用提供者」项无编辑/删除按钮，选中表示不选提供方", async () => {
+  it("固定的「不使用模型提供方」项无编辑/删除按钮，选中表示不选提供方", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const noneRow = wrapper.find(".model-provider-row.model-provider-none");
     expect(noneRow.exists()).toBe(true);
     expect(noneRow.find(".provider-row-edit").exists()).toBe(false);
     expect(noneRow.find(".provider-row-delete").exists()).toBe(false);
-    expect(noneRow.text()).toContain("不使用提供者");
-    // 选中「不使用提供者」后 model_provider 为空
+    expect(noneRow.text()).toContain("不使用模型提供方");
+    // 选中「不使用模型提供方」后 model_provider 为空
     const noneRadio = noneRow.find('input[name="model-provider-active"]');
     await noneRadio.setValue();
     expect((noneRadio.element as HTMLInputElement).checked).toBe(true);
@@ -745,7 +745,7 @@ describe("SettingsView 模型配置", () => {
     ).toBe("");
   });
 
-  it("选中「不使用提供者」保存：不删既有提供方，model_provider 写 null", async () => {
+  it("选中「不使用模型提供方」保存：不删既有提供方，model_provider 写 null", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
@@ -893,7 +893,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     const radios = wrapper.findAll('input[name="model-provider-active"]');
     expect(radios.length).toBe(2);
-    // 首项「不使用提供者」未选中，新增的 first 自动激活
+    // 首项「不使用模型提供方」未选中，新增的 first 自动激活
     expect((radios[0].element as HTMLInputElement).checked).toBe(false);
     expect((radios[1].element as HTMLInputElement).checked).toBe(true);
   });

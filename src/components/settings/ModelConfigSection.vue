@@ -387,7 +387,7 @@ function canGenerateModelCatalog(p: ModelProviderInfo): boolean {
   return !!(p.base_url ?? "").trim() && !!(p.experimental_bearer_token ?? "").trim();
 }
 
-/** 当前选中的提供方（未选「不使用提供者」或选择项已不存在时为 null）。 */
+/** 当前选中的提供方（未选「不使用模型提供方」或选择项已不存在时为 null）。 */
 const activeProvider = computed<ModelProviderInfo | null>(
   () =>
     modelConfig.providers.find((p) => p.key === modelConfig.model_provider) ?? null,
@@ -742,8 +742,7 @@ function openModelConfigFile() {
               v-model="modelConfig.model_provider"
               :disabled="modelConfig.loading"
             />
-            <span class="model-provider-name">不使用提供者</span>
-            <span class="model-provider-key">(none)</span>
+            <span class="model-provider-name">不使用模型提供方</span>
           </label>
         </div>
         <div
