@@ -48,6 +48,24 @@ const MODEL_KEEP_KEYS = [
 ];
 const DESCRIPTION_MAX = 300;
 
+/**
+ * codex 的 `ModelInfo` 在解析目录时强制要求的键（0.149.0 逐个删字段实测）：
+ * 缺任一个都会让整份 model_catalog_json 解析失败，因此兜底基底必须带齐。
+ */
+const REQUIRED_ENTRY_KEYS = [
+  "slug",
+  "display_name",
+  "priority",
+  "model_messages",
+  "supported_reasoning_levels",
+  "support_verbosity",
+  "shell_type",
+  "truncation_policy",
+  "visibility",
+  "supported_in_api",
+  "experimental_supported_tools",
+];
+
 const args = new Set(process.argv.slice(2));
 const runAll = args.size === 0;
 const shouldRun = (flag) => runAll || args.has(flag);
@@ -149,9 +167,16 @@ async function updateTemplate() {
   template.context_window = 272000;
   template.max_context_window = 272000;
   template.support_verbosity = false;
-  delete template.default_verbosity;
+  // 不删键：某些 codex 版本把该键当必需字段，缺键会让整份目录解析失败
+  template.default_verbosity = null;
   template.supports_search_tool = false;
   template.supports_image_detail_original = false;
+  // 档位最小化：键必须留（必需字段之一），但不携带任何档位；
+  // 档位描述由基底条目（本机 codex 导出 / 兜底资源）在渲染时提供
+  template.supported_reasoning_levels = [];
+
+  // 提示词改为随运行期 codex 版本走（应用用 codex 导出基底），模板不再持有 model_messages
+  delete template.model_messages;
 
   // 传输层最小化：第三方 provider 不走 OpenAI 专用传输与工具形态
   template.prefer_websockets = false;
@@ -176,6 +201,16 @@ async function updateTemplate() {
   await writeResource(
     "model_catalog_template.json",
     `${JSON.stringify(template, null, 2)}\n`,
+  );
+
+  // 兜底基底（仅在拿不到本机 codex 导出时使用）：只保留必需键 + 提示词
+  const fallback = {};
+  for (const key of REQUIRED_ENTRY_KEYS) {
+    if (key in base) fallback[key] = base[key];
+  }
+  await writeResource(
+    "model_catalog_fallback.json",
+    `${JSON.stringify(fallback, null, 2)}\n`,
   );
 }
 

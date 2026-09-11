@@ -1,16 +1,28 @@
 //! 目录条目的渲染基底。
 //!
-//! **模板 JSON 是固定值与占位值的唯一事实来源**：代码只声明哪些键由字段源覆盖
-//! （[`DATA_DRIVEN_KEYS`]）以及四条派生规则，不再持有任何固定取值常量。
-//! 调整生成条目的固定行为 = 只改 `resources/model_catalog_template.json`。
+//! **渲染模板 = 本机 codex 导出基底 + `resources/model_catalog_template.json` 覆盖**：
+//! 基底取 `codex debug models --bundled` 的第一条（随用户安装的 codex 版本变化），
+//! 保证生成条目的键集与该版本一致——实测缺少必需字段会让 codex 直接拒绝整份
+//! `model_catalog_json`（`missing field display_name` / `missing field visibility`）。
+//! 模板资源只声明固定值与占位值：模板里有同名键就用模板的值。
+//! 代码只声明哪些键由字段源覆盖（[`DATA_DRIVEN_KEYS`]）以及四条派生规则。
 
+use std::collections::HashMap;
+use std::path::Path;
 use std::sync::OnceLock;
 
 use serde_json::{json, Map, Value};
 
+use super::codex_models;
 use super::facts::ModelFacts;
 
 const TEMPLATE_JSON: &str = include_str!("../../../resources/model_catalog_template.json");
+/// 无导出（老版本 codex 没有 `debug models`、或导出失败且无缓存）时的基底骨架：
+/// 只含必需键与一份提示词，其余仍由模板资源覆盖。
+const FALLBACK_BASE_JSON: &str = include_str!("../../../resources/model_catalog_fallback.json");
+/// 基底里不并入模板的键：提示词只保留 `model_messages.instructions_template`，
+/// 避免每条目录条目重复数十 KB 的 `base_instructions`（实测该键非必需）。
+const BASE_EXCLUDED_KEYS: &[&str] = &["base_instructions"];
 
 /// 由字段源覆盖的键；模板里其余键一律原样继承。
 ///
@@ -41,8 +53,8 @@ pub const DATA_DRIVEN_KEYS: &[&str] = &[
 /// 源没有给出描述时的兜底文案。
 const DESCRIPTION_FALLBACK: &str = "由模型提供者目录生成";
 
-/// 模板（已做 OnceLock 缓存）。模板非法时返回错误，避免静默产出残缺条目。
-pub fn template() -> Result<&'static Map<String, Value>, String> {
+/// 覆盖清单（模板资源，已做 OnceLock 缓存）；非法时返回错误，避免静默产出残缺条目。
+fn overrides() -> Result<&'static Map<String, Value>, String> {
     static TEMPLATE: OnceLock<Result<Map<String, Value>, String>> = OnceLock::new();
     let cached = TEMPLATE.get_or_init(|| {
         let parsed: Value = serde_json::from_str(TEMPLATE_JSON)
@@ -55,10 +67,108 @@ pub fn template() -> Result<&'static Map<String, Value>, String> {
     cached.as_ref().map_err(Clone::clone)
 }
 
+/// 兜底基底骨架（已做 OnceLock 缓存）。
+fn fallback_base() -> Result<&'static Map<String, Value>, String> {
+    static FALLBACK: OnceLock<Result<Map<String, Value>, String>> = OnceLock::new();
+    let cached = FALLBACK.get_or_init(|| {
+        let parsed: Value = serde_json::from_str(FALLBACK_BASE_JSON)
+            .map_err(|e| format!("内置模型目录兜底基底不是合法 JSON: {e}"))?;
+        parsed
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "内置模型目录兜底基底不是 JSON 对象".to_string())
+    });
+    cached.as_ref().map_err(Clone::clone)
+}
+
+/// 渲染模板：条目基底（覆盖后的固定值）+ 档位描述表（来自基底，随本机 codex 版本）。
+pub struct RenderTemplate {
+    /// 合并后的条目映射：本机 codex 导出基底（无导出则兜底骨架）被模板资源覆盖同名键。
+    pub entry: Map<String, Value>,
+    /// `effort → description`：取自**覆盖前**的基底条目（模板把该键最小化成 `[]`，
+    /// 但界面上档位选项的悬停提示仍应显示本机 codex 的官方文案）。
+    level_descriptions: HashMap<String, String>,
+}
+
+impl RenderTemplate {
+    /// 档位描述：基底表里有就用，没有则给一句兜底文案。
+    fn describe_level(&self, effort: &str) -> String {
+        self.level_descriptions
+            .get(effort)
+            .cloned()
+            .unwrap_or_else(|| format!("{effort} reasoning effort"))
+    }
+}
+
+/// 渲染模板：本机 codex 导出基底（无导出则兜底骨架）→ 模板资源覆盖同名键。
+///
+/// 生成期只读 [`codex_models::codex_snapshot`] 的进程内快照，不会再起 codex 子进程。
+pub fn effective_template(app_dir: &Path) -> Result<RenderTemplate, String> {
+    let base = match codex_models::template_base(app_dir) {
+        Some(entry) => entry
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "codex 导出的模型条目不是 JSON 对象".to_string())?,
+        None => fallback_base()?.clone(),
+    };
+    let level_descriptions = level_descriptions_of(&base);
+    let mut merged = base;
+    for key in BASE_EXCLUDED_KEYS {
+        merged.remove(*key);
+    }
+    for (key, value) in overrides()? {
+        merged.insert(key.clone(), value.clone());
+    }
+    Ok(RenderTemplate {
+        entry: merged,
+        level_descriptions,
+    })
+}
+
+/// 从条目里抽取 `supported_reasoning_levels` 的「档位 → 描述」表。
+fn level_descriptions_of(entry: &Map<String, Value>) -> HashMap<String, String> {
+    let mut descriptions = HashMap::new();
+    let Some(levels) = entry
+        .get("supported_reasoning_levels")
+        .and_then(Value::as_array)
+    else {
+        return descriptions;
+    };
+    for level in levels {
+        let Some(effort) = level.get("effort").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(description) = level.get("description").and_then(Value::as_str) else {
+            continue;
+        };
+        descriptions.insert(effort.trim().to_string(), description.to_string());
+    }
+    descriptions
+}
+
+/// 用模板值补齐条目缺失的键（只补不覆盖）。
+///
+/// 官方条目池里的条目（运行期导出或手写的第三方条目）按 slug 整条复用，
+/// 这里保证它们也带上当前 codex 版本要求的全部键。
+pub fn ensure_keys(entry: &mut Value, template: &Map<String, Value>) {
+    let Some(object) = entry.as_object_mut() else {
+        return;
+    };
+    for (key, value) in template {
+        if !object.contains_key(key) {
+            object.insert(key.clone(), value.clone());
+        }
+    }
+}
+
 /// 用字段源的合并结果渲染一个目录条目。
-pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Value, String> {
-    let template = template()?;
-    let mut entry = template.clone();
+pub fn render(
+    template: &RenderTemplate,
+    model_id: &str,
+    facts: &ModelFacts,
+    priority: usize,
+) -> Result<Value, String> {
+    let mut entry = template.entry.clone();
 
     entry.insert("slug".to_string(), json!(model_id));
     entry.insert(
@@ -114,7 +224,7 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
         .map(|effort| {
             json!({
                 "effort": effort,
-                "description": reasoning_effort_description(template, effort),
+                "description": template.describe_level(effort),
             })
         })
         .collect();
@@ -123,7 +233,8 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
             entry.insert("default_reasoning_level".to_string(), json!(default));
         }
         None => {
-            entry.remove("default_reasoning_level");
+            // 不删键：某些 codex 版本把该键当作必需字段，缺键会让整份目录解析失败
+            entry.insert("default_reasoning_level".to_string(), Value::Null);
         }
     }
     entry.insert(
@@ -139,11 +250,11 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
     match facts.support_verbosity {
         Some(true) => {
             entry.insert("support_verbosity".to_string(), json!(true));
-            entry.remove("default_verbosity");
+            entry.insert("default_verbosity".to_string(), Value::Null);
         }
         Some(false) => {
             entry.insert("support_verbosity".to_string(), json!(false));
-            entry.remove("default_verbosity");
+            entry.insert("default_verbosity".to_string(), Value::Null);
         }
         None => {}
     }
@@ -230,71 +341,158 @@ fn resolve_default_reasoning_level(facts: &ModelFacts, levels: &[String]) -> Opt
     None
 }
 
-fn reasoning_effort_description(template: &Map<String, Value>, effort: &str) -> String {
-    template
-        .get("supported_reasoning_levels")
-        .and_then(Value::as_array)
-        .and_then(|levels| {
-            levels.iter().find(|level| {
-                level.get("effort").and_then(Value::as_str) == Some(effort)
-            })
-        })
-        .and_then(|level| level.get("description"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{effort} reasoning effort"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    /// 无导出时的渲染模板：兜底基底 + 模板资源覆盖（与真实流程一致）
+    fn effective_without_export() -> RenderTemplate {
+        let dir = tempdir().unwrap();
+        effective_template(dir.path()).unwrap()
+    }
 
     fn rendered(facts: ModelFacts) -> Value {
-        render("mimo-v2.5-free", &facts, 1).unwrap()
+        render(&effective_without_export(), "mimo-v2.5-free", &facts, 1).unwrap()
     }
 
     #[test]
-    fn template_is_the_single_source_of_truth_for_fixed_values() {
-        let template = template().unwrap();
-        assert_eq!(template.len(), 42, "模板键数变化需同步更新文档与测试");
-        assert_eq!(template["prefer_websockets"], json!(false));
-        assert_eq!(template["web_search_tool_type"], json!("text"));
-        assert_eq!(template["use_responses_lite"], json!(false));
-        assert_eq!(template["tool_mode"], Value::Null);
-        assert_eq!(template["truncation_policy"], json!({"mode":"tokens","limit":10000}));
-        assert_eq!(template["multi_agent_version"], json!("v2"));
-        assert_eq!(template["comp_hash"], json!("3000"));
-        assert_eq!(template["minimal_client_version"], json!("0.144.0"));
-        assert_eq!(template["reasoning_summary_format"], json!("experimental"));
-        assert_eq!(template["default_reasoning_summary"], json!("none"));
-        assert_eq!(template["include_skills_usage_instructions"], json!(false));
-        assert_eq!(template["include_plugin_usage_instructions"], json!(true));
-        assert_eq!(template["include_apps_usage_instructions"], json!(true));
-        assert_eq!(template["effective_context_window_percent"], json!(95));
-        assert_eq!(template["supports_parallel_tool_calls"], json!(true));
-        assert_eq!(template["shell_type"], json!("shell_command"));
-        assert_eq!(template["apply_patch_tool_type"], json!("freeform"));
-        assert_eq!(template["visibility"], json!("list"));
-        assert_eq!(template["supported_in_api"], json!(true));
-        assert_eq!(template["available_in_plans"], json!([]));
-        assert_eq!(template["service_tiers"], json!([]));
-        assert_eq!(template["additional_speed_tiers"], json!([]));
-        assert_eq!(template["default_service_tier"], Value::Null);
-        // supported_reasoning_levels 是渲染期的“档位描述表”，写入前必被覆盖
-        assert!(!template["supported_reasoning_levels"]
-            .as_array()
-            .unwrap()
-            .is_empty());
+    fn overrides_are_the_single_source_of_truth_for_fixed_values() {
+        let overrides = overrides().unwrap();
+        assert_eq!(overrides.len(), 42, "覆盖清单键数变化需同步更新文档与测试");
+        assert_eq!(overrides["prefer_websockets"], json!(false));
+        assert_eq!(overrides["web_search_tool_type"], json!("text"));
+        assert_eq!(overrides["use_responses_lite"], json!(false));
+        assert_eq!(overrides["tool_mode"], Value::Null);
+        assert_eq!(overrides["truncation_policy"], json!({"mode":"tokens","limit":10000}));
+        assert_eq!(overrides["multi_agent_version"], json!("v2"));
+        assert_eq!(overrides["comp_hash"], json!("3000"));
+        assert_eq!(overrides["minimal_client_version"], json!("0.144.0"));
+        assert_eq!(overrides["reasoning_summary_format"], json!("experimental"));
+        assert_eq!(overrides["default_reasoning_summary"], json!("none"));
+        assert_eq!(overrides["include_skills_usage_instructions"], json!(false));
+        assert_eq!(overrides["include_plugin_usage_instructions"], json!(true));
+        assert_eq!(overrides["include_apps_usage_instructions"], json!(true));
+        assert_eq!(overrides["effective_context_window_percent"], json!(95));
+        assert_eq!(overrides["supports_parallel_tool_calls"], json!(true));
+        assert_eq!(overrides["shell_type"], json!("shell_command"));
+        assert_eq!(overrides["apply_patch_tool_type"], json!("freeform"));
+        assert_eq!(overrides["visibility"], json!("list"));
+        assert_eq!(overrides["supported_in_api"], json!(true));
+        assert_eq!(overrides["available_in_plans"], json!([]));
+        assert_eq!(overrides["service_tiers"], json!([]));
+        assert_eq!(overrides["additional_speed_tiers"], json!([]));
+        assert_eq!(overrides["default_service_tier"], Value::Null);
+        // 提示词随本机 codex 版本走，覆盖清单里不再有 model_messages
+        assert!(!overrides.contains_key("model_messages"));
+        // 不删键：缺值时写 null，避免某些版本把该键当必需字段
+        assert_eq!(overrides["default_verbosity"], Value::Null);
+        // 档位最小化：保留键但不带任何档位（描述表改由基底提供）
+        assert_eq!(overrides["supported_reasoning_levels"], json!([]));
     }
 
     #[test]
-    fn template_keeps_instructions_without_duplicate_base_instructions() {
-        let template = template().unwrap();
-        assert!(template.get("base_instructions").is_none());
-        let instructions = template["model_messages"]["instructions_template"]
+    fn effective_template_falls_back_to_bundled_skeleton_without_export() {
+        let template = effective_without_export();
+        assert!(template.entry.get("base_instructions").is_none());
+        let instructions = template.entry["model_messages"]["instructions_template"]
             .as_str()
             .unwrap();
         assert!(instructions.starts_with("You are Codex"));
+    }
+
+    #[test]
+    fn effective_template_follows_codex_export_and_template_overrides() {
+        let dir = tempdir().unwrap();
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.6-sol",
+                // 覆盖清单没有的键：必须跟随本机 codex（版本对齐的关键）
+                "node_repl_disabled": true,
+                "context_window": 400_000,
+                // 提示词随本机版本
+                "model_messages": { "instructions_template": "You are Codex (0.150)" },
+                // 覆盖清单里有的键：必须用模板值
+                "prefer_websockets": true,
+                "shell_type": "shell_command",
+                "base_instructions": "should be dropped"
+            })],
+        );
+        let template = effective_template(dir.path()).unwrap();
+        let entry = &template.entry;
+
+        assert_eq!(entry["node_repl_disabled"], json!(true));
+        assert_eq!(
+            entry["model_messages"]["instructions_template"],
+            json!("You are Codex (0.150)")
+        );
+        assert_eq!(entry["prefer_websockets"], json!(false));
+        assert_eq!(entry["context_window"], json!(272_000));
+        assert!(entry.get("base_instructions").is_none());
+    }
+
+    #[test]
+    fn ensure_keys_fills_only_missing_keys() {
+        let template = effective_without_export();
+        let mut entry = serde_json::json!({
+            "slug": "mimo-v2.5-free",
+            "prefer_websockets": true,
+            "supported_reasoning_levels": [{ "effort": "low", "description": "自有值" }]
+        });
+        ensure_keys(&mut entry, &template.entry);
+
+        let object = entry.as_object().unwrap();
+        assert_eq!(object["prefer_websockets"], json!(true), "已有值不得被覆盖");
+        assert_eq!(object["slug"], json!("mimo-v2.5-free"));
+        assert_eq!(
+            object["supported_reasoning_levels"],
+            json!([{ "effort": "low", "description": "自有值" }]),
+            "已有档位不得被模板覆盖"
+        );
+        for key in template.entry.keys() {
+            assert!(object.contains_key(key), "缺失键 {key} 应被补齐");
+        }
+
+        // 缺失该键时补进来的是最小化空数组，而不是基底的六档
+        let mut bare = json!({ "slug": "x" });
+        ensure_keys(&mut bare, &template.entry);
+        assert_eq!(bare["supported_reasoning_levels"], json!([]));
+    }
+
+    #[test]
+    fn merged_template_minimizes_levels_but_keeps_level_descriptions() {
+        let template = effective_without_export();
+        assert_eq!(template.entry["supported_reasoning_levels"], json!([]));
+        // 描述表来自基底（无导出时是兜底资源里的 codex 基线表）
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert!(
+                template.level_descriptions.contains_key(effort),
+                "描述表缺少档位 {effort}"
+            );
+        }
+        assert_eq!(
+            template.level_descriptions.get("low").map(String::as_str),
+            Some("Fast responses with lighter reasoning")
+        );
+    }
+
+    #[test]
+    fn render_writes_only_source_levels_with_base_descriptions() {
+        // 字段源不给档位：生成条目写空数组（不继承模板/基底的档位）
+        assert_eq!(rendered(ModelFacts::default())["supported_reasoning_levels"], json!([]));
+
+        let facts = ModelFacts {
+            reasoning_levels: Some(vec!["low".to_string(), "turbo".to_string()]),
+            ..ModelFacts::default()
+        };
+        assert_eq!(
+            rendered(facts)["supported_reasoning_levels"],
+            json!([
+                { "effort": "low", "description": "Fast responses with lighter reasoning" },
+                { "effort": "turbo", "description": "turbo reasoning effort" }
+            ])
+        );
     }
 
     #[test]
@@ -362,7 +560,8 @@ mod tests {
             levels[1]["description"],
             json!("turbo reasoning effort")
         );
-        assert!(entry.get("default_reasoning_level").is_none());
+        // 不删键：无默认档位时写 null
+        assert_eq!(entry["default_reasoning_level"], Value::Null);
         assert_eq!(entry["supports_reasoning_summary_parameter"], json!(false));
     }
 
@@ -380,7 +579,7 @@ mod tests {
             default_reasoning_level: Some("max".to_string()),
             ..ModelFacts::default()
         };
-        assert!(rendered(facts).get("default_reasoning_level").is_none());
+        assert_eq!(rendered(facts)["default_reasoning_level"], Value::Null);
     }
 
     #[test]
@@ -399,7 +598,7 @@ mod tests {
             entry["supported_reasoning_levels"],
             json!([{"effort":"turbo","description":"turbo reasoning effort"}])
         );
-        assert!(entry.get("default_reasoning_level").is_none());
+        assert_eq!(entry["default_reasoning_level"], Value::Null);
         assert_eq!(entry["supports_reasoning_summary_parameter"], json!(false));
     }
 
@@ -407,7 +606,7 @@ mod tests {
     fn render_uses_conservative_verbosity_and_search_defaults() {
         let entry = rendered(ModelFacts::default());
         assert_eq!(entry["support_verbosity"], json!(false));
-        assert!(entry.get("default_verbosity").is_none());
+        assert_eq!(entry["default_verbosity"], Value::Null);
         assert_eq!(entry["supports_search_tool"], json!(false));
     }
 
@@ -444,24 +643,26 @@ mod tests {
         };
         let entry = rendered(facts);
         assert_eq!(entry["support_verbosity"], json!(false));
-        assert!(entry.get("default_verbosity").is_none());
+        assert_eq!(entry["default_verbosity"], Value::Null);
         assert_eq!(entry["supports_search_tool"], json!(false));
     }
 
     #[test]
     fn render_only_touches_data_driven_keys() {
-        let template = template().unwrap();
+        let template = effective_without_export();
         let entry = rendered(ModelFacts::default());
         let entry = entry.as_object().unwrap();
-        for (key, value) in template {
+        for (key, value) in &template.entry {
             if DATA_DRIVEN_KEYS.contains(&key.as_str()) {
                 continue;
             }
             assert_eq!(entry.get(key), Some(value), "键 {key} 不应被渲染改动");
         }
-        // 渲染新增 supports_reasoning_summary_parameter、并移除无档位时的 default_reasoning_level
-        assert_eq!(entry.len(), template.len());
+        // 渲染新增 supports_reasoning_summary_parameter；其余键（含无档位时的
+        // default_reasoning_level=null）一律保留，不再删键
+        assert_eq!(entry.len(), template.entry.len() + 1);
         assert!(entry.contains_key("supports_reasoning_summary_parameter"));
+        assert!(entry.contains_key("default_reasoning_level"));
     }
 
     #[test]

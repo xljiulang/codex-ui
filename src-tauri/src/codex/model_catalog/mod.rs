@@ -93,6 +93,8 @@ fn build_catalog_result(
 ) -> Result<ModelCatalogGenerateResult, String> {
     let full_entry_sources = sources::full_entry_sources(app_dir, base_url);
     let fact_sources = sources::fact_sources(app_dir);
+    // 渲染模板随用户安装的 codex 版本走（基底 = 启动导出的第一条 + 模板资源覆盖）
+    let render_template = template::effective_template(app_dir)?;
 
     let mut entries: Vec<Value> = Vec::new();
     let mut models: Vec<ModelCatalogModelOption> = Vec::with_capacity(ids.len());
@@ -101,7 +103,8 @@ fn build_catalog_result(
 
         if let Some((source_id, matched)) = lookup_full_entry(&full_entry_sources, id) {
             let source_evidence = full_entry_evidence(source_id, &matched);
-            let entry = finalize_full_entry(matched.entry, id, entries.len() + 1)?;
+            let mut entry = finalize_full_entry(matched.entry, id, entries.len() + 1)?;
+            template::ensure_keys(&mut entry, &render_template.entry);
             entries.push(entry);
             models.push(ModelCatalogModelOption {
                 id: id.clone(),
@@ -141,7 +144,10 @@ fn build_catalog_result(
             {
                 warnings.push("上游资料标记为 beta".to_string());
             }
-            entries.push(template::render(id, &collected.facts, entries.len() + 1)?);
+            let mut entry =
+                template::render(&render_template, id, &collected.facts, entries.len() + 1)?;
+            template::ensure_keys(&mut entry, &render_template.entry);
+            entries.push(entry);
             ModelCatalogModelStatus::Ready
         };
         models.push(ModelCatalogModelOption {
@@ -461,6 +467,132 @@ mod tests {
             collected.facts.source_of("support_verbosity"),
             Some("openrouter")
         );
+    }
+
+    #[test]
+    fn generated_entries_follow_codex_export_keys() {
+        let dir = tempdir().unwrap();
+        // 导出基底带一个覆盖清单里没有的键（模拟更高版本 codex 的新字段）
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.7-sol",
+                "node_repl_disabled": true,
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "model_messages": { "instructions_template": "You are Codex (new)" }
+            })],
+        );
+
+        let result = build_catalog_result(
+            &["deepseek-v4-flash-vision-exp".to_string()],
+            dir.path(),
+            "https://relay.example.com/v1",
+        )
+        .unwrap();
+        let entry = catalog_entry(&result, "deepseek-v4-flash-vision-exp");
+        assert_eq!(
+            entry["node_repl_disabled"],
+            json!(true),
+            "生成条目应带上本机 codex 的新键"
+        );
+        assert_eq!(
+            entry["model_messages"]["instructions_template"],
+            json!("You are Codex (new)"),
+            "提示词应跟随本机 codex 导出"
+        );
+    }
+
+    #[test]
+    fn reused_entries_are_filled_with_template_keys() {
+        let dir = tempdir().unwrap();
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.7-sol",
+                "node_repl_disabled": true,
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "model_messages": { "instructions_template": "You are Codex (new)" }
+            })],
+        );
+
+        // 手写的第三方官方条目本身缺少部分模板键，写出前应被补齐
+        let result = build_catalog_result(
+            &["deepseek-flash".to_string()],
+            dir.path(),
+            "https://api.deepseek.com/v1",
+        )
+        .unwrap();
+        let entry = catalog_entry(&result, "deepseek-flash");
+        assert!(has_source(&result.models[0], "official"));
+        for key in ["available_in_plans", "service_tiers", "node_repl_disabled"] {
+            assert!(entry.get(key).is_some(), "缺失键 {key} 应被补齐");
+        }
+        assert_eq!(entry["prefer_websockets"], json!(false));
+    }
+
+    #[test]
+    fn generated_catalog_is_accepted_by_local_codex() {
+        // 需要真实 codex：与其它集成用例同一门控（未设置 CODEX_BIN 时跳过）
+        let Ok(codex) = std::env::var("CODEX_BIN") else {
+            eprintln!("skip: 未设置 CODEX_BIN");
+            return;
+        };
+        let ids = ["deepseek-flash".to_string(), "big-pickle".to_string()];
+
+        // 1) 无导出：兜底基底 + 模板覆盖
+        let fallback_dir = tempdir().unwrap();
+        assert_catalog_accepted_by_codex(&codex, fallback_dir.path(), &ids);
+
+        // 2) 有导出：基底 = 本机 codex 自带目录第一条（版本对齐路径）
+        let export_dir = tempdir().unwrap();
+        let exported = std::process::Command::new(&codex)
+            .args(["debug", "models", "--bundled"])
+            .output()
+            .unwrap();
+        assert!(exported.status.success(), "导出本机 codex 目录失败");
+        let cache = codex_models::cache_path(export_dir.path());
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        std::fs::write(&cache, &exported.stdout).unwrap();
+        assert_catalog_accepted_by_codex(&codex, export_dir.path(), &ids);
+    }
+
+    /// 用给定 app_dir 生成目录，塞进临时 `CODEX_HOME` 交给真实 codex 解析，
+    /// 并断言生成的模型都在结果里（缺任何必需字段都会让整份目录解析失败）。
+    fn assert_catalog_accepted_by_codex(codex: &str, app_dir: &Path, ids: &[String]) {
+        let result =
+            build_catalog_result(ids, app_dir, "https://relay.example.com/v1").unwrap();
+        assert_eq!(result.ready, ids.len());
+
+        let home = tempdir().unwrap();
+        let catalog = home.path().join("models.json");
+        std::fs::write(&catalog, &result.catalog).unwrap();
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!("model_catalog_json = '{}'\n", catalog.display()),
+        )
+        .unwrap();
+        let output = std::process::Command::new(codex)
+            .args(["debug", "models"])
+            .env("CODEX_HOME", home.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "codex 拒绝生成的目录：{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let slugs: Vec<&str> = value["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|model| model["slug"].as_str())
+            .collect();
+        for id in ids {
+            assert!(slugs.contains(&id.as_str()), "缺少 {id}，实际：{slugs:?}");
+        }
     }
 
     #[test]

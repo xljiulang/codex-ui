@@ -83,7 +83,9 @@ impl FullEntrySource for OfficialModelSource {
 fn official_pool(app_dir: &Path) -> Vec<Value> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut entries = Vec::new();
-    for entry in codex_models::codex_entries(app_dir)
+    // 与模板基底共用同一份进程内快照：不重复解析、也不再起子进程
+    let runtime: Vec<Value> = codex_models::codex_snapshot(app_dir).iter().cloned().collect();
+    for entry in runtime
         .into_iter()
         .chain(bundled_entries().iter().cloned())
     {

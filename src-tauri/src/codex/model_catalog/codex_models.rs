@@ -3,9 +3,14 @@
 //! `resources/official-models.json` 只内置第三方官方条目；GPT/codex 基线条目随用户安装的
 //! codex 版本变化，启动时从该二进制自带的目录导出，避免把研发环境的字段写到老版本 codex 上。
 //! `--bundled` 不读 `CODEX_HOME/config.toml`、不联网；导出失败保留上次缓存。
+//!
+//! 导出结果以**进程内快照**复用：每次启动最多跑一次子进程，生成目录时只读快照
+//! （官方条目池与模板基底共用同一份，保证两者来自同一次导出）。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -24,6 +29,46 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// 运行时缓存路径：`<app_dir>/cache/codex-models.json`。
 pub fn cache_path(app_dir: &Path) -> PathBuf {
     app_dir.join("cache").join(CACHE_FILE)
+}
+
+/// 进程内快照（按缓存路径索引，避免「换目录读旧快照」；实际使用只有一个应用数据目录）。
+static SNAPSHOT: OnceLock<Mutex<HashMap<PathBuf, Arc<Vec<Value>>>>> = OnceLock::new();
+
+fn snapshot_slot() -> &'static Mutex<HashMap<PathBuf, Arc<Vec<Value>>>> {
+    SNAPSHOT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 取导出条目的进程内快照：内存命中直接返回，未命中才读一次磁盘缓存。
+///
+/// 生成目录时官方条目池与模板基底都走这里，因此不会重复解析、也不会再起子进程。
+pub fn codex_snapshot(app_dir: &Path) -> Arc<Vec<Value>> {
+    let path = cache_path(app_dir);
+    if let Ok(guard) = snapshot_slot().lock() {
+        if let Some(entries) = guard.get(&path) {
+            return Arc::clone(entries);
+        }
+    }
+    let entries = Arc::new(read_entries(&path));
+    remember(&path, Arc::clone(&entries));
+    entries
+}
+
+/// 模板基底：导出目录的第一条（版本相关，确定性即可）。
+pub fn template_base(app_dir: &Path) -> Option<Value> {
+    codex_snapshot(app_dir).first().cloned()
+}
+
+fn read_entries(path: &Path) -> Vec<Value> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => parse_export(&text).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn remember(path: &Path, entries: Arc<Vec<Value>>) {
+    if let Ok(mut guard) = snapshot_slot().lock() {
+        guard.insert(path.to_path_buf(), entries);
+    }
 }
 
 /// 导出本机 codex 自带的官方条目并写入缓存；失败返回原因，调用方记日志并保留旧缓存。
@@ -53,18 +98,15 @@ pub async fn refresh_codex_models(app_dir: &Path, codex: &Path) -> Result<(), St
     store_export(app_dir, &String::from_utf8_lossy(&output.stdout))
 }
 
-/// 读取运行时导出的条目；缓存缺失或损坏返回空（此时官方池只剩内置第三方条目）。
-pub fn codex_entries(app_dir: &Path) -> Vec<Value> {
-    let Ok(text) = std::fs::read_to_string(cache_path(app_dir)) else {
-        return Vec::new();
-    };
-    parse_export(&text).unwrap_or_default()
-}
-
 /// 校验导出文本并原子写入缓存；校验不通过时不动旧文件。
+///
+/// 成功写盘后同步刷新进程内快照（失败保留旧快照）。
 fn store_export(app_dir: &Path, text: &str) -> Result<(), String> {
-    parse_export(text)?;
-    write_atomic(&cache_path(app_dir), text.trim().as_bytes())
+    let entries = Arc::new(parse_export(text)?);
+    let path = cache_path(app_dir);
+    write_atomic(&path, text.trim().as_bytes())?;
+    remember(&path, entries);
+    Ok(())
 }
 
 /// 测试辅助：按正式校验路径写入导出缓存。
@@ -132,10 +174,13 @@ mod tests {
         let dir = tempdir().unwrap();
         store_export(dir.path(), &export_text(&["gpt-5.6-sol", "codex-auto-review"])).unwrap();
 
-        let entries = codex_entries(dir.path());
+        let entries = codex_snapshot(dir.path());
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["slug"], json!("gpt-5.6-sol"));
         assert!(cache_path(dir.path()).exists());
+        // 快照与文件同源
+        assert_eq!(codex_snapshot(dir.path()).len(), 2);
+        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.6-sol"));
     }
 
     #[test]
@@ -162,17 +207,53 @@ mod tests {
             before,
             "非法导出不得覆盖旧缓存"
         );
-        assert_eq!(codex_entries(dir.path()).len(), 1);
+        assert_eq!(codex_snapshot(dir.path()).len(), 1);
     }
 
     #[test]
-    fn codex_entries_without_cache_is_empty() {
+    fn snapshot_without_cache_is_empty() {
         let dir = tempdir().unwrap();
-        assert!(codex_entries(dir.path()).is_empty());
+        assert!(codex_snapshot(dir.path()).is_empty());
+        assert!(template_base(dir.path()).is_none());
 
         // 缓存损坏同样按“没有导出”处理
         std::fs::create_dir_all(dir.path().join("cache")).unwrap();
         std::fs::write(cache_path(dir.path()), "{ broken").unwrap();
-        assert!(codex_entries(dir.path()).is_empty());
+        assert!(codex_snapshot(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn snapshot_is_reused_without_repeated_disk_reads() {
+        let dir = tempdir().unwrap();
+        write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.6-sol",
+                "model_messages": { "instructions_template": "You are Codex" }
+            })],
+        );
+        assert_eq!(codex_snapshot(dir.path()).len(), 1);
+
+        // 磁盘缓存被删掉后仍能从快照读到（证明生成期只读内存，不再读盘/起子进程）
+        std::fs::remove_file(cache_path(dir.path())).unwrap();
+        assert_eq!(codex_snapshot(dir.path()).len(), 1);
+        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn refresh_replaces_snapshot() {
+        let dir = tempdir().unwrap();
+        write_export_for_test(dir.path(), vec![json!({
+            "slug": "gpt-5.6-sol",
+            "model_messages": { "instructions_template": "You are Codex" }
+        })]);
+        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.6-sol"));
+
+        write_export_for_test(dir.path(), vec![json!({
+            "slug": "gpt-5.7-sol",
+            "model_messages": { "instructions_template": "You are Codex" }
+        })]);
+        assert_eq!(codex_snapshot(dir.path()).len(), 1);
+        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.7-sol"));
     }
 }

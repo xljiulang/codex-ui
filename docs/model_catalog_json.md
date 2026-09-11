@@ -136,12 +136,30 @@
 因此想让某模型固定按你写的参数走，把它的条目放进这个文件即可（不再经历多源合并）。
 `codex-auto-review` 不在任何提供方的 `/models` 里，使用自动评审时需手动加入目录。
 
-## 模板（固定值的唯一事实来源）
+## 模板：运行时基底 + 覆盖清单
 
-模板 `src-tauri/resources/model_catalog_template.json`（42 键）由脚本从 codex 基线
-`models.json` 的 `gpt-5.6-sol` 派生（不再依赖内置条目池），并做传输层最小化与占位。
-改固定行为 = 只改这个文件（代码里没有固定值常量），
-`src-tauri/src/codex/model_catalog/template.rs` 的护栏测试会拦住误改。
+**渲染模板 = 本机 codex 导出基底 + `resources/model_catalog_template.json` 覆盖**：
+
+- 基底 = 启动时 `codex debug models --bundled` 导出的**第一条**（缓存 `cache/codex-models.json`
+  ＋进程内快照，见下文「数据源与资源刷新」），因此生成条目的**键集与用户实际安装的
+  codex 版本一致**；基底里的 `base_instructions` 会被丢弃（提示词只保留
+  `model_messages.instructions_template`，避免每条重复几十 KB）。
+- 覆盖清单 = `src-tauri/resources/model_catalog_template.json`（42 键，已去掉 `model_messages`）：
+  有同名键就用清单里的值，其余键（含新版本新增的键、`model_messages` 提示词）跟随基底。
+  改固定行为 = 只改这个文件，`template.rs` 的护栏测试会拦住误改。
+- 拿不到导出时（老版本 codex 没有 `debug models`、或导出失败且无缓存）基底改用
+  `resources/model_catalog_fallback.json`（11 个必需键骨架 + 一份提示词），其余仍由覆盖清单决定。
+- 写出前还会对**每一条**输出条目（模板渲染条目与官方复用条目，含手写第三方条目）做
+  「只补不覆盖」的补键，保证不出现缺字段。
+
+> **为什么必须对齐**：codex 解析 `model_catalog_json` 时缺必需字段是**硬失败**——
+> `{"models":[{"slug":"x"}]}` 会直接报 `missing field display_name`、缺 `visibility` 同样报错，
+> 整份目录都加载不了。0.149.0 逐个删字段实测：必需键共 11 个
+> （`slug`、`display_name`、`priority`、`model_messages`、`supported_reasoning_levels`、
+> `support_verbosity`、`shell_type`、`truncation_policy`、`visibility`、`supported_in_api`、
+> `experimental_supported_tools`），其余 31 个删掉都能解析（多出来的未知键会被 serde 忽略）。
+> 渲染器同样**不再删键**：`default_reasoning_level`、`default_verbosity` 无值写 `null`
+> （实测 null 可解析），避免这些键在某个版本变成必需时整份目录失效。
 
 关键固定值：`prefer_websockets=false`、`web_search_tool_type="text"`、`use_responses_lite=false`、
 `tool_mode=null`（协议层最小化，第三方 provider 不走 OpenAI 专用传输）；
@@ -154,9 +172,11 @@
 `visibility="list"`、`supported_in_api=true`、`available_in_plans=[]`、`service_tiers=[]`、
 `additional_speed_tiers=[]`、`default_service_tier=null`。
 
-提示词只保留 `model_messages.instructions_template`（不再重复写 `base_instructions`，
-官方内置条目也没有该键）；`supported_reasoning_levels` 在模板里保留一份档位描述表，
-渲染时必被覆盖，仅用于查档位描述。
+提示词随本机 codex（基底第一条的 `model_messages`）；`supported_reasoning_levels` 在覆盖清单里
+是**最小化空数组 `[]`**——只保证 Key 存在（它是必需字段、也是补键时的安全兜底值），
+不携带任何档位；渲染期的档位**描述**改从**基底条目**的表里查（本机 codex / 兜底资源），
+查不到才退化为 `"{effort} reasoning effort"`。条目里的档位列表始终来自字段源，
+无档位信息就是 `[]`，不会继承模板或基底的档位。
 
 > 注：`supports_parallel_tool_calls`、`reasoning_summary_format`、`minimal_client_version`、
 > `supports_reasoning_summaries`、`available_in_plans` 在 0.149.0 的 `ModelInfo` 里并不存在，
@@ -169,7 +189,8 @@
 | `resources/official-models.json` | 第三方官方条目池（完整条目源）：只放手写的第三方厂商条目（deepseek 等）；GPT/codex 基线条目改为启动时从本机 codex 导出 | `--official`（校验 + 规范化，不联网） |
 | `resources/models-dev.json` | models.dev 内置快照（`catalog.json` 精简版）：`providers` **全量** 213 个 provider / 7669 个模型 + `models` 382 条模型级条目，约 3 MB，保留 `tool_call` / `status` / `reasoning_options`；省略与 map key 重复的 `id` 与不再使用的 `api` / `name` | 同上 |
 | `resources/openrouter-models.json` | OpenRouter 全量响应回退 | 同上 |
-| `resources/model_catalog_template.json` | 渲染基底（由 codex 基线 `models.json` 的 `gpt-5.6-sol` 派生） | `--template` |
+| `resources/model_catalog_template.json` | 渲染模板的**覆盖清单**（42 键，无 `model_messages`）：固定值与占位值 | `--template` |
+| `resources/model_catalog_fallback.json` | 无本机 codex 导出时的基底骨架（11 个必需键 + 提示词） | `--template` |
 
 运行时缓存位于应用数据目录 `%APPDATA%\com.codexui.app\cache\`：`openrouter-models.json`
 与 `models-dev.json` **均为 24 小时 TTL**——启动时检查各自文件的 mtime，未过期直接复用、
