@@ -115,6 +115,11 @@ fn build_catalog_result(
         if let Some((source_id, matched)) = lookup_full_entry(&full_entry_sources, id) {
             let source_evidence = full_entry_evidence(source_id, &matched);
             let mut entry = finalize_full_entry(matched.entry, id, entries.len() + 1)?;
+            template::ensure_keys(&mut entry, &render_template.entry);
+            // 摘要策略在补键之后执行，避免基底又把它带回来；执行后再记录来源
+            if let Some(object) = entry.as_object_mut() {
+                apply_reasoning_summary_policy(object);
+            }
             let mut provenance = Provenance::new();
             if let Some(object) = entry.as_object() {
                 for key in validation::OUTPUT_FIELDS {
@@ -126,7 +131,6 @@ fn build_catalog_result(
                     }
                 }
             }
-            template::ensure_keys(&mut entry, &render_template.entry);
             let status = match validation::validate_entry(&mut entry, &mut warnings) {
                 Ok(()) => {
                     validation::complete_provenance(&entry, &mut provenance);
@@ -239,7 +243,7 @@ fn lookup_full_entry(
         .find_map(|source| source.full_entry(model_id).map(|entry| (source.id(), entry)))
 }
 
-/// 只覆盖身份与顺序：`slug` 用提供方原始 id，`priority` 按候选原顺序。
+/// 覆盖身份、顺序与推理摘要策略：`slug` 用提供方原始 id，`priority` 按候选原顺序。
 fn finalize_full_entry(mut entry: Value, model_id: &str, priority: usize) -> Result<Value, String> {
     let object = entry
         .as_object_mut()
@@ -247,6 +251,21 @@ fn finalize_full_entry(mut entry: Value, model_id: &str, priority: usize) -> Res
     object.insert("slug".to_string(), json!(model_id));
     object.insert("priority".to_string(), json!(priority as i64));
     Ok(entry)
+}
+
+/// 复用条目时打开推理摘要：官方 GPT 条目默认 `none`，而 GPT 系只回加密推理 + 摘要，
+/// 不请求就等于思考过程空白；同时清掉会挡掉摘要请求的旧字段。
+fn apply_reasoning_summary_policy(object: &mut serde_json::Map<String, Value>) {
+    let reasoning = object
+        .get("supported_reasoning_levels")
+        .and_then(Value::as_array)
+        .is_some_and(|levels| !levels.is_empty());
+    if reasoning {
+        object.insert("default_reasoning_summary".to_string(), json!("auto"));
+    }
+    if object.get("supports_reasoning_summary_parameter") == Some(&Value::Bool(false)) {
+        object.remove("supports_reasoning_summary_parameter");
+    }
 }
 
 struct CollectedFacts {
@@ -426,6 +445,28 @@ mod tests {
         assert_eq!(result.models[0].field_provenance["context_window"].source, "openrouter");
         assert_eq!(result.models[0].field_provenance["description"].source, "models_dev");
         assert!(result.models[0].warnings.iter().any(|warning| warning.contains("近似")));
+    }
+
+    #[test]
+    fn reused_official_entry_enables_reasoning_summary() {
+        let dir = tempdir().unwrap();
+        codex_models::write_export_for_test(dir.path(), vec![json!({
+            "slug":"gpt-5.6-luna",
+            "model_messages":{"instructions_template":"test"},
+            "supported_reasoning_levels":[{"effort":"low","description":"low"}],
+            "default_reasoning_summary":"none",
+            "supports_reasoning_summary_parameter": false
+        })]);
+        let result = build_catalog_result(
+            &["gpt-5.6-luna".into()],
+            dir.path(),
+            "https://relay.example.com",
+        )
+        .unwrap();
+        // GPT 系只回加密推理 + 摘要，复用条目必须把官方默认的 none 打开
+        let entry = catalog_entry(&result, "gpt-5.6-luna");
+        assert_eq!(entry["default_reasoning_summary"], json!("auto"));
+        assert!(entry.get("supports_reasoning_summary_parameter").is_none());
     }
 
     #[test]
@@ -802,11 +843,16 @@ mod tests {
             .find(|model| model["slug"] == json!("deepseek-flash"))
             .expect("官方条目池缺少 deepseek-flash");
         for (key, value) in expected.as_object().unwrap() {
-            if matches!(key.as_str(), "slug" | "priority" | "prefer_websockets") {
+            // default_reasoning_summary 由复用策略覆盖为 auto（推理条目打开摘要）
+            if matches!(
+                key.as_str(),
+                "slug" | "priority" | "prefer_websockets" | "default_reasoning_summary"
+            ) {
                 continue;
             }
             assert_eq!(entry.get(key), Some(value), "键 {key} 应原样复用官方条目");
         }
+        assert_eq!(entry["default_reasoning_summary"], json!("auto"));
         assert_eq!(result.ready, 1);
         assert_eq!(result.models[0].status, ModelCatalogModelStatus::Ready);
         assert!(result.models[0].selectable);

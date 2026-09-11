@@ -20,6 +20,8 @@ interface RawConfigReadResponse {
 export interface ModelProviderConfigState {
   model: string;
   model_reasoning_effort: string;
+  /** 推理摘要 model_reasoning_summary（auto/concise/detailed/none），空串表示未配置 */
+  model_reasoning_summary: string;
   /** 回复风格 personality（friendly/pragmatic/none），空串表示未配置 */
   personality: string;
   /** 输出详细程度 model_verbosity（low/medium/high），空串表示未配置 */
@@ -62,6 +64,7 @@ export async function loadModelProviderConfig(): Promise<ModelProviderConfigStat
   return {
     model: str(cfg.model),
     model_reasoning_effort: str(cfg.model_reasoning_effort),
+    model_reasoning_summary: str(cfg.model_reasoning_summary),
     personality: str(cfg.personality),
     model_verbosity: str(cfg.model_verbosity),
     model_provider: str(cfg.model_provider),
@@ -137,6 +140,12 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
           keyPath: "model_reasoning_effort",
           // 空值删键：写空串会被 codex 拒绝（reasoning_effort must not be empty），导致保存失败
           value: edit.model_reasoning_effort.trim() || null,
+          mergeStrategy: "replace",
+        },
+        {
+          // model_reasoning_summary：空串写 null 让 codex 删除该键（回退模型条目默认值）
+          keyPath: "model_reasoning_summary",
+          value: edit.model_reasoning_summary.trim() || null,
           mergeStrategy: "replace",
         },
         {

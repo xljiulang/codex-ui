@@ -55,6 +55,7 @@ const modelConfig = reactive({
   model_catalog: "",
   model: "",
   model_reasoning_effort: "",
+  model_reasoning_summary: "",
   personality: "",
   model_verbosity: "",
   model_provider: "",
@@ -75,6 +76,16 @@ const REASONING_EFFORT_VALUES = [
   "xhigh",
   "max",
   "ultra",
+];
+
+/** config.toml `model_reasoning_summary` 支持的档位（codex-cli ReasoningSummary）。
+ *  GPT 系只返回加密推理 + 摘要，不请求摘要时“思考过程”卡片为空；选 auto 交给服务端决定。 */
+const REASONING_SUMMARY_OPTIONS: AppSelectOption[] = [
+  { value: "", label: "默认（不写入）" },
+  { value: "auto", label: "auto（自动）" },
+  { value: "concise", label: "concise（简洁）" },
+  { value: "detailed", label: "detailed（详细）" },
+  { value: "none", label: "none（关闭）" },
 ];
 
 /** config.toml `personality` 支持的档位（codex-cli Personality）。
@@ -227,6 +238,7 @@ function applyCatalogCard(res: ModelConfigState) {
 function applyProvidersCard(pc: ModelProviderConfigState) {
   modelConfig.model = pc.model;
   modelConfig.model_reasoning_effort = pc.model_reasoning_effort;
+  modelConfig.model_reasoning_summary = pc.model_reasoning_summary;
   modelConfig.personality = pc.personality;
   modelConfig.model_verbosity = pc.model_verbosity;
   modelConfig.model_provider = pc.model_provider;
@@ -601,6 +613,7 @@ async function saveModelConfig() {
     const input: ModelConfigUiEdit = {
       model: modelConfig.model.trim(),
       model_reasoning_effort: modelConfig.model_reasoning_effort.trim(),
+      model_reasoning_summary: modelConfig.model_reasoning_summary,
       personality: modelConfig.personality,
       model_verbosity: modelConfig.model_verbosity,
       model_provider: modelConfig.model_provider,
@@ -833,6 +846,15 @@ function openModelConfigFile() {
             v-model="modelConfig.personality"
             :disabled="modelConfig.loading"
             :options="PERSONALITY_OPTIONS"
+          />
+        </div>
+        <div class="setting-row">
+          <label for="model-config-ui-reasoning-summary">model_reasoning_summary（推理摘要）</label>
+          <AppSelect
+            id="model-config-ui-reasoning-summary"
+            v-model="modelConfig.model_reasoning_summary"
+            :disabled="modelConfig.loading"
+            :options="REASONING_SUMMARY_OPTIONS"
           />
         </div>
         <div class="setting-row">

@@ -339,6 +339,8 @@ export interface ModelCatalogGenerateResult {
 export interface ModelConfigUiEdit {
   model: string;
   model_reasoning_effort: string;
+  /** 推理摘要 model_reasoning_summary（auto/concise/detailed/none）；空串表示不写入该键 */
+  model_reasoning_summary: string;
   /** 回复风格 personality（friendly/pragmatic/none）；空串表示不写入该键 */
   personality: string;
   /** 输出详细程度 model_verbosity（low/medium/high）；空串表示不写入该键 */

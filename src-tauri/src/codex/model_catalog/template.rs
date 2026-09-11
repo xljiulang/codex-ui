@@ -28,8 +28,9 @@ const BASE_EXCLUDED_KEYS: &[&str] = &["base_instructions"];
 
 /// 由字段源覆盖的键；模板里其余键一律原样继承。
 ///
-/// `supports_reasoning_summary_parameter` 不在模板里（官方内置条目也没有该键），
-/// 由渲染器按推理能力写入。
+/// `default_reasoning_summary` 按推理能力写入（推理模型 auto、其余 none）；
+/// 0.149.x 的 `supports_reasoning_summary_parameter` 一律不写——官方条目没有该键，
+/// 显式写 false 会让 codex 完全不请求推理摘要（GPT 系因此只回加密推理、思考过程空白）。
 /// 该清单作为渲染契约由 `render_only_touches_data_driven_keys` 断言，仅测试期使用。
 #[cfg(test)]
 pub const DATA_DRIVEN_KEYS: &[&str] = &[
@@ -40,6 +41,7 @@ pub const DATA_DRIVEN_KEYS: &[&str] = &[
     "input_modalities",
     "supported_reasoning_levels",
     "default_reasoning_level",
+    "default_reasoning_summary",
     "context_window",
     "max_context_window",
     "effective_context_window_percent",
@@ -49,7 +51,6 @@ pub const DATA_DRIVEN_KEYS: &[&str] = &[
     "supports_search_tool",
     "status",
     "supports_image_detail_original",
-    "supports_reasoning_summary_parameter",
 ];
 
 /// 源没有给出描述时的兜底文案。
@@ -249,9 +250,12 @@ pub fn render(
         "supported_reasoning_levels".to_string(),
         Value::Array(presets),
     );
+    // 推理模型请求推理摘要：GPT 系只回加密推理 + 摘要，不请求就等于思考过程空白；
+    // 非推理模型显式关闭。不写 `supports_reasoning_summary_parameter`（见 DATA_DRIVEN_KEYS 注释）。
+    let supports_reasoning = facts.supports_reasoning == Some(true) || !levels.is_empty();
     entry.insert(
-        "supports_reasoning_summary_parameter".to_string(),
-        json!(false),
+        "default_reasoning_summary".to_string(),
+        json!(if supports_reasoning { "auto" } else { "none" }),
     );
 
     // 源明确给了 verbosity / 搜索能力才覆盖；源无信息时保留模板取值。
@@ -374,7 +378,7 @@ mod tests {
         assert_eq!(overrides["comp_hash"], json!("3000"));
         assert_eq!(overrides["minimal_client_version"], json!("0.144.0"));
         assert_eq!(overrides["reasoning_summary_format"], json!("experimental"));
-        assert_eq!(overrides["default_reasoning_summary"], json!("none"));
+        assert_eq!(overrides["default_reasoning_summary"], json!("auto"));
         assert_eq!(overrides["include_skills_usage_instructions"], json!(false));
         assert_eq!(overrides["include_plugin_usage_instructions"], json!(true));
         assert_eq!(overrides["include_apps_usage_instructions"], json!(true));
@@ -574,7 +578,9 @@ mod tests {
         );
         // 不删键：无默认档位时写 null
         assert_eq!(entry["default_reasoning_level"], Value::Null);
-        assert_eq!(entry["supports_reasoning_summary_parameter"], json!(false));
+        // 有推理档位即请求摘要；且不写会挡掉摘要请求的旧字段
+        assert_eq!(entry["default_reasoning_summary"], json!("auto"));
+        assert!(entry.get("supports_reasoning_summary_parameter").is_none());
     }
 
     #[test]
@@ -611,7 +617,14 @@ mod tests {
             json!([{"effort":"turbo","description":"turbo reasoning effort"}])
         );
         assert_eq!(entry["default_reasoning_level"], Value::Null);
-        assert_eq!(entry["supports_reasoning_summary_parameter"], json!(false));
+        assert_eq!(entry["default_reasoning_summary"], json!("auto"));
+    }
+
+    #[test]
+    fn render_disables_reasoning_summary_for_non_reasoning_models() {
+        let entry = rendered(ModelFacts::default());
+        assert_eq!(entry["default_reasoning_summary"], json!("none"));
+        assert!(entry.get("supports_reasoning_summary_parameter").is_none());
     }
 
     #[test]
@@ -670,10 +683,10 @@ mod tests {
             }
             assert_eq!(entry.get(key), Some(value), "键 {key} 不应被渲染改动");
         }
-        // 渲染新增 supports_reasoning_summary_parameter；其余键（含无档位时的
-        // default_reasoning_level=null）一律保留，不再删键
-        assert_eq!(entry.len(), template.entry.len() + 1);
-        assert!(entry.contains_key("supports_reasoning_summary_parameter"));
+        // 渲染不新增键（不再写 supports_reasoning_summary_parameter）；其余键
+        // （含无档位时的 default_reasoning_level=null）一律保留，不再删键
+        assert_eq!(entry.len(), template.entry.len());
+        assert!(!entry.contains_key("supports_reasoning_summary_parameter"));
         assert!(entry.contains_key("default_reasoning_level"));
     }
 

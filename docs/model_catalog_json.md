@@ -143,7 +143,8 @@
 
 | 字段 | 来源 |
 | --- | --- |
-| `supports_reasoning_summary_parameter` | 模板生成条目固定为 false；官方完整条目保持原值 |
+| `default_reasoning_summary` | 推理条目（有档位或声明支持推理）写 `auto`、其余写 `none`；官方复用条目同样按此覆盖，否则 GPT 系只回加密推理、「思考过程」卡片为空 |
+| `supports_reasoning_summary_parameter` | **一律不写**：官方条目没有该键，显式写 `false` 会让 codex 完全不请求推理摘要；复用条目里若残留 `false` 会被删除 |
 | `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；模板条目 `display_name` 按 slug 格式化；`priority` 按选中条目的候选原顺序从 1 重排，不按点击顺序 |
 | 可用性 | 可靠匹配的 `tool_call=false` 或 `status=deprecated` → `incompatible`；条目校验失败 → `invalid`；这些条目不会写入目录 |
 
@@ -218,7 +219,7 @@
 `tool_mode=null`（协议层最小化，第三方 provider 不走 OpenAI 专用传输）；
 `truncation_policy={tokens,10000}`、`multi_agent_version="v2"`、`comp_hash="3000"`、
 `minimal_client_version="0.144.0"`、`reasoning_summary_format="experimental"`、
-`default_reasoning_summary="none"`、`supports_reasoning_summaries=true`、
+`default_reasoning_summary="auto"`（渲染器按推理能力改写为 `auto` / `none`）、`supports_reasoning_summaries=true`、
 `include_skills_usage_instructions=false`、`include_plugin_usage_instructions=true`、
 `include_apps_usage_instructions=true`、`effective_context_window_percent=95`、
 `supports_parallel_tool_calls=true`、`shell_type="shell_command"`、`apply_patch_tool_type="freeform"`、

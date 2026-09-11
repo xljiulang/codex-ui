@@ -66,6 +66,7 @@ function providerConfigState(
   return {
     model: "gpt-5.2",
     model_reasoning_effort: "medium",
+    model_reasoning_summary: "",
     personality: "",
     model_verbosity: "",
     model_provider: "",
@@ -95,10 +96,14 @@ beforeEach(() => {
   mockedInvoke.mockResolvedValue(modelConfigReadResult());
 });
 
-describe("ModelConfigSection 回复风格与输出详细程度", () => {
-  it("渲染 personality / model_verbosity 两个下拉并回显已配置值", async () => {
+describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", () => {
+  it("渲染推理摘要、personality、model_verbosity 三个下拉并回显已配置值", async () => {
     mockedLoad.mockResolvedValue(
-      providerConfigState({ personality: "pragmatic", model_verbosity: "low" }),
+      providerConfigState({
+        model_reasoning_summary: "auto",
+        personality: "pragmatic",
+        model_verbosity: "low",
+      }),
     );
     const wrapper = await mountSection();
     const rows = wrapper.findAll(".settings .setting-row");
@@ -107,20 +112,25 @@ describe("ModelConfigSection 回复风格与输出详细程度", () => {
     expect(labels).toContain("preferred_auth_method（优先认证方式）");
     expect(labels).toContain("forced_login_method（强制登录方式）");
     expect(labels).toContain("personality（回复风格）");
+    expect(labels).toContain("model_reasoning_summary（推理摘要）");
     expect(labels).toContain("model_verbosity（输出详细程度）");
-    // 顺序：effort → 优先认证 → 强制登录 → personality → verbosity
+    // 顺序：effort → 优先认证 → 强制登录 → personality → 推理摘要 → verbosity
     const iEffort = labels.indexOf("model_reasoning_effort（推理强度）");
     const iAuth = labels.indexOf("preferred_auth_method（优先认证方式）");
     const iForced = labels.indexOf("forced_login_method（强制登录方式）");
     const iPersonality = labels.indexOf("personality（回复风格）");
+    const iSummary = labels.indexOf("model_reasoning_summary（推理摘要）");
     const iVerbosity = labels.indexOf("model_verbosity（输出详细程度）");
     expect(iAuth).toBeGreaterThan(iEffort);
     expect(iForced).toBeGreaterThan(iAuth);
     expect(iPersonality).toBeGreaterThan(iForced);
-    expect(iVerbosity).toBeGreaterThan(iPersonality);
+    expect(iSummary).toBeGreaterThan(iPersonality);
+    expect(iVerbosity).toBeGreaterThan(iSummary);
     // AppSelect 触发按钮显示选中项 label
     const personalitySelect = wrapper.find("#model-config-ui-personality");
     expect(personalitySelect.text()).toContain("pragmatic（务实简洁）");
+    const summarySelect = wrapper.find("#model-config-ui-reasoning-summary");
+    expect(summarySelect.text()).toContain("auto（自动）");
     const verbositySelect = wrapper.find("#model-config-ui-verbosity");
     expect(verbositySelect.text()).toContain("low（简洁）");
   });
@@ -128,18 +138,26 @@ describe("ModelConfigSection 回复风格与输出详细程度", () => {
   it("未配置时显示「默认（不写入）」", async () => {
     mockedLoad.mockResolvedValue(providerConfigState());
     const wrapper = await mountSection();
+    expect(wrapper.find("#model-config-ui-reasoning-summary").text()).toContain(
+      "默认（不写入）",
+    );
     expect(wrapper.find("#model-config-ui-personality").text()).toContain("默认（不写入）");
     expect(wrapper.find("#model-config-ui-verbosity").text()).toContain("默认（不写入）");
   });
 
   it("保存时把当前选择传入 saveModelProviderConfig", async () => {
     mockedLoad.mockResolvedValue(
-      providerConfigState({ personality: "pragmatic", model_verbosity: "low" }),
+      providerConfigState({
+        model_reasoning_summary: "auto",
+        personality: "pragmatic",
+        model_verbosity: "low",
+      }),
     );
     const wrapper = await mountSection();
     await wrapper.find(".model-config-save-btn").trigger("click");
     await vi.waitFor(() => expect(mockedSave).toHaveBeenCalled());
     const input = mockedSave.mock.calls[0]![0];
+    expect(input.model_reasoning_summary).toBe("auto");
     expect(input.personality).toBe("pragmatic");
     expect(input.model_verbosity).toBe("low");
   });

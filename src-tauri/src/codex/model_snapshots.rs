@@ -30,6 +30,9 @@ pub struct ModelSnapshot {
     pub model: String,
     #[serde(default)]
     pub model_reasoning_effort: String,
+    /// 推理摘要 model_reasoning_summary（auto/concise/detailed/none）。
+    #[serde(default)]
+    pub model_reasoning_summary: String,
     #[serde(default)]
     pub personality: String,
     #[serde(default)]
@@ -249,6 +252,7 @@ fn current_snapshot(home: &Path) -> Result<ModelSnapshot, String> {
         version: SNAPSHOT_VERSION,
         model: doc_string(&doc, "model"),
         model_reasoning_effort: doc_string(&doc, "model_reasoning_effort"),
+        model_reasoning_summary: doc_string(&doc, "model_reasoning_summary"),
         personality: doc_string(&doc, "personality"),
         model_verbosity: doc_string(&doc, "model_verbosity"),
         model_provider: doc_string(&doc, "model_provider"),
@@ -339,6 +343,11 @@ fn apply_model_fields(
         doc,
         "model_reasoning_effort",
         &snapshot.model_reasoning_effort,
+    );
+    set_or_remove(
+        doc,
+        "model_reasoning_summary",
+        &snapshot.model_reasoning_summary,
     );
     set_or_remove(doc, "personality", &snapshot.personality);
     set_or_remove(doc, "model_verbosity", &snapshot.model_verbosity);
@@ -606,6 +615,7 @@ mod tests {
             version: SNAPSHOT_VERSION,
             model: "deepseek-v4-flash".into(),
             model_reasoning_effort: "high".into(),
+            model_reasoning_summary: "auto".into(),
             personality: "pragmatic".into(),
             model_verbosity: "low".into(),
             model_provider: "deepseek".into(),
@@ -645,6 +655,7 @@ mod tests {
             &model_config::config_path_in(home),
             r#"model = "gpt"
 model_reasoning_effort = "high"
+model_reasoning_summary = "auto"
 model_provider = "deepseek"
 preferred_auth_method = "apikey"
 forced_login_method = "api"
@@ -665,6 +676,7 @@ custom = 42
         save_in(home, "dev").unwrap();
         let snapshot = read_snapshot(home, "dev").unwrap();
         assert_eq!(snapshot.model, "gpt");
+        assert_eq!(snapshot.model_reasoning_summary, "auto");
         assert_eq!(snapshot.model_providers["deepseek"]["custom"], 42);
         assert_eq!(
             snapshot.model_providers["deepseek"]["experimental_bearer_token"],
@@ -716,6 +728,7 @@ name = "Old"
         assert!(text.contains("instructions = \"keep me\""));
         assert!(text.contains("[mcp_servers.filesystem]"));
         assert!(text.contains("model = \"deepseek-v4-flash\""));
+        assert!(text.contains("model_reasoning_summary = \"auto\""));
         assert!(text.contains("experimental_bearer_token = \"sk-secret\""));
         assert!(text.contains("custom = 42"));
         assert!(!text.contains("model_providers.old"));
