@@ -31,6 +31,15 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/models";
 const TEMPLATE_BASE_SLUG = "gpt-5.6-sol";
 
 /**
+ * 模板持有的提示词：只服务"未命中完整条目源"的模型（多源合并 + 模板渲染）。
+ * 命中完整条目源（codex 导出池 / official-models.json）的条目整条复用、保留自带提示词。
+ * codex 对 `base_instructions` 与 `model_messages.instructions_template` 互为备选
+ * （两者都缺才会报 missing both），故两个字段写同一段文本，不依赖其内部优先级。
+ */
+const THIRD_PARTY_INSTRUCTIONS =
+  "你是 Codex，一名编码代理。你与用户共享同一个工作区，通过调用工具完成用户的请求，而不是只给出建议。\n\n## 工作方式\n\n- 持续工作直到任务真正完成：每一步要么调用工具推进，要么给出结论；不要只说「我接下来会……」就结束回合。\n- 动手前先读取相关文件，用工具查看真实内容，不要凭记忆或猜测。\n- 修改文件使用编辑工具，保持最小改动，不要顺手重构无关代码。\n- 不要臆造 API、函数名或文件路径；不确定就先读代码或运行命令确认。\n- 工具报错时换一种方式重试（换工具或换命令），不要因一次失败就停止工作。\n- 核对命令输出，不要假设命令已成功。\n- 危险操作（删除、覆盖、重置）先确认范围。\n\n## 沟通\n\n- 用中文回答，简洁直接，先说结论。\n- 代码、命令、路径保持原样，不翻译。\n- 结束回合前确认用户的要求已全部满足；未完成就继续，或说明卡在哪里。";
+
+/**
  * 精简快照保留的模型字段：只留映射需要的能力参数。
  * 冗余的 `id` 与 map key 重复，故省略（Rust 侧缺失时用 map key 注入）。
  */
@@ -154,8 +163,9 @@ async function updateTemplate() {
     official.models.find((model) => model.slug === TEMPLATE_BASE_SLUG) ?? official.models[0];
   const template = structuredClone(base);
 
-  // 提示词只保留 model_messages.instructions_template（官方条目从不写 base_instructions）
-  delete template.base_instructions;
+  // 提示词：模板由官方条目派生，但值换成第三方精简提示词（官方条目自带的提示词
+  // 只服务命中完整条目源的模型；其它模型走模板渲染，用这段精简文本）
+  template.base_instructions = THIRD_PARTY_INSTRUCTIONS;
 
   // 数据驱动占位：生成时一律覆盖
   template.slug = "placeholder-model";
@@ -175,8 +185,9 @@ async function updateTemplate() {
   // 档位描述由基底条目（本机 codex 导出 / 兜底资源）在渲染时提供
   template.supported_reasoning_levels = [];
 
-  // 提示词改为随运行期 codex 版本走（应用用 codex 导出基底），模板不再持有 model_messages
-  delete template.model_messages;
+  // 只保留 instructions_template：approvals / collaboration_modes / permissions 等
+  // 子键在运行期跟随 codex 导出基底（Rust 侧合并时只覆盖提示词）
+  template.model_messages = { instructions_template: THIRD_PARTY_INSTRUCTIONS };
 
   // 传输层最小化：第三方 provider 不走 OpenAI 专用传输与工具形态
   template.prefer_websockets = false;

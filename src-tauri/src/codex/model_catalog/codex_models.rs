@@ -237,17 +237,27 @@ mod tests {
     fn captured_snapshot_is_shared_by_official_source_and_template() {
         let dir = tempdir().unwrap();
         write_export_for_test(dir.path(), vec![json!({
-            "slug":"generation-old", "model_messages":{"instructions_template":"old"}
+            "slug":"generation-old",
+            "node_repl_disabled": true,
+            "model_messages":{"instructions_template":"old"}
         })]);
         let captured = codex_snapshot(dir.path());
         write_export_for_test(dir.path(), vec![json!({
-            "slug":"generation-new", "model_messages":{"instructions_template":"new"}
+            "slug":"generation-new",
+            "node_repl_disabled": false,
+            "model_messages":{"instructions_template":"new"}
         })]);
         let sources = super::super::sources::full_entry_sources(&captured, "https://relay.example.com");
         assert!(sources[0].full_entry("generation-old").is_some());
         assert!(sources[0].full_entry("generation-new").is_none());
         let template = super::super::template::from_snapshot(&captured).unwrap();
-        assert_eq!(template.entry["model_messages"]["instructions_template"], json!("old"));
+        // 快照共享：模板取的是捕获时的条目（新写入的导出不得生效）。
+        // 提示词本身来自模板资源，不再跟随导出，故用其它键断言。
+        assert_eq!(template.entry["node_repl_disabled"], json!(true));
+        assert_ne!(
+            template.entry["model_messages"]["instructions_template"],
+            json!("old")
+        );
     }
 
     #[tokio::test]

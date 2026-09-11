@@ -177,7 +177,7 @@
 `codex-auto-review` 不再复用（不影响生成，只是少了官方口径的资料）。
 
 先全池查找原始 slug 精确匹配，再查找唯一规范化匹配；规范化有歧义时自动转字段源。
-命中时整条复用该条目：专属提示词、`context_window`、
+命中时整条复用该条目：`context_window`、
 `max_context_window`（如 `gpt-5.6-*` 的 872000）、`tool_mode=code_mode_only`、
 `use_responses_lite`、`web_search_tool_type=text_and_image`、`include_*`、`multi_agent_version`、
 `truncation_policy` 全部保留；只覆盖：
@@ -185,6 +185,16 @@
 1. `slug` ← 提供方返回的原始 ID；
 2. `priority` ← 勾选顺序；
 3. 提供方主机不是 OpenAI 官方（`*.openai.com` / `*.chatgpt.com`）时，`prefer_websockets` 置 `false`。
+
+**提示词按来源分流**：命中本源的条目（含唯一规范化匹配）保留自带提示词（`base_instructions`
+与 `model_messages.instructions_template` 都不改）；**未命中**的模型走多源合并 + 模板渲染，
+两个提示词字段都写成模板资源里的精简提示词（见下节）。
+
+> **为什么要精简非本源模型的提示词**：模板基底取自官方条目，其提示词约 18K 字符；像
+> `big-pickle` 这类只存在于提供方 `/models`、又不在导出池内的第三方模型，会带着这段
+> 固定开销随会话增长把上游上下文顶满——实测表现为模型突然不再调用工具、回合静默结束，
+> 随后上游开始回 500/400。精简提示词约 380 字符，保留「持续工作到完成、失败换方式重试、
+> 先读后改、最小改动」等关键约束。
 
 只做精确匹配、不做模糊匹配，避免把 `gpt-5.6` 之类乱映射到 `sol/terra/luna`。
 因此想让某模型固定按你写的参数走，把它的条目放进这个文件即可（不再经历多源合并）。
@@ -196,15 +206,18 @@
 
 - 基底 = 启动时 `codex debug models --bundled` 导出的**第一条**（缓存 `cache/codex-models.json`
   ＋进程内快照，见下文「数据源与资源刷新」），因此生成条目的**键集与用户实际安装的
-  codex 版本一致**；基底里的 `base_instructions` 会被丢弃（提示词只保留
-  `model_messages.instructions_template`，避免每条重复几十 KB）。
-- 覆盖清单 = `src-tauri/resources/model_catalog_template.json`（42 键，已去掉 `model_messages`）：
-  有同名键就用清单里的值，其余键（含新版本新增的键、`model_messages` 提示词）跟随基底。
-  改固定行为 = 只改这个文件，`template.rs` 的护栏测试会拦住误改。
+  codex 版本一致**；基底里的 `base_instructions` 会被丢弃，再由覆盖清单写入精简版。
+- 覆盖清单 = `src-tauri/resources/model_catalog_template.json`（44 键）：有同名键就用清单里的值，
+  其余键（含新版本新增的键）跟随基底。改固定行为 = 只改这个文件，`template.rs` 的护栏测试会拦住误改。
+  其中 `base_instructions` 与 `model_messages.instructions_template` 写同一段精简提示词，
+  服务所有未命中完整条目源的模型；`model_messages` 只覆盖 `instructions_template`，
+  `approvals` / `collaboration_modes` / `instructions_variables` / `multi_agent` / `permissions`
+  等子键在合并时保留基底的（整对象替换会丢）。
 - 拿不到导出时（老版本 codex 没有 `debug models`、或导出失败且无缓存）基底改用
   `resources/model_catalog_fallback.json`（11 个必需键骨架 + 一份提示词），其余仍由覆盖清单决定。
 - 写出前还会对**每一条**输出条目（模板渲染条目与官方复用条目，含手写第三方条目）做
-  「只补不覆盖」的补键，保证不出现缺字段。
+  「只补不覆盖」的补键，保证不出现缺字段；`base_instructions` 是唯一例外——它只由模板渲染
+  路径产出，**不**向复用条目补齐，否则命中完整条目源的模型会被塞进精简基底、悄悄换掉自带提示词。
 
 > **为什么必须对齐**：codex 解析 `model_catalog_json` 时缺必需字段是**硬失败**——
 > `{"models":[{"slug":"x"}]}` 会直接报 `missing field display_name`、缺 `visibility` 同样报错，
@@ -226,7 +239,8 @@
 `visibility="list"`、`supported_in_api=true`、`available_in_plans=[]`、`service_tiers=[]`、
 `additional_speed_tiers=[]`、`default_service_tier=null`。
 
-提示词随本机 codex（基底第一条的 `model_messages`）；`supported_reasoning_levels` 在覆盖清单里
+提示词由覆盖清单持有（`base_instructions` 与 `model_messages.instructions_template` 同写精简版，
+服务未命中完整条目源的模型；命中本源的条目保留自带提示词）；`supported_reasoning_levels` 在覆盖清单里
 是**最小化空数组 `[]`**——只保证 Key 存在（它是必需字段、也是补键时的安全兜底值），
 不携带任何档位；渲染期的档位**描述**改从**基底条目**的表里查（本机 codex / 兜底资源），
 查不到才退化为 `"{effort} reasoning effort"`。条目里的档位列表始终来自字段源，
@@ -243,7 +257,7 @@
 | `resources/official-models.json` | 第三方官方条目池（完整条目源）：只放手写的第三方厂商条目（deepseek 等）；GPT/codex 基线条目改为启动时从本机 codex 导出 | `--official`（校验 + 规范化，不联网） |
 | `resources/models-dev.json` | models.dev 内置快照（`catalog.json` 精简版）：`providers` **全量** 213 个 provider / 7669 个模型 + `models` 382 条模型级条目，约 3 MB，保留 `tool_call` / `status` / `reasoning_options`；省略与 map key 重复的 `id` 与不再使用的 `api` / `name` | 同上 |
 | `resources/openrouter-models.json` | OpenRouter 全量响应回退 | 同上 |
-| `resources/model_catalog_template.json` | 渲染模板的**覆盖清单**（42 键，无 `model_messages`）：固定值与占位值 | `--template` |
+| `resources/model_catalog_template.json` | 渲染模板的**覆盖清单**（44 键）：固定值、占位值与精简提示词（`base_instructions` + `model_messages.instructions_template`） | `--template` |
 | `resources/model_catalog_fallback.json` | 无本机 codex 导出时的基底骨架（11 个必需键 + 提示词） | `--template` |
 
 运行时缓存位于应用数据目录 `%APPDATA%\com.codexui.app\cache\`：`openrouter-models.json`

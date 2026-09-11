@@ -22,9 +22,12 @@ const TEMPLATE_JSON: &str = include_str!("../../../resources/model_catalog_templ
 /// 无导出（老版本 codex 没有 `debug models`、或导出失败且无缓存）时的基底骨架：
 /// 只含必需键与一份提示词，其余仍由模板资源覆盖。
 const FALLBACK_BASE_JSON: &str = include_str!("../../../resources/model_catalog_fallback.json");
-/// 基底里不并入模板的键：提示词只保留 `model_messages.instructions_template`，
-/// 避免每条目录条目重复数十 KB 的 `base_instructions`（实测该键非必需）。
+/// 基底里不并入模板的键：剥掉**基底**（本机 codex 导出 / 兜底骨架）的长
+/// `base_instructions`，随后由模板资源用精简版覆盖。
 const BASE_EXCLUDED_KEYS: &[&str] = &["base_instructions"];
+/// 复用条目补键时跳过的键：`base_instructions` 必须保持条目自带的那份，否则命中
+/// 完整条目源（codex 导出池 / `official-models.json`）的模型会被注入模板的精简基底。
+const ENSURE_EXCLUDED_KEYS: &[&str] = &["base_instructions"];
 
 /// 由字段源覆盖的键；模板里其余键一律原样继承。
 ///
@@ -124,8 +127,40 @@ pub fn from_snapshot(snapshot: &[Value]) -> Result<RenderTemplate, String> {
     for key in BASE_EXCLUDED_KEYS {
         merged.remove(*key);
     }
-    for (key, value) in overrides()? {
+    let overrides = overrides()?;
+    // 提示词：模板必须同时给出两个字段（codex 对二者互为备选，都写才不依赖其优先级）
+    let prompt = overrides
+        .get("model_messages")
+        .and_then(|messages| messages.get("instructions_template"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .ok_or_else(|| "内置模型目录模板缺少 model_messages.instructions_template".to_string())?
+        .to_string();
+    if !overrides
+        .get("base_instructions")
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+    {
+        return Err("内置模型目录模板缺少 base_instructions".to_string());
+    }
+    for (key, value) in overrides {
+        // model_messages 单独合并：整对象替换会丢掉基底的 approvals /
+        // collaboration_modes / instructions_variables / multi_agent / permissions
+        if key.as_str() == "model_messages" {
+            continue;
+        }
         merged.insert(key.clone(), value.clone());
+    }
+    match merged.get_mut("model_messages") {
+        Some(Value::Object(messages)) => {
+            messages.insert("instructions_template".to_string(), json!(prompt));
+        }
+        _ => {
+            merged.insert(
+                "model_messages".to_string(),
+                json!({ "instructions_template": prompt }),
+            );
+        }
     }
     Ok(RenderTemplate {
         entry: merged,
@@ -163,6 +198,9 @@ pub fn ensure_keys(entry: &mut Value, template: &Map<String, Value>) {
         return;
     };
     for (key, value) in template {
+        if ENSURE_EXCLUDED_KEYS.contains(&key.as_str()) {
+            continue;
+        }
         if !object.contains_key(key) {
             object.insert(key.clone(), value.clone());
         }
@@ -365,10 +403,18 @@ mod tests {
         render(&effective_without_export(), "mimo-v2.5-free", &facts, 1).unwrap()
     }
 
+    /// 模板资源持有的精简提示词（渲染路径条目的提示词来源）。
+    fn third_party_prompt() -> String {
+        overrides().unwrap()["model_messages"]["instructions_template"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
     #[test]
     fn overrides_are_the_single_source_of_truth_for_fixed_values() {
         let overrides = overrides().unwrap();
-        assert_eq!(overrides.len(), 42, "覆盖清单键数变化需同步更新文档与测试");
+        assert_eq!(overrides.len(), 44, "覆盖清单键数变化需同步更新文档与测试");
         assert_eq!(overrides["prefer_websockets"], json!(false));
         assert_eq!(overrides["web_search_tool_type"], json!("text"));
         assert_eq!(overrides["use_responses_lite"], json!(false));
@@ -392,8 +438,23 @@ mod tests {
         assert_eq!(overrides["service_tiers"], json!([]));
         assert_eq!(overrides["additional_speed_tiers"], json!([]));
         assert_eq!(overrides["default_service_tier"], Value::Null);
-        // 提示词随本机 codex 版本走，覆盖清单里不再有 model_messages
-        assert!(!overrides.contains_key("model_messages"));
+        // 提示词由覆盖清单持有：两个字段同写，且是精简版（只服务未命中完整条目源的模型）
+        assert_eq!(
+            overrides["base_instructions"],
+            overrides["model_messages"]["instructions_template"]
+        );
+        assert_eq!(
+            overrides["model_messages"].as_object().unwrap().len(),
+            1,
+            "model_messages 只覆盖 instructions_template，其余子键跟随运行期基底"
+        );
+        let prompt = third_party_prompt();
+        assert!(!prompt.trim().is_empty());
+        assert!(
+            prompt.chars().count() < 2_000,
+            "精简提示词应远小于官方长提示词：{} 字符",
+            prompt.chars().count()
+        );
         // 不删键：缺值时写 null，避免某些版本把该键当必需字段
         assert_eq!(overrides["default_verbosity"], Value::Null);
         // 档位最小化：保留键但不带任何档位（描述表改由基底提供）
@@ -403,11 +464,28 @@ mod tests {
     #[test]
     fn effective_template_falls_back_to_bundled_skeleton_without_export() {
         let template = effective_without_export();
-        assert!(template.entry.get("base_instructions").is_none());
+        let prompt = third_party_prompt();
+        // 基底（兜底骨架）的长提示词被模板值替换
         let instructions = template.entry["model_messages"]["instructions_template"]
             .as_str()
             .unwrap();
-        assert!(instructions.starts_with("You are Codex"));
+        assert_eq!(instructions, prompt);
+        assert_eq!(template.entry["base_instructions"], json!(prompt));
+        assert!(
+            !instructions.starts_with("You are Codex"),
+            "模板提示词应覆盖兜底骨架自带的官方长提示词"
+        );
+    }
+
+    #[test]
+    fn rendered_entries_carry_both_prompt_fields() {
+        let entry = rendered(ModelFacts::default());
+        let prompt = third_party_prompt();
+        assert_eq!(entry["base_instructions"], json!(prompt));
+        assert_eq!(
+            entry["model_messages"]["instructions_template"],
+            json!(prompt)
+        );
     }
 
     #[test]
@@ -420,8 +498,11 @@ mod tests {
                 // 覆盖清单没有的键：必须跟随本机 codex（版本对齐的关键）
                 "node_repl_disabled": true,
                 "context_window": 400_000,
-                // 提示词随本机版本
-                "model_messages": { "instructions_template": "You are Codex (0.150)" },
+                // 提示词：模板值覆盖基底；但 model_messages 的其它子键跟随本机版本
+                "model_messages": {
+                    "instructions_template": "You are Codex (0.150)",
+                    "approvals": { "from": "codex-export" }
+                },
                 // 覆盖清单里有的键：必须用模板值
                 "prefer_websockets": true,
                 "shell_type": "shell_command",
@@ -432,13 +513,19 @@ mod tests {
         let entry = &template.entry;
 
         assert_eq!(entry["node_repl_disabled"], json!(true));
+        // 提示词不再跟随基底：渲染路径统一用模板里的精简提示词（两个字段同写）
         assert_eq!(
             entry["model_messages"]["instructions_template"],
-            json!("You are Codex (0.150)")
+            json!(third_party_prompt())
+        );
+        assert_eq!(entry["base_instructions"], json!(third_party_prompt()));
+        // 基底的其余 model_messages 子键必须保留（整对象替换会丢）
+        assert_eq!(
+            entry["model_messages"]["approvals"],
+            json!({ "from": "codex-export" })
         );
         assert_eq!(entry["prefer_websockets"], json!(false));
         assert_eq!(entry["context_window"], json!(272_000));
-        assert!(entry.get("base_instructions").is_none());
     }
 
     #[test]
@@ -460,8 +547,16 @@ mod tests {
             "已有档位不得被模板覆盖"
         );
         for key in template.entry.keys() {
+            if ENSURE_EXCLUDED_KEYS.contains(&key.as_str()) {
+                continue;
+            }
             assert!(object.contains_key(key), "缺失键 {key} 应被补齐");
         }
+        // 提示词例外：复用条目不得被注入模板的精简基底
+        assert!(
+            !object.contains_key("base_instructions"),
+            "复用条目不应被补上模板的 base_instructions"
+        );
 
         // 缺失该键时补进来的是最小化空数组，而不是基底的六档
         let mut bare = json!({ "slug": "x" });

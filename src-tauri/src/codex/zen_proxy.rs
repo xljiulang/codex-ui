@@ -5,7 +5,7 @@
 //! - API Key 不固定：读取入站请求的 `Authorization` 头原样转发。
 //! - 仅绑定回环地址，专供 codex-ui 自身使用，无额外鉴权。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
@@ -45,6 +45,14 @@ const HOP_BY_HOP_HEADERS: [&str; 8] = [
     "transfer-encoding",
     "upgrade",
 ];
+
+/// 畸形工具调用被拦截时写入 `response.failed` 的错误码。
+const CODE_MALFORMED_TOOL_CALL: &str = "malformed_tool_call_arguments";
+/// 上游随流下发 `error`、或读取中断时写入 `response.failed` 的错误码。
+const CODE_UPSTREAM_STREAM_ERROR: &str = "upstream_stream_error";
+/// 补齐悬空工具调用时代入的工具结果文本。
+const MISSING_TOOL_OUTPUT_TEXT: &str =
+    "该工具调用未执行（参数非法或调用被中止），请重新发起。";
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
@@ -221,14 +229,28 @@ async fn handle_responses(
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
+    // 体积诊断字段：`instructions_chars` 即模型目录里的提示词开销，
+    // `input_chars` 为本次会话历史体量，二者共同决定是否逼近上游真实窗口。
+    let instructions_chars = req
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .map(|s| s.chars().count())
+        .unwrap_or(0);
+    let input_chars = req
+        .get("input")
+        .and_then(|v| serde_json::to_string(v).ok())
+        .map(|s| s.chars().count())
+        .unwrap_or(0);
     log_at(
         &state.log,
         "info",
         "zen_proxy.request",
         &[
-            ("model", model),
+            ("model", model.clone()),
             ("stream", want_stream.to_string()),
             ("input_msg_count", input_msg_count.to_string()),
+            ("input_chars", input_chars.to_string()),
+            ("instructions_chars", instructions_chars.to_string()),
             ("tool_count", tool_count.to_string()),
         ],
     );
@@ -245,7 +267,8 @@ async fn handle_responses(
     )
     .await
     {
-        Ok((status, resp)) => {
+        Ok(forwarded) => {
+            let status = forwarded.status;
             log_at(
                 &state.log,
                 "info",
@@ -254,15 +277,49 @@ async fn handle_responses(
                     ("url", base_url.clone()),
                     ("status", status.as_u16().to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
+                    (
+                        "include_usage",
+                        (!forwarded.usage_dropped && want_stream).to_string(),
+                    ),
                 ],
             );
-            if !status.is_success() {
-                return proxy_error_response(status, resp, &state.log).await;
+            if forwarded.repairs.invalid_arguments > 0 || forwarded.repairs.missing_tool_outputs > 0 {
+                log_at(
+                    &state.log,
+                    "warn",
+                    "zen_proxy.history_repaired",
+                    &[
+                        (
+                            "invalid_arguments",
+                            forwarded.repairs.invalid_arguments.to_string(),
+                        ),
+                        (
+                            "missing_tool_outputs",
+                            forwarded.repairs.missing_tool_outputs.to_string(),
+                        ),
+                    ],
+                );
             }
-            if want_stream {
-                proxy_stream_response(req, resp, &state.log).await
-            } else {
-                proxy_json_response(req, resp, &state.log).await
+            if forwarded.usage_dropped {
+                log_at(
+                    &state.log,
+                    "warn",
+                    "zen_proxy.include_usage_unsupported",
+                    &[("detail", "上游不支持 stream_options.include_usage，已去掉该字段重试".to_string())],
+                );
+            }
+            match forwarded.payload {
+                ForwardPayload::Text(text) => proxy_error_text(status, &text, &state.log),
+                ForwardPayload::Live(resp) => {
+                    if !status.is_success() {
+                        return proxy_error_response(status, resp, &state.log).await;
+                    }
+                    if want_stream {
+                        proxy_stream_response(req, resp, &state.log).await
+                    } else {
+                        proxy_json_response(req, resp, &state.log).await
+                    }
+                }
             }
         }
         Err((status, msg)) => {
@@ -411,7 +468,22 @@ async fn passthrough_response(resp: reqwest::Response) -> Response {
         .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into()))
 }
 
-/// 翻译请求并转发到 Zen；返回 (状态码, 响应)。
+/// 上游响应载体：2xx 保留可流式读取的响应；4xx 为判定 `stream_options` 兼容性
+/// 读出错误体时直接携带文本，避免二次读取。
+enum ForwardPayload {
+    Live(reqwest::Response),
+    Text(String),
+}
+
+/// 一次转发的完整结果：状态、响应载体、历史修复统计、用量请求是否已降级。
+struct Forwarded {
+    status: StatusCode,
+    payload: ForwardPayload,
+    repairs: RepairReport,
+    usage_dropped: bool,
+}
+
+/// 翻译请求并转发到 Zen（含历史净化与用量降级重试）。
 /// `base_url` 由配置传入（测试时可指向本地 mock）。
 /// `fallback_session` 仅在客户端未提供 `session-id` 时用作 `x-opencode-session`。
 async fn forward(
@@ -421,12 +493,57 @@ async fn forward(
     base_url: &str,
     client: &reqwest::Client,
     fallback_session: &str,
-) -> Result<(StatusCode, reqwest::Response), (StatusCode, String)> {
-    let chat = responses_to_chat(req, want_stream)
+) -> Result<Forwarded, (StatusCode, String)> {
+    let (chat, repairs) = responses_to_chat(req, want_stream)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut attempt = 0usize;
+    loop {
+        // 流式首次带 `stream_options.include_usage`：codex 依赖它做 token 计量与
+        // 上下文判断。上游明确拒绝该字段时去掉后重试一次（最多一次）。
+        let want_usage = want_stream && attempt == 0;
+        let mut body = chat.clone();
+        if want_usage {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
+        let resp = build_chat_request(client, &url, headers, fallback_session, &body)
+            .send()
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
+        let status = resp.status();
+        if want_usage && status.is_client_error() {
+            let text = resp.text().await.unwrap_or_default();
+            if mentions_include_usage_unsupported(&text) {
+                attempt = 1;
+                continue;
+            }
+            return Ok(Forwarded {
+                status,
+                payload: ForwardPayload::Text(text),
+                repairs,
+                usage_dropped: false,
+            });
+        }
+        return Ok(Forwarded {
+            status,
+            payload: ForwardPayload::Live(resp),
+            repairs,
+            usage_dropped: attempt == 1,
+        });
+    }
+}
+
+/// 构造发往 Zen 的 chat/completions 请求（固定识别头 + 透传的 Authorization）。
+fn build_chat_request(
+    client: &reqwest::Client,
+    url: &str,
+    headers: &HeaderMap,
+    fallback_session: &str,
+    body: &Value,
+) -> reqwest::RequestBuilder {
     let mut rq = client
-        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')))
-        .json(&chat)
+        .post(url)
+        .json(body)
         .header("x-opencode-client", OPENCODE_CLIENT)
         .header("x-opencode-project", OPENCODE_PROJECT)
         .header("x-opencode-request", random_id("msg"))
@@ -439,11 +556,14 @@ async fn forward(
             rq = rq.header(header::AUTHORIZATION, v.to_string());
         }
     }
-    let resp = rq
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
-    Ok((resp.status(), resp))
+    rq
+}
+
+/// 上游错误体是否明确指向 `stream_options` / `include_usage` 不被支持。
+/// 只在指名道姓时降级重试，避免对普通 4xx（如参数校验失败）重复发请求。
+fn mentions_include_usage_unsupported(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("stream_options") || lower.contains("include_usage")
 }
 
 /// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
@@ -478,7 +598,18 @@ async fn proxy_json_response(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let out = chat_to_responses(&chat, &model);
+    let out = match chat_to_responses(&chat, &model) {
+        Ok(out) => out,
+        Err(e) => {
+            log_at(
+                log,
+                "warn",
+                "zen_proxy.malformed_tool_call",
+                &[("reason", e.clone())],
+            );
+            return error_json(StatusCode::BAD_GATEWAY, e);
+        }
+    };
     let body = serde_json::to_string(&out).unwrap_or_else(|_| "{}".into());
     log_at(
         log,
@@ -544,12 +675,18 @@ async fn proxy_stream_response(
                             let payload = line["data:".len()..].trim();
                             if payload == "[DONE]" {
                                 log_at(&log, "info", "zen_proxy.stream_done", &[]);
-                                out.extend(finish_stream(&mut st));
+                                out.extend(finish_stream(&mut st, &log));
                                 done = true;
                                 break;
                             }
                             if let Ok(v) = serde_json::from_str::<Value>(payload) {
-                                out.extend(process_chunk(&v, &mut st));
+                                out.extend(process_chunk(&v, &mut st, &log));
+                                // 上游随流下发 error：立即按失败收尾，不再继续读
+                                if st.failure.is_some() && !st.closed {
+                                    out.extend(finish_stream(&mut st, &log));
+                                    done = true;
+                                    break;
+                                }
                             }
                         }
                         if done || !out.is_empty() {
@@ -557,12 +694,18 @@ async fn proxy_stream_response(
                         }
                     }
                     Some(Err(_)) => {
-                        log_at(&log, "warn", "zen_proxy.stream_error", &[(
-                            "detail",
-                            "上游读取出错，按完成收尾".to_string(),
-                        )]);
-                        // 上游读取出错：按已完成收尾，避免客户端悬挂
-                        return Some((finish_stream(&mut st), (bytes, buf, st, true, log)));
+                        // 上游读取出错：按失败收尾（原先按完成收尾会让回合静默结束）
+                        if st.failure.is_none() {
+                            st.failure = Some(StreamFailure {
+                                code: CODE_UPSTREAM_STREAM_ERROR.to_string(),
+                                message: "上游连接中断，本轮未正常结束；请重试".to_string(),
+                                detail: "上游读取出错（连接中断或超时）".to_string(),
+                            });
+                        }
+                        return Some((
+                            finish_stream(&mut st, &log),
+                            (bytes, buf, st, true, log),
+                        ));
                     }
                     None => {
                         log_at(&log, "info", "zen_proxy.stream_end", &[(
@@ -570,7 +713,10 @@ async fn proxy_stream_response(
                             "上游未发送 [DONE]，补发完成事件".to_string(),
                         )]);
                         // 上游正常结束但未收到 [DONE]（兼容实现差异）：补发完成事件
-                        return Some((finish_stream(&mut st), (bytes, buf, st, true, log)));
+                        return Some((
+                            finish_stream(&mut st, &log),
+                            (bytes, buf, st, true, log),
+                        ));
                     }
                 }
             }
@@ -596,6 +742,11 @@ async fn proxy_error_response(
     log: &Option<Arc<SessionLog>>,
 ) -> Response {
     let text = resp.text().await.unwrap_or_default();
+    proxy_error_text(status, &text, log)
+}
+
+/// 上游非 2xx 且错误体已读出：透传状态码与错误体。
+fn proxy_error_text(status: StatusCode, text: &str, log: &Option<Arc<SessionLog>>) -> Response {
     log_at(
         log,
         "warn",
@@ -605,7 +756,7 @@ async fn proxy_error_response(
             ("detail", text.chars().take(200).collect::<String>()),
         ],
     );
-    let body = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| {
+    let body = serde_json::from_str::<Value>(text).unwrap_or_else(|_| {
         json!({ "error": { "message": text.chars().take(400).collect::<String>(), "type": "upstream_error" } })
     });
     Response::builder()
@@ -650,11 +801,23 @@ fn gen_id(prefix: &str) -> String {
 // 请求翻译：Responses → Chat Completions
 // ---------------------------------------------------------------------------
 
+/// 历史净化统计：被改写的非法工具参数条数、补出的悬空工具结果条数。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct RepairReport {
+    invalid_arguments: usize,
+    missing_tool_outputs: usize,
+}
+
 /// 把 Responses 请求体转换为 Chat Completions 请求体（纯函数，便于单测）。
-fn responses_to_chat(req: &Value, want_stream: bool) -> Result<Value, String> {
+///
+/// 同时净化历史：工具调用参数被截断/非法时改写为 `{}`，并有工具调用却缺少
+/// 对应结果时补一条合成 `tool` 消息——Chat Completions 要求二者严格配对，
+/// 否则整条会话会被上游以 400/500 永久拒绝。
+fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairReport), String> {
     if !req.is_object() {
         return Err("请求体必须是 JSON 对象".into());
     }
+    let mut repairs = RepairReport::default();
     let model = req.get("model").cloned().unwrap_or(Value::Null);
     let mut messages: Vec<Value> = Vec::new();
 
@@ -701,11 +864,14 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<Value, String> {
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let arguments = obj
+                        let raw_arguments = obj
                             .get("arguments")
                             .and_then(|v| v.as_str())
-                            .unwrap_or("{}")
-                            .to_string();
+                            .unwrap_or("");
+                        let (arguments, repaired) = normalize_arguments(raw_arguments);
+                        if repaired {
+                            repairs.invalid_arguments += 1;
+                        }
                         let tc = json!({
                             "id": call_id,
                             "type": "function",
@@ -743,6 +909,7 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<Value, String> {
                 }
             }
             flush(&mut messages, &mut pending);
+            repair_tool_pairing(&mut messages, &mut repairs);
         }
         _ => {}
     }
@@ -788,7 +955,103 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<Value, String> {
         }
     }
 
-    Ok(chat)
+    Ok((chat, repairs))
+}
+
+/// 规范化工具调用参数：空/缺失统一写 `{}`（无参工具），非空但非法 JSON 也写 `{}`
+/// 并计入修复（返回值第二项表示"发生了修复"）。
+fn normalize_arguments(raw: &str) -> (String, bool) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return ("{}".to_string(), false);
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(_)) => (trimmed.to_string(), false),
+        // 数组合法等非对象形态同样视为不可用：Chat Completions 要求 object
+        Ok(_) | Err(_) => ("{}".to_string(), true),
+    }
+}
+
+/// 校验一条工具调用的参数是否可用（流式侧护栏，判定"畸形"）。
+/// 工具名必须非空；`arguments` 允许为空串（无参工具），非空时必须是合法 JSON 对象。
+fn validate_call_arguments(name: &str, args: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("工具名为空".into());
+    }
+    let trimmed = args.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(_)) => Ok(()),
+        Ok(other) => Err(format!(
+            "工具参数不是 JSON 对象：{}",
+            truncate_chars(&other.to_string(), 80)
+        )),
+        Err(e) => Err(format!("工具参数不是合法 JSON：{e}")),
+    }
+}
+
+/// 为"有工具调用却没有结果"的 assistant 消息补出合成 `tool` 消息。
+fn repair_tool_pairing(messages: &mut Vec<Value>, repairs: &mut RepairReport) {
+    let mut i = 0usize;
+    while i < messages.len() {
+        let ids: Vec<String> = messages[i]
+            .get("tool_calls")
+            .and_then(|t| t.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|tc| {
+                        tc.get("id").and_then(|v| v.as_str()).map(str::to_string)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if ids.is_empty() {
+            i += 1;
+            continue;
+        }
+        // 紧随其后的连续 tool 消息即这组调用的结果
+        let mut j = i + 1;
+        let mut answered: HashSet<String> = HashSet::new();
+        while j < messages.len()
+            && messages[j].get("role").and_then(|r| r.as_str()) == Some("tool")
+        {
+            if let Some(id) = messages[j].get("tool_call_id").and_then(|v| v.as_str()) {
+                answered.insert(id.to_string());
+            }
+            j += 1;
+        }
+        let missing: Vec<String> = ids
+            .into_iter()
+            .filter(|id| !answered.contains(id))
+            .collect();
+        if missing.is_empty() {
+            i = j;
+            continue;
+        }
+        let count = missing.len();
+        for (offset, id) in missing.into_iter().enumerate() {
+            messages.insert(
+                j + offset,
+                json!({
+                    "role": "tool",
+                    "tool_call_id": id,
+                    "content": MISSING_TOOL_OUTPUT_TEXT
+                }),
+            );
+        }
+        repairs.missing_tool_outputs += count;
+        i = j + count;
+    }
+}
+
+/// 按字符截断（UTF-8 安全），用于日志与错误摘要。
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    value.chars().take(max_chars).collect::<String>() + "…"
 }
 
 /// 提取 Responses message item 的文本内容（多段 content 拼接为单一字符串）。
@@ -828,7 +1091,8 @@ fn value_to_text(v: &Value) -> String {
 // ---------------------------------------------------------------------------
 
 /// 非流式 chat.completion → responses 对象（纯函数，便于单测）。
-fn chat_to_responses(chat: &Value, model: &str) -> Value {
+/// 工具调用参数不可用时返回 Err（调用方以 502 结束，而不是把坏参数交给 codex）。
+fn chat_to_responses(chat: &Value, model: &str) -> Result<Value, String> {
     let chat_id = chat
         .get("id")
         .and_then(|v| v.as_str())
@@ -877,11 +1141,18 @@ fn chat_to_responses(chat: &Value, model: &str) -> Value {
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let arguments = tc
+                    let raw_arguments = tc
                         .pointer("/function/arguments")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("{}")
-                        .to_string();
+                        .unwrap_or("");
+                    let (arguments, repaired) = normalize_arguments(raw_arguments);
+                    if repaired {
+                        return Err(format!(
+                            "上游工具调用参数不可用（{}）：{}",
+                            if name.is_empty() { "未知工具" } else { &name },
+                            truncate_chars(raw_arguments.trim(), 120)
+                        ));
+                    }
                     output.push(json!({
                         "id": gen_id("fc"),
                         "type": "function_call",
@@ -895,19 +1166,9 @@ fn chat_to_responses(chat: &Value, model: &str) -> Value {
         }
     }
 
-    let usage = chat.get("usage").cloned().unwrap_or_else(|| json!({}));
-    let mut usage_out = json!({});
-    if let Some(v) = usage.get("prompt_tokens") {
-        usage_out["input_tokens"] = v.clone();
-    }
-    if let Some(v) = usage.get("completion_tokens") {
-        usage_out["output_tokens"] = v.clone();
-    }
-    if let Some(v) = usage.get("total_tokens") {
-        usage_out["total_tokens"] = v.clone();
-    }
+    let usage_out = usage_to_responses(chat.get("usage"));
 
-    json!({
+    Ok(json!({
         "id": response_id,
         "object": "response",
         "created_at": unix_now(),
@@ -916,7 +1177,27 @@ fn chat_to_responses(chat: &Value, model: &str) -> Value {
         "output": output,
         "error": null,
         "usage": usage_out
-    })
+    }))
+}
+
+/// chat 的 `usage` → responses 的 `usage`（流式与非流式共用同一组字段名）。
+fn usage_to_responses(usage: Option<&Value>) -> Value {
+    let mut out = json!({});
+    let Some(usage) = usage else {
+        return out;
+    };
+    for (dst, src) in [
+        ("input_tokens", "prompt_tokens"),
+        ("output_tokens", "completion_tokens"),
+        ("total_tokens", "total_tokens"),
+    ] {
+        if let Some(v) = usage.get(src) {
+            if !v.is_null() {
+                out[dst] = v.clone();
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -944,6 +1225,12 @@ struct StreamState {
     text: Option<TextTrack>,
     calls: HashMap<usize, CallTrack>,
     closed: bool,
+    /// 已判定的失败（上游随流下发的 error / 读取中断）；畸形工具调用在收尾时判定。
+    failure: Option<StreamFailure>,
+    /// 上游给出的结束原因（`finish_reason`），仅用于观测。
+    finish_reason: Option<String>,
+    /// 上游随流下发的 token 用量，收尾时映射进 `response.completed`。
+    usage: Option<Value>,
 }
 
 impl StreamState {
@@ -955,14 +1242,45 @@ impl StreamState {
             text: None,
             calls: HashMap::new(),
             closed: false,
+            failure: None,
+            finish_reason: None,
+            usage: None,
         }
     }
 }
 
+/// 一次流内失败：`code` 写入 `response.failed`，`detail` 仅进日志。
+#[derive(Debug, Clone)]
+struct StreamFailure {
+    code: String,
+    message: String,
+    detail: String,
+}
+
 /// 处理一个 chat chunk（choice 数组），返回零到多条 responses SSE 块。
-fn process_chunk(chunk: &Value, st: &mut StreamState) -> Vec<String> {
+fn process_chunk(chunk: &Value, st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     if st.closed {
         return Vec::new();
+    }
+    // 上游随流下发的 error（HTTP 仍为 200）：不再静默忽略，直接判定失败
+    if let Some(err) = chunk.get("error").filter(|v| !v.is_null()) {
+        if st.failure.is_none() {
+            let message = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| "上游流内返回错误".to_string());
+            st.failure = Some(StreamFailure {
+                code: CODE_UPSTREAM_STREAM_ERROR.to_string(),
+                message,
+                detail: truncate_chars(&err.to_string(), 300),
+            });
+        }
+        return Vec::new();
+    }
+    // token 用量（部分实现随任意 chunk 或末块下发）
+    if let Some(usage) = chunk.get("usage").filter(|v| !v.is_null()) {
+        st.usage = Some(usage.clone());
     }
     let mut out = Vec::new();
     let Some(choices) = chunk.get("choices").and_then(|c| c.as_array()) else {
@@ -989,7 +1307,10 @@ fn process_chunk(chunk: &Value, st: &mut StreamState) -> Vec<String> {
         // finish_reason 出现即收尾（null/空串跳过）
         if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
             if !fr.is_empty() && fr != "null" {
-                out.extend(finish_stream(st));
+                if st.finish_reason.is_none() {
+                    st.finish_reason = Some(fr.to_string());
+                }
+                out.extend(finish_stream(st, log));
             }
         }
     }
@@ -1122,13 +1443,21 @@ fn tool_args_delta(tool_index: usize, args: &str, st: &mut StreamState) -> Vec<S
     out
 }
 
-/// 收尾：把已开始的 message / function_call 补 done 事件并发送 response.completed。
-fn finish_stream(st: &mut StreamState) -> Vec<String> {
+/// 收尾：文本 item 照常补 done 事件；工具调用正常时补 function_call 的 done 事件
+/// 并发 `response.completed`（带 usage）；若上游已失败或存在畸形工具调用，则不发任何
+/// function_call、改发 `response.failed`，让回合以明确错误结束而不是静默完成。
+/// 无论哪条路径都记一次 `zen_proxy.stream_summary`。
+fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     if st.closed {
         return Vec::new();
     }
     st.closed = true;
     let mut out = Vec::new();
+    let text_chars = st
+        .text
+        .as_ref()
+        .map(|t| t.text_buf.chars().count())
+        .unwrap_or(0);
 
     if let Some(t) = st.text.take() {
         out.push(sse_event(
@@ -1174,48 +1503,135 @@ fn finish_stream(st: &mut StreamState) -> Vec<String> {
 
     let mut calls: Vec<_> = st.calls.drain().collect();
     calls.sort_by_key(|(idx, _)| *idx);
-    for (_, c) in calls {
-        out.push(sse_event(
-            "response.function_call_arguments.done",
-            &json!({
-                "type": "response.function_call_arguments.done",
-                "item_id": c.item_id,
-                "output_index": c.out_index,
-                "arguments": c.args_buf
-            }),
-        ));
-        out.push(sse_event(
-            "response.output_item.done",
-            &json!({
-                "type": "response.output_item.done",
-                "output_index": c.out_index,
-                "item": {
-                    "id": c.item_id,
-                    "type": "function_call",
-                    "status": "completed",
-                    "call_id": c.call_id,
-                    "name": c.name,
+    let call_count = calls.len();
+
+    // 上游随流错误：补一条日志（错误详情只在检测处写入状态）
+    if let Some(f) = st.failure.as_ref() {
+        log_at(
+            log,
+            "warn",
+            "zen_proxy.stream_error",
+            &[("code", f.code.clone()), ("detail", f.detail.clone())],
+        );
+    }
+
+    // 畸形工具调用：整轮判失败，且不发出任何 function_call——既避免半执行，
+    // 也避免把非法 JSON 参数写进会话历史（那会让后续每个请求都被上游拒绝）。
+    let mut malformed: Option<StreamFailure> = None;
+    if st.failure.is_none() {
+        for (_, c) in calls.iter() {
+            let Err(reason) = validate_call_arguments(&c.name, &c.args_buf) else {
+                continue;
+            };
+            log_at(
+                log,
+                "warn",
+                "zen_proxy.malformed_tool_call",
+                &[
+                    ("name", c.name.clone()),
+                    ("call_id", c.call_id.clone()),
+                    ("args_len", c.args_buf.chars().count().to_string()),
+                    ("preview", truncate_chars(c.args_buf.trim(), 200)),
+                    ("reason", reason.clone()),
+                ],
+            );
+            malformed = Some(StreamFailure {
+                code: CODE_MALFORMED_TOOL_CALL.to_string(),
+                message: format!(
+                    "上游模型返回的工具调用参数不可用（{}），已阻止该调用进入会话；请重试本轮",
+                    if c.name.trim().is_empty() {
+                        "未知工具"
+                    } else {
+                        c.name.trim()
+                    }
+                ),
+                detail: reason,
+            });
+            break;
+        }
+    }
+    let failure = st.failure.clone().or(malformed);
+    let failed = failure.is_some();
+
+    if failure.is_none() {
+        for (_, c) in calls {
+            out.push(sse_event(
+                "response.function_call_arguments.done",
+                &json!({
+                    "type": "response.function_call_arguments.done",
+                    "item_id": c.item_id,
+                    "output_index": c.out_index,
                     "arguments": c.args_buf
+                }),
+            ));
+            out.push(sse_event(
+                "response.output_item.done",
+                &json!({
+                    "type": "response.output_item.done",
+                    "output_index": c.out_index,
+                    "item": {
+                        "id": c.item_id,
+                        "type": "function_call",
+                        "status": "completed",
+                        "call_id": c.call_id,
+                        "name": c.name,
+                        "arguments": c.args_buf
+                    }
+                }),
+            ));
+        }
+    }
+
+    if let Some(f) = failure {
+        // codex 的 SSE 解析器认识 response.failed，会以明确的失败结束本回合
+        out.push(sse_event(
+            "response.failed",
+            &json!({
+                "type": "response.failed",
+                "response": {
+                    "id": st.response_id,
+                    "object": "response",
+                    "created_at": unix_now(),
+                    "status": "failed",
+                    "model": st.model,
+                    "output": [],
+                    "error": { "code": f.code, "message": f.message }
                 }
             }),
         ));
+    } else {
+        let mut response = json!({
+            "id": st.response_id,
+            "object": "response",
+            "created_at": unix_now(),
+            "status": "completed",
+            "model": st.model,
+            "output": [],
+            "error": null
+        });
+        if let Some(usage) = st.usage.as_ref() {
+            response["usage"] = usage_to_responses(Some(usage));
+        }
+        out.push(sse_event(
+            "response.completed",
+            &json!({ "type": "response.completed", "response": response }),
+        ));
     }
 
-    out.push(sse_event(
-        "response.completed",
-        &json!({
-            "type": "response.completed",
-            "response": {
-                "id": st.response_id,
-                "object": "response",
-                "created_at": unix_now(),
-                "status": "completed",
-                "model": st.model,
-                "output": [],
-                "error": null
-            }
-        }),
-    ));
+    log_at(
+        log,
+        "info",
+        "zen_proxy.stream_summary",
+        &[
+            (
+                "finish_reason",
+                st.finish_reason.clone().unwrap_or_default(),
+            ),
+            ("text_chars", text_chars.to_string()),
+            ("call_count", call_count.to_string()),
+            ("failed", failed.to_string()),
+        ],
+    );
     out
 }
 
@@ -1268,7 +1684,8 @@ mod tests {
             "input": "你好",
             "stream": false
         });
-        let chat = responses_to_chat(&req, false).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, false).unwrap();
+        assert_eq!(repairs, RepairReport::default(), "纯文本历史不应触发净化");
         assert_eq!(chat["model"], "zen/gpt-5-mini");
         assert_eq!(chat["stream"], false);
         assert_eq!(chat["messages"][0]["role"], "user");
@@ -1305,7 +1722,8 @@ mod tests {
             ],
             "max_output_tokens": 100
         });
-        let chat = responses_to_chat(&req, true).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, true).unwrap();
+        assert_eq!(repairs, RepairReport::default(), "配对完整的工具调用不应触发净化");
         assert_eq!(chat["stream"], true);
         assert_eq!(chat["messages"].as_array().unwrap().len(), 4);
         assert_eq!(chat["messages"][0]["role"], "system");
@@ -1332,7 +1750,8 @@ mod tests {
             "reasoning": { "effort": "high" },
             "previous_response_id": "resp_x"
         });
-        let chat = responses_to_chat(&req, false).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, false).unwrap();
+        assert_eq!(repairs, RepairReport::default());
         assert!(chat.get("store").is_none());
         assert!(chat.get("reasoning").is_none());
         assert!(chat.get("previous_response_id").is_none());
@@ -1349,7 +1768,7 @@ mod tests {
             }],
             "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
         });
-        let resp = chat_to_responses(&chat, "zen/gpt-5-mini");
+        let resp = chat_to_responses(&chat, "zen/gpt-5-mini").unwrap();
         assert_eq!(resp["status"], "completed");
         assert_eq!(resp["model"], "zen/gpt-5-mini");
         assert_eq!(resp["output"][0]["type"], "message");
@@ -1374,7 +1793,7 @@ mod tests {
                 }
             }]
         });
-        let resp = chat_to_responses(&chat, "m");
+        let resp = chat_to_responses(&chat, "m").unwrap();
         assert_eq!(resp["output"].as_array().unwrap().len(), 2);
         assert_eq!(resp["output"][1]["type"], "function_call");
         assert_eq!(resp["output"][1]["call_id"], "call_9");
@@ -1395,9 +1814,9 @@ mod tests {
             "choices": [{ "delta": {}, "finish_reason": "stop" }]
         });
         let mut lines: Vec<String> = Vec::new();
-        lines.extend(process_chunk(&c1, &mut st));
-        lines.extend(process_chunk(&c2, &mut st));
-        lines.extend(process_chunk(&c3, &mut st));
+        lines.extend(process_chunk(&c1, &mut st, &None));
+        lines.extend(process_chunk(&c2, &mut st, &None));
+        lines.extend(process_chunk(&c3, &mut st, &None));
         let events: Vec<&str> = lines
             .iter()
             .filter_map(|b| b.lines().next())
@@ -1453,9 +1872,9 @@ mod tests {
             }] }, "finish_reason": "tool_calls" }]
         });
         let mut lines: Vec<String> = Vec::new();
-        lines.extend(process_chunk(&c1, &mut st));
-        lines.extend(process_chunk(&c2, &mut st));
-        lines.extend(process_chunk(&c3, &mut st));
+        lines.extend(process_chunk(&c1, &mut st, &None));
+        lines.extend(process_chunk(&c2, &mut st, &None));
+        lines.extend(process_chunk(&c3, &mut st, &None));
         let joined = lines.join("\n");
         assert!(joined.contains("event: response.output_item.added"));
         assert!(joined.contains(r#""type":"function_call""#));
@@ -1575,6 +1994,204 @@ mod tests {
         std::fs::write(&blocker, b"x").unwrap();
         let log = Some(Arc::new(SessionLog::new(blocker)));
         log_at(&log, "info", "zen_proxy.request", &[]);
+    }
+
+    /// 从 SSE 块里取事件名序列。
+    fn event_names(lines: &[String]) -> Vec<String> {
+        lines
+            .iter()
+            .filter_map(|l| l.lines().next())
+            .map(|l| l.trim_start_matches("event: ").to_string())
+            .collect()
+    }
+
+    /// 取指定事件的 data 载荷。
+    fn event_payload(lines: &[String], name: &str) -> Option<Value> {
+        lines.iter().find_map(|l| {
+            let mut it = l.lines();
+            let head = it.next()?;
+            if head.trim_start_matches("event: ") != name {
+                return None;
+            }
+            let data = it.next()?.trim_start_matches("data:").trim();
+            serde_json::from_str::<Value>(data).ok()
+        })
+    }
+
+    #[test]
+    fn malformed_tool_arguments_fail_the_stream() {
+        let mut st = StreamState::new("resp_bad".into(), "m".into());
+        let c1 = json!({
+            "choices": [{ "delta": { "content": "我直接改文件" }, "finish_reason": null }]
+        });
+        // 真实故障形态：参数被截断
+        let c2 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "id": "call_bad",
+                "type": "function",
+                "function": { "name": "apply_patch", "arguments": "{\"old_string\": " }
+            }] }, "finish_reason": "tool_calls" }]
+        });
+        let mut lines = process_chunk(&c1, &mut st, &None);
+        lines.extend(process_chunk(&c2, &mut st, &None));
+
+        let names = event_names(&lines);
+        assert!(names.contains(&"response.failed".to_string()));
+        assert!(!names.contains(&"response.completed".to_string()));
+        // 坏调用不得以完成态进入会话：`output_item.added` 是增量协议里先发出去的，
+        // 但参数完成事件与 function_call 的 `output_item.done` 都不得发出。
+        assert!(!names.contains(&"response.function_call_arguments.done".to_string()));
+        assert!(!lines
+            .iter()
+            .any(|l| l.contains("output_item.done") && l.contains("\"type\":\"function_call\"")));
+        // 文本照常收尾：用户仍能看到模型已产出的话
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("output_item.done") && l.contains("\"type\":\"message\"")));
+
+        let failed = event_payload(&lines, "response.failed").expect("应发出 response.failed");
+        assert_eq!(failed["response"]["status"], "failed");
+        assert_eq!(failed["response"]["error"]["code"], CODE_MALFORMED_TOOL_CALL);
+        assert!(failed["response"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("apply_patch"));
+    }
+
+    #[test]
+    fn empty_tool_arguments_still_complete() {
+        let mut st = StreamState::new("resp_noargs".into(), "m".into());
+        let c1 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "id": "call_a",
+                "type": "function",
+                "function": { "name": "get_time", "arguments": "" }
+            }] }, "finish_reason": "tool_calls" }]
+        });
+        let lines = process_chunk(&c1, &mut st, &None);
+        let names = event_names(&lines);
+        assert!(names.contains(&"response.completed".to_string()));
+        assert!(!names.contains(&"response.failed".to_string()));
+        assert!(names.contains(&"response.function_call_arguments.done".to_string()));
+    }
+
+    #[test]
+    fn stream_error_payload_fails_the_stream() {
+        let mut st = StreamState::new("resp_err".into(), "m".into());
+        let chunk = json!({ "error": { "message": "Internal server error", "type": "error" } });
+        assert!(process_chunk(&chunk, &mut st, &None).is_empty());
+        assert!(st.failure.is_some(), "流内 error 应被记为失败");
+
+        let lines = finish_stream(&mut st, &None);
+        let names = event_names(&lines);
+        assert!(names.contains(&"response.failed".to_string()));
+        assert!(!names.contains(&"response.completed".to_string()));
+        let failed = event_payload(&lines, "response.failed").unwrap();
+        assert_eq!(failed["response"]["error"]["code"], CODE_UPSTREAM_STREAM_ERROR);
+        assert!(failed["response"]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Internal server error"));
+    }
+
+    #[test]
+    fn stream_usage_is_mapped_into_completed() {
+        let mut st = StreamState::new("resp_usage".into(), "m".into());
+        let c1 = json!({
+            "choices": [{ "delta": { "content": "好" }, "finish_reason": null }]
+        });
+        let c2 = json!({
+            "choices": [],
+            "usage": { "prompt_tokens": 120000, "completion_tokens": 30, "total_tokens": 120030 }
+        });
+        let c3 = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] });
+        let mut lines = process_chunk(&c1, &mut st, &None);
+        lines.extend(process_chunk(&c2, &mut st, &None));
+        lines.extend(process_chunk(&c3, &mut st, &None));
+
+        let done = event_payload(&lines, "response.completed").expect("应正常完成");
+        assert_eq!(done["response"]["usage"]["input_tokens"], 120000);
+        assert_eq!(done["response"]["usage"]["output_tokens"], 30);
+        assert_eq!(done["response"]["usage"]["total_tokens"], 120030);
+    }
+
+    #[test]
+    fn responses_to_chat_repairs_invalid_arguments() {
+        let req = json!({
+            "model": "m",
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "apply_patch",
+                    "arguments": "{\"old_string\": "
+                }
+            ]
+        });
+        let (chat, repairs) = responses_to_chat(&req, true).unwrap();
+        assert_eq!(repairs.invalid_arguments, 1);
+        assert_eq!(
+            chat["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            "{}"
+        );
+    }
+
+    #[test]
+    fn responses_to_chat_synthesizes_missing_tool_output() {
+        let req = json!({
+            "model": "m",
+            "input": [
+                {
+                    "type": "function_call",
+                    "call_id": "call_9",
+                    "name": "apply_patch",
+                    "arguments": "{\"a\":1}"
+                }
+            ]
+        });
+        let (chat, repairs) = responses_to_chat(&req, true).unwrap();
+        assert_eq!(repairs.missing_tool_outputs, 1);
+        let messages = chat["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "assistant");
+        assert_eq!(messages[1]["role"], "tool");
+        assert_eq!(messages[1]["tool_call_id"], "call_9");
+        assert_eq!(messages[1]["content"], MISSING_TOOL_OUTPUT_TEXT);
+    }
+
+    #[test]
+    fn chat_to_responses_rejects_invalid_arguments() {
+        let chat = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_bad",
+                        "type": "function",
+                        "function": { "name": "apply_patch", "arguments": "{\"old_string\": " }
+                    }]
+                }
+            }]
+        });
+        let err = chat_to_responses(&chat, "m").unwrap_err();
+        assert!(err.contains("apply_patch"), "错误信息应含工具名：{err}");
+    }
+
+    #[test]
+    fn include_usage_rejection_is_detected_by_parameter_name() {
+        assert!(mentions_include_usage_unsupported(
+            "{\"error\":{\"message\":\"Unrecognized request argument supplied: stream_options\"}}"
+        ));
+        assert!(mentions_include_usage_unsupported(
+            "include_usage is not supported by this model"
+        ));
+        // 普通 4xx 不应触发降级重试
+        assert!(!mentions_include_usage_unsupported(
+            "{\"error\":{\"message\":\"Assistant tool call function.arguments must be valid JSON.\"}}"
+        ));
     }
 }
 
@@ -1783,7 +2400,7 @@ mod integration_tests {
         let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
             .await
             .expect("forward 应成功");
-        assert!(resp.0.is_success());
+        assert!(resp.status.is_success());
 
         // 验证上游收到的内容
         let got = rec.lock().await.clone().expect("mock 应已收到请求");
@@ -1813,7 +2430,7 @@ mod integration_tests {
         let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
             .await
             .expect("forward 应成功");
-        assert!(resp.0.is_success());
+        assert!(resp.status.is_success());
 
         let got = rec.lock().await.clone().expect("mock 应已收到请求");
         // 客户端 session-id 优先，并补上 ses_ 前缀
@@ -1835,7 +2452,7 @@ mod integration_tests {
         let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
             .await
             .expect("forward 应成功");
-        assert!(resp.0.is_success());
+        assert!(resp.status.is_success());
         let got = rec.lock().await.clone().expect("mock 应已收到请求");
         assert_eq!(got.authorization, None);
         assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
@@ -1923,5 +2540,105 @@ mod integration_tests {
             got.opencode_session.as_deref(),
             Some("ses_client-session-42")
         );
+    }
+
+    /// 起一个"先拒绝 `stream_options` 再放行"的 mock Zen（记录请求次数与末次 body）。
+    async fn spawn_mock_zen_rejecting_stream_options(
+        count: Arc<AsyncMutex<usize>>,
+        last: Arc<AsyncMutex<Option<Value>>>,
+    ) -> String {
+        let app = Router::new().route(
+            "/chat/completions",
+            axum::routing::post(move |Json(body): Json<Value>| {
+                let count = count.clone();
+                let last = last.clone();
+                async move {
+                    let has_usage = body.get("stream_options").is_some();
+                    *count.lock().await += 1;
+                    *last.lock().await = Some(body);
+                    if has_usage {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "error": {
+                                    "message": "Unrecognized request argument supplied: stream_options",
+                                    "type": "invalid_request_error"
+                                }
+                            })),
+                        );
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(json!({
+                            "id": "chatcmpl-mock",
+                            "object": "chat.completion",
+                            "model": "m",
+                            "choices": [{
+                                "index": 0,
+                                "message": { "role": "assistant", "content": "ok" },
+                                "finish_reason": "stop"
+                            }]
+                        })),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn streaming_request_asks_for_token_usage() {
+        let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+        let base_url = spawn_mock_zen(rec.clone()).await;
+
+        let req = json!({ "model": "m", "input": "hi", "stream": true });
+        let resp = forward(
+            &req,
+            &HeaderMap::new(),
+            true,
+            &base_url,
+            http_client(),
+            "ses_fixed123",
+        )
+        .await
+        .expect("forward 应成功");
+        assert!(resp.status.is_success());
+        assert!(!resp.usage_dropped);
+
+        let got = rec.lock().await.clone().expect("mock 应已收到请求");
+        assert_eq!(got.body["stream_options"]["include_usage"], true);
+        assert_eq!(got.body["stream"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn include_usage_is_dropped_and_retried_when_upstream_rejects_it() {
+        let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
+        let last: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
+        let base_url =
+            spawn_mock_zen_rejecting_stream_options(count.clone(), last.clone()).await;
+
+        let req = json!({ "model": "m", "input": "hi", "stream": true });
+        let resp = forward(
+            &req,
+            &HeaderMap::new(),
+            true,
+            &base_url,
+            http_client(),
+            "ses_fixed123",
+        )
+        .await
+        .expect("forward 应成功");
+        assert!(resp.status.is_success());
+        assert!(resp.usage_dropped, "应标记为已降级");
+        assert_eq!(*count.lock().await, 2, "应恰好重试一次");
+
+        let got = last.lock().await.clone().expect("mock 应已收到请求");
+        assert!(got.get("stream_options").is_none(), "重试不应再带 stream_options");
+        assert_eq!(got["stream"], true);
     }
 }

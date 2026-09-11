@@ -562,6 +562,16 @@ mod tests {
             .unwrap_or_else(|| panic!("目录里没有 {slug}"))
     }
 
+    /// 模板持有的精简提示词：未命中完整条目源的条目两个提示词字段都取这个值。
+    fn template_prompt(dir: &Path) -> String {
+        template::effective_template(dir)
+            .unwrap()
+            .entry["model_messages"]["instructions_template"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
     #[test]
     fn source_differences_only_warn_for_constraints_and_status() {
         let dir = tempdir().unwrap();
@@ -665,8 +675,13 @@ mod tests {
         );
         assert_eq!(
             entry["model_messages"]["instructions_template"],
-            json!("You are Codex (new)"),
-            "提示词应跟随本机 codex 导出"
+            json!(template_prompt(dir.path())),
+            "未命中完整条目源的条目应使用模板提示词"
+        );
+        assert_eq!(
+            entry["base_instructions"],
+            json!(template_prompt(dir.path())),
+            "base_instructions 与 instructions_template 同写模板提示词"
         );
     }
 
@@ -846,7 +861,10 @@ mod tests {
             // default_reasoning_summary 由复用策略覆盖为 auto（推理条目打开摘要）
             if matches!(
                 key.as_str(),
-                "slug" | "priority" | "prefer_websockets" | "default_reasoning_summary"
+                "slug"
+                    | "priority"
+                    | "prefer_websockets"
+                    | "default_reasoning_summary"
             ) {
                 continue;
             }
@@ -895,6 +913,7 @@ mod tests {
                 "max_context_window": 872_000,
                 "tool_mode": "code_mode_only",
                 "prefer_websockets": true,
+                "base_instructions": "You are Codex (base)",
                 "model_messages": { "instructions_template": "You are Codex" }
             })],
         );
@@ -912,9 +931,52 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("You are Codex"));
+        // 复用条目逐字段原样：提示词（两个字段）都不被模板改写
+        assert_eq!(entry["base_instructions"], json!("You are Codex (base)"));
         assert!(has_source(&result.models[0], "official"));
         assert!(!has_source(&result.models[0], "models_dev"));
         assert!(!has_source(&result.models[0], "openrouter"));
+    }
+
+    #[test]
+    fn entries_outside_full_entry_sources_use_template_prompt() {
+        let dir = tempdir().unwrap();
+        // 复刻真实故障：big-pickle 不在 codex 导出池（也不在 official-models.json），
+        // 走多源合并 + 模板渲染，因此提示词必须换成模板里的精简版
+        let long_prompt = "You are Codex, an agent based on GPT-5. ".repeat(400);
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.6-sol",
+                "base_instructions": long_prompt,
+                "model_messages": { "instructions_template": long_prompt }
+            })],
+        );
+        let expected = template_prompt(dir.path());
+        assert!(
+            expected.chars().count() < 2_000,
+            "模板提示词应是精简版：{expected}"
+        );
+
+        for base_url in [
+            "http://127.0.0.1:18080/v1",
+            "https://relay.example.com/v1",
+            "https://api.openai.com/v1",
+        ] {
+            let result =
+                build_catalog_result(&["big-pickle".to_string()], dir.path(), base_url).unwrap();
+            let entry = catalog_entry(&result, "big-pickle");
+            // 两个提示词字段同写，不依赖 codex 对二者的优先级
+            assert_eq!(entry["base_instructions"], json!(expected), "{base_url}");
+            assert_eq!(
+                entry["model_messages"]["instructions_template"],
+                json!(expected),
+                "{base_url}"
+            );
+            // 与提供方 host 无关：规则只看是否命中完整条目源
+            assert_eq!(result.models[0].status, ModelCatalogModelStatus::Ready);
+            assert!(result.models[0].selectable);
+        }
     }
 
     #[test]
