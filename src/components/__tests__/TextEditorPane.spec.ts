@@ -25,6 +25,14 @@ import { tooltipDirective } from "../../directives/tooltip";
 const mockedInvoke = vi.mocked(invoke);
 const root = "D:\\repo";
 
+/**
+ * 宽松等待上限：`代码格式化` 会 lazy import prettier（standalone + 8 个插件），
+ * 并行跑全量用例时首次加载可能超过默认的 5s，偶发导致 vi.waitFor 超时。
+ * 用例超时同步放宽（只在真要超时时才会等到这个上限）。
+ */
+const WAIT_TIMEOUT = 15_000;
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 function fileContent(content: string) {
   return { content, validUtf8: true, byteSize: content.length };
 }
@@ -67,7 +75,7 @@ async function viewOf(
       if (!el.__cmView) throw new Error("waiting for editor view");
       return el.__cmView;
     },
-    { timeout: 5000, interval: 20 },
+    { timeout: WAIT_TIMEOUT, interval: 20 },
   );
 }
 
@@ -79,7 +87,7 @@ async function waitForEl(
     () => {
       expect(wrapper.find(selector).exists()).toBe(true);
     },
-    { timeout: 5000, interval: 20 },
+    { timeout: WAIT_TIMEOUT, interval: 20 },
   );
 }
 
@@ -287,7 +295,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
         expect(txt).toContain("B标题");
         expect(txt).not.toContain("A标题");
       },
-      { timeout: 5000, interval: 20 },
+      { timeout: WAIT_TIMEOUT, interval: 20 },
     );
     wrapper.unmount();
   });
@@ -338,7 +346,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
           '{ "a": 1, "b": [1, 2] }',
         );
       },
-      { timeout: 5000, interval: 20 },
+      { timeout: WAIT_TIMEOUT, interval: 20 },
     );
     expect(tab.dirty).toBe(true);
 
@@ -410,7 +418,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
           }),
         );
       },
-      { timeout: 5000, interval: 20 },
+      { timeout: WAIT_TIMEOUT, interval: 20 },
     );
     const args = mockedInvoke.mock.calls.find(
       (c) => c[0] === "export_markdown_pdf",
@@ -420,7 +428,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
       () => {
         expect(store.toast).toBe("已导出 PDF：D:\\out\\a.pdf");
       },
-      { timeout: 5000, interval: 20 },
+      { timeout: WAIT_TIMEOUT, interval: 20 },
     );
     wrapper.unmount();
   });
@@ -439,7 +447,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
       () => {
         expect(store.toast).toBe("JSON 语法错误，无法格式化");
       },
-      { timeout: 5000, interval: 20 },
+      { timeout: WAIT_TIMEOUT, interval: 20 },
     );
     wrapper.unmount();
   });
