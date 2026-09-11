@@ -278,8 +278,12 @@ async fn handle_responses(
                     ("status", status.as_u16().to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
                     (
-                        "include_usage",
-                        (!forwarded.usage_dropped && want_stream).to_string(),
+                        "dropped_fields",
+                        if forwarded.dropped_fields.is_empty() {
+                            "-".to_string()
+                        } else {
+                            forwarded.dropped_fields.join(",")
+                        },
                     ),
                 ],
             );
@@ -300,12 +304,18 @@ async fn handle_responses(
                     ],
                 );
             }
-            if forwarded.usage_dropped {
+            if !forwarded.dropped_fields.is_empty() {
                 log_at(
                     &state.log,
                     "warn",
-                    "zen_proxy.include_usage_unsupported",
-                    &[("detail", "上游不支持 stream_options.include_usage，已去掉该字段重试".to_string())],
+                    "zen_proxy.optional_fields_dropped",
+                    &[
+                        ("fields", forwarded.dropped_fields.join(",")),
+                        (
+                            "detail",
+                            "上游指名拒绝这些可选字段，已摘除后重试一次".to_string(),
+                        ),
+                    ],
                 );
             }
             match forwarded.payload {
@@ -475,15 +485,106 @@ enum ForwardPayload {
     Text(String),
 }
 
-/// 一次转发的完整结果：状态、响应载体、历史修复统计、用量请求是否已降级。
+/// 一次转发的完整结果：状态、响应载体、历史修复统计、被摘掉的可选字段。
 struct Forwarded {
     status: StatusCode,
     payload: ForwardPayload,
     repairs: RepairReport,
-    usage_dropped: bool,
+    dropped_fields: Vec<&'static str>,
 }
 
-/// 翻译请求并转发到 Zen（含历史净化与用量降级重试）。
+/// 可选请求字段：取到值才加入请求体；上游指名拒绝时按需摘除后重试一次。
+struct OptionalField {
+    /// 写入 chat 请求体的字段名。
+    key: &'static str,
+    /// 上游错误体里指认该字段的关键词（小写比较）。
+    needles: &'static [&'static str],
+    value: Value,
+}
+
+/// 本次请求要带上的可选字段：流式用量 + 推理强度等透传字段。
+fn optional_fields(req: &Value, want_stream: bool) -> Vec<OptionalField> {
+    let mut out: Vec<OptionalField> = Vec::new();
+    if want_stream {
+        out.push(OptionalField {
+            key: "stream_options",
+            needles: &["stream_options", "include_usage"],
+            value: json!({ "include_usage": true }),
+        });
+    }
+    if let Some(effort) = req
+        .pointer("/reasoning/effort")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty())
+    {
+        out.push(OptionalField {
+            key: "reasoning_effort",
+            needles: &["reasoning_effort", "reasoning effort"],
+            value: json!(effort),
+        });
+    }
+    if let Some(v) = req.get("parallel_tool_calls").filter(|v| v.is_boolean()) {
+        out.push(OptionalField {
+            key: "parallel_tool_calls",
+            needles: &["parallel_tool_calls"],
+            value: v.clone(),
+        });
+    }
+    if let Some(v) = req
+        .get("prompt_cache_key")
+        .and_then(Value::as_str)
+        .filter(|v| !v.trim().is_empty())
+    {
+        out.push(OptionalField {
+            key: "prompt_cache_key",
+            needles: &["prompt_cache_key"],
+            value: json!(v),
+        });
+    }
+    if let Some(v) = req
+        .get("service_tier")
+        .and_then(Value::as_str)
+        .filter(|v| !v.trim().is_empty())
+    {
+        out.push(OptionalField {
+            key: "service_tier",
+            needles: &["service_tier"],
+            value: json!(v),
+        });
+    }
+    if let Some(choice) = tool_choice_to_chat(req.get("tool_choice")) {
+        out.push(OptionalField {
+            key: "tool_choice",
+            needles: &["tool_choice"],
+            value: choice,
+        });
+    }
+    out
+}
+
+/// Responses 的 `tool_choice` → chat 形态：字符串直接透传，
+/// `{type:"function",name}` 转 `{type:"function",function:{name}}`，
+/// 其余（`allowed_tools` 等无 chat 等价物）返回 None。
+fn tool_choice_to_chat(choice: Option<&Value>) -> Option<Value> {
+    let choice = choice.filter(|v| !v.is_null())?;
+    match choice {
+        Value::String(s) if !s.trim().is_empty() => Some(json!(s)),
+        Value::Object(object) if object.get("type").and_then(Value::as_str) == Some("function") => {
+            let name = object.get("name").and_then(Value::as_str)?;
+            Some(json!({ "type": "function", "function": { "name": name } }))
+        }
+        _ => None,
+    }
+}
+
+/// 错误体是否指认了该可选字段。
+fn mentions_field(text: &str, needles: &[&str]) -> bool {
+    let lower = text.to_ascii_lowercase();
+    needles.iter().any(|needle| lower.contains(needle))
+}
+
+/// 翻译请求并转发到 Zen（含历史净化与可选字段降级重试）。
 /// `base_url` 由配置传入（测试时可指向本地 mock）。
 /// `fallback_session` 仅在客户端未提供 `session-id` 时用作 `x-opencode-session`。
 async fn forward(
@@ -497,23 +598,35 @@ async fn forward(
     let (chat, repairs) = responses_to_chat(req, want_stream)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let optional = optional_fields(req, want_stream);
+    let mut dropped: Vec<&'static str> = Vec::new();
     let mut attempt = 0usize;
     loop {
-        // 流式首次带 `stream_options.include_usage`：codex 依赖它做 token 计量与
-        // 上下文判断。上游明确拒绝该字段时去掉后重试一次（最多一次）。
-        let want_usage = want_stream && attempt == 0;
         let mut body = chat.clone();
-        if want_usage {
-            body["stream_options"] = json!({ "include_usage": true });
+        for field in optional.iter() {
+            if dropped.contains(&field.key) {
+                continue;
+            }
+            body[field.key] = field.value.clone();
         }
         let resp = build_chat_request(client, &url, headers, fallback_session, &body)
             .send()
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
         let status = resp.status();
-        if want_usage && status.is_client_error() {
+        // 上游以 4xx 指名拒绝某个可选字段时摘掉它重试一次（最多一次）；
+        // 未指名任何可选字段（如参数校验失败）不重试，避免重复发请求。
+        if attempt == 0 && status.is_client_error() {
             let text = resp.text().await.unwrap_or_default();
-            if mentions_include_usage_unsupported(&text) {
+            let hit: Vec<&'static str> = optional
+                .iter()
+                .filter(|field| {
+                    !dropped.contains(&field.key) && mentions_field(&text, field.needles)
+                })
+                .map(|field| field.key)
+                .collect();
+            if !hit.is_empty() {
+                dropped.extend(hit);
                 attempt = 1;
                 continue;
             }
@@ -521,14 +634,14 @@ async fn forward(
                 status,
                 payload: ForwardPayload::Text(text),
                 repairs,
-                usage_dropped: false,
+                dropped_fields: Vec::new(),
             });
         }
         return Ok(Forwarded {
             status,
             payload: ForwardPayload::Live(resp),
             repairs,
-            usage_dropped: attempt == 1,
+            dropped_fields: dropped,
         });
     }
 }
@@ -557,13 +670,6 @@ fn build_chat_request(
         }
     }
     rq
-}
-
-/// 上游错误体是否明确指向 `stream_options` / `include_usage` 不被支持。
-/// 只在指名道姓时降级重试，避免对普通 4xx（如参数校验失败）重复发请求。
-fn mentions_include_usage_unsupported(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("stream_options") || lower.contains("include_usage")
 }
 
 /// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
@@ -610,6 +716,14 @@ async fn proxy_json_response(
             return error_json(StatusCode::BAD_GATEWAY, e);
         }
     };
+    if let Some(usage) = chat.get("usage").filter(|v| !v.is_null()) {
+        log_at(
+            log,
+            "info",
+            "zen_proxy.usage",
+            &[("detail", truncate_chars(&usage.to_string(), 300))],
+        );
+    }
     let body = serde_json::to_string(&out).unwrap_or_else(|_| "{}".into());
     log_at(
         log,
@@ -850,7 +964,7 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairRep
                             .and_then(|r| r.as_str())
                             .unwrap_or("user")
                             .to_string();
-                        let content = item_content_text(item);
+                        let content = message_content(item);
                         messages.push(json!({ "role": role, "content": content }));
                     }
                     "function_call" => {
@@ -1077,6 +1191,55 @@ fn item_content_text(item: &Value) -> String {
     }
 }
 
+/// 消息内容：纯文本消息仍用字符串（最大兼容）；含图片时改为 chat 多模态 parts。
+/// Responses 的 `input_image` 是 `{type,image_url:<字符串>,detail?}`，chat 需要
+/// `{type:"image_url",image_url:{url,detail?}}`；`detail` 仅透传 auto/low/high。
+fn message_content(item: &Value) -> Value {
+    let Some(parts) = item.get("content").and_then(Value::as_array) else {
+        return Value::String(item_content_text(item));
+    };
+    let has_image = parts
+        .iter()
+        .any(|part| part.get("type").and_then(Value::as_str) == Some("input_image"));
+    if !has_image {
+        return Value::String(item_content_text(item));
+    }
+    let mut out: Vec<Value> = Vec::new();
+    for part in parts {
+        match part.get("type").and_then(Value::as_str).unwrap_or("") {
+            "input_text" | "output_text" => {
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    if !text.is_empty() {
+                        out.push(json!({ "type": "text", "text": text }));
+                    }
+                }
+            }
+            "input_image" => {
+                let Some(url) = part
+                    .get("image_url")
+                    .and_then(Value::as_str)
+                    .filter(|url| !url.trim().is_empty())
+                else {
+                    continue;
+                };
+                let mut image = json!({ "url": url });
+                if let Some(detail) = part.get("detail").and_then(Value::as_str) {
+                    if matches!(detail, "auto" | "low" | "high") {
+                        image["detail"] = json!(detail);
+                    }
+                }
+                out.push(json!({ "type": "image_url", "image_url": image }));
+            }
+            // input_file / input_audio：chat 侧形态差异较大，本次不透传
+            _ => {}
+        }
+    }
+    if out.is_empty() {
+        return Value::String(item_content_text(item));
+    }
+    Value::Array(out)
+}
+
 /// 任意 JSON 值 → 聊天文本（工具输出等）。
 fn value_to_text(v: &Value) -> String {
     match v {
@@ -1181,6 +1344,10 @@ fn chat_to_responses(chat: &Value, model: &str) -> Result<Value, String> {
 }
 
 /// chat 的 `usage` → responses 的 `usage`（流式与非流式共用同一组字段名）。
+/// 除三个总量外还翻译明细：`input_tokens_details.cached_tokens` /
+/// `input_tokens_details.cache_write_tokens` / `output_tokens_details.reasoning_tokens`
+/// ——codex 用它们填充 `cached_input_tokens` / `cache_write_input_tokens` /
+/// `reasoning_output_tokens`（应用侧「缓存读取 / 缓存写入 / 推理输出」三行）。
 fn usage_to_responses(usage: Option<&Value>) -> Value {
     let mut out = json!({});
     let Some(usage) = usage else {
@@ -1191,13 +1358,57 @@ fn usage_to_responses(usage: Option<&Value>) -> Value {
         ("output_tokens", "completion_tokens"),
         ("total_tokens", "total_tokens"),
     ] {
-        if let Some(v) = usage.get(src) {
-            if !v.is_null() {
-                out[dst] = v.clone();
-            }
+        if let Some(v) = usage.get(src).filter(|v| !v.is_null()) {
+            out[dst] = v.clone();
         }
     }
+
+    let mut input_details = json!({});
+    if let Some(v) = pick_number(
+        usage,
+        &["prompt_tokens_details.cached_tokens", "cache_read_input_tokens"],
+    ) {
+        input_details["cached_tokens"] = v;
+    }
+    if let Some(v) = pick_number(
+        usage,
+        &[
+            "cache_write_tokens",
+            "prompt_tokens_details.cache_write_tokens",
+            "cache_creation_input_tokens",
+        ],
+    ) {
+        input_details["cache_write_tokens"] = v;
+    }
+    if input_details.as_object().is_some_and(|map| !map.is_empty()) {
+        out["input_tokens_details"] = input_details;
+    }
+
+    let mut output_details = json!({});
+    if let Some(v) = pick_number(
+        usage,
+        &["completion_tokens_details.reasoning_tokens", "reasoning_tokens"],
+    ) {
+        output_details["reasoning_tokens"] = v;
+    }
+    if output_details.as_object().is_some_and(|map| !map.is_empty()) {
+        out["output_tokens_details"] = output_details;
+    }
     out
+}
+
+/// 按路径取数值：支持 `a` 与 `a.b`；非数值、缺失、null 都视为未命中。
+fn pick_number(value: &Value, paths: &[&str]) -> Option<Value> {
+    for path in paths {
+        let found = match path.split_once('.') {
+            Some((head, tail)) => value.get(head).and_then(|v| v.get(tail)),
+            None => value.get(*path),
+        };
+        if let Some(v) = found.filter(|v| v.is_number()) {
+            return Some(v.clone());
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -1222,6 +1433,8 @@ struct StreamState {
     response_id: String,
     model: String,
     next_index: usize,
+    /// 推理摘要（上游 reasoning 增量）；codex 用它渲染「思考过程」。
+    reasoning: Option<TextTrack>,
     text: Option<TextTrack>,
     calls: HashMap<usize, CallTrack>,
     closed: bool,
@@ -1239,6 +1452,7 @@ impl StreamState {
             response_id,
             model,
             next_index: 0,
+            reasoning: None,
             text: None,
             calls: HashMap::new(),
             closed: false,
@@ -1288,6 +1502,11 @@ fn process_chunk(chunk: &Value, st: &mut StreamState, log: &ZenLog) -> Vec<Strin
     };
     for choice in choices {
         let delta = choice.get("delta").cloned().unwrap_or_else(|| json!({}));
+        // 推理增量（DeepSeek 系 reasoning_content / 中转 reasoning）：翻成
+        // responses 的 reasoning summary 事件，供「思考过程」卡片展示
+        if let Some(text) = reasoning_text(&delta) {
+            out.extend(reasoning_delta(text, st));
+        }
         // 文本增量
         if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
             if !content.is_empty() {
@@ -1313,6 +1532,73 @@ fn process_chunk(chunk: &Value, st: &mut StreamState, log: &ZenLog) -> Vec<Strin
                 out.extend(finish_stream(st, log));
             }
         }
+    }
+    out
+}
+
+/// 取增量里的推理文本：`reasoning_content`（DeepSeek 系）或 `reasoning`
+/// （字符串，或 `{content}` 对象——OpenRouter 等中转常见）。
+fn reasoning_text(delta: &Value) -> Option<&str> {
+    if let Some(text) = delta
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+    {
+        return Some(text);
+    }
+    match delta.get("reasoning") {
+        Some(Value::String(text)) if !text.is_empty() => Some(text.as_str()),
+        Some(Value::Object(object)) => object
+            .get("content")
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty()),
+        _ => None,
+    }
+}
+
+/// 推理摘要增量 → `response.reasoning_summary_*` 事件序列（summary_index 固定 0）。
+fn reasoning_delta(text: &str, st: &mut StreamState) -> Vec<String> {
+    let mut out = Vec::new();
+    if st.reasoning.is_none() {
+        let out_index = st.next_index;
+        st.next_index += 1;
+        let item_id = gen_id("rs");
+        st.reasoning = Some(TextTrack {
+            item_id: item_id.clone(),
+            text_buf: String::new(),
+            out_index,
+        });
+        out.push(sse_event(
+            "response.output_item.added",
+            &json!({
+                "type": "response.output_item.added",
+                "output_index": out_index,
+                "item": { "id": item_id, "type": "reasoning", "summary": [] }
+            }),
+        ));
+        out.push(sse_event(
+            "response.reasoning_summary_part.added",
+            &json!({
+                "type": "response.reasoning_summary_part.added",
+                "item_id": item_id,
+                "output_index": out_index,
+                "summary_index": 0,
+                "part": { "type": "summary_text", "text": "" }
+            }),
+        ));
+    }
+    if let Some(t) = st.reasoning.as_mut() {
+        t.text_buf.push_str(text);
+        out.push(sse_event(
+            "response.reasoning_summary_text.delta",
+            &json!({
+                "type": "response.reasoning_summary_text.delta",
+                "item_id": t.item_id,
+                "output_index": t.out_index,
+                "summary_index": 0,
+                "delta": text
+            }),
+        ));
     }
     out
 }
@@ -1453,11 +1739,52 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     }
     st.closed = true;
     let mut out = Vec::new();
+    let reasoning_chars = st
+        .reasoning
+        .as_ref()
+        .map(|t| t.text_buf.chars().count())
+        .unwrap_or(0);
     let text_chars = st
         .text
         .as_ref()
         .map(|t| t.text_buf.chars().count())
         .unwrap_or(0);
+
+    // 推理摘要 item 先收尾（它的 output_index 先分配）
+    if let Some(t) = st.reasoning.take() {
+        out.push(sse_event(
+            "response.reasoning_summary_text.done",
+            &json!({
+                "type": "response.reasoning_summary_text.done",
+                "item_id": t.item_id,
+                "output_index": t.out_index,
+                "summary_index": 0,
+                "text": t.text_buf
+            }),
+        ));
+        out.push(sse_event(
+            "response.reasoning_summary_part.done",
+            &json!({
+                "type": "response.reasoning_summary_part.done",
+                "item_id": t.item_id,
+                "output_index": t.out_index,
+                "summary_index": 0,
+                "part": { "type": "summary_text", "text": t.text_buf }
+            }),
+        ));
+        out.push(sse_event(
+            "response.output_item.done",
+            &json!({
+                "type": "response.output_item.done",
+                "output_index": t.out_index,
+                "item": {
+                    "id": t.item_id,
+                    "type": "reasoning",
+                    "summary": [{ "type": "summary_text", "text": t.text_buf }]
+                }
+            }),
+        ));
+    }
 
     if let Some(t) = st.text.take() {
         out.push(sse_event(
@@ -1552,6 +1879,8 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     }
     let failure = st.failure.clone().or(malformed);
     let failed = failure.is_some();
+    // 被上游截断（finish_reason=length）：照常收尾，但以 incomplete 结束而不是 completed
+    let truncated = st.finish_reason.as_deref() == Some("length");
 
     if failure.is_none() {
         for (_, c) in calls {
@@ -1599,6 +1928,24 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                 }
             }),
         ));
+    } else if truncated {
+        let mut response = json!({
+            "id": st.response_id,
+            "object": "response",
+            "created_at": unix_now(),
+            "status": "incomplete",
+            "model": st.model,
+            "output": [],
+            "error": null,
+            "incomplete_details": { "reason": "max_output_tokens" }
+        });
+        if let Some(usage) = st.usage.as_ref() {
+            response["usage"] = usage_to_responses(Some(usage));
+        }
+        out.push(sse_event(
+            "response.incomplete",
+            &json!({ "type": "response.incomplete", "response": response }),
+        ));
     } else {
         let mut response = json!({
             "id": st.response_id,
@@ -1618,6 +1965,15 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         ));
     }
 
+    if let Some(usage) = st.usage.as_ref() {
+        log_at(
+            log,
+            "info",
+            "zen_proxy.usage",
+            &[("detail", truncate_chars(&usage.to_string(), 300))],
+        );
+    }
+
     log_at(
         log,
         "info",
@@ -1627,6 +1983,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                 "finish_reason",
                 st.finish_reason.clone().unwrap_or_default(),
             ),
+            ("reasoning_chars", reasoning_chars.to_string()),
             ("text_chars", text_chars.to_string()),
             ("call_count", call_count.to_string()),
             ("failed", failed.to_string()),
@@ -2181,17 +2538,315 @@ mod tests {
     }
 
     #[test]
-    fn include_usage_rejection_is_detected_by_parameter_name() {
-        assert!(mentions_include_usage_unsupported(
-            "{\"error\":{\"message\":\"Unrecognized request argument supplied: stream_options\"}}"
+    fn optional_field_rejection_is_detected_by_parameter_name() {
+        let stream_options = ["stream_options", "include_usage"];
+        assert!(mentions_field(
+            "{\"error\":{\"message\":\"Unrecognized request argument supplied: stream_options\"}}",
+            &stream_options
         ));
-        assert!(mentions_include_usage_unsupported(
-            "include_usage is not supported by this model"
+        assert!(mentions_field(
+            "include_usage is not supported by this model",
+            &stream_options
         ));
         // 普通 4xx 不应触发降级重试
-        assert!(!mentions_include_usage_unsupported(
-            "{\"error\":{\"message\":\"Assistant tool call function.arguments must be valid JSON.\"}}"
+        assert!(!mentions_field(
+            "{\"error\":{\"message\":\"Assistant tool call function.arguments must be valid JSON.\"}}",
+            &stream_options
         ));
+        // 推理强度被指名时的关键词匹配
+        assert!(mentions_field(
+            "Unknown parameter: 'reasoning_effort'.",
+            &["reasoning_effort", "reasoning effort"]
+        ));
+    }
+
+    #[test]
+    fn usage_details_are_mapped_into_responses() {
+        let usage = json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 40,
+            "total_tokens": 140,
+            "prompt_tokens_details": { "cached_tokens": 80, "cache_write_tokens": 20 },
+            "completion_tokens_details": { "reasoning_tokens": 12 }
+        });
+        let out = usage_to_responses(Some(&usage));
+        assert_eq!(out["input_tokens"], 100);
+        assert_eq!(out["output_tokens"], 40);
+        assert_eq!(out["total_tokens"], 140);
+        assert_eq!(out["input_tokens_details"]["cached_tokens"], 80);
+        assert_eq!(out["input_tokens_details"]["cache_write_tokens"], 20);
+        assert_eq!(out["output_tokens_details"]["reasoning_tokens"], 12);
+    }
+
+    #[test]
+    fn usage_details_fall_back_to_top_level_fields() {
+        let usage = json!({
+            "prompt_tokens": 10,
+            "completion_tokens": 2,
+            "cache_read_input_tokens": 6,
+            "cache_creation_input_tokens": 4,
+            "reasoning_tokens": 1
+        });
+        let out = usage_to_responses(Some(&usage));
+        assert_eq!(out["input_tokens_details"]["cached_tokens"], 6);
+        assert_eq!(out["input_tokens_details"]["cache_write_tokens"], 4);
+        assert_eq!(out["output_tokens_details"]["reasoning_tokens"], 1);
+    }
+
+    #[test]
+    fn usage_without_details_omits_detail_objects() {
+        let out = usage_to_responses(Some(&json!({
+            "prompt_tokens": 5,
+            "completion_tokens": 1,
+            "total_tokens": 6
+        })));
+        assert!(out.get("input_tokens_details").is_none());
+        assert!(out.get("output_tokens_details").is_none());
+        // null / 非数值都不算命中
+        let out = usage_to_responses(Some(&json!({
+            "prompt_tokens_details": { "cached_tokens": null },
+            "completion_tokens_details": { "reasoning_tokens": "7" },
+            "cache_write_tokens": null
+        })));
+        assert!(out.get("input_tokens_details").is_none());
+        assert!(out.get("output_tokens_details").is_none());
+    }
+
+    #[test]
+    fn optional_fields_map_reasoning_and_passthrough_fields() {
+        let req = json!({
+            "model": "m",
+            "reasoning": { "effort": "high", "summary": "auto" },
+            "parallel_tool_calls": false,
+            "prompt_cache_key": "cache-key",
+            "service_tier": "flex"
+        });
+        let fields = optional_fields(&req, true);
+        let value_of = |key: &str| {
+            fields
+                .iter()
+                .find(|field| field.key == key)
+                .map(|field| field.value.clone())
+        };
+        assert_eq!(value_of("stream_options"), Some(json!({ "include_usage": true })));
+        assert_eq!(value_of("reasoning_effort"), Some(json!("high")));
+        assert_eq!(value_of("parallel_tool_calls"), Some(json!(false)));
+        assert_eq!(value_of("prompt_cache_key"), Some(json!("cache-key")));
+        assert_eq!(value_of("service_tier"), Some(json!("flex")));
+        // 非流式不带 stream_options；未给可选字段时列表为空
+        assert!(optional_fields(&req, false)
+            .iter()
+            .all(|field| field.key != "stream_options"));
+        assert!(optional_fields(&json!({ "model": "m" }), false).is_empty());
+    }
+
+    #[test]
+    fn tool_choice_converts_only_known_shapes() {
+        assert_eq!(
+            tool_choice_to_chat(Some(&json!({ "type": "function", "name": "search" }))),
+            Some(json!({ "type": "function", "function": { "name": "search" } }))
+        );
+        assert_eq!(
+            tool_choice_to_chat(Some(&json!("required"))),
+            Some(json!("required"))
+        );
+        // 无 chat 等价物的形态与空值一律丢弃
+        assert_eq!(tool_choice_to_chat(Some(&json!({ "type": "allowed_tools" }))), None);
+        assert_eq!(tool_choice_to_chat(Some(&Value::Null)), None);
+        assert_eq!(tool_choice_to_chat(None), None);
+    }
+
+    #[test]
+    fn message_images_become_chat_content_parts() {
+        let req = json!({
+            "model": "m",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": "看这张图" },
+                    {
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,AAA",
+                        "detail": "high"
+                    }
+                ]
+            }]
+        });
+        let (chat, _) = responses_to_chat(&req, false).unwrap();
+        let content = &chat["messages"][0]["content"];
+        assert_eq!(content[0], json!({ "type": "text", "text": "看这张图" }));
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,AAA");
+        assert_eq!(content[1]["image_url"]["detail"], "high");
+    }
+
+    #[test]
+    fn unsupported_image_detail_or_missing_url_is_skipped() {
+        let req = json!({
+            "model": "m",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [
+                    { "type": "input_image", "image_url": "https://x/y.png", "detail": "original" },
+                    { "type": "input_image" }
+                ]
+            }]
+        });
+        let (chat, _) = responses_to_chat(&req, false).unwrap();
+        let content = chat["messages"][0]["content"].as_array().unwrap().clone();
+        assert_eq!(content.len(), 1, "无 url 的图片应被丢弃");
+        assert_eq!(content[0]["image_url"]["url"], "https://x/y.png");
+        assert!(
+            content[0]["image_url"].get("detail").is_none(),
+            "未知 detail 不写入"
+        );
+    }
+
+    #[test]
+    fn text_only_messages_keep_string_content() {
+        let req = json!({
+            "model": "m",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "hi" }]
+            }]
+        });
+        let (chat, _) = responses_to_chat(&req, false).unwrap();
+        assert_eq!(chat["messages"][0]["content"], json!("hi"));
+    }
+
+    #[test]
+    fn reasoning_deltas_become_reasoning_summary_events() {
+        let mut st = StreamState::new("resp_r".into(), "m".into());
+        let c1 = json!({ "choices": [{ "delta": { "reasoning_content": "先看" }, "finish_reason": null }] });
+        let c2 = json!({ "choices": [{ "delta": { "reasoning_content": "日志" }, "finish_reason": null }] });
+        let c3 = json!({ "choices": [{ "delta": { "content": "结论" }, "finish_reason": "stop" }] });
+        let mut lines = process_chunk(&c1, &mut st, &None);
+        lines.extend(process_chunk(&c2, &mut st, &None));
+        lines.extend(process_chunk(&c3, &mut st, &None));
+
+        let names = event_names(&lines);
+        assert_eq!(names[0], "response.output_item.added", "推理 item 先开");
+        assert!(names.contains(&"response.reasoning_summary_part.added".to_string()));
+        assert!(names.contains(&"response.reasoning_summary_text.delta".to_string()));
+        assert!(names.contains(&"response.reasoning_summary_text.done".to_string()));
+        assert!(names.contains(&"response.reasoning_summary_part.done".to_string()));
+        assert!(names.contains(&"response.completed".to_string()));
+
+        let delta = event_payload(&lines, "response.reasoning_summary_text.delta").unwrap();
+        assert_eq!(delta["summary_index"], 0);
+        assert_eq!(delta["delta"], "先看");
+        let done = event_payload(&lines, "response.reasoning_summary_text.done").unwrap();
+        assert_eq!(done["text"], "先看日志");
+
+        // output_item.done 顺序：推理 item 在前，且带摘要全文
+        let done_items: Vec<Value> = lines
+            .iter()
+            .filter(|line| line.contains("event: response.output_item.done"))
+            .filter_map(|line| {
+                serde_json::from_str::<Value>(
+                    line.lines().nth(1)?.trim_start_matches("data:").trim(),
+                )
+                .ok()
+            })
+            .collect();
+        assert_eq!(done_items[0]["item"]["type"], "reasoning");
+        assert_eq!(done_items[0]["item"]["summary"][0]["text"], "先看日志");
+        assert_eq!(done_items[1]["item"]["type"], "message");
+    }
+
+    #[test]
+    fn reasoning_object_form_is_understood() {
+        let mut st = StreamState::new("resp_ro".into(), "m".into());
+        let chunk = json!({
+            "choices": [{ "delta": { "reasoning": { "content": "想想" } }, "finish_reason": null }]
+        });
+        let lines = process_chunk(&chunk, &mut st, &None);
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("response.reasoning_summary_text.delta")
+                && line.contains("想想")));
+    }
+
+    #[test]
+    fn finish_reason_length_yields_incomplete() {
+        let mut st = StreamState::new("resp_len".into(), "m".into());
+        let c1 = json!({ "choices": [{ "delta": { "content": "半截" }, "finish_reason": null }] });
+        let c2 = json!({ "choices": [{ "delta": {}, "finish_reason": "length" }] });
+        let mut lines = process_chunk(&c1, &mut st, &None);
+        lines.extend(process_chunk(&c2, &mut st, &None));
+
+        let names = event_names(&lines);
+        assert!(names.contains(&"response.incomplete".to_string()));
+        assert!(!names.contains(&"response.completed".to_string()));
+        let event = event_payload(&lines, "response.incomplete").unwrap();
+        assert_eq!(event["response"]["status"], "incomplete");
+        assert_eq!(
+            event["response"]["incomplete_details"]["reason"],
+            "max_output_tokens"
+        );
+    }
+
+    #[test]
+    fn stream_usage_details_are_forwarded() {
+        let mut st = StreamState::new("resp_ud".into(), "m".into());
+        let c1 = json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 5,
+                "total_tokens": 105,
+                "prompt_tokens_details": { "cached_tokens": 60 },
+                "completion_tokens_details": { "reasoning_tokens": 3 }
+            }
+        });
+        let c2 = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] });
+        let mut lines = process_chunk(&c1, &mut st, &None);
+        lines.extend(process_chunk(&c2, &mut st, &None));
+        let done = event_payload(&lines, "response.completed").unwrap();
+        assert_eq!(
+            done["response"]["usage"]["input_tokens_details"]["cached_tokens"],
+            60
+        );
+        assert_eq!(
+            done["response"]["usage"]["output_tokens_details"]["reasoning_tokens"],
+            3
+        );
+    }
+
+    #[test]
+    fn chat_to_responses_carries_usage_details() {
+        let chat = json!({
+            "choices": [{ "message": { "role": "assistant", "content": "好" } }],
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 3,
+                "total_tokens": 12,
+                "prompt_tokens_details": { "cached_tokens": 4 }
+            }
+        });
+        let resp = chat_to_responses(&chat, "m").unwrap();
+        assert_eq!(resp["usage"]["input_tokens_details"]["cached_tokens"], 4);
+        assert_eq!(resp["usage"]["input_tokens"], 9);
+    }
+
+    #[test]
+    fn failure_takes_precedence_over_incomplete() {
+        let mut st = StreamState::new("resp_fi".into(), "m".into());
+        st.failure = Some(StreamFailure {
+            code: CODE_UPSTREAM_STREAM_ERROR.to_string(),
+            message: "boom".to_string(),
+            detail: "读取出错".to_string(),
+        });
+        st.finish_reason = Some("length".to_string());
+        let lines = finish_stream(&mut st, &None);
+        let names = event_names(&lines);
+        assert!(names.contains(&"response.failed".to_string()));
+        assert!(!names.contains(&"response.incomplete".to_string()));
+        assert!(!names.contains(&"response.completed".to_string()));
     }
 }
 
@@ -2542,10 +3197,12 @@ mod integration_tests {
         );
     }
 
-    /// 起一个"先拒绝 `stream_options` 再放行"的 mock Zen（记录请求次数与末次 body）。
-    async fn spawn_mock_zen_rejecting_stream_options(
+    /// 起一个"带指定字段就用 4xx 指名拒绝、否则放行"的 mock Zen
+    /// （记录请求次数与末次 body）。
+    async fn spawn_mock_zen_rejecting_field(
         count: Arc<AsyncMutex<usize>>,
         last: Arc<AsyncMutex<Option<Value>>>,
+        field: &'static str,
     ) -> String {
         let app = Router::new().route(
             "/chat/completions",
@@ -2553,15 +3210,15 @@ mod integration_tests {
                 let count = count.clone();
                 let last = last.clone();
                 async move {
-                    let has_usage = body.get("stream_options").is_some();
+                    let rejected = body.get(field).is_some();
                     *count.lock().await += 1;
                     *last.lock().await = Some(body);
-                    if has_usage {
+                    if rejected {
                         return (
                             StatusCode::BAD_REQUEST,
                             Json(json!({
                                 "error": {
-                                    "message": "Unrecognized request argument supplied: stream_options",
+                                    "message": format!("Unrecognized request argument supplied: {field}"),
                                     "type": "invalid_request_error"
                                 }
                             })),
@@ -2578,6 +3235,34 @@ mod integration_tests {
                                 "message": { "role": "assistant", "content": "ok" },
                                 "finish_reason": "stop"
                             }]
+                        })),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    /// 起一个恒定 4xx（错误体不指认任何可选字段）的 mock Zen。
+    async fn spawn_mock_zen_bad_request(count: Arc<AsyncMutex<usize>>) -> String {
+        let app = Router::new().route(
+            "/chat/completions",
+            axum::routing::post(move |Json(_body): Json<Value>| {
+                let count = count.clone();
+                async move {
+                    *count.lock().await += 1;
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "error": {
+                                "message": "Assistant tool call function.arguments must be valid JSON.",
+                                "type": "invalid_request_error"
+                            }
                         })),
                     )
                 }
@@ -2608,7 +3293,7 @@ mod integration_tests {
         .await
         .expect("forward 应成功");
         assert!(resp.status.is_success());
-        assert!(!resp.usage_dropped);
+        assert!(resp.dropped_fields.is_empty(), "上游未拒绝时不应摘字段");
 
         let got = rec.lock().await.clone().expect("mock 应已收到请求");
         assert_eq!(got.body["stream_options"]["include_usage"], true);
@@ -2620,7 +3305,7 @@ mod integration_tests {
         let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
         let last: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
         let base_url =
-            spawn_mock_zen_rejecting_stream_options(count.clone(), last.clone()).await;
+            spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "stream_options").await;
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
         let resp = forward(
@@ -2634,11 +3319,77 @@ mod integration_tests {
         .await
         .expect("forward 应成功");
         assert!(resp.status.is_success());
-        assert!(resp.usage_dropped, "应标记为已降级");
+        assert_eq!(
+            resp.dropped_fields,
+            vec!["stream_options"],
+            "应标记被摘掉的字段"
+        );
         assert_eq!(*count.lock().await, 2, "应恰好重试一次");
 
         let got = last.lock().await.clone().expect("mock 应已收到请求");
         assert!(got.get("stream_options").is_none(), "重试不应再带 stream_options");
         assert_eq!(got["stream"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reasoning_effort_is_dropped_and_retried_when_rejected() {
+        let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
+        let last: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
+        let base_url =
+            spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "reasoning_effort").await;
+
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "stream": true,
+            "reasoning": { "effort": "xhigh" }
+        });
+        let resp = forward(
+            &req,
+            &HeaderMap::new(),
+            true,
+            &base_url,
+            http_client(),
+            "ses_fixed123",
+        )
+        .await
+        .expect("forward 应成功");
+        assert!(resp.status.is_success());
+        assert_eq!(resp.dropped_fields, vec!["reasoning_effort"]);
+        assert_eq!(*count.lock().await, 2, "应恰好重试一次");
+
+        let got = last.lock().await.clone().expect("mock 应已收到请求");
+        assert!(got.get("reasoning_effort").is_none(), "重试不应再带被拒字段");
+        assert_eq!(
+            got["stream_options"]["include_usage"], true,
+            "未被拒的可选字段应保留"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unrelated_4xx_is_not_retried() {
+        let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
+        let base_url = spawn_mock_zen_bad_request(count.clone()).await;
+
+        let req = json!({ "model": "m", "input": "hi", "stream": true });
+        let resp = forward(
+            &req,
+            &HeaderMap::new(),
+            true,
+            &base_url,
+            http_client(),
+            "ses_fixed123",
+        )
+        .await
+        .expect("forward 应成功");
+        assert!(!resp.status.is_success());
+        assert!(resp.dropped_fields.is_empty(), "未指名可选字段时不应摘字段");
+        assert_eq!(*count.lock().await, 1, "不应重试");
+        match resp.payload {
+            ForwardPayload::Text(text) => {
+                assert!(text.contains("valid JSON"), "错误体应原样透传：{text}")
+            }
+            ForwardPayload::Live(_) => panic!("4xx 应携带已读出的错误体"),
+        }
     }
 }
