@@ -72,6 +72,33 @@ describe("ZenProxySection", () => {
     expect(mockOpenDocsUrl).toHaveBeenCalledWith(ZEN_PRICING_DOCS_URL);
   });
 
+  it("本地 provider 的 base_url 提示跟随上游地址的路径", async () => {
+    const wrapper = mountSection();
+    // 默认上游 https://opencode.ai/zen/v1 → 本机地址 + /zen/v1
+    expect(wrapper.find(".zen-proxy-head-desc").text()).toContain(
+      "http://127.0.0.1:18080/zen/v1",
+    );
+    const urlInput = wrapper.find("input[type='text']");
+    await urlInput.setValue("https://api.deepseek.com/");
+    expect(wrapper.find(".zen-proxy-head-desc").text()).toContain(
+      "http://127.0.0.1:18080",
+    );
+    expect(wrapper.find(".zen-proxy-head-desc").text()).not.toContain(
+      "http://127.0.0.1:18080/zen",
+    );
+    await urlInput.setValue("https://custom.example.com/zen/v2/");
+    expect(wrapper.find(".zen-proxy-head-desc").text()).toContain(
+      "http://127.0.0.1:18080/zen/v2",
+    );
+  });
+
+  it("上游地址字段文案为「模型提供方的 base_url」", () => {
+    const wrapper = mountSection();
+    const labels = wrapper.findAll("label").map((l) => l.text());
+    expect(labels).toContain("模型提供方的 base_url");
+    expect(labels).not.toContain("转发目标地址");
+  });
+
   it("端口非法时提示错误", async () => {
     const wrapper = mountSection();
     const input = wrapper.find("input[type='number']");

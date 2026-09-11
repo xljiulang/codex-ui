@@ -89,7 +89,7 @@ pub async fn server_logs(server: State<'_, Server>) -> Result<Vec<String>, Strin
         .unwrap_or_default())
 }
 
-/// 开启/关闭 Zen 本地代理并返回状态；端口变化时自动重启。
+/// 开启/关闭 Zen 本地代理并返回状态；端口或上游地址变化时自动重启。
 #[tauri::command]
 pub async fn zen_proxy_apply(
     server: State<'_, Server>,

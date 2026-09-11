@@ -62,7 +62,10 @@ impl SessionLog {
             Ok(g) => g,
             Err(e) => e.into_inner(),
         };
-        if inner.current.as_ref().map(|(d, _)| d.as_str()) != Some(date.as_str()) {
+        let same_day = inner.current.as_ref().map(|(d, _)| d.as_str()) == Some(date.as_str());
+        // 当天日志文件被外部删除时（句柄不会因此失效）重新建文件，否则后续日志写进已删除的句柄。
+        let deleted = same_day && !log_path(&self.dir, &date, &self.prefix).exists();
+        if !same_day || deleted {
             inner.current = open_file(&self.dir, &date, &self.prefix)
                 .ok()
                 .map(|f| (date.clone(), f));
@@ -150,11 +153,15 @@ fn value_str(v: &Value) -> String {
         .unwrap_or_else(|| v.to_string())
 }
 
+fn log_path(dir: &Path, date: &str, prefix: &str) -> PathBuf {
+    dir.join(format!("{prefix}{date}.log"))
+}
+
 fn open_file(dir: &Path, date: &str, prefix: &str) -> std::io::Result<File> {
     OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join(format!("{prefix}{date}.log")))
+        .open(log_path(dir, date, prefix))
 }
 
 /// 删除日期早于今天-6 天的日志文件（含今天共保留 7 个自然日）。
@@ -248,6 +255,20 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|(n, _)| n.contains("2026-08-16")));
         assert!(files.iter().any(|(n, _)| n.contains("2026-08-17")));
+    }
+
+    #[test]
+    fn deleted_same_day_file_is_recreated() {
+        let dir = tmp_dir();
+        let log = SessionLog::new(dir.path().to_path_buf());
+        log.write_at(local(2026, 9, 12, 10, 0, 0), "info", Some("t"), "ev", &[]);
+        let path = dir.path().join("session-2026-09-12.log");
+        assert!(path.exists());
+        // 模拟外部删除当天日志文件：句柄仍在，后续日志必须重建文件而不是写进已删除的句柄。
+        fs::remove_file(&path).unwrap();
+        log.write_at(local(2026, 9, 12, 10, 0, 1), "info", Some("t"), "ev2", &[]);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("event=ev2"));
     }
 
     #[test]

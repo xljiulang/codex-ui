@@ -319,7 +319,7 @@ impl CodexServer {
         }
     }
 
-    /// 应用 Zen 代理开关与端口：按需启动/停止/重启，返回最新状态。
+    /// 应用 Zen 代理开关、端口与上游地址：按需启动/停止/重启，返回最新状态。
     pub(crate) async fn apply_zen_proxy(
         &self,
         enabled: bool,

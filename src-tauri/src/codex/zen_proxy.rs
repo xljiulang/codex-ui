@@ -16,8 +16,9 @@ use axum::body::Body;
 use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::Response;
-use axum::routing::post;
-use axum::{Json, Router};
+use axum::Router;
+#[cfg(test)]
+use axum::Json;
 use futures_util::stream::{self, StreamExt};
 use serde_json::{Value, json};
 use tokio::task::AbortHandle;
@@ -57,10 +58,17 @@ const MISSING_TOOL_OUTPUT_TEXT: &str =
 const USAGE_GRACE: Duration = Duration::from_secs(3);
 /// `zen_proxy.stream_summary` 里记录的 delta 键上限（去重后按字典序取前若干个）。
 const DELTA_KEY_LIMIT: usize = 16;
+/// 翻译分支的请求体上限：长会话实测已近 1MB，axum 默认 2MB 会撞 413。
+const RESPONSES_BODY_LIMIT: usize = 64 * 1024 * 1024;
+/// 端口刚被上一实例释放时的绑定重试次数与间隔（同端口换上游会立即重启代理）。
+const BIND_RETRY: u32 = 20;
+const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
     pub port: u16,
+    /// 生效中的上游 base_url（已归一化，用于判断是否需要重启）。
+    base_url: String,
     abort: AbortHandle,
 }
 
@@ -91,23 +99,51 @@ impl ZenProxyStatus {
     }
 }
 
+/// 归一化上游 base_url：去首尾空白、空值回退默认地址、去掉末尾所有 `/`。
+/// `https://a/` 与 `https://a`、`https://a/zen/v2/` 与 `https://a/zen/v2` 因此等价，
+/// 既影响翻译路由的派生，也影响「上游地址是否变化」的重启判定。
+fn normalize_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        DEFAULT_ZEN_BASE_URL.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// 翻译入口路径 = 上游 base_url 的路径 + `/responses`（base_url 无路径时为 `/responses`）。
+/// codex 对 provider 的 base_url 追加 `/responses`，因此本地 provider 的路径需与提供方一致。
+fn responses_path(base_url: &str) -> String {
+    let base = normalize_base_url(base_url);
+    let path = reqwest::Url::parse(&base)
+        .map(|url| url.path().trim_end_matches('/').to_string())
+        .unwrap_or_default();
+    format!("{path}/responses")
+}
+
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
 pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyHandle, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("代理端口 {port} 启动失败（可能被占用）：{e}"))?;
-    let base_url = if base_url.trim().is_empty() {
-        DEFAULT_ZEN_BASE_URL.to_string()
-    } else {
-        base_url
+    let mut attempt = 0;
+    let listener = loop {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => break listener,
+            // 同端口换上游会先停旧实例再立即绑定，旧监听可能尚未释放，短暂重试。
+            Err(e) => {
+                if attempt >= BIND_RETRY {
+                    return Err(format!("代理端口 {port} 启动失败（可能被占用）：{e}"));
+                }
+                attempt += 1;
+                tokio::time::sleep(BIND_RETRY_INTERVAL).await;
+            }
+        }
     };
+    let base_url = normalize_base_url(&base_url);
     let app = Router::new()
-        .route("/v1/responses", post(handle_responses))
-        .fallback(handle_passthrough)
+        .fallback(handle_any)
         .with_state(ProxyState {
             session: random_id("ses"),
-            base_url,
+            base_url: base_url.clone(),
             log,
         });
     let task = tokio::spawn(async move {
@@ -115,6 +151,7 @@ pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyH
     });
     Ok(ZenProxyHandle {
         port,
+        base_url,
         abort: task.abort_handle(),
     })
 }
@@ -127,9 +164,13 @@ pub async fn apply(
     base_url: String,
     log: ZenLog,
 ) -> ZenProxyStatus {
-    let running_port = handle.as_ref().map(|h| h.port);
-    let need_start = enabled && running_port != Some(port);
-    if !enabled || running_port != Some(port) {
+    let base_url = normalize_base_url(&base_url);
+    // 端口与上游地址都没变（含 `https://a/` 与 `https://a` 这类等价写法）才复用现有实例。
+    let unchanged = handle
+        .as_ref()
+        .is_some_and(|h| h.port == port && h.base_url == base_url);
+    let need_start = enabled && !unchanged;
+    if !enabled || !unchanged {
         if let Some(h) = handle.take() {
             h.stop();
         }
@@ -256,11 +297,54 @@ fn request_log_fields(req: &Value, want_stream: bool) -> Vec<(&'static str, Stri
     ]
 }
 
-async fn handle_responses(
+/// 统一入口：`POST {上游 base_url 路径}/responses` 走 Responses→Chat 翻译，其余路径/方法透传。
+async fn handle_any(
     State(state): State<ProxyState>,
+    method: Method,
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
-    Json(req): Json<Value>,
+    body: Body,
 ) -> Response {
+    let expected = responses_path(&state.base_url);
+    if method == Method::POST && uri.path() == expected {
+        return handle_responses(&state, &headers, body).await;
+    }
+    // 客户端把 `/responses` 打到了别的路径：本地 provider 的 base_url 路径与上游不一致。
+    if uri.path().ends_with("/responses") {
+        log_at(
+            &state.log,
+            "warn",
+            "zen_proxy.path_unmatched",
+            &[
+                ("method", method.to_string()),
+                ("path", uri.path().to_string()),
+                ("expected", expected),
+            ],
+        );
+    }
+    forward_passthrough(&state, method, &uri, &headers, body).await
+}
+
+/// 把请求体读成 JSON 后交给翻译路径；读取或解析失败时返回明确错误。
+async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -> Response {
+    let bytes = match axum::body::to_bytes(body, RESPONSES_BODY_LIMIT).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return error_json(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("请求体过大或读取失败：{e}"),
+            );
+        }
+    };
+    let req: Value = match serde_json::from_slice(&bytes) {
+        Ok(req) => req,
+        Err(e) => {
+            return error_json(
+                StatusCode::BAD_REQUEST,
+                format!("请求体不是合法 JSON：{e}"),
+            );
+        }
+    };
     let want_stream = req
         .get("stream")
         .and_then(|v| v.as_bool())
@@ -361,18 +445,8 @@ async fn handle_responses(
     }
 }
 
-/// 非 `/v1/responses` 请求：按 base_url 路径前缀直接透传到 Zen。
-async fn handle_passthrough(
-    State(state): State<ProxyState>,
-    method: Method,
-    OriginalUri(uri): OriginalUri,
-    headers: HeaderMap,
-    body: Body,
-) -> Response {
-    forward_passthrough(&state, method, &uri, &headers, body).await
-}
-
 /// 透传核心（便于单测）：构造上游 URL、转发请求并流式回传响应。
+/// 只替换 host，路径与 query 原样发出——本地 provider 的 base_url 路径需与提供方一致。
 async fn forward_passthrough(
     state: &ProxyState,
     method: Method,
@@ -382,7 +456,10 @@ async fn forward_passthrough(
 ) -> Response {
     let url = match passthrough_url(&state.base_url, uri) {
         Ok(url) => url,
-        Err(e) => return error_json(StatusCode::BAD_GATEWAY, e),
+        Err(e) => {
+            log_passthrough(state, &method, uri.path(), "error");
+            return error_json(StatusCode::BAD_GATEWAY, e);
+        }
     };
     let mut rq = http_client()
         .request(to_reqwest_method(&method), url)
@@ -391,23 +468,38 @@ async fn forward_passthrough(
         rq = rq.body(reqwest::Body::wrap_stream(body.into_data_stream()));
     }
     match rq.send().await {
-        Ok(resp) => passthrough_response(resp).await,
-        Err(e) => error_json(StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")),
+        Ok(resp) => {
+            let status = resp.status();
+            log_passthrough(state, &method, uri.path(), &status.as_u16().to_string());
+            passthrough_response(resp).await
+        }
+        Err(e) => {
+            log_passthrough(state, &method, uri.path(), "error");
+            error_json(StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}"))
+        }
     }
 }
 
-/// 把本地 `/v1` 前缀替换为 base_url 的路径前缀，保留 query。
+/// 透传日志：2xx 记 info、其余记 warn，配合 `zen_proxy.path_unmatched` 判断请求走了哪条分支。
+fn log_passthrough(state: &ProxyState, method: &Method, path: &str, status: &str) {
+    let level = if status.starts_with('2') { "info" } else { "warn" };
+    log_at(
+        &state.log,
+        level,
+        "zen_proxy.passthrough",
+        &[
+            ("method", method.to_string()),
+            ("path", path.to_string()),
+            ("status", status.to_string()),
+        ],
+    );
+}
+
+/// 透传目标 URL：scheme/host/port 取自 base_url，入站 path 与 query 原样发出（零路径转换）。
 fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
-    let mut url = reqwest::Url::parse(base_url)
+    let mut url = reqwest::Url::parse(&normalize_base_url(base_url))
         .map_err(|e| format!("Zen 代理转发地址无效: {e}"))?;
-    let base_path = url.path().trim_end_matches('/').to_string();
-    let incoming = uri.path();
-    let suffix = incoming.strip_prefix("/v1").unwrap_or(incoming);
-    let mut path = format!("{base_path}{suffix}");
-    if path.is_empty() {
-        path.push('/');
-    }
-    url.set_path(&path);
+    url.set_path(uri.path());
     url.set_query(uri.query());
     url.set_fragment(None);
     Ok(url)
@@ -2108,27 +2200,57 @@ mod tests {
     }
 
     #[test]
-    fn passthrough_url_maps_v1_prefix_and_query() {
-        let uri: Uri = "/v1/models?foo=bar".parse().unwrap();
+    fn passthrough_url_keeps_incoming_path_and_query_verbatim() {
+        // 本地 provider 与上游同路径（都是 /zen/v1）→ 原样透传。
+        let uri: Uri = "/zen/v1/models?foo=bar".parse().unwrap();
         let url = passthrough_url("https://opencode.ai/zen/v1", &uri).unwrap();
         assert_eq!(url.as_str(), "https://opencode.ai/zen/v1/models?foo=bar");
-    }
 
-    #[test]
-    fn passthrough_url_maps_custom_base_path() {
-        let uri: Uri = "/v1/chat/completions?x=1".parse().unwrap();
+        // 上游无路径（如 DeepSeek 官方 base_url）→ 入站 /models 原样转发。
+        let uri: Uri = "/models".parse().unwrap();
+        let url = passthrough_url("https://api.deepseek.com/", &uri).unwrap();
+        assert_eq!(url.as_str(), "https://api.deepseek.com/models");
+
+        // 上游带自定义路径、入站同路径（含尾斜杠写法）→ 原样透传。
+        let uri: Uri = "/api/v1/chat/completions?x=1".parse().unwrap();
         let url = passthrough_url("https://custom.example.com/api/v1/", &uri).unwrap();
         assert_eq!(
             url.as_str(),
             "https://custom.example.com/api/v1/chat/completions?x=1"
         );
+
+        // 两侧路径不一致（上游 /v1、入站 /health）也不做任何转换，原样发出。
+        let uri: Uri = "/health".parse().unwrap();
+        let url = passthrough_url("https://example.com/v1", &uri).unwrap();
+        assert_eq!(url.as_str(), "https://example.com/health");
     }
 
     #[test]
-    fn passthrough_url_appends_non_v1_path() {
-        let uri: Uri = "/health".parse().unwrap();
-        let url = passthrough_url("https://example.com/v1", &uri).unwrap();
-        assert_eq!(url.as_str(), "https://example.com/v1/health");
+    fn normalize_base_url_trims_whitespace_and_trailing_slashes() {
+        assert_eq!(normalize_base_url("https://a/"), "https://a");
+        assert_eq!(normalize_base_url("https://a"), "https://a");
+        assert_eq!(normalize_base_url("https://a///"), "https://a");
+        assert_eq!(
+            normalize_base_url("  https://a/zen/v2/  "),
+            "https://a/zen/v2"
+        );
+        assert_eq!(normalize_base_url(""), DEFAULT_ZEN_BASE_URL);
+        assert_eq!(normalize_base_url("   "), DEFAULT_ZEN_BASE_URL);
+        assert_eq!(normalize_base_url("/"), DEFAULT_ZEN_BASE_URL);
+    }
+
+    #[test]
+    fn responses_path_follows_base_url_path() {
+        assert_eq!(responses_path("https://api.deepseek.com"), "/responses");
+        assert_eq!(responses_path("https://api.deepseek.com/"), "/responses");
+        assert_eq!(responses_path("https://opencode.ai/zen/v1"), "/zen/v1/responses");
+        assert_eq!(responses_path("https://opencode.ai/zen/v2/"), "/zen/v2/responses");
+        assert_eq!(responses_path("https://a/v1"), "/v1/responses");
+        // 空/非法地址回退默认上游，派生出默认路径。
+        assert_eq!(
+            responses_path(""),
+            responses_path(DEFAULT_ZEN_BASE_URL)
+        );
     }
 
     #[test]
@@ -3438,6 +3560,319 @@ mod integration_tests {
             got.opencode_session.as_deref(),
             Some("ses_client-session-42")
         );
+    }
+
+    /// 起一个"任何方法/路径都记录一行并回 chat.completion JSON"的上游，
+    /// 用于分辨请求走的是翻译分支还是透传分支。
+    async fn spawn_mock_record_all(rec: Arc<AsyncMutex<Vec<String>>>) -> String {
+        let app = Router::new()
+            .fallback(
+                move |method: Method,
+                      uri: Uri,
+                      headers: HeaderMap,
+                      _body: axum::body::Bytes| {
+                let rec = rec.clone();
+                async move {
+                    let session = headers
+                        .get("x-opencode-session")
+                        .and_then(|h| h.to_str().ok())
+                        .unwrap_or("-")
+                        .to_string();
+                    rec.lock().await.push(format!(
+                        "{} {} {}",
+                        method.as_str(),
+                        uri.path(),
+                        session
+                    ));
+                    Json(json!({
+                        "id": "chatcmpl-mock",
+                        "object": "chat.completion",
+                        "created": 0,
+                        "model": "m",
+                        "choices": [{
+                            "index": 0,
+                            "message": { "role": "assistant", "content": "mock 回复" },
+                            "finish_reason": "stop"
+                        }]
+                    }))
+                }
+            },
+            )
+            // 大请求体用例要能读完整 body（axum 默认上限 2MB）；layer 只作用于此前注册的路由。
+            .layer(axum::extract::DefaultBodyLimit::max(RESPONSES_BODY_LIMIT));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    async fn body_text(resp: Response) -> String {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    /// 记录行的最后一条：`METHOD path session`。
+    async fn last_row(rec: &Arc<AsyncMutex<Vec<String>>>) -> Option<String> {
+        rec.lock().await.last().cloned()
+    }
+
+    /// 取一个当前空闲的回环端口（测试用；绑定后立即释放）。
+    fn free_loopback_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    fn responses_probe() -> Body {
+        Body::from(
+            json!({ "model": "m", "input": "hi", "stream": false }).to_string(),
+        )
+    }
+
+    fn proxy_state(base_url: String, log: ZenLog) -> ProxyState {
+        ProxyState {
+            session: "ses_fixed123".into(),
+            base_url,
+            log,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dispatches_translation_on_base_url_path_plus_responses() {
+        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream = spawn_mock_record_all(rec.clone()).await;
+
+        // 上游路径 /zen/v2 → 只把 /zen/v2/responses 当翻译入口（带不带尾斜杠都一样）。
+        for base in [format!("{upstream}/zen/v2"), format!("{upstream}/zen/v2/")] {
+            rec.lock().await.clear();
+            let state = proxy_state(base.clone(), None);
+            let uri: Uri = "/zen/v2/responses".parse().unwrap();
+            let resp = handle_any(
+                State(state),
+                Method::POST,
+                OriginalUri(uri),
+                HeaderMap::new(),
+                responses_probe(),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_text(resp).await;
+            assert!(body.contains("\"object\":\"response\""), "{body}");
+            assert_eq!(
+                rec.lock().await.clone(),
+                vec!["POST /zen/v2/chat/completions ses_fixed123".to_string()]
+            );
+        }
+
+        // 上游无路径（DeepSeek 官方 base_url 的现实情况）→ /responses 走翻译。
+        rec.lock().await.clear();
+        let uri: Uri = "/responses".parse().unwrap();
+        let resp = handle_any(
+            State(proxy_state(upstream.clone(), None)),
+            Method::POST,
+            OriginalUri(uri),
+            HeaderMap::new(),
+            responses_probe(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_text(resp).await;
+        assert!(body.contains("\"object\":\"response\""), "{body}");
+        assert_eq!(
+            rec.lock().await.clone(),
+            vec!["POST /chat/completions ses_fixed123".to_string()]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn unmatched_responses_path_passes_through_and_warns() {
+        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream = spawn_mock_record_all(rec.clone()).await;
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let state = proxy_state(format!("{upstream}/zen/v1"), log);
+
+        // 本地 provider 少写了 /zen/v1：原样透传到上游，不再静默收尾。
+        let uri: Uri = "/responses".parse().unwrap();
+        let resp = handle_any(
+            State(state),
+            Method::POST,
+            OriginalUri(uri),
+            HeaderMap::new(),
+            responses_probe(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        // 透传即上游原文（chat.completion），而非翻译后的 response 对象。
+        assert!(body_text(resp).await.contains("chat.completion"));
+        assert_eq!(
+            rec.lock().await.clone(),
+            vec!["POST /responses ses_fixed123".to_string()]
+        );
+
+        let logged = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            logged.contains("zen_proxy.path_unmatched")
+                && logged.contains("path=/responses")
+                && logged.contains("expected=/zen/v1/responses"),
+            "{logged}"
+        );
+        assert!(logged.contains("zen_proxy.passthrough"), "{logged}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn non_post_on_responses_path_passes_through() {
+        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream = spawn_mock_record_all(rec.clone()).await;
+        let uri: Uri = "/responses".parse().unwrap();
+        let resp = handle_any(
+            State(proxy_state(upstream, None)),
+            Method::GET,
+            OriginalUri(uri),
+            HeaderMap::new(),
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            rec.lock().await.clone(),
+            vec!["GET /responses ses_fixed123".to_string()]
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn started_proxy_translates_path_derived_from_upstream() {
+        // 端到端覆盖 start() 的路由装配：这正是"翻译分支从来没被走到"的根因所在。
+        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream = spawn_mock_record_all(rec.clone()).await;
+        let port = free_loopback_port();
+        let mut handle = None;
+        let status = apply(
+            &mut handle,
+            true,
+            port,
+            format!("{upstream}/zen/v1"),
+            None,
+        )
+        .await;
+        assert!(status.running, "{:?}", status.error);
+
+        let resp = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{port}/zen/v1/responses"))
+            .header("content-type", "application/json")
+            .body(json!({ "model": "m", "input": "hi", "stream": false }).to_string())
+            .send()
+            .await
+            .expect("代理应可访问");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let text = resp.text().await.unwrap();
+        assert!(text.contains("\"object\":\"response\""), "{text}");
+        let rows = rec.lock().await.clone();
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].starts_with("POST /zen/v1/chat/completions ses_"),
+            "{rows:?}"
+        );
+
+        let status = apply(&mut handle, false, port, upstream, None).await;
+        assert!(!status.running);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn oversized_body_still_reaches_translation() {
+        // 2MB 曾是 axum 默认上限，长会话请求体已近 1MB；这里用 >2MB 体确认不再 413。
+        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream = spawn_mock_record_all(rec.clone()).await;
+        let filler = "x".repeat(3 * 1024 * 1024);
+        let body = json!({ "model": "m", "stream": false, "input": filler }).to_string();
+        let uri: Uri = "/responses".parse().unwrap();
+        let resp = handle_any(
+            State(proxy_state(upstream, None)),
+            Method::POST,
+            OriginalUri(uri),
+            HeaderMap::new(),
+            Body::from(body),
+        )
+        .await;
+        let status = resp.status();
+        let text = body_text(resp).await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert!(text.contains("\"object\":\"response\""), "{text}");
+        assert_eq!(rec.lock().await.len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn apply_restarts_only_when_port_or_upstream_changes() {
+        let rec_a: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let rec_b: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream_a = spawn_mock_record_all(rec_a.clone()).await;
+        let upstream_b = spawn_mock_record_all(rec_b.clone()).await;
+        let port = free_loopback_port();
+        let mut handle = None;
+
+        let status = apply(&mut handle, true, port, upstream_a.clone(), None).await;
+        assert!(status.running, "{:?}", status.error);
+        let probe = |port: u16| async move {
+            // 每次用新 client：代理重启会关闭旧连接，复用连接池会读到半关闭的连接。
+            let resp = reqwest::Client::new()
+                .get(format!("http://127.0.0.1:{port}/models"))
+                .send()
+                .await
+                .expect("代理应可访问");
+            assert_eq!(resp.status(), StatusCode::OK);
+        };
+
+        probe(port).await;
+        let first = last_row(&rec_a).await.expect("上游 A 应已收到请求");
+        rec_a.lock().await.clear();
+
+        // 端口与上游都没变（含只差尾斜杠的等价写法）→ 复用实例，会话标识不变。
+        let status = apply(&mut handle, true, port, upstream_a.clone(), None).await;
+        assert!(status.running, "{:?}", status.error);
+        let status = apply(
+            &mut handle,
+            true,
+            port,
+            format!("{upstream_a}/"),
+            None,
+        )
+        .await;
+        assert!(status.running, "{:?}", status.error);
+        probe(port).await;
+        assert_eq!(
+            last_row(&rec_a).await.as_deref(),
+            Some(first.as_str()),
+            "同端口同上游不应重启（{first}）"
+        );
+
+        // 换上游地址 → 立即重启：B 收到请求、A 不再收到。
+        let before_a = rec_a.lock().await.len();
+        let status = apply(&mut handle, true, port, upstream_b.clone(), None).await;
+        assert!(status.running, "{:?}", status.error);
+        probe(port).await;
+        let second = last_row(&rec_b).await.expect("上游 B 应已收到请求");
+        assert_ne!(first.split(' ').nth(2), second.split(' ').nth(2));
+        assert_eq!(rec_a.lock().await.len(), before_a);
+
+        // 端口变化 → 也重启。
+        let other_port = free_loopback_port();
+        let status = apply(&mut handle, true, other_port, upstream_b, None).await;
+        assert!(status.running, "{:?}", status.error);
+        assert_eq!(status.port, other_port);
+        probe(other_port).await;
+
+        // 关闭 → 停止。
+        let status = apply(&mut handle, false, other_port, upstream_a, None).await;
+        assert!(!status.running);
+        assert!(handle.is_none());
     }
 
     /// 起一个"带指定字段就用 4xx 指名拒绝、否则放行"的 mock Zen

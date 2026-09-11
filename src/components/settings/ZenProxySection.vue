@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   applyZenProxy,
   readZenProxyStatus,
@@ -29,6 +29,21 @@ const apiUrlInput = ref<string>(
 );
 /** 输入校验错误信息 */
 const portError = ref<string>("");
+
+/**
+ * 本地 provider 的 base_url 提示：本机回环地址 + 模型提供方 base_url 的路径
+ * （codex 请求 `{base_url}/responses`，两侧路径必须一致，只换 host）。
+ */
+const localBaseUrlHint = computed(() => {
+  const raw = apiUrlInput.value.trim() || DEFAULT_BASE_URL;
+  let path = "";
+  try {
+    path = new URL(raw).pathname.replace(/\/+$/, "");
+  } catch {
+    path = "";
+  }
+  return `http://127.0.0.1:${store.settings.zen_proxy_port ?? DEFAULT_PORT}${path}`;
+});
 
 function validatePort(v: string): number | null {
   const n = Number(v.trim());
@@ -107,9 +122,9 @@ onBeforeUnmount(refresh);
               :href="ZEN_PRICING_DOCS_URL"
               v-tooltip="'Zen 定价文档（浏览器打开）'"
               @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
-            >Zen 免费模型</a>，base_url 为 http://127.0.0.1:{{
-              store.settings.zen_proxy_port ?? DEFAULT_PORT
-            }}/v1，experimental_bearer_token 为 public 或你自己的 key
+            >Zen 免费模型</a>，本地 provider 的 base_url 为
+            {{ localBaseUrlHint }}（本机地址 + 模型提供方 base_url 的路径，只换
+            host），experimental_bearer_token 为 public 或你自己的 key
           </p>
           <div class="zen-proxy-badges">
             <span
@@ -148,7 +163,7 @@ onBeforeUnmount(refresh);
         </div>
 
         <div class="setting-row">
-          <label>转发目标地址</label>
+          <label>模型提供方的 base_url</label>
           <input
             type="text"
             class="zen-proxy-url-input"
