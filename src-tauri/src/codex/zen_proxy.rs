@@ -10,6 +10,7 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
@@ -63,6 +64,8 @@ const RESPONSES_BODY_LIMIT: usize = 64 * 1024 * 1024;
 /// 端口刚被上一实例释放时的绑定重试次数与间隔（同端口换上游会立即重启代理）。
 const BIND_RETRY: u32 = 20;
 const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+/// 一次转发最多发出的上游请求数（可选字段降级 + reasoning_content 开关各一次修复）。
+const FORWARD_MAX_ATTEMPTS: usize = 3;
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
@@ -145,6 +148,7 @@ pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyH
             session: random_id("ses"),
             base_url: base_url.clone(),
             log,
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         });
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -213,6 +217,9 @@ struct ProxyState {
     session: String,
     base_url: String,
     log: ZenLog,
+    /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
+    /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
+    requires_reasoning_rc: Arc<AtomicBool>,
 }
 
 /// 写一条 zen_proxy 诊断日志；句柄为 None 或写盘失败时静默忽略。
@@ -362,6 +369,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
         &base_url,
         http_client(),
         &state.session,
+        &state.requires_reasoning_rc,
     )
     .await
     {
@@ -383,8 +391,39 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                             forwarded.dropped_fields.join(",")
                         },
                     ),
+                    (
+                        "reasoning_rc",
+                        if forwarded.reasoning_rc { "on" } else { "off" }.to_string(),
+                    ),
                 ],
             );
+            if let Some(change) = forwarded.reasoning_rc_change.as_ref() {
+                log_at(
+                    &state.log,
+                    "warn",
+                    if change.enabled {
+                        "zen_proxy.reasoning_content_enabled"
+                    } else {
+                        "zen_proxy.reasoning_content_disabled"
+                    },
+                    &[
+                        (
+                            "detail",
+                            if change.enabled {
+                                format!(
+                                    "上游要求历史回传 reasoning_content，已改为回传：{}",
+                                    change.detail
+                                )
+                            } else {
+                                format!(
+                                    "上游不接受 reasoning_content，已停止回传：{}",
+                                    change.detail
+                                )
+                            },
+                        ),
+                    ],
+                );
+            }
             if forwarded.repairs.invalid_arguments > 0 || forwarded.repairs.missing_tool_outputs > 0 {
                 log_at(
                     &state.log,
@@ -591,12 +630,24 @@ enum ForwardPayload {
     Text(String),
 }
 
+/// `reasoning_content` 回传开关的状态变化（仅用于日志）。
+struct ReasoningRcChange {
+    /// true = 本次打开了回传（上游要求历史回传思维链），false = 本次关闭（上游不接受该字段）。
+    enabled: bool,
+    /// 触发变化的上游错误原文（已截断）。
+    detail: String,
+}
+
 /// 一次转发的完整结果：状态、响应载体、历史修复统计、被摘掉的可选字段。
 struct Forwarded {
     status: StatusCode,
     payload: ForwardPayload,
     repairs: RepairReport,
     dropped_fields: Vec<&'static str>,
+    /// 本次请求是否回传了 `reasoning_content`。
+    reasoning_rc: bool,
+    /// 本次请求是否改变了回传开关（改变时记一条 warn 日志）。
+    reasoning_rc_change: Option<ReasoningRcChange>,
 }
 
 /// 可选请求字段：取到值才加入请求体；上游指名拒绝时按需摘除后重试一次。
@@ -693,6 +744,7 @@ fn mentions_field(text: &str, needles: &[&str]) -> bool {
 /// 翻译请求并转发到 Zen（含历史净化与可选字段降级重试）。
 /// `base_url` 由配置传入（测试时可指向本地 mock）。
 /// `fallback_session` 仅在客户端未提供 `session-id` 时用作 `x-opencode-session`。
+/// `requires_reasoning_rc` 是本代理实例的"上游是否要求历史回传 `reasoning_content`"开关。
 async fn forward(
     req: &Value,
     headers: &HeaderMap,
@@ -700,15 +752,17 @@ async fn forward(
     base_url: &str,
     client: &reqwest::Client,
     fallback_session: &str,
+    requires_reasoning_rc: &AtomicBool,
 ) -> Result<Forwarded, (StatusCode, String)> {
-    let (chat, repairs) = responses_to_chat(req, want_stream)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let optional = optional_fields(req, want_stream);
     let mut dropped: Vec<&'static str> = Vec::new();
-    let mut attempt = 0usize;
+    let mut reasoning_rc = requires_reasoning_rc.load(Ordering::Relaxed);
+    let mut reasoning_rc_change: Option<ReasoningRcChange> = None;
+    let mut attempts = 0usize;
     loop {
-        let mut body = chat.clone();
+        let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
         for field in optional.iter() {
             if dropped.contains(&field.key) {
                 continue;
@@ -720,9 +774,11 @@ async fn forward(
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
         let status = resp.status();
-        // 上游以 4xx 指名拒绝某个可选字段时摘掉它重试一次（最多一次）；
-        // 未指名任何可选字段（如参数校验失败）不重试，避免重复发请求。
-        if attempt == 0 && status.is_client_error() {
+        // 4xx 且还有重试额度时按需修复后重发（最多 FORWARD_MAX_ATTEMPTS 次请求）：
+        // ① 可选字段被指名拒绝 → 摘掉重试；② 思考模式要求回传 reasoning_content（或反向）→ 切换后重试；
+        //  两者都没命中（如纯参数校验失败）则直接返回上游错误，避免反复发请求。
+        if attempts + 1 < FORWARD_MAX_ATTEMPTS && status.is_client_error() {
+            attempts += 1;
             let text = resp.text().await.unwrap_or_default();
             let hit: Vec<&'static str> = optional
                 .iter()
@@ -733,7 +789,19 @@ async fn forward(
                 .collect();
             if !hit.is_empty() {
                 dropped.extend(hit);
-                attempt = 1;
+                continue;
+            }
+            // DeepSeek 思考模式：历史里带 tool_calls 的 assistant 消息必须回传 reasoning_content。
+            // 上游既然明确要求，就打开开关（反向：本已回传却被拒绝，则关掉）并重试一次；
+            // 400 不产生副作用，重试安全。
+            if mentions_field(&text, &["reasoning_content"]) {
+                let enabled = !reasoning_rc;
+                reasoning_rc = enabled;
+                requires_reasoning_rc.store(enabled, Ordering::Relaxed);
+                reasoning_rc_change = Some(ReasoningRcChange {
+                    enabled,
+                    detail: truncate_chars(&text, 200),
+                });
                 continue;
             }
             return Ok(Forwarded {
@@ -741,6 +809,8 @@ async fn forward(
                 payload: ForwardPayload::Text(text),
                 repairs,
                 dropped_fields: Vec::new(),
+                reasoning_rc,
+                reasoning_rc_change,
             });
         }
         return Ok(Forwarded {
@@ -748,6 +818,8 @@ async fn forward(
             payload: ForwardPayload::Live(resp),
             repairs,
             dropped_fields: dropped,
+            reasoning_rc,
+            reasoning_rc_change,
         });
     }
 }
@@ -1085,7 +1157,11 @@ fn chat_role(role: &str) -> &str {
 /// 同时净化历史：工具调用参数被截断/非法时改写为 `{}`，并有工具调用却缺少
 /// 对应结果时补一条合成 `tool` 消息——Chat Completions 要求二者严格配对，
 /// 否则整条会话会被上游以 400/500 永久拒绝。
-fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairReport), String> {
+fn responses_to_chat(
+    req: &Value,
+    want_stream: bool,
+    attach_reasoning: bool,
+) -> Result<(Value, RepairReport), String> {
     if !req.is_object() {
         return Err("请求体必须是 JSON 对象".into());
     }
@@ -1107,6 +1183,9 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairRep
         Some(Value::Array(items)) => {
             // 连续的 function_call 聚合成一条 assistant + tool_calls 消息
             let mut pending: Option<Value> = None;
+            // 待回传的思维链文本：来自回放的 `reasoning` item，只有真的需要
+            // （`attach_reasoning`）时才挂到下一条工具调用消息上。
+            let mut pending_reasoning: Option<String> = None;
             let flush = |messages: &mut Vec<Value>, pending: &mut Option<Value>| {
                 if let Some(p) = pending.take() {
                     messages.push(p);
@@ -1119,8 +1198,19 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairRep
                         flush(&mut messages, &mut pending);
                         let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("user");
                         let role = chat_role(role);
+                        if role != "assistant" {
+                            // 非 assistant 的 message 意味着进入新一轮，丢弃未被消费的思维链，
+                            // 避免把上一轮的推理挂到下一轮的工具调用上。
+                            pending_reasoning = None;
+                        }
                         let content = message_content(item);
                         messages.push(json!({ "role": role, "content": content }));
+                    }
+                    // 思维链：Responses 用 `reasoning` item 回放，chat 侧只在工具调用消息上要它。
+                    "reasoning" => {
+                        if let Some(text) = reasoning_item_text(item) {
+                            pending_reasoning = Some(text);
+                        }
                     }
                     "function_call" => {
                         let call_id = obj
@@ -1151,11 +1241,18 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairRep
                                 .as_array_mut()
                                 .map(|arr| arr.push(tc));
                         } else {
-                            pending = Some(json!({
+                            let mut message = json!({
                                 "role": "assistant",
                                 "content": Value::Null,
                                 "tool_calls": [tc]
-                            }));
+                            });
+                            if attach_reasoning {
+                                // 上游（DeepSeek 思考模式）要求带 tool_calls 的历史消息回传
+                                // reasoning_content；没有可用文本时写空串（实测同样被接受）。
+                                message["reasoning_content"] =
+                                    Value::String(pending_reasoning.take().unwrap_or_default());
+                            }
+                            pending = Some(message);
                         }
                     }
                     "function_call_output" => {
@@ -1173,7 +1270,7 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairRep
                         }));
                     }
                     _ => {
-                        // reasoning / 其它未知类型：无法映射，忽略
+                        // 其它未知类型：无法映射，忽略
                     }
                 }
             }
@@ -1349,6 +1446,26 @@ fn item_content_text(item: &Value) -> String {
 /// 消息内容：纯文本消息仍用字符串（最大兼容）；含图片时改为 chat 多模态 parts。
 /// Responses 的 `input_image` 是 `{type,image_url:<字符串>,detail?}`，chat 需要
 /// `{type:"image_url",image_url:{url,detail?}}`；`detail` 仅透传 auto/low/high。
+/// 回放的 `reasoning` item → 思维链文本：优先 `summary[].text`（codex 存下的推理内容，
+/// 即上一条流里翻出去的原文），为空再退 `content[].text`。
+fn reasoning_item_text(item: &Value) -> Option<String> {
+    let join = |key: &str| -> Option<String> {
+        let texts: Vec<&str> = item
+            .get(key)
+            .and_then(Value::as_array)?
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .filter(|text| !text.is_empty())
+            .collect();
+        if texts.is_empty() {
+            None
+        } else {
+            Some(texts.join("\n"))
+        }
+    };
+    join("summary").or_else(|| join("content"))
+}
+
 fn message_content(item: &Value) -> Value {
     let Some(parts) = item.get("content").and_then(Value::as_array) else {
         return Value::String(item_content_text(item));
@@ -2274,7 +2391,7 @@ mod tests {
             "input": "你好",
             "stream": false
         });
-        let (chat, repairs) = responses_to_chat(&req, false).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, false, false).unwrap();
         assert_eq!(repairs, RepairReport::default(), "纯文本历史不应触发净化");
         assert_eq!(chat["model"], "zen/gpt-5-mini");
         assert_eq!(chat["stream"], false);
@@ -2293,7 +2410,7 @@ mod tests {
                 { "type": "message", "role": "user", "content": "你好" }
             ]
         });
-        let (chat, repairs) = responses_to_chat(&req, false).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, false, false).unwrap();
         assert_eq!(repairs, RepairReport::default());
         assert_eq!(chat["messages"][0]["role"], "system");
         assert_eq!(chat["messages"][1]["role"], "system");
@@ -2302,6 +2419,77 @@ mod tests {
         assert_eq!(chat_role("developer"), "system");
         assert_eq!(chat_role("assistant"), "assistant");
         assert_eq!(chat_role("tool"), "tool");
+    }
+
+    /// 带思维链回放 + 文本 + 工具调用的历史（codex 的真实形状）。
+    fn reasoning_history() -> Value {
+        json!({
+            "model": "m",
+            "input": [
+                { "type": "reasoning", "id": "rs_1", "summary": [
+                    { "type": "summary_text", "text": "先看代码" }
+                ] },
+                { "type": "message", "role": "assistant", "content": [
+                    { "type": "output_text", "text": "我先看一下" }
+                ] },
+                { "type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        })
+    }
+
+    #[test]
+    fn responses_to_chat_omits_reasoning_content_by_default() {
+        let (chat, _) = responses_to_chat(&reasoning_history(), false, false).unwrap();
+        assert_eq!(chat["messages"][0]["role"], "assistant");
+        assert!(chat["messages"][1].get("tool_calls").is_some());
+        assert!(chat["messages"][1].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn responses_to_chat_attaches_reasoning_content_when_required() {
+        let (chat, _) = responses_to_chat(&reasoning_history(), false, true).unwrap();
+        // 文本消息不带（chat 侧不需要，避免无谓的 token 膨胀）
+        assert_eq!(chat["messages"][0]["content"], "我先看一下");
+        assert!(chat["messages"][0].get("reasoning_content").is_none());
+        // 工具调用消息带，且内容就是回放的思维链文本
+        assert_eq!(chat["messages"][1]["reasoning_content"], "先看代码");
+        // 工具结果消息不受影响
+        assert_eq!(chat["messages"][2]["role"], "tool");
+    }
+
+    #[test]
+    fn responses_to_chat_uses_empty_reasoning_content_without_reasoning_item() {
+        // 该轮模型没产推理（reasoning_chars=0）→ 回传空串，DeepSeek 同样接受。
+        let req = json!({
+            "model": "m",
+            "input": [
+                { "type": "message", "role": "user", "content": "hi" },
+                { "type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, false, true).unwrap();
+        assert_eq!(chat["messages"][1]["reasoning_content"], "");
+    }
+
+    #[test]
+    fn responses_to_chat_does_not_leak_reasoning_across_turns() {
+        let req = json!({
+            "model": "m",
+            "input": [
+                { "type": "reasoning", "id": "rs_1", "summary": [
+                    { "type": "summary_text", "text": "上一轮的思维链" }
+                ] },
+                { "type": "message", "role": "assistant", "content": "上一轮的答复" },
+                { "type": "message", "role": "user", "content": "下一轮" },
+                { "type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, false, true).unwrap();
+        // 新轮开始后旧思维链被丢弃 → 空串而不是上一轮的文本
+        assert_eq!(chat["messages"][2]["reasoning_content"], "");
     }
 
     #[test]
@@ -2334,7 +2522,7 @@ mod tests {
             ],
             "max_output_tokens": 100
         });
-        let (chat, repairs) = responses_to_chat(&req, true).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, true, false).unwrap();
         assert_eq!(repairs, RepairReport::default(), "配对完整的工具调用不应触发净化");
         assert_eq!(chat["stream"], true);
         assert_eq!(chat["messages"].as_array().unwrap().len(), 4);
@@ -2362,7 +2550,7 @@ mod tests {
             "reasoning": { "effort": "high" },
             "previous_response_id": "resp_x"
         });
-        let (chat, repairs) = responses_to_chat(&req, false).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, false, false).unwrap();
         assert_eq!(repairs, RepairReport::default());
         assert!(chat.get("store").is_none());
         assert!(chat.get("reasoning").is_none());
@@ -2748,7 +2936,7 @@ mod tests {
                 }
             ]
         });
-        let (chat, repairs) = responses_to_chat(&req, true).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, true, false).unwrap();
         assert_eq!(repairs.invalid_arguments, 1);
         assert_eq!(
             chat["messages"][0]["tool_calls"][0]["function"]["arguments"],
@@ -2769,7 +2957,7 @@ mod tests {
                 }
             ]
         });
-        let (chat, repairs) = responses_to_chat(&req, true).unwrap();
+        let (chat, repairs) = responses_to_chat(&req, true, false).unwrap();
         assert_eq!(repairs.missing_tool_outputs, 1);
         let messages = chat["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 2);
@@ -2972,7 +3160,7 @@ mod tests {
                 ]
             }]
         });
-        let (chat, _) = responses_to_chat(&req, false).unwrap();
+        let (chat, _) = responses_to_chat(&req, false, false).unwrap();
         let content = &chat["messages"][0]["content"];
         assert_eq!(content[0], json!({ "type": "text", "text": "看这张图" }));
         assert_eq!(content[1]["type"], "image_url");
@@ -2993,7 +3181,7 @@ mod tests {
                 ]
             }]
         });
-        let (chat, _) = responses_to_chat(&req, false).unwrap();
+        let (chat, _) = responses_to_chat(&req, false, false).unwrap();
         let content = chat["messages"][0]["content"].as_array().unwrap().clone();
         assert_eq!(content.len(), 1, "无 url 的图片应被丢弃");
         assert_eq!(content[0]["image_url"]["url"], "https://x/y.png");
@@ -3013,7 +3201,7 @@ mod tests {
                 "content": [{ "type": "input_text", "text": "hi" }]
             }]
         });
-        let (chat, _) = responses_to_chat(&req, false).unwrap();
+        let (chat, _) = responses_to_chat(&req, false, false).unwrap();
         assert_eq!(chat["messages"][0]["content"], json!("hi"));
     }
 
@@ -3447,7 +3635,7 @@ mod integration_tests {
             header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer public"),
         );
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false))
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3477,7 +3665,7 @@ mod integration_tests {
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false))
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3499,7 +3687,7 @@ mod integration_tests {
         let base_url = spawn_mock_zen(rec.clone()).await;
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let headers = HeaderMap::new();
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123")
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false))
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3518,6 +3706,7 @@ mod integration_tests {
             session: "ses_fixed123".into(),
             base_url,
             log: None,
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         };
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -3576,6 +3765,7 @@ mod integration_tests {
             session: "ses_fixed123".into(),
             base_url,
             log: None,
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         };
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("client-session-42"));
@@ -3667,6 +3857,7 @@ mod integration_tests {
             session: "ses_fixed123".into(),
             base_url,
             log,
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -3905,6 +4096,136 @@ mod integration_tests {
         assert!(handle.is_none());
     }
 
+    /// 起一个"模仿 DeepSeek 思考模式"的 mock：历史里带 tool_calls 的 assistant 消息
+    /// 没有 `reasoning_content` 就回 400（原文照抄），带上了则 200。
+    /// 每次请求记录一行 `rc=on|off`。
+    async fn spawn_mock_requiring_reasoning_rc(
+        rec: Arc<AsyncMutex<Vec<String>>>,
+    ) -> String {
+        use axum::response::IntoResponse;
+        let app = Router::new().route(
+            "/chat/completions",
+            axum::routing::post(move |Json(body): Json<Value>| {
+                let rec = rec.clone();
+                async move {
+                    let messages = body
+                        .get("messages")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let tool_calls = messages
+                        .iter()
+                        .filter(|m| m.get("tool_calls").is_some())
+                        .collect::<Vec<_>>();
+                    let all_have_rc =
+                        !tool_calls.is_empty() && tool_calls.iter().all(|m| m.get("reasoning_content").is_some());
+                    rec.lock()
+                        .await
+                        .push(format!("rc={}", if all_have_rc { "on" } else { "off" }));
+                    if !tool_calls.is_empty() && !all_have_rc {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({ "error": {
+                                "message": "The `reasoning_content` in the thinking mode must be passed back to the API.",
+                                "type": "invalid_request_error"
+                            } })),
+                        )
+                            .into_response();
+                    }
+                    (
+                        StatusCode::OK,
+                        Json(json!({
+                            "id": "chatcmpl-mock",
+                            "object": "chat.completion",
+                            "created": 0,
+                            "model": "m",
+                            "choices": [{
+                                "index": 0,
+                                "message": { "role": "assistant", "content": "ok" },
+                                "finish_reason": "stop"
+                            }]
+                        })),
+                    )
+                        .into_response()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn learns_and_retries_reasoning_content_requirement() {
+        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let upstream = spawn_mock_requiring_reasoning_rc(rec.clone()).await;
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let state = ProxyState {
+            session: "ses_fixed123".into(),
+            base_url: upstream,
+            log,
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+        };
+        let probe = |state: ProxyState| async move {
+            let uri: Uri = "/responses".parse().unwrap();
+            let body = Body::from(
+                json!({
+                    "model": "m",
+                    "stream": false,
+                    "input": [
+                        { "type": "reasoning", "id": "rs_1", "summary": [
+                            { "type": "summary_text", "text": "先看代码" }
+                        ] },
+                        { "type": "message", "role": "user", "content": "hi" },
+                        { "type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{}" },
+                        { "type": "function_call_output", "call_id": "call_1", "output": "ok" }
+                    ]
+                })
+                .to_string(),
+            );
+            handle_any(
+                State(state),
+                Method::POST,
+                OriginalUri(uri),
+                HeaderMap::new(),
+                body,
+            )
+            .await
+        };
+
+        // 第一次：上游因缺少 reasoning_content 回 400 → 代理打开开关内部重试 → 客户端只看到 200。
+        let resp = probe(state.clone()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            rec.lock().await.clone(),
+            vec!["rc=off".to_string(), "rc=on".to_string()]
+        );
+        assert!(state.requires_reasoning_rc.load(Ordering::Relaxed));
+
+        // 第二次：开关已粘在代理实例上 → 只发一次请求且直接带字段。
+        rec.lock().await.clear();
+        let resp = probe(state.clone()).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(rec.lock().await.clone(), vec!["rc=on".to_string()]);
+
+        let logged = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            logged.contains("zen_proxy.reasoning_content_enabled")
+                && logged.contains("zen_proxy.forward")
+                && logged.contains("reasoning_rc=on"),
+            "{logged}"
+        );
+    }
+
     /// 起一个"带指定字段就用 4xx 指名拒绝、否则放行"的 mock Zen
     /// （记录请求次数与末次 body）。
     async fn spawn_mock_zen_rejecting_field(
@@ -3997,6 +4318,7 @@ mod integration_tests {
             &base_url,
             http_client(),
             "ses_fixed123",
+            &AtomicBool::new(false),
         )
         .await
         .expect("forward 应成功");
@@ -4023,6 +4345,7 @@ mod integration_tests {
             &base_url,
             http_client(),
             "ses_fixed123",
+            &AtomicBool::new(false),
         )
         .await
         .expect("forward 应成功");
@@ -4059,6 +4382,7 @@ mod integration_tests {
             &base_url,
             http_client(),
             "ses_fixed123",
+            &AtomicBool::new(false),
         )
         .await
         .expect("forward 应成功");
@@ -4087,6 +4411,7 @@ mod integration_tests {
             &base_url,
             http_client(),
             "ses_fixed123",
+            &AtomicBool::new(false),
         )
         .await
         .expect("forward 应成功");
