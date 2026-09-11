@@ -442,6 +442,32 @@ pub fn run() {
             let server = Arc::new(CodexServer::new(app.handle().clone(), workspace));
             let server_handle = server.clone();
             app.manage(server);
+
+            // 启动时后台导出本机 codex 自带的官方条目（GPT/codex 基线条目随 codex 版本变化，
+            // 不再内置在 resources/official-models.json）；失败保留上次缓存并记 warn。
+            if let Some(export_dir) = app_dir.clone() {
+                let export_server = server_handle.clone();
+                let export_settings = loaded.clone();
+                tauri::async_runtime::spawn(async move {
+                    let codex = match codex::app_server::find_codex_sync(&export_settings) {
+                        Ok(path) => path,
+                        Err(err) => {
+                            export_server
+                                .push_log("warn", format!("导出官方模型条目失败：{err}"))
+                                .await;
+                            return;
+                        }
+                    };
+                    if let Err(err) =
+                        codex::model_catalog::refresh_codex_models(&export_dir, &codex).await
+                    {
+                        export_server
+                            .push_log("warn", format!("导出官方模型条目失败：{err}"))
+                            .await;
+                    }
+                });
+            }
+
             // 微信接入桥：数据根目录随应用数据目录；存在绑定时后台自动恢复长轮询
             let wechat_app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             let session_store = Arc::new(

@@ -26,7 +26,7 @@
 ```
 提供方 /models（模型 ID 列表）
    │
-   ├─ 1. 完整条目源（official）：命中即整条复用，不套模板
+   ├─ 1. 完整条目源（official）：本机 codex 导出条目 + 内置第三方条目，命中即整条复用，不套模板
    │
    └─ 2. 字段源：models.dev + OpenRouter
           │  每个源返回匹配类型、分数与 ModelFacts
@@ -43,7 +43,8 @@
 | `facts.rs` | `ModelFacts`（全字段可选）+ `merge_from` 逐字段覆盖 + `provenance` 溯源 |
 | `matching.rs` | 别名键匹配、匹配级别与排序键、`CandidateStore`、规范化/相似度 |
 | `template.rs` | 模板加载、`DATA_DRIVEN_KEYS`、四条派生规则 |
-| `sources/official.rs` | 完整条目源：官方条目池（精确匹配） |
+| `sources/official.rs` | 完整条目源：官方条目池（本机 codex 导出 + 内置第三方条目，精确匹配） |
+| `codex_models.rs` | 启动时从本机 codex 导出官方条目（`codex debug models --bundled` → 运行时缓存） |
 | `sources/models_dev.rs` | 字段源（catalog.json 全量 provider 展开的模型 ID 索引） |
 | `sources/openrouter.rs` | 字段源（缓存 + 内置回退） |
 
@@ -106,16 +107,26 @@
 统计字段为 `ready / incompatible / unmatched`。即使全部未匹配或不兼容，也会返回候选列表和
 空目录 `{ "models": [] }`，由弹窗展示具体原因。
 
-### 官方条目的复用（codex GPT / deepseek 等厂商同池）
+### 官方条目的复用（本机 codex 导出 + 第三方条目）
 
-`resources/official-models.json` 是**多厂商共用的官方条目池**：codex 基线条目由
-`scripts/update-model-catalog-sources.mjs --official` 刷新，其它厂商（如 deepseek）提供的
-条目可直接手工追加——脚本刷新时按 slug 保留这些手写条目。
+官方条目池由两部分合并，**同 slug 时运行期导出条目优先**：
+
+- **本机 codex 自带目录**：启动后后台跑一次 `codex debug models --bundled`，把该二进制自带的
+  目录（GPT/codex 基线条目）原子写入 `%APPDATA%\com.codexui.app\cache\codex-models.json`；
+  失败保留上次缓存并记一条 warn 日志。因此 GPT 条目始终与用户安装的 codex 版本匹配，
+  老版本 codex 不会吃到新版本专用字段。`--bundled` 不读 `CODEX_HOME/config.toml`、不联网；
+  解析只看 stdout（该命令会往 stderr 打 PATH 别名之类的 WARNING）。
+- **`resources/official-models.json`**：只放手写的第三方官方条目（目前 `deepseek-flash`、
+  `deepseek-v4-pro`），由 `scripts/update-model-catalog-sources.mjs --official` 校验并规范化
+  （不联网；要求每条有 `slug` 与 `model_messages.instructions_template`，按 slug 去重）。
+
+导出失败且无缓存时条目池只剩第三方条目：GPT 模型退回多源合并 + 模板渲染，
+`codex-auto-review` 不再复用（不影响生成，只是少了官方口径的资料）。
 
 命中池中 slug（精确或规范化相同）时整条复用该条目：专属提示词、`context_window`、
 `max_context_window`（如 `gpt-5.6-*` 的 872000）、`tool_mode=code_mode_only`、
 `use_responses_lite`、`web_search_tool_type=text_and_image`、`include_*`、`multi_agent_version`、
-`truncation_policy`、`comp_hash`、`minimal_client_version` 全部保留；只覆盖：
+`truncation_policy` 全部保留；只覆盖：
 
 1. `slug` ← 提供方返回的原始 ID；
 2. `priority` ← 勾选顺序；
@@ -127,8 +138,9 @@
 
 ## 模板（固定值的唯一事实来源）
 
-模板 `src-tauri/resources/model_catalog_template.json`（42 键）由脚本从官方条目池的
-`gpt-5.6-sol` 派生，并做传输层最小化与占位。改固定行为 = 只改这个文件（代码里没有固定值常量），
+模板 `src-tauri/resources/model_catalog_template.json`（42 键）由脚本从 codex 基线
+`models.json` 的 `gpt-5.6-sol` 派生（不再依赖内置条目池），并做传输层最小化与占位。
+改固定行为 = 只改这个文件（代码里没有固定值常量），
 `src-tauri/src/codex/model_catalog/template.rs` 的护栏测试会拦住误改。
 
 关键固定值：`prefer_websockets=false`、`web_search_tool_type="text"`、`use_responses_lite=false`、
@@ -154,10 +166,10 @@
 
 | 资源 | 用途 | 更新方式 |
 | --- | --- | --- |
-| `resources/official-models.json` | 官方条目池（完整条目源）：codex 基线条目与 codex 版本绑定，可手工追加其它厂商条目 | `--official` |
+| `resources/official-models.json` | 第三方官方条目池（完整条目源）：只放手写的第三方厂商条目（deepseek 等）；GPT/codex 基线条目改为启动时从本机 codex 导出 | `--official`（校验 + 规范化，不联网） |
 | `resources/models-dev.json` | models.dev 内置快照（`catalog.json` 精简版）：`providers` **全量** 213 个 provider / 7669 个模型 + `models` 382 条模型级条目，约 3 MB，保留 `tool_call` / `status` / `reasoning_options`；省略与 map key 重复的 `id` 与不再使用的 `api` / `name` | 同上 |
 | `resources/openrouter-models.json` | OpenRouter 全量响应回退 | 同上 |
-| `resources/model_catalog_template.json` | 渲染基底（由官方条目池的 `gpt-5.6-sol` 派生） | `--template` |
+| `resources/model_catalog_template.json` | 渲染基底（由 codex 基线 `models.json` 的 `gpt-5.6-sol` 派生） | `--template` |
 
 运行时缓存位于应用数据目录 `%APPDATA%\com.codexui.app\cache\`：`openrouter-models.json`
 与 `models-dev.json` **均为 24 小时 TTL**——启动时检查各自文件的 mtime，未过期直接复用、
@@ -166,10 +178,13 @@
 （models.dev `catalog.json` 约 4.9 MB，不含精简；旧版 `api.json` 形态的缓存因缺少
 `providers` 键会被判为过期并重新抓取）。
 
+同目录另有 `codex-models.json`：**每次启动都后台重新导出**（`codex debug models --bundled`），
+校验通过才原子替换；导出失败/超时/形状非法时保留上一次的文件，缓存损坏等同于没有导出。
+
 ```powershell
 node scripts/update-model-catalog-sources.mjs                # 全部
-node scripts/update-model-catalog-sources.mjs --official     # 官方条目池（保留手写条目）
-node scripts/update-model-catalog-sources.mjs --template     # 生成基底模板
+node scripts/update-model-catalog-sources.mjs --official     # 校验并规范化第三方官方条目（不联网）
+node scripts/update-model-catalog-sources.mjs --template     # 生成基底模板（从 codex 基线派生）
 node scripts/update-model-catalog-sources.mjs --models-dev   # models.dev 精简快照
 node scripts/update-model-catalog-sources.mjs --openrouter   # OpenRouter 全量响应
 ```

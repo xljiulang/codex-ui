@@ -9,6 +9,7 @@
 //! 数据源来自提供方 `/models` 的模型 ID 列表，元数据由上述源补全；新增数据源只需
 //! 在 `sources::fact_sources` 里追加一行。
 
+mod codex_models;
 mod facts;
 mod matching;
 mod sources;
@@ -26,6 +27,8 @@ use sources::{FactMatch, FactSource, FullEntryMatch, FullEntrySource};
 
 /// 启动时后台刷新各字段源的运行时缓存；失败静默。
 pub use sources::refresh_caches as refresh_source_caches;
+/// 启动时后台导出本机 codex 自带的官方条目；失败保留旧缓存。
+pub use codex_models::refresh_codex_models;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -88,7 +91,7 @@ fn build_catalog_result(
     app_dir: &Path,
     base_url: &str,
 ) -> Result<ModelCatalogGenerateResult, String> {
-    let full_entry_sources = sources::full_entry_sources(base_url);
+    let full_entry_sources = sources::full_entry_sources(app_dir, base_url);
     let fact_sources = sources::fact_sources(app_dir);
 
     let mut entries: Vec<Value> = Vec::new();
@@ -548,6 +551,17 @@ mod tests {
     #[test]
     fn official_entry_is_reused_verbatim_for_gpt_models() {
         let dir = tempdir().unwrap();
+        // GPT/codex 基线条目来自本机 codex 的运行期导出，不再内置在资源里
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.6-sol",
+                "max_context_window": 872_000,
+                "tool_mode": "code_mode_only",
+                "prefer_websockets": true,
+                "model_messages": { "instructions_template": "You are Codex" }
+            })],
+        );
         let result = build_catalog_result(
             &["gpt-5.6-sol".to_string()],
             dir.path(),
@@ -626,7 +640,7 @@ mod tests {
     fn priorities_follow_selection_order() {
         let dir = tempdir().unwrap();
         let result = build_catalog_result(
-            &["deepseek-flash".to_string(), "gpt-5.6-sol".to_string()],
+            &["deepseek-flash".to_string(), "deepseek-v4-pro".to_string()],
             dir.path(),
             "https://api.deepseek.com/v1",
         )

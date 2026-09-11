@@ -67,8 +67,8 @@ pub trait FactSource {
 }
 
 /// 完整条目源列表：顺序 = 优先级（靠前者先问）。
-pub fn full_entry_sources(base_url: &str) -> Vec<Box<dyn FullEntrySource>> {
-    vec![Box::new(official::OfficialModelSource::new(base_url))]
+pub fn full_entry_sources(app_dir: &Path, base_url: &str) -> Vec<Box<dyn FullEntrySource>> {
+    vec![Box::new(official::OfficialModelSource::new(app_dir, base_url))]
 }
 
 /// 字段源列表：顺序 = 覆盖顺序（靠后者覆盖靠前者）。

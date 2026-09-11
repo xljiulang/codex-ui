@@ -2,14 +2,15 @@
 // 更新模型目录生成用的内置资源（src-tauri/resources/）。
 //
 //   node scripts/update-model-catalog-sources.mjs                # 全部
-//   node scripts/update-model-catalog-sources.mjs --official     # 官方条目（合并刷新 codex 基线，保留手写条目）
-//   node scripts/update-model-catalog-sources.mjs --template     # 生成基底模板（依赖官方条目）
+//   node scripts/update-model-catalog-sources.mjs --official     # 校验并规范化手写的第三方官方条目（不联网）
+//   node scripts/update-model-catalog-sources.mjs --template     # 生成基底模板（从 codex 基线条目派生）
 //   node scripts/update-model-catalog-sources.mjs --models-dev   # models.dev 精简快照（provider 分组 + 模型清单）
 //   node scripts/update-model-catalog-sources.mjs --openrouter   # OpenRouter 全量响应
 //
 // 各资源的地位不同：
-// - official-models.json：多厂商官方条目池（命中即整条复用）；codex 基线条目由本脚本刷新，
-//   其它厂商（如 deepseek）可直接手工追加，刷新时会保留；
+// - official-models.json：第三方官方条目池（命中即整条复用，目前是 deepseek 等手写条目）；
+//   GPT/codex 基线条目不再内置——应用启动时用 `codex debug models --bundled` 从用户安装的
+//   codex 导出，运行时与本文件合并（同 slug 时运行期条目优先）；
 // - models-dev.json：全量精简快照（含中转/聚合商，保证首次离线也能匹配）；
 // - model_catalog_template.json：字段源合并后的渲染基底，固定值全部固化在这里。
 
@@ -75,60 +76,47 @@ function truncate(value, max) {
 }
 
 /**
- * 刷新官方条目池里的 codex 基线条目（条目形态即 model_catalog_json 的权威形状）。
+ * 校验并规范化手写的第三方官方条目（条目形态即 model_catalog_json 的权威形状）。
  *
- * 合并写回：本次抓取到的 slug 之外的手写条目（其它厂商提供的数据）原样保留，
- * 排在抓取条目之后，并打印保留清单——这样往 official-models.json 里追加条目是安全的。
+ * 不联网：GPT/codex 基线条目已改为应用启动时从本机 codex 导出（`codex debug models
+ * --bundled`），本文件只维护其它厂商（如 deepseek）提供的条目。
  */
 async function updateOfficial() {
-  const text = await fetchJson(CODEX_MODELS_URL);
-  const fetched = JSON.parse(text);
-  if (!Array.isArray(fetched.models) || fetched.models.length === 0) {
-    throw new Error("codex 基线目录缺少 models 数组");
+  const parsed = JSON.parse(await readResource("official-models.json"));
+  if (!Array.isArray(parsed?.models)) {
+    throw new Error("official-models.json 缺少 models 数组");
   }
-  for (const model of fetched.models) {
-    if (typeof model.slug !== "string" || !model.slug) {
-      throw new Error("codex 基线目录存在缺少 slug 的条目");
+
+  const seen = new Set();
+  const models = [];
+  for (const model of parsed.models) {
+    if (!model || typeof model !== "object") {
+      throw new Error("official-models.json 存在非对象条目");
     }
-  }
-
-  const fetchedSlugs = new Set(fetched.models.map((model) => model.slug));
-  const kept = await readExistingEntries(fetchedSlugs);
-  if (kept.length > 0) {
-    console.log(
-      `保留手写条目 ${kept.length} 条：${kept.map((model) => model.slug).join(", ")}`,
-    );
-  }
-
-  const models = [...fetched.models, ...kept];
-  await writeResource("official-models.json", `${JSON.stringify({ ...fetched, models }, null, 2)}\n`);
-}
-
-/** 读现有官方条目文件，返回本次抓取范围之外的条目；文件缺失/损坏时返回空数组。 */
-async function readExistingEntries(fetchedSlugs) {
-  let existing;
-  try {
-    existing = JSON.parse(await readFile(join(RESOURCES, "official-models.json"), "utf8"));
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(existing?.models)) return [];
-  const kept = [];
-  const invalid = [];
-  for (const model of existing.models) {
-    const slug = typeof model?.slug === "string" ? model.slug : "";
+    const slug = typeof model.slug === "string" ? model.slug.trim() : "";
     if (!slug) {
-      invalid.push(model);
+      throw new Error(
+        "official-models.json 存在缺少 slug 的条目（是否把整个 models.json 当成单条粘进来了？）",
+      );
+    }
+    const template = model.model_messages?.instructions_template;
+    if (typeof template !== "string" || !template.trim()) {
+      throw new Error(`official-models.json 条目 ${slug} 缺少 model_messages.instructions_template`);
+    }
+    if (seen.has(slug)) {
+      console.warn(`警告：official-models.json 存在重复 slug ${slug}，已保留首条`);
       continue;
     }
-    if (!fetchedSlugs.has(slug)) kept.push(model);
+    seen.add(slug);
+    model.slug = slug;
+    models.push(model);
   }
-  if (invalid.length > 0) {
-    console.warn(
-      `警告：official-models.json 有 ${invalid.length} 条缺少 slug 的条目，已跳过（是否把整个 models.json 当成单条粘进来了？）`,
-    );
+  if (models.length === 0) {
+    throw new Error("official-models.json 没有任何条目");
   }
-  return kept;
+
+  console.log(`第三方官方条目：${models.length} 条（${models.map((m) => m.slug).join(", ")}）`);
+  await writeResource("official-models.json", `${JSON.stringify({ models }, null, 2)}\n`);
 }
 
 /**
@@ -138,8 +126,12 @@ async function readExistingEntries(fetchedSlugs) {
  * 保留基底条目的档位与描述，作为渲染期的“档位描述表”（写入前必被覆盖，不会泄漏）。
  */
 async function updateTemplate() {
-  const text = await readResource("official-models.json");
+  // 基底取自 codex 基线 models.json（不再从 official-models.json 派生：那里只有第三方条目）
+  const text = await fetchJson(CODEX_MODELS_URL);
   const official = JSON.parse(text);
+  if (!Array.isArray(official?.models) || official.models.length === 0) {
+    throw new Error("codex 基线目录缺少 models 数组");
+  }
   const base =
     official.models.find((model) => model.slug === TEMPLATE_BASE_SLUG) ?? official.models[0];
   const template = structuredClone(base);
