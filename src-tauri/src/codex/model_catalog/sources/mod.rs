@@ -35,55 +35,33 @@ pub struct FullEntryMatch {
     pub kind: MatchKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchScope {
-    Provider,
-    OfficialGlobal,
-    Global,
-}
-
-impl MatchScope {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Provider => "provider",
-            Self::OfficialGlobal => "official_global",
-            Self::Global => "global",
-        }
-    }
-
-    fn quality_base(self) -> u8 {
-        match self {
-            Self::Provider => 40,
-            Self::OfficialGlobal => 30,
-            Self::Global => 20,
-        }
-    }
-}
-
 pub struct FactMatch {
     pub facts: ModelFacts,
     pub matched_id: String,
     pub kind: MatchKind,
     pub score: f64,
-    pub scope: MatchScope,
 }
 
 impl FactMatch {
-    /// 作用域优先，同一作用域内再按精确/别名/模糊匹配降级。
-    pub fn quality(&self) -> u8 {
+    /// 来源权威基础分 + 匹配级别加分（精确 > 别名 > 规范化 > 模糊）。
+    pub fn quality(&self, source_base: u8) -> u8 {
         let match_bonus = match self.kind {
             MatchKind::Exact => 4,
             MatchKind::Alias => 3,
             MatchKind::Normalized => 2,
             MatchKind::Fuzzy => 1,
         };
-        self.scope.quality_base() + match_bonus
+        source_base + match_bonus
     }
 }
 
 /// 字段源：只提取字段，覆盖由 [`ModelFacts::merge_from`] 统一完成。
 pub trait FactSource {
     fn id(&self) -> &'static str;
+    /// 来源权威基础分：分数高的源覆盖分数低的源，同分时靠后的源覆盖靠前的源。
+    fn quality_base(&self) -> u8 {
+        20
+    }
     /// 未命中返回 `None`；命中返回该源能提供的字段（其余为 `None`）。
     fn extract(&self, model_id: &str) -> Option<FactMatch>;
 }
@@ -94,10 +72,10 @@ pub fn full_entry_sources(base_url: &str) -> Vec<Box<dyn FullEntrySource>> {
 }
 
 /// 字段源列表：顺序 = 覆盖顺序（靠后者覆盖靠前者）。
-pub fn fact_sources(app_dir: &Path, base_url: &str) -> Vec<Box<dyn FactSource>> {
+pub fn fact_sources(app_dir: &Path) -> Vec<Box<dyn FactSource>> {
     vec![
         Box::new(openrouter::OpenRouterSource::load(app_dir)),
-        Box::new(models_dev::ModelsDevSource::load(app_dir, base_url)),
+        Box::new(models_dev::ModelsDevSource::load(app_dir)),
     ]
 }
 

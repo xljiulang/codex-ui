@@ -1,9 +1,10 @@
-//! models.dev 字段源（覆盖源）：官方厂商口径的上下文、输入模态、推理档位与描述。
+//! models.dev 字段源（覆盖源）：模型级的上下文、输入模态、推理档位与描述。
 //!
-//! 形态与 <https://models.dev/api.json> 一致（顶层为 provider id）；内置快照与运行时缓存
-//! 都是全量（含中转/聚合商，缓存 24 小时内不重复下载）。
-//! 匹配时先按 `base_url` 定位 provider 分组（URL 前缀优先、主机名兜底），否则用全局索引；
-//! 全局索引同 ID 冲突时优先官方厂商（清单见 `models-dev-official-providers.json`）。
+//! 数据来自 <https://models.dev/catalog.json>（形态 `{ models, providers }`）；内置快照与
+//! 运行时缓存同形态、全量（含中转/聚合商），缓存 24 小时内不重复下载。
+//! **匹配只看模型 ID**：`providers` 的全部模型展开成一张不分组的索引（同 ID 取分组 id
+//! 字典序第一份），`models` 只补 `providers` 未覆盖的 ID；不按 `base_url` 定位分组，
+//! 因此同一个模型 ID 在任何提供方下结果一致。
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -12,39 +13,23 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{FactMatch, FactSource, MatchScope, write_atomic};
+use super::{FactMatch, FactSource, write_atomic};
 use crate::codex::model_catalog::facts::ModelFacts;
 use crate::codex::model_catalog::matching::{Candidate, CandidateStore, release_from_date};
 
-const MODELS_DEV_URL: &str = "https://models.dev/api.json";
+const MODELS_DEV_URL: &str = "https://models.dev/catalog.json";
 const BUNDLED_MODELS_DEV: &str = include_str!("../../../../resources/models-dev.json");
-const BUNDLED_OFFICIAL_PROVIDERS: &str =
-    include_str!("../../../../resources/models-dev-official-providers.json");
-
-struct ProviderEntry {
-    id: String,
-    api: Option<String>,
-    models: Vec<Value>,
-}
 
 pub struct ModelsDevSource {
-    scoped: CandidateStore,
-    official_global: CandidateStore,
+    store: CandidateStore,
 }
 
 impl ModelsDevSource {
-    pub fn load(app_dir: &Path, base_url: &str) -> Self {
+    pub fn load(app_dir: &Path) -> Self {
         let cached = std::fs::read_to_string(cache_path(app_dir))
             .ok()
-            .and_then(|text| parse_providers(&text).ok());
-        let providers: &[ProviderEntry] = cached.as_deref().unwrap_or_else(|| bundled_providers());
-        let scoped = scoped_provider(providers, base_url)
-            .map(build_store)
-            .unwrap_or_default();
-        Self {
-            scoped,
-            official_global: build_official_global_store(providers),
-        }
+            .and_then(|text| parse_catalog(&text).ok());
+        Self { store: CandidateStore::new(cached.unwrap_or_else(|| bundled_items().to_vec())) }
     }
 }
 
@@ -53,194 +38,113 @@ impl FactSource for ModelsDevSource {
         "models_dev"
     }
 
+    /// 覆盖源：基础分高于 OpenRouter，但依然只覆盖已有字段、只补空缺。
+    fn quality_base(&self) -> u8 {
+        30
+    }
+
     fn extract(&self, model_id: &str) -> Option<FactMatch> {
-        if let Some(matched) = self.scoped.lookup(model_id) {
-            return Some(FactMatch {
-                facts: facts_from_model(matched.value),
-                matched_id: matched.matched_id.to_string(),
-                kind: matched.kind,
-                score: matched.score,
-                scope: MatchScope::Provider,
-            });
-        }
-        let matched = self.official_global.lookup(model_id)?;
+        let matched = self.store.lookup(model_id)?;
         Some(FactMatch {
             facts: facts_from_model(matched.value),
             matched_id: matched.matched_id.to_string(),
             kind: matched.kind,
             score: matched.score,
-            scope: MatchScope::OfficialGlobal,
         })
     }
 }
 
-/// 解析 provider 分组：只保留带模型的 provider。
-fn parse_providers(text: &str) -> Result<Vec<ProviderEntry>, String> {
+/// 解析 catalog.json（`{ models, providers }`）并按模型 ID 展平成候选表。
+///
+/// 优先级即顺序：`providers` 全部模型的展开（分组 id 字典序、同 ID 取第一份）→
+/// `models` 里 `providers` 未覆盖的条目。旧版 api.json 形态（顶层直接是 provider 分组）
+/// 没有 `providers` 键，这里判为非法，使旧缓存自动失效并重下。
+fn parse_catalog(text: &str) -> Result<Vec<(Candidate, Value)>, String> {
     let value: Value =
         serde_json::from_str(text).map_err(|e| format!("models.dev 目录不是合法 JSON: {e}"))?;
     let object = value
         .as_object()
         .ok_or_else(|| "models.dev 目录不是 JSON 对象".to_string())?;
+    let providers = object
+        .get("providers")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "models.dev 目录缺少 providers 分组".to_string())?;
 
-    let mut providers = Vec::new();
-    for (provider_id, provider) in object {
-        let Some(models) = provider.get("models").and_then(Value::as_object) else {
-            continue;
-        };
-        let mut entries = Vec::new();
-        for (model_id, model) in models {
-            if !model.is_object() {
-                continue;
-            }
-            let mut model = model.clone();
-            if model.get("id").and_then(Value::as_str).is_none() {
-                model["id"] = json!(model_id);
-            }
-            entries.push(model);
-        }
-        if entries.is_empty() {
-            continue;
-        }
-        providers.push(ProviderEntry {
-            id: provider_id.clone(),
-            api: provider
-                .get("api")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            models: entries,
-        });
-    }
-
-    if providers.is_empty() {
-        return Err("models.dev 目录没有可用的 provider 分组".to_string());
-    }
-    Ok(providers)
-}
-
-/// 按 `base_url` 定位 provider 分组：
-/// 1. 同源且路径前缀匹配（区分同主机不同产品线）；
-/// 2. 没有路径命中时，仅在该主机只有一个 provider 时才退化为主机匹配。
-///
-/// 命中多个时取路径最长者，再按 provider id 字典序，保证确定性。
-fn scoped_provider<'a>(providers: &'a [ProviderEntry], base_url: &str) -> Option<&'a ProviderEntry> {
-    let base = url_parts(base_url)?;
-    let mut path_matches = Vec::new();
-    let mut host_matches = Vec::new();
-    for provider in providers {
-        let Some(api) = provider.api.as_deref().and_then(url_parts) else {
-            continue;
-        };
-        if api.host != base.host {
-            continue;
-        }
-        host_matches.push(provider);
-        if api.scheme == base.scheme && is_path_prefix(&api.path, &base.path) {
-            path_matches.push((api.path.len(), provider));
-        }
-    }
-    path_matches.sort_by(|(left_len, left), (right_len, right)| {
-        right_len
-            .cmp(left_len)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    if let Some((_, provider)) = path_matches.first() {
-        if path_matches
-            .get(1)
-            .is_some_and(|(length, _)| *length == path_matches[0].0)
-        {
-            // 同主机同长度路径无法证明属于哪条产品线，禁止按 provider id 猜测。
-            return None;
-        }
-        return Some(*provider);
-    }
-    (host_matches.len() == 1).then(|| host_matches[0])
-}
-
-fn build_store(provider: &ProviderEntry) -> CandidateStore {
-    CandidateStore::new(build_pairs(provider))
-}
-
-fn build_pairs(provider: &ProviderEntry) -> Vec<(Candidate, Value)> {
-    provider
-        .models
-        .iter()
-        .filter_map(|model| {
-            let id = model
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|id| !id.is_empty())?
-                .to_string();
-            let mut aliases = Vec::new();
-            if let Some(family) = model
-                .get("family")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|family| !family.is_empty())
-            {
-                aliases.push(family.to_string());
-            }
-            let release = model
-                .get("release_date")
-                .and_then(Value::as_str)
-                .and_then(release_from_date)
-                .or_else(|| {
-                    model
-                        .get("last_updated")
-                        .and_then(Value::as_str)
-                        .and_then(release_from_date)
-                });
-            let status = model.get("status").and_then(Value::as_str);
-            Some((
-                Candidate::new(id.clone(), aliases, release, id).with_status(status),
-                model.clone(),
-            ))
-        })
-        .collect()
-}
-
-/// 全局回退只索引官方厂商；中转商数据只在 base_url 明确命中分组时使用。
-fn build_official_global_store(providers: &[ProviderEntry]) -> CandidateStore {
-    let official = official_provider_ids();
-    let mut order: Vec<&ProviderEntry> = providers
-        .iter()
-        .filter(|provider| official.contains(&provider.id))
-        .collect();
-    order.sort_by(|left, right| left.id.cmp(&right.id));
+    // 显式排序：同 ID 冲突时取哪一份完全确定，不依赖 JSON map 的实现细节。
+    let mut provider_ids: Vec<&str> = providers.keys().map(String::as_str).collect();
+    provider_ids.sort_unstable();
 
     let mut seen: HashSet<String> = HashSet::new();
     let mut items = Vec::new();
-    for provider in order {
-        for (candidate, payload) in build_pairs(provider) {
-            let id = payload
-                .get("id")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            if !seen.insert(id) {
+    for provider_id in provider_ids {
+        let Some(models) = providers
+            .get(provider_id)
+            .and_then(|provider| provider.get("models"))
+            .and_then(Value::as_object)
+        else {
+            continue;
+        };
+        for (model_id, model) in models {
+            if !model.is_object() || !seen.insert(model_id.clone()) {
                 continue;
             }
-            items.push((candidate, payload));
+            items.push(build_item(model_id, model));
         }
     }
-    CandidateStore::new(items)
+
+    // 模型清单只补 providers 未覆盖的 ID（它没有 reasoning_options / status，不能反压分组资料）
+    if let Some(canonical) = object.get("models").and_then(Value::as_object) {
+        for (model_id, model) in canonical {
+            if !model.is_object() || !seen.insert(model_id.clone()) {
+                continue;
+            }
+            items.push(build_item(model_id, model));
+        }
+    }
+
+    if items.is_empty() {
+        return Err("models.dev 目录没有可用模型".to_string());
+    }
+    Ok(items)
 }
 
-/// 官方厂商清单（由更新脚本产出，仅影响同 ID 冲突时的优先级）。
-fn official_provider_ids() -> &'static HashSet<String> {
-    static IDS: OnceLock<HashSet<String>> = OnceLock::new();
-    IDS.get_or_init(|| {
-        serde_json::from_str::<Vec<String>>(BUNDLED_OFFICIAL_PROVIDERS)
-            .map(|ids| ids.into_iter().collect())
-            .unwrap_or_default()
-    })
+/// 单条模型记录 → 候选（别名取 `family`，发布时间取 `release_date` / `last_updated`）。
+fn build_item(model_id: &str, model: &Value) -> (Candidate, Value) {
+    let mut payload = model.clone();
+    if payload.get("id").and_then(Value::as_str).is_none() {
+        payload["id"] = json!(model_id);
+    }
+    let mut aliases = Vec::new();
+    if let Some(family) = model
+        .get("family")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|family| !family.is_empty())
+    {
+        aliases.push(family.to_string());
+    }
+    let release = model
+        .get("release_date")
+        .and_then(Value::as_str)
+        .and_then(release_from_date)
+        .or_else(|| {
+            model
+                .get("last_updated")
+                .and_then(Value::as_str)
+                .and_then(release_from_date)
+        });
+    let status = model.get("status").and_then(Value::as_str);
+    (
+        Candidate::new(model_id.to_string(), aliases, release, model_id).with_status(status),
+        payload,
+    )
 }
 
-/// 内联全量快照（约 2.8 MB）只解析一次进程复用。
-fn bundled_providers() -> &'static [ProviderEntry] {
-    static BUNDLED: OnceLock<Vec<ProviderEntry>> = OnceLock::new();
+/// 内联全量快照（约 3 MB）只解析一次进程复用。
+fn bundled_items() -> &'static [(Candidate, Value)] {
+    static BUNDLED: OnceLock<Vec<(Candidate, Value)>> = OnceLock::new();
     BUNDLED
-        .get_or_init(|| parse_providers(BUNDLED_MODELS_DEV).unwrap_or_default())
+        .get_or_init(|| parse_catalog(BUNDLED_MODELS_DEV).unwrap_or_default())
         .as_slice()
 }
 
@@ -325,31 +229,6 @@ fn supports_reasoning(model: &Value) -> Option<bool> {
     Some(reasoning.as_bool().unwrap_or(false) || has_options)
 }
 
-struct UrlParts {
-    scheme: String,
-    host: String,
-    path: String,
-}
-
-/// 归一化 URL：scheme/host 小写、路径去尾斜杠（query/fragment 不参与比较）。
-fn url_parts(value: &str) -> Option<UrlParts> {
-    let url = reqwest::Url::parse(value.trim()).ok()?;
-    Some(UrlParts {
-        scheme: url.scheme().to_ascii_lowercase(),
-        host: url.host_str()?.to_ascii_lowercase(),
-        path: url.path().trim_end_matches('/').to_string(),
-    })
-}
-
-/// `prefix` 是否等于 `full` 或在路径边界（`/`）处结束的前缀。
-fn is_path_prefix(prefix: &str, full: &str) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-    full == prefix
-        || (full.starts_with(prefix) && full.as_bytes().get(prefix.len()) == Some(&b'/'))
-}
-
 fn cache_path(app_dir: &Path) -> PathBuf {
     app_dir.join("cache").join("models-dev.json")
 }
@@ -357,7 +236,7 @@ fn cache_path(app_dir: &Path) -> PathBuf {
 /// 是否需要重新下载：缓存缺失、超过 24 小时或内容不可解析（损坏视为过期）。
 fn needs_refresh(app_dir: &Path) -> bool {
     !super::cache_is_reusable(&cache_path(app_dir), |text| {
-        parse_providers(text).is_ok()
+        parse_catalog(text).is_ok()
     })
 }
 
@@ -393,7 +272,7 @@ pub async fn refresh_cache(app_dir: &Path) {
 }
 
 fn store_response(app_dir: &Path, text: &str) -> Result<(), String> {
-    parse_providers(text)?;
+    parse_catalog(text)?;
     write_atomic(&cache_path(app_dir), text.as_bytes())
 }
 
@@ -402,109 +281,144 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// 合成快照：`alpha-relay` / `beta-relay` 都定义 `shared-model`（值不同），
+    /// `models` 里另有一个只属于模型清单的 ID，用来验证「分组优先、清单补缺」的顺序。
+    fn synthetic_catalog() -> String {
+        json!({
+            "models": {
+                "canonical-only-model": { "limit": { "context": 4096 }, "tool_call": true },
+                "shared-model": { "limit": { "context": 999 }, "tool_call": true }
+            },
+            "providers": {
+                "alpha-relay": {
+                    "models": { "shared-model": { "limit": { "context": 100 }, "tool_call": true } }
+                },
+                "beta-relay": {
+                    "models": { "shared-model": { "limit": { "context": 200 }, "tool_call": true } }
+                }
+            }
+        })
+        .to_string()
+    }
+
+    fn write_cache_file(dir: &std::path::Path, text: &str) {
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        std::fs::write(cache_path(dir), text).unwrap();
+    }
+
+    fn has_id(items: &[(Candidate, Value)], id: &str) -> bool {
+        items
+            .iter()
+            .any(|(_, payload)| payload.get("id").and_then(Value::as_str) == Some(id))
+    }
+
     #[test]
     fn bundled_snapshot_is_full_and_usable() {
-        let providers = bundled_providers();
+        // 快照本体仍是「全量 provider 分组 + 模型清单」两段
+        let raw: Value = serde_json::from_str(BUNDLED_MODELS_DEV).unwrap();
+        let providers = raw["providers"].as_object().unwrap();
+        let provider_models: usize = providers
+            .values()
+            .map(|provider| {
+                provider["models"]
+                    .as_object()
+                    .map_or(0, |models| models.len())
+            })
+            .sum();
         assert!(providers.len() >= 200, "内置快照应为全量（含中转商）");
-        let models: usize = providers.iter().map(|provider| provider.models.len()).sum();
-        assert!(models >= 7000, "内置快照模型数异常: {models}");
-        for id in ["deepseek", "opencode", "opencode-go", "zenmux"] {
-            assert!(
-                providers.iter().any(|provider| provider.id == id),
-                "内置快照缺少 provider {id}"
-            );
+        assert!(provider_models >= 7000, "内置快照模型数异常: {provider_models}");
+        assert!(
+            raw["models"].as_object().is_some_and(|models| models.len() >= 380),
+            "内置快照缺少模型清单"
+        );
+
+        // 展平后的索引：分组唯一 ID + 模型清单补充的 ID
+        let items = bundled_items();
+        // 全量分组展开 = 3624 个唯一 ID，加上模型清单补充的 ID，约 3740 条
+        assert!(items.len() >= 3700, "内置快照条目数异常: {}", items.len());
+        for id in ["big-pickle", "hy3-preview-free", "longcat-2.0"] {
+            assert!(has_id(items, id), "内置快照缺少分组模型 {id}");
+        }
+        assert!(
+            has_id(items, "swiss-ai/apertus-8b"),
+            "内置快照缺少只在模型清单里的条目"
+        );
+    }
+
+    #[test]
+    fn matching_only_depends_on_model_id() {
+        let dir = tempdir().unwrap();
+        // 本机代理无法按 base_url 命中任何分组，加载不再接受 base_url
+        let source = ModelsDevSource::load(dir.path());
+
+        let facts = source.extract("big-pickle").unwrap().facts;
+        assert_eq!(facts.context_window, Some(200_000));
+        assert_eq!(facts.max_context_window, Some(200_000));
+        assert_eq!(facts.input_token_limit, Some(160_000));
+        assert_eq!(facts.supports_tool_calls, Some(true));
+
+        for id in ["hy3-preview-free", "longcat-2.0", "mimo-v2.5-free"] {
+            assert!(source.extract(id).is_some(), "分组专有 ID {id} 应命中");
         }
     }
 
     #[test]
-    fn scoping_uses_url_prefix_before_host() {
-        let providers = bundled_providers();
-        assert_eq!(
-            scoped_provider(providers, "https://opencode.ai/zen/v1")
-                .unwrap()
-                .id,
-            "opencode"
-        );
-        assert_eq!(
-            scoped_provider(providers, "https://opencode.ai/zen/go/v1")
-                .unwrap()
-                .id,
-            "opencode-go"
-        );
-        assert_eq!(
-            scoped_provider(providers, "https://api.deepseek.com/v1")
-                .unwrap()
-                .id,
-            "deepseek"
-        );
-        // 同主机有多个产品线且路径不明确时，不再任意选最长路径。
-        assert!(scoped_provider(providers, "https://opencode.ai/zen/go").is_none());
-        assert!(scoped_provider(providers, "https://opencode.ai").is_none());
-    }
-
-    #[test]
-    fn scoping_rejects_duplicate_host_and_path_ambiguity() {
-        let text = json!({
-            "alpha": {
-                "id": "alpha",
-                "api": "https://shared.example/v1",
-                "models": { "a": { "id": "a" } }
-            },
-            "beta": {
-                "id": "beta",
-                "api": "https://shared.example/v1",
-                "models": { "b": { "id": "b" } }
-            }
-        })
-        .to_string();
-        let providers = parse_providers(&text).unwrap();
-        assert!(scoped_provider(&providers, "https://shared.example/v1").is_none());
-    }
-
-    #[test]
-    fn relay_groups_are_reachable_without_cache() {
+    fn duplicate_ids_take_lexicographically_first_provider_group() {
         let dir = tempdir().unwrap();
-        let zen = ModelsDevSource::load(dir.path(), "https://opencode.ai/zen/v1");
-        assert!(zen.extract("hy3-preview-free").is_some());
-        let go = ModelsDevSource::load(dir.path(), "https://opencode.ai/zen/go/v1");
-        assert!(go.extract("longcat-2.0").is_some());
+        write_cache_file(dir.path(), &synthetic_catalog());
+        let source = ModelsDevSource::load(dir.path());
+
+        let shared = source.extract("shared-model").unwrap();
+        assert_eq!(shared.matched_id, "shared-model");
+        assert_eq!(
+            shared.facts.context_window,
+            Some(100),
+            "同 ID 多份分组副本时取分组 id 字典序第一份"
+        );
     }
 
     #[test]
-    fn official_provider_list_excludes_relays() {
-        let ids = official_provider_ids();
-        assert!(ids.contains("deepseek"));
-        assert!(ids.contains("openai"));
-        assert!(!ids.contains("opencode"));
-        assert!(!ids.contains("zenmux"));
+    fn canonical_models_fill_ids_missing_from_provider_groups() {
+        let dir = tempdir().unwrap();
+        write_cache_file(dir.path(), &synthetic_catalog());
+        let source = ModelsDevSource::load(dir.path());
+
+        // 分组里没有的 ID 用模型清单补齐；分组里已有的 ID 不被模型清单反压
+        assert_eq!(
+            source
+                .extract("canonical-only-model")
+                .unwrap()
+                .facts
+                .context_window,
+            Some(4096)
+        );
+        assert_eq!(
+            source.extract("shared-model").unwrap().facts.context_window,
+            Some(100)
+        );
     }
 
     #[test]
     fn extract_resolves_versionless_family_to_latest_base_release() {
         let dir = tempdir().unwrap();
-        let source = ModelsDevSource::load(dir.path(), "https://api.deepseek.com/v1");
+        let source = ModelsDevSource::load(dir.path());
         let extracted = source.extract("deepseek-flash").unwrap();
         let facts = extracted.facts;
-        assert_eq!(extracted.scope, MatchScope::Provider);
-        assert_eq!(facts.context_window, Some(1_000_000));
-        assert_eq!(facts.max_context_window, Some(1_000_000));
-        assert_eq!(
-            facts.input_modalities,
-            Some(vec!["text".to_string(), "image".to_string()])
+        assert!(
+            extracted.matched_id.contains("deepseek") && extracted.matched_id.contains("flash"),
+            "实际命中 {}",
+            extracted.matched_id
         );
-        assert_eq!(
-            facts.reasoning_levels,
-            Some(vec![
-                "low".to_string(),
-                "high".to_string(),
-                "max".to_string()
-            ])
-        );
+        assert!(facts.context_window.is_some());
+        assert!(facts
+            .reasoning_levels
+            .as_ref()
+            .is_some_and(|levels| levels.iter().any(|level| level == "low")));
         assert_eq!(facts.supports_reasoning, Some(true));
         assert!(facts
             .description
             .as_deref()
-            .is_some_and(|description| description.contains("DeepSeek V4.1 Flash")));
+            .is_some_and(|description| description.contains("DeepSeek")));
         // models.dev 不提供 verbosity / 搜索能力，保持沉默交给其它源或模板
         assert_eq!(facts.support_verbosity, None);
         assert_eq!(facts.supports_search_tool, None);
@@ -514,24 +428,18 @@ mod tests {
     fn bundled_matching_inherits_latest_compatible_model_family() {
         let dir = tempdir().unwrap();
 
-        let openai = ModelsDevSource::load(dir.path(), "https://relay.example.com/v1");
+        let openai = ModelsDevSource::load(dir.path());
         let gpt = openai.extract("gpt-5.7").unwrap();
         assert_eq!(gpt.matched_id, "gpt-5.6");
         assert_eq!(gpt.kind, crate::codex::model_catalog::matching::MatchKind::Fuzzy);
         assert_eq!(gpt.facts.input_token_limit, Some(922_000));
         assert_eq!(gpt.facts.supports_tool_calls, Some(true));
 
-        let qwen = ModelsDevSource::load(
-            dir.path(),
-            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        )
-        .extract("qwen4-coder")
-        .unwrap();
-        assert!(qwen.matched_id.starts_with("qwen3-coder"));
+        let qwen = openai.extract("qwen4-coder").unwrap();
+        // 全局索引里的 Qwen 条目可能带供应商前缀（如 qwen/qwen3-coder），只要求命中 Coder 规格
+        assert!(qwen.matched_id.contains("qwen3-coder"));
 
-        let deepseek = ModelsDevSource::load(dir.path(), "https://api.deepseek.com/v1")
-            .extract("deepseek-v5")
-            .unwrap();
+        let deepseek = openai.extract("deepseek-v5").unwrap();
         assert!(
             deepseek.matched_id.starts_with("deepseek-v4"),
             "实际命中 {}",
@@ -555,84 +463,18 @@ mod tests {
     }
 
     #[test]
-    fn provider_host_scopes_matching_to_that_provider() {
+    fn cache_is_used_when_valid_and_legacy_api_json_is_expired() {
         let dir = tempdir().unwrap();
-        let text = json!({
-            "alpha": {
-                "id": "alpha",
-                "api": "https://api.alpha.example/v1",
-                "models": { "shared-model": { "id": "shared-model", "limit": { "context": 100 } } }
-            },
-            "beta": {
-                "id": "beta",
-                "api": "https://api.beta.example/v1",
-                "models": { "shared-model": { "id": "shared-model", "limit": { "context": 200 } } }
-            }
-        })
-        .to_string();
-        std::fs::create_dir_all(dir.path().join("cache")).unwrap();
-        std::fs::write(cache_path(dir.path()), text).unwrap();
-
-        let alpha = ModelsDevSource::load(dir.path(), "https://api.alpha.example/v1");
+        write_cache_file(dir.path(), &synthetic_catalog());
+        let cached = ModelsDevSource::load(dir.path());
         assert_eq!(
-            alpha.extract("shared-model").unwrap().facts.context_window,
+            cached.extract("shared-model").unwrap().facts.context_window,
             Some(100)
         );
-        let beta = ModelsDevSource::load(dir.path(), "https://api.beta.example/v1");
-        assert_eq!(
-            beta.extract("shared-model").unwrap().facts.context_window,
-            Some(200)
-        );
-    }
+        assert!(!needs_refresh(dir.path()), "新鲜且合法的缓存不应重新下载");
 
-    #[test]
-    fn official_global_index_excludes_relays() {
-        let text = json!({
-            "aaa-relay": {
-                "id": "aaa-relay",
-                "api": "https://api.aaa-relay.example/v1",
-                "models": { "shared-model": { "id": "shared-model", "limit": { "context": 999 } } }
-            },
-            "deepseek": {
-                "id": "deepseek",
-                "api": "https://api.deepseek.com/v1",
-                "models": { "shared-model": { "id": "shared-model", "limit": { "context": 100 } } }
-            }
-        })
-        .to_string();
-        let providers = parse_providers(&text).unwrap();
-        let store = build_official_global_store(&providers);
-        let facts = facts_from_model(store.lookup("shared-model").unwrap().value);
-        assert_eq!(facts.context_window, Some(100));
-    }
-
-    #[test]
-    fn global_index_prefers_official_vendor_over_lexicographic_relay() {
-        // 中转商 id 排在官方厂商之前，验证「官方优先」不是靠字典序碰巧成立
-        let text = json!({
-            "aaa-relay": {
-                "id": "aaa-relay",
-                "api": "https://api.aaa-relay.example/v1",
-                "models": { "shared-model": { "id": "shared-model", "limit": { "context": 999 } } }
-            },
-            "deepseek": {
-                "id": "deepseek",
-                "api": "https://api.deepseek.com/v1",
-                "models": { "shared-model": { "id": "shared-model", "limit": { "context": 100 } } }
-            }
-        })
-        .to_string();
-        let providers = parse_providers(&text).unwrap();
-        let store = build_official_global_store(&providers);
-        let facts = facts_from_model(store.lookup("shared-model").unwrap().value);
-        assert_eq!(facts.context_window, Some(100), "官方厂商应优先于中转商");
-    }
-
-    #[test]
-    fn cache_is_used_when_valid_and_ignored_when_broken() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("cache")).unwrap();
-        let valid = json!({
+        // 旧版 api.json（顶层直接是 provider 分组）缺少 providers 键 → 视为过期
+        let legacy = json!({
             "customrelay": {
                 "id": "customrelay",
                 "api": "https://api.customrelay.example/v1",
@@ -640,18 +482,18 @@ mod tests {
             }
         })
         .to_string();
-        std::fs::write(cache_path(dir.path()), &valid).unwrap();
-        let source = ModelsDevSource::load(dir.path(), "https://api.customrelay.example/v1");
-        assert_eq!(
-            source.extract("relay-model").unwrap().facts.context_window,
-            Some(4242)
+        write_cache_file(dir.path(), &legacy);
+        assert!(needs_refresh(dir.path()), "旧版 api.json 缓存应视为过期");
+        let fallback = ModelsDevSource::load(dir.path());
+        assert!(fallback.extract("relay-model").is_none());
+        assert!(
+            fallback.extract("big-pickle").is_some(),
+            "旧缓存应回退内置快照"
         );
-        assert!(!needs_refresh(dir.path()), "新鲜且合法的缓存不应重新下载");
 
-        std::fs::write(cache_path(dir.path()), "{ broken").unwrap();
-        let source = ModelsDevSource::load(dir.path(), "https://api.customrelay.example/v1");
-        assert!(source.extract("relay-model").is_none());
-        assert!(source.extract("deepseek-flash").is_some(), "损坏缓存应回退内置快照");
+        write_cache_file(dir.path(), "{ broken");
+        let fallback = ModelsDevSource::load(dir.path());
+        assert!(fallback.extract("big-pickle").is_some(), "损坏缓存应回退内置快照");
     }
 
     #[test]
@@ -659,20 +501,24 @@ mod tests {
         let dir = tempdir().unwrap();
         assert!(store_response(dir.path(), "{ broken").is_err());
         assert!(!cache_path(dir.path()).exists());
+
+        // 旧形态（没有 providers 键）同样拒绝写入
+        let legacy = json!({
+            "customrelay": { "models": { "relay-model": { "id": "relay-model" } } }
+        })
+        .to_string();
+        assert!(store_response(dir.path(), &legacy).is_err());
+        assert!(!cache_path(dir.path()).exists());
+
+        assert!(store_response(dir.path(), &synthetic_catalog()).is_ok());
+        assert!(cache_path(dir.path()).exists());
     }
 
     #[test]
     fn needs_refresh_follows_ttl_and_content_validity() {
         let dir = tempdir().unwrap();
         let path = cache_path(dir.path());
-        let valid = json!({
-            "customrelay": {
-                "id": "customrelay",
-                "api": "https://api.customrelay.example/v1",
-                "models": { "relay-model": { "id": "relay-model", "limit": { "context": 4242 } } }
-            }
-        })
-        .to_string();
+        let valid = synthetic_catalog();
 
         // 没有缓存文件 → 需要下载
         assert!(needs_refresh(dir.path()));

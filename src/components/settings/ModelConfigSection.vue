@@ -120,8 +120,8 @@ const catalogPicker = reactive({
   query: "",
 });
 
-/** 候选模型的资料来源标记（只读展示，不影响勾选与生成流程）。 */
-function catalogSourceLabel(model: ModelCatalogModelOption): string {
+/** 候选模型的资料来源徽章（每个来源一枚，只读展示，不影响勾选与生成流程）。 */
+function catalogSourceBadges(model: ModelCatalogModelOption): string[] {
   const sourceOrder = { official: 0, models_dev: 1, openrouter: 2 } as const;
   return [...model.sources]
     .sort(
@@ -141,8 +141,7 @@ function catalogSourceLabel(model: ModelCatalogModelOption): string {
       return source.matched_id.toLowerCase() !== model.id.toLowerCase()
         ? `${name} · 继承 ${source.matched_id}`
         : name;
-    })
-    .join(" + ");
+    });
 }
 
 function catalogStatusLabel(model: ModelCatalogModelOption): string {
@@ -1062,9 +1061,15 @@ function openModelConfigFile() {
               <span class="model-catalog-picker-details" @click.stop.prevent>
                 <span
                   v-if="model.sources.length"
-                  class="model-catalog-picker-source"
+                  class="model-catalog-picker-sources"
                 >
-                  {{ catalogSourceLabel(model) }}
+                  <span
+                    v-for="badge in catalogSourceBadges(model)"
+                    :key="badge"
+                    class="model-catalog-picker-source"
+                  >
+                    {{ badge }}
+                  </span>
                 </span>
                 <span
                   v-if="model.status !== 'ready' || model.warnings.length"

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{FactMatch, FactSource, MatchScope, write_atomic};
+use super::{FactMatch, FactSource, write_atomic};
 use crate::codex::model_catalog::facts::ModelFacts;
 use crate::codex::model_catalog::matching::{Candidate, CandidateStore};
 
@@ -45,7 +45,6 @@ impl FactSource for OpenRouterSource {
             matched_id: matched.matched_id.to_string(),
             kind: matched.kind,
             score: matched.score,
-            scope: MatchScope::Global,
         })
     }
 }

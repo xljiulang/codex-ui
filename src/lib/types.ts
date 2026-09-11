@@ -313,7 +313,6 @@ export interface ModelCatalogSourceEvidence {
   matched_id: string;
   match_kind: "exact" | "alias" | "normalized" | "fuzzy" | string;
   score: number;
-  scope: "provider" | "official_global" | "global" | string;
 }
 
 export interface ModelCatalogModelOption {

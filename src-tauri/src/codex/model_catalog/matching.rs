@@ -2,8 +2,8 @@
 //!
 //! 排序规则（无版本 id 优先命中同家族最新正式版）：
 //! 1. 匹配级别：主 ID 精确 → 别名精确 → 规范化精确 → 相似度；
-//! 2. 模糊匹配优先保持厂商、版本系列与 coder/flash/pro 等规格 token；
-//! 3. 再按相似度、变体、多余 token、发布时间与 id 排序。
+//! 2. 模糊匹配优先保持厂商、版本系列、查询里的规格 token，再比较版本距离；
+//! 3. 最后按相似度、变体、多余 token、发布时间与 id 排序。
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -76,6 +76,7 @@ pub struct Candidate {
     sort_id: String,
     vendor: Option<String>,
     series_markers: HashSet<String>,
+    version: Option<(String, u32)>,
     role_tokens: HashSet<String>,
 }
 
@@ -112,6 +113,7 @@ impl Candidate {
             sort_id: sort_id.into(),
             vendor,
             series_markers: version_series_markers(&analysis_key),
+            version: key_version(&analysis_key),
             role_tokens: role_tokens(&analysis_key),
         }
     }
@@ -175,6 +177,7 @@ fn lookup_index(candidates: &[Candidate], model_id: &str) -> Option<(usize, Matc
 
     let query_vendor = provider_prefix(query);
     let query_series = version_series_markers(&query_key);
+    let query_version = key_version(&query_key);
     let query_roles = role_tokens(&query_key);
 
     let mut best: Option<(Rank, usize, MatchKind, f64)> = None;
@@ -186,6 +189,7 @@ fn lookup_index(candidates: &[Candidate], model_id: &str) -> Option<(usize, Matc
             query_token_count,
             query_vendor.as_deref(),
             &query_series,
+            query_version.as_ref(),
             &query_roles,
         ) else {
             continue;
@@ -208,9 +212,10 @@ struct Rank {
     vendor_mismatch: bool,
     series_mismatch: bool,
     missing_roles: usize,
+    is_variant: bool,
+    version_gap: u32,
     extra_roles: usize,
     score_millis: i64,
-    is_variant: bool,
     extra_tokens: usize,
     release: i64,
     sort_id: String,
@@ -223,9 +228,10 @@ impl Ord for Rank {
             .then_with(|| self.vendor_mismatch.cmp(&other.vendor_mismatch))
             .then_with(|| self.series_mismatch.cmp(&other.series_mismatch))
             .then_with(|| self.missing_roles.cmp(&other.missing_roles))
+            .then_with(|| self.is_variant.cmp(&other.is_variant))
+            .then_with(|| self.version_gap.cmp(&other.version_gap))
             .then_with(|| self.extra_roles.cmp(&other.extra_roles))
             .then_with(|| other.score_millis.cmp(&self.score_millis))
-            .then_with(|| self.is_variant.cmp(&other.is_variant))
             .then_with(|| self.extra_tokens.cmp(&other.extra_tokens))
             .then_with(|| other.release.cmp(&self.release))
             .then_with(|| self.sort_id.cmp(&other.sort_id))
@@ -245,6 +251,7 @@ fn rank_candidate(
     query_token_count: usize,
     query_vendor: Option<&str>,
     query_series: &HashSet<String>,
+    query_version: Option<&(String, u32)>,
     query_roles: &HashSet<String>,
 ) -> Option<(Rank, MatchKind, f64)> {
     let mut kind = None;
@@ -302,6 +309,14 @@ fn rank_candidate(
             || query_series.is_disjoint(&candidate.series_markers));
     let missing_roles = query_roles.difference(&candidate.role_tokens).count();
     let extra_roles = candidate.role_tokens.difference(query_roles).count();
+    // 版本距离：同系列标记才可比（差 0 表示同版本）；无版本或标记不同排到最后。
+    // 例：查询 `deepseek-v5` 时 `deepseek-v4-*`（差 1）优先于中转商的历史 `deepseek-v3*`（差 2）。
+    let version_gap = match (query_version, candidate.version.as_ref()) {
+        (Some((query_marker, query_value)), Some((marker, value))) if query_marker == marker => {
+            query_value.abs_diff(*value)
+        }
+        _ => u32::MAX,
+    };
 
     Some((
         Rank {
@@ -309,9 +324,10 @@ fn rank_candidate(
             vendor_mismatch,
             series_mismatch,
             missing_roles,
+            is_variant: candidate.is_variant,
+            version_gap,
             extra_roles,
             score_millis: (score * 1000.0).round() as i64,
-            is_variant: candidate.is_variant,
             extra_tokens,
             release: candidate.release.unwrap_or(0),
             sort_id: candidate.sort_id.clone(),
@@ -393,6 +409,22 @@ fn version_series_markers(input: &str) -> HashSet<String> {
         }
     }
     markers
+}
+
+/// 关键版本：系列标记 + 紧随其后的首个整数（`deepseek-v5` → `v` 5、`qwen4` → `qwen` 4）。
+///
+/// 只取首个小版本号，`gemini-3.8` 与 `gemini-3.1` 都按主版本 3 比较；无该形态则为 `None`。
+fn key_version(input: &str) -> Option<(String, u32)> {
+    for pair in semantic_tokens(input).windows(2) {
+        if pair[0].chars().all(|ch| ch.is_ascii_alphabetic())
+            && pair[1].chars().all(|ch| ch.is_ascii_digit())
+        {
+            if let Ok(value) = pair[1].parse::<u32>() {
+                return Some((pair[0].clone(), value));
+            }
+        }
+    }
+    None
 }
 
 fn role_tokens(input: &str) -> HashSet<String> {

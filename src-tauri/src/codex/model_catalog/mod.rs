@@ -22,7 +22,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use facts::ModelFacts;
-use sources::{FactMatch, FactSource, FullEntryMatch, FullEntrySource, MatchScope};
+use sources::{FactMatch, FactSource, FullEntryMatch, FullEntrySource};
 
 /// 启动时后台刷新各字段源的运行时缓存；失败静默。
 pub use sources::refresh_caches as refresh_source_caches;
@@ -41,7 +41,6 @@ pub struct ModelCatalogSourceEvidence {
     pub matched_id: String,
     pub match_kind: String,
     pub score: f64,
-    pub scope: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -90,7 +89,7 @@ fn build_catalog_result(
     base_url: &str,
 ) -> Result<ModelCatalogGenerateResult, String> {
     let full_entry_sources = sources::full_entry_sources(base_url);
-    let fact_sources = sources::fact_sources(app_dir, base_url);
+    let fact_sources = sources::fact_sources(app_dir);
 
     let mut entries: Vec<Value> = Vec::new();
     let mut models: Vec<ModelCatalogModelOption> = Vec::with_capacity(ids.len());
@@ -125,7 +124,7 @@ fn build_catalog_result(
             continue;
         }
 
-        let mut warnings = collected.warnings;
+        let mut warnings = Vec::new();
         let incompatible_reason = incompatible_reason(&collected.facts);
         let status = if let Some(reason) = incompatible_reason {
             warnings.push(reason);
@@ -199,35 +198,25 @@ fn finalize_full_entry(mut entry: Value, model_id: &str, priority: usize) -> Res
 struct CollectedFacts {
     facts: ModelFacts,
     sources: Vec<ModelCatalogSourceEvidence>,
-    warnings: Vec<String>,
 }
 
-/// 逐字段源提取，并按作用域权威性与匹配质量合并。
+/// 逐字段源提取，并按来源权威性与匹配质量合并。
 fn collect_facts(model_id: &str, sources: &[Box<dyn FactSource>]) -> CollectedFacts {
     let mut facts = ModelFacts::default();
     let mut evidence = Vec::new();
-    let mut conflict_fields = HashSet::new();
     for source in sources {
         if let Some(matched) = source.extract(model_id) {
-            conflict_fields.extend(facts.merge_from(
+            facts.merge_from(
                 source.id(),
-                matched.quality(),
+                matched.quality(source.quality_base()),
                 matched.facts.clone(),
-            ));
+            );
             evidence.push(fact_evidence(source.id(), &matched));
         }
     }
-    let warnings = if conflict_fields.is_empty() {
-        Vec::new()
-    } else {
-        let mut fields: Vec<_> = conflict_fields.into_iter().collect();
-        fields.sort_unstable();
-        vec![format!("字段资料存在冲突：{}", fields.join("、"))]
-    };
     CollectedFacts {
         facts,
         sources: evidence,
-        warnings,
     }
 }
 
@@ -240,7 +229,6 @@ fn full_entry_evidence(
         matched_id: matched.matched_id.clone(),
         match_kind: matched.kind.as_str().to_string(),
         score: 1.0,
-        scope: MatchScope::OfficialGlobal.as_str().to_string(),
     }
 }
 
@@ -250,7 +238,6 @@ fn fact_evidence(source: &'static str, matched: &FactMatch) -> ModelCatalogSourc
         matched_id: matched.matched_id.clone(),
         match_kind: matched.kind.as_str().to_string(),
         score: matched.score,
-        scope: matched.scope.as_str().to_string(),
     }
 }
 
@@ -364,6 +351,11 @@ mod tests {
             "fake"
         }
 
+        /// 测试用高权威源：验证「来源基础分更高者覆盖前序来源」。
+        fn quality_base(&self) -> u8 {
+            50
+        }
+
         fn extract(&self, model_id: &str) -> Option<FactMatch> {
             Some(FactMatch {
                 facts: ModelFacts {
@@ -373,7 +365,6 @@ mod tests {
                 matched_id: model_id.to_string(),
                 kind: matching::MatchKind::Exact,
                 score: 1.0,
-                scope: MatchScope::Provider,
             })
         }
     }
@@ -391,6 +382,27 @@ mod tests {
             .find(|entry| entry["slug"] == json!(slug))
             .cloned()
             .unwrap_or_else(|| panic!("目录里没有 {slug}"))
+    }
+
+    #[test]
+    fn conflicting_source_values_do_not_warn() {
+        let dir = tempdir().unwrap();
+        // models.dev 与 OpenRouter 对该模型给出的上下文不同，但字段差异不再产生候选警告
+        let result = build_catalog_result(
+            &["deepseek-v4-flash-vision-exp".to_string()],
+            dir.path(),
+            "https://api.deepseek.com/v1",
+        )
+        .unwrap();
+        let model = &result.models[0];
+        assert_eq!(model.status, ModelCatalogModelStatus::Ready);
+        assert!(has_source(model, "models_dev"));
+        assert!(has_source(model, "openrouter"));
+        assert!(
+            model.warnings.is_empty(),
+            "字段差异不应再进入候选警告：{:?}",
+            model.warnings
+        );
     }
 
     #[test]
@@ -421,13 +433,9 @@ mod tests {
     #[test]
     fn pipeline_merges_sources_by_quality_and_records_evidence() {
         let dir = tempdir().unwrap();
-        let base_url = "https://api.deepseek.com/v1";
         let sources: Vec<Box<dyn FactSource>> = vec![
             Box::new(sources::openrouter::OpenRouterSource::load(dir.path())),
-            Box::new(sources::models_dev::ModelsDevSource::load(
-                dir.path(),
-                base_url,
-            )),
+            Box::new(sources::models_dev::ModelsDevSource::load(dir.path())),
             Box::new(FakeSource),
         ];
         let collected = collect_facts("deepseek-flash", &sources);
@@ -450,7 +458,35 @@ mod tests {
             collected.facts.source_of("support_verbosity"),
             Some("openrouter")
         );
-        assert!(!collected.warnings.is_empty(), "字段冲突应提供可见警告");
+    }
+
+    #[test]
+    fn local_proxy_base_url_still_matches_models_dev_ids() {
+        let dir = tempdir().unwrap();
+        // 本机代理的 base_url 无法映射到 models.dev 的任何分组，匹配必须只看模型 ID
+        let result = build_catalog_result(
+            &["big-pickle".to_string()],
+            dir.path(),
+            "http://127.0.0.1:9000/v1",
+        )
+        .unwrap();
+        assert_eq!(result.ready, 1);
+        assert_eq!(result.unmatched, 0);
+        let model = &result.models[0];
+        assert_eq!(model.display_name, "Big-Pickle");
+        assert!(model.selectable);
+        assert!(has_source(model, "models_dev"));
+
+        let entry = catalog_entry(&result, "big-pickle");
+        assert_eq!(entry["context_window"], json!(200_000));
+        assert_eq!(entry["max_context_window"], json!(200_000));
+        // 160000 / 200000 → 80%，压缩阈值取输入上限的 90%
+        assert_eq!(entry["effective_context_window_percent"], json!(80));
+        assert_eq!(entry["auto_compact_token_limit"], json!(144_000));
+
+        // 候选证据不体现提供方 / 作用域
+        let evidence = serde_json::to_value(&model.sources).unwrap();
+        assert!(evidence[0].get("scope").is_none());
     }
 
     #[test]
@@ -499,10 +535,11 @@ mod tests {
         // models.dev 给 1000000，OpenRouter 给 1048576：前者应覆盖后者
         assert_eq!(entry["context_window"], json!(1_000_000));
         assert_eq!(entry["max_context_window"], json!(1_000_000));
+        // 全局索引里该 ID 有多份副本（分组 id 字典序第一份），描述随之取那一份
         assert!(entry["description"]
             .as_str()
             .unwrap()
-            .contains("DeepSeek V4.1 Flash"));
+            .contains("DeepSeek V4 Flash"));
         assert!(!has_source(&result.models[0], "official"));
         assert!(has_source(&result.models[0], "models_dev"));
         assert!(has_source(&result.models[0], "openrouter"));

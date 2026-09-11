@@ -4,14 +4,13 @@
 //   node scripts/update-model-catalog-sources.mjs                # 全部
 //   node scripts/update-model-catalog-sources.mjs --official     # 官方条目（合并刷新 codex 基线，保留手写条目）
 //   node scripts/update-model-catalog-sources.mjs --template     # 生成基底模板（依赖官方条目）
-//   node scripts/update-model-catalog-sources.mjs --models-dev   # models.dev 全量精简快照 + 官方厂商清单
+//   node scripts/update-model-catalog-sources.mjs --models-dev   # models.dev 精简快照（provider 分组 + 模型清单）
 //   node scripts/update-model-catalog-sources.mjs --openrouter   # OpenRouter 全量响应
 //
 // 各资源的地位不同：
 // - official-models.json：多厂商官方条目池（命中即整条复用）；codex 基线条目由本脚本刷新，
 //   其它厂商（如 deepseek）可直接手工追加，刷新时会保留；
 // - models-dev.json：全量精简快照（含中转/聚合商，保证首次离线也能匹配）；
-// - models-dev-official-providers.json：官方厂商清单，仅用于同 ID 冲突时的优先级；
 // - model_catalog_template.json：字段源合并后的渲染基底，固定值全部固化在这里。
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -24,51 +23,11 @@ const RESOURCES = join(ROOT, "src-tauri", "resources");
 /** codex 基线版本：与 src-tauri 里适配的 codex-cli 版本保持一致。 */
 const CODEX_BASELINE_TAG = "rust-v0.149.0";
 const CODEX_MODELS_URL = `https://raw.githubusercontent.com/openai/codex/${CODEX_BASELINE_TAG}/codex-rs/models-manager/models.json`;
-const MODELS_DEV_URL = "https://models.dev/api.json";
+const MODELS_DEV_URL = "https://models.dev/catalog.json";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/models";
 
 /** 模板基底条目：取内置目录里最新一代的可见模型。 */
 const TEMPLATE_BASE_SLUG = "gpt-5.6-sol";
-
-/**
- * 官方厂商清单（唯一来源）：只用于「同 ID 冲突时优先取官方厂商参数」，
- * 不参与快照过滤——快照是全量的，中转商/聚合商照收。
- */
-const OFFICIAL_VENDORS = [
-  "openai",
-  "anthropic",
-  "google",
-  "google-vertex",
-  "xai",
-  "meta",
-  "mistral",
-  "cohere",
-  "perplexity",
-  "nvidia",
-  "amazon-bedrock",
-  "azure",
-  "deepseek",
-  "moonshotai",
-  "moonshotai-cn",
-  "zhipuai",
-  "zai",
-  "minimax",
-  "minimax-cn",
-  "alibaba",
-  "alibaba-cn",
-  "qwen",
-  "xiaomi",
-  "stepfun",
-  "longcat",
-  "baidu",
-  "tencent-tokenhub",
-  "inception",
-  "thinkingmachines",
-  "poolside",
-  "sakana",
-  "upstage",
-  "ai21",
-];
 
 /**
  * 精简快照保留的模型字段：只留映射需要的能力参数。
@@ -228,47 +187,56 @@ async function updateTemplate() {
   );
 }
 
-/** models.dev 全量目录 → 精简字段版本（保留全部 provider，形态与全量一致） */
+/** 单个模型条目 → 精简字段版本（只留 Rust 侧映射需要的能力参数）。 */
+function slimModel(model) {
+  const keep = {};
+  for (const key of MODEL_KEEP_KEYS) {
+    if (key in model) {
+      keep[key] = key === "description" ? truncate(model[key], DESCRIPTION_MAX) : model[key];
+    }
+  }
+  return keep;
+}
+
+/**
+ * models.dev 全量目录（catalog.json：`{ models, providers }`）→ 精简字段版本。
+ *
+ * 形态与远端一致：`providers` 保留全部 provider 分组（含中转/聚合商），`models` 保留
+ * 模型级规范条目；Rust 侧只看模型 ID，不按 base_url 定位分组，因此精简掉 `api` / `name`。
+ */
 async function updateModelsDev() {
   const text = await fetchJson(MODELS_DEV_URL);
   const parsed = JSON.parse(text);
-  const slim = {};
-  let providers = 0;
-  let models = 0;
+  const providers = {};
+  const canonical = {};
+  let providerModels = 0;
+  let canonicalModels = 0;
 
-  for (const [providerId, provider] of Object.entries(parsed)) {
+  for (const [providerId, provider] of Object.entries(parsed.providers ?? {})) {
     if (!provider || typeof provider !== "object" || !provider.models) continue;
     const slimModels = {};
     for (const [modelId, model] of Object.entries(provider.models)) {
       if (!model || typeof model !== "object") continue;
-      const keep = {};
-      for (const key of MODEL_KEEP_KEYS) {
-        if (key in model) keep[key] = key === "description" ? truncate(model[key], DESCRIPTION_MAX) : model[key];
-      }
-      slimModels[modelId] = keep;
-      models += 1;
+      slimModels[modelId] = slimModel(model);
+      providerModels += 1;
     }
     if (Object.keys(slimModels).length === 0) continue;
-    slim[providerId] = {
-      id: provider.id ?? providerId,
-      api: provider.api ?? null,
-      name: provider.name ?? providerId,
-      models: slimModels,
-    };
-    providers += 1;
+    providers[providerId] = { models: slimModels };
   }
 
-  if (providers === 0) throw new Error("models.dev 目录没有可用的 provider 分组");
-  console.log(`models.dev 全量精简：${providers} 个 provider、${models} 个模型`);
-  await writeResource("models-dev.json", `${JSON.stringify(slim)}\n`);
+  for (const [modelId, model] of Object.entries(parsed.models ?? {})) {
+    if (!model || typeof model !== "object") continue;
+    canonical[modelId] = slimModel(model);
+    canonicalModels += 1;
+  }
 
-  // 官方厂商清单：只保留确实存在于本次抓取结果里的 id，排序保证可复现
-  const official = OFFICIAL_VENDORS.filter((id) => id in slim).sort();
-  console.log(`官方厂商清单：${official.length} 个（${official.join(", ")}）`);
-  await writeResource(
-    "models-dev-official-providers.json",
-    `${JSON.stringify(official, null, 2)}\n`,
+  if (providerModels === 0) throw new Error("models.dev 目录没有可用的 provider 分组");
+  if (canonicalModels === 0) throw new Error("models.dev 目录没有可用的模型条目");
+  console.log(
+    `models.dev 全量精简：${Object.keys(providers).length} 个 provider / ${providerModels} 个模型，` +
+      `模型清单 ${canonicalModels} 条`,
   );
+  await writeResource("models-dev.json", `${JSON.stringify({ models: canonical, providers })}\n`);
 }
 
 /** OpenRouter 全量响应（含 data[].id / canonical_slug / created 等）。 */

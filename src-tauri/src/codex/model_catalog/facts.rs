@@ -40,23 +40,12 @@ pub struct ModelFacts {
 
 impl ModelFacts {
     /// 按来源质量逐字段合并：低质量源只补空缺，不覆盖高质量值。
-    ///
-    /// 返回存在分歧的字段名，供候选项显示警告。
-    pub fn merge_from(
-        &mut self,
-        source: &'static str,
-        quality: u8,
-        other: ModelFacts,
-    ) -> Vec<&'static str> {
-        let mut conflicts = Vec::new();
+    pub fn merge_from(&mut self, source: &'static str, quality: u8, other: ModelFacts) {
         macro_rules! merge_fields {
             ($($field:ident),+ $(,)?) => {
                 $(
                     if let Some(value) = other.$field {
                         let field = stringify!($field);
-                        if self.$field.as_ref().is_some_and(|current| current != &value) {
-                            conflicts.push(field);
-                        }
                         let should_replace = self.$field.is_none()
                             || self
                                 .provenance
@@ -87,7 +76,6 @@ impl ModelFacts {
             supports_tool_calls,
             status,
         );
-        conflicts
     }
 
     /// 该源是否为这个字段提供了当前值（供测试断言）。
@@ -134,13 +122,12 @@ mod tests {
     }
 
     #[test]
-    fn lower_quality_source_only_fills_missing_fields_and_reports_conflict() {
+    fn lower_quality_source_only_fills_missing_fields() {
         let mut merged = ModelFacts::default();
         merged.merge_from("scoped", 30, facts(100, "scoped"));
-        let conflicts = merged.merge_from("global", 10, facts(200, "global"));
+        merged.merge_from("global", 10, facts(200, "global"));
         assert_eq!(merged.context_window, Some(100));
         assert_eq!(merged.description.as_deref(), Some("scoped"));
         assert_eq!(merged.source_of("context_window"), Some("scoped"));
-        assert!(conflicts.contains(&"context_window"));
     }
 }

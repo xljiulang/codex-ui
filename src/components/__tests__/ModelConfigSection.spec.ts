@@ -199,14 +199,12 @@ describe("ModelConfigSection 生成模型目录", () => {
               matched_id: "deepseek-chat",
               match_kind: "exact",
               score: 1,
-              scope: "provider",
             },
             {
               source: "openrouter",
               matched_id: "deepseek/deepseek-v3.2",
               match_kind: "fuzzy",
               score: 0.86,
-              scope: "global",
             },
           ],
           warnings: [],
@@ -222,7 +220,6 @@ describe("ModelConfigSection 生成模型目录", () => {
               matched_id: "deepseek-reasoner",
               match_kind: "exact",
               score: 1,
-              scope: "official_global",
             },
           ],
           warnings: [],
@@ -346,7 +343,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(confirm.classes()).not.toContain("primary");
   });
 
-  it("弹窗展示每个候选命中资料的来源标记", async () => {
+  it("弹窗为每个命中资料展示独立来源徽章", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({ providers: [providerWithKey] }),
     );
@@ -365,11 +362,18 @@ describe("ModelConfigSection 生成模型目录", () => {
       expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
     );
 
-    const labels = wrapper
-      .findAll(".model-catalog-picker-source")
-      .map((label) => label.text());
-    expect(labels).toEqual([
-      "models.dev + OpenRouter · 继承 deepseek/deepseek-v3.2",
+    // 同一候选的每个来源各一枚徽章，不再拼成一条
+    const badgeGroups = wrapper.findAll(".model-catalog-picker-sources");
+    expect(badgeGroups).toHaveLength(2);
+    expect(
+      badgeGroups.flatMap((group) =>
+        group
+          .findAll(".model-catalog-picker-source")
+          .map((badge) => badge.text()),
+      ),
+    ).toEqual([
+      "models.dev",
+      "OpenRouter · 继承 deepseek/deepseek-v3.2",
       "官方条目",
     ]);
     // 未命中的模型只显示跳过提示，不给来源标记
@@ -401,7 +405,6 @@ describe("ModelConfigSection 生成模型目录", () => {
                   matched_id: "legacy-model",
                   match_kind: "exact",
                   score: 1,
-                  scope: "provider",
                 },
               ],
               warnings: ["上游明确标记 tool_call=false，不兼容 Codex 工具调用"],

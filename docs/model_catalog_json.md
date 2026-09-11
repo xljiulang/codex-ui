@@ -29,7 +29,7 @@
    ├─ 1. 完整条目源（official）：命中即整条复用，不套模板
    │
    └─ 2. 字段源：models.dev + OpenRouter
-          │  每个源返回匹配类型、作用域、分数与 ModelFacts
+          │  每个源返回匹配类型、分数与 ModelFacts
           │  merge 按来源权威性和匹配质量逐字段选择，低质量源只补缺失值
           ▼
       3. 模板渲染（model_catalog_template.json，固定值唯一事实来源）
@@ -44,7 +44,7 @@
 | `matching.rs` | 别名键匹配、匹配级别与排序键、`CandidateStore`、规范化/相似度 |
 | `template.rs` | 模板加载、`DATA_DRIVEN_KEYS`、四条派生规则 |
 | `sources/official.rs` | 完整条目源：官方条目池（精确匹配） |
-| `sources/models_dev.rs` | 字段源（provider URL 定位 + 官方厂商全局索引） |
+| `sources/models_dev.rs` | 字段源（catalog.json 全量 provider 展开的模型 ID 索引） |
 | `sources/openrouter.rs` | 字段源（缓存 + 内置回退） |
 
 ### 新增一个数据源（三步）
@@ -64,20 +64,21 @@
   规范化会剥掉 provider 前缀、`:free` / `:batch` / `-free` / `-latest` / `-preview` /
   `-beta` / `-alpha` 后缀与结尾日期。
 - **模糊排序**（依次比较，全部确定性）：同厂商 → 同版本系列 → 保留查询中的规格 token
-  （`coder` / `chat` / `reasoner` / `flash` / `pro` / `mini` / `sonnet` 等）→ 相似度 →
-  正式模型优先于实验/beta/deprecated → 多余 token 少者 → 发布时间新者 → 模型 ID。
+  （`coder` / `chat` / `reasoner` / `flash` / `pro` / `mini` / `sonnet` 等）→
+  正式模型优先于实验/beta/deprecated → 版本距离近者（同系列标记后的首个整数，
+  如查询 `deepseek-v5` 时 `deepseek-v4-*` 优于中转商的历史 `deepseek-v3*`）→
+  多余 token 少者 → 相似度 → 发布时间新者 → 模型 ID。
 - **效果**：`gpt-5.7` 继承最新正式 GPT-5.x，`qwen4-coder` 优先继承 Qwen Coder，
   `deepseek-v5` 只在 DeepSeek V 系列内选择；模糊命中仍是正常可生成模型，只在弹窗显示
   “资料继承自……”的溯源。
 - **输出 slug 始终是提供方返回的原始 ID**，只有能力字段来自命中的规范模型。
-- **provider 分组定位**（仅 models.dev）：先按 `base_url` 与 provider `api` 的
-  同源 + 路径前缀匹配（区分同主机不同产品线，如 `https://opencode.ai/zen/v1` → `opencode`、
-  `https://opencode.ai/zen/go/v1` → `opencode-go`）。无路径命中时仅当同主机只有一个 provider
-  才退化为主机匹配；同主机多分组且路径不足以判断时不再任意选择。
-- **全局回退**：models.dev 只索引 `models-dev-official-providers.json` 中的官方厂商；无关中转商
-  只有在 `base_url` 明确定位到其 provider 分组时才可使用。OpenRouter 为最后的全局补充源。
-- **字段覆盖**：provider 精确/别名资料优先于官方厂商全局资料，再优先于 OpenRouter；低质量
-  命中只能补空字段，不能覆盖高质量值。冲突字段会进入候选警告。
+- **只按模型 ID 匹配**（models.dev）：不按 `base_url` 定位 provider 分组，也不看提供方，
+  同一个模型 ID 在任何提供方下的结果一致。索引由 `catalog.json` 的 `providers` 全部分组
+  展平得到（同 ID 取分组 id 字典序第一份），`models` 里的模型级条目只补 `providers`
+  未覆盖的 ID（如 `swiss-ai/apertus-8b`）——它没有 `reasoning_options` / `status`，
+  因此不反压分组资料，推理档位与 beta/deprecated 判定不退化。
+- **字段覆盖**：models.dev 基础分高于 OpenRouter，两者再按匹配级别（精确/别名/规范化/模糊）
+  加分比较；低质量命中只能补空字段，不能覆盖高质量值（各源取值不同不再作为警告展示）。
 
 ## 字段来源
 
@@ -100,7 +101,8 @@
 | `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；`display_name` 按 slug 格式化；`priority` 按勾选顺序从 1 重排 |
 
 命令返回的每个候选包含 `status`（`ready` / `incompatible` / `unmatched`）、`selectable`、
-`warnings` 与 `sources[]`。来源证据包括来源名、继承目标 `matched_id`、匹配类型、分数和作用域；
+`warnings` 与 `sources[]`。来源证据包括来源名、继承目标 `matched_id`、匹配类型与分数，
+弹窗里**每个来源各展示一枚徽章**（未继承时只显示来源名，继承时显示「来源 · 继承 `matched_id`」）；
 统计字段为 `ready / incompatible / unmatched`。即使全部未匹配或不兼容，也会返回候选列表和
 空目录 `{ "models": [] }`，由弹窗展示具体原因。
 
@@ -153,16 +155,16 @@
 | 资源 | 用途 | 更新方式 |
 | --- | --- | --- |
 | `resources/official-models.json` | 官方条目池（完整条目源）：codex 基线条目与 codex 版本绑定，可手工追加其它厂商条目 | `--official` |
-| `resources/models-dev.json` | models.dev 内置快照：**全量** provider 分组（213 个 provider / 7669 个模型，约 2.8 MB，保留 `tool_call` / `status`；含中转/聚合商供明确 provider 分组使用） | 同上 |
-| `resources/models-dev-official-providers.json` | 官方厂商 id 清单（约 0.5 KB），只用于全局索引同 ID 冲突时的优先级 | 同上 |
+| `resources/models-dev.json` | models.dev 内置快照（`catalog.json` 精简版）：`providers` **全量** 213 个 provider / 7669 个模型 + `models` 382 条模型级条目，约 3 MB，保留 `tool_call` / `status` / `reasoning_options`；省略与 map key 重复的 `id` 与不再使用的 `api` / `name` | 同上 |
 | `resources/openrouter-models.json` | OpenRouter 全量响应回退 | 同上 |
 | `resources/model_catalog_template.json` | 渲染基底（由官方条目池的 `gpt-5.6-sol` 派生） | `--template` |
 
 运行时缓存位于应用数据目录 `%APPDATA%\com.codexui.app\cache\`：`openrouter-models.json`
 与 `models-dev.json` **均为 24 小时 TTL**——启动时检查各自文件的 mtime，未过期直接复用、
 不重复下载；缓存缺失、过期或**内容损坏（无法解析）**时才重新抓取，抓取失败保留旧缓存；
-读取时若缓存不可用则回退上面两份内置资源。缓存里保存的是抓取到的原始完整响应
-（models.dev 约 4.5 MB，不含精简）。
+读取时若缓存不可用则回退内置资源。缓存里保存的是抓取到的原始完整响应
+（models.dev `catalog.json` 约 4.9 MB，不含精简；旧版 `api.json` 形态的缓存因缺少
+`providers` 键会被判为过期并重新抓取）。
 
 ```powershell
 node scripts/update-model-catalog-sources.mjs                # 全部
