@@ -18,6 +18,7 @@ const DEFAULT_PORT = 18080;
 const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
 const ZEN_PRICING_DOCS_URL =
   "https://open-code.ai/zh/docs/zen#%E5%AE%9A%E4%BB%B7";
+const ZEN_KEY_DOCS_URL = "https://opencode.ai/zen";
 
 /** 本地代理运行状态（由 zen_proxy_status 驱动；未获取时默认停止） */
 const status = ref<ZenProxyStatus>({ running: false, port: DEFAULT_PORT });
@@ -124,7 +125,12 @@ onBeforeUnmount(refresh);
               @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
             >Zen 免费模型</a>，本地 provider 的 base_url 为
             {{ localBaseUrlHint }}（本机地址 + 模型提供方 base_url 的路径，只换
-            host），experimental_bearer_token 为 public 或你自己的 key
+            host），experimental_bearer_token 为 public 或 <a
+            class="zen-proxy-docs-link"
+            :href="ZEN_KEY_DOCS_URL"
+            v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
+            @click.prevent="openDocsUrl(ZEN_KEY_DOCS_URL)"
+          >你自己的 key</a>
           </p>
           <div class="zen-proxy-badges">
             <span
