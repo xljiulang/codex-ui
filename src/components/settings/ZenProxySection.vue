@@ -9,6 +9,7 @@ import {
   toastError,
   type ZenProxyStatus,
 } from "../../composables/useCodex";
+import { copyText } from "../../lib/clipboard";
 import { ICON_SAVE } from "../../lib/icons";
 import { openDocsUrl } from "../../lib/links";
 
@@ -30,6 +31,8 @@ const apiUrlInput = ref<string>(
 );
 /** 输入校验错误信息 */
 const portError = ref<string>("");
+/** base_url 复制按钮反馈文案 */
+const copied = ref(false);
 
 /**
  * 本地 provider 的 base_url 提示：本机回环地址 + 模型提供方 base_url 的路径
@@ -101,6 +104,18 @@ async function onSave() {
   await refresh();
 }
 
+// 复制本机 provider 的 base_url
+async function copyBaseUrl() {
+  const ok = await copyText(localBaseUrlHint.value);
+  setToast(ok ? "base_url 已复制" : "复制失败，请手动选择复制");
+  if (ok) {
+    copied.value = true;
+    window.setTimeout(() => {
+      copied.value = false;
+    }, 1500);
+  }
+}
+
 onMounted(refresh);
 onBeforeUnmount(refresh);
 </script>
@@ -117,29 +132,9 @@ onBeforeUnmount(refresh);
         <div class="zen-proxy-head-main">
           <h3>Zen 本地代理服务</h3>
           <p class="zen-proxy-head-desc">
-            model 为
-            <a
-              class="zen-proxy-docs-link"
-              :href="ZEN_PRICING_DOCS_URL"
-              v-tooltip="'Zen 定价文档（浏览器打开）'"
-              @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
-            >Zen 免费模型</a>，本地 provider 的 base_url 为
-            {{ localBaseUrlHint }}，experimental_bearer_token 为 public 或 <a
-            class="zen-proxy-docs-link"
-            :href="ZEN_KEY_DOCS_URL"
-            v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
-            @click.prevent="openDocsUrl(ZEN_KEY_DOCS_URL)"
-          >你自己的 key</a>
+            在「模型配置」中添加模型提供方，字段按下图填写
           </p>
-          <div class="zen-proxy-badges">
-            <span
-              class="zen-proxy-status"
-              :class="status.running ? 'is-running' : 'is-stopped'"
-            >
-              {{ status.running ? "运行中" : "已停止" }}
-            </span>
-            <span class="zen-proxy-port-badge">{{ status.port }}</span>
-          </div>
+
         </div>
         <div class="model-config-head-actions">
           <label class="switch" aria-label="Zen 本地代理开关">
@@ -150,6 +145,45 @@ onBeforeUnmount(refresh);
             />
             <span class="switch-track"></span>
           </label>
+        </div>
+      </div>
+
+      <div class="zen-proxy-config-hint">
+        <div class="zen-proxy-config-row">
+          <span class="zen-proxy-config-field">base_url</span>
+          <span class="zen-proxy-config-value zen-proxy-config-code">
+            {{ localBaseUrlHint }}
+          </span>
+          <button
+            class="copy-btn zen-proxy-config-copy"
+            aria-label="复制 base_url"
+            v-tooltip="'复制 base_url'"
+            @click="copyBaseUrl"
+          >
+            {{ copied ? "已复制" : "复制" }}
+          </button>
+        </div>
+        <div class="zen-proxy-config-row">
+          <span class="zen-proxy-config-field">experimental_bearer_token</span>
+          <span class="zen-proxy-config-value">
+            <a
+              class="zen-proxy-docs-link"
+              :href="ZEN_KEY_DOCS_URL"
+              v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
+              @click.prevent="openDocsUrl(ZEN_KEY_DOCS_URL)"
+            >你自己的 key</a>
+          </span>
+        </div>
+        <div class="zen-proxy-config-row">
+          <span class="zen-proxy-config-field">model</span>
+          <span class="zen-proxy-config-value">
+            <a
+              class="zen-proxy-docs-link"
+              :href="ZEN_PRICING_DOCS_URL"
+              v-tooltip="'Zen 定价文档（浏览器打开）'"
+              @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
+            >Zen 免费模型</a>
+          </span>
         </div>
       </div>
 
@@ -221,11 +255,6 @@ onBeforeUnmount(refresh);
   color: var(--accent-dim);
   text-decoration: underline;
 }
-.zen-proxy-badges {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
 .zen-proxy-port-input {
   width: 100%;
   height: var(--ctrl-h-md);
@@ -244,38 +273,65 @@ onBeforeUnmount(refresh);
 .zen-proxy-apply-btn {
   flex-shrink: 0;
 }
-.zen-proxy-status {
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  border-radius: 999px;
-  flex-shrink: 0;
-  padding: 1px var(--space-2);
-  border: 1px solid transparent;
-}
-.zen-proxy-status.is-running {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.zen-proxy-status.is-stopped {
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border-color: var(--border);
-}
-.zen-proxy-port-badge {
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  border-radius: 999px;
-  flex-shrink: 0;
-  padding: 1px var(--space-2);
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-}
+
 .zen-proxy-error {
   color: var(--danger);
   font-size: var(--font-xs);
   margin: 0 0 var(--space-2);
+}
+.zen-proxy-config-hint {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--overlay-rgb), 0.02);
+  padding: var(--space-5) var(--space-8);
+  margin-top: var(--space-5);
+}
+
+.zen-proxy-config-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.zen-proxy-config-field {
+  flex: 0 0 168px;
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+  user-select: text;
+}
+
+.zen-proxy-config-value {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--font-md);
+  color: var(--text);
+  user-select: text;
+}
+
+.zen-proxy-config-code {
+  font-family: var(--mono);
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px var(--space-3);
+  word-break: break-all;
+}
+
+.zen-proxy-config-copy {
+  flex-shrink: 0;
+  min-height: var(--ctrl-h-xs);
+  font-size: var(--font-xs);
 }
 </style>

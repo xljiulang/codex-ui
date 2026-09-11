@@ -3,6 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const mockOpenDocsUrl = vi.hoisted(() => vi.fn());
+const mockCopyText = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/clipboard", () => ({ copyText: mockCopyText }));
 vi.mock("../../lib/links", () => ({ openDocsUrl: mockOpenDocsUrl }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
@@ -46,6 +48,8 @@ describe("ZenProxySection", () => {
     mockedToggle.mockClear();
     mockedToast.mockClear();
     mockOpenDocsUrl.mockClear();
+    mockCopyText.mockReset();
+    mockCopyText.mockResolvedValue(true);
   });
 
   it("渲染标题、说明与运行状态", async () => {
@@ -56,40 +60,55 @@ describe("ZenProxySection", () => {
     expect(wrapper.find(".zen-proxy-head-main h3").text()).toBe(
       "Zen 本地代理服务",
     );
-    expect(wrapper.text()).toContain("运行中");
-    expect(wrapper.find(".zen-proxy-port-badge").text()).toContain("18080");
     // 说明文案含 Responses 与 Zen
     expect(wrapper.text()).toContain("Responses");
     expect(wrapper.text()).toContain("OpenCode Zen");
   });
 
-  it("说明中的 Zen 免费模型链接到定价文档", async () => {
+  it("配置块中的 Zen 免费模型链接到定价文档", async () => {
     const wrapper = mountSection();
-    const link = wrapper.find(".zen-proxy-docs-link");
+    const row = wrapper.findAll(".zen-proxy-config-row")[2];
+    const link = row.find(".zen-proxy-docs-link");
     expect(link.text()).toBe("Zen 免费模型");
     expect(link.attributes("href")).toBe(ZEN_PRICING_DOCS_URL);
     await link.trigger("click");
     expect(mockOpenDocsUrl).toHaveBeenCalledWith(ZEN_PRICING_DOCS_URL);
   });
 
+  it("配置块渲染 experimental_bearer_token：指向「你自己的 key」链接", async () => {
+    const wrapper = mountSection();
+    const rows = wrapper.findAll(".zen-proxy-config-row");
+    const tokenRow = rows[1];
+    expect(tokenRow.find(".zen-proxy-config-field").text()).toBe(
+      "experimental_bearer_token",
+    );
+    const keyLink = tokenRow.find(".zen-proxy-docs-link");
+    expect(keyLink.text()).toBe("你自己的 key");
+  });
+
+  it("配置块 base_url 行提供复制按钮并调用 copyText", async () => {
+    const wrapper = mountSection();
+    const copyBtn = wrapper.find(".zen-proxy-config-copy");
+    expect(copyBtn.exists()).toBe(true);
+    await copyBtn.trigger("click");
+    expect(mockCopyText).toHaveBeenCalledWith(
+      "http://127.0.0.1:18080/zen/v1",
+    );
+    expect(copyBtn.text()).toContain("已复制");
+  });
+
   it("本地 provider 的 base_url 提示跟随上游地址的路径", async () => {
     const wrapper = mountSection();
     // 默认上游 https://opencode.ai/zen/v1 → 本机地址 + /zen/v1
-    expect(wrapper.find(".zen-proxy-head-desc").text()).toContain(
-      "http://127.0.0.1:18080/zen/v1",
-    );
+    const value = () =>
+      wrapper.find(".zen-proxy-config-value.zen-proxy-config-code");
+    expect(value().text()).toContain("http://127.0.0.1:18080/zen/v1");
     const urlInput = wrapper.find("input[type='text']");
     await urlInput.setValue("https://api.deepseek.com/");
-    expect(wrapper.find(".zen-proxy-head-desc").text()).toContain(
-      "http://127.0.0.1:18080",
-    );
-    expect(wrapper.find(".zen-proxy-head-desc").text()).not.toContain(
-      "http://127.0.0.1:18080/zen",
-    );
+    expect(value().text()).toContain("http://127.0.0.1:18080");
+    expect(value().text()).not.toContain("http://127.0.0.1:18080/zen");
     await urlInput.setValue("https://custom.example.com/zen/v2/");
-    expect(wrapper.find(".zen-proxy-head-desc").text()).toContain(
-      "http://127.0.0.1:18080/zen/v2",
-    );
+    expect(value().text()).toContain("http://127.0.0.1:18080/zen/v2");
   });
 
   it("上游地址字段文案为「模型提供方的 base_url」", () => {
