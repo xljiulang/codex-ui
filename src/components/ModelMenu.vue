@@ -37,9 +37,12 @@ const defaultEffort = computed(() => {
 function selectModel(m: (typeof store.models)[number]) {
   // 默认项（配置 model 或服务端 isDefault）→ 内部空串表示跟随默认；其它显式选择
   model.value = m.isDefault ? "" : m.model;
-  // 当前强度不在该模型支持范围内时，回到默认
+  // 当前强度不在该模型支持范围内时回到默认；但"支持列表为空"表示该模型没声明档位
+  // （未知），这时保留当前强度，避免把用户/配置里的推理强度静默清成 none
+  // （与 sessionState 的 validateSessionModelEffort 同规则）。
   if (
     effort.value &&
+    m.supportedReasoningEfforts.length &&
     !m.supportedReasoningEfforts.some((s) => s.reasoningEffort === effort.value)
   ) {
     effort.value = "";

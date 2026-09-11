@@ -162,37 +162,32 @@ async function fetchModelCatalog(): Promise<ModelInfo[] | null> {
  * - 配置 model 未命中（含被 hidden 过滤）：置顶合成项并标记默认；
  * - 配置 model 为空：不插合成项，沿用服务端 isDefault（缺失则首项）；
  * - 配置读取失败（null）：同"为空"分支沿用服务端 isDefault；
- * - 默认项强度：config model_reasoning_effort 非空时覆盖该项 defaultReasoningEffort。
+ * - 默认项强度：config model_reasoning_effort 非空时覆盖该项 defaultReasoningEffort；
+ *   目录没声明档位（supportedReasoningEfforts 为空 = 未知）的条目也沿用该值——
+ *   否则切到这类模型时强度会回落成 none，整轮不请求推理（Zen 的 big-pickle 实测）。
+ *   声明了档位的模型（除配置模型那一项）不受影响。
  */
 function composeModels(
   catalog: ModelInfo[],
   defaults: EffectiveDefaults | null,
 ): ModelInfo[] {
+  const configEffort = defaults?.reasoningEffort ?? "";
+  const applyEffort = (m: ModelInfo, isConfigModel: boolean): ModelInfo => {
+    if (!configEffort) return m;
+    if (!isConfigModel && m.supportedReasoningEfforts.length > 0) return m;
+    return { ...m, defaultReasoningEffort: configEffort };
+  };
   const list = catalog.map((m) => ({ ...m }));
   if (defaults === null || !defaults.model) {
     if (!list.some((m) => m.isDefault) && list.length) list[0].isDefault = true;
-    if (defaults?.reasoningEffort) {
-      const idx = list.findIndex((m) => m.isDefault);
-      if (idx >= 0) {
-        list[idx] = {
-          ...list[idx],
-          defaultReasoningEffort: defaults.reasoningEffort,
-        };
-      }
-    }
-    return list;
+    return list.map((m) => applyEffort(m, m.isDefault));
   }
   const configModel = defaults.model;
   const idx = list.findIndex((m) => m.model === configModel);
   if (idx >= 0) {
-    return list.map((m, i) => ({
-      ...m,
-      isDefault: i === idx,
-      defaultReasoningEffort:
-        i === idx && defaults.reasoningEffort
-          ? defaults.reasoningEffort
-          : m.defaultReasoningEffort,
-    }));
+    return list.map((m, i) =>
+      applyEffort({ ...m, isDefault: i === idx }, i === idx),
+    );
   }
   return [
     {
@@ -203,9 +198,9 @@ function composeModels(
       hidden: false,
       isDefault: true,
       supportedReasoningEfforts: [],
-      defaultReasoningEffort: defaults.reasoningEffort || "",
+      defaultReasoningEffort: configEffort,
     },
-    ...list.map((m) => ({ ...m, isDefault: false })),
+    ...list.map((m) => applyEffort({ ...m, isDefault: false }, false)),
   ];
 }
 

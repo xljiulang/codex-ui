@@ -364,6 +364,15 @@ function mkModel(
   };
 }
 
+/** 目录没声明推理档位的条目（如 Zen 的 big-pickle）：空数组表示"未知" */
+function mkModelWithoutLevels(slug: string): ModelInfo {
+  return {
+    ...mkModel(slug),
+    supportedReasoningEfforts: [],
+    defaultReasoningEffort: "",
+  };
+}
+
 /** 按 codex_rpc 方法返回目录/配置响应；catalogThrows/configThrows 模拟调用失败 */
 function mockModelRpc(opts: {
   catalog?: ModelInfo[] | null;
@@ -437,6 +446,34 @@ describe("loadModels 默认模型合成", () => {
     expect(
       store.models.find((m) => m.model === "b")?.defaultReasoningEffort,
     ).toBe("high");
+  });
+
+  it("目录没声明档位的模型（空数组=未知）沿用 config 强度作默认，声明档位的不受影响", async () => {
+    mockModelRpc({
+      catalog: [
+        mkModel("a", { isDefault: true }),
+        mkModel("b"),
+        mkModelWithoutLevels("big-pickle"),
+      ],
+      config: { config: { model: "a", model_reasoning_effort: "medium" } },
+    });
+    await loadModels(true, "");
+    const bySlug = (slug: string) =>
+      store.models.find((m) => m.model === slug)?.defaultReasoningEffort;
+    expect(bySlug("a")).toBe("medium"); // 配置模型：既有覆盖规则
+    expect(bySlug("big-pickle")).toBe("medium"); // 未声明档位：沿用配置强度
+    expect(bySlug("b")).toBe("low"); // 声明了档位：保持条目自带默认
+  });
+
+  it("config 强度为空：未声明档位的条目默认值保持为空", async () => {
+    mockModelRpc({
+      catalog: [mkModel("a", { isDefault: true }), mkModelWithoutLevels("big-pickle")],
+      config: { config: { model: "a" } },
+    });
+    await loadModels(true, "");
+    expect(
+      store.models.find((m) => m.model === "big-pickle")?.defaultReasoningEffort,
+    ).toBe("");
   });
 
   it("config 读取失败：沿用服务端 isDefault，不插合成项", async () => {

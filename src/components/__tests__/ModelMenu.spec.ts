@@ -130,6 +130,41 @@ describe("ModelMenu 模型与推理强度", () => {
     expect(w.emitted("close")).toBeTruthy();
   });
 
+  it("切到未声明档位的模型：保留当前推理强度（空数组=未知，不清成 none）", async () => {
+    const w = mount(ModelMenu);
+    // OTHER_MODEL 的 supportedReasoningEfforts 为空（big-pickle 这类目录没给档位的模型）
+    await w.findAll(".option-btn")[1].trigger("click");
+    await w.find(".model-menu-apply-btn").trigger("click");
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/settings/update",
+      params: { threadId: "t1", model: "other-model", effort: "high" },
+    });
+    expect(activeSessionTab()?.effort).toBe("high");
+  });
+
+  it("模型声明了档位但不含当前强度：仍回落为默认强度", async () => {
+    store.models.push({
+      id: "m3",
+      model: "low-only-model",
+      displayName: "LowOnly",
+      description: "",
+      hidden: false,
+      isDefault: false,
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "低" },
+      ],
+      defaultReasoningEffort: "low",
+    } as (typeof store.models)[number]);
+    const w = mount(ModelMenu);
+    await w.findAll(".option-btn")[2].trigger("click"); // low-only-model
+    await w.find(".model-menu-apply-btn").trigger("click");
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "thread/settings/update",
+      params: { threadId: "t1", model: "low-only-model", effort: "low" },
+    });
+    expect(activeSessionTab()?.effort).toBe("low");
+  });
+
   it("同步失败时 toast 提示但仍关闭菜单", async () => {
     mockedInvoke.mockRejectedValue(new Error("同步失败"));
     const w = mount(ModelMenu);
