@@ -18,8 +18,8 @@
   因此要用哪些模型，就得把它们都写进目录（包括想用的 GPT 模型）。
 - **只在启动时构建**：改完目录或提供方后需要重启 codex-ui 才生效（`config/batchWrite` 的
   `reloadUserConfig` 不会重建模型目录）。
-- **条目字段不完整会退化**：字段缺失会走 codex 的 fallback 元数据（上下文 272k、
-  `visibility=none`），所以生成的条目始终输出完整键集。
+- **必需字段缺失会导致加载失败**：生成器先补齐键，再校验字段类型与关联约束；
+  无法安全生成的单个模型标为 `invalid`，不让它破坏其余模型的目录。
 
 ## 生成管线
 
@@ -30,9 +30,12 @@
    │
    └─ 2. 字段源：models.dev + OpenRouter
           │  每个源返回匹配类型、分数与 ModelFacts
-          │  merge 按来源权威性和匹配质量逐字段选择，低质量源只补缺失值
+          │  merge 先比较匹配准确度，再比较来源权威性，逐字段选择
           ▼
       3. 模板渲染（model_catalog_template.json，固定值唯一事实来源）
+          │  自动派生、修正约束并校验，失败条目隔离
+          ▼
+      4. 选择模型 → 确定 → 直接回填完整参数（不自动保存）
 ```
 
 代码结构（`src-tauri/src/codex/model_catalog/`）：
@@ -43,6 +46,7 @@
 | `facts.rs` | `ModelFacts`（全字段可选）+ `merge_from` 逐字段覆盖 + `provenance` 溯源 |
 | `matching.rs` | 别名键匹配、匹配级别与排序键、`CandidateStore`、规范化/相似度 |
 | `template.rs` | 模板加载、`DATA_DRIVEN_KEYS`、四条派生规则 |
+| `validation.rs` | 关联事实修正、输出结构与上下文校验、最终字段来源补全 |
 | `sources/official.rs` | 完整条目源：官方条目池（本机 codex 导出 + 内置第三方条目，精确匹配） |
 | `codex_models.rs` | 启动时从本机 codex 导出官方条目（`codex debug models --bundled` → 运行时缓存） |
 | `sources/models_dev.rs` | 字段源（catalog.json 全量 provider 展开的模型 ID 索引） |
@@ -58,12 +62,14 @@
 
 ## 匹配与排序规则
 
-- **权威别名**：OpenRouter 用 `canonical_slug` / `alias_target.slug`；models.dev 用 `family`。
+- **权威别名**：OpenRouter 用 `canonical_slug` / `alias_target.slug`；
+  models.dev 的 `family` 只参与模糊系列继承，不构成同一模型的精确别名。
 - **匹配级别**：规范模型 ID 精确 → 权威别名精确 → 规范化精确 → 同系列模糊匹配 → 无匹配。
   一般模糊阈值为 0.72；版本系列已确认一致时可降到 0.60，容纳 `coder` / `flash` / `pro`
   等规格后缀造成的额外距离。
   规范化会剥掉 provider 前缀、`:free` / `:batch` / `-free` / `-latest` / `-preview` /
-  `-beta` / `-alpha` 后缀与结尾日期。
+  `-beta` / `-alpha` 后缀与结尾日期；日期剥离使用 UTF-8 安全切片，格式为
+  `YYYYMMDD` 或 `YYYY-MM-DD`。明确存在且冲突的命名空间不会跨厂商匹配。
 - **模糊排序**（依次比较，全部确定性）：同厂商 → 同版本系列 → 保留查询中的规格 token
   （`coder` / `chat` / `reasoner` / `flash` / `pro` / `mini` / `sonnet` 等）→
   正式模型优先于实验/beta/deprecated → 版本距离近者（同系列标记后的首个整数，
@@ -73,13 +79,16 @@
   `deepseek-v5` 只在 DeepSeek V 系列内选择；模糊命中仍是正常可生成模型，只在弹窗显示
   “资料继承自……”的溯源。
 - **输出 slug 始终是提供方返回的原始 ID**，只有能力字段来自命中的规范模型。
-- **只按模型 ID 匹配**（models.dev）：不按 `base_url` 定位 provider 分组，也不看提供方，
-  同一个模型 ID 在任何提供方下的结果一致。索引由 `catalog.json` 的 `providers` 全部分组
-  展平得到（同 ID 取分组 id 字典序第一份），`models` 里的模型级条目只补 `providers`
-  未覆盖的 ID（如 `swiss-ai/apertus-8b`）——它没有 `reasoning_options` / `status`，
-  因此不反压分组资料，推理档位与 beta/deprecated 判定不退化。
-- **字段覆盖**：models.dev 基础分高于 OpenRouter，两者再按匹配级别（精确/别名/规范化/模糊）
-  加分比较；低质量命中只能补空字段，不能覆盖高质量值（各源取值不同不再作为警告展示）。
+- **只按模型 ID 匹配**（models.dev）：不按 `base_url` 定位目标提供方，同一个模型 ID
+  在任何目标提供方下结果一致。保留 `providers` 全部分组与 `models` 模型级记录，
+  不在解析阶段按字典序丢弃同 ID 资料；源内部逐字段采用「规范模型 → 明确原厂 → 其他提供方」。
+  原厂仅按规范 ID 命名空间与 provider ID 的明确关系识别，无厂商白名单、无名称猜测。
+  无前缀 ID 仅通过唯一、无损尾段关联规范模型，保留日期、版本与规格后缀。
+  规范资料缺失的字段仍可补充；其他提供方同级值一致才采用，冲突字段保持未知，
+  自动交给其他来源或模板。`big-pickle` 等分组专有 ID 仍可匹配。
+- **字段覆盖**：先比较 exact / alias / normalized / fuzzy，再比较来源权威性
+  （同级默认 models.dev 优先于 OpenRouter），模糊命中再比较相似度，最后按稳定来源标识排序。
+  因此 OpenRouter 的精确资料会覆盖 models.dev 的近似资料；缺失值不抹掉已有结果。
 
 ## 字段来源
 
@@ -100,45 +109,54 @@
 | `description` | `description` | `description` | `description`（空则用占位文案「由模型提供者目录生成」） |
 | `support_verbosity` | `supported_parameters` 含 `verbosity` | —（不提供） | `support_verbosity`；源明确给值时同时把 `default_verbosity` 写 `null` |
 | `supports_search_tool` | `supported_parameters` 含 `web_search_options` 或 `web_search` | —（不提供） | `supports_search_tool` |
-| `supports_tool_calls` | `supported_parameters` 含 `tools` | `tool_call`（bool） | **不写入目录**，只做兼容判定：`false` → 候选标 `incompatible` |
-| `status` | `status` | `status`（小写） | 写入条目 `status`；`beta` → 候选警告；`deprecated` → `incompatible` |
+| `supports_tool_calls` | `supported_parameters` 含 `tools` | `tool_call`（bool） | **不写入目录**；可靠匹配最终采用的 `false` → `incompatible`，模糊值只提示继承对象限制 |
+| `status` | `status`（去空白、小写） | `status`（去空白、小写） | 写入条目 `status`；`beta` → 警告；可靠匹配的 `deprecated` → `incompatible`，模糊值不直接禁用目标模型 |
 | `supports_reasoning` | `reasoning` 存在且（`mandatory` / `supported_efforts` 非空 / `default_effort` 非空） | `reasoning === true` 或 `reasoning_options` 非空 | **目前无消费者**（只有单测断言），接上用途或删除前不必关注 |
 
 > OpenRouter 的 `supported_parameters` 是「集合存在即为显式声明」：`verbosity` / `web_search*` / `tools`
-> 不在集合里即记 `false`（明确不支持，而不是未知）。models.dev 没有这三个字段，所以这三项实际由
-> OpenRouter 独家提供。
+> 不在合法字符串集合里即记 `false`（明确不支持，而不是未知）；数组类型或元素非法则视为未知。
+> models.dev 用 `tool_call` 提供工具能力；verbosity 与搜索参数能力由 OpenRouter 提供。
 
 ### 只用于候选匹配、不进 ModelFacts 的字段
 
 | 用途 | OpenRouter | models.dev |
 | --- | --- | --- |
 | 候选主键（输出 slug 仍用提供方返回的原始 ID） | `id` | `providers[*].models` 的 map key（条目缺 `id` 时用 key） |
-| 权威别名（匹配级别 alias） | `canonical_slug`、`alias_target.slug` | `family` |
+| 权威别名（匹配级别 alias） | `canonical_slug`、`alias_target.slug` | 无；`family` 仅为模糊线索 |
 | 发布时间（相似度相同时取新） | `created` | `release_date`，缺失回退 `last_updated` |
 | 变体/实验标记（排序时靠后） | `status` | `status` |
-| 数据形态 | `data[]` 或 `models[]`，每条必须有非空 `id` | `{ models, providers }`：providers 全量展平（同 ID 取分组 id 字典序第一份）+ `models` 补缺 |
+| 数据形态 | `data[]` 或 `models[]`，每条必须有非空 `id` | `{ models, providers }`：保留同 ID 全部记录，逐字段处理权威性与冲突 |
 
 ### 合并与派生
 
-- 注册顺序 `openrouter` → `models.dev`；质量分 = 来源基础分（**models.dev 30 / OpenRouter 20**）+ 匹配级别
-  加成（exact 4 / alias 3 / normalized 2 / fuzzy 1），`quality >= 当前值` 才覆盖——同分时 models.dev
-  胜出，低分源只能补空字段。例：`deepseek-v4-flash-vision-exp` 的上下文取 models.dev 的 1,000,000，
-  而不是 OpenRouter 的 1,048,576。
-- 档位过滤：只丢弃空值、`default`、`null` 哨兵，保留自定义档位。
+- 来源各自独立查找，生成器通过 `FieldQuality` 的有序字段比较可信度，不再把来源分与匹配分相加。
+  `FieldProvenance` 记录来源、继承 ID、匹配级别、资料所属 provider、最终值与处理原因。
+- 明确 `false` 与空数组是有效值，缺失与解析失败才是未知。档位采用一个来源的完整列表，
+  不拼接多个来源的集合；同来源多份记录仅顺序不同不算冲突。
+- 档位过滤：只丢弃空值、`default`、`null` 哨兵，保留自定义档位；默认档位不在支持列表时自动清空。
+- 输入上限大于上下文时，若输入上限更可信则用其重新派生上下文基准；否则放弃冲突输入限制。
+  仅有输入上限、上下文未知时，以输入上限自动派生保守基准，不套用可能更大的模板窗口。
+  随后校验正数上下文、最大上下文、有效比例与压缩阈值。必需字段类型非法或无法安全修复时，
+  候选标 `invalid` 并隔离，不影响其他模型。
 
 ### 其余写入字段
 
 | 字段 | 来源 |
 | --- | --- |
 | `supports_reasoning_summary_parameter` | 模板生成条目固定为 false；官方完整条目保持原值 |
-| `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；`display_name` 按 slug 格式化；`priority` 按勾选顺序从 1 重排 |
-| 可用性 | `tool_call=false` 或 `status=deprecated` → `incompatible`；不兼容条目不会写入目录 |
+| `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；模板条目 `display_name` 按 slug 格式化；`priority` 按选中条目的候选原顺序从 1 重排，不按点击顺序 |
+| 可用性 | 可靠匹配的 `tool_call=false` 或 `status=deprecated` → `incompatible`；条目校验失败 → `invalid`；这些条目不会写入目录 |
 
-命令返回的每个候选包含 `status`（`ready` / `incompatible` / `unmatched`）、`selectable`、
-`warnings` 与 `sources[]`。来源证据包括来源名、继承目标 `matched_id`、匹配类型与分数，
+命令返回的每个候选包含 `status`（`ready` / `incompatible` / `unmatched` / `invalid`）、`selectable`、
+`warnings`、`sources[]` 与 `field_provenance`。来源证据包括来源名、继承目标 `matched_id`、匹配类型与分数，
 弹窗里**每个来源各展示一枚徽章**（未继承时只显示来源名，继承时显示「来源 · 继承 `matched_id`」）；
-统计字段为 `ready / incompatible / unmatched`。即使全部未匹配或不兼容，也会返回候选列表和
-空目录 `{ "models": [] }`，由弹窗展示具体原因。
+统计字段为 `ready / incompatible / unmatched / invalid`。即使全部不可生成，也会返回候选列表和
+空目录 `{ "models": [] }`，弹窗展示具体原因并禁用确认，编辑框原内容不变。
+
+选择弹窗、搜索、勾选、三态全选及确认步骤全部保留。字段来源通过「参数来源（只读）」展开，
+不提供人工参数输入、来源选择或冲突确认。用户点击确定后只过滤已选模型并重排优先级，
+直接回填已自动计算的完整参数，不重新请求资料、不自动保存。取消、请求失败和迟到的过期响应
+不会修改目录；保存仍走现有按钮。
 
 ### 官方条目的复用（本机 codex 导出 + 第三方条目）
 
@@ -156,7 +174,8 @@
 导出失败且无缓存时条目池只剩第三方条目：GPT 模型退回多源合并 + 模板渲染，
 `codex-auto-review` 不再复用（不影响生成，只是少了官方口径的资料）。
 
-命中池中 slug（精确或规范化相同）时整条复用该条目：专属提示词、`context_window`、
+先全池查找原始 slug 精确匹配，再查找唯一规范化匹配；规范化有歧义时自动转字段源。
+命中时整条复用该条目：专属提示词、`context_window`、
 `max_context_window`（如 `gpt-5.6-*` 的 872000）、`tool_mode=code_mode_only`、
 `use_responses_lite`、`web_search_tool_type=text_and_image`、`include_*`、`multi_agent_version`、
 `truncation_policy` 全部保留；只覆盖：
@@ -234,6 +253,9 @@
 
 同目录另有 `codex-models.json`：**每次启动都后台重新导出**（`codex debug models --bundled`），
 校验通过才原子替换；导出失败/超时/形状非法时保留上一次的文件，缓存损坏等同于没有导出。
+同路径导出串行发布，写盘成功后更新内存；首次读盘不会覆盖后台刚发布的新快照。
+一次生成只捕获一个不可变快照，官方条目池和模板均使用它。导出超时后终止并回收子进程，
+stdout/stderr 并行排空，不留下后台读取任务。
 
 ```powershell
 node scripts/update-model-catalog-sources.mjs                # 全部

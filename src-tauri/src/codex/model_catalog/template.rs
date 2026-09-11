@@ -8,11 +8,13 @@
 //! 代码只声明哪些键由字段源覆盖（[`DATA_DRIVEN_KEYS`]）以及四条派生规则。
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::OnceLock;
 
 use serde_json::{json, Map, Value};
 
+#[cfg(test)]
 use super::codex_models;
 use super::facts::ModelFacts;
 
@@ -103,8 +105,13 @@ impl RenderTemplate {
 /// 渲染模板：本机 codex 导出基底（无导出则兜底骨架）→ 模板资源覆盖同名键。
 ///
 /// 生成期只读 [`codex_models::codex_snapshot`] 的进程内快照，不会再起 codex 子进程。
+#[cfg(test)]
 pub fn effective_template(app_dir: &Path) -> Result<RenderTemplate, String> {
-    let base = match codex_models::template_base(app_dir) {
+    from_snapshot(&codex_models::codex_snapshot(app_dir))
+}
+
+pub fn from_snapshot(snapshot: &[Value]) -> Result<RenderTemplate, String> {
+    let base = match snapshot.first() {
         Some(entry) => entry
             .as_object()
             .cloned()
@@ -197,20 +204,21 @@ pub fn render(
             .input_token_limit
             .filter(|input_limit| *input_limit > 0 && *input_limit < context_window)
         {
-            let percent = ((input_limit.saturating_mul(100)) / context_window).clamp(1, 95);
+            let percent = ((i128::from(input_limit) * 100) / i128::from(context_window)).clamp(1, 95) as i64;
             entry.insert(
                 "effective_context_window_percent".to_string(),
                 json!(percent),
             );
             entry.insert(
                 "auto_compact_token_limit".to_string(),
-                json!(input_limit.saturating_mul(9) / 10),
+                json!((i128::from(input_limit) * 9 / 10) as i64),
             );
         }
     }
 
     // 输入模态：同时决定图片细节能力（纯文本模型不应声称支持 image detail original）。
-    let modalities = normalize_modalities(facts.input_modalities.as_deref().unwrap_or(&[]));
+    let modalities = facts.input_modalities.as_deref().map(normalize_modalities)
+        .unwrap_or_else(|| vec!["text".to_string()]);
     entry.insert(
         "supports_image_detail_original".to_string(),
         json!(modalities.iter().any(|modality| modality == "image")),
@@ -307,9 +315,6 @@ fn normalize_modalities(modalities: &[String]) -> Vec<String> {
         if !normalized.iter().any(|existing| existing == &modality) {
             normalized.push(modality);
         }
-    }
-    if normalized.is_empty() {
-        normalized.push("text".to_string());
     }
     normalized
 }
@@ -534,6 +539,13 @@ mod tests {
         let entry = rendered(facts);
         assert_eq!(entry["input_modalities"], json!(["image", "text"]));
         assert_eq!(entry["supports_image_detail_original"], json!(true));
+    }
+
+    #[test]
+    fn explicit_empty_modalities_do_not_inherit_template_text() {
+        let entry = rendered(ModelFacts { input_modalities: Some(vec![]), ..ModelFacts::default() });
+        assert_eq!(entry["input_modalities"], json!([]));
+        assert_eq!(entry["supports_image_detail_original"], json!(false));
     }
 
     #[test]

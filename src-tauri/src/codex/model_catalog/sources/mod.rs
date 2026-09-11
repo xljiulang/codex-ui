@@ -1,7 +1,7 @@
 //! 数据源注册表。
 //!
 //! - 完整条目源（[`FullEntrySource`]）：能给出权威完整条目，命中即短路，不套模板；
-//! - 字段源（[`FactSource`]）：只提取部分字段，按注册顺序逐字段覆盖。
+//! - 字段源（[`FactSource`]）：独立提取部分字段，生成器按可信度逐字段合并。
 //!
 //! 新增数据源：实现对应 trait，然后在 [`fact_sources`]（或 [`full_entry_sources`]）
 //! 里追加一行即可，合并、渲染与匹配逻辑都不需要改动。
@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
-use super::facts::ModelFacts;
+use super::facts::{FieldQuality, ModelFacts};
 use super::matching::MatchKind;
 
 /// 运行时缓存有效期：24 小时内不重复下载（两个字段源共用同一策略）。
@@ -27,6 +27,9 @@ pub trait FullEntrySource {
     fn id(&self) -> &'static str;
     /// 未命中返回 `None`；命中返回可写入目录的完整条目。
     fn full_entry(&self, model_id: &str) -> Option<FullEntryMatch>;
+    fn warnings(&self, _model_id: &str) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 pub struct FullEntryMatch {
@@ -43,22 +46,22 @@ pub struct FactMatch {
 }
 
 impl FactMatch {
-    /// 来源权威基础分 + 匹配级别加分（精确 > 别名 > 规范化 > 模糊）。
-    pub fn quality(&self, source_base: u8) -> u8 {
-        let match_bonus = match self.kind {
-            MatchKind::Exact => 4,
-            MatchKind::Alias => 3,
-            MatchKind::Normalized => 2,
-            MatchKind::Fuzzy => 1,
-        };
-        source_base + match_bonus
+    /// 匹配级别先比较，来源偏好不能让近似值覆盖精确值。
+    pub fn quality(&self, source_base: u8) -> FieldQuality {
+        FieldQuality {
+            reliability: self.kind.reliability(),
+            authority: source_base,
+            similarity: if self.kind == MatchKind::Fuzzy {
+                (self.score.clamp(0.0, 1.0) * 1000.0).round() as u16
+            } else { 1000 },
+        }
     }
 }
 
 /// 字段源：只提取字段，覆盖由 [`ModelFacts::merge_from`] 统一完成。
 pub trait FactSource {
     fn id(&self) -> &'static str;
-    /// 来源权威基础分：分数高的源覆盖分数低的源，同分时靠后的源覆盖靠前的源。
+    /// 同匹配级别内的来源权威性，不能压过更准确的匹配。
     fn quality_base(&self) -> u8 {
         20
     }
@@ -67,11 +70,11 @@ pub trait FactSource {
 }
 
 /// 完整条目源列表：顺序 = 优先级（靠前者先问）。
-pub fn full_entry_sources(app_dir: &Path, base_url: &str) -> Vec<Box<dyn FullEntrySource>> {
-    vec![Box::new(official::OfficialModelSource::new(app_dir, base_url))]
+pub fn full_entry_sources(snapshot: &[Value], base_url: &str) -> Vec<Box<dyn FullEntrySource>> {
+    vec![Box::new(official::OfficialModelSource::from_snapshot(snapshot, base_url))]
 }
 
-/// 字段源列表：顺序 = 覆盖顺序（靠后者覆盖靠前者）。
+/// 字段源列表：各自独立提取，合并结果不依赖注册顺序。
 pub fn fact_sources(app_dir: &Path) -> Vec<Box<dyn FactSource>> {
     vec![
         Box::new(openrouter::OpenRouterSource::load(app_dir)),

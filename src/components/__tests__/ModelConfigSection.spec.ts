@@ -698,6 +698,100 @@ describe("ModelConfigSection 生成模型目录", () => {
     await vi.waitFor(() => expect(button.attributes("disabled")).toBeUndefined());
     expect(wrapper.find(".model-catalog-picker").exists()).toBe(true);
   });
+
+  it("参数来源只读展开不改变勾选，确定后直接回填且不保存", async () => {
+    mockedLoad.mockResolvedValue(providerConfigState({ providers: [providerWithKey] }));
+    const result = catalogResult();
+    const parsed = JSON.parse(result.catalog);
+    parsed.models[0].context_window = 128000;
+    result.catalog = JSON.stringify(parsed);
+    const response = {
+      ...result,
+      invalid: 1,
+      total: 4,
+      models: [
+        {
+          ...result.models[0],
+          field_provenance: {
+            context_window: {
+              source: "openrouter", matched_id: "deepseek-chat", match_kind: "exact",
+              provider_id: null, value: 128000, reason: "精确资料优先于近似资料",
+            },
+          },
+        },
+        ...result.models.slice(1),
+        { id: "broken", display_name: "Broken", status: "invalid", selectable: false,
+          sources: [], warnings: ["上下文参数无效"], field_provenance: {} },
+      ],
+    };
+    mockedInvoke.mockImplementation(async (cmd) => {
+      if (cmd === "model_config_read") return modelConfigReadResult();
+      if (cmd === "model_catalog_generate_from_provider") return response;
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".model-catalog-picker").text()).toContain("校验失败 1 个");
+    const checkbox = wrapper.find(".model-catalog-picker-row input");
+    await wrapper.find(".model-catalog-provenance-toggle").trigger("click");
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.find(".model-catalog-provenance").text()).toContain("context_window = 128000");
+    expect(wrapper.find(".model-catalog-provenance").text()).toContain("精确资料优先于近似资料");
+    expect(wrapper.find(".model-catalog-provenance input").exists()).toBe(false);
+    expect(wrapper.find(".is-invalid input").attributes("disabled")).toBeDefined();
+    await checkbox.setValue(true);
+    await wrapper.find(".model-catalog-picker-confirm").trigger("click");
+    expect(wrapper.find(".model-catalog-picker").exists()).toBe(false);
+    const catalog = JSON.parse((wrapper.find(".model-config-textarea").element as HTMLTextAreaElement).value);
+    expect(catalog.models).toHaveLength(1);
+    expect(catalog.models[0]).toMatchObject({ slug: "deepseek-chat", context_window: 128000, priority: 1 });
+    expect(mockedInvoke.mock.calls.filter(([cmd]) => cmd === "model_catalog_generate_from_provider")).toHaveLength(1);
+    expect(mockedInvoke.mock.calls.some(([cmd]) => cmd === "model_catalog_save")).toBe(false);
+    expect(mockedSave).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("全部校验失败时保留原目录且不能确认", async () => {
+    mockedLoad.mockResolvedValue(providerConfigState({ providers: [providerWithKey] }));
+    mockedInvoke.mockImplementation(async (cmd) => {
+      if (cmd === "model_config_read") return { ...modelConfigReadResult(), model_catalog: "old-catalog" };
+      if (cmd === "model_catalog_generate_from_provider") return {
+        catalog: '{"models":[]}', total: 1, ready: 0, unmatched: 0, incompatible: 0, invalid: 1,
+        models: [{ id: "broken", display_name: "Broken", status: "invalid", selectable: false,
+          sources: [], warnings: ["上下文参数无效"], field_provenance: {} }],
+      };
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".model-catalog-picker-confirm").attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".model-catalog-picker").text()).toContain("上下文参数无效");
+    expect((wrapper.find(".model-config-textarea").element as HTMLTextAreaElement).value).toBe("old-catalog");
+    wrapper.unmount();
+  });
+
+  it("组件卸载后忽略迟到的生成成功或失败", async () => {
+    for (const fail of [false, true]) {
+      vi.mocked(setToast).mockClear();
+      mockedLoad.mockResolvedValue(providerConfigState({ providers: [providerWithKey] }));
+      let finish!: () => void;
+      mockedInvoke.mockImplementation((cmd) => {
+        if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+        if (cmd === "model_catalog_generate_from_provider") {
+          return new Promise((resolve, reject) => {
+            finish = () => fail ? reject(new Error("迟到错误")) : resolve(catalogResult());
+          });
+        }
+        return Promise.resolve(undefined);
+      });
+      const wrapper = await mountSection();
+      await wrapper.find(".provider-row-generate").trigger("click");
+      wrapper.unmount();
+      finish();
+      await flushPromises();
+      expect(setToast).not.toHaveBeenCalled();
+    }
+  });
 });
 
 describe("ModelConfigSection 模型快照联动", () => {

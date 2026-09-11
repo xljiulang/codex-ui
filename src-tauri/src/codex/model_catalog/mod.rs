@@ -1,10 +1,10 @@
-//! 模型目录生成：完整条目源优先，其次多字段源按注册顺序合并，最后套模板。
+//! 模型目录生成：完整条目源优先，其次按字段可信度合并，最后渲染并校验。
 //!
 //! 管线（见 `sources` 模块）：
 //! 1. 依次询问完整条目源（`official`）：命中即整条复用，解决自定义目录里
 //!    GPT 类模型不如 codex 自带条目、或厂商条目与公开数据源不一致的问题；
-//! 2. 否则逐字段源提取（`openrouter` → `models_dev`，后者覆盖前者）；
-//! 3. 合并结果套 [`template`] 渲染成目录条目。
+//! 2. 否则各字段源独立提取，匹配准确度优先于来源权威性；
+//! 3. 合并结果套 [`template`] 渲染，按 [`validation`] 约束自动修正并隔离非法条目。
 //!
 //! 数据源来自提供方 `/models` 的模型 ID 列表，元数据由上述源补全；新增数据源只需
 //! 在 `sources::fact_sources` 里追加一行。
@@ -14,6 +14,7 @@ mod facts;
 mod matching;
 mod sources;
 mod template;
+mod validation;
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -22,7 +23,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use facts::ModelFacts;
+use facts::{FieldProvenance, FieldQuality, ModelFacts, Provenance};
 use sources::{FactMatch, FactSource, FullEntryMatch, FullEntrySource};
 
 /// 启动时后台刷新各字段源的运行时缓存；失败静默。
@@ -36,6 +37,7 @@ pub enum ModelCatalogModelStatus {
     Ready,
     Incompatible,
     Unmatched,
+    Invalid,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -54,6 +56,7 @@ pub struct ModelCatalogModelOption {
     pub sources: Vec<ModelCatalogSourceEvidence>,
     pub warnings: Vec<String>,
     pub selectable: bool,
+    pub field_provenance: Provenance,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -63,6 +66,7 @@ pub struct ModelCatalogGenerateResult {
     pub ready: usize,
     pub incompatible: usize,
     pub unmatched: usize,
+    pub invalid: usize,
     pub models: Vec<ModelCatalogModelOption>,
 }
 
@@ -91,46 +95,76 @@ fn build_catalog_result(
     app_dir: &Path,
     base_url: &str,
 ) -> Result<ModelCatalogGenerateResult, String> {
-    let full_entry_sources = sources::full_entry_sources(app_dir, base_url);
+    let snapshot = codex_models::codex_snapshot(app_dir);
+    let full_entry_sources = sources::full_entry_sources(&snapshot, base_url);
     let fact_sources = sources::fact_sources(app_dir);
     // 渲染模板随用户安装的 codex 版本走（基底 = 启动导出的第一条 + 模板资源覆盖）
-    let render_template = template::effective_template(app_dir)?;
+    let render_template = template::from_snapshot(&snapshot)?;
 
     let mut entries: Vec<Value> = Vec::new();
     let mut models: Vec<ModelCatalogModelOption> = Vec::with_capacity(ids.len());
+    let mut seen = HashSet::new();
     for id in ids {
+        if !seen.insert(id.clone()) { continue; }
         let display_name = template::display_name_from_slug(id);
+        let mut warnings: Vec<String> = full_entry_sources.iter()
+            .flat_map(|source| source.warnings(id)).collect();
 
         if let Some((source_id, matched)) = lookup_full_entry(&full_entry_sources, id) {
             let source_evidence = full_entry_evidence(source_id, &matched);
             let mut entry = finalize_full_entry(matched.entry, id, entries.len() + 1)?;
+            let mut provenance = Provenance::new();
+            if let Some(object) = entry.as_object() {
+                for key in validation::OUTPUT_FIELDS {
+                    if let Some(value) = object.get(*key) {
+                        let mut origin = FieldProvenance::new(source_id, &matched.matched_id, matched.kind, FieldQuality::from(100));
+                        origin.value = value.clone();
+                        origin.reason = "完整条目复用".to_string();
+                        provenance.insert(*key, origin);
+                    }
+                }
+            }
             template::ensure_keys(&mut entry, &render_template.entry);
-            entries.push(entry);
+            let status = match validation::validate_entry(&mut entry, &mut warnings) {
+                Ok(()) => {
+                    validation::complete_provenance(&entry, &mut provenance);
+                    entries.push(entry);
+                    ModelCatalogModelStatus::Ready
+                }
+                Err(error) => { warnings.push(error); ModelCatalogModelStatus::Invalid }
+            };
             models.push(ModelCatalogModelOption {
                 id: id.clone(),
                 display_name,
-                status: ModelCatalogModelStatus::Ready,
-                selectable: true,
+                status,
+                selectable: status == ModelCatalogModelStatus::Ready,
                 sources: vec![source_evidence],
-                warnings: Vec::new(),
+                warnings,
+                field_provenance: provenance,
             });
             continue;
         }
 
-        let collected = collect_facts(id, &fact_sources);
+        let mut collected = collect_facts(id, &fact_sources);
         if collected.sources.is_empty() {
+            warnings.push("未匹配到可用资料".to_string());
             models.push(ModelCatalogModelOption {
                 id: id.clone(),
                 display_name,
                 status: ModelCatalogModelStatus::Unmatched,
                 selectable: false,
                 sources: Vec::new(),
-                warnings: vec!["未匹配到可用资料".to_string()],
+                warnings,
+                field_provenance: Provenance::new(),
             });
             continue;
         }
 
-        let mut warnings = Vec::new();
+        warnings.append(&mut collected.facts.warnings);
+        if collected.sources.iter().any(|source| source.match_kind == "fuzzy") {
+            warnings.push("部分资料继承自近似模型，未验证目标服务实际能力".to_string());
+        }
+        validation::reconcile_facts(&mut collected.facts, &mut warnings);
         let incompatible_reason = incompatible_reason(&collected.facts);
         let status = if let Some(reason) = incompatible_reason {
             warnings.push(reason);
@@ -147,8 +181,14 @@ fn build_catalog_result(
             let mut entry =
                 template::render(&render_template, id, &collected.facts, entries.len() + 1)?;
             template::ensure_keys(&mut entry, &render_template.entry);
-            entries.push(entry);
-            ModelCatalogModelStatus::Ready
+            match validation::validate_entry(&mut entry, &mut warnings) {
+                Ok(()) => {
+                    validation::complete_provenance(&entry, &mut collected.facts.provenance);
+                    entries.push(entry);
+                    ModelCatalogModelStatus::Ready
+                }
+                Err(error) => { warnings.push(error); ModelCatalogModelStatus::Invalid }
+            }
         };
         models.push(ModelCatalogModelOption {
             id: id.clone(),
@@ -157,6 +197,7 @@ fn build_catalog_result(
             selectable: status == ModelCatalogModelStatus::Ready,
             sources: collected.sources,
             warnings,
+            field_provenance: collected.facts.provenance,
         });
     }
 
@@ -172,6 +213,7 @@ fn build_catalog_result(
         .iter()
         .filter(|model| model.status == ModelCatalogModelStatus::Unmatched)
         .count();
+    let invalid = models.iter().filter(|model| model.status == ModelCatalogModelStatus::Invalid).count();
     let catalog = serde_json::to_string_pretty(&json!({ "models": entries }))
         .map_err(|e| format!("生成模型目录 JSON 失败: {e}"))?;
     Ok(ModelCatalogGenerateResult {
@@ -180,6 +222,7 @@ fn build_catalog_result(
         ready,
         incompatible,
         unmatched,
+        invalid,
         models,
     })
 }
@@ -194,7 +237,7 @@ fn lookup_full_entry(
         .find_map(|source| source.full_entry(model_id).map(|entry| (source.id(), entry)))
 }
 
-/// 只覆盖身份与顺序：`slug` 用提供方返回的原始 id，`priority` 按选择顺序。
+/// 只覆盖身份与顺序：`slug` 用提供方原始 id，`priority` 按候选原顺序。
 fn finalize_full_entry(mut entry: Value, model_id: &str, priority: usize) -> Result<Value, String> {
     let object = entry
         .as_object_mut()
@@ -214,10 +257,12 @@ fn collect_facts(model_id: &str, sources: &[Box<dyn FactSource>]) -> CollectedFa
     let mut facts = ModelFacts::default();
     let mut evidence = Vec::new();
     for source in sources {
-        if let Some(matched) = source.extract(model_id) {
+        if let Some(mut matched) = source.extract(model_id) {
+            let quality = matched.quality(source.quality_base());
+            matched.facts.attach_match(source.id(), &matched.matched_id, matched.kind, quality);
             facts.merge_from(
                 source.id(),
-                matched.quality(source.quality_base()),
+                quality,
                 matched.facts.clone(),
             );
             evidence.push(fact_evidence(source.id(), &matched));
@@ -251,13 +296,15 @@ fn fact_evidence(source: &'static str, matched: &FactMatch) -> ModelCatalogSourc
 }
 
 fn incompatible_reason(facts: &ModelFacts) -> Option<String> {
-    if facts.supports_tool_calls == Some(false) {
+    let reliable = |field| facts.provenance.get(field)
+        .is_none_or(|origin| origin.match_kind != matching::MatchKind::Fuzzy);
+    if facts.supports_tool_calls == Some(false) && reliable("supports_tool_calls") {
         return Some("上游明确标记 tool_call=false，不兼容 Codex 工具调用".to_string());
     }
     if facts
         .status
         .as_deref()
-        .is_some_and(|status| status.eq_ignore_ascii_case("deprecated"))
+        .is_some_and(|status| status.eq_ignore_ascii_case("deprecated")) && reliable("status")
     {
         return Some("上游资料标记为 deprecated".to_string());
     }
@@ -352,6 +399,69 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn write_source_fixture(dir: &Path, openrouter: Value, models_dev: Value) {
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        std::fs::write(dir.join("cache/openrouter-models.json"), openrouter.to_string()).unwrap();
+        std::fs::write(dir.join("cache/models-dev.json"), models_dev.to_string()).unwrap();
+    }
+
+    #[test]
+    fn precise_source_wins_over_fuzzy_source_per_field() {
+        let dir = tempdir().unwrap();
+        write_source_fixture(dir.path(),
+            json!({"data":[{"id":"review-model-v5","context_length":128000,
+                "supported_parameters":["tools"],"reasoning":{"supported_efforts":[]}}]}),
+            json!({"providers":{"relay":{"models":{"review-model-v4":{
+                "limit":{"context":1000000},"tool_call":false,"status":"deprecated",
+                "description":"继承描述","reasoning_options":[{"type":"effort","values":["high"]}]
+            }}}}}));
+        let result = build_catalog_result(&["review-model-v5".into()], dir.path(), "https://relay.example.com").unwrap();
+        assert_eq!(result.ready, 1);
+        let entry = catalog_entry(&result, "review-model-v5");
+        assert_eq!(entry["context_window"], json!(128000));
+        assert_eq!(entry["supported_reasoning_levels"], json!([]));
+        assert_eq!(entry["description"], json!("继承描述"));
+        assert_eq!(result.models[0].field_provenance["context_window"].source, "openrouter");
+        assert_eq!(result.models[0].field_provenance["description"].source, "models_dev");
+        assert!(result.models[0].warnings.iter().any(|warning| warning.contains("近似")));
+    }
+
+    #[test]
+    fn openrouter_status_alone_disables_exact_but_not_fuzzy_target() {
+        let dir = tempdir().unwrap();
+        write_source_fixture(dir.path(),
+            json!({"data":[
+                {"id":"review-model-v4","status":" DEPRECATED ","supported_parameters":["tools"]},
+                {"id":"other-ready","status":" BETA ","supported_parameters":["tools"]}
+            ]}),
+            json!({"providers":{"relay":{"models":{"zzzzzzz":{"tool_call":true}}}}}));
+        let result = build_catalog_result(
+            &["review-model-v4".into(), "review-model-v5".into(), "other-ready".into()],
+            dir.path(), "https://relay.example.com").unwrap();
+        assert_eq!(result.models[0].status, ModelCatalogModelStatus::Incompatible);
+        assert_eq!(result.models[1].status, ModelCatalogModelStatus::Ready);
+        assert_eq!(result.models[2].warnings, vec!["上游资料标记为 beta"]);
+    }
+
+    #[test]
+    fn invalid_entry_is_isolated_and_priorities_remain_contiguous() {
+        let dir = tempdir().unwrap();
+        codex_models::write_export_for_test(dir.path(), vec![
+            json!({"slug":"invalid-model","model_messages":{"instructions_template":"test"},
+                "context_window":0}),
+            json!({"slug":"valid-model","model_messages":{"instructions_template":"test"}}),
+        ]);
+        let result = build_catalog_result(
+            &["invalid-model".into(), "valid-model".into(), "valid-model".into()],
+            dir.path(), "https://relay.example.com").unwrap();
+        assert_eq!(result.invalid, 1);
+        assert_eq!(result.ready, 1);
+        assert_eq!(result.total, 2);
+        assert!(!result.models[0].selectable);
+        assert_eq!(catalog_entry(&result, "valid-model")["priority"], json!(1));
+        assert_eq!(result.total, result.ready + result.incompatible + result.unmatched + result.invalid);
+    }
+
     /// 测试用第三个字段源：证明新增数据源只需实现 trait，无需改动管线代码。
     struct FakeSource;
 
@@ -394,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_source_values_do_not_warn() {
+    fn source_differences_only_warn_for_constraints_and_status() {
         let dir = tempdir().unwrap();
         // models.dev 与 OpenRouter 对该模型给出的上下文不同，但字段差异不再产生候选警告
         let result = build_catalog_result(
@@ -407,11 +517,9 @@ mod tests {
         assert_eq!(model.status, ModelCatalogModelStatus::Ready);
         assert!(has_source(model, "models_dev"));
         assert!(has_source(model, "openrouter"));
-        assert!(
-            model.warnings.is_empty(),
-            "字段差异不应再进入候选警告：{:?}",
-            model.warnings
-        );
+        assert!(model.warnings.iter().all(|warning|
+            warning.contains("输入上限") || warning.contains("beta")),
+            "普通来源差异不应逐项告警：{:?}", model.warnings);
     }
 
     #[test]
@@ -539,7 +647,7 @@ mod tests {
             eprintln!("skip: 未设置 CODEX_BIN");
             return;
         };
-        let ids = ["deepseek-flash".to_string(), "big-pickle".to_string()];
+        let ids = ["deepseek-flash".to_string(), "big-pickle".to_string(), "gpt-5.7".to_string()];
 
         // 1) 无导出：兜底基底 + 模板覆盖
         let fallback_dir = tempdir().unwrap();
@@ -555,7 +663,32 @@ mod tests {
         let cache = codex_models::cache_path(export_dir.path());
         std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
         std::fs::write(&cache, &exported.stdout).unwrap();
-        assert_catalog_accepted_by_codex(&codex, export_dir.path(), &ids);
+        let exported_value: Value = serde_json::from_slice(&exported.stdout).unwrap();
+        let mut runtime_ids = ids.to_vec();
+        runtime_ids.push(exported_value["models"][0]["slug"].as_str().unwrap().to_string());
+        assert_catalog_accepted_by_codex(&codex, export_dir.path(), &runtime_ids);
+
+        // 3) 精确来源胜过模糊来源、同级冲突补缺、自定义档位与 audio 的真实解析。
+        let fixture_dir = tempdir().unwrap();
+        write_source_fixture(fixture_dir.path(),
+            json!({"data":[
+                {"id":"review-audio-v1","context_length":32000,"supported_parameters":["tools"],
+                 "architecture":{"input_modalities":["text","audio"]},
+                 "reasoning":{"supported_efforts":["turbo"],"default_effort":"turbo"}},
+                {"id":"review-conflict-v1","context_length":64000,"supported_parameters":["tools"]}
+            ]}),
+            json!({"providers":{
+                "alpha":{"models":{
+                    "review-audio-v0":{"limit":{"context":4096},"tool_call":true},
+                    "review-conflict-v1":{"limit":{"context":100},"tool_call":true}
+                }},
+                "beta":{"models":{"review-conflict-v1":{"limit":{"context":200},"tool_call":true}}}
+            }}));
+        let fixture_ids = ["review-audio-v1".to_string(), "review-conflict-v1".to_string()];
+        let fixture_result = build_catalog_result(&fixture_ids, fixture_dir.path(), "https://relay.example.com").unwrap();
+        assert_eq!(catalog_entry(&fixture_result, "review-audio-v1")["context_window"], json!(32000));
+        assert_eq!(catalog_entry(&fixture_result, "review-conflict-v1")["context_window"], json!(64000));
+        assert_catalog_accepted_by_codex(&codex, fixture_dir.path(), &fixture_ids);
     }
 
     /// 用给定 app_dir 生成目录，塞进临时 `CODEX_HOME` 交给真实 codex 解析，
@@ -592,6 +725,13 @@ mod tests {
             .collect();
         for id in ids {
             assert!(slugs.contains(&id.as_str()), "缺少 {id}，实际：{slugs:?}");
+            let expected = catalog_entry(&result, id);
+            let actual = value["models"].as_array().unwrap().iter()
+                .find(|entry| entry["slug"].as_str() == Some(id.as_str())).unwrap();
+            for key in ["slug", "priority", "context_window", "max_context_window",
+                "input_modalities", "supported_reasoning_levels", "default_reasoning_level"] {
+                assert_eq!(actual[key], expected[key], "{id} 的 {key} 加载后发生变化");
+            }
         }
     }
 
@@ -670,7 +810,7 @@ mod tests {
         // models.dev 给 1000000，OpenRouter 给 1048576：前者应覆盖后者
         assert_eq!(entry["context_window"], json!(1_000_000));
         assert_eq!(entry["max_context_window"], json!(1_000_000));
-        // 全局索引里该 ID 有多份副本（分组 id 字典序第一份），描述随之取那一份
+        // 全局索引里该 ID 有多份资料，描述按字段可信度合并。
         assert!(entry["description"]
             .as_str()
             .unwrap()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   loadModelProviderConfig,
@@ -104,6 +104,13 @@ const modelConfigErrors = reactive({
 
 /** 正在生成模型目录的提供方 key；空串表示没有生成任务。 */
 const catalogGenerating = ref("");
+let catalogGenerationId = 0;
+let componentAlive = true;
+const expandedCatalogModels = ref<string[]>([]);
+onBeforeUnmount(() => {
+  componentAlive = false;
+  catalogGenerationId++;
+});
 
 /** 获取模型后选择要写入目录的模型。 */
 const catalogPicker = reactive({
@@ -114,6 +121,7 @@ const catalogPicker = reactive({
   ready: 0,
   incompatible: 0,
   unmatched: 0,
+  invalid: 0,
   catalog: "",
   models: [] as ModelCatalogModelOption[],
   selectedIds: [] as string[],
@@ -146,7 +154,19 @@ function catalogSourceBadges(model: ModelCatalogModelOption): string[] {
 
 function catalogStatusLabel(model: ModelCatalogModelOption): string {
   if (model.warnings.length) return model.warnings.join("；");
+  if (model.status === "invalid") return "生成参数校验失败";
   return model.status === "incompatible" ? "与 Codex 不兼容" : "无匹配资料";
+}
+
+function toggleCatalogProvenance(id: string) {
+  expandedCatalogModels.value = expandedCatalogModels.value.includes(id)
+    ? expandedCatalogModels.value.filter((value) => value !== id)
+    : [...expandedCatalogModels.value, id];
+}
+
+function catalogFieldValue(value: unknown): string {
+  const text = JSON.stringify(value) ?? "未知";
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
 }
 
 /** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
@@ -408,10 +428,12 @@ function openCatalogPicker(
   catalogPicker.ready = res.ready;
   catalogPicker.incompatible = res.incompatible;
   catalogPicker.unmatched = res.unmatched;
+  catalogPicker.invalid = res.invalid ?? 0;
   catalogPicker.catalog = res.catalog;
   catalogPicker.models = res.models.map((model) => ({ ...model }));
   catalogPicker.selectedIds = [];
   catalogPicker.query = "";
+  expandedCatalogModels.value = [];
 }
 
 function closeCatalogPicker() {
@@ -422,10 +444,12 @@ function closeCatalogPicker() {
   catalogPicker.ready = 0;
   catalogPicker.incompatible = 0;
   catalogPicker.unmatched = 0;
+  catalogPicker.invalid = 0;
   catalogPicker.catalog = "";
   catalogPicker.models = [];
   catalogPicker.selectedIds = [];
   catalogPicker.query = "";
+  expandedCatalogModels.value = [];
 }
 
 /** 三态全选：全部选中时取消当前结果，否则选中当前结果。 */
@@ -455,7 +479,7 @@ function confirmCatalogPicker() {
       catalogPicker.selectedIds,
     );
     modelConfigErrors.catalog = "";
-    const skippedCount = catalogPicker.incompatible + catalogPicker.unmatched;
+    const skippedCount = catalogPicker.incompatible + catalogPicker.unmatched + catalogPicker.invalid;
     const skipped = skippedCount > 0 ? `，跳过 ${skippedCount} 个不可用模型` : "";
     setToast(
       `已生成 ${catalogPicker.selectedIds.length} 个模型条目${skipped}，保存并重启 codex-ui 后生效`,
@@ -477,19 +501,28 @@ async function generateModelCatalog(p: ModelProviderInfo) {
     return;
   }
   catalogGenerating.value = p.key;
+  const generationId = ++catalogGenerationId;
+  const provider = { ...p };
   try {
     const res = await invoke<ModelCatalogGenerateResult>(
       "model_catalog_generate_from_provider",
       {
-        baseUrl: p.base_url.trim(),
-        apiKey: p.experimental_bearer_token.trim(),
+        baseUrl: provider.base_url.trim(),
+        apiKey: provider.experimental_bearer_token.trim(),
       },
     );
-    openCatalogPicker(p, res);
+    if (!componentAlive || generationId !== catalogGenerationId) return;
+    const current = modelConfig.providers.find((item) => item.key === provider.key);
+    if (!current || current.base_url !== provider.base_url ||
+      current.experimental_bearer_token !== provider.experimental_bearer_token) {
+      setToast("提供方配置已变更，请重新生成模型目录");
+      return;
+    }
+    openCatalogPicker(provider, res);
   } catch (e) {
-    setToast(toastError(e));
+    if (componentAlive && generationId === catalogGenerationId) setToast(toastError(e));
   } finally {
-    catalogGenerating.value = "";
+    if (componentAlive && generationId === catalogGenerationId) catalogGenerating.value = "";
   }
 }
 
@@ -1001,7 +1034,8 @@ function openModelConfigFile() {
               获取 {{ catalogPicker.total }} 个模型：可生成
               {{ catalogPicker.ready }} 个，不兼容
               {{ catalogPicker.incompatible }} 个，未匹配
-              {{ catalogPicker.unmatched }} 个。
+              {{ catalogPicker.unmatched }} 个，校验失败
+              {{ catalogPicker.invalid }} 个。
             </p>
           </div>
           <div class="model-catalog-picker-toolbar">
@@ -1043,6 +1077,7 @@ function openModelConfigFile() {
               :class="{
                 'is-unmatched': model.status === 'unmatched',
                 'is-incompatible': model.status === 'incompatible',
+                'is-invalid': model.status === 'invalid',
               }"
             >
               <input
@@ -1076,6 +1111,29 @@ function openModelConfigFile() {
                   class="model-catalog-picker-status"
                 >
                   {{ catalogStatusLabel(model) }}
+                </span>
+                <button
+                  v-if="Object.keys(model.field_provenance ?? {}).length"
+                  type="button"
+                  class="model-catalog-provenance-toggle"
+                  :aria-expanded="expandedCatalogModels.includes(model.id)"
+                  @click.stop.prevent="toggleCatalogProvenance(model.id)"
+                >
+                  参数来源（只读）
+                </button>
+                <span
+                  v-if="expandedCatalogModels.includes(model.id)"
+                  class="model-catalog-provenance"
+                >
+                  <span
+                    v-for="(origin, field) in model.field_provenance"
+                    :key="field"
+                    class="model-catalog-provenance-field"
+                  >
+                    <code>{{ field }} = {{ catalogFieldValue(origin.value) }}</code>
+                    <span>{{ origin.source }}<template v-if="origin.provider_id"> / {{ origin.provider_id }}</template><template v-if="origin.matched_id"> · {{ origin.matched_id }}</template> · {{ origin.match_kind }}</span>
+                    <span>{{ origin.reason }}</span>
+                  </span>
                 </span>
               </span>
             </label>

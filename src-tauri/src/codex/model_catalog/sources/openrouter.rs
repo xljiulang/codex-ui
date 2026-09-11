@@ -131,6 +131,8 @@ fn facts_from_model(model: &Value) -> ModelFacts {
         .map(|effort| effort.trim().to_ascii_lowercase())
         .filter(|effort| !effort.is_empty());
     facts.supports_reasoning = reasoning_present(model);
+    facts.status = model.get("status").and_then(Value::as_str)
+        .map(|status| status.trim().to_ascii_lowercase()).filter(|status| !status.is_empty());
     facts.description = model
         .get("description")
         .and_then(Value::as_str)
@@ -153,9 +155,10 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
     let items = model
         .pointer("/architecture/input_modalities")
         .and_then(Value::as_array)?;
+    if !items.iter().all(Value::is_string) { return None; }
     let mut modalities = Vec::new();
     for item in items {
-        let Some(modality) = item.as_str().map(str::to_ascii_lowercase) else {
+        let Some(modality) = item.as_str().map(|value| value.trim().to_ascii_lowercase()) else {
             continue;
         };
         if matches!(modality.as_str(), "text" | "image" | "audio")
@@ -164,24 +167,27 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
             modalities.push(modality);
         }
     }
-    (!modalities.is_empty()).then_some(modalities)
+    Some(modalities)
 }
 
 fn reasoning_levels(model: &Value) -> Option<Vec<String>> {
     let items = model
         .pointer("/reasoning/supported_efforts")
         .and_then(Value::as_array)?;
-    let levels: Vec<String> = items
+    if !items.iter().all(Value::is_string) { return None; }
+    let mut levels: Vec<String> = items
         .iter()
         .filter_map(Value::as_str)
         .map(|effort| effort.trim().to_ascii_lowercase())
         .filter(|effort| !effort.is_empty())
         .collect();
-    (!levels.is_empty()).then_some(levels)
+    let mut seen = HashSet::new();
+    levels.retain(|level| seen.insert(level.clone()));
+    Some(levels)
 }
 
 fn reasoning_present(model: &Value) -> Option<bool> {
-    let reasoning = model.get("reasoning")?;
+    let reasoning = model.get("reasoning")?.as_object()?;
     let mandatory = reasoning
         .get("mandatory")
         .and_then(Value::as_bool)
@@ -199,11 +205,12 @@ fn reasoning_present(model: &Value) -> Option<bool> {
 
 fn supported_parameters(model: &Value) -> Option<HashSet<String>> {
     let items = model.get("supported_parameters").and_then(Value::as_array)?;
+    if !items.iter().all(Value::is_string) { return None; }
     Some(
         items
             .iter()
             .filter_map(Value::as_str)
-            .map(str::to_ascii_lowercase)
+            .map(|value| value.trim().to_ascii_lowercase())
             .collect(),
     )
 }
@@ -299,6 +306,26 @@ mod tests {
         assert_eq!(facts.support_verbosity, Some(true));
         assert_eq!(facts.supports_search_tool, Some(false));
         assert_eq!(facts.supports_tool_calls, Some(false));
+    }
+
+    #[test]
+    fn extracts_status_and_explicit_empty_efforts() {
+        let facts = facts_from_model(&json!({
+            "id": "model", "status": " DEPRECATED ",
+            "reasoning": { "supported_efforts": [] }
+        }));
+        assert_eq!(facts.status.as_deref(), Some("deprecated"));
+        assert_eq!(facts.reasoning_levels, Some(vec![]));
+        assert_eq!(facts_from_model(&json!({"id":"model"})).reasoning_levels, None);
+        let invalid = facts_from_model(&json!({
+            "supported_parameters":[1], "reasoning":{"supported_efforts":[1]},
+            "architecture":{"input_modalities":[1]}
+        }));
+        assert_eq!(invalid.supports_tool_calls, None);
+        assert_eq!(invalid.reasoning_levels, None);
+        assert_eq!(invalid.input_modalities, None);
+        let empty = facts_from_model(&json!({"architecture":{"input_modalities":[]}}));
+        assert_eq!(empty.input_modalities, Some(vec![]));
     }
 
     #[test]

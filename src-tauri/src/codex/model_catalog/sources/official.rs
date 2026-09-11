@@ -12,14 +12,16 @@
 //!   由 `scripts/update-model-catalog-sources.mjs --official` 校验并规范化。
 
 use std::collections::HashSet;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::OnceLock;
 
 use serde_json::{json, Value};
 
 use super::{FullEntryMatch, FullEntrySource};
+#[cfg(test)]
 use crate::codex::model_catalog::codex_models;
-use crate::codex::model_catalog::matching::{MatchKind, normalize_model_key};
+use crate::codex::model_catalog::matching::{MatchKind, normalize_model_key, namespaces_conflict};
 
 const OFFICIAL_MODELS_JSON: &str = include_str!("../../../../resources/official-models.json");
 
@@ -29,11 +31,24 @@ pub struct OfficialModelSource {
 }
 
 impl OfficialModelSource {
+    #[cfg(test)]
     pub fn new(app_dir: &Path, base_url: &str) -> Self {
+        Self::from_snapshot(&codex_models::codex_snapshot(app_dir), base_url)
+    }
+
+    pub fn from_snapshot(snapshot: &[Value], base_url: &str) -> Self {
         Self {
-            entries: official_pool(app_dir),
+            entries: official_pool(snapshot),
             official_openai: is_official_openai_host(base_url),
         }
+    }
+
+    fn normalized_entries(&self, query: &str) -> Vec<&Value> {
+        let key = normalize_model_key(query);
+        self.entries.iter().filter(|entry| {
+            let slug = entry["slug"].as_str().unwrap_or("");
+            !key.is_empty() && !namespaces_conflict(query, slug) && normalize_model_key(slug) == key
+        }).collect()
     }
 }
 
@@ -49,17 +64,14 @@ impl FullEntrySource for OfficialModelSource {
         if query.is_empty() {
             return None;
         }
-        let query_key = normalize_model_key(query);
-        let (entry, kind) = self.entries.iter().find_map(|entry| {
-            let slug = entry.get("slug").and_then(Value::as_str).unwrap_or("");
-            if slug == query {
-                Some((entry, MatchKind::Exact))
-            } else if !query_key.is_empty() && normalize_model_key(slug) == query_key {
-                Some((entry, MatchKind::Normalized))
-            } else {
-                None
-            }
-        })?;
+        let (entry, kind) = if let Some(entry) = self.entries.iter()
+            .find(|entry| entry["slug"].as_str() == Some(query)) {
+            (entry, MatchKind::Exact)
+        } else {
+            let normalized = self.normalized_entries(query);
+            if normalized.len() != 1 { return None; }
+            (normalized[0], MatchKind::Normalized)
+        };
 
         let mut value = entry.clone();
         if !self.official_openai {
@@ -77,16 +89,22 @@ impl FullEntrySource for OfficialModelSource {
             kind,
         })
     }
+
+    fn warnings(&self, model_id: &str) -> Vec<String> {
+        let exact = self.entries.iter().any(|entry| entry["slug"].as_str() == Some(model_id.trim()));
+        if !exact && self.normalized_entries(model_id).len() > 1 {
+            vec!["官方条目规范化匹配存在歧义，已自动改用字段来源".to_string()]
+        } else { Vec::new() }
+    }
 }
 
 /// 官方条目池：运行期导出的本机 codex 条目优先，内置资源只放第三方官方条目。
-fn official_pool(app_dir: &Path) -> Vec<Value> {
+fn official_pool(snapshot: &[Value]) -> Vec<Value> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut entries = Vec::new();
     // 与模板基底共用同一份进程内快照：不重复解析、也不再起子进程
-    let runtime: Vec<Value> = codex_models::codex_snapshot(app_dir).iter().cloned().collect();
-    for entry in runtime
-        .into_iter()
+    for entry in snapshot
+        .iter().cloned()
         .chain(bundled_entries().iter().cloned())
     {
         let slug = entry
@@ -134,6 +152,24 @@ fn is_official_openai_host(base_url: &str) -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn exact_match_beats_earlier_normalized_entry_and_ambiguity_falls_back() {
+        for entries in [
+            vec![gpt_entry("gpt-test-preview"), gpt_entry("gpt-test")],
+            vec![gpt_entry("gpt-test"), gpt_entry("gpt-test-preview")],
+        ] {
+            let source = OfficialModelSource::from_snapshot(&entries, "https://relay.example.com");
+            let found = source.full_entry("gpt-test").unwrap();
+            assert_eq!(found.kind, MatchKind::Exact);
+            assert_eq!(found.matched_id, "gpt-test");
+            assert!(source.full_entry("GPT-TEST").is_none());
+            assert_eq!(source.warnings("GPT-TEST").len(), 1);
+        }
+        let source = OfficialModelSource::from_snapshot(
+            &[gpt_entry("vendor/model-v5")], "https://relay.example.com");
+        assert!(source.full_entry("other/model-v5").is_none());
+    }
 
     /// 运行期导出的 GPT 基线条目（本机 codex 经 `codex debug models --bundled` 导出）。
     fn gpt_entry(slug: &str) -> Value {

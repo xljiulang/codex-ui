@@ -38,7 +38,8 @@ const ROLE_TOKENS: &[&str] = &[
     "sonnet", "opus", "haiku", "vision", "vl", "instruct", "thinking", "lite",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MatchKind {
     Exact,
     Alias,
@@ -47,6 +48,14 @@ pub enum MatchKind {
 }
 
 impl MatchKind {
+    pub fn reliability(self) -> u8 {
+        match self {
+            Self::Exact => 4,
+            Self::Alias => 3,
+            Self::Normalized => 2,
+            Self::Fuzzy => 1,
+        }
+    }
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Exact => "exact",
@@ -78,6 +87,7 @@ pub struct Candidate {
     series_markers: HashSet<String>,
     version: Option<(String, u32)>,
     role_tokens: HashSet<String>,
+    family_keys: Vec<String>,
 }
 
 impl Candidate {
@@ -115,7 +125,16 @@ impl Candidate {
             series_markers: version_series_markers(&analysis_key),
             version: key_version(&analysis_key),
             role_tokens: role_tokens(&analysis_key),
+            family_keys: Vec::new(),
         }
+    }
+
+    /// family 只参与近似查找，不建立精确别名关系。
+    pub fn with_family(mut self, family: Option<&str>) -> Self {
+        if let Some(family) = family.filter(|value| !value.trim().is_empty()) {
+            self.family_keys.push(normalize_model_key(family));
+        }
+        self
     }
 
     /// 上游状态也参与正式/实验排序；精确命中仍保持最高优先级。
@@ -179,10 +198,14 @@ fn lookup_index(candidates: &[Candidate], model_id: &str) -> Option<(usize, Matc
     let query_series = version_series_markers(&query_key);
     let query_version = key_version(&query_key);
     let query_roles = role_tokens(&query_key);
+    let normalized_namespaces: HashSet<_> = candidates.iter()
+        .filter(|candidate| candidate.normalized_primary == query_key)
+        .filter_map(|candidate| candidate.vendor.as_deref()).collect();
+    let ambiguous_namespace = query_vendor.is_none() && normalized_namespaces.len() > 1;
 
     let mut best: Option<(Rank, usize, MatchKind, f64)> = None;
     for (index, candidate) in candidates.iter().enumerate() {
-        let Some((rank, kind, score)) = rank_candidate(
+        let Some((mut rank, mut kind, score)) = rank_candidate(
             candidate,
             query,
             &query_key,
@@ -194,6 +217,11 @@ fn lookup_index(candidates: &[Candidate], model_id: &str) -> Option<(usize, Matc
         ) else {
             continue;
         };
+        // 无命名空间查询有多个同尾段厂商时，只能作为近似资料，不能声称身份相同。
+        if ambiguous_namespace && kind == MatchKind::Normalized {
+            kind = MatchKind::Fuzzy;
+            rank.level = 3;
+        }
         let better = match &best {
             None => true,
             Some((best_rank, _, _, _)) => rank < *best_rank,
@@ -254,6 +282,9 @@ fn rank_candidate(
     query_version: Option<&(String, u32)>,
     query_roles: &HashSet<String>,
 ) -> Option<(Rank, MatchKind, f64)> {
+    if namespaces_conflict(query, &candidate.primary_key) {
+        return None;
+    }
     let mut kind = None;
     let mut score = 1.0_f64;
 
@@ -272,6 +303,7 @@ fn rank_candidate(
     } else if !query_key.is_empty() {
         let best = std::iter::once(&candidate.normalized_primary)
             .chain(candidate.normalized_aliases.iter())
+            .chain(candidate.family_keys.iter())
             .map(|key| similarity(query_key, key))
             .fold(0.0_f64, f64::max);
         let same_series = !query_series.is_empty()
@@ -376,6 +408,13 @@ fn provider_prefix(input: &str) -> Option<String> {
     (!provider.is_empty()).then_some(provider)
 }
 
+/// 明确存在且不同的命名空间不能仅凭尾段相同建立模型身份。
+pub fn namespaces_conflict(left: &str, right: &str) -> bool {
+    provider_prefix(left)
+        .zip(provider_prefix(right))
+        .is_some_and(|(left, right)| left != right)
+}
+
 /// 把 `qwen4` / `v5` 这类紧连的字母数字也拆成语义 token。
 fn semantic_tokens(input: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -435,22 +474,20 @@ fn role_tokens(input: &str) -> HashSet<String> {
 }
 
 fn strip_trailing_date(key: &str) -> &str {
-    if let Some((prefix, last)) = key.rsplit_once('-') {
-        if last.len() == 8 && last.bytes().all(|b| b.is_ascii_digit()) {
-            return prefix;
-        }
-    }
-    if key.len() >= 11 {
-        let start = key.len() - 11;
-        let candidate = &key[start..];
-        if candidate.starts_with('-')
-            && candidate[1..]
-                .bytes()
-                .filter(|b| *b != b'-')
-                .all(|b| b.is_ascii_digit())
-            && candidate[1..].bytes().filter(|b| *b == b'-').count() == 2
-        {
-            return &key[..start];
+    for length in [11, 9] {
+        if let Some(start) = key.len().checked_sub(length) {
+            if let Some(suffix) = key.get(start..) {
+                let valid = suffix.bytes().enumerate().all(|(index, byte)| {
+                    if index == 0 || (length == 11 && matches!(index, 5 | 8)) {
+                        byte == b'-'
+                    } else {
+                        byte.is_ascii_digit()
+                    }
+                });
+                if valid {
+                    return &key[..start];
+                }
+            }
         }
     }
     key
@@ -543,6 +580,30 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_and_partial_dates_are_safe() {
+        for id in ["模型测试", "😀模型测试", "模型-2026-9-11", "模型-2026091", "abc-12-34-56"] {
+            assert_eq!(normalize_model_key(id), id);
+        }
+        assert_eq!(normalize_model_key("模型测试-2026-09-11"), "模型测试");
+        assert_eq!(normalize_model_key("😀模型-20260911"), "😀模型");
+    }
+
+    #[test]
+    fn family_is_only_fuzzy_and_namespaces_do_not_cross() {
+        let candidate = Candidate::new("vendor/model-v5".into(), vec![], None, "vendor/model-v5")
+            .with_family(Some("model"));
+        let store = CandidateStore::new(vec![(candidate, serde_json::json!({}))]);
+        assert_eq!(store.lookup("model").unwrap().kind, MatchKind::Fuzzy);
+        assert!(store.lookup("other/model-v5").is_none());
+        assert_eq!(store.lookup("vendor/model-v5").unwrap().kind, MatchKind::Exact);
+        assert_eq!(store.lookup("model-v5").unwrap().kind, MatchKind::Normalized);
+        let ambiguous = CandidateStore::new(["vendor-a/model-v5", "vendor-b/model-v5"].into_iter()
+            .map(|id| (Candidate::new(id.into(), vec![], None, id), serde_json::json!({})))
+            .collect());
+        assert_eq!(ambiguous.lookup("model-v5").unwrap().kind, MatchKind::Fuzzy);
+    }
     use serde_json::json;
 
     fn store(items: &[(&str, Option<i64>)]) -> CandidateStore {

@@ -9,12 +9,13 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::Value;
-use tokio::process::Command;
+use tokio::io::AsyncReadExt;
+use tokio::process::{Child, Command};
 
 use super::sources::write_atomic;
 use crate::codex::app_server::apply_codex_env;
@@ -49,11 +50,17 @@ pub fn codex_snapshot(app_dir: &Path) -> Arc<Vec<Value>> {
         }
     }
     let entries = Arc::new(read_entries(&path));
-    remember(&path, Arc::clone(&entries));
-    entries
+    publish_initial(&path, entries)
+}
+
+/// 磁盘读取期间后台可能已发布新快照；只允许首次读取填充空槽。
+fn publish_initial(path: &Path, entries: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
+    let mut guard = snapshot_slot().lock().unwrap_or_else(|error| error.into_inner());
+    Arc::clone(guard.entry(path.to_path_buf()).or_insert(entries))
 }
 
 /// 模板基底：导出目录的第一条（版本相关，确定性即可）。
+#[cfg(test)]
 pub fn template_base(app_dir: &Path) -> Option<Value> {
     codex_snapshot(app_dir).first().cloned()
 }
@@ -73,29 +80,57 @@ fn remember(path: &Path, entries: Arc<Vec<Value>>) {
 
 /// 导出本机 codex 自带的官方条目并写入缓存；失败返回原因，调用方记日志并保留旧缓存。
 pub async fn refresh_codex_models(app_dir: &Path, codex: &Path) -> Result<(), String> {
+    // 同路径刷新串行执行，避免旧导出迟到覆盖新发布、临时文件互相覆盖。
+    static REFRESH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let refresh_lock = {
+        let mut locks = REFRESH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
+            .lock().unwrap_or_else(|error| error.into_inner());
+        Arc::clone(locks.entry(cache_path(app_dir)).or_default())
+    };
+    let _refresh_guard = refresh_lock.lock().await;
     let mut cmd = Command::new(codex);
     cmd.args(["debug", "models", "--bundled"]);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     #[cfg(windows)]
     {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     apply_codex_env(cmd.as_std_mut());
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("启动 codex debug models 失败: {e}"))?;
-    let output = tokio::time::timeout(EXPORT_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| format!("codex debug models 超时（{}s）", EXPORT_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("执行 codex debug models 失败: {e}"))?;
+    let output = wait_for_export(&mut child, EXPORT_TIMEOUT).await?;
     if !output.status.success() {
         return Err(format!("codex debug models 退出码 {}", output.status));
     }
     // 只看 stdout：该命令会往 stderr 打 PATH 别名之类的 WARNING
     store_export(app_dir, &String::from_utf8_lossy(&output.stdout))
+}
+
+/// 同时排空两条管道，超时则明确终止并回收子进程，不留下后台读取任务。
+async fn wait_for_export(child: &mut Child, timeout: Duration) -> Result<Output, String> {
+    let mut stdout = child.stdout.take().ok_or("导出缺少 stdout 管道")?;
+    let mut stderr = child.stderr.take().ok_or("导出缺少 stderr 管道")?;
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let result = tokio::time::timeout(timeout, async {
+        tokio::try_join!(child.wait(), stdout.read_to_end(&mut output), stderr.read_to_end(&mut errors))
+    }).await;
+    match result {
+        Ok(Ok((status, _, _))) => Ok(Output { status, stdout: output, stderr: errors }),
+        Ok(Err(error)) => {
+            let _ = child.kill().await;
+            Err(format!("执行 codex debug models 失败: {error}"))
+        }
+        Err(_) => {
+            child.kill().await.map_err(|error| format!("导出超时且终止子进程失败: {error}"))?;
+            Err(format!("codex debug models 超时（{}ms），子进程已终止", timeout.as_millis()))
+        }
+    }
 }
 
 /// 校验导出文本并原子写入缓存；校验不通过时不动旧文件。
@@ -155,6 +190,77 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tempfile::tempdir;
+
+    /// 仅由超时测试启动的子进程阻塞；正常单测调用直接返回。
+    #[test]
+    fn export_timeout_child() {
+        if std::env::var_os("CODEX_UI_EXPORT_TIMEOUT_TEST").is_some() {
+            loop { std::thread::park(); }
+        }
+    }
+
+    #[tokio::test]
+    async fn export_timeout_terminates_and_reaps_child() {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", "codex::model_catalog::codex_models::tests::export_timeout_child"])
+            .env("CODEX_UI_EXPORT_TIMEOUT_TEST", "1")
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(CREATE_NO_WINDOW);
+        let mut child = command.spawn().unwrap();
+        let error = wait_for_export(&mut child, Duration::from_millis(100)).await.unwrap_err();
+        assert!(error.contains("超时"));
+        assert!(child.try_wait().unwrap().is_some(), "超时后必须已回收子进程");
+    }
+
+    #[test]
+    fn late_initial_read_does_not_replace_refreshed_snapshot() {
+        let dir = tempdir().unwrap();
+        let path = cache_path(dir.path());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let reader_barrier = Arc::clone(&barrier);
+        let reader_path = path.clone();
+        let reader = std::thread::spawn(move || {
+            let old = Arc::new(vec![json!({"slug":"old"})]);
+            reader_barrier.wait();
+            reader_barrier.wait();
+            publish_initial(&reader_path, old)
+        });
+        barrier.wait();
+        remember(&path, Arc::new(vec![json!({"slug":"new"})]));
+        barrier.wait();
+        assert_eq!(reader.join().unwrap()[0]["slug"], json!("new"));
+        assert_eq!(codex_snapshot(dir.path())[0]["slug"], json!("new"));
+    }
+
+    #[test]
+    fn captured_snapshot_is_shared_by_official_source_and_template() {
+        let dir = tempdir().unwrap();
+        write_export_for_test(dir.path(), vec![json!({
+            "slug":"generation-old", "model_messages":{"instructions_template":"old"}
+        })]);
+        let captured = codex_snapshot(dir.path());
+        write_export_for_test(dir.path(), vec![json!({
+            "slug":"generation-new", "model_messages":{"instructions_template":"new"}
+        })]);
+        let sources = super::super::sources::full_entry_sources(&captured, "https://relay.example.com");
+        assert!(sources[0].full_entry("generation-old").is_some());
+        assert!(sources[0].full_entry("generation-new").is_none());
+        let template = super::super::template::from_snapshot(&captured).unwrap();
+        assert_eq!(template.entry["model_messages"]["instructions_template"], json!("old"));
+    }
+
+    #[tokio::test]
+    async fn refresh_failure_retains_previous_file_and_snapshot() {
+        let dir = tempdir().unwrap();
+        write_export_for_test(dir.path(), vec![json!({
+            "slug":"old", "model_messages":{"instructions_template":"old"}
+        })]);
+        let before = std::fs::read(cache_path(dir.path())).unwrap();
+        assert!(refresh_codex_models(dir.path(), &dir.path().join("missing-codex.exe")).await.is_err());
+        assert_eq!(std::fs::read(cache_path(dir.path())).unwrap(), before);
+        assert_eq!(codex_snapshot(dir.path())[0]["slug"], json!("old"));
+    }
 
     fn export_text(slugs: &[&str]) -> String {
         let models: Vec<Value> = slugs

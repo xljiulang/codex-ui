@@ -318,10 +318,21 @@ export interface ModelCatalogSourceEvidence {
 export interface ModelCatalogModelOption {
   id: string;
   display_name: string;
-  status: "ready" | "incompatible" | "unmatched";
+  status: "ready" | "incompatible" | "unmatched" | "invalid";
   selectable: boolean;
   sources: ModelCatalogSourceEvidence[];
   warnings: string[];
+  field_provenance: Record<string, ModelCatalogFieldProvenance>;
+}
+
+/** 自动参数选择的只读依据，不用于要求用户手动补参数。 */
+export interface ModelCatalogFieldProvenance {
+  source: string;
+  matched_id: string;
+  match_kind: string;
+  provider_id: string | null;
+  value: unknown;
+  reason: string;
 }
 
 /** `model_catalog_generate_from_provider` 返回结果。 */
@@ -331,6 +342,7 @@ export interface ModelCatalogGenerateResult {
   ready: number;
   incompatible: number;
   unmatched: number;
+  invalid: number;
   models: ModelCatalogModelOption[];
 }
 
