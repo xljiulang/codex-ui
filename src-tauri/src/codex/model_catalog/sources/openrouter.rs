@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{FactSource, write_atomic};
+use super::{FactMatch, FactSource, MatchScope, write_atomic};
 use crate::codex::model_catalog::facts::ModelFacts;
 use crate::codex::model_catalog::matching::{Candidate, CandidateStore};
 
@@ -38,8 +38,15 @@ impl FactSource for OpenRouterSource {
         "openrouter"
     }
 
-    fn extract(&self, model_id: &str) -> Option<ModelFacts> {
-        self.store.lookup(model_id).map(facts_from_model)
+    fn extract(&self, model_id: &str) -> Option<FactMatch> {
+        let matched = self.store.lookup(model_id)?;
+        Some(FactMatch {
+            facts: facts_from_model(matched.value),
+            matched_id: matched.matched_id.to_string(),
+            kind: matched.kind,
+            score: matched.score,
+            scope: MatchScope::Global,
+        })
     }
 }
 
@@ -86,12 +93,24 @@ fn build_store(models: Vec<Value>) -> CandidateStore {
                     .map(str::trim)
                     .filter(|slug| !slug.is_empty())
                     .map(str::to_string);
-                let mut keys = vec![id.clone()];
+                let mut aliases = Vec::new();
                 if let Some(canonical_slug) = canonical_slug {
-                    keys.push(canonical_slug);
+                    aliases.push(canonical_slug);
+                }
+                if let Some(alias_target) = model
+                    .pointer("/alias_target/slug")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|slug| !slug.is_empty())
+                {
+                    aliases.push(alias_target.to_string());
                 }
                 let release = model.get("created").and_then(Value::as_i64);
-                Some((Candidate::new(keys, release, id), model))
+                let status = model.get("status").and_then(Value::as_str);
+                Some((
+                    Candidate::new(id.clone(), aliases, release, id).with_status(status),
+                    model,
+                ))
             })
             .collect(),
     )
@@ -126,6 +145,7 @@ fn facts_from_model(model: &Value) -> ModelFacts {
         facts.supports_search_tool = Some(
             parameters.contains("web_search_options") || parameters.contains("web_search"),
         );
+        facts.supports_tool_calls = Some(parameters.contains("tools"));
     }
     facts
 }
@@ -269,7 +289,7 @@ mod tests {
         let source = OpenRouterSource {
             store: build_store(vec![model("vendor/model-x")]),
         };
-        let facts = source.extract("vendor/model-x").unwrap();
+        let facts = source.extract("vendor/model-x").unwrap().facts;
         assert_eq!(facts.context_window, Some(128_000));
         assert_eq!(facts.max_context_window, Some(128_000));
         assert_eq!(facts.input_modalities, Some(vec!["text".into(), "image".into()]));
@@ -279,6 +299,7 @@ mod tests {
         assert_eq!(facts.description.as_deref(), Some("描述"));
         assert_eq!(facts.support_verbosity, Some(true));
         assert_eq!(facts.supports_search_tool, Some(false));
+        assert_eq!(facts.supports_tool_calls, Some(false));
     }
 
     #[test]
@@ -286,9 +307,10 @@ mod tests {
         let source = OpenRouterSource {
             store: build_store(vec![json!({ "id": "vendor/model-y" })]),
         };
-        let facts = source.extract("vendor/model-y").unwrap();
+        let facts = source.extract("vendor/model-y").unwrap().facts;
         assert_eq!(facts.support_verbosity, None);
         assert_eq!(facts.supports_search_tool, None);
+        assert_eq!(facts.supports_tool_calls, None);
         assert_eq!(facts.context_window, None);
         assert_eq!(facts.supports_reasoning, None);
     }
@@ -299,6 +321,12 @@ mod tests {
         let source = OpenRouterSource::load(dir.path());
         assert!(source.store.len() > 100);
         assert!(source.extract("deepseek/deepseek-v4-flash").is_some());
+        let qwen = source.extract("qwen4-coder").unwrap();
+        assert_eq!(qwen.matched_id, "qwen/qwen3-coder");
+        assert_eq!(
+            qwen.kind,
+            crate::codex::model_catalog::matching::MatchKind::Fuzzy
+        );
     }
 
     #[test]

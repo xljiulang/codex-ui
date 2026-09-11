@@ -22,36 +22,45 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use facts::ModelFacts;
-use sources::{FactSource, FullEntrySource};
-
-/// 弹窗里的来源标记：命中了哪些数据源。
-const SOURCE_OFFICIAL: &str = "official";
-const SOURCE_MODELS_DEV: &str = "models_dev";
-const SOURCE_OPENROUTER: &str = "openrouter";
+use sources::{FactMatch, FactSource, FullEntryMatch, FullEntrySource, MatchScope};
 
 /// 启动时后台刷新各字段源的运行时缓存；失败静默。
 pub use sources::refresh_caches as refresh_source_caches;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCatalogModelStatus {
+    Ready,
+    Incompatible,
+    Unmatched,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ModelCatalogSourceEvidence {
+    pub source: String,
+    pub matched_id: String,
+    pub match_kind: String,
+    pub score: f64,
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ModelCatalogModelOption {
     pub id: String,
     pub display_name: String,
-    /// 是否命中可用资料（未命中的模型不会生成条目）
-    pub matched: bool,
-    /// 命中了官方条目（整条复用）
-    pub official: bool,
-    /// 命中了 models.dev 资料
-    pub models_dev: bool,
-    /// 命中了 OpenRouter 资料
-    pub openrouter: bool,
+    pub status: ModelCatalogModelStatus,
+    pub sources: Vec<ModelCatalogSourceEvidence>,
+    pub warnings: Vec<String>,
+    pub selectable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ModelCatalogGenerateResult {
     pub catalog: String,
     pub total: usize,
-    pub matched: usize,
-    pub skipped: usize,
+    pub ready: usize,
+    pub incompatible: usize,
+    pub unmatched: usize,
     pub models: Vec<ModelCatalogModelOption>,
 }
 
@@ -88,38 +97,81 @@ fn build_catalog_result(
     for id in ids {
         let display_name = template::display_name_from_slug(id);
 
-        if let Some((source_id, entry)) = lookup_full_entry(&full_entry_sources, id) {
-            let entry = finalize_full_entry(entry, id, entries.len() + 1)?;
+        if let Some((source_id, matched)) = lookup_full_entry(&full_entry_sources, id) {
+            let source_evidence = full_entry_evidence(source_id, &matched);
+            let entry = finalize_full_entry(matched.entry, id, entries.len() + 1)?;
             entries.push(entry);
-            models.push(model_option(id, display_name, &[source_id]));
+            models.push(ModelCatalogModelOption {
+                id: id.clone(),
+                display_name,
+                status: ModelCatalogModelStatus::Ready,
+                selectable: true,
+                sources: vec![source_evidence],
+                warnings: Vec::new(),
+            });
             continue;
         }
 
-        let (facts, hits) = collect_facts(id, &fact_sources);
-        if hits.is_empty() {
-            models.push(model_option(id, display_name, &[]));
+        let collected = collect_facts(id, &fact_sources);
+        if collected.sources.is_empty() {
+            models.push(ModelCatalogModelOption {
+                id: id.clone(),
+                display_name,
+                status: ModelCatalogModelStatus::Unmatched,
+                selectable: false,
+                sources: Vec::new(),
+                warnings: vec!["未匹配到可用资料".to_string()],
+            });
             continue;
         }
-        entries.push(template::render(id, &facts, entries.len() + 1)?);
-        models.push(model_option(id, display_name, &hits));
+
+        let mut warnings = collected.warnings;
+        let incompatible_reason = incompatible_reason(&collected.facts);
+        let status = if let Some(reason) = incompatible_reason {
+            warnings.push(reason);
+            ModelCatalogModelStatus::Incompatible
+        } else {
+            if collected
+                .facts
+                .status
+                .as_deref()
+                .is_some_and(|status| status.eq_ignore_ascii_case("beta"))
+            {
+                warnings.push("上游资料标记为 beta".to_string());
+            }
+            entries.push(template::render(id, &collected.facts, entries.len() + 1)?);
+            ModelCatalogModelStatus::Ready
+        };
+        models.push(ModelCatalogModelOption {
+            id: id.clone(),
+            display_name,
+            status,
+            selectable: status == ModelCatalogModelStatus::Ready,
+            sources: collected.sources,
+            warnings,
+        });
     }
 
-    if entries.is_empty() {
-        return Err(format!(
-            "模型提供者返回的 {} 个模型均未匹配到可用资料，未生成模型目录",
-            ids.len()
-        ));
-    }
-
-    let matched = models.iter().filter(|model| model.matched).count();
-    let skipped = models.len().saturating_sub(matched);
+    let ready = models
+        .iter()
+        .filter(|model| model.status == ModelCatalogModelStatus::Ready)
+        .count();
+    let incompatible = models
+        .iter()
+        .filter(|model| model.status == ModelCatalogModelStatus::Incompatible)
+        .count();
+    let unmatched = models
+        .iter()
+        .filter(|model| model.status == ModelCatalogModelStatus::Unmatched)
+        .count();
     let catalog = serde_json::to_string_pretty(&json!({ "models": entries }))
         .map_err(|e| format!("生成模型目录 JSON 失败: {e}"))?;
     Ok(ModelCatalogGenerateResult {
         catalog,
         total: models.len(),
-        matched,
-        skipped,
+        ready,
+        incompatible,
+        unmatched,
         models,
     })
 }
@@ -128,7 +180,7 @@ fn build_catalog_result(
 fn lookup_full_entry(
     sources: &[Box<dyn FullEntrySource>],
     model_id: &str,
-) -> Option<(&'static str, Value)> {
+) -> Option<(&'static str, FullEntryMatch)> {
     sources
         .iter()
         .find_map(|source| source.full_entry(model_id).map(|entry| (source.id(), entry)))
@@ -144,32 +196,76 @@ fn finalize_full_entry(mut entry: Value, model_id: &str, priority: usize) -> Res
     Ok(entry)
 }
 
-/// 逐字段源提取并按注册顺序合并（靠后的源覆盖靠前的源）。
-fn collect_facts(model_id: &str, sources: &[Box<dyn FactSource>]) -> (ModelFacts, Vec<&'static str>) {
-    let mut facts = ModelFacts::default();
-    let mut hits = Vec::new();
-    for source in sources {
-        if let Some(partial) = source.extract(model_id) {
-            hits.push(source.id());
-            facts.merge_from(source.id(), partial);
-        }
-    }
-    (facts, hits)
+struct CollectedFacts {
+    facts: ModelFacts,
+    sources: Vec<ModelCatalogSourceEvidence>,
+    warnings: Vec<String>,
 }
 
-fn model_option(
-    id: &str,
-    display_name: String,
-    hits: &[&'static str],
-) -> ModelCatalogModelOption {
-    ModelCatalogModelOption {
-        id: id.to_string(),
-        display_name,
-        matched: !hits.is_empty(),
-        official: hits.contains(&SOURCE_OFFICIAL),
-        models_dev: hits.contains(&SOURCE_MODELS_DEV),
-        openrouter: hits.contains(&SOURCE_OPENROUTER),
+/// 逐字段源提取，并按作用域权威性与匹配质量合并。
+fn collect_facts(model_id: &str, sources: &[Box<dyn FactSource>]) -> CollectedFacts {
+    let mut facts = ModelFacts::default();
+    let mut evidence = Vec::new();
+    let mut conflict_fields = HashSet::new();
+    for source in sources {
+        if let Some(matched) = source.extract(model_id) {
+            conflict_fields.extend(facts.merge_from(
+                source.id(),
+                matched.quality(),
+                matched.facts.clone(),
+            ));
+            evidence.push(fact_evidence(source.id(), &matched));
+        }
     }
+    let warnings = if conflict_fields.is_empty() {
+        Vec::new()
+    } else {
+        let mut fields: Vec<_> = conflict_fields.into_iter().collect();
+        fields.sort_unstable();
+        vec![format!("字段资料存在冲突：{}", fields.join("、"))]
+    };
+    CollectedFacts {
+        facts,
+        sources: evidence,
+        warnings,
+    }
+}
+
+fn full_entry_evidence(
+    source: &'static str,
+    matched: &FullEntryMatch,
+) -> ModelCatalogSourceEvidence {
+    ModelCatalogSourceEvidence {
+        source: source.to_string(),
+        matched_id: matched.matched_id.clone(),
+        match_kind: matched.kind.as_str().to_string(),
+        score: 1.0,
+        scope: MatchScope::OfficialGlobal.as_str().to_string(),
+    }
+}
+
+fn fact_evidence(source: &'static str, matched: &FactMatch) -> ModelCatalogSourceEvidence {
+    ModelCatalogSourceEvidence {
+        source: source.to_string(),
+        matched_id: matched.matched_id.clone(),
+        match_kind: matched.kind.as_str().to_string(),
+        score: matched.score,
+        scope: matched.scope.as_str().to_string(),
+    }
+}
+
+fn incompatible_reason(facts: &ModelFacts) -> Option<String> {
+    if facts.supports_tool_calls == Some(false) {
+        return Some("上游明确标记 tool_call=false，不兼容 Codex 工具调用".to_string());
+    }
+    if facts
+        .status
+        .as_deref()
+        .is_some_and(|status| status.eq_ignore_ascii_case("deprecated"))
+    {
+        return Some("上游资料标记为 deprecated".to_string());
+    }
+    None
 }
 
 fn models_url(base_url: &str) -> Result<String, String> {
@@ -268,12 +364,22 @@ mod tests {
             "fake"
         }
 
-        fn extract(&self, _model_id: &str) -> Option<ModelFacts> {
-            Some(ModelFacts {
-                context_window: Some(999),
-                ..ModelFacts::default()
+        fn extract(&self, model_id: &str) -> Option<FactMatch> {
+            Some(FactMatch {
+                facts: ModelFacts {
+                    context_window: Some(999),
+                    ..ModelFacts::default()
+                },
+                matched_id: model_id.to_string(),
+                kind: matching::MatchKind::Exact,
+                score: 1.0,
+                scope: MatchScope::Provider,
             })
         }
+    }
+
+    fn has_source(model: &ModelCatalogModelOption, source: &str) -> bool {
+        model.sources.iter().any(|item| item.source == source)
     }
 
     fn catalog_entry(result: &ModelCatalogGenerateResult, slug: &str) -> Value {
@@ -313,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn pipeline_merges_sources_in_registration_order() {
+    fn pipeline_merges_sources_by_quality_and_records_evidence() {
         let dir = tempdir().unwrap();
         let base_url = "https://api.deepseek.com/v1";
         let sources: Vec<Box<dyn FactSource>> = vec![
@@ -324,16 +430,27 @@ mod tests {
             )),
             Box::new(FakeSource),
         ];
-        let (facts, hits) = collect_facts("deepseek-flash", &sources);
-        assert_eq!(hits, vec!["openrouter", "models_dev", "fake"]);
-        assert_eq!(facts.context_window, Some(999), "最后的源覆盖上下文");
-        assert_eq!(facts.source_of("context_window"), Some("fake"));
+        let collected = collect_facts("deepseek-flash", &sources);
         assert_eq!(
-            facts.source_of("input_modalities"),
+            collected
+                .sources
+                .iter()
+                .map(|source| source.source.as_str())
+                .collect::<Vec<_>>(),
+            vec!["openrouter", "models_dev", "fake"]
+        );
+        assert_eq!(collected.facts.context_window, Some(999));
+        assert_eq!(collected.facts.source_of("context_window"), Some("fake"));
+        assert_eq!(
+            collected.facts.source_of("input_modalities"),
             Some("models_dev"),
             "未提供该字段的源不应覆盖"
         );
-        assert_eq!(facts.source_of("support_verbosity"), Some("openrouter"));
+        assert_eq!(
+            collected.facts.source_of("support_verbosity"),
+            Some("openrouter")
+        );
+        assert!(!collected.warnings.is_empty(), "字段冲突应提供可见警告");
     }
 
     #[test]
@@ -361,10 +478,12 @@ mod tests {
             }
             assert_eq!(entry.get(key), Some(value), "键 {key} 应原样复用官方条目");
         }
-        assert_eq!(result.matched, 1);
-        assert!(result.models[0].official);
-        assert!(!result.models[0].models_dev);
-        assert!(!result.models[0].openrouter);
+        assert_eq!(result.ready, 1);
+        assert_eq!(result.models[0].status, ModelCatalogModelStatus::Ready);
+        assert!(result.models[0].selectable);
+        assert!(has_source(&result.models[0], "official"));
+        assert!(!has_source(&result.models[0], "models_dev"));
+        assert!(!has_source(&result.models[0], "openrouter"));
     }
 
     #[test]
@@ -383,10 +502,10 @@ mod tests {
         assert!(entry["description"]
             .as_str()
             .unwrap()
-            .contains("Experimental multimodal"));
-        assert!(!result.models[0].official);
-        assert!(result.models[0].models_dev);
-        assert!(result.models[0].openrouter);
+            .contains("DeepSeek V4.1 Flash"));
+        assert!(!has_source(&result.models[0], "official"));
+        assert!(has_source(&result.models[0], "models_dev"));
+        assert!(has_source(&result.models[0], "openrouter"));
     }
 
     #[test]
@@ -406,9 +525,9 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("You are Codex"));
-        assert!(result.models[0].official);
-        assert!(!result.models[0].models_dev);
-        assert!(!result.models[0].openrouter);
+        assert!(has_source(&result.models[0], "official"));
+        assert!(!has_source(&result.models[0], "models_dev"));
+        assert!(!has_source(&result.models[0], "openrouter"));
     }
 
     #[test]
@@ -424,23 +543,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.total, 2);
-        assert_eq!(result.matched, 1);
-        assert_eq!(result.skipped, 1);
-        assert!(!result.models[1].matched);
+        assert_eq!(result.ready, 1);
+        assert_eq!(result.incompatible, 0);
+        assert_eq!(result.unmatched, 1);
+        assert_eq!(result.models[1].status, ModelCatalogModelStatus::Unmatched);
+        assert!(!result.models[1].selectable);
         let catalog: Value = serde_json::from_str(&result.catalog).unwrap();
         assert_eq!(catalog["models"].as_array().unwrap().len(), 1);
     }
 
     #[test]
-    fn all_unmatched_reports_error() {
+    fn all_unmatched_still_returns_candidate_details() {
         let dir = tempdir().unwrap();
-        let error = build_catalog_result(
+        let result = build_catalog_result(
             &["definitely-not-a-real-model-xyz".to_string()],
             dir.path(),
             "https://relay.example.com/v1",
         )
-        .unwrap_err();
-        assert!(error.contains("均未匹配到可用资料"));
+        .unwrap();
+        assert_eq!(result.ready, 0);
+        assert_eq!(result.unmatched, 1);
+        assert_eq!(result.models[0].warnings, vec!["未匹配到可用资料"]);
+        let catalog: Value = serde_json::from_str(&result.catalog).unwrap();
+        assert!(catalog["models"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn explicit_tool_incompatibility_and_deprecated_status_are_rejected() {
+        let no_tools = ModelFacts {
+            supports_tool_calls: Some(false),
+            ..ModelFacts::default()
+        };
+        assert!(incompatible_reason(&no_tools).unwrap().contains("tool_call=false"));
+
+        let deprecated = ModelFacts {
+            status: Some("deprecated".to_string()),
+            ..ModelFacts::default()
+        };
+        assert!(incompatible_reason(&deprecated)
+            .unwrap()
+            .contains("deprecated"));
     }
 
     #[test]

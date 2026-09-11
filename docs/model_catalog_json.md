@@ -28,8 +28,9 @@
    │
    ├─ 1. 完整条目源（official）：命中即整条复用，不套模板
    │
-   └─ 2. 字段源：openrouter（基础）→ models_dev（覆盖）
-          │  每个源只做「提取 → 记录」（ModelFacts），覆盖由 merge 逐字段完成
+   └─ 2. 字段源：models.dev + OpenRouter
+          │  每个源返回匹配类型、作用域、分数与 ModelFacts
+          │  merge 按来源权威性和匹配质量逐字段选择，低质量源只补缺失值
           ▼
       3. 模板渲染（model_catalog_template.json，固定值唯一事实来源）
 ```
@@ -43,7 +44,7 @@
 | `matching.rs` | 别名键匹配、匹配级别与排序键、`CandidateStore`、规范化/相似度 |
 | `template.rs` | 模板加载、`DATA_DRIVEN_KEYS`、四条派生规则 |
 | `sources/official.rs` | 完整条目源：官方条目池（精确匹配） |
-| `sources/models_dev.rs` | 字段源（provider 主机推断 + 全局索引） |
+| `sources/models_dev.rs` | 字段源（provider URL 定位 + 官方厂商全局索引） |
 | `sources/openrouter.rs` | 字段源（缓存 + 内置回退） |
 
 ### 新增一个数据源（三步）
@@ -56,26 +57,27 @@
 
 ## 匹配与排序规则
 
-- **别名键**：OpenRouter 用 `id` / `canonical_slug`；models.dev 用 `id` / `family`。
-- **匹配级别**：别名键精确 → 规范化精确 → 相似度 ≥ 0.72。
+- **权威别名**：OpenRouter 用 `canonical_slug` / `alias_target.slug`；models.dev 用 `family`。
+- **匹配级别**：规范模型 ID 精确 → 权威别名精确 → 规范化精确 → 同系列模糊匹配 → 无匹配。
+  一般模糊阈值为 0.72；版本系列已确认一致时可降到 0.60，容纳 `coder` / `flash` / `pro`
+  等规格后缀造成的额外距离。
   规范化会剥掉 provider 前缀、`:free` / `:batch` / `-free` / `-latest` / `-preview` /
   `-beta` / `-alpha` 后缀与结尾日期。
-- **同级别排序**（依次比较，全部确定性）：
-  1. `is_variant` 为 false 优先 —— 原始键含 `exp`/`experimental`/`preview`/`beta`/`alpha`/
-     `rc`/`nightly`/`dev`/`free`/`batch`/`latest` 任一 token 即视为变体或别名（`vision` 不算）；
-  2. 多余 token 少者优先（候选键比查询多出的 token 数）；
-  3. 发布时间新者优先（models.dev `release_date` → `last_updated`，OpenRouter `created`）；
-  4. 候选 id 字典序兜底。
-- **效果**：无版本 ID（`deepseek-flash`）先按 `family` 命中同族候选，实验变体落败后取
-  `deepseek-v4-flash`；同族出现 `v4`/`v5` 两个同构版本时取发布时间最新的；带版本查询
-  （`deepseek-v4-flash-0731`）因多余 token 最少仍命中自身。
+- **模糊排序**（依次比较，全部确定性）：同厂商 → 同版本系列 → 保留查询中的规格 token
+  （`coder` / `chat` / `reasoner` / `flash` / `pro` / `mini` / `sonnet` 等）→ 相似度 →
+  正式模型优先于实验/beta/deprecated → 多余 token 少者 → 发布时间新者 → 模型 ID。
+- **效果**：`gpt-5.7` 继承最新正式 GPT-5.x，`qwen4-coder` 优先继承 Qwen Coder，
+  `deepseek-v5` 只在 DeepSeek V 系列内选择；模糊命中仍是正常可生成模型，只在弹窗显示
+  “资料继承自……”的溯源。
 - **输出 slug 始终是提供方返回的原始 ID**，只有能力字段来自命中的规范模型。
 - **provider 分组定位**（仅 models.dev）：先按 `base_url` 与 provider `api` 的
   同源 + 路径前缀匹配（区分同主机不同产品线，如 `https://opencode.ai/zen/v1` → `opencode`、
-  `https://opencode.ai/zen/go/v1` → `opencode-go`），无前缀命中时退化为同主机匹配；
-  命中多个时取路径最长者、再按 provider id。该分组内匹配不中时，才回退全量索引。
-- **全量索引同 ID 冲突**：优先 `models-dev-official-providers.json` 里的官方厂商
-  （如 `deepseek`），其余按 provider id 字典序；保证中转商不会凭字母序覆盖官方参数。
+  `https://opencode.ai/zen/go/v1` → `opencode-go`）。无路径命中时仅当同主机只有一个 provider
+  才退化为主机匹配；同主机多分组且路径不足以判断时不再任意选择。
+- **全局回退**：models.dev 只索引 `models-dev-official-providers.json` 中的官方厂商；无关中转商
+  只有在 `base_url` 明确定位到其 provider 分组时才可使用。OpenRouter 为最后的全局补充源。
+- **字段覆盖**：provider 精确/别名资料优先于官方厂商全局资料，再优先于 OpenRouter；低质量
+  命中只能补空字段，不能覆盖高质量值。冲突字段会进入候选警告。
 
 ## 字段来源
 
@@ -83,16 +85,24 @@
 
 | 字段 | 来源 |
 | --- | --- |
-| `context_window` / `max_context_window` | models.dev `limit.context` → OpenRouter `context_length` |
+| `context_window` / `max_context_window` | models.dev `limit.context` 或 OpenRouter `context_length`；两者都表示总上下文 |
+| `effective_context_window_percent` / `auto_compact_token_limit` | 若 models.dev `limit.input < limit.context`：分别为 `min(95, floor(input/context*100))` 与 `floor(input*0.9)` |
 | `input_modalities` | models.dev `modalities.input` → OpenRouter `architecture.input_modalities`（过滤为 text/image/audio） |
-| `supported_reasoning_levels` | models.dev `reasoning_options[type=effort].values` → OpenRouter `reasoning.supported_efforts`（过滤到 codex 已知档位） |
-| `default_reasoning_level` | OpenRouter `reasoning.default_effort`（须在档位内），否则按 `medium→high→low→xhigh→max→minimal→none` 取首个存在的；档位为空则删键 |
+| `supported_reasoning_levels` | models.dev `reasoning_options[type=effort].values` / OpenRouter `reasoning.supported_efforts`；保留合法自定义值，只过滤空值、`default`、`null` 哨兵 |
+| `default_reasoning_level` | 仅数据源明确给出且该值存在于档位列表时写入，不自行猜测 |
 | `description` | models.dev → OpenRouter → 占位文案 |
-| `supports_reasoning_summary_parameter` | 任一源声明推理能力即为 true，否则 false |
-| `support_verbosity` / `default_verbosity` | 源明确声明时用源（明确 false 会删 `default_verbosity`），源无信息时保留模板值 |
-| `supports_search_tool` | 同上（OpenRouter 看 `supported_parameters` 的 `web_search_options`/`web_search`） |
+| `supports_reasoning_summary_parameter` | 模板生成条目固定为 false；官方完整条目保持原值 |
+| `support_verbosity` / `default_verbosity` | 默认 false 且不写默认 verbosity；仅数据源明确声明 `verbosity` 时开启 |
+| `supports_search_tool` | 默认 false；仅数据源明确声明 `web_search_options` / `web_search` 时开启 |
+| `status` | models.dev 的有效状态写入生成条目；`beta` 正常生成并显示警告 |
+| 可用性 | models.dev `tool_call=false` 或 `status=deprecated` → `incompatible`；不兼容条目不会写入目录 |
 | `supports_image_detail_original` | 派生：`input_modalities` 含 `image` 则为 true |
 | `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；`display_name` 按 slug 格式化；`priority` 按勾选顺序从 1 重排 |
+
+命令返回的每个候选包含 `status`（`ready` / `incompatible` / `unmatched`）、`selectable`、
+`warnings` 与 `sources[]`。来源证据包括来源名、继承目标 `matched_id`、匹配类型、分数和作用域；
+统计字段为 `ready / incompatible / unmatched`。即使全部未匹配或不兼容，也会返回候选列表和
+空目录 `{ "models": [] }`，由弹窗展示具体原因。
 
 ### 官方条目的复用（codex GPT / deepseek 等厂商同池）
 
@@ -115,7 +125,7 @@
 
 ## 模板（固定值的唯一事实来源）
 
-模板 `src-tauri/resources/model_catalog_template.json`（43 键）由脚本从官方条目池的
+模板 `src-tauri/resources/model_catalog_template.json`（42 键）由脚本从官方条目池的
 `gpt-5.6-sol` 派生，并做传输层最小化与占位。改固定行为 = 只改这个文件（代码里没有固定值常量），
 `src-tauri/src/codex/model_catalog/template.rs` 的护栏测试会拦住误改。
 
@@ -143,7 +153,7 @@
 | 资源 | 用途 | 更新方式 |
 | --- | --- | --- |
 | `resources/official-models.json` | 官方条目池（完整条目源）：codex 基线条目与 codex 版本绑定，可手工追加其它厂商条目 | `--official` |
-| `resources/models-dev.json` | models.dev 内置快照：**全量** provider 分组（213 个 provider / 7616 个模型，约 2.8 MB，含中转/聚合商，首次离线也能匹配 zen 之类中转） | 同上 |
+| `resources/models-dev.json` | models.dev 内置快照：**全量** provider 分组（213 个 provider / 7669 个模型，约 2.8 MB，保留 `tool_call` / `status`；含中转/聚合商供明确 provider 分组使用） | 同上 |
 | `resources/models-dev-official-providers.json` | 官方厂商 id 清单（约 0.5 KB），只用于全局索引同 ID 冲突时的优先级 | 同上 |
 | `resources/openrouter-models.json` | OpenRouter 全量响应回退 | 同上 |
 | `resources/model_catalog_template.json` | 渲染基底（由官方条目池的 `gpt-5.6-sol` 派生） | `--template` |

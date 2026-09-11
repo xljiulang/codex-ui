@@ -308,25 +308,30 @@ export interface ModelProviderInfo {
 }
 
 /** `model_catalog_generate_from_provider` 返回的单个模型候选。 */
+export interface ModelCatalogSourceEvidence {
+  source: string;
+  matched_id: string;
+  match_kind: "exact" | "alias" | "normalized" | "fuzzy" | string;
+  score: number;
+  scope: "provider" | "official_global" | "global" | string;
+}
+
 export interface ModelCatalogModelOption {
   id: string;
   display_name: string;
-  /** 是否命中可用资料（未命中的模型不会生成条目） */
-  matched: boolean;
-  /** 命中了官方条目（整条复用，如 codex / deepseek 等厂商提供的权威条目） */
-  official: boolean;
-  /** 命中了 models.dev 资料 */
-  models_dev: boolean;
-  /** 命中了 OpenRouter 资料 */
-  openrouter: boolean;
+  status: "ready" | "incompatible" | "unmatched";
+  selectable: boolean;
+  sources: ModelCatalogSourceEvidence[];
+  warnings: string[];
 }
 
 /** `model_catalog_generate_from_provider` 返回结果。 */
 export interface ModelCatalogGenerateResult {
   catalog: string;
   total: number;
-  matched: number;
-  skipped: number;
+  ready: number;
+  incompatible: number;
+  unmatched: number;
   models: ModelCatalogModelOption[];
 }
 

@@ -1,8 +1,7 @@
 {
   "slug": "placeholder-model",
   "prefer_websockets": false,
-  "support_verbosity": true,
-  "default_verbosity": "low",
+  "support_verbosity": false,
   "apply_patch_tool_type": "freeform",
   "web_search_tool_type": "text",
   "input_modalities": [
@@ -75,7 +74,7 @@
   },
   "experimental_supported_tools": [],
   "available_in_plans": [],
-  "supports_search_tool": true,
+  "supports_search_tool": false,
   "default_service_tier": null,
   "service_tiers": [],
   "additional_speed_tiers": [],

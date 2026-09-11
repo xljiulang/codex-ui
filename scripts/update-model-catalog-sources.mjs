@@ -81,6 +81,8 @@ const MODEL_KEEP_KEYS = [
   "reasoning_options",
   "modalities",
   "limit",
+  "tool_call",
+  "status",
   "release_date",
   "last_updated",
 ];
@@ -195,9 +197,9 @@ async function updateTemplate() {
   template.default_reasoning_level = null;
   template.context_window = 272000;
   template.max_context_window = 272000;
-  template.support_verbosity = true;
-  template.default_verbosity = "low";
-  template.supports_search_tool = true;
+  template.support_verbosity = false;
+  delete template.default_verbosity;
+  template.supports_search_tool = false;
   template.supports_image_detail_original = false;
 
   // 传输层最小化：第三方 provider 不走 OpenAI 专用传输与工具形态

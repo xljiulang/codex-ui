@@ -111,8 +111,9 @@ const catalogPicker = reactive({
   providerName: "",
   baseUrl: "",
   total: 0,
-  matched: 0,
-  skipped: 0,
+  ready: 0,
+  incompatible: 0,
+  unmatched: 0,
   catalog: "",
   models: [] as ModelCatalogModelOption[],
   selectedIds: [] as string[],
@@ -121,11 +122,32 @@ const catalogPicker = reactive({
 
 /** 候选模型的资料来源标记（只读展示，不影响勾选与生成流程）。 */
 function catalogSourceLabel(model: ModelCatalogModelOption): string {
-  const labels: string[] = [];
-  if (model.official) labels.push("官方条目");
-  if (model.models_dev) labels.push("models.dev");
-  if (model.openrouter) labels.push("OpenRouter");
-  return labels.join(" + ");
+  const sourceOrder = { official: 0, models_dev: 1, openrouter: 2 } as const;
+  return [...model.sources]
+    .sort(
+      (left, right) =>
+        (sourceOrder[left.source as keyof typeof sourceOrder] ?? 99) -
+        (sourceOrder[right.source as keyof typeof sourceOrder] ?? 99),
+    )
+    .map((source) => {
+      const name =
+        source.source === "official"
+          ? "官方条目"
+          : source.source === "models_dev"
+            ? "models.dev"
+            : source.source === "openrouter"
+              ? "OpenRouter"
+              : source.source;
+      return source.matched_id.toLowerCase() !== model.id.toLowerCase()
+        ? `${name} · 继承 ${source.matched_id}`
+        : name;
+    })
+    .join(" + ");
+}
+
+function catalogStatusLabel(model: ModelCatalogModelOption): string {
+  if (model.warnings.length) return model.warnings.join("；");
+  return model.status === "incompatible" ? "与 Codex 不兼容" : "无匹配资料";
 }
 
 /** 提供方新增/编辑表单状态（editingIndex < 0 表示新增） */
@@ -357,20 +379,20 @@ const filteredCatalogModels = computed(() => {
   );
 });
 
-const visibleMatchedCatalogModels = computed(() =>
-  filteredCatalogModels.value.filter((model) => model.matched),
+const visibleSelectableCatalogModels = computed(() =>
+  filteredCatalogModels.value.filter((model) => model.selectable),
 );
 
 const allVisibleCatalogModelsSelected = computed(
   () =>
-    visibleMatchedCatalogModels.value.length > 0 &&
-    visibleMatchedCatalogModels.value.every((model) =>
+    visibleSelectableCatalogModels.value.length > 0 &&
+    visibleSelectableCatalogModels.value.every((model) =>
       catalogPicker.selectedIds.includes(model.id),
     ),
 );
 
 const someVisibleCatalogModelsSelected = computed(() =>
-  visibleMatchedCatalogModels.value.some((model) =>
+  visibleSelectableCatalogModels.value.some((model) =>
     catalogPicker.selectedIds.includes(model.id),
   ),
 );
@@ -384,8 +406,9 @@ function openCatalogPicker(
   catalogPicker.providerName = p.name || p.key;
   catalogPicker.baseUrl = p.base_url.trim();
   catalogPicker.total = res.total;
-  catalogPicker.matched = res.matched;
-  catalogPicker.skipped = res.skipped;
+  catalogPicker.ready = res.ready;
+  catalogPicker.incompatible = res.incompatible;
+  catalogPicker.unmatched = res.unmatched;
   catalogPicker.catalog = res.catalog;
   catalogPicker.models = res.models.map((model) => ({ ...model }));
   catalogPicker.selectedIds = [];
@@ -397,8 +420,9 @@ function closeCatalogPicker() {
   catalogPicker.providerName = "";
   catalogPicker.baseUrl = "";
   catalogPicker.total = 0;
-  catalogPicker.matched = 0;
-  catalogPicker.skipped = 0;
+  catalogPicker.ready = 0;
+  catalogPicker.incompatible = 0;
+  catalogPicker.unmatched = 0;
   catalogPicker.catalog = "";
   catalogPicker.models = [];
   catalogPicker.selectedIds = [];
@@ -408,7 +432,7 @@ function closeCatalogPicker() {
 /** 三态全选：全部选中时取消当前结果，否则选中当前结果。 */
 function toggleVisibleCatalogModels() {
   const visibleIds = new Set(
-    visibleMatchedCatalogModels.value.map((model) => model.id),
+    visibleSelectableCatalogModels.value.map((model) => model.id),
   );
   if (allVisibleCatalogModelsSelected.value) {
     catalogPicker.selectedIds = catalogPicker.selectedIds.filter(
@@ -416,7 +440,7 @@ function toggleVisibleCatalogModels() {
     );
     return;
   }
-  for (const model of visibleMatchedCatalogModels.value) {
+  for (const model of visibleSelectableCatalogModels.value) {
     if (!catalogPicker.selectedIds.includes(model.id)) {
       catalogPicker.selectedIds.push(model.id);
     }
@@ -432,10 +456,8 @@ function confirmCatalogPicker() {
       catalogPicker.selectedIds,
     );
     modelConfigErrors.catalog = "";
-    const skipped =
-      catalogPicker.skipped > 0
-        ? `，跳过 ${catalogPicker.skipped} 个未匹配模型`
-        : "";
+    const skippedCount = catalogPicker.incompatible + catalogPicker.unmatched;
+    const skipped = skippedCount > 0 ? `，跳过 ${skippedCount} 个不可用模型` : "";
     setToast(
       `已生成 ${catalogPicker.selectedIds.length} 个模型条目${skipped}，保存并重启 codex-ui 后生效`,
     );
@@ -977,9 +999,10 @@ function openModelConfigFile() {
               <span class="model-catalog-picker-url">{{ catalogPicker.baseUrl }}</span>
             </div>
             <p>
-              获取 {{ catalogPicker.total }} 个模型，可生成
-              {{ catalogPicker.matched }} 个；{{ catalogPicker.skipped }}
-              个未匹配资料，将跳过。
+              获取 {{ catalogPicker.total }} 个模型：可生成
+              {{ catalogPicker.ready }} 个，不兼容
+              {{ catalogPicker.incompatible }} 个，未匹配
+              {{ catalogPicker.unmatched }} 个。
             </p>
           </div>
           <div class="model-catalog-picker-toolbar">
@@ -992,7 +1015,7 @@ function openModelConfigFile() {
             <label
               class="model-catalog-picker-select-all"
               :class="{
-                'is-disabled': visibleMatchedCatalogModels.length === 0,
+                'is-disabled': visibleSelectableCatalogModels.length === 0,
               }"
             >
               <input
@@ -1002,7 +1025,7 @@ function openModelConfigFile() {
                   someVisibleCatalogModelsSelected &&
                   !allVisibleCatalogModelsSelected
                 "
-                :disabled="visibleMatchedCatalogModels.length === 0"
+                :disabled="visibleSelectableCatalogModels.length === 0"
                 aria-label="全选当前搜索结果"
                 @change="toggleVisibleCatalogModels"
               />
@@ -1011,20 +1034,23 @@ function openModelConfigFile() {
           </div>
           <div class="model-catalog-picker-count">
             已选 {{ catalogPicker.selectedIds.length }} / 可生成
-            {{ catalogPicker.matched }}
+            {{ catalogPicker.ready }}
           </div>
           <div class="model-catalog-picker-list">
             <label
               v-for="model in filteredCatalogModels"
               :key="model.id"
               class="model-catalog-picker-row"
-              :class="{ 'is-unmatched': !model.matched }"
+              :class="{
+                'is-unmatched': model.status === 'unmatched',
+                'is-incompatible': model.status === 'incompatible',
+              }"
             >
               <input
                 type="checkbox"
                 :value="model.id"
                 v-model="catalogPicker.selectedIds"
-                :disabled="!model.matched"
+                :disabled="!model.selectable"
               />
               <span
                 class="model-catalog-picker-text"
@@ -1033,19 +1059,19 @@ function openModelConfigFile() {
                 <span class="model-catalog-picker-id">{{ model.id }}</span>
                 <span class="model-catalog-picker-name">{{ model.display_name }}</span>
               </span>
-              <span
-                v-if="model.matched"
-                class="model-catalog-picker-source"
-                @click.stop.prevent
-              >
-                {{ catalogSourceLabel(model) }}
-              </span>
-              <span
-                v-if="!model.matched"
-                class="model-catalog-picker-status"
-                @click.stop.prevent
-              >
-                无匹配资料，将跳过
+              <span class="model-catalog-picker-details" @click.stop.prevent>
+                <span
+                  v-if="model.sources.length"
+                  class="model-catalog-picker-source"
+                >
+                  {{ catalogSourceLabel(model) }}
+                </span>
+                <span
+                  v-if="model.status !== 'ready' || model.warnings.length"
+                  class="model-catalog-picker-status"
+                >
+                  {{ catalogStatusLabel(model) }}
+                </span>
               </span>
             </label>
             <p

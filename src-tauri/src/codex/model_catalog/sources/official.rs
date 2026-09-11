@@ -13,8 +13,8 @@ use std::sync::OnceLock;
 
 use serde_json::{json, Value};
 
-use super::FullEntrySource;
-use crate::codex::model_catalog::matching::normalize_model_key;
+use super::{FullEntryMatch, FullEntrySource};
+use crate::codex::model_catalog::matching::{MatchKind, normalize_model_key};
 
 const OFFICIAL_MODELS_JSON: &str = include_str!("../../../../resources/official-models.json");
 
@@ -37,15 +37,21 @@ impl FullEntrySource for OfficialModelSource {
 
     /// 只做精确匹配（原始 slug 或规范化后相同），不做模糊匹配：
     /// 避免把提供方返回的 `gpt-5.6` 之类乱映射到 `gpt-5.6-sol/terra/luna`。
-    fn full_entry(&self, model_id: &str) -> Option<Value> {
+    fn full_entry(&self, model_id: &str) -> Option<FullEntryMatch> {
         let query = model_id.trim();
         if query.is_empty() {
             return None;
         }
         let query_key = normalize_model_key(query);
-        let entry = official_entries().iter().find(|entry| {
+        let (entry, kind) = official_entries().iter().find_map(|entry| {
             let slug = entry.get("slug").and_then(Value::as_str).unwrap_or("");
-            slug == query || (!query_key.is_empty() && normalize_model_key(slug) == query_key)
+            if slug == query {
+                Some((entry, MatchKind::Exact))
+            } else if !query_key.is_empty() && normalize_model_key(slug) == query_key {
+                Some((entry, MatchKind::Normalized))
+            } else {
+                None
+            }
         })?;
 
         let mut value = entry.clone();
@@ -54,7 +60,15 @@ impl FullEntrySource for OfficialModelSource {
                 object.insert("prefer_websockets".to_string(), json!(false));
             }
         }
-        Some(value)
+        Some(FullEntryMatch {
+            entry: value,
+            matched_id: entry
+                .get("slug")
+                .and_then(Value::as_str)
+                .unwrap_or(query)
+                .to_string(),
+            kind,
+        })
     }
 }
 
@@ -116,7 +130,7 @@ mod tests {
     #[test]
     fn full_entry_reuses_official_entry_verbatim_for_third_party_provider() {
         let source = OfficialModelSource::new("https://api.deepseek.com/v1");
-        let entry = source.full_entry("gpt-5.6-sol").unwrap();
+        let entry = source.full_entry("gpt-5.6-sol").unwrap().entry;
         let official_entry = official_entry("gpt-5.6-sol");
 
         for (key, value) in official_entry.as_object().unwrap() {
@@ -135,7 +149,7 @@ mod tests {
     #[test]
     fn full_entry_keeps_websockets_for_official_openai_host() {
         let source = OfficialModelSource::new("https://api.openai.com/v1");
-        let entry = source.full_entry("gpt-5.6-sol").unwrap();
+        let entry = source.full_entry("gpt-5.6-sol").unwrap().entry;
         assert_eq!(entry["prefer_websockets"], json!(true));
     }
 
@@ -145,7 +159,8 @@ mod tests {
         assert!(source.full_entry("GPT-5.6-Sol").is_some());
         // 规范化会剥掉 `-preview` 这类别名后缀：仍命中对应官方条目
         let preview = source.full_entry("gpt-5.6-terra-preview").unwrap();
-        assert_eq!(preview["slug"], json!("gpt-5.6-terra"));
+        assert_eq!(preview.entry["slug"], json!("gpt-5.6-terra"));
+        assert_eq!(preview.kind, MatchKind::Normalized);
         // 没有任何别名键能对应上时不猜（不做模糊匹配）
         assert!(source.full_entry("gpt-5.6").is_none());
         assert!(source.full_entry("gpt-5.9-unknown").is_none());

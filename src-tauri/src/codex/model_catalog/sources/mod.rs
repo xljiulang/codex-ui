@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 use serde_json::Value;
 
 use super::facts::ModelFacts;
+use super::matching::MatchKind;
 
 /// 运行时缓存有效期：24 小时内不重复下载（两个字段源共用同一策略）。
 pub(super) const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -25,14 +26,66 @@ pub(super) const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub trait FullEntrySource {
     fn id(&self) -> &'static str;
     /// 未命中返回 `None`；命中返回可写入目录的完整条目。
-    fn full_entry(&self, model_id: &str) -> Option<Value>;
+    fn full_entry(&self, model_id: &str) -> Option<FullEntryMatch>;
+}
+
+pub struct FullEntryMatch {
+    pub entry: Value,
+    pub matched_id: String,
+    pub kind: MatchKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchScope {
+    Provider,
+    OfficialGlobal,
+    Global,
+}
+
+impl MatchScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::OfficialGlobal => "official_global",
+            Self::Global => "global",
+        }
+    }
+
+    fn quality_base(self) -> u8 {
+        match self {
+            Self::Provider => 40,
+            Self::OfficialGlobal => 30,
+            Self::Global => 20,
+        }
+    }
+}
+
+pub struct FactMatch {
+    pub facts: ModelFacts,
+    pub matched_id: String,
+    pub kind: MatchKind,
+    pub score: f64,
+    pub scope: MatchScope,
+}
+
+impl FactMatch {
+    /// 作用域优先，同一作用域内再按精确/别名/模糊匹配降级。
+    pub fn quality(&self) -> u8 {
+        let match_bonus = match self.kind {
+            MatchKind::Exact => 4,
+            MatchKind::Alias => 3,
+            MatchKind::Normalized => 2,
+            MatchKind::Fuzzy => 1,
+        };
+        self.scope.quality_base() + match_bonus
+    }
 }
 
 /// 字段源：只提取字段，覆盖由 [`ModelFacts::merge_from`] 统一完成。
 pub trait FactSource {
     fn id(&self) -> &'static str;
     /// 未命中返回 `None`；命中返回该源能提供的字段（其余为 `None`）。
-    fn extract(&self, model_id: &str) -> Option<ModelFacts>;
+    fn extract(&self, model_id: &str) -> Option<FactMatch>;
 }
 
 /// 完整条目源列表：顺序 = 优先级（靠前者先问）。

@@ -28,21 +28,15 @@ pub const DATA_DRIVEN_KEYS: &[&str] = &[
     "default_reasoning_level",
     "context_window",
     "max_context_window",
+    "effective_context_window_percent",
+    "auto_compact_token_limit",
     "support_verbosity",
     "default_verbosity",
     "supports_search_tool",
+    "status",
     "supports_image_detail_original",
     "supports_reasoning_summary_parameter",
 ];
-
-/// codex 已知的推理档位（未知档位会被过滤，避免写入非法值）。
-pub const KNOWN_REASONING_EFFORTS: &[&str] = &[
-    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
-];
-
-/// 源没给出默认档位时的回退顺序。
-const DEFAULT_REASONING_FALLBACK_ORDER: &[&str] =
-    &["medium", "high", "low", "xhigh", "max", "minimal", "none"];
 
 /// 源没有给出描述时的兜底文案。
 const DESCRIPTION_FALLBACK: &str = "由模型提供者目录生成";
@@ -89,6 +83,20 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
             "max_context_window".to_string(),
             json!(facts.max_context_window.unwrap_or(context_window)),
         );
+        if let Some(input_limit) = facts
+            .input_token_limit
+            .filter(|input_limit| *input_limit > 0 && *input_limit < context_window)
+        {
+            let percent = ((input_limit.saturating_mul(100)) / context_window).clamp(1, 95);
+            entry.insert(
+                "effective_context_window_percent".to_string(),
+                json!(percent),
+            );
+            entry.insert(
+                "auto_compact_token_limit".to_string(),
+                json!(input_limit.saturating_mul(9) / 10),
+            );
+        }
     }
 
     // 输入模态：同时决定图片细节能力（纯文本模型不应声称支持 image detail original）。
@@ -100,7 +108,7 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
     entry.insert("input_modalities".to_string(), json!(modalities));
 
     // 推理档位与默认档位。
-    let levels = filter_known_efforts(facts.reasoning_levels.as_deref().unwrap_or(&[]));
+    let levels = normalize_reasoning_efforts(facts.reasoning_levels.as_deref().unwrap_or(&[]));
     let presets: Vec<Value> = levels
         .iter()
         .map(|effort| {
@@ -124,13 +132,14 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
     );
     entry.insert(
         "supports_reasoning_summary_parameter".to_string(),
-        json!(facts.supports_reasoning.unwrap_or(!levels.is_empty())),
+        json!(false),
     );
 
     // 源明确给了 verbosity / 搜索能力才覆盖；源无信息时保留模板取值。
     match facts.support_verbosity {
         Some(true) => {
             entry.insert("support_verbosity".to_string(), json!(true));
+            entry.remove("default_verbosity");
         }
         Some(false) => {
             entry.insert("support_verbosity".to_string(), json!(false));
@@ -143,6 +152,14 @@ pub fn render(model_id: &str, facts: &ModelFacts, priority: usize) -> Result<Val
             "supports_search_tool".to_string(),
             json!(supports_search_tool),
         );
+    }
+    if let Some(status) = facts
+        .status
+        .as_deref()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+    {
+        entry.insert("status".to_string(), json!(status));
     }
 
     Ok(Value::Object(entry))
@@ -186,11 +203,11 @@ fn normalize_modalities(modalities: &[String]) -> Vec<String> {
     normalized
 }
 
-fn filter_known_efforts(efforts: &[String]) -> Vec<String> {
+fn normalize_reasoning_efforts(efforts: &[String]) -> Vec<String> {
     let mut filtered: Vec<String> = Vec::new();
     for effort in efforts {
         let effort = effort.trim().to_ascii_lowercase();
-        if !KNOWN_REASONING_EFFORTS.contains(&effort.as_str()) {
+        if effort.is_empty() || matches!(effort.as_str(), "default" | "null") {
             continue;
         }
         if !filtered.iter().any(|existing| existing == &effort) {
@@ -210,12 +227,7 @@ fn resolve_default_reasoning_level(facts: &ModelFacts, levels: &[String]) -> Opt
             return Some(default);
         }
     }
-    for candidate in DEFAULT_REASONING_FALLBACK_ORDER {
-        if levels.iter().any(|level| level == candidate) {
-            return Some((*candidate).to_string());
-        }
-    }
-    levels.first().cloned()
+    None
 }
 
 fn reasoning_effort_description(template: &Map<String, Value>, effort: &str) -> String {
@@ -244,7 +256,7 @@ mod tests {
     #[test]
     fn template_is_the_single_source_of_truth_for_fixed_values() {
         let template = template().unwrap();
-        assert_eq!(template.len(), 43, "模板键数变化需同步更新文档与测试");
+        assert_eq!(template.len(), 42, "模板键数变化需同步更新文档与测试");
         assert_eq!(template["prefer_websockets"], json!(false));
         assert_eq!(template["web_search_tool_type"], json!("text"));
         assert_eq!(template["use_responses_lite"], json!(false));
@@ -327,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn render_filters_unknown_efforts_and_resolves_default_level() {
+    fn render_keeps_custom_efforts_without_guessing_default_level() {
         let facts = ModelFacts {
             reasoning_levels: Some(vec![
                 "low".to_string(),
@@ -338,15 +350,20 @@ mod tests {
         };
         let entry = rendered(facts);
         let levels = entry["supported_reasoning_levels"].as_array().unwrap();
-        assert_eq!(levels.len(), 2);
+        assert_eq!(levels.len(), 3);
         assert_eq!(levels[0]["effort"], json!("low"));
         // 描述取模板内置的档位描述表（写入前后者必被覆盖，不会泄漏到其它条目）
         assert_eq!(
             levels[0]["description"],
             json!("Fast responses with lighter reasoning")
         );
-        assert_eq!(entry["default_reasoning_level"], json!("high"));
-        assert_eq!(entry["supports_reasoning_summary_parameter"], json!(true));
+        assert_eq!(levels[1]["effort"], json!("turbo"));
+        assert_eq!(
+            levels[1]["description"],
+            json!("turbo reasoning effort")
+        );
+        assert!(entry.get("default_reasoning_level").is_none());
+        assert_eq!(entry["supports_reasoning_summary_parameter"], json!(false));
     }
 
     #[test]
@@ -363,27 +380,59 @@ mod tests {
             default_reasoning_level: Some("max".to_string()),
             ..ModelFacts::default()
         };
-        assert_eq!(rendered(facts)["default_reasoning_level"], json!("low"));
+        assert!(rendered(facts).get("default_reasoning_level").is_none());
     }
 
     #[test]
-    fn render_drops_default_level_when_there_are_no_levels() {
+    fn render_filters_only_reasoning_sentinel_values() {
         let facts = ModelFacts {
-            reasoning_levels: Some(vec!["turbo".to_string()]),
+            reasoning_levels: Some(vec![
+                "".to_string(),
+                "default".to_string(),
+                "null".to_string(),
+                "turbo".to_string(),
+            ]),
             ..ModelFacts::default()
         };
         let entry = rendered(facts);
-        assert_eq!(entry["supported_reasoning_levels"], json!([]));
+        assert_eq!(
+            entry["supported_reasoning_levels"],
+            json!([{"effort":"turbo","description":"turbo reasoning effort"}])
+        );
         assert!(entry.get("default_reasoning_level").is_none());
         assert_eq!(entry["supports_reasoning_summary_parameter"], json!(false));
     }
 
     #[test]
-    fn render_inherits_template_verbosity_and_search_when_source_is_silent() {
+    fn render_uses_conservative_verbosity_and_search_defaults() {
         let entry = rendered(ModelFacts::default());
-        assert_eq!(entry["support_verbosity"], json!(true));
-        assert_eq!(entry["default_verbosity"], json!("low"));
-        assert_eq!(entry["supports_search_tool"], json!(true));
+        assert_eq!(entry["support_verbosity"], json!(false));
+        assert!(entry.get("default_verbosity").is_none());
+        assert_eq!(entry["supports_search_tool"], json!(false));
+    }
+
+    #[test]
+    fn render_derives_effective_context_and_compaction_from_input_limit() {
+        let facts = ModelFacts {
+            context_window: Some(200_000),
+            max_context_window: Some(200_000),
+            input_token_limit: Some(128_000),
+            ..ModelFacts::default()
+        };
+        let entry = rendered(facts);
+        assert_eq!(entry["context_window"], json!(200_000));
+        assert_eq!(entry["max_context_window"], json!(200_000));
+        assert_eq!(entry["effective_context_window_percent"], json!(64));
+        assert_eq!(entry["auto_compact_token_limit"], json!(115_200));
+    }
+
+    #[test]
+    fn render_preserves_beta_status_for_generated_entries() {
+        let facts = ModelFacts {
+            status: Some("beta".to_string()),
+            ..ModelFacts::default()
+        };
+        assert_eq!(rendered(facts)["status"], json!("beta"));
     }
 
     #[test]

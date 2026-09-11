@@ -5,7 +5,6 @@
 //! 匹配时先按 `base_url` 定位 provider 分组（URL 前缀优先、主机名兜底），否则用全局索引；
 //! 全局索引同 ID 冲突时优先官方厂商（清单见 `models-dev-official-providers.json`）。
 
-use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -13,7 +12,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{FactSource, write_atomic};
+use super::{FactMatch, FactSource, MatchScope, write_atomic};
 use crate::codex::model_catalog::facts::ModelFacts;
 use crate::codex::model_catalog::matching::{Candidate, CandidateStore, release_from_date};
 
@@ -30,7 +29,7 @@ struct ProviderEntry {
 
 pub struct ModelsDevSource {
     scoped: CandidateStore,
-    global: CandidateStore,
+    official_global: CandidateStore,
 }
 
 impl ModelsDevSource {
@@ -44,7 +43,7 @@ impl ModelsDevSource {
             .unwrap_or_default();
         Self {
             scoped,
-            global: build_global_store(providers),
+            official_global: build_official_global_store(providers),
         }
     }
 }
@@ -54,11 +53,24 @@ impl FactSource for ModelsDevSource {
         "models_dev"
     }
 
-    fn extract(&self, model_id: &str) -> Option<ModelFacts> {
-        self.scoped
-            .lookup(model_id)
-            .or_else(|| self.global.lookup(model_id))
-            .map(facts_from_model)
+    fn extract(&self, model_id: &str) -> Option<FactMatch> {
+        if let Some(matched) = self.scoped.lookup(model_id) {
+            return Some(FactMatch {
+                facts: facts_from_model(matched.value),
+                matched_id: matched.matched_id.to_string(),
+                kind: matched.kind,
+                score: matched.score,
+                scope: MatchScope::Provider,
+            });
+        }
+        let matched = self.official_global.lookup(model_id)?;
+        Some(FactMatch {
+            facts: facts_from_model(matched.value),
+            matched_id: matched.matched_id.to_string(),
+            kind: matched.kind,
+            score: matched.score,
+            scope: MatchScope::OfficialGlobal,
+        })
     }
 }
 
@@ -106,13 +118,14 @@ fn parse_providers(text: &str) -> Result<Vec<ProviderEntry>, String> {
 }
 
 /// 按 `base_url` 定位 provider 分组：
-/// 1. 同源且路径前缀匹配（区分同主机不同产品线，如 `opencode` 与 `opencode-go`）；
-/// 2. 退化为同主机匹配。
+/// 1. 同源且路径前缀匹配（区分同主机不同产品线）；
+/// 2. 没有路径命中时，仅在该主机只有一个 provider 时才退化为主机匹配。
 ///
 /// 命中多个时取路径最长者，再按 provider id 字典序，保证确定性。
 fn scoped_provider<'a>(providers: &'a [ProviderEntry], base_url: &str) -> Option<&'a ProviderEntry> {
     let base = url_parts(base_url)?;
-    let mut best: Option<(u8, usize, &'a ProviderEntry)> = None;
+    let mut path_matches = Vec::new();
+    let mut host_matches = Vec::new();
     for provider in providers {
         let Some(api) = provider.api.as_deref().and_then(url_parts) else {
             continue;
@@ -120,21 +133,27 @@ fn scoped_provider<'a>(providers: &'a [ProviderEntry], base_url: &str) -> Option
         if api.host != base.host {
             continue;
         }
-        let tier = u8::from(!(api.scheme == base.scheme && is_path_prefix(&api.path, &base.path)));
-        let better = match best {
-            None => true,
-            Some((best_tier, best_path_len, best_provider)) => {
-                tier.cmp(&best_tier)
-                    .then_with(|| best_path_len.cmp(&api.path.len()))
-                    .then_with(|| provider.id.cmp(&best_provider.id))
-                    == Ordering::Less
-            }
-        };
-        if better {
-            best = Some((tier, api.path.len(), provider));
+        host_matches.push(provider);
+        if api.scheme == base.scheme && is_path_prefix(&api.path, &base.path) {
+            path_matches.push((api.path.len(), provider));
         }
     }
-    best.map(|(_, _, provider)| provider)
+    path_matches.sort_by(|(left_len, left), (right_len, right)| {
+        right_len
+            .cmp(left_len)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    if let Some((_, provider)) = path_matches.first() {
+        if path_matches
+            .get(1)
+            .is_some_and(|(length, _)| *length == path_matches[0].0)
+        {
+            // 同主机同长度路径无法证明属于哪条产品线，禁止按 provider id 猜测。
+            return None;
+        }
+        return Some(*provider);
+    }
+    (host_matches.len() == 1).then(|| host_matches[0])
 }
 
 fn build_store(provider: &ProviderEntry) -> CandidateStore {
@@ -152,14 +171,14 @@ fn build_pairs(provider: &ProviderEntry) -> Vec<(Candidate, Value)> {
                 .map(str::trim)
                 .filter(|id| !id.is_empty())?
                 .to_string();
-            let mut keys = vec![id.clone()];
+            let mut aliases = Vec::new();
             if let Some(family) = model
                 .get("family")
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .filter(|family| !family.is_empty())
             {
-                keys.push(family.to_string());
+                aliases.push(family.to_string());
             }
             let release = model
                 .get("release_date")
@@ -171,21 +190,23 @@ fn build_pairs(provider: &ProviderEntry) -> Vec<(Candidate, Value)> {
                         .and_then(Value::as_str)
                         .and_then(release_from_date)
                 });
-            Some((Candidate::new(keys, release, id), model.clone()))
+            let status = model.get("status").and_then(Value::as_str);
+            Some((
+                Candidate::new(id.clone(), aliases, release, id).with_status(status),
+                model.clone(),
+            ))
         })
         .collect()
 }
 
-/// 全局索引：同一模型 id 出现在多个 provider 时，官方厂商优先、其余按 provider id 字典序。
-fn build_global_store(providers: &[ProviderEntry]) -> CandidateStore {
+/// 全局回退只索引官方厂商；中转商数据只在 base_url 明确命中分组时使用。
+fn build_official_global_store(providers: &[ProviderEntry]) -> CandidateStore {
     let official = official_provider_ids();
-    let mut order: Vec<&ProviderEntry> = providers.iter().collect();
-    order.sort_by(|left, right| {
-        official
-            .contains(&right.id)
-            .cmp(&official.contains(&left.id))
-            .then_with(|| left.id.cmp(&right.id))
-    });
+    let mut order: Vec<&ProviderEntry> = providers
+        .iter()
+        .filter(|provider| official.contains(&provider.id))
+        .collect();
+    order.sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut seen: HashSet<String> = HashSet::new();
     let mut items = Vec::new();
@@ -231,6 +252,10 @@ fn facts_from_model(model: &Value) -> ModelFacts {
         .filter(|value| *value > 0);
     facts.context_window = context_window;
     facts.max_context_window = context_window;
+    facts.input_token_limit = model
+        .pointer("/limit/input")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0);
     facts.input_modalities = input_modalities(model);
     facts.reasoning_levels = reasoning_levels(model);
     facts.supports_reasoning = supports_reasoning(model);
@@ -240,6 +265,13 @@ fn facts_from_model(model: &Value) -> ModelFacts {
         .map(str::trim)
         .filter(|description| !description.is_empty())
         .map(str::to_string);
+    facts.supports_tool_calls = model.get("tool_call").and_then(Value::as_bool);
+    facts.status = model
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+        .map(str::to_ascii_lowercase);
     facts
 }
 
@@ -405,17 +437,28 @@ mod tests {
                 .id,
             "deepseek"
         );
-        // 路径边界：`/zen/go` 不以 `/zen/v1` 为前缀，两者只能落到同主机兜底，取路径最长者
-        assert_eq!(
-            scoped_provider(providers, "https://opencode.ai/zen/go")
-                .unwrap()
-                .id,
-            "opencode-go"
-        );
-        assert_eq!(
-            scoped_provider(providers, "https://opencode.ai").unwrap().id,
-            "opencode-go"
-        );
+        // 同主机有多个产品线且路径不明确时，不再任意选最长路径。
+        assert!(scoped_provider(providers, "https://opencode.ai/zen/go").is_none());
+        assert!(scoped_provider(providers, "https://opencode.ai").is_none());
+    }
+
+    #[test]
+    fn scoping_rejects_duplicate_host_and_path_ambiguity() {
+        let text = json!({
+            "alpha": {
+                "id": "alpha",
+                "api": "https://shared.example/v1",
+                "models": { "a": { "id": "a" } }
+            },
+            "beta": {
+                "id": "beta",
+                "api": "https://shared.example/v1",
+                "models": { "b": { "id": "b" } }
+            }
+        })
+        .to_string();
+        let providers = parse_providers(&text).unwrap();
+        assert!(scoped_provider(&providers, "https://shared.example/v1").is_none());
     }
 
     #[test]
@@ -440,10 +483,15 @@ mod tests {
     fn extract_resolves_versionless_family_to_latest_base_release() {
         let dir = tempdir().unwrap();
         let source = ModelsDevSource::load(dir.path(), "https://api.deepseek.com/v1");
-        let facts = source.extract("deepseek-flash").unwrap();
+        let extracted = source.extract("deepseek-flash").unwrap();
+        let facts = extracted.facts;
+        assert_eq!(extracted.scope, MatchScope::Provider);
         assert_eq!(facts.context_window, Some(1_000_000));
         assert_eq!(facts.max_context_window, Some(1_000_000));
-        assert_eq!(facts.input_modalities, Some(vec!["text".to_string()]));
+        assert_eq!(
+            facts.input_modalities,
+            Some(vec!["text".to_string(), "image".to_string()])
+        );
         assert_eq!(
             facts.reasoning_levels,
             Some(vec![
@@ -456,10 +504,54 @@ mod tests {
         assert!(facts
             .description
             .as_deref()
-            .is_some_and(|description| description.contains("Official DeepSeek V4 Flash")));
+            .is_some_and(|description| description.contains("DeepSeek V4.1 Flash")));
         // models.dev 不提供 verbosity / 搜索能力，保持沉默交给其它源或模板
         assert_eq!(facts.support_verbosity, None);
         assert_eq!(facts.supports_search_tool, None);
+    }
+
+    #[test]
+    fn bundled_matching_inherits_latest_compatible_model_family() {
+        let dir = tempdir().unwrap();
+
+        let openai = ModelsDevSource::load(dir.path(), "https://relay.example.com/v1");
+        let gpt = openai.extract("gpt-5.7").unwrap();
+        assert_eq!(gpt.matched_id, "gpt-5.6");
+        assert_eq!(gpt.kind, crate::codex::model_catalog::matching::MatchKind::Fuzzy);
+        assert_eq!(gpt.facts.input_token_limit, Some(922_000));
+        assert_eq!(gpt.facts.supports_tool_calls, Some(true));
+
+        let qwen = ModelsDevSource::load(
+            dir.path(),
+            "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        )
+        .extract("qwen4-coder")
+        .unwrap();
+        assert!(qwen.matched_id.starts_with("qwen3-coder"));
+
+        let deepseek = ModelsDevSource::load(dir.path(), "https://api.deepseek.com/v1")
+            .extract("deepseek-v5")
+            .unwrap();
+        assert!(
+            deepseek.matched_id.starts_with("deepseek-v4"),
+            "实际命中 {}",
+            deepseek.matched_id
+        );
+        assert!(!deepseek.matched_id.contains("r1"));
+    }
+
+    #[test]
+    fn extracts_tool_capability_and_model_status() {
+        let model = json!({
+            "limit": { "context": 200000, "input": 128000 },
+            "tool_call": false,
+            "status": "beta"
+        });
+        let facts = facts_from_model(&model);
+        assert_eq!(facts.context_window, Some(200_000));
+        assert_eq!(facts.input_token_limit, Some(128_000));
+        assert_eq!(facts.supports_tool_calls, Some(false));
+        assert_eq!(facts.status.as_deref(), Some("beta"));
     }
 
     #[test]
@@ -482,29 +574,35 @@ mod tests {
         std::fs::write(cache_path(dir.path()), text).unwrap();
 
         let alpha = ModelsDevSource::load(dir.path(), "https://api.alpha.example/v1");
-        assert_eq!(alpha.extract("shared-model").unwrap().context_window, Some(100));
+        assert_eq!(
+            alpha.extract("shared-model").unwrap().facts.context_window,
+            Some(100)
+        );
         let beta = ModelsDevSource::load(dir.path(), "https://api.beta.example/v1");
-        assert_eq!(beta.extract("shared-model").unwrap().context_window, Some(200));
+        assert_eq!(
+            beta.extract("shared-model").unwrap().facts.context_window,
+            Some(200)
+        );
     }
 
     #[test]
-    fn global_index_is_deterministic_for_duplicate_model_ids() {
+    fn official_global_index_excludes_relays() {
         let text = json!({
-            "zeta": {
-                "id": "zeta",
-                "api": "https://api.zeta.example/v1",
+            "aaa-relay": {
+                "id": "aaa-relay",
+                "api": "https://api.aaa-relay.example/v1",
                 "models": { "shared-model": { "id": "shared-model", "limit": { "context": 999 } } }
             },
-            "alpha": {
-                "id": "alpha",
-                "api": "https://api.alpha.example/v1",
+            "deepseek": {
+                "id": "deepseek",
+                "api": "https://api.deepseek.com/v1",
                 "models": { "shared-model": { "id": "shared-model", "limit": { "context": 100 } } }
             }
         })
         .to_string();
         let providers = parse_providers(&text).unwrap();
-        let store = build_global_store(&providers);
-        let facts = facts_from_model(store.lookup("shared-model").unwrap());
+        let store = build_official_global_store(&providers);
+        let facts = facts_from_model(store.lookup("shared-model").unwrap().value);
         assert_eq!(facts.context_window, Some(100));
     }
 
@@ -525,8 +623,8 @@ mod tests {
         })
         .to_string();
         let providers = parse_providers(&text).unwrap();
-        let store = build_global_store(&providers);
-        let facts = facts_from_model(store.lookup("shared-model").unwrap());
+        let store = build_official_global_store(&providers);
+        let facts = facts_from_model(store.lookup("shared-model").unwrap().value);
         assert_eq!(facts.context_window, Some(100), "官方厂商应优先于中转商");
     }
 
@@ -544,7 +642,10 @@ mod tests {
         .to_string();
         std::fs::write(cache_path(dir.path()), &valid).unwrap();
         let source = ModelsDevSource::load(dir.path(), "https://api.customrelay.example/v1");
-        assert_eq!(source.extract("relay-model").unwrap().context_window, Some(4242));
+        assert_eq!(
+            source.extract("relay-model").unwrap().facts.context_window,
+            Some(4242)
+        );
         assert!(!needs_refresh(dir.path()), "新鲜且合法的缓存不应重新下载");
 
         std::fs::write(cache_path(dir.path()), "{ broken").unwrap();

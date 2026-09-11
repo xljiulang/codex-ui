@@ -1331,7 +1331,8 @@ button.skill-row-main:hover .skill-name {
 .model-catalog-picker-row:hover {
   background: rgba(var(--overlay-rgb), 0.035);
 }
-.model-catalog-picker-row.is-unmatched {
+.model-catalog-picker-row.is-unmatched,
+.model-catalog-picker-row.is-incompatible {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1366,7 +1367,18 @@ button.skill-row-main:hover .skill-name {
   font-size: var(--font-sm);
   color: var(--text-dim);
 }
+.model-catalog-picker-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
 .model-catalog-picker-status {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   flex-shrink: 0;
   font-size: var(--font-xs);
   color: var(--text-faint);

@@ -184,32 +184,56 @@ describe("ModelConfigSection 生成模型目录", () => {
         2,
       ),
       total: 3,
-      matched: 2,
-      skipped: 1,
+      ready: 2,
+      incompatible: 0,
+      unmatched: 1,
       models: [
         {
           id: "deepseek-chat",
           display_name: "Deepseek-Chat",
-          matched: true,
-          official: false,
-          models_dev: true,
-          openrouter: true,
+          status: "ready",
+          selectable: true,
+          sources: [
+            {
+              source: "models_dev",
+              matched_id: "deepseek-chat",
+              match_kind: "exact",
+              score: 1,
+              scope: "provider",
+            },
+            {
+              source: "openrouter",
+              matched_id: "deepseek/deepseek-v3.2",
+              match_kind: "fuzzy",
+              score: 0.86,
+              scope: "global",
+            },
+          ],
+          warnings: [],
         },
         {
           id: "deepseek-reasoner",
           display_name: "Deepseek-Reasoner",
-          matched: true,
-          official: true,
-          models_dev: false,
-          openrouter: false,
+          status: "ready",
+          selectable: true,
+          sources: [
+            {
+              source: "official",
+              matched_id: "deepseek-reasoner",
+              match_kind: "exact",
+              score: 1,
+              scope: "official_global",
+            },
+          ],
+          warnings: [],
         },
         {
           id: "unknown-model",
           display_name: "Unknown-Model",
-          matched: false,
-          official: false,
-          models_dev: false,
-          openrouter: false,
+          status: "unmatched",
+          selectable: false,
+          sources: [],
+          warnings: ["未匹配到可用资料"],
         },
       ],
     };
@@ -344,9 +368,76 @@ describe("ModelConfigSection 生成模型目录", () => {
     const labels = wrapper
       .findAll(".model-catalog-picker-source")
       .map((label) => label.text());
-    expect(labels).toEqual(["models.dev + OpenRouter", "官方条目"]);
+    expect(labels).toEqual([
+      "models.dev + OpenRouter · 继承 deepseek/deepseek-v3.2",
+      "官方条目",
+    ]);
     // 未命中的模型只显示跳过提示，不给来源标记
     expect(wrapper.findAll(".model-catalog-picker-status")).toHaveLength(1);
+  });
+
+  it("全部不可用时仍打开弹窗并展示不兼容与未匹配原因", async () => {
+    mockedLoad.mockResolvedValue(
+      providerConfigState({ providers: [providerWithKey] }),
+    );
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_catalog_generate_from_provider") {
+        return Promise.resolve({
+          catalog: '{"models":[]}',
+          total: 2,
+          ready: 0,
+          incompatible: 1,
+          unmatched: 1,
+          models: [
+            {
+              id: "legacy-model",
+              display_name: "Legacy-Model",
+              status: "incompatible",
+              selectable: false,
+              sources: [
+                {
+                  source: "models_dev",
+                  matched_id: "legacy-model",
+                  match_kind: "exact",
+                  score: 1,
+                  scope: "provider",
+                },
+              ],
+              warnings: ["上游明确标记 tool_call=false，不兼容 Codex 工具调用"],
+            },
+            {
+              id: "unknown-model",
+              display_name: "Unknown-Model",
+              status: "unmatched",
+              selectable: false,
+              sources: [],
+              warnings: ["未匹配到可用资料"],
+            },
+          ],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const wrapper = await mountSection();
+    await wrapper.find(".provider-row-generate").trigger("click");
+    await vi.waitFor(() =>
+      expect(wrapper.find(".model-catalog-picker").exists()).toBe(true),
+    );
+
+    expect(wrapper.find(".model-catalog-picker-meta").text()).toContain(
+      "可生成 0 个，不兼容 1 个，未匹配 1 个",
+    );
+    expect(wrapper.findAll(".model-catalog-picker-row.is-incompatible")).toHaveLength(1);
+    expect(wrapper.findAll(".model-catalog-picker-row.is-unmatched")).toHaveLength(1);
+    expect(wrapper.find(".model-catalog-picker-list").text()).toContain(
+      "tool_call=false",
+    );
+    expect(
+      wrapper
+        .findAll(".model-catalog-picker-row input[type='checkbox']")
+        .every((item) => (item.element as HTMLInputElement).disabled),
+    ).toBe(true);
   });
 
   it("点击模型文字不切换复选框，点击复选框仍可正常选择", async () => {
@@ -519,7 +610,7 @@ describe("ModelConfigSection 生成模型目录", () => {
       { slug: "deepseek-reasoner", display_name: "Deepseek-Reasoner", priority: 1 },
     ]);
     expect(setToast).toHaveBeenCalledWith(
-      "已生成 1 个模型条目，跳过 1 个未匹配模型，保存并重启 codex-ui 后生效",
+      "已生成 1 个模型条目，跳过 1 个不可用模型，保存并重启 codex-ui 后生效",
     );
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "model_catalog_save",
