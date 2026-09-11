@@ -414,6 +414,15 @@ const catalogGenerateTip = computed(() => {
     : "当前提供方缺少 base_url 或 API Key";
 });
 
+/** 模型目录标题链接提示：文件存在时为打开动作，文件缺失或路径未读取时给出状态。 */
+const catalogTitleTip = computed(() => {
+  const path = modelConfig.model_catalog_path;
+  if (!path) return "正在读取目录路径…";
+  return modelConfig.model_catalog_exists
+    ? `在编辑器中打开 ${path}`
+    : `${path}（文件不存在，保存时将新建）`;
+});
+
 /** 为当前选中的提供方生成模型目录（模型目录区块右上角按钮入口）。 */
 function generateModelCatalogForActiveProvider() {
   const p = activeProvider.value;
@@ -813,7 +822,18 @@ function openModelConfigFile() {
 
       <div class="model-catalog-block">
         <div class="model-catalog-head">
-          <span class="model-catalog-title">model_catalog_json（模型目录）</span>
+          <!-- 标题即文件链接：原生 disabled 按钮不派发鼠标事件，tooltip 挂包裹元素上 -->
+          <span class="model-catalog-title-wrap" v-tooltip="catalogTitleTip">
+            <button
+              type="button"
+              class="model-config-title-link model-catalog-title-link"
+              :disabled="!modelConfig.model_catalog_exists || !modelConfig.model_catalog_path"
+              :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
+              @click="openModelConfigFile"
+            >
+              model_catalog_json（模型目录）
+            </button>
+          </span>
           <!-- 禁用按钮不派发鼠标事件，tooltip 挂在包裹元素上 -->
           <span class="model-catalog-generate-wrap" v-tooltip="catalogGenerateTip">
             <button
@@ -828,19 +848,6 @@ function openModelConfigFile() {
             </button>
           </span>
         </div>
-        <button
-          v-if="modelConfig.model_catalog_exists"
-          type="button"
-          class="model-config-path-link"
-          v-tooltip="'在编辑器中打开文件'"
-          :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
-          @click="openModelConfigFile"
-        >
-          <span>{{ modelConfig.model_catalog_path || "正在读取目录路径…" }}</span>
-        </button>
-        <p v-else class="model-config-path">
-          {{ modelConfig.model_catalog_path || "正在读取目录路径…" }}
-        </p>
         <textarea
           v-model="modelConfig.model_catalog"
           class="model-config-textarea"
@@ -1198,25 +1205,20 @@ function openModelConfigFile() {
 </template>
 
 <style scoped>
-.model-config-path {
-  font-family: var(--mono);
+/* 模型目录标题链接包裹层：限制为内容宽度，tooltip 只围绕标题显示 */
+.model-catalog-title-wrap {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+/* 标题作为文件链接（沿用 .model-config-title-link 的卡片标题语义），字号降到本区块子标题层级 */
+.model-catalog-title-link {
   font-size: var(--font-sm);
-  line-height: 1.4;
-  color: var(--text-dim);
-  word-break: break-all;
-  user-select: text;
-  text-align: right;
-  min-width: 0;
 }
 
-.model-config-path-link:hover {
-  color: var(--accent-dim);
-}
-
-/* 模型目录路径链接：作为 column 容器 item 默认会被拉伸占满整行，
-   导致 tooltip 相对整行居中而偏到路径名右侧；限制为内容宽度使其只围绕路径名显示 */
-.model-config-path-link {
-  align-self: flex-start;
+/* 禁用态让包裹层直接接收指针事件：保证文件不存在/路径未读取时 tooltip 仍能显示 */
+.model-catalog-title-link:disabled {
+  pointer-events: none;
 }
 
 /* 模型提供方列表与表单 */
@@ -1354,7 +1356,7 @@ function openModelConfigFile() {
   border-color: var(--accent);
 }
 
-/* 模型目录区块：只读路径 + JSON 编辑器（与提供方输入区之间加分隔） */
+/* 模型目录区块：标题即文件链接（悬停显示路径）+ JSON 编辑器（与提供方输入区之间加分隔） */
 .model-catalog-block {
   display: flex;
   flex-direction: column;
@@ -1370,19 +1372,10 @@ function openModelConfigFile() {
   gap: var(--space-4);
 }
 
-.model-catalog-title {
-  font-size: var(--font-sm);
-  font-weight: 700;
-  color: var(--text-bright);
-}
-
 /* 生成按钮包裹层：原生 disabled 按钮不派发鼠标事件，tooltip 挂这里才能在禁用态显示 */
 .model-catalog-generate-wrap {
   display: inline-flex;
   flex-shrink: 0;
 }
 
-.model-catalog-block .model-config-path {
-  text-align: left;
-}
 </style>

@@ -298,6 +298,15 @@ describe("ModelConfigSection 生成模型目录", () => {
     const tip = wrapper.find(".model-catalog-head .model-catalog-generate-wrap");
     expect(tip.attributes("data-tip")).toBe("生成模型目录");
     expect(tip.attributes("data-tip")).not.toContain("API Key");
+
+    // 标题本身即文件链接，与生成按钮同处标题行（默认 mock 未解析出路径 → 禁用）
+    const titleLink = wrapper.find(".model-catalog-head .model-config-title-link");
+    expect(titleLink.exists()).toBe(true);
+    expect(titleLink.text()).toBe("model_catalog_json（模型目录）");
+    expect(titleLink.attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".model-catalog-title-wrap").attributes("data-tip")).toBe(
+      "正在读取目录路径…",
+    );
   });
 
   it("模型目录区块位于模型提供方之后、模型标识之前", async () => {
@@ -310,6 +319,52 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(providersAt).toBeGreaterThan(-1);
     expect(catalogAt).toBeGreaterThan(providersAt);
     expect(modelAt).toBeGreaterThan(catalogAt);
+  });
+
+  it("模型目录标题即文件链接：文件存在时可点击，独立路径行已删除", async () => {
+    mockedLoad.mockResolvedValue(activeProviderState());
+    mockedInvoke.mockResolvedValue({
+      ...modelConfigReadResult(),
+      model_catalog_path: "C:\\Users\\t\\.codex\\models.json",
+      model_catalog_exists: true,
+      model_catalog: '{"models":[]}',
+    });
+    const wrapper = await mountSection();
+    const link = wrapper.find(".model-catalog-head .model-config-title-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe("model_catalog_json（模型目录）");
+    expect(link.attributes("disabled")).toBeUndefined();
+    expect(wrapper.find(".model-catalog-title-wrap").attributes("data-tip")).toBe(
+      "在编辑器中打开 C:\\Users\\t\\.codex\\models.json",
+    );
+    // 路径行与生成按钮同处标题行，不再有独立路径元素
+    expect(
+      wrapper.find(".model-catalog-block .model-config-path").exists(),
+    ).toBe(false);
+    expect(
+      wrapper.find(".model-catalog-block .model-config-path-link").exists(),
+    ).toBe(false);
+    expect(
+      wrapper.find(".model-catalog-head .model-catalog-generate").exists(),
+    ).toBe(true);
+  });
+
+  it("模型目录文件缺失时标题链接禁用，tooltip 提示保存时将新建", async () => {
+    mockedLoad.mockResolvedValue(activeProviderState());
+    mockedInvoke.mockResolvedValue({
+      ...modelConfigReadResult(),
+      model_catalog_path: "C:\\Users\\t\\.codex\\models.json",
+      model_catalog_exists: false,
+      model_catalog: "",
+    });
+    const wrapper = await mountSection();
+    const link = wrapper.find(".model-catalog-head .model-config-title-link");
+    expect(link.attributes("disabled")).toBeDefined();
+    const tip = wrapper
+      .find(".model-catalog-title-wrap")
+      .attributes("data-tip") as string;
+    expect(tip).toContain("models.json");
+    expect(tip).toContain("文件不存在，保存时将新建");
   });
 
   it("未选择提供方时按钮禁用并提示，点击不发起生成", async () => {

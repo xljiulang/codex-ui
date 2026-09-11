@@ -322,7 +322,7 @@ describe("SettingsView 模型配置", () => {
     expect(pos & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("文件缺失时可编辑，仅 AGENTS 保留标题链接", async () => {
+  it("文件缺失时可编辑，模型目录与 AGENTS 标题均为文件链接", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read")
         return Promise.resolve({
@@ -345,11 +345,12 @@ describe("SettingsView 模型配置", () => {
       wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
-    // 模型配置标题本身是纯文本，链接位于下方路径行；AGENTS 标题保留链接
-    expect(
-      wrapper.findAll(".settings-section-model-config .model-config-title-link")
-        .length,
-    ).toBe(0);
+    // 模型目录标题即文件链接（路径行已合并进标题），AGENTS 标题保留链接
+    const catalogLinks = wrapper.findAll(
+      ".settings-section-model-config .model-catalog-head .model-config-title-link",
+    );
+    expect(catalogLinks.length).toBe(1);
+    expect(catalogLinks[0].attributes("disabled")).toBeUndefined();
     expect(
       wrapper.findAll(".settings-section-global-instructions .model-config-title-link")
         .length,
@@ -402,17 +403,26 @@ describe("SettingsView 模型配置", () => {
     expect(store.toast).toContain("AGENTS 已保存");
   });
 
-  it("模型配置文件存在时在路径行渲染链接并在应用内打开", async () => {
+  it("模型目录标题即文件链接，点击在应用内打开", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const links = wrapper.findAll(
-      ".settings-section-model-config .model-config-path-link",
+      ".settings-section-model-config .model-catalog-head .model-config-title-link",
     );
     expect(links.length).toBe(1);
+    expect(links[0].text()).toBe("model_catalog_json（模型目录）");
     expect(links[0].attributes("aria-label")).toBe(
       "在编辑器中打开 C:/apps/codex-ui/.codex/models.json",
     );
-    expect(links[0].text()).toContain("C:/apps/codex-ui/.codex/models.json");
+    expect(links[0].attributes("disabled")).toBeUndefined();
+    // 独立路径行已删除，路径只出现在标题链接的 tooltip 中
+    expect(
+      wrapper.findAll(".settings-section-model-config .model-config-path-link")
+        .length,
+    ).toBe(0);
+    expect(wrapper.find(".model-catalog-title-wrap").attributes("data-tip")).toBe(
+      "在编辑器中打开 C:/apps/codex-ui/.codex/models.json",
+    );
     await links[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -420,7 +430,7 @@ describe("SettingsView 模型配置", () => {
     );
   });
 
-  it("模型配置文件不存在时不渲染标题链接", async () => {
+  it("模型配置文件不存在时标题链接禁用并给出路径提示", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: any) => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
         return Promise.resolve(sampleModelConfigRead);
@@ -437,13 +447,27 @@ describe("SettingsView 模型配置", () => {
     });
     const wrapper = mount(SettingsView);
     await flushPromises();
+    const link = wrapper.find(
+      ".settings-section-model-config .model-catalog-head .model-config-title-link",
+    );
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".model-catalog-head").text()).toContain(
+      "model_catalog_json（模型目录）",
+    );
+    // 独立路径行已删除：路径与「保存时将新建」提示只在标题链接的 tooltip 中给出
+    expect(wrapper.find(".model-catalog-block .model-config-path").exists()).toBe(
+      false,
+    );
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
     ).toBe(0);
-    expect(wrapper.find(".model-catalog-head").text()).toContain(
-      "model_catalog_json（模型目录）",
-    );
+    const tip = wrapper
+      .find(".model-catalog-title-wrap")
+      .attributes("data-tip") as string;
+    expect(tip).toContain("C:/apps/codex-ui/.codex/models.json");
+    expect(tip).toContain("文件不存在，保存时将新建");
   });
 
   it("点击 AGENTS 标题链接在应用内打开", async () => {
@@ -671,10 +695,17 @@ describe("SettingsView 模型配置", () => {
     expect(
       wrapper.find("textarea.model-config-textarea").attributes("disabled"),
     ).toBeUndefined();
+    // 路径信息只通过标题链接的 tooltip 暴露（不再有独立路径行）
+    const titleLink = wrapper.find(
+      ".settings-section-model-config .model-catalog-head .model-config-title-link",
+    );
+    expect(titleLink.attributes("disabled")).toBeDefined();
     expect(
-      wrapper.find(".model-catalog-block .model-config-path").text(),
+      wrapper.find(".model-catalog-title-wrap").attributes("data-tip"),
     ).toContain("models.json");
-    // 文件不存在时不渲染模型目录路径链接
+    expect(wrapper.find(".model-catalog-block .model-config-path").exists()).toBe(
+      false,
+    );
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
@@ -3953,8 +3984,8 @@ describe("SettingsView 按钮图标", () => {
         ).toBe(false);
       }
     }
-    // AGENTS / 模型目录路径链接为纯文字链接（无图标），仅验证文案完整
-    for (const sel of [".model-config-title-link", ".model-config-path-link"]) {
+    // AGENTS / 模型目录标题链接为纯文字链接（无图标），仅验证文案完整
+    for (const sel of [".model-config-title-link"]) {
       const buttons = wrapper.findAll(sel);
       expect(buttons.length, `${sel} 未找到按钮`).toBeGreaterThan(0);
       for (const btn of buttons) {

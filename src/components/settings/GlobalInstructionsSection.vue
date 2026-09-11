@@ -125,33 +125,6 @@ function openAgentsFile() {
   min-height: 0;
 }
 
-/* 卡片标题作为文件链接（AGENTS / model_catalog_json）：纯文字，可点击打开文件 */
-.model-config-title-link {
-  display: inline-flex;
-  align-items: center;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: var(--font-base);
-  font-weight: 700;
-  line-height: 1.2;
-  color: var(--text-bright);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.model-config-title-link:hover {
-  color: var(--accent);
-}
-
-.model-config-title-link:disabled {
-  cursor: default;
-  opacity: 0.55;
-  text-decoration: none;
-}
-
 .model-config-missing {
   color: var(--red);
 }
