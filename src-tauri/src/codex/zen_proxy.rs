@@ -5,12 +5,12 @@
 //! - API Key 不固定：读取入站请求的 `Authorization` 头原样转发。
 //! - 仅绑定回环地址，专供 codex-ui 自身使用，无额外鉴权。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::{OriginalUri, State};
@@ -53,6 +53,10 @@ const CODE_UPSTREAM_STREAM_ERROR: &str = "upstream_stream_error";
 /// 补齐悬空工具调用时代入的工具结果文本。
 const MISSING_TOOL_OUTPUT_TEXT: &str =
     "该工具调用未执行（参数非法或调用被中止），请重新发起。";
+/// `finish_reason` 之后等待尾部分片（usage 等）的宽限；超时按现状收尾，避免挂住回合。
+const USAGE_GRACE: Duration = Duration::from_secs(3);
+/// `zen_proxy.stream_summary` 里记录的 delta 键上限（去重后按字典序取前若干个）。
+const DELTA_KEY_LIMIT: usize = 16;
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
@@ -769,13 +773,51 @@ async fn proxy_stream_response(
     let byte_stream = resp.bytes_stream();
     let stream_log = log.clone();
     let events = stream::unfold(
-        (byte_stream, Vec::<u8>::new(), st, false, stream_log),
-        |(mut bytes, mut buf, mut st, mut done, log)| async move {
+        (
+            byte_stream,
+            Vec::<u8>::new(),
+            st,
+            false,
+            stream_log,
+            None::<Instant>,
+        ),
+        |(mut bytes, mut buf, mut st, mut done, log, mut finish_deadline)| async move {
             if done {
                 return None;
             }
             loop {
-                match bytes.next().await {
+                // finish_reason 之后还要再等尾部分片（OpenAI 的 `include_usage`
+                // 把 usage 放在最后一个独立分片里）；最多等 USAGE_GRACE。
+                let next = if st.finish_reason.is_some() {
+                    let deadline = *finish_deadline
+                        .get_or_insert_with(|| Instant::now() + USAGE_GRACE);
+                    match tokio::time::timeout(
+                        deadline.saturating_duration_since(Instant::now()),
+                        bytes.next(),
+                    )
+                    .await
+                    {
+                        Ok(item) => item,
+                        Err(_) => {
+                            log_at(
+                                &log,
+                                "warn",
+                                "zen_proxy.usage_timeout",
+                                &[(
+                                    "detail",
+                                    "finish_reason 后未再收到分片，按现状收尾".to_string(),
+                                )],
+                            );
+                            return Some((
+                                finish_stream(&mut st, &log),
+                                (bytes, buf, st, true, log, None),
+                            ));
+                        }
+                    }
+                } else {
+                    bytes.next().await
+                };
+                match next {
                     Some(Ok(chunk)) => {
                         buf.extend_from_slice(&chunk);
                         let mut out = Vec::new();
@@ -794,7 +836,7 @@ async fn proxy_stream_response(
                                 break;
                             }
                             if let Ok(v) = serde_json::from_str::<Value>(payload) {
-                                out.extend(process_chunk(&v, &mut st, &log));
+                                out.extend(process_chunk(&v, &mut st));
                                 // 上游随流下发 error：立即按失败收尾，不再继续读
                                 if st.failure.is_some() && !st.closed {
                                     out.extend(finish_stream(&mut st, &log));
@@ -804,7 +846,10 @@ async fn proxy_stream_response(
                             }
                         }
                         if done || !out.is_empty() {
-                            return Some((out, (bytes, buf, st, done, log)));
+                            return Some((
+                                out,
+                                (bytes, buf, st, done, log, finish_deadline),
+                            ));
                         }
                     }
                     Some(Err(_)) => {
@@ -818,7 +863,7 @@ async fn proxy_stream_response(
                         }
                         return Some((
                             finish_stream(&mut st, &log),
-                            (bytes, buf, st, true, log),
+                            (bytes, buf, st, true, log, None),
                         ));
                     }
                     None => {
@@ -829,7 +874,7 @@ async fn proxy_stream_response(
                         // 上游正常结束但未收到 [DONE]（兼容实现差异）：补发完成事件
                         return Some((
                             finish_stream(&mut st, &log),
-                            (bytes, buf, st, true, log),
+                            (bytes, buf, st, true, log, None),
                         ));
                     }
                 }
@@ -1444,6 +1489,8 @@ struct StreamState {
     finish_reason: Option<String>,
     /// 上游随流下发的 token 用量，收尾时映射进 `response.completed`。
     usage: Option<Value>,
+    /// 本次流里出现过的 delta 顶层键（去重、有上限），仅用于诊断。
+    delta_keys: BTreeSet<String>,
 }
 
 impl StreamState {
@@ -1459,6 +1506,7 @@ impl StreamState {
             failure: None,
             finish_reason: None,
             usage: None,
+            delta_keys: BTreeSet::new(),
         }
     }
 }
@@ -1472,7 +1520,7 @@ struct StreamFailure {
 }
 
 /// 处理一个 chat chunk（choice 数组），返回零到多条 responses SSE 块。
-fn process_chunk(chunk: &Value, st: &mut StreamState, log: &ZenLog) -> Vec<String> {
+fn process_chunk(chunk: &Value, st: &mut StreamState) -> Vec<String> {
     if st.closed {
         return Vec::new();
     }
@@ -1502,6 +1550,15 @@ fn process_chunk(chunk: &Value, st: &mut StreamState, log: &ZenLog) -> Vec<Strin
     };
     for choice in choices {
         let delta = choice.get("delta").cloned().unwrap_or_else(|| json!({}));
+        // 诊断：记录出现过的 delta 键名（只记键，不记值）
+        if let Some(object) = delta.as_object() {
+            for key in object.keys() {
+                if st.delta_keys.len() >= DELTA_KEY_LIMIT {
+                    break;
+                }
+                st.delta_keys.insert(key.clone());
+            }
+        }
         // 推理增量（DeepSeek 系 reasoning_content / 中转 reasoning）：翻成
         // responses 的 reasoning summary 事件，供「思考过程」卡片展示
         if let Some(text) = reasoning_text(&delta) {
@@ -1529,15 +1586,18 @@ fn process_chunk(chunk: &Value, st: &mut StreamState, log: &ZenLog) -> Vec<Strin
                 if st.finish_reason.is_none() {
                     st.finish_reason = Some(fr.to_string());
                 }
-                out.extend(finish_stream(st, log));
+                // 不在此收尾：OpenAI 的 `include_usage` 会在 finish_reason 之后
+                // 再发一个只带 usage 的分片，提前关流会把它丢掉（见流循环的宽限）。
             }
         }
     }
     out
 }
 
-/// 取增量里的推理文本：`reasoning_content`（DeepSeek 系）或 `reasoning`
-/// （字符串，或 `{content}` 对象——OpenRouter 等中转常见）。
+/// 取增量里的推理文本。覆盖常见形态：
+/// - `reasoning_content`：DeepSeek 系；
+/// - `reasoning`：字符串，或带 `content` / `text` / `summary` 的对象；
+/// - `reasoning_details`：OpenRouter 系的数组（取 `text` / `summary`，跳过加密项）。
 fn reasoning_text(delta: &Value) -> Option<&str> {
     if let Some(text) = delta
         .get("reasoning_content")
@@ -1548,12 +1608,33 @@ fn reasoning_text(delta: &Value) -> Option<&str> {
     }
     match delta.get("reasoning") {
         Some(Value::String(text)) if !text.is_empty() => Some(text.as_str()),
-        Some(Value::Object(object)) => object
-            .get("content")
-            .and_then(Value::as_str)
-            .filter(|text| !text.is_empty()),
-        _ => None,
+        Some(Value::Object(object)) => reasoning_field(object),
+        _ => delta
+            .get("reasoning_details")
+            .and_then(Value::as_array)
+            .and_then(|details| {
+                details.iter().find_map(|detail| {
+                    let object = detail.as_object()?;
+                    // 加密推理没有可展示文本
+                    if object
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .is_some_and(|kind| kind.contains("encrypted"))
+                    {
+                        return None;
+                    }
+                    reasoning_field(object)
+                })
+            }),
     }
+}
+
+/// 从推理对象里按 `content` / `text` / `summary` 顺序取非空文本。
+fn reasoning_field(object: &serde_json::Map<String, Value>) -> Option<&str> {
+    ["content", "text", "summary"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_str))
+        .filter(|text| !text.is_empty())
 }
 
 /// 推理摘要增量 → `response.reasoning_summary_*` 事件序列（summary_index 固定 0）。
@@ -1987,6 +2068,18 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
             ("text_chars", text_chars.to_string()),
             ("call_count", call_count.to_string()),
             ("failed", failed.to_string()),
+            (
+                "usage",
+                if st.usage.is_some() { "present" } else { "none" }.to_string(),
+            ),
+            (
+                "delta_keys",
+                st.delta_keys
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
         ],
     );
     out
@@ -2171,9 +2264,11 @@ mod tests {
             "choices": [{ "delta": {}, "finish_reason": "stop" }]
         });
         let mut lines: Vec<String> = Vec::new();
-        lines.extend(process_chunk(&c1, &mut st, &None));
-        lines.extend(process_chunk(&c2, &mut st, &None));
-        lines.extend(process_chunk(&c3, &mut st, &None));
+        lines.extend(process_chunk(&c1, &mut st));
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(process_chunk(&c3, &mut st));
+        // finish_reason 只记录，收尾由流循环在尾部（usage 分片/结束）触发
+        lines.extend(finish_stream(&mut st, &None));
         let events: Vec<&str> = lines
             .iter()
             .filter_map(|b| b.lines().next())
@@ -2229,9 +2324,10 @@ mod tests {
             }] }, "finish_reason": "tool_calls" }]
         });
         let mut lines: Vec<String> = Vec::new();
-        lines.extend(process_chunk(&c1, &mut st, &None));
-        lines.extend(process_chunk(&c2, &mut st, &None));
-        lines.extend(process_chunk(&c3, &mut st, &None));
+        lines.extend(process_chunk(&c1, &mut st));
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(process_chunk(&c3, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
         let joined = lines.join("\n");
         assert!(joined.contains("event: response.output_item.added"));
         assert!(joined.contains(r#""type":"function_call""#));
@@ -2390,8 +2486,9 @@ mod tests {
                 "function": { "name": "apply_patch", "arguments": "{\"old_string\": " }
             }] }, "finish_reason": "tool_calls" }]
         });
-        let mut lines = process_chunk(&c1, &mut st, &None);
-        lines.extend(process_chunk(&c2, &mut st, &None));
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
 
         let names = event_names(&lines);
         assert!(names.contains(&"response.failed".to_string()));
@@ -2427,7 +2524,8 @@ mod tests {
                 "function": { "name": "get_time", "arguments": "" }
             }] }, "finish_reason": "tool_calls" }]
         });
-        let lines = process_chunk(&c1, &mut st, &None);
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(finish_stream(&mut st, &None));
         let names = event_names(&lines);
         assert!(names.contains(&"response.completed".to_string()));
         assert!(!names.contains(&"response.failed".to_string()));
@@ -2438,7 +2536,7 @@ mod tests {
     fn stream_error_payload_fails_the_stream() {
         let mut st = StreamState::new("resp_err".into(), "m".into());
         let chunk = json!({ "error": { "message": "Internal server error", "type": "error" } });
-        assert!(process_chunk(&chunk, &mut st, &None).is_empty());
+        assert!(process_chunk(&chunk, &mut st).is_empty());
         assert!(st.failure.is_some(), "流内 error 应被记为失败");
 
         let lines = finish_stream(&mut st, &None);
@@ -2464,9 +2562,10 @@ mod tests {
             "usage": { "prompt_tokens": 120000, "completion_tokens": 30, "total_tokens": 120030 }
         });
         let c3 = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] });
-        let mut lines = process_chunk(&c1, &mut st, &None);
-        lines.extend(process_chunk(&c2, &mut st, &None));
-        lines.extend(process_chunk(&c3, &mut st, &None));
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(process_chunk(&c3, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
 
         let done = event_payload(&lines, "response.completed").expect("应正常完成");
         assert_eq!(done["response"]["usage"]["input_tokens"], 120000);
@@ -2724,9 +2823,10 @@ mod tests {
         let c1 = json!({ "choices": [{ "delta": { "reasoning_content": "先看" }, "finish_reason": null }] });
         let c2 = json!({ "choices": [{ "delta": { "reasoning_content": "日志" }, "finish_reason": null }] });
         let c3 = json!({ "choices": [{ "delta": { "content": "结论" }, "finish_reason": "stop" }] });
-        let mut lines = process_chunk(&c1, &mut st, &None);
-        lines.extend(process_chunk(&c2, &mut st, &None));
-        lines.extend(process_chunk(&c3, &mut st, &None));
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(process_chunk(&c3, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
 
         let names = event_names(&lines);
         assert_eq!(names[0], "response.output_item.added", "推理 item 先开");
@@ -2764,7 +2864,7 @@ mod tests {
         let chunk = json!({
             "choices": [{ "delta": { "reasoning": { "content": "想想" } }, "finish_reason": null }]
         });
-        let lines = process_chunk(&chunk, &mut st, &None);
+        let lines = process_chunk(&chunk, &mut st);
         assert!(lines
             .iter()
             .any(|line| line.contains("response.reasoning_summary_text.delta")
@@ -2776,8 +2876,9 @@ mod tests {
         let mut st = StreamState::new("resp_len".into(), "m".into());
         let c1 = json!({ "choices": [{ "delta": { "content": "半截" }, "finish_reason": null }] });
         let c2 = json!({ "choices": [{ "delta": {}, "finish_reason": "length" }] });
-        let mut lines = process_chunk(&c1, &mut st, &None);
-        lines.extend(process_chunk(&c2, &mut st, &None));
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
 
         let names = event_names(&lines);
         assert!(names.contains(&"response.incomplete".to_string()));
@@ -2804,8 +2905,9 @@ mod tests {
             }
         });
         let c2 = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] });
-        let mut lines = process_chunk(&c1, &mut st, &None);
-        lines.extend(process_chunk(&c2, &mut st, &None));
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
         let done = event_payload(&lines, "response.completed").unwrap();
         assert_eq!(
             done["response"]["usage"]["input_tokens_details"]["cached_tokens"],
@@ -2847,6 +2949,99 @@ mod tests {
         assert!(names.contains(&"response.failed".to_string()));
         assert!(!names.contains(&"response.incomplete".to_string()));
         assert!(!names.contains(&"response.completed".to_string()));
+    }
+
+    #[test]
+    fn finish_reason_alone_does_not_complete_the_stream() {
+        let mut st = StreamState::new("resp_ord".into(), "m".into());
+        let finish = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] });
+        assert!(
+            process_chunk(&finish, &mut st).is_empty(),
+            "finish_reason 分片本身不产出事件"
+        );
+        assert!(
+            !st.closed,
+            "不应在 finish_reason 处关流，否则会丢掉随后的 usage 分片"
+        );
+
+        // OpenAI `include_usage` 的真实形态：finish_reason 之后再发一个只带 usage 的分片
+        let usage = json!({
+            "choices": [],
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 20,
+                "total_tokens": 1020,
+                "prompt_tokens_details": { "cached_tokens": 800 },
+                "completion_tokens_details": { "reasoning_tokens": 7 }
+            }
+        });
+        assert!(process_chunk(&usage, &mut st).is_empty());
+
+        let lines = finish_stream(&mut st, &None);
+        let done = event_payload(&lines, "response.completed").expect("应正常完成");
+        assert_eq!(done["response"]["usage"]["input_tokens"], 1000);
+        assert_eq!(
+            done["response"]["usage"]["input_tokens_details"]["cached_tokens"],
+            800
+        );
+        assert_eq!(
+            done["response"]["usage"]["output_tokens_details"]["reasoning_tokens"],
+            7
+        );
+    }
+
+    #[test]
+    fn stream_summary_reports_usage_presence_and_delta_keys() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let mut st = StreamState::new("resp_diag".into(), "m".into());
+        st.usage = Some(json!({ "prompt_tokens": 1 }));
+        st.delta_keys.insert("content".to_string());
+        st.delta_keys.insert("reasoning_content".to_string());
+        let _ = finish_stream(&mut st, &log);
+
+        let joined = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("usage=present"), "{joined}");
+        assert!(
+            joined.contains("delta_keys=content,reasoning_content"),
+            "{joined}"
+        );
+    }
+
+    #[test]
+    fn reasoning_details_array_is_understood() {
+        let mut st = StreamState::new("resp_rd".into(), "m".into());
+        let chunk = json!({
+            "choices": [{ "delta": { "reasoning_details": [
+                { "type": "reasoning.encrypted", "data": "xxx" },
+                { "type": "reasoning.text", "text": "明细推理" }
+            ] }, "finish_reason": null }]
+        });
+        let lines = process_chunk(&chunk, &mut st);
+        assert!(lines.iter().any(|line| {
+            line.contains("response.reasoning_summary_text.delta") && line.contains("明细推理")
+        }));
+    }
+
+    #[test]
+    fn reasoning_text_and_summary_fields_are_understood() {
+        let mut st = StreamState::new("resp_rs".into(), "m".into());
+        let text = json!({
+            "choices": [{ "delta": { "reasoning": { "text": "来自 text" } }, "finish_reason": null }]
+        });
+        let summary = json!({
+            "choices": [{ "delta": { "reasoning": { "summary": "来自 summary" } }, "finish_reason": null }]
+        });
+        let mut lines = process_chunk(&text, &mut st);
+        lines.extend(process_chunk(&summary, &mut st));
+        let joined = lines.join("\n");
+        assert!(joined.contains("来自 text"));
+        assert!(joined.contains("来自 summary"));
     }
 }
 
@@ -3391,5 +3586,77 @@ mod integration_tests {
             }
             ForwardPayload::Live(_) => panic!("4xx 应携带已读出的错误体"),
         }
+    }
+
+    /// 起一个"发一片 finish_reason 后就保持连接不关"的 mock 上游。
+    async fn spawn_mock_upstream_holding_open() -> String {
+        let app = Router::new().route(
+            "/stream",
+            axum::routing::get(|| async {
+                let first = futures_util::stream::once(async {
+                    Ok::<_, std::io::Error>(axum::body::Bytes::from_static(
+                        b"data: {\"choices\":[{\"delta\":{\"content\":\"half\"},\"finish_reason\":\"stop\"}]}\n\n",
+                    ))
+                });
+                let rest = futures_util::stream::pending::<
+                    Result<axum::body::Bytes, std::io::Error>,
+                >();
+                axum::response::Response::builder()
+                    .header(header::CONTENT_TYPE, "text/event-stream")
+                    .body(Body::from_stream(first.chain(rest)))
+                    .unwrap()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn finish_without_more_chunks_times_out_and_completes() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let base_url = spawn_mock_upstream_holding_open().await;
+        let resp = http_client()
+            .get(format!("{base_url}/stream"))
+            .send()
+            .await
+            .expect("mock 上游应可连接");
+
+        let req = json!({ "model": "m", "input": "hi", "stream": true });
+        let started = std::time::Instant::now();
+        let out = proxy_stream_response(req, resp, &log).await;
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            axum::body::to_bytes(out.into_body(), usize::MAX),
+        )
+        .await
+        .expect("宽限超时后应已收尾，不能挂住回合")
+        .unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("event: response.completed"),
+            "应正常收尾：{text}"
+        );
+        assert!(
+            started.elapsed() >= USAGE_GRACE,
+            "应先等满宽限期再收尾，实际 {:?}",
+            started.elapsed()
+        );
+
+        let joined = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            joined.contains("zen_proxy.usage_timeout"),
+            "应记录宽限超时：{joined}"
+        );
+        assert!(joined.contains("usage=none"), "{joined}");
     }
 }
