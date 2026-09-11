@@ -1069,6 +1069,17 @@ struct RepairReport {
     missing_tool_outputs: usize,
 }
 
+/// Responses 角色 → Chat Completions 角色。
+/// `developer` 是 Responses 的开发者指令角色（codex 用它下发开发者消息），但多数 OpenAI
+/// 兼容端点不认它——DeepSeek 直接回 400 `unknown variant developer`——统一降级为 `system`；
+/// 其余角色原样透传，交给上游自行校验。
+fn chat_role(role: &str) -> &str {
+    match role {
+        "developer" => "system",
+        other => other,
+    }
+}
+
 /// 把 Responses 请求体转换为 Chat Completions 请求体（纯函数，便于单测）。
 ///
 /// 同时净化历史：工具调用参数被截断/非法时改写为 `{}`，并有工具调用却缺少
@@ -1106,11 +1117,8 @@ fn responses_to_chat(req: &Value, want_stream: bool) -> Result<(Value, RepairRep
                 match obj.get("type").and_then(|t| t.as_str()).unwrap_or("") {
                     "message" => {
                         flush(&mut messages, &mut pending);
-                        let role = obj
-                            .get("role")
-                            .and_then(|r| r.as_str())
-                            .unwrap_or("user")
-                            .to_string();
+                        let role = obj.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                        let role = chat_role(role);
                         let content = message_content(item);
                         messages.push(json!({ "role": role, "content": content }));
                     }
@@ -2272,6 +2280,28 @@ mod tests {
         assert_eq!(chat["stream"], false);
         assert_eq!(chat["messages"][0]["role"], "user");
         assert_eq!(chat["messages"][0]["content"], "你好");
+    }
+
+    #[test]
+    fn responses_to_chat_maps_developer_role_to_system() {
+        // Responses 的 developer 角色在 OpenAI 兼容端点上普遍不被接受（DeepSeek 直接 400）。
+        let req = json!({
+            "model": "m",
+            "instructions": "系统指令",
+            "input": [
+                { "type": "message", "role": "developer", "content": "开发者指令" },
+                { "type": "message", "role": "user", "content": "你好" }
+            ]
+        });
+        let (chat, repairs) = responses_to_chat(&req, false).unwrap();
+        assert_eq!(repairs, RepairReport::default());
+        assert_eq!(chat["messages"][0]["role"], "system");
+        assert_eq!(chat["messages"][1]["role"], "system");
+        assert_eq!(chat["messages"][1]["content"], "开发者指令");
+        assert_eq!(chat["messages"][2]["role"], "user");
+        assert_eq!(chat_role("developer"), "system");
+        assert_eq!(chat_role("assistant"), "assistant");
+        assert_eq!(chat_role("tool"), "tool");
     }
 
     #[test]
