@@ -209,6 +209,53 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
+/// `zen_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
+/// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
+/// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格。
+fn request_log_fields(req: &Value, want_stream: bool) -> Vec<(&'static str, String)> {
+    let model = req
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let input_msg_count = req
+        .get("input")
+        .and_then(Value::as_array)
+        .map(|items| items.len())
+        .unwrap_or(0);
+    let tool_count = req
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| tools.len())
+        .unwrap_or(0);
+    let instructions_chars = req
+        .get("instructions")
+        .and_then(Value::as_str)
+        .map(|text| text.chars().count())
+        .unwrap_or(0);
+    let input_chars = req
+        .get("input")
+        .and_then(|value| serde_json::to_string(value).ok())
+        .map(|text| text.chars().count())
+        .unwrap_or(0);
+    let reasoning_effort = req
+        .pointer("/reasoning/effort")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-")
+        .to_string();
+    vec![
+        ("model", model),
+        ("stream", want_stream.to_string()),
+        ("input_msg_count", input_msg_count.to_string()),
+        ("input_chars", input_chars.to_string()),
+        ("instructions_chars", instructions_chars.to_string()),
+        ("reasoning_effort", reasoning_effort),
+        ("tool_count", tool_count.to_string()),
+    ]
+}
+
 async fn handle_responses(
     State(state): State<ProxyState>,
     headers: HeaderMap,
@@ -218,46 +265,9 @@ async fn handle_responses(
         .get("stream")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let model = req
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let input_msg_count = req
-        .get("input")
-        .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    let tool_count = req
-        .get("tools")
-        .and_then(|v| v.as_array())
-        .map(|a| a.len())
-        .unwrap_or(0);
-    // 体积诊断字段：`instructions_chars` 即模型目录里的提示词开销，
-    // `input_chars` 为本次会话历史体量，二者共同决定是否逼近上游真实窗口。
-    let instructions_chars = req
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .map(|s| s.chars().count())
-        .unwrap_or(0);
-    let input_chars = req
-        .get("input")
-        .and_then(|v| serde_json::to_string(v).ok())
-        .map(|s| s.chars().count())
-        .unwrap_or(0);
-    log_at(
-        &state.log,
-        "info",
-        "zen_proxy.request",
-        &[
-            ("model", model.clone()),
-            ("stream", want_stream.to_string()),
-            ("input_msg_count", input_msg_count.to_string()),
-            ("input_chars", input_chars.to_string()),
-            ("instructions_chars", instructions_chars.to_string()),
-            ("tool_count", tool_count.to_string()),
-        ],
-    );
+    let fields = request_log_fields(&req, want_stream);
+    let kv: Vec<(&str, String)> = fields.iter().map(|(k, v)| (*k, v.clone())).collect();
+    log_at(&state.log, "info", "zen_proxy.request", &kv);
 
     let started = Instant::now();
     let base_url = state.base_url.clone();
@@ -2657,6 +2667,44 @@ mod tests {
             "Unknown parameter: 'reasoning_effort'.",
             &["reasoning_effort", "reasoning effort"]
         ));
+    }
+
+    #[test]
+    fn request_log_records_reasoning_effort() {
+        let fields = request_log_fields(
+            &json!({
+                "model": "m",
+                "stream": true,
+                "instructions": "提示词",
+                "input": [{ "type": "message" }],
+                "tools": [],
+                "reasoning": { "effort": "high", "summary": "auto" }
+            }),
+            true,
+        );
+        let value_of = |key: &str| {
+            fields
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(value_of("reasoning_effort"), Some("high".to_string()));
+        assert_eq!(value_of("model"), Some("m".to_string()));
+        assert_eq!(value_of("stream"), Some("true".to_string()));
+        assert_eq!(value_of("input_msg_count"), Some("1".to_string()));
+        assert_eq!(value_of("tool_count"), Some("0".to_string()));
+        assert_eq!(value_of("instructions_chars"), Some("3".to_string()));
+        assert!(value_of("input_chars").is_some());
+
+        // 没请求推理时记 `-`
+        let fields = request_log_fields(&json!({ "model": "m" }), false);
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(name, _)| *name == "reasoning_effort")
+                .map(|(_, value)| value.as_str()),
+            Some("-")
+        );
     }
 
     #[test]

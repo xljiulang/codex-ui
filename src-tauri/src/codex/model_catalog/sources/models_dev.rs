@@ -247,7 +247,12 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
 fn reasoning_levels(model: &Value) -> Option<Vec<String>> {
     let options = model.get("reasoning_options").and_then(Value::as_array)?;
     let mut levels = Vec::new();
-    let mut explicit = options.is_empty();
+    // 空数组的语义分两种：声明了「会推理」却没给档位（`reasoning: true` + 空数组，
+    // 例如 models.dev 里某些 provider 级条目只写 toggle）视为**未知**，交给其它来源
+    // （如 OpenRouter 的 supported_efforts）补档位；未声明推理能力的空数组仍按
+    // 「明确无档位」处理，保持各来源既有的优先级语义。
+    let mut explicit =
+        options.is_empty() && model.get("reasoning").and_then(Value::as_bool) != Some(true);
     for option in options {
         if option.get("type").and_then(Value::as_str) != Some("effort") {
             continue;
@@ -352,6 +357,48 @@ mod tests {
             assert_eq!(facts.provenance["context_window"].provider_id, None);
             assert_eq!(facts.provenance["reasoning_levels"].provider_id.as_deref(), Some("vendor"));
         }
+    }
+
+    #[test]
+    fn empty_reasoning_options_with_reasoning_true_is_treated_as_unknown() {
+        // 真实形态（models.dev 里 Zen 的 mimo-v2.5-free）：provider 级条目只写
+        // `reasoning: true` + 空 `reasoning_options`，不应把档位清零，
+        // 以便其它来源补上（OpenRouter 对 xiaomi/mimo-v2.5 给 high/low/none）
+        let text = json!({
+            "providers": {
+                "relay": { "models": { "mimo-v2.5-free": {
+                    "reasoning_options": [{"type":"effort","values":["high","low"]}]
+                }}},
+                "opencode": { "models": { "mimo-v2.5-free": {
+                    "reasoning": true, "reasoning_options": []
+                }}}
+            }
+        })
+        .to_string();
+        let source = ModelsDevSource {
+            store: CandidateStore::new(parse_catalog(&text).unwrap()),
+        };
+        let facts = source.extract("mimo-v2.5-free").unwrap().facts;
+        assert_eq!(
+            facts.reasoning_levels,
+            Some(vec!["high".to_string(), "low".to_string()]),
+            "空档位不应清掉其它来源给出的档位"
+        );
+        assert_eq!(facts.supports_reasoning, Some(true));
+
+        // 未声明推理能力的空数组仍按「明确无档位」处理
+        let text = json!({
+            "providers": { "opencode": { "models": { "plain-model": {
+                "reasoning_options": []
+            }}}}
+        })
+        .to_string();
+        let source = ModelsDevSource {
+            store: CandidateStore::new(parse_catalog(&text).unwrap()),
+        };
+        let facts = source.extract("plain-model").unwrap().facts;
+        assert_eq!(facts.reasoning_levels, Some(Vec::new()));
+        assert_eq!(facts.supports_reasoning, None);
     }
 
     #[test]

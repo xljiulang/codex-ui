@@ -903,6 +903,51 @@ mod tests {
     }
 
     #[test]
+    fn empty_reasoning_options_do_not_clear_levels_from_openrouter() {
+        // 机制回归：精确命中 models.dev 的 provider 级记录（声明会推理、档位却是空数组），
+        // 修复前该空数组会被当成"明确无档位"，以更高的来源质量清掉 OpenRouter 给出的
+        // supported_efforts，目录里的 `supported_reasoning_levels` 变成 `[]`，
+        // codex 于是从不请求推理。用夹具复刻这条链路（真实数据见下条注释）。
+        let dir = tempdir().unwrap();
+        write_source_fixture(
+            dir.path(),
+            json!({ "data": [{
+                "id": "relay/mimo-demo",
+                "canonical_slug": "relay/mimo-demo",
+                "name": "MiMo Demo",
+                "context_length": 200000,
+                "reasoning": {
+                    "mandatory": false,
+                    "supported_efforts": ["high", "low"],
+                    "default_effort": "high"
+                }
+            }] }),
+            json!({ "providers": { "relay": { "models": { "mimo-demo": {
+                "reasoning": true,
+                "reasoning_options": []
+            }}}}}),
+        );
+        let result = build_catalog_result(
+            &["mimo-demo".to_string()],
+            dir.path(),
+            "https://relay.example.com/v1",
+        )
+        .unwrap();
+        let entry = catalog_entry(&result, "mimo-demo");
+        let levels: Vec<&str> = entry["supported_reasoning_levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|level| level["effort"].as_str())
+            .collect();
+        assert!(
+            !levels.is_empty(),
+            "空档位不得清掉 OpenRouter 给出的档位：{entry}"
+        );
+        assert!(levels.contains(&"high"), "档位应含 high：{levels:?}");
+    }
+
+    #[test]
     fn official_entry_is_reused_verbatim_for_gpt_models() {
         let dir = tempdir().unwrap();
         // GPT/codex 基线条目来自本机 codex 的运行期导出，不再内置在资源里
