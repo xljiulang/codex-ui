@@ -75,7 +75,7 @@ describe("ZenProxySection", () => {
     expect(mockOpenDocsUrl).toHaveBeenCalledWith(ZEN_PRICING_DOCS_URL);
   });
 
-  it("配置块渲染 experimental_bearer_token：指向「你自己的 key」链接", async () => {
+  it("配置块渲染 experimental_bearer_token：指向「API Key」链接", async () => {
     const wrapper = mountSection();
     const rows = wrapper.findAll(".zen-proxy-config-row");
     const tokenRow = rows[1];
@@ -83,7 +83,7 @@ describe("ZenProxySection", () => {
       "experimental_bearer_token",
     );
     const keyLink = tokenRow.find(".zen-proxy-docs-link");
-    expect(keyLink.text()).toBe("你自己的 key");
+    expect(keyLink.text()).toBe("API Key");
   });
 
   it("配置块 base_url 行提供复制按钮并调用 copyText", async () => {
