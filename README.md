@@ -208,8 +208,15 @@
 - **模型配置空值语义**：提供方列表首项为固定的「**不使用模型提供方**」（选中表示不激活任何提供方）——**选择它不会删除既有提供方**，因为 `model_provider` 留空时按空值删键写 `null` 而不是写空串（实测：空串会让 codex 判定整份配置无效、用户层从 `config/read` 消失，设置页因此读到空提供方列表，下次保存把 `model_providers` 整表覆盖为空）；**`wire_api` 仅支持 `responses`**（codex 0.149.x 已不支持 `chat`），历史 `chat` 值在提供方行显示行内错误、保存时校验阻断，编辑弹窗只提供 `responses` 且打开时回填该值，保存一次即修正；推理强度留空表示「未配置」（写 `null` 删键，写空串会被 codex 以 `reasoning_effort must not be empty` 拒绝保存）；
 - 保存后需重启 codex-ui 才能生效、Enter 快捷发送、跟进处理方式（调整方向 / 加入队列）、提示音开关、**记忆管理**（记忆模式关闭/启用，默认关闭，新建会话自动应用、保存时同步当前会话；「删除记忆」二次确认后清空全部已保存记忆）（权限模式、模型、推理强度为会话级，在每个会话标签的输入区按钮菜单中配置，新会话取默认）。
 
-### Zen 代理诊断日志（内容级，默认常开）
+### Zen 代理诊断日志（内容级，默认关闭，用 `CODEXUI_ZEN_TRACE` 开启）
 
+- **开关**：默认**不写**内容日志（避免长期累积占盘）。需要排查时设 `CODEXUI_ZEN_TRACE=1` 并**重启 codex-ui** 才生效（环境变量只在启动时读取一次）：
+
+```powershell
+$env:CODEXUI_ZEN_TRACE='1'; .\build-dev.bat     # 或先设置系统环境变量再启动应用
+```
+
+- 取值：`1` / `true` / `on` / `yes` 为开启，`0` / `false` / `off` / `no` 为关闭（大小写不敏感）；写错（如 `=abc`）按关闭处理，并在 `session-*.log` 里记一条 `env.flag_invalid` 便于发现。关闭后**已有文件保留、不再清理**，需要时手动删除 `%APPDATA%\com.codexui.app\logs\zen\*`。
 - **位置**：`%APPDATA%\com.codexui.app\logs\zen\`（与 `session-*.log` 分目录存放）；**只覆盖翻译路径**（`{模型提供方 base_url 路径}/responses`），`/models` 等透传请求仍只记 `zen_proxy.passthrough` 一行。
 - **每次上游尝试一组文件**（含重试的每次 attempt）：`<yyyyMMdd-HHmmssSSS>-<call_id>-a<n>.request.json`（发往上游的 chat/completions 请求体）、`.response.sse`（上游响应原文逐行，保留 `data:` 前缀与 `[DONE]`；非流式为 `.response.json`）、`.response.txt`（上游非 2xx 原文）、`.summary.txt`（收尾摘要）。
 - **摘要字段**：`call_id` / `attempt` / `model` / `stream` / `upstream_url` / `x_opencode_session`（= codex `session-id` 派生值，用于关联线程）/ `x_opencode_request` / `authorization=present|absent`（**从不落盘 API Key**）/ `message_count` / `tool_count` / `dropped_fields` / `reasoning_rc` / `elapsed_ms` / `upstream_status` / `finish_reason` / `text_chars` / `reasoning_chars` / `call_count` / `failed` / `usage` / `delta_keys` / `suspicious` / `translated_terminal_event`（发回 codex 的 `response.completed|failed|incomplete` 原文）；流未收尾就被中断时摘要记 `ended=dropped_without_finish`。
@@ -341,6 +348,20 @@ node scripts/run-e2e.mjs --audit-chat      # 主题审计改用 chat 阶段（�
 - 协议级探针（直连 `codex app-server --stdio`）：`probe-approval*.mjs`。
 
 E2E 探针自建临时目录与会话，结束时自动清理；CDP 端口被占用或应用启动失败时给出明确诊断，可用 `CODEX_E2E_PORT` 换端口。
+
+## 环境变量（`CODEXUI_*`）
+
+codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下划线的「组件_用途」功能段（如 `CODEXUI_ZEN_TRACE`；将来新增的 `CODEXUI_ZEN_TRACE_MAX_MB`、`CODEXUI_WECHAT_DEBUG` 等沿用同一前缀）。约定如下：
+
+- **取值**：大小写不敏感、自动 trim；真值 `1` / `true` / `on` / `yes`，假值 `0` / `false` / `off` / `no`；未设置或空串按「关」处理。
+- **生效时机**：进程启动时读取一次，改完需重启 codex-ui。
+- **写错的值**：既不是真值也不是假值（如 `abc`）按「关」处理，同时往 `%APPDATA%\com.codexui.app\logs\session-<日期>.log` 写一条 `env.flag_invalid`，字段含变量名与原始取值。
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `CODEXUI_ZEN_TRACE` | 关 | 是否把 Zen 代理的内容诊断日志（请求体/上游响应原文/收尾事件）写到 `logs\zen\`，见「Zen 代理诊断日志」小节 |
+
+> 说明：`CODEX_BIN`（Rust 集成测试的 codex 路径）、`CODEX_E2E_PORT`（E2E 端口）等属于本仓库自有的**开发/测试**变量（不带前缀，供脚本与 CI 使用），与上面的运行期开关是两套。
 
 ## 使用说明
 

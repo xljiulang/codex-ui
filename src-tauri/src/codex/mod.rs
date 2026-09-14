@@ -4,6 +4,7 @@ pub mod bundled;
 pub mod commands;
 pub mod custom_instructions;
 pub mod diff;
+pub mod env_flags;
 pub mod file_icon;
 pub mod git;
 pub mod logs_guard;

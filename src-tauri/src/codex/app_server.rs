@@ -12,6 +12,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, Notify, broadcast, oneshot};
 
 use crate::codex::bundled;
+use crate::codex::env_flags;
 use crate::codex::path_util::clean_path;
 use crate::codex::model_config;
 use crate::codex::logs_guard;
@@ -124,6 +125,15 @@ impl Inner {
     }
 }
 
+/// Zen 代理内容诊断日志句柄：开关关闭（默认）或没有日志目录时不构造——
+/// 既不建目录也不写入，更不会清理已有文件（用户需要时手动删或重新开启）。
+fn zen_trace_from(dir: Option<PathBuf>, enabled: bool) -> Option<Arc<ZenTrace>> {
+    if !enabled {
+        return None;
+    }
+    dir.map(|d| Arc::new(ZenTrace::new(d)))
+}
+
 impl CodexServer {
     pub fn new(app: AppHandle, workspace: PathBuf) -> Self {
         let logs_dir = app
@@ -137,10 +147,27 @@ impl CodexServer {
         let codex_log = logs_dir
             .as_ref()
             .map(|d| Arc::new(SessionLog::with_prefix(d.clone(), "codex-")));
-        // Zen 代理内容诊断日志（独立子目录，便于单独清理与打包分析）
-        let zen_trace = logs_dir
-            .as_ref()
-            .map(|d| Arc::new(ZenTrace::new(d.join("zen"))));
+        // Zen 代理内容诊断日志（独立子目录，便于单独清理与打包分析）：默认关闭，
+        // 需要排查时设 `CODEXUI_ZEN_TRACE=1` 并重启 codex-ui（环境变量只在启动时读取一次）。
+        if let (Some(raw), Some(log)) = (env_flags::invalid_value("ZEN_TRACE"), log.as_ref()) {
+            log.write(
+                "warn",
+                None,
+                "env.flag_invalid",
+                &[
+                    ("name".to_string(), env_flags::full_name("ZEN_TRACE")),
+                    ("value".to_string(), raw),
+                    (
+                        "detail".to_string(),
+                        "取值无法识别，按关闭处理；真值为 1/true/on/yes".to_string(),
+                    ),
+                ],
+            );
+        }
+        let zen_trace = zen_trace_from(
+            logs_dir.as_ref().map(|d| d.join("zen")),
+            env_flags::flag("ZEN_TRACE"),
+        );
         Self {
             app,
             shared: Arc::new(Shared {
@@ -1433,6 +1460,17 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+
+    /// `CODEXUI_ZEN_TRACE` 关闭（默认）时不构造内容日志句柄，也不创建目录。
+    #[test]
+    fn zen_trace_handle_respects_switch() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("zen");
+        assert!(zen_trace_from(Some(dir.clone()), false).is_none());
+        assert!(!dir.exists(), "开关关闭时不应创建内容日志目录");
+        assert!(zen_trace_from(Some(dir.clone()), true).is_some());
+        assert!(zen_trace_from(None, true).is_none());
+    }
 
     #[test]
     fn parse_codex_version_variants() {
