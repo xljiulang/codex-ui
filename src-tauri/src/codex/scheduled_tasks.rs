@@ -393,6 +393,7 @@ pub enum FireAction {
     Skip,
 }
 
+/// 触发决策：线程空闲即执行；忙时按任务策略顺延或跳过。
 pub fn decide_fire(thread_busy: bool, policy: &str) -> FireAction {
     if !thread_busy {
         return FireAction::Execute;
@@ -401,6 +402,28 @@ pub fn decide_fire(thread_busy: bool, policy: &str) -> FireAction {
         FireAction::Skip
     } else {
         FireAction::Defer
+    }
+}
+
+/// 启动首轮对单个任务的处置结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FirstTickAction {
+    /// 已过期且启用：记「已错过」并推进 next_run（错过不补跑）。
+    MissAndAdvance,
+    /// 未到期 / 停用 / 已归档，无需处理。
+    Idle,
+}
+
+/// 启动首轮处置决策：应用未运行期间错过的触发点一律记「已错过」不补跑。
+/// 此刻线程必为空闲，若复用 [`decide_fire`] 会误判为 `Execute` 立即执行，
+/// 故首轮对到期任务固定返回 [`FirstTickAction::MissAndAdvance`]，
+/// 与任务忙时策略（skip/defer）无关。
+pub fn decide_first_tick(now: i64, task: &ScheduledTask) -> FirstTickAction {
+    let due = task.next_run.map(|nr| nr <= now).unwrap_or(false);
+    if task.enabled && !task.done && due {
+        FirstTickAction::MissAndAdvance
+    } else {
+        FirstTickAction::Idle
     }
 }
 
@@ -815,7 +838,9 @@ struct SchedulerInner {
     deferred: HashSet<String>,
     /// 任务 id → 进行中回合（用于完成匹配与超时兜底）。
     running: HashMap<String, RunningTurn>,
-    /// 首轮 tick 标记：把启动时已过期的触发点判定为「已错过」。
+    /// 首轮 tick 标记：把「应用未运行期间已过期的触发点」判定为「已错过」。
+    /// 默认 `false`（`#[derive(Default)]`），由 [`TaskScheduler::start`] 在启动
+    /// 第一个 tick 前同步置为 `true`；tick 首轮消费后随即复位，仅生效一次。
     first_tick: bool,
     default_model: Option<Result<String, String>>,
 }
@@ -850,6 +875,12 @@ impl TaskScheduler {
 
     /// 启动调度循环与通知订阅（仅在 setup 调用一次）。
     pub fn start(self: &Arc<Self>) {
+        // 启动首轮标记：必须在 spawn tick 循环前同步置位（同一把 inner 锁，
+        // 与 tick 消费 `mem::replace(.., false)` 互斥），保证首个 tick 生效一次。
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .first_tick = true;
         let tick = self.clone();
         tauri::async_runtime::spawn(async move {
             loop {
@@ -981,6 +1012,16 @@ impl TaskScheduler {
         }
 
         for task in tasks.iter().filter(|t| t.enabled && !t.done) {
+            // 启动首轮：应用未运行期间错过的触发点一律记「已错过」，不补跑。
+            // 决策不依赖线程忙闲（此刻必空闲）与任务忙时策略，到期即
+            // MissAndAdvance，未到期回退到下方正常调度路径。
+            if first_tick && decide_first_tick(now, task) == FirstTickAction::MissAndAdvance {
+                let _ = self.store.record_event_run(&task.id, now, "missed", None);
+                self.advance(task, now);
+                self.emit_tasks(Some(&task.id));
+                continue;
+            }
+
             let due = task.next_run.map(|nr| nr <= now).unwrap_or(false);
             if !due {
                 continue;
@@ -991,14 +1032,6 @@ impl TaskScheduler {
                 .unwrap_or_else(|e| e.into_inner())
                 .active_threads
                 .contains(&task.thread_id);
-
-            // 启动首轮：应用未运行期间错过的触发点一律记「已错过」，不补跑。
-            if first_tick {
-                let _ = self.store.record_event_run(&task.id, now, "missed", None);
-                self.advance(task, now);
-                self.emit_tasks(Some(&task.id));
-                continue;
-            }
 
             match decide_fire(busy, &task.busy_policy) {
                 FireAction::Execute => {
@@ -1501,6 +1534,74 @@ mod tests {
         assert_eq!(decide_fire(true, "skip"), FireAction::Skip);
         // 非法策略回退 skip（创建默认）
         assert_eq!(decide_fire(true, "bad"), FireAction::Skip);
+    }
+
+    #[test]
+    fn decide_first_tick_marks_due_tasks_missed_and_ignores_rest() {
+        let due = 1_000i64;
+        let task = |busy_policy: &str| ScheduledTask {
+            id: "t-1".into(),
+            name: "n".into(),
+            prompt: "p".into(),
+            cron: "0 0 9 * * *".into(),
+            thread_id: "th".into(),
+            busy_policy: busy_policy.into(),
+            enabled: true,
+            done: false,
+            created_at: 0,
+            next_run: Some(due),
+        };
+
+        // 到期且启用：无论忙时策略（defer/skip）一律记「已错过」
+        assert_eq!(
+            decide_first_tick(due + 1, &task("defer")),
+            FirstTickAction::MissAndAdvance
+        );
+        assert_eq!(
+            decide_first_tick(due + 1, &task("skip")),
+            FirstTickAction::MissAndAdvance
+        );
+        // 临界：now == next_run 也算到期
+        assert_eq!(
+            decide_first_tick(due, &task("skip")),
+            FirstTickAction::MissAndAdvance
+        );
+
+        // 未到期 → Idle
+        let not_due = ScheduledTask {
+            next_run: Some(due + 100),
+            ..task("skip")
+        };
+        assert_eq!(
+            decide_first_tick(due, &not_due),
+            FirstTickAction::Idle
+        );
+        // 停用 / 已归档 → Idle
+        let disabled = ScheduledTask {
+            enabled: false,
+            ..task("defer")
+        };
+        assert_eq!(
+            decide_first_tick(due + 1, &disabled),
+            FirstTickAction::Idle
+        );
+        let done = ScheduledTask {
+            done: true,
+            ..task("skip")
+        };
+        assert_eq!(
+            decide_first_tick(due + 1, &done),
+            FirstTickAction::Idle
+        );
+        // next_run 缺失（无可触发时刻）→ Idle
+        let no_next = ScheduledTask {
+            next_run: None,
+            ..task("skip")
+        };
+        assert_eq!(
+            decide_first_tick(due, &no_next),
+            FirstTickAction::Idle
+        );
     }
 
     #[test]
