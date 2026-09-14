@@ -814,42 +814,108 @@ fn flat_namespace_tool_name(namespace: &str, name: &str) -> String {
     format!("{namespace}_{name}")
 }
 
-/// 从 Responses 工具声明收集「扁平名 → （命名空间, 子工具名）」映射；
-/// 只有命名空间工具需要还原，普通函数工具与自由格式工具不在表内。
-fn namespace_tool_map(req: &Value) -> HashMap<String, (String, String)> {
-    let mut map: HashMap<String, (String, String)> = HashMap::new();
-    let Some(tools) = req.get("tools").and_then(Value::as_array) else {
-        return map;
-    };
-    for tool in tools {
-        if tool.get("type").and_then(Value::as_str) != Some("namespace") {
-            continue;
-        }
-        let Some(namespace) = tool.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(children) = tool.get("tools").and_then(Value::as_array) else {
-            continue;
-        };
-        for child in children {
-            let Some(name) = child.get("name").and_then(Value::as_str) else {
-                continue;
-            };
-            map.entry(flat_namespace_tool_name(namespace, name))
-                .or_insert_with(|| (namespace.to_string(), name.to_string()));
-        }
-    }
-    map
+/// 一次请求的工具形态：命名空间需要展开/还原，自由格式工具（`type:"custom"`，如 apply_patch）
+/// 需要走 `custom_tool_call` 回译，两者都按工具名查表。
+#[derive(Default, Clone)]
+struct ToolShape {
+    /// 命名空间工具的「扁平名 → （命名空间, 子工具名）」。
+    namespaces: HashMap<String, (String, String)>,
+    /// 自由格式工具的（chat 侧）工具名集合。
+    custom: HashSet<String>,
 }
 
-/// 把 chat 侧工具名还原成 Responses 的 `(name, namespace)`：命中命名空间映射时回带命名空间。
-fn split_namespace_tool(
-    name: &str,
-    map: &HashMap<String, (String, String)>,
-) -> (String, Option<String>) {
-    match map.get(name) {
-        Some((namespace, tool)) => (tool.clone(), Some(namespace.clone())),
-        None => (name.to_string(), None),
+impl ToolShape {
+    /// chat 侧工具名 → Responses 的 `(name, namespace)`：命中命名空间映射时回带命名空间。
+    fn resolve(&self, name: &str) -> (String, Option<String>) {
+        match self.namespaces.get(name) {
+            Some((namespace, tool)) => (tool.clone(), Some(namespace.clone())),
+            None => (name.to_string(), None),
+        }
+    }
+
+    /// 是否为自由格式工具（回译成 `custom_tool_call`、参数允许非 JSON 文本）。
+    fn is_custom(&self, name: &str) -> bool {
+        self.custom.contains(name)
+    }
+}
+
+/// 从 Responses 工具声明收集本次请求的工具形态（纯函数，便于单测）。
+fn tool_shape(req: &Value) -> ToolShape {
+    let mut shape = ToolShape::default();
+    let Some(tools) = req.get("tools").and_then(Value::as_array) else {
+        return shape;
+    };
+    for tool in tools {
+        match tool.get("type").and_then(Value::as_str) {
+            Some("namespace") => {
+                let Some(namespace) = tool.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(children) = tool.get("tools").and_then(Value::as_array) else {
+                    continue;
+                };
+                for child in children {
+                    let Some(name) = child.get("name").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    shape
+                        .namespaces
+                        .entry(flat_namespace_tool_name(namespace, name))
+                        .or_insert_with(|| (namespace.to_string(), name.to_string()));
+                }
+            }
+            Some("custom") => {
+                if let Some(name) = tool.get("name").and_then(Value::as_str) {
+                    shape.custom.insert(name.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    shape
+}
+
+/// 自由格式工具（apply_patch 等）在上游的调用约定：Chat Completions 只有函数调用，
+/// 因此把整段文本放进 JSON 的 `input` 字段；codex 原描述里的 FREEFORM 提示会误导模型，
+/// 命中时整段替换为中性说明，其余情况保留原文再追加约定。
+fn custom_tool_description(raw: &str, name: &str) -> String {
+    const HINT: &str = "本通道为函数调用：请把完整补丁文本放进 JSON 的 input 字段。";
+    let trimmed = raw.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let misleading =
+        trimmed.is_empty() || lower.contains("freeform") || lower.contains("do not wrap");
+    let base = if misleading {
+        format!("编辑文件（{name} 语法）。")
+    } else {
+        trimmed.to_string()
+    };
+    format!("{base}\n\n{HINT}")
+}
+
+/// 自由格式工具在 chat 侧的参数 schema：单个 `input` 字符串承载全部文本。
+fn custom_tool_parameters() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "string",
+                "description": "完整补丁文本（\"*** Begin Patch\" … \"*** End Patch\"）"
+            }
+        },
+        "required": ["input"]
+    })
+}
+
+/// 自由格式工具调用要交给 codex 的 `input`：优先取 JSON 对象的 `input` 字段，
+/// 否则（模型直接给补丁原文、或 JSON 里没有 input）原样使用参数文本。
+fn custom_tool_input(arguments: &str) -> String {
+    match serde_json::from_str::<Value>(arguments.trim()) {
+        Ok(Value::Object(obj)) => obj
+            .get("input")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| arguments.to_string()),
+        _ => arguments.to_string(),
     }
 }
 
@@ -1254,7 +1320,7 @@ async fn proxy_json_response(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let out = match chat_to_responses(&chat, &model, &namespace_tool_map(&req)) {
+    let out = match chat_to_responses(&chat, &model, &tool_shape(&req)) {
         Ok(out) => out,
         Err(e) => {
             log_at(
@@ -1325,8 +1391,8 @@ async fn proxy_stream_response(
     let mut st = StreamState::new(response_id, model);
     // 内容诊断日志句柄随流状态走：收尾与中断（Drop）时都能落盘
     st.trace = call;
-    // 命名空间工具映射：回译模型调用时还原 codex 期望的 name/namespace
-    st.namespace_tools = namespace_tool_map(&req);
+    // 工具形态：回译模型调用时还原 codex 期望的 name/namespace 或 custom_tool_call
+    st.tool_shape = tool_shape(&req);
     let byte_stream = resp.bytes_stream();
     let stream_log = log.clone();
     let events = stream::unfold(
@@ -1629,7 +1695,7 @@ fn responses_to_chat(
                             pending_reasoning = Some(text);
                         }
                     }
-                    "function_call" => {
+                    "function_call" | "custom_tool_call" => {
                         let call_id = obj
                             .get("call_id")
                             .and_then(|v| v.as_str())
@@ -1644,14 +1710,27 @@ fn responses_to_chat(
                             }
                             _ => raw_name.to_string(),
                         };
-                        let raw_arguments = obj
-                            .get("arguments")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        let (arguments, repaired) = normalize_arguments(raw_arguments);
-                        if repaired {
-                            repairs.invalid_arguments += 1;
-                        }
+                        // 自由格式工具的历史调用：把 `input` 包成上游函数调用形态（`{"input": …}`），
+                        // 与工具声明的单参数 schema 一致；普通函数调用照旧规范化 arguments。
+                        let arguments = if obj.get("type").and_then(Value::as_str)
+                            == Some("custom_tool_call")
+                        {
+                            let input = obj
+                                .get("input")
+                                .map(value_to_text)
+                                .unwrap_or_default();
+                            json!({ "input": input }).to_string()
+                        } else {
+                            let raw_arguments = obj
+                                .get("arguments")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let (arguments, repaired) = normalize_arguments(raw_arguments);
+                            if repaired {
+                                repairs.invalid_arguments += 1;
+                            }
+                            arguments
+                        };
                         let tc = json!({
                             "id": call_id,
                             "type": "function",
@@ -1676,7 +1755,7 @@ fn responses_to_chat(
                             pending = Some(message);
                         }
                     }
-                    "function_call_output" => {
+                    "function_call_output" | "custom_tool_call_output" => {
                         flush(&mut messages, &mut pending);
                         let call_id = obj
                             .get("call_id")
@@ -1740,6 +1819,26 @@ fn responses_to_chat(
                 }
                 continue;
             }
+            // 自由格式工具（codex 的 `apply_patch`）：上游只有函数调用，暴露成单参数 `input` 的函数，
+            // 回译时再还原成 `custom_tool_call`（否则 codex 会判 `incompatible payload`）。
+            if obj.get("type").and_then(Value::as_str) == Some("custom") {
+                let Some(name) = obj.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !seen.insert(name.to_string()) {
+                    continue;
+                }
+                let raw_desc = obj.get("description").and_then(Value::as_str).unwrap_or("");
+                chat_tools.push(json!({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": custom_tool_description(raw_desc, name),
+                        "parameters": custom_tool_parameters()
+                    }
+                }));
+                continue;
+            }
             let Some(name) = obj.get("name").and_then(Value::as_str) else {
                 continue;
             };
@@ -1793,12 +1892,20 @@ fn normalize_arguments(raw: &str) -> (String, bool) {
 
 /// 校验一条工具调用的参数是否可用（流式侧护栏，判定"畸形"）。
 /// 工具名必须非空；`arguments` 允许为空串（无参工具），非空时必须是合法 JSON 对象。
-fn validate_call_arguments(name: &str, args: &str) -> Result<(), String> {
+/// `custom_tool`（自由格式工具，如 apply_patch）例外：它的参数就是模型给的原文
+/// （codex 原描述明确要求"不要包成 JSON"），只要求非空，由 codex 的补丁解析器判好坏。
+fn validate_call_arguments(name: &str, args: &str, custom_tool: bool) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("工具名为空".into());
     }
     let trimmed = args.trim();
     if trimmed.is_empty() {
+        if custom_tool {
+            return Err("自由格式工具内容为空".into());
+        }
+        return Ok(());
+    }
+    if custom_tool {
         return Ok(());
     }
     match serde_json::from_str::<Value>(trimmed) {
@@ -1980,11 +2087,11 @@ fn value_to_text(v: &Value) -> String {
 
 /// 非流式 chat.completion → responses 对象（纯函数，便于单测）。
 /// 工具调用参数不可用时返回 Err（调用方以 502 结束，而不是把坏参数交给 codex）。
-/// `namespace_tools` 为命名空间工具的扁平名映射（回译时还原 `name` + `namespace`）。
+/// `shape` 为本次请求的工具形态（命名空间还原 + 自由格式工具走 `custom_tool_call`）。
 fn chat_to_responses(
     chat: &Value,
     model: &str,
-    namespace_tools: &HashMap<String, (String, String)>,
+    shape: &ToolShape,
 ) -> Result<Value, String> {
     let chat_id = chat
         .get("id")
@@ -2038,27 +2145,40 @@ fn chat_to_responses(
                         .pointer("/function/arguments")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let (arguments, repaired) = normalize_arguments(raw_arguments);
-                    if repaired {
-                        return Err(format!(
-                            "上游工具调用参数不可用（{}）：{}",
-                            if name.is_empty() { "未知工具" } else { &name },
-                            truncate_chars(raw_arguments.trim(), 120)
-                        ));
-                    }
-                    // 命名空间工具：还原成 codex 期望的 `name` + `namespace`
-                    let (item_name, item_namespace) = split_namespace_tool(&name, namespace_tools);
-                    let mut item = json!({
-                        "id": gen_id("fc"),
-                        "type": "function_call",
-                        "status": "completed",
-                        "call_id": call_id,
-                        "name": item_name,
-                        "arguments": arguments
-                    });
-                    if let Some(namespace) = item_namespace {
-                        item["namespace"] = Value::String(namespace);
-                    }
+                    // 回译形态：命名空间工具写 `name` + `namespace`；自由格式工具写
+                    // `custom_tool_call`（`input` 取 JSON 的 input 字段或原始文本）。
+                    let (item_name, item_namespace) = shape.resolve(&name);
+                    let item = if shape.is_custom(&name) {
+                        json!({
+                            "id": gen_id("ctc"),
+                            "type": "custom_tool_call",
+                            "status": "completed",
+                            "call_id": call_id,
+                            "name": item_name,
+                            "input": custom_tool_input(raw_arguments)
+                        })
+                    } else {
+                        let (arguments, repaired) = normalize_arguments(raw_arguments);
+                        if repaired {
+                            return Err(format!(
+                                "上游工具调用参数不可用（{}）：{}",
+                                if name.is_empty() { "未知工具" } else { &name },
+                                truncate_chars(raw_arguments.trim(), 120)
+                            ));
+                        }
+                        let mut item = json!({
+                            "id": gen_id("fc"),
+                            "type": "function_call",
+                            "status": "completed",
+                            "call_id": call_id,
+                            "name": item_name,
+                            "arguments": arguments
+                        });
+                        if let Some(namespace) = item_namespace {
+                            item["namespace"] = Value::String(namespace);
+                        }
+                        item
+                    };
                     output.push(item);
                 }
             }
@@ -2186,9 +2306,9 @@ struct StreamState {
     trace: TraceCall,
     /// `finish_reason` 后等待尾部分片是否超时（仅用于诊断标记）。
     usage_timeout: bool,
-    /// 本次请求里命名空间工具的「扁平名 → （命名空间, 子工具名）」映射：
-    /// 回译模型调用时按它还原成 codex 期望的 `{name, namespace}` 形态。
-    namespace_tools: HashMap<String, (String, String)>,
+    /// 本次请求的工具形态（命名空间映射 + 自由格式工具名单）：回译模型调用时据此还原成
+    /// codex 期望的 `{name, namespace}` 或 `custom_tool_call`。
+    tool_shape: ToolShape,
 }
 
 impl StreamState {
@@ -2207,7 +2327,7 @@ impl StreamState {
             delta_keys: BTreeSet::new(),
             trace: TraceCall::disabled(),
             usage_timeout: false,
-            namespace_tools: HashMap::new(),
+            tool_shape: ToolShape::default(),
         }
     }
 }
@@ -2453,8 +2573,10 @@ fn tool_delta(tool_index: usize, tc: &Value, st: &mut StreamState) -> Vec<String
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        // 命名空间工具：`added` 与 `done` 都写回 codex 期望的 `name` + `namespace`，避免两处不一致
-        let (item_name, item_namespace) = split_namespace_tool(&name, &st.namespace_tools);
+        // 回译形态：命名空间工具写回 `name` + `namespace`；自由格式工具是 `custom_tool_call`
+        // （`added` 与 `done` 两处必须一致，否则 codex 侧 item 对不上）。
+        let (item_name, item_namespace) = st.tool_shape.resolve(&name);
+        let is_custom = st.tool_shape.is_custom(&name);
         st.calls.insert(
             tool_index,
             CallTrack {
@@ -2465,17 +2587,29 @@ fn tool_delta(tool_index: usize, tc: &Value, st: &mut StreamState) -> Vec<String
                 out_index,
             },
         );
-        let mut item = json!({
-            "id": item_id,
-            "type": "function_call",
-            "status": "in_progress",
-            "call_id": call_id,
-            "name": item_name,
-            "arguments": ""
-        });
-        if let Some(namespace) = item_namespace {
-            item["namespace"] = Value::String(namespace);
-        }
+        let item = if is_custom {
+            json!({
+                "id": item_id,
+                "type": "custom_tool_call",
+                "status": "in_progress",
+                "call_id": call_id,
+                "name": item_name,
+                "input": ""
+            })
+        } else {
+            let mut item = json!({
+                "id": item_id,
+                "type": "function_call",
+                "status": "in_progress",
+                "call_id": call_id,
+                "name": item_name,
+                "arguments": ""
+            });
+            if let Some(namespace) = item_namespace {
+                item["namespace"] = Value::String(namespace);
+            }
+            item
+        };
         out.push(sse_event(
             "response.output_item.added",
             &json!({
@@ -2504,10 +2638,20 @@ fn tool_args_delta(tool_index: usize, args: &str, st: &mut StreamState) -> Vec<S
     let mut out = Vec::new();
     if let Some(c) = st.calls.get_mut(&tool_index) {
         c.args_buf.push_str(args);
+        // 自由格式工具：增量事件是 `custom_tool_call_input.delta`
+        let custom = st.tool_shape.is_custom(&c.name);
         out.push(sse_event(
-            "response.function_call_arguments.delta",
+            if custom {
+                "response.custom_tool_call_input.delta"
+            } else {
+                "response.function_call_arguments.delta"
+            },
             &json!({
-                "type": "response.function_call_arguments.delta",
+                "type": if custom {
+                    "response.custom_tool_call_input.delta"
+                } else {
+                    "response.function_call_arguments.delta"
+                },
                 "item_id": c.item_id,
                 "output_index": c.out_index,
                 "delta": args
@@ -2635,7 +2779,9 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     let mut malformed: Option<StreamFailure> = None;
     if st.failure.is_none() {
         for (_, c) in calls.iter() {
-            let Err(reason) = validate_call_arguments(&c.name, &c.args_buf) else {
+            let Err(reason) =
+                validate_call_arguments(&c.name, &c.args_buf, st.tool_shape.is_custom(&c.name))
+            else {
                 continue;
             };
             log_at(
@@ -2672,28 +2818,51 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
 
     if failure.is_none() {
         for (_, c) in calls {
-            // 命名空间工具：chat 侧是扁平名，回译成 codex 期望的 `name` + `namespace`
-            let (item_name, item_namespace) = split_namespace_tool(&c.name, &st.namespace_tools);
-            out.push(sse_event(
-                "response.function_call_arguments.done",
-                &json!({
-                    "type": "response.function_call_arguments.done",
-                    "item_id": c.item_id,
-                    "output_index": c.out_index,
+            // 回译形态：命名空间工具写回 `name` + `namespace`；自由格式工具写 `custom_tool_call`
+            // （`input` 取 JSON 的 input 字段或原始文本）。
+            let (item_name, item_namespace) = st.tool_shape.resolve(&c.name);
+            let item = if st.tool_shape.is_custom(&c.name) {
+                let input = custom_tool_input(&c.args_buf);
+                out.push(sse_event(
+                    "response.custom_tool_call_input.done",
+                    &json!({
+                        "type": "response.custom_tool_call_input.done",
+                        "item_id": c.item_id,
+                        "output_index": c.out_index,
+                        "input": input
+                    }),
+                ));
+                json!({
+                    "id": c.item_id,
+                    "type": "custom_tool_call",
+                    "status": "completed",
+                    "call_id": c.call_id,
+                    "name": item_name,
+                    "input": input
+                })
+            } else {
+                out.push(sse_event(
+                    "response.function_call_arguments.done",
+                    &json!({
+                        "type": "response.function_call_arguments.done",
+                        "item_id": c.item_id,
+                        "output_index": c.out_index,
+                        "arguments": c.args_buf
+                    }),
+                ));
+                let mut item = json!({
+                    "id": c.item_id,
+                    "type": "function_call",
+                    "status": "completed",
+                    "call_id": c.call_id,
+                    "name": item_name,
                     "arguments": c.args_buf
-                }),
-            ));
-            let mut item = json!({
-                "id": c.item_id,
-                "type": "function_call",
-                "status": "completed",
-                "call_id": c.call_id,
-                "name": item_name,
-                "arguments": c.args_buf
-            });
-            if let Some(namespace) = item_namespace {
-                item["namespace"] = Value::String(namespace);
-            }
+                });
+                if let Some(namespace) = item_namespace {
+                    item["namespace"] = Value::String(namespace);
+                }
+                item
+            };
             out.push(sse_event(
                 "response.output_item.done",
                 &json!({
@@ -3120,7 +3289,7 @@ mod tests {
             }],
             "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
         });
-        let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &HashMap::new()).unwrap();
+        let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &ToolShape::default()).unwrap();
         assert_eq!(resp["status"], "completed");
         assert_eq!(resp["model"], "zen/gpt-5-mini");
         assert_eq!(resp["output"][0]["type"], "message");
@@ -3145,7 +3314,7 @@ mod tests {
                 }
             }]
         });
-        let resp = chat_to_responses(&chat, "m", &HashMap::new()).unwrap();
+        let resp = chat_to_responses(&chat, "m", &ToolShape::default()).unwrap();
         assert_eq!(resp["output"].as_array().unwrap().len(), 2);
         assert_eq!(resp["output"][1]["type"], "function_call");
         assert_eq!(resp["output"][1]["call_id"], "call_9");
@@ -3289,17 +3458,17 @@ mod tests {
             .is_some_and(|d| d == "创建定时任务"));
         assert!(chat["tools"][1]["function"]["parameters"]["type"] == "object");
 
-        // ② 反向映射表：扁平名 → （命名空间, 子工具名）
-        let map = namespace_tool_map(&req);
+        // ② 工具形态：扁平名 → （命名空间, 子工具名）
+        let shape = tool_shape(&req);
         assert_eq!(
-            map.get("codexui_add_scheduled_task"),
+            shape.namespaces.get("codexui_add_scheduled_task"),
             Some(&("codexui".to_string(), "add_scheduled_task".to_string()))
         );
-        assert_eq!(map.get("exec_command"), None);
+        assert_eq!(shape.namespaces.get("exec_command"), None);
 
         // ③ 回译（流式）：output_item.added / done 都带 name + namespace
         let mut st = StreamState::new("resp_ns".into(), "m".into());
-        st.namespace_tools = map.clone();
+        st.tool_shape = shape.clone();
         let c1 = json!({
             "choices": [{ "delta": { "tool_calls": [{
                 "index": 0,
@@ -3346,7 +3515,7 @@ mod tests {
                 }]
             } }]
         });
-        let out = chat_to_responses(&chat_resp, "m", &map).unwrap();
+        let out = chat_to_responses(&chat_resp, "m", &shape).unwrap();
         let call = out["output"]
             .as_array()
             .unwrap()
@@ -3413,6 +3582,218 @@ mod tests {
             .map(|t| t["function"]["name"].as_str().unwrap())
             .collect();
         assert_eq!(names, vec!["codexui_get_usage"], "{names:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // 自由格式工具（type:"custom"，如 apply_patch）：单参数声明 + custom_tool_call 回译
+    // -----------------------------------------------------------------------
+
+    const PATCH: &str = "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch\n";
+
+    /// codex 对 freeform 模型的 apply_patch 声明原文（含会误导模型的 FREEFORM 措辞）。
+    fn custom_tool_request() -> Value {
+        json!({
+            "model": "m",
+            "input": "hi",
+            "tools": [
+                {
+                    "type": "custom",
+                    "name": "apply_patch",
+                    "description": "The `apply_patch` tool can be used to edit files. \
+                        This is a FREEFORM tool, so do not wrap the patch in JSON.",
+                    "format": { "type": "grammar", "syntax": "lark", "definition": "start: ..." }
+                }
+            ]
+        })
+    }
+
+    #[test]
+    fn custom_tool_is_exposed_as_single_input_function() {
+        let (chat, _) = responses_to_chat(&custom_tool_request(), true, false).unwrap();
+        let tool = &chat["tools"][0]["function"];
+        assert_eq!(chat["tools"][0]["type"], "function");
+        assert_eq!(tool["name"], "apply_patch");
+        let desc = tool["description"].as_str().unwrap();
+        assert!(
+            !desc.contains("FREEFORM") && !desc.contains("do not wrap"),
+            "描述里不应保留会误导模型的 FREEFORM 提示：{desc}"
+        );
+        assert!(desc.contains("input"), "{desc}");
+        assert_eq!(tool["parameters"]["properties"]["input"]["type"], "string");
+        assert_eq!(tool["parameters"]["required"][0], "input");
+        // grammar 不下发
+        assert!(tool.get("format").is_none());
+
+        let shape = tool_shape(&custom_tool_request());
+        assert!(shape.is_custom("apply_patch"));
+        assert!(!shape.is_custom("exec_command"));
+    }
+
+    /// 自由格式工具：流式回译成 `custom_tool_call` 事件序列，参数允许非 JSON 原文。
+    #[test]
+    fn custom_tool_call_streams_custom_events_with_raw_arguments() {
+        let mut st = StreamState::new("resp_custom".into(), "m".into());
+        st.tool_shape = tool_shape(&custom_tool_request());
+        let c1 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "id": "call_patch",
+                "type": "function",
+                "function": { "name": "apply_patch", "arguments": "" }
+            }] }, "finish_reason": null }]
+        });
+        let c2 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "function": { "arguments": PATCH }
+            }] }, "finish_reason": "tool_calls" }]
+        });
+        let mut lines: Vec<String> = Vec::new();
+        lines.extend(process_chunk(&c1, &mut st));
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
+        let joined = lines.join("\n");
+        assert!(joined.contains("event: response.output_item.added"), "{joined}");
+        assert!(
+            joined.contains(r#""type":"custom_tool_call""#),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("event: response.custom_tool_call_input.delta"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("event: response.custom_tool_call_input.done"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("function_call_arguments"),
+            "自由格式工具不应发 function_call 事件：{joined}"
+        );
+        let done = lines
+            .iter()
+            .find(|l| l.contains("response.custom_tool_call_input.done"))
+            .unwrap();
+        let data = done.split("data:").nth(1).unwrap().trim();
+        let v: Value = serde_json::from_str(data).unwrap();
+        assert_eq!(v["input"], PATCH);
+        // 原始（非 JSON）参数不再判畸形，本轮照常收尾
+        assert!(joined.contains("event: response.completed"), "{joined}");
+        assert!(!joined.contains("event: response.failed"), "{joined}");
+    }
+
+    /// 模型把补丁包进 `{"input": …}` 时也要取出该字段。
+    #[test]
+    fn custom_tool_call_accepts_json_input_wrapper() {
+        let mut st = StreamState::new("resp_custom_json".into(), "m".into());
+        st.tool_shape = tool_shape(&custom_tool_request());
+        let args = json!({ "input": PATCH }).to_string();
+        let c1 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "id": "call_patch",
+                "type": "function",
+                "function": { "name": "apply_patch", "arguments": args }
+            }] }, "finish_reason": "tool_calls" }]
+        });
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(finish_stream(&mut st, &None));
+        let joined = lines.join("\n");
+        let done = lines
+            .iter()
+            .find(|l| l.contains("response.custom_tool_call_input.done"))
+            .unwrap();
+        let v: Value =
+            serde_json::from_str(done.split("data:").nth(1).unwrap().trim()).unwrap();
+        assert_eq!(v["input"], PATCH);
+        assert!(!joined.contains("event: response.failed"), "{joined}");
+    }
+
+    /// 自由格式工具内容为空时仍按畸形处理（避免把空补丁交给 codex）。
+    #[test]
+    fn custom_tool_call_with_empty_arguments_is_malformed() {
+        let mut st = StreamState::new("resp_custom_empty".into(), "m".into());
+        st.tool_shape = tool_shape(&custom_tool_request());
+        let c1 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "id": "call_patch",
+                "type": "function",
+                "function": { "name": "apply_patch", "arguments": "" }
+            }] }, "finish_reason": "tool_calls" }]
+        });
+        let mut lines = process_chunk(&c1, &mut st);
+        lines.extend(finish_stream(&mut st, &None));
+        let joined = lines.join("\n");
+        assert!(joined.contains("event: response.failed"), "{joined}");
+        assert!(joined.contains(CODE_MALFORMED_TOOL_CALL), "{joined}");
+    }
+
+    /// 非流式：自由格式工具同样回译成 `custom_tool_call`。
+    #[test]
+    fn chat_to_responses_emits_custom_tool_call() {
+        let chat = json!({
+            "id": "chatcmpl-2",
+            "choices": [{ "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_patch",
+                    "type": "function",
+                    "function": { "name": "apply_patch", "arguments": PATCH }
+                }]
+            } }]
+        });
+        let out = chat_to_responses(&chat, "m", &tool_shape(&custom_tool_request())).unwrap();
+        let call = out["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "custom_tool_call")
+            .expect("应输出 custom_tool_call");
+        assert_eq!(call["name"], "apply_patch");
+        assert_eq!(call["input"], PATCH);
+        assert_eq!(call["call_id"], "call_patch");
+    }
+
+    /// 历史回放：`custom_tool_call` / `custom_tool_call_output` 不再丢失。
+    #[test]
+    fn custom_tool_history_is_replayed() {
+        let req = json!({
+            "model": "m",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "改个文件" }]
+                },
+                {
+                    "type": "custom_tool_call",
+                    "name": "apply_patch",
+                    "call_id": "call_patch",
+                    "input": PATCH,
+                    "status": "completed"
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_patch",
+                    "output": "Success. Updated the following files:\nA a.txt\n"
+                }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, true, false).unwrap();
+        let call = &chat["messages"][1]["tool_calls"][0];
+        assert_eq!(call["id"], "call_patch");
+        assert_eq!(call["function"]["name"], "apply_patch");
+        let args: Value =
+            serde_json::from_str(call["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["input"], PATCH);
+        assert_eq!(chat["messages"][2]["role"], "tool");
+        assert_eq!(chat["messages"][2]["tool_call_id"], "call_patch");
+        assert!(chat["messages"][2]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Updated the following files"));
     }
 
     #[test]
@@ -3703,7 +4084,7 @@ mod tests {
                 }
             }]
         });
-        let err = chat_to_responses(&chat, "m", &HashMap::new()).unwrap_err();
+        let err = chat_to_responses(&chat, "m", &ToolShape::default()).unwrap_err();
         assert!(err.contains("apply_patch"), "错误信息应含工具名：{err}");
     }
 
@@ -4041,7 +4422,7 @@ mod tests {
                 "prompt_tokens_details": { "cached_tokens": 4 }
             }
         });
-        let resp = chat_to_responses(&chat, "m", &HashMap::new()).unwrap();
+        let resp = chat_to_responses(&chat, "m", &ToolShape::default()).unwrap();
         assert_eq!(resp["usage"]["input_tokens_details"]["cached_tokens"], 4);
         assert_eq!(resp["usage"]["input_tokens"], 9);
     }
