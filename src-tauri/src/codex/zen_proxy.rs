@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use tokio::task::AbortHandle;
 
 use crate::codex::session_log::SessionLog;
+use crate::codex::zen_trace::{TraceCall, TraceSink};
 
 /// Zen 本地代理默认端口（可在设置页修改）。
 pub(crate) const DEFAULT_ZEN_PROXY_PORT: u16 = 18080;
@@ -125,7 +126,12 @@ fn responses_path(base_url: &str) -> String {
 }
 
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
-pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyHandle, String> {
+pub(crate) async fn start(
+    port: u16,
+    base_url: String,
+    log: ZenLog,
+    trace: TraceSink,
+) -> Result<ZenProxyHandle, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut attempt = 0;
     let listener = loop {
@@ -148,6 +154,7 @@ pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyH
             session: random_id("ses"),
             base_url: base_url.clone(),
             log,
+            trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         });
     let task = tokio::spawn(async move {
@@ -161,12 +168,13 @@ pub async fn start(port: u16, base_url: String, log: ZenLog) -> Result<ZenProxyH
 }
 
 /// 由 `CodexServer` 调用：按设置启停代理并返回当前状态。
-pub async fn apply(
+pub(crate) async fn apply(
     handle: &mut Option<ZenProxyHandle>,
     enabled: bool,
     port: u16,
     base_url: String,
     log: ZenLog,
+    trace: TraceSink,
 ) -> ZenProxyStatus {
     let base_url = normalize_base_url(&base_url);
     // 端口与上游地址都没变（含 `https://a/` 与 `https://a` 这类等价写法）才复用现有实例。
@@ -180,7 +188,7 @@ pub async fn apply(
         }
     }
     if need_start {
-        match start(port, base_url, log).await {
+        match start(port, base_url, log, trace).await {
             Ok(h) => {
                 *handle = Some(h);
                 ZenProxyStatus {
@@ -217,6 +225,8 @@ struct ProxyState {
     session: String,
     base_url: String,
     log: ZenLog,
+    /// 内容诊断日志（常开）：每次上游尝试的请求体/响应原文/收尾事件。
+    trace: TraceSink,
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
@@ -259,8 +269,13 @@ fn http_client() -> &'static reqwest::Client {
 
 /// `zen_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
 /// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
-/// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格。
-fn request_log_fields(req: &Value, want_stream: bool) -> Vec<(&'static str, String)> {
+/// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格；
+/// `call_id` 与内容日志（`logs/zen/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
+fn request_log_fields(
+    req: &Value,
+    want_stream: bool,
+    call_id: &str,
+) -> Vec<(&'static str, String)> {
     let model = req
         .get("model")
         .and_then(Value::as_str)
@@ -294,6 +309,7 @@ fn request_log_fields(req: &Value, want_stream: bool) -> Vec<(&'static str, Stri
         .unwrap_or("-")
         .to_string();
     vec![
+        ("call_id", call_id.to_string()),
         ("model", model),
         ("stream", want_stream.to_string()),
         ("input_msg_count", input_msg_count.to_string()),
@@ -356,12 +372,15 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
         .get("stream")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let fields = request_log_fields(&req, want_stream);
+    // 本次入站请求的稳定标识：贯穿内容日志文件名与 session 日志行。
+    let call_id = random_id("req");
+    let fields = request_log_fields(&req, want_stream, &call_id);
     let kv: Vec<(&str, String)> = fields.iter().map(|(k, v)| (*k, v.clone())).collect();
     log_at(&state.log, "info", "zen_proxy.request", &kv);
 
     let started = Instant::now();
     let base_url = state.base_url.clone();
+    let trace = state.trace.clone();
     match forward(
         &req,
         &headers,
@@ -371,6 +390,8 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
         &state.session,
         &state.requires_reasoning_rc,
         &state.log,
+        &trace,
+        &call_id,
     )
     .await
     {
@@ -457,15 +478,18 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                 );
             }
             match forwarded.payload {
-                ForwardPayload::Text(text) => proxy_error_text(status, &text, &state.log),
+                ForwardPayload::Text(text) => {
+                    proxy_error_text(status, &text, &state.log, forwarded.trace)
+                }
                 ForwardPayload::Live(resp) => {
                     if !status.is_success() {
-                        return proxy_error_response(status, resp, &state.log).await;
+                        return proxy_error_response(status, resp, &state.log, forwarded.trace)
+                            .await;
                     }
                     if want_stream {
-                        proxy_stream_response(req, resp, &state.log).await
+                        proxy_stream_response(req, resp, &state.log, forwarded.trace).await
                     } else {
-                        proxy_json_response(req, resp, &state.log).await
+                        proxy_json_response(req, resp, &state.log, forwarded.trace).await
                     }
                 }
             }
@@ -688,6 +712,8 @@ struct Forwarded {
     reasoning_rc: bool,
     /// 本次请求是否改变了回传开关（改变时记一条 warn 日志）。
     reasoning_rc_change: Option<ReasoningRcChange>,
+    /// 本次尝试的内容日志句柄（请求体已落盘，响应侧继续写）。
+    trace: TraceCall,
 }
 
 /// 可选请求字段：取到值才加入请求体；上游指名拒绝时按需摘除后重试一次。
@@ -781,10 +807,78 @@ fn mentions_field(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| lower.contains(needle))
 }
 
+/// 内容日志的请求侧元信息：`Authorization` 只记 presence，任何情况下不落盘 API Key。
+#[allow(clippy::too_many_arguments)]
+fn note_request_meta(
+    call: &mut TraceCall,
+    url: &str,
+    request_id: &str,
+    headers: &HeaderMap,
+    fallback_session: &str,
+    body: &Value,
+    dropped: &[&'static str],
+    reasoning_rc: bool,
+) {
+    call.note("upstream_url", url.to_string());
+    call.note(
+        "authorization",
+        if headers.contains_key(header::AUTHORIZATION) {
+            "present"
+        } else {
+            "absent"
+        },
+    );
+    call.note(
+        "x_opencode_session",
+        opencode_session(headers, fallback_session),
+    );
+    call.note("x_opencode_request", request_id.to_string());
+    call.note(
+        "model",
+        body.get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string(),
+    );
+    call.note(
+        "stream",
+        body.get("stream")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .to_string(),
+    );
+    call.note(
+        "message_count",
+        body.get("messages")
+            .and_then(Value::as_array)
+            .map(|m| m.len())
+            .unwrap_or(0)
+            .to_string(),
+    );
+    call.note(
+        "tool_count",
+        body.get("tools")
+            .and_then(Value::as_array)
+            .map(|t| t.len())
+            .unwrap_or(0)
+            .to_string(),
+    );
+    call.note(
+        "dropped_fields",
+        if dropped.is_empty() {
+            "-".to_string()
+        } else {
+            dropped.join(",")
+        },
+    );
+    call.note("reasoning_rc", if reasoning_rc { "on" } else { "off" });
+}
+
 /// 翻译请求并转发到 Zen（含历史净化与可选字段降级重试）。
 /// `base_url` 由配置传入（测试时可指向本地 mock）。
 /// `fallback_session` 仅在客户端未提供 `session-id` 时用作 `x-opencode-session`。
 /// `requires_reasoning_rc` 是本代理实例的"上游是否要求历史回传 `reasoning_content`"开关。
+/// `call_id` 用于把本次入站请求的多次尝试（内容日志）关联到同一条 session 日志。
 async fn forward(
     req: &Value,
     headers: &HeaderMap,
@@ -794,6 +888,8 @@ async fn forward(
     fallback_session: &str,
     requires_reasoning_rc: &AtomicBool,
     log: &ZenLog,
+    trace: &TraceSink,
+    call_id: &str,
 ) -> Result<Forwarded, (StatusCode, String)> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let optional = optional_fields(req, want_stream);
@@ -803,7 +899,10 @@ async fn forward(
     // 一次请求内最多切换一次 reasoning_content 回传方向，避免"开了又关"地来回重试。
     let mut reasoning_toggled = false;
     let mut attempts = 0usize;
+    // 上游尝试序号（从 1 开始，含重试），用于内容日志文件名与摘要。
+    let mut attempt_no = 0usize;
     loop {
+        attempt_no += 1;
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
         for field in optional.iter() {
@@ -812,11 +911,33 @@ async fn forward(
             }
             body[field.key] = field.value.clone();
         }
-        let resp = build_chat_request(client, &url, headers, fallback_session, &body)
+        // 内容诊断日志：先落盘本次尝试实际发出的请求体与关键元信息（不含 API Key）
+        let mut call = trace.begin(call_id, attempt_no);
+        let request_id = random_id("msg");
+        note_request_meta(
+            &mut call,
+            &url,
+            &request_id,
+            headers,
+            fallback_session,
+            &body,
+            &dropped,
+            reasoning_rc,
+        );
+        call.write_request_json(&body);
+        let resp = build_chat_request(
+            client,
+            &url,
+            headers,
+            fallback_session,
+            &request_id,
+            &body,
+        )
             .send()
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
         let status = resp.status();
+        call.note("upstream_status", status.as_u16().to_string());
         // 4xx 且还有重试额度时按需修复后重发（最多 FORWARD_MAX_ATTEMPTS 次请求）：
         // ① 可选字段被指名拒绝 → 摘掉重试；② 思考模式要求回传 reasoning_content（或反向）→ 切换后重试；
         //  两者都没命中（如纯参数校验失败）则直接返回上游错误，避免反复发请求。
@@ -849,6 +970,21 @@ async fn forward(
                 })
                 .map(|field| field.key)
                 .collect();
+            let toggle_reasoning = hit.is_empty()
+                && !reasoning_toggled
+                && mentions_field(&text, &["reasoning_content"]);
+            if !hit.is_empty() || toggle_reasoning {
+                // 内容诊断日志：只对**确实会重试**的尝试落错误原文与重试标记
+                // （不可重试时错误体由 proxy_error_text 落盘，避免同一份写两次）
+                call.note("retried", "true");
+                call.write_response_text("response.txt", &text);
+                let flags = suspicious_flags(&SuspiciousFacts {
+                    upstream_http_error: true,
+                    ..SuspiciousFacts::default()
+                });
+                call.note("suspicious", flags_field(&flags));
+                call.finish();
+            }
             if !hit.is_empty() {
                 dropped.extend(hit);
                 continue;
@@ -856,7 +992,7 @@ async fn forward(
             // DeepSeek 思考模式：本轮 assistant 消息（带 tool_calls 的与带 content 的）都要回传
             // reasoning_content。上游既然明确要求，就打开开关（反向：本已回传却被拒绝，则关掉）
             // 并重试一次——一次请求最多翻转一次；400 不产生副作用，重试安全。
-            if !reasoning_toggled && mentions_field(&text, &["reasoning_content"]) {
+            if toggle_reasoning {
                 reasoning_toggled = true;
                 let enabled = !reasoning_rc;
                 reasoning_rc = enabled;
@@ -874,6 +1010,7 @@ async fn forward(
                 dropped_fields: Vec::new(),
                 reasoning_rc,
                 reasoning_rc_change,
+                trace: call,
             });
         }
         return Ok(Forwarded {
@@ -883,6 +1020,7 @@ async fn forward(
             dropped_fields: dropped,
             reasoning_rc,
             reasoning_rc_change,
+            trace: call,
         });
     }
 }
@@ -893,6 +1031,7 @@ fn build_chat_request(
     url: &str,
     headers: &HeaderMap,
     fallback_session: &str,
+    request_id: &str,
     body: &Value,
 ) -> reqwest::RequestBuilder {
     let mut rq = client
@@ -900,7 +1039,7 @@ fn build_chat_request(
         .json(body)
         .header("x-opencode-client", OPENCODE_CLIENT)
         .header("x-opencode-project", OPENCODE_PROJECT)
-        .header("x-opencode-request", random_id("msg"))
+        .header("x-opencode-request", request_id)
         .header(
             "x-opencode-session",
             opencode_session(headers, fallback_session),
@@ -914,16 +1053,138 @@ fn build_chat_request(
 }
 
 /// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
+/// 可疑结束判定的输入事实（纯数据结构，便于单测）。
+#[derive(Default)]
+struct SuspiciousFacts<'a> {
+    finish_reason: Option<&'a str>,
+    text_chars: usize,
+    reasoning_chars: usize,
+    call_count: usize,
+    failed: bool,
+    usage_present: bool,
+    usage_timeout: bool,
+    upstream_http_error: bool,
+}
+
+/// 启发式「可疑结束」标记（纯函数）：命中多项时按固定顺序返回，未命中返回空。
+/// 目的只是让「回合提前结束（任务未完成）」这类偶发问题能一眼筛出来，
+/// 判定本身不改变任何行为。
+fn suspicious_flags(facts: &SuspiciousFacts<'_>) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    if facts.upstream_http_error {
+        out.push("upstream_http_error");
+    }
+    if facts.failed {
+        out.push("failed");
+    }
+    if facts.finish_reason == Some("length") {
+        out.push("truncated");
+    }
+    if facts.finish_reason.is_none_or(|reason| reason.is_empty()) {
+        out.push("finish_reason_missing");
+    }
+    if facts.finish_reason == Some("stop") && facts.call_count == 0 {
+        if facts.text_chars == 0 && facts.reasoning_chars == 0 {
+            out.push("stop_without_output");
+        } else {
+            out.push("stop_without_tool_call");
+        }
+    }
+    if !facts.usage_present {
+        out.push("usage_missing");
+    }
+    if facts.usage_timeout {
+        out.push("usage_timeout");
+    }
+    out
+}
+
+/// 标记列表 → 日志字段值（无标记记 `-`）。
+fn flags_field(flags: &[&'static str]) -> String {
+    if flags.is_empty() {
+        "-".to_string()
+    } else {
+        flags.join(",")
+    }
+}
+
+/// 汇总非流式 chat 响应的关键事实，并写入可疑结束标记。
+fn note_chat_result(call: &mut TraceCall, chat: &Value) {
+    let choice = chat
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first());
+    let finish_reason = choice
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let message = choice.and_then(|c| c.get("message"));
+    let text_chars = message
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_str)
+        .map(|t| t.chars().count())
+        .unwrap_or(0);
+    let reasoning_chars = ["reasoning_content", "reasoning"]
+        .iter()
+        .find_map(|key| {
+            message
+                .and_then(|m| m.get(*key))
+                .and_then(Value::as_str)
+                .map(|t| t.chars().count())
+        })
+        .unwrap_or(0);
+    let call_count = message
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(Value::as_array)
+        .map(|calls| calls.len())
+        .unwrap_or(0);
+    let usage = chat.get("usage").filter(|v| !v.is_null());
+    call.note("finish_reason", finish_reason.clone().unwrap_or_default());
+    call.note("text_chars", text_chars.to_string());
+    call.note("reasoning_chars", reasoning_chars.to_string());
+    call.note("call_count", call_count.to_string());
+    call.note(
+        "usage",
+        if usage.is_some() { "present" } else { "none" },
+    );
+    if let Some(usage) = usage {
+        call.note("usage_raw", truncate_chars(&usage.to_string(), 300));
+    }
+    let flags = suspicious_flags(&SuspiciousFacts {
+        finish_reason: finish_reason.as_deref(),
+        text_chars,
+        reasoning_chars,
+        call_count,
+        failed: false,
+        usage_present: usage.is_some(),
+        usage_timeout: false,
+        upstream_http_error: false,
+    });
+    call.note("suspicious", flags_field(&flags));
+}
+
+/// 非流式：把 Zen 的 chat.completion JSON 翻译为 responses 对象。
 async fn proxy_json_response(
     req: Value,
     resp: reqwest::Response,
     log: &Option<Arc<SessionLog>>,
+    mut call: TraceCall,
 ) -> Response {
     let status = resp.status();
     let text = match resp.text().await {
         Ok(t) => t,
-        Err(e) => return error_json(StatusCode::BAD_GATEWAY, format!("读取上游响应失败：{e}")),
+        Err(e) => {
+            call.note("read_error", e.to_string());
+            call.note("suspicious", "upstream_read_error");
+            call.finish();
+            return error_json(
+                StatusCode::BAD_GATEWAY,
+                format!("读取上游响应失败：{e}"),
+            );
+        }
     };
+    // 内容诊断日志：上游整份响应原文
+    call.write_response_text("response.json", &text);
     let Ok(chat) = serde_json::from_str::<Value>(&text) else {
         log_at(
             log,
@@ -935,6 +1196,8 @@ async fn proxy_json_response(
                     + &text.chars().take(200).collect::<String>(),
             )],
         );
+        call.note("suspicious", "response_parse_error");
+        call.finish();
         return error_json(
             StatusCode::BAD_GATEWAY,
             "上游响应不是合法 JSON：".to_string() + &text.chars().take(200).collect::<String>(),
@@ -954,6 +1217,9 @@ async fn proxy_json_response(
                 "zen_proxy.malformed_tool_call",
                 &[("reason", e.clone())],
             );
+            call.note("suspicious", "malformed_tool_call");
+            call.note("failure_detail", e.clone());
+            call.finish();
             return error_json(StatusCode::BAD_GATEWAY, e);
         }
     };
@@ -975,6 +1241,9 @@ async fn proxy_json_response(
             ("event_bytes", body.len().to_string()),
         ],
     );
+    note_chat_result(&mut call, &chat);
+    call.note("translated_response", body.clone());
+    call.finish();
     Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, "application/json")
@@ -987,6 +1256,7 @@ async fn proxy_stream_response(
     req: Value,
     resp: reqwest::Response,
     log: &Option<Arc<SessionLog>>,
+    call: TraceCall,
 ) -> Response {
     let model = req
         .get("model")
@@ -1007,6 +1277,9 @@ async fn proxy_stream_response(
         }
     }));
     let st = StreamState::new(response_id, model);
+    // 内容诊断日志句柄随流状态走：收尾与中断（Drop）时都能落盘
+    let mut st = st;
+    st.trace = call;
     let byte_stream = resp.bytes_stream();
     let stream_log = log.clone();
     let events = stream::unfold(
@@ -1045,6 +1318,7 @@ async fn proxy_stream_response(
                                     "finish_reason 后未再收到分片，按现状收尾".to_string(),
                                 )],
                             );
+                            st.usage_timeout = true;
                             return Some((
                                 finish_stream(&mut st, &log),
                                 (bytes, buf, st, true, log, None),
@@ -1062,6 +1336,8 @@ async fn proxy_stream_response(
                             let line: Vec<u8> = buf.drain(..=pos).collect();
                             let line = String::from_utf8_lossy(&line);
                             let line = line.trim_end();
+                            // 内容诊断日志：上游分行原样落盘（含非 data 行）
+                            st.trace.write_response_line(line);
                             if line.is_empty() || !line.starts_with("data:") {
                                 continue;
                             }
@@ -1136,13 +1412,19 @@ async fn proxy_error_response(
     status: StatusCode,
     resp: reqwest::Response,
     log: &Option<Arc<SessionLog>>,
+    call: TraceCall,
 ) -> Response {
     let text = resp.text().await.unwrap_or_default();
-    proxy_error_text(status, &text, log)
+    proxy_error_text(status, &text, log, call)
 }
 
 /// 上游非 2xx 且错误体已读出：透传状态码与错误体。
-fn proxy_error_text(status: StatusCode, text: &str, log: &Option<Arc<SessionLog>>) -> Response {
+fn proxy_error_text(
+    status: StatusCode,
+    text: &str,
+    log: &Option<Arc<SessionLog>>,
+    mut call: TraceCall,
+) -> Response {
     log_at(
         log,
         "warn",
@@ -1152,6 +1434,15 @@ fn proxy_error_text(status: StatusCode, text: &str, log: &Option<Arc<SessionLog>
             ("detail", text.chars().take(200).collect::<String>()),
         ],
     );
+    // 内容诊断日志：非 2xx 原文全文 + 可疑标记
+    call.note("upstream_status", status.as_u16().to_string());
+    call.write_response_text("response.txt", text);
+    let flags = suspicious_flags(&SuspiciousFacts {
+        upstream_http_error: !status.is_success(),
+        ..SuspiciousFacts::default()
+    });
+    call.note("suspicious", flags_field(&flags));
+    call.finish();
     let body = serde_json::from_str::<Value>(text).unwrap_or_else(|_| {
         json!({ "error": { "message": text.chars().take(400).collect::<String>(), "type": "upstream_error" } })
     });
@@ -1797,6 +2088,10 @@ struct StreamState {
     usage: Option<Value>,
     /// 本次流里出现过的 delta 顶层键（去重、有上限），仅用于诊断。
     delta_keys: BTreeSet<String>,
+    /// 内容诊断日志句柄（请求体已在转发前落盘，这里继续写上游响应与摘要）。
+    trace: TraceCall,
+    /// `finish_reason` 后等待尾部分片是否超时（仅用于诊断标记）。
+    usage_timeout: bool,
 }
 
 impl StreamState {
@@ -1813,6 +2108,8 @@ impl StreamState {
             finish_reason: None,
             usage: None,
             delta_keys: BTreeSet::new(),
+            trace: TraceCall::disabled(),
+            usage_timeout: false,
         }
     }
 }
@@ -2298,9 +2595,10 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         }
     }
 
-    if let Some(f) = failure {
+    // 本次发回 codex 的收尾事件（同时写入内容日志的 summary）
+    let terminal = if let Some(f) = failure {
         // codex 的 SSE 解析器认识 response.failed，会以明确的失败结束本回合
-        out.push(sse_event(
+        sse_event(
             "response.failed",
             &json!({
                 "type": "response.failed",
@@ -2314,7 +2612,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                     "error": { "code": f.code, "message": f.message }
                 }
             }),
-        ));
+        )
     } else if truncated {
         let mut response = json!({
             "id": st.response_id,
@@ -2329,10 +2627,10 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         if let Some(usage) = st.usage.as_ref() {
             response["usage"] = usage_to_responses(Some(usage));
         }
-        out.push(sse_event(
+        sse_event(
             "response.incomplete",
             &json!({ "type": "response.incomplete", "response": response }),
-        ));
+        )
     } else {
         let mut response = json!({
             "id": st.response_id,
@@ -2346,11 +2644,12 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         if let Some(usage) = st.usage.as_ref() {
             response["usage"] = usage_to_responses(Some(usage));
         }
-        out.push(sse_event(
+        sse_event(
             "response.completed",
             &json!({ "type": "response.completed", "response": response }),
-        ));
-    }
+        )
+    };
+    out.push(terminal.clone());
 
     if let Some(usage) = st.usage.as_ref() {
         log_at(
@@ -2360,6 +2659,53 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
             &[("detail", truncate_chars(&usage.to_string(), 300))],
         );
     }
+
+    // 内容诊断日志：收尾事实 + 发回 codex 的收尾事件原文 + 可疑结束标记
+    let delta_keys = st
+        .delta_keys
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(",");
+    let flags = suspicious_flags(&SuspiciousFacts {
+        finish_reason: st.finish_reason.as_deref(),
+        text_chars,
+        reasoning_chars,
+        call_count,
+        failed,
+        usage_present: st.usage.is_some(),
+        usage_timeout: st.usage_timeout,
+        upstream_http_error: false,
+    });
+    let suspicious = flags_field(&flags);
+    let call = &mut st.trace;
+    call.note(
+        "finish_reason",
+        st.finish_reason.clone().unwrap_or_default(),
+    );
+    call.note("reasoning_chars", reasoning_chars.to_string());
+    call.note("text_chars", text_chars.to_string());
+    call.note("call_count", call_count.to_string());
+    call.note("failed", failed.to_string());
+    if let Some(f) = st.failure.as_ref() {
+        call.note("failure_code", f.code.clone());
+        call.note("failure_detail", f.detail.clone());
+    }
+    if let Some(usage) = st.usage.as_ref() {
+        call.note("usage_raw", truncate_chars(&usage.to_string(), 300));
+    }
+    call.note(
+        "usage",
+        if st.usage.is_some() {
+            "present"
+        } else {
+            "none"
+        },
+    );
+    call.note("delta_keys", delta_keys.clone());
+    call.note("suspicious", suspicious.clone());
+    call.note("translated_terminal_event", terminal.trim().to_string());
+    call.finish();
 
     log_at(
         log,
@@ -2380,12 +2726,9 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
             ),
             (
                 "delta_keys",
-                st.delta_keys
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(","),
+                delta_keys,
             ),
+            ("suspicious", suspicious),
         ],
     );
     out
@@ -3120,6 +3463,7 @@ mod tests {
                 "reasoning": { "effort": "high", "summary": "auto" }
             }),
             true,
+            "req_test",
         );
         let value_of = |key: &str| {
             fields
@@ -3134,9 +3478,10 @@ mod tests {
         assert_eq!(value_of("tool_count"), Some("0".to_string()));
         assert_eq!(value_of("instructions_chars"), Some("3".to_string()));
         assert!(value_of("input_chars").is_some());
+        assert_eq!(value_of("call_id"), Some("req_test".to_string()));
 
         // 没请求推理时记 `-`
-        let fields = request_log_fields(&json!({ "model": "m" }), false);
+        let fields = request_log_fields(&json!({ "model": "m" }), false, "req_test");
         assert_eq!(
             fields
                 .iter()
@@ -3734,7 +4079,7 @@ mod integration_tests {
             header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer public"),
         );
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None)
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None, &TraceSink::disabled(), "req_test")
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3764,7 +4109,7 @@ mod integration_tests {
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None)
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None, &TraceSink::disabled(), "req_test")
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3786,7 +4131,7 @@ mod integration_tests {
         let base_url = spawn_mock_zen(rec.clone()).await;
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let headers = HeaderMap::new();
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None)
+        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None, &TraceSink::disabled(), "req_test")
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -3805,6 +4150,7 @@ mod integration_tests {
             session: "ses_fixed123".into(),
             base_url,
             log: None,
+            trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         };
         let mut headers = HeaderMap::new();
@@ -3864,6 +4210,7 @@ mod integration_tests {
             session: "ses_fixed123".into(),
             base_url,
             log: None,
+            trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         };
         let mut headers = HeaderMap::new();
@@ -3952,10 +4299,15 @@ mod integration_tests {
     }
 
     fn proxy_state(base_url: String, log: ZenLog) -> ProxyState {
+        proxy_state_traced(base_url, log, TraceSink::disabled())
+    }
+
+    fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyState {
         ProxyState {
             session: "ses_fixed123".into(),
             base_url,
             log,
+            trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -4081,6 +4433,7 @@ mod integration_tests {
             port,
             format!("{upstream}/zen/v1"),
             None,
+            TraceSink::disabled(),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -4102,7 +4455,15 @@ mod integration_tests {
             "{rows:?}"
         );
 
-        let status = apply(&mut handle, false, port, upstream, None).await;
+        let status = apply(
+            &mut handle,
+            false,
+            port,
+            upstream,
+            None,
+            TraceSink::disabled(),
+        )
+        .await;
         assert!(!status.running);
     }
 
@@ -4138,7 +4499,15 @@ mod integration_tests {
         let port = free_loopback_port();
         let mut handle = None;
 
-        let status = apply(&mut handle, true, port, upstream_a.clone(), None).await;
+        let status = apply(
+            &mut handle,
+            true,
+            port,
+            upstream_a.clone(),
+            None,
+            TraceSink::disabled(),
+        )
+        .await;
         assert!(status.running, "{:?}", status.error);
         let probe = |port: u16| async move {
             // 每次用新 client：代理重启会关闭旧连接，复用连接池会读到半关闭的连接。
@@ -4155,7 +4524,15 @@ mod integration_tests {
         rec_a.lock().await.clear();
 
         // 端口与上游都没变（含只差尾斜杠的等价写法）→ 复用实例，会话标识不变。
-        let status = apply(&mut handle, true, port, upstream_a.clone(), None).await;
+        let status = apply(
+            &mut handle,
+            true,
+            port,
+            upstream_a.clone(),
+            None,
+            TraceSink::disabled(),
+        )
+        .await;
         assert!(status.running, "{:?}", status.error);
         let status = apply(
             &mut handle,
@@ -4163,6 +4540,7 @@ mod integration_tests {
             port,
             format!("{upstream_a}/"),
             None,
+            TraceSink::disabled(),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -4175,7 +4553,15 @@ mod integration_tests {
 
         // 换上游地址 → 立即重启：B 收到请求、A 不再收到。
         let before_a = rec_a.lock().await.len();
-        let status = apply(&mut handle, true, port, upstream_b.clone(), None).await;
+        let status = apply(
+            &mut handle,
+            true,
+            port,
+            upstream_b.clone(),
+            None,
+            TraceSink::disabled(),
+        )
+        .await;
         assert!(status.running, "{:?}", status.error);
         probe(port).await;
         let second = last_row(&rec_b).await.expect("上游 B 应已收到请求");
@@ -4184,13 +4570,29 @@ mod integration_tests {
 
         // 端口变化 → 也重启。
         let other_port = free_loopback_port();
-        let status = apply(&mut handle, true, other_port, upstream_b, None).await;
+        let status = apply(
+            &mut handle,
+            true,
+            other_port,
+            upstream_b,
+            None,
+            TraceSink::disabled(),
+        )
+        .await;
         assert!(status.running, "{:?}", status.error);
         assert_eq!(status.port, other_port);
         probe(other_port).await;
 
         // 关闭 → 停止。
-        let status = apply(&mut handle, false, other_port, upstream_a, None).await;
+        let status = apply(
+            &mut handle,
+            false,
+            other_port,
+            upstream_a,
+            None,
+            TraceSink::disabled(),
+        )
+        .await;
         assert!(!status.running);
         assert!(handle.is_none());
     }
@@ -4269,6 +4671,7 @@ mod integration_tests {
             session: "ses_fixed123".into(),
             base_url: upstream,
             log,
+            trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         };
         let probe = |state: ProxyState| async move {
@@ -4425,6 +4828,8 @@ mod integration_tests {
             "ses_fixed123",
             &AtomicBool::new(false),
             &None,
+            &TraceSink::disabled(),
+            "req_test",
         )
         .await
         .expect("forward 应成功");
@@ -4453,6 +4858,8 @@ mod integration_tests {
             "ses_fixed123",
             &AtomicBool::new(false),
             &None,
+            &TraceSink::disabled(),
+            "req_test",
         )
         .await
         .expect("forward 应成功");
@@ -4491,6 +4898,8 @@ mod integration_tests {
             "ses_fixed123",
             &AtomicBool::new(false),
             &None,
+            &TraceSink::disabled(),
+            "req_test",
         )
         .await
         .expect("forward 应成功");
@@ -4521,6 +4930,8 @@ mod integration_tests {
             "ses_fixed123",
             &AtomicBool::new(false),
             &None,
+            &TraceSink::disabled(),
+            "req_test",
         )
         .await
         .expect("forward 应成功");
@@ -4580,7 +4991,7 @@ mod integration_tests {
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
         let started = std::time::Instant::now();
-        let out = proxy_stream_response(req, resp, &log).await;
+        let out = proxy_stream_response(req, resp, &log, TraceCall::disabled()).await;
         let body = tokio::time::timeout(
             std::time::Duration::from_secs(8),
             axum::body::to_bytes(out.into_body(), usize::MAX),
@@ -4610,5 +5021,332 @@ mod integration_tests {
             "应记录宽限超时：{joined}"
         );
         assert!(joined.contains("usage=none"), "{joined}");
+    }
+
+    // -----------------------------------------------------------------------
+    // 内容诊断日志（logs/zen）：请求体 + 上游响应原文 + 收尾事件 + 可疑标记
+    // -----------------------------------------------------------------------
+
+    /// trace 目录里的全部文件（按文件名排序）。
+    fn trace_files(dir: &std::path::Path) -> Vec<(String, String)> {
+        let mut files: Vec<(String, String)> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| {
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    std::fs::read_to_string(entry.path()).unwrap_or_default(),
+                )
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    fn trace_file_with(dir: &std::path::Path, suffix: &str) -> (String, String) {
+        trace_files(dir)
+            .into_iter()
+            .find(|(name, _)| name.ends_with(suffix))
+            .unwrap_or_else(|| panic!("应存在 {suffix} 文件"))
+    }
+
+    fn traced_sink(dir: &std::path::Path) -> TraceSink {
+        TraceSink::new(Arc::new(crate::codex::zen_trace::ZenTrace::new(
+            dir.to_path_buf(),
+        )))
+    }
+
+    /// 起一个返回固定 SSE 原文的 mock Zen（POST /chat/completions）。
+    async fn spawn_mock_zen_sse(chunks: Vec<&'static str>) -> String {
+        let app = Router::new().route(
+            "/chat/completions",
+            axum::routing::post(move |Json(_body): Json<Value>| {
+                let chunks = chunks.clone();
+                async move {
+                    let stream = futures_util::stream::iter(
+                        chunks
+                            .into_iter()
+                            .map(|chunk| {
+                                Ok::<_, std::io::Error>(axum::body::Bytes::from(chunk.to_string()))
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                    axum::response::Response::builder()
+                        .header(header::CONTENT_TYPE, "text/event-stream")
+                        .body(Body::from_stream(stream))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        format!("http://{addr}")
+    }
+
+    #[test]
+    fn suspicious_flags_cover_each_branch() {
+        let flags = |facts: SuspiciousFacts<'_>| flags_field(&suspicious_flags(&facts));
+        // 正常收尾：带工具调用 + 有 usage → 无标记
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("tool_calls"),
+                call_count: 2,
+                usage_present: true,
+                ..Default::default()
+            }),
+            "-"
+        );
+        // 模型什么都没输出就 stop（最符合「任务未完成就结束」）
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("stop"),
+                usage_present: true,
+                ..Default::default()
+            }),
+            "stop_without_output"
+        );
+        // 只输出文本、没有工具调用
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("stop"),
+                text_chars: 12,
+                usage_present: true,
+                ..Default::default()
+            }),
+            "stop_without_tool_call"
+        );
+        // 上游截断
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("length"),
+                usage_present: true,
+                ..Default::default()
+            }),
+            "truncated"
+        );
+        // 失败收尾（无 finish_reason）
+        assert_eq!(
+            flags(SuspiciousFacts {
+                failed: true,
+                usage_present: true,
+                ..Default::default()
+            }),
+            "failed,finish_reason_missing"
+        );
+        // 缺 usage / 宽限超时 / 上游非 2xx
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("tool_calls"),
+                call_count: 1,
+                ..Default::default()
+            }),
+            "usage_missing"
+        );
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("tool_calls"),
+                call_count: 1,
+                usage_present: true,
+                usage_timeout: true,
+                ..Default::default()
+            }),
+            "usage_timeout"
+        );
+        assert_eq!(
+            flags(SuspiciousFacts {
+                upstream_http_error: true,
+                usage_present: true,
+                ..Default::default()
+            }),
+            "upstream_http_error,finish_reason_missing"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trace_records_stream_request_response_and_summary() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let upstream = spawn_mock_zen_sse(vec![
+            "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+            "data: [DONE]\n\n",
+        ])
+        .await;
+        let state = proxy_state_traced(upstream, None, traced_sink(dir.path()));
+        let resp = handle_any(
+            State(state),
+            Method::POST,
+            OriginalUri("/responses".parse().unwrap()),
+            HeaderMap::new(),
+            Body::from(
+                json!({
+                    "model": "mimo-v2.5-flash",
+                    "stream": true,
+                    "input": [{
+                        "type": "message",
+                        "role": "user",
+                        "content": [{ "type": "input_text", "text": "hi" }]
+                    }]
+                })
+                .to_string(),
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let text = body_text(resp).await;
+        assert!(text.contains("event: response.completed"), "{text}");
+
+        let (_, request) = trace_file_with(dir.path(), ".request.json");
+        assert!(
+            request.contains("\"model\": \"mimo-v2.5-flash\""),
+            "{request}"
+        );
+        assert!(request.contains("\"role\": \"user\""), "{request}");
+        assert!(request.contains("\"content\": \"hi\""), "{request}");
+        assert!(request.contains("\"include_usage\": true"), "{request}");
+
+        let (_, response) = trace_file_with(dir.path(), ".response.sse");
+        assert!(
+            response.contains("data: [DONE]"),
+            "上游行应原样落盘：{response}"
+        );
+        assert!(response.contains("\"finish_reason\":\"stop\""), "{response}");
+
+        let (_, summary) = trace_file_with(dir.path(), ".summary.txt");
+        assert!(summary.contains("call_id=req_"), "{summary}");
+        assert!(summary.contains("attempt=1"), "{summary}");
+        assert!(summary.contains("upstream_url="), "{summary}");
+        assert!(summary.contains("authorization=absent"), "{summary}");
+        assert!(summary.contains("finish_reason=stop"), "{summary}");
+        assert!(summary.contains("usage=present"), "{summary}");
+        assert!(
+            summary.contains("suspicious=stop_without_tool_call"),
+            "{summary}"
+        );
+        assert!(
+            summary.contains("translated_terminal_event=event: response.completed"),
+            "{summary}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trace_marks_stop_without_output_as_suspicious() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let upstream = spawn_mock_zen_sse(vec![
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ])
+        .await;
+        let state = proxy_state_traced(upstream, None, traced_sink(dir.path()));
+        let resp = handle_any(
+            State(state),
+            Method::POST,
+            OriginalUri("/responses".parse().unwrap()),
+            HeaderMap::new(),
+            Body::from(json!({ "model": "m", "stream": true, "input": "hi" }).to_string()),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let text = body_text(resp).await;
+        assert!(text.contains("event: response.completed"), "{text}");
+
+        let (_, summary) = trace_file_with(dir.path(), ".summary.txt");
+        assert!(
+            summary.contains("suspicious=stop_without_output,usage_missing"),
+            "{summary}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trace_records_each_retry_attempt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let trace = traced_sink(dir.path());
+        let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
+        let last: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
+        let base_url =
+            spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "stream_options").await;
+
+        let req = json!({ "model": "m", "input": "hi", "stream": true });
+        let resp = forward(
+            &req,
+            &HeaderMap::new(),
+            true,
+            &base_url,
+            http_client(),
+            "ses_fixed123",
+            &AtomicBool::new(false),
+            &None,
+            &trace,
+            "req_retry",
+        )
+        .await
+        .expect("forward 应成功");
+        assert!(resp.status.is_success());
+        drop(resp);
+
+        let files = trace_files(dir.path());
+        let a1_request = files
+            .iter()
+            .find(|(name, _)| name.contains("req_retry-a1.request.json"))
+            .expect("第一次尝试应有请求体")
+            .clone();
+        let a2_request = files
+            .iter()
+            .find(|(name, _)| name.contains("req_retry-a2.request.json"))
+            .expect("重试应有独立请求体")
+            .clone();
+        assert!(a1_request.1.contains("stream_options"), "{}", a1_request.1);
+        assert!(
+            !a2_request.1.contains("stream_options"),
+            "重试不应再带被拒字段：{}",
+            a2_request.1
+        );
+        let a1_summary = files
+            .iter()
+            .find(|(name, _)| name.contains("req_retry-a1.summary.txt"))
+            .expect("第一次尝试应有摘要")
+            .clone();
+        assert!(a1_summary.1.contains("retried=true"), "{}", a1_summary.1);
+        assert!(
+            a1_summary.1.contains("suspicious=upstream_http_error"),
+            "{}",
+            a1_summary.1
+        );
+        let (_, a1_error) = trace_file_with(dir.path(), "req_retry-a1.response.txt");
+        assert!(a1_error.contains("stream_options"), "{a1_error}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn trace_records_upstream_error_body() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
+        let upstream = spawn_mock_zen_bad_request(count.clone()).await;
+        let state = proxy_state_traced(upstream, None, traced_sink(dir.path()));
+        let resp = handle_any(
+            State(state),
+            Method::POST,
+            OriginalUri("/responses".parse().unwrap()),
+            HeaderMap::new(),
+            responses_probe(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let (_, error_body) = trace_file_with(dir.path(), ".response.txt");
+        assert!(error_body.contains("must be valid JSON"), "{error_body}");
+        assert_eq!(
+            error_body.matches("must be valid JSON").count(),
+            1,
+            "不可重试的上游错误只应落盘一次：{error_body}"
+        );
+        let (_, summary) = trace_file_with(dir.path(), ".summary.txt");
+        assert!(summary.contains("upstream_status=400"), "{summary}");
+        assert!(
+            summary.contains("suspicious=upstream_http_error"),
+            "{summary}"
+        );
     }
 }

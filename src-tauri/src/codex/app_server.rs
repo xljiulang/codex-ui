@@ -18,6 +18,7 @@ use crate::codex::logs_guard;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::session_log::SessionLog;
 use crate::codex::zen_proxy::{self, ZenProxyHandle};
+use crate::codex::zen_trace::{TraceSink, ZenTrace};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
@@ -41,6 +42,8 @@ pub struct CodexServer {
     log: Option<Arc<SessionLog>>,
     /// codex app-server 的 error/warning 消息日志（`codex-YYYY-MM-DD.log`）。
     codex_log: Option<Arc<SessionLog>>,
+    /// Zen 代理内容诊断日志（`logs/zen/`，常开）；无日志目录时为 None。
+    zen_trace: Option<Arc<ZenTrace>>,
 }
 
 struct Shared {
@@ -134,6 +137,10 @@ impl CodexServer {
         let codex_log = logs_dir
             .as_ref()
             .map(|d| Arc::new(SessionLog::with_prefix(d.clone(), "codex-")));
+        // Zen 代理内容诊断日志（独立子目录，便于单独清理与打包分析）
+        let zen_trace = logs_dir
+            .as_ref()
+            .map(|d| Arc::new(ZenTrace::new(d.join("zen"))));
         Self {
             app,
             shared: Arc::new(Shared {
@@ -148,6 +155,7 @@ impl CodexServer {
             run_started: AtomicBool::new(false),
             log,
             codex_log,
+            zen_trace,
         }
     }
 
@@ -327,7 +335,19 @@ impl CodexServer {
         base_url: String,
     ) -> zen_proxy::ZenProxyStatus {
         let mut inner = self.shared.inner.lock().await;
-        zen_proxy::apply(&mut inner.zen_proxy, enabled, port, base_url, self.log.clone()).await
+        let trace = match self.zen_trace.as_ref() {
+            Some(trace) => TraceSink::new(trace.clone()),
+            None => TraceSink::disabled(),
+        };
+        zen_proxy::apply(
+            &mut inner.zen_proxy,
+            enabled,
+            port,
+            base_url,
+            self.log.clone(),
+            trace,
+        )
+        .await
     }
 
     /// Zen 代理当前状态（运行中返回端口；未开启或未启动返回默认端口）。

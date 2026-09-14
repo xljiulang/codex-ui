@@ -206,6 +206,21 @@
 - **模型配置空值语义**：提供方列表首项为固定的「**不使用模型提供方**」（选中表示不激活任何提供方）——**选择它不会删除既有提供方**，因为 `model_provider` 留空时按空值删键写 `null` 而不是写空串（实测：空串会让 codex 判定整份配置无效、用户层从 `config/read` 消失，设置页因此读到空提供方列表，下次保存把 `model_providers` 整表覆盖为空）；**`wire_api` 仅支持 `responses`**（codex 0.149.x 已不支持 `chat`），历史 `chat` 值在提供方行显示行内错误、保存时校验阻断，编辑弹窗只提供 `responses` 且打开时回填该值，保存一次即修正；推理强度留空表示「未配置」（写 `null` 删键，写空串会被 codex 以 `reasoning_effort must not be empty` 拒绝保存）；
 - 保存后需重启 codex-ui 才能生效、Enter 快捷发送、跟进处理方式（调整方向 / 加入队列）、提示音开关、**记忆管理**（记忆模式关闭/启用，默认关闭，新建会话自动应用、保存时同步当前会话；「删除记忆」二次确认后清空全部已保存记忆）（权限模式、模型、推理强度为会话级，在每个会话标签的输入区按钮菜单中配置，新会话取默认）。
 
+### Zen 代理诊断日志（内容级，默认常开）
+
+- **位置**：`%APPDATA%\com.codexui.app\logs\zen\`（与 `session-*.log` 分目录存放）；**只覆盖翻译路径**（`{模型提供方 base_url 路径}/responses`），`/models` 等透传请求仍只记 `zen_proxy.passthrough` 一行。
+- **每次上游尝试一组文件**（含重试的每次 attempt）：`<yyyyMMdd-HHmmssSSS>-<call_id>-a<n>.request.json`（发往上游的 chat/completions 请求体）、`.response.sse`（上游响应原文逐行，保留 `data:` 前缀与 `[DONE]`；非流式为 `.response.json`）、`.response.txt`（上游非 2xx 原文）、`.summary.txt`（收尾摘要）。
+- **摘要字段**：`call_id` / `attempt` / `model` / `stream` / `upstream_url` / `x_opencode_session`（= codex `session-id` 派生值，用于关联线程）/ `x_opencode_request` / `authorization=present|absent`（**从不落盘 API Key**）/ `message_count` / `tool_count` / `dropped_fields` / `reasoning_rc` / `elapsed_ms` / `upstream_status` / `finish_reason` / `text_chars` / `reasoning_chars` / `call_count` / `failed` / `usage` / `delta_keys` / `suspicious` / `translated_terminal_event`（发回 codex 的 `response.completed|failed|incomplete` 原文）；流未收尾就被中断时摘要记 `ended=dropped_without_finish`。
+- **可疑结束标记** `suspicious`（命中多项逗号连接，无标记为 `-`）：`stop_without_output`（`finish_reason=stop` 且无文本/推理/工具调用——最贴近「任务未完成就结束」）、`stop_without_tool_call`（只输出文本、没有工具调用）、`failed`、`truncated`（`finish_reason=length`）、`finish_reason_missing`、`usage_missing`、`usage_timeout`、`upstream_http_error`。标记只用于筛选，不改变代理行为；`zen_proxy.request` 带 `call_id`、`zen_proxy.stream_summary` 带 `suspicious`，可与内容日志互相定位。
+- **保留与上限**：单文件 8MB（超出即停止写入并追加 `[truncated: …]`，摘要记 `truncated=true`）、目录总量 256MB、保留 3 天；按文件名时间戳**整组清理**（无法解析的文件名不删），清理在开始新调用前执行且最多每 60 秒一次。
+- **风险提示**：内容日志包含完整提示词、工具参数与输出、代码片段（不含 API Key），分享前请确认。
+- **检索可疑调用**（PowerShell）：
+
+```powershell
+Select-String -Path "$env:APPDATA\com.codexui.app\logs\zen\*.summary.txt" -Pattern 'suspicious=(?!-)' |
+  Select-Object Path, Line
+```
+
 ### 插件管理（设置页「插件管理」Tab）
 
 - 顶部「已安装插件」卡片跨市场汇总已安装插件（图标、版本、状态、来源市场，可直接卸载），无已安装插件时显示空态；
