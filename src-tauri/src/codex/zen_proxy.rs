@@ -807,6 +807,52 @@ fn mentions_field(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| lower.contains(needle))
 }
 
+/// 命名空间工具在 Chat Completions 侧的扁平名：`{namespace}_{tool}`。
+/// Chat Completions 没有命名空间概念（函数名只允许 `[A-Za-z0-9_-]`，codex 也不认裸命名空间名），
+/// 因此命名空间必须展开成扁平函数名发给上游，回译时再还原成 `{name, namespace}`。
+fn flat_namespace_tool_name(namespace: &str, name: &str) -> String {
+    format!("{namespace}_{name}")
+}
+
+/// 从 Responses 工具声明收集「扁平名 → （命名空间, 子工具名）」映射；
+/// 只有命名空间工具需要还原，普通函数工具与自由格式工具不在表内。
+fn namespace_tool_map(req: &Value) -> HashMap<String, (String, String)> {
+    let mut map: HashMap<String, (String, String)> = HashMap::new();
+    let Some(tools) = req.get("tools").and_then(Value::as_array) else {
+        return map;
+    };
+    for tool in tools {
+        if tool.get("type").and_then(Value::as_str) != Some("namespace") {
+            continue;
+        }
+        let Some(namespace) = tool.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(children) = tool.get("tools").and_then(Value::as_array) else {
+            continue;
+        };
+        for child in children {
+            let Some(name) = child.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            map.entry(flat_namespace_tool_name(namespace, name))
+                .or_insert_with(|| (namespace.to_string(), name.to_string()));
+        }
+    }
+    map
+}
+
+/// 把 chat 侧工具名还原成 Responses 的 `(name, namespace)`：命中命名空间映射时回带命名空间。
+fn split_namespace_tool(
+    name: &str,
+    map: &HashMap<String, (String, String)>,
+) -> (String, Option<String>) {
+    match map.get(name) {
+        Some((namespace, tool)) => (tool.clone(), Some(namespace.clone())),
+        None => (name.to_string(), None),
+    }
+}
+
 /// 内容日志的请求侧元信息：`Authorization` 只记 presence，任何情况下不落盘 API Key。
 #[allow(clippy::too_many_arguments)]
 fn note_request_meta(
@@ -1208,7 +1254,7 @@ async fn proxy_json_response(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let out = match chat_to_responses(&chat, &model) {
+    let out = match chat_to_responses(&chat, &model, &namespace_tool_map(&req)) {
         Ok(out) => out,
         Err(e) => {
             log_at(
@@ -1276,10 +1322,11 @@ async fn proxy_stream_response(
             "error": null,
         }
     }));
-    let st = StreamState::new(response_id, model);
+    let mut st = StreamState::new(response_id, model);
     // 内容诊断日志句柄随流状态走：收尾与中断（Drop）时都能落盘
-    let mut st = st;
     st.trace = call;
+    // 命名空间工具映射：回译模型调用时还原 codex 期望的 name/namespace
+    st.namespace_tools = namespace_tool_map(&req);
     let byte_stream = resp.bytes_stream();
     let stream_log = log.clone();
     let events = stream::unfold(
@@ -1588,11 +1635,15 @@ fn responses_to_chat(
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let name = obj
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
+                        // 历史里的命名空间调用（`name` + `namespace`）：回放时也要用扁平名，
+                        // 与工具声明的写法一致，否则上游会看到「未声明过的函数名」。
+                        let raw_name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let name = match obj.get("namespace").and_then(|v| v.as_str()) {
+                            Some(namespace) if !namespace.is_empty() && !raw_name.is_empty() => {
+                                flat_namespace_tool_name(namespace, raw_name)
+                            }
+                            _ => raw_name.to_string(),
+                        };
                         let raw_arguments = obj
                             .get("arguments")
                             .and_then(|v| v.as_str())
@@ -1657,21 +1708,53 @@ fn responses_to_chat(
     });
 
     if let Some(tools) = req.get("tools").and_then(|t| t.as_array()) {
-        let chat_tools: Vec<Value> = tools
-            .iter()
-            .filter_map(|t| {
-                let obj = t.as_object()?;
-                let name = obj.get("name").and_then(|v| v.as_str())?;
-                let mut function = json!({ "name": name });
-                if let Some(desc) = obj.get("description").and_then(|v| v.as_str()) {
-                    function["description"] = Value::String(desc.to_string());
+        let mut chat_tools: Vec<Value> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for tool in tools {
+            let Some(obj) = tool.as_object() else { continue };
+            // 命名空间工具（codex 用它承载 codexui / 多智能体等分组）：chat 侧没有命名空间，
+            // 展开成 `{namespace}_{tool}` 扁平函数，参数与说明取自子工具。
+            if obj.get("type").and_then(Value::as_str) == Some("namespace") {
+                let Some(namespace) = obj.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(children) = obj.get("tools").and_then(Value::as_array) else {
+                    continue;
+                };
+                for child in children {
+                    let Some(name) = child.get("name").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let flat = flat_namespace_tool_name(namespace, name);
+                    if !seen.insert(flat.clone()) {
+                        continue;
+                    }
+                    let mut function = json!({ "name": flat });
+                    if let Some(desc) = child.get("description").and_then(Value::as_str) {
+                        function["description"] = Value::String(desc.to_string());
+                    }
+                    if let Some(params) = child.get("parameters") {
+                        function["parameters"] = params.clone();
+                    }
+                    chat_tools.push(json!({ "type": "function", "function": function }));
                 }
-                if let Some(params) = obj.get("parameters") {
-                    function["parameters"] = params.clone();
-                }
-                Some(json!({ "type": "function", "function": function }))
-            })
-            .collect();
+                continue;
+            }
+            let Some(name) = obj.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            if !seen.insert(name.to_string()) {
+                continue;
+            }
+            let mut function = json!({ "name": name });
+            if let Some(desc) = obj.get("description").and_then(Value::as_str) {
+                function["description"] = Value::String(desc.to_string());
+            }
+            if let Some(params) = obj.get("parameters") {
+                function["parameters"] = params.clone();
+            }
+            chat_tools.push(json!({ "type": "function", "function": function }));
+        }
         if !chat_tools.is_empty() {
             chat["tools"] = Value::Array(chat_tools);
         }
@@ -1897,7 +1980,12 @@ fn value_to_text(v: &Value) -> String {
 
 /// 非流式 chat.completion → responses 对象（纯函数，便于单测）。
 /// 工具调用参数不可用时返回 Err（调用方以 502 结束，而不是把坏参数交给 codex）。
-fn chat_to_responses(chat: &Value, model: &str) -> Result<Value, String> {
+/// `namespace_tools` 为命名空间工具的扁平名映射（回译时还原 `name` + `namespace`）。
+fn chat_to_responses(
+    chat: &Value,
+    model: &str,
+    namespace_tools: &HashMap<String, (String, String)>,
+) -> Result<Value, String> {
     let chat_id = chat
         .get("id")
         .and_then(|v| v.as_str())
@@ -1958,14 +2046,20 @@ fn chat_to_responses(chat: &Value, model: &str) -> Result<Value, String> {
                             truncate_chars(raw_arguments.trim(), 120)
                         ));
                     }
-                    output.push(json!({
+                    // 命名空间工具：还原成 codex 期望的 `name` + `namespace`
+                    let (item_name, item_namespace) = split_namespace_tool(&name, namespace_tools);
+                    let mut item = json!({
                         "id": gen_id("fc"),
                         "type": "function_call",
                         "status": "completed",
                         "call_id": call_id,
-                        "name": name,
+                        "name": item_name,
                         "arguments": arguments
-                    }));
+                    });
+                    if let Some(namespace) = item_namespace {
+                        item["namespace"] = Value::String(namespace);
+                    }
+                    output.push(item);
                 }
             }
         }
@@ -2092,6 +2186,9 @@ struct StreamState {
     trace: TraceCall,
     /// `finish_reason` 后等待尾部分片是否超时（仅用于诊断标记）。
     usage_timeout: bool,
+    /// 本次请求里命名空间工具的「扁平名 → （命名空间, 子工具名）」映射：
+    /// 回译模型调用时按它还原成 codex 期望的 `{name, namespace}` 形态。
+    namespace_tools: HashMap<String, (String, String)>,
 }
 
 impl StreamState {
@@ -2110,6 +2207,7 @@ impl StreamState {
             delta_keys: BTreeSet::new(),
             trace: TraceCall::disabled(),
             usage_timeout: false,
+            namespace_tools: HashMap::new(),
         }
     }
 }
@@ -2355,29 +2453,35 @@ fn tool_delta(tool_index: usize, tc: &Value, st: &mut StreamState) -> Vec<String
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-            st.calls.insert(
-                tool_index,
-                CallTrack {
-                    item_id: item_id.clone(),
-                    call_id: call_id.clone(),
-                    name: name.clone(),
-                    args_buf: String::new(),
-                    out_index,
-                },
-            );
+        // 命名空间工具：`added` 与 `done` 都写回 codex 期望的 `name` + `namespace`，避免两处不一致
+        let (item_name, item_namespace) = split_namespace_tool(&name, &st.namespace_tools);
+        st.calls.insert(
+            tool_index,
+            CallTrack {
+                item_id: item_id.clone(),
+                call_id: call_id.clone(),
+                name: name.clone(),
+                args_buf: String::new(),
+                out_index,
+            },
+        );
+        let mut item = json!({
+            "id": item_id,
+            "type": "function_call",
+            "status": "in_progress",
+            "call_id": call_id,
+            "name": item_name,
+            "arguments": ""
+        });
+        if let Some(namespace) = item_namespace {
+            item["namespace"] = Value::String(namespace);
+        }
         out.push(sse_event(
             "response.output_item.added",
             &json!({
                 "type": "response.output_item.added",
                 "output_index": out_index,
-                "item": {
-                    "id": item_id,
-                    "type": "function_call",
-                    "status": "in_progress",
-                    "call_id": call_id,
-                    "name": name,
-                    "arguments": ""
-                }
+                "item": item
             }),
         ));
         // 首个 chunk 可能已带参数片段（某些实现）
@@ -2568,6 +2672,8 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
 
     if failure.is_none() {
         for (_, c) in calls {
+            // 命名空间工具：chat 侧是扁平名，回译成 codex 期望的 `name` + `namespace`
+            let (item_name, item_namespace) = split_namespace_tool(&c.name, &st.namespace_tools);
             out.push(sse_event(
                 "response.function_call_arguments.done",
                 &json!({
@@ -2577,19 +2683,23 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                     "arguments": c.args_buf
                 }),
             ));
+            let mut item = json!({
+                "id": c.item_id,
+                "type": "function_call",
+                "status": "completed",
+                "call_id": c.call_id,
+                "name": item_name,
+                "arguments": c.args_buf
+            });
+            if let Some(namespace) = item_namespace {
+                item["namespace"] = Value::String(namespace);
+            }
             out.push(sse_event(
                 "response.output_item.done",
                 &json!({
                     "type": "response.output_item.done",
                     "output_index": c.out_index,
-                    "item": {
-                        "id": c.item_id,
-                        "type": "function_call",
-                        "status": "completed",
-                        "call_id": c.call_id,
-                        "name": c.name,
-                        "arguments": c.args_buf
-                    }
+                    "item": item
                 }),
             ));
         }
@@ -3010,7 +3120,7 @@ mod tests {
             }],
             "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
         });
-        let resp = chat_to_responses(&chat, "zen/gpt-5-mini").unwrap();
+        let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &HashMap::new()).unwrap();
         assert_eq!(resp["status"], "completed");
         assert_eq!(resp["model"], "zen/gpt-5-mini");
         assert_eq!(resp["output"][0]["type"], "message");
@@ -3035,7 +3145,7 @@ mod tests {
                 }
             }]
         });
-        let resp = chat_to_responses(&chat, "m").unwrap();
+        let resp = chat_to_responses(&chat, "m", &HashMap::new()).unwrap();
         assert_eq!(resp["output"].as_array().unwrap().len(), 2);
         assert_eq!(resp["output"][1]["type"], "function_call");
         assert_eq!(resp["output"][1]["call_id"], "call_9");
@@ -3134,6 +3244,175 @@ mod tests {
         let data = done.split("data:").nth(1).unwrap().trim();
         let v: Value = serde_json::from_str(data).unwrap();
         assert_eq!(v["arguments"], "{\"q\":1}");
+    }
+
+    /// 命名空间工具（codex 用 `{"type":"namespace","tools":[…]}` 声明）：
+    /// 上游按扁平名调用，回译必须还原成 codex 期望的 `name` + `namespace`。
+    #[test]
+    fn namespace_tools_are_flattened_upstream_and_restored_back() {
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "tools": [
+                { "type": "function", "name": "exec_command", "parameters": { "type": "object" } },
+                {
+                    "type": "namespace",
+                    "name": "codexui",
+                    "description": "codex-ui 管理工具",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "add_scheduled_task",
+                            "description": "创建定时任务",
+                            "parameters": { "type": "object", "properties": {} }
+                        },
+                        { "type": "function", "name": "get_usage", "description": "查询用量" }
+                    ]
+                }
+            ]
+        });
+        // ① 工具声明：命名空间展开成扁平函数，且不再暴露裸命名空间名
+        let (chat, _) = responses_to_chat(&req, true, false).unwrap();
+        let names: Vec<&str> = chat["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["exec_command", "codexui_add_scheduled_task", "codexui_get_usage"],
+            "{names:?}"
+        );
+        assert!(chat["tools"][1]["function"]["description"]
+            .as_str()
+            .is_some_and(|d| d == "创建定时任务"));
+        assert!(chat["tools"][1]["function"]["parameters"]["type"] == "object");
+
+        // ② 反向映射表：扁平名 → （命名空间, 子工具名）
+        let map = namespace_tool_map(&req);
+        assert_eq!(
+            map.get("codexui_add_scheduled_task"),
+            Some(&("codexui".to_string(), "add_scheduled_task".to_string()))
+        );
+        assert_eq!(map.get("exec_command"), None);
+
+        // ③ 回译（流式）：output_item.added / done 都带 name + namespace
+        let mut st = StreamState::new("resp_ns".into(), "m".into());
+        st.namespace_tools = map.clone();
+        let c1 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "id": "call_ns",
+                "type": "function",
+                "function": { "name": "codexui_add_scheduled_task", "arguments": "" }
+            }] }, "finish_reason": null }]
+        });
+        let c2 = json!({
+            "choices": [{ "delta": { "tool_calls": [{
+                "index": 0,
+                "function": { "arguments": "{\"name\":\"x\",\"prompt\":\"y\",\"cron\":\"0 0 12 * * 1-5\"}" }
+            }] }, "finish_reason": "tool_calls" }]
+        });
+        let mut lines: Vec<String> = Vec::new();
+        lines.extend(process_chunk(&c1, &mut st));
+        lines.extend(process_chunk(&c2, &mut st));
+        lines.extend(finish_stream(&mut st, &None));
+        let items: Vec<Value> = lines
+            .iter()
+            .filter(|l| {
+                l.contains("response.output_item.added") || l.contains("response.output_item.done")
+            })
+            .map(|l| {
+                serde_json::from_str::<Value>(l.split("data:").nth(1).unwrap().trim()).unwrap()
+            })
+            .collect();
+        assert_eq!(items.len(), 2, "{items:?}");
+        for item in items {
+            assert_eq!(item["item"]["name"], "add_scheduled_task");
+            assert_eq!(item["item"]["namespace"], "codexui");
+        }
+
+        // ④ 回译（非流式）：同一份映射也生效
+        let chat_resp = json!({
+            "id": "chatcmpl-1",
+            "choices": [{ "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_ns",
+                    "type": "function",
+                    "function": { "name": "codexui_get_usage", "arguments": "{}" }
+                }]
+            } }]
+        });
+        let out = chat_to_responses(&chat_resp, "m", &map).unwrap();
+        let call = out["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .expect("应输出 function_call 项");
+        assert_eq!(call["name"], "get_usage");
+        assert_eq!(call["namespace"], "codexui");
+    }
+
+    /// 命名空间历史回放：codex 回放的是 `name` + `namespace`，上游要看到扁平名。
+    #[test]
+    fn namespace_history_calls_are_flattened_for_upstream() {
+        let req = json!({
+            "model": "m",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "生成定时任务" }]
+                },
+                {
+                    "type": "function_call",
+                    "name": "add_scheduled_task",
+                    "namespace": "codexui",
+                    "arguments": "{\"name\":\"x\"}",
+                    "call_id": "call_1"
+                },
+                { "type": "function_call_output", "call_id": "call_1", "output": "已创建" }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, true, false).unwrap();
+        let calls = &chat["messages"][1]["tool_calls"];
+        assert_eq!(calls[0]["function"]["name"], "codexui_add_scheduled_task");
+        assert_eq!(calls[0]["id"], "call_1");
+        assert_eq!(chat["messages"][2]["role"], "tool");
+    }
+
+    /// 命名空间不合法/无子工具时不产生工具；扁平名撞车时只保留一个。
+    #[test]
+    fn namespace_expansion_skips_empty_and_dedupes_flat_names() {
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "tools": [
+                { "type": "namespace", "name": "empty", "tools": [] },
+                {
+                    "type": "namespace",
+                    "name": "codexui",
+                    "tools": [{ "type": "function", "name": "get_usage" }]
+                },
+                {
+                    "type": "namespace",
+                    "name": "codexui",
+                    "tools": [{ "type": "function", "name": "get_usage" }]
+                }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, true, false).unwrap();
+        let names: Vec<&str> = chat["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["codexui_get_usage"], "{names:?}");
     }
 
     #[test]
@@ -3424,7 +3703,7 @@ mod tests {
                 }
             }]
         });
-        let err = chat_to_responses(&chat, "m").unwrap_err();
+        let err = chat_to_responses(&chat, "m", &HashMap::new()).unwrap_err();
         assert!(err.contains("apply_patch"), "错误信息应含工具名：{err}");
     }
 
@@ -3762,7 +4041,7 @@ mod tests {
                 "prompt_tokens_details": { "cached_tokens": 4 }
             }
         });
-        let resp = chat_to_responses(&chat, "m").unwrap();
+        let resp = chat_to_responses(&chat, "m", &HashMap::new()).unwrap();
         assert_eq!(resp["usage"]["input_tokens_details"]["cached_tokens"], 4);
         assert_eq!(resp["usage"]["input_tokens"], 9);
     }
