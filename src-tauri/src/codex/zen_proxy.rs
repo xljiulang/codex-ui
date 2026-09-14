@@ -270,7 +270,9 @@ fn http_client() -> &'static reqwest::Client {
 /// `zen_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
 /// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
 /// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格；
-/// `call_id` 与内容日志（`logs/zen/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
+/// `patch_failures` 是本次历史里已失败的补丁调用条数（>0 说明模型正在补丁上打转，
+/// 代理已对这些工具结果追加格式纠错提示）；`call_id` 与内容日志
+/// （`logs/zen/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
 fn request_log_fields(
     req: &Value,
     want_stream: bool,
@@ -308,6 +310,7 @@ fn request_log_fields(
         .filter(|value| !value.is_empty())
         .unwrap_or("-")
         .to_string();
+    let patch_failures = patch_failure_count(req);
     vec![
         ("call_id", call_id.to_string()),
         ("model", model),
@@ -317,6 +320,7 @@ fn request_log_fields(
         ("instructions_chars", instructions_chars.to_string()),
         ("reasoning_effort", reasoning_effort),
         ("tool_count", tool_count.to_string()),
+        ("patch_failures", patch_failures.to_string()),
     ]
 }
 
@@ -875,21 +879,60 @@ fn tool_shape(req: &Value) -> ToolShape {
     shape
 }
 
+/// 是否自由格式的 `apply_patch` 工具（按名匹配，大小写不敏感）。
+fn is_apply_patch_tool(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("apply_patch")
+}
+
+/// `apply_patch` 的补丁语法规范（**英文原文**，从 codex 声明的 lark grammar 提炼）。
+///
+/// codex 的补丁语法只存在于自由格式工具声明的 `format.definition`（lark grammar）里，
+/// description 本身只有「可以编辑文件 + 别包 JSON」两句；而 Chat Completions 没有语法约束
+/// 能力，代理也不下发 grammar，于是上游模型（真机实测 mimo 系）完全不知道 `@@` 的语义，
+/// 自创 `@@ 中文描述 @@` 的 hunk 头 → codex 判 `apply_patch verification failed: Failed to find
+/// context …` → 反复重试到回合结束。这段文字就是补上那份缺失的语法说明。
+/// 模型可见文案统一英文（补丁关键字、参数名与 codex 原生描述都是英文）。
+fn patch_syntax_spec() -> &'static str {
+    r"Patch syntax (follow it exactly):
+*** Begin Patch
+*** Update File: <path>
+@@ <optional: one line that exists verbatim in the file, e.g. a function signature or struct field>
+ <context line: copied verbatim from the file, keep the leading space and the indentation>
+-old line
++new line
+*** End Patch
+
+Rules:
+- Enclose the whole patch between `*** Begin Patch` and `*** End Patch`. One patch may carry several file blocks and several hunks.
+- File blocks: `*** Update File: <path>`, `*** Add File: <path>` (every following line starts with `+`), `*** Delete File: <path>`, and `*** Move to: <path>` (only directly after an Update File block, to rename it).
+- A hunk header is either `@@` alone or `@@ <a line that exists verbatim in the file>`. Never write `@@ some description @@` or any prose text there: everything after `@@` is searched as a file line, so a description always fails the whole patch.
+- Line prefixes: one space marks an unchanged context line, `-` a removed line, `+` an added line.
+- Context lines must match the file byte-for-byte, indentation included. Read the file first; never rebuild context from memory.
+- Append `*** End of File` to anchor a hunk at the end of the file."
+}
+
 /// 自由格式工具（apply_patch 等）在上游的调用约定：Chat Completions 只有函数调用，
 /// 因此把整段文本放进 JSON 的 `input` 字段；codex 原描述里的 FREEFORM 提示会误导模型，
 /// 命中时整段替换为中性说明，其余情况保留原文再追加约定。
+/// `apply_patch` 另补一份补丁语法规范（见 `patch_syntax_spec`），其它自由格式工具不加。
 fn custom_tool_description(raw: &str, name: &str) -> String {
-    const HINT: &str = "本通道为函数调用：请把完整补丁文本放进 JSON 的 input 字段。";
+    const HINT: &str =
+        "This channel is a function call: put the full patch text in the JSON \"input\" field.";
     let trimmed = raw.trim();
     let lower = trimmed.to_ascii_lowercase();
     let misleading =
         trimmed.is_empty() || lower.contains("freeform") || lower.contains("do not wrap");
     let base = if misleading {
-        format!("编辑文件（{name} 语法）。")
+        format!("Edit files ({name} patch language).")
     } else {
         trimmed.to_string()
     };
-    format!("{base}\n\n{HINT}")
+    let mut out = format!("{base}\n\n{HINT}");
+    if is_apply_patch_tool(name) {
+        out.push_str("\n\n");
+        out.push_str(patch_syntax_spec());
+    }
+    out
 }
 
 /// 自由格式工具在 chat 侧的参数 schema：单个 `input` 字符串承载全部文本。
@@ -899,7 +942,7 @@ fn custom_tool_parameters() -> Value {
         "properties": {
             "input": {
                 "type": "string",
-                "description": "完整补丁文本（\"*** Begin Patch\" … \"*** End Patch\"）"
+                "description": "The full patch text, from \"*** Begin Patch\" to \"*** End Patch\"."
             }
         },
         "required": ["input"]
@@ -917,6 +960,81 @@ fn custom_tool_input(arguments: &str) -> String {
             .unwrap_or_else(|| arguments.to_string()),
         _ => arguments.to_string(),
     }
+}
+
+/// codex 补丁校验失败的原文标记（小写比较，避免大小写差异漏判）。
+const PATCH_FAILURE_MARKERS: [&str; 4] = [
+    "apply_patch verification failed",
+    "failed to find context",
+    "invalid patch",
+    "invalid context",
+];
+
+/// 工具输出是否为补丁校验失败。
+fn is_patch_failure(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    PATCH_FAILURE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+/// 补丁失败后追加给上游的纠错提示（**英文原文**）。
+///
+/// codex 自己的失败原文只说「找不到某段上下文」，弱模型据此只会换一种错法反复试
+/// （真机实测 mimo 系会连续发出 `@@ 描述 @@` 形态的 hunk）。这段提示点明 `@@` 的真实语义
+/// 并给出最小正确形状，附在**发往上游**的那条工具结果后面；codex 侧的记录与 rollout 不变。
+fn patch_failure_hint() -> &'static str {
+    r"[apply_patch format correction] The patch above was rejected because a hunk header was wrong.
+- A hunk header must be `@@` alone or `@@ <a line that exists verbatim in the file>`.
+- Never write `@@ some description @@`: whatever follows `@@` is looked up as a file line, so a description or any prose text can only fail.
+- Context lines start with exactly one space and must be copied verbatim from the file, indentation included.
+- Read the file first, then retry in the correct shape:
+*** Begin Patch
+*** Update File: <path>
+@@ <verbatim anchor line, optional>
+ <verbatim context line>
+-old line
++new line
+*** End Patch"
+}
+
+/// 本次请求历史里「确实失败了」的自由格式工具调用（`call_id` 集合）。
+///
+/// 判据同时要求：`call_id` 来自本段历史里的 `custom_tool_call`（自由格式工具的历史回放形态，
+/// 含 apply_patch），且对应的 `custom_tool_call_output` 文本命中补丁失败标记——只认这两条，
+/// 避免把恰好打印了同样字样的普通命令输出也算成补丁失败（纠错提示与诊断统计共用同一判据）。
+fn patch_failure_call_ids(items: &[Value]) -> HashSet<String> {
+    let custom: HashSet<&str> = items
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("custom_tool_call"))
+        .filter_map(|item| item.get("call_id").and_then(Value::as_str))
+        .filter(|id| !id.is_empty())
+        .collect();
+    if custom.is_empty() {
+        return HashSet::new();
+    }
+    items
+        .iter()
+        .filter(|item| {
+            item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
+        })
+        .filter_map(|item| {
+            let id = item.get("call_id").and_then(Value::as_str)?;
+            if !custom.contains(id) {
+                return None;
+            }
+            let text = value_to_text(item.get("output").unwrap_or(&Value::Null));
+            is_patch_failure(&text).then(|| id.to_string())
+        })
+        .collect()
+}
+
+/// 本次请求历史里已失败的补丁调用条数（诊断用，0 表示历史干净）。
+fn patch_failure_count(req: &Value) -> usize {
+    req.get("input")
+        .and_then(Value::as_array)
+        .map(|items| patch_failure_call_ids(items).len())
+        .unwrap_or(0)
 }
 
 /// 内容日志的请求侧元信息：`Authorization` 只记 presence，任何情况下不落盘 API Key。
@@ -1176,6 +1294,8 @@ struct SuspiciousFacts<'a> {
     usage_present: bool,
     usage_timeout: bool,
     upstream_http_error: bool,
+    /// 本次请求历史里已有失败的补丁调用（模型在补丁格式上打转的信号）。
+    patch_retry: bool,
 }
 
 /// 启发式「可疑结束」标记（纯函数）：命中多项时按固定顺序返回，未命中返回空。
@@ -1191,6 +1311,9 @@ fn suspicious_flags(facts: &SuspiciousFacts<'_>) -> Vec<&'static str> {
     }
     if facts.finish_reason == Some("length") {
         out.push("truncated");
+    }
+    if facts.patch_retry {
+        out.push("patch_retry");
     }
     if facts.finish_reason.is_none_or(|reason| reason.is_empty()) {
         out.push("finish_reason_missing");
@@ -1271,6 +1394,8 @@ fn note_chat_result(call: &mut TraceCall, chat: &Value) {
         usage_present: usage.is_some(),
         usage_timeout: false,
         upstream_http_error: false,
+        // 非流式路径拿不到入站请求历史，补丁重试标记只在流式收尾统计。
+        patch_retry: false,
     });
     call.note("suspicious", flags_field(&flags));
 }
@@ -1393,6 +1518,8 @@ async fn proxy_stream_response(
     st.trace = call;
     // 工具形态：回译模型调用时还原 codex 期望的 name/namespace 或 custom_tool_call
     st.tool_shape = tool_shape(&req);
+    // 历史里的补丁失败条数：收尾时进摘要与可疑标记（模型是否在补丁格式上打转）
+    st.patch_failures = patch_failure_count(&req);
     let byte_stream = resp.bytes_stream();
     let stream_log = log.clone();
     let events = stream::unfold(
@@ -1653,6 +1780,9 @@ fn responses_to_chat(
             // 待回传的思维链文本：来自回放的 `reasoning` item，只有真的需要
             // （`attach_reasoning`）时才挂到下一条工具调用消息上。
             let mut pending_reasoning: Option<String> = None;
+            // 本段历史里已经失败的自定义工具调用：对应工具结果要补一条格式纠错提示，
+            // 否则弱模型只会换一种错法继续重试（见 `patch_failure_hint`）。
+            let failed_patches = patch_failure_call_ids(items);
             let flush = |messages: &mut Vec<Value>, pending: &mut Option<Value>| {
                 if let Some(p) = pending.take() {
                     messages.push(p);
@@ -1762,7 +1892,14 @@ fn responses_to_chat(
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let content = value_to_text(obj.get("output").unwrap_or(&Value::Null));
+                        let mut content =
+                            value_to_text(obj.get("output").unwrap_or(&Value::Null));
+                        // 补丁校验失败：把格式纠错提示附在同一条工具结果后面（只影响本次
+                        // 发往上游的历史，codex 自己的记录与 rollout 不变）。
+                        if failed_patches.contains(&call_id) {
+                            content.push('\n');
+                            content.push_str(patch_failure_hint());
+                        }
                         messages.push(json!({
                             "role": "tool",
                             "tool_call_id": call_id,
@@ -2309,6 +2446,8 @@ struct StreamState {
     /// 本次请求的工具形态（命名空间映射 + 自由格式工具名单）：回译模型调用时据此还原成
     /// codex 期望的 `{name, namespace}` 或 `custom_tool_call`。
     tool_shape: ToolShape,
+    /// 本次请求历史里已失败的补丁调用条数（诊断用；>0 会在收尾标记 `patch_retry`）。
+    patch_failures: usize,
 }
 
 impl StreamState {
@@ -2328,6 +2467,7 @@ impl StreamState {
             trace: TraceCall::disabled(),
             usage_timeout: false,
             tool_shape: ToolShape::default(),
+            patch_failures: 0,
         }
     }
 }
@@ -2955,6 +3095,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         usage_present: st.usage.is_some(),
         usage_timeout: st.usage_timeout,
         upstream_http_error: false,
+        patch_retry: st.patch_failures > 0,
     });
     let suspicious = flags_field(&flags);
     let call = &mut st.trace;
@@ -2966,6 +3107,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     call.note("text_chars", text_chars.to_string());
     call.note("call_count", call_count.to_string());
     call.note("failed", failed.to_string());
+    call.note("patch_failures", st.patch_failures.to_string());
     if let Some(f) = st.failure.as_ref() {
         call.note("failure_code", f.code.clone());
         call.note("failure_detail", f.detail.clone());
@@ -2999,6 +3141,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
             ("text_chars", text_chars.to_string()),
             ("call_count", call_count.to_string()),
             ("failed", failed.to_string()),
+            ("patch_failures", st.patch_failures.to_string()),
             (
                 "usage",
                 if st.usage.is_some() { "present" } else { "none" }.to_string(),
@@ -3619,14 +3762,141 @@ mod tests {
             "描述里不应保留会误导模型的 FREEFORM 提示：{desc}"
         );
         assert!(desc.contains("input"), "{desc}");
+        // 语法只存在于 codex 的 `format.definition`（grammar）里，代理不下发 grammar，
+        // 因此必须把提炼后的语法规范补进描述，否则弱模型只会自创 hunk 头。
+        assert!(desc.contains("*** Begin Patch"), "{desc}");
+        assert!(desc.contains("*** End Patch"), "{desc}");
+        assert!(desc.contains("@@ <"), "{desc}");
+        assert!(desc.contains("Never write `@@ some description @@`"), "{desc}");
+        assert!(desc.contains("Edit files (apply_patch patch language)."), "{desc}");
         assert_eq!(tool["parameters"]["properties"]["input"]["type"], "string");
         assert_eq!(tool["parameters"]["required"][0], "input");
+        assert!(
+            tool["parameters"]["properties"]["input"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("*** Begin Patch"),
+            "{tool}"
+        );
         // grammar 不下发
         assert!(tool.get("format").is_none());
 
         let shape = tool_shape(&custom_tool_request());
         assert!(shape.is_custom("apply_patch"));
         assert!(!shape.is_custom("exec_command"));
+    }
+
+    /// 非 apply_patch 的自由格式工具：只换基底 + 追加函数调用约定，不塞补丁语法。
+    #[test]
+    fn other_custom_tools_keep_short_description() {
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "tools": [
+                {
+                    "type": "custom",
+                    "name": "other_tool",
+                    "description": "This is a FREEFORM tool, so do not wrap the input in JSON."
+                }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, true, false).unwrap();
+        let desc = chat["tools"][0]["function"]["description"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(desc.contains("Edit files (other_tool patch language)."), "{desc}");
+        assert!(desc.contains("This channel is a function call"), "{desc}");
+        assert!(!desc.contains("*** Begin Patch"), "{desc}");
+        assert!(!desc.contains("FREEFORM"), "{desc}");
+    }
+
+    /// 补丁校验失败：该工具结果后追加格式纠错提示，其它输出逐字不变。
+    #[test]
+    fn failed_patch_output_gets_format_correction_hint() {
+        let req = json!({
+            "model": "m",
+            "input": [
+                { "type": "message", "role": "user", "content": "改个文案" },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_patch",
+                    "name": "apply_patch",
+                    "input": PATCH
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_patch",
+                    "output": "apply_patch verification failed: Failed to find context \
+                        'version_too_old field @@' in D:\\repo\\app_server.rs"
+                },
+                { "type": "function_call", "call_id": "call_exec", "name": "exec_command",
+                  "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "call_exec",
+                  "output": "Exit code: 0" }
+            ]
+        });
+        let (chat, _) = responses_to_chat(&req, true, false).unwrap();
+        let messages = chat["messages"].as_array().unwrap();
+        let patch = messages
+            .iter()
+            .find(|m| m["tool_call_id"] == json!("call_patch"))
+            .expect("补丁工具结果应在历史里");
+        let patch_text = patch["content"].as_str().unwrap();
+        assert!(
+            patch_text.starts_with("apply_patch verification failed"),
+            "原有失败原文必须保留：{patch_text}"
+        );
+        assert!(patch_text.contains("Never write `@@ some description @@`"), "{patch_text}");
+        assert!(patch_text.contains("A hunk header must be"), "{patch_text}");
+        // 未失败的普通工具输出逐字不变
+        let exec = messages
+            .iter()
+            .find(|m| m["tool_call_id"] == json!("call_exec"))
+            .unwrap();
+        assert_eq!(exec["content"], json!("Exit code: 0"));
+    }
+
+    /// 补丁失败计数只认自定义工具调用；普通命令输出里恰好出现同样字样时不计。
+    #[test]
+    fn patch_failure_count_only_counts_custom_patch_failures() {
+        let clean = json!({
+            "model": "m",
+            "input": [
+                { "type": "custom_tool_call", "call_id": "c1", "name": "apply_patch", "input": PATCH },
+                { "type": "custom_tool_call_output", "call_id": "c1", "output": "Done!" }
+            ]
+        });
+        assert_eq!(patch_failure_count(&clean), 0);
+
+        let failed = json!({
+            "model": "m",
+            "input": [
+                { "type": "custom_tool_call", "call_id": "c1", "name": "apply_patch", "input": PATCH },
+                { "type": "custom_tool_call_output", "call_id": "c1",
+                  "output": "apply_patch verification failed: Failed to find context 'x @@'" },
+                { "type": "custom_tool_call", "call_id": "c2", "name": "apply_patch", "input": PATCH },
+                { "type": "custom_tool_call_output", "call_id": "c2",
+                  "output": "Invalid Context: line 3" }
+            ]
+        });
+        assert_eq!(patch_failure_count(&failed), 2);
+
+        // 普通工具（命令）输出里出现同样字样：不是补丁调用，不计也不加提示
+        let plain = json!({
+            "model": "m",
+            "input": [
+                { "type": "function_call", "call_id": "e1", "name": "exec_command",
+                  "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "e1",
+                  "output": "apply_patch verification failed: Failed to find context 'x @@'" }
+            ]
+        });
+        assert_eq!(patch_failure_count(&plain), 0);
+        let (chat, _) = responses_to_chat(&plain, true, false).unwrap();
+        assert_eq!(chat["messages"][1]["content"], json!(
+            "apply_patch verification failed: Failed to find context 'x @@'"
+        ));
     }
 
     /// 自由格式工具：流式回译成 `custom_tool_call` 事件序列，参数允许非 JSON 原文。
@@ -4137,6 +4407,7 @@ mod tests {
         assert_eq!(value_of("input_msg_count"), Some("1".to_string()));
         assert_eq!(value_of("tool_count"), Some("0".to_string()));
         assert_eq!(value_of("instructions_chars"), Some("3".to_string()));
+        assert_eq!(value_of("patch_failures"), Some("0".to_string()));
         assert!(value_of("input_chars").is_some());
         assert_eq!(value_of("call_id"), Some("req_test".to_string()));
 
@@ -4148,6 +4419,28 @@ mod tests {
                 .find(|(name, _)| *name == "reasoning_effort")
                 .map(|(_, value)| value.as_str()),
             Some("-")
+        );
+
+        // 历史里有失败的补丁调用：记条数（模型正在补丁格式上打转）
+        let fields = request_log_fields(
+            &json!({
+                "model": "m",
+                "input": [
+                    { "type": "custom_tool_call", "call_id": "c1", "name": "apply_patch",
+                      "input": "*** Begin Patch\n*** End Patch\n" },
+                    { "type": "custom_tool_call_output", "call_id": "c1",
+                      "output": "apply_patch verification failed: Failed to find context 'x @@'" }
+                ]
+            }),
+            true,
+            "req_test",
+        );
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(name, _)| *name == "patch_failures")
+                .map(|(_, value)| value.as_str()),
+            Some("1")
         );
     }
 
@@ -4503,6 +4796,26 @@ mod tests {
             joined.contains("delta_keys=content,reasoning_content"),
             "{joined}"
         );
+    }
+
+    /// 收尾摘要与可疑标记都要带上补丁失败条数（用于判断模型是否在补丁格式上打转）。
+    #[test]
+    fn stream_summary_reports_patch_failures() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let mut st = StreamState::new("resp_patch".into(), "m".into());
+        st.usage = Some(json!({ "prompt_tokens": 1 }));
+        st.patch_failures = 2;
+        let _ = finish_stream(&mut st, &log);
+
+        let joined = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("patch_failures=2"), "{joined}");
+        assert!(joined.contains("patch_retry"), "{joined}");
     }
 
     #[test]
@@ -5786,6 +6099,17 @@ mod integration_tests {
                 ..Default::default()
             }),
             "truncated"
+        );
+        // 本次历史里已有失败的补丁调用（模型在补丁格式上打转）
+        assert_eq!(
+            flags(SuspiciousFacts {
+                finish_reason: Some("tool_calls"),
+                call_count: 1,
+                usage_present: true,
+                patch_retry: true,
+                ..Default::default()
+            }),
+            "patch_retry"
         );
         // 失败收尾（无 finish_reason）
         assert_eq!(
