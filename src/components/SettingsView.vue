@@ -9,6 +9,7 @@ import {
   ICON_MODEL_CUBE,
   ICON_PALETTE,
   ICON_SKILL,
+  ICON_SNAPSHOT,
   ICON_TOOL,
   ICON_TUNE,
 } from "../lib/icons";
@@ -17,6 +18,7 @@ import DynamicToolsSection from "./settings/DynamicToolsSection.vue";
 import GlobalInstructionsSection from "./settings/GlobalInstructionsSection.vue";
 import McpSection from "./settings/McpSection.vue";
 import ModelConfigSection from "./settings/ModelConfigSection.vue";
+import ModelSnapshotSection from "./settings/ModelSnapshotSection.vue";
 import PersonalizationSection from "./settings/PersonalizationSection.vue";
 import PluginsSection from "./settings/PluginsSection.vue";
 import ScheduledTasksSection from "./settings/ScheduledTasksSection.vue";
@@ -28,6 +30,7 @@ const settingsSectionIds = [
   "personalization",
   "basic",
   "global-instructions",
+  "model-snapshot",
   "model-config",
   "dynamic-tools",
   "skills",
@@ -41,13 +44,14 @@ interface SettingsSection {
   id: SettingsSectionId;
   label: string;
   icon: string;
-  /** 是否以描边渲染（当前仅「模型配置」用立方体线框） */
+  /** 是否以描边渲染（「模型配置」立方体线框、「模型快照」花括号 + M 两处使用） */
   stroke?: boolean;
 }
 const settingsSections: SettingsSection[] = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
   { id: "basic", label: "基础设置", icon: ICON_TUNE },
   { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
+  { id: "model-snapshot", label: "模型快照", icon: ICON_SNAPSHOT, stroke: true },
   { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "dynamic-tools", label: "动态工具", icon: ICON_TOOL },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
@@ -58,6 +62,9 @@ const settingsSections: SettingsSection[] = [
 ];
 /** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
 const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
+
+/** 模型快照还原信号：自增后由「模型配置」分区重读一次磁盘配置（保持还原后卡片即时同步） */
+const modelConfigReloadToken = ref(0);
 
 /** 导航键盘操作：上下方向键循环切换分类（与其它面板方向键习惯一致） */
 function onNavKeydown(e: KeyboardEvent) {
@@ -102,7 +109,15 @@ function onNavKeydown(e: KeyboardEvent) {
       <div class="settings-panel">
         <PersonalizationSection :active="activeSection === 'personalization'" />
 
-        <ModelConfigSection :active="activeSection === 'model-config'" />
+        <ModelSnapshotSection
+          :active="activeSection === 'model-snapshot'"
+          @applied="modelConfigReloadToken++"
+        />
+
+        <ModelConfigSection
+          :active="activeSection === 'model-config'"
+          :reload-token="modelConfigReloadToken"
+        />
 
         <GlobalInstructionsSection :active="activeSection === 'global-instructions'" />
 

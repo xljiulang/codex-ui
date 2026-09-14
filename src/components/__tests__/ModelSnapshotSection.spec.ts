@@ -33,7 +33,7 @@ vi.mock("../../composables/useModelSnapshots", () => ({
   openModelSnapshot: mockOpen,
 }));
 
-import ModelSnapshotCard from "../settings/ModelSnapshotCard.vue";
+import ModelSnapshotSection from "../settings/ModelSnapshotSection.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import {
   ICON_DELETE,
@@ -42,14 +42,14 @@ import {
   ICON_RESTORE,
 } from "../../lib/icons";
 
-function mountCard(active = true) {
-  return mount(ModelSnapshotCard, {
+function mountSection(active = true) {
+  return mount(ModelSnapshotSection, {
     props: { active },
     global: { directives: { tooltip: tooltipDirective } },
   });
 }
 
-describe("ModelSnapshotCard 模型快照卡片", () => {
+describe("ModelSnapshotSection 模型快照分区", () => {
   beforeEach(() => {
     mockList.mockReset().mockResolvedValue(["a", "b"]);
     mockCreate.mockReset().mockResolvedValue(undefined);
@@ -59,12 +59,17 @@ describe("ModelSnapshotCard 模型快照卡片", () => {
     mockSetToast.mockReset();
   });
 
-  it("激活时拉取列表并渲染卡片头与快照行", async () => {
-    const wrapper = mountCard();
+  it("激活时拉取列表并渲染分区标题、卡片头与快照行", async () => {
+    const wrapper = mountSection();
     await flushPromises();
 
     expect(mockList).toHaveBeenCalledOnce();
-    expect(wrapper.find(".model-config-card-head h3").text()).toBe("模型快照");
+    // 独立 Tab：区标题 + 说明文案，卡片内小标题为「已保存快照」
+    expect(wrapper.find(".settings-section-title").text()).toBe("模型快照");
+    expect(wrapper.find(".settings-section-desc").text()).toContain(
+      "CODEX_HOME/codex-ui",
+    );
+    expect(wrapper.find(".model-config-card-head h3").text()).toBe("已保存快照");
     const rows = wrapper.findAll(".model-snapshot-row");
     expect(rows).toHaveLength(2);
     expect(rows[0].find(".model-snapshot-name").text()).toBe("a");
@@ -77,20 +82,20 @@ describe("ModelSnapshotCard 模型快照卡片", () => {
   });
 
   it("未激活时不拉取列表；空列表显示空态", async () => {
-    const inactive = mountCard(false);
+    const inactive = mountSection(false);
     await flushPromises();
     expect(mockList).not.toHaveBeenCalled();
     inactive.unmount();
 
     mockList.mockResolvedValue([]);
-    const wrapper = mountCard();
+    const wrapper = mountSection();
     await flushPromises();
     expect(wrapper.find(".plugin-empty").text()).toBe("暂无模型快照");
     wrapper.unmount();
   });
 
   it("还原：调用 apply 并 emit applied", async () => {
-    const wrapper = mountCard();
+    const wrapper = mountSection();
     await flushPromises();
     const restore = wrapper.find('button[aria-label="还原模型快照a"]');
     expect(restore.find("path").attributes("d")).toBe(ICON_RESTORE);
@@ -104,7 +109,7 @@ describe("ModelSnapshotCard 模型快照卡片", () => {
 
   it("还原失败：不 emit applied", async () => {
     mockApply.mockRejectedValue(new Error("boom"));
-    const wrapper = mountCard();
+    const wrapper = mountSection();
     await flushPromises();
     await wrapper.find('button[aria-label="还原模型快照a"]').trigger("click");
     await flushPromises();
@@ -114,7 +119,7 @@ describe("ModelSnapshotCard 模型快照卡片", () => {
   });
 
   it("删除与打开：调用对应函数并带确认/图标", async () => {
-    const wrapper = mountCard();
+    const wrapper = mountSection();
     await flushPromises();
 
     const del = wrapper.find('button[aria-label="删除模型快照b"]');
@@ -134,7 +139,7 @@ describe("ModelSnapshotCard 模型快照卡片", () => {
   });
 
   it("新建：头按钮打开弹窗，输入名称后创建并刷新列表", async () => {
-    const wrapper = mountCard();
+    const wrapper = mountSection();
     await flushPromises();
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
 

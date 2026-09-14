@@ -265,7 +265,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型配置 → 动态工具 → 技能管理 → MCP管理 → 插件管理 → 定时任务", () => {
+  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型快照 → 模型配置 → 动态工具 → 技能管理 → MCP管理 → 插件管理 → 定时任务", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
@@ -273,12 +273,14 @@ describe("SettingsView 模型配置", () => {
     expect(labels.indexOf("个性化")).toBe(0);
     expect(labels.indexOf("基础设置")).toBe(1);
     expect(labels.indexOf("全局指令")).toBe(2);
-    expect(labels.indexOf("模型配置")).toBe(3);
-    expect(labels.indexOf("动态工具")).toBe(4);
-    expect(labels.indexOf("技能管理")).toBe(5);
-    expect(labels.indexOf("MCP管理")).toBe(6);
-    expect(labels.indexOf("插件管理")).toBe(7);
-    expect(labels.indexOf("定时任务")).toBe(8);
+    // 模型快照独立成 Tab，且排在剩余的「模型配置」之前
+    expect(labels.indexOf("模型快照")).toBe(3);
+    expect(labels.indexOf("模型配置")).toBe(4);
+    expect(labels.indexOf("动态工具")).toBe(5);
+    expect(labels.indexOf("技能管理")).toBe(6);
+    expect(labels.indexOf("MCP管理")).toBe(7);
+    expect(labels.indexOf("插件管理")).toBe(8);
+    expect(labels.indexOf("定时任务")).toBe(9);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -301,14 +303,67 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain("模型配置");
     expect(wrapper.text()).toContain("model_catalog_json");
     expect(wrapper.text()).toContain("AGENTS");
+    // 模型快照已迁出：模型配置 Tab 只剩 1 张卡，快照 Tab 自带 1 张卡
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-card").length,
-    ).toBe(2);
+    ).toBe(1);
     expect(
       wrapper.findAll(".settings-section-global-instructions .model-config-card")
         .length,
     ).toBe(1);
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
+  });
+
+  it("模型快照 Tab 独立渲染，还原后模型配置自动重读", async () => {
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read") {
+        return Promise.resolve(sampleModelConfigRead);
+      }
+      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "custom_instructions_read")
+        return Promise.resolve(sampleAgentsState);
+      if (cmd === "model_snapshots_list") return Promise.resolve(["dev"]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const readCount = () =>
+      mockedInvoke.mock.calls.filter(([name]) => name === "model_config_read")
+        .length;
+    expect(readCount()).toBe(1);
+
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("模型快照"))!
+      .trigger("click");
+    await flushPromises();
+
+    // 快照卡片归属「模型快照」Tab，卡片头小标题为「已保存快照」
+    expect(
+      wrapper.findAll(".settings-section-model-snapshot .model-config-card")
+        .length,
+    ).toBe(1);
+    expect(
+      wrapper
+        .find(".settings-section-model-snapshot .model-config-card-head h3")
+        .text(),
+    ).toBe("已保存快照");
+    // 模型配置 Tab 内不再有快照行
+    expect(
+      wrapper
+        .find(".settings-section-model-config .model-snapshot-row")
+        .exists(),
+    ).toBe(false);
+
+    await wrapper
+      .find('button[aria-label="还原模型快照dev"]')
+      .trigger("click");
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("model_snapshots_apply", {
+      name: "dev",
+    });
+    expect(readCount()).toBe(2);
+    wrapper.unmount();
   });
 
   it("模型提供方列表排在 model 等输入之前", async () => {
@@ -579,7 +634,7 @@ describe("SettingsView 模型配置", () => {
         (args as { method?: string } | undefined)?.method === "config/read",
     ).length;
     await wrapper
-      .find(".settings-section-model-config .model-config-card:not(.model-snapshot-card) .model-config-reload-btn")
+      .find(".settings-section-model-config .model-config-card .model-config-reload-btn")
       .trigger("click");
     await flushPromises();
     expect(
@@ -603,7 +658,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(
       wrapper
-        .find(".settings-section-model-config .model-config-card:not(.model-snapshot-card) .model-config-reload-btn")
+        .find(".settings-section-model-config .model-config-card .model-config-reload-btn")
         .attributes("aria-label"),
     ).toBe("刷新");
     const agentsCard = wrapper.find(
@@ -619,7 +674,7 @@ describe("SettingsView 模型配置", () => {
       ([name]) => name === "custom_instructions_read",
     ).length;
     await wrapper
-      .find(".settings-section-model-config .model-config-card:not(.model-snapshot-card) .model-config-reload-btn")
+      .find(".settings-section-model-config .model-config-card .model-config-reload-btn")
       .trigger("click");
     await flushPromises();
     await agentsCard.find(".model-config-reload-btn").trigger("click");
@@ -1428,13 +1483,14 @@ describe("SettingsView 动态工具", () => {
     await flushPromises();
     const nav = wrapper.findAll(".settings-nav-item");
     const idx = (t: string) => nav.map((i) => i.text().trim()).indexOf(t);
-    expect(idx("模型配置")).toBe(3);
-    expect(idx("动态工具")).toBe(4);
-    expect(idx("技能管理")).toBe(5);
-    expect(idx("MCP管理")).toBe(6);
-    expect(idx("插件管理")).toBe(7);
-    expect(idx("定时任务")).toBe(8);
-    await nav[4].trigger("click");
+    expect(idx("模型快照")).toBe(3);
+    expect(idx("模型配置")).toBe(4);
+    expect(idx("动态工具")).toBe(5);
+    expect(idx("技能管理")).toBe(6);
+    expect(idx("MCP管理")).toBe(7);
+    expect(idx("插件管理")).toBe(8);
+    expect(idx("定时任务")).toBe(9);
+    await nav[5].trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("动态工具");
     expect(wrapper.text()).toContain("禁用后新会话不再注入");
@@ -2577,13 +2633,14 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染十个分类，默认选中第一个", () => {
+  it("左侧导航渲染十一个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "个性化",
       "基础设置",
       "全局指令",
+      "模型快照",
       "模型配置",
       "动态工具",
       "技能管理",
@@ -2599,6 +2656,10 @@ describe("SettingsView 设置标签行为", () => {
     expect(items[4].classes()).not.toContain("active");
     expect(items[5].classes()).not.toContain("active");
     expect(items[6].classes()).not.toContain("active");
+    expect(items[7].classes()).not.toContain("active");
+    expect(items[8].classes()).not.toContain("active");
+    expect(items[9].classes()).not.toContain("active");
+    expect(items[10].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;

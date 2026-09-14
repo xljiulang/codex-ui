@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   loadModelProviderConfig,
@@ -32,9 +32,8 @@ import type {
 import AppSelect, { type AppSelectOption } from "../AppSelect.vue";
 import ModelConfigModelPicker from "../ModelConfigModelPicker.vue";
 import ModalDialog from "../ModalDialog.vue";
-import ModelSnapshotCard from "./ModelSnapshotCard.vue";
 
-defineProps<{ active: boolean }>();
+const props = defineProps<{ active: boolean; reloadToken?: number }>();
 
 /** DeepSeek Codex 接入文档（模型提供方配置参考，浏览器打开） */
 const DEEPSEEK_CODEX_DOCS_URL =
@@ -252,6 +251,14 @@ onMounted(() => {
   void loadModelConfig();
 });
 
+// 外部还原信号（设置页「模型快照」分区还原成功后自增）：立即把磁盘值同步回本卡片
+watch(
+  () => props.reloadToken,
+  (token) => {
+    if (token) void loadModelConfig();
+  },
+);
+
 async function loadModelConfig() {
   modelConfig.loading = true;
   try {
@@ -382,37 +389,10 @@ function removeProvider(index: number) {
   modelConfig.providers.splice(index, 1);
 }
 
-/** 仅当提供方同时有 base_url 和 API Key 时允许生成模型目录。 */
+/** 仅当提供方同时有 base_url 和 API Key 时显示「生成模型目录」按钮。 */
 function canGenerateModelCatalog(p: ModelProviderInfo): boolean {
   return !!(p.base_url ?? "").trim() && !!(p.experimental_bearer_token ?? "").trim();
 }
-
-/** 当前选中的提供方（未选「不使用模型提供方」或选择项已不存在时为 null）。 */
-const activeProvider = computed<ModelProviderInfo | null>(
-  () =>
-    modelConfig.providers.find((p) => p.key === modelConfig.model_provider) ?? null,
-);
-
-/** 「生成模型目录」按钮可用性：绑定当前选择的提供方（需同时有 base_url 与 API Key）。 */
-const catalogGenerateEnabled = computed(() => {
-  const p = activeProvider.value;
-  return (
-    !!p &&
-    canGenerateModelCatalog(p) &&
-    !modelConfig.loading &&
-    !modelConfig.saving &&
-    !catalogGenerating.value
-  );
-});
-
-/** 「生成模型目录」按钮提示：可用时为动作名，不可用时说明原因。 */
-const catalogGenerateTip = computed(() => {
-  const p = activeProvider.value;
-  if (!p) return "请先选择一个模型提供方";
-  return canGenerateModelCatalog(p)
-    ? "生成模型目录"
-    : "当前提供方缺少 base_url 或 API Key";
-});
 
 /** 模型目录标题链接提示：文件存在时为打开动作，文件缺失或路径未读取时给出状态。 */
 const catalogTitleTip = computed(() => {
@@ -422,13 +402,6 @@ const catalogTitleTip = computed(() => {
     ? `在编辑器中打开 ${path}`
     : `${path}（文件不存在，保存时将新建）`;
 });
-
-/** 为当前选中的提供方生成模型目录（模型目录区块右上角按钮入口）。 */
-function generateModelCatalogForActiveProvider() {
-  const p = activeProvider.value;
-  if (!p || !catalogGenerateEnabled.value) return;
-  void generateModelCatalog(p);
-}
 
 /** 按搜索条件过滤候选模型；未匹配项保留用于禁用展示。 */
 const filteredCatalogModels = computed(() => {
@@ -685,10 +658,8 @@ function openModelConfigFile() {
   <section v-show="active" class="settings-section settings-section-model-config">
     <h2 class="settings-section-title">模型配置</h2>
     <p class="settings-section-desc">
-      模型、模型提供方、模型目录与模型快照
+      模型、模型提供方与模型目录
     </p>
-
-    <ModelSnapshotCard :active="active" @applied="() => void loadModelConfig()" />
 
     <div class="model-config-card">
       <div class="model-config-card-head">
@@ -788,6 +759,23 @@ function openModelConfigFile() {
             {{ providerRowError(p) }}
           </p>
           <div class="model-provider-actions">
+            <!-- 仅当前选中的提供方行显示：能力不足直接不渲染（不用禁用态说明原因） -->
+            <button
+              v-if="
+                modelConfig.model_provider === p.key && canGenerateModelCatalog(p)
+              "
+              class="btn btn-icon model-catalog-generate"
+              :disabled="
+                modelConfig.loading || modelConfig.saving || !!catalogGenerating
+              "
+              aria-label="生成模型目录"
+              v-tooltip="'生成模型目录'"
+              @click="generateModelCatalog(p)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path :d="ICON_ARROW_CIRCLE_DOWN" />
+              </svg>
+            </button>
             <button
               class="btn btn-icon provider-row-edit"
               aria-label="编辑"
@@ -832,19 +820,6 @@ function openModelConfigFile() {
               @click="openModelConfigFile"
             >
               model_catalog_json（模型目录）
-            </button>
-          </span>
-          <!-- 禁用按钮不派发鼠标事件，tooltip 挂在包裹元素上 -->
-          <span class="model-catalog-generate-wrap" v-tooltip="catalogGenerateTip">
-            <button
-              class="btn btn-icon model-catalog-generate"
-              :disabled="!catalogGenerateEnabled"
-              aria-label="生成模型目录"
-              @click="generateModelCatalogForActiveProvider"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path :d="ICON_ARROW_CIRCLE_DOWN" />
-              </svg>
             </button>
           </span>
         </div>
@@ -1368,14 +1343,7 @@ function openModelConfigFile() {
 .model-catalog-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-4);
-}
-
-/* 生成按钮包裹层：原生 disabled 按钮不派发鼠标事件，tooltip 挂这里才能在禁用态显示 */
-.model-catalog-generate-wrap {
-  display: inline-flex;
-  flex-shrink: 0;
 }
 
 </style>

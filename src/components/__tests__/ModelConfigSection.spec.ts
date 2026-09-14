@@ -13,16 +13,6 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   };
 });
 
-const mockSnapshotList = vi.hoisted(() => vi.fn());
-const mockSnapshotApply = vi.hoisted(() => vi.fn());
-vi.mock("../../composables/useModelSnapshots", () => ({
-  listModelSnapshots: mockSnapshotList,
-  createModelSnapshot: vi.fn(),
-  applyModelSnapshot: mockSnapshotApply,
-  deleteModelSnapshot: vi.fn(),
-  openModelSnapshot: vi.fn(),
-}));
-
 import { invoke } from "@tauri-apps/api/core";
 import ModelConfigSection from "../settings/ModelConfigSection.vue";
 import {
@@ -188,7 +178,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     wire_api: "responses",
   };
 
-  /** 生成按钮绑定「当前选中的提供方」：默认选中 deepseek（同时有 base_url 与 API Key）。 */
+  /** 生成按钮显示在「当前选中的提供方」行内：默认选中 deepseek（同时有 base_url 与 API Key）。 */
   function activeProviderState(
     extra: Partial<ModelProviderConfigState> = {},
   ): ModelProviderConfigState {
@@ -272,7 +262,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     };
   }
 
-  it("生成按钮常驻模型目录区块右上角，提供方行内不再渲染", async () => {
+  it("生成按钮只出现在当前选中且有 base_url 与 API Key 的提供方行内（编辑之前）", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({
         providers: [providerWithKey, providerWithoutKey],
@@ -281,25 +271,29 @@ describe("ModelConfigSection 生成模型目录", () => {
     );
     const wrapper = await mountSection();
     const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
-    expect(rows[0].find(".model-catalog-generate").exists()).toBe(false);
+    // 仅当前选中的 deepseek 行渲染；未选中的 other 行不渲染（无禁用态可看）
+    expect(rows[0].find(".model-catalog-generate").exists()).toBe(true);
     expect(rows[1].find(".model-catalog-generate").exists()).toBe(false);
 
-    const generateButton = wrapper.find(
-      ".model-catalog-head .model-catalog-generate",
-    );
-    expect(generateButton.exists()).toBe(true);
+    const generateButton = rows[0].find(".model-catalog-generate");
     expect(generateButton.find("svg").exists()).toBe(true);
     expect(
       generateButton.find("path").attributes("d"),
     ).toBe(ICON_ARROW_CIRCLE_DOWN);
     expect(generateButton.attributes("aria-label")).toBe("生成模型目录");
     expect(generateButton.attributes("disabled")).toBeUndefined();
-    // tooltip 挂在包裹元素上（原生禁用按钮不派发鼠标事件，挂按钮上禁用态不会显示）
-    const tip = wrapper.find(".model-catalog-head .model-catalog-generate-wrap");
-    expect(tip.attributes("data-tip")).toBe("生成模型目录");
-    expect(tip.attributes("data-tip")).not.toContain("API Key");
+    expect(generateButton.attributes("data-tip")).toBe("生成模型目录");
+    expect(generateButton.attributes("data-tip")).not.toContain("API Key");
 
-    // 标题本身即文件链接，与生成按钮同处标题行（默认 mock 未解析出路径 → 禁用）
+    // 位置：行内第一个按钮，「编辑」排在其后
+    const actions = rows[0].findAll(".model-provider-actions button");
+    expect(actions[0].classes()).toContain("model-catalog-generate");
+    expect(actions[1].classes()).toContain("provider-row-edit");
+
+    // 模型目录标题行只剩标题链接（默认 mock 未解析出路径 → 禁用）
+    expect(
+      wrapper.find(".model-catalog-head .model-catalog-generate").exists(),
+    ).toBe(false);
     const titleLink = wrapper.find(".model-catalog-head .model-config-title-link");
     expect(titleLink.exists()).toBe(true);
     expect(titleLink.text()).toBe("model_catalog_json（模型目录）");
@@ -344,9 +338,11 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(
       wrapper.find(".model-catalog-block .model-config-path-link").exists(),
     ).toBe(false);
+    // 生成按钮已迁到提供方行内，标题行不再渲染
     expect(
       wrapper.find(".model-catalog-head .model-catalog-generate").exists(),
-    ).toBe(true);
+    ).toBe(false);
+    expect(wrapper.find(".model-catalog-generate").exists()).toBe(true);
   });
 
   it("模型目录文件缺失时标题链接禁用，tooltip 提示保存时将新建", async () => {
@@ -367,18 +363,13 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(tip).toContain("文件不存在，保存时将新建");
   });
 
-  it("未选择提供方时按钮禁用并提示，点击不发起生成", async () => {
+  it("未选择提供方时任何行都不渲染生成按钮", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({ providers: [providerWithKey], model_provider: "" }),
     );
     const wrapper = await mountSection();
     const button = wrapper.find(".model-catalog-generate");
-    expect(button.attributes("disabled")).toBeDefined();
-    expect(
-      wrapper.find(".model-catalog-generate-wrap").attributes("data-tip"),
-    ).toBe("请先选择一个模型提供方");
-
-    await button.trigger("click");
+    expect(button.exists()).toBe(false);
     expect(
       mockedInvoke.mock.calls.some(
         ([cmd]) => cmd === "model_catalog_generate_from_provider",
@@ -387,7 +378,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(wrapper.find(".model-catalog-picker").exists()).toBe(false);
   });
 
-  it("选中缺 API Key 的提供方时按钮禁用并提示原因", async () => {
+  it("选中的提供方缺 API Key 时不渲染生成按钮（无原因提示）", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({
         providers: [providerWithKey, providerWithoutKey],
@@ -395,13 +386,8 @@ describe("ModelConfigSection 生成模型目录", () => {
       }),
     );
     const wrapper = await mountSection();
-    const button = wrapper.find(".model-catalog-generate");
-    expect(button.attributes("disabled")).toBeDefined();
-    expect(
-      wrapper.find(".model-catalog-generate-wrap").attributes("data-tip"),
-    ).toBe("当前提供方缺少 base_url 或 API Key");
-
-    await button.trigger("click");
+    // 有能力的 deepseek 未选中、选中的 other 缺 API Key：两行都不渲染按钮
+    expect(wrapper.find(".model-catalog-generate").exists()).toBe(false);
     expect(
       mockedInvoke.mock.calls.some(
         ([cmd]) => cmd === "model_catalog_generate_from_provider",
@@ -409,7 +395,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     ).toBe(false);
   });
 
-  it("切换提供方选择时按钮可用性跟随变化", async () => {
+  it("切换提供方选择时生成按钮跟随移动到新选中行", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({
         providers: [providerWithKey, providerWithoutKey],
@@ -417,19 +403,21 @@ describe("ModelConfigSection 生成模型目录", () => {
       }),
     );
     const wrapper = await mountSection();
-    const button = wrapper.find(".model-catalog-generate");
-    expect(button.attributes("disabled")).toBeDefined();
+    const rows = () =>
+      wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    expect(wrapper.find(".model-catalog-generate").exists()).toBe(false);
 
     // 0 = 不使用提供者，1 = deepseek（有 base_url + API Key），2 = other
     const radios = wrapper.findAll('input[name="model-provider-active"]');
     await radios[1].setValue();
-    expect(button.attributes("disabled")).toBeUndefined();
+    expect(rows()[0].find(".model-catalog-generate").exists()).toBe(true);
+    expect(rows()[1].find(".model-catalog-generate").exists()).toBe(false);
     expect(
-      wrapper.find(".model-catalog-generate-wrap").attributes("data-tip"),
+      rows()[0].find(".model-catalog-generate").attributes("data-tip"),
     ).toBe("生成模型目录");
 
     await radios[0].setValue();
-    expect(button.attributes("disabled")).toBeDefined();
+    expect(wrapper.find(".model-catalog-generate").exists()).toBe(false);
   });
 
   it("wire_api 仅支持 responses：历史 chat 行内报错并回填 responses", async () => {
@@ -854,7 +842,7 @@ describe("ModelConfigSection 生成模型目录", () => {
     ).toBe("old-catalog");
   });
 
-  it("生成期间按钮禁用", async () => {
+  it("生成期间行内按钮禁用", async () => {
     mockedLoad.mockResolvedValue(
       activeProviderState(),
     );
@@ -869,7 +857,10 @@ describe("ModelConfigSection 生成模型目录", () => {
       return Promise.resolve(undefined);
     });
     const wrapper = await mountSection();
-    const button = wrapper.find(".model-catalog-generate");
+    const button = wrapper.find(
+      ".model-provider-row .model-provider-actions .model-catalog-generate",
+    );
+    expect(button.exists()).toBe(true);
     await button.trigger("click");
     await vi.waitFor(() => expect(button.attributes("disabled")).toBeDefined());
     resolveGenerate(catalogResult());
@@ -963,16 +954,14 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 });
 
-describe("ModelConfigSection 模型快照联动", () => {
+describe("ModelConfigSection 外部重读信号", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedInvoke.mockResolvedValue(modelConfigReadResult());
     mockedLoad.mockResolvedValue(providerConfigState());
-    mockSnapshotList.mockReset().mockResolvedValue(["dev"]);
-    mockSnapshotApply.mockReset().mockResolvedValue(undefined);
   });
 
-  it("还原模型快照后自动重读一次模型配置", async () => {
+  it("reloadToken 自增时重读一次模型配置（还原快照后由设置页触发）", async () => {
     const wrapper = await mountSection();
     const readCount = () =>
       mockedInvoke.mock.calls.filter(
@@ -980,12 +969,13 @@ describe("ModelConfigSection 模型快照联动", () => {
       ).length;
     expect(readCount()).toBe(1);
 
-    await wrapper
-      .find('button[aria-label="还原模型快照dev"]')
-      .trigger("click");
+    await wrapper.setProps({ reloadToken: 1 });
     await flushPromises();
+    expect(readCount()).toBe(2);
 
-    expect(mockSnapshotApply).toHaveBeenCalledWith("dev");
+    // 同值重复设置不再触发
+    await wrapper.setProps({ reloadToken: 1 });
+    await flushPromises();
     expect(readCount()).toBe(2);
     wrapper.unmount();
   });
