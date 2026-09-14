@@ -187,6 +187,12 @@ export interface BrowserBridgeStatus {
   nodeReplRunning: boolean;
 }
 
+/** Rust browser_bridge_stop 的结果：stopped/failed 都是进程名（failed 带原因） */
+export interface BrowserBridgeStopReport {
+  stopped: string[];
+  failed: string[];
+}
+
 /** 是否为携带浏览器桥接的 chrome 插件（openai-bundled 的 chrome） */
 export function isChromeBridgePlugin(plugin: {
   id: string;
@@ -205,7 +211,15 @@ export async function repairBrowserBridge(): Promise<BrowserBridgeRepairReport> 
   return invoke<BrowserBridgeRepairReport>("browser_bridge_repair");
 }
 
-/** 卸载预检：桥接进程（extension-host/node_repl）运行中会锁住缓存目录，卸载将报 os error 5 */
+/** 安装/卸载预检：桥接进程（extension-host/node_repl）运行中会锁住缓存目录，装卸载将报 os error 5 */
 export async function checkBrowserBridge(): Promise<BrowserBridgeStatus> {
   return invoke<BrowserBridgeStatus>("browser_bridge_status");
+}
+
+/**
+ * 结束浏览器桥接进程（安装 chrome 插件前由用户确认后调用）：
+ * 结束会中断当前浏览器控制会话，Chrome 扩展下次使用时会自动重新拉起 extension-host。
+ */
+export async function stopBrowserBridge(): Promise<BrowserBridgeStopReport> {
+  return invoke<BrowserBridgeStopReport>("browser_bridge_stop");
 }

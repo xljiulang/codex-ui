@@ -3429,6 +3429,159 @@ describe("SettingsView 插件管理", () => {
       params: { marketplacePath: "C:/x/bundled", pluginName: "pdf" },
     });
     expect(store.toast).toContain("已安装 PDF");
+    // 非 chrome 桥接插件不做进程预检
+    expect(mockedInvoke).not.toHaveBeenCalledWith("browser_bridge_status");
+    expect(mockedInvoke).not.toHaveBeenCalledWith("browser_bridge_stop");
+  });
+
+  /** chrome 插件安装用例的公共 mock：plugin/list 里只有 chrome 一项 */
+  function mockChromePluginList(
+    extra: (cmd: string, args?: any) => unknown | undefined,
+  ) {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/list") {
+        return {
+          marketplaces: [
+            {
+              name: "openai-bundled",
+              path: "C:/x/bundled",
+              plugins: [
+                {
+                  id: "chrome@openai-bundled",
+                  name: "chrome",
+                  installed: false,
+                  interface: { displayName: "ChatGPT 浏览器插件" },
+                },
+              ],
+            },
+          ],
+        };
+      }
+      const handled = extra(cmd, args);
+      return handled === undefined ? {} : handled;
+    });
+  }
+
+  it("安装 chrome 插件时桥接进程运行：确认后先结束进程再安装", async () => {
+    mockChromePluginList((cmd) => {
+      if (cmd === "browser_bridge_status") {
+        return { extensionHostRunning: true, nodeReplRunning: false };
+      }
+      if (cmd === "browser_bridge_stop") {
+        return { stopped: ["extension-host.exe"], failed: [] };
+      }
+      if (cmd === "browser_bridge_repair") {
+        return { status: "no-registration", latestAction: "none", message: "" };
+      }
+      return undefined;
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+
+    // 先弹预检确认，此时还没有安装
+    expect(mockedInvoke).toHaveBeenCalledWith("browser_bridge_status");
+    expect(store.confirm).toBeTruthy();
+    expect(store.confirm!.title).toBe("浏览器桥接进程运行中");
+    const installCalls = () =>
+      mockedInvoke.mock.calls.filter(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method === "plugin/install",
+      );
+    expect(installCalls()).toHaveLength(0);
+
+    settleConfirm(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("browser_bridge_stop");
+    // 顺序：先结束进程，再安装
+    const stopAt = mockedInvoke.mock.calls.findIndex(
+      ([cmd]) => cmd === "browser_bridge_stop",
+    );
+    const installAt = mockedInvoke.mock.calls.findIndex(
+      ([cmd, args]) =>
+        cmd === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method === "plugin/install",
+    );
+    expect(stopAt).toBeGreaterThanOrEqual(0);
+    expect(installAt).toBeGreaterThan(stopAt);
+    expect(store.toast).toContain("已安装 ChatGPT 浏览器插件");
+  });
+
+  it("安装 chrome 插件时用户取消预检：不结束进程也不安装", async () => {
+    mockChromePluginList((cmd) => {
+      if (cmd === "browser_bridge_status") {
+        return { extensionHostRunning: false, nodeReplRunning: true };
+      }
+      return undefined;
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(store.confirm!.title).toBe("浏览器桥接进程运行中");
+
+    settleConfirm(false);
+    await flushPromises();
+    expect(mockedInvoke).not.toHaveBeenCalledWith("browser_bridge_stop");
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method === "plugin/install",
+      ),
+    ).toBe(false);
+  });
+
+  it("结束桥接进程失败时中止安装并给出中文指引", async () => {
+    mockChromePluginList((cmd) => {
+      if (cmd === "browser_bridge_status") {
+        return { extensionHostRunning: true, nodeReplRunning: true };
+      }
+      if (cmd === "browser_bridge_stop") {
+        return {
+          stopped: [],
+          failed: ["extension-host.exe（pid 1: 打开进程失败）"],
+        };
+      }
+      return undefined;
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    settleConfirm(true);
+    await flushPromises();
+    expect(store.toast).toContain("请完全退出 Chrome");
+    expect(
+      mockedInvoke.mock.calls.some(
+        ([cmd, args]) =>
+          cmd === "codex_rpc" &&
+          (args as { method?: string } | undefined)?.method === "plugin/install",
+      ),
+    ).toBe(false);
+  });
+
+  it("安装因缓存被占用失败（os error 5）时给中文指引", async () => {
+    mockChromePluginList((cmd, args) => {
+      if (cmd === "codex_rpc" && args?.method === "plugin/install") {
+        throw new Error(
+          "failed to install plugin: failed to back up plugin cache entry: 拒绝访问。 (os error 5)",
+        );
+      }
+      return undefined;
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper.find(".plugin-marketplace-head").trigger("click");
+    await wrapper.find(".plugin-install-btn").trigger("click");
+    await flushPromises();
+    expect(store.toast).toContain("插件缓存文件被浏览器桥接进程占用");
+    expect(store.toast).not.toContain("failed to install plugin");
   });
 
   it("安装 chrome 插件后调用 browser_bridge_repair 并提示桥接就绪", async () => {

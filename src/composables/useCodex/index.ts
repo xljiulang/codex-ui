@@ -65,10 +65,12 @@ export {
   refreshPluginCaches,
   removeMarketplace,
   repairBrowserBridge,
+  stopBrowserBridge,
   uninstallPlugin,
 } from "./plugins";
 export type {
   BrowserBridgeRepairReport,
+  BrowserBridgeStopReport,
   BrowserBridgeStatus,
 } from "./plugins";
 export {

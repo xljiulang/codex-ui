@@ -4,7 +4,9 @@
 //! 链接一断 Chrome 扩展就拉不起 extension-host，codex 的 `agent.browsers.list()`
 //! 变空。本模块在插件安装后检查并修复该链接（必要时补写宿主注册），让控制
 //! Chrome 的链路随安装即可用；另提供进程状态查询供卸载预检（运行中的
-//! extension-host/node_repl 会锁住缓存目录文件，导致卸载报 os error 5）。
+//! extension-host/node_repl 会锁住缓存目录文件，导致卸载报 os error 5），
+//! 以及安装 chrome 插件前的「结束桥接进程」入口（同一批文件被占用时
+//! `plugin/install` 备份缓存会失败）。
 
 use std::path::{Path, PathBuf};
 
@@ -29,13 +31,25 @@ pub struct BridgeRepairReport {
     pub message: String,
 }
 
-/// 桥接进程状态（卸载预检用）。
+/// 桥接进程状态（安装/卸载预检用）。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeStatus {
     pub extension_host_running: bool,
     pub node_repl_running: bool,
 }
+
+/// 结束桥接进程的结果：stopped/failed 都是进程名（failed 含结束失败的原因）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeStopReport {
+    pub stopped: Vec<String>,
+    pub failed: Vec<String>,
+}
+
+/// 需要结束的桥接进程名（扩展宿主由 Chrome 拉起、node_repl 由 codex 拉起，
+/// 二者都可能占用插件缓存目录里的文件）。
+const BRIDGE_PROCESS_NAMES: [&str; 2] = ["extension-host.exe", "node_repl.exe"];
 
 /// 插件安装后自愈入口：修复 latest junction 与原生宿主注册。
 #[tauri::command]
@@ -44,13 +58,47 @@ pub fn browser_bridge_repair() -> Result<BridgeRepairReport, String> {
     Ok(repair_in(&home))
 }
 
-/// 查询桥接相关进程是否在运行（卸载预检）。
+/// 查询桥接相关进程是否在运行（安装/卸载预检）。
 #[tauri::command]
 pub fn browser_bridge_status() -> Result<BridgeStatus, String> {
     Ok(BridgeStatus {
-        extension_host_running: process_running("extension-host.exe"),
-        node_repl_running: process_running("node_repl.exe"),
+        extension_host_running: process_running(BRIDGE_PROCESS_NAMES[0]),
+        node_repl_running: process_running(BRIDGE_PROCESS_NAMES[1]),
     })
+}
+
+/// 结束桥接进程（安装 chrome 插件前由用户确认后调用）：
+/// 逐 PID `TerminateProcess` 并等待退出，进程不存在不算失败。
+#[tauri::command]
+pub fn browser_bridge_stop() -> Result<BridgeStopReport, String> {
+    Ok(stop_processes(&BRIDGE_PROCESS_NAMES))
+}
+
+/// 结束给定名字的进程，返回成功/失败名单（纯编排，便于测试注入伪进程名）。
+fn stop_processes(names: &[&str]) -> BridgeStopReport {
+    let mut stopped: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for name in names {
+        let pids = pids_of(name);
+        if pids.is_empty() {
+            continue;
+        }
+        let mut failures: Vec<String> = Vec::new();
+        let mut killed_any = false;
+        for pid in pids {
+            match terminate_pid(pid, std::time::Duration::from_secs(2)) {
+                Ok(()) => killed_any = true,
+                Err(e) => failures.push(format!("pid {pid}: {e}")),
+            }
+        }
+        if killed_any {
+            stopped.push((*name).to_string());
+        }
+        if !failures.is_empty() {
+            failed.push(format!("{}（{}）", name, failures.join("；")));
+        }
+    }
+    BridgeStopReport { stopped, failed }
 }
 
 impl BridgeRepairReport {
@@ -530,7 +578,7 @@ fn set_junction_reparse(link: &Path, target: &Path) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn process_running(exe_name: &str) -> bool {
+fn pids_of(exe_name: &str) -> Vec<u32> {
     use std::mem::size_of;
 
     use windows::Win32::Foundation::CloseHandle;
@@ -539,32 +587,75 @@ fn process_running(exe_name: &str) -> bool {
         TH32CS_SNAPPROCESS,
     };
 
+    let mut pids: Vec<u32> = Vec::new();
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
     let Ok(snapshot) = snapshot else {
-        return false;
+        return pids;
     };
     let mut entry = PROCESSENTRY32W::default();
     entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
     let target = exe_name.to_lowercase();
-    let mut found = false;
     let mut iter = unsafe { Process32FirstW(snapshot, &mut entry) };
     while iter.is_ok() {
         let name = String::from_utf16_lossy(&entry.szExeFile);
         if name.trim_end_matches('\0').to_lowercase() == target {
-            found = true;
-            break;
+            pids.push(entry.th32ProcessID);
         }
         iter = unsafe { Process32NextW(snapshot, &mut entry) };
     }
     unsafe {
         let _ = CloseHandle(snapshot);
     }
-    found
+    pids
 }
 
 #[cfg(not(windows))]
-fn process_running(_exe_name: &str) -> bool {
-    false
+fn pids_of(_exe_name: &str) -> Vec<u32> {
+    Vec::new()
+}
+
+fn process_running(exe_name: &str) -> bool {
+    !pids_of(exe_name).is_empty()
+}
+
+/// 结束指定 PID 并等待其退出（Windows 实现见下；非 Windows 恒返回 Err）。
+#[cfg(windows)]
+fn terminate_pid(pid: u32, wait: std::time::Duration) -> Result<(), String> {
+    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows::Win32::System::Threading::{
+        OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
+    };
+
+    // 结束进程要 PROCESS_TERMINATE，随后的等待还要 PROCESS_SYNCHRONIZE
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, false, pid) };
+    let Ok(handle) = handle else {
+        return Err(format!("打开进程失败: {}", std::io::Error::last_os_error()));
+    };
+    let result = (|| -> Result<(), String> {
+        unsafe { TerminateProcess(handle, 1) }.map_err(|e| {
+            format!(
+                "结束进程失败: {e}（{}）",
+                std::io::Error::last_os_error()
+            )
+        })?;
+        let waited = unsafe { WaitForSingleObject(handle, wait.as_millis() as u32) };
+        if waited != WAIT_OBJECT_0 {
+            return Err(format!(
+                "等待进程退出超时: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(())
+    })();
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn terminate_pid(_pid: u32, _wait: std::time::Duration) -> Result<(), String> {
+    Err("仅 Windows 支持结束桥接进程".to_string())
 }
 
 #[cfg(windows)]
@@ -602,6 +693,48 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join(file), b"payload").unwrap();
         d
+    }
+
+    #[test]
+    fn stop_processes_ignores_missing_processes() {
+        let report = stop_processes(&["codex-ui-definitely-not-running.exe"]);
+        assert!(report.stopped.is_empty(), "{:?}", report.stopped);
+        assert!(report.failed.is_empty(), "{:?}", report.failed);
+    }
+
+    /// 枚举工具能按名字找到当前进程（自身 exe 名来自 current_exe）。
+    #[cfg(windows)]
+    #[test]
+    fn pids_of_finds_current_process() {
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        let Some(name) = exe.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            return;
+        };
+        let pids = pids_of(&name);
+        assert!(
+            pids.contains(&std::process::id()),
+            "应在 {name} 的 PID 列表里，实际 {pids:?}"
+        );
+    }
+
+    /// 真起一个子进程并按 PID 结束：验证 OpenProcess/TerminateProcess/等待链路可用。
+    #[cfg(windows)]
+    #[test]
+    fn terminate_pid_kills_real_process() {
+        let mut child = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("应能启动 powershell");
+        let pid = child.id();
+        terminate_pid(pid, std::time::Duration::from_secs(5)).expect("应能结束该进程");
+        // 进程已被结束：reap 后不应还在运行
+        let _ = child.wait();
+        let still_running = pids_of("powershell.exe").contains(&pid);
+        assert!(!still_running, "pid {pid} 应已退出");
     }
 
     #[test]

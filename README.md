@@ -235,7 +235,7 @@ Select-String -Path "$env:APPDATA\com.codexui.app\logs\zen\*.summary.txt" -Patte
 - 顶部「已安装插件」卡片跨市场汇总已安装插件（图标、版本、状态、来源市场，可直接卸载），无已安装插件时显示空态；
 - 下方插件市场按市场分组列出插件，每个插件展示接口图标（远程 URL 优先、本地路径其次，缺失或加载失败时以品牌色 + 首字母占位）；
 - 支持安装/卸载、添加/移除市场；
-- **chrome 插件（openai-bundled）安装后自动「浏览器桥接自愈」**——重装只恢复版本目录、不重建 `latest` junction，安装完成后自动检查并修复链接与原生宿主注册（`browser_bridge_repair`），toast 提示桥接就绪或失败原因，卸载前检测桥接进程运行并提示先关闭 Chrome（避免缓存文件被占用报 os error 5）。
+- **chrome 插件（openai-bundled）安装后自动「浏览器桥接自愈」**——重装只恢复版本目录、不重建 `latest` junction，安装完成后自动检查并修复链接与原生宿主注册（`browser_bridge_repair`），toast 提示桥接就绪或失败原因；**安装与卸载前都会检测浏览器桥接进程**（`extension-host.exe` / `node_repl.exe` 运行时会锁住插件缓存目录，导致安装备份缓存或卸载报 os error 5）——安装时弹确认框、确认后一键结束这两个进程再安装（会中断当前浏览器控制会话，Chrome 扩展下次使用自动重连），卸载时提示先完全退出 Chrome；任何插件安装若仍因缓存占用失败（os error 5）都会给出中文指引而非原始英文错误。
 
 ### 定时任务（设置页「定时任务」Tab）
 

@@ -11,6 +11,7 @@ import {
   removeMarketplace,
   repairBrowserBridge,
   setToast,
+  stopBrowserBridge,
   toastError,
   uninstallPlugin,
 } from "../../composables/useCodex";
@@ -76,11 +77,55 @@ async function chromeBridgeToastSuffix(): Promise<string> {
   }
 }
 
+/**
+ * chrome 插件安装前预检：桥接进程（extension-host / node_repl）运行中会锁住插件缓存目录，
+ * `plugin/install` 备份缓存时直接报 os error 5。确认后结束这两个进程再安装。
+ * 返回 false 表示用户取消或结束进程失败（调用方应中止安装）。
+ */
+async function ensureBridgeProcessesStopped(): Promise<boolean> {
+  try {
+    const bridge = await checkBrowserBridge();
+    if (!bridge.extensionHostRunning && !bridge.nodeReplRunning) return true;
+    const proceed = await askConfirm({
+      title: "浏览器桥接进程运行中",
+      message:
+        "检测到浏览器桥接进程（extension-host / node_repl）正在运行，它们锁住了插件缓存目录，安装时备份缓存会失败（os error 5）。" +
+        "结束进程会中断当前浏览器控制会话，Chrome 扩展下次使用时会自动重连。是否结束这些进程并继续安装？",
+      confirmLabel: "结束进程并安装",
+      cancelLabel: "取消",
+    });
+    if (!proceed) return false;
+  } catch {
+    // 预检失败不阻断安装（与卸载预检一致）
+    return true;
+  }
+  try {
+    const report = await stopBrowserBridge();
+    if (report.failed.length) {
+      setToast(
+        `结束桥接进程失败：${report.failed.join("、")}，请完全退出 Chrome 后重试`,
+      );
+      return false;
+    }
+    return true;
+  } catch (e) {
+    setToast(`结束桥接进程失败：${toastError(e)}，请完全退出 Chrome 后重试`);
+    return false;
+  }
+}
+
 async function doInstall(
   mp: PluginMarketplaceInfo,
   plugin: PluginCatalogItem,
 ) {
   if (pluginState.busy[plugin.id]) return;
+  // 仅 chrome 桥接插件做预检：它的缓存目录会被桥接进程锁住（os error 5）
+  if (
+    isChromeBridgePlugin(plugin) &&
+    !(await ensureBridgeProcessesStopped())
+  ) {
+    return;
+  }
   pluginState.busy[plugin.id] = true;
   try {
     const res = await installPlugin(mp, plugin);
@@ -100,12 +145,17 @@ async function doInstall(
     }
     await refreshPlugins();
   } catch (e) {
-    if (isAuthRequiredError(e)) {
+    const msg = toastError(e);
+    if (/os error 5|拒绝访问|back up plugin cache entry/i.test(msg)) {
       setToast(
-        `${plugin.displayName} 需要账号登录，当前 API key 不可用：${toastError(e)}`,
+        "安装失败：插件缓存文件被浏览器桥接进程占用，请结束桥接进程（或完全退出 Chrome）后重试",
+      );
+    } else if (isAuthRequiredError(e)) {
+      setToast(
+        `${plugin.displayName} 需要账号登录，当前 API key 不可用：${msg}`,
       );
     } else {
-      setToast(toastError(e));
+      setToast(msg);
     }
   } finally {
     pluginState.busy[plugin.id] = false;
@@ -759,4 +809,3 @@ function pluginInitial(p: PluginCatalogItem): string {
   display: block;
 }
 </style>
-
