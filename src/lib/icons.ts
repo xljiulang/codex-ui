@@ -238,7 +238,7 @@ export const ICON_PALETTE =
 
 /** 设置页「Zen 代理」导航：圆圈 + 字母 Z（描边渲染） */
 export const ICON_ZEN_PROXY =
-  "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM8 8h8l-8 8h8";
+  "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM6 12h12M6 12l3-3M6 12l3 3M18 12l-3-3M18 12l-3 3";
 
 /** 模型选择/模型配置共用：立方体线框（描边渲染，fill 置 none，与输入区「模型切换」按钮一致） */
 export const ICON_MODEL_CUBE =
