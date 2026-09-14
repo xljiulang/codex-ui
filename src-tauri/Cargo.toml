@@ -45,7 +45,13 @@ windows = { version = "0.62", features = [
     "Foundation",
 ] }
 windows-core = "0.61"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "gif",
+    "webp",
+    "bmp",
+] }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cron = "0.15"

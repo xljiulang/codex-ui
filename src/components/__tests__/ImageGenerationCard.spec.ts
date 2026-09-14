@@ -52,6 +52,29 @@ describe("ImageGenerationCard 生成图片卡片", () => {
     );
   });
 
+  it("灯箱：点图片即关闭，data-copy-source 取原始来源", async () => {
+    const wrapper = mount(ImageGenerationCard, {
+      props: { item: makeItem({ result: "C:\\tmp\\gen.png" }) },
+    });
+    await wrapper.find("img.image-gen-img").trigger("click");
+    const lightbox = wrapper.find(".lightbox");
+    expect(lightbox.exists()).toBe(true);
+    expect(lightbox.find("img").attributes("data-copy-source")).toBe(
+      "C:\\tmp\\gen.png",
+    );
+    await lightbox.find("img").trigger("click");
+    expect(wrapper.find(".lightbox").exists()).toBe(false);
+
+    // data URL 来源原样带回（后端自行解析）
+    const w2 = mount(ImageGenerationCard, {
+      props: { item: makeItem({ result: "data:image/png;base64,AAAA" }) },
+    });
+    await w2.find("img.image-gen-img").trigger("click");
+    expect(w2.find(".lightbox img").attributes("data-copy-source")).toBe(
+      "data:image/png;base64,AAAA",
+    );
+  });
+
   it("生成中显示状态，无图时不显示原始数据", () => {
     const wrapper = mount(ImageGenerationCard, {
       props: { item: makeItem({ status: "in_progress" }) },

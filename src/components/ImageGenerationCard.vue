@@ -46,12 +46,17 @@ const statusClass = computed(() => {
 const rawJson = computed(() => JSON.stringify(props.item, null, 2));
 const imgErr = ref(false);
 const lightboxSrc = ref("");
+/** 灯箱图片的可复制来源（提取自 result 的原始路径 / data URL）——右键「复制图像」用 */
+const lightboxSource = ref("");
 
 function openLightbox() {
-  if (hasImage.value) lightboxSrc.value = src.value;
+  if (!hasImage.value) return;
+  lightboxSrc.value = src.value;
+  lightboxSource.value = extractResultSrc(props.item.result);
 }
 function closeLightbox() {
   lightboxSrc.value = "";
+  lightboxSource.value = "";
 }
 function onKey(e: KeyboardEvent) {
   if (e.key === "Escape") closeLightbox();
@@ -93,7 +98,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       aria-label="图片预览"
       @click="closeLightbox"
     >
-      <img :src="lightboxSrc" alt="图片预览" @click.stop />
+      <!-- 不加 @click.stop：点图片也冒泡到遮罩，一次点击即关闭 -->
+      <img
+        :src="lightboxSrc"
+        :data-copy-source="lightboxSource"
+        alt="图片预览"
+      />
     </div>
   </div>
 </template>

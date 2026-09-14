@@ -759,6 +759,99 @@ pub async fn clipboard_read_text() -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// 从图片来源取原始字节：支持 `data:` URL（base64）与本地文件路径；
+/// 远程 http(s) 图片不做下载，直接给出可读错误。
+fn image_bytes_from_source(source: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Err("图片来源为空".into());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Err("暂不支持复制网络图片，请先另存到本地".into());
+    }
+    if lower.starts_with("data:") {
+        let Some((_, payload)) = trimmed.split_once(";base64,") else {
+            return Err("暂不支持该 data URL 形式（仅支持 base64）".into());
+        };
+        return base64::engine::general_purpose::STANDARD
+            .decode(payload.trim())
+            .map_err(|e| format!("data URL 解析失败: {e}"));
+    }
+    std::fs::read(trimmed).map_err(|e| format!("读取图片失败 {trimmed}: {e}"))
+}
+
+/// RGBA8 像素 → 32 位 BI_RGB 的 DIB（BITMAPINFOHEADER + 自顶向下像素行）。
+/// 透明像素按白底合成：多数应用忽略 32bpp 的 alpha，不合成会变成黑底。
+fn rgba_to_dib(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    const HEADER_LEN: usize = 40;
+    let mut out = Vec::with_capacity(HEADER_LEN + width as usize * height as usize * 4);
+    out.extend_from_slice(&40u32.to_le_bytes()); // biSize
+    out.extend_from_slice(&(width as i32).to_le_bytes()); // biWidth
+    out.extend_from_slice(&(-(height as i32)).to_le_bytes()); // biHeight：负值 = 自顶向下
+    out.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
+    out.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
+    out.extend_from_slice(&0u32.to_le_bytes()); // biCompression = BI_RGB
+    out.extend_from_slice(&(width * height * 4).to_le_bytes()); // biSizeImage
+    out.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
+    out.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
+    out.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
+    out.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
+    for px in rgba.chunks_exact(4) {
+        let alpha = px[3] as u32;
+        let blend = |c: u8| -> u8 { ((c as u32 * alpha + 255 * (255 - alpha)) / 255) as u8 };
+        out.push(blend(px[2])); // B
+        out.push(blend(px[1])); // G
+        out.push(blend(px[0])); // R
+        out.push(255); // A：写不透明
+    }
+    out
+}
+
+/// DIB → BMP 文件字节（14 字节 BITMAPFILEHEADER + DIB），供 CF_BITMAP 兜底格式使用。
+fn dib_to_bmp(dib: &[u8]) -> Vec<u8> {
+    const FILE_HEADER_LEN: usize = 14;
+    let mut out = Vec::with_capacity(FILE_HEADER_LEN + dib.len());
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&((FILE_HEADER_LEN + dib.len()) as u32).to_le_bytes()); // bfSize
+    out.extend_from_slice(&0u16.to_le_bytes()); // bfReserved1
+    out.extend_from_slice(&0u16.to_le_bytes()); // bfReserved2
+    out.extend_from_slice(&(FILE_HEADER_LEN as u32).to_le_bytes()); // bfOffBits
+    out.extend_from_slice(dib);
+    out
+}
+
+/// 把图片写入系统剪贴板（CF_DIB 主格式 + CF_BITMAP 兜底），供图片灯箱右键「复制图像」使用。
+#[tauri::command]
+pub async fn clipboard_write_image(source: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let bytes = image_bytes_from_source(&source)?;
+        let img = image::load_from_memory(&bytes)
+            .map_err(|e| format!("图片解码失败（支持 png/jpg/jpeg/webp/gif/bmp）：{e}"))?;
+        let rgba = img.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        if width == 0 || height == 0 {
+            return Err("图片尺寸无效".into());
+        }
+        let dib = rgba_to_dib(width, height, rgba.as_raw());
+        // 打开剪贴板（被占用时重试 10 次；Drop 时自动 close）
+        let _clip = clipboard_win::Clipboard::new_attempts(10)
+            .map_err(|e| format!("打开剪贴板失败: {e}"))?;
+        // CF_DIB：多数应用（画图/Word/微信等）首选；set() 会先清空剪贴板
+        clipboard_win::raw::set(clipboard_win::formats::CF_DIB, &dib)
+            .map_err(|e| format!("写入剪贴板图像失败: {e}"))?;
+        // 追加 CF_BITMAP，兼容只认 HBITMAP 的老程序（失败不阻断，DIB 已在剪贴板里）
+        let _ = clipboard_win::raw::set_bitmap_with(
+            &dib_to_bmp(&dib),
+            clipboard_win::options::NoClear,
+        );
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn settings_get(app: AppHandle) -> Result<AppSettings, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -877,6 +970,72 @@ mod tests {
         let b = pasted_file_name("png");
         assert_ne!(a, b);
         assert!(a.ends_with(".png"));
+    }
+
+    #[test]
+    fn image_bytes_from_source_reads_data_url_and_path_rejects_remote() {
+        use base64::Engine as _;
+        // data URL（base64）
+        let payload = base64::engine::general_purpose::STANDARD.encode(b"png-bytes");
+        let bytes =
+            image_bytes_from_source(&format!("data:image/png;base64,{payload}")).unwrap();
+        assert_eq!(bytes, b"png-bytes");
+        // 本地路径
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("a.png");
+        std::fs::write(&file, b"file-bytes").unwrap();
+        assert_eq!(
+            image_bytes_from_source(&file.to_string_lossy()).unwrap(),
+            b"file-bytes"
+        );
+        // 远程图片与非法输入
+        assert!(image_bytes_from_source("https://x/a.png")
+            .unwrap_err()
+            .contains("暂不支持复制网络图片"));
+        assert!(image_bytes_from_source("data:image/svg+xml,<svg/>")
+            .unwrap_err()
+            .contains("仅支持 base64"));
+        assert!(image_bytes_from_source("  ").unwrap_err().contains("为空"));
+        assert!(image_bytes_from_source(&dir.path().join("missing.png").to_string_lossy())
+            .unwrap_err()
+            .contains("读取图片失败"));
+    }
+
+    #[test]
+    fn rgba_to_dib_writes_header_and_composites_transparency() {
+        // 2x1：不透明红 + 全透明（应合成成白）
+        let rgba = [255u8, 0, 0, 255, 0, 0, 0, 0];
+        let dib = rgba_to_dib(2, 1, &rgba);
+        assert_eq!(dib.len(), 40 + 2 * 4);
+        let u32_at = |off: usize| u32::from_le_bytes(dib[off..off + 4].try_into().unwrap());
+        let i32_at = |off: usize| i32::from_le_bytes(dib[off..off + 4].try_into().unwrap());
+        assert_eq!(u32_at(0), 40, "biSize");
+        assert_eq!(i32_at(4), 2, "biWidth");
+        assert_eq!(i32_at(8), -1, "biHeight 负值 = 自顶向下");
+        assert_eq!(u16::from_le_bytes(dib[12..14].try_into().unwrap()), 1, "biPlanes");
+        assert_eq!(u16::from_le_bytes(dib[14..16].try_into().unwrap()), 32, "biBitCount");
+        assert_eq!(u32_at(16), 0, "biCompression = BI_RGB");
+        assert_eq!(u32_at(20), 2 * 1 * 4, "biSizeImage");
+        // 像素：BGR 顺序 + alpha 置 255
+        assert_eq!(&dib[40..44], &[0, 0, 255, 255], "不透明红 → BGR");
+        assert_eq!(&dib[44..48], &[255, 255, 255, 255], "全透明 → 白底");
+    }
+
+    #[test]
+    fn dib_to_bmp_prepends_file_header() {
+        let bmp = dib_to_bmp(&[1, 2, 3, 4]);
+        assert_eq!(&bmp[0..2], b"BM");
+        assert_eq!(
+            u32::from_le_bytes(bmp[2..6].try_into().unwrap()),
+            14 + 4,
+            "bfSize"
+        );
+        assert_eq!(
+            u32::from_le_bytes(bmp[10..14].try_into().unwrap()),
+            14,
+            "bfOffBits"
+        );
+        assert_eq!(&bmp[14..], &[1, 2, 3, 4]);
     }
 
     #[test]

@@ -274,7 +274,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: zoom-out;
+  /* 点任意位置（含图片）关闭：一致用普通箭头，避免"缩小光标"造成的误解 */
+  cursor: default;
   animation: fadeIn var(--ease);
 }
 .lightbox img {
@@ -283,7 +284,6 @@
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-light);
   box-shadow: var(--shadow-lg);
-  cursor: default;
 }
 .user-image.clickable {
   cursor: zoom-in;

@@ -2,9 +2,11 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { openLink } from "../lib/links";
 import { clampMenuPos } from "../lib/ctxMenu";
-import { copyText } from "../lib/clipboard";
+import { copyImage, copyText } from "../lib/clipboard";
+import { setToast, toastError } from "./useCodex";
 import {
   ICON_CUT,
+  ICON_IMAGE,
   ICON_COPY,
   ICON_PASTE,
   ICON_SELECT_ALL,
@@ -156,6 +158,33 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
       return;
     }
     e.preventDefault();
+    // 图片灯箱：右键提供「复制图像」（来源取 data-copy-source，回退当前 src）。
+    // 只对灯箱内的图片生效，聊天缩略图与其它图片保持原有行为。
+    const lightboxImg =
+      target instanceof HTMLImageElement && target.closest(".lightbox")
+        ? target
+        : null;
+    if (lightboxImg) {
+      const source = lightboxImg.dataset.copySource || lightboxImg.src;
+      const pos = clampMenuPos(e.clientX, e.clientY, 160, 42);
+      ctxMenu.value = {
+        x: pos.x,
+        y: pos.y,
+        items: [
+          {
+            label: "复制图像",
+            icon: ICON_IMAGE,
+            action: () => {
+              void copyImage(source)
+                .then(() => setToast("已复制图像"))
+                .catch((e) => setToast(toastError(e)));
+            },
+          },
+        ],
+      };
+      ctxAnchor = target;
+      return;
+    }
     const selection = window.getSelection()?.toString() ?? "";
     const link = target.closest("a") as HTMLAnchorElement | null;
     const items: CtxItem[] = [];

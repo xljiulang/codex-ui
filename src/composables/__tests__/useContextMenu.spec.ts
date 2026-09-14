@@ -2,17 +2,21 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { defineComponent, h, ref } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
-import { copyText } from "../../lib/clipboard";
+import { copyImage, copyText } from "../../lib/clipboard";
 import { useContextMenu } from "../useContextMenu";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../lib/links", () => ({
   openLink: vi.fn(),
 }));
-vi.mock("../../lib/clipboard", () => ({ copyText: vi.fn() }));
+vi.mock("../../lib/clipboard", () => ({
+  copyText: vi.fn(),
+  copyImage: vi.fn(),
+}));
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedCopy = vi.mocked(copyText);
+const mockedCopyImage = vi.mocked(copyImage);
 
 const Host = defineComponent({
   setup() {
@@ -83,6 +87,43 @@ const HostControls = defineComponent({
               "div",
               { class: "ctx-menu" },
               ctxMenu.value.items.map((it) => h("button", {}, it.label)),
+            )
+          : null,
+      ]);
+  },
+});
+
+/** 图片灯箱：灯箱内图片带 data-copy-source；另有灯箱外缩略图与无来源图片用于对照。 */
+const HostLightbox = defineComponent({
+  setup() {
+    const { ctxMenu } = useContextMenu();
+    return () =>
+      h("div", [
+        h("img", { class: "thumb", src: "asset://mock/thumb.png" }),
+        h("div", { class: "lightbox" }, [
+          h("img", {
+            class: "lightbox-img",
+            src: "asset://mock/a.png",
+            "data-copy-source": "C:\\x\\a.png",
+          }),
+        ]),
+        h("div", { class: "lightbox" }, [
+          h("img", {
+            class: "lightbox-img-nosource",
+            src: "asset://mock/b.png",
+          }),
+        ]),
+        ctxMenu.value
+          ? h(
+              "div",
+              { class: "ctx-menu" },
+              ctxMenu.value.items.map((it) =>
+                h(
+                  "button",
+                  { class: "ctx-menu-item", onClick: () => it.action() },
+                  it.label,
+                ),
+              ),
             )
           : null,
       ]);
@@ -307,6 +348,59 @@ describe("useContextMenu 自定义右键菜单", () => {
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
     wrapper.find(".anchor-scroll").element.dispatchEvent(new Event("scroll"));
+    await flushPromises();
+    expect(wrapper.find(".ctx-menu").exists()).toBe(false);
+  });
+
+  it("灯箱图片右键弹出「复制图像」，点击用 data-copy-source 调后端", async () => {
+    mockedCopyImage.mockReset();
+    mockedCopyImage.mockResolvedValue(true);
+    const wrapper = mount(HostLightbox, { attachTo: document.body });
+    await flushPromises();
+    wrapper
+      .find(".lightbox-img")
+      .element.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 60,
+          clientY: 70,
+        }),
+      );
+    await flushPromises();
+    const menu = wrapper.find(".ctx-menu");
+    expect(menu.exists()).toBe(true);
+    expect(menu.text()).toBe("复制图像");
+
+    await menu.find(".ctx-menu-item").trigger("click");
+    await flushPromises();
+    expect(mockedCopyImage).toHaveBeenCalledWith("C:\\x\\a.png");
+  });
+
+  it("灯箱图片没有 data-copy-source 时回退 img.src；灯箱外图片不提供该项", async () => {
+    mockedCopyImage.mockReset();
+    mockedCopyImage.mockResolvedValue(true);
+    const wrapper = mount(HostLightbox, { attachTo: document.body });
+    await flushPromises();
+    // 无来源的灯箱图片：回退 src
+    wrapper
+      .find(".lightbox-img-nosource")
+      .element.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
+    await flushPromises();
+    const menu = wrapper.find(".ctx-menu");
+    expect(menu.exists()).toBe(true);
+    await menu.find(".ctx-menu-item").trigger("click");
+    await flushPromises();
+    expect(mockedCopyImage).toHaveBeenCalledWith("asset://mock/b.png");
+
+    // 灯箱外的缩略图：不弹出「复制图像」
+    wrapper
+      .find(".thumb")
+      .element.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+      );
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(false);
   });

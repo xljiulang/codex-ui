@@ -578,7 +578,7 @@ describe("用户消息中的图片附件", () => {
     expect(commentary.find(".agent-final").exists()).toBe(false);
   });
 
-  it("图片点击打开灯箱，Esc 关闭", async () => {
+  it("图片点击打开灯箱：点图片即关闭、Esc 关闭，并带上复制来源", async () => {
     const wrapper = mount(MessageItem, {
       props: { tab: TEST_TAB,
         item: userItem([
@@ -587,6 +587,19 @@ describe("用户消息中的图片附件", () => {
         ]),
       },
     });
+    await wrapper.find(".user-image").trigger("click");
+    await flushPromises();
+    const lightbox = wrapper.find(".lightbox");
+    expect(lightbox.exists()).toBe(true);
+    // 右键「复制图像」用的来源是本地路径，而不是 asset URL
+    expect(lightbox.find("img").attributes("data-copy-source")).toBe(
+      "C:\\x\\a.png",
+    );
+    // 点图片也关闭（一次点击即退）
+    await lightbox.find("img").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".lightbox").exists()).toBe(false);
+    // 重新打开后 Esc 仍关闭
     await wrapper.find(".user-image").trigger("click");
     await flushPromises();
     expect(wrapper.find(".lightbox").exists()).toBe(true);

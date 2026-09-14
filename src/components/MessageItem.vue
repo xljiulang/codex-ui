@@ -163,13 +163,17 @@ async function copyUserMessage() {
 
 // ---------- 图片灯箱 / 加载失败占位 ----------
 const lightboxSrc = ref("");
+/** 灯箱图片的可复制来源（本地绝对路径）——右键「复制图像」用，asset URL 不能直接读文件 */
+const lightboxSource = ref("");
 const attachmentImgErrors = ref(new Set<number>());
 const imgErr = ref(false);
-function openLightbox(src: string) {
+function openLightbox(src: string, source = "") {
   lightboxSrc.value = src;
+  lightboxSource.value = source;
 }
 function closeLightbox() {
   lightboxSrc.value = "";
+  lightboxSource.value = "";
 }
 function onLightboxKey(e: KeyboardEvent) {
   if (e.key === "Escape") closeLightbox();
@@ -229,7 +233,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
             alt="图片"
             loading="lazy"
             decoding="async"
-            @click="openLightbox(assetUrl(img.path))"
+            @click="openLightbox(assetUrl(img.path), img.path)"
             @error="markAttachmentImgError(k)"
           />
           <div v-else class="img-fallback">图片加载失败</div>
@@ -346,7 +350,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
         alt="图片"
         loading="lazy"
         decoding="async"
-        @click="openLightbox(assetUrl(String(item.path ?? '')))"
+        @click="openLightbox(assetUrl(String(item.path ?? '')), String(item.path ?? ''))"
         @error="markImgErr()"
       />
       <div v-else class="img-fallback">图片加载失败</div>
@@ -378,7 +382,12 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     aria-label="图片预览"
     @click="closeLightbox"
   >
-    <img :src="lightboxSrc" alt="图片预览" @click.stop />
+    <!-- 不加 @click.stop：点图片也冒泡到遮罩，一次点击即关闭；data-copy-source 供右键「复制图像」 -->
+    <img
+      :src="lightboxSrc"
+      :data-copy-source="lightboxSource"
+      alt="图片预览"
+    />
   </div>
 </template>
 
