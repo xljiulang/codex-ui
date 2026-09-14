@@ -3,7 +3,7 @@ import { ref } from "vue";
 import {
   ICON_EXTENSION,
   ICON_FILE,
-  ICON_GLOBE,
+  ICON_ZEN_PROXY,
   ICON_HISTORY,
   ICON_MCP,
   ICON_MODEL_CUBE,
@@ -58,7 +58,7 @@ const settingsSections: SettingsSection[] = [
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
   { id: "scheduled-tasks", label: "定时任务", icon: ICON_HISTORY },
-  { id: "zen-proxy", label: "Zen 代理", icon: ICON_GLOBE },
+  { id: "zen-proxy", label: "Zen 代理", icon: ICON_ZEN_PROXY, stroke: true },
 ];
 /** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
 const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
