@@ -752,12 +752,6 @@ function openModelConfigFile() {
             <span class="model-provider-key">{{ p.key }}</span>
             <span v-if="p.wire_api" class="model-provider-wire">{{ p.wire_api }}</span>
           </label>
-          <p
-            v-if="providerRowError(p)"
-            class="model-config-field-error model-provider-row-msg"
-          >
-            {{ providerRowError(p) }}
-          </p>
           <div class="model-provider-actions">
             <!-- 仅当前选中的提供方行显示：能力不足直接不渲染（不用禁用态说明原因） -->
             <button
@@ -799,6 +793,14 @@ function openModelConfigFile() {
               </svg>
             </button>
           </div>
+          <!-- 行内错误必须排在按钮组之后：配合 .model-provider-row 的 flex-wrap，
+               错误整宽换到第二行，不再压住提供方名称与右侧按钮 -->
+          <p
+            v-if="providerRowError(p)"
+            class="model-config-field-error model-provider-row-msg"
+          >
+            {{ providerRowError(p) }}
+          </p>
         </div>
         <p
           v-if="modelConfigErrors.provider"
@@ -1206,7 +1208,10 @@ function openModelConfigFile() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 行内错误是 flex: 0 0 100%：必须允许换行，否则会溢出压住名称与按钮 */
+  flex-wrap: wrap;
   gap: var(--space-4);
+  row-gap: var(--space-2);
   padding: var(--space-4) 0;
   border-bottom: 1px solid var(--border);
   transition: background var(--ease);
@@ -1287,6 +1292,7 @@ function openModelConfigFile() {
 }
 
 .model-provider-row-msg {
+  /* 整宽独占第二行（首行 = 单选 + 名称/key/wire + 右侧按钮组） */
   flex: 0 0 100%;
 }
 

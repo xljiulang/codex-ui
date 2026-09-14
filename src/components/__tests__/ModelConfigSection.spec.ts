@@ -440,6 +440,23 @@ describe("ModelConfigSection 生成模型目录", () => {
     const row = wrapper.find(".model-provider-row:not(.model-provider-none)");
     expect(row.classes()).toContain("model-provider-row-error");
     expect(row.text()).toContain("wire_api 仅支持 responses（当前 chat）");
+    // 行内错误必须排在按钮组之后：配合 .model-provider-row 的 flex-wrap，
+    // 错误整宽换到第二行，不会再压住提供方名称与右侧按钮
+    const msg = row.find(".model-provider-row-msg").element;
+    const actions = row.find(".model-provider-actions").element;
+    expect(
+      actions.compareDocumentPosition(msg) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // 首行内容（单选 + 名称）仍在
+    expect(row.find('input[name="model-provider-active"]').exists()).toBe(true);
+    expect(row.find(".model-provider-name").text()).toContain("Legacy");
+    // 「不使用模型提供方」行没有错误提示
+    expect(
+      wrapper
+        .find(".model-provider-none")
+        .find(".model-provider-row-msg")
+        .exists(),
+    ).toBe(false);
 
     // 打开编辑弹窗：唯一合法值 responses 已回填（保存一次即修正历史 chat）
     await row.find(".provider-row-edit").trigger("click");
