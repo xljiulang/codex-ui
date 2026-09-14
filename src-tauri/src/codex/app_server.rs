@@ -94,7 +94,7 @@ struct Inner {
     codex_path: Option<PathBuf>,
     /// 启动后探测到的 codex 版本号（`codex --version` 输出）；未探测为 None。
     codex_version: Option<String>,
-    /// 版本是否低于 0.149.0（仅低版本警告）；未探测为 None。
+    /// 版本是否低于 0.149.0（需 0.149.0+）；未探测为 None。
     version_too_old: Option<bool>,
     /// Zen 本地代理运行句柄（设置开启且启动成功时为 Some）。
     zen_proxy: Option<ZenProxyHandle>,
@@ -662,6 +662,18 @@ impl CodexServer {
                 let method = v["method"].as_str().unwrap_or("unknown");
                 let params = v.get("params").cloned().unwrap_or(Value::Null);
                 self.log_event("server-request", method, &params);
+
+                // 前端不需要交互的服务端请求由后端直接应答（如 currentTime/read），
+                // 避免其在 codex 侧挂起至超时；其余照常转发前端。
+                if let Some(reply) = auto_reply_for(method, now_unix_secs()) {
+                    let request_id = id.clone().unwrap();
+                    if let Err(e) = self.send_response(&request_id, reply).await {
+                        self.push_log("warn", format!("自动应答 {method} 失败: {e}"))
+                            .await;
+                    }
+                    return;
+                }
+
                 let _ = self.app.emit(
                     "interaction:request",
                     json!({ "requestId": id, "method": method, "params": params }),
@@ -1021,7 +1033,7 @@ impl CodexServer {
                 if too_old {
                     self.push_log(
                         "warn",
-                        format!("当前 codex 版本 {text} 低于 0.149.0，仅支持 0.149.x，部分功能可能异常"),
+                        format!("当前 codex 版本 {text} 低于 0.149.0，需要 0.149.0 及以上版本，部分功能可能异常"),
                     )
                     .await;
                 } else {
@@ -1112,6 +1124,32 @@ fn is_streaming_delta(event: &str) -> bool {
         .next()
         .map(|seg| seg.to_ascii_lowercase().contains("delta"))
         .unwrap_or(false)
+}
+
+/// 当前 Unix 时间戳（整秒）；系统时间早于纪元时回落 0。
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// 前端不需要交互、由后端直接应答的服务端反向请求；应答体按 0.154.0 协议实测字段构造。
+/// 返回 `None` 表示该请求需要转发前端处理（审批 / 提问 / elicitation / 动态工具调用）。
+fn auto_reply_for(method: &str, now_unix_secs: i64) -> Option<Value> {
+    match method {
+        // 仅当用户开启 `[features.current_time_reminder]` 且 `clock_source = "external"` 时发出，
+        // 要求回答 `{ currentTimeAt: 整秒 Unix 时间戳 }`（字段名/单位不符会被解析失败）。
+        // codex 侧 10s 超时、且按 1s 间隔轮询，不应答会拖慢并最终中断回合。
+        "currentTime/read" => Some(json!({ "currentTimeAt": now_unix_secs })),
+        // 客户端在 initialize 声明 requestAttestation=false，正常情况下不会收到；
+        // 收到也无法生成令牌，回 null 让 codex 侧按「无 attestation」继续（不挂起）。
+        "attestation/generate" => Some(Value::Null),
+        // 仅在客户端自管 ChatGPT 凭据（external auth）时才发出，本项目不使用该模式；
+        // 回 null 让 codex 立即按「凭据无效」失败，避免干等 10s 超时。
+        "account/chatgptAuthTokens/refresh" => Some(Value::Null),
+        _ => None,
+    }
 }
 
 /// 在 npm 前缀目录下按嵌套/扁平布局找 @openai 平台包里的真实 codex.exe（x64/arm64）
@@ -1541,6 +1579,46 @@ mod tests {
         ] {
             assert!(!is_streaming_delta(e), "{e} 不应视为流式事件");
         }
+    }
+
+    /// 前端无需交互的服务端请求由后端自动应答；`currentTime/read` 应答体必须是
+    /// `{ currentTimeAt: 整秒 }`（0.154.0 协议实测字段，毫秒或 timestamp 会被解析失败）。
+    #[test]
+    fn auto_reply_covers_new_server_requests() {
+        assert_eq!(
+            auto_reply_for("currentTime/read", 1_700_000_000_000),
+            Some(json!({ "currentTimeAt": 1_700_000_000_000i64 }))
+        );
+        assert_eq!(auto_reply_for("attestation/generate", 0), Some(Value::Null));
+        assert_eq!(
+            auto_reply_for("account/chatgptAuthTokens/refresh", 0),
+            Some(Value::Null)
+        );
+    }
+
+    /// 交互类（审批/提问/elicitation）与未知服务端请求不自动应答，仍照常转发前端。
+    #[test]
+    fn auto_reply_leaves_interactive_and_unknown_requests_to_frontend() {
+        for method in [
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+            "item/tool/requestUserInput",
+            "mcpServer/elicitation/request",
+            "execCommandApproval",
+            "applyPatchApproval",
+            "some/unknown/request",
+        ] {
+            assert!(auto_reply_for(method, 0).is_none(), "{method} 应转发前端");
+        }
+    }
+
+    /// 时间戳为整秒且落在合理区间（epoch 之前的系统时间回落 0，不会产生负值）。
+    #[test]
+    fn now_unix_secs_is_non_negative_seconds() {
+        let ts = now_unix_secs();
+        assert!(ts > 1_600_000_000, "应为整秒级时间戳: {ts}");
+        assert!(ts < 4_000_000_000, "疑似毫秒级时间戳: {ts}");
     }
 
     #[test]

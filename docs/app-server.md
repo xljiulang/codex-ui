@@ -1,6 +1,7 @@
 # codex.exe app-server 协议完整参考
 
-> 本文档基于本机 `codex.exe`（**codex-cli 0.149.0**，2026-08-23）实测生成：`codex app-server generate-ts --experimental` 与 `codex app-server generate-json-schema --experimental` 的产物，以及官方 `openai/codex` 仓库 `codex-rs/app-server/README.md`（rust-v0.149.0 分支）的协议说明。
+> 本文档的协议盘点基于本机 `codex.exe`（**codex-cli 0.149.0**，2026-08-23）实测生成：`codex app-server generate-ts --experimental` 与 `codex app-server generate-json-schema --experimental` 的产物，以及官方 `openai/codex` 仓库 `codex-rs/app-server/README.md` 的协议说明。
+> 2026-09-15 已用本机 **codex-cli 0.154.0** 重新生成上述绑定复核，差异与结论见 §1.1：客户端请求/通知为纯增量，`ServerRequest` 集合与既有字段无破坏性变更；下文各表仍按 0.149.0 基线盘点，其中的数量统计同理。
 > 协议为实验性（`[experimental]`），随 codex 版本演进；生成产物与运行版本一一对应，升级 codex 后应重新生成并核对。
 
 ---
@@ -20,6 +21,20 @@
 - 客户端每连接必须先 `initialize`，随后发 `initialized` 通知，之后才能调用其它方法。
 - 审批、提问、MCP 表单等由**服务端反向发起 JSON-RPC 请求**，客户端应答后回合继续。
 - 大量方法与字段由 `capabilities.experimentalApi` 门控（见第 10 节）。
+
+### 1.1 版本差异（0.149.0 → 0.154.0）
+
+用本机 codex-cli 0.154.0 重新生成绑定与本文件盘点（0.149.0 基线）核对：
+
+| 面 | 0.149.0 | 0.154.0 | 结论 |
+|---|---|---|---|
+| `ServerRequest`（服务端反向请求） | 11 | 11 | **集合不变**，方法与 params 字段一致；`currentTime/read`、`attestation/generate`、`account/chatgptAuthTokens/refresh` 三个在 0.149.0 即已存在 |
+| `ClientRequest`（客户端请求） | 表格所列 | 159 | 新增约 30 项可选方法：`project/*`、`thread/queue/*`、`thread/timeline/list`、`thread/revert`、`threadSection/create\|delete\|update`、`turn/settings/update`、`userVerification/*`、`account/bedrock/*`、`mcpServer/event/stream/*`、`plugin/search`、`plugin/reconcile`、`server/diagnostics`、`environment/{add,status}` 等 |
+| `ServerNotification` | 72 | 81 | 新增 `thread/queue/changed`、`thread/project/updated`、`project/changed`、`thread/reverted`、`modelProvider/authRecovery{Started,Completed}`、`mcpServer/event/stream/notification`、`thread/realtime/item/*`、`autoApprovalReview/strictReviewRequired`、`hook/completed` 等 |
+
+既有代码实际调用的全部方法在 0.154.0 中均存在（无方法被移除），新增面均为「不使用即不受影响」的可选能力，因此升级到 0.154.0 无需改动既有协议调用。
+
+唯一需要补齐的行为：`currentTime/read` 是本项目**此前未实现应答**的服务端请求（用户开启 `[features.current_time_reminder] clock_source = "external"` 时到期发出）。它要求客户端回 `{ "currentTimeAt": <整秒 Unix 时间戳> }`；不应答会让 codex 侧按 1s 轮询干等 10s 后终止该回合。codex-ui 已在后端自动应答（见第 6.6 节）。
 
 ## 2. 启动与传输
 
@@ -470,8 +485,9 @@ type InitializeResponse = {
 - `attestation/generate`：客户端回 `{ "token": "v1.<opaque>" }`；app-server 转发上游时包成 `{ "v": 1, "s": 0, "t": "v1.<opaque>" }`。app-server 自身失败时发同形包络（`s`: 1=timeout、2=request failed、3=request canceled、4=malformed response，无 `t`）。
 - `currentTime/read`：`[features.current_time_reminder]` + `clock_source = "external"` 时到期发出；应答 `{ "currentTimeAt": <Unix 秒> }`；失败/取消/超时/畸形会在此回合发送模型请求前终止回合。
 - `account/chatgptAuthTokens/refresh`：多账号客户端按 `previousAccountId` 提示刷新正确工作区令牌。
+- **codex-ui 处理**：这三类请求在前端不需要交互，由后端 `app_server.rs` 的 `handle_message` 直接应答、不进入交互气泡——`currentTime/read` 回本机 `{ "currentTimeAt": <整秒> }`；`attestation/generate` 与 `account/chatgptAuthTokens/refresh` 回 `null`（前者在 `initialize` 已声明 `requestAttestation: false`，后者本项目不使用 external auth 凭据托管模式，正常都不会收到）。
 
-## 7. 服务端 → 客户端通知（72 个）
+## 7. 服务端 → 客户端通知（0.149.0 基线 72 个）
 
 > 通知包络（`ServerNotificationEnvelope`）：`{ method, params }`，可选附加 `emittedAtMs`。可按精确方法名在 initialize 时用 `optOutNotificationMethods` 抑制。下表 params 类型同生成绑定名。
 
@@ -859,6 +875,6 @@ codex app-server generate-json-schema --experimental --out <DIR>
 
 ## 参考
 
-- 官方 README：`openai/codex` → `codex-rs/app-server/README.md`（rust-v0.149.0）
-- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（codex-cli 0.149.0）
+- 官方 README：`openai/codex` → `codex-rs/app-server/README.md`（0.154.0 起另有 `codex-rs/app-server-client/README.md` 描述进程内客户端；仓库 tag 与 CLI 版本不完全对齐，勿直接按 tag 推算方法集合）
+- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（本文件盘点为 codex-cli 0.149.0，2026-09-15 已用 0.154.0 复核，见 §1.1）
 - 本地实测：`src-tauri/tests/app_server_integration.rs`、`docs/协议盘点.md`

@@ -70,7 +70,7 @@ export async function init() {
       for (let i = 0; i < 25; i++) {
         if (store.server.versionTooOld === true) {
           const v = store.server.codexVersion ?? "未知版本";
-          setToast(`当前 codex 版本 ${v} 低于 0.149.0，仅支持 0.149.x，部分功能可能异常`);
+          setToast(`当前 codex 版本 ${v} 低于 0.149.0，需要 0.149.0 及以上版本，部分功能可能异常`);
           return;
         }
         if (store.server.versionTooOld === false) return;

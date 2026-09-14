@@ -522,21 +522,25 @@ mod tests {
 
     #[test]
     fn shell_command_maps_powershell_and_cmd() {
-        let (prog, args) = shell_command("powershell");
-        assert_eq!(prog, resolve_powershell());
-        assert_eq!(
-            args,
-            vec!["-NoLogo", "-NoExit", "-Command", PS_STARTUP]
-        );
+        // 本用例两次实时解析 pwsh 路径，必须与其他改环境变量的用例串行，
+        // 否则并行时两次解析之间 env 被改写会出现不一致（空 pairs 仅取锁）。
+        with_envs(&[], || {
+            let (prog, args) = shell_command("powershell");
+            assert_eq!(prog, resolve_powershell());
+            assert_eq!(
+                args,
+                vec!["-NoLogo", "-NoExit", "-Command", PS_STARTUP]
+            );
 
-        let (prog, args) = shell_command("cmd");
-        assert_eq!(prog, "cmd.exe");
-        assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
+            let (prog, args) = shell_command("cmd");
+            assert_eq!(prog, "cmd.exe");
+            assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
 
-        // 未知/缺失值统一回落 cmd
-        let (prog, args) = shell_command("bogus");
-        assert_eq!(prog, "cmd.exe");
-        assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
+            // 未知/缺失值统一回落 cmd
+            let (prog, args) = shell_command("bogus");
+            assert_eq!(prog, "cmd.exe");
+            assert_eq!(args, vec!["/D", "/K", CMD_STARTUP]);
+        });
     }
 
     #[test]
@@ -670,9 +674,11 @@ mod tests {
         });
 
         std::thread::sleep(Duration::from_millis(600));
+        // 末尾单独执行 `chcp`：启动行的 `chcp 65001 >nul` 自身输出被丢弃，且 ConPTY 是否
+        // 回显启动命令行不保证（偶发丢失），故按运行时真实代码页校验，不依赖回显时序。
         writer
             .write_all(
-                b"echo PTY-OK-42\r\necho \xe7\xbb\x88\xe7\xab\xaf\xe6\xb5\x8b\xe8\xaf\x95\r\n",
+                b"echo PTY-OK-42\r\necho \xe7\xbb\x88\xe7\xab\xaf\xe6\xb5\x8b\xe8\xaf\x95\r\nchcp\r\n",
             )
             .expect("write input");
         writer.flush().expect("flush input");
