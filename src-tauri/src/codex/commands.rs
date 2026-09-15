@@ -647,8 +647,13 @@ fn pasted_file_name(ext: &str) -> String {
     format!("pasted-{}-{ms}-{seq}.{ext}", std::process::id())
 }
 
+/// 粘贴图片临时目录：`%TEMP%\codex-ui-paste`。
+fn paste_image_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("codex-ui-paste")
+}
+
 /// 把图片字节写入指定目录，返回绝对路径
-fn save_image_bytes(
+pub(crate) fn save_image_bytes(
     dir: &std::path::Path,
     name: &str,
     bytes: &[u8],
@@ -700,7 +705,7 @@ pub async fn save_pasted_image(
     tokio::task::spawn_blocking(move || {
         let ext = image_extension(&name)?;
         let file_name = pasted_file_name(&ext);
-        let primary = std::env::temp_dir().join("codex-ui-paste");
+        let primary = paste_image_dir();
         // 顺手清理 7 天前的残留粘贴图片，避免临时目录无限增长
         cleanup_old_files(&primary, std::time::Duration::from_secs(7 * 24 * 3600));
         if let Ok(p) = save_image_bytes(&primary, &file_name, &bytes) {

@@ -77,7 +77,7 @@ const TURN_TIMEOUT_SECS: u64 = 600;
 /// 前端事件名：状态每次变化全量推送快照。
 pub const WECHAT_EVENT: &str = "wechat/event";
 
-/// 一条已通过「谁扫谁白」门禁的入站文本消息（携带目标绑定信息）。
+/// 一条已通过「谁扫谁白」门禁的入站消息（文本与/或图片，携带目标绑定信息）。
 #[derive(Debug, Clone)]
 struct InboundMessage {
     /// 消息所属微信账号（即绑定账号）。
@@ -85,7 +85,10 @@ struct InboundMessage {
     /// 绑定目标线程 id（消息将路由到该线程执行回合）。
     thread_id: String,
     from: String,
-    text: String,
+    /// 文本内容；纯图片消息为 None。
+    text: Option<String>,
+    /// 已下载解密落盘的图片绝对路径（按微信 item_list 顺序）。
+    images: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -170,17 +173,40 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
     out
 }
 
+/// 消息是否构成一次回合输入：有非空文本或至少一张图片（纯媒体消息无载荷）。
+fn has_turn_payload(text: Option<&str>, images: &[String]) -> bool {
+    text.is_some_and(|t| !t.trim().is_empty()) || !images.is_empty()
+}
+
+/// 协议侧路径统一正斜杠：Windows 反斜杠路径 codex 侧读不到（与前端 mention.toProtocolPath 一致）。
+fn proto_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// 组装 turn/start 的 input：图片以 localImage 项在前，文本项在后（纯图片消息无文本项）。
+fn build_turn_input(text: Option<&str>, images: &[String]) -> Vec<Value> {
+    let mut input: Vec<Value> = images
+        .iter()
+        .map(|p| json!({ "type": "localImage", "path": proto_path(p) }))
+        .collect();
+    if let Some(t) = text {
+        input.push(json!({ "type": "text", "text": t }));
+    }
+    input
+}
+
 /// turn/start 参数：完整能力 + 免审批（dangerFullAccess 沙箱策略）。
 fn build_turn_params(
     thread_id: &str,
-    text: &str,
+    text: Option<&str>,
+    images: &[String],
     model: &str,
     effort: Option<&str>,
     client_message_id: &str,
 ) -> Value {
     json!({
         "threadId": thread_id,
-        "input": [{ "type": "text", "text": text }],
+        "input": build_turn_input(text, images),
         "clientUserMessageId": client_message_id,
         "approvalPolicy": "never",
         "sandboxPolicy": { "type": "dangerFullAccess" },
@@ -704,26 +730,19 @@ impl WeChatBridge {
                 timestamp: _,
                 context_token: _,
                 text,
+                images,
+                image_error,
             } => {
-                // 媒体等无文本消息直接忽略。
-                let Some(text) = text else {
-                    return;
-                };
+                if let Some(err) = image_error.as_deref() {
+                    self.log("warn", format!("微信图片接收失败（{from}）: {err}")).await;
+                }
                 let thread_id = {
                     let g = self.inner.lock().await;
                     find_binding_for_message(&g.bindings, &account_id, &from)
                         .and_then(|b| b.get("threadId").and_then(|v| v.as_str()))
                         .map(str::to_string)
                 };
-                if let Some(thread_id) = thread_id {
-                    self.enqueue_inbound(InboundMessage {
-                        account_id,
-                        thread_id,
-                        from,
-                        text,
-                    })
-                    .await;
-                } else {
+                let Some(thread_id) = thread_id else {
                     // 「谁扫谁白」门禁：非绑定账号/非本人消息仅首次记一条日志，防刷屏。
                     let key = format!("{account_id}|{from}");
                     let first_ignore = {
@@ -737,7 +756,24 @@ impl WeChatBridge {
                         )
                         .await;
                     }
+                    return;
+                };
+                // 无文本无图片（如视频/文件等媒体）：仅当图片接收失败时回一次提示，其余静默忽略。
+                if !has_turn_payload(text.as_deref(), &images) {
+                    if let Some(err) = image_error {
+                        self.send_reply_now(&account_id, &from, &format!("⚠️ 图片接收失败：{err}"))
+                            .await;
+                    }
+                    return;
                 }
+                self.enqueue_inbound(InboundMessage {
+                    account_id,
+                    thread_id,
+                    from,
+                    text,
+                    images,
+                })
+                .await;
             }
             WechatEvent::Accounts(list) => {
                 // 重启复登：对所有已绑定且可启动的账号逐个恢复接收。
@@ -1004,7 +1040,7 @@ impl WeChatBridge {
         let account = job.account_id.clone();
         let thread_id = job.thread_id.clone();
         match self
-            .run_turn_on_thread(&account, &peer, &thread_id, &job.text)
+            .run_turn_on_thread(&account, &peer, &thread_id, job.text.as_deref(), &job.images)
             .await
         {
             Ok(t) => Ok(t),
@@ -1033,7 +1069,8 @@ impl WeChatBridge {
         account_id: &str,
         peer: &str,
         thread_id: &str,
-        text: &str,
+        text: Option<&str>,
+        images: &[String],
     ) -> Result<ActiveTurn, (String, String)> {
         {
             let mut g = self.inner.lock().await;
@@ -1080,7 +1117,14 @@ impl WeChatBridge {
         // 回合即将真正开始：点亮“正在输入”并周期续发。
         let typing_task = self.spawn_typing_refresh(account_id, peer);
         self.set_typing(account_id, peer, 1).await;
-        let params = build_turn_params(thread_id, text, &model, effort, &self.next_message_id());
+        let params = build_turn_params(
+            thread_id,
+            text,
+            images,
+            &model,
+            effort,
+            &self.next_message_id(),
+        );
         let turn_id = match self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))
@@ -1260,7 +1304,7 @@ mod tests {
 
     #[test]
     fn turn_params_carry_never_policy_and_default_collab() {
-        let v = build_turn_params("t-1", "hello", "gpt-x", Some("high"), "wechat-1-0");
+        let v = build_turn_params("t-1", Some("hello"), &[], "gpt-x", Some("high"), "wechat-1-0");
         assert_eq!(v["threadId"], "t-1");
         assert_eq!(v["input"][0]["type"], "text");
         assert_eq!(v["input"][0]["text"], "hello");
@@ -1276,7 +1320,7 @@ mod tests {
 
     #[test]
     fn turn_params_always_danger_full_access() {
-        let v = build_turn_params("t-1", "hello", "gpt-x", None, "wechat-1-0");
+        let v = build_turn_params("t-1", Some("hello"), &[], "gpt-x", None, "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
         assert_eq!(v["sandboxPolicy"]["type"], "dangerFullAccess");
         assert!(
@@ -1289,6 +1333,32 @@ mod tests {
         );
         assert_eq!(v["effort"], serde_json::Value::Null);
         assert_eq!(v["collaborationMode"]["settings"]["reasoning_effort"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn turn_input_puts_images_first_and_normalizes_paths() {
+        let images = vec!["C:\\tmp\\codex-ui-paste\\wechat-img-1.png".to_string()];
+        // 图片 + 文本：图片项在前，文本项在后，路径转正斜杠
+        let v = build_turn_params("t-1", Some("看这张图"), &images, "gpt-x", None, "wechat-1-0");
+        assert_eq!(v["input"].as_array().unwrap().len(), 2);
+        assert_eq!(v["input"][0]["type"], "localImage");
+        assert_eq!(v["input"][0]["path"], "C:/tmp/codex-ui-paste/wechat-img-1.png");
+        assert_eq!(v["input"][1]["type"], "text");
+        assert_eq!(v["input"][1]["text"], "看这张图");
+
+        // 纯图片：只有 localImage 项，不带任何 text 项
+        let v = build_turn_params("t-1", None, &images, "gpt-x", None, "wechat-1-0");
+        assert_eq!(v["input"].as_array().unwrap().len(), 1);
+        assert_eq!(v["input"][0]["type"], "localImage");
+    }
+
+    #[test]
+    fn turn_payload_requires_text_or_image() {
+        let img = vec!["D:/a.png".to_string()];
+        assert!(has_turn_payload(None, &img));
+        assert!(has_turn_payload(Some("你好"), &[]));
+        assert!(!has_turn_payload(None, &[]));
+        assert!(!has_turn_payload(Some("   "), &[]));
     }
 
     #[test]

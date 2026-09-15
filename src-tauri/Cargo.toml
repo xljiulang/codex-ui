@@ -54,6 +54,8 @@ image = { version = "0.25", default-features = false, features = [
     "bmp",
 ] }
 base64 = "0.22"
+aes = "0.8"
+ecb = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cron = "0.15"
 toml_edit = "0.22"

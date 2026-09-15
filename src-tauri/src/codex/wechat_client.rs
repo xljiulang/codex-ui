@@ -1,9 +1,9 @@
 //! 微信 ilink bot 协议客户端（纯 Rust，替代 Node sidecar）。
 //!
 //! 实现文本收发链路的完整协议：二维码登录、getUpdates 长轮询、sendmessage、
-//! contextToken 管理、账号/会话/同步缓冲/回复上下文的文件存储；媒体上传下载不在
-//! 范围内（UI 本就忽略媒体）。事件经 mpsc 推送给桥（WechatEvent），语义对齐
-//! 原 sidecar 的 stdio 事件。
+//! contextToken 管理、账号/会话/同步缓冲/回复上下文的文件存储；入站图片按微信 CDN
+//! 协议下载并 AES-128-ECB 解密后落盘（其它媒体仍忽略，媒体上传不在范围内）。
+//! 事件经 mpsc 推送给桥（WechatEvent），语义对齐原 sidecar 的 stdio 事件。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -18,8 +18,12 @@ use futures_util::Future;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex, Notify};
 
+use crate::codex::commands::save_image_bytes;
+
 /// 默认 API 基地址（与 wechat-channel 一致）。
 pub const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
+/// 媒体 CDN 基地址（与 wechat-channel 一致）：下载地址为 `{CDN}/download?encrypted_query_param=…`。
+pub const CDN_BASE_URL: &str = "https://novac2c.cdn.weixin.qq.com/c2c";
 /// ilink bot 类型。
 const BOT_TYPE: &str = "3";
 /// base_info 里的通道版本（沿用库版本串，保持兼容）。
@@ -42,6 +46,14 @@ const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 /// getconfig / sendtyping 请求超时（正在输入状态指示相关）。
 const TYPING_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+/// 单张入站图片下载超时（超时按接收失败处理，不拖住长轮询）。
+const IMAGE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+/// 单张入站图片大小上限。
+const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+/// 单条消息最多处理的图片数量（微信通常单图，多余忽略）。
+const MAX_IMAGES_PER_MESSAGE: usize = 4;
+/// 入站图片存放目录名（位于 wechannel-data 下，与 wechat-channel 的原布局一致）。
+const MEDIA_DIR_NAME: &str = "media";
 
 /// 统一 ID 计数器（替代随机源：唯一性足够，避免额外依赖）。
 static ID_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -123,6 +135,188 @@ pub fn extract_message_text(item_list: &Value) -> Option<String> {
         }
     }
     None
+}
+
+/// 入站图片引用：CDN 下载参数 + AES 密钥原文。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboundImage {
+    /// 原图 CDN 引用（`image_item.media.encrypt_query_param`）。
+    pub encrypt_query_param: String,
+    /// AES-128 密钥原文：优先 `image_item.aeskey`（hex），其次 `media.aes_key`（base64）；为空视为明文。
+    pub aes_key: String,
+}
+
+/// 从消息 item_list 提取入站图片：IMAGE（type=2）且带 CDN 下载参数，最多 `MAX_IMAGES_PER_MESSAGE` 张。
+pub fn extract_message_images(item_list: &Value) -> Vec<InboundImage> {
+    let Some(list) = item_list.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in list {
+        if out.len() >= MAX_IMAGES_PER_MESSAGE {
+            break;
+        }
+        if item.get("type").and_then(|v| v.as_i64()) != Some(2) {
+            continue;
+        }
+        let Some(param) = item
+            .pointer("/image_item/media/encrypt_query_param")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let key = item
+            .pointer("/image_item/aeskey")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                item.pointer("/image_item/media/aes_key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or("");
+        out.push(InboundImage {
+            encrypt_query_param: param.to_string(),
+            aes_key: key.to_string(),
+        });
+    }
+    out
+}
+
+/// 图片 CDN 下载地址（与 wechat-channel 的 buildCdnDownloadUrl 一致）。
+pub fn cdn_download_url(encrypt_query_param: &str) -> String {
+    format!(
+        "{CDN_BASE_URL}/download?encrypted_query_param={}",
+        urlencode(encrypt_query_param)
+    )
+}
+
+/// item_list 中可下载图片项的数量（与 `extract_message_images` 的口径一致，用于判断是否溢出上限）。
+fn count_image_items(item_list: Option<&Value>) -> usize {
+    item_list
+        .and_then(|v| v.as_array())
+        .map(|list| {
+            list.iter()
+                .filter(|i| {
+                    i.get("type").and_then(|v| v.as_i64()) == Some(2)
+                        && i.pointer("/image_item/media/encrypt_query_param")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|s| !s.trim().is_empty())
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// 解析 AES-128 密钥：支持 32 字符 hex、base64(16 字节原文)、base64(32 字符 hex 串) 三种形态。
+pub fn parse_aes_key(raw: &str) -> Result<[u8; 16], String> {
+    let s = raw.trim();
+    if s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return hex_to_key(s);
+    }
+    let decoded = BASE64
+        .decode(s)
+        .map_err(|e| format!("aes_key base64 解码失败: {e}"))?;
+    if decoded.len() == 16 {
+        let mut key = [0u8; 16];
+        key.copy_from_slice(&decoded);
+        return Ok(key);
+    }
+    if decoded.len() == 32 {
+        let ascii = std::str::from_utf8(&decoded)
+            .map_err(|_| "aes_key 非法：既不是 16 字节密钥也不是 hex 串".to_string())?;
+        return hex_to_key(ascii);
+    }
+    Err(format!("aes_key 长度非法（{} 字节）", decoded.len()))
+}
+
+/// 32 字符 hex → 16 字节密钥。
+fn hex_to_key(s: &str) -> Result<[u8; 16], String> {
+    let bytes = s.as_bytes();
+    if bytes.len() != 32 {
+        return Err("aes_key hex 长度不是 32".into());
+    }
+    let mut key = [0u8; 16];
+    for (i, slot) in key.iter_mut().enumerate() {
+        let hi = (bytes[i * 2] as char)
+            .to_digit(16)
+            .ok_or_else(|| "aes_key 含非 hex 字符".to_string())?;
+        let lo = (bytes[i * 2 + 1] as char)
+            .to_digit(16)
+            .ok_or_else(|| "aes_key 含非 hex 字符".to_string())?;
+        *slot = (hi * 16 + lo) as u8;
+    }
+    Ok(key)
+}
+
+/// AES-128-ECB + PKCS7 解密（微信 CDN 媒体加密方式）。
+fn decrypt_aes_ecb(ciphertext: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
+    use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyInit};
+    let mut buf = ciphertext.to_vec();
+    ecb::Decryptor::<aes::Aes128>::new(key.into())
+        .decrypt_padded_mut::<Pkcs7>(&mut buf)
+        .map(|plain| plain.to_vec())
+        .map_err(|e| format!("图片解密失败: {e}"))
+}
+
+/// 图片扩展名：按魔数识别，仅接受 codex 能直接读入的常见格式。
+fn image_extension_of(bytes: &[u8]) -> Option<&'static str> {
+    match image::guess_format(bytes).ok()? {
+        image::ImageFormat::Png => Some("png"),
+        image::ImageFormat::Jpeg => Some("jpg"),
+        image::ImageFormat::Gif => Some("gif"),
+        image::ImageFormat::WebP => Some("webp"),
+        image::ImageFormat::Bmp => Some("bmp"),
+        _ => None,
+    }
+}
+
+/// 入站图片文件名：`wechat-{yyyyMMdd-HHmmss}-{seq}.{ext}`（同秒多图靠进程内自增区分）。
+fn wechat_image_file_name(ext: &str, now: chrono::DateTime<chrono::Local>) -> String {
+    let seq = ID_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("wechat-{}-{seq}.{ext}", now.format("%Y%m%d-%H%M%S"))
+}
+
+/// 入站图片目录：`<root>/wechannel-data/media/<年-月>`（按月分目录，跨月自动新建）。
+fn media_dir(root: &Path, now: chrono::DateTime<chrono::Local>) -> PathBuf {
+    state_dir(root)
+        .join(MEDIA_DIR_NAME)
+        .join(now.format("%Y-%m").to_string())
+}
+
+/// 落盘入站图片：写入应用数据目录的媒体目录（永久保留，不清理），返回绝对路径。
+pub fn save_wechat_image(root: &Path, bytes: &[u8]) -> Result<String, String> {
+    let ext = image_extension_of(bytes)
+        .ok_or_else(|| "不支持的图片格式（仅支持 png/jpg/gif/webp/bmp）".to_string())?;
+    let now = chrono::Local::now();
+    save_image_bytes(&media_dir(root, now), &wechat_image_file_name(ext, now), bytes)
+}
+
+/// 下载并解密单张入站图片，落盘后返回绝对路径。
+async fn fetch_inbound_image<A: WechatApi>(
+    api: &A,
+    root: &Path,
+    img: &InboundImage,
+) -> Result<String, String> {
+    let raw = api.download_bytes(&cdn_download_url(&img.encrypt_query_param)).await?;
+    if raw.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "图片过大（{} MB，上限 {} MB）",
+            raw.len() / 1024 / 1024,
+            MAX_IMAGE_BYTES / 1024 / 1024
+        ));
+    }
+    let plain = if img.aes_key.trim().is_empty() {
+        raw
+    } else {
+        let key = parse_aes_key(&img.aes_key)?;
+        decrypt_aes_ecb(&raw, &key)?
+    };
+    save_wechat_image(root, &plain)
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +562,8 @@ pub trait WechatApi: Send + Sync {
         -> BoxFuture<'_, Result<Value, String>>;
     fn send_typing(&self, base_url: &str, token: &str, body: Value)
         -> BoxFuture<'_, Result<Value, String>>;
+    /// 下载任意 URL 的原始字节（入站图片走微信 CDN）。
+    fn download_bytes(&self, url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>>;
 }
 
 /// 真实 HTTP 实现（reqwest）。
@@ -541,6 +737,33 @@ impl WechatApi for ReqwestApi {
             TYPING_REQUEST_TIMEOUT,
         )
     }
+
+    fn download_bytes(&self, url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
+        let http = self.http.clone();
+        let url = url.to_string();
+        Box::pin(async move {
+            let resp = http
+                .get(&url)
+                .timeout(IMAGE_DOWNLOAD_TIMEOUT)
+                .send()
+                .await
+                .map_err(|e| format!("图片下载失败: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("图片下载失败: CDN 返回 {}", resp.status()));
+            }
+            // 先看声明的长度，避免异常超大响应被整体读入内存。
+            if resp.content_length().is_some_and(|n| n > MAX_IMAGE_BYTES as u64) {
+                return Err(format!(
+                    "图片过大（上限 {} MB）",
+                    MAX_IMAGE_BYTES / 1024 / 1024
+                ));
+            }
+            resp.bytes()
+                .await
+                .map(|b| b.to_vec())
+                .map_err(|e| format!("图片下载失败: {e}"))
+        })
+    }
 }
 
 fn urlencode(s: &str) -> String {
@@ -578,6 +801,10 @@ pub enum WechatEvent {
         timestamp: u64,
         context_token: String,
         text: Option<String>,
+        /// 已下载并解密的图片绝对路径（按 item_list 顺序）。
+        images: Vec<String>,
+        /// 图片接收失败原因（同一消息多图时取首个失败原因）。
+        image_error: Option<String>,
     },
     SessionStatus {
         account_id: String,
@@ -1084,7 +1311,34 @@ async fn run_receiver<A: WechatApi>(
                                 if !from.is_empty() && !ctx.is_empty() {
                                     set_context_token(&root, &account_id, &from, &ctx, raw.get("message_id").and_then(|v| v.as_str()));
                                 }
-                                let text = raw.get("item_list").and_then(extract_message_text);
+                                let items = raw.get("item_list");
+                                let text = items.and_then(extract_message_text);
+                                // 图片：顺序下载解密落盘（保持消息顺序）；单张失败不阻断后续轮询。
+                                let refs = items.map(extract_message_images).unwrap_or_default();
+                                if refs.len() < count_image_items(items) {
+                                    let _ = tx.send(WechatEvent::Error {
+                                        message: format!(
+                                            "单条消息图片超过 {MAX_IMAGES_PER_MESSAGE} 张，多余的已忽略"
+                                        ),
+                                        kind: "media".into(),
+                                    });
+                                }
+                                let mut images: Vec<String> = Vec::new();
+                                let mut image_error: Option<String> = None;
+                                for img in &refs {
+                                    match fetch_inbound_image(api.as_ref(), &root, img).await {
+                                        Ok(path) => images.push(path),
+                                        Err(e) => {
+                                            if image_error.is_none() {
+                                                image_error = Some(e.clone());
+                                            }
+                                            let _ = tx.send(WechatEvent::Error {
+                                                message: format!("微信图片接收失败: {e}"),
+                                                kind: "media".into(),
+                                            });
+                                        }
+                                    }
+                                }
                                 let _ = tx.send(WechatEvent::Message {
                                     account_id: account_id.clone(),
                                     from,
@@ -1092,6 +1346,8 @@ async fn run_receiver<A: WechatApi>(
                                     timestamp: ts,
                                     context_token: ctx,
                                     text,
+                                    images,
+                                    image_error,
                                 });
                             }
                         }
@@ -1160,6 +1416,9 @@ mod tests {
         fn send_typing(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
+        fn download_bytes(&self, _url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
+            Box::pin(async { Err("测试未实现图片下载".to_string()) })
+        }
     }
 
     #[test]
@@ -1184,6 +1443,111 @@ mod tests {
         assert!(extract_message_text(&media).is_none());
         let voice = json!([{ "type": 3, "voice_item": { "text": "转写" } }]);
         assert_eq!(extract_message_text(&voice).as_deref(), Some("转写"));
+    }
+
+    /// 1x1 PNG：图片解密/落盘用例的明文素材。
+    fn tiny_png() -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([1, 2, 3, 255]));
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    /// AES-128-ECB + PKCS7 加密：测试侧构造微信 CDN 密文。
+    fn encrypt_aes_ecb(plain: &[u8], key: &[u8; 16]) -> Vec<u8> {
+        use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyInit};
+        let mut buf = vec![0u8; plain.len() + 16];
+        buf[..plain.len()].copy_from_slice(plain);
+        ecb::Encryptor::<aes::Aes128>::new(key.into())
+            .encrypt_padded_mut::<Pkcs7>(&mut buf, plain.len())
+            .unwrap()
+            .to_vec()
+    }
+
+    fn hex_of(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn message_image_extraction_prefers_hex_key_and_caps_count() {
+        let list = json!([
+            { "type": 1, "text_item": { "text": "看图" } },
+            { "type": 2, "image_item": {
+                "aeskey": "00112233445566778899aabbccddeeff",
+                "media": { "encrypt_query_param": "P1", "aes_key": "QUJD" },
+            } },
+            { "type": 2, "image_item": { "media": { "encrypt_query_param": "P2", "aes_key": " QUJD " } } },
+            // 缺 encrypt_query_param → 跳过
+            { "type": 2, "image_item": { "media": {} } },
+            { "type": 3, "voice_item": { "text": "转写" } },
+        ]);
+        let imgs = extract_message_images(&list);
+        assert_eq!(imgs.len(), 2);
+        assert_eq!(imgs[0].encrypt_query_param, "P1");
+        assert_eq!(imgs[0].aes_key, "00112233445566778899aabbccddeeff");
+        assert_eq!(imgs[1].encrypt_query_param, "P2");
+        assert_eq!(imgs[1].aes_key, "QUJD");
+
+        // 超过上限：只取前 MAX_IMAGES_PER_MESSAGE 张，计数函数反映真实数量
+        let many = Value::Array(
+            (0..6)
+                .map(|i| json!({ "type": 2, "image_item": { "media": { "encrypt_query_param": format!("P{i}") } } }))
+                .collect(),
+        );
+        assert_eq!(extract_message_images(&many).len(), MAX_IMAGES_PER_MESSAGE);
+        assert_eq!(count_image_items(Some(&many)), 6);
+        assert!(extract_message_images(&json!(null)).is_empty());
+    }
+
+    #[test]
+    fn cdn_download_url_encodes_param() {
+        assert_eq!(
+            cdn_download_url("a b/c"),
+            format!("{CDN_BASE_URL}/download?encrypted_query_param=a%20b%2Fc")
+        );
+    }
+
+    #[test]
+    fn aes_ecb_roundtrip_and_key_parsing() {
+        let key = [0x42u8; 16];
+        let plain = b"hello wechat image payload".to_vec();
+        let cipher = encrypt_aes_ecb(&plain, &key);
+        assert_eq!(decrypt_aes_ecb(&cipher, &key).unwrap(), plain);
+        // 非 16 字节整数倍 → 解密失败
+        assert!(decrypt_aes_ecb(&[0u8; 4], &key).is_err());
+
+        let hex_key = hex_of(&key);
+        assert_eq!(parse_aes_key(&hex_key).unwrap(), key);
+        assert_eq!(parse_aes_key(&BASE64.encode(key)).unwrap(), key);
+        assert_eq!(parse_aes_key(&BASE64.encode(hex_key.as_bytes())).unwrap(), key);
+        assert!(parse_aes_key("QUJD").is_err());
+        assert!(parse_aes_key("").is_err());
+    }
+
+    #[test]
+    fn saves_wechat_image_under_state_media_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(save_wechat_image(dir.path(), b"not an image").is_err());
+        let png = tiny_png();
+        let path = save_wechat_image(dir.path(), &png).unwrap();
+        let file = std::path::PathBuf::from(&path);
+        let media_root = dir.path().join("wechannel-data").join(MEDIA_DIR_NAME);
+        assert!(
+            crate::codex::path_util::is_inside_path(&media_root, &file),
+            "应落盘到 <root>/wechannel-data/media: {path}"
+        );
+        let month = chrono::Local::now().format("%Y-%m").to_string();
+        assert_eq!(
+            file.parent().map(std::path::Path::to_path_buf),
+            Some(media_root.join(&month)),
+            "应落在 <年-月> 子目录: {path}"
+        );
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.starts_with("wechat-"), "文件名应带来源前缀: {name}");
+        assert!(name.ends_with(".png"), "扩展名应按魔数推断: {name}");
+        assert_eq!(std::fs::read(&file).unwrap(), png);
     }
 
     #[test]
@@ -1223,6 +1587,110 @@ mod tests {
         assert_eq!(snap[0]["userId"], "u-1");
     }
 
+    /// 入站图片端到端：getUpdates 带图 → CDN 下载 → 解密 → 落盘 → 事件带路径。
+    /// 用多线程 runtime + 后续轮询 yield，避免立即返回的 mock 把长轮询循环变成忙循环。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receiver_downloads_image_into_message_event() {
+        struct ImageApi {
+            cipher: Vec<u8>,
+            key_hex: String,
+        }
+        impl WechatApi for ImageApi {
+            fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "status": "wait" })) })
+            }
+            fn get_updates(&self, _b: &str, _t: &str, buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+                // 首次返回图片消息，之后返回空，避免测试忙循环反复投递。
+                let first = buf.is_empty();
+                let key_hex = self.key_hex.clone();
+                Box::pin(async move {
+                    if first {
+                        Ok(json!({
+                            "ret": 0,
+                            "get_updates_buf": "b1",
+                            "msgs": [{
+                                "from_user_id": "u-1",
+                                "to_user_id": "bot-1",
+                                "create_time_ms": 1,
+                                "context_token": "ctx-1",
+                                "message_id": "m-1",
+                                "item_list": [{
+                                    "type": 2,
+                                    "image_item": {
+                                        "aeskey": key_hex,
+                                        "media": { "encrypt_query_param": "PARAM-1" },
+                                    },
+                                }],
+                            }],
+                        }))
+                    } else {
+                        // 真实长轮询会挂起；此处 sleep 让出调度，避免忙循环独占 runtime。
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        Ok(json!({ "ret": 0, "get_updates_buf": "b1", "msgs": [] }))
+                    }
+                })
+            }
+            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn download_bytes(&self, url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
+                assert!(
+                    url.contains("encrypted_query_param=PARAM-1"),
+                    "CDN 下载地址应带加密参数: {url}"
+                );
+                let cipher = self.cipher.clone();
+                Box::pin(async move { Ok(cipher) })
+            }
+        }
+
+        let png = tiny_png();
+        let key = [7u8; 16];
+        let cipher = encrypt_aes_ecb(&png, &key);
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let cancel = Arc::new(Notify::new());
+        let handle = tokio::spawn(run_receiver(
+            Arc::new(ImageApi { cipher, key_hex: hex_of(&key) }),
+            tx,
+            root.clone(),
+            "bot-1".into(),
+            cancel.clone(),
+        ));
+        let got = loop {
+            match rx.recv().await {
+                Some(WechatEvent::Message { text, images, image_error, .. }) => break (text, images, image_error),
+                Some(_) => continue,
+                None => panic!("事件通道提前关闭"),
+            }
+        };
+        cancel.notify_one();
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+
+        let (text, images, image_error) = got;
+        assert!(text.is_none(), "纯图片消息不应有文本");
+        assert_eq!(image_error, None);
+        assert_eq!(images.len(), 1);
+        let path = std::path::PathBuf::from(&images[0]);
+        let media_root = root.join("wechannel-data").join(MEDIA_DIR_NAME);
+        assert!(
+            crate::codex::path_util::is_inside_path(&media_root, &path),
+            "应落盘到 <root>/wechannel-data/media: {}",
+            images[0]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), png, "落盘内容应为解密后的原图");
+    }
+
     #[tokio::test]
     async fn receiver_reports_session_expired_and_stops() {
         struct ExpiredApi;
@@ -1244,6 +1712,9 @@ mod tests {
             }
             fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn download_bytes(&self, _url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
+                Box::pin(async { Err("测试未实现图片下载".to_string()) })
             }
         }
         let dir = tempfile::tempdir().unwrap();
@@ -1320,6 +1791,9 @@ mod tests {
             fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
                 *self.send_typing_calls.lock().unwrap() += 1;
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn download_bytes(&self, _url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
+                Box::pin(async { Err("测试未实现图片下载".to_string()) })
             }
         }
 
