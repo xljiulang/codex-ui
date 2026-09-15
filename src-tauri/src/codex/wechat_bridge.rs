@@ -185,26 +185,49 @@ fn proto_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
-/// 取路径的文件名（mention 项的显示名）。
+/// 取路径的文件名（文件段里展示给 Codex 的名字）。
 fn base_name(path: &str) -> String {
     path.rsplit(['\\', '/']).next().unwrap_or(path).to_string()
 }
 
-/// 组装 turn/start 的 input：图片（localImage）→ 文件/视频（mention）→ 文本项（有文本时才有）。
+/// 文件引用段标题（与前端 mention.ts / VS Code Codex 扩展一致）。
+const FILE_MENTION_HEADING: &str = "# Files mentioned by the user:";
+/// 用户请求分隔标记（同上）。
+const MY_REQUEST_MARKER: &str = "## My request:";
+/// 纯附件消息（无文字）时补的说明：避免 codex 收到空请求。
+const BARE_ATTACHMENT_NOTE: &str = "（用户只发送了附件，没有文字说明，请查看附件内容）";
+
+/// 文件引用文本段：`# Files mentioned by the user:` 下每行 `## 名字: 路径`（与前端 `fileMentionSection` 同款格式）。
+/// codex 会丢弃独立的 `mention` 输入项，文件路径只能靠文本承载。
+fn file_mention_section(files: &[String]) -> String {
+    if files.is_empty() {
+        return String::new();
+    }
+    let refs: String = files
+        .iter()
+        .map(|p| format!("\n## {}: {}\n", base_name(p), proto_path(p)))
+        .collect();
+    format!("\n{FILE_MENTION_HEADING}\n{refs}")
+}
+
+/// 组装 turn/start 的 input：图片（localImage）→ 文本项（用户文本，文件/视频以文件段承载）。
+/// 纯图片消息不带文本项（codex 会自行包装 `<image …>`）。
 fn build_turn_input(text: Option<&str>, images: &[String], files: &[String]) -> Vec<Value> {
     let mut input: Vec<Value> = images
         .iter()
         .map(|p| json!({ "type": "localImage", "path": proto_path(p) }))
         .collect();
-    input.extend(files.iter().map(|p| {
-        json!({
-            "type": "mention",
-            "name": base_name(p),
-            "path": proto_path(p),
-        })
-    }));
-    if let Some(t) = text {
-        input.push(json!({ "type": "text", "text": t }));
+    let section = file_mention_section(files);
+    let body = match (text, section.is_empty()) {
+        // 有文件：文件段 + `## My request:` + 用户文本（无文字时用占位说明）
+        (Some(t), false) => Some(format!("{section}\n{MY_REQUEST_MARKER}\n{t}")),
+        (None, false) => Some(format!("{section}\n{MY_REQUEST_MARKER}\n{BARE_ATTACHMENT_NOTE}")),
+        // 无文件：有文本就原样发，纯图片不带文本项
+        (Some(t), true) => Some(t.to_string()),
+        (None, true) => None,
+    };
+    if let Some(body) = body {
+        input.push(json!({ "type": "text", "text": body }));
     }
     input
 }
@@ -1391,13 +1414,13 @@ mod tests {
     }
 
     #[test]
-    fn turn_input_orders_images_files_and_text_with_protocol_paths() {
-        let images = vec!["C:\\tmp\\wechat\\media\\2026-09\\wechat-img-1.png".to_string()];
+    fn turn_input_orders_images_and_carries_files_in_text_section() {
+        let images = vec!["C:\\tmp\\wechat\\media\\t-1\\wechat-img-1.png".to_string()];
         let files = vec![
-            "C:\\tmp\\wechat\\media\\2026-09\\预算表.xlsx".to_string(),
-            "C:\\tmp\\wechat\\media\\2026-09\\wechat-video-1.mp4".to_string(),
+            "C:\\tmp\\wechat\\media\\t-1\\预算表.xlsx".to_string(),
+            "C:\\tmp\\wechat\\media\\t-1\\wechat-video-1.mp4".to_string(),
         ];
-        // 图片 → 文件 → 文本，路径转正斜杠
+        // 图片 + 文件 + 文本：图片在前，文件走文本段，路径转正斜杠
         let v = build_turn_params(
             "t-1",
             Some("看附件"),
@@ -1408,25 +1431,66 @@ mod tests {
             "wechat-1-0",
         );
         let input = v["input"].as_array().unwrap();
-        assert_eq!(input.len(), 4);
+        assert_eq!(input.len(), 2, "只应有 localImage + text 两项");
         assert_eq!(input[0]["type"], "localImage");
-        assert_eq!(
-            input[0]["path"],
-            "C:/tmp/wechat/media/2026-09/wechat-img-1.png"
+        assert_eq!(input[0]["path"], "C:/tmp/wechat/media/t-1/wechat-img-1.png");
+        assert_eq!(input[1]["type"], "text");
+        let body = input[1]["text"].as_str().unwrap();
+        assert!(
+            body.starts_with(&format!("\n{FILE_MENTION_HEADING}")),
+            "文本应以文件段开头: {body}"
         );
-        assert_eq!(input[1]["type"], "mention");
-        assert_eq!(input[1]["name"], "预算表.xlsx");
-        assert_eq!(input[1]["path"], "C:/tmp/wechat/media/2026-09/预算表.xlsx");
-        assert_eq!(input[2]["type"], "mention");
-        assert_eq!(input[2]["name"], "wechat-video-1.mp4");
-        assert_eq!(input[3]["type"], "text");
-        assert_eq!(input[3]["text"], "看附件");
+        assert!(body.contains("## 预算表.xlsx: C:/tmp/wechat/media/t-1/预算表.xlsx"), "{body}");
+        assert!(
+            body.contains("## wechat-video-1.mp4: C:/tmp/wechat/media/t-1/wechat-video-1.mp4"),
+            "{body}"
+        );
+        assert!(body.ends_with("看附件"), "用户文本应在末尾: {body}");
+        assert!(body.contains(MY_REQUEST_MARKER), "{body}");
 
-        // 纯附件（文件 + 视频）：不带任何 text 项
+        // 纯附件（文件 + 视频，无文字）：带文件段 + 占位说明
         let v = build_turn_params("t-1", None, &[], &files, "gpt-x", None, "wechat-1-0");
         let input = v["input"].as_array().unwrap();
-        assert_eq!(input.len(), 2);
-        assert!(input.iter().all(|i| i["type"] == "mention"));
+        assert_eq!(input.len(), 1, "只有 text 项");
+        assert_eq!(input[0]["type"], "text");
+        let body = input[0]["text"].as_str().unwrap();
+        assert!(body.contains("## 预算表.xlsx: C:/tmp/wechat/media/t-1/预算表.xlsx"), "{body}");
+        assert!(body.contains(MY_REQUEST_MARKER), "{body}");
+        assert!(body.ends_with(BARE_ATTACHMENT_NOTE), "{body}");
+
+        // 纯图片：只有 localImage 项，不带文本
+        let v = build_turn_params("t-1", None, &images, &[], "gpt-x", None, "wechat-1-0");
+        let input = v["input"].as_array().unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["type"], "localImage");
+
+        // 仅文本：原样发送
+        let v = build_turn_params("t-1", Some("你好"), &[], &[], "gpt-x", None, "wechat-1-0");
+        let input = v["input"].as_array().unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["text"], "你好");
+    }
+
+    /// codex 会丢弃独立的 `mention` 项（曾导致微信文件回合变成空消息），确保不再产生该类型。
+    #[test]
+    fn turn_input_never_emits_mention_items() {
+        let images = vec!["C:\\tmp\\a.png".to_string()];
+        let files = vec!["C:\\tmp\\b.xlsx".to_string(), "C:\\tmp\\c.mp4".to_string()];
+        for (text, imgs, fls) in [
+            (Some("看附件"), images.clone(), files.clone()),
+            (None, Vec::new(), files.clone()),
+            (Some("只有文字"), Vec::new(), Vec::new()),
+            (None, images.clone(), Vec::new()),
+            (Some("图 + 文件"), images.clone(), files.clone()),
+        ] {
+            let v = build_turn_params("t-1", text, &imgs, &fls, "gpt-x", None, "wechat-1-0");
+            let input = v["input"].as_array().unwrap();
+            assert!(
+                input.iter().all(|i| i["type"] != "mention"),
+                "不应再产生 mention 项: {input:?}"
+            );
+            assert!(!input.is_empty(), "input 不应为空: text={text:?}");
+        }
     }
 
     #[test]
