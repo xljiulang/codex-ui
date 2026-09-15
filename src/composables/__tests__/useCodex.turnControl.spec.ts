@@ -402,6 +402,45 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     expect(goalIdx).toBeGreaterThan(-1);
     expect(turnIdx).toBeGreaterThan(goalIdx);
   });
+
+  it("startTurn：回合启动失败时 toast + 未聚焦通知（带归属会话）", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { name: "修复登录" }));
+    activeTabId.value = "s1";
+    tabs[0].resumedThreadId = "t1"; // 跳过 thread_resume
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "turn_start") {
+        return Promise.reject(new Error("unexpected status 401 Unauthorized"));
+      }
+      return Promise.resolve(undefined);
+    });
+    store.models = [DEFAULT_MODEL];
+    await sendPrompt("你好");
+    expect(store.toast).toBe("认证失效，请重新登录");
+    expect(mockedInvoke).toHaveBeenCalledWith("notify_codex_error", {
+      title: "Codex 错误 · 修复登录",
+      body: "认证失效，请重新登录",
+      threadId: "t1",
+      turnId: null,
+    });
+  });
+
+  it("startTurn：会话不存在（thread not found）不发系统通知", async () => {
+    tabs.push(makeSessionTab("s1", "t1", { name: "修复登录" }));
+    activeTabId.value = "s1";
+    tabs[0].resumedThreadId = "t1";
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "turn_start") {
+        return Promise.reject(new Error("thread not found: t1"));
+      }
+      return Promise.resolve(undefined);
+    });
+    store.models = [DEFAULT_MODEL];
+    await sendPrompt("你好");
+    expect(store.toast).toBe("会话已不存在，已切换为新会话");
+    expect(
+      mockedInvoke.mock.calls.filter(([c]) => c === "notify_codex_error"),
+    ).toHaveLength(0);
+  });
 });
 
 describe("buildTurnParams 三面独立映射", () => {

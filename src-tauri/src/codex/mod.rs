@@ -13,6 +13,7 @@ pub mod model_snapshots;
 pub mod path_util;
 pub mod pdf_export;
 pub mod model_catalog;
+pub mod notifications;
 pub mod runtime_download;
 pub mod scheduled_tasks;
 pub mod session_fs;

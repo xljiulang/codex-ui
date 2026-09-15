@@ -21,11 +21,12 @@ let unlistenClose: (() => void) | undefined;
 let unlistenNotification: (() => void) | undefined;
 
 onMounted(async () => {
-  // 定时任务通知「打开会话」：由 Rust 端处理 toast 点击后发事件，此处聚焦窗口并打开绑定会话
-  unlistenNotification = await listen<string>("scheduled-task-notification-open", async (e) => {
+  // 通知「打开会话」：由 Rust 端处理 toast 点击（定时任务终态 / codex 错误）后发事件，
+  // 此处聚焦窗口并打开绑定会话
+  unlistenNotification = await listen<string>("notification-open-session", async (e) => {
     const threadId = e.payload;
     if (!threadId) return;
-    await sessionLog("info", null, "sched-toast-open-session", `frontend-received thread=${threadId}`);
+    await sessionLog("info", null, "toast-open-session", `frontend-received thread=${threadId}`);
     // 窗口前置操作用 try/catch 隔离：即使失败也不阻断打开绑定会话（仅影响视觉前置）。
     try {
       const win = getCurrentWindow();
@@ -36,7 +37,7 @@ onMounted(async () => {
       await sessionLog(
         "error",
         null,
-        "sched-toast-open-session",
+        "toast-open-session",
         `frontend-window-error=${String(err)}`,
       );
     }
@@ -45,14 +46,14 @@ onMounted(async () => {
       await sessionLog(
         "info",
         null,
-        "sched-toast-open-session",
+        "toast-open-session",
         "frontend-openSession-done",
       );
     } catch (err) {
       await sessionLog(
         "error",
         null,
-        "sched-toast-open-session",
+        "toast-open-session",
         `frontend-openSession-error=${String(err)}`,
       );
     }

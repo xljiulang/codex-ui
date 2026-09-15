@@ -195,6 +195,8 @@ export interface AppSettings {
   zen_proxy_port?: number;
   /** Zen 代理转发上游 API 请求地址（默认 https://opencode.ai/zen/v1） */
   zen_proxy_base_url?: string;
+  /** codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启 */
+  error_notify_enabled?: boolean;
 }
 
 /** 定时任务执行记录状态 */

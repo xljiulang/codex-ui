@@ -128,6 +128,131 @@ describe("codex/message 事件 toast 本地化", () => {
   });
 });
 
+describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
+  /** 取出本次 notify_codex_error 调用参数（未调用返回 undefined） */
+  function notifyArgs() {
+    const call = mockedInvoke.mock.calls.find(
+      ([cmd]) => cmd === "notify_codex_error",
+    );
+    return call?.[1] as
+      | { title: string; body: string; threadId: string; turnId?: string | null }
+      | undefined;
+  }
+
+  beforeEach(() => {
+    disposeEvents();
+    for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
+    mockListenCapture();
+    mockedInvoke.mockReset();
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "thread_list") {
+        return Promise.resolve({ data: [], nextCursor: null });
+      }
+      return Promise.resolve(undefined);
+    });
+    __resetSessionTabsForTest();
+    store.toast = "";
+    store.threads = [];
+  });
+
+  it("codex/message 的 error 通知：toast 照旧 + 按归属会话发通知", async () => {
+    const tab = reactive(makeSessionTab("s1", "t1", { name: "修复登录" }));
+    tabs.push(tab);
+    await wireEvents();
+    fireListen("codex/message", {
+      level: "error",
+      method: "error",
+      message: "unexpected status 401 Unauthorized: Model x is not supported",
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    // 应用内提示行为不变
+    expect(store.toast).toBe("认证失效，请重新登录");
+    expect(notifyArgs()).toEqual({
+      title: "Codex 错误 · 修复登录",
+      body: "认证失效，请重新登录",
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+  });
+
+  it("codex/message 的 error 缺 threadId：只弹 toast，不发通知", async () => {
+    await wireEvents();
+    fireListen("codex/message", {
+      level: "error",
+      method: "error",
+      message: "server overloaded",
+    });
+    expect(store.toast).toBe("服务过载，请稍后重试");
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("会话内 error 条目：入库渲染照旧 + 发通知", async () => {
+    const tab = reactive(makeSessionTab("s1", "t1", { name: "修复登录" }));
+    tabs.push(tab);
+    await wireEvents();
+    fireListen("item/completed", {
+      threadId: "t1",
+      turnId: "turn-1",
+      item: { id: "i1", type: "error", message: "boom" },
+    });
+    expect(store.itemsByThread["t1"]).toHaveLength(1);
+    expect(notifyArgs()).toEqual({
+      title: "Codex 错误 · 修复登录",
+      body: "boom",
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+  });
+
+  it("非 error 条目不发通知", async () => {
+    await wireEvents();
+    fireListen("item/completed", {
+      threadId: "t1",
+      item: { id: "i1", type: "agentMessage", text: "hi" },
+    });
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("turn/completed=failed：按 turn.error 发通知并照旧复位回合状态", async () => {
+    const tab = reactive(
+      makeSessionTab("s1", "t1", {
+        name: "修复登录",
+        turnActive: true,
+        currentTurnId: "turn-1",
+      }),
+    );
+    tabs.push(tab);
+    await wireEvents();
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: {
+        id: "turn-1",
+        status: "failed",
+        error: { message: "stream disconnected before completion", codexErrorInfo: "httpConnectionFailed" },
+      },
+    });
+    expect(notifyArgs()).toEqual({
+      title: "Codex 错误 · 修复登录",
+      body: "网络连接失败，请重试",
+      threadId: "t1",
+      turnId: "turn-1",
+    });
+    expect(tab.turnActive).toBe(false);
+  });
+
+  it("turn/completed 正常完成不发通知", async () => {
+    const tab = reactive(makeSessionTab("s1", "t1"));
+    tabs.push(tab);
+    await wireEvents();
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed", error: null },
+    });
+    expect(notifyArgs()).toBeUndefined();
+  });
+});
+
 describe("thread/tokenUsage/updated 记录会话累计输入/输出", () => {
   it("按 threadId 写入归属标签的 input/output，并保留 contextUsed/window", async () => {
     __resetSessionTabsForTest();

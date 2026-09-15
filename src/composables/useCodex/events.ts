@@ -8,6 +8,7 @@ import {
 } from "../../lib/serverMessages";
 import {
   type CodexMessageEvent,
+  type ErrorItem,
   isThreadItemType,
   type AgentMessageItem,
   type CommandExecutionItem,
@@ -30,6 +31,7 @@ import { activeSessionTab, allSessionTabs, findSessionTabByThread, sessionTabTit
 import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
+import { notifyCodexError } from "./errorNotify";
 import { clearGoal, startTurn, startTurnForTab } from "./turnControl";
 import { handleDynamicToolCall } from "./dynamicToolCall";
 import { tabs } from "../useTabs";
@@ -87,6 +89,24 @@ export function resolveTurnTab(p: {
     if (activeSessionTab()?.currentTurnId === turnId) return activeSessionTab();
   }
   return null;
+}
+
+
+/**
+ * 会话内 error 条目（`item.type === "error"`，服务端错误消息）：窗口没有前台焦点时
+ * 额外发一条 Windows 通知，让用户切走后也能看到该错误（应用内错误卡片照旧渲染）。
+ */
+function notifyErrorItem(
+  item: ThreadItem,
+  threadId: string,
+  turnId?: string,
+): void {
+  if (!isThreadItemType<ErrorItem>(item, "error")) {
+    return;
+  }
+  const message = String(item.message ?? "").trim();
+  if (!message) return;
+  notifyCodexError({ message, threadId, turnId });
 }
 
 
@@ -193,9 +213,25 @@ export async function wireEvents() {
     await listen("turn/completed", async (e) => {
       const p = e.payload as {
         threadId?: string;
-        turn?: { id?: string; status?: string };
+        turn?: {
+          id?: string;
+          status?: string;
+          error?: { message?: string; codexErrorInfo?: unknown } | null;
+        };
       };
       if (isBackgroundThread(p.threadId)) return; // 后台临时线程完成不影响主对话
+      // 回合失败：错误正文写在 turn.error（`error` 通知可能早于本事件到达，
+      // 也可能是唯一来源）；仅有 threadId 时才发系统通知
+      const turnError = p.turn?.status === "failed" ? p.turn.error : null;
+      const turnErrorMessage = String(turnError?.message ?? "").trim();
+      if (turnErrorMessage && p.threadId) {
+        notifyCodexError({
+          message: turnErrorMessage,
+          codexErrorInfo: turnError?.codexErrorInfo,
+          threadId: p.threadId,
+          turnId: p.turn?.id,
+        });
+      }
       const tab = resolveTurnTab(p);
       // 无打开标签时（线程已关闭/仅缓存）仍按 p.threadId 清扫该线程的 item，
       // 但不触碰任何标签的回合状态/计划提示
@@ -291,9 +327,11 @@ export async function wireEvents() {
       const p = e.payload as {
         item: ThreadItem;
         threadId: string;
+        turnId?: string;
         startedAtMs?: number;
       };
       if (isBackgroundThread(p.threadId)) return;
+      notifyErrorItem(p.item, p.threadId, p.turnId);
       upsertItem(p.threadId, {
         ...p.item,
         startedAtMs: p.startedAtMs ?? Date.now(),
@@ -303,9 +341,11 @@ export async function wireEvents() {
       const p = e.payload as {
         item: ThreadItem;
         threadId: string;
+        turnId?: string;
         completedAtMs?: number;
       };
       if (isBackgroundThread(p.threadId)) return;
+      notifyErrorItem(p.item, p.threadId, p.turnId);
       // 优先用服务端提供的耗时；缺失时用 startedAtMs→completedAtMs 推算，
       // 覆盖命令执行/文件变更等所有工具类型的“耗时”展示。
       let durationMs: number | undefined =
@@ -669,6 +709,13 @@ export async function wireEvents() {
             error: { message: p.message, codexErrorInfo: p.codexErrorInfo },
           }),
         );
+        // 窗口没有前台焦点时同时投 Windows 通知（应用内 toast 行为不变）
+        notifyCodexError({
+          message: p.message,
+          codexErrorInfo: p.codexErrorInfo,
+          threadId: p.threadId,
+          turnId: p.turnId,
+        });
         return;
       }
       // 非 error 只会在 DEBUG 构建由后端发送；Release 下 warning 仅落盘

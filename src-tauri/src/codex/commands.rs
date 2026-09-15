@@ -10,6 +10,7 @@ use crate::codex::custom_instructions;
 use crate::codex::model_config;
 use crate::codex::path_util::clean_path;
 use crate::codex::model_catalog;
+use crate::codex::notifications;
 use crate::codex::scheduled_tasks::{self, ScheduledTask, ScheduledTaskStore, TaskScheduler, TaskRunRecord};
 use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
@@ -420,6 +421,98 @@ pub async fn scheduled_task_runs(
     offset: Option<i64>,
 ) -> Result<Vec<TaskRunRecord>, String> {
     store.list_runs(&task_id, limit.unwrap_or(20).clamp(1, 100), offset.unwrap_or(0).max(0))
+}
+
+/// codex 错误通知节流器（进程级，见 `notifications::ToastThrottle`）。
+static CODEX_ERROR_THROTTLE: OnceLock<Mutex<notifications::ToastThrottle>> = OnceLock::new();
+
+fn codex_error_throttle() -> &'static Mutex<notifications::ToastThrottle> {
+    CODEX_ERROR_THROTTLE.get_or_init(|| Mutex::new(notifications::ToastThrottle::default()))
+}
+
+/// 把 codex 产生的错误转成 Windows 系统通知（系统 toast/操作中心）。
+///
+/// 由前端在每次 codex 错误（`codex/message` 的 error、会话内 error 条目、回合失败、
+/// 发送回合失败）时调用，本命令负责三件前端拿不到的事：
+/// 1) **焦点判定**：主窗口处于前台焦点时直接返回——只在「应用没被看到」时才打扰用户，
+///    判定放在后端可避免前端为此申请 `core:window:allow-is-focused` 权限；
+/// 2) **节流**：同一正文 10 秒内只发一条（响应流断线重连 1/5…5/5 的同文连报会收敛），
+///    同一会话回合 2 秒内只发一条（`error` 通知与 `turn/failed` 对同一次失败的双报，
+///    窗口取短以免压掉同一回合内稍后出现的、真正致命的另一个错误）；
+/// 3) **投递**：在带消息泵的主线程发 WinRT toast，附「打开会话」按钮，
+///    点击后经 `notification-open-session` 事件让前端聚焦窗口并打开该会话。
+///
+/// 标题/正文在此再清洗一次（压单行 + 截断），失败只记会话日志，不向前端抛错。
+#[tauri::command]
+pub async fn notify_codex_error(
+    app: AppHandle,
+    server: State<'_, Server>,
+    title: String,
+    body: String,
+    thread_id: String,
+    turn_id: Option<String>,
+) -> Result<(), String> {
+    let thread_id = thread_id.trim().to_string();
+    if thread_id.is_empty() {
+        return Ok(());
+    }
+    // 窗口不存在（启动早期/已销毁）按「没有前台焦点」处理，与最小化/隐藏到托盘一致。
+    let focused = app
+        .get_webview_window("main")
+        .and_then(|w| w.is_focused().ok())
+        .unwrap_or(false);
+    if focused {
+        return Ok(());
+    }
+    let title = notifications::sanitize_toast_text(&title, notifications::MAX_TITLE_CHARS);
+    let body = notifications::sanitize_toast_text(&body, notifications::MAX_BODY_CHARS);
+    if title.is_empty() || body.is_empty() {
+        return Ok(());
+    }
+    let entries = notifications::throttle_entries(&thread_id, turn_id.as_deref(), &body);
+    let allowed = codex_error_throttle()
+        .lock()
+        .map(|mut t| t.allow(&entries, std::time::Instant::now()))
+        .unwrap_or(true);
+    if !allowed {
+        server.session_log(
+            "info".into(),
+            Some(thread_id.clone()),
+            "toast-throttled".into(),
+            Some(format!("source=codex-error body={body}")).into(),
+        );
+        return Ok(());
+    }
+
+    let app_for_toast = app.clone();
+    let server_for_toast = server.inner().clone();
+    #[cfg(windows)]
+    {
+        let _ = app.clone().run_on_main_thread(move || {
+            if let Err(e) = notifications::show_winrt_toast(
+                &app_for_toast,
+                &server_for_toast,
+                notifications::notification_app_id(),
+                &title,
+                &body,
+                &thread_id,
+                "codex-error",
+            ) {
+                server_for_toast.session_log(
+                    "warn".into(),
+                    None,
+                    "toast-error".into(),
+                    Some(format!("source=codex-error error={e}")).into(),
+                );
+            }
+        });
+    }
+    #[cfg(not(windows))]
+    {
+        // 项目仅面向 Windows，此分支不会在目标构建中用到。
+        let _ = (app_for_toast, server_for_toast, title, body, thread_id);
+    }
+    Ok(())
 }
 
 #[tauri::command]

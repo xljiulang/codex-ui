@@ -88,9 +88,9 @@ fn show_main(app: &AppHandle) {
 }
 
 pub fn run() {
-    // 尽早声明进程 AUMID（安装版），确保定时任务 toast 按钮的前台激活投递到本运行进程，
+    // 尽早声明进程 AUMID（安装版），确保通知上「打开会话」按钮的前台激活投递到本运行进程，
     // 而非经快捷方式拉起新实例（那样会丢失点击上下文，无法聚焦并打开绑定会话）。
-    codex::scheduled_tasks::ensure_process_app_user_model_id();
+    codex::notifications::ensure_process_app_user_model_id();
 
     let builder = tauri::Builder::default()
         .on_page_load(|webview, payload| {
@@ -201,6 +201,7 @@ pub fn run() {
             codex::commands::scheduled_task_update,
             codex::commands::scheduled_task_run_now,
             codex::commands::scheduled_task_runs,
+            codex::commands::notify_codex_error,
               codex::commands::model_config_read,
               codex::commands::model_config_save,
               codex::commands::model_catalog_save,
@@ -290,7 +291,7 @@ pub fn run() {
                 server.session_log(
                     "info".into(),
                     None,
-                    "sched-toast-relaunch".into(),
+                    "toast-relaunch".into(),
                     Some(format!(
                         "args={}",
                         args.iter()
@@ -301,17 +302,17 @@ pub fn run() {
                     .into(),
                 );
             }
-            if let Some(thread) = codex::scheduled_tasks::parse_activation_thread(&args) {
+            if let Some(thread) = codex::notifications::parse_activation_thread(&args) {
                 if let Some(server) = app.try_state::<Arc<codex::app_server::CodexServer>>() {
                     server.session_log(
                         "info".into(),
                         None,
-                        "sched-toast-open-session".into(),
+                        "toast-open-session".into(),
                         Some(format!("via=relaunch thread={thread}")).into(),
                     );
                 }
                 show_main(app);
-                let _ = app.emit("scheduled-task-notification-open", &thread);
+                let _ = app.emit(codex::notifications::OPEN_SESSION_EVENT, &thread);
                 return;
             }
             show_main(app);

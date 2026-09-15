@@ -410,6 +410,8 @@ codex app-server generate-ts --out <dir> --experimental
 
 `error`/`warning` 通知统一写入 `%APPDATA%\com.codexui.app\logs\codex-YYYY-MM-DD.log`（保留 7 天）；DEBUG 构建下两者都弹 toast，Release 构建下仅 `error` 弹，`warning` 只落盘不提示。
 
+**codex 错误的系统通知**（设置 → 个性化 →「codex 错误发系统通知」，默认开启）：应用内提示行为不变，另外在**主窗口没有前台焦点时**（切到别的程序、最小化、隐藏到托盘）把 codex 产生的 error 级内容发一条 Windows 系统通知（操作中心）——来源包括 `codex/message` 的 error 通知、会话内 error 条目、回合失败（`turn/completed` failed）与发送/续跑回合失败；通知标题为「Codex 错误 · <会话名>」（取不到会话名时仅「Codex 错误」），点击「打开会话」按钮聚焦窗口并打开该会话。拿不到会话（无 threadId）的错误不发通知；节流为「同一错误正文 10 秒内只发一条」（`Reconnecting… 1/5`…`5/5` 这类同文连报收敛为一条）加「同一会话回合 2 秒内只发一条」（压制同一次失败的 error 通知 + turn failed 双报，窗口取短以免压掉同回合内稍后出现的真正错误）。通知在带消息泵的主线程按 AUMID 归属显示（开发版回退 PowerShell，安装版用 `com.codexui.app`），与定时任务通知同一套实现。
+
 **置顶**（0.149.x 固定协议）：`threadSection/list` 定位内置 `Pinned` 分区 → `thread/section/move { sectionId }` 置顶 / `{ sectionId: null }` 取消。`threadSection/list` 失败时回退内置 Pinned 分区常量 id。
 
 **标题自动总结**（0.149.x 固定协议）：新建会话后恒用 ephemeral 临时线程总结首条消息并立即注销，失败静默保留默认标题。

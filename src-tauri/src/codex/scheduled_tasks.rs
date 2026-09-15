@@ -9,7 +9,6 @@
 //! - 删除路径全部级联：删会话删任务、删任务删执行记录。
 
 use std::collections::{HashMap, HashSet};
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,17 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
-use windows::core::{HSTRING, IInspectable, Interface};
-#[cfg(windows)]
-use windows::Data::Xml::Dom::XmlDocument;
-#[cfg(windows)]
-use windows::Foundation::TypedEventHandler;
-#[cfg(windows)]
-use windows::UI::Notifications::{
-    ToastActivatedEventArgs, ToastNotification, ToastNotificationManager,
-};
-
 use crate::codex::app_server::CodexServer;
+use crate::codex::notifications;
 use crate::codex::session_state::SessionStateStore;
 use crate::codex::settings;
 
@@ -54,200 +44,6 @@ const RESULT_MAX_CHARS: usize = 4000;
 pub const BUSY_POLICY_DEFER: &str = "defer";
 /// 忙碌策略：跳过本次（等下一个触发点）。
 pub const BUSY_POLICY_SKIP: &str = "skip";
-
-/// Windows 通知归属的应用 AppUserModelID（与 tauri.conf.json `identifier` 一致）。
-/// 安装版快捷方式需携带该 AUMID，通知才会以应用图标归属显示；开发版回退 PowerShell。
-const APP_USER_MODEL_ID: &str = "com.codexui.app";
-
-/// 开发版（target/debug、target/release）回退 PowerShell 默认 AUMID，确保未注册
-/// 快捷方式的场景下 toast 也能显示（其点击路由依赖系统快捷方式，本端不处理）。
-#[cfg(windows)]
-const DEV_AUMID: &str =
-    "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
-
-/// toast 前台激活携带的「打开会话」协议串前缀。安装版下点击按钮可能不经进程内
-/// WinRT `Activated` 事件，而是由系统按 AUMID 经快捷方式二次启动本 exe，激活参数
-/// 随命令行透传；统一用该协议串承载 thread id，进程内回调与命令行两条路径都能解析。
-pub const OPEN_SESSION_SCHEME: &str = "codexui://open-session/";
-
-/// 从二次启动的命令行参数中解析「打开会话」的 thread id：扫描是否存在
-/// [`OPEN_SESSION_SCHEME`] 协议串，命中则取其后的 id（截断可能跟随的空白/引号）。
-/// 仅按协议串匹配，避免把 argv[0]（exe 路径）等误判为 thread id。
-pub fn parse_activation_thread(args: &[String]) -> Option<String> {
-    for a in args {
-        if let Some(pos) = a.find(OPEN_SESSION_SCHEME) {
-            let rest = &a[pos + OPEN_SESSION_SCHEME.len()..];
-            let id = rest
-                .split(|c: char| c.is_whitespace() || c == '"' || c == '\'')
-                .next()
-                .unwrap_or("")
-                .trim();
-            if !id.is_empty() {
-                return Some(id.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// 选择 Windows toast 的 AUMID：从 `target/debug`、`target/release` 运行视为开发版，
-/// 回退 PowerShell 默认（否则未注册快捷方式时 toast 不显示）；打包安装版用应用 AUMID。
-fn notification_app_id() -> &'static str {
-    if let Ok(exe) = std::env::current_exe() {
-        let dir = exe
-            .parent()
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        if dir.ends_with("/target/debug") || dir.ends_with("/target/release") {
-            return notification_dev_app_id();
-        }
-    }
-    APP_USER_MODEL_ID
-}
-
-/// 开发版（target/debug、target/release）回退 PowerShell 默认 AUMID，确保 toast 可显示。
-#[cfg(windows)]
-fn notification_dev_app_id() -> &'static str {
-    DEV_AUMID
-}
-
-/// 非 Windows 平台占位（项目仅面向 Windows，此分支不会在目标构建中用到）。
-#[cfg(not(windows))]
-fn notification_dev_app_id() -> &'static str {
-    APP_USER_MODEL_ID
-}
-
-/// 让本进程显式声明 Windows AppUserModelID：安装版下 toast 按钮的前台激活因此会被
-/// Windows 投递到「当前已运行进程」的 `ToastNotification.Activated` 事件（`on_activated`），
-/// 从而聚焦窗口并打开绑定会话；否则 Windows 会经安装版快捷方式尝试拉起新实例，
-/// 被单实例插件截获后仅「聚焦窗口」，会话打开逻辑永远不执行。
-///
-/// 仅安装版（exe 不在 `target/debug`、`target/release`）设置；开发版 toast 仍回退
-/// PowerShell AUMID 仅为「能显示」，其点击路由本就不在本端，故不为其设置进程 AUMID，
-/// 避免把本进程伪装成 PowerShell。
-pub fn ensure_process_app_user_model_id() {
-    #[cfg(windows)]
-    {
-        if notification_app_id() == APP_USER_MODEL_ID {
-            // 手动构造以 NUL 结尾的 UTF-16 宽字符串，避免 windows / windows-core
-            // 两个版本不一致导致 HSTRING 无法传入 Param<PCWSTR>；进程 AUMID 声明一次，
-            // 既是任务栏分组归属，也是 toast 激活路由的依据，失败仅记日志不影响功能。
-            let mut wide: Vec<u16> = APP_USER_MODEL_ID.encode_utf16().collect();
-            wide.push(0);
-            unsafe {
-                let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
-                    windows::core::PCWSTR::from_raw(wide.as_ptr()),
-                );
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        // 项目仅面向 Windows，此分支不会在目标构建中用到。
-    }
-}
-
-/// 常驻的 `ToastNotification` 队列：WinRT 要求在 toast 停留期间其对象存活，否则点击
-/// 「打开会话」按钮触发的 `Activated` 事件不再回调（对象 Drop 后事件回调失效）。
-/// 仅按 FIFO 淘汰最旧的（早已被系统关闭的 toast），避免长期运行无限增长。
-#[cfg(windows)]
-static ALIVE_TOASTS: Mutex<VecDeque<ToastNotification>> = Mutex::new(VecDeque::new());
-
-/// 常驻队列上限：超过则弹出最旧 toast 并释放其引用。通常同一时刻仅 0~2 条 toast。
-#[cfg(windows)]
-const MAX_ALIVE_TOASTS: usize = 128;
-
-/// 用 `windows` crate 直接发送 WinRT toast，并**把 `ToastNotification` 常驻**以接收点击事件。
-/// 在带消息泵的主线程调用。点击「打开会话」有两条投递通道，均已埋日志：
-/// 1) 进程内 WinRT `Activated` 事件（toast 对象常驻才有效）；
-/// 2) 未打包 Win32 应用的前台激活：系统按 AUMID 经快捷方式二次启动本 exe，
-///    激活串（`launch` / 按钮 `arguments`）随命令行透传，由单实例回调
-///    [`parse_activation_thread`] 解析后经事件通知前端。
-#[cfg(windows)]
-fn show_winrt_toast(
-    app: &AppHandle,
-    server: &Arc<CodexServer>,
-    app_id: &str,
-    title: &str,
-    body: &str,
-    thread_id: &str,
-) -> Result<(), String> {
-    let activation = format!("{}{}", OPEN_SESSION_SCHEME, thread_id);
-    let xml = format!(
-        r#"<toast duration="short" launch="{}"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual><actions><action content="打开会话" arguments="{}" activationType="foreground"/></actions></toast>"#,
-        xml_escape(&activation),
-        xml_escape(title),
-        xml_escape(body),
-        xml_escape(&activation),
-    );
-    let doc = XmlDocument::new().map_err(|e| e.to_string())?;
-    doc.LoadXml(&HSTRING::from(xml)).map_err(|e| e.to_string())?;
-    let toast =
-        ToastNotification::CreateToastNotification(&doc).map_err(|e| e.to_string())?;
-
-    let app_for_cb = app.clone();
-    let server_for_cb = server.clone();
-    let activated = TypedEventHandler::<ToastNotification, IInspectable>::new(
-        move |_sender, insp| {
-            // 通道 1：进程内 WinRT 激活事件。能进到这里说明 toast 对象常驻生效。
-            // arguments / launch 均为协议串，需解析出 thread id 再通知前端。
-            let raw = insp
-                .as_ref()
-                .and_then(|i| i.cast::<ToastActivatedEventArgs>().ok())
-                .and_then(|args| args.Arguments().ok())
-                .map(|a| a.to_string())
-                .unwrap_or_default();
-            server_for_cb.session_log(
-                "info".into(),
-                None,
-                "sched-toast-activated".into(),
-                Some(format!("raw={raw}")).into(),
-            );
-            if let Some(thread) = parse_activation_thread(&[raw]) {
-                server_for_cb.session_log(
-                    "info".into(),
-                    None,
-                    "sched-toast-open-session".into(),
-                    Some(format!("via=winrt-activated thread={thread}")).into(),
-                );
-                let _ = app_for_cb.emit("scheduled-task-notification-open", &thread);
-            }
-            Ok(())
-        },
-    );
-    toast
-        .Activated(&activated)
-        .map_err(|e| e.to_string())?;
-
-    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))
-        .map_err(|e| e.to_string())?;
-    notifier.Show(&toast).map_err(|e| e.to_string())?;
-    server.session_log(
-        "info".into(),
-        None,
-        "sched-toast-shown".into(),
-        Some(format!("app_id={app_id} thread={thread_id}")).into(),
-    );
-
-    // 关键：把 ToastNotification 存入常驻队列，防止 Drop 后点击回调失效。
-    if let Ok(mut alive) = ALIVE_TOASTS.lock() {
-        alive.push_back(toast);
-        if alive.len() > MAX_ALIVE_TOASTS {
-            alive.pop_front();
-        }
-    }
-    Ok(())
-}
-
-/// XML 转义（toast 标题/正文可能来自用户任务名与执行结果，需保证 XML 合法）。
-#[cfg(windows)]
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
 
 /// 归一化忙碌策略：非法值回退 skip（忙时跳过，创建默认值）。
 pub fn normalize_busy_policy(v: &str) -> &'static str {
@@ -909,9 +705,9 @@ impl TaskScheduler {
     }
 
     /// 发送 Windows 原生通知（系统 toast/操作中心，非托盘 tooltip）。
-    /// 在带消息泵的主线程显示（保证 `Activated` 事件可被投递），并附「打开会话」按钮；
-    /// 点击按钮携带 thread_id，经 Tauri 事件通知前端聚焦窗口并打开绑定会话。
-    /// `ToastNotification` 被存入常驻队列，避免 Drop 后点击回调失效（见 `show_winrt_toast`）。
+    /// 实现在共用模块 [`notifications`]：在带消息泵的主线程显示（保证 `Activated`
+    /// 事件可被投递），并附「打开会话」按钮；点击按钮携带 thread_id，经 Tauri 事件
+    /// 通知前端聚焦窗口并打开绑定会话。
     fn notify_task(&self, title: &str, body: &str, thread_id: &str) {
         let app = self.app.clone();
         let server = self.server.clone();
@@ -921,13 +717,14 @@ impl TaskScheduler {
         #[cfg(windows)]
         {
             let _ = app.clone().run_on_main_thread(move || {
-                let _ = show_winrt_toast(
+                let _ = notifications::show_winrt_toast(
                     &app,
                     &server,
-                    notification_app_id(),
+                    notifications::notification_app_id(),
                     &title,
                     &body,
                     &thread_id,
+                    "scheduled-task",
                 );
             });
         }
@@ -1423,34 +1220,6 @@ mod tests {
 
     fn tz() -> FixedOffset {
         FixedOffset::east_opt(8 * 3600).unwrap()
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn xml_escape_escapes_special_chars() {
-        assert_eq!(xml_escape("a&b<c>d\"e'f"), "a&amp;b&lt;c&gt;d&quot;e&apos;f");
-        assert_eq!(xml_escape("无特殊字符"), "无特殊字符");
-    }
-
-    #[test]
-    fn parse_activation_thread_scans_scheme() {
-        assert_eq!(
-            parse_activation_thread(&[
-                "C:\\app\\codex-ui.exe".into(),
-                "codexui://open-session/task-thread-123".into(),
-            ]),
-            Some("task-thread-123".into()),
-        );
-        // 命中后截断紧随其后的引号/空白（激活器可能包裹或拼接其它 token）
-        assert_eq!(
-            parse_activation_thread(&["codexui://open-session/abc\"extra".into()]),
-            Some("abc".into()),
-        );
-        // 未命中协议串
-        assert_eq!(
-            parse_activation_thread(&["-AppUserModelId".into(), "codex-ui".into()]),
-            None,
-        );
     }
 
     #[test]

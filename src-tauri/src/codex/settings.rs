@@ -34,6 +34,9 @@ pub struct AppSettings {
     /// Zen 代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
     #[serde(default = "default_zen_proxy_base_url")]
     pub zen_proxy_base_url: String,
+    /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启
+    #[serde(default = "default_error_notify_enabled")]
+    pub error_notify_enabled: bool,
 }
 
 fn default_zen_proxy_port() -> u16 {
@@ -56,6 +59,10 @@ fn default_glass_effect() -> bool {
     true
 }
 
+fn default_error_notify_enabled() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -72,6 +79,7 @@ impl Default for AppSettings {
             zen_proxy_enabled: false,
             zen_proxy_port: default_zen_proxy_port(),
             zen_proxy_base_url: default_zen_proxy_base_url(),
+            error_notify_enabled: default_error_notify_enabled(),
         }
     }
 }
@@ -223,6 +231,31 @@ mod tests {
         let s = AppSettings::default();
         save(dir.path(), &s).unwrap();
         assert!(load(dir.path()).glass_effect);
+    }
+
+    #[test]
+    fn error_notify_defaults_true_and_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        // 旧 settings.json 缺失 error_notify_enabled：应回退默认 true（错误发系统通知）
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        assert!(load(dir.path()).error_notify_enabled);
+
+        // 显式关闭与开启均可往返一致
+        let s = AppSettings {
+            error_notify_enabled: false,
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        assert!(!load(dir.path()).error_notify_enabled);
+
+        let s = AppSettings::default();
+        save(dir.path(), &s).unwrap();
+        assert!(load(dir.path()).error_notify_enabled);
     }
 
     #[test]
