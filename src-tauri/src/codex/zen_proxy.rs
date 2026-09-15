@@ -75,7 +75,7 @@ const NUDGE_MAX_STREAK: u32 = 2;
 /// 口嗨自动续跑：距上次注入超过该时长视为新的一轮，连续计数清零。
 const NUDGE_RESET_AFTER: Duration = Duration::from_secs(10 * 60);
 /// 口嗨自动续跑：判定调用（后台会话）的超时上限；超时按「已完成」处理。
-const NUDGE_JUDGE_TIMEOUT: Duration = Duration::from_secs(15);
+const NUDGE_JUDGE_TIMEOUT: Duration = Duration::from_secs(25);
 /// 口嗨自动续跑：单次入站请求最多向上游发起的 pass 数（1 次原始 + 续跑，留余量）。
 const NUDGE_MAX_PASSES: usize = 4;
 /// 口嗨自动续跑：判定提示词里助手文本 / 用户请求的截断上限（字符）。
@@ -7310,3 +7310,4 @@ mod integration_tests {
         );
     }
 }
+
