@@ -385,6 +385,8 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
+/* 配色与光标对齐滚动条滑块（styles/feedback.css 的 ::-webkit-scrollbar-thumb：
+   常态 rgba(border, 0.26)、悬停 0.42、cursor: default）；改这里需同步那边 */
 .turn-nav-btn {
   pointer-events: auto;
   display: flex;
@@ -395,11 +397,10 @@ onBeforeUnmount(() => {
   padding: 0;
   border: none;
   border-radius: 6px;
-  color: var(--text-faint);
+  color: rgba(var(--border-rgb), 0.26);
   background: none;
   box-shadow: none;
-  cursor: pointer;
-  opacity: 0.8;
+  cursor: default;
   transition: opacity var(--ease), color var(--ease);
 }
 
@@ -410,8 +411,7 @@ onBeforeUnmount(() => {
 }
 
 .turn-nav-btn:hover:not(:disabled) {
-  opacity: 1;
-  color: var(--text-dim);
+  color: rgba(var(--border-rgb), 0.42);
 }
 
 .turn-nav-btn:disabled {
