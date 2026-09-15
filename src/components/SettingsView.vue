@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import {
   ICON_EXTENSION,
-  ICON_FILE,
+  ICON_CHECKLIST,
   ICON_GLOBE,
   ICON_HISTORY,
   ICON_MCP,
@@ -50,7 +50,7 @@ interface SettingsSection {
 const settingsSections: SettingsSection[] = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
   { id: "basic", label: "基础设置", icon: ICON_TUNE },
-  { id: "global-instructions", label: "全局指令", icon: ICON_FILE },
+  { id: "global-instructions", label: "全局指令", icon: ICON_CHECKLIST },
   { id: "model-snapshot", label: "模型快照", icon: ICON_SNAPSHOT, stroke: true },
   { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "dynamic-tools", label: "动态工具", icon: ICON_TOOL },
