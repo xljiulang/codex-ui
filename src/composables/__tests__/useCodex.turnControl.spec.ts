@@ -416,11 +416,12 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     store.models = [DEFAULT_MODEL];
     await sendPrompt("你好");
     expect(store.toast).toBe("认证失效，请重新登录");
-    expect(mockedInvoke).toHaveBeenCalledWith("notify_codex_error", {
-      title: "Codex 错误 · 修复登录",
+    expect(mockedInvoke).toHaveBeenCalledWith("notify_session_event", {
+      title: "会话错误 · 修复登录",
       body: "认证失效，请重新登录",
       threadId: "t1",
       turnId: null,
+      source: "error",
     });
   });
 
@@ -438,7 +439,7 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
     await sendPrompt("你好");
     expect(store.toast).toBe("会话已不存在，已切换为新会话");
     expect(
-      mockedInvoke.mock.calls.filter(([c]) => c === "notify_codex_error"),
+      mockedInvoke.mock.calls.filter(([c]) => c === "notify_session_event"),
     ).toHaveLength(0);
   });
 });

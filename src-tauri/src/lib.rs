@@ -201,7 +201,7 @@ pub fn run() {
             codex::commands::scheduled_task_update,
             codex::commands::scheduled_task_run_now,
             codex::commands::scheduled_task_runs,
-            codex::commands::notify_codex_error,
+            codex::commands::notify_session_event,
               codex::commands::model_config_read,
               codex::commands::model_config_save,
               codex::commands::model_catalog_save,

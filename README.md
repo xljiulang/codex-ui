@@ -30,7 +30,7 @@
 
 - 提权审批（批准 / 拒绝 / 本次会话批准 / 批准并记住此规则）、选项提问、MCP 表单**内嵌在聊天消息流中**（待处理交互气泡，回答时上方上下文完整可见；交互挂起时隐藏“等待响应”；CODEX 会话标签显示待处理计数角标，切到文件/diff 标签也不会错过）；
 - **计划已就绪确认**同为消息流内嵌气泡（仿 VS Code/CLI：计划模式回合完成后在消息流末尾弹出“执行计划 / 待在计划 / 退出计划模式”，完整计划见上方消息、气泡不重复展示，执行计划自动发送 `PLEASE IMPLEMENT THIS PLAN:` 消息并切到默认模式，气泡按钮聚焦时 Space 不触发默认点击、防误执行）；
-- 交互出现时播放提示音；
+- 交互（提权审批 / 提问 / MCP 表单）与「计划已就绪」出现、以及会话报错时，若窗口没有前台焦点则发 Windows 系统通知（默认开启，可在设置 → 个性化关闭）；
 - 回合可随时停止并提示“已停止生成”；
 - 非编辑区自定义右键菜单（复制/打开链接），文本输入控件剪切/复制/粘贴/全选，均无默认菜单；
 - 右键菜单不被会话流式更新的吸底滚动误关闭（仅当被滚动的容器包含菜单锚点时才关）。
@@ -206,7 +206,7 @@
 - **Zen 代理的工具声明翻译（自由格式工具）**：codex 对 `apply_patch_tool_type="freeform"` 的模型声明 `{"type":"custom","name":"apply_patch","description":"…FREEFORM…","format":{grammar…}}`（补丁文本是自由格式，不包 JSON），而 Chat Completions 只有函数调用。代理把它**暴露成单参数函数**（`input` 字符串必填；描述里的 FREEFORM/「do not wrap in JSON」措辞会被替换为「Edit files (apply_patch patch language).」+「This channel is a function call: put the full patch text in the JSON "input" field.」，`format.grammar` 不下发），回译模型调用时发出完整的 `custom_tool_call` 事件序列（`response.output_item.added` → `response.custom_tool_call_input.delta` → `.done` → `response.output_item.done`，`input` 取 `{"input":…}` 字段或补丁原文），非流式输出 `custom_tool_call` item；历史里的 `custom_tool_call` / `custom_tool_call_output` 会还原成 assistant 的 function_call 与 `role:"tool"` 消息（此前被整段丢弃）。**补丁语法说明（模型可见文案统一英文）**：codex 的补丁语法只存在于 `format.definition`（lark grammar）里，description 本身只有「可编辑文件 + 别包 JSON」两句，而 Chat Completions 没有语法约束能力——grammar 被丢掉后上游模型（实测 mimo 系）根本不知道 `@@` 的语义，会自创 `@@ 中文描述 @@` 形态的 hunk 头，被 codex 判 `apply_patch verification failed: Failed to find context '… @@'` 后反复换写法重试，最后回退到 PowerShell 字符串替换（实测 09-14 一条 mimo 会话：16 次 apply_patch、5 次失败、203 次 exec_command）。现在描述里**补上从 grammar 提炼的英文语法规范**（骨架 `*** Begin Patch` → `*** Update File:` → `@@ <原文锚点行>` → 上下文/`-`/`+` 行 → `*** End Patch`，文件块 `Add File` / `Delete File` / `Move to` / `End of File`，以及「hunk 头只能是 `@@` 或文件里逐字存在的一行，禁止 `@@ 描述 @@`；上下文行必须逐字复制、含缩进」），并**在历史里出现补丁失败时追加一条英文纠错提示**（只对这个历史里的自定义工具调用生效，且输出命中 `apply_patch verification failed` / `Failed to find context` / `Invalid patch` / `Invalid Context`；只改写发往上游的那条工具结果，codex 侧记录与 rollout 不变）。诊断：`zen_proxy.request` 增 `patch_failures=<n>`（本次历史里已失败的补丁调用条数），`zen_proxy.stream_summary` 同名字段，`suspicious` 新增 `patch_retry`。**实测**：走 `function_call` 形态会被 codex 判 `Fatal error: tool apply_patch invoked with incompatible payload`，`custom_tool_call` 形态可正常执行补丁。非 JSON 参数按补丁原文接受（空内容仍判畸形）；`type:"web_search"` 内建联网工具仍不暴露给上游（代理无法代执行）。
 - **Zen 代理的指标口径**：上游 usage 里的 `cache_write_tokens` 在 OpenAI 兼容端点上恒为 0（上游明确上报该字段，属正常；有效指标是「缓存读取」与「输入缓存命中率」）；「推理输出 / 思考过程」取决于 codex 是否请求推理——把该提供方的 `model_reasoning_effort` 设为非 `none`、`model_reasoning_summary` 设为 `auto`，再用 `zen_proxy.request` 的 `reasoning_effort` 与 `zen_proxy.stream_summary` 的 `delta_keys` 核对（前者是 codex 请求的档位，后者是上游实际下发的推理字段）。
 - **模型配置空值语义**：提供方列表首项为固定的「**不使用模型提供方**」（选中表示不激活任何提供方）——**选择它不会删除既有提供方**，因为 `model_provider` 留空时按空值删键写 `null` 而不是写空串（实测：空串会让 codex 判定整份配置无效、用户层从 `config/read` 消失，设置页因此读到空提供方列表，下次保存把 `model_providers` 整表覆盖为空）；**`wire_api` 仅支持 `responses`**（codex 0.149.x 已不支持 `chat`），历史 `chat` 值在提供方行显示行内错误、保存时校验阻断，编辑弹窗只提供 `responses` 且打开时回填该值，保存一次即修正；推理强度留空表示「未配置」（写 `null` 删键，写空串会被 codex 以 `reasoning_effort must not be empty` 拒绝保存）；
-- 保存后需重启 codex-ui 才能生效、Enter 快捷发送、跟进处理方式（调整方向 / 加入队列）、提示音开关、**记忆管理**（记忆模式关闭/启用，默认关闭，新建会话自动应用、保存时同步当前会话；「删除记忆」二次确认后清空全部已保存记忆）（权限模式、模型、推理强度为会话级，在每个会话标签的输入区按钮菜单中配置，新会话取默认）。
+- 保存后需重启 codex-ui 才能生效、Enter 快捷发送、跟进处理方式（调整方向 / 加入队列）、**两个系统通知开关**（会话错误 / 会话提权·交互，均默认开启且只在窗口没有前台焦点时生效）、**记忆管理**（记忆模式关闭/启用，默认关闭，新建会话自动应用、保存时同步当前会话；「删除记忆」二次确认后清空全部已保存记忆）（权限模式、模型、推理强度为会话级，在每个会话标签的输入区按钮菜单中配置，新会话取默认）。
 
 ### Zen 代理诊断日志（内容级，默认关闭，用 `CODEXUI_ZEN_TRACE` 开启）
 
@@ -370,7 +370,7 @@ codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下�
 - **会话列表**：面板顶部即搜索框；按目录分组（目录按名称 A-Z、会话按置顶+时间倒序），文件夹默认收起，支持全量加载、重命名、**分叉会话**（把源会话完整复制为新线程、打开新标签并沿用源名称，可在此基础上另起分支继续）、固定置顶、删除确认。点击会话行：未打开则新标签打开、已打开则聚焦对应标签（点击当前会话不重载）；已打开会话行显示「已打开」标记、后台运行中显示呼吸点；切换标签不中断后台回合；关闭窗口时若有工作会话/终端会先确认。**打开无活跃目标的历史会话即恢复线程**，右上角立即显示该会话累计输入/输出 token 用量；**带活跃目标**的会话仍只读，发消息才恢复（服务端围绕目标自动续跑，点击目标旗子旁的 × 清除目标即停止）；新会话首条消息会自动生成短标题。
 - **会话资源**：右侧面板底部切换到“资源”Tab；根为**活动标签的工作区**（会话标签→会话工作目录；文件/diff/预览/终端标签→各自打开时的工作区），根节点显示文件夹名、默认展开第一层；`.git`/`.codegraph` 等点目录不显示；文件/目录右键管理，文件变化自动刷新；头部搜索框同时按文件名/目录名与文件内容（捆绑 `rg.exe` 可用时）检索，内容命中显示行号摘要；切换标签后根随之切换。
 - **权限模式**：只读访问（文件只读、不联网，不会修改任何文件）；请求批准允许联网、联网与外部写操作均会询问审批；帮我批准允许联网、仅对检测到的风险操作请求批准（自动评审）；完全访问不受限。权限/模型/推理强度为**会话级**，每个会话标签独立配置，新会话取默认（模型未显式选择时由模型列表默认值决定）。
-- **设置文件**：`%APPDATA%\com.codexui.app\settings.json`，仅保存 codex 路径、Enter 快捷发送、跟进处理方式、提示音开关、主题、毛玻璃特效开关、权限模式初始值、记忆模式、微信接入总开关与最后活跃会话 id（`last_session_id`，供下次启动恢复）。
+- **设置文件**：`%APPDATA%\com.codexui.app\settings.json`，仅保存 codex 路径、Enter 快捷发送、跟进处理方式、两个系统通知开关（`error_notify_enabled` / `interaction_notify_enabled`）、主题、毛玻璃特效开关、权限模式初始值、记忆模式、微信接入总开关与最后活跃会话 id（`last_session_id`，供下次启动恢复）。
 - **登录**：界面不提供登录入口，请使用其它入口（如 `codex login` 或 API Key）完成认证。
 
 ## 微信接入（ClawBot · 实验性）
@@ -410,7 +410,12 @@ codex app-server generate-ts --out <dir> --experimental
 
 `error`/`warning` 通知统一写入 `%APPDATA%\com.codexui.app\logs\codex-YYYY-MM-DD.log`（保留 7 天）；DEBUG 构建下两者都弹 toast，Release 构建下仅 `error` 弹，`warning` 只落盘不提示。
 
-**codex 错误的系统通知**（设置 → 个性化 →「codex 错误发系统通知」，默认开启）：应用内提示行为不变，另外在**主窗口没有前台焦点时**（切到别的程序、最小化、隐藏到托盘）把 codex 产生的 error 级内容发一条 Windows 系统通知（操作中心）——来源包括 `codex/message` 的 error 通知、会话内 error 条目、回合失败（`turn/completed` failed）与发送/续跑回合失败；通知标题为「Codex 错误 · <会话名>」（取不到会话名时仅「Codex 错误」），点击「打开会话」按钮聚焦窗口并打开该会话。拿不到会话（无 threadId）的错误不发通知；节流为「同一错误正文 10 秒内只发一条」（`Reconnecting… 1/5`…`5/5` 这类同文连报收敛为一条）加「同一会话回合 2 秒内只发一条」（压制同一次失败的 error 通知 + turn failed 双报，窗口取短以免压掉同回合内稍后出现的真正错误）。通知在带消息泵的主线程按 AUMID 归属显示（开发版回退 PowerShell，安装版用 `com.codexui.app`），与定时任务通知同一套实现。
+**会话的系统通知**（设置 → 个性化，两项均默认开启；应用内提示行为一律不变，只有**主窗口没有前台焦点时**——切到别的程序、最小化、隐藏到托盘——才发 Windows 通知）：
+
+- **会话错误时发系统通知**（`error_notify_enabled`）：把 codex 产生的 error 级内容发通知——来源包括 `codex/message` 的 error 通知、会话内 error 条目、回合失败（`turn/completed` failed）与发送/续跑回合失败；标题「会话错误 · <会话名>」（取不到会话名时仅「会话错误」），正文为友好中文错误文本并截断。拿不到会话（无 threadId）的错误不发；节流为「同一错误正文 10 秒内只发一条」（`Reconnecting… 1/5`…`5/5` 这类同文连报收敛为一条）加「同一会话回合 2 秒内只发一条」（压制同一次失败的 error 通知 + turn failed 双报，窗口取短以免压掉同回合内稍后出现的真正错误）。
+- **会话提权/交互时发系统通知**（`interaction_notify_enabled`）：审批（命令/文件变更/权限）、提问、MCP 表单与「计划已就绪」各发一条，标题分别是「需要审批 / 需要输入 / MCP 表单 / 计划已就绪 · <会话名>」，正文为对应的通用说明（不含命令与问题原文）；**不去重**，每条交互请求都发，避免漏掉需要立即处理的确认。
+
+两条通知都带「打开会话」按钮，点击聚焦窗口并打开对应会话；均在带消息泵的主线程按 AUMID 归属显示（开发版回退 PowerShell，安装版用 `com.codexui.app`），与定时任务通知同一套实现。
 
 **置顶**（0.149.x 固定协议）：`threadSection/list` 定位内置 `Pinned` 分区 → `thread/section/move { sectionId }` 置顶 / `{ sectionId: null }` 取消。`threadSection/list` 失败时回退内置 Pinned 分区常量 id。
 

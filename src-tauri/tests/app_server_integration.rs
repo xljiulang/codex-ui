@@ -644,13 +644,13 @@ fn settings_roundtrip() {
     let mut s = settings::load(tmp.path());
     assert_eq!(s.followup_mode, "adjust");
     assert!(s.enter_to_send);
-    assert!(s.sound_enabled);
+    assert!(s.interaction_notify_enabled);
     s.followup_mode = "queue".into();
     s.enter_to_send = false;
-    s.sound_enabled = false;
+    s.interaction_notify_enabled = false;
     settings::save(tmp.path(), &s).expect("save");
     let loaded = settings::load(tmp.path());
     assert_eq!(loaded.followup_mode, "queue");
     assert!(!loaded.enter_to_send);
-    assert!(!loaded.sound_enabled);
+    assert!(!loaded.interaction_notify_enabled);
 }

@@ -16,7 +16,7 @@ import { currentModelId, effectiveEffort, resetToNewSession } from "./settings";
 import { store } from "./store";
 import { isThreadNotFound } from "./threads";
 import { setToast, toastError } from "./toast";
-import { notifyCodexError } from "./errorNotify";
+import { notifySessionError } from "./sessionNotify";
 import type { SessionTab } from "./types";
 
 
@@ -153,7 +153,7 @@ export async function startTurnForTab(
       // 回合没发出去：窗口没被看到时也发一条系统通知（无有效会话时不发）；
       // 不传 turnId——回合并未建立，标签上的 currentTurnId 属于上一回合，
       // 带上它会让后端把「同一回合」的历史通知当成重复而误压本次。
-      notifyCodexError({ message: extractErrorMessage(e), threadId });
+      notifySessionError({ message: extractErrorMessage(e), threadId });
     }
     tab.turnActive = false;
   }
@@ -218,7 +218,7 @@ export async function startTurn(prompt: string, attachments: UserInput[]) {
     } else {
       setToast(toastError(e));
       // 回合没发出去：窗口没被看到时也发一条系统通知（不传 turnId，理由同上）
-      notifyCodexError({ message: extractErrorMessage(e), threadId });
+      notifySessionError({ message: extractErrorMessage(e), threadId });
     }
     if (tab) tab.turnActive = false;
   }

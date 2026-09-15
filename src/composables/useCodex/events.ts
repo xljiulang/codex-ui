@@ -18,7 +18,6 @@ import {
   type ServerStatus,
   type ThreadItem,
 } from "../../lib/types";
-import { playNotificationSound } from "../../lib/sound";
 import { sessionLog } from "../../lib/sessionLog";
 import {
   bumpActive,
@@ -31,7 +30,11 @@ import { activeSessionTab, allSessionTabs, findSessionTabByThread, sessionTabTit
 import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
-import { notifyCodexError } from "./errorNotify";
+import {
+  interactionKindForMethod,
+  notifySessionError,
+  notifySessionInteraction,
+} from "./sessionNotify";
 import { clearGoal, startTurn, startTurnForTab } from "./turnControl";
 import { handleDynamicToolCall } from "./dynamicToolCall";
 import { tabs } from "../useTabs";
@@ -106,7 +109,7 @@ function notifyErrorItem(
   }
   const message = String(item.message ?? "").trim();
   if (!message) return;
-  notifyCodexError({ message, threadId, turnId });
+  notifySessionError({ message, threadId, turnId });
 }
 
 
@@ -150,7 +153,11 @@ export async function wireEvents() {
       } else {
         store.interactions.push({ ...p, at: Date.now() });
       }
-      if (store.settings.sound_enabled) playNotificationSound();
+      // 窗口没有前台焦点时发系统通知（应用内气泡行为不变；无会话归属时不发）
+      notifySessionInteraction({
+        kind: interactionKindForMethod(p.method),
+        threadId,
+      });
     }),
   );
 
@@ -225,7 +232,7 @@ export async function wireEvents() {
       const turnError = p.turn?.status === "failed" ? p.turn.error : null;
       const turnErrorMessage = String(turnError?.message ?? "").trim();
       if (turnErrorMessage && p.threadId) {
-        notifyCodexError({
+        notifySessionError({
           message: turnErrorMessage,
           codexErrorInfo: turnError?.codexErrorInfo,
           threadId: p.threadId,
@@ -304,7 +311,8 @@ export async function wireEvents() {
         }
         if (planText) {
           tab.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
-          if (store.settings.sound_enabled) playNotificationSound();
+          // 窗口没有前台焦点时发系统通知（计划确认气泡行为不变）
+          notifySessionInteraction({ kind: "plan", threadId: tid });
         }
       }
       await refreshThreads();
@@ -710,7 +718,7 @@ export async function wireEvents() {
           }),
         );
         // 窗口没有前台焦点时同时投 Windows 通知（应用内 toast 行为不变）
-        notifyCodexError({
+        notifySessionError({
           message: p.message,
           codexErrorInfo: p.codexErrorInfo,
           threadId: p.threadId,

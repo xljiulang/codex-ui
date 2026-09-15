@@ -5,7 +5,6 @@ import { TabIcon, TabKind, type EditorTabBase } from "../../lib/tabs";
 
 export const defaultSettings = (): AppSettings => ({
   codex_path: null,
-  sound_enabled: true,
   enter_to_send: true,
   followup_mode: "adjust",
   theme: "blue",
@@ -18,6 +17,7 @@ export const defaultSettings = (): AppSettings => ({
     zen_proxy_port: 18080,
     zen_proxy_base_url: "https://opencode.ai/zen/v1",
     error_notify_enabled: true,
+    interaction_notify_enabled: true,
   });
 
 

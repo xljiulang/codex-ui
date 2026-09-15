@@ -7,8 +7,8 @@ import type { AppSettings } from "../../lib/types";
 
 defineProps<{ active: boolean }>();
 
-const sound = ref(store.settings.sound_enabled);
 const errorNotify = ref(store.settings.error_notify_enabled ?? true);
+const interactionNotify = ref(store.settings.interaction_notify_enabled ?? true);
 const enterToSend = ref(store.settings.enter_to_send);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const glass = ref(store.settings.glass_effect);
@@ -37,25 +37,10 @@ function selectTheme(id: ThemeId) {
   >
     <h2 class="settings-section-title">个性化</h2>
     <p class="settings-section-desc">
-      主题、音效与消息发送等个性化偏好
+      主题、通知与消息发送等个性化偏好
     </p>
     <div class="settings-card">
       <div class="settings">
-        <div class="setting-row switch-row">
-          <label class="switch">
-            <input
-              id="sound"
-              v-model="sound"
-              type="checkbox"
-              @change="persist({ sound_enabled: sound })"
-            />
-            <span class="switch-track"></span>
-          </label>
-          <label class="switch-text" for="sound">
-            提权/交互时播放提示音
-          </label>
-        </div>
-
         <div class="setting-row switch-row">
           <label class="switch">
             <input
@@ -67,7 +52,22 @@ function selectTheme(id: ThemeId) {
             <span class="switch-track"></span>
           </label>
           <label class="switch-text" for="error-notify">
-            codex 错误发系统通知（窗口没有前台焦点时）
+            会话错误时发系统通知（窗口没有前台焦点时）
+          </label>
+        </div>
+
+        <div class="setting-row switch-row">
+          <label class="switch">
+            <input
+              id="interaction-notify"
+              v-model="interactionNotify"
+              type="checkbox"
+              @change="persist({ interaction_notify_enabled: interactionNotify })"
+            />
+            <span class="switch-track"></span>
+          </label>
+          <label class="switch-text" for="interaction-notify">
+            会话提权/交互时发系统通知（窗口没有前台焦点时）
           </label>
         </div>
 

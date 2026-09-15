@@ -128,14 +128,20 @@ describe("codex/message 事件 toast 本地化", () => {
   });
 });
 
-describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
-  /** 取出本次 notify_codex_error 调用参数（未调用返回 undefined） */
+describe("会话错误/交互在窗口未聚焦时转 Windows 通知", () => {
+  /** 取出本次 notify_session_event 调用参数（未调用返回 undefined） */
   function notifyArgs() {
     const call = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "notify_codex_error",
+      ([cmd]) => cmd === "notify_session_event",
     );
     return call?.[1] as
-      | { title: string; body: string; threadId: string; turnId?: string | null }
+      | {
+          title: string;
+          body: string;
+          threadId: string;
+          turnId?: string | null;
+          source: string;
+        }
       | undefined;
   }
 
@@ -153,6 +159,7 @@ describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
     __resetSessionTabsForTest();
     store.toast = "";
     store.threads = [];
+    store.interactions = [];
   });
 
   it("codex/message 的 error 通知：toast 照旧 + 按归属会话发通知", async () => {
@@ -169,10 +176,11 @@ describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
     // 应用内提示行为不变
     expect(store.toast).toBe("认证失效，请重新登录");
     expect(notifyArgs()).toEqual({
-      title: "Codex 错误 · 修复登录",
+      title: "会话错误 · 修复登录",
       body: "认证失效，请重新登录",
       threadId: "t1",
       turnId: "turn-1",
+      source: "error",
     });
   });
 
@@ -198,10 +206,11 @@ describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
     });
     expect(store.itemsByThread["t1"]).toHaveLength(1);
     expect(notifyArgs()).toEqual({
-      title: "Codex 错误 · 修复登录",
+      title: "会话错误 · 修复登录",
       body: "boom",
       threadId: "t1",
       turnId: "turn-1",
+      source: "error",
     });
   });
 
@@ -233,10 +242,11 @@ describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
       },
     });
     expect(notifyArgs()).toEqual({
-      title: "Codex 错误 · 修复登录",
+      title: "会话错误 · 修复登录",
       body: "网络连接失败，请重试",
       threadId: "t1",
       turnId: "turn-1",
+      source: "error",
     });
     expect(tab.turnActive).toBe(false);
   });
@@ -250,6 +260,92 @@ describe("codex 错误在窗口未聚焦时转 Windows 通知", () => {
       turn: { id: "turn-1", status: "completed", error: null },
     });
     expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("交互请求（审批）：气泡照旧入队 + 发 source=interaction 通知", async () => {
+    const tab = reactive(makeSessionTab("s1", "t1", { name: "修复登录" }));
+    tabs.push(tab);
+    await wireEvents();
+    fireListen("interaction:request", {
+      requestId: 21,
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "t1", turnId: "turn-1", command: "npm test" },
+    });
+    expect(tab.interactions).toHaveLength(1);
+    expect(notifyArgs()).toEqual({
+      title: "需要审批 · 修复登录",
+      body: "会话正在等待你批准操作",
+      threadId: "t1",
+      turnId: null,
+      source: "interaction",
+    });
+  });
+
+  it("交互请求（提问/MCP 表单）各自标题；codexui 动态工具调用不发通知", async () => {
+    tabs.push(reactive(makeSessionTab("s1", "t1", { name: "修复登录" })));
+    await wireEvents();
+    fireListen("interaction:request", {
+      requestId: 22,
+      method: "item/tool/requestUserInput",
+      params: { threadId: "t1" },
+    });
+    expect(notifyArgs()?.title).toBe("需要输入 · 修复登录");
+
+    mockedInvoke.mockClear();
+    fireListen("interaction:request", {
+      requestId: 23,
+      method: "mcpServer/elicitation/request",
+      params: { threadId: "t1" },
+    });
+    expect(notifyArgs()?.title).toBe("MCP 表单 · 修复登录");
+
+    mockedInvoke.mockClear();
+    fireListen("interaction:request", {
+      requestId: 24,
+      method: "item/tool/call",
+      params: { threadId: "t1", namespace: "codexui", tool: "get_usage" },
+    });
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("无 threadId 的交互请求：不入标签也不发通知", async () => {
+    await wireEvents();
+    fireListen("interaction:request", {
+      requestId: 25,
+      method: "item/fileChange/requestApproval",
+      params: {},
+    });
+    expect(store.interactions).toHaveLength(1);
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("计划模式回合产出计划：计划气泡照旧 + 发 source=plan 通知", async () => {
+    const tab = reactive(
+      makeSessionTab("s1", "t1", {
+        name: "修复登录",
+        collaborationMode: "plan",
+        turnActive: true,
+        currentTurnId: "turn-1",
+      }),
+    );
+    tabs.push(tab);
+    store.itemsByThread["t1"] = [
+      { id: "u1", type: "userMessage", content: [], clientId: "c1" },
+      { id: "p1", type: "plan", text: "1. 做 A\n2. 做 B" },
+    ];
+    await wireEvents();
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "completed", error: null },
+    });
+    expect(tab.planPrompt?.planText).toBe("1. 做 A\n2. 做 B");
+    expect(notifyArgs()).toEqual({
+      title: "计划已就绪 · 修复登录",
+      body: "会话已产出计划，等待你确认是否执行",
+      threadId: "t1",
+      turnId: null,
+      source: "plan",
+    });
   });
 });
 
@@ -440,7 +536,7 @@ describe("interaction:request 弹窗请求不抢窗口焦点", () => {
     mockListenCapture();
     mockedInvoke.mockReset();
     store.interactions = [];
-    store.settings.sound_enabled = false;
+    store.settings.interaction_notify_enabled = false;
     vi.mocked(getCurrentWindow).mockClear();
   });
 

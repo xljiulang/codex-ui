@@ -175,7 +175,6 @@ export type TerminalShell = "cmd" | "powershell";
 
 export interface AppSettings {
   codex_path?: string | null;
-  sound_enabled: boolean;
   enter_to_send: boolean;
   followup_mode: FollowupMode;
   theme: ThemeId;
@@ -197,6 +196,8 @@ export interface AppSettings {
   zen_proxy_base_url?: string;
   /** codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启 */
   error_notify_enabled?: boolean;
+  /** 会话提权/交互（审批、提问、MCP 表单、计划就绪）发 Windows 系统通知，默认开启 */
+  interaction_notify_enabled?: boolean;
 }
 
 /** 定时任务执行记录状态 */

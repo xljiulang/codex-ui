@@ -6,7 +6,6 @@ use std::path::Path;
 #[serde(default)]
 pub struct AppSettings {
     pub codex_path: Option<String>,
-    pub sound_enabled: bool,
     pub enter_to_send: bool,
     pub followup_mode: String,
     pub theme: String,
@@ -37,6 +36,9 @@ pub struct AppSettings {
     /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启
     #[serde(default = "default_error_notify_enabled")]
     pub error_notify_enabled: bool,
+    /// 会话提权/交互（审批、提问、MCP 表单、计划就绪）发 Windows 系统通知，默认开启
+    #[serde(default = "default_interaction_notify_enabled")]
+    pub interaction_notify_enabled: bool,
 }
 
 fn default_zen_proxy_port() -> u16 {
@@ -63,11 +65,14 @@ fn default_error_notify_enabled() -> bool {
     true
 }
 
+fn default_interaction_notify_enabled() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             codex_path: None,
-            sound_enabled: true,
             enter_to_send: true,
             followup_mode: "adjust".into(),
             theme: "blue".into(),
@@ -80,6 +85,7 @@ impl Default for AppSettings {
             zen_proxy_port: default_zen_proxy_port(),
             zen_proxy_base_url: default_zen_proxy_base_url(),
             error_notify_enabled: default_error_notify_enabled(),
+            interaction_notify_enabled: default_interaction_notify_enabled(),
         }
     }
 }
@@ -256,6 +262,49 @@ mod tests {
         let s = AppSettings::default();
         save(dir.path(), &s).unwrap();
         assert!(load(dir.path()).error_notify_enabled);
+    }
+
+    #[test]
+    fn interaction_notify_defaults_true_and_roundtrips() {
+        let dir = TempDir::new().unwrap();
+        // 旧 settings.json 缺失 interaction_notify_enabled：应回退默认 true（交互发系统通知）
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        assert!(load(dir.path()).interaction_notify_enabled);
+
+        // 显式关闭与开启均可往返一致
+        let s = AppSettings {
+            interaction_notify_enabled: false,
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        assert!(!load(dir.path()).interaction_notify_enabled);
+
+        let s = AppSettings::default();
+        save(dir.path(), &s).unwrap();
+        assert!(load(dir.path()).interaction_notify_enabled);
+    }
+
+    #[test]
+    fn legacy_sound_enabled_key_is_ignored() {
+        let dir = TempDir::new().unwrap();
+        // 已移除的提示音开关留在旧 settings.json 里：解析必须容忍该未知键，
+        // 同文件里的其它字段照常生效（否则 load 会整体回退默认值）
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":false,"enter_to_send":false,"followup_mode":"queue","theme":"dark"}"#,
+        )
+        .unwrap();
+        let s = load(dir.path());
+        assert!(!s.enter_to_send);
+        assert_eq!(s.followup_mode, "queue");
+        assert_eq!(s.theme, "dark");
+        assert!(s.interaction_notify_enabled);
     }
 
     #[test]

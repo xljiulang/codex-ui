@@ -2762,11 +2762,11 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     );
     expect(rows).toHaveLength(3);
     // 控件在左：switch 里的 input 与文字标签通过 id/for 关联（点文字也能切换）
-    expect(rows[0].find(".switch > input").attributes("id")).toBe("sound");
-    expect(rows[1].find(".switch > input").attributes("id")).toBe("error-notify");
+    expect(rows[0].find(".switch > input").attributes("id")).toBe("error-notify");
+    expect(rows[1].find(".switch > input").attributes("id")).toBe("interaction-notify");
     expect(rows[2].find(".switch > input").attributes("id")).toBe("enter");
-    expect(rows[0].find(".switch-text").attributes("for")).toBe("sound");
-    expect(rows[1].find(".switch-text").attributes("for")).toBe("error-notify");
+    expect(rows[0].find(".switch-text").attributes("for")).toBe("error-notify");
+    expect(rows[1].find(".switch-text").attributes("for")).toBe("interaction-notify");
     expect(rows[2].find(".switch-text").attributes("for")).toBe("enter");
     // 个性化里不再有原生复选框行
     expect(
@@ -2788,13 +2788,13 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
 
   it("个性化三行 switch 切换后即时保存", async () => {
     const wrapper = mount(SettingsView);
-    await wrapper.find("#sound").setValue(false);
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith({ sound_enabled: false });
-
     await wrapper.find("#error-notify").setValue(false);
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith({ error_notify_enabled: false });
+
+    await wrapper.find("#interaction-notify").setValue(false);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({ interaction_notify_enabled: false });
 
     await wrapper.find("#enter").setValue(false);
     await flushPromises();

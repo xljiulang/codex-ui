@@ -238,7 +238,6 @@ describe("loadSettings 默认权限初始值", () => {
   it("启动时按持久化的默认权限设置权限模式初始值", async () => {
     mockedInvoke.mockResolvedValue({
       codex_path: null,
-      sound_enabled: true,
       enter_to_send: true,
       followup_mode: "adjust",
       theme: "blue",
@@ -254,7 +253,6 @@ describe("loadSettings 默认权限初始值", () => {
   it("持久化值非法时回退 ask-for-approval", async () => {
     mockedInvoke.mockResolvedValue({
       codex_path: null,
-      sound_enabled: true,
       enter_to_send: true,
       followup_mode: "adjust",
       theme: "blue",
@@ -275,7 +273,6 @@ describe("loadSettings 终端 Shell", () => {
   it("启动时按持久化的 terminal_shell 加载", async () => {
     mockedInvoke.mockResolvedValue({
       codex_path: null,
-      sound_enabled: true,
       enter_to_send: true,
       followup_mode: "adjust",
       theme: "blue",
@@ -291,7 +288,6 @@ describe("loadSettings 终端 Shell", () => {
   it("持久化值非法或缺失时回退 cmd", async () => {
     mockedInvoke.mockResolvedValue({
       codex_path: null,
-      sound_enabled: true,
       enter_to_send: true,
       followup_mode: "adjust",
       theme: "blue",
@@ -318,7 +314,6 @@ describe("loadSettings 毛玻璃特效", () => {
   it("持久化值缺失时回退默认 true 并写入 data-glass=on", async () => {
     mockedInvoke.mockResolvedValue({
       codex_path: null,
-      sound_enabled: true,
       enter_to_send: true,
       followup_mode: "adjust",
       theme: "blue",
@@ -333,7 +328,6 @@ describe("loadSettings 毛玻璃特效", () => {
   it("持久化 glass_effect=false 时加载并写入 data-glass=off", async () => {
     mockedInvoke.mockResolvedValue({
       codex_path: null,
-      sound_enabled: true,
       enter_to_send: true,
       followup_mode: "adjust",
       theme: "blue",

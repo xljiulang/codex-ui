@@ -423,39 +423,49 @@ pub async fn scheduled_task_runs(
     store.list_runs(&task_id, limit.unwrap_or(20).clamp(1, 100), offset.unwrap_or(0).max(0))
 }
 
-/// codex 错误通知节流器（进程级，见 `notifications::ToastThrottle`）。
+/// 会话错误通知节流器（进程级，见 `notifications::ToastThrottle`）。
 static CODEX_ERROR_THROTTLE: OnceLock<Mutex<notifications::ToastThrottle>> = OnceLock::new();
 
 fn codex_error_throttle() -> &'static Mutex<notifications::ToastThrottle> {
     CODEX_ERROR_THROTTLE.get_or_init(|| Mutex::new(notifications::ToastThrottle::default()))
 }
 
-/// 把 codex 产生的错误转成 Windows 系统通知（系统 toast/操作中心）。
+/// 通知来源是否为「可节流」的错误类：交互类（审批/提问/MCP 表单/计划就绪）每条都要发，
+/// 否则用户切走后可能漏掉需要立即处理的确认。
+fn source_is_throttled(source: &str) -> bool {
+    source == "error"
+}
+
+/// 把会话级事件转成 Windows 系统通知（系统 toast/操作中心）。
 ///
-/// 由前端在每次 codex 错误（`codex/message` 的 error、会话内 error 条目、回合失败、
-/// 发送回合失败）时调用，本命令负责三件前端拿不到的事：
+/// 由前端在这些时刻调用：codex 错误（`codex/message` 的 error、会话内 error 条目、
+/// 回合失败、发送回合失败，`source=error`）、需要人工处理的交互（审批/提问/MCP 表单，
+/// `source=interaction`）与计划就绪（`source=plan`）。本命令负责三件前端拿不到的事：
 /// 1) **焦点判定**：主窗口处于前台焦点时直接返回——只在「应用没被看到」时才打扰用户，
 ///    判定放在后端可避免前端为此申请 `core:window:allow-is-focused` 权限；
-/// 2) **节流**：同一正文 10 秒内只发一条（响应流断线重连 1/5…5/5 的同文连报会收敛），
-///    同一会话回合 2 秒内只发一条（`error` 通知与 `turn/failed` 对同一次失败的双报，
-///    窗口取短以免压掉同一回合内稍后出现的、真正致命的另一个错误）；
+/// 2) **节流**（仅 `source=error`）：同一正文 10 秒内只发一条（响应流断线重连
+///    1/5…5/5 的同文连报会收敛），同一会话回合 2 秒内只发一条（`error` 通知与
+///    `turn/failed` 对同一次失败的双报，窗口取短以免压掉同一回合内稍后出现的、
+///    真正致命的另一个错误）；交互/计划通知不去重，每条都发；
 /// 3) **投递**：在带消息泵的主线程发 WinRT toast，附「打开会话」按钮，
 ///    点击后经 `notification-open-session` 事件让前端聚焦窗口并打开该会话。
 ///
 /// 标题/正文在此再清洗一次（压单行 + 截断），失败只记会话日志，不向前端抛错。
 #[tauri::command]
-pub async fn notify_codex_error(
+pub async fn notify_session_event(
     app: AppHandle,
     server: State<'_, Server>,
     title: String,
     body: String,
     thread_id: String,
     turn_id: Option<String>,
+    source: String,
 ) -> Result<(), String> {
     let thread_id = thread_id.trim().to_string();
     if thread_id.is_empty() {
         return Ok(());
     }
+    let source = source.trim().to_string();
     // 窗口不存在（启动早期/已销毁）按「没有前台焦点」处理，与最小化/隐藏到托盘一致。
     let focused = app
         .get_webview_window("main")
@@ -469,21 +479,28 @@ pub async fn notify_codex_error(
     if title.is_empty() || body.is_empty() {
         return Ok(());
     }
-    let entries = notifications::throttle_entries(&thread_id, turn_id.as_deref(), &body);
-    let allowed = codex_error_throttle()
-        .lock()
-        .map(|mut t| t.allow(&entries, std::time::Instant::now()))
-        .unwrap_or(true);
-    if !allowed {
-        server.session_log(
-            "info".into(),
-            Some(thread_id.clone()),
-            "toast-throttled".into(),
-            Some(format!("source=codex-error body={body}")).into(),
-        );
-        return Ok(());
+    if source_is_throttled(&source) {
+        let entries = notifications::throttle_entries(&thread_id, turn_id.as_deref(), &body);
+        let allowed = codex_error_throttle()
+            .lock()
+            .map(|mut t| t.allow(&entries, std::time::Instant::now()))
+            .unwrap_or(true);
+        if !allowed {
+            server.session_log(
+                "info".into(),
+                Some(thread_id.clone()),
+                "toast-throttled".into(),
+                Some(format!("source={source} body={body}")).into(),
+            );
+            return Ok(());
+        }
     }
 
+    let log_source = if source.is_empty() {
+        "session".to_string()
+    } else {
+        source.clone()
+    };
     let app_for_toast = app.clone();
     let server_for_toast = server.inner().clone();
     #[cfg(windows)]
@@ -496,13 +513,13 @@ pub async fn notify_codex_error(
                 &title,
                 &body,
                 &thread_id,
-                "codex-error",
+                &log_source,
             ) {
                 server_for_toast.session_log(
                     "warn".into(),
                     None,
                     "toast-error".into(),
-                    Some(format!("source=codex-error error={e}")).into(),
+                    Some(format!("source={log_source} error={e}")).into(),
                 );
             }
         });
@@ -510,7 +527,14 @@ pub async fn notify_codex_error(
     #[cfg(not(windows))]
     {
         // 项目仅面向 Windows，此分支不会在目标构建中用到。
-        let _ = (app_for_toast, server_for_toast, title, body, thread_id);
+        let _ = (
+            app_for_toast,
+            server_for_toast,
+            title,
+            body,
+            thread_id,
+            log_source,
+        );
     }
     Ok(())
 }
