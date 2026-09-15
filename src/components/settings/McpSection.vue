@@ -323,14 +323,9 @@ function openMcpDetail(index: number) {
         >
           <span class="row-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
-              <path
-                :d="ICON_MCP"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
+              <!-- ICON_MCP 是面字形（cable 带子路径），按 fill 渲染才成形；
+                   描边会把 1 单位宽的带子两侧各描一圈，14px 下糊成一团 -->
+              <path :d="ICON_MCP" fill="currentColor" />
             </svg>
           </span>
           <div class="mcp-server-info">
@@ -815,4 +810,3 @@ function openMcpDetail(index: number) {
   color: var(--yellow);
 }
 </style>
-
