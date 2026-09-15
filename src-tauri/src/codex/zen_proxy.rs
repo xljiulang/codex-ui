@@ -84,6 +84,13 @@ const NUDGE_USER_LIMIT: usize = 2000;
 /// 注入给上游的续跑提醒。只出现在发给上游的历史里，不会进入 codex 自己的记录，
 /// 因此应用聊天里看不到这条消息。
 const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合，但任务看起来还没完成。请继续执行：必须实际调用工具完成剩余工作；如果确实已经完成，请明确说明完成了什么。";
+/// 计划模式的标记：codex 把当前协作模式作为开发者消息下发，计划模式下的文本形如
+/// `<collaboration_mode># Collaboration Mode: Plan …</collaboration_mode>`（Default
+/// 文案里出现的「e.g. Plan mode」不会命中）。计划模式的正常交付物就是「只有计划、
+/// 不调工具」，**必须跳过口嗨检测**，否则会把计划当成口嗨并注入「必须动手」。
+const PLAN_MODE_MARKER: &str = "collaboration mode: plan";
+/// 计划产物的包裹标签（协议 `item/plan/delta` 与之对应）：出现即视为计划交付物。
+const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
 
 /// 口嗨自动续跑的分会话计数（内存态，代理重启即清零）。
 #[derive(Debug, Default, Clone)]
@@ -127,15 +134,48 @@ enum NudgeVerdict {
     Unknown,
 }
 
+/// 请求是否处于计划模式：扫 `instructions` 与 `input` 各条目的文本，找
+/// `<collaboration_mode>` 包裹的 `Collaboration Mode: Plan`（大小写不敏感）。
+/// 计划模式下正常的「只给计划、不调工具」不能当口嗨，调用方据此整轮跳过检测。
+fn request_is_plan_mode(req: &Value) -> bool {
+    let mut texts: Vec<String> = Vec::new();
+    if let Some(instructions) = req.get("instructions").and_then(Value::as_str) {
+        texts.push(instructions.to_string());
+    }
+    if let Some(Value::String(text)) = req.get("input") {
+        texts.push(text.clone());
+    }
+    if let Some(items) = req.get("input").and_then(Value::as_array) {
+        for item in items {
+            let text = item_content_text(item);
+            if !text.is_empty() {
+                texts.push(text);
+            }
+        }
+    }
+    texts
+        .iter()
+        .any(|text| text.to_lowercase().contains(PLAN_MODE_MARKER))
+}
+
+/// 终局文本是否为计划产物（`<proposed_plan>` 包裹）：是则视为「已完成」而不检测。
+fn is_plan_deliverable(text: &str) -> bool {
+    text.to_lowercase().contains(PLAN_OUTPUT_MARKER)
+}
+
 /// 判定提示词：把「用户请求 + 助手最终回复 + 本回合工具调用数为 0」交给同一个模型，
 /// 要求只回一行结论。纯函数，便于单测。
+/// 规则要点：**方案/计划本身就是交付物**（计划模式或在等用户确认），只有「声称现在去做、
+/// 却既没有工具调用也没有交付物」才算未完成——这条曾因漏掉而导致计划被误判（见
+/// [`PLAN_MODE_MARKER`]）。
 fn nudge_judge_prompt(user_text: &str, assistant_text: &str) -> String {
     format!(
         "你是一次 AI 编码回合的看门狗，只做判断，不要执行任何操作。\n\
          已知事实：这次回合里助手调用工具的次数是 0。\n\
          请判断助手是否真的完成了用户请求：\n\
-         - 助手给出了明确结论、答案或交付物，或明确说明无需改动 → 已完成\n\
-         - 助手只是说接下来要做什么、让我先看看、现在去改某个文件，却没有真正执行任何操作 → 未完成\n\
+         - 助手给出了明确结论、答案或交付物（含代码/文本产出），或明确说明无需改动 → 已完成\n\
+         - 助手给出的是方案或计划（例如用 <proposed_plan> 包裹的计划内容），或明确表示需要等用户确认后再动手 → 已完成\n\
+         - 只有这种情况才算未完成：助手声称现在就去执行或去改某个文件，却既没有调用工具、也没有给出任何交付物\n\
          只输出一行：`未完成` 或 `已完成`（可在第二行补一句理由）。不要调用任何工具，不要输出其它内容。\n\n\
          【用户请求】\n{user}\n\n【助手最终回复】\n{assistant}\n",
         user = truncate_chars(user_text, NUDGE_USER_LIMIT),
@@ -1845,6 +1885,8 @@ async fn run_stream_task(
         .get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| !tools.is_empty());
+    // 计划模式整轮不检测：计划模式的正常交付物就是「只有计划、不调工具」
+    let plan_mode = request_is_plan_mode(&req);
     let session = opencode_session(&headers, &state.session);
     let user_text = last_user_text(&req);
 
@@ -1887,6 +1929,32 @@ async fn run_stream_task(
         // 只处理「纯文本 + 正常结束」的终局：无文本、被截断、无可调工具都不判定
         if !has_tools || st.finish_reason.as_deref() != Some("stop") || pass_text.trim().is_empty()
         {
+            break;
+        }
+        // 计划模式：连判定都不发（否则会把「给计划」当口嗨，注入「必须动手」逼它在计划模式里改代码）
+        if plan_mode {
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_skipped",
+                &[
+                    ("reason", "plan_mode".to_string()),
+                    ("pass", pass.to_string()),
+                ],
+            );
+            break;
+        }
+        // 终局文本本身就是计划产物：同样视为已完成
+        if is_plan_deliverable(&pass_text) {
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_skipped",
+                &[
+                    ("reason", "plan_output".to_string()),
+                    ("pass", pass.to_string()),
+                ],
+            );
             break;
         }
         if pass >= NUDGE_MAX_PASSES {
@@ -3657,6 +3725,14 @@ mod tests {
         assert!(prompt.contains("Now update the test"), "应带上助手终局文本");
         assert!(prompt.contains("调用工具的次数是 0"), "应说明工具调用数为 0");
         assert!(prompt.contains("`未完成` 或 `已完成`"), "应要求单行结论");
+        assert!(
+            prompt.contains("方案或计划") && prompt.contains("<proposed_plan>"),
+            "计划/方案必须明确算作已完成：{prompt}"
+        );
+        assert!(
+            prompt.contains("没有调用工具、也没有给出任何交付物"),
+            "未完成只限「声称去做却什么都没做」：{prompt}"
+        );
 
         // 超长输入按字符截断（含省略号），不会把整段历史塞进判定提示词
         let long_user = "用".repeat(NUDGE_USER_LIMIT + 50);
@@ -3692,6 +3768,54 @@ mod tests {
         assert_eq!(parse_nudge_verdict("好的\n未完成"), NudgeVerdict::Unknown);
         assert_eq!(parse_nudge_verdict("   \n\n"), NudgeVerdict::Unknown);
         assert_eq!(parse_nudge_verdict("undone"), NudgeVerdict::Unknown);
+    }
+
+    #[test]
+    fn request_is_plan_mode_detects_collaboration_mode_message() {
+        // 计划模式：codex 把模式文本作为开发者消息下发（实测格式）
+        let plan = json!({
+            "instructions": "…",
+            "input": [
+                { "type": "message", "role": "developer", "content": [{
+                    "type": "input_text",
+                    "text": "</permissions instructions><collaboration_mode># Collaboration Mode: Plan\r\n\r\nYou are now in Plan mode …</collaboration_mode>"
+                }] },
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+            ]
+        });
+        assert!(request_is_plan_mode(&plan));
+
+        // 默认模式：同一段文案里出现的「e.g. Plan mode」不能误判
+        let default_mode = json!({
+            "input": [
+                { "type": "message", "role": "developer", "content": [{
+                    "type": "input_text",
+                    "text": "<collaboration_mode># Collaboration Mode: Default\r\n\r\nYou are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.</collaboration_mode>"
+                }] }
+            ]
+        });
+        assert!(!request_is_plan_mode(&default_mode));
+
+        // 模式文本放在 instructions 里、以及大小写/换行差异
+        let in_instructions = json!({
+            "instructions": "# Collaboration\n<collaboration_mode># Collaboration Mode: PLAN</collaboration_mode>"
+        });
+        assert!(request_is_plan_mode(&in_instructions));
+
+        // 完全没有模式信息（例如其它客户端）：按非计划模式处理
+        assert!(!request_is_plan_mode(&json!({ "input": "hi" })));
+        assert!(!request_is_plan_mode(&json!({})));
+    }
+
+    #[test]
+    fn is_plan_deliverable_matches_proposed_plan_wrapper() {
+        assert!(is_plan_deliverable(
+            "<proposed_plan>\n# 标题\n…\n</proposed_plan>"
+        ));
+        assert!(is_plan_deliverable("前言\n<PROPOSED_PLAN>\n…"));
+        assert!(is_plan_deliverable("前后有文字的 <proposed_plan 片段"));
+        assert!(!is_plan_deliverable("我看完了代码，结论是不需要改动。"));
+        assert!(!is_plan_deliverable(""));
     }
 
     #[test]
@@ -6054,8 +6178,8 @@ mod integration_tests {
         }))
     }
 
-    /// 入站 Responses 请求体：可选带一个工具声明（无工具时不应触发判定）。
-    fn nudge_probe(with_tools: bool) -> Body {
+    /// 入站 Responses 请求体（JSON）：可选带一个工具声明（无工具时不应触发判定）。
+    fn nudge_probe_json(with_tools: bool) -> Value {
         let mut req = json!({
             "model": "mimo-v2.5-free",
             "stream": true,
@@ -6070,6 +6194,23 @@ mod integration_tests {
                 "parameters": { "type": "object", "properties": {} }
             }]);
         }
+        req
+    }
+
+    fn nudge_probe(with_tools: bool) -> Body {
+        Body::from(nudge_probe_json(with_tools).to_string())
+    }
+
+    /// 在探测请求前面插入一条协作模式开发者消息（模拟 codex 下发的模式文本）。
+    fn nudge_probe_with_mode(with_tools: bool, mode_text: &str) -> Body {
+        let mut req = nudge_probe_json(with_tools);
+        let mut input = vec![json!({
+            "type": "message",
+            "role": "developer",
+            "content": [{ "type": "input_text", "text": mode_text }]
+        })];
+        input.extend(req["input"].as_array().unwrap().clone());
+        req["input"] = Value::Array(input);
         Body::from(req.to_string())
     }
 
@@ -6228,6 +6369,61 @@ mod integration_tests {
         assert!(body.contains("function_call"), "{body}");
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert_eq!(rec.lock().await.len(), 3);
+    }
+
+    /// 计划模式：正常的「只给计划、不调工具」终局必须整轮跳过检测（不发判定、不注入）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_skipped_in_plan_mode() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply(
+            // 故意不带 <proposed_plan> 包裹：弱模型常直接把计划写成普通 Markdown，
+            // 这条用例要保证「模式」判据本身就能拦住它（而不是靠计划标签兜底）。
+            "## 计划\n1. 后端加 git_version 命令\n2. 关于页面加一行显示\n3. 跑测试",
+        ))])
+        .await;
+        let plan_mode_text = "</permissions instructions><collaboration_mode># Collaboration Mode: Plan\n\nYou are now in Plan mode …</collaboration_mode>";
+
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_mode(true, plan_mode_text),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert!(
+            rec.lock().await.len() == 1,
+            "计划模式下不应发判定调用：{}",
+            rec.lock().await.len()
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("reason=plan_mode"),
+            "{joined}"
+        );
+    }
+
+    /// 终局文本本身就是计划产物（默认模式下的 `<proposed_plan>`）：同样按已完成处理。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_skipped_for_plan_deliverable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply(
+            "先给方案：\n<proposed_plan>\n1. 做 A\n2. 做 B\n</proposed_plan>",
+        ))])
+        .await;
+
+        let body = run_nudge_probe(&upstream, log, nudge_probe(true)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(rec.lock().await.len(), 1, "计划产物不应触发判定");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped")
+                && joined.contains("reason=plan_output"),
+            "{joined}"
+        );
     }
 
     fn responses_probe() -> Body {
@@ -7310,4 +7506,3 @@ mod integration_tests {
         );
     }
 }
-
