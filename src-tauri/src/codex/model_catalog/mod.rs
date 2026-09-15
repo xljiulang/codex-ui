@@ -176,14 +176,6 @@ fn build_catalog_result(
             warnings.push(reason);
             ModelCatalogModelStatus::Incompatible
         } else {
-            if collected
-                .facts
-                .status
-                .as_deref()
-                .is_some_and(|status| status.eq_ignore_ascii_case("beta"))
-            {
-                warnings.push("上游资料标记为 beta".to_string());
-            }
             let mut entry =
                 template::render(&render_template, id, &collected.facts, entries.len() + 1)?;
             template::ensure_keys(&mut entry, &render_template.entry);
@@ -322,13 +314,6 @@ fn incompatible_reason(facts: &ModelFacts) -> Option<String> {
     if facts.supports_tool_calls == Some(false) && reliable("supports_tool_calls") {
         return Some("上游明确标记 tool_call=false，不兼容 Codex 工具调用".to_string());
     }
-    if facts
-        .status
-        .as_deref()
-        .is_some_and(|status| status.eq_ignore_ascii_case("deprecated")) && reliable("status")
-    {
-        return Some("上游资料标记为 deprecated".to_string());
-    }
     None
 }
 
@@ -433,7 +418,7 @@ mod tests {
             json!({"data":[{"id":"review-model-v5","context_length":128000,
                 "supported_parameters":["tools"],"reasoning":{"supported_efforts":[]}}]}),
             json!({"providers":{"relay":{"models":{"review-model-v4":{
-                "limit":{"context":1000000},"tool_call":false,"status":"deprecated",
+                "limit":{"context":1000000},"tool_call":false,
                 "description":"继承描述","reasoning_options":[{"type":"effort","values":["high"]}]
             }}}}}));
         let result = build_catalog_result(&["review-model-v5".into()], dir.path(), "https://relay.example.com").unwrap();
@@ -486,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn openrouter_status_alone_disables_exact_but_not_fuzzy_target() {
+    fn upstream_status_is_ignored_for_exact_and_fuzzy_matches() {
         let dir = tempdir().unwrap();
         write_source_fixture(dir.path(),
             json!({"data":[
@@ -497,9 +482,16 @@ mod tests {
         let result = build_catalog_result(
             &["review-model-v4".into(), "review-model-v5".into(), "other-ready".into()],
             dir.path(), "https://relay.example.com").unwrap();
-        assert_eq!(result.models[0].status, ModelCatalogModelStatus::Incompatible);
-        assert_eq!(result.models[1].status, ModelCatalogModelStatus::Ready);
-        assert_eq!(result.models[2].warnings, vec!["上游资料标记为 beta"]);
+        // 第三方资料的 status 不再参与任何判定：精确命中的 deprecated / beta 与模糊继承的 v5 都可生成
+        assert_eq!(result.ready, 3);
+        for model in &result.models {
+            assert_eq!(model.status, ModelCatalogModelStatus::Ready, "{:?}", model.warnings);
+            assert!(model.selectable, "{:?}", model.warnings);
+            assert!(!model.warnings.iter().any(|warning| {
+                warning.contains("deprecated") || warning.contains("beta")
+            }), "{:?}", model.warnings);
+        }
+        assert!(catalog_entry(&result, "review-model-v4").get("status").is_none());
     }
 
     #[test]
@@ -573,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn source_differences_only_warn_for_constraints_and_status() {
+    fn source_differences_only_warn_for_constraints() {
         let dir = tempdir().unwrap();
         // models.dev 与 OpenRouter 对该模型给出的上下文不同，但字段差异不再产生候选警告
         let result = build_catalog_result(
@@ -586,8 +578,7 @@ mod tests {
         assert_eq!(model.status, ModelCatalogModelStatus::Ready);
         assert!(has_source(model, "models_dev"));
         assert!(has_source(model, "openrouter"));
-        assert!(model.warnings.iter().all(|warning|
-            warning.contains("输入上限") || warning.contains("beta")),
+        assert!(model.warnings.iter().all(|warning| warning.contains("输入上限")),
             "普通来源差异不应逐项告警：{:?}", model.warnings);
     }
 
@@ -1063,20 +1054,12 @@ mod tests {
     }
 
     #[test]
-    fn explicit_tool_incompatibility_and_deprecated_status_are_rejected() {
+    fn explicit_tool_incompatibility_is_rejected() {
         let no_tools = ModelFacts {
             supports_tool_calls: Some(false),
             ..ModelFacts::default()
         };
         assert!(incompatible_reason(&no_tools).unwrap().contains("tool_call=false"));
-
-        let deprecated = ModelFacts {
-            status: Some("deprecated".to_string()),
-            ..ModelFacts::default()
-        };
-        assert!(incompatible_reason(&deprecated)
-            .unwrap()
-            .contains("deprecated"));
     }
 
     #[test]

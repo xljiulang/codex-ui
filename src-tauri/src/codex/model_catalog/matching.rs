@@ -137,18 +137,6 @@ impl Candidate {
         self
     }
 
-    /// 上游状态也参与正式/实验排序；精确命中仍保持最高优先级。
-    pub fn with_status(mut self, status: Option<&str>) -> Self {
-        if status.is_some_and(|status| {
-            matches!(
-                status.trim().to_ascii_lowercase().as_str(),
-                "experimental" | "preview" | "beta" | "alpha" | "deprecated"
-            )
-        }) {
-            self.is_variant = true;
-        }
-        self
-    }
 }
 
 /// 候选集合：内部保持候选顺序，`lookup` 返回命中的原始载荷。
@@ -777,28 +765,6 @@ mod tests {
             ),
         ]);
         assert_eq!(matched_id(&store, "gpt-5.7"), Some("gpt-5.6"));
-    }
-
-    #[test]
-    fn fuzzy_match_ranks_explicit_beta_status_after_formal_model() {
-        let formal = Candidate::new(
-            "openai/gpt-5.5".to_string(),
-            Vec::new(),
-            Some(1_800_000_000),
-            "openai/gpt-5.5",
-        );
-        let beta = Candidate::new(
-            "openai/gpt-5.6".to_string(),
-            Vec::new(),
-            Some(1_900_000_000),
-            "openai/gpt-5.6",
-        )
-        .with_status(Some("beta"));
-        let store = CandidateStore::new(vec![
-            (formal, json!({"id":"openai/gpt-5.5"})),
-            (beta, json!({"id":"openai/gpt-5.6"})),
-        ]);
-        assert_eq!(matched_id(&store, "gpt-5.7"), Some("openai/gpt-5.5"));
     }
 
     #[test]

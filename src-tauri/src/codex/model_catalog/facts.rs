@@ -70,8 +70,6 @@ pub struct ModelFacts {
     pub supports_search_tool: Option<bool>,
     /// 明确 false 时，模型不适合作为 Codex 工具调用模型。
     pub supports_tool_calls: Option<bool>,
-    /// 上源模型状态，目前主要处理 `beta` / `deprecated`。
-    pub status: Option<String>,
     pub provenance: Provenance,
     #[serde(skip)]
     pub warnings: Vec<String>,
@@ -121,7 +119,6 @@ impl ModelFacts {
             support_verbosity,
             supports_search_tool,
             supports_tool_calls,
-            status,
         );
     }
 
@@ -152,7 +149,7 @@ impl ModelFacts {
         }
         resolve!(context_window, max_context_window, input_token_limit, input_modalities,
             reasoning_levels, default_reasoning_level, description, supports_reasoning,
-            support_verbosity, supports_search_tool, supports_tool_calls, status);
+            support_verbosity, supports_search_tool, supports_tool_calls);
         result
     }
 
@@ -171,7 +168,7 @@ impl ModelFacts {
         }
         attach!(context_window, max_context_window, input_token_limit, input_modalities,
             reasoning_levels, default_reasoning_level, description, supports_reasoning,
-            support_verbosity, supports_search_tool, supports_tool_calls, status);
+            support_verbosity, supports_search_tool, supports_tool_calls);
     }
 
     /// 该源是否为这个字段提供了当前值（供测试断言）。

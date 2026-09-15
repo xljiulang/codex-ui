@@ -105,9 +105,8 @@ fn build_store(models: Vec<Value>) -> CandidateStore {
                     aliases.push(alias_target.to_string());
                 }
                 let release = model.get("created").and_then(Value::as_i64);
-                let status = model.get("status").and_then(Value::as_str);
                 Some((
-                    Candidate::new(id.clone(), aliases, release, id).with_status(status),
+                    Candidate::new(id.clone(), aliases, release, id),
                     model,
                 ))
             })
@@ -131,8 +130,6 @@ fn facts_from_model(model: &Value) -> ModelFacts {
         .map(|effort| effort.trim().to_ascii_lowercase())
         .filter(|effort| !effort.is_empty());
     facts.supports_reasoning = reasoning_present(model);
-    facts.status = model.get("status").and_then(Value::as_str)
-        .map(|status| status.trim().to_ascii_lowercase()).filter(|status| !status.is_empty());
     facts.description = model
         .get("description")
         .and_then(Value::as_str)
@@ -329,12 +326,11 @@ mod tests {
     }
 
     #[test]
-    fn extracts_status_and_explicit_empty_efforts() {
+    fn extracts_explicit_empty_efforts() {
         let facts = facts_from_model(&json!({
-            "id": "model", "status": " DEPRECATED ",
+            "id": "model",
             "reasoning": { "supported_efforts": [] }
         }));
-        assert_eq!(facts.status.as_deref(), Some("deprecated"));
         assert_eq!(facts.reasoning_levels, Some(vec![]));
         assert_eq!(facts_from_model(&json!({"id":"model"})).reasoning_levels, None);
         let invalid = facts_from_model(&json!({

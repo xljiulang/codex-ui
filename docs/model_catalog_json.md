@@ -72,8 +72,10 @@
   `YYYYMMDD` 或 `YYYY-MM-DD`。明确存在且冲突的命名空间不会跨厂商匹配。
 - **模糊排序**（依次比较，全部确定性）：同厂商 → 同版本系列 → 保留查询中的规格 token
   （`coder` / `chat` / `reasoner` / `flash` / `pro` / `mini` / `sonnet` 等）→
-  正式模型优先于实验/beta/deprecated → 版本距离近者（同系列标记后的首个整数，
-  如查询 `deepseek-v5` 时 `deepseek-v4-*` 优于中转商的历史 `deepseek-v3*`）→
+  名称带变体词元的候选靠后（只按模型 ID 的词元判定：`exp` / `preview` / `beta` /
+  `alpha` / `rc` / `nightly` / `dev` / `free` / `batch` / `latest` 等，不看第三方资料）→
+  版本距离近者（同系列标记后的首个整数，如查询 `deepseek-v5` 时 `deepseek-v4-*`
+  优于中转商的历史 `deepseek-v3*`）→
   多余 token 少者 → 相似度 → 发布时间新者 → 模型 ID。
 - **效果**：`gpt-5.7` 继承最新正式 GPT-5.x，`qwen4-coder` 优先继承 Qwen Coder，
   `deepseek-v5` 只在 DeepSeek V 系列内选择；模糊命中仍是正常可生成模型，只在弹窗显示
@@ -110,7 +112,6 @@
 | `support_verbosity` | `supported_parameters` 含 `verbosity` | —（不提供） | `support_verbosity`；源明确给值时同时把 `default_verbosity` 写 `null` |
 | `supports_search_tool` | `supported_parameters` 含 `web_search_options` 或 `web_search` | —（不提供） | `supports_search_tool` |
 | `supports_tool_calls` | `supported_parameters` 含 `tools` | `tool_call`（bool） | **不写入目录**；可靠匹配最终采用的 `false` → `incompatible`，模糊值只提示继承对象限制 |
-| `status` | `status`（去空白、小写） | `status`（去空白、小写） | 写入条目 `status`；`beta` → 警告；可靠匹配的 `deprecated` → `incompatible`，模糊值不直接禁用目标模型 |
 | `supports_reasoning` | `reasoning` 存在且（`mandatory` / `supported_efforts` 非空 / `default_effort` 非空） | `reasoning === true` 或 `reasoning_options` 非空 | **目前无消费者**（只有单测断言），接上用途或删除前不必关注 |
 
 > OpenRouter 的 `supported_parameters` 是「集合存在即为显式声明」：`verbosity` / `web_search*` / `tools`
@@ -124,7 +125,6 @@
 | 候选主键（输出 slug 仍用提供方返回的原始 ID） | `id` | `providers[*].models` 的 map key（条目缺 `id` 时用 key） |
 | 权威别名（匹配级别 alias） | `canonical_slug`、`alias_target.slug` | 无；`family` 仅为模糊线索 |
 | 发布时间（相似度相同时取新） | `created` | `release_date`，缺失回退 `last_updated` |
-| 变体/实验标记（排序时靠后） | `status` | `status` |
 | 数据形态 | `data[]` 或 `models[]`，每条必须有非空 `id` | `{ models, providers }`：保留同 ID 全部记录，逐字段处理权威性与冲突 |
 
 ### 合并与派生
@@ -146,7 +146,7 @@
 | `default_reasoning_summary` | 推理条目（有档位或声明支持推理）写 `auto`、其余写 `none`；官方复用条目同样按此覆盖，否则 GPT 系只回加密推理、「思考过程」卡片为空 |
 | `supports_reasoning_summary_parameter` | **一律不写**：官方条目没有该键，显式写 `false` 会让 codex 完全不请求推理摘要；复用条目里若残留 `false` 会被删除 |
 | `slug` / `display_name` / `priority` | `slug` 用提供方返回的 ID；模板条目 `display_name` 按 slug 格式化；`priority` 按选中条目的候选原顺序从 1 重排，不按点击顺序 |
-| 可用性 | 可靠匹配的 `tool_call=false` 或 `status=deprecated` → `incompatible`；条目校验失败 → `invalid`；这些条目不会写入目录 |
+| 可用性 | 可靠匹配的 `tool_call=false` → `incompatible`；条目校验失败 → `invalid`；这些条目不会写入目录 |
 
 命令返回的每个候选包含 `status`（`ready` / `incompatible` / `unmatched` / `invalid`）、`selectable`、
 `warnings` 与 `sources[]`。来源证据包括来源名、继承目标 `matched_id`、匹配类型与分数，
@@ -255,7 +255,7 @@
 | 资源 | 用途 | 更新方式 |
 | --- | --- | --- |
 | `resources/official-models.json` | 第三方官方条目池（完整条目源）：只放手写的第三方厂商条目（deepseek 等）；GPT/codex 基线条目改为启动时从本机 codex 导出 | `--official`（校验 + 规范化，不联网） |
-| `resources/models-dev.json` | models.dev 内置快照（`catalog.json` 精简版）：`providers` **全量** 213 个 provider / 7669 个模型 + `models` 382 条模型级条目，约 3 MB，保留 `tool_call` / `status` / `reasoning_options`；省略与 map key 重复的 `id` 与不再使用的 `api` / `name` | 同上 |
+| `resources/models-dev.json` | models.dev 内置快照（`catalog.json` 精简版）：`providers` **全量** 213 个 provider / 7669 个模型 + `models` 382 条模型级条目，约 3 MB，保留 `tool_call` / `status` / `reasoning_options`（`status` 已不再参与生成，仅为快照原样保留）；省略与 map key 重复的 `id` 与不再使用的 `api` / `name` | 同上 |
 | `resources/openrouter-models.json` | OpenRouter 全量响应回退 | 同上 |
 | `resources/model_catalog_template.json` | 渲染模板的**覆盖清单**（44 键）：固定值、占位值与精简提示词（`base_instructions` + `model_messages.instructions_template`） | `--template` |
 | `resources/model_catalog_fallback.json` | 无本机 codex 导出时的基底骨架（11 个必需键 + 提示词） | `--template` |

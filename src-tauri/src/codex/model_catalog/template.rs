@@ -52,7 +52,6 @@ pub const DATA_DRIVEN_KEYS: &[&str] = &[
     "support_verbosity",
     "default_verbosity",
     "supports_search_tool",
-    "status",
     "supports_image_detail_original",
 ];
 
@@ -315,15 +314,6 @@ pub fn render(
             json!(supports_search_tool),
         );
     }
-    if let Some(status) = facts
-        .status
-        .as_deref()
-        .map(str::trim)
-        .filter(|status| !status.is_empty())
-    {
-        entry.insert("status".to_string(), json!(status));
-    }
-
     Ok(Value::Object(entry))
 }
 
@@ -744,15 +734,6 @@ mod tests {
         assert_eq!(entry["max_context_window"], json!(200_000));
         assert_eq!(entry["effective_context_window_percent"], json!(64));
         assert_eq!(entry["auto_compact_token_limit"], json!(115_200));
-    }
-
-    #[test]
-    fn render_preserves_beta_status_for_generated_entries() {
-        let facts = ModelFacts {
-            status: Some("beta".to_string()),
-            ..ModelFacts::default()
-        };
-        assert_eq!(rendered(facts)["status"], json!("beta"));
     }
 
     #[test]

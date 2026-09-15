@@ -128,13 +128,6 @@ fn parse_catalog(text: &str) -> Result<Vec<(Candidate, Value)>, String> {
         let mut representative = records[0]["model"].clone();
         representative["id"] = json!(id);
         representative["_records"] = json!(records);
-        // 匹配排序也使用字段级归并后的状态，不能仅看恰好排在前面的记录。
-        let resolved = facts_from_records(&representative);
-        if let Some(status) = resolved.status {
-            representative["status"] = json!(status);
-        } else if let Some(object) = representative.as_object_mut() {
-            object.remove("status");
-        }
         let (candidate, payload) = build_item(id, &representative);
         items.push((candidate, payload));
     }
@@ -161,10 +154,9 @@ fn build_item(model_id: &str, model: &Value) -> (Candidate, Value) {
                 .and_then(Value::as_str)
                 .and_then(release_from_date)
         });
-    let status = model.get("status").and_then(Value::as_str);
     (
         Candidate::new(model_id.to_string(), Vec::new(), release, model_id)
-            .with_family(model.get("family").and_then(Value::as_str)).with_status(status),
+            .with_family(model.get("family").and_then(Value::as_str)),
         payload,
     )
 }
@@ -215,12 +207,6 @@ fn facts_from_model(model: &Value) -> ModelFacts {
         .filter(|description| !description.is_empty())
         .map(str::to_string);
     facts.supports_tool_calls = model.get("tool_call").and_then(Value::as_bool);
-    facts.status = model
-        .get("status")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|status| !status.is_empty())
-        .map(str::to_ascii_lowercase);
     facts
 }
 
@@ -345,7 +331,7 @@ mod tests {
                 }}},
                 "vendor": { "models": { "model-v5": {
                     "limit": { "context": 2000, "input": 800 },
-                    "reasoning_options": [], "status":"beta"
+                    "reasoning_options": []
                 }}}
             }
         }).to_string();
@@ -355,7 +341,6 @@ mod tests {
             assert_eq!(facts.context_window, Some(1000));
             assert_eq!(facts.input_token_limit, Some(800));
             assert_eq!(facts.reasoning_levels, Some(vec![]));
-            assert_eq!(facts.status.as_deref(), Some("beta"));
             assert_eq!(facts.provenance["context_window"].provider_id, None);
             assert_eq!(facts.provenance["reasoning_levels"].provider_id.as_deref(), Some("vendor"));
         }
@@ -598,17 +583,15 @@ mod tests {
     }
 
     #[test]
-    fn extracts_tool_capability_and_model_status() {
+    fn extracts_tool_capability() {
         let model = json!({
             "limit": { "context": 200000, "input": 128000 },
-            "tool_call": false,
-            "status": "beta"
+            "tool_call": false
         });
         let facts = facts_from_model(&model);
         assert_eq!(facts.context_window, Some(200_000));
         assert_eq!(facts.input_token_limit, Some(128_000));
         assert_eq!(facts.supports_tool_calls, Some(false));
-        assert_eq!(facts.status.as_deref(), Some("beta"));
     }
 
     #[test]

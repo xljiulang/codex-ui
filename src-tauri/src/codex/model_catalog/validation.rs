@@ -13,7 +13,7 @@ pub const OUTPUT_FIELDS: &[&str] = &[
     "support_verbosity", "default_verbosity", "supports_search_tool",
     "supports_image_detail_original", "supports_reasoning_summary_parameter",
     "model_messages", "shell_type", "truncation_policy", "visibility",
-    "supported_in_api", "experimental_supported_tools", "status",
+    "supported_in_api", "experimental_supported_tools",
     "prefer_websockets", "tool_mode", "use_responses_lite", "web_search_tool_type",
     "apply_patch_tool_type", "multi_agent_version", "comp_hash", "minimal_client_version",
     "reasoning_summary_format", "default_reasoning_summary", "supports_reasoning_summaries",
@@ -67,13 +67,12 @@ pub fn reconcile_facts(facts: &mut ModelFacts, warnings: &mut Vec<String>) {
             warnings.push("默认推理档位不在支持列表中，已自动清空".to_string());
         }
     }
-    for field in ["status", "supports_tool_calls"] {
-        if let Some(origin) = facts.provenance.get(field) {
-            let limited = (field == "status" && facts.status.as_deref() == Some("deprecated"))
-                || (field == "supports_tool_calls" && facts.supports_tool_calls == Some(false));
-            if origin.match_kind == MatchKind::Fuzzy && limited {
-                warnings.push(format!("近似资料 {} 的 {} 存在限制，不作为目标模型禁用依据", origin.matched_id, field));
-            }
+    if let Some(origin) = facts.provenance.get("supports_tool_calls") {
+        if origin.match_kind == MatchKind::Fuzzy && facts.supports_tool_calls == Some(false) {
+            warnings.push(format!(
+                "近似资料 {} 的 supports_tool_calls 存在限制，不作为目标模型禁用依据",
+                origin.matched_id
+            ));
         }
     }
 }
