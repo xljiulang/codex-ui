@@ -16,6 +16,7 @@ use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
 use crate::codex::wechat_bridge::WeChatBridge;
+use crate::codex::wechat_client;
 use crate::codex::zen_proxy;
 
 type Server = Arc<CodexServer>;
@@ -570,6 +571,17 @@ pub async fn wechat_bindings(wechat: State<'_, WeChat>) -> Result<Value, String>
     Ok(wechat.bindings().await)
 }
 
+/// 微信接入协议信息（设置页「关于」展示用）：协议名 + `base_info.channel_version` 的取值。
+/// 版本号只有一处事实源（`wechat_client::CHANNEL_VERSION`，即每次请求实际上报的串），
+/// 前端不另写一份，Rust 改动后「关于」自动跟随。
+#[tauri::command]
+pub fn wechat_protocol_info() -> Value {
+    json!({
+        "protocol": wechat_client::PROTOCOL_NAME,
+        "channelVersion": wechat_client::CHANNEL_VERSION,
+    })
+}
+
 /// 对指定会话发起扫码绑定：二维码内容随后经 `wechat/event` 事件推送。
 #[tauri::command]
 pub async fn wechat_bind_login_start(
@@ -1067,6 +1079,19 @@ pub fn custom_instructions_save(content: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wechat_protocol_info_exposes_protocol_and_channel_version() {
+        let info = wechat_protocol_info();
+        assert_eq!(
+            info.get("protocol").and_then(|v| v.as_str()),
+            Some(wechat_client::PROTOCOL_NAME)
+        );
+        assert_eq!(
+            info.get("channelVersion").and_then(|v| v.as_str()),
+            Some(wechat_client::CHANNEL_VERSION)
+        );
+    }
 
     #[test]
     fn image_extension_whitelist() {

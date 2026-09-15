@@ -278,6 +278,12 @@ export interface WeChatSnapshot {
   bindings: WeChatBindingInfo[];
 }
 
+/** 微信接入协议信息（wechat_protocol_info 命令）：协议名 + base_info 上报的通道版本 */
+export interface WeChatProtocolInfo {
+  protocol: string;
+  channelVersion: string;
+}
+
 /** 模型配置（config.toml / model_catalog_json 目标文件）读取结果，字段与 Rust 端一致 */
 export interface ModelConfigState {
   config_path: string;

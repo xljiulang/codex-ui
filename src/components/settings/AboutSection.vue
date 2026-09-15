@@ -1,8 +1,10 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { store } from "../../composables/useCodex";
+import type { WeChatProtocolInfo } from "../../lib/types";
 
 defineProps<{ active: boolean }>();
 
@@ -10,6 +12,18 @@ defineProps<{ active: boolean }>();
 const appVersion = ref<string>("");
 /** 后端已探测的 codex CLI 版本（`store.server.codexVersion`，未探测显示占位） */
 const codexVersion = ref<string>("未知版本");
+/** 微信接入协议（协议名 + 协议版本，来自后端 `wechat_protocol_info`；取不到显示占位） */
+const wechatProtocol = ref<string>("未知");
+
+/** 协议展示文案：协议名 · 协议版本 <channelVersion>（ClawBot 通道）；字段缺失返回占位 */
+function formatWechatProtocol(
+  info: WeChatProtocolInfo | null | undefined,
+): string {
+  const protocol = info?.protocol?.trim();
+  const version = info?.channelVersion?.trim();
+  if (!protocol || !version) return "未知";
+  return `${protocol} · 协议版本 ${version}（ClawBot 通道）`;
+}
 
 onMounted(async () => {
   // 与 boot.ts 取标题版本同源：getVersion 失败静默回退「未知版本」
@@ -20,6 +34,14 @@ onMounted(async () => {
     appVersion.value = "未知版本";
   }
   codexVersion.value = store.server.codexVersion ?? "未知版本";
+  // 协议版本只有后端一处事实源（每次微信请求的 base_info.channel_version）
+  try {
+    wechatProtocol.value = formatWechatProtocol(
+      await invoke<WeChatProtocolInfo>("wechat_protocol_info"),
+    );
+  } catch {
+    wechatProtocol.value = "未知";
+  }
 });
 </script>
 
@@ -43,6 +65,10 @@ onMounted(async () => {
         <div class="setting-row about-row">
           <label>codex CLI 版本</label>
           <div class="about-value">{{ codexVersion }}</div>
+        </div>
+        <div class="setting-row about-row">
+          <label>微信接入</label>
+          <div class="about-value">{{ wechatProtocol }}</div>
         </div>
         <div class="setting-row about-row">
           <label>技术栈</label>

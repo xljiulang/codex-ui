@@ -2721,6 +2721,41 @@ describe("SettingsView 设置标签行为", () => {
     expect((about.element as HTMLElement).style.display).not.toBe("none");
   });
 
+  it("「关于」按顺序显示四行，微信接入行取后端的协议名与协议版本", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "wechat_protocol_info") {
+        return Promise.resolve({
+          protocol: "ilink bot API",
+          channelVersion: "1.1.0",
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const about = wrapper.find(".settings-section-about");
+    expect(
+      about.findAll(".about-row label").map((l) => l.text()),
+    ).toEqual(["应用版本", "codex CLI 版本", "微信接入", "技术栈"]);
+    expect(about.findAll(".about-value")[2].text()).toBe(
+      "ilink bot API · 协议版本 1.1.0（ClawBot 通道）",
+    );
+  });
+
+  it("微信协议信息取不到时「关于」显示占位", async () => {
+    mockedInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "wechat_protocol_info") {
+        return Promise.reject(new Error("no ipc"));
+      }
+      return Promise.resolve(undefined);
+    });
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    expect(
+      wrapper.findAll(".settings-section-about .about-value")[2].text(),
+    ).toBe("未知");
+  });
+
   it("codex CLI 版本未知时「关于」显示占位", async () => {
     store.server.codexVersion = null;
     wrapper = mount(SettingsView);

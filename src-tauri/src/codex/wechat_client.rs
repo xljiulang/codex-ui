@@ -24,8 +24,10 @@ pub const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
 pub const CDN_BASE_URL: &str = "https://novac2c.cdn.weixin.qq.com/c2c";
 /// ilink bot 类型。
 const BOT_TYPE: &str = "3";
+/// 微信接入协议名（「关于」展示用）：走微信官方 ClawBot 通道的 ilink bot 接口。
+pub const PROTOCOL_NAME: &str = "ilink bot API";
 /// base_info 里的通道版本（沿用库版本串，保持兼容）。
-const CHANNEL_VERSION: &str = "1.1.0";
+pub const CHANNEL_VERSION: &str = "1.1.0";
 /// getUpdates 长轮询超时：客户端超时视为空响应继续轮询。
 const LONG_POLL_TIMEOUT: Duration = Duration::from_secs(35);
 /// 二维码状态轮询超时：超时视为 wait。
@@ -1815,6 +1817,19 @@ async fn sleep_or_cancel(cancel: &Notify, dur: Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_info_reports_channel_version_constant() {
+        // 「关于」展示的协议版本取自同一个常量：这里保证它确实就是每次请求上报的值
+        assert_eq!(PROTOCOL_NAME, "ilink bot API");
+        assert_eq!(
+            build_base_info()
+                .get("channel_version")
+                .and_then(|v| v.as_str()),
+            Some(CHANNEL_VERSION)
+        );
+        assert!(!CHANNEL_VERSION.trim().is_empty());
+    }
 
     struct MockApi {
         // 简单固定响应

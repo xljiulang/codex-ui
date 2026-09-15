@@ -172,6 +172,7 @@ pub fn run() {
             codex::commands::auth_logout,
             codex::commands::wechat_state,
             codex::commands::wechat_bindings,
+            codex::commands::wechat_protocol_info,
             codex::commands::wechat_bind_login_start,
             codex::commands::wechat_unbind,
             codex::commands::wechat_cancel_bind,
