@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import {
+  ICON_ABOUT,
   ICON_EXTENSION,
   ICON_CHECKLIST,
   ICON_GLOBE,
@@ -24,6 +25,7 @@ import PluginsSection from "./settings/PluginsSection.vue";
 import ScheduledTasksSection from "./settings/ScheduledTasksSection.vue";
 import SkillsSection from "./settings/SkillsSection.vue";
 import ZenProxySection from "./settings/ZenProxySection.vue";
+import AboutSection from "./settings/AboutSection.vue";
 
 /** 设置分类（左侧纵向导航；后续新增大类只需在此追加并补充右侧内容区） */
 const settingsSectionIds = [
@@ -38,6 +40,7 @@ const settingsSectionIds = [
   "plugins",
   "scheduled-tasks",
   "zen-proxy",
+  "about",
 ] as const;
 type SettingsSectionId = (typeof settingsSectionIds)[number];
 interface SettingsSection {
@@ -59,6 +62,7 @@ const settingsSections: SettingsSection[] = [
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
   { id: "scheduled-tasks", label: "定时任务", icon: ICON_HISTORY },
   { id: "zen-proxy", label: "Zen 代理", icon: ICON_GLOBE },
+  { id: "about", label: "关于", icon: ICON_ABOUT },
 ];
 /** 当前选中分类：默认取第一个分类（不依赖具体标签）；设置标签存在期间保持状态，关闭后重开才重置 */
 const activeSection = ref<SettingsSectionId>(settingsSections[0].id);
@@ -134,6 +138,8 @@ function onNavKeydown(e: KeyboardEvent) {
         <PluginsSection :active="activeSection === 'plugins'" />
 
         <ZenProxySection :active="activeSection === 'zen-proxy'" />
+
+        <AboutSection :active="activeSection === 'about'" />
 
       </div>
     </div>

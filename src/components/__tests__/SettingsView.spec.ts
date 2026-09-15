@@ -9,6 +9,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => () => {}),
 }));
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: vi.fn(),
+}));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, saveSettings: vi.fn() };
@@ -19,6 +22,7 @@ vi.mock("../../composables/useSessionFs", async (importOriginal) => {
 });
 
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import SettingsView from "../SettingsView.vue";
 import {
   saveSettings,
@@ -44,6 +48,7 @@ config.global.directives = { tooltip: tooltipDirective };
 const tabs = _tabs as unknown as SessionTab[];
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedGetVersion = vi.mocked(getVersion);
 const mockedSave = vi.mocked(saveSettings);
 const mockedOpenPathInApp = vi.mocked(openPathInApp);
 
@@ -265,7 +270,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → 基础设置 → 全局指令 → 模型快照 → 模型配置 → 动态工具 → 技能管理 → MCP管理 → 插件管理 → 定时任务", () => {
+  it("导航顺序：个性化 → … → 定时任务 → Zen 代理 → 关于", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
@@ -281,6 +286,8 @@ describe("SettingsView 模型配置", () => {
     expect(labels.indexOf("MCP管理")).toBe(7);
     expect(labels.indexOf("插件管理")).toBe(8);
     expect(labels.indexOf("定时任务")).toBe(9);
+    expect(labels.indexOf("Zen 代理")).toBe(10);
+    expect(labels.indexOf("关于")).toBe(11);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -2598,6 +2605,9 @@ describe("SettingsView 设置标签行为", () => {
     store.toast = "";
     mockedInvoke.mockReset();
     mockedSave.mockClear();
+    mockedGetVersion.mockReset();
+    mockedGetVersion.mockResolvedValue("1.0.0");
+    store.server.codexVersion = "0.154.0";
   });
 
   afterEach(() => {
@@ -2633,7 +2643,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染十一个分类，默认选中第一个", () => {
+  it("左侧导航渲染十二个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
@@ -2648,6 +2658,7 @@ describe("SettingsView 设置标签行为", () => {
       "插件管理",
       "定时任务",
       "Zen 代理",
+      "关于",
     ]);
     expect(items[0].classes()).toContain("active");
     expect(items[1].classes()).not.toContain("active");
@@ -2660,6 +2671,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(items[8].classes()).not.toContain("active");
     expect(items[9].classes()).not.toContain("active");
     expect(items[10].classes()).not.toContain("active");
+    expect(items[11].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;
@@ -2689,6 +2701,31 @@ describe("SettingsView 设置标签行为", () => {
     const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
     expect(globalInstructions.style.display).toBe("none");
     expect(plugins.style.display).not.toBe("none");
+  });
+
+  it("「关于」分区渲染应用信息，点击导航切换", async () => {
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const about = wrapper.find(".settings-section-about");
+    expect(about.exists()).toBe(true);
+    expect(about.find(".model-config-card-head h3").text()).toBe("Codex UI");
+    expect(about.find(".about-value").text()).toBe("1.0.0");
+    const items = wrapper.findAll(".settings-nav-item");
+    const aboutItem = items.find((i) => i.text().includes("关于"))!;
+    expect(aboutItem.classes()).not.toContain("active");
+    await aboutItem.trigger("click");
+    expect(aboutItem.classes()).toContain("active");
+    expect((about.element as HTMLElement).style.display).not.toBe("none");
+  });
+
+  it("codex CLI 版本未知时「关于」显示占位", async () => {
+    store.server.codexVersion = null;
+    wrapper = mount(SettingsView);
+    await flushPromises();
+    const values = wrapper
+      .findAll(".settings-section-about .about-value")
+      .map((v) => v.text());
+    expect(values[1]).toBe("未知版本");
   });
 
 });

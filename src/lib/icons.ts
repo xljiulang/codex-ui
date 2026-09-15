@@ -37,6 +37,8 @@ export const ICON_RENAME =
 /** 属性/信息：资源面板「属性」菜单 */
 export const ICON_INFO =
   "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z";
+/** 设置页「关于」导航：info 圆形（与 ICON_INFO 同路径，独立常量维持导航图标命名） */
+export const ICON_ABOUT = ICON_INFO;
 export const ICON_OPEN =
   "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
 /** 在资源管理器中打开：外链箭头（方框右上开口 + 角标箭头，feather external-link 风格；与「打开」的 open_in_new 区分） */
