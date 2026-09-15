@@ -2709,6 +2709,9 @@ describe("SettingsView 设置标签行为", () => {
     const about = wrapper.find(".settings-section-about");
     expect(about.exists()).toBe(true);
     expect(about.find(".model-config-card-head h3").text()).toBe("Codex UI");
+    expect(about.find(".about-tagline").text()).toBe(
+      "由 xljiulang 100% vibe coding 而成",
+    );
     expect(about.find(".about-value").text()).toBe("1.0.0");
     const items = wrapper.findAll(".settings-nav-item");
     const aboutItem = items.find((i) => i.text().includes("关于"))!;
