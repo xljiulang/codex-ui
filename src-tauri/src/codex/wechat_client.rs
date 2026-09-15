@@ -18,8 +18,6 @@ use futures_util::Future;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex, Notify};
 
-use crate::codex::commands::save_image_bytes;
-
 /// 默认 API 基地址（与 wechat-channel 一致）。
 pub const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
 /// 媒体 CDN 基地址（与 wechat-channel 一致）：下载地址为 `{CDN}/download?encrypted_query_param=…`。
@@ -46,14 +44,18 @@ const BACKOFF_DELAY: Duration = Duration::from_secs(30);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 /// getconfig / sendtyping 请求超时（正在输入状态指示相关）。
 const TYPING_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-/// 单张入站图片下载超时（超时按接收失败处理，不拖住长轮询）。
-const IMAGE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
-/// 单张入站图片大小上限。
-const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
-/// 单条消息最多处理的图片数量（微信通常单图，多余忽略）。
+/// 入站附件下载总时长上限（不限制大小；超时按接收失败处理，不拖住长轮询）。
+const ATTACHMENT_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// 单条消息最多处理的各类附件数量（微信通常单附件，多余忽略）。
 const MAX_IMAGES_PER_MESSAGE: usize = 4;
-/// 入站图片存放目录名（位于 wechannel-data 下，与 wechat-channel 的原布局一致）。
+const MAX_FILES_PER_MESSAGE: usize = 4;
+const MAX_VIDEOS_PER_MESSAGE: usize = 2;
+/// 附件存放目录名（位于 wechannel-data 下，与 wechat-channel 的原布局一致）。
 const MEDIA_DIR_NAME: &str = "media";
+/// 附件文件名净化后的最大字符数（含扩展名）。
+const MAX_FILE_NAME_CHARS: usize = 120;
+/// 落盘时保留的解密头部字节数（供图片魔数探测）。
+const HEAD_PROBE_BYTES: usize = 64;
 
 /// 统一 ID 计数器（替代随机源：唯一性足够，避免额外依赖）。
 static ID_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -187,6 +189,69 @@ pub fn extract_message_images(item_list: &Value) -> Vec<InboundImage> {
     out
 }
 
+/// 入站文件/视频引用：CDN 下载参数 + AES 密钥原文 + 原始文件名（视频没有文件名）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboundFile {
+    /// 附件 CDN 引用（`{file_item|video_item}/media/encrypt_query_param`）。
+    pub encrypt_query_param: String,
+    /// AES-128 密钥原文（`media.aes_key`，base64）；为空视为明文。
+    pub aes_key: String,
+    /// 原始文件名（仅文件消息有；视频固定用生成名）。
+    pub file_name: Option<String>,
+}
+
+/// 按 item 类型提取附件引用（type=4 文件 / type=5 视频），最多 `max` 个。
+fn extract_media_refs(item_list: &Value, item_type: i64, item_key: &str, max: usize) -> Vec<InboundFile> {
+    let Some(list) = item_list.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in list {
+        if out.len() >= max {
+            break;
+        }
+        if item.get("type").and_then(|v| v.as_i64()) != Some(item_type) {
+            continue;
+        }
+        let Some(param) = item
+            .pointer(&format!("/{item_key}/media/encrypt_query_param"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let aes_key = item
+            .pointer(&format!("/{item_key}/media/aes_key"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("");
+        let file_name = item
+            .pointer(&format!("/{item_key}/file_name"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        out.push(InboundFile {
+            encrypt_query_param: param.to_string(),
+            aes_key: aes_key.to_string(),
+            file_name,
+        });
+    }
+    out
+}
+
+/// 从消息 item_list 提取入站文件（type=4），最多 `MAX_FILES_PER_MESSAGE` 个。
+pub fn extract_message_files(item_list: &Value) -> Vec<InboundFile> {
+    extract_media_refs(item_list, 4, "file_item", MAX_FILES_PER_MESSAGE)
+}
+
+/// 从消息 item_list 提取入站视频（type=5），最多 `MAX_VIDEOS_PER_MESSAGE` 个。
+pub fn extract_message_videos(item_list: &Value) -> Vec<InboundFile> {
+    extract_media_refs(item_list, 5, "video_item", MAX_VIDEOS_PER_MESSAGE)
+}
+
 /// 图片 CDN 下载地址（与 wechat-channel 的 buildCdnDownloadUrl 一致）。
 pub fn cdn_download_url(encrypt_query_param: &str) -> String {
     format!(
@@ -253,16 +318,6 @@ fn hex_to_key(s: &str) -> Result<[u8; 16], String> {
     Ok(key)
 }
 
-/// AES-128-ECB + PKCS7 解密（微信 CDN 媒体加密方式）。
-fn decrypt_aes_ecb(ciphertext: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, String> {
-    use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyInit};
-    let mut buf = ciphertext.to_vec();
-    ecb::Decryptor::<aes::Aes128>::new(key.into())
-        .decrypt_padded_mut::<Pkcs7>(&mut buf)
-        .map(|plain| plain.to_vec())
-        .map_err(|e| format!("图片解密失败: {e}"))
-}
-
 /// 图片扩展名：按魔数识别，仅接受 codex 能直接读入的常见格式。
 fn image_extension_of(bytes: &[u8]) -> Option<&'static str> {
     match image::guess_format(bytes).ok()? {
@@ -281,42 +336,349 @@ fn wechat_image_file_name(ext: &str, now: chrono::DateTime<chrono::Local>) -> St
     format!("wechat-{}-{seq}.{ext}", now.format("%Y%m%d-%H%M%S"))
 }
 
-/// 入站图片目录：`<root>/wechannel-data/media/<年-月>`（按月分目录，跨月自动新建）。
-fn media_dir(root: &Path, now: chrono::DateTime<chrono::Local>) -> PathBuf {
+/// 会话目录名净化：只保留字母数字与 `._-`，其余替换为 `_`；空值或纯点兜底 `_unknown`。
+pub fn sanitize_path_segment(id: &str) -> String {
+    let cleaned: String = id
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() || cleaned.chars().all(|c| c == '.') {
+        return "_unknown".to_string();
+    }
+    cleaned
+}
+
+/// 附件目录：`<root>/wechannel-data/media/<会话id>`（扁平，图片/文件/视频混放）。
+fn media_dir(root: &Path, thread_id: &str) -> PathBuf {
     state_dir(root)
         .join(MEDIA_DIR_NAME)
-        .join(now.format("%Y-%m").to_string())
+        .join(sanitize_path_segment(thread_id))
 }
 
-/// 落盘入站图片：写入应用数据目录的媒体目录（永久保留，不清理），返回绝对路径。
-pub fn save_wechat_image(root: &Path, bytes: &[u8]) -> Result<String, String> {
-    let ext = image_extension_of(bytes)
-        .ok_or_else(|| "不支持的图片格式（仅支持 png/jpg/gif/webp/bmp）".to_string())?;
-    let now = chrono::Local::now();
-    save_image_bytes(&media_dir(root, now), &wechat_image_file_name(ext, now), bytes)
+/// 目录内唯一文件名：已存在则给主名追加 `-<seq>`（`seq` 为进程内自增）。
+fn unique_path(dir: &Path, name: &str) -> PathBuf {
+    if !dir.join(name).exists() {
+        return dir.join(name);
+    }
+    let (stem, ext) = split_name(name);
+    let seq = ID_SEQ.fetch_add(1, Ordering::Relaxed);
+    if ext.is_empty() {
+        dir.join(format!("{stem}-{seq}"))
+    } else {
+        dir.join(format!("{stem}-{seq}.{ext}"))
+    }
 }
 
-/// 下载并解密单张入站图片，落盘后返回绝对路径。
-async fn fetch_inbound_image<A: WechatApi>(
+/// 拆分主名与扩展名（按最后一个点；点开头或无点视为无扩展名）。
+fn split_name(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(i) if i > 0 && i + 1 < name.len() => (&name[..i], &name[i + 1..]),
+        _ => (name, ""),
+    }
+}
+
+/// 按字符数限长，超长时截断主名、保留扩展名。
+fn truncate_file_name(name: &str, max_chars: usize) -> String {
+    if name.chars().count() <= max_chars {
+        return name.to_string();
+    }
+    let (stem, ext) = split_name(name);
+    let keep = if ext.is_empty() {
+        max_chars
+    } else {
+        max_chars.saturating_sub(ext.chars().count() + 1)
+    };
+    let stem: String = stem.chars().take(keep.max(1)).collect();
+    if ext.is_empty() {
+        stem
+    } else {
+        format!("{stem}.{ext}")
+    }
+}
+
+/// 文件名净化：剥离路径部分、替换 Windows 非法字符与控制字符、去首尾空白与点、限长（保留扩展名）。
+pub fn sanitize_file_name(hint: &str) -> String {
+    let base = hint.rsplit(['\\', '/']).next().unwrap_or(hint).trim();
+    let cleaned: String = base
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches(|c: char| c == ' ' || c == '.');
+    if trimmed.is_empty() {
+        return "attachment".to_string();
+    }
+    truncate_file_name(trimmed, MAX_FILE_NAME_CHARS)
+}
+
+/// 入站视频文件名：协议没有原始文件名，固定 `wechat-video-{yyyyMMdd-HHmmss}-{seq}.mp4`。
+fn wechat_video_file_name(now: chrono::DateTime<chrono::Local>) -> String {
+    let seq = ID_SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("wechat-video-{}-{seq}.mp4", now.format("%Y%m%d-%H%M%S"))
+}
+
+/// 入站附件的类别：决定最终命名策略与日志标签。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentKind {
+    Image,
+    File,
+    Video,
+}
+
+impl AttachmentKind {
+    fn label(self) -> &'static str {
+        match self {
+            AttachmentKind::Image => "图片",
+            AttachmentKind::File => "文件",
+            AttachmentKind::Video => "视频",
+        }
+    }
+}
+
+/// 附件最终文件名：图片按 `head` 魔数推断扩展名，文件用净化后的原名，视频用生成名。
+fn resolve_final_name(
+    kind: AttachmentKind,
+    head: &[u8],
+    name_hint: Option<&str>,
+    now: chrono::DateTime<chrono::Local>,
+) -> Result<String, String> {
+    match kind {
+        AttachmentKind::Image => {
+            let ext = image_extension_of(head)
+                .ok_or_else(|| "不支持的图片格式（仅支持 png/jpg/gif/webp/bmp）".to_string())?;
+            Ok(wechat_image_file_name(ext, now))
+        }
+        AttachmentKind::File => Ok(name_hint
+            .map(sanitize_file_name)
+            .unwrap_or_else(|| "attachment".to_string())),
+        AttachmentKind::Video => Ok(wechat_video_file_name(now)),
+    }
+}
+
+/// 流式解密状态机（AES-128-ECB + PKCS7）：只解出"确定不是最后一块"的完整块，
+/// 末块留到 `finish` 再解密并去 padding；无密钥时直通。
+struct EcbStreamDecryptor {
+    key: Option<[u8; 16]>,
+    /// 未满一块、或需等"是否还有后续数据"的尾部字节。
+    pending: Vec<u8>,
+}
+
+impl EcbStreamDecryptor {
+    /// 按 `aes_key` 构造；密钥为空表示明文直通。
+    fn new(aes_key: &str) -> Result<Self, String> {
+        let key = if aes_key.trim().is_empty() {
+            None
+        } else {
+            Some(parse_aes_key(aes_key)?)
+        };
+        Ok(Self {
+            key,
+            pending: Vec::new(),
+        })
+    }
+
+    /// 喂入一块密文，返回可立即写出的明文（可能为空）。
+    fn push(&mut self, chunk: &[u8]) -> Result<Vec<u8>, String> {
+        let Some(key) = self.key else {
+            return Ok(chunk.to_vec());
+        };
+        self.pending.extend_from_slice(chunk);
+        // 保留最后一块：它可能带着 PKCS7 padding，需等流结束后再处理。
+        let blocks = self.pending.len() / 16;
+        if blocks <= 1 {
+            return Ok(Vec::new());
+        }
+        let take = (blocks - 1) * 16;
+        let mut buf: Vec<u8> = self.pending.drain(..take).collect();
+        decrypt_blocks(&mut buf, &key);
+        Ok(buf)
+    }
+
+    /// 流结束：解密末块并去掉 PKCS7 padding。
+    fn finish(&mut self) -> Result<Vec<u8>, String> {
+        let Some(key) = self.key else {
+            return Ok(std::mem::take(&mut self.pending));
+        };
+        if self.pending.is_empty() {
+            return Err("附件密文为空".into());
+        }
+        if !self.pending.len().is_multiple_of(16) {
+            return Err(format!(
+                "附件密文长度不是 16 的整数倍（{} 字节）",
+                self.pending.len()
+            ));
+        }
+        use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyInit};
+        let mut buf = std::mem::take(&mut self.pending);
+        ecb::Decryptor::<aes::Aes128>::new((&key).into())
+            .decrypt_padded_mut::<Pkcs7>(&mut buf)
+            .map(|plain| plain.to_vec())
+            .map_err(|e| format!("附件解密失败: {e}"))
+    }
+}
+
+/// 就地解密若干完整块（不做 padding 处理；末块由 `EcbStreamDecryptor::finish` 负责）。
+fn decrypt_blocks(buf: &mut [u8], key: &[u8; 16]) {
+    use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
+    let cipher = aes::Aes128::new(key.into());
+    for block in buf.chunks_exact_mut(16) {
+        cipher.decrypt_block(GenericArray::from_mut_slice(block));
+    }
+}
+
+/// 流式下载 + 解密写入 `.part`，返回已解密数据的前 `HEAD_PROBE_BYTES` 字节（供图片格式探测）。
+async fn write_stream_to_part<A: WechatApi>(
+    api: &A,
+    url: &str,
+    aes_key: &str,
+    part: &Path,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut stream = api.download_stream(url, timeout).await?;
+    let mut decryptor = EcbStreamDecryptor::new(aes_key)?;
+    let mut file = tokio::fs::File::create(part)
+        .await
+        .map_err(|e| format!("创建附件临时文件失败 {}: {e}", part.display()))?;
+    let mut head: Vec<u8> = Vec::new();
+    let mut write_out = |plain: &[u8]| {
+        if head.len() < HEAD_PROBE_BYTES {
+            let need = HEAD_PROBE_BYTES - head.len();
+            head.extend_from_slice(&plain[..need.min(plain.len())]);
+        }
+    };
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        let plain = decryptor.push(&chunk)?;
+        if plain.is_empty() {
+            continue;
+        }
+        write_out(&plain);
+        file.write_all(&plain)
+            .await
+            .map_err(|e| format!("写入附件失败 {}: {e}", part.display()))?;
+    }
+    let tail = decryptor.finish()?;
+    if !tail.is_empty() {
+        write_out(&tail);
+        file.write_all(&tail)
+            .await
+            .map_err(|e| format!("写入附件失败 {}: {e}", part.display()))?;
+    }
+    file.flush()
+        .await
+        .map_err(|e| format!("写入附件失败 {}: {e}", part.display()))?;
+    Ok(head)
+}
+
+/// 流式下载 + 解密 + 落盘到 `<root>/wechannel-data/media/<会话id>/`：
+/// 先写同目录 `.part`，定名后改名；任何失败/超时都删除临时文件，不留半截文件。
+/// 不限制附件大小，`timeout` 为下载总时长上限（测试可注入小值）。
+#[allow(clippy::too_many_arguments)]
+async fn save_attachment<A: WechatApi>(
     api: &A,
     root: &Path,
-    img: &InboundImage,
+    thread_id: &str,
+    url: &str,
+    aes_key: &str,
+    kind: AttachmentKind,
+    name_hint: Option<&str>,
+    timeout: Duration,
 ) -> Result<String, String> {
-    let raw = api.download_bytes(&cdn_download_url(&img.encrypt_query_param)).await?;
-    if raw.len() > MAX_IMAGE_BYTES {
-        return Err(format!(
-            "图片过大（{} MB，上限 {} MB）",
-            raw.len() / 1024 / 1024,
-            MAX_IMAGE_BYTES / 1024 / 1024
-        ));
-    }
-    let plain = if img.aes_key.trim().is_empty() {
-        raw
-    } else {
-        let key = parse_aes_key(&img.aes_key)?;
-        decrypt_aes_ecb(&raw, &key)?
+    use crate::codex::path_util::clean_path;
+
+    let dir = media_dir(root, thread_id);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("创建附件目录失败 {}: {e}", dir.display()))?;
+    let part = dir.join(format!(
+        ".wechat-{}-{}.part",
+        std::process::id(),
+        ID_SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    // 超时由本层强制：mock/异常上游不遵守请求超时时也不会挂住长轮询。
+    let head = match tokio::time::timeout(
+        timeout,
+        write_stream_to_part(api, url, aes_key, &part, timeout),
+    )
+    .await
+    {
+        Ok(Ok(head)) => head,
+        Ok(Err(e)) => {
+            let _ = tokio::fs::remove_file(&part).await;
+            return Err(e);
+        }
+        Err(_) => {
+            let _ = tokio::fs::remove_file(&part).await;
+            return Err(format!("附件下载超时（超过 {} 秒）", timeout.as_secs()));
+        }
     };
-    save_wechat_image(root, &plain)
+    let name = match resolve_final_name(kind, &head, name_hint, chrono::Local::now()) {
+        Ok(name) => name,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&part).await;
+            return Err(e);
+        }
+    };
+    let target = unique_path(&dir, &name);
+    if let Err(e) = tokio::fs::rename(&part, &target).await {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(format!("附件改名失败 {}: {e}", target.display()));
+    }
+    Ok(clean_path(&target))
+}
+
+/// 下载并解密单个入站附件（图片/文件/视频），落盘到会话目录后返回绝对路径。
+async fn fetch_inbound_attachment<A: WechatApi>(
+    api: &A,
+    root: &Path,
+    thread_id: &str,
+    encrypt_query_param: &str,
+    aes_key: &str,
+    kind: AttachmentKind,
+    name_hint: Option<&str>,
+) -> Result<String, String> {
+    save_attachment(
+        api,
+        root,
+        thread_id,
+        &cdn_download_url(encrypt_query_param),
+        aes_key,
+        kind,
+        name_hint,
+        ATTACHMENT_DOWNLOAD_TIMEOUT,
+    )
+    .await
+}
+
+/// 附件接收失败：首个失败原因留在消息事件里（供桥回提示），每次都推一条日志事件。
+fn report_media_error(
+    tx: &mpsc::UnboundedSender<WechatEvent>,
+    first: &mut Option<String>,
+    kind: AttachmentKind,
+    err: String,
+) {
+    if first.is_none() {
+        *first = Some(err.clone());
+    }
+    let _ = tx.send(WechatEvent::Error {
+        message: format!("微信{}接收失败: {err}", kind.label()),
+        kind: "media".into(),
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -546,6 +908,9 @@ pub fn accounts_snapshot(root: &Path) -> Vec<Value> {
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+/// 附件下载流：按块产出原始字节（`Err` 表示读取中断）；解密与落盘在调用方流式完成。
+pub type AttachmentStream = Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+
 pub trait WechatApi: Send + Sync {
     fn get_qr_code(&self, base_url: &str, bot_type: &str) -> BoxFuture<'_, Result<Value, String>>;
     fn poll_qr_status(&self, base_url: &str, qrcode: &str) -> BoxFuture<'_, Result<Value, String>>;
@@ -562,8 +927,10 @@ pub trait WechatApi: Send + Sync {
         -> BoxFuture<'_, Result<Value, String>>;
     fn send_typing(&self, base_url: &str, token: &str, body: Value)
         -> BoxFuture<'_, Result<Value, String>>;
-    /// 下载任意 URL 的原始字节（入站图片走微信 CDN）。
-    fn download_bytes(&self, url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>>;
+    /// 打开附件下载流（入站附件走微信 CDN）：按块产出原始字节，解密由调用方流式完成。
+    /// `timeout` 为整次请求（含读取响应体）的时长上限。
+    fn download_stream(&self, url: &str, timeout: Duration)
+        -> BoxFuture<'_, Result<AttachmentStream, String>>;
 }
 
 /// 真实 HTTP 实现（reqwest）。
@@ -738,30 +1105,29 @@ impl WechatApi for ReqwestApi {
         )
     }
 
-    fn download_bytes(&self, url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
+    fn download_stream(
+        &self,
+        url: &str,
+        timeout: Duration,
+    ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+        use futures_util::StreamExt;
+
         let http = self.http.clone();
         let url = url.to_string();
         Box::pin(async move {
             let resp = http
                 .get(&url)
-                .timeout(IMAGE_DOWNLOAD_TIMEOUT)
+                .timeout(timeout)
                 .send()
                 .await
-                .map_err(|e| format!("图片下载失败: {e}"))?;
+                .map_err(|e| format!("附件下载失败: {e}"))?;
             if !resp.status().is_success() {
-                return Err(format!("图片下载失败: CDN 返回 {}", resp.status()));
+                return Err(format!("附件下载失败: CDN 返回 {}", resp.status()));
             }
-            // 先看声明的长度，避免异常超大响应被整体读入内存。
-            if resp.content_length().is_some_and(|n| n > MAX_IMAGE_BYTES as u64) {
-                return Err(format!(
-                    "图片过大（上限 {} MB）",
-                    MAX_IMAGE_BYTES / 1024 / 1024
-                ));
-            }
-            resp.bytes()
-                .await
-                .map(|b| b.to_vec())
-                .map_err(|e| format!("图片下载失败: {e}"))
+            let stream = resp
+                .bytes_stream()
+                .map(|r| r.map(|b| b.to_vec()).map_err(|e| format!("附件下载失败: {e}")));
+            Ok(Box::pin(stream) as AttachmentStream)
         })
     }
 }
@@ -803,8 +1169,10 @@ pub enum WechatEvent {
         text: Option<String>,
         /// 已下载并解密的图片绝对路径（按 item_list 顺序）。
         images: Vec<String>,
-        /// 图片接收失败原因（同一消息多图时取首个失败原因）。
-        image_error: Option<String>,
+        /// 已下载并解密的文件/视频绝对路径（按 item_list 顺序）。
+        files: Vec<String>,
+        /// 附件接收失败原因（同一消息多个附件时取首个失败原因）。
+        media_error: Option<String>,
     },
     SessionStatus {
         account_id: String,
@@ -826,6 +1194,8 @@ pub struct WechatClient<A: WechatApi = ReqwestApi> {
     receivers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     /// typing_ticket 内存缓存：键为 (account_id, peer)。
     typing_tickets: Mutex<HashMap<(String, String), String>>,
+    /// 账号 → 绑定会话 id（由桥同步）：决定附件落盘目录；缺失即不下载附件。
+    bound_threads: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl WechatClient<ReqwestApi> {
@@ -842,7 +1212,13 @@ impl<A: WechatApi + 'static> WechatClient<A> {
             tx,
             receivers: Arc::new(Mutex::new(HashMap::new())),
             typing_tickets: Mutex::new(HashMap::new()),
+            bound_threads: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// 整体替换「账号 → 会话」映射（桥在装载绑定 / 绑定成功 / 解绑后调用）。
+    pub async fn set_bindings(&self, map: HashMap<String, String>) {
+        *self.bound_threads.lock().await = map;
     }
 
     pub fn accounts(&self) -> Vec<Value> {
@@ -1020,12 +1396,13 @@ impl<A: WechatApi + 'static> WechatClient<A> {
         let api = self.api.clone();
         let tx = self.tx.clone();
         let root = self.root.clone();
+        let bound_threads = self.bound_threads.clone();
         let cancel = {
             let map = self.receivers.lock().await;
             map.get(&account_id).cloned().unwrap()
         };
         tokio::spawn(async move {
-            run_receiver(api, tx, root, account_id, cancel).await;
+            run_receiver(api, tx, root, account_id, cancel, bound_threads).await;
         });
     }
 
@@ -1235,6 +1612,7 @@ async fn run_receiver<A: WechatApi>(
     root: PathBuf,
     account_id: String,
     cancel: Arc<Notify>,
+    bound_threads: Arc<Mutex<HashMap<String, String>>>,
 ) {
     let Some(account) = load_account(&root, &account_id) else {
         let _ = tx.send(WechatEvent::Error {
@@ -1313,29 +1691,81 @@ async fn run_receiver<A: WechatApi>(
                                 }
                                 let items = raw.get("item_list");
                                 let text = items.and_then(extract_message_text);
-                                // 图片：顺序下载解密落盘（保持消息顺序）；单张失败不阻断后续轮询。
-                                let refs = items.map(extract_message_images).unwrap_or_default();
-                                if refs.len() < count_image_items(items) {
-                                    let _ = tx.send(WechatEvent::Error {
-                                        message: format!(
-                                            "单条消息图片超过 {MAX_IMAGES_PER_MESSAGE} 张，多余的已忽略"
-                                        ),
-                                        kind: "media".into(),
-                                    });
-                                }
+                                // 附件只在「该账号已绑定会话」时下载：目录即 media/<会话id>；
+                                // 未绑定时不下载（消息照旧发出，由桥按「谁扫谁白」忽略）。
+                                let thread_id = {
+                                    let map = bound_threads.lock().await;
+                                    map.get(&account_id).cloned()
+                                };
                                 let mut images: Vec<String> = Vec::new();
-                                let mut image_error: Option<String> = None;
-                                for img in &refs {
-                                    match fetch_inbound_image(api.as_ref(), &root, img).await {
-                                        Ok(path) => images.push(path),
-                                        Err(e) => {
-                                            if image_error.is_none() {
-                                                image_error = Some(e.clone());
+                                let mut files: Vec<String> = Vec::new();
+                                let mut media_error: Option<String> = None;
+                                if let Some(thread_id) = thread_id {
+                                    // 附件：图片 → 文件 → 视频，顺序下载解密落盘（保持消息顺序）；
+                                    // 单个失败不阻断其它附件与后续轮询。
+                                    let image_refs = items.map(extract_message_images).unwrap_or_default();
+                                    if image_refs.len() < count_image_items(items) {
+                                        let _ = tx.send(WechatEvent::Error {
+                                            message: format!(
+                                                "单条消息图片超过 {MAX_IMAGES_PER_MESSAGE} 张，多余的已忽略"
+                                            ),
+                                            kind: "media".into(),
+                                        });
+                                    }
+                                    let file_refs = items.map(extract_message_files).unwrap_or_default();
+                                    let video_refs = items.map(extract_message_videos).unwrap_or_default();
+                                    for img in &image_refs {
+                                        match fetch_inbound_attachment(
+                                            api.as_ref(),
+                                            &root,
+                                            &thread_id,
+                                            &img.encrypt_query_param,
+                                            &img.aes_key,
+                                            AttachmentKind::Image,
+                                            None,
+                                        )
+                                        .await
+                                        {
+                                            Ok(path) => images.push(path),
+                                            Err(e) => {
+                                                report_media_error(&tx, &mut media_error, AttachmentKind::Image, e)
                                             }
-                                            let _ = tx.send(WechatEvent::Error {
-                                                message: format!("微信图片接收失败: {e}"),
-                                                kind: "media".into(),
-                                            });
+                                        }
+                                    }
+                                    for file in &file_refs {
+                                        match fetch_inbound_attachment(
+                                            api.as_ref(),
+                                            &root,
+                                            &thread_id,
+                                            &file.encrypt_query_param,
+                                            &file.aes_key,
+                                            AttachmentKind::File,
+                                            file.file_name.as_deref(),
+                                        )
+                                        .await
+                                        {
+                                            Ok(path) => files.push(path),
+                                            Err(e) => {
+                                                report_media_error(&tx, &mut media_error, AttachmentKind::File, e)
+                                            }
+                                        }
+                                    }
+                                    for video in &video_refs {
+                                        match fetch_inbound_attachment(
+                                            api.as_ref(),
+                                            &root,
+                                            &thread_id,
+                                            &video.encrypt_query_param,
+                                            &video.aes_key,
+                                            AttachmentKind::Video,
+                                            None,
+                                        )
+                                        .await
+                                        {
+                                            Ok(path) => files.push(path),
+                                            Err(e) => {
+                                                report_media_error(&tx, &mut media_error, AttachmentKind::Video, e)
+                                            }
                                         }
                                     }
                                 }
@@ -1347,7 +1777,8 @@ async fn run_receiver<A: WechatApi>(
                                     context_token: ctx,
                                     text,
                                     images,
-                                    image_error,
+                                    files,
+                                    media_error,
                                 });
                             }
                         }
@@ -1416,8 +1847,12 @@ mod tests {
         fn send_typing(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
-        fn download_bytes(&self, _url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
-            Box::pin(async { Err("测试未实现图片下载".to_string()) })
+        fn download_stream(
+            &self,
+            _url: &str,
+            _timeout: Duration,
+        ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+            Box::pin(async { Err("测试未实现附件下载".to_string()) })
         }
     }
 
@@ -1510,14 +1945,58 @@ mod tests {
     }
 
     #[test]
-    fn aes_ecb_roundtrip_and_key_parsing() {
-        let key = [0x42u8; 16];
-        let plain = b"hello wechat image payload".to_vec();
-        let cipher = encrypt_aes_ecb(&plain, &key);
-        assert_eq!(decrypt_aes_ecb(&cipher, &key).unwrap(), plain);
-        // 非 16 字节整数倍 → 解密失败
-        assert!(decrypt_aes_ecb(&[0u8; 4], &key).is_err());
+    fn message_file_and_video_extraction() {
+        let list = json!([
+            { "type": 1, "text_item": { "text": "看附件" } },
+            { "type": 4, "file_item": {
+                "file_name": "预算表.xlsx",
+                "media": { "encrypt_query_param": "F1", "aes_key": "QUJD" },
+            } },
+            // 缺 encrypt_query_param → 跳过
+            { "type": 4, "file_item": { "file_name": "空.xlsx", "media": {} } },
+            // 缺 aes_key → 仍提取（按明文落盘）
+            { "type": 4, "file_item": { "file_name": "无密钥.txt", "media": { "encrypt_query_param": "F2" } } },
+            { "type": 5, "video_item": { "media": { "encrypt_query_param": "V1", "aes_key": "QUJD" } } },
+            { "type": 5, "video_item": { "media": { "encrypt_query_param": "V2", "aes_key": "QUJD" } } },
+            { "type": 5, "video_item": { "media": { "encrypt_query_param": "V3", "aes_key": "QUJD" } } },
+        ]);
+        let files = extract_message_files(&list);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].encrypt_query_param, "F1");
+        assert_eq!(files[0].file_name.as_deref(), Some("预算表.xlsx"));
+        assert_eq!(files[0].aes_key, "QUJD");
+        assert_eq!(files[1].encrypt_query_param, "F2");
+        assert_eq!(files[1].aes_key, "", "缺密钥应留空串（按明文处理）");
 
+        let videos = extract_message_videos(&list);
+        assert_eq!(videos.len(), MAX_VIDEOS_PER_MESSAGE, "视频最多取前 2 个");
+        assert_eq!(videos[0].encrypt_query_param, "V1");
+        assert!(videos[0].file_name.is_none(), "视频协议里没有原始文件名");
+
+        assert!(extract_message_files(&json!(null)).is_empty());
+        assert!(extract_message_videos(&json!([])).is_empty());
+    }
+
+    #[test]
+    fn sanitize_file_name_cleans_and_limits() {
+        assert_eq!(sanitize_file_name("C:\\tmp\\报表.xlsx"), "报表.xlsx");
+        assert_eq!(sanitize_file_name("/etc/hosts"), "hosts");
+        assert_eq!(sanitize_file_name("a<b>c:d\"e|f?g*h.txt"), "a_b_c_d_e_f_g_h.txt");
+        assert_eq!(sanitize_file_name("  ..name..  "), "name");
+        assert_eq!(sanitize_file_name("a\u{7}b.txt"), "a_b.txt", "控制字符应替换");
+        assert_eq!(sanitize_file_name("   "), "attachment");
+        assert_eq!(sanitize_file_name("dir\\"), "attachment");
+        assert_eq!(sanitize_file_name("noext"), "noext");
+
+        let long = format!("{}.txt", "长".repeat(200));
+        let cleaned = sanitize_file_name(&long);
+        assert_eq!(cleaned.chars().count(), MAX_FILE_NAME_CHARS);
+        assert!(cleaned.ends_with(".txt"), "限长应保留扩展名: {cleaned}");
+    }
+
+    #[test]
+    fn aes_key_parsing_accepts_three_encodings() {
+        let key = [0x42u8; 16];
         let hex_key = hex_of(&key);
         assert_eq!(parse_aes_key(&hex_key).unwrap(), key);
         assert_eq!(parse_aes_key(&BASE64.encode(key)).unwrap(), key);
@@ -1527,27 +2006,254 @@ mod tests {
     }
 
     #[test]
-    fn saves_wechat_image_under_state_media_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(save_wechat_image(dir.path(), b"not an image").is_err());
+    fn ecb_stream_decryptor_handles_chunk_boundaries() {
+        let key = [0x42u8; 16];
+        let hex_key = hex_of(&key);
+        let plain = b"streamed attachment payload".to_vec();
+        let cipher = encrypt_aes_ecb(&plain, &key);
+        // 各种切块边界：明文与一次性解密一致
+        for chunk_size in [1usize, 7, 15, 16, 17, 64] {
+            let mut d = EcbStreamDecryptor::new(&hex_key).unwrap();
+            let mut out = Vec::new();
+            for chunk in cipher.chunks(chunk_size) {
+                out.extend(d.push(chunk).unwrap());
+            }
+            out.extend(d.finish().unwrap());
+            assert_eq!(out, plain, "chunk_size={chunk_size}");
+        }
+        // 无密钥：明文直通
+        let mut d = EcbStreamDecryptor::new("").unwrap();
+        assert_eq!(d.push(b"abc").unwrap(), b"abc");
+        assert!(d.finish().unwrap().is_empty());
+        // 密文长度不是 16 的整数倍 / 空密文：报错
+        let mut d = EcbStreamDecryptor::new(&hex_key).unwrap();
+        assert!(d.push(&[0u8; 3]).unwrap().is_empty());
+        assert!(d.finish().is_err());
+        assert!(EcbStreamDecryptor::new(&hex_key).unwrap().finish().is_err());
+    }
+
+    #[test]
+    fn resolve_final_name_applies_kind_rules() {
+        let now = chrono::Local::now();
         let png = tiny_png();
-        let path = save_wechat_image(dir.path(), &png).unwrap();
-        let file = std::path::PathBuf::from(&path);
-        let media_root = dir.path().join("wechannel-data").join(MEDIA_DIR_NAME);
+        let name = resolve_final_name(AttachmentKind::Image, &png, None, now).unwrap();
+        assert!(name.starts_with("wechat-") && name.ends_with(".png"), "{name}");
         assert!(
-            crate::codex::path_util::is_inside_path(&media_root, &file),
-            "应落盘到 <root>/wechannel-data/media: {path}"
+            resolve_final_name(AttachmentKind::Image, b"not an image", None, now).is_err(),
+            "魔数识别不出应报错"
         );
-        let month = chrono::Local::now().format("%Y-%m").to_string();
         assert_eq!(
-            file.parent().map(std::path::Path::to_path_buf),
-            Some(media_root.join(&month)),
-            "应落在 <年-月> 子目录: {path}"
+            resolve_final_name(AttachmentKind::File, b"x", Some("C:\\tmp\\预算表.xlsx"), now).unwrap(),
+            "预算表.xlsx"
         );
+        assert_eq!(
+            resolve_final_name(AttachmentKind::File, b"x", None, now).unwrap(),
+            "attachment"
+        );
+        let video = resolve_final_name(AttachmentKind::Video, b"x", Some("ignored.mp4"), now).unwrap();
+        assert!(video.starts_with("wechat-video-") && video.ends_with(".mp4"), "{video}");
+    }
+
+    #[test]
+    fn unique_path_dedupes_within_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = unique_path(dir.path(), "预算表.xlsx");
+        assert_eq!(first, dir.path().join("预算表.xlsx"));
+        std::fs::write(&first, b"one").unwrap();
+        let second = unique_path(dir.path(), "预算表.xlsx");
+        assert_ne!(second, first, "同名应去重");
+        let name = second.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.starts_with("预算表-") && name.ends_with(".xlsx"), "{name}");
+        // 无扩展名同样处理
+        assert_eq!(unique_path(dir.path(), "noext"), dir.path().join("noext"));
+    }
+
+    #[test]
+    fn sanitize_path_segment_rules() {
+        assert_eq!(
+            sanitize_path_segment("01a0a2c4-2702-7bf0-9f61-9f280145e222"),
+            "01a0a2c4-2702-7bf0-9f61-9f280145e222"
+        );
+        assert_eq!(sanitize_path_segment("a/b:c"), "a_b_c");
+        assert_eq!(sanitize_path_segment("..\\.."), ".._..");
+        assert_eq!(sanitize_path_segment("  "), "_unknown");
+        assert_eq!(sanitize_path_segment("..."), "_unknown");
+    }
+
+    /// 只实现下载流的测试 API：按给定分块返回数据，或返回永不产出的流（超时用例）。
+    struct StreamApi {
+        url_match: String,
+        chunks: Vec<Vec<u8>>,
+        pending: bool,
+    }
+
+    impl WechatApi for StreamApi {
+        fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({})) })
+        }
+        fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "status": "wait" })) })
+        }
+        fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "ret": 0, "msgs": [] })) })
+        }
+        fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "ret": 0 })) })
+        }
+        fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "ret": 0 })) })
+        }
+        fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            Box::pin(async { Ok(json!({ "ret": 0 })) })
+        }
+        fn download_stream(
+            &self,
+            url: &str,
+            _timeout: Duration,
+        ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+            assert!(
+                url.contains(&self.url_match),
+                "下载 URL 应带参数 {}: {url}",
+                self.url_match
+            );
+            if self.pending {
+                return Box::pin(async {
+                    Ok(Box::pin(futures_util::stream::pending::<Result<Vec<u8>, String>>())
+                        as AttachmentStream)
+                });
+            }
+            let items: Vec<Result<Vec<u8>, String>> = self.chunks.iter().cloned().map(Ok).collect();
+            Box::pin(async move { Ok(Box::pin(futures_util::stream::iter(items)) as AttachmentStream) })
+        }
+    }
+
+    /// 按固定大小切块（覆盖流式解密的跨块边界）。
+    fn split_chunks(data: &[u8], size: usize) -> Vec<Vec<u8>> {
+        data.chunks(size.max(1)).map(|c| c.to_vec()).collect()
+    }
+
+    #[tokio::test]
+    async fn save_attachment_streams_image_into_session_dir() {
+        let png = tiny_png();
+        let key = [3u8; 16];
+        let cipher = encrypt_aes_ecb(&png, &key);
+        let api = StreamApi {
+            url_match: "encrypted_query_param=PARAM-IMG".into(),
+            chunks: split_chunks(&cipher, 7),
+            pending: false,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let thread = "01a0a2c4-2702-7bf0-9f61-9f280145e222";
+        let path = save_attachment(
+            &api,
+            dir.path(),
+            thread,
+            &cdn_download_url("PARAM-IMG"),
+            &BASE64.encode(key),
+            AttachmentKind::Image,
+            None,
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
+        let file = std::path::PathBuf::from(&path);
+        let session_dir = dir.path().join("wechannel-data").join(MEDIA_DIR_NAME).join(thread);
+        assert_eq!(file.parent().unwrap(), session_dir, "应落在 media/<会话id>/");
         let name = file.file_name().unwrap().to_string_lossy().to_string();
-        assert!(name.starts_with("wechat-"), "文件名应带来源前缀: {name}");
-        assert!(name.ends_with(".png"), "扩展名应按魔数推断: {name}");
+        assert!(name.starts_with("wechat-") && name.ends_with(".png"), "{name}");
         assert_eq!(std::fs::read(&file).unwrap(), png);
+        assert!(
+            !std::fs::read_dir(&session_dir)
+                .unwrap()
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".part")),
+            "不应残留 .part"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_attachment_writes_file_with_original_name() {
+        let content = b"quarterly report".to_vec();
+        let api = StreamApi {
+            url_match: "encrypted_query_param=PARAM-F".into(),
+            chunks: split_chunks(&content, 4),
+            pending: false,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_attachment(
+            &api,
+            dir.path(),
+            "t-1",
+            &cdn_download_url("PARAM-F"),
+            "",
+            AttachmentKind::File,
+            Some("C:\\微信\\季度报表.xlsx"),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
+        let file = std::path::PathBuf::from(&path);
+        assert_eq!(file.file_name().unwrap().to_string_lossy(), "季度报表.xlsx");
+        assert_eq!(std::fs::read(&file).unwrap(), content);
+    }
+
+    #[tokio::test]
+    async fn save_attachment_timeout_cleans_part() {
+        let api = StreamApi {
+            url_match: "encrypted_query_param=PARAM-T".into(),
+            chunks: Vec::new(),
+            pending: true,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let err = save_attachment(
+            &api,
+            dir.path(),
+            "t-timeout",
+            &cdn_download_url("PARAM-T"),
+            "",
+            AttachmentKind::Video,
+            None,
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("超时"), "{err}");
+        let session_dir = dir
+            .path()
+            .join("wechannel-data")
+            .join(MEDIA_DIR_NAME)
+            .join("t-timeout");
+        let leftovers: Vec<String> = std::fs::read_dir(&session_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(leftovers.is_empty(), "超时后应清理临时文件: {leftovers:?}");
+    }
+
+    #[tokio::test]
+    async fn save_attachment_accepts_large_stream() {
+        // 60 MiB（超过改造前 50 MB 的文件上限）：回归「已取消大小上限」且分块落盘正常。
+        const MIB: usize = 1024 * 1024;
+        let api = StreamApi {
+            url_match: "encrypted_query_param=PARAM-BIG".into(),
+            chunks: vec![vec![7u8; MIB]; 60],
+            pending: false,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_attachment(
+            &api,
+            dir.path(),
+            "t-big",
+            &cdn_download_url("PARAM-BIG"),
+            "",
+            AttachmentKind::File,
+            Some("big.bin"),
+            Duration::from_secs(120),
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), (60 * MIB) as u64);
     }
 
     #[test]
@@ -1587,15 +2293,17 @@ mod tests {
         assert_eq!(snap[0]["userId"], "u-1");
     }
 
-    /// 入站图片端到端：getUpdates 带图 → CDN 下载 → 解密 → 落盘 → 事件带路径。
+    /// 入站附件端到端：getUpdates 带图片/文件/视频 → CDN 下载 → 解密 → 落盘 → 事件带路径。
     /// 用多线程 runtime + 后续轮询 yield，避免立即返回的 mock 把长轮询循环变成忙循环。
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn receiver_downloads_image_into_message_event() {
-        struct ImageApi {
-            cipher: Vec<u8>,
+    async fn receiver_downloads_attachments_into_message_event() {
+        struct MediaApi {
+            /// 加密参数 → 密文
+            ciphers: std::collections::HashMap<String, Vec<u8>>,
             key_hex: String,
+            key_b64: String,
         }
-        impl WechatApi for ImageApi {
+        impl WechatApi for MediaApi {
             fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({})) })
             }
@@ -1603,9 +2311,10 @@ mod tests {
                 Box::pin(async { Ok(json!({ "status": "wait" })) })
             }
             fn get_updates(&self, _b: &str, _t: &str, buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
-                // 首次返回图片消息，之后返回空，避免测试忙循环反复投递。
+                // 首次返回一条含图片/文件/视频的消息，之后返回空，避免测试忙循环反复投递。
                 let first = buf.is_empty();
                 let key_hex = self.key_hex.clone();
+                let key_b64 = self.key_b64.clone();
                 Box::pin(async move {
                     if first {
                         Ok(json!({
@@ -1617,13 +2326,19 @@ mod tests {
                                 "create_time_ms": 1,
                                 "context_token": "ctx-1",
                                 "message_id": "m-1",
-                                "item_list": [{
-                                    "type": 2,
-                                    "image_item": {
+                                "item_list": [
+                                    { "type": 2, "image_item": {
                                         "aeskey": key_hex,
-                                        "media": { "encrypt_query_param": "PARAM-1" },
-                                    },
-                                }],
+                                        "media": { "encrypt_query_param": "PARAM-IMG" },
+                                    } },
+                                    { "type": 4, "file_item": {
+                                        "file_name": "季度报表.xlsx",
+                                        "media": { "encrypt_query_param": "PARAM-FILE", "aes_key": key_b64.clone() },
+                                    } },
+                                    { "type": 5, "video_item": {
+                                        "media": { "encrypt_query_param": "PARAM-VIDEO", "aes_key": key_b64 },
+                                    } },
+                                ],
                             }],
                         }))
                     } else {
@@ -1642,34 +2357,60 @@ mod tests {
             fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn download_bytes(&self, url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
-                assert!(
-                    url.contains("encrypted_query_param=PARAM-1"),
-                    "CDN 下载地址应带加密参数: {url}"
-                );
-                let cipher = self.cipher.clone();
-                Box::pin(async move { Ok(cipher) })
+            fn download_stream(
+                &self,
+                url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                let param = ["PARAM-IMG", "PARAM-FILE", "PARAM-VIDEO"]
+                    .into_iter()
+                    .find(|p| url.contains(&format!("encrypted_query_param={p}")))
+                    .unwrap_or_else(|| panic!("未预期的下载 URL: {url}"));
+                let cipher = self.ciphers.get(param).expect("缺少对应密文").clone();
+                // 分两块返回，顺带覆盖流式解密的跨块拼接。
+                let mid = cipher.len() / 2;
+                let tail = cipher[mid..].to_vec();
+                let head = cipher[..mid].to_vec();
+                Box::pin(async move {
+                    Ok(Box::pin(futures_util::stream::iter(vec![Ok(head), Ok(tail)])) as AttachmentStream)
+                })
             }
         }
 
         let png = tiny_png();
+        let file_bytes = b"xlsx-content".to_vec();
+        let video_bytes = b"video-content".to_vec();
         let key = [7u8; 16];
-        let cipher = encrypt_aes_ecb(&png, &key);
+        let mut ciphers = std::collections::HashMap::new();
+        ciphers.insert("PARAM-IMG".to_string(), encrypt_aes_ecb(&png, &key));
+        ciphers.insert("PARAM-FILE".to_string(), encrypt_aes_ecb(&file_bytes, &key));
+        ciphers.insert("PARAM-VIDEO".to_string(), encrypt_aes_ecb(&video_bytes, &key));
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
         let (tx, mut rx) = mpsc::unbounded_channel();
         let cancel = Arc::new(Notify::new());
+        // 账号已绑定会话：附件应落到 media/<会话id>/ 下。
+        let thread_id = "01a0a2c4-2702-7bf0-9f61-9f280145e222";
+        let mut bindings = HashMap::new();
+        bindings.insert("bot-1".to_string(), thread_id.to_string());
         let handle = tokio::spawn(run_receiver(
-            Arc::new(ImageApi { cipher, key_hex: hex_of(&key) }),
+            Arc::new(MediaApi {
+                ciphers,
+                key_hex: hex_of(&key),
+                key_b64: BASE64.encode(key),
+            }),
             tx,
             root.clone(),
             "bot-1".into(),
             cancel.clone(),
+            Arc::new(Mutex::new(bindings)),
         ));
         let got = loop {
             match rx.recv().await {
-                Some(WechatEvent::Message { text, images, image_error, .. }) => break (text, images, image_error),
+                Some(WechatEvent::Message { text, images, files, media_error, .. }) => {
+                    break (text, images, files, media_error)
+                }
                 Some(_) => continue,
                 None => panic!("事件通道提前关闭"),
             }
@@ -1677,18 +2418,153 @@ mod tests {
         cancel.notify_one();
         let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
-        let (text, images, image_error) = got;
-        assert!(text.is_none(), "纯图片消息不应有文本");
-        assert_eq!(image_error, None);
+        let (text, images, files, media_error) = got;
+        assert!(text.is_none(), "纯附件消息不应有文本");
+        assert_eq!(media_error, None);
         assert_eq!(images.len(), 1);
-        let path = std::path::PathBuf::from(&images[0]);
-        let media_root = root.join("wechannel-data").join(MEDIA_DIR_NAME);
-        assert!(
-            crate::codex::path_util::is_inside_path(&media_root, &path),
-            "应落盘到 <root>/wechannel-data/media: {}",
-            images[0]
+        assert_eq!(files.len(), 2, "应落盘 1 个文件 + 1 个视频");
+        // 落盘目录为 media/<会话id>/
+        let media_root = root
+            .join("wechannel-data")
+            .join(MEDIA_DIR_NAME)
+            .join(thread_id);
+        for p in images.iter().chain(files.iter()) {
+            assert!(
+                crate::codex::path_util::is_inside_path(&media_root, &std::path::PathBuf::from(p)),
+                "应落盘到 <root>/wechannel-data/media/<会话id>: {p}"
+            );
+        }
+        // 临时 .part 不应残留
+        let leftovers: Vec<String> = std::fs::read_dir(&media_root)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.ends_with(".part"))
+            .collect();
+        assert!(leftovers.is_empty(), "不应残留临时文件: {leftovers:?}");
+        assert_eq!(
+            std::fs::read(&images[0]).unwrap(),
+            png,
+            "图片内容应为解密后的原图"
         );
-        assert_eq!(std::fs::read(&path).unwrap(), png, "落盘内容应为解密后的原图");
+        // 文件保留微信原文件名；视频没有原名，用生成名
+        let name_of = |p: &str| {
+            std::path::PathBuf::from(p)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        };
+        let report = files
+            .iter()
+            .find(|p| name_of(p.as_str()) == "季度报表.xlsx")
+            .expect("文件应保留原始文件名");
+        assert_eq!(std::fs::read(report).unwrap(), file_bytes);
+        let video = files
+            .iter()
+            .find(|p| {
+                let n = name_of(p.as_str());
+                n.starts_with("wechat-video-") && n.ends_with(".mp4")
+            })
+            .unwrap_or_else(|| panic!("视频应用生成名: {files:?}"));
+        assert_eq!(std::fs::read(video).unwrap(), video_bytes);
+    }
+
+    /// 未绑定账号：附件一律不下载、不落盘，事件也不带附件。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receiver_skips_attachments_when_unbound() {
+        struct UnboundApi {
+            key_hex: String,
+        }
+        impl WechatApi for UnboundApi {
+            fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "status": "wait" })) })
+            }
+            fn get_updates(&self, _b: &str, _t: &str, buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+                let first = buf.is_empty();
+                let key_hex = self.key_hex.clone();
+                Box::pin(async move {
+                    if first {
+                        Ok(json!({
+                            "ret": 0,
+                            "get_updates_buf": "b1",
+                            "msgs": [{
+                                "from_user_id": "u-1",
+                                "to_user_id": "bot-1",
+                                "create_time_ms": 1,
+                                "context_token": "ctx-1",
+                                "message_id": "m-1",
+                                "item_list": [
+                                    { "type": 2, "image_item": {
+                                        "aeskey": key_hex,
+                                        "media": { "encrypt_query_param": "PARAM-IMG" },
+                                    } },
+                                ],
+                            }],
+                        }))
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        Ok(json!({ "ret": 0, "get_updates_buf": "b1", "msgs": [] }))
+                    }
+                })
+            }
+            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn download_stream(
+                &self,
+                url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                panic!("未绑定账号不应触发附件下载: {url}");
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let cancel = Arc::new(Notify::new());
+        let handle = tokio::spawn(run_receiver(
+            Arc::new(UnboundApi {
+                key_hex: hex_of(&[7u8; 16]),
+            }),
+            tx,
+            root.clone(),
+            "bot-1".into(),
+            cancel.clone(),
+            // 空映射：该账号没有绑定会话
+            Arc::new(Mutex::new(HashMap::new())),
+        ));
+        let got = loop {
+            match rx.recv().await {
+                Some(WechatEvent::Message { text, images, files, media_error, .. }) => {
+                    break (text, images, files, media_error)
+                }
+                Some(_) => continue,
+                None => panic!("事件通道提前关闭"),
+            }
+        };
+        cancel.notify_one();
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+
+        let (text, images, files, media_error) = got;
+        assert!(text.is_none());
+        assert!(images.is_empty() && files.is_empty(), "未绑定不应落盘附件");
+        assert_eq!(media_error, None);
+        assert!(
+            !root.join("wechannel-data").join(MEDIA_DIR_NAME).exists(),
+            "未绑定不应创建媒体目录"
+        );
     }
 
     #[tokio::test]
@@ -1713,8 +2589,12 @@ mod tests {
             fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn download_bytes(&self, _url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
-                Box::pin(async { Err("测试未实现图片下载".to_string()) })
+            fn download_stream(
+                &self,
+                _url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                Box::pin(async { Err("测试未实现附件下载".to_string()) })
             }
         }
         let dir = tempfile::tempdir().unwrap();
@@ -1723,7 +2603,15 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let cancel = Arc::new(Notify::new());
         let api = Arc::new(ExpiredApi);
-        run_receiver(api, tx, root.clone(), "bot-1".into(), cancel).await;
+        run_receiver(
+            api,
+            tx,
+            root.clone(),
+            "bot-1".into(),
+            cancel,
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
         let mut expired = false;
         while let Ok(ev) = rx.try_recv() {
             if let WechatEvent::SessionStatus { status, .. } = ev {
@@ -1792,8 +2680,12 @@ mod tests {
                 *self.send_typing_calls.lock().unwrap() += 1;
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn download_bytes(&self, _url: &str) -> BoxFuture<'_, Result<Vec<u8>, String>> {
-                Box::pin(async { Err("测试未实现图片下载".to_string()) })
+            fn download_stream(
+                &self,
+                _url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                Box::pin(async { Err("测试未实现附件下载".to_string()) })
             }
         }
 

@@ -89,6 +89,8 @@ struct InboundMessage {
     text: Option<String>,
     /// 已下载解密落盘的图片绝对路径（按微信 item_list 顺序）。
     images: Vec<String>,
+    /// 已下载解密落盘的文件/视频绝对路径（按微信 item_list 顺序）。
+    files: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -173,9 +175,9 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
     out
 }
 
-/// 消息是否构成一次回合输入：有非空文本或至少一张图片（纯媒体消息无载荷）。
-fn has_turn_payload(text: Option<&str>, images: &[String]) -> bool {
-    text.is_some_and(|t| !t.trim().is_empty()) || !images.is_empty()
+/// 消息是否构成一次回合输入：有非空文本或至少一个附件（无载荷的媒体消息只是忽略）。
+fn has_turn_payload(text: Option<&str>, images: &[String], files: &[String]) -> bool {
+    text.is_some_and(|t| !t.trim().is_empty()) || !images.is_empty() || !files.is_empty()
 }
 
 /// 协议侧路径统一正斜杠：Windows 反斜杠路径 codex 侧读不到（与前端 mention.toProtocolPath 一致）。
@@ -183,12 +185,24 @@ fn proto_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
-/// 组装 turn/start 的 input：图片以 localImage 项在前，文本项在后（纯图片消息无文本项）。
-fn build_turn_input(text: Option<&str>, images: &[String]) -> Vec<Value> {
+/// 取路径的文件名（mention 项的显示名）。
+fn base_name(path: &str) -> String {
+    path.rsplit(['\\', '/']).next().unwrap_or(path).to_string()
+}
+
+/// 组装 turn/start 的 input：图片（localImage）→ 文件/视频（mention）→ 文本项（有文本时才有）。
+fn build_turn_input(text: Option<&str>, images: &[String], files: &[String]) -> Vec<Value> {
     let mut input: Vec<Value> = images
         .iter()
         .map(|p| json!({ "type": "localImage", "path": proto_path(p) }))
         .collect();
+    input.extend(files.iter().map(|p| {
+        json!({
+            "type": "mention",
+            "name": base_name(p),
+            "path": proto_path(p),
+        })
+    }));
     if let Some(t) = text {
         input.push(json!({ "type": "text", "text": t }));
     }
@@ -200,13 +214,14 @@ fn build_turn_params(
     thread_id: &str,
     text: Option<&str>,
     images: &[String],
+    files: &[String],
     model: &str,
     effort: Option<&str>,
     client_message_id: &str,
 ) -> Value {
     json!({
         "threadId": thread_id,
-        "input": build_turn_input(text, images),
+        "input": build_turn_input(text, images, files),
         "clientUserMessageId": client_message_id,
         "approvalPolicy": "never",
         "sandboxPolicy": { "type": "dangerFullAccess" },
@@ -361,6 +376,23 @@ impl WeChatBridge {
     async fn reload_bindings(self: &Arc<Self>) {
         let list = self.store.wechat_bindings();
         self.inner.lock().await.bindings = list;
+        self.sync_client_bindings().await;
+    }
+
+    /// 把「账号 → 会话 id」映射推给协议客户端（决定附件落盘目录：未绑定账号不落盘）。
+    async fn sync_client_bindings(&self) {
+        let map: HashMap<String, String> = {
+            let g = self.inner.lock().await;
+            g.bindings
+                .iter()
+                .filter_map(|b| {
+                    let account = b.get("accountId").and_then(|v| v.as_str())?;
+                    let thread = b.get("threadId").and_then(|v| v.as_str())?;
+                    Some((account.to_string(), thread.to_string()))
+                })
+                .collect()
+        };
+        self.client.set_bindings(map).await;
     }
 
     /// 取某线程的绑定（复制一份，避免跨 await 持锁）。
@@ -581,6 +613,8 @@ impl WeChatBridge {
         if let Err(e) = self.store.set_wechat(thread_id, None) {
             self.log("warn", format!("落盘解除绑定失败: {e}")).await;
         }
+        // 解绑后同步映射：该账号后续附件不再下载（媒体目录不再新增文件）。
+        self.sync_client_bindings().await;
         self.log("info", format!("已解除会话 {thread_id} 的微信绑定")).await;
         self.emit_state().await;
         Ok(())
@@ -665,6 +699,8 @@ impl WeChatBridge {
                                     format!("会话 {thread_id} 已绑定微信账号 {start_account}"),
                                 )
                                 .await;
+                                // 先同步映射再启动接收，保证绑定后立即收到的附件能落到该会话目录。
+                                self.sync_client_bindings().await;
                                 self.client.start_receiver(start_account).await;
                             }
                         }
@@ -731,10 +767,11 @@ impl WeChatBridge {
                 context_token: _,
                 text,
                 images,
-                image_error,
+                files,
+                media_error,
             } => {
-                if let Some(err) = image_error.as_deref() {
-                    self.log("warn", format!("微信图片接收失败（{from}）: {err}")).await;
+                if let Some(err) = media_error.as_deref() {
+                    self.log("warn", format!("微信附件接收失败（{from}）: {err}")).await;
                 }
                 let thread_id = {
                     let g = self.inner.lock().await;
@@ -758,10 +795,10 @@ impl WeChatBridge {
                     }
                     return;
                 };
-                // 无文本无图片（如视频/文件等媒体）：仅当图片接收失败时回一次提示，其余静默忽略。
-                if !has_turn_payload(text.as_deref(), &images) {
-                    if let Some(err) = image_error {
-                        self.send_reply_now(&account_id, &from, &format!("⚠️ 图片接收失败：{err}"))
+                // 无文本无附件（如语音等无载荷媒体）：仅当附件接收失败时回一次提示，其余静默忽略。
+                if !has_turn_payload(text.as_deref(), &images, &files) {
+                    if let Some(err) = media_error {
+                        self.send_reply_now(&account_id, &from, &format!("⚠️ 附件接收失败：{err}"))
                             .await;
                     }
                     return;
@@ -772,6 +809,7 @@ impl WeChatBridge {
                     from,
                     text,
                     images,
+                    files,
                 })
                 .await;
             }
@@ -1040,7 +1078,14 @@ impl WeChatBridge {
         let account = job.account_id.clone();
         let thread_id = job.thread_id.clone();
         match self
-            .run_turn_on_thread(&account, &peer, &thread_id, job.text.as_deref(), &job.images)
+            .run_turn_on_thread(
+                &account,
+                &peer,
+                &thread_id,
+                job.text.as_deref(),
+                &job.images,
+                &job.files,
+            )
             .await
         {
             Ok(t) => Ok(t),
@@ -1071,6 +1116,7 @@ impl WeChatBridge {
         thread_id: &str,
         text: Option<&str>,
         images: &[String],
+        files: &[String],
     ) -> Result<ActiveTurn, (String, String)> {
         {
             let mut g = self.inner.lock().await;
@@ -1121,6 +1167,7 @@ impl WeChatBridge {
             thread_id,
             text,
             images,
+            files,
             &model,
             effort,
             &self.next_message_id(),
@@ -1304,7 +1351,15 @@ mod tests {
 
     #[test]
     fn turn_params_carry_never_policy_and_default_collab() {
-        let v = build_turn_params("t-1", Some("hello"), &[], "gpt-x", Some("high"), "wechat-1-0");
+        let v = build_turn_params(
+            "t-1",
+            Some("hello"),
+            &[],
+            &[],
+            "gpt-x",
+            Some("high"),
+            "wechat-1-0",
+        );
         assert_eq!(v["threadId"], "t-1");
         assert_eq!(v["input"][0]["type"], "text");
         assert_eq!(v["input"][0]["text"], "hello");
@@ -1320,7 +1375,7 @@ mod tests {
 
     #[test]
     fn turn_params_always_danger_full_access() {
-        let v = build_turn_params("t-1", Some("hello"), &[], "gpt-x", None, "wechat-1-0");
+        let v = build_turn_params("t-1", Some("hello"), &[], &[], "gpt-x", None, "wechat-1-0");
         assert_eq!(v["approvalPolicy"], "never");
         assert_eq!(v["sandboxPolicy"]["type"], "dangerFullAccess");
         assert!(
@@ -1336,29 +1391,53 @@ mod tests {
     }
 
     #[test]
-    fn turn_input_puts_images_first_and_normalizes_paths() {
-        let images = vec!["C:\\tmp\\codex-ui-paste\\wechat-img-1.png".to_string()];
-        // 图片 + 文本：图片项在前，文本项在后，路径转正斜杠
-        let v = build_turn_params("t-1", Some("看这张图"), &images, "gpt-x", None, "wechat-1-0");
-        assert_eq!(v["input"].as_array().unwrap().len(), 2);
-        assert_eq!(v["input"][0]["type"], "localImage");
-        assert_eq!(v["input"][0]["path"], "C:/tmp/codex-ui-paste/wechat-img-1.png");
-        assert_eq!(v["input"][1]["type"], "text");
-        assert_eq!(v["input"][1]["text"], "看这张图");
+    fn turn_input_orders_images_files_and_text_with_protocol_paths() {
+        let images = vec!["C:\\tmp\\wechat\\media\\2026-09\\wechat-img-1.png".to_string()];
+        let files = vec![
+            "C:\\tmp\\wechat\\media\\2026-09\\预算表.xlsx".to_string(),
+            "C:\\tmp\\wechat\\media\\2026-09\\wechat-video-1.mp4".to_string(),
+        ];
+        // 图片 → 文件 → 文本，路径转正斜杠
+        let v = build_turn_params(
+            "t-1",
+            Some("看附件"),
+            &images,
+            &files,
+            "gpt-x",
+            None,
+            "wechat-1-0",
+        );
+        let input = v["input"].as_array().unwrap();
+        assert_eq!(input.len(), 4);
+        assert_eq!(input[0]["type"], "localImage");
+        assert_eq!(
+            input[0]["path"],
+            "C:/tmp/wechat/media/2026-09/wechat-img-1.png"
+        );
+        assert_eq!(input[1]["type"], "mention");
+        assert_eq!(input[1]["name"], "预算表.xlsx");
+        assert_eq!(input[1]["path"], "C:/tmp/wechat/media/2026-09/预算表.xlsx");
+        assert_eq!(input[2]["type"], "mention");
+        assert_eq!(input[2]["name"], "wechat-video-1.mp4");
+        assert_eq!(input[3]["type"], "text");
+        assert_eq!(input[3]["text"], "看附件");
 
-        // 纯图片：只有 localImage 项，不带任何 text 项
-        let v = build_turn_params("t-1", None, &images, "gpt-x", None, "wechat-1-0");
-        assert_eq!(v["input"].as_array().unwrap().len(), 1);
-        assert_eq!(v["input"][0]["type"], "localImage");
+        // 纯附件（文件 + 视频）：不带任何 text 项
+        let v = build_turn_params("t-1", None, &[], &files, "gpt-x", None, "wechat-1-0");
+        let input = v["input"].as_array().unwrap();
+        assert_eq!(input.len(), 2);
+        assert!(input.iter().all(|i| i["type"] == "mention"));
     }
 
     #[test]
-    fn turn_payload_requires_text_or_image() {
+    fn turn_payload_requires_text_or_attachment() {
         let img = vec!["D:/a.png".to_string()];
-        assert!(has_turn_payload(None, &img));
-        assert!(has_turn_payload(Some("你好"), &[]));
-        assert!(!has_turn_payload(None, &[]));
-        assert!(!has_turn_payload(Some("   "), &[]));
+        let file = vec!["D:/b.xlsx".to_string()];
+        assert!(has_turn_payload(None, &img, &[]));
+        assert!(has_turn_payload(None, &[], &file));
+        assert!(has_turn_payload(Some("你好"), &[], &[]));
+        assert!(!has_turn_payload(None, &[], &[]));
+        assert!(!has_turn_payload(Some("   "), &[], &[]));
     }
 
     #[test]

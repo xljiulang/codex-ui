@@ -652,8 +652,8 @@ fn paste_image_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("codex-ui-paste")
 }
 
-/// 把图片字节写入指定目录，返回绝对路径
-pub(crate) fn save_image_bytes(
+/// 把字节写入指定目录，返回绝对路径
+fn save_bytes_to_dir(
     dir: &std::path::Path,
     name: &str,
     bytes: &[u8],
@@ -708,7 +708,7 @@ pub async fn save_pasted_image(
         let primary = paste_image_dir();
         // 顺手清理 7 天前的残留粘贴图片，避免临时目录无限增长
         cleanup_old_files(&primary, std::time::Duration::from_secs(7 * 24 * 3600));
-        if let Ok(p) = save_image_bytes(&primary, &file_name, &bytes) {
+        if let Ok(p) = save_bytes_to_dir(&primary, &file_name, &bytes) {
             return Ok(p);
         }
         let fallback = app
@@ -716,7 +716,7 @@ pub async fn save_pasted_image(
             .app_data_dir()
             .map_err(|e| format!("获取应用数据目录失败: {e}"))?
             .join("attachments");
-        save_image_bytes(&fallback, &file_name, &bytes)
+        save_bytes_to_dir(&fallback, &file_name, &bytes)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -961,9 +961,9 @@ mod tests {
     }
 
     #[test]
-    fn save_image_bytes_writes_file() {
+    fn save_bytes_to_dir_writes_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let p = save_image_bytes(dir.path(), "pasted-1-123.png", b"img").unwrap();
+        let p = save_bytes_to_dir(dir.path(), "pasted-1-123.png", b"img").unwrap();
         assert!(std::path::Path::new(&p).is_file());
         assert_eq!(std::fs::read(&p).unwrap(), b"img");
         assert!(p.contains("pasted-1-123.png"));
