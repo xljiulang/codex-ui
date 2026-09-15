@@ -10,6 +10,7 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -67,6 +68,164 @@ const BIND_RETRY: u32 = 20;
 const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 /// 一次转发最多发出的上游请求数（可选字段降级 + reasoning_content 开关各一次修复）。
 const FORWARD_MAX_ATTEMPTS: usize = 3;
+
+/// 口嗨自动续跑：同一会话「连续注入提醒且模型仍未实际调用工具」的次数上限，
+/// 达到后不再判定与注入（避免与弱模型无限来回）。
+const NUDGE_MAX_STREAK: u32 = 2;
+/// 口嗨自动续跑：距上次注入超过该时长视为新的一轮，连续计数清零。
+const NUDGE_RESET_AFTER: Duration = Duration::from_secs(10 * 60);
+/// 口嗨自动续跑：判定调用（后台会话）的超时上限；超时按「已完成」处理。
+const NUDGE_JUDGE_TIMEOUT: Duration = Duration::from_secs(15);
+/// 口嗨自动续跑：单次入站请求最多向上游发起的 pass 数（1 次原始 + 续跑，留余量）。
+const NUDGE_MAX_PASSES: usize = 4;
+/// 口嗨自动续跑：判定提示词里助手文本 / 用户请求的截断上限（字符）。
+const NUDGE_ASSISTANT_LIMIT: usize = 4000;
+const NUDGE_USER_LIMIT: usize = 2000;
+/// 注入给上游的续跑提醒。只出现在发给上游的历史里，不会进入 codex 自己的记录，
+/// 因此应用聊天里看不到这条消息。
+const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合，但任务看起来还没完成。请继续执行：必须实际调用工具完成剩余工作；如果确实已经完成，请明确说明完成了什么。";
+
+/// 口嗨自动续跑的分会话计数（内存态，代理重启即清零）。
+#[derive(Debug, Default, Clone)]
+struct NudgeState {
+    /// 连续注入且模型仍未实际调用工具的次数。
+    streak: u32,
+    /// 最近一次注入时刻。
+    last: Option<Instant>,
+}
+
+impl NudgeState {
+    /// 是否允许继续注入：距上次注入超过 `NUDGE_RESET_AFTER` 先按新一轮清零；
+    /// 达到上限则拒绝（不改变已有计数）。
+    fn allow(&mut self, now: Instant) -> bool {
+        if let Some(last) = self.last {
+            if now.saturating_duration_since(last) >= NUDGE_RESET_AFTER {
+                self.streak = 0;
+                self.last = None;
+            }
+        }
+        self.streak < NUDGE_MAX_STREAK
+    }
+
+    fn record_injection(&mut self, now: Instant) {
+        self.streak = self.streak.saturating_add(1);
+        self.last = Some(now);
+    }
+
+    /// 模型真的调用了工具：本轮口嗨已被纠正，连续计数清零。
+    fn record_tool_activity(&mut self) {
+        self.streak = 0;
+        self.last = None;
+    }
+}
+
+/// 口嗨判定结论：未完成（需要续跑）/ 已完成（正常收尾）/ 无法判定（按已完成处理）。
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum NudgeVerdict {
+    Undone,
+    Done,
+    Unknown,
+}
+
+/// 判定提示词：把「用户请求 + 助手最终回复 + 本回合工具调用数为 0」交给同一个模型，
+/// 要求只回一行结论。纯函数，便于单测。
+fn nudge_judge_prompt(user_text: &str, assistant_text: &str) -> String {
+    format!(
+        "你是一次 AI 编码回合的看门狗，只做判断，不要执行任何操作。\n\
+         已知事实：这次回合里助手调用工具的次数是 0。\n\
+         请判断助手是否真的完成了用户请求：\n\
+         - 助手给出了明确结论、答案或交付物，或明确说明无需改动 → 已完成\n\
+         - 助手只是说接下来要做什么、让我先看看、现在去改某个文件，却没有真正执行任何操作 → 未完成\n\
+         只输出一行：`未完成` 或 `已完成`（可在第二行补一句理由）。不要调用任何工具，不要输出其它内容。\n\n\
+         【用户请求】\n{user}\n\n【助手最终回复】\n{assistant}\n",
+        user = truncate_chars(user_text, NUDGE_USER_LIMIT),
+        assistant = truncate_chars(assistant_text, NUDGE_ASSISTANT_LIMIT),
+    )
+}
+
+/// 解析判定输出：只看第一个非空行；先判「未完成」（它是「已完成」的超集，必须先判）。
+fn parse_nudge_verdict(text: &str) -> NudgeVerdict {
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.contains("未完成") {
+            return NudgeVerdict::Undone;
+        }
+        if line.contains("已完成") {
+            return NudgeVerdict::Done;
+        }
+        return NudgeVerdict::Unknown;
+    }
+    NudgeVerdict::Unknown
+}
+
+/// 取入站 Responses 请求里最后一条 user 消息的纯文本（判定提示词的「用户请求」）。
+fn last_user_text(req: &Value) -> String {
+    match req.get("input") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .rev()
+            .find(|item| item.get("role").and_then(Value::as_str) == Some("user"))
+            .map(item_content_text)
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// 构造判定调用请求体：同一模型、非流式、不带工具（避免判定模型自己去调工具）。
+fn nudge_judge_body(model: &str, prompt: &str) -> Value {
+    json!({
+        "model": model,
+        "stream": false,
+        "tools": [],
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": prompt }]
+        }],
+    })
+}
+
+/// 构造续跑请求体：克隆原请求，把本轮助手文本与注入提醒按序追加到 `input` 尾部。
+/// 原请求不被修改；`input` 为字符串（简写形态）时先转成数组再追加。
+fn nudge_continuation_body(original: &Value, assistant_text: &str) -> Value {
+    let mut body = original.clone();
+    let mut input = match body.get("input") {
+        Some(Value::String(text)) => vec![json!({
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": text }]
+        })],
+        Some(Value::Array(items)) => items.clone(),
+        _ => Vec::new(),
+    };
+    input.push(json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{ "type": "output_text", "text": assistant_text }]
+    }));
+    input.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{ "type": "input_text", "text": NUDGE_TEXT }]
+    }));
+    body["input"] = Value::Array(input);
+    body
+}
+
+/// 从 chat/completions 响应体里取第一条 choice 的 `message.content` 文本。
+fn chat_message_text(chat: &Value) -> Option<String> {
+    chat.get("choices")
+        .and_then(Value::as_array)?
+        .first()?
+        .get("message")?
+        .get("content")?
+        .as_str()
+        .map(str::to_string)
+}
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
@@ -156,6 +315,7 @@ pub(crate) async fn start(
             log,
             trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
         });
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -230,6 +390,8 @@ struct ProxyState {
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
+    /// 口嗨自动续跑的分会话连续计数（key = 会话 id，仅内存态）。
+    nudge: Arc<Mutex<HashMap<String, NudgeState>>>,
 }
 
 /// 写一条 zen_proxy 诊断日志；句柄为 None 或写盘失败时静默忽略。
@@ -491,7 +653,15 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                             .await;
                     }
                     if want_stream {
-                        proxy_stream_response(req, resp, &state.log, forwarded.trace).await
+                        proxy_stream_response(
+                            state.clone(),
+                            headers.clone(),
+                            call_id.clone(),
+                            req,
+                            resp,
+                            forwarded.trace,
+                        )
+                        .await
                     } else {
                         proxy_json_response(req, resp, &state.log, forwarded.trace).await
                     }
@@ -1488,11 +1658,122 @@ async fn proxy_json_response(
         .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into()))
 }
 
+/// 读取一轮上游 SSE：把 data 行翻译成 responses 事件并送入通道。
+///
+/// 只负责「读一轮」，**不**调用 `finish_stream`——收尾由调用方在所有 pass 结束后统一发一次，
+/// 这样「口嗨检测 + 续跑」才能把第二轮的事件续在同一个响应流里。
+/// `trace` 为这一轮的内容日志句柄（第一轮是入站 call，续跑轮各有自己的）。
+async fn pump_stream(
+    resp: reqwest::Response,
+    st: &mut StreamState,
+    log: &ZenLog,
+    tx: &tokio::sync::mpsc::Sender<Vec<u8>>,
+    trace: &mut TraceCall,
+) {
+    let mut bytes = resp.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut finish_deadline: Option<Instant> = None;
+    loop {
+        // finish_reason 之后还要再等尾部分片（OpenAI 的 `include_usage` 把 usage 放在
+        // 最后一个独立分片里）；最多等 USAGE_GRACE。
+        let next = if st.finish_reason.is_some() {
+            let deadline = *finish_deadline.get_or_insert_with(|| Instant::now() + USAGE_GRACE);
+            match tokio::time::timeout(
+                deadline.saturating_duration_since(Instant::now()),
+                bytes.next(),
+            )
+            .await
+            {
+                Ok(item) => item,
+                Err(_) => {
+                    log_at(
+                        log,
+                        "warn",
+                        "zen_proxy.usage_timeout",
+                        &[(
+                            "detail",
+                            "finish_reason 后未再收到分片，按现状收尾".to_string(),
+                        )],
+                    );
+                    st.usage_timeout = true;
+                    return;
+                }
+            }
+        } else {
+            bytes.next().await
+        };
+        match next {
+            Some(Ok(chunk)) => {
+                buf.extend_from_slice(&chunk);
+                let mut out: Vec<String> = Vec::new();
+                while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                    let line: Vec<u8> = buf.drain(..=pos).collect();
+                    let line = String::from_utf8_lossy(&line);
+                    let line = line.trim_end();
+                    // 内容诊断日志：上游分行原样落盘（含非 data 行）
+                    trace.write_response_line(line);
+                    if line.is_empty() || !line.starts_with("data:") {
+                        continue;
+                    }
+                    let payload = line["data:".len()..].trim();
+                    if payload == "[DONE]" {
+                        log_at(log, "info", "zen_proxy.stream_done", &[]);
+                        if !out.is_empty() {
+                            let _ = tx.send(out.concat().into_bytes()).await;
+                        }
+                        return;
+                    }
+                    if let Ok(v) = serde_json::from_str::<Value>(payload) {
+                        out.extend(process_chunk(&v, st));
+                        // 上游随流下发 error：立即停止读取（失败收尾由调用方统一发）
+                        if st.failure.is_some() {
+                            if !out.is_empty() {
+                                let _ = tx.send(out.concat().into_bytes()).await;
+                            }
+                            return;
+                        }
+                    }
+                }
+                if !out.is_empty() && tx.send(out.concat().into_bytes()).await.is_err() {
+                    return;
+                }
+            }
+            Some(Err(_)) => {
+                // 上游读取出错：按失败收尾（原先按完成收尾会让回合静默结束）
+                if st.failure.is_none() {
+                    st.failure = Some(StreamFailure {
+                        code: CODE_UPSTREAM_STREAM_ERROR.to_string(),
+                        message: "上游连接中断，本轮未正常结束；请重试".to_string(),
+                        detail: "上游读取出错（连接中断或超时）".to_string(),
+                    });
+                }
+                return;
+            }
+            None => {
+                log_at(
+                    log,
+                    "info",
+                    "zen_proxy.stream_end",
+                    &[("detail", "上游未发送 [DONE]，补发完成事件".to_string())],
+                );
+                // 上游正常结束但未收到 [DONE]（兼容实现差异）：按现状收尾
+                return;
+            }
+        }
+    }
+}
+
 /// 流式：把 Zen 的 SSE data 行翻译为 responses 事件序列（text/event-stream）。
+///
+/// 实际处理在 `run_stream_task`：读第一轮上游流，终局若命中「纯文本 + 无工具调用」就先跑
+/// 一次后台判定，判为口嗨则注入提醒再打一轮上游、把第二轮事件续在同一个响应流里
+/// （工具调用照常下发给 codex，对 codex 透明），最后统一收尾。
 async fn proxy_stream_response(
+    state: ProxyState,
+    headers: HeaderMap,
+    call_id: String,
     req: Value,
     resp: reqwest::Response,
-    log: &Option<Arc<SessionLog>>,
     call: TraceCall,
 ) -> Response {
     let model = req
@@ -1513,138 +1794,345 @@ async fn proxy_stream_response(
             "error": null,
         }
     }));
-    let mut st = StreamState::new(response_id, model);
+    // 通道 + 独立任务：事件一边产出一边下发，判定/续跑都发生在同一个响应流里
+    let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+    tokio::spawn(async move {
+        run_stream_task(
+            state, headers, call_id, req, resp, call, response_id, model, created, tx,
+        )
+        .await;
+    });
+    let body = stream::unfold(rx, |mut rx| async move {
+        rx.recv()
+            .await
+            .map(|item| (Ok::<_, std::convert::Infallible>(item), rx))
+    });
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header("Cache-Control", "no-cache")
+        .body(Body::from_stream(body))
+        .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into()))
+}
+
+/// 一个入站流式请求的完整处理：原始 pass（+ 必要时判定与续跑 pass）→ 统一收尾。
+#[allow(clippy::too_many_arguments)]
+async fn run_stream_task(
+    state: ProxyState,
+    headers: HeaderMap,
+    call_id: String,
+    req: Value,
+    first_resp: reqwest::Response,
+    call: TraceCall,
+    response_id: String,
+    model: String,
+    created: String,
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+) {
+    let log: ZenLog = state.log.clone();
+    let mut st = StreamState::new(response_id, model.clone());
     // 内容诊断日志句柄随流状态走：收尾与中断（Drop）时都能落盘
     st.trace = call;
     // 工具形态：回译模型调用时还原 codex 期望的 name/namespace 或 custom_tool_call
     st.tool_shape = tool_shape(&req);
     // 历史里的补丁失败条数：收尾时进摘要与可疑标记（模型是否在补丁格式上打转）
     st.patch_failures = patch_failure_count(&req);
-    let byte_stream = resp.bytes_stream();
-    let stream_log = log.clone();
-    let events = stream::unfold(
-        (
-            byte_stream,
-            Vec::<u8>::new(),
-            st,
-            false,
-            stream_log,
-            None::<Instant>,
-        ),
-        |(mut bytes, mut buf, mut st, mut done, log, mut finish_deadline)| async move {
-            if done {
-                return None;
+    if tx.send(created.into_bytes()).await.is_err() {
+        return;
+    }
+
+    let has_tools = req
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty());
+    let session = opencode_session(&headers, &state.session);
+    let user_text = last_user_text(&req);
+
+    let mut body = req.clone();
+    let mut current = first_resp;
+    let mut pass = 0usize;
+    let mut next_trace: Option<TraceCall> = None;
+    loop {
+        pass += 1;
+        let text_len_before = st.text.as_ref().map(|t| t.text_buf.len()).unwrap_or(0);
+        if pass == 1 {
+            // 第一轮沿用入站 call：收尾摘要仍写在它上面（与改造前一致）
+            let mut trace = std::mem::replace(&mut st.trace, TraceCall::disabled());
+            pump_stream(current, &mut st, &log, &tx, &mut trace).await;
+            st.trace = trace;
+        } else {
+            // 上一轮的 finish_reason 必须清掉：它会让 `pump_stream` 从本轮第一个分片起
+            // 就套用 3 秒尾包宽限，把慢上游的第二轮截断（工具调用会被丢掉）。
+            st.finish_reason = None;
+            let mut trace = next_trace.take().unwrap_or_else(TraceCall::disabled);
+            pump_stream(current, &mut st, &log, &tx, &mut trace).await;
+            trace.note("nudge_pass", pass.to_string());
+            trace.finish();
+        }
+
+        // 失败：交给收尾统一发 response.failed
+        if st.failure.is_some() {
+            break;
+        }
+        // 模型真的调用了工具：本轮口嗨已被纠正（后续回合走新的入站请求），计数清零
+        if !st.calls.is_empty() {
+            nudge_record_tool_activity(&state, &session);
+            break;
+        }
+        let pass_text = st
+            .text
+            .as_ref()
+            .map(|t| t.text_buf[text_len_before..].to_string())
+            .unwrap_or_default();
+        // 只处理「纯文本 + 正常结束」的终局：无文本、被截断、无可调工具都不判定
+        if !has_tools || st.finish_reason.as_deref() != Some("stop") || pass_text.trim().is_empty()
+        {
+            break;
+        }
+        if pass >= NUDGE_MAX_PASSES {
+            log_at(
+                &log,
+                "warn",
+                "zen_proxy.nudge_limited",
+                &[
+                    ("reason", "max_passes".to_string()),
+                    ("pass", pass.to_string()),
+                ],
+            );
+            break;
+        }
+        if !nudge_allow(&state, &session) {
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_limited",
+                &[("reason", "max_streak".to_string())],
+            );
+            break;
+        }
+        if nudge_judge(&state, &headers, &model, &user_text, &pass_text, &call_id, pass).await
+            != NudgeVerdict::Undone
+        {
+            break;
+        }
+        // 注入提醒并续跑：第二轮的事件继续喂同一个 StreamState
+        let streak = nudge_record_injection(&state, &session);
+        body = nudge_continuation_body(&body, &pass_text);
+        log_at(
+            &log,
+            "info",
+            "zen_proxy.nudge_injected",
+            &[
+                ("session", session.clone()),
+                ("pass", pass.to_string()),
+                ("streak", streak.to_string()),
+                ("assistant_chars", pass_text.chars().count().to_string()),
+            ],
+        );
+        let nudge_call_id = format!("{call_id}-nudge{pass}");
+        match forward(
+            &body,
+            &headers,
+            true,
+            &state.base_url,
+            http_client(),
+            &state.session,
+            &state.requires_reasoning_rc,
+            &state.log,
+            &state.trace,
+            &nudge_call_id,
+        )
+        .await
+        {
+            Ok(forwarded) if forwarded.status.is_success() => match forwarded.payload {
+                ForwardPayload::Live(resp) => {
+                    next_trace = Some(forwarded.trace);
+                    current = resp;
+                }
+                ForwardPayload::Text(text) => {
+                    log_at(
+                        &log,
+                        "warn",
+                        "zen_proxy.nudge_skipped",
+                        &[
+                            ("reason", "nudge_upstream_error".to_string()),
+                            ("detail", truncate_chars(&text, 200)),
+                        ],
+                    );
+                    break;
+                }
+            },
+            Ok(forwarded) => {
+                log_at(
+                    &log,
+                    "warn",
+                    "zen_proxy.nudge_skipped",
+                    &[
+                        ("reason", "nudge_upstream_status".to_string()),
+                        ("status", forwarded.status.as_u16().to_string()),
+                    ],
+                );
+                break;
             }
-            loop {
-                // finish_reason 之后还要再等尾部分片（OpenAI 的 `include_usage`
-                // 把 usage 放在最后一个独立分片里）；最多等 USAGE_GRACE。
-                let next = if st.finish_reason.is_some() {
-                    let deadline = *finish_deadline
-                        .get_or_insert_with(|| Instant::now() + USAGE_GRACE);
-                    match tokio::time::timeout(
-                        deadline.saturating_duration_since(Instant::now()),
-                        bytes.next(),
-                    )
-                    .await
-                    {
-                        Ok(item) => item,
-                        Err(_) => {
-                            log_at(
-                                &log,
-                                "warn",
-                                "zen_proxy.usage_timeout",
-                                &[(
-                                    "detail",
-                                    "finish_reason 后未再收到分片，按现状收尾".to_string(),
-                                )],
-                            );
-                            st.usage_timeout = true;
-                            return Some((
-                                finish_stream(&mut st, &log),
-                                (bytes, buf, st, true, log, None),
-                            ));
-                        }
-                    }
-                } else {
-                    bytes.next().await
+            Err((_, message)) => {
+                log_at(
+                    &log,
+                    "warn",
+                    "zen_proxy.nudge_skipped",
+                    &[
+                        ("reason", "nudge_forward_error".to_string()),
+                        ("detail", truncate_chars(&message, 200)),
+                    ],
+                );
+                break;
+            }
+        }
+    }
+
+    let terminal = finish_stream(&mut st, &log).concat();
+    let _ = tx.send(terminal.into_bytes()).await;
+}
+
+/// 分会话计数：是否还允许注入（距上次注入超时按新一轮清零）。
+fn nudge_allow(state: &ProxyState, session: &str) -> bool {
+    let Ok(mut map) = state.nudge.lock() else {
+        return false;
+    };
+    map.entry(session.to_string())
+        .or_default()
+        .allow(Instant::now())
+}
+
+/// 分会话计数：记录一次注入，返回累计的连续注入次数。
+fn nudge_record_injection(state: &ProxyState, session: &str) -> u32 {
+    let Ok(mut map) = state.nudge.lock() else {
+        return 0;
+    };
+    let entry = map.entry(session.to_string()).or_default();
+    entry.record_injection(Instant::now());
+    entry.streak
+}
+
+/// 分会话计数：模型真的调用了工具，连续计数清零。
+fn nudge_record_tool_activity(state: &ProxyState, session: &str) {
+    let Ok(mut map) = state.nudge.lock() else {
+        return;
+    };
+    if let Some(entry) = map.get_mut(session) {
+        entry.record_tool_activity();
+    }
+}
+
+/// 跑一次后台判定调用（同一模型、非流式、无工具）。超时/报错/解析不出都返回
+/// `Unknown`，调用方按「已完成」处理（不注入、照常收尾）。
+async fn nudge_judge(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    model: &str,
+    user_text: &str,
+    assistant_text: &str,
+    call_id: &str,
+    pass: usize,
+) -> NudgeVerdict {
+    let prompt = nudge_judge_prompt(user_text, assistant_text);
+    let body = nudge_judge_body(model, &prompt);
+    let judge_call_id = format!("{call_id}-judge{pass}");
+    let started = Instant::now();
+    let forwarded = tokio::time::timeout(
+        NUDGE_JUDGE_TIMEOUT,
+        forward(
+            &body,
+            headers,
+            false,
+            &state.base_url,
+            http_client(),
+            &state.session,
+            &state.requires_reasoning_rc,
+            &state.log,
+            &state.trace,
+            &judge_call_id,
+        ),
+    )
+    .await;
+    let elapsed_ms = started.elapsed().as_millis().to_string();
+    let outcome: Result<String, (String, String)> = match forwarded {
+        Err(_) => Err(("timeout".to_string(), String::new())),
+        Ok(Err((status, message))) => Err((format!("http_{}", status.as_u16()), message)),
+        Ok(Ok(forwarded)) => {
+            let mut trace = forwarded.trace;
+            if !forwarded.status.is_success() {
+                let detail = match forwarded.payload {
+                    ForwardPayload::Text(text) => truncate_chars(&text, 200),
+                    ForwardPayload::Live(_) => String::new(),
                 };
-                match next {
-                    Some(Ok(chunk)) => {
-                        buf.extend_from_slice(&chunk);
-                        let mut out = Vec::new();
-                        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-                            let line: Vec<u8> = buf.drain(..=pos).collect();
-                            let line = String::from_utf8_lossy(&line);
-                            let line = line.trim_end();
-                            // 内容诊断日志：上游分行原样落盘（含非 data 行）
-                            st.trace.write_response_line(line);
-                            if line.is_empty() || !line.starts_with("data:") {
-                                continue;
-                            }
-                            let payload = line["data:".len()..].trim();
-                            if payload == "[DONE]" {
-                                log_at(&log, "info", "zen_proxy.stream_done", &[]);
-                                out.extend(finish_stream(&mut st, &log));
-                                done = true;
-                                break;
-                            }
-                            if let Ok(v) = serde_json::from_str::<Value>(payload) {
-                                out.extend(process_chunk(&v, &mut st));
-                                // 上游随流下发 error：立即按失败收尾，不再继续读
-                                if st.failure.is_some() && !st.closed {
-                                    out.extend(finish_stream(&mut st, &log));
-                                    done = true;
-                                    break;
+                trace.note("upstream_status", forwarded.status.as_u16().to_string());
+                trace.note("suspicious", "nudge_judge_upstream_error");
+                trace.finish();
+                Err((format!("http_{}", forwarded.status.as_u16()), detail))
+            } else {
+                match forwarded.payload {
+                    ForwardPayload::Live(resp) => match resp.text().await {
+                        Ok(text) => {
+                            trace.write_response_text("response.json", &text);
+                            let reply = serde_json::from_str::<Value>(&text)
+                                .ok()
+                                .as_ref()
+                                .and_then(chat_message_text);
+                            match reply {
+                                Some(reply) => {
+                                    trace.note(
+                                        "nudge_reply_chars",
+                                        reply.chars().count().to_string(),
+                                    );
+                                    trace.finish();
+                                    Ok(reply)
+                                }
+                                None => {
+                                    trace.note("suspicious", "nudge_judge_parse_error");
+                                    trace.finish();
+                                    Err(("parse_error".to_string(), String::new()))
                                 }
                             }
                         }
-                        if done || !out.is_empty() {
-                            return Some((
-                                out,
-                                (bytes, buf, st, done, log, finish_deadline),
-                            ));
+                        Err(e) => {
+                            trace.note("read_error", e.to_string());
+                            trace.finish();
+                            Err(("read_error".to_string(), e.to_string()))
                         }
-                    }
-                    Some(Err(_)) => {
-                        // 上游读取出错：按失败收尾（原先按完成收尾会让回合静默结束）
-                        if st.failure.is_none() {
-                            st.failure = Some(StreamFailure {
-                                code: CODE_UPSTREAM_STREAM_ERROR.to_string(),
-                                message: "上游连接中断，本轮未正常结束；请重试".to_string(),
-                                detail: "上游读取出错（连接中断或超时）".to_string(),
-                            });
-                        }
-                        return Some((
-                            finish_stream(&mut st, &log),
-                            (bytes, buf, st, true, log, None),
-                        ));
-                    }
-                    None => {
-                        log_at(&log, "info", "zen_proxy.stream_end", &[(
-                            "detail",
-                            "上游未发送 [DONE]，补发完成事件".to_string(),
-                        )]);
-                        // 上游正常结束但未收到 [DONE]（兼容实现差异）：补发完成事件
-                        return Some((
-                            finish_stream(&mut st, &log),
-                            (bytes, buf, st, true, log, None),
-                        ));
+                    },
+                    ForwardPayload::Text(text) => {
+                        trace.note("suspicious", "nudge_judge_empty_body");
+                        trace.finish();
+                        Err(("empty_body".to_string(), truncate_chars(&text, 200)))
                     }
                 }
             }
-        },
-    )
-    .flat_map(stream::iter);
-
-    let full = stream::once(async move { created })
-        .chain(events)
-        .map(|s| Ok::<_, std::convert::Infallible>(s.into_bytes()));
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "text/event-stream")
-        .header("Cache-Control", "no-cache")
-        .body(Body::from_stream(full))
-        .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into()))
+        }
+    };
+    let (verdict, reply_chars) = match &outcome {
+        Ok(reply) => (parse_nudge_verdict(reply), reply.chars().count()),
+        Err(_) => (NudgeVerdict::Unknown, 0),
+    };
+    log_at(
+        &state.log,
+        "info",
+        "zen_proxy.nudge_judged",
+        &[
+            ("session", opencode_session(headers, &state.session)),
+            ("pass", pass.to_string()),
+            ("verdict", format!("{verdict:?}")),
+            ("reply_chars", reply_chars.to_string()),
+            ("elapsed_ms", elapsed_ms),
+            (
+                "error",
+                match &outcome {
+                    Ok(_) => "-".to_string(),
+                    Err((kind, detail)) => format!("{kind}:{detail}"),
+                },
+            ),
+        ],
+    );
+    verdict
 }
 
 /// 上游非 2xx：透传状态码与错误体。
@@ -3159,6 +3647,183 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------- 口嗨检测：纯函数与分会话计数 ----------
+
+    #[test]
+    fn nudge_judge_prompt_carries_facts_and_limits_length() {
+        let prompt = nudge_judge_prompt("把 base_url 的测试补上", "Now update the test - specifically the base_url path test.");
+        assert!(prompt.contains("把 base_url 的测试补上"), "应带上用户请求");
+        assert!(prompt.contains("Now update the test"), "应带上助手终局文本");
+        assert!(prompt.contains("调用工具的次数是 0"), "应说明工具调用数为 0");
+        assert!(prompt.contains("`未完成` 或 `已完成`"), "应要求单行结论");
+
+        // 超长输入按字符截断（含省略号），不会把整段历史塞进判定提示词
+        let long_user = "用".repeat(NUDGE_USER_LIMIT + 50);
+        let long_reply = "答".repeat(NUDGE_ASSISTANT_LIMIT + 50);
+        let prompt = nudge_judge_prompt(&long_user, &long_reply);
+        assert!(!prompt.contains(&long_user));
+        assert!(!prompt.contains(&long_reply));
+        assert_eq!(
+            prompt.matches('…').count(),
+            2,
+            "两段超长文本各截断一次：{prompt}"
+        );
+    }
+
+    #[test]
+    fn parse_nudge_verdict_reads_first_non_empty_line() {
+        assert_eq!(parse_nudge_verdict("未完成"), NudgeVerdict::Undone);
+        assert_eq!(
+            parse_nudge_verdict("\n  未完成\n理由：它只说要做，没有动手"),
+            NudgeVerdict::Undone
+        );
+        assert_eq!(parse_nudge_verdict("已完成"), NudgeVerdict::Done);
+        assert_eq!(
+            parse_nudge_verdict("已完成\n理由：给出了明确结论"),
+            NudgeVerdict::Done
+        );
+        // 一行里两种字样都出现：先判「未完成」（它是「已完成」的超集）
+        assert_eq!(
+            parse_nudge_verdict("未完成（不是已完成）"),
+            NudgeVerdict::Undone
+        );
+        // 只有第一行参与判定；噪声/空文本按无法判定
+        assert_eq!(parse_nudge_verdict("好的\n未完成"), NudgeVerdict::Unknown);
+        assert_eq!(parse_nudge_verdict("   \n\n"), NudgeVerdict::Unknown);
+        assert_eq!(parse_nudge_verdict("undone"), NudgeVerdict::Unknown);
+    }
+
+    #[test]
+    fn last_user_text_picks_latest_user_message() {
+        let req = json!({
+            "input": [
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "第一问" }] },
+                { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "第一次回答" }] },
+                { "type": "function_call", "call_id": "c1", "name": "shell", "arguments": "{}" },
+                { "type": "function_call_output", "call_id": "c1", "output": "ok" },
+                { "role": "user", "content": [{ "type": "input_text", "text": "第二问" }] }
+            ]
+        });
+        assert_eq!(last_user_text(&req), "第二问");
+        // 简写：input 为字符串
+        assert_eq!(last_user_text(&json!({ "input": "你好" })), "你好");
+        // 没有 user 消息 / 没有 input
+        assert_eq!(
+            last_user_text(&json!({ "input": [{ "type": "message", "role": "assistant", "content": "x" }] })),
+            ""
+        );
+        assert_eq!(last_user_text(&json!({})), "");
+    }
+
+    #[test]
+    fn nudge_continuation_body_appends_messages_without_touching_original() {
+        let original = json!({
+            "model": "m",
+            "stream": true,
+            "instructions": "keep me",
+            "tools": [{ "type": "function", "name": "shell" }],
+            "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "改文件" }] }]
+        });
+        let before = original.clone();
+        let body = nudge_continuation_body(&original, "Now update the test");
+        assert_eq!(original, before, "原请求不应被修改");
+        assert_eq!(body["instructions"], "keep me");
+        assert_eq!(body["tools"], before["tools"]);
+        let input = body["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[1]["content"][0]["type"], "output_text");
+        assert_eq!(input[1]["content"][0]["text"], "Now update the test");
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[2]["content"][0]["type"], "input_text");
+        assert!(input[2]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(NUDGE_TEXT));
+
+        // 简写 input（字符串）也要能续跑
+        let body = nudge_continuation_body(&json!({ "input": "hi" }), "text");
+        let input = body["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["text"], "hi");
+    }
+
+    #[test]
+    fn nudge_judge_body_is_non_stream_without_tools() {
+        let body = nudge_judge_body("mimo-v2.5-free", "判定提示词");
+        assert_eq!(body["model"], "mimo-v2.5-free");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["tools"], json!([]));
+        assert_eq!(body["input"][0]["role"], "user");
+        assert_eq!(body["input"][0]["content"][0]["text"], "判定提示词");
+    }
+
+    #[test]
+    fn chat_message_text_reads_first_choice() {
+        let chat = json!({
+            "choices": [{ "message": { "role": "assistant", "content": "未完成\n理由：只说不做" } }]
+        });
+        assert_eq!(
+            chat_message_text(&chat).as_deref(),
+            Some("未完成\n理由：只说不做")
+        );
+        assert_eq!(chat_message_text(&json!({ "choices": [] })), None);
+        assert_eq!(chat_message_text(&json!({})), None);
+    }
+
+    #[test]
+    fn nudge_state_caps_streak_and_resets() {
+        let mut state = NudgeState::default();
+        let now = Instant::now();
+        assert!(state.allow(now), "初始应允许注入");
+        state.record_injection(now);
+        assert!(state.allow(now + Duration::from_secs(1)));
+        state.record_injection(now + Duration::from_secs(1));
+        assert!(
+            !state.allow(now + Duration::from_secs(2)),
+            "连续两次注入后应拒绝"
+        );
+
+        // 距上次注入超过窗口：按新一轮清零并放行
+        let later = now + Duration::from_secs(1) + NUDGE_RESET_AFTER;
+        assert!(state.allow(later));
+        assert_eq!(state.streak, 0);
+
+        // 模型真的调用了工具：计数清零
+        state.record_injection(later);
+        state.record_tool_activity();
+        assert_eq!(state.streak, 0);
+        assert!(state.last.is_none());
+        assert!(state.allow(later));
+    }
+
+    #[test]
+    fn nudge_counters_are_per_session() {
+        let state = ProxyState {
+            session: "ses_fixed123".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            log: None,
+            trace: TraceSink::disabled(),
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
+        };
+        assert!(nudge_allow(&state, "ses_a"));
+        assert_eq!(nudge_record_injection(&state, "ses_a"), 1);
+        assert_eq!(nudge_record_injection(&state, "ses_a"), 2);
+        assert!(!nudge_allow(&state, "ses_a"), "同会话达上限应拒绝");
+        // 其它会话不受影响
+        assert!(nudge_allow(&state, "ses_b"));
+        assert_eq!(nudge_record_injection(&state, "ses_b"), 1);
+        assert!(nudge_allow(&state, "ses_b"), "另一个会话仍有注入额度");
+        assert_eq!(nudge_record_injection(&state, "ses_b"), 2);
+        assert!(!nudge_allow(&state, "ses_b"), "第二个会话自己达上限");
+        // 工具活动只清零对应会话：A 恢复，B 仍受限
+        nudge_record_tool_activity(&state, "ses_a");
+        assert!(nudge_allow(&state, "ses_a"));
+        assert!(!nudge_allow(&state, "ses_b"));
+    }
 
     fn sse_data_lines(block: &str) -> Vec<String> {
         block
@@ -4854,6 +5519,7 @@ mod tests {
 mod integration_tests {
     use super::*;
     use std::sync::Arc;
+    use std::collections::VecDeque;
     use tokio::sync::Mutex as AsyncMutex;
 
     /// 记录一次上游收到的请求（聊身体 + 识别头）。
@@ -5125,6 +5791,7 @@ mod integration_tests {
             log: None,
             trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
         };
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -5185,6 +5852,7 @@ mod integration_tests {
             log: None,
             trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
         };
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("client-session-42"));
@@ -5265,6 +5933,303 @@ mod integration_tests {
         listener.local_addr().unwrap().port()
     }
 
+    // ---------- 口嗨自动续跑：脚本化上游与端到端用例 ----------
+
+    /// 脚本化上游响应：JSON 用于非流式（判定调用），SSE 分片用于流式。
+    #[derive(Clone)]
+    enum ScriptedReply {
+        Json(Value),
+        Sse(Vec<String>),
+        /// 等待 `delay` 后一次性下发全部 `lines`：模拟「首包很慢」的上游（续跑轮会用到）。
+        SseDelayed { lines: Vec<String>, delay: Duration },
+    }
+
+    /// 起一个按调用次序返回脚本化响应的 mock 上游，并记录**全部**收到的请求体；
+    /// 脚本用完后回一条内容为「已完成」的普通 JSON（避免未覆盖的调用把用例带偏）。
+    async fn spawn_mock_zen_scripted(
+        script: Vec<ScriptedReply>,
+    ) -> (String, Arc<AsyncMutex<Vec<Value>>>) {
+        let queue = Arc::new(AsyncMutex::new(VecDeque::from(script)));
+        let rec: Arc<AsyncMutex<Vec<Value>>> = Arc::new(AsyncMutex::new(Vec::new()));
+        let rec_for_route = rec.clone();
+        let app = Router::new().route(
+            "/chat/completions",
+            axum::routing::post(move |Json(body): Json<Value>| {
+                let queue = queue.clone();
+                let rec = rec_for_route.clone();
+                async move {
+                    rec.lock().await.push(body);
+                    let reply = queue.lock().await.pop_front();
+                    match reply {
+                        Some(ScriptedReply::Json(value)) => axum::response::Response::builder()
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(value.to_string()))
+                            .unwrap(),
+                        Some(ScriptedReply::Sse(lines)) => {
+                            let chunks: Vec<Result<axum::body::Bytes, std::io::Error>> = lines
+                                .into_iter()
+                                .map(|l| Ok(axum::body::Bytes::from(l)))
+                                .collect();
+                            axum::response::Response::builder()
+                                .header(header::CONTENT_TYPE, "text/event-stream")
+                                .body(Body::from_stream(stream::iter(chunks)))
+                                .unwrap()
+                        }
+                        Some(ScriptedReply::SseDelayed { lines, delay }) => {
+                            let body = stream::once(async move {
+                                tokio::time::sleep(delay).await;
+                                let body: Vec<u8> =
+                                    lines.into_iter().flat_map(|l| l.into_bytes()).collect();
+                                Ok::<_, std::io::Error>(axum::body::Bytes::from(body))
+                            });
+                            axum::response::Response::builder()
+                                .header(header::CONTENT_TYPE, "text/event-stream")
+                                .body(Body::from_stream(body))
+                                .unwrap()
+                        }
+                        None => axum::response::Response::builder()
+                            .header(header::CONTENT_TYPE, "application/json")
+                            .body(Body::from(
+                                json!({
+                                    "choices": [{
+                                        "message": { "role": "assistant", "content": "已完成" },
+                                        "finish_reason": "stop"
+                                    }]
+                                })
+                                .to_string(),
+                            ))
+                            .unwrap(),
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}"), rec)
+    }
+
+    /// 一段「纯文本回复」的流式分片。
+    fn sse_text_reply(text: &str) -> Vec<String> {
+        vec![
+            format!(
+                "data: {}\n\n",
+                json!({ "choices": [{ "index": 0, "delta": { "content": text }, "finish_reason": null }] })
+            ),
+            format!(
+                "data: {}\n\n",
+                json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "stop" }] })
+            ),
+            "data: [DONE]\n\n".to_string(),
+        ]
+    }
+
+    /// 一段「工具调用」的流式分片。
+    fn sse_tool_call_reply(name: &str, arguments: &str) -> Vec<String> {
+        vec![
+            format!(
+                "data: {}\n\n",
+                json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [{
+                    "index": 0, "id": "call_1",
+                    "function": { "name": name, "arguments": arguments }
+                }] }, "finish_reason": null }] })
+            ),
+            format!(
+                "data: {}\n\n",
+                json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] })
+            ),
+            "data: [DONE]\n\n".to_string(),
+        ]
+    }
+
+    /// 判定调用的 JSON 回复（非流式）。
+    fn judge_reply(verdict: &str) -> ScriptedReply {
+        ScriptedReply::Json(json!({
+            "choices": [{
+                "message": { "role": "assistant", "content": verdict },
+                "finish_reason": "stop"
+            }]
+        }))
+    }
+
+    /// 入站 Responses 请求体：可选带一个工具声明（无工具时不应触发判定）。
+    fn nudge_probe(with_tools: bool) -> Body {
+        let mut req = json!({
+            "model": "mimo-v2.5-free",
+            "stream": true,
+            "input": [{ "type": "message", "role": "user",
+                        "content": [{ "type": "input_text", "text": "把 base_url 的测试补上" }] }]
+        });
+        if with_tools {
+            req["tools"] = json!([{
+                "type": "function",
+                "name": "shell",
+                "description": "run shell",
+                "parameters": { "type": "object", "properties": {} }
+            }]);
+        }
+        Body::from(req.to_string())
+    }
+
+    /// 走一次代理的流式翻译入口，返回发给客户端（codex）的完整 SSE 文本。
+    async fn run_nudge_probe(upstream: &str, log: ZenLog, body: Body) -> String {
+        let state = ProxyState {
+            session: "ses_fixed123".into(),
+            base_url: upstream.to_string(),
+            log,
+            trace: TraceSink::disabled(),
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let uri: Uri = "/responses".parse().unwrap();
+        let resp = handle_any(
+            State(state),
+            Method::POST,
+            OriginalUri(uri),
+            HeaderMap::new(),
+            body,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        body_text(resp).await
+    }
+
+    /// 读取会话日志目录下全部内容（断言 nudge_* 事件用）。
+    fn read_session_log(dir: &tempfile::TempDir) -> String {
+        std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_injects_continuation_and_relays_tool_call() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply(
+                "Now update the test - specifically the base_url path test.",
+            )),
+            judge_reply("未完成"),
+            ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(&upstream, log, nudge_probe(true)).await;
+
+        // 对 codex 而言只是「一条带文本的响应，随后调用了工具」，只收尾一次
+        assert!(body.contains("response.output_text.delta"), "{body}");
+        assert!(body.contains("Now update the test"), "{body}");
+        assert!(body.contains("function_call"), "{body}");
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 3, "应为：首轮 + 判定 + 续跑");
+        // 判定调用：非流式、无工具，提示词里带上用户请求与助手终局文本
+        assert_eq!(calls[1]["stream"], false);
+        assert!(
+            calls[1]["tools"].is_null(),
+            "判定调用不应带工具声明：{}",
+            calls[1]
+        );
+        let prompt = calls[1]["messages"][0]["content"]
+            .as_str()
+            .unwrap_or_else(|| panic!("判定请求形状异常：{}", calls[1]));
+        assert!(prompt.contains("把 base_url 的测试补上"), "{prompt}");
+        assert!(prompt.contains("Now update the test"), "{prompt}");
+        // 续跑调用：历史尾部是「助手原样文本 + 注入提醒」
+        let messages = calls[2]["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert!(messages[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Now update the test"));
+        assert_eq!(messages[2]["role"], "user");
+        assert!(messages[2]["content"].as_str().unwrap().contains("自动续跑"));
+        // 会话日志：判定与注入各留一条
+        let joined = read_session_log(&dir);
+        assert!(joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
+        assert!(joined.contains("event=zen_proxy.nudge_injected"), "{joined}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_does_not_inject_when_verdict_done() {
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("结论：这段代码无需改动，原因是 ……")),
+            judge_reply("已完成"),
+        ])
+        .await;
+
+        let body = run_nudge_probe(&upstream, None, nudge_probe(true)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert!(!body.contains("function_call"), "{body}");
+        assert_eq!(rec.lock().await.len(), 2, "判为已完成时不应续跑");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_stops_after_two_injections() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("第一句空话")),
+            judge_reply("未完成"),
+            ScriptedReply::Sse(sse_text_reply("第二句空话")),
+            judge_reply("未完成"),
+            ScriptedReply::Sse(sse_text_reply("第三句空话")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(&upstream, log, nudge_probe(true)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(
+            rec.lock().await.len(),
+            5,
+            "首轮 + (判定 + 续跑) × 2；第三次口嗨不再注入"
+        );
+        let joined = read_session_log(&dir);
+        assert!(joined.contains("event=zen_proxy.nudge_limited"), "{joined}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_skipped_when_request_has_no_tools() {
+        let (upstream, rec) =
+            spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply("纯聊天回答"))]).await;
+
+        let body = run_nudge_probe(&upstream, None, nudge_probe(false)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(rec.lock().await.len(), 1, "无工具可用时不做判定");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_second_pass_survives_slow_upstream() {
+        // 续跑轮的首包晚于 USAGE_GRACE：它不应继承上一轮的 finish_reason 而套用
+        // 「尾包宽限」把自己整轮丢掉（那样注入就白做了、工具调用也拿不到）。
+        let tool_chunks = sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}");
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("我先说明一下接下来要做的事。")),
+            judge_reply("未完成"),
+            ScriptedReply::SseDelayed {
+                lines: tool_chunks,
+                delay: USAGE_GRACE + Duration::from_millis(500),
+            },
+        ])
+        .await;
+
+        let body = run_nudge_probe(&upstream, None, nudge_probe(true)).await;
+
+        assert!(body.contains("function_call"), "{body}");
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(rec.lock().await.len(), 3);
+    }
+
     fn responses_probe() -> Body {
         Body::from(
             json!({ "model": "m", "input": "hi", "stream": false }).to_string(),
@@ -5282,6 +6247,7 @@ mod integration_tests {
             log,
             trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -5646,6 +6612,7 @@ mod integration_tests {
             log,
             trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
         };
         let probe = |state: ProxyState| async move {
             let uri: Uri = "/responses".parse().unwrap();
@@ -5964,7 +6931,16 @@ mod integration_tests {
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
         let started = std::time::Instant::now();
-        let out = proxy_stream_response(req, resp, &log, TraceCall::disabled()).await;
+        let state = proxy_state(base_url.clone(), log.clone());
+        let out = proxy_stream_response(
+            state,
+            HeaderMap::new(),
+            "req_test".to_string(),
+            req,
+            resp,
+            TraceCall::disabled(),
+        )
+        .await;
         let body = tokio::time::timeout(
             std::time::Duration::from_secs(8),
             axum::body::to_bytes(out.into_body(), usize::MAX),
