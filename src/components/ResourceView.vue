@@ -313,7 +313,6 @@ onBeforeUnmount(() => {
         <button
           class="panel-view-toggle"
           aria-label="切换显示：修改时间/文件大小"
-          v-tooltip="'切换显示：修改时间/文件大小'"
           @click="toggleFileSideMode()"
         >
           <!-- 图标呈现当前态：时钟=正在显示时间、Aa=正在显示大小（两者同取按钮 color，勿单独设色） -->
