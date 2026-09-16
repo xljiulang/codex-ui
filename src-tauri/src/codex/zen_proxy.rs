@@ -87,12 +87,16 @@ const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
 const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有给出计划就结束了回合。请继续：在计划模式下把完整方案写成用 <proposed_plan> 包裹的计划；如果确实需要用户先确认信息，请明确提出问题。";
-/// 计划模式的标记：codex 把当前协作模式作为开发者消息下发，计划模式下的文本形如
-/// `<collaboration_mode># Collaboration Mode: Plan …</collaboration_mode>`（Default
-/// 文案里出现的「e.g. Plan mode」不会命中）。计划模式下的口嗨判据完全由代码给出：
-/// 终局文本含计划标签（见 [`PLAN_OUTPUT_MARKER`]）即「计划已交付」，否则注入
-/// [`PLAN_NUDGE_TEXT`] 催它给计划——**不调用 AI 判定**。
-const PLAN_MODE_MARKER: &str = "collaboration mode: plan";
+/// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
+/// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
+const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
+/// 计划模式的标题行判据（大小写不敏感，只匹配块内**第一个非空行**）：codex 0.154 实测
+/// 标题为 `# Plan Mode (Conversational)`（旧版本是 `# Collaboration Mode: Plan`，见下一条）。
+/// 计划模式下的口嗨判据完全由代码给出：终局文本含计划标签（见 [`PLAN_OUTPUT_MARKER`]）
+/// 即「计划已交付」，否则注入 [`PLAN_NUDGE_TEXT`] 催它给计划——**不调用 AI 判定**。
+const PLAN_MODE_HEADING_MARKER: &str = "plan mode";
+/// 旧版 codex 的计划模式标题（`# Collaboration Mode: Plan`），保留兼容分支。
+const PLAN_MODE_HEADING_MARKER_LEGACY: &str = "collaboration mode: plan";
 /// 计划产物的包裹标签（协议 `item/plan/delta` 与之对应）：**计划模式**下出现即视为
 /// 计划已交付（AI 判定不参与此判据）；默认模式不据此短路，仍交由 AI 判定。
 const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
@@ -143,10 +147,35 @@ enum NudgeVerdict {
     Unknown,
 }
 
-/// 请求是否处于计划模式：扫 `instructions` 与 `input` 各条目的文本，找
-/// `<collaboration_mode>` 包裹的 `Collaboration Mode: Plan`（大小写不敏感）。
-/// 调用方据此整轮绕开 AI 判定，改用「终局文本是否含计划标签」这条代码判据
-/// （见 [`PLAN_OUTPUT_MARKER`] 与 [`PLAN_NUDGE_TEXT`]）。
+/// 单段文本里的协作模式块是否声明「计划模式」：从每个 [`COLLABORATION_MODE_TAG`] 之后
+/// 取**第一个非空行**，只有它是 Markdown 标题（`# …`）且含 `plan mode`（codex 0.154：
+/// `# Plan Mode (Conversational)`）或 `collaboration mode: plan`（旧文案）才算计划模式。
+///
+/// **只认标题行**：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着
+/// 「… for other modes (e.g. Plan mode) are no longer active.」——按整段（甚至按正文行）子串
+/// 匹配都会把默认模式误判成计划模式，那样默认模式的正常编码回合会被注入「请给出计划」。
+/// 块不闭合（文本被截断）时同样按标题行判定。
+fn text_declares_plan_mode(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let mut rest = lower.as_str();
+    while let Some(index) = rest.find(COLLABORATION_MODE_TAG) {
+        rest = &rest[index + COLLABORATION_MODE_TAG.len()..];
+        // 标题行 = 标签之后的第一个非空行；codex 实测标签后紧跟 "# Plan Mode …"
+        if let Some(heading) = rest.lines().map(str::trim).find(|line| !line.is_empty()) {
+            if heading.starts_with('#')
+                && (heading.contains(PLAN_MODE_HEADING_MARKER)
+                    || heading.contains(PLAN_MODE_HEADING_MARKER_LEGACY))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// 请求是否处于计划模式：扫 `instructions` 与 `input` 各条目的文本，按 [`text_declares_plan_mode`]
+/// 判断协作模式标题行（大小写不敏感）。调用方据此整轮绕开 AI 判定，改用「终局文本是否含
+/// 计划标签」这条代码判据（见 [`PLAN_OUTPUT_MARKER`] 与 [`PLAN_NUDGE_TEXT`]）。
 fn request_is_plan_mode(req: &Value) -> bool {
     let mut texts: Vec<String> = Vec::new();
     if let Some(instructions) = req.get("instructions").and_then(Value::as_str) {
@@ -163,9 +192,7 @@ fn request_is_plan_mode(req: &Value) -> bool {
             }
         }
     }
-    texts
-        .iter()
-        .any(|text| text.to_lowercase().contains(PLAN_MODE_MARKER))
+    texts.iter().any(|text| text_declares_plan_mode(text))
 }
 
 /// 终局文本是否为计划产物（`<proposed_plan>` 包裹）：**计划模式**下命中即视为
@@ -492,6 +519,8 @@ fn http_client() -> &'static reqwest::Client {
 /// `zen_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
 /// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
 /// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格；
+/// `mode` 是口嗨检测识别出的协作模式（`plan`/`default`）——排查「计划模式仍发起判定」
+/// 这类问题时先看这一格（识别走 [`request_is_plan_mode`]）；
 /// `patch_failures` 是本次历史里已失败的补丁调用条数（>0 说明模型正在补丁上打转，
 /// 代理已对这些工具结果追加格式纠错提示）；`call_id` 与内容日志
 /// （`logs/zen/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
@@ -537,6 +566,10 @@ fn request_log_fields(
         ("call_id", call_id.to_string()),
         ("model", model),
         ("stream", want_stream.to_string()),
+        (
+            "mode",
+            if request_is_plan_mode(req) { "plan" } else { "default" }.to_string(),
+        ),
         ("input_msg_count", input_msg_count.to_string()),
         ("input_chars", input_chars.to_string()),
         ("instructions_chars", instructions_chars.to_string()),
@@ -3751,6 +3784,14 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     out
 }
 
+/// codex 0.154 实测的计划模式协作块（标题行是 `# Plan Mode (Conversational)`；旧版 codex
+/// 的 `# Collaboration Mode: Plan` 已不再出现，但仍保留兼容分支）。测试共用。
+#[cfg(test)]
+const REAL_PLAN_MODE_BLOCK: &str = "<collaboration_mode># Plan Mode (Conversational)\r\n\r\nYou work in 3 phases, and you should *chat your way* to a great plan before finalizing it.\r\n\r\n## Mode rules (strict)\r\n\r\nYou are in **Plan Mode** until a developer message explicitly ends it.\r\n\r\nEventually issuing a `<proposed_plan>` block.\r\n</collaboration_mode>";
+/// codex 0.154 实测的默认模式协作块：正文第一句就含 `(e.g. Plan mode)`，只认标题行才不会误判。
+#[cfg(test)]
+const REAL_DEFAULT_MODE_BLOCK: &str = "<collaboration_mode># Collaboration Mode: Default\r\n\r\nYou are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.\r\n\r\nYour active mode changes only when new developer instructions with a different `<collaboration_mode>...</collaboration_mode>` change it.\r\n</collaboration_mode>";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3816,36 +3857,63 @@ mod tests {
     }
 
     #[test]
-    fn request_is_plan_mode_detects_collaboration_mode_message() {
-        // 计划模式：codex 把模式文本作为开发者消息下发（实测格式）
+    fn request_is_plan_mode_reads_collaboration_mode_heading() {
+        // 计划模式：codex 把模式块拼在 developer 条目末尾（前面还有 skills 等文本）
         let plan = json!({
-            "instructions": "…",
+            "instructions": "You are a coding agent running in the Codex CLI…",
             "input": [
                 { "type": "message", "role": "developer", "content": [{
                     "type": "input_text",
-                    "text": "</permissions instructions><collaboration_mode># Collaboration Mode: Plan\r\n\r\nYou are now in Plan mode …</collaboration_mode>"
+                    "text": format!("<skills_instructions>## Skills …</skills_instructions><multi_agent_mode>…</multi_agent_mode>{REAL_PLAN_MODE_BLOCK}")
                 }] },
                 { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
             ]
         });
         assert!(request_is_plan_mode(&plan));
+        assert!(text_declares_plan_mode(REAL_PLAN_MODE_BLOCK));
 
-        // 默认模式：同一段文案里出现的「e.g. Plan mode」不能误判
+        // 旧版 codex 文案（`# Collaboration Mode: Plan`）：保留兼容
+        let legacy = json!({
+            "input": [
+                { "type": "message", "role": "developer", "content": [{
+                    "type": "input_text",
+                    "text": "</permissions instructions><collaboration_mode># Collaboration Mode: PLAN\r\n\r\nYou are now in Plan mode …</collaboration_mode>"
+                }] },
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+            ]
+        });
+        assert!(request_is_plan_mode(&legacy));
+
+        // 默认模式：正文里的「(e.g. Plan mode)」不能误判（只认标题行）
         let default_mode = json!({
             "input": [
                 { "type": "message", "role": "developer", "content": [{
                     "type": "input_text",
-                    "text": "<collaboration_mode># Collaboration Mode: Default\r\n\r\nYou are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.</collaboration_mode>"
+                    "text": REAL_DEFAULT_MODE_BLOCK
                 }] }
             ]
         });
         assert!(!request_is_plan_mode(&default_mode));
+        assert!(!text_declares_plan_mode(REAL_DEFAULT_MODE_BLOCK));
+        // 用户正文里出现「Plan mode / proposed_plan」同样不因此被判成计划模式
+        assert!(!request_is_plan_mode(&json!({
+            "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "计划模式(Plan mode)下要输出 <proposed_plan>" }] }]
+        })));
 
-        // 模式文本放在 instructions 里、以及大小写/换行差异
-        let in_instructions = json!({
-            "instructions": "# Collaboration\n<collaboration_mode># Collaboration Mode: PLAN</collaboration_mode>"
-        });
-        assert!(request_is_plan_mode(&in_instructions));
+        // 模式块放在 instructions 里、或 input 是字符串简写：同样生效
+        assert!(request_is_plan_mode(&json!({
+            "instructions": format!("前文…\r\n{REAL_PLAN_MODE_BLOCK}")
+        })));
+        assert!(request_is_plan_mode(&json!({
+            "input": format!("{REAL_PLAN_MODE_BLOCK}\r\n继续")
+        })));
+
+        // 标签后先空行再标题、以及文本被截断（块未闭合）：仍按标题行判定
+        assert!(text_declares_plan_mode(
+            "<collaboration_mode>\r\n\r\n# Plan Mode (Standard)\r\n…（内容被截断）"
+        ));
+        // 标签后直接就是正文（没有标题行）时按非计划模式处理
+        assert!(!text_declares_plan_mode("<collaboration_mode>You are now in Plan mode"));
 
         // 完全没有模式信息（例如其它客户端）：按非计划模式处理
         assert!(!request_is_plan_mode(&json!({ "input": "hi" })));
@@ -5280,6 +5348,27 @@ mod tests {
         assert_eq!(value_of("patch_failures"), Some("0".to_string()));
         assert!(value_of("input_chars").is_some());
         assert_eq!(value_of("call_id"), Some("req_test".to_string()));
+        // 协作模式：无模式块按默认模式记；计划模式块（真实文案）记 plan
+        assert_eq!(value_of("mode"), Some("default".to_string()));
+        let plan_fields = request_log_fields(
+            &json!({
+                "model": "m",
+                "input": [
+                    { "type": "message", "role": "developer", "content": [{
+                        "type": "input_text", "text": REAL_PLAN_MODE_BLOCK
+                    }] }
+                ]
+            }),
+            true,
+            "req_test",
+        );
+        assert_eq!(
+            plan_fields
+                .iter()
+                .find(|(name, _)| *name == "mode")
+                .map(|(_, value)| value.as_str()),
+            Some("plan")
+        );
 
         // 没请求推理时记 `-`
         let fields = request_log_fields(&json!({ "model": "m" }), false, "req_test");
@@ -6465,8 +6554,11 @@ mod integration_tests {
         assert_eq!(rec.lock().await.len(), 3);
     }
 
-    /// 计划模式下的协作模式开发者消息文本（codex 实测格式）。
-    const PLAN_MODE_TEXT: &str = "</permissions instructions><collaboration_mode># Collaboration Mode: Plan\n\nYou are now in Plan mode …</collaboration_mode>";
+    /// 计划模式下的协作模式文本段（codex 0.154 实测文案，见 [`REAL_PLAN_MODE_BLOCK`]；
+    /// 前缀补一段 skills 文本以贴近真实请求：模式块拼在同一个 developer 条目末尾）。
+    fn plan_mode_text() -> String {
+        format!("<skills_instructions>## Skills …</skills_instructions>{REAL_PLAN_MODE_BLOCK}")
+    }
 
     /// 计划模式下终局没有计划标签：按「计划未交付」注入计划专用提醒续跑，
     /// 全程不调用 AI 判定（判定提示词与判据都不参与计划模式）。
@@ -6490,7 +6582,7 @@ mod integration_tests {
         let body = run_nudge_probe(
             &upstream,
             log,
-            nudge_probe_with_mode(true, PLAN_MODE_TEXT),
+            nudge_probe_with_mode(true, &plan_mode_text()),
         )
         .await;
 
@@ -6536,7 +6628,7 @@ mod integration_tests {
         let body = run_nudge_probe(
             &upstream,
             log,
-            nudge_probe_with_mode(true, PLAN_MODE_TEXT),
+            nudge_probe_with_mode(true, &plan_mode_text()),
         )
         .await;
 
@@ -6566,7 +6658,7 @@ mod integration_tests {
         let body = run_nudge_probe(
             &upstream,
             log,
-            nudge_probe_with_mode(true, PLAN_MODE_TEXT),
+            nudge_probe_with_mode(true, &plan_mode_text()),
         )
         .await;
 
@@ -6581,6 +6673,50 @@ mod integration_tests {
             joined.contains("event=zen_proxy.nudge_limited")
                 && joined.contains("reason=max_streak")
                 && joined.contains("mode=plan"),
+            "{joined}"
+        );
+    }
+
+    /// 默认模式的协作块正文里带「(e.g. Plan mode)」：不能被误判成计划模式而跳过 AI 判定
+    /// （否则默认模式的正常编码回合会被注入「请给出计划」）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_default_mode_block_still_goes_to_judge() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("先给个说明，接下来我再动手。")),
+            judge_reply("未完成"),
+            // 续跑轮真的调用了工具：回合就此收尾，不再产生第二轮判定
+            ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_mode(true, REAL_DEFAULT_MODE_BLOCK),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert!(body.contains("function_call"), "{body}");
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 3, "默认模式仍应「首轮 + 判定 + 续跑」：{calls:?}");
+        let injected = calls[2]["messages"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["content"]
+            .as_str()
+            .unwrap();
+        assert!(
+            injected.contains("必须实际调用工具"),
+            "默认模式注入执行口径：{injected}"
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_judged")
+                && joined.contains("mode=default"),
             "{joined}"
         );
     }
