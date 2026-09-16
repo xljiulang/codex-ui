@@ -68,6 +68,7 @@ const nav = useTurnNav({
   items,
   stickToBottom: scroll.stickToBottom,
   isSettling: scroll.isSettling,
+  onProgrammaticScroll: (top) => scroll.noteProgrammaticScroll(top),
   turnNavRoot,
   turnCardBody,
 });

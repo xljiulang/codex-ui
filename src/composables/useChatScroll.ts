@@ -2,7 +2,7 @@ import { nextTick, ref, type Ref } from "vue";
 
 /** 吸底滚动引擎与回合导航域的接缝（由 ChatView 注入，避免双向依赖） */
 export interface ChatScrollDeps {
-  /** 回合跳转自绘动画进行中：期间滚动事件不参与吸底/索引推导 */
+  /** 回合跳转窗口（点击 → 动画结束的下一帧）进行中：期间滚动事件不参与吸底/索引推导 */
   isNavAnimating(): boolean;
   /** 可信用户滚动：更新当前回合索引（锚点归属导航域） */
   onTrustedScroll(scrollTop: number): void;
@@ -34,14 +34,26 @@ export function useChatScroll(
   let lastStickScrollTop = 0;
   // settleToBottom 进行中标记（供预热守卫复用）
   let settleRunning = false;
+  // 程序化滚动落点（回合跳转自绘动画登记）：结束帧的尾随 scroll 事件据此识别。
+  // WebView2/Chromium 中程序化滚动同样派发 isTrusted=true 的 scroll 事件，
+  // 只能靠位置比对把「自己滚的」和「用户滚的」区分开。
+  let programmaticTop: number | null = null;
   let scrollRaf: number | undefined;
   let scrollObserver: MutationObserver | undefined;
 
   function onScroll(e: Event) {
-    // 自绘跳转动画期间的滚动事件不参与索引/吸底推导，结束后由 syncAnchors 收敛
+    // 跳转窗口内的滚动事件不参与索引/吸底推导，结束后由 syncAnchors 收敛
     if (deps.isNavAnimating()) return;
     const el = scroller.value;
     if (!el) return;
+    // 跳转落点的尾随 scroll 事件：消费本次登记后直接返回，
+    // 否则落点距底 < 60px 时会被下面「滚回底部附近自动恢复」判据当成用户滚动，
+    // 重新开启吸底并把位置从落点拉回底部
+    if (programmaticTop !== null) {
+      const isSelfScroll = Math.abs(el.scrollTop - programmaticTop) <= 1;
+      programmaticTop = null;
+      if (isSelfScroll) return;
+    }
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (e.isTrusted && dist > UNPIN_DIST_PX && el.scrollTop < lastStickScrollTop - 2) {
       // 用户向上滚动且距底部超过阈值才解除：
@@ -84,6 +96,14 @@ export function useChatScroll(
     stickToBottom.value = true;
     scheduleScroll();
     deps.scheduleAnchorSync();
+  }
+
+  /**
+   * 登记程序化滚动落点（回合跳转自绘动画调用）：随后的尾随 scroll 事件
+   * 若落在该位置，则视为程序化滚动而非用户滚动。
+   */
+  function noteProgrammaticScroll(top: number) {
+    programmaticTop = top;
   }
 
   /**
@@ -157,6 +177,7 @@ export function useChatScroll(
     scroller.value?.removeEventListener("load", onImageLoad, true);
     // 避免切换视图后残留滚动状态
     stickToBottom.value = true;
+    programmaticTop = null;
   }
 
   return {
@@ -165,6 +186,7 @@ export function useChatScroll(
     onScroll,
     scheduleScroll,
     jumpToBottom,
+    noteProgrammaticScroll,
     settleToBottom,
     resetForNewThread,
     attachObserver,

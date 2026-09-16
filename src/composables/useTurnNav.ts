@@ -31,6 +31,8 @@ export interface TurnNavDeps {
   stickToBottom: Ref<boolean>;
   /** 吸底落定流程进行中（预热守卫，避免与强制布局互相踩踏） */
   isSettling(): boolean;
+  /** 登记跳转动画的程序化落点（吸底引擎据此识别尾随 scroll 事件，避免误判为用户滚动） */
+  onProgrammaticScroll(top: number): void;
   /** 导航按钮/卡片根元素与卡片列表元素（模板 ref 由调用方绑定） */
   turnNavRoot: Ref<HTMLElement | null>;
   turnCardBody: Ref<HTMLElement | null>;
@@ -61,7 +63,9 @@ export function useTurnNav(deps: TurnNavDeps) {
   let layoutWarmed = false;
   let warmRunning = false;
   let warmSeq = 0;
-  // 回合跳转动画状态：自绘动画期间锁定索引，连点取消旧动画从当前位置继续
+  // 回合跳转窗口状态：从点击起（含 measuring/nextTick 等待）到动画结束的下一帧都置位，
+  // 期间到达的 scroll 事件一律视为程序化滚动（不参与吸底/索引推导）；
+  // 连点取消旧动画从当前位置继续
   let navAnimSeq = 0;
   let navAnimRaf: number | undefined;
   let navAnimating = false;
@@ -389,9 +393,18 @@ export function useTurnNav(deps: TurnNavDeps) {
     const finish = () => {
       if (seq !== navAnimSeq) return;
       el.scrollTop = top;
-      navAnimating = false;
       navAnimRaf = undefined;
+      // 登记落点并与落点收敛索引
+      deps.onProgrammaticScroll(top);
       syncAnchors();
+      // 跳转窗口延后一帧关闭：scroll 事件在每帧的滚动步骤里派发（早于 rAF 回调），
+      // 结束帧写入引发的事件要到下一帧才到，提前关窗会被「距底 60px 内」误判成
+      // 用户滚动而重新开启吸底，把视图从落点拉回底部
+      navAnimRaf = requestAnimationFrame(() => {
+        if (seq !== navAnimSeq) return;
+        navAnimRaf = undefined;
+        navAnimating = false;
+      });
     };
     if (Math.abs(delta) < 1) {
       finish();
@@ -425,6 +438,16 @@ export function useTurnNav(deps: TurnNavDeps) {
     if (!el || target < 0 || target >= anchorCount.value) return;
     // 手动浏览历史：解除吸底，避免 MutationObserver/流式更新把位置拉回
     deps.stickToBottom.value = false;
+    // 打开跳转窗口：从点击起（含 measuring/nextTick 等待）到动画结束的下一帧，
+    // 期间的 scroll 事件都视为程序化滚动——流式吸底写入留下的滞后事件恰落在这个窗口内，
+    // 否则会被「距底 60px 内」判据当成用户滚动而重新开启吸底
+    cancelTurnAnimation();
+    const jumpSeq = navAnimSeq;
+    navAnimating = true;
+    // 提前返回时关窗：新跳转已接管（seq 变化）则不动，避免误关新窗口
+    const endJumpWindow = () => {
+      if (jumpSeq === navAnimSeq) navAnimating = false;
+    };
     currentIndex.value = target;
     // 导航按钮只在后台全文预热完成后出现；此处直接强制真实布局量取精确坐标
     // measuring 强制真实布局后量取内容坐标；移除类并稳定后再自绘动画到目标
@@ -435,7 +458,10 @@ export function useTurnNav(deps: TurnNavDeps) {
       await nextTick();
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const nodes = collectAnchorNodes();
-      if (target >= nodes.length) return;
+      if (target >= nodes.length) {
+        endJumpWindow();
+        return;
+      }
       const containerTop = el.getBoundingClientRect().top;
       anchorTops = nodes.map(
         (node) => node.getBoundingClientRect().top - containerTop + el.scrollTop,
@@ -446,7 +472,10 @@ export function useTurnNav(deps: TurnNavDeps) {
     } finally {
       el.classList.remove("measuring");
     }
-    if (!node) return;
+    if (!node) {
+      endJumpWindow();
+      return;
+    }
     await nextTick();
     startAnimatedScroll(el, top);
     flashTurn(node);

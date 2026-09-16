@@ -1188,6 +1188,111 @@ describe("ChatView 回合定位按钮", () => {
     wrapper.unmount();
   });
 
+  it("跳转窗口内到达的滞后吸底 scroll 事件不重新开启吸底", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 270, 500]);
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 700,
+    });
+    // 流式吸底写入：建立「程序化吸底位置」基线，并留下一个待派发的 scroll 事件
+    store.itemsRev++;
+    await nextTick();
+    expect(scroller.scrollTop).toBe(1000);
+
+    await openNavCard(wrapper);
+    // 点击条目后不等待：跳转仍在 measuring/nextTick 等待中，
+    // 此时吸底写入滞后派发的 scroll 事件到达（位置仍在旧底部，dist<60）
+    void wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    const stale = new Event("scroll");
+    Object.defineProperty(stale, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(stale);
+    await nextTick();
+    await flushPromises();
+
+    // 落定在目标回合起点，且流式输出继续后仍停在落点
+    expect(scroller.scrollTop).toBe(270);
+    store.itemsRev++;
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(270);
+    wrapper.unmount();
+  });
+
+  it("跳转落点的尾随 scroll 事件不重新开启吸底；用户自己滚到底部才恢复跟随", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 270, 500]);
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 700,
+    });
+    store.itemsRev++;
+    await nextTick(); // 吸底基线：scrollTop = 1000
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    // 落点 270 距底 30px（<60），正是本 BUG 的场景
+    expect(scroller.scrollTop).toBe(270);
+
+    // 动画结束帧的尾随 scroll 事件（WebView2 中同样 isTrusted）
+    const trailing = new Event("scroll");
+    Object.defineProperty(trailing, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(trailing);
+    expect(wrapper.find(".scroll-bottom-btn").exists()).toBe(true);
+    store.itemsRev++;
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(270);
+
+    // 用户自己滚到距底 60px 内 → 恢复吸底并跟随
+    trustedScroll(scroller, 950);
+    store.itemsRev++;
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(1000);
+    expect(wrapper.find(".scroll-bottom-btn").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("跳转落点远离底部时，用户自己滚到底部附近才恢复吸底", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 270, 500]);
+    Object.defineProperty(scroller, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
+    store.itemsRev++;
+    await nextTick(); // 吸底基线：scrollTop = 1000
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[0].trigger("click");
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(100);
+
+    // 流式输出继续：落点远离底部，保持解除
+    store.itemsRev++;
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(100);
+
+    // 用户自己滚到距底 60px 内（位置与落点不同）→ 恢复吸底
+    trustedScroll(scroller, 950);
+    store.itemsRev++;
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(1000);
+    wrapper.unmount();
+  });
+
   it("移出自动收起，Escape 与点击外部均关闭卡片", async () => {
     store.itemsByThread["t1"] = reactive(userThread(3));
     const wrapper = mountChat();
