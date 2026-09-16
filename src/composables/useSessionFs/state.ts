@@ -31,6 +31,17 @@ export const iconCache = reactive(new Map<string, string | null>());
 
 export const searchActive = computed(() => searchTerm.value.trim().length > 0);
 
+/**
+ * 文件行右列显示态：time=修改时间（默认）、size=文件大小；
+ * 仅内存态（切换标签保留、重启回默认），根切换不重置。
+ */
+export const fileSideMode = ref<"time" | "size">("time");
+
+/** 切换文件行右列显示态：时间 ↔ 大小 */
+export function toggleFileSideMode() {
+  fileSideMode.value = fileSideMode.value === "time" ? "size" : "time";
+}
+
 export const treeRows = computed<ResourceRow[]>(() => {
   if (!rootEntry.value) return [];
   return flattenResourceTree(rootEntry.value, childrenByPath, expanded);

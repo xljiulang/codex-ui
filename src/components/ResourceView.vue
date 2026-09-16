@@ -16,17 +16,16 @@ import {
   clearSearch,
   ensureEntryIcons,
   expanded,
+  fileSideMode,
   iconFor,
   onSearchInput,
   openTextEditor,
   openDocxPreview,
   probeTextEntry,
-  refreshAll,
   revealActiveTab,
   revealInTree,
   rootEntry,
   rootError,
-  runSearchNow,
   searchActive,
   searchSnippet,
   searching,
@@ -35,6 +34,7 @@ import {
   selectedPath,
   setSessionFsActive,
   toggleDir,
+  toggleFileSideMode,
   treeRows,
   loadingRoot,
   createTextFile,
@@ -50,6 +50,7 @@ import {
 } from "../composables/useSessionFs";
 import {
   formatFileSize,
+  formatFileTime,
   type FsEntry,
   type ResourceRow,
 } from "../lib/sessionFs";
@@ -61,7 +62,7 @@ import {
   ICON_FILE,
   ICON_FOLDER_CLOSED,
   ICON_FOLDER_OPEN,
-  ICON_REFRESH,
+  ICON_TIME,
 } from "../lib/icons";
 import {
   activeTab,
@@ -79,7 +80,7 @@ const hasActiveSessionTab = computed(
     activeTab.value?.kind === TabKind.Session,
 );
 
-/** 是否有可浏览的资源内容：仅当存在工作区且有根树（或处于搜索态）时显示搜索/刷新控件，
+/** 是否有可浏览的资源内容：仅当存在工作区且有根树（或处于搜索态）时显示搜索/显示态控件，
  *  与 Git 面板仅在 ok 态显示头部一致；空工作区/首屏加载/根加载错误时隐藏。 */
 const showResourceControls = computed(
   () => !!workspace.value && (!!rootEntry.value || searchActive.value),
@@ -264,11 +265,6 @@ function onSearchResultClick(entry: FsEntry) {
   revealGitFile(workspace.value, entry.path);
 }
 
-function onRefresh() {
-  if (searchActive.value) void runSearchNow();
-  else void refreshAll();
-}
-
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
   if (isDragInteraction.value) {
@@ -315,13 +311,24 @@ onBeforeUnmount(() => {
           ×
         </button>
         <button
-          class="panel-refresh"
-          aria-label="刷新"
-          @click="onRefresh()"
+          class="panel-view-toggle"
+          aria-label="切换显示：修改时间/文件大小"
+          v-tooltip="'切换显示：修改时间/文件大小'"
+          @click="toggleFileSideMode()"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path :d="ICON_REFRESH" />
+          <!-- 图标呈现当前态：时钟=正在显示时间、Aa=正在显示大小（两者同取按钮 color，勿单独设色） -->
+          <svg
+            v-if="fileSideMode === 'time'"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path :d="ICON_TIME" />
           </svg>
+          <span
+            v-else
+            class="panel-view-toggle-glyph"
+            aria-hidden="true"
+          >Aa</span>
         </button>
       </div>
     </div>
@@ -458,8 +465,10 @@ onBeforeUnmount(() => {
             >{{ row.entry.childCount ?? 0 }}</span>
             <span
               v-else
-              class="resource-size"
-            >{{ formatFileSize(row.entry.size) }}</span>
+              class="resource-meta"
+            >{{ fileSideMode === "time"
+              ? formatFileTime(row.entry.modifiedAtMs)
+              : formatFileSize(row.entry.size) }}</span>
           </span>
         </div>
         <div v-if="loadingRoot && !rootEntry" class="menu-note">加载中…</div>

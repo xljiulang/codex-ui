@@ -148,8 +148,8 @@
   max-width: 45%;
 }
 
-/* 文件行右侧只显示大小（行内时间已下线） */
-.resource-size {
+/* 文件行右侧元信息：按显示态切换渲染大小或修改时间（时间/大小同款紧凑文本样式） */
+.resource-meta {
   font-size: var(--font-sm);
   color: var(--text-faint);
   white-space: nowrap;

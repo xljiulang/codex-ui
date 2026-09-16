@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { setToast, toastError, workspace } from "../useCodex";
 import { normalizeFsPath } from "../../lib/path";
 import {
+  fileSideMode,
   pruneTreeToRoot,
   rootError,
   rootEntry,
@@ -134,6 +135,8 @@ watch(workspace, async (r, old) => {
 export function __resetSessionFsForTest() {
   active = false;
   loadedRoot = "";
+  // 显示态是用户偏好（根切换不重置），仅测试重置回默认
+  fileSideMode.value = "time";
   resetTree();
   resetSearchState();
   unlistenFsEvent?.();

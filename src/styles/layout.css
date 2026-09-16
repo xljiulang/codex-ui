@@ -175,7 +175,9 @@
   color: var(--text-bright);
   background: var(--bg-hover);
 }
-.panel-refresh {
+/* 搜索框右侧附属按钮：面板刷新（会话）与显示态切换（资源）共用同一位置与尺寸 */
+.panel-refresh,
+.panel-view-toggle {
   box-sizing: border-box;
   flex-shrink: 0;
   width: 30px;
@@ -190,14 +192,23 @@
   cursor: pointer;
   transition: color var(--ease), background-color var(--ease);
 }
-.panel-refresh:hover {
+.panel-refresh:hover,
+.panel-view-toggle:hover {
   color: var(--text-bright);
   background: var(--bg-hover);
 }
-.panel-refresh svg {
+.panel-refresh svg,
+.panel-view-toggle svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
+}
+/* 显示态切换的「Aa」文本字形：颜色继承按钮 currentColor，
+   与时钟 SVG（fill: currentColor）在默认/悬停态同色——勿单独设 color/opacity */
+.panel-view-toggle-glyph {
+  font-size: var(--font-base);
+  font-weight: 600;
+  line-height: 1;
 }
 .panel-list {
   flex: 1;

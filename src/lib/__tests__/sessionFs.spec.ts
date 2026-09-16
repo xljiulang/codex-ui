@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dirNameOf,
   flattenResourceTree,
+  formatFileTime,
   formatFileSize,
   isPathUnderRoot,
   joinFsPath,
@@ -59,6 +60,14 @@ describe("formatFileSize", () => {
     expect(formatFileSize(1536)).toBe("1.5 KB");
     expect(formatFileSize(1024 * 1024)).toBe("1.0 MB");
     expect(formatFileSize(1024 * 1024 * 1024 * 2)).toBe("2.0 GB");
+  });
+});
+
+describe("formatFileTime", () => {
+  it("按相对时间格式化，缺失时间戳返回空串", () => {
+    expect(formatFileTime(0)).toBe("");
+    expect(formatFileTime(null)).toBe("");
+    expect(formatFileTime(Date.now() - 5 * 60 * 1000)).toBe("5 分");
   });
 });
 

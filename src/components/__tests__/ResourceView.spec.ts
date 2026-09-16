@@ -44,12 +44,14 @@ import {
 } from "../../composables/useEditorTabs";
 import { tooltipDirective } from "../../directives/tooltip";
 import type { FsEntry, RgHit } from "../../lib/sessionFs";
-import { ICON_AT } from "../../lib/icons";
+import { ICON_AT, ICON_TIME } from "../../lib/icons";
 import { TabIcon, TabKind } from "../../lib/tabs";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedConvertFileSrc = vi.mocked(convertFileSrc);
 const rootPath = "D:\\codex\\codex-ui";
+/** 文件行的修改时间：固定为「5 分」前，令默认时间态的相对时间文本可断言 */
+const fileMtimeMs = Date.now() - 5 * 60 * 1000;
 
 const rootEntry: FsEntry = {
   name: "codex-ui",
@@ -87,7 +89,7 @@ const aTxt: FsEntry = {
   relPath: "a.txt",
   isDir: false,
   size: 1536,
-  modifiedAtMs: 0,
+  modifiedAtMs: fileMtimeMs,
   createdAtMs: 0,
   childCount: null,
 };
@@ -97,7 +99,7 @@ const mainTs: FsEntry = {
   relPath: "src/main.ts",
   isDir: false,
   size: 2048,
-  modifiedAtMs: 0,
+  modifiedAtMs: fileMtimeMs,
   createdAtMs: 0,
   childCount: null,
 };
@@ -107,7 +109,7 @@ const picPng: FsEntry = {
   relPath: "src/pic.png",
   isDir: false,
   size: 2048,
-  modifiedAtMs: 0,
+  modifiedAtMs: fileMtimeMs,
   createdAtMs: 0,
   childCount: null,
 };
@@ -117,7 +119,7 @@ const docPdf: FsEntry = {
   relPath: "src/doc.pdf",
   isDir: false,
   size: 4096,
-  modifiedAtMs: 0,
+  modifiedAtMs: fileMtimeMs,
   createdAtMs: 0,
   childCount: null,
 };
@@ -345,7 +347,7 @@ describe("ResourceView 文件树", () => {
       workspace: rootPath,
       path: rootPath,
     });
-    // 有工作区时搜索/刷新头部可见
+    // 有工作区时搜索/显示态头部可见
     expect(wrapper.find(".panel-head").exists()).toBe(true);
     wrapper.unmount();
   });
@@ -568,10 +570,10 @@ describe("ResourceView 文件树", () => {
     expect(wrapper.find(".resource-empty-title").text()).toContain("无法获取资源树");
     expect(wrapper.find(".resource-empty-desc").text()).toContain("暂无工作目录");
     expect(mockedInvoke).not.toHaveBeenCalledWith("startup_workspace");
-    // 空态下不显示搜索/刷新框（对齐 Git 面板）
+    // 空态下不显示搜索/显示态头部（对齐 Git 面板）
     expect(wrapper.find(".panel-head").exists()).toBe(false);
     expect(wrapper.find(".panel-search").exists()).toBe(false);
-    expect(wrapper.find(".panel-refresh").exists()).toBe(false);
+    expect(wrapper.find(".panel-view-toggle").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -1249,14 +1251,80 @@ describe("ResourceView 文件树", () => {
     wrapper.unmount();
   });
 
-  it("树行只显示文件大小与目录项数，不再显示时间", async () => {
+  it("文件行右列默认显示修改时间，目录行恒为项数徽章", async () => {
     const wrapper = await mountPanel();
-    // 行内时间已下线：文件行只留大小，目录行只留项数徽章
-    expect(wrapper.find(".resource-time").exists()).toBe(false);
+    // 刷新入口已下线，原位改为显示态切换按钮（图标呈现当前态：时间=时钟 SVG）
+    expect(wrapper.find(".panel-refresh").exists()).toBe(false);
+    const toggle = wrapper.find(".panel-view-toggle");
+    expect(toggle.exists()).toBe(true);
+    expect(toggle.attributes("aria-label")).toBe("切换显示：修改时间/文件大小");
+    expect(toggle.find("path").attributes("d")).toBe(ICON_TIME);
+    expect(toggle.find(".panel-view-toggle-glyph").exists()).toBe(false);
+    // 默认时间态：文件行只留相对时间（不掺大小），目录行只留项数徽章
+    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
+      "5 分",
+    );
+    expect(wrapper.find(".resource-row.resource-dir .resource-side").text()).toBe("1");
+    wrapper.unmount();
+  });
+
+  it("点击显示态按钮：文件行右列在时间与大小之间切换", async () => {
+    const wrapper = await mountPanel();
+    await wrapper.find(".panel-view-toggle").trigger("click");
+    // 大小态改用「Aa」文本字形（不再有 svg），颜色继承按钮 currentColor 与时钟同色
+    const glyph = wrapper.find(".panel-view-toggle-glyph");
+    expect(glyph.exists()).toBe(true);
+    expect(glyph.text()).toBe("Aa");
+    expect(wrapper.find(".panel-view-toggle svg").exists()).toBe(false);
     expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
       "1.5 KB",
     );
+    // 目录行不受显示态影响
     expect(wrapper.find(".resource-row.resource-dir .resource-side").text()).toBe("1");
+    await wrapper.find(".panel-view-toggle").trigger("click");
+    expect(wrapper.find(".panel-view-toggle path").attributes("d")).toBe(ICON_TIME);
+    expect(wrapper.find(".panel-view-toggle-glyph").exists()).toBe(false);
+    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
+      "5 分",
+    );
+    wrapper.unmount();
+  });
+
+  it("显示态为内存偏好：重新挂载保留，测试重置后回到默认时间态", async () => {
+    const first = await mountPanel();
+    await first.find(".panel-view-toggle").trigger("click");
+    expect(first.find(".resource-row.resource-file .resource-side").text()).toBe(
+      "1.5 KB",
+    );
+    first.unmount();
+    // 面板重挂载（切 Tab 场景）后仍为大小态
+    const second = await mountPanel();
+    expect(second.find(".resource-row.resource-file .resource-side").text()).toBe(
+      "1.5 KB",
+    );
+    second.unmount();
+    __resetSessionFsForTest();
+    const third = await mountPanel();
+    expect(third.find(".resource-row.resource-file .resource-side").text()).toBe(
+      "5 分",
+    );
+    third.unmount();
+  });
+
+  it("文件修改时间缺失时右列渲染为空，不出现占位文本", async () => {
+    const base = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd, args) => {
+      if (cmd === "session_fs_list") {
+        return Promise.resolve([
+          { ...aTxt, modifiedAtMs: 0 },
+          srcDir,
+          nodeModules,
+        ]);
+      }
+      return base(cmd, args);
+    });
+    const wrapper = await mountPanel();
+    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe("");
     wrapper.unmount();
   });
 

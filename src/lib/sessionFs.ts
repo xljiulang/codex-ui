@@ -1,4 +1,5 @@
 import { normalizePathKey as normalizePathKeyForMerge } from "./path";
+import { formatRelativeTime } from "./format";
 // 路径工具统一实现收敛到 ./path：本文件仅 re-export，保持既有调用方不变
 export {
   dirNameOf,
@@ -124,6 +125,12 @@ export function formatFileSize(bytes: number | null): string {
   } while (v >= 1024 && u < units.length - 1);
   const num = v >= 100 ? Math.round(v).toString() : v.toFixed(1);
   return `${num} ${units[u]}`;
+}
+
+/** 文件时间列展示：复用历史会话的相对时间格式；时间戳缺失返回空串 */
+export function formatFileTime(ms: number | null): string {
+  if (!ms) return "";
+  return formatRelativeTime(ms / 1000);
 }
 
 /**

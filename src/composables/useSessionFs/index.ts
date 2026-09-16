@@ -4,6 +4,7 @@
 export {
   childrenByPath,
   expanded,
+  fileSideMode,
   iconCache,
   loadingByPath,
   loadingRoot,
@@ -17,6 +18,7 @@ export {
   selectedPath,
   treeRows,
   pruneDeadDir,
+  toggleFileSideMode,
 } from "./state";
 export {
   ensureEntryIcons,
