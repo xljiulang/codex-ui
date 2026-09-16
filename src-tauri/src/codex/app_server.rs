@@ -45,6 +45,9 @@ pub struct CodexServer {
     codex_log: Option<Arc<SessionLog>>,
     /// Zen 代理内容诊断日志（`logs/zen/`，常开）；无日志目录时为 None。
     zen_trace: Option<Arc<ZenTrace>>,
+    /// 「线程 id → 协作模式」协议登记表：由本层登记（`turn/start` 参数与
+    /// `thread/settings/updated` 通知），供 Zen 代理精确判定协作模式，不再只靠关键词猜。
+    thread_modes: Arc<zen_proxy::ThreadModeRegistry>,
 }
 
 struct Shared {
@@ -183,6 +186,7 @@ impl CodexServer {
             log,
             codex_log,
             zen_trace,
+            thread_modes: Arc::new(zen_proxy::ThreadModeRegistry::default()),
         }
     }
 
@@ -373,8 +377,19 @@ impl CodexServer {
             base_url,
             self.log.clone(),
             trace,
+            self.thread_modes.clone(),
         )
         .await
+    }
+
+    /// 把请求/通知参数里的协作模式登记进 [`zen_proxy::ThreadModeRegistry`]：`turn/start`、
+    /// `thread/settings/update` 与 `thread/settings/updated` 都带 `threadId` + 模式字段。
+    /// 登记发生在 `turn/start` 发出前，而 Zen 代理要等 codex 真正发模型请求才用到它，
+    /// 因此代理侧读到的必然是本回合实际生效的模式。缺失/未知取值时保持已有登记不变。
+    fn record_thread_mode(&self, params: &Value) {
+        if let Some((thread_id, mode)) = zen_proxy::thread_mode_from_params(params) {
+            self.thread_modes.record(&thread_id, &mode);
+        }
     }
 
     /// Zen 代理当前状态（运行中返回端口；未开启或未启动返回默认端口）。
@@ -704,6 +719,9 @@ impl CodexServer {
             let params = v.get("params").cloned().unwrap_or(Value::Null);
             self.log_event(method, method, &params);
             self.log_codex_message(method, &params);
+            // `thread/settings/updated` = 服务端「下一回合」实际生效的协作模式（权威事件源），
+            // 与 turn/start 参数一起构成 Zen 代理的模式登记表。
+            self.record_thread_mode(&params);
             let _ = self.shared.tap.send((method.to_string(), params.clone()));
             let _ = self.app.emit(method, params);
         }
@@ -766,6 +784,9 @@ impl CodexServer {
         params: Value,
         timeout: Option<Duration>,
     ) -> Result<Value, RpcError> {
+        // 协作模式登记：`turn/start` / `thread/settings/update` 的 collaborationMode 就是
+        // 本回合实际生效的模式（前端、定时任务、微信桥都经这里发请求）。
+        self.record_thread_mode(&params);
         // 等待握手完成（初始化失败/断线重连时最多等 10 秒）
         let ready_deadline = Instant::now() + Duration::from_secs(10);
         loop {

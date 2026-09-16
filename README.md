@@ -452,21 +452,21 @@
   （历史尾部先补一条本轮助手文本，再补提醒「【自动续跑】…必须实际调用工具完成剩余工作…」）
   并**再打一次上游，把第二轮的事件续在同一个 SSE 流**上
   ——工具调用照常下发给 codex，`response.completed` 只发一次，对 codex 与应用完全透明，注入的提醒**不会进入 codex 记录**（聊天里看不到任何伪造消息）。
-- **计划模式**的识别只看协作模式块的**标题行**：codex 把当前协作模式拼进 developer 条目
-  （`…<collaboration_mode># Plan Mode (Conversational)…</collaboration_mode>`，0.154 实测文案；
-  旧版 `# Collaboration Mode: Plan` 仍兼容），代理取标签后的第一个非空行判断，
-  命中即**连判定都不发，计划是否真的交付完全由代码判据给出**：
+- **计划模式**下**连判定都不发，计划是否真的交付完全由代码判据给出**（模式怎么判定见下面两条）：
   - 终局文本含 `<proposed_plan>` → 视为计划已交付、直接收尾（nudge_skipped reason=plan_output mode=plan）；
-  - 不含 → 视为未交付，注入**计划专用提醒**（「…在计划模式下把完整方案写成用 `<proposed_plan>` 包裹的计划；如果确实需要用户先确认信息，请明确提出问题。」）并续跑，同样受 pass／streak 上限约束——不会再注入「必须动手」逼模型在计划模式里改代码。
-- 之所以只认标题行：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着「… for other modes (**e.g. Plan mode**) are no longer active.」——按子串匹配会把默认模式误判成计划模式（默认模式的正常编码回合就会被注入「请给出计划」）。
+  - 不含 → 视为未交付，注入**计划专用提醒**并续跑，同样受 pass／streak 上限约束——不会再注入「必须动手」逼模型在计划模式里改代码。
+    提醒里**直接给出 `<proposed_plan>` / `</proposed_plan>` 骨架**（`# 计划标题` + 步骤项，并要求两个标签原样保留、各自独占一行、不要放进代码块）：弱模型常把计划写成普通 Markdown，而 codex 只在终局文本出现该包裹时才生成计划条目（应用里才有「计划已就绪」），骨架式提醒能显著提高交付率。
+- **模式判定优先取协议登记表**：`CodexServer` 把 `turn/start` / `thread/settings/update` 参数与 `thread/settings/updated` 通知里的 `collaborationMode.mode` 登记成「线程 id → 模式」，代理用入站请求头 `session-id`（= codex 线程 id，`ses_` 前缀自动剥离）查表——命中即**完全不做关键词扫描**，`mode` 一栏的 `mode_src=registry` 说明来自登记表；查不到（其它客户端、子代理线程等）才退回关键词判据，且判据取**最后一个**协作模式块的标题行（`mode_src=heuristic`）。登记表只存内存、上限 1024 条（超出整体清空，模式每轮 `turn/start` 都会重新登记）。
+- 关键词兜底判据（`mode_src=heuristic`）从协作模式块标签 `<collaboration_mode>` 之后取**第一个非空行**（codex 0.154 是 `# Plan Mode (Conversational)`，旧版 `# Collaboration Mode: Plan` 仍兼容），且**只认标题行**：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着「… for other modes (**e.g. Plan mode**) are no longer active.」——按子串匹配会把默认模式误判成计划模式（默认模式的正常编码回合就会被注入「请给出计划」）。
+- 为什么必须以最后一块为准：codex 会把**历次**协作模式块都留在请求历史里，切回默认模式后历史里仍有旧的 `<collaboration_mode># Plan Mode…</collaboration_mode>`——按「任一命中即计划模式」必然误判（实测某线程 codex 侧记为 `collaboration_mode_kind=default` 的回合，代理仍按 plan 分流并注入「请给出计划」）。
 - **会话标题生成请求**（应用 `autoTitleThread` 的后台临时线程，末条 user 文本以固定前缀「给下面用户消息生成一个不超过 30 字的中文会话标题」开头）**整轮放行**：不判定、不注入（nudge_skipped reason=title_task）——此前它被当成普通编码回合去判定，白花一次上游调用并把标题结果静默压后 20 秒级。
-- 边界与开关：判定拿不准（超时 25 秒／报错／输出无法解析）一律按「已完成」处理，照常收尾；同一会话「连续注入且模型仍未实际调用工具」达到 **2 次**后不再注入（模型一旦真的调用工具、或距上次注入超过 10 分钟即清零），单次入站请求最多 4 个 pass 兜底；请求里没有声明任何工具时不做判定；**非流式路径、错误/失败路径、历史净化与工具翻译逻辑均不受影响**。
-- 诊断日志：`zen_proxy.request` 的 `mode=plan|default`（本次识别出的协作模式，排查「计划模式仍发起判定」先看这一格）、
+- 边界与开关：判定拿不准（超时 60 秒／报错／输出无法解析）一律按「已完成」处理，照常收尾；同一会话「连续注入且模型仍未实际调用工具」达到 **2 次**后不再注入（模型一旦真的调用工具、或距上次注入超过 10 分钟即清零），单次入站请求最多 4 个 pass 兜底；请求里没有声明任何工具时不做判定；**非流式路径、错误/失败路径、历史净化与工具翻译逻辑均不受影响**。
+- 诊断日志：`zen_proxy.request` 的 `mode=plan|default` 与 `mode_src=registry|heuristic`（本次识别出的协作模式及其来源，排查「计划模式仍发起判定」或「默认模式被当成计划模式」先看这两格）、
   `zen_proxy.nudge_judged`（verdict／回复字数／耗时／错误原因）、
   `zen_proxy.nudge_injected`（session／pass／streak／mode／助手字数）、
   `zen_proxy.nudge_skipped`（原因：plan_output／title_task／上游错误/状态码/转发失败）、
   `zen_proxy.nudge_limited`（reason=max_streak|max_passes + mode）；内容级诊断另开两份请求记录（call_id 带 `-judge<n>` / `-nudge<n>` 后缀）。
-- 未覆盖：不检测「调用过工具但没做对」的情况，也不回溯历史回合；判定期间这条流会静默最长 25 秒（不额外发 SSE 保活注释）。
+- 未覆盖：不检测「调用过工具但没做对」的情况，也不回溯历史回合；判定期间这条流会静默最长 60 秒（不额外发 SSE 保活注释；codex 侧流空闲超时默认 300 秒，不会因此被掐断）。模式登记表不持久化，应用重启后第一个回合由 `turn/start` 重新登记。
 
 #### Zen 代理：指标口径
 

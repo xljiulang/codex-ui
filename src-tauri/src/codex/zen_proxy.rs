@@ -75,7 +75,7 @@ const NUDGE_MAX_STREAK: u32 = 2;
 /// 口嗨自动续跑：距上次注入超过该时长视为新的一轮，连续计数清零。
 const NUDGE_RESET_AFTER: Duration = Duration::from_secs(10 * 60);
 /// 口嗨自动续跑：判定调用（后台会话）的超时上限；超时按「已完成」处理。
-const NUDGE_JUDGE_TIMEOUT: Duration = Duration::from_secs(25);
+const NUDGE_JUDGE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 口嗨自动续跑：单次入站请求最多向上游发起的 pass 数（1 次原始 + 续跑，留余量）。
 const NUDGE_MAX_PASSES: usize = 4;
 /// 口嗨自动续跑：判定提示词里助手文本 / 用户请求的截断上限（字符）。
@@ -86,7 +86,10 @@ const NUDGE_USER_LIMIT: usize = 2000;
 const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合，但任务看起来还没完成。请继续执行：必须实际调用工具完成剩余工作；如果确实已经完成，请明确说明完成了什么。";
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
-const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有给出计划就结束了回合。请继续：在计划模式下把完整方案写成用 <proposed_plan> 包裹的计划；如果确实需要用户先确认信息，请明确提出问题。";
+/// **必须带完整骨架**：弱模型经常只把计划写成普通 Markdown，而 codex 只在终局文本里出现
+/// `<proposed_plan>` 包裹时才生成计划条目（否则应用里没有「计划已就绪」）——所以提醒里直接
+/// 给出骨架，并明确标签要原样保留、各自独占一行、不要放进代码块。
+const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请继续：把完整方案写进下面这个结构里——两个标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n如果确实需要用户先确认信息，请明确提出问题。";
 /// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
 /// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
 const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
@@ -100,6 +103,14 @@ const PLAN_MODE_HEADING_MARKER_LEGACY: &str = "collaboration mode: plan";
 /// 计划产物的包裹标签（协议 `item/plan/delta` 与之对应）：**计划模式**下出现即视为
 /// 计划已交付（AI 判定不参与此判据）；默认模式不据此短路，仍交由 AI 判定。
 const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
+/// 协议登记表里承认的协作模式取值（与协议 `ModeKind` 一致）：其余取值一律不登记。
+const KNOWN_MODES: [&str; 2] = ["plan", "default"];
+/// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
+/// 清空只会让极少数线程临时退回关键词兜底，不会让表无界增长）。
+const THREAD_MODE_LIMIT: usize = 1024;
+/// `zen_proxy.request` 的 `mode_src` 取值：模式来自协议登记表（权威）/ 关键词兜底判据。
+const MODE_SRC_REGISTRY: &str = "registry";
+const MODE_SRC_HEURISTIC: &str = "heuristic";
 /// 会话标题生成请求（应用发起的后台临时线程）提示词的固定前缀，用于识别并整轮放行。
 /// 与 `src/composables/useCodex/threads.ts` 的 `autoTitleThread` 提示词一致，改那句话
 /// 时必须同步这里，否则标题线程会重新被口嗨检测拦住（每次白花一次上游调用 + 静默等判定）。
@@ -147,36 +158,103 @@ enum NudgeVerdict {
     Unknown,
 }
 
-/// 单段文本里的协作模式块是否声明「计划模式」：从每个 [`COLLABORATION_MODE_TAG`] 之后
-/// 取**第一个非空行**，只有它是 Markdown 标题（`# …`）且含 `plan mode`（codex 0.154：
-/// `# Plan Mode (Conversational)`）或 `collaboration mode: plan`（旧文案）才算计划模式。
+/// 「线程 id → 协作模式」协议登记表（内存态，进程内共享）：由 app-server 侧的真实来源
+/// （`turn/start` / `thread/settings/update` 的参数、`thread/settings/updated` 通知）更新，
+/// 供 Zen 代理按入站请求头 `session-id`（= codex 线程 id）直接取用。
+///
+/// 存在的理由：codex 会把**历次**协作模式块都留在请求历史里，切回默认模式后历史里仍有旧的
+/// `<collaboration_mode># Plan Mode…</collaboration_mode>`，只按关键词判定就会把默认模式误判成
+/// 计划模式（实测某线程 codex 侧 `collaboration_mode_kind=default` 的回合，代理仍按 plan 分流）。
+/// 登记表记的是「应用实际请求 / 服务端实际生效」的模式，不需要猜。
+#[derive(Debug, Default)]
+pub(crate) struct ThreadModeRegistry {
+    modes: Mutex<HashMap<String, String>>,
+}
+
+impl ThreadModeRegistry {
+    /// 值是否是协议承认的协作模式（`plan` / `default`）。
+    fn is_known_mode(mode: &str) -> bool {
+        KNOWN_MODES.contains(&mode)
+    }
+
+    /// 登记一个线程的协作模式；空白线程 id 或非 `plan`/`default` 的取值一律忽略。
+    /// 返回是否发生了实际变化（便于调用方按需记日志）；表达到上限时整体清空后再插入。
+    pub(crate) fn record(&self, thread_id: &str, mode: &str) -> bool {
+        let thread_id = thread_id.trim();
+        if thread_id.is_empty() || !Self::is_known_mode(mode) {
+            return false;
+        }
+        let Ok(mut map) = self.modes.lock() else {
+            return false;
+        };
+        if map.len() >= THREAD_MODE_LIMIT && !map.contains_key(thread_id) {
+            map.clear();
+        }
+        let previous = map.insert(thread_id.to_string(), mode.to_string());
+        previous.as_deref() != Some(mode)
+    }
+
+    /// 查一个线程登记的模式；未登记（或登记表不可用）返回 None，调用方退回关键词兜底判据。
+    pub(crate) fn mode(&self, thread_id: &str) -> Option<String> {
+        let map = self.modes.lock().ok()?;
+        map.get(thread_id).cloned()
+    }
+}
+
+/// 从 app-server 的请求/通知参数里取出「线程 id + 协作模式」，供 [`ThreadModeRegistry`] 登记。
+///
+/// 覆盖两种形状：`turn/start` 与 `thread/settings/update` 的 `{ threadId, collaborationMode }`、
+/// `thread/settings/updated` 通知的 `{ threadId, threadSettings.collaborationMode }`。
+/// 缺线程 id、模式缺失（如 `collaborationMode: null`）或不是 `plan` / `default` 时返回 None，
+/// 调用方据此保持已有登记不变（协作模式在协议里是粘滞的，缺失表示沿用上一回合）。
+pub(crate) fn thread_mode_from_params(params: &Value) -> Option<(String, String)> {
+    let thread_id = params.get("threadId")?.as_str()?.trim().to_string();
+    if thread_id.is_empty() {
+        return None;
+    }
+    let mode = params
+        .pointer("/collaborationMode/mode")
+        .or_else(|| params.pointer("/threadSettings/collaborationMode/mode"))
+        .and_then(Value::as_str)?;
+    if !ThreadModeRegistry::is_known_mode(mode) {
+        return None;
+    }
+    Some((thread_id, mode.to_string()))
+}
+
+/// 单段文本里**最后一个**协作模式块是否声明「计划模式」：从该块标签 [`COLLABORATION_MODE_TAG`]
+/// 之后取**第一个非空行**，只有它是 Markdown 标题（`# …`）且含 `plan mode`（codex 0.154：
+/// `# Plan Mode (Conversational)`）或 `collaboration mode: plan`（旧文案）才算计划模式；
+/// `None` 表示这段文本里根本没有模式块。
 ///
 /// **只认标题行**：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着
 /// 「… for other modes (e.g. Plan mode) are no longer active.」——按整段（甚至按正文行）子串
 /// 匹配都会把默认模式误判成计划模式，那样默认模式的正常编码回合会被注入「请给出计划」。
 /// 块不闭合（文本被截断）时同样按标题行判定。
-fn text_declares_plan_mode(text: &str) -> bool {
+fn last_mode_block_declares_plan(text: &str) -> Option<bool> {
     let lower = text.to_lowercase();
     let mut rest = lower.as_str();
+    let mut verdict = None;
     while let Some(index) = rest.find(COLLABORATION_MODE_TAG) {
         rest = &rest[index + COLLABORATION_MODE_TAG.len()..];
         // 标题行 = 标签之后的第一个非空行；codex 实测标签后紧跟 "# Plan Mode …"
-        if let Some(heading) = rest.lines().map(str::trim).find(|line| !line.is_empty()) {
-            if heading.starts_with('#')
-                && (heading.contains(PLAN_MODE_HEADING_MARKER)
-                    || heading.contains(PLAN_MODE_HEADING_MARKER_LEGACY))
-            {
-                return true;
-            }
-        }
+        let plan = rest
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .is_some_and(|heading| {
+                heading.starts_with('#')
+                    && (heading.contains(PLAN_MODE_HEADING_MARKER)
+                        || heading.contains(PLAN_MODE_HEADING_MARKER_LEGACY))
+            });
+        verdict = Some(plan);
     }
-    false
+    verdict
 }
 
-/// 请求是否处于计划模式：扫 `instructions` 与 `input` 各条目的文本，按 [`text_declares_plan_mode`]
-/// 判断协作模式标题行（大小写不敏感）。调用方据此整轮绕开 AI 判定，改用「终局文本是否含
-/// 计划标签」这条代码判据（见 [`PLAN_OUTPUT_MARKER`] 与 [`PLAN_NUDGE_TEXT`]）。
-fn request_is_plan_mode(req: &Value) -> bool {
+/// 请求里可能携带协作模式块的文本，按 codex 的组装顺序：`instructions` → `input`
+/// （`input` 为字符串简写时先取它，为数组时逐条目取文本）。
+fn request_mode_texts(req: &Value) -> Vec<String> {
     let mut texts: Vec<String> = Vec::new();
     if let Some(instructions) = req.get("instructions").and_then(Value::as_str) {
         texts.push(instructions.to_string());
@@ -192,7 +270,48 @@ fn request_is_plan_mode(req: &Value) -> bool {
             }
         }
     }
-    texts.iter().any(|text| text_declares_plan_mode(text))
+    texts
+}
+
+/// 请求是否处于计划模式——**关键词兜底判据**，只在协议登记表查不到该线程时使用：
+/// 取请求里**最后一个**协作模式块的标题行（大小写不敏感）。codex 会把历次模式块都留在历史里
+/// （切回默认模式后旧的 `# Plan Mode …` 块仍在），按「任一命中即计划模式」必然把默认模式误判
+/// 成计划模式，所以这里以最后一块为准。
+fn request_is_plan_mode(req: &Value) -> bool {
+    let mut verdict = None;
+    for text in request_mode_texts(req) {
+        if let Some(block) = last_mode_block_declares_plan(&text) {
+            verdict = Some(block);
+        }
+    }
+    verdict.unwrap_or(false)
+}
+
+/// 入站请求对应的 codex 线程 id：取请求头 `session-id`（codex 用它上报线程 id），
+/// 去掉可能存在的 `ses_` 前缀（代理给上游的 `x-opencode-session` 会补这个前缀，登记表按
+/// 原始线程 id 存）。缺失、纯空白或非 ASCII 时返回 None（调用方退回关键词兜底判据）。
+fn request_header_thread_id(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get("session-id")?.to_str().ok()?.trim();
+    let id = raw.strip_prefix("ses_").unwrap_or(raw).trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+/// 本次入站请求的协作模式与来源：先按请求头里的线程 id 查协议登记表（权威，命中即不做任何
+/// 关键词扫描），查不到才退回关键词判据（只看**最后一个**协作模式块）。
+/// 返回 `(是否计划模式, mode_src)`，`mode_src` 进 `zen_proxy.request` 日志便于排查。
+fn resolve_nudge_mode(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    req: &Value,
+) -> (bool, &'static str) {
+    if let Some(mode) = request_header_thread_id(headers).and_then(|id| state.modes.mode(&id)) {
+        return (mode == "plan", MODE_SRC_REGISTRY);
+    }
+    (request_is_plan_mode(req), MODE_SRC_HEURISTIC)
 }
 
 /// 终局文本是否为计划产物（`<proposed_plan>` 包裹）：**计划模式**下命中即视为
@@ -377,6 +496,7 @@ pub(crate) async fn start(
     base_url: String,
     log: ZenLog,
     trace: TraceSink,
+    modes: Arc<ThreadModeRegistry>,
 ) -> Result<ZenProxyHandle, String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut attempt = 0;
@@ -403,6 +523,7 @@ pub(crate) async fn start(
             trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
             nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes,
         });
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -422,6 +543,7 @@ pub(crate) async fn apply(
     base_url: String,
     log: ZenLog,
     trace: TraceSink,
+    modes: Arc<ThreadModeRegistry>,
 ) -> ZenProxyStatus {
     let base_url = normalize_base_url(&base_url);
     // 端口与上游地址都没变（含 `https://a/` 与 `https://a` 这类等价写法）才复用现有实例。
@@ -435,7 +557,7 @@ pub(crate) async fn apply(
         }
     }
     if need_start {
-        match start(port, base_url, log, trace).await {
+        match start(port, base_url, log, trace, modes).await {
             Ok(h) => {
                 *handle = Some(h);
                 ZenProxyStatus {
@@ -479,6 +601,8 @@ struct ProxyState {
     requires_reasoning_rc: Arc<AtomicBool>,
     /// 口嗨自动续跑的分会话连续计数（key = 会话 id，仅内存态）。
     nudge: Arc<Mutex<HashMap<String, NudgeState>>>,
+    /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
+    modes: Arc<ThreadModeRegistry>,
 }
 
 /// 写一条 zen_proxy 诊断日志；句柄为 None 或写盘失败时静默忽略。
@@ -520,7 +644,8 @@ fn http_client() -> &'static reqwest::Client {
 /// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
 /// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格；
 /// `mode` 是口嗨检测识别出的协作模式（`plan`/`default`）——排查「计划模式仍发起判定」
-/// 这类问题时先看这一格（识别走 [`request_is_plan_mode`]）；
+/// 这类问题时先看这一格；`mode_src` 说明它的来源（`registry` = 协议登记表，
+/// `heuristic` = 关键词兜底判据，见 [`resolve_nudge_mode`]）；
 /// `patch_failures` 是本次历史里已失败的补丁调用条数（>0 说明模型正在补丁上打转，
 /// 代理已对这些工具结果追加格式纠错提示）；`call_id` 与内容日志
 /// （`logs/zen/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
@@ -528,6 +653,8 @@ fn request_log_fields(
     req: &Value,
     want_stream: bool,
     call_id: &str,
+    mode: &str,
+    mode_src: &str,
 ) -> Vec<(&'static str, String)> {
     let model = req
         .get("model")
@@ -566,10 +693,8 @@ fn request_log_fields(
         ("call_id", call_id.to_string()),
         ("model", model),
         ("stream", want_stream.to_string()),
-        (
-            "mode",
-            if request_is_plan_mode(req) { "plan" } else { "default" }.to_string(),
-        ),
+        ("mode", mode.to_string()),
+        ("mode_src", mode_src.to_string()),
         ("input_msg_count", input_msg_count.to_string()),
         ("input_chars", input_chars.to_string()),
         ("instructions_chars", instructions_chars.to_string()),
@@ -633,7 +758,10 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
         .unwrap_or(false);
     // 本次入站请求的稳定标识：贯穿内容日志文件名与 session 日志行。
     let call_id = random_id("req");
-    let fields = request_log_fields(&req, want_stream, &call_id);
+    // 协作模式先按协议登记表解析（查不到才退回关键词），日志里连同来源一起记下
+    let (plan_mode, mode_src) = resolve_nudge_mode(state, headers, &req);
+    let mode = if plan_mode { "plan" } else { "default" };
+    let fields = request_log_fields(&req, want_stream, &call_id, mode, mode_src);
     let kv: Vec<(&str, String)> = fields.iter().map(|(k, v)| (*k, v.clone())).collect();
     log_at(&state.log, "info", "zen_proxy.request", &kv);
 
@@ -1940,8 +2068,10 @@ async fn run_stream_task(
         .get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| !tools.is_empty());
-    // 计划模式：口嗨判据完全由代码给（终局文本是否含计划标签），不调用 AI 判定
-    let plan_mode = request_is_plan_mode(&req);
+    // 计划模式：口嗨判据完全由代码给（终局文本是否含计划标签），不调用 AI 判定。
+    // 模式本身优先取协议登记表（`run_stream_task` 与 `handle_responses` 用的是同一个纯函数，
+    // 两处结论必然一致），查不到才退回关键词兜底。
+    let (plan_mode, _) = resolve_nudge_mode(&state, &headers, &req);
     // 会话标题生成任务（应用的后台临时线程）：整轮放行，不判定也不注入
     let title_task = request_is_title_task(&req);
     let session = opencode_session(&headers, &state.session);
@@ -3870,7 +4000,7 @@ mod tests {
             ]
         });
         assert!(request_is_plan_mode(&plan));
-        assert!(text_declares_plan_mode(REAL_PLAN_MODE_BLOCK));
+        assert_eq!(last_mode_block_declares_plan(REAL_PLAN_MODE_BLOCK), Some(true));
 
         // 旧版 codex 文案（`# Collaboration Mode: Plan`）：保留兼容
         let legacy = json!({
@@ -3894,7 +4024,10 @@ mod tests {
             ]
         });
         assert!(!request_is_plan_mode(&default_mode));
-        assert!(!text_declares_plan_mode(REAL_DEFAULT_MODE_BLOCK));
+        assert_eq!(
+            last_mode_block_declares_plan(REAL_DEFAULT_MODE_BLOCK),
+            Some(false)
+        );
         // 用户正文里出现「Plan mode / proposed_plan」同样不因此被判成计划模式
         assert!(!request_is_plan_mode(&json!({
             "input": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "计划模式(Plan mode)下要输出 <proposed_plan>" }] }]
@@ -3909,15 +4042,203 @@ mod tests {
         })));
 
         // 标签后先空行再标题、以及文本被截断（块未闭合）：仍按标题行判定
-        assert!(text_declares_plan_mode(
-            "<collaboration_mode>\r\n\r\n# Plan Mode (Standard)\r\n…（内容被截断）"
-        ));
+        assert_eq!(
+            last_mode_block_declares_plan(
+                "<collaboration_mode>\r\n\r\n# Plan Mode (Standard)\r\n…（内容被截断）"
+            ),
+            Some(true)
+        );
         // 标签后直接就是正文（没有标题行）时按非计划模式处理
-        assert!(!text_declares_plan_mode("<collaboration_mode>You are now in Plan mode"));
+        assert_eq!(
+            last_mode_block_declares_plan("<collaboration_mode>You are now in Plan mode"),
+            Some(false)
+        );
+
+        // 没有模式块时返回 None（调用方据此继续扫下一段文本）
+        assert_eq!(last_mode_block_declares_plan("普通文本，没有模式标签"), None);
 
         // 完全没有模式信息（例如其它客户端）：按非计划模式处理
         assert!(!request_is_plan_mode(&json!({ "input": "hi" })));
         assert!(!request_is_plan_mode(&json!({})));
+    }
+
+    /// 线上误判的最小复现：codex 把历次模式块都留在历史里，切回默认模式后请求里
+    /// 「旧的计划块在前、当前的默认块在后」——必须按**最后一块**判定为默认模式。
+    #[test]
+    fn request_is_plan_mode_takes_the_last_mode_block() {
+        // 历史里先有旧的计划模式块，切回默认模式后 codex 追加了默认模式块
+        let switched_back = json!({
+            "input": [
+                { "type": "message", "role": "developer", "content": [{ "type": "input_text", "text": REAL_PLAN_MODE_BLOCK }] },
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "先出计划" }] },
+                { "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "…" }] },
+                { "type": "message", "role": "developer", "content": [{ "type": "input_text", "text": REAL_DEFAULT_MODE_BLOCK }] },
+                { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+            ]
+        });
+        // 计划块在前、默认块在后 → 默认模式（修复前这里会误判成计划模式）
+        assert!(!request_is_plan_mode(&switched_back));
+
+        // 反向：默认块在前、计划块在后 → 计划模式
+        let back_to_plan = json!({
+            "input": [
+                { "type": "message", "role": "developer", "content": [{ "type": "input_text", "text": REAL_DEFAULT_MODE_BLOCK }] },
+                { "type": "message", "role": "developer", "content": [{ "type": "input_text", "text": REAL_PLAN_MODE_BLOCK }] }
+            ]
+        });
+        assert!(request_is_plan_mode(&back_to_plan));
+
+        // 同一段文本里多个模式块：同样以最后一个为准
+        assert!(!request_is_plan_mode(&json!({
+            "input": format!("{REAL_PLAN_MODE_BLOCK}\r\n中间内容\r\n{REAL_DEFAULT_MODE_BLOCK}")
+        })));
+        assert!(request_is_plan_mode(&json!({
+            "input": format!("{REAL_DEFAULT_MODE_BLOCK}\r\n中间内容\r\n{REAL_PLAN_MODE_BLOCK}")
+        })));
+        assert_eq!(
+            last_mode_block_declares_plan(&format!(
+                "{REAL_PLAN_MODE_BLOCK}\r\n{REAL_DEFAULT_MODE_BLOCK}"
+            )),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn thread_mode_from_params_reads_request_and_notification_shapes() {
+        // turn/start、thread/settings/update 的参数形状
+        assert_eq!(
+            thread_mode_from_params(&json!({
+                "threadId": "01a0aaf8-abc",
+                "collaborationMode": { "mode": "plan", "settings": { "model": "m" } }
+            })),
+            Some(("01a0aaf8-abc".to_string(), "plan".to_string()))
+        );
+        // thread/settings/updated 通知的形状
+        assert_eq!(
+            thread_mode_from_params(&json!({
+                "threadId": "t2",
+                "threadSettings": {
+                    "collaborationMode": { "mode": "default", "settings": { "model": "m" } }
+                }
+            })),
+            Some(("t2".to_string(), "default".to_string()))
+        );
+        // 线程 id 前后空白先 trim
+        assert_eq!(
+            thread_mode_from_params(&json!({
+                "threadId": " t3 ",
+                "collaborationMode": { "mode": "plan" }
+            })),
+            Some(("t3".to_string(), "plan".to_string()))
+        );
+
+        // collaborationMode 为 null / 缺失 / 未知取值 → None（调用方保持已有登记不变）
+        assert_eq!(
+            thread_mode_from_params(&json!({ "threadId": "t", "collaborationMode": null })),
+            None
+        );
+        assert_eq!(thread_mode_from_params(&json!({ "threadId": "t" })), None);
+        assert_eq!(
+            thread_mode_from_params(&json!({
+                "threadId": "t",
+                "collaborationMode": { "mode": "chatty" }
+            })),
+            None
+        );
+        // 缺线程 id / 纯空白线程 id → None
+        assert_eq!(
+            thread_mode_from_params(&json!({ "collaborationMode": { "mode": "plan" } })),
+            None
+        );
+        assert_eq!(
+            thread_mode_from_params(&json!({
+                "threadId": "   ",
+                "collaborationMode": { "mode": "plan" }
+            })),
+            None
+        );
+        // 与协作模式无关的通知（如 turn/started）→ None
+        assert_eq!(
+            thread_mode_from_params(&json!({ "threadId": "t", "turn": { "id": "x" } })),
+            None
+        );
+    }
+
+    #[test]
+    fn thread_mode_registry_records_overwrites_and_isolates() {
+        let registry = ThreadModeRegistry::default();
+        assert_eq!(registry.mode("t1"), None, "未登记应查不到");
+        assert!(registry.record("t1", "plan"), "首次登记算变化");
+        assert_eq!(registry.mode("t1").as_deref(), Some("plan"));
+        // 同值重复登记：不算变化（也不影响取值）
+        assert!(!registry.record("t1", "plan"));
+        assert_eq!(registry.mode("t1").as_deref(), Some("plan"));
+        // 覆盖为默认模式
+        assert!(registry.record("t1", "default"));
+        assert_eq!(registry.mode("t1").as_deref(), Some("default"));
+        // 登记时线程 id 先 trim
+        assert!(registry.record("  t2  ", "plan"));
+        assert_eq!(registry.mode("t2").as_deref(), Some("plan"));
+        // 非法取值与空白线程 id 一律忽略，不改动已有值
+        assert!(!registry.record("t1", "chatty"));
+        assert_eq!(registry.mode("t1").as_deref(), Some("default"));
+        assert!(!registry.record("   ", "plan"));
+        assert_eq!(registry.mode("   "), None);
+        // 会话之间互不影响
+        assert_eq!(registry.mode("t3"), None);
+    }
+
+    #[test]
+    fn thread_mode_registry_clears_when_full() {
+        let registry = ThreadModeRegistry::default();
+        for i in 0..THREAD_MODE_LIMIT {
+            assert!(registry.record(&format!("t{i}"), "plan"));
+        }
+        // 到达上限后再登记**新**线程：整表清空后只留这一条（模式每轮 turn 都会重新登记）
+        assert!(registry.record("t-new", "default"));
+        assert_eq!(registry.mode("t-new").as_deref(), Some("default"));
+        assert_eq!(registry.mode("t0"), None, "清空后旧条目不再保留");
+        // 表内的已有线程照常覆盖，不会触发清空
+        assert!(registry.record("t-new", "plan"));
+        assert_eq!(registry.mode("t-new").as_deref(), Some("plan"));
+    }
+
+    #[test]
+    fn request_header_thread_id_normalizes_client_value() {
+        // 本模块不依赖集成测试里的构造器，这里就地造一个带 `session-id` 的请求头
+        let session_headers = |id: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert("session-id", HeaderValue::from_str(id).unwrap());
+            headers
+        };
+        // codex 上报裸线程 id（`ses_` 前缀是代理给上游时才加的）
+        assert_eq!(
+            request_header_thread_id(&session_headers("01a0aaf8-abc")).as_deref(),
+            Some("01a0aaf8-abc")
+        );
+        // 客户端已带前缀：去掉前缀后查登记表（与 x-opencode-session 的补前缀规则对称）
+        assert_eq!(
+            request_header_thread_id(&session_headers("ses_abc")).as_deref(),
+            Some("abc")
+        );
+        // 前后空白先 trim
+        assert_eq!(
+            request_header_thread_id(&session_headers("  abc  ")).as_deref(),
+            Some("abc")
+        );
+        // 缺失 / 纯前缀 / 纯空白 / 非 ASCII → None（调用方退回关键词兜底判据）
+        assert_eq!(request_header_thread_id(&HeaderMap::new()), None);
+        assert_eq!(request_header_thread_id(&session_headers("ses_")), None);
+        assert_eq!(request_header_thread_id(&session_headers("   ")), None);
+        let mut invalid = HeaderMap::new();
+        invalid.insert("session-id", HeaderValue::from_bytes(b"caf\xe9").unwrap());
+        assert_eq!(request_header_thread_id(&invalid), None);
+    }
+
+    #[test]
+    fn nudge_judge_timeout_is_one_minute() {
+        // 判定用同一个模型后台跑（Zen 免费模型偶发 30s+）：给足 60 秒，超时仍按「已完成」收尾
+        assert_eq!(NUDGE_JUDGE_TIMEOUT, Duration::from_secs(60));
     }
 
     #[test]
@@ -4013,6 +4334,14 @@ mod tests {
         let input = body["input"].as_array().unwrap();
         assert_eq!(input[2]["content"][0]["text"], PLAN_NUDGE_TEXT);
         assert!(PLAN_NUDGE_TEXT.contains("<proposed_plan>"));
+        assert!(
+            PLAN_NUDGE_TEXT.contains("</proposed_plan>"),
+            "必须给出闭合标签，否则弱模型只写正文：{PLAN_NUDGE_TEXT}"
+        );
+        assert!(
+            PLAN_NUDGE_TEXT.contains("不要放进代码块"),
+            "必须禁止把标签包进代码块：{PLAN_NUDGE_TEXT}"
+        );
         assert!(!PLAN_NUDGE_TEXT.contains("必须实际调用工具"));
 
         // 简写 input（字符串）也要能续跑
@@ -4072,16 +4401,17 @@ mod tests {
         assert!(state.allow(later));
     }
 
-    #[test]
-    fn nudge_counters_are_per_session() {
-        let state = ProxyState {
-            session: "ses_fixed123".into(),
-            base_url: "http://127.0.0.1:1".into(),
-            log: None,
-            trace: TraceSink::disabled(),
-            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
-        };
+   #[test]
+   fn nudge_counters_are_per_session() {
+       let state = ProxyState {
+           session: "ses_fixed123".into(),
+           base_url: "http://127.0.0.1:1".into(),
+           log: None,
+           trace: TraceSink::disabled(),
+           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+           nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes: Arc::new(ThreadModeRegistry::default()),
+       };
         assert!(nudge_allow(&state, "ses_a"));
         assert_eq!(nudge_record_injection(&state, "ses_a"), 1);
         assert_eq!(nudge_record_injection(&state, "ses_a"), 2);
@@ -5332,6 +5662,8 @@ mod tests {
             }),
             true,
             "req_test",
+            "default",
+            MODE_SRC_HEURISTIC,
         );
         let value_of = |key: &str| {
             fields
@@ -5348,8 +5680,9 @@ mod tests {
         assert_eq!(value_of("patch_failures"), Some("0".to_string()));
         assert!(value_of("input_chars").is_some());
         assert_eq!(value_of("call_id"), Some("req_test".to_string()));
-        // 协作模式：无模式块按默认模式记；计划模式块（真实文案）记 plan
+        // 协作模式与来源由调用方（`resolve_nudge_mode`）解析后传入，这里只记录
         assert_eq!(value_of("mode"), Some("default".to_string()));
+        assert_eq!(value_of("mode_src"), Some(MODE_SRC_HEURISTIC.to_string()));
         let plan_fields = request_log_fields(
             &json!({
                 "model": "m",
@@ -5361,6 +5694,8 @@ mod tests {
             }),
             true,
             "req_test",
+            "plan",
+            MODE_SRC_REGISTRY,
         );
         assert_eq!(
             plan_fields
@@ -5369,9 +5704,22 @@ mod tests {
                 .map(|(_, value)| value.as_str()),
             Some("plan")
         );
+        assert_eq!(
+            plan_fields
+                .iter()
+                .find(|(name, _)| *name == "mode_src")
+                .map(|(_, value)| value.as_str()),
+            Some(MODE_SRC_REGISTRY)
+        );
 
         // 没请求推理时记 `-`
-        let fields = request_log_fields(&json!({ "model": "m" }), false, "req_test");
+        let fields = request_log_fields(
+            &json!({ "model": "m" }),
+            false,
+            "req_test",
+            "default",
+            MODE_SRC_HEURISTIC,
+        );
         assert_eq!(
             fields
                 .iter()
@@ -5393,6 +5741,8 @@ mod tests {
             }),
             true,
             "req_test",
+            "default",
+            MODE_SRC_HEURISTIC,
         );
         assert_eq!(
             fields
@@ -6075,18 +6425,19 @@ mod integration_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn passthrough_forwards_models_and_post_body() {
-        let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
-            Arc::new(AsyncMutex::new(None));
-        let base_url = spawn_mock_passthrough(rec.clone()).await;
-        let state = ProxyState {
-            session: "ses_fixed123".into(),
-            base_url,
-            log: None,
-            trace: TraceSink::disabled(),
-            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
-        };
+   async fn passthrough_forwards_models_and_post_body() {
+       let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
+           Arc::new(AsyncMutex::new(None));
+       let base_url = spawn_mock_passthrough(rec.clone()).await;
+       let state = ProxyState {
+           session: "ses_fixed123".into(),
+           base_url,
+           log: None,
+           trace: TraceSink::disabled(),
+           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+           nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes: Arc::new(ThreadModeRegistry::default()),
+       };
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -6136,18 +6487,19 @@ mod integration_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn passthrough_prefers_client_session_header() {
-        let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
-            Arc::new(AsyncMutex::new(None));
-        let base_url = spawn_mock_passthrough(rec.clone()).await;
-        let state = ProxyState {
-            session: "ses_fixed123".into(),
-            base_url,
-            log: None,
-            trace: TraceSink::disabled(),
-            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
-        };
+   async fn passthrough_prefers_client_session_header() {
+       let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
+           Arc::new(AsyncMutex::new(None));
+       let base_url = spawn_mock_passthrough(rec.clone()).await;
+       let state = ProxyState {
+           session: "ses_fixed123".into(),
+           base_url,
+           log: None,
+           trace: TraceSink::disabled(),
+           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+           nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes: Arc::new(ThreadModeRegistry::default()),
+       };
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("client-session-42"));
 
@@ -6386,19 +6738,50 @@ mod integration_tests {
 
     /// 在探测请求前面插入一条协作模式开发者消息（模拟 codex 下发的模式文本）。
     fn nudge_probe_with_mode(with_tools: bool, mode_text: &str) -> Body {
+        nudge_probe_with_modes(with_tools, &[mode_text])
+    }
+
+    /// 在探测请求前面按顺序插入多条协作模式开发者消息：codex 会把历次模式块都留在历史里，
+    /// 切换模式后的请求正是「旧块在前、当前块在后」的形状（线上误判的复现形态）。
+    fn nudge_probe_with_modes(with_tools: bool, mode_texts: &[&str]) -> Body {
         let mut req = nudge_probe_json(with_tools);
-        let mut input = vec![json!({
-            "type": "message",
-            "role": "developer",
-            "content": [{ "type": "input_text", "text": mode_text }]
-        })];
+        let mut input: Vec<Value> = mode_texts
+            .iter()
+            .map(|text| {
+                json!({
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{ "type": "input_text", "text": text }]
+                })
+            })
+            .collect();
         input.extend(req["input"].as_array().unwrap().clone());
         req["input"] = Value::Array(input);
         Body::from(req.to_string())
     }
 
-    /// 走一次代理的流式翻译入口，返回发给客户端（codex）的完整 SSE 文本。
-    async fn run_nudge_probe(upstream: &str, log: ZenLog, body: Body) -> String {
+    /// 带 `session-id` 请求头（codex 上报的线程 id，代理给上游时才补 `ses_` 前缀）。
+    fn session_headers(thread_id: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert("session-id", HeaderValue::from_str(thread_id).unwrap());
+        headers
+    }
+
+    /// 预置一条登记的协议模式登记表（模拟 app-server 侧已经登记过该线程的模式）。
+    fn modes_with(thread_id: &str, mode: &str) -> Arc<ThreadModeRegistry> {
+        let registry = ThreadModeRegistry::default();
+        assert!(registry.record(thread_id, mode), "登记应成功");
+        Arc::new(registry)
+    }
+
+    /// 走一次代理的流式翻译入口（指定请求头与模式登记表），返回发给 codex 的完整 SSE 文本。
+    async fn run_nudge_probe_full(
+        upstream: &str,
+        log: ZenLog,
+        headers: HeaderMap,
+        body: Body,
+        modes: Arc<ThreadModeRegistry>,
+    ) -> String {
         let state = ProxyState {
             session: "ses_fixed123".into(),
             base_url: upstream.to_string(),
@@ -6406,18 +6789,31 @@ mod integration_tests {
             trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
             nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes,
         };
         let uri: Uri = "/responses".parse().unwrap();
         let resp = handle_any(
             State(state),
             Method::POST,
             OriginalUri(uri),
-            HeaderMap::new(),
+            headers,
             body,
         )
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
         body_text(resp).await
+    }
+
+    /// 走一次代理的流式翻译入口（无请求头、空登记表），返回发给 codex 的完整 SSE 文本。
+    async fn run_nudge_probe(upstream: &str, log: ZenLog, body: Body) -> String {
+        run_nudge_probe_full(
+            upstream,
+            log,
+            HeaderMap::new(),
+            body,
+            Arc::new(ThreadModeRegistry::default()),
+        )
+        .await
     }
 
     /// 读取会话日志目录下全部内容（断言 nudge_* 事件用）。
@@ -6598,7 +6994,7 @@ mod integration_tests {
         let last = messages.last().unwrap();
         assert_eq!(last["role"], "user");
         let injected = last["content"].as_str().unwrap();
-        assert!(injected.contains("没有给出计划"), "{injected}");
+        assert!(injected.contains("没有交付计划"), "{injected}");
         assert!(injected.contains("<proposed_plan>"), "{injected}");
         assert!(
             !injected.contains("必须实际调用工具"),
@@ -6613,6 +7009,169 @@ mod integration_tests {
             !joined.contains("event=zen_proxy.nudge_judged"),
             "计划模式不应有 AI 判定：{joined}"
         );
+    }
+
+    /// 关键回归：历史里残留旧的计划模式块（codex 把历次模式块都留在历史里），但协议登记表
+    /// 说这个线程现在是默认模式——必须走默认模式的 AI 看门狗并注入执行口径，不能按计划模式
+    /// 注入「请给出计划」（这正是线上 `collaboration_mode_kind=default` 却按 plan 分流的那次误判）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_mode_registry_beats_stale_plan_block_in_history() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply(
+                "Now update the test - specifically the base_url path test.",
+            )),
+            judge_reply("未完成"),
+            ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
+        ])
+        .await;
+
+        let body = run_nudge_probe_full(
+            &upstream,
+            log,
+            session_headers("01a0aaf8-abc"),
+            nudge_probe_with_modes(true, &[&plan_mode_text(), REAL_DEFAULT_MODE_BLOCK]),
+            modes_with("01a0aaf8-abc", "default"),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(
+            calls.len(),
+            3,
+            "登记表说默认模式：应「首轮 + 判定 + 续跑」：{calls:?}"
+        );
+        let injected = calls[2]["messages"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["content"]
+            .as_str()
+            .unwrap();
+        assert!(
+            injected.contains("必须实际调用工具"),
+            "默认模式应注入执行口径：{injected}"
+        );
+        assert!(
+            !injected.contains("没有交付计划"),
+            "不得按计划模式注入计划提醒：{injected}"
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_judged"),
+            "默认模式应发判定：{joined}"
+        );
+        assert!(
+            joined.contains("mode=default") && joined.contains("mode_src=registry"),
+            "模式与来源应记进日志：{joined}"
+        );
+        assert!(
+            !joined.contains("mode=plan"),
+            "历史里的旧计划块不应把模式拉回 plan：{joined}"
+        );
+    }
+
+    /// 反向：登记表说计划模式、而历史里最后一块是默认模式块时，以登记表为准走计划分支
+    /// （不调用 AI 判定，注入计划专用提醒）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_mode_registry_plan_wins_over_default_block_in_history() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply(
+                "## 计划\n1. 后端加 git_version 命令\n2. 关于页面加一行显示",
+            )),
+            ScriptedReply::Sse(sse_text_reply(
+                "<proposed_plan>\n1. 后端加 git_version 命令\n</proposed_plan>",
+            )),
+        ])
+        .await;
+
+        let body = run_nudge_probe_full(
+            &upstream,
+            log,
+            session_headers("ses_thread-plan"),
+            nudge_probe_with_modes(true, &[REAL_DEFAULT_MODE_BLOCK]),
+            modes_with("thread-plan", "plan"),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 2, "计划模式只应「首轮 + 续跑」：{calls:?}");
+        let injected = calls[1]["messages"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["content"]
+            .as_str()
+            .unwrap();
+        assert!(injected.contains("没有交付计划"), "{injected}");
+        assert!(injected.contains("<proposed_plan>"), "{injected}");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("mode=plan") && joined.contains("mode_src=registry"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_judged"),
+            "计划模式不应发判定：{joined}"
+        );
+    }
+
+    /// 没有 `session-id` 请求头（其它客户端/连不上登记表的线程）时退回关键词兜底判据，
+    /// 且以**最后一个**模式块为准：默认块在最后 → 默认分支；计划块在最后 → 计划分支。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_mode_falls_back_to_last_mode_block_without_registry() {
+        // ① 旧计划块在前、默认块在后 → 默认模式（判定 + 执行口径）
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("我先说明一下接下来要做的事。")),
+            judge_reply("未完成"),
+            ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
+        ])
+        .await;
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_modes(true, &[&plan_mode_text(), REAL_DEFAULT_MODE_BLOCK]),
+        )
+        .await;
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(rec.lock().await.len(), 3, "默认分支应发判定");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("mode=default") && joined.contains("mode_src=heuristic"),
+            "无登记表时应记关键词兜底来源：{joined}"
+        );
+
+        // ② 默认块在前、计划块在后 → 计划模式（不发判定）
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("## 计划\n1. 做 A")),
+            ScriptedReply::Sse(sse_text_reply(
+                "<proposed_plan>\n1. 做 A\n</proposed_plan>",
+            )),
+        ])
+        .await;
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_modes(true, &[REAL_DEFAULT_MODE_BLOCK, &plan_mode_text()]),
+        )
+        .await;
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(rec.lock().await.len(), 2, "计划分支不发判定");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("mode=plan") && joined.contains("mode_src=heuristic"),
+            "{joined}"
+        );
+        assert!(!joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
     }
 
     /// 计划模式下终局带了计划标签：代码判据直接判「计划已交付」，一次上游调用就收尾。
@@ -6798,16 +7357,17 @@ mod integration_tests {
         proxy_state_traced(base_url, log, TraceSink::disabled())
     }
 
-    fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyState {
-        ProxyState {
-            session: "ses_fixed123".into(),
-            base_url,
-            log,
-            trace,
-            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
+   fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyState {
+       ProxyState {
+           session: "ses_fixed123".into(),
+           base_url,
+           log,
+           trace,
+           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+           nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes: Arc::new(ThreadModeRegistry::default()),
+       }
+   }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn dispatches_translation_on_base_url_path_plus_responses() {
@@ -6931,6 +7491,7 @@ mod integration_tests {
             format!("{upstream}/zen/v1"),
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -6959,6 +7520,7 @@ mod integration_tests {
             upstream,
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(!status.running);
@@ -7003,6 +7565,7 @@ mod integration_tests {
             upstream_a.clone(),
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -7028,6 +7591,7 @@ mod integration_tests {
             upstream_a.clone(),
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -7038,6 +7602,7 @@ mod integration_tests {
             format!("{upstream_a}/"),
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -7057,6 +7622,7 @@ mod integration_tests {
             upstream_b.clone(),
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -7074,6 +7640,7 @@ mod integration_tests {
             upstream_b,
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(status.running, "{:?}", status.error);
@@ -7088,6 +7655,7 @@ mod integration_tests {
             upstream_a,
             None,
             TraceSink::disabled(),
+            Arc::new(ThreadModeRegistry::default()),
         )
         .await;
         assert!(!status.running);
@@ -7159,19 +7727,20 @@ mod integration_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn learns_and_retries_reasoning_content_requirement() {
-        let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
-        let upstream = spawn_mock_requiring_reasoning_rc(rec.clone()).await;
-        let dir = tempfile::TempDir::new().unwrap();
-        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
-        let state = ProxyState {
-            session: "ses_fixed123".into(),
-            base_url: upstream,
-            log,
-            trace: TraceSink::disabled(),
-            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
-        };
+   async fn learns_and_retries_reasoning_content_requirement() {
+       let rec: Arc<AsyncMutex<Vec<String>>> = Arc::new(AsyncMutex::new(Vec::new()));
+       let upstream = spawn_mock_requiring_reasoning_rc(rec.clone()).await;
+       let dir = tempfile::TempDir::new().unwrap();
+       let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+       let state = ProxyState {
+           session: "ses_fixed123".into(),
+           base_url: upstream,
+           log,
+           trace: TraceSink::disabled(),
+           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+           nudge: Arc::new(Mutex::new(HashMap::new())),
+            modes: Arc::new(ThreadModeRegistry::default()),
+       };
         let probe = |state: ProxyState| async move {
             let uri: Uri = "/responses".parse().unwrap();
             let body = Body::from(
