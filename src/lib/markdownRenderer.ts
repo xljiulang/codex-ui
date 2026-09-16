@@ -1,5 +1,5 @@
-import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { parseMarkdown } from "./markdownEngine";
 
 /** 与 MarkdownText 之前一致的 URI 白名单：http/file/mailto/盘符路径/相对路径 */
 export const MARKDOWN_URI_REGEXP =
@@ -10,6 +10,7 @@ export const MARKDOWN_URI_REGEXP =
  * - 包一层 div 再 sanitize，避免 DOMPurify 剥离文档根元素 <pre>；
  *   （DOMPurify 会剥掉这个包装根 div，因此返回的 HTML 直接是顶层块元素）；
  * - 放行 file: 与盘符路径 href（本地文件链接需要）。
+ * 原始 HTML 已在 markdownEngine 里转义为字面文本，此处是纵深防御。
  */
 export function sanitizeMarkdown(raw: string): string {
   return DOMPurify.sanitize(`<div>${raw}</div>`, {
@@ -18,11 +19,7 @@ export function sanitizeMarkdown(raw: string): string {
 }
 
 function parseSync(text: string): string {
-  return marked.parse(text, {
-    async: false,
-    breaks: true,
-    gfm: true,
-  }) as string;
+  return parseMarkdown(text);
 }
 
 interface PendingReq {

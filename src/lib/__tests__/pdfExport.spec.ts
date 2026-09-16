@@ -88,6 +88,17 @@ describe("buildPrintHtml", () => {
     expect(html).toContain("hljs-number");
   });
 
+  it("尖括号内容按字面文本导出（回归：<dd> 被吞成空白）", async () => {
+    const md = ["# 标题", "", "<dd>", "", "把 <user_message> 里的东西改掉"].join(
+      "\n",
+    );
+    const html = await buildPrintHtml(md, "D:\\repo\\a.md");
+
+    expect(html).toContain("&lt;dd&gt;");
+    expect(html).toContain("把 &lt;user_message&gt; 里的东西改掉");
+    expect(html).not.toContain("<dd>");
+  });
+
   it("本地图片重写为 asset URL，远程/data/file 按规则处理", async () => {
     const md = [
       "![相对](./img/a.png)",

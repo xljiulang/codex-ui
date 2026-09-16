@@ -36,6 +36,23 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     expect(wrapper.find(".md strong").text()).toBe("world");
   });
 
+  it("尖括号内容按字面文本渲染（回归：<dd> 气泡整体空白）", async () => {
+    const wrapper = mount(MarkdownText, { props: { text: "<dd>" } });
+    await flushPromises();
+    expect(wrapper.find(".md").text()).toBe("<dd>");
+    expect(wrapper.find(".md dd").exists()).toBe(false);
+  });
+
+  it("行内原始 HTML 按字面文本渲染，不生成链接/图片元素", async () => {
+    const source =
+      '把 <a href="D:/a.txt">x</a> 换成 <img src="https://e.com/a.png">';
+    const wrapper = mount(MarkdownText, { props: { text: source } });
+    await flushPromises();
+    expect(wrapper.find(".md").text()).toBe(source);
+    expect(wrapper.find(".md a").exists()).toBe(false);
+    expect(wrapper.find(".md img").exists()).toBe(false);
+  });
+
   it("流式期间最多每 80ms 刷新一次，结束时立即刷净", async () => {
     vi.useFakeTimers();
     const wrapper = mount(MarkdownText, {

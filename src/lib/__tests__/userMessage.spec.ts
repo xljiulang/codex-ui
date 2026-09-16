@@ -243,12 +243,19 @@ describe("markdownToPlainText marked 同引擎提取", () => {
     const indented = ["正文", "", "    缩进代码行", "", "结尾"].join("\n");
     expect(markdownToPlainText(indented)).toBe("正文 结尾");
 
-    expect(markdownToPlainText("前置 <br> 后置")).toBe("前置 后置");
+    expect(markdownToPlainText("前置 <br> 后置")).toBe("前置 <br> 后置");
   });
 
-  it("html token 去标签取可见文本；空/纯代码输入输出为空串", () => {
+  it("html token 按字面文本参与（与气泡渲染一致）；空/纯代码输入输出为空串", () => {
     expect(markdownToPlainText("<span>可见文字</span> 后缀")).toBe(
-      "可见文字 后缀",
+      "<span>可见文字</span> 后缀",
+    );
+    expect(markdownToPlainText("a<b>c")).toBe("a<b>c");
+    expect(markdownToPlainText("<user_instructions>")).toBe(
+      "<user_instructions>",
+    );
+    expect(markdownToPlainText("把 <ABCD> 里的东西改掉")).toBe(
+      "把 <ABCD> 里的东西改掉",
     );
     expect(markdownToPlainText("")).toBe("");
     expect(markdownToPlainText("```\ncode\n```")).toBe("");

@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { parseMarkdown } from "./markdownEngine";
 
 interface MarkdownRequest {
   id: number;
@@ -15,11 +15,7 @@ self.onmessage = (e: MessageEvent<MarkdownRequest>) => {
   const { id, text } = e.data;
   let raw = "";
   try {
-    raw = marked.parse(text, {
-      async: false,
-      breaks: true,
-      gfm: true,
-    }) as string;
+    raw = parseMarkdown(text);
   } catch {
     raw = "";
   }

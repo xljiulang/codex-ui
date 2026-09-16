@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { lexMarkdown } from "./markdownEngine";
 import {
   FILE_MENTION_HEADING,
   MY_REQUEST_MARKER,
@@ -44,9 +44,16 @@ function tokenListText(list: readonly MarkdownWalkToken[]): string {
   return parts.join(" ");
 }
 
+/** 行内 token 列表：直接拼接（相邻行内内容本就无分隔，如 `a<b>c`、`<span>x</span> 后缀`） */
+function inlineListText(list: readonly MarkdownWalkToken[]): string {
+  let out = "";
+  for (const t of list) out += tokenText(t);
+  return out;
+}
+
 function tableCellText(cell: unknown): string {
   const c = cell as MarkdownWalkToken;
-  return tokenListText(tokenChildren(c.tokens)) || tokenTextString(c.text);
+  return inlineListText(tokenChildren(c.tokens)) || tokenTextString(c.text);
 }
 
 function tableText(t: MarkdownWalkToken): string {
@@ -62,12 +69,11 @@ function tableText(t: MarkdownWalkToken): string {
   return parts.join(" ");
 }
 
-/** html token 的可见文本近似：去掉标签，空结果由上层过滤 */
-function htmlVisibleText(html: string): string {
-  return html.replace(/<[^>]*>/g, " ");
-}
-
-/** 单 token → 文本：按块/行内结构递归取用户可见内容（代码块与任务勾选不计入） */
+/**
+ * 单 token → 文本：按块/行内结构递归取用户可见内容（代码块与任务勾选不计入）。
+ * html token 取原文——气泡里原始 HTML 已按字面文本显示（见 markdownEngine），
+ * 这里保持一致，否则会出现「气泡显示 `<ABCD>` 而导航预览空白」。
+ */
 function tokenText(t: MarkdownWalkToken): string {
   switch (t.type) {
     case "space":
@@ -91,13 +97,13 @@ function tokenText(t: MarkdownWalkToken): string {
     case "lheading":
     case "paragraph":
     case "text":
-      return tokenListText(tokenChildren(t.tokens)) || tokenTextString(t.text);
+      return inlineListText(tokenChildren(t.tokens)) || tokenTextString(t.text);
     case "html":
-      return htmlVisibleText(tokenTextString(t.text));
+      return tokenTextString(t.text);
     default:
-      // 行内 token（text/escape/codespan/strong/em/del/link/image/autolink 等）：
+      // 行内 token（escape/codespan/strong/em/del/link/image/autolink 等）：
       // 优先取子 token 文本，其次取自身 text（link 链接文字与 image alt 同源）
-      return tokenListText(tokenChildren(t.tokens)) || tokenTextString(t.text);
+      return inlineListText(tokenChildren(t.tokens)) || tokenTextString(t.text);
   }
 }
 
@@ -106,13 +112,13 @@ function collapseWhitespace(text: string): string {
 }
 
 /**
- * 把 Markdown 源文本转为纯文本（不渲染 HTML）：用与气泡渲染同一引擎（marked）的
+ * 把 Markdown 源文本转为纯文本（不渲染 HTML）：用与气泡渲染同一引擎的
  * lexer 分词后递归取文本，结构语义与展示一致；代码块不进入预览，行内代码保留。
  */
 export function markdownToPlainText(text: string): string {
   let tokens: readonly MarkdownWalkToken[];
   try {
-    tokens = marked.lexer(text, { gfm: true, breaks: true }) as unknown as readonly MarkdownWalkToken[];
+    tokens = lexMarkdown(text) as unknown as readonly MarkdownWalkToken[];
   } catch {
     return collapseWhitespace(text);
   }
