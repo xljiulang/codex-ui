@@ -85,13 +85,15 @@ const NUDGE_USER_LIMIT: usize = 2000;
 const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合，但任务看起来还没完成。请继续执行：必须实际调用工具完成剩余工作；如果确实已经完成，请明确说明完成了什么；如果该操作在更早的回合已经用工具执行过（例如已经 git 提交或推送过），不要重复执行，只需说明执行结果。";
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
-/// **必须带完整骨架**：弱模型经常只把计划写成普通 Markdown，而 codex 只在终局文本里出现
-/// `<proposed_plan>` 包裹时才生成计划条目（否则应用里没有「计划已就绪」）——所以提醒里直接
-/// 给出骨架，并明确标签要原样保留、各自独占一行、不要放进代码块。
-/// 尾句另外约定「用户已取消这个计划」时的收尾标记 [`PLAN_CANCEL_MARKER`]：用户中途放弃计划
-/// （实测例子：「行，那不处理了」）时模型只会写普通正文，按「未交付」催办会把一份已被放弃的
-/// 完整方案重新逼出来；给出标记后模型可以一行收尾，代码识别到即直接收尾、不再续跑。
-const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请继续：把完整方案写进下面这个结构里——这两个标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n另有两条约定，只在这两种情况用，其它情况一律按上面的结构给计划：\n- 用户已经放弃这个计划（例如让你不要再处理、说不用改了、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <cancelled_plan>放弃计划原因</cancelled_plan> 收尾——两个标签原样保留，中间换成实际放弃原因。\n- 确实需要用户先确认信息：请明确提出问题。";
+/// **排除式三选一**：被催办时先判两种「不需要给方案」的情况——用户已放弃
+/// （[`PLAN_CANCEL_MARKER`]）与「问题本身无法或无需产出实现计划」
+/// （[`PLAN_UNACHIEVABLE_MARKER`]，如事实问题/纯查询/闲聊），两者都不成立才必须把完整方案
+/// 落进 `<proposed_plan>` 骨架。骨架必须带完整形态：弱模型经常只把计划写成普通 Markdown，
+/// 而 codex 只在终局文本里出现 `<proposed_plan>` 包裹时才生成计划条目（否则应用里没有
+/// 「计划已就绪」），所以提醒里直接给出骨架，并要求标签原样保留、各自独占一行、不要放进代码块。
+/// 「计划已被认可、无需改动、保持现状」不属于「无法/无需计划」：这同样是一个评估结论，
+/// 应把该结论或重申的原计划写进 `<proposed_plan>` 收尾，而不是逃到非方案标签。
+const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <cancelled_plan>放弃计划原因</cancelled_plan> 收尾——两个标签原样保留，中间换成实际放弃原因。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <unachievable_plan>原因</unachievable_plan> 收尾——两个标签原样保留，中间换成实际原因。\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
 /// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
 /// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
 const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
@@ -115,6 +117,18 @@ const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
 /// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
 /// 等写法；计划标签判据优先于本判据。
 const PLAN_CANCEL_MARKER: &str = "<cancelled_plan";
+/// 计划模式下「问题本身无法或无需产出实现计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给
+/// 模型，教学形态是成对标签 `<unachievable_plan>原因</unachievable_plan>`，与
+/// [`PLAN_OUTPUT_MARKER`] / [`PLAN_CANCEL_MARKER`] 同形）：`<proposed_plan>` = 计划已交付、
+/// `<cancelled_plan>` = 计划已取消、本标记 = 无法/无需计划（如「1+1=？」这类事实问题、
+/// 纯查询或闲聊，本就不产出计划这种交付物）。「计划已被认可、无需改动、保持现状」**不属于**
+/// 本标记：那是评估结论，应写进 `<proposed_plan>` 收尾，不逃到非方案标签。
+/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;unachievable_plan&gt;…`），
+/// 不会被当成 HTML 吞掉。
+/// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**。
+/// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
+/// 等写法；计划标签判据优先于本判据。
+const PLAN_UNACHIEVABLE_MARKER: &str = "<unachievable_plan";
 /// 协议登记表里承认的协作模式取值（与协议 `ModeKind` 一致）：其余取值一律不登记。
 const KNOWN_MODES: [&str; 2] = ["plan", "default"];
 /// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
@@ -331,6 +345,13 @@ fn is_plan_deliverable(text: &str) -> bool {
 /// （用户放弃后看到的就是模型那句普通结论加一行可见标签）；默认模式不使用本判据。
 fn is_plan_cancelled(text: &str) -> bool {
     text.to_lowercase().contains(PLAN_CANCEL_MARKER)
+}
+
+/// 终局文本是否带「问题无法或无需产出实现计划」标记（见 [`PLAN_UNACHIEVABLE_MARKER`]）：
+/// **计划模式**下命中即视为计划话题已终结并直接收尾——不再注入续跑提醒，也**不生成计划条目**
+/// （例如「1+1=？」这类事实问题，聊天里就是模型那句结论加一行可见标签）；默认模式不使用本判据。
+fn is_plan_unachievable(text: &str) -> bool {
+    text.to_lowercase().contains(PLAN_UNACHIEVABLE_MARKER)
 }
 
 /// 请求是否为应用发起的「会话标题生成」任务（后台临时线程）：末条 user 文本以提示词
@@ -2313,8 +2334,9 @@ async fn run_stream_task(
             break;
         }
         // 计划模式：只用代码判据决定本轮怎么收尾——终局带计划标签即已交付、直接收尾；
-        // 带「已取消计划」标记则视为用户已放弃、同样直接收尾；两者都没有才按「未交付」
-        // 催它给出计划（计划专用提醒，不调用 AI 判定）
+        // 带「已取消计划」标记则视为用户已放弃、带「无法或无需计划」标记则视为本就不产出
+        // 计划，三者都直接收尾；三者都没有才按「未交付」催它给出计划（计划专用提醒，
+        // 不调用 AI 判定）
         let nudge_mode = if plan_mode { "plan" } else { "default" };
         if plan_mode && is_plan_deliverable(&pass_text) {
             log_at(
@@ -2338,6 +2360,21 @@ async fn run_stream_task(
                 "zen_proxy.nudge_skipped",
                 &[
                     ("reason", "plan_cancelled".to_string()),
+                    ("pass", pass.to_string()),
+                    ("mode", nudge_mode.to_string()),
+                ],
+            );
+            break;
+        }
+        // 问题本身无法或无需产出实现计划（提醒里约定的标签）：同样直接收尾——
+        // 不逼它在计划模式里强行给方案，也不消耗 streak、不触发后续 pass
+        if plan_mode && is_plan_unachievable(&pass_text) {
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_skipped",
+                &[
+                    ("reason", "plan_unachievable".to_string()),
                     ("pass", pass.to_string()),
                     ("mode", nudge_mode.to_string()),
                 ],
@@ -4528,6 +4565,30 @@ mod tests {
     }
 
     #[test]
+    fn is_plan_unachievable_matches_tag_marker() {
+        // 提醒里教的标签形态（问题本身无法或无需产出实现计划时的正确收尾）
+        assert!(is_plan_unachievable(
+            "1+1=2。\n<unachievable_plan>这是事实问题，不产出实现计划</unachievable_plan>"
+        ));
+        // 与 `<proposed_plan>` 同口径：大小写不敏感 + 前缀匹配，缺闭合标签也命中
+        assert!(is_plan_unachievable(
+            "<UNACHIEVABLE_PLAN>纯查询，无需计划</UNACHIEVABLE_PLAN>"
+        ));
+        assert!(is_plan_unachievable("<unachievable_plan>闲聊"));
+        assert!(is_plan_unachievable("<unachievable_plan>"));
+        // 普通结论、空串、裸中文措辞与正常交付/取消的计划都不算「无法/无需计划」
+        assert!(!is_plan_unachievable("我看完了代码，结论是不需要改动。"));
+        assert!(!is_plan_unachievable(""));
+        assert!(!is_plan_unachievable("这个问题没法做"));
+        assert!(!is_plan_unachievable(
+            "<proposed_plan>\n# 标题\n- 步骤 1\n</proposed_plan>"
+        ));
+        assert!(!is_plan_unachievable(
+            "<cancelled_plan>用户说不用改了</cancelled_plan>"
+        ));
+    }
+
+    #[test]
     fn request_is_title_task_matches_app_prompt_prefix() {
         let title_req = |text: &str| {
             json!({
@@ -4625,6 +4686,34 @@ mod tests {
         assert!(
             is_plan_cancelled(PLAN_NUDGE_TEXT),
             "提醒文本自身就带标记，前缀判据必须命中：{PLAN_NUDGE_TEXT}"
+        );
+        // 问题本身无法或无需产出实现计划时的约定标记：同样教成对标签、代码按前缀判据识别
+        assert!(
+            PLAN_NUDGE_TEXT.contains(&format!("{PLAN_UNACHIEVABLE_MARKER}>")),
+            "必须与模型约定「无法/无需计划」标签，否则事实问题会被逼重给方案：{PLAN_NUDGE_TEXT}"
+        );
+        assert!(
+            is_plan_unachievable(PLAN_NUDGE_TEXT),
+            "提醒文本自身就带标记，前缀判据必须命中：{PLAN_NUDGE_TEXT}"
+        );
+        // 排除式判定：先判两种「不需要给方案」的情况，都不成立才必须给方案；保持现状/无需改动
+        // 属于评估结论、应走 proposed_plan，因此提醒里不出现在 unachievable 的分支描述中
+        assert!(
+            PLAN_NUDGE_TEXT.contains("先判断下面两种不需要给方案的情况是否成立"),
+            "必须让模型先排除不方案情形：{PLAN_NUDGE_TEXT}"
+        );
+        assert!(
+            PLAN_NUDGE_TEXT.contains("都必须给出完整方案") ||
+                PLAN_NUDGE_TEXT.contains("必须想办法把完整方案"),
+            "排除两种后必须给方案：{PLAN_NUDGE_TEXT}"
+        );
+        assert!(
+            !PLAN_NUDGE_TEXT.contains("请明确提出问题"),
+            "已删除「需要先确认信息」的自由文本出口：{PLAN_NUDGE_TEXT}"
+        );
+        assert!(
+            !PLAN_NUDGE_TEXT.contains("说不用改了"),
+            "「不用改了」是认可既有计划的收尾，不属于放弃：{PLAN_NUDGE_TEXT}"
         );
         assert!(!PLAN_NUDGE_TEXT.contains("必须实际调用工具"));
 
@@ -7516,6 +7605,98 @@ mod integration_tests {
         assert!(
             !joined.contains("event=zen_proxy.nudge_injected"),
             "已取消的计划不应再注入催办：{joined}"
+        );
+    }
+
+    /// 问题本身无法或无需产出实现计划（如「1+1=？」这类事实问题）：首轮模型只写普通正文 →
+    /// 催办一轮，续跑轮按约定用 `<unachievable_plan>` 标签收尾 → 代码判据直接收尾，
+    /// 不再注入第 3 轮、不消耗 streak，也不会逼它在计划模式里强行给一份方案。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_plan_mode_stops_when_plan_unachievable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("1 + 1 = 2。")),
+            ScriptedReply::Sse(sse_text_reply(
+                "1 + 1 = 2。\n<unachievable_plan>事实问题，不产出实现计划</unachievable_plan>",
+            )),
+            // 第 3 轮不该发生：真发生时脚本会回空话，下面的调用数断言会失败
+            ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_mode(true, &plan_mode_text()),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(
+            calls.len(),
+            2,
+            "「无法/无需计划」应当一轮催办后就收尾，不再注入：{calls:?}"
+        );
+        // 催办轮注入的提醒里带上了约定标签
+        let messages = calls[1]["messages"].as_array().unwrap();
+        let injected = messages.last().unwrap()["content"].as_str().unwrap();
+        assert!(injected.contains("<unachievable_plan>"), "{injected}");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped")
+                && joined.contains("reason=plan_unachievable")
+                && joined.contains("mode=plan"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_limited"),
+            "无法/无需计划分支不该走到 pass／streak 上限：{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_judged"),
+            "计划模式不应有 AI 判定：{joined}"
+        );
+    }
+
+    /// 模型首轮就已按约定给出「无法/无需计划」标签（早前回合被催过）：一次调用就收尾，
+    /// 连催办都不发。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_plan_mode_skips_injection_when_already_unachievable() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply(
+                "这就是个纯查询。\n<unachievable_plan>无实现计划可给</unachievable_plan>",
+            )),
+            ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_mode(true, &plan_mode_text()),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(
+            rec.lock().await.len(),
+            1,
+            "首轮即带无法/无需计划标签时不应再打上游"
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped")
+                && joined.contains("reason=plan_unachievable")
+                && joined.contains("pass=1"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_injected"),
+            "无法/无需计划不应再注入催办：{joined}"
         );
     }
 
