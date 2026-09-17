@@ -89,7 +89,7 @@ const NUDGE_MAX_INJECTIONS: usize = 4;
 /// 回合已经做完，被催办也不能让模型再提交/再推送一次；末句给出标签的**结构不变量**
 /// （成对闭合、独占一行、不换行、本轮最多一个、不进代码块），未来的代理层过滤/分桶只依赖
 /// 这些结构与标签前缀，不依赖载荷词汇（载荷保持自由文本）。
-const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合。请立刻走下面两条路之一，不要只写正文，也不要写「接下来我会…／马上做…」这类将来时承诺：\n- 还有工作没做完：必须实际调用工具把剩余工作做完；做完后按下面第二条收尾。\n- 任务确实已经结束：不要重复上一条回复的正文，也不要在更早的回合已经用工具执行过的操作上重复执行（例如已经 git 提交或推送过）——无论「已完成」「无需改动」「用户已放弃」还是「确实做不下去」，都用一行 <zen_task_completed>一句话说明结论</zen_task_completed> 收尾。这个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签。";
+const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合。请立刻走下面两条路之一，不要只写正文，也不要写「接下来我会…／马上做…」这类将来时承诺：\n- 还有工作没做完：必须实际调用工具把剩余工作做完；做完后按下面第二条收尾。\n- 任务确实已经结束：不要重复上一条回复的正文，也不要在更早的回合已经用工具执行过的操作上重复执行（例如已经 git 提交或推送过）——用一行 <zen_task_completed>已完成</zen_task_completed> 收尾。标签里只写这四个词之一：已完成／无需改动／已放弃／做不下去，不要写别的说明；标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签。";
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
 /// **排除式三选一**：被催办时先判两种「不需要给方案」的情况——用户已放弃
@@ -100,7 +100,7 @@ const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何
 /// 「计划已就绪」），所以提醒里直接给出骨架，并要求标签原样保留、各自独占一行、不要放进代码块。
 /// 「计划已被认可、无需改动、保持现状」不属于「无法/无需计划」：这同样是一个评估结论，
 /// 应把该结论或重申的原计划写进 `<proposed_plan>` 收尾，而不是逃到非方案标签。
-const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <zen_plan_cancelled>放弃计划原因</zen_plan_cancelled> 收尾——两个标签原样保留，中间换成实际放弃原因。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <zen_plan_unachievable>原因</zen_plan_unachievable> 收尾——两个标签原样保留，中间换成实际原因。\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
+const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <zen_plan_cancelled>已放弃</zen_plan_cancelled> 收尾（标签里只写「已放弃」这三个字，不要写别的说明）。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <zen_plan_unachievable>无法计划</zen_plan_unachievable> 收尾（标签里只写「无法计划」这四个字，不要写别的说明）。\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
 /// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
 /// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
 const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
@@ -161,6 +161,20 @@ const PLAN_UNACHIEVABLE_MARKER: &str = "<zen_plan_unachievable";
 /// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_task_completed&gt;…`），不会被
 /// 当成 HTML 吞掉。默认模式下终局文本出现即视为任务已终结、直接收尾；计划模式不使用本判据。
 const TASK_COMPLETED_MARKER: &str = "<zen_task_completed";
+/// 三个自研标签的**闭标签**：剥离时按「开标签 → 对应闭标签」的结构剪掉整段，
+/// 载荷写什么、是不是固定短词都不参与匹配（见 [`TagStripper`]）。
+const TASK_COMPLETED_CLOSE: &str = "</zen_task_completed>";
+const PLAN_CANCEL_CLOSE: &str = "</zen_plan_cancelled>";
+const PLAN_UNACHIEVABLE_CLOSE: &str = "</zen_plan_unachievable>";
+/// 结构化剥离用的「开标签前缀 + 闭标签」对照表。
+const ZEN_TAG_PAIRS: [(&str, &str); 3] = [
+    (TASK_COMPLETED_MARKER, TASK_COMPLETED_CLOSE),
+    (PLAN_CANCEL_MARKER, PLAN_CANCEL_CLOSE),
+    (PLAN_UNACHIEVABLE_MARKER, PLAN_UNACHIEVABLE_CLOSE),
+];
+/// 日志里记标签载荷时的截断长度与条数上限（`nudge_skipped 标签内容=`）。
+const TAG_PAYLOAD_CHARS: usize = 60;
+const TAG_PAYLOAD_ENTRIES: usize = 4;
 /// 协议登记表里承认的协作模式取值（与协议 `ModeKind` 一致）：其余取值一律不登记。
 const KNOWN_MODES: [&str; 2] = ["plan", "default"];
 /// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
@@ -182,12 +196,12 @@ const TITLE_TASK_PREFIX: &str = "给下面用户消息生成一个不超过 30 �
 /// 本轮最多一个、不进代码块）——单测对两者都做断言，防半改。
 /// 准入见 [`contract_injection_eligible`]：只给「流式 + 声明了工具 + 非会话标题线程」的请求
 /// 注入；非流式没有催办路径可消费，标题线程只产出标题，压缩/摘要类后台请求也通常不带工具。
-const DEFAULT_MODE_CONTRACT_TEXT: &str = "【回合收尾约定】当你结束回合、且本轮没有调用任何工具时：任务已全部完成就用一行 <zen_task_completed>一句话结论</zen_task_completed> 收尾（成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块）；还有没做完的工作必须实际调用工具继续做，不要只写「接下来我会…」这类承诺；不要重复执行更早回合已经用工具做过的操作。";
+const DEFAULT_MODE_CONTRACT_TEXT: &str = "【回合收尾约定】当你结束回合、且本轮没有调用任何工具时：任务已全部完成就用一行 <zen_task_completed>已完成</zen_task_completed> 收尾——标签里只写这四个词之一：已完成／无需改动／已放弃／做不下去，不要写别的说明（成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块）；还有没做完的工作必须实际调用工具继续做，不要只写「接下来我会…」这类承诺；不要重复执行更早回合已经用工具做过的操作。";
 /// **首轮教学**（计划模式）：只前置两个「不需要给方案」的出口标签，不前置「必须给完整方案」——
 /// 计划模式的正常形态是 chat your way，强制口径留在 [`PLAN_NUDGE_TEXT`] 里，避免把中间闲聊
 /// 回合逼出假方案。边界（「无需改动、保持现状、原计划已认可」属于评估结论、要写进
 /// `<proposed_plan>`、不算 unachievable）必须写在这里，否则会重现 2026-09-18 那次误逃。
-const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户已放弃这个计划（让你不要再处理、先不做了），用一行 <zen_plan_cancelled>放弃原因</zen_plan_cancelled> 收尾；若问题本身无法或无需产出实现计划（事实问题、纯查询、闲聊），用一行 <zen_plan_unachievable>原因</zen_plan_unachievable> 收尾；其余情况照常把完整方案写进 <proposed_plan>（「无需改动、保持现状、原计划已认可」属于评估结论，要写进 <proposed_plan>，不算 unachievable）。这两个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块。";
+const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户已放弃这个计划（让你不要再处理、先不做了），用一行 <zen_plan_cancelled>已放弃</zen_plan_cancelled> 收尾（标签里只写「已放弃」，不要写别的说明）；若问题本身无法或无需产出实现计划（事实问题、纯查询、闲聊），用一行 <zen_plan_unachievable>无法计划</zen_plan_unachievable> 收尾（标签里只写「无法计划」，不要写别的说明）；其余情况照常把完整方案写进 <proposed_plan>（「无需改动、保持现状、原计划已认可」属于评估结论，要写进 <proposed_plan>，不算 unachievable）。这两个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块。";
 
 /// 「线程 id → 协作模式」协议登记表（内存态，进程内共享）：由 app-server 侧的真实来源
 /// （`turn/start` / `thread/settings/update` 的参数、`thread/settings/updated` 通知）更新，
@@ -2330,6 +2344,7 @@ async fn run_stream_task(
                     ("轮次", pass.to_string()),
                     ("模式", nudge_mode.to_string()),
                     ("说明", "用户已放弃计划，直接收尾".to_string()),
+                    ("标签内容", tag_payload(&st)),
                 ],
             );
             break;
@@ -2346,6 +2361,7 @@ async fn run_stream_task(
                     ("轮次", pass.to_string()),
                     ("模式", nudge_mode.to_string()),
                     ("说明", "问题无需实现计划，直接收尾".to_string()),
+                    ("标签内容", tag_payload(&st)),
                 ],
             );
             break;
@@ -2362,6 +2378,7 @@ async fn run_stream_task(
                     ("轮次", pass.to_string()),
                     ("模式", nudge_mode.to_string()),
                     ("说明", "模型已自行宣告任务结束，直接收尾".to_string()),
+                    ("标签内容", tag_payload(&st)),
                 ],
             );
             break;
@@ -2480,6 +2497,251 @@ fn nudge_injected_note(plan_mode: bool) -> &'static str {
 
 /// `zen_proxy.nudge_skipped` 里会话标题线程的中文 `说明`（其余原因的说明就地写在日志调用处）。
 const NUDGE_SKIP_NOTE_TITLE_TASK: &str = "会话标题线程，整轮放行";
+
+/// 日志用：本次流里被结构剥离掉的标签载荷（标签不再下发，这里是唯一回看入口）。
+fn tag_payload(st: &StreamState) -> String {
+    st.text
+        .as_ref()
+        .map(|t| t.stripper.stripped_note())
+        .unwrap_or_default()
+}
+
+/// **结构化剥离器**：把发给 codex 的文本里三个自研标签整段剪掉（标签只服务代理判定，
+/// 不该污染会话内容）。匹配只看结构——「开标签前缀 → 闭标签」，**载荷写什么、写多长、
+/// 是不是教学里要求的固定短词，一概不参与匹配**。
+///
+/// 规则：
+/// 1. 命中任一开标签前缀即进入标签态，此后内容压住不下发，直到闭标签；
+/// 2. 闭标签取三个 zen 闭标签里**最早出现**的那个（同名优先命中，弱模型写错闭标签也不会
+///    把整条消息吞掉），整段丢弃并记进 `stripped`；
+/// 3. 支持跨分片：开/闭标签被切成多段（甚至逐字符）到达也成立；
+/// 4. 流结束时仍在标签态（未闭合）→ 丢弃标签开头到文本结尾（与「缺闭合标签也命中」的判据一致）；
+/// 5. 一行里多个标签逐个处理；不做嵌套解析（进入标签后遇到第一个闭标签即结束）；
+/// 6. 标签**独占一行**时连行首缩进与行尾换行一起去掉，避免聊天里留空行；同一行还有别的正文时
+///    只删标签本身，同行其余文本保留。
+#[derive(Debug, Default)]
+struct TagStripper {
+    /// 还没判定完、暂时不能下发的尾巴（可能是开标签的开头几个字符）。
+    pending: String,
+    /// 已进入标签态：正在等闭标签（`pending` 此时就是载荷 + 可能的半个闭标签）。
+    inside: bool,
+    /// 进入的标签是否独占一行（决定删完后要不要连行尾换行一起吞掉）。
+    inside_line_tag: bool,
+    /// 当前已下发文本的「本行至今只有空白」状态：为真且标签前只有空白时，该标签独占一行。
+    line_start_ws: bool,
+    /// 刚删掉一个整行标签：正在吞掉紧随其后的空白与一个换行。
+    trim_after_tag: bool,
+    /// 本次流里被删掉的标签载荷（截断、条数封顶），供日志回看。
+    stripped: Vec<String>,
+}
+
+impl TagStripper {
+    fn new() -> Self {
+        Self {
+            line_start_ws: true,
+            ..Self::default()
+        }
+    }
+
+    /// 喂一段上游文本，返回可以下发给 codex 的可见文本（可能为空）。
+    fn feed(&mut self, text: &str) -> String {
+        self.pending.push_str(text);
+        let mut visible = String::new();
+        loop {
+            if self.trim_after_tag {
+                let cut = self.take_line_tail();
+                if !cut {
+                    break;
+                }
+                continue;
+            }
+            if self.inside {
+                match find_close_tag(&self.pending) {
+                    Some((at, len)) => {
+                        let payload = self.pending[..at].to_string();
+                        self.record_payload(&payload);
+                        self.pending.drain(..at + len);
+                        self.inside = false;
+                        // 只有「标签独占一行」时，才继续吞掉行尾空白与换行
+                        self.trim_after_tag = self.inside_line_tag;
+                        self.inside_line_tag = false;
+                        continue;
+                    }
+                    // 整段都还可能是载荷（或半个闭标签）：继续压住
+                    None => break,
+                }
+            }
+            match find_open_tag(&self.pending) {
+                Some((at, len)) => {
+                    let prefix = self.pending[..at].to_string();
+                    // 标签是否独占一行：标签之前（本行内）只有空白与缩进
+                    let line_ws_at_tag = line_state_after(self.line_start_ws, &prefix);
+                    let keep = if line_ws_at_tag {
+                        // 丢掉这一行的缩进，但保留前面各行的正文与换行
+                        prefix[..prefix.rfind('\n').map(|i| i + 1).unwrap_or(0)].to_string()
+                    } else {
+                        prefix
+                    };
+                    self.note_visible(&keep);
+                    visible.push_str(&keep);
+                    self.pending.drain(..at + len);
+                    self.inside = true;
+                    self.inside_line_tag = line_ws_at_tag;
+                    continue;
+                }
+                None => {
+                    // 没有开标签：把「可能是开标签开头」的尾巴压住，其余原样下发
+                    let hold = held_prefix_len(&self.pending);
+                    let cut = self.pending.len() - hold;
+                    if cut > 0 {
+                        let head: String = self.pending.drain(..cut).collect();
+                        self.note_visible(&head);
+                        visible.push_str(&head);
+                    }
+                    break;
+                }
+            }
+        }
+        visible
+    }
+
+    /// 流结束：未闭合的标签整段丢弃；否则把压住的尾巴原样交出。
+    fn finish(&mut self) -> String {
+        if self.inside {
+            let payload = std::mem::take(&mut self.pending);
+            self.record_payload(&payload);
+            self.inside = false;
+            self.trim_after_tag = false;
+            return String::new();
+        }
+        self.trim_after_tag = false;
+        let tail = std::mem::take(&mut self.pending);
+        if !tail.is_empty() {
+            self.note_visible(&tail);
+        }
+        tail
+    }
+
+    /// 供日志：本次流里被删掉的标签载荷（含尚未闭合的那一段），截断后拼接。
+    fn stripped_note(&self) -> String {
+        let mut all = self.stripped.clone();
+        if self.inside {
+            all.push(truncate_chars(
+                &clean_payload(&self.pending),
+                TAG_PAYLOAD_CHARS,
+            ));
+        }
+        all.retain(|item| !item.is_empty());
+        truncate_chars(&all.join(" / "), TAG_PAYLOAD_CHARS * 2)
+    }
+
+    /// 一次性剥离（非流式路径用）：返回 (可见文本, 被删载荷)。
+    fn strip_once(text: &str) -> (String, String) {
+        let mut stripper = Self::new();
+        let mut visible = stripper.feed(text);
+        visible.push_str(&stripper.finish());
+        (visible, stripper.stripped_note())
+    }
+
+    /// 吞掉整行标签后面的空白与一个换行；返回是否还需要继续处理 `pending`。
+    fn take_line_tail(&mut self) -> bool {
+        let mut consumed = 0;
+        for (idx, ch) in self.pending.char_indices() {
+            if ch == '\n' {
+                self.pending.drain(..idx + ch.len_utf8());
+                self.trim_after_tag = false;
+                self.line_start_ws = true;
+                return true;
+            }
+            if !is_line_blank(ch) {
+                // 同一行后面还有正文：停止吞空白，正文照常下发
+                if consumed > 0 {
+                    self.pending.drain(..consumed);
+                }
+                self.trim_after_tag = false;
+                self.line_start_ws = false;
+                return true;
+            }
+            consumed = idx + ch.len_utf8();
+        }
+        // 目前只有空白：先吃掉，等后续分片
+        if consumed > 0 {
+            self.pending.drain(..consumed);
+        }
+        false
+    }
+
+    /// 记录一条被删载荷（截断；空载荷也记，便于区分「有标签」与「没标签」）。
+    fn record_payload(&mut self, payload: &str) {
+        if self.stripped.len() >= TAG_PAYLOAD_ENTRIES {
+            return;
+        }
+        self.stripped
+            .push(truncate_chars(&clean_payload(payload), TAG_PAYLOAD_CHARS));
+    }
+
+    /// 维护「本行至今只有空白」状态。
+    fn note_visible(&mut self, text: &str) {
+        self.line_start_ws = line_state_after(self.line_start_ws, text);
+    }
+}
+
+/// 行首缩进允许的空白（不含换行本身）。
+fn is_line_blank(ch: char) -> bool {
+    ch == ' ' || ch == '\t' || ch == '\r'
+}
+
+/// 走过一段已下发文本后，「本行至今只有空白」的状态（换行重置为真，非空白字符置为假）。
+fn line_state_after(mut state: bool, text: &str) -> bool {
+    for ch in text.chars() {
+        if ch == '\n' {
+            state = true;
+        } else if !is_line_blank(ch) {
+            state = false;
+        }
+    }
+    state
+}
+
+/// 载荷清理：去掉开标签残留的 `>`、行首缩进与首尾空白（只影响日志里记的内容）。
+fn clean_payload(raw: &str) -> String {
+    raw.trim_start_matches(|ch: char| is_line_blank(ch) || ch == '>')
+        .trim()
+        .to_string()
+}
+
+/// 三个 zen 闭标签里最早出现的那个，返回 (起点, 长度)。
+fn find_close_tag(hay: &str) -> Option<(usize, usize)> {
+    let lower = hay.to_lowercase();
+    ZEN_TAG_PAIRS
+        .iter()
+        .filter_map(|(_, close)| lower.find(close).map(|at| (at, close.len())))
+        .min_by_key(|(at, _)| *at)
+}
+
+/// 三个 zen 开标签里最早出现的那个，返回 (起点, 开标签长度)。
+fn find_open_tag(hay: &str) -> Option<(usize, usize)> {
+    let lower = hay.to_lowercase();
+    ZEN_TAG_PAIRS
+        .iter()
+        .filter_map(|(open, _)| lower.find(open).map(|at| (at, open.len())))
+        .min_by_key(|(at, _)| *at)
+}
+
+/// `pending` 末尾有多少字符可能是某个开标签的开头（必须压住不下发）。
+fn held_prefix_len(hay: &str) -> usize {
+    let lower = hay.to_lowercase();
+    let mut hold = 0;
+    for (open, _) in ZEN_TAG_PAIRS {
+        let max = open.len().min(lower.len());
+        for len in 1..=max {
+            if lower.ends_with(&open[..len]) {
+                hold = hold.max(len);
+            }
+        }
+    }
+    hold
+}
 
 /// 上游非 2xx：透传状态码与错误体。
 async fn proxy_error_response(
@@ -3100,6 +3362,8 @@ fn chat_to_responses(
                 .and_then(|c| c.as_str())
                 .unwrap_or("")
                 .to_string();
+            // 非流式路径同样按结构剥离三个 zen 标签（一次性，无跨分片问题）
+            let content = TagStripper::strip_once(&content).0;
             let mut content_parts = Vec::new();
             if !content.is_empty() {
                 content_parts.push(json!({
@@ -3260,7 +3524,12 @@ fn pick_number(value: &Value, paths: &[&str]) -> Option<Value> {
 
 struct TextTrack {
     item_id: String,
+    /// 上游原文（判据、续跑轮回显、字数统计都用它）。
     text_buf: String,
+    /// 剥掉三个 zen 标签后**真正下发给 codex** 的文本（delta 与 done 都用它）。
+    visible_buf: String,
+    /// 结构剥离器（跨分片）。
+    stripper: TagStripper,
     out_index: usize,
 }
 
@@ -3458,6 +3727,9 @@ fn reasoning_delta(text: &str, st: &mut StreamState) -> Vec<String> {
         st.reasoning = Some(TextTrack {
             item_id: item_id.clone(),
             text_buf: String::new(),
+            // 推理摘要不剥离标签，可见文本与原文一致（只是复用同一结构）
+            visible_buf: String::new(),
+            stripper: TagStripper::new(),
             out_index,
         });
         out.push(sse_event(
@@ -3504,6 +3776,8 @@ fn text_delta(text: &str, st: &mut StreamState) -> Vec<String> {
         st.text = Some(TextTrack {
             item_id: item_id.clone(),
             text_buf: String::new(),
+            visible_buf: String::new(),
+            stripper: TagStripper::new(),
             out_index,
         });
         out.push(sse_event(
@@ -3533,16 +3807,21 @@ fn text_delta(text: &str, st: &mut StreamState) -> Vec<String> {
     }
     if let Some(t) = st.text.as_mut() {
         t.text_buf.push_str(text);
-        out.push(sse_event(
-            "response.output_text.delta",
-            &json!({
-                "type": "response.output_text.delta",
-                "item_id": t.item_id,
-                "output_index": t.out_index,
-                "content_index": 0,
-                "delta": text
-            }),
-        ));
+        // 只把剥掉 zen 标签后的可见文本下发给 codex（空分片不发，避免下游看到空 delta）
+        let visible = t.stripper.feed(text);
+        if !visible.is_empty() {
+            t.visible_buf.push_str(&visible);
+            out.push(sse_event(
+                "response.output_text.delta",
+                &json!({
+                    "type": "response.output_text.delta",
+                    "item_id": t.item_id,
+                    "output_index": t.out_index,
+                    "content_index": 0,
+                    "delta": visible
+                }),
+            ));
+        }
     }
     out
 }
@@ -3708,7 +3987,19 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         ));
     }
 
-    if let Some(t) = st.text.take() {
+    // 剥离掉的字符数（原始 − 可见），进收尾摘要便于对照「标签被删了多少」
+    let mut stripped_chars = 0usize;
+    if let Some(mut t) = st.text.take() {
+        // 收尾前先把剥离器压住的尾巴交出来（未闭合标签按规则丢弃），
+        // 保证 done / content_part.done / output_item.done 与 delta 累积完全一致
+        let tail = t.stripper.finish();
+        t.visible_buf.push_str(&tail);
+        let visible_text = t.visible_buf.clone();
+        stripped_chars = t
+            .text_buf
+            .chars()
+            .count()
+            .saturating_sub(visible_text.chars().count());
         out.push(sse_event(
             "response.output_text.done",
             &json!({
@@ -3716,7 +4007,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                 "item_id": t.item_id,
                 "output_index": t.out_index,
                 "content_index": 0,
-                "text": t.text_buf,
+                "text": visible_text.clone(),
                 "annotations": []
             }),
         ));
@@ -3727,7 +4018,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                 "item_id": t.item_id,
                 "output_index": t.out_index,
                 "content_index": 0,
-                "part": { "type": "output_text", "text": t.text_buf, "annotations": [] }
+                "part": { "type": "output_text", "text": visible_text.clone(), "annotations": [] }
             }),
         ));
         out.push(sse_event(
@@ -3742,7 +4033,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
                     "status": "completed",
                     "content": [{
                         "type": "output_text",
-                        "text": t.text_buf,
+                        "text": visible_text.clone(),
                         "annotations": []
                     }]
                 }
@@ -3955,6 +4246,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     );
     call.note("reasoning_chars", reasoning_chars.to_string());
     call.note("text_chars", text_chars.to_string());
+    call.note("stripped_chars", stripped_chars.to_string());
     call.note("call_count", call_count.to_string());
     call.note("failed", failed.to_string());
     call.note("patch_failures", st.patch_failures.to_string());
@@ -3989,6 +4281,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
             ),
             ("reasoning_chars", reasoning_chars.to_string()),
             ("text_chars", text_chars.to_string()),
+            ("stripped_chars", stripped_chars.to_string()),
             ("call_count", call_count.to_string()),
             ("failed", failed.to_string()),
             ("patch_failures", st.patch_failures.to_string()),
@@ -4699,6 +4992,134 @@ mod tests {
         assert_eq!(NUDGE_MAX_INJECTIONS, 4);
     }
 
+    /// 结构剥离：**载荷写什么、是不是教学里要求的固定短词，一律不影响剥离**。
+    #[test]
+    fn tag_stripper_removes_spans_by_structure_not_payload() {
+        let cases = [
+            // 教学要求的固定短词
+            ("已补好测试。\n<zen_task_completed>已完成</zen_task_completed>"),
+            // 不守约定：写了一整句话
+            ("已补好测试。\n<zen_task_completed>我判断已经全部完成了，改了 3 个文件</zen_task_completed>"),
+            // 不守约定：英文
+            ("done\n<zen_task_completed>all good</zen_task_completed>"),
+            // 空载荷
+            ("已停。\n<zen_plan_cancelled></zen_plan_cancelled>"),
+            // 乱码/符号
+            ("结论。\n<zen_plan_unachievable>??? 只需查询</zen_plan_unachievable>"),
+        ];
+        for (case, label) in cases.into_iter().zip([
+            "固定短词",
+            "一整句话",
+            "英文",
+            "空载荷",
+            "乱码",
+        ]) {
+            let (visible, payload) = TagStripper::strip_once(case);
+            assert!(
+                !visible.to_lowercase().contains("<zen_"),
+                "{label}：标签必须整段剥离：{visible}"
+            );
+            assert!(
+                !payload.contains("</zen_"),
+                "{label}：日志里的载荷不应带上闭标签：{payload}"
+            );
+        }
+
+        // 整行标签：连行尾换行一起删，不残留空行；正文原样保留
+        let (visible, payload) = TagStripper::strip_once(
+            "已补好测试。\n<zen_task_completed>我判断已经完成了</zen_task_completed>\n",
+        );
+        assert_eq!(visible, "已补好测试。\n", "整行标签连换行一起删");
+        assert_eq!(payload, "我判断已经完成了", "日志里记实际载荷");
+
+        // 行内标签：只删标签本身，同行其余文本保留
+        let (visible, _) =
+            TagStripper::strip_once("已完成改动<zen_task_completed>已完成</zen_task_completed>，请查看");
+        assert_eq!(visible, "已完成改动，请查看");
+
+        // 大小写不敏感（判据同口径）
+        let (visible, _) = TagStripper::strip_once("收尾\n<ZEN_TASK_COMPLETED>DONE</ZEN_TASK_COMPLETED>");
+        assert!(!visible.to_lowercase().contains("zen_task_completed"), "{visible}");
+
+        // 一行里多个标签逐个处理
+        let (visible, payload) = TagStripper::strip_once(
+            "前言\n<zen_plan_cancelled>已放弃</zen_plan_cancelled><zen_task_completed>已完成</zen_task_completed>\n",
+        );
+        assert!(!visible.to_lowercase().contains("<zen_"), "{visible}");
+        assert!(payload.contains("已放弃") && payload.contains("已完成"), "{payload}");
+    }
+
+    /// 跨分片、写错闭标签、未闭合这几种弱模型常见形态。
+    #[test]
+    fn tag_stripper_handles_split_chunks_and_odd_closers() {
+        // 逐字符喂：开闭标签都被切碎也不能漏出去
+        let raw = "正文\n<zen_task_completed>已完成</zen_task_completed>";
+        let mut stripper = TagStripper::new();
+        let mut visible = String::new();
+        for ch in raw.chars() {
+            visible.push_str(&stripper.feed(&ch.to_string()));
+        }
+        visible.push_str(&stripper.finish());
+        assert_eq!(visible, "正文\n");
+        assert_eq!(stripper.stripped_note(), "已完成");
+
+        // 弱模型把闭标签写成另一个 zen 标签：照样闭合，不会把后面整段吞掉
+        let (visible, payload) = TagStripper::strip_once(
+            "正文\n<zen_task_completed>已完成</zen_plan_cancelled>尾部",
+        );
+        assert_eq!(visible, "正文\n尾部", "容错闭合后保留后续正文：{visible}");
+        assert_eq!(payload, "已完成");
+
+        // 未闭合（流结束仍在标签里）：丢掉标签开头到结尾，载荷照样进日志
+        let mut stripper = TagStripper::new();
+        let mut visible = stripper.feed("正文\n<zen_task_completed>没有闭合");
+        visible.push_str(&stripper.finish());
+        assert_eq!(visible, "正文\n");
+        assert_eq!(stripper.stripped_note(), "没有闭合");
+
+        // 只是「看起来像标签开头」的普通文本：原样下发（不能被吞掉）
+        let mut stripper = TagStripper::new();
+        let mut visible = stripper.feed("这里有 <zen_ 但不是标签");
+        visible.push_str(&stripper.finish());
+        assert_eq!(visible, "这里有 <zen_ 但不是标签");
+        assert!(stripper.stripped_note().is_empty());
+
+        // 剥掉 `proposed_plan` 之外的正文不受影响（代理不碰 codex 自己的标签）
+        let (visible, _) = TagStripper::strip_once(
+            "<proposed_plan>\n1. 做 A\n</proposed_plan>\n<zen_task_completed>已完成</zen_task_completed>",
+        );
+        assert!(visible.contains("<proposed_plan>"), "{visible}");
+        assert!(!visible.to_lowercase().contains("zen_task_completed"), "{visible}");
+    }
+
+    /// 四个教学面都改成固定短词表，且原有结构不变量与口径仍在。
+    #[test]
+    fn teaching_texts_use_fixed_short_payloads() {
+        for text in [NUDGE_TEXT, DEFAULT_MODE_CONTRACT_TEXT] {
+            assert!(
+                text.contains("<zen_task_completed>已完成</zen_task_completed>"),
+                "默认模式教学应给出固定短词的标签：{text}"
+            );
+            for word in ["已完成", "无需改动", "已放弃", "做不下去"] {
+                assert!(text.contains(word), "缺少固定词「{word}」：{text}");
+            }
+            assert!(
+                text.contains("不要写别的说明"),
+                "必须禁止标签里写长说明（省 token）：{text}"
+            );
+        }
+        for text in [PLAN_NUDGE_TEXT, PLAN_MODE_CONTRACT_TEXT] {
+            assert!(
+                text.contains("<zen_plan_cancelled>已放弃</zen_plan_cancelled>"),
+                "计划模式教学应给出固定短词：{text}"
+            );
+            assert!(
+                text.contains("<zen_plan_unachievable>无法计划</zen_plan_unachievable>"),
+                "计划模式教学应给出固定短词：{text}"
+            );
+        }
+    }
+
     fn sse_data_lines(block: &str) -> Vec<String> {
         block
             .lines()
@@ -4978,6 +5399,26 @@ mod tests {
         assert_eq!(resp["output"][0]["content"][0]["text"], "好的");
         assert_eq!(resp["usage"]["input_tokens"], 10);
         assert_eq!(resp["usage"]["output_tokens"], 5);
+    }
+
+    /// 非流式翻译路径同样按结构剥离三个 zen 标签（一次性，无跨分片问题）。
+    #[test]
+    fn chat_to_responses_strips_zen_tags() {
+        let chat = json!({
+            "id": "chatcmpl-strip",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "结论：无需改动。\n<zen_task_completed>无需改动</zen_task_completed>"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &ToolShape::default()).unwrap();
+        let text = resp["output"][0]["content"][0]["text"].as_str().unwrap();
+        assert_eq!(text, "结论：无需改动。\n", "{resp}");
+        assert!(!text.contains("zen_"), "{resp}");
     }
 
     #[test]
@@ -7323,7 +7764,9 @@ mod integration_tests {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
-            completion_reply("已完成：这段代码无需改动，原因是 ……"),
+            ScriptedReply::Sse(sse_text_reply(
+                "这段代码无需改动，原因是 ……\n<zen_task_completed>无需改动</zen_task_completed>",
+            )),
             // 第 2 轮不该发生：真发生时脚本会回空话，下面的调用数断言会失败
             ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
         ])
@@ -7334,12 +7777,31 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert!(!body.contains("function_call"), "{body}");
         assert_eq!(rec.lock().await.len(), 1, "带标签时不应续跑");
+        // 正文保留、标签（含载荷）不进 codex：delta 与三个 done 事件里都不该有它
+        assert!(body.contains("这段代码无需改动"), "{body}");
+        assert!(
+            !body.contains(TASK_COMPLETED_MARKER),
+            "标签不得下发到 codex：{body}"
+        );
+        assert!(
+            !body.contains("无需改动</zen_task_completed>"),
+            "标签载荷也不得下发：{body}"
+        );
+        // 下发的 done 文本 = 剥掉标签后的正文（delta 与 done 一致）
+        assert!(
+            body.contains(r#""text":"这段代码无需改动，原因是 ……\n"#),
+            "{body}"
+        );
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
                 && joined.contains("原因=task_completed")
                 && joined.contains("模式=default"),
             "{joined}"
+        );
+        assert!(
+            joined.contains("标签内容=无需改动"),
+            "被删载荷要进日志：{joined}"
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_injected"),
@@ -7558,11 +8020,17 @@ mod integration_tests {
             1,
             "首轮即带取消标签时不应再打上游"
         );
+        // 标签不下发：聊天里只剩模型那句结论
+        assert!(
+            body.contains("那就不做改动了。") && !body.contains("<zen_plan_cancelled"),
+            "计划模式的出口标签必须剥离：{body}"
+        );
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
                 && joined.contains("原因=plan_cancelled")
-                && joined.contains("轮次=1"),
+                && joined.contains("轮次=1")
+                && joined.contains("标签内容=用户说不用改了"),
             "{joined}"
         );
         assert!(
@@ -7986,13 +8454,45 @@ mod integration_tests {
             "续跑请求应教出标签契约：{}",
             calls[1]
         );
-        // 第二轮带标签收尾：可见文本里能同时看到方案与收尾标签
+        // 第二轮带标签收尾：下发给 codex 的文本里只剩方案，标签被结构剥离
         assert!(body.contains("1. 做 A"), "{body}");
-        assert!(body.contains(&format!("{TASK_COMPLETED_MARKER}>")), "{body}");
+        assert!(
+            !body.contains(TASK_COMPLETED_MARKER),
+            "标签不得下发到 codex：{body}"
+        );
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("原因=task_completed") && joined.contains("模式=default"),
             "{joined}"
+        );
+        assert!(
+            joined.contains("标签内容=已给方案"),
+            "剥离后的载荷要进日志：{joined}"
+        );
+    }
+
+    /// 模型不守约定、标签里写了一整句话：照样按结构剥离（剥离不看载荷），日志记全。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_strips_tag_even_when_payload_is_free_text() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply(
+            "我把 base_url 的测试补上了。\n<zen_task_completed>我判断已经全部完成：新增了 3 个用例，并跑通了 cargo test</zen_task_completed>",
+        ))])
+        .await;
+
+        let body = run_nudge_probe(&upstream, log, nudge_probe(true)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(rec.lock().await.len(), 1, "首轮带标签即收尾");
+        assert!(
+            body.contains("我把 base_url 的测试补上了。") && !body.to_lowercase().contains("<zen_"),
+            "自由文本载荷也必须整段剥离：{body}"
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("标签内容=我判断已经全部完成"),
+            "被删载荷要进日志：{joined}"
         );
     }
 
@@ -9085,6 +9585,8 @@ mod integration_tests {
         assert!(summary.contains("authorization=absent"), "{summary}");
         assert!(summary.contains("finish_reason=stop"), "{summary}");
         assert!(summary.contains("usage=present"), "{summary}");
+        // 剥离口径进摘要：普通回复没有被剥离的字符
+        assert!(summary.contains("stripped_chars=0"), "{summary}");
         assert!(
             summary.contains("suspicious=stop_without_tool_call"),
             "{summary}"
