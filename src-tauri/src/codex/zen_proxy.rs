@@ -67,22 +67,28 @@ const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 /// 一次转发最多发出的上游请求数（可选字段降级 + reasoning_content 开关各一次修复）。
 const FORWARD_MAX_ATTEMPTS: usize = 3;
 
-/// 口嗨自动续跑：同一会话「连续注入提醒且模型仍未实际调用工具」的次数上限，
-/// 达到后不再判定与注入（避免与弱模型无限来回）。
+/// 口嗨自动续跑：同一会话「连续注入提醒、而模型既没调用工具、也没用
+/// [`TASK_COMPLETED_MARKER`] 收尾」的次数上限，达到后不再注入（避免与弱模型无限来回）。
 const NUDGE_MAX_STREAK: u32 = 2;
 /// 口嗨自动续跑：距上次注入超过该时长视为新的一轮，连续计数清零。
 const NUDGE_RESET_AFTER: Duration = Duration::from_secs(10 * 60);
-/// 口嗨自动续跑：判定调用（后台会话）的超时上限；超时按「已完成」处理。
-const NUDGE_JUDGE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 口嗨自动续跑：单次入站请求最多向上游发起的 pass 数（1 次原始 + 续跑，留余量）。
 const NUDGE_MAX_PASSES: usize = 4;
-/// 口嗨自动续跑：判定提示词里助手文本 / 用户请求的截断上限（字符）。
-const NUDGE_ASSISTANT_LIMIT: usize = 4000;
-const NUDGE_USER_LIMIT: usize = 2000;
 /// 注入给上游的续跑提醒。只出现在发给上游的历史里，不会进入 codex 自己的记录，
-/// 因此应用聊天里看不到这条消息。末句显式排除「重复执行已完成的操作」——操作型请求
-/// （如「请 git 提交并推送」）若在更早回合已经做完，误判注入也不能让模型再提交/再推送一次。
-const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合，但任务看起来还没完成。请继续执行：必须实际调用工具完成剩余工作；如果确实已经完成，请明确说明完成了什么；如果该操作在更早的回合已经用工具执行过（例如已经 git 提交或推送过），不要重复执行，只需说明执行结果。";
+/// 因此应用聊天里看不到这条消息（模型按提醒回出的 [`TASK_COMPLETED_MARKER`] 标签是模型
+/// 自己的输出，会留在聊天里、以可见字面文本显示）。
+///
+/// **二选一强收尾**：默认模式没有独立判定请求可用了（Zen 免费层会拒那条后台
+/// `chat/completions`），所以判定搬进原对话——被催办时模型只有两条路：
+/// ① 还有活没做完 → 必须实际调用工具继续做；
+/// ② 任务确实已经结束 → 用一行 [`TASK_COMPLETED_MARKER`] 成对标签宣告结束，
+/// 代理据此（纯代码前缀判据，见 [`is_task_completed`]）直接收尾。
+///
+/// 第二句显式排除「重复执行已完成的操作」——操作型请求（如「请 git 提交并推送」）若在更早
+/// 回合已经做完，被催办也不能让模型再提交/再推送一次；末句给出标签的**结构不变量**
+/// （成对闭合、独占一行、不换行、本轮最多一个、不进代码块），未来的代理层过滤/分桶只依赖
+/// 这些结构与标签前缀，不依赖载荷词汇（载荷保持自由文本）。
+const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合。请立刻走下面两条路之一，不要只写正文，也不要写「接下来我会…／马上做…」这类将来时承诺：\n- 还有工作没做完：必须实际调用工具把剩余工作做完；做完后按下面第二条收尾。\n- 任务确实已经结束：不要重复上一条回复的正文，也不要在更早的回合已经用工具执行过的操作上重复执行（例如已经 git 提交或推送过）——无论「已完成」「无需改动」「用户已放弃」还是「确实做不下去」，都用一行 <task_completed>一句话说明结论</task_completed> 收尾。这个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签。";
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
 /// **排除式三选一**：被催办时先判两种「不需要给方案」的情况——用户已放弃
@@ -105,7 +111,8 @@ const PLAN_MODE_HEADING_MARKER: &str = "plan mode";
 /// 旧版 codex 的计划模式标题（`# Collaboration Mode: Plan`），保留兼容分支。
 const PLAN_MODE_HEADING_MARKER_LEGACY: &str = "collaboration mode: plan";
 /// 计划产物的包裹标签（协议 `item/plan/delta` 与之对应）：**计划模式**下出现即视为
-/// 计划已交付（AI 判定不参与此判据）；默认模式不据此短路，仍交由 AI 判定。
+/// 计划已交付（全程纯代码判据）；默认模式不据此短路，也没有别的判定可用——默认模式的收尾
+/// 靠模型自己回出 [`TASK_COMPLETED_MARKER`]。
 const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
 /// 计划模式下「用户已取消这个计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给模型，
 /// 教学形态是成对标签 `<cancelled_plan>放弃计划原因</cancelled_plan>`，与计划产物标签
@@ -129,6 +136,28 @@ const PLAN_CANCEL_MARKER: &str = "<cancelled_plan";
 /// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
 /// 等写法；计划标签判据优先于本判据。
 const PLAN_UNACHIEVABLE_MARKER: &str = "<unachievable_plan";
+/// **默认模式**下「任务已经结束」的约定标记（由 [`NUDGE_TEXT`] 教给模型，教学形态是成对标签
+/// `<task_completed>一句话结论</task_completed>`）：默认模式的判定搬进原对话——代理不再发
+/// 独立的判定请求（Zen 免费层会以 `FreeTierError: OpenCode's free tier can only be used from
+/// within OpenCode` 拒绝那条后台 `chat/completions`），只看模型自己在终局文本里回了什么。
+///
+/// 命名：小写 + 下划线，**不加 `zen_` 前缀**，与 [`PLAN_OUTPUT_MARKER`] /
+/// [`PLAN_CANCEL_MARKER`] / [`PLAN_UNACHIEVABLE_MARKER`] 同族同形。将来若给自研标签统一加
+/// 前缀，只动这几个常量即可；`<proposed_plan>` 除外——它是 codex 侧约定（协议
+/// `item/plan/delta` 与之对应），改名后 codex 就不再生成计划条目。
+///
+/// 判据（见 [`is_task_completed`]）：大小写不敏感 + 前缀匹配，缺闭合标签同样命中；
+/// **不解析载荷**（载荷是自由文本，只给人和未来的软映射分桶用）。
+///
+/// 结构不变量（写进 [`NUDGE_TEXT`]，未来代理层过滤/分桶只依赖这些）：成对闭合、独占一行、
+/// 不换行、一整轮最多一个、不放进代码块。有了这些，过滤 = 删掉整段闭合标签（缺闭合时删到该行
+/// 行尾），与载荷内容无关；分桶 = 对载荷首词做软映射（已完成/无需改动/已放弃/无法继续 → 枚举），
+/// 映射不到落 `unknown`。若将来真需要机器可读的强枚举，优先加**第二个标签名**（沿用 plan 系
+/// 「词表在标签名里、载荷自由」的风格），而不是把枚举塞进载荷。
+///
+/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;task_completed&gt;…`），不会被当成
+/// HTML 吞掉。默认模式下终局文本出现即视为任务已终结、直接收尾；计划模式不使用本判据。
+const TASK_COMPLETED_MARKER: &str = "<task_completed";
 /// 协议登记表里承认的协作模式取值（与协议 `ModeKind` 一致）：其余取值一律不登记。
 const KNOWN_MODES: [&str; 2] = ["plan", "default"];
 /// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
@@ -139,13 +168,14 @@ const MODE_SRC_REGISTRY: &str = "registry";
 const MODE_SRC_HEURISTIC: &str = "heuristic";
 /// 会话标题生成请求（应用发起的后台临时线程）提示词的固定前缀，用于识别并整轮放行。
 /// 与 `src/composables/useCodex/threads.ts` 的 `autoTitleThread` 提示词一致，改那句话
-/// 时必须同步这里，否则标题线程会重新被口嗨检测拦住（每次白花一次上游调用 + 静默等判定）。
+/// 时必须同步这里，否则标题线程会重新被口嗨检测拦住（标题必然「纯文本 + 零工具调用」，
+/// 每次都会白花一轮续跑提醒）。
 const TITLE_TASK_PREFIX: &str = "给下面用户消息生成一个不超过 30 字的中文会话标题";
 
 /// 口嗨自动续跑的分会话计数（内存态，代理重启即清零）。
 #[derive(Debug, Default, Clone)]
 struct NudgeState {
-    /// 连续注入且模型仍未实际调用工具的次数。
+    /// 连续注入、而模型既没调用工具也没用 [`TASK_COMPLETED_MARKER`] 收尾的次数。
     streak: u32,
     /// 最近一次注入时刻。
     last: Option<Instant>,
@@ -169,19 +199,12 @@ impl NudgeState {
         self.last = Some(now);
     }
 
-    /// 模型真的调用了工具：本轮口嗨已被纠正，连续计数清零。
-    fn record_tool_activity(&mut self) {
+    /// 模型真的推进了：调用了工具，或用 [`TASK_COMPLETED_MARKER`] 宣告任务结束。
+    /// 两种情况都说明本轮口嗨已被纠正/话题已正常终结，连续计数清零。
+    fn record_progress(&mut self) {
         self.streak = 0;
         self.last = None;
     }
-}
-
-/// 口嗨判定结论：未完成（需要续跑）/ 已完成（正常收尾）/ 无法判定（按已完成处理）。
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum NudgeVerdict {
-    Undone,
-    Done,
-    Unknown,
 }
 
 /// 「线程 id → 协作模式」协议登记表（内存态，进程内共享）：由 app-server 侧的真实来源
@@ -354,57 +377,22 @@ fn is_plan_unachievable(text: &str) -> bool {
     text.to_lowercase().contains(PLAN_UNACHIEVABLE_MARKER)
 }
 
+/// 终局文本是否带「任务已经结束」标记（见 [`TASK_COMPLETED_MARKER`]）：**默认模式**下命中即视为
+/// 模型自己宣告任务终结、直接收尾——不再注入续跑提醒、不触发后续 pass，并把该会话的连续计数
+/// 清零（见 [`nudge_record_progress`]）。判据与别的标签同口径（大小写不敏感 + 前缀匹配，缺闭合
+/// 标签、空标签同样命中），且**不解析载荷**。计划模式不使用本判据。
+fn is_task_completed(text: &str) -> bool {
+    text.to_lowercase().contains(TASK_COMPLETED_MARKER)
+}
+
 /// 请求是否为应用发起的「会话标题生成」任务（后台临时线程）：末条 user 文本以提示词
 /// 固定前缀开头即命中。标题线程只把首条消息压成短标题、必然以纯文本结束，让口嗨检测
-/// 参与只会白花一次上游调用并把标题结果静默压后（实测判定 20 秒级），因此整轮放行。
+/// 参与只会白花一轮上游（注入续跑提醒后还要再等一次生成），因此整轮放行。
 fn request_is_title_task(req: &Value) -> bool {
     last_user_text(req).trim().starts_with(TITLE_TASK_PREFIX)
 }
 
-/// 判定提示词：把「用户请求 + 助手最终回复 + 本回合工具调用数为 0」交给同一个模型，
-/// 要求只回一行结论。纯函数，便于单测。
-/// 规则要点：**验收口径按任务类型中立**——用户请求可以是操作型的（执行命令、git 提交与
-/// 推送、发布、删除…），只要助手给出了明确结论/结果说明/交付物就算完成；**方案/计划本身
-/// 就是交付物**（在等用户确认）；只有「只有将来时承诺、什么都没给」才算未完成。
-/// 另有一条解释条款：事实里的「本次回复没有工具调用」只描述这一条回复，**不能**推断整个
-/// 任务没做——操作可能在更早的回合就已经用工具执行过（例如已经 git 提交/推送过），
-/// 本轮只是如实汇报；缺了这条会把「已提交并推送」这类正常汇报误判成口嗨。
-/// **提示词里不出现计划标签**：计划模式的完成判据完全由代码给（见
-/// [`PLAN_OUTPUT_MARKER`]），本判定只服务默认模式。
-fn nudge_judge_prompt(user_text: &str, assistant_text: &str) -> String {
-    format!(
-        "你是一次 AI 编码回合的看门狗，只做判断，不要执行任何操作。\n\
-         已知事实：这条「助手最终回复」里没有调用任何工具。注意：这只说明本次回复没调工具，不能据此推断整个任务没做——任务可能在更早的回合就已经用工具执行过（例如已经执行过 git 提交或推送）。\n\n\
-         请判断助手是否真的完成了用户请求。用户请求可以是任何类型：写代码、改文件、执行命令、git 提交与推送、查询或解释、发布、删除等。\n\
-         - 助手给出明确结论、结果说明或交付物（例如「已提交并推送，commit 是 abc123」「已把 X 改成 Y，原因是 Z」「查询结果是 Z」）→ 已完成\n\
-         - 助手给出的是方案或计划，或明确表示需要等用户确认后再动手，或明确说明无需改动 → 已完成\n\
-         - 只有这种情况才算未完成：助手只是承诺「接下来／马上／我会去做某件事」（将来时），既没给出任何结果说明或交付物，也没说明需要用户确认\n\
-         只输出一行：`未完成` 或 `已完成`（可在第二行补一句理由）。不要调用任何工具，不要输出其它内容。\n\n\
-         【用户请求】\n{user}\n\n【助手最终回复】\n{assistant}\n",
-        user = truncate_chars(user_text, NUDGE_USER_LIMIT),
-        assistant = truncate_chars(assistant_text, NUDGE_ASSISTANT_LIMIT),
-    )
-}
-
-/// 解析判定输出：只看第一个非空行；先判「未完成」（它是「已完成」的超集，必须先判）。
-fn parse_nudge_verdict(text: &str) -> NudgeVerdict {
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.contains("未完成") {
-            return NudgeVerdict::Undone;
-        }
-        if line.contains("已完成") {
-            return NudgeVerdict::Done;
-        }
-        return NudgeVerdict::Unknown;
-    }
-    NudgeVerdict::Unknown
-}
-
-/// 取入站 Responses 请求里最后一条 user 消息的纯文本（判定提示词的「用户请求」）。
+/// 取入站 Responses 请求里最后一条 user 消息的纯文本（会话标题线程的识别用）。
 fn last_user_text(req: &Value) -> String {
     match req.get("input") {
         Some(Value::String(text)) => text.clone(),
@@ -416,24 +404,6 @@ fn last_user_text(req: &Value) -> String {
             .unwrap_or_default(),
         _ => String::new(),
     }
-}
-
-/// 构造判定调用请求体：同一模型、流式、不带工具（避免判定模型自己去调工具）。
-///
-/// 流式原因：OpenCode 免费档会拒绝对非流式（`stream: false`）的请求（
-/// "OpenCode's free tier can only be used from within OpenCode"），
-/// 判定只是后台调用，流式返回同样可用；解析侧见 [`nudge_judge_stream_text`]。
-fn nudge_judge_body(model: &str, prompt: &str) -> Value {
-    json!({
-        "model": model,
-        "stream": true,
-        "tools": [],
-        "input": [{
-            "type": "message",
-            "role": "user",
-            "content": [{ "type": "input_text", "text": prompt }]
-        }],
-    })
 }
 
 /// 构造续跑请求体：克隆原请求，把本轮助手文本与注入提醒（默认模式用 [`NUDGE_TEXT`]、
@@ -462,45 +432,6 @@ fn nudge_continuation_body(original: &Value, assistant_text: &str, nudge_text: &
     }));
     body["input"] = Value::Array(input);
     body
-}
-
-/// 从 SSE 流式响应里拼接判定文本：逐行取 `data:` 载荷，每个 chunk 的
-/// `choices[0].delta.content` 按序拼接；空行/非 data 行/`[DONE]` 忽略。
-/// 流内出现 `error` 或没有任何内容时返回 `None`（调用方记为解析失败）。
-fn nudge_judge_stream_text(sse: &str) -> Option<String> {
-    let mut text = String::new();
-    for line in sse.lines() {
-        let line = line.trim_end();
-        if line.is_empty() || !line.starts_with("data:") {
-            continue;
-        }
-        let payload = line["data:".len()..].trim();
-        if payload.is_empty() || payload == "[DONE]" {
-            continue;
-        }
-        let Ok(chunk) = serde_json::from_str::<Value>(payload) else {
-            continue;
-        };
-        // 流内随附的 error（HTTP 仍为 200）：当作解析失败
-        if chunk.get("error").is_some_and(|v| !v.is_null()) {
-            return None;
-        }
-        // 无 choices 的分片（如 usage 分片）直接跳过，不影响其它内容分片
-        let choices = chunk.get("choices").and_then(Value::as_array);
-        if let Some(Some(content)) = choices.map(|c| {
-            c.first()
-                .and_then(|choice| choice.get("delta"))
-                .and_then(|d| d.get("content"))
-                .and_then(Value::as_str)
-        }) {
-            text.push_str(content);
-        }
-    }
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
 }
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
@@ -876,7 +807,7 @@ fn http_client() -> &'static reqwest::Client {
 /// `zen_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
 /// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
 /// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格；
-/// `mode` 是口嗨检测识别出的协作模式（`plan`/`default`）——排查「计划模式仍发起判定」
+/// `mode` 是口嗨检测识别出的协作模式（`plan`/`default`）——排查「默认模式被注入计划提醒」
 /// 这类问题时先看这一格；`mode_src` 说明它的来源（`registry` = 协议登记表，
 /// `heuristic` = 关键词兜底判据，见 [`resolve_nudge_mode`]）；
 /// `patch_failures` 是本次历史里已失败的补丁调用条数（>0 说明模型正在补丁上打转，
@@ -2187,10 +2118,13 @@ async fn pump_stream(
 /// 流式：把 Zen 的 SSE data 行翻译为 responses 事件序列（text/event-stream）。
 ///
 /// 实际处理在 `run_stream_task`：读第一轮上游流，终局若命中「纯文本 + 无工具调用」就
-/// 走口嗨决策链——标题生成请求整轮放行；计划模式用代码判据（终局含计划标签即「已交付」、
-/// 含 [`PLAN_CANCEL_MARKER`] 即「用户已取消」，两者都直接收尾）决定是收尾还是注入
-/// [`PLAN_NUDGE_TEXT`] 催计划；默认模式发一次后台 AI 判定，判为口嗨则注入提醒再打一轮上游、
-/// 把第二轮事件续在同一个响应流里（工具调用照常下发给 codex，对 codex 透明），最后统一收尾。
+/// 走口嗨决策链——标题生成请求整轮放行；两个模式都用**纯代码判据**决定收尾还是续跑：
+/// 计划模式看计划系标签（[`PLAN_OUTPUT_MARKER`] / [`PLAN_CANCEL_MARKER`] /
+/// [`PLAN_UNACHIEVABLE_MARKER`]，命中即收尾，都不命中才注入 [`PLAN_NUDGE_TEXT`] 催计划）；
+/// 默认模式看模型自己回的 [`TASK_COMPLETED_MARKER`]（命中即收尾清零计数），不命中就注入
+/// [`NUDGE_TEXT`] 再打一轮上游、把第二轮事件续在同一个响应流里（工具调用照常下发给 codex，
+/// 对 codex 透明），最后统一收尾。**没有任何独立的判定请求**——判定就发生在这一段注入的
+/// 对话轮里。
 async fn proxy_stream_response(
     state: ProxyState,
     headers: HeaderMap,
@@ -2217,7 +2151,7 @@ async fn proxy_stream_response(
             "error": null,
         }
     }));
-    // 通道 + 独立任务：事件一边产出一边下发，判定/续跑都发生在同一个响应流里
+    // 通道 + 独立任务：事件一边产出一边下发，续跑都发生在同一个响应流里
     let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
     tokio::spawn(async move {
         run_stream_task(
@@ -2238,7 +2172,7 @@ async fn proxy_stream_response(
         .unwrap_or_else(|_| error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into()))
 }
 
-/// 一个入站流式请求的完整处理：原始 pass（+ 必要时判定与续跑 pass）→ 统一收尾。
+/// 一个入站流式请求的完整处理：原始 pass（+ 必要时续跑 pass）→ 统一收尾。
 #[allow(clippy::too_many_arguments)]
 async fn run_stream_task(
     state: ProxyState,
@@ -2268,15 +2202,13 @@ async fn run_stream_task(
         .get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| !tools.is_empty());
-    // 计划模式：口嗨判据完全由代码给（终局文本是否含计划标签或「已取消计划」标记），
-    // 不调用 AI 判定。
+    // 口嗨判据完全由代码给：计划模式看计划系标签，默认模式看 [`TASK_COMPLETED_MARKER`]。
     // 模式本身优先取协议登记表（`run_stream_task` 与 `handle_responses` 用的是同一个纯函数，
     // 两处结论必然一致），查不到才退回关键词兜底。
     let (plan_mode, _) = resolve_nudge_mode(&state, &headers, &req);
-    // 会话标题生成任务（应用的后台临时线程）：整轮放行，不判定也不注入
+    // 会话标题生成任务（应用的后台临时线程）：整轮放行，不催办也不注入
     let title_task = request_is_title_task(&req);
     let session = opencode_session(&state, &headers);
-    let user_text = last_user_text(&req);
 
     let mut body = req.clone();
     let mut current = first_resp;
@@ -2306,11 +2238,11 @@ async fn run_stream_task(
         }
         // 模型真的调用了工具：本轮口嗨已被纠正（后续回合走新的入站请求），计数清零
         if !st.calls.is_empty() {
-            nudge_record_tool_activity(&state, &session);
+            nudge_record_progress(&state, &session);
             break;
         }
         // 会话标题生成任务：直接放行（标题线程必然「纯文本 + 零工具调用」结束，
-        // 判定只会白花一次上游调用并把它静默压后），不判定、不注入、不动 streak
+        // 注入只会白花一轮上游），不注入、不动 streak
         if title_task {
             log_at(
                 &log,
@@ -2328,15 +2260,14 @@ async fn run_stream_task(
             .as_ref()
             .map(|t| t.text_buf[text_len_before..].to_string())
             .unwrap_or_default();
-        // 只处理「纯文本 + 正常结束」的终局：无文本、被截断、无可调工具都不判定
+        // 只处理「纯文本 + 正常结束」的终局：无文本、被截断、无可调工具都不催办
         if !has_tools || st.finish_reason.as_deref() != Some("stop") || pass_text.trim().is_empty()
         {
             break;
         }
         // 计划模式：只用代码判据决定本轮怎么收尾——终局带计划标签即已交付、直接收尾；
         // 带「已取消计划」标记则视为用户已放弃、带「无法或无需计划」标记则视为本就不产出
-        // 计划，三者都直接收尾；三者都没有才按「未交付」催它给出计划（计划专用提醒，
-        // 不调用 AI 判定）
+        // 计划，三者都直接收尾；三者都没有才按「未交付」催它给出计划（计划专用提醒）
         let nudge_mode = if plan_mode { "plan" } else { "default" };
         if plan_mode && is_plan_deliverable(&pass_text) {
             log_at(
@@ -2381,6 +2312,24 @@ async fn run_stream_task(
             );
             break;
         }
+        // 默认模式：终局带「任务已经结束」标签（提醒里约定的 `<task_completed>`），
+        // 即模型自己宣告任务已终结——直接收尾，不再注入、不触发后续 pass。
+        // 这里按「健康结束」清零连续计数：判定删除后每个纯文本终局都会注入一次，
+        // 若不重置，普通问答两轮就会耗光 streak，真正的口嗨反而 10 分钟内不再被催。
+        if !plan_mode && is_task_completed(&pass_text) {
+            nudge_record_progress(&state, &session);
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_skipped",
+                &[
+                    ("reason", "task_completed".to_string()),
+                    ("pass", pass.to_string()),
+                    ("mode", nudge_mode.to_string()),
+                ],
+            );
+            break;
+        }
         if pass >= NUDGE_MAX_PASSES {
             log_at(
                 &log,
@@ -2406,17 +2355,9 @@ async fn run_stream_task(
             );
             break;
         }
-        // AI 看门狗只服务默认模式：计划模式的完成判据已由上面的代码判据给出
-        let nudge_text = if !plan_mode {
-            if nudge_judge(&state, &headers, &model, &user_text, &pass_text, &call_id, pass).await
-                != NudgeVerdict::Undone
-            {
-                break;
-            }
-            NUDGE_TEXT
-        } else {
-            PLAN_NUDGE_TEXT
-        };
+        // 两个模式各用各的提醒：默认模式那条负责把 `<task_completed>` 教给模型
+        // （判定搬进原对话，不再有独立的判定请求）
+        let nudge_text = if plan_mode { PLAN_NUDGE_TEXT } else { NUDGE_TEXT };
         // 注入提醒并续跑：第二轮的事件继续喂同一个 StreamState
         let streak = nudge_record_injection(&state, &session);
         body = nudge_continuation_body(&body, &pass_text, nudge_text);
@@ -2504,112 +2445,15 @@ fn nudge_record_injection(state: &ProxyState, session: &str) -> u32 {
     entry.streak
 }
 
-/// 分会话计数：模型真的调用了工具，连续计数清零。
-fn nudge_record_tool_activity(state: &ProxyState, session: &str) {
+/// 分会话计数：模型真的推进了（调用了工具，或用 [`TASK_COMPLETED_MARKER`] 宣告任务结束），
+/// 连续计数清零。
+fn nudge_record_progress(state: &ProxyState, session: &str) {
     let Ok(mut map) = state.nudge.lock() else {
         return;
     };
     if let Some(entry) = map.get_mut(session) {
-        entry.record_tool_activity();
+        entry.record_progress();
     }
-}
-
-/// 跑一次后台判定调用（同一模型、流式、无工具）。超时/报错/解析不出都返回
-/// `Unknown`，调用方按「已完成」处理（不注入、照常收尾）。
-async fn nudge_judge(
-    state: &ProxyState,
-    headers: &HeaderMap,
-    model: &str,
-    user_text: &str,
-    assistant_text: &str,
-    call_id: &str,
-    pass: usize,
-) -> NudgeVerdict {
-    let prompt = nudge_judge_prompt(user_text, assistant_text);
-    let body = nudge_judge_body(model, &prompt);
-    let judge_call_id = format!("{call_id}-judge{pass}");
-    let started = Instant::now();
-    let forwarded = tokio::time::timeout(
-        NUDGE_JUDGE_TIMEOUT,
-        forward(&body, headers, true, state, &judge_call_id),
-    )
-    .await;
-    let elapsed_ms = started.elapsed().as_millis().to_string();
-    let outcome: Result<String, (String, String)> = match forwarded {
-        Err(_) => Err(("timeout".to_string(), String::new())),
-        Ok(Err((status, message))) => Err((format!("http_{}", status.as_u16()), message)),
-        Ok(Ok(forwarded)) => {
-            let mut trace = forwarded.trace;
-            if !forwarded.status.is_success() {
-                let detail = match forwarded.payload {
-                    ForwardPayload::Text(text) => truncate_chars(&text, 200),
-                    ForwardPayload::Live(_) => String::new(),
-                };
-                trace.note("upstream_status", forwarded.status.as_u16().to_string());
-                trace.note("suspicious", "nudge_judge_upstream_error");
-                trace.finish();
-                Err((format!("http_{}", forwarded.status.as_u16()), detail))
-            } else {
-                match forwarded.payload {
-                    ForwardPayload::Live(resp) => match resp.text().await {
-                        Ok(text) => {
-                            trace.write_response_text("response.sse", &text);
-                            let reply = nudge_judge_stream_text(&text);
-                            match reply {
-                                Some(reply) => {
-                                    trace.note(
-                                        "nudge_reply_chars",
-                                        reply.chars().count().to_string(),
-                                    );
-                                    trace.finish();
-                                    Ok(reply)
-                                }
-                                None => {
-                                    trace.note("suspicious", "nudge_judge_parse_error");
-                                    trace.finish();
-                                    Err(("parse_error".to_string(), String::new()))
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            trace.note("read_error", e.to_string());
-                            trace.finish();
-                            Err(("read_error".to_string(), e.to_string()))
-                        }
-                    },
-                    ForwardPayload::Text(text) => {
-                        trace.note("suspicious", "nudge_judge_empty_body");
-                        trace.finish();
-                        Err(("empty_body".to_string(), truncate_chars(&text, 200)))
-                    }
-                }
-            }
-        }
-    };
-    let (verdict, reply_chars) = match &outcome {
-        Ok(reply) => (parse_nudge_verdict(reply), reply.chars().count()),
-        Err(_) => (NudgeVerdict::Unknown, 0),
-    };
-    log_at(
-        &state.log,
-        "info",
-        "zen_proxy.nudge_judged",
-        &[
-            ("session", opencode_session(state, headers)),
-            ("pass", pass.to_string()),
-            ("verdict", format!("{verdict:?}")),
-            ("reply_chars", reply_chars.to_string()),
-            ("elapsed_ms", elapsed_ms),
-            (
-                "error",
-                match &outcome {
-                    Ok(_) => "-".to_string(),
-                    Err((kind, detail)) => format!("{kind}:{detail}"),
-                },
-            ),
-        ],
-    );
-    verdict
 }
 
 /// 上游非 2xx：透传状态码与错误体。
@@ -4181,103 +4025,6 @@ mod tests {
     // ---------- 口嗨检测：纯函数与分会话计数 ----------
 
     #[test]
-    fn nudge_judge_prompt_carries_facts_and_limits_length() {
-        let prompt = nudge_judge_prompt("把 base_url 的测试补上", "Now update the test - specifically the base_url path test.");
-        assert!(prompt.contains("把 base_url 的测试补上"), "应带上用户请求");
-        assert!(prompt.contains("Now update the test"), "应带上助手终局文本");
-        assert!(prompt.contains("没有调用任何工具"), "应说明本回复没有工具调用");
-        assert!(
-            prompt.contains("这只说明本次回复没调工具"),
-            "应限定事实的适用范围：{prompt}"
-        );
-        assert!(
-            prompt.contains("不能据此推断整个任务没做"),
-            "必须排除「本轮没调工具＝任务没做」的推断：{prompt}"
-        );
-        assert!(prompt.contains("`未完成` 或 `已完成`"), "应要求单行结论");
-        assert!(
-            prompt.contains("方案或计划"),
-            "计划/方案必须明确算作已完成：{prompt}"
-        );
-        // 规则部分（助手终局文本之前）不得再出现计划标签：计划模式的完成判据由代码给
-        let rules = prompt.split("【用户请求】").next().unwrap_or_default();
-        assert!(
-            !rules.contains("<proposed_plan"),
-            "判定提示词的规则不应再提计划标签：{rules}"
-        );
-        assert!(
-            !rules.contains("含代码/文本产出"),
-            "验收口径不应再偏向「代码/文本产出」：{rules}"
-        );
-        assert!(
-            rules.contains("只是承诺") && rules.contains("将来时"),
-            "未完成只限「只有将来时承诺、什么都没给」：{rules}"
-        );
-
-        // 超长输入按字符截断（含省略号），不会把整段历史塞进判定提示词
-        let long_user = "用".repeat(NUDGE_USER_LIMIT + 50);
-        let long_reply = "答".repeat(NUDGE_ASSISTANT_LIMIT + 50);
-        let prompt = nudge_judge_prompt(&long_user, &long_reply);
-        assert!(!prompt.contains(&long_user));
-        assert!(!prompt.contains(&long_reply));
-        assert_eq!(
-            prompt.matches('…').count(),
-            2,
-            "两段超长文本各截断一次：{prompt}"
-        );
-    }
-
-    #[test]
-    fn nudge_judge_prompt_accepts_non_code_tasks() {
-        // 回归场景：操作型请求（git 提交并推送）在更早回合已用工具做完，本轮只是汇报
-        let prompt = nudge_judge_prompt("请git提交和推送代码", "已提交并推送：74a828f（origin/main）。");
-        let rules = prompt.split("【用户请求】").next().unwrap_or_default();
-        // 任务类型清单必须覆盖「不含代码产出」的操作型请求
-        for needle in [
-            "任何类型",
-            "执行命令",
-            "git 提交与推送",
-            "查询或解释",
-            "发布",
-            "删除",
-        ] {
-            assert!(rules.contains(needle), "任务类型清单缺少「{needle}」：{rules}");
-        }
-        // past-tense 结果汇报本身就是交付物（误判发生在这一格）
-        assert!(rules.contains("已提交并推送"), "{rules}");
-        // 「本轮 0 次工具调用」不能反推「任务没做」
-        assert!(rules.contains("不能据此推断整个任务没做"), "{rules}");
-        // 规则段仍不得引入计划标签
-        assert!(!rules.contains("<proposed_plan"), "{rules}");
-        // 用户请求与助手终局文本原样带上
-        assert!(prompt.contains("请git提交和推送代码"), "{prompt}");
-        assert!(prompt.contains("已提交并推送：74a828f"), "{prompt}");
-    }
-
-    #[test]
-    fn parse_nudge_verdict_reads_first_non_empty_line() {
-        assert_eq!(parse_nudge_verdict("未完成"), NudgeVerdict::Undone);
-        assert_eq!(
-            parse_nudge_verdict("\n  未完成\n理由：它只说要做，没有动手"),
-            NudgeVerdict::Undone
-        );
-        assert_eq!(parse_nudge_verdict("已完成"), NudgeVerdict::Done);
-        assert_eq!(
-            parse_nudge_verdict("已完成\n理由：给出了明确结论"),
-            NudgeVerdict::Done
-        );
-        // 一行里两种字样都出现：先判「未完成」（它是「已完成」的超集）
-        assert_eq!(
-            parse_nudge_verdict("未完成（不是已完成）"),
-            NudgeVerdict::Undone
-        );
-        // 只有第一行参与判定；噪声/空文本按无法判定
-        assert_eq!(parse_nudge_verdict("好的\n未完成"), NudgeVerdict::Unknown);
-        assert_eq!(parse_nudge_verdict("   \n\n"), NudgeVerdict::Unknown);
-        assert_eq!(parse_nudge_verdict("undone"), NudgeVerdict::Unknown);
-    }
-
-    #[test]
     fn request_is_plan_mode_reads_collaboration_mode_heading() {
         // 计划模式：codex 把模式块拼在 developer 条目末尾（前面还有 skills 等文本）
         let plan = json!({
@@ -4527,12 +4274,6 @@ mod tests {
     }
 
     #[test]
-    fn nudge_judge_timeout_is_one_minute() {
-        // 判定用同一个模型后台跑（Zen 免费模型偶发 30s+）：给足 60 秒，超时仍按「已完成」收尾
-        assert_eq!(NUDGE_JUDGE_TIMEOUT, Duration::from_secs(60));
-    }
-
-    #[test]
     fn is_plan_deliverable_matches_proposed_plan_wrapper() {
         assert!(is_plan_deliverable(
             "<proposed_plan>\n# 标题\n…\n</proposed_plan>"
@@ -4585,6 +4326,40 @@ mod tests {
         ));
         assert!(!is_plan_unachievable(
             "<cancelled_plan>用户说不用改了</cancelled_plan>"
+        ));
+    }
+
+    #[test]
+    fn is_task_completed_matches_tag_marker() {
+        // 标签名与命名口径锁死：不加 `zen_` 前缀（与 plan 系标签同族同形）
+        assert_eq!(TASK_COMPLETED_MARKER, "<task_completed");
+        assert!(
+            !TASK_COMPLETED_MARKER.contains("zen"),
+            "标签名不得带 zen 前缀：{TASK_COMPLETED_MARKER}"
+        );
+        // 提醒里教的标签形态（默认模式下模型自己宣告任务结束的正确收尾）
+        assert!(is_task_completed(
+            "结论：已把 base_url 路径测试补上。\n<task_completed>已完成：补了 3 个用例</task_completed>"
+        ));
+        // 与 plan 系标签同口径：大小写不敏感 + 前缀匹配，缺闭合标签也命中
+        assert!(is_task_completed(
+            "<TASK_COMPLETED>已完成：无需改动</TASK_COMPLETED>"
+        ));
+        assert!(is_task_completed("<task_completed>已完成：已推送"));
+        assert!(is_task_completed("<task_completed>"));
+        // 普通结论、空串、裸中文措辞都不算「任务已结束」
+        assert!(!is_task_completed("我看完了代码，结论是不需要改动。"));
+        assert!(!is_task_completed(""));
+        assert!(!is_task_completed("任务已经完成，无需改动"));
+        // 三个计划标签不命中本判据（模式教学不串味）
+        assert!(!is_task_completed(
+            "<proposed_plan>\n# 标题\n- 步骤 1\n</proposed_plan>"
+        ));
+        assert!(!is_task_completed(
+            "<cancelled_plan>用户说不用改了</cancelled_plan>"
+        ));
+        assert!(!is_task_completed(
+            "<unachievable_plan>这是事实问题</unachievable_plan>"
         ));
     }
 
@@ -4665,6 +4440,35 @@ mod tests {
         assert_eq!(input[2]["content"][0]["type"], "input_text");
         assert_eq!(input[2]["content"][0]["text"], NUDGE_TEXT);
 
+        // 默认模式提醒：二选一（继续干 / 用标签宣告结束），并教出成对标签
+        assert!(
+            NUDGE_TEXT.contains("必须实际调用工具"),
+            "必须保留执行口径，否则弱模型继续只写承诺：{NUDGE_TEXT}"
+        );
+        assert!(
+            NUDGE_TEXT.contains(&format!("{TASK_COMPLETED_MARKER}>")),
+            "必须与模型约定「任务已结束」标签，否则判定删掉后没有收尾出口：{NUDGE_TEXT}"
+        );
+        assert!(
+            NUDGE_TEXT.contains("</task_completed>"),
+            "必须给出闭合标签，否则弱模型只写正文：{NUDGE_TEXT}"
+        );
+        assert!(
+            is_task_completed(NUDGE_TEXT),
+            "提醒文本自身就带标记，前缀判据必须命中：{NUDGE_TEXT}"
+        );
+        // 结构不变量：未来的代理层过滤/分桶只依赖这些（与载荷词汇无关）
+        for needle in ["成对闭合", "独占一行", "不换行", "本轮最多只写一个", "不要放进代码块"] {
+            assert!(
+                NUDGE_TEXT.contains(needle),
+                "提醒必须写明标签结构约定「{needle}」：{NUDGE_TEXT}"
+            );
+        }
+        // 默认模式提醒不教计划标签（模式教学不串味）
+        assert!(!NUDGE_TEXT.contains(PLAN_OUTPUT_MARKER), "{NUDGE_TEXT}");
+        assert!(!NUDGE_TEXT.contains(PLAN_CANCEL_MARKER), "{NUDGE_TEXT}");
+        assert!(!NUDGE_TEXT.contains(PLAN_UNACHIEVABLE_MARKER), "{NUDGE_TEXT}");
+
         // 计划模式：注入计划专用提醒（同一段构造逻辑，只是文本不同）
         let body = nudge_continuation_body(&original, "先给方案", PLAN_NUDGE_TEXT);
         let input = body["input"].as_array().unwrap();
@@ -4726,53 +4530,6 @@ mod tests {
     }
 
     #[test]
-    fn nudge_judge_body_is_stream_without_tools() {
-        let body = nudge_judge_body("mimo-v2.5-free", "判定提示词");
-        assert_eq!(body["model"], "mimo-v2.5-free");
-        assert_eq!(body["stream"], true);
-        assert_eq!(body["tools"], json!([]));
-        assert_eq!(body["input"][0]["role"], "user");
-        assert_eq!(body["input"][0]["content"][0]["text"], "判定提示词");
-    }
-
-    #[test]
-    fn nudge_judge_stream_text_concats_delta_content() {
-        let sse = "event: message\n\
-data: {\"choices\":[{\"delta\":{\"content\":\"未完成\"}}]}\n\
-\n\
-data: {\"choices\":[{\"delta\":{\"content\":\"\\n理由：只说不做\"}}]}\n\
-\n\
-data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\
-\n\
-data: [DONE]\n\n";
-        assert_eq!(
-            nudge_judge_stream_text(sse).as_deref(),
-            Some("未完成\n理由：只说不做")
-        );
-    }
-
-    #[test]
-    fn nudge_judge_stream_text_ignores_noise_and_usage_chunks() {
-        // 空行 / 非 data 行 / 无 choices 的 usage 分片都应跳过、不中断拼接
-        let sse = "\n\
-event: message\n\
-data: {\"choices\":[{\"delta\":{\"content\":\"已完成\"}}]}\n\
-data: {\"usage\":{\"total_tokens\":12}}\n\
-data: [DONE]";
-        assert_eq!(nudge_judge_stream_text(sse).as_deref(), Some("已完成"));
-    }
-
-    #[test]
-    fn nudge_judge_stream_text_empty_or_error_returns_none() {
-        assert_eq!(nudge_judge_stream_text(""), None);
-        assert_eq!(nudge_judge_stream_text("event: done\ndata: [DONE]"), None);
-        // 流内随附 error：整体判为解析失败
-        let sse = "data: {\"error\":{\"message\":\"boom\"}}\n\
-data: {\"choices\":[{\"delta\":{\"content\":\"已完成\"}}]}\n";
-        assert_eq!(nudge_judge_stream_text(sse), None);
-    }
-
-    #[test]
     fn nudge_state_caps_streak_and_resets() {
         let mut state = NudgeState::default();
         let now = Instant::now();
@@ -4790,9 +4547,9 @@ data: {\"choices\":[{\"delta\":{\"content\":\"已完成\"}}]}\n";
         assert!(state.allow(later));
         assert_eq!(state.streak, 0);
 
-        // 模型真的调用了工具：计数清零
+        // 模型真的推进了（调用工具，或用 `<task_completed>` 收尾）：计数清零
         state.record_injection(later);
-        state.record_tool_activity();
+        state.record_progress();
         assert_eq!(state.streak, 0);
         assert!(state.last.is_none());
         assert!(state.allow(later));
@@ -4820,8 +4577,8 @@ data: {\"choices\":[{\"delta\":{\"content\":\"已完成\"}}]}\n";
         assert!(nudge_allow(&state, "ses_b"), "另一个会话仍有注入额度");
         assert_eq!(nudge_record_injection(&state, "ses_b"), 2);
         assert!(!nudge_allow(&state, "ses_b"), "第二个会话自己达上限");
-        // 工具活动只清零对应会话：A 恢复，B 仍受限
-        nudge_record_tool_activity(&state, "ses_a");
+        // 进展只清零对应会话：A 恢复，B 仍受限
+        nudge_record_progress(&state, "ses_a");
         assert!(nudge_allow(&state, "ses_a"));
         assert!(!nudge_allow(&state, "ses_b"));
     }
@@ -7094,7 +6851,7 @@ mod integration_tests {
 
     // ---------- 口嗨自动续跑：脚本化上游与端到端用例 ----------
 
-    /// 脚本化上游响应：SSE 分片用于流式（判定与正常回复均流式），
+    /// 脚本化上游响应：SSE 分片用于流式（正常回复与续跑轮都是流式），
     /// `SseDelayed` 模拟「首包很慢」的上游。
     #[derive(Clone)]
     enum ScriptedReply {
@@ -7199,9 +6956,11 @@ mod integration_tests {
         ]
     }
 
-    /// 判定调用的 SSE 流式回复：判定请求走流式（`stream: true`），mock 需回 SSE 分片。
-    fn judge_reply(verdict: &str) -> ScriptedReply {
-        ScriptedReply::Sse(sse_text_reply(verdict))
+    /// 默认模式按约定收尾的终局文本（`<task_completed>` 成对标签）。
+    fn completion_reply(reason: &str) -> ScriptedReply {
+        ScriptedReply::Sse(sse_text_reply(&format!(
+            "<task_completed>{reason}</task_completed>"
+        )))
     }
 
     /// 入站 Responses 请求体（JSON）：指定末条 user 文本，可选带一个工具声明。
@@ -7223,7 +6982,7 @@ mod integration_tests {
         req
     }
 
-    /// 入站 Responses 请求体（JSON）：可选带一个工具声明（无工具时不应触发判定）。
+    /// 入站 Responses 请求体（JSON）：可选带一个工具声明（无工具时不应催办）。
     fn nudge_probe_json(with_tools: bool) -> Value {
         nudge_probe_json_for("把 base_url 的测试补上", with_tools)
     }
@@ -7278,24 +7037,27 @@ mod integration_tests {
         Arc::new(registry)
     }
 
-    /// 走一次代理的流式翻译入口（指定请求头与模式登记表），返回发给 codex 的完整 SSE 文本。
-    async fn run_nudge_probe_full(
-        upstream: &str,
-        log: ZenLog,
+    /// 探测用代理状态（可复用：`nudge` 计数表在同一个 state 内跨请求保留，
+    /// 测「标签收尾清零 streak」这类跨请求行为时必须复用同一个 state）。
+    fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
+        ProxyState {
+            session: "ses_fixed123".into(),
+            base_url: upstream.to_string(),
+            log,
+            trace: TraceSink::disabled(),
+            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            nudge: Arc::new(Mutex::new(HashMap::new())),
+            session_map: Arc::new(SessionMap::default()),
+            modes: Arc::new(ThreadModeRegistry::default()),
+        }
+    }
+
+    /// 用一个已构造好的代理状态走一次流式翻译入口，返回发给 codex 的完整 SSE 文本。
+    async fn run_nudge_probe_state(
+        state: ProxyState,
         headers: HeaderMap,
         body: Body,
-        modes: Arc<ThreadModeRegistry>,
     ) -> String {
-       let state = ProxyState {
-           session: "ses_fixed123".into(),
-           base_url: upstream.to_string(),
-           log,
-           trace: TraceSink::disabled(),
-           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           nudge: Arc::new(Mutex::new(HashMap::new())),
-           session_map: Arc::new(SessionMap::default()),
-           modes,
-       };
         let uri: Uri = "/responses".parse().unwrap();
         let resp = handle_any(
             State(state),
@@ -7307,6 +7069,19 @@ mod integration_tests {
         .await;
         assert_eq!(resp.status(), StatusCode::OK);
         body_text(resp).await
+    }
+
+    /// 走一次代理的流式翻译入口（指定请求头与模式登记表），返回发给 codex 的完整 SSE 文本。
+    async fn run_nudge_probe_full(
+        upstream: &str,
+        log: ZenLog,
+        headers: HeaderMap,
+        body: Body,
+        modes: Arc<ThreadModeRegistry>,
+    ) -> String {
+        let mut state = nudge_probe_state(upstream, log);
+        state.modes = modes;
+        run_nudge_probe_state(state, headers, body).await
     }
 
     /// 走一次代理的流式翻译入口（无请求头、空登记表），返回发给 codex 的完整 SSE 文本。
@@ -7339,7 +7114,6 @@ mod integration_tests {
             ScriptedReply::Sse(sse_text_reply(
                 "Now update the test - specifically the base_url path test.",
             )),
-            judge_reply("未完成"),
             ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
         ])
         .await;
@@ -7353,22 +7127,9 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
 
         let calls = rec.lock().await.clone();
-        assert_eq!(calls.len(), 3, "应为：首轮 + 判定 + 续跑");
-        // 判定调用：流式（绕开 OpenCode 免费档对非流式的拒绝）、无工具，
-        // 提示词里带上用户请求与助手终局文本
-        assert_eq!(calls[1]["stream"], true);
-        assert!(
-            calls[1]["tools"].is_null(),
-            "判定调用不应带工具声明：{}",
-            calls[1]
-        );
-        let prompt = calls[1]["messages"][0]["content"]
-            .as_str()
-            .unwrap_or_else(|| panic!("判定请求形状异常：{}", calls[1]));
-        assert!(prompt.contains("把 base_url 的测试补上"), "{prompt}");
-        assert!(prompt.contains("Now update the test"), "{prompt}");
+        assert_eq!(calls.len(), 2, "应为：首轮 + 续跑（不再有独立判定请求）");
         // 续跑调用：历史尾部是「助手原样文本 + 注入提醒」
-        let messages = calls[2]["messages"].as_array().unwrap();
+        let messages = calls[1]["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[1]["role"], "assistant");
         assert!(messages[1]["content"]
@@ -7376,26 +7137,50 @@ mod integration_tests {
             .unwrap()
             .contains("Now update the test"));
         assert_eq!(messages[2]["role"], "user");
-        assert!(messages[2]["content"].as_str().unwrap().contains("自动续跑"));
-        // 会话日志：判定与注入各留一条
+        let injected = messages[2]["content"].as_str().unwrap();
+        assert!(injected.contains("自动续跑"), "{injected}");
+        assert!(
+            injected.contains(&format!("{TASK_COMPLETED_MARKER}>")),
+            "默认模式提醒必须教出成对标签：{injected}"
+        );
+        assert!(
+            injected.contains("必须实际调用工具"),
+            "默认模式提醒必须带执行口径：{injected}"
+        );
+        // 会话日志：只留注入一条（判定事件已随看门狗删除）
         let joined = read_session_log(&dir);
-        assert!(joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
         assert!(joined.contains("event=zen_proxy.nudge_injected"), "{joined}");
+        assert!(!joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
     }
 
+    /// 终局自带 `<task_completed>`：模型自己宣告任务结束，一次调用就收尾（不注入、不续跑）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_does_not_inject_when_verdict_done() {
+    async fn nudge_skipped_when_completion_tag_present() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
-            ScriptedReply::Sse(sse_text_reply("结论：这段代码无需改动，原因是 ……")),
-            judge_reply("已完成"),
+            completion_reply("已完成：这段代码无需改动，原因是 ……"),
+            // 第 2 轮不该发生：真发生时脚本会回空话，下面的调用数断言会失败
+            ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
         ])
         .await;
 
-        let body = run_nudge_probe(&upstream, None, nudge_probe(true)).await;
+        let body = run_nudge_probe(&upstream, log, nudge_probe(true)).await;
 
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert!(!body.contains("function_call"), "{body}");
-        assert_eq!(rec.lock().await.len(), 2, "判为已完成时不应续跑");
+        assert_eq!(rec.lock().await.len(), 1, "带标签时不应续跑");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped")
+                && joined.contains("reason=task_completed")
+                && joined.contains("mode=default"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_injected"),
+            "带标签时不应注入：{joined}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -7404,9 +7189,7 @@ mod integration_tests {
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("第一句空话")),
-            judge_reply("未完成"),
             ScriptedReply::Sse(sse_text_reply("第二句空话")),
-            judge_reply("未完成"),
             ScriptedReply::Sse(sse_text_reply("第三句空话")),
         ])
         .await;
@@ -7416,11 +7199,16 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert_eq!(
             rec.lock().await.len(),
-            5,
-            "首轮 + (判定 + 续跑) × 2；第三次口嗨不再注入"
+            3,
+            "首轮 + 续跑 × 2；第三次口嗨不再注入（streak 上限）"
         );
         let joined = read_session_log(&dir);
         assert!(joined.contains("event=zen_proxy.nudge_limited"), "{joined}");
+        assert_eq!(
+            joined.matches("event=zen_proxy.nudge_injected").count(),
+            2,
+            "恰好注入两次：{joined}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -7431,7 +7219,7 @@ mod integration_tests {
         let body = run_nudge_probe(&upstream, None, nudge_probe(false)).await;
 
         assert_eq!(body.matches("event: response.completed").count(), 1);
-        assert_eq!(rec.lock().await.len(), 1, "无工具可用时不做判定");
+        assert_eq!(rec.lock().await.len(), 1, "无工具可用时不催办");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -7441,7 +7229,6 @@ mod integration_tests {
         let tool_chunks = sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}");
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("我先说明一下接下来要做的事。")),
-            judge_reply("未完成"),
             ScriptedReply::SseDelayed {
                 lines: tool_chunks,
                 delay: USAGE_GRACE + Duration::from_millis(500),
@@ -7453,7 +7240,7 @@ mod integration_tests {
 
         assert!(body.contains("function_call"), "{body}");
         assert_eq!(body.matches("event: response.completed").count(), 1);
-        assert_eq!(rec.lock().await.len(), 3);
+        assert_eq!(rec.lock().await.len(), 2);
     }
 
     /// 计划模式下的协作模式文本段（codex 0.154 实测文案，见 [`REAL_PLAN_MODE_BLOCK`]；
@@ -7463,7 +7250,7 @@ mod integration_tests {
     }
 
     /// 计划模式下终局没有计划标签：按「计划未交付」注入计划专用提醒续跑，
-    /// 全程不调用 AI 判定（判定提示词与判据都不参与计划模式）。
+    /// 全程纯代码判据（计划模式不看默认模式的收尾标签，也不发任何独立判定请求）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_plan_mode_asks_for_plan_when_no_marker() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7493,7 +7280,7 @@ mod integration_tests {
         assert_eq!(
             calls.len(),
             2,
-            "计划模式下应「首轮 + 续跑」，不发判定调用：{calls:?}"
+            "计划模式下应「首轮 + 续跑」，无独立判定请求：{calls:?}"
         );
         // 续跑调用：历史尾部是「助手原样文本 + 计划专用提醒」
         let messages = calls[1]["messages"].as_array().unwrap();
@@ -7513,7 +7300,7 @@ mod integration_tests {
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
-            "计划模式不应有 AI 判定：{joined}"
+            "已随看门狗删除的判定事件不应出现：{joined}"
         );
     }
 
@@ -7565,7 +7352,7 @@ mod integration_tests {
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
-            "计划模式不应有 AI 判定：{joined}"
+            "已随看门狗删除的判定事件不应出现：{joined}"
         );
     }
 
@@ -7656,7 +7443,7 @@ mod integration_tests {
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
-            "计划模式不应有 AI 判定：{joined}"
+            "已随看门狗删除的判定事件不应出现：{joined}"
         );
     }
 
@@ -7701,8 +7488,9 @@ mod integration_tests {
     }
 
     /// 关键回归：历史里残留旧的计划模式块（codex 把历次模式块都留在历史里），但协议登记表
-    /// 说这个线程现在是默认模式——必须走默认模式的 AI 看门狗并注入执行口径，不能按计划模式
-    /// 注入「请给出计划」（这正是线上 `collaboration_mode_kind=default` 却按 plan 分流的那次误判）。
+    /// 说这个线程现在是默认模式——必须走默认模式的续跑（注入带 `<task_completed>` 契约的执行
+    /// 口径），不能按计划模式注入「请给出计划」（这正是线上 `collaboration_mode_kind=default`
+    /// 却按 plan 分流的那次误判）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_mode_registry_beats_stale_plan_block_in_history() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7711,7 +7499,6 @@ mod integration_tests {
             ScriptedReply::Sse(sse_text_reply(
                 "Now update the test - specifically the base_url path test.",
             )),
-            judge_reply("未完成"),
             ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
         ])
         .await;
@@ -7729,10 +7516,10 @@ mod integration_tests {
         let calls = rec.lock().await.clone();
         assert_eq!(
             calls.len(),
-            3,
-            "登记表说默认模式：应「首轮 + 判定 + 续跑」：{calls:?}"
+            2,
+            "登记表说默认模式：应「首轮 + 续跑」（无独立判定请求）：{calls:?}"
         );
-        let injected = calls[2]["messages"]
+        let injected = calls[1]["messages"]
             .as_array()
             .unwrap()
             .last()
@@ -7744,13 +7531,17 @@ mod integration_tests {
             "默认模式应注入执行口径：{injected}"
         );
         assert!(
+            injected.contains(&format!("{TASK_COMPLETED_MARKER}>")),
+            "默认模式应注入标签契约：{injected}"
+        );
+        assert!(
             !injected.contains("没有交付计划"),
             "不得按计划模式注入计划提醒：{injected}"
         );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("event=zen_proxy.nudge_judged"),
-            "默认模式应发判定：{joined}"
+            joined.contains("event=zen_proxy.nudge_injected"),
+            "默认模式应注入续跑提醒：{joined}"
         );
         assert!(
             joined.contains("mode=default") && joined.contains("mode_src=registry"),
@@ -7763,7 +7554,7 @@ mod integration_tests {
     }
 
     /// 反向：登记表说计划模式、而历史里最后一块是默认模式块时，以登记表为准走计划分支
-    /// （不调用 AI 判定，注入计划专用提醒）。
+    /// （注入计划专用提醒，不看默认模式标签）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_mode_registry_plan_wins_over_default_block_in_history() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7806,7 +7597,7 @@ mod integration_tests {
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
-            "计划模式不应发判定：{joined}"
+            "已随看门狗删除的判定事件不应出现：{joined}"
         );
     }
 
@@ -7814,12 +7605,11 @@ mod integration_tests {
     /// 且以**最后一个**模式块为准：默认块在最后 → 默认分支；计划块在最后 → 计划分支。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_mode_falls_back_to_last_mode_block_without_registry() {
-        // ① 旧计划块在前、默认块在后 → 默认模式（判定 + 执行口径）
+        // ① 旧计划块在前、默认块在后 → 默认模式（续跑 + 执行口径）
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("我先说明一下接下来要做的事。")),
-            judge_reply("未完成"),
             ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
         ])
         .await;
@@ -7830,14 +7620,18 @@ mod integration_tests {
         )
         .await;
         assert_eq!(body.matches("event: response.completed").count(), 1);
-        assert_eq!(rec.lock().await.len(), 3, "默认分支应发判定");
+        assert_eq!(rec.lock().await.len(), 2, "默认分支应续跑一轮");
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("mode=default") && joined.contains("mode_src=heuristic"),
             "无登记表时应记关键词兜底来源：{joined}"
         );
+        assert!(
+            joined.contains("event=zen_proxy.nudge_injected"),
+            "默认分支应注入续跑提醒：{joined}"
+        );
 
-        // ② 默认块在前、计划块在后 → 计划模式（不发判定）
+        // ② 默认块在前、计划块在后 → 计划模式（注入计划提醒）
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
@@ -7854,13 +7648,24 @@ mod integration_tests {
         )
         .await;
         assert_eq!(body.matches("event: response.completed").count(), 1);
-        assert_eq!(rec.lock().await.len(), 2, "计划分支不发判定");
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 2, "计划分支只续跑一轮");
+        let injected = calls[1]["messages"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["content"]
+            .as_str()
+            .unwrap();
+        assert!(
+            injected.contains("没有交付计划") && injected.contains("<proposed_plan>"),
+            "计划分支必须注入计划专用提醒：{injected}"
+        );
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("mode=plan") && joined.contains("mode_src=heuristic"),
             "{joined}"
         );
-        assert!(!joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
     }
 
     /// 计划模式下终局带了计划标签：代码判据直接判「计划已交付」，一次上游调用就收尾。
@@ -7925,16 +7730,15 @@ mod integration_tests {
         );
     }
 
-    /// 默认模式的协作块正文里带「(e.g. Plan mode)」：不能被误判成计划模式而跳过 AI 判定
+    /// 默认模式的协作块正文里带「(e.g. Plan mode)」：不能被误判成计划模式而注入计划提醒
     /// （否则默认模式的正常编码回合会被注入「请给出计划」）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_default_mode_block_still_goes_to_judge() {
+    async fn nudge_default_mode_block_injects_execution_nudge() {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("先给个说明，接下来我再动手。")),
-            judge_reply("未完成"),
-            // 续跑轮真的调用了工具：回合就此收尾，不再产生第二轮判定
+            // 续跑轮真的调用了工具：回合就此收尾，不再产生第三轮
             ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
         ])
         .await;
@@ -7949,8 +7753,8 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert!(body.contains("function_call"), "{body}");
         let calls = rec.lock().await.clone();
-        assert_eq!(calls.len(), 3, "默认模式仍应「首轮 + 判定 + 续跑」：{calls:?}");
-        let injected = calls[2]["messages"]
+        assert_eq!(calls.len(), 2, "默认模式应「首轮 + 续跑」：{calls:?}");
+        let injected = calls[1]["messages"]
             .as_array()
             .unwrap()
             .last()
@@ -7961,25 +7765,29 @@ mod integration_tests {
             injected.contains("必须实际调用工具"),
             "默认模式注入执行口径：{injected}"
         );
+        assert!(
+            injected.contains(&format!("{TASK_COMPLETED_MARKER}>")),
+            "默认模式注入标签契约：{injected}"
+        );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("event=zen_proxy.nudge_judged")
-                && joined.contains("mode=default"),
+            joined.contains("event=zen_proxy.nudge_injected") && joined.contains("mode=default"),
             "{joined}"
         );
     }
 
-    /// 默认模式下终局文本本身是计划产物（`<proposed_plan>`）：代码不再短路，
-    /// 仍交给 AI 看门狗判断（提示词里不含该标签），判为已完成即正常收尾。
+    /// 默认模式下终局文本本身是计划产物（`<proposed_plan>`）：那不是默认模式的收尾标签，
+    /// 因此照常注入续跑提醒；模型在续跑轮按约定用 `<task_completed>` 收尾即结束
+    /// （「已给方案、等你确认」也要写进标签，不再由 AI 判定替它放行）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_default_mode_plan_output_goes_to_judge() {
+    async fn nudge_default_mode_plan_output_is_not_a_completion_tag() {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply(
                 "先给方案：\n<proposed_plan>\n1. 做 A\n2. 做 B\n</proposed_plan>",
             )),
-            judge_reply("已完成"),
+            completion_reply("已给方案，等你确认后再动手"),
         ])
         .await;
 
@@ -7987,34 +7795,33 @@ mod integration_tests {
 
         assert_eq!(body.matches("event: response.completed").count(), 1);
         let calls = rec.lock().await.clone();
-        assert_eq!(calls.len(), 2, "默认模式下计划产物仍要判定：{calls:?}");
-        let prompt = calls[1]["messages"][0]["content"]
-            .as_str()
-            .unwrap_or_else(|| panic!("判定请求形状异常：{}", calls[1]));
-        // 规则部分不再提计划标签；助手终局文本原样带上（里面含标签是内容本身）
-        let rules = prompt.split("【用户请求】").next().unwrap_or_default();
+        assert_eq!(calls.len(), 2, "计划产物不是默认模式收尾标签，应续跑一轮：{calls:?}");
+        // 续跑请求：历史尾部是「助手原样文本（含计划包裹）+ 注入提醒」
+        let messages = calls[1]["messages"].as_array().unwrap();
         assert!(
-            !rules.contains("<proposed_plan"),
-            "判定提示词的规则不应提计划标签：{rules}"
-        );
-        // 验收口径按任务类型中立（不是「只认代码/文本产出」）
-        assert!(
-            rules.contains("任何类型") && rules.contains("结果说明"),
-            "判定规则应覆盖非代码任务与结果汇报：{rules}"
+            messages[1]["content"].as_str().unwrap().contains("1. 做 A"),
+            "续跑请求应原样带上上一轮助手文本：{}",
+            calls[1]
         );
         assert!(
-            prompt.contains("先给方案：") && prompt.contains("1. 做 A"),
-            "判定提示词应原样带上助手终局文本：{prompt}"
+            messages[2]["content"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("{TASK_COMPLETED_MARKER}>")),
+            "续跑请求应教出标签契约：{}",
+            calls[1]
         );
+        // 第二轮带标签收尾：可见文本里能同时看到方案与收尾标签
+        assert!(body.contains("1. 做 A"), "{body}");
+        assert!(body.contains(&format!("{TASK_COMPLETED_MARKER}>")), "{body}");
         let joined = read_session_log(&dir);
-        assert!(joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
         assert!(
-            !joined.contains("event=zen_proxy.nudge_injected"),
-            "判为已完成时不应注入：{joined}"
+            joined.contains("reason=task_completed") && joined.contains("mode=default"),
+            "{joined}"
         );
     }
 
-    /// 会话标题生成请求（应用后台临时线程）：整轮放行，不发判定、不注入。
+    /// 会话标题生成请求（应用后台临时线程）：整轮放行，不催办、不注入。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_skipped_for_title_task() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -8031,12 +7838,103 @@ mod integration_tests {
         assert_eq!(
             rec.lock().await.len(),
             1,
-            "标题任务不应触发判定：{:?}",
+            "标题任务不应注入续跑提醒：{:?}",
             rec.lock().await
         );
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("reason=title_task"),
+            "{joined}"
+        );
+    }
+
+    /// 标签契约只在续跑提醒里教：首轮发给上游的请求体里不能出现任何收尾约定
+    /// （否则等于偷偷改了 codex 的系统提示词）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_default_mode_first_pass_request_is_untouched() {
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("我先说明一下接下来要做的事。")),
+            completion_reply("已完成：只是说明"),
+        ])
+        .await;
+
+        let body = run_nudge_probe(&upstream, None, nudge_probe(true)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 2, "应「首轮 + 续跑」：{calls:?}");
+        let first = calls[0].to_string();
+        assert!(
+            !first.contains(TASK_COMPLETED_MARKER),
+            "首轮请求不得带标签契约：{first}"
+        );
+        assert!(
+            calls[0]["messages"][0]["content"]
+                .as_str()
+                .is_none_or(|system| !system.contains("自动续跑")),
+            "首轮请求不得带续跑提醒：{}",
+            calls[0]
+        );
+        // 只有续跑轮（注入提醒）才带上契约与提醒
+        let injected = calls[1]["messages"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["content"]
+            .as_str()
+            .unwrap();
+        assert!(
+            injected.contains(TASK_COMPLETED_MARKER) && injected.contains("自动续跑"),
+            "续跑轮应带标签契约：{injected}"
+        );
+    }
+
+    /// 标签收尾按「健康结束」清零连续计数：连续两轮「文本 + 标签」之后，同一会话的下一轮
+    /// 口嗨仍然会被注入（否则普通问答两轮就会耗光 streak，真正的口嗨反而 10 分钟不再被催）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_completion_tag_clears_streak() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let headers = session_headers("thread-streak");
+        // 一个 state 贯穿三轮请求：`nudge` 计数表在 Arc 里跨请求保留（clone 共享同一张表）
+        let shared = nudge_probe_state("http://127.0.0.1:1", log.clone());
+
+        // 前两轮：各自「首轮口嗨 → 续跑轮用标签收尾」（每次都把计数清零）
+        for _ in 0..2 {
+            let (upstream, rec) = spawn_mock_zen_scripted(vec![
+                ScriptedReply::Sse(sse_text_reply("接下来我会把测试补上。")),
+                completion_reply("已完成：补了测试"),
+            ])
+            .await;
+            let mut state = shared.clone();
+            state.base_url = upstream;
+            let body = run_nudge_probe_state(state, headers.clone(), nudge_probe(true)).await;
+            assert_eq!(body.matches("event: response.completed").count(), 1);
+            assert_eq!(rec.lock().await.len(), 2, "应注入一次并收尾");
+        }
+
+        // 第三轮再口嗨：仍有注入额度（若标签没有清零 streak，这里会被 max_streak 拦下、
+        // 只剩 1 次上游调用）
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("接下来我会把测试补上。")),
+            ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
+        ])
+        .await;
+        let mut state = shared;
+        state.base_url = upstream;
+        let body = run_nudge_probe_state(state, headers, nudge_probe(true)).await;
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert!(body.contains("function_call"), "{body}");
+        assert_eq!(
+            rec.lock().await.len(),
+            2,
+            "标签收尾清零 streak 后，第三轮仍应注入：{:?}",
+            rec.lock().await
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_injected")
+                && !joined.contains("event=zen_proxy.nudge_limited"),
             "{joined}"
         );
     }
