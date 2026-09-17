@@ -7,6 +7,7 @@ import {
   flattenNoticeText,
   interactionKindForMethod,
   noticeTitle,
+  notifySessionCompleted,
   notifySessionError,
   notifySessionInteraction,
   sessionTitleForThread,
@@ -239,6 +240,44 @@ describe("notifySessionInteraction", () => {
   it("后台临时线程不发通知", () => {
     backgroundThreadIds.add("helper-1");
     notifySessionInteraction({ kind: "approval", threadId: "helper-1" });
+    backgroundThreadIds.delete("helper-1");
+    expect(notifyArgs()).toBeUndefined();
+  });
+});
+
+describe("notifySessionCompleted", () => {
+  it("正常完成发 source=completion 通知：固定标题+正文，带会话名，turnId 为 null", () => {
+    tabs.push(makeSessionTab("s1", "t1", { name: "修复登录" }));
+    notifySessionCompleted({ threadId: "t1" });
+    expect(notifyArgs()).toEqual({
+      title: "会话完成 · 修复登录",
+      body: "会话已完成，可以查看结果",
+      threadId: "t1",
+      turnId: null,
+      source: "completion",
+    });
+  });
+
+  it("无会话名时标题只用固定前缀「会话完成」", () => {
+    notifySessionCompleted({ threadId: "t1" });
+    expect(notifyArgs()?.title).toBe("会话完成");
+  });
+
+  it("设置关闭时不发通知（与提权/交互共用 interaction_notify_enabled）", () => {
+    store.settings.interaction_notify_enabled = false;
+    notifySessionCompleted({ threadId: "t1" });
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("无 threadId 时不发通知（无法定位会话）", () => {
+    notifySessionCompleted({ threadId: null });
+    notifySessionCompleted({});
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("后台临时线程不发通知", () => {
+    backgroundThreadIds.add("helper-1");
+    notifySessionCompleted({ threadId: "helper-1" });
     backgroundThreadIds.delete("helper-1");
     expect(notifyArgs()).toBeUndefined();
   });

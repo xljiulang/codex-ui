@@ -36,7 +36,8 @@ pub struct AppSettings {
     /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启
     #[serde(default = "default_error_notify_enabled")]
     pub error_notify_enabled: bool,
-    /// 会话提权/交互（审批、提问、MCP 表单、计划就绪）发 Windows 系统通知，默认开启
+    /// 会话提权/交互/完成（审批、提问、MCP 表单、计划就绪、回合正常完成）
+    /// 发 Windows 系统通知，默认开启
     #[serde(default = "default_interaction_notify_enabled")]
     pub interaction_notify_enabled: bool,
 }

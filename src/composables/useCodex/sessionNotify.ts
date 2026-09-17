@@ -17,7 +17,7 @@ const TITLE_SESSION_MAX_CHARS = 40;
 const BODY_MAX_CHARS = 200;
 
 /** 通知来源（后端日志 `source=` 与节流策略据此区分） */
-export type SessionNotifySource = "error" | "interaction" | "plan";
+export type SessionNotifySource = "error" | "interaction" | "plan" | "completion";
 
 /** 需要用户处理的交互类型（决定通知标题） */
 export type InteractionKind =
@@ -116,6 +116,12 @@ export interface SessionInteractionNotice {
 }
 
 
+export interface SessionCompletedNotice {
+  /** 回合归属线程；缺失时不发系统通知（无法定位会话） */
+  threadId?: string | null;
+}
+
+
 /**
  * 通知的统一门槛与投递（fire-and-forget）：
  * 开关关闭 / 无 threadId / 归属后台临时线程（标题总结的 ephemeral 线程，不打扰用户且
@@ -175,5 +181,23 @@ export function notifySessionInteraction(notice: SessionInteractionNotice): void
     body: text.body,
     threadId,
     source: notice.kind === "plan" ? "plan" : "interaction",
+  });
+}
+
+
+/**
+ * 会话正常完成（`turn/completed` 且 status=completed）→ Windows 通知（未聚焦时）。
+ * 开关：设置项 `interaction_notify_enabled`（与提权/交互共用）。
+ * 不带 turnId（回合已正常收尾，没有需要合并的双报）；不传正文，固定通用文案。
+ */
+export function notifySessionCompleted(notice: SessionCompletedNotice): void {
+  const threadId = (notice.threadId ?? "").trim();
+  if (!threadId || isBackgroundThread(threadId)) return;
+  sendSessionNotice({
+    enabled: !!store.settings.interaction_notify_enabled,
+    title: noticeTitle("会话完成", threadId),
+    body: "会话已完成，可以查看结果",
+    threadId,
+    source: "completion",
   });
 }

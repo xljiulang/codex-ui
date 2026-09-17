@@ -441,7 +441,8 @@ fn source_is_throttled(source: &str) -> bool {
 ///
 /// 由前端在这些时刻调用：codex 错误（`codex/message` 的 error、会话内 error 条目、
 /// 回合失败、发送回合失败，`source=error`）、需要人工处理的交互（审批/提问/MCP 表单，
-/// `source=interaction`）与计划就绪（`source=plan`）。本命令负责三件前端拿不到的事：
+/// `source=interaction`）、计划就绪（`source=plan`）与会话正常完成（`source=completion`）。
+/// 本命令负责三件前端拿不到的事：
 /// 1) **焦点判定**：主窗口处于前台焦点时直接返回——只在「应用没被看到」时才打扰用户，
 ///    判定放在后端可避免前端为此申请 `core:window:allow-is-focused` 权限；
 /// 2) **节流**（仅 `source=error`）：同一正文 10 秒内只发一条（响应流断线重连

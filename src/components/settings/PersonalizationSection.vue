@@ -67,7 +67,7 @@ function selectTheme(id: ThemeId) {
             <span class="switch-track"></span>
           </label>
           <label class="switch-text" for="interaction-notify">
-            会话提权/交互时发系统通知（窗口没有前台焦点时）
+            会话提权/交互/完成时发系统通知（窗口没有前台焦点时）
           </label>
         </div>
 

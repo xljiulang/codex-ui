@@ -251,14 +251,77 @@ describe("会话错误/交互在窗口未聚焦时转 Windows 通知", () => {
     expect(tab.turnActive).toBe(false);
   });
 
-  it("turn/completed 正常完成不发通知", async () => {
-    const tab = reactive(makeSessionTab("s1", "t1"));
+  it("turn/completed 正常完成：发 source=completion 通知", async () => {
+    const tab = reactive(makeSessionTab("s1", "t1", { name: "修复登录" }));
     tabs.push(tab);
     await wireEvents();
     fireListen("turn/completed", {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed", error: null },
     });
+    expect(notifyArgs()).toEqual({
+      title: "会话完成 · 修复登录",
+      body: "会话已完成，可以查看结果",
+      threadId: "t1",
+      turnId: null,
+      source: "completion",
+    });
+  });
+
+  it("turn/completed 中断/状态缺失：不发「会话完成」通知", async () => {
+    tabs.push(reactive(makeSessionTab("s1", "t1", { name: "修复登录" })));
+    await wireEvents();
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: { id: "turn-1", status: "interrupted" },
+    });
+    expect(notifyArgs()).toBeUndefined();
+
+    mockedInvoke.mockClear();
+    fireListen("turn/completed", { threadId: "t1", turn: { id: "turn-2" } });
+    expect(notifyArgs()).toBeUndefined();
+
+    mockedInvoke.mockClear();
+    fireListen("turn/completed", { threadId: "t1" });
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("turn/completed failed：只发错误通知，不叠加「会话完成」", async () => {
+    tabs.push(reactive(makeSessionTab("s1", "t1", { name: "修复登录" })));
+    await wireEvents();
+    fireListen("turn/completed", {
+      threadId: "t1",
+      turn: {
+        id: "turn-1",
+        status: "failed",
+        error: { message: "stream disconnected before completion" },
+      },
+    });
+    const sources = mockedInvoke.mock.calls
+      .filter(([c]) => c === "notify_session_event")
+      .map(([, args]) => (args as { source: string }).source);
+    expect(sources).toEqual(["error"]);
+  });
+
+  it("turn/completed 无 threadId：不发完成通知（无法定位会话）", async () => {
+    tabs.push(
+      reactive(makeSessionTab("s1", "t1", { currentTurnId: "turn-1" })),
+    );
+    await wireEvents();
+    fireListen("turn/completed", {
+      turn: { id: "turn-1", status: "completed" },
+    });
+    expect(notifyArgs()).toBeUndefined();
+  });
+
+  it("后台临时线程 turn/completed：不发完成通知", async () => {
+    backgroundThreadIds.add("helper1");
+    await wireEvents();
+    fireListen("turn/completed", {
+      threadId: "helper1",
+      turn: { id: "ht1", status: "completed" },
+    });
+    backgroundThreadIds.delete("helper1");
     expect(notifyArgs()).toBeUndefined();
   });
 
@@ -346,6 +409,11 @@ describe("会话错误/交互在窗口未聚焦时转 Windows 通知", () => {
       turnId: null,
       source: "plan",
     });
+    // 只发这一条：不再叠加「会话完成」
+    const sources = mockedInvoke.mock.calls
+      .filter(([c]) => c === "notify_session_event")
+      .map(([, args]) => (args as { source: string }).source);
+    expect(sources).toEqual(["plan"]);
   });
 });
 

@@ -32,6 +32,7 @@ import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
 import {
   interactionKindForMethod,
+  notifySessionCompleted,
   notifySessionError,
   notifySessionInteraction,
 } from "./sessionNotify";
@@ -279,6 +280,8 @@ export async function wireEvents() {
         if (touched) store.itemsRev++;
       }
       // 目标完成/预算耗尽由服务端通过 thread/goal/updated 通知，回合完成不再自动清目标
+      // 是否已就「计划已就绪」发过通知：为真时不再叠加发「会话完成」
+      let planNotified = false;
       // 计划模式：回合正常完成且产出 plan 内容 → 弹出“计划已就绪”确认（仿 VS Code/CLI，
       // 纯客户端 UX：协议层没有计划确认交互，由客户端在计划 item 完成后自行询问）
       if (
@@ -313,7 +316,14 @@ export async function wireEvents() {
           tab.planPrompt = { threadId: tid, turnId: p.turn.id, planText };
           // 窗口没有前台焦点时发系统通知（计划确认气泡行为不变）
           notifySessionInteraction({ kind: "plan", threadId: tid });
+          planNotified = true;
         }
+      }
+      // 窗口没有前台焦点时发「会话完成」通知（应用内行为不变）；
+      // 仅正常完成（failed/interrupted 已有错误/交互通知，不叠加）；
+      // 无 threadId / 后台临时线程由 notifySessionCompleted 内部静默
+      if (p.turn?.status === "completed" && !planNotified) {
+        notifySessionCompleted({ threadId: p.threadId });
       }
       await refreshThreads();
       // 处理“加入队列”的跟进消息
