@@ -494,30 +494,30 @@
 - **默认模式：判定搬进原对话，只认模型自己回的 `<zen_task_completed>` 标签**（不再有独立的后台判定请求——那条 `chat/completions` 会被 Zen 免费层以 `FreeTierError: OpenCode's free tier can only be used from within OpenCode` 拒掉，判定退化成「拿不准按已完成」）：
   代理把提醒作为**合成 user 消息**追加到发给上游的历史里（历史尾部先补一条本轮助手文本，再补提醒），并**再打一次上游，把第二轮的事件续在同一个 SSE 流**上——工具调用照常下发给 codex，`response.completed` 只发一次，对 codex 与应用完全透明，注入的提醒**不会进入 codex 记录**（聊天里看不到任何伪造消息）。
   提醒是**二选一强收尾**：① 还有工作没做完 → **必须实际调用工具**把剩余工作做完；② 任务确实已经结束（已完成 / 无需改动 / 用户已放弃 / 确实做不下去）→ 不要重复上一条回复的正文、也不要重复执行更早回合已经用工具做过的操作（例如已经 git 提交或推送过），用**一行 `<zen_task_completed>一句话结论</zen_task_completed>`** 收尾。
-  终局文本出现该标签（大小写不敏感 + 前缀匹配，缺闭合标签同样命中；**不解析载荷**）即视为任务已终结、直接收尾（nudge_skipped reason=task_completed mode=default），不再注入、不触发后续 pass。
+  终局文本出现该标签（大小写不敏感 + 前缀匹配，缺闭合标签同样命中；**不解析载荷**）即视为任务已终结、直接收尾（`nudge_skipped 原因=task_completed 模式=default`），不再注入、不触发后续 pass。
   **命名与结构不变量**：自研标签统一 `zen_` 前缀——本标签固定 `<zen_task_completed>`，计划模式的两个出口是 `<zen_plan_cancelled>` / `<zen_plan_unachievable>`；`<proposed_plan>` 是唯一例外（codex 侧约定，改名后 codex 不再生成计划条目）。必须成对闭合、独占一行、不换行、一整轮最多一个、不放进代码块。载荷保持自由文本——未来的代理层过滤按「整段闭合标签整行删除」实现、分桶按「首词软映射（已完成/无需改动/已放弃/无法继续 → 枚举），映射不到落 unknown」实现，都不依赖今天的措辞；真要机器可读的强枚举时另加标签名，而不是把枚举塞进载荷。应用 Markdown 渲染把尖括号转义成可见字面文本，所以聊天里能直接看到这行标签。**旧的无前缀写法（`<task_completed>` / `<cancelled_plan>` / `<unachievable_plan>`）一律不再被识别**（改名当轮若命中旧写法不会被当结束，模型会被催办一次、按新标签自愈）。
   **行为收紧（有意）**：默认模式下「给出方案 / 等你确认」不再被算作完成——模型要么动手调工具，要么把「已给方案、等你确认」写进标签自己宣告结束。
 - **计划模式**下**连判定都不发，本轮怎么收尾完全由代码判据给出**（模式怎么判定见下面四条）：
-  - 终局文本含 `<proposed_plan>` → 视为计划已交付、直接收尾（nudge_skipped reason=plan_output mode=plan）；
-  - 终局文本含 **`<zen_plan_cancelled>放弃计划原因</zen_plan_cancelled>`**（用户中途放弃计划的约定标签，提示词里教给模型）→ 视为计划话题已终结、直接收尾（nudge_skipped reason=plan_cancelled mode=plan）——不再催它给一份已被放弃的方案，**也不生成计划条目、不弹「计划已就绪」**（聊天里只是一句普通结论加一行可见标签；应用 Markdown 渲染会把尖括号转义成字面文本，不会被当成 HTML 吞掉）。判定与计划标签同口径（大小写不敏感 + 前缀匹配），计划标签优先；
-  - 终局文本含 **`<zen_plan_unachievable>原因</zen_plan_unachievable>`**（问题本身无法或无需产出实现计划的约定标签，如「1+1=？」这类事实问题、纯查询或闲聊，提示词里教给模型）→ 视为计划话题已终结、直接收尾（nudge_skipped reason=plan_unachievable mode=plan）——不再逼它在计划模式里强行给一份实现方案，也不生成计划条目、不弹「计划已就绪」。判定与别的计划标签同口径（大小写不敏感 + 前缀匹配）。
-  - 三者都没有 → 视为未交付，注入**计划专用提醒**并续跑，同样受 pass／streak 上限约束——不会再注入「必须动手」逼模型在计划模式里改代码。
+  - 终局文本含 `<proposed_plan>` → 视为计划已交付、直接收尾（`nudge_skipped 原因=plan_output 模式=plan`）；
+  - 终局文本含 **`<zen_plan_cancelled>放弃计划原因</zen_plan_cancelled>`**（用户中途放弃计划的约定标签，提示词里教给模型）→ 视为计划话题已终结、直接收尾（`nudge_skipped 原因=plan_cancelled 模式=plan`）——不再催它给一份已被放弃的方案，**也不生成计划条目、不弹「计划已就绪」**（聊天里只是一句普通结论加一行可见标签；应用 Markdown 渲染会把尖括号转义成字面文本，不会被当成 HTML 吞掉）。判定与计划标签同口径（大小写不敏感 + 前缀匹配），计划标签优先；
+  - 终局文本含 **`<zen_plan_unachievable>原因</zen_plan_unachievable>`**（问题本身无法或无需产出实现计划的约定标签，如「1+1=？」这类事实问题、纯查询或闲聊，提示词里教给模型）→ 视为计划话题已终结、直接收尾（`nudge_skipped 原因=plan_unachievable 模式=plan`）——不再逼它在计划模式里强行给一份实现方案，也不生成计划条目、不弹「计划已就绪」。判定与别的计划标签同口径（大小写不敏感 + 前缀匹配）。
+  - 三者都没有 → 视为未交付，注入**计划专用提醒**并续跑，同样受单请求催办次数上限约束——不会再注入「必须动手」逼模型在计划模式里改代码。
     提醒是**排除式三选一**：先让模型判断「用户已放弃」（`<zen_plan_cancelled>`）与「问题无法/无需产出实现计划」（`<zen_plan_unachievable>`）两种不需要给方案的情况是否成立，都不成立才**必须**把完整方案写进 **`<proposed_plan>` / `</proposed_plan>` 骨架**（`# 计划标题` + 步骤项，并要求标签原样保留、各自独占一行、不要放进代码块）；即便结论是「无需改动、保持现状或原计划已认可」，也要把该结论（或重申原计划）写进结构里收尾——那是评估结论、不是「无法/无需计划」。弱模型常把计划写成普通 Markdown，而 codex 只在终局文本出现该包裹时才生成计划条目（应用里才有「计划已就绪」），骨架式提醒能显著提高交付率。
-- **首轮教学（两种模式都有）**：代理在首次转发之前，把**契约**追加到发给上游的 `instructions` 末尾（原提示词逐字保留、契约在末尾，对上游 prompt cache 友好；只改 `instructions`、不动 `input`，所以协作模式判据与 `mode_src` 不受影响），让模型第一轮就按约定收尾：
+- **首轮教学（两种模式都有）**：代理在首次转发之前，把**契约**追加到发给上游的 `instructions` 末尾（原提示词逐字保留、契约在末尾，对上游 prompt cache 友好；只改 `instructions`、不动 `input`，所以协作模式判据与 `模式来源` 不受影响），让模型第一轮就按约定收尾：
   - 默认模式：`【回合收尾约定】…任务已全部完成就用一行 <zen_task_completed>一句话结论</zen_task_completed> 收尾（成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块）；还有没做完的工作必须实际调用工具继续做，不要只写「接下来我会…」这类承诺；不要重复执行更早回合已经用工具做过的操作。`
   - 计划模式：只前置两个**出口标签**（`<zen_plan_cancelled>` / `<zen_plan_unachievable>`）并写清边界（「无需改动、保持现状、原计划已认可」属于评估结论、要走 `<proposed_plan>`、不算 unachievable）；**不前置**「必须给完整方案」——计划模式的正常形态是 chat your way，强制口径留在催办提醒里，免得把中间闲聊回合逼出假方案。
   - 门槛与催办同源：**流式 + 请求声明了工具 + 非会话标题线程**才注入（非流式没有催办路径可消费；压缩/摘要类后台请求通常不带工具；标题线程只产出标题）。
   - 收益与代价：守约定的模型首轮就带回标签 → 常规回合**零额外上游往返**（此前每条「纯文本 + 零工具」回复都要多打一轮换标签）；代价是每个合格请求多约 130~160 字提示词，且默认模式下几乎每条纯文本回复末尾都会多出一行 `<zen_task_completed>…</zen_task_completed>`。
   - 催办提醒里的 **N 选一原样保留**（默认二选一、计划排除式三选一），作为「模型不吃首轮教学」时的第二道。
-- **模式判定优先取协议登记表**：`CodexServer` 把 `turn/start` / `thread/settings/update` 参数与 `thread/settings/updated` 通知里的 `collaborationMode.mode` 登记成「线程 id → 模式」，代理用入站请求头 `session-id`（= codex 线程 id，`ses_` 前缀自动剥离）查表——命中即**完全不做关键词扫描**，`mode` 一栏的 `mode_src=registry` 说明来自登记表；查不到（其它客户端、子代理线程等）才退回关键词判据，且判据取**最后一个**协作模式块的标题行（`mode_src=heuristic`）。登记表只存内存、上限 1024 条（超出整体清空，模式每轮 `turn/start` 都会重新登记）。
-- 关键词兜底判据（`mode_src=heuristic`）从协作模式块标签 `<collaboration_mode>` 之后取**第一个非空行**（codex 0.154 是 `# Plan Mode (Conversational)`，旧版 `# Collaboration Mode: Plan` 仍兼容），且**只认标题行**：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着「… for other modes (**e.g. Plan mode**) are no longer active.」——按子串匹配会把默认模式误判成计划模式（默认模式的正常编码回合就会被注入「请给出计划」）。
+- **模式判定优先取协议登记表**：`CodexServer` 把 `turn/start` / `thread/settings/update` 参数与 `thread/settings/updated` 通知里的 `collaborationMode.mode` 登记成「线程 id → 模式」，代理用入站请求头 `session-id`（= codex 线程 id，`ses_` 前缀自动剥离）查表——命中即**完全不做关键词扫描**，`模式` 一栏的 `模式来源=registry` 说明来自登记表；查不到（其它客户端、子代理线程等）才退回关键词判据，且判据取**最后一个**协作模式块的标题行（`模式来源=heuristic`）。登记表只存内存、上限 1024 条（超出整体清空，模式每轮 `turn/start` 都会重新登记）。
+- 关键词兜底判据（`模式来源=heuristic`）从协作模式块标签 `<collaboration_mode>` 之后取**第一个非空行**（codex 0.154 是 `# Plan Mode (Conversational)`，旧版 `# Collaboration Mode: Plan` 仍兼容），且**只认标题行**：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着「… for other modes (**e.g. Plan mode**) are no longer active.」——按子串匹配会把默认模式误判成计划模式（默认模式的正常编码回合就会被注入「请给出计划」）。
 - 为什么必须以最后一块为准：codex 会把**历次**协作模式块都留在请求历史里，切回默认模式后历史里仍有旧的 `<collaboration_mode># Plan Mode…</collaboration_mode>`——按「任一命中即计划模式」必然误判（实测某线程 codex 侧记为 `collaboration_mode_kind=default` 的回合，代理仍按 plan 分流并注入「请给出计划」）。
-- **会话标题生成请求**（应用 `autoTitleThread` 的后台临时线程，末条 user 文本以固定前缀「给下面用户消息生成一个不超过 30 字的中文会话标题」开头）**整轮放行**：不催办、不注入（nudge_skipped reason=title_task）——标题必然「纯文本 + 零工具调用」结束，注入只会白花一轮上游。
-- 边界与开关：同一会话「连续注入提醒、而模型既没调用工具、也没用 `<zen_task_completed>` 收尾」达到 **2 次**后不再注入（模型一旦真的调用工具、或**用标签收尾**、或距上次注入超过 10 分钟即清零——标签收尾算「健康结束」必须清零，否则普通问答两轮就会耗光额度、真正的口嗨反而 10 分钟内不再被催），单次入站请求最多 4 个 pass 兜底；请求里没有声明任何工具时既不催办也不注入契约；**错误/失败路径、历史净化与工具翻译逻辑均不受影响**。
-- 诊断日志：`zen_proxy.request` 的 `mode=plan|default`、`mode_src=registry|heuristic`（本次识别出的协作模式及其来源，排查「默认模式被注入计划提醒」或「默认模式被当成计划模式」先看这两格）与 **`contract=off|default|plan`**（本次是否注入首轮教学契约；`instructions_chars` 记的是**注入后**实际发给上游的长度，便于对照体积变化）、
-  `zen_proxy.nudge_injected`（session／pass／streak／mode／助手字数）、
-  `zen_proxy.nudge_skipped`（原因：task_completed／plan_output／plan_cancelled／plan_unachievable／title_task／上游错误/状态码/转发失败）、
-  `zen_proxy.nudge_limited`（reason=max_streak|max_passes + mode）；内容级诊断另开请求记录（call_id 带 `-nudge<n>` 后缀，原来的 `-judge<n>` 已随看门狗删除）。
+- **会话标题生成请求**（应用 `autoTitleThread` 的后台临时线程，末条 user 文本以固定前缀「给下面用户消息生成一个不超过 30 字的中文会话标题」开头）**整轮放行**：不催办、不注入（`nudge_skipped 原因=title_task`）——标题必然「纯文本 + 零工具调用」结束，注入只会白花一轮上游。
+- 边界与开关：**单次入站请求最多注入 4 次续跑提醒**（= 最多 5 次上游调用；`NUDGE_MAX_INJECTIONS` 是唯一旋钮，原来的「同一会话连续 2 次 / 10 分钟窗口」跨请求计数与「最多 4 个 pass」兜底都已删除，因为循环内每次迭代要么收尾要么注入，两者本就等价）；跨请求**不再有任何静默期**——每个「纯文本 + 零工具 + 无收尾标签」的终局都会被催。请求里没有声明任何工具时既不催办也不注入契约；**错误/失败路径、历史净化与工具翻译逻辑均不受影响**。
+- 诊断日志（**nudge 家族的键名是中文、值保留英文 token**，事件名保留英文便于 grep）：`zen_proxy.request` 的 `模式=plan|default`、`模式来源=registry|heuristic`（本次识别出的协作模式及其来源，排查「默认模式被注入计划提醒」或「默认模式被当成计划模式」先看这两格）与 **`首轮教学=off|default|plan`**（本次是否注入首轮教学契约；`instructions_chars` 记的是**注入后**实际发给上游的长度，便于对照体积变化）、
+  `zen_proxy.nudge_injected`（`会话`／`轮次`／`本请求催办次数=1/4`／`模式`／`助手字数`／`说明`）、
+  `zen_proxy.nudge_skipped`（`原因`：task_completed／plan_output／plan_cancelled／plan_unachievable／title_task／上游错误/状态码/转发失败，另带 `轮次`／`模式`／可选 `状态`、`详情` 与中文 `说明`）、
+  `zen_proxy.nudge_limited`（`原因=max_injections` + `轮次`／`模式`／`说明`）；内容级诊断另开请求记录（call_id 带 `-nudge<n>` 后缀，原来的 `-judge<n>` 已随看门狗删除）。
 - 未覆盖：不检测「调用过工具但没做对」的情况，也不回溯历史回合；判定完全在注入的那一轮对话里完成，因此不再有「判定期间静默 60 秒」的等待（原看门狗的超时与解析路径已整体删除）。模式登记表不持久化，应用重启后第一个回合由 `turn/start` 重新登记。
 
 #### Zen 代理：指标口径

@@ -67,13 +67,14 @@ const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(50);
 /// 一次转发最多发出的上游请求数（可选字段降级 + reasoning_content 开关各一次修复）。
 const FORWARD_MAX_ATTEMPTS: usize = 3;
 
-/// 口嗨自动续跑：同一会话「连续注入提醒、而模型既没调用工具、也没用
-/// [`TASK_COMPLETED_MARKER`] 收尾」的次数上限，达到后不再注入（避免与弱模型无限来回）。
-const NUDGE_MAX_STREAK: u32 = 2;
-/// 口嗨自动续跑：距上次注入超过该时长视为新的一轮，连续计数清零。
-const NUDGE_RESET_AFTER: Duration = Duration::from_secs(10 * 60);
-/// 口嗨自动续跑：单次入站请求最多向上游发起的 pass 数（1 次原始 + 续跑，留余量）。
-const NUDGE_MAX_PASSES: usize = 4;
+/// 口嗨自动续跑：**单次入站请求**内最多注入几次续跑提醒（等价于单请求最多
+/// `NUDGE_MAX_INJECTIONS + 1` 次上游调用：首轮 + 每次催办一轮）。
+///
+/// 计数只活在一次请求的循环里，不跨请求、也没有时间窗口：每个「纯文本 + 零工具 + 无收尾
+/// 标签」的终局都会被催（此前是「同一会话连续 2 次后 10 分钟内不再催」，会把真正的口嗨一起
+/// 静默掉）。循环里每次迭代要么收尾、要么注入一次，因此原先的 `NUDGE_MAX_PASSES` 与本上限
+/// 完全等价，已删除——只留这一个旋钮。
+const NUDGE_MAX_INJECTIONS: usize = 4;
 /// 注入给上游的续跑提醒。只出现在发给上游的历史里，不会进入 codex 自己的记录，
 /// 因此应用聊天里看不到这条消息（模型按提醒回出的 [`TASK_COMPLETED_MARKER`] 标签是模型
 /// 自己的输出，会留在聊天里、以可见字面文本显示）。
@@ -187,41 +188,6 @@ const DEFAULT_MODE_CONTRACT_TEXT: &str = "【回合收尾约定】当你结束�
 /// 回合逼出假方案。边界（「无需改动、保持现状、原计划已认可」属于评估结论、要写进
 /// `<proposed_plan>`、不算 unachievable）必须写在这里，否则会重现 2026-09-18 那次误逃。
 const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户已放弃这个计划（让你不要再处理、先不做了），用一行 <zen_plan_cancelled>放弃原因</zen_plan_cancelled> 收尾；若问题本身无法或无需产出实现计划（事实问题、纯查询、闲聊），用一行 <zen_plan_unachievable>原因</zen_plan_unachievable> 收尾；其余情况照常把完整方案写进 <proposed_plan>（「无需改动、保持现状、原计划已认可」属于评估结论，要写进 <proposed_plan>，不算 unachievable）。这两个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块。";
-
-/// 口嗨自动续跑的分会话计数（内存态，代理重启即清零）。
-#[derive(Debug, Default, Clone)]
-struct NudgeState {
-    /// 连续注入、而模型既没调用工具也没用 [`TASK_COMPLETED_MARKER`] 收尾的次数。
-    streak: u32,
-    /// 最近一次注入时刻。
-    last: Option<Instant>,
-}
-
-impl NudgeState {
-    /// 是否允许继续注入：距上次注入超过 `NUDGE_RESET_AFTER` 先按新一轮清零；
-    /// 达到上限则拒绝（不改变已有计数）。
-    fn allow(&mut self, now: Instant) -> bool {
-        if let Some(last) = self.last {
-            if now.saturating_duration_since(last) >= NUDGE_RESET_AFTER {
-                self.streak = 0;
-                self.last = None;
-            }
-        }
-        self.streak < NUDGE_MAX_STREAK
-    }
-
-    fn record_injection(&mut self, now: Instant) {
-        self.streak = self.streak.saturating_add(1);
-        self.last = Some(now);
-    }
-
-    /// 模型真的推进了：调用了工具，或用 [`TASK_COMPLETED_MARKER`] 宣告任务结束。
-    /// 两种情况都说明本轮口嗨已被纠正/话题已正常终结，连续计数清零。
-    fn record_progress(&mut self) {
-        self.streak = 0;
-        self.last = None;
-    }
-}
 
 /// 「线程 id → 协作模式」协议登记表（内存态，进程内共享）：由 app-server 侧的真实来源
 /// （`turn/start` / `thread/settings/update` 的参数、`thread/settings/updated` 通知）更新，
@@ -394,9 +360,9 @@ fn is_plan_unachievable(text: &str) -> bool {
 }
 
 /// 终局文本是否带「任务已经结束」标记（见 [`TASK_COMPLETED_MARKER`]）：**默认模式**下命中即视为
-/// 模型自己宣告任务终结、直接收尾——不再注入续跑提醒、不触发后续 pass，并把该会话的连续计数
-/// 清零（见 [`nudge_record_progress`]）。判据与别的标签同口径（大小写不敏感 + 前缀匹配，缺闭合
-/// 标签、空标签同样命中），且**不解析载荷**。计划模式不使用本判据。
+/// 模型自己宣告任务终结、直接收尾——不再注入续跑提醒、不触发后续 pass。判据与别的标签同口径
+/// （大小写不敏感 + 前缀匹配，缺闭合标签、空标签同样命中），且**不解析载荷**；计划模式不使用
+/// 本判据。
 fn is_task_completed(text: &str) -> bool {
     text.to_lowercase().contains(TASK_COMPLETED_MARKER)
 }
@@ -579,7 +545,6 @@ pub(crate) async fn start(
             log,
             trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
             modes,
         });
     let task = tokio::spawn(async move {
@@ -660,8 +625,6 @@ struct ProxyState {
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
-    /// 口嗨自动续跑的分会话连续计数（key = 会话 id，仅内存态）。
-    nudge: Arc<Mutex<HashMap<String, NudgeState>>>,
     /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
     modes: Arc<ThreadModeRegistry>,
 }
@@ -913,9 +876,9 @@ fn request_log_fields(
         ("call_id", call_id.to_string()),
         ("model", model),
         ("stream", want_stream.to_string()),
-        ("mode", mode.to_string()),
-        ("mode_src", mode_src.to_string()),
-        ("contract", contract.to_string()),
+        ("模式", mode.to_string()),
+        ("模式来源", mode_src.to_string()),
+        ("首轮教学", contract.to_string()),
         ("input_msg_count", input_msg_count.to_string()),
         ("input_chars", input_chars.to_string()),
         ("instructions_chars", instructions_chars.to_string()),
@@ -2280,6 +2243,8 @@ async fn run_stream_task(
     let mut body = req.clone();
     let mut current = first_resp;
     let mut pass = 0usize;
+    // 本次入站请求已注入的续跑提醒次数（只活在这个循环里，见 NUDGE_MAX_INJECTIONS）
+    let mut injections = 0usize;
     let mut next_trace: Option<TraceCall> = None;
     loop {
         pass += 1;
@@ -2303,21 +2268,24 @@ async fn run_stream_task(
         if st.failure.is_some() {
             break;
         }
-        // 模型真的调用了工具：本轮口嗨已被纠正（后续回合走新的入站请求），计数清零
+        // 模型真的调用了工具：本轮口嗨已被纠正（后续回合走新的入站请求）
         if !st.calls.is_empty() {
-            nudge_record_progress(&state, &session);
             break;
         }
         // 会话标题生成任务：直接放行（标题线程必然「纯文本 + 零工具调用」结束，
-        // 注入只会白花一轮上游），不注入、不动 streak
+        // 注入只会白花一轮上游），不注入
         if title_task {
             log_at(
                 &log,
                 "info",
                 "zen_proxy.nudge_skipped",
                 &[
-                    ("reason", "title_task".to_string()),
-                    ("pass", pass.to_string()),
+                    ("原因", "title_task".to_string()),
+                    ("轮次", pass.to_string()),
+                    (
+                        "说明",
+                        NUDGE_SKIP_NOTE_TITLE_TASK.to_string(),
+                    ),
                 ],
             );
             break;
@@ -2342,82 +2310,78 @@ async fn run_stream_task(
                 "info",
                 "zen_proxy.nudge_skipped",
                 &[
-                    ("reason", "plan_output".to_string()),
-                    ("pass", pass.to_string()),
-                    ("mode", nudge_mode.to_string()),
+                    ("原因", "plan_output".to_string()),
+                    ("轮次", pass.to_string()),
+                    ("模式", nudge_mode.to_string()),
+                    ("说明", "计划已交付，直接收尾".to_string()),
                 ],
             );
             break;
         }
         // 用户已取消这个计划（提醒里约定的标签）：计划话题已终结，直接收尾——
-        // 既不再催它给一份已被放弃的方案，也不消耗 streak、不触发后续 pass
+        // 既不再催它给一份已被放弃的方案，也不触发后续 pass
         if plan_mode && is_plan_cancelled(&pass_text) {
             log_at(
                 &log,
                 "info",
                 "zen_proxy.nudge_skipped",
                 &[
-                    ("reason", "plan_cancelled".to_string()),
-                    ("pass", pass.to_string()),
-                    ("mode", nudge_mode.to_string()),
+                    ("原因", "plan_cancelled".to_string()),
+                    ("轮次", pass.to_string()),
+                    ("模式", nudge_mode.to_string()),
+                    ("说明", "用户已放弃计划，直接收尾".to_string()),
                 ],
             );
             break;
         }
         // 问题本身无法或无需产出实现计划（提醒里约定的标签）：同样直接收尾——
-        // 不逼它在计划模式里强行给方案，也不消耗 streak、不触发后续 pass
+        // 不逼它在计划模式里强行给方案，也不触发后续 pass
         if plan_mode && is_plan_unachievable(&pass_text) {
             log_at(
                 &log,
                 "info",
                 "zen_proxy.nudge_skipped",
                 &[
-                    ("reason", "plan_unachievable".to_string()),
-                    ("pass", pass.to_string()),
-                    ("mode", nudge_mode.to_string()),
+                    ("原因", "plan_unachievable".to_string()),
+                    ("轮次", pass.to_string()),
+                    ("模式", nudge_mode.to_string()),
+                    ("说明", "问题无需实现计划，直接收尾".to_string()),
                 ],
             );
             break;
         }
         // 默认模式：终局带「任务已经结束」标签（首轮教学与提醒里约定的 `<zen_task_completed>`），
         // 即模型自己宣告任务已终结——直接收尾，不再注入、不触发后续 pass。
-        // 这里按「健康结束」清零连续计数：判定删除后每个纯文本终局都会注入一次，
-        // 若不重置，普通问答两轮就会耗光 streak，真正的口嗨反而 10 分钟内不再被催。
         if !plan_mode && is_task_completed(&pass_text) {
-            nudge_record_progress(&state, &session);
             log_at(
                 &log,
                 "info",
                 "zen_proxy.nudge_skipped",
                 &[
-                    ("reason", "task_completed".to_string()),
-                    ("pass", pass.to_string()),
-                    ("mode", nudge_mode.to_string()),
+                    ("原因", "task_completed".to_string()),
+                    ("轮次", pass.to_string()),
+                    ("模式", nudge_mode.to_string()),
+                    ("说明", "模型已自行宣告任务结束，直接收尾".to_string()),
                 ],
             );
             break;
         }
-        if pass >= NUDGE_MAX_PASSES {
+        // 单请求内的注入上限：达到后不再注入（计数只在本次请求的循环里累加，不跨请求）
+        if injections >= NUDGE_MAX_INJECTIONS {
             log_at(
                 &log,
                 "warn",
                 "zen_proxy.nudge_limited",
                 &[
-                    ("reason", "max_passes".to_string()),
-                    ("pass", pass.to_string()),
-                    ("mode", nudge_mode.to_string()),
-                ],
-            );
-            break;
-        }
-        if !nudge_allow(&state, &session) {
-            log_at(
-                &log,
-                "info",
-                "zen_proxy.nudge_limited",
-                &[
-                    ("reason", "max_streak".to_string()),
-                    ("mode", nudge_mode.to_string()),
+                    ("原因", "max_injections".to_string()),
+                    ("轮次", pass.to_string()),
+                    ("模式", nudge_mode.to_string()),
+                    (
+                        "说明",
+                        format!(
+                            "本请求已催办 {NUDGE_MAX_INJECTIONS} 次仍未收尾，停止催办"
+                        ),
+                    ),
                 ],
             );
             break;
@@ -2426,20 +2390,24 @@ async fn run_stream_task(
         // （判定搬进原对话，不再有独立的判定请求）
         let nudge_text = if plan_mode { PLAN_NUDGE_TEXT } else { NUDGE_TEXT };
         // 注入提醒并续跑：第二轮的事件继续喂同一个 StreamState
-        let streak = nudge_record_injection(&state, &session);
         body = nudge_continuation_body(&body, &pass_text, nudge_text);
         log_at(
             &log,
             "info",
             "zen_proxy.nudge_injected",
             &[
-                ("session", session.clone()),
-                ("pass", pass.to_string()),
-                ("streak", streak.to_string()),
-                ("mode", nudge_mode.to_string()),
-                ("assistant_chars", pass_text.chars().count().to_string()),
+                ("会话", session.clone()),
+                ("轮次", pass.to_string()),
+                (
+                    "本请求催办次数",
+                    format!("{}/{NUDGE_MAX_INJECTIONS}", injections + 1),
+                ),
+                ("模式", nudge_mode.to_string()),
+                ("助手字数", pass_text.chars().count().to_string()),
+                ("说明", nudge_injected_note(plan_mode).to_string()),
             ],
         );
+        injections += 1;
         let nudge_call_id = format!("{call_id}-nudge{pass}");
         match forward(&body, &headers, true, &state, &nudge_call_id).await
         {
@@ -2454,8 +2422,12 @@ async fn run_stream_task(
                         "warn",
                         "zen_proxy.nudge_skipped",
                         &[
-                            ("reason", "nudge_upstream_error".to_string()),
-                            ("detail", truncate_chars(&text, 200)),
+                            ("原因", "nudge_upstream_error".to_string()),
+                            (
+                                "说明",
+                                "续跑轮上游返回错误，已放弃本次催办".to_string(),
+                            ),
+                            ("详情", truncate_chars(&text, 200)),
                         ],
                     );
                     break;
@@ -2467,8 +2439,12 @@ async fn run_stream_task(
                     "warn",
                     "zen_proxy.nudge_skipped",
                     &[
-                        ("reason", "nudge_upstream_status".to_string()),
-                        ("status", forwarded.status.as_u16().to_string()),
+                        ("原因", "nudge_upstream_status".to_string()),
+                        (
+                            "说明",
+                            "续跑轮上游非 2xx，已放弃本次催办".to_string(),
+                        ),
+                        ("状态", forwarded.status.as_u16().to_string()),
                     ],
                 );
                 break;
@@ -2479,8 +2455,9 @@ async fn run_stream_task(
                     "warn",
                     "zen_proxy.nudge_skipped",
                     &[
-                        ("reason", "nudge_forward_error".to_string()),
-                        ("detail", truncate_chars(&message, 200)),
+                        ("原因", "nudge_forward_error".to_string()),
+                        ("说明", "续跑轮转发失败，已放弃本次催办".to_string()),
+                        ("详情", truncate_chars(&message, 200)),
                     ],
                 );
                 break;
@@ -2492,36 +2469,17 @@ async fn run_stream_task(
     let _ = tx.send(terminal.into_bytes()).await;
 }
 
-/// 分会话计数：是否还允许注入（距上次注入超时按新一轮清零）。
-fn nudge_allow(state: &ProxyState, session: &str) -> bool {
-    let Ok(mut map) = state.nudge.lock() else {
-        return false;
-    };
-    map.entry(session.to_string())
-        .or_default()
-        .allow(Instant::now())
-}
-
-/// 分会话计数：记录一次注入，返回累计的连续注入次数。
-fn nudge_record_injection(state: &ProxyState, session: &str) -> u32 {
-    let Ok(mut map) = state.nudge.lock() else {
-        return 0;
-    };
-    let entry = map.entry(session.to_string()).or_default();
-    entry.record_injection(Instant::now());
-    entry.streak
-}
-
-/// 分会话计数：模型真的推进了（调用了工具，或用 [`TASK_COMPLETED_MARKER`] 宣告任务结束），
-/// 连续计数清零。
-fn nudge_record_progress(state: &ProxyState, session: &str) {
-    let Ok(mut map) = state.nudge.lock() else {
-        return;
-    };
-    if let Some(entry) = map.get_mut(session) {
-        entry.record_progress();
+/// `zen_proxy.nudge_injected` 的中文 `说明`：一句话讲清「为什么催、要求什么」。
+fn nudge_injected_note(plan_mode: bool) -> &'static str {
+    if plan_mode {
+        "模型以纯文本收尾且未交付计划，已注入计划续跑提醒（要求给出 <proposed_plan> 或两个出口标签）"
+    } else {
+        "模型以纯文本收尾且未宣告完成，已注入续跑提醒（要求继续调用工具或回 <zen_task_completed>）"
     }
 }
+
+/// `zen_proxy.nudge_skipped` 里会话标题线程的中文 `说明`（其余原因的说明就地写在日志调用处）。
+const NUDGE_SKIP_NOTE_TITLE_TASK: &str = "会话标题线程，整轮放行";
 
 /// 上游非 2xx：透传状态码与错误体。
 async fn proxy_error_response(
@@ -4080,7 +4038,6 @@ fn test_proxy_state(session: &str, base_url: &str, log: ZenLog, trace: TraceSink
         log,
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        nudge: Arc::new(Mutex::new(HashMap::new())),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
 }
@@ -4737,57 +4694,9 @@ mod tests {
     }
 
     #[test]
-    fn nudge_state_caps_streak_and_resets() {
-        let mut state = NudgeState::default();
-        let now = Instant::now();
-        assert!(state.allow(now), "初始应允许注入");
-        state.record_injection(now);
-        assert!(state.allow(now + Duration::from_secs(1)));
-        state.record_injection(now + Duration::from_secs(1));
-        assert!(
-            !state.allow(now + Duration::from_secs(2)),
-            "连续两次注入后应拒绝"
-        );
-
-        // 距上次注入超过窗口：按新一轮清零并放行
-        let later = now + Duration::from_secs(1) + NUDGE_RESET_AFTER;
-        assert!(state.allow(later));
-        assert_eq!(state.streak, 0);
-
-        // 模型真的推进了（调用工具，或用 `<zen_task_completed>` 收尾）：计数清零
-        state.record_injection(later);
-        state.record_progress();
-        assert_eq!(state.streak, 0);
-        assert!(state.last.is_none());
-        assert!(state.allow(later));
-    }
-
-   #[test]
-   fn nudge_counters_are_per_session() {
-      let state = ProxyState {
-           session: "ses_fixed123".into(),
-           base_url: "http://127.0.0.1:1".into(),
-           log: None,
-           trace: TraceSink::disabled(),
-           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           nudge: Arc::new(Mutex::new(HashMap::new())),
-           session_map: Arc::new(SessionMap::default()),
-            modes: Arc::new(ThreadModeRegistry::default()),
-       };
-        assert!(nudge_allow(&state, "ses_a"));
-        assert_eq!(nudge_record_injection(&state, "ses_a"), 1);
-        assert_eq!(nudge_record_injection(&state, "ses_a"), 2);
-        assert!(!nudge_allow(&state, "ses_a"), "同会话达上限应拒绝");
-        // 其它会话不受影响
-        assert!(nudge_allow(&state, "ses_b"));
-        assert_eq!(nudge_record_injection(&state, "ses_b"), 1);
-        assert!(nudge_allow(&state, "ses_b"), "另一个会话仍有注入额度");
-        assert_eq!(nudge_record_injection(&state, "ses_b"), 2);
-        assert!(!nudge_allow(&state, "ses_b"), "第二个会话自己达上限");
-        // 进展只清零对应会话：A 恢复，B 仍受限
-        nudge_record_progress(&state, "ses_a");
-        assert!(nudge_allow(&state, "ses_a"));
-        assert!(!nudge_allow(&state, "ses_b"));
+    fn nudge_injection_limit_is_per_request() {
+        // 上限常量只有一个旋钮：单请求最多注入 4 次（= 首轮 + 4 次续跑）
+        assert_eq!(NUDGE_MAX_INJECTIONS, 4);
     }
 
     fn sse_data_lines(block: &str) -> Vec<String> {
@@ -6127,10 +6036,10 @@ mod tests {
         assert!(value_of("input_chars").is_some());
         assert_eq!(value_of("call_id"), Some("req_test".to_string()));
         // 协作模式与来源由调用方（`resolve_nudge_mode`）解析后传入，这里只记录
-        assert_eq!(value_of("mode"), Some("default".to_string()));
-        assert_eq!(value_of("mode_src"), Some(MODE_SRC_HEURISTIC.to_string()));
+        assert_eq!(value_of("模式"), Some("default".to_string()));
+        assert_eq!(value_of("模式来源"), Some(MODE_SRC_HEURISTIC.to_string()));
         // 首轮教学的注入结论同样进这一行日志
-        assert_eq!(value_of("contract"), Some("default".to_string()));
+        assert_eq!(value_of("首轮教学"), Some("default".to_string()));
         let plan_fields = request_log_fields(
             &json!({
                 "model": "m",
@@ -6149,21 +6058,21 @@ mod tests {
         assert_eq!(
             plan_fields
                 .iter()
-                .find(|(name, _)| *name == "mode")
+                .find(|(name, _)| *name == "模式")
                 .map(|(_, value)| value.as_str()),
             Some("plan")
         );
         assert_eq!(
             plan_fields
                 .iter()
-                .find(|(name, _)| *name == "mode_src")
+                .find(|(name, _)| *name == "模式来源")
                 .map(|(_, value)| value.as_str()),
             Some(MODE_SRC_REGISTRY)
         );
         assert_eq!(
             plan_fields
                 .iter()
-                .find(|(name, _)| *name == "contract")
+                .find(|(name, _)| *name == "首轮教学")
                 .map(|(_, value)| value.as_str()),
             Some("off")
         );
@@ -6919,7 +6828,6 @@ mod integration_tests {
            log: None,
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           nudge: Arc::new(Mutex::new(HashMap::new())),
            session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        };
@@ -6983,7 +6891,6 @@ mod integration_tests {
            log: None,
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           nudge: Arc::new(Mutex::new(HashMap::new())),
            session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        };
@@ -7294,7 +7201,7 @@ mod integration_tests {
     }
 
     /// 探测用代理状态（可复用：`nudge` 计数表在同一个 state 内跨请求保留，
-    /// 测「标签收尾清零 streak」这类跨请求行为时必须复用同一个 state）。
+    /// 测「跨请求不复用计数」这类行为时必须复用同一个 state）。
     fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
         ProxyState {
             session: "ses_fixed123".into(),
@@ -7302,7 +7209,6 @@ mod integration_tests {
             log,
             trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
             session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
         }
@@ -7431,8 +7337,8 @@ mod integration_tests {
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
-                && joined.contains("reason=task_completed")
-                && joined.contains("mode=default"),
+                && joined.contains("原因=task_completed")
+                && joined.contains("模式=default"),
             "{joined}"
         );
         assert!(
@@ -7442,13 +7348,15 @@ mod integration_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_stops_after_two_injections() {
+    async fn nudge_stops_after_max_injections() {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("第一句空话")),
             ScriptedReply::Sse(sse_text_reply("第二句空话")),
             ScriptedReply::Sse(sse_text_reply("第三句空话")),
+            ScriptedReply::Sse(sse_text_reply("第四句空话")),
+            ScriptedReply::Sse(sse_text_reply("第五句空话")),
         ])
         .await;
 
@@ -7457,15 +7365,25 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert_eq!(
             rec.lock().await.len(),
-            3,
-            "首轮 + 续跑 × 2；第三次口嗨不再注入（streak 上限）"
+            5,
+            "首轮 + 续跑 × 4；第五次口嗨不再注入（单请求注入上限）"
         );
         let joined = read_session_log(&dir);
-        assert!(joined.contains("event=zen_proxy.nudge_limited"), "{joined}");
+        assert!(
+            joined.contains("event=zen_proxy.nudge_limited")
+                && joined.contains("原因=max_injections")
+                && joined.contains("轮次=5")
+                && joined.contains("说明=本请求已催办 4 次仍未收尾，停止催办"),
+            "{joined}"
+        );
         assert_eq!(
             joined.matches("event=zen_proxy.nudge_injected").count(),
-            2,
-            "恰好注入两次：{joined}"
+            4,
+            "恰好注入四次：{joined}"
+        );
+        assert!(
+            joined.contains("本请求催办次数=4/4") && joined.contains("说明="),
+            "注入日志应带中文次数与说明：{joined}"
         );
     }
 
@@ -7553,7 +7471,7 @@ mod integration_tests {
         );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("event=zen_proxy.nudge_injected") && joined.contains("mode=plan"),
+            joined.contains("event=zen_proxy.nudge_injected") && joined.contains("模式=plan"),
             "{joined}"
         );
         assert!(
@@ -7564,7 +7482,7 @@ mod integration_tests {
 
     /// 用户中途放弃计划（实测例子：「行，那不处理了」）：首轮模型只写普通正文 → 催办一轮，
     /// 续跑轮按约定用 `<zen_plan_cancelled>` 标签收尾 → 代码判据直接收尾，不再注入第 3 轮、
-    /// 不消耗 streak，也不会把一份已被放弃的完整方案重新逼出来。
+    /// 不会把一份已被放弃的完整方案重新逼出来。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_plan_mode_stops_when_plan_cancelled() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7600,13 +7518,13 @@ mod integration_tests {
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
-                && joined.contains("reason=plan_cancelled")
-                && joined.contains("mode=plan"),
+                && joined.contains("原因=plan_cancelled")
+                && joined.contains("模式=plan"),
             "{joined}"
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_limited"),
-            "已取消分支不该走到 pass／streak 上限：{joined}"
+            "已取消分支不该走到催办次数上限：{joined}"
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
@@ -7643,8 +7561,8 @@ mod integration_tests {
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
-                && joined.contains("reason=plan_cancelled")
-                && joined.contains("pass=1"),
+                && joined.contains("原因=plan_cancelled")
+                && joined.contains("轮次=1"),
             "{joined}"
         );
         assert!(
@@ -7655,7 +7573,7 @@ mod integration_tests {
 
     /// 问题本身无法或无需产出实现计划（如「1+1=？」这类事实问题）：首轮模型只写普通正文 →
     /// 催办一轮，续跑轮按约定用 `<zen_plan_unachievable>` 标签收尾 → 代码判据直接收尾，
-    /// 不再注入第 3 轮、不消耗 streak，也不会逼它在计划模式里强行给一份方案。
+    /// 不会把一份本就不产出计划的方案重新逼出来。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_plan_mode_stops_when_plan_unachievable() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7691,13 +7609,13 @@ mod integration_tests {
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
-                && joined.contains("reason=plan_unachievable")
-                && joined.contains("mode=plan"),
+                && joined.contains("原因=plan_unachievable")
+                && joined.contains("模式=plan"),
             "{joined}"
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_limited"),
-            "无法/无需计划分支不该走到 pass／streak 上限：{joined}"
+            "无法/无需计划分支不该走到催办次数上限：{joined}"
         );
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
@@ -7735,8 +7653,8 @@ mod integration_tests {
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
-                && joined.contains("reason=plan_unachievable")
-                && joined.contains("pass=1"),
+                && joined.contains("原因=plan_unachievable")
+                && joined.contains("轮次=1"),
             "{joined}"
         );
         assert!(
@@ -7802,11 +7720,11 @@ mod integration_tests {
             "默认模式应注入续跑提醒：{joined}"
         );
         assert!(
-            joined.contains("mode=default") && joined.contains("mode_src=registry"),
+            joined.contains("模式=default") && joined.contains("模式来源=registry"),
             "模式与来源应记进日志：{joined}"
         );
         assert!(
-            !joined.contains("mode=plan"),
+            !joined.contains("模式=plan"),
             "历史里的旧计划块不应把模式拉回 plan：{joined}"
         );
     }
@@ -7850,7 +7768,7 @@ mod integration_tests {
         assert!(injected.contains("<proposed_plan>"), "{injected}");
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("mode=plan") && joined.contains("mode_src=registry"),
+            joined.contains("模式=plan") && joined.contains("模式来源=registry"),
             "{joined}"
         );
         assert!(
@@ -7881,7 +7799,7 @@ mod integration_tests {
         assert_eq!(rec.lock().await.len(), 2, "默认分支应续跑一轮");
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("mode=default") && joined.contains("mode_src=heuristic"),
+            joined.contains("模式=default") && joined.contains("模式来源=heuristic"),
             "无登记表时应记关键词兜底来源：{joined}"
         );
         assert!(
@@ -7921,7 +7839,7 @@ mod integration_tests {
         );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("mode=plan") && joined.contains("mode_src=heuristic"),
+            joined.contains("模式=plan") && joined.contains("模式来源=heuristic"),
             "{joined}"
         );
     }
@@ -7948,21 +7866,23 @@ mod integration_tests {
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
-                && joined.contains("reason=plan_output")
-                && joined.contains("mode=plan"),
+                && joined.contains("原因=plan_output")
+                && joined.contains("模式=plan"),
             "{joined}"
         );
     }
 
     /// 计划模式也受「同会话连续注入 2 次」上限约束：第 3 次没给出计划时不再注入。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_plan_mode_stops_after_two_injections() {
+    async fn nudge_plan_mode_stops_after_max_injections() {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("第一句空话")),
             ScriptedReply::Sse(sse_text_reply("第二句空话")),
             ScriptedReply::Sse(sse_text_reply("第三句空话")),
+            ScriptedReply::Sse(sse_text_reply("第四句空话")),
+            ScriptedReply::Sse(sse_text_reply("第五句空话")),
         ])
         .await;
 
@@ -7976,14 +7896,15 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
         assert_eq!(
             rec.lock().await.len(),
-            3,
-            "首轮 + 续跑 × 2；第三次没给计划也不再注入"
+            5,
+            "首轮 + 续跑 × 4；第五次没给计划也不再注入"
         );
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_limited")
-                && joined.contains("reason=max_streak")
-                && joined.contains("mode=plan"),
+                && joined.contains("原因=max_injections")
+                && joined.contains("模式=plan")
+                && joined.contains("轮次=5"),
             "{joined}"
         );
     }
@@ -8029,7 +7950,7 @@ mod integration_tests {
         );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("event=zen_proxy.nudge_injected") && joined.contains("mode=default"),
+            joined.contains("event=zen_proxy.nudge_injected") && joined.contains("模式=default"),
             "{joined}"
         );
     }
@@ -8070,7 +7991,7 @@ mod integration_tests {
         assert!(body.contains(&format!("{TASK_COMPLETED_MARKER}>")), "{body}");
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("reason=task_completed") && joined.contains("mode=default"),
+            joined.contains("原因=task_completed") && joined.contains("模式=default"),
             "{joined}"
         );
     }
@@ -8097,7 +8018,7 @@ mod integration_tests {
         );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("reason=title_task"),
+            joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("原因=title_task"),
             "{joined}"
         );
     }
@@ -8207,18 +8128,17 @@ mod integration_tests {
         );
     }
 
-    /// 标签收尾按「健康结束」清零连续计数：连续两轮「文本 + 标签」之后，同一会话的下一轮
-    /// 口嗨仍然会被注入（否则普通问答两轮就会耗光 streak，真正的口嗨反而 10 分钟不再被催）。
+    /// 注入上限只按**单次请求**计：同一个 `ProxyState`（同一个会话）连发两次请求，第二次
+    /// 仍然是「首轮 + 续跑」各打一次上游——不再有跨请求的连续计数与静默窗口。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_completion_tag_clears_streak() {
+    async fn nudge_injections_are_per_request() {
         let dir = tempfile::TempDir::new().unwrap();
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
-        let headers = session_headers("thread-streak");
-        // 一个 state 贯穿三轮请求：`nudge` 计数表在 Arc 里跨请求保留（clone 共享同一张表）
+        let headers = session_headers("thread-per-request");
+        // 一个 state 贯穿两次请求：跨请求不再有任何计数状态
         let shared = nudge_probe_state("http://127.0.0.1:1", log.clone());
 
-        // 前两轮：各自「首轮口嗨 → 续跑轮用标签收尾」（每次都把计数清零）
-        for _ in 0..2 {
+        for round in 1..=2 {
             let (upstream, rec) = spawn_mock_zen_scripted(vec![
                 ScriptedReply::Sse(sse_text_reply("接下来我会把测试补上。")),
                 completion_reply("已完成：补了测试"),
@@ -8228,32 +8148,18 @@ mod integration_tests {
             state.base_url = upstream;
             let body = run_nudge_probe_state(state, headers.clone(), nudge_probe(true)).await;
             assert_eq!(body.matches("event: response.completed").count(), 1);
-            assert_eq!(rec.lock().await.len(), 2, "应注入一次并收尾");
+            assert_eq!(
+                rec.lock().await.len(),
+                2,
+                "第 {round} 次请求都应是「首轮 + 续跑」：{:?}",
+                rec.lock().await
+            );
         }
-
-        // 第三轮再口嗨：仍有注入额度（若标签没有清零 streak，这里会被 max_streak 拦下、
-        // 只剩 1 次上游调用）
-        let (upstream, rec) = spawn_mock_zen_scripted(vec![
-            ScriptedReply::Sse(sse_text_reply("接下来我会把测试补上。")),
-            ScriptedReply::Sse(sse_tool_call_reply("shell", "{\"cmd\":\"ls\"}")),
-        ])
-        .await;
-        let mut state = shared;
-        state.base_url = upstream;
-        let body = run_nudge_probe_state(state, headers, nudge_probe(true)).await;
-        assert_eq!(body.matches("event: response.completed").count(), 1);
-        assert!(body.contains("function_call"), "{body}");
-        assert_eq!(
-            rec.lock().await.len(),
-            2,
-            "标签收尾清零 streak 后，第三轮仍应注入：{:?}",
-            rec.lock().await
-        );
         let joined = read_session_log(&dir);
         assert!(
-            joined.contains("event=zen_proxy.nudge_injected")
+            joined.contains("本请求催办次数=1/4")
                 && !joined.contains("event=zen_proxy.nudge_limited"),
-            "{joined}"
+            "两次请求应各注入一次、都不触发上限：{joined}"
         );
     }
 
@@ -8274,7 +8180,6 @@ mod integration_tests {
            log,
            trace,
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           nudge: Arc::new(Mutex::new(HashMap::new())),
            session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        }
@@ -8649,7 +8554,6 @@ mod integration_tests {
            log,
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           nudge: Arc::new(Mutex::new(HashMap::new())),
            session_map: Arc::new(SessionMap::default()),
            modes: Arc::new(ThreadModeRegistry::default()),
        };
