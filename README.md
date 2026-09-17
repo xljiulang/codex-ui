@@ -520,6 +520,13 @@
 - 「推理输出 / 思考过程」取决于 codex 是否请求推理——把该提供方的 `model_reasoning_effort` 设为非 `none`、`model_reasoning_summary` 设为 `auto`；
 - 再用 `zen_proxy.request` 的 `reasoning_effort` 与 `zen_proxy.stream_summary` 的 `delta_keys` 核对（前者是 codex 请求的档位，后者是上游实际下发的推理字段）。
 
+#### Zen 代理：模型报「工具 update_plan 不可用」（codex 侧问题，已核实）
+
+- **现象**：弱模型按 codex 的 base instructions 去调用 `update_plan`，codex 回 `unsupported call: update_plan`，模型遂把它转述成「工具 update_plan 不可用」。**默认模式与计划模式都会出现**。
+- **根因（0.154.0 实测抓包）**：请求的 `tools` 数组里**没有** `update_plan`（只有 `exec_command` / `write_stdin` / goal 三件套 / 若干命名空间工具 / `web_search` 等），但同一请求的 `instructions` 里仍有两处承诺它存在（`## Planning` 段与文末 ``## `update_plan` `` 整节），计划模式还多一段 `## Plan Mode vs update_plan tool`——属 codex 侧「提示词承诺了一个未注册的工具」。
+- **代理侧不做特例、也无法适配**：代理原样翻译转发客户端的工具声明；codex 的工具注册表在回合开始时即固定，代理无法让 codex 接受一个它没注册的工具（替模型吞掉调用、自行合成工具结果会让计划不再显示在应用里，语义也脏）。同一现象在不走 Zen 的 provider 上同样复现，与 Zen 无关。
+- **当前处理**：不改代码 / 提示词，作为已知问题记录；完整取证（mock 抓包命令、rollout 次数统计）与两个未实施的备选方案见 [docs/变更记录.md](docs/变更记录.md) 2026-09-17 条目。
+
 ### Zen 代理诊断日志（内容级，默认关闭，用 `CODEXUI_ZEN_TRACE` 开启）
 
 #### 开关与取值
@@ -759,6 +766,7 @@ codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下�
 高版本不警告意味着未来 codex 协议变化时应用可能静默异常，升级 codex 后请留意功能是否正常。
 0.154.0 相对 0.149.0 的协议差异核对见 [docs/app-server.md](docs/app-server.md) §1.1
 （`ServerRequest` 无变化，新增方法与通知均为可选、不使用即不受影响）。
+**已知不一致（0.154.0）**：base instructions 仍教模型使用 `update_plan`，但请求的 `tools` 里已无该工具，模型调用会被 codex 拒为 `unsupported call: update_plan`（表现为模型说「工具 update_plan 不可用」，默认/计划模式皆然）；不影响应用功能，详见「Zen 代理」小节的同名条目与 `docs/变更记录.md`。
 
 以 `codex app-server generate-ts --experimental` 输出的协议绑定为参考。后端只实现本项目所需字段，未知通知忽略并记录日志。codex CLI 升级后如协议变化，可重新生成绑定核对：
 
