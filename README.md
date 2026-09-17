@@ -406,8 +406,11 @@
 - **上游地址末尾带不带 `/` 都兼容**（`https://a/` 与 `https://a` 等价，路由派生与重启判定都按归一化后的值），且**在设置页保存「模型提供方的 base_url」或端口即重启生效**，无需重启 codex-ui；端口默认 `18080` 可在设置页修改，运行状态实时展示；
 - Zen base URL 与 User-Agent（`opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24`）固定，API Key 不固定——读取客户端请求的 `Authorization` 头原样转发，
   因此在模型配置页为 provider 填 `experimental_bearer_token = "public"` 即可；
-- 代理向上游附加 opencode 客户端识别头（`x-opencode-client: desktop`、`x-opencode-project: global`、每次请求随机的 `x-opencode-request: msg_*`、
-  `x-opencode-session`（**优先取客户端请求头 `session-id` 并加 `ses_` 前缀**，缺失或非法时回落到代理生命周期内稳定的 `ses_*`））；
+- 代理向上游附加 opencode 客户端识别头（`x-opencode-client: desktop`、`x-opencode-project: global`、每条上游请求随机的 `x-opencode-request: msg_*`、
+  `x-opencode-session`）——**两者都按真实 opencode 客户端的 ID 规则生成**：`msg_` / `ses_` 之后固定 26 位 `[0-9A-Za-z]`（前 12 位是时间戳低 6 字节的小写十六进制、后 14 位随机，复刻 `sst/opencode` 的 `Identifier.create`）；
+  Zen 免费层会校验这个形状（旧写法 `ses_` + 裸 codex 线程 id、18 位随机串会被判成「非 opencode 客户端」并以 `403 FreeTierError: OpenCode's free tier can only be used from within OpenCode` 拒绝）；
+  `x-opencode-session` 由客户端请求头 `session-id`（codex 线程 id）**经进程内双向映射表**得到：同一线程在代理生命周期内恒定发同一个 `ses_*`，不同线程互不相同，可反查回线程 id（代理重启后重新分配）；
+  请求头缺失、空白或非可见 ASCII 时回落到代理启动时生成、生命周期内稳定的 `ses_*`；
 - **流式健壮性**：
   - ① 上游返回的工具调用参数被截断/非法（或工具名为空）时，整轮**不发出任何 function_call**、改发 `response.failed`（codex 以明确失败结束，不再静默按完成收尾），并记 `zen_proxy.malformed_tool_call`；
   - ② 上游随流下发的 `error` 与读取中断同样转成 `response.failed`，不再"按完成收尾"；
@@ -541,7 +544,8 @@ $env:CODEXUI_ZEN_TRACE='1'; .\build-dev.bat     # 或先设置系统环境变量
 #### 摘要字段与可疑标记
 
 - **摘要字段**：`call_id` / `attempt` / `model` / `stream` / `upstream_url` /
-  `x_opencode_session`（= codex `session-id` 派生值，用于关联线程）/ `x_opencode_request` /
+  `x_opencode_session`（实发的 opencode 形状会话 id）/ `session_codex`（由双向映射表反查出的 codex 线程 id，
+  回落会话记 `-`，两者对照即可定位是哪个线程）/ `x_opencode_request` /
   `authorization=present|absent`（**从不落盘 API Key**）/ `message_count` / `tool_count` /
   `dropped_fields` / `reasoning_rc` / `elapsed_ms` / `upstream_status` / `finish_reason` /
   `text_chars` / `reasoning_chars` / `call_count` / `failed` / `usage` / `delta_keys` /

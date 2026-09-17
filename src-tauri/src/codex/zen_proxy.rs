@@ -6,12 +6,10 @@
 //! - 仅绑定回环地址，专供 codex-ui 自身使用，无额外鉴权。
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
@@ -288,16 +286,10 @@ fn request_is_plan_mode(req: &Value) -> bool {
 }
 
 /// 入站请求对应的 codex 线程 id：取请求头 `session-id`（codex 用它上报线程 id），
-/// 去掉可能存在的 `ses_` 前缀（代理给上游的 `x-opencode-session` 会补这个前缀，登记表按
-/// 原始线程 id 存）。缺失、纯空白或非 ASCII 时返回 None（调用方退回关键词兜底判据）。
+/// 归一化见 [`normalize_client_session`]（与 [`SessionMap`] 用同一口径，登记表按原始线程 id 存）。
+/// 缺失、纯空白或非 ASCII 时返回 None（调用方退回关键词兜底判据）。
 fn request_header_thread_id(headers: &HeaderMap) -> Option<String> {
-    let raw = headers.get("session-id")?.to_str().ok()?.trim();
-    let id = raw.strip_prefix("ses_").unwrap_or(raw).trim();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id.to_string())
-    }
+    normalize_client_session(headers.get("session-id")?.to_str().ok()?)
 }
 
 /// 本次入站请求的协作模式与来源：先按请求头里的线程 id 查协议登记表（权威，命中即不做任何
@@ -517,7 +509,8 @@ pub(crate) async fn start(
     let app = Router::new()
         .fallback(handle_any)
         .with_state(ProxyState {
-            session: random_id("ses"),
+            session: opencode_id("ses", true),
+            session_map: Arc::new(SessionMap::default()),
             base_url: base_url.clone(),
             log,
             trace,
@@ -591,7 +584,11 @@ pub(crate) async fn apply(
 /// 作为客户端未提供 `session-id` 请求头时的 `x-opencode-session` 回落值。
 #[derive(Clone)]
 struct ProxyState {
+    /// 代理级稳定会话：客户端没给 `session-id` 时用它作 `x-opencode-session`（同样是
+    /// opencode 形状，代理启动时生成一次）。
     session: String,
+    /// 「codex 会话 id ↔ 上游 `ses_*`」映射表，见 [`SessionMap`]。
+    session_map: Arc<SessionMap>,
     base_url: String,
     log: ZenLog,
     /// 内容诊断日志（常开）：每次上游尝试的请求体/响应原文/收尾事件。
@@ -615,19 +612,177 @@ fn log_at(log: &Option<Arc<SessionLog>>, level: &str, event: &str, kv: &[(&str, 
     log.write(level, None, event, &kv);
 }
 
-/// 生成 `prefix_` + 18 位字母数字随机串（无额外依赖，基于 `RandomState` 的随机种子）。
-fn random_id(prefix: &str) -> String {
-    const CHARS: &[u8] =
-        b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let mut out = String::with_capacity(prefix.len() + 19);
+/// opencode 客户端标识的字符集（与 `sst/opencode` 的 `Identifier.create` 一致）。
+const OPENCODE_ID_CHARS: &[u8] =
+    b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/// opencode 客户端标识的后段长度：`ses_` / `msg_` 之后固定 26 位。
+const OPENCODE_ID_LEN: usize = 26;
+/// [`opencode_id`] 的进程内计数状态：`(毫秒时间戳, 同毫秒内已用序号)`。
+static OPENCODE_ID_STATE: Mutex<(u64, u64)> = Mutex::new((0, 0));
+/// 会话映射表上限：超出后整体清空再插入（与 [`ThreadModeRegistry`] 同一取舍）。
+const SESSION_MAP_LIMIT: usize = 1024;
+/// 铸号撞上已有会话时的最大重铸次数。
+const SESSION_MAP_MINT_RETRY: usize = 7;
+
+/// 生成 opencode 客户端标识：`prefix_` + 26 位（前 12 位时间十六进制 + 后 14 位随机字母数字）。
+///
+/// 复刻 `sst/opencode` 的 `Identifier.create`：`current = Date.now() * 0x1000 + 计数器`
+/// （计数器同毫秒内自增、跨毫秒清零），`descending` 取 `!current`（会话 id 用降序、
+/// 消息 id 用升序）；前 12 位是 `current` 低 6 字节的小写十六进制，后 14 位是随机字节按
+/// `% 62` 映射到 [`OPENCODE_ID_CHARS`]。Zen 服务端要求 `ses_` / `msg_` 之后恰为 26 位
+/// `[0-9A-Za-z]`（真实 opencode 客户端就是这种形状），格式不符会被判成「非 opencode 客户端」。
+fn opencode_id(prefix: &str, descending: bool) -> String {
+    let (timestamp, counter) = {
+        let mut state = OPENCODE_ID_STATE
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let now = unix_now_ms();
+        if now != state.0 {
+            state.0 = now;
+            state.1 = 0;
+        }
+        state.1 += 1;
+        (state.0, state.1)
+    };
+    let value = {
+        let current = timestamp.wrapping_mul(0x1000).wrapping_add(counter);
+        if descending {
+            !current
+        } else {
+            current
+        }
+    };
+    let mut out = String::with_capacity(prefix.len() + 1 + OPENCODE_ID_LEN);
     out.push_str(prefix);
     out.push('_');
-    for _ in 0..18 {
-        let mut h = RandomState::new().build_hasher();
-        h.write_u64(unix_now());
-        out.push(CHARS[(h.finish() % 62) as usize] as char);
+    for index in 0..6 {
+        let byte = ((value >> (40 - 8 * index)) & 0xff) as u8;
+        out.push_str(&format!("{byte:02x}"));
+    }
+    for byte in random_bytes::<14>() {
+        out.push(OPENCODE_ID_CHARS[(byte % 62) as usize] as char);
     }
     out
+}
+
+/// 取 `N` 字节随机数：优先 Windows CNG（`BCryptGenRandom` + 系统首选随机源），
+/// 失败时回落到「时间纳秒 + 进程内计数」播种的 SplitMix64（保证不 panic、仍有基本离散度）。
+fn random_bytes<const N: usize>() -> [u8; N] {
+    let mut buf = [0u8; N];
+    if !fill_random_from_cng(&mut buf) {
+        fill_random_fallback(&mut buf);
+    }
+    buf
+}
+
+/// 用 Windows CNG 填充随机字节；返回是否成功。
+#[cfg(windows)]
+fn fill_random_from_cng(buf: &mut [u8]) -> bool {
+    use windows::Win32::Security::Cryptography::{
+        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+    };
+    // SAFETY: 传给 CNG 的是可写切片（长度由 windows crate 换算），`None` 表示使用系统首选
+    // 随机源——不涉及句柄，也就不需要释放。返回 NTSTATUS，0 即 STATUS_SUCCESS。
+    unsafe { BCryptGenRandom(None, buf, BCRYPT_USE_SYSTEM_PREFERRED_RNG).0 == 0 }
+}
+
+#[cfg(not(windows))]
+fn fill_random_from_cng(_buf: &mut [u8]) -> bool {
+    false
+}
+
+/// 随机源不可用时的回落：SplitMix64 由时间纳秒与进程内计数混合播种。
+fn fill_random_fallback(buf: &mut [u8]) {
+    /// SplitMix64 的常量增量。
+    const GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+    let mut x = unix_now_nanos() ^ SEQ.fetch_add(1, Ordering::Relaxed).wrapping_mul(GAMMA);
+    for slot in buf.iter_mut() {
+        x = x.wrapping_add(GAMMA);
+        *slot = (mix64(x) >> 32) as u8;
+    }
+}
+
+/// SplitMix64 的最终混合函数。
+fn mix64(mut x: u64) -> u64 {
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
+/// 「codex 会话 id ↔ 上游 `x-opencode-session`」双向映射表（内存态，进程内共享）。
+///
+/// 存在的理由：Zen 服务端要求会话标识是 opencode 形状（`ses_` + 26 位 `[0-9A-Za-z]`），
+/// 而 codex 上报的线程 id 是 UUID（带连字符，形状不符）。这里按真实 opencode 的生成规则
+/// （[`opencode_id`] + 降序）为每个 codex 线程铸一个会话 id 并缓存：同一线程的所有请求发
+/// 同一个值（上游按会话分组/限流的语义不变），不同线程互不相同；反向索引让「看到 `ses_*`
+/// 想找回 codex 线程 id」变成一次查表（日志与排查用）。表只存内存：代理重启后同一线程会
+/// 拿到新的 `ses_*`，与 [`ThreadModeRegistry`] 的取舍一致。
+#[derive(Default)]
+struct SessionMap {
+    inner: Mutex<SessionMapInner>,
+}
+
+#[derive(Default)]
+struct SessionMapInner {
+    /// codex 会话 id（归一化后）→ 上游 `ses_*`。
+    forward: HashMap<String, String>,
+    /// 上游 `ses_*` → codex 会话 id（归一化后）。
+    reverse: HashMap<String, String>,
+}
+
+impl SessionMap {
+    /// 取入站会话 id 对应的上游 `ses_*`：首次见到时铸一个并双向登记，之后恒定返回同一个。
+    /// 入站值为空白（或客户端没给）时返回 None，调用方回落到代理级稳定会话。
+    fn resolve(&self, client_session_id: &str) -> Option<String> {
+        self.resolve_with(client_session_id, || opencode_id("ses", true))
+    }
+
+    /// [`SessionMap::resolve`] 的可注入版本：`mint` 负责铸号，便于单测构造撞号场景。
+    fn resolve_with(
+        &self,
+        client_session_id: &str,
+        mut mint: impl FnMut() -> String,
+    ) -> Option<String> {
+        let key = normalize_client_session(client_session_id)?;
+        let Ok(mut inner) = self.inner.lock() else {
+            // 表不可用（锁中毒）时仍要给出合法形状的值：现铸一个，只是失去会话稳定性。
+            return Some(mint());
+        };
+        if let Some(existing) = inner.forward.get(&key) {
+            return Some(existing.clone());
+        }
+        if inner.forward.len() >= SESSION_MAP_LIMIT {
+            inner.forward.clear();
+            inner.reverse.clear();
+        }
+        let mut session = mint();
+        // 撞号（该值已属于另一个 codex 会话）就重铸；26 位标识撞号概率可忽略，
+        // 重试用尽后沿用最后一次取值（反向索引只保留最新一条）。
+        for _ in 0..SESSION_MAP_MINT_RETRY {
+            if !inner.reverse.contains_key(&session) {
+                break;
+            }
+            session = mint();
+        }
+        inner.forward.insert(key.clone(), session.clone());
+        inner.reverse.insert(session.clone(), key);
+        Some(session)
+    }
+
+    /// 反查：由上游 `ses_*` 找回 codex 会话 id；未登记（如代理级回落会话）返回 None。
+    fn codex_of(&self, session: &str) -> Option<String> {
+        let inner = self.inner.lock().ok()?;
+        inner.reverse.get(session).cloned()
+    }
+}
+
+/// 归一化入站会话 id：trim 后剥掉可能存在的 `ses_` 前缀（codex 上报的是裸线程 id），
+/// 结果为空时返回 None（调用方视为「客户端没给会话 id」）。
+fn normalize_client_session(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let bare = trimmed.strip_prefix("ses_").unwrap_or(trimmed).trim();
+    (!bare.is_empty()).then(|| bare.to_string())
 }
 
 fn http_client() -> &'static reqwest::Client {
@@ -757,7 +912,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     // 本次入站请求的稳定标识：贯穿内容日志文件名与 session 日志行。
-    let call_id = random_id("req");
+    let call_id = opencode_id("req", false);
     // 协作模式先按协议登记表解析（查不到才退回关键词），日志里连同来源一起记下
     let (plan_mode, mode_src) = resolve_nudge_mode(state, headers, &req);
     let mode = if plan_mode { "plan" } else { "default" };
@@ -767,21 +922,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
 
     let started = Instant::now();
     let base_url = state.base_url.clone();
-    let trace = state.trace.clone();
-    match forward(
-        &req,
-        &headers,
-        want_stream,
-        &base_url,
-        http_client(),
-        &state.session,
-        &state.requires_reasoning_rc,
-        &state.log,
-        &trace,
-        &call_id,
-    )
-    .await
-    {
+    match forward(&req, headers, want_stream, state, &call_id).await {
         Ok(forwarded) => {
             let status = forwarded.status;
             log_at(
@@ -922,7 +1063,7 @@ async fn forward_passthrough(
     };
     let mut rq = http_client()
         .request(to_reqwest_method(&method), url)
-        .headers(forwarded_request_headers(headers, &state.session));
+        .headers(forwarded_request_headers(headers, state));
     if method_has_body(&method) {
         rq = rq.body(reqwest::Body::wrap_stream(body.into_data_stream()));
     }
@@ -964,27 +1105,20 @@ fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
     Ok(url)
 }
 
-/// 上游 `x-opencode-session` 取值：优先用客户端请求头 `session-id`（OpenAI 协议会话标识，
-/// codex 每次请求都会带上），统一加 `ses_` 前缀（已带前缀则不重复）；
-/// 缺失、空白或非法值时回落到代理生命周期内稳定的 `ses_*`。
-fn opencode_session(headers: &HeaderMap, fallback: &str) -> String {
+/// 上游 `x-opencode-session` 取值：按入站请求头 `session-id`（OpenAI 协议会话标识，codex
+/// 每次请求都会带上）查 [`SessionMap`]，首次见到就按 opencode 规则铸一个 `ses_*` 并登记
+/// （同一 codex 线程恒定、不同线程不同）；请求头缺失、空白或非可见 ASCII 时回落到代理
+/// 生命周期内稳定的 `state.session`（同样是合法形状）。
+fn opencode_session(state: &ProxyState, headers: &HeaderMap) -> String {
     headers
         .get("session-id")
         .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| {
-            if value.starts_with("ses_") {
-                value.to_string()
-            } else {
-                format!("ses_{value}")
-            }
-        })
-        .unwrap_or_else(|| fallback.to_string())
+        .and_then(|value| state.session_map.resolve(value))
+        .unwrap_or_else(|| state.session.clone())
 }
 
 /// 构造转发给上游的请求头：保留入站头，剔除逐跳头并附加固定 opencode 识别头。
-fn forwarded_request_headers(headers: &HeaderMap, fallback_session: &str) -> HeaderMap {
+fn forwarded_request_headers(headers: &HeaderMap, state: &ProxyState) -> HeaderMap {
     let mut out = headers.clone();
     for name in HOP_BY_HOP_HEADERS {
         out.remove(name);
@@ -1001,10 +1135,10 @@ fn forwarded_request_headers(headers: &HeaderMap, fallback_session: &str) -> Hea
         "x-opencode-project",
         HeaderValue::from_static(OPENCODE_PROJECT),
     );
-    if let Ok(value) = HeaderValue::from_str(&random_id("msg")) {
+    if let Ok(value) = HeaderValue::from_str(&opencode_id("msg", false)) {
         out.insert("x-opencode-request", value);
     }
-    if let Ok(value) = HeaderValue::from_str(&opencode_session(headers, fallback_session)) {
+    if let Ok(value) = HeaderValue::from_str(&opencode_session(state, headers)) {
         out.insert("x-opencode-session", value);
     }
     out
@@ -1435,7 +1569,8 @@ fn note_request_meta(
     url: &str,
     request_id: &str,
     headers: &HeaderMap,
-    fallback_session: &str,
+    session: &str,
+    session_codex: Option<&str>,
     body: &Value,
     dropped: &[&'static str],
     reasoning_rc: bool,
@@ -1449,10 +1584,8 @@ fn note_request_meta(
             "absent"
         },
     );
-    call.note(
-        "x_opencode_session",
-        opencode_session(headers, fallback_session),
-    );
+    call.note("x_opencode_session", session.to_string());
+    call.note("session_codex", session_codex.unwrap_or("-").to_string());
     call.note("x_opencode_request", request_id.to_string());
     call.note(
         "model",
@@ -1496,26 +1629,24 @@ fn note_request_meta(
 }
 
 /// 翻译请求并转发到 Zen（含历史净化与可选字段降级重试）。
-/// `base_url` 由配置传入（测试时可指向本地 mock）。
-/// `fallback_session` 仅在客户端未提供 `session-id` 时用作 `x-opencode-session`。
-/// `requires_reasoning_rc` 是本代理实例的"上游是否要求历史回传 `reasoning_content`"开关。
+/// `state` 提供上游地址（测试时可指向本地 mock）、会话映射与代理级状态。
 /// `call_id` 用于把本次入站请求的多次尝试（内容日志）关联到同一条 session 日志。
 async fn forward(
     req: &Value,
     headers: &HeaderMap,
     want_stream: bool,
-    base_url: &str,
-    client: &reqwest::Client,
-    fallback_session: &str,
-    requires_reasoning_rc: &AtomicBool,
-    log: &ZenLog,
-    trace: &TraceSink,
+    state: &ProxyState,
     call_id: &str,
 ) -> Result<Forwarded, (StatusCode, String)> {
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let url = format!("{}/chat/completions", state.base_url.trim_end_matches('/'));
+    let client = http_client();
+    // 本会话发往上游的 x-opencode-session（同一 codex 线程在代理生命周期内恒定）
+    let session = opencode_session(state, headers);
+    // 反查：把实发的 ses_* 映射回 codex 会话 id，落进内容日志便于人工对照
+    let session_codex = state.session_map.codex_of(&session);
     let optional = optional_fields(req, want_stream);
     let mut dropped: Vec<&'static str> = Vec::new();
-    let mut reasoning_rc = requires_reasoning_rc.load(Ordering::Relaxed);
+    let mut reasoning_rc = state.requires_reasoning_rc.load(Ordering::Relaxed);
     let mut reasoning_rc_change: Option<ReasoningRcChange> = None;
     // 一次请求内最多切换一次 reasoning_content 回传方向，避免"开了又关"地来回重试。
     let mut reasoning_toggled = false;
@@ -1533,27 +1664,21 @@ async fn forward(
             body[field.key] = field.value.clone();
         }
         // 内容诊断日志：先落盘本次尝试实际发出的请求体与关键元信息（不含 API Key）
-        let mut call = trace.begin(call_id, attempt_no);
-        let request_id = random_id("msg");
+        let mut call = state.trace.begin(call_id, attempt_no);
+        let request_id = opencode_id("msg", false);
         note_request_meta(
             &mut call,
             &url,
             &request_id,
             headers,
-            fallback_session,
+            &session,
+            session_codex.as_deref(),
             &body,
             &dropped,
             reasoning_rc,
         );
         call.write_request_json(&body);
-        let resp = build_chat_request(
-            client,
-            &url,
-            headers,
-            fallback_session,
-            &request_id,
-            &body,
-        )
+        let resp = build_chat_request(client, &url, headers, &session, &request_id, &body)
             .send()
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
@@ -1567,7 +1692,7 @@ async fn forward(
             let text = resp.text().await.unwrap_or_default();
             let shape = message_shape(&body);
             log_at(
-                log,
+                &state.log,
                 "warn",
                 "zen_proxy.forward_attempt",
                 &[
@@ -1617,7 +1742,7 @@ async fn forward(
                 reasoning_toggled = true;
                 let enabled = !reasoning_rc;
                 reasoning_rc = enabled;
-                requires_reasoning_rc.store(enabled, Ordering::Relaxed);
+                state.requires_reasoning_rc.store(enabled, Ordering::Relaxed);
                 reasoning_rc_change = Some(ReasoningRcChange {
                     enabled,
                     detail: truncate_chars(&text, 200),
@@ -1651,7 +1776,7 @@ fn build_chat_request(
     client: &reqwest::Client,
     url: &str,
     headers: &HeaderMap,
-    fallback_session: &str,
+    session: &str,
     request_id: &str,
     body: &Value,
 ) -> reqwest::RequestBuilder {
@@ -1661,10 +1786,7 @@ fn build_chat_request(
         .header("x-opencode-client", OPENCODE_CLIENT)
         .header("x-opencode-project", OPENCODE_PROJECT)
         .header("x-opencode-request", request_id)
-        .header(
-            "x-opencode-session",
-            opencode_session(headers, fallback_session),
-        );
+        .header("x-opencode-session", session);
     if let Some(auth) = headers.get(header::AUTHORIZATION) {
         if let Ok(v) = auth.to_str() {
             rq = rq.header(header::AUTHORIZATION, v.to_string());
@@ -2074,7 +2196,7 @@ async fn run_stream_task(
     let (plan_mode, _) = resolve_nudge_mode(&state, &headers, &req);
     // 会话标题生成任务（应用的后台临时线程）：整轮放行，不判定也不注入
     let title_task = request_is_title_task(&req);
-    let session = opencode_session(&headers, &state.session);
+    let session = opencode_session(&state, &headers);
     let user_text = last_user_text(&req);
 
     let mut body = req.clone();
@@ -2200,19 +2322,7 @@ async fn run_stream_task(
             ],
         );
         let nudge_call_id = format!("{call_id}-nudge{pass}");
-        match forward(
-            &body,
-            &headers,
-            true,
-            &state.base_url,
-            http_client(),
-            &state.session,
-            &state.requires_reasoning_rc,
-            &state.log,
-            &state.trace,
-            &nudge_call_id,
-        )
-        .await
+        match forward(&body, &headers, true, &state, &nudge_call_id).await
         {
             Ok(forwarded) if forwarded.status.is_success() => match forwarded.payload {
                 ForwardPayload::Live(resp) => {
@@ -2310,18 +2420,7 @@ async fn nudge_judge(
     let started = Instant::now();
     let forwarded = tokio::time::timeout(
         NUDGE_JUDGE_TIMEOUT,
-        forward(
-            &body,
-            headers,
-            false,
-            &state.base_url,
-            http_client(),
-            &state.session,
-            &state.requires_reasoning_rc,
-            &state.log,
-            &state.trace,
-            &judge_call_id,
-        ),
+        forward(&body, headers, false, state, &judge_call_id),
     )
     .await;
     let elapsed_ms = started.elapsed().as_millis().to_string();
@@ -2388,7 +2487,7 @@ async fn nudge_judge(
         "info",
         "zen_proxy.nudge_judged",
         &[
-            ("session", opencode_session(headers, &state.session)),
+            ("session", opencode_session(state, headers)),
             ("pass", pass.to_string()),
             ("verdict", format!("{verdict:?}")),
             ("reply_chars", reply_chars.to_string()),
@@ -2470,6 +2569,22 @@ fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// 当前 Unix 毫秒时间戳（opencode 标识里的时间部分）。
+fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 当前 Unix 纳秒时间戳（仅用于随机源回落的播种）。
+fn unix_now_nanos() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
 }
 
@@ -3922,6 +4037,35 @@ const REAL_PLAN_MODE_BLOCK: &str = "<collaboration_mode># Plan Mode (Conversatio
 #[cfg(test)]
 const REAL_DEFAULT_MODE_BLOCK: &str = "<collaboration_mode># Collaboration Mode: Default\r\n\r\nYou are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.\r\n\r\nYour active mode changes only when new developer instructions with a different `<collaboration_mode>...</collaboration_mode>` change it.\r\n</collaboration_mode>";
 
+/// 断言 `id` 是 opencode 形状：`prefix_` + 26 位 `[0-9A-Za-z]`（Zen 服务端的要求）。
+/// 两个测试模块共用：`tests` 断言纯函数产物、`integration_tests` 断言实际发出的头。
+#[cfg(test)]
+fn assert_is_opencode_id(id: &str, prefix: &str) {
+    let body = id
+        .strip_prefix(&format!("{prefix}_"))
+        .unwrap_or_else(|| panic!("应以 {prefix}_ 开头：{id}"));
+    assert_eq!(body.len(), 26, "后段应为 26 位：{id}");
+    assert!(
+        body.chars().all(|c| c.is_ascii_alphanumeric()),
+        "后段只允许 0-9A-Za-z：{id}"
+    );
+}
+
+/// 测试用代理状态：会话映射表独立（避免跨用例串味），基址可指向本地 mock。
+#[cfg(test)]
+fn test_proxy_state(session: &str, base_url: &str, log: ZenLog, trace: TraceSink) -> ProxyState {
+    ProxyState {
+        session: session.to_string(),
+        session_map: Arc::new(SessionMap::default()),
+        base_url: base_url.to_string(),
+        log,
+        trace,
+        requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+        nudge: Arc::new(Mutex::new(HashMap::new())),
+        modes: Arc::new(ThreadModeRegistry::default()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4211,12 +4355,12 @@ mod tests {
             headers.insert("session-id", HeaderValue::from_str(id).unwrap());
             headers
         };
-        // codex 上报裸线程 id（`ses_` 前缀是代理给上游时才加的）
+        // codex 上报裸线程 id（`ses_` 前缀只可能来自别的客户端，归一化时剥掉）
         assert_eq!(
             request_header_thread_id(&session_headers("01a0aaf8-abc")).as_deref(),
             Some("01a0aaf8-abc")
         );
-        // 客户端已带前缀：去掉前缀后查登记表（与 x-opencode-session 的补前缀规则对称）
+        // 客户端已带前缀：去掉前缀后查登记表（与 SessionMap 的 key 归一化同一口径）
         assert_eq!(
             request_header_thread_id(&session_headers("ses_abc")).as_deref(),
             Some("abc")
@@ -4403,13 +4547,14 @@ mod tests {
 
    #[test]
    fn nudge_counters_are_per_session() {
-       let state = ProxyState {
+      let state = ProxyState {
            session: "ses_fixed123".into(),
            base_url: "http://127.0.0.1:1".into(),
            log: None,
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
            nudge: Arc::new(Mutex::new(HashMap::new())),
+           session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        };
         assert!(nudge_allow(&state, "ses_a"));
@@ -5341,56 +5486,139 @@ mod tests {
     }
 
     #[test]
-    fn random_id_matches_opencode_format() {
-        let msg = random_id("msg");
-        let ses = random_id("ses");
-        assert!(msg.starts_with("msg_"));
-        assert!(ses.starts_with("ses_"));
-        // 前缀后固定 18 位字母数字
-        let body = &msg[4..];
-        assert_eq!(body.len(), 18);
-        assert!(body.chars().all(|c| c.is_ascii_alphanumeric()));
-        // 两次调用应不同
-        assert_ne!(msg, random_id("msg"));
+    fn opencode_id_matches_opencode_format() {
+        // 前缀 + 26 位：前 12 位是时间戳低 6 字节的小写十六进制（opencode 规则），
+        // 后 14 位是 0-9A-Za-z；Zen 服务端就是这么要求的，不合形状会被判成非 opencode 客户端
+        for (id, prefix) in [
+            (opencode_id("msg", false), "msg_"),
+            (opencode_id("ses", true), "ses_"),
+        ] {
+            let body = id.strip_prefix(prefix).expect("前缀应完整保留");
+            assert_eq!(body.len(), 26, "{id}");
+            assert!(
+                body[..12]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+                "前 12 位应是小写十六进制：{id}"
+            );
+            assert!(
+                body.chars().all(|c| c.is_ascii_alphanumeric()),
+                "后段只允许 0-9A-Za-z：{id}"
+            );
+        }
+        // 同一毫秒内连续铸号也必须不同（毫秒内计数器参与取值）
+        assert_ne!(opencode_id("msg", false), opencode_id("msg", false));
+        // 升序与降序是同一时间戳的互补取值：首字节必然不同（会话用降序、消息用升序）
+        let ascending = opencode_id("x", false);
+        let descending = opencode_id("x", true);
+        assert_ne!(&ascending[2..14], &descending[2..14]);
     }
 
     #[test]
-    fn opencode_session_prefers_client_header() {
+    fn opencode_session_maps_client_header_to_stable_id() {
+        let state = test_proxy_state("ses_fixed123", "http://127.0.0.1:1", None, TraceSink::disabled());
         let mut headers = HeaderMap::new();
         headers.insert(
             "session-id",
             HeaderValue::from_static("3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"),
         );
-        // 客户端值不带 ses_ 前缀时统一补前缀
+        // UUID 形状的 codex 线程 id 不再直接贴进头里，而是映射成合法 opencode 会话标识
+        let session = opencode_session(&state, &headers);
+        assert_is_opencode_id(&session, "ses");
+        // 同一 codex 线程恒定
+        assert_eq!(opencode_session(&state, &headers), session);
+        // 反查能找回原始 codex 线程 id
         assert_eq!(
-            opencode_session(&headers, "ses_fixed123"),
-            "ses_3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+            state.session_map.codex_of(&session).as_deref(),
+            Some("3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8")
         );
 
-        // 已带前缀则不重复添加
+        // 另一个线程 → 另一个会话 id
+        let mut other = HeaderMap::new();
+        other.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
+        assert_ne!(opencode_session(&state, &other), session);
+
+        // 前后空白与 `ses_` 前缀归一化到同一条映射
         let mut prefixed = HeaderMap::new();
-        prefixed.insert("session-id", HeaderValue::from_static("ses_abc"));
-        assert_eq!(opencode_session(&prefixed, "ses_fixed123"), "ses_abc");
-
-        // 前后空白先 trim 再加前缀
-        let mut padded = HeaderMap::new();
-        padded.insert("session-id", HeaderValue::from_static("  abc  "));
-        assert_eq!(opencode_session(&padded, "ses_fixed123"), "ses_abc");
-
-        // 缺失 / 纯空白 / 非可见 ASCII：回落到代理稳定值
-        assert_eq!(
-            opencode_session(&HeaderMap::new(), "ses_fixed123"),
-            "ses_fixed123"
+        prefixed.insert(
+            "session-id",
+            HeaderValue::from_static(" ses_3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8 "),
         );
+        assert_eq!(opencode_session(&state, &prefixed), session);
+
+        // 缺失 / 纯空白 / 非可见 ASCII：回落到代理级稳定会话，且查不到对应线程
+        assert_eq!(opencode_session(&state, &HeaderMap::new()), "ses_fixed123");
         let mut blank = HeaderMap::new();
         blank.insert("session-id", HeaderValue::from_static("   "));
-        assert_eq!(opencode_session(&blank, "ses_fixed123"), "ses_fixed123");
+        assert_eq!(opencode_session(&state, &blank), "ses_fixed123");
         let mut invalid = HeaderMap::new();
         invalid.insert(
             "session-id",
             HeaderValue::from_bytes(b"caf\xe9").unwrap(),
         );
-        assert_eq!(opencode_session(&invalid, "ses_fixed123"), "ses_fixed123");
+        assert_eq!(opencode_session(&state, &invalid), "ses_fixed123");
+        assert_eq!(state.session_map.codex_of("ses_fixed123"), None);
+    }
+
+    #[test]
+    fn session_map_is_deterministic_and_reversible() {
+        let map = SessionMap::default();
+        let a = map.resolve("thread-a").expect("应铸出会话 id");
+        let b = map.resolve("thread-b").expect("应铸出会话 id");
+        assert_is_opencode_id(&a, "ses");
+        assert_is_opencode_id(&b, "ses");
+        assert_ne!(a, b);
+        // 同 key 恒定、双向可查
+        assert_eq!(map.resolve("thread-a").as_deref(), Some(a.as_str()));
+        assert_eq!(map.codex_of(&a).as_deref(), Some("thread-a"));
+        assert_eq!(map.codex_of(&b).as_deref(), Some("thread-b"));
+        assert_eq!(map.codex_of("ses_unknown"), None);
+    }
+
+    #[test]
+    fn session_map_normalizes_key_and_ignores_blank() {
+        let map = SessionMap::default();
+        let a = map.resolve("thread-a").expect("应铸出会话 id");
+        // trim + 剥 `ses_` 前缀后落到同一条映射
+        assert_eq!(map.resolve("  ses_thread-a  ").as_deref(), Some(a.as_str()));
+        assert!(map.resolve("   ").is_none());
+        assert!(map.resolve("ses_").is_none());
+    }
+
+    #[test]
+    fn session_map_clears_when_full() {
+        let map = SessionMap::default();
+        let keep = map.resolve("thread-0").expect("应铸出会话 id");
+        for index in 1..SESSION_MAP_LIMIT {
+            map.resolve(&format!("thread-{index}")).expect("应铸出会话 id");
+        }
+        assert_eq!(map.codex_of(&keep).as_deref(), Some("thread-0"));
+        // 超出上限：整体清空后插入（与 ThreadModeRegistry 同一取舍）
+        let overflow = map.resolve("thread-overflow").expect("应铸出会话 id");
+        assert_eq!(map.codex_of(&overflow).as_deref(), Some("thread-overflow"));
+        assert_eq!(map.codex_of(&keep), None);
+    }
+
+    #[test]
+    fn session_map_remints_when_id_collides() {
+        let map = SessionMap::default();
+        let taken = map.resolve("thread-a").expect("应铸出会话 id");
+        let mut calls = 0usize;
+        let other = map
+            .resolve_with("thread-b", || {
+                calls += 1;
+                if calls <= 2 {
+                    taken.clone()
+                } else {
+                    "ses_fresh".to_string()
+                }
+            })
+            .expect("应铸出会话 id");
+        assert_eq!(other, "ses_fresh");
+        assert_eq!(calls, 3, "前两次撞号应重铸");
+        // 撞号重铸不影响原会话的映射
+        assert_eq!(map.codex_of(&taken).as_deref(), Some("thread-a"));
+        assert_eq!(map.resolve("thread-a").as_deref(), Some(taken.as_str()));
     }
 
     #[test]
@@ -6362,7 +6590,8 @@ mod integration_tests {
             header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer public"),
         );
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None, &TraceSink::disabled(), "req_test")
+        let state = proxy_state(base_url, None);
+        let resp = forward(&req, &headers, false, &state, "req_test")
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
@@ -6380,7 +6609,8 @@ mod integration_tests {
         assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
         assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
         let req_id = got.opencode_request.as_deref().expect("应有请求 id");
-        assert!(req_id.starts_with("msg_"));
+        assert_is_opencode_id(req_id, "msg");
+        // 客户端没给 session-id：用代理级稳定会话（形状同样合法）
         assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
     }
 
@@ -6392,20 +6622,40 @@ mod integration_tests {
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None, &TraceSink::disabled(), "req_test")
+        let state = proxy_state(base_url, None);
+        let resp = forward(&req, &headers, false, &state, "req_test")
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
 
         let got = rec.lock().await.clone().expect("mock 应已收到请求");
-        // 客户端 session-id 优先，并补上 ses_ 前缀
-        assert_eq!(got.opencode_session.as_deref(), Some("ses_3f1a2b3c"));
+        // 按 codex 会话 id 派生的 opencode 会话标识：ses_ + 26 位 [0-9A-Za-z]
+        let session = got.opencode_session.clone().expect("应有会话 id");
+        assert_is_opencode_id(&session, "ses");
+        // 反查能把实发值映射回 codex 线程 id（诊断用）
+        assert_eq!(
+            state.session_map.codex_of(&session).as_deref(),
+            Some("3f1a2b3c")
+        );
         assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
         assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
-        assert!(got
-            .opencode_request
-            .as_deref()
-            .is_some_and(|id| id.starts_with("msg_")));
+        assert_is_opencode_id(
+            got.opencode_request.as_deref().expect("应有请求 id"),
+            "msg",
+        );
+
+        // 同一 codex 会话的后续请求发同一个 x-opencode-session，不同会话则不同
+        let resp = forward(&req, &headers, false, &state, "req_test")
+            .await
+            .expect("forward 应成功");
+        assert!(resp.status.is_success());
+        let again = rec.lock().await.clone().expect("mock 应已收到请求");
+        assert_eq!(again.opencode_session.as_deref(), Some(session.as_str()));
+        assert_ne!(
+            again.opencode_request.as_deref(),
+            got.opencode_request.as_deref(),
+            "每条上游请求都应换新的 x-opencode-request"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -6414,14 +6664,18 @@ mod integration_tests {
         let base_url = spawn_mock_zen(rec.clone()).await;
         let req = json!({ "model": "m", "input": "hi", "stream": false });
         let headers = HeaderMap::new();
-        let resp = forward(&req, &headers, false, &base_url, http_client(), "ses_fixed123", &AtomicBool::new(false), &None, &TraceSink::disabled(), "req_test")
+        let state = proxy_state(base_url, None);
+        let resp = forward(&req, &headers, false, &state, "req_test")
             .await
             .expect("forward 应成功");
         assert!(resp.status.is_success());
         let got = rec.lock().await.clone().expect("mock 应已收到请求");
         assert_eq!(got.authorization, None);
         assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
-        assert_eq!(got.opencode_request.as_deref().map(|s| &s[..4]), Some("msg_"));
+        assert_is_opencode_id(
+            got.opencode_request.as_deref().expect("应有请求 id"),
+            "msg",
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -6429,13 +6683,14 @@ mod integration_tests {
        let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
            Arc::new(AsyncMutex::new(None));
        let base_url = spawn_mock_passthrough(rec.clone()).await;
-       let state = ProxyState {
+      let state = ProxyState {
            session: "ses_fixed123".into(),
            base_url,
            log: None,
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
            nudge: Arc::new(Mutex::new(HashMap::new())),
+           session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        };
         let mut headers = HeaderMap::new();
@@ -6464,10 +6719,11 @@ mod integration_tests {
         assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
         assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
         assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
+        // 透传路径同样只需要合法形状：没带 session-id 时用代理级稳定会话
         assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
-        assert_eq!(
-            got.opencode_request.as_deref().map(|s| &s[..4]),
-            Some("msg_")
+        assert_is_opencode_id(
+            got.opencode_request.as_deref().expect("应有请求 id"),
+            "msg",
         );
 
         let uri: Uri = "/v1/echo".parse().unwrap();
@@ -6491,13 +6747,14 @@ mod integration_tests {
        let rec: Arc<AsyncMutex<Option<PassthroughReceived>>> =
            Arc::new(AsyncMutex::new(None));
        let base_url = spawn_mock_passthrough(rec.clone()).await;
-       let state = ProxyState {
+      let state = ProxyState {
            session: "ses_fixed123".into(),
            base_url,
            log: None,
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
            nudge: Arc::new(Mutex::new(HashMap::new())),
+           session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        };
         let mut headers = HeaderMap::new();
@@ -6509,9 +6766,12 @@ mod integration_tests {
         assert_eq!(resp.status(), StatusCode::OK);
 
         let got = rec.lock().await.clone().expect("mock 应已收到 GET 请求");
+        // 入站 session-id 不合法（不是 opencode 形状）也不影响：代理按它派生一个合法会话 id
+        let session = got.opencode_session.clone().expect("应有会话 id");
+        assert_is_opencode_id(&session, "ses");
         assert_eq!(
-            got.opencode_session.as_deref(),
-            Some("ses_client-session-42")
+            state.session_map.codex_of(&session).as_deref(),
+            Some("client-session-42")
         );
     }
 
@@ -6782,15 +7042,16 @@ mod integration_tests {
         body: Body,
         modes: Arc<ThreadModeRegistry>,
     ) -> String {
-        let state = ProxyState {
-            session: "ses_fixed123".into(),
-            base_url: upstream.to_string(),
-            log,
-            trace: TraceSink::disabled(),
-            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-            nudge: Arc::new(Mutex::new(HashMap::new())),
-            modes,
-        };
+       let state = ProxyState {
+           session: "ses_fixed123".into(),
+           base_url: upstream.to_string(),
+           log,
+           trace: TraceSink::disabled(),
+           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+           nudge: Arc::new(Mutex::new(HashMap::new())),
+           session_map: Arc::new(SessionMap::default()),
+           modes,
+       };
         let uri: Uri = "/responses".parse().unwrap();
         let resp = handle_any(
             State(state),
@@ -7365,6 +7626,7 @@ mod integration_tests {
            trace,
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
            nudge: Arc::new(Mutex::new(HashMap::new())),
+           session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
        }
    }
@@ -7739,7 +8001,8 @@ mod integration_tests {
            trace: TraceSink::disabled(),
            requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
            nudge: Arc::new(Mutex::new(HashMap::new())),
-            modes: Arc::new(ThreadModeRegistry::default()),
+           session_map: Arc::new(SessionMap::default()),
+           modes: Arc::new(ThreadModeRegistry::default()),
        };
         let probe = |state: ProxyState| async move {
             let uri: Uri = "/responses".parse().unwrap();
@@ -7886,19 +8149,9 @@ mod integration_tests {
         let base_url = spawn_mock_zen(rec.clone()).await;
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
-        let resp = forward(
-            &req,
-            &HeaderMap::new(),
-            true,
-            &base_url,
-            http_client(),
-            "ses_fixed123",
-            &AtomicBool::new(false),
-            &None,
-            &TraceSink::disabled(),
-            "req_test",
-        )
-        .await
+        let state = proxy_state(base_url.clone(), None);
+        let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
+            .await
         .expect("forward 应成功");
         assert!(resp.status.is_success());
         assert!(resp.dropped_fields.is_empty(), "上游未拒绝时不应摘字段");
@@ -7916,19 +8169,9 @@ mod integration_tests {
             spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "stream_options").await;
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
-        let resp = forward(
-            &req,
-            &HeaderMap::new(),
-            true,
-            &base_url,
-            http_client(),
-            "ses_fixed123",
-            &AtomicBool::new(false),
-            &None,
-            &TraceSink::disabled(),
-            "req_test",
-        )
-        .await
+        let state = proxy_state(base_url.clone(), None);
+        let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
+            .await
         .expect("forward 应成功");
         assert!(resp.status.is_success());
         assert_eq!(
@@ -7956,19 +8199,9 @@ mod integration_tests {
             "stream": true,
             "reasoning": { "effort": "xhigh" }
         });
-        let resp = forward(
-            &req,
-            &HeaderMap::new(),
-            true,
-            &base_url,
-            http_client(),
-            "ses_fixed123",
-            &AtomicBool::new(false),
-            &None,
-            &TraceSink::disabled(),
-            "req_test",
-        )
-        .await
+        let state = proxy_state(base_url.clone(), None);
+        let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
+            .await
         .expect("forward 应成功");
         assert!(resp.status.is_success());
         assert_eq!(resp.dropped_fields, vec!["reasoning_effort"]);
@@ -7988,19 +8221,9 @@ mod integration_tests {
         let base_url = spawn_mock_zen_bad_request(count.clone()).await;
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
-        let resp = forward(
-            &req,
-            &HeaderMap::new(),
-            true,
-            &base_url,
-            http_client(),
-            "ses_fixed123",
-            &AtomicBool::new(false),
-            &None,
-            &TraceSink::disabled(),
-            "req_test",
-        )
-        .await
+        let state = proxy_state(base_url.clone(), None);
+        let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
+            .await
         .expect("forward 应成功");
         assert!(!resp.status.is_success());
         assert!(resp.dropped_fields.is_empty(), "未指名可选字段时不应摘字段");
@@ -8357,19 +8580,9 @@ mod integration_tests {
             spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "stream_options").await;
 
         let req = json!({ "model": "m", "input": "hi", "stream": true });
-        let resp = forward(
-            &req,
-            &HeaderMap::new(),
-            true,
-            &base_url,
-            http_client(),
-            "ses_fixed123",
-            &AtomicBool::new(false),
-            &None,
-            &trace,
-            "req_retry",
-        )
-        .await
+        let state = proxy_state_traced(base_url.clone(), None, trace);
+        let resp = forward(&req, &HeaderMap::new(), true, &state, "req_retry")
+            .await
         .expect("forward 应成功");
         assert!(resp.status.is_success());
         drop(resp);
