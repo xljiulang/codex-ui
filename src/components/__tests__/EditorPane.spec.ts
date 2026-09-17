@@ -56,8 +56,14 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   return { ...mod, pickAndOpenNewSession: vi.fn() };
 });
 
+vi.mock("../../composables/useSessionFs", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../../composables/useSessionFs")>();
+  return { ...mod, openPathInApp: vi.fn() };
+});
+
 import { invoke } from "@tauri-apps/api/core";
 import EditorPane from "../EditorPane.vue";
+import { openPathInApp } from "../../composables/useSessionFs";
 import {
   __resetEditorTabsForTest,
   SETTINGS_TAB_ID,
@@ -89,6 +95,7 @@ import {
 } from "../../composables/useCodex";
 import {
   ICON_GIT,
+  ICON_OPEN,
   ICON_SESSION,
   ICON_TERMINAL,
   ICON_WECHAT,
@@ -100,6 +107,7 @@ import {
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedPickAndOpenNewSession = vi.mocked(pickAndOpenNewSession);
+const mockedOpenPathInApp = vi.mocked(openPathInApp);
 const root = "D:\\repo";
 const aTxt = root + "\\a.txt";
 const bTxt = root + "\\b.txt";
@@ -154,6 +162,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedPickAndOpenNewSession.mockClear();
+    mockedOpenPathInApp.mockReset();
     termFocus.calls = 0;
     __resetEditorTabsForTest();
     __resetSessionFsForTest();
@@ -309,7 +318,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
-  it("有活动标签时「+」可见，点击弹出「新建会话 / 新建终端(cmd) / 新建终端(PowerShell)」菜单（带图标）", async () => {
+  it("有活动标签时「+」可见，点击弹出「新建会话 / 打开文件 / 新建终端(cmd) / 新建终端(PowerShell)」菜单（带图标）", async () => {
     tabs[0].workspace = "D:/repo";
     const wrapper = mountPane();
     expect(wrapper.find(".editor-tab-add").exists()).toBe(true);
@@ -317,6 +326,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const items = wrapper.findAll(".ctx-menu-item");
     expect(items.map((i) => i.text().trim())).toEqual([
       "新建会话",
+      "打开文件",
       "新建终端(cmd)",
       "新建终端(PowerShell)",
     ]);
@@ -328,29 +338,32 @@ describe("EditorPane 左侧多标签编辑区", () => {
     expect(sessionPaths[0].attributes("fill")).toBe("currentColor");
     expect(sessionPaths[0].attributes("stroke")).toBe("none");
     expect(sessionPaths[0].attributes("fill-rule")).toBe("evenodd");
-    // 新建终端(cmd)：仍为单路径图标
+    // 打开文件：仍为单路径图标
     expect(items[1].findAll("svg path")).toHaveLength(1);
-    expect(items[1].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
-    // 新建终端(PowerShell)：仍为单路径图标
+    expect(items[1].find("svg path").attributes("d")).toBe(ICON_OPEN);
+    // 新建终端(cmd)：仍为单路径图标
     expect(items[2].findAll("svg path")).toHaveLength(1);
     expect(items[2].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
+    // 新建终端(PowerShell)：仍为单路径图标
+    expect(items[3].findAll("svg path")).toHaveLength(1);
+    expect(items[3].find("svg path").attributes("d")).toBe(ICON_TERMINAL);
     wrapper.unmount();
   });
 
-  it("无工作区时点「+」：菜单仍含「新建会话 / 新建终端(cmd) / 新建终端(PowerShell)」", async () => {
+  it("无工作区时点「+」：菜单仍含「新建会话 / 打开文件 / 新建终端(cmd) / 新建终端(PowerShell)」", async () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
     const items = wrapper.findAll(".ctx-menu-item");
     expect(
       items.map((i) => i.text().trim()),
-    ).toEqual(["新建会话", "新建终端(cmd)", "新建终端(PowerShell)"]);
+    ).toEqual(["新建会话", "打开文件", "新建终端(cmd)", "新建终端(PowerShell)"]);
     wrapper.unmount();
   });
 
   it("无工作区时点击「新建终端(cmd)」：仍调用 terminal_spawn 并传入空工作目录与 shell", async () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
-    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[2].trigger("click");
     await settle();
     const spawn = mockedInvoke.mock.calls.find(
       ([cmd]) => cmd === "terminal_spawn",
@@ -369,6 +382,66 @@ describe("EditorPane 左侧多标签编辑区", () => {
     wrapper.unmount();
   });
 
+  it("点击「打开文件」：弹文件选择器（多选、以活动标签工作区为起点）", async () => {
+    tabs[0].workspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "pick_files") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await settle();
+    expect(mockedInvoke).toHaveBeenCalledWith("pick_files", {
+      multiple: true,
+      initialDir: "D:/repo",
+    });
+    wrapper.unmount();
+  });
+
+  it("点击「打开文件」取消选择：不打开文件、不因文件选择结果弹错误提示", async () => {
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "pick_files") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await settle();
+    expect(mockedOpenPathInApp).not.toHaveBeenCalled();
+    expect(store.toast).not.toContain("picked");
+    expect(store.toast).not.toContain("打开");
+    wrapper.unmount();
+  });
+
+  it("点击「打开文件」选中文件：能打开的逐路径打开，不支持的提示无法打开", async () => {
+    tabs[0].workspace = "D:/repo";
+    mockedInvoke.mockImplementation((cmd) => {
+      if (cmd === "pick_files") {
+        return Promise.resolve(["D:/repo/a.txt", "D:/repo/b.bin"]);
+      }
+      return Promise.resolve(undefined);
+    });
+    mockedOpenPathInApp.mockImplementation((p) =>
+      Promise.resolve(p === "D:/repo/a.txt"),
+    );
+    const wrapper = mountPane();
+    await wrapper.find(".editor-tab-add").trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await settle();
+    expect(mockedOpenPathInApp).toHaveBeenCalledTimes(2);
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith("D:/repo/a.txt");
+    expect(mockedOpenPathInApp).toHaveBeenCalledWith("D:/repo/b.bin");
+    expect(store.toast).toContain("该文件不是文本文件，无法打开：b.bin");
+    expect(mockedInvoke).not.toHaveBeenCalledWith("reveal_path", {
+      path: "D:/repo/a.txt",
+    });
+    expect(mockedInvoke).not.toHaveBeenCalledWith("reveal_path", {
+      path: "D:/repo/b.bin",
+    });
+    wrapper.unmount();
+  });
+
   it("点击「新建终端(cmd)」：以活动标签工作区启动终端并携带 shell=cmd", async () => {
     tabs[0].workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd) => {
@@ -378,7 +451,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     });
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
-    await wrapper.findAll(".ctx-menu-item")[1].trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[2].trigger("click");
     await settle();
     const spawn = mockedInvoke.mock.calls.find(
       ([cmd]) => cmd === "terminal_spawn",
@@ -398,7 +471,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     });
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
-    await wrapper.findAll(".ctx-menu-item")[2].trigger("click");
+    await wrapper.findAll(".ctx-menu-item")[3].trigger("click");
     await settle();
     const spawn = mockedInvoke.mock.calls.find(
       ([cmd]) => cmd === "terminal_spawn",

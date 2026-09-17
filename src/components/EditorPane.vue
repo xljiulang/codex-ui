@@ -11,6 +11,7 @@ import ChatView from "./ChatView.vue";
 import ContextMenu from "./ContextMenu.vue";
 import EditorTabBar from "./EditorTabBar.vue";
 import SettingsView from "./SettingsView.vue";
+import { invoke } from "@tauri-apps/api/core";
 import {
   activeTab,
   activeTabId,
@@ -35,15 +36,18 @@ import {
   SETTINGS_TAB_ID,
 } from "../composables/useEditorTabs";
 import {
+  openPathInApp,
   revealAbsPathInTree,
   revealInExplorer,
 } from "../composables/useSessionFs";
 import { revealGitFile } from "../composables/useGitChanges";
+import { pathBaseName } from "../lib/format";
 import { joinFsPath } from "../lib/sessionFs";
 import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
 import {
   pickAndOpenNewSession,
   setToast,
+  toastError,
   store,
   workspace,
   type SessionTab,
@@ -55,6 +59,7 @@ import {
   ICON_CLOSE_OTHERS,
   ICON_CLOSE_RIGHT,
   ICON_EXTERNAL_LINK,
+  ICON_OPEN,
   ICON_RENAME,
   ICON_SESSION,
   ICON_TERMINAL,
@@ -252,8 +257,27 @@ const settingsTabOpen = computed(() =>
   tabs.some((t) => t.id === SETTINGS_TAB_ID),
 );
 
-/** 标签栏末尾「+」：新建会话走与头部一致的工作目录选择；
+/** 标签栏末尾「+」菜单：新建会话走与头部一致的工作目录选择；
+ * 打开文件走原生文件选择器（多次选择，应用内打开；不支持的类型提示无法打开）；
  * 新建终端拆为 cmd / PowerShell 两项，按所选 Shell 强制启动 */
+/** 打开文件流程：文件选择器多选 → 逐路径应用内打开；不支持的类型提示无法打开 */
+async function pickAndOpenFile() {
+  const ws = workspace.value || store.lastWorkspace || "";
+  try {
+    const picked = await invoke<string[]>("pick_files", {
+      multiple: true,
+      initialDir: ws || null,
+    });
+    for (const p of picked) {
+      const opened = await openPathInApp(p);
+      if (opened) continue;
+      setToast(`该文件不是文本文件，无法打开：${pathBaseName(p)}`);
+    }
+  } catch (e) {
+    setToast(toastError(e));
+  }
+}
+
 function openAddMenu(e: MouseEvent) {
   const ws = workspace.value || store.lastWorkspace || "";
   const items: ActionMenuItem[] = [
@@ -261,6 +285,11 @@ function openAddMenu(e: MouseEvent) {
       label: "新建会话",
       icon: ICON_SESSION,
       action: () => void pickAndOpenNewSession(),
+    },
+    {
+      label: "打开文件",
+      icon: ICON_OPEN,
+      action: () => void pickAndOpenFile(),
     },
     {
       label: "新建终端(cmd)",
