@@ -14,8 +14,10 @@ import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { openSettingsTab } from "./composables/useEditorTabs";
 import { sessionLog } from "./lib/sessionLog";
+import { useGlobalDragDrop } from "./composables/useGlobalDragDrop";
 
 const { ctxMenu } = useContextMenu();
+const { dragging: globalDragging, setup: setupGlobalDragDrop } = useGlobalDragDrop();
 
 let unlistenClose: (() => void) | undefined;
 let unlistenNotification: (() => void) | undefined;
@@ -62,6 +64,7 @@ onMounted(async () => {
   unlistenClose = await registerCloseGuard();
   try {
   await init();
+  await setupGlobalDragDrop();
   } finally {
     // 启动恢复：配置文件记录了最后活跃会话（且线程仍在历史中）则打开该会话并展开
     // 其目录分组；否则回退打开设置标签（设置 tab 幂等，存在则仅激活）
@@ -77,7 +80,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app">
+  <div class="app" :class="{ dragover: globalDragging }">
     <div class="app-ambient" aria-hidden="true"></div>
     <AppHeader />
     <div class="app-body">
@@ -129,5 +132,11 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--accent);
   flex-shrink: 0;
+}
+
+/* 全局拖拽悬停视觉反馈 */
+.app.dragover {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
 }
 </style>

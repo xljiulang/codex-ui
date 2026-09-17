@@ -7,21 +7,6 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (p: string) => "asset://mock/" + p,
 }));
 
-const mockDragDropHandlers: Array<
-  (event: { payload: { type: string; paths?: string[]; position?: unknown } }) => void
-> = [];
-
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({
-    onDragDropEvent: vi.fn(
-      async (handler: (event: { payload: { type: string; paths?: string[]; position?: unknown } }) => void) => {
-        mockDragDropHandlers.push(handler);
-        return () => {};
-      },
-    ),
-  }),
-}));
-
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, sendPrompt: vi.fn() };
@@ -41,6 +26,7 @@ import {
 import type { UserInput } from "../../lib/types";
 import { activeTabId, tabs as _tabs } from "../../composables/useEditorTabs";
 import { makeSessionTab } from "../../composables/__tests__/useCodexTestHarness";
+import { findDropTarget } from "../../composables/dropTargets";
 /** 本 spec 的会话标签 fixture 直接放入统一列表 */
 const tabs = _tabs as unknown as SessionTab[];
 
@@ -823,30 +809,44 @@ describe("ComposerBar 拖放图片/文件", () => {
     expect(activeSessionTab()?.attachments).toEqual([]);
   });
 
-  it("Tauri 拖放事件：over 高亮、drop 路径生成附件（图片 localImage、文件 mention）", async () => {
+  it("全局拖拽命中输入区（dropTargets）：setDragging 高亮、drop 生成附件", async () => {
     mockedInvoke.mockResolvedValue({});
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await flushPromises();
-    const handler = mockDragDropHandlers[mockDragDropHandlers.length - 1];
 
-    handler({ payload: { type: "over", position: {} as never } });
+    // 全局监听者（useGlobalDragDrop）按坐标命中已登记目标，把悬停推进来
+    const el = wrapper.find(".composer").element;
+    // happy-dom 下 getBoundingClientRect 默认全 0（视为隐藏），stub 为非零可见矩形
+    const rect = { left: 0, top: 500, width: 800, height: 200 } as DOMRect;
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+      ...rect,
+      right: rect.left + rect.width,
+      bottom: rect.top + rect.height,
+      x: rect.left,
+      y: rect.top,
+      toJSON: () => ({}),
+    });
+    const hit = findDropTarget(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+    );
+    expect(hit).not.toBeNull();
+    hit!.setDragging(true);
     await flushPromises();
     expect(wrapper.find(".composer").classes()).toContain("dragover");
 
-    handler({
-      payload: {
-        type: "drop",
-        paths: ["D:/repo/shot.png", "D:/repo/a.txt"],
-        position: {} as never,
-      },
-    });
+    hit!.onDropPaths(["D:/repo/shot.png", "D:/repo/a.txt"]);
     await flushPromises();
 
-    expect(wrapper.find(".composer").classes()).not.toContain("dragover");
     expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/shot.png" },
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
     ]);
+
+    // drop 后全局熄灭高亮
+    hit!.setDragging(false);
+    await flushPromises();
+    expect(wrapper.find(".composer").classes()).not.toContain("dragover");
   });
 });
 

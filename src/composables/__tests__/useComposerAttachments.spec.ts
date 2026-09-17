@@ -4,9 +4,6 @@ import { flushPromises } from "@vue/test-utils";
 import type { UserInput } from "../../lib/types";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: vi.fn(),
-}));
 vi.mock("../useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../useCodex")>();
   return { ...mod, setToast: vi.fn() };
@@ -15,6 +12,7 @@ vi.mock("../useCodex", async (importOriginal) => {
 import { invoke } from "@tauri-apps/api/core";
 import { setToast } from "../useCodex";
 import { useComposerAttachments } from "../useComposerAttachments";
+import { findDropTarget } from "../dropTargets";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedToast = vi.mocked(setToast);
@@ -22,7 +20,8 @@ const mockedToast = vi.mocked(setToast);
 function setup() {
   const rowAttachments = ref<UserInput[]>([]);
   const syncAttachments = vi.fn();
-  const att = useComposerAttachments({ rowAttachments, syncAttachments });
+  const rootRef = ref<HTMLElement | null>(null);
+  const att = useComposerAttachments({ rowAttachments, syncAttachments, rootRef });
   return { rowAttachments, syncAttachments, att };
 }
 
@@ -111,5 +110,88 @@ describe("useComposerAttachments 粘贴", () => {
       type: "mention",
       name: "a.txt",
     });
+  });
+
+  it("registerTarget 后 drop 事件派发走 addDroppedPaths 进附件区", async () => {
+    const rowAttachments = ref<UserInput[]>([]);
+    const syncAttachments = vi.fn();
+    const rootRef = ref<HTMLElement | null>(null);
+    const att = useComposerAttachments({
+      rowAttachments,
+      syncAttachments,
+      rootRef,
+    });
+
+    const el = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 200,
+        width: 400,
+        height: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    } as unknown as HTMLElement;
+    rootRef.value = el;
+    att.registerTarget();
+
+    // 全局命中后触发目标回调（等价 useGlobalDragDrop 的坐标命中派发）
+    const hit = findDropTarget(100, 100);
+    expect(hit).not.toBeNull();
+    hit!.onDropPaths(["D:\\x\\a.ts", "D:\\x\\b.pdf"]);
+    await flushPromises();
+
+    // mention 附件路径被 toUserAttachment 转成正斜杠；localImage 保留原样
+    // （addDroppedPaths 只产生 mention/localImage，不存在 text/skill 项）
+    expect(
+      rowAttachments.value
+        .filter((a): a is UserInput & { path: string } => "path" in a)
+        .map((a) => a.path),
+    ).toEqual([
+      "D:/x/a.ts",
+      "D:/x/b.pdf",
+    ]);
+    expect(syncAttachments).toHaveBeenCalled();
+
+    // 清理：注销避免影响后续用例
+    att.unregisterTarget();
+    expect(findDropTarget(100, 100)).toBeNull();
+  });
+
+  it("registerTarget 的 setDragging 驱动高亮", () => {
+    const rowAttachments = ref<UserInput[]>([]);
+    const rootRef = ref<HTMLElement | null>(null);
+    const att = useComposerAttachments({
+      rowAttachments,
+      syncAttachments: vi.fn(),
+      rootRef,
+    });
+
+    const el = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 400,
+        bottom: 200,
+        width: 400,
+        height: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    } as unknown as HTMLElement;
+    rootRef.value = el;
+    att.registerTarget();
+
+    // 模拟全局 enter/over 推送
+    expect(att.dragging.value).toBe(false);
+    const hit = findDropTarget(100, 100);
+    hit!.setDragging(true);
+    expect(att.dragging.value).toBe(true);
+
+    att.unregisterTarget();
   });
 });

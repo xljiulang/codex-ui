@@ -69,6 +69,8 @@ const {
   onWindowMousedown,
 } = useComposerMenus({ mention });
 const mentionMenu = ref<InstanceType<typeof MentionMenu> | null>(null);
+// 输入区根元素：登记为全局拖拽 drop 目标（非活动标签 v-show 隐藏时矩形为 0，天然不命中）
+const rootRef = ref<HTMLElement | null>(null);
 
 // @ 文件引用：模糊搜索（防抖/序号失效/上限 50）
 const {
@@ -97,13 +99,15 @@ const {
 const {
   dragging,
   handlePasteDom,
-  setupDragDrop,
   onDragOver,
   onDragLeave,
   onDrop,
+  registerTarget,
+  unregisterTarget,
 } = useComposerAttachments({
   rowAttachments,
   syncAttachments,
+  rootRef,
 });
 
 // 用户输入历史（仅内存），供向上/向下键选择，行为类似 Linux shell
@@ -322,7 +326,7 @@ onMounted(() => {
   window.addEventListener("mousedown", onWindowMousedown);
   window.addEventListener("resize", clampComposerHeightOnResize);
   exposeEditor();
-  void setupDragDrop();
+  registerTarget();
   if (props.active) restoreDraftFromTab();
   void nextTick(() => editor.value?.commands.focus());
 });
@@ -334,6 +338,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydownGlobal);
   window.removeEventListener("mousedown", onWindowMousedown);
   window.removeEventListener("resize", clampComposerHeightOnResize);
+  unregisterTarget();
   if (props.tab) unregisterComposerAddHandler(props.tab.id);
   endComposerResize();
   cancelFileSearch();
@@ -481,9 +486,10 @@ function collaborationModeLabel(): string {
 
 <template>
   <div
+    ref="rootRef"
     class="composer"
     :class="{ dragover: dragging }"
-    @dragover.prevent="onDragOver()"
+    @dragover.prevent="onDragOver($event)"
     @dragleave="onDragLeave($event)"
     @drop="onDrop($event)"
   >

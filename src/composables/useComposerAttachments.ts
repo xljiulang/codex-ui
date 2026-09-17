@@ -1,10 +1,13 @@
 import { nextTick, onBeforeUnmount, ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import { setToast, toastError } from "./useCodex";
 import { baseName, toUserAttachment } from "../lib/mention";
 import type { UserInput } from "../lib/types";
+import {
+  registerDropTarget,
+  unregisterDropTarget,
+  type DropTarget,
+} from "./dropTargets";
 
 /** 粘贴的截图/位图最大字节数（原路径文件不受限） */
 const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -16,9 +19,10 @@ const MAX_PASTED_IMAGE_BYTES = 20 * 1024 * 1024;
 export function useComposerAttachments(options: {
   rowAttachments: Ref<UserInput[]>;
   syncAttachments: () => void;
+  /** 输入区根元素：登记为全局拖拽 drop 目标（坐标命中判定） */
+  rootRef: Ref<HTMLElement | null>;
 }) {
   const dragging = ref(false);
-  let dropUnlisten: UnlistenFn | undefined;
 
   /** 从剪贴板 MIME/文件名推断图片扩展名（白名单与后端 save_pasted_image 一致） */
   function imageExtFromType(type: string, fallbackName: string): string {
@@ -112,26 +116,6 @@ export function useComposerAttachments(options: {
     return true;
   }
 
-  /** Tauri 拖放事件：drop 时直接拿到绝对路径数组（WebView2 下 HTML5 dataTransfer.files 为空） */
-  async function setupDragDrop() {
-    try {
-      dropUnlisten = await getCurrentWebview().onDragDropEvent((event) => {
-        const p = event.payload;
-        if (p.type === "enter" || p.type === "over") {
-          dragging.value = true;
-        } else if (p.type === "leave") {
-          dragging.value = false;
-        } else if (p.type === "drop") {
-          dragging.value = false;
-          const paths = p.paths ?? [];
-          if (paths.length) void addDroppedPaths(paths);
-        }
-      });
-    } catch {
-      // 非 Tauri 环境（浏览器/单测）忽略，走 HTML5 drop 兜底
-    }
-  }
-
   /** 拖放路径 → 附件区：图片按扩展名 → localImage，其它 → mention */
   async function addDroppedPaths(paths: string[]) {
     let added = 0;
@@ -147,7 +131,7 @@ export function useComposerAttachments(options: {
     }
   }
 
-  function onDragOver() {
+  function onDragOver(_e?: DragEvent) {
     dragging.value = true;
   }
 
@@ -170,16 +154,50 @@ export function useComposerAttachments(options: {
     void addFilesWithPaths(files, paths, "拖放");
   }
 
+  /**
+   * 登记为全局拖拽 drop 目标（由 useGlobalDragDrop 坐标派发）：
+   * 在 Tauri 环境，附件 drop 只经此入口；HTML5 onDrop 仅作浏览器/单测兜底。
+   * 非活动标签因 v-show 隐藏（矩形为 0）不被全局命中，天然只有当前活动输入区收附件。
+   */
+  let registeredTarget: DropTarget | null = null;
+
+  /** 构造本输入区的 drop 目标（el 为根元素，经 useGlobalDragDrop 坐标命中） */
+  function makeTarget(el: HTMLElement): DropTarget {
+    return {
+      el,
+      onDropPaths: (paths: string[]) => void addDroppedPaths(paths),
+      setDragging: (b: boolean) => {
+        dragging.value = b;
+      },
+    };
+  }
+
+  function registerTarget() {
+    const el = options.rootRef.value;
+    if (!el || registeredTarget) return;
+    registeredTarget = makeTarget(el);
+    registerDropTarget(registeredTarget);
+  }
+
+  /** 注销全局拖拽 drop 目标（组件卸载时） */
+  function unregisterTarget() {
+    if (registeredTarget) {
+      unregisterDropTarget(registeredTarget);
+      registeredTarget = null;
+    }
+  }
+
   onBeforeUnmount(() => {
-    dropUnlisten?.();
+    unregisterTarget();
   });
 
   return {
     dragging,
     handlePasteDom,
-    setupDragDrop,
     onDragOver,
     onDragLeave,
     onDrop,
+    registerTarget,
+    unregisterTarget,
   };
 }
