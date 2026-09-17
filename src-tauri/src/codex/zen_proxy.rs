@@ -88,7 +88,7 @@ const NUDGE_MAX_PASSES: usize = 4;
 /// 回合已经做完，被催办也不能让模型再提交/再推送一次；末句给出标签的**结构不变量**
 /// （成对闭合、独占一行、不换行、本轮最多一个、不进代码块），未来的代理层过滤/分桶只依赖
 /// 这些结构与标签前缀，不依赖载荷词汇（载荷保持自由文本）。
-const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合。请立刻走下面两条路之一，不要只写正文，也不要写「接下来我会…／马上做…」这类将来时承诺：\n- 还有工作没做完：必须实际调用工具把剩余工作做完；做完后按下面第二条收尾。\n- 任务确实已经结束：不要重复上一条回复的正文，也不要在更早的回合已经用工具执行过的操作上重复执行（例如已经 git 提交或推送过）——无论「已完成」「无需改动」「用户已放弃」还是「确实做不下去」，都用一行 <task_completed>一句话说明结论</task_completed> 收尾。这个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签。";
+const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合。请立刻走下面两条路之一，不要只写正文，也不要写「接下来我会…／马上做…」这类将来时承诺：\n- 还有工作没做完：必须实际调用工具把剩余工作做完；做完后按下面第二条收尾。\n- 任务确实已经结束：不要重复上一条回复的正文，也不要在更早的回合已经用工具执行过的操作上重复执行（例如已经 git 提交或推送过）——无论「已完成」「无需改动」「用户已放弃」还是「确实做不下去」，都用一行 <zen_task_completed>一句话说明结论</zen_task_completed> 收尾。这个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签。";
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
 /// **排除式三选一**：被催办时先判两种「不需要给方案」的情况——用户已放弃
@@ -99,7 +99,7 @@ const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何
 /// 「计划已就绪」），所以提醒里直接给出骨架，并要求标签原样保留、各自独占一行、不要放进代码块。
 /// 「计划已被认可、无需改动、保持现状」不属于「无法/无需计划」：这同样是一个评估结论，
 /// 应把该结论或重申的原计划写进 `<proposed_plan>` 收尾，而不是逃到非方案标签。
-const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <cancelled_plan>放弃计划原因</cancelled_plan> 收尾——两个标签原样保留，中间换成实际放弃原因。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <unachievable_plan>原因</unachievable_plan> 收尾——两个标签原样保留，中间换成实际原因。\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
+const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <zen_plan_cancelled>放弃计划原因</zen_plan_cancelled> 收尾——两个标签原样保留，中间换成实际放弃原因。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <zen_plan_unachievable>原因</zen_plan_unachievable> 收尾——两个标签原样保留，中间换成实际原因。\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
 /// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
 /// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
 const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
@@ -115,39 +115,41 @@ const PLAN_MODE_HEADING_MARKER_LEGACY: &str = "collaboration mode: plan";
 /// 靠模型自己回出 [`TASK_COMPLETED_MARKER`]。
 const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
 /// 计划模式下「用户已取消这个计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给模型，
-/// 教学形态是成对标签 `<cancelled_plan>放弃计划原因</cancelled_plan>`，与计划产物标签
-/// [`PLAN_OUTPUT_MARKER`] 同形：`<proposed_plan>` = 计划已交付、本标记 = 计划已取消）。
-/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;cancelled_plan&gt;…`），
+/// 教学形态是成对标签 `<zen_plan_cancelled>放弃计划原因</zen_plan_cancelled>`，与计划产物
+/// 标签 [`PLAN_OUTPUT_MARKER`] 同形：`<proposed_plan>` = 计划已交付、本标记 = 计划已取消）。
+/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_plan_cancelled&gt;…`），
 /// 不会被当成 HTML 吞掉。
 /// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**
 /// （聊天里只是一句普通结论加一行可见的标签，不弹「计划已就绪」）。
 /// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
-/// 等写法；计划标签判据优先于本判据。
-const PLAN_CANCEL_MARKER: &str = "<cancelled_plan";
+/// 等写法；计划标签判据优先于本判据。**不兼容旧的无前缀写法**（`<cancelled_plan>`）。
+const PLAN_CANCEL_MARKER: &str = "<zen_plan_cancelled";
 /// 计划模式下「问题本身无法或无需产出实现计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给
-/// 模型，教学形态是成对标签 `<unachievable_plan>原因</unachievable_plan>`，与
+/// 模型，教学形态是成对标签 `<zen_plan_unachievable>原因</zen_plan_unachievable>`，与
 /// [`PLAN_OUTPUT_MARKER`] / [`PLAN_CANCEL_MARKER`] 同形）：`<proposed_plan>` = 计划已交付、
-/// `<cancelled_plan>` = 计划已取消、本标记 = 无法/无需计划（如「1+1=？」这类事实问题、
+/// `<zen_plan_cancelled>` = 计划已取消、本标记 = 无法/无需计划（如「1+1=？」这类事实问题、
 /// 纯查询或闲聊，本就不产出计划这种交付物）。「计划已被认可、无需改动、保持现状」**不属于**
 /// 本标记：那是评估结论，应写进 `<proposed_plan>` 收尾，不逃到非方案标签。
-/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;unachievable_plan&gt;…`），
+/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_plan_unachievable&gt;…`），
 /// 不会被当成 HTML 吞掉。
 /// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**。
 /// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
-/// 等写法；计划标签判据优先于本判据。
-const PLAN_UNACHIEVABLE_MARKER: &str = "<unachievable_plan";
-/// **默认模式**下「任务已经结束」的约定标记（由 [`NUDGE_TEXT`] 教给模型，教学形态是成对标签
-/// `<task_completed>一句话结论</task_completed>`）：默认模式的判定搬进原对话——代理不再发
-/// 独立的判定请求（Zen 免费层会以 `FreeTierError: OpenCode's free tier can only be used from
-/// within OpenCode` 拒绝那条后台 `chat/completions`），只看模型自己在终局文本里回了什么。
+/// 等写法；计划标签判据优先于本判据。**不兼容旧的无前缀写法**（`<unachievable_plan>`）。
+const PLAN_UNACHIEVABLE_MARKER: &str = "<zen_plan_unachievable";
+/// **默认模式**下「任务已经结束」的约定标记（由首轮教学的 [`DEFAULT_MODE_CONTRACT_TEXT`] 与
+/// [`NUDGE_TEXT`] 教给模型，教学形态是成对标签
+/// `<zen_task_completed>一句话结论</zen_task_completed>`）：默认模式的判定搬进原对话——
+/// 代理不再发独立的判定请求（Zen 免费层会以 `FreeTierError: OpenCode's free tier can only be
+/// used from within OpenCode` 拒绝那条后台 `chat/completions`），只看模型自己在终局文本里回了
+/// 什么。
 ///
-/// 命名：小写 + 下划线，**不加 `zen_` 前缀**，与 [`PLAN_OUTPUT_MARKER`] /
-/// [`PLAN_CANCEL_MARKER`] / [`PLAN_UNACHIEVABLE_MARKER`] 同族同形。将来若给自研标签统一加
-/// 前缀，只动这几个常量即可；`<proposed_plan>` 除外——它是 codex 侧约定（协议
+/// 命名：小写 + 下划线 + **`zen_` 前缀**（自研标签统一前缀：本标记用 `zen_task_`，计划模式的
+/// 两个出口用 `zen_plan_`）；`<proposed_plan>` 是唯一例外——它是 codex 侧约定（协议
 /// `item/plan/delta` 与之对应），改名后 codex 就不再生成计划条目。
 ///
 /// 判据（见 [`is_task_completed`]）：大小写不敏感 + 前缀匹配，缺闭合标签同样命中；
-/// **不解析载荷**（载荷是自由文本，只给人和未来的软映射分桶用）。
+/// **不解析载荷**（载荷是自由文本，只给人和未来的软映射分桶用）；**不兼容旧的无前缀写法**
+/// （`<task_completed>`）。
 ///
 /// 结构不变量（写进 [`NUDGE_TEXT`]，未来代理层过滤/分桶只依赖这些）：成对闭合、独占一行、
 /// 不换行、一整轮最多一个、不放进代码块。有了这些，过滤 = 删掉整段闭合标签（缺闭合时删到该行
@@ -155,9 +157,9 @@ const PLAN_UNACHIEVABLE_MARKER: &str = "<unachievable_plan";
 /// 映射不到落 `unknown`。若将来真需要机器可读的强枚举，优先加**第二个标签名**（沿用 plan 系
 /// 「词表在标签名里、载荷自由」的风格），而不是把枚举塞进载荷。
 ///
-/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;task_completed&gt;…`），不会被当成
-/// HTML 吞掉。默认模式下终局文本出现即视为任务已终结、直接收尾；计划模式不使用本判据。
-const TASK_COMPLETED_MARKER: &str = "<task_completed";
+/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_task_completed&gt;…`），不会被
+/// 当成 HTML 吞掉。默认模式下终局文本出现即视为任务已终结、直接收尾；计划模式不使用本判据。
+const TASK_COMPLETED_MARKER: &str = "<zen_task_completed";
 /// 协议登记表里承认的协作模式取值（与协议 `ModeKind` 一致）：其余取值一律不登记。
 const KNOWN_MODES: [&str; 2] = ["plan", "default"];
 /// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
@@ -171,6 +173,20 @@ const MODE_SRC_HEURISTIC: &str = "heuristic";
 /// 时必须同步这里，否则标题线程会重新被口嗨检测拦住（标题必然「纯文本 + 零工具调用」，
 /// 每次都会白花一轮续跑提醒）。
 const TITLE_TASK_PREFIX: &str = "给下面用户消息生成一个不超过 30 字的中文会话标题";
+
+/// **首轮教学**（默认模式）：把收尾契约追加到发给上游的 `instructions` 尾部，让模型第一轮就按
+/// 约定收尾——守约定的模型首轮即带回 [`TASK_COMPLETED_MARKER`]，那条「纯文本 + 零工具」终局
+/// 就不必再多打一轮上游换标签（催办提醒仍保留为第二道，见 [`NUDGE_TEXT`]）。
+/// 与提醒的关系：措辞可以不同，但标签字面量与结构不变量必须一致（成对闭合、独占一行、不换行、
+/// 本轮最多一个、不进代码块）——单测对两者都做断言，防半改。
+/// 准入见 [`contract_injection_eligible`]：只给「流式 + 声明了工具 + 非会话标题线程」的请求
+/// 注入；非流式没有催办路径可消费，标题线程只产出标题，压缩/摘要类后台请求也通常不带工具。
+const DEFAULT_MODE_CONTRACT_TEXT: &str = "【回合收尾约定】当你结束回合、且本轮没有调用任何工具时：任务已全部完成就用一行 <zen_task_completed>一句话结论</zen_task_completed> 收尾（成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块）；还有没做完的工作必须实际调用工具继续做，不要只写「接下来我会…」这类承诺；不要重复执行更早回合已经用工具做过的操作。";
+/// **首轮教学**（计划模式）：只前置两个「不需要给方案」的出口标签，不前置「必须给完整方案」——
+/// 计划模式的正常形态是 chat your way，强制口径留在 [`PLAN_NUDGE_TEXT`] 里，避免把中间闲聊
+/// 回合逼出假方案。边界（「无需改动、保持现状、原计划已认可」属于评估结论、要写进
+/// `<proposed_plan>`、不算 unachievable）必须写在这里，否则会重现 2026-09-18 那次误逃。
+const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户已放弃这个计划（让你不要再处理、先不做了），用一行 <zen_plan_cancelled>放弃原因</zen_plan_cancelled> 收尾；若问题本身无法或无需产出实现计划（事实问题、纯查询、闲聊），用一行 <zen_plan_unachievable>原因</zen_plan_unachievable> 收尾；其余情况照常把完整方案写进 <proposed_plan>（「无需改动、保持现状、原计划已认可」属于评估结论，要写进 <proposed_plan>，不算 unachievable）。这两个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块。";
 
 /// 口嗨自动续跑的分会话计数（内存态，代理重启即清零）。
 #[derive(Debug, Default, Clone)]
@@ -383,6 +399,45 @@ fn is_plan_unachievable(text: &str) -> bool {
 /// 标签、空标签同样命中），且**不解析载荷**。计划模式不使用本判据。
 fn is_task_completed(text: &str) -> bool {
     text.to_lowercase().contains(TASK_COMPLETED_MARKER)
+}
+
+/// 请求是否声明了可调用的工具（`tools` 数组非空）：催办与首轮教学共用同一判据，
+/// 避免两处口径漂移（没有工具可调时既不催办、也不注入契约）。
+fn request_has_tools(req: &Value) -> bool {
+    req.get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| !tools.is_empty())
+}
+
+/// 首轮教学是否该注入：只给「**流式** + **声明了工具** + **非会话标题线程**」的请求注入。
+/// 纯函数，便于单测真值表。三条理由：非流式没有催办路径可消费这份契约；没有工具声明的请求
+/// 在催办判据里也被放过（压缩/摘要类后台请求通常不带工具）；标题线程只产出标题。
+fn contract_injection_eligible(want_stream: bool, has_tools: bool, title_task: bool) -> bool {
+    want_stream && has_tools && !title_task
+}
+
+/// 本次该注入哪段契约（计划模式用 [`PLAN_MODE_CONTRACT_TEXT`]、默认模式用
+/// [`DEFAULT_MODE_CONTRACT_TEXT`]）。
+fn contract_text(plan_mode: bool) -> &'static str {
+    if plan_mode {
+        PLAN_MODE_CONTRACT_TEXT
+    } else {
+        DEFAULT_MODE_CONTRACT_TEXT
+    }
+}
+
+/// 把契约追加到请求的 `instructions` 尾部（原内容逐字保留，只补一个空行分隔）；`instructions`
+/// 缺失或为空时以契约本身作为它。**只改 `instructions`、不动 `input`**——协作模式块的关键词
+/// 扫描与 `resolve_nudge_mode` 的结论都只看 `instructions` 里的模式块标签，所以调用方必须先
+/// 解析模式、再注入；契约文本里也不含 `<collaboration_mode>` 块。幂等：`instructions` 已经以
+/// 该契约结尾时直接返回（同一请求重复调用不会叠加两遍）。
+fn inject_contract(req: &mut Value, text: &str) {
+    let merged = match req.get("instructions").and_then(Value::as_str) {
+        None | Some("") => text.to_string(),
+        Some(existing) if existing.ends_with(text) => return,
+        Some(existing) => format!("{existing}\n\n{text}"),
+    };
+    req["instructions"] = Value::String(merged);
 }
 
 /// 请求是否为应用发起的「会话标题生成」任务（后台临时线程）：末条 user 文本以提示词
@@ -819,6 +874,7 @@ fn request_log_fields(
     call_id: &str,
     mode: &str,
     mode_src: &str,
+    contract: &str,
 ) -> Vec<(&'static str, String)> {
     let model = req
         .get("model")
@@ -859,6 +915,7 @@ fn request_log_fields(
         ("stream", want_stream.to_string()),
         ("mode", mode.to_string()),
         ("mode_src", mode_src.to_string()),
+        ("contract", contract.to_string()),
         ("input_msg_count", input_msg_count.to_string()),
         ("input_chars", input_chars.to_string()),
         ("instructions_chars", instructions_chars.to_string()),
@@ -907,7 +964,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
             );
         }
     };
-    let req: Value = match serde_json::from_slice(&bytes) {
+    let mut req: Value = match serde_json::from_slice(&bytes) {
         Ok(req) => req,
         Err(e) => {
             return error_json(
@@ -925,7 +982,20 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
     // 协作模式先按协议登记表解析（查不到才退回关键词），日志里连同来源一起记下
     let (plan_mode, mode_src) = resolve_nudge_mode(state, headers, &req);
     let mode = if plan_mode { "plan" } else { "default" };
-    let fields = request_log_fields(&req, want_stream, &call_id, mode, mode_src);
+    // 首轮教学：把收尾契约追加到 instructions 尾部（必须在模式解析之后——契约文本里不含
+    // `<collaboration_mode>` 块，模式判据与 mode_src 因此完全不受影响）
+    let contract = if contract_injection_eligible(
+        want_stream,
+        request_has_tools(&req),
+        request_is_title_task(&req),
+    ) {
+        inject_contract(&mut req, contract_text(plan_mode));
+        mode
+    } else {
+        "off"
+    };
+    // 日志按**注入后**的实际请求体记（`instructions_chars` 含契约长度，便于对照体积变化）
+    let fields = request_log_fields(&req, want_stream, &call_id, mode, mode_src, contract);
     let kv: Vec<(&str, String)> = fields.iter().map(|(k, v)| (*k, v.clone())).collect();
     log_at(&state.log, "info", "zen_proxy.request", &kv);
 
@@ -2198,10 +2268,7 @@ async fn run_stream_task(
         return;
     }
 
-    let has_tools = req
-        .get("tools")
-        .and_then(Value::as_array)
-        .is_some_and(|tools| !tools.is_empty());
+    let has_tools = request_has_tools(&req);
     // 口嗨判据完全由代码给：计划模式看计划系标签，默认模式看 [`TASK_COMPLETED_MARKER`]。
     // 模式本身优先取协议登记表（`run_stream_task` 与 `handle_responses` 用的是同一个纯函数，
     // 两处结论必然一致），查不到才退回关键词兜底。
@@ -2312,7 +2379,7 @@ async fn run_stream_task(
             );
             break;
         }
-        // 默认模式：终局带「任务已经结束」标签（提醒里约定的 `<task_completed>`），
+        // 默认模式：终局带「任务已经结束」标签（首轮教学与提醒里约定的 `<zen_task_completed>`），
         // 即模型自己宣告任务已终结——直接收尾，不再注入、不触发后续 pass。
         // 这里按「健康结束」清零连续计数：判定删除后每个纯文本终局都会注入一次，
         // 若不重置，普通问答两轮就会耗光 streak，真正的口嗨反而 10 分钟内不再被催。
@@ -2355,7 +2422,7 @@ async fn run_stream_task(
             );
             break;
         }
-        // 两个模式各用各的提醒：默认模式那条负责把 `<task_completed>` 教给模型
+        // 两个模式各用各的提醒：默认模式那条负责把 `<zen_task_completed>` 教给模型
         // （判定搬进原对话，不再有独立的判定请求）
         let nudge_text = if plan_mode { PLAN_NUDGE_TEXT } else { NUDGE_TEXT };
         // 注入提醒并续跑：第二轮的事件继续喂同一个 StreamState
@@ -4286,16 +4353,22 @@ mod tests {
 
     #[test]
     fn is_plan_cancelled_matches_tag_marker() {
-        // 提醒里教的标签形态（用户中途放弃计划时的正确收尾）
+        // 标签名与命名口径锁死：自研标签统一 `zen_plan_` 前缀
+        assert_eq!(PLAN_CANCEL_MARKER, "<zen_plan_cancelled");
+        assert!(
+            PLAN_CANCEL_MARKER.starts_with("<zen_plan_"),
+            "计划模式出口标签必须走 zen_plan_ 命名：{PLAN_CANCEL_MARKER}"
+        );
+        // 教学里给的标签形态（用户中途放弃计划时的正确收尾）
         assert!(is_plan_cancelled(
-            "好，那就不处理了。\n<cancelled_plan>用户说不用改了</cancelled_plan>"
+            "好，那就不处理了。\n<zen_plan_cancelled>用户说不用改了</zen_plan_cancelled>"
         ));
         // 与 `<proposed_plan>` 同口径：大小写不敏感 + 前缀匹配，缺闭合标签也命中
         assert!(is_plan_cancelled(
-            "<CANCELLED_PLAN>用户说不用改了</CANCELLED_PLAN>"
+            "<ZEN_PLAN_CANCELLED>用户说不用改了</ZEN_PLAN_CANCELLED>"
         ));
-        assert!(is_plan_cancelled("<cancelled_plan>用户说不用改了"));
-        assert!(is_plan_cancelled("<cancelled_plan>"));
+        assert!(is_plan_cancelled("<zen_plan_cancelled>用户说不用改了"));
+        assert!(is_plan_cancelled("<zen_plan_cancelled>"));
         // 普通结论、空串、裸中文措辞与正常交付的计划都不算「已取消」
         assert!(!is_plan_cancelled("我看完了代码，结论是不需要改动。"));
         assert!(!is_plan_cancelled(""));
@@ -4303,20 +4376,29 @@ mod tests {
         assert!(!is_plan_cancelled(
             "<proposed_plan>\n# 标题\n- 步骤 1\n</proposed_plan>"
         ));
+        // 旧的无前缀写法不再被识别（只认新标签）
+        assert!(!is_plan_cancelled(
+            "<cancelled_plan>用户说不用改了</cancelled_plan>"
+        ));
     }
 
     #[test]
     fn is_plan_unachievable_matches_tag_marker() {
-        // 提醒里教的标签形态（问题本身无法或无需产出实现计划时的正确收尾）
+        assert_eq!(PLAN_UNACHIEVABLE_MARKER, "<zen_plan_unachievable");
+        assert!(
+            PLAN_UNACHIEVABLE_MARKER.starts_with("<zen_plan_"),
+            "计划模式出口标签必须走 zen_plan_ 命名：{PLAN_UNACHIEVABLE_MARKER}"
+        );
+        // 教学里给的标签形态（问题本身无法或无需产出实现计划时的正确收尾）
         assert!(is_plan_unachievable(
-            "1+1=2。\n<unachievable_plan>这是事实问题，不产出实现计划</unachievable_plan>"
+            "1+1=2。\n<zen_plan_unachievable>这是事实问题，不产出实现计划</zen_plan_unachievable>"
         ));
         // 与 `<proposed_plan>` 同口径：大小写不敏感 + 前缀匹配，缺闭合标签也命中
         assert!(is_plan_unachievable(
-            "<UNACHIEVABLE_PLAN>纯查询，无需计划</UNACHIEVABLE_PLAN>"
+            "<ZEN_PLAN_UNACHIEVABLE>纯查询，无需计划</ZEN_PLAN_UNACHIEVABLE>"
         ));
-        assert!(is_plan_unachievable("<unachievable_plan>闲聊"));
-        assert!(is_plan_unachievable("<unachievable_plan>"));
+        assert!(is_plan_unachievable("<zen_plan_unachievable>闲聊"));
+        assert!(is_plan_unachievable("<zen_plan_unachievable>"));
         // 普通结论、空串、裸中文措辞与正常交付/取消的计划都不算「无法/无需计划」
         assert!(!is_plan_unachievable("我看完了代码，结论是不需要改动。"));
         assert!(!is_plan_unachievable(""));
@@ -4324,29 +4406,37 @@ mod tests {
         assert!(!is_plan_unachievable(
             "<proposed_plan>\n# 标题\n- 步骤 1\n</proposed_plan>"
         ));
+        // 两个前缀（zen_plan_cancelled / zen_plan_unachievable）互不误命中
         assert!(!is_plan_unachievable(
-            "<cancelled_plan>用户说不用改了</cancelled_plan>"
+            "<zen_plan_cancelled>用户说不用改了</zen_plan_cancelled>"
+        ));
+        assert!(!is_plan_cancelled(
+            "<zen_plan_unachievable>这是事实问题</zen_plan_unachievable>"
+        ));
+        // 旧的无前缀写法不再被识别（只认新标签）
+        assert!(!is_plan_unachievable(
+            "<unachievable_plan>这是事实问题</unachievable_plan>"
         ));
     }
 
     #[test]
     fn is_task_completed_matches_tag_marker() {
-        // 标签名与命名口径锁死：不加 `zen_` 前缀（与 plan 系标签同族同形）
-        assert_eq!(TASK_COMPLETED_MARKER, "<task_completed");
+        // 标签名与命名口径锁死：自研标签统一 `zen_` 前缀（本标记用 zen_task_）
+        assert_eq!(TASK_COMPLETED_MARKER, "<zen_task_completed");
         assert!(
-            !TASK_COMPLETED_MARKER.contains("zen"),
-            "标签名不得带 zen 前缀：{TASK_COMPLETED_MARKER}"
+            TASK_COMPLETED_MARKER.starts_with("<zen_task_"),
+            "默认模式收尾标签必须走 zen_task_ 命名：{TASK_COMPLETED_MARKER}"
         );
-        // 提醒里教的标签形态（默认模式下模型自己宣告任务结束的正确收尾）
+        // 教学里给的标签形态（默认模式下模型自己宣告任务结束的正确收尾）
         assert!(is_task_completed(
-            "结论：已把 base_url 路径测试补上。\n<task_completed>已完成：补了 3 个用例</task_completed>"
+            "结论：已把 base_url 路径测试补上。\n<zen_task_completed>已完成：补了 3 个用例</zen_task_completed>"
         ));
         // 与 plan 系标签同口径：大小写不敏感 + 前缀匹配，缺闭合标签也命中
         assert!(is_task_completed(
-            "<TASK_COMPLETED>已完成：无需改动</TASK_COMPLETED>"
+            "<ZEN_TASK_COMPLETED>已完成：无需改动</ZEN_TASK_COMPLETED>"
         ));
-        assert!(is_task_completed("<task_completed>已完成：已推送"));
-        assert!(is_task_completed("<task_completed>"));
+        assert!(is_task_completed("<zen_task_completed>已完成：已推送"));
+        assert!(is_task_completed("<zen_task_completed>"));
         // 普通结论、空串、裸中文措辞都不算「任务已结束」
         assert!(!is_task_completed("我看完了代码，结论是不需要改动。"));
         assert!(!is_task_completed(""));
@@ -4356,10 +4446,14 @@ mod tests {
             "<proposed_plan>\n# 标题\n- 步骤 1\n</proposed_plan>"
         ));
         assert!(!is_task_completed(
-            "<cancelled_plan>用户说不用改了</cancelled_plan>"
+            "<zen_plan_cancelled>用户说不用改了</zen_plan_cancelled>"
         ));
         assert!(!is_task_completed(
-            "<unachievable_plan>这是事实问题</unachievable_plan>"
+            "<zen_plan_unachievable>这是事实问题</zen_plan_unachievable>"
+        ));
+        // 旧的无前缀写法不再被识别（只认新标签）
+        assert!(!is_task_completed(
+            "<task_completed>已完成</task_completed>"
         ));
     }
 
@@ -4450,7 +4544,7 @@ mod tests {
             "必须与模型约定「任务已结束」标签，否则判定删掉后没有收尾出口：{NUDGE_TEXT}"
         );
         assert!(
-            NUDGE_TEXT.contains("</task_completed>"),
+            NUDGE_TEXT.contains("</zen_task_completed>"),
             "必须给出闭合标签，否则弱模型只写正文：{NUDGE_TEXT}"
         );
         assert!(
@@ -4521,12 +4615,125 @@ mod tests {
         );
         assert!(!PLAN_NUDGE_TEXT.contains("必须实际调用工具"));
 
+        // 改名后**任何教学面都不许再出现旧的无前缀标签**（防半改）
+        for legacy in ["<cancelled_plan", "<unachievable_plan", "<task_completed"] {
+            for text in [
+                NUDGE_TEXT,
+                PLAN_NUDGE_TEXT,
+                DEFAULT_MODE_CONTRACT_TEXT,
+                PLAN_MODE_CONTRACT_TEXT,
+            ] {
+                assert!(!text.contains(legacy), "残留旧标签字面量「{legacy}」：{text}");
+            }
+        }
+
+        // 首轮教学的两段契约：教新标签、与判据强耦合、结构不变量写全
+        assert!(DEFAULT_MODE_CONTRACT_TEXT.contains(&format!("{TASK_COMPLETED_MARKER}>")));
+        assert!(DEFAULT_MODE_CONTRACT_TEXT.contains("</zen_task_completed>"));
+        assert!(is_task_completed(DEFAULT_MODE_CONTRACT_TEXT));
+        assert!(!DEFAULT_MODE_CONTRACT_TEXT.contains(PLAN_CANCEL_MARKER));
+        assert!(!DEFAULT_MODE_CONTRACT_TEXT.contains(PLAN_UNACHIEVABLE_MARKER));
+        for needle in [
+            "成对闭合",
+            "独占一行",
+            "不换行",
+            "本轮最多只写一个",
+            "不要放进代码块",
+        ] {
+            assert!(
+                DEFAULT_MODE_CONTRACT_TEXT.contains(needle),
+                "默认模式契约缺少结构约定「{needle}」：{DEFAULT_MODE_CONTRACT_TEXT}"
+            );
+            assert!(
+                PLAN_MODE_CONTRACT_TEXT.contains(needle),
+                "计划模式契约缺少结构约定「{needle}」：{PLAN_MODE_CONTRACT_TEXT}"
+            );
+        }
+        // 计划模式契约：两个出口标签 + 边界（不算 unachievable 的评估结论要走 proposed_plan）
+        assert!(PLAN_MODE_CONTRACT_TEXT.contains(&format!("{PLAN_CANCEL_MARKER}>")));
+        assert!(PLAN_MODE_CONTRACT_TEXT.contains("</zen_plan_cancelled>"));
+        assert!(is_plan_cancelled(PLAN_MODE_CONTRACT_TEXT));
+        assert!(PLAN_MODE_CONTRACT_TEXT.contains(&format!("{PLAN_UNACHIEVABLE_MARKER}>")));
+        assert!(PLAN_MODE_CONTRACT_TEXT.contains("</zen_plan_unachievable>"));
+        assert!(is_plan_unachievable(PLAN_MODE_CONTRACT_TEXT));
+        assert!(PLAN_MODE_CONTRACT_TEXT.contains("不算 unachievable"));
+        assert!(PLAN_MODE_CONTRACT_TEXT.contains(PLAN_OUTPUT_MARKER));
+        assert!(!PLAN_MODE_CONTRACT_TEXT.contains(TASK_COMPLETED_MARKER));
+        // 首轮教学不前置「必须给完整方案」：强制口径只留在催办提醒里
+        assert!(!PLAN_MODE_CONTRACT_TEXT.contains("都必须给出完整方案"));
+        assert!(!PLAN_MODE_CONTRACT_TEXT.contains("必须想办法把完整方案"));
+
         // 简写 input（字符串）也要能续跑
         let body = nudge_continuation_body(&json!({ "input": "hi" }), "text", NUDGE_TEXT);
         let input = body["input"].as_array().unwrap();
         assert_eq!(input.len(), 3);
         assert_eq!(input[0]["role"], "user");
         assert_eq!(input[0]["content"][0]["text"], "hi");
+    }
+
+    #[test]
+    fn contract_injection_eligible_only_for_streaming_tool_requests() {
+        // 流式 + 声明了工具 + 非会话标题线程：注入首轮教学
+        assert!(contract_injection_eligible(true, true, false));
+        // 非流式：没有催办路径消费这份契约
+        assert!(!contract_injection_eligible(false, true, false));
+        // 没有工具声明：与催办同一门槛（压缩/摘要类后台请求通常也不带工具）
+        assert!(!contract_injection_eligible(true, false, false));
+        // 会话标题线程：只产出标题
+        assert!(!contract_injection_eligible(true, true, true));
+    }
+
+    #[test]
+    fn contract_text_follows_mode() {
+        assert_eq!(contract_text(true), PLAN_MODE_CONTRACT_TEXT);
+        assert_eq!(contract_text(false), DEFAULT_MODE_CONTRACT_TEXT);
+    }
+
+    #[test]
+    fn inject_contract_appends_without_touching_prefix() {
+        // 有 instructions：原内容逐字保留、契约在末尾（只多一个空行分隔）
+        let mut req = json!({ "instructions": "keep me", "input": "hi" });
+        inject_contract(&mut req, DEFAULT_MODE_CONTRACT_TEXT);
+        assert_eq!(
+            req["instructions"],
+            format!("keep me\n\n{DEFAULT_MODE_CONTRACT_TEXT}").as_str()
+        );
+        // 其余字段一字不动
+        assert_eq!(req["input"], json!("hi"));
+        // 幂等：重复注入不叠加
+        inject_contract(&mut req, DEFAULT_MODE_CONTRACT_TEXT);
+        assert_eq!(
+            req["instructions"],
+            format!("keep me\n\n{DEFAULT_MODE_CONTRACT_TEXT}").as_str()
+        );
+
+        // 没有 instructions / 空 instructions：契约本身就是 instructions
+        let mut req = json!({ "input": "hi" });
+        inject_contract(&mut req, PLAN_MODE_CONTRACT_TEXT);
+        assert_eq!(req["instructions"], PLAN_MODE_CONTRACT_TEXT);
+        let mut req = json!({ "instructions": "", "input": "hi" });
+        inject_contract(&mut req, PLAN_MODE_CONTRACT_TEXT);
+        assert_eq!(req["instructions"], PLAN_MODE_CONTRACT_TEXT);
+    }
+
+    #[test]
+    fn inject_contract_keeps_mode_block_verdict() {
+        // 契约里没有 `<collaboration_mode>` 块：注入不改变关键词兜底判据的结论
+        let mut plan_req = json!({ "instructions": REAL_PLAN_MODE_BLOCK, "input": "hi" });
+        assert!(request_is_plan_mode(&plan_req));
+        inject_contract(&mut plan_req, PLAN_MODE_CONTRACT_TEXT);
+        assert!(
+            request_is_plan_mode(&plan_req),
+            "注入契约不应把计划模式判成默认模式：{plan_req}"
+        );
+
+        let mut default_req = json!({ "instructions": REAL_DEFAULT_MODE_BLOCK, "input": "hi" });
+        assert!(!request_is_plan_mode(&default_req));
+        inject_contract(&mut default_req, DEFAULT_MODE_CONTRACT_TEXT);
+        assert!(
+            !request_is_plan_mode(&default_req),
+            "注入契约不应把默认模式判成计划模式：{default_req}"
+        );
     }
 
     #[test]
@@ -4547,7 +4754,7 @@ mod tests {
         assert!(state.allow(later));
         assert_eq!(state.streak, 0);
 
-        // 模型真的推进了（调用工具，或用 `<task_completed>` 收尾）：计数清零
+        // 模型真的推进了（调用工具，或用 `<zen_task_completed>` 收尾）：计数清零
         state.record_injection(later);
         state.record_progress();
         assert_eq!(state.streak, 0);
@@ -5902,6 +6109,7 @@ mod tests {
             "req_test",
             "default",
             MODE_SRC_HEURISTIC,
+            "default",
         );
         let value_of = |key: &str| {
             fields
@@ -5921,6 +6129,8 @@ mod tests {
         // 协作模式与来源由调用方（`resolve_nudge_mode`）解析后传入，这里只记录
         assert_eq!(value_of("mode"), Some("default".to_string()));
         assert_eq!(value_of("mode_src"), Some(MODE_SRC_HEURISTIC.to_string()));
+        // 首轮教学的注入结论同样进这一行日志
+        assert_eq!(value_of("contract"), Some("default".to_string()));
         let plan_fields = request_log_fields(
             &json!({
                 "model": "m",
@@ -5934,6 +6144,7 @@ mod tests {
             "req_test",
             "plan",
             MODE_SRC_REGISTRY,
+            "off",
         );
         assert_eq!(
             plan_fields
@@ -5949,6 +6160,13 @@ mod tests {
                 .map(|(_, value)| value.as_str()),
             Some(MODE_SRC_REGISTRY)
         );
+        assert_eq!(
+            plan_fields
+                .iter()
+                .find(|(name, _)| *name == "contract")
+                .map(|(_, value)| value.as_str()),
+            Some("off")
+        );
 
         // 没请求推理时记 `-`
         let fields = request_log_fields(
@@ -5957,6 +6175,7 @@ mod tests {
             "req_test",
             "default",
             MODE_SRC_HEURISTIC,
+            "off",
         );
         assert_eq!(
             fields
@@ -5981,6 +6200,7 @@ mod tests {
             "req_test",
             "default",
             MODE_SRC_HEURISTIC,
+            "off",
         );
         assert_eq!(
             fields
@@ -6956,11 +7176,47 @@ mod integration_tests {
         ]
     }
 
-    /// 默认模式按约定收尾的终局文本（`<task_completed>` 成对标签）。
+    /// 默认模式按约定收尾的终局文本（`<zen_task_completed>` 成对标签）。
     fn completion_reply(reason: &str) -> ScriptedReply {
         ScriptedReply::Sse(sse_text_reply(&format!(
-            "<task_completed>{reason}</task_completed>"
+            "<zen_task_completed>{reason}</zen_task_completed>"
         )))
+    }
+
+    /// 某个上游请求体里最后一条 assistant 消息的文本（首轮教学注入在 system 里，不影响它）。
+    fn last_assistant_text(call: &Value) -> String {
+        call["messages"]
+            .as_array()
+            .and_then(|messages| {
+                messages
+                    .iter()
+                    .rev()
+                    .find(|m| m["role"].as_str() == Some("assistant"))
+            })
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// 某个上游请求体里的 system 文本（= 入站 `instructions`，首轮教学的契约挂在这里）。
+    fn system_text(call: &Value) -> String {
+        call["messages"]
+            .as_array()
+            .and_then(|messages| messages.first())
+            .filter(|m| m["role"].as_str() == Some("system"))
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// 某个上游请求体里最后一条消息的文本（续跑轮即注入的续跑提醒）。
+    fn last_message_text(call: &Value) -> String {
+        call["messages"]
+            .as_array()
+            .and_then(|messages| messages.last())
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or_default()
+            .to_string()
     }
 
     /// 入站 Responses 请求体（JSON）：指定末条 user 文本，可选带一个工具声明。
@@ -7128,16 +7384,18 @@ mod integration_tests {
 
         let calls = rec.lock().await.clone();
         assert_eq!(calls.len(), 2, "应为：首轮 + 续跑（不再有独立判定请求）");
+        // 首轮与续跑轮都带首轮教学注入的契约（instructions → system 消息）
+        assert!(
+            system_text(&calls[0]).contains(DEFAULT_MODE_CONTRACT_TEXT),
+            "首轮应带默认模式契约：{}",
+            calls[0]
+        );
         // 续跑调用：历史尾部是「助手原样文本 + 注入提醒」
         let messages = calls[1]["messages"].as_array().unwrap();
-        assert_eq!(messages.len(), 3);
-        assert_eq!(messages[1]["role"], "assistant");
-        assert!(messages[1]["content"]
-            .as_str()
-            .unwrap()
-            .contains("Now update the test"));
-        assert_eq!(messages[2]["role"], "user");
-        let injected = messages[2]["content"].as_str().unwrap();
+        assert_eq!(messages.len(), 4, "契约的 system 消息 + user + assistant + 提醒：{messages:?}");
+        assert_eq!(messages.last().unwrap()["role"], "user");
+        assert!(last_assistant_text(&calls[1]).contains("Now update the test"));
+        let injected = messages.last().unwrap()["content"].as_str().unwrap();
         assert!(injected.contains("自动续跑"), "{injected}");
         assert!(
             injected.contains(&format!("{TASK_COMPLETED_MARKER}>")),
@@ -7153,7 +7411,7 @@ mod integration_tests {
         assert!(!joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
     }
 
-    /// 终局自带 `<task_completed>`：模型自己宣告任务结束，一次调用就收尾（不注入、不续跑）。
+    /// 终局自带 `<zen_task_completed>`：模型自己宣告任务结束，一次调用就收尾（不注入、不续跑）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_skipped_when_completion_tag_present() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -7305,7 +7563,7 @@ mod integration_tests {
     }
 
     /// 用户中途放弃计划（实测例子：「行，那不处理了」）：首轮模型只写普通正文 → 催办一轮，
-    /// 续跑轮按约定用 `<cancelled_plan>` 标签收尾 → 代码判据直接收尾，不再注入第 3 轮、
+    /// 续跑轮按约定用 `<zen_plan_cancelled>` 标签收尾 → 代码判据直接收尾，不再注入第 3 轮、
     /// 不消耗 streak，也不会把一份已被放弃的完整方案重新逼出来。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_plan_mode_stops_when_plan_cancelled() {
@@ -7314,7 +7572,7 @@ mod integration_tests {
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("好，那就保持现状，这一项先不改了。")),
             ScriptedReply::Sse(sse_text_reply(
-                "明白，那就不处理了。\n<cancelled_plan>用户说不用改了</cancelled_plan>",
+                "明白，那就不处理了。\n<zen_plan_cancelled>用户说不用改了</zen_plan_cancelled>",
             )),
             // 第 3 轮不该发生：真发生时脚本会回空话，下面的调用数断言会失败
             ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
@@ -7338,7 +7596,7 @@ mod integration_tests {
         // 催办轮注入的提醒里带上了约定标签
         let messages = calls[1]["messages"].as_array().unwrap();
         let injected = messages.last().unwrap()["content"].as_str().unwrap();
-        assert!(injected.contains("<cancelled_plan>"), "{injected}");
+        assert!(injected.contains("<zen_plan_cancelled>"), "{injected}");
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
@@ -7363,7 +7621,7 @@ mod integration_tests {
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply(
-                "那就不做改动了。\n<cancelled_plan>用户说不用改了</cancelled_plan>",
+                "那就不做改动了。\n<zen_plan_cancelled>用户说不用改了</zen_plan_cancelled>",
             )),
             ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
         ])
@@ -7396,7 +7654,7 @@ mod integration_tests {
     }
 
     /// 问题本身无法或无需产出实现计划（如「1+1=？」这类事实问题）：首轮模型只写普通正文 →
-    /// 催办一轮，续跑轮按约定用 `<unachievable_plan>` 标签收尾 → 代码判据直接收尾，
+    /// 催办一轮，续跑轮按约定用 `<zen_plan_unachievable>` 标签收尾 → 代码判据直接收尾，
     /// 不再注入第 3 轮、不消耗 streak，也不会逼它在计划模式里强行给一份方案。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_plan_mode_stops_when_plan_unachievable() {
@@ -7405,7 +7663,7 @@ mod integration_tests {
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("1 + 1 = 2。")),
             ScriptedReply::Sse(sse_text_reply(
-                "1 + 1 = 2。\n<unachievable_plan>事实问题，不产出实现计划</unachievable_plan>",
+                "1 + 1 = 2。\n<zen_plan_unachievable>事实问题，不产出实现计划</zen_plan_unachievable>",
             )),
             // 第 3 轮不该发生：真发生时脚本会回空话，下面的调用数断言会失败
             ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
@@ -7429,7 +7687,7 @@ mod integration_tests {
         // 催办轮注入的提醒里带上了约定标签
         let messages = calls[1]["messages"].as_array().unwrap();
         let injected = messages.last().unwrap()["content"].as_str().unwrap();
-        assert!(injected.contains("<unachievable_plan>"), "{injected}");
+        assert!(injected.contains("<zen_plan_unachievable>"), "{injected}");
         let joined = read_session_log(&dir);
         assert!(
             joined.contains("event=zen_proxy.nudge_skipped")
@@ -7455,7 +7713,7 @@ mod integration_tests {
         let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply(
-                "这就是个纯查询。\n<unachievable_plan>无实现计划可给</unachievable_plan>",
+                "这就是个纯查询。\n<zen_plan_unachievable>无实现计划可给</zen_plan_unachievable>",
             )),
             ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
         ])
@@ -7488,7 +7746,7 @@ mod integration_tests {
     }
 
     /// 关键回归：历史里残留旧的计划模式块（codex 把历次模式块都留在历史里），但协议登记表
-    /// 说这个线程现在是默认模式——必须走默认模式的续跑（注入带 `<task_completed>` 契约的执行
+    /// 说这个线程现在是默认模式——必须走默认模式的续跑（注入带 `<zen_task_completed>` 契约的执行
     /// 口径），不能按计划模式注入「请给出计划」（这正是线上 `collaboration_mode_kind=default`
     /// 却按 plan 分流的那次误判）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -7777,7 +8035,7 @@ mod integration_tests {
     }
 
     /// 默认模式下终局文本本身是计划产物（`<proposed_plan>`）：那不是默认模式的收尾标签，
-    /// 因此照常注入续跑提醒；模型在续跑轮按约定用 `<task_completed>` 收尾即结束
+    /// 因此照常注入续跑提醒；模型在续跑轮按约定用 `<zen_task_completed>` 收尾即结束
     /// （「已给方案、等你确认」也要写进标签，不再由 AI 判定替它放行）。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn nudge_default_mode_plan_output_is_not_a_completion_tag() {
@@ -7797,17 +8055,13 @@ mod integration_tests {
         let calls = rec.lock().await.clone();
         assert_eq!(calls.len(), 2, "计划产物不是默认模式收尾标签，应续跑一轮：{calls:?}");
         // 续跑请求：历史尾部是「助手原样文本（含计划包裹）+ 注入提醒」
-        let messages = calls[1]["messages"].as_array().unwrap();
         assert!(
-            messages[1]["content"].as_str().unwrap().contains("1. 做 A"),
+            last_assistant_text(&calls[1]).contains("1. 做 A"),
             "续跑请求应原样带上上一轮助手文本：{}",
             calls[1]
         );
         assert!(
-            messages[2]["content"]
-                .as_str()
-                .unwrap()
-                .contains(&format!("{TASK_COMPLETED_MARKER}>")),
+            last_message_text(&calls[1]).contains(&format!("{TASK_COMPLETED_MARKER}>")),
             "续跑请求应教出标签契约：{}",
             calls[1]
         );
@@ -7848,10 +8102,10 @@ mod integration_tests {
         );
     }
 
-    /// 标签契约只在续跑提醒里教：首轮发给上游的请求体里不能出现任何收尾约定
-    /// （否则等于偷偷改了 codex 的系统提示词）。
+    /// 首轮教学（默认模式）：契约挂在 `instructions` 尾部（→ system 消息），首轮请求就带；
+    /// 续跑提醒仍然只出现在续跑轮，两者不是同一段文本。
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn nudge_default_mode_first_pass_request_is_untouched() {
+    async fn nudge_default_mode_first_pass_request_carries_contract() {
         let (upstream, rec) = spawn_mock_zen_scripted(vec![
             ScriptedReply::Sse(sse_text_reply("我先说明一下接下来要做的事。")),
             completion_reply("已完成：只是说明"),
@@ -7863,29 +8117,93 @@ mod integration_tests {
         assert_eq!(body.matches("event: response.completed").count(), 1);
         let calls = rec.lock().await.clone();
         assert_eq!(calls.len(), 2, "应「首轮 + 续跑」：{calls:?}");
-        let first = calls[0].to_string();
+        // 首轮：system 里就是默认模式契约；不含续跑提醒，也不含计划模式的出口标签
+        let first_system = system_text(&calls[0]);
         assert!(
-            !first.contains(TASK_COMPLETED_MARKER),
-            "首轮请求不得带标签契约：{first}"
-        );
-        assert!(
-            calls[0]["messages"][0]["content"]
-                .as_str()
-                .is_none_or(|system| !system.contains("自动续跑")),
-            "首轮请求不得带续跑提醒：{}",
+            first_system.contains(DEFAULT_MODE_CONTRACT_TEXT),
+            "首轮应带默认模式契约：{}",
             calls[0]
         );
-        // 只有续跑轮（注入提醒）才带上契约与提醒
-        let injected = calls[1]["messages"]
-            .as_array()
-            .unwrap()
-            .last()
-            .unwrap()["content"]
-            .as_str()
-            .unwrap();
+        assert!(!first_system.contains("自动续跑"), "首轮不该有续跑提醒：{first_system}");
+        assert!(!first_system.contains(PLAN_CANCEL_MARKER), "{first_system}");
+        assert!(!first_system.contains(PLAN_UNACHIEVABLE_MARKER), "{first_system}");
+        // 续跑轮：契约仍在，历史尾部追加了续跑提醒
+        assert!(
+            system_text(&calls[1]).contains(DEFAULT_MODE_CONTRACT_TEXT),
+            "续跑轮应继续带契约：{}",
+            calls[1]
+        );
+        let injected = last_message_text(&calls[1]);
         assert!(
             injected.contains(TASK_COMPLETED_MARKER) && injected.contains("自动续跑"),
-            "续跑轮应带标签契约：{injected}"
+            "续跑轮尾部应是带标签的提醒：{injected}"
+        );
+    }
+
+    /// 首轮教学（计划模式）：只前置两个出口标签，不前置「必须给完整方案」；两种模式的契约互不串味。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_plan_mode_first_pass_request_carries_exit_contract() {
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply(
+            "<proposed_plan>\n1. 做 A\n</proposed_plan>",
+        ))])
+        .await;
+
+        let body = run_nudge_probe(
+            &upstream,
+            None,
+            nudge_probe_with_mode(true, &plan_mode_text()),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 1, "已交付的计划不该再有第二轮：{calls:?}");
+        let system = system_text(&calls[0]);
+        assert!(
+            system.contains(PLAN_MODE_CONTRACT_TEXT),
+            "计划模式首轮应带出口契约：{}",
+            calls[0]
+        );
+        assert!(system.contains(PLAN_CANCEL_MARKER), "{system}");
+        assert!(system.contains(PLAN_UNACHIEVABLE_MARKER), "{system}");
+        // 模式不串味：计划模式请求不带默认模式收尾标签，默认模式请求不带计划出口标签
+        assert!(!system.contains(TASK_COMPLETED_MARKER), "{system}");
+        assert!(
+            !system.contains("都必须给出完整方案"),
+            "首轮教学不前置强制口径：{system}"
+        );
+    }
+
+    /// 首轮教学的门槛：标题线程与「没有工具声明」的请求都不注入契约
+    /// （非流式由 `contract_injection_eligible` 单测覆盖）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn contract_not_injected_for_title_task_or_tool_less_request() {
+        // ① 标题线程：整轮放行，system 里没有契约
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply(
+            "zen 首轮教学",
+        ))])
+        .await;
+        let body = run_nudge_probe(&upstream, None, nudge_probe_title_task(true)).await;
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(
+            !system_text(&calls[0]).contains(DEFAULT_MODE_CONTRACT_TEXT),
+            "标题线程不该注入契约：{}",
+            calls[0]
+        );
+
+        // ② 没有工具声明：与催办同一门槛，不注入
+        let (upstream, rec) =
+            spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply("纯聊天回答"))]).await;
+        let body = run_nudge_probe(&upstream, None, nudge_probe(false)).await;
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(
+            !system_text(&calls[0]).contains(DEFAULT_MODE_CONTRACT_TEXT),
+            "无工具请求不该注入契约：{}",
+            calls[0]
         );
     }
 
