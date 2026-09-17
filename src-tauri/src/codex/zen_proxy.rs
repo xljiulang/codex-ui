@@ -397,11 +397,15 @@ fn last_user_text(req: &Value) -> String {
     }
 }
 
-/// 构造判定调用请求体：同一模型、非流式、不带工具（避免判定模型自己去调工具）。
+/// 构造判定调用请求体：同一模型、流式、不带工具（避免判定模型自己去调工具）。
+///
+/// 流式原因：OpenCode 免费档会拒绝对非流式（`stream: false`）的请求（
+/// "OpenCode's free tier can only be used from within OpenCode"），
+/// 判定只是后台调用，流式返回同样可用；解析侧见 [`nudge_judge_stream_text`]。
 fn nudge_judge_body(model: &str, prompt: &str) -> Value {
     json!({
         "model": model,
-        "stream": false,
+        "stream": true,
         "tools": [],
         "input": [{
             "type": "message",
@@ -439,15 +443,43 @@ fn nudge_continuation_body(original: &Value, assistant_text: &str, nudge_text: &
     body
 }
 
-/// 从 chat/completions 响应体里取第一条 choice 的 `message.content` 文本。
-fn chat_message_text(chat: &Value) -> Option<String> {
-    chat.get("choices")
-        .and_then(Value::as_array)?
-        .first()?
-        .get("message")?
-        .get("content")?
-        .as_str()
-        .map(str::to_string)
+/// 从 SSE 流式响应里拼接判定文本：逐行取 `data:` 载荷，每个 chunk 的
+/// `choices[0].delta.content` 按序拼接；空行/非 data 行/`[DONE]` 忽略。
+/// 流内出现 `error` 或没有任何内容时返回 `None`（调用方记为解析失败）。
+fn nudge_judge_stream_text(sse: &str) -> Option<String> {
+    let mut text = String::new();
+    for line in sse.lines() {
+        let line = line.trim_end();
+        if line.is_empty() || !line.starts_with("data:") {
+            continue;
+        }
+        let payload = line["data:".len()..].trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+        let Ok(chunk) = serde_json::from_str::<Value>(payload) else {
+            continue;
+        };
+        // 流内随附的 error（HTTP 仍为 200）：当作解析失败
+        if chunk.get("error").is_some_and(|v| !v.is_null()) {
+            return None;
+        }
+        // 无 choices 的分片（如 usage 分片）直接跳过，不影响其它内容分片
+        let choices = chunk.get("choices").and_then(Value::as_array);
+        if let Some(Some(content)) = choices.map(|c| {
+            c.first()
+                .and_then(|choice| choice.get("delta"))
+                .and_then(|d| d.get("content"))
+                .and_then(Value::as_str)
+        }) {
+            text.push_str(content);
+        }
+    }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
@@ -2445,7 +2477,7 @@ fn nudge_record_tool_activity(state: &ProxyState, session: &str) {
     }
 }
 
-/// 跑一次后台判定调用（同一模型、非流式、无工具）。超时/报错/解析不出都返回
+/// 跑一次后台判定调用（同一模型、流式、无工具）。超时/报错/解析不出都返回
 /// `Unknown`，调用方按「已完成」处理（不注入、照常收尾）。
 async fn nudge_judge(
     state: &ProxyState,
@@ -2462,7 +2494,7 @@ async fn nudge_judge(
     let started = Instant::now();
     let forwarded = tokio::time::timeout(
         NUDGE_JUDGE_TIMEOUT,
-        forward(&body, headers, false, state, &judge_call_id),
+        forward(&body, headers, true, state, &judge_call_id),
     )
     .await;
     let elapsed_ms = started.elapsed().as_millis().to_string();
@@ -2484,11 +2516,8 @@ async fn nudge_judge(
                 match forwarded.payload {
                     ForwardPayload::Live(resp) => match resp.text().await {
                         Ok(text) => {
-                            trace.write_response_text("response.json", &text);
-                            let reply = serde_json::from_str::<Value>(&text)
-                                .ok()
-                                .as_ref()
-                                .and_then(chat_message_text);
+                            trace.write_response_text("response.sse", &text);
+                            let reply = nudge_judge_stream_text(&text);
                             match reply {
                                 Some(reply) => {
                                     trace.note(
@@ -4608,26 +4637,50 @@ mod tests {
     }
 
     #[test]
-    fn nudge_judge_body_is_non_stream_without_tools() {
+    fn nudge_judge_body_is_stream_without_tools() {
         let body = nudge_judge_body("mimo-v2.5-free", "判定提示词");
         assert_eq!(body["model"], "mimo-v2.5-free");
-        assert_eq!(body["stream"], false);
+        assert_eq!(body["stream"], true);
         assert_eq!(body["tools"], json!([]));
         assert_eq!(body["input"][0]["role"], "user");
         assert_eq!(body["input"][0]["content"][0]["text"], "判定提示词");
     }
 
     #[test]
-    fn chat_message_text_reads_first_choice() {
-        let chat = json!({
-            "choices": [{ "message": { "role": "assistant", "content": "未完成\n理由：只说不做" } }]
-        });
+    fn nudge_judge_stream_text_concats_delta_content() {
+        let sse = "event: message\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"未完成\"}}]}\n\
+\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"\\n理由：只说不做\"}}]}\n\
+\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\
+\n\
+data: [DONE]\n\n";
         assert_eq!(
-            chat_message_text(&chat).as_deref(),
+            nudge_judge_stream_text(sse).as_deref(),
             Some("未完成\n理由：只说不做")
         );
-        assert_eq!(chat_message_text(&json!({ "choices": [] })), None);
-        assert_eq!(chat_message_text(&json!({})), None);
+    }
+
+    #[test]
+    fn nudge_judge_stream_text_ignores_noise_and_usage_chunks() {
+        // 空行 / 非 data 行 / 无 choices 的 usage 分片都应跳过、不中断拼接
+        let sse = "\n\
+event: message\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"已完成\"}}]}\n\
+data: {\"usage\":{\"total_tokens\":12}}\n\
+data: [DONE]";
+        assert_eq!(nudge_judge_stream_text(sse).as_deref(), Some("已完成"));
+    }
+
+    #[test]
+    fn nudge_judge_stream_text_empty_or_error_returns_none() {
+        assert_eq!(nudge_judge_stream_text(""), None);
+        assert_eq!(nudge_judge_stream_text("event: done\ndata: [DONE]"), None);
+        // 流内随附 error：整体判为解析失败
+        let sse = "data: {\"error\":{\"message\":\"boom\"}}\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"已完成\"}}]}\n";
+        assert_eq!(nudge_judge_stream_text(sse), None);
     }
 
     #[test]
@@ -6952,10 +7005,10 @@ mod integration_tests {
 
     // ---------- 口嗨自动续跑：脚本化上游与端到端用例 ----------
 
-    /// 脚本化上游响应：JSON 用于非流式（判定调用），SSE 分片用于流式。
+    /// 脚本化上游响应：SSE 分片用于流式（判定与正常回复均流式），
+    /// `SseDelayed` 模拟「首包很慢」的上游。
     #[derive(Clone)]
     enum ScriptedReply {
-        Json(Value),
         Sse(Vec<String>),
         /// 等待 `delay` 后一次性下发全部 `lines`：模拟「首包很慢」的上游（续跑轮会用到）。
         SseDelayed { lines: Vec<String>, delay: Duration },
@@ -6978,10 +7031,6 @@ mod integration_tests {
                     rec.lock().await.push(body);
                     let reply = queue.lock().await.pop_front();
                     match reply {
-                        Some(ScriptedReply::Json(value)) => axum::response::Response::builder()
-                            .header(header::CONTENT_TYPE, "application/json")
-                            .body(Body::from(value.to_string()))
-                            .unwrap(),
                         Some(ScriptedReply::Sse(lines)) => {
                             let chunks: Vec<Result<axum::body::Bytes, std::io::Error>> = lines
                                 .into_iter()
@@ -7061,14 +7110,9 @@ mod integration_tests {
         ]
     }
 
-    /// 判定调用的 JSON 回复（非流式）。
+    /// 判定调用的 SSE 流式回复：判定请求走流式（`stream: true`），mock 需回 SSE 分片。
     fn judge_reply(verdict: &str) -> ScriptedReply {
-        ScriptedReply::Json(json!({
-            "choices": [{
-                "message": { "role": "assistant", "content": verdict },
-                "finish_reason": "stop"
-            }]
-        }))
+        ScriptedReply::Sse(sse_text_reply(verdict))
     }
 
     /// 入站 Responses 请求体（JSON）：指定末条 user 文本，可选带一个工具声明。
@@ -7221,8 +7265,9 @@ mod integration_tests {
 
         let calls = rec.lock().await.clone();
         assert_eq!(calls.len(), 3, "应为：首轮 + 判定 + 续跑");
-        // 判定调用：非流式、无工具，提示词里带上用户请求与助手终局文本
-        assert_eq!(calls[1]["stream"], false);
+        // 判定调用：流式（绕开 OpenCode 免费档对非流式的拒绝）、无工具，
+        // 提示词里带上用户请求与助手终局文本
+        assert_eq!(calls[1]["stream"], true);
         assert!(
             calls[1]["tools"].is_null(),
             "判定调用不应带工具声明：{}",
