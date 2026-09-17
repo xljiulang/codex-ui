@@ -314,7 +314,7 @@
   color: var(--console-text);
 }
 .text-editor-preview .md {
-  max-width: 920px;
+  max-width: none;
 }
 .text-editor-status {
   display: flex;

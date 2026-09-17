@@ -164,7 +164,7 @@
   「代码格式化」覆盖全部已识别语言：JS/TS/JSON/JSONC/CSS/HTML/YAML/Markdown 走 Prettier 完整美化（可展开单行），
   XML/SVG 走自研语法树美化，Python/Go/Rust/C++/Java 等其余语言复用 CodeMirror 缩进规则重排（仅修正缩进）；
 - 格式化单次事务可撤销，语法错误 toast 提示；
-- `.md`/`.markdown` 文件支持**「预览/编辑」切换**；
+- `.md`/`.markdown` 文件支持**「预览/编辑」切换**，预览宽度随窗口自适应（不再受 920px 阅读上限约束）；
 
 #### 会话附件与拖拽
 
