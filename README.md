@@ -499,10 +499,11 @@
   （历史尾部先补一条本轮助手文本，再补提醒「【自动续跑】…必须实际调用工具完成剩余工作…如果该操作在更早的回合已经用工具执行过（例如已经 git 提交或推送过），不要重复执行，只需说明执行结果。」）
   并**再打一次上游，把第二轮的事件续在同一个 SSE 流**上
   ——工具调用照常下发给 codex，`response.completed` 只发一次，对 codex 与应用完全透明，注入的提醒**不会进入 codex 记录**（聊天里看不到任何伪造消息）。
-- **计划模式**下**连判定都不发，计划是否真的交付完全由代码判据给出**（模式怎么判定见下面两条）：
+- **计划模式**下**连判定都不发，本轮怎么收尾完全由代码判据给出**（模式怎么判定见下面两条）：
   - 终局文本含 `<proposed_plan>` → 视为计划已交付、直接收尾（nudge_skipped reason=plan_output mode=plan）；
-  - 不含 → 视为未交付，注入**计划专用提醒**并续跑，同样受 pass／streak 上限约束——不会再注入「必须动手」逼模型在计划模式里改代码。
-    提醒里**直接给出 `<proposed_plan>` / `</proposed_plan>` 骨架**（`# 计划标题` + 步骤项，并要求两个标签原样保留、各自独占一行、不要放进代码块）：弱模型常把计划写成普通 Markdown，而 codex 只在终局文本出现该包裹时才生成计划条目（应用里才有「计划已就绪」），骨架式提醒能显著提高交付率。
+  - 终局文本含 **`<cancelled_plan>放弃计划原因</cancelled_plan>`**（用户中途放弃计划的约定标签，提示词里教给模型）→ 视为计划话题已终结、直接收尾（nudge_skipped reason=plan_cancelled mode=plan）——不再催它给一份已被放弃的方案，**也不生成计划条目、不弹「计划已就绪」**（聊天里只是一句普通结论加一行可见标签；应用 Markdown 渲染会把尖括号转义成字面文本，不会被当成 HTML 吞掉）。判定与计划标签同口径（大小写不敏感 + 前缀匹配），计划标签优先；
+  - 两者都没有 → 视为未交付，注入**计划专用提醒**并续跑，同样受 pass／streak 上限约束——不会再注入「必须动手」逼模型在计划模式里改代码。
+    提醒里**直接给出 `<proposed_plan>` / `</proposed_plan>` 骨架**（`# 计划标题` + 步骤项，并要求这两个标签原样保留、各自独占一行、不要放进代码块），并约定用户已放弃计划时改用 `<cancelled_plan>…</cancelled_plan>` 收尾：弱模型常把计划写成普通 Markdown，而 codex 只在终局文本出现该包裹时才生成计划条目（应用里才有「计划已就绪」），骨架式提醒能显著提高交付率。
 - **模式判定优先取协议登记表**：`CodexServer` 把 `turn/start` / `thread/settings/update` 参数与 `thread/settings/updated` 通知里的 `collaborationMode.mode` 登记成「线程 id → 模式」，代理用入站请求头 `session-id`（= codex 线程 id，`ses_` 前缀自动剥离）查表——命中即**完全不做关键词扫描**，`mode` 一栏的 `mode_src=registry` 说明来自登记表；查不到（其它客户端、子代理线程等）才退回关键词判据，且判据取**最后一个**协作模式块的标题行（`mode_src=heuristic`）。登记表只存内存、上限 1024 条（超出整体清空，模式每轮 `turn/start` 都会重新登记）。
 - 关键词兜底判据（`mode_src=heuristic`）从协作模式块标签 `<collaboration_mode>` 之后取**第一个非空行**（codex 0.154 是 `# Plan Mode (Conversational)`，旧版 `# Collaboration Mode: Plan` 仍兼容），且**只认标题行**：默认模式文案的标题是 `# Collaboration Mode: Default`，正文第一句却写着「… for other modes (**e.g. Plan mode**) are no longer active.」——按子串匹配会把默认模式误判成计划模式（默认模式的正常编码回合就会被注入「请给出计划」）。
 - 为什么必须以最后一块为准：codex 会把**历次**协作模式块都留在请求历史里，切回默认模式后历史里仍有旧的 `<collaboration_mode># Plan Mode…</collaboration_mode>`——按「任一命中即计划模式」必然误判（实测某线程 codex 侧记为 `collaboration_mode_kind=default` 的回合，代理仍按 plan 分流并注入「请给出计划」）。
@@ -511,7 +512,7 @@
 - 诊断日志：`zen_proxy.request` 的 `mode=plan|default` 与 `mode_src=registry|heuristic`（本次识别出的协作模式及其来源，排查「计划模式仍发起判定」或「默认模式被当成计划模式」先看这两格）、
   `zen_proxy.nudge_judged`（verdict／回复字数／耗时／错误原因）、
   `zen_proxy.nudge_injected`（session／pass／streak／mode／助手字数）、
-  `zen_proxy.nudge_skipped`（原因：plan_output／title_task／上游错误/状态码/转发失败）、
+  `zen_proxy.nudge_skipped`（原因：plan_output／plan_cancelled／title_task／上游错误/状态码/转发失败）、
   `zen_proxy.nudge_limited`（reason=max_streak|max_passes + mode）；内容级诊断另开两份请求记录（call_id 带 `-judge<n>` / `-nudge<n>` 后缀）。
 - 未覆盖：不检测「调用过工具但没做对」的情况，也不回溯历史回合；判定期间这条流会静默最长 60 秒（不额外发 SSE 保活注释；codex 侧流空闲超时默认 300 秒，不会因此被掐断）。模式登记表不持久化，应用重启后第一个回合由 `turn/start` 重新登记。
 

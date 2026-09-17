@@ -88,7 +88,10 @@ const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何
 /// **必须带完整骨架**：弱模型经常只把计划写成普通 Markdown，而 codex 只在终局文本里出现
 /// `<proposed_plan>` 包裹时才生成计划条目（否则应用里没有「计划已就绪」）——所以提醒里直接
 /// 给出骨架，并明确标签要原样保留、各自独占一行、不要放进代码块。
-const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请继续：把完整方案写进下面这个结构里——两个标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n如果确实需要用户先确认信息，请明确提出问题。";
+/// 尾句另外约定「用户已取消这个计划」时的收尾标记 [`PLAN_CANCEL_MARKER`]：用户中途放弃计划
+/// （实测例子：「行，那不处理了」）时模型只会写普通正文，按「未交付」催办会把一份已被放弃的
+/// 完整方案重新逼出来；给出标记后模型可以一行收尾，代码识别到即直接收尾、不再续跑。
+const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请继续：把完整方案写进下面这个结构里——这两个标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n另有两条约定，只在这两种情况用，其它情况一律按上面的结构给计划：\n- 用户已经放弃这个计划（例如让你不要再处理、说不用改了、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <cancelled_plan>放弃计划原因</cancelled_plan> 收尾——两个标签原样保留，中间换成实际放弃原因。\n- 确实需要用户先确认信息：请明确提出问题。";
 /// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
 /// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
 const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
@@ -102,6 +105,16 @@ const PLAN_MODE_HEADING_MARKER_LEGACY: &str = "collaboration mode: plan";
 /// 计划产物的包裹标签（协议 `item/plan/delta` 与之对应）：**计划模式**下出现即视为
 /// 计划已交付（AI 判定不参与此判据）；默认模式不据此短路，仍交由 AI 判定。
 const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
+/// 计划模式下「用户已取消这个计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给模型，
+/// 教学形态是成对标签 `<cancelled_plan>放弃计划原因</cancelled_plan>`，与计划产物标签
+/// [`PLAN_OUTPUT_MARKER`] 同形：`<proposed_plan>` = 计划已交付、本标记 = 计划已取消）。
+/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;cancelled_plan&gt;…`），
+/// 不会被当成 HTML 吞掉。
+/// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**
+/// （聊天里只是一句普通结论加一行可见的标签，不弹「计划已就绪」）。
+/// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
+/// 等写法；计划标签判据优先于本判据。
+const PLAN_CANCEL_MARKER: &str = "<cancelled_plan";
 /// 协议登记表里承认的协作模式取值（与协议 `ModeKind` 一致）：其余取值一律不登记。
 const KNOWN_MODES: [&str; 2] = ["plan", "default"];
 /// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
@@ -311,6 +324,13 @@ fn resolve_nudge_mode(
 /// 「计划已交付」并直接收尾（代码判据，不调用 AI 判定）；默认模式不使用本判据。
 fn is_plan_deliverable(text: &str) -> bool {
     text.to_lowercase().contains(PLAN_OUTPUT_MARKER)
+}
+
+/// 终局文本是否带「用户已取消这个计划」标记（见 [`PLAN_CANCEL_MARKER`]）：**计划模式**下
+/// 命中即视为计划话题已终结并直接收尾——不再注入续跑提醒，也**不生成计划条目**
+/// （用户放弃后看到的就是模型那句普通结论加一行可见标签）；默认模式不使用本判据。
+fn is_plan_cancelled(text: &str) -> bool {
+    text.to_lowercase().contains(PLAN_CANCEL_MARKER)
 }
 
 /// 请求是否为应用发起的「会话标题生成」任务（后台临时线程）：末条 user 文本以提示词
@@ -2114,10 +2134,10 @@ async fn pump_stream(
 /// 流式：把 Zen 的 SSE data 行翻译为 responses 事件序列（text/event-stream）。
 ///
 /// 实际处理在 `run_stream_task`：读第一轮上游流，终局若命中「纯文本 + 无工具调用」就
-/// 走口嗨决策链——标题生成请求整轮放行；计划模式用代码判据（终局是否含计划标签）决定
-/// 是「已交付」还是注入 [`PLAN_NUDGE_TEXT`] 催计划；默认模式发一次后台 AI 判定，判为口嗨
-/// 则注入提醒再打一轮上游、把第二轮事件续在同一个响应流里（工具调用照常下发给 codex，
-/// 对 codex 透明），最后统一收尾。
+/// 走口嗨决策链——标题生成请求整轮放行；计划模式用代码判据（终局含计划标签即「已交付」、
+/// 含 [`PLAN_CANCEL_MARKER`] 即「用户已取消」，两者都直接收尾）决定是收尾还是注入
+/// [`PLAN_NUDGE_TEXT`] 催计划；默认模式发一次后台 AI 判定，判为口嗨则注入提醒再打一轮上游、
+/// 把第二轮事件续在同一个响应流里（工具调用照常下发给 codex，对 codex 透明），最后统一收尾。
 async fn proxy_stream_response(
     state: ProxyState,
     headers: HeaderMap,
@@ -2195,7 +2215,8 @@ async fn run_stream_task(
         .get("tools")
         .and_then(Value::as_array)
         .is_some_and(|tools| !tools.is_empty());
-    // 计划模式：口嗨判据完全由代码给（终局文本是否含计划标签），不调用 AI 判定。
+    // 计划模式：口嗨判据完全由代码给（终局文本是否含计划标签或「已取消计划」标记），
+    // 不调用 AI 判定。
     // 模式本身优先取协议登记表（`run_stream_task` 与 `handle_responses` 用的是同一个纯函数，
     // 两处结论必然一致），查不到才退回关键词兜底。
     let (plan_mode, _) = resolve_nudge_mode(&state, &headers, &req);
@@ -2259,8 +2280,9 @@ async fn run_stream_task(
         {
             break;
         }
-        // 计划模式：只用代码判据决定计划是否真的交付——终局带计划标签即已交付、直接收尾；
-        // 不带标签则按「未交付」催它给出计划（计划专用提醒，不调用 AI 判定）
+        // 计划模式：只用代码判据决定本轮怎么收尾——终局带计划标签即已交付、直接收尾；
+        // 带「已取消计划」标记则视为用户已放弃、同样直接收尾；两者都没有才按「未交付」
+        // 催它给出计划（计划专用提醒，不调用 AI 判定）
         let nudge_mode = if plan_mode { "plan" } else { "default" };
         if plan_mode && is_plan_deliverable(&pass_text) {
             log_at(
@@ -2269,6 +2291,21 @@ async fn run_stream_task(
                 "zen_proxy.nudge_skipped",
                 &[
                     ("reason", "plan_output".to_string()),
+                    ("pass", pass.to_string()),
+                    ("mode", nudge_mode.to_string()),
+                ],
+            );
+            break;
+        }
+        // 用户已取消这个计划（提醒里约定的标签）：计划话题已终结，直接收尾——
+        // 既不再催它给一份已被放弃的方案，也不消耗 streak、不触发后续 pass
+        if plan_mode && is_plan_cancelled(&pass_text) {
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_skipped",
+                &[
+                    ("reason", "plan_cancelled".to_string()),
                     ("pass", pass.to_string()),
                     ("mode", nudge_mode.to_string()),
                 ],
@@ -4441,6 +4478,27 @@ mod tests {
     }
 
     #[test]
+    fn is_plan_cancelled_matches_tag_marker() {
+        // 提醒里教的标签形态（用户中途放弃计划时的正确收尾）
+        assert!(is_plan_cancelled(
+            "好，那就不处理了。\n<cancelled_plan>用户说不用改了</cancelled_plan>"
+        ));
+        // 与 `<proposed_plan>` 同口径：大小写不敏感 + 前缀匹配，缺闭合标签也命中
+        assert!(is_plan_cancelled(
+            "<CANCELLED_PLAN>用户说不用改了</CANCELLED_PLAN>"
+        ));
+        assert!(is_plan_cancelled("<cancelled_plan>用户说不用改了"));
+        assert!(is_plan_cancelled("<cancelled_plan>"));
+        // 普通结论、空串、裸中文措辞与正常交付的计划都不算「已取消」
+        assert!(!is_plan_cancelled("我看完了代码，结论是不需要改动。"));
+        assert!(!is_plan_cancelled(""));
+        assert!(!is_plan_cancelled("用户已经放弃计划，所以不改了"));
+        assert!(!is_plan_cancelled(
+            "<proposed_plan>\n# 标题\n- 步骤 1\n</proposed_plan>"
+        ));
+    }
+
+    #[test]
     fn request_is_title_task_matches_app_prompt_prefix() {
         let title_req = |text: &str| {
             json!({
@@ -4529,6 +4587,15 @@ mod tests {
         assert!(
             PLAN_NUDGE_TEXT.contains("不要放进代码块"),
             "必须禁止把标签包进代码块：{PLAN_NUDGE_TEXT}"
+        );
+        // 用户中途放弃计划时的约定标记：提醒里教的是成对标签，代码按前缀判据识别
+        assert!(
+            PLAN_NUDGE_TEXT.contains(&format!("{PLAN_CANCEL_MARKER}>")),
+            "必须与模型约定「已取消计划」标签，否则用户放弃计划后会被逼重给方案：{PLAN_NUDGE_TEXT}"
+        );
+        assert!(
+            is_plan_cancelled(PLAN_NUDGE_TEXT),
+            "提醒文本自身就带标记，前缀判据必须命中：{PLAN_NUDGE_TEXT}"
         );
         assert!(!PLAN_NUDGE_TEXT.contains("必须实际调用工具"));
 
@@ -7313,6 +7380,97 @@ mod integration_tests {
         assert!(
             !joined.contains("event=zen_proxy.nudge_judged"),
             "计划模式不应有 AI 判定：{joined}"
+        );
+    }
+
+    /// 用户中途放弃计划（实测例子：「行，那不处理了」）：首轮模型只写普通正文 → 催办一轮，
+    /// 续跑轮按约定用 `<cancelled_plan>` 标签收尾 → 代码判据直接收尾，不再注入第 3 轮、
+    /// 不消耗 streak，也不会把一份已被放弃的完整方案重新逼出来。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_plan_mode_stops_when_plan_cancelled() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply("好，那就保持现状，这一项先不改了。")),
+            ScriptedReply::Sse(sse_text_reply(
+                "明白，那就不处理了。\n<cancelled_plan>用户说不用改了</cancelled_plan>",
+            )),
+            // 第 3 轮不该发生：真发生时脚本会回空话，下面的调用数断言会失败
+            ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_mode(true, &plan_mode_text()),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        let calls = rec.lock().await.clone();
+        assert_eq!(
+            calls.len(),
+            2,
+            "「已取消计划」应当一轮催办后就收尾，不再注入：{calls:?}"
+        );
+        // 催办轮注入的提醒里带上了约定标签
+        let messages = calls[1]["messages"].as_array().unwrap();
+        let injected = messages.last().unwrap()["content"].as_str().unwrap();
+        assert!(injected.contains("<cancelled_plan>"), "{injected}");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped")
+                && joined.contains("reason=plan_cancelled")
+                && joined.contains("mode=plan"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_limited"),
+            "已取消分支不该走到 pass／streak 上限：{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_judged"),
+            "计划模式不应有 AI 判定：{joined}"
+        );
+    }
+
+    /// 模型首轮就已按约定给出取消标签（早前回合被催过）：一次调用就收尾，连催办都不发。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_plan_mode_skips_injection_when_already_cancelled() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply(
+                "那就不做改动了。\n<cancelled_plan>用户说不用改了</cancelled_plan>",
+            )),
+            ScriptedReply::Sse(sse_text_reply("这一轮不应该被调用")),
+        ])
+        .await;
+
+        let body = run_nudge_probe(
+            &upstream,
+            log,
+            nudge_probe_with_mode(true, &plan_mode_text()),
+        )
+        .await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert_eq!(
+            rec.lock().await.len(),
+            1,
+            "首轮即带取消标签时不应再打上游"
+        );
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("event=zen_proxy.nudge_skipped")
+                && joined.contains("reason=plan_cancelled")
+                && joined.contains("pass=1"),
+            "{joined}"
+        );
+        assert!(
+            !joined.contains("event=zen_proxy.nudge_injected"),
+            "已取消的计划不应再注入催办：{joined}"
         );
     }
 
