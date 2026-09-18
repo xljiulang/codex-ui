@@ -86,20 +86,24 @@ const FORWARD_MAX_ATTEMPTS: usize = 3;
 /// 完全等价，已删除——只留这一个旋钮。
 const NUDGE_MAX_INJECTIONS: usize = 4;
 /// 注入给上游的续跑提醒。只出现在发给上游的历史里，不会进入 codex 自己的记录，
-/// 因此应用聊天里看不到这条消息（模型按提醒回出的 [`TASK_COMPLETED_MARKER`] 标签是模型
-/// 自己的输出，会留在聊天里、以可见字面文本显示）。
+/// 因此应用聊天里看不到这条消息（模型按提醒回出的 [`TASK_COMPLETED_MARKER`] 标签会被
+/// [`TagStripper`] 整段剥离，见该类型文档）。
 ///
-/// **二选一强收尾**：默认模式没有独立判定请求可用了（Zen 免费层会拒那条后台
+/// **两条路径强收尾**：默认模式没有独立判定请求可用了（Zen 免费层会拒那条后台
 /// `chat/completions`），所以判定搬进原对话——被催办时模型只有两条路：
-/// ① 还有活没做完 → 必须实际调用工具继续做；
-/// ② 任务确实已经结束 → 用一行 [`TASK_COMPLETED_MARKER`] 成对标签宣告结束，
-/// 代理据此（纯代码前缀判据，见 [`is_task_completed`]）直接收尾。
+/// ① 仍有可执行的剩余工作 → 必须实际调用工具完成，**不得用文字描述、计划或承诺代替工具调用**，
+/// 也不得直接甩出完成标签逃避执行；
+/// ② 任务已结束、无需继续或无法继续 → 不复述上一条回复正文、不重复此前已执行过的工具操作，
+/// 用一行 [`TASK_COMPLETED_MARKER`] 成对标签宣告结束，代理据此（纯代码前缀判据，
+/// 见 [`is_task_completed`]）直接收尾。
 ///
-/// 第二句显式排除「重复执行已完成的操作」——操作型请求（如「请 git 提交并推送」）若在更早
-/// 回合已经做完，被催办也不能让模型再提交/再推送一次；末句给出标签的**结构不变量**
-/// （成对闭合、独占一行、不换行、本轮最多一个、不进代码块），未来的代理层过滤/分桶只依赖
-/// 这些结构与标签前缀，不依赖载荷词汇（载荷保持自由文本）。
-const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何工具就结束了回合。请立刻走下面两条路之一，不要只写正文，也不要写「接下来我会…／马上做…」这类将来时承诺：\n- 还有工作没做完：必须实际调用工具把剩余工作做完；做完后按下面第二条收尾。\n- 任务确实已经结束：不要重复上一条回复的正文，也不要在更早的回合已经用工具执行过的操作上重复执行（例如已经 git 提交或推送过）——用一行 <zen_task_completed>已完成</zen_task_completed> 收尾。标签里只写这四个词之一：已完成／无需改动／已放弃／做不下去，不要写别的说明；标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签。";
+/// 第②条显式排除「重复执行已完成的操作」——操作型请求（如「请 git 提交并推送」）若在更早
+/// 回合已经做完，被催办也不能让模型再提交/再推送一次；并且要求**本轮只回这一行标签**
+/// （「标签外不得有任何其他字符」）——上一轮正文已经展示过，收尾轮再补正文只会是噪音。
+/// 末句给出标签的**结构不变量**（成对闭合、独占一行、不换行、本轮最多一个、不进代码块、
+/// 不改写标签），未来的代理层过滤/分桶只依赖这些结构与标签前缀，不依赖载荷词汇
+/// （载荷保持固定短词，只服务日志阅读）。
+const NUDGE_TEXT: &str = "【自动续跑】\n你上一条回复未调用任何工具就结束了回合。现在必须立即从以下两条路径中选择并执行。\n\n1. 仍有可执行的剩余工作：\n- 必须实际调用工具完成剩余工作；不得用文字描述、计划或承诺代替工具调用。\n- 只要还有可执行工作，就不得直接输出完成标签来逃避执行。\n- 完成剩余工作后，按第 2 条标签格式收尾。\n\n2. 任务已结束、无需继续或无法继续：\n- 不复述上一条回复正文。\n- 不重复此前已执行过的工具操作（例如已 git commit/push 的，不得再次提交/推送）。\n- 仅输出一行闭合标签：\n<zen_task_completed>已完成</zen_task_completed>\n其中“已完成”必须替换为以下四者之一：已完成、无需改动、已放弃、做不下去。\n- 标签必须成对闭合、独占一行、不换行；本轮最多一个；不得放入代码块；不得改写标签；标签外不得有任何其他字符。";
 /// 计划模式专用的续跑提醒：计划模式的交付物是「计划」而不是「动手改代码」，
 /// 所以不能沿用 [`NUDGE_TEXT`] 的执行口径（否则会把模型逼去在计划模式里改代码）。
 /// **排除式三选一**：被催办时先判两种「不需要给方案」的情况——用户已放弃
@@ -107,10 +111,11 @@ const NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有调用任何
 /// （[`PLAN_UNACHIEVABLE_MARKER`]，如事实问题/纯查询/闲聊），两者都不成立才必须把完整方案
 /// 落进 `<proposed_plan>` 骨架。骨架必须带完整形态：弱模型经常只把计划写成普通 Markdown，
 /// 而 codex 只在终局文本里出现 `<proposed_plan>` 包裹时才生成计划条目（否则应用里没有
-/// 「计划已就绪」），所以提醒里直接给出骨架，并要求标签原样保留、各自独占一行、不要放进代码块。
+/// 「计划已就绪」），所以提醒里直接给出骨架，并要求标签原样保留、成对闭合、各自独占一行、
+/// 不换行、本轮最多只写一个、不要放进代码块、不要改写标签。
 /// 「计划已被认可、无需改动、保持现状」不属于「无法/无需计划」：这同样是一个评估结论，
 /// 应把该结论或重申的原计划写进 `<proposed_plan>` 收尾，而不是逃到非方案标签。
-const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。标签必须原样保留、各自独占一行，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <zen_plan_cancelled>已放弃</zen_plan_cancelled> 收尾（标签里只写「已放弃」这三个字，不要写别的说明）。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <zen_plan_unachievable>无法计划</zen_plan_unachievable> 收尾（标签里只写「无法计划」这四个字，不要写别的说明）。\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
+const PLAN_NUDGE_TEXT: &str = "【自动续跑】你上一条回复没有交付计划就结束了回合。请先判断下面两种不需要给方案的情况是否成立，都不成立时才必须给出完整方案。\n\n标签必须原样保留、成对闭合、各自独占一行、不换行、本轮最多只写一个，不要放进代码块，不要改写标签，也不要只写正文：\n- 用户已经放弃这个计划（例如让你不要再处理、先不做了）：不要重新给方案，也不要只写正文，直接用一行 <zen_plan_cancelled>已放弃</zen_plan_cancelled> 收尾（标签里只写「已放弃」这三个字，不要写别的说明）。\n- 问题本身无法或无需产出实现计划（例如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划这种交付物）：不要先回答正文，只用一行 <zen_plan_unachievable>无法计划</zen_plan_unachievable> 收尾（标签里只写「无法计划」这四个字，不要写别的说明）。\n\n以上两种情况都不成立时，必须想办法把完整方案写进下面这个结构里：\n\n<proposed_plan>\n# 计划标题\n- 步骤 1\n- 步骤 2\n</proposed_plan>\n\n即便你的结论是无需改动、保持现状或原有计划已经可以，也要把该结论（或重申原计划）写进这个结构里收尾。";
 /// 计划模式开发者消息的开头标签：codex 把当前协作模式拼进 developer 条目（形如
 /// `…<collaboration_mode># Plan Mode (Conversational)\r\n…</collaboration_mode>`）。
 const COLLABORATION_MODE_TAG: &str = "<collaboration_mode>";
@@ -125,31 +130,30 @@ const PLAN_MODE_HEADING_MARKER_LEGACY: &str = "collaboration mode: plan";
 /// 计划已交付（全程纯代码判据）；默认模式不据此短路，也没有别的判定可用——默认模式的收尾
 /// 靠模型自己回出 [`TASK_COMPLETED_MARKER`]。
 const PLAN_OUTPUT_MARKER: &str = "<proposed_plan";
-/// 计划模式下「用户已取消这个计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给模型，
-/// 教学形态是成对标签 `<zen_plan_cancelled>放弃计划原因</zen_plan_cancelled>`，与计划产物
-/// 标签 [`PLAN_OUTPUT_MARKER`] 同形：`<proposed_plan>` = 计划已交付、本标记 = 计划已取消）。
-/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_plan_cancelled&gt;…`），
-/// 不会被当成 HTML 吞掉。
-/// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**
-/// （聊天里只是一句普通结论加一行可见的标签，不弹「计划已就绪」）。
+/// 计划模式下「用户已取消这个计划」的约定标记（由 [`PLAN_MODE_CONTRACT_TEXT`] 与
+/// [`PLAN_NUDGE_TEXT`] 教给模型，教学形态是成对标签 + 固定短词
+/// `<zen_plan_cancelled>已放弃</zen_plan_cancelled>`，与计划产物标签 [`PLAN_OUTPUT_MARKER`]
+/// 同形：`<proposed_plan>` = 计划已交付、本标记 = 计划已取消）。标签由 [`TagStripper`] 整段剥离，
+/// 不进聊天、不进 codex 会话（载荷只在日志 `nudge_skipped 标签内容=` 里回看）。
+/// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**、
+/// 不弹「计划已就绪」。
 /// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
 /// 等写法；计划标签判据优先于本判据。**不兼容旧的无前缀写法**（`<cancelled_plan>`）。
 const PLAN_CANCEL_MARKER: &str = "<zen_plan_cancelled";
-/// 计划模式下「问题本身无法或无需产出实现计划」的约定标记（由 [`PLAN_NUDGE_TEXT`] 教给
-/// 模型，教学形态是成对标签 `<zen_plan_unachievable>原因</zen_plan_unachievable>`，与
-/// [`PLAN_OUTPUT_MARKER`] / [`PLAN_CANCEL_MARKER`] 同形）：`<proposed_plan>` = 计划已交付、
-/// `<zen_plan_cancelled>` = 计划已取消、本标记 = 无法/无需计划（如「1+1=？」这类事实问题、
-/// 纯查询或闲聊，本就不产出计划这种交付物）。「计划已被认可、无需改动、保持现状」**不属于**
-/// 本标记：那是评估结论，应写进 `<proposed_plan>` 收尾，不逃到非方案标签。
-/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_plan_unachievable&gt;…`），
-/// 不会被当成 HTML 吞掉。
+/// 计划模式下「问题本身无法或无需产出实现计划」的约定标记（由 [`PLAN_MODE_CONTRACT_TEXT`] 与
+/// [`PLAN_NUDGE_TEXT`] 教给模型，教学形态是成对标签 + 固定短词
+/// `<zen_plan_unachievable>无法计划</zen_plan_unachievable>`，与 [`PLAN_OUTPUT_MARKER`] /
+/// [`PLAN_CANCEL_MARKER`] 同形）：`<proposed_plan>` = 计划已交付、`<zen_plan_cancelled>` =
+/// 计划已取消、本标记 = 无法/无需计划（如「1+1=？」这类事实问题、纯查询或闲聊，本就不产出计划
+/// 这种交付物）。「计划已被认可、无需改动、保持现状」**不属于**本标记：那是评估结论，
+/// 应写进 `<proposed_plan>` 收尾，不逃到非方案标签。标签同样由 [`TagStripper`] 剥离。
 /// **计划模式**下终局文本出现即视为计划话题已终结、直接收尾：不再续跑，也**不生成计划条目**。
 /// 判定与 [`PLAN_OUTPUT_MARKER`] 同口径（大小写不敏感 + 前缀匹配）：兼容大写、缺闭合标签
 /// 等写法；计划标签判据优先于本判据。**不兼容旧的无前缀写法**（`<unachievable_plan>`）。
 const PLAN_UNACHIEVABLE_MARKER: &str = "<zen_plan_unachievable";
 /// **默认模式**下「任务已经结束」的约定标记（由首轮教学的 [`DEFAULT_MODE_CONTRACT_TEXT`] 与
-/// [`NUDGE_TEXT`] 教给模型，教学形态是成对标签
-/// `<zen_task_completed>一句话结论</zen_task_completed>`）：默认模式的判定搬进原对话——
+/// [`NUDGE_TEXT`] 教给模型，教学形态是成对标签 + 固定短词
+/// `<zen_task_completed>已完成</zen_task_completed>`）：默认模式的判定搬进原对话——
 /// 代理不再发独立的判定请求（Zen 免费层会以 `FreeTierError: OpenCode's free tier can only be
 /// used from within OpenCode` 拒绝那条后台 `chat/completions`），只看模型自己在终局文本里回了
 /// 什么。
@@ -163,13 +167,17 @@ const PLAN_UNACHIEVABLE_MARKER: &str = "<zen_plan_unachievable";
 /// （`<task_completed>`）。
 ///
 /// 结构不变量（写进 [`NUDGE_TEXT`]，未来代理层过滤/分桶只依赖这些）：成对闭合、独占一行、
-/// 不换行、一整轮最多一个、不放进代码块。有了这些，过滤 = 删掉整段闭合标签（缺闭合时删到该行
-/// 行尾），与载荷内容无关；分桶 = 对载荷首词做软映射（已完成/无需改动/已放弃/无法继续 → 枚举），
-/// 映射不到落 `unknown`。若将来真需要机器可读的强枚举，优先加**第二个标签名**（沿用 plan 系
-/// 「词表在标签名里、载荷自由」的风格），而不是把枚举塞进载荷。
+/// 不换行、一整轮最多一个、不放进代码块、不改写标签。催办轮（上一轮正文已经展示过）额外要求
+/// 「标签外不得有任何其他字符」——收尾轮只回这一行标签；首轮教学契约不写这一条，因为它会把
+/// 模型的结论正文一起禁掉（契约只要求「标签独占一行、该行不再有别的字符、正文写在标签之前」）。
+/// 有了这些结构，过滤 = 删掉整段闭合标签（缺闭合时删到该行行尾），与载荷内容无关；分桶 =
+/// 对载荷首词做软映射（已完成/无需改动/已放弃/无法继续 → 枚举），映射不到落 `unknown`。
+/// 若将来真需要机器可读的强枚举，优先加**第二个标签名**（沿用 plan 系「词表在标签名里、
+/// 载荷自由」的风格），而不是把枚举塞进载荷。
 ///
-/// 应用侧 Markdown 渲染会把尖括号转义成可见字面文本（`&lt;zen_task_completed&gt;…`），不会被
-/// 当成 HTML 吞掉。默认模式下终局文本出现即视为任务已终结、直接收尾；计划模式不使用本判据。
+/// 标签**不会进应用**：模型回出的标签由 [`TagStripper`] 整段剥离（载荷只在日志
+/// `nudge_skipped 标签内容=` 里回看），标签之前的正文原样保留。默认模式下终局文本出现即视为
+/// 任务已终结、直接收尾；计划模式不使用本判据。
 const TASK_COMPLETED_MARKER: &str = "<zen_task_completed";
 /// 三个自研标签的**闭标签**：剥离时按「开标签 → 对应闭标签」的结构剪掉整段，
 /// 载荷写什么、是不是固定短词都不参与匹配（见 [`TagStripper`]）。
@@ -203,15 +211,17 @@ const TITLE_TASK_PREFIX: &str = "给下面用户消息生成一个不超过 30 �
 /// 约定收尾——守约定的模型首轮即带回 [`TASK_COMPLETED_MARKER`]，那条「纯文本 + 零工具」终局
 /// 就不必再多打一轮上游换标签（催办提醒仍保留为第二道，见 [`NUDGE_TEXT`]）。
 /// 与提醒的关系：措辞可以不同，但标签字面量与结构不变量必须一致（成对闭合、独占一行、不换行、
-/// 本轮最多一个、不进代码块）——单测对两者都做断言，防半改。
+/// 本轮最多一个、不进代码块、不改写标签）——单测对两者都做断言，防半改。**只有催办提醒**才写
+/// 「标签外不得有任何其他字符」：契约必须让模型照常输出结论正文，只要求收尾标签自成一行、
+/// 该行不再有别的字符（正文写在标签之前）。
 /// 准入见 [`contract_injection_eligible`]：只给「流式 + 声明了工具 + 非会话标题线程」的请求
 /// 注入；非流式没有催办路径可消费，标题线程只产出标题，压缩/摘要类后台请求也通常不带工具。
-const DEFAULT_MODE_CONTRACT_TEXT: &str = "【回合收尾约定】当你结束回合、且本轮没有调用任何工具时：任务已全部完成就用一行 <zen_task_completed>已完成</zen_task_completed> 收尾——标签里只写这四个词之一：已完成／无需改动／已放弃／做不下去，不要写别的说明（成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块）；还有没做完的工作必须实际调用工具继续做，不要只写「接下来我会…」这类承诺；不要重复执行更早回合已经用工具做过的操作。";
+const DEFAULT_MODE_CONTRACT_TEXT: &str = "【回合收尾约定】当你结束回合、且本轮没有调用任何工具时：任务已全部完成就把结论写在正文里，然后用一行 <zen_task_completed>已完成</zen_task_completed> 收尾——标签里只写这四个词之一：已完成／无需改动／已放弃／做不下去，不要写别的说明；标签必须成对闭合、独占一行、不换行；本轮最多一个；不得放入代码块；不得改写标签；标签那一行不得再有任何其他字符（结论正文写在标签之前）。还有没做完的工作必须实际调用工具继续做，不要只写「接下来我会…」这类承诺；不要重复执行更早回合已经用工具做过的操作。";
 /// **首轮教学**（计划模式）：只前置两个「不需要给方案」的出口标签，不前置「必须给完整方案」——
 /// 计划模式的正常形态是 chat your way，强制口径留在 [`PLAN_NUDGE_TEXT`] 里，避免把中间闲聊
 /// 回合逼出假方案。边界（「无需改动、保持现状、原计划已认可」属于评估结论、要写进
 /// `<proposed_plan>`、不算 unachievable）必须写在这里，否则会重现 2026-09-18 那次误逃。
-const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户已放弃这个计划（让你不要再处理、先不做了），用一行 <zen_plan_cancelled>已放弃</zen_plan_cancelled> 收尾（标签里只写「已放弃」，不要写别的说明）；若问题本身无法或无需产出实现计划（事实问题、纯查询、闲聊），用一行 <zen_plan_unachievable>无法计划</zen_plan_unachievable> 收尾（标签里只写「无法计划」，不要写别的说明）；其余情况照常把完整方案写进 <proposed_plan>（「无需改动、保持现状、原计划已认可」属于评估结论，要写进 <proposed_plan>，不算 unachievable）。这两个标签必须成对闭合、独占一行、不换行、本轮最多只写一个，不要放进代码块。";
+const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户已放弃这个计划（让你不要再处理、先不做了），用一行 <zen_plan_cancelled>已放弃</zen_plan_cancelled> 收尾（标签里只写「已放弃」，不要写别的说明）；若问题本身无法或无需产出实现计划（事实问题、纯查询、闲聊），用一行 <zen_plan_unachievable>无法计划</zen_plan_unachievable> 收尾（标签里只写「无法计划」，不要写别的说明）；其余情况照常把完整方案写进 <proposed_plan>（「无需改动、保持现状、原计划已认可」属于评估结论，要写进 <proposed_plan>，不算 unachievable）。这两个出口标签必须成对闭合、独占一行、不换行；本轮最多一个；不得放入代码块；不得改写标签；标签那一行不得再有任何其他字符。";
 
 /// 「线程 id → 协作模式」协议登记表（内存态，进程内共享）：由 app-server 侧的真实来源
 /// （`turn/start` / `thread/settings/update` 的参数、`thread/settings/updated` 通知）更新，
@@ -371,14 +381,16 @@ fn is_plan_deliverable(text: &str) -> bool {
 
 /// 终局文本是否带「用户已取消这个计划」标记（见 [`PLAN_CANCEL_MARKER`]）：**计划模式**下
 /// 命中即视为计划话题已终结并直接收尾——不再注入续跑提醒，也**不生成计划条目**
-/// （用户放弃后看到的就是模型那句普通结论加一行可见标签）；默认模式不使用本判据。
+/// （用户放弃后看到的就是模型那句普通结论，标签本身被 [`TagStripper`] 剥离）；
+/// 默认模式不使用本判据。
 fn is_plan_cancelled(text: &str) -> bool {
     text.to_lowercase().contains(PLAN_CANCEL_MARKER)
 }
 
 /// 终局文本是否带「问题无法或无需产出实现计划」标记（见 [`PLAN_UNACHIEVABLE_MARKER`]）：
 /// **计划模式**下命中即视为计划话题已终结并直接收尾——不再注入续跑提醒，也**不生成计划条目**
-/// （例如「1+1=？」这类事实问题，聊天里就是模型那句结论加一行可见标签）；默认模式不使用本判据。
+/// （例如「1+1=？」这类事实问题：正文已在上一轮给出，催办轮按约定只回标签，标签由
+/// [`TagStripper`] 剥离）；默认模式不使用本判据。
 fn is_plan_unachievable(text: &str) -> bool {
     text.to_lowercase().contains(PLAN_UNACHIEVABLE_MARKER)
 }
@@ -4883,10 +4895,15 @@ mod tests {
         assert_eq!(input[2]["content"][0]["type"], "input_text");
         assert_eq!(input[2]["content"][0]["text"], NUDGE_TEXT);
 
-        // 默认模式提醒：二选一（继续干 / 用标签宣告结束），并教出成对标签
+        // 默认模式提醒：两条路径（继续干 / 用标签宣告结束），并教出成对标签
         assert!(
             NUDGE_TEXT.contains("必须实际调用工具"),
             "必须保留执行口径，否则弱模型继续只写承诺：{NUDGE_TEXT}"
+        );
+        assert!(
+            NUDGE_TEXT.contains("不得用文字描述、计划或承诺代替工具调用")
+                && NUDGE_TEXT.contains("就不得直接输出完成标签来逃避执行"),
+            "必须堵住「只写承诺」与「提前甩完成标签」两条逃避路径：{NUDGE_TEXT}"
         );
         assert!(
             NUDGE_TEXT.contains(&format!("{TASK_COMPLETED_MARKER}>")),
@@ -4897,11 +4914,23 @@ mod tests {
             "必须给出闭合标签，否则弱模型只写正文：{NUDGE_TEXT}"
         );
         assert!(
+            NUDGE_TEXT.contains("仅输出一行闭合标签"),
+            "收尾轮必须是「只回这一行标签」：{NUDGE_TEXT}"
+        );
+        assert!(
             is_task_completed(NUDGE_TEXT),
             "提醒文本自身就带标记，前缀判据必须命中：{NUDGE_TEXT}"
         );
         // 结构不变量：未来的代理层过滤/分桶只依赖这些（与载荷词汇无关）
-        for needle in ["成对闭合", "独占一行", "不换行", "本轮最多只写一个", "不要放进代码块"] {
+        for needle in [
+            "成对闭合",
+            "独占一行",
+            "不换行",
+            "本轮最多一个",
+            "不得放入代码块",
+            "不得改写标签",
+            "标签外不得有任何其他字符",
+        ] {
             assert!(
                 NUDGE_TEXT.contains(needle),
                 "提醒必须写明标签结构约定「{needle}」：{NUDGE_TEXT}"
@@ -4925,6 +4954,13 @@ mod tests {
             PLAN_NUDGE_TEXT.contains("不要放进代码块"),
             "必须禁止把标签包进代码块：{PLAN_NUDGE_TEXT}"
         );
+        // 结构不变量（计划模式提醒沿用附件原文措辞，与默认提醒同义）
+        for needle in ["成对闭合", "各自独占一行", "不换行", "本轮最多只写一个", "不要改写标签"] {
+            assert!(
+                PLAN_NUDGE_TEXT.contains(needle),
+                "计划提醒必须写明标签结构约定「{needle}」：{PLAN_NUDGE_TEXT}"
+            );
+        }
         // 用户中途放弃计划时的约定标记：提醒里教的是成对标签，代码按前缀判据识别
         assert!(
             PLAN_NUDGE_TEXT.contains(&format!("{PLAN_CANCEL_MARKER}>")),
@@ -4986,8 +5022,9 @@ mod tests {
             "成对闭合",
             "独占一行",
             "不换行",
-            "本轮最多只写一个",
-            "不要放进代码块",
+            "本轮最多一个",
+            "不得放入代码块",
+            "不得改写标签",
         ] {
             assert!(
                 DEFAULT_MODE_CONTRACT_TEXT.contains(needle),
@@ -4996,6 +5033,22 @@ mod tests {
             assert!(
                 PLAN_MODE_CONTRACT_TEXT.contains(needle),
                 "计划模式契约缺少结构约定「{needle}」：{PLAN_MODE_CONTRACT_TEXT}"
+            );
+        }
+        // 契约必须让模型照常输出结论正文：只有催办提醒（上一轮正文已展示）才要求
+        // 「标签外不得有任何其他字符」，契约只要求收尾标签独占一行、正文写在标签之前
+        assert!(
+            DEFAULT_MODE_CONTRACT_TEXT.contains("结论正文写在标签之前"),
+            "契约不能让模型为了回标签而丢掉结论正文：{DEFAULT_MODE_CONTRACT_TEXT}"
+        );
+        for text in [DEFAULT_MODE_CONTRACT_TEXT, PLAN_MODE_CONTRACT_TEXT] {
+            assert!(
+                !text.contains("标签外不得有任何其他字符"),
+                "契约不得照搬催办轮的「标签外不得有任何其他字符」（会把正文一起禁掉）：{text}"
+            );
+            assert!(
+                text.contains("标签那一行不得再有任何其他字符"),
+                "契约要写清「标签独占一行、该行不再有别的字符」：{text}"
             );
         }
         // 计划模式契约：两个出口标签 + 边界（不算 unachievable 的评估结论要走 proposed_plan）
@@ -5202,11 +5255,18 @@ mod tests {
             for word in ["已完成", "无需改动", "已放弃", "做不下去"] {
                 assert!(text.contains(word), "缺少固定词「{word}」：{text}");
             }
-            assert!(
-                text.contains("不要写别的说明"),
-                "必须禁止标签里写长说明（省 token）：{text}"
-            );
         }
+        // 默认模式的**催办提醒**改用「只输出一行标签 + 固定词替换表」的写法，
+        // 「不要写别的说明」只在首轮教学契约里（提醒靠「标签外不得有任何其他字符」兜住）
+        assert!(
+            NUDGE_TEXT.contains("仅输出一行闭合标签")
+                && NUDGE_TEXT.contains("必须替换为以下四者之一"),
+            "默认提醒必须教出「只回一行标签 + 四个固定词」：{NUDGE_TEXT}"
+        );
+        assert!(
+            DEFAULT_MODE_CONTRACT_TEXT.contains("不要写别的说明"),
+            "契约必须禁止标签里写长说明（省 token）：{DEFAULT_MODE_CONTRACT_TEXT}"
+        );
         for text in [PLAN_NUDGE_TEXT, PLAN_MODE_CONTRACT_TEXT] {
             assert!(
                 text.contains("<zen_plan_cancelled>已放弃</zen_plan_cancelled>"),
@@ -5215,6 +5275,10 @@ mod tests {
             assert!(
                 text.contains("<zen_plan_unachievable>无法计划</zen_plan_unachievable>"),
                 "计划模式教学应给出固定短词：{text}"
+            );
+            assert!(
+                text.contains("不要写别的说明"),
+                "计划模式教学必须禁止标签里写长说明（省 token）：{text}"
             );
         }
     }
@@ -8696,6 +8760,59 @@ mod integration_tests {
         assert!(
             joined.contains("标签内容=已给方案"),
             "剥离后的载荷要进日志：{joined}"
+        );
+    }
+
+    /// 催办轮按「标签外不得有任何其他字符」收尾：续跑轮只回一行标签，
+    /// 下发给 codex 的可见文本不新增任何字符（上一轮正文已经展示过，再补就是噪音）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn nudge_tag_only_continuation_keeps_stream_valid() {
+        const FIRST_PASS: &str = "先给个说明，接下来我再动手。";
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            // 首轮典型口嗨：纯文本 + 零工具调用 + 无收尾标签 → 触发催办
+            ScriptedReply::Sse(sse_text_reply(FIRST_PASS)),
+            // 催办轮严格照约定收尾：整条回复只有这一行标签
+            completion_reply("已完成"),
+        ])
+        .await;
+
+        let body = run_nudge_probe(&upstream, log, nudge_probe(true)).await;
+
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+        assert!(
+            !body.to_lowercase().contains("<zen_"),
+            "标签不得下发到 codex：{body}"
+        );
+        // 收集下发的可见文本（output_text.done 的 text）：只有首轮那一句，续跑轮为空
+        let visible: Vec<String> = body
+            .split("\n\n")
+            .filter(|block| block.starts_with("event: response.output_text.done"))
+            .filter_map(|block| block.lines().nth(1))
+            .filter_map(|data| {
+                let payload: Value =
+                    serde_json::from_str(data.trim_start_matches("data:").trim()).ok()?;
+                payload["text"].as_str().map(str::to_string)
+            })
+            .collect();
+        assert!(!visible.is_empty(), "应有 output_text.done：{body}");
+        assert_eq!(
+            visible.concat(),
+            FIRST_PASS,
+            "续跑轮不得新增任何可见字符：{visible:?}"
+        );
+
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 2, "应为：首轮 + 催办轮：{calls:?}");
+        let joined = read_session_log(&dir);
+        assert!(
+            joined.contains("原因=task_completed") && joined.contains("模式=default"),
+            "{joined}"
+        );
+        assert!(
+            joined.contains("标签内容=已完成"),
+            "被剥离的标签载荷要进日志：{joined}"
         );
     }
 
