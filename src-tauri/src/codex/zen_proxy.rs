@@ -40,7 +40,9 @@ const ZEN_REQUIRED_TOOL_NAMES: [&str; 6] = ["bash", "edit", "glob", "grep", "rea
 /// 上述假工具的描述：门禁只看名字，这段文案负责劝模型别真调用。
 const ZEN_FAKE_TOOL_DESCRIPTION: &str = "这是弃用的工具，请勿调用";
 /// 门禁要求的 `max_tokens`（与 `messages` 同级）：入站请求没有自己的输出预算时补上这个值。
-const ZEN_MAX_TOKENS: u64 = 1_000_000;
+/// **只对 Zen 上游生效**（与 [`ZEN_REQUIRED_TOOL_NAMES`] 同受 `zen_body_patch` 约束，
+/// 判定见 [`is_zen_upstream`]）。
+const ZEN_MAX_TOKENS: u64 = 32_000;
 /// 请求上游时固定的 User-Agent（与 opencode 官方客户端一致）。
 const ZEN_USER_AGENT: &str =
     "opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24";
@@ -1783,8 +1785,10 @@ async fn forward(
     // 反查：把实发的 ses_* 映射回 codex 会话 id，落进内容日志便于人工对照
     let session_codex = state.session_map.codex_of(&session);
     let mut optional = optional_fields(req, want_stream);
-    // Zen 免费层的请求体门禁：补 `max_tokens`（与 messages 同级）。放进可选字段列表是为了
-    // 上游指名拒绝它能走既有「摘掉后重试一次」的降级（非 Zen 上游不加）。
+    // Zen 免费层的请求体门禁之一：补 `max_tokens`（与 messages 同级）。它与下面的工具名
+    // 补丁**同受 `zen_body_patch` 约束**——只有上游 host 是 opencode.ai 及其子域时才加，
+    // 换成 DeepSeek 等自建/第三方端点时两项都不加（无法只开其中一项）。放进可选字段列表
+    // 是为了上游指名拒绝它能走既有「摘掉后重试一次」的降级。
     if state.zen_body_patch {
         if let Some(field) = zen_max_tokens_field(req) {
             optional.push(field);
@@ -1802,7 +1806,8 @@ async fn forward(
         attempt_no += 1;
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
-        // 同一道门禁要求的工具名：每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）
+        // 同一道门禁的另一项：工具名每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）。
+        // 与上面的 `max_tokens` 完全同源，同样只在上游 host 是 opencode.ai 时为真。
         if state.zen_body_patch {
             patch_zen_request_body(&mut body);
         }
@@ -6829,7 +6834,7 @@ mod tests {
         ));
         // null 与缺失同口径
         assert!(zen_max_tokens_field(&json!({ "max_output_tokens": null })).is_some());
-        // 客户端显式给了预算：尊重它，不补 1000000
+        // 客户端显式给了预算：尊重它，不补 ZEN_MAX_TOKENS
         assert!(zen_max_tokens_field(&json!({ "max_output_tokens": 100 })).is_none());
         let req = json!({
             "model": "m",
