@@ -171,7 +171,9 @@ onBeforeUnmount(refresh);
               :href="ZEN_KEY_DOCS_URL"
               v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
               @click.prevent="openDocsUrl(ZEN_KEY_DOCS_URL)"
-            >API Key</a>
+            >ApiKey</a>
+            或
+            <code class="zen-proxy-config-code">public</code>
           </span>
         </div>
         <div class="zen-proxy-config-row">

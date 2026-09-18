@@ -83,7 +83,11 @@ describe("ZenProxySection", () => {
       "experimental_bearer_token",
     );
     const keyLink = tokenRow.find(".zen-proxy-docs-link");
-    expect(keyLink.text()).toBe("API Key");
+    expect(keyLink.text()).toBe("ApiKey");
+    expect(tokenRow.text()).toContain("public");
+    const publicCode = tokenRow.find(".zen-proxy-config-code");
+    expect(publicCode.exists()).toBe(true);
+    expect(publicCode.text()).toBe("public");
   });
 
   it("配置块 base_url 行提供复制按钮并调用 copyText", async () => {
