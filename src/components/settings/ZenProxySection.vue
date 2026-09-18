@@ -9,7 +9,6 @@ import {
   toastError,
   type ZenProxyStatus,
 } from "../../composables/useCodex";
-import { copyText } from "../../lib/clipboard";
 import { ICON_SAVE } from "../../lib/icons";
 import { openDocsUrl } from "../../lib/links";
 
@@ -31,8 +30,6 @@ const apiUrlInput = ref<string>(
 );
 /** 输入校验错误信息 */
 const portError = ref<string>("");
-/** base_url 复制按钮反馈文案 */
-const copied = ref(false);
 
 /**
  * 本地 provider 的 base_url 提示：本机回环地址 + 模型提供方 base_url 的路径
@@ -104,18 +101,6 @@ async function onSave() {
   await refresh();
 }
 
-// 复制本机 provider 的 base_url
-async function copyBaseUrl() {
-  const ok = await copyText(localBaseUrlHint.value);
-  setToast(ok ? "base_url 已复制" : "复制失败，请手动选择复制");
-  if (ok) {
-    copied.value = true;
-    window.setTimeout(() => {
-      copied.value = false;
-    }, 1500);
-  }
-}
-
 onMounted(refresh);
 onBeforeUnmount(refresh);
 </script>
@@ -151,17 +136,11 @@ onBeforeUnmount(refresh);
       <div class="zen-proxy-config-hint">
         <div class="zen-proxy-config-row">
           <span class="zen-proxy-config-field">base_url</span>
-          <span class="zen-proxy-config-value zen-proxy-config-code">
-            {{ localBaseUrlHint }}
+          <span class="zen-proxy-config-value">
+            <code class="zen-proxy-config-code zen-proxy-config-base-url">
+              {{ localBaseUrlHint }}
+            </code>
           </span>
-          <button
-            class="copy-btn zen-proxy-config-copy"
-            aria-label="复制 base_url"
-            v-tooltip="'复制 base_url'"
-            @click="copyBaseUrl"
-          >
-            {{ copied ? "已复制" : "复制" }}
-          </button>
         </div>
         <div class="zen-proxy-config-row">
           <span class="zen-proxy-config-field">experimental_bearer_token</span>
@@ -329,11 +308,6 @@ onBeforeUnmount(refresh);
   border-radius: var(--radius);
   padding: 1px var(--space-3);
   word-break: break-all;
-}
-
-.zen-proxy-config-copy {
-  flex-shrink: 0;
-  min-height: var(--ctrl-h-xs);
-  font-size: var(--font-xs);
+  min-width: 0;
 }
 </style>

@@ -3,8 +3,6 @@ import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const mockOpenDocsUrl = vi.hoisted(() => vi.fn());
-const mockCopyText = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/clipboard", () => ({ copyText: mockCopyText }));
 vi.mock("../../lib/links", () => ({ openDocsUrl: mockOpenDocsUrl }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
@@ -48,8 +46,6 @@ describe("ZenProxySection", () => {
     mockedToggle.mockClear();
     mockedToast.mockClear();
     mockOpenDocsUrl.mockClear();
-    mockCopyText.mockReset();
-    mockCopyText.mockResolvedValue(true);
   });
 
   it("渲染标题、说明与运行状态", async () => {
@@ -90,22 +86,11 @@ describe("ZenProxySection", () => {
     expect(publicCode.text()).toBe("public");
   });
 
-  it("配置块 base_url 行提供复制按钮并调用 copyText", async () => {
-    const wrapper = mountSection();
-    const copyBtn = wrapper.find(".zen-proxy-config-copy");
-    expect(copyBtn.exists()).toBe(true);
-    await copyBtn.trigger("click");
-    expect(mockCopyText).toHaveBeenCalledWith(
-      "http://127.0.0.1:18080/zen/v1",
-    );
-    expect(copyBtn.text()).toContain("已复制");
-  });
-
   it("本地 provider 的 base_url 提示跟随上游地址的路径", async () => {
     const wrapper = mountSection();
     // 默认上游 https://opencode.ai/zen/v1 → 本机地址 + /zen/v1
     const value = () =>
-      wrapper.find(".zen-proxy-config-value.zen-proxy-config-code");
+      wrapper.find(".zen-proxy-config-code.zen-proxy-config-base-url");
     expect(value().text()).toContain("http://127.0.0.1:18080/zen/v1");
     const urlInput = wrapper.find("input[type='text']");
     await urlInput.setValue("https://api.deepseek.com/");
