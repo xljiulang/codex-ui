@@ -33,6 +33,14 @@ const OPENCODE_CLIENT: &str = "desktop";
 const OPENCODE_PROJECT: &str = "global";
 /// OpenCode Zen 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
 pub(crate) const DEFAULT_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
+/// OpenCode 免费层的**请求体门禁**要求请求里出现这些工具名（opencode 客户端的内置工具）：
+/// 只在 `tools` 里补声明、不提供任何实现，模型真去调用时由 codex 侧以 `unsupported call`
+/// 裁决（代理不做特例过滤）。门禁只校验名字，不看描述与参数。
+const ZEN_REQUIRED_TOOL_NAMES: [&str; 6] = ["bash", "edit", "glob", "grep", "read", "write"];
+/// 上述假工具的描述：门禁只看名字，这段文案负责劝模型别真调用。
+const ZEN_FAKE_TOOL_DESCRIPTION: &str = "这是弃用的工具，请勿调用";
+/// 门禁要求的 `max_tokens`（与 `messages` 同级）：入站请求没有自己的输出预算时补上这个值。
+const ZEN_MAX_TOKENS: u64 = 1_000_000;
 /// 请求上游时固定的 User-Agent（与 opencode 官方客户端一致）。
 const ZEN_USER_AGENT: &str =
     "opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24";
@@ -526,6 +534,20 @@ fn responses_path(base_url: &str) -> String {
     format!("{path}/responses")
 }
 
+/// 上游是否为 OpenCode Zen（host 是 `opencode.ai` 或其子域，大小写不敏感）。
+/// 只有 Zen 免费层才有 [`ZEN_REQUIRED_TOOL_NAMES`] / [`ZEN_MAX_TOKENS`] 这套请求体门禁，
+/// 因此补形状只对 Zen 生效；指向自建或第三方兼容端点（DeepSeek 等）时请求体保持原样。
+fn is_zen_upstream(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.to_ascii_lowercase();
+    host == "opencode.ai" || host.ends_with(".opencode.ai")
+}
+
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
 pub(crate) async fn start(
     port: u16,
@@ -559,6 +581,7 @@ pub(crate) async fn start(
             log,
             trace,
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            zen_body_patch: is_zen_upstream(&base_url),
             modes,
         });
     let task = tokio::spawn(async move {
@@ -639,6 +662,9 @@ struct ProxyState {
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
+    /// 是否按 Zen 免费层的请求体门禁补形状（`max_tokens` + 内置工具名，见
+    /// [`patch_zen_request_body`]）：上游是 opencode.ai 时为 true，其它上游保持请求体原样。
+    zen_body_patch: bool,
     /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
     modes: Arc<ThreadModeRegistry>,
 }
@@ -1000,6 +1026,10 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                     (
                         "reasoning_rc",
                         if forwarded.reasoning_rc { "on" } else { "off" }.to_string(),
+                    ),
+                    (
+                        "zen_body",
+                        if state.zen_body_patch { "on" } else { "off" }.to_string(),
                     ),
                 ],
             );
@@ -1371,6 +1401,58 @@ fn optional_fields(req: &Value, want_stream: bool) -> Vec<OptionalField> {
     out
 }
 
+/// Zen 免费层的 `max_tokens` 补法：只在入站请求**没有**自己的输出预算（`max_output_tokens`
+/// 缺失或为 null）时才补 [`ZEN_MAX_TOKENS`]，客户端显式给的预算一律尊重。
+///
+/// 走 [`OptionalField`] 而不是直接写进请求体，是为了复用既有的降级路径：上游若在 4xx
+/// 错误体里指名 `max_tokens`（某些模型中上游拒绝超出自身上限的值），会被摘掉后重试一次。
+fn zen_max_tokens_field(req: &Value) -> Option<OptionalField> {
+    match req.get("max_output_tokens") {
+        Some(v) if !v.is_null() => None,
+        _ => Some(OptionalField {
+            key: "max_tokens",
+            needles: &["max_tokens"],
+            value: json!(ZEN_MAX_TOKENS),
+        }),
+    }
+}
+
+/// 请求体形状补丁（只对 Zen 上游调用，见 [`is_zen_upstream`]）：把门禁要求的
+/// [`ZEN_REQUIRED_TOOL_NAMES`] 以假工具追加到 `tools` **末尾**。
+///
+/// 只补缺失的名字：客户端已声明的真实工具（含命名空间扁平名与自由格式工具）一律保留、
+/// 顺序不变，同名时以客户端声明为准（不覆盖）；入站请求原本没有 `tools` 时，数组只含这
+/// 几个假工具。幂等：重复调用不会叠加。
+fn patch_zen_request_body(body: &mut Value) {
+    let existing = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    // chat 侧工具名就是 `tools[i].function.name`（命名空间已展开成扁平名，自由格式工具
+    // 也是单参数函数），因此按这个路径取名字即可与既有去重口径一致。
+    let mut seen: HashSet<String> = existing
+        .iter()
+        .filter_map(|tool| tool.pointer("/function/name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let mut tools = existing;
+    for name in ZEN_REQUIRED_TOOL_NAMES {
+        if !seen.insert(name.to_string()) {
+            continue;
+        }
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": ZEN_FAKE_TOOL_DESCRIPTION,
+                "parameters": { "type": "object", "properties": {} }
+            }
+        }));
+    }
+    body["tools"] = Value::Array(tools);
+}
+
 /// Responses 的 `tool_choice` → chat 形态：字符串直接透传，
 /// `{type:"function",name}` 转 `{type:"function",function:{name}}`，
 /// 其余（`allowed_tools` 等无 chat 等价物）返回 None。
@@ -1700,7 +1782,14 @@ async fn forward(
     let session = opencode_session(state, headers);
     // 反查：把实发的 ses_* 映射回 codex 会话 id，落进内容日志便于人工对照
     let session_codex = state.session_map.codex_of(&session);
-    let optional = optional_fields(req, want_stream);
+    let mut optional = optional_fields(req, want_stream);
+    // Zen 免费层的请求体门禁：补 `max_tokens`（与 messages 同级）。放进可选字段列表是为了
+    // 上游指名拒绝它能走既有「摘掉后重试一次」的降级（非 Zen 上游不加）。
+    if state.zen_body_patch {
+        if let Some(field) = zen_max_tokens_field(req) {
+            optional.push(field);
+        }
+    }
     let mut dropped: Vec<&'static str> = Vec::new();
     let mut reasoning_rc = state.requires_reasoning_rc.load(Ordering::Relaxed);
     let mut reasoning_rc_change: Option<ReasoningRcChange> = None;
@@ -1713,6 +1802,10 @@ async fn forward(
         attempt_no += 1;
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
+        // 同一道门禁要求的工具名：每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）
+        if state.zen_body_patch {
+            patch_zen_request_body(&mut body);
+        }
         for field in optional.iter() {
             if dropped.contains(&field.key) {
                 continue;
@@ -4331,6 +4424,7 @@ fn test_proxy_state(session: &str, base_url: &str, log: ZenLog, trace: TraceSink
         log,
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+        zen_body_patch: is_zen_upstream(base_url),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
 }
@@ -6657,6 +6751,95 @@ mod tests {
         assert_eq!(tool_choice_to_chat(None), None);
     }
 
+    // ---------- Zen 免费层请求体门禁：形状补丁 ----------
+
+    #[test]
+    fn is_zen_upstream_matches_only_opencode_hosts() {
+        // 默认上游与 Zen 的其它路径都命中（host 判定，与路径无关）
+        assert!(is_zen_upstream("https://opencode.ai/zen/v1"));
+        assert!(is_zen_upstream("https://opencode.ai"));
+        assert!(is_zen_upstream("https://api.opencode.ai/zen/v2/"));
+        assert!(is_zen_upstream("HTTPS://OpenCode.AI/zen/v1"));
+        // 本地 mock / 第三方上游 / 伪装域名 / 非法地址一律不补形状
+        assert!(!is_zen_upstream("http://127.0.0.1:18080/zen/v1"));
+        assert!(!is_zen_upstream("https://opencode.ai.evil.com/v1"));
+        assert!(!is_zen_upstream("https://api.deepseek.com/v1"));
+        assert!(!is_zen_upstream("https://10.0.0.20:9080/v1"));
+        assert!(!is_zen_upstream(""));
+        assert!(!is_zen_upstream("open"));
+        assert!(!is_zen_upstream("opencode.ai/zen/v1"));
+    }
+
+    #[test]
+    fn patch_zen_request_body_appends_missing_required_tools() {
+        // 原本没有 tools：数组只含 6 个假工具，形状逐字可核对
+        let mut body = json!({ "model": "m", "messages": [], "stream": true });
+        patch_zen_request_body(&mut body);
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), ZEN_REQUIRED_TOOL_NAMES.len());
+        for (tool, name) in tools.iter().zip(ZEN_REQUIRED_TOOL_NAMES) {
+            assert_eq!(tool["type"], "function");
+            assert_eq!(tool["function"]["name"], name);
+            assert_eq!(tool["function"]["description"], ZEN_FAKE_TOOL_DESCRIPTION);
+            assert_eq!(
+                tool["function"]["parameters"],
+                json!({ "type": "object", "properties": {} })
+            );
+        }
+        // 幂等：再调用一次不叠加
+        patch_zen_request_body(&mut body);
+        assert_eq!(body["tools"].as_array().unwrap().len(), ZEN_REQUIRED_TOOL_NAMES.len());
+
+        // 已有工具：真实工具保留且顺序不变、同名时以客户端声明为准，只补缺失的名字
+        let mut body = json!({
+            "messages": [],
+            "tools": [
+                { "type": "function", "function": {
+                    "name": "shell", "description": "真实工具" } },
+                { "type": "function", "function": {
+                    "name": "codexui_glob", "description": "命名空间扁平名" } },
+                { "type": "function", "function": {
+                    "name": "bash", "description": "客户端自己的 bash" } }
+            ]
+        });
+        patch_zen_request_body(&mut body);
+        let tools = body["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["shell", "codexui_glob", "bash", "edit", "glob", "grep", "read", "write"],
+            "真实工具在前、缺失的假工具按固定顺序追加在后"
+        );
+        assert_eq!(tools[2]["function"]["description"], "客户端自己的 bash");
+    }
+
+    #[test]
+    fn zen_max_tokens_field_follows_client_budget() {
+        // 入站没有自己的输出预算 → 补 ZEN_MAX_TOKENS，且错误体点名 max_tokens 时会被摘掉重试
+        let field = zen_max_tokens_field(&json!({ "model": "m", "input": "hi" }))
+            .expect("无 max_output_tokens 时应补 max_tokens");
+        assert_eq!(field.key, "max_tokens");
+        assert_eq!(field.value, json!(ZEN_MAX_TOKENS));
+        assert!(mentions_field(
+            r#"{"error":{"message":"Invalid max_tokens: too large"}}"#,
+            field.needles
+        ));
+        // null 与缺失同口径
+        assert!(zen_max_tokens_field(&json!({ "max_output_tokens": null })).is_some());
+        // 客户端显式给了预算：尊重它，不补 1000000
+        assert!(zen_max_tokens_field(&json!({ "max_output_tokens": 100 })).is_none());
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "max_output_tokens": 100
+        });
+        let (chat, _) = responses_to_chat(&req, false, false).unwrap();
+        assert_eq!(chat["max_tokens"], 100, "客户端预算仍按原样映射");
+    }
+
     #[test]
     fn message_images_become_chat_content_parts() {
         let req = json!({
@@ -7264,14 +7447,15 @@ mod integration_tests {
            Arc::new(AsyncMutex::new(None));
        let base_url = spawn_mock_passthrough(rec.clone()).await;
       let state = ProxyState {
-           session: "ses_fixed123".into(),
-           base_url,
-           log: None,
-           trace: TraceSink::disabled(),
-           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           session_map: Arc::new(SessionMap::default()),
-            modes: Arc::new(ThreadModeRegistry::default()),
-       };
+          session: "ses_fixed123".into(),
+          zen_body_patch: is_zen_upstream(&base_url),
+          base_url,
+          log: None,
+          trace: TraceSink::disabled(),
+          requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+          session_map: Arc::new(SessionMap::default()),
+           modes: Arc::new(ThreadModeRegistry::default()),
+      };
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
@@ -7327,14 +7511,15 @@ mod integration_tests {
            Arc::new(AsyncMutex::new(None));
        let base_url = spawn_mock_passthrough(rec.clone()).await;
       let state = ProxyState {
-           session: "ses_fixed123".into(),
-           base_url,
-           log: None,
-           trace: TraceSink::disabled(),
-           requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-           session_map: Arc::new(SessionMap::default()),
-            modes: Arc::new(ThreadModeRegistry::default()),
-       };
+          session: "ses_fixed123".into(),
+          zen_body_patch: is_zen_upstream(&base_url),
+          base_url,
+          log: None,
+          trace: TraceSink::disabled(),
+          requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+          session_map: Arc::new(SessionMap::default()),
+           modes: Arc::new(ThreadModeRegistry::default()),
+      };
         let mut headers = HeaderMap::new();
         headers.insert("session-id", HeaderValue::from_static("client-session-42"));
 
@@ -7650,6 +7835,7 @@ mod integration_tests {
             log,
             trace: TraceSink::disabled(),
             requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
+            zen_body_patch: is_zen_upstream(upstream),
             session_map: Arc::new(SessionMap::default()),
             modes: Arc::new(ThreadModeRegistry::default()),
         }
@@ -7807,6 +7993,43 @@ mod integration_tests {
             !joined.contains("event=zen_proxy.nudge_injected"),
             "带标签时不应注入：{joined}"
         );
+    }
+
+    /// 续跑轮与首轮走同一个 `forward`：门禁补丁在每一轮上游请求体里都要在。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn zen_body_patch_applies_to_nudge_continuation() {
+        let (upstream, rec) = spawn_mock_zen_scripted(vec![
+            ScriptedReply::Sse(sse_text_reply(
+                "Now update the test - specifically the base_url path test.",
+            )),
+            completion_reply("已完成"),
+        ])
+        .await;
+
+        let mut state = nudge_probe_state(&upstream, None);
+        state.zen_body_patch = true;
+        let body = run_nudge_probe_state(state, HeaderMap::new(), nudge_probe(true)).await;
+        assert_eq!(body.matches("event: response.completed").count(), 1);
+
+        let calls = rec.lock().await.clone();
+        assert_eq!(calls.len(), 2, "应为：首轮 + 续跑");
+        for call in &calls {
+            assert_eq!(
+                call["max_tokens"], ZEN_MAX_TOKENS,
+                "每一轮都要补 max_tokens：{call}"
+            );
+            let names: Vec<&str> = call["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tool| tool["function"]["name"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                names,
+                vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
+                "每一轮都要补假工具：{call}"
+            );
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -8676,6 +8899,7 @@ mod integration_tests {
    fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyState {
        ProxyState {
            session: "ses_fixed123".into(),
+           zen_body_patch: is_zen_upstream(&base_url),
            base_url,
            log,
            trace,
@@ -9050,6 +9274,7 @@ mod integration_tests {
        let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
        let state = ProxyState {
            session: "ses_fixed123".into(),
+           zen_body_patch: is_zen_upstream(&upstream),
            base_url: upstream,
            log,
            trace: TraceSink::disabled(),
@@ -9265,6 +9490,119 @@ mod integration_tests {
         assert_eq!(
             got["stream_options"]["include_usage"], true,
             "未被拒的可选字段应保留"
+        );
+    }
+
+    /// Zen 上游（补丁开启）：上游实收的 chat 请求体同时带 `max_tokens` 与 6 个假工具，
+    /// 真实工具保留在前、顺序不变。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn zen_body_patch_reaches_upstream_request_body() {
+        let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+        let base_url = spawn_mock_zen(rec.clone()).await;
+
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "stream": false,
+            "tools": [{
+                "type": "function",
+                "name": "shell",
+                "description": "run shell",
+                "parameters": { "type": "object", "properties": {} }
+            }]
+        });
+        let mut state = proxy_state(base_url, None);
+        state.zen_body_patch = true;
+        let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
+            .await
+            .expect("forward 应成功");
+        assert!(resp.status.is_success());
+
+        let got = rec.lock().await.clone().expect("mock 应已收到请求");
+        assert_eq!(got.body["max_tokens"], ZEN_MAX_TOKENS, "应补门禁要求的 max_tokens");
+        let names: Vec<&str> = got.body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
+            "真实工具保留在前、缺的假工具按固定顺序补在后：{}",
+            got.body
+        );
+        assert_eq!(
+            got.body["tools"][1]["function"]["description"],
+            ZEN_FAKE_TOOL_DESCRIPTION
+        );
+    }
+
+    /// 非 Zen 上游（自建 / 第三方兼容端点）：同一个入站请求一个字段都不补。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn zen_body_patch_is_off_for_non_zen_upstream() {
+        let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+        let base_url = spawn_mock_zen(rec.clone()).await;
+
+        let req = json!({
+            "model": "m",
+            "input": "hi",
+            "stream": false,
+            "tools": [{
+                "type": "function",
+                "name": "shell",
+                "description": "run shell",
+                "parameters": { "type": "object", "properties": {} }
+            }]
+        });
+        // 补丁开关由 base_url 派生：回环地址不是 Zen 上游，自然关闭
+        let state = proxy_state(base_url, None);
+        assert!(!state.zen_body_patch, "回环地址不应被当成 Zen 上游");
+        let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
+            .await
+            .expect("forward 应成功");
+        assert!(resp.status.is_success());
+
+        let got = rec.lock().await.clone().expect("mock 应已收到请求");
+        assert!(
+            got.body.get("max_tokens").is_none(),
+            "非 Zen 上游不补 max_tokens：{}",
+            got.body
+        );
+        let names: Vec<&str> = got.body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["shell"], "非 Zen 上游不补假工具：{}", got.body);
+    }
+
+    /// 上游在 4xx 错误体里指名 `max_tokens`：摘掉后重试一次（复用既有可选字段降级路径），
+    /// 回环重试仍带工具补丁。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn zen_max_tokens_is_dropped_and_retried_when_rejected() {
+        let count: Arc<AsyncMutex<usize>> = Arc::new(AsyncMutex::new(0));
+        let last: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
+        let base_url =
+            spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "max_tokens").await;
+
+        let req = json!({ "model": "m", "input": "hi", "stream": false });
+        let mut state = proxy_state(base_url, None);
+        state.zen_body_patch = true;
+        let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
+            .await
+            .expect("forward 应成功");
+        assert!(resp.status.is_success());
+        assert_eq!(resp.dropped_fields, vec!["max_tokens"], "应标记被摘掉的字段");
+        assert_eq!(*count.lock().await, 2, "应恰好重试一次");
+
+        let got = last.lock().await.clone().expect("mock 应已收到请求");
+        assert!(got.get("max_tokens").is_none(), "重试不应再带 max_tokens：{got}");
+        assert_eq!(
+            got["tools"].as_array().unwrap().len(),
+            ZEN_REQUIRED_TOOL_NAMES.len(),
+            "工具补丁不受可选字段摘除影响：{got}"
         );
     }
 

@@ -412,6 +412,11 @@
   Zen 免费层会校验这个形状（旧写法 `ses_` + 裸 codex 线程 id、18 位随机串会被判成「非 opencode 客户端」并以 `403 FreeTierError: OpenCode's free tier can only be used from within OpenCode` 拒绝）；
   `x-opencode-session` 由客户端请求头 `session-id`（codex 线程 id）**经进程内双向映射表**得到：同一线程在代理生命周期内恒定发同一个 `ses_*`，不同线程互不相同，可反查回线程 id（代理重启后重新分配）；
   请求头缺失、空白或非可见 ASCII 时回落到代理启动时生成、生命周期内稳定的 `ses_*`；
+- **请求体形状补丁（免费层门禁的第二道）**：2026-09-18 起，识别头已经合法的请求仍会被以同一条 `403 FreeTierError` 拒绝——门禁搬到了请求体，于是**翻译路径**给发往 Zen 的 `chat/completions` 再补两样东西（透传路径与其它上游一个字段都不动）：
+  - 在与 `messages` 同级的位置补 `max_tokens: 1000000`——**仅当入站请求没有自己的输出预算**时补（codex 实测不下发 `max_output_tokens`，故真实请求等价于一律补；其它 Responses 客户端显式给了预算就尊重它）；上游若在 4xx 错误体里指名 `max_tokens`，按既有「可选字段」规则摘掉后重试一次（`zen_proxy.optional_fields_dropped fields=max_tokens`）；
+  - 往 `tools` **末尾**补 opencode 客户端内置的 6 个工具名（`bash` / `edit` / `glob` / `grep` / `read` / `write`，描述写「这是弃用的工具，请勿调用」、参数为空对象 schema）——只补缺失的名字：真实工具（含命名空间扁平名与自由格式工具）保留在前、顺序不变，同名时以客户端声明为准；模型真去调用这些假工具时代理照常回译成 `function_call`，由 codex 判 `unsupported call`（代理不做特例过滤）；
+  - **生效范围只看上游 host**：是 `opencode.ai` 或其子域才打补丁，把 base_url 换成自建/第三方兼容端点（DeepSeek 等）即自动关闭；逐请求可在 `zen_proxy.forward` 行的 `zen_body=on|off` 核对，补丁后的实发请求体见 `logs/zen/*.request.json`；
+  - 代价：每个请求多约数百字节的恒定工具声明（位置固定在尾部，可被上游缓存）；无工具声明的后台请求（会话标题、压缩/摘要）同样会看到这些工具，弱模型存在误调假工具的残余风险——所以描述写死劝退文案；
 - **流式健壮性**：
   - ① 上游返回的工具调用参数被截断/非法（或工具名为空）时，整轮**不发出任何 function_call**、改发 `response.failed`（codex 以明确失败结束，不再静默按完成收尾），并记 `zen_proxy.malformed_tool_call`；
   - ② 上游随流下发的 `error` 与读取中断同样转成 `response.failed`，不再"按完成收尾"；
@@ -441,7 +446,7 @@
     上游声明 tools 时（DeepSeek 实测）校验会一路查到那条文本消息，只补工具调用那条不够；
     该轮没有回放思维链时补空串（实测同样接受）。
   - 是否回传由**学习式开关**决定——上游第一次以"缺 `reasoning_content`"报错时自动打开并内部重试一次（记 `zen_proxy.reasoning_content_enabled`），开关粘滞到本次代理实例结束，且**一次请求内最多翻转一次**（上游若反过来不接受该字段则自动关闭，记 `zen_proxy.reasoning_content_disabled`）；
-  - 失败尝试逐条记 `zen_proxy.forward_attempt`（`attempt`/`status`/错误原文 + `messages`/`assistant_with_tools_rc`/`assistant_with_content_rc` 形态统计），`zen_proxy.forward` 另有 `reasoning_rc=on|off` 供逐请求核对；
+  - 失败尝试逐条记 `zen_proxy.forward_attempt`（`attempt`/`status`/错误原文 + `messages`/`assistant_with_tools_rc`/`assistant_with_content_rc` 形态统计），`zen_proxy.forward` 另有 `reasoning_rc=on|off` 与 `zen_body=on|off`（本次是否按 Zen 形状打了请求体补丁）供逐请求核对；
   - 启用后在「模型配置」页手动添加 provider：
     `base_url = http://127.0.0.1:{端口}{模型提供方 base_url 的路径}`
     （默认上游是 `https://opencode.ai/zen/v1`，故填 `http://127.0.0.1:{端口}/zen/v1`；
