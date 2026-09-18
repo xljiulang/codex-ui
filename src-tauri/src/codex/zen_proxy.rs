@@ -1451,10 +1451,12 @@ fn patch_zen_request_body(body: &mut Value) {
         .map(str::to_string)
         .collect();
     let mut tools = existing;
+    let mut added: Vec<&str> = Vec::new();
     for name in ZEN_REQUIRED_TOOL_NAMES {
         if !seen.insert(name.to_string()) {
             continue;
         }
+        added.push(name);
         tools.push(json!({
             "type": "function",
             "function": {
@@ -1465,6 +1467,38 @@ fn patch_zen_request_body(body: &mut Value) {
         }));
     }
     body["tools"] = Value::Array(tools);
+    // 动态教学：只列出真正被追加的工具名，与 description 形成双重约束
+    if let Some(text) = fake_tools_instruction(&added) {
+        inject_fake_tools_instruction(body, &text);
+    }
+}
+
+/// 根据实际追加的工具名列表动态生成弃用教学文本；列表为空时返回 None。
+fn fake_tools_instruction(added: &[&str]) -> Option<String> {
+    if added.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "【弃用工具声明】以下工具已弃用，禁止调用：{}。这些工具名仅用于满足客户端门禁校验，实际没有任何实现。如果你需要执行类似操作，请使用可用的工具完成任务。",
+        added.join("、")
+    ))
+}
+
+/// 将弃用工具教学文本注入 `instructions`（幂等：已包含则跳过）。
+fn inject_fake_tools_instruction(body: &mut Value, text: &str) {
+    let existing = body
+        .get("instructions")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if existing.contains(text) {
+        return;
+    }
+    let merged = if existing.is_empty() {
+        text.to_string()
+    } else {
+        format!("{existing}\n\n{text}")
+    };
+    body["instructions"] = Value::String(merged);
 }
 
 /// Responses 的 `tool_choice` → chat 形态：字符串直接透传，
@@ -6855,9 +6889,14 @@ mod tests {
                 json!({ "type": "object", "properties": {} })
             );
         }
+        // 6 个工具全部追加 → instructions 含全部 6 个工具名
+        let inst = body["instructions"].as_str().unwrap().to_string();
+        assert!(inst.contains("bash、edit、glob、grep、read、write"), "教学应列出全部 6 个工具：{inst}");
         // 幂等：再调用一次不叠加
         patch_zen_request_body(&mut body);
         assert_eq!(body["tools"].as_array().unwrap().len(), ZEN_REQUIRED_TOOL_NAMES.len());
+        // 幂等：instructions 不重复追加
+        assert_eq!(body["instructions"].as_str().unwrap(), &inst);
 
         // 已有工具：真实工具保留且顺序不变、同名时以客户端声明为准，只补缺失的名字
         let mut body = json!({
@@ -6883,6 +6922,47 @@ mod tests {
             "真实工具在前、缺失的假工具按固定顺序追加在后"
         );
         assert_eq!(tools[2]["function"]["description"], "客户端自己的 bash");
+        // bash 已存在不追加 → 教学只列 edit/glob/grep/read/write
+        let inst = body["instructions"].as_str().unwrap();
+        assert!(inst.contains("edit、glob、grep、read、write"), "教学应列出 5 个缺失工具：{inst}");
+        assert!(!inst.contains("bash、edit"), "教学不应重复列出 bash：{inst}");
+    }
+
+    #[test]
+    fn fake_tools_instruction_returns_none_for_empty_list() {
+        assert!(fake_tools_instruction(&[]).is_none());
+    }
+
+    #[test]
+    fn fake_tools_instruction_lists_only_added_tools() {
+        let text = fake_tools_instruction(&["edit", "glob"]).unwrap();
+        assert!(text.contains("edit、glob"), "应列出指定工具：{text}");
+        assert!(!text.contains("bash"), "不应含未追加工具：{text}");
+        assert!(!text.contains("grep"), "不应含未追加工具：{text}");
+    }
+
+    #[test]
+    fn patch_zen_request_body_preserves_existing_instructions() {
+        let mut body = json!({
+            "model": "m",
+            "instructions": "原有教学内容",
+            "messages": [],
+            "stream": true
+        });
+        patch_zen_request_body(&mut body);
+        let inst = body["instructions"].as_str().unwrap();
+        assert!(inst.starts_with("原有教学内容"), "应保留原有 instructions 前缀：{inst}");
+        assert!(inst.contains("弃用工具声明"), "应追加弃用教学：{inst}");
+    }
+
+    #[test]
+    fn patch_zen_request_body_idempotent_instructions() {
+        let mut body = json!({ "model": "m", "messages": [], "stream": true });
+        patch_zen_request_body(&mut body);
+        let first = body["instructions"].as_str().unwrap().to_string();
+        patch_zen_request_body(&mut body);
+        let second = body["instructions"].as_str().unwrap();
+        assert_eq!(first, second, "幂等调用不应重复追加教学");
     }
 
     #[test]
