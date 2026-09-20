@@ -50,6 +50,7 @@ vi.mock("../../composables/useCodex", () => {
 });
 
 import ChatView from "../ChatView.vue";
+import { invoke } from "@tauri-apps/api/core";
 import { respondInteraction, store } from "../../composables/useCodex";
 import type { ThreadItem } from "../../lib/types";
 import type { SessionTab } from "../../composables/useCodex";
@@ -972,11 +973,14 @@ describe("ChatView 回合定位按钮", () => {
     } as DOMRect;
   }
 
-  function anchorStub() {
+  /** 消息条目桩类型（含模板与声明 props，供 stubs 复用） */
+  type MessageStub = { props: string[]; template: string };
+
+  function anchorStub(): MessageStub {
     return {
       props: ["item"],
       template:
-        "<div class='msg-stub' :data-turn-anchor=\"item.type === 'userMessage' ? '' : null\">{{ item.type }}</div>",
+        "<div class='msg-stub' :data-turn-anchor=\"item.type === 'userMessage' ? item.id : null\">{{ item.type }}</div>",
     };
   }
 
@@ -1005,13 +1009,13 @@ describe("ChatView 回合定位按钮", () => {
     return arr;
   }
 
-  function mountChat() {
+  function mountChat(messageStub: MessageStub = anchorStub()) {
     return mount(ChatView, {
       props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
-          MessageItem: anchorStub(),
+          MessageItem: messageStub,
         },
       },
     });
@@ -1076,6 +1080,35 @@ describe("ChatView 回合定位按钮", () => {
     await vi.advanceTimersByTimeAsync(200);
     await nextTick();
     await flushPromises();
+  }
+
+  // 手动帧驱动：把 rAF 换成可控队列，便于逐帧验证「落地后跟随收敛」的行为
+  let rafPending: Map<number, FrameRequestCallback>;
+  let rafNextId = 0;
+  let frameTime = 0;
+  function useManualRaf() {
+    rafPending = new Map();
+    rafNextId = 0;
+    frameTime = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      const id = ++rafNextId;
+      rafPending.set(id, cb);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      rafPending.delete(id);
+    });
+  }
+  /** 推进 count 帧（每帧 32ms：220ms 的跳转动画约 7 帧走完）并让 await 链继续 */
+  async function runFrames(count: number) {
+    for (let i = 0; i < count; i++) {
+      frameTime += 32;
+      const cbs = [...rafPending.values()];
+      rafPending.clear();
+      for (const cb of cbs) cb(frameTime);
+      await nextTick();
+      await flushPromises();
+    }
   }
 
   /** 悬停导航按钮（根容器）展开卡片 */
@@ -1552,6 +1585,168 @@ describe("ChatView 回合定位按钮", () => {
     expect(btn2.text()).toBe("");
     expect(btn2.find("svg").exists()).toBe(true);
     expect(btn2.classes()).not.toContain("has-pct");
+    wrapper.unmount();
+  });
+
+  it("量取后正文继续长高（大历史异步落地）：跳转按实时布局跟随收敛到目标并记诊断日志", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 300, 500]);
+    trustedScroll(scroller, 1000);
+    await nextTick();
+    vi.mocked(invoke).mockClear();
+    useManualRaf();
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    // 第 1 帧完成测距，之后是动画帧：动画落地前目标上方内容长高（300 → 460）
+    await runFrames(2);
+    rects.set(wrapper.findAll("[data-turn-anchor]")[1].element, 460);
+    await runFrames(12);
+
+    // 一次量取的落点会停在 300，跟随收敛把它重新对准 460
+    expect(scroller.scrollTop).toBe(460);
+    expect(wrapper.findAll("[data-turn-anchor]")[1].classes()).toContain(
+      "turn-highlight",
+    );
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      "session_log",
+      expect.objectContaining({
+        event: "chat-nav-jump",
+        detail: expect.stringContaining("drift=160px"),
+      }),
+    );
+    wrapper.unmount();
+  });
+
+  it("落点稳定后不再被后续布局变化拉动，高亮留在目标上", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 300, 500]);
+    trustedScroll(scroller, 1000);
+    await nextTick();
+    useManualRaf();
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    await runFrames(16);
+    expect(scroller.scrollTop).toBe(300);
+    const anchors = wrapper.findAll("[data-turn-anchor]");
+    expect(anchors[1].classes()).toContain("turn-highlight");
+
+    // 已收尾：此后的布局变化不再拉动视图（跟随只覆盖跳转后的有限窗口）
+    rects.set(anchors[1].element, 460);
+    await runFrames(6);
+    expect(scroller.scrollTop).toBe(300);
+    wrapper.unmount();
+  });
+
+  it("跟随窗口内用户滚轮立即让位，不再自动微调", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 300, 500]);
+    trustedScroll(scroller, 1000);
+    await nextTick();
+    useManualRaf();
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    await runFrames(2);
+
+    // 用户真实滚轮：跟随立即放弃，视图不再被自动对准
+    const wheel = new Event("wheel");
+    Object.defineProperty(wheel, "isTrusted", { get: () => true });
+    scroller.dispatchEvent(wheel);
+    rects.set(wrapper.findAll("[data-turn-anchor]")[1].element, 460);
+    await runFrames(12);
+    expect(scroller.scrollTop).not.toBe(460);
+    wrapper.unmount();
+  });
+
+  it("落点一次到位时不写诊断日志", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 300, 500]);
+    trustedScroll(scroller, 1000);
+    await nextTick();
+    vi.mocked(invoke).mockClear();
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(300);
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith(
+      "session_log",
+      expect.objectContaining({ event: "chat-nav-jump" }),
+    );
+    wrapper.unmount();
+  });
+
+  it("锚点缺少 id 时按序数兜底定位并记 fallback 日志", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat({
+      props: ["item"],
+      template: "<div class='msg-stub' data-turn-anchor>{{ item.type }}</div>",
+    });
+    await warmReady();
+    const scroller = await installGeometry(wrapper, [100, 300, 500]);
+    trustedScroll(scroller, 1000);
+    await nextTick();
+    vi.mocked(invoke).mockClear();
+
+    await openNavCard(wrapper);
+    await wrapper.findAll(".turn-nav-item")[1].trigger("click");
+    await nextTick();
+    await flushPromises();
+    expect(scroller.scrollTop).toBe(300);
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith(
+      "session_log",
+      expect.objectContaining({ event: "chat-nav-anchor-fallback" }),
+    );
+    wrapper.unmount();
+  });
+
+  it("预热超时（持续布局变化）不算稳定：按间隔重试，稳定后停止重试", async () => {
+    store.itemsByThread["t1"] = reactive(userThread(3));
+    const wrapper = mountChat();
+    const scroller = wrapper.find(".chat-scroll").element as HTMLElement;
+    // 观察 measuring 类出现次数：每次预热尝试会加一次（批量附件计数便于断言重试）
+    let cycles = 0;
+    let inMeasuring = false;
+    const observer = new MutationObserver(() => {
+      const on = scroller.classList.contains("measuring");
+      if (on && !inMeasuring) cycles++;
+      inMeasuring = on;
+    });
+    observer.observe(scroller, { attributes: true, attributeFilter: ["class"] });
+
+    // 持续 DOM 变更：8s 上限前无法进入 120ms 安静期 → 本次预热判为「未稳定」
+    for (let i = 0; i < 85; i++) {
+      scroller.appendChild(document.createElement("div"));
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    await nextTick();
+    // 按钮可见时机保持现状：首次预热尝试结束即显示
+    expect(wrapper.find(".turn-nav").exists()).toBe(true);
+    expect(cycles).toBe(1);
+
+    // 停止变更：1s 后重试并达到稳定 → 不再重试
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cycles).toBe(2);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(cycles).toBe(2);
+    observer.disconnect();
     wrapper.unmount();
   });
 });

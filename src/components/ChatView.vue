@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="turn-nav-item"
                 :class="{ active: entry.index === currentIndex }"
-                @click="selectTurn(entry.index)"
+                @click="selectTurn(entry)"
                 @mouseenter="onTurnItemEnter($event, entry)"
                 @mouseleave="onTurnItemLeave()"
               >

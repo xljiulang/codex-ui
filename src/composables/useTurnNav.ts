@@ -15,11 +15,37 @@ import {
   loadPendingImages,
   waitForRenderQuiet,
 } from "../lib/chatWarmup";
+import { sessionLog } from "../lib/sessionLog";
 
 // 回合跳转动画时长（自绘 rAF 缓动，不使用原生 scrollTo smooth）
 const NAV_ANIM_MS = 220;
 // 悬停移出导航按钮/卡片后的关闭延迟：覆盖按钮与卡片之间 10px 间隙的穿越防抖
 const NAV_HOVER_CLOSE_DELAY_MS = 150;
+// 跳转落地后的跟随收敛：窗口上限、单帧容差、判定稳定所需的连续帧数
+const NAV_SETTLE_MS = 1500;
+const NAV_SETTLE_TOL_PX = 1;
+const NAV_SETTLE_STABLE_FRAMES = 3;
+// 首次落点偏差超过该值才写诊断日志（正常跳转不写，避免日志噪声）
+const NAV_DRIFT_LOG_PX = 2;
+// 预热未稳定时的重试间隔与次数上限
+const WARM_RETRY_MS = 1000;
+const WARM_RETRY_MAX = 5;
+// 用户消息锚点属性：值为消息 id，跳转按身份定位而非序数
+const TURN_ANCHOR_ATTR = "data-turn-anchor";
+
+/** 导航条目（卡片点击传入）：id 为目标用户消息身份，index 为锚点序数 */
+export interface TurnNavTarget {
+  id: string;
+  index: number;
+}
+
+/** 单调时钟（performance 不可用时回落到 Date） */
+function nowMs(): number {
+  return typeof performance !== "undefined" &&
+    typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
 
 /** 回合导航与全文预热的接缝（由 ChatView 注入） */
 export interface TurnNavDeps {
@@ -63,12 +89,18 @@ export function useTurnNav(deps: TurnNavDeps) {
   let layoutWarmed = false;
   let warmRunning = false;
   let warmSeq = 0;
+  let warmRetryTimer: number | undefined;
+  let warmRetryCount = 0;
   // 回合跳转窗口状态：从点击起（含 measuring/nextTick 等待）到动画结束的下一帧都置位，
   // 期间到达的 scroll 事件一律视为程序化滚动（不参与吸底/索引推导）；
   // 连点取消旧动画从当前位置继续
   let navAnimSeq = 0;
   let navAnimRaf: number | undefined;
   let navAnimating = false;
+  // measuring 类引用计数：跳转量取与预热可能重叠，避免提前摘掉强制渲染
+  let measuringDepth = 0;
+  // 跳转窗口内挂载用户输入监听的目标元素（取消跟随用）
+  let jumpGuardEl: HTMLElement | null = null;
 
   // ≥2 个回合才提供导航（单回合无跳转意义，按钮不显示）
   const hasTurnNav = computed(
@@ -118,10 +150,74 @@ export function useTurnNav(deps: TurnNavDeps) {
     return deps.scroller.value
       ? Array.from(
           deps.scroller.value.querySelectorAll<HTMLElement>(
-            "[data-turn-anchor]",
+            `[${TURN_ANCHOR_ATTR}]`,
           ),
         )
       : [];
+  }
+
+  /** 强制真实渲染类（引用计数：跳转量取与预热重叠时不互相摘除） */
+  function addMeasuring(el: HTMLElement) {
+    measuringDepth++;
+    el.classList.add("measuring");
+  }
+
+  function removeMeasuring(el: HTMLElement) {
+    measuringDepth = Math.max(0, measuringDepth - 1);
+    if (measuringDepth === 0) el.classList.remove("measuring");
+  }
+
+  /**
+   * 目标锚点：优先按 id 匹配（index 与 DOM 锚点顺序一旦错位就会跳到别的消息，
+   * 按身份匹配可免疫），匹配不到再用序数兜底并由调用方记日志。
+   */
+  function resolveAnchor(
+    nodes: HTMLElement[],
+    entry: TurnNavTarget,
+  ): { node: HTMLElement; index: number; byId: boolean } | null {
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].getAttribute(TURN_ANCHOR_ATTR) === entry.id) {
+        return { node: nodes[i], index: i, byId: true };
+      }
+    }
+    const node = nodes[entry.index] ?? null;
+    return node ? { node, index: entry.index, byId: false } : null;
+  }
+
+  /** 目标锚点相对滚动容器顶边的实时偏差：>0 表示目标在视口顶部之下（需向下滚这么多） */
+  function anchorDrift(el: HTMLElement, node: HTMLElement): number {
+    return node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  }
+
+  /** 跳转诊断日志（只记安全数值字段，失败静默） */
+  function logJump(event: string, detail: string) {
+    void sessionLog("warn", deps.tab.value.threadId, event, detail);
+  }
+
+  /** 跳转窗口内的用户真实输入：立即让位（取消动画/跟随并摘掉监听） */
+  function onJumpUserInput(e: Event) {
+    if (!e.isTrusted) return;
+    cancelTurnAnimation();
+    detachJumpGuards();
+  }
+
+  function attachJumpGuards(el: HTMLElement) {
+    if (jumpGuardEl) return;
+    jumpGuardEl = el;
+    el.addEventListener("wheel", onJumpUserInput, { passive: true });
+    el.addEventListener("pointerdown", onJumpUserInput, true);
+    el.addEventListener("touchstart", onJumpUserInput, { passive: true });
+    window.addEventListener("keydown", onJumpUserInput, true);
+  }
+
+  function detachJumpGuards() {
+    const el = jumpGuardEl;
+    if (!el) return;
+    jumpGuardEl = null;
+    el.removeEventListener("wheel", onJumpUserInput);
+    el.removeEventListener("pointerdown", onJumpUserInput, true);
+    el.removeEventListener("touchstart", onJumpUserInput);
+    window.removeEventListener("keydown", onJumpUserInput, true);
   }
 
   /** 重算锚点内容坐标；吸底状态下当前回合取最新一条，否则按视口顶部判定 */
@@ -180,20 +276,27 @@ export function useTurnNav(deps: TurnNavDeps) {
   /**
    * 首次跳转前的全文预热：measuring 强制真实渲染，图片/异步 Markdown 稳定后再
    * 移除类并等两帧，使 content-visibility 记住全部真实高度。不改变当前 scrollTop。
+   * 返回本次预热结束时布局是否真正稳定（超时返回 false，调用方不得当成已稳定）。
    */
-  async function warmUpHistoryLayout() {
+  async function warmUpHistoryLayout(): Promise<boolean> {
     const el = deps.scroller.value;
-    if (!el) return;
-    el.classList.add("measuring");
+    if (!el) return false;
+    let stable = false;
+    addMeasuring(el);
     try {
       await nextTick();
-      await Promise.all([loadPendingImages(el), waitForRenderQuiet(el)]);
+      const [, quiet] = await Promise.all([
+        loadPendingImages(el),
+        waitForRenderQuiet(el),
+      ]);
+      stable = quiet.stable;
     } finally {
-      el.classList.remove("measuring");
+      removeMeasuring(el);
     }
     await nextTick();
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return stable;
   }
 
   /** 作废当前线程的预热结果（切换线程/重新加载时调用） */
@@ -203,11 +306,33 @@ export function useTurnNav(deps: TurnNavDeps) {
     layoutWarmed = false;
     turnNavReady.value = false;
     turnNavOpen.value = false;
+    clearWarmRetry();
+    warmRetryCount = 0;
+  }
+
+  function clearWarmRetry() {
+    if (warmRetryTimer !== undefined) {
+      window.clearTimeout(warmRetryTimer);
+      warmRetryTimer = undefined;
+    }
+  }
+
+  /** 预热未稳定时的延迟重试（seq 守卫：切线程/重载后旧重试不生效） */
+  function scheduleWarmRetry(seq: number) {
+    if (warmRetryCount >= WARM_RETRY_MAX) return;
+    warmRetryCount++;
+    clearWarmRetry();
+    warmRetryTimer = window.setTimeout(() => {
+      warmRetryTimer = undefined;
+      if (seq !== warmSeq) return;
+      beginBackgroundWarm();
+    }, WARM_RETRY_MS);
   }
 
   /**
-   * 会话打开后在后台执行一次全文预热；完成前不显示导航按钮。
-   * 预热按线程一次性执行，warmSeq/threadId 守卫防止旧线程结果误落新线程。
+   * 会话打开后在后台执行全文预热：首次尝试结束即显示导航按钮（可见时机不变），
+   * 但只有真正稳定（DOM 安静且渲染队列清空）才算预热完成；未稳定时按间隔重试，
+   * 期间跳转由落地后的跟随收敛兜底。warmSeq/threadId 守卫防止旧线程结果误落新线程。
    */
   function beginBackgroundWarm() {
     if (
@@ -225,15 +350,22 @@ export function useTurnNav(deps: TurnNavDeps) {
     if (!threadId || !hasUserMessage || !deps.scroller.value) return;
     warmRunning = true;
     const seq = warmSeq;
-    void warmUpHistoryLayout()
-      .catch(() => undefined)
-      .finally(() => {
-        if (seq !== warmSeq) return;
-        warmRunning = false;
-        layoutWarmed = true;
-        turnNavReady.value = true;
-        scheduleAnchorSync();
-      });
+    void (async () => {
+      let stable = false;
+      try {
+        stable = await warmUpHistoryLayout();
+      } catch {
+        stable = false;
+      }
+      if (seq !== warmSeq) return;
+      warmRunning = false;
+      // 只有「DOM 安静且渲染队列清空」才算预热完成；超时不再被当成已稳定
+      if (stable) layoutWarmed = true;
+      // 按钮可见时机保持现状：首次预热尝试结束即显示
+      turnNavReady.value = true;
+      scheduleAnchorSync();
+      if (!stable) scheduleWarmRetry(seq);
+    })();
   }
 
   /** 内容刚出现且暂无可执行预热时机时，等 DOM 渲染后补一次后台预热 */
@@ -319,9 +451,9 @@ export function useTurnNav(deps: TurnNavDeps) {
     toggleTurnNav();
   }
 
-  function selectTurn(index: number) {
+  function selectTurn(entry: TurnNavTarget) {
     closeTurnNav();
-    void jumpToTurn(index);
+    void jumpToTurn(entry);
   }
 
   function cancelPreviewHide() {
@@ -378,33 +510,64 @@ export function useTurnNav(deps: TurnNavDeps) {
     }
   });
 
+  /** 提前返回时关窗：新跳转已接管（seq 变化）则不动，避免误关新窗口 */
+  function endJumpWindow(seq: number) {
+    if (seq === navAnimSeq) navAnimating = false;
+  }
+
   /**
-   * 自绘 ease-out 短动画：每帧写 scrollTop，结束帧强制落到目标并同步索引。
+   * 量取目标锚点：measuring 强制真实布局后取内容坐标，并按 id 解析目标节点。
+   * 返回 "cancelled" 表示等待期间已被取消（新跳转/切线程），调用方应直接放弃。
+   */
+  async function measureAnchor(
+    el: HTMLElement,
+    entry: TurnNavTarget,
+    seq: number,
+  ): Promise<
+    { node: HTMLElement; top: number; byId: boolean } | "cancelled" | null
+  > {
+    addMeasuring(el);
+    try {
+      await nextTick();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (seq !== navAnimSeq) return "cancelled";
+      const nodes = collectAnchorNodes();
+      const containerTop = el.getBoundingClientRect().top;
+      anchorTops = nodes.map(
+        (node) => node.getBoundingClientRect().top - containerTop + el.scrollTop,
+      );
+      anchorCount.value = nodes.length;
+      const hit = resolveAnchor(nodes, entry);
+      return hit
+        ? { node: hit.node, top: anchorTops[hit.index], byId: hit.byId }
+        : null;
+    } finally {
+      removeMeasuring(el);
+    }
+  }
+
+  /**
+   * 自绘 ease-out 短动画：每帧写 scrollTop，结束帧强制落到目标并同步索引后回调 onDone。
    * 不用原生 scrollTo smooth / scrollend，避免 trusted scroll 事件时序干扰；
    * 同步 rAF（测试/异常环境）两帧时间戳不推进时直接收尾，防死循环。
    */
-  function startAnimatedScroll(el: HTMLElement, top: number) {
-    cancelTurnAnimation();
-    const seq = navAnimSeq;
-    navAnimating = true;
+  function animateScrollTo(
+    el: HTMLElement,
+    top: number,
+    seq: number,
+    onDone: () => void,
+  ) {
     const from = el.scrollTop;
     const delta = top - from;
     const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
     const finish = () => {
+      navAnimRaf = undefined;
       if (seq !== navAnimSeq) return;
       el.scrollTop = top;
-      navAnimRaf = undefined;
       // 登记落点并与落点收敛索引
       deps.onProgrammaticScroll(top);
       syncAnchors();
-      // 跳转窗口延后一帧关闭：scroll 事件在每帧的滚动步骤里派发（早于 rAF 回调），
-      // 结束帧写入引发的事件要到下一帧才到，提前关窗会被「距底 60px 内」误判成
-      // 用户滚动而重新开启吸底，把视图从落点拉回底部
-      navAnimRaf = requestAnimationFrame(() => {
-        if (seq !== navAnimSeq) return;
-        navAnimRaf = undefined;
-        navAnimating = false;
-      });
+      onDone();
     };
     if (Math.abs(delta) < 1) {
       finish();
@@ -414,7 +577,10 @@ export function useTurnNav(deps: TurnNavDeps) {
     let prevNow = -1;
     let sameFrames = 0;
     const step = (now: number) => {
-      if (seq !== navAnimSeq) return;
+      if (seq !== navAnimSeq) {
+        navAnimRaf = undefined;
+        return;
+      }
       if (start === undefined) start = now;
       const p = Math.min(1, (now - start) / NAV_ANIM_MS);
       el.scrollTop = from + delta * easeOutCubic(p);
@@ -432,53 +598,139 @@ export function useTurnNav(deps: TurnNavDeps) {
     navAnimRaf = requestAnimationFrame(step);
   }
 
-  /** 直接滚到指定用户消息回合起点（顶部对齐），并短暂高亮目标气泡 */
-  async function jumpToTurn(target: number) {
-    const el = deps.scroller.value;
-    if (!el || target < 0 || target >= anchorCount.value) return;
-    // 手动浏览历史：解除吸底，避免 MutationObserver/流式更新把位置拉回
-    deps.stickToBottom.value = false;
-    // 打开跳转窗口：从点击起（含 measuring/nextTick 等待）到动画结束的下一帧，
-    // 期间的 scroll 事件都视为程序化滚动——流式吸底写入留下的滞后事件恰落在这个窗口内，
-    // 否则会被「距底 60px 内」判据当成用户滚动而重新开启吸底
-    cancelTurnAnimation();
-    const jumpSeq = navAnimSeq;
-    navAnimating = true;
-    // 提前返回时关窗：新跳转已接管（seq 变化）则不动，避免误关新窗口
-    const endJumpWindow = () => {
-      if (jumpSeq === navAnimSeq) navAnimating = false;
-    };
-    currentIndex.value = target;
-    // 导航按钮只在后台全文预热完成后出现；此处直接强制真实布局量取精确坐标
-    // measuring 强制真实布局后量取内容坐标；移除类并稳定后再自绘动画到目标
-    el.classList.add("measuring");
-    let node: HTMLElement | null = null;
-    let top = 0;
-    try {
-      await nextTick();
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      const nodes = collectAnchorNodes();
-      if (target >= nodes.length) {
-        endJumpWindow();
+  /**
+   * 落地后的跟随收敛：历史会话打开时正文（Markdown Worker 渲染、代码高亮、图片）仍在
+   * 陆续落地，量取时刻的高度与最终高度不同，一次性写入的绝对落点必然漂移。
+   * 这里按实时布局把目标顶边持续对齐容器顶边，直到连续稳定或窗口上限；
+   * 每次读几何都走实时布局（不重复加 measuring）：既避免大历史下每帧强制全量真实布局，
+   * 又让「测量」与「滚动」始终处于同一套布局，即使浏览器对记忆尺寸的处理有差异也收敛。
+   * 被取消（用户输入/新跳转/切线程）或目标节点已卸载时不回调收尾。
+   */
+  function followAnchorToTop(
+    el: HTMLElement,
+    node: HTMLElement,
+    seq: number,
+    onEnd: (settled: boolean, drift: number, rounds: number) => void,
+  ) {
+    const startedAt = nowMs();
+    let rounds = 0;
+    let stableFrames = 0;
+    const step = () => {
+      navAnimRaf = undefined;
+      if (seq !== navAnimSeq) return;
+      // 目标已不在聊天流里（消息替换/线程切换）：放弃跟随，不做收尾高亮
+      if (!el.contains(node)) {
+        onEnd(false, 0, rounds);
         return;
       }
-      const containerTop = el.getBoundingClientRect().top;
-      anchorTops = nodes.map(
-        (node) => node.getBoundingClientRect().top - containerTop + el.scrollTop,
+      const drift = anchorDrift(el, node);
+      if (Math.abs(drift) <= NAV_SETTLE_TOL_PX) {
+        stableFrames++;
+        if (stableFrames >= NAV_SETTLE_STABLE_FRAMES) {
+          onEnd(true, drift, rounds);
+          return;
+        }
+      } else {
+        stableFrames = 0;
+        // 按残余偏差直接微调：位移小、频率低，观感仍是平滑贴合
+        el.scrollTop += drift;
+        deps.onProgrammaticScroll(el.scrollTop);
+      }
+      rounds++;
+      if (nowMs() - startedAt >= NAV_SETTLE_MS) {
+        onEnd(false, drift, rounds);
+        return;
+      }
+      navAnimRaf = requestAnimationFrame(step);
+    };
+    navAnimRaf = requestAnimationFrame(step);
+  }
+
+  /** 跳转收尾：同步索引 → 登记落点 → 高亮目标 → 延后一帧关窗 */
+  function finishJump(
+    el: HTMLElement,
+    node: HTMLElement,
+    entry: TurnNavTarget,
+    seq: number,
+    info: { landedDrift: number; drift: number; rounds: number; settled: boolean },
+  ) {
+    if (seq !== navAnimSeq) return;
+    syncAnchors();
+    deps.onProgrammaticScroll(el.scrollTop);
+    if (el.contains(node)) flashTurn(node);
+    detachJumpGuards();
+    // 只在落点明显漂移或未收敛时留诊断日志（同事机器回传即可定位成因）
+    if (!info.settled || Math.abs(info.landedDrift) > NAV_DRIFT_LOG_PX) {
+      logJump(
+        "chat-nav-jump",
+        `target=${entry.index + 1} drift=${Math.round(info.landedDrift)}px ` +
+          `residual=${Math.round(info.drift)}px rounds=${info.rounds} ` +
+          `settled=${info.settled ? 1 : 0}`,
       );
-      anchorCount.value = nodes.length;
-      top = anchorTops[target];
-      node = nodes[target];
-    } finally {
-      el.classList.remove("measuring");
     }
-    if (!node) {
-      endJumpWindow();
+    // 跳转窗口延后一帧关闭：scroll 事件在每帧的滚动步骤里派发（早于 rAF 回调），
+    // 结束帧写入引发的事件要到下一帧才到，提前关窗会被「距底 60px 内」误判成
+    // 用户滚动而重新开启吸底，把视图从落点拉回底部
+    navAnimRaf = requestAnimationFrame(() => {
+      if (seq !== navAnimSeq) return;
+      navAnimRaf = undefined;
+      navAnimating = false;
+    });
+  }
+
+  /**
+   * 滚到指定用户消息回合起点（顶部对齐）：量取 → 自绘动画 → 跟随收敛 → 收尾高亮。
+   * 跳转窗口从点击起（含 measuring/nextTick 等待）一直开到最后一次跟随结束的下一帧，
+   * 期间的 scroll 事件都视为程序化滚动——流式吸底写入留下的滞后事件恰落在这个窗口内，
+   * 否则会被「距底 60px 内」判据当成用户滚动而重新开启吸底。
+   */
+  async function jumpToTurn(entry: TurnNavTarget) {
+    const el = deps.scroller.value;
+    if (!el) return;
+    if (entry.index < 0 || entry.index >= anchorCount.value) {
+      logJump(
+        "chat-nav-jump",
+        `target=${entry.index + 1}/${anchorCount.value} early=range`,
+      );
       return;
     }
+    // 手动浏览历史：解除吸底，避免 MutationObserver/流式更新把位置拉回
+    deps.stickToBottom.value = false;
+    cancelTurnAnimation();
+    const seq = navAnimSeq;
+    navAnimating = true;
+    currentIndex.value = entry.index;
+    attachJumpGuards(el);
+    const measured = await measureAnchor(el, entry, seq);
+    if (measured === "cancelled") return;
+    if (!measured) {
+      logJump("chat-nav-jump", `target=${entry.index + 1} early=missing`);
+      endJumpWindow(seq);
+      detachJumpGuards();
+      return;
+    }
+    if (!measured.byId) {
+      logJump(
+        "chat-nav-anchor-fallback",
+        `target=${entry.index + 1} id=${entry.id}`,
+      );
+    }
     await nextTick();
-    startAnimatedScroll(el, top);
-    flashTurn(node);
+    if (seq !== navAnimSeq) return;
+    animateScrollTo(el, measured.top, seq, () => {
+      if (seq !== navAnimSeq) return;
+      const landedDrift = el.contains(measured.node)
+        ? anchorDrift(el, measured.node)
+        : 0;
+      followAnchorToTop(el, measured.node, seq, (settled, drift, rounds) => {
+        finishJump(el, measured.node, entry, seq, {
+          landedDrift,
+          drift,
+          rounds,
+          settled,
+        });
+      });
+    });
   }
 
   /** 可信用户滚动时更新当前回合索引（由吸底滚动引擎回调） */
@@ -490,6 +742,7 @@ export function useTurnNav(deps: TurnNavDeps) {
   function resetTurnNav() {
     resetWarmState();
     cancelTurnAnimation();
+    detachJumpGuards();
     clearTurnHighlight();
     cancelNavHoverClose();
     hideTurnPreview();
@@ -510,6 +763,8 @@ export function useTurnNav(deps: TurnNavDeps) {
 
   function dispose() {
     cancelTurnAnimation();
+    detachJumpGuards();
+    clearWarmRetry();
     cancelNavHoverClose();
     cancelPreviewHide();
     document.removeEventListener("pointerdown", onGlobalPointerDown);

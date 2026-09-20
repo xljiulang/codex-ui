@@ -201,7 +201,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
   <div
     v-if="item.type === 'userMessage'"
     class="msg msg-user"
-    data-turn-anchor
+    :data-turn-anchor="item.id"
   >
     <div class="bubble">
       <button
