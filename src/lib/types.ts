@@ -182,8 +182,11 @@ export interface AppSettings {
   default_permission: PermissionId;
   /** 新开终端使用的 Shell */
   terminal_shell: TerminalShell;
-  /** 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空数组 = 全部启用 */
-  dynamic_tools_disabled: string[];
+  /**
+   * 动态工具显式开关（`namespace.tool` → 是否开启）：true 显式开启、false 显式关闭；
+   * 缺键时回落到工具定义里的 defaultEnabled（旧字段 dynamic_tools_disabled 已废弃且不迁移）
+   */
+  dynamic_tools_state: Record<string, boolean>;
   /** 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启 */
   glass_effect: boolean;
   /** 最后活跃会话 id：下次启动恢复该会话；null/缺省 = 无记录，启动开设置标签 */

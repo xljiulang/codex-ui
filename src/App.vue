@@ -13,6 +13,7 @@ import { disposeEvents, init, openSession, restoreLastSession, store } from "./c
 import { registerCloseGuard } from "./composables/useCloseGuard";
 import { useContextMenu } from "./composables/useContextMenu";
 import { openSettingsTab } from "./composables/useEditorTabs";
+import { subscribeKnowledgeEvents } from "./composables/useKnowledge";
 import { sessionLog } from "./lib/sessionLog";
 import { useGlobalDragDrop } from "./composables/useGlobalDragDrop";
 
@@ -21,6 +22,7 @@ const { dragging: globalDragging, setup: setupGlobalDragDrop } = useGlobalDragDr
 
 let unlistenClose: (() => void) | undefined;
 let unlistenNotification: (() => void) | undefined;
+let unlistenKnowledge: (() => void) | undefined;
 
 onMounted(async () => {
   // 通知「打开会话」：由 Rust 端处理 toast 点击（定时任务终态 / codex 错误）后发事件，
@@ -62,6 +64,8 @@ onMounted(async () => {
   });
   // 关闭守卫仅阻止 Tauri 默认销毁窗口；关闭即隐藏到系统托盘由 Rust 端处理
   unlistenClose = await registerCloseGuard();
+  // 知识库建库进度/完成（由 agent 经动态工具触发）：驱动设置页列表状态与结果 toast
+  unlistenKnowledge = await subscribeKnowledgeEvents();
   try {
   await init();
   await setupGlobalDragDrop();
@@ -75,6 +79,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unlistenNotification?.();
   unlistenClose?.();
+  unlistenKnowledge?.();
   disposeEvents();
 });
 </script>

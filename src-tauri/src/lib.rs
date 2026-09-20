@@ -202,6 +202,11 @@ pub fn run() {
             codex::commands::scheduled_task_update,
             codex::commands::scheduled_task_run_now,
             codex::commands::scheduled_task_runs,
+            codex::knowledge::commands::knowledge_list,
+            codex::knowledge::commands::knowledge_delete,
+            codex::knowledge::commands::knowledge_search,
+            codex::knowledge::commands::knowledge_index_start,
+            codex::knowledge::commands::knowledge_index_cancel,
             codex::commands::notify_session_event,
               codex::commands::model_config_read,
               codex::commands::model_config_save,
@@ -474,6 +479,32 @@ pub fn run() {
 
             // 微信接入桥：数据根目录随应用数据目录；存在绑定时后台自动恢复长轮询
             let wechat_app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            // 知识库：向量缓存 + 建库任务状态（数据在 <app data dir>/knowledge/）
+            app.manage(codex::knowledge::KnowledgeState::default());
+            // 后台物化随包向量模型（归档缺失时静默跳过，不阻塞窗口显示）
+            {
+                let model_app_dir = wechat_app_dir.clone();
+                let model_server = server_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    match codex::knowledge::materialize_model(&model_app_dir) {
+                        Ok(codex::bundled::BootOutcome::ArchiveMissing) => {}
+                        Ok(codex::bundled::BootOutcome::AlreadyPresent) => {}
+                        Ok(outcome) => {
+                            model_server
+                                .push_log(
+                                    "info",
+                                    format!("知识库向量模型已就绪（{outcome:?}）"),
+                                )
+                                .await;
+                        }
+                        Err(e) => {
+                            model_server
+                                .push_log("warn", format!("知识库向量模型物化失败：{e}"))
+                                .await;
+                        }
+                    }
+                });
+            }
             let session_store = Arc::new(
                 codex::session_state::SessionStateStore::new(&wechat_app_dir)
                     .map_err(|e| e.to_string())?,

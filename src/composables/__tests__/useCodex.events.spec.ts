@@ -1868,8 +1868,8 @@ describe("codexui 动态工具 item/tool/call 应答", () => {
     });
   });
 
-  it("已禁用的工具返回禁用错误，不再执行", async () => {
-    store.settings.dynamic_tools_disabled = ["codexui.get_usage"];
+  it("被显式关闭的工具返回未开启错误，不再执行", async () => {
+    store.settings.dynamic_tools_state = { "codexui.get_usage": false };
     await handleDynamicToolCall({
       requestId: 11,
       method: "item/tool/call",
@@ -1886,14 +1886,14 @@ describe("codexui 动态工具 item/tool/call 应答", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("interaction_respond", {
       requestId: 11,
       result: {
-        contentItems: [{ type: "inputText", text: "该动态工具已被禁用" }],
+        contentItems: [{ type: "inputText", text: "该动态工具未开启" }],
         success: false,
       },
     });
-    // 禁用后不应再触发用量查询逻辑（无 codex_rpc 调用）
+    // 关闭后不应再触发用量查询逻辑（无 codex_rpc 调用）
     expect(
       mockedInvoke.mock.calls.filter(([c]) => c === "codex_rpc"),
     ).toHaveLength(0);
-    store.settings.dynamic_tools_disabled = [];
+    store.settings.dynamic_tools_state = {};
   });
 });

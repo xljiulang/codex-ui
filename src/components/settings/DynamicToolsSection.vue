@@ -5,25 +5,38 @@ import {
   store,
   toastError,
 } from "../../composables/useCodex";
-import { dynamicToolRows, type DynamicToolRow } from "../../lib/dynamicTools";
+import {
+  dynamicToolRows,
+  isDynamicToolEnabled,
+  type DynamicToolRow,
+} from "../../lib/dynamicTools";
 import { ICON_TOOL } from "../../lib/icons";
 
 defineProps<{ active: boolean }>();
 
-/** 动态工具行（静态定义展开；当前为 codexui 命名空间两个工具），只提供启用/禁用 */
+/** 动态工具行（静态定义展开），只提供启用/禁用 */
 const dynamicToolRowsList = dynamicToolRows();
 
-function isDynamicToolDisabled(key: string): boolean {
-  return (store.settings.dynamic_tools_disabled ?? []).includes(key);
+/** 开关显示的是「生效值」：显式配置优先，缺省用工具定义里的 defaultEnabled */
+function isToolOn(tool: DynamicToolRow): boolean {
+  return isDynamicToolEnabled(
+    tool.namespace,
+    tool.tool,
+    store.settings.dynamic_tools_state,
+  );
 }
 
-/** 切换动态工具启用/禁用：写入应用设置，禁用的工具不再注入新会话 */
+/**
+ * 切换开关：写入显式三态值（true 开启 / false 关闭），不再回落到代码缺省；
+ * 只影响新建会话的注入（既有会话不变）。
+ */
 async function toggleDynamicTool(tool: DynamicToolRow) {
-  const disabled = new Set(store.settings.dynamic_tools_disabled ?? []);
-  if (disabled.has(tool.key)) disabled.delete(tool.key);
-  else disabled.add(tool.key);
+  const next = {
+    ...(store.settings.dynamic_tools_state ?? {}),
+    [tool.key]: !isToolOn(tool),
+  };
   try {
-    await saveSettings({ dynamic_tools_disabled: Array.from(disabled) });
+    await saveSettings({ dynamic_tools_state: next });
   } catch (e) {
     setToast(toastError(e));
   }
@@ -34,13 +47,13 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
   <section v-show="active" class="settings-section settings-section-dynamic-tools">
     <h2 class="settings-section-title">动态工具</h2>
     <p class="settings-section-desc">
-      控制 codex-ui 动态工具（codexui）是否随新建会话注入；禁用的工具不再注入
+      控制 codex-ui 动态工具（codexui）是否随新建会话注入；关闭的工具不再注入。知识库相关工具默认关闭
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
         <h3>对话内动态工具</h3>
         <div class="model-config-head-actions">
-          <span class="dynamic-tools-hint">禁用后新会话不再注入</span>
+          <span class="dynamic-tools-hint">改动只影响新建会话</span>
         </div>
       </div>
       <div class="skills-list">
@@ -66,10 +79,8 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
             <label class="switch">
               <input
                 type="checkbox"
-                :checked="!isDynamicToolDisabled(tool.key)"
-                :aria-label="
-                  isDynamicToolDisabled(tool.key) ? '启用工具' : '禁用工具'
-                "
+                :checked="isToolOn(tool)"
+                :aria-label="isToolOn(tool) ? '禁用工具' : '启用工具'"
                 @change="toggleDynamicTool(tool)"
               />
               <span class="switch-track"></span>
@@ -89,4 +100,3 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
   white-space: nowrap;
 }
 </style>
-

@@ -282,12 +282,13 @@ describe("SettingsView 模型配置", () => {
     expect(labels.indexOf("模型快照")).toBe(3);
     expect(labels.indexOf("模型配置")).toBe(4);
     expect(labels.indexOf("动态工具")).toBe(5);
-    expect(labels.indexOf("技能管理")).toBe(6);
-    expect(labels.indexOf("MCP管理")).toBe(7);
-    expect(labels.indexOf("插件管理")).toBe(8);
-    expect(labels.indexOf("定时任务")).toBe(9);
-    expect(labels.indexOf("Zen 代理")).toBe(10);
-    expect(labels.indexOf("关于")).toBe(11);
+    expect(labels.indexOf("知识库")).toBe(6);
+    expect(labels.indexOf("技能管理")).toBe(7);
+    expect(labels.indexOf("MCP管理")).toBe(8);
+    expect(labels.indexOf("插件管理")).toBe(9);
+    expect(labels.indexOf("定时任务")).toBe(10);
+    expect(labels.indexOf("Zen 代理")).toBe(11);
+    expect(labels.indexOf("关于")).toBe(12);
   });
 
   it("挂载时调用读取命令并填充三张卡片", async () => {
@@ -1482,10 +1483,10 @@ describe("SettingsView 动态工具", () => {
     (mockedInvoke as ReturnType<typeof vi.fn>).mockImplementation(
       async () => undefined,
     );
-    store.settings.dynamic_tools_disabled = [];
+    store.settings.dynamic_tools_state = {};
   });
 
-  it("导航位于模型配置与技能管理之间，渲染标题与三个工具行", async () => {
+  it("导航位于模型配置与技能管理之间（知识库紧随动态工具），渲染标题与五个工具行", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const nav = wrapper.findAll(".settings-nav-item");
@@ -1493,23 +1494,26 @@ describe("SettingsView 动态工具", () => {
     expect(idx("模型快照")).toBe(3);
     expect(idx("模型配置")).toBe(4);
     expect(idx("动态工具")).toBe(5);
-    expect(idx("技能管理")).toBe(6);
-    expect(idx("MCP管理")).toBe(7);
-    expect(idx("插件管理")).toBe(8);
-    expect(idx("定时任务")).toBe(9);
+    expect(idx("知识库")).toBe(6);
+    expect(idx("技能管理")).toBe(7);
+    expect(idx("MCP管理")).toBe(8);
+    expect(idx("插件管理")).toBe(9);
+    expect(idx("定时任务")).toBe(10);
     await nav[5].trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("动态工具");
-    expect(wrapper.text()).toContain("禁用后新会话不再注入");
+    expect(wrapper.text()).toContain("改动只影响新建会话");
     const rows = wrapper.findAll(".dynamic-tool-row");
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(5);
     expect(rows[0].text()).toContain("codexui_get_usage");
     expect(rows[0].text()).toContain("查询当前会话的 token 消耗");
     expect(rows[1].text()).toContain("codexui_compact_context");
     expect(rows[2].text()).toContain("codexui_add_scheduled_task");
+    expect(rows[3].text()).toContain("codexui_search_docs");
+    expect(rows[4].text()).toContain("codexui_index_docs");
   });
 
-  it("切换开关写入 dynamic_tools_disabled（禁用后不再注入）", async () => {
+  it("开关按三态口径读写：默认三条开、两条关；切换即写显式值", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const nav = wrapper
@@ -1518,20 +1522,154 @@ describe("SettingsView 动态工具", () => {
     await nav.trigger("click");
     await flushPromises();
 
-    const firstSwitch = wrapper
-      .findAll(".dynamic-tool-row input[type='checkbox']")[0];
+    const switches = wrapper.findAll(".dynamic-tool-row input[type='checkbox']");
+    // 生效值：既有三条开、知识库两条关
+    expect(
+      switches.map((s) => (s.element as HTMLInputElement).checked),
+    ).toEqual([true, true, true, false, false]);
+
+    // 关闭缺省开启的工具 → 写显式 false
+    const firstSwitch = switches[0];
     await firstSwitch.setValue(false);
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith({
-      dynamic_tools_disabled: ["codexui.get_usage"],
+      dynamic_tools_state: { "codexui.get_usage": false },
     });
 
-    const disabledResult = wrapper
-      .findAll(".dynamic-tool-row input[type='checkbox']")[0];
-    await disabledResult.setValue(true);
+    // 再打开 → 写显式 true（不再回落到缺省）
+    await wrapper
+      .findAll(".dynamic-tool-row input[type='checkbox']")[0]
+      .setValue(true);
     await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith({ dynamic_tools_disabled: [] });
+    expect(mockedSave).toHaveBeenCalledWith({
+      dynamic_tools_state: { "codexui.get_usage": true },
+    });
 
+    // 开启缺省关闭的知识库工具 → 写显式 true
+    await wrapper
+      .findAll(".dynamic-tool-row input[type='checkbox']")[3]
+      .setValue(true);
+    await flushPromises();
+    expect(mockedSave).toHaveBeenCalledWith({
+      dynamic_tools_state: { "codexui.get_usage": true, "codexui.search_docs": true },
+    });
+
+    wrapper.unmount();
+  });
+});
+
+describe("SettingsView 知识库", () => {
+  const kbRow = {
+    file: "shouhou-1a2b3c4d.sqlite",
+    cwd: "D:\\work\\售后",
+    docs: 3,
+    chunks: 12,
+    updated_at: 1700000000,
+    available: true,
+    error: null,
+  };
+
+  beforeEach(() => {
+    __resetTabsForTest();
+    store.toast = "";
+    store.confirm = null;
+    mockedInvoke.mockReset();
+    mockedSave.mockReset();
+    mockedInvoke.mockImplementation(async (cmd) => {
+      if (cmd === "knowledge_list") return [{ ...kbRow }];
+      return undefined;
+    });
+  });
+
+  async function openKnowledgeSection() {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    const nav = wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("知识库"))!;
+    await nav.trigger("click");
+    await flushPromises();
+    return wrapper;
+  }
+
+  it("分区只展示列表与删除：标题、只读统计与「默认关闭」提示", async () => {
+    const wrapper = await openKnowledgeSection();
+    expect(wrapper.text()).toContain("按会话工作目录一对一存放");
+    expect(wrapper.text()).toContain("默认关闭");
+    const rows = wrapper.findAll(".knowledge-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text()).toContain("D:\\work\\售后");
+    expect(rows[0].text()).toContain("3 篇文档");
+    expect(rows[0].text()).toContain("12 个切块");
+    expect(rows[0].text()).toContain("上次更新");
+    // 分区内没有任何建库/检索入口
+    expect(wrapper.find(".settings-section-knowledge input").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("删除走二次确认：确认后调用 knowledge_delete 并刷新列表", async () => {
+    const wrapper = await openKnowledgeSection();
+    const listCallsBefore = mockedInvoke.mock.calls.filter(
+      ([c]) => c === "knowledge_list",
+    ).length;
+
+    await wrapper.find(".knowledge-row button").trigger("click");
+    await flushPromises();
+    expect(store.confirm?.title).toBe("删除知识库");
+
+    settleConfirm(true);
+    await flushPromises();
+    expect(mockedInvoke).toHaveBeenCalledWith("knowledge_delete", {
+      file: "shouhou-1a2b3c4d.sqlite",
+    });
+    expect(
+      mockedInvoke.mock.calls.filter(([c]) => c === "knowledge_list").length,
+    ).toBeGreaterThan(listCallsBefore);
+    wrapper.unmount();
+  });
+
+  it("取消二次确认则不删除", async () => {
+    const wrapper = await openKnowledgeSection();
+    await wrapper.find(".knowledge-row button").trigger("click");
+    await flushPromises();
+    settleConfirm(false);
+    await flushPromises();
+    expect(
+      mockedInvoke.mock.calls.filter(([c]) => c === "knowledge_delete"),
+    ).toHaveLength(0);
+    expect(wrapper.findAll(".knowledge-row")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("不可用库标注原因且仍可删除", async () => {
+    mockedInvoke.mockImplementation(async (cmd) => {
+      if (cmd === "knowledge_list")
+        return [
+          {
+            file: "broken-00000000.sqlite",
+            cwd: "",
+            docs: 0,
+            chunks: 0,
+            updated_at: 0,
+            available: false,
+            error: "元数据缺失，无法识别所属工作目录",
+          },
+        ];
+      return undefined;
+    });
+    const wrapper = await openKnowledgeSection();
+    const row = wrapper.find(".knowledge-row");
+    expect(row.text()).toContain("不可用");
+    expect(row.text()).toContain("元数据缺失");
+    expect(row.find("button").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("空列表给出空态提示", async () => {
+    mockedInvoke.mockImplementation(async () => []);
+    const wrapper = await openKnowledgeSection();
+    expect(wrapper.text()).toContain("暂无知识库");
+    expect(wrapper.findAll(".knowledge-row")).toHaveLength(0);
     wrapper.unmount();
   });
 });
@@ -2643,7 +2781,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(titles).toContain("插件管理");
   });
 
-  it("左侧导航渲染十二个分类，默认选中第一个", () => {
+  it("左侧导航渲染十三个分类，默认选中第一个", () => {
     wrapper = mount(SettingsView);
     const items = wrapper.findAll(".settings-nav-item");
     expect(items.map((i) => i.text().trim())).toEqual([
@@ -2653,6 +2791,7 @@ describe("SettingsView 设置标签行为", () => {
       "模型快照",
       "模型配置",
       "动态工具",
+      "知识库",
       "技能管理",
       "MCP管理",
       "插件管理",
@@ -2672,6 +2811,7 @@ describe("SettingsView 设置标签行为", () => {
     expect(items[9].classes()).not.toContain("active");
     expect(items[10].classes()).not.toContain("active");
     expect(items[11].classes()).not.toContain("active");
+    expect(items[12].classes()).not.toContain("active");
     const personal = wrapper
       .find(".settings-section-personalization")
       .element as HTMLElement;
@@ -3254,8 +3394,10 @@ describe("SettingsView 插件管理", () => {
     // 默认折叠：市场内的插件列表隐藏（已安装插件卡片常显，不在此断言范围）
     expect(mps[0].find(".plugin-list").exists()).toBe(false);
     expect(mps[0].text()).not.toContain("Browser");
-    expect(wrapper.text()).not.toContain("PDF");
-    expect(wrapper.text()).not.toContain("Gmail");
+    // 折叠时不渲染插件名（断言限定在插件分区内：其它分区文案可能含 PDF 等词）
+    const pluginSection = wrapper.find(".settings-section-plugins");
+    expect(pluginSection.text()).not.toContain("PDF");
+    expect(pluginSection.text()).not.toContain("Gmail");
     // 头部（市场名/插件数量）始终可见
     expect(mps[0].find(".plugin-marketplace-count").text()).toBe("2");
     expect(mps[1].find(".plugin-marketplace-count").text()).toBe("1");

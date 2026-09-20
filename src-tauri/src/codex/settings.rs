@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,9 +16,10 @@ pub struct AppSettings {
     /// 终端 Shell：cmd（命令提示符，默认）｜powershell
     #[serde(default = "default_terminal_shell")]
     pub terminal_shell: String,
-    /// 被禁用的动态工具（`namespace.tool`，如 codexui.get_usage）；空 = 全部启用
+    /// 动态工具显式开关（`namespace.tool` → 是否开启）：true 显式开启、false 显式关闭、
+    /// 缺键则用工具代码里的 defaultEnabled；旧字段 `dynamic_tools_disabled` 已废弃且不迁移
     #[serde(default)]
-    pub dynamic_tools_disabled: Vec<String>,
+    pub dynamic_tools_state: HashMap<String, bool>,
     /// 毛玻璃特效（Windows 11 Mica / Windows 10 Acrylic 窗口背景），默认开启
     #[serde(default = "default_glass_effect")]
     pub glass_effect: bool,
@@ -79,7 +81,7 @@ impl Default for AppSettings {
             theme: "blue".into(),
             default_permission: default_permission(),
             terminal_shell: default_terminal_shell(),
-            dynamic_tools_disabled: Vec::new(),
+            dynamic_tools_state: HashMap::new(),
             glass_effect: default_glass_effect(),
             last_session_id: None,
             zen_proxy_enabled: false,
@@ -180,9 +182,9 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_tools_disabled_defaults_empty_and_roundtrips() {
+    fn dynamic_tools_state_defaults_empty_and_roundtrips() {
         let dir = TempDir::new().unwrap();
-        // 缺失字段回退空（全部启用）
+        // 缺失字段回退空 map（各工具回落到代码默认）
         let p = settings_path(dir.path());
         fs::write(
             &p,
@@ -190,16 +192,34 @@ mod tests {
         )
         .unwrap();
         let s = load(dir.path());
-        assert!(s.dynamic_tools_disabled.is_empty());
+        assert!(s.dynamic_tools_state.is_empty());
 
-        // 保存自定义禁用列表往返一致
+        // 保存显式开关往返一致
         let s = AppSettings {
-            dynamic_tools_disabled: vec!["codexui.get_usage".into()],
+            dynamic_tools_state: HashMap::from([
+                ("codexui.get_usage".to_string(), false),
+                ("codexui.search_docs".to_string(), true),
+            ]),
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
-        assert_eq!(loaded.dynamic_tools_disabled, vec!["codexui.get_usage"]);
+        assert_eq!(loaded.dynamic_tools_state.get("codexui.get_usage"), Some(&false));
+        assert_eq!(loaded.dynamic_tools_state.get("codexui.search_docs"), Some(&true));
+    }
+
+    #[test]
+    fn legacy_dynamic_tools_disabled_is_ignored() {
+        let dir = TempDir::new().unwrap();
+        // 旧字段不再被识别：老环境此前手动的关闭不迁移，全部回落到代码默认
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"enter_to_send":true,"followup_mode":"adjust","theme":"blue","dynamic_tools_disabled":["codexui.get_usage"]}"#,
+        )
+        .unwrap();
+        let s = load(dir.path());
+        assert!(s.dynamic_tools_state.is_empty());
     }
 
     #[test]

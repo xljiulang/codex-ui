@@ -10,7 +10,7 @@ export const defaultSettings = (): AppSettings => ({
   theme: "blue",
   default_permission: "ask-for-approval",
   terminal_shell: "cmd",
-    dynamic_tools_disabled: [],
+  dynamic_tools_state: {},
     glass_effect: true,
     last_session_id: null,
     zen_proxy_enabled: false,

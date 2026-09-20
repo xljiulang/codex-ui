@@ -7,6 +7,7 @@ pub mod diff;
 pub mod env_flags;
 pub mod file_icon;
 pub mod git;
+pub mod knowledge;
 pub mod logs_guard;
 pub mod model_config;
 pub mod model_snapshots;

@@ -53,8 +53,13 @@ export async function loadSettings() {
   if (!["cmd", "powershell"].includes(store.settings.terminal_shell)) {
     store.settings.terminal_shell = "cmd";
   }
-  if (!Array.isArray(store.settings.dynamic_tools_disabled)) {
-    store.settings.dynamic_tools_disabled = [];
+  // 动态工具三态开关：非对象的持久化值（含已废弃的旧数组字段）一律回落到「全部按代码缺省」
+  if (
+    !store.settings.dynamic_tools_state ||
+    typeof store.settings.dynamic_tools_state !== "object" ||
+    Array.isArray(store.settings.dynamic_tools_state)
+  ) {
+    store.settings.dynamic_tools_state = {};
   }
   const tab = activeSessionTab();
   if (tab) tab.permissionMode = store.settings.default_permission;

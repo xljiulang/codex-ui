@@ -6,6 +6,7 @@ import {
   ICON_CHECKLIST,
   ICON_GLOBE,
   ICON_HISTORY,
+  ICON_KNOWLEDGE,
   ICON_MCP,
   ICON_MODEL_CUBE,
   ICON_PALETTE,
@@ -17,6 +18,7 @@ import {
 import BasicSection from "./settings/BasicSection.vue";
 import DynamicToolsSection from "./settings/DynamicToolsSection.vue";
 import GlobalInstructionsSection from "./settings/GlobalInstructionsSection.vue";
+import KnowledgeSection from "./settings/KnowledgeSection.vue";
 import McpSection from "./settings/McpSection.vue";
 import ModelConfigSection from "./settings/ModelConfigSection.vue";
 import ModelSnapshotSection from "./settings/ModelSnapshotSection.vue";
@@ -35,6 +37,7 @@ const settingsSectionIds = [
   "model-snapshot",
   "model-config",
   "dynamic-tools",
+  "knowledge",
   "skills",
   "mcp",
   "plugins",
@@ -57,6 +60,7 @@ const settingsSections: SettingsSection[] = [
   { id: "model-snapshot", label: "模型快照", icon: ICON_SNAPSHOT, stroke: true },
   { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
   { id: "dynamic-tools", label: "动态工具", icon: ICON_TOOL },
+  { id: "knowledge", label: "知识库", icon: ICON_KNOWLEDGE },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
   { id: "plugins", label: "插件管理", icon: ICON_EXTENSION },
@@ -128,6 +132,8 @@ function onNavKeydown(e: KeyboardEvent) {
         <BasicSection :active="activeSection === 'basic'" />
 
         <DynamicToolsSection :active="activeSection === 'dynamic-tools'" />
+
+        <KnowledgeSection :active="activeSection === 'knowledge'" />
 
         <ScheduledTasksSection :active="activeSection === 'scheduled-tasks'" />
 

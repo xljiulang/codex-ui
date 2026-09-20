@@ -121,10 +121,10 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
       approvalPolicy: toApprovalPolicy(permission),
       sandbox: toSandbox(permission),
     };
-    // 注入 codexui 动态工具：agent 可在会话内查询用量/压缩上下文（仅 thread/start 支持）；
-    // 按设置中被禁用的工具过滤，全部禁用则整体不注入
+    // 注入 codexui 动态工具：agent 可在会话内查询用量/压缩上下文/检索知识库（仅 thread/start 支持）；
+    // 三态开关（显式 true/false，缺省用工具代码里的 defaultEnabled）过滤，全部关闭则整体不注入
     const dynamicTools = buildInjectedDynamicTools(
-      store.settings.dynamic_tools_disabled,
+      store.settings.dynamic_tools_state,
     );
     if (dynamicTools.length) params.dynamicTools = dynamicTools;
     // 无确定工作区时不传 cwd（交由 codex 用服务端默认目录），避免 cwd 为空串

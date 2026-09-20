@@ -371,7 +371,23 @@
 - 新建会话通过 `thread/start.dynamicTools` 注册 `codexui` 命名空间工具，agent 可在对话内直接调用：
   - `codexui_get_usage`（查询当前会话 token 消耗与上下文窗口占用）；
   - `codexui_compact_context`（压缩上下文）与 `codexui_add_scheduled_task`（创建定时任务，见「定时任务」）。
-- 工具调用经 `item/tool/call` 回由 codex-ui 应答，设置页「动态工具」区块可逐个启停（实验性、依赖 `experimentalApi`，仅新建会话注入）。
+  - `codexui_search_docs` 与 `codexui_index_docs`（售后知识库检索/建库，见「知识库」——**默认关闭**）。
+- **三态开关**：每个工具的开关状态由应用设置 `dynamic_tools_state`（`namespace.tool` → bool）决定——`true` 显式开启、`false` 显式关闭、缺键则用工具定义里的缺省（`get_usage`/`compact_context`/`add_scheduled_task` 缺省开启，两条知识库工具缺省关闭）。设置页「动态工具」区块的开关显示的是生效值，拨动即写入显式值（不提供"恢复缺省"入口）。
+- 工具调用经 `item/tool/call` 回由 codex-ui 应答（实验性、依赖 `experimentalApi`，仅新建会话注入；改动只影响之后新建的会话）。
+- **行为变化**：旧字段 `dynamic_tools_disabled`（禁用列表）已被上述三态映射取代且**不做迁移**——升级后此前手动关闭过的工具会回到各自缺省状态，需要在设置页重新关闭。
+
+### 知识库（设置页「知识库」Tab）
+
+售后文档的**本地离线检索**：文档抽取 → 本地 ONNX 向量化 → SQLite（向量 + FTS5 关键词）混合召回，由动态工具交给 codex 使用。
+
+- **与工作目录一对一**：一个会话工作目录对应一个知识库（同一目录下的多个会话共享同一个库）；检索/建库都作用于"当前会话工作目录"对应的那个库，换目录即换库，互不串扰。
+- **数据位置**：`<app data dir>/knowledge/` —— `kbs/<目录名>-<hash8>.sqlite` 为各工作目录的索引库（含 `-wal`/`-shm`），`model/bge-small-zh-v1.5/` 为随包向量模型；该目录自包含，可整体复制或删除。
+- **工具（默认关闭，需在「动态工具」开启）**：
+  - `codexui_search_docs(query, topK?)`：混合检索并返回带出处的片段（`[n] 文件名 › 章节（匹配 0.82）`），未建库时提示先建库；
+  - `codexui_index_docs(paths?, full?)`：扫描给定路径（缺省=当前工作目录，递归）下的 **PDF / Word(docx) / Markdown / txt**，抽取正文、按标题+段落切块（约 500 字、重叠 80）、本地向量化入库；按 `size + mtime` 增量，单文件失败只记录不中断；**幂等**（无变化时秒回当前统计，因此也可当状态查询）；文件数 >300 或同步等待超过 3 分钟自动转后台，完成后用 toast 汇报。
+- **设置页分区只做两件事**：列出各知识库（工作目录、文档数/切块数、上次更新时间、建库中状态）与删除（二次确认，只删索引，不动原始文档与模型）。建库与检索没有手工入口，全部由动态工具驱动。
+- **模型与分发**：默认 `BAAI/bge-small-zh-v1.5`（中文，512 维）。模型归档 `knowledge-model.tar.gz` 随安装包放在应用目录 `marketplaces/`，启动时解压到 `knowledge/model/`（复用内置插件的"临时目录解压 → 整体改名 + 版本比对"物化流程）；生成归档用 `pwsh -File scripts/build-knowledge-model.ps1`（默认量化版约 24 MB，`-Variant fp32` 为完整版）。
+- **ONNX Runtime**：以动态加载方式读取应用目录 `bin/onnxruntime.dll`（与 `codex.exe` 等同目录分发），因此不新增静态链接体积；用 `pwsh -File scripts/fetch-onnxruntime.ps1` 生成/更新（默认从 NuGet 取 1.30.0，先读包尾中央目录再按 Range 只拉那一个条目，实际传输约 6 MB；`-AlsoDev` 同时复制到 `src-tauri/target/{debug,release}/bin` 供本地运行，`-Source pypi` 改从 PyPI wheel 取，`-Full` 为 Range 不可用时的整包退路）。**版本下限 1.24**（`ort` 以 `GetApi(24)` 申请接口），脚本会读出 DLL 版本并强制校验；`build-release.bat` 在 `setup\bin\onnxruntime.dll` 缺失时自动调用该脚本（失败只告警，不阻断打包）。缺失或模型未就绪时，工具会返回可操作的中文提示（如"未找到 onnxruntime.dll（应随安装包放在应用目录的 bin/ 下）"），不影响其它功能。
 
 ### MCP 管理（设置页「MCP 管理」Tab）
 

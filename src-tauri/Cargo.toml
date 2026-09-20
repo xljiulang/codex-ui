@@ -68,6 +68,12 @@ reqwest = { version = "0.12", features = ["stream", "json"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "original-uri"] }
 futures-util = "0.3"
 rusqlite = { version = "0.40", features = ["bundled"] }
+fastembed = { version = "7", default-features = false, features = ["ort-load-dynamic"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "std", "api-24", "load-dynamic"] }
+pdf-extract = "0.12"
+zip = "8"
+quick-xml = "0.42"
+encoding_rs = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
