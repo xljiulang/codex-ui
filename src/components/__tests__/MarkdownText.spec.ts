@@ -4,12 +4,15 @@ import MarkdownText from "../MarkdownText.vue";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(() => Promise.resolve(null)),
+  convertFileSrc: vi.fn((p: string) => `asset://${p.replace(/\\/g, "/")}`),
 }));
 
 import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { store } from "../../composables/useCodex";
 
 const mockedInvoke = vi.mocked(invoke);
+const mockedConvertFileSrc = vi.mocked(convertFileSrc);
 const origWorker = globalThis.Worker;
 
 describe("MarkdownText 流式渲染与代码高亮", () => {
@@ -19,6 +22,7 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
 
   beforeEach(() => {
     mockedInvoke.mockClear();
+    mockedConvertFileSrc.mockClear();
     store.workspace = "D:/repo";
     // 测试环境固定走同步回退解析，避免 happy-dom Worker 挂起
     (globalThis as Record<string, unknown>).Worker = undefined;
@@ -365,5 +369,37 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
       "reveal_path",
       expect.anything(),
     );
+  });
+
+  it("传 basePath 时相对路径图片 src 转 asset URL", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "![](images/abc.jpg)", basePath: "D:/docs/readme.md" },
+    });
+    await flushPromises();
+    const img = wrapper.find("img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("asset://D:/docs/images/abc.jpg");
+  });
+
+  it("传 basePath 时远程与 data 图片 src 保持不变", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: {
+        text: "![a](https://e.com/a.png) ![b](data:image/png;base64,AAAA)",
+        basePath: "D:/docs/readme.md",
+      },
+    });
+    await flushPromises();
+    const imgs = wrapper.findAll("img");
+    expect(imgs[0].attributes("src")).toBe("https://e.com/a.png");
+    expect(imgs[1].attributes("src")).toBe("data:image/png;base64,AAAA");
+    expect(mockedConvertFileSrc).not.toHaveBeenCalled();
+  });
+
+  it("不传 basePath 时相对路径图片 src 保留原样", async () => {
+    const wrapper = mount(MarkdownText, {
+      props: { text: "![](images/abc.jpg)" },
+    });
+    await flushPromises();
+    expect(wrapper.find("img").attributes("src")).toBe("images/abc.jpg");
   });
 });

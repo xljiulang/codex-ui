@@ -11,12 +11,13 @@ import {
 import { openPathInApp } from "../composables/useSessionFs";
 import { renderMarkdown } from "../lib/markdownRenderer";
 import { copyText } from "../lib/clipboard";
+import { resolveImageSrc } from "../lib/pdfExport";
 import {
   hideTooltip,
   showTooltip,
 } from "../composables/useTooltip";
 
-const props = defineProps<{ text: string; streaming?: boolean }>();
+const props = defineProps<{ text: string; streaming?: boolean; basePath?: string }>();
 const root = ref<HTMLElement | null>(null);
 
 // 流式期间最多每 80ms 刷新一次展示文本，避免每个 delta 全量重解析；
@@ -32,6 +33,7 @@ watch(
       void nextTick(() => {
         decorateCodeBlocks();
         decorateLinks();
+        decorateImages();
       });
     }
   },
@@ -120,6 +122,7 @@ function applyHtml(h: string) {
   void nextTick(() => {
     decorateCodeBlocks();
     decorateLinks();
+    decorateImages();
   });
 }
 
@@ -130,6 +133,7 @@ onMounted(() => {
   } else {
     decorateCodeBlocks();
     decorateLinks();
+    decorateImages();
   }
 });
 
@@ -201,6 +205,22 @@ function decorateLinks() {
         if (!opened) openLink(h, root);
       }).catch(() => openLink(h, root));
     });
+  }
+}
+
+/** 相对路径本地图片（md 文件目录为基准）转 asset URL；
+ *  仅当传入 basePath（文件预览）时启用，聊天气泡等无文件基准场景不处理 */
+function decorateImages() {
+  if (!root.value || !props.basePath) return;
+  const imgs = root.value.querySelectorAll<HTMLImageElement>(
+    "img:not([data-img-ready])",
+  );
+  for (const img of imgs) {
+    img.setAttribute("data-img-ready", "1");
+    const src = img.getAttribute("src");
+    if (!src) continue;
+    const resolved = resolveImageSrc(src, props.basePath);
+    if (resolved) img.setAttribute("src", resolved);
   }
 }
 

@@ -62,6 +62,13 @@ const byteSizeLabel = computed(() =>
  */
 const previewText = computed(() => props.tab.editorState?.doc.toString() ?? "");
 
+/** md 文件绝对磁盘路径：图片相对路径以此为基准（兼容工作区内/外部文件） */
+const mdAbsPath = computed(() =>
+  /^[A-Za-z]:[\\/]/.test(props.tab.path)
+    ? props.tab.path
+    : `${props.tab.workspace.replace(/[\\/]+$/, "")}\\${props.tab.path}`,
+);
+
 const {
   ctxMenu,
   openCtx,
@@ -375,7 +382,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-show="!previewMode" ref="editorHost" class="text-editor-host"></div>
       <div v-if="previewMode" class="text-editor-preview">
-        <MarkdownText :text="previewText" />
+        <MarkdownText :text="previewText" :base-path="mdAbsPath" />
       </div>
     </div>
     <div class="text-editor-status">
