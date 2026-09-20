@@ -42,6 +42,9 @@ function selectTheme(id: ThemeId) {
     <div class="settings-card">
       <div class="settings">
         <div class="setting-row switch-row">
+          <label class="switch-text" for="error-notify">
+            会话错误时发系统通知（窗口没有前台焦点时）
+          </label>
           <label class="switch">
             <input
               id="error-notify"
@@ -51,12 +54,12 @@ function selectTheme(id: ThemeId) {
             />
             <span class="switch-track"></span>
           </label>
-          <label class="switch-text" for="error-notify">
-            会话错误时发系统通知（窗口没有前台焦点时）
-          </label>
         </div>
 
         <div class="setting-row switch-row">
+          <label class="switch-text" for="interaction-notify">
+            会话提权/交互/完成时发系统通知（窗口没有前台焦点时）
+          </label>
           <label class="switch">
             <input
               id="interaction-notify"
@@ -66,12 +69,12 @@ function selectTheme(id: ThemeId) {
             />
             <span class="switch-track"></span>
           </label>
-          <label class="switch-text" for="interaction-notify">
-            会话提权/交互/完成时发系统通知（窗口没有前台焦点时）
-          </label>
         </div>
 
         <div class="setting-row switch-row">
+          <label class="switch-text" for="enter">
+            Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
+          </label>
           <label class="switch">
             <input
               id="enter"
@@ -81,13 +84,11 @@ function selectTheme(id: ThemeId) {
             />
             <span class="switch-track"></span>
           </label>
-          <label class="switch-text" for="enter">
-            Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
-          </label>
         </div>
 
         <div class="setting-row">
           <div class="theme-row-head">
+            <label class="switch-text" for="glass">毛玻璃主题外观</label>
             <label class="switch">
               <input
                 id="glass"
@@ -97,7 +98,6 @@ function selectTheme(id: ThemeId) {
               />
               <span class="switch-track"></span>
             </label>
-            <label class="switch-text" for="glass">毛玻璃主题外观</label>
           </div>
           <div class="theme-picker">
             <button
@@ -200,10 +200,11 @@ function selectTheme(id: ThemeId) {
   font-size: var(--font-sm);
   color: var(--text-faint);
 }
-/* 开关在左、文字在右（仅本 Tab 的排布；其它分区仍是文字在左、开关在右） */
+/* 文字在左、开关在右（与基础设置等其它分区一致） */
 .switch-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-4);
 }
 
@@ -221,11 +222,11 @@ function selectTheme(id: ThemeId) {
   color: var(--text);
 }
 
-/* 主题行头部：毛玻璃开关在左、标题在右，同行并列 */
+/* 主题行头部：标题在左、毛玻璃开关在右，同行并列 */
 .theme-row-head {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }

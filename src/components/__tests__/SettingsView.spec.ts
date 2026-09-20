@@ -2784,10 +2784,10 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     const head = wrapper.find(".settings-section-personalization .theme-row-head");
     expect(head.find(".switch-text").text()).toBe("毛玻璃主题外观");
     expect(head.find(".switch input").attributes("id")).toBe("glass");
-    // 开关在左、文字在右：头部第一个 label 是开关，文字标签紧随其后
+    // 文字在左、开关在右：头部第一个 label 是文字标签，开关紧随其后
     const labels = head.findAll("label");
-    expect(labels[0].classes()).toContain("switch");
-    expect(labels[1].classes()).toContain("switch-text");
+    expect(labels[0].classes()).toContain("switch-text");
+    expect(labels[1].classes()).toContain("switch");
   });
 
   it("个性化三行已改 switch，且毛玻璃开关不在其行内", () => {
@@ -2796,7 +2796,7 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
       ".settings-section-personalization .setting-row.switch-row",
     );
     expect(rows).toHaveLength(3);
-    // 控件在左：switch 里的 input 与文字标签通过 id/for 关联（点文字也能切换）
+    // 文字在左、开关在右：switch 里的 input 与文字标签通过 id/for 关联（点文字也能切换）
     expect(rows[0].find(".switch > input").attributes("id")).toBe("error-notify");
     expect(rows[1].find(".switch > input").attributes("id")).toBe("interaction-notify");
     expect(rows[2].find(".switch > input").attributes("id")).toBe("enter");
