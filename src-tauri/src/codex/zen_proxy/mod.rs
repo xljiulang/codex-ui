@@ -1423,6 +1423,9 @@ fn zen_max_tokens_field(req: &Value) -> Option<OptionalField> {
 /// 只补缺失的名字：客户端已声明的真实工具（含命名空间扁平名与自由格式工具）一律保留、
 /// 顺序不变，同名时以客户端声明为准（不覆盖）；入站请求原本没有 `tools` 时，数组只含这
 /// 几个假工具。幂等：重复调用不会叠加。
+///
+/// 补完工具后另把「弃用工具声明」教学写进 `messages`（见 [`inject_fake_tools_instruction`]）：
+/// 上游是 chat/completions，没有 `instructions` 字段，教学只能走消息列表。
 fn patch_zen_request_body(body: &mut Value) {
     let existing = body
         .get("tools")
@@ -1470,21 +1473,40 @@ fn fake_tools_instruction(added: &[&str]) -> Option<String> {
     ))
 }
 
-/// 将弃用工具教学文本注入 `instructions`（幂等：已包含则跳过）。
+/// 把弃用工具教学文本并入发往上游的 `messages`（**不是**顶层 `instructions`）。
+///
+/// 上游是 chat/completions，协议里没有 `instructions` 这个字段：入站的 Responses
+/// `instructions` 早在 [`responses_to_chat`] 阶段就被消费成了 `messages[0]` 的 system 消息，
+/// 翻译后的请求体顶层根本没有该键——写在那里只会给上游多发一个未知字段，模型永远看不到。
+/// 因此教学只能落进消息列表：
+/// - 首条是 system 消息且 `content` 是字符串 → 追加到它末尾（原内容逐字保留、仍是前缀）；
+/// - 否则（没有 system 消息，或首条 system 的 `content` 不是字符串）→ 在 `messages` **最前**
+///   插一条独立 system 消息，已有消息顺序不变。
+///
+/// 幂等：目标 system 消息已包含该文本时直接返回（首次调用后首条必为带教学的 system 消息，
+/// 重复调用天然命中）。`messages` 缺失或不是数组时按空数组新建（纯函数，不 panic）。
 fn inject_fake_tools_instruction(body: &mut Value, text: &str) {
-    let existing = body
-        .get("instructions")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if existing.contains(text) {
-        return;
+    if !body.get("messages").is_some_and(Value::is_array) {
+        body["messages"] = json!([]);
     }
-    let merged = if existing.is_empty() {
-        text.to_string()
-    } else {
-        format!("{existing}\n\n{text}")
-    };
-    body["instructions"] = Value::String(merged);
+    let leading_system_text = body["messages"]
+        .as_array()
+        .and_then(|messages| messages.first())
+        .filter(|message| message.get("role").and_then(Value::as_str) == Some("system"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    match leading_system_text {
+        Some(existing) if existing.contains(text) => {}
+        Some(existing) => {
+            body["messages"][0]["content"] = Value::String(format!("{existing}\n\n{text}"));
+        }
+        None => {
+            if let Some(messages) = body["messages"].as_array_mut() {
+                messages.insert(0, json!({ "role": "system", "content": text }));
+            }
+        }
+    }
 }
 
 /// Responses 的 `tool_choice` → chat 形态：字符串直接透传，

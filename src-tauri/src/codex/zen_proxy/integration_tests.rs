@@ -860,6 +860,16 @@ async fn zen_body_patch_applies_to_nudge_continuation() {
             vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
             "每一轮都要补假工具：{call}"
         );
+        // 教学只能走 messages：system 消息同时带首轮契约与弃用声明
+        let system = call["messages"][0]["content"].as_str().unwrap_or_default();
+        assert!(
+            system.contains(DEFAULT_MODE_CONTRACT_TEXT) && system.contains("弃用工具声明"),
+            "system 消息应同时带首轮教学契约与弃用教学：{call}"
+        );
+        assert!(
+            call.get("instructions").is_none(),
+            "chat 体不应出现顶层 instructions：{call}"
+        );
     }
 }
 
@@ -2408,6 +2418,22 @@ async fn zen_body_patch_reaches_upstream_request_body() {
         got.body["tools"][1]["function"]["description"],
         ZEN_FAKE_TOOL_DESCRIPTION
     );
+    // 该请求非流式、无 instructions → 没有 system 消息，教学另起一条放在最前
+    assert!(
+        got.body.get("instructions").is_none(),
+        "chat 体不应出现顶层 instructions：{}",
+        got.body
+    );
+    assert_eq!(
+        got.body["messages"][0]["role"], "system",
+        "无 system 消息时教学应另起一条放在最前：{}",
+        got.body
+    );
+    let system = got.body["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        system.contains("弃用工具声明") && system.contains("bash、edit、glob、grep、read、write"),
+        "system 消息应带列出全部 6 个假工具的弃用教学：{system}"
+    );
 }
 
 /// 非 Zen 上游（自建 / 第三方兼容端点）：同一个入站请求一个字段都不补。
@@ -2448,6 +2474,20 @@ async fn zen_body_patch_is_off_for_non_zen_upstream() {
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["shell"], "非 Zen 上游不补假工具：{}", got.body);
+    assert!(
+        got.body.get("instructions").is_none(),
+        "非 Zen 上游不应出现顶层 instructions：{}",
+        got.body
+    );
+    assert!(
+        got.body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|message| message["role"] != "system"),
+        "非 Zen 上游不应注入 system 教学：{}",
+        got.body
+    );
 }
 
 /// 上游在 4xx 错误体里指名 `max_tokens`：摘掉后重试一次（复用既有可选字段降级路径），

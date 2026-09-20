@@ -2472,11 +2472,16 @@ fn patch_zen_request_body_appends_missing_required_tools() {
             json!({ "type": "object", "properties": {} })
         );
     }
-    // 6 个工具全部追加 → instructions 含全部 6 个工具名
-    let inst = body["instructions"].as_str().unwrap().to_string();
+    // 6 个工具全部追加 → 教学并入 messages：原本没有 system 消息，新建一条放在最前
+    assert_eq!(body["messages"][0]["role"], "system");
+    let inst = body["messages"][0]["content"].as_str().unwrap().to_string();
     assert!(
         inst.contains("bash、edit、glob、grep、read、write"),
         "教学应列出全部 6 个工具：{inst}"
+    );
+    assert!(
+        body.get("instructions").is_none(),
+        "chat 体不应出现顶层 instructions：{body}"
     );
     // 幂等：再调用一次不叠加
     patch_zen_request_body(&mut body);
@@ -2484,8 +2489,13 @@ fn patch_zen_request_body_appends_missing_required_tools() {
         body["tools"].as_array().unwrap().len(),
         ZEN_REQUIRED_TOOL_NAMES.len()
     );
-    // 幂等：instructions 不重复追加
-    assert_eq!(body["instructions"].as_str().unwrap(), &inst);
+    // 幂等：不新增消息、教学不重复追加
+    assert_eq!(
+        body["messages"].as_array().unwrap().len(),
+        1,
+        "幂等调用不应新增消息：{body}"
+    );
+    assert_eq!(body["messages"][0]["content"].as_str().unwrap(), &inst);
 
     // 已有工具：真实工具保留且顺序不变、同名时以客户端声明为准，只补缺失的名字
     let mut body = json!({
@@ -2521,7 +2531,7 @@ fn patch_zen_request_body_appends_missing_required_tools() {
     );
     assert_eq!(tools[2]["function"]["description"], "客户端自己的 bash");
     // bash 已存在不追加 → 教学只列 edit/glob/grep/read/write
-    let inst = body["instructions"].as_str().unwrap();
+    let inst = body["messages"][0]["content"].as_str().unwrap();
     assert!(
         inst.contains("edit、glob、grep、read、write"),
         "教学应列出 5 个缺失工具：{inst}"
@@ -2546,30 +2556,83 @@ fn fake_tools_instruction_lists_only_added_tools() {
 }
 
 #[test]
-fn patch_zen_request_body_preserves_existing_instructions() {
+fn patch_zen_request_body_appends_teaching_to_existing_system_message() {
+    // 真实形状：入站 instructions 已被 responses_to_chat 翻成首条 system 消息
     let mut body = json!({
         "model": "m",
-        "instructions": "原有教学内容",
-        "messages": [],
+        "messages": [{ "role": "system", "content": "原有教学内容" }],
         "stream": true
     });
     patch_zen_request_body(&mut body);
-    let inst = body["instructions"].as_str().unwrap();
+    let messages = body["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1, "应并入已有 system 消息、不新增消息：{body}");
+    let inst = messages[0]["content"].as_str().unwrap();
     assert!(
         inst.starts_with("原有教学内容"),
-        "应保留原有 instructions 前缀：{inst}"
+        "应保留原有 system 文本前缀：{inst}"
     );
     assert!(inst.contains("弃用工具声明"), "应追加弃用教学：{inst}");
+    assert!(
+        inst.contains("原有教学内容\n\n"),
+        "原文本与教学之间应有一个空行分隔：{inst}"
+    );
+    assert!(
+        body.get("instructions").is_none(),
+        "chat 体不应出现顶层 instructions：{body}"
+    );
 }
 
 #[test]
 fn patch_zen_request_body_idempotent_instructions() {
     let mut body = json!({ "model": "m", "messages": [], "stream": true });
     patch_zen_request_body(&mut body);
-    let first = body["instructions"].as_str().unwrap().to_string();
+    let first = body["messages"][0]["content"].as_str().unwrap().to_string();
     patch_zen_request_body(&mut body);
-    let second = body["instructions"].as_str().unwrap();
+    assert_eq!(
+        body["messages"].as_array().unwrap().len(),
+        1,
+        "幂等调用不应新增消息：{body}"
+    );
+    let second = body["messages"][0]["content"].as_str().unwrap();
     assert_eq!(first, second, "幂等调用不应重复追加教学");
+}
+
+#[test]
+fn patch_zen_request_body_inserts_system_message_before_user_message() {
+    // 没有 system 消息（如非流式、无 instructions 的请求）：教学另起一条放在最前
+    let mut body = json!({
+        "model": "m",
+        "messages": [{ "role": "user", "content": "hi" }],
+        "stream": true
+    });
+    patch_zen_request_body(&mut body);
+    let messages = body["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2, "应插一条 system 消息、不动原有消息：{body}");
+    assert_eq!(messages[0]["role"], "system");
+    assert!(messages[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("弃用工具声明"));
+    assert_eq!(messages[1]["role"], "user");
+    assert_eq!(messages[1]["content"], "hi");
+}
+
+#[test]
+fn patch_zen_request_body_inserts_when_leading_system_content_is_not_text() {
+    // 首条 system 的 content 不是字符串（分片形态）：不合并，另插一条 system 消息
+    let mut body = json!({
+        "model": "m",
+        "messages": [{ "role": "system", "content": [{ "type": "text", "text": "分段" }] }],
+    });
+    patch_zen_request_body(&mut body);
+    let messages = body["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 2, "分片 system 消息无法追加，应另插一条：{body}");
+    assert_eq!(messages[0]["role"], "system");
+    assert!(messages[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("弃用工具声明"));
+    assert!(messages[1]["content"].is_array(), "原有分片消息应逐字保留");
 }
 
 #[test]
