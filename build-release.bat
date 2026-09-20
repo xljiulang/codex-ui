@@ -68,8 +68,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem 知识库向量推理所需的 ONNX Runtime（随包分发到 {app}\bin）：缺失时从 NuGet 取。
-rem 取不到只告警不阻断——缺 DLL 只影响知识库检索，应用其余功能照常。
+rem ONNX Runtime for knowledge base retrieval (shipped to {app}\bin): fetch from NuGet if absent.
+rem A failure only warns; a missing DLL affects knowledge base retrieval only.
 if not exist "setup\bin\onnxruntime.dll" (
   echo [4/5] Fetching onnxruntime.dll ^(ONNX Runtime 1.24+^) ...
   where pwsh >nul 2>nul
