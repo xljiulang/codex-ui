@@ -666,6 +666,27 @@ build-release.bat
 > 仅当 `runtime.json` 缺失或其 `bundleVersion` 旧于 `26.819.11345` 才下载。
 > 因此安装包体积变小，但首次启用 `openai-primary-runtime` 依赖网络；下载/解压失败时该市场不注册、下次启动重试。
 
+### 用 GitHub Actions 构建 release（推荐）
+
+本机 `cargo build --release` 较慢，日常把这一步交给 CI（`.github/workflows/build.yml`，workflow 名 `build-release`）：
+
+- 推送到 `main` 自动构建（只改 `*.md` / `docs/` 的提交不触发）；产物在 Actions 运行页的 **Artifacts** 里下载，名字是 `codex-ui-exe-<短提交号>`，压缩包内含 `codex-ui.exe` 与 `build-info.txt`（版本、提交、ref、run 号、UTC 时间），保留 90 天；
+- 推 `v*` 标签会额外创建同名 GitHub Release，并附件 `codex-ui.exe` 与 `build-info.txt`（标签与 `Cargo.toml` 版本号不一致时只告警，不中断发布）；
+- 也可以在 Actions 页面用该 workflow 的 **Run workflow** 手动触发。
+
+CI 只做「前端构建（`npm run build`，含 `vue-tsc --noEmit`）+ Rust release」两件事：**不产出安装包**，也不接触 `setup\bin` 下的 sidecar 二进制。
+
+拿到 CI 产物后，把它拷进 `setup\` 再只打安装包（跳过本机最耗时的 Rust 编译）：
+
+```powershell
+build-installer.bat                                          # 用现有的 setup\codex-ui.exe
+build-installer.bat $env:USERPROFILE\Downloads\codex-ui.exe  # 指定下载下来的 exe（先拷到 setup\）
+```
+
+产物同样是 `setup\output\codex-ui-win-x64.exe`。该脚本只调 Inno Setup（`setup\setup.iss`），要求 `setup\codex-ui.exe`、`setup\bin`、`setup\marketplaces` 已就位；`setup\codex-ui.exe` 缺失时脚本会提示从 Actions 下载 artifact 或改跑 `build-release.bat`。
+
+> exe 内的版本号来自 `src-tauri/Cargo.toml`（与 `tauri.conf.json` 中的 `version` 一致），安装包版本号由 Inno Setup 从 exe 自身读取，与 tag 无关。
+
 ## 测试
 
 ```powershell

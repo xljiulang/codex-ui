@@ -1,0 +1,144 @@
+# codex-ui release 构建流水线
+#
+# 目的：把本机最耗时的「npm run build + cargo build --release」搬到 GitHub Actions，
+# 本机只保留 Inno Setup 打包（见 build-installer.bat）。
+#
+# - push main（纯文档提交除外）→ 构建 codex-ui.exe 并作为 artifact 上传
+# - push v* 标签 → 额外创建 GitHub Release 并附件 codex-ui.exe
+# - 手动触发 → 同上（非标签运行只出 artifact）
+#
+# 本 workflow 不产出安装包，也不接触 setup\bin 下的 sidecar 二进制。
+
+name: build-release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    # 路径过滤只作用于分支推送（GitHub 不对标签推送求值路径过滤）
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".gitignore"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支连续提交只保留最新一次构建；tag 发版不互相取消
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: 构建 codex-ui.exe
+    runs-on: windows-latest
+    outputs:
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建前端
+        run: npm run build
+
+      - name: 构建 Rust release
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
+
+      - name: 读取版本并写入构建信息
+        id: meta
+        shell: pwsh
+        run: |
+          $cargo = "src-tauri/Cargo.toml"
+          $version = (Select-String -LiteralPath $cargo -Pattern '^version\s*=\s*"([^"]+)"' |
+            Select-Object -First 1).Matches[0].Groups[1].Value
+          if (-not $version) { throw "无法从 $cargo 解析版本号" }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "short_sha=$($env:GITHUB_SHA.Substring(0, 7))" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          New-Item -ItemType Directory -Force -Path ci-output | Out-Null
+          @(
+            "version=$version"
+            "commit=$env:GITHUB_SHA"
+            "ref=$env:GITHUB_REF_NAME"
+            "run=$env:GITHUB_RUN_NUMBER"
+            "built-at=$([DateTime]::UtcNow.ToString('u'))"
+          ) | Set-Content -LiteralPath ci-output/build-info.txt -Encoding utf8
+          Get-Content -LiteralPath ci-output/build-info.txt
+
+      - name: 校验产物
+        shell: pwsh
+        run: |
+          $exe = "src-tauri/target/release/codex-ui.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "未找到产物：$exe" }
+          $size = (Get-Item -LiteralPath $exe).Length
+          if ($size -lt 1MB) { throw "产物体积异常（$size 字节），前端可能未嵌入" }
+          Write-Host "产物：$exe（$([math]::Round($size / 1MB, 1)) MB）"
+          Copy-Item -LiteralPath $exe -Destination ci-output/codex-ui.exe -Force
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-ui-exe-${{ steps.meta.outputs.short_sha }}
+          path: |
+            ci-output/codex-ui.exe
+            ci-output/build-info.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: 发布 Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-ui-exe-${{ needs.build.outputs.short_sha }}
+
+      - name: 校验 tag 与版本号一致
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::warning::标签 $GITHUB_REF_NAME 与 Cargo.toml 版本 $VERSION 不一致；安装包版本号取自 exe 自身，不中断发布"
+          fi
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          ls -l
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" codex-ui.exe build-info.txt --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              codex-ui.exe \
+              build-info.txt
+          fi
