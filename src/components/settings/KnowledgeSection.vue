@@ -62,7 +62,7 @@ async function onDelete(kb: KnowledgeKb) {
       <div class="model-config-card-head">
         <h3>已建立的知识库</h3>
         <div class="model-config-head-actions">
-          <span class="knowledge-hint">索引数据位于应用数据目录 knowledge/kbs/</span>
+          <span class="knowledge-hint">索引数据位于应用数据目录 kbs/</span>
         </div>
       </div>
       <div v-if="!knowledgeKbs.length" class="knowledge-empty">

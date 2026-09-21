@@ -1,13 +1,12 @@
 //! 知识库路径与库名约定。
 //!
-//! - **索引数据**：`%APPDATA%\com.codexui.app\knowledge\kbs\<库名>-<hash8>.sqlite`
-//!   （与 codex-ui 的 `app_data_dir()/knowledge` 同一目录，硬编码在此，应用不再传路径）；
+//! - **索引数据**：`%APPDATA%\com.codexui.app\kbs\<库名>-<hash8>.sqlite`
+//!   （与 codex-ui 的 `app_data_dir()` 同一目录，硬编码在此，应用不再传路径）；
 //! - **模型与运行库**：与 `codexui-kb.exe` 同目录（自包含）。
 //!
 //! ```text
-//! %APPDATA%\com.codexui.app\
-//! └─ knowledge/
-//!    └─ kbs/<库名>-<hash8>.sqlite (+ -wal / -shm)
+//! %APPDATA%\com.codexui.app\      # 应用数据目录本身（与 cache/ logs/ wechat/ 并列）
+//! └─ kbs/<库名>-<hash8>.sqlite (+ -wal / -shm)
 //!
 //! <exe 目录>/                      # 发布版 = {app}\bin\，开发版 = src-tauri\target\debug\
 //! ├─ codexui-kb.exe
@@ -48,19 +47,19 @@ pub fn model_dir() -> Result<PathBuf, String> {
     Ok(model_root()?.join(MODEL_ID))
 }
 
-/// 知识库数据根目录：`%APPDATA%\com.codexui.app\knowledge`
+/// 知识库数据根目录：`%APPDATA%\com.codexui.app`（应用数据目录本身，库文件在其下的 `kbs\`）
 ///
-/// 与 codex-ui 的 `app_data_dir()/knowledge` 同一目录（Tauri v2 在 Windows 用
+/// 与 codex-ui 的 `app_data_dir()` 同一目录（Tauri v2 在 Windows 用
 /// `%APPDATA%/<identifier>`）。`APPDATA` 缺失时报错而不回退，避免数据落到两处。
 pub fn data_dir() -> Result<PathBuf, String> {
     let appdata = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
         .ok_or_else(|| {
-            "无法定位知识库数据目录：环境变量 APPDATA 未设置（期望 %APPDATA%\\com.codexui.app\\knowledge）"
+            "无法定位知识库数据目录：环境变量 APPDATA 未设置（期望 %APPDATA%\\com.codexui.app）"
                 .to_string()
         })?;
-    Ok(appdata.join(APP_IDENTIFIER).join("knowledge"))
+    Ok(appdata.join(APP_IDENTIFIER))
 }
 
 /// 知识库文件目录（`<data_dir>/kbs`）
@@ -224,8 +223,12 @@ mod tests {
             Some(v) => std::env::set_var("APPDATA", v),
             None => std::env::remove_var("APPDATA"),
         }
-        assert!(dir.ends_with("knowledge"));
-        assert!(dir.to_string_lossy().contains(APP_IDENTIFIER));
-        assert!(dir.starts_with("C:\\Users\\tester\\AppData\\Roaming"));
+        // 数据根 = 应用数据目录本身（不再有 knowledge 这一层），库文件在其下的 kbs/
+        assert_eq!(
+            dir,
+            std::path::Path::new("C:\\Users\\tester\\AppData\\Roaming").join(APP_IDENTIFIER)
+        );
+        assert!(dir.ends_with(APP_IDENTIFIER));
+        assert_eq!(kbs_dir(&dir).file_name().unwrap(), "kbs");
     }
 }

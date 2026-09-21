@@ -42,7 +42,7 @@ codexui-kb —— codex-ui 知识库 CLI
   codexui-kb version                           输出版本与协议版本
 
 库名不能是路径（不含 / \\ : 等字符）；库与工作目录解耦，跨目录共享同一个库时用同一个库名。
-数据目录固定 %APPDATA%\\com.codexui.app\\knowledge；模型与 onnxruntime.dll 位于本程序同目录。
+数据目录固定 %APPDATA%\\com.codexui.app（库文件在其下的 kbs\\）；模型与 onnxruntime.dll 位于本程序同目录。
 
 输出：stdout 为 NDJSON（progress / result / error），stderr 为人可读日志。
 退出码：0 成功、1 内部错误、2 参数错误、3 模型未就绪、4 库被占用、5 已取消。";
@@ -331,7 +331,7 @@ fn cmd_delete<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
     Ok(EXIT_OK)
 }
 
-/// 数据目录：固定 `%APPDATA%\com.codexui.app\knowledge`
+/// 数据目录：固定 `%APPDATA%\com.codexui.app`（库文件在其下的 `kbs\`）
 fn data_dir() -> Result<std::path::PathBuf, CliError> {
     paths::data_dir().map_err(|e| CliError::new(EXIT_INTERNAL, e))
 }

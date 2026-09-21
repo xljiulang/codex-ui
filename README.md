@@ -383,7 +383,7 @@
 - **独立进程实现**：整条流水线跑在随包分发的 `codexui-kb.exe`（`{app}\bin\`，源码在 `src-tauri/crates/knowledge-cli/`）里，codex-ui 每次以一次性子进程调用它（NDJSON 协议）：向量化会话与检索用的全量向量都在子进程内，退出即释放，**索引时 UI 进程内存不随语料规模增长**；代价是每次检索多一次进程启动与模型加载（数十~数百毫秒）。开发环境需先 `cargo build -p knowledge-cli`（`build-dev.bat` 已内置该步骤），也可用 `CODEXUI_KB_BIN` 指定可执行文件。
 - **CLI 自包含目录**：`codexui-kb.exe`、`onnxruntime.dll`、`model\bge-small-zh-v1.5\` 三者同目录（发布版 `{app}\bin\`、开发版 `src-tauri\target\debug\`），模型与运行库都由子进程按自身所在目录解析，codex-ui 不做任何物化、也不传模型路径。
 - **库名标识、来源目录登记**：库是机器级全局命名（一个库对应一个已登记的来源目录），与工作目录解耦；跨目录共享同一个库时双方使用同一个库名。agent 侧由 skill 调用 `codexui-kb` 完成建库与检索。
-- **数据位置**：`%APPDATA%\com.codexui.app\knowledge\kbs\<库名>-<hash8>.sqlite`（每个库一个文件，含 `-wal`/`-shm`）；换机迁移只需拷贝该目录（模型随程序目录走）。数据目录与模型都由 CLI 自行解析，所有命令都不需要路径参数。**旧版按工作目录命名与寻址的库不兼容**，需删除后用 `create` 重建。
+- **数据位置**：`%APPDATA%\com.codexui.app\kbs\<库名>-<hash8>.sqlite`（每个库一个文件，含 `-wal`/`-shm`，与 `cache\`、`logs\`、`wechat\` 并列）；换机迁移只需拷贝该目录（模型随程序目录走）。数据目录与模型都由 CLI 自行解析，所有命令都不需要路径参数。**旧版按工作目录命名与寻址的库、以及旧 `knowledge\kbs` 位置都不兼容**，需删除后用 `create` 重建。
 - **命令集**（动态工具已移除，改由 skill 调用下列命令）：
   - `codexui-kb create <库名> <目录>`：新建库并登记索引来源目录（目录不存在报错；同名同来源幂等、同名不同来源报错）；
   - `codexui-kb search <库名> --query <检索词> [--top-k <n>]`：混合检索并返回带出处的片段（`[n] 文件名 › 章节（匹配 0.82）`），库不存在或为空返回空结果；

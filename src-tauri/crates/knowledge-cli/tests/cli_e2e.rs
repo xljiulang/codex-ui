@@ -106,6 +106,22 @@ fn create_index_search_incremental_and_shared_across_dirs() {
         .iter()
         .any(|v| v.get("type").and_then(Value::as_str) == Some("progress")));
 
+    // 落盘位置：库文件在 <APPDATA>\com.codexui.app\kbs\，且不再创建 knowledge\ 目录
+    let kb_dir = appdata.join("com.codexui.app").join("kbs");
+    let files: Vec<String> = std::fs::read_dir(&kb_dir)
+        .expect("kbs 目录应存在")
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        files.iter().any(|f| f.starts_with("售后手册-") && f.ends_with(".sqlite")),
+        "库文件应落在 kbs 下：{files:?}"
+    );
+    assert!(
+        !appdata.join("com.codexui.app").join("knowledge").exists(),
+        "不应再创建 knowledge 子目录"
+    );
+
     // search：命中含错误码的切块，并带回库名与来源
     let (code, lines) = run_cli(
         &appdata,

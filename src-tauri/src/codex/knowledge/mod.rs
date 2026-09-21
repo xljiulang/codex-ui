@@ -11,8 +11,8 @@
 //! ├─ onnxruntime.dll
 //! └─ model/bge-small-zh-v1.5/{model.onnx, tokenizer.json, config.json, ...}
 //!
-//! %APPDATA%\com.codexui.app\
-//! └─ knowledge/kbs/<库名>-<hash8>.sqlite (+ -wal / -shm)   # 数据目录由 CLI 自行解析
+//! %APPDATA%\com.codexui.app\                       # 应用数据目录（CLI 自行解析）
+//! └─ kbs/<库名>-<hash8>.sqlite (+ -wal / -shm)
 //! ```
 //! 库名缺省由前端按会话工作目录名派生（`D:\售后\手册` → `手册`），因此不同目录的同名库
 //! 会共享；跨目录共享同一个库时，双方使用同一个库名即可。

@@ -1,5 +1,5 @@
 // 知识库设置分区状态：列表（库名 + 来源目录）+ 删除 + 建库进度。
-// 数据由 codexui-kb.exe 管理（%APPDATA%\com.codexui.app\knowledge\kbs），
+// 数据由 codexui-kb.exe 管理（%APPDATA%\com.codexui.app\kbs），
 // 索引/检索由 skill 调用 CLI 完成；本模块只做命令转发与事件驱动的列表刷新。
 import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";

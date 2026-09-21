@@ -7,11 +7,13 @@
 //! 这样做的唯一目的是内存隔离：向量化会话（ONNX Runtime）与检索时的全量向量
 //! 都只存在于这个短命进程里，进程退出即释放，UI 进程内存不随语料规模增长。
 //!
-//! 数据布局与 codex-ui 既有实现完全一致（因此既有知识库无需重建）：
+//! 数据布局：
 //! ```text
-//! <app data dir>/knowledge/
-//! ├─ model/bge-small-zh-v1.5/{model.onnx, tokenizer.json, config.json, ...}
-//! └─ kbs/<目录名>-<hash8>.sqlite (+ -wal / -shm)
+//! <app data dir>/                    # %APPDATA%\com.codexui.app
+//! └─ kbs/<库名>-<hash8>.sqlite (+ -wal / -shm)
+//!
+//! <exe 目录>/                        # 模型与 onnxruntime.dll 与 CLI 同目录
+//! └─ model/bge-small-zh-v1.5/{model.onnx, tokenizer.json, config.json, ...}
 //! ```
 
 pub mod chunk;

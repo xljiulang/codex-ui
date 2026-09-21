@@ -2,8 +2,8 @@
 //!
 //! 知识库的全部重活（PDF/docx 抽取、切块、ONNX 向量化、SQLite 混合检索）都在
 //! `codexui-kb.exe` 里完成；这里只负责起进程、读协议、把错误翻译成中文。
-//! **数据目录与模型都由子进程自行解析**（`%APPDATA%\com.codexui.app\knowledge`
-//! 与 CLI 同目录的 `model/`），本层不传任何路径参数。
+//! **数据目录与模型都由子进程自行解析**（`%APPDATA%\com.codexui.app` 与其下 `kbs\`、
+//! CLI 同目录的 `model/`），本层不传任何路径参数。
 //!
 //! 协议见 `crates/knowledge-cli/src/cli.rs`：stdout 为 NDJSON（progress / result /
 //! error），退出码 0 成功、2 参数错误、3 模型未就绪、4 库被占用、5 已取消。
