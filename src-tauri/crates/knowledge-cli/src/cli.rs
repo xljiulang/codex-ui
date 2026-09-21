@@ -1,27 +1,26 @@
-//! 命令行协议层：参数解析 + 面向 codex-ui 的 NDJSON 输出。
+//! 命令行协议层：参数解析 + 面向 codex-ui（及 skill）的 NDJSON 输出。
 //!
 //! stdout 协议（每行一个 JSON 对象，UTF-8）：
-//! - 若干 `{"type":"progress","cwd":…,"phase":"scan|index|done","processed":n,"total":n,"current":"…"}`
-//! - 最后恰好一条 `{"type":"result",…}`（`index` 带 `summary`、`search` 带 `hits`、
-//!   `list` 带 `kbs`、`delete` 带 `ok`、`version` 带 `version` 与 `codexUiApi`）
+//! - 若干 `{"type":"progress","kb":"…","phase":"scan|index|done","processed":n,"total":n,"current":"…"}`
+//! - 最后恰好一条 `{"type":"result",…}`（`create` 带 `created/kb/source/file`、`index` 带 `summary`、
+//!   `search` 带 `hits`、`list` 带 `kbs`、`delete` 带 `ok`、`version` 带 `version` 与 `codexUiApi`）
 //! - 或 `{"type":"error","code":n,"message":"…"}`（中文，可直接展示给用户）
 //!
 //! stderr 只放人可读日志，codex-ui 只在失败时截取尾部用于诊断。
 //!
-//! 退出码：0 成功、1 内部错误、2 参数错误、3 模型/ONNX Runtime 未就绪、
-//! 4 知识库被占用、5 保留给"已取消"（当前由父进程杀进程实现，不主动返回）。
+//! 退出码：0 成功、1 内部错误、2 参数错误、3 模型/ONNX Runtime 未就绪、4 库被占用、
+//! 5 保留给"已取消"（由父进程杀进程实现，不主动返回）。
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use serde_json::json;
 
 use crate::{embed, index, paths, search, store};
 
-/// 协议版本：codex-ui 用它校验 CLI 与自身是否匹配
-pub const API_VERSION: u32 = 1;
+/// 协议版本：codex-ui 用它校验 CLI 与自身是否匹配（v2 = create + 按库名操作 + 无路径参数）
+pub const API_VERSION: u32 = 2;
 
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_INTERNAL: i32 = 1;
@@ -34,14 +33,16 @@ const USAGE: &str = "\
 codexui-kb —— codex-ui 知识库 CLI
 
 用法：
-  codexui-kb index  --data-dir <知识库根目录> --cwd <工作目录> [--roots <路径> ...] [--full] [--model-dir <模型目录>]
-  codexui-kb search --data-dir <知识库根目录> --cwd <工作目录> --query <检索词> [--top-k <n>] [--model-dir <模型目录>]
-  codexui-kb list   --data-dir <知识库根目录>
-  codexui-kb delete --data-dir <知识库根目录> --file <库文件名>
-  codexui-kb version
+  codexui-kb create <库名> <目录>              新建库并登记索引来源目录
+  codexui-kb index  <库名> [--full]            按已登记来源建库/增量更新
+  codexui-kb search <库名> --query <检索词> [--top-k <n>]   检索指定库
+  codexui-kb list                              列出所有库
+  codexui-kb delete <库名>                     按库名删除（含 -wal/-shm）
+  codexui-kb delete --file <库文件名>          删除损坏库（按文件名兜底）
+  codexui-kb version                           输出版本与协议版本
 
---model-dir 缺省为「codexui-kb.exe 同目录的 model/bge-small-zh-v1.5」；
---data-dir 只承载各工作目录的 kbs/*.sqlite 索引。
+库名不能是路径（不含 / \\ : 等字符）；库与工作目录解耦，跨目录共享同一个库时用同一个库名。
+数据目录固定 %APPDATA%\\com.codexui.app\\knowledge；模型与 onnxruntime.dll 位于本程序同目录。
 
 输出：stdout 为 NDJSON（progress / result / error），stderr 为人可读日志。
 退出码：0 成功、1 内部错误、2 参数错误、3 模型未就绪、4 库被占用、5 已取消。";
@@ -107,13 +108,12 @@ fn dispatch<W: Write>(args: &[String], out: &mut W) -> Result<i32, CliError> {
     }
     match command.as_str() {
         "version" => cmd_version(out, rest),
+        "create" => cmd_create(out, rest),
         "index" => cmd_index(out, rest),
         "search" => cmd_search(out, rest),
         "list" => cmd_list(out, rest),
         "delete" => cmd_delete(out, rest),
-        other => Err(CliError::usage(format!(
-            "未知子命令：{other}\n\n{USAGE}"
-        ))),
+        other => Err(CliError::usage(format!("未知子命令：{other}\n\n{USAGE}"))),
     }
 }
 
@@ -132,17 +132,79 @@ fn cmd_version<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> 
     Ok(EXIT_OK)
 }
 
-fn cmd_index<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
-    let flags = Flags::parse(rest, &["--data-dir", "--cwd", "--roots", "--model-dir"], &["--full"])?;
-    let data_dir = flags.required_path("--data-dir")?;
-    let cwd = flags.required("--cwd")?;
-    let model_dir = flags.model_dir()?;
-    let roots_arg: Vec<String> = flags.get_all("--roots").to_vec();
-    let full = flags.has("--full");
+/// `create <库名> <目录>`
+fn cmd_create<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
+    let args = Args::parse(rest, &[], &[])?;
+    let tokens = args.positional();
+    let [name, source] = tokens.as_slice() else {
+        return Err(CliError::usage(format!(
+            "用法：codexui-kb create <库名> <目录>\n\n{USAGE}"
+        )));
+    };
+    let (normalized, display) = paths::normalize_kb_name(name).map_err(CliError::usage)?;
+    let source = source.trim();
+    if source.is_empty() {
+        return Err(CliError::usage("来源目录不能为空"));
+    }
+    let source_path = std::path::Path::new(source);
+    if !source_path.is_dir() {
+        return Err(CliError::usage(format!("来源目录不存在或不是目录：{source}")));
+    }
+    let data_dir = data_dir()?;
+    let (store, created) = store::KbStore::create(&data_dir, &normalized, &display, source)
+        .map_err(map_engine_error)?;
+    let file = store
+        .path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    write_line(
+        out,
+        &json!({
+            "type": "result",
+            "created": created,
+            "kb": store.kb_display(),
+            "source": store.source_display(),
+            "file": file,
+        }),
+    )?;
+    Ok(EXIT_OK)
+}
 
+/// `index <库名> [--full]`
+fn cmd_index<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
+    let args = Args::parse(rest, &[], &["--full"])?;
+    let tokens = args.positional();
+    let [name] = tokens.as_slice() else {
+        return Err(CliError::usage(format!(
+            "用法：codexui-kb index <库名> [--full]\n\n{USAGE}"
+        )));
+    };
+    let (normalized, display) = paths::normalize_kb_name(name).map_err(CliError::usage)?;
+    let data_dir = data_dir()?;
+    let path = store::require_existing_path(&data_dir, &normalized, &display)
+        .map_err(|e| CliError::new(EXIT_USAGE, e))?;
+    let opened = store::KbStore::open_existing(&data_dir, &normalized)
+        .map_err(map_engine_error)?
+        .ok_or_else(|| CliError::new(EXIT_INTERNAL, "打开知识库失败".to_string()))?;
+    let source = opened.source_display();
+    drop(opened);
+    if source.trim().is_empty() {
+        return Err(CliError::new(
+            EXIT_INTERNAL,
+            format!("库「{display}」没有登记来源目录，请重新执行 codexui-kb create \"{display}\" <目录>"),
+        ));
+    }
+    let root = std::path::PathBuf::from(&source);
+    if !root.is_dir() {
+        return Err(CliError::new(
+            EXIT_INTERNAL,
+            format!("库「{display}」的来源目录不存在：{source}（请修正目录后重新 create）"),
+        ));
+    }
+    let _ = path;
+    let model_dir = paths::model_dir().map_err(|e| CliError::new(EXIT_MODEL, e))?;
     ensure_model(&model_dir)?;
-    let roots =
-        index::resolve_roots(&cwd, &roots_arg).map_err(|e| CliError::usage(e))?;
 
     let cancel = AtomicBool::new(false);
     let mut on_progress = |p: index::IndexProgress| {
@@ -151,7 +213,7 @@ fn cmd_index<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
             out,
             &json!({
                 "type": "progress",
-                "cwd": p.cwd,
+                "kb": p.kb,
                 "phase": p.phase,
                 "processed": p.processed,
                 "total": p.total,
@@ -166,9 +228,10 @@ fn cmd_index<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
     let summary = index::run_index(
         &data_dir,
         &model_dir,
-        &cwd,
-        &roots,
-        full,
+        &normalized,
+        &display,
+        &root,
+        args.has("--full"),
         &cancel,
         &mut on_progress,
     )
@@ -178,53 +241,99 @@ fn cmd_index<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
     Ok(EXIT_OK)
 }
 
+/// `search <库名> --query <检索词> [--top-k <n>]`
 fn cmd_search<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
-    let flags = Flags::parse(
-        rest,
-        &["--data-dir", "--cwd", "--query", "--top-k", "--model-dir"],
-        &[],
-    )?;
-    let data_dir = flags.required_path("--data-dir")?;
-    let cwd = flags.required("--cwd")?;
-    let query = flags.required("--query")?;
-    let model_dir = flags.model_dir()?;
-    let top_k = match flags.get("--top-k") {
+    let args = Args::parse(rest, &["--query", "--top-k"], &[])?;
+    let tokens = args.positional();
+    let [name] = tokens.as_slice() else {
+        return Err(CliError::usage(format!(
+            "用法：codexui-kb search <库名> --query <检索词> [--top-k <n>]\n\n{USAGE}"
+        )));
+    };
+    let (normalized, display) = paths::normalize_kb_name(name).map_err(CliError::usage)?;
+    let query = args.required("--query")?;
+    if query.trim().is_empty() {
+        return Err(CliError::usage("--query 不能为空"));
+    }
+    let top_k = match args.get("--top-k") {
         Some(raw) => raw
             .parse::<usize>()
             .map_err(|_| CliError::usage(format!("--top-k 需要正整数，收到：{raw}")))?,
         None => search::DEFAULT_TOP_K,
     };
-    if query.trim().is_empty() {
-        return Err(CliError::usage("--query 不能为空"));
-    }
-    let Some(store) = store::KbStore::open_existing(&data_dir, &cwd).map_err(map_engine_error)?
+    let data_dir = data_dir()?;
+    let Some(store) = store::KbStore::open_existing(&data_dir, &normalized).map_err(map_engine_error)?
     else {
-        write_line(out, &json!({ "type": "result", "hits": [] }))?;
+        // 库不存在：返回空结果（不报错、不建库），并附上库名便于调用方核对
+        write_line(out, &json!({ "type": "result", "kb": display, "hits": [] }))?;
         return Ok(EXIT_OK);
     };
+    // 空库（尚未建索引）：无需加载模型即可回答"没有内容"
+    let (_, chunk_count) = store.counts();
+    if chunk_count == 0 {
+        write_line(
+            out,
+            &json!({ "type": "result", "kb": store.kb_display(), "source": store.source_display(), "hits": [] }),
+        )?;
+        return Ok(EXIT_OK);
+    }
+    let model_dir = paths::model_dir().map_err(|e| CliError::new(EXIT_MODEL, e))?;
     ensure_model(&model_dir)?;
     let cache = search::VectorCache::default();
     let hits = search::search(&model_dir, &store, &cache, &query, top_k)
         .map_err(map_engine_error)?;
-    write_line(out, &json!({ "type": "result", "hits": hits }))?;
+    write_line(
+        out,
+        &json!({ "type": "result", "kb": store.kb_display(), "source": store.source_display(), "hits": hits }),
+    )?;
     Ok(EXIT_OK)
 }
 
+/// `list`
 fn cmd_list<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
-    let flags = Flags::parse(rest, &["--data-dir"], &[])?;
-    let data_dir = flags.required_path("--data-dir")?;
+    let args = Args::parse(rest, &[], &[])?;
+    if !args.positional().is_empty() {
+        return Err(CliError::usage("list 不接受位置参数"));
+    }
+    let data_dir = data_dir()?;
     let kbs = store::list_all(&data_dir);
     write_line(out, &json!({ "type": "result", "kbs": kbs }))?;
     Ok(EXIT_OK)
 }
 
+/// `delete <库名>` / `delete --file <库文件名>`
 fn cmd_delete<W: Write>(out: &mut W, rest: &[String]) -> Result<i32, CliError> {
-    let flags = Flags::parse(rest, &["--data-dir", "--file"], &[])?;
-    let data_dir = flags.required_path("--data-dir")?;
-    let file = flags.required("--file")?;
+    let args = Args::parse(rest, &["--file"], &[])?;
+    let data_dir = data_dir()?;
+    if let Some(file) = args.get("--file") {
+        if !args.positional().is_empty() {
+            return Err(CliError::usage("delete 不能同时使用库名与 --file"));
+        }
+        store::delete_file(&data_dir, file).map_err(map_engine_error)?;
+        write_line(out, &json!({ "type": "result", "ok": true, "file": file }))?;
+        return Ok(EXIT_OK);
+    }
+    let tokens = args.positional();
+    let [name] = tokens.as_slice() else {
+        return Err(CliError::usage(format!(
+            "用法：codexui-kb delete <库名> | codexui-kb delete --file <库文件名>\n\n{USAGE}"
+        )));
+    };
+    let (normalized, display) = paths::normalize_kb_name(name).map_err(CliError::usage)?;
+    let path = store::require_existing_path(&data_dir, &normalized, &display)
+        .map_err(|e| CliError::new(EXIT_USAGE, e))?;
+    let file = path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
     store::delete_file(&data_dir, &file).map_err(map_engine_error)?;
-    write_line(out, &json!({ "type": "result", "ok": true }))?;
+    write_line(out, &json!({ "type": "result", "ok": true, "kb": display, "file": file }))?;
     Ok(EXIT_OK)
+}
+
+/// 数据目录：固定 `%APPDATA%\com.codexui.app\knowledge`
+fn data_dir() -> Result<std::path::PathBuf, CliError> {
+    paths::data_dir().map_err(|e| CliError::new(EXIT_INTERNAL, e))
 }
 
 /// 模型与 ONNX Runtime 就绪校验：不通过时给出可操作中文提示（退出码 3）
@@ -247,47 +356,60 @@ fn map_engine_error(message: String) -> CliError {
     CliError::new(EXIT_INTERNAL, message)
 }
 
-/// 极简 `--flag value` / `--flag` 解析器（未知参数即报错，避免静默忽略）
+/// 极简解析器：位置参数 + `--flag value` / `--flag=value` / `--bool`（未知参数即报错）
 #[derive(Debug, Default)]
-struct Flags {
+struct Args {
+    positional: Vec<String>,
     values: HashMap<String, Vec<String>>,
     bools: HashSet<String>,
 }
 
-impl Flags {
+impl Args {
     fn parse(args: &[String], value_flags: &[&str], bool_flags: &[&str]) -> Result<Self, CliError> {
-        let mut flags = Flags::default();
+        let mut parsed = Args::default();
         let mut i = 0usize;
         while i < args.len() {
             let raw = args[i].as_str();
-            if let Some(name) = raw.split('=').next().filter(|n| n.starts_with("--")) {
-                let inline = raw.contains('=');
-                if bool_flags.contains(&name) {
-                    if inline {
-                        return Err(CliError::usage(format!("{name} 是开关，不接受取值")));
-                    }
-                    flags.bools.insert(name.to_string());
-                    i += 1;
-                    continue;
+            let name = raw
+                .split('=')
+                .next()
+                .filter(|n| n.starts_with("--") && n.len() > 2)
+                .map(str::to_string);
+            let Some(name) = name else {
+                parsed.positional.push(raw.to_string());
+                i += 1;
+                continue;
+            };
+            let inline = raw.contains('=');
+            if bool_flags.contains(&name.as_str()) {
+                if inline {
+                    return Err(CliError::usage(format!("{name} 是开关，不接受取值")));
                 }
-                if !value_flags.contains(&name) {
-                    return Err(CliError::usage(format!("未知参数：{raw}")));
-                }
-                let value = if inline {
-                    raw.split_once('=').map(|(_, v)| v.to_string()).unwrap_or_default()
-                } else {
-                    i += 1;
-                    args.get(i)
-                        .cloned()
-                        .ok_or_else(|| CliError::usage(format!("{name} 缺少取值")))? 
-                };
-                flags.values.entry(name.to_string()).or_default().push(value);
+                parsed.bools.insert(name);
                 i += 1;
                 continue;
             }
-            return Err(CliError::usage(format!("无法识别的参数：{raw}")));
+            if !value_flags.contains(&name.as_str()) {
+                return Err(CliError::usage(format!("未知参数：{raw}")));
+            }
+            let value = if inline {
+                raw.split_once('=')
+                    .map(|(_, v)| v.to_string())
+                    .unwrap_or_default()
+            } else {
+                i += 1;
+                args.get(i)
+                    .cloned()
+                    .ok_or_else(|| CliError::usage(format!("{name} 缺少取值")))?
+            };
+            parsed.values.entry(name).or_default().push(value);
+            i += 1;
         }
-        Ok(flags)
+        Ok(parsed)
+    }
+
+    fn positional(&self) -> Vec<&str> {
+        self.positional.iter().map(|s| s.as_str()).collect()
     }
 
     fn get(&self, name: &str) -> Option<&str> {
@@ -295,14 +417,6 @@ impl Flags {
             .get(name)
             .and_then(|v| v.last())
             .map(|s| s.as_str())
-    }
-
-    fn get_all(&self, name: &str) -> &[String] {
-        self.values.get(name).map(|v| v.as_slice()).unwrap_or(&[])
-    }
-
-    fn has(&self, name: &str) -> bool {
-        self.bools.contains(name)
     }
 
     fn required(&self, name: &str) -> Result<String, CliError> {
@@ -315,41 +429,48 @@ impl Flags {
         Ok(value.to_string())
     }
 
-    fn required_path(&self, name: &str) -> Result<PathBuf, CliError> {
-        Ok(PathBuf::from(self.required(name)?))
-    }
-
-    /// 模型目录（内含 `model.onnx`/`tokenizer.json` 等）：
-    /// 显式 `--model-dir` 优先，否则与 `codexui-kb.exe` 同目录的 `model/<MODEL_ID>`
-    fn model_dir(&self) -> Result<PathBuf, CliError> {
-        match self.get("--model-dir") {
-            Some(raw) => Ok(PathBuf::from(raw)),
-            None => paths::model_dir().map_err(|e| CliError::new(EXIT_MODEL, e)),
-        }
+    fn has(&self, name: &str) -> bool {
+        self.bools.contains(name)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
-    fn lines(args: &[&str]) -> (i32, Vec<serde_json::Value>) {
+    /// 用临时 APPDATA 跑一段命令（测试间共享环境变量，故内部串行）
+    fn run_with_appdata(args: &[&str], appdata: &std::path::Path) -> (i32, Vec<serde_json::Value>) {
         let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let mut buf: Vec<u8> = Vec::new();
         let code = run_with(&owned, &mut buf);
+        let _ = appdata;
         let text = String::from_utf8(buf).unwrap();
         let parsed = text
             .lines()
             .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str::<serde_json::Value>(l).expect("每行都应是合法 JSON"))
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
             .collect();
         (code, parsed)
     }
 
+    /// 环境变量（APPDATA）相关的用例串行执行
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_appdata<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var_os("APPDATA");
+        std::env::set_var("APPDATA", dir);
+        let out = f();
+        match previous {
+            Some(v) => std::env::set_var("APPDATA", v),
+            None => std::env::remove_var("APPDATA"),
+        }
+        out
+    }
+
     #[test]
     fn version_reports_protocol() {
-        let (code, out) = lines(&["version"]);
+        let (code, out) = run_with_appdata(&["version"], std::path::Path::new("D:\\tmp"));
         assert_eq!(code, EXIT_OK);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0]["type"], "result");
@@ -358,28 +479,32 @@ mod tests {
     }
 
     #[test]
-    fn missing_command_and_unknown_flags_are_usage_errors() {
-        let (code, out) = lines(&[]);
-        assert_eq!(code, EXIT_USAGE);
-        assert_eq!(out[0]["type"], "error");
-        assert_eq!(out[0]["code"], EXIT_USAGE);
-
-        let (code, out) = lines(&["index", "--data-dir", "X", "--cwd", "Y", "--nope"]);
-        assert_eq!(code, EXIT_USAGE);
-        assert!(out[0]["message"]
-            .as_str()
-            .unwrap()
-            .contains("未知参数：--nope"));
+    fn unknown_args_and_removed_flags_are_usage_errors() {
+        let cases: Vec<Vec<&str>> = vec![
+            vec![],
+            vec!["index", "--nope"],
+            vec!["index", "手册", "--cwd", "D:\\x"],
+            vec!["index", "手册", "--roots", "D:\\x"],
+            vec!["index", "手册", "--model-dir", "D:\\m"],
+            vec!["list", "--data-dir", "D:\\kb"],
+            vec!["search", "手册", "--query", "x", "--data-dir", "D:\\kb"],
+        ];
+        for case in cases {
+            let (code, out) = run_with_appdata(&case, std::path::Path::new("D:\\tmp"));
+            assert_eq!(code, EXIT_USAGE, "{case:?} 应为参数错误");
+            assert_eq!(out[0]["type"], "error");
+            assert_eq!(out[0]["code"], EXIT_USAGE);
+        }
     }
 
     #[test]
-    fn missing_required_flag_is_reported() {
-        let (code, out) = lines(&["list"]);
+    fn kb_name_is_validated_in_commands() {
+        let (code, out) = run_with_appdata(
+            &["create", "D:\\kb", "D:\\src"],
+            std::path::Path::new("D:\\tmp"),
+        );
         assert_eq!(code, EXIT_USAGE);
-        assert!(out[0]["message"]
-            .as_str()
-            .unwrap()
-            .contains("--data-dir"));
+        assert!(out[0]["message"].as_str().unwrap().contains("库名"));
     }
 
     #[test]
@@ -397,88 +522,120 @@ mod tests {
     }
 
     #[test]
-    fn list_on_empty_data_dir_returns_empty_array() {
-        let dir = TempDir::new().unwrap();
-        let (code, out) = lines(&["list", "--data-dir", &dir.path().to_string_lossy()]);
-        assert_eq!(code, EXIT_OK);
-        assert_eq!(out[0]["type"], "result");
-        assert_eq!(out[0]["kbs"].as_array().unwrap().len(), 0);
+    fn create_then_list_search_delete_roundtrip() {
+        let appdata = tempfile::TempDir::new().unwrap();
+        let source = tempfile::TempDir::new().unwrap();
+        std::fs::write(source.path().join("a.md"), "# 标题\n\n内容").unwrap();
+        let source_s = source.path().to_string_lossy().to_string();
+
+        with_appdata(appdata.path(), || {
+            // 新建
+            let (code, out) = run_with_appdata(&["create", "手册", &source_s], appdata.path());
+            assert_eq!(code, EXIT_OK, "{out:?}");
+            assert_eq!(out[0]["created"], true);
+            assert_eq!(out[0]["kb"], "手册");
+
+            // 幂等
+            let (code, out) = run_with_appdata(&["create", "手册", &source_s], appdata.path());
+            assert_eq!(code, EXIT_OK);
+            assert_eq!(out[0]["created"], false);
+
+            // 同名不同来源 → 报错
+            let other = tempfile::TempDir::new().unwrap();
+            let (code, out) = run_with_appdata(
+                &["create", "手册", &other.path().to_string_lossy()],
+                appdata.path(),
+            );
+            assert_eq!(code, EXIT_INTERNAL);
+            assert!(out[0]["message"].as_str().unwrap().contains("来源"));
+
+            // list 能列出
+            let (code, out) = run_with_appdata(&["list"], appdata.path());
+            assert_eq!(code, EXIT_OK);
+            let rows = out[0]["kbs"].as_array().unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0]["kb"], "手册");
+            assert_eq!(rows[0]["source"], source_s);
+            assert!(rows[0].get("cwd").is_none(), "不应再有 cwd 字段");
+
+            // search（库存在但未建索引）→ 空 hits，不报错
+            let (code, out) =
+                run_with_appdata(&["search", "手册", "--query", "错误码"], appdata.path());
+            assert_eq!(code, EXIT_OK);
+            assert_eq!(out[0]["hits"].as_array().unwrap().len(), 0);
+
+            // search 未建库 → 空 hits
+            let (code, out) =
+                run_with_appdata(&["search", "没有这个库", "--query", "x"], appdata.path());
+            assert_eq!(code, EXIT_OK);
+            assert_eq!(out[0]["hits"].as_array().unwrap().len(), 0);
+
+            // delete 按库名
+            let (code, _) = run_with_appdata(&["delete", "手册"], appdata.path());
+            assert_eq!(code, EXIT_OK);
+            let (_, out) = run_with_appdata(&["list"], appdata.path());
+            assert_eq!(out[0]["kbs"].as_array().unwrap().len(), 0);
+        });
     }
 
     #[test]
-    fn index_without_model_reports_model_exit_code() {
-        let dir = TempDir::new().unwrap();
-        let cwd = dir.path().join("ws");
-        std::fs::create_dir_all(&cwd).unwrap();
-        std::fs::write(cwd.join("a.md"), "# 标题\n\n内容").unwrap();
-        let (code, out) = lines(&[
-            "index",
-            "--data-dir",
-            &dir.path().to_string_lossy(),
-            "--cwd",
-            &cwd.to_string_lossy(),
-        ]);
-        assert_eq!(code, EXIT_MODEL);
-        assert_eq!(out[0]["type"], "error");
-        let message = out[0]["message"].as_str().unwrap();
-        assert!(
-            message.contains("模型文件") || message.contains("onnxruntime.dll"),
-            "错误信息应可指导修复：{message}"
-        );
+    fn create_rejects_missing_source_directory() {
+        let appdata = tempfile::TempDir::new().unwrap();
+        with_appdata(appdata.path(), || {
+            let missing = appdata.path().join("nope");
+            let (code, out) = run_with_appdata(
+                &["create", "手册", &missing.to_string_lossy()],
+                appdata.path(),
+            );
+            assert_eq!(code, EXIT_USAGE);
+            assert!(out[0]["message"].as_str().unwrap().contains("不存在"));
+        });
     }
 
     #[test]
-    fn index_with_missing_root_is_usage_error() {
-        let dir = TempDir::new().unwrap();
-        let cwd = dir.path().join("ws");
-        std::fs::create_dir_all(&cwd).unwrap();
-        let model_dir = dir.path().join("model");
-        std::fs::create_dir_all(&model_dir).unwrap();
-        let (code, out) = lines(&[
-            "index",
-            "--data-dir",
-            &dir.path().to_string_lossy(),
-            "--cwd",
-            &cwd.to_string_lossy(),
-            "--model-dir",
-            &model_dir.to_string_lossy(),
-            "--roots",
-            &cwd.join("nope").to_string_lossy(),
-        ]);
-        assert_eq!(code, EXIT_MODEL, "缺模型先于路径校验被拦下");
-        assert_eq!(out[0]["type"], "error");
+    fn index_requires_existing_kb_and_model() {
+        let appdata = tempfile::TempDir::new().unwrap();
+        let source = tempfile::TempDir::new().unwrap();
+        let source_s = source.path().to_string_lossy().to_string();
+        with_appdata(appdata.path(), || {
+            // 未 create → 提示先 create
+            let (code, out) = run_with_appdata(&["index", "手册"], appdata.path());
+            assert_eq!(code, EXIT_USAGE);
+            assert!(out[0]["message"].as_str().unwrap().contains("create"));
+
+            let (code, _) =
+                run_with_appdata(&["create", "手册", &source_s], appdata.path());
+            assert_eq!(code, EXIT_OK);
+            // 已 create 但本机无模型 → 退出码 3（模型未就绪）
+            let (code, out) = run_with_appdata(&["index", "手册"], appdata.path());
+            assert_eq!(code, EXIT_MODEL);
+            assert_eq!(out[0]["type"], "error");
+        });
     }
 
     #[test]
-    fn search_on_unindexed_workspace_returns_empty_hits() {
-        let dir = TempDir::new().unwrap();
-        let (code, out) = lines(&[
-            "search",
-            "--data-dir",
-            &dir.path().to_string_lossy(),
-            "--cwd",
-            "D:\\没有这个目录",
-            "--query",
-            "错误码",
-        ]);
-        assert_eq!(code, EXIT_OK);
-        assert_eq!(out[0]["type"], "result");
-        assert_eq!(out[0]["hits"].as_array().unwrap().len(), 0);
+    fn delete_by_file_rejects_path_traversal() {
+        let appdata = tempfile::TempDir::new().unwrap();
+        with_appdata(appdata.path(), || {
+            let (code, out) =
+                run_with_appdata(&["delete", "--file", "../escape.sqlite"], appdata.path());
+            assert_eq!(code, EXIT_INTERNAL);
+            assert!(out[0]["message"].as_str().unwrap().contains("非法"));
+        });
     }
 
     #[test]
-    fn delete_rejects_path_traversal() {
-        let dir = TempDir::new().unwrap();
-        std::fs::create_dir_all(crate::paths::kbs_dir(dir.path())).unwrap();
-        let (code, out) = lines(&[
-            "delete",
-            "--data-dir",
-            &dir.path().to_string_lossy(),
-            "--file",
-            "../escape.sqlite",
-        ]);
+    fn missing_appdata_reports_internal_error() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var_os("APPDATA");
+        std::env::remove_var("APPDATA");
+        let (code, out) = run_with_appdata(&["list"], std::path::Path::new("X"));
+        match previous {
+            Some(v) => std::env::set_var("APPDATA", v),
+            None => std::env::remove_var("APPDATA"),
+        }
         assert_eq!(code, EXIT_INTERNAL);
-        assert!(out[0]["message"].as_str().unwrap().contains("非法"));
+        assert!(out[0]["message"].as_str().unwrap().contains("APPDATA"));
     }
 
     #[test]
@@ -489,37 +646,25 @@ mod tests {
     }
 
     #[test]
-    fn flags_accept_inline_values() {
-        let args: Vec<String> = ["--data-dir=D:\\kb", "--full", "--roots", "a"]
+    fn args_accept_inline_values_and_positionals() {
+        let args: Vec<String> = ["手册", "--top-k=5", "--query", "错误码"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let flags = Flags::parse(&args, &["--data-dir", "--roots"], &["--full"]).unwrap();
-        assert_eq!(flags.get("--data-dir"), Some("D:\\kb"));
-        assert_eq!(flags.get_all("--roots"), ["a".to_string()]);
-        assert!(flags.has("--full"));
+        let parsed = Args::parse(&args, &["--query", "--top-k"], &[]).unwrap();
+        assert_eq!(parsed.positional(), vec!["手册"]);
+        assert_eq!(parsed.get("--top-k"), Some("5"));
+        assert_eq!(parsed.required("--query").unwrap(), "错误码");
     }
 
     #[test]
-    fn default_model_dir_points_to_model_next_to_exe() {
-        let flags = Flags::default();
-        let resolved = flags.model_dir().unwrap();
-        let exe_dir = std::env::current_exe().unwrap();
-        let exe_dir = exe_dir.parent().unwrap();
-        assert_eq!(resolved, exe_dir.join("model").join(crate::paths::MODEL_ID));
-        assert_eq!(crate::paths::model_dir().unwrap(), resolved);
-    }
-
-    #[test]
-    fn explicit_model_dir_flag_wins() {
-        let args: Vec<String> = ["--model-dir", "D:\\models\\zh"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let flags = Flags::parse(&args, &["--model-dir"], &[]).unwrap();
-        assert_eq!(
-            flags.model_dir().unwrap(),
-            std::path::PathBuf::from("D:\\models\\zh")
-        );
+    fn model_dir_is_next_to_exe_and_not_configurable() {
+        let expected = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("model")
+            .join(crate::paths::MODEL_ID);
+        assert_eq!(crate::paths::model_dir().unwrap(), expected);
     }
 }

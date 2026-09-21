@@ -1,9 +1,8 @@
 //! 建库/增量更新任务：扫描 → 抽取 → 切块 → 向量化 → 落库（可取消、按文件 mtime/size 增量）。
 //!
-//! `data_dir` 为知识库根目录（`--data-dir`，只承载 `kbs/`），`model_dir` 为当前向量模型目录
-//! （`--model-dir`，默认与 `codexui-kb.exe` 同目录的 `model/<MODEL_ID>`）。
+//! 扫描根恒为该库登记的来源目录（`meta.source`）；`data_dir` 为知识库根目录，
+//! `model_dir` 为向量模型目录（与 `codexui-kb.exe` 同目录的 `model/<MODEL_ID>`）。
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -16,18 +15,20 @@ use super::{chunk, embed, extract, store::KbStore};
 /// 进度回调载荷
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexProgress {
-    pub cwd: String,
+    pub kb: String,
     pub phase: String,
     pub processed: usize,
     pub total: usize,
     pub current: String,
 }
 
-/// 建库结果摘要（同时作为 `index_docs` 工具返回值与后台完成事件载荷）
+/// 建库结果摘要（命令层返回给调用方，也作为后台完成事件载荷）
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct IndexSummary {
-    pub cwd: String,
-    pub roots: Vec<String>,
+    /// 库名（展示用大小写）
+    pub kb: String,
+    /// 索引来源目录（本库唯一来源）
+    pub source: String,
     pub total: usize,
     pub added: i64,
     pub updated: i64,
@@ -41,16 +42,16 @@ pub struct IndexSummary {
     /// 是否已转后台执行（当次调用只返回启动信息）
     pub background: bool,
     pub cancelled: bool,
-    /// 人类可读摘要（由 Rust 生成，供动态工具直接回传给 agent）
+    /// 人类可读摘要（由 CLI 生成，skill/agent 可直接使用）
     pub text: String,
 }
 
 impl IndexSummary {
     /// 后台启动占位：命令层不等待任务完成时返回
-    pub fn background_started(cwd: &str, roots: Vec<String>, total: usize) -> Self {
+    pub fn background_started(kb: &str, source: &str, total: usize) -> Self {
         let mut summary = IndexSummary {
-            cwd: cwd.to_string(),
-            roots,
+            kb: kb.to_string(),
+            source: source.to_string(),
             total,
             background: true,
             ..Default::default()
@@ -69,11 +70,9 @@ impl IndexSummary {
     pub fn describe(&self) -> String {
         if self.background {
             return format!(
-                "已在后台开始建库：工作目录 {}，来源 {}，共 {} 个文件。完成后设置页「知识库」列表会更新；\
-                 再次调用 index_docs 可查看当前统计。",
-                self.cwd,
-                self.roots.join("、"),
-                self.total
+                "已在后台开始建库：库「{}」，来源 {}，共 {} 个文件。完成后设置页「知识库」列表会更新；\
+                 再次执行 codexui-kb index \"{}\" 可查看当前统计。",
+                self.kb, self.source, self.total, self.kb
             );
         }
         let mut text = format!(
@@ -100,7 +99,7 @@ impl IndexSummary {
                 "知识库无变化（内容与上次索引一致）：当前共 {} 篇文档 / {} 个切块，来源 {}。",
                 self.docs,
                 self.chunks,
-                self.roots.join("、")
+                self.source
             );
         }
         if !self.failed.is_empty() {
@@ -111,50 +110,11 @@ impl IndexSummary {
     }
 }
 
-/// 解析待索引根：缺省用工作目录；相对路径按工作目录展开；不存在的路径直接报错
-pub fn resolve_roots(cwd: &str, paths: &[String]) -> Result<Vec<PathBuf>, String> {
-    let raw: Vec<String> = if paths.is_empty() {
-        vec![cwd.to_string()]
-    } else {
-        paths.to_vec()
-    };
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for item in raw {
-        let candidate = PathBuf::from(&item);
-        let resolved = if candidate.is_absolute() {
-            candidate
-        } else {
-            Path::new(cwd).join(candidate)
-        };
-        if !resolved.exists() {
-            return Err(format!("路径不存在：{}", resolved.display()));
-        }
-        let key = resolved.to_string_lossy().to_lowercase();
-        if seen.insert(key) {
-            out.push(resolved);
-        }
-    }
-    if out.is_empty() {
-        return Err("未指定可索引的路径，且当前会话没有工作目录".into());
-    }
-    Ok(out)
-}
-
-/// 扫描根下支持的文件（去重、排序）
-pub fn plan_files(roots: &[PathBuf]) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for root in roots {
-        for file in extract::collect_files(root) {
-            let key = file.to_string_lossy().to_lowercase();
-            if seen.insert(key) {
-                out.push(file);
-            }
-        }
-    }
-    out.sort();
-    out
+/// 扫描来源目录下支持的文件（排序）
+pub fn plan_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = extract::collect_files(root);
+    files.sort();
+    files
 }
 
 fn stat(path: &Path) -> Result<(i64, i64), String> {
@@ -173,38 +133,34 @@ fn stat(path: &Path) -> Result<(i64, i64), String> {
 pub fn run_index(
     data_dir: &Path,
     model_dir: &Path,
-    cwd: &str,
-    roots: &[PathBuf],
+    normalized: &str,
+    display: &str,
+    root: &Path,
     full: bool,
     cancel: &AtomicBool,
     on_progress: &mut dyn FnMut(IndexProgress),
 ) -> Result<IndexSummary, String> {
     let started = Instant::now();
-    let store = KbStore::open(data_dir, cwd)?;
-    let files = plan_files(roots);
+    // index 不改写来源与库名：库必须已由 create 建立
+    let store = KbStore::open_existing(data_dir, normalized)?
+        .ok_or_else(|| format!("库「{display}」尚未建立：请先执行 codexui-kb create \"{display}\" <目录>"))?;
+    let files = plan_files(root);
     let total = files.len();
     let mut summary = IndexSummary {
-        cwd: cwd.to_string(),
-        roots: roots
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect(),
+        kb: store.kb_display(),
+        source: root.to_string_lossy().to_string(),
         total,
         ..Default::default()
     };
-    for root in roots {
-        if root.is_dir() {
-            store.add_source(&root.to_string_lossy())?;
-        }
-    }
     on_progress(IndexProgress {
-        cwd: cwd.to_string(),
+        kb: summary.kb.clone(),
         phase: "scan".into(),
         processed: 0,
         total,
         current: String::new(),
     });
 
+    let root_str = root.to_string_lossy().to_string();
     for (i, file) in files.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             summary.cancelled = true;
@@ -212,17 +168,12 @@ pub fn run_index(
         }
         let path_str = file.to_string_lossy().to_string();
         on_progress(IndexProgress {
-            cwd: cwd.to_string(),
+            kb: summary.kb.clone(),
             phase: "index".into(),
             processed: i,
             total,
             current: path_str.clone(),
         });
-        let root_str = roots
-            .iter()
-            .find(|r| r.is_dir() && file.starts_with(r))
-            .map(|r| r.to_string_lossy().to_string())
-            .unwrap_or_else(|| path_str.clone());
         let (size, mtime) = match stat(file) {
             Ok(v) => v,
             Err(e) => {
@@ -283,11 +234,7 @@ pub fn run_index(
         }
     }
 
-    for root in roots {
-        if root.is_dir() {
-            summary.removed += store.prune_missing_under(&root.to_string_lossy())?;
-        }
-    }
+    summary.removed += store.prune_missing_under(&root_str)?;
     store.touch_updated()?;
     let (docs, chunks) = store.counts();
     summary.docs = docs;
@@ -295,7 +242,7 @@ pub fn run_index(
     summary.elapsed_ms = started.elapsed().as_millis() as u64;
     summary.failed.truncate(10);
     on_progress(IndexProgress {
-        cwd: cwd.to_string(),
+        kb: summary.kb.clone(),
         phase: "done".into(),
         processed: total,
         total,
@@ -311,29 +258,12 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn resolve_roots_defaults_to_cwd_and_expands_relative() {
-        let dir = TempDir::new().unwrap();
-        let sub = dir.path().join("docs");
-        std::fs::create_dir_all(&sub).unwrap();
-        let cwd = dir.path().to_string_lossy().to_string();
-
-        let default = resolve_roots(&cwd, &[]).unwrap();
-        assert_eq!(default.len(), 1);
-        assert!(default[0].to_string_lossy().contains("docs") || default[0].exists());
-
-        let relative = resolve_roots(&cwd, &["docs".to_string()]).unwrap();
-        assert_eq!(relative[0], sub);
-        assert!(resolve_roots(&cwd, &["missing".to_string()]).is_err());
-    }
-
-    #[test]
     fn plan_files_dedupes_and_sorts() {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join("b.md"), "b").unwrap();
         std::fs::write(dir.path().join("a.txt"), "a").unwrap();
         std::fs::write(dir.path().join("c.png"), "c").unwrap();
-        let roots = vec![dir.path().to_path_buf(), dir.path().to_path_buf()];
-        let files = plan_files(&roots);
+        let files = plan_files(dir.path());
         assert_eq!(files.len(), 2);
         assert!(files[0].ends_with("a.txt"));
     }
@@ -341,8 +271,8 @@ mod tests {
     #[test]
     fn summary_describes_idempotent_state() {
         let summary = IndexSummary {
-            cwd: "D:\\kb".into(),
-            roots: vec!["D:\\kb".into()],
+            kb: "手册".into(),
+            source: "D:\\kb".into(),
             docs: 3,
             chunks: 12,
             ..Default::default()
@@ -350,7 +280,8 @@ mod tests {
         let text = summary.describe();
         assert!(text.contains("无变化"));
         assert!(text.contains("3 篇"));
-        let background = IndexSummary::background_started("D:\\kb", vec!["D:\\kb".into()], 500);
+        let background = IndexSummary::background_started("手册", "D:\\kb", 500);
         assert!(background.describe().contains("后台"));
+        assert!(background.describe().contains("codexui-kb index"));
     }
 }

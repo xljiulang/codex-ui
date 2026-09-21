@@ -5,11 +5,6 @@ export const CODEXUI_DYNAMIC_NAMESPACE = "codexui";
 export const CODEXUI_TOOL_GET_USAGE = "get_usage";
 export const CODEXUI_TOOL_COMPACT_CONTEXT = "compact_context";
 export const CODEXUI_TOOL_ADD_SCHEDULED_TASK = "add_scheduled_task";
-/** 知识库检索（默认关闭：需在「设置 → 动态工具」显式开启） */
-export const CODEXUI_TOOL_SEARCH_DOCS = "search_docs";
-/** 知识库建库/增量更新（同一工作目录的知识库，幂等） */
-export const CODEXUI_TOOL_INDEX_DOCS = "index_docs";
-
 /** 与协议 `DynamicToolFunctionSpec` 对齐的最小结构（字段名以 generate-ts 绑定为准） */
 export interface DynamicToolFunctionSpec {
   type: "function";
@@ -51,7 +46,7 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceDef[] = [
   {
     type: "namespace",
     name: CODEXUI_DYNAMIC_NAMESPACE,
-    description: "codex-ui 管理工具：查询用量、压缩上下文、创建定时任务、检索与更新售后知识库",
+    description: "codex-ui 管理工具：查询用量、压缩上下文、创建定时任务",
     tools: [
       {
         type: "function",
@@ -90,53 +85,6 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceDef[] = [
           required: ["name", "prompt", "cron"],
         },
         defaultEnabled: true,
-      },
-      {
-        type: "function",
-        name: CODEXUI_TOOL_SEARCH_DOCS,
-        description:
-          "检索当前会话工作目录对应知识库里的售后文档手册（向量 + 关键词混合召回）。" +
-          "回答故障码、型号、操作步骤这类需要事实依据的问题前应先调用本工具，并在回答中标注来源文件名与章节。" +
-          "若返回「尚未建库」，可先用 index_docs 建立/更新知识库。",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "检索词：用用户问题里的关键实体（故障现象、错误码、型号、部件名）",
-            },
-            topK: {
-              type: "integer",
-              description: "返回条数（1-20，缺省 8）",
-            },
-          },
-          required: ["query"],
-        },
-        defaultEnabled: false,
-      },
-      {
-        type: "function",
-        name: CODEXUI_TOOL_INDEX_DOCS,
-        description:
-          "为当前会话工作目录建立/增量更新知识库：扫描给定路径下的 PDF、Word(docx)、Markdown、txt，" +
-          "抽取正文、切块、本地向量化后入库（知识库与工作目录一对一，同目录的其它会话共享）。" +
-          "幂等：内容没变化时秒回当前统计，因此也可用来查询知识库现状（文档数/切块数/来源）。",
-        inputSchema: {
-          type: "object",
-          properties: {
-            paths: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "要索引的目录或文件（绝对路径，或相对当前工作目录）；缺省=当前工作目录自身（递归）",
-            },
-            full: {
-              type: "boolean",
-              description: "true=忽略增量判定全量重建（缺省 false）",
-            },
-          },
-        },
-        defaultEnabled: false,
       },
     ],
   },

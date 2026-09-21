@@ -2,6 +2,8 @@
 //!
 //! 知识库的全部重活（PDF/docx 抽取、切块、ONNX 向量化、SQLite 混合检索）都在
 //! `codexui-kb.exe` 里完成；这里只负责起进程、读协议、把错误翻译成中文。
+//! **数据目录与模型都由子进程自行解析**（`%APPDATA%\com.codexui.app\knowledge`
+//! 与 CLI 同目录的 `model/`），本层不传任何路径参数。
 //!
 //! 协议见 `crates/knowledge-cli/src/cli.rs`：stdout 为 NDJSON（progress / result /
 //! error），退出码 0 成功、2 参数错误、3 模型未就绪、4 库被占用、5 已取消。
@@ -20,8 +22,8 @@ use tokio::process::{Child, Command};
 pub const DEFAULT_TOP_K: usize = 8;
 /// 子进程可执行文件名
 const BIN_NAME: &str = "codexui-kb.exe";
-/// 期望的 CLI 协议版本
-const API_VERSION: u64 = 1;
+/// 期望的 CLI 协议版本（v2 = create + 按库名操作 + 无路径参数）
+const API_VERSION: u64 = 2;
 /// 隐藏子进程控制台窗口（GUI 应用里起控制台程序会闪黑框）
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -31,7 +33,7 @@ const STDERR_TAIL_LIMIT: usize = 800;
 /// 首次版本校验通过后缓存（失败不缓存，便于补齐/重装后重试）
 static READY: OnceLock<()> = OnceLock::new();
 
-/// 检索命中的切块（与子进程 `ChunkHit` 字段一一对应，字段名即前端契约）
+/// 检索命中的切块（与子进程 `ChunkHit` 字段一一对应）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkHit {
     pub doc_path: String,
@@ -43,9 +45,12 @@ pub struct ChunkHit {
 /// 知识库列表行（与子进程 `KbSummary` 字段一一对应）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KbSummary {
-    /// 库文件名（删除时回传该值）
+    /// 库文件名（损坏库删除时回传该值）
     pub file: String,
-    pub cwd: String,
+    /// 库名
+    pub kb: String,
+    /// 索引来源目录
+    pub source: String,
     pub docs: i64,
     pub chunks: i64,
     pub updated_at: i64,
@@ -57,18 +62,18 @@ pub struct KbSummary {
 /// 建库进度载荷（事件 `knowledge/index-progress` 的 payload）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IndexProgress {
-    pub cwd: String,
+    pub kb: String,
     pub phase: String,
     pub processed: usize,
     pub total: usize,
     pub current: String,
 }
 
-/// 建库结果摘要（同时作为 `index_docs` 工具返回值与完成事件载荷）
+/// 建库结果摘要（同时作为完成事件载荷）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IndexSummary {
-    pub cwd: String,
-    pub roots: Vec<String>,
+    pub kb: String,
+    pub source: String,
     pub total: usize,
     pub added: i64,
     pub updated: i64,
@@ -82,26 +87,23 @@ pub struct IndexSummary {
     /// 是否已转后台执行（当次调用只返回启动信息）
     pub background: bool,
     pub cancelled: bool,
-    /// 人类可读摘要（由子进程生成，codex-ui 直接透传给 agent）
+    /// 人类可读摘要（由子进程生成）
     pub text: String,
 }
 
 impl IndexSummary {
     /// 后台启动占位：文件数过多或同步等待超时时由 codex-ui 生成（子进程仍在跑）
-    pub fn background_started(cwd: &str, roots: Vec<String>, total: usize) -> Self {
+    pub fn background_started(kb: &str, source: &str, total: usize) -> Self {
         let mut summary = IndexSummary {
-            cwd: cwd.to_string(),
-            roots: roots.clone(),
+            kb: kb.to_string(),
+            source: source.to_string(),
             total,
             background: true,
             ..Default::default()
         };
         summary.text = format!(
-            "已在后台开始建库：工作目录 {}，来源 {}，共 {} 个文件。完成后设置页「知识库」列表会更新；\
-             再次调用 index_docs 可查看当前统计。",
-            cwd,
-            roots.join("、"),
-            total
+            "已在后台开始建库：库「{kb}」，来源 {source}，共 {total} 个文件。\
+             完成后设置页「知识库」列表会更新；可用 codexui-kb list 查看当前统计。"
         );
         summary
     }
@@ -165,7 +167,8 @@ async fn ensure_ready() -> Result<(), String> {
     let api = value.get("codexUiApi").and_then(Value::as_u64).unwrap_or(0);
     if api != API_VERSION {
         return Err(format!(
-            "codexui-kb 版本不匹配：CLI 协议 v{api}，当前 codex-ui 需要 v{API_VERSION}，请更新或重新构建知识库 CLI"
+            "codexui-kb 版本不匹配：CLI 协议 v{api}，当前 codex-ui 需要 v{API_VERSION}，\
+             请重新运行 build-dev.bat / build-release.bat 生成知识库 CLI"
         ));
     }
     let _ = READY.set(());
@@ -173,25 +176,28 @@ async fn ensure_ready() -> Result<(), String> {
 }
 
 /// 知识库列表（不加载向量模型）
-pub async fn list(data_dir: &Path) -> Result<Vec<KbSummary>, String> {
+pub async fn list() -> Result<Vec<KbSummary>, String> {
     ensure_ready().await?;
-    let value = run_once(vec![
-        "list".to_string(),
-        "--data-dir".to_string(),
-        path_arg(data_dir),
-    ])
-    .await?;
-    let rows = value.get("kbs").cloned().unwrap_or_else(|| Value::Array(vec![]));
+    let value = run_once(vec!["list".to_string()]).await?;
+    let rows = value
+        .get("kbs")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(vec![]));
     serde_json::from_value(rows).map_err(|e| format!("解析知识库列表失败：{e}"))
 }
 
-/// 删除指定知识库文件（只删索引，不动原始文档与模型）
-pub async fn delete(data_dir: &Path, file: &str) -> Result<(), String> {
+/// 按库名删除知识库（只删索引，不动原始文档与模型）
+pub async fn delete_kb(kb: &str) -> Result<(), String> {
+    ensure_ready().await?;
+    run_once(vec!["delete".to_string(), kb.to_string()]).await?;
+    Ok(())
+}
+
+/// 按库文件名删除（损坏库清理兜底）
+pub async fn delete_file(file: &str) -> Result<(), String> {
     ensure_ready().await?;
     run_once(vec![
         "delete".to_string(),
-        "--data-dir".to_string(),
-        path_arg(data_dir),
         "--file".to_string(),
         file.to_string(),
     ])
@@ -199,51 +205,41 @@ pub async fn delete(data_dir: &Path, file: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 检索当前会话工作目录对应的知识库（未建库返回空数组）
-pub async fn search(
-    data_dir: &Path,
-    cwd: &str,
-    query: &str,
-    top_k: usize,
-) -> Result<Vec<ChunkHit>, String> {
+/// 检索指定库（库不存在返回空结果）
+pub async fn search(kb: &str, query: &str, top_k: usize) -> Result<Vec<ChunkHit>, String> {
     ensure_ready().await?;
     let value = run_once(vec![
         "search".to_string(),
-        "--data-dir".to_string(),
-        path_arg(data_dir),
-        "--cwd".to_string(),
-        cwd.to_string(),
+        kb.to_string(),
         "--query".to_string(),
         query.to_string(),
         "--top-k".to_string(),
         top_k.to_string(),
     ])
     .await?;
-    let hits = value.get("hits").cloned().unwrap_or_else(|| Value::Array(vec![]));
+    let hits = value
+        .get("hits")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(vec![]));
     serde_json::from_value(hits).map_err(|e| format!("解析检索结果失败：{e}"))
+}
+
+/// 登记库与来源目录（幂等；同名不同来源由 CLI 报错）
+pub async fn create(kb: &str, source: &str) -> Result<(), String> {
+    ensure_ready().await?;
+    run_once(vec!["create".to_string(), kb.to_string(), source.to_string()]).await?;
+    Ok(())
 }
 
 /// 建库/增量更新：边读 NDJSON 边回调进度，返回最终摘要
 pub async fn run_index(
-    data_dir: &Path,
-    cwd: &str,
-    roots: &[String],
+    kb: &str,
     full: bool,
     job: &Arc<JobHandle>,
     on_progress: &mut (dyn FnMut(IndexProgress) + Send),
 ) -> Result<IndexSummary, String> {
     ensure_ready().await?;
-    let mut args = vec![
-        "index".to_string(),
-        "--data-dir".to_string(),
-        path_arg(data_dir),
-        "--cwd".to_string(),
-        cwd.to_string(),
-    ];
-    for root in roots {
-        args.push("--roots".to_string());
-        args.push(root.clone());
-    }
+    let mut args = vec!["index".to_string(), kb.to_string()];
     if full {
         args.push("--full".to_string());
     }
@@ -330,7 +326,7 @@ pub async fn run_index(
     }
 }
 
-/// 收集一次性命令（list/search/delete/version）的结果 JSON
+/// 收集一次性命令（version/list/search/delete/create）的结果 JSON
 async fn run_once(args: Vec<String>) -> Result<Value, String> {
     let bin = binary_path()?;
     let output = command(&bin, &args)
@@ -399,10 +395,6 @@ fn spawn_stderr_reader(stderr: tokio::process::ChildStderr) -> tokio::task::Join
     })
 }
 
-fn path_arg(path: &Path) -> String {
-    path.to_string_lossy().to_string()
-}
-
 fn stderr_tail(stderr: &str) -> String {
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
@@ -421,7 +413,7 @@ fn with_stderr(message: String, stderr: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 环境变量相关用例串行执行（`#[tokio::test]` 与普通测试共用同一进程）
+    /// 环境变量相关用例串行执行（异步测试与普通测试共用同一进程）
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
@@ -454,11 +446,12 @@ mod tests {
 
     #[test]
     fn background_summary_describes_background_run() {
-        let summary = IndexSummary::background_started("D:\\kb", vec!["D:\\kb".into()], 500);
+        let summary = IndexSummary::background_started("手册", "D:\\kb", 500);
         assert!(summary.background);
         assert_eq!(summary.total, 500);
         assert!(summary.text.contains("后台"));
         assert!(summary.text.contains("500"));
+        assert!(summary.text.contains("codexui-kb list"));
     }
 
     #[test]
@@ -475,7 +468,6 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let fake = dir.path().join(BIN_NAME);
         std::fs::write(&fake, b"stub").unwrap();
-        // 环境变量是进程全局的：设置后立即断言并复位，避免影响其它用例
         let _guard = lock_env();
         std::env::set_var("CODEXUI_KB_BIN", &fake);
         let resolved = binary_path().unwrap();
@@ -494,23 +486,20 @@ mod tests {
     }
 
     #[test]
-    fn list_reads_empty_data_dir_through_cli() {
-        let Some(result) = with_dev_cli(|| {
-            let dir = tempfile::TempDir::new().unwrap();
-            tauri::async_runtime::block_on(list(dir.path()))
-        }) else {
+    fn list_returns_rows_through_cli() {
+        let Some(result) = with_dev_cli(|| tauri::async_runtime::block_on(list())) else {
             eprintln!("跳过：未构建 codexui-kb.exe（先 cargo build -p knowledge-cli）");
             return;
         };
-        assert_eq!(result.unwrap().len(), 0);
+        // 真实环境里可能有库也可能没有：命令成功且结构可解析即可
+        assert!(result.is_ok(), "{:?}", result.err());
     }
 
     #[test]
-    fn search_without_kb_returns_empty_hits_through_cli() {
-        let Some(result) = with_dev_cli(|| {
-            let dir = tempfile::TempDir::new().unwrap();
-            tauri::async_runtime::block_on(search(dir.path(), "D:\\没有这个工作目录", "错误码", 8))
-        }) else {
+    fn search_on_unknown_kb_returns_empty_hits() {
+        let Some(result) =
+            with_dev_cli(|| tauri::async_runtime::block_on(search("没有这个库", "错误码", 8)))
+        else {
             eprintln!("跳过：未构建 codexui-kb.exe（先 cargo build -p knowledge-cli）");
             return;
         };
@@ -518,12 +507,21 @@ mod tests {
     }
 
     #[test]
-    fn delete_surfaces_cli_error_message() {
-        let Some(result) = with_dev_cli(|| {
-            let dir = tempfile::TempDir::new().unwrap();
-            std::fs::create_dir_all(dir.path().join("kbs")).unwrap();
-            tauri::async_runtime::block_on(delete(dir.path(), "../escape.sqlite"))
-        }) else {
+    fn delete_rejects_invalid_kb_name() {
+        let Some(result) = with_dev_cli(|| tauri::async_runtime::block_on(delete_kb("D:\\kb")))
+        else {
+            eprintln!("跳过：未构建 codexui-kb.exe（先 cargo build -p knowledge-cli）");
+            return;
+        };
+        let err = result.unwrap_err();
+        assert!(err.contains("库名"), "{err}");
+    }
+
+    #[test]
+    fn delete_file_surfaces_cli_error_message() {
+        let Some(result) =
+            with_dev_cli(|| tauri::async_runtime::block_on(delete_file("../escape.sqlite")))
+        else {
             eprintln!("跳过：未构建 codexui-kb.exe（先 cargo build -p knowledge-cli）");
             return;
         };

@@ -1504,16 +1504,16 @@ describe("SettingsView 动态工具", () => {
     expect(wrapper.text()).toContain("动态工具");
     expect(wrapper.text()).toContain("改动只影响新建会话");
     const rows = wrapper.findAll(".dynamic-tool-row");
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(3);
     expect(rows[0].text()).toContain("codexui_get_usage");
     expect(rows[0].text()).toContain("查询当前会话的 token 消耗");
     expect(rows[1].text()).toContain("codexui_compact_context");
     expect(rows[2].text()).toContain("codexui_add_scheduled_task");
-    expect(rows[3].text()).toContain("codexui_search_docs");
-    expect(rows[4].text()).toContain("codexui_index_docs");
+    expect(rows[2].text()).toContain("codexui_add_scheduled_task");
+
   });
 
-  it("开关按三态口径读写：默认三条开、两条关；切换即写显式值", async () => {
+  it("开关按三态口径读写：三条均默认开；切换即写显式值", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const nav = wrapper
@@ -1523,10 +1523,10 @@ describe("SettingsView 动态工具", () => {
     await flushPromises();
 
     const switches = wrapper.findAll(".dynamic-tool-row input[type='checkbox']");
-    // 生效值：既有三条开、知识库两条关
+    // 生效值：三条均开（知识库已改由 skill + CLI，不再有动态工具）
     expect(
       switches.map((s) => (s.element as HTMLInputElement).checked),
-    ).toEqual([true, true, true, false, false]);
+    ).toEqual([true, true, true]);
 
     // 关闭缺省开启的工具 → 写显式 false
     const firstSwitch = switches[0];
@@ -1545,14 +1545,6 @@ describe("SettingsView 动态工具", () => {
       dynamic_tools_state: { "codexui.get_usage": true },
     });
 
-    // 开启缺省关闭的知识库工具 → 写显式 true
-    await wrapper
-      .findAll(".dynamic-tool-row input[type='checkbox']")[3]
-      .setValue(true);
-    await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith({
-      dynamic_tools_state: { "codexui.get_usage": true, "codexui.search_docs": true },
-    });
 
     wrapper.unmount();
   });
@@ -1561,7 +1553,8 @@ describe("SettingsView 动态工具", () => {
 describe("SettingsView 知识库", () => {
   const kbRow = {
     file: "shouhou-1a2b3c4d.sqlite",
-    cwd: "D:\\work\\售后",
+    kb: "售后",
+    source: "D:\\work\\售后",
     docs: 3,
     chunks: 12,
     updated_at: 1700000000,
@@ -1594,11 +1587,12 @@ describe("SettingsView 知识库", () => {
 
   it("分区只展示列表与删除：标题、只读统计与「默认关闭」提示", async () => {
     const wrapper = await openKnowledgeSection();
-    expect(wrapper.text()).toContain("按会话工作目录一对一存放");
-    expect(wrapper.text()).toContain("默认关闭");
+    expect(wrapper.text()).toContain("知识库按");
+    expect(wrapper.text()).toContain("codexui-kb");
     const rows = wrapper.findAll(".knowledge-row");
     expect(rows).toHaveLength(1);
-    expect(rows[0].text()).toContain("D:\\work\\售后");
+    expect(rows[0].text()).toContain("售后");
+    expect(rows[0].text()).toContain("来源：D:\\work\\售后");
     expect(rows[0].text()).toContain("3 篇文档");
     expect(rows[0].text()).toContain("12 个切块");
     expect(rows[0].text()).toContain("上次更新");
@@ -1620,6 +1614,7 @@ describe("SettingsView 知识库", () => {
     settleConfirm(true);
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("knowledge_delete", {
+      kb: "售后",
       file: "shouhou-1a2b3c4d.sqlite",
     });
     expect(
@@ -1647,12 +1642,13 @@ describe("SettingsView 知识库", () => {
         return [
           {
             file: "broken-00000000.sqlite",
-            cwd: "",
+            kb: "",
+            source: "",
             docs: 0,
             chunks: 0,
             updated_at: 0,
             available: false,
-            error: "元数据缺失，无法识别所属工作目录",
+            error: "旧版或损坏的知识库",
           },
         ];
       return undefined;
@@ -1660,7 +1656,7 @@ describe("SettingsView 知识库", () => {
     const wrapper = await openKnowledgeSection();
     const row = wrapper.find(".knowledge-row");
     expect(row.text()).toContain("不可用");
-    expect(row.text()).toContain("元数据缺失");
+    expect(row.text()).toContain("损坏的知识库");
     expect(row.find("button").exists()).toBe(true);
     wrapper.unmount();
   });

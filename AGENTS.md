@@ -53,8 +53,9 @@ npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，
 
 独立进程（`src-tauri/crates/knowledge-cli/`，workspace 成员）：
 
-- `codexui-kb.exe`：知识库全部实现（抽取 → 切块 → 本地 ONNX 向量化 → SQLite 向量+FTS5 → RRF 混合检索）都在这里，由应用以一次性子进程调用，避免向量化会话与全量向量常驻 UI 进程（`src-tauri/src/codex/knowledge/` 只剩 `paths.rs` 数据目录约定、`cli.rs` 子进程调用层与 `commands.rs` 编排）。
-- 改动知识库逻辑改 CLI crate；改动调用协议时两边必须同步：`crates/knowledge-cli/src/cli.rs` 的 `API_VERSION` 与 `src/codex/knowledge/cli.rs` 的 `API_VERSION`。
+- `codexui-kb.exe`：知识库全部实现（抽取 → 切块 → 本地 ONNX 向量化 → SQLite 向量+FTS5 → RRF 混合检索）都在这里，由应用以一次性子进程调用，避免向量化会话与全量向量常驻 UI 进程（`src-tauri/src/codex/knowledge/` 只剩 `cli.rs` 子进程调用层与 `commands.rs` 编排）。
+- **CLI 按库名操作、无路径参数**：`create <库名> <目录>`（唯一来源登记入口）→ `index <库名>` / `search <库名> --query ...` / `list` / `delete <库名>`；数据目录固定 `%APPDATA%\com.codexui.app\knowledge`（与 `tauri.conf.json` 的 `identifier` 耦合，改 identifier 必须同步 `crates/knowledge-cli/src/paths.rs` 的 `APP_IDENTIFIER`），模型固定在 CLI 同目录。知识库**没有动态工具**（`codexui.search_docs`/`index_docs` 已移除），agent 侧由 skill 调用 CLI。
+- 改动知识库逻辑改 CLI crate；改动调用协议时两边必须同步：`crates/knowledge-cli/src/cli.rs` 的 `API_VERSION` 与 `src/codex/knowledge/cli.rs` 的 `API_VERSION`（当前均为 2）。
 - 该 CLI 目录自包含：`codexui-kb.exe` + `onnxruntime.dll` + `model\bge-small-zh-v1.5\` 同目录（发布版 `{app}\bin\`、开发版 `src-tauri\target\debug\`），模型与 DLL 都由子进程按自身目录解析；应用数据目录 `%APPDATA%\com.codexui.app\knowledge\` 下只有 `kbs\`。本地开发用 `pwsh -File scripts/build-knowledge-model.ps1 -AlsoDev` 铺模型（`build-dev.bat` 缺模型时自动调用）。
 
 集成测试位于 `src-tauri/tests/app_server_integration.rs`（真实 app-server 握手/回合、目标、记忆、线程设置等，需 `CODEX_BIN`）。

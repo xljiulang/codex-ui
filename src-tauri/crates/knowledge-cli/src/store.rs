@@ -1,6 +1,7 @@
-//! 单个工作目录的知识库存储（SQLite：元数据 + 文档 + 切块 + 向量 + FTS5 关键词索引）。
+//! 单个知识库的存储（SQLite：元数据 + 文档 + 切块 + 向量 + FTS5 关键词索引）。
 //!
-//! `data_dir` 即 codex-ui 传入的 `--data-dir`（`<app data dir>/knowledge`）。
+//! 库由**库名**标识：`meta.kb` 存规范化库名（寻址键）、`meta.kb_display` 存展示名；
+//! 来源目录记在 `meta.source`/`meta.source_display`（`sources` 表同步写一行以兼容旧读法）。
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,10 +24,12 @@ pub fn now_secs() -> i64 {
 /// 设置页「知识库」列表行
 #[derive(Debug, Clone, Serialize)]
 pub struct KbSummary {
-    /// 库文件名（删除时回传该值）
+    /// 库文件名（损坏库删除时回传该值）
     pub file: String,
-    /// 工作目录（原始路径；缺失元数据时为空）
-    pub cwd: String,
+    /// 库名（展示用大小写；缺元数据时为空）
+    pub kb: String,
+    /// 索引来源目录（原始路径；缺元数据时为空）
+    pub source: String,
     pub docs: i64,
     pub chunks: i64,
     /// 上次更新时间（Unix 秒；0 表示未索引过）
@@ -34,6 +37,21 @@ pub struct KbSummary {
     /// 是否可正常使用（损坏/缺元数据为 false，仍允许删除）
     pub available: bool,
     pub error: Option<String>,
+}
+
+/// `create` 的结果
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateOutcome {
+    /// 规范化库名（寻址键）
+    pub kb: String,
+    /// 展示用库名
+    pub display: String,
+    /// 来源目录（原始路径）
+    pub source: String,
+    /// 库文件名
+    pub file: String,
+    /// 本次是否新建；false = 已存在且来源一致（幂等）
+    pub created: bool,
 }
 
 /// 检索命中的切块
@@ -51,13 +69,18 @@ pub struct KbStore {
 }
 
 impl KbStore {
-    /// 打开（必要时创建）指定工作目录的知识库；文件槽位冲突时顺延，避免串库或覆盖他人数据。
-    pub fn open(data_dir: &Path, cwd: &str) -> Result<Self, String> {
+    /// 新建或打开指定库名的知识库：同名且来源一致时幂等返回 `created=false`；
+    /// 同名但来源不同直接报错（不静默改写）；文件槽位冲突时顺延，绝不覆盖他人数据。
+    pub fn create(
+        data_dir: &Path,
+        normalized: &str,
+        display: &str,
+        source: &str,
+    ) -> Result<(Self, bool), String> {
         let dir = paths::kbs_dir(data_dir);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("创建知识库目录失败 {}: {e}", dir.display()))?;
-        let norm = paths::normalize_workspace(cwd);
-        let stem = paths::kb_stem(cwd);
+        let stem = paths::kb_stem(normalized);
         for slot in 1..=8 {
             let name = if slot == 1 {
                 format!("{stem}.sqlite")
@@ -69,23 +92,34 @@ impl KbStore {
             let conn = Connection::open(&path).map_err(|e| format!("打开知识库失败：{e}"))?;
             Self::init(&conn)?;
             let store = KbStore { conn, path };
-            match store.meta_get("cwd") {
-                Some(existing) if existing == norm => return Ok(store),
-                None if !existed || store.counts() == (0, 0) => {
-                    store.meta_set("cwd", &norm)?;
-                    store.meta_set("cwd_display", cwd.trim())?;
-                    return Ok(store);
+            match store.meta_get("kb") {
+                Some(existing) if existing == normalized => {
+                    let current = store.source_display();
+                    if !current.is_empty() && paths::normalize_dir(&current) != paths::normalize_dir(source)
+                    {
+                        return Err(format!(
+                            "库「{display}」已存在，来源为 {current}，与本次 {source} 不一致；\
+                             请先用 list 查看，或换一个库名（删除旧库：codexui-kb delete \"{display}\"）"
+                        ));
+                    }
+                    return Ok((store, false));
                 }
-                // 属于别的目录（哈希碰撞）：换下一个槽位，绝不覆盖
+                None if !existed || store.counts() == (0, 0) => {
+                    store.meta_set("kb", normalized)?;
+                    store.meta_set("kb_display", display)?;
+                    store.set_source(source)?;
+                    return Ok((store, true));
+                }
+                // 属于别的库（哈希碰撞）：换下一个槽位，绝不覆盖
                 _ => continue,
             }
         }
-        Err("知识库文件槽位已用尽（同名目录冲突），请清理 knowledge/kbs 后重试".into())
+        Err("知识库文件槽位已用尽（同名库冲突），请清理 knowledge/kbs 后重试".into())
     }
 
     /// 只打开已存在的库（不创建、不改写元数据）；不存在返回 None
-    pub fn open_existing(data_dir: &Path, cwd: &str) -> Result<Option<Self>, String> {
-        let Some(path) = resolve_existing_path(data_dir, cwd)? else {
+    pub fn open_existing(data_dir: &Path, normalized: &str) -> Result<Option<Self>, String> {
+        let Some(path) = resolve_existing_path(data_dir, normalized)? else {
             return Ok(None);
         };
         let conn = Connection::open(&path).map_err(|e| format!("打开知识库失败：{e}"))?;
@@ -186,14 +220,28 @@ impl KbStore {
         Ok(())
     }
 
-    /// 展示用工作目录：优先原始路径，缺失时回落到规范化路径
-    pub fn cwd_display(&self) -> String {
-        self.meta_get("cwd_display")
-            .or_else(|| self.meta_get("cwd"))
+    /// 展示用库名：优先原始大小写，缺失时回落到规范化名
+    pub fn kb_display(&self) -> String {
+        self.meta_get("kb_display")
+            .or_else(|| self.meta_get("kb"))
             .unwrap_or_default()
     }
 
-    /// 内容修订号：每次索引写入递增，向量缓存据此失效
+    /// 展示用来源目录
+    pub fn source_display(&self) -> String {
+        self.meta_get("source_display")
+            .or_else(|| self.meta_get("source"))
+            .unwrap_or_default()
+    }
+
+    /// 写入来源目录（`meta.source` + `sources` 表，兼容旧读法）
+    pub fn set_source(&self, source: &str) -> Result<(), String> {
+        self.meta_set("source", &paths::normalize_dir(source))?;
+        self.meta_set("source_display", source.trim())?;
+        self.add_source(source.trim())
+    }
+
+    /// 内容修订号：每次索引写入递增
     pub fn revision(&self) -> String {
         self.meta_get("revision").unwrap_or_else(|| "0".to_string())
     }
@@ -230,7 +278,7 @@ impl KbStore {
         (docs, chunks)
     }
 
-    pub fn add_source(&self, root: &str) -> Result<(), String> {
+    fn add_source(&self, root: &str) -> Result<(), String> {
         self.conn
             .execute(
                 "INSERT OR IGNORE INTO sources(path, added_at) VALUES(?1, ?2)",
@@ -240,6 +288,7 @@ impl KbStore {
         Ok(())
     }
 
+    /// 已知来源目录（新库恒为一个）
     pub fn sources(&self) -> Vec<String> {
         let mut stmt = match self.conn.prepare("SELECT path FROM sources ORDER BY path") {
             Ok(s) => s,
@@ -327,7 +376,11 @@ impl KbStore {
     }
 
     /// 用新的切块替换该文档的全部切块（含向量）
-    pub fn replace_chunks(&self, doc_id: i64, chunks: &[(String, String, Vec<f32>)]) -> Result<(), String> {
+    pub fn replace_chunks(
+        &self,
+        doc_id: i64,
+        chunks: &[(String, String, Vec<f32>)],
+    ) -> Result<(), String> {
         // 单文档一个事务：中途失败/被杀进程时不会留下"旧切块已删、新切块只写了一半"的半成品
         self.conn
             .execute_batch("BEGIN IMMEDIATE")
@@ -481,11 +534,10 @@ impl KbStore {
     }
 }
 
-/// 解析该工作目录已存在的库文件路径（按槽位顺序，校验 `meta.cwd` 归属）
-pub fn resolve_existing_path(data_dir: &Path, cwd: &str) -> Result<Option<PathBuf>, String> {
+/// 解析该库名已存在的库文件路径（按槽位顺序，校验 `meta.kb` 归属）
+pub fn resolve_existing_path(data_dir: &Path, normalized: &str) -> Result<Option<PathBuf>, String> {
     let dir = paths::kbs_dir(data_dir);
-    let norm = paths::normalize_workspace(cwd);
-    let stem = paths::kb_stem(cwd);
+    let stem = paths::kb_stem(normalized);
     for slot in 1..=8 {
         let name = if slot == 1 {
             format!("{stem}.sqlite")
@@ -498,14 +550,24 @@ pub fn resolve_existing_path(data_dir: &Path, cwd: &str) -> Result<Option<PathBu
         }
         let conn = Connection::open(&path).map_err(|e| format!("打开知识库失败：{e}"))?;
         let existing: Option<String> = conn
-            .query_row("SELECT value FROM meta WHERE key = 'cwd'", [], |r| r.get(0))
+            .query_row("SELECT value FROM meta WHERE key = 'kb'", [], |r| r.get(0))
             .optional()
             .unwrap_or(None);
-        if existing.as_deref() == Some(norm.as_str()) {
+        if existing.as_deref() == Some(normalized) {
             return Ok(Some(path));
         }
     }
     Ok(None)
+}
+
+/// 解析库文件路径（不存在则报错），供 `index`/`delete` 使用
+pub fn require_existing_path(data_dir: &Path, normalized: &str, display: &str) -> Result<PathBuf, String> {
+    resolve_existing_path(data_dir, normalized)?.ok_or_else(|| {
+        format!(
+            "库「{display}」尚未建立：请先执行 codexui-kb create \"{display}\" <目录>；\
+             可用 codexui-kb list 查看已有库"
+        )
+    })
 }
 
 /// 扫描 `kbs/` 下全部知识库，按更新时间倒序返回（损坏/缺元数据的标记为不可用但仍可删）
@@ -534,7 +596,8 @@ pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
                     .ok()
                     .flatten()
                 };
-                let cwd = read_meta("cwd_display").or_else(|| read_meta("cwd"));
+                let kb = read_meta("kb_display").or_else(|| read_meta("kb"));
+                let source = read_meta("source_display").or_else(|| read_meta("source"));
                 let docs = conn
                     .query_row("SELECT COUNT(*) FROM documents", [], |r| r.get::<_, i64>(0))
                     .unwrap_or(0);
@@ -544,10 +607,11 @@ pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
                 let updated_at = read_meta("updated_at")
                     .and_then(|v| v.parse::<i64>().ok())
                     .unwrap_or(0);
-                let available = cwd.is_some();
+                let available = kb.is_some();
                 out.push(KbSummary {
                     file,
-                    cwd: cwd.unwrap_or_default(),
+                    kb: kb.unwrap_or_default(),
+                    source: source.unwrap_or_default(),
                     docs,
                     chunks,
                     updated_at,
@@ -555,13 +619,17 @@ pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
                     error: if available {
                         None
                     } else {
-                        Some("元数据缺失，无法识别所属工作目录".to_string())
+                        Some(
+                            "旧版或损坏的知识库（缺少库名元数据），请删除后用 create 重建"
+                                .to_string(),
+                        )
                     },
                 });
             }
             Err(e) => out.push(KbSummary {
                 file,
-                cwd: String::new(),
+                kb: String::new(),
+                source: String::new(),
                 docs: 0,
                 chunks: 0,
                 updated_at: 0,
@@ -617,15 +685,18 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn open_kb(dir: &TempDir, cwd: &str) -> KbStore {
-        KbStore::open(dir.path(), cwd).unwrap()
+    fn create_kb(dir: &TempDir, name: &str, source: &str) -> KbStore {
+        let (norm, display) = paths::normalize_kb_name(name).unwrap();
+        KbStore::create(dir.path(), &norm, &display, source).unwrap().0
     }
 
     #[test]
     fn kb_file_name_is_stable_and_normalized() {
         let dir = TempDir::new().unwrap();
-        let a = paths::kb_path(dir.path(), "D:\\Work\\售后手册");
-        let b = paths::kb_path(dir.path(), "d:/work/售后手册/");
+        let (norm, _) = paths::normalize_kb_name("售后手册").unwrap();
+        let a = paths::kb_path(dir.path(), &norm);
+        let (norm2, _) = paths::normalize_kb_name(" 售后手册 ").unwrap();
+        let b = paths::kb_path(dir.path(), &norm2);
         assert_eq!(a, b);
         let name = a.file_name().unwrap().to_string_lossy().to_string();
         assert!(name.ends_with(".sqlite"));
@@ -633,31 +704,64 @@ mod tests {
     }
 
     #[test]
+    fn create_is_idempotent_and_rejects_different_source() {
+        let dir = TempDir::new().unwrap();
+        let (store, created) =
+            KbStore::create(dir.path(), "手册", "手册", "D:\\售后\\手册").unwrap();
+        assert!(created);
+        assert_eq!(store.source_display(), "D:\\售后\\手册");
+        drop(store);
+
+        // 同名同来源（大小写/斜杠差异）→ 幂等
+        let (_, created) =
+            KbStore::create(dir.path(), "手册", "手册", "d:/售后/手册/").unwrap();
+        assert!(!created);
+
+        // 同名不同来源 → 报错且不改写
+        let err = KbStore::create(dir.path(), "手册", "手册", "E:\\别的目录")
+            .map(|_| ())
+            .unwrap_err();
+        assert!(err.contains("来源"), "{err}");
+        let (store, _) = KbStore::create(dir.path(), "手册", "手册", "D:\\售后\\手册").unwrap();
+        assert_eq!(store.source_display(), "D:\\售后\\手册");
+    }
+
+    #[test]
     fn hash_collision_slots_do_not_share_data() {
         let dir = TempDir::new().unwrap();
-        let first = open_kb(&dir, "D:\\a\\kb");
-        first.meta_set("cwd", "d:\\a\\kb").unwrap();
-        first.meta_set("cwd_display", "D:\\a\\kb").unwrap();
+        let first = create_kb(&dir, "a", "D:\\a");
+        first.meta_set("kb", "a").unwrap();
         drop(first);
-        // 手工把首选槽位伪造成别的目录，验证会顺延到 -2 而不是共用一个库
-        let path = paths::kb_path(dir.path(), "D:\\a\\kb");
+        // 手工把首选槽位伪造成别的库，验证会顺延到 -2 而不是共用一个库
+        let path = paths::kb_path(dir.path(), "a");
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute(
-                "INSERT OR REPLACE INTO meta(key, value) VALUES('cwd', 'd:\\other')",
+                "INSERT OR REPLACE INTO meta(key, value) VALUES('kb', 'other')",
                 [],
             )
             .unwrap();
         }
-        let second = KbStore::open(dir.path(), "D:\\a\\kb").unwrap();
+        let (second, _) = KbStore::create(dir.path(), "a", "a", "D:\\a").unwrap();
         assert_ne!(second.path, path);
-        assert_eq!(second.meta_get("cwd").as_deref(), Some("d:\\a\\kb"));
+        assert_eq!(second.meta_get("kb").as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn open_existing_requires_matching_kb_name() {
+        let dir = TempDir::new().unwrap();
+        assert!(KbStore::open_existing(dir.path(), "手册").unwrap().is_none());
+        let _kb = create_kb(&dir, "手册", "D:\\kb");
+        assert!(KbStore::open_existing(dir.path(), "手册").unwrap().is_some());
+        assert!(KbStore::open_existing(dir.path(), "别的").unwrap().is_none());
+        let err = require_existing_path(dir.path(), "别的", "别的").unwrap_err();
+        assert!(err.contains("create"), "{err}");
     }
 
     #[test]
     fn documents_chunks_and_keyword_search_roundtrip() {
         let dir = TempDir::new().unwrap();
-        let kb = open_kb(&dir, "D:\\kb");
+        let kb = create_kb(&dir, "kb", "D:\\kb");
         let doc_id = kb
             .upsert_document("D:\\kb", "D:\\kb\\手册.md", 10, 20)
             .unwrap();
@@ -693,7 +797,7 @@ mod tests {
     #[test]
     fn replacing_chunks_keeps_fts_in_sync() {
         let dir = TempDir::new().unwrap();
-        let kb = open_kb(&dir, "D:\\kb");
+        let kb = create_kb(&dir, "kb", "D:\\kb");
         let doc_id = kb.upsert_document("D:\\kb", "D:\\kb\\a.md", 1, 1).unwrap();
         kb.replace_chunks(
             doc_id,
@@ -712,7 +816,7 @@ mod tests {
     #[test]
     fn delete_document_cascades_chunks() {
         let dir = TempDir::new().unwrap();
-        let kb = open_kb(&dir, "D:\\kb");
+        let kb = create_kb(&dir, "kb", "D:\\kb");
         let doc_id = kb.upsert_document("D:\\kb", "D:\\kb\\gone.md", 1, 1).unwrap();
         kb.replace_chunks(doc_id, &[("t".into(), "内容".into(), vec![1.0])])
             .unwrap();
@@ -723,7 +827,7 @@ mod tests {
     #[test]
     fn list_and_delete_cover_stray_files() {
         let dir = TempDir::new().unwrap();
-        let kb = open_kb(&dir, "D:\\kb");
+        let kb = create_kb(&dir, "手册", "D:\\kb");
         kb.upsert_document("D:\\kb", "D:\\kb\\a.md", 1, 1).unwrap();
         kb.touch_updated().unwrap();
         let file = kb.path.file_name().unwrap().to_string_lossy().to_string();
@@ -736,7 +840,8 @@ mod tests {
         let list = list_all(dir.path());
         assert_eq!(list.len(), 2);
         let row = list.iter().find(|r| r.file == file).unwrap();
-        assert_eq!(row.cwd, "D:\\kb");
+        assert_eq!(row.kb, "手册");
+        assert_eq!(row.source, "D:\\kb");
         assert!(row.available && row.docs == 1);
         let broken_row = list.iter().find(|r| r.file == "broken-00000000.sqlite").unwrap();
         assert!(!broken_row.available);

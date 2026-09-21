@@ -371,23 +371,25 @@
 - 新建会话通过 `thread/start.dynamicTools` 注册 `codexui` 命名空间工具，agent 可在对话内直接调用：
   - `codexui_get_usage`（查询当前会话 token 消耗与上下文窗口占用）；
   - `codexui_compact_context`（压缩上下文）与 `codexui_add_scheduled_task`（创建定时任务，见「定时任务」）。
-  - `codexui_search_docs` 与 `codexui_index_docs`（售后知识库检索/建库，见「知识库」——**默认关闭**）。
-- **三态开关**：每个工具的开关状态由应用设置 `dynamic_tools_state`（`namespace.tool` → bool）决定——`true` 显式开启、`false` 显式关闭、缺键则用工具定义里的缺省（`get_usage`/`compact_context`/`add_scheduled_task` 缺省开启，两条知识库工具缺省关闭）。设置页「动态工具」区块的开关显示的是生效值，拨动即写入显式值（不提供"恢复缺省"入口）。
+  - 知识库的建库/检索**不再是动态工具**，改由 skill 调用 `codexui-kb` 命令行（见「知识库」）。
+- **三态开关**：每个工具的开关状态由应用设置 `dynamic_tools_state`（`namespace.tool` → bool）决定——`true` 显式开启、`false` 显式关闭、缺键则用工具定义里的缺省（当前三条工具缺省全部开启）。设置页「动态工具」区块的开关显示的是生效值，拨动即写入显式值（不提供“恢复缺省”入口）。历史键 `codexui.search_docs` / `codexui.index_docs` 已失效，不影响注入。
 - 工具调用经 `item/tool/call` 回由 codex-ui 应答（实验性、依赖 `experimentalApi`，仅新建会话注入；改动只影响之后新建的会话）。
 - **行为变化**：旧字段 `dynamic_tools_disabled`（禁用列表）已被上述三态映射取代且**不做迁移**——升级后此前手动关闭过的工具会回到各自缺省状态，需要在设置页重新关闭。
 
 ### 知识库（设置页「知识库」Tab）
 
-售后文档的**本地离线检索**：文档抽取 → 本地 ONNX 向量化 → SQLite（向量 + FTS5 关键词）混合召回，由动态工具交给 codex 使用。
+售后文档的**本地离线检索**：文档抽取 → 本地 ONNX 向量化 → SQLite（向量 + FTS5 关键词）混合召回，由 `codexui-kb` 命令行交给 codex 使用（agent 侧由 skill 调用）。
 
 - **独立进程实现**：整条流水线跑在随包分发的 `codexui-kb.exe`（`{app}\bin\`，源码在 `src-tauri/crates/knowledge-cli/`）里，codex-ui 每次以一次性子进程调用它（NDJSON 协议）：向量化会话与检索用的全量向量都在子进程内，退出即释放，**索引时 UI 进程内存不随语料规模增长**；代价是每次检索多一次进程启动与模型加载（数十~数百毫秒）。开发环境需先 `cargo build -p knowledge-cli`（`build-dev.bat` 已内置该步骤），也可用 `CODEXUI_KB_BIN` 指定可执行文件。
 - **CLI 自包含目录**：`codexui-kb.exe`、`onnxruntime.dll`、`model\bge-small-zh-v1.5\` 三者同目录（发布版 `{app}\bin\`、开发版 `src-tauri\target\debug\`），模型与运行库都由子进程按自身所在目录解析，codex-ui 不做任何物化、也不传模型路径。
-- **与工作目录一对一**：一个会话工作目录对应一个知识库（同一目录下的多个会话共享同一个库）；检索/建库都作用于"当前会话工作目录"对应的那个库，换目录即换库，互不串扰。
-- **数据位置**：`<app data dir>/knowledge/` 下只有 `kbs/<目录名>-<hash8>.sqlite`（各工作目录的索引库，含 `-wal`/`-shm`）；换机/迁移时只需拷贝该目录（模型随程序目录走，不在数据目录里）。
-- **工具（默认关闭，需在「动态工具」开启）**：
-  - `codexui_search_docs(query, topK?)`：混合检索并返回带出处的片段（`[n] 文件名 › 章节（匹配 0.82）`），未建库时提示先建库；
-  - `codexui_index_docs(paths?, full?)`：扫描给定路径（缺省=当前工作目录，递归）下的 **PDF / Word(docx) / Markdown / txt**，抽取正文、按标题+段落切块（约 500 字、重叠 80）、本地向量化入库；按 `size + mtime` 增量，单文件失败只记录不中断；**幂等**（无变化时秒回当前统计，因此也可当状态查询）；文件数 >300 或同步等待超过 3 分钟自动转后台，完成后用 toast 汇报。
-- **设置页分区只做两件事**：列出各知识库（工作目录、文档数/切块数、上次更新时间、建库中状态）与删除（二次确认，只删索引，不动原始文档与模型）。建库与检索没有手工入口，全部由动态工具驱动。
+- **库名标识、来源目录登记**：库是机器级全局命名（一个库对应一个已登记的来源目录），与工作目录解耦；跨目录共享同一个库时双方使用同一个库名。agent 侧由 skill 调用 `codexui-kb` 完成建库与检索。
+- **数据位置**：`%APPDATA%\com.codexui.app\knowledge\kbs\<库名>-<hash8>.sqlite`（每个库一个文件，含 `-wal`/`-shm`）；换机迁移只需拷贝该目录（模型随程序目录走）。数据目录与模型都由 CLI 自行解析，所有命令都不需要路径参数。**旧版按工作目录命名与寻址的库不兼容**，需删除后用 `create` 重建。
+- **命令集**（动态工具已移除，改由 skill 调用下列命令）：
+  - `codexui-kb create <库名> <目录>`：新建库并登记索引来源目录（目录不存在报错；同名同来源幂等、同名不同来源报错）；
+  - `codexui-kb search <库名> --query <检索词> [--top-k <n>]`：混合检索并返回带出处的片段（`[n] 文件名 › 章节（匹配 0.82）`），库不存在或为空返回空结果；
+  - `codexui-kb index <库名> [--full]`：扫描该库已登记的来源目录（递归）下的 **PDF / Word(docx) / Markdown / txt**，抽取正文、按标题+段落切块（约 500 字、重叠 80）、本地向量化入库；按 `size + mtime` 增量，失效文档清理，单文件失败只记录不中断；**幂等**（无变化时秒回当前统计，因此也可当状态查询）；文件数 >300 或同步等待超过 3 分钟自动转后台，完成后用 toast 汇报；
+  - `codexui-kb list` 列出全部库（库名、来源目录、文档数/切块数、更新时间、可用性）；`codexui-kb delete <库名>` 删除索引（含 `-wal`/`-shm`），损坏库用 `delete --file <库文件名>` 兜底；退出码 0/1/2/3/4/5，stdout 为 NDJSON。
+- **设置页分区只做两件事**：列出各知识库（库名、来源目录、文档数/切块数、上次更新时间、建库中状态）与删除（二次确认，只删索引，不动原始文档与模型）。
 - **模型与分发**：默认 `BAAI/bge-small-zh-v1.5`（中文，512 维、量化版约 23 MB）。模型文件由 `pwsh -File scripts/build-knowledge-model.ps1` 直接铺到 `setup\bin\model\bge-small-zh-v1.5\`（**不入库**，`.gitignore` 已忽略），随 `{app}\bin\*` 通配符与 CLI、DLL 一起安装，运行期只读；`-Variant fp32` 为完整版，`-AlsoDev` 同时铺到 `src-tauri\target\{debug,release}\model\` 供本地开发。`build-release.bat` 在缺少 `model.onnx` 时自动调用该脚本（失败只告警，不阻断打包）。
 - **ONNX Runtime**：由 `codexui-kb.exe` 以动态加载方式读取 `onnxruntime.dll`（查找顺序：`CODEXUI_ORT_DYLIB` → 子进程所在目录 → 其 `bin/` 子目录），因此不新增静态链接体积；用 `pwsh -File scripts/fetch-onnxruntime.ps1` 生成/更新（默认从 NuGet 取 1.30.0，先读包尾中央目录再按 Range 只拉那一个条目，实际传输约 6 MB；`-AlsoDev` 同时复制到 `src-tauri/target/{debug,release}/bin` 供本地运行，`-Source pypi` 改从 PyPI wheel 取，`-Full` 为 Range 不可用时的整包退路）。**版本下限 1.24**（`ort` 以 `GetApi(24)` 申请接口），脚本会读出 DLL 版本并强制校验；`build-release.bat` 在 `setup\bin\onnxruntime.dll` 缺失时自动调用该脚本（失败只告警，不阻断打包），并把 `codexui-kb.exe` 一并复制进 `setup\bin\`。缺失或模型未就绪时，工具会返回可操作的中文提示（如"未找到 onnxruntime.dll（应随安装包放在应用目录的 bin/ 下，或用 CODEXUI_ORT_DYLIB 指定）"），不影响其它功能。
 

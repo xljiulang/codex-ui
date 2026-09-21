@@ -5,8 +5,6 @@ import {
   CODEXUI_TOOL_ADD_SCHEDULED_TASK,
   CODEXUI_TOOL_COMPACT_CONTEXT,
   CODEXUI_TOOL_GET_USAGE,
-  CODEXUI_TOOL_INDEX_DOCS,
-  CODEXUI_TOOL_SEARCH_DOCS,
   buildInjectedDynamicTools,
   dynamicToolDisplay,
   dynamicToolKey,
@@ -37,15 +35,17 @@ describe("codexui 动态工具定义", () => {
     expect(RESERVED_NAMESPACES.has(CODEXUI_DYNAMIC_NAMESPACE)).toBe(false);
   });
 
-  it("包含五条 function 工具（含两条默认关闭的知识库工具）且字段合法", () => {
+  it("包含三条 function 工具（知识库已改为 skill + CLI，不再注入动态工具）且字段合法", () => {
     const names = CODEXUI_DYNAMIC_TOOLS.flatMap((ns) =>
       ns.tools.map((t) => t.name),
     );
-    expect(names).toContain(CODEXUI_TOOL_GET_USAGE);
-    expect(names).toContain(CODEXUI_TOOL_COMPACT_CONTEXT);
-    expect(names).toContain(CODEXUI_TOOL_ADD_SCHEDULED_TASK);
-    expect(names).toContain(CODEXUI_TOOL_SEARCH_DOCS);
-    expect(names).toContain(CODEXUI_TOOL_INDEX_DOCS);
+    expect(names).toEqual([
+      CODEXUI_TOOL_GET_USAGE,
+      CODEXUI_TOOL_COMPACT_CONTEXT,
+      CODEXUI_TOOL_ADD_SCHEDULED_TASK,
+    ]);
+    expect(names).not.toContain("search_docs");
+    expect(names).not.toContain("index_docs");
     for (const ns of CODEXUI_DYNAMIC_TOOLS) {
       expect(ns.type).toBe("namespace");
       expect(ns.name).toBe(CODEXUI_DYNAMIC_NAMESPACE);
@@ -68,21 +68,9 @@ describe("codexui 动态工具定义", () => {
       required: string[];
     };
     expect(add.required).toEqual(["name", "prompt", "cron"]);
-    // search_docs 只要求 query，topK 可选
-    const search = tool(CODEXUI_TOOL_SEARCH_DOCS).inputSchema as {
-      required: string[];
-      properties: Record<string, unknown>;
-    };
-    expect(search.required).toEqual(["query"]);
-    expect(Object.keys(search.properties)).toEqual(["query", "topK"]);
-    // index_docs 无必填参数（缺省=当前工作目录、增量）
-    const index = tool(CODEXUI_TOOL_INDEX_DOCS).inputSchema as {
-      required?: string[];
-    };
-    expect(index.required).toBeUndefined();
   });
 
-  it("缺省开关：既有三条 true、知识库两条 false", () => {
+  it("缺省开关：三条工具全部缺省开启", () => {
     const byName = new Map(
       CODEXUI_DYNAMIC_TOOLS.flatMap((ns) => ns.tools).map((t) => [
         t.name,
@@ -92,8 +80,6 @@ describe("codexui 动态工具定义", () => {
     expect(byName.get(CODEXUI_TOOL_GET_USAGE)).toBe(true);
     expect(byName.get(CODEXUI_TOOL_COMPACT_CONTEXT)).toBe(true);
     expect(byName.get(CODEXUI_TOOL_ADD_SCHEDULED_TASK)).toBe(true);
-    expect(byName.get(CODEXUI_TOOL_SEARCH_DOCS)).toBe(false);
-    expect(byName.get(CODEXUI_TOOL_INDEX_DOCS)).toBe(false);
   });
 });
 
@@ -134,16 +120,22 @@ describe("codexui 动态工具注入过滤", () => {
     ]);
   });
 
-  it("显式 true 开启缺省关闭的知识库工具", () => {
-    const result = buildInjectedDynamicTools({ "codexui.search_docs": true });
+  it("历史知识库开关不影响注入（键已失效），注入前剔除私有字段", () => {
+    const result = buildInjectedDynamicTools({
+      "codexui.search_docs": true,
+      "codexui.index_docs": true,
+    });
     const names = result.flatMap((ns) => ns.tools.map((t) => t.name));
-    expect(names).toContain(CODEXUI_TOOL_SEARCH_DOCS);
-    expect(names).not.toContain(CODEXUI_TOOL_INDEX_DOCS);
+    expect(names).toEqual([
+      CODEXUI_TOOL_GET_USAGE,
+      CODEXUI_TOOL_COMPACT_CONTEXT,
+      CODEXUI_TOOL_ADD_SCHEDULED_TASK,
+    ]);
     // 注入前剔除 codex-ui 私有字段，避免协议收到未知键
-    const search = result
+    const usage = result
       .flatMap((ns) => ns.tools)
-      .find((t) => t.name === CODEXUI_TOOL_SEARCH_DOCS)!;
-    expect(Object.keys(search).sort()).toEqual([
+      .find((t) => t.name === CODEXUI_TOOL_GET_USAGE)!;
+    expect(Object.keys(usage).sort()).toEqual([
       "description",
       "inputSchema",
       "name",
@@ -165,6 +157,8 @@ describe("codexui 动态工具注入过滤", () => {
     expect(
       isDynamicToolEnabled("codexui", "get_usage", { "codexui.get_usage": false }),
     ).toBe(false);
+    // 历史知识库工具已从定义中移除：显式配置仍按"显式优先"读取，
+    // 但注入列表由定义决定，因此不会再出现在注入结果里（见上一条用例）
     expect(isDynamicToolEnabled("codexui", "search_docs", {})).toBe(false);
     expect(
       isDynamicToolEnabled("codexui", "search_docs", {

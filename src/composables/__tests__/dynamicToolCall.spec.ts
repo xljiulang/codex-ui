@@ -148,141 +148,27 @@ describe("动态工具 add_scheduled_task（直接创建，无前端确认框）
   });
 });
 
-describe("动态工具 search_docs / index_docs（知识库，默认关闭）", () => {
-  it("默认关闭：search_docs 未被显式开启时应答 failure 且不触发检索", async () => {
-    useSessionTab();
+describe("知识库动态工具已移除（改由 skill 调 CLI）", () => {
+  it("search_docs 不再被处理：响应未知工具且不触发检索", async () => {
+    useSessionTab("D:\\work\\售后");
+    store.settings.dynamic_tools_state = { "codexui.search_docs": true };
     await handleDynamicToolCall(callPayload("search_docs", { query: "无法开机" }));
     const texts = await respondTexts();
-    expect(texts[0]).toContain("未开启");
+    expect(texts[0]).toContain("未知的 codexui 工具");
     expect(
       mockedInvoke.mock.calls.filter(([cmd]) => cmd === "knowledge_search"),
     ).toHaveLength(0);
   });
 
-  it("开启后按会话工作目录检索，应答带出处与匹配分", async () => {
-    useSessionTab("D:\\work\\售后");
-    store.settings.dynamic_tools_state = { "codexui.search_docs": true };
-    mockedInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "knowledge_search") {
-        return [
-          {
-            doc_path: "D:\\work\\售后\\手册.pdf",
-            title_path: "售后手册 › 第3章 故障 › 3.2 无法开机",
-            text: "请检查电源适配器是否插紧。",
-            score: 0.82,
-          },
-        ];
-      }
-      return undefined;
-    });
-
-    await handleDynamicToolCall(
-      callPayload("search_docs", { query: "设备无法开机", topK: 3 }),
-    );
-    const [, args] = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "knowledge_search",
-    )!;
-    expect(args).toEqual({
-      cwd: "D:\\work\\售后",
-      query: "设备无法开机",
-      topK: 3,
-    });
-
-    const texts = await respondTexts();
-    expect(texts[0]).toContain("手册.pdf");
-    expect(texts[0]).toContain("第3章 故障");
-    expect(texts[0]).toContain("匹配 0.82");
-    expect(texts[0]).toContain("请检查电源适配器");
-  });
-
-  it("空结果为成功应答并提示可先建库（不报错）", async () => {
+  it("index_docs 不再被处理：响应未知工具且不调建库命令", async () => {
     useSessionTab();
-    store.settings.dynamic_tools_state = { "codexui.search_docs": true };
-    await handleDynamicToolCall(callPayload("search_docs", { query: "没有的词" }));
-    const texts = await respondTexts();
-    expect(texts[0]).toContain("没有匹配");
-    expect(texts[0]).toContain("index_docs");
-  });
-
-  it("缺少工作目录时明确报错（不落到活动标签兜底）", async () => {
-    useSessionTab(null);
-    store.settings.dynamic_tools_state = { "codexui.search_docs": true };
-    await handleDynamicToolCall(callPayload("search_docs", { query: "问题" }));
-    const texts = await respondTexts();
-    expect(texts[0]).toContain("没有工作目录");
-    expect(
-      mockedInvoke.mock.calls.filter(([cmd]) => cmd === "knowledge_search"),
-    ).toHaveLength(0);
-  });
-
-  it("缺少 query 参数时报错", async () => {
-    useSessionTab();
-    store.settings.dynamic_tools_state = { "codexui.search_docs": true };
-    await handleDynamicToolCall(callPayload("search_docs", {}));
-    const texts = await respondTexts();
-    expect(texts[0]).toContain("缺少 query");
-  });
-
-  it("检索命令报错时把原因回传给 agent", async () => {
-    useSessionTab();
-    store.settings.dynamic_tools_state = { "codexui.search_docs": true };
-    mockedInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "knowledge_search") throw new Error("向量模型未就绪");
-      return undefined;
-    });
-    await handleDynamicToolCall(callPayload("search_docs", { query: "问题" }));
-    const texts = await respondTexts();
-    expect(texts[0]).toContain("向量模型未就绪");
-  });
-
-  it("index_docs：开启后按工作目录建库并透传 Rust 摘要文本", async () => {
-    useSessionTab("D:\\work\\售后");
-    store.settings.dynamic_tools_state = { "codexui.index_docs": true };
-    mockedInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "knowledge_index_start") {
-        return { text: "知识库无变化（内容与上次索引一致）：当前共 3 篇文档 / 12 个切块。" };
-      }
-      return undefined;
-    });
-
-    await handleDynamicToolCall(
-      callPayload("index_docs", { paths: ["D:\\work\\售后\\手册"], full: true }),
-    );
-    const [, args] = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "knowledge_index_start",
-    )!;
-    expect(args).toEqual({
-      cwd: "D:\\work\\售后",
-      paths: ["D:\\work\\售后\\手册"],
-      full: true,
-    });
-    const texts = await respondTexts();
-    expect(texts[0]).toContain("无变化");
-    expect(texts[0]).toContain("3 篇");
-  });
-
-  it("index_docs：缺省不传 paths/full（由 Rust 用工作目录增量）", async () => {
-    useSessionTab();
-    store.settings.dynamic_tools_state = { "codexui.index_docs": true };
-    mockedInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "knowledge_index_start") return { text: "已开始" };
-      return undefined;
-    });
-    await handleDynamicToolCall(callPayload("index_docs", {}));
-    const [, args] = mockedInvoke.mock.calls.find(
-      ([cmd]) => cmd === "knowledge_index_start",
-    )!;
-    expect(args).toEqual({ cwd: "D:\\kb", paths: undefined, full: undefined });
-  });
-
-  it("index_docs：缺少工作目录时报错且不调用命令", async () => {
-    useSessionTab(null);
     store.settings.dynamic_tools_state = { "codexui.index_docs": true };
     await handleDynamicToolCall(callPayload("index_docs", {}));
     const texts = await respondTexts();
-    expect(texts[0]).toContain("没有工作目录");
+    expect(texts[0]).toContain("未知的 codexui 工具");
     expect(
       mockedInvoke.mock.calls.filter(([cmd]) => cmd === "knowledge_index_start"),
     ).toHaveLength(0);
   });
 });
+

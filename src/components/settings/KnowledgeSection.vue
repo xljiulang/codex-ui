@@ -5,6 +5,7 @@ import {
   deleteKnowledge,
   knowledgeKbs,
   knowledgeProgress,
+  normalizeKbKey,
   refreshKnowledgeList,
   type KnowledgeKb,
 } from "../../composables/useKnowledge";
@@ -20,8 +21,8 @@ function updatedText(ts: number): string {
 
 /** 该库当前是否有进行中的建库任务 */
 function progressText(kb: KnowledgeKb): string {
-  const key = kb.cwd.trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
-  return knowledgeProgress.value[key] ?? "";
+  if (!kb.kb) return "";
+  return knowledgeProgress.value[normalizeKbKey(kb.kb)] ?? "";
 }
 
 onMounted(() => {
@@ -29,16 +30,19 @@ onMounted(() => {
 });
 
 async function onDelete(kb: KnowledgeKb) {
+  const label = kb.kb || kb.file;
   const ok = await askConfirm({
     title: "删除知识库",
     message:
-      `确定删除工作目录「${kb.cwd || kb.file}」的知识库索引吗？\n` +
-      "只删除本地索引（含向量与关键词索引），不影响原始文档与向量模型；下次可用 index_docs 重新建库。",
+      `确定删除知识库「${label}」的索引吗？\n` +
+      `索引来源目录：${kb.source || "（未知）"}\n` +
+      "只删除本地索引（含向量与关键词索引），不影响原始文档与向量模型；\
+       之后可用 codexui-kb create + index 重新建库。",
     confirmLabel: "删除",
   });
   if (!ok) return;
   try {
-    await deleteKnowledge(kb.file);
+    await deleteKnowledge(kb);
   } catch (e) {
     setToast(toastError(e));
   }
@@ -49,19 +53,20 @@ async function onDelete(kb: KnowledgeKb) {
   <section v-show="active" class="settings-section settings-section-knowledge">
     <h2 class="settings-section-title">知识库</h2>
     <p class="settings-section-desc">
-      按会话工作目录一对一存放（同一目录的多个会话共享一个知识库）。检索与建库由动态工具
-      <code>codexui.search_docs</code> / <code>codexui.index_docs</code> 完成——两者默认关闭，
-      需在「动态工具」中开启后新建会话才可用
+      知识库按<b>库名</b>管理，每个库登记一个索引来源目录；跨目录共享同一个库时使用同一个库名。
+      索引与检索由 <code>codexui-kb</code> 命令行完成（由 skill 调用）：
+      <code>create &lt;库名&gt; &lt;目录&gt;</code> 登记来源、
+      <code>index &lt;库名&gt;</code> 建库、<code>search &lt;库名&gt; --query &lt;词&gt;</code> 检索。
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
         <h3>已建立的知识库</h3>
         <div class="model-config-head-actions">
-          <span class="knowledge-hint">索引数据位于应用数据目录 knowledge/</span>
+          <span class="knowledge-hint">索引数据位于应用数据目录 knowledge/kbs/</span>
         </div>
       </div>
       <div v-if="!knowledgeKbs.length" class="knowledge-empty">
-        暂无知识库：在会话里让 codex 调用 index_docs 建立
+        暂无知识库：用 codexui-kb create &lt;库名&gt; &lt;目录&gt; 建立
       </div>
       <div v-else class="skills-list">
         <div v-for="kb in knowledgeKbs" :key="kb.file" class="knowledge-row">
@@ -72,11 +77,11 @@ async function onDelete(kb: KnowledgeKb) {
           </span>
           <div class="skill-info">
             <span class="skill-row-main">
-              <span class="skill-name">{{ kb.cwd || kb.file }}</span>
+              <span class="skill-name">{{ kb.kb || kb.file }}</span>
             </span>
             <p class="skill-desc">
               <template v-if="kb.available">
-                {{ kb.docs }} 篇文档 · {{ kb.chunks }} 个切块 · 上次更新
+                来源：{{ kb.source || "（未知）" }} · {{ kb.docs }} 篇文档 · {{ kb.chunks }} 个切块 · 上次更新
                 {{ updatedText(kb.updated_at) }}
                 <template v-if="progressText(kb)">
                   · {{ progressText(kb) }}
@@ -92,7 +97,7 @@ async function onDelete(kb: KnowledgeKb) {
               type="button"
               class="btn btn-icon danger knowledge-delete-btn"
               v-tooltip="'删除知识库'"
-              :aria-label="`删除知识库 ${kb.cwd || kb.file}`"
+              :aria-label="`删除知识库 ${kb.kb || kb.file}`"
               @click="onDelete(kb)"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
