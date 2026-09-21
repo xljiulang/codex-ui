@@ -2446,9 +2446,14 @@ fn is_zen_upstream_matches_only_opencode_hosts() {
     assert!(is_zen_upstream("https://opencode.ai"));
     assert!(is_zen_upstream("https://api.opencode.ai/zen/v2/"));
     assert!(is_zen_upstream("HTTPS://OpenCode.AI/zen/v1"));
-    // 本地 mock / 第三方上游 / 伪装域名 / 非法地址一律不补形状
+    // host 含有 `opencode`（小写化后）即命中：子串出现在任意位置都算
+    assert!(is_zen_upstream("https://opencode.ai.evil.com/v1"));
+    assert!(is_zen_upstream("https://myopencode.ai/v1"));
+    assert!(is_zen_upstream("https://opencode-ai.com/v1"));
+    assert!(is_zen_upstream("https://evilopencode.ai/v1"));
+    assert!(is_zen_upstream("HTTPS://Api.OpenCode.ai/zen/v1"));
+    // 本地 mock / 第三方上游 / 非法地址一律不补形状
     assert!(!is_zen_upstream("http://127.0.0.1:18080/zen/v1"));
-    assert!(!is_zen_upstream("https://opencode.ai.evil.com/v1"));
     assert!(!is_zen_upstream("https://api.deepseek.com/v1"));
     assert!(!is_zen_upstream("https://10.0.0.20:9080/v1"));
     assert!(!is_zen_upstream(""));

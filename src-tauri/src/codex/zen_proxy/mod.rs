@@ -546,7 +546,7 @@ fn responses_path(base_url: &str) -> String {
     format!("{path}/responses")
 }
 
-/// 上游是否为 OpenCode Zen（host 是 `opencode.ai` 或其子域，大小写不敏感）。
+/// 上游是否为 OpenCode Zen（host 小写化后含有 `opencode`，大小写不敏感）。
 /// 只有 Zen 免费层才有 [`ZEN_REQUIRED_TOOL_NAMES`] / [`ZEN_MAX_TOKENS`] 这套请求体门禁，
 /// 因此补形状只对 Zen 生效；指向自建或第三方兼容端点（DeepSeek 等）时请求体保持原样。
 fn is_zen_upstream(base_url: &str) -> bool {
@@ -557,7 +557,7 @@ fn is_zen_upstream(base_url: &str) -> bool {
         return false;
     };
     let host = host.to_ascii_lowercase();
-    host == "opencode.ai" || host.ends_with(".opencode.ai")
+    host.contains("opencode")
 }
 
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
@@ -673,7 +673,7 @@ struct ProxyState {
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
     /// 是否按 Zen 免费层的请求体门禁补形状（`max_tokens` + 内置工具名，见
-    /// [`patch_zen_request_body`]）：上游是 opencode.ai 时为 true，其它上游保持请求体原样。
+    /// [`patch_zen_request_body`]）：上游 host 含有 `opencode` 时为 true，其它上游保持请求体原样。
     zen_body_patch: bool,
     /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
     modes: Arc<ThreadModeRegistry>,
@@ -1838,7 +1838,7 @@ async fn forward(
     let session_codex = state.session_map.codex_of(&session);
     let mut optional = optional_fields(req, want_stream);
     // Zen 免费层的请求体门禁之一：补 `max_tokens`（与 messages 同级）。它与下面的工具名
-    // 补丁**同受 `zen_body_patch` 约束**——只有上游 host 是 opencode.ai 及其子域时才加，
+    // 补丁**同受 `zen_body_patch` 约束**——只有上游 host 含有 `opencode` 时才加，
     // 换成 DeepSeek 等自建/第三方端点时两项都不加（无法只开其中一项）。放进可选字段列表
     // 是为了上游指名拒绝它能走既有「摘掉后重试一次」的降级。
     if state.zen_body_patch {
@@ -1859,7 +1859,7 @@ async fn forward(
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
         // 同一道门禁的另一项：工具名每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）。
-        // 与上面的 `max_tokens` 完全同源，同样只在上游 host 是 opencode.ai 时为真。
+        // 与上面的 `max_tokens` 完全同源，同样只在上游 host 含有 `opencode` 时为真。
         if state.zen_body_patch {
             patch_zen_request_body(&mut body);
         }
