@@ -56,6 +56,25 @@ echo [2/2] Starting npm run tauri dev ...
 echo   UI loads from http://localhost:5173 with HMR; keep this terminal open.
 echo   Running target\debug\codex-ui.exe directly loads the embedded dist/ and
 echo   will NOT reflect recent UI changes.
+echo   Building knowledge base CLI (codexui-kb.exe) first: knowledge base runs it
+echo   as a child process (dev builds land next to codex-ui.exe in target\debug).
+call cargo build --manifest-path src-tauri\Cargo.toml -p knowledge-cli
+if errorlevel 1 (
+  echo [ERROR] Knowledge base CLI build failed.
+  exit /b 1
+)
+rem Knowledge base embedding model must sit next to codexui-kb.exe (target\debug\model).
+rem Generated on demand (not tracked in git); a failure only warns.
+if not exist "src-tauri\target\debug\model\bge-small-zh-v1.5\model.onnx" (
+  echo   Fetching embedding model ^(bge-small-zh-v1.5^) ...
+  where pwsh >nul 2>nul
+  if errorlevel 1 (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\build-knowledge-model.ps1" -AlsoDev
+  ) else (
+    pwsh -NoProfile -File "scripts\build-knowledge-model.ps1" -AlsoDev
+  )
+  if errorlevel 1 echo   [WARN] embedding model not ready; knowledge base will report missing model.
+)
 call npm run build
 call npm run tauri dev
 if errorlevel 1 (

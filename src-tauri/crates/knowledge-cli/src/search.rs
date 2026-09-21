@@ -1,4 +1,7 @@
 //! 混合检索：向量余弦召回 + FTS5 关键词召回 → RRF 融合。
+//!
+//! `model_dir` 为当前向量模型目录（查询向量化用）。整库向量按调用缓存于本进程：
+//! 进程短命，缓存随退出释放，不会把内存留在 codex-ui 里。
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -88,7 +91,7 @@ fn cosine(cached: &CachedVectors, idx: usize, query: &[f32]) -> f32 {
 
 /// 向量召回：返回按余弦降序的 chunk id
 fn vector_candidates(
-    app_dir: &Path,
+    model_dir: &Path,
     store: &KbStore,
     cache: &VectorCache,
     query: &str,
@@ -105,7 +108,7 @@ fn vector_candidates(
             super::paths::EMBED_DIM
         ));
     }
-    let query_vec = embed::embed_query(app_dir, query)?;
+    let query_vec = embed::embed_query(model_dir, query)?;
     let mut scored: Vec<(i64, f32)> = cached
         .ids
         .iter()
@@ -159,7 +162,7 @@ pub fn rrf_fuse(vec_ids: &[i64], fts_ids: &[i64], top: usize) -> Vec<(i64, f64)>
 
 /// 混合检索：向量 + 关键词召回后融合，命中的 `score` 用与查询的余弦相似度（0~1，便于展示）
 pub fn search(
-    app_dir: &Path,
+    model_dir: &Path,
     store: &KbStore,
     cache: &VectorCache,
     query: &str,
@@ -174,7 +177,7 @@ pub fn search(
         return Ok(Vec::new());
     }
     let top_k = top_k.clamp(1, 50);
-    let vec_ids = vector_candidates(app_dir, store, cache, query, RECALL_TOP)?;
+    let vec_ids = vector_candidates(model_dir, store, cache, query, RECALL_TOP)?;
     let expr = build_match_expr(query);
     let mut fts_ids: Vec<i64> = if expr.is_empty() {
         Vec::new()
@@ -194,7 +197,7 @@ pub fn search(
 
     // 展示分：与查询向量的余弦相似度，缺失时回落到 RRF 分数的放大值
     let cached = cache.get(store)?;
-    let query_vec = embed::embed_query(app_dir, query).unwrap_or_default();
+    let query_vec = embed::embed_query(model_dir, query).unwrap_or_default();
     for (i, hit) in hits.iter_mut().enumerate() {
         let id = ids.get(i).copied().unwrap_or_default();
         hit.score = match (cached.index_of.get(&id), query_vec.len() == cached.dim) {

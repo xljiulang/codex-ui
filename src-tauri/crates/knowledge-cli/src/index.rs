@@ -1,4 +1,7 @@
 //! 建库/增量更新任务：扫描 → 抽取 → 切块 → 向量化 → 落库（可取消、按文件 mtime/size 增量）。
+//!
+//! `data_dir` 为知识库根目录（`--data-dir`，只承载 `kbs/`），`model_dir` 为当前向量模型目录
+//! （`--model-dir`，默认与 `codexui-kb.exe` 同目录的 `model/<MODEL_ID>`）。
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -168,7 +171,8 @@ fn stat(path: &Path) -> Result<(i64, i64), String> {
 
 /// 执行一次建库（调用方负责放到后台线程；`cancel` 置位后尽快收尾）
 pub fn run_index(
-    app_dir: &Path,
+    data_dir: &Path,
+    model_dir: &Path,
     cwd: &str,
     roots: &[PathBuf],
     full: bool,
@@ -176,7 +180,7 @@ pub fn run_index(
     on_progress: &mut dyn FnMut(IndexProgress),
 ) -> Result<IndexSummary, String> {
     let started = Instant::now();
-    let store = KbStore::open(app_dir, cwd)?;
+    let store = KbStore::open(data_dir, cwd)?;
     let files = plan_files(roots);
     let total = files.len();
     let mut summary = IndexSummary {
@@ -255,7 +259,7 @@ pub fn run_index(
             let mut payload: Vec<(String, String, Vec<f32>)> = Vec::with_capacity(chunks.len());
             for group in chunks.chunks(embed::EMBED_BATCH) {
                 let texts: Vec<String> = group.iter().map(|c| c.text.clone()).collect();
-                let vectors = embed::embed_texts(app_dir, &texts)?;
+                let vectors = embed::embed_texts(model_dir, &texts)?;
                 for (c, v) in group.iter().zip(vectors.into_iter()) {
                     payload.push((c.title_path.clone(), c.text.clone(), v));
                 }

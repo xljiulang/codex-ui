@@ -1,30 +1,33 @@
-# 生成知识库向量模型归档（随安装包分发到 <应用目录>/marketplaces/knowledge-model.tar.gz）。
+# 生成知识库向量模型（直接铺文件，不打归档）：默认落到 setup\bin\model\bge-small-zh-v1.5\，
+# 随安装包与 codexui-kb.exe / onnxruntime.dll 同目录分发（CLI 自包含，运行期只读、不做物化）。
 #
-# 归档结构（顶层目录名必须与 src-tauri/src/codex/knowledge/paths.rs 的 MODEL_ID 一致）：
+# 目标结构（与 src-tauri/crates/knowledge-cli 的 MODEL_FILES 一致，缺一不可）：
 #   bge-small-zh-v1.5/{model.onnx, tokenizer.json, config.json, special_tokens_map.json, tokenizer_config.json}
-#   bge-small-zh-v1.5/.materialization-key   # {"appVersion": "<版本>"}，供启动期版本比对
 #
 # 用法：
-#   pwsh -File scripts/build-knowledge-model.ps1                     # 默认量化版（推荐，约 24 MB）
-#   pwsh -File scripts/build-knowledge-model.ps1 -Variant fp32      # fp32（约 95 MB，效果相同、体积更大）
+#   pwsh -File scripts/build-knowledge-model.ps1                # 默认量化版（约 23 MB，落 setup\bin\model）
+#   pwsh -File scripts/build-knowledge-model.ps1 -Variant fp32 # fp32（约 95 MB，效果相同、体积更大）
+#   pwsh -File scripts/build-knowledge-model.ps1 -AlsoDev      # 同时铺到 src-tauri\target\{debug,release}\model
+#   pwsh -File scripts/build-knowledge-model.ps1 -Repo <镜像仓库> -OutDir <目录>
 #
-# 说明：codex-ui 运行期从该归档解压到 <app data dir>/knowledge/model/，全程离线；
-# 换模型/换维度需同时改 paths.rs 的 MODEL_ID / EMBED_DIM，并删除已有知识库重建。
+# 说明：模型文件由本脚本生成、不入库（.gitignore 已忽略 /setup/bin/model/）；换模型/换维度需同时改
+# crates/knowledge-cli/src/paths.rs 的 MODEL_ID / EMBED_DIM，并删除已有知识库重建。
 
 param(
     [string]$Repo = "Xenova/bge-small-zh-v1.5",
-    [string]$Top = "bge-small-zh-v1.5",
+    [string]$ModelId = "bge-small-zh-v1.5",
     [ValidateSet("int8", "fp32")]
     [string]$Variant = "int8",
-    [string]$OutFile = "",
-    [string]$AppVersion = "1.0.0"
+    [string]$OutDir = "",
+    [switch]$AlsoDev,
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-if (-not $OutFile) {
-    $OutFile = Join-Path $repoRoot "setup/marketplaces/knowledge-model.tar.gz"
+if (-not $OutDir) {
+    $OutDir = Join-Path $repoRoot "setup/bin/model/$ModelId"
 }
 
 $onnxSource = if ($Variant -eq "int8") { "onnx/model_quantized.onnx" } else { "onnx/model.onnx" }
@@ -32,36 +35,44 @@ $baseUrl = "https://huggingface.co/$Repo/resolve/main"
 
 # 归档内文件名固定为模型目录约定（int8 也落成 model.onnx，运行期不区分来源）
 $files = [ordered]@{
-    $onnxSource                    = "model.onnx"
-    "tokenizer.json"               = "tokenizer.json"
-    "config.json"                  = "config.json"
-    "special_tokens_map.json"      = "special_tokens_map.json"
-    "tokenizer_config.json"        = "tokenizer_config.json"
+    $onnxSource               = "model.onnx"
+    "tokenizer.json"          = "tokenizer.json"
+    "config.json"             = "config.json"
+    "special_tokens_map.json" = "special_tokens_map.json"
+    "tokenizer_config.json"   = "tokenizer_config.json"
 }
 
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("codexui-knowledge-model-" + [guid]::NewGuid().ToString("N"))
-$target = Join-Path $staging $Top
-New-Item -ItemType Directory -Path $target -Force | Out-Null
+function Get-ModelFiles {
+    param([string]$Target)
 
-try {
+    New-Item -ItemType Directory -Path $Target -Force | Out-Null
+    $total = 0
     foreach ($src in $files.Keys) {
-        $dest = Join-Path $target $files[$src]
-        Write-Host "下载 $src → $($files[$src])"
-        Invoke-WebRequest -UseBasicParsing "$baseUrl/$src" -OutFile $dest -TimeoutSec 600
-        $size = [math]::Round((Get-Item $dest).Length / 1MB, 2)
-        Write-Host "  $size MB"
+        $dest = Join-Path $Target $files[$src]
+        if ((Test-Path $dest) -and -not $Force -and (Get-Item $dest).Length -gt 0) {
+            Write-Host "已存在，跳过 $($files[$src])"
+        }
+        else {
+            Write-Host "下载 $src → $($files[$src])"
+            Invoke-WebRequest -UseBasicParsing "$baseUrl/$src" -OutFile $dest -TimeoutSec 600
+        }
+        $size = (Get-Item $dest).Length
+        if ($size -le 0) { throw "模型文件为空：$dest" }
+        $total += $size
     }
-
-    # 物化键：与该归档版本比对（仅升级、不降级），沿用 bundled.rs 的约定
-    (@{ appVersion = $AppVersion } | ConvertTo-Json -Compress) | Set-Content -Path (Join-Path $target ".materialization-key") -Encoding utf8
-
-    New-Item -ItemType Directory -Path (Split-Path -Parent $OutFile) -Force | Out-Null
-    if (Test-Path $OutFile) { Remove-Item -LiteralPath $OutFile -Force }
-    # Windows 自带 bsdtar；-C 保证归档顶层目录为 $Top
-    tar -czf $OutFile -C $staging $Top
-    $total = [math]::Round((Get-Item $OutFile).Length / 1MB, 2)
-    Write-Host "已生成 $OutFile（$total MB）"
+    return $total
 }
-finally {
-    if (Test-Path $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+
+$bytes = Get-ModelFiles -Target $OutDir
+Write-Host ("已铺到 {0}（{1:N2} MB）" -f $OutDir, ($bytes / 1MB))
+
+if ($AlsoDev) {
+    foreach ($profile in @("debug", "release")) {
+        $devDir = Join-Path $repoRoot "src-tauri/target/$profile/model/$ModelId"
+        New-Item -ItemType Directory -Path $devDir -Force | Out-Null
+        foreach ($name in $files.Values) {
+            Copy-Item -LiteralPath (Join-Path $OutDir $name) -Destination (Join-Path $devDir $name) -Force
+        }
+        Write-Host "已复制到 $devDir"
+    }
 }

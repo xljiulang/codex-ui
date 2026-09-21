@@ -54,9 +54,8 @@ Source: .\bin\*; DestDir: {app}\bin; Flags: recursesubdirs ignoreversion overwri
 ; 随包只放 openai-bundled 插件市场（.tar.gz）；codex-primary-runtime 不再进安装包，
 ; 由 codex-ui 启动后按需下载/升级到 canonical 位置；卸载 codex-ui 时保留该 codex 资源。
 Source: .\marketplaces\openai-bundled.tar.gz; DestDir: {app}\marketplaces; Flags: ignoreversion overwritereadonly replacesameversion
-; 知识库向量模型（bge-small-zh-v1.5，可选）：由 scripts/build-knowledge-model.ps1 生成；
-; 未随包时构建照常通过（skipifsourcedoesntexist），知识库工具会提示模型未就绪。
-Source: .\marketplaces\knowledge-model.tar.gz; DestDir: {app}\marketplaces; Flags: ignoreversion skipifsourcedoesntexist overwritereadonly replacesameversion
+; 知识库向量模型（bge-small-zh-v1.5）由 scripts/build-knowledge-model.ps1 直接铺到 .\bin\model\，
+; 与 codexui-kb.exe / onnxruntime.dll 同目录，随上面的 .\bin\* 通配符一起安装（不再用 tar.gz）。
 
 [Tasks]
 Name: desktopicon; Description: {cm:CreateDesktopIcon}

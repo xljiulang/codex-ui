@@ -49,6 +49,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem Knowledge base CLI (codexui-kb.exe): extraction/embedding/retrieval run in this
+rem separate process so the UI process memory stays flat while indexing.
+echo [3/5] Building knowledge base CLI (codexui-kb.exe) ...
+call cargo build --release --manifest-path src-tauri\Cargo.toml -p knowledge-cli
+if errorlevel 1 (
+  echo [ERROR] Knowledge base CLI build failed.
+  exit /b 1
+)
+
 echo [4/5] Staging installer payload (copy exe into setup\) ...
 
 rem Locate ISCC.exe: PATH first, then common install directories
@@ -68,6 +77,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+if not exist "setup\bin" mkdir "setup\bin"
+copy /Y "src-tauri\target\release\codexui-kb.exe" "setup\bin\codexui-kb.exe" >nul
+if errorlevel 1 (
+  echo [ERROR] Failed to copy codexui-kb.exe to setup\bin\.
+  exit /b 1
+)
+
 rem ONNX Runtime for knowledge base retrieval (shipped to {app}\bin): fetch from NuGet if absent.
 rem A failure only warns; a missing DLL affects knowledge base retrieval only.
 if not exist "setup\bin\onnxruntime.dll" (
@@ -79,6 +95,19 @@ if not exist "setup\bin\onnxruntime.dll" (
     pwsh -NoProfile -File "scripts\fetch-onnxruntime.ps1"
   )
   if errorlevel 1 echo [WARN] onnxruntime.dll not ready; knowledge base retrieval will report missing runtime.
+)
+
+rem Knowledge base embedding model: shipped next to codexui-kb.exe ({app}\bin\model).
+rem Generated on demand (not tracked in git); a failure only warns.
+if not exist "setup\bin\model\bge-small-zh-v1.5\model.onnx" (
+  echo [4/5] Fetching embedding model ^(bge-small-zh-v1.5^) ...
+  where pwsh >nul 2>nul
+  if errorlevel 1 (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\build-knowledge-model.ps1"
+  ) else (
+    pwsh -NoProfile -File "scripts\build-knowledge-model.ps1"
+  )
+  if errorlevel 1 echo [WARN] embedding model not ready; knowledge base will report missing model.
 )
 
 echo [5/5] Compiling installer (Inno Setup) ...

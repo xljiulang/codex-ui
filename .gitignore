@@ -11,5 +11,6 @@ src-tauri/gen
 /.playwright-cli/
 /setup/bin/*.exe 
 /setup/bin/*.dll
+/setup/bin/model/
 /setup/output/*.exe
 /setup/*.exe

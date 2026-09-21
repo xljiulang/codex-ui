@@ -1,0 +1,31 @@
+[package]
+name = "knowledge-cli"
+version = "1.0.0"
+description = "codex-ui knowledge base CLI: per-workspace local index and hybrid retrieval"
+authors = ["codex-ui"]
+edition = "2021"
+
+[[bin]]
+name = "codexui-kb"
+path = "src/main.rs"
+
+[lib]
+name = "codexui_kb"
+path = "src/lib.rs"
+
+[lints.rust]
+linker_messages = "allow"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+fastembed = { version = "7", default-features = false, features = ["ort-load-dynamic"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "std", "api-24", "load-dynamic"] }
+pdf-extract = "0.12"
+zip = "8"
+quick-xml = "0.42"
+encoding_rs = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

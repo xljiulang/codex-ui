@@ -737,17 +737,12 @@ dependencies = [
  "clipboard-win",
  "cron",
  "ecb",
- "encoding_rs",
- "fastembed",
  "flate2",
  "futures-util",
  "image",
  "notify",
  "open",
- "ort",
- "pdf-extract",
  "portable-pty",
- "quick-xml 0.42.0",
  "reqwest 0.12.28",
  "rfd",
  "rusqlite",
@@ -767,7 +762,6 @@ dependencies = [
  "windows-core 0.61.2",
  "winreg 0.55.0",
  "xz2",
- "zip",
 ]
 
 [[package]]
@@ -2687,6 +2681,22 @@ dependencies = [
  "bitflags 2.13.1",
  "serde",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "knowledge-cli"
+version = "1.0.0"
+dependencies = [
+ "encoding_rs",
+ "fastembed",
+ "ort",
+ "pdf-extract",
+ "quick-xml 0.42.0",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "zip",
 ]
 
 [[package]]

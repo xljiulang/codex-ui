@@ -1,4 +1,6 @@
 //! 单个工作目录的知识库存储（SQLite：元数据 + 文档 + 切块 + 向量 + FTS5 关键词索引）。
+//!
+//! `data_dir` 即 codex-ui 传入的 `--data-dir`（`<app data dir>/knowledge`）。
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,8 +52,8 @@ pub struct KbStore {
 
 impl KbStore {
     /// 打开（必要时创建）指定工作目录的知识库；文件槽位冲突时顺延，避免串库或覆盖他人数据。
-    pub fn open(app_dir: &Path, cwd: &str) -> Result<Self, String> {
-        let dir = paths::kbs_dir(app_dir);
+    pub fn open(data_dir: &Path, cwd: &str) -> Result<Self, String> {
+        let dir = paths::kbs_dir(data_dir);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("创建知识库目录失败 {}: {e}", dir.display()))?;
         let norm = paths::normalize_workspace(cwd);
@@ -82,8 +84,8 @@ impl KbStore {
     }
 
     /// 只打开已存在的库（不创建、不改写元数据）；不存在返回 None
-    pub fn open_existing(app_dir: &Path, cwd: &str) -> Result<Option<Self>, String> {
-        let Some(path) = resolve_existing_path(app_dir, cwd)? else {
+    pub fn open_existing(data_dir: &Path, cwd: &str) -> Result<Option<Self>, String> {
+        let Some(path) = resolve_existing_path(data_dir, cwd)? else {
             return Ok(None);
         };
         let conn = Connection::open(&path).map_err(|e| format!("打开知识库失败：{e}"))?;
@@ -326,6 +328,28 @@ impl KbStore {
 
     /// 用新的切块替换该文档的全部切块（含向量）
     pub fn replace_chunks(&self, doc_id: i64, chunks: &[(String, String, Vec<f32>)]) -> Result<(), String> {
+        // 单文档一个事务：中途失败/被杀进程时不会留下"旧切块已删、新切块只写了一半"的半成品
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| format!("开启写入事务失败：{e}"))?;
+        let outcome = self.replace_chunks_inner(doc_id, chunks);
+        match &outcome {
+            Ok(()) => self
+                .conn
+                .execute_batch("COMMIT")
+                .map_err(|e| format!("提交写入事务失败：{e}"))?,
+            Err(_) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+            }
+        }
+        outcome
+    }
+
+    fn replace_chunks_inner(
+        &self,
+        doc_id: i64,
+        chunks: &[(String, String, Vec<f32>)],
+    ) -> Result<(), String> {
         self.conn
             .execute("DELETE FROM chunks WHERE doc_id = ?1", params![doc_id])
             .map_err(|e| format!("清理旧切块失败：{e}"))?;
@@ -458,8 +482,8 @@ impl KbStore {
 }
 
 /// 解析该工作目录已存在的库文件路径（按槽位顺序，校验 `meta.cwd` 归属）
-pub fn resolve_existing_path(app_dir: &Path, cwd: &str) -> Result<Option<PathBuf>, String> {
-    let dir = paths::kbs_dir(app_dir);
+pub fn resolve_existing_path(data_dir: &Path, cwd: &str) -> Result<Option<PathBuf>, String> {
+    let dir = paths::kbs_dir(data_dir);
     let norm = paths::normalize_workspace(cwd);
     let stem = paths::kb_stem(cwd);
     for slot in 1..=8 {
@@ -485,8 +509,8 @@ pub fn resolve_existing_path(app_dir: &Path, cwd: &str) -> Result<Option<PathBuf
 }
 
 /// 扫描 `kbs/` 下全部知识库，按更新时间倒序返回（损坏/缺元数据的标记为不可用但仍可删）
-pub fn list_all(app_dir: &Path) -> Vec<KbSummary> {
-    let dir = paths::kbs_dir(app_dir);
+pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
+    let dir = paths::kbs_dir(data_dir);
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -551,14 +575,14 @@ pub fn list_all(app_dir: &Path) -> Vec<KbSummary> {
 }
 
 /// 删除 `kbs/` 下的库文件（含 WAL/SHM 残留）；只接受纯文件名，拒绝路径穿越
-pub fn delete_file(app_dir: &Path, file: &str) -> Result<(), String> {
+pub fn delete_file(data_dir: &Path, file: &str) -> Result<(), String> {
     let name = Path::new(file);
     if name.file_name().map(|f| f.to_string_lossy().to_string()) != Some(file.to_string())
         || !file.ends_with(".sqlite")
     {
         return Err("非法的知识库文件名".into());
     }
-    let path = paths::kbs_dir(app_dir).join(file);
+    let path = paths::kbs_dir(data_dir).join(file);
     if !path.is_file() {
         return Err("知识库文件不存在".into());
     }
@@ -591,7 +615,6 @@ pub fn decode_vector(blob: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codex::knowledge::paths;
     use tempfile::TempDir;
 
     fn open_kb(dir: &TempDir, cwd: &str) -> KbStore {

@@ -1,5 +1,5 @@
-//! 本地向量化：fastembed + 随包 ONNX 模型（`<app data dir>/knowledge/model/<MODEL_ID>/`），
-//! ONNX Runtime 以动态加载方式从 `<应用目录>/bin/onnxruntime.dll` 载入，全程不出网。
+//! 本地向量化：fastembed + 随包 ONNX 模型（与 CLI 同目录的 `model/<MODEL_ID>/`），
+//! ONNX Runtime 以动态加载方式从 CLI 同目录的 `onnxruntime.dll` 载入，全程不出网。
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -38,7 +38,10 @@ fn state() -> &'static EmbedState {
     })
 }
 
-/// onnxruntime.dll 查找顺序：显式环境变量 → `<应用目录>/bin/` → `<应用目录>/`
+/// onnxruntime.dll 查找顺序：显式环境变量 → `<exe 目录>/` → `<exe 目录>/bin/`
+///
+/// 发布版把 `codexui-kb.exe` 与 `onnxruntime.dll` 一起放在 `{app}\bin\`（命中前者），
+/// 开发版二者共同落在 `src-tauri/target/debug/`，DLL 在其中的 `bin/` 子目录（命中后者）。
 pub fn ort_dll_path() -> Result<PathBuf, String> {
     if let Some(custom) = std::env::var_os("CODEXUI_ORT_DYLIB") {
         let path = PathBuf::from(custom);
@@ -47,30 +50,53 @@ pub fn ort_dll_path() -> Result<PathBuf, String> {
         }
         return Err(format!("CODEXUI_ORT_DYLIB 指向的文件不存在：{}", path.display()));
     }
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .ok_or_else(|| "无法定位应用目录".to_string())?;
-    for candidate in [exe_dir.join("bin").join("onnxruntime.dll"), exe_dir.join("onnxruntime.dll")] {
+    let exe_dir = paths::exe_dir()?;
+    for candidate in [
+        exe_dir.join("onnxruntime.dll"),
+        exe_dir.join("bin").join("onnxruntime.dll"),
+    ] {
         if candidate.is_file() {
             return Ok(candidate);
         }
     }
-    Err("未找到 onnxruntime.dll（应随安装包放在应用目录的 bin/ 下）".into())
+    Err(
+        "未找到 onnxruntime.dll（应与 codexui-kb.exe 同目录，即安装目录下的 bin/；\
+         也可用 CODEXUI_ORT_DYLIB 指定）"
+            .into(),
+    )
 }
 
 /// 模型是否就绪：文件齐全 + ONNX Runtime 可定位
-pub fn model_ready(app_dir: &Path) -> bool {
-    model_dir_ready(app_dir) && ort_dll_path().is_ok()
+pub fn model_ready(model_dir: &Path) -> bool {
+    model_dir_ready(model_dir) && ort_dll_path().is_ok()
 }
 
-fn model_dir_ready(app_dir: &Path) -> bool {
-    let dir = paths::model_dir(app_dir);
-    MODEL_FILES.iter().all(|f| dir.join(f).is_file())
+fn model_dir_ready(model_dir: &Path) -> bool {
+    MODEL_FILES.iter().all(|f| model_dir.join(f).is_file())
 }
 
-fn read_model_files(app_dir: &Path) -> Result<(Vec<u8>, TokenizerFiles), String> {
-    let dir = paths::model_dir(app_dir);
+/// 模型未就绪时的可操作中文提示（区分"缺文件"与"缺 ONNX Runtime"）
+pub fn model_problem(model_dir: &Path) -> String {
+    if !model_dir_ready(model_dir) {
+        let missing: Vec<&str> = MODEL_FILES
+            .iter()
+            .copied()
+            .filter(|f| !model_dir.join(f).is_file())
+            .collect();
+        return format!(
+            "模型文件不完整，缺少：{}（请确认已随安装包铺到 {}；开发环境可用 \
+             pwsh -File scripts/build-knowledge-model.ps1 -AlsoDev 生成）",
+            missing.join("、"),
+            model_dir.display()
+        );
+    }
+    ort_dll_path()
+        .err()
+        .unwrap_or_else(|| "ONNX Runtime 未就绪".to_string())
+}
+
+fn read_model_files(model_dir: &Path) -> Result<(Vec<u8>, TokenizerFiles), String> {
+    let dir = model_dir;
     let read = |name: &str| -> Result<Vec<u8>, String> {
         let path = dir.join(name);
         std::fs::read(&path).map_err(|e| {
@@ -115,7 +141,7 @@ fn ensure_ort_loaded() -> Result<(), String> {
 
 /// 构建（或复用）embedding 会话；失败不缓存，便于补齐模型/DLL 后重试
 fn with_embedder<T>(
-    app_dir: &Path,
+    model_dir: &Path,
     f: impl FnOnce(&mut TextEmbedding) -> Result<T, String>,
 ) -> Result<T, String> {
     let st = state();
@@ -129,7 +155,7 @@ fn with_embedder<T>(
         .map_err(|_| "embedding 会话锁中毒".to_string())?;
     if guard.is_none() {
         ensure_ort_loaded()?;
-        let (onnx, files) = read_model_files(app_dir)?;
+        let (onnx, files) = read_model_files(model_dir)?;
         let model = UserDefinedEmbeddingModel::new(onnx, files);
         let embedding = TextEmbedding::try_new_from_user_defined(
             model,
@@ -142,11 +168,11 @@ fn with_embedder<T>(
 }
 
 /// 批量向量化：返回与入参等长的向量列表（维度必须是 [`paths::EMBED_DIM`]）
-pub fn embed_texts(app_dir: &Path, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
+pub fn embed_texts(model_dir: &Path, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
-    let vectors = with_embedder(app_dir, |embedding| {
+    let vectors = with_embedder(model_dir, |embedding| {
         embedding
             .embed(texts, Some(EMBED_BATCH))
             .map_err(|e| format!("向量化失败：{e}"))
@@ -161,10 +187,10 @@ pub fn embed_texts(app_dir: &Path, texts: &[String]) -> Result<Vec<Vec<f32>>, St
     for v in &vectors {
         if v.len() != paths::EMBED_DIM {
             return Err(format!(
-                "向量维度不匹配（模型输出 {} 维，期望 {} 维），请检查 knowledge/model/{} 是否为 {}",
+                "向量维度不匹配（模型输出 {} 维，期望 {} 维），请检查 {} 是否为 {}",
                 v.len(),
                 paths::EMBED_DIM,
-                paths::MODEL_ID,
+                model_dir.display(),
                 paths::MODEL_ID
             ));
         }
@@ -173,8 +199,8 @@ pub fn embed_texts(app_dir: &Path, texts: &[String]) -> Result<Vec<Vec<f32>>, St
 }
 
 /// 单条向量化（检索查询用）
-pub fn embed_query(app_dir: &Path, query: &str) -> Result<Vec<f32>, String> {
-    let mut out = embed_texts(app_dir, &[query.to_string()])?;
+pub fn embed_query(model_dir: &Path, query: &str) -> Result<Vec<f32>, String> {
+    let mut out = embed_texts(model_dir, &[query.to_string()])?;
     out.pop().ok_or_else(|| "向量化返回空结果".to_string())
 }
 
