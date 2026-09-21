@@ -582,6 +582,22 @@ describe("ComposerBar 粘贴图片/文件", () => {
     expect(getEditor().getText()).toBe("");
   });
 
+  it("接入 transformPastedHTML：HTML 链接 → 「标题 URL」文本", async () => {
+    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    await flushPromises(); // 等 TipTap 创建 .ProseMirror
+    const transform = getEditor().view.props.transformPastedHTML as
+      | ((html: string) => string)
+      | undefined;
+    expect(transform).toBeTypeOf("function");
+
+    expect(transform?.('<a href="https://a.b">文档</a>')).toBe(
+      "文档 https://a.b",
+    );
+    // 无 <a> 的 HTML 原样放行，不影响 ProseMirror 默认粘贴
+    const plainHtml = "<p>纯文本<b>粗体</b></p>";
+    expect(transform?.(plainHtml)).toBe(plainHtml);
+  });
+
   it("粘贴项取不到 File 时放行默认粘贴（不 preventDefault）", async () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await flushPromises(); // 等 TipTap 创建 .ProseMirror

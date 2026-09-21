@@ -51,6 +51,7 @@ import {
   type EditorRun,
 } from "../lib/richEditor";
 import { collaborationMode } from "../lib/collaborationModes";
+import { linksToPlainText } from "../lib/pasteLinks";
 
 const props = defineProps<{ tab: SessionTab; active?: boolean }>();
 
@@ -129,6 +130,9 @@ const editor = useEditor({
     },
     handleKeyDown: (_view, event) => handleKeydown(event),
     handlePaste: (_view, event) => handlePasteDom(event),
+    // 剪贴板 HTML 里的 `<a href>` → 「标题 URL」纯文本：避免 ProseMirror 只保留
+    // link mark 的标题文本、发送时 URL 丢失（粘贴地址变标题的问题）
+    transformPastedHTML: (html) => linksToPlainText(html),
   },
   onCreate: () => {
     syncAfterChange();
