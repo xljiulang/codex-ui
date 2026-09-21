@@ -19,5 +19,6 @@
 
 pub mod cli;
 pub mod commands;
+pub mod hint;
 
 pub use commands::KnowledgeState;

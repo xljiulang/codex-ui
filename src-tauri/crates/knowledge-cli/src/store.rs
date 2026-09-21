@@ -549,10 +549,14 @@ pub fn resolve_existing_path(data_dir: &Path, normalized: &str) -> Result<Option
             continue;
         }
         let conn = Connection::open(&path).map_err(|e| format!("打开知识库失败：{e}"))?;
+        // 查询失败必须往上抛（权限/占用/损坏），否则会被当成"这个库不存在"，
+        // 让调用方给出"尚未建库、请先 create"的错误建议
         let existing: Option<String> = conn
             .query_row("SELECT value FROM meta WHERE key = 'kb'", [], |r| r.get(0))
             .optional()
-            .unwrap_or(None);
+            .map_err(|e| {
+                format!("读取知识库失败 {}（可能没有访问权限或文件损坏）：{e}", path.display())
+            })?;
         if existing.as_deref() == Some(normalized) {
             return Ok(Some(path));
         }
@@ -570,7 +574,85 @@ pub fn require_existing_path(data_dir: &Path, normalized: &str, display: &str) -
     })
 }
 
-/// 扫描 `kbs/` 下全部知识库，按更新时间倒序返回（损坏/缺元数据的标记为不可用但仍可删）
+/// 读取 meta 键：区分"查询失败"（无权限/被占用/不是本工具的库）与"键不存在"。
+/// 之前把两者都当成 `None`，导致权限问题被报成"缺少库名元数据、请删除重建"，会误导 agent。
+fn read_meta_checked(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .map_err(|e| format!("读取知识库元数据失败：{e}"))
+}
+
+/// 汇总单个库文件：可读时返回行；不可读时返回中文原因（区分"读不了"与"缺库名元数据"）。
+fn summarize_kb_file(path: &Path, file: String) -> Result<KbSummary, String> {
+    // 只读打开：list 不改库，避免因需要写 WAL 而被权限挡住
+    let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| {
+            format!("无法读取知识库（可能没有访问权限、文件被占用，或不是有效的 SQLite 库）：{e}")
+        })?;
+    // 先判"是不是本工具的库"：连 meta 表都没有（或读不了）时如实报错，不给重建建议
+    let read_meta_or_explain = |key: &str| -> Result<Option<String>, String> {
+        read_meta_checked(&conn, key).map_err(|e| {
+            if e.contains("no such table") {
+                format!("不是 codexui-kb 的知识库（缺少 meta 表）：{e}")
+            } else {
+                e
+            }
+        })
+    };
+    let kb_display = read_meta_or_explain("kb_display")?;
+    let kb_key = read_meta_or_explain("kb")?;
+    let source_display = read_meta_checked(&conn, "source_display")?;
+    let source_key = read_meta_checked(&conn, "source")?;
+    let updated_at = read_meta_checked(&conn, "updated_at")?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    let kb = kb_display
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| kb_key.filter(|v| !v.trim().is_empty()));
+    let source = source_display
+        .filter(|v| !v.trim().is_empty())
+        .or(source_key)
+        .unwrap_or_default();
+    // 缺库名元数据 = 旧版按工作目录寻址的库（或别的工具建的库）：此时计数表可能也不存在，
+    // 直接给"缺元数据"的结论，不再纠缠计数错误
+    let Some(kb) = kb else {
+        return Ok(KbSummary {
+            file,
+            kb: String::new(),
+            source,
+            docs: 0,
+            chunks: 0,
+            updated_at,
+            available: false,
+            error: Some(
+                "缺少库名元数据（可能是旧版按工作目录寻址的库，或不是 codexui-kb 建的库）；\
+                 确认不再需要后再用 create 重建"
+                    .to_string(),
+            ),
+        });
+    };
+    let docs = conn
+        .query_row("SELECT COUNT(*) FROM documents", [], |r| r.get::<_, i64>(0))
+        .map_err(|e| format!("读取文档数失败：{e}"))?;
+    let chunks = conn
+        .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get::<_, i64>(0))
+        .map_err(|e| format!("读取切块数失败：{e}"))?;
+    Ok(KbSummary {
+        file,
+        kb,
+        source,
+        docs,
+        chunks,
+        updated_at,
+        available: true,
+        error: None,
+    })
+}
+
+/// 扫描 `kbs/` 下全部知识库，按更新时间倒序返回。
+/// 读不了的文件（权限/占用/非 SQLite）如实报告原因；只有确实缺库名元数据时才提示重建。
 pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
     let dir = paths::kbs_dir(data_dir);
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -586,47 +668,9 @@ pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
             .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_default();
-        match Connection::open(&path) {
-            Ok(conn) => {
-                let read_meta = |key: &str| -> Option<String> {
-                    conn.query_row("SELECT value FROM meta WHERE key = ?1", params![key], |r| {
-                        r.get::<_, String>(0)
-                    })
-                    .optional()
-                    .ok()
-                    .flatten()
-                };
-                let kb = read_meta("kb_display").or_else(|| read_meta("kb"));
-                let source = read_meta("source_display").or_else(|| read_meta("source"));
-                let docs = conn
-                    .query_row("SELECT COUNT(*) FROM documents", [], |r| r.get::<_, i64>(0))
-                    .unwrap_or(0);
-                let chunks = conn
-                    .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get::<_, i64>(0))
-                    .unwrap_or(0);
-                let updated_at = read_meta("updated_at")
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(0);
-                let available = kb.is_some();
-                out.push(KbSummary {
-                    file,
-                    kb: kb.unwrap_or_default(),
-                    source: source.unwrap_or_default(),
-                    docs,
-                    chunks,
-                    updated_at,
-                    available,
-                    error: if available {
-                        None
-                    } else {
-                        Some(
-                            "旧版或损坏的知识库（缺少库名元数据），请删除后用 create 重建"
-                                .to_string(),
-                        )
-                    },
-                });
-            }
-            Err(e) => out.push(KbSummary {
+        match summarize_kb_file(&path, file.clone()) {
+            Ok(row) => out.push(row),
+            Err(reason) => out.push(KbSummary {
                 file,
                 kb: String::new(),
                 source: String::new(),
@@ -634,7 +678,7 @@ pub fn list_all(data_dir: &Path) -> Vec<KbSummary> {
                 chunks: 0,
                 updated_at: 0,
                 available: false,
-                error: Some(format!("打开失败：{e}")),
+                error: Some(reason),
             }),
         }
     }
@@ -852,6 +896,72 @@ mod tests {
         assert!(delete_file(dir.path(), "../escape.sqlite").is_err());
         delete_file(dir.path(), &file).unwrap();
         assert!(list_all(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn unreadable_file_reports_reason_instead_of_rebuild_advice() {
+        let dir = TempDir::new().unwrap();
+        let kbs = paths::kbs_dir(dir.path());
+        std::fs::create_dir_all(&kbs).unwrap();
+        // 非 SQLite 内容：读取元数据会失败（而权限不足时也是走到这条路），
+        // 必须如实报告原因，不能建议删除重建
+        std::fs::write(kbs.join("broken-00000000.sqlite"), b"not a database").unwrap();
+        let rows = list_all(dir.path());
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert!(!row.available);
+        let err = row.error.clone().unwrap_or_default();
+        assert!(
+            err.contains("无法读取") || err.contains("读取知识库元数据失败"),
+            "应报告真实原因：{err}"
+        );
+        assert!(!err.contains("重建"), "读不了时不应给重建建议：{err}");
+        assert!(!err.contains("删除"), "读不了时不应建议删除：{err}");
+    }
+
+    #[test]
+    fn valid_sqlite_without_kb_meta_is_reported_as_missing_metadata() {
+        let dir = TempDir::new().unwrap();
+        let kbs = paths::kbs_dir(dir.path());
+        std::fs::create_dir_all(&kbs).unwrap();
+        let path = kbs.join("legacy-11111111.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            // 旧版库的形状：有 meta（里面是 cwd 而不是 kb）与 documents/chunks 表
+            conn.execute_batch(
+                "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO meta(key, value) VALUES('cwd', 'd:\\\\old');
+                 CREATE TABLE documents (id INTEGER PRIMARY KEY);
+                 CREATE TABLE chunks (id INTEGER PRIMARY KEY);",
+            )
+            .unwrap();
+        }
+        let rows = list_all(dir.path());
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert!(!row.available);
+        let err = row.error.clone().unwrap_or_default();
+        assert!(err.contains("缺少库名元数据"), "应说明缺元数据：{err}");
+    }
+
+    #[test]
+    fn sqlite_without_meta_table_is_not_reported_as_missing_kb_metadata() {
+        let dir = TempDir::new().unwrap();
+        let kbs = paths::kbs_dir(dir.path());
+        std::fs::create_dir_all(&kbs).unwrap();
+        let path = kbs.join("foreign-22222222.sqlite");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE something_else (id INTEGER PRIMARY KEY);")
+                .unwrap();
+        }
+        let rows = list_all(dir.path());
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert!(!row.available);
+        let err = row.error.clone().unwrap_or_default();
+        assert!(err.contains("不是 codexui-kb 的知识库"), "应说明不是本工具的库：{err}");
+        assert!(!err.contains("重建"), "不应给重建建议：{err}");
     }
 
     #[test]

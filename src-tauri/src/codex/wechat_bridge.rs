@@ -1186,7 +1186,7 @@ impl WeChatBridge {
         // 回合即将真正开始：点亮“正在输入”并周期续发。
         let typing_task = self.spawn_typing_refresh(account_id, peer);
         self.set_typing(account_id, peer, 1).await;
-        let params = build_turn_params(
+        let mut params = build_turn_params(
             thread_id,
             text,
             images,
@@ -1195,6 +1195,8 @@ impl WeChatBridge {
             effort,
             &self.next_message_id(),
         );
+        // 与 UI 会话一致：微信桥发起的回合也带上知识库提示
+        crate::codex::knowledge::hint::apply_turn_params(&mut params);
         let turn_id = match self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))

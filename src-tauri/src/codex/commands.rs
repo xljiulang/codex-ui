@@ -244,7 +244,15 @@ pub async fn thread_set_name(
         .await
 }
 
-rpc_passthrough!(turn_start, "turn/start", Some(Duration::from_secs(60)));
+/// 发送回合：统一先给参数补上知识库提示（`additionalContext`，来源标识 `codexui-kb`），
+/// 让 agent 知道本机有 `codexui-kb` 这个离线知识库 CLI（见 `knowledge::hint`）。
+#[tauri::command]
+pub async fn turn_start(server: State<'_, Server>, mut params: Value) -> Result<Value, String> {
+    crate::codex::knowledge::hint::apply_turn_params(&mut params);
+    server
+        .request("turn/start", params, Some(Duration::from_secs(60)))
+        .await
+}
 
 rpc_passthrough!(turn_steer, "turn/steer", Some(Duration::from_secs(60)));
 

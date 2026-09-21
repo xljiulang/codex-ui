@@ -654,3 +654,57 @@ fn settings_roundtrip() {
     assert!(!loaded.enter_to_send);
     assert!(!loaded.interaction_notify_enabled);
 }
+
+/// 知识库提示注入能被真实 app-server 接受：codex-ui 每回合都把 `codexui-kb` 的说明放进
+/// `turn/start` 的 `additionalContext`（见 `knowledge::hint`）。这里只验证该字段不被拒绝——
+/// 拿到 turn/start 应答后立刻中断，不等模型生成完。
+#[test]
+fn turn_start_accepts_knowledge_hint_context() {
+    if codex_bin().is_none() {
+        eprintln!("跳过：未设置 CODEX_BIN");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let mut server = Server::start(tmp.path());
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let thread_id = start_thread(&mut server, tmp.path(), deadline);
+
+    let mut params = json!({
+        "threadId": thread_id,
+        "input": [{ "type": "text", "text": "只回复 OK", "text_elements": [] }],
+        "approvalPolicy": "untrusted",
+        "sandboxPolicy": { "type": "readOnly" }
+    });
+    assert!(
+        codex_ui_lib::codex::knowledge::hint::apply_turn_params(&mut params),
+        "应注入知识库提示"
+    );
+    let id = server.request("turn/start", params);
+    let resp = server
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(id)
+        })
+        .expect("turn/start response");
+    let err_text = resp.get("error").map(|e| e.to_string()).unwrap_or_default();
+    assert!(
+        !err_text.contains("additionalContext"),
+        "服务端不应拒绝 additionalContext：{resp}"
+    );
+    assert!(resp.get("result").is_some(), "turn/start 应成功：{resp}");
+
+    let turn_id = resp
+        .pointer("/result/turn/id")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if !turn_id.is_empty() {
+        let interrupt_id = server.request(
+            "turn/interrupt",
+            json!({ "threadId": thread_id, "turnId": turn_id }),
+        );
+        let _ = server.wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(interrupt_id)
+        });
+    }
+    cleanup_thread(&mut server, &thread_id, deadline);
+}

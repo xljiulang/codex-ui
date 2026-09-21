@@ -57,6 +57,7 @@ npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，
 - **CLI 按库名操作、无路径参数**：`create <库名> <目录>`（唯一来源登记入口）→ `index <库名>` / `search <库名> --query ...` / `list` / `delete <库名>`；数据目录固定 `%APPDATA%\com.codexui.app`（应用数据目录本身，库文件在其下的 `kbs\`；与 `tauri.conf.json` 的 `identifier` 耦合，改 identifier 必须同步 `crates/knowledge-cli/src/paths.rs` 的 `APP_IDENTIFIER`），模型固定在 CLI 同目录。知识库**没有动态工具**（`codexui.search_docs`/`index_docs` 已移除），agent 侧由 skill 调用 CLI。
 - 改动知识库逻辑改 CLI crate；改动调用协议时两边必须同步：`crates/knowledge-cli/src/cli.rs` 的 `API_VERSION` 与 `src/codex/knowledge/cli.rs` 的 `API_VERSION`（当前均为 2）。
 - 该 CLI 目录自包含：`codexui-kb.exe` + `onnxruntime.dll` + `model\bge-small-zh-v1.5\` 同目录（发布版 `{app}\bin\`、开发版 `src-tauri\target\debug\`），模型与 DLL 都由子进程按自身目录解析；应用数据目录 `%APPDATA%\com.codexui.app\` 下只新增 `kbs\`（与既有 `cache\`、`logs\`、`wechat\` 并列）。本地开发用 `pwsh -File scripts/build-knowledge-model.ps1 -AlsoDev` 铺模型（`build-dev.bat` 缺模型时自动调用）。
+- **向 agent 介绍 CLI 的方式**：不做技能、不加设置开关——每个回合在 `turn/start` 的 `additionalContext`（键 `codexui-kb`、`kind: "application"`）里注入固定说明，见 `src-tauri/src/codex/knowledge/hint.rs`；注入点有三处，改协议时别漏：`commands.rs` 的 `turn_start`（前端会话）、`scheduled_tasks.rs`（定时任务）、`wechat_bridge.rs`（微信桥）。**不要改用 `thread/start|resume|fork` 的 `developerInstructions`**：那是替换语义，且 `turn/start` 的 `collaborationMode.settings.developer_instructions` 每轮都会覆盖它（codex-ui 固定发 `null`，计划模式还需保持 null 以免覆盖 codex 自带的 plan 开发者指令），会话级注入会被逐轮冲掉。
 
 集成测试位于 `src-tauri/tests/app_server_integration.rs`（真实 app-server 握手/回合、目标、记忆、线程设置等，需 `CODEX_BIN`）。
 

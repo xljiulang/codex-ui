@@ -978,7 +978,7 @@ impl TaskScheduler {
             return;
         }
 
-        let params = json!({
+        let mut params = json!({
             "threadId": task.thread_id,
             "input": [{ "type": "text", "text": task.prompt }],
             "clientUserMessageId": format!("sched-{}-{}", task.id, started_at),
@@ -991,6 +991,8 @@ impl TaskScheduler {
                 "settings": { "model": model, "reasoning_effort": effort, "developer_instructions": null },
             },
         });
+        // 与 UI 会话一致：定时任务回合也带上知识库提示（agent 才知道可查本机知识库）
+        crate::codex::knowledge::hint::apply_turn_params(&mut params);
         match self
             .server
             .request("turn/start", params, Some(Duration::from_secs(60)))
