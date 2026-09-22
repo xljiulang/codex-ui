@@ -33,10 +33,11 @@ pub struct AppSettings {
     /// Zen 代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
     #[serde(default = "default_zen_proxy_base_url")]
     pub zen_proxy_base_url: String,
-    /// Zen 代理「回合收尾强制约束」（口嗨检测 + 自动续跑 + 首轮教学 + 标签剥离），默认开启
+    /// Zen 代理「回合收尾约束和助推」（口嗨检测 + 自动续跑 + 首轮教学 + 标签剥离），默认开启
     #[serde(default = "default_zen_proxy_nudge_enabled")]
     pub zen_proxy_nudge_enabled: bool,
-    /// Zen 代理「OpenCode 客户端身份」（识别头 + opencode User-Agent + 免费层请求体门禁补丁），默认开启
+    /// Zen 代理「OpenCode 客户端身份」（识别头 + opencode User-Agent + 免费层请求体门禁补丁；
+    /// 勾选即对所有上游一律生效，不再判断 host），默认开启
     #[serde(default = "default_zen_proxy_identity_enabled")]
     pub zen_proxy_identity_enabled: bool,
     /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启

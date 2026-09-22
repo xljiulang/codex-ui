@@ -18,9 +18,9 @@ export interface ZenProxyOptions {
   enabled: boolean;
   port: number;
   baseUrl: string;
-  /** 「回合收尾强制约束」：空转收尾时自动续跑，默认开启 */
+  /** 「回合收尾约束和助推」：空转收尾时自动续跑，默认开启 */
   nudgeEnabled?: boolean;
-  /** 「OpenCode 客户端身份」：识别头/UA + 免费层门禁补丁，默认开启 */
+  /** 「OpenCode 客户端身份」：识别头/UA + 免费层门禁补丁（不分上游），默认开启 */
   identityEnabled?: boolean;
 }
 

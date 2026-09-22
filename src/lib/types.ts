@@ -194,9 +194,9 @@ export interface AppSettings {
   zen_proxy_port?: number;
   /** Zen 代理转发上游 API 请求地址（默认 https://opencode.ai/zen/v1） */
   zen_proxy_base_url?: string;
-  /** Zen 代理「回合收尾强制约束」（空转收尾时自动续跑），默认开启 */
+  /** Zen 代理「回合收尾约束和助推」（空转收尾时自动续跑），默认开启 */
   zen_proxy_nudge_enabled?: boolean;
-  /** Zen 代理「OpenCode 客户端身份」（识别头 + UA + 免费层门禁补丁），默认开启 */
+  /** Zen 代理「OpenCode 客户端身份」（识别头 + UA + 免费层门禁补丁，不分上游），默认开启 */
   zen_proxy_identity_enabled?: boolean;
   /** codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启 */
   error_notify_enabled?: boolean;

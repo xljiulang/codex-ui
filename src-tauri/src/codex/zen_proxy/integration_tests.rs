@@ -300,7 +300,6 @@ async fn passthrough_forwards_models_and_post_body() {
     let base_url = spawn_mock_passthrough(rec.clone()).await;
     let state = ProxyState {
         session: "ses_fixed123".into(),
-        zen_body_patch: is_zen_upstream(&base_url),
         opencode_identity: true,
         nudge_enabled: true,
         base_url,
@@ -361,7 +360,6 @@ async fn passthrough_prefers_client_session_header() {
     let base_url = spawn_mock_passthrough(rec.clone()).await;
     let state = ProxyState {
         session: "ses_fixed123".into(),
-        zen_body_patch: is_zen_upstream(&base_url),
         opencode_identity: true,
         nudge_enabled: true,
         base_url,
@@ -685,7 +683,6 @@ fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
         log,
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        zen_body_patch: is_zen_upstream(upstream),
         opencode_identity: true,
         nudge_enabled: true,
         session_map: Arc::new(SessionMap::default()),
@@ -854,8 +851,7 @@ async fn zen_body_patch_applies_to_nudge_continuation() {
     ])
     .await;
 
-    let mut state = nudge_probe_state(&upstream, None);
-    state.zen_body_patch = true;
+    let state = nudge_probe_state(&upstream, None);
     let body = run_nudge_probe_state(state, HeaderMap::new(), nudge_probe(true)).await;
     assert_eq!(body.matches("event: response.completed").count(), 1);
 
@@ -1791,7 +1787,6 @@ fn proxy_state(base_url: String, log: ZenLog) -> ProxyState {
 fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyState {
     ProxyState {
         session: "ses_fixed123".into(),
-        zen_body_patch: is_zen_upstream(&base_url),
         opencode_identity: true,
         nudge_enabled: true,
         base_url,
@@ -2195,7 +2190,6 @@ async fn learns_and_retries_reasoning_content_requirement() {
     let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
     let state = ProxyState {
         session: "ses_fixed123".into(),
-        zen_body_patch: is_zen_upstream(&upstream),
         opencode_identity: true,
         nudge_enabled: true,
         base_url: upstream,
@@ -2440,8 +2434,7 @@ async fn zen_body_patch_reaches_upstream_request_body() {
             "parameters": { "type": "object", "properties": {} }
         }]
     });
-    let mut state = proxy_state(base_url, None);
-    state.zen_body_patch = true;
+    let state = proxy_state(base_url, None);
     let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
         .await
         .expect("forward 应成功");
@@ -2486,9 +2479,10 @@ async fn zen_body_patch_reaches_upstream_request_body() {
     );
 }
 
-/// 非 Zen 上游（自建 / 第三方兼容端点）：同一个入站请求一个字段都不补。
+/// 非 opencode 上游（回环 mock / 自建 / 第三方兼容端点）：身份开关开启时**同样**补
+/// 门禁形状——补丁不再看上游 host，只看「OpenCode 客户端身份」开关。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn zen_body_patch_is_off_for_non_zen_upstream() {
+async fn zen_body_patch_applies_to_non_opencode_upstream_when_identity_on() {
     let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
     let base_url = spawn_mock_zen(rec.clone()).await;
 
@@ -2503,18 +2497,18 @@ async fn zen_body_patch_is_off_for_non_zen_upstream() {
             "parameters": { "type": "object", "properties": {} }
         }]
     });
-    // 补丁开关由 base_url 派生：回环地址不是 Zen 上游，自然关闭
+    // 身份开关默认开启 → 回环地址（host 不含 opencode）也照补
     let state = proxy_state(base_url, None);
-    assert!(!state.zen_body_patch, "回环地址不应被当成 Zen 上游");
+    assert!(state.opencode_identity, "默认开启身份");
     let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
         .await
         .expect("forward 应成功");
     assert!(resp.status.is_success());
 
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
-    assert!(
-        got.body.get("max_tokens").is_none(),
-        "非 Zen 上游不补 max_tokens：{}",
+    assert_eq!(
+        got.body["max_tokens"], ZEN_MAX_TOKENS,
+        "身份开启时对所有上游都补 max_tokens：{}",
         got.body
     );
     let names: Vec<&str> = got.body["tools"]
@@ -2523,19 +2517,24 @@ async fn zen_body_patch_is_off_for_non_zen_upstream() {
         .iter()
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect();
-    assert_eq!(names, vec!["shell"], "非 Zen 上游不补假工具：{}", got.body);
-    assert!(
-        got.body.get("instructions").is_none(),
-        "非 Zen 上游不应出现顶层 instructions：{}",
+    assert_eq!(
+        names,
+        vec!["shell", "bash", "edit", "glob", "grep", "read", "write"],
+        "身份开启时对所有上游都补假工具：{}",
         got.body
     );
     assert!(
-        got.body["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|message| message["role"] != "system"),
-        "非 Zen 上游不应注入 system 教学：{}",
+        got.body.get("instructions").is_none(),
+        "chat 体不应出现顶层 instructions：{}",
+        got.body
+    );
+    // 弃用工具教学同样照发（该请求无 instructions → 教学另起一条 system 消息放在最前）
+    let system = got.body["messages"][0]["content"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        system.contains("弃用工具声明"),
+        "身份开启时应注入弃用工具教学：{}",
         got.body
     );
 }
@@ -2549,8 +2548,7 @@ async fn zen_max_tokens_is_dropped_and_retried_when_rejected() {
     let base_url = spawn_mock_zen_rejecting_field(count.clone(), last.clone(), "max_tokens").await;
 
     let req = json!({ "model": "m", "input": "hi", "stream": false });
-    let mut state = proxy_state(base_url, None);
-    state.zen_body_patch = true;
+    let state = proxy_state(base_url, None);
     let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
         .await
         .expect("forward 应成功");
@@ -3014,11 +3012,10 @@ async fn trace_records_upstream_error_body() {
     );
 }
 
-// ---------- 两个行为开关：身份伪装 / 回合收尾强制约束 ----------
+// ---------- 两个行为开关：身份伪装 / 回合收尾约束和助推 ----------
 
 /// 身份开关关闭：翻译路径不发任何识别头、UA 透传入站值；上游请求体保持原样
-/// （`forward` 对补丁同时要求「派生位为真」与「身份开启」，这里刻意把派生位置真来验证
-/// 身份开关本身就能压住补丁；派生规则另由 `zen_body_patch_requires_identity_switch_and_zen_host` 覆盖）。
+/// （补丁只看「OpenCode 客户端身份」开关这一项判据）。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn identity_switch_off_stops_headers_and_body_patch() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -3040,9 +3037,6 @@ async fn identity_switch_off_stops_headers_and_body_patch() {
     let trace_dir = tempfile::TempDir::new().unwrap();
     let mut state = proxy_state_traced(base_url, log, traced_sink(trace_dir.path()));
     state.opencode_identity = false;
-    assert!(!state.zen_body_patch, "关闭身份后不应再补请求体形状");
-    // 双保险：即便派生位被置真（例如手工构造/未来重构），身份关闭也必须压住补丁
-    state.zen_body_patch = true;
     let mut headers = HeaderMap::new();
     headers.insert(header::USER_AGENT, HeaderValue::from_static("codex/1.2.3"));
     headers.insert(
@@ -3088,22 +3082,23 @@ async fn identity_switch_off_stops_headers_and_body_patch() {
     // 诊断：请求行记 `身份伪装=off`，内容日志里的识别头一律记 `-`
     let joined = read_session_log(&dir);
     assert!(joined.contains("身份伪装=off"), "{joined}");
-    assert!(joined.contains("zen_body=off"), "{joined}");
+    assert!(
+        !joined.contains("zen_body="),
+        "冗余的 zen_body 诊断列应已删除：{joined}"
+    );
     let (_, summary) = trace_file_with(trace_dir.path(), ".summary.txt");
     assert!(summary.contains("identity=off"), "{summary}");
     assert!(summary.contains("x_opencode_session=-"), "{summary}");
 }
 
-/// 身份开关开启（真实派生路径）：上游 host 含 `opencode` 时才既发识别头、又补门禁字段。
+/// 身份开关开启：既发识别头/UA，也补门禁字段（不看上游 host，回环 mock 同样成立）。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn identity_switch_on_keeps_headers_and_body_patch() {
     let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
     let base_url = spawn_mock_zen(rec.clone()).await;
 
     let req = json!({ "model": "m", "input": "hi", "stream": false });
-    let mut state = proxy_state(base_url, None);
-    // 模拟「上游 host 含 opencode」：直接打开派生位，其余按默认（身份开启）
-    state.zen_body_patch = true;
+    let state = proxy_state(base_url, None);
     let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
         .await
         .expect("forward 应成功");

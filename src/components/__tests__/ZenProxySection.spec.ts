@@ -110,10 +110,12 @@ describe("ZenProxySection", () => {
   it("两个行为开关的文案为「名称（额外说明）」且默认勾选", () => {
     const wrapper = mountSection();
     const texts = wrapper.findAll(".zen-proxy-switch-text").map((l) => l.text());
-    expect(texts[0]).toContain("回合收尾强制约束");
+    expect(texts[0]).toContain("回合收尾约束和助推");
     expect(texts[0]).toContain("模型空转收尾时自动续跑");
     expect(texts[1]).toContain("OpenCode 客户端身份");
     expect(texts[1]).toContain("免费层门禁字段");
+    // 身份开关不再按上游分流：括号说明里不该再出现「对 opencode 上游」这类前提
+    expect(texts[1]).not.toContain("opencode 上游");
     const boxes = wrapper.findAll(".zen-proxy-switch-row input");
     expect(boxes).toHaveLength(2);
     for (const box of boxes) {

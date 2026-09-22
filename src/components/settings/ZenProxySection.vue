@@ -28,7 +28,7 @@ const portInput = ref<string>(String(store.settings.zen_proxy_port ?? DEFAULT_PO
 const apiUrlInput = ref<string>(
   store.settings.zen_proxy_base_url ?? DEFAULT_BASE_URL,
 );
-/** 回合收尾强制约束（本地缓冲，保存时写回；缺省开启） */
+/** 回合收尾约束和助推（本地缓冲，保存时写回；缺省开启） */
 const nudgeEnabled = ref<boolean>(store.settings.zen_proxy_nudge_enabled ?? true);
 /** OpenCode 客户端身份（本地缓冲，保存时写回；缺省开启） */
 const identityEnabled = ref<boolean>(
@@ -212,7 +212,7 @@ onBeforeUnmount(refresh);
 
         <div class="setting-row zen-proxy-switch-row">
           <label class="zen-proxy-switch-text" for="zen-proxy-nudge">
-            回合收尾强制约束（模型空转收尾时自动续跑，直到真的动手做完或干净收尾）
+            回合收尾约束和助推（模型空转收尾时自动续跑，直到真的动手做完或干净收尾）
           </label>
           <label class="switch">
             <input id="zen-proxy-nudge" v-model="nudgeEnabled" type="checkbox" />
@@ -222,8 +222,7 @@ onBeforeUnmount(refresh);
 
         <div class="setting-row zen-proxy-switch-row">
           <label class="zen-proxy-switch-text" for="zen-proxy-identity">
-            OpenCode 客户端身份（按 OpenCode 客户端形状发送请求头，并对 opencode
-            上游补齐免费层门禁字段）
+            OpenCode 客户端身份（按 OpenCode 客户端形状发送请求头，并补齐免费层门禁字段）
           </label>
           <label class="switch">
             <input id="zen-proxy-identity" v-model="identityEnabled" type="checkbox" />

@@ -830,7 +830,7 @@ fn tag_stripper_handles_split_chunks_and_odd_closers() {
     );
 }
 
-/// 「回合收尾强制约束」关闭时剥离器直通：标签原样下发、不记载荷，正文一字不改。
+/// 「回合收尾约束和助推」关闭时剥离器直通：标签原样下发、不记载荷，正文一字不改。
 #[test]
 fn tag_stripper_passes_through_when_nudge_disabled() {
     let raw = "结论。\n<zen_task_completed>已完成</zen_task_completed>\n";
@@ -2493,44 +2493,31 @@ fn tool_choice_converts_only_known_shapes() {
 
 // ---------- Zen 免费层请求体门禁：形状补丁 ----------
 
+/// 请求体门禁补丁的开关**只看**「OpenCode 客户端身份」这一项：开即补（无论上游
+/// host 是 opencode、DeepSeek 还是回环地址），关即不补；收尾开关不影响它。
 #[test]
-fn is_zen_upstream_matches_only_opencode_hosts() {
-    // 默认上游与 Zen 的其它路径都命中（host 判定，与路径无关）
-    assert!(is_zen_upstream("https://opencode.ai/zen/v1"));
-    assert!(is_zen_upstream("https://opencode.ai"));
-    assert!(is_zen_upstream("https://api.opencode.ai/zen/v2/"));
-    assert!(is_zen_upstream("HTTPS://OpenCode.AI/zen/v1"));
-    // host 含有 `opencode`（小写化后）即命中：子串出现在任意位置都算
-    assert!(is_zen_upstream("https://opencode.ai.evil.com/v1"));
-    assert!(is_zen_upstream("https://myopencode.ai/v1"));
-    assert!(is_zen_upstream("https://opencode-ai.com/v1"));
-    assert!(is_zen_upstream("https://evilopencode.ai/v1"));
-    assert!(is_zen_upstream("HTTPS://Api.OpenCode.ai/zen/v1"));
-    // 本地 mock / 第三方上游 / 非法地址一律不补形状
-    assert!(!is_zen_upstream("http://127.0.0.1:18080/zen/v1"));
-    assert!(!is_zen_upstream("https://api.deepseek.com/v1"));
-    assert!(!is_zen_upstream("https://10.0.0.20:9080/v1"));
-    assert!(!is_zen_upstream(""));
-    assert!(!is_zen_upstream("open"));
-    assert!(!is_zen_upstream("opencode.ai/zen/v1"));
-}
-
-/// 请求体门禁补丁的开关 = 「OpenCode 客户端身份」开关 **且** 上游 host 含 `opencode`：
-/// 任一不满足都不补（与 `apply()` 里构造 `ProxyState.zen_body_patch` 的口径一致）。
-#[test]
-fn zen_body_patch_requires_identity_switch_and_zen_host() {
-    let config = |base_url: &str, identity: bool, nudge: bool| {
-        ZenProxyConfig::new(18080, base_url, identity, nudge)
-    };
-    // 身份开 + Zen 上游：补
-    assert!(config("https://opencode.ai/zen/v1", true, true).zen_body_patch());
-    // 身份关：即使上游是 Zen 也不补（这就是「伪装开关」的用途）
-    assert!(!config("https://opencode.ai/zen/v1", false, true).zen_body_patch());
-    // 身份开但上游是自建/第三方：不补
-    assert!(!config("https://api.deepseek.com/v1", true, true).zen_body_patch());
-    assert!(!config("http://127.0.0.1:18080/zen/v1", true, true).zen_body_patch());
-    // 收尾开关与补形状无关：它是另一个独立维度
-    assert!(config("https://opencode.ai/zen/v1", true, false).zen_body_patch());
+fn zen_body_patch_follows_identity_switch_only() {
+    // 上游地址（含 Zen / 第三方 / 回环 / 非法）不参与判据，只有身份开关决定是否补形状
+    for base_url in [
+        "https://opencode.ai/zen/v1",
+        "https://api.deepseek.com/v1",
+        "http://127.0.0.1:18080/zen/v1",
+        "not-a-url",
+        "",
+    ] {
+        assert!(
+            ZenProxyConfig::new(18080, base_url, true, true).opencode_identity,
+            "身份开启即补形状（不看上游）：{base_url}"
+        );
+        assert!(
+            !ZenProxyConfig::new(18080, base_url, false, true).opencode_identity,
+            "身份关闭即不补形状：{base_url}"
+        );
+    }
+    // 收尾开关是另一个独立维度：它不参与「补不补形状」
+    assert!(
+        ZenProxyConfig::new(18080, "https://opencode.ai/zen/v1", true, false).opencode_identity
+    );
 }
 
 /// 身份开关落地到请求头：开时发四个识别头 + opencode UA；关时一个识别头都不发，

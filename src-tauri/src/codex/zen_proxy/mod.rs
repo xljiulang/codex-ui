@@ -40,8 +40,8 @@ const ZEN_REQUIRED_TOOL_NAMES: [&str; 6] = ["bash", "edit", "glob", "grep", "rea
 /// 上述假工具的描述：门禁只看名字，这段文案负责劝模型别真调用。
 const ZEN_FAKE_TOOL_DESCRIPTION: &str = "这是弃用的工具，请勿调用";
 /// 门禁要求的 `max_tokens`（与 `messages` 同级）：入站请求没有自己的输出预算时补上这个值。
-/// **只对 Zen 上游生效**（与 [`ZEN_REQUIRED_TOOL_NAMES`] 同受 `zen_body_patch` 约束，
-/// 判定见 [`is_zen_upstream`]）。
+/// 与 [`ZEN_REQUIRED_TOOL_NAMES`] 同受「OpenCode 客户端身份」开关约束：开关开启时对
+/// **所有上游**都补，关闭时一个字段都不补（见 [`ProxyState::opencode_identity`]）。
 const ZEN_MAX_TOKENS: u64 = 32_000;
 /// 请求上游时固定的 User-Agent（与 opencode 官方客户端一致）。
 const ZEN_USER_AGENT: &str = "opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24";
@@ -504,10 +504,11 @@ pub(crate) struct ZenProxyConfig {
     pub port: u16,
     /// 上游 base_url（已归一化：去空白与末尾 `/`）。
     pub base_url: String,
-    /// 「OpenCode 客户端身份」开关：是否按 opencode 客户端形状发送识别头/UA，
-    /// 并对 host 含 `opencode` 的上游补齐免费层请求体门禁字段。
+    /// 「OpenCode 客户端身份」开关：勾选即**无条件**按 opencode 客户端发请求——
+    /// 识别头/UA 与免费层请求体门禁字段（`max_tokens` + 内置工具名）一并生效，
+    /// 不再判断上游 host；取消勾选则两者一起停用。
     pub opencode_identity: bool,
-    /// 「回合收尾强制约束」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
+    /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
     pub nudge_enabled: bool,
 }
 
@@ -525,11 +526,6 @@ impl ZenProxyConfig {
             opencode_identity,
             nudge_enabled,
         }
-    }
-
-    /// 是否按 Zen 免费层门禁补请求体形状：只有「身份开启」且上游 host 含 `opencode` 时才补。
-    fn zen_body_patch(&self) -> bool {
-        self.opencode_identity && is_zen_upstream(&self.base_url)
     }
 
     /// 是否与运行中的实例等价（用于「要不要重启代理」的判定）：端口、归一化后的上游地址
@@ -591,20 +587,6 @@ fn responses_path(base_url: &str) -> String {
     format!("{path}/responses")
 }
 
-/// 上游是否为 OpenCode Zen（host 小写化后含有 `opencode`，大小写不敏感）。
-/// 只有 Zen 免费层才有 [`ZEN_REQUIRED_TOOL_NAMES`] / [`ZEN_MAX_TOKENS`] 这套请求体门禁，
-/// 因此补形状只对 Zen 生效；指向自建或第三方兼容端点（DeepSeek 等）时请求体保持原样。
-fn is_zen_upstream(base_url: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(base_url) else {
-        return false;
-    };
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    let host = host.to_ascii_lowercase();
-    host.contains("opencode")
-}
-
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
 pub(crate) async fn start(
     config: ZenProxyConfig,
@@ -637,7 +619,6 @@ pub(crate) async fn start(
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         opencode_identity: config.opencode_identity,
-        zen_body_patch: config.zen_body_patch(),
         nudge_enabled: config.nudge_enabled,
         modes,
     });
@@ -717,15 +698,12 @@ struct ProxyState {
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
-    /// 「OpenCode 客户端身份」开关：是否发 opencode 形状的识别头与 UA，并对 host 含
-    /// `opencode` 的上游补请求体门禁字段（见 [`patch_zen_request_body`]）。
+    /// 「OpenCode 客户端身份」开关：是否按 opencode 客户端发请求。开启时既发
+    /// opencode 形状的识别头与 UA，也补免费层请求体门禁字段（`max_tokens` + 内置工具名，
+    /// 见 [`patch_zen_request_body`]）——**不看上游 host，对所有上游一视同仁**；
+    /// 关闭时两者一起停用，请求体保持原样。
     opencode_identity: bool,
-    /// 是否按 Zen 免费层的请求体门禁补形状（`max_tokens` + 内置工具名，见
-    /// [`patch_zen_request_body`]）：由启动配置派生 = 「OpenCode 客户端身份」开启
-    /// **且** 上游 host 含 `opencode`（见 [`ZenProxyConfig::zen_body_patch`]）；
-    /// 其它上游、以及身份开关关闭时一律保持请求体原样。
-    zen_body_patch: bool,
-    /// 「回合收尾强制约束」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
+    /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
     nudge_enabled: bool,
     /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
     modes: Arc<ThreadModeRegistry>,
@@ -1048,7 +1026,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
     let mode = if plan_mode { "plan" } else { "default" };
     // 首轮教学：把收尾契约追加到 instructions 尾部（必须在模式解析之后——契约文本里不含
     // `<collaboration_mode>` 块，模式判据与 mode_src 因此完全不受影响）
-    // 「回合收尾强制约束」关闭时整条链路（首轮教学、终局判定、续跑、标签剥离）都不参与
+    // 「回合收尾约束和助推」关闭时整条链路（首轮教学、终局判定、续跑、标签剥离）都不参与
     let nudge_enabled = state.nudge_enabled;
     let contract = if nudge_enabled
         && contract_injection_eligible(
@@ -1090,15 +1068,6 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                     (
                         "reasoning_rc",
                         if forwarded.reasoning_rc { "on" } else { "off" }.to_string(),
-                    ),
-                    (
-                        "zen_body",
-                        if state.zen_body_patch && state.opencode_identity {
-                            "on"
-                        } else {
-                            "off"
-                        }
-                        .to_string(),
                     ),
                     (
                         "身份伪装",
@@ -1532,7 +1501,7 @@ fn zen_max_tokens_field(req: &Value) -> Option<OptionalField> {
     }
 }
 
-/// 请求体形状补丁（只对 Zen 上游调用，见 [`is_zen_upstream`]）：把门禁要求的
+/// 请求体形状补丁（由「OpenCode 客户端身份」开关决定是否调用）：把门禁要求的
 /// [`ZEN_REQUIRED_TOOL_NAMES`] 以假工具追加到 `tools` **末尾**。
 ///
 /// 只补缺失的名字：客户端已声明的真实工具（含命名空间扁平名与自由格式工具）一律保留、
@@ -1976,11 +1945,11 @@ async fn forward(
     // 反查：把实发的 ses_* 映射回 codex 会话 id，落进内容日志便于人工对照
     let session_codex = state.session_map.codex_of(&session);
     let mut optional = optional_fields(req, want_stream);
-    // Zen 免费层的请求体门禁之一：补 `max_tokens`（与 messages 同级）。它与下面的工具名
-    // 补丁**同受 `zen_body_patch` 约束**——只有上游 host 含有 `opencode` 时才加，
-    // 换成 DeepSeek 等自建/第三方端点时两项都不加（无法只开其中一项）。放进可选字段列表
-    // 是为了上游指名拒绝它能走既有「摘掉后重试一次」的降级。
-    if state.zen_body_patch && state.opencode_identity {
+    // 请求体门禁之一：补 `max_tokens`（与 messages 同级）。它与下面的工具名补丁
+    // **同受「OpenCode 客户端身份」开关约束**——开启即对所有上游都补，关闭即都不补
+    // （无法只开其中一项）。放进可选字段列表是为了上游指名拒绝它能走既有
+    // 「摘掉后重试一次」的降级。
+    if state.opencode_identity {
         if let Some(field) = zen_max_tokens_field(req) {
             optional.push(field);
         }
@@ -1998,8 +1967,8 @@ async fn forward(
         let (mut body, repairs) = responses_to_chat(req, want_stream, reasoning_rc)
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
         // 同一道门禁的另一项：工具名每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）。
-        // 与上面的 `max_tokens` 完全同源，同样只在上游 host 含有 `opencode` 时为真。
-        if state.zen_body_patch && state.opencode_identity {
+        // 与上面的 `max_tokens` 完全同源，同样只看「OpenCode 客户端身份」开关。
+        if state.opencode_identity {
             patch_zen_request_body(&mut body);
         }
         for field in optional.iter() {
@@ -2534,7 +2503,7 @@ async fn run_stream_task(
 ) {
     let log: ZenLog = state.log.clone();
     let mut st = StreamState::new(response_id, model.clone());
-    // 标签剥离与「回合收尾强制约束」同开关：关闭时文本直通（不剪标签、不催办）
+    // 标签剥离与「回合收尾约束和助推」同开关：关闭时文本直通（不剪标签、不催办）
     st.strip_tags = state.nudge_enabled;
     // 内容诊断日志句柄随流状态走：收尾与中断（Drop）时都能落盘
     st.trace = call;
@@ -2587,7 +2556,7 @@ async fn run_stream_task(
         if !st.calls.is_empty() {
             break;
         }
-        // 「回合收尾强制约束」关闭：终局判定与续跑整段跳过（本轮怎么收尾完全由上游决定），
+        // 「回合收尾约束和助推」关闭：终局判定与续跑整段跳过（本轮怎么收尾完全由上游决定），
         // 每个入站请求只记一条诊断；后续分支（标题线程放行、催办、催办上限）都不会走到。
         // 放在标题线程判定之前：关闭开关后标题线程也无需再单独记一条 `title_task`
         if !state.nudge_enabled {
@@ -2806,8 +2775,8 @@ fn nudge_injected_note(plan_mode: bool) -> &'static str {
 
 /// `zen_proxy.nudge_skipped` 里会话标题线程的中文 `说明`（其余原因的说明就地写在日志调用处）。
 const NUDGE_SKIP_NOTE_TITLE_TASK: &str = "会话标题线程，整轮放行";
-/// `zen_proxy.nudge_skipped` 里「回合收尾强制约束」开关关闭时的中文 `说明`。
-const NUDGE_SKIP_NOTE_DISABLED: &str = "回合收尾强制约束已关闭，不注入也不催办";
+/// `zen_proxy.nudge_skipped` 里「回合收尾约束和助推」开关关闭时的中文 `说明`。
+const NUDGE_SKIP_NOTE_DISABLED: &str = "回合收尾约束和助推已关闭，不注入也不催办";
 
 /// 日志用：本次流里被结构剥离掉的标签载荷（标签不再下发，这里是唯一回看入口）。
 fn tag_payload(st: &StreamState) -> String {
@@ -2832,7 +2801,7 @@ fn tag_payload(st: &StreamState) -> String {
 ///    只删标签本身，同行其余文本保留。
 #[derive(Debug, Default)]
 struct TagStripper {
-    /// 是否启用剥离（= 「回合收尾强制约束」开关）：关闭时**直通**——文本原样下发、
+    /// 是否启用剥离（= 「回合收尾约束和助推」开关）：关闭时**直通**——文本原样下发、
     /// 不记录载荷，也不存在跨分片 holdback，行为与没有这段逻辑完全一致。
     enabled: bool,
     /// 还没判定完、暂时不能下发的尾巴（可能是开标签的开头几个字符）。
@@ -3655,7 +3624,7 @@ fn value_to_text(v: &Value) -> String {
 /// 非流式 chat.completion → responses 对象（纯函数，便于单测）。
 /// 工具调用参数不可用时返回 Err（调用方以 502 结束，而不是把坏参数交给 codex）。
 /// `shape` 为本次请求的工具形态（命名空间还原 + 自由格式工具走 `custom_tool_call`）。
-/// `strip_tags` 为「回合收尾强制约束」开关：关闭时不剥离 zen 标签（见 [`TagStripper`]）。
+/// `strip_tags` 为「回合收尾约束和助推」开关：关闭时不剥离 zen 标签（见 [`TagStripper`]）。
 fn chat_to_responses(
     chat: &Value,
     model: &str,
@@ -3683,7 +3652,7 @@ fn chat_to_responses(
                 .unwrap_or("")
                 .to_string();
             // 非流式路径同样按结构剥离三个 zen 标签（一次性，无跨分片问题）；
-            // 「回合收尾强制约束」关闭时不剥离，正文原样交给 codex。
+            // 「回合收尾约束和助推」关闭时不剥离，正文原样交给 codex。
             let content = TagStripper::strip_once(&content, strip_tags).0;
             let mut content_parts = Vec::new();
             if !content.is_empty() {
@@ -3878,7 +3847,7 @@ struct CallTrack {
 struct StreamState {
     response_id: String,
     model: String,
-    /// 是否剥离 zen 收尾标签（= 「回合收尾强制约束」开关）：关闭时文本直通，
+    /// 是否剥离 zen 收尾标签（= 「回合收尾约束和助推」开关）：关闭时文本直通，
     /// 与「不注入教学/不催办」保持一致。
     strip_tags: bool,
     next_index: usize,
@@ -3907,7 +3876,7 @@ struct StreamState {
 }
 
 impl StreamState {
-    /// `strip_tags` 默认开启（与「回合收尾强制约束」的默认值一致）；代理在
+    /// `strip_tags` 默认开启（与「回合收尾约束和助推」的默认值一致）；代理在
     /// `run_stream_task` 里按实际开关覆写它。
     fn new(response_id: String, model: String) -> Self {
         Self {
