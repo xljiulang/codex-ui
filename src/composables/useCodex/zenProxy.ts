@@ -13,44 +13,56 @@ export interface ZenProxyStatus {
 const DEFAULT_PORT = 18080;
 const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
 
+/** 应用本地代理所需的全部参数（两个行为开关缺省按开启）。 */
+export interface ZenProxyOptions {
+  enabled: boolean;
+  port: number;
+  baseUrl: string;
+  /** 「回合收尾强制约束」：空转收尾时自动续跑，默认开启 */
+  nudgeEnabled?: boolean;
+  /** 「OpenCode 客户端身份」：识别头/UA + 免费层门禁补丁，默认开启 */
+  identityEnabled?: boolean;
+}
+
 /** 查询本地代理当前状态。 */
 export async function readZenProxyStatus(): Promise<ZenProxyStatus> {
   const s = await invoke<ZenProxyStatus>("zen_proxy_status");
   return s ?? { running: false, port: DEFAULT_PORT };
 }
 
-/** 应用（开启/关闭/改端口）本地代理；persist=false 时仅启停不写 settings.json。 */
+/** 应用（开启/关闭/改端口/改行为开关）本地代理；persist=false 时仅启停不写 settings.json。 */
 export async function applyZenProxy(
-  enabled: boolean,
-  port: number,
-  baseUrl: string,
+  options: ZenProxyOptions,
   persist = true,
 ): Promise<ZenProxyStatus> {
-  const targetPort = port > 0 ? port : DEFAULT_PORT;
+  const { enabled } = options;
+  const targetPort = options.port > 0 ? options.port : DEFAULT_PORT;
   const targetBaseUrl =
-    baseUrl.trim() === "" ? DEFAULT_BASE_URL : baseUrl.trim();
+    options.baseUrl.trim() === "" ? DEFAULT_BASE_URL : options.baseUrl.trim();
+  const nudgeEnabled = options.nudgeEnabled ?? true;
+  const identityEnabled = options.identityEnabled ?? true;
   if (persist) {
     await saveSettings({
       zen_proxy_enabled: enabled,
       zen_proxy_port: targetPort,
       zen_proxy_base_url: targetBaseUrl,
+      zen_proxy_nudge_enabled: nudgeEnabled,
+      zen_proxy_identity_enabled: identityEnabled,
     });
   }
   return invoke<ZenProxyStatus>("zen_proxy_apply", {
     enabled,
     port: targetPort,
     baseUrl: targetBaseUrl,
+    nudgeEnabled,
+    opencodeIdentityEnabled: identityEnabled,
   });
 }
 
 /** 便捷包装：应用并统一 toast 反馈；返回是否成功。 */
-export async function toggleZenProxy(
-  enabled: boolean,
-  port: number,
-  baseUrl: string,
-): Promise<boolean> {
+export async function toggleZenProxy(options: ZenProxyOptions): Promise<boolean> {
   try {
-    const status = await applyZenProxy(enabled, port, baseUrl, true);
+    const status = await applyZenProxy(options, true);
     if (status.running) {
       setToast(`Zen 本地代理已启动（端口 ${status.port}）`);
     } else {

@@ -492,9 +492,54 @@ fn nudge_continuation_body(original: &Value, assistant_text: &str, nudge_text: &
 /// 运行中的代理句柄；`stop()` 终止监听任务。
 pub struct ZenProxyHandle {
     pub port: u16,
-    /// 生效中的上游 base_url（已归一化，用于判断是否需要重启）。
-    base_url: String,
+    /// 生效中的启动配置（已归一化，用于判断是否需要重启）。
+    config: ZenProxyConfig,
     abort: AbortHandle,
+}
+
+/// 代理启动配置：端口、上游地址与两个行为开关。任一项变化都要重启代理，
+/// 因此整体作为 [`ZenProxyHandle`] 的比对基准。
+#[derive(Debug, Clone)]
+pub(crate) struct ZenProxyConfig {
+    pub port: u16,
+    /// 上游 base_url（已归一化：去空白与末尾 `/`）。
+    pub base_url: String,
+    /// 「OpenCode 客户端身份」开关：是否按 opencode 客户端形状发送识别头/UA，
+    /// 并对 host 含 `opencode` 的上游补齐免费层请求体门禁字段。
+    pub opencode_identity: bool,
+    /// 「回合收尾强制约束」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
+    pub nudge_enabled: bool,
+}
+
+impl ZenProxyConfig {
+    /// 归一化构造：base_url 去空白与末尾 `/`，空值回退默认上游。
+    pub(crate) fn new(
+        port: u16,
+        base_url: &str,
+        opencode_identity: bool,
+        nudge_enabled: bool,
+    ) -> Self {
+        Self {
+            port,
+            base_url: normalize_base_url(base_url),
+            opencode_identity,
+            nudge_enabled,
+        }
+    }
+
+    /// 是否按 Zen 免费层门禁补请求体形状：只有「身份开启」且上游 host 含 `opencode` 时才补。
+    fn zen_body_patch(&self) -> bool {
+        self.opencode_identity && is_zen_upstream(&self.base_url)
+    }
+
+    /// 是否与运行中的实例等价（用于「要不要重启代理」的判定）：端口、归一化后的上游地址
+    /// 与两个行为开关全部相同才算未变。
+    fn matches(&self, other: &Self) -> bool {
+        self.port == other.port
+            && self.base_url == other.base_url
+            && self.opencode_identity == other.opencode_identity
+            && self.nudge_enabled == other.nudge_enabled
+    }
 }
 
 /// Zen 本地代理的诊断日志句柄（复用应用会话日志；None 时不落盘）。
@@ -562,12 +607,13 @@ fn is_zen_upstream(base_url: &str) -> bool {
 
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
 pub(crate) async fn start(
-    port: u16,
-    base_url: String,
+    config: ZenProxyConfig,
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
 ) -> Result<ZenProxyHandle, String> {
+    let port = config.port;
+    let base_url = config.base_url.clone();
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut attempt = 0;
     let listener = loop {
@@ -583,7 +629,6 @@ pub(crate) async fn start(
             }
         }
     };
-    let base_url = normalize_base_url(&base_url);
     let app = Router::new().fallback(handle_any).with_state(ProxyState {
         session: opencode_id("ses", true),
         session_map: Arc::new(SessionMap::default()),
@@ -591,7 +636,9 @@ pub(crate) async fn start(
         log,
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
-        zen_body_patch: is_zen_upstream(&base_url),
+        opencode_identity: config.opencode_identity,
+        zen_body_patch: config.zen_body_patch(),
+        nudge_enabled: config.nudge_enabled,
         modes,
     });
     let task = tokio::spawn(async move {
@@ -599,7 +646,7 @@ pub(crate) async fn start(
     });
     Ok(ZenProxyHandle {
         port,
-        base_url,
+        config,
         abort: task.abort_handle(),
     })
 }
@@ -608,17 +655,15 @@ pub(crate) async fn start(
 pub(crate) async fn apply(
     handle: &mut Option<ZenProxyHandle>,
     enabled: bool,
-    port: u16,
-    base_url: String,
+    config: ZenProxyConfig,
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
 ) -> ZenProxyStatus {
-    let base_url = normalize_base_url(&base_url);
-    // 端口与上游地址都没变（含 `https://a/` 与 `https://a` 这类等价写法）才复用现有实例。
-    let unchanged = handle
-        .as_ref()
-        .is_some_and(|h| h.port == port && h.base_url == base_url);
+    let port = config.port;
+    // 端口、上游地址与两个行为开关都没变（含 `https://a/` 与 `https://a` 这类等价写法）
+    // 才复用现有实例。
+    let unchanged = handle.as_ref().is_some_and(|h| h.config.matches(&config));
     let need_start = enabled && !unchanged;
     if !enabled || !unchanged {
         if let Some(h) = handle.take() {
@@ -626,7 +671,7 @@ pub(crate) async fn apply(
         }
     }
     if need_start {
-        match start(port, base_url, log, trace, modes).await {
+        match start(config, log, trace, modes).await {
             Ok(h) => {
                 *handle = Some(h);
                 ZenProxyStatus {
@@ -672,9 +717,16 @@ struct ProxyState {
     /// 上游是否要求历史里带 `tool_calls` 的 assistant 消息回传 `reasoning_content`
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
+    /// 「OpenCode 客户端身份」开关：是否发 opencode 形状的识别头与 UA，并对 host 含
+    /// `opencode` 的上游补请求体门禁字段（见 [`patch_zen_request_body`]）。
+    opencode_identity: bool,
     /// 是否按 Zen 免费层的请求体门禁补形状（`max_tokens` + 内置工具名，见
-    /// [`patch_zen_request_body`]）：上游 host 含有 `opencode` 时为 true，其它上游保持请求体原样。
+    /// [`patch_zen_request_body`]）：由启动配置派生 = 「OpenCode 客户端身份」开启
+    /// **且** 上游 host 含 `opencode`（见 [`ZenProxyConfig::zen_body_patch`]）；
+    /// 其它上游、以及身份开关关闭时一律保持请求体原样。
     zen_body_patch: bool,
+    /// 「回合收尾强制约束」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
+    nudge_enabled: bool,
     /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
     modes: Arc<ThreadModeRegistry>,
 }
@@ -688,6 +740,14 @@ fn log_at(log: &Option<Arc<SessionLog>>, level: &str, event: &str, kv: &[(&str, 
 
 /// opencode 客户端标识的字符集（与 `sst/opencode` 的 `Identifier.create` 一致）。
 const OPENCODE_ID_CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+/// opencode 客户端识别头：由「OpenCode 客户端身份」开关统一控制（关闭时一个都不发，
+/// 入站请求带来的同名声也要剔除，避免误当成 opencode 客户端）。
+const OPENCODE_IDENTITY_HEADERS: [&str; 4] = [
+    "x-opencode-client",
+    "x-opencode-project",
+    "x-opencode-request",
+    "x-opencode-session",
+];
 /// opencode 客户端标识的后段长度：`ses_` / `msg_` 之后固定 26 位。
 const OPENCODE_ID_LEN: usize = 26;
 /// [`opencode_id`] 的进程内计数状态：`(毫秒时间戳, 同毫秒内已用序号)`。
@@ -860,9 +920,10 @@ fn normalize_client_session(raw: &str) -> Option<String> {
 
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    // 不在客户端上固定 User-Agent：识别头与 UA 都由每个请求按「OpenCode 客户端身份」
+    // 开关决定（见 [`apply_opencode_identity`]），关闭时才能透传入站 UA。
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
-            .user_agent(ZEN_USER_AGENT)
             .build()
             .unwrap_or_else(|_| reqwest::Client::new())
     })
@@ -987,11 +1048,14 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
     let mode = if plan_mode { "plan" } else { "default" };
     // 首轮教学：把收尾契约追加到 instructions 尾部（必须在模式解析之后——契约文本里不含
     // `<collaboration_mode>` 块，模式判据与 mode_src 因此完全不受影响）
-    let contract = if contract_injection_eligible(
-        want_stream,
-        request_has_tools(&req),
-        request_is_title_task(&req),
-    ) {
+    // 「回合收尾强制约束」关闭时整条链路（首轮教学、终局判定、续跑、标签剥离）都不参与
+    let nudge_enabled = state.nudge_enabled;
+    let contract = if nudge_enabled
+        && contract_injection_eligible(
+            want_stream,
+            request_has_tools(&req),
+            request_is_title_task(&req),
+        ) {
         inject_contract(&mut req, contract_text(plan_mode));
         mode
     } else {
@@ -1029,7 +1093,16 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                     ),
                     (
                         "zen_body",
-                        if state.zen_body_patch { "on" } else { "off" }.to_string(),
+                        if state.zen_body_patch && state.opencode_identity {
+                            "on"
+                        } else {
+                            "off"
+                        }
+                        .to_string(),
+                    ),
+                    (
+                        "身份伪装",
+                        if state.opencode_identity { "on" } else { "off" }.to_string(),
                     ),
                 ],
             );
@@ -1110,7 +1183,14 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                         )
                         .await
                     } else {
-                        proxy_json_response(req, resp, &state.log, forwarded.trace).await
+                        proxy_json_response(
+                            req,
+                            resp,
+                            &state.log,
+                            state.nudge_enabled,
+                            forwarded.trace,
+                        )
+                        .await
                     }
                 }
             }
@@ -1203,16 +1283,31 @@ fn opencode_session(state: &ProxyState, headers: &HeaderMap) -> String {
         .unwrap_or_else(|| state.session.clone())
 }
 
-/// 构造转发给上游的请求头：保留入站头，剔除逐跳头并附加固定 opencode 识别头。
-fn forwarded_request_headers(headers: &HeaderMap, state: &ProxyState) -> HeaderMap {
-    let mut out = headers.clone();
-    for name in HOP_BY_HOP_HEADERS {
+/// 按「OpenCode 客户端身份」开关落到请求头上的全部效果（翻译路径与透传路径共用）：
+/// - 开启：附加固定识别头（`x-opencode-client` / `-project` / `-request` / `-session`）与
+///   opencode 客户端 UA，入站 UA 一律丢弃（与既有行为一致）；
+/// - 关闭：不附加任何识别头，并把入站自带的同名头剔除（避免仍然“自称 opencode”），
+///   UA 改为透传入站值；入站没有 UA 时不带 UA（客户端不再设默认 UA）。
+///
+/// `session` 与 `request_id` 由调用方提供，保证内容日志里记的值与实发头逐字一致；
+/// 关闭时两者不参与发送。
+fn apply_opencode_identity(
+    out: &mut HeaderMap,
+    headers: &HeaderMap,
+    state: &ProxyState,
+    session: &str,
+    request_id: &str,
+) {
+    for name in OPENCODE_IDENTITY_HEADERS {
         out.remove(name);
     }
-    out.remove(header::HOST);
-    out.remove(header::CONTENT_LENGTH);
-    // 保持固定 opencode User-Agent，不沿用入站客户端 UA
     out.remove(header::USER_AGENT);
+    if !state.opencode_identity {
+        if let Some(ua) = headers.get(header::USER_AGENT) {
+            out.insert(header::USER_AGENT, ua.clone());
+        }
+        return;
+    }
     out.insert(
         "x-opencode-client",
         HeaderValue::from_static(OPENCODE_CLIENT),
@@ -1221,12 +1316,32 @@ fn forwarded_request_headers(headers: &HeaderMap, state: &ProxyState) -> HeaderM
         "x-opencode-project",
         HeaderValue::from_static(OPENCODE_PROJECT),
     );
-    if let Ok(value) = HeaderValue::from_str(&opencode_id("msg", false)) {
+    if let Ok(value) = HeaderValue::from_str(request_id) {
         out.insert("x-opencode-request", value);
     }
-    if let Ok(value) = HeaderValue::from_str(&opencode_session(state, headers)) {
+    if let Ok(value) = HeaderValue::from_str(session) {
         out.insert("x-opencode-session", value);
     }
+    if let Ok(value) = HeaderValue::from_str(ZEN_USER_AGENT) {
+        out.insert(header::USER_AGENT, value);
+    }
+}
+
+/// 构造转发给上游的请求头：保留入站头，剔除逐跳头，再按身份开关补识别头/UA。
+fn forwarded_request_headers(headers: &HeaderMap, state: &ProxyState) -> HeaderMap {
+    let mut out = headers.clone();
+    for name in HOP_BY_HOP_HEADERS {
+        out.remove(name);
+    }
+    out.remove(header::HOST);
+    out.remove(header::CONTENT_LENGTH);
+    apply_opencode_identity(
+        &mut out,
+        headers,
+        state,
+        &opencode_session(state, headers),
+        &opencode_id("msg", false),
+    );
     out
 }
 
@@ -1763,6 +1878,7 @@ fn note_request_meta(
     headers: &HeaderMap,
     session: &str,
     session_codex: Option<&str>,
+    identity: bool,
     body: &Value,
     dropped: &[&'static str],
     reasoning_rc: bool,
@@ -1776,9 +1892,32 @@ fn note_request_meta(
             "absent"
         },
     );
-    call.note("x_opencode_session", session.to_string());
-    call.note("session_codex", session_codex.unwrap_or("-").to_string());
-    call.note("x_opencode_request", request_id.to_string());
+    // 身份开关关闭时不发识别头，日志同样记 `-`（否则会误导成「已发过这个会话 id」）
+    call.note("identity", if identity { "on" } else { "off" });
+    call.note(
+        "x_opencode_session",
+        if identity {
+            session.to_string()
+        } else {
+            "-".to_string()
+        },
+    );
+    call.note(
+        "session_codex",
+        if identity {
+            session_codex.unwrap_or("-").to_string()
+        } else {
+            "-".to_string()
+        },
+    );
+    call.note(
+        "x_opencode_request",
+        if identity {
+            request_id.to_string()
+        } else {
+            "-".to_string()
+        },
+    );
     call.note(
         "model",
         body.get("model")
@@ -1841,7 +1980,7 @@ async fn forward(
     // 补丁**同受 `zen_body_patch` 约束**——只有上游 host 含有 `opencode` 时才加，
     // 换成 DeepSeek 等自建/第三方端点时两项都不加（无法只开其中一项）。放进可选字段列表
     // 是为了上游指名拒绝它能走既有「摘掉后重试一次」的降级。
-    if state.zen_body_patch {
+    if state.zen_body_patch && state.opencode_identity {
         if let Some(field) = zen_max_tokens_field(req) {
             optional.push(field);
         }
@@ -1860,7 +1999,7 @@ async fn forward(
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("请求翻译失败：{e}")))?;
         // 同一道门禁的另一项：工具名每次尝试都补一遍（`dropped` 只影响可选字段，不影响它）。
         // 与上面的 `max_tokens` 完全同源，同样只在上游 host 含有 `opencode` 时为真。
-        if state.zen_body_patch {
+        if state.zen_body_patch && state.opencode_identity {
             patch_zen_request_body(&mut body);
         }
         for field in optional.iter() {
@@ -1879,12 +2018,13 @@ async fn forward(
             headers,
             &session,
             session_codex.as_deref(),
+            state.opencode_identity,
             &body,
             &dropped,
             reasoning_rc,
         );
         call.write_request_json(&body);
-        let resp = build_chat_request(client, &url, headers, &session, &request_id, &body)
+        let resp = build_chat_request(client, &url, state, headers, &session, &request_id, &body)
             .send()
             .await
             .map_err(|e| (StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}")))?;
@@ -1979,22 +2119,23 @@ async fn forward(
     }
 }
 
-/// 构造发往 Zen 的 chat/completions 请求（固定识别头 + 透传的 Authorization）。
+/// 构造发往 Zen 的 chat/completions 请求：识别头/UA 按「OpenCode 客户端身份」开关决定
+/// （见 [`apply_opencode_identity`]），Authorization 始终原样透传。
 fn build_chat_request(
     client: &reqwest::Client,
     url: &str,
+    state: &ProxyState,
     headers: &HeaderMap,
     session: &str,
     request_id: &str,
     body: &Value,
 ) -> reqwest::RequestBuilder {
-    let mut rq = client
-        .post(url)
-        .json(body)
-        .header("x-opencode-client", OPENCODE_CLIENT)
-        .header("x-opencode-project", OPENCODE_PROJECT)
-        .header("x-opencode-request", request_id)
-        .header("x-opencode-session", session);
+    let mut rq = client.post(url).json(body);
+    let mut identity = HeaderMap::new();
+    apply_opencode_identity(&mut identity, headers, state, session, request_id);
+    for (name, value) in identity.iter() {
+        rq = rq.header(name, value.clone());
+    }
     if let Some(auth) = headers.get(header::AUTHORIZATION) {
         if let Ok(v) = auth.to_str() {
             rq = rq.header(header::AUTHORIZATION, v.to_string());
@@ -2123,6 +2264,7 @@ async fn proxy_json_response(
     req: Value,
     resp: reqwest::Response,
     log: &Option<Arc<SessionLog>>,
+    strip_tags: bool,
     mut call: TraceCall,
 ) -> Response {
     let status = resp.status();
@@ -2159,7 +2301,7 @@ async fn proxy_json_response(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let out = match chat_to_responses(&chat, &model, &tool_shape(&req)) {
+    let out = match chat_to_responses(&chat, &model, &tool_shape(&req), strip_tags) {
         Ok(out) => out,
         Err(e) => {
             log_at(
@@ -2392,6 +2534,8 @@ async fn run_stream_task(
 ) {
     let log: ZenLog = state.log.clone();
     let mut st = StreamState::new(response_id, model.clone());
+    // 标签剥离与「回合收尾强制约束」同开关：关闭时文本直通（不剪标签、不催办）
+    st.strip_tags = state.nudge_enabled;
     // 内容诊断日志句柄随流状态走：收尾与中断（Drop）时都能落盘
     st.trace = call;
     // 工具形态：回译模型调用时还原 codex 期望的 name/namespace 或 custom_tool_call
@@ -2441,6 +2585,22 @@ async fn run_stream_task(
         }
         // 模型真的调用了工具：本轮口嗨已被纠正（后续回合走新的入站请求）
         if !st.calls.is_empty() {
+            break;
+        }
+        // 「回合收尾强制约束」关闭：终局判定与续跑整段跳过（本轮怎么收尾完全由上游决定），
+        // 每个入站请求只记一条诊断；后续分支（标题线程放行、催办、催办上限）都不会走到。
+        // 放在标题线程判定之前：关闭开关后标题线程也无需再单独记一条 `title_task`
+        if !state.nudge_enabled {
+            log_at(
+                &log,
+                "info",
+                "zen_proxy.nudge_skipped",
+                &[
+                    ("原因", "disabled".to_string()),
+                    ("轮次", pass.to_string()),
+                    ("说明", NUDGE_SKIP_NOTE_DISABLED.to_string()),
+                ],
+            );
             break;
         }
         // 会话标题生成任务：直接放行（标题线程必然「纯文本 + 零工具调用」结束，
@@ -2646,6 +2806,8 @@ fn nudge_injected_note(plan_mode: bool) -> &'static str {
 
 /// `zen_proxy.nudge_skipped` 里会话标题线程的中文 `说明`（其余原因的说明就地写在日志调用处）。
 const NUDGE_SKIP_NOTE_TITLE_TASK: &str = "会话标题线程，整轮放行";
+/// `zen_proxy.nudge_skipped` 里「回合收尾强制约束」开关关闭时的中文 `说明`。
+const NUDGE_SKIP_NOTE_DISABLED: &str = "回合收尾强制约束已关闭，不注入也不催办";
 
 /// 日志用：本次流里被结构剥离掉的标签载荷（标签不再下发，这里是唯一回看入口）。
 fn tag_payload(st: &StreamState) -> String {
@@ -2670,6 +2832,9 @@ fn tag_payload(st: &StreamState) -> String {
 ///    只删标签本身，同行其余文本保留。
 #[derive(Debug, Default)]
 struct TagStripper {
+    /// 是否启用剥离（= 「回合收尾强制约束」开关）：关闭时**直通**——文本原样下发、
+    /// 不记录载荷，也不存在跨分片 holdback，行为与没有这段逻辑完全一致。
+    enabled: bool,
     /// 还没判定完、暂时不能下发的尾巴（可能是开标签的开头几个字符）。
     pending: String,
     /// 已进入标签态：正在等闭标签（`pending` 此时就是载荷 + 可能的半个闭标签）。
@@ -2685,15 +2850,21 @@ struct TagStripper {
 }
 
 impl TagStripper {
-    fn new() -> Self {
+    /// 构造剥离器：`enabled=false` 时为直通模式（见字段说明）。
+    fn new(enabled: bool) -> Self {
         Self {
+            enabled,
             line_start_ws: true,
             ..Self::default()
         }
     }
 
     /// 喂一段上游文本，返回可以下发给 codex 的可见文本（可能为空）。
+    /// 直通模式下逐字返回原文。
     fn feed(&mut self, text: &str) -> String {
+        if !self.enabled {
+            return text.to_string();
+        }
         self.pending.push_str(text);
         let mut visible = String::new();
         loop {
@@ -2785,8 +2956,9 @@ impl TagStripper {
     }
 
     /// 一次性剥离（非流式路径用）：返回 (可见文本, 被删载荷)。
-    fn strip_once(text: &str) -> (String, String) {
-        let mut stripper = Self::new();
+    /// `enabled=false` 时原样返回文本、载荷为空。
+    fn strip_once(text: &str, enabled: bool) -> (String, String) {
+        let mut stripper = Self::new(enabled);
         let mut visible = stripper.feed(text);
         visible.push_str(&stripper.finish());
         (visible, stripper.stripped_note())
@@ -3483,7 +3655,13 @@ fn value_to_text(v: &Value) -> String {
 /// 非流式 chat.completion → responses 对象（纯函数，便于单测）。
 /// 工具调用参数不可用时返回 Err（调用方以 502 结束，而不是把坏参数交给 codex）。
 /// `shape` 为本次请求的工具形态（命名空间还原 + 自由格式工具走 `custom_tool_call`）。
-fn chat_to_responses(chat: &Value, model: &str, shape: &ToolShape) -> Result<Value, String> {
+/// `strip_tags` 为「回合收尾强制约束」开关：关闭时不剥离 zen 标签（见 [`TagStripper`]）。
+fn chat_to_responses(
+    chat: &Value,
+    model: &str,
+    shape: &ToolShape,
+    strip_tags: bool,
+) -> Result<Value, String> {
     let chat_id = chat
         .get("id")
         .and_then(|v| v.as_str())
@@ -3504,8 +3682,9 @@ fn chat_to_responses(chat: &Value, model: &str, shape: &ToolShape) -> Result<Val
                 .and_then(|c| c.as_str())
                 .unwrap_or("")
                 .to_string();
-            // 非流式路径同样按结构剥离三个 zen 标签（一次性，无跨分片问题）
-            let content = TagStripper::strip_once(&content).0;
+            // 非流式路径同样按结构剥离三个 zen 标签（一次性，无跨分片问题）；
+            // 「回合收尾强制约束」关闭时不剥离，正文原样交给 codex。
+            let content = TagStripper::strip_once(&content, strip_tags).0;
             let mut content_parts = Vec::new();
             if !content.is_empty() {
                 content_parts.push(json!({
@@ -3699,6 +3878,9 @@ struct CallTrack {
 struct StreamState {
     response_id: String,
     model: String,
+    /// 是否剥离 zen 收尾标签（= 「回合收尾强制约束」开关）：关闭时文本直通，
+    /// 与「不注入教学/不催办」保持一致。
+    strip_tags: bool,
     next_index: usize,
     /// 推理摘要（上游 reasoning 增量）；codex 用它渲染「思考过程」。
     reasoning: Option<TextTrack>,
@@ -3725,10 +3907,13 @@ struct StreamState {
 }
 
 impl StreamState {
+    /// `strip_tags` 默认开启（与「回合收尾强制约束」的默认值一致）；代理在
+    /// `run_stream_task` 里按实际开关覆写它。
     fn new(response_id: String, model: String) -> Self {
         Self {
             response_id,
             model,
+            strip_tags: true,
             next_index: 0,
             reasoning: None,
             text: None,
@@ -3881,7 +4066,7 @@ fn reasoning_delta(text: &str, st: &mut StreamState) -> Vec<String> {
             text_buf: String::new(),
             // 推理摘要不剥离标签，可见文本与原文一致（只是复用同一结构）
             visible_buf: String::new(),
-            stripper: TagStripper::new(),
+            stripper: TagStripper::new(false),
             out_index,
         });
         out.push(sse_event(
@@ -3929,7 +4114,7 @@ fn text_delta(text: &str, st: &mut StreamState) -> Vec<String> {
             item_id: item_id.clone(),
             text_buf: String::new(),
             visible_buf: String::new(),
-            stripper: TagStripper::new(),
+            stripper: TagStripper::new(st.strip_tags),
             out_index,
         });
         out.push(sse_event(
@@ -4142,7 +4327,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     // 剥离掉的字符数（原始 − 可见），进收尾摘要便于对照「标签被删了多少」
     let mut stripped_chars = 0usize;
     if let Some(mut t) = st.text.take() {
-        // 收尾前先把剥离器压住的尾巴交出来（未闭合标签按规则丢弃），
+        // 收尾前先把剥离器压住的尾巴交出来（未闭合标签按规则丢弃；直通模式下就是原文尾巴），
         // 保证 done / content_part.done / output_item.done 与 delta 累积完全一致
         let tail = t.stripper.finish();
         t.visible_buf.push_str(&tail);

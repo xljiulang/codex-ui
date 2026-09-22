@@ -28,8 +28,25 @@ const portInput = ref<string>(String(store.settings.zen_proxy_port ?? DEFAULT_PO
 const apiUrlInput = ref<string>(
   store.settings.zen_proxy_base_url ?? DEFAULT_BASE_URL,
 );
+/** 回合收尾强制约束（本地缓冲，保存时写回；缺省开启） */
+const nudgeEnabled = ref<boolean>(store.settings.zen_proxy_nudge_enabled ?? true);
+/** OpenCode 客户端身份（本地缓冲，保存时写回；缺省开启） */
+const identityEnabled = ref<boolean>(
+  store.settings.zen_proxy_identity_enabled ?? true,
+);
 /** 输入校验错误信息 */
 const portError = ref<string>("");
+
+/** 本次要应用的选项（端口 / 上游 / 两个行为开关的当前缓冲值） */
+function currentOptions(enabled: boolean, port: number) {
+  return {
+    enabled,
+    port,
+    baseUrl: apiUrlInput.value.trim() || DEFAULT_BASE_URL,
+    nudgeEnabled: nudgeEnabled.value,
+    identityEnabled: identityEnabled.value,
+  };
+}
 
 /**
  * 本地 provider 的 base_url 提示：本机回环地址 + 模型提供方 base_url 的路径
@@ -72,8 +89,7 @@ async function onToggle(checked: boolean) {
     setToast("端口无效，请检查输入");
     return;
   }
-  const baseUrl = apiUrlInput.value.trim() || DEFAULT_BASE_URL;
-  const ok = await toggleZenProxy(checked, port, baseUrl);
+  const ok = await toggleZenProxy(currentOptions(checked, port));
   if (ok !== checked) {
     status.value = await readZenProxyStatus().catch(() => status.value);
   } else {
@@ -87,9 +103,8 @@ async function onSave() {
   const port = validatePort(portInput.value);
   if (!port) return;
   const enabled = store.settings.zen_proxy_enabled ?? false;
-  const baseUrl = apiUrlInput.value.trim() || DEFAULT_BASE_URL;
   try {
-    const st = await applyZenProxy(enabled, port, baseUrl, true);
+    const st = await applyZenProxy(currentOptions(enabled, port), true);
     if (enabled) {
       setToast(st.error ?? `代理已重启（端口 ${st.port}）`);
     } else {
@@ -194,6 +209,27 @@ onBeforeUnmount(refresh);
             "
           />
         </div>
+
+        <div class="setting-row zen-proxy-switch-row">
+          <label class="zen-proxy-switch-text" for="zen-proxy-nudge">
+            回合收尾强制约束（模型空转收尾时自动续跑，直到真的动手做完或干净收尾）
+          </label>
+          <label class="switch">
+            <input id="zen-proxy-nudge" v-model="nudgeEnabled" type="checkbox" />
+            <span class="switch-track"></span>
+          </label>
+        </div>
+
+        <div class="setting-row zen-proxy-switch-row">
+          <label class="zen-proxy-switch-text" for="zen-proxy-identity">
+            OpenCode 客户端身份（按 OpenCode 客户端形状发送请求头，并对 opencode
+            上游补齐免费层门禁字段）
+          </label>
+          <label class="switch">
+            <input id="zen-proxy-identity" v-model="identityEnabled" type="checkbox" />
+            <span class="switch-track"></span>
+          </label>
+        </div>
       </div>
 
       <div class="zen-proxy-actions">
@@ -245,6 +281,29 @@ onBeforeUnmount(refresh);
   width: 100%;
   height: var(--ctrl-h-md);
   padding: var(--space-2) var(--space-4);
+}
+/* 行为开关行：文字在左、开关在右（与「个性化」分区的开关行一致） */
+.zen-proxy-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+/* 抵消全局 `.setting-row label` 的 block/600 字重与下边距，让文字与开关垂直居中 */
+.zen-proxy-switch-row label {
+  margin-bottom: 0;
+}
+.zen-proxy-switch-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-md);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text);
+  user-select: text;
+}
+.zen-proxy-switch-row .switch {
+  flex-shrink: 0;
 }
 .zen-proxy-actions {
   display: flex;

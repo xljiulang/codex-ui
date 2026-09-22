@@ -202,10 +202,16 @@ async fn forwards_chat_with_auth_and_user_agent() {
         axum::http::HeaderValue::from_static("Bearer public"),
     );
     let state = proxy_state(base_url, None);
-    let resp = forward(&req, &headers, false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
+    // 走完整翻译入口：`forward` 直调不会写 `zen_proxy.forward` 那一行请求日志
+    let resp = handle_any(
+        State(state),
+        Method::POST,
+        OriginalUri("/responses".parse().unwrap()),
+        headers,
+        Body::from(req.to_string()),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
 
     // 验证上游收到的内容
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
@@ -234,10 +240,15 @@ async fn forwards_chat_prefers_client_session_header() {
     let mut headers = HeaderMap::new();
     headers.insert("session-id", HeaderValue::from_static("3f1a2b3c"));
     let state = proxy_state(base_url, None);
-    let resp = forward(&req, &headers, false, &state, "req_test")
-        .await
-        .expect("forward 应成功");
-    assert!(resp.status.is_success());
+    let resp = handle_any(
+        State(state.clone()),
+        Method::POST,
+        OriginalUri("/responses".parse().unwrap()),
+        headers.clone(),
+        Body::from(req.to_string()),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
 
     let got = rec.lock().await.clone().expect("mock 应已收到请求");
     // 按 codex 会话 id 派生的 opencode 会话标识：ses_ + 26 位 [0-9A-Za-z]
@@ -290,6 +301,8 @@ async fn passthrough_forwards_models_and_post_body() {
     let state = ProxyState {
         session: "ses_fixed123".into(),
         zen_body_patch: is_zen_upstream(&base_url),
+        opencode_identity: true,
+        nudge_enabled: true,
         base_url,
         log: None,
         trace: TraceSink::disabled(),
@@ -349,6 +362,8 @@ async fn passthrough_prefers_client_session_header() {
     let state = ProxyState {
         session: "ses_fixed123".into(),
         zen_body_patch: is_zen_upstream(&base_url),
+        opencode_identity: true,
+        nudge_enabled: true,
         base_url,
         log: None,
         trace: TraceSink::disabled(),
@@ -671,6 +686,8 @@ fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         zen_body_patch: is_zen_upstream(upstream),
+        opencode_identity: true,
+        nudge_enabled: true,
         session_map: Arc::new(SessionMap::default()),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
@@ -1775,6 +1792,8 @@ fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyS
     ProxyState {
         session: "ses_fixed123".into(),
         zen_body_patch: is_zen_upstream(&base_url),
+        opencode_identity: true,
+        nudge_enabled: true,
         base_url,
         log,
         trace,
@@ -1902,8 +1921,7 @@ async fn started_proxy_translates_path_derived_from_upstream() {
     let status = apply(
         &mut handle,
         true,
-        port,
-        format!("{upstream}/zen/v1"),
+        ZenProxyConfig::new(port, &format!("{upstream}/zen/v1"), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -1931,8 +1949,7 @@ async fn started_proxy_translates_path_derived_from_upstream() {
     let status = apply(
         &mut handle,
         false,
-        port,
-        upstream,
+        ZenProxyConfig::new(port, &upstream, true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -1976,8 +1993,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        port,
-        upstream_a.clone(),
+        ZenProxyConfig::new(port, &upstream_a.clone(), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2002,8 +2018,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        port,
-        upstream_a.clone(),
+        ZenProxyConfig::new(port, &upstream_a.clone(), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2013,8 +2028,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        port,
-        format!("{upstream_a}/"),
+        ZenProxyConfig::new(port, &format!("{upstream_a}/"), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2033,8 +2047,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        port,
-        upstream_b.clone(),
+        ZenProxyConfig::new(port, &upstream_b.clone(), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2051,8 +2064,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        other_port,
-        upstream_b,
+        ZenProxyConfig::new(other_port, &upstream_b, true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2062,12 +2074,48 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     assert_eq!(status.port, other_port);
     probe(other_port).await;
 
+    // 只改行为开关（端口与上游不动）→ 同样重启：开关是代理运行期行为，必须重新装配。
+    rec_b.lock().await.clear();
+    let before_switch = last_row(&rec_b).await;
+    let status = apply(
+        &mut handle,
+        true,
+        ZenProxyConfig::new(other_port, &upstream_b, false, true),
+        None,
+        TraceSink::disabled(),
+        Arc::new(ThreadModeRegistry::default()),
+    )
+    .await;
+    assert!(status.running, "{:?}", status.error);
+    probe(other_port).await;
+    let after_switch = last_row(&rec_b).await.expect("重启后上游应再次收到请求");
+    assert_ne!(
+        before_switch,
+        Some(after_switch.clone()),
+        "改开关应重启（会话标识重新分配）：{after_switch}"
+    );
+    let status = apply(
+        &mut handle,
+        true,
+        ZenProxyConfig::new(other_port, &upstream_b, false, true),
+        None,
+        TraceSink::disabled(),
+        Arc::new(ThreadModeRegistry::default()),
+    )
+    .await;
+    assert!(status.running, "{:?}", status.error);
+    probe(other_port).await;
+    assert_eq!(
+        last_row(&rec_b).await,
+        Some(after_switch),
+        "开关取值相同则复用实例（不应重启）"
+    );
+
     // 关闭 → 停止。
     let status = apply(
         &mut handle,
         false,
-        other_port,
-        upstream_a,
+        ZenProxyConfig::new(other_port, &upstream_a, true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2148,6 +2196,8 @@ async fn learns_and_retries_reasoning_content_requirement() {
     let state = ProxyState {
         session: "ses_fixed123".into(),
         zen_body_patch: is_zen_upstream(&upstream),
+        opencode_identity: true,
+        nudge_enabled: true,
         base_url: upstream,
         log,
         trace: TraceSink::disabled(),
@@ -2961,5 +3011,150 @@ async fn trace_records_upstream_error_body() {
     assert!(
         summary.contains("suspicious=upstream_http_error"),
         "{summary}"
+    );
+}
+
+// ---------- 两个行为开关：身份伪装 / 回合收尾强制约束 ----------
+
+/// 身份开关关闭：翻译路径不发任何识别头、UA 透传入站值；上游请求体保持原样
+/// （`forward` 对补丁同时要求「派生位为真」与「身份开启」，这里刻意把派生位置真来验证
+/// 身份开关本身就能压住补丁；派生规则另由 `zen_body_patch_requires_identity_switch_and_zen_host` 覆盖）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn identity_switch_off_stops_headers_and_body_patch() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+    let base_url = spawn_mock_zen(rec.clone()).await;
+
+    let req = json!({
+        "model": "m",
+        "input": "hi",
+        "stream": false,
+        "tools": [{
+            "type": "function",
+            "name": "shell",
+            "description": "run shell",
+            "parameters": { "type": "object", "properties": {} }
+        }]
+    });
+    let trace_dir = tempfile::TempDir::new().unwrap();
+    let mut state = proxy_state_traced(base_url, log, traced_sink(trace_dir.path()));
+    state.opencode_identity = false;
+    assert!(!state.zen_body_patch, "关闭身份后不应再补请求体形状");
+    // 双保险：即便派生位被置真（例如手工构造/未来重构），身份关闭也必须压住补丁
+    state.zen_body_patch = true;
+    let mut headers = HeaderMap::new();
+    headers.insert(header::USER_AGENT, HeaderValue::from_static("codex/1.2.3"));
+    headers.insert(
+        "x-opencode-session",
+        HeaderValue::from_static("ses_attacker_supplied"),
+    );
+
+    // 走完整翻译入口：`forward` 直调不会写 `zen_proxy.forward` 那一行请求日志
+    let resp = handle_any(
+        State(state),
+        Method::POST,
+        OriginalUri("/responses".parse().unwrap()),
+        headers,
+        Body::from(req.to_string()),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let got = rec.lock().await.clone().expect("mock 应已收到请求");
+    assert!(
+        got.body.get("max_tokens").is_none(),
+        "关闭身份后不应补 max_tokens：{}",
+        got.body
+    );
+    let names: Vec<&str> = got.body["tools"]
+        .as_array()
+        .map(|tools| {
+            tools
+                .iter()
+                .map(|tool| tool["function"]["name"].as_str().unwrap_or(""))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(names, vec!["shell"], "关闭身份后不应补假工具：{}", got.body);
+    assert_eq!(got.user_agent.as_deref(), Some("codex/1.2.3"));
+    assert_eq!(got.opencode_client, None, "关闭时不应发识别头");
+    assert_eq!(got.opencode_project, None);
+    assert_eq!(got.opencode_request, None);
+    assert_eq!(
+        got.opencode_session, None,
+        "关闭时连入站自带的同名头也要剔除"
+    );
+    // 诊断：请求行记 `身份伪装=off`，内容日志里的识别头一律记 `-`
+    let joined = read_session_log(&dir);
+    assert!(joined.contains("身份伪装=off"), "{joined}");
+    assert!(joined.contains("zen_body=off"), "{joined}");
+    let (_, summary) = trace_file_with(trace_dir.path(), ".summary.txt");
+    assert!(summary.contains("identity=off"), "{summary}");
+    assert!(summary.contains("x_opencode_session=-"), "{summary}");
+}
+
+/// 身份开关开启（真实派生路径）：上游 host 含 `opencode` 时才既发识别头、又补门禁字段。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn identity_switch_on_keeps_headers_and_body_patch() {
+    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+    let base_url = spawn_mock_zen(rec.clone()).await;
+
+    let req = json!({ "model": "m", "input": "hi", "stream": false });
+    let mut state = proxy_state(base_url, None);
+    // 模拟「上游 host 含 opencode」：直接打开派生位，其余按默认（身份开启）
+    state.zen_body_patch = true;
+    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
+        .await
+        .expect("forward 应成功");
+    assert!(resp.status.is_success());
+
+    let got = rec.lock().await.clone().expect("mock 应已收到请求");
+    assert_eq!(got.user_agent.as_deref(), Some(ZEN_USER_AGENT));
+    assert_eq!(got.opencode_client.as_deref(), Some(OPENCODE_CLIENT));
+    assert_eq!(got.opencode_project.as_deref(), Some(OPENCODE_PROJECT));
+    assert_is_opencode_id(got.opencode_request.as_deref().expect("应有请求 id"), "msg");
+    assert_eq!(got.opencode_session.as_deref(), Some("ses_fixed123"));
+    assert!(got.body.get("max_tokens").is_some(), "{}", got.body);
+}
+
+/// 收尾约束关闭：终局即使「纯文本 + 零工具调用」也不注入、不续跑，只打一次上游；
+/// 且不再剥离 zen 标签（正文里的标签原样交给 codex）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn nudge_switch_off_skips_injection_and_keeps_tags() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let (upstream, rec) = spawn_mock_zen_scripted(vec![ScriptedReply::Sse(sse_text_reply(
+        "我先说明一下接下来要做的事。\n<zen_task_completed>已完成</zen_task_completed>",
+    ))])
+    .await;
+
+    let mut state = nudge_probe_state(&upstream, log);
+    state.nudge_enabled = false;
+    let body = run_nudge_probe_state(state, HeaderMap::new(), nudge_probe(true)).await;
+
+    assert_eq!(rec.lock().await.len(), 1, "关闭时不应续跑第二轮");
+    assert_eq!(body.matches("event: response.completed").count(), 1);
+    // 标签不再剥离：原样出现在下发给 codex 的文本里
+    assert!(
+        body.contains("zen_task_completed"),
+        "关闭时应保留标签：{body}"
+    );
+    // 首轮教学也不注入：首轮调用的 system 消息里没有契约
+    let calls = rec.lock().await.clone();
+    assert!(
+        !system_text(&calls[0]).contains(DEFAULT_MODE_CONTRACT_TEXT),
+        "关闭时不应注入首轮教学：{}",
+        calls[0]
+    );
+    // 诊断：记一条「因开关关闭而跳过」
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("原因=disabled"),
+        "{joined}"
+    );
+    assert!(
+        !joined.contains("event=zen_proxy.nudge_injected"),
+        "关闭时不应有注入事件：{joined}"
     );
 }

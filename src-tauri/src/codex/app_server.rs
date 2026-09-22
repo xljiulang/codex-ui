@@ -330,6 +330,8 @@ impl CodexServer {
                 settings.zen_proxy_enabled,
                 settings.zen_proxy_port,
                 settings.zen_proxy_base_url,
+                settings.zen_proxy_nudge_enabled,
+                settings.zen_proxy_identity_enabled,
             )
             .await;
         if !status.running {
@@ -364,6 +366,8 @@ impl CodexServer {
         enabled: bool,
         port: u16,
         base_url: String,
+        nudge_enabled: bool,
+        opencode_identity: bool,
     ) -> zen_proxy::ZenProxyStatus {
         let mut inner = self.shared.inner.lock().await;
         let trace = match self.zen_trace.as_ref() {
@@ -373,8 +377,7 @@ impl CodexServer {
         zen_proxy::apply(
             &mut inner.zen_proxy,
             enabled,
-            port,
-            base_url,
+            zen_proxy::ZenProxyConfig::new(port, &base_url, opencode_identity, nudge_enabled),
             self.log.clone(),
             trace,
             self.thread_modes.clone(),

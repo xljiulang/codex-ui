@@ -16,6 +16,8 @@ export const defaultSettings = (): AppSettings => ({
     zen_proxy_enabled: false,
     zen_proxy_port: 18080,
     zen_proxy_base_url: "https://opencode.ai/zen/v1",
+    zen_proxy_nudge_enabled: true,
+    zen_proxy_identity_enabled: true,
     error_notify_enabled: true,
     interaction_notify_enabled: true,
   });

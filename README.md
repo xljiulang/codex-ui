@@ -398,14 +398,17 @@
 ### Zen 代理
 
 - **Zen 代理（设置 → Zen 代理）**：在 `127.0.0.1` 开放一个 OpenAI Responses API 端点，内部翻译为 Chat Completions 并转发到 OpenCode Zen（`https://opencode.ai/zen/v1`），让 codex 无需 `wire_api="chat"` 即可使用 Zen 免费模型；
+- **两个行为开关**（设置页 Zen 代理卡片内，都是复选框、**默认勾选**，与端口/base_url 一起点「保存」才生效——保存即重启代理）：
+  - **`回合收尾强制约束（模型空转收尾时自动续跑，直到真的动手做完或干净收尾）`**：控制「口嗨检测与自动续跑」整条链路——首轮收尾契约教学、终局判定与续跑提醒、以及 `<zen_task_completed>` 等收尾标签的剥离；关闭后代理只做协议翻译，终局怎么收尾完全由上游决定（`zen_proxy.nudge_skipped 原因=disabled`），模型就算写出这类标签也原样显示在聊天里。**与上游域名无关**，指向任何上游都按这个开关走；
+  - **`OpenCode 客户端身份（按 OpenCode 客户端形状发送请求头，并对 opencode 上游补齐免费层门禁字段）`**：控制全部伪装能力——`x-opencode-client` / `-project` / `-request` / `-session` 四个识别头、opencode 固定 User-Agent，以及「上游 host 含 `opencode` 时补 `max_tokens` + 6 个假工具名」的请求体门禁补丁。关闭后翻译路径与透传路径都不发任何识别头（入站自带的同名头也会被剔除，避免仍然"自称 opencode"），UA 改为**透传入站请求的 User-Agent**（入站没有就不带 UA），请求体一个门禁字段都不补。诊断口径：`zen_proxy.forward` 增 `身份伪装=on|off`，内容日志里的 `identity=on|off`、`x_opencode_session` / `x_opencode_request`（未发送时记 `-`）；
 - **翻译入口路径 = 模型提供方 base_url 的路径 + `/responses`**（`…/zen/v1` → `/zen/v1/responses`，base_url 无路径 → `/responses`，一律不锁死 `/v1`；
   本地 provider 的 base_url 路径必须与「模型提供方的 base_url」一致，只把 host 换成本机代理），判定不看方法以外的任何猜测；
 - **角色映射**：Responses 的 `developer` 角色在 Chat Completions 侧统一降级为 `system`
   （codex 用 `developer` 下发开发者消息，而 DeepSeek 等兼容端点只认 `system`/`user`/`assistant`/`tool`，会直接 400 `unknown variant developer`），其余角色原样透传；
-- **除该入口外的所有路径/方法都零路径转换透传**——只把 scheme/host/port 换成上游，入站 path 与 query 原样发出（如上游无路径时 `GET /models` → `{上游}/models`），保留 method/query/body/Authorization 等请求信息并附加 opencode 识别头，非 2xx 原样透传；
+- **除该入口外的所有路径/方法都零路径转换透传**——只把 scheme/host/port 换成上游，入站 path 与 query 原样发出（如上游无路径时 `GET /models` → `{上游}/models`），保留 method/query/body/Authorization 等请求信息并附加 opencode 识别头（**识别头与 UA 同样受「OpenCode 客户端身份」开关控制**，两条路径共用一套口径），非 2xx 原样透传；
 - 请求走了翻译还是透传由日志回答：`zen_proxy.passthrough method=… path=… status=…`（2xx info、其余 warn），客户端把 `/responses` 打到非期望路径时另记 `zen_proxy.path_unmatched path=… expected=…`（本地 provider 路径与上游不一致时直接给出期望值）；
 - **上游地址末尾带不带 `/` 都兼容**（`https://a/` 与 `https://a` 等价，路由派生与重启判定都按归一化后的值），且**在设置页保存「模型提供方的 base_url」或端口即重启生效**，无需重启 codex-ui；端口默认 `18080` 可在设置页修改，运行状态实时展示；
-- Zen base URL 与 User-Agent（`opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24`）固定，API Key 不固定——读取客户端请求的 `Authorization` 头原样转发，
+- Zen base URL 固定；**默认**发固定的 opencode User-Agent（`opencode/1.18.29 ai-sdk/provider-utils/4.0.23 runtime/node.js/24`，可由「OpenCode 客户端身份」开关关闭，见上），API Key 不固定——读取客户端请求的 `Authorization` 头原样转发，
   因此在模型配置页为 provider 填 `experimental_bearer_token = "public"` 即可；
 - 代理向上游附加 opencode 客户端识别头（`x-opencode-client: desktop`、`x-opencode-project: global`、每条上游请求随机的 `x-opencode-request: msg_*`、
   `x-opencode-session`）——**两者都按真实 opencode 客户端的 ID 规则生成**：`msg_` / `ses_` 之后固定 26 位 `[0-9A-Za-z]`（前 12 位是时间戳低 6 字节的小写十六进制、后 14 位随机，复刻 `sst/opencode` 的 `Identifier.create`）；
@@ -415,7 +418,7 @@
 - **请求体形状补丁（免费层门禁的第二道）**：2026-09-18 起，识别头已经合法的请求仍会被以同一条 `403 FreeTierError` 拒绝——门禁搬到了请求体，于是**翻译路径**给发往 Zen 的 `chat/completions` 再补两样东西（透传路径与其它上游一个字段都不动）：
   - 在与 `messages` 同级的位置补 `max_tokens: 32000`——**仅当入站请求没有自己的输出预算**时补（codex 实测不下发 `max_output_tokens`，故真实请求等价于一律补；其它 Responses 客户端显式给了预算就尊重它）；上游若在 4xx 错误体里指名 `max_tokens`，按既有「可选字段」规则摘掉后重试一次（`zen_proxy.optional_fields_dropped fields=max_tokens`）；
   - 往 `tools` **末尾**补 opencode 客户端内置的 6 个工具名（`bash` / `edit` / `glob` / `grep` / `read` / `write`，描述写「这是弃用的工具，请勿调用」、参数为空对象 schema）——只补缺失的名字：真实工具（含命名空间扁平名与自由格式工具）保留在前、顺序不变，同名时以客户端声明为准；模型真去调用这些假工具时代理照常回译成 `function_call`，由 codex 判 `unsupported call`（代理不做特例过滤）；**同步把一段“弃用工具声明”教学并入发往上游的 `messages`**（首条是 system 消息就追加到它末尾，没有就另起一条 system 消息放在最前；幂等，已有则不重复），只列举本次**实际被追加**的工具名——客户端已声明的同名工具不进教学，教学与 description 形成双重约束。**教学只能写 `messages`**：上游是 chat/completions，没有 `instructions` 字段，入站的 Responses `instructions` 在翻译阶段就已经变成那条 system 消息；
-  - **生效范围只看上游 host，且对上面两项一视同仁**：上游 host（小写化后）含有 `opencode` 时才补 `max_tokens` 与这 6 个工具名（同一个开关，做不到只开其中一项），把 base_url 换成自建/第三方兼容端点（DeepSeek 等）时两项都自动关闭；**客户端自己**通过 `max_output_tokens` 指定的预算不受此限——那是既有的标量映射，照旧发往任意上游；逐请求可在 `zen_proxy.forward` 行的 `zen_body=on|off` 核对，补丁后的实发请求体见 `logs/zen/*.request.json`；
+  - **生效范围 = 「OpenCode 客户端身份」开关 ∧ 上游 host 含 `opencode`，且对上面两项一视同仁**：先看上面的身份开关（关闭则一律不补，见「两个行为开关」条目），再看上游 host（小写化后）是否含有 `opencode`——两者都满足时才补 `max_tokens` 与这 6 个工具名（同一个开关，做不到只开其中一项），把 base_url 换成自建/第三方兼容端点（DeepSeek 等）时两项都自动关闭；**客户端自己**通过 `max_output_tokens` 指定的预算不受此限——那是既有的标量映射，照旧发往任意上游；逐请求可在 `zen_proxy.forward` 行的 `zen_body=on|off` 与 `身份伪装=on|off` 核对，补丁后的实发请求体见 `logs/zen/*.request.json`；
   - 代价：每个请求多约数百字节的恒定工具声明（位置固定在尾部，可被上游缓存）与一小段动态教学文本；无工具声明的后台请求（会话标题、压缩/摘要）同样会看到这些工具，弱模型存在误调假工具的残余风险——所以有工具 description + system 消息教学双重劝退；
 - **流式健壮性**：
   - ① 上游返回的工具调用参数被截断/非法（或工具名为空）时，整轮**不发出任何 function_call**、改发 `response.failed`（codex 以明确失败结束，不再静默按完成收尾），并记 `zen_proxy.malformed_tool_call`；

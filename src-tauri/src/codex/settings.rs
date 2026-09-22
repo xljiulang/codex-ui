@@ -33,6 +33,12 @@ pub struct AppSettings {
     /// Zen 代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
     #[serde(default = "default_zen_proxy_base_url")]
     pub zen_proxy_base_url: String,
+    /// Zen 代理「回合收尾强制约束」（口嗨检测 + 自动续跑 + 首轮教学 + 标签剥离），默认开启
+    #[serde(default = "default_zen_proxy_nudge_enabled")]
+    pub zen_proxy_nudge_enabled: bool,
+    /// Zen 代理「OpenCode 客户端身份」（识别头 + opencode User-Agent + 免费层请求体门禁补丁），默认开启
+    #[serde(default = "default_zen_proxy_identity_enabled")]
+    pub zen_proxy_identity_enabled: bool,
     /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启
     #[serde(default = "default_error_notify_enabled")]
     pub error_notify_enabled: bool,
@@ -48,6 +54,14 @@ fn default_zen_proxy_port() -> u16 {
 
 fn default_zen_proxy_base_url() -> String {
     crate::codex::zen_proxy::DEFAULT_ZEN_BASE_URL.to_string()
+}
+
+fn default_zen_proxy_nudge_enabled() -> bool {
+    true
+}
+
+fn default_zen_proxy_identity_enabled() -> bool {
+    true
 }
 
 fn default_permission() -> String {
@@ -85,6 +99,8 @@ impl Default for AppSettings {
             zen_proxy_enabled: false,
             zen_proxy_port: default_zen_proxy_port(),
             zen_proxy_base_url: default_zen_proxy_base_url(),
+            zen_proxy_nudge_enabled: default_zen_proxy_nudge_enabled(),
+            zen_proxy_identity_enabled: default_zen_proxy_identity_enabled(),
             error_notify_enabled: default_error_notify_enabled(),
             interaction_notify_enabled: default_interaction_notify_enabled(),
         }
@@ -359,11 +375,17 @@ mod tests {
         .unwrap();
         let s = load(dir.path());
         assert!(!s.zen_proxy_enabled);
-        assert_eq!(s.zen_proxy_port, crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT);
+        assert_eq!(
+            s.zen_proxy_port,
+            crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT
+        );
         assert_eq!(
             s.zen_proxy_base_url,
             crate::codex::zen_proxy::DEFAULT_ZEN_BASE_URL
         );
+        // 两个行为开关同样缺失：回退默认开启（行为与旧版本一致）
+        assert!(s.zen_proxy_nudge_enabled);
+        assert!(s.zen_proxy_identity_enabled);
 
         // 自定义端口与开关往返一致
         let s = AppSettings {
@@ -377,5 +399,43 @@ mod tests {
         assert!(loaded.zen_proxy_enabled);
         assert_eq!(loaded.zen_proxy_port, 19090);
         assert_eq!(loaded.zen_proxy_base_url, "https://custom.example.com/v1");
+        assert!(loaded.zen_proxy_nudge_enabled);
+        assert!(loaded.zen_proxy_identity_enabled);
+    }
+
+    #[test]
+    fn zen_proxy_behavior_switches_default_true_and_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        // 旧 settings.json 缺失两个行为开关：回退默认开启
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"sound_enabled":true,"enter_to_send":true,"followup_mode":"adjust","theme":"blue"}"#,
+        )
+        .unwrap();
+        let s = load(dir.path());
+        assert!(s.zen_proxy_nudge_enabled);
+        assert!(s.zen_proxy_identity_enabled);
+
+        // 显式关闭与开启均可往返一致
+        let s = AppSettings {
+            zen_proxy_nudge_enabled: false,
+            zen_proxy_identity_enabled: false,
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        let loaded = load(dir.path());
+        assert!(!loaded.zen_proxy_nudge_enabled);
+        assert!(!loaded.zen_proxy_identity_enabled);
+
+        let s = AppSettings {
+            zen_proxy_nudge_enabled: true,
+            zen_proxy_identity_enabled: false,
+            ..AppSettings::default()
+        };
+        save(dir.path(), &s).unwrap();
+        let loaded = load(dir.path());
+        assert!(loaded.zen_proxy_nudge_enabled);
+        assert!(!loaded.zen_proxy_identity_enabled);
     }
 }

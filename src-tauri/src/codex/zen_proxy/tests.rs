@@ -736,7 +736,7 @@ fn tag_stripper_removes_spans_by_structure_not_payload() {
         .into_iter()
         .zip(["固定短词", "一整句话", "英文", "空载荷", "乱码"])
     {
-        let (visible, payload) = TagStripper::strip_once(case);
+        let (visible, payload) = TagStripper::strip_once(case, true);
         assert!(
             !visible.to_lowercase().contains("<zen_"),
             "{label}：标签必须整段剥离：{visible}"
@@ -750,6 +750,7 @@ fn tag_stripper_removes_spans_by_structure_not_payload() {
     // 整行标签：连行尾换行一起删，不残留空行；正文原样保留
     let (visible, payload) = TagStripper::strip_once(
         "已补好测试。\n<zen_task_completed>我判断已经完成了</zen_task_completed>\n",
+        true,
     );
     assert_eq!(visible, "已补好测试。\n", "整行标签连换行一起删");
     assert_eq!(payload, "我判断已经完成了", "日志里记实际载荷");
@@ -757,12 +758,13 @@ fn tag_stripper_removes_spans_by_structure_not_payload() {
     // 行内标签：只删标签本身，同行其余文本保留
     let (visible, _) = TagStripper::strip_once(
         "已完成改动<zen_task_completed>已完成</zen_task_completed>，请查看",
+        true,
     );
     assert_eq!(visible, "已完成改动，请查看");
 
     // 大小写不敏感（判据同口径）
     let (visible, _) =
-        TagStripper::strip_once("收尾\n<ZEN_TASK_COMPLETED>DONE</ZEN_TASK_COMPLETED>");
+        TagStripper::strip_once("收尾\n<ZEN_TASK_COMPLETED>DONE</ZEN_TASK_COMPLETED>", true);
     assert!(
         !visible.to_lowercase().contains("zen_task_completed"),
         "{visible}"
@@ -771,6 +773,7 @@ fn tag_stripper_removes_spans_by_structure_not_payload() {
     // 一行里多个标签逐个处理
     let (visible, payload) = TagStripper::strip_once(
         "前言\n<zen_plan_cancelled>已放弃</zen_plan_cancelled><zen_task_completed>已完成</zen_task_completed>\n",
+        true,
     );
     assert!(!visible.to_lowercase().contains("<zen_"), "{visible}");
     assert!(
@@ -784,7 +787,7 @@ fn tag_stripper_removes_spans_by_structure_not_payload() {
 fn tag_stripper_handles_split_chunks_and_odd_closers() {
     // 逐字符喂：开闭标签都被切碎也不能漏出去
     let raw = "正文\n<zen_task_completed>已完成</zen_task_completed>";
-    let mut stripper = TagStripper::new();
+    let mut stripper = TagStripper::new(true);
     let mut visible = String::new();
     for ch in raw.chars() {
         visible.push_str(&stripper.feed(&ch.to_string()));
@@ -794,20 +797,22 @@ fn tag_stripper_handles_split_chunks_and_odd_closers() {
     assert_eq!(stripper.stripped_note(), "已完成");
 
     // 弱模型把闭标签写成另一个 zen 标签：照样闭合，不会把后面整段吞掉
-    let (visible, payload) =
-        TagStripper::strip_once("正文\n<zen_task_completed>已完成</zen_plan_cancelled>尾部");
+    let (visible, payload) = TagStripper::strip_once(
+        "正文\n<zen_task_completed>已完成</zen_plan_cancelled>尾部",
+        true,
+    );
     assert_eq!(visible, "正文\n尾部", "容错闭合后保留后续正文：{visible}");
     assert_eq!(payload, "已完成");
 
     // 未闭合（流结束仍在标签里）：丢掉标签开头到结尾，载荷照样进日志
-    let mut stripper = TagStripper::new();
+    let mut stripper = TagStripper::new(true);
     let mut visible = stripper.feed("正文\n<zen_task_completed>没有闭合");
     visible.push_str(&stripper.finish());
     assert_eq!(visible, "正文\n");
     assert_eq!(stripper.stripped_note(), "没有闭合");
 
     // 只是「看起来像标签开头」的普通文本：原样下发（不能被吞掉）
-    let mut stripper = TagStripper::new();
+    let mut stripper = TagStripper::new(true);
     let mut visible = stripper.feed("这里有 <zen_ 但不是标签");
     visible.push_str(&stripper.finish());
     assert_eq!(visible, "这里有 <zen_ 但不是标签");
@@ -816,11 +821,60 @@ fn tag_stripper_handles_split_chunks_and_odd_closers() {
     // 剥掉 `proposed_plan` 之外的正文不受影响（代理不碰 codex 自己的标签）
     let (visible, _) = TagStripper::strip_once(
         "<proposed_plan>\n1. 做 A\n</proposed_plan>\n<zen_task_completed>已完成</zen_task_completed>",
+        true,
     );
     assert!(visible.contains("<proposed_plan>"), "{visible}");
     assert!(
         !visible.to_lowercase().contains("zen_task_completed"),
         "{visible}"
+    );
+}
+
+/// 「回合收尾强制约束」关闭时剥离器直通：标签原样下发、不记载荷，正文一字不改。
+#[test]
+fn tag_stripper_passes_through_when_nudge_disabled() {
+    let raw = "结论。\n<zen_task_completed>已完成</zen_task_completed>\n";
+    let (visible, payload) = TagStripper::strip_once(raw, false);
+    assert_eq!(visible, raw, "关闭时可见文本必须与上游原文逐字一致");
+    assert!(payload.is_empty(), "关闭时不记标签载荷：{payload}");
+
+    // 逐分片喂（直通模式下不存在 holdback，每片立即返回）
+    let mut stripper = TagStripper::new(false);
+    let mut out = String::new();
+    for ch in raw.chars() {
+        out.push_str(&stripper.feed(&ch.to_string()));
+    }
+    out.push_str(&stripper.finish());
+    assert_eq!(out, raw);
+    assert!(stripper.stripped_note().is_empty());
+}
+
+/// 非流式翻译：同一段带标签的响应，开关开时剥离、关时原样保留。
+#[test]
+fn chat_to_responses_honors_strip_switch() {
+    let chat = json!({
+        "id": "chatcmpl-switch",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "结论：无需改动。\n<zen_task_completed>无需改动</zen_task_completed>"
+            },
+            "finish_reason": "stop"
+        }]
+    });
+    let text_of = |strip: bool| {
+        chat_to_responses(&chat, "m", &ToolShape::default(), strip).unwrap()["output"][0]["content"]
+            [0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(text_of(true), "结论：无需改动。\n", "开启时剥离标签");
+    assert_eq!(
+        text_of(false),
+        "结论：无需改动。\n<zen_task_completed>无需改动</zen_task_completed>",
+        "关闭时原样保留标签"
     );
 }
 
@@ -1144,7 +1198,7 @@ fn chat_to_responses_basic() {
         }],
         "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
     });
-    let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &ToolShape::default()).unwrap();
+    let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &ToolShape::default(), true).unwrap();
     assert_eq!(resp["status"], "completed");
     assert_eq!(resp["model"], "zen/gpt-5-mini");
     assert_eq!(resp["output"][0]["type"], "message");
@@ -1167,7 +1221,7 @@ fn chat_to_responses_strips_zen_tags() {
             "finish_reason": "stop"
         }]
     });
-    let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &ToolShape::default()).unwrap();
+    let resp = chat_to_responses(&chat, "zen/gpt-5-mini", &ToolShape::default(), true).unwrap();
     let text = resp["output"][0]["content"][0]["text"].as_str().unwrap();
     assert_eq!(text, "结论：无需改动。\n", "{resp}");
     assert!(!text.contains("zen_"), "{resp}");
@@ -1189,7 +1243,7 @@ fn chat_to_responses_tool_calls() {
             }
         }]
     });
-    let resp = chat_to_responses(&chat, "m", &ToolShape::default()).unwrap();
+    let resp = chat_to_responses(&chat, "m", &ToolShape::default(), true).unwrap();
     assert_eq!(resp["output"].as_array().unwrap().len(), 2);
     assert_eq!(resp["output"][1]["type"], "function_call");
     assert_eq!(resp["output"][1]["call_id"], "call_9");
@@ -1391,7 +1445,7 @@ fn namespace_tools_are_flattened_upstream_and_restored_back() {
             }]
         } }]
     });
-    let out = chat_to_responses(&chat_resp, "m", &shape).unwrap();
+    let out = chat_to_responses(&chat_resp, "m", &shape, true).unwrap();
     let call = out["output"]
         .as_array()
         .unwrap()
@@ -1759,7 +1813,7 @@ fn chat_to_responses_emits_custom_tool_call() {
             }]
         } }]
     });
-    let out = chat_to_responses(&chat, "m", &tool_shape(&custom_tool_request())).unwrap();
+    let out = chat_to_responses(&chat, "m", &tool_shape(&custom_tool_request()), true).unwrap();
     let call = out["output"]
         .as_array()
         .unwrap()
@@ -2191,7 +2245,7 @@ fn chat_to_responses_rejects_invalid_arguments() {
             }
         }]
     });
-    let err = chat_to_responses(&chat, "m", &ToolShape::default()).unwrap_err();
+    let err = chat_to_responses(&chat, "m", &ToolShape::default(), true).unwrap_err();
     assert!(err.contains("apply_patch"), "错误信息应含工具名：{err}");
 }
 
@@ -2459,6 +2513,80 @@ fn is_zen_upstream_matches_only_opencode_hosts() {
     assert!(!is_zen_upstream(""));
     assert!(!is_zen_upstream("open"));
     assert!(!is_zen_upstream("opencode.ai/zen/v1"));
+}
+
+/// 请求体门禁补丁的开关 = 「OpenCode 客户端身份」开关 **且** 上游 host 含 `opencode`：
+/// 任一不满足都不补（与 `apply()` 里构造 `ProxyState.zen_body_patch` 的口径一致）。
+#[test]
+fn zen_body_patch_requires_identity_switch_and_zen_host() {
+    let config = |base_url: &str, identity: bool, nudge: bool| {
+        ZenProxyConfig::new(18080, base_url, identity, nudge)
+    };
+    // 身份开 + Zen 上游：补
+    assert!(config("https://opencode.ai/zen/v1", true, true).zen_body_patch());
+    // 身份关：即使上游是 Zen 也不补（这就是「伪装开关」的用途）
+    assert!(!config("https://opencode.ai/zen/v1", false, true).zen_body_patch());
+    // 身份开但上游是自建/第三方：不补
+    assert!(!config("https://api.deepseek.com/v1", true, true).zen_body_patch());
+    assert!(!config("http://127.0.0.1:18080/zen/v1", true, true).zen_body_patch());
+    // 收尾开关与补形状无关：它是另一个独立维度
+    assert!(config("https://opencode.ai/zen/v1", true, false).zen_body_patch());
+}
+
+/// 身份开关落地到请求头：开时发四个识别头 + opencode UA；关时一个识别头都不发，
+/// 并把入站自带的同名头剔除、UA 透传入站值。
+#[test]
+fn opencode_identity_headers_follow_the_switch() {
+    let mut inbound = HeaderMap::new();
+    inbound.insert(header::USER_AGENT, HeaderValue::from_static("codex/1.2.3"));
+    // 恶意/异常客户端自带识别头：关闭时必须被剔除
+    inbound.insert(
+        "x-opencode-session",
+        HeaderValue::from_static("ses_attacker_supplied"),
+    );
+
+    let on = test_proxy_state(
+        "ses_fixed123",
+        "https://opencode.ai/zen/v1",
+        None,
+        TraceSink::disabled(),
+    );
+    let mut out = HeaderMap::new();
+    apply_opencode_identity(&mut out, &inbound, &on, "ses_fixed123", "msg_fixed");
+    assert_eq!(out.get("x-opencode-client").unwrap(), OPENCODE_CLIENT);
+    assert_eq!(out.get("x-opencode-project").unwrap(), OPENCODE_PROJECT);
+    assert_eq!(out.get("x-opencode-request").unwrap(), "msg_fixed");
+    assert_eq!(out.get("x-opencode-session").unwrap(), "ses_fixed123");
+    assert_eq!(out.get(header::USER_AGENT).unwrap(), ZEN_USER_AGENT);
+
+    let mut off = test_proxy_state(
+        "ses_fixed123",
+        "https://opencode.ai/zen/v1",
+        None,
+        TraceSink::disabled(),
+    );
+    off.opencode_identity = false;
+    let mut out = HeaderMap::new();
+    apply_opencode_identity(&mut out, &inbound, &off, "ses_fixed123", "msg_fixed");
+    for name in OPENCODE_IDENTITY_HEADERS {
+        assert!(out.get(name).is_none(), "关闭时不应发 {name}");
+    }
+    assert_eq!(
+        out.get(header::USER_AGENT).unwrap(),
+        "codex/1.2.3",
+        "关闭时 UA 应透传入站值"
+    );
+
+    // 入站没有 UA 时关闭态不带 UA（客户端本身也不再设默认 UA）
+    let mut out = HeaderMap::new();
+    apply_opencode_identity(
+        &mut out,
+        &HeaderMap::new(),
+        &off,
+        "ses_fixed123",
+        "msg_fixed",
+    );
+    assert!(out.get(header::USER_AGENT).is_none());
 }
 
 #[test]
@@ -2838,7 +2966,7 @@ fn chat_to_responses_carries_usage_details() {
             "prompt_tokens_details": { "cached_tokens": 4 }
         }
     });
-    let resp = chat_to_responses(&chat, "m", &ToolShape::default()).unwrap();
+    let resp = chat_to_responses(&chat, "m", &ToolShape::default(), true).unwrap();
     assert_eq!(resp["usage"]["input_tokens_details"]["cached_tokens"], 4);
     assert_eq!(resp["usage"]["input_tokens"], 9);
 }

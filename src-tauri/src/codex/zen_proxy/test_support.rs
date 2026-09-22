@@ -35,6 +35,8 @@ pub(crate) fn test_proxy_state(
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         zen_body_patch: is_zen_upstream(base_url),
+        opencode_identity: true,
+        nudge_enabled: true,
         modes: Arc::new(ThreadModeRegistry::default()),
     }
 }

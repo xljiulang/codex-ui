@@ -107,6 +107,39 @@ describe("ZenProxySection", () => {
     expect(labels).not.toContain("转发目标地址");
   });
 
+  it("两个行为开关的文案为「名称（额外说明）」且默认勾选", () => {
+    const wrapper = mountSection();
+    const texts = wrapper.findAll(".zen-proxy-switch-text").map((l) => l.text());
+    expect(texts[0]).toContain("回合收尾强制约束");
+    expect(texts[0]).toContain("模型空转收尾时自动续跑");
+    expect(texts[1]).toContain("OpenCode 客户端身份");
+    expect(texts[1]).toContain("免费层门禁字段");
+    const boxes = wrapper.findAll(".zen-proxy-switch-row input");
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
+      expect((box.element as HTMLInputElement).checked).toBe(true);
+    }
+  });
+
+  it("保存时把两个行为开关当前值一并提交", async () => {
+    const wrapper = mountSection();
+    const boxes = wrapper.findAll(".zen-proxy-switch-row input");
+    await boxes[0].setValue(false);
+    await boxes[1].setValue(false);
+    const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
+    await btn!.trigger("click");
+    expect(mockedApply).toHaveBeenCalledWith(
+      {
+        enabled: false,
+        port: 18080,
+        baseUrl: "https://opencode.ai/zen/v1",
+        nudgeEnabled: false,
+        identityEnabled: false,
+      },
+      true,
+    );
+  });
+
   it("端口非法时提示错误", async () => {
     const wrapper = mountSection();
     const input = wrapper.find("input[type='number']");
@@ -120,14 +153,20 @@ describe("ZenProxySection", () => {
 
   it("开启开关时调用 toggleZenProxy", async () => {
     const wrapper = mountSection();
-    const checkbox = wrapper.find("input[type='checkbox']");
+    const checkbox = wrapper.find(
+      ".model-config-head-actions input[type='checkbox']",
+    );
     await checkbox.setValue(true);
     await checkbox.trigger("change");
     // 默认端口 18080 通过校验，默认 base_url
     expect(mockedToggle).toHaveBeenCalledWith(
-      true,
-      18080,
-      "https://opencode.ai/zen/v1",
+      {
+        enabled: true,
+        port: 18080,
+        baseUrl: "https://opencode.ai/zen/v1",
+        nudgeEnabled: true,
+        identityEnabled: true,
+      },
     );
   });
 
@@ -140,9 +179,13 @@ describe("ZenProxySection", () => {
     const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
     await btn!.trigger("click");
     expect(mockedApply).toHaveBeenCalledWith(
-      false,
-      19090,
-      "https://custom.example.com/v1",
+      {
+        enabled: false,
+        port: 19090,
+        baseUrl: "https://custom.example.com/v1",
+        nudgeEnabled: true,
+        identityEnabled: true,
+      },
       true,
     );
   });
