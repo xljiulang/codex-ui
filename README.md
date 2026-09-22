@@ -399,8 +399,8 @@
 
 - **Zen 代理（设置 → Zen 代理）**：在 `127.0.0.1` 开放一个 OpenAI Responses API 端点，内部翻译为 Chat Completions 并转发到 OpenCode Zen（`https://opencode.ai/zen/v1`），让 codex 无需 `wire_api="chat"` 即可使用 Zen 免费模型；
 - **两个行为开关**（设置页 Zen 代理卡片内，都是复选框、**默认勾选**，与端口/base_url 一起点「保存」才生效——保存即重启代理）：
-  - **`回合收尾约束和助推（模型空转收尾时自动续跑，直到真的动手做完或干净收尾）`**：控制「口嗨检测与自动续跑」整条链路——首轮收尾契约教学、终局判定与续跑提醒、以及 `<zen_task_completed>` 等收尾标签的剥离；关闭后代理只做协议翻译，终局怎么收尾完全由上游决定（`zen_proxy.nudge_skipped 原因=disabled`），模型就算写出这类标签也原样显示在聊天里。**与上游域名无关**，指向任何上游都按这个开关走；
-  - **`OpenCode 客户端身份（按 OpenCode 客户端形状发送请求头，并补齐免费层门禁字段）`**：控制全部伪装能力——`x-opencode-client` / `-project` / `-request` / `-session` 四个识别头、opencode 固定 User-Agent，以及 `max_tokens` + 6 个假工具名的请求体门禁补丁。**勾选即对所有上游（Zen / 自建 / 第三方兼容端点）一律生效，不再判断上游 host**；关闭后翻译路径与透传路径都不发任何识别头（入站自带的同名头也会被剔除，避免仍然"自称 opencode"），UA 改为**透传入站请求的 User-Agent**（入站没有就不带 UA），请求体一个门禁字段都不补。诊断口径：`zen_proxy.forward` 的 `身份伪装=on|off`，内容日志里的 `identity=on|off`、`x_opencode_session` / `x_opencode_request`（未发送时记 `-`）；
+  - **`回合收尾约束和助推（模型空转收尾时自动续跑）`**：控制「口嗨检测与自动续跑」整条链路——首轮收尾契约教学、终局判定与续跑提醒、以及 `<zen_task_completed>` 等收尾标签的剥离；关闭后代理只做协议翻译，终局怎么收尾完全由上游决定（`zen_proxy.nudge_skipped 原因=disabled`），模型就算写出这类标签也原样显示在聊天里。**与上游域名无关**，指向任何上游都按这个开关走；
+  - **`OpenCode 客户端身份（补齐与 OpenCode 一致的请求头和工具集）`**：控制全部伪装能力——`x-opencode-client` / `-project` / `-request` / `-session` 四个识别头、opencode 固定 User-Agent，以及 `max_tokens` + 6 个内置工具名（`bash` / `edit` / `glob` / `grep` / `read` / `write`）的请求体门禁补丁。**勾选即对所有上游（Zen / 自建 / 第三方兼容端点）一律生效，不再判断上游 host**；关闭后翻译路径与透传路径都不发任何识别头（入站自带的同名头也会被剔除，避免仍然"自称 opencode"），UA 改为**透传入站请求的 User-Agent**（入站没有就不带 UA），请求体一个门禁字段都不补。诊断口径：`zen_proxy.forward` 的 `身份伪装=on|off`，内容日志里的 `identity=on|off`、`x_opencode_session` / `x_opencode_request`（未发送时记 `-`）；
 - **翻译入口路径 = 模型提供方 base_url 的路径 + `/responses`**（`…/zen/v1` → `/zen/v1/responses`，base_url 无路径 → `/responses`，一律不锁死 `/v1`；
   本地 provider 的 base_url 路径必须与「模型提供方的 base_url」一致，只把 host 换成本机代理），判定不看方法以外的任何猜测；
 - **角色映射**：Responses 的 `developer` 角色在 Chat Completions 侧统一降级为 `system`

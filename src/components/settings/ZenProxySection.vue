@@ -210,24 +210,30 @@ onBeforeUnmount(refresh);
           />
         </div>
 
-        <div class="setting-row zen-proxy-switch-row">
-          <label class="zen-proxy-switch-text" for="zen-proxy-nudge">
-            回合收尾约束和助推（模型空转收尾时自动续跑，直到真的动手做完或干净收尾）
-          </label>
-          <label class="switch">
-            <input id="zen-proxy-nudge" v-model="nudgeEnabled" type="checkbox" />
-            <span class="switch-track"></span>
-          </label>
+        <div class="setting-row">
+          <div class="checkbox-row zen-proxy-checkbox-row">
+            <input
+              id="zen-proxy-nudge"
+              v-model="nudgeEnabled"
+              type="checkbox"
+            />
+            <label for="zen-proxy-nudge">
+              回合收尾约束和助推（模型空转收尾时自动续跑）
+            </label>
+          </div>
         </div>
 
-        <div class="setting-row zen-proxy-switch-row">
-          <label class="zen-proxy-switch-text" for="zen-proxy-identity">
-            OpenCode 客户端身份（按 OpenCode 客户端形状发送请求头，并补齐免费层门禁字段）
-          </label>
-          <label class="switch">
-            <input id="zen-proxy-identity" v-model="identityEnabled" type="checkbox" />
-            <span class="switch-track"></span>
-          </label>
+        <div class="setting-row">
+          <div class="checkbox-row zen-proxy-checkbox-row">
+            <input
+              id="zen-proxy-identity"
+              v-model="identityEnabled"
+              type="checkbox"
+            />
+            <label for="zen-proxy-identity">
+              OpenCode 客户端身份（补齐与 OpenCode 一致的请求头和工具集）
+            </label>
+          </div>
         </div>
       </div>
 
@@ -281,28 +287,30 @@ onBeforeUnmount(refresh);
   height: var(--ctrl-h-md);
   padding: var(--space-2) var(--space-4);
 }
-/* 行为开关行：文字在左、开关在右（与「个性化」分区的开关行一致） */
-.zen-proxy-switch-row {
+/* 行为开关行：复选框在左、说明在后（复用全局 `.checkbox-row`，毛玻璃态自动跟上）；
+   文案会换行，因此复选框与首行对齐而不是整行居中 */
+.zen-proxy-checkbox-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
+  align-items: flex-start;
+  gap: var(--space-3);
 }
-/* 抵消全局 `.setting-row label` 的 block/600 字重与下边距，让文字与开关垂直居中 */
-.zen-proxy-switch-row label {
+/* 抵消全局 `.setting-row label` 的 block/600 字重/--text-dim 与下边距 */
+.zen-proxy-checkbox-row label {
   margin-bottom: 0;
-}
-.zen-proxy-switch-text {
-  flex: 1;
-  min-width: 0;
   font-size: var(--font-md);
   font-weight: 400;
   line-height: 1.5;
   color: var(--text);
   user-select: text;
 }
-.zen-proxy-switch-row .switch {
+/* 18px 行高对 16px 方框补 1px，使方框与文字首行垂直居中对齐 */
+.zen-proxy-checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
   flex-shrink: 0;
+  cursor: pointer;
 }
 .zen-proxy-actions {
   display: flex;
