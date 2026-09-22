@@ -161,7 +161,6 @@ onBeforeUnmount(refresh);
               role="button"
               tabindex="0"
               :aria-label="`复制 base_url：${localBaseUrlHint}`"
-              v-tooltip="'点击复制 base_url'"
               @click="copyBaseUrl()"
               @keydown.enter.prevent="copyBaseUrl()"
               @keydown.space.prevent="copyBaseUrl()"
