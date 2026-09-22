@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
-  applyZenProxy,
-  readZenProxyStatus,
+  applyCompatProxy,
+  readCompatProxyStatus,
   setToast,
   store,
-  toggleZenProxy,
+  toggleCompatProxy,
   toastError,
-  type ZenProxyStatus,
+  type CompatProxyStatus,
 } from "../../composables/useCodex";
 import { ICON_SAVE } from "../../lib/icons";
 import { openDocsUrl } from "../../lib/links";
@@ -20,19 +20,19 @@ const ZEN_PRICING_DOCS_URL =
   "https://open-code.ai/zh/docs/zen#%E5%AE%9A%E4%BB%B7";
 const ZEN_KEY_DOCS_URL = "https://opencode.ai/zen";
 
-/** 本地代理运行状态（由 zen_proxy_status 驱动；未获取时默认停止） */
-const status = ref<ZenProxyStatus>({ running: false, port: DEFAULT_PORT });
+/** 本地代理运行状态（由 compat_proxy_status 驱动；未获取时默认停止） */
+const status = ref<CompatProxyStatus>({ running: false, port: DEFAULT_PORT });
 /** 端口输入（本地缓冲，保存时写回） */
-const portInput = ref<string>(String(store.settings.zen_proxy_port ?? DEFAULT_PORT));
+const portInput = ref<string>(String(store.settings.compat_proxy_port ?? DEFAULT_PORT));
 /** API 请求地址输入（本地缓冲，保存时写回；空回退默认） */
 const apiUrlInput = ref<string>(
-  store.settings.zen_proxy_base_url ?? DEFAULT_BASE_URL,
+  store.settings.compat_proxy_base_url ?? DEFAULT_BASE_URL,
 );
 /** 回合收尾约束和助推（本地缓冲，保存时写回；缺省开启） */
-const nudgeEnabled = ref<boolean>(store.settings.zen_proxy_nudge_enabled ?? true);
+const nudgeEnabled = ref<boolean>(store.settings.compat_proxy_nudge_enabled ?? true);
 /** OpenCode 客户端身份（本地缓冲，保存时写回；缺省开启） */
 const identityEnabled = ref<boolean>(
-  store.settings.zen_proxy_identity_enabled ?? true,
+  store.settings.compat_proxy_identity_enabled ?? true,
 );
 /** 输入校验错误信息 */
 const portError = ref<string>("");
@@ -60,7 +60,7 @@ const localBaseUrlHint = computed(() => {
   } catch {
     path = "";
   }
-  return `http://127.0.0.1:${store.settings.zen_proxy_port ?? DEFAULT_PORT}${path}`;
+  return `http://127.0.0.1:${store.settings.compat_proxy_port ?? DEFAULT_PORT}${path}`;
 });
 
 function validatePort(v: string): number | null {
@@ -75,7 +75,7 @@ function validatePort(v: string): number | null {
 
 async function refresh() {
   try {
-    const s = await readZenProxyStatus();
+    const s = await readCompatProxyStatus();
     status.value = s ?? { running: false, port: DEFAULT_PORT };
   } catch {
     status.value = { running: false, port: DEFAULT_PORT };
@@ -89,9 +89,9 @@ async function onToggle(checked: boolean) {
     setToast("端口无效，请检查输入");
     return;
   }
-  const ok = await toggleZenProxy(currentOptions(checked, port));
+  const ok = await toggleCompatProxy(currentOptions(checked, port));
   if (ok !== checked) {
-    status.value = await readZenProxyStatus().catch(() => status.value);
+    status.value = await readCompatProxyStatus().catch(() => status.value);
   } else {
     status.value = { running: checked, port, error: null };
   }
@@ -102,9 +102,9 @@ async function onToggle(checked: boolean) {
 async function onSave() {
   const port = validatePort(portInput.value);
   if (!port) return;
-  const enabled = store.settings.zen_proxy_enabled ?? false;
+  const enabled = store.settings.compat_proxy_enabled ?? false;
   try {
-    const st = await applyZenProxy(currentOptions(enabled, port), true);
+    const st = await applyCompatProxy(currentOptions(enabled, port), true);
     if (enabled) {
       setToast(st.error ?? `代理已重启（端口 ${st.port}）`);
     } else {
@@ -121,26 +121,26 @@ onBeforeUnmount(refresh);
 </script>
 
 <template>
-  <section v-show="active" class="settings-section settings-section-zen-proxy">
-    <h2 class="settings-section-title">Zen 代理</h2>
+  <section v-show="active" class="settings-section settings-section-compat-proxy">
+    <h2 class="settings-section-title">兼容代理</h2>
     <p class="settings-section-desc">
-      在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions 转发到 OpenCode
-      Zen 免费模型
+      在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions 转发到任意
+      OpenAI 兼容上游（默认 OpenCode Zen 免费模型）
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
-        <div class="zen-proxy-head-main">
-          <h3>Zen 本地代理服务</h3>
-          <p class="zen-proxy-head-desc">
+        <div class="compat-proxy-head-main">
+          <h3>兼容代理服务</h3>
+          <p class="compat-proxy-head-desc">
             在「模型配置」中添加模型提供方，字段按下图填写
           </p>
 
         </div>
         <div class="model-config-head-actions">
-          <label class="switch" aria-label="Zen 本地代理开关">
+          <label class="switch" aria-label="兼容代理开关">
             <input
               type="checkbox"
-              :checked="store.settings.zen_proxy_enabled ?? false"
+              :checked="store.settings.compat_proxy_enabled ?? false"
               @change="onToggle(($event.target as HTMLInputElement).checked)"
             />
             <span class="switch-track"></span>
@@ -148,33 +148,33 @@ onBeforeUnmount(refresh);
         </div>
       </div>
 
-      <div class="zen-proxy-config-hint">
-        <div class="zen-proxy-config-row">
-          <span class="zen-proxy-config-field">base_url</span>
-          <span class="zen-proxy-config-value">
-            <code class="zen-proxy-config-code zen-proxy-config-base-url">
+      <div class="compat-proxy-config-hint">
+        <div class="compat-proxy-config-row">
+          <span class="compat-proxy-config-field">base_url</span>
+          <span class="compat-proxy-config-value">
+            <code class="compat-proxy-config-code compat-proxy-config-base-url">
               {{ localBaseUrlHint }}
             </code>
           </span>
         </div>
-        <div class="zen-proxy-config-row">
-          <span class="zen-proxy-config-field">experimental_bearer_token</span>
-          <span class="zen-proxy-config-value">
+        <div class="compat-proxy-config-row">
+          <span class="compat-proxy-config-field">experimental_bearer_token</span>
+          <span class="compat-proxy-config-value">
             <a
-              class="zen-proxy-docs-link"
+              class="compat-proxy-docs-link"
               :href="ZEN_KEY_DOCS_URL"
               v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
               @click.prevent="openDocsUrl(ZEN_KEY_DOCS_URL)"
             >ApiKey</a>
             或
-            <code class="zen-proxy-config-code">public</code>
+            <code class="compat-proxy-config-code">public</code>
           </span>
         </div>
-        <div class="zen-proxy-config-row">
-          <span class="zen-proxy-config-field">model</span>
-          <span class="zen-proxy-config-value">
+        <div class="compat-proxy-config-row">
+          <span class="compat-proxy-config-field">model</span>
+          <span class="compat-proxy-config-value">
             <a
-              class="zen-proxy-docs-link"
+              class="compat-proxy-docs-link"
               :href="ZEN_PRICING_DOCS_URL"
               v-tooltip="'Zen 定价文档（浏览器打开）'"
               @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
@@ -188,20 +188,20 @@ onBeforeUnmount(refresh);
           <label>监听回环端口</label>
           <input
             type="number"
-            class="zen-proxy-port-input"
+            class="compat-proxy-port-input"
             :value="portInput"
             min="1024"
             max="65535"
             @input="portInput = ($event.target as HTMLInputElement).value"
           />
-          <p v-if="portError" class="zen-proxy-error">{{ portError }}</p>
+          <p v-if="portError" class="compat-proxy-error">{{ portError }}</p>
         </div>
 
         <div class="setting-row">
           <label>模型提供方的 base_url</label>
           <input
             type="text"
-            class="zen-proxy-url-input"
+            class="compat-proxy-url-input"
             :value="apiUrlInput"
             placeholder="https://opencode.ai/zen/v1"
             @input="
@@ -211,34 +211,34 @@ onBeforeUnmount(refresh);
         </div>
 
         <div class="setting-row">
-          <div class="checkbox-row zen-proxy-checkbox-row">
+          <div class="checkbox-row compat-proxy-checkbox-row">
             <input
-              id="zen-proxy-nudge"
+              id="compat-proxy-nudge"
               v-model="nudgeEnabled"
               type="checkbox"
             />
-            <label for="zen-proxy-nudge">
+            <label for="compat-proxy-nudge">
               回合收尾约束和助推（模型空转收尾时自动续跑）
             </label>
           </div>
         </div>
 
         <div class="setting-row">
-          <div class="checkbox-row zen-proxy-checkbox-row">
+          <div class="checkbox-row compat-proxy-checkbox-row">
             <input
-              id="zen-proxy-identity"
+              id="compat-proxy-identity"
               v-model="identityEnabled"
               type="checkbox"
             />
-            <label for="zen-proxy-identity">
+            <label for="compat-proxy-identity">
               OpenCode 客户端身份（补齐与 OpenCode 一致的请求头和工具集）
             </label>
           </div>
         </div>
       </div>
 
-      <div class="zen-proxy-actions">
-        <button class="btn zen-proxy-apply-btn" @click="onSave">
+      <div class="compat-proxy-actions">
+        <button class="btn compat-proxy-apply-btn" @click="onSave">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_SAVE" />
           </svg>
@@ -253,13 +253,13 @@ onBeforeUnmount(refresh);
 .model-config-card-head {
   align-items: center;
 }
-.zen-proxy-head-main {
+.compat-proxy-head-main {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
 }
-.zen-proxy-head-desc {
+.compat-proxy-head-desc {
   margin: 0;
   font-size: var(--font-md);
   line-height: 1.5;
@@ -267,35 +267,35 @@ onBeforeUnmount(refresh);
   -webkit-user-select: text;
   user-select: text;
 }
-.zen-proxy-docs-link {
+.compat-proxy-docs-link {
   color: var(--accent);
   text-decoration: none;
   cursor: pointer;
   user-select: text;
 }
-.zen-proxy-docs-link:hover {
+.compat-proxy-docs-link:hover {
   color: var(--accent-dim);
   text-decoration: underline;
 }
-.zen-proxy-port-input {
+.compat-proxy-port-input {
   width: 100%;
   height: var(--ctrl-h-md);
   padding: var(--space-2) var(--space-4);
 }
-.zen-proxy-url-input {
+.compat-proxy-url-input {
   width: 100%;
   height: var(--ctrl-h-md);
   padding: var(--space-2) var(--space-4);
 }
 /* 行为开关行：复选框在左、说明在后（复用全局 `.checkbox-row`，毛玻璃态自动跟上）；
    文案会换行，因此复选框与首行对齐而不是整行居中 */
-.zen-proxy-checkbox-row {
+.compat-proxy-checkbox-row {
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
 }
 /* 抵消全局 `.setting-row label` 的 block/600 字重/--text-dim 与下边距 */
-.zen-proxy-checkbox-row label {
+.compat-proxy-checkbox-row label {
   margin-bottom: 0;
   font-size: var(--font-md);
   font-weight: 400;
@@ -304,7 +304,7 @@ onBeforeUnmount(refresh);
   user-select: text;
 }
 /* 18px 行高对 16px 方框补 1px，使方框与文字首行垂直居中对齐 */
-.zen-proxy-checkbox-row input[type="checkbox"] {
+.compat-proxy-checkbox-row input[type="checkbox"] {
   accent-color: var(--accent);
   width: 16px;
   height: 16px;
@@ -312,21 +312,21 @@ onBeforeUnmount(refresh);
   flex-shrink: 0;
   cursor: pointer;
 }
-.zen-proxy-actions {
+.compat-proxy-actions {
   display: flex;
   justify-content: flex-end;
   padding: var(--space-4) 0 0;
 }
-.zen-proxy-apply-btn {
+.compat-proxy-apply-btn {
   flex-shrink: 0;
 }
 
-.zen-proxy-error {
+.compat-proxy-error {
   color: var(--danger);
   font-size: var(--font-xs);
   margin: 0 0 var(--space-2);
 }
-.zen-proxy-config-hint {
+.compat-proxy-config-hint {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -337,14 +337,14 @@ onBeforeUnmount(refresh);
   margin-top: var(--space-5);
 }
 
-.zen-proxy-config-row {
+.compat-proxy-config-row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
 }
 
-.zen-proxy-config-field {
+.compat-proxy-config-field {
   flex: 0 0 168px;
   font-family: var(--mono);
   font-size: var(--font-xs);
@@ -352,7 +352,7 @@ onBeforeUnmount(refresh);
   user-select: text;
 }
 
-.zen-proxy-config-value {
+.compat-proxy-config-value {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -364,7 +364,7 @@ onBeforeUnmount(refresh);
   user-select: text;
 }
 
-.zen-proxy-config-code {
+.compat-proxy-config-code {
   font-family: var(--mono);
   font-size: var(--font-xs);
   line-height: 1.5;

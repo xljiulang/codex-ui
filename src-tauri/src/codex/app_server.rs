@@ -18,8 +18,8 @@ use crate::codex::model_config;
 use crate::codex::logs_guard;
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::session_log::SessionLog;
-use crate::codex::zen_proxy::{self, ZenProxyHandle};
-use crate::codex::zen_trace::{TraceSink, ZenTrace};
+use crate::codex::compat_proxy::{self, CompatProxyHandle};
+use crate::codex::compat_trace::{TraceSink, CompatTrace};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
@@ -43,11 +43,11 @@ pub struct CodexServer {
     log: Option<Arc<SessionLog>>,
     /// codex app-server 的 error/warning 消息日志（`codex-YYYY-MM-DD.log`）。
     codex_log: Option<Arc<SessionLog>>,
-    /// Zen 代理内容诊断日志（`logs/zen/`，常开）；无日志目录时为 None。
-    zen_trace: Option<Arc<ZenTrace>>,
+    /// 兼容代理内容诊断日志（`logs/compat/`，常开）；无日志目录时为 None。
+    compat_trace: Option<Arc<CompatTrace>>,
     /// 「线程 id → 协作模式」协议登记表：由本层登记（`turn/start` 参数与
-    /// `thread/settings/updated` 通知），供 Zen 代理精确判定协作模式，不再只靠关键词猜。
-    thread_modes: Arc<zen_proxy::ThreadModeRegistry>,
+    /// `thread/settings/updated` 通知），供兼容代理精确判定协作模式，不再只靠关键词猜。
+    thread_modes: Arc<compat_proxy::ThreadModeRegistry>,
 }
 
 struct Shared {
@@ -99,8 +99,8 @@ struct Inner {
     codex_version: Option<String>,
     /// 版本是否低于 0.149.0（需 0.149.0+）；未探测为 None。
     version_too_old: Option<bool>,
-    /// Zen 本地代理运行句柄（设置开启且启动成功时为 Some）。
-    zen_proxy: Option<ZenProxyHandle>,
+    /// 兼容代理运行句柄（设置开启且启动成功时为 Some）。
+    compat_proxy: Option<CompatProxyHandle>,
 }
 
 impl Inner {
@@ -115,7 +115,7 @@ impl Inner {
             codex_path: None,
             codex_version: None,
             version_too_old: None,
-            zen_proxy: None,
+            compat_proxy: None,
         }
     }
 
@@ -128,13 +128,13 @@ impl Inner {
     }
 }
 
-/// Zen 代理内容诊断日志句柄：开关关闭（默认）或没有日志目录时不构造——
+/// 兼容代理内容诊断日志句柄：开关关闭（默认）或没有日志目录时不构造——
 /// 既不建目录也不写入，更不会清理已有文件（用户需要时手动删或重新开启）。
-fn zen_trace_from(dir: Option<PathBuf>, enabled: bool) -> Option<Arc<ZenTrace>> {
+fn compat_trace_from(dir: Option<PathBuf>, enabled: bool) -> Option<Arc<CompatTrace>> {
     if !enabled {
         return None;
     }
-    dir.map(|d| Arc::new(ZenTrace::new(d)))
+    dir.map(|d| Arc::new(CompatTrace::new(d)))
 }
 
 impl CodexServer {
@@ -150,15 +150,15 @@ impl CodexServer {
         let codex_log = logs_dir
             .as_ref()
             .map(|d| Arc::new(SessionLog::with_prefix(d.clone(), "codex-")));
-        // Zen 代理内容诊断日志（独立子目录，便于单独清理与打包分析）：默认关闭，
-        // 需要排查时设 `CODEXUI_ZEN_TRACE=1` 并重启 codex-ui（环境变量只在启动时读取一次）。
-        if let (Some(raw), Some(log)) = (env_flags::invalid_value("ZEN_TRACE"), log.as_ref()) {
+        // 兼容代理内容诊断日志（独立子目录，便于单独清理与打包分析）：默认关闭，
+        // 需要排查时设 `CODEXUI_COMPAT_TRACE=1` 并重启 codex-ui（环境变量只在启动时读取一次）。
+        if let (Some(raw), Some(log)) = (env_flags::invalid_value("COMPAT_TRACE"), log.as_ref()) {
             log.write(
                 "warn",
                 None,
                 "env.flag_invalid",
                 &[
-                    ("name".to_string(), env_flags::full_name("ZEN_TRACE")),
+                    ("name".to_string(), env_flags::full_name("COMPAT_TRACE")),
                     ("value".to_string(), raw),
                     (
                         "detail".to_string(),
@@ -167,9 +167,9 @@ impl CodexServer {
                 ],
             );
         }
-        let zen_trace = zen_trace_from(
-            logs_dir.as_ref().map(|d| d.join("zen")),
-            env_flags::flag("ZEN_TRACE"),
+        let compat_trace = compat_trace_from(
+            logs_dir.as_ref().map(|d| d.join("compat")),
+            env_flags::flag("COMPAT_TRACE"),
         );
         Self {
             app,
@@ -185,8 +185,8 @@ impl CodexServer {
             run_started: AtomicBool::new(false),
             log,
             codex_log,
-            zen_trace,
-            thread_modes: Arc::new(zen_proxy::ThreadModeRegistry::default()),
+            compat_trace,
+            thread_modes: Arc::new(compat_proxy::ThreadModeRegistry::default()),
         }
     }
 
@@ -230,7 +230,7 @@ impl CodexServer {
         if let Some(child) = inner.child.as_mut() {
             let _ = child.start_kill();
         }
-        if let Some(h) = inner.zen_proxy.take() {
+        if let Some(h) = inner.compat_proxy.take() {
             h.stop();
         }
     }
@@ -318,7 +318,7 @@ impl CodexServer {
         tauri::async_runtime::spawn(async move {
             bundled::bootstrap(boot).await;
         });
-        // 按保存设置启动 Zen 本地代理（app-server 解码前确保端口可用；失败仅记日志不阻断）。
+        // 按保存设置启动兼容代理（app-server 解码前确保端口可用；失败仅记日志不阻断）。
         let app_dir = self
             .app
             .path()
@@ -326,22 +326,22 @@ impl CodexServer {
             .unwrap_or_default();
         let settings = settings::load(&app_dir);
         let status = self
-            .apply_zen_proxy(
-                settings.zen_proxy_enabled,
-                settings.zen_proxy_port,
-                settings.zen_proxy_base_url,
-                settings.zen_proxy_nudge_enabled,
-                settings.zen_proxy_identity_enabled,
+            .apply_compat_proxy(
+                settings.compat_proxy_enabled,
+                settings.compat_proxy_port,
+                settings.compat_proxy_base_url,
+                settings.compat_proxy_nudge_enabled,
+                settings.compat_proxy_identity_enabled,
             )
             .await;
         if !status.running {
             if let Some(e) = status.error {
-                self.push_log("warn", format!("Zen 本地代理未启动：{e}")).await;
+                self.push_log("warn", format!("兼容代理未启动：{e}")).await;
             }
         } else {
             self.push_log(
                 "info",
-                format!("Zen 本地代理已启动，端口 {}", status.port),
+                format!("兼容代理已启动，端口 {}", status.port),
             )
             .await;
         }
@@ -360,24 +360,24 @@ impl CodexServer {
         }
     }
 
-    /// 应用 Zen 代理开关、端口与上游地址：按需启动/停止/重启，返回最新状态。
-    pub(crate) async fn apply_zen_proxy(
+    /// 应用兼容代理开关、端口与上游地址：按需启动/停止/重启，返回最新状态。
+    pub(crate) async fn apply_compat_proxy(
         &self,
         enabled: bool,
         port: u16,
         base_url: String,
         nudge_enabled: bool,
         opencode_identity: bool,
-    ) -> zen_proxy::ZenProxyStatus {
+    ) -> compat_proxy::CompatProxyStatus {
         let mut inner = self.shared.inner.lock().await;
-        let trace = match self.zen_trace.as_ref() {
+        let trace = match self.compat_trace.as_ref() {
             Some(trace) => TraceSink::new(trace.clone()),
             None => TraceSink::disabled(),
         };
-        zen_proxy::apply(
-            &mut inner.zen_proxy,
+        compat_proxy::apply(
+            &mut inner.compat_proxy,
             enabled,
-            zen_proxy::ZenProxyConfig::new(port, &base_url, opencode_identity, nudge_enabled),
+            compat_proxy::CompatProxyConfig::new(port, &base_url, opencode_identity, nudge_enabled),
             self.log.clone(),
             trace,
             self.thread_modes.clone(),
@@ -385,27 +385,27 @@ impl CodexServer {
         .await
     }
 
-    /// 把请求/通知参数里的协作模式登记进 [`zen_proxy::ThreadModeRegistry`]：`turn/start`、
+    /// 把请求/通知参数里的协作模式登记进 [`compat_proxy::ThreadModeRegistry`]：`turn/start`、
     /// `thread/settings/update` 与 `thread/settings/updated` 都带 `threadId` + 模式字段。
-    /// 登记发生在 `turn/start` 发出前，而 Zen 代理要等 codex 真正发模型请求才用到它，
+    /// 登记发生在 `turn/start` 发出前，而兼容代理要等 codex 真正发模型请求才用到它，
     /// 因此代理侧读到的必然是本回合实际生效的模式。缺失/未知取值时保持已有登记不变。
     fn record_thread_mode(&self, params: &Value) {
-        if let Some((thread_id, mode)) = zen_proxy::thread_mode_from_params(params) {
+        if let Some((thread_id, mode)) = compat_proxy::thread_mode_from_params(params) {
             self.thread_modes.record(&thread_id, &mode);
         }
     }
 
-    /// Zen 代理当前状态（运行中返回端口；未开启或未启动返回默认端口）。
-    pub(crate) async fn zen_proxy_status(&self) -> zen_proxy::ZenProxyStatus {
+    /// 兼容代理当前状态（运行中返回端口；未开启或未启动返回默认端口）。
+    pub(crate) async fn compat_proxy_status(&self) -> compat_proxy::CompatProxyStatus {
         let inner = self.shared.inner.lock().await;
-        if let Some(h) = &inner.zen_proxy {
-            zen_proxy::ZenProxyStatus {
+        if let Some(h) = &inner.compat_proxy {
+            compat_proxy::CompatProxyStatus {
                 running: true,
                 port: h.port,
                 error: None,
             }
         } else {
-            zen_proxy::ZenProxyStatus::stopped()
+            compat_proxy::CompatProxyStatus::stopped()
         }
     }
 
@@ -723,7 +723,7 @@ impl CodexServer {
             self.log_event(method, method, &params);
             self.log_codex_message(method, &params);
             // `thread/settings/updated` = 服务端「下一回合」实际生效的协作模式（权威事件源），
-            // 与 turn/start 参数一起构成 Zen 代理的模式登记表。
+            // 与 turn/start 参数一起构成兼容代理的模式登记表。
             self.record_thread_mode(&params);
             let _ = self.shared.tap.send((method.to_string(), params.clone()));
             let _ = self.app.emit(method, params);
@@ -1523,15 +1523,15 @@ mod tests {
 
     static ENV_LOCK: StdMutex<()> = StdMutex::new(());
 
-    /// `CODEXUI_ZEN_TRACE` 关闭（默认）时不构造内容日志句柄，也不创建目录。
+    /// `CODEXUI_COMPAT_TRACE` 关闭（默认）时不构造内容日志句柄，也不创建目录。
     #[test]
-    fn zen_trace_handle_respects_switch() {
+    fn compat_trace_handle_respects_switch() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let dir = tmp.path().join("zen");
-        assert!(zen_trace_from(Some(dir.clone()), false).is_none());
+        let dir = tmp.path().join("compat");
+        assert!(compat_trace_from(Some(dir.clone()), false).is_none());
         assert!(!dir.exists(), "开关关闭时不应创建内容日志目录");
-        assert!(zen_trace_from(Some(dir.clone()), true).is_some());
-        assert!(zen_trace_from(None, true).is_none());
+        assert!(compat_trace_from(Some(dir.clone()), true).is_some());
+        assert!(compat_trace_from(None, true).is_none());
     }
 
     #[test]

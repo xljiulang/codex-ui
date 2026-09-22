@@ -17,11 +17,11 @@ export type {
 } from "./types";
 export { setToast, toastError } from "./toast";
 export {
-  applyZenProxy,
-  readZenProxyStatus,
-  toggleZenProxy,
-  type ZenProxyStatus,
-} from "./zenProxy";
+  applyCompatProxy,
+  readCompatProxyStatus,
+  toggleCompatProxy,
+  type CompatProxyStatus,
+} from "./compatProxy";
 export { askConfirm, settleConfirm } from "./confirm";
 export {
   __resetPinnedSectionForTest,

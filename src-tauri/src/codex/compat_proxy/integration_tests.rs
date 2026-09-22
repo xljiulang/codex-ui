@@ -1,4 +1,4 @@
-//! `zen_proxy` 的集成测试（原 `zen_proxy.rs` 内联测试模块拆出）。
+//! `compat_proxy` 的集成测试（原 `compat_proxy.rs` 内联测试模块拆出）。
 
 use super::test_support::*;
 use super::*;
@@ -202,7 +202,7 @@ async fn forwards_chat_with_auth_and_user_agent() {
         axum::http::HeaderValue::from_static("Bearer public"),
     );
     let state = proxy_state(base_url, None);
-    // 走完整翻译入口：`forward` 直调不会写 `zen_proxy.forward` 那一行请求日志
+    // 走完整翻译入口：`forward` 直调不会写 `compat_proxy.forward` 那一行请求日志
     let resp = handle_any(
         State(state),
         Method::POST,
@@ -783,10 +783,13 @@ async fn nudge_injects_continuation_and_relays_tool_call() {
     // 会话日志：只留注入一条（判定事件已随看门狗删除）
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_injected"),
+        joined.contains("event=compat_proxy.nudge_injected"),
         "{joined}"
     );
-    assert!(!joined.contains("event=zen_proxy.nudge_judged"), "{joined}");
+    assert!(
+        !joined.contains("event=compat_proxy.nudge_judged"),
+        "{joined}"
+    );
 }
 
 /// 终局自带 `<zen_task_completed>`：模型自己宣告任务结束，一次调用就收尾（不注入、不续跑）。
@@ -825,7 +828,7 @@ async fn nudge_skipped_when_completion_tag_present() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped")
+        joined.contains("event=compat_proxy.nudge_skipped")
             && joined.contains("原因=task_completed")
             && joined.contains("模式=default"),
         "{joined}"
@@ -835,7 +838,7 @@ async fn nudge_skipped_when_completion_tag_present() {
         "被删载荷要进日志：{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_injected"),
+        !joined.contains("event=compat_proxy.nudge_injected"),
         "带标签时不应注入：{joined}"
     );
 }
@@ -909,14 +912,14 @@ async fn nudge_stops_after_max_injections() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_limited")
+        joined.contains("event=compat_proxy.nudge_limited")
             && joined.contains("原因=max_injections")
             && joined.contains("轮次=5")
             && joined.contains("说明=本请求已催办 4 次仍未收尾，停止催办"),
         "{joined}"
     );
     assert_eq!(
-        joined.matches("event=zen_proxy.nudge_injected").count(),
+        joined.matches("event=compat_proxy.nudge_injected").count(),
         4,
         "恰好注入四次：{joined}"
     );
@@ -1010,11 +1013,11 @@ async fn nudge_plan_mode_asks_for_plan_when_no_marker() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_injected") && joined.contains("模式=plan"),
+        joined.contains("event=compat_proxy.nudge_injected") && joined.contains("模式=plan"),
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_judged"),
+        !joined.contains("event=compat_proxy.nudge_judged"),
         "已随看门狗删除的判定事件不应出现：{joined}"
     );
 }
@@ -1056,17 +1059,17 @@ async fn nudge_plan_mode_stops_when_plan_cancelled() {
     assert!(injected.contains("<zen_plan_cancelled>"), "{injected}");
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped")
+        joined.contains("event=compat_proxy.nudge_skipped")
             && joined.contains("原因=plan_cancelled")
             && joined.contains("模式=plan"),
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_limited"),
+        !joined.contains("event=compat_proxy.nudge_limited"),
         "已取消分支不该走到催办次数上限：{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_judged"),
+        !joined.contains("event=compat_proxy.nudge_judged"),
         "已随看门狗删除的判定事件不应出现：{joined}"
     );
 }
@@ -1100,14 +1103,14 @@ async fn nudge_plan_mode_skips_injection_when_already_cancelled() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped")
+        joined.contains("event=compat_proxy.nudge_skipped")
             && joined.contains("原因=plan_cancelled")
             && joined.contains("轮次=1")
             && joined.contains("标签内容=用户说不用改了"),
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_injected"),
+        !joined.contains("event=compat_proxy.nudge_injected"),
         "已取消的计划不应再注入催办：{joined}"
     );
 }
@@ -1149,17 +1152,17 @@ async fn nudge_plan_mode_stops_when_plan_unachievable() {
     assert!(injected.contains("<zen_plan_unachievable>"), "{injected}");
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped")
+        joined.contains("event=compat_proxy.nudge_skipped")
             && joined.contains("原因=plan_unachievable")
             && joined.contains("模式=plan"),
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_limited"),
+        !joined.contains("event=compat_proxy.nudge_limited"),
         "无法/无需计划分支不该走到催办次数上限：{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_judged"),
+        !joined.contains("event=compat_proxy.nudge_judged"),
         "已随看门狗删除的判定事件不应出现：{joined}"
     );
 }
@@ -1193,13 +1196,13 @@ async fn nudge_plan_mode_skips_injection_when_already_unachievable() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped")
+        joined.contains("event=compat_proxy.nudge_skipped")
             && joined.contains("原因=plan_unachievable")
             && joined.contains("轮次=1"),
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_injected"),
+        !joined.contains("event=compat_proxy.nudge_injected"),
         "无法/无需计划不应再注入催办：{joined}"
     );
 }
@@ -1253,7 +1256,7 @@ async fn nudge_mode_registry_beats_stale_plan_block_in_history() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_injected"),
+        joined.contains("event=compat_proxy.nudge_injected"),
         "默认模式应注入续跑提醒：{joined}"
     );
     assert!(
@@ -1305,7 +1308,7 @@ async fn nudge_mode_registry_plan_wins_over_default_block_in_history() {
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_judged"),
+        !joined.contains("event=compat_proxy.nudge_judged"),
         "已随看门狗删除的判定事件不应出现：{joined}"
     );
 }
@@ -1336,7 +1339,7 @@ async fn nudge_mode_falls_back_to_last_mode_block_without_registry() {
         "无登记表时应记关键词兜底来源：{joined}"
     );
     assert!(
-        joined.contains("event=zen_proxy.nudge_injected"),
+        joined.contains("event=compat_proxy.nudge_injected"),
         "默认分支应注入续跑提醒：{joined}"
     );
 
@@ -1392,7 +1395,7 @@ async fn nudge_skipped_in_plan_mode_when_plan_delivered() {
     assert_eq!(rec.lock().await.len(), 1, "已交付的计划不应再打上游");
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped")
+        joined.contains("event=compat_proxy.nudge_skipped")
             && joined.contains("原因=plan_output")
             && joined.contains("模式=plan"),
         "{joined}"
@@ -1428,7 +1431,7 @@ async fn nudge_plan_mode_stops_after_max_injections() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_limited")
+        joined.contains("event=compat_proxy.nudge_limited")
             && joined.contains("原因=max_injections")
             && joined.contains("模式=plan")
             && joined.contains("轮次=5"),
@@ -1473,7 +1476,7 @@ async fn nudge_default_mode_block_injects_execution_nudge() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_injected") && joined.contains("模式=default"),
+        joined.contains("event=compat_proxy.nudge_injected") && joined.contains("模式=default"),
         "{joined}"
     );
 }
@@ -1628,7 +1631,7 @@ async fn nudge_skipped_for_title_task() {
     );
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("原因=title_task"),
+        joined.contains("event=compat_proxy.nudge_skipped") && joined.contains("原因=title_task"),
         "{joined}"
     );
 }
@@ -1771,7 +1774,8 @@ async fn nudge_injections_are_per_request() {
     }
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("本请求催办次数=1/4") && !joined.contains("event=zen_proxy.nudge_limited"),
+        joined.contains("本请求催办次数=1/4")
+            && !joined.contains("event=compat_proxy.nudge_limited"),
         "两次请求应各注入一次、都不触发上限：{joined}"
     );
 }
@@ -1878,12 +1882,12 @@ async fn unmatched_responses_path_passes_through_and_warns() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        logged.contains("zen_proxy.path_unmatched")
+        logged.contains("compat_proxy.path_unmatched")
             && logged.contains("path=/responses")
             && logged.contains("expected=/zen/v1/responses"),
         "{logged}"
     );
-    assert!(logged.contains("zen_proxy.passthrough"), "{logged}");
+    assert!(logged.contains("compat_proxy.passthrough"), "{logged}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1916,7 +1920,7 @@ async fn started_proxy_translates_path_derived_from_upstream() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(port, &format!("{upstream}/zen/v1"), true, true),
+        CompatProxyConfig::new(port, &format!("{upstream}/zen/v1"), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -1944,7 +1948,7 @@ async fn started_proxy_translates_path_derived_from_upstream() {
     let status = apply(
         &mut handle,
         false,
-        ZenProxyConfig::new(port, &upstream, true, true),
+        CompatProxyConfig::new(port, &upstream, true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -1988,7 +1992,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(port, &upstream_a.clone(), true, true),
+        CompatProxyConfig::new(port, &upstream_a.clone(), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2013,7 +2017,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(port, &upstream_a.clone(), true, true),
+        CompatProxyConfig::new(port, &upstream_a.clone(), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2023,7 +2027,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(port, &format!("{upstream_a}/"), true, true),
+        CompatProxyConfig::new(port, &format!("{upstream_a}/"), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2042,7 +2046,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(port, &upstream_b.clone(), true, true),
+        CompatProxyConfig::new(port, &upstream_b.clone(), true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2059,7 +2063,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(other_port, &upstream_b, true, true),
+        CompatProxyConfig::new(other_port, &upstream_b, true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2075,7 +2079,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(other_port, &upstream_b, false, true),
+        CompatProxyConfig::new(other_port, &upstream_b, false, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2092,7 +2096,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         true,
-        ZenProxyConfig::new(other_port, &upstream_b, false, true),
+        CompatProxyConfig::new(other_port, &upstream_b, false, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2110,7 +2114,7 @@ async fn apply_restarts_only_when_port_or_upstream_changes() {
     let status = apply(
         &mut handle,
         false,
-        ZenProxyConfig::new(other_port, &upstream_a, true, true),
+        CompatProxyConfig::new(other_port, &upstream_a, true, true),
         None,
         TraceSink::disabled(),
         Arc::new(ThreadModeRegistry::default()),
@@ -2249,11 +2253,11 @@ async fn learns_and_retries_reasoning_content_requirement() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        logged.contains("zen_proxy.reasoning_content_enabled")
-            && logged.contains("zen_proxy.forward_attempt")
+        logged.contains("compat_proxy.reasoning_content_enabled")
+            && logged.contains("compat_proxy.forward_attempt")
             && logged.contains("assistant_with_content=1")
             && logged.contains("assistant_with_content_rc=0")
-            && logged.contains("zen_proxy.forward")
+            && logged.contains("compat_proxy.forward")
             && logged.contains("reasoning_rc=on"),
         "{logged}"
     );
@@ -2673,14 +2677,14 @@ async fn finish_without_more_chunks_times_out_and_completes() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        joined.contains("zen_proxy.usage_timeout"),
+        joined.contains("compat_proxy.usage_timeout"),
         "应记录宽限超时：{joined}"
     );
     assert!(joined.contains("usage=none"), "{joined}");
 }
 
 // -----------------------------------------------------------------------
-// 内容诊断日志（logs/zen）：请求体 + 上游响应原文 + 收尾事件 + 可疑标记
+// 内容诊断日志（logs/compat）：请求体 + 上游响应原文 + 收尾事件 + 可疑标记
 // -----------------------------------------------------------------------
 
 /// trace 目录里的全部文件（按文件名排序）。
@@ -2707,7 +2711,7 @@ fn trace_file_with(dir: &std::path::Path, suffix: &str) -> (String, String) {
 }
 
 fn traced_sink(dir: &std::path::Path) -> TraceSink {
-    TraceSink::new(Arc::new(crate::codex::zen_trace::ZenTrace::new(
+    TraceSink::new(Arc::new(crate::codex::compat_trace::CompatTrace::new(
         dir.to_path_buf(),
     )))
 }
@@ -3044,7 +3048,7 @@ async fn identity_switch_off_stops_headers_and_body_patch() {
         HeaderValue::from_static("ses_attacker_supplied"),
     );
 
-    // 走完整翻译入口：`forward` 直调不会写 `zen_proxy.forward` 那一行请求日志
+    // 走完整翻译入口：`forward` 直调不会写 `compat_proxy.forward` 那一行请求日志
     let resp = handle_any(
         State(state),
         Method::POST,
@@ -3145,11 +3149,11 @@ async fn nudge_switch_off_skips_injection_and_keeps_tags() {
     // 诊断：记一条「因开关关闭而跳过」
     let joined = read_session_log(&dir);
     assert!(
-        joined.contains("event=zen_proxy.nudge_skipped") && joined.contains("原因=disabled"),
+        joined.contains("event=compat_proxy.nudge_skipped") && joined.contains("原因=disabled"),
         "{joined}"
     );
     assert!(
-        !joined.contains("event=zen_proxy.nudge_injected"),
+        !joined.contains("event=compat_proxy.nudge_injected"),
         "关闭时不应有注入事件：{joined}"
     );
 }

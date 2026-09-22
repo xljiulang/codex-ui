@@ -1,7 +1,8 @@
-//! Zen 本地代理：把 codex 的 OpenAI Responses 请求翻译为 OpenCode Zen 的
-//! Chat Completions 请求并转发；响应反向翻译回 Responses 格式（含流式 SSE）。
+//! 兼容代理：把 codex 的 OpenAI Responses 请求翻译为 Chat Completions 请求并转发到
+//! 任意 OpenAI 兼容上游（默认 OpenCode Zen，可在设置页改地址）；响应反向翻译回
+//! Responses 格式（含流式 SSE）。
 //!
-//! - Zen base URL 与 User-Agent 硬编码（模块私有，不暴露到前端）。
+//! - 上游 base URL 与 User-Agent 硬编码（模块私有，不暴露到前端）。
 //! - API Key 不固定：读取入站请求的 `Authorization` 头原样转发。
 //! - 仅绑定回环地址，专供 codex-ui 自身使用，无额外鉴权。
 
@@ -23,16 +24,16 @@ use futures_util::stream::{self, StreamExt};
 use serde_json::{json, Value};
 use tokio::task::AbortHandle;
 
+use crate::codex::compat_trace::{TraceCall, TraceSink};
 use crate::codex::session_log::SessionLog;
-use crate::codex::zen_trace::{TraceCall, TraceSink};
 
-/// Zen 本地代理默认端口（可在设置页修改）。
-pub(crate) const DEFAULT_ZEN_PROXY_PORT: u16 = 18080;
+/// 兼容代理默认端口（可在设置页修改）。
+pub(crate) const DEFAULT_COMPAT_PROXY_PORT: u16 = 18080;
 /// 模拟 opencode 桌面客户端的固定识别头（随请求发往 Zen）。
 const OPENCODE_CLIENT: &str = "desktop";
 const OPENCODE_PROJECT: &str = "global";
 /// OpenCode Zen 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
-pub(crate) const DEFAULT_ZEN_BASE_URL: &str = "https://opencode.ai/zen/v1";
+pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "https://opencode.ai/zen/v1";
 /// OpenCode 免费层的**请求体门禁**要求请求里出现这些工具名（opencode 客户端的内置工具）：
 /// 只在 `tools` 里补声明、不提供任何实现，模型真去调用时由 codex 侧以 `unsupported call`
 /// 裁决（代理不做特例过滤）。门禁只校验名字，不看描述与参数。
@@ -65,7 +66,7 @@ const CODE_UPSTREAM_STREAM_ERROR: &str = "upstream_stream_error";
 const MISSING_TOOL_OUTPUT_TEXT: &str = "该工具调用未执行（参数非法或调用被中止），请重新发起。";
 /// `finish_reason` 之后等待尾部分片（usage 等）的宽限；超时按现状收尾，避免挂住回合。
 const USAGE_GRACE: Duration = Duration::from_secs(3);
-/// `zen_proxy.stream_summary` 里记录的 delta 键上限（去重后按字典序取前若干个）。
+/// `compat_proxy.stream_summary` 里记录的 delta 键上限（去重后按字典序取前若干个）。
 const DELTA_KEY_LIMIT: usize = 16;
 /// 翻译分支的请求体上限：长会话实测已近 1MB，axum 默认 2MB 会撞 413。
 const RESPONSES_BODY_LIMIT: usize = 64 * 1024 * 1024;
@@ -196,7 +197,7 @@ const KNOWN_MODES: [&str; 2] = ["plan", "default"];
 /// 协议登记表的条目上限：超过即整体清空（模式每轮 `turn/start` 都会重新登记，
 /// 清空只会让极少数线程临时退回关键词兜底，不会让表无界增长）。
 const THREAD_MODE_LIMIT: usize = 1024;
-/// `zen_proxy.request` 的 `mode_src` 取值：模式来自协议登记表（权威）/ 关键词兜底判据。
+/// `compat_proxy.request` 的 `mode_src` 取值：模式来自协议登记表（权威）/ 关键词兜底判据。
 const MODE_SRC_REGISTRY: &str = "registry";
 const MODE_SRC_HEURISTIC: &str = "heuristic";
 /// 会话标题生成请求（应用发起的后台临时线程）提示词的固定前缀，用于识别并整轮放行。
@@ -223,7 +224,7 @@ const PLAN_MODE_CONTRACT_TEXT: &str = "【计划模式收尾约定】若用户�
 
 /// 「线程 id → 协作模式」协议登记表（内存态，进程内共享）：由 app-server 侧的真实来源
 /// （`turn/start` / `thread/settings/update` 的参数、`thread/settings/updated` 通知）更新，
-/// 供 Zen 代理按入站请求头 `session-id`（= codex 线程 id）直接取用。
+/// 供兼容代理按入站请求头 `session-id`（= codex 线程 id）直接取用。
 ///
 /// 存在的理由：codex 会把**历次**协作模式块都留在请求历史里，切回默认模式后历史里仍有旧的
 /// `<collaboration_mode># Plan Mode…</collaboration_mode>`，只按关键词判定就会把默认模式误判成
@@ -359,7 +360,7 @@ fn request_header_thread_id(headers: &HeaderMap) -> Option<String> {
 
 /// 本次入站请求的协作模式与来源：先按请求头里的线程 id 查协议登记表（权威，命中即不做任何
 /// 关键词扫描），查不到才退回关键词判据（只看**最后一个**协作模式块）。
-/// 返回 `(是否计划模式, mode_src)`，`mode_src` 进 `zen_proxy.request` 日志便于排查。
+/// 返回 `(是否计划模式, mode_src)`，`mode_src` 进 `compat_proxy.request` 日志便于排查。
 fn resolve_nudge_mode(
     state: &ProxyState,
     headers: &HeaderMap,
@@ -490,17 +491,17 @@ fn nudge_continuation_body(original: &Value, assistant_text: &str, nudge_text: &
 }
 
 /// 运行中的代理句柄；`stop()` 终止监听任务。
-pub struct ZenProxyHandle {
+pub struct CompatProxyHandle {
     pub port: u16,
     /// 生效中的启动配置（已归一化，用于判断是否需要重启）。
-    config: ZenProxyConfig,
+    config: CompatProxyConfig,
     abort: AbortHandle,
 }
 
 /// 代理启动配置：端口、上游地址与两个行为开关。任一项变化都要重启代理，
-/// 因此整体作为 [`ZenProxyHandle`] 的比对基准。
+/// 因此整体作为 [`CompatProxyHandle`] 的比对基准。
 #[derive(Debug, Clone)]
-pub(crate) struct ZenProxyConfig {
+pub(crate) struct CompatProxyConfig {
     pub port: u16,
     /// 上游 base_url（已归一化：去空白与末尾 `/`）。
     pub base_url: String,
@@ -512,7 +513,7 @@ pub(crate) struct ZenProxyConfig {
     pub nudge_enabled: bool,
 }
 
-impl ZenProxyConfig {
+impl CompatProxyConfig {
     /// 归一化构造：base_url 去空白与末尾 `/`，空值回退默认上游。
     pub(crate) fn new(
         port: u16,
@@ -538,28 +539,28 @@ impl ZenProxyConfig {
     }
 }
 
-/// Zen 本地代理的诊断日志句柄（复用应用会话日志；None 时不落盘）。
+/// 兼容代理的诊断日志句柄（复用应用会话日志；None 时不落盘）。
 pub(crate) type ZenLog = Option<Arc<SessionLog>>;
 
-impl ZenProxyHandle {
+impl CompatProxyHandle {
     pub fn stop(&self) {
         self.abort.abort();
     }
 }
 
-/// 代理状态（供设置页与 `zen_proxy_status` 命令展示）。
+/// 代理状态（供设置页与 `compat_proxy_status` 命令展示）。
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ZenProxyStatus {
+pub struct CompatProxyStatus {
     pub running: bool,
     pub port: u16,
     pub error: Option<String>,
 }
 
-impl ZenProxyStatus {
+impl CompatProxyStatus {
     pub fn stopped() -> Self {
         Self {
             running: false,
-            port: DEFAULT_ZEN_PROXY_PORT,
+            port: DEFAULT_COMPAT_PROXY_PORT,
             error: None,
         }
     }
@@ -571,7 +572,7 @@ impl ZenProxyStatus {
 fn normalize_base_url(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
     if trimmed.is_empty() {
-        DEFAULT_ZEN_BASE_URL.to_string()
+        DEFAULT_COMPAT_BASE_URL.to_string()
     } else {
         trimmed.to_string()
     }
@@ -589,11 +590,11 @@ fn responses_path(base_url: &str) -> String {
 
 /// 在当前 tokio runtime 上启动本地代理；端口被占用时返回 Err。
 pub(crate) async fn start(
-    config: ZenProxyConfig,
+    config: CompatProxyConfig,
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
-) -> Result<ZenProxyHandle, String> {
+) -> Result<CompatProxyHandle, String> {
     let port = config.port;
     let base_url = config.base_url.clone();
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
@@ -625,7 +626,7 @@ pub(crate) async fn start(
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    Ok(ZenProxyHandle {
+    Ok(CompatProxyHandle {
         port,
         config,
         abort: task.abort_handle(),
@@ -634,13 +635,13 @@ pub(crate) async fn start(
 
 /// 由 `CodexServer` 调用：按设置启停代理并返回当前状态。
 pub(crate) async fn apply(
-    handle: &mut Option<ZenProxyHandle>,
+    handle: &mut Option<CompatProxyHandle>,
     enabled: bool,
-    config: ZenProxyConfig,
+    config: CompatProxyConfig,
     log: ZenLog,
     trace: TraceSink,
     modes: Arc<ThreadModeRegistry>,
-) -> ZenProxyStatus {
+) -> CompatProxyStatus {
     let port = config.port;
     // 端口、上游地址与两个行为开关都没变（含 `https://a/` 与 `https://a` 这类等价写法）
     // 才复用现有实例。
@@ -655,26 +656,26 @@ pub(crate) async fn apply(
         match start(config, log, trace, modes).await {
             Ok(h) => {
                 *handle = Some(h);
-                ZenProxyStatus {
+                CompatProxyStatus {
                     running: true,
                     port,
                     error: None,
                 }
             }
-            Err(e) => ZenProxyStatus {
+            Err(e) => CompatProxyStatus {
                 running: false,
                 port,
                 error: Some(e),
             },
         }
     } else if enabled {
-        ZenProxyStatus {
+        CompatProxyStatus {
             running: true,
             port,
             error: None,
         }
     } else {
-        ZenProxyStatus::stopped()
+        CompatProxyStatus::stopped()
     }
 }
 
@@ -709,7 +710,7 @@ struct ProxyState {
     modes: Arc<ThreadModeRegistry>,
 }
 
-/// 写一条 zen_proxy 诊断日志；句柄为 None 或写盘失败时静默忽略。
+/// 写一条 compat_proxy 诊断日志；句柄为 None 或写盘失败时静默忽略。
 fn log_at(log: &Option<Arc<SessionLog>>, level: &str, event: &str, kv: &[(&str, String)]) {
     let Some(log) = log else { return };
     let kv: Vec<(String, String)> = kv.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
@@ -907,7 +908,7 @@ fn http_client() -> &'static reqwest::Client {
     })
 }
 
-/// `zen_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
+/// `compat_proxy.request` 的诊断列（纯函数，便于单测）：体积（提示词 / 历史字符数）
 /// 用于判断是否逼近上游窗口；`reasoning_effort` 记录 codex 本次实际请求的推理强度
 /// （`-` 表示没请求推理），排查「思考过程为空」时先看这一格；
 /// `mode` 是口嗨检测识别出的协作模式（`plan`/`default`）——排查「默认模式被注入计划提醒」
@@ -915,7 +916,7 @@ fn http_client() -> &'static reqwest::Client {
 /// `heuristic` = 关键词兜底判据，见 [`resolve_nudge_mode`]）；
 /// `patch_failures` 是本次历史里已失败的补丁调用条数（>0 说明模型正在补丁上打转，
 /// 代理已对这些工具结果追加格式纠错提示）；`call_id` 与内容日志
-/// （`logs/zen/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
+/// （`logs/compat/<时间>-<call_id>-a<n>.*`）一一对应，便于两者对照。
 fn request_log_fields(
     req: &Value,
     want_stream: bool,
@@ -990,7 +991,7 @@ async fn handle_any(
         log_at(
             &state.log,
             "warn",
-            "zen_proxy.path_unmatched",
+            "compat_proxy.path_unmatched",
             &[
                 ("method", method.to_string()),
                 ("path", uri.path().to_string()),
@@ -1042,7 +1043,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
     // 日志按**注入后**的实际请求体记（`instructions_chars` 含契约长度，便于对照体积变化）
     let fields = request_log_fields(&req, want_stream, &call_id, mode, mode_src, contract);
     let kv: Vec<(&str, String)> = fields.iter().map(|(k, v)| (*k, v.clone())).collect();
-    log_at(&state.log, "info", "zen_proxy.request", &kv);
+    log_at(&state.log, "info", "compat_proxy.request", &kv);
 
     let started = Instant::now();
     let base_url = state.base_url.clone();
@@ -1052,7 +1053,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
             log_at(
                 &state.log,
                 "info",
-                "zen_proxy.forward",
+                "compat_proxy.forward",
                 &[
                     ("url", base_url.clone()),
                     ("status", status.as_u16().to_string()),
@@ -1080,9 +1081,9 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                     &state.log,
                     "warn",
                     if change.enabled {
-                        "zen_proxy.reasoning_content_enabled"
+                        "compat_proxy.reasoning_content_enabled"
                     } else {
-                        "zen_proxy.reasoning_content_disabled"
+                        "compat_proxy.reasoning_content_disabled"
                     },
                     &[(
                         "detail",
@@ -1105,7 +1106,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                 log_at(
                     &state.log,
                     "warn",
-                    "zen_proxy.history_repaired",
+                    "compat_proxy.history_repaired",
                     &[
                         (
                             "invalid_arguments",
@@ -1122,7 +1123,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                 log_at(
                     &state.log,
                     "warn",
-                    "zen_proxy.optional_fields_dropped",
+                    "compat_proxy.optional_fields_dropped",
                     &[
                         ("fields", forwarded.dropped_fields.join(",")),
                         (
@@ -1168,7 +1169,7 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
             log_at(
                 &state.log,
                 "warn",
-                "zen_proxy.forward_error",
+                "compat_proxy.forward_error",
                 &[("url", base_url), ("error", msg.clone())],
             );
             error_json(status, msg)
@@ -1211,7 +1212,7 @@ async fn forward_passthrough(
     }
 }
 
-/// 透传日志：2xx 记 info、其余记 warn，配合 `zen_proxy.path_unmatched` 判断请求走了哪条分支。
+/// 透传日志：2xx 记 info、其余记 warn，配合 `compat_proxy.path_unmatched` 判断请求走了哪条分支。
 fn log_passthrough(state: &ProxyState, method: &Method, path: &str, status: &str) {
     let level = if status.starts_with('2') {
         "info"
@@ -1221,7 +1222,7 @@ fn log_passthrough(state: &ProxyState, method: &Method, path: &str, status: &str
     log_at(
         &state.log,
         level,
-        "zen_proxy.passthrough",
+        "compat_proxy.passthrough",
         &[
             ("method", method.to_string()),
             ("path", path.to_string()),
@@ -1233,7 +1234,7 @@ fn log_passthrough(state: &ProxyState, method: &Method, path: &str, status: &str
 /// 透传目标 URL：scheme/host/port 取自 base_url，入站 path 与 query 原样发出（零路径转换）。
 fn passthrough_url(base_url: &str, uri: &Uri) -> Result<reqwest::Url, String> {
     let mut url = reqwest::Url::parse(&normalize_base_url(base_url))
-        .map_err(|e| format!("Zen 代理转发地址无效: {e}"))?;
+        .map_err(|e| format!("兼容代理转发地址无效: {e}"))?;
     url.set_path(uri.path());
     url.set_query(uri.query());
     url.set_fragment(None);
@@ -2009,7 +2010,7 @@ async fn forward(
             log_at(
                 &state.log,
                 "warn",
-                "zen_proxy.forward_attempt",
+                "compat_proxy.forward_attempt",
                 &[
                     ("attempt", attempts.to_string()),
                     ("status", status.as_u16().to_string()),
@@ -2252,7 +2253,7 @@ async fn proxy_json_response(
         log_at(
             log,
             "warn",
-            "zen_proxy.response_parse_error",
+            "compat_proxy.response_parse_error",
             &[(
                 "detail",
                 "上游响应不是合法 JSON：".to_string() + &text.chars().take(200).collect::<String>(),
@@ -2276,7 +2277,7 @@ async fn proxy_json_response(
             log_at(
                 log,
                 "warn",
-                "zen_proxy.malformed_tool_call",
+                "compat_proxy.malformed_tool_call",
                 &[("reason", e.clone())],
             );
             call.note("suspicious", "malformed_tool_call");
@@ -2289,7 +2290,7 @@ async fn proxy_json_response(
         log_at(
             log,
             "info",
-            "zen_proxy.usage",
+            "compat_proxy.usage",
             &[("detail", truncate_chars(&usage.to_string(), 300))],
         );
     }
@@ -2297,7 +2298,7 @@ async fn proxy_json_response(
     log_at(
         log,
         "info",
-        "zen_proxy.response",
+        "compat_proxy.response",
         &[
             ("status", status.as_u16().to_string()),
             ("event_bytes", body.len().to_string()),
@@ -2344,7 +2345,7 @@ async fn pump_stream(
                     log_at(
                         log,
                         "warn",
-                        "zen_proxy.usage_timeout",
+                        "compat_proxy.usage_timeout",
                         &[(
                             "detail",
                             "finish_reason 后未再收到分片，按现状收尾".to_string(),
@@ -2372,7 +2373,7 @@ async fn pump_stream(
                     }
                     let payload = line["data:".len()..].trim();
                     if payload == "[DONE]" {
-                        log_at(log, "info", "zen_proxy.stream_done", &[]);
+                        log_at(log, "info", "compat_proxy.stream_done", &[]);
                         if !out.is_empty() {
                             let _ = tx.send(out.concat().into_bytes()).await;
                         }
@@ -2408,7 +2409,7 @@ async fn pump_stream(
                 log_at(
                     log,
                     "info",
-                    "zen_proxy.stream_end",
+                    "compat_proxy.stream_end",
                     &[("detail", "上游未发送 [DONE]，补发完成事件".to_string())],
                 );
                 // 上游正常结束但未收到 [DONE]（兼容实现差异）：按现状收尾
@@ -2563,7 +2564,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "info",
-                "zen_proxy.nudge_skipped",
+                "compat_proxy.nudge_skipped",
                 &[
                     ("原因", "disabled".to_string()),
                     ("轮次", pass.to_string()),
@@ -2578,7 +2579,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "info",
-                "zen_proxy.nudge_skipped",
+                "compat_proxy.nudge_skipped",
                 &[
                     ("原因", "title_task".to_string()),
                     ("轮次", pass.to_string()),
@@ -2605,7 +2606,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "info",
-                "zen_proxy.nudge_skipped",
+                "compat_proxy.nudge_skipped",
                 &[
                     ("原因", "plan_output".to_string()),
                     ("轮次", pass.to_string()),
@@ -2621,7 +2622,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "info",
-                "zen_proxy.nudge_skipped",
+                "compat_proxy.nudge_skipped",
                 &[
                     ("原因", "plan_cancelled".to_string()),
                     ("轮次", pass.to_string()),
@@ -2638,7 +2639,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "info",
-                "zen_proxy.nudge_skipped",
+                "compat_proxy.nudge_skipped",
                 &[
                     ("原因", "plan_unachievable".to_string()),
                     ("轮次", pass.to_string()),
@@ -2655,7 +2656,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "info",
-                "zen_proxy.nudge_skipped",
+                "compat_proxy.nudge_skipped",
                 &[
                     ("原因", "task_completed".to_string()),
                     ("轮次", pass.to_string()),
@@ -2671,7 +2672,7 @@ async fn run_stream_task(
             log_at(
                 &log,
                 "warn",
-                "zen_proxy.nudge_limited",
+                "compat_proxy.nudge_limited",
                 &[
                     ("原因", "max_injections".to_string()),
                     ("轮次", pass.to_string()),
@@ -2696,7 +2697,7 @@ async fn run_stream_task(
         log_at(
             &log,
             "info",
-            "zen_proxy.nudge_injected",
+            "compat_proxy.nudge_injected",
             &[
                 ("会话", session.clone()),
                 ("轮次", pass.to_string()),
@@ -2721,7 +2722,7 @@ async fn run_stream_task(
                     log_at(
                         &log,
                         "warn",
-                        "zen_proxy.nudge_skipped",
+                        "compat_proxy.nudge_skipped",
                         &[
                             ("原因", "nudge_upstream_error".to_string()),
                             ("说明", "续跑轮上游返回错误，已放弃本次催办".to_string()),
@@ -2735,7 +2736,7 @@ async fn run_stream_task(
                 log_at(
                     &log,
                     "warn",
-                    "zen_proxy.nudge_skipped",
+                    "compat_proxy.nudge_skipped",
                     &[
                         ("原因", "nudge_upstream_status".to_string()),
                         ("说明", "续跑轮上游非 2xx，已放弃本次催办".to_string()),
@@ -2748,7 +2749,7 @@ async fn run_stream_task(
                 log_at(
                     &log,
                     "warn",
-                    "zen_proxy.nudge_skipped",
+                    "compat_proxy.nudge_skipped",
                     &[
                         ("原因", "nudge_forward_error".to_string()),
                         ("说明", "续跑轮转发失败，已放弃本次催办".to_string()),
@@ -2764,7 +2765,7 @@ async fn run_stream_task(
     let _ = tx.send(terminal.into_bytes()).await;
 }
 
-/// `zen_proxy.nudge_injected` 的中文 `说明`：一句话讲清「为什么催、要求什么」。
+/// `compat_proxy.nudge_injected` 的中文 `说明`：一句话讲清「为什么催、要求什么」。
 fn nudge_injected_note(plan_mode: bool) -> &'static str {
     if plan_mode {
         "模型以纯文本收尾且未交付计划，已注入计划续跑提醒（要求给出 <proposed_plan> 或两个出口标签）"
@@ -2773,9 +2774,9 @@ fn nudge_injected_note(plan_mode: bool) -> &'static str {
     }
 }
 
-/// `zen_proxy.nudge_skipped` 里会话标题线程的中文 `说明`（其余原因的说明就地写在日志调用处）。
+/// `compat_proxy.nudge_skipped` 里会话标题线程的中文 `说明`（其余原因的说明就地写在日志调用处）。
 const NUDGE_SKIP_NOTE_TITLE_TASK: &str = "会话标题线程，整轮放行";
-/// `zen_proxy.nudge_skipped` 里「回合收尾约束和助推」开关关闭时的中文 `说明`。
+/// `compat_proxy.nudge_skipped` 里「回合收尾约束和助推」开关关闭时的中文 `说明`。
 const NUDGE_SKIP_NOTE_DISABLED: &str = "回合收尾约束和助推已关闭，不注入也不催办";
 
 /// 日志用：本次流里被结构剥离掉的标签载荷（标签不再下发，这里是唯一回看入口）。
@@ -3054,7 +3055,7 @@ fn proxy_error_text(
     log_at(
         log,
         "warn",
-        "zen_proxy.upstream_error",
+        "compat_proxy.upstream_error",
         &[
             ("status", status.as_u16().to_string()),
             ("detail", text.chars().take(200).collect::<String>()),
@@ -3087,7 +3088,7 @@ fn error_json(status: StatusCode, msg: String) -> Response {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
             serde_json::to_string(
-                &json!({ "error": { "message": msg, "type": "zen_proxy_error" } }),
+                &json!({ "error": { "message": msg, "type": "compat_proxy_error" } }),
             )
             .unwrap_or_else(|_| "{}".into()),
         ))
@@ -4239,7 +4240,7 @@ fn tool_args_delta(tool_index: usize, args: &str, st: &mut StreamState) -> Vec<S
 /// 收尾：文本 item 照常补 done 事件；工具调用正常时补 function_call 的 done 事件
 /// 并发 `response.completed`（带 usage）；若上游已失败或存在畸形工具调用，则不发任何
 /// function_call、改发 `response.failed`，让回合以明确错误结束而不是静默完成。
-/// 无论哪条路径都记一次 `zen_proxy.stream_summary`。
+/// 无论哪条路径都记一次 `compat_proxy.stream_summary`。
 fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     if st.closed {
         return Vec::new();
@@ -4356,7 +4357,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         log_at(
             log,
             "warn",
-            "zen_proxy.stream_error",
+            "compat_proxy.stream_error",
             &[("code", f.code.clone()), ("detail", f.detail.clone())],
         );
     }
@@ -4374,7 +4375,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
             log_at(
                 log,
                 "warn",
-                "zen_proxy.malformed_tool_call",
+                "compat_proxy.malformed_tool_call",
                 &[
                     ("name", c.name.clone()),
                     ("call_id", c.call_id.clone()),
@@ -4521,7 +4522,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
         log_at(
             log,
             "info",
-            "zen_proxy.usage",
+            "compat_proxy.usage",
             &[("detail", truncate_chars(&usage.to_string(), 300))],
         );
     }
@@ -4574,7 +4575,7 @@ fn finish_stream(st: &mut StreamState, log: &ZenLog) -> Vec<String> {
     log_at(
         log,
         "info",
-        "zen_proxy.stream_summary",
+        "compat_proxy.stream_summary",
         &[
             (
                 "finish_reason",

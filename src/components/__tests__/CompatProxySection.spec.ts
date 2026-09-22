@@ -8,38 +8,38 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
-    applyZenProxy: vi.fn(async () => ({ running: false, port: 18080 })),
-    readZenProxyStatus: vi.fn(), // 会被组件覆盖，见测试
-    toggleZenProxy: vi.fn(async () => true),
+    applyCompatProxy: vi.fn(async () => ({ running: false, port: 18080 })),
+    readCompatProxyStatus: vi.fn(), // 会被组件覆盖，见测试
+    toggleCompatProxy: vi.fn(async () => true),
     setToast: vi.fn(),
     toastError: vi.fn(),
   };
 });
 
-import ZenProxySection from "../settings/ZenProxySection.vue";
+import CompatProxySection from "../settings/CompatProxySection.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import {
-  applyZenProxy,
-  readZenProxyStatus,
+  applyCompatProxy,
+  readCompatProxyStatus,
   setToast,
-  toggleZenProxy,
+  toggleCompatProxy,
 } from "../../composables/useCodex";
 
-const mockedApply = vi.mocked(applyZenProxy);
-const mockedRead = vi.mocked(readZenProxyStatus);
-const mockedToggle = vi.mocked(toggleZenProxy);
+const mockedApply = vi.mocked(applyCompatProxy);
+const mockedRead = vi.mocked(readCompatProxyStatus);
+const mockedToggle = vi.mocked(toggleCompatProxy);
 const mockedToast = vi.mocked(setToast);
 const ZEN_PRICING_DOCS_URL =
   "https://open-code.ai/zh/docs/zen#%E5%AE%9A%E4%BB%B7";
 
 function mountSection() {
-  return mount(ZenProxySection, {
+  return mount(CompatProxySection, {
     props: { active: true },
     global: { directives: { tooltip: tooltipDirective } },
   });
 }
 
-describe("ZenProxySection", () => {
+describe("CompatProxySection", () => {
   beforeEach(() => {
     mockedRead.mockResolvedValue({ running: false, port: 18080 });
     mockedApply.mockClear();
@@ -52,19 +52,20 @@ describe("ZenProxySection", () => {
     mockedRead.mockResolvedValue({ running: true, port: 18080 });
     const wrapper = mountSection();
     await flushPromises();
-    expect(wrapper.find(".settings-section-title").text()).toContain("Zen 代理");
-    expect(wrapper.find(".zen-proxy-head-main h3").text()).toBe(
-      "Zen 本地代理服务",
+    expect(wrapper.find(".settings-section-title").text()).toContain("兼容代理");
+    expect(wrapper.find(".compat-proxy-head-main h3").text()).toBe(
+      "兼容代理服务",
     );
-    // 说明文案含 Responses 与 Zen
+    // 说明文案含 Responses，并点出默认上游是 OpenCode Zen（可换成任意兼容端点）
     expect(wrapper.text()).toContain("Responses");
     expect(wrapper.text()).toContain("OpenCode Zen");
+    expect(wrapper.text()).toContain("OpenAI 兼容上游");
   });
 
   it("配置块中的 Zen 免费模型链接到定价文档", async () => {
     const wrapper = mountSection();
-    const row = wrapper.findAll(".zen-proxy-config-row")[2];
-    const link = row.find(".zen-proxy-docs-link");
+    const row = wrapper.findAll(".compat-proxy-config-row")[2];
+    const link = row.find(".compat-proxy-docs-link");
     expect(link.text()).toBe("Zen 免费模型");
     expect(link.attributes("href")).toBe(ZEN_PRICING_DOCS_URL);
     await link.trigger("click");
@@ -73,15 +74,15 @@ describe("ZenProxySection", () => {
 
   it("配置块渲染 experimental_bearer_token：指向「API Key」链接", async () => {
     const wrapper = mountSection();
-    const rows = wrapper.findAll(".zen-proxy-config-row");
+    const rows = wrapper.findAll(".compat-proxy-config-row");
     const tokenRow = rows[1];
-    expect(tokenRow.find(".zen-proxy-config-field").text()).toBe(
+    expect(tokenRow.find(".compat-proxy-config-field").text()).toBe(
       "experimental_bearer_token",
     );
-    const keyLink = tokenRow.find(".zen-proxy-docs-link");
+    const keyLink = tokenRow.find(".compat-proxy-docs-link");
     expect(keyLink.text()).toBe("ApiKey");
     expect(tokenRow.text()).toContain("public");
-    const publicCode = tokenRow.find(".zen-proxy-config-code");
+    const publicCode = tokenRow.find(".compat-proxy-config-code");
     expect(publicCode.exists()).toBe(true);
     expect(publicCode.text()).toBe("public");
   });
@@ -90,7 +91,7 @@ describe("ZenProxySection", () => {
     const wrapper = mountSection();
     // 默认上游 https://opencode.ai/zen/v1 → 本机地址 + /zen/v1
     const value = () =>
-      wrapper.find(".zen-proxy-config-code.zen-proxy-config-base-url");
+      wrapper.find(".compat-proxy-config-code.compat-proxy-config-base-url");
     expect(value().text()).toContain("http://127.0.0.1:18080/zen/v1");
     const urlInput = wrapper.find("input[type='text']");
     await urlInput.setValue("https://api.deepseek.com/");
@@ -110,7 +111,7 @@ describe("ZenProxySection", () => {
   it("两个行为开关的文案为「名称（额外说明）」且默认勾选", () => {
     const wrapper = mountSection();
     const texts = wrapper
-      .findAll(".zen-proxy-checkbox-row label")
+      .findAll(".compat-proxy-checkbox-row label")
       .map((l) => l.text());
     expect(texts[0]).toContain("回合收尾约束和助推");
     expect(texts[0]).toContain("模型空转收尾时自动续跑");
@@ -118,7 +119,7 @@ describe("ZenProxySection", () => {
     expect(texts[1]).toContain("补齐与 OpenCode 一致的请求头和工具集");
     // 身份开关不再按上游分流：括号说明里不该再出现「对 opencode 上游」这类前提
     expect(texts[1]).not.toContain("opencode 上游");
-    const boxes = wrapper.findAll(".zen-proxy-checkbox-row input");
+    const boxes = wrapper.findAll(".compat-proxy-checkbox-row input");
     expect(boxes).toHaveLength(2);
     for (const box of boxes) {
       expect((box.element as HTMLInputElement).checked).toBe(true);
@@ -127,7 +128,7 @@ describe("ZenProxySection", () => {
 
   it("两个行为开关用的是左侧复选框，不再是右侧 switch", () => {
     const wrapper = mountSection();
-    const rows = wrapper.findAll(".zen-proxy-checkbox-row");
+    const rows = wrapper.findAll(".compat-proxy-checkbox-row");
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       const input = row.find("input[type='checkbox']");
@@ -143,7 +144,7 @@ describe("ZenProxySection", () => {
 
   it("保存时把两个行为开关当前值一并提交", async () => {
     const wrapper = mountSection();
-    const boxes = wrapper.findAll(".zen-proxy-checkbox-row input");
+    const boxes = wrapper.findAll(".compat-proxy-checkbox-row input");
     await boxes[0].setValue(false);
     await boxes[1].setValue(false);
     const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
@@ -166,12 +167,12 @@ describe("ZenProxySection", () => {
     await input.setValue("80");
     const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
     await btn!.trigger("click");
-    expect(wrapper.find(".zen-proxy-error").exists()).toBe(true);
+    expect(wrapper.find(".compat-proxy-error").exists()).toBe(true);
     expect(mockedToggle).not.toHaveBeenCalled();
     expect(mockedApply).not.toHaveBeenCalled();
   });
 
-  it("开启开关时调用 toggleZenProxy", async () => {
+  it("开启开关时调用 toggleCompatProxy", async () => {
     const wrapper = mountSection();
     const checkbox = wrapper.find(
       ".model-config-head-actions input[type='checkbox']",
@@ -190,7 +191,7 @@ describe("ZenProxySection", () => {
     );
   });
 
-  it("保存合法端口与 API 地址调用 applyZenProxy", async () => {
+  it("保存合法端口与 API 地址调用 applyCompatProxy", async () => {
     const wrapper = mountSection();
     const input = wrapper.find("input[type='number']");
     await input.setValue("19090");

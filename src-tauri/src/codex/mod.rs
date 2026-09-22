@@ -25,5 +25,5 @@ pub mod terminal;
 pub mod util;
 pub mod wechat_bridge;
 pub mod wechat_client;
-pub mod zen_proxy;
-pub mod zen_trace;
+pub mod compat_proxy;
+pub mod compat_trace;

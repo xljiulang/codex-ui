@@ -24,22 +24,22 @@ pub struct AppSettings {
     /// 最后活跃会话 id：退出后留档，下次启动恢复该会话（None = 无记录，启动开设置页）
     #[serde(default)]
     pub last_session_id: Option<String>,
-    /// Zen 本地代理开关（默认关闭）
+    /// 兼容代理开关（默认关闭）
     #[serde(default)]
-    pub zen_proxy_enabled: bool,
-    /// Zen 本地代理监听端口（默认 18080）
-    #[serde(default = "default_zen_proxy_port")]
-    pub zen_proxy_port: u16,
-    /// Zen 代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
-    #[serde(default = "default_zen_proxy_base_url")]
-    pub zen_proxy_base_url: String,
-    /// Zen 代理「回合收尾约束和助推」（口嗨检测 + 自动续跑 + 首轮教学 + 标签剥离），默认开启
-    #[serde(default = "default_zen_proxy_nudge_enabled")]
-    pub zen_proxy_nudge_enabled: bool,
-    /// Zen 代理「OpenCode 客户端身份」（识别头 + opencode User-Agent + 免费层请求体门禁补丁；
+    pub compat_proxy_enabled: bool,
+    /// 兼容代理监听端口（默认 18080）
+    #[serde(default = "default_compat_proxy_port")]
+    pub compat_proxy_port: u16,
+    /// 兼容代理转发上游 API 请求地址（默认 opencode.ai/zen/v1）
+    #[serde(default = "default_compat_proxy_base_url")]
+    pub compat_proxy_base_url: String,
+    /// 兼容代理「回合收尾约束和助推」（口嗨检测 + 自动续跑 + 首轮教学 + 标签剥离），默认开启
+    #[serde(default = "default_compat_proxy_nudge_enabled")]
+    pub compat_proxy_nudge_enabled: bool,
+    /// 兼容代理「OpenCode 客户端身份」（识别头 + opencode User-Agent + 免费层请求体门禁补丁；
     /// 勾选即对所有上游一律生效，不再判断 host），默认开启
-    #[serde(default = "default_zen_proxy_identity_enabled")]
-    pub zen_proxy_identity_enabled: bool,
+    #[serde(default = "default_compat_proxy_identity_enabled")]
+    pub compat_proxy_identity_enabled: bool,
     /// codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启
     #[serde(default = "default_error_notify_enabled")]
     pub error_notify_enabled: bool,
@@ -49,19 +49,19 @@ pub struct AppSettings {
     pub interaction_notify_enabled: bool,
 }
 
-fn default_zen_proxy_port() -> u16 {
-    crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT
+fn default_compat_proxy_port() -> u16 {
+    crate::codex::compat_proxy::DEFAULT_COMPAT_PROXY_PORT
 }
 
-fn default_zen_proxy_base_url() -> String {
-    crate::codex::zen_proxy::DEFAULT_ZEN_BASE_URL.to_string()
+fn default_compat_proxy_base_url() -> String {
+    crate::codex::compat_proxy::DEFAULT_COMPAT_BASE_URL.to_string()
 }
 
-fn default_zen_proxy_nudge_enabled() -> bool {
+fn default_compat_proxy_nudge_enabled() -> bool {
     true
 }
 
-fn default_zen_proxy_identity_enabled() -> bool {
+fn default_compat_proxy_identity_enabled() -> bool {
     true
 }
 
@@ -97,11 +97,11 @@ impl Default for AppSettings {
             dynamic_tools_disabled: Vec::new(),
             glass_effect: default_glass_effect(),
             last_session_id: None,
-            zen_proxy_enabled: false,
-            zen_proxy_port: default_zen_proxy_port(),
-            zen_proxy_base_url: default_zen_proxy_base_url(),
-            zen_proxy_nudge_enabled: default_zen_proxy_nudge_enabled(),
-            zen_proxy_identity_enabled: default_zen_proxy_identity_enabled(),
+            compat_proxy_enabled: false,
+            compat_proxy_port: default_compat_proxy_port(),
+            compat_proxy_base_url: default_compat_proxy_base_url(),
+            compat_proxy_nudge_enabled: default_compat_proxy_nudge_enabled(),
+            compat_proxy_identity_enabled: default_compat_proxy_identity_enabled(),
             error_notify_enabled: default_error_notify_enabled(),
             interaction_notify_enabled: default_interaction_notify_enabled(),
         }
@@ -112,10 +112,48 @@ pub fn settings_path(app_dir: &Path) -> std::path::PathBuf {
     app_dir.join("settings.json")
 }
 
+/// 改名兼容：把旧键 `zen_proxy_*` 的值搬到新键 `compat_proxy_*`。
+///
+/// 2026-09-22 把 Zen 代理改名为「兼容代理」，五个设置键随之改名。这里做**读兼容**：
+/// 旧 `settings.json` 里只有旧键时，先原地改名为新键再解析（下次 `save` 自然只写新键）；
+/// 新旧键并存时以**新键**为准，避免覆盖用户已经用新版本保存过的值；两个都没有时不动，
+/// 由各字段的 `serde(default)` 回退默认值。非对象 JSON 或读取失败时原样返回，交给既有
+/// 「解析失败即回退默认」的路径处理。
+fn migrate_legacy_zen_proxy_keys(raw: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return raw.to_string();
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return raw.to_string();
+    };
+    let mut changed = false;
+    for (old, new) in [
+        ("zen_proxy_enabled", "compat_proxy_enabled"),
+        ("zen_proxy_port", "compat_proxy_port"),
+        ("zen_proxy_base_url", "compat_proxy_base_url"),
+        ("zen_proxy_nudge_enabled", "compat_proxy_nudge_enabled"),
+        (
+            "zen_proxy_identity_enabled",
+            "compat_proxy_identity_enabled",
+        ),
+    ] {
+        if let Some(legacy) = obj.remove(old) {
+            // 新键已存在时优先保留新值（丢弃旧值），两者都没有则直接搬过来
+            obj.entry(new).or_insert(legacy);
+            changed = true;
+        }
+    }
+    if !changed {
+        return raw.to_string();
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
+}
+
 pub fn load(app_dir: &Path) -> AppSettings {
     let p = settings_path(app_dir);
     fs::read_to_string(&p)
         .ok()
+        .map(|s| migrate_legacy_zen_proxy_keys(&s))
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
@@ -365,9 +403,9 @@ mod tests {
     }
 
     #[test]
-    fn zen_proxy_defaults_and_roundtrips() {
+    fn compat_proxy_defaults_and_roundtrips() {
         let dir = TempDir::new().unwrap();
-        // 旧 settings.json 缺失 zen_proxy 字段：回退关闭 + 默认端口
+        // 旧 settings.json 缺失 compat_proxy 字段：回退关闭 + 默认端口
         let p = settings_path(dir.path());
         fs::write(
             &p,
@@ -375,37 +413,40 @@ mod tests {
         )
         .unwrap();
         let s = load(dir.path());
-        assert!(!s.zen_proxy_enabled);
+        assert!(!s.compat_proxy_enabled);
         assert_eq!(
-            s.zen_proxy_port,
-            crate::codex::zen_proxy::DEFAULT_ZEN_PROXY_PORT
+            s.compat_proxy_port,
+            crate::codex::compat_proxy::DEFAULT_COMPAT_PROXY_PORT
         );
         assert_eq!(
-            s.zen_proxy_base_url,
-            crate::codex::zen_proxy::DEFAULT_ZEN_BASE_URL
+            s.compat_proxy_base_url,
+            crate::codex::compat_proxy::DEFAULT_COMPAT_BASE_URL
         );
         // 两个行为开关同样缺失：回退默认开启（行为与旧版本一致）
-        assert!(s.zen_proxy_nudge_enabled);
-        assert!(s.zen_proxy_identity_enabled);
+        assert!(s.compat_proxy_nudge_enabled);
+        assert!(s.compat_proxy_identity_enabled);
 
         // 自定义端口与开关往返一致
         let s = AppSettings {
-            zen_proxy_enabled: true,
-            zen_proxy_port: 19090,
-            zen_proxy_base_url: "https://custom.example.com/v1".into(),
+            compat_proxy_enabled: true,
+            compat_proxy_port: 19090,
+            compat_proxy_base_url: "https://custom.example.com/v1".into(),
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
-        assert!(loaded.zen_proxy_enabled);
-        assert_eq!(loaded.zen_proxy_port, 19090);
-        assert_eq!(loaded.zen_proxy_base_url, "https://custom.example.com/v1");
-        assert!(loaded.zen_proxy_nudge_enabled);
-        assert!(loaded.zen_proxy_identity_enabled);
+        assert!(loaded.compat_proxy_enabled);
+        assert_eq!(loaded.compat_proxy_port, 19090);
+        assert_eq!(
+            loaded.compat_proxy_base_url,
+            "https://custom.example.com/v1"
+        );
+        assert!(loaded.compat_proxy_nudge_enabled);
+        assert!(loaded.compat_proxy_identity_enabled);
     }
 
     #[test]
-    fn zen_proxy_behavior_switches_default_true_and_roundtrip() {
+    fn compat_proxy_behavior_switches_default_true_and_roundtrip() {
         let dir = TempDir::new().unwrap();
         // 旧 settings.json 缺失两个行为开关：回退默认开启
         let p = settings_path(dir.path());
@@ -415,28 +456,143 @@ mod tests {
         )
         .unwrap();
         let s = load(dir.path());
-        assert!(s.zen_proxy_nudge_enabled);
-        assert!(s.zen_proxy_identity_enabled);
+        assert!(s.compat_proxy_nudge_enabled);
+        assert!(s.compat_proxy_identity_enabled);
 
         // 显式关闭与开启均可往返一致
         let s = AppSettings {
-            zen_proxy_nudge_enabled: false,
-            zen_proxy_identity_enabled: false,
+            compat_proxy_nudge_enabled: false,
+            compat_proxy_identity_enabled: false,
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
-        assert!(!loaded.zen_proxy_nudge_enabled);
-        assert!(!loaded.zen_proxy_identity_enabled);
+        assert!(!loaded.compat_proxy_nudge_enabled);
+        assert!(!loaded.compat_proxy_identity_enabled);
 
         let s = AppSettings {
-            zen_proxy_nudge_enabled: true,
-            zen_proxy_identity_enabled: false,
+            compat_proxy_nudge_enabled: true,
+            compat_proxy_identity_enabled: false,
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
         let loaded = load(dir.path());
-        assert!(loaded.zen_proxy_nudge_enabled);
-        assert!(!loaded.zen_proxy_identity_enabled);
+        assert!(loaded.compat_proxy_nudge_enabled);
+        assert!(!loaded.compat_proxy_identity_enabled);
+    }
+
+    /// 改名兼容：旧键 `zen_proxy_*` 仍能被读入（写回时只写新键）。
+    #[test]
+    fn legacy_zen_proxy_keys_are_still_read() {
+        let dir = TempDir::new().unwrap();
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"codex_path":null,"theme":"blue",
+                "zen_proxy_enabled":true,"zen_proxy_port":19191,
+                "zen_proxy_base_url":"https://legacy.example.com/v1",
+                "zen_proxy_nudge_enabled":false,"zen_proxy_identity_enabled":false}"#,
+        )
+        .unwrap();
+
+        let s = load(dir.path());
+        assert!(s.compat_proxy_enabled, "旧键 enabled 应被读入");
+        assert_eq!(s.compat_proxy_port, 19191, "旧键 port 应被读入");
+        assert_eq!(
+            s.compat_proxy_base_url, "https://legacy.example.com/v1",
+            "旧键 base_url 应被读入"
+        );
+        assert!(!s.compat_proxy_nudge_enabled, "旧键 nudge 应被读入");
+        assert!(!s.compat_proxy_identity_enabled, "旧键 identity 应被读入");
+
+        // 保存后写的是新键：文件里不再出现旧键
+        save(dir.path(), &s).unwrap();
+        let raw = fs::read_to_string(&p).unwrap();
+        assert!(raw.contains("compat_proxy_enabled"), "{raw}");
+        assert!(!raw.contains("zen_proxy_"), "不应再写出旧键：{raw}");
+    }
+
+    /// 改名兼容：新旧键同时存在时以**新键**为准（旧键被丢弃，不覆盖新值）。
+    #[test]
+    fn new_keys_win_over_legacy_keys() {
+        let dir = TempDir::new().unwrap();
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"compat_proxy_enabled":false,"compat_proxy_port":20001,
+                "compat_proxy_base_url":"https://new.example.com/v1",
+                "compat_proxy_nudge_enabled":true,"compat_proxy_identity_enabled":true,
+                "zen_proxy_enabled":true,"zen_proxy_port":19999,
+                "zen_proxy_base_url":"https://old.example.com/v1",
+                "zen_proxy_nudge_enabled":false,"zen_proxy_identity_enabled":false}"#,
+        )
+        .unwrap();
+
+        let s = load(dir.path());
+        assert!(!s.compat_proxy_enabled);
+        assert_eq!(s.compat_proxy_port, 20001);
+        assert_eq!(s.compat_proxy_base_url, "https://new.example.com/v1");
+        assert!(s.compat_proxy_nudge_enabled);
+        assert!(s.compat_proxy_identity_enabled);
+    }
+
+    /// 改名兼容：只写新键时正常读入（旧键缺失不影响）。
+    #[test]
+    fn new_keys_only_are_read() {
+        let dir = TempDir::new().unwrap();
+        let p = settings_path(dir.path());
+        fs::write(
+            &p,
+            r#"{"compat_proxy_enabled":true,"compat_proxy_port":19292,
+                "compat_proxy_base_url":"https://only-new.example.com/v1"}"#,
+        )
+        .unwrap();
+
+        let s = load(dir.path());
+        assert!(s.compat_proxy_enabled);
+        assert_eq!(s.compat_proxy_port, 19292);
+        assert_eq!(s.compat_proxy_base_url, "https://only-new.example.com/v1");
+        // 未给出的两个行为开关回退默认（开启）
+        assert!(s.compat_proxy_nudge_enabled);
+        assert!(s.compat_proxy_identity_enabled);
+    }
+
+    /// 迁移函数本身：旧键改名、新键优先、非对象/坏 JSON 原样返回、无旧键时也原样返回。
+    #[test]
+    fn migrate_legacy_keys_rewrites_only_when_needed() {
+        // 只有旧键 → 全部改名为新键，旧键一个不留
+        let migrated = migrate_legacy_zen_proxy_keys(
+            r#"{"theme":"blue","zen_proxy_port":19191,"zen_proxy_enabled":true}"#,
+        );
+        assert!(
+            migrated.contains("\"compat_proxy_port\":19191"),
+            "{migrated}"
+        );
+        assert!(
+            migrated.contains("\"compat_proxy_enabled\":true"),
+            "{migrated}"
+        );
+        assert!(!migrated.contains("zen_proxy"), "{migrated}");
+        assert!(
+            migrated.contains("\"theme\":\"blue\""),
+            "其它键应保留：{migrated}"
+        );
+
+        // 新旧并存 → 保留新值
+        let migrated =
+            migrate_legacy_zen_proxy_keys(r#"{"compat_proxy_port":20001,"zen_proxy_port":19999}"#);
+        assert!(
+            migrated.contains("\"compat_proxy_port\":20001"),
+            "{migrated}"
+        );
+        assert!(!migrated.contains("zen_proxy"), "{migrated}");
+
+        // 没有旧键：原样返回（不做无意义的重新序列化）
+        let raw = r#"{ "theme" : "blue" }"#;
+        assert_eq!(migrate_legacy_zen_proxy_keys(raw), raw);
+
+        // 坏 JSON / 非对象：原样返回，交给既有「解析失败回退默认」路径
+        assert_eq!(migrate_legacy_zen_proxy_keys("not json"), "not json");
+        assert_eq!(migrate_legacy_zen_proxy_keys("[1,2]"), "[1,2]");
     }
 }

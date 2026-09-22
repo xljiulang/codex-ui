@@ -1,19 +1,19 @@
-//! Zen 代理内容诊断日志：把每次上游调用的**发往上游请求体**、**上游响应原文**与
-//! **发回 codex 的收尾事件**落到 `<app_data_dir>/logs/zen/`，用于事后分析
+//! 兼容代理内容诊断日志：把每次上游调用的**发往上游请求体**、**上游响应原文**与
+//! **发回 codex 的收尾事件**落到 `<app_data_dir>/logs/compat/`，用于事后分析
 //! 「回合提前结束（任务未完成）」这类偶发问题。
 //!
 //! 与 `session_log` 的「只记安全字段、不落盘提示词/文件内容/工具输出」约定不同，
 //! 本模块**有意**落盘完整对话内容（提示词、工具参数与结果、代码片段），因此：
 //!
-//! - 单独目录 `logs/zen`、单独上限：单文件 8MB、目录 256MB、保留 3 天；
+//! - 单独目录 `logs/compat`、单独上限：单文件 8MB、目录 256MB、保留 3 天；
 //! - `Authorization` 只记 `present|absent`，任何情况下不落盘 API Key；
 //! - 所有写入失败静默，绝不影响代理主流程。
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::Local;
@@ -59,14 +59,14 @@ impl Default for TraceLimits {
 }
 
 /// 内容日志的写入器；`Arc` 由代理状态共享。
-pub(crate) struct ZenTrace {
+pub(crate) struct CompatTrace {
     dir: PathBuf,
     limits: TraceLimits,
     /// 上次清理时间（epoch 毫秒），0 表示尚未清理过。
     last_cleanup_ms: AtomicU64,
 }
 
-impl ZenTrace {
+impl CompatTrace {
     /// 使用默认上限创建（目录在首次写入前按需创建）。
     pub(crate) fn new(dir: PathBuf) -> Self {
         Self::with_limits(dir, TraceLimits::default())
@@ -128,10 +128,10 @@ impl ZenTrace {
 
 /// 代理侧持有的写入句柄；`disabled()` 用于未启用/无日志目录的场景（全部空操作）。
 #[derive(Clone)]
-pub(crate) struct TraceSink(Option<Arc<ZenTrace>>);
+pub(crate) struct TraceSink(Option<Arc<CompatTrace>>);
 
 impl TraceSink {
-    pub(crate) fn new(trace: Arc<ZenTrace>) -> Self {
+    pub(crate) fn new(trace: Arc<CompatTrace>) -> Self {
         Self(Some(trace))
     }
 
@@ -467,7 +467,7 @@ mod tests {
     #[test]
     fn writes_request_response_and_summary_files() {
         let dir = tmp_dir();
-        let trace = ZenTrace::new(dir.path().to_path_buf());
+        let trace = CompatTrace::new(dir.path().to_path_buf());
         let mut call = trace.begin("req_abc", 1);
         call.note("model", "mimo-v2.5-flash");
         call.note("upstream_status", "200");
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn write_response_text_writes_whole_file() {
         let dir = tmp_dir();
-        let trace = ZenTrace::new(dir.path().to_path_buf());
+        let trace = CompatTrace::new(dir.path().to_path_buf());
         let mut call = trace.begin_at("req_txt", 2, 1_770_000_000_000);
         call.write_response_text("response.txt", "{\"error\":\"boom\"}");
         call.finish();
@@ -538,7 +538,7 @@ mod tests {
             max_file_bytes: 32,
             ..TraceLimits::default()
         };
-        let trace = ZenTrace::with_limits(dir.path().to_path_buf(), limits);
+        let trace = CompatTrace::with_limits(dir.path().to_path_buf(), limits);
         let mut call = trace.begin("req_big", 1);
         for _ in 0..10 {
             call.write_response_line("data: 0123456789");
@@ -627,7 +627,7 @@ mod tests {
             keep_days: 3,
             cleanup_interval_ms: 0,
         };
-        let trace = ZenTrace::with_limits(dir.path().to_path_buf(), limits);
+        let trace = CompatTrace::with_limits(dir.path().to_path_buf(), limits);
         let old = stamped(now_ms() - 5 * MS_PER_DAY, "gone", "request.json");
         fs::write(dir.path().join(old), "x").unwrap();
         fs::write(dir.path().join("keep-me.log"), "x").unwrap();
@@ -655,7 +655,7 @@ mod tests {
         // 目标“目录”是普通文件：create_dir_all 与 open 都会失败，写入必须静默
         let blocker = dir.path().join("blocked");
         fs::write(&blocker, b"x").unwrap();
-        let trace = ZenTrace::new(blocker);
+        let trace = CompatTrace::new(blocker);
         let mut call = trace.begin("req_x", 1);
         call.write_request_json(&json!({ "model": "m" }));
         call.finish();
@@ -664,7 +664,7 @@ mod tests {
     #[test]
     fn drop_writes_summary_for_interrupted_call() {
         let dir = tmp_dir();
-        let trace = ZenTrace::new(dir.path().to_path_buf());
+        let trace = CompatTrace::new(dir.path().to_path_buf());
         {
             let mut call = trace.begin("req_drop", 1);
             call.note("model", "m");

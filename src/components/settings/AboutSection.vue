@@ -83,7 +83,7 @@ onMounted(async () => {
 .about-card {
   gap: var(--space-3);
 }
-/* 卡片头：标题与副标题竖排（与 Zen 代理分区的 head-main / head-desc 同款取值） */
+/* 卡片头：标题与副标题竖排（与兼容代理分区的 head-main / head-desc 同款取值） */
 .about-head-main {
   display: flex;
   flex-direction: column;

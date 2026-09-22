@@ -270,7 +270,7 @@ describe("SettingsView 模型配置", () => {
     mockedOpenPathInApp.mockResolvedValue(true);
   });
 
-  it("导航顺序：个性化 → … → 定时任务 → Zen 代理 → 关于", () => {
+  it("导航顺序：个性化 → … → 定时任务 → 兼容代理 → 关于", () => {
     const wrapper = mount(SettingsView);
     const labels = wrapper
       .findAll(".settings-nav-item")
@@ -286,7 +286,7 @@ describe("SettingsView 模型配置", () => {
     expect(labels.indexOf("MCP管理")).toBe(7);
     expect(labels.indexOf("插件管理")).toBe(8);
     expect(labels.indexOf("定时任务")).toBe(9);
-    expect(labels.indexOf("Zen 代理")).toBe(10);
+    expect(labels.indexOf("兼容代理")).toBe(10);
     expect(labels.indexOf("关于")).toBe(11);
   });
 
@@ -2657,7 +2657,7 @@ describe("SettingsView 设置标签行为", () => {
       "MCP管理",
       "插件管理",
       "定时任务",
-      "Zen 代理",
+      "兼容代理",
       "关于",
     ]);
     expect(items[0].classes()).toContain("active");

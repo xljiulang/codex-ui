@@ -1,4 +1,4 @@
-//! `zen_proxy` 的单元测试（原 `zen_proxy.rs` 内联测试模块拆出）。
+//! `compat_proxy` 的单元测试（原 `compat_proxy.rs` 内联测试模块拆出）。
 
 use super::test_support::*;
 use super::*;
@@ -959,9 +959,9 @@ fn normalize_base_url_trims_whitespace_and_trailing_slashes() {
         normalize_base_url("  https://a/zen/v2/  "),
         "https://a/zen/v2"
     );
-    assert_eq!(normalize_base_url(""), DEFAULT_ZEN_BASE_URL);
-    assert_eq!(normalize_base_url("   "), DEFAULT_ZEN_BASE_URL);
-    assert_eq!(normalize_base_url("/"), DEFAULT_ZEN_BASE_URL);
+    assert_eq!(normalize_base_url(""), DEFAULT_COMPAT_BASE_URL);
+    assert_eq!(normalize_base_url("   "), DEFAULT_COMPAT_BASE_URL);
+    assert_eq!(normalize_base_url("/"), DEFAULT_COMPAT_BASE_URL);
 }
 
 #[test]
@@ -978,7 +978,7 @@ fn responses_path_follows_base_url_path() {
     );
     assert_eq!(responses_path("https://a/v1"), "/v1/responses");
     // 空/非法地址回退默认上游，派生出默认路径。
-    assert_eq!(responses_path(""), responses_path(DEFAULT_ZEN_BASE_URL));
+    assert_eq!(responses_path(""), responses_path(DEFAULT_COMPAT_BASE_URL));
 }
 
 #[test]
@@ -2017,7 +2017,7 @@ fn log_at_writes_safe_events_to_session_log() {
     log_at(
         &log,
         "info",
-        "zen_proxy.request",
+        "compat_proxy.request",
         &[
             ("model", "zen/gpt-5-mini".to_string()),
             ("stream", "true".to_string()),
@@ -2026,7 +2026,7 @@ fn log_at_writes_safe_events_to_session_log() {
     log_at(
         &log,
         "warn",
-        "zen_proxy.forward_error",
+        "compat_proxy.forward_error",
         &[("error", "上游请求失败：TLS".to_string())],
     );
 
@@ -2036,8 +2036,8 @@ fn log_at_writes_safe_events_to_session_log() {
         .map(|e| std::fs::read_to_string(e.path()).unwrap())
         .collect::<Vec<_>>();
     let joined = files.join("\n");
-    assert!(joined.contains("event=zen_proxy.request"));
-    assert!(joined.contains("event=zen_proxy.forward_error"));
+    assert!(joined.contains("event=compat_proxy.request"));
+    assert!(joined.contains("event=compat_proxy.forward_error"));
     assert!(joined.contains("model=zen/gpt-5-mini"));
     // 安全字段：不应包含 Authorization / 敏感内容字样
     assert!(!joined.contains("Authorization"));
@@ -2047,13 +2047,13 @@ fn log_at_writes_safe_events_to_session_log() {
 #[test]
 fn log_at_none_or_bad_dir_is_silent() {
     // 无句柄：不 panic
-    log_at(&None, "info", "zen_proxy.request", &[]);
+    log_at(&None, "info", "compat_proxy.request", &[]);
     // 日志目录不可写（路径指向一个普通文件）：静默不 panic
     let dir = tempfile::TempDir::new().unwrap();
     let blocker = dir.path().join("blocked");
     std::fs::write(&blocker, b"x").unwrap();
     let log = Some(Arc::new(SessionLog::new(blocker)));
-    log_at(&log, "info", "zen_proxy.request", &[]);
+    log_at(&log, "info", "compat_proxy.request", &[]);
 }
 
 /// 从 SSE 块里取事件名序列。
@@ -2506,17 +2506,17 @@ fn zen_body_patch_follows_identity_switch_only() {
         "",
     ] {
         assert!(
-            ZenProxyConfig::new(18080, base_url, true, true).opencode_identity,
+            CompatProxyConfig::new(18080, base_url, true, true).opencode_identity,
             "身份开启即补形状（不看上游）：{base_url}"
         );
         assert!(
-            !ZenProxyConfig::new(18080, base_url, false, true).opencode_identity,
+            !CompatProxyConfig::new(18080, base_url, false, true).opencode_identity,
             "身份关闭即不补形状：{base_url}"
         );
     }
     // 收尾开关是另一个独立维度：它不参与「补不补形状」
     assert!(
-        ZenProxyConfig::new(18080, "https://opencode.ai/zen/v1", true, false).opencode_identity
+        CompatProxyConfig::new(18080, "https://opencode.ai/zen/v1", true, false).opencode_identity
     );
 }
 

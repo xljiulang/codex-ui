@@ -188,16 +188,16 @@ export interface AppSettings {
   glass_effect: boolean;
   /** 最后活跃会话 id：下次启动恢复该会话；null/缺省 = 无记录，启动开设置标签 */
   last_session_id?: string | null;
-  /** Zen 本地代理开关（默认关闭） */
-  zen_proxy_enabled?: boolean;
-  /** Zen 本地代理监听端口（默认 18080） */
-  zen_proxy_port?: number;
-  /** Zen 代理转发上游 API 请求地址（默认 https://opencode.ai/zen/v1） */
-  zen_proxy_base_url?: string;
-  /** Zen 代理「回合收尾约束和助推」（空转收尾时自动续跑），默认开启 */
-  zen_proxy_nudge_enabled?: boolean;
-  /** Zen 代理「OpenCode 客户端身份」（识别头 + UA + 免费层门禁补丁，不分上游），默认开启 */
-  zen_proxy_identity_enabled?: boolean;
+  /** 兼容代理开关（默认关闭） */
+  compat_proxy_enabled?: boolean;
+  /** 兼容代理监听端口（默认 18080） */
+  compat_proxy_port?: number;
+  /** 兼容代理转发上游 API 请求地址（默认 https://opencode.ai/zen/v1） */
+  compat_proxy_base_url?: string;
+  /** 兼容代理「回合收尾约束和助推」（空转收尾时自动续跑），默认开启 */
+  compat_proxy_nudge_enabled?: boolean;
+  /** 兼容代理「OpenCode 客户端身份」（识别头 + UA + 免费层门禁补丁，不分上游），默认开启 */
+  compat_proxy_identity_enabled?: boolean;
   /** codex 错误发 Windows 系统通知（窗口无前台焦点时），默认开启 */
   error_notify_enabled?: boolean;
   /** 会话提权/交互/完成（审批、提问、MCP 表单、计划就绪、回合正常完成）发 Windows 系统通知，默认开启 */

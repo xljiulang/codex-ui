@@ -1,8 +1,8 @@
 //! codex-ui 自有环境变量的统一约定与解析。
 //!
 //! 命名空间：所有本应用自有的环境变量都用 `CODEXUI_` 前缀，后接大写下划线的功能段，
-//! 功能段按「组件_用途」组织（例：`CODEXUI_ZEN_TRACE` 控制 Zen 代理内容诊断日志，
-//! 将来的 `CODEXUI_ZEN_TRACE_MAX_MB`、`CODEXUI_WECHAT_DEBUG` 沿用同一前缀与解析规则）。
+//! 功能段按「组件_用途」组织（例：`CODEXUI_COMPAT_TRACE` 控制兼容代理内容诊断日志，
+//! 将来的 `CODEXUI_COMPAT_TRACE_MAX_MB`、`CODEXUI_WECHAT_DEBUG` 沿用同一前缀与解析规则）。
 //!
 //! 取值约定（大小写不敏感、自动 trim）：
 //! - 真值：`1` / `true` / `on` / `yes`
@@ -55,7 +55,7 @@ pub(crate) fn invalid_value(suffix: &str) -> Option<String> {
     }
 }
 
-/// 拼接完整变量名：`CODEXUI_<SUFFIX>`（suffix 传大写功能段，如 `ZEN_TRACE`）。
+/// 拼接完整变量名：`CODEXUI_<SUFFIX>`（suffix 传大写功能段，如 `COMPAT_TRACE`）。
 pub(crate) fn full_name(suffix: &str) -> String {
     format!("{ENV_PREFIX}{suffix}")
 }
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn full_name_uses_namespace_prefix() {
-        assert_eq!(full_name("ZEN_TRACE"), "CODEXUI_ZEN_TRACE");
-        assert!(full_name("ZEN_TRACE").starts_with(ENV_PREFIX));
+        assert_eq!(full_name("COMPAT_TRACE"), "CODEXUI_COMPAT_TRACE");
+        assert!(full_name("COMPAT_TRACE").starts_with(ENV_PREFIX));
     }
 }
