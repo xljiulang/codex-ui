@@ -10,15 +10,15 @@ import {
   type CompatProxyStatus,
 } from "../../composables/useCodex";
 import { ICON_SAVE } from "../../lib/icons";
+import { copyText } from "../../lib/clipboard";
 import { openDocsUrl } from "../../lib/links";
 
 defineProps<{ active: boolean }>();
 
 const DEFAULT_PORT = 18080;
 const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
-const ZEN_PRICING_DOCS_URL =
-  "https://open-code.ai/zh/docs/zen#%E5%AE%9A%E4%BB%B7";
-const ZEN_KEY_DOCS_URL = "https://opencode.ai/zen";
+/** 顶部说明里「Zen 免费模型」的文档地址（浏览器打开） */
+const ZEN_DOCS_URL = "https://opencode.ai/zen";
 
 /** 本地代理运行状态（由 compat_proxy_status 驱动；未获取时默认停止） */
 const status = ref<CompatProxyStatus>({ running: false, port: DEFAULT_PORT });
@@ -82,6 +82,12 @@ async function refresh() {
   }
 }
 
+/** 点击胶囊：把本机 base_url 复制到剪贴板并提示（失败按既有范式提示手动复制） */
+async function copyBaseUrl() {
+  const ok = await copyText(localBaseUrlHint.value);
+  setToast(ok ? "已复制 base_url" : "复制失败，请手动选择复制");
+}
+
 /** 切换开关：开启/关闭代理（写 settings.json 并启停服务） */
 async function onToggle(checked: boolean) {
   const port = validatePort(portInput.value);
@@ -124,17 +130,45 @@ onBeforeUnmount(refresh);
   <section v-show="active" class="settings-section settings-section-compat-proxy">
     <h2 class="settings-section-title">兼容代理</h2>
     <p class="settings-section-desc">
-      在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions 转发到任意
-      OpenAI 兼容上游（默认 OpenCode Zen 免费模型）
+      在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions
+      转发到任意 OpenAI 兼容上游（默认 OpenCode
+      <a
+        class="compat-proxy-docs-link"
+        :href="ZEN_DOCS_URL"
+        v-tooltip="'Zen 免费模型文档（浏览器打开）'"
+        @click.prevent="openDocsUrl(ZEN_DOCS_URL)"
+        >Zen 免费模型</a
+      >）
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
         <div class="compat-proxy-head-main">
           <h3>兼容代理服务</h3>
-          <p class="compat-proxy-head-desc">
-            在「模型配置」中添加模型提供方，字段按下图填写
-          </p>
-
+          <div class="compat-proxy-head-status">
+            <span
+              class="compat-proxy-status-badge"
+              :class="
+                (store.settings.compat_proxy_enabled ?? false)
+                  ? 'is-running'
+                  : 'is-stopped'
+              "
+            >
+              {{ (store.settings.compat_proxy_enabled ?? false) ? "已启动" : "已停止" }}
+            </span>
+            <code
+              v-if="store.settings.compat_proxy_enabled ?? false"
+              class="compat-proxy-base-url-capsule"
+              role="button"
+              tabindex="0"
+              :aria-label="`复制 base_url：${localBaseUrlHint}`"
+              v-tooltip="'点击复制 base_url'"
+              @click="copyBaseUrl()"
+              @keydown.enter.prevent="copyBaseUrl()"
+              @keydown.space.prevent="copyBaseUrl()"
+            >
+              {{ localBaseUrlHint }}
+            </code>
+          </div>
         </div>
         <div class="model-config-head-actions">
           <label class="switch" aria-label="兼容代理开关">
@@ -145,41 +179,6 @@ onBeforeUnmount(refresh);
             />
             <span class="switch-track"></span>
           </label>
-        </div>
-      </div>
-
-      <div class="compat-proxy-config-hint">
-        <div class="compat-proxy-config-row">
-          <span class="compat-proxy-config-field">base_url</span>
-          <span class="compat-proxy-config-value">
-            <code class="compat-proxy-config-code compat-proxy-config-base-url">
-              {{ localBaseUrlHint }}
-            </code>
-          </span>
-        </div>
-        <div class="compat-proxy-config-row">
-          <span class="compat-proxy-config-field">experimental_bearer_token</span>
-          <span class="compat-proxy-config-value">
-            <a
-              class="compat-proxy-docs-link"
-              :href="ZEN_KEY_DOCS_URL"
-              v-tooltip="'获取你的 Zen API Key（浏览器打开）'"
-              @click.prevent="openDocsUrl(ZEN_KEY_DOCS_URL)"
-            >ApiKey</a>
-            或
-            <code class="compat-proxy-config-code">public</code>
-          </span>
-        </div>
-        <div class="compat-proxy-config-row">
-          <span class="compat-proxy-config-field">model</span>
-          <span class="compat-proxy-config-value">
-            <a
-              class="compat-proxy-docs-link"
-              :href="ZEN_PRICING_DOCS_URL"
-              v-tooltip="'Zen 定价文档（浏览器打开）'"
-              @click.prevent="openDocsUrl(ZEN_PRICING_DOCS_URL)"
-            >Zen 免费模型</a>
-          </span>
         </div>
       </div>
 
@@ -259,13 +258,58 @@ onBeforeUnmount(refresh);
   gap: var(--space-2);
   min-width: 0;
 }
-.compat-proxy-head-desc {
-  margin: 0;
-  font-size: var(--font-md);
+/* 卡片头状态行：状态徽章常驻，base_url 胶囊仅在启用后出现 */
+.compat-proxy-head-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.compat-proxy-status-badge {
+  padding: 2px var(--space-3);
+  border-radius: 999px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.compat-proxy-status-badge.is-running {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.compat-proxy-status-badge.is-stopped {
+  color: var(--text-faint);
+  background: var(--bg-input);
+  border-color: var(--border);
+}
+/* base_url 值胶囊：可点击复制（鼠标手型 + 悬停高亮 + 键盘可达） */
+.compat-proxy-base-url-capsule {
+  font-family: var(--mono);
+  font-size: var(--font-xs);
   line-height: 1.5;
-  color: var(--text-dim);
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px var(--space-3);
+  word-break: break-all;
+  min-width: 0;
+  cursor: pointer;
   -webkit-user-select: text;
   user-select: text;
+  transition: border-color var(--ease), color var(--ease);
+}
+.compat-proxy-base-url-capsule:hover {
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.compat-proxy-base-url-capsule:focus-visible {
+  outline: none;
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
 .compat-proxy-docs-link {
   color: var(--accent);
@@ -325,55 +369,5 @@ onBeforeUnmount(refresh);
   color: var(--danger);
   font-size: var(--font-xs);
   margin: 0 0 var(--space-2);
-}
-.compat-proxy-config-hint {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: rgba(var(--overlay-rgb), 0.02);
-  padding: var(--space-5) var(--space-8);
-  margin-top: var(--space-5);
-}
-
-.compat-proxy-config-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.compat-proxy-config-field {
-  flex: 0 0 168px;
-  font-family: var(--mono);
-  font-size: var(--font-xs);
-  color: var(--text-faint);
-  user-select: text;
-}
-
-.compat-proxy-config-value {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  font-size: var(--font-md);
-  color: var(--text);
-  user-select: text;
-}
-
-.compat-proxy-config-code {
-  font-family: var(--mono);
-  font-size: var(--font-xs);
-  line-height: 1.5;
-  color: var(--text-bright);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1px var(--space-3);
-  word-break: break-all;
-  min-width: 0;
 }
 </style>
