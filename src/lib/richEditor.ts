@@ -71,7 +71,14 @@ export function docToRuns(doc: JSONContent): EditorRun[] {
   // 块级容器：其子块之间以 \n 分隔（doc/有序或无序列表/列表项/块引用/代码块）。
   // 行内文本块（paragraph/heading 等）的子节点间不插入换行，保持现有单段内文本顺序。
   const isBlockContainer = (t: string) =>
-    ["doc", "bulletList", "orderedList", "listItem", "blockquote", "codeBlock"].includes(t);
+    [
+      "doc",
+      "bulletList",
+      "orderedList",
+      "listItem",
+      "blockquote",
+      "codeBlock",
+    ].includes(t);
 
   const walk = (node: JSONContent) => {
     const type = node.type ?? "";

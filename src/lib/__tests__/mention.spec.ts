@@ -185,9 +185,9 @@ describe("toUserAttachment / isImagePath / baseName", () => {
     ).toBe(
       "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## b.cs: D:/repo/b.cs\n",
     );
-    expect(fileMentionSection([{ type: "localImage", path: "D:/repo/a.png" }])).toBe(
-      "",
-    );
+    expect(
+      fileMentionSection([{ type: "localImage", path: "D:/repo/a.png" }]),
+    ).toBe("");
     expect(fileMentionSection([])).toBe("");
   });
 
@@ -196,9 +196,7 @@ describe("toUserAttachment / isImagePath / baseName", () => {
       "\n# Files mentioned by the user:\n\n## a.cs: D:/repo/a.cs\n\n## My request:\n[@documents](C:/x/plugins/documents) [$csharp-code-rules](C:/x/skills/csharp-code-rules/SKILL.md) 混合测试\n";
     expect(stripMentionContext(text)).toBe("混合测试");
     expect(
-      stripMentionContext(
-        "[@documents](C:/x/plugins/documents) 看下\n",
-      ),
+      stripMentionContext("[@documents](C:/x/plugins/documents) 看下\n"),
     ).toBe("看下");
     expect(
       stripMentionContext(
@@ -210,7 +208,11 @@ describe("toUserAttachment / isImagePath / baseName", () => {
   it("buildTurnInput 文件走单条 text、技能走结构化项且路径转正斜杠", () => {
     const input = buildTurnInput("按规则检查", [
       { type: "mention", name: "a.cs", path: "D:\\repo\\a.cs" },
-      { type: "skill", name: "csharp-code-rules", path: "C:\\Users\\x\\.codex\\skills\\csharp-code-rules\\SKILL.md" },
+      {
+        type: "skill",
+        name: "csharp-code-rules",
+        path: "C:\\Users\\x\\.codex\\skills\\csharp-code-rules\\SKILL.md",
+      },
       { type: "localImage", path: "D:\\repo\\a.png" },
     ]);
     expect(input).toEqual([
@@ -287,9 +289,9 @@ describe("toUserAttachment / isImagePath / baseName", () => {
         "先 [@a.cs](D:/repo/a.cs) 中间 [$csharp-code-rules](C:/x/SKILL.md) 结尾",
       ),
     ).toBe("先 中间 结尾");
-    expect(
-      stripMentionContext("[@documents](C:/x/documents) 看下"),
-    ).toBe("看下");
+    expect(stripMentionContext("[@documents](C:/x/documents) 看下")).toBe(
+      "看下",
+    );
     expect(stripMentionContext("先 [a.cs](src/a.cs) 看下")).toBe("先 看下");
   });
 
@@ -332,9 +334,9 @@ describe("toUserAttachment / isImagePath / baseName", () => {
   });
 
   it("stripLeadingRefLinks / stripMentionContext 剥离技能链接", () => {
-    expect(stripLeadingRefLinks("[$a](C:/x/SKILL.md) [$b](C:/y/SKILL.md) hello")).toBe(
-      "hello",
-    );
+    expect(
+      stripLeadingRefLinks("[$a](C:/x/SKILL.md) [$b](C:/y/SKILL.md) hello"),
+    ).toBe("hello");
     expect(stripLeadingRefLinks("普通文本")).toBe("普通文本");
     // 带文件段时 stripMentionContext 也去掉技能链接
     const text =

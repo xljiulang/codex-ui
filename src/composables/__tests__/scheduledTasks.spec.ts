@@ -18,7 +18,9 @@ describe("describeSchedule cron 调度描述", () => {
   });
 
   it("单次（带年份）显示具体时间", () => {
-    expect(describeSchedule("0 0 9 20 1 * 2026")).toBe("单次：2026-01-20 09:00");
+    expect(describeSchedule("0 0 9 20 1 * 2026")).toBe(
+      "单次：2026-01-20 09:00",
+    );
   });
 
   it("识别不了的模式回退原表达式", () => {

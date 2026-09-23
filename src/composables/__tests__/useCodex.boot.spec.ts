@@ -1,9 +1,17 @@
 import { init } from "../useCodex/boot";
 import { disposeEvents } from "../useCodex/events";
-import { __resetSessionTabsForTest, freshSessionTab } from "../useCodex/sessionState";
+import {
+  __resetSessionTabsForTest,
+  freshSessionTab,
+} from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { activeTabId } from "../useEditorTabs";
-import { capturedListeners, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  capturedListeners,
+  mockListenCapture,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { flushPromises } from "@vue/test-utils";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -184,10 +192,13 @@ describe("启动版本警告（仅低于 0.149.0）", () => {
 
     await init();
 
-    await vi.waitFor(() => {
-      expect(store.toast).toContain("codex-cli 0.148.2");
-      expect(store.toast).toContain("低于 0.149.0");
-    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        expect(store.toast).toContain("codex-cli 0.148.2");
+        expect(store.toast).toContain("低于 0.149.0");
+      },
+      { timeout: 3000, interval: 20 },
+    );
   });
 
   it("versionTooOld=false（0.149.x 或更高）：不提示", async () => {

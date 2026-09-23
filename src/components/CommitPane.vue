@@ -74,7 +74,9 @@ function openFileDiff(file: GitCommitFile) {
       <div v-if="detail.body" class="commit-body">{{ detail.body }}</div>
 
       <div class="commit-files">
-        <div class="commit-files-title">变更文件（{{ detail.files.length }}）</div>
+        <div class="commit-files-title">
+          变更文件（{{ detail.files.length }}）
+        </div>
         <div v-if="detail.files.length" class="commit-file-list">
           <button
             v-for="f in detail.files"
@@ -83,10 +85,7 @@ function openFileDiff(file: GitCommitFile) {
             v-tooltip="f.path"
             @click="openFileDiff(f)"
           >
-            <span
-              class="commit-file-status"
-              :class="'git-status-' + f.status"
-            >
+            <span class="commit-file-status" :class="'git-status-' + f.status">
               {{ gitStatusLetter(f.status) }}
             </span>
             <span class="commit-file-path">{{ f.path }}</span>

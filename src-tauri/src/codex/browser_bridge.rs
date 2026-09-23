@@ -632,12 +632,8 @@ fn terminate_pid(pid: u32, wait: std::time::Duration) -> Result<(), String> {
         return Err(format!("打开进程失败: {}", std::io::Error::last_os_error()));
     };
     let result = (|| -> Result<(), String> {
-        unsafe { TerminateProcess(handle, 1) }.map_err(|e| {
-            format!(
-                "结束进程失败: {e}（{}）",
-                std::io::Error::last_os_error()
-            )
-        })?;
+        unsafe { TerminateProcess(handle, 1) }
+            .map_err(|e| format!("结束进程失败: {e}（{}）", std::io::Error::last_os_error()))?;
         let waited = unsafe { WaitForSingleObject(handle, wait.as_millis() as u32) };
         if waited != WAIT_OBJECT_0 {
             return Err(format!(
@@ -724,7 +720,12 @@ mod tests {
     #[test]
     fn terminate_pid_kills_real_process() {
         let mut child = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()

@@ -30,7 +30,12 @@ const hasImage = computed(() => !!src.value);
 
 const statusLabel = computed(() => {
   const s = props.item.status;
-  if (s === "in_progress" || s === "inProgress" || s === "pending" || s === "started")
+  if (
+    s === "in_progress" ||
+    s === "inProgress" ||
+    s === "pending" ||
+    s === "started"
+  )
     return "生成中";
   if (s === "completed" || s === "succeeded" || s === "done") return "完成";
   if (s === "failed" || s === "error") return "失败";

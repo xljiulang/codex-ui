@@ -34,7 +34,9 @@
   border: 1px solid var(--border-light);
   box-shadow: var(--inset-shadow-md);
   border-radius: var(--radius-lg);
-  transition: border-color var(--ease-slow), box-shadow var(--ease-slow);
+  transition:
+    border-color var(--ease-slow),
+    box-shadow var(--ease-slow);
 }
 .composer-resize-handle {
   height: 8px;
@@ -58,7 +60,9 @@
   border-radius: 999px;
   background: rgba(var(--accent-rgb), 0.28);
   opacity: 0;
-  transition: opacity var(--ease), background-color var(--ease);
+  transition:
+    opacity var(--ease),
+    background-color var(--ease);
 }
 .composer-resize-handle:hover .composer-resize-grip,
 .composer-resize-handle.active .composer-resize-grip {
@@ -179,7 +183,9 @@ body.resizing-composer {
   color: var(--text-faint);
   background: var(--neutral-soft);
   border: 1px solid var(--border-light);
-  transition: border-color var(--ease), background-color var(--ease),
+  transition:
+    border-color var(--ease),
+    background-color var(--ease),
     box-shadow var(--ease);
 }
 .goal-chip:hover {
@@ -265,7 +271,10 @@ body.resizing-composer {
   background: var(--btn-primary-grad);
   color: var(--on-accent);
   box-shadow: var(--btn-glow);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
 }
 .send-btn svg {
   width: 13px;
@@ -293,7 +302,8 @@ body.resizing-composer {
     box-shadow: var(--btn-glow);
   }
   50% {
-    box-shadow: 0 2px 22px rgba(var(--accent-rgb), 0.6),
+    box-shadow:
+      0 2px 22px rgba(var(--accent-rgb), 0.6),
       inset 0 1px 0 rgba(255, 255, 255, 0.35);
   }
 }

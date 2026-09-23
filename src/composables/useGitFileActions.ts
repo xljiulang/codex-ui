@@ -36,7 +36,10 @@ export function useGitFileActions(options: {
     gitActionBusy.value = true;
     try {
       setGitOpInFlight(true);
-      const st = await invoke<GitStatus>(cmd, { workspace: root, path: relPath });
+      const st = await invoke<GitStatus>(cmd, {
+        workspace: root,
+        path: relPath,
+      });
       options.gitStatus.value = st;
       markGitStatusFresh();
     } catch (e) {

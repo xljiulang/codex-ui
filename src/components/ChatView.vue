@@ -195,7 +195,9 @@ onBeforeUnmount(() => {
         <template v-for="turn in turns" :key="turn.key">
           <section class="turn">
             <template v-for="row in turn.rows" :key="row.key">
-              <div v-if="row.kind === 'sep'" class="date-sep">{{ row.date }}</div>
+              <div v-if="row.kind === 'sep'" class="date-sep">
+                {{ row.date }}
+              </div>
               <MessageItem v-else :item="row.item" :tab="props.tab" />
             </template>
           </section>
@@ -225,7 +227,11 @@ onBeforeUnmount(() => {
           aria-label="回合导航"
           @keydown="onTurnNavKeydown"
         >
-          <svg viewBox="0 0 24 24" preserveAspectRatio="none" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
             <path :d="ICON_LINES_4" />
           </svg>
         </button>
@@ -357,7 +363,9 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-md);
   cursor: pointer;
   opacity: 0.9;
-  transition: opacity var(--ease), border-color var(--ease);
+  transition:
+    opacity var(--ease),
+    border-color var(--ease);
 }
 
 .scroll-bottom-btn svg {
@@ -402,7 +410,9 @@ onBeforeUnmount(() => {
   background: none;
   box-shadow: none;
   cursor: default;
-  transition: opacity var(--ease), color var(--ease);
+  transition:
+    opacity var(--ease),
+    color var(--ease);
 }
 
 .turn-nav-btn svg {
@@ -618,7 +628,9 @@ onBeforeUnmount(() => {
 @keyframes turn-highlight-flash {
   0%,
   100% {
-    box-shadow: var(--inset-shadow), 0 2px 12px rgba(var(--accent-rgb), 0.13);
+    box-shadow:
+      var(--inset-shadow),
+      0 2px 12px rgba(var(--accent-rgb), 0.13);
   }
   30% {
     box-shadow:

@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   loadModelProviderConfig,
@@ -7,9 +14,7 @@ import {
   setToast,
   toastError,
 } from "../../composables/useCodex";
-import type {
-  ModelProviderConfigState,
-} from "../../composables/useCodex";
+import type { ModelProviderConfigState } from "../../composables/useCodex";
 import { openPathInAppOrReveal } from "../../composables/usePathOpen";
 import { openDocsUrl } from "../../lib/links";
 import { filterCatalogByModelIds } from "../../lib/modelCatalog";
@@ -391,7 +396,9 @@ function removeProvider(index: number) {
 
 /** 仅当提供方同时有 base_url 和 API Key 时显示「生成模型目录」按钮。 */
 function canGenerateModelCatalog(p: ModelProviderInfo): boolean {
-  return !!(p.base_url ?? "").trim() && !!(p.experimental_bearer_token ?? "").trim();
+  return (
+    !!(p.base_url ?? "").trim() && !!(p.experimental_bearer_token ?? "").trim()
+  );
 }
 
 /** 模型目录标题链接提示：文件存在时为打开动作，文件缺失或路径未读取时给出状态。 */
@@ -493,8 +500,12 @@ function confirmCatalogPicker() {
       catalogPicker.selectedIds,
     );
     modelConfigErrors.catalog = "";
-    const skippedCount = catalogPicker.incompatible + catalogPicker.unmatched + catalogPicker.invalid;
-    const skipped = skippedCount > 0 ? `，跳过 ${skippedCount} 个不可用模型` : "";
+    const skippedCount =
+      catalogPicker.incompatible +
+      catalogPicker.unmatched +
+      catalogPicker.invalid;
+    const skipped =
+      skippedCount > 0 ? `，跳过 ${skippedCount} 个不可用模型` : "";
     setToast(
       `已生成 ${catalogPicker.selectedIds.length} 个模型条目${skipped}，保存并重启 codex-ui 后生效`,
     );
@@ -526,17 +537,24 @@ async function generateModelCatalog(p: ModelProviderInfo) {
       },
     );
     if (!componentAlive || generationId !== catalogGenerationId) return;
-    const current = modelConfig.providers.find((item) => item.key === provider.key);
-    if (!current || current.base_url !== provider.base_url ||
-      current.experimental_bearer_token !== provider.experimental_bearer_token) {
+    const current = modelConfig.providers.find(
+      (item) => item.key === provider.key,
+    );
+    if (
+      !current ||
+      current.base_url !== provider.base_url ||
+      current.experimental_bearer_token !== provider.experimental_bearer_token
+    ) {
       setToast("提供方配置已变更，请重新生成模型目录");
       return;
     }
     openCatalogPicker(provider, res);
   } catch (e) {
-    if (componentAlive && generationId === catalogGenerationId) setToast(toastError(e));
+    if (componentAlive && generationId === catalogGenerationId)
+      setToast(toastError(e));
   } finally {
-    if (componentAlive && generationId === catalogGenerationId) catalogGenerating.value = "";
+    if (componentAlive && generationId === catalogGenerationId)
+      catalogGenerating.value = "";
   }
 }
 
@@ -635,7 +653,9 @@ async function saveModelConfig() {
       model_provider: modelConfig.model_provider,
       preferred_auth_method: modelConfig.preferred_auth_method.trim(),
       forced_login_method: modelConfig.forced_login_method.trim(),
-      model_catalog_json: catalogContent ? modelConfig.model_catalog_path : null,
+      model_catalog_json: catalogContent
+        ? modelConfig.model_catalog_path
+        : null,
       providers: modelConfig.providers,
     };
     await saveModelProviderConfig(input);
@@ -655,11 +675,12 @@ function openModelConfigFile() {
 </script>
 
 <template>
-  <section v-show="active" class="settings-section settings-section-model-config">
+  <section
+    v-show="active"
+    class="settings-section settings-section-model-config"
+  >
     <h2 class="settings-section-title">模型配置</h2>
-    <p class="settings-section-desc">
-      模型、模型提供方与模型目录
-    </p>
+    <p class="settings-section-desc">模型、模型提供方与模型目录</p>
 
     <div class="model-config-card">
       <div class="model-config-card-head">
@@ -747,16 +768,24 @@ function openModelConfigFile() {
             />
             <span class="model-provider-name">
               {{ p.name || p.key }}
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </span>
             <span class="model-provider-key">{{ p.key }}</span>
-            <span v-if="p.wire_api" class="model-provider-wire">{{ p.wire_api }}</span>
+            <span v-if="p.wire_api" class="model-provider-wire">{{
+              p.wire_api
+            }}</span>
           </label>
           <div class="model-provider-actions">
             <!-- 仅当前选中的提供方行显示：能力不足直接不渲染（不用禁用态说明原因） -->
             <button
               v-if="
-                modelConfig.model_provider === p.key && canGenerateModelCatalog(p)
+                modelConfig.model_provider === p.key &&
+                canGenerateModelCatalog(p)
               "
               class="btn btn-icon model-catalog-generate"
               :disabled="
@@ -802,10 +831,7 @@ function openModelConfigFile() {
             {{ providerRowError(p) }}
           </p>
         </div>
-        <p
-          v-if="modelConfigErrors.provider"
-          class="model-config-field-error"
-        >
+        <p v-if="modelConfigErrors.provider" class="model-config-field-error">
           {{ modelConfigErrors.provider }}
         </p>
       </div>
@@ -817,7 +843,10 @@ function openModelConfigFile() {
             <button
               type="button"
               class="model-config-title-link model-catalog-title-link"
-              :disabled="!modelConfig.model_catalog_exists || !modelConfig.model_catalog_path"
+              :disabled="
+                !modelConfig.model_catalog_exists ||
+                !modelConfig.model_catalog_path
+              "
               :aria-label="`在编辑器中打开 ${modelConfig.model_catalog_path}`"
               @click="openModelConfigFile"
             >
@@ -842,9 +871,7 @@ function openModelConfigFile() {
           class="setting-row"
           :class="{ 'model-config-row-error': modelConfigErrors.model }"
         >
-          <label for="model-config-ui-model">
-            model（模型标识）
-          </label>
+          <label for="model-config-ui-model"> model（模型标识） </label>
           <ModelConfigModelPicker
             id="model-config-ui-model"
             v-model="modelConfig.model"
@@ -852,15 +879,14 @@ function openModelConfigFile() {
             :disabled="modelConfig.loading"
             :error="!!modelConfigErrors.model"
           />
-          <p
-            v-if="modelConfigErrors.model"
-            class="model-config-field-error"
-          >
+          <p v-if="modelConfigErrors.model" class="model-config-field-error">
             {{ modelConfigErrors.model }}
           </p>
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-effort">model_reasoning_effort（推理强度）</label>
+          <label for="model-config-ui-effort"
+            >model_reasoning_effort（推理强度）</label
+          >
           <AppSelect
             id="model-config-ui-effort"
             v-model="modelConfig.model_reasoning_effort"
@@ -869,7 +895,9 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-reasoning-summary">model_reasoning_summary（推理摘要）</label>
+          <label for="model-config-ui-reasoning-summary"
+            >model_reasoning_summary（推理摘要）</label
+          >
           <AppSelect
             id="model-config-ui-reasoning-summary"
             v-model="modelConfig.model_reasoning_summary"
@@ -878,7 +906,9 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-auth">preferred_auth_method（优先认证方式）</label>
+          <label for="model-config-ui-auth"
+            >preferred_auth_method（优先认证方式）</label
+          >
           <AppSelect
             id="model-config-ui-auth"
             v-model="modelConfig.preferred_auth_method"
@@ -887,7 +917,9 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-forced">forced_login_method（强制登录方式）</label>
+          <label for="model-config-ui-forced"
+            >forced_login_method（强制登录方式）</label
+          >
           <AppSelect
             id="model-config-ui-forced"
             v-model="modelConfig.forced_login_method"
@@ -896,7 +928,9 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-personality">personality（回复风格）</label>
+          <label for="model-config-ui-personality"
+            >personality（回复风格）</label
+          >
           <AppSelect
             id="model-config-ui-personality"
             v-model="modelConfig.personality"
@@ -905,7 +939,9 @@ function openModelConfigFile() {
           />
         </div>
         <div class="setting-row">
-          <label for="model-config-ui-verbosity">model_verbosity（输出详细程度）</label>
+          <label for="model-config-ui-verbosity"
+            >model_verbosity（输出详细程度）</label
+          >
           <AppSelect
             id="model-config-ui-verbosity"
             v-model="modelConfig.model_verbosity"
@@ -917,7 +953,9 @@ function openModelConfigFile() {
 
       <ModalDialog
         v-if="providerForm.open"
-        :title="providerForm.editingIndex >= 0 ? '编辑模型提供方' : '添加模型提供方'"
+        :title="
+          providerForm.editingIndex >= 0 ? '编辑模型提供方' : '添加模型提供方'
+        "
         closable
         @close="closeProviderForm"
       >
@@ -928,7 +966,12 @@ function openModelConfigFile() {
           >
             <label>
               key（标识）
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </label>
             <input
               v-model="providerForm.key"
@@ -937,10 +980,7 @@ function openModelConfigFile() {
               placeholder="如 my-provider"
               :class="{ 'model-config-input-error': providerFormErrors.key }"
             />
-            <p
-              v-if="providerFormErrors.key"
-              class="model-config-field-error"
-            >
+            <p v-if="providerFormErrors.key" class="model-config-field-error">
               {{ providerFormErrors.key }}
             </p>
           </div>
@@ -950,7 +990,12 @@ function openModelConfigFile() {
           >
             <label>
               name（名称）
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </label>
             <input
               v-model="providerForm.name"
@@ -958,10 +1003,7 @@ function openModelConfigFile() {
               placeholder="如 DeepSeek"
               :class="{ 'model-config-input-error': providerFormErrors.name }"
             />
-            <p
-              v-if="providerFormErrors.name"
-              class="model-config-field-error"
-            >
+            <p v-if="providerFormErrors.name" class="model-config-field-error">
               {{ providerFormErrors.name }}
             </p>
           </div>
@@ -971,7 +1013,12 @@ function openModelConfigFile() {
           >
             <label>
               base_url（接口地址）
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </label>
             <input
               v-model="providerForm.base_url"
@@ -1013,22 +1060,24 @@ function openModelConfigFile() {
             class="setting-row"
             :class="{ 'model-config-row-error': providerFormErrors.auth }"
           >
-            <label>experimental_bearer_token（API Key，一般是 sk-* 前缀）</label>
+            <label
+              >experimental_bearer_token（API Key，一般是 sk-* 前缀）</label
+            >
             <input
               v-model="providerForm.experimental_bearer_token"
               type="password"
               placeholder="API Key"
             />
-            <p
-              v-if="providerFormErrors.auth"
-              class="model-config-field-error"
-            >
+            <p v-if="providerFormErrors.auth" class="model-config-field-error">
               {{ providerFormErrors.auth }}
             </p>
           </div>
           <div class="setting-row">
             <label>wire_api（接口协议）</label>
-            <AppSelect v-model="providerForm.wire_api" :options="wireApiOptions" />
+            <AppSelect
+              v-model="providerForm.wire_api"
+              :options="wireApiOptions"
+            />
           </div>
         </div>
         <template #foot>
@@ -1054,7 +1103,9 @@ function openModelConfigFile() {
           <div class="model-catalog-picker-meta">
             <div class="model-catalog-picker-provider">
               <span>{{ catalogPicker.providerName }}</span>
-              <span class="model-catalog-picker-url">{{ catalogPicker.baseUrl }}</span>
+              <span class="model-catalog-picker-url">{{
+                catalogPicker.baseUrl
+              }}</span>
             </div>
             <p>
               获取 {{ catalogPicker.total }} 个模型：可生成
@@ -1112,12 +1163,11 @@ function openModelConfigFile() {
                 v-model="catalogPicker.selectedIds"
                 :disabled="!model.selectable"
               />
-              <span
-                class="model-catalog-picker-text"
-                @click.stop.prevent
-              >
+              <span class="model-catalog-picker-text" @click.stop.prevent>
                 <span class="model-catalog-picker-id">{{ model.id }}</span>
-                <span class="model-catalog-picker-name">{{ model.display_name }}</span>
+                <span class="model-catalog-picker-name">{{
+                  model.display_name
+                }}</span>
               </span>
               <span class="model-catalog-picker-details" @click.stop.prevent>
                 <span
@@ -1351,5 +1401,4 @@ function openModelConfigFile() {
   align-items: center;
   gap: var(--space-4);
 }
-
 </style>

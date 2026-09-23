@@ -18,7 +18,9 @@ describe("权限模式映射", () => {
       "帮我批准",
       "完全访问",
     ]);
-    expect(PERMISSION_MODES[3].desc).toBe("不受限制地访问互联网和您电脑的任何文件");
+    expect(PERMISSION_MODES[3].desc).toBe(
+      "不受限制地访问互联网和您电脑的任何文件",
+    );
     expect(PERMISSION_MODES[0].desc).toBe("文件只读，不会联网");
   });
 

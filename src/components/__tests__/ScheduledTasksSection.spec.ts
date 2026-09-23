@@ -3,7 +3,8 @@ import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     loadScheduledTasks: vi.fn(async () => {}),
@@ -18,7 +19,9 @@ vi.mock("../../composables/useCodex", async (importOriginal) => {
     toastError: vi.fn((e: unknown) => String(e)),
   };
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue(undefined),
+}));
 
 import ScheduledTasksSection from "../settings/ScheduledTasksSection.vue";
 import {
@@ -56,7 +59,14 @@ const activeTask = {
 beforeEach(() => {
   store.scheduledTasks = [];
   store.threads = [
-    { id: "t1", name: "会话一", preview: "", createdAt: now, recencyAt: now, cwd: "D:\\repo" },
+    {
+      id: "t1",
+      name: "会话一",
+      preview: "",
+      createdAt: now,
+      recencyAt: now,
+      cwd: "D:\\repo",
+    },
   ] as never;
   vi.clearAllMocks();
 });
@@ -140,10 +150,12 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     await wrapper.find(".sched-row-edit").trigger("click");
     expect(wrapper.find(".sched-edit-form").exists()).toBe(true);
     expect(
-      (wrapper.find(".sched-edit-form input").element as HTMLInputElement).value,
+      (wrapper.find(".sched-edit-form input").element as HTMLInputElement)
+        .value,
     ).toBe("每日总结");
     expect(
-      (wrapper.find(".sched-edit-form textarea").element as HTMLTextAreaElement).value,
+      (wrapper.find(".sched-edit-form textarea").element as HTMLTextAreaElement)
+        .value,
     ).toBe("总结昨天的提交");
     // 修改标题后保存
     await wrapper.find(".sched-edit-form input").setValue("新标题");
@@ -175,7 +187,14 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
   it("单次任务完成后进入「已完成」归档分组，可展开查看记录", async () => {
     store.scheduledTasks = [
       { ...activeTask },
-      { ...activeTask, id: "task-2", name: "一次性任务", enabled: false, done: true, cron: "0 0 9 20 1 * 2026" },
+      {
+        ...activeTask,
+        id: "task-2",
+        name: "一次性任务",
+        enabled: false,
+        done: true,
+        cron: "0 0 9 20 1 * 2026",
+      },
     ];
     const wrapper = mount(ScheduledTasksSection);
     expect(wrapper.text()).toContain("已完成（1）");
@@ -203,7 +222,13 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     // 收起，任务执行完成
     await wrapper.find(".sched-task-main").trigger("click");
     mockedRuns.mockResolvedValueOnce([
-      { id: 1, taskId: "task-1", startedAt: now, status: "success", result: "结果" },
+      {
+        id: 1,
+        taskId: "task-1",
+        startedAt: now,
+        status: "success",
+        result: "结果",
+      },
     ]);
     // 重新展开：应重置 done 标记并重新拉取
     await wrapper.find(".sched-task-main").trigger("click");
@@ -222,7 +247,14 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
   it("会话无 name 但有 preview：绑定会话显示摘要而非会话 ID", () => {
     store.scheduledTasks = [{ ...activeTask, threadId: "t2" }];
     store.threads = [
-      { id: "t2", name: "", preview: "首条消息摘要", createdAt: now, recencyAt: now, cwd: "D:\\repo" },
+      {
+        id: "t2",
+        name: "",
+        preview: "首条消息摘要",
+        createdAt: now,
+        recencyAt: now,
+        cwd: "D:\\repo",
+      },
     ] as never;
     const wrapper = mount(ScheduledTasksSection);
     expect(wrapper.text()).toContain("首条消息摘要");
@@ -232,7 +264,14 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
   it("会话无 name 且无 preview：绑定会话显示「新会话」而非会话 ID", () => {
     store.scheduledTasks = [{ ...activeTask, threadId: "t3" }];
     store.threads = [
-      { id: "t3", name: "", preview: "", createdAt: now, recencyAt: now, cwd: "D:\\repo" },
+      {
+        id: "t3",
+        name: "",
+        preview: "",
+        createdAt: now,
+        recencyAt: now,
+        cwd: "D:\\repo",
+      },
     ] as never;
     const wrapper = mount(ScheduledTasksSection);
     expect(wrapper.text()).toContain("新会话");

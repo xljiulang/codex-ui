@@ -14,7 +14,11 @@ const Harness = defineComponent({
 });
 
 function wheel(el: Element, deltaY: number, ctrlKey = true): WheelEvent {
-  const e = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true });
+  const e = new WheelEvent("wheel", {
+    deltaY,
+    bubbles: true,
+    cancelable: true,
+  });
   // happy-dom 的 WheelEvent 构造不接收 ctrlKey，手动定义
   Object.defineProperty(e, "ctrlKey", { value: ctrlKey, configurable: true });
   el.dispatchEvent(e);

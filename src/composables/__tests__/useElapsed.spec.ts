@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-const { holder } = vi.hoisted(() => ({ holder: {} as { ref?: { value: number } } }));
+const { holder } = vi.hoisted(() => ({
+  holder: {} as { ref?: { value: number } },
+}));
 
 vi.mock("../useClock", async () => {
   const { ref } = await import("vue");

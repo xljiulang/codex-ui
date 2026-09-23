@@ -41,9 +41,7 @@ function isRequired(key: string): boolean {
 /** 单选/多选 enum schema：oneOf/anyOf（const+title）或 enum（+enumNames） */
 function isEnumSchema(s: Record<string, unknown>): boolean {
   return (
-    Array.isArray(s.oneOf) ||
-    Array.isArray(s.anyOf) ||
-    Array.isArray(s.enum)
+    Array.isArray(s.oneOf) || Array.isArray(s.anyOf) || Array.isArray(s.enum)
   );
 }
 
@@ -51,15 +49,21 @@ function isMultiEnum(s: Record<string, unknown>): boolean {
   return s.type === "array" && isEnumSchema(obj(s.items));
 }
 
-function enumOptions(s: Record<string, unknown>): { value: string; title: string }[] {
-  const oneOf = list(s.oneOf).map(obj).filter((o) => o.const !== undefined);
+function enumOptions(
+  s: Record<string, unknown>,
+): { value: string; title: string }[] {
+  const oneOf = list(s.oneOf)
+    .map(obj)
+    .filter((o) => o.const !== undefined);
   if (oneOf.length) {
     return oneOf.map((o) => ({
       value: str(o.const),
       title: str(o.title ?? o.const),
     }));
   }
-  const anyOf = list(s.anyOf).map(obj).filter((o) => o.const !== undefined);
+  const anyOf = list(s.anyOf)
+    .map(obj)
+    .filter((o) => o.const !== undefined);
   if (anyOf.length) {
     return anyOf.map((o) => ({
       value: str(o.const),
@@ -151,10 +155,16 @@ async function handleElicitation() {
 <template>
   <div class="approval-hero">
     <div class="approval-label">来自 {{ params.serverName }} 的请求</div>
-    <div v-if="params.message" class="approval-reason">{{ params.message }}</div>
+    <div v-if="params.message" class="approval-reason">
+      {{ params.message }}
+    </div>
   </div>
   <template v-if="obj(params).mode !== 'url'">
-    <div v-for="[key, prop] in schemaProperties()" :key="key" class="question-row">
+    <div
+      v-for="[key, prop] in schemaProperties()"
+      :key="key"
+      class="question-row"
+    >
       <div class="question-text">
         {{ prop.title ?? key }}
         <span v-if="isRequired(key)" class="required-mark"> *</span>

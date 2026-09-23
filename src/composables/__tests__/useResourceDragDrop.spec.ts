@@ -62,10 +62,11 @@ describe("useResourceDragDrop", () => {
     const wrapper = mount(Wrapper);
     const d = wrapper.vm.d as ReturnType<typeof useResourceDragDrop>;
 
-    d.onRowPointerDown(
-      entry("D:\\repo\\a.txt"),
-      { button: 0, clientX: 10, clientY: 10 } as PointerEvent,
-    );
+    d.onRowPointerDown(entry("D:\\repo\\a.txt"), {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    } as PointerEvent);
     expect(d.isDragInteraction.value).toBe(true);
 
     // 移动 3px（阈值 5 内）→ 不激活
@@ -128,10 +129,11 @@ describe("useResourceDragDrop", () => {
     const wrapper = mount(Wrapper);
     const d = wrapper.vm.d as ReturnType<typeof useResourceDragDrop>;
 
-    d.onRowPointerDown(
-      entry("D:\\repo\\a.txt"),
-      { button: 0, clientX: 10, clientY: 10 } as PointerEvent,
-    );
+    d.onRowPointerDown(entry("D:\\repo\\a.txt"), {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    } as PointerEvent);
     // 区内激活：幽灵显示
     window.dispatchEvent(pointer(30, 30));
     expect(d.dragActive.value).toBe(true);
@@ -149,7 +151,9 @@ describe("useResourceDragDrop", () => {
 
     // 区外松手：不移动、状态清理
     window.dispatchEvent(pointer(150, 150));
-    window.dispatchEvent(new MouseEvent("pointerup") as unknown as PointerEvent);
+    window.dispatchEvent(
+      new MouseEvent("pointerup") as unknown as PointerEvent,
+    );
     expect(moveEntry).not.toHaveBeenCalled();
     expect(d.isDragInteraction.value).toBe(false);
     expect(document.body.classList.contains("resource-dragging")).toBe(false);

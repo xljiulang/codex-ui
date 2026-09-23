@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { EditorView } from "@codemirror/view";
 import { redo, selectAll, undo } from "@codemirror/commands";
@@ -8,7 +15,10 @@ import { formatFileSize } from "../lib/sessionFs";
 import { languageFromPath } from "../lib/highlight";
 import { relPathOf } from "../lib/format";
 import { saveFileTab, type FileEditorTab } from "../composables/useEditorTabs";
-import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
+import {
+  useActionMenu,
+  type ActionMenuItem,
+} from "../composables/useActionMenu";
 import { setToast } from "../composables/useCodex";
 import { copyText } from "../lib/clipboard";
 import { formatDoc, isFormattablePath } from "../lib/codeFormat";
@@ -46,13 +56,9 @@ const previewMode = computed({
   },
 });
 
-const langLabel = computed(
-  () => languageFromPath(props.tab.path) ?? "text",
-);
+const langLabel = computed(() => languageFromPath(props.tab.path) ?? "text");
 const byteSizeLabel = computed(() =>
-  props.tab.byteSize == null
-    ? ""
-    : formatFileSize(props.tab.byteSize),
+  props.tab.byteSize == null ? "" : formatFileSize(props.tab.byteSize),
 );
 
 /**
@@ -321,13 +327,16 @@ onBeforeUnmount(() => {
   <div class="text-editor-pane text-editor-embedded">
     <div class="text-editor-head">
       <span class="text-editor-title">
-        <span class="text-editor-path">{{ relPathOf(tab.workspace, tab.path) }}</span>
+        <span class="text-editor-path">{{
+          relPathOf(tab.workspace, tab.path)
+        }}</span>
         <span class="text-editor-lang">{{ langLabel }}</span>
         <span
           v-if="tab.languageDisabled"
           class="text-editor-ro"
           v-tooltip="'文件存在超长行，已停用语法高亮以保持流畅'"
-        >纯文本</span>
+          >纯文本</span
+        >
         <span v-if="tab.dirty" class="text-editor-dirty">未保存</span>
         <span v-if="tab.readOnly" class="text-editor-ro">只读</span>
       </span>
@@ -380,14 +389,22 @@ onBeforeUnmount(() => {
       <div v-if="tab.readOnly" class="text-editor-banner">
         该文件不是 UTF-8 编码，已以只读方式打开（保存功能已禁用）。
       </div>
-      <div v-show="!previewMode" ref="editorHost" class="text-editor-host"></div>
+      <div
+        v-show="!previewMode"
+        ref="editorHost"
+        class="text-editor-host"
+      ></div>
       <div v-if="previewMode" class="text-editor-preview">
         <MarkdownText :text="previewText" :base-path="mdAbsPath" />
       </div>
     </div>
     <div class="text-editor-status">
-      <span v-if="!previewMode">行 {{ tab.cursor.line }}，列 {{ tab.cursor.col }}</span>
-      <span>{{ tab.languageDisabled ? "纯文本（超长行，已停用语法高亮）" : langLabel }}</span>
+      <span v-if="!previewMode"
+        >行 {{ tab.cursor.line }}，列 {{ tab.cursor.col }}</span
+      >
+      <span>{{
+        tab.languageDisabled ? "纯文本（超长行，已停用语法高亮）" : langLabel
+      }}</span>
       <span>UTF-8{{ tab.readOnly ? "（只读）" : "" }}</span>
       <span v-if="byteSizeLabel">{{ byteSizeLabel }}</span>
       <span>{{ tab.eol === "\r\n" ? "CRLF" : "LF" }}</span>

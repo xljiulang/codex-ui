@@ -4,8 +4,7 @@ import type { GitStatus } from "../../lib/gitChanges";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../useCodex", async (importOriginal) => {
-  const mod =
-    await importOriginal<typeof import("../useCodex")>();
+  const mod = await importOriginal<typeof import("../useCodex")>();
   return { ...mod, setToast: vi.fn() };
 });
 

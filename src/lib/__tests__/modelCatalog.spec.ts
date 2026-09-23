@@ -6,7 +6,11 @@ function catalogText(): string {
     {
       models: [
         { slug: "deepseek-chat", display_name: "Deepseek-Chat", priority: 1 },
-        { slug: "deepseek-reasoner", display_name: "Deepseek-Reasoner", priority: 2 },
+        {
+          slug: "deepseek-reasoner",
+          display_name: "Deepseek-Reasoner",
+          priority: 2,
+        },
         { slug: "deepseek-coder", display_name: "Deepseek-Coder", priority: 3 },
       ],
     },
@@ -18,7 +22,10 @@ function catalogText(): string {
 describe("filterCatalogByModelIds", () => {
   it("只保留选中的模型并按原顺序重排 priority", () => {
     const result = JSON.parse(
-      filterCatalogByModelIds(catalogText(), ["deepseek-coder", "deepseek-chat"]),
+      filterCatalogByModelIds(catalogText(), [
+        "deepseek-coder",
+        "deepseek-chat",
+      ]),
     ) as {
       models: Array<{ slug: string; priority: number }>;
     };

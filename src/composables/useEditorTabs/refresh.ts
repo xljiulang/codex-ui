@@ -35,7 +35,9 @@ let deferredTimer: ReturnType<typeof setTimeout> | null = null;
 const EDITOR_HOST_SELECTOR = ".text-editor-host";
 
 function editorHostOf(target: EventTarget | null): Element | null {
-  return target instanceof Element ? target.closest(EDITOR_HOST_SELECTOR) : null;
+  return target instanceof Element
+    ? target.closest(EDITOR_HOST_SELECTOR)
+    : null;
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -67,9 +69,7 @@ function sameRelPath(a: string, b: string): boolean {
 function isFileLikeTab(
   tab: Tab | undefined,
 ): tab is FileEditorTab | PreviewEditorTab {
-  return (
-    !!tab && (tab.kind === TabKind.File || tab.kind === TabKind.Preview)
-  );
+  return !!tab && (tab.kind === TabKind.File || tab.kind === TabKind.Preview);
 }
 
 /** 标签是否命中事件载荷（工作区 + 相对路径；payload 缺失视为命中） */
@@ -109,7 +109,8 @@ export async function refreshTabsFromFs(
   }
   if (refreshing) return;
   const tab = tabs.find((t) => t.id === activeTabId.value);
-  if (!isFileLikeTab(tab) || tab.missing || !matchesPayload(tab, payload)) return;
+  if (!isFileLikeTab(tab) || tab.missing || !matchesPayload(tab, payload))
+    return;
   if (tab.kind === TabKind.File) {
     if (tab.dirty) {
       tab.status = "文件已在外部变更（存在未保存修改）";

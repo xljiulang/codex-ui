@@ -22,7 +22,9 @@ function badge(color: string, inner: string): string {
 function gearGlyph(color: string): string {
   const tooth = `<rect x="7.25" y=".9" width="1.5" height="3.2" rx=".6"/>`;
   const teeth = [0, 45, 90, 135, 180, 225, 270, 315]
-    .map((a) => (a === 0 ? tooth : `<g transform="rotate(${a} 8 8)">${tooth}</g>`))
+    .map((a) =>
+      a === 0 ? tooth : `<g transform="rotate(${a} 8 8)">${tooth}</g>`,
+    )
     .join("");
   return `<g fill="${color}"><path fill-rule="evenodd" d="M8 3.7A4.3 4.3 0 1 0 8 12.3 4.3 4.3 0 0 0 8 3.7zm0 2.4a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8z"/>${teeth}</g>`;
 }
@@ -125,7 +127,9 @@ const SWIFT = svg(
 );
 
 /* C / C++ / C#：蓝系底徽 + 字符 */
-const C_ICON = svg(badge("#03599C", stroke("#fff", "M10.9 5.9a3.1 3.1 0 1 0 0 4.2", 1.5)));
+const C_ICON = svg(
+  badge("#03599C", stroke("#fff", "M10.9 5.9a3.1 3.1 0 1 0 0 4.2", 1.5)),
+);
 const CPP = svg(
   badge(
     "#00599C",
@@ -171,8 +175,12 @@ const MD = svg(
 );
 
 /* YAML / TOML：底徽字标 */
-const YML = svg(badge("#6B4E9E", stroke("#fff", "M5 4.6 8 8l3-3.4M8 8v3.8", 1.3)));
-const TOML = svg(badge("#9C4121", stroke("#fff", "M4.7 4.9h6.6M8 4.9v6.6", 1.3)));
+const YML = svg(
+  badge("#6B4E9E", stroke("#fff", "M5 4.6 8 8l3-3.4M8 8v3.8", 1.3)),
+);
+const TOML = svg(
+  badge("#9C4121", stroke("#fff", "M4.7 4.9h6.6M8 4.9v6.6", 1.3)),
+);
 
 /* SQL：数据库圆柱 */
 const SQL = svg(
@@ -192,7 +200,9 @@ const DOCKER = svg(
 );
 
 /* Makefile：灰底 M */
-const MAKE = svg(badge("#6D8086", stroke("#fff", "M5.6 11.2V5L8 8.2 10.4 5v6.2", 1.3)));
+const MAKE = svg(
+  badge("#6D8086", stroke("#fff", "M5.6 11.2V5L8 8.2 10.4 5v6.2", 1.3)),
+);
 
 /* Git 点文件：橙色分支 */
 const GIT = svg(

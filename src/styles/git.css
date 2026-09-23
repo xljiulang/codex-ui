@@ -83,7 +83,9 @@
   font-weight: 700;
   color: var(--text-bright);
   overflow: hidden;
-  transition: color var(--ease), background-color var(--ease),
+  transition:
+    color var(--ease),
+    background-color var(--ease),
     border-color var(--ease);
 }
 
@@ -548,7 +550,9 @@
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  transition: color var(--ease), background-color var(--ease),
+  transition:
+    color var(--ease),
+    background-color var(--ease),
     border-color var(--ease);
 }
 
@@ -700,7 +704,9 @@
   user-select: none;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
 }
 
 .git-section-head:hover {
@@ -720,7 +726,9 @@
   height: 12px;
   fill: currentColor;
   color: var(--text-dim);
-  transition: transform var(--ease), color var(--ease);
+  transition:
+    transform var(--ease),
+    color var(--ease);
 }
 
 /* 分区标题图标（箭头与文字之间），配色跟随标题文字 */
@@ -778,7 +786,9 @@
   border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
 }
 
 .git-file:hover {
@@ -876,7 +886,9 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
 }
 
 .git-log-item:hover {
@@ -964,7 +976,9 @@
   border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
 }
 
 .git-tree-row:hover {
@@ -1109,7 +1123,9 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
 }
 
 .commit-file:hover {

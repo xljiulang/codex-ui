@@ -41,7 +41,10 @@ export async function removeScheduledTask(id: string): Promise<void> {
   await invoke("scheduled_task_remove", { id });
 }
 
-export async function setScheduledTaskEnabled(id: string, enabled: boolean): Promise<void> {
+export async function setScheduledTaskEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<void> {
   await invoke("scheduled_task_set_enabled", { id, enabled });
 }
 
@@ -79,7 +82,11 @@ export async function loadScheduledTaskRuns(
   limit = 20,
   offset = 0,
 ): Promise<TaskRunRecord[]> {
-  return invoke<TaskRunRecord[]>("scheduled_task_runs", { taskId, limit, offset });
+  return invoke<TaskRunRecord[]>("scheduled_task_runs", {
+    taskId,
+    limit,
+    offset,
+  });
 }
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
@@ -102,12 +109,26 @@ export function describeSchedule(cron: string): string {
 
   // 每 N 分钟：0 */N * * * *
   const stepMin = /^\*\/(\d+)$/.exec(min);
-  if (stepMin && (sec === "0" || sec === "*") && wild(hour) && wild(dom) && wild(mon) && wild(dow)) {
+  if (
+    stepMin &&
+    (sec === "0" || sec === "*") &&
+    wild(hour) &&
+    wild(dom) &&
+    wild(mon) &&
+    wild(dow)
+  ) {
     const n = Number(stepMin[1]);
     if (n > 0) return `每 ${n} 分钟`;
   }
   // 每小时：0 0 * * * *
-  if (sec === "0" && min === "0" && wild(hour) && wild(dom) && wild(mon) && wild(dow)) {
+  if (
+    sec === "0" &&
+    min === "0" &&
+    wild(hour) &&
+    wild(dom) &&
+    wild(mon) &&
+    wild(dow)
+  ) {
     return "每小时";
   }
   // 每天 / 每周：时分固定
@@ -121,7 +142,11 @@ export function describeSchedule(cron: string): string {
   // 单次（带年份）
   if (
     parts.length === 7 &&
-    isNum(year!) && isNum(mon) && isNum(dom) && isNum(hour) && isNum(min)
+    isNum(year!) &&
+    isNum(mon) &&
+    isNum(dom) &&
+    isNum(hour) &&
+    isNum(min)
   ) {
     return `单次：${year}-${pad2(mon)}-${pad2(dom)} ${hm}`;
   }

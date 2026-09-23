@@ -2,10 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import type { UserInput } from "../lib/types";
 import { assetUrl } from "../lib/asset";
-import {
-  toUserAttachment,
-  type FuzzyFileResult,
-} from "../lib/mention";
+import { toUserAttachment, type FuzzyFileResult } from "../lib/mention";
 import {
   ensureSkills,
   ensureThreadPlugins,
@@ -145,9 +142,10 @@ function selectRow(row: Row) {
   if (row.kind === "title") return; // 组标题不可选中
   if (row.kind === "file") {
     const { root, path, file_name } = row.item;
-    const full = root.endsWith("\\") || root.endsWith("/")
-      ? root + path
-      : root + "\\" + path;
+    const full =
+      root.endsWith("\\") || root.endsWith("/")
+        ? root + path
+        : root + "\\" + path;
     emit("select-file", toUserAttachment(file_name, full));
   } else if (row.kind === "native-file") {
     emit("pick-files");
@@ -165,7 +163,8 @@ function selectRow(row: Row) {
 }
 
 function rowIcon(row: Row): string {
-  if (row.kind === "file") return row.item.match_type === "directory" ? "D" : "F";
+  if (row.kind === "file")
+    return row.item.match_type === "directory" ? "D" : "F";
   if (row.kind === "plugin") return "";
   return row.kind === "native-file" ? "F" : "D";
 }
@@ -258,13 +257,17 @@ function pluginInitial(p: PluginItem): string {
             </span>
             <span>
               <div class="menu-item-label">{{ rowLabel(row) }}</div>
-              <div v-if="rowDesc(row)" class="menu-item-desc">{{ rowDesc(row) }}</div>
+              <div v-if="rowDesc(row)" class="menu-item-desc">
+                {{ rowDesc(row) }}
+              </div>
             </span>
           </button>
         </template>
 
         <div v-if="token && searching" class="menu-note">搜索中…</div>
-        <div v-else-if="token && !results.length" class="menu-note">无匹配文件</div>
+        <div v-else-if="token && !results.length" class="menu-note">
+          无匹配文件
+        </div>
         <div v-if="token && !filteredPlugins.length" class="menu-note">
           无匹配插件
         </div>
@@ -299,7 +302,9 @@ function pluginInitial(p: PluginItem): string {
           </span>
         </button>
         <div v-if="loadingSkills" class="menu-note">加载中…</div>
-        <div v-else-if="!filteredSkills.length" class="menu-note">无匹配技能</div>
+        <div v-else-if="!filteredSkills.length" class="menu-note">
+          无匹配技能
+        </div>
       </div>
     </template>
   </div>

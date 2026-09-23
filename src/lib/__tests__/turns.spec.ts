@@ -9,7 +9,11 @@ import {
 import type { ThreadItem } from "../types";
 
 function msg(id: string, type: string, ts?: number): ThreadItem {
-  return { id, type, ...(ts === undefined ? {} : { startedAtMs: ts }) } as ThreadItem;
+  return {
+    id,
+    type,
+    ...(ts === undefined ? {} : { startedAtMs: ts }),
+  } as ThreadItem;
 }
 
 function formatDay(ts: number): string {
@@ -52,7 +56,11 @@ describe("buildTurns 回合分组", () => {
 
   it("连续 userMessage 各自成回合", () => {
     const turns = buildTurns(
-      [msg("u1", "userMessage"), msg("u2", "userMessage"), msg("a1", "agentMessage")],
+      [
+        msg("u1", "userMessage"),
+        msg("u2", "userMessage"),
+        msg("a1", "agentMessage"),
+      ],
       formatDay,
     );
     expect(turns.map((t) => t.key)).toEqual(["turn-u1", "turn-u2"]);
@@ -90,7 +98,9 @@ describe("buildTurns 回合分组", () => {
       ],
       formatDay,
     );
-    expect(turns.flatMap((t) => t.rows).filter((r) => r.kind === "sep")).toHaveLength(1);
+    expect(
+      turns.flatMap((t) => t.rows).filter((r) => r.kind === "sep"),
+    ).toHaveLength(1);
   });
 
   it("builder 行对象按 key 复用，未变化条目引用不变", () => {
@@ -108,7 +118,10 @@ describe("buildTurns 回合分组", () => {
   it("跨次 build 日期分隔线 key 稳定复用，缓存不随构建次数增长", () => {
     const builder = createTurnsBuilder(formatDay);
     const day = new Date(2026, 7, 9, 10, 0).getTime();
-    const items = [msg("u1", "userMessage", day), msg("a1", "agentMessage", day)];
+    const items = [
+      msg("u1", "userMessage", day),
+      msg("a1", "agentMessage", day),
+    ];
 
     const seps = (b: ReturnType<typeof createTurnsBuilder>) =>
       b
@@ -189,9 +202,9 @@ describe("回合导航预览文本", () => {
         },
       ],
     } as const;
-    expect(turnPreviewText(item as unknown as import("../types").ThreadItem)).toBe(
-      "请看看 这个 文件",
-    );
+    expect(
+      turnPreviewText(item as unknown as import("../types").ThreadItem),
+    ).toBe("请看看 这个 文件");
   });
 
   it("纯图片/引用消息回退占位文本", () => {
@@ -204,8 +217,8 @@ describe("回合导航预览文本", () => {
         { type: "skill", name: "skill-a", path: "D:/SKILL.md" },
       ],
     } as const;
-    expect(turnPreviewText(item as unknown as import("../types").ThreadItem)).toBe(
-      "[图片] @app.ts $skill-a",
-    );
+    expect(
+      turnPreviewText(item as unknown as import("../types").ThreadItem),
+    ).toBe("[图片] @app.ts $skill-a");
   });
 });

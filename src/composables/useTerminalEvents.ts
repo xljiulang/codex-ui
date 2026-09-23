@@ -42,17 +42,20 @@ let listenersReady: Promise<void> | null = null;
 export function ensureTerminalListeners(): Promise<void> {
   if (listenersReady) return listenersReady;
   listenersReady = (async () => {
-    unlistenOutput = await listen<TerminalOutputPayload>("terminal/output", (e) => {
-      const { id, data } = e.payload;
-      const handlers = dataHandlers.get(id);
-      if (handlers && handlers.size > 0) {
-        for (const cb of handlers) cb(data);
-      } else {
-        const buf = outputBuffer.get(id);
-        if (buf) buf.push(data);
-        else outputBuffer.set(id, [data]);
-      }
-    });
+    unlistenOutput = await listen<TerminalOutputPayload>(
+      "terminal/output",
+      (e) => {
+        const { id, data } = e.payload;
+        const handlers = dataHandlers.get(id);
+        if (handlers && handlers.size > 0) {
+          for (const cb of handlers) cb(data);
+        } else {
+          const buf = outputBuffer.get(id);
+          if (buf) buf.push(data);
+          else outputBuffer.set(id, [data]);
+        }
+      },
+    );
     unlistenExit = await listen<TerminalExitPayload>("terminal/exit", (e) => {
       const { id, exitCode } = e.payload;
       const handlers = exitHandlers.get(id);

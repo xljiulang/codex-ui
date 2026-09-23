@@ -35,9 +35,13 @@ const webResultsUsable = computed(() =>
       :key="i"
       class="web-result"
       :href="r.url || '#'"
-      @click.prevent="r.url ? void invoke('open_url', { url: r.url }) : undefined"
+      @click.prevent="
+        r.url ? void invoke('open_url', { url: r.url }) : undefined
+      "
     >
-      <span class="web-result-title">{{ r.title || r.url || "（无标题）" }}</span>
+      <span class="web-result-title">{{
+        r.title || r.url || "（无标题）"
+      }}</span>
       <span v-if="r.snippet" class="web-result-snippet">{{ r.snippet }}</span>
     </a>
   </div>

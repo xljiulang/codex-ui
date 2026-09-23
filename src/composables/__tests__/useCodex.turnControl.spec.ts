@@ -1,9 +1,21 @@
-import { newEmptySession, openSessionTabForThread, sendPrompt } from "../useCodex/actions";
-import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
+import {
+  newEmptySession,
+  openSessionTabForThread,
+  sendPrompt,
+} from "../useCodex/actions";
+import {
+  __resetSessionTabsForTest,
+  activeSessionTab,
+} from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import { buildTurnParams, clearGoal, setGoal } from "../useCodex/turnControl";
 import { activeTabId } from "../useEditorTabs";
-import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  DEFAULT_MODEL,
+  makeSessionTab,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -280,8 +292,16 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
 
   it("openSessionTabForThread：分页线程以 includeTurns=false 读元数据，消息来自 turns/list", async () => {
     const items = [
-      { id: "i1", type: "userMessage", content: [{ type: "inputText", text: "hi" }] },
-      { id: "i2", type: "agentMessage", content: [{ type: "outputText", text: "hello" }] },
+      {
+        id: "i1",
+        type: "userMessage",
+        content: [{ type: "inputText", text: "hi" }],
+      },
+      {
+        id: "i2",
+        type: "agentMessage",
+        content: [{ type: "outputText", text: "hello" }],
+      },
     ];
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {
@@ -327,7 +347,11 @@ describe("线程级目标：设置/清除/读取/事件同步", () => {
 
   it("openSessionTabForThread：legacy 线程 turns/list 失败时回退 includeTurns=true 摘要", async () => {
     const summaryItems = [
-      { id: "s1", type: "userMessage", content: [{ type: "inputText", text: "旧消息" }] },
+      {
+        id: "s1",
+        type: "userMessage",
+        content: [{ type: "inputText", text: "旧消息" }],
+      },
     ];
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_read") {

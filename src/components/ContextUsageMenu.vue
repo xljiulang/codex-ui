@@ -3,7 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { type SessionTab } from "../composables/useCodex";
 import { useContextUsage } from "../composables/useContextUsage";
 import { formatTokens } from "../lib/format";
-import { ICON_ARROW_DOWN, ICON_ARROW_UP, ICON_COMPRESS, ICON_SIGMA } from "../lib/icons";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_UP,
+  ICON_COMPRESS,
+  ICON_SIGMA,
+} from "../lib/icons";
 
 const props = defineProps<{ tab: SessionTab }>();
 
@@ -114,10 +119,20 @@ const totalRows = computed<UsageRow[]>(() => {
   if (!t) return [];
   const rows: UsageRow[] = [];
   if (typeof t.input === "number") {
-    rows.push({ key: "input", label: "输入", value: formatTokens(t.input), icon: ICON_ARROW_UP });
+    rows.push({
+      key: "input",
+      label: "输入",
+      value: formatTokens(t.input),
+      icon: ICON_ARROW_UP,
+    });
   }
   if (typeof t.output === "number") {
-    rows.push({ key: "output", label: "输出", value: formatTokens(t.output), icon: ICON_ARROW_DOWN });
+    rows.push({
+      key: "output",
+      label: "输出",
+      value: formatTokens(t.output),
+      icon: ICON_ARROW_DOWN,
+    });
   }
   if (typeof t.totalTokens === "number") {
     rows.push({
@@ -128,7 +143,12 @@ const totalRows = computed<UsageRow[]>(() => {
     });
   }
   if (typeof t.cachedInput === "number") {
-    rows.push({ key: "cachedInput", label: "缓存读取", value: formatTokens(t.cachedInput), sub: true });
+    rows.push({
+      key: "cachedInput",
+      label: "缓存读取",
+      value: formatTokens(t.cachedInput),
+      sub: true,
+    });
   }
   if (typeof t.input === "number" && typeof t.cachedInput === "number") {
     // 输入缓存命中率 = 缓存读取输入 / 总输入（cachedInput 是 input 的子集）
@@ -141,10 +161,20 @@ const totalRows = computed<UsageRow[]>(() => {
     });
   }
   if (typeof t.cacheWriteInput === "number") {
-    rows.push({ key: "cacheWriteInput", label: "缓存写入", value: formatTokens(t.cacheWriteInput), sub: true });
+    rows.push({
+      key: "cacheWriteInput",
+      label: "缓存写入",
+      value: formatTokens(t.cacheWriteInput),
+      sub: true,
+    });
   }
   if (typeof t.reasoningOutput === "number") {
-    rows.push({ key: "reasoningOutput", label: "推理输出", value: formatTokens(t.reasoningOutput), sub: true });
+    rows.push({
+      key: "reasoningOutput",
+      label: "推理输出",
+      value: formatTokens(t.reasoningOutput),
+      sub: true,
+    });
   }
   return rows;
 });
@@ -195,7 +225,10 @@ const totalRows = computed<UsageRow[]>(() => {
             aria-valuemax="100"
             :aria-valuenow="ringPct"
           >
-            <div class="usage-menu-bar-fill" :style="{ width: ringPct + '%' }"></div>
+            <div
+              class="usage-menu-bar-fill"
+              :style="{ width: ringPct + '%' }"
+            ></div>
           </div>
           <!-- 百分比 + 压缩图标合成胶囊（复刻旧导航底栏合并胶囊风格） -->
           <span class="usage-menu-capsule">
@@ -232,7 +265,12 @@ const totalRows = computed<UsageRow[]>(() => {
           :class="{ sub: row.sub }"
         >
           <span class="usage-menu-label">
-            <svg v-if="row.icon" class="usage-menu-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <svg
+              v-if="row.icon"
+              class="usage-menu-ico"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
               <path :d="row.icon" />
             </svg>
             {{ row.label }}
@@ -378,7 +416,9 @@ const totalRows = computed<UsageRow[]>(() => {
   color: var(--accent);
   background: transparent;
   cursor: pointer;
-  transition: background var(--ease), opacity var(--ease);
+  transition:
+    background var(--ease),
+    opacity var(--ease);
 }
 
 .usage-menu-capsule-btn:hover:not(:disabled) {

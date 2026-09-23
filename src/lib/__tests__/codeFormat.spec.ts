@@ -1,19 +1,46 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  FORMATTABLE_EXTS,
-  formatDoc,
-  isFormattablePath,
-} from "../codeFormat";
+import { FORMATTABLE_EXTS, formatDoc, isFormattablePath } from "../codeFormat";
 
 describe("codeFormat 扩展名识别", () => {
   it("覆盖 Prettier / XML / 缩进重排三组扩展名", () => {
     for (const ext of [
-      "js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts",
-      "json", "jsonc", "css", "html", "htm", "yml", "yaml", "md", "markdown",
-      "xml", "svg",
-      "py", "rs", "c", "h", "cpp", "go", "java", "kt", "cs", "php", "sql",
-      "sh", "ps1", "rb", "ini", "cfg", "diff",
+      "js",
+      "jsx",
+      "ts",
+      "tsx",
+      "mjs",
+      "cjs",
+      "mts",
+      "cts",
+      "json",
+      "jsonc",
+      "css",
+      "html",
+      "htm",
+      "yml",
+      "yaml",
+      "md",
+      "markdown",
+      "xml",
+      "svg",
+      "py",
+      "rs",
+      "c",
+      "h",
+      "cpp",
+      "go",
+      "java",
+      "kt",
+      "cs",
+      "php",
+      "sql",
+      "sh",
+      "ps1",
+      "rb",
+      "ini",
+      "cfg",
+      "diff",
     ]) {
       expect(FORMATTABLE_EXTS.has(ext), ext).toBe(true);
       expect(isFormattablePath(`D:\\repo\\a.${ext}`), ext).toBe(true);
@@ -31,7 +58,7 @@ describe("codeFormat XML 美化", () => {
   it("单行紧凑 XML 展开为多行并缩进", async () => {
     const res = await formatDoc(
       "a.xml",
-      '<root><a>1</a><b><c>x</c></b></root>',
+      "<root><a>1</a><b><c>x</c></b></root>",
     );
     expect(res).toEqual({
       ok: true,
@@ -61,10 +88,7 @@ describe("codeFormat XML 美化", () => {
   });
 
   it("混合文本内容保持单行原文", async () => {
-    const res = await formatDoc(
-      "a.xml",
-      "<p>Hello <b>world</b>!</p>",
-    );
+    const res = await formatDoc("a.xml", "<p>Hello <b>world</b>!</p>");
     // 已为单行、无需重排：返回 unchanged（不产生编辑）
     expect(res).toEqual({ ok: true, unchanged: true });
   });
@@ -75,10 +99,7 @@ describe("codeFormat XML 美化", () => {
   });
 
   it("CRLF 与结尾换行保持", async () => {
-    const res = await formatDoc(
-      "a.xml",
-      "<root>\r\n  <a>1</a>\r\n</root>\r\n",
-    );
+    const res = await formatDoc("a.xml", "<root>\r\n  <a>1</a>\r\n</root>\r\n");
     expect(res).toEqual({
       ok: true,
       text: "<root>\r\n    <a>1</a>\r\n</root>\r\n",
@@ -121,10 +142,7 @@ describe("codeFormat Prettier 路径", () => {
   });
 
   it("JSONC 注释被保留（Prettier json 解析器）", async () => {
-    const res = await formatDoc(
-      "a.jsonc",
-      '{\n// comment\n"a":1,\n}',
-    );
+    const res = await formatDoc("a.jsonc", '{\n// comment\n"a":1,\n}');
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect("text" in res).toBe(true);

@@ -95,7 +95,10 @@ const displayedRows = computed(() => displayed.value.visible);
 const truncatedRows = computed(() => displayed.value.truncated);
 const hiddenCtxRows = computed(() =>
   brief.value
-    ? renderedRows.value.reduce((count, r) => (r.kind === "ctx" ? count + 1 : count), 0)
+    ? renderedRows.value.reduce(
+        (count, r) => (r.kind === "ctx" ? count + 1 : count),
+        0,
+      )
     : 0,
 );
 
@@ -141,7 +144,9 @@ function copyTargetText(e: MouseEvent): string {
 
 function onDiffContext(e: MouseEvent) {
   const text = copyTargetText(e);
-  openCtx(e, [{ label: "复制", icon: ICON_COPY, action: () => void copyText(text) }]);
+  openCtx(e, [
+    { label: "复制", icon: ICON_COPY, action: () => void copyText(text) },
+  ]);
 }
 
 function onWindowClick(e: MouseEvent) {
@@ -224,7 +229,8 @@ onBeforeUnmount(() => {
       </template>
       <template v-else>
         <div v-if="hiddenCtxRows" class="diff-fallback-note">
-          行数较多，已折叠未变更的 {{ hiddenCtxRows }} 行（右上角按钮可显示完整差异）
+          行数较多，已折叠未变更的
+          {{ hiddenCtxRows }} 行（右上角按钮可显示完整差异）
         </div>
         <div v-if="truncatedRows" class="diff-fallback-note">
           差异过大：仅渲染前 {{ DIFF_MAX_RENDER_ROWS }} 行，已省略

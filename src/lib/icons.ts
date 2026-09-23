@@ -7,8 +7,7 @@ export const ICON_ARROW_DOWN =
 export const ICON_ARROW_UP =
   "M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z";
 /** 求和符号 Σ：上下文用量「合计」行（与输入/输出箭头图标同风格） */
-export const ICON_SIGMA =
-  "M18 6H8.83l6 6-6 6H18v2H6v-2l6-6-6-6V4h12z";
+export const ICON_SIGMA = "M18 6H8.83l6 6-6 6H18v2H6v-2l6-6-6-6V4h12z";
 
 export const ICON_FOLDER_CLOSED =
   "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
@@ -73,8 +72,7 @@ export const ICON_CLOSE =
 /** 窗口控制：最小化（居中横线） */
 export const ICON_WINDOW_MIN = "M6 11h12v2H6z";
 /** 压缩/收缩：上下双箭头向中间横线汇聚（「>|<」上下结构的压缩/折叠图标，用于上下文压缩） */
-export const ICON_COMPRESS =
-  "M4 3l8 6 8-6zM4 11h16v2H4zM4 21l8-6 8 6z";
+export const ICON_COMPRESS = "M4 3l8 6 8-6zM4 11h16v2H4zM4 21l8-6 8 6z";
 /** 代币硬币：三同心圆 evenodd 挖空成币边 + 中心（回合导航底栏 token 图标） */
 export const ICON_TOKEN =
   "M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0M12 12m-5 0a5 5 0 1 0 10 0a5 5 0 1 0 -10 0M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0";
@@ -116,8 +114,7 @@ export const ICON_MORE =
   "M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z";
 export const ICON_CHEVRON_DOWN = "M4 6l4 4 4-4z";
 /** 下拉选择：居中下箭头（AppSelect 触发器右侧展开指示） */
-export const ICON_SELECT_CHEVRON =
-  "M12 16.2L5.6 9.8l1.4-1.4 5 5 5-5 1.4 1.4z";
+export const ICON_SELECT_CHEVRON = "M12 16.2L5.6 9.8l1.4-1.4 5 5 5-5 1.4 1.4z";
 
 /** 目标：旗帜（目标芯片的设置/取消按钮与状态展示共用） */
 export const ICON_GOAL = "M4 3h2v18H4zm2 1h13l-2.8 4 2.8 4H6z";
@@ -200,8 +197,7 @@ export const ICON_EDIT =
   "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z";
 
 /** diff 简要/完整切换：三条横线列表图标 */
-export const ICON_SUMMARY =
-  "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z";
+export const ICON_SUMMARY = "M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z";
 
 /** 代码格式化：魔法棒图标（编辑器右键菜单） */
 export const ICON_FORMAT =
@@ -214,8 +210,7 @@ export const ICON_PDF =
 /** .docx 富文本编辑器工具栏图标（24 单位坐标） */
 export const ICON_BOLD =
   "M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z";
-export const ICON_ITALIC =
-  "M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z";
+export const ICON_ITALIC = "M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z";
 export const ICON_UNDERLINE =
   "M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z";
 export const ICON_STRIKE =
@@ -224,8 +219,7 @@ export const ICON_LIST_UL =
   "M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z";
 export const ICON_LIST_OL =
   "M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z";
-export const ICON_QUOTE =
-  "M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z";
+export const ICON_QUOTE = "M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z";
 export const ICON_CODE =
   "M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z";
 export const ICON_TABLE =
@@ -277,7 +271,8 @@ export const ICON_DOWNLOAD = "M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z";
 /** 播放/执行（定时任务「立即执行」按钮） */
 export const ICON_PLAY = "M8 5v14l11-7z";
 /** 跳过（定时任务忙时策略「跳过本次」图标；跳转弯箭头，Material redo） */
-export const ICON_SKIP = "M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h7V9l-1.6 1.6z";
+export const ICON_SKIP =
+  "M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h7V9l-1.6 1.6z";
 /** 历史/时钟（GitView「提交历史」分区标题） */
 export const ICON_HISTORY =
   "M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z";

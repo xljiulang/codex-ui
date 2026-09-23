@@ -1,9 +1,25 @@
-import { ensureSkills, ensureThreadPlugins, loadModels, loadSettings, refreshServer, resetToNewSession } from "../useCodex/settings";
+import {
+  ensureSkills,
+  ensureThreadPlugins,
+  loadModels,
+  loadSettings,
+  refreshServer,
+  resetToNewSession,
+} from "../useCodex/settings";
 import { store } from "../useCodex/store";
 import type { ModelInfo } from "../useCodex/types";
-import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
+import {
+  __resetSessionTabsForTest,
+  activeSessionTab,
+} from "../useCodex/sessionState";
 import { activeTabId } from "../useEditorTabs";
-import { makeSessionTab, PLUGINS_RESPONSE, SKILLS_RESPONSE, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  makeSessionTab,
+  PLUGINS_RESPONSE,
+  SKILLS_RESPONSE,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -212,9 +228,7 @@ describe("resetToNewSession 会话级缓存复位", () => {
         loaded: true,
       },
       skills: {
-        skills: [
-          { name: "s1", key: "s1", path: "", desc: "", shortDesc: "" },
-        ],
+        skills: [{ name: "s1", key: "s1", path: "", desc: "", shortDesc: "" }],
         loaded: true,
       },
     });
@@ -461,12 +475,16 @@ describe("loadModels 默认模型合成", () => {
 
   it("config 强度为空：未声明档位的条目默认值保持为空", async () => {
     mockModelRpc({
-      catalog: [mkModel("a", { isDefault: true }), mkModelWithoutLevels("big-pickle")],
+      catalog: [
+        mkModel("a", { isDefault: true }),
+        mkModelWithoutLevels("big-pickle"),
+      ],
       config: { config: { model: "a" } },
     });
     await loadModels(true, "");
     expect(
-      store.models.find((m) => m.model === "big-pickle")?.defaultReasoningEffort,
+      store.models.find((m) => m.model === "big-pickle")
+        ?.defaultReasoningEffort,
     ).toBe("");
   });
 
@@ -499,7 +517,10 @@ describe("loadModels 默认模型合成", () => {
 
   it("hidden 目录项被过滤；config model 命中隐藏项时置顶", async () => {
     mockModelRpc({
-      catalog: [mkModel("a", { isDefault: true }), mkModel("d", { hidden: true })],
+      catalog: [
+        mkModel("a", { isDefault: true }),
+        mkModel("d", { hidden: true }),
+      ],
       config: { config: { model: "d" } },
     });
     await loadModels(true, "");
@@ -526,7 +547,8 @@ describe("loadModels 默认模型合成", () => {
     mockedInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd !== "codex_rpc") return undefined;
       const method = (args as { method?: string } | undefined)?.method;
-      if (method === "model/list") return { data: [mkModel("a"), mkModel("b")] };
+      if (method === "model/list")
+        return { data: [mkModel("a"), mkModel("b")] };
       if (method === "config/read") {
         const cwd = (args as { params?: { cwd?: string } }).params?.cwd;
         if (cwd) throw new Error("bad cwd");
@@ -542,9 +564,9 @@ describe("loadModels 默认模型合成", () => {
         (args as { method?: string } | undefined)?.method === "config/read",
     );
     expect(configCalls).toHaveLength(2);
-    expect(
-      (configCalls[0][1] as { params: { cwd?: string } }).params.cwd,
-    ).toBe("D:/bad");
+    expect((configCalls[0][1] as { params: { cwd?: string } }).params.cwd).toBe(
+      "D:/bad",
+    );
     expect(
       (configCalls[1][1] as { params: { cwd?: string } }).params.cwd,
     ).toBeUndefined();

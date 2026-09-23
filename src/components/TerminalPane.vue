@@ -9,7 +9,10 @@ import {
   attachTerminal,
   type TerminalHandle,
 } from "../composables/useTerminalEvents";
-import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
+import {
+  useActionMenu,
+  type ActionMenuItem,
+} from "../composables/useActionMenu";
 import { copyText } from "../lib/clipboard";
 import { ICON_COPY, ICON_PASTE } from "../lib/icons";
 import ContextMenu from "./ContextMenu.vue";
@@ -86,9 +89,7 @@ function readTerminalTheme(): TerminalTheme {
     cs.getPropertyValue(name).trim() || fallback;
   const glassOn = document.documentElement.dataset.glass === "on";
   return {
-    background: glassOn
-      ? "#00000000"
-      : v("--bg", "#0e1116"),
+    background: glassOn ? "#00000000" : v("--bg", "#0e1116"),
     foreground: v("--console-text", "#d4dce8"),
     cursor: v("--accent", "#4f8cc9"),
     cursorAccent: v("--console-cursor-text", "#0c1016"),

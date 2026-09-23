@@ -13,7 +13,6 @@ import {
   type SkillItem,
 } from "./types";
 
-
 /** 当前会话已不存在（被删除等）时重置回新对话，避免继续发送一直报错 */
 export function resetToNewSession() {
   const tab = activeSessionTab();
@@ -35,7 +34,6 @@ export function resetToNewSession() {
   tab.followupQueue = [];
   tab.title = sessionTabTitle(tab);
 }
-
 
 export async function loadSettings() {
   try {
@@ -62,7 +60,6 @@ export async function loadSettings() {
   applyGlassEffect(store.settings.glass_effect);
 }
 
-
 export async function saveSettings(patch: Partial<AppSettings>) {
   store.settings = { ...store.settings, ...patch };
   await invoke("settings_set", { settings: store.settings });
@@ -70,12 +67,10 @@ export async function saveSettings(patch: Partial<AppSettings>) {
   applyGlassEffect(store.settings.glass_effect);
 }
 
-
 export async function refreshServer() {
   const s = await invoke<ServerStatus>("server_status");
   store.server = { ...store.server, ...s };
 }
-
 
 /** app-server 协议 ReasoningEffort 合法值（与设置页档位列表一致） */
 const REASONING_EFFORTS = new Set([
@@ -114,7 +109,12 @@ async function invokeConfigRead(
       method: "config/read",
       params,
     });
-    if (!res || typeof res !== "object" || !res.config || typeof res.config !== "object") {
+    if (
+      !res ||
+      typeof res !== "object" ||
+      !res.config ||
+      typeof res.config !== "object"
+    ) {
       return null;
     }
     return res;
@@ -221,7 +221,6 @@ export async function loadModels(force = false, cwd = "") {
   store.modelsLoaded = true;
 }
 
-
 /** 确保指定会话的插件缓存已加载（会话级缓存：已加载直接返回，失败可重试） */
 export async function ensureThreadPlugins(tab: SessionTab) {
   if (tab.plugins.loaded) return;
@@ -277,7 +276,6 @@ export async function ensureThreadPlugins(tab: SessionTab) {
   }
 }
 
-
 /** 拉取技能列表（会话级缓存，幂等），供 $ 菜单与回显悬浮提示使用 */
 export async function ensureSkills(tab: SessionTab) {
   if (tab.skills.loaded) return;
@@ -308,7 +306,6 @@ export async function ensureSkills(tab: SessionTab) {
   }
 }
 
-
 /** 解析模型的显示名：指定模型优先，否则用默认模型 */
 export function modelDisplayName(model: string | null): string {
   if (model) {
@@ -318,7 +315,6 @@ export function modelDisplayName(model: string | null): string {
   const def = store.models.find((x) => x.isDefault);
   return def?.displayName || "默认模型";
 }
-
 
 /** 当前生效模型 id：传入标签时只取该标签的 model（不读活动标签）→ 默认模型 → 列表首个 → 无可选时抛错 */
 export function currentModelId(tab?: Pick<SessionTab, "model">): string {
@@ -333,9 +329,10 @@ export function currentModelId(tab?: Pick<SessionTab, "model">): string {
   throw new Error("当前没有可用模型，请检查模型列表");
 }
 
-
 /** 当前生效的推理强度：标签显式值优先，否则用默认模型的默认强度 */
-export function effectiveEffort(tab?: Pick<SessionTab, "model" | "effort">): string {
+export function effectiveEffort(
+  tab?: Pick<SessionTab, "model" | "effort">,
+): string {
   const session = tab ?? activeSessionTab();
   if (session?.effort) return session.effort;
   const m =

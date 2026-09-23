@@ -57,7 +57,10 @@ describe("useGitChanges 状态机与监听", () => {
   });
 
   it("not_a_repo 错误进入 not_repo", async () => {
-    mockedInvoke.mockRejectedValue({ code: "not_a_repo", message: "not a git repo" });
+    mockedInvoke.mockRejectedValue({
+      code: "not_a_repo",
+      message: "not a git repo",
+    });
     await refreshGitChanges();
     expect(gitState.value).toBe("not_repo");
     expect(gitStatus.value).toBeNull();

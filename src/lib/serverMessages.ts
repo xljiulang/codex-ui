@@ -54,7 +54,10 @@ const MESSAGE_RULES: MessageRule[] = [
     text: "已有审批/应用操作进行中，请先等待完成",
   },
   { match: "server overloaded", text: "服务过载，请稍后重试" },
-  { match: "requires experimentalapi capability", text: "当前 Codex 版本不支持该功能" },
+  {
+    match: "requires experimentalapi capability",
+    text: "当前 Codex 版本不支持该功能",
+  },
   { match: "not initialized", text: "服务尚未就绪，请稍后重试" },
   { match: "already initialized", text: "服务重复初始化" },
   { match: "thread not found", text: "会话不存在" },
@@ -68,7 +71,10 @@ const MESSAGE_RULES: MessageRule[] = [
   { match: "sandbox", text: "沙箱执行出错" },
   { match: "response stream disconnected", text: "响应连接已断开，请重试" },
   { match: "response stream connection failed", text: "响应连接失败，请重试" },
-  { match: "response too many failed attempts", text: "响应重试次数过多，请稍后重试" },
+  {
+    match: "response too many failed attempts",
+    text: "响应重试次数过多，请稍后重试",
+  },
   { match: "http connection failed", text: "网络连接失败，请重试" },
   { match: "active turn not steerable", text: "当前回合类型不支持该操作" },
   { match: "rollback", text: "会话回滚失败" },

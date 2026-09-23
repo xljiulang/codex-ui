@@ -1,14 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { workspace } from "../useCodex";
-import type {
-  FsEntry,
-  IconRequest,
-  IconResult,
-} from "../../lib/sessionFs";
-import {
-  BUILTIN_ICON_NAMES,
-  builtinFileIcon,
-} from "../../lib/fileTypeIcons";
+import type { FsEntry, IconRequest, IconResult } from "../../lib/sessionFs";
+import { BUILTIN_ICON_NAMES, builtinFileIcon } from "../../lib/fileTypeIcons";
 import { iconCache } from "./state";
 
 /** 图标缓存上限：超限按插入顺序淘汰最旧 */

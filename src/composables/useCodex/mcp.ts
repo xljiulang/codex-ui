@@ -144,7 +144,8 @@ export function normalizeMcpServerStatus(
     tools.push({
       name,
       title: typeof t.title === "string" ? t.title : undefined,
-      description: typeof t.description === "string" ? t.description : undefined,
+      description:
+        typeof t.description === "string" ? t.description : undefined,
       inputSchema: t.inputSchema,
     });
   }
@@ -157,7 +158,8 @@ export function normalizeMcpServerStatus(
       uri: r.uri,
       name: typeof r.name === "string" ? r.name : undefined,
       title: typeof r.title === "string" ? r.title : undefined,
-      description: typeof r.description === "string" ? r.description : undefined,
+      description:
+        typeof r.description === "string" ? r.description : undefined,
       mimeType: typeof r.mimeType === "string" ? r.mimeType : undefined,
     });
   }
@@ -175,7 +177,8 @@ export function normalizeMcpServerStatus(
           ? rt.name.trim()
           : rt.uriTemplate,
       title: typeof rt.title === "string" ? rt.title : undefined,
-      description: typeof rt.description === "string" ? rt.description : undefined,
+      description:
+        typeof rt.description === "string" ? rt.description : undefined,
       mimeType: typeof rt.mimeType === "string" ? rt.mimeType : undefined,
     });
   }
@@ -191,9 +194,10 @@ export function normalizeMcpServerStatus(
   const serverInfo = raw.serverInfo
     ? {
         title: raw.serverInfo.title,
-        version: typeof raw.serverInfo.version === "string"
-          ? raw.serverInfo.version
-          : "",
+        version:
+          typeof raw.serverInfo.version === "string"
+            ? raw.serverInfo.version
+            : "",
         description: raw.serverInfo.description,
         websiteUrl: raw.serverInfo.websiteUrl,
         icons: raw.serverInfo.icons,
@@ -242,7 +246,9 @@ export async function saveMcpServers(
       delete base.bearer_token_env_var;
     }
     // omit_tools_from 与 transport 无关：非空写回（过滤非法 + 去重保序），为空删除交回 codex 默认
-    const omits = (s.omit_tools_from ?? []).map((x) => x.trim()).filter((x) => MCP_OMIT_TOOLS.has(x));
+    const omits = (s.omit_tools_from ?? [])
+      .map((x) => x.trim())
+      .filter((x) => MCP_OMIT_TOOLS.has(x));
     if (omits.length) base.omit_tools_from = Array.from(new Set(omits));
     else delete base.omit_tools_from;
     merged[s.name.trim()] = base;
@@ -295,7 +301,9 @@ function omitList(v: unknown): string[] {
   if (Array.isArray(v)) {
     return Array.from(
       new Set(
-        v.filter((x): x is string => typeof x === "string" && MCP_OMIT_TOOLS.has(x)),
+        v.filter(
+          (x): x is string => typeof x === "string" && MCP_OMIT_TOOLS.has(x),
+        ),
       ),
     );
   }

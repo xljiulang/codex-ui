@@ -3,11 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
 import type { PreviewEditorTab } from "../composables/useEditorTabs";
 import { extOf } from "../lib/preview";
-import {
-  parseXlsx,
-  type XlsxSheetData,
-  type XlsxWorkbook,
-} from "../lib/xlsx";
+import { parseXlsx, type XlsxSheetData, type XlsxWorkbook } from "../lib/xlsx";
 
 const props = defineProps<{
   tab: PreviewEditorTab;
@@ -72,10 +68,7 @@ function updateWindow() {
   const sheet = activeSheet.value;
   if (!host || !sheet || sheet.rowCount === 0) return;
   const rowH = rowHeightPx.value;
-  const first = Math.max(
-    0,
-    Math.floor(host.scrollTop / rowH) - OVERSCAN,
-  );
+  const first = Math.max(0, Math.floor(host.scrollTop / rowH) - OVERSCAN);
   const count = Math.ceil(host.clientHeight / rowH) + OVERSCAN * 2;
   startRow.value = first;
   endRow.value = Math.min(sheet.rowCount, first + count);
@@ -147,11 +140,9 @@ async function load() {
   updateWindow();
 }
 
-watch(
-  [() => props.tab, () => props.tab.xlsxData],
-  () => void load(),
-  { immediate: true },
-);
+watch([() => props.tab, () => props.tab.xlsxData], () => void load(), {
+  immediate: true,
+});
 
 // 缩放变化后行高/列宽重新布局，浏览器会夹紧滚动位置：下一帧重算可见窗口
 watch(zoom, () => {
@@ -195,11 +186,7 @@ watch(zoom, () => {
           >
             ＋
           </button>
-          <button
-            class="preview-zoom-btn"
-            type="button"
-            @click="resetZoom()"
-          >
+          <button class="preview-zoom-btn" type="button" @click="resetZoom()">
             100%
           </button>
         </div>
@@ -212,18 +199,11 @@ watch(zoom, () => {
     <div v-else-if="error" class="preview-note preview-error">
       无法预览该表格（{{ error }}）
     </div>
-    <div v-else-if="!activeSheet" class="preview-note">
-      该工作簿没有工作表
-    </div>
+    <div v-else-if="!activeSheet" class="preview-note">该工作簿没有工作表</div>
     <div v-else-if="activeSheet.rowCount === 0" class="preview-note">
       该工作表为空
     </div>
-    <div
-      v-else
-      ref="gridHost"
-      class="xlsx-grid-host"
-      @scroll="onScroll"
-    >
+    <div v-else ref="gridHost" class="xlsx-grid-host" @scroll="onScroll">
       <table
         class="xlsx-table"
         :style="{
@@ -241,11 +221,7 @@ watch(zoom, () => {
         </colgroup>
         <thead>
           <tr>
-            <th
-              v-for="c in activeSheet.colCount"
-              :key="c"
-              class="xlsx-th"
-            >
+            <th v-for="c in activeSheet.colCount" :key="c" class="xlsx-th">
               {{ colLabel(c - 1) }}
             </th>
           </tr>

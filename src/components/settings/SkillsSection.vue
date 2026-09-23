@@ -11,11 +11,7 @@ import {
   ICON_REFRESH,
   ICON_SKILL,
 } from "../../lib/icons";
-import type {
-  SkillErrorInfo,
-  SkillsItem,
-  SkillsState,
-} from "../../lib/types";
+import type { SkillErrorInfo, SkillsItem, SkillsState } from "../../lib/types";
 
 /** Skills Catalog for Codex（浏览器打开） */
 const SKILLS_CATALOG_URL = "https://github.com/openai/skills";
@@ -179,11 +175,7 @@ async function removeSkill(s: SkillsItem) {
         <div v-else-if="!skillsState.items.length" class="plugin-empty">
           暂无可用技能
         </div>
-        <div
-          v-for="s in skillsState.items"
-          :key="s.path"
-          class="skill-row"
-        >
+        <div v-for="s in skillsState.items" :key="s.path" class="skill-row">
           <span class="row-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
               <path :d="ICON_SKILL" fill="currentColor" />
@@ -250,4 +242,3 @@ async function removeSkill(s: SkillsItem) {
   margin-top: var(--space-1);
 }
 </style>
-

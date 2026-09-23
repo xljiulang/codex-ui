@@ -10,12 +10,10 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 const docxPreviewMock = vi.hoisted(() => ({
-  renderAsync: vi.fn(
-    async (_data: unknown, container: HTMLElement) => {
-      container.innerHTML = '<div class="docx-wrapper"><p>春天</p></div>';
-      return undefined;
-    },
-  ),
+  renderAsync: vi.fn(async (_data: unknown, container: HTMLElement) => {
+    container.innerHTML = '<div class="docx-wrapper"><p>春天</p></div>';
+    return undefined;
+  }),
 }));
 vi.mock("docx-preview", () => docxPreviewMock);
 
@@ -31,7 +29,9 @@ import { tooltipDirective } from "../../directives/tooltip";
 const mockedRenderAsync = vi.mocked(renderAsync);
 const root = "D:\\repo";
 
-function previewTab(overrides: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
+function previewTab(
+  overrides: Partial<PreviewEditorTab> = {},
+): PreviewEditorTab {
   const tab = {
     kind: "preview",
     previewType: "docx",

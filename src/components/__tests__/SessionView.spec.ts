@@ -2,7 +2,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     deleteThread: vi.fn(),
@@ -48,7 +49,13 @@ const mockedInvoke = vi.mocked(invoke);
 
 const now = Date.now() / 1000;
 const threads = [
-  { id: "t1", name: "会话一", preview: "预览一", createdAt: now, recencyAt: now },
+  {
+    id: "t1",
+    name: "会话一",
+    preview: "预览一",
+    createdAt: now,
+    recencyAt: now,
+  },
   { id: "t2", name: null, preview: "仅预览", createdAt: now, recencyAt: now },
 ];
 
@@ -127,7 +134,9 @@ describe("SessionView 删除确认", () => {
     await clickCtxItem(wrapper, "删除会话");
 
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
-    expect(wrapper.text()).toContain("确定删除会话「会话一」吗？此操作不可恢复。");
+    expect(wrapper.text()).toContain(
+      "确定删除会话「会话一」吗？此操作不可恢复。",
+    );
     expect(mockedDelete).not.toHaveBeenCalled();
   });
 
@@ -200,10 +209,7 @@ describe("SessionView 置顶", () => {
   });
 
   it("置顶会话显示置顶图标，右键点取消置顶调用 setThreadPinned(id, false)", async () => {
-    store.threads = [
-      { ...threads[0], isPinned: true },
-      { ...threads[1] },
-    ];
+    store.threads = [{ ...threads[0], isPinned: true }, { ...threads[1] }];
     const wrapper = mount(SessionView);
     const badge = wrapper.find(".pin-badge");
     expect(badge.exists()).toBe(true);
@@ -243,14 +249,18 @@ describe("SessionView 右键菜单", () => {
     const labels = wrapper
       .findAll(".ctx-menu-item")
       .map((b) => b.text().trim());
-    expect(labels).toEqual(["打开", "重命名", "分叉会话", "置顶固定", "微信接入", "删除会话"]);
+    expect(labels).toEqual([
+      "打开",
+      "重命名",
+      "分叉会话",
+      "置顶固定",
+      "微信接入",
+      "删除会话",
+    ]);
   });
 
   it("置顶会话右键菜单显示“取消固定”", async () => {
-    store.threads = [
-      { ...threads[0], isPinned: true },
-      { ...threads[1] },
-    ];
+    store.threads = [{ ...threads[0], isPinned: true }, { ...threads[1] }];
     const wrapper = mount(SessionView);
     await openCtxMenu(wrapper);
     const labels = wrapper
@@ -304,12 +314,20 @@ describe("SessionView 右键菜单", () => {
     expect(t1Row.find(".session-icon path").attributes("d")).toBe(ICON_WECHAT);
     expect(t2Row.find(".session-icon path").attributes("d")).toBe(ICON_SESSION);
     // 微信绑定行保留非零环绕填充；未绑定会话行单色填充 + evenodd 挖两孔
-    expect(t1Row.find(".session-icon path").attributes("fill")).toBe("currentColor");
+    expect(t1Row.find(".session-icon path").attributes("fill")).toBe(
+      "currentColor",
+    );
     expect(t1Row.find(".session-icon path").attributes("stroke")).toBe("none");
-    expect(t1Row.find(".session-icon path").attributes("fill-rule")).toBe("nonzero");
-    expect(t2Row.find(".session-icon path").attributes("fill")).toBe("currentColor");
+    expect(t1Row.find(".session-icon path").attributes("fill-rule")).toBe(
+      "nonzero",
+    );
+    expect(t2Row.find(".session-icon path").attributes("fill")).toBe(
+      "currentColor",
+    );
     expect(t2Row.find(".session-icon path").attributes("stroke")).toBe("none");
-    expect(t2Row.find(".session-icon path").attributes("fill-rule")).toBe("evenodd");
+    expect(t2Row.find(".session-icon path").attributes("fill-rule")).toBe(
+      "evenodd",
+    );
     expect(t1Row.find(".history-wechat-badge").exists()).toBe(false);
     store.wechat = null;
   });
@@ -472,15 +490,21 @@ describe("SessionView 目录分组", () => {
     store.threads = dirThreads.map((t) => ({ ...t }));
     const wrapper = mount(SessionView);
     expect(wrapper.findAll(".session-item")).toHaveLength(0);
-    expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".session-folder")[0].classes()).toContain(
+      "collapsed",
+    );
 
     await wrapper.findAll(".session-folder")[0].trigger("click");
     expect(wrapper.findAll(".session-item")).toHaveLength(2);
-    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain(
+      "collapsed",
+    );
 
     await wrapper.findAll(".session-folder")[0].trigger("click");
     expect(wrapper.findAll(".session-item")).toHaveLength(0);
-    expect(wrapper.findAll(".session-folder")[0].classes()).toContain("collapsed");
+    expect(wrapper.findAll(".session-folder")[0].classes()).toContain(
+      "collapsed",
+    );
   });
 
   it("目录行可聚焦，Enter/Space 键展开与收起", async () => {
@@ -494,17 +518,17 @@ describe("SessionView 目录分组", () => {
 
     await folder.trigger("keydown", { key: "Enter" });
     expect(wrapper.findAll(".session-item")).toHaveLength(2);
-    expect(wrapper.findAll(".session-folder")[0].attributes("aria-expanded")).toBe(
-      "true",
-    );
+    expect(
+      wrapper.findAll(".session-folder")[0].attributes("aria-expanded"),
+    ).toBe("true");
 
     await wrapper
       .findAll(".session-folder")[0]
       .trigger("keydown", { key: " ", code: "Space" });
     expect(wrapper.findAll(".session-item")).toHaveLength(0);
-    expect(wrapper.findAll(".session-folder")[0].attributes("aria-expanded")).toBe(
-      "false",
-    );
+    expect(
+      wrapper.findAll(".session-folder")[0].attributes("aria-expanded"),
+    ).toBe("false");
   });
 
   it("目录按组内第一会话排序（置顶优先），置顶会话仍留在目录内", async () => {
@@ -526,7 +550,13 @@ describe("SessionView 目录分组", () => {
   it("无 cwd 的会话平铺显示，不建目录", async () => {
     store.threads = [
       { id: "x", name: "平铺", createdAt: now, recencyAt: 5 },
-      { id: "y", name: "目录内", createdAt: now, recencyAt: 4, cwd: "D:\\repo" },
+      {
+        id: "y",
+        name: "目录内",
+        createdAt: now,
+        recencyAt: 4,
+        cwd: "D:\\repo",
+      },
     ];
     const wrapper = mount(SessionView);
 
@@ -567,10 +597,15 @@ describe("SessionView 目录分组", () => {
     expect(wrapper.findAll(".session-item")).toHaveLength(2);
 
     // 模拟列表刷新（store.threads 换成新数组）
-    store.threads = dirThreads.map((t) => ({ ...t, recencyAt: t.recencyAt + 10 }));
+    store.threads = dirThreads.map((t) => ({
+      ...t,
+      recencyAt: t.recencyAt + 10,
+    }));
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain("collapsed");
+    expect(wrapper.findAll(".session-folder")[0].classes()).not.toContain(
+      "collapsed",
+    );
     expect(wrapper.findAll(".session-item")).toHaveLength(2);
   });
 });
@@ -898,7 +933,9 @@ describe("SessionView 会话标签联动", () => {
     });
     const wrapper = mount(SessionView);
     await openCtxMenu(wrapper, 0);
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).not.toContain("打开");
     expect(labels).not.toContain("关闭标签");
     expect(labels).not.toContain("删除会话");
@@ -909,7 +946,9 @@ describe("SessionView 会话标签联动", () => {
   it("未打开的会话行右键菜单含「打开」与「删除会话」、不含「关闭标签」", async () => {
     const wrapper = mount(SessionView);
     await openCtxMenu(wrapper, 1); // t2 未打开
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).not.toContain("关闭标签");
     expect(labels).toContain("打开");
     expect(labels).toContain("删除会话");
@@ -919,8 +958,22 @@ describe("SessionView 会话标签联动", () => {
 
 describe("SessionView 启动恢复分组展开", () => {
   const groupedThreads = [
-    { id: "t1", name: "A1", preview: "", createdAt: now, recencyAt: now, cwd: "D:\proj-a" },
-    { id: "t2", name: "B1", preview: "", createdAt: now, recencyAt: now, cwd: "D:\proj-b" },
+    {
+      id: "t1",
+      name: "A1",
+      preview: "",
+      createdAt: now,
+      recencyAt: now,
+      cwd: "D:\proj-a",
+    },
+    {
+      id: "t2",
+      name: "B1",
+      preview: "",
+      createdAt: now,
+      recencyAt: now,
+      cwd: "D:\proj-b",
+    },
   ];
 
   beforeEach(() => {

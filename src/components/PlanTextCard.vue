@@ -36,7 +36,11 @@ async function copyPlan() {
         aria-label="展开或收起计划"
         @click="open = !open"
       >
-        <svg class="assistant-card-arrow" viewBox="0 0 24 24" aria-hidden="true">
+        <svg
+          class="assistant-card-arrow"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
           <path :d="open ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
         </svg>
         <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">

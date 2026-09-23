@@ -6,13 +6,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(windows)]
-use tauri::AppHandle;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::webview::PageLoadEvent;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri::utils::config::Color;
+use tauri::webview::PageLoadEvent;
+#[cfg(windows)]
+use tauri::AppHandle;
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use codex::app_server::CodexServer;
 
@@ -34,10 +34,10 @@ const EXIT_GRACE_SECONDS: u64 = 8;
 /// 阻止默认行为；Ctrl/Alt/Shift 组合下的功能键（如 Alt+F4）不拦截，保留系统快捷键。
 #[cfg(windows)]
 fn disable_main_window_function_keys(app: &AppHandle) {
+    use webview2_com::AcceleratorKeyPressedEventHandler;
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN, COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN,
     };
-    use webview2_com::AcceleratorKeyPressedEventHandler;
 
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -203,16 +203,16 @@ pub fn run() {
             codex::commands::scheduled_task_run_now,
             codex::commands::scheduled_task_runs,
             codex::commands::notify_session_event,
-              codex::commands::model_config_read,
-              codex::commands::model_config_save,
-              codex::commands::model_catalog_save,
-              codex::commands::model_catalog_generate_from_provider,
-              codex::model_snapshots::model_snapshots_list,
-              codex::model_snapshots::model_snapshots_save,
-              codex::model_snapshots::model_snapshots_apply,
-              codex::model_snapshots::model_snapshots_delete,
-              codex::model_snapshots::model_snapshots_open,
-              codex::commands::skills_read,
+            codex::commands::model_config_read,
+            codex::commands::model_config_save,
+            codex::commands::model_catalog_save,
+            codex::commands::model_catalog_generate_from_provider,
+            codex::model_snapshots::model_snapshots_list,
+            codex::model_snapshots::model_snapshots_save,
+            codex::model_snapshots::model_snapshots_apply,
+            codex::model_snapshots::model_snapshots_delete,
+            codex::model_snapshots::model_snapshots_open,
+            codex::commands::skills_read,
             codex::commands::skills_add,
             codex::commands::skills_remove,
             codex::commands::custom_instructions_read,
@@ -280,46 +280,46 @@ pub fn run() {
             codex::git::git_changes_watch_stop,
         ]);
 
-        // 单实例仅 release 打包生效：同一时刻只允许一个实例；重复启动时聚焦已有窗口。
-        // 定时任务 toast 的前台激活对未打包 Win32 应用，可能由系统按 AUMID 经快捷方式
-        // 二次启动本 exe 并透传激活串（协议串 `codexui://open-session/<threadId>`），
-        // 由此回调在「运行中的首实例」里解析参数并打开绑定会话。dev（debug_assertions）
-        // 不注册，允许多开，便于调试/热更。
-        #[cfg(not(debug_assertions))]
-        let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // 无论是否命中，都把二次启动收到的参数记入会话日志，便于诊断 toast 点击路由。
+    // 单实例仅 release 打包生效：同一时刻只允许一个实例；重复启动时聚焦已有窗口。
+    // 定时任务 toast 的前台激活对未打包 Win32 应用，可能由系统按 AUMID 经快捷方式
+    // 二次启动本 exe 并透传激活串（协议串 `codexui://open-session/<threadId>`），
+    // 由此回调在「运行中的首实例」里解析参数并打开绑定会话。dev（debug_assertions）
+    // 不注册，允许多开，便于调试/热更。
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        // 无论是否命中，都把二次启动收到的参数记入会话日志，便于诊断 toast 点击路由。
+        if let Some(server) = app.try_state::<Arc<codex::app_server::CodexServer>>() {
+            server.session_log(
+                "info".into(),
+                None,
+                "toast-relaunch".into(),
+                Some(format!(
+                    "args={}",
+                    args.iter()
+                        .map(|s| s.replace(' ', "\\ "))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ))
+                .into(),
+            );
+        }
+        if let Some(thread) = codex::notifications::parse_activation_thread(&args) {
             if let Some(server) = app.try_state::<Arc<codex::app_server::CodexServer>>() {
                 server.session_log(
                     "info".into(),
                     None,
-                    "toast-relaunch".into(),
-                    Some(format!(
-                        "args={}",
-                        args.iter()
-                            .map(|s| s.replace(' ', "\\ "))
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    ))
-                    .into(),
+                    "toast-open-session".into(),
+                    Some(format!("via=relaunch thread={thread}")).into(),
                 );
             }
-            if let Some(thread) = codex::notifications::parse_activation_thread(&args) {
-                if let Some(server) = app.try_state::<Arc<codex::app_server::CodexServer>>() {
-                    server.session_log(
-                        "info".into(),
-                        None,
-                        "toast-open-session".into(),
-                        Some(format!("via=relaunch thread={thread}")).into(),
-                    );
-                }
-                show_main(app);
-                let _ = app.emit(codex::notifications::OPEN_SESSION_EVENT, &thread);
-                return;
-            }
             show_main(app);
-        }));
+            let _ = app.emit(codex::notifications::OPEN_SESSION_EVENT, &thread);
+            return;
+        }
+        show_main(app);
+    }));
 
-        builder
+    builder
         .setup(|app| {
             // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
             codex::git::probe_git_at_startup();
@@ -328,8 +328,7 @@ pub fn run() {
             // 失败不影响启动，生成时回退内置资源。
             if let Ok(model_source_app_dir) = app.path().app_data_dir() {
                 tauri::async_runtime::spawn(async move {
-                    codex::model_catalog::refresh_source_caches(&model_source_app_dir)
-                        .await;
+                    codex::model_catalog::refresh_source_caches(&model_source_app_dir).await;
                 });
             }
 
@@ -341,28 +340,29 @@ pub fn run() {
                 .as_deref()
                 .map(codex::settings::load)
                 .unwrap_or_default();
-            let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
-                .inner_size(1280.0, 800.0)
-                .min_inner_size(400.0, 560.0)
-                .resizable(true)
-                // 自绘标题栏：隐藏原生标题栏与最小化/最大化/关闭按钮，
-                // 改由前端 AppHeader 标题栏提供拖动与窗口控制（关闭仍走下方
-                // on_window_event 的“关闭→隐藏到系统托盘”逻辑）。
-                .decorations(false)
-                // 毛玻璃特效：窗口透明以便露出 Windows Mica/Acrylic；关闭开关时
-                // 由前端纯色根背景兜底，视觉等同关闭（透明会失去系统阴影）。
-                .transparent(true)
-                // 无边框透明窗口与默认阴影冲突：禁用后透明才真正生效
-                .shadow(false)
-                .center()
-                .visible(false)
-                .background_color(Color(0, 0, 0, 0))
-                .build()
-                .map_err(|e| {
-                    eprintln!("创建主窗口失败: {e}");
-                    format!("创建主窗口失败: {e}")
-                })?;
+            let main_window =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title(format!("Codex UI v{}", env!("CARGO_PKG_VERSION")))
+                    .inner_size(1280.0, 800.0)
+                    .min_inner_size(400.0, 560.0)
+                    .resizable(true)
+                    // 自绘标题栏：隐藏原生标题栏与最小化/最大化/关闭按钮，
+                    // 改由前端 AppHeader 标题栏提供拖动与窗口控制（关闭仍走下方
+                    // on_window_event 的“关闭→隐藏到系统托盘”逻辑）。
+                    .decorations(false)
+                    // 毛玻璃特效：窗口透明以便露出 Windows Mica/Acrylic；关闭开关时
+                    // 由前端纯色根背景兜底，视觉等同关闭（透明会失去系统阴影）。
+                    .transparent(true)
+                    // 无边框透明窗口与默认阴影冲突：禁用后透明才真正生效
+                    .shadow(false)
+                    .center()
+                    .visible(false)
+                    .background_color(Color(0, 0, 0, 0))
+                    .build()
+                    .map_err(|e| {
+                        eprintln!("创建主窗口失败: {e}");
+                        format!("创建主窗口失败: {e}")
+                    })?;
 
             // 关闭 → 隐藏：取消关闭并隐藏到系统托盘（codex/微信不随窗口关闭而停）。
             // 直接隐藏而不等待前端：前端关闭守卫只负责 preventDefault 阻止默认销毁，
@@ -505,10 +505,12 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 wechat_boot.autostart().await;
             });
-            app.manage(codex::pdf_export::PdfExportState(
-                std::sync::Mutex::new(std::collections::HashMap::new()),
-            ));
-            app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(None)));
+            app.manage(codex::pdf_export::PdfExportState(std::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )));
+            app.manage(codex::session_fs::FsWatcherState(std::sync::Mutex::new(
+                None,
+            )));
             app.manage(codex::git::GitWatcherState(std::sync::Mutex::new(None)));
             app.manage(codex::terminal::TerminalState(std::sync::Mutex::new(
                 std::collections::HashMap::new(),

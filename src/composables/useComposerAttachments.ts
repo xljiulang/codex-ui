@@ -70,7 +70,10 @@ export function useComposerAttachments(options: {
             bytes: Array.from(bytes),
             name: `pasted.${imageExtFromType(f.type, name)}`,
           });
-          options.rowAttachments.value.push({ type: "localImage", path: saved });
+          options.rowAttachments.value.push({
+            type: "localImage",
+            path: saved,
+          });
           added++;
         } catch (e) {
           setToast(toastError(e));

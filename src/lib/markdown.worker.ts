@@ -19,5 +19,8 @@ self.onmessage = (e: MessageEvent<MarkdownRequest>) => {
   } catch {
     raw = "";
   }
-  (self as unknown as Worker).postMessage({ id, raw } satisfies MarkdownResponse);
+  (self as unknown as Worker).postMessage({
+    id,
+    raw,
+  } satisfies MarkdownResponse);
 };

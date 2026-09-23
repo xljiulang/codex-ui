@@ -205,7 +205,9 @@ async function confirmMcpForm() {
     command: isHttp ? "" : mcpForm.command.trim(),
     cwd: isHttp ? "" : mcpForm.cwd.trim(),
     args: isHttp ? [] : args,
-    env: isHttp ? [] : mcpForm.env.map((e) => ({ key: e.key.trim(), value: e.value })),
+    env: isHttp
+      ? []
+      : mcpForm.env.map((e) => ({ key: e.key.trim(), value: e.value })),
     url: isHttp ? mcpForm.url.trim() : "",
     headers: isHttp
       ? mcpForm.headers.map((e) => ({ key: e.key.trim(), value: e.value }))
@@ -275,9 +277,7 @@ function openMcpDetail(index: number) {
 <template>
   <section v-show="active" class="settings-section settings-section-mcp">
     <h2 class="settings-section-title">MCP 管理</h2>
-    <p class="settings-section-desc">
-      配置 MCP 服务器
-    </p>
+    <p class="settings-section-desc">配置 MCP 服务器</p>
     <div class="model-config-card">
       <div class="model-config-card-head">
         <h3>MCP 服务器</h3>
@@ -331,7 +331,9 @@ function openMcpDetail(index: number) {
           <div class="mcp-server-info">
             <span class="mcp-server-name">{{ s.name }}</span>
             <div class="mcp-server-meta">
-              <span class="mcp-server-type">{{ s.url.trim() ? "http" : "stdio" }}</span>
+              <span class="mcp-server-type">{{
+                s.url.trim() ? "http" : "stdio"
+              }}</span>
               <span
                 v-if="s.omit_tools_from?.length"
                 class="mcp-server-omit"
@@ -381,7 +383,9 @@ function openMcpDetail(index: number) {
 
       <ModalDialog
         v-if="mcpForm.open"
-        :title="mcpForm.editingIndex >= 0 ? '编辑 MCP 服务器' : '添加 MCP 服务器'"
+        :title="
+          mcpForm.editingIndex >= 0 ? '编辑 MCP 服务器' : '添加 MCP 服务器'
+        "
         closable
         @close="closeMcpForm"
       >
@@ -392,7 +396,12 @@ function openMcpDetail(index: number) {
           >
             <label>
               名称（name）
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </label>
             <input
               v-model="mcpForm.name"
@@ -433,7 +442,8 @@ function openMcpDetail(index: number) {
                 <span class="mcp-omit-desc">{{ opt.label }}</span>
               </label>
               <p class="mcp-omit-note">
-                新增服务器默认勾选 deferred（直接内联，便于 DeepSeek 等模型使用）；若三个全勾选，工具将完全对模型隐藏。
+                新增服务器默认勾选 deferred（直接内联，便于 DeepSeek
+                等模型使用）；若三个全勾选，工具将完全对模型隐藏。
               </p>
             </div>
           </div>
@@ -444,7 +454,12 @@ function openMcpDetail(index: number) {
           >
             <label>
               command
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </label>
             <input
               v-model="mcpForm.command"
@@ -452,17 +467,11 @@ function openMcpDetail(index: number) {
               placeholder="如 npx"
               :class="{ 'model-config-input-error': mcpFormErrors.command }"
             />
-            <p
-              v-if="mcpFormErrors.command"
-              class="model-config-field-error"
-            >
+            <p v-if="mcpFormErrors.command" class="model-config-field-error">
               {{ mcpFormErrors.command }}
             </p>
           </div>
-          <div
-            v-if="mcpForm.transport === 'stdio'"
-            class="setting-row"
-          >
+          <div v-if="mcpForm.transport === 'stdio'" class="setting-row">
             <label>cwd（工作目录）</label>
             <input
               v-model="mcpForm.cwd"
@@ -470,10 +479,7 @@ function openMcpDetail(index: number) {
               placeholder="服务器进程启动目录，可留空（如 D:\\project）"
             />
           </div>
-          <div
-            v-if="mcpForm.transport === 'stdio'"
-            class="setting-row"
-          >
+          <div v-if="mcpForm.transport === 'stdio'" class="setting-row">
             <label>args（空格分隔）</label>
             <input
               class="mcp-args-input"
@@ -489,21 +495,9 @@ function openMcpDetail(index: number) {
           >
             <label>env（环境变量）</label>
             <div class="mcp-env-rows">
-              <div
-                v-for="(e, i) in mcpForm.env"
-                :key="i"
-                class="mcp-env-row"
-              >
-                <input
-                  v-model="e.key"
-                  type="text"
-                  placeholder="环境变量名"
-                />
-                <input
-                  v-model="e.value"
-                  type="text"
-                  placeholder="值"
-                />
+              <div v-for="(e, i) in mcpForm.env" :key="i" class="mcp-env-row">
+                <input v-model="e.key" type="text" placeholder="环境变量名" />
+                <input v-model="e.value" type="text" placeholder="值" />
                 <button
                   class="btn btn-icon danger"
                   aria-label="删除该环境变量"
@@ -527,7 +521,12 @@ function openMcpDetail(index: number) {
           >
             <label>
               url
-              <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+              <span
+                class="model-config-required"
+                aria-label="必填"
+                v-tooltip="'必填'"
+                >*</span
+              >
             </label>
             <input
               v-model="mcpForm.url"
@@ -539,10 +538,7 @@ function openMcpDetail(index: number) {
               {{ mcpFormErrors.url }}
             </p>
           </div>
-          <div
-            v-if="mcpForm.transport === 'http'"
-            class="setting-row"
-          >
+          <div v-if="mcpForm.transport === 'http'" class="setting-row">
             <label>bearer_token_env_var（Bearer 令牌环境变量名）</label>
             <input
               v-model="mcpForm.bearer_token_env_var"
@@ -562,16 +558,8 @@ function openMcpDetail(index: number) {
                 :key="i"
                 class="mcp-env-row"
               >
-                <input
-                  v-model="h.key"
-                  type="text"
-                  placeholder="请求头名"
-                />
-                <input
-                  v-model="h.value"
-                  type="text"
-                  placeholder="值"
-                />
+                <input v-model="h.key" type="text" placeholder="请求头名" />
+                <input v-model="h.value" type="text" placeholder="值" />
                 <button
                   class="btn btn-icon danger"
                   aria-label="删除该请求头"
@@ -630,7 +618,6 @@ function openMcpDetail(index: number) {
         :server="mcpDetailServer"
         @close="mcpDetailServer = null"
       />
-
     </div>
   </section>
 </template>
@@ -752,7 +739,10 @@ function openMcpDetail(index: number) {
   border-radius: var(--radius-sm);
   background: var(--bg-input);
   cursor: pointer;
-  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease);
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 .mcp-omit-option input[type="checkbox"]:hover {

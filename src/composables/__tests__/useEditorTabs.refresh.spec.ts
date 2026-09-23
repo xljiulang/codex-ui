@@ -79,7 +79,9 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     });
     await refreshTabsFromFs({ root, paths: ["a.txt"] });
 
-    expect(tab.editorState!.doc.toString()).toBe("line1\nline2\nchanged\nline4");
+    expect(tab.editorState!.doc.toString()).toBe(
+      "line1\nline2\nchanged\nline4",
+    );
     expect(tab.editorState!.selection.main.head).toBe(6); // line2 行首
     expect(tab.dirty).toBe(false);
     expect(tab.status).toContain("已从磁盘刷新");
@@ -114,7 +116,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     await openFile("a.txt", "A");
     await openFile("b.txt", "B");
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
     // 活动标签是 b.txt，payload 命中 a.txt：不触发任何读取
@@ -134,7 +137,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     });
     await refreshTabsFromFs({ root, paths: ["b.txt"] });
     const b = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("b.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("b.txt"),
     )!;
     expect(b.editorState!.doc.toString()).toBe("B2");
   });
@@ -143,10 +147,12 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     await openFile("a.txt", "A");
     await openFile("b.txt", "B");
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     const b = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("b.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("b.txt"),
     )!;
     mockedInvoke.mockClear();
 
@@ -169,7 +175,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     });
     await refreshTabsFromFs({ root, paths: ["a.txt"] });
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     expect(a.editorState!.doc.toString()).toBe("A2");
     expect(a.stale).toBe(false);
@@ -179,7 +186,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     await openFile("a.txt", "A");
     await openFile("b.txt", "B");
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
     await refreshTabsFromFs({ root, paths: ["a.txt"] }); // 非活动 a 标记 stale
@@ -201,7 +209,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     await openFile("a.txt", "A");
     await openFile("b.txt", "B");
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
     await refreshTabsFromFs({ root, paths: ["a.txt"] });
@@ -221,7 +230,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     await openFile("a.txt", "A");
     await openFile("b.txt", "B");
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     mockedInvoke.mockClear();
     await refreshTabsFromFs({ root, paths: ["a.txt"] });
@@ -244,10 +254,12 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     mockedInvoke.mockResolvedValue(undefined);
     await openPreviewTab("image", root, "pic.png");
     const img = tabs.find(
-      (t): t is PreviewEditorTab => t.kind === "preview" && t.path === "pic.png",
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "pic.png",
     )!;
     const a = tabs.find(
-      (t): t is FileEditorTab => t.kind === "file" && t.path === absPath("a.txt"),
+      (t): t is FileEditorTab =>
+        t.kind === "file" && t.path === absPath("a.txt"),
     )!;
     activeTabId.value = a.id; // 预览转非活动
     await flushPromises();
@@ -313,7 +325,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     mockedInvoke.mockResolvedValue(undefined);
     await openPreviewTab("image", root, "pic.png");
     const tab = tabs.find(
-      (t): t is PreviewEditorTab => t.kind === "preview" && t.path === "pic.png",
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "pic.png",
     )!;
     expect(tab.previewType).toBe("image");
     await refreshTabsFromFs({ root, paths: ["pic.png"] });
@@ -341,7 +354,8 @@ describe("refreshTabsFromFs 活动标签外部刷新", () => {
     });
     await openPreviewTab("pdf", root, "doc.pdf");
     const tab = tabs.find(
-      (t): t is PreviewEditorTab => t.kind === "preview" && t.path === "doc.pdf",
+      (t): t is PreviewEditorTab =>
+        t.kind === "preview" && t.path === "doc.pdf",
     )!;
     expect(tab.pdfData!.length).toBe(3);
 

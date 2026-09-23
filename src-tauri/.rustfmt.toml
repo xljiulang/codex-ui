@@ -1,0 +1,7 @@
+# rustfmt 配置：与仓库既有风格对齐
+# edition 与 Cargo.toml 保持一致（2021）
+edition = "2021"
+# 默认 100；Rust 源码中的中文注释按 unicode 宽度计算，保持默认即可
+max_width = 100
+# 保留逐个 use 的显式分组（仓库现状），不启用 group_imports 自动合并
+reorder_imports = true

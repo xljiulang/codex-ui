@@ -11,10 +11,8 @@ import { setWindowBaseTitle, updateWindowTitle } from "./windowTitle";
 import { trackLastSession } from "./lastSession";
 import { loadScheduledTasks } from "./scheduledTasks";
 
-
 /** 启动加载态最长展示时长：防止某个 invoke 挂起导致加载动画永久显示 */
 const BOOT_MAX_MS = 15_000;
-
 
 export async function init() {
   // E2E 测试钩子（与 ComposerBar 暴露 __CODEX_UI_EDITOR__ 同模式）：
@@ -70,7 +68,9 @@ export async function init() {
       for (let i = 0; i < 25; i++) {
         if (store.server.versionTooOld === true) {
           const v = store.server.codexVersion ?? "未知版本";
-          setToast(`当前 codex 版本 ${v} 低于 0.149.0，需要 0.149.0 及以上版本，部分功能可能异常`);
+          setToast(
+            `当前 codex 版本 ${v} 低于 0.149.0，需要 0.149.0 及以上版本，部分功能可能异常`,
+          );
           return;
         }
         if (store.server.versionTooOld === false) return;

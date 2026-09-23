@@ -1,6 +1,12 @@
-import { __resetPinnedSectionForTest, sortThreads } from "../useCodex/pinnedSection";
+import {
+  __resetPinnedSectionForTest,
+  sortThreads,
+} from "../useCodex/pinnedSection";
 import { disposeEvents, wireEvents } from "../useCodex/events";
-import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
+import {
+  __resetSessionTabsForTest,
+  activeSessionTab,
+} from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import {
   autoTitleThread,
@@ -10,7 +16,14 @@ import {
   upsertThreadSummary,
 } from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
-import { capturedListeners, fireListen, makeSessionTab, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  capturedListeners,
+  fireListen,
+  makeSessionTab,
+  mockListenCapture,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -59,8 +72,7 @@ describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）"
   function rpcCalls(method: string) {
     return mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
-        cmd === "codex_rpc" &&
-        (args as { method?: string })?.method === method,
+        cmd === "codex_rpc" && (args as { method?: string })?.method === method,
     );
   }
 
@@ -70,7 +82,10 @@ describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）"
     );
   }
 
-  function mockPinnedSectionId(pinnedSectionId: string | null, refreshedPinned = true) {
+  function mockPinnedSectionId(
+    pinnedSectionId: string | null,
+    refreshedPinned = true,
+  ) {
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "codex_pinned_section_id") {
         return pinnedSectionId === null
@@ -156,7 +171,10 @@ describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）"
       if (cmd === "codex_pinned_section_id") {
         return Promise.resolve("sec-1");
       }
-      if (cmd === "codex_rpc" && (args as { method?: string })?.method === "thread/section/move") {
+      if (
+        cmd === "codex_rpc" &&
+        (args as { method?: string })?.method === "thread/section/move"
+      ) {
         return Promise.reject(new Error("update failed"));
       }
       return Promise.resolve(undefined);
@@ -172,7 +190,13 @@ describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）"
   it("sortThreads 从 section 推导置顶：固定优先，再按最近时间降序", () => {
     const list = [
       { id: "b", name: "未置顶新", createdAt: 0, recencyAt: 2 },
-      { id: "a", name: "置顶旧", createdAt: 0, recencyAt: 1, section: { id: "sec-1", name: "Pinned" } },
+      {
+        id: "a",
+        name: "置顶旧",
+        createdAt: 0,
+        recencyAt: 1,
+        section: { id: "sec-1", name: "Pinned" },
+      },
       { id: "c", name: "未置顶更新", createdAt: 0, recencyAt: 3 },
     ];
     const sorted = sortThreads(list);
@@ -183,7 +207,9 @@ describe("置顶 setThreadPinned（0.149.x 固定 thread/section/move 协议）"
 describe("sanitizeTitle 标题清洗", () => {
   it("去掉引号与 Markdown 标记、折叠空白", () => {
     expect(sanitizeTitle('  "修复 **登录** 页报错" ')).toBe("修复 登录 页报错");
-    expect(sanitizeTitle("`重构` 模块\n\n换行\t空白")).toBe("重构 模块 换行 空白");
+    expect(sanitizeTitle("`重构` 模块\n\n换行\t空白")).toBe(
+      "重构 模块 换行 空白",
+    );
     expect(sanitizeTitle("标题。")).toBe("标题。");
   });
 
@@ -193,7 +219,10 @@ describe("sanitizeTitle 标题清洗", () => {
   });
 });
 describe("autoTitleThread 临时线程标题总结", () => {
-  const LONG_TEXT = "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(2);
+  const LONG_TEXT =
+    "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(
+      2,
+    );
 
   beforeEach(() => {
     disposeEvents(); // 重置 wired，避免前面 wireEvents 用例的监听残留
@@ -205,40 +234,55 @@ describe("autoTitleThread 临时线程标题总结", () => {
     activeTabId.value = "s1";
     store.toast = "";
     store.workspace = "D:/repo";
-    store.threads = [{ id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 }];
+    store.threads = [
+      { id: "t1", name: null, preview: "旧预览", createdAt: 0, recencyAt: 0 },
+    ];
   });
 
   it("短文保持默认标题，不消耗模型", async () => {
     await autoTitleThread("t1", "短消息");
-    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_start",
+      expect.anything(),
+    );
   });
 
   it("阈值边界：纯文本 15 字不触发，16 字触发", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "thread_start")
+        return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       return Promise.resolve(undefined);
     });
 
     await autoTitleThread("t1", "一二三四五六七八九十一二三四五"); // 15 字
-    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_start",
+      expect.anything(),
+    );
 
     mockedInvoke.mockClear();
     const p = autoTitleThread("t1", "一二三四五六七八九十一二三四五六"); // 16 字
     await p;
-    expect(mockedInvoke).toHaveBeenCalledWith("thread_start", expect.anything());
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "thread_start",
+      expect.anything(),
+    );
 
     // 结算临时回合并清理，避免 30s 兜底定时器悬空
     fireListen("turn/completed", {
       threadId: "helper1",
       turn: { id: "ht1", status: "interrupted" },
     });
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-        method: "thread/unsubscribe",
-        params: { threadId: "helper1" },
-      });
-    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+          method: "thread/unsubscribe",
+          params: { threadId: "helper1" },
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
   });
 
   it("线程已有名称时不覆盖", async () => {
@@ -246,7 +290,10 @@ describe("autoTitleThread 临时线程标题总结", () => {
     tab.name = "手动标题";
     tab.nameIsFirstMessage = false;
     await autoTitleThread("t1", LONG_TEXT);
-    expect(mockedInvoke).not.toHaveBeenCalledWith("thread_start", expect.anything());
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "thread_start",
+      expect.anything(),
+    );
   });
 
   it("名称来自首条消息时总结可覆盖并复位标记", async () => {
@@ -254,7 +301,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
     tab.name = "帮我修复登录页面报错";
     tab.nameIsFirstMessage = true;
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "thread_start")
+        return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       if (cmd === "thread_set_name") return Promise.resolve({});
       if (cmd === "thread_list")
@@ -274,30 +322,46 @@ describe("autoTitleThread 临时线程标题总结", () => {
       turn: { id: "ht1", status: "completed" },
     });
 
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
-        threadId: "t1",
-        name: "修复登录页面报错",
-      });
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(tab.nameIsFirstMessage).toBe(false);
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("thread_list", expect.anything());
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-        method: "thread/unsubscribe",
-        params: { threadId: "helper1" },
-      });
-    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+          threadId: "t1",
+          name: "修复登录页面报错",
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(tab.nameIsFirstMessage).toBe(false);
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith(
+          "thread_list",
+          expect.anything(),
+        );
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+          method: "thread/unsubscribe",
+          params: { threadId: "helper1" },
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
   });
 
   it("ephemeral 路径：模型标题写回，临时线程注销", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd === "thread_start") {
-        const params = (args as { params?: Record<string, unknown> }).params ?? {};
+        const params =
+          (args as { params?: Record<string, unknown> }).params ?? {};
         expect(params.ephemeral).toBe(true);
         expect(params.model).toBeUndefined();
         expect(params.sandbox).toBe("read-only");
@@ -305,7 +369,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
         return Promise.resolve({ thread: { id: "helper1" } });
       }
       if (cmd === "turn_start") {
-        const params = (args as { params?: Record<string, unknown> }).params ?? {};
+        const params =
+          (args as { params?: Record<string, unknown> }).params ?? {};
         expect(
           (params.sandboxPolicy as { type?: string } | undefined)?.type,
         ).toBe("readOnly");
@@ -334,26 +399,36 @@ describe("autoTitleThread 临时线程标题总结", () => {
       turn: { id: "ht1", status: "completed" },
     });
 
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
-        threadId: "t1",
-        name: "修复登录页面报错问题",
-      });
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(store.toast).toContain("当前会话的标题已简化");
-    }, { timeout: 3000, interval: 20 });
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-        method: "thread/unsubscribe",
-        params: { threadId: "helper1" },
-      });
-    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+          threadId: "t1",
+          name: "修复登录页面报错问题",
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(store.toast).toContain("当前会话的标题已简化");
+      },
+      { timeout: 3000, interval: 20 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+          method: "thread/unsubscribe",
+          params: { threadId: "helper1" },
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
   });
 
   it("回合失败：不写回标题，仍清理临时线程", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "thread_start")
+        return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       return Promise.resolve(undefined);
     });
@@ -365,12 +440,15 @@ describe("autoTitleThread 临时线程标题总结", () => {
       turn: { id: "ht1", status: "failed" },
     });
 
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
-        method: "thread/unsubscribe",
-        params: { threadId: "helper1" },
-      });
-    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+          method: "thread/unsubscribe",
+          params: { threadId: "helper1" },
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
     expect(mockedInvoke).not.toHaveBeenCalledWith(
       "thread_set_name",
       expect.anything(),
@@ -380,7 +458,8 @@ describe("autoTitleThread 临时线程标题总结", () => {
 
   it("后台临时线程事件被隔离：不影响全局进行中状态", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "thread_start")
+        return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       if (cmd === "thread_set_name") return Promise.resolve({});
       if (cmd === "thread_list") {
@@ -407,12 +486,15 @@ describe("autoTitleThread 临时线程标题总结", () => {
       threadId: "helper1",
       turn: { id: "ht1", status: "completed" },
     });
-    await vi.waitFor(() => {
-      expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
-        threadId: "t1",
-        name: expect.any(String),
-      });
-    }, { timeout: 3000, interval: 20 });
+    await vi.waitFor(
+      () => {
+        expect(mockedInvoke).toHaveBeenCalledWith("thread_set_name", {
+          threadId: "t1",
+          name: expect.any(String),
+        });
+      },
+      { timeout: 3000, interval: 20 },
+    );
     expect(activeSessionTab()?.turnActive).toBe(false);
 
     // 主线程事件照常工作
@@ -435,14 +517,34 @@ describe("upsertThreadSummary 历史面板本地兜底", () => {
   });
 
   it("追加新条目并按最近时间排序", () => {
-    upsertThreadSummary({ id: "t1", name: "旧", createdAt: 100, recencyAt: 100 });
-    upsertThreadSummary({ id: "t2", name: "新", createdAt: 200, recencyAt: 200 });
+    upsertThreadSummary({
+      id: "t1",
+      name: "旧",
+      createdAt: 100,
+      recencyAt: 100,
+    });
+    upsertThreadSummary({
+      id: "t2",
+      name: "新",
+      createdAt: 200,
+      recencyAt: 200,
+    });
     expect(store.threads.map((t) => t.id)).toEqual(["t2", "t1"]);
   });
 
   it("同 id 替换不产生重复", () => {
-    upsertThreadSummary({ id: "t1", name: "旧", createdAt: 100, recencyAt: 100 });
-    upsertThreadSummary({ id: "t1", name: "新", createdAt: 100, recencyAt: 200 });
+    upsertThreadSummary({
+      id: "t1",
+      name: "旧",
+      createdAt: 100,
+      recencyAt: 100,
+    });
+    upsertThreadSummary({
+      id: "t1",
+      name: "新",
+      createdAt: 100,
+      recencyAt: 200,
+    });
     expect(store.threads).toHaveLength(1);
     expect(store.threads[0].name).toBe("新");
   });

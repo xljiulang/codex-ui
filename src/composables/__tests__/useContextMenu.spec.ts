@@ -195,16 +195,14 @@ describe("useContextMenu 自定义右键菜单", () => {
     const ta = wrapper.find("textarea").element as HTMLTextAreaElement;
     ta.focus();
     ta.setSelectionRange(0, 2);
-    wrapper
-      .find("textarea")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    wrapper.find("textarea").element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
     await flushPromises();
     const menu = wrapper.find(".ctx-menu");
     expect(menu.text()).toContain("剪切");
@@ -220,16 +218,14 @@ describe("useContextMenu 自定义右键菜单", () => {
     await flushPromises();
     const ta = wrapper.find("textarea").element as HTMLTextAreaElement;
     ta.setSelectionRange(0, 0);
-    wrapper
-      .find("textarea")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    wrapper.find("textarea").element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
     await flushPromises();
     const btns = wrapper.findAll(".ctx-menu-item");
     await btns.find((b) => b.text() === "粘贴")!.trigger("click");
@@ -278,16 +274,14 @@ describe("useContextMenu 自定义右键菜单", () => {
   it("点击外部关闭菜单", async () => {
     const wrapper = mountHost();
     await flushPromises();
-    wrapper
-      .find("a")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    wrapper.find("a").element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
     window.dispatchEvent(new MouseEvent("click"));
@@ -315,16 +309,14 @@ describe("useContextMenu 自定义右键菜单", () => {
   it("其它容器（不含锚点）滚动不关闭菜单：会话流式吸底不回关", async () => {
     const wrapper = mount(HostScroll, { attachTo: document.body });
     await flushPromises();
-    wrapper
-      .find("textarea")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    wrapper.find("textarea").element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
     wrapper.find(".other-scroll").element.dispatchEvent(new Event("scroll"));
@@ -335,16 +327,14 @@ describe("useContextMenu 自定义右键菜单", () => {
   it("包含锚点自身的容器滚动时关闭菜单", async () => {
     const wrapper = mount(HostScroll, { attachTo: document.body });
     await flushPromises();
-    wrapper
-      .find("textarea")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 50,
-          clientY: 50,
-        }),
-      );
+    wrapper.find("textarea").element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 50,
+        clientY: 50,
+      }),
+    );
     await flushPromises();
     expect(wrapper.find(".ctx-menu").exists()).toBe(true);
     wrapper.find(".anchor-scroll").element.dispatchEvent(new Event("scroll"));
@@ -357,16 +347,14 @@ describe("useContextMenu 自定义右键菜单", () => {
     mockedCopyImage.mockResolvedValue(true);
     const wrapper = mount(HostLightbox, { attachTo: document.body });
     await flushPromises();
-    wrapper
-      .find(".lightbox-img")
-      .element.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: 60,
-          clientY: 70,
-        }),
-      );
+    wrapper.find(".lightbox-img").element.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 60,
+        clientY: 70,
+      }),
+    );
     await flushPromises();
     const menu = wrapper.find(".ctx-menu");
     expect(menu.exists()).toBe(true);

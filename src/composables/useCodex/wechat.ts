@@ -63,5 +63,7 @@ export function isThreadBound(threadId: string | null | undefined): boolean {
 
 /** 指定会话的绑定信息（未绑定返回 null）。 */
 export function bindingOfThread(threadId: string): WeChatBindingInfo | null {
-  return (store.wechat?.bindings ?? []).find((b) => b.threadId === threadId) ?? null;
+  return (
+    (store.wechat?.bindings ?? []).find((b) => b.threadId === threadId) ?? null
+  );
 }

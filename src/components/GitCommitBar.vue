@@ -23,9 +23,7 @@ const commitBusy = ref(false);
 
 const canCommit = computed(
   () =>
-    !commitBusy.value &&
-    !!commitMessage.value.trim() &&
-    props.stagedCount > 0,
+    !commitBusy.value && !!commitMessage.value.trim() && props.stagedCount > 0,
 );
 
 const commitHint = computed(() =>

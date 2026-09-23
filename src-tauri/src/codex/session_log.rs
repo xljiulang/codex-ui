@@ -122,14 +122,20 @@ impl SessionLog {
             }
         }
         if let Some(it) = obj.get("item").and_then(|x| x.as_object()) {
-            for (key, tag) in [("id", "itemId"), ("type", "itemType"), ("status", "itemStatus")]
-            {
+            for (key, tag) in [
+                ("id", "itemId"),
+                ("type", "itemType"),
+                ("status", "itemStatus"),
+            ] {
                 if let Some(v) = it.get(key) {
                     push(tag, value_str(v));
                 }
             }
         }
-        if matches!(method, "turn/start" | "turn/steer" | "thread/resume" | "thread/start") {
+        if matches!(
+            method,
+            "turn/start" | "turn/steer" | "thread/resume" | "thread/start"
+        ) {
             if let Some(v) = obj.get("approvalPolicy") {
                 push("approvalPolicy", value_str(v));
             }
@@ -220,10 +226,7 @@ mod tests {
     }
 
     fn local(y: i32, m: u32, d: u32, h: u32, min: u32, s: u32) -> DateTime<Local> {
-        Local
-            .with_ymd_and_hms(y, m, d, h, min, s)
-            .single()
-            .unwrap()
+        Local.with_ymd_and_hms(y, m, d, h, min, s).single().unwrap()
     }
 
     #[test]
@@ -286,7 +289,9 @@ mod tests {
             .collect();
         assert!(!names.iter().any(|n| n.contains("2026-08-10")));
         for day in 11..=17 {
-            assert!(names.iter().any(|n| n.contains(&format!("2026-08-{day:02}"))));
+            assert!(names
+                .iter()
+                .any(|n| n.contains(&format!("2026-08-{day:02}"))));
         }
     }
 
@@ -294,13 +299,16 @@ mod tests {
     fn custom_prefix_writes_codex_file_and_cleanup_is_isolated() {
         let dir = tmp_dir();
         let codex = SessionLog::with_prefix(dir.path().to_path_buf(), "codex-");
-        codex.write_at(local(2026, 9, 9, 12, 0, 0), "warn", Some("t"), "warning", &[]);
+        codex.write_at(
+            local(2026, 9, 9, 12, 0, 0),
+            "warn",
+            Some("t"),
+            "warning",
+            &[],
+        );
         let session = SessionLog::new(dir.path().to_path_buf());
         session.write_at(local(2026, 9, 9, 12, 0, 0), "info", Some("t"), "ev", &[]);
-        let names: Vec<String> = read_files(dir.path())
-            .into_iter()
-            .map(|(n, _)| n)
-            .collect();
+        let names: Vec<String> = read_files(dir.path()).into_iter().map(|(n, _)| n).collect();
         assert!(names.iter().any(|n| n == "codex-2026-09-09.log"));
         assert!(names.iter().any(|n| n == "session-2026-09-09.log"));
 
@@ -349,7 +357,10 @@ mod tests {
         assert_eq!(map.get("turnId").map(String::as_str), Some("tu1"));
         assert_eq!(map.get("turnStatus").map(String::as_str), Some("completed"));
         assert_eq!(map.get("itemId").map(String::as_str), Some("i1"));
-        assert_eq!(map.get("itemType").map(String::as_str), Some("agentMessage"));
+        assert_eq!(
+            map.get("itemType").map(String::as_str),
+            Some("agentMessage")
+        );
     }
 
     #[test]

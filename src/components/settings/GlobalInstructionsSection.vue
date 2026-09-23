@@ -77,7 +77,10 @@ function openAgentsFile() {
           <span>AGENTS</span>
         </button>
         <div class="model-config-head-actions">
-          <span v-if="agents.agents_path && !agents.exists" class="model-config-missing">
+          <span
+            v-if="agents.agents_path && !agents.exists"
+            class="model-config-missing"
+          >
             （文件不存在，保存时将新建）
           </span>
           <button

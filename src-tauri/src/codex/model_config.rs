@@ -213,8 +213,8 @@ fn read_state_in(home: &Path) -> Result<ModelConfigState, String> {
         // 不存在则创建：保证设置页可直接编辑
         atomic_write(&config_path, "")?;
     }
-    let config_content = fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取 config.toml 失败: {e}"))?;
+    let config_content =
+        fs::read_to_string(&config_path).map_err(|e| format!("读取 config.toml 失败: {e}"))?;
     let structured = read_structured(&config_path);
     let catalog_value = model_catalog_json_value(&config_path);
     let catalog_target = resolve_catalog_path(home, catalog_value.as_deref());
@@ -241,8 +241,7 @@ fn read_state_in(home: &Path) -> Result<ModelConfigState, String> {
         model_provider: structured.model_provider,
         preferred_auth_method: structured.preferred_auth_method,
         forced_login_method: structured.forced_login_method,
-        openai_api_key_present: std::env::var_os("OPENAI_API_KEY")
-            .is_some_and(|v| !v.is_empty()),
+        openai_api_key_present: std::env::var_os("OPENAI_API_KEY").is_some_and(|v| !v.is_empty()),
         providers: structured.providers,
     })
 }
@@ -273,16 +272,18 @@ fn save_model_catalog_in(home: &Path, content: &str) -> Result<(), String> {
         return Err("模型目录内容不能为空".to_string());
     }
     validate_model_catalog(trimmed)?;
-    let target =
-        resolve_catalog_path(home, model_catalog_json_value(&config_path_in(home)).as_deref());
+    let target = resolve_catalog_path(
+        home,
+        model_catalog_json_value(&config_path_in(home)).as_deref(),
+    );
     atomic_write(&target, content)
 }
 
 /// 校验模型目录 JSON：必须为合法 JSON、顶层为对象、含 `models` 数组，且数组每一项为对象。
 /// `models` 可为空数组（`[]` 属合法空目录）。返回中文错误。
 fn validate_model_catalog(trimmed: &str) -> Result<(), String> {
-    let value: serde_json::Value = serde_json::from_str(trimmed)
-        .map_err(|e| format!("模型目录不是合法 JSON: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(trimmed).map_err(|e| format!("模型目录不是合法 JSON: {e}"))?;
     let obj = value
         .as_object()
         .ok_or_else(|| "模型目录必须是顶层 JSON 对象（含 models 数组）".to_string())?;
@@ -303,10 +304,7 @@ pub(crate) fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("tmp");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("tmp");
     let tmp = path.with_extension(format!("{ext}.tmp"));
     fs::write(&tmp, text).map_err(|e| format!("写入临时文件失败: {e}"))?;
     if path.exists() {
@@ -493,8 +491,11 @@ mod tests {
     fn read_state_does_not_read_default_models_json_when_unconfigured() {
         let dir = TempDir::new().unwrap();
         // 仅创建默认 models.json（含旧内容），config 不配置 model_catalog_json 键
-        fs::write(dir.path().join("models.json"), r#"{"models":[{"slug":"old"}]}"#)
-            .unwrap();
+        fs::write(
+            dir.path().join("models.json"),
+            r#"{"models":[{"slug":"old"}]}"#,
+        )
+        .unwrap();
 
         let state = read_state_in(dir.path()).unwrap();
         // 未配置键 → 不读取默认文件内容、不视为已配置
@@ -531,7 +532,8 @@ mod tests {
     #[test]
     fn save_config_writes_verbatim_without_managed_keys() {
         let dir = TempDir::new().unwrap();
-        let content = "instructions = \"项目指引\"\n\n[mcp_servers.filesystem]\ncommand = \"npx\"\n";
+        let content =
+            "instructions = \"项目指引\"\n\n[mcp_servers.filesystem]\ncommand = \"npx\"\n";
         save_config_in(dir.path(), content).unwrap();
 
         let text = fs::read_to_string(config_path_in(dir.path())).unwrap();

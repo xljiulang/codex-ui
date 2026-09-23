@@ -10,11 +10,7 @@ import { openFileTab, openPreviewTab } from "../useEditorTabs";
 import { toUserAttachment } from "../../lib/mention";
 import { pathBaseName } from "../../lib/format";
 import { previewTypeForName } from "../../lib/preview";
-import {
-  dirNameOf,
-  isPathUnderRoot,
-  type FsEntry,
-} from "../../lib/sessionFs";
+import { dirNameOf, isPathUnderRoot, type FsEntry } from "../../lib/sessionFs";
 
 /** 应用内打开文本文件：在主窗口左侧编辑器区打开/激活一个文件标签 */
 export function openTextEditor(entry: FsEntry) {
@@ -76,9 +72,7 @@ export function openPptxPreview(entry: FsEntry) {
  * 打开前探测文件内容是否为文本：true=文本、false=二进制/非文本、
  * null=探测失败（已 toast 错误；无工作目录时静默返回 null）
  */
-export async function probeTextEntry(
-  entry: FsEntry,
-): Promise<boolean | null> {
+export async function probeTextEntry(entry: FsEntry): Promise<boolean | null> {
   const root = workspace.value;
   if (!root) return null;
   try {

@@ -8,12 +8,9 @@ const props = defineProps<{ tab: PreviewEditorTab }>();
 const mediaError = ref(false);
 
 // 切换预览标签或媒体地址变化（外部刷新）时复位错误态
-watch(
-  [() => props.tab, () => props.tab.mediaUrl],
-  () => {
-    mediaError.value = false;
-  },
-);
+watch([() => props.tab, () => props.tab.mediaUrl], () => {
+  mediaError.value = false;
+});
 </script>
 
 <template>

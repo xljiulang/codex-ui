@@ -89,9 +89,13 @@ describe("buildPrintHtml", () => {
   });
 
   it("尖括号内容按字面文本导出（回归：<dd> 被吞成空白）", async () => {
-    const md = ["# 标题", "", "<dd>", "", "把 <user_message> 里的东西改掉"].join(
-      "\n",
-    );
+    const md = [
+      "# 标题",
+      "",
+      "<dd>",
+      "",
+      "把 <user_message> 里的东西改掉",
+    ].join("\n");
     const html = await buildPrintHtml(md, "D:\\repo\\a.md");
 
     expect(html).toContain("&lt;dd&gt;");

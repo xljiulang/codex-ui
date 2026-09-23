@@ -31,7 +31,10 @@ import {
   setThreadPinned,
 } from "../composables/useCodex";
 import { isThreadBound } from "../composables/useCodex/wechat";
-import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
+import {
+  useActionMenu,
+  type ActionMenuItem,
+} from "../composables/useActionMenu";
 import { useSessionDialogs } from "../composables/useSessionDialogs";
 import { formatRelativeTime } from "../lib/format";
 import { groupSessions } from "../lib/sessionGroup";
@@ -100,7 +103,10 @@ watch(
   },
   { immediate: true },
 );
-const debouncedSearch = debounce(() => void searchThreads(searchTerm.value), 300);
+const debouncedSearch = debounce(
+  () => void searchThreads(searchTerm.value),
+  300,
+);
 
 type RenderRow =
   | { kind: "folder"; group: SessionGroup; collapsed: boolean }
@@ -286,11 +292,7 @@ onBeforeUnmount(() => {
         >
           ×
         </button>
-        <button
-          class="panel-refresh"
-          aria-label="刷新"
-          @click="onRefresh()"
-        >
+        <button class="panel-refresh" aria-label="刷新" @click="onRefresh()">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_REFRESH" />
           </svg>
@@ -341,7 +343,9 @@ onBeforeUnmount(() => {
           <span
             class="session-icon"
             :aria-hidden="isThreadBound(row.thread.id) ? undefined : 'true'"
-            :aria-label="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
+            :aria-label="
+              isThreadBound(row.thread.id) ? '已绑定微信' : undefined
+            "
             v-tooltip="isThreadBound(row.thread.id) ? '已绑定微信' : undefined"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -349,7 +353,9 @@ onBeforeUnmount(() => {
                 :d="isThreadBound(row.thread.id) ? ICON_WECHAT : ICON_SESSION"
                 fill="currentColor"
                 stroke="none"
-                :fill-rule="isThreadBound(row.thread.id) ? 'nonzero' : 'evenodd'"
+                :fill-rule="
+                  isThreadBound(row.thread.id) ? 'nonzero' : 'evenodd'
+                "
               />
             </svg>
           </span>
@@ -388,17 +394,23 @@ onBeforeUnmount(() => {
               >
                 {{ store.searchSnippets[row.thread.id] }}
               </span>
-          </template>
+            </template>
           </span>
           <span class="session-time">{{
             formatRelativeTime(row.thread.recencyAt ?? row.thread.updatedAt)
           }}</span>
         </div>
       </template>
-      <div v-if="!store.threads.length && !store.loadingSessions" class="menu-note">
+      <div
+        v-if="!store.threads.length && !store.loadingSessions"
+        class="menu-note"
+      >
         暂无会话
       </div>
-      <div v-if="store.loadingSessions && !store.threads.length" class="menu-note">
+      <div
+        v-if="store.loadingSessions && !store.threads.length"
+        class="menu-note"
+      >
         加载中…
       </div>
     </div>

@@ -77,7 +77,9 @@ export async function loadModelProviderConfig(): Promise<ModelProviderConfigStat
 
 /** 保存模型提供方配置：整表同步（列表外的提供方删除），保留未知字段，
  *  顶层标量一并写入，经 config/batchWrite 热重载。 */
-export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<void> {
+export async function saveModelProviderConfig(
+  edit: ModelConfigUiEdit,
+): Promise<void> {
   // 校验（与旧 Rust 直写语义一致）：标识合法且不重复，激活项必须存在。
   const seen: string[] = [];
   for (const p of edit.providers) {
@@ -114,7 +116,11 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
     setOrRemove(base, "name", p.name.trim());
     setOrRemove(base, "base_url", p.base_url.trim());
     setOrRemove(base, "env_key", p.env_key.trim());
-    setOrRemove(base, "experimental_bearer_token", p.experimental_bearer_token.trim());
+    setOrRemove(
+      base,
+      "experimental_bearer_token",
+      p.experimental_bearer_token.trim(),
+    );
     setOrRemove(base, "wire_api", p.wire_api.trim());
     setOrRemoveBool(base, "requires_openai_auth", !!p.requires_openai_auth);
     merged[key] = base;
@@ -135,7 +141,11 @@ export async function saveModelProviderConfig(edit: ModelConfigUiEdit): Promise<
           mergeStrategy: "replace",
         },
         // model：空串写 null 让 codex 删除该键（回退默认）
-        { keyPath: "model", value: edit.model.trim() || null, mergeStrategy: "replace" },
+        {
+          keyPath: "model",
+          value: edit.model.trim() || null,
+          mergeStrategy: "replace",
+        },
         {
           keyPath: "model_reasoning_effort",
           // 空值删键：写空串会被 codex 拒绝（reasoning_effort must not be empty），导致保存失败
@@ -191,7 +201,11 @@ function setOrRemove(obj: Record<string, unknown>, key: string, value: string) {
   else delete obj[key];
 }
 
-function setOrRemoveBool(obj: Record<string, unknown>, key: string, value: boolean) {
+function setOrRemoveBool(
+  obj: Record<string, unknown>,
+  key: string,
+  value: boolean,
+) {
   if (value) obj[key] = true;
   else delete obj[key];
 }

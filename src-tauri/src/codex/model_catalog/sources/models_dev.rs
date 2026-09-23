@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::{FactMatch, FactSource, write_atomic};
+use super::{write_atomic, FactMatch, FactSource};
 use crate::codex::model_catalog::facts::{FieldProvenance, FieldQuality, ModelFacts};
-use crate::codex::model_catalog::matching::{Candidate, CandidateStore, release_from_date};
+use crate::codex::model_catalog::matching::{release_from_date, Candidate, CandidateStore};
 
 const MODELS_DEV_URL: &str = "https://models.dev/catalog.json";
 const BUNDLED_MODELS_DEV: &str = include_str!("../../../../resources/models-dev.json");
@@ -28,7 +28,9 @@ impl ModelsDevSource {
         let cached = std::fs::read_to_string(cache_path(app_dir))
             .ok()
             .and_then(|text| parse_catalog(&text).ok());
-        Self { store: CandidateStore::new(cached.unwrap_or_else(|| bundled_items().to_vec())) }
+        Self {
+            store: CandidateStore::new(cached.unwrap_or_else(|| bundled_items().to_vec())),
+        }
     }
 }
 
@@ -74,18 +76,26 @@ fn parse_catalog(text: &str) -> Result<Vec<(Candidate, Value)>, String> {
     let mut canonical_tails: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if let Some(canonical) = object.get("models").and_then(Value::as_object) {
         for (id, model) in canonical {
-            if id.trim().is_empty() || !model.is_object() { continue; }
-            canonical_tails.entry(id.rsplit('/').next().unwrap_or(id).to_string())
-                .or_default().push(id.clone());
+            if id.trim().is_empty() || !model.is_object() {
+                continue;
+            }
+            canonical_tails
+                .entry(id.rsplit('/').next().unwrap_or(id).to_string())
+                .or_default()
+                .push(id.clone());
             grouped.entry(id.clone()).or_default().push(json!({
                 "model": model, "matched_id": id, "provider_id": null, "tier": 3
             }));
         }
     }
     for (provider_id, provider) in providers {
-        let Some(models) = provider.get("models").and_then(Value::as_object) else { continue; };
+        let Some(models) = provider.get("models").and_then(Value::as_object) else {
+            continue;
+        };
         for (id, model) in models {
-            if id.trim().is_empty() || !model.is_object() { continue; }
+            if id.trim().is_empty() || !model.is_object() {
+                continue;
+            }
             grouped.entry(id.clone()).or_default().push(json!({
                 "model": model, "matched_id": id, "provider_id": provider_id, "tier": 1
             }));
@@ -97,7 +107,11 @@ fn parse_catalog(text: &str) -> Result<Vec<(Candidate, Value)>, String> {
         let canonical = canonical_tails.get(tail).and_then(|ids| {
             if id.contains('/') {
                 ids.iter().find(|candidate| *candidate == id)
-            } else if ids.len() == 1 { ids.first() } else { None }
+            } else if ids.len() == 1 {
+                ids.first()
+            } else {
+                None
+            }
         });
         let mut related = BTreeSet::from([id.as_str()]);
         if let Some(canonical) = canonical {
@@ -121,9 +135,19 @@ fn parse_catalog(text: &str) -> Result<Vec<(Candidate, Value)>, String> {
             }
         }
         records.sort_by(|left, right| {
-            right["tier"].as_u64().cmp(&left["tier"].as_u64())
-                .then_with(|| left["provider_id"].as_str().cmp(&right["provider_id"].as_str()))
-                .then_with(|| left["matched_id"].as_str().cmp(&right["matched_id"].as_str()))
+            right["tier"]
+                .as_u64()
+                .cmp(&left["tier"].as_u64())
+                .then_with(|| {
+                    left["provider_id"]
+                        .as_str()
+                        .cmp(&right["provider_id"].as_str())
+                })
+                .then_with(|| {
+                    left["matched_id"]
+                        .as_str()
+                        .cmp(&right["matched_id"].as_str())
+                })
         });
         let mut representative = records[0]["model"].clone();
         representative["id"] = json!(id);
@@ -165,15 +189,19 @@ fn facts_from_records(model: &Value) -> ModelFacts {
     let Some(records) = model.get("_records").and_then(Value::as_array) else {
         return facts_from_model(model);
     };
-    let records: Vec<_> = records.iter().map(|record| {
-        let mut origin = FieldProvenance::new(
-            "models_dev", record["matched_id"].as_str().unwrap_or(""),
-            crate::codex::model_catalog::matching::MatchKind::Exact,
-            FieldQuality::from(record["tier"].as_u64().unwrap_or(1) as u8),
-        );
-        origin.provider_id = record["provider_id"].as_str().map(str::to_string);
-        (facts_from_model(&record["model"]), origin)
-    }).collect();
+    let records: Vec<_> = records
+        .iter()
+        .map(|record| {
+            let mut origin = FieldProvenance::new(
+                "models_dev",
+                record["matched_id"].as_str().unwrap_or(""),
+                crate::codex::model_catalog::matching::MatchKind::Exact,
+                FieldQuality::from(record["tier"].as_u64().unwrap_or(1) as u8),
+            );
+            origin.provider_id = record["provider_id"].as_str().map(str::to_string);
+            (facts_from_model(&record["model"]), origin)
+        })
+        .collect();
     ModelFacts::resolve_records(&records)
 }
 
@@ -214,7 +242,9 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
     let items = model
         .pointer("/modalities/input")
         .and_then(Value::as_array)?;
-    if !items.iter().all(Value::is_string) { return None; }
+    if !items.iter().all(Value::is_string) {
+        return None;
+    }
     let mut modalities = Vec::new();
     for item in items {
         let Some(modality) = item.as_str().map(|value| value.trim().to_ascii_lowercase()) else {
@@ -246,10 +276,15 @@ fn reasoning_levels(model: &Value) -> Option<Vec<String>> {
             continue;
         }
         let values = option.get("values").and_then(Value::as_array)?;
-        if !values.iter().all(Value::is_string) { return None; }
+        if !values.iter().all(Value::is_string) {
+            return None;
+        }
         explicit = true;
         for value in values {
-            let Some(effort) = value.as_str().map(|value| value.trim().to_ascii_lowercase()) else {
+            let Some(effort) = value
+                .as_str()
+                .map(|value| value.trim().to_ascii_lowercase())
+            else {
                 continue;
             };
             if !levels.iter().any(|existing| existing == &effort) {
@@ -266,7 +301,9 @@ fn supports_reasoning(model: &Value) -> Option<bool> {
         .get("reasoning_options")
         .and_then(Value::as_array)
         .is_some_and(|options| !options.is_empty());
-    reasoning.map(|value| value || has_options).or_else(|| has_options.then_some(true))
+    reasoning
+        .map(|value| value || has_options)
+        .or_else(|| has_options.then_some(true))
 }
 
 fn cache_path(app_dir: &Path) -> PathBuf {
@@ -275,9 +312,7 @@ fn cache_path(app_dir: &Path) -> PathBuf {
 
 /// 是否需要重新下载：缓存缺失、超过 24 小时或内容不可解析（损坏视为过期）。
 fn needs_refresh(app_dir: &Path) -> bool {
-    !super::cache_is_reusable(&cache_path(app_dir), |text| {
-        parse_catalog(text).is_ok()
-    })
+    !super::cache_is_reusable(&cache_path(app_dir), |text| parse_catalog(text).is_ok())
 }
 
 /// 启动时后台刷新缓存（24 小时内跳过）；失败静默保留旧缓存/内置资源。
@@ -335,14 +370,19 @@ mod tests {
                 }}}
             }
         }).to_string();
-        let source = ModelsDevSource { store: CandidateStore::new(parse_catalog(&text).unwrap()) };
+        let source = ModelsDevSource {
+            store: CandidateStore::new(parse_catalog(&text).unwrap()),
+        };
         for query in ["model-v5", "vendor/model-v5"] {
             let facts = source.extract(query).unwrap().facts;
             assert_eq!(facts.context_window, Some(1000));
             assert_eq!(facts.input_token_limit, Some(800));
             assert_eq!(facts.reasoning_levels, Some(vec![]));
             assert_eq!(facts.provenance["context_window"].provider_id, None);
-            assert_eq!(facts.provenance["reasoning_levels"].provider_id.as_deref(), Some("vendor"));
+            assert_eq!(
+                facts.provenance["reasoning_levels"].provider_id.as_deref(),
+                Some("vendor")
+            );
         }
     }
 
@@ -394,7 +434,9 @@ mod tests {
             "alpha": { "models": { "private-model": { "limit":{"context":100}, "tool_call":true } } },
             "beta": { "models": { "private-model": { "limit":{"context":200}, "tool_call":true } } }
         }}).to_string();
-        let source = ModelsDevSource { store: CandidateStore::new(parse_catalog(&text).unwrap()) };
+        let source = ModelsDevSource {
+            store: CandidateStore::new(parse_catalog(&text).unwrap()),
+        };
         let facts = source.extract("private-model").unwrap().facts;
         assert_eq!(facts.context_window, None);
         assert_eq!(facts.supports_tool_calls, Some(true));
@@ -409,10 +451,23 @@ mod tests {
                 "vendor-b/model-v5": {"limit":{"context":200}}
             },
             "providers": {"relay":{"models":{"model-v5":{"tool_call":true}}}}
-        }).to_string();
-        let source = ModelsDevSource { store: CandidateStore::new(parse_catalog(&text).unwrap()) };
-        assert_eq!(source.extract("model-v5").unwrap().facts.context_window, None);
-        assert_eq!(source.extract("vendor-a/model-v5").unwrap().facts.context_window, Some(100));
+        })
+        .to_string();
+        let source = ModelsDevSource {
+            store: CandidateStore::new(parse_catalog(&text).unwrap()),
+        };
+        assert_eq!(
+            source.extract("model-v5").unwrap().facts.context_window,
+            None
+        );
+        assert_eq!(
+            source
+                .extract("vendor-a/model-v5")
+                .unwrap()
+                .facts
+                .context_window,
+            Some(100)
+        );
     }
 
     /// 合成快照：`alpha-relay` / `beta-relay` 都定义 `shared-model`（值不同），
@@ -460,9 +515,14 @@ mod tests {
             })
             .sum();
         assert!(providers.len() >= 200, "内置快照应为全量（含中转商）");
-        assert!(provider_models >= 7000, "内置快照模型数异常: {provider_models}");
         assert!(
-            raw["models"].as_object().is_some_and(|models| models.len() >= 380),
+            provider_models >= 7000,
+            "内置快照模型数异常: {provider_models}"
+        );
+        assert!(
+            raw["models"]
+                .as_object()
+                .is_some_and(|models| models.len() >= 380),
             "内置快照缺少模型清单"
         );
 
@@ -565,7 +625,10 @@ mod tests {
         let openai = ModelsDevSource::load(dir.path());
         let gpt = openai.extract("gpt-5.7").unwrap();
         assert_eq!(gpt.matched_id, "gpt-5.6");
-        assert_eq!(gpt.kind, crate::codex::model_catalog::matching::MatchKind::Fuzzy);
+        assert_eq!(
+            gpt.kind,
+            crate::codex::model_catalog::matching::MatchKind::Fuzzy
+        );
         assert_eq!(gpt.facts.input_token_limit, Some(922_000));
         assert_eq!(gpt.facts.supports_tool_calls, Some(true));
 
@@ -575,7 +638,10 @@ mod tests {
 
         let deepseek = openai.extract("deepseek-v5").unwrap();
         assert!(
-            deepseek.matched_id.to_ascii_lowercase().starts_with("deepseek-v4"),
+            deepseek
+                .matched_id
+                .to_ascii_lowercase()
+                .starts_with("deepseek-v4"),
             "实际命中 {}",
             deepseek.matched_id
         );
@@ -625,7 +691,10 @@ mod tests {
 
         write_cache_file(dir.path(), "{ broken");
         let fallback = ModelsDevSource::load(dir.path());
-        assert!(fallback.extract("big-pickle").is_some(), "损坏缓存应回退内置快照");
+        assert!(
+            fallback.extract("big-pickle").is_some(),
+            "损坏缓存应回退内置快照"
+        );
     }
 
     #[test]

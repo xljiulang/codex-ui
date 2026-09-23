@@ -64,10 +64,7 @@ function mountGitView(options: Parameters<typeof mount>[1] = {}) {
 
 function mockWatcherAndDefaults() {
   mockedInvoke.mockImplementation((cmd) => {
-    if (
-      cmd === "git_changes_watch_start" ||
-      cmd === "git_changes_watch_stop"
-    ) {
+    if (cmd === "git_changes_watch_start" || cmd === "git_changes_watch_stop") {
       return Promise.resolve(undefined);
     }
     return Promise.resolve(undefined);
@@ -205,7 +202,9 @@ describe("GitView 文件列表与 diff", () => {
         );
       }
       if (cmd === "build_diff_preview") {
-        return Promise.resolve([{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }]);
+        return Promise.resolve([
+          { kind: "ctx", oldNo: 1, newNo: 1, text: "a" },
+        ]);
       }
       return Promise.resolve(undefined);
     });
@@ -243,7 +242,10 @@ describe("GitView 文件列表与 diff", () => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
       if (cmd === "session_fs_icons") {
         return Promise.resolve([
-          { path: "D:\\codex\\demo\\a.txt", dataUri: "data:image/png;base64,abc" },
+          {
+            path: "D:\\codex\\demo\\a.txt",
+            dataUri: "data:image/png;base64,abc",
+          },
         ]);
       }
       return Promise.resolve(undefined);
@@ -256,9 +258,9 @@ describe("GitView 文件列表与 diff", () => {
       ([cmd]) => cmd === "session_fs_icons",
     );
     expect(iconCall).toBeTruthy();
-    expect((iconCall?.[1] as { workspace?: string } | undefined)?.workspace).toBe(
-      rootPath,
-    );
+    expect(
+      (iconCall?.[1] as { workspace?: string } | undefined)?.workspace,
+    ).toBe(rootPath);
     const img = wrapper.find(".git-file-icon-img");
     expect(img.exists()).toBe(true);
     expect(img.attributes("src")).toContain("data:image/png;base64");
@@ -275,7 +277,9 @@ describe("GitView 文件列表与 diff", () => {
         );
       }
       if (cmd === "build_diff_preview") {
-        return Promise.resolve([{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }]);
+        return Promise.resolve([
+          { kind: "ctx", oldNo: 1, newNo: 1, text: "a" },
+        ]);
       }
       return Promise.resolve(undefined);
     });
@@ -314,9 +318,9 @@ describe("GitView 文件列表与 diff", () => {
     expect(params.kind).toBe("modify");
     expect(params.workspace).toBe(rootPath);
     expect(params.diff).toContain("@@");
-    expect(
-      tabs.some((t) => t.kind === "diff" && t.path === "a.txt"),
-    ).toBe(true);
+    expect(tabs.some((t) => t.kind === "diff" && t.path === "a.txt")).toBe(
+      true,
+    );
     wrapper.unmount();
   });
 
@@ -378,7 +382,10 @@ describe("GitView 分支管理", () => {
       if (cmd === "git_changes_branch_switch") {
         return Promise.resolve({ ...okStatus, branch: "dev" });
       }
-      if (cmd === "git_changes_branch_create" || cmd === "git_changes_branch_delete") {
+      if (
+        cmd === "git_changes_branch_create" ||
+        cmd === "git_changes_branch_delete"
+      ) {
         return Promise.resolve({ ...okStatus, branch: current });
       }
       if (cmd === "git_changes_branch_merge") {
@@ -406,7 +413,9 @@ describe("GitView 分支管理", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
     // 分支按钮带 git 分支图标
-    expect(wrapper.find(".git-branch-btn .git-branch-icon").exists()).toBe(true);
+    expect(wrapper.find(".git-branch-btn .git-branch-icon").exists()).toBe(
+      true,
+    );
     await wrapper.find(".git-branch-btn").trigger("click");
     await flushPromises();
 
@@ -599,9 +608,9 @@ describe("GitView 分支管理", () => {
     chatEl.remove();
 
     // 弹层内部列表滚动（粘贴/聚焦自动滚动同路径）不关闭
-    wrapper.find(".git-branch-menu-list").element.dispatchEvent(
-      new Event("scroll"),
-    );
+    wrapper
+      .find(".git-branch-menu-list")
+      .element.dispatchEvent(new Event("scroll"));
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".git-branch-menu").exists()).toBe(true);
 
@@ -721,8 +730,8 @@ describe("GitView 提交历史", () => {
       if (cmd === "git_changes_status") return Promise.resolve(okStatus);
       if (cmd === "git_changes_log") {
         const before =
-          (args as unknown as { before?: string | null } | undefined)
-            ?.before ?? null;
+          (args as unknown as { before?: string | null } | undefined)?.before ??
+          null;
         logCalls.push({ before });
         const start =
           before == null ? 0 : all.findIndex((e) => e.hash === before) + 1;
@@ -886,8 +895,12 @@ describe("GitView 提交历史", () => {
 
     expect(wrapper.findAll(".git-log-item")).toHaveLength(50);
     expect(wrapper.find(".git-log-more").exists()).toBe(true);
-    expect(wrapper.find(".git-log-more").attributes("aria-label")).toBe("加载更多");
-    expect(wrapper.find(".git-log-more").attributes("data-tip")).toBe("加载更多");
+    expect(wrapper.find(".git-log-more").attributes("aria-label")).toBe(
+      "加载更多",
+    );
+    expect(wrapper.find(".git-log-more").attributes("data-tip")).toBe(
+      "加载更多",
+    );
     expect(logCalls.some((c) => c.before === null)).toBe(true);
 
     await wrapper.find(".git-log-more").trigger("click");
@@ -895,7 +908,9 @@ describe("GitView 提交历史", () => {
 
     expect(wrapper.findAll(".git-log-item")).toHaveLength(100);
     expect(logCalls.some((c) => c.before === all[49].hash)).toBe(true);
-    expect(wrapper.find(".git-log-more").attributes("aria-label")).toBe("加载更多");
+    expect(wrapper.find(".git-log-more").attributes("aria-label")).toBe(
+      "加载更多",
+    );
     wrapper.unmount();
   });
 
@@ -1004,9 +1019,9 @@ describe("GitView 分区折叠", () => {
       .find(".git-section-head")
       .trigger("click");
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".git-section")[2].find(".git-log-list").exists()).toBe(
-      true,
-    );
+    expect(
+      wrapper.findAll(".git-section")[2].find(".git-log-list").exists(),
+    ).toBe(true);
     expect(wrapper.findAll(".git-section")[2].classes()).not.toContain(
       "collapsed",
     );
@@ -1017,9 +1032,9 @@ describe("GitView 分区折叠", () => {
       .find(".git-section-head")
       .trigger("click");
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.findAll(".git-section")[0].find(".git-file-list").exists(),
+    ).toBe(false);
     expect(
       wrapper
         .findAll(".git-section")[0]
@@ -1034,10 +1049,12 @@ describe("GitView 分区折叠", () => {
       .find(".git-section-head")
       .trigger("click");
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
-      true,
+    expect(
+      wrapper.findAll(".git-section")[0].find(".git-file-list").exists(),
+    ).toBe(true);
+    expect(wrapper.findAll(".git-section")[0].classes()).not.toContain(
+      "collapsed",
     );
-    expect(wrapper.findAll(".git-section")[0].classes()).not.toContain("collapsed");
     wrapper.unmount();
   });
 
@@ -1060,13 +1077,14 @@ describe("GitView 分区折叠", () => {
     await head.trigger("keydown", { key: " " });
     await wrapper.vm.$nextTick();
     expect(
-      wrapper.findAll(".git-section")[2].find(".git-section-head").attributes(
-        "aria-expanded",
-      ),
+      wrapper
+        .findAll(".git-section")[2]
+        .find(".git-section-head")
+        .attributes("aria-expanded"),
     ).toBe("true");
-    expect(wrapper.findAll(".git-section")[2].find(".git-log-list").exists()).toBe(
-      true,
-    );
+    expect(
+      wrapper.findAll(".git-section")[2].find(".git-log-list").exists(),
+    ).toBe(true);
 
     // 再按 Space 折叠
     await wrapper
@@ -1074,9 +1092,9 @@ describe("GitView 分区折叠", () => {
       .find(".git-section-head")
       .trigger("keydown", { key: " " });
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".git-section")[2].find(".git-log-list").exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.findAll(".git-section")[2].find(".git-log-list").exists(),
+    ).toBe(false);
     wrapper.unmount();
   });
 
@@ -1087,9 +1105,9 @@ describe("GitView 分区折叠", () => {
 
     await wrapper.find(".git-section-head").trigger("click");
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.findAll(".git-section")[0].find(".git-file-list").exists(),
+    ).toBe(false);
 
     // 监听事件触发自动刷新，折叠状态应保留（越过 1s 刷新冷却）
     const changedCb = mockedListen.mock.calls.find(
@@ -1099,9 +1117,9 @@ describe("GitView 分区折叠", () => {
     await new Promise((r) => setTimeout(r, 1200));
     changedCb();
     await flushPromises();
-    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.findAll(".git-section")[0].find(".git-file-list").exists(),
+    ).toBe(false);
     expect(wrapper.findAll(".git-section")[0].classes()).toContain("collapsed");
     wrapper.unmount();
   });
@@ -1111,14 +1129,12 @@ describe("GitView 分区折叠", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
 
-    await wrapper
-      .findAll(".git-section-head")[0]
-      .trigger("contextmenu");
+    await wrapper.findAll(".git-section-head")[0].trigger("contextmenu");
     await flushPromises();
     // 仍为展开状态，且分区菜单正常打开
-    expect(wrapper.findAll(".git-section")[0].find(".git-file-list").exists()).toBe(
-      true,
-    );
+    expect(
+      wrapper.findAll(".git-section")[0].find(".git-file-list").exists(),
+    ).toBe(true);
     expect(wrapper.findAll(".ctx-menu-item").map((i) => i.text())).toEqual([
       "暂存",
       "撤消更改",
@@ -1312,7 +1328,9 @@ describe("GitView 变更文件右键菜单", () => {
         );
       }
       if (cmd === "build_diff_preview") {
-        return Promise.resolve([{ kind: "ctx", oldNo: 1, newNo: 1, text: "a" }]);
+        return Promise.resolve([
+          { kind: "ctx", oldNo: 1, newNo: 1, text: "a" },
+        ]);
       }
       return Promise.resolve(undefined);
     });
@@ -1508,7 +1526,12 @@ describe("GitView 变更文件树形目录", () => {
         staged: true,
         worktree: false,
       },
-      { path: "src2/d.txt", status: "untracked", staged: false, worktree: true },
+      {
+        path: "src2/d.txt",
+        status: "untracked",
+        staged: false,
+        worktree: true,
+      },
     ],
   };
 
@@ -1698,11 +1721,7 @@ describe("GitView 变更文件树形目录", () => {
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
     await dirRow(wrapper, "src").trigger("contextmenu");
-    expect(menuLabels(wrapper)).toEqual([
-      "暂存",
-      "忽略此本地项",
-      "撤消更改",
-    ]);
+    expect(menuLabels(wrapper)).toEqual(["暂存", "忽略此本地项", "撤消更改"]);
     expect(wrapper.find(".ctx-menu-item.danger").text()).toBe("撤消更改");
 
     window.dispatchEvent(new MouseEvent("click"));
@@ -2232,9 +2251,7 @@ describe("GitView 状态字母徽标", () => {
     const deletedRow = wrapper
       .findAll(".git-file")
       .find((r) => r.find(".git-path").text() === "del.txt")!;
-    expect(deletedRow.find(".git-path").classes()).toContain(
-      "git-path-strike",
-    );
+    expect(deletedRow.find(".git-path").classes()).toContain("git-path-strike");
     const modifiedRow = wrapper
       .findAll(".git-file")
       .find((r) => r.find(".git-path").text() === "mod.txt")!;
@@ -2313,7 +2330,11 @@ describe("GitView 远端管理", () => {
   };
 
   function mockRemotes(
-    list: Array<{ name: string; fetchUrl: string | null; pushUrl: string | null }>,
+    list: Array<{
+      name: string;
+      fetchUrl: string | null;
+      pushUrl: string | null;
+    }>,
     current: string | null,
   ) {
     mockedInvoke.mockImplementation((cmd) => {
@@ -2355,7 +2376,9 @@ describe("GitView 远端管理", () => {
     );
     expect(wrapper.find(".git-remote-name").text()).toContain("origin");
     expect(wrapper.find(".git-remote-badge").exists()).toBe(true);
-    expect(wrapper.find(".git-remote-url").text()).toContain("github.com/x/y.git");
+    expect(wrapper.find(".git-remote-url").text()).toContain(
+      "github.com/x/y.git",
+    );
     wrapper.unmount();
   });
 
@@ -2368,7 +2391,9 @@ describe("GitView 远端管理", () => {
     await flushPromises();
 
     expect(
-      wrapper.find(".git-remote-manage-section .git-remote-branch-empty").text(),
+      wrapper
+        .find(".git-remote-manage-section .git-remote-branch-empty")
+        .text(),
     ).toBe("暂无远端");
     wrapper.unmount();
   });
@@ -2420,7 +2445,10 @@ describe("GitView 远端管理", () => {
         return Promise.resolve(defaultBranches);
       }
       if (cmd === "git_changes_remotes") {
-        return Promise.resolve({ current, remotes: [originRemote, upstreamRemote] });
+        return Promise.resolve({
+          current,
+          remotes: [originRemote, upstreamRemote],
+        });
       }
       if (cmd === "git_changes_remote_switch_upstream") {
         current = "upstream";
@@ -2460,12 +2488,12 @@ describe("GitView 远端管理", () => {
     expect(call).toBeTruthy();
     expect(call?.[1]).toEqual({ workspace: rootPath, remote: "upstream" });
     expect(store.toast).toContain("已将当前分支上游切换到 upstream");
-    const badgeRow = wrapper.find(".git-remote-badge").element.closest(
-      ".git-remote-row",
+    const badgeRow = wrapper
+      .find(".git-remote-badge")
+      .element.closest(".git-remote-row");
+    expect(badgeRow?.querySelector(".git-remote-name")?.textContent).toContain(
+      "upstream",
     );
-    expect(
-      badgeRow?.querySelector(".git-remote-name")?.textContent,
-    ).toContain("upstream");
     wrapper.unmount();
   });
 
@@ -2581,7 +2609,9 @@ describe("GitView 远程分支管理", () => {
     expect(badge.exists()).toBe(true);
     expect(badge.text()).toBe("上游");
     expect(
-      wrapper.find(".git-remote-branch-item.upstream .git-remote-branch-name").text(),
+      wrapper
+        .find(".git-remote-branch-item.upstream .git-remote-branch-name")
+        .text(),
     ).toBe("origin/main");
     wrapper.unmount();
   });
@@ -2598,7 +2628,9 @@ describe("GitView 远程分支管理", () => {
 
     await wrapper
       .findAll(".git-remote-branch-item")
-      .find((i) => i.find(".git-remote-branch-name").text() === "origin/feature")!
+      .find(
+        (i) => i.find(".git-remote-branch-name").text() === "origin/feature",
+      )!
       .trigger("click");
     await flushPromises();
     const checkoutCall = mockedInvoke.mock.calls.find(

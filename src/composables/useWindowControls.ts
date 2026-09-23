@@ -4,7 +4,6 @@ import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-
 export interface WindowControls {
   /** 当前是否处于最大化（控制最大化/还原图标展示） */
   isMaximized: Ref<boolean>;
@@ -18,10 +17,8 @@ export interface WindowControls {
   onTitlebarMouseDown: (event: MouseEvent) => void;
 }
 
-
 /** 标题栏交互元素（按钮/输入等）不触发拖动与双击最大化 */
 const NON_DRAG_SELECTOR = "button, a, input, textarea, [data-no-drag]";
-
 
 /**
  * 窗口控制逻辑（供 AppHeader 自绘标题栏使用）：

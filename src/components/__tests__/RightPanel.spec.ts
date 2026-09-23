@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     deleteThread: vi.fn(),
@@ -98,7 +99,12 @@ function mockFs() {
         branch: "main",
         hasRemote: true,
         files: [
-          { path: "src/a.ts", status: "modified", staged: false, worktree: true },
+          {
+            path: "src/a.ts",
+            status: "modified",
+            staged: false,
+            worktree: true,
+          },
         ],
       });
     }
@@ -132,11 +138,7 @@ describe("RightPanel Tab 栏", () => {
 
     const tabs = wrapper.findAll(".panel-tab");
     expect(tabs).toHaveLength(3);
-    expect(tabs.map((t) => t.text().trim())).toEqual([
-      "会话",
-      "资源",
-      "Git",
-    ]);
+    expect(tabs.map((t) => t.text().trim())).toEqual(["会话", "资源", "Git"]);
     // git 状态未加载时角标不显示
     expect(tabs[2].find(".tab-badge").exists()).toBe(false);
     expect(tabs[0].classes()).toContain("active");
@@ -215,9 +217,7 @@ describe("RightPanel Tab 栏", () => {
     // 切到资源 Tab：展开 src，main.ts 出现
     await wrapper.findAll(".panel-tab")[1].trigger("click");
     await flushPromises();
-    await wrapper
-      .findAll(".resource-row.resource-dir")[0]
-      .trigger("click");
+    await wrapper.findAll(".resource-row.resource-dir")[0].trigger("click");
     await flushPromises();
     expect(wrapper.find(".resource-view").text()).toContain("main.ts");
 

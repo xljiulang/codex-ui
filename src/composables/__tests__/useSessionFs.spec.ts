@@ -77,9 +77,15 @@ describe("useSessionFs 文件图标缓存", () => {
   });
 
   it("iconCacheKey：特殊文件名归一为共享键（大小写不敏感）", () => {
-    expect(iconCacheKey(file("Dockerfile", "Dockerfile"))).toBe("ext:dockerfile");
-    expect(iconCacheKey(file("Makefile", "build/Makefile"))).toBe("ext:makefile");
-    expect(iconCacheKey(file(".gitignore", ".gitignore"))).toBe("ext:.gitignore");
+    expect(iconCacheKey(file("Dockerfile", "Dockerfile"))).toBe(
+      "ext:dockerfile",
+    );
+    expect(iconCacheKey(file("Makefile", "build/Makefile"))).toBe(
+      "ext:makefile",
+    );
+    expect(iconCacheKey(file(".gitignore", ".gitignore"))).toBe(
+      "ext:.gitignore",
+    );
     expect(iconCacheKey(file(".env", "conf/.env"))).toBe("ext:.env");
   });
 
@@ -97,7 +103,10 @@ describe("useSessionFs 文件图标缓存", () => {
       if (cmd === "session_fs_icons") {
         const req = (args as { requests: { path: string }[] }).requests;
         return Promise.resolve(
-          req.map((r) => ({ path: r.path, dataUri: "data:image/png;base64,CCCC" })),
+          req.map((r) => ({
+            path: r.path,
+            dataUri: "data:image/png;base64,CCCC",
+          })),
         );
       }
       return Promise.resolve(undefined);
@@ -128,7 +137,10 @@ describe("useSessionFs 文件图标缓存", () => {
       if (cmd === "session_fs_icons") {
         const req = (args as { requests: { path: string }[] }).requests;
         return Promise.resolve(
-          req.map((r) => ({ path: r.path, dataUri: "data:image/png;base64,AAAA" })),
+          req.map((r) => ({
+            path: r.path,
+            dataUri: "data:image/png;base64,AAAA",
+          })),
         );
       }
       return Promise.resolve(undefined);
@@ -309,7 +321,11 @@ describe("openPathInApp 对话链接应用内打开", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(undefined);
     });
@@ -432,9 +448,9 @@ describe("openPathInApp 对话链接应用内打开", () => {
     });
     const ok = await openPathInApp(root + "\\a.bin");
     expect(ok).toBe(false);
-    expect(
-      tabs.some((t) => t.kind === "file" || t.kind === "preview"),
-    ).toBe(false);
+    expect(tabs.some((t) => t.kind === "file" || t.kind === "preview")).toBe(
+      false,
+    );
   });
 
   it("探测失败（目录/缺失）：返回 false 且不 toast", async () => {
@@ -501,9 +517,9 @@ describe("openPathInApp 对话链接应用内打开", () => {
     mockedInvoke.mockResolvedValue(false);
     const ok = await openPathInApp("relative\\a.txt");
     expect(ok).toBe(false);
-    expect(
-      tabs.some((t) => t.kind === "file" || t.kind === "preview"),
-    ).toBe(false);
+    expect(tabs.some((t) => t.kind === "file" || t.kind === "preview")).toBe(
+      false,
+    );
     store.workspace = root;
     await flushPromises();
   });

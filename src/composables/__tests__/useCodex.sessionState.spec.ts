@@ -84,7 +84,11 @@ describe("useCodex 会话状态持久化", () => {
     store.modelsLoaded = true;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "sessions_get") {
-        return { permissionMode: "full-access", model: "gone-model", effort: "max" };
+        return {
+          permissionMode: "full-access",
+          model: "gone-model",
+          effort: "max",
+        };
       }
       return undefined;
     });
@@ -114,7 +118,11 @@ describe("useCodex 会话状态持久化", () => {
     store.modelsLoaded = true;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "sessions_get") {
-        return { permissionMode: "ask-for-approval", model: DEFAULT_MODEL.model, effort: "max" };
+        return {
+          permissionMode: "ask-for-approval",
+          model: DEFAULT_MODEL.model,
+          effort: "max",
+        };
       }
       return undefined;
     });
@@ -129,7 +137,11 @@ describe("useCodex 会话状态持久化", () => {
     store.modelsLoaded = false;
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === "sessions_get") {
-        return { permissionMode: "read-only", model: "later-model", effort: "low" };
+        return {
+          permissionMode: "read-only",
+          model: "later-model",
+          effort: "low",
+        };
       }
       return undefined;
     });

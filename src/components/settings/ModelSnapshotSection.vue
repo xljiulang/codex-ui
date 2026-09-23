@@ -123,7 +123,10 @@ watch(
 </script>
 
 <template>
-  <section v-show="active" class="settings-section settings-section-model-snapshot">
+  <section
+    v-show="active"
+    class="settings-section settings-section-model-snapshot"
+  >
     <h2 class="settings-section-title">模型快照</h2>
     <p class="settings-section-desc">
       保存、还原与删除模型配置快照（CODEX_HOME/codex-ui）
@@ -167,11 +170,7 @@ watch(
         <div v-else-if="!snapshots.length" class="plugin-empty">
           暂无模型快照
         </div>
-        <div
-          v-for="name in snapshots"
-          :key="name"
-          class="model-snapshot-row"
-        >
+        <div v-for="name in snapshots" :key="name" class="model-snapshot-row">
           <span class="model-snapshot-name">{{ name }}</span>
           <div class="model-snapshot-actions">
             <button
@@ -223,7 +222,12 @@ watch(
         <div class="setting-row">
           <label for="model-snapshot-name">
             快照名称
-            <span class="model-config-required" aria-label="必填" v-tooltip="'必填'">*</span>
+            <span
+              class="model-config-required"
+              aria-label="必填"
+              v-tooltip="'必填'"
+              >*</span
+            >
           </label>
           <input
             id="model-snapshot-name"

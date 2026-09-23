@@ -104,7 +104,10 @@ describe("lastSession 最后活跃会话记录与退出落盘", () => {
     await nextTick();
     store.settings.last_session_id = "t2";
     // 最近激活的 s2 被关闭，仅存活的 s1 不是最近激活者
-    tabs.splice(tabs.findIndex((t) => t.id === "s2"), 1);
+    tabs.splice(
+      tabs.findIndex((t) => t.id === "s2"),
+      1,
+    );
     await flushLastSession();
     expect(mockedSave).toHaveBeenCalledWith({ last_session_id: "" });
   });

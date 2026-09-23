@@ -86,9 +86,10 @@ export function groupSessions(list: ThreadSummary[]): SessionRow[] {
     .map((group): SessionRow => ({ kind: "group", group }));
 
   singles.sort(byPinThenRecency);
-  const singleRows: SessionRow[] = singles.map(
-    (thread): SessionRow => ({ kind: "item", thread }),
-  );
+  const singleRows: SessionRow[] = singles.map((thread): SessionRow => ({
+    kind: "item",
+    thread,
+  }));
 
   return [...folderRows, ...singleRows];
 }

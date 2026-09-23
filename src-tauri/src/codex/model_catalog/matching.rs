@@ -34,8 +34,23 @@ const VARIANT_TOKENS: &[&str] = &[
 
 /// 会影响模型用途/规格的 token，模糊匹配时尽量保留。
 const ROLE_TOKENS: &[&str] = &[
-    "coder", "code", "chat", "reasoner", "reasoning", "flash", "pro", "mini", "nano",
-    "sonnet", "opus", "haiku", "vision", "vl", "instruct", "thinking", "lite",
+    "coder",
+    "code",
+    "chat",
+    "reasoner",
+    "reasoning",
+    "flash",
+    "pro",
+    "mini",
+    "nano",
+    "sonnet",
+    "opus",
+    "haiku",
+    "vision",
+    "vl",
+    "instruct",
+    "thinking",
+    "lite",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -136,7 +151,6 @@ impl Candidate {
         }
         self
     }
-
 }
 
 /// 候选集合：内部保持候选顺序，`lookup` 返回命中的原始载荷。
@@ -186,9 +200,11 @@ fn lookup_index(candidates: &[Candidate], model_id: &str) -> Option<(usize, Matc
     let query_series = version_series_markers(&query_key);
     let query_version = key_version(&query_key);
     let query_roles = role_tokens(&query_key);
-    let normalized_namespaces: HashSet<_> = candidates.iter()
+    let normalized_namespaces: HashSet<_> = candidates
+        .iter()
         .filter(|candidate| candidate.normalized_primary == query_key)
-        .filter_map(|candidate| candidate.vendor.as_deref()).collect();
+        .filter_map(|candidate| candidate.vendor.as_deref())
+        .collect();
     let ambiguous_namespace = query_vendor.is_none() && normalized_namespaces.len() > 1;
 
     let mut best: Option<(Rank, usize, MatchKind, f64)> = None;
@@ -571,7 +587,13 @@ mod tests {
 
     #[test]
     fn unicode_and_partial_dates_are_safe() {
-        for id in ["模型测试", "😀模型测试", "模型-2026-9-11", "模型-2026091", "abc-12-34-56"] {
+        for id in [
+            "模型测试",
+            "😀模型测试",
+            "模型-2026-9-11",
+            "模型-2026091",
+            "abc-12-34-56",
+        ] {
             assert_eq!(normalize_model_key(id), id);
         }
         assert_eq!(normalize_model_key("模型测试-2026-09-11"), "模型测试");
@@ -585,11 +607,25 @@ mod tests {
         let store = CandidateStore::new(vec![(candidate, serde_json::json!({}))]);
         assert_eq!(store.lookup("model").unwrap().kind, MatchKind::Fuzzy);
         assert!(store.lookup("other/model-v5").is_none());
-        assert_eq!(store.lookup("vendor/model-v5").unwrap().kind, MatchKind::Exact);
-        assert_eq!(store.lookup("model-v5").unwrap().kind, MatchKind::Normalized);
-        let ambiguous = CandidateStore::new(["vendor-a/model-v5", "vendor-b/model-v5"].into_iter()
-            .map(|id| (Candidate::new(id.into(), vec![], None, id), serde_json::json!({})))
-            .collect());
+        assert_eq!(
+            store.lookup("vendor/model-v5").unwrap().kind,
+            MatchKind::Exact
+        );
+        assert_eq!(
+            store.lookup("model-v5").unwrap().kind,
+            MatchKind::Normalized
+        );
+        let ambiguous = CandidateStore::new(
+            ["vendor-a/model-v5", "vendor-b/model-v5"]
+                .into_iter()
+                .map(|id| {
+                    (
+                        Candidate::new(id.into(), vec![], None, id),
+                        serde_json::json!({}),
+                    )
+                })
+                .collect(),
+        );
         assert_eq!(ambiguous.lookup("model-v5").unwrap().kind, MatchKind::Fuzzy);
     }
     use serde_json::json;
@@ -724,10 +760,7 @@ mod tests {
             matched_id(&store, "deepseek-v5"),
             Some("deepseek/deepseek-v3.2")
         );
-        assert_eq!(
-            matched_id(&store, "qwen4-coder"),
-            Some("qwen/qwen3-coder")
-        );
+        assert_eq!(matched_id(&store, "qwen4-coder"), Some("qwen/qwen3-coder"));
     }
 
     #[test]

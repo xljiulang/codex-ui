@@ -29,7 +29,12 @@ export {
   sortThreads,
 } from "./pinnedSection";
 export { resolveSessionWorkspace, workspace } from "./items";
-export { currentItems, currentOriginLabel, permissionChip, threadTitle } from "./selectors";
+export {
+  currentItems,
+  currentOriginLabel,
+  permissionChip,
+  threadTitle,
+} from "./selectors";
 export {
   __resetSessionTabsForTest,
   activeSessionTab,

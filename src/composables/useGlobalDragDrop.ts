@@ -1,4 +1,3 @@
-
 import { onBeforeUnmount, ref } from "vue";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { UnlistenFn } from "@tauri-apps/api/event";

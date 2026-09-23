@@ -367,7 +367,10 @@ fn cleanup_targets(files: &[(String, u64)], now_ms: i64, limits: TraceLimits) ->
         let Some((group, ts)) = parse_artifact(name) else {
             continue;
         };
-        match groups.iter_mut().find(|(existing, _, _)| *existing == group) {
+        match groups
+            .iter_mut()
+            .find(|(existing, _, _)| *existing == group)
+        {
             Some((_, _, total)) => *total += *size,
             None => groups.push((group, ts, *size)),
         }
@@ -495,8 +498,7 @@ mod tests {
 
         let response = fs::read_to_string(dir.path().join(format!("{base}.response.sse"))).unwrap();
         assert_eq!(
-            response,
-            "data: {\"choices\":[]}\ndata: [DONE]\n",
+            response, "data: {\"choices\":[]}\ndata: [DONE]\n",
             "上游行应原样落盘"
         );
 
@@ -554,10 +556,7 @@ mod tests {
         assert!(content.contains(TRUNCATED_MARK), "{content}");
         assert!(content.len() < 256, "截断后不应继续增长：{content}");
 
-        let summary_name = names
-            .iter()
-            .find(|n| n.ends_with(".summary.txt"))
-            .unwrap();
+        let summary_name = names.iter().find(|n| n.ends_with(".summary.txt")).unwrap();
         let summary = fs::read_to_string(dir.path().join(summary_name)).unwrap();
         assert!(summary.contains("truncated=true"), "{summary}");
     }
@@ -676,6 +675,9 @@ mod tests {
             .find(|n| n.ends_with(".summary.txt"))
             .expect("中断也应落盘摘要");
         let summary = fs::read_to_string(dir.path().join(summary_name)).unwrap();
-        assert!(summary.contains("ended=dropped_without_finish"), "{summary}");
+        assert!(
+            summary.contains("ended=dropped_without_finish"),
+            "{summary}"
+        );
     }
 }

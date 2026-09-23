@@ -9,7 +9,11 @@ import { store } from "../useCodex/store";
 import { refreshThreads, searchThreads } from "../useCodex/threads";
 import { activeTabId } from "../useEditorTabs";
 import type { ThreadItem, Turn } from "../../lib/types";
-import { makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  makeSessionTab,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,9 +61,7 @@ describe("resolveSessionWorkspace 工作目录解析", () => {
 
   it("有会话：取会话 cwd", () => {
     __resetSessionTabsForTest();
-    tabs.push(
-      makeSessionTab("s1", "t1", { workspace: "D:/projects/other" }),
-    );
+    tabs.push(makeSessionTab("s1", "t1", { workspace: "D:/projects/other" }));
     activeTabId.value = "s1";
     expect(resolveSessionWorkspace()).toBe("D:/projects/other");
   });
@@ -105,12 +107,9 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("workspace 计算：有活动标签覆盖时返回覆盖值，否则回落会话工作区", async () => {
     __resetSessionTabsForTest();
-    tabs.push(
-      makeSessionTab("s1", "t1", { workspace: "D:/session" }),
-    );
+    tabs.push(makeSessionTab("s1", "t1", { workspace: "D:/session" }));
     activeTabId.value = "s1";
     expect(workspace.value).toBe("D:/session");
 
@@ -189,8 +188,8 @@ describe("历史全量加载（逐页拉取）", () => {
   it("searchThreads 逐页累加并汇总摘要", async () => {
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
       if (cmd !== "codex_rpc") return Promise.resolve(undefined);
-      const cursor = (args as { params?: { cursor?: string | null } })
-        ?.params?.cursor;
+      const cursor = (args as { params?: { cursor?: string | null } })?.params
+        ?.cursor;
       if (!cursor) {
         return Promise.resolve({
           data: [
@@ -325,7 +324,11 @@ describe("upsertItem 用户消息派生摘要持久化", () => {
       type: "userMessage",
       content: [{ type: "text", text: "问题1", text_elements: [] }],
     } as ThreadItem);
-    upsertItem("t1", { id: "a1", type: "agentMessage", text: "回答" } as ThreadItem);
+    upsertItem("t1", {
+      id: "a1",
+      type: "agentMessage",
+      text: "回答",
+    } as ThreadItem);
 
     expect(store.itemsByThread["t1"][0].derived).toEqual({
       text: "问题1",

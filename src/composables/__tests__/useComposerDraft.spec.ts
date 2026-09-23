@@ -100,7 +100,7 @@ describe("useComposerDraft", () => {
     const { tab, rowAttachments, refsById, draft, editor } = setup();
     tab.draftJson = JSON.stringify({ type: "doc", content: [{ type: "p" }] });
     tab.draftAttachments = [{ type: "localImage", path: "D:/p.png" }];
-    tab.draftRefs = { "r1": { type: "mention", name: "a", path: "D:/a.cs" } };
+    tab.draftRefs = { r1: { type: "mention", name: "a", path: "D:/a.cs" } };
     draft.restoreDraftFromTab();
     expect(refsById.value.get("r1")).toEqual({
       type: "mention",

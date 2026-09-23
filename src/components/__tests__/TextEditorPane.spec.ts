@@ -155,7 +155,9 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     const txtTab = await openTab("a.txt", "hello");
     const txtWrapper = await mountEditor(txtTab);
     expect(
-      txtWrapper.find(".text-editor-actions button[aria-label='预览']").exists(),
+      txtWrapper
+        .find(".text-editor-actions button[aria-label='预览']")
+        .exists(),
     ).toBe(false);
     txtWrapper.unmount();
   });
@@ -360,9 +362,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     // 短 JSON 对象在打印宽度内保持单行，但规范化为空格与 4 空格缩进风格
     await vi.waitFor(
       () => {
-        expect(view.state.doc.toString()).toBe(
-          '{ "a": 1, "b": [1, 2] }',
-        );
+        expect(view.state.doc.toString()).toBe('{ "a": 1, "b": [1, 2] }');
       },
       { timeout: WAIT_TIMEOUT, interval: 20 },
     );
@@ -382,9 +382,7 @@ describe("TextEditorPane 右键菜单与 Markdown 预览", () => {
     await openCtx(wrapper);
     await clickMenuItem(wrapper, "代码格式化");
 
-    expect(view.state.doc.toString()).toBe(
-      "<root>\n    <a>1</a>\n</root>",
-    );
+    expect(view.state.doc.toString()).toBe("<root>\n    <a>1</a>\n</root>");
     wrapper.unmount();
   });
 

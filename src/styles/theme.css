@@ -181,15 +181,17 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18), 0 1px 1px rgba(0, 0, 0, 0.1);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.22), 0 10px 28px rgba(0, 0, 0, 0.14);
   --shadow-lg: 0 4px 14px rgba(0, 0, 0, 0.28), 0 18px 48px rgba(0, 0, 0, 0.2);
-  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.24), 0 12px 32px rgba(0, 0, 0, 0.16);
-  --shadow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.16),
+  --shadow-hover:
+    0 4px 12px rgba(0, 0, 0, 0.24), 0 12px 32px rgba(0, 0, 0, 0.16);
+  --shadow-accent:
+    0 0 0 1px rgba(var(--accent-rgb), 0.16),
     0 4px 18px rgba(var(--accent-rgb), 0.3);
   --header-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   --footer-shadow: 0 -12px 32px rgba(0, 0, 0, 0.08);
   --panel-shadow: -16px 0 40px rgba(0, 0, 0, 0.06);
   --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --inset-shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    inset 0 0 28px rgba(0, 0, 0, 0.05);
+  --inset-shadow-md:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 0 28px rgba(0, 0, 0, 0.05);
   --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.28), 0 14px 36px rgba(0, 0, 0, 0.18);
   /* 玻璃面：半透明底色 + 模糊，应用于头部/composer/菜单/弹窗 */
   --glass-bg: rgba(38, 48, 61, 0.68);
@@ -198,18 +200,30 @@
   --float-bg: rgba(23, 29, 38, 0.85);
   --float-bg-solid: #171d26;
   /* 表面与主按钮渐变/辉光 */
-  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.028),
-    rgba(255, 255, 255, 0) 42%);
+  --surface-grad: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.028),
+    rgba(255, 255, 255, 0) 42%
+  );
   --btn-primary-grad: var(--send-btn-grad);
-  --btn-glow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+  --btn-glow:
+    0 2px 12px rgba(var(--accent-rgb), 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  --btn-glow-hover: 0 4px 22px rgba(var(--accent-rgb), 0.55),
+  --btn-glow-hover:
+    0 4px 22px rgba(var(--accent-rgb), 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
   /* 背景氛围光：顶部/底部两团径向渐变（.app-ambient） */
-  --ambient-grad: radial-gradient(680px 340px at 12% -10%,
-      rgba(var(--accent-rgb), 0.07), transparent 62%),
-    radial-gradient(760px 380px at 88% 112%,
-      rgba(var(--purple-rgb), 0.05), transparent 62%);
+  --ambient-grad:
+    radial-gradient(
+      680px 340px at 12% -10%,
+      rgba(var(--accent-rgb), 0.07),
+      transparent 62%
+    ),
+    radial-gradient(
+      760px 380px at 88% 112%,
+      rgba(var(--purple-rgb), 0.05),
+      transparent 62%
+    );
 }
 
 /* 主题二：曜黑（近黑画布 + 霓虹紫，更冷峻凌厉） */
@@ -329,31 +343,45 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22), 0 1px 1px rgba(0, 0, 0, 0.12);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.26), 0 10px 28px rgba(0, 0, 0, 0.17);
   --shadow-lg: 0 4px 14px rgba(0, 0, 0, 0.32), 0 18px 48px rgba(0, 0, 0, 0.24);
-  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.19);
-  --shadow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.18),
+  --shadow-hover:
+    0 4px 12px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.19);
+  --shadow-accent:
+    0 0 0 1px rgba(var(--accent-rgb), 0.18),
     0 4px 18px rgba(var(--accent-rgb), 0.34);
   --header-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   --footer-shadow: 0 -12px 32px rgba(0, 0, 0, 0.1);
   --panel-shadow: -16px 0 40px rgba(0, 0, 0, 0.08);
   --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-  --inset-shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.04),
-    inset 0 0 28px rgba(0, 0, 0, 0.06);
+  --inset-shadow-md:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 0 28px rgba(0, 0, 0, 0.06);
   --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.32), 0 14px 36px rgba(0, 0, 0, 0.22);
   --glass-bg: rgba(32, 33, 46, 0.7);
   --glass-border: rgba(173, 168, 212, 0.18);
   --float-bg: rgba(19, 20, 28, 0.85);
   --float-bg-solid: #13141c;
-  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.03),
-    rgba(255, 255, 255, 0) 42%);
+  --surface-grad: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.03),
+    rgba(255, 255, 255, 0) 42%
+  );
   --btn-primary-grad: var(--send-btn-grad);
-  --btn-glow: 0 2px 12px rgba(var(--accent-rgb), 0.32),
+  --btn-glow:
+    0 2px 12px rgba(var(--accent-rgb), 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
-  --btn-glow-hover: 0 4px 22px rgba(var(--accent-rgb), 0.55),
+  --btn-glow-hover:
+    0 4px 22px rgba(var(--accent-rgb), 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
-  --ambient-grad: radial-gradient(680px 340px at 12% -10%,
-      rgba(var(--accent-rgb), 0.09), transparent 62%),
-    radial-gradient(760px 380px at 88% 112%,
-      rgba(var(--purple-rgb), 0.07), transparent 62%);
+  --ambient-grad:
+    radial-gradient(
+      680px 340px at 12% -10%,
+      rgba(var(--accent-rgb), 0.09),
+      transparent 62%
+    ),
+    radial-gradient(
+      760px 380px at 88% 112%,
+      rgba(var(--purple-rgb), 0.07),
+      transparent 62%
+    );
 }
 
 /* 主题三：晨光（通透明亮，蓝主色加深保证对比度） */
@@ -364,9 +392,9 @@
   /* 毛玻璃特效下的应用底色（本体色 + 0.72 alpha，浅色透感更弱保证可读） */
   --app-glass-tint: rgba(244, 246, 251, 0.45);
   /* 头部/标签栏/输入区外层：更透的 tint 增强玻璃感 */
-  --app-header-tint: rgba(244, 246, 251, 0.40);
+  --app-header-tint: rgba(244, 246, 251, 0.4);
   /* 输入卡片：比头部稍实一档，保证输入文字对比 */
-  --app-composer-tint: rgba(244, 246, 251, 0.50);
+  --app-composer-tint: rgba(244, 246, 251, 0.5);
   /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
   --app-content-tint: rgba(244, 246, 251, 0.58);
   --bg-panel: #ffffff;
@@ -472,34 +500,53 @@
 
   --overlay-rgb: 25, 35, 52;
   /* 光影体系（晨光：低透明冷灰阴影，保持通透明亮） */
-  --shadow-sm: 0 1px 2px rgba(30, 40, 60, 0.06), 0 1px 1px rgba(30, 40, 60, 0.04);
-  --shadow-md: 0 2px 8px rgba(30, 40, 60, 0.08), 0 10px 28px rgba(30, 40, 60, 0.07);
-  --shadow-lg: 0 4px 14px rgba(30, 40, 60, 0.1), 0 18px 44px rgba(30, 40, 60, 0.09);
-  --shadow-hover: 0 4px 12px rgba(30, 40, 60, 0.1), 0 12px 30px rgba(30, 40, 60, 0.08);
-  --shadow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.14),
+  --shadow-sm:
+    0 1px 2px rgba(30, 40, 60, 0.06), 0 1px 1px rgba(30, 40, 60, 0.04);
+  --shadow-md:
+    0 2px 8px rgba(30, 40, 60, 0.08), 0 10px 28px rgba(30, 40, 60, 0.07);
+  --shadow-lg:
+    0 4px 14px rgba(30, 40, 60, 0.1), 0 18px 44px rgba(30, 40, 60, 0.09);
+  --shadow-hover:
+    0 4px 12px rgba(30, 40, 60, 0.1), 0 12px 30px rgba(30, 40, 60, 0.08);
+  --shadow-accent:
+    0 0 0 1px rgba(var(--accent-rgb), 0.14),
     0 4px 18px rgba(var(--accent-rgb), 0.18);
   --header-shadow: 0 6px 20px rgba(30, 40, 60, 0.05);
   --footer-shadow: 0 -10px 28px rgba(30, 40, 60, 0.04);
   --panel-shadow: -16px 0 32px rgba(30, 40, 60, 0.05);
   --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  --inset-shadow-md: inset 0 1px 0 rgba(255, 255, 255, 0.8),
+  --inset-shadow-md:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
     inset 0 0 24px rgba(255, 255, 255, 0.5);
-  --doc-shadow: 0 2px 8px rgba(30, 40, 60, 0.12), 0 14px 32px rgba(30, 40, 60, 0.1);
+  --doc-shadow:
+    0 2px 8px rgba(30, 40, 60, 0.12), 0 14px 32px rgba(30, 40, 60, 0.1);
   --glass-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(60, 76, 101, 0.16);
   --float-bg: rgba(255, 255, 255, 0.88);
   --float-bg-solid: #ffffff;
-  --surface-grad: linear-gradient(180deg, rgba(255, 255, 255, 0.7),
-    rgba(255, 255, 255, 0) 40%);
+  --surface-grad: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.7),
+    rgba(255, 255, 255, 0) 40%
+  );
   --btn-primary-grad: var(--send-btn-grad);
-  --btn-glow: 0 2px 10px rgba(var(--accent-rgb), 0.25),
+  --btn-glow:
+    0 2px 10px rgba(var(--accent-rgb), 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.45);
-  --btn-glow-hover: 0 6px 22px rgba(var(--accent-rgb), 0.35),
+  --btn-glow-hover:
+    0 6px 22px rgba(var(--accent-rgb), 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  --ambient-grad: radial-gradient(680px 340px at 12% -10%,
-      rgba(var(--accent-rgb), 0.06), transparent 62%),
-    radial-gradient(760px 380px at 88% 112%,
-      rgba(var(--purple-rgb), 0.05), transparent 62%);
+  --ambient-grad:
+    radial-gradient(
+      680px 340px at 12% -10%,
+      rgba(var(--accent-rgb), 0.06),
+      transparent 62%
+    ),
+    radial-gradient(
+      760px 380px at 88% 112%,
+      rgba(var(--purple-rgb), 0.05),
+      transparent 62%
+    );
 }
 
 * {
@@ -516,7 +563,11 @@ body,
 }
 
 body {
-  font-family: "Segoe UI", "Microsoft YaHei", -apple-system, sans-serif;
+  font-family:
+    "Segoe UI",
+    "Microsoft YaHei",
+    -apple-system,
+    sans-serif;
   font-size: var(--font-base);
   line-height: 1.55;
   color: var(--text);
@@ -538,8 +589,12 @@ button {
   background: none;
   border: none;
   cursor: pointer;
-  transition: background-color var(--ease), color var(--ease),
-    border-color var(--ease), box-shadow var(--ease), transform var(--ease),
+  transition:
+    background-color var(--ease),
+    color var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease),
+    transform var(--ease),
     opacity var(--ease);
 }
 
@@ -571,7 +626,9 @@ textarea {
   padding: var(--space-2) var(--space-3);
   outline: none;
   resize: none;
-  transition: border-color var(--ease), box-shadow var(--ease);
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 input:focus,
@@ -589,7 +646,9 @@ select {
   border-radius: var(--radius);
   padding: var(--space-2) var(--space-3);
   outline: none;
-  transition: border-color var(--ease), box-shadow var(--ease);
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 select:focus {
@@ -823,7 +882,9 @@ html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"] {
 
 html[data-glass="on"] .checkbox-row input[type="checkbox"]:checked,
 html[data-glass="on"] .mcp-omit-option input[type="checkbox"]:checked,
-html[data-glass="on"] .model-catalog-picker-select-all input[type="checkbox"]:checked,
+html[data-glass="on"]
+  .model-catalog-picker-select-all
+  input[type="checkbox"]:checked,
 html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"]:checked {
   background-color: rgba(var(--accent-rgb), 0.55);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-7' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -832,8 +893,12 @@ html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"]:checked {
   background-repeat: no-repeat;
 }
 
-html[data-glass="on"] .model-catalog-picker-select-all input[type="checkbox"]:indeterminate,
-html[data-glass="on"] .model-catalog-picker-row input[type="checkbox"]:indeterminate {
+html[data-glass="on"]
+  .model-catalog-picker-select-all
+  input[type="checkbox"]:indeterminate,
+html[data-glass="on"]
+  .model-catalog-picker-row
+  input[type="checkbox"]:indeterminate {
   background-color: rgba(var(--accent-rgb), 0.55);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-size: 12px;

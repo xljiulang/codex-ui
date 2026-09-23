@@ -2,7 +2,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     wechatBindLoginStart: vi.fn().mockResolvedValue(undefined),
@@ -136,7 +137,9 @@ describe("WechatBindDialog", () => {
   it("非扫码中关闭：直接 close 且不取消", async () => {
     const wrapper = mountDialog();
     await flushPromises();
-    const footBtn = wrapper.findAll(".modal-foot .btn").find((b) => b.text().trim() === "关闭");
+    const footBtn = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "关闭");
     expect(footBtn).toBeTruthy();
     await footBtn!.trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
@@ -155,7 +158,9 @@ describe("WechatBindDialog", () => {
     };
     const wrapper = mountDialog();
     await flushPromises();
-    const footBtn = wrapper.findAll(".modal-foot .btn").find((b) => b.text().trim() === "关闭");
+    const footBtn = wrapper
+      .findAll(".modal-foot .btn")
+      .find((b) => b.text().trim() === "关闭");
     await footBtn!.trigger("click");
     await flushPromises();
     expect(mockedCancel).toHaveBeenCalled();

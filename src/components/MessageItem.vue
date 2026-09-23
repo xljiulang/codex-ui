@@ -67,12 +67,11 @@ const bubbleFiles = computed(() => {
 });
 
 /** 附件区图片：localImage 项 */
-const bubbleImages = computed(
-  () =>
-    contentItems.value.filter(
-      (x): x is Extract<UserInput, { type: "localImage" }> =>
-        x.type === "localImage",
-    ),
+const bubbleImages = computed(() =>
+  contentItems.value.filter(
+    (x): x is Extract<UserInput, { type: "localImage" }> =>
+      x.type === "localImage",
+  ),
 );
 
 function hasInlineRefs(c: UserInput): boolean {
@@ -239,10 +238,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
           <div v-else class="img-fallback">图片加载失败</div>
         </template>
       </div>
-      <PlanTextCard
-        v-if="isExecutePlan"
-        :plan-text="executePlanText"
-      />
+      <PlanTextCard v-if="isExecutePlan" :plan-text="executePlanText" />
       <template v-for="(c, i) in contentItems" :key="i">
         <template v-if="c.type === 'localImage'">
           <!-- 图片已渲染到附件区 -->
@@ -289,7 +285,11 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     <PlanTextCard :plan-text="String(item.text ?? '')" default-open />
   </div>
   <div v-else-if="item.type === 'agentMessage'" class="msg msg-agent">
-    <span v-if="item.phase === 'commentary' && item.streaming === true" class="phase-badge">进行中</span>
+    <span
+      v-if="item.phase === 'commentary' && item.streaming === true"
+      class="phase-badge"
+      >进行中</span
+    >
     <div v-if="isFinalAnswer && !item.streaming" class="agent-final">
       <button
         type="button"
@@ -314,7 +314,10 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
       </div>
     </div>
     <template v-else>
-      <MarkdownText :text="String(item.text ?? '')" :streaming="item.streaming === true" />
+      <MarkdownText
+        :text="String(item.text ?? '')"
+        :streaming="item.streaming === true"
+      />
       <span v-if="item.streaming === true" class="stream-cursor"></span>
       <div v-if="memoryList.length" class="memory-citation">
         <span class="memory-citation-title">记忆引用：</span>
@@ -350,7 +353,12 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
         alt="图片"
         loading="lazy"
         decoding="async"
-        @click="openLightbox(assetUrl(String(item.path ?? '')), String(item.path ?? ''))"
+        @click="
+          openLightbox(
+            assetUrl(String(item.path ?? '')),
+            String(item.path ?? ''),
+          )
+        "
         @error="markImgErr()"
       />
       <div v-else class="img-fallback">图片加载失败</div>
@@ -363,7 +371,9 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     </div>
   </div>
   <div v-else-if="item.type === 'sleep'" class="msg">
-    <div class="unknown-item">等待 {{ formatDuration(Number(item.durationMs ?? 0)) }}</div>
+    <div class="unknown-item">
+      等待 {{ formatDuration(Number(item.durationMs ?? 0)) }}
+    </div>
   </div>
   <div v-else class="msg">
     <div class="unknown-item">
@@ -383,11 +393,7 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
     @click="closeLightbox"
   >
     <!-- 不加 @click.stop：点图片也冒泡到遮罩，一次点击即关闭；data-copy-source 供右键「复制图像」 -->
-    <img
-      :src="lightboxSrc"
-      :data-copy-source="lightboxSource"
-      alt="图片预览"
-    />
+    <img :src="lightboxSrc" :data-copy-source="lightboxSource" alt="图片预览" />
   </div>
 </template>
 
@@ -403,9 +409,12 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
   background: rgba(var(--accent-rgb), 0.1);
   border: 1px solid rgba(var(--accent-rgb), 0.28);
   color: var(--text-bright);
-  box-shadow: var(--inset-shadow), 0 2px 12px rgba(var(--accent-rgb), 0.13);
+  box-shadow:
+    var(--inset-shadow),
+    0 2px 12px rgba(var(--accent-rgb), 0.13);
   padding: var(--space-3) var(--space-5);
-  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm)
+    var(--radius-lg);
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;

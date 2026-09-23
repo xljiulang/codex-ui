@@ -1,7 +1,11 @@
 // useCodex 拆分模块：类型与常量（原 useCodex.ts 的一部分，纯移动，行为不变）
-import type { AppSettings, PendingInteraction, PermissionId, UserInput } from "../../lib/types";
+import type {
+  AppSettings,
+  PendingInteraction,
+  PermissionId,
+  UserInput,
+} from "../../lib/types";
 import { TabIcon, TabKind, type EditorTabBase } from "../../lib/tabs";
-
 
 export const defaultSettings = (): AppSettings => ({
   codex_path: null,
@@ -10,18 +14,17 @@ export const defaultSettings = (): AppSettings => ({
   theme: "blue",
   default_permission: "ask-for-approval",
   terminal_shell: "cmd",
-    dynamic_tools_disabled: [],
-    glass_effect: true,
-    last_session_id: null,
-    compat_proxy_enabled: false,
-    compat_proxy_port: 18080,
-    compat_proxy_base_url: "https://opencode.ai/zen/v1",
-    compat_proxy_nudge_enabled: true,
-    compat_proxy_identity_enabled: true,
-    error_notify_enabled: true,
-    interaction_notify_enabled: true,
-  });
-
+  dynamic_tools_disabled: [],
+  glass_effect: true,
+  last_session_id: null,
+  compat_proxy_enabled: false,
+  compat_proxy_port: 18080,
+  compat_proxy_base_url: "https://opencode.ai/zen/v1",
+  compat_proxy_nudge_enabled: true,
+  compat_proxy_identity_enabled: true,
+  error_notify_enabled: true,
+  interaction_notify_enabled: true,
+});
 
 export interface ModelInfo {
   id: string;
@@ -34,7 +37,6 @@ export interface ModelInfo {
   defaultReasoningEffort: string;
 }
 
-
 /** 线程目标的持久状态（thread/goal/get 与 thread/goal/updated 携带；值对齐协议绑定 ThreadGoalStatus） */
 export type GoalStatus =
   | "active"
@@ -43,7 +45,6 @@ export type GoalStatus =
   | "usageLimited"
   | "budgetLimited"
   | "complete";
-
 
 export function isGoalStatus(v: unknown): v is GoalStatus {
   return (
@@ -56,7 +57,6 @@ export function isGoalStatus(v: unknown): v is GoalStatus {
   );
 }
 
-
 /** 服务端终态：目标已完成/预算耗尽/用量受限/阻塞/暂停，客户端收到后自动清目标并复位 flag */
 const GOAL_TERMINAL_STATUSES = new Set<GoalStatus>([
   "complete",
@@ -66,11 +66,9 @@ const GOAL_TERMINAL_STATUSES = new Set<GoalStatus>([
   "paused",
 ]);
 
-
 export function isGoalTerminalStatus(v: unknown): v is GoalStatus {
   return typeof v === "string" && GOAL_TERMINAL_STATUSES.has(v as GoalStatus);
 }
-
 
 /** 终态 toast 文案：目标已完成/预算耗尽/用量受限/已阻塞/已暂停 */
 export function goalStatusToast(status: GoalStatus): string {
@@ -89,7 +87,6 @@ export function goalStatusToast(status: GoalStatus): string {
       return "";
   }
 }
-
 
 /** 计划模式回合完成后的“计划已就绪”确认弹窗数据（纯前端 UX，非协议交互） */
 export interface PlanPrompt {
@@ -111,7 +108,6 @@ export interface TurnPlan {
   explanation?: string;
   steps: PlanStep[];
 }
-
 
 /**
  * 会话标签：左侧标签区的每个“会话”标签对应一个打开的会话
@@ -190,7 +186,6 @@ export interface SessionTab extends EditorTabBase {
   interactions: PendingInteraction[];
 }
 
-
 /** @ 菜单中展示的插件条目（plugin/list 归一化结果） */
 export interface PluginItem {
   id: string;
@@ -243,7 +238,6 @@ export interface PluginMarketplaceLoadError {
   error: string;
 }
 
-
 /** $ 菜单与回显悬浮提示共用的技能条目（skills/list 归一化结果） */
 export interface SkillItem {
   name: string;
@@ -257,7 +251,6 @@ export interface SkillItem {
 
 /** 右侧面板 Tab：资源管理器 / 会话历史 / Git */
 export type PanelTab = "session" | "resources" | "git";
-
 
 export interface ConfirmRequest {
   title: string;

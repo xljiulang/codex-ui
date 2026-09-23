@@ -11,8 +11,14 @@ describe("friendlyServerMessage 服务端消息本地化", () => {
       "cannot resume running thread thr_123 with history while it is already running",
       "该会话正被占用（已有回合在运行或其它进程持有），请稍后再试",
     ],
-    ["Thread is unavailable", "该会话正被占用（已有回合在运行或其它进程持有），请稍后再试"],
-    ["thread is busy", "该会话正被占用（已有回合在运行或其它进程持有），请稍后再试"],
+    [
+      "Thread is unavailable",
+      "该会话正被占用（已有回合在运行或其它进程持有），请稍后再试",
+    ],
+    [
+      "thread is busy",
+      "该会话正被占用（已有回合在运行或其它进程持有），请稍后再试",
+    ],
     [
       "Context window exceeded while compacting; removing oldest history item. Error: x",
       "上下文超出窗口，已自动压缩并移除最早的历史内容",

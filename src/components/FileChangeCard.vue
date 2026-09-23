@@ -27,12 +27,7 @@ function diffEntries(c: {
     const prefix = kind === "add" ? "+" : kind === "delete" ? "-" : "";
     return lines.map((l) => ({
       text: l ? `${prefix}${l}` : l,
-      cls:
-        kind === "add"
-          ? "diff-add"
-          : kind === "delete"
-            ? "diff-del"
-            : "",
+      cls: kind === "add" ? "diff-add" : kind === "delete" ? "diff-del" : "",
     }));
   }
   return lines.map((l) => {
@@ -45,11 +40,7 @@ function diffEntries(c: {
 }
 
 /** 用条目自带的内联 diff 直接打开 */
-function openPreview(c: {
-  path: string;
-  kind: unknown;
-  diff?: string;
-}) {
+function openPreview(c: { path: string; kind: unknown; diff?: string }) {
   if (!c.diff) return;
   void openDiffTab({
     path: c.path,

@@ -23,7 +23,11 @@ describe("useCodex/mcp", () => {
       config: {},
       layers: [
         {
-          name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
           version: "sha256:abc",
           config: {
             mcp_servers: {
@@ -185,7 +189,10 @@ describe("useCodex/mcp", () => {
           bearer_token_env_var: "",
         },
       ],
-      { srv: { command: "old", env: { K: "old", EXTRA: "x" } }, gone: { command: "x" } },
+      {
+        srv: { command: "old", env: { K: "old", EXTRA: "x" } },
+        gone: { command: "x" },
+      },
     );
     const value = (
       mockedInvoke.mock.calls[0][1] as {
@@ -214,7 +221,11 @@ describe("useCodex/mcp", () => {
       config: {},
       layers: [
         {
-          name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
           version: "sha256:abc",
           config: {
             mcp_servers: {
@@ -277,7 +288,11 @@ describe("useCodex/mcp", () => {
         params: { edits: { value: Record<string, Record<string, unknown>> }[] };
       }
     ).params.edits[0].value;
-    expect(value.on).toEqual({ command: "npx", omit_tools_from: ["deferred"], custom: 1 });
+    expect(value.on).toEqual({
+      command: "npx",
+      omit_tools_from: ["deferred"],
+      custom: 1,
+    });
     expect(value.off).toEqual({ command: "npx", custom: 2 });
     expect(value.off.omit_tools_from).toBeUndefined();
   });
@@ -287,7 +302,11 @@ describe("useCodex/mcp", () => {
       config: {},
       layers: [
         {
-          name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
           version: "sha256:abc",
           config: {
             mcp_servers: {
@@ -460,7 +479,9 @@ describe("useCodex/mcp", () => {
 
   it("loadMcpServerStatus 找不到 name 时返回 null", async () => {
     mockedInvoke.mockResolvedValue({
-      data: [{ name: "other", tools: {}, resources: [], resourceTemplates: [] }],
+      data: [
+        { name: "other", tools: {}, resources: [], resourceTemplates: [] },
+      ],
     });
     const detail = await loadMcpServerStatus("missing");
     expect(detail).toBeNull();
@@ -471,7 +492,11 @@ describe("useCodex/mcp", () => {
       name: "demo",
       serverInfo: null,
       tools: {
-        ok: { name: "ok", description: "可用", inputSchema: { type: "object" } },
+        ok: {
+          name: "ok",
+          description: "可用",
+          inputSchema: { type: "object" },
+        },
         noName: { name: "   " },
         empty: undefined,
       },
@@ -488,7 +513,9 @@ describe("useCodex/mcp", () => {
     expect(detail).toEqual({
       name: "demo",
       serverInfo: undefined,
-      tools: [{ name: "ok", description: "可用", inputSchema: { type: "object" } }],
+      tools: [
+        { name: "ok", description: "可用", inputSchema: { type: "object" } },
+      ],
       resources: [{ uri: "file:///x", name: "x" }],
       resourceTemplates: [{ uriTemplate: "file:///{p}", name: "p" }],
       authStatus: "unknown",

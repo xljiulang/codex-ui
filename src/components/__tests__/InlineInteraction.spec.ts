@@ -6,7 +6,8 @@ import { nextTick } from "vue";
 enableAutoUnmount(afterEach);
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, respondInteraction: vi.fn() };
 });
 
@@ -52,7 +53,9 @@ describe("requestUserInput 响应格式", () => {
       .find((b) => b.text().trim() === "B");
     expect(optionB).toBeTruthy();
     await optionB!.trigger("click");
-    const submit = wrapper.findAll(".btn").find((b) => b.text().trim() === "提交");
+    const submit = wrapper
+      .findAll(".btn")
+      .find((b) => b.text().trim() === "提交");
     await submit!.trigger("click");
 
     expect(mockedRespond).toHaveBeenCalledTimes(1);
@@ -106,9 +109,15 @@ describe("requestUserInput 响应格式", () => {
       expectedAnswers[`q${i + 1}`] = { answers: [pick] };
       // 最后一题点“提交”，否则点“下一题”
       if (i < N - 1) {
-        await wrapper.findAll(".btn").find((b) => b.text().trim() === "下一题")!.trigger("click");
+        await wrapper
+          .findAll(".btn")
+          .find((b) => b.text().trim() === "下一题")!
+          .trigger("click");
       } else {
-        await wrapper.findAll(".btn").find((b) => b.text().trim() === "提交")!.trigger("click");
+        await wrapper
+          .findAll(".btn")
+          .find((b) => b.text().trim() === "提交")!
+          .trigger("click");
       }
     }
     expect(mockedRespond).toHaveBeenCalledTimes(1);
@@ -131,7 +140,10 @@ describe("审批/询问弹窗信息层级", () => {
         command: "npm run build",
         cwd: "D:/repo",
         reason: "构建前端产物",
-        additionalPermissions: { type: "workspaceWrite", writableRoots: ["D:/repo"] },
+        additionalPermissions: {
+          type: "workspaceWrite",
+          writableRoots: ["D:/repo"],
+        },
       },
       at: Date.now(),
     });
@@ -155,7 +167,10 @@ describe("审批/询问弹窗信息层级", () => {
       method: "item/permissions/requestApproval",
       params: {
         grantRoot: "D:/repo",
-        permissions: { type: "workspaceWrite", writableRoots: ["D:/repo", "D:/tmp"] },
+        permissions: {
+          type: "workspaceWrite",
+          writableRoots: ["D:/repo", "D:/tmp"],
+        },
       },
       at: Date.now(),
     });

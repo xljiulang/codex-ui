@@ -15,8 +15,10 @@ export function useComposerResize() {
   /** 输入框最小高度（编辑器盒高）：使空态整卡 = max(CARD_MIN_H, 16vh) */
   function minComposerHeight(): number {
     return (
-      Math.max(CARD_MIN_H, Math.round(window.innerHeight * MIN_COMPOSER_RATIO)) -
-      COMPOSER_CHROME_H
+      Math.max(
+        CARD_MIN_H,
+        Math.round(window.innerHeight * MIN_COMPOSER_RATIO),
+      ) - COMPOSER_CHROME_H
     );
   }
 

@@ -6,8 +6,8 @@
 //! 新增数据源：实现对应 trait，然后在 [`fact_sources`]（或 [`full_entry_sources`]）
 //! 里追加一行即可，合并、渲染与匹配逻辑都不需要改动。
 
-pub mod official;
 pub mod models_dev;
+pub mod official;
 pub mod openrouter;
 
 use std::io::Write;
@@ -53,7 +53,9 @@ impl FactMatch {
             authority: source_base,
             similarity: if self.kind == MatchKind::Fuzzy {
                 (self.score.clamp(0.0, 1.0) * 1000.0).round() as u16
-            } else { 1000 },
+            } else {
+                1000
+            },
         }
     }
 }
@@ -71,7 +73,9 @@ pub trait FactSource {
 
 /// 完整条目源列表：顺序 = 优先级（靠前者先问）。
 pub fn full_entry_sources(snapshot: &[Value], base_url: &str) -> Vec<Box<dyn FullEntrySource>> {
-    vec![Box::new(official::OfficialModelSource::from_snapshot(snapshot, base_url))]
+    vec![Box::new(official::OfficialModelSource::from_snapshot(
+        snapshot, base_url,
+    ))]
 }
 
 /// 字段源列表：各自独立提取，合并结果不依赖注册顺序。
@@ -100,8 +104,7 @@ pub(super) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let mut file = std::fs::File::create(&tmp).map_err(|e| format!("写入缓存失败: {e}"))?;
         file.write_all(bytes)
             .map_err(|e| format!("写入缓存失败: {e}"))?;
-        file.sync_all()
-            .map_err(|e| format!("同步缓存失败: {e}"))?;
+        file.sync_all().map_err(|e| format!("同步缓存失败: {e}"))?;
     }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);

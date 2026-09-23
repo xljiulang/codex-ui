@@ -16,7 +16,9 @@
   text-decoration: none;
   color: var(--text);
   background: rgba(var(--overlay-rgb), 0.015);
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
 }
 .web-result:hover {
   background: rgba(var(--accent-rgb), 0.07);

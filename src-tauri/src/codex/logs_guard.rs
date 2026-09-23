@@ -28,11 +28,9 @@ pub fn apply_logs_guard(db: &Path) -> Result<bool, String> {
     if !db.is_file() {
         return Ok(false);
     }
-    let conn = rusqlite::Connection::open_with_flags(
-        db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
-    )
-    .map_err(|e| format!("打开日志库失败（{}）：{e}", db.display()))?;
+    let conn =
+        rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|e| format!("打开日志库失败（{}）：{e}", db.display()))?;
     conn.busy_timeout(Duration::from_secs(3))
         .map_err(|e| format!("设置日志库忙等待失败：{e}"))?;
     conn.execute_batch(BLOCK_INSERT_TRIGGER_SQL)
@@ -151,7 +149,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("other.sqlite");
         let conn = rusqlite::Connection::open(&db).unwrap();
-        conn.execute_batch("CREATE TABLE other (x INTEGER);").unwrap();
+        conn.execute_batch("CREATE TABLE other (x INTEGER);")
+            .unwrap();
         conn.close().unwrap();
         assert!(apply_logs_guard(&db).is_err());
     }
@@ -160,15 +159,18 @@ mod tests {
     fn apply_at_codex_home_resolves_and_skips_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let home_s = tmp.path().to_string_lossy().into_owned();
-        with_envs(&[("CODEX_HOME", Some(&home_s)), ("USERPROFILE", None)], || {
-            // 目录下无库：跳过且不创建
-            assert_eq!(apply_at_codex_home("logs_2.sqlite").unwrap(), None);
-            assert!(!tmp.path().join("logs_2.sqlite").exists());
-            // 建库后：应用并返回路径
-            let db = db_with_logs_table(tmp.path());
-            let res = apply_at_codex_home("logs_2.sqlite").unwrap();
-            assert_eq!(res.as_deref(), Some(db.as_path()));
-            assert_eq!(trigger_count(&db), 1);
-        });
+        with_envs(
+            &[("CODEX_HOME", Some(&home_s)), ("USERPROFILE", None)],
+            || {
+                // 目录下无库：跳过且不创建
+                assert_eq!(apply_at_codex_home("logs_2.sqlite").unwrap(), None);
+                assert!(!tmp.path().join("logs_2.sqlite").exists());
+                // 建库后：应用并返回路径
+                let db = db_with_logs_table(tmp.path());
+                let res = apply_at_codex_home("logs_2.sqlite").unwrap();
+                assert_eq!(res.as_deref(), Some(db.as_path()));
+                assert_eq!(trigger_count(&db), 1);
+            },
+        );
     }
 }

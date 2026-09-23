@@ -70,7 +70,9 @@ async function refresh() {
     }
     gitErrorMsg.value = "";
     try {
-      const st = await invoke<GitStatus>("git_changes_status", { workspace: root });
+      const st = await invoke<GitStatus>("git_changes_status", {
+        workspace: root,
+      });
       if (workspace.value !== root) {
         // 请求期间工作区已切换：结果作废，结束后续刷新工作区
         refreshRetryPending = true;

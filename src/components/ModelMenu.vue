@@ -50,8 +50,12 @@ function selectModel(m: (typeof store.models)[number]) {
 }
 
 // 菜单打开时按活动会话 cwd 重读有效配置（含项目层），刷新默认项
-onMounted(() =>
-  void loadModels(true, resolveSessionWorkspace(activeSessionTab() ?? undefined)),
+onMounted(
+  () =>
+    void loadModels(
+      true,
+      resolveSessionWorkspace(activeSessionTab() ?? undefined),
+    ),
 );
 
 async function apply() {
@@ -102,12 +106,18 @@ async function apply() {
   <div class="popup-menu right composer-menu" @click.stop>
     <div class="menu-group">
       <div class="menu-group-title">模型</div>
-      <div v-if="store.models.length" class="question-options" style="padding: 0 8px 4px">
+      <div
+        v-if="store.models.length"
+        class="question-options"
+        style="padding: 0 8px 4px"
+      >
         <button
           v-for="m in store.models"
           :key="m.id"
           class="option-btn"
-          :class="{ selected: model === m.model || (model === '' && m.isDefault) }"
+          :class="{
+            selected: model === m.model || (model === '' && m.isDefault),
+          }"
           @click="selectModel(m)"
           v-tooltip="m.description || m.model"
         >
@@ -128,11 +138,18 @@ async function apply() {
                 effort === e.reasoningEffort ||
                 (effort === '' && e.reasoningEffort === defaultEffort),
             }"
-            @click="effort = e.reasoningEffort === defaultEffort ? '' : e.reasoningEffort"
+            @click="
+              effort =
+                e.reasoningEffort === defaultEffort ? '' : e.reasoningEffort
+            "
             v-tooltip="e.description"
           >
             {{ e.reasoningEffort }}
-            <span v-if="e.reasoningEffort === defaultEffort" class="option-default-tag">默认</span>
+            <span
+              v-if="e.reasoningEffort === defaultEffort"
+              class="option-default-tag"
+              >默认</span
+            >
           </button>
         </div>
       </template>

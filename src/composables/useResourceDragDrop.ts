@@ -67,7 +67,9 @@ export function useResourceDragDrop(
     const start = dragStart.value;
     if (!start) return;
     if (!dragActive.value) {
-      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD) {
+      if (
+        Math.hypot(e.clientX - start.x, e.clientY - start.y) < DRAG_THRESHOLD
+      ) {
         return;
       }
       dragActive.value = true;

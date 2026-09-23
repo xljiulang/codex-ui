@@ -61,10 +61,14 @@ describe("用户消息中的图片附件", () => {
 
   it("localImage 渲染为图片而不是路径文本", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           { type: "text", text: "里面只有一个人吗", text_elements: [] },
-          { type: "localImage", path: "C:\\Users\\Admin\\Desktop\\lai\\out_0003.png" },
+          {
+            type: "localImage",
+            path: "C:\\Users\\Admin\\Desktop\\lai\\out_0003.png",
+          },
         ]),
       },
     });
@@ -81,7 +85,8 @@ describe("用户消息中的图片附件", () => {
 
   it("mention 附件渲染为 @名称", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           { type: "text", text: "看看这个", text_elements: [] },
           { type: "mention", name: "src/main.ts", path: "D:\\p\\src\\main.ts" },
@@ -94,14 +99,18 @@ describe("用户消息中的图片附件", () => {
 
   it("上下文压缩显示提示", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB, item: { id: "c1", type: "contextCompaction" } as ThreadItem },
+      props: {
+        tab: TEST_TAB,
+        item: { id: "c1", type: "contextCompaction" } as ThreadItem,
+      },
     });
     expect(wrapper.text()).toContain("上下文已压缩");
   });
 
   it("commentary 阶段显示进行中徽标，final_answer 不显示", () => {
     const w1 = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "a1",
           type: "agentMessage",
@@ -114,7 +123,8 @@ describe("用户消息中的图片附件", () => {
     expect(w1.find(".phase-badge").exists()).toBe(true);
     // 流式结束后（即使 phase 仍是 commentary）不再显示进行中
     const w3 = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "a3",
           type: "agentMessage",
@@ -126,8 +136,14 @@ describe("用户消息中的图片附件", () => {
     });
     expect(w3.find(".phase-badge").exists()).toBe(false);
     const w2 = mount(MessageItem, {
-      props: { tab: TEST_TAB,
-        item: { id: "a2", type: "agentMessage", text: "答案", phase: "final_answer" } as ThreadItem,
+      props: {
+        tab: TEST_TAB,
+        item: {
+          id: "a2",
+          type: "agentMessage",
+          text: "答案",
+          phase: "final_answer",
+        } as ThreadItem,
       },
     });
     expect(w2.find(".phase-badge").exists()).toBe(false);
@@ -135,20 +151,28 @@ describe("用户消息中的图片附件", () => {
 
   it("imageView 渲染为图片", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
-        item: { id: "v1", type: "imageView", path: "C:\\x\\y.png" } as ThreadItem,
+      props: {
+        tab: TEST_TAB,
+        item: {
+          id: "v1",
+          type: "imageView",
+          path: "C:\\x\\y.png",
+        } as ThreadItem,
       },
     });
     const img = wrapper.find("img.user-image");
     expect(img.exists()).toBe(true);
     expect(img.attributes("loading")).toBe("lazy");
     // imageView 只是图片回显，不充当回合切点
-    expect(wrapper.find(".msg-user").attributes("data-turn-anchor")).toBeUndefined();
+    expect(
+      wrapper.find(".msg-user").attributes("data-turn-anchor"),
+    ).toBeUndefined();
   });
 
   it("流式中的助手消息显示闪烁光标，完成后消失", () => {
     const w1 = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "s1",
           type: "agentMessage",
@@ -159,7 +183,8 @@ describe("用户消息中的图片附件", () => {
     });
     expect(w1.find(".stream-cursor").exists()).toBe(true);
     const w2 = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "s2",
           type: "agentMessage",
@@ -173,7 +198,8 @@ describe("用户消息中的图片附件", () => {
 
   it("同一条消息混合 @ 与 $：文件段与技能链接都渲染为引用标签", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -198,7 +224,8 @@ describe("用户消息中的图片附件", () => {
 
   it("只有文本技能链接（无结构化项）时也能渲染 $ 标签", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -214,7 +241,8 @@ describe("用户消息中的图片附件", () => {
 
   it("插件链接 [@documents](path) 渲染 @documents 标签", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -230,7 +258,8 @@ describe("用户消息中的图片附件", () => {
 
   it("无前缀本地路径链接 [a.cs](src/a.cs) 渲染为 @a.cs 文件 chip", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -246,7 +275,8 @@ describe("用户消息中的图片附件", () => {
 
   it("插件链接 [@documents](plugin://...) 渲染 @documents 标签", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -262,7 +292,8 @@ describe("用户消息中的图片附件", () => {
 
   it("插件链接 + 同名结构化项去重：只渲染一个 @documents", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -285,7 +316,8 @@ describe("用户消息中的图片附件", () => {
 
   it("技能链接与同名结构化项去重：只渲染一个 $csharp-code-rules", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -307,7 +339,8 @@ describe("用户消息中的图片附件", () => {
 
   it("内联链接回显顺序与输入一致：文本-文件-文本-技能-文本", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -336,7 +369,8 @@ describe("用户消息中的图片附件", () => {
 
   it("混编回显片段为内联盒子：气泡直接子节点无块级 .md", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -369,7 +403,8 @@ describe("用户消息中的图片附件", () => {
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = true;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -391,21 +426,21 @@ describe("用户消息中的图片附件", () => {
     // 悬浮卡片：文件显示路径、技能/插件显示说明
     await fileChip!.trigger("mouseenter");
     await new Promise((r) => setTimeout(r, 160));
-    expect(
-      document.body.querySelector(".ref-tooltip")?.textContent,
-    ).toContain("src/a.cs");
+    expect(document.body.querySelector(".ref-tooltip")?.textContent).toContain(
+      "src/a.cs",
+    );
     await fileChip!.trigger("mouseleave");
     await skillChip!.trigger("mouseenter");
     await new Promise((r) => setTimeout(r, 160));
-    expect(
-      document.body.querySelector(".ref-tooltip")?.textContent,
-    ).toContain("C# 代码规范技能");
+    expect(document.body.querySelector(".ref-tooltip")?.textContent).toContain(
+      "C# 代码规范技能",
+    );
     await skillChip!.trigger("mouseleave");
     await pluginChip!.trigger("mouseenter");
     await new Promise((r) => setTimeout(r, 160));
-    expect(
-      document.body.querySelector(".ref-tooltip")?.textContent,
-    ).toContain("文档处理插件");
+    expect(document.body.querySelector(".ref-tooltip")?.textContent).toContain(
+      "文档处理插件",
+    );
     await pluginChip!.trigger("mouseleave");
     await fileChip!.trigger("click");
     await skillChip!.trigger("click");
@@ -414,9 +449,7 @@ describe("用户消息中的图片附件", () => {
     const log = (window as unknown as Record<string, unknown>)
       .__CODEX_UI_TEST_LOG__ as { cmd: string; args: { path: string } }[];
     expect(
-      log
-        .filter((l) => l.cmd === "reveal_path")
-        .map((l) => l.args.path),
+      log.filter((l) => l.cmd === "reveal_path").map((l) => l.args.path),
     ).toEqual(["D:\\repo\\src\\a.cs", "C:\\x\\SKILL.md"]);
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST__ = false;
     (window as unknown as Record<string, unknown>).__CODEX_UI_TEST_LOG__ = [];
@@ -424,7 +457,8 @@ describe("用户消息中的图片附件", () => {
 
   it("含 Files 段的旧消息（无内联链接）仍按 legacy 路径渲染", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -442,7 +476,8 @@ describe("用户消息中的图片附件", () => {
 
   it("多个文件引用渲染多个 @ 标签，正文不含协议段落", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           {
             type: "text",
@@ -462,7 +497,8 @@ describe("用户消息中的图片附件", () => {
 
   it("用户消息文本按 Markdown 渲染", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           { type: "text", text: "# 标题\n\n**加粗**", text_elements: [] },
         ]),
@@ -472,7 +508,9 @@ describe("用户消息中的图片附件", () => {
     expect(wrapper.find(".msg-user .md h1").text()).toBe("标题");
     expect(wrapper.find(".msg-user .md strong").text()).toBe("加粗");
     // 用户消息是回合跳转切点，根节点需带定位标记
-    expect(wrapper.get(".msg-user").attributes("data-turn-anchor")).toBeDefined();
+    expect(
+      wrapper.get(".msg-user").attributes("data-turn-anchor"),
+    ).toBeDefined();
   });
 
   it("用户消息与助手最终答复都显示时间戳", () => {
@@ -485,7 +523,8 @@ describe("用户消息中的图片附件", () => {
       5,
     ).getTime();
     const user = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "u2",
           type: "userMessage",
@@ -498,7 +537,8 @@ describe("用户消息中的图片附件", () => {
     expect(user.find(".msg-time").text()).toBe("14:05");
 
     const agent = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "a2",
           type: "agentMessage",
@@ -537,7 +577,8 @@ describe("用户消息中的图片附件", () => {
 
   it("仅最终答复（非流式）包 agent-final 卡片，流式与 commentary 不包", async () => {
     const final = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "f1",
           type: "agentMessage",
@@ -552,7 +593,8 @@ describe("用户消息中的图片附件", () => {
     expect(final.find(".agent-final").text()).toContain("最终答案");
 
     const streaming = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "s1",
           type: "agentMessage",
@@ -565,7 +607,8 @@ describe("用户消息中的图片附件", () => {
     expect(streaming.find(".agent-final").exists()).toBe(false);
 
     const commentary = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "c1",
           type: "agentMessage",
@@ -580,7 +623,8 @@ describe("用户消息中的图片附件", () => {
 
   it("图片点击打开灯箱：点图片即关闭、Esc 关闭，并带上复制来源", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([
           { type: "text", text: "看这张图", text_elements: [] },
           { type: "localImage", path: "C:\\x\\a.png" },
@@ -610,7 +654,8 @@ describe("用户消息中的图片附件", () => {
 
   it("图片加载失败显示占位", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: userItem([{ type: "localImage", path: "C:\\x\\bad.png" }]),
       },
     });
@@ -621,7 +666,10 @@ describe("用户消息中的图片附件", () => {
 
   it("未知消息类型显示友好提示并可展开原始数据", async () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB, item: { id: "x1", type: "weirdType" } as ThreadItem },
+      props: {
+        tab: TEST_TAB,
+        item: { id: "x1", type: "weirdType" } as ThreadItem,
+      },
     });
     expect(wrapper.text()).toContain("暂不支持显示的项目类型：weirdType");
     await wrapper.find(".unknown-toggle").trigger("click");
@@ -635,7 +683,8 @@ describe("用户消息中的图片附件", () => {
       configurable: true,
     });
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "a1",
           type: "agentMessage",
@@ -676,13 +725,13 @@ describe("用户消息中的图片附件", () => {
     expect(writeText).toHaveBeenCalledWith("要复制的用户文本");
     expect(btn.text()).toBe("已复制");
   });
-
 });
 
 describe("子代理活动提示", () => {
   it("subAgentActivity 渲染 kind 与 agentPath", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "s1",
           type: "subAgentActivity",
@@ -701,7 +750,8 @@ describe("子代理活动提示", () => {
 describe("执行计划用户消息卡片", () => {
   it("命中 PLEASE IMPLEMENT THIS PLAN 前缀：渲染卡片且默认不显示正文", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "u1",
           type: "userMessage",
@@ -717,13 +767,16 @@ describe("执行计划用户消息卡片", () => {
     });
     expect(wrapper.find(".assistant-card").exists()).toBe(true);
     // 标题取自计划本身（首行标题），正文默认折叠不可见
-    expect(wrapper.find(".assistant-card .assistant-card-title").text()).toBe("计划A");
+    expect(wrapper.find(".assistant-card .assistant-card-title").text()).toBe(
+      "计划A",
+    );
     expect(wrapper.text()).not.toContain("步骤1");
   });
 
   it("带内联引用的执行计划消息：引用照常渲染", () => {
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "u1",
           type: "userMessage",
@@ -746,13 +799,12 @@ describe("执行计划用户消息卡片", () => {
     // 走同步回退解析，避免 happy-dom Worker 挂起（与文件内既有图片用例一致）
     (globalThis as Record<string, unknown>).Worker = undefined;
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "u1",
           type: "userMessage",
-          content: [
-            { type: "text", text: "普通问题", text_elements: [] },
-          ],
+          content: [{ type: "text", text: "普通问题", text_elements: [] }],
         } as ThreadItem,
       },
     });
@@ -764,7 +816,8 @@ describe("执行计划用户消息卡片", () => {
   it("助理端 plan 条目渲染为计划卡片：默认展开，可收起", async () => {
     (globalThis as Record<string, unknown>).Worker = undefined;
     const wrapper = mount(MessageItem, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         item: {
           id: "p1",
           type: "plan",

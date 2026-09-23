@@ -4,12 +4,14 @@ const { listeners, listen } = vi.hoisted(() => {
   const listeners = new Map<string, (e: { payload: unknown }) => void>();
   return {
     listeners,
-    listen: vi.fn().mockImplementation(
-      (event: string, cb: (e: { payload: unknown }) => void) => {
-        listeners.set(event, cb);
-        return Promise.resolve(() => listeners.delete(event));
-      },
-    ),
+    listen: vi
+      .fn()
+      .mockImplementation(
+        (event: string, cb: (e: { payload: unknown }) => void) => {
+          listeners.set(event, cb);
+          return Promise.resolve(() => listeners.delete(event));
+        },
+      ),
   };
 });
 

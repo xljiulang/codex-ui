@@ -63,10 +63,8 @@ pub fn rel_path_of(root: &Path, path: &Path) -> Option<String> {
 pub fn resolve_abs_path(p: &str, root: &str) -> Result<String, String> {
     let h = p.replace('\\', "/");
     let bytes = h.as_bytes();
-    let is_drive_abs = bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'/';
+    let is_drive_abs =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
     if is_drive_abs || h.starts_with("//") {
         return Ok(h.replace('/', "\\"));
     }
@@ -105,7 +103,10 @@ mod tests {
     #[test]
     fn norm_path_key_strips_verbatim_prefix() {
         assert_eq!(norm_path_key(Path::new(r"\\?\C:\A\B")), "c:\\a\\b");
-        assert_eq!(norm_path_key(Path::new(r"\\?\UNC\Srv\Share\")), r"\\srv\share");
+        assert_eq!(
+            norm_path_key(Path::new(r"\\?\UNC\Srv\Share\")),
+            r"\\srv\share"
+        );
         assert_eq!(norm_path_key(Path::new("C:/A/B")), "c:\\a\\b");
     }
 
@@ -141,13 +142,19 @@ mod tests {
     #[test]
     fn rel_path_of_handles_verbatim_and_unc() {
         assert_eq!(
-            rel_path_of(Path::new(r"\\?\C:\root"), Path::new(r"\\?\C:\root\src\a.txt"))
-                .as_deref(),
+            rel_path_of(
+                Path::new(r"\\?\C:\root"),
+                Path::new(r"\\?\C:\root\src\a.txt")
+            )
+            .as_deref(),
             Some("src/a.txt")
         );
         assert_eq!(
-            rel_path_of(Path::new(r"\\srv\share"), Path::new(r"\\?\UNC\srv\share\f.txt"))
-                .as_deref(),
+            rel_path_of(
+                Path::new(r"\\srv\share"),
+                Path::new(r"\\?\UNC\srv\share\f.txt")
+            )
+            .as_deref(),
             Some("f.txt")
         );
     }
@@ -163,7 +170,10 @@ mod tests {
 
     #[test]
     fn resolve_abs_path_matches_diff_semantics() {
-        assert_eq!(resolve_abs_path("C:/a/b.txt", "D:\\root").unwrap(), "C:\\a\\b.txt");
+        assert_eq!(
+            resolve_abs_path("C:/a/b.txt", "D:\\root").unwrap(),
+            "C:\\a\\b.txt"
+        );
         assert_eq!(
             resolve_abs_path(r"\\srv\share\f.txt", "D:\\root").unwrap(),
             "\\\\srv\\share\\f.txt"
@@ -172,7 +182,10 @@ mod tests {
             resolve_abs_path("src/a.txt", "D:\\root").unwrap(),
             "D:\\root\\src\\a.txt"
         );
-        assert_eq!(resolve_abs_path("a.txt", "D:\\root\\").unwrap(), "D:\\root\\a.txt");
+        assert_eq!(
+            resolve_abs_path("a.txt", "D:\\root\\").unwrap(),
+            "D:\\root\\a.txt"
+        );
         assert!(resolve_abs_path("C:foo", "D:\\root").is_err());
     }
 }

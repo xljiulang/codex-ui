@@ -76,20 +76,17 @@ describe("ToolCard 实时耗时", () => {
   });
 
   it("失败状态显示退出码", async () => {
-    const wrapper = mount(
-      ToolCard,
-      {
-        props: {
-          item: makeItem({
-            status: "failed",
-            exitCode: 1,
-            durationMs: 500,
-            aggregatedOutput: "boom",
-            startedAtMs: 1000,
-          }),
-        },
+    const wrapper = mount(ToolCard, {
+      props: {
+        item: makeItem({
+          status: "failed",
+          exitCode: 1,
+          durationMs: 500,
+          aggregatedOutput: "boom",
+          startedAtMs: 1000,
+        }),
       },
-    );
+    });
     expect(wrapper.text()).toContain("失败");
     // 卡片默认折叠，展开后显示退出码
     expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
@@ -107,7 +104,8 @@ describe("ToolCard 实时耗时", () => {
       props: {
         item: makeItem({
           status: "completed",
-          command: '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command whoami',
+          command:
+            '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command whoami',
           commandActions: [{ command: "whoami", type: "unknown" }],
           cwd: "D:\\codex\\codex-ui",
           durationMs: 500,
@@ -146,7 +144,11 @@ describe("ToolCard 实时耗时", () => {
           type: "webSearch",
           query: "rust tauri",
           results: [
-            { title: "Tauri 官网", url: "https://tauri.app", snippet: "Rust 桌面框架" },
+            {
+              title: "Tauri 官网",
+              url: "https://tauri.app",
+              snippet: "Rust 桌面框架",
+            },
             { title: "第二条", url: "https://example.com" },
           ],
         } as ThreadItem,
@@ -156,7 +158,9 @@ describe("ToolCard 实时耗时", () => {
     const titles = wrapper.findAll(".web-result-title").map((t) => t.text());
     expect(titles).toContain("Tauri 官网");
     expect(titles).toContain("第二条");
-    expect(wrapper.find(".web-result-snippet").text()).toContain("Rust 桌面框架");
+    expect(wrapper.find(".web-result-snippet").text()).toContain(
+      "Rust 桌面框架",
+    );
   });
 
   it("收起输出/展开完整输出可切换", async () => {
@@ -224,13 +228,7 @@ describe("ToolCard 实时耗时", () => {
 });
 
 describe("文件变更：打开独立 diff 窗口", () => {
-  const REPLACE_DIFF = [
-    "@@ -1,3 +1,3 @@",
-    " a",
-    "-b",
-    "+X",
-    " c",
-  ].join("\n");
+  const REPLACE_DIFF = ["@@ -1,3 +1,3 @@", " a", "-b", "+X", " c"].join("\n");
 
   beforeEach(() => {
     mockedInvoke.mockReset();
@@ -307,7 +305,9 @@ describe("文件变更：打开独立 diff 窗口", () => {
 });
 
 describe("文件变更：折叠标题显示文件名", () => {
-  function changeItem(changes: { path: string; kind: string; diff?: string }[]): ThreadItem {
+  function changeItem(
+    changes: { path: string; kind: string; diff?: string }[],
+  ): ThreadItem {
     return {
       id: "f3",
       type: "fileChange",
@@ -319,7 +319,9 @@ describe("文件变更：折叠标题显示文件名", () => {
   it("单文件时折叠标题显示完整路径", () => {
     const wrapper = mount(ToolCard, {
       props: {
-        item: changeItem([{ path: "D:\\repo\\a.cs", kind: "update", diff: "x" }]),
+        item: changeItem([
+          { path: "D:\\repo\\a.cs", kind: "update", diff: "x" },
+        ]),
       },
     });
     expect(wrapper.find(".assistant-card-sub").text()).toBe("D:\\repo\\a.cs");
@@ -335,7 +337,9 @@ describe("文件变更：折叠标题显示文件名", () => {
         ]),
       },
     });
-    expect(wrapper.find(".assistant-card-sub").text()).toBe("D:\\repo\\a.cs (等3个)");
+    expect(wrapper.find(".assistant-card-sub").text()).toBe(
+      "D:\\repo\\a.cs (等3个)",
+    );
   });
 
   it("无变更时折叠标题为空", () => {
@@ -525,14 +529,17 @@ describe("ToolCard 头部图标", () => {
     },
   ];
 
-  it.each(cases)("$name 渲染对应图标且标题不变", ({ item, expected, title }) => {
-    const wrapper = mount(ToolCard, { props: { item } });
-    const icon = wrapper.find(".assistant-card-icon");
-    expect(icon.exists()).toBe(true);
-    expect(icon.attributes("aria-hidden")).toBe("true");
-    expect(icon.find("path").attributes("d")).toBe(expected);
-    expect(wrapper.find(".assistant-card-title").text()).toBe(title);
-  });
+  it.each(cases)(
+    "$name 渲染对应图标且标题不变",
+    ({ item, expected, title }) => {
+      const wrapper = mount(ToolCard, { props: { item } });
+      const icon = wrapper.find(".assistant-card-icon");
+      expect(icon.exists()).toBe(true);
+      expect(icon.attributes("aria-hidden")).toBe("true");
+      expect(icon.find("path").attributes("d")).toBe(expected);
+      expect(wrapper.find(".assistant-card-title").text()).toBe(title);
+    },
+  );
 
   it("未知类型回退扳手图标", () => {
     const wrapper = mount(ToolCard, {

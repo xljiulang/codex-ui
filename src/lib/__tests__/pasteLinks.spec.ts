@@ -3,30 +3,28 @@ import { linksToPlainText } from "../pasteLinks";
 
 describe("linksToPlainText", () => {
   it("普通链接 → 标题 + 空格 + URL", () => {
-    expect(
-      linksToPlainText('<a href="https://a.b">标题</a>'),
-    ).toBe("标题 https://a.b");
+    expect(linksToPlainText('<a href="https://a.b">标题</a>')).toBe(
+      "标题 https://a.b",
+    );
   });
 
   it("带路径/query/hash 的 URL 原样保留", () => {
-    expect(
-      linksToPlainText('<a href="https://a.b/x?q=1#sec">文档</a>'),
-    ).toBe("文档 https://a.b/x?q=1#sec");
+    expect(linksToPlainText('<a href="https://a.b/x?q=1#sec">文档</a>')).toBe(
+      "文档 https://a.b/x?q=1#sec",
+    );
   });
 
   it("空标题/纯空白标题 → 只保留 URL", () => {
-    expect(linksToPlainText('<a href="https://a.b"></a>')).toBe(
-      "https://a.b",
-    );
+    expect(linksToPlainText('<a href="https://a.b"></a>')).toBe("https://a.b");
     expect(linksToPlainText('<a href="https://a.b">  </a>')).toBe(
       "https://a.b",
     );
   });
 
   it("href 首尾空白被剔除", () => {
-    expect(
-      linksToPlainText('<a href="  https://a.b  ">标题</a>'),
-    ).toBe("标题 https://a.b");
+    expect(linksToPlainText('<a href="  https://a.b  ">标题</a>')).toBe(
+      "标题 https://a.b",
+    );
   });
 
   it("多链接连续各自转换", () => {
@@ -42,16 +40,12 @@ describe("linksToPlainText", () => {
       linksToPlainText(
         '<p>看 <a href="https://a.b">文档</a> 吧</p><ul><li><a href="https://c.d">项</a></li></ul>',
       ),
-    ).toBe(
-      '<p>看 文档 https://a.b 吧</p><ul><li>项 https://c.d</li></ul>',
-    );
+    ).toBe("<p>看 文档 https://a.b 吧</p><ul><li>项 https://c.d</li></ul>");
   });
 
   it("嵌套链接：内层与外层都非 a 的文本保留", () => {
     expect(
-      linksToPlainText(
-        '<a href="https://a.b"><strong>粗</strong>标题</a>',
-      ),
+      linksToPlainText('<a href="https://a.b"><strong>粗</strong>标题</a>'),
     ).toBe("粗标题 https://a.b");
   });
 

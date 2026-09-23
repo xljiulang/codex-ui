@@ -9,11 +9,7 @@ import {
   type GitMergeResult,
   type GitStatus,
 } from "../lib/gitChanges";
-import {
-  ICON_CLOSE,
-  ICON_PLUS,
-  ICON_REFRESH,
-} from "../lib/icons";
+import { ICON_CLOSE, ICON_PLUS, ICON_REFRESH } from "../lib/icons";
 
 const ICON_MERGE =
   "M17 20.41L18.41 19 15 15.59 13.59 17 17 20.41zM7.5 8H11v5.59L5.59 19 7 20.41l6-6V8h3.5L12 3.5 7.5 8z";
@@ -387,10 +383,9 @@ onBeforeUnmount(() => {
           @click="checkoutRemoteBranch(rb)"
         >
           <span class="git-remote-branch-name">{{ rb }}</span>
-          <span
-            v-if="rb === currentUpstream"
-            class="git-remote-branch-badge"
-          >上游</span>
+          <span v-if="rb === currentUpstream" class="git-remote-branch-badge"
+            >上游</span
+          >
           <button
             class="git-remote-branch-delete"
             aria-label="删除远程分支"

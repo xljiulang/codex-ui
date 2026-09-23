@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
-use windows::core::{HSTRING, IInspectable, Interface};
+use windows::core::{IInspectable, Interface, HSTRING};
 #[cfg(windows)]
 use windows::Data::Xml::Dom::XmlDocument;
 #[cfg(windows)]
@@ -171,15 +171,15 @@ pub fn show_winrt_toast(
         xml_escape(&activation),
     );
     let doc = XmlDocument::new().map_err(|e| e.to_string())?;
-    doc.LoadXml(&HSTRING::from(xml)).map_err(|e| e.to_string())?;
-    let toast =
-        ToastNotification::CreateToastNotification(&doc).map_err(|e| e.to_string())?;
+    doc.LoadXml(&HSTRING::from(xml))
+        .map_err(|e| e.to_string())?;
+    let toast = ToastNotification::CreateToastNotification(&doc).map_err(|e| e.to_string())?;
 
     let app_for_cb = app.clone();
     let server_for_cb = server.clone();
     let source_for_cb = source.to_string();
-    let activated = TypedEventHandler::<ToastNotification, IInspectable>::new(
-        move |_sender, insp| {
+    let activated =
+        TypedEventHandler::<ToastNotification, IInspectable>::new(move |_sender, insp| {
             // 通道 1：进程内 WinRT 激活事件。能进到这里说明 toast 对象常驻生效。
             // arguments / launch 均为协议串，需解析出 thread id 再通知前端。
             let raw = insp
@@ -207,11 +207,8 @@ pub fn show_winrt_toast(
                 let _ = app_for_cb.emit(OPEN_SESSION_EVENT, &thread);
             }
             Ok(())
-        },
-    );
-    toast
-        .Activated(&activated)
-        .map_err(|e| e.to_string())?;
+        });
+    toast.Activated(&activated).map_err(|e| e.to_string())?;
 
     let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))
         .map_err(|e| e.to_string())?;
@@ -294,11 +291,7 @@ impl ToastThrottle {
 
 /// 节流条目：`text:<归一化正文>`（同文去重，10 秒）+ 回合存在时追加
 /// `turn:<会话>:<回合>`（同一次失败的双报去重，2 秒）。
-pub fn throttle_entries(
-    thread_id: &str,
-    turn_id: Option<&str>,
-    body: &str,
-) -> Vec<ThrottleEntry> {
+pub fn throttle_entries(thread_id: &str, turn_id: Option<&str>, body: &str) -> Vec<ThrottleEntry> {
     let normalized = body.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut entries = vec![ThrottleEntry {
         key: format!("text:{}", normalized.to_lowercase()),
@@ -320,7 +313,10 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn xml_escape_escapes_special_chars() {
-        assert_eq!(xml_escape("a&b<c>d\"e'f"), "a&amp;b&lt;c&gt;d&quot;e&apos;f");
+        assert_eq!(
+            xml_escape("a&b<c>d\"e'f"),
+            "a&amp;b&lt;c&gt;d&quot;e&apos;f"
+        );
         assert_eq!(xml_escape("无特殊字符"), "无特殊字符");
     }
 
@@ -391,7 +387,10 @@ mod tests {
         let other = throttle_entries("t1", None, "认证失效，请重新登录");
         assert!(throttle.allow(&other, now + Duration::from_secs(4)));
         // 超出窗口后同文再次放行
-        assert!(throttle.allow(&entries, now + Duration::from_secs(NOTIFY_THROTTLE_SECS + 1)));
+        assert!(throttle.allow(
+            &entries,
+            now + Duration::from_secs(NOTIFY_THROTTLE_SECS + 1)
+        ));
     }
 
     #[test]

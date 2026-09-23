@@ -43,7 +43,10 @@ import {
 import { revealGitFile } from "../composables/useGitChanges";
 import { pathBaseName } from "../lib/format";
 import { joinFsPath } from "../lib/sessionFs";
-import { useActionMenu, type ActionMenuItem } from "../composables/useActionMenu";
+import {
+  useActionMenu,
+  type ActionMenuItem,
+} from "../composables/useActionMenu";
 import {
   pickAndOpenNewSession,
   setToast,
@@ -114,8 +117,8 @@ const editorTabs = computed<EditorTab[]>(() =>
 /** 待关闭确认的脏文件标签 */
 const pendingTab = computed<EditorTab | null>(
   () =>
-    (tabs.find((t) => t.id === pendingCloseId.value) as EditorTab | undefined) ??
-    null,
+    (tabs.find((t) => t.id === pendingCloseId.value) as
+      EditorTab | undefined) ?? null,
 );
 
 /** 文件型标签（file/preview/diff）的磁盘绝对路径：兼容相对路径与工作区外绝对路径 */
@@ -123,20 +126,22 @@ function tabAbsPath(
   tab: FileEditorTab | DiffEditorTab | PreviewEditorTab,
 ): string {
   const root = tab.workspace;
-  return /^[A-Za-z]:[\\/]/.test(tab.path) ? tab.path : joinFsPath(root, tab.path);
+  return /^[A-Za-z]:[\\/]/.test(tab.path)
+    ? tab.path
+    : joinFsPath(root, tab.path);
 }
 
 /** 文件型标签（file/preview）的磁盘绝对路径：兼容工作区内绝对路径与外部文件（root=父目录+文件名） */
-function fileTabAbsPath(
-  tab: FileEditorTab | PreviewEditorTab,
-): string {
+function fileTabAbsPath(tab: FileEditorTab | PreviewEditorTab): string {
   return tabAbsPath(tab);
 }
 
 /** 批量关闭跳过提示：运行中会话/终端与未保存文件不逐个确认，仅计数 */
 function reportSkipped(skipped: number) {
   if (skipped > 0) {
-    setToast(`已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`);
+    setToast(
+      `已跳过 ${skipped} 个标签（未保存文件 / 运行中的终端 / 运行中的会话）`,
+    );
   }
 }
 
@@ -193,10 +198,7 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
     });
   }
   // 文件/预览标签（含对话打开的工作区外文件）可直达所在目录，置于菜单末尾
-  if (
-    tab.kind === TabKind.File ||
-    tab.kind === TabKind.Preview
-  ) {
+  if (tab.kind === TabKind.File || tab.kind === TabKind.Preview) {
     items.push({
       label: "在资源管理器中打开",
       icon: ICON_EXTERNAL_LINK,
@@ -206,8 +208,13 @@ function openTabMenu(e: MouseEvent, tab: SessionTab | EditorTab) {
   openCtx(e, items);
 }
 
-const { ctxMenu, openCtx, onWindowClick, onWindowScroll, onKeydown: onMenuKeydown } =
-  useActionMenu({ width: 190, scrollScope: ".editor-tabs-bar" });
+const {
+  ctxMenu,
+  openCtx,
+  onWindowClick,
+  onWindowScroll,
+  onKeydown: onMenuKeydown,
+} = useActionMenu({ width: 190, scrollScope: ".editor-tabs-bar" });
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
@@ -304,7 +311,6 @@ function openAddMenu(e: MouseEvent) {
   ];
   openCtx(e, items);
 }
-
 </script>
 
 <template>

@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { ref } from "vue";
-import {
-  useComposerMenus,
-  type ComposerMention,
-} from "../useComposerMenus";
+import { useComposerMenus, type ComposerMention } from "../useComposerMenus";
 
 describe("useComposerMenus", () => {
   beforeEach(() => {

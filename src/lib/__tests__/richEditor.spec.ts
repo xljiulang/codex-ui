@@ -47,7 +47,12 @@ describe("docToRuns / runsToText", () => {
       { kind: "text", text: "看 " },
       { kind: "ref", refId: "r1", refKind: "file", label: "a.cs" },
       { kind: "text", text: "然后" },
-      { kind: "ref", refId: "r2", refKind: "skill", label: "csharp-code-rules" },
+      {
+        kind: "ref",
+        refId: "r2",
+        refKind: "skill",
+        label: "csharp-code-rules",
+      },
     ]);
     expect(runsToText(docToRuns(doc))).toBe("看 然后");
   });
@@ -85,13 +90,19 @@ describe("docToRuns / runsToText", () => {
             {
               type: "listItem",
               content: [
-                { type: "paragraph", content: [{ type: "text", text: "第一项" }] },
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "第一项" }],
+                },
               ],
             },
             {
               type: "listItem",
               content: [
-                { type: "paragraph", content: [{ type: "text", text: "第二项" }] },
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "第二项" }],
+                },
               ],
             },
           ],
@@ -190,7 +201,15 @@ describe("runsToWireText 内联链接序列化", () => {
           pluginId: "documents@openai-primary-runtime",
         },
       ],
-      ["r3", { type: "skill", name: "csharp-code-rules", path: "C:/x/SKILL.md", source: "skill" }],
+      [
+        "r3",
+        {
+          type: "skill",
+          name: "csharp-code-rules",
+          path: "C:/x/SKILL.md",
+          source: "skill",
+        },
+      ],
     ]);
     const runs = [
       { kind: "text", text: "先 " },
@@ -198,7 +217,12 @@ describe("runsToWireText 内联链接序列化", () => {
       { kind: "text", text: "中间 " },
       { kind: "ref", refId: "r2", refKind: "plugin", label: "documents" },
       { kind: "text", text: "再 " },
-      { kind: "ref", refId: "r3", refKind: "skill", label: "csharp-code-rules" },
+      {
+        kind: "ref",
+        refId: "r3",
+        refKind: "skill",
+        label: "csharp-code-rules",
+      },
       { kind: "text", text: "结尾" },
     ] as const;
     expect(runsToWireText(runs as never, refs)).toBe(
@@ -216,12 +240,10 @@ describe("runsToWireText 内联链接序列化", () => {
       { kind: "text", text: "看下" },
       { kind: "ref", refId: "r2", refKind: "file", label: "b.txt" },
     ] as const;
-    expect(runsToWireText(runs as never, refs)).toBe(
-      "看下",
-    );
-    expect(runsToWireText([{ kind: "text", text: "纯文本" }] as never, new Map())).toBe(
-      "纯文本",
-    );
+    expect(runsToWireText(runs as never, refs)).toBe("看下");
+    expect(
+      runsToWireText([{ kind: "text", text: "纯文本" }] as never, new Map()),
+    ).toBe("纯文本");
   });
 
   it("跨段落以 \\n 连接，缺失 refId 的引用跳过", () => {
@@ -235,9 +257,7 @@ describe("runsToWireText 内联链接序列化", () => {
       { kind: "ref", refId: "missing", refKind: "skill", label: "x" },
       { kind: "text", text: "第二行" },
     ] as const;
-    expect(runsToWireText(runs as never, refs)).toBe(
-      "第一行\n第二行",
-    );
+    expect(runsToWireText(runs as never, refs)).toBe("第一行\n第二行");
   });
 });
 

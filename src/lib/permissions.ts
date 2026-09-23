@@ -91,9 +91,7 @@ export function toApprovalsReviewer(
 }
 
 /** turn/start 的沙箱覆盖参数是 sandboxPolicy 对象 */
-export function toSandboxPolicy(
-  mode: PermissionId,
-): Record<string, unknown> {
+export function toSandboxPolicy(mode: PermissionId): Record<string, unknown> {
   switch (mode) {
     case "read-only":
       return { type: "readOnly", networkAccess: false };

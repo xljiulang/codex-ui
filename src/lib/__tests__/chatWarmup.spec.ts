@@ -85,7 +85,10 @@ describe("waitForRenderQuiet（预热稳定判定）", () => {
   it("懒加载图片临时置 eager 等解码，完成后恢复 lazy；已完成的图片不处理", async () => {
     const img = document.createElement("img");
     img.loading = "lazy";
-    Object.defineProperty(img, "complete", { configurable: true, value: false });
+    Object.defineProperty(img, "complete", {
+      configurable: true,
+      value: false,
+    });
     const decode = vi.fn(() => Promise.resolve());
     Object.defineProperty(img, "decode", { configurable: true, value: decode });
     const doneImg = document.createElement("img");

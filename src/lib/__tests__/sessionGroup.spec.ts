@@ -1,15 +1,8 @@
 import { describe, expect, it } from "vitest";
-import {
-  dirLabel,
-  groupSessions,
-  normalizeDirKey,
-} from "../sessionGroup";
+import { dirLabel, groupSessions, normalizeDirKey } from "../sessionGroup";
 import type { ThreadSummary } from "../types";
 
-function t(
-  id: string,
-  over: Partial<ThreadSummary> = {},
-): ThreadSummary {
+function t(id: string, over: Partial<ThreadSummary> = {}): ThreadSummary {
   return {
     id,
     createdAt: 0,
@@ -46,7 +39,10 @@ describe("sessionGroup 目录分组", () => {
     const groups = rows.filter((r) => r.kind === "group");
     const items = rows.filter((r) => r.kind === "item");
     expect(groups).toHaveLength(1);
-    expect(items.map((r) => (r.kind === "item" ? r.thread.id : ""))).toEqual(["a", "c"]);
+    expect(items.map((r) => (r.kind === "item" ? r.thread.id : ""))).toEqual([
+      "a",
+      "c",
+    ]);
   });
 
   it("label 取路径最后一段，兼容反斜杠/正斜杠/根路径", () => {
@@ -91,7 +87,11 @@ describe("sessionGroup 目录分组", () => {
 
     expect(rows).toHaveLength(1);
     if (rows[0].kind === "group") {
-      expect(rows[0].group.threads.map((x) => x.id)).toEqual(["p1", "n1", "n2"]);
+      expect(rows[0].group.threads.map((x) => x.id)).toEqual([
+        "p1",
+        "n1",
+        "n2",
+      ]);
     }
   });
 

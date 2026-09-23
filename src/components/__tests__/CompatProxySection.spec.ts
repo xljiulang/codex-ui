@@ -7,7 +7,8 @@ vi.mock("../../lib/links", () => ({ openDocsUrl: mockOpenDocsUrl }));
 const mockCopyText = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../../lib/clipboard", () => ({ copyText: mockCopyText }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     applyCompatProxy: vi.fn(async () => ({ running: false, port: 18080 })),
@@ -58,7 +59,9 @@ describe("CompatProxySection", () => {
     mockedRead.mockResolvedValue({ running: true, port: 18080 });
     const wrapper = mountSection();
     await flushPromises();
-    expect(wrapper.find(".settings-section-title").text()).toContain("兼容代理");
+    expect(wrapper.find(".settings-section-title").text()).toContain(
+      "兼容代理",
+    );
     expect(wrapper.find(".compat-proxy-head-main h3").text()).toBe(
       "兼容代理服务",
     );
@@ -180,7 +183,9 @@ describe("CompatProxySection", () => {
     const boxes = wrapper.findAll(".compat-proxy-checkbox-row input");
     await boxes[0].setValue(false);
     await boxes[1].setValue(false);
-    const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
+    const btn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("保存"));
     await btn!.trigger("click");
     expect(mockedApply).toHaveBeenCalledWith(
       {
@@ -198,7 +203,9 @@ describe("CompatProxySection", () => {
     const wrapper = mountSection();
     const input = wrapper.find("input[type='number']");
     await input.setValue("80");
-    const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
+    const btn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("保存"));
     await btn!.trigger("click");
     expect(wrapper.find(".compat-proxy-error").exists()).toBe(true);
     expect(mockedToggle).not.toHaveBeenCalled();
@@ -213,15 +220,13 @@ describe("CompatProxySection", () => {
     await checkbox.setValue(true);
     await checkbox.trigger("change");
     // 默认端口 18080 通过校验，默认 base_url
-    expect(mockedToggle).toHaveBeenCalledWith(
-      {
-        enabled: true,
-        port: 18080,
-        baseUrl: "https://opencode.ai/zen/v1",
-        nudgeEnabled: true,
-        identityEnabled: true,
-      },
-    );
+    expect(mockedToggle).toHaveBeenCalledWith({
+      enabled: true,
+      port: 18080,
+      baseUrl: "https://opencode.ai/zen/v1",
+      nudgeEnabled: true,
+      identityEnabled: true,
+    });
   });
 
   it("保存合法端口与 API 地址调用 applyCompatProxy", async () => {
@@ -230,7 +235,9 @@ describe("CompatProxySection", () => {
     await input.setValue("19090");
     const urlInput = wrapper.find("input[type='text']");
     await urlInput.setValue("https://custom.example.com/v1");
-    const btn = wrapper.findAll("button").find((b) => b.text().includes("保存"));
+    const btn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("保存"));
     await btn!.trigger("click");
     expect(mockedApply).toHaveBeenCalledWith(
       {

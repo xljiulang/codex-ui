@@ -34,7 +34,11 @@ vi.mock("../useCodex", async (importOriginal) => {
 
 import { setToast } from "../useCodex";
 import { openPathInApp } from "../useSessionFs";
-import { registerDropTarget, unregisterDropTarget, type DropTarget } from "../dropTargets";
+import {
+  registerDropTarget,
+  unregisterDropTarget,
+  type DropTarget,
+} from "../dropTargets";
 import { useGlobalDragDrop } from "../useGlobalDragDrop";
 
 const mockedOpenPathInApp = vi.mocked(openPathInApp);
@@ -84,21 +88,16 @@ function registerTargetRect(rect: {
 
 /** 抓取全局监听者注册的处理器 */
 function handler() {
-  return mockOnDragDropEvent.mock.calls[0][0] as (
-    event: {
-      payload: {
-        type: "enter" | "over" | "leave" | "drop";
-        paths?: string[];
-        position?: { x: number; y: number };
-      };
-    },
-  ) => void;
+  return mockOnDragDropEvent.mock.calls[0][0] as (event: {
+    payload: {
+      type: "enter" | "over" | "leave" | "drop";
+      paths?: string[];
+      position?: { x: number; y: number };
+    };
+  }) => void;
 }
 
-function dropEvent(
-  paths: string[],
-  position?: { x: number; y: number },
-) {
+function dropEvent(paths: string[], position?: { x: number; y: number }) {
   const payload: {
     type: "drop";
     paths: string[];
@@ -128,7 +127,9 @@ describe("useGlobalDragDrop 单一全局拖拽监听", () => {
     await setup();
     await flushPromises();
 
-    handler()(dropEvent(["D:\\repo\\a.ts", "D:\\repo\\b.cs"], { x: 10, y: 10 }));
+    handler()(
+      dropEvent(["D:\\repo\\a.ts", "D:\\repo\\b.cs"], { x: 10, y: 10 }),
+    );
     await flushPromises();
 
     expect(mockedOpenPathInApp).toHaveBeenCalledTimes(2);
@@ -154,9 +155,7 @@ describe("useGlobalDragDrop 单一全局拖拽监听", () => {
     });
     expect(setDragging).toHaveBeenLastCalledWith(true);
     setDragging.mockClear();
-    handler()(
-      dropEvent(["D:\\repo\\a.ts"], { x: 400, y: 500 }),
-    );
+    handler()(dropEvent(["D:\\repo\\a.ts"], { x: 400, y: 500 }));
     await flushPromises();
 
     expect(onDropPaths).toHaveBeenCalledWith(["D:\\repo\\a.ts"]);
@@ -204,9 +203,7 @@ describe("useGlobalDragDrop 单一全局拖拽监听", () => {
     await setup();
     await flushPromises();
 
-    handler()(
-      dropEvent(["D:\\repo\\unsupported.bin"], { x: 10, y: 10 }),
-    );
+    handler()(dropEvent(["D:\\repo\\unsupported.bin"], { x: 10, y: 10 }));
     await flushPromises();
 
     expect(mockedToast).toHaveBeenCalledWith(

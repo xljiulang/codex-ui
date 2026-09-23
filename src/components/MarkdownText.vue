@@ -12,12 +12,13 @@ import { openPathInApp } from "../composables/useSessionFs";
 import { renderMarkdown } from "../lib/markdownRenderer";
 import { copyText } from "../lib/clipboard";
 import { resolveImageSrc } from "../lib/pdfExport";
-import {
-  hideTooltip,
-  showTooltip,
-} from "../composables/useTooltip";
+import { hideTooltip, showTooltip } from "../composables/useTooltip";
 
-const props = defineProps<{ text: string; streaming?: boolean; basePath?: string }>();
+const props = defineProps<{
+  text: string;
+  streaming?: boolean;
+  basePath?: string;
+}>();
 const root = ref<HTMLElement | null>(null);
 
 // 流式期间最多每 80ms 刷新一次展示文本，避免每个 delta 全量重解析；
@@ -148,7 +149,7 @@ function decorateCodeBlocks() {
   for (const pre of pres) {
     const code = pre.querySelector("code");
     const lang = code
-      ? /language-([\w-]+)/.exec(code.className)?.[1] ?? ""
+      ? (/language-([\w-]+)/.exec(code.className)?.[1] ?? "")
       : "";
     if (!streamingNow && code && lang && !code.dataset.highlighted) {
       try {
@@ -179,7 +180,9 @@ function decorateCodeBlocks() {
 
 function decorateLinks() {
   if (!root.value) return;
-  const links = root.value.querySelectorAll<HTMLAnchorElement>("a:not([data-link-ready])");
+  const links = root.value.querySelectorAll<HTMLAnchorElement>(
+    "a:not([data-link-ready])",
+  );
   for (const a of links) {
     a.setAttribute("data-link-ready", "1");
     const href = a.getAttribute("href") ?? "";
@@ -201,9 +204,11 @@ function decorateLinks() {
         return;
       }
       // 本地：支持则在应用内 tab 打开，否则降级资源管理器（原行为）
-      void openPathInApp(cls.path).then((opened) => {
-        if (!opened) openLink(h, root);
-      }).catch(() => openLink(h, root));
+      void openPathInApp(cls.path)
+        .then((opened) => {
+          if (!opened) openLink(h, root);
+        })
+        .catch(() => openLink(h, root));
     });
   }
 }
@@ -225,7 +230,11 @@ function decorateImages() {
 }
 
 async function copyCode(pre: HTMLPreElement, btn: HTMLButtonElement) {
-  const code = (pre.querySelector("code")?.textContent ?? pre.textContent ?? "").replace(/\n$/, "");
+  const code = (
+    pre.querySelector("code")?.textContent ??
+    pre.textContent ??
+    ""
+  ).replace(/\n$/, "");
   const ok = await copyText(code);
   btn.textContent = ok ? "已复制" : "复制失败";
   window.setTimeout(() => {
@@ -307,7 +316,10 @@ async function copyCode(pre: HTMLPreElement, btn: HTMLButtonElement) {
   border-radius: 999px;
   padding: var(--space-1) var(--space-4);
   opacity: 0.6;
-  transition: opacity var(--ease), color var(--ease), border-color var(--ease),
+  transition:
+    opacity var(--ease),
+    color var(--ease),
+    border-color var(--ease),
     background-color var(--ease);
   cursor: pointer;
 }

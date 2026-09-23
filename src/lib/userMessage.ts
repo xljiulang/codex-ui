@@ -167,8 +167,7 @@ export function summarizeUserMessage(
   const text = textParts.join("\n");
   const navText = navParts.join(" ") || fileFallbackParts.join(" ");
   const trimmed = text.trimStart();
-  const isExecutePlan =
-    trimmed.toUpperCase().startsWith(EXECUTE_PLAN_PREFIX);
+  const isExecutePlan = trimmed.toUpperCase().startsWith(EXECUTE_PLAN_PREFIX);
   const executePlanText = isExecutePlan
     ? trimmed.slice(EXECUTE_PLAN_PREFIX.length).trim()
     : "";

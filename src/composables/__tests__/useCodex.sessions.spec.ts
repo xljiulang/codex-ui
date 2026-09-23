@@ -1,14 +1,32 @@
 import type { UserInput } from "../../lib/types";
 import { newEmptySession, openSessionTabForThread } from "../useCodex/actions";
 import { settleConfirm } from "../useCodex/confirm";
-import { __resetSessionTabsForTest, activeSessionTab, isThreadOpen, isThreadRunning, sessionTabTitle } from "../useCodex/sessionState";
-import { addAttachmentToActiveSession, closeAllSessionTabs, closeSessionTab, registerComposerAddHandler, switchSessionTab, unregisterComposerAddHandler } from "../useCodex/sessionTabs";
+import {
+  __resetSessionTabsForTest,
+  activeSessionTab,
+  isThreadOpen,
+  isThreadRunning,
+  sessionTabTitle,
+} from "../useCodex/sessionState";
+import {
+  addAttachmentToActiveSession,
+  closeAllSessionTabs,
+  closeSessionTab,
+  registerComposerAddHandler,
+  switchSessionTab,
+  unregisterComposerAddHandler,
+} from "../useCodex/sessionTabs";
 import { store } from "../useCodex/store";
 import { startTurnForTab, interrupt } from "../useCodex/turnControl";
 import type { SessionTab } from "../useCodex/types";
 import { tabs as _tabs, activeTabId } from "../useEditorTabs";
 import { __resetTabsForTest, type Tab } from "../useTabs";
-import { DEFAULT_MODEL, makeSessionTab, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  DEFAULT_MODEL,
+  makeSessionTab,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { flushPromises } from "@vue/test-utils";
@@ -59,7 +77,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.threads = [];
   });
 
-
   it("会话标签标题：会话标题", () => {
     store.threads = [
       { id: "t1", name: null, preview: "", createdAt: 0, recencyAt: 0 },
@@ -103,7 +120,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     expect(sessionTabTitle(tab)).toBe("我的标题");
   });
 });
-
 
 describe("打开历史会话即恢复（token 用量显示）", () => {
   beforeEach(() => {
@@ -175,9 +191,7 @@ describe("打开历史会话即恢复（token 用量显示）", () => {
 
   it("thread_resume 失败（非 not-found）：仍成功打开、不丢弃标签", async () => {
     store.threads = [];
-    mockedInvoke.mockImplementation(
-      baseMock({}, "boom"),
-    );
+    mockedInvoke.mockImplementation(baseMock({}, "boom"));
     expect(await openSessionTabForThread("t2")).toBe(true);
     expect(tabs).toHaveLength(1);
     expect(activeSessionTab()?.threadId).toBe("t2");
@@ -231,7 +245,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     };
     store.threads = [];
   });
-
 
   it("会话标签标题：无标题回退摘要预览", () => {
     store.threads = [
@@ -289,7 +302,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.threads = [];
   });
 
-
   it("会话标签标题：新建带目录仅名称", () => {
     const tab: SessionTab = {
       id: "s1",
@@ -342,7 +354,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     };
     store.threads = [];
   });
-
 
   it("会话标签标题：全新标签为 新建会话", () => {
     const tab: SessionTab = {
@@ -397,7 +408,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     store.threads = [];
   });
 
-
   it("会话标签标题：新对话预选目录后为 新建会话", () => {
     const tab: SessionTab = {
       id: "s1",
@@ -450,7 +460,6 @@ describe("主窗口标题固定为 Codex UI，会话标签标题沿用主窗体�
     };
     store.threads = [];
   });
-
 
   it("会话标签标题：无 workspace 且无 cwd 时降级为仅标题", () => {
     store.workspace = "";
@@ -688,9 +697,7 @@ describe("多会话标签：新建/打开/切换/关闭", () => {
       if (cmd === "turn_interrupt") {
         const turnId = (args as { turnId?: string })?.turnId;
         if (turnId === "turn-1") {
-          return Promise.reject(
-            new Error("turn not found but found abc-123"),
-          );
+          return Promise.reject(new Error("turn not found but found abc-123"));
         }
       }
       return Promise.resolve(undefined);
@@ -722,7 +729,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("会话标签 title 由同步点维护：新建为 新建会话，改名后更新", async () => {
     await newEmptySession("D:/projects/B");
     expect(tabs[0].title).toBe("新建会话");
@@ -745,7 +751,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("会话标签 loading 字段读写一致", async () => {
     await newEmptySession();
     const tab = tabs[0];
@@ -765,7 +770,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("isThreadOpen / isThreadRunning 反映标签打开与运行状态", () => {
     tabs.push(makeSessionTab("s1", "t1", { turnActive: true }));
     tabs.push(makeSessionTab("s2", "t2"));
@@ -784,7 +788,6 @@ describe("会话标签状态与事件路由", () => {
     store.interactions = [];
     store.threads = [];
   });
-
 
   it("switchSessionTab：快照当前、恢复目标，各标签状态不串", async () => {
     tabs.push(
@@ -849,9 +852,10 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("活动标签的 live 字段变化自动同步回标签记录", async () => {
-    tabs.push(makeSessionTab("s1", "t1", { name: "会话A", collaborationMode: "plan" }));
+    tabs.push(
+      makeSessionTab("s1", "t1", { name: "会话A", collaborationMode: "plan" }),
+    );
     activeTabId.value = "s1";
     expect(tabs[0].name).toBe("会话A");
     expect(tabs[0].collaborationMode).toBe("plan");
@@ -866,21 +870,16 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("closeAllSessionTabs：运行中跳过并计数，关闭后保留运行中标签", async () => {
     tabs.push(makeSessionTab("s1", "t1"));
-    tabs.push(
-      makeSessionTab("s2", "t2", { turnActive: true }),
-    );
+    tabs.push(makeSessionTab("s2", "t2", { turnActive: true }));
     activeTabId.value = "s1";
     const skipped = await closeAllSessionTabs();
     expect(skipped).toBe(1);
     expect(tabs.some((t) => t.id === "s1")).toBe(false);
     expect(tabs.some((t) => t.id === "s2")).toBe(true);
     expect(tabs).toHaveLength(1);
-    expect(activeTabId.value).toBe(
-      tabs[tabs.length - 1].id,
-    );
+    expect(activeTabId.value).toBe(tabs[tabs.length - 1].id);
   });
 });
 describe("会话标签状态与事件路由", () => {
@@ -891,7 +890,6 @@ describe("会话标签状态与事件路由", () => {
     store.interactions = [];
     store.threads = [];
   });
-
 
   it("closeAllSessionTabs：全部关闭后允许 0 标签", async () => {
     tabs.push(makeSessionTab("s1", "t1"));
@@ -1130,8 +1128,7 @@ describe("多会话隔离：关闭/发送不触碰其它标签", () => {
     await startTurnForTab(tab, "hello", []);
 
     const call = mockedInvoke.mock.calls.find(([c]) => c === "turn_start");
-    const params = (call?.[1] as { params?: Record<string, unknown> })
-      ?.params;
+    const params = (call?.[1] as { params?: Record<string, unknown> })?.params;
     expect(params?.collaborationMode).toMatchObject({ mode: "plan" });
     expect(tab.turnActive).toBe(true);
     expect(tab.currentTurnId).toBe("turn-b");

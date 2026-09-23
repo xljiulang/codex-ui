@@ -3,7 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     loadModelProviderConfig: vi.fn(),
@@ -76,7 +77,9 @@ async function mountSection() {
   });
   // 等待 onMounted 异步加载完成
   await vi.waitFor(() => expect(mockedLoad).toHaveBeenCalled());
-  await vi.waitFor(() => expect(wrapper.find("#model-config-ui-personality").exists()).toBe(true));
+  await vi.waitFor(() =>
+    expect(wrapper.find("#model-config-ui-personality").exists()).toBe(true),
+  );
   return wrapper;
 }
 
@@ -138,8 +141,12 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
     expect(wrapper.find("#model-config-ui-reasoning-summary").text()).toContain(
       "默认（不写入）",
     );
-    expect(wrapper.find("#model-config-ui-personality").text()).toContain("默认（不写入）");
-    expect(wrapper.find("#model-config-ui-verbosity").text()).toContain("默认（不写入）");
+    expect(wrapper.find("#model-config-ui-personality").text()).toContain(
+      "默认（不写入）",
+    );
+    expect(wrapper.find("#model-config-ui-verbosity").text()).toContain(
+      "默认（不写入）",
+    );
   });
 
   it("保存时把当前选择传入 saveModelProviderConfig", async () => {
@@ -270,16 +277,18 @@ describe("ModelConfigSection 生成模型目录", () => {
       }),
     );
     const wrapper = await mountSection();
-    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    const rows = wrapper.findAll(
+      ".model-provider-row:not(.model-provider-none)",
+    );
     // 仅当前选中的 deepseek 行渲染；未选中的 other 行不渲染（无禁用态可看）
     expect(rows[0].find(".model-catalog-generate").exists()).toBe(true);
     expect(rows[1].find(".model-catalog-generate").exists()).toBe(false);
 
     const generateButton = rows[0].find(".model-catalog-generate");
     expect(generateButton.find("svg").exists()).toBe(true);
-    expect(
-      generateButton.find("path").attributes("d"),
-    ).toBe(ICON_ARROW_CIRCLE_DOWN);
+    expect(generateButton.find("path").attributes("d")).toBe(
+      ICON_ARROW_CIRCLE_DOWN,
+    );
     expect(generateButton.attributes("aria-label")).toBe("生成模型目录");
     expect(generateButton.attributes("disabled")).toBeUndefined();
     expect(generateButton.attributes("data-tip")).toBe("生成模型目录");
@@ -294,13 +303,15 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(
       wrapper.find(".model-catalog-head .model-catalog-generate").exists(),
     ).toBe(false);
-    const titleLink = wrapper.find(".model-catalog-head .model-config-title-link");
+    const titleLink = wrapper.find(
+      ".model-catalog-head .model-config-title-link",
+    );
     expect(titleLink.exists()).toBe(true);
     expect(titleLink.text()).toBe("model_catalog_json（模型目录）");
     expect(titleLink.attributes("disabled")).toBeDefined();
-    expect(wrapper.find(".model-catalog-title-wrap").attributes("data-tip")).toBe(
-      "正在读取目录路径…",
-    );
+    expect(
+      wrapper.find(".model-catalog-title-wrap").attributes("data-tip"),
+    ).toBe("正在读取目录路径…");
   });
 
   it("模型目录区块位于模型提供方之后、模型标识之前", async () => {
@@ -328,9 +339,9 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(link.exists()).toBe(true);
     expect(link.text()).toBe("model_catalog_json（模型目录）");
     expect(link.attributes("disabled")).toBeUndefined();
-    expect(wrapper.find(".model-catalog-title-wrap").attributes("data-tip")).toBe(
-      "在编辑器中打开 C:\\Users\\t\\.codex\\models.json",
-    );
+    expect(
+      wrapper.find(".model-catalog-title-wrap").attributes("data-tip"),
+    ).toBe("在编辑器中打开 C:\\Users\\t\\.codex\\models.json");
     // 路径行与生成按钮同处标题行，不再有独立路径元素
     expect(
       wrapper.find(".model-catalog-block .model-config-path").exists(),
@@ -476,9 +487,7 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("点击后打开选择弹窗且确认前不修改编辑框", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read") {
         return Promise.resolve({
@@ -527,9 +536,7 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("弹窗为每个命中资料展示独立来源徽章", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read") {
         return Promise.resolve(modelConfigReadResult());
@@ -564,11 +571,10 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("全部不可用时仍打开弹窗并展示不兼容与未匹配原因", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_config_read")
+        return Promise.resolve(modelConfigReadResult());
       if (cmd === "model_catalog_generate_from_provider") {
         return Promise.resolve({
           catalog: '{"models":[]}',
@@ -614,8 +620,12 @@ describe("ModelConfigSection 生成模型目录", () => {
     expect(wrapper.find(".model-catalog-picker-meta").text()).toContain(
       "可生成 0 个，不兼容 1 个，未匹配 1 个",
     );
-    expect(wrapper.findAll(".model-catalog-picker-row.is-incompatible")).toHaveLength(1);
-    expect(wrapper.findAll(".model-catalog-picker-row.is-unmatched")).toHaveLength(1);
+    expect(
+      wrapper.findAll(".model-catalog-picker-row.is-incompatible"),
+    ).toHaveLength(1);
+    expect(
+      wrapper.findAll(".model-catalog-picker-row.is-unmatched"),
+    ).toHaveLength(1);
     expect(wrapper.find(".model-catalog-picker-list").text()).toContain(
       "tool_call=false",
     );
@@ -627,11 +637,10 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("点击模型文字不切换复选框，点击复选框仍可正常选择", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_config_read")
+        return Promise.resolve(modelConfigReadResult());
       if (cmd === "model_catalog_generate_from_provider") {
         return Promise.resolve(catalogResult());
       }
@@ -648,8 +657,9 @@ describe("ModelConfigSection 生成模型目录", () => {
       ".model-catalog-picker-row input[type='checkbox']",
     );
     expect((firstCheckbox.element as HTMLInputElement).checked).toBe(false);
-    expect(wrapper.find(".model-catalog-picker-confirm").attributes("disabled"))
-      .toBeDefined();
+    expect(
+      wrapper.find(".model-catalog-picker-confirm").attributes("disabled"),
+    ).toBeDefined();
 
     await firstCheckbox.setValue(true);
     expect((firstCheckbox.element as HTMLInputElement).checked).toBe(true);
@@ -659,11 +669,10 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("三态全选复选框覆盖全部、部分和未选状态", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_config_read")
+        return Promise.resolve(modelConfigReadResult());
       if (cmd === "model_catalog_generate_from_provider") {
         return Promise.resolve(catalogResult());
       }
@@ -709,11 +718,10 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("搜索时三态全选只操作当前结果并保留隐藏项", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_config_read")
+        return Promise.resolve(modelConfigReadResult());
       if (cmd === "model_catalog_generate_from_provider") {
         return Promise.resolve(catalogResult());
       }
@@ -747,7 +755,9 @@ describe("ModelConfigSection 生成模型目录", () => {
 
     await search.setValue("");
     expect((selectAll.element as HTMLInputElement).indeterminate).toBe(true);
-    const rows = wrapper.findAll(".model-catalog-picker-row input[type='checkbox']");
+    const rows = wrapper.findAll(
+      ".model-catalog-picker-row input[type='checkbox']",
+    );
     expect((rows[0].element as HTMLInputElement).checked).toBe(true);
     expect((rows[1].element as HTMLInputElement).checked).toBe(false);
 
@@ -759,9 +769,7 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("确认后只写入选中模型、重排 priority 并提示数量", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read") {
         return Promise.resolve({
@@ -793,7 +801,11 @@ describe("ModelConfigSection 生成模型目录", () => {
         .value,
     ) as { models: Array<{ slug: string; priority: number }> };
     expect(catalog.models).toEqual([
-      { slug: "deepseek-reasoner", display_name: "Deepseek-Reasoner", priority: 1 },
+      {
+        slug: "deepseek-reasoner",
+        display_name: "Deepseek-Reasoner",
+        priority: 1,
+      },
     ]);
     expect(setToast).toHaveBeenCalledWith(
       "已生成 1 个模型条目，跳过 1 个不可用模型，保存并重启 codex-ui 后生效",
@@ -805,9 +817,7 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("取消选择不修改编辑框", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read") {
         return Promise.resolve({
@@ -834,9 +844,7 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("生成失败时不打开弹窗、不修改编辑框并提示错误", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation((cmd: string) => {
       if (cmd === "model_config_read") {
         return Promise.resolve({
@@ -860,12 +868,11 @@ describe("ModelConfigSection 生成模型目录", () => {
   });
 
   it("生成期间行内按钮禁用", async () => {
-    mockedLoad.mockResolvedValue(
-      activeProviderState(),
-    );
+    mockedLoad.mockResolvedValue(activeProviderState());
     let resolveGenerate!: (value: unknown) => void;
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+      if (cmd === "model_config_read")
+        return Promise.resolve(modelConfigReadResult());
       if (cmd === "model_catalog_generate_from_provider") {
         return new Promise((resolve) => {
           resolveGenerate = resolve;
@@ -881,7 +888,9 @@ describe("ModelConfigSection 生成模型目录", () => {
     await button.trigger("click");
     await vi.waitFor(() => expect(button.attributes("disabled")).toBeDefined());
     resolveGenerate(catalogResult());
-    await vi.waitFor(() => expect(button.attributes("disabled")).toBeUndefined());
+    await vi.waitFor(() =>
+      expect(button.attributes("disabled")).toBeUndefined(),
+    );
     expect(wrapper.find(".model-catalog-picker").exists()).toBe(true);
   });
 
@@ -898,8 +907,14 @@ describe("ModelConfigSection 生成模型目录", () => {
       models: [
         result.models[0],
         ...result.models.slice(1),
-        { id: "broken", display_name: "Broken", status: "invalid", selectable: false,
-          sources: [], warnings: ["上下文参数无效"] },
+        {
+          id: "broken",
+          display_name: "Broken",
+          status: "invalid",
+          selectable: false,
+          sources: [],
+          warnings: ["上下文参数无效"],
+        },
       ],
     };
     mockedInvoke.mockImplementation(async (cmd) => {
@@ -909,21 +924,40 @@ describe("ModelConfigSection 生成模型目录", () => {
     const wrapper = await mountSection();
     await wrapper.find(".model-catalog-generate").trigger("click");
     await flushPromises();
-    expect(wrapper.find(".model-catalog-picker").text()).toContain("校验失败 1 个");
+    expect(wrapper.find(".model-catalog-picker").text()).toContain(
+      "校验失败 1 个",
+    );
     const checkbox = wrapper.find(".model-catalog-picker-row input");
     expect((checkbox.element as HTMLInputElement).checked).toBe(false);
     // 弹窗不再提供参数来源入口
-    expect(wrapper.find(".model-catalog-provenance-toggle").exists()).toBe(false);
+    expect(wrapper.find(".model-catalog-provenance-toggle").exists()).toBe(
+      false,
+    );
     expect(wrapper.find(".model-catalog-provenance").exists()).toBe(false);
-    expect(wrapper.find(".is-invalid input").attributes("disabled")).toBeDefined();
+    expect(
+      wrapper.find(".is-invalid input").attributes("disabled"),
+    ).toBeDefined();
     await checkbox.setValue(true);
     await wrapper.find(".model-catalog-picker-confirm").trigger("click");
     expect(wrapper.find(".model-catalog-picker").exists()).toBe(false);
-    const catalog = JSON.parse((wrapper.find(".model-config-textarea").element as HTMLTextAreaElement).value);
+    const catalog = JSON.parse(
+      (wrapper.find(".model-config-textarea").element as HTMLTextAreaElement)
+        .value,
+    );
     expect(catalog.models).toHaveLength(1);
-    expect(catalog.models[0]).toMatchObject({ slug: "deepseek-chat", context_window: 128000, priority: 1 });
-    expect(mockedInvoke.mock.calls.filter(([cmd]) => cmd === "model_catalog_generate_from_provider")).toHaveLength(1);
-    expect(mockedInvoke.mock.calls.some(([cmd]) => cmd === "model_catalog_save")).toBe(false);
+    expect(catalog.models[0]).toMatchObject({
+      slug: "deepseek-chat",
+      context_window: 128000,
+      priority: 1,
+    });
+    expect(
+      mockedInvoke.mock.calls.filter(
+        ([cmd]) => cmd === "model_catalog_generate_from_provider",
+      ),
+    ).toHaveLength(1);
+    expect(
+      mockedInvoke.mock.calls.some(([cmd]) => cmd === "model_catalog_save"),
+    ).toBe(false);
     expect(mockedSave).not.toHaveBeenCalled();
     wrapper.unmount();
   });
@@ -931,19 +965,41 @@ describe("ModelConfigSection 生成模型目录", () => {
   it("全部校验失败时保留原目录且不能确认", async () => {
     mockedLoad.mockResolvedValue(activeProviderState());
     mockedInvoke.mockImplementation(async (cmd) => {
-      if (cmd === "model_config_read") return { ...modelConfigReadResult(), model_catalog: "old-catalog" };
-      if (cmd === "model_catalog_generate_from_provider") return {
-        catalog: '{"models":[]}', total: 1, ready: 0, unmatched: 0, incompatible: 0, invalid: 1,
-        models: [{ id: "broken", display_name: "Broken", status: "invalid", selectable: false,
-          sources: [], warnings: ["上下文参数无效"] }],
-      };
+      if (cmd === "model_config_read")
+        return { ...modelConfigReadResult(), model_catalog: "old-catalog" };
+      if (cmd === "model_catalog_generate_from_provider")
+        return {
+          catalog: '{"models":[]}',
+          total: 1,
+          ready: 0,
+          unmatched: 0,
+          incompatible: 0,
+          invalid: 1,
+          models: [
+            {
+              id: "broken",
+              display_name: "Broken",
+              status: "invalid",
+              selectable: false,
+              sources: [],
+              warnings: ["上下文参数无效"],
+            },
+          ],
+        };
     });
     const wrapper = await mountSection();
     await wrapper.find(".model-catalog-generate").trigger("click");
     await flushPromises();
-    expect(wrapper.find(".model-catalog-picker-confirm").attributes("disabled")).toBeDefined();
-    expect(wrapper.find(".model-catalog-picker").text()).toContain("上下文参数无效");
-    expect((wrapper.find(".model-config-textarea").element as HTMLTextAreaElement).value).toBe("old-catalog");
+    expect(
+      wrapper.find(".model-catalog-picker-confirm").attributes("disabled"),
+    ).toBeDefined();
+    expect(wrapper.find(".model-catalog-picker").text()).toContain(
+      "上下文参数无效",
+    );
+    expect(
+      (wrapper.find(".model-config-textarea").element as HTMLTextAreaElement)
+        .value,
+    ).toBe("old-catalog");
     wrapper.unmount();
   });
 
@@ -953,10 +1009,12 @@ describe("ModelConfigSection 生成模型目录", () => {
       mockedLoad.mockResolvedValue(activeProviderState());
       let finish!: () => void;
       mockedInvoke.mockImplementation((cmd) => {
-        if (cmd === "model_config_read") return Promise.resolve(modelConfigReadResult());
+        if (cmd === "model_config_read")
+          return Promise.resolve(modelConfigReadResult());
         if (cmd === "model_catalog_generate_from_provider") {
           return new Promise((resolve, reject) => {
-            finish = () => fail ? reject(new Error("迟到错误")) : resolve(catalogResult());
+            finish = () =>
+              fail ? reject(new Error("迟到错误")) : resolve(catalogResult());
           });
         }
         return Promise.resolve(undefined);
@@ -981,9 +1039,8 @@ describe("ModelConfigSection 外部重读信号", () => {
   it("reloadToken 自增时重读一次模型配置（还原快照后由设置页触发）", async () => {
     const wrapper = await mountSection();
     const readCount = () =>
-      mockedInvoke.mock.calls.filter(
-        ([cmd]) => cmd === "model_config_read",
-      ).length;
+      mockedInvoke.mock.calls.filter(([cmd]) => cmd === "model_config_read")
+        .length;
     expect(readCount()).toBe(1);
 
     await wrapper.setProps({ reloadToken: 1 });

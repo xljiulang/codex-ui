@@ -80,10 +80,7 @@ async function refreshMcpDetail() {
 }
 
 /** 处理服务器启动状态通知：仅用于 ready 后自动重拉一次能力清单 */
-function onMcpStartupUpdated(payload: {
-  name?: string;
-  status?: string;
-}) {
+function onMcpStartupUpdated(payload: { name?: string; status?: string }) {
   if (!payload || payload.name !== mcpDetail.name) return;
   const status = payload.status;
   if (
@@ -166,9 +163,7 @@ function mcpDetailSchemaText(tool: McpToolDetail): string {
 }
 
 function mcpDetailAuthLabel(): string {
-  return mcpDetail.detail
-    ? MCP_AUTH_LABELS[mcpDetail.detail.authStatus]
-    : "";
+  return mcpDetail.detail ? MCP_AUTH_LABELS[mcpDetail.detail.authStatus] : "";
 }
 </script>
 
@@ -180,11 +175,7 @@ function mcpDetailAuthLabel(): string {
     @close="emit('close')"
   >
     <div class="mcp-detail">
-      <div
-        class="mcp-detail-tabs"
-        role="tablist"
-        aria-label="MCP 详情分类"
-      >
+      <div class="mcp-detail-tabs" role="tablist" aria-label="MCP 详情分类">
         <button
           v-for="t in MCP_DETAIL_TABS"
           :key="t.id"
@@ -198,8 +189,7 @@ function mcpDetailAuthLabel(): string {
           {{ t.label }}
           <span
             v-if="
-              (t.id === 'tools' || t.id === 'resources') &&
-              mcpDetail.detail
+              (t.id === 'tools' || t.id === 'resources') && mcpDetail.detail
             "
             class="mcp-detail-tab-count"
           >
@@ -215,13 +205,10 @@ function mcpDetailAuthLabel(): string {
         >
           正在获取服务器状态…
         </div>
-        <div
-          v-else-if="mcpDetail.notFound"
-          class="mcp-detail-empty"
-        >
+        <div v-else-if="mcpDetail.notFound" class="mcp-detail-empty">
           <p>
-            未查询到「{{ mcpDetail.name }}」的状态，服务器可能尚未被
-            codex 加载。
+            未查询到「{{ mcpDetail.name }}」的状态，服务器可能尚未被 codex
+            加载。
           </p>
           <button
             class="btn"
@@ -246,7 +233,9 @@ function mcpDetailAuthLabel(): string {
               <div class="mcp-detail-field">
                 <span class="mcp-detail-field-label">传输类型</span>
                 <span class="mcp-detail-field-value">
-                  {{ mcpDetail.transport === "http" ? "Streamable HTTP" : "stdio" }}
+                  {{
+                    mcpDetail.transport === "http" ? "Streamable HTTP" : "stdio"
+                  }}
                 </span>
               </div>
               <template v-if="mcpDetail.transport === 'http'">
@@ -264,10 +253,7 @@ function mcpDetailAuthLabel(): string {
                     {{ mcpDetail.command }}
                   </span>
                 </div>
-                <div
-                  v-if="mcpDetail.argsText"
-                  class="mcp-detail-field"
-                >
+                <div v-if="mcpDetail.argsText" class="mcp-detail-field">
                   <span class="mcp-detail-field-label">args</span>
                   <span class="mcp-detail-field-value mono">
                     {{ mcpDetail.argsText }}
@@ -280,9 +266,7 @@ function mcpDetailAuthLabel(): string {
                   </span>
                 </div>
               </template>
-              <template
-                v-if="mcpDetail.detail.serverInfo"
-              >
+              <template v-if="mcpDetail.detail.serverInfo">
                 <div
                   v-if="mcpDetail.detail.serverInfo.title"
                   class="mcp-detail-field"
@@ -339,10 +323,7 @@ function mcpDetailAuthLabel(): string {
             >
               未获取到工具（服务器可能未启动），服务器就绪后将自动更新。
             </div>
-            <div
-              v-else
-              class="mcp-detail-tools"
-            >
+            <div v-else class="mcp-detail-tools">
               <article
                 v-for="tool in mcpDetail.detail.tools"
                 :key="tool.name"
@@ -359,10 +340,7 @@ function mcpDetailAuthLabel(): string {
                     {{ tool.title }}
                   </span>
                 </header>
-                <p
-                  v-if="tool.description"
-                  class="mcp-detail-tool-desc"
-                >
+                <p v-if="tool.description" class="mcp-detail-tool-desc">
                   {{ tool.description }}
                 </p>
                 <details
@@ -390,9 +368,7 @@ function mcpDetailAuthLabel(): string {
               该服务器未声明资源与资源模板。
             </div>
             <template v-else>
-              <template
-                v-if="mcpDetail.detail.resources.length"
-              >
+              <template v-if="mcpDetail.detail.resources.length">
                 <h4 class="mcp-detail-group-title">
                   资源（{{ mcpDetail.detail.resources.length }}）
                 </h4>
@@ -431,13 +407,9 @@ function mcpDetailAuthLabel(): string {
                   </div>
                 </div>
               </template>
-              <template
-                v-if="mcpDetail.detail.resourceTemplates.length"
-              >
+              <template v-if="mcpDetail.detail.resourceTemplates.length">
                 <h4 class="mcp-detail-group-title">
-                  资源模板（{{
-                    mcpDetail.detail.resourceTemplates.length
-                  }}）
+                  资源模板（{{ mcpDetail.detail.resourceTemplates.length }}）
                 </h4>
                 <div class="mcp-detail-resources">
                   <div
@@ -468,7 +440,6 @@ function mcpDetailAuthLabel(): string {
               </template>
             </template>
           </section>
-
         </template>
       </div>
     </div>
@@ -499,7 +470,10 @@ function mcpDetailAuthLabel(): string {
   color: var(--text-dim);
   font-size: var(--font-sm);
   cursor: pointer;
-  transition: color var(--ease), background var(--ease), border-color var(--ease);
+  transition:
+    color var(--ease),
+    background var(--ease),
+    border-color var(--ease);
 }
 
 .mcp-detail-tab:hover {
@@ -694,4 +668,3 @@ function mcpDetailAuthLabel(): string {
   font-size: var(--font-xs);
 }
 </style>
-

@@ -39,7 +39,8 @@ export async function flushLastSession(): Promise<void> {
 /** 最近激活会话 threadId 是否仍有打开的会话标签（kind=session 且 threadId 匹配） */
 function isSessionTabOpen(threadId: string): boolean {
   return tabs.some(
-    (t) => t.kind === TabKind.Session && (t as SessionTab).threadId === threadId,
+    (t) =>
+      t.kind === TabKind.Session && (t as SessionTab).threadId === threadId,
   );
 }
 

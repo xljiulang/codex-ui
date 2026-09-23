@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import {
-  openSettingsTab,
-  SETTINGS_TAB_ID,
-} from "../composables/useEditorTabs";
+import { openSettingsTab, SETTINGS_TAB_ID } from "../composables/useEditorTabs";
 import { activateTab, tabs } from "../composables/useTabs";
 import { useWindowControls } from "../composables/useWindowControls";
 import {
@@ -17,13 +14,8 @@ import {
 import { store } from "../composables/useCodex";
 
 // 自绘标题栏窗口控制：最小化/最大化(还原)/关闭 + 拖动窗口 + 双击最大化
-const {
-  isMaximized,
-  minimize,
-  toggleMaximize,
-  close,
-  onTitlebarMouseDown,
-} = useWindowControls();
+const { isMaximized, minimize, toggleMaximize, close, onTitlebarMouseDown } =
+  useWindowControls();
 
 /** 设置按钮：无设置标签则创建并激活；已存在（无论是否激活）仅聚焦激活 */
 function onSettings() {
@@ -37,10 +29,7 @@ function onSettings() {
 </script>
 
 <template>
-  <header
-    class="app-header"
-    @mousedown="onTitlebarMouseDown"
-  >
+  <header class="app-header" @mousedown="onTitlebarMouseDown">
     <div class="brand">
       <span class="brand-logo">
         <svg viewBox="0 0 24 24">
@@ -69,16 +58,16 @@ function onSettings() {
       >
         <svg viewBox="0 0 24 24">
           <path
-            :d="store.rightPanelHidden ? ICON_LAYOUT_SIDE_HIDDEN : ICON_LAYOUT_SIDE"
+            :d="
+              store.rightPanelHidden
+                ? ICON_LAYOUT_SIDE_HIDDEN
+                : ICON_LAYOUT_SIDE
+            "
             fill-rule="evenodd"
           />
         </svg>
       </button>
-      <button
-        class="icon-btn win-btn"
-        aria-label="最小化"
-        @click="minimize()"
-      >
+      <button class="icon-btn win-btn" aria-label="最小化" @click="minimize()">
         <svg viewBox="0 0 24 24">
           <path :d="ICON_WINDOW_MIN" />
         </svg>

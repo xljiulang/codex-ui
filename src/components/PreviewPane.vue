@@ -7,7 +7,9 @@ import type { PreviewEditorTab } from "../composables/useEditorTabs";
 const props = defineProps<{ tab: PreviewEditorTab }>();
 
 // pdf.js 较重，懒加载避免拖累主窗口首屏
-const PdfPreviewPane = defineAsyncComponent(() => import("./PdfPreviewPane.vue"));
+const PdfPreviewPane = defineAsyncComponent(
+  () => import("./PdfPreviewPane.vue"),
+);
 const XlsxPreviewPane = defineAsyncComponent(
   () => import("./XlsxPreviewPane.vue"),
 );
@@ -79,15 +81,12 @@ function fitZoom() {
 }
 
 // 切换预览标签或图片地址变化（外部刷新）时复位加载失败状态与缩放
-watch(
-  [() => props.tab, () => props.tab.imageUrl],
-  () => {
-    imgError.value = false;
-    zoom.value = 1;
-    naturalW.value = 0;
-    naturalH.value = 0;
-  },
-);
+watch([() => props.tab, () => props.tab.imageUrl], () => {
+  imgError.value = false;
+  zoom.value = 1;
+  naturalW.value = 0;
+  naturalH.value = 0;
+});
 </script>
 
 <template>
@@ -119,11 +118,7 @@ watch(
           >
             ＋
           </button>
-          <button
-            class="preview-zoom-btn"
-            type="button"
-            @click="fitZoom()"
-          >
+          <button class="preview-zoom-btn" type="button" @click="fitZoom()">
             适应窗口
           </button>
         </div>

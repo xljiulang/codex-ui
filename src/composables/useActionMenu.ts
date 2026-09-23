@@ -75,5 +75,12 @@ export function useActionMenu(options?: {
     return false;
   }
 
-  return { ctxMenu, openCtx, closeCtx, onWindowClick, onWindowScroll, onKeydown };
+  return {
+    ctxMenu,
+    openCtx,
+    closeCtx,
+    onWindowClick,
+    onWindowScroll,
+    onKeydown,
+  };
 }

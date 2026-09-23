@@ -64,7 +64,13 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("文件 chip 悬浮显示路径卡片", async () => {
     const wrapper = mount(RefChip, {
-      props: { tab: TEST_TAB, path: "src/a.cs", label: "@a.cs", kind: "file", delay: 0 },
+      props: {
+        tab: TEST_TAB,
+        path: "src/a.cs",
+        label: "@a.cs",
+        kind: "file",
+        delay: 0,
+      },
     });
     await wrapper.find(".mention-inline").trigger("mouseenter");
     await waitTick();
@@ -78,7 +84,8 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("插件 chip 悬浮显示插件说明，缺失回退路径", async () => {
     const wrapper = mount(RefChip, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         path: "plugin://documents@openai-primary-runtime",
         label: "@documents",
         kind: "plugin",
@@ -92,7 +99,8 @@ describe("RefChip 自定义悬浮卡片", () => {
     await waitTick();
 
     const missing = mount(RefChip, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         path: "plugin://unknown@market",
         label: "@unknown",
         kind: "plugin",
@@ -106,7 +114,8 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("技能 chip 悬浮显示技能说明，缺失回退路径", async () => {
     const wrapper = mount(RefChip, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         path: "C:/x/skills/csharp-code-rules/SKILL.md",
         label: "$csharp-code-rules",
         kind: "skill",
@@ -120,7 +129,13 @@ describe("RefChip 自定义悬浮卡片", () => {
     await waitTick();
 
     const missing = mount(RefChip, {
-      props: { tab: TEST_TAB, path: "C:/x/SKILL.md", label: "$zzz", kind: "skill", delay: 0 },
+      props: {
+        tab: TEST_TAB,
+        path: "C:/x/SKILL.md",
+        label: "$zzz",
+        kind: "skill",
+        delay: 0,
+      },
     });
     await missing.find(".mention-inline").trigger("mouseenter");
     await waitTick();
@@ -129,7 +144,8 @@ describe("RefChip 自定义悬浮卡片", () => {
 
   it("plugin:// chip 不可点击（渲染为 span）", () => {
     const wrapper = mount(RefChip, {
-      props: { tab: TEST_TAB,
+      props: {
+        tab: TEST_TAB,
         path: "plugin://documents@openai-primary-runtime",
         label: "@documents",
         kind: "plugin",
@@ -188,7 +204,12 @@ describe("RefChip 自定义悬浮卡片", () => {
       return Promise.resolve(undefined);
     });
     const wrapper = mount(RefChip, {
-      props: { tab: TEST_TAB, path: "src/a.bin", label: "@a.bin", kind: "file" },
+      props: {
+        tab: TEST_TAB,
+        path: "src/a.bin",
+        label: "@a.bin",
+        kind: "file",
+      },
     });
     await wrapper.find(".mention-inline").trigger("click");
     await flushPromises();

@@ -9,11 +9,9 @@ import { findSessionTabByThread, sessionTabTitle } from "./sessionState";
 import { backgroundThreadIds, store } from "./store";
 import { setToast, toastError } from "./toast";
 
-
 export function isThreadNotFound(e: unknown): boolean {
   return String(e).toLowerCase().includes("thread not found");
 }
-
 
 /** 全量加载历史会话：逐页拉取直至 cursor 为空（防死循环上限 200 页） */
 export async function refreshThreads() {
@@ -58,7 +56,6 @@ export function upsertThreadSummary(summary: ThreadSummary) {
   store.threads = sortThreads(store.threads);
 }
 
-
 /** 搜索历史会话（thread/search）：全量翻页，结果写入 store.threads 并附带摘要 */
 export async function searchThreads(term: string) {
   const t = term.trim();
@@ -101,14 +98,12 @@ export async function searchThreads(term: string) {
   }
 }
 
-
 /** 退出搜索，恢复常规列表 */
 export function clearSearch() {
   store.searchActive = false;
   store.searchSnippets = {};
   void refreshThreads();
 }
-
 
 /**
  * 重命名会话；返回是否成功（手动重命名 / 首条消息作标题 / AI 总结写回共用）。
@@ -151,7 +146,6 @@ export async function renameThread(
   }
 }
 
-
 /** 清洗模型生成的标题：去引号/Markdown 标记、折叠空白、截断 50 字 */
 export function sanitizeTitle(raw: string): string {
   const t = raw
@@ -163,12 +157,14 @@ export function sanitizeTitle(raw: string): string {
   return t.length > 50 ? t.slice(0, 50) : t;
 }
 
-
 /**
  * 仿 VS Code：临时线程总结首条消息，为会话生成短标题（不指定模型，用默认模型）。
  * 与主回合并行执行、失败静默（保留默认标题）；0.149.x 恒用 ephemeral 临时线程。
  */
-export async function autoTitleThread(threadId: string, firstMessagePlain: string) {
+export async function autoTitleThread(
+  threadId: string,
+  firstMessagePlain: string,
+) {
   const text = firstMessagePlain.replace(/\s+/g, " ").trim();
   if (!text || text.length <= 15) return; // 短文保持默认标题，不消耗模型
   const tab = findSessionTabByThread(threadId);
@@ -315,7 +311,6 @@ export async function autoTitleThread(threadId: string, firstMessagePlain: strin
     await cleanup();
   }
 }
-
 
 /** 固定/取消固定会话（置顶） */
 export async function setThreadPinned(threadId: string, pinned: boolean) {

@@ -2,12 +2,7 @@
 export type GitErrorCode = "not_a_repo" | "repo_error";
 
 export type GitFileStatus =
-  | "added"
-  | "modified"
-  | "deleted"
-  | "renamed"
-  | "untracked"
-  | "conflicted";
+  "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
 
 /** 变更文件条目（Rust git_changes_status 返回，字段 camelCase） */
 export interface GitFile {
@@ -168,7 +163,9 @@ export function normalizeDiffKind(kind: unknown): DiffPreviewKind {
   const k =
     typeof kind === "string"
       ? kind
-      : kind && typeof kind === "object" && "type" in (kind as Record<string, unknown>)
+      : kind &&
+          typeof kind === "object" &&
+          "type" in (kind as Record<string, unknown>)
         ? String((kind as { type: unknown }).type)
         : "";
   if (k === "add" || k === "added" || k === "untracked") return "add";

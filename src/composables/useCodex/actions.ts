@@ -4,7 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { focusComposer } from "../../lib/composerFocus";
 import { buildInjectedDynamicTools } from "../../lib/dynamicTools";
 import { stripMentionContext } from "../../lib/mention";
-import { toApprovalPolicy, toApprovalsReviewer, toSandbox } from "../../lib/permissions";
+import {
+  toApprovalPolicy,
+  toApprovalsReviewer,
+  toSandbox,
+} from "../../lib/permissions";
 import { sessionLog } from "../../lib/sessionLog";
 import { TabKind } from "../../lib/tabs";
 import type {
@@ -14,7 +18,13 @@ import type {
   UserInput,
 } from "../../lib/types";
 import { activeTab, activateTab, insertTab, tabs } from "../useTabs";
-import { flattenTurns, isActiveItem, loadFullItems, resolveSessionWorkspace, workspace } from "./items";
+import {
+  flattenTurns,
+  isActiveItem,
+  loadFullItems,
+  resolveSessionWorkspace,
+  workspace,
+} from "./items";
 import {
   activeSessionTab,
   allSessionTabs,
@@ -55,7 +65,6 @@ import {
   type SessionTab,
 } from "./types";
 
-
 /**
  * 打开历史会话的统一入口（唯一性约束）：已有标签绑定该线程则直接切换（不新建、
  * 不重载）；否则新建标签并加载。返回 true 表示已进入目标会话。
@@ -67,7 +76,11 @@ export async function openSessionTabForThread(
   // activeSessionTab() 返回的是“最近投影”会话而非显示中的标签，点击历史会话
   // 仍必须走 switchSessionTab 把对应会话标签切回前台。
   const active = activeTab.value;
-  if (active && active.kind === TabKind.Session && active.threadId === threadId) {
+  if (
+    active &&
+    active.kind === TabKind.Session &&
+    active.threadId === threadId
+  ) {
     return true;
   }
   void sessionLog("info", threadId, "session-open");
@@ -83,12 +96,11 @@ export async function openSessionTabForThread(
     const i = tabs.indexOf(tab);
     if (i >= 0) tabs.splice(i, 1);
     return false;
-    }
-    tab.origin = "history";
-    await hydrateSessionState(tab);
-    return await loadThreadInto(tab, threadId);
   }
-
+  tab.origin = "history";
+  await hydrateSessionState(tab);
+  return await loadThreadInto(tab, threadId);
+}
 
 /**
  * 新建会话完成后回填服务端解析出的模型/强度：res.model 优先（服务端可能按
@@ -105,7 +117,6 @@ function applyNewThreadModelEffort(
   tab.effort = tab.effort || (res.reasoningEffort ?? "") || fallback.effort;
   void saveSessionState(tab);
 }
-
 
 async function startNewSession(prompt: string, attachments: UserInput[]) {
   const active = activeSessionTab();
@@ -229,7 +240,11 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
       if (firstText) {
         const tab = findSessionTabByThread(threadId);
         if (
-          await renameThread(threadId, sanitizeTitle(firstText), "first-message")
+          await renameThread(
+            threadId,
+            sanitizeTitle(firstText),
+            "first-message",
+          )
         ) {
           if (tab) tab.nameIsFirstMessage = true;
         }
@@ -246,19 +261,27 @@ async function startNewSession(prompt: string, attachments: UserInput[]) {
   }
 }
 
-
 export async function sendPrompt(text: string, invertFollowup = false) {
   const tab = activeSessionTab();
   const attachments = tab?.attachments.splice(0) ?? [];
   if (!text.trim() && attachments.length === 0) return;
-  void sessionLog("info", tab?.threadId ?? null, "user-send", `chars=${text.length}`);
+  void sessionLog(
+    "info",
+    tab?.threadId ?? null,
+    "user-send",
+    `chars=${text.length}`,
+  );
   // 手动发送标记：ChatView 据此在发送后强制恢复吸底回到底部
   // （队列消息在回合结束后自动发送时走 startTurn/startNewSession，不递增）
   store.userSendRev++;
   // 回合进行中：按“跟进处理方式”转向或入队；Ctrl+Enter 对单条消息取相反方式
   if (tab?.turnActive && tab.threadId) {
     const base = store.settings.followup_mode;
-    const mode = invertFollowup ? (base === "adjust" ? "queue" : "adjust") : base;
+    const mode = invertFollowup
+      ? base === "adjust"
+        ? "queue"
+        : "adjust"
+      : base;
     if (mode === "adjust") {
       await steerTurn(text, attachments);
     } else {
@@ -278,13 +301,11 @@ export async function sendPrompt(text: string, invertFollowup = false) {
   }
 }
 
-
 /** “待在计划”：关闭“计划已就绪”弹窗，保持计划模式，不发消息（Esc 同此行为） */
 export function dismissPlanPrompt() {
   const tab = activeSessionTab();
   if (tab) tab.planPrompt = null;
 }
-
 
 /** “退出计划模式”：切回默认模式并关闭弹窗，不发消息 */
 export function exitPlanMode() {
@@ -294,7 +315,6 @@ export function exitPlanMode() {
     tab.collaborationMode = "default";
   }
 }
-
 
 /** “执行计划”：仿 VS Code —— 发送 `PLEASE IMPLEMENT THIS PLAN:` 消息并切到默认模式 */
 export async function executePlan() {
@@ -322,7 +342,6 @@ export async function executePlan() {
   }
 }
 
-
 /**
  * 新建空会话标签（所有“新会话”入口的统一函数）：会话多开，不打断/不停止
  * 当前或后台标签的回合；可预置本次会话的工作目录 cwd。恒返回 true。
@@ -341,12 +360,14 @@ export async function newEmptySession(cwd?: string | null): Promise<boolean> {
   return true;
 }
 
-
 /**
  * 把历史会话加载进指定会话标签（结果按“是否仍为活动标签”写入 live 字段或标签记录，
  * 避免加载期间用户切换标签导致状态串味）。
  */
-async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolean> {
+async function loadThreadInto(
+  tab: SessionTab,
+  threadId: string,
+): Promise<boolean> {
   const isActive = () => activeSessionTab()?.id === tab.id;
   tab.loading = true;
   void ensureThreadPlugins(tab); // 进入历史对话即预初始化插件缓存
@@ -372,7 +393,9 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
       if (historyMode === "paginated") {
         // 分页线程不支持 includeTurns=true，保持空列表打开（仍可继续发送消息）
         fullItems = [];
-        setToast("该会话为分页存储，当前 Codex 版本无法读取历史，仍可继续发送消息");
+        setToast(
+          "该会话为分页存储，当前 Codex 版本无法读取历史，仍可继续发送消息",
+        );
       } else {
         try {
           const legacy = await invoke<{ thread: { turns?: Turn[] } }>(
@@ -458,13 +481,11 @@ async function loadThreadInto(tab: SessionTab, threadId: string): Promise<boolea
   }
 }
 
-
 /** 切换会话成功后的统一收尾：聚焦输入框（右侧面板保持当前 Tab） */
 async function finishSessionSwitch() {
   await nextTick();
   focusComposer();
 }
-
 
 /**
  * 新建会话统一入口（头部按钮 / 历史目录右键「新建会话」）：
@@ -475,10 +496,8 @@ export async function openNewSession(cwd?: string | null): Promise<void> {
   await finishSessionSwitch();
 }
 
-
 /** 目录选择对话框打开中：禁止重复触发（头部「+」与空状态按钮共用，供按钮禁用态绑定） */
 export const pickingNewSessionDir = ref(false);
-
 
 /**
  * 选择工作目录并新建会话（头部「+」与零会话空状态按钮共用）：
@@ -504,7 +523,6 @@ export async function pickAndOpenNewSession(): Promise<void> {
   }
 }
 
-
 /**
  * 打开历史会话统一入口（会话行单击 / 右键「打开」）：
  * 切换成功（未被取消）才聚焦输入框；右侧面板保持当前 Tab。
@@ -514,7 +532,6 @@ export async function openSession(threadId: string): Promise<void> {
   if (!(await openSessionTabForThread(threadId))) return;
   await finishSessionSwitch();
 }
-
 
 /**
  * 启动恢复最后活跃会话：读取配置文件持久化的会话 id（settings.json 的
@@ -530,7 +547,6 @@ export async function restoreLastSession(): Promise<boolean> {
   return true;
 }
 
-
 export async function deleteThread(threadId: string) {
   try {
     // 删除已绑定微信的会话前先解除绑定（单条删除与「删除所有会话」组删共用此路径）
@@ -540,12 +556,12 @@ export async function deleteThread(threadId: string) {
     await invoke("thread_delete", { threadId });
     void sessionLog("warn", threadId, "thread-delete");
     store.threads = store.threads.filter((t) => t.id !== threadId);
-      // 释放该会话的本地缓存，避免历史列表长期累积内存
-      delete store.itemsByThread[threadId];
-      delete store.activeWorkByThread[threadId];
-      // 清空会话统一状态记录
-      void removeSessionState(threadId);
-      // 关闭绑定该线程的会话标签（线程已删除，无需确认/中断）
+    // 释放该会话的本地缓存，避免历史列表长期累积内存
+    delete store.itemsByThread[threadId];
+    delete store.activeWorkByThread[threadId];
+    // 清空会话统一状态记录
+    void removeSessionState(threadId);
+    // 关闭绑定该线程的会话标签（线程已删除，无需确认/中断）
     for (const tab of allSessionTabs().filter((t) => t.threadId === threadId)) {
       dropSessionTab(tab);
     }
@@ -553,7 +569,6 @@ export async function deleteThread(threadId: string) {
     setToast(toastError(e));
   }
 }
-
 
 /**
  * 从历史会话分叉出新会话（整会话复制）：调用 thread/fork 复制源线程为新线程，
@@ -600,8 +615,10 @@ export async function forkThread(threadId: string) {
   }
 }
 
-
-export async function respondInteraction(interaction: PendingInteraction, result: unknown) {
+export async function respondInteraction(
+  interaction: PendingInteraction,
+  result: unknown,
+) {
   try {
     await invoke("interaction_respond", {
       requestId: interaction.requestId,
@@ -610,9 +627,13 @@ export async function respondInteraction(interaction: PendingInteraction, result
   } catch (e) {
     setToast(toastError(e));
   } finally {
-    store.interactions = store.interactions.filter((i) => i.requestId !== interaction.requestId);
+    store.interactions = store.interactions.filter(
+      (i) => i.requestId !== interaction.requestId,
+    );
     for (const tab of allSessionTabs()) {
-      if (tab.interactions?.some((i) => i.requestId === interaction.requestId)) {
+      if (
+        tab.interactions?.some((i) => i.requestId === interaction.requestId)
+      ) {
         tab.interactions = tab.interactions.filter(
           (i) => i.requestId !== interaction.requestId,
         );

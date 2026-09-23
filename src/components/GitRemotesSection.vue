@@ -2,15 +2,8 @@
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, setToast, toastError } from "../composables/useCodex";
-import type {
-  GitRemote,
-  GitRemotes,
-} from "../lib/gitChanges";
-import {
-  ICON_DELETE,
-  ICON_PLUS,
-  ICON_SWITCH,
-} from "../lib/icons";
+import type { GitRemote, GitRemotes } from "../lib/gitChanges";
+import { ICON_DELETE, ICON_PLUS, ICON_SWITCH } from "../lib/icons";
 
 const props = defineProps<{
   /** 仓库根目录（git_changes_remotes 系列命令的 workspace 参数） */
@@ -131,10 +124,9 @@ async function removeRemote(remote: GitRemote) {
         <span class="git-remote-main">
           <span class="git-remote-name">
             {{ r.name }}
-            <span
-              v-if="r.name === currentRemote"
-              class="git-remote-badge"
-            >当前</span>
+            <span v-if="r.name === currentRemote" class="git-remote-badge"
+              >当前</span
+            >
           </span>
           <span class="git-remote-url" v-tooltip="r.fetchUrl ?? undefined">
             {{ r.fetchUrl || "（未配置拉取地址）" }}
@@ -152,9 +144,7 @@ async function removeRemote(remote: GitRemote) {
             class="git-remote-switch"
             aria-label="切换远端"
             v-tooltip="
-              r.name === currentRemote
-                ? '当前远端'
-                : '设为当前分支上游'
+              r.name === currentRemote ? '当前远端' : '设为当前分支上游'
             "
             :disabled="remoteBusy || r.name === currentRemote"
             @click="switchRemote(r)"

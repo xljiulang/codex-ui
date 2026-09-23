@@ -141,7 +141,8 @@ export function isUserInput(c: unknown): c is UserInput {
   if (!c || typeof c !== "object") return false;
   const t = (c as { type?: unknown }).type;
   if (t === "text") return typeof (c as TextInput).text === "string";
-  if (t === "localImage") return typeof (c as LocalImageInput).path === "string";
+  if (t === "localImage")
+    return typeof (c as LocalImageInput).path === "string";
   if (t === "mention" || t === "skill") {
     const m = c as MentionInput | SkillInput;
     return typeof m.name === "string" && typeof m.path === "string";
@@ -162,10 +163,7 @@ export type ThemeId = "blue" | "dark" | "light";
 
 /** 权限批准模式：read-only（只读访问）｜ask-for-approval（请求批准）｜help-me-approve（帮我批准）｜full-access（完全访问） */
 export type PermissionId =
-  | "ask-for-approval"
-  | "help-me-approve"
-  | "full-access"
-  | "read-only";
+  "ask-for-approval" | "help-me-approve" | "full-access" | "read-only";
 
 /** 跟进处理方式：adjust（调整方向）｜queue（加入队列） */
 export type FollowupMode = "adjust" | "queue";
@@ -205,7 +203,8 @@ export interface AppSettings {
 }
 
 /** 定时任务执行记录状态 */
-export type TaskRunStatus = "running" | "success" | "failed" | "skipped" | "missed";
+export type TaskRunStatus =
+  "running" | "success" | "failed" | "skipped" | "missed";
 
 /** 定时任务（绑定已有会话，到点在原会话中发送 prompt 开启回合） */
 export interface ScheduledTask {
@@ -244,11 +243,7 @@ export interface WeChatBindingInfo {
   accountId: string | null;
   name?: string | null;
   connection:
-    | "offline"
-    | "starting"
-    | "connected"
-    | "session_expired"
-    | "error";
+    "offline" | "starting" | "connected" | "session_expired" | "error";
 }
 
 /** 会话统一持久化状态（sessions.json 单条记录，key=threadId）的字段，与 Rust SessionState 对齐 */
@@ -393,7 +388,7 @@ export interface McpServerInfo {
   url: string;
   /** 静态 HTTP 请求头（http_headers） */
   headers: McpEnvEntry[];
-/** Bearer 令牌来源环境变量名 */
+  /** Bearer 令牌来源环境变量名 */
   bearer_token_env_var: string;
   /** 工具暴露面排除清单（omit_tools_from），直接暴露面：direct/deferred/code_mode */
   omit_tools_from?: string[];
@@ -401,11 +396,7 @@ export interface McpServerInfo {
 
 /** mcpServerStatus/list 返回的认证状态（McpAuthStatus） */
 export type McpAuthStatus =
-  | "unknown"
-  | "unsupported"
-  | "notLoggedIn"
-  | "bearerToken"
-  | "oAuth";
+  "unknown" | "unsupported" | "notLoggedIn" | "bearerToken" | "oAuth";
 
 /** MCP 服务器元数据（协议 serverInfo 归一化） */
 export interface McpServerInfoDetail {

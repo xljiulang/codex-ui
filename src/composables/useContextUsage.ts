@@ -1,7 +1,12 @@
 import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTokens } from "../lib/format";
-import { activeSessionTab, setToast, toastError, type SessionTab } from "./useCodex";
+import {
+  activeSessionTab,
+  setToast,
+  toastError,
+  type SessionTab,
+} from "./useCodex";
 
 /** 上下文窗口使用情况：window 未知时不显示 */
 export function useContextUsage(tab?: SessionTab) {

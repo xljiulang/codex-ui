@@ -52,12 +52,14 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, pickAndOpenNewSession: vi.fn() };
 });
 
 vi.mock("../../composables/useSessionFs", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useSessionFs")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useSessionFs")>();
   return { ...mod, openPathInApp: vi.fn() };
 });
 
@@ -143,7 +145,10 @@ async function viewOf(
   );
 }
 
-async function waitForEl(wrapper: Awaited<ReturnType<typeof mount>>, selector: string) {
+async function waitForEl(
+  wrapper: Awaited<ReturnType<typeof mount>>,
+  selector: string,
+) {
   await vi.waitFor(
     () => {
       expect(wrapper.find(selector).exists()).toBe(true);
@@ -169,42 +174,44 @@ describe("EditorPane 左侧多标签编辑区", () => {
     __resetSessionTabsForTest();
     __resetGitChangesForTest();
     // 会话标签 fixture：多会话标签下 EditorPane 的会话标签来自 tabs
-    tabs.push(reactive({
-      id: "sess-1",
-      kind: "session",
-      title: "新建会话",
-      icon: "session",
-      threadId: "t1",
-      name: "",
-      nameIsFirstMessage: false,
-      permissionMode: "ask-for-approval",
-      collaborationMode: "default",
-      model: null,
-      effort: null,
-      plugins: { plugins: [], loaded: false },
-      skills: { skills: [], loaded: false },
-      creatingSession: false,
-      draftJson: JSON.stringify({ type: "doc", content: [] }),
-      draftAttachments: [],
-      draftRefs: {},
-      origin: "history",
-      workspace: null,
-      resumedThreadId: null,
-      turnActive: false,
-      currentTurnId: null,
-      turnInterrupted: false,
-      goalText: null,
-      goalStatus: null,
-      goalArmed: false,
-      threadTokenUsage: null,
-      followupQueue: [],
-      attachments: [],
-      planPrompt: null,
-      plan: null,
-      loading: false,
-      newSessionWorkspace: null,
-      interactions: [],
-    } as SessionTab));
+    tabs.push(
+      reactive({
+        id: "sess-1",
+        kind: "session",
+        title: "新建会话",
+        icon: "session",
+        threadId: "t1",
+        name: "",
+        nameIsFirstMessage: false,
+        permissionMode: "ask-for-approval",
+        collaborationMode: "default",
+        model: null,
+        effort: null,
+        plugins: { plugins: [], loaded: false },
+        skills: { skills: [], loaded: false },
+        creatingSession: false,
+        draftJson: JSON.stringify({ type: "doc", content: [] }),
+        draftAttachments: [],
+        draftRefs: {},
+        origin: "history",
+        workspace: null,
+        resumedThreadId: null,
+        turnActive: false,
+        currentTurnId: null,
+        turnInterrupted: false,
+        goalText: null,
+        goalStatus: null,
+        goalArmed: false,
+        threadTokenUsage: null,
+        followupQueue: [],
+        attachments: [],
+        planPrompt: null,
+        plan: null,
+        loading: false,
+        newSessionWorkspace: null,
+        interactions: [],
+      } as SessionTab),
+    );
     activeTabId.value = "sess-1";
     store.workspace = null;
     store.confirm = null;
@@ -354,9 +361,12 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const wrapper = mountPane();
     await wrapper.find(".editor-tab-add").trigger("click");
     const items = wrapper.findAll(".ctx-menu-item");
-    expect(
-      items.map((i) => i.text().trim()),
-    ).toEqual(["新建会话", "打开文件", "新建终端(cmd)", "新建终端(PowerShell)"]);
+    expect(items.map((i) => i.text().trim())).toEqual([
+      "新建会话",
+      "打开文件",
+      "新建终端(cmd)",
+      "新建终端(PowerShell)",
+    ]);
     wrapper.unmount();
   });
 
@@ -674,7 +684,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const scroller = wrapper.find(".editor-tabs");
     expect(scroller.attributes("role")).toBeUndefined();
     expect(scroller.attributes("aria-label")).toBeUndefined();
-    expect(wrapper.find(".editor-tabs-track").attributes("role")).toBe("tablist");
+    expect(wrapper.find(".editor-tabs-track").attributes("role")).toBe(
+      "tablist",
+    );
     wrapper.unmount();
   });
 
@@ -730,8 +742,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     const bTab = tabs.find((t) => t.title === "b.txt")!;
     const bEl = wrapper
       .findAll(".editor-tab")
-      .find((w) => w.text().includes("b.txt"))!
-      .element as HTMLElement;
+      .find((w) => w.text().includes("b.txt"))!.element as HTMLElement;
     Object.defineProperty(bEl, "offsetLeft", {
       value: 1200,
       configurable: true,
@@ -922,7 +933,12 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await cEl.trigger("contextmenu", { clientX: 100, clientY: 100 });
     expect(
       wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
-    ).toEqual(["关闭所有标签", "关闭其它标签", "关闭左边所有标签", "在资源管理器中打开"]);
+    ).toEqual([
+      "关闭所有标签",
+      "关闭其它标签",
+      "关闭左边所有标签",
+      "在资源管理器中打开",
+    ]);
     wrapper.unmount();
   });
 
@@ -1237,9 +1253,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
     expect(
-      wrapper
-        .findAll(".editor-tab")
-        .some((w) => w.text().includes("构建终端")),
+      wrapper.findAll(".editor-tab").some((w) => w.text().includes("构建终端")),
     ).toBe(true);
     wrapper.unmount();
   });
@@ -1264,9 +1278,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
     expect(
-      wrapper
-        .findAll(".editor-tab")
-        .some((w) => w.text().includes("失焦标题")),
+      wrapper.findAll(".editor-tab").some((w) => w.text().includes("失焦标题")),
     ).toBe(true);
     wrapper.unmount();
   });
@@ -1291,9 +1303,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
     expect(
-      wrapper
-        .findAll(".editor-tab")
-        .some((w) => w.text().includes("cmd")),
+      wrapper.findAll(".editor-tab").some((w) => w.text().includes("cmd")),
     ).toBe(true);
     wrapper.unmount();
   });
@@ -1318,9 +1328,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
 
     expect(wrapper.find(".tab-rename-input").exists()).toBe(false);
     expect(
-      wrapper
-        .findAll(".editor-tab")
-        .some((w) => w.text().includes("cmd")),
+      wrapper.findAll(".editor-tab").some((w) => w.text().includes("cmd")),
     ).toBe(true);
     wrapper.unmount();
   });
@@ -1401,7 +1409,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
   it("激活预览标签：gitRevealTarget 指向该标签的 workspace/path", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       if (cmd === "session_fs_metadata") {
         return Promise.resolve({
@@ -1724,9 +1734,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
   it("打开 diff 标签：展示类型徽标与内联行", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") {
-        return Promise.resolve([
-          { kind: "add", newNo: 1, text: "hello" },
-        ]);
+        return Promise.resolve([{ kind: "add", newNo: 1, text: "hello" }]);
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -1937,9 +1945,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await openTerminalTab(root + "\\src");
     await settle();
     await waitForEl(wrapper, ".terminal-pane");
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    )!;
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal")!;
     t.busy = true;
     await nextTick();
 
@@ -2015,9 +2021,7 @@ describe("EditorPane 左侧多标签编辑区", () => {
     await waitForEl(wrapper, ".terminal-pane");
 
     const termEl = () => wrapper.findAll(".editor-tab")[1];
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    )!;
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal")!;
     t.busy = true;
     await nextTick();
     expect(termEl().find(".editor-tab-run").exists()).toBe(true);
@@ -2154,7 +2158,9 @@ describe("EditorPane 左侧多标签编辑区", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "build_diff_preview") return Promise.resolve([]);
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       if (cmd === "session_fs_icons") return Promise.resolve([]);
       if (cmd === "terminal_spawn") return Promise.resolve({});
@@ -2278,16 +2284,21 @@ describe("EditorPane 左侧多标签编辑区", () => {
     // 顺序：sess-1, sess-2, a.txt → 首个会话只有右边；末个会话左右都有
     const firstChat = wrapper.findAll(".editor-tab")[0];
     await firstChat.trigger("contextmenu", { clientX: 100, clientY: 100 });
-    expect(wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim())).toEqual(
-      ["关闭所有标签", "关闭其它标签", "关闭右边所有标签"],
-    );
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).toEqual(["关闭所有标签", "关闭其它标签", "关闭右边所有标签"]);
     await wrapper.find(".ctx-menu").trigger("click");
 
     const secondChat = wrapper.findAll(".editor-tab")[1];
     await secondChat.trigger("contextmenu", { clientX: 100, clientY: 100 });
-    expect(wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim())).toEqual(
-      ["关闭所有标签", "关闭其它标签", "关闭左边所有标签", "关闭右边所有标签"],
-    );
+    expect(
+      wrapper.findAll(".ctx-menu-item").map((i) => i.text().trim()),
+    ).toEqual([
+      "关闭所有标签",
+      "关闭其它标签",
+      "关闭左边所有标签",
+      "关闭右边所有标签",
+    ]);
     wrapper.unmount();
   });
 });

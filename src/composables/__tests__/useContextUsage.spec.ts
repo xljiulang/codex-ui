@@ -27,11 +27,17 @@ describe("useContextUsage", () => {
   });
 
   it("window 已知时计算百分比并截断到 100", () => {
-    (tabs[0] as SessionTab).threadTokenUsage = { contextUsed: 5000, window: 10000 };
+    (tabs[0] as SessionTab).threadTokenUsage = {
+      contextUsed: 5000,
+      window: 10000,
+    };
     const u = useContextUsage();
     expect(u.ctxUsage.value).toEqual({ pct: 50, used: 5000, window: 10000 });
 
-    (tabs[0] as SessionTab).threadTokenUsage = { contextUsed: 12000, window: 10000 };
+    (tabs[0] as SessionTab).threadTokenUsage = {
+      contextUsed: 12000,
+      window: 10000,
+    };
     expect(u.ctxUsage.value?.pct).toBe(100);
   });
 
@@ -49,9 +55,7 @@ describe("useContextUsage", () => {
       window: 2_000_000,
     };
     const u = useContextUsage();
-    expect(u.ctxTooltip.value).toBe(
-      "上下文已用 150万，共 200万，双击进行压缩",
-    );
+    expect(u.ctxTooltip.value).toBe("上下文已用 150万，共 200万，双击进行压缩");
   });
 
   it("compactNow 发起 thread/compact/start 并提示；无会话不发起", async () => {
@@ -81,7 +85,10 @@ describe("useContextUsage", () => {
   it("传入 tab 时以该 tab 为准，而非活动会话", () => {
     const other = reactive(makeSessionTab("s2", "t2"));
     tabs.push(other);
-    (other as SessionTab).threadTokenUsage = { contextUsed: 2000, window: 4000 };
+    (other as SessionTab).threadTokenUsage = {
+      contextUsed: 2000,
+      window: 4000,
+    };
     // 活动会话为 s1（无 window），传入 s2 时仍应基于 s2 计算
     activeTabId.value = "s1";
     const u = useContextUsage(other);

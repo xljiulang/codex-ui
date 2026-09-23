@@ -2,9 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { setToast, toastError, workspace } from "../composables/useCodex";
 
 export type LinkClassification =
-  | { kind: "web"; url: string }
-  | { kind: "local"; path: string }
-  | null;
+  { kind: "web"; url: string } | { kind: "local"; path: string } | null;
 
 /** 把 Windows 风格路径统一为反斜杠 */
 function toBackslash(p: string): string {

@@ -29,7 +29,9 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => {
     if (h.state.shouldThrow) throw new Error("not in tauri");
     return {
-      onCloseRequested: async (cb: (event: CloseEventLike) => void | Promise<void>) => {
+      onCloseRequested: async (
+        cb: (event: CloseEventLike) => void | Promise<void>,
+      ) => {
         h.state.closeHandler = cb;
         return () => {};
       },
@@ -38,8 +40,12 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: async (name: string, cb: (payload: unknown) => void | Promise<void>) => {
-    if (name === "app-exit-requested") h.state.exitHandler = cb as () => void | Promise<void>;
+  listen: async (
+    name: string,
+    cb: (payload: unknown) => void | Promise<void>,
+  ) => {
+    if (name === "app-exit-requested")
+      h.state.exitHandler = cb as () => void | Promise<void>;
     return () => {};
   },
 }));
@@ -138,15 +144,28 @@ describe("registerCloseGuard 退出守卫", () => {
     const ev = { preventDefault: vi.fn() };
     await h.state.closeHandler!(ev);
     expect(ev.preventDefault).toHaveBeenCalledTimes(1);
-    expect(mockedInvoke).not.toHaveBeenCalledWith("app_exit", expect.anything());
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "app_exit",
+      expect.anything(),
+    );
   });
 
   it("app-exit-requested：中断工作会话、终止工作终端，最后调用 app_exit", async () => {
     tabs.push(
-      sessionTab({ id: "s1", threadId: "t1", currentTurnId: "turn-1", working: true }),
+      sessionTab({
+        id: "s1",
+        threadId: "t1",
+        currentTurnId: "turn-1",
+        working: true,
+      }),
     );
     tabs.push(
-      sessionTab({ id: "s2", threadId: "t2", currentTurnId: "turn-2", working: false }),
+      sessionTab({
+        id: "s2",
+        threadId: "t2",
+        currentTurnId: "turn-2",
+        working: false,
+      }),
     );
     tabs.push(terminalTab("term-1"));
 
@@ -157,7 +176,9 @@ describe("registerCloseGuard 退出守卫", () => {
     expect(mockedInterrupt).toHaveBeenCalledWith("t1", "turn-1");
     // 非工作会话不中断
     expect(mockedInterrupt).not.toHaveBeenCalledWith("t2", expect.anything());
-    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", { id: "term-1" });
+    expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
+      id: "term-1",
+    });
 
     const calls = mockedInvoke.mock.calls;
     expect(calls[calls.length - 1][0]).toBe("app_exit");
@@ -165,7 +186,12 @@ describe("registerCloseGuard 退出守卫", () => {
 
   it("app-exit-requested：中断抛错仍调用 app_exit（finally 兜底）", async () => {
     tabs.push(
-      sessionTab({ id: "s1", threadId: "t1", currentTurnId: "turn-1", working: true }),
+      sessionTab({
+        id: "s1",
+        threadId: "t1",
+        currentTurnId: "turn-1",
+        working: true,
+      }),
     );
     mockedInterrupt.mockRejectedValueOnce(new Error("中断失败"));
 

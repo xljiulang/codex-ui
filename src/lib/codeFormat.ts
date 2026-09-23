@@ -132,17 +132,16 @@ async function loadPrettier(): Promise<{
           html,
           yaml,
           markdown,
-        ] =
-          await Promise.all([
-            import("prettier/standalone"),
-            import("prettier/plugins/babel"),
-            import("prettier/plugins/estree"),
-            import("prettier/plugins/typescript"),
-            import("prettier/plugins/postcss"),
-            import("prettier/plugins/html"),
-            import("prettier/plugins/yaml"),
-            import("prettier/plugins/markdown"),
-          ]);
+        ] = await Promise.all([
+          import("prettier/standalone"),
+          import("prettier/plugins/babel"),
+          import("prettier/plugins/estree"),
+          import("prettier/plugins/typescript"),
+          import("prettier/plugins/postcss"),
+          import("prettier/plugins/html"),
+          import("prettier/plugins/yaml"),
+          import("prettier/plugins/markdown"),
+        ]);
         return {
           format: (text, opts) =>
             format(text, {
@@ -184,11 +183,12 @@ async function formatWithPrettier(
     });
     const eol = text.includes("\r\n") ? "\r\n" : "\n";
     const normalized = eol === "\n" ? out : out.replace(/\n/g, "\r\n");
-    const final = /\n$/.test(text) && !/\n$/.test(normalized)
-      ? `${normalized}\n`
-      : !/\n$/.test(text) && /\n$/.test(normalized)
-        ? normalized.replace(/\n$/, "")
-        : normalized;
+    const final =
+      /\n$/.test(text) && !/\n$/.test(normalized)
+        ? `${normalized}\n`
+        : !/\n$/.test(text) && /\n$/.test(normalized)
+          ? normalized.replace(/\n$/, "")
+          : normalized;
     if (final === text) return { ok: true, unchanged: true };
     return { ok: true, text: final };
   } catch {
@@ -273,7 +273,8 @@ function blockXmlChildren(
       continue;
     }
     if (c.name === "Text") {
-      if (/\S/.test(text.slice(c.from, c.to))) lines.push(text.slice(c.from, c.to));
+      if (/\S/.test(text.slice(c.from, c.to)))
+        lines.push(text.slice(c.from, c.to));
       continue;
     }
     if (c.name === "Element") {
@@ -285,17 +286,21 @@ function blockXmlChildren(
   return lines.map((l) => `${INDENT.repeat(depth)}${l}`).join("\n");
 }
 
-function formatXmlElement(node: SyntaxNode, text: string, depth: number): string {
+function formatXmlElement(
+  node: SyntaxNode,
+  text: string,
+  depth: number,
+): string {
   const openTag = node.getChild("OpenTag") ?? node.getChild("SelfClosingTag");
-  const open = openTag ? text.slice(openTag.from, openTag.to) : text.slice(node.from, node.to);
+  const open = openTag
+    ? text.slice(openTag.from, openTag.to)
+    : text.slice(node.from, node.to);
   const closeTag = node.getChild("CloseTag");
   const elementChildren = node.getChildren("Element");
 
   if (!elementChildren.length) {
     // 空元素/纯文本/混合内容：单行保留原文
-    const inner = node.firstChild
-      ? inlineXmlChildren(node, text, depth)
-      : "";
+    const inner = node.firstChild ? inlineXmlChildren(node, text, depth) : "";
     const close = closeTag ? text.slice(closeTag.from, closeTag.to) : "";
     return `${open}${inner}${close}`;
   }

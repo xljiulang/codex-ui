@@ -11,10 +11,7 @@ import type { ThreadItem } from "../lib/types";
 import { formatChatTime } from "../lib/format";
 import { findCurrentTurnIndex } from "../lib/turns";
 import { getUserMessageSummary } from "../lib/userMessage";
-import {
-  loadPendingImages,
-  waitForRenderQuiet,
-} from "../lib/chatWarmup";
+import { loadPendingImages, waitForRenderQuiet } from "../lib/chatWarmup";
 import { sessionLog } from "../lib/sessionLog";
 
 // 回合跳转动画时长（自绘 rAF 缓动，不使用原生 scrollTo smooth）
@@ -294,8 +291,12 @@ export function useTurnNav(deps: TurnNavDeps) {
       removeMeasuring(el);
     }
     await nextTick();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
     return stable;
   }
 
@@ -529,12 +530,15 @@ export function useTurnNav(deps: TurnNavDeps) {
     addMeasuring(el);
     try {
       await nextTick();
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
       if (seq !== navAnimSeq) return "cancelled";
       const nodes = collectAnchorNodes();
       const containerTop = el.getBoundingClientRect().top;
       anchorTops = nodes.map(
-        (node) => node.getBoundingClientRect().top - containerTop + el.scrollTop,
+        (node) =>
+          node.getBoundingClientRect().top - containerTop + el.scrollTop,
       );
       anchorCount.value = nodes.length;
       const hit = resolveAnchor(nodes, entry);
@@ -652,7 +656,12 @@ export function useTurnNav(deps: TurnNavDeps) {
     node: HTMLElement,
     entry: TurnNavTarget,
     seq: number,
-    info: { landedDrift: number; drift: number; rounds: number; settled: boolean },
+    info: {
+      landedDrift: number;
+      drift: number;
+      rounds: number;
+      settled: boolean;
+    },
   ) {
     if (seq !== navAnimSeq) return;
     syncAnchors();

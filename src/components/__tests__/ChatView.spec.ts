@@ -38,14 +38,12 @@ vi.mock("../../composables/useCodex", () => {
     dismissPlanPrompt: vi.fn(),
     executePlan: vi.fn(),
     exitPlanMode: vi.fn(),
-    respondInteraction: vi.fn(
-      (interaction: { requestId: number }) => {
-        const i = store.interactions.findIndex(
-          (x) => x.requestId === interaction.requestId,
-        );
-        if (i >= 0) store.interactions.splice(i, 1);
-      },
-    ),
+    respondInteraction: vi.fn((interaction: { requestId: number }) => {
+      const i = store.interactions.findIndex(
+        (x) => x.requestId === interaction.requestId,
+      );
+      if (i >= 0) store.interactions.splice(i, 1);
+    }),
   };
 });
 
@@ -112,11 +110,12 @@ describe("ChatView 日期分隔线", () => {
   it("跨天消息之间插入日期分隔线", () => {
     const day1 = new Date(2026, 7, 9, 10, 0).getTime();
     const day2 = new Date(2026, 7, 10, 9, 0).getTime();
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "第一天", startedAtMs: day1 },
       { id: "a2", type: "agentMessage", text: "第二天", startedAtMs: day2 },
-    ] as ThreadItem[]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ] as ThreadItem[];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -132,12 +131,13 @@ describe("ChatView 日期分隔线", () => {
 
   it("同一天不重复插入分隔线，缺少时间戳时不插入", () => {
     const day1 = new Date(2026, 7, 9, 10, 0).getTime();
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "x", startedAtMs: day1 },
       { id: "a2", type: "agentMessage", text: "y", startedAtMs: day1 },
       { id: "a3", type: "agentMessage", text: "无时间戳" },
-    ] as ThreadItem[]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ] as ThreadItem[];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -150,15 +150,16 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("按回合分组渲染：userMessage 起始新回合，历史续接归入伪回合", () => {
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a0", type: "agentMessage", text: "历史" },
       { id: "u1", type: "userMessage", text: "问题1" },
       { id: "r1", type: "reasoning", content: ["思考"] },
       { id: "a1", type: "agentMessage", text: "回答1" },
       { id: "u2", type: "userMessage", text: "问题2" },
       { id: "a2", type: "agentMessage", text: "回答2" },
-    ] as ThreadItem[]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ] as ThreadItem[];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -186,8 +187,9 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("无消息时显示空状态", () => {
-    store.itemsByThread["t1"] = ([]);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = [];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -204,10 +206,11 @@ describe("ChatView 日期分隔线", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     tab.turnActive = true;
     store.activeWorkByThread = { t1: 0 };
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -233,10 +236,11 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("待处理交互内嵌渲染在消息流末尾，回答后移除", async () => {
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -265,7 +269,9 @@ describe("ChatView 日期分隔线", () => {
       at: Date.now(),
     });
     await nextTick();
-    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(true);
+    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(
+      true,
+    );
 
     await wrapper
       .findAll(".interaction-foot .btn")
@@ -286,10 +292,11 @@ describe("ChatView 日期分隔线", () => {
       params: { questions: [] },
       at: Date.now(),
     });
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -313,8 +320,9 @@ describe("ChatView 日期分隔线", () => {
   });
 
   it("无障碍播报区域随回合状态更新", async () => {
-    store.itemsByThread["t1"] = ([]);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = [];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -337,8 +345,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -362,7 +371,7 @@ describe("ChatView 日期分隔线", () => {
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
+    store.itemsByThread["t1"] = arr;
     tab.loading = true;
     const wrapper = mount(ChatView, {
       props: { tab },
@@ -396,8 +405,9 @@ describe("ChatView 日期分隔线", () => {
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -421,8 +431,9 @@ describe("ChatView 日期分隔线", () => {
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
       { id: "a2", type: "agentMessage", text: "y" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -452,7 +463,7 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
+    store.itemsByThread["t1"] = arr;
     const wrapper = mount(ChatView, {
       props: { tab },
       global: {
@@ -494,8 +505,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -529,8 +541,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -561,8 +574,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -591,8 +605,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -621,8 +636,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -659,8 +675,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -693,8 +710,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -728,8 +746,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -759,8 +778,9 @@ describe("ChatView 日期分隔线", () => {
         streaming: true,
       } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -789,8 +809,9 @@ describe("ChatView 日期分隔线", () => {
         streaming: true,
       } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -814,8 +835,9 @@ describe("ChatView 日期分隔线", () => {
     const arr = reactive([
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
     ]);
-    store.itemsByThread["t1"] = (arr);
-    const wrapper = mount(ChatView, { props: { tab },
+    store.itemsByThread["t1"] = arr;
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -844,10 +866,11 @@ describe("ChatView 计划已就绪气泡", () => {
   });
 
   it("planPrompt 设置后消息流末尾渲染计划气泡，解决后移除", async () => {
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
-    const wrapper = mount(ChatView, { props: { tab },
+    ];
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -856,7 +879,9 @@ describe("ChatView 计划已就绪气泡", () => {
         },
       },
     });
-    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(false);
+    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(
+      false,
+    );
 
     tab.planPrompt = {
       threadId: "t1",
@@ -871,14 +896,16 @@ describe("ChatView 计划已就绪气泡", () => {
 
     tab.planPrompt = null;
     await nextTick();
-    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(false);
+    expect(wrapper.find(".chat-scroll .interaction-bubble").exists()).toBe(
+      false,
+    );
     wrapper.unmount();
   });
 
   it("与交互气泡并存时 InlineInteraction 在前、计划气泡在后", async () => {
-    store.itemsByThread["t1"] = ([
+    store.itemsByThread["t1"] = [
       { id: "a1", type: "agentMessage", text: "x" } as ThreadItem,
-    ]);
+    ];
     store.interactions.push({
       requestId: 3,
       method: "item/commandExecution/requestApproval",
@@ -890,7 +917,8 @@ describe("ChatView 计划已就绪气泡", () => {
       turnId: "turn-1",
       planText: "# 修复方案",
     };
-    const wrapper = mount(ChatView, { props: { tab },
+    const wrapper = mount(ChatView, {
+      props: { tab },
       global: {
         stubs: {
           ComposerBar: true,
@@ -1112,9 +1140,7 @@ describe("ChatView 回合定位按钮", () => {
   }
 
   /** 悬停导航按钮（根容器）展开卡片 */
-  async function openNavCard(
-    wrapper: ReturnType<typeof mountChat>,
-  ) {
+  async function openNavCard(wrapper: ReturnType<typeof mountChat>) {
     await wrapper.find(".turn-nav").trigger("mouseenter");
     await nextTick();
   }
@@ -1161,9 +1187,11 @@ describe("ChatView 回合定位按钮", () => {
     expect(wrapper.find(".turn-nav-card").exists()).toBe(true);
     const items = wrapper.findAll(".turn-nav-item");
     expect(items).toHaveLength(3);
-    expect(
-      items.map((x) => x.find(".turn-nav-item-title").text()),
-    ).toEqual(["问题1", "问题2", "问题3"]);
+    expect(items.map((x) => x.find(".turn-nav-item-title").text())).toEqual([
+      "问题1",
+      "问题2",
+      "问题3",
+    ]);
     expect(items[2].classes()).toContain("active");
     wrapper.unmount();
   });
@@ -1187,9 +1215,9 @@ describe("ChatView 回合定位按钮", () => {
     const wrapper = mountChat();
     await warmReady();
     await openNavCard(wrapper);
-    expect(
-      wrapper.findAll(".turn-nav-item-time").map((x) => x.text()),
-    ).toEqual(["09:05", "8月9日 14:05"]);
+    expect(wrapper.findAll(".turn-nav-item-time").map((x) => x.text())).toEqual(
+      ["09:05", "8月9日 14:05"],
+    );
     wrapper.unmount();
   });
 
@@ -1345,7 +1373,9 @@ describe("ChatView 回合定位按钮", () => {
 
     await openNavCard(wrapper);
     document.body.dispatchEvent(
-      new MouseEvent("pointerdown", { bubbles: true }) as unknown as PointerEvent,
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+      }) as unknown as PointerEvent,
     );
     await nextTick();
     expect(wrapper.find(".turn-nav-card").exists()).toBe(false);
@@ -1435,17 +1465,13 @@ describe("ChatView 回合定位按钮", () => {
       {
         id: "u2",
         type: "userMessage",
-        content: [
-          { type: "text", text: "只看图", text_elements: [] },
-        ],
+        content: [{ type: "text", text: "只看图", text_elements: [] }],
       } as ThreadItem,
     ]);
     const wrapper = mountChat();
     await warmReady();
     await openNavCard(wrapper);
-    const texts = wrapper
-      .findAll(".turn-nav-item-title")
-      .map((x) => x.text());
+    const texts = wrapper.findAll(".turn-nav-item-title").map((x) => x.text());
     expect(texts[0]).toBe("[图片]");
     expect(texts[1]).toBe("只看图");
     wrapper.unmount();
@@ -1729,7 +1755,10 @@ describe("ChatView 回合定位按钮", () => {
       if (on && !inMeasuring) cycles++;
       inMeasuring = on;
     });
-    observer.observe(scroller, { attributes: true, attributeFilter: ["class"] });
+    observer.observe(scroller, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
 
     // 持续 DOM 变更：8s 上限前无法进入 120ms 安静期 → 本次预热判为「未稳定」
     for (let i = 0; i < 85; i++) {

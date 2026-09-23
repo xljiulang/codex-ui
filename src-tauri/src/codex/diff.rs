@@ -353,10 +353,8 @@ const MAX_DIFF_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 /// 走 `spawn_blocking` + 60s 超时，与 `session_fs` / `git_changes_*` 同一约定。
 #[tauri::command]
 pub async fn build_diff_preview(params: DiffPreviewParams) -> Result<Vec<DiffRow>, String> {
-    match crate::codex::util::spawn_blocking_timeout(60, move || {
-        build_diff_preview_impl(params)
-    })
-    .await
+    match crate::codex::util::spawn_blocking_timeout(60, move || build_diff_preview_impl(params))
+        .await
     {
         Ok(result) => result,
         Err(crate::codex::util::BlockingError::Timeout(secs)) => {
@@ -373,16 +371,14 @@ fn build_diff_preview_impl(params: DiffPreviewParams) -> Result<Vec<DiffRow>, St
     let new_content = if params.kind == "delete" {
         String::new()
     } else {
-        let meta = std::fs::metadata(&abs)
-            .map_err(|e| format!("无法读取文件 {}: {}", abs, e))?;
+        let meta = std::fs::metadata(&abs).map_err(|e| format!("无法读取文件 {}: {}", abs, e))?;
         if meta.len() > MAX_DIFF_PREVIEW_BYTES {
             return Err(format!(
                 "文件过大（{}），不支持逐行预览",
                 format_bytes(meta.len())
             ));
         }
-        std::fs::read_to_string(&abs)
-            .map_err(|e| format!("无法读取文件 {}: {}", abs, e))?
+        std::fs::read_to_string(&abs).map_err(|e| format!("无法读取文件 {}: {}", abs, e))?
     };
     let old_content = apply_reverse_unified_diff(&new_content, &params.diff)?;
     build_inline_rows(&old_content, &new_content, &params.diff)
@@ -488,7 +484,14 @@ mod tests {
         assert!(matches!(&rows[4], DiffRow::Del { old_no: 5, .. }));
         assert!(matches!(&rows[5], DiffRow::Sep));
         assert!(matches!(&rows[6], DiffRow::Add { new_no: 5, .. }));
-        assert!(matches!(&rows[11], DiffRow::Ctx { old_no: 10, new_no: 10, .. }));
+        assert!(matches!(
+            &rows[11],
+            DiffRow::Ctx {
+                old_no: 10,
+                new_no: 10,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -506,19 +509,35 @@ mod tests {
         let old_lines = vec!["line1", "line2", "line3", "line5"];
         let new_lines = vec!["line1", "X", "line3", "Y", "line5"];
         let diff = "@@ -1,4 +1,5 @@\n line1\n-line2\n+X\n line3\n+Y\n line5";
-        let rows = build_inline_rows(
-            &old_lines.join("\n"),
-            &new_lines.join("\n"),
-            diff,
-        )
-        .unwrap();
-        assert!(matches!(&rows[0], DiffRow::Ctx { old_no: 1, new_no: 1, .. }));
+        let rows = build_inline_rows(&old_lines.join("\n"), &new_lines.join("\n"), diff).unwrap();
+        assert!(matches!(
+            &rows[0],
+            DiffRow::Ctx {
+                old_no: 1,
+                new_no: 1,
+                ..
+            }
+        ));
         assert!(matches!(&rows[1], DiffRow::Del { old_no: 2, .. }));
         assert!(matches!(&rows[2], DiffRow::Sep));
         assert!(matches!(&rows[3], DiffRow::Add { new_no: 2, .. }));
-        assert!(matches!(&rows[4], DiffRow::Ctx { old_no: 3, new_no: 3, .. }));
+        assert!(matches!(
+            &rows[4],
+            DiffRow::Ctx {
+                old_no: 3,
+                new_no: 3,
+                ..
+            }
+        ));
         assert!(matches!(&rows[5], DiffRow::Add { new_no: 4, .. }));
-        assert!(matches!(&rows[6], DiffRow::Ctx { old_no: 4, new_no: 5, .. }));
+        assert!(matches!(
+            &rows[6],
+            DiffRow::Ctx {
+                old_no: 4,
+                new_no: 5,
+                ..
+            }
+        ));
         // 新旧两侧行号必须各自严格单调递增
         let mut last_old = 0u32;
         let mut last_new = 0u32;
@@ -547,13 +566,34 @@ mod tests {
     fn commit_diff_rows_multi_change_group_keeps_monotonic_numbers() {
         let diff = "@@ -1,4 +1,5 @@\n line1\n-line2\n+X\n line3\n+Y\n line5";
         let rows = build_commit_diff_rows(diff).unwrap();
-        assert!(matches!(&rows[0], DiffRow::Ctx { old_no: 1, new_no: 1, .. }));
+        assert!(matches!(
+            &rows[0],
+            DiffRow::Ctx {
+                old_no: 1,
+                new_no: 1,
+                ..
+            }
+        ));
         assert!(matches!(&rows[1], DiffRow::Del { old_no: 2, .. }));
         assert!(matches!(&rows[2], DiffRow::Sep));
         assert!(matches!(&rows[3], DiffRow::Add { new_no: 2, .. }));
-        assert!(matches!(&rows[4], DiffRow::Ctx { old_no: 3, new_no: 3, .. }));
+        assert!(matches!(
+            &rows[4],
+            DiffRow::Ctx {
+                old_no: 3,
+                new_no: 3,
+                ..
+            }
+        ));
         assert!(matches!(&rows[5], DiffRow::Add { new_no: 4, .. }));
-        assert!(matches!(&rows[6], DiffRow::Ctx { old_no: 4, new_no: 5, .. }));
+        assert!(matches!(
+            &rows[6],
+            DiffRow::Ctx {
+                old_no: 4,
+                new_no: 5,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -573,7 +613,10 @@ mod tests {
     #[test]
     fn resolve_path_rules() {
         // 绝对盘符路径原样返回（反斜杠）
-        assert_eq!(resolve_abs_path("C:/a/b.txt", "D:\\root").unwrap(), "C:\\a\\b.txt");
+        assert_eq!(
+            resolve_abs_path("C:/a/b.txt", "D:\\root").unwrap(),
+            "C:\\a\\b.txt"
+        );
         // UNC 路径原样返回
         assert_eq!(
             resolve_abs_path(r"\\srv\share\f.txt", "D:\\root").unwrap(),
@@ -598,8 +641,7 @@ mod tests {
         let mut new_lines = old_lines.clone();
         new_lines[5000] = "changed".into();
         let diff = "@@ -5001,1 +5001,1 @@\n-line5001\n+changed";
-        let rows =
-            build_inline_rows(&old_lines.join("\n"), &new_lines.join("\n"), diff).unwrap();
+        let rows = build_inline_rows(&old_lines.join("\n"), &new_lines.join("\n"), diff).unwrap();
         assert_eq!(rows.len(), 10_002);
         assert!(matches!(&rows[5000], DiffRow::Del { .. }));
         assert!(matches!(&rows[5002], DiffRow::Add { .. }));
@@ -685,7 +727,14 @@ index 111..222 100644\n\
         assert!(matches!(&rows[1], DiffRow::Del { old_no: 2, .. }));
         assert!(matches!(&rows[2], DiffRow::Sep));
         assert!(matches!(&rows[3], DiffRow::Add { new_no: 2, .. }));
-        assert!(matches!(&rows[4], DiffRow::Ctx { old_no: 3, new_no: 3, .. }));
+        assert!(matches!(
+            &rows[4],
+            DiffRow::Ctx {
+                old_no: 3,
+                new_no: 3,
+                ..
+            }
+        ));
         assert!(matches!(&rows[5], DiffRow::Del { old_no: 10, .. }));
         assert!(matches!(&rows[6], DiffRow::Sep));
         assert!(matches!(&rows[7], DiffRow::Add { new_no: 10, .. }));
@@ -700,5 +749,4 @@ rename to new.txt\n";
         assert!(build_commit_diff_rows(rename_diff).unwrap().is_empty());
         assert!(build_commit_diff_rows("").unwrap().is_empty());
     }
-
 }

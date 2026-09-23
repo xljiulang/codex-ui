@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import ContextMenu from "./ContextMenu.vue";
 import ModalDialog from "./ModalDialog.vue";
 import GitSectionHead from "./GitSectionHead.vue";
@@ -45,7 +53,13 @@ import {
   type GitFileNode,
   type GitTreeNode,
 } from "../lib/gitTree";
-import { ICON_EDIT, ICON_GIT, ICON_HISTORY, ICON_PLUS, ICON_STAGE } from "../lib/icons";
+import {
+  ICON_EDIT,
+  ICON_GIT,
+  ICON_HISTORY,
+  ICON_PLUS,
+  ICON_STAGE,
+} from "../lib/icons";
 
 const props = defineProps<{ active: boolean }>();
 
@@ -93,12 +107,8 @@ const {
   onWindowScroll: onMenuWindowScroll,
   onKeydown: onMenuKeydown,
 } = useActionMenu({ width: 190, scrollScope: ".git-view" });
-const {
-  gitActionBusy,
-  openFileCtx,
-  openDirCtx,
-  openSectionCtx,
-} = useGitFileActions({ gitStatus, openCtx, openDiff });
+const { gitActionBusy, openFileCtx, openDirCtx, openSectionCtx } =
+  useGitFileActions({ gitStatus, openCtx, openDiff });
 
 /** 手动折叠的目录集合；未记录 = 默认展开，折叠状态跨刷新保留 */
 const collapsedDirs = reactive(new Set<string>());
@@ -133,7 +143,10 @@ const stagedCount = computed(() => stagedFiles.value.length);
 const changeCount = computed(() => gitStatus.value?.files.length ?? 0);
 
 /** 归一化目标为相对仓库根路径；仓库不匹配返回 null */
-function normGitRel(target: { workspace: string; path: string }): string | null {
+function normGitRel(target: {
+  workspace: string;
+  path: string;
+}): string | null {
   const root = repoWorkspace.value;
   if (!root) return null;
   // 工作区比较走全局共享方法（正/反斜杠、大小写等价）；目标路径可能是相对仓库根的
@@ -196,20 +209,14 @@ function gitFileIcon(file: GitFile): string | undefined {
 }
 
 // 变更列表可见行变化时懒加载缺失的文件图标（与资源面板同管线）
-watch(
-  [worktreeRows, stagedRows, repoWorkspace],
-  () => {
-    const root = repoWorkspace.value;
-    if (!root) return;
-    const files = [
-      ...worktreeRows.value,
-      ...stagedRows.value,
-    ]
-      .filter((r): r is GitFileNode => r.kind === "file")
-      .map((r) => gitFileEntry(r.file));
-    if (files.length) void ensureEntryIcons(files, root);
-  },
-);
+watch([worktreeRows, stagedRows, repoWorkspace], () => {
+  const root = repoWorkspace.value;
+  if (!root) return;
+  const files = [...worktreeRows.value, ...stagedRows.value]
+    .filter((r): r is GitFileNode => r.kind === "file")
+    .map((r) => gitFileEntry(r.file));
+  if (files.length) void ensureEntryIcons(files, root);
+});
 
 function startInit() {
   confirmInit.value = true;
@@ -315,8 +322,9 @@ function toggleDirRow(node: GitDirNode) {
     <div v-else-if="gitState === 'not_repo'" class="git-empty">
       <p class="git-empty-title">当前目录不是 Git 仓库</p>
       <p class="git-empty-desc">
-        点击下方按钮可将当前工作目录初始化为 Git 仓库（仅初始化，不会自动提交，并创建默认
-        .gitignore 与 .gitattributes，已存在则跳过）。
+        点击下方按钮可将当前工作目录初始化为 Git
+        仓库（仅初始化，不会自动提交，并创建默认 .gitignore 与
+        .gitattributes，已存在则跳过）。
       </p>
       <button
         class="btn primary git-init-btn"
@@ -333,7 +341,9 @@ function toggleDirRow(node: GitDirNode) {
     <div v-else-if="gitState === 'error'" class="git-empty">
       <p class="git-empty-title">无法获取 Git 状态</p>
       <p class="git-empty-desc">{{ gitErrorMsg }}</p>
-      <button class="btn git-init-btn" @click="refreshGitChanges()">重试</button>
+      <button class="btn git-init-btn" @click="refreshGitChanges()">
+        重试
+      </button>
     </div>
 
     <template v-else-if="gitState === 'ok' && gitStatus">
@@ -349,9 +359,7 @@ function toggleDirRow(node: GitDirNode) {
           </svg>
           <span class="git-branch-name-text">{{ branchLabel }}</span>
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"
-            />
+            <path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z" />
           </svg>
         </button>
         <div class="git-pull-push">
@@ -370,21 +378,19 @@ function toggleDirRow(node: GitDirNode) {
               !gitStatus?.hasRemote
                 ? '未配置远端，无法拉取'
                 : !gitAvailable
-                ? '未检测到 git，无法拉取'
-                : branchLabel === 'HEAD'
-                  ? '游离 HEAD 无法拉取'
-                  : pullBusy
-                    ? '拉取中…'
-                    : pushBusy
-                      ? '推送中…'
-                      : '拉取'
+                  ? '未检测到 git，无法拉取'
+                  : branchLabel === 'HEAD'
+                    ? '游离 HEAD 无法拉取'
+                    : pullBusy
+                      ? '拉取中…'
+                      : pushBusy
+                        ? '推送中…'
+                        : '拉取'
             "
             @click="doPull()"
           >
             <svg v-if="!pullBusy" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"
-              />
+              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
             </svg>
             <span v-else class="git-pull-text">拉取中…</span>
           </button>
@@ -404,14 +410,14 @@ function toggleDirRow(node: GitDirNode) {
               !gitStatus?.hasRemote
                 ? '未配置远端，无法推送'
                 : !gitAvailable
-                ? '未检测到 git，无法推送'
-                : branchLabel === 'HEAD'
-                  ? '游离 HEAD 无法推送'
-                  : pushBusy
-                    ? '推送中…'
-                    : pullBusy
-                      ? '拉取中…'
-                      : '推送'
+                  ? '未检测到 git，无法推送'
+                  : branchLabel === 'HEAD'
+                    ? '游离 HEAD 无法推送'
+                    : pushBusy
+                      ? '推送中…'
+                      : pullBusy
+                        ? '拉取中…'
+                        : '推送'
             "
             @click="doPush()"
           >
@@ -432,7 +438,10 @@ function toggleDirRow(node: GitDirNode) {
         />
       </div>
 
-      <div class="git-section" :class="{ collapsed: isSectionCollapsed('changes') }">
+      <div
+        class="git-section"
+        :class="{ collapsed: isSectionCollapsed('changes') }"
+      >
         <GitSectionHead
           label="更改"
           :icon="ICON_EDIT"
@@ -457,7 +466,10 @@ function toggleDirRow(node: GitDirNode) {
         </div>
       </div>
 
-      <div class="git-section" :class="{ collapsed: isSectionCollapsed('staged') }">
+      <div
+        class="git-section"
+        :class="{ collapsed: isSectionCollapsed('staged') }"
+      >
         <GitSectionHead
           label="暂存更改"
           :icon="ICON_STAGE"
@@ -487,7 +499,10 @@ function toggleDirRow(node: GitDirNode) {
         </div>
       </div>
 
-      <div class="git-section" :class="{ collapsed: isSectionCollapsed('history') }">
+      <div
+        class="git-section"
+        :class="{ collapsed: isSectionCollapsed('history') }"
+      >
         <GitSectionHead
           label="提交历史"
           :icon="ICON_HISTORY"
@@ -495,7 +510,10 @@ function toggleDirRow(node: GitDirNode) {
           @toggle="toggleSection('history')"
         />
         <div v-if="!isSectionCollapsed('history')" class="git-section-body">
-          <GitHistoryList :workspace="repoWorkspace" :status-signal="gitStatus" />
+          <GitHistoryList
+            :workspace="repoWorkspace"
+            :status-signal="gitStatus"
+          />
         </div>
       </div>
     </template>

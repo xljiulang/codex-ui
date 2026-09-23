@@ -114,7 +114,10 @@ function scrollTabs(dir: -1 | 1) {
 }
 
 watch(
-  [() => props.activeTabId, () => props.sessionTabs.length + props.editorTabs.length],
+  [
+    () => props.activeTabId,
+    () => props.sessionTabs.length + props.editorTabs.length,
+  ],
   () => {
     void nextTick(() => {
       scrollActiveTabIntoView();
@@ -178,8 +181,7 @@ watch(
         tab.kind === TabKind.Settings
       )
         continue;
-      const t =
-        tab as FileEditorTab | DiffEditorTab | PreviewEditorTab;
+      const t = tab as FileEditorTab | DiffEditorTab | PreviewEditorTab;
       const list = byRoot.get(t.workspace) ?? [];
       list.push(tabToEntry(t));
       byRoot.set(t.workspace, list);
@@ -193,7 +195,9 @@ watch(
 
 /** 会话标签待处理交互计数：绑定线程读标签记录，新对话（无线程）回退全局 */
 function sessionTabPending(tab: SessionTab): number {
-  return tab.threadId ? (tab.interactions?.length ?? 0) : store.interactions.length;
+  return tab.threadId
+    ? (tab.interactions?.length ?? 0)
+    : store.interactions.length;
 }
 
 /**

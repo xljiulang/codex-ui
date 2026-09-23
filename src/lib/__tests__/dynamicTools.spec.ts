@@ -55,7 +55,9 @@ describe("codexui 动态工具定义", () => {
     }
     // 无参工具保持空 properties；add_scheduled_task 带必填参数 schema
     const tool = (name: string) =>
-      CODEXUI_DYNAMIC_TOOLS.flatMap((ns) => ns.tools).find((t) => t.name === name)!;
+      CODEXUI_DYNAMIC_TOOLS.flatMap((ns) => ns.tools).find(
+        (t) => t.name === name,
+      )!;
     expect(tool(CODEXUI_TOOL_GET_USAGE).inputSchema).toEqual({
       type: "object",
       properties: {},

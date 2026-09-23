@@ -88,7 +88,11 @@ describe("fileTypeIcons 内置代码文件图标", () => {
   });
 
   it("覆盖清单：扩展名均带点小写，特殊文件名小写且互不重叠", () => {
-    expect(BUILTIN_ICON_EXTS.every((e) => e.startsWith(".") && e === e.toLowerCase())).toBe(true);
+    expect(
+      BUILTIN_ICON_EXTS.every(
+        (e) => e.startsWith(".") && e === e.toLowerCase(),
+      ),
+    ).toBe(true);
     expect(BUILTIN_ICON_NAMES.every((n) => n === n.toLowerCase())).toBe(true);
     expect(BUILTIN_ICON_NAMES.some((n) => n.includes("."))).toBe(true);
   });

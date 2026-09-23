@@ -7,7 +7,14 @@ export interface AppSelectOption {
 </script>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useAttrs } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  useAttrs,
+} from "vue";
 import { clampMenuPos } from "../lib/ctxMenu";
 import { ICON_SELECT_CHEVRON } from "../lib/icons";
 
@@ -62,7 +69,10 @@ function syncMenuPos() {
   const spaceBelow = window.innerHeight - rect.bottom - 8;
   const spaceAbove = rect.top - 8;
   const below = spaceBelow >= Math.min(estH, 200) || spaceBelow >= spaceAbove;
-  const menuH = Math.max(Math.min(estH, Math.max(below ? spaceBelow : spaceAbove, 120)), 120);
+  const menuH = Math.max(
+    Math.min(estH, Math.max(below ? spaceBelow : spaceAbove, 120)),
+    120,
+  );
   menuMaxHeight.value = menuH;
   const top = below ? rect.bottom + 4 : rect.top - 4 - menuH;
   const pos = clampMenuPos(rect.left, top, Math.max(rect.width, 180), menuH);
@@ -72,7 +82,9 @@ function syncMenuPos() {
 
 function openMenu() {
   if (props.disabled || open.value) return;
-  highlighted.value = props.options.findIndex((o) => o.value === props.modelValue);
+  highlighted.value = props.options.findIndex(
+    (o) => o.value === props.modelValue,
+  );
   syncMenuPos();
   open.value = true;
   // 展开后把选中项滚进可视区
@@ -111,7 +123,12 @@ function onTriggerKeydown(e: KeyboardEvent) {
     e.preventDefault();
     const n = props.options.length;
     if (!n) return;
-    const from = highlighted.value < 0 ? (e.key === "ArrowDown" ? -1 : 0) : highlighted.value;
+    const from =
+      highlighted.value < 0
+        ? e.key === "ArrowDown"
+          ? -1
+          : 0
+        : highlighted.value;
     highlighted.value = (from + (e.key === "ArrowDown" ? 1 : -1) + n) % n;
   } else if (e.key === "Enter" || e.key === " ") {
     e.preventDefault();
@@ -200,7 +217,10 @@ onBeforeUnmount(() => {
         type="button"
         role="option"
         class="app-select-option"
-        :class="{ selected: opt.value === modelValue, highlighted: i === highlighted }"
+        :class="{
+          selected: opt.value === modelValue,
+          highlighted: i === highlighted,
+        }"
         :aria-selected="opt.value === modelValue ? 'true' : 'false'"
         @click="choose(opt)"
         @mousemove="highlighted = i"

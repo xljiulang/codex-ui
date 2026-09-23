@@ -36,9 +36,7 @@ const TEXT_INPUT_TYPES = new Set([
 ]);
 
 function isTextInput(el: HTMLElement): el is HTMLInputElement {
-  return (
-    el instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(el.type)
-  );
+  return el instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(el.type);
 }
 
 function selectionRange(el: HTMLInputElement | HTMLTextAreaElement): {
@@ -62,7 +60,10 @@ function selectedText(el: HTMLInputElement | HTMLTextAreaElement): string {
 }
 
 /** 在光标处插入文本并触发 input（驱动 v-model），随后把光标移到插入后位置 */
-function insertAtCursor(el: HTMLInputElement | HTMLTextAreaElement, text: string) {
+function insertAtCursor(
+  el: HTMLInputElement | HTMLTextAreaElement,
+  text: string,
+) {
   const { start, end } = selectionRange(el);
   const next = el.value.slice(0, start) + text + el.value.slice(end);
   el.value = next;
@@ -141,7 +142,12 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
       e.preventDefault();
       const el = target as HTMLInputElement | HTMLTextAreaElement;
       const items = buildEditMenuItems(el);
-      const pos = clampMenuPos(e.clientX, e.clientY, 180, items.length * 30 + 12);
+      const pos = clampMenuPos(
+        e.clientX,
+        e.clientY,
+        180,
+        items.length * 30 + 12,
+      );
       ctxMenu.value = { x: pos.x, y: pos.y, items };
       ctxAnchor = target;
       return;
@@ -196,9 +202,8 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
             void copyText(selection);
           } else {
             // 无选区时复制整行内容（diff 行为 .diff-text）
-            const line = (target.closest?.(".diff-text") ?? target) as
-              | HTMLElement
-              | null;
+            const line = (target.closest?.(".diff-text") ??
+              target) as HTMLElement | null;
             void copyText(line?.innerText ?? target.textContent ?? "");
           }
         },
@@ -219,12 +224,7 @@ export function useContextMenu(enabled = true, alwaysCopy = false) {
       ctxAnchor = null;
       return;
     }
-    const pos = clampMenuPos(
-      e.clientX,
-      e.clientY,
-      160,
-      items.length * 30 + 12,
-    );
+    const pos = clampMenuPos(e.clientX, e.clientY, 160, items.length * 30 + 12);
     ctxMenu.value = { x: pos.x, y: pos.y, items };
     ctxAnchor = target;
   }

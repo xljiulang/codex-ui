@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { saveSettings, setToast, store, toastError } from "../../composables/useCodex";
+import {
+  saveSettings,
+  setToast,
+  store,
+  toastError,
+} from "../../composables/useCodex";
 import { THEMES, previewTheme, type ThemeId } from "../../composables/useTheme";
 import { ICON_CHECK } from "../../lib/icons";
 import type { AppSettings } from "../../lib/types";
@@ -8,7 +13,9 @@ import type { AppSettings } from "../../lib/types";
 defineProps<{ active: boolean }>();
 
 const errorNotify = ref(store.settings.error_notify_enabled ?? true);
-const interactionNotify = ref(store.settings.interaction_notify_enabled ?? true);
+const interactionNotify = ref(
+  store.settings.interaction_notify_enabled ?? true,
+);
 const enterToSend = ref(store.settings.enter_to_send);
 const theme = ref<ThemeId>(store.settings.theme as ThemeId);
 const glass = ref(store.settings.glass_effect);
@@ -36,9 +43,7 @@ function selectTheme(id: ThemeId) {
     class="settings-section settings-section-personalization"
   >
     <h2 class="settings-section-title">个性化</h2>
-    <p class="settings-section-desc">
-      主题、通知与消息发送等个性化偏好
-    </p>
+    <p class="settings-section-desc">主题、通知与消息发送等个性化偏好</p>
     <div class="settings-card">
       <div class="settings">
         <div class="setting-row switch-row">
@@ -65,7 +70,9 @@ function selectTheme(id: ThemeId) {
               id="interaction-notify"
               v-model="interactionNotify"
               type="checkbox"
-              @change="persist({ interaction_notify_enabled: interactionNotify })"
+              @change="
+                persist({ interaction_notify_enabled: interactionNotify })
+              "
             />
             <span class="switch-track"></span>
           </label>
@@ -73,7 +80,8 @@ function selectTheme(id: ThemeId) {
 
         <div class="setting-row switch-row">
           <label class="switch-text" for="enter">
-            Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter 换行，Ctrl+Enter 发送）
+            Enter 快捷发送（开启时 Ctrl+Enter 换行；关闭后 Enter
+            换行，Ctrl+Enter 发送）
           </label>
           <label class="switch">
             <input
@@ -112,7 +120,11 @@ function selectTheme(id: ThemeId) {
               <span class="theme-swatch"></span>
               <span class="theme-name">{{ t.name }}</span>
               <span class="theme-desc">{{ t.desc }}</span>
-              <span v-if="theme === t.id" class="theme-check" aria-hidden="true">
+              <span
+                v-if="theme === t.id"
+                class="theme-check"
+                aria-hidden="true"
+              >
                 <svg viewBox="0 0 24 24">
                   <path :d="ICON_CHECK" />
                 </svg>
@@ -140,7 +152,9 @@ function selectTheme(id: ThemeId) {
   border: 1px solid var(--border);
   background: var(--bg-input);
   box-shadow: var(--shadow-sm), var(--inset-shadow);
-  transition: border-color var(--ease), box-shadow var(--ease),
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease),
     transform var(--ease);
 }
 .theme-card:hover {

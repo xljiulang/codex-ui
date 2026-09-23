@@ -31,7 +31,10 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
 </script>
 
 <template>
-  <section v-show="active" class="settings-section settings-section-dynamic-tools">
+  <section
+    v-show="active"
+    class="settings-section settings-section-dynamic-tools"
+  >
     <h2 class="settings-section-title">动态工具</h2>
     <p class="settings-section-desc">
       控制 codex-ui 动态工具（codexui）是否随新建会话注入；禁用的工具不再注入
@@ -89,4 +92,3 @@ async function toggleDynamicTool(tool: DynamicToolRow) {
   white-space: nowrap;
 }
 </style>
-

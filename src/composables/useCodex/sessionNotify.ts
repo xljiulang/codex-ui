@@ -10,23 +10,18 @@ import { friendlyServerError } from "../../lib/serverMessages";
 import { findSessionTabByThread } from "./sessionState";
 import { isBackgroundThread, store } from "./store";
 
-
 /** 通知标题里会话名最大字符数（超出截断，避免标题过长被系统省略） */
 const TITLE_SESSION_MAX_CHARS = 40;
 /** 通知正文最大字符数（与后端 notifications::MAX_BODY_CHARS 一致） */
 const BODY_MAX_CHARS = 200;
 
 /** 通知来源（后端日志 `source=` 与节流策略据此区分） */
-export type SessionNotifySource = "error" | "interaction" | "plan" | "completion";
+export type SessionNotifySource =
+  "error" | "interaction" | "plan" | "completion";
 
 /** 需要用户处理的交互类型（决定通知标题） */
 export type InteractionKind =
-  | "approval"
-  | "question"
-  | "elicitation"
-  | "plan"
-  | "other";
-
+  "approval" | "question" | "elicitation" | "plan" | "other";
 
 /** 单行化（换行/制表/连续空白压成单空格）并按字符数截断，超出追加省略号 */
 export function flattenNoticeText(text: string, maxChars: number): string {
@@ -35,7 +30,6 @@ export function flattenNoticeText(text: string, maxChars: number): string {
   if (chars.length <= maxChars) return flat;
   return chars.slice(0, maxChars).join("") + "…";
 }
-
 
 /**
  * 会话显示标题：优先已打开的会话标签（标签名可能来自首条消息），其次历史列表摘要；
@@ -49,7 +43,6 @@ export function sessionTitleForThread(threadId: string): string {
   return (summary?.name || summary?.preview || "").trim();
 }
 
-
 /** 通知标题：能定位到会话时带上会话名，否则只用固定前缀 */
 export function noticeTitle(prefix: string, threadId: string): string {
   const title = sessionTitleForThread(threadId);
@@ -57,25 +50,28 @@ export function noticeTitle(prefix: string, threadId: string): string {
   return `${prefix} · ${flattenNoticeText(title, TITLE_SESSION_MAX_CHARS)}`;
 }
 
-
 /** 错误通知正文：错误对象经友好中文映射后单行截断 */
-export function errorNoticeBody(message: string, codexErrorInfo?: unknown): string {
+export function errorNoticeBody(
+  message: string,
+  codexErrorInfo?: unknown,
+): string {
   const friendly = friendlyServerError({
     error: { message, codexErrorInfo },
   });
   return flattenNoticeText(friendly, BODY_MAX_CHARS);
 }
 
-
 /** 交互通知的固定文案：正文为通用说明，不含命令/问题/表单原文 */
-const INTERACTION_NOTICE: Record<InteractionKind, { prefix: string; body: string }> = {
+const INTERACTION_NOTICE: Record<
+  InteractionKind,
+  { prefix: string; body: string }
+> = {
   approval: { prefix: "需要审批", body: "会话正在等待你批准操作" },
   question: { prefix: "需要输入", body: "会话正在等待你回答问题" },
   elicitation: { prefix: "MCP 表单", body: "MCP 工具正在等待你填写表单" },
   plan: { prefix: "计划已就绪", body: "会话已产出计划，等待你确认是否执行" },
   other: { prefix: "需要确认", body: "会话正在等待你的确认" },
 };
-
 
 /** 协议 method → 交互类型；未列举（含未来新增）的方法归入 other */
 export function interactionKindForMethod(method: string): InteractionKind {
@@ -95,7 +91,6 @@ export function interactionKindForMethod(method: string): InteractionKind {
   }
 }
 
-
 export interface SessionErrorNotice {
   /** 错误正文（原始 message；内部按 codexErrorInfo → 文本规则映射为友好中文） */
   message: string;
@@ -107,7 +102,6 @@ export interface SessionErrorNotice {
   turnId?: string | null;
 }
 
-
 export interface SessionInteractionNotice {
   /** 交互类型（标题按此取固定文案） */
   kind: InteractionKind;
@@ -115,12 +109,10 @@ export interface SessionInteractionNotice {
   threadId?: string | null;
 }
 
-
 export interface SessionCompletedNotice {
   /** 回合归属线程；缺失时不发系统通知（无法定位会话） */
   threadId?: string | null;
 }
-
 
 /**
  * 通知的统一门槛与投递（fire-and-forget）：
@@ -146,14 +138,14 @@ function sendSessionNotice(opts: {
   }).catch(() => {});
 }
 
-
 /**
  * codex 产生的会话错误 → Windows 通知（未聚焦时）。
  * 开关：设置项 `error_notify_enabled`。
  */
 export function notifySessionError(notice: SessionErrorNotice): void {
   const threadId = (notice.threadId ?? "").trim();
-  if (!threadId || isBackgroundThread(threadId) || !notice.message.trim()) return;
+  if (!threadId || isBackgroundThread(threadId) || !notice.message.trim())
+    return;
   const body = errorNoticeBody(notice.message, notice.codexErrorInfo);
   sendSessionNotice({
     enabled: !!store.settings.error_notify_enabled,
@@ -165,13 +157,14 @@ export function notifySessionError(notice: SessionErrorNotice): void {
   });
 }
 
-
 /**
  * 会话等待人工处理（审批 / 提问 / MCP 表单 / 计划就绪）→ Windows 通知（未聚焦时）。
  * 开关：设置项 `interaction_notify_enabled`。每条交互请求都发（后端不做去重），
  * 避免用户切走后漏掉需要立即处理的确认。
  */
-export function notifySessionInteraction(notice: SessionInteractionNotice): void {
+export function notifySessionInteraction(
+  notice: SessionInteractionNotice,
+): void {
   const threadId = (notice.threadId ?? "").trim();
   if (!threadId || isBackgroundThread(threadId)) return;
   const text = INTERACTION_NOTICE[notice.kind] ?? INTERACTION_NOTICE.other;
@@ -183,7 +176,6 @@ export function notifySessionInteraction(notice: SessionInteractionNotice): void
     source: notice.kind === "plan" ? "plan" : "interaction",
   });
 }
-
 
 /**
  * 会话正常完成（`turn/completed` 且 status=completed）→ Windows 通知（未聚焦时）。

@@ -77,7 +77,12 @@ describe("动态工具 add_scheduled_task（直接创建，无前端确认框）
 
   it("busyPolicy 透传给创建命令：显式 defer 则 defer，缺省/未知则 skip", async () => {
     await handleDynamicToolCall(
-      payload({ name: "n", prompt: "p", cron: "0 0 9 * * *", busyPolicy: "defer" }),
+      payload({
+        name: "n",
+        prompt: "p",
+        cron: "0 0 9 * * *",
+        busyPolicy: "defer",
+      }),
     );
     await flushPromises();
     const [, args] = mockedInvoke.mock.calls.find(
@@ -120,7 +125,9 @@ describe("动态工具 add_scheduled_task（直接创建，无前端确认框）
   it("后端校验失败（如 cron 颗粒度过小）应答 failure 并带回错误文案", async () => {
     mockedInvoke.mockImplementation(async (cmd) => {
       if (cmd === "scheduled_task_add")
-        throw new Error("定时颗粒度过小，最小间隔为 1 分钟（建议不低于 5 分钟）");
+        throw new Error(
+          "定时颗粒度过小，最小间隔为 1 分钟（建议不低于 5 分钟）",
+        );
       return undefined;
     });
     await handleDynamicToolCall(

@@ -31,13 +31,19 @@ describe("diffView 渲染预算", () => {
 
   it("canHighlightDiffRows：无语言或行数超上限时不高亮", () => {
     expect(canHighlightDiffRows(false, ctxRows(3))).toBe(false);
-    expect(canHighlightDiffRows(true, ctxRows(DIFF_MAX_HIGHLIGHT_LINES + 1))).toBe(false);
+    expect(
+      canHighlightDiffRows(true, ctxRows(DIFF_MAX_HIGHLIGHT_LINES + 1)),
+    ).toBe(false);
     expect(canHighlightDiffRows(true, ctxRows(3))).toBe(true);
   });
 
   it("canHighlightDiffRows：单行超长（压缩成一行的大 JSON）时整份不高亮", () => {
     const rows: DiffRow[] = [
-      { kind: "del", oldNo: 1, text: "a".repeat(DIFF_MAX_HIGHLIGHT_LINE_CHARS + 1) },
+      {
+        kind: "del",
+        oldNo: 1,
+        text: "a".repeat(DIFF_MAX_HIGHLIGHT_LINE_CHARS + 1),
+      },
       { kind: "sep" },
       { kind: "add", newNo: 1, text: "b" },
     ];
@@ -46,7 +52,10 @@ describe("diffView 渲染预算", () => {
 
   it("canHighlightDiffRows：总字符量超预算时不高亮", () => {
     const perRow = DIFF_MAX_HIGHLIGHT_LINE_CHARS;
-    const rows = ctxRows(Math.ceil(DIFF_MAX_HIGHLIGHT_CHARS / perRow) + 1, "a".repeat(perRow));
+    const rows = ctxRows(
+      Math.ceil(DIFF_MAX_HIGHLIGHT_CHARS / perRow) + 1,
+      "a".repeat(perRow),
+    );
     expect(canHighlightDiffRows(true, rows)).toBe(false);
   });
 });

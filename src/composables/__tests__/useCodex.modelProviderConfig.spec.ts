@@ -1,4 +1,7 @@
-import { loadModelProviderConfig, saveModelProviderConfig } from "../useCodex/modelProviderConfig";
+import {
+  loadModelProviderConfig,
+  saveModelProviderConfig,
+} from "../useCodex/modelProviderConfig";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelProviderInfo } from "../../lib/types";
@@ -68,7 +71,11 @@ describe("useCodex/modelProviderConfig", () => {
             wire_api: "responses",
             custom: 42,
           },
-          other: { name: "Other", base_url: "https://o.example/v1", wire_api: "chat" },
+          other: {
+            name: "Other",
+            base_url: "https://o.example/v1",
+            wire_api: "chat",
+          },
         },
         {
           model_reasoning_summary: "auto",
@@ -184,7 +191,11 @@ describe("useCodex/modelProviderConfig", () => {
             },
             mergeStrategy: "replace",
           },
-          { keyPath: "model_provider", value: "deepseek", mergeStrategy: "replace" },
+          {
+            keyPath: "model_provider",
+            value: "deepseek",
+            mergeStrategy: "replace",
+          },
           { keyPath: "model", value: "gpt-x", mergeStrategy: "replace" },
           {
             keyPath: "model_reasoning_effort",
@@ -249,7 +260,8 @@ describe("useCodex/modelProviderConfig", () => {
     const call = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     )!;
     const edits = (
       call[1] as {
@@ -317,9 +329,7 @@ describe("useCodex/modelProviderConfig", () => {
     await expect(
       saveModelProviderConfig({
         ...base,
-        providers: [
-          provider("a b", { name: "X", base_url: "u" }),
-        ],
+        providers: [provider("a b", { name: "X", base_url: "u" })],
       }),
     ).rejects.toThrow("只能包含字母、数字、下划线与连字符");
     await expect(
@@ -349,12 +359,15 @@ describe("useCodex/modelProviderConfig", () => {
       preferred_auth_method: "",
       forced_login_method: "",
       model_catalog_json: "",
-      providers: [provider("a", { name: "A", base_url: "https://a.example/v1" })],
+      providers: [
+        provider("a", { name: "A", base_url: "https://a.example/v1" }),
+      ],
     });
     const call = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     )!;
     const edits = (
       call[1] as { params: { edits: { keyPath: string; value: unknown }[] } }

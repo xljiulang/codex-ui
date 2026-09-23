@@ -4,9 +4,7 @@ import { reactive } from "vue";
 import PreviewPane from "../PreviewPane.vue";
 import type { PreviewEditorTab } from "../../composables/useEditorTabs";
 
-function makeTab(
-  over: Partial<PreviewEditorTab> = {},
-): PreviewEditorTab {
+function makeTab(over: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
   return {
     kind: "preview",
     icon: "file",
@@ -44,9 +42,9 @@ describe("PreviewPane 预览标签", () => {
   it("图像预览结构：缩放控件并入头部行，图片位于 preview-image-stage 内", () => {
     const w = mount(PreviewPane, { props: { tab: makeTab() } });
     // 缩放控件渲染在头部右侧动作区
-    expect(
-      w.find(".preview-head-actions .preview-zoom-toolbar").exists(),
-    ).toBe(true);
+    expect(w.find(".preview-head-actions .preview-zoom-toolbar").exists()).toBe(
+      true,
+    );
     const stage = w.find(".preview-image-stage");
     expect(stage.exists()).toBe(true);
     expect(stage.find("img").exists()).toBe(true);
@@ -99,9 +97,9 @@ describe("PreviewPane 预览标签", () => {
 
     await btns[2].trigger("click"); // 适应窗口
     expect(w.find(".preview-zoom-percent").text()).toBe("100%");
-    expect(w.find(".preview-image img").attributes("style") ?? "").not.toContain(
-      "250px",
-    );
+    expect(
+      w.find(".preview-image img").attributes("style") ?? "",
+    ).not.toContain("250px");
     expect(w.find(".preview-image img").classes()).not.toContain("zoomed");
   });
 
@@ -156,7 +154,9 @@ describe("PreviewPane 预览标签", () => {
 
   it("PDF 类型委托给 PdfPreviewPane", () => {
     const w = mount(PreviewPane, {
-      props: { tab: makeTab({ previewType: "pdf", pdfData: new Uint8Array([1]) }) },
+      props: {
+        tab: makeTab({ previewType: "pdf", pdfData: new Uint8Array([1]) }),
+      },
       global: {
         stubs: { PdfPreviewPane: { template: '<div class="pdf-stub" />' } },
       },

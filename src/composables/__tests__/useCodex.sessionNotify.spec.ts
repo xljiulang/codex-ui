@@ -30,7 +30,9 @@ const mockedInvoke = vi.mocked(invoke);
 
 /** 取出本次 notify_session_event 调用参数（未调用返回 undefined） */
 function notifyArgs() {
-  const call = mockedInvoke.mock.calls.find(([cmd]) => cmd === "notify_session_event");
+  const call = mockedInvoke.mock.calls.find(
+    ([cmd]) => cmd === "notify_session_event",
+  );
   return call?.[1] as
     | {
         title: string;
@@ -106,7 +108,9 @@ describe("noticeTitle / sessionTitleForThread", () => {
 
   it("会话名超长时截断到 40 字符", () => {
     tabs.push(makeSessionTab("s1", "t1", { name: "标".repeat(60) }));
-    expect(noticeTitle("会话错误", "t1")).toBe(`会话错误 · ${"标".repeat(40)}…`);
+    expect(noticeTitle("会话错误", "t1")).toBe(
+      `会话错误 · ${"标".repeat(40)}…`,
+    );
   });
 });
 
@@ -124,7 +128,9 @@ describe("interactionKindForMethod", () => {
   });
 
   it("提问与 MCP 表单各自归类，未知 method 归入 other", () => {
-    expect(interactionKindForMethod("item/tool/requestUserInput")).toBe("question");
+    expect(interactionKindForMethod("item/tool/requestUserInput")).toBe(
+      "question",
+    );
     expect(interactionKindForMethod("mcpServer/elicitation/request")).toBe(
       "elicitation",
     );
@@ -181,7 +187,9 @@ describe("notifySessionError", () => {
 
   it("invoke 失败不影响调用方（静默）", async () => {
     mockedInvoke.mockImplementation(() => Promise.reject(new Error("no ipc")));
-    expect(() => notifySessionError({ message: "boom", threadId: "t1" })).not.toThrow();
+    expect(() =>
+      notifySessionError({ message: "boom", threadId: "t1" }),
+    ).not.toThrow();
     await Promise.resolve();
   });
 });
@@ -189,7 +197,11 @@ describe("notifySessionError", () => {
 describe("notifySessionInteraction", () => {
   it("审批/提问/MCP 表单：固定标题+通用正文（source=interaction）", () => {
     tabs.push(makeSessionTab("s1", "t1", { name: "修复登录" }));
-    const cases: [Parameters<typeof notifySessionInteraction>[0]["kind"], string, string][] = [
+    const cases: [
+      Parameters<typeof notifySessionInteraction>[0]["kind"],
+      string,
+      string,
+    ][] = [
       ["approval", "需要审批 · 修复登录", "会话正在等待你批准操作"],
       ["question", "需要输入 · 修复登录", "会话正在等待你回答问题"],
       ["elicitation", "MCP 表单 · 修复登录", "MCP 工具正在等待你填写表单"],

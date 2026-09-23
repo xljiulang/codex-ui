@@ -10,10 +10,7 @@ import {
   rootEntry,
   resetTree,
 } from "./state";
-import {
-  ensureRootLoaded,
-  refreshAll,
-} from "./tree";
+import { ensureRootLoaded, refreshAll } from "./tree";
 import { ensureTextFileIcon } from "./icons";
 import { clearSearch, resetSearchState } from "./search";
 import { refreshTabsFromFs } from "../useEditorTabs";
@@ -33,8 +30,7 @@ async function syncWatcher() {
         unlistenFsEvent = await listen("session-fs/changed", (e) => {
           if (active) void refreshAll();
           const payload = e.payload as
-            | { root?: unknown; paths?: unknown }
-            | undefined;
+            { root?: unknown; paths?: unknown } | undefined;
           void refreshTabsFromFs(
             payload &&
               typeof payload.root === "string" &&

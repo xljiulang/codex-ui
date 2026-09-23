@@ -459,7 +459,10 @@ mod tests {
         let (items, errors) = parse_skill_items(&res).unwrap();
         assert!(items.is_empty());
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].path, "C:/apps/codex-ui/.codex/skills/bad/SKILL.md");
+        assert_eq!(
+            errors[0].path,
+            "C:/apps/codex-ui/.codex/skills/bad/SKILL.md"
+        );
         assert_eq!(errors[0].message, "missing field `description`");
     }
 
@@ -480,12 +483,7 @@ mod tests {
     #[test]
     fn keeps_disabled_skills() {
         let items = vec![
-            list_item(
-                "on",
-                "C:/apps/codex-ui/.codex/skills/on/SKILL.md",
-                true,
-                "",
-            ),
+            list_item("on", "C:/apps/codex-ui/.codex/skills/on/SKILL.md", true, ""),
             list_item(
                 "off",
                 "C:/apps/codex-ui/.codex/skills/off/SKILL.md",
@@ -527,10 +525,10 @@ mod tests {
             ),
         ];
         let out = filter_local_skills(&items);
-        assert_eq!(out.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), [
-            "Alpha",
-            "beta"
-        ]);
+        assert_eq!(
+            out.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["Alpha", "beta"]
+        );
     }
 
     #[test]
@@ -645,7 +643,11 @@ mod tests {
         .unwrap();
         let name = install_in(&src.join("skill.md"), &home).unwrap();
         assert_eq!(name, "myskill");
-        assert!(home.join("skills").join("MySkill").join("skill.md").is_file());
+        assert!(home
+            .join("skills")
+            .join("MySkill")
+            .join("skill.md")
+            .is_file());
     }
 
     #[test]

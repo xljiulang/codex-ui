@@ -8,9 +8,8 @@ const mockToastError = vi.hoisted(() => (e: unknown) => String(e));
 const mockStore = vi.hoisted(() => ({}));
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<
-    typeof import("../../composables/useCodex")
-  >();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     setToast: mockSetToast,
@@ -69,7 +68,9 @@ describe("ModelSnapshotSection 模型快照分区", () => {
     expect(wrapper.find(".settings-section-desc").text()).toContain(
       "CODEX_HOME/codex-ui",
     );
-    expect(wrapper.find(".model-config-card-head h3").text()).toBe("已保存快照");
+    expect(wrapper.find(".model-config-card-head h3").text()).toBe(
+      "已保存快照",
+    );
     const rows = wrapper.findAll(".model-snapshot-row");
     expect(rows).toHaveLength(2);
     expect(rows[0].find(".model-snapshot-name").text()).toBe("a");

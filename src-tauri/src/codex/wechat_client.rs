@@ -113,8 +113,7 @@ pub fn is_session_expired_payload(payload: &Value) -> bool {
 
 /// 子串 a 是否在 b 之后出现（对应正则 a.*b）。
 fn subseq(s: &str, a: &str, b: &str) -> bool {
-    s.find(a)
-        .is_some_and(|i| s[i + a.len()..].contains(b))
+    s.find(a).is_some_and(|i| s[i + a.len()..].contains(b))
 }
 
 /// 响应是否携带业务错误（ret/errcode 非 0）。
@@ -207,7 +206,12 @@ pub struct InboundFile {
 }
 
 /// 按 item 类型提取附件引用（type=4 文件 / type=5 视频），最多 `max` 个。
-fn extract_media_refs(item_list: &Value, item_type: i64, item_key: &str, max: usize) -> Vec<InboundFile> {
+fn extract_media_refs(
+    item_list: &Value,
+    item_type: i64,
+    item_key: &str,
+    max: usize,
+) -> Vec<InboundFile> {
     let Some(list) = item_list.as_array() else {
         return Vec::new();
     };
@@ -831,7 +835,10 @@ fn load_sync_buf(root: &Path, account_id: &str) -> String {
 }
 
 fn save_sync_buf(root: &Path, account_id: &str, buf: &str) {
-    let _ = write_json(&sync_buf_path(root, account_id), &json!({ "get_updates_buf": buf }));
+    let _ = write_json(
+        &sync_buf_path(root, account_id),
+        &json!({ "get_updates_buf": buf }),
+    );
 }
 
 fn load_reply_context(root: &Path, account_id: &str) -> HashMap<String, Value> {
@@ -861,7 +868,13 @@ fn save_reply_context(root: &Path, account_id: &str, map: &HashMap<String, Value
 }
 
 /// 保存入站消息的 contextToken（24h 被动回复窗口）。
-fn set_context_token(root: &Path, account_id: &str, user_id: &str, token: &str, message_id: Option<&str>) {
+fn set_context_token(
+    root: &Path,
+    account_id: &str,
+    user_id: &str,
+    token: &str,
+    message_id: Option<&str>,
+) {
     let mut map = load_reply_context(root, account_id);
     let now = now_ms();
     let mut entry = json!({
@@ -884,7 +897,10 @@ fn get_context_token(root: &Path, account_id: &str, user_id: &str) -> Option<Str
     if expires_at <= now_ms() {
         return None;
     }
-    entry.get("contextToken").and_then(|v| v.as_str()).map(str::to_string)
+    entry
+        .get("contextToken")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
 
 fn clear_reply_contexts(root: &Path, account_id: &str) {
@@ -951,7 +967,8 @@ impl WechatSendFailure {
 }
 
 /// 附件下载流：按块产出原始字节（`Err` 表示读取中断）；解密与落盘在调用方流式完成。
-pub type AttachmentStream = Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
+pub type AttachmentStream =
+    Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
 
 pub trait WechatApi: Send + Sync {
     fn get_qr_code(&self, base_url: &str, bot_type: &str) -> BoxFuture<'_, Result<Value, String>>;
@@ -963,16 +980,31 @@ pub trait WechatApi: Send + Sync {
         buf: &str,
         timeout_ms: u64,
     ) -> BoxFuture<'_, Result<Value, String>>;
-    fn send_message(&self, base_url: &str, token: &str, body: Value)
-        -> BoxFuture<'_, Result<Value, String>>;
-    fn get_config(&self, base_url: &str, token: &str, body: Value)
-        -> BoxFuture<'_, Result<Value, String>>;
-    fn send_typing(&self, base_url: &str, token: &str, body: Value)
-        -> BoxFuture<'_, Result<Value, String>>;
+    fn send_message(
+        &self,
+        base_url: &str,
+        token: &str,
+        body: Value,
+    ) -> BoxFuture<'_, Result<Value, String>>;
+    fn get_config(
+        &self,
+        base_url: &str,
+        token: &str,
+        body: Value,
+    ) -> BoxFuture<'_, Result<Value, String>>;
+    fn send_typing(
+        &self,
+        base_url: &str,
+        token: &str,
+        body: Value,
+    ) -> BoxFuture<'_, Result<Value, String>>;
     /// 打开附件下载流（入站附件走微信 CDN）：按块产出原始字节，解密由调用方流式完成。
     /// `timeout` 为整次请求（含读取响应体）的时长上限。
-    fn download_stream(&self, url: &str, timeout: Duration)
-        -> BoxFuture<'_, Result<AttachmentStream, String>>;
+    fn download_stream(
+        &self,
+        url: &str,
+        timeout: Duration,
+    ) -> BoxFuture<'_, Result<AttachmentStream, String>>;
 }
 
 /// 真实 HTTP 实现（reqwest）。
@@ -1027,11 +1059,7 @@ impl ReqwestApi {
 }
 
 impl WechatApi for ReqwestApi {
-    fn get_qr_code(
-        &self,
-        base_url: &str,
-        bot_type: &str,
-    ) -> BoxFuture<'_, Result<Value, String>> {
+    fn get_qr_code(&self, base_url: &str, bot_type: &str) -> BoxFuture<'_, Result<Value, String>> {
         let http = self.http.clone();
         let url = format!(
             "{}/ilink/bot/get_bot_qrcode?bot_type={}",
@@ -1050,11 +1078,7 @@ impl WechatApi for ReqwestApi {
         })
     }
 
-    fn poll_qr_status(
-        &self,
-        base_url: &str,
-        qrcode: &str,
-    ) -> BoxFuture<'_, Result<Value, String>> {
+    fn poll_qr_status(&self, base_url: &str, qrcode: &str) -> BoxFuture<'_, Result<Value, String>> {
         let http = self.http.clone();
         let url = format!(
             "{}/ilink/bot/get_qrcode_status?qrcode={}",
@@ -1166,9 +1190,10 @@ impl WechatApi for ReqwestApi {
             if !resp.status().is_success() {
                 return Err(format!("附件下载失败: CDN 返回 {}", resp.status()));
             }
-            let stream = resp
-                .bytes_stream()
-                .map(|r| r.map(|b| b.to_vec()).map_err(|e| format!("附件下载失败: {e}")));
+            let stream = resp.bytes_stream().map(|r| {
+                r.map(|b| b.to_vec())
+                    .map_err(|e| format!("附件下载失败: {e}"))
+            });
             Ok(Box::pin(stream) as AttachmentStream)
         })
     }
@@ -1294,7 +1319,11 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                     return;
                 }
             };
-            let mut qrcode = qr.get("qrcode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut qrcode = qr
+                .get("qrcode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let url = qr
                 .get("qrcode_img_content")
                 .and_then(|v| v.as_str())
@@ -1354,10 +1383,26 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                 };
                 match st.get("status").and_then(|v| v.as_str()).unwrap_or("") {
                     "confirmed" => {
-                        let bot_id = st.get("ilink_bot_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let bot_token = st.get("bot_token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let base_url = st.get("baseurl").and_then(|v| v.as_str()).unwrap_or(DEFAULT_BASE_URL).to_string();
-                        let user_id = st.get("ilink_user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let bot_id = st
+                            .get("ilink_bot_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let bot_token = st
+                            .get("bot_token")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let base_url = st
+                            .get("baseurl")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(DEFAULT_BASE_URL)
+                            .to_string();
+                        let user_id = st
+                            .get("ilink_user_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         if bot_id.is_empty() || bot_token.is_empty() {
                             let _ = tx.send(WechatEvent::LoginResult {
                                 login_id,
@@ -1397,7 +1442,11 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("")
                                     .to_string();
-                                let new_code = nq.get("qrcode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let new_code = nq
+                                    .get("qrcode")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 if !new_url.is_empty() {
                                     let _ = tx.send(WechatEvent::Qr(new_url));
                                 }
@@ -1561,7 +1610,8 @@ impl<A: WechatApi + 'static> WechatClient<A> {
         if let Some(t) = self.typing_tickets.lock().await.get(&key).cloned() {
             return Ok(t);
         }
-        let account = load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
+        let account =
+            load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
         let token = account
             .get("token")
             .and_then(|v| v.as_str())
@@ -1592,7 +1642,8 @@ impl<A: WechatApi + 'static> WechatClient<A> {
 
     /// 发送“正在输入”状态（status=1 显示 / status=2 取消）。best-effort：账号未连接直接 Ok。
     pub async fn send_typing(&self, account_id: &str, to: &str, status: i32) -> Result<(), String> {
-        let account = load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
+        let account =
+            load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
         let token = account
             .get("token")
             .and_then(|v| v.as_str())
@@ -1939,9 +1990,7 @@ async fn finish_receiver(
         reason: reason.to_string(),
     });
     let mut map = receivers.lock().await;
-    let mine = map
-        .get(account_id)
-        .is_some_and(|n| Arc::ptr_eq(n, cancel));
+    let mine = map.get(account_id).is_some_and(|n| Arc::ptr_eq(n, cancel));
     if mine {
         map.remove(account_id);
     }
@@ -1972,7 +2021,11 @@ mod tests {
         fn get_qr_code(&self, _base: &str, _bot: &str) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "qrcode": "QR-1", "qrcode_img_content": "http://qr/1" })) })
         }
-        fn poll_qr_status(&self, _base: &str, _qrcode: &str) -> BoxFuture<'_, Result<Value, String>> {
+        fn poll_qr_status(
+            &self,
+            _base: &str,
+            _qrcode: &str,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async {
                 Ok(json!({
                     "status": "confirmed",
@@ -1983,16 +2036,37 @@ mod tests {
                 }))
             })
         }
-        fn get_updates(&self, _base: &str, _tok: &str, _buf: &str, _t: u64) -> BoxFuture<'_, Result<Value, String>> {
+        fn get_updates(
+            &self,
+            _base: &str,
+            _tok: &str,
+            _buf: &str,
+            _t: u64,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0, "msgs": [], "get_updates_buf": "" })) })
         }
-        fn send_message(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+        fn send_message(
+            &self,
+            _base: &str,
+            _tok: &str,
+            _body: Value,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
-        fn get_config(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+        fn get_config(
+            &self,
+            _base: &str,
+            _tok: &str,
+            _body: Value,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0, "typing_ticket": "ticket-1" })) })
         }
-        fn send_typing(&self, _base: &str, _tok: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+        fn send_typing(
+            &self,
+            _base: &str,
+            _tok: &str,
+            _body: Value,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
         fn download_stream(
@@ -2007,12 +2081,22 @@ mod tests {
     #[test]
     fn expired_detection_narrowed() {
         assert!(is_session_expired_payload(&json!({ "errcode": -14 })));
-        assert!(is_session_expired_payload(&json!({ "errmsg": "session expired" })));
-        assert!(is_session_expired_payload(&json!({ "errmsg": "token expired" })));
-        assert!(is_session_expired_payload(&json!({ "errmsg": "xxx session 已经 expired" })));
+        assert!(is_session_expired_payload(
+            &json!({ "errmsg": "session expired" })
+        ));
+        assert!(is_session_expired_payload(
+            &json!({ "errmsg": "token expired" })
+        ));
+        assert!(is_session_expired_payload(
+            &json!({ "errmsg": "xxx session 已经 expired" })
+        ));
         // timeout 不再误判为过期
-        assert!(!is_session_expired_payload(&json!({ "errmsg": "upstream timeout" })));
-        assert!(!is_session_expired_payload(&json!({ "errmsg": "model not found" })));
+        assert!(!is_session_expired_payload(
+            &json!({ "errmsg": "upstream timeout" })
+        ));
+        assert!(!is_session_expired_payload(
+            &json!({ "errmsg": "model not found" })
+        ));
     }
 
     #[test]
@@ -2129,9 +2213,16 @@ mod tests {
     fn sanitize_file_name_cleans_and_limits() {
         assert_eq!(sanitize_file_name("C:\\tmp\\报表.xlsx"), "报表.xlsx");
         assert_eq!(sanitize_file_name("/etc/hosts"), "hosts");
-        assert_eq!(sanitize_file_name("a<b>c:d\"e|f?g*h.txt"), "a_b_c_d_e_f_g_h.txt");
+        assert_eq!(
+            sanitize_file_name("a<b>c:d\"e|f?g*h.txt"),
+            "a_b_c_d_e_f_g_h.txt"
+        );
         assert_eq!(sanitize_file_name("  ..name..  "), "name");
-        assert_eq!(sanitize_file_name("a\u{7}b.txt"), "a_b.txt", "控制字符应替换");
+        assert_eq!(
+            sanitize_file_name("a\u{7}b.txt"),
+            "a_b.txt",
+            "控制字符应替换"
+        );
         assert_eq!(sanitize_file_name("   "), "attachment");
         assert_eq!(sanitize_file_name("dir\\"), "attachment");
         assert_eq!(sanitize_file_name("noext"), "noext");
@@ -2148,7 +2239,10 @@ mod tests {
         let hex_key = hex_of(&key);
         assert_eq!(parse_aes_key(&hex_key).unwrap(), key);
         assert_eq!(parse_aes_key(&BASE64.encode(key)).unwrap(), key);
-        assert_eq!(parse_aes_key(&BASE64.encode(hex_key.as_bytes())).unwrap(), key);
+        assert_eq!(
+            parse_aes_key(&BASE64.encode(hex_key.as_bytes())).unwrap(),
+            key
+        );
         assert!(parse_aes_key("QUJD").is_err());
         assert!(parse_aes_key("").is_err());
     }
@@ -2185,21 +2279,34 @@ mod tests {
         let now = chrono::Local::now();
         let png = tiny_png();
         let name = resolve_final_name(AttachmentKind::Image, &png, None, now).unwrap();
-        assert!(name.starts_with("wechat-") && name.ends_with(".png"), "{name}");
+        assert!(
+            name.starts_with("wechat-") && name.ends_with(".png"),
+            "{name}"
+        );
         assert!(
             resolve_final_name(AttachmentKind::Image, b"not an image", None, now).is_err(),
             "魔数识别不出应报错"
         );
         assert_eq!(
-            resolve_final_name(AttachmentKind::File, b"x", Some("C:\\tmp\\预算表.xlsx"), now).unwrap(),
+            resolve_final_name(
+                AttachmentKind::File,
+                b"x",
+                Some("C:\\tmp\\预算表.xlsx"),
+                now
+            )
+            .unwrap(),
             "预算表.xlsx"
         );
         assert_eq!(
             resolve_final_name(AttachmentKind::File, b"x", None, now).unwrap(),
             "attachment"
         );
-        let video = resolve_final_name(AttachmentKind::Video, b"x", Some("ignored.mp4"), now).unwrap();
-        assert!(video.starts_with("wechat-video-") && video.ends_with(".mp4"), "{video}");
+        let video =
+            resolve_final_name(AttachmentKind::Video, b"x", Some("ignored.mp4"), now).unwrap();
+        assert!(
+            video.starts_with("wechat-video-") && video.ends_with(".mp4"),
+            "{video}"
+        );
     }
 
     #[test]
@@ -2211,7 +2318,10 @@ mod tests {
         let second = unique_path(dir.path(), "预算表.xlsx");
         assert_ne!(second, first, "同名应去重");
         let name = second.file_name().unwrap().to_string_lossy().to_string();
-        assert!(name.starts_with("预算表-") && name.ends_with(".xlsx"), "{name}");
+        assert!(
+            name.starts_with("预算表-") && name.ends_with(".xlsx"),
+            "{name}"
+        );
         // 无扩展名同样处理
         assert_eq!(unique_path(dir.path(), "noext"), dir.path().join("noext"));
     }
@@ -2242,16 +2352,37 @@ mod tests {
         fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "status": "wait" })) })
         }
-        fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+        fn get_updates(
+            &self,
+            _b: &str,
+            _t: &str,
+            _buf: &str,
+            _to: u64,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0, "msgs": [] })) })
         }
-        fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+        fn send_message(
+            &self,
+            _b: &str,
+            _t: &str,
+            _body: Value,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
-        fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+        fn get_config(
+            &self,
+            _b: &str,
+            _t: &str,
+            _body: Value,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
-        fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+        fn send_typing(
+            &self,
+            _b: &str,
+            _t: &str,
+            _body: Value,
+        ) -> BoxFuture<'_, Result<Value, String>> {
             Box::pin(async { Ok(json!({ "ret": 0 })) })
         }
         fn download_stream(
@@ -2266,12 +2397,16 @@ mod tests {
             );
             if self.pending {
                 return Box::pin(async {
-                    Ok(Box::pin(futures_util::stream::pending::<Result<Vec<u8>, String>>())
-                        as AttachmentStream)
+                    Ok(
+                        Box::pin(futures_util::stream::pending::<Result<Vec<u8>, String>>())
+                            as AttachmentStream,
+                    )
                 });
             }
             let items: Vec<Result<Vec<u8>, String>> = self.chunks.iter().cloned().map(Ok).collect();
-            Box::pin(async move { Ok(Box::pin(futures_util::stream::iter(items)) as AttachmentStream) })
+            Box::pin(
+                async move { Ok(Box::pin(futures_util::stream::iter(items)) as AttachmentStream) },
+            )
         }
     }
 
@@ -2305,10 +2440,21 @@ mod tests {
         .await
         .unwrap();
         let file = std::path::PathBuf::from(&path);
-        let session_dir = dir.path().join("wechannel-data").join(MEDIA_DIR_NAME).join(thread);
-        assert_eq!(file.parent().unwrap(), session_dir, "应落在 media/<会话id>/");
+        let session_dir = dir
+            .path()
+            .join("wechannel-data")
+            .join(MEDIA_DIR_NAME)
+            .join(thread);
+        assert_eq!(
+            file.parent().unwrap(),
+            session_dir,
+            "应落在 media/<会话id>/"
+        );
         let name = file.file_name().unwrap().to_string_lossy().to_string();
-        assert!(name.starts_with("wechat-") && name.ends_with(".png"), "{name}");
+        assert!(
+            name.starts_with("wechat-") && name.ends_with(".png"),
+            "{name}"
+        );
         assert_eq!(std::fs::read(&file).unwrap(), png);
         assert!(
             !std::fs::read_dir(&session_dir)
@@ -2417,13 +2563,22 @@ mod tests {
     async fn storage_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        save_account(root, "bot-1@im.bot", "tok", "https://ilinkai.weixin.qq.com", "u-1");
+        save_account(
+            root,
+            "bot-1@im.bot",
+            "tok",
+            "https://ilinkai.weixin.qq.com",
+            "u-1",
+        );
         assert_eq!(load_account_ids(root), vec!["bot-1@im.bot"]);
         assert!(load_account(root, "bot-1@im.bot").is_some());
         save_sync_buf(root, "bot-1@im.bot", "buf-abc");
         assert_eq!(load_sync_buf(root, "bot-1@im.bot"), "buf-abc");
         set_context_token(root, "bot-1@im.bot", "u-1", "ctx-1", None);
-        assert_eq!(get_context_token(root, "bot-1@im.bot", "u-1").as_deref(), Some("ctx-1"));
+        assert_eq!(
+            get_context_token(root, "bot-1@im.bot", "u-1").as_deref(),
+            Some("ctx-1")
+        );
         // 过期窗口：写入过期时间后取不到
         let p = reply_context_path(root, "bot-1@im.bot");
         let mut map = load_reply_context(root, "bot-1@im.bot");
@@ -2431,7 +2586,10 @@ mod tests {
             "u-2".into(),
             json!({ "peerId": "u-2", "contextToken": "old", "lastInboundAt": 1, "expiresAt": 1 }),
         );
-        let obj = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Value>();
+        let obj = map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Value>();
         write_json(&p, &obj).unwrap();
         assert!(get_context_token(root, "bot-1@im.bot", "u-2").is_none());
         // 快照
@@ -2458,7 +2616,13 @@ mod tests {
             fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "status": "wait" })) })
             }
-            fn get_updates(&self, _b: &str, _t: &str, buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 // 首次返回一条含图片/文件/视频的消息，之后返回空，避免测试忙循环反复投递。
                 let first = buf.is_empty();
                 let key_hex = self.key_hex.clone();
@@ -2496,13 +2660,28 @@ mod tests {
                     }
                 })
             }
-            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
             fn download_stream(
@@ -2520,7 +2699,10 @@ mod tests {
                 let tail = cipher[mid..].to_vec();
                 let head = cipher[..mid].to_vec();
                 Box::pin(async move {
-                    Ok(Box::pin(futures_util::stream::iter(vec![Ok(head), Ok(tail)])) as AttachmentStream)
+                    Ok(
+                        Box::pin(futures_util::stream::iter(vec![Ok(head), Ok(tail)]))
+                            as AttachmentStream,
+                    )
                 })
             }
         }
@@ -2532,7 +2714,10 @@ mod tests {
         let mut ciphers = std::collections::HashMap::new();
         ciphers.insert("PARAM-IMG".to_string(), encrypt_aes_ecb(&png, &key));
         ciphers.insert("PARAM-FILE".to_string(), encrypt_aes_ecb(&file_bytes, &key));
-        ciphers.insert("PARAM-VIDEO".to_string(), encrypt_aes_ecb(&video_bytes, &key));
+        ciphers.insert(
+            "PARAM-VIDEO".to_string(),
+            encrypt_aes_ecb(&video_bytes, &key),
+        );
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
@@ -2562,9 +2747,13 @@ mod tests {
         ));
         let got = loop {
             match rx.recv().await {
-                Some(WechatEvent::Message { text, images, files, media_error, .. }) => {
-                    break (text, images, files, media_error)
-                }
+                Some(WechatEvent::Message {
+                    text,
+                    images,
+                    files,
+                    media_error,
+                    ..
+                }) => break (text, images, files, media_error),
                 Some(_) => continue,
                 None => panic!("事件通道提前关闭"),
             }
@@ -2646,7 +2835,13 @@ mod tests {
             fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "status": "wait" })) })
             }
-            fn get_updates(&self, _b: &str, _t: &str, buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 let first = buf.is_empty();
                 let key_hex = self.key_hex.clone();
                 Box::pin(async move {
@@ -2674,13 +2869,28 @@ mod tests {
                     }
                 })
             }
-            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
             fn download_stream(
@@ -2711,9 +2921,13 @@ mod tests {
         ));
         let got = loop {
             match rx.recv().await {
-                Some(WechatEvent::Message { text, images, files, media_error, .. }) => {
-                    break (text, images, files, media_error)
-                }
+                Some(WechatEvent::Message {
+                    text,
+                    images,
+                    files,
+                    media_error,
+                    ..
+                }) => break (text, images, files, media_error),
                 Some(_) => continue,
                 None => panic!("事件通道提前关闭"),
             }
@@ -2741,16 +2955,37 @@ mod tests {
             fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "status": "wait" })) })
             }
-            fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                _buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "errcode": -14, "errmsg": "session expired" })) })
             }
-            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0, "typing_ticket": "ticket-x" })) })
             }
-            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
             fn download_stream(
@@ -2802,7 +3037,9 @@ mod tests {
             "过期退出后应清理 receivers 表中的自身条目"
         );
         assert_eq!(
-            load_session_status(&root, "bot-1").get("status").and_then(|v| v.as_str()),
+            load_session_status(&root, "bot-1")
+                .get("status")
+                .and_then(|v| v.as_str()),
             Some("session_expired")
         );
     }
@@ -2820,7 +3057,11 @@ mod tests {
         while let Some(ev) = rx.recv().await {
             match ev {
                 WechatEvent::Qr(_) => qr_seen = true,
-                WechatEvent::LoginResult { success, account_id, .. } => {
+                WechatEvent::LoginResult {
+                    success,
+                    account_id,
+                    ..
+                } => {
                     ok = success;
                     acc = account_id;
                     break;
@@ -2846,17 +3087,38 @@ mod tests {
             fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "status": "wait" })) })
             }
-            fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                _buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0, "msgs": [], "get_updates_buf": "" })) })
             }
-            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
-            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 *self.get_config_calls.lock().unwrap() += 1;
                 Box::pin(async { Ok(json!({ "ret": 0, "typing_ticket": "ticket-1" })) })
             }
-            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 *self.send_typing_calls.lock().unwrap() += 1;
                 Box::pin(async { Ok(json!({ "ret": 0 })) })
             }
@@ -2880,7 +3142,10 @@ mod tests {
         let client = WechatClient::with_api(
             root.clone(),
             tx,
-            CountingApi { get_config_calls: gcc.clone(), send_typing_calls: stc.clone() },
+            CountingApi {
+                get_config_calls: gcc.clone(),
+                send_typing_calls: stc.clone(),
+            },
         );
         client.send_typing("bot-1", "u-1", 1).await.unwrap();
         client.send_typing("bot-1", "u-1", 2).await.unwrap();
@@ -2955,20 +3220,44 @@ mod tests {
             fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({})) })
             }
-            fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                _buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({})) })
             }
-            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 panic!("未连接账号不应发出 sendmessage 请求");
             }
-            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({})) })
             }
-            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
                 Box::pin(async { Ok(json!({})) })
             }
-            fn download_stream(&self, _url: &str, _timeout: Duration)
-                -> BoxFuture<'_, Result<AttachmentStream, String>> {
+            fn download_stream(
+                &self,
+                _url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
                 Box::pin(async { Err("未实现".to_string()) })
             }
         }

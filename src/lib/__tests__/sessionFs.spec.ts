@@ -102,7 +102,11 @@ describe("flattenResourceTree", () => {
   });
 
   it("未加载目录不产生子行（懒加载缓存为空）", () => {
-    const rows = flattenResourceTree(root, { "D:\\repo": [src] }, new Set([root.path]));
+    const rows = flattenResourceTree(
+      root,
+      { "D:\\repo": [src] },
+      new Set([root.path]),
+    );
     expect(rows).toHaveLength(2);
   });
 });

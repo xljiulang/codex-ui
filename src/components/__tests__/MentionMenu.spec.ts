@@ -7,7 +7,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, ensureSkills: vi.fn() };
 });
 
@@ -70,7 +71,13 @@ describe("MentionMenu @/$ 联合菜单", () => {
       loaded: true,
     };
     const w = mount(MentionMenu, {
-      props: { tab, kind: "@", token: "search", results: [FILE_RESULT], searching: false },
+      props: {
+        tab,
+        kind: "@",
+        token: "search",
+        results: [FILE_RESULT],
+        searching: false,
+      },
     });
     const labels = w.findAll(".menu-item-label").map((n) => n.text());
     expect(labels[0]).toBe("选择文件…");
@@ -85,9 +92,17 @@ describe("MentionMenu @/$ 联合菜单", () => {
 
   it("@ 分支：点击文件行发出 mention 附件（路径转正斜杠）", async () => {
     const w = mount(MentionMenu, {
-      props: { tab, kind: "@", token: "search", results: [FILE_RESULT], searching: false },
+      props: {
+        tab,
+        kind: "@",
+        token: "search",
+        results: [FILE_RESULT],
+        searching: false,
+      },
     });
-    const fileBtn = w.findAll(".menu-item").find((b) => b.text().includes("search.txt"));
+    const fileBtn = w
+      .findAll(".menu-item")
+      .find((b) => b.text().includes("search.txt"));
     expect(fileBtn).toBeTruthy();
     await fileBtn!.trigger("click");
     const emitted = w.emitted("select-file");

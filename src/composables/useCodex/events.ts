@@ -26,7 +26,12 @@ import {
   isActiveItem,
   upsertItem,
 } from "./items";
-import { activeSessionTab, allSessionTabs, findSessionTabByThread, sessionTabTitle } from "./sessionState";
+import {
+  activeSessionTab,
+  allSessionTabs,
+  findSessionTabByThread,
+  sessionTabTitle,
+} from "./sessionState";
 import { isBackgroundThread, store } from "./store";
 import { refreshThreads } from "./threads";
 import { setToast } from "./toast";
@@ -48,10 +53,8 @@ import {
   type SessionTab,
 } from "./types";
 
-
 let unlisteners: UnlistenFn[] = [];
 let wired = false;
-
 
 /** 任一标签（会话回合/目标续跑、终端命令执行）在工作时，任务栏显示不确定进度条；
  * 全部结束后隐藏（非 Tauri 环境静默忽略）。与标签栏呼吸灯同源（isTabWorking）。 */
@@ -67,7 +70,6 @@ async function updateTaskbarProgress() {
     // 非 Tauri 环境（如浏览器预览）忽略
   }
 }
-
 
 watch(
   () => tabs.some((t) => isTabWorking(t)),
@@ -95,7 +97,6 @@ export function resolveTurnTab(p: {
   return null;
 }
 
-
 /**
  * 会话内 error 条目（`item.type === "error"`，服务端错误消息）：窗口没有前台焦点时
  * 额外发一条 Windows 通知，让用户切走后也能看到该错误（应用内错误卡片照旧渲染）。
@@ -112,7 +113,6 @@ function notifyErrorItem(
   if (!message) return;
   notifySessionError({ message, threadId, turnId });
 }
-
 
 export async function wireEvents() {
   if (wired) return;
@@ -165,7 +165,9 @@ export async function wireEvents() {
   unlisteners.push(
     await listen("serverRequest/resolved", (e) => {
       const p = e.payload as { requestId: number | string };
-      store.interactions = store.interactions.filter((i) => i.requestId !== p.requestId);
+      store.interactions = store.interactions.filter(
+        (i) => i.requestId !== p.requestId,
+      );
       for (const tab of allSessionTabs()) {
         if (tab.interactions.some((i) => i.requestId === p.requestId)) {
           tab.interactions = tab.interactions.filter(
@@ -271,7 +273,9 @@ export async function wireEvents() {
             it.status = interrupted ? "interrupted" : "canceled";
             if (typeof it.durationMs !== "number") {
               const started =
-                typeof it.startedAtMs === "number" ? (it.startedAtMs as number) : now;
+                typeof it.startedAtMs === "number"
+                  ? (it.startedAtMs as number)
+                  : now;
               it.durationMs = now - started;
             }
             touched = true;
@@ -307,7 +311,11 @@ export async function wireEvents() {
         let planText = "";
         for (let i = threadItems.length - 1; i >= scanStart; i--) {
           const it = threadItems[i];
-          if (it?.type === "plan" && typeof it.text === "string" && it.text.trim()) {
+          if (
+            it?.type === "plan" &&
+            typeof it.text === "string" &&
+            it.text.trim()
+          ) {
             planText = it.text;
             break;
           }
@@ -390,7 +398,11 @@ export async function wireEvents() {
 
   unlisteners.push(
     await listen("item/agentMessage/delta", (e) => {
-      const p = e.payload as { threadId: string; itemId: string; delta: string };
+      const p = e.payload as {
+        threadId: string;
+        itemId: string;
+        delta: string;
+      };
       if (isBackgroundThread(p.threadId)) return;
       const item = getOrCreateItem(p.threadId, p.itemId, () => ({
         id: p.itemId,
@@ -410,7 +422,11 @@ export async function wireEvents() {
 
   unlisteners.push(
     await listen("item/commandExecution/outputDelta", (e) => {
-      const p = e.payload as { threadId: string; itemId: string; delta: string };
+      const p = e.payload as {
+        threadId: string;
+        itemId: string;
+        delta: string;
+      };
       if (isBackgroundThread(p.threadId)) return;
       const item = getOrCreateItem(p.threadId, p.itemId, () => ({
         id: p.itemId,
@@ -428,7 +444,12 @@ export async function wireEvents() {
 
   unlisteners.push(
     await listen("item/reasoning/textDelta", (e) => {
-      const p = e.payload as { threadId: string; itemId: string; delta: string; contentIndex: number };
+      const p = e.payload as {
+        threadId: string;
+        itemId: string;
+        delta: string;
+        contentIndex: number;
+      };
       if (isBackgroundThread(p.threadId)) return;
       const item = getOrCreateItem(p.threadId, p.itemId, () => ({
         id: p.itemId,
@@ -654,7 +675,9 @@ export async function wireEvents() {
       const usage = {
         // 当前上下文占用取 last（最近一次请求），total 为会话累计（会超过窗口）
         contextUsed:
-          p.tokenUsage?.last?.totalTokens ?? p.tokenUsage?.total?.totalTokens ?? 0,
+          p.tokenUsage?.last?.totalTokens ??
+          p.tokenUsage?.total?.totalTokens ??
+          0,
         window: p.tokenUsage?.modelContextWindow ?? null,
         ...(typeof totalInput === "number" ? { input: totalInput } : {}),
         ...(typeof totalOutput === "number" ? { output: totalOutput } : {}),
@@ -744,7 +767,10 @@ export async function wireEvents() {
   // 定时任务快照：后端任务/执行记录变更时全量推送任务列表
   unlisteners.push(
     await listen("scheduled-tasks/event", (e) => {
-      const p = e.payload as { tasks?: ScheduledTask[]; changedTaskId?: string };
+      const p = e.payload as {
+        tasks?: ScheduledTask[];
+        changedTaskId?: string;
+      };
       if (Array.isArray(p.tasks)) store.scheduledTasks = p.tasks;
       // seq 递增：同一任务连续两次事件（如 started → completed）也能被 watch 感知
       store.scheduledTaskChange = {
@@ -754,7 +780,6 @@ export async function wireEvents() {
     }),
   );
 }
-
 
 export function disposeEvents() {
   for (const fn of unlisteners) {

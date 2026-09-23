@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// 解析 CODEX_BIN 指向的真实 codex 可执行文件（可能带路径或只是命令名）。
 /// npm 安装的 `codex` 在 PATH 里通常只是 `.cmd`/`.ps1` shim，Rust 的
@@ -66,7 +66,13 @@ fn find_on_path(name: &str) -> Option<String> {
 /// npm 前缀目录下按嵌套/扁平布局找 @openai 平台包里的真实 codex.exe（x64/arm64）
 fn npm_codex_exe(prefix: &Path) -> Option<PathBuf> {
     const LAYOUTS: [&[&str]; 2] = [
-        &["node_modules", "@openai", "codex", "node_modules", "@openai"],
+        &[
+            "node_modules",
+            "@openai",
+            "codex",
+            "node_modules",
+            "@openai",
+        ],
         &["node_modules", "@openai"],
     ];
     const TARGETS: [&[&str]; 2] = [
@@ -210,16 +216,26 @@ fn app_server_handshake_list_start_turn() {
         }),
     );
     let init_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(init_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(init_id)
+        })
         .expect("initialize response");
-    assert!(init_resp.get("result").is_some(), "initialize 应成功: {init_resp}");
+    assert!(
+        init_resp.get("result").is_some(),
+        "initialize 应成功: {init_resp}"
+    );
     server.notify("initialized");
 
     let list_id = server.request("thread/list", json!({ "limit": 5 }));
     let list_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(list_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(list_id)
+        })
         .expect("thread/list response");
-    assert!(list_resp.get("result").is_some(), "thread/list 应成功: {list_resp}");
+    assert!(
+        list_resp.get("result").is_some(),
+        "thread/list 应成功: {list_resp}"
+    );
 
     let start_id = server.request(
         "thread/start",
@@ -230,7 +246,9 @@ fn app_server_handshake_list_start_turn() {
         }),
     );
     let start_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(start_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(start_id)
+        })
         .expect("thread/start response");
     let thread_id = start_resp["result"]["thread"]["id"]
         .as_str()
@@ -245,9 +263,14 @@ fn app_server_handshake_list_start_turn() {
         }),
     );
     let turn_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(turn_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(turn_id)
+        })
         .expect("turn/start response");
-    assert!(turn_resp.get("result").is_some(), "turn/start 应成功: {turn_resp}");
+    assert!(
+        turn_resp.get("result").is_some(),
+        "turn/start 应成功: {turn_resp}"
+    );
 
     let completed = server
         .wait_for(deadline, |v| {
@@ -279,9 +302,14 @@ fn start_thread(server: &mut Server, cwd: &Path, deadline: Instant) -> String {
         }),
     );
     let init_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(init_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(init_id)
+        })
         .expect("initialize response");
-    assert!(init_resp.get("result").is_some(), "initialize 应成功: {init_resp}");
+    assert!(
+        init_resp.get("result").is_some(),
+        "initialize 应成功: {init_resp}"
+    );
     server.notify("initialized");
 
     let start_id = server.request(
@@ -293,7 +321,9 @@ fn start_thread(server: &mut Server, cwd: &Path, deadline: Instant) -> String {
         }),
     );
     let start_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(start_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(start_id)
+        })
         .expect("thread/start response");
     start_resp["result"]["thread"]["id"]
         .as_str()
@@ -328,10 +358,17 @@ fn app_server_goal_lifecycle() {
         json!({ "threadId": thread_id, "objective": "只回复 OK 两个字母，完成后停止" }),
     );
     let set_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(set_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(set_id)
+        })
         .expect("thread/goal/set response");
-    let set_result = set_resp.get("result").expect("thread/goal/set 应成功: {set_resp}");
-    assert_eq!(set_result["goal"]["status"].as_str().unwrap_or(""), "active");
+    let set_result = set_resp
+        .get("result")
+        .expect("thread/goal/set 应成功: {set_resp}");
+    assert_eq!(
+        set_result["goal"]["status"].as_str().unwrap_or(""),
+        "active"
+    );
 
     // 等待服务端 auto-continuation 完成后下发非 active 状态（协议值 complete）
     let updated = server
@@ -351,16 +388,23 @@ fn app_server_goal_lifecycle() {
     // goal/get 回读一致
     let get_id = server.request("thread/goal/get", json!({ "threadId": thread_id }));
     let get_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(get_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(get_id)
+        })
         .expect("thread/goal/get response");
     let goal = &get_resp["result"]["goal"];
     assert_eq!(goal["status"].as_str().unwrap_or(""), "complete");
-    assert_eq!(goal["objective"].as_str().unwrap_or(""), "只回复 OK 两个字母，完成后停止");
+    assert_eq!(
+        goal["objective"].as_str().unwrap_or(""),
+        "只回复 OK 两个字母，完成后停止"
+    );
 
     // goal/clear 清除并返回 cleared: true
     let clear_id = server.request("thread/goal/clear", json!({ "threadId": thread_id }));
     let clear_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(clear_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(clear_id)
+        })
         .expect("thread/goal/clear response");
     assert_eq!(clear_resp["result"]["cleared"].as_bool(), Some(true));
 
@@ -385,7 +429,9 @@ fn app_server_memory_and_settings_update() {
             json!({ "threadId": thread_id, "mode": mode }),
         );
         let mem_resp = server
-            .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(mem_id))
+            .wait_for(deadline, |v| {
+                v.get("id").and_then(|i| i.as_u64()) == Some(mem_id)
+            })
             .expect("thread/memoryMode/set response");
         assert!(
             mem_resp.get("result").is_some(),
@@ -399,16 +445,23 @@ fn app_server_memory_and_settings_update() {
         json!({ "threadId": thread_id, "model": null, "effort": null }),
     );
     let s1_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(s1_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(s1_id)
+        })
         .expect("thread/settings/update response 1");
-    assert!(s1_resp.get("result").is_some(), "settings/update(nulls) 应成功: {s1_resp}");
+    assert!(
+        s1_resp.get("result").is_some(),
+        "settings/update(nulls) 应成功: {s1_resp}"
+    );
 
     let s2_id = server.request(
         "thread/settings/update",
         json!({ "threadId": thread_id, "effort": "low" }),
     );
     let s2_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(s2_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(s2_id)
+        })
         .expect("thread/settings/update response 2");
     assert!(
         s2_resp.get("result").is_some(),
@@ -447,9 +500,14 @@ fn app_server_turns_list_full_and_search() {
         }),
     );
     let turn_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(turn_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(turn_id)
+        })
         .expect("turn/start response");
-    assert!(turn_resp.get("result").is_some(), "turn/start 应成功: {turn_resp}");
+    assert!(
+        turn_resp.get("result").is_some(),
+        "turn/start 应成功: {turn_resp}"
+    );
     let completed = server
         .wait_for(deadline, |v| {
             v.get("method").and_then(|m| m.as_str()) == Some("turn/completed")
@@ -471,9 +529,14 @@ fn app_server_turns_list_full_and_search() {
         }),
     );
     let list_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(list_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(list_id)
+        })
         .expect("thread/turns/list response");
-    assert!(list_resp.get("result").is_some(), "turns/list 应成功: {list_resp}");
+    assert!(
+        list_resp.get("result").is_some(),
+        "turns/list 应成功: {list_resp}"
+    );
     let full_text = serde_json::to_string(&list_resp["result"]).unwrap_or_default();
     assert!(
         full_text.contains(&marker),
@@ -485,9 +548,14 @@ fn app_server_turns_list_full_and_search() {
     for _ in 0..30 {
         let search_id = server.request("thread/search", json!({ "searchTerm": marker }));
         let search_resp = server
-            .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(search_id))
+            .wait_for(deadline, |v| {
+                v.get("id").and_then(|i| i.as_u64()) == Some(search_id)
+            })
             .expect("thread/search response");
-        assert!(search_resp.get("result").is_some(), "thread/search 应成功: {search_resp}");
+        assert!(
+            search_resp.get("result").is_some(),
+            "thread/search 应成功: {search_resp}"
+        );
         if search_resp["result"]["data"]
             .as_array()
             .is_some_and(|a| !a.is_empty())
@@ -520,15 +588,22 @@ fn app_server_pin_unpin_section_move() {
         }),
     );
     let init_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(init_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(init_id)
+        })
         .expect("initialize response");
-    assert!(init_resp.get("result").is_some(), "initialize 应成功: {init_resp}");
+    assert!(
+        init_resp.get("result").is_some(),
+        "initialize 应成功: {init_resp}"
+    );
     server.notify("initialized");
 
     // 固定协议（0.149+）：threadSection/list 定位 Pinned 分区 → thread/section/move
     let sec_id = server.request("threadSection/list", json!({ "limit": 50 }));
     let sec_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(sec_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(sec_id)
+        })
         .expect("threadSection/list response");
     let sec_result = sec_resp
         .get("result")
@@ -552,7 +627,9 @@ fn app_server_pin_unpin_section_move() {
         }),
     );
     let start_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(start_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(start_id)
+        })
         .expect("thread/start response");
     let thread_id = start_resp["result"]["thread"]["id"]
         .as_str()
@@ -567,15 +644,23 @@ fn app_server_pin_unpin_section_move() {
         }),
     );
     let turn_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(turn_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(turn_id)
+        })
         .expect("turn/start response");
-    assert!(turn_resp.get("result").is_some(), "turn/start 应成功: {turn_resp}");
+    assert!(
+        turn_resp.get("result").is_some(),
+        "turn/start 应成功: {turn_resp}"
+    );
     let completed = server
         .wait_for(deadline, |v| {
             v.get("method").and_then(|m| m.as_str()) == Some("turn/completed")
         })
         .expect("turn/completed");
-    assert_eq!(completed["params"]["turn"]["status"].as_str().unwrap_or(""), "completed");
+    assert_eq!(
+        completed["params"]["turn"]["status"].as_str().unwrap_or(""),
+        "completed"
+    );
 
     // thread/section/move 置顶
     let pin_id = server.request(
@@ -583,7 +668,9 @@ fn app_server_pin_unpin_section_move() {
         json!({ "threadId": thread_id, "sectionId": pinned_id }),
     );
     let pin_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(pin_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(pin_id)
+        })
         .expect("pin response");
     assert!(pin_resp.get("result").is_some(), "置顶应成功: {pin_resp}");
 
@@ -593,7 +680,9 @@ fn app_server_pin_unpin_section_move() {
         json!({ "threadId": thread_id, "includeTurns": false }),
     );
     let read_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(read_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(read_id)
+        })
         .expect("thread/read response");
     let thread = &read_resp["result"]["thread"];
     let section = thread["section"]
@@ -611,7 +700,9 @@ fn app_server_pin_unpin_section_move() {
         json!({ "threadId": thread_id, "sectionId": null }),
     );
     let un_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(un_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(un_id)
+        })
         .expect("unpin response");
     assert!(un_resp.get("result").is_some(), "取消置顶应成功: {un_resp}");
 
@@ -620,7 +711,9 @@ fn app_server_pin_unpin_section_move() {
         json!({ "threadId": thread_id, "includeTurns": false }),
     );
     let read2_resp = server
-        .wait_for(deadline, |v| v.get("id").and_then(|i| i.as_u64()) == Some(read2_id))
+        .wait_for(deadline, |v| {
+            v.get("id").and_then(|i| i.as_u64()) == Some(read2_id)
+        })
         .expect("thread/read response 2");
     let thread2 = &read2_resp["result"]["thread"];
     assert!(

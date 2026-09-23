@@ -53,7 +53,9 @@ describe("GitRemotesSection", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].find(".git-remote-name").text()).toContain("origin");
     expect(rows[0].find(".git-remote-badge").exists()).toBe(true);
-    expect(rows[1].find(".git-remote-url").text()).toContain("example.com/u.git");
+    expect(rows[1].find(".git-remote-url").text()).toContain(
+      "example.com/u.git",
+    );
     expect(wrapper.emitted("update:currentRemote")?.[0]).toEqual(["origin"]);
     wrapper.unmount();
   });
@@ -88,9 +90,7 @@ describe("GitRemotesSection", () => {
       url: "https://example.com/u.git",
     });
     expect(wrapper.emitted("update:currentRemote")?.[1]).toEqual(["upstream"]);
-    expect(
-      (inputs[0].element as HTMLInputElement).value,
-    ).toBe("");
+    expect((inputs[0].element as HTMLInputElement).value).toBe("");
     wrapper.unmount();
   });
 
@@ -135,7 +135,9 @@ describe("GitRemotesSection", () => {
     await wrapper.find(".git-remote-delete").trigger("click");
     await flushPromises();
     expect(
-      mockedInvoke.mock.calls.some(([cmd]) => cmd === "git_changes_remote_remove"),
+      mockedInvoke.mock.calls.some(
+        ([cmd]) => cmd === "git_changes_remote_remove",
+      ),
     ).toBe(false);
 
     mockedAskConfirm.mockResolvedValueOnce(true);

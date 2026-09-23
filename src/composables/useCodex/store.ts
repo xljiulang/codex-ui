@@ -15,7 +15,6 @@ import {
   type PanelTab,
 } from "./types";
 
-
 export const store = reactive({
   server: {
     connected: false,
@@ -63,7 +62,6 @@ export const store = reactive({
   confirm: null as (ConfirmRequest & { resolve: (ok: boolean) => void }) | null,
 });
 
-
 /**
  * 后台临时线程 id 集合（如标题总结用的 ephemeral 线程）。
  * 这些线程的事件只由各自的一次性监听处理，不得进入全局 UI 状态，
@@ -71,7 +69,8 @@ export const store = reactive({
  */
 export const backgroundThreadIds = new Set<string>();
 
-
-export function isBackgroundThread(threadId: string | undefined | null): boolean {
+export function isBackgroundThread(
+  threadId: string | undefined | null,
+): boolean {
   return !!threadId && backgroundThreadIds.has(threadId);
 }

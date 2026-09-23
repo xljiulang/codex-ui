@@ -60,7 +60,9 @@ export async function applyCompatProxy(
 }
 
 /** 便捷包装：应用并统一 toast 反馈；返回是否成功。 */
-export async function toggleCompatProxy(options: CompatProxyOptions): Promise<boolean> {
+export async function toggleCompatProxy(
+  options: CompatProxyOptions,
+): Promise<boolean> {
   try {
     const status = await applyCompatProxy(options, true);
     if (status.running) {

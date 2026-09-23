@@ -87,8 +87,8 @@ impl SessionStateStore {
 
     fn persist(&self) -> Result<(), String> {
         let data = self.data.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let text = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化会话状态失败: {e}"))?;
+        let text =
+            serde_json::to_string_pretty(&data).map_err(|e| format!("序列化会话状态失败: {e}"))?;
         let p = &self.path;
         if let Some(parent) = p.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
@@ -196,7 +196,11 @@ impl SessionStateStore {
                     continue;
                 }
                 let binding = WechatBinding {
-                    account_id: b.get("accountId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    account_id: b
+                        .get("accountId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     user_id: b.get("userId").and_then(|v| v.as_str()).map(str::to_string),
                     name: b.get("name").and_then(|v| v.as_str()).map(str::to_string),
                     bound_at: b.get("boundAt").and_then(|v| v.as_u64()),
@@ -223,8 +227,23 @@ mod tests {
     fn set_settings_merges_and_preserves_wechat() {
         let dir = TempDir::new().unwrap();
         let store = SessionStateStore::new(dir.path()).unwrap();
-        store.set_wechat("t1", Some(WechatBinding { account_id: "bot-1".into(), ..Default::default() })).unwrap();
-        store.set_settings("t1", Some("full-access".into()), Some("deepseek".into()), Some("high".into())).unwrap();
+        store
+            .set_wechat(
+                "t1",
+                Some(WechatBinding {
+                    account_id: "bot-1".into(),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        store
+            .set_settings(
+                "t1",
+                Some("full-access".into()),
+                Some("deepseek".into()),
+                Some("high".into()),
+            )
+            .unwrap();
         let rec = store.get("t1").unwrap();
         assert_eq!(rec.permission_mode.as_deref(), Some("full-access"));
         assert_eq!(rec.model.as_deref(), Some("deepseek"));
@@ -236,8 +255,17 @@ mod tests {
     fn null_model_effort_clears_to_default() {
         let dir = TempDir::new().unwrap();
         let store = SessionStateStore::new(dir.path()).unwrap();
-        store.set_settings("t1", Some("ask-for-approval".into()), Some("m".into()), Some("low".into())).unwrap();
-        store.set_settings("t1", Some("read-only".into()), None, None).unwrap();
+        store
+            .set_settings(
+                "t1",
+                Some("ask-for-approval".into()),
+                Some("m".into()),
+                Some("low".into()),
+            )
+            .unwrap();
+        store
+            .set_settings("t1", Some("read-only".into()), None, None)
+            .unwrap();
         let rec = store.get("t1").unwrap();
         assert_eq!(rec.permission_mode.as_deref(), Some("read-only"));
         assert!(rec.model.is_none());
@@ -248,7 +276,9 @@ mod tests {
     fn empty_record_is_removed() {
         let dir = TempDir::new().unwrap();
         let store = SessionStateStore::new(dir.path()).unwrap();
-        store.set_settings("t1", Some("full-access".into()), None, None).unwrap();
+        store
+            .set_settings("t1", Some("full-access".into()), None, None)
+            .unwrap();
         store.set_settings("t1", None, None, None).unwrap();
         assert!(store.get("t1").is_none());
     }
@@ -311,7 +341,13 @@ mod tests {
         assert_eq!(rec1.permission_mode.as_deref(), Some("full-access"));
         assert_eq!(rec1.model.as_deref(), Some("m1"));
         assert_eq!(
-            store2.get("t2").unwrap().wechat.as_ref().unwrap().account_id,
+            store2
+                .get("t2")
+                .unwrap()
+                .wechat
+                .as_ref()
+                .unwrap()
+                .account_id,
             "bot-3"
         );
         assert!(!legacy_bindings_path(app_dir).exists());
@@ -322,7 +358,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         {
             let store = SessionStateStore::new(dir.path()).unwrap();
-            store.set_settings("t1", Some("help-me-approve".into()), None, Some("max".into())).unwrap();
+            store
+                .set_settings(
+                    "t1",
+                    Some("help-me-approve".into()),
+                    None,
+                    Some("max".into()),
+                )
+                .unwrap();
         }
         let store = SessionStateStore::new(dir.path()).unwrap();
         let rec = store.get("t1").unwrap();

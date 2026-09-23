@@ -38,7 +38,9 @@ import { tooltipDirective } from "../../directives/tooltip";
 const mockedInit = vi.mocked(initMock);
 const root = "D:\\repo";
 
-function previewTab(overrides: Partial<PreviewEditorTab> = {}): PreviewEditorTab {
+function previewTab(
+  overrides: Partial<PreviewEditorTab> = {},
+): PreviewEditorTab {
   const tab = {
     kind: "preview",
     previewType: "pptx",

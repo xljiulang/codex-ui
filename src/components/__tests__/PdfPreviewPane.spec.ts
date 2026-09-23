@@ -2,48 +2,50 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { reactive } from "vue";
 
-const { mockPage, mockTextLayers, MockIntersectionObserver } = vi.hoisted(() => {
-  class MockIntersectionObserver {
-    static instances: MockIntersectionObserver[] = [];
-    private cb: IntersectionObserverCallback;
-    constructor(cb: IntersectionObserverCallback) {
-      this.cb = cb;
-      MockIntersectionObserver.instances.push(this);
+const { mockPage, mockTextLayers, MockIntersectionObserver } = vi.hoisted(
+  () => {
+    class MockIntersectionObserver {
+      static instances: MockIntersectionObserver[] = [];
+      private cb: IntersectionObserverCallback;
+      constructor(cb: IntersectionObserverCallback) {
+        this.cb = cb;
+        MockIntersectionObserver.instances.push(this);
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+      /** 手动触发指定目标的交叉回调（模拟滚入视口） */
+      trigger(target: Element): void {
+        this.cb(
+          [
+            {
+              isIntersecting: true,
+              target,
+            } as unknown as IntersectionObserverEntry,
+          ],
+          this as unknown as IntersectionObserver,
+        );
+      }
     }
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-    /** 手动触发指定目标的交叉回调（模拟滚入视口） */
-    trigger(target: Element): void {
-      this.cb(
-        [
-          {
-            isIntersecting: true,
-            target,
-          } as unknown as IntersectionObserverEntry,
-        ],
-        this as unknown as IntersectionObserver,
-      );
-    }
-  }
-  return {
-    mockPage: {
-      getViewport: vi.fn((opts?: { scale?: number }) => ({
-        width: 100,
-        height: 200,
-        scale: opts?.scale ?? 1,
-      })),
-      render: vi.fn(() => ({ promise: Promise.resolve() })),
-      getTextContent: vi.fn(async () => ({ items: [], styles: {} })),
-    },
-    mockTextLayers: [] as {
-      opts: Record<string, unknown>;
-      render: () => Promise<void>;
-      cancel: () => void;
-    }[],
-    MockIntersectionObserver,
-  };
-});
+    return {
+      mockPage: {
+        getViewport: vi.fn((opts?: { scale?: number }) => ({
+          width: 100,
+          height: 200,
+          scale: opts?.scale ?? 1,
+        })),
+        render: vi.fn(() => ({ promise: Promise.resolve() })),
+        getTextContent: vi.fn(async () => ({ items: [], styles: {} })),
+      },
+      mockTextLayers: [] as {
+        opts: Record<string, unknown>;
+        render: () => Promise<void>;
+        cancel: () => void;
+      }[],
+      MockIntersectionObserver,
+    };
+  },
+);
 
 vi.mock("pdfjs-dist", () => ({
   GlobalWorkerOptions: { workerSrc: "" },
@@ -160,7 +162,8 @@ describe("PdfPreviewPane PDF 预览", () => {
     ).toBe("0.1");
 
     // 第 2 页滚入视口同样渲染
-    io.trigger(w.find('.pdf-page-wrap[data-page="2"]').element);    await flushPromises();
+    io.trigger(w.find('.pdf-page-wrap[data-page="2"]').element);
+    await flushPromises();
     expect(mockTextLayers).toHaveLength(2);
     w.unmount();
     getContextSpy.mockRestore();

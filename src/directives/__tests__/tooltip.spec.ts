@@ -75,7 +75,9 @@ describe("useTooltip 显隐与指针守卫", () => {
     const el = attachEl();
     // happy-dom 下 getBoundingClientRect 为全 0：(0,0) 视为在包围盒内
     showTooltip("x", el.getBoundingClientRect(), el);
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 0, clientY: 0 }));
+    window.dispatchEvent(
+      new MouseEvent("mousemove", { clientX: 0, clientY: 0 }),
+    );
     expect(tooltip.visible).toBe(true);
     window.dispatchEvent(
       new MouseEvent("mousemove", { clientX: 100, clientY: 100 }),
@@ -89,7 +91,9 @@ describe("useTooltip 显隐与指针守卫", () => {
     const el = attachEl();
     showTooltip("x", el.getBoundingClientRect(), el);
     el.style.display = "none";
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 0, clientY: 0 }));
+    window.dispatchEvent(
+      new MouseEvent("mousemove", { clientX: 0, clientY: 0 }),
+    );
     vi.advanceTimersByTime(60);
     expect(tooltip.visible).toBe(false);
   });

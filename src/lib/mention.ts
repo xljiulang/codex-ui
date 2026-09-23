@@ -29,9 +29,7 @@ export function matchMentionToken(text: string): MentionToken | null {
   const kind = m[1] as "@" | "$";
   const token = m[2];
   const allowed =
-    kind === "$"
-      ? /^[\w.:\u4e00-\u9fff-]*$/
-      : /^[\w.\u4e00-\u9fff-]*$/;
+    kind === "$" ? /^[\w.:\u4e00-\u9fff-]*$/ : /^[\w.\u4e00-\u9fff-]*$/;
   if (!allowed.test(token)) return null;
   const triggerIdx =
     m.index + (m[0].startsWith("@") || m[0].startsWith("$") ? 0 : 1);
@@ -84,10 +82,16 @@ export function buildTurnInput(
     text: `${prompt}\n`,
     text_elements: [],
   };
-  const images: UserInput[] = attachments.filter((a) => a.type === "localImage");
+  const images: UserInput[] = attachments.filter(
+    (a) => a.type === "localImage",
+  );
   const skills: UserInput[] = attachments
     .filter((a) => a.type === "skill")
-    .map((a) => ({ type: "skill", name: a.name, path: toProtocolPath(a.path) }));
+    .map((a) => ({
+      type: "skill",
+      name: a.name,
+      path: toProtocolPath(a.path),
+    }));
   return [...images, text, ...skills];
 }
 

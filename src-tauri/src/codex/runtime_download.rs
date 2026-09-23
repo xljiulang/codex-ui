@@ -17,7 +17,7 @@ use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
 use crate::codex::app_server::CodexServer;
-use crate::codex::bundled::{BundleSpec, materialize};
+use crate::codex::bundled::{materialize, BundleSpec};
 
 /// 期望安装的运行时版本（含 poppler/PDF 工具链）。
 pub(crate) const RUNTIME_DOWNLOAD_VERSION: &str = "26.819.11345";
@@ -75,9 +75,11 @@ pub(crate) fn runtime_status(target: &Path) -> RuntimeStatus {
         Ok(t) => t,
         Err(_) => return RuntimeStatus::Missing,
     };
-    let installed = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|v| v.get("bundleVersion").and_then(|x| x.as_str()).map(str::to_owned));
+    let installed = serde_json::from_str::<Value>(&text).ok().and_then(|v| {
+        v.get("bundleVersion")
+            .and_then(|x| x.as_str())
+            .map(str::to_owned)
+    });
     match installed {
         Some(ver) if compare_versions(&ver, RUNTIME_DOWNLOAD_VERSION) == Ordering::Less => {
             RuntimeStatus::Older(ver)
@@ -91,9 +93,9 @@ pub(crate) fn runtime_status(target: &Path) -> RuntimeStatus {
 pub(crate) fn runtime_reason(target: &Path) -> Option<String> {
     match runtime_status(target) {
         RuntimeStatus::Missing => Some("runtime.json 不存在（未安装）".to_string()),
-        RuntimeStatus::Older(ver) => {
-            Some(format!("bundleVersion {ver} 旧于 {RUNTIME_DOWNLOAD_VERSION}"))
-        }
+        RuntimeStatus::Older(ver) => Some(format!(
+            "bundleVersion {ver} 旧于 {RUNTIME_DOWNLOAD_VERSION}"
+        )),
         RuntimeStatus::Unparsable => Some("runtime.json 无法解析 bundleVersion".to_string()),
         RuntimeStatus::Current(_) => None,
     }
@@ -145,22 +147,27 @@ pub(crate) async fn download_with_resume(
         "全新下载".to_string()
     };
     server
-        .push_log("info", format!("下载 codex-primary-runtime：{mode} · {url} → {}", dest.display()))
+        .push_log(
+            "info",
+            format!(
+                "下载 codex-primary-runtime：{mode} · {url} → {}",
+                dest.display()
+            ),
+        )
         .await;
 
     let mut req = client.get(url);
     if existing > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={existing}-"));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("下载请求失败: {e}"))?;
+    let resp = req.send().await.map_err(|e| format!("下载请求失败: {e}"))?;
     let status = resp.status();
 
     match status {
         status if status == reqwest::StatusCode::PARTIAL_CONTENT => {
-            server.push_log("info", "HTTP 206：断点续传".to_string()).await;
+            server
+                .push_log("info", "HTTP 206：断点续传".to_string())
+                .await;
             let mut file = tokio::fs::OpenOptions::new()
                 .append(true)
                 .open(dest)
@@ -168,9 +175,14 @@ pub(crate) async fn download_with_resume(
                 .map_err(|e| format!("打开缓存文件失败 {}: {e}", dest.display()))?;
             let mut total = existing;
             write_body(resp, &mut file, server, &mut total).await?;
-            file.flush().await.map_err(|e| format!("刷新缓存文件失败: {e}"))?;
+            file.flush()
+                .await
+                .map_err(|e| format!("刷新缓存文件失败: {e}"))?;
             server
-                .push_log("info", format!("下载完成，共 {total} 字节：{}", dest.display()))
+                .push_log(
+                    "info",
+                    format!("下载完成，共 {total} 字节：{}", dest.display()),
+                )
                 .await;
         }
         status if status == reqwest::StatusCode::OK => {
@@ -185,9 +197,14 @@ pub(crate) async fn download_with_resume(
                 .map_err(|e| format!("创建缓存文件失败 {}: {e}", dest.display()))?;
             let mut total = 0u64;
             write_body(resp, &mut file, server, &mut total).await?;
-            file.flush().await.map_err(|e| format!("刷新缓存文件失败: {e}"))?;
+            file.flush()
+                .await
+                .map_err(|e| format!("刷新缓存文件失败: {e}"))?;
             server
-                .push_log("info", format!("下载完成，共 {total} 字节：{}", dest.display()))
+                .push_log(
+                    "info",
+                    format!("下载完成，共 {total} 字节：{}", dest.display()),
+                )
                 .await;
         }
         status if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE => {
@@ -241,15 +258,26 @@ pub(crate) async fn ensure(spec: &BundleSpec, server: &CodexServer) -> Result<()
     if !is_gzip(&cache) {
         let _ = std::fs::remove_file(&cache);
         server
-            .push_log("warn", "下载的运行时归档 gzip 校验失败，已删除缓存，下次重下".to_string())
+            .push_log(
+                "warn",
+                "下载的运行时归档 gzip 校验失败，已删除缓存，下次重下".to_string(),
+            )
             .await;
         return Err("下载的运行时归档不是有效的 gzip 文件".into());
     }
-    server.push_log("info", "运行时归档 gzip 校验通过".to_string()).await;
+    server
+        .push_log("info", "运行时归档 gzip 校验通过".to_string())
+        .await;
 
     let target = spec.dest.join(spec.top);
     server
-        .push_log("info", format!("开始解压/安装 codex-primary-runtime 到 {}", target.display()))
+        .push_log(
+            "info",
+            format!(
+                "开始解压/安装 codex-primary-runtime 到 {}",
+                target.display()
+            ),
+        )
         .await;
     if let Err(e) = materialize(&cache, spec, &target, true) {
         let _ = std::fs::remove_file(&cache);
@@ -260,7 +288,13 @@ pub(crate) async fn ensure(spec: &BundleSpec, server: &CodexServer) -> Result<()
     }
     let _ = std::fs::remove_file(&cache);
     server
-        .push_log("info", format!("codex-primary-runtime 已安装到 {}，缓存已清理", target.display()))
+        .push_log(
+            "info",
+            format!(
+                "codex-primary-runtime 已安装到 {}，缓存已清理",
+                target.display()
+            ),
+        )
         .await;
     Ok(())
 }
@@ -327,16 +361,28 @@ mod tests {
 
     #[test]
     fn compare_versions_numeric_segments() {
-        assert_eq!(compare_versions("26.819.11345", "26.819.11345"), Ordering::Equal);
-        assert_eq!(compare_versions("26.426.12240", "26.819.11345"), Ordering::Less);
-        assert_eq!(compare_versions("26.819.11346", "26.819.11345"), Ordering::Greater);
+        assert_eq!(
+            compare_versions("26.819.11345", "26.819.11345"),
+            Ordering::Equal
+        );
+        assert_eq!(
+            compare_versions("26.426.12240", "26.819.11345"),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions("26.819.11346", "26.819.11345"),
+            Ordering::Greater
+        );
         assert_eq!(compare_versions("26.819", "26.819.0"), Ordering::Equal);
     }
 
     #[test]
     fn ensure_cache_dir_creates_parent() {
         let dir = TempDir::new().unwrap();
-        let dest = dir.path().join("codex-runtimes").join("codex-primary-runtime.tar.gz");
+        let dest = dir
+            .path()
+            .join("codex-runtimes")
+            .join("codex-primary-runtime.tar.gz");
         assert!(ensure_cache_dir(&dest).is_ok());
         assert!(dest.parent().unwrap().is_dir());
         assert!(!dest.exists());

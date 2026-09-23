@@ -7,7 +7,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, setToast: vi.fn() };
 });
 
@@ -94,7 +95,9 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
     expect(menu.exists()).toBe(true);
     expect(menu.find(".usage-menu-title").text()).toBe("上下文与 Token");
     expect(menu.find(".usage-menu-capsule-pct").text()).toBe("50%");
-    expect(menu.find(".usage-menu-line").text()).toContain("已用 5000 / 窗口 1万");
+    expect(menu.find(".usage-menu-line").text()).toContain(
+      "已用 5000 / 窗口 1万",
+    );
     expect(menu.find(".usage-menu-line").text()).toContain("剩余 5000");
     const compact = menu.find(".usage-menu-capsule-btn");
     expect(compact.exists()).toBe(true);
@@ -137,7 +140,11 @@ describe("ContextUsageMenu 上下文用量圆环与悬浮菜单", () => {
   });
 
   it("窗口未知时不画进度，菜单提示窗口大小未知但仍展示累计", async () => {
-    wrapper = await mountWith({ contextUsed: 3000, window: null, input: 12000 });
+    wrapper = await mountWith({
+      contextUsed: 3000,
+      window: null,
+      input: 12000,
+    });
     expect(wrapper.find(".ctx-ring-pct").exists()).toBe(false);
     expect(wrapper.find(".ctx-ring-bar").exists()).toBe(false);
     await wrapper.find(".ctx-ring-anchor").trigger("mouseenter");

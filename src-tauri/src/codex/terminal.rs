@@ -68,10 +68,7 @@ const CMD_STARTUP: &str = "chcp 65001 >nul & prompt $E]133;D$E\\$P$G ";
 
 /// 解析安装目录名的前导数字版本号（如 8 → 8、7-preview → 7）；无前导数字返回 None
 fn dir_major_version(name: &str) -> Option<u64> {
-    let digits: String = name
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
+    let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();
     if digits.is_empty() {
         None
     } else {
@@ -256,9 +253,7 @@ pub fn terminal_spawn(
         .map(PathBuf::from)
         .unwrap_or_default();
     if let Some(app_dir) = app_exe_dir() {
-        if let Some(joined) =
-            prepend_bin_and_runtime_path(&existing_path, &app_dir, &userprofile)
-        {
+        if let Some(joined) = prepend_bin_and_runtime_path(&existing_path, &app_dir, &userprofile) {
             cmd.env("PATH", joined);
         }
     }
@@ -349,9 +344,7 @@ pub fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
-    let session = guard
-        .get(&id)
-        .ok_or_else(|| format!("终端不存在: {id}"))?;
+    let session = guard.get(&id).ok_or_else(|| format!("终端不存在: {id}"))?;
     let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
     writer
         .write_all(data.as_bytes())
@@ -368,9 +361,7 @@ pub fn terminal_resize(
     rows: u16,
 ) -> Result<(), String> {
     let guard = state.0.lock().map_err(|e| e.to_string())?;
-    let session = guard
-        .get(&id)
-        .ok_or_else(|| format!("终端不存在: {id}"))?;
+    let session = guard.get(&id).ok_or_else(|| format!("终端不存在: {id}"))?;
     let master = session.master.lock().map_err(|e| e.to_string())?;
     master
         .resize(PtySize {
@@ -421,10 +412,7 @@ mod tests {
 
     /// 在根目录下伪造 PowerShell\<版本>\pwsh.exe 并返回其路径
     fn write_pwsh(root: &Path, version_dir: &str) -> PathBuf {
-        let exe = root
-            .join("PowerShell")
-            .join(version_dir)
-            .join("pwsh.exe");
+        let exe = root.join("PowerShell").join(version_dir).join("pwsh.exe");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(&exe, b"MZ").unwrap();
         exe
@@ -491,8 +479,8 @@ mod tests {
     #[test]
     fn spawn_rejects_invalid_cwd() {
         assert!(resolve_workspace_dir("relative/path").is_err());
-        let missing = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("no_such_dir_for_terminal_test");
+        let missing =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("no_such_dir_for_terminal_test");
         assert!(resolve_workspace_dir(missing.to_str().unwrap()).is_err());
     }
 
@@ -527,10 +515,7 @@ mod tests {
         with_envs(&[], || {
             let (prog, args) = shell_command("powershell");
             assert_eq!(prog, resolve_powershell());
-            assert_eq!(
-                args,
-                vec!["-NoLogo", "-NoExit", "-Command", PS_STARTUP]
-            );
+            assert_eq!(args, vec!["-NoLogo", "-NoExit", "-Command", PS_STARTUP]);
 
             let (prog, args) = shell_command("cmd");
             assert_eq!(prog, "cmd.exe");
@@ -568,14 +553,8 @@ mod tests {
         let stable = write_pwsh(root.path(), "7");
         let preview = write_pwsh(root.path(), "7-preview");
         set_modified(&stable, std::time::UNIX_EPOCH);
-        set_modified(
-            &preview,
-            std::time::UNIX_EPOCH + Duration::from_secs(1),
-        );
-        assert_eq!(
-            find_pwsh(&[root.path().to_path_buf()]).unwrap(),
-            preview
-        );
+        set_modified(&preview, std::time::UNIX_EPOCH + Duration::from_secs(1));
+        assert_eq!(find_pwsh(&[root.path().to_path_buf()]).unwrap(), preview);
     }
 
     #[test]
@@ -587,11 +566,7 @@ mod tests {
         set_modified(&a, std::time::UNIX_EPOCH);
         set_modified(&b, std::time::UNIX_EPOCH);
         assert_eq!(
-            find_pwsh(&[
-                root_a.path().to_path_buf(),
-                root_b.path().to_path_buf(),
-            ])
-            .unwrap(),
+            find_pwsh(&[root_a.path().to_path_buf(), root_b.path().to_path_buf(),]).unwrap(),
             a
         );
     }
@@ -614,10 +589,7 @@ mod tests {
         with_envs(
             &[("ProgramW6432", Some(&root_s)), ("ProgramFiles", None)],
             || {
-                assert_eq!(
-                    resolve_powershell(),
-                    exe.to_string_lossy().into_owned()
-                );
+                assert_eq!(resolve_powershell(), exe.to_string_lossy().into_owned());
             },
         );
     }
@@ -813,5 +785,4 @@ mod tests {
             "pty output missing Invoke-WebRequest UseBasicParsing default: {out}"
         );
     }
-
 }

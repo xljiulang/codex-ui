@@ -55,7 +55,9 @@ pub fn codex_snapshot(app_dir: &Path) -> Arc<Vec<Value>> {
 
 /// 磁盘读取期间后台可能已发布新快照；只允许首次读取填充空槽。
 fn publish_initial(path: &Path, entries: Arc<Vec<Value>>) -> Arc<Vec<Value>> {
-    let mut guard = snapshot_slot().lock().unwrap_or_else(|error| error.into_inner());
+    let mut guard = snapshot_slot()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     Arc::clone(guard.entry(path.to_path_buf()).or_insert(entries))
 }
 
@@ -81,10 +83,13 @@ fn remember(path: &Path, entries: Arc<Vec<Value>>) {
 /// 导出本机 codex 自带的官方条目并写入缓存；失败返回原因，调用方记日志并保留旧缓存。
 pub async fn refresh_codex_models(app_dir: &Path, codex: &Path) -> Result<(), String> {
     // 同路径刷新串行执行，避免旧导出迟到覆盖新发布、临时文件互相覆盖。
-    static REFRESH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    static REFRESH_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
+        OnceLock::new();
     let refresh_lock = {
-        let mut locks = REFRESH_LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
-            .lock().unwrap_or_else(|error| error.into_inner());
+        let mut locks = REFRESH_LOCKS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         Arc::clone(locks.entry(cache_path(app_dir)).or_default())
     };
     let _refresh_guard = refresh_lock.lock().await;
@@ -118,17 +123,32 @@ async fn wait_for_export(child: &mut Child, timeout: Duration) -> Result<Output,
     let mut output = Vec::new();
     let mut errors = Vec::new();
     let result = tokio::time::timeout(timeout, async {
-        tokio::try_join!(child.wait(), stdout.read_to_end(&mut output), stderr.read_to_end(&mut errors))
-    }).await;
+        tokio::try_join!(
+            child.wait(),
+            stdout.read_to_end(&mut output),
+            stderr.read_to_end(&mut errors)
+        )
+    })
+    .await;
     match result {
-        Ok(Ok((status, _, _))) => Ok(Output { status, stdout: output, stderr: errors }),
+        Ok(Ok((status, _, _))) => Ok(Output {
+            status,
+            stdout: output,
+            stderr: errors,
+        }),
         Ok(Err(error)) => {
             let _ = child.kill().await;
             Err(format!("执行 codex debug models 失败: {error}"))
         }
         Err(_) => {
-            child.kill().await.map_err(|error| format!("导出超时且终止子进程失败: {error}"))?;
-            Err(format!("codex debug models 超时（{}ms），子进程已终止", timeout.as_millis()))
+            child
+                .kill()
+                .await
+                .map_err(|error| format!("导出超时且终止子进程失败: {error}"))?;
+            Err(format!(
+                "codex debug models 超时（{}ms），子进程已终止",
+                timeout.as_millis()
+            ))
         }
     }
 }
@@ -147,7 +167,11 @@ fn store_export(app_dir: &Path, text: &str) -> Result<(), String> {
 /// 测试辅助：按正式校验路径写入导出缓存。
 #[cfg(test)]
 pub(crate) fn write_export_for_test(app_dir: &Path, models: Vec<Value>) {
-    store_export(app_dir, &serde_json::json!({ "models": models }).to_string()).unwrap();
+    store_export(
+        app_dir,
+        &serde_json::json!({ "models": models }).to_string(),
+    )
+    .unwrap();
 }
 
 /// 解析并校验 `codex debug models --bundled` 的输出：
@@ -179,7 +203,9 @@ fn parse_export(text: &str) -> Result<Vec<Value>, String> {
             .and_then(Value::as_str)
             .unwrap_or("");
         if template.trim().is_empty() {
-            return Err(format!("codex 模型目录条目 {slug} 缺少 instructions_template"));
+            return Err(format!(
+                "codex 模型目录条目 {slug} 缺少 instructions_template"
+            ));
         }
     }
     Ok(entries.clone())
@@ -195,22 +221,36 @@ mod tests {
     #[test]
     fn export_timeout_child() {
         if std::env::var_os("CODEX_UI_EXPORT_TIMEOUT_TEST").is_some() {
-            loop { std::thread::park(); }
+            loop {
+                std::thread::park();
+            }
         }
     }
 
     #[tokio::test]
     async fn export_timeout_terminates_and_reaps_child() {
         let mut command = Command::new(std::env::current_exe().unwrap());
-        command.args(["--exact", "codex::model_catalog::codex_models::tests::export_timeout_child"])
+        command
+            .args([
+                "--exact",
+                "codex::model_catalog::codex_models::tests::export_timeout_child",
+            ])
             .env("CODEX_UI_EXPORT_TIMEOUT_TEST", "1")
-            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
         #[cfg(windows)]
         command.creation_flags(CREATE_NO_WINDOW);
         let mut child = command.spawn().unwrap();
-        let error = wait_for_export(&mut child, Duration::from_millis(100)).await.unwrap_err();
+        let error = wait_for_export(&mut child, Duration::from_millis(100))
+            .await
+            .unwrap_err();
         assert!(error.contains("超时"));
-        assert!(child.try_wait().unwrap().is_some(), "超时后必须已回收子进程");
+        assert!(
+            child.try_wait().unwrap().is_some(),
+            "超时后必须已回收子进程"
+        );
     }
 
     #[test]
@@ -236,18 +276,25 @@ mod tests {
     #[test]
     fn captured_snapshot_is_shared_by_official_source_and_template() {
         let dir = tempdir().unwrap();
-        write_export_for_test(dir.path(), vec![json!({
-            "slug":"generation-old",
-            "node_repl_disabled": true,
-            "model_messages":{"instructions_template":"old"}
-        })]);
+        write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug":"generation-old",
+                "node_repl_disabled": true,
+                "model_messages":{"instructions_template":"old"}
+            })],
+        );
         let captured = codex_snapshot(dir.path());
-        write_export_for_test(dir.path(), vec![json!({
-            "slug":"generation-new",
-            "node_repl_disabled": false,
-            "model_messages":{"instructions_template":"new"}
-        })]);
-        let sources = super::super::sources::full_entry_sources(&captured, "https://relay.example.com");
+        write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug":"generation-new",
+                "node_repl_disabled": false,
+                "model_messages":{"instructions_template":"new"}
+            })],
+        );
+        let sources =
+            super::super::sources::full_entry_sources(&captured, "https://relay.example.com");
         assert!(sources[0].full_entry("generation-old").is_some());
         assert!(sources[0].full_entry("generation-new").is_none());
         let template = super::super::template::from_snapshot(&captured).unwrap();
@@ -263,11 +310,18 @@ mod tests {
     #[tokio::test]
     async fn refresh_failure_retains_previous_file_and_snapshot() {
         let dir = tempdir().unwrap();
-        write_export_for_test(dir.path(), vec![json!({
-            "slug":"old", "model_messages":{"instructions_template":"old"}
-        })]);
+        write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug":"old", "model_messages":{"instructions_template":"old"}
+            })],
+        );
         let before = std::fs::read(cache_path(dir.path())).unwrap();
-        assert!(refresh_codex_models(dir.path(), &dir.path().join("missing-codex.exe")).await.is_err());
+        assert!(
+            refresh_codex_models(dir.path(), &dir.path().join("missing-codex.exe"))
+                .await
+                .is_err()
+        );
         assert_eq!(std::fs::read(cache_path(dir.path())).unwrap(), before);
         assert_eq!(codex_snapshot(dir.path())[0]["slug"], json!("old"));
     }
@@ -288,7 +342,11 @@ mod tests {
     #[test]
     fn store_export_round_trips_valid_payload() {
         let dir = tempdir().unwrap();
-        store_export(dir.path(), &export_text(&["gpt-5.6-sol", "codex-auto-review"])).unwrap();
+        store_export(
+            dir.path(),
+            &export_text(&["gpt-5.6-sol", "codex-auto-review"]),
+        )
+        .unwrap();
 
         let entries = codex_snapshot(dir.path());
         assert_eq!(entries.len(), 2);
@@ -296,7 +354,10 @@ mod tests {
         assert!(cache_path(dir.path()).exists());
         // 快照与文件同源
         assert_eq!(codex_snapshot(dir.path()).len(), 2);
-        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.6-sol"));
+        assert_eq!(
+            template_base(dir.path()).unwrap()["slug"],
+            json!("gpt-5.6-sol")
+        );
     }
 
     #[test]
@@ -353,23 +414,38 @@ mod tests {
         // 磁盘缓存被删掉后仍能从快照读到（证明生成期只读内存，不再读盘/起子进程）
         std::fs::remove_file(cache_path(dir.path())).unwrap();
         assert_eq!(codex_snapshot(dir.path()).len(), 1);
-        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.6-sol"));
+        assert_eq!(
+            template_base(dir.path()).unwrap()["slug"],
+            json!("gpt-5.6-sol")
+        );
     }
 
     #[test]
     fn refresh_replaces_snapshot() {
         let dir = tempdir().unwrap();
-        write_export_for_test(dir.path(), vec![json!({
-            "slug": "gpt-5.6-sol",
-            "model_messages": { "instructions_template": "You are Codex" }
-        })]);
-        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.6-sol"));
+        write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.6-sol",
+                "model_messages": { "instructions_template": "You are Codex" }
+            })],
+        );
+        assert_eq!(
+            template_base(dir.path()).unwrap()["slug"],
+            json!("gpt-5.6-sol")
+        );
 
-        write_export_for_test(dir.path(), vec![json!({
-            "slug": "gpt-5.7-sol",
-            "model_messages": { "instructions_template": "You are Codex" }
-        })]);
+        write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug": "gpt-5.7-sol",
+                "model_messages": { "instructions_template": "You are Codex" }
+            })],
+        );
         assert_eq!(codex_snapshot(dir.path()).len(), 1);
-        assert_eq!(template_base(dir.path()).unwrap()["slug"], json!("gpt-5.7-sol"));
+        assert_eq!(
+            template_base(dir.path()).unwrap()["slug"],
+            json!("gpt-5.7-sol")
+        );
     }
 }

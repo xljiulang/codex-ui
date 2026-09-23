@@ -55,7 +55,11 @@ export function useChatScroll(
       if (isSelfScroll) return;
     }
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (e.isTrusted && dist > UNPIN_DIST_PX && el.scrollTop < lastStickScrollTop - 2) {
+    if (
+      e.isTrusted &&
+      dist > UNPIN_DIST_PX &&
+      el.scrollTop < lastStickScrollTop - 2
+    ) {
       // 用户向上滚动且距底部超过阈值才解除：
       // 轻微误触/抖动（< 32px）不会在流式期间误解除，单次正常滚轮一次即生效；
       // 程序化吸底写入与追赶窗口内的向下滚动不会误判
@@ -121,7 +125,9 @@ export function useChatScroll(
     el.classList.add("measuring");
     try {
       await nextTick();
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
       el.scrollTop = el.scrollHeight;
       lastStickScrollTop = el.scrollTop;
     } finally {
@@ -162,7 +168,10 @@ export function useChatScroll(
         scheduleScroll();
         deps.scheduleAnchorSync();
       });
-      scrollObserver.observe(scroller.value, { childList: true, subtree: true });
+      scrollObserver.observe(scroller.value, {
+        childList: true,
+        subtree: true,
+      });
       scroller.value.addEventListener("load", onImageLoad, true);
       lastStickScrollTop = scroller.value.scrollTop;
     }

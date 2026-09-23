@@ -13,22 +13,20 @@ vi.mock("@tauri-apps/api/app", () => ({
   getVersion: vi.fn(),
 }));
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, saveSettings: vi.fn() };
 });
 vi.mock("../../composables/useSessionFs", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useSessionFs")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useSessionFs")>();
   return { ...mod, openPathInApp: vi.fn() };
 });
 
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import SettingsView from "../SettingsView.vue";
-import {
-  saveSettings,
-  settleConfirm,
-  store,
-} from "../../composables/useCodex";
+import { saveSettings, settleConfirm, store } from "../../composables/useCodex";
 import { openPathInApp } from "../../composables/useSessionFs";
 import {
   activeTabId,
@@ -85,15 +83,21 @@ describe("SettingsView codex 可执行文件选择", () => {
     mockedSave.mockReset();
     mockedSave.mockResolvedValue(undefined);
     // 默认返回 undefined：验证 composable 的空快照守卫不会清掉已有状态
-    (mockedInvoke as ReturnType<typeof vi.fn>).mockImplementation(async () => undefined);
+    (mockedInvoke as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => undefined,
+    );
   });
 
   it("渲染只读路径与选择按钮，路径行不再渲染文本输入框", () => {
     const wrapper = mount(SettingsView);
     const row = wrapper.find(".codex-path-row");
     expect(row.exists()).toBe(true);
-    expect(row.find(".codex-path-value").text()).toContain("C:/tools/codex.exe");
-    expect(row.find("button.codex-pick-btn").attributes("data-tip")).toBe("选择文件");
+    expect(row.find(".codex-path-value").text()).toContain(
+      "C:/tools/codex.exe",
+    );
+    expect(row.find("button.codex-pick-btn").attributes("data-tip")).toBe(
+      "选择文件",
+    );
     expect(row.find('input[type="text"]').exists()).toBe(false);
   });
 
@@ -182,7 +186,8 @@ describe("SettingsView 模型配置", () => {
   const sampleModelConfig = {
     config_path: "C:/apps/codex-ui/.codex/config.toml",
     config_exists: true,
-    config_content: 'model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n',
+    config_content:
+      'model = "deepseek-v4-flash"\nmodel_reasoning_effort = "high"\n',
     model_catalog_json: "",
     model_catalog_path: "C:/apps/codex-ui/.codex/models.json",
     model_catalog_exists: true,
@@ -217,7 +222,11 @@ describe("SettingsView 模型配置", () => {
     config: {},
     layers: [
       {
-        name: { type: "user", file: "C:/apps/codex-ui/.codex/config.toml", profile: null },
+        name: {
+          type: "user",
+          file: "C:/apps/codex-ui/.codex/config.toml",
+          profile: null,
+        },
         version: "sha256:abc",
         config: {
           model: "deepseek-v4-flash",
@@ -260,7 +269,8 @@ describe("SettingsView 模型配置", () => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
         return Promise.resolve(sampleModelConfigRead);
       }
-      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "model_config_read")
+        return Promise.resolve(sampleModelConfig);
       if (cmd === "custom_instructions_read")
         return Promise.resolve(sampleAgentsState);
       return Promise.resolve(undefined);
@@ -312,11 +322,13 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain("AGENTS");
     // 模型快照已迁出：模型配置 Tab 只剩 1 张卡，快照 Tab 自带 1 张卡
     expect(
-      wrapper.findAll(".settings-section-model-config .model-config-card").length,
+      wrapper.findAll(".settings-section-model-config .model-config-card")
+        .length,
     ).toBe(1);
     expect(
-      wrapper.findAll(".settings-section-global-instructions .model-config-card")
-        .length,
+      wrapper.findAll(
+        ".settings-section-global-instructions .model-config-card",
+      ).length,
     ).toBe(1);
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
   });
@@ -326,7 +338,8 @@ describe("SettingsView 模型配置", () => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
         return Promise.resolve(sampleModelConfigRead);
       }
-      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "model_config_read")
+        return Promise.resolve(sampleModelConfig);
       if (cmd === "custom_instructions_read")
         return Promise.resolve(sampleAgentsState);
       if (cmd === "model_snapshots_list") return Promise.resolve(["dev"]);
@@ -362,9 +375,7 @@ describe("SettingsView 模型配置", () => {
         .exists(),
     ).toBe(false);
 
-    await wrapper
-      .find('button[aria-label="还原模型快照dev"]')
-      .trigger("click");
+    await wrapper.find('button[aria-label="还原模型快照dev"]').trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("model_snapshots_apply", {
       name: "dev",
@@ -395,7 +406,11 @@ describe("SettingsView 模型配置", () => {
           model_catalog: '{"models":[]}',
         });
       if (cmd === "custom_instructions_read")
-        return Promise.resolve({ ...sampleAgentsState, exists: true, content: "" });
+        return Promise.resolve({
+          ...sampleAgentsState,
+          exists: true,
+          content: "",
+        });
       return Promise.resolve(undefined);
     });
     const wrapper = mount(SettingsView);
@@ -404,7 +419,9 @@ describe("SettingsView 模型配置", () => {
     // 模型目录元数据与 AGENTS 均可编辑
     expect(textareas[0].attributes("disabled")).toBeUndefined();
     expect(
-      wrapper.find("textarea.custom-instructions-textarea").attributes("disabled"),
+      wrapper
+        .find("textarea.custom-instructions-textarea")
+        .attributes("disabled"),
     ).toBeUndefined();
     expect(wrapper.find(".model-config-missing").exists()).toBe(false);
     // 模型目录标题即文件链接（路径行已合并进标题），AGENTS 标题保留链接
@@ -414,8 +431,9 @@ describe("SettingsView 模型配置", () => {
     expect(catalogLinks.length).toBe(1);
     expect(catalogLinks[0].attributes("disabled")).toBeUndefined();
     expect(
-      wrapper.findAll(".settings-section-global-instructions .model-config-title-link")
-        .length,
+      wrapper.findAll(
+        ".settings-section-global-instructions .model-config-title-link",
+      ).length,
     ).toBe(1);
   });
 
@@ -444,7 +462,8 @@ describe("SettingsView 模型配置", () => {
     const batchWrite = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     );
     expect(batchWrite).toBeTruthy();
     expect(store.toast).toContain("模型配置已保存");
@@ -457,7 +476,9 @@ describe("SettingsView 模型配置", () => {
     const cards = wrapper.findAll(
       ".settings-section-global-instructions .model-config-card",
     );
-    await cards[0].find(".model-config-actions .model-config-save-btn").trigger("click");
+    await cards[0]
+      .find(".model-config-actions .model-config-save-btn")
+      .trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("custom_instructions_save", {
       content: "# AGENTS.md\n\nWindows 环境。\n",
@@ -482,9 +503,9 @@ describe("SettingsView 模型配置", () => {
       wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
     ).toBe(0);
-    expect(wrapper.find(".model-catalog-title-wrap").attributes("data-tip")).toBe(
-      "在编辑器中打开 C:/apps/codex-ui/.codex/models.json",
-    );
+    expect(
+      wrapper.find(".model-catalog-title-wrap").attributes("data-tip"),
+    ).toBe("在编辑器中打开 C:/apps/codex-ui/.codex/models.json");
     await links[0].trigger("click");
     await flushPromises();
     expect(mockedOpenPathInApp).toHaveBeenCalledWith(
@@ -518,9 +539,9 @@ describe("SettingsView 模型配置", () => {
       "model_catalog_json（模型目录）",
     );
     // 独立路径行已删除：路径与「保存时将新建」提示只在标题链接的 tooltip 中给出
-    expect(wrapper.find(".model-catalog-block .model-config-path").exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.find(".model-catalog-block .model-config-path").exists(),
+    ).toBe(false);
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
@@ -641,7 +662,9 @@ describe("SettingsView 模型配置", () => {
         (args as { method?: string } | undefined)?.method === "config/read",
     ).length;
     await wrapper
-      .find(".settings-section-model-config .model-config-card .model-config-reload-btn")
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-reload-btn",
+      )
       .trigger("click");
     await flushPromises();
     expect(
@@ -665,7 +688,9 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(
       wrapper
-        .find(".settings-section-model-config .model-config-card .model-config-reload-btn")
+        .find(
+          ".settings-section-model-config .model-config-card .model-config-reload-btn",
+        )
         .attributes("aria-label"),
     ).toBe("刷新");
     const agentsCard = wrapper.find(
@@ -681,7 +706,9 @@ describe("SettingsView 模型配置", () => {
       ([name]) => name === "custom_instructions_read",
     ).length;
     await wrapper
-      .find(".settings-section-model-config .model-config-card .model-config-reload-btn")
+      .find(
+        ".settings-section-model-config .model-config-card .model-config-reload-btn",
+      )
       .trigger("click");
     await flushPromises();
     await agentsCard.find(".model-config-reload-btn").trigger("click");
@@ -765,9 +792,9 @@ describe("SettingsView 模型配置", () => {
     expect(
       wrapper.find(".model-catalog-title-wrap").attributes("data-tip"),
     ).toContain("models.json");
-    expect(wrapper.find(".model-catalog-block .model-config-path").exists()).toBe(
-      false,
-    );
+    expect(
+      wrapper.find(".model-catalog-block .model-config-path").exists(),
+    ).toBe(false);
     expect(
       wrapper.findAll(".settings-section-model-config .model-config-path-link")
         .length,
@@ -792,7 +819,8 @@ describe("SettingsView 模型配置", () => {
     // 点击候选回填到模型名称
     await opts[0].trigger("click");
     expect(
-      (wrapper.find("#model-config-ui-model").element as HTMLInputElement).value,
+      (wrapper.find("#model-config-ui-model").element as HTMLInputElement)
+        .value,
     ).toBe("m1");
   });
 
@@ -807,7 +835,9 @@ describe("SettingsView 模型配置", () => {
   it("渲染提供方列表与激活单选", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    const rows = wrapper.findAll(
+      ".model-provider-row:not(.model-provider-none)",
+    );
     expect(rows.length).toBe(2);
     expect(rows[0].text()).toContain("DeepSeek");
     expect(rows[0].text()).toContain("deepseek");
@@ -833,8 +863,10 @@ describe("SettingsView 模型配置", () => {
     await noneRadio.setValue();
     expect((noneRadio.element as HTMLInputElement).checked).toBe(true);
     expect(
-      (wrapper.find('input[name="model-provider-active"]').element as HTMLInputElement)
-        .value,
+      (
+        wrapper.find('input[name="model-provider-active"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("");
   });
 
@@ -842,7 +874,9 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .find('.model-provider-row.model-provider-none input[name="model-provider-active"]')
+      .find(
+        '.model-provider-row.model-provider-none input[name="model-provider-active"]',
+      )
       .setValue();
     await wrapper
       .find(
@@ -854,7 +888,8 @@ describe("SettingsView 模型配置", () => {
     const batchWrite = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     );
     expect(batchWrite).toBeTruthy();
     const edits = (
@@ -880,7 +915,8 @@ describe("SettingsView 模型配置", () => {
         read.layers[0].config.model_providers.other.wire_api = "chat";
         return Promise.resolve(read);
       }
-      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "model_config_read")
+        return Promise.resolve(sampleModelConfig);
       if (cmd === "custom_instructions_read")
         return Promise.resolve(sampleAgentsState);
       return Promise.resolve(undefined);
@@ -915,22 +951,24 @@ describe("SettingsView 模型配置", () => {
       if (cmd === "codex_rpc" && args?.method === "config/read") {
         return Promise.resolve({
           ...sampleModelConfigRead,
-          layers: [{
-            name: { type: "user" },
-            config: {
-              model: "gpt-5.6-luna",
-              model_reasoning_effort: "max",
-              model_provider: "newapi",
-              model_providers: {
-                newapi: {
-                  name: "NewAPI",
-                  base_url: "https://newpi.bond/v1",
-                  wire_api: "responses",
-                  requires_openai_auth: true,
+          layers: [
+            {
+              name: { type: "user" },
+              config: {
+                model: "gpt-5.6-luna",
+                model_reasoning_effort: "max",
+                model_provider: "newapi",
+                model_providers: {
+                  newapi: {
+                    name: "NewAPI",
+                    base_url: "https://newpi.bond/v1",
+                    wire_api: "responses",
+                    requires_openai_auth: true,
+                  },
                 },
               },
             },
-          }],
+          ],
         });
       }
       if (cmd === "model_config_read")
@@ -970,12 +1008,8 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
     expect(wrapper.find(".model-provider-form").exists()).toBe(true);
-    await wrapper
-      .find('input[placeholder="如 my-provider"]')
-      .setValue("first");
-    await wrapper
-      .find('input[placeholder="如 DeepSeek"]')
-      .setValue("First");
+    await wrapper.find('input[placeholder="如 my-provider"]').setValue("first");
+    await wrapper.find('input[placeholder="如 DeepSeek"]').setValue("First");
     await wrapper
       .find('input[placeholder="https://api.example.com/v1"]')
       .setValue("https://first.example.com/v1");
@@ -996,11 +1030,15 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
-    await wrapper.find('input[placeholder="如 my-provider"]').setValue("deepseek");
+    await wrapper
+      .find('input[placeholder="如 my-provider"]')
+      .setValue("deepseek");
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     expect(wrapper.text()).toContain("提供方标识已存在");
-    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
+    expect(
+      wrapper.findAll(".model-provider-row:not(.model-provider-none)").length,
+    ).toBe(2);
   });
 
   it("新增提供方以弹窗呈现：标题、遮罩与表单均在弹窗内", async () => {
@@ -1010,7 +1048,9 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
     expect(wrapper.find(".modal-title").text()).toBe("添加模型提供方");
-    expect(wrapper.find(".modal-body .model-provider-form").exists()).toBe(true);
+    expect(wrapper.find(".modal-body .model-provider-form").exists()).toBe(
+      true,
+    );
     expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("确认");
   });
 
@@ -1024,7 +1064,9 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     expect(wrapper.find(".modal-title").text()).toBe("编辑模型提供方");
     expect(
-      wrapper.find('input[placeholder="如 my-provider"]').attributes("disabled"),
+      wrapper
+        .find('input[placeholder="如 my-provider"]')
+        .attributes("disabled"),
     ).toBeDefined();
     expect(wrapper.find(".modal-foot .btn.primary").text()).toBe("确认");
   });
@@ -1043,13 +1085,17 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".modal-close").trigger("click");
     await flushPromises();
     expect(wrapper.find(".modal-mask").exists()).toBe(false);
-    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
+    expect(
+      wrapper.findAll(".model-provider-row:not(.model-provider-none)").length,
+    ).toBe(2);
     // 重新打开表单复位
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
     expect(
-      (wrapper.find('input[placeholder="如 my-provider"]')
-        .element as HTMLInputElement).value,
+      (
+        wrapper.find('input[placeholder="如 my-provider"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("");
     // 取消关闭
     await wrapper.find(".modal-foot .btn:not(.primary)").trigger("click");
@@ -1060,12 +1106,16 @@ describe("SettingsView 模型配置", () => {
   it("编辑提供方后保存调用 config/batchWrite", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    const rows = wrapper.findAll(
+      ".model-provider-row:not(.model-provider-none)",
+    );
     await rows[1].find(".provider-row-edit").trigger("click");
     await flushPromises();
     expect(wrapper.find(".model-provider-form").exists()).toBe(true);
     expect(
-      wrapper.find('input[placeholder="如 my-provider"]').attributes("disabled"),
+      wrapper
+        .find('input[placeholder="如 my-provider"]')
+        .attributes("disabled"),
     ).toBeDefined();
     await wrapper
       .find('input[placeholder="https://api.example.com/v1"]')
@@ -1073,13 +1123,16 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     await wrapper
-      .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
+      .find(
+        ".settings-section-model-config .model-config-actions .model-config-save-btn",
+      )!
       .trigger("click");
     await flushPromises();
     const saveCall = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     );
     expect(saveCall).toBeTruthy();
     const edits = (
@@ -1113,16 +1166,18 @@ describe("SettingsView 模型配置", () => {
   it("激活项与非激活项都可删除，删除激活项后清空激活", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
-    const delBtns = rows.map(
-      (r) => r.find(".provider-row-delete")!,
+    const rows = wrapper.findAll(
+      ".model-provider-row:not(.model-provider-none)",
     );
+    const delBtns = rows.map((r) => r.find(".provider-row-delete")!);
     expect(delBtns[0].attributes("disabled")).toBeUndefined();
     expect(delBtns[1].attributes("disabled")).toBeUndefined();
     expect(delBtns[1].classes()).toContain("danger");
     await delBtns[0].trigger("click");
     await flushPromises();
-    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(1);
+    expect(
+      wrapper.findAll(".model-provider-row:not(.model-provider-none)").length,
+    ).toBe(1);
   });
 
   it("不再展示固定值 UI", async () => {
@@ -1169,14 +1224,17 @@ describe("SettingsView 模型配置", () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     await wrapper
-      .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
+      .find(
+        ".settings-section-model-config .model-config-actions .model-config-save-btn",
+      )!
       .trigger("click");
     await flushPromises();
     expect(
       mockedInvoke.mock.calls.some(
         ([cmd, args]) =>
           cmd === "codex_rpc" &&
-          (args as { method?: string } | undefined)?.method === "config/batchWrite",
+          (args as { method?: string } | undefined)?.method ===
+            "config/batchWrite",
       ),
     ).toBe(true);
   });
@@ -1217,13 +1275,16 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     const save = () =>
       wrapper
-        .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
+        .find(
+          ".settings-section-model-config .model-config-actions .model-config-save-btn",
+        )!
         .trigger("click");
     const lastAuthEdits = () => {
       const calls = mockedInvoke.mock.calls.filter(
         ([cmd, args]) =>
           cmd === "codex_rpc" &&
-          (args as { method?: string } | undefined)?.method === "config/batchWrite",
+          (args as { method?: string } | undefined)?.method ===
+            "config/batchWrite",
       );
       const last = calls[calls.length - 1];
       return (
@@ -1238,9 +1299,9 @@ describe("SettingsView 模型配置", () => {
     expect(
       edits.find((e) => e.keyPath === "preferred_auth_method")?.value,
     ).toBe(null);
-    expect(
-      edits.find((e) => e.keyPath === "forced_login_method")?.value,
-    ).toBe(null);
+    expect(edits.find((e) => e.keyPath === "forced_login_method")?.value).toBe(
+      null,
+    );
 
     await pickAppSelect(wrapper, "model-config-ui-auth", "apikey");
     await pickAppSelect(wrapper, "model-config-ui-forced", "api");
@@ -1250,21 +1311,20 @@ describe("SettingsView 模型配置", () => {
     expect(
       edits.find((e) => e.keyPath === "preferred_auth_method")?.value,
     ).toBe("apikey");
-    expect(
-      edits.find((e) => e.keyPath === "forced_login_method")?.value,
-    ).toBe("api");
+    expect(edits.find((e) => e.keyPath === "forced_login_method")?.value).toBe(
+      "api",
+    );
   });
 
   it("模型目录内容非法 JSON 时提示并阻断保存（不写 config）", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    await wrapper
-      .find("textarea.model-config-textarea")
-      .setValue("{ not json");
+    await wrapper.find("textarea.model-config-textarea").setValue("{ not json");
     const batchCallsBefore = mockedInvoke.mock.calls.filter(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     ).length;
     await wrapper
       .find(
@@ -1305,7 +1365,8 @@ describe("SettingsView 模型配置", () => {
     const saveCall = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     );
     expect(saveCall).toBeTruthy();
     const edits = (
@@ -1361,9 +1422,7 @@ describe("SettingsView 模型配置", () => {
     await wrapper
       .find('input[placeholder="如 my-provider"]')
       .setValue("env-only");
-    await wrapper
-      .find('input[placeholder="如 DeepSeek"]')
-      .setValue("Env Only");
+    await wrapper.find('input[placeholder="如 DeepSeek"]').setValue("Env Only");
     await wrapper
       .find('input[placeholder="https://api.example.com/v1"]')
       .setValue("https://env.example.com/v1");
@@ -1372,7 +1431,9 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).not.toContain("已检测到全局 OPENAI_API_KEY");
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
-    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(1);
+    expect(
+      wrapper.findAll(".model-provider-row:not(.model-provider-none)").length,
+    ).toBe(1);
   });
 
   it("提供方表单缺少名称/base_url/认证时逐字段提示", async () => {
@@ -1380,8 +1441,7 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
-    const add = () =>
-      wrapper.find(".provider-form-submit").trigger("click");
+    const add = () => wrapper.find(".provider-form-submit").trigger("click");
     await wrapper.find('input[placeholder="如 my-provider"]').setValue("x");
     await add();
     expect(wrapper.text()).toContain("请填写提供方名称");
@@ -1395,7 +1455,9 @@ describe("SettingsView 模型配置", () => {
     expect(wrapper.text()).toContain(
       "请填写 env_key、API Key 或选择 ChatGPT/OpenAI 登录认证",
     );
-    expect(wrapper.findAll(".model-provider-row:not(.model-provider-none)").length).toBe(2);
+    expect(
+      wrapper.findAll(".model-provider-row:not(.model-provider-none)").length,
+    ).toBe(2);
   });
 
   it("勾选 ChatGPT/OpenAI 登录认证后隐藏 env_key / API Key 字段，取消恢复", async () => {
@@ -1403,7 +1465,8 @@ describe("SettingsView 模型配置", () => {
     await flushPromises();
     await wrapper.find(".model-config-add-btn").trigger("click");
     await flushPromises();
-    const envInput = () => wrapper.find('input[placeholder="如 OPENAI_API_KEY"]');
+    const envInput = () =>
+      wrapper.find('input[placeholder="如 OPENAI_API_KEY"]');
     const tokenInput = () => wrapper.find('input[placeholder="API Key"]');
     expect(envInput().exists()).toBe(true);
     expect(tokenInput().exists()).toBe(true);
@@ -1420,7 +1483,9 @@ describe("SettingsView 模型配置", () => {
   it("勾选 ChatGPT/OpenAI 登录认证并保存后清空 env_key / experimental_bearer_token", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
-    const rows = wrapper.findAll(".model-provider-row:not(.model-provider-none)");
+    const rows = wrapper.findAll(
+      ".model-provider-row:not(.model-provider-none)",
+    );
     await rows[1].find(".provider-row-edit").trigger("click");
     await flushPromises();
     await wrapper.find("#provider-openai-auth").setValue(true);
@@ -1428,13 +1493,16 @@ describe("SettingsView 模型配置", () => {
     await wrapper.find(".provider-form-submit").trigger("click");
     await flushPromises();
     await wrapper
-      .find(".settings-section-model-config .model-config-actions .model-config-save-btn")!
+      .find(
+        ".settings-section-model-config .model-config-actions .model-config-save-btn",
+      )!
       .trigger("click");
     await flushPromises();
     const saveCall = mockedInvoke.mock.calls.find(
       ([cmd, args]) =>
         cmd === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
     );
     expect(saveCall).toBeTruthy();
     const edits = (
@@ -1442,10 +1510,7 @@ describe("SettingsView 模型配置", () => {
         params: { edits: { keyPath: string; value: unknown }[] };
       }
     ).params.edits;
-    const providers = edits[0].value as Record<
-      string,
-      Record<string, unknown>
-    >;
+    const providers = edits[0].value as Record<string, Record<string, unknown>>;
     expect(edits[0].keyPath).toBe("model_providers");
     expect(providers.other).toEqual({
       name: "Other",
@@ -1518,16 +1583,18 @@ describe("SettingsView 动态工具", () => {
     await nav.trigger("click");
     await flushPromises();
 
-    const firstSwitch = wrapper
-      .findAll(".dynamic-tool-row input[type='checkbox']")[0];
+    const firstSwitch = wrapper.findAll(
+      ".dynamic-tool-row input[type='checkbox']",
+    )[0];
     await firstSwitch.setValue(false);
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith({
       dynamic_tools_disabled: ["codexui.get_usage"],
     });
 
-    const disabledResult = wrapper
-      .findAll(".dynamic-tool-row input[type='checkbox']")[0];
+    const disabledResult = wrapper.findAll(
+      ".dynamic-tool-row input[type='checkbox']",
+    )[0];
     await disabledResult.setValue(true);
     await flushPromises();
     expect(mockedSave).toHaveBeenCalledWith({ dynamic_tools_disabled: [] });
@@ -1812,9 +1879,9 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       ([name]) => name === "skills_read",
     ).length;
     expect(after).toBe(before + 1);
-    expect(
-      mockedInvoke.mock.calls[mockedInvoke.mock.calls.length - 1],
-    ).toEqual(["skills_read", { forceReload: true }]);
+    expect(mockedInvoke.mock.calls[mockedInvoke.mock.calls.length - 1]).toEqual(
+      ["skills_read", { forceReload: true }],
+    );
   });
 
   it("添加技能取消（null）：不 toast、不刷新", async () => {
@@ -1965,9 +2032,10 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     expect(wrapper.findAll(".mcp-server-row").length).toBe(2);
     expect(wrapper.text()).toContain("filesystem");
     expect(wrapper.text()).toContain("remote");
-    expect(
-      wrapper.findAll(".mcp-server-type").map((t) => t.text()),
-    ).toEqual(["stdio", "http"]);
+    expect(wrapper.findAll(".mcp-server-type").map((t) => t.text())).toEqual([
+      "stdio",
+      "http",
+    ]);
     expect(wrapper.find(".mcp-row-delete").classes()).toContain("danger");
     expect(
       wrapper.find(".settings-section-mcp .mcp-config-add-btn").exists(),
@@ -1995,8 +2063,9 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     // 新增默认勾选 deferred（直接内联），direct/code_mode 不勾选
     expect(
       (
-        wrapper.find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
-          .element as HTMLInputElement
+        wrapper.find(
+          '.mcp-server-form .mcp-omit-option input[value="deferred"]',
+        ).element as HTMLInputElement
       ).checked,
     ).toBe(true);
     expect(
@@ -2243,8 +2312,10 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       wrapper.find("#mcp-form-transport .app-select-label").text().trim(),
     ).toBe("stdio");
     expect(
-      (wrapper.find('.mcp-server-form input[placeholder="如 filesystem"]')
-        .element as HTMLInputElement).value,
+      (
+        wrapper.find('.mcp-server-form input[placeholder="如 filesystem"]')
+          .element as HTMLInputElement
+      ).value,
     ).toBe("");
     await wrapper.find(".modal-foot .btn:not(.primary)").trigger("click");
     await flushPromises();
@@ -2298,8 +2369,14 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     const batchWriteCall = mockedInvoke.mock.calls.find(
       ([name, args]) =>
         name === "codex_rpc" &&
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
-    ) as [string, { params: { edits: { value: Record<string, Record<string, unknown>> }[] } }];
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
+    ) as [
+      string,
+      {
+        params: { edits: { value: Record<string, Record<string, unknown>> }[] };
+      },
+    ];
     const value = batchWriteCall[1].params.edits[0].value;
     expect(value.xapi.omit_tools_from).toBeUndefined();
     expect(value.xapi).toEqual({ command: "npx" });
@@ -2312,7 +2389,11 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
           config: {},
           layers: [
             {
-              name: { type: "user", file: "C:/x/.codex/config.toml", profile: null },
+              name: {
+                type: "user",
+                file: "C:/x/.codex/config.toml",
+                profile: null,
+              },
               version: "x",
               config: {
                 mcp_servers: {
@@ -2366,14 +2447,16 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await flushPromises();
     expect(
       (
-        wrapper.find('.mcp-server-form .mcp-omit-option input[value="code_mode"]')
-          .element as HTMLInputElement
+        wrapper.find(
+          '.mcp-server-form .mcp-omit-option input[value="code_mode"]',
+        ).element as HTMLInputElement
       ).checked,
     ).toBe(true);
     expect(
       (
-        wrapper.find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
-          .element as HTMLInputElement
+        wrapper.find(
+          '.mcp-server-form .mcp-omit-option input[value="deferred"]',
+        ).element as HTMLInputElement
       ).checked,
     ).toBe(false);
     await wrapper.find(".modal-foot .btn:not(.primary)").trigger("click");
@@ -2386,14 +2469,16 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     await flushPromises();
     expect(
       (
-        wrapper.find('.mcp-server-form .mcp-omit-option input[value="deferred"]')
-          .element as HTMLInputElement
+        wrapper.find(
+          '.mcp-server-form .mcp-omit-option input[value="deferred"]',
+        ).element as HTMLInputElement
       ).checked,
     ).toBe(false);
     expect(
       (
-        wrapper.find('.mcp-server-form .mcp-omit-option input[value="code_mode"]')
-          .element as HTMLInputElement
+        wrapper.find(
+          '.mcp-server-form .mcp-omit-option input[value="code_mode"]',
+        ).element as HTMLInputElement
       ).checked,
     ).toBe(false);
   });
@@ -2520,14 +2605,15 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
       "读取指定路径的文本文件",
     );
     expect(wrapper.findAll(".mcp-detail-schema")).toHaveLength(2);
-    expect(wrapper.find(".mcp-detail-schema pre").text()).toContain(
-      '"path"',
-    );
+    expect(wrapper.find(".mcp-detail-schema pre").text()).toContain('"path"');
   });
 
   it("MCP 详情资源 Tab：分组渲染并复制 URI", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
-    const clipboardDesc = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const clipboardDesc = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText },
       configurable: true,
@@ -2633,7 +2719,9 @@ describe("SettingsView 设置标签行为", () => {
 
   it("个性化 / 全局指令 / 模型配置 / 技能管理 / MCP管理 / 插件管理六个分区均渲染", () => {
     wrapper = mount(SettingsView);
-    const titles = wrapper.findAll(".settings-section-title").map((s) => s.text());
+    const titles = wrapper
+      .findAll(".settings-section-title")
+      .map((s) => s.text());
     expect(titles).toContain("个性化");
     expect(titles).toContain("基础设置");
     expect(titles).toContain("全局指令");
@@ -2672,15 +2760,16 @@ describe("SettingsView 设置标签行为", () => {
     expect(items[9].classes()).not.toContain("active");
     expect(items[10].classes()).not.toContain("active");
     expect(items[11].classes()).not.toContain("active");
-    const personal = wrapper
-      .find(".settings-section-personalization")
+    const personal = wrapper.find(".settings-section-personalization")
       .element as HTMLElement;
-    const globalInstructions = wrapper
-      .find(".settings-section-global-instructions")
+    const globalInstructions = wrapper.find(
+      ".settings-section-global-instructions",
+    ).element as HTMLElement;
+    const skills = wrapper.find(".settings-section-skills")
       .element as HTMLElement;
-    const skills = wrapper.find(".settings-section-skills").element as HTMLElement;
     const mcp = wrapper.find(".settings-section-mcp").element as HTMLElement;
-    const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
+    const plugins = wrapper.find(".settings-section-plugins")
+      .element as HTMLElement;
     expect(personal.style.display).not.toBe("none");
     expect(globalInstructions.style.display).toBe("none");
     expect(skills.style.display).toBe("none");
@@ -2695,10 +2784,11 @@ describe("SettingsView 设置标签行为", () => {
     await pluginItem.trigger("click");
     expect(items[0].classes()).not.toContain("active");
     expect(pluginItem.classes()).toContain("active");
-    const globalInstructions = wrapper
-      .find(".settings-section-global-instructions")
+    const globalInstructions = wrapper.find(
+      ".settings-section-global-instructions",
+    ).element as HTMLElement;
+    const plugins = wrapper.find(".settings-section-plugins")
       .element as HTMLElement;
-    const plugins = wrapper.find(".settings-section-plugins").element as HTMLElement;
     expect(globalInstructions.style.display).toBe("none");
     expect(plugins.style.display).not.toBe("none");
   });
@@ -2734,9 +2824,12 @@ describe("SettingsView 设置标签行为", () => {
     wrapper = mount(SettingsView);
     await flushPromises();
     const about = wrapper.find(".settings-section-about");
-    expect(
-      about.findAll(".about-row label").map((l) => l.text()),
-    ).toEqual(["应用版本", "codex CLI 版本", "微信接入", "技术栈"]);
+    expect(about.findAll(".about-row label").map((l) => l.text())).toEqual([
+      "应用版本",
+      "codex CLI 版本",
+      "微信接入",
+      "技术栈",
+    ]);
     expect(about.findAll(".about-value")[2].text()).toBe(
       "ilink bot API · 协议版本 1.1.0（ClawBot 通道）",
     );
@@ -2765,7 +2858,6 @@ describe("SettingsView 设置标签行为", () => {
       .map((v) => v.text());
     expect(values[1]).toBe("未知版本");
   });
-
 });
 
 describe("SettingsView 毛玻璃主题外观开关", () => {
@@ -2781,7 +2873,9 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     const wrapper = mount(SettingsView);
     const input = wrapper.find("#glass").element as HTMLInputElement;
     expect(input.checked).toBe(true);
-    const head = wrapper.find(".settings-section-personalization .theme-row-head");
+    const head = wrapper.find(
+      ".settings-section-personalization .theme-row-head",
+    );
     expect(head.find(".switch-text").text()).toBe("毛玻璃主题外观");
     expect(head.find(".switch input").attributes("id")).toBe("glass");
     // 文字在左、开关在右：头部第一个 label 是文字标签，开关紧随其后
@@ -2797,11 +2891,17 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
     );
     expect(rows).toHaveLength(3);
     // 文字在左、开关在右：switch 里的 input 与文字标签通过 id/for 关联（点文字也能切换）
-    expect(rows[0].find(".switch > input").attributes("id")).toBe("error-notify");
-    expect(rows[1].find(".switch > input").attributes("id")).toBe("interaction-notify");
+    expect(rows[0].find(".switch > input").attributes("id")).toBe(
+      "error-notify",
+    );
+    expect(rows[1].find(".switch > input").attributes("id")).toBe(
+      "interaction-notify",
+    );
     expect(rows[2].find(".switch > input").attributes("id")).toBe("enter");
     expect(rows[0].find(".switch-text").attributes("for")).toBe("error-notify");
-    expect(rows[1].find(".switch-text").attributes("for")).toBe("interaction-notify");
+    expect(rows[1].find(".switch-text").attributes("for")).toBe(
+      "interaction-notify",
+    );
     expect(rows[2].find(".switch-text").attributes("for")).toBe("enter");
     // 个性化里不再有原生复选框行
     expect(
@@ -2829,7 +2929,9 @@ describe("SettingsView 毛玻璃主题外观开关", () => {
 
     await wrapper.find("#interaction-notify").setValue(false);
     await flushPromises();
-    expect(mockedSave).toHaveBeenCalledWith({ interaction_notify_enabled: false });
+    expect(mockedSave).toHaveBeenCalledWith({
+      interaction_notify_enabled: false,
+    });
 
     await wrapper.find("#enter").setValue(false);
     await flushPromises();
@@ -2927,12 +3029,7 @@ describe("SettingsView 默认权限", () => {
       menu!.querySelectorAll<HTMLElement>(".app-select-option"),
     );
     expect(opts.map((o) => o.textContent?.trim())).toEqual(
-      expect.arrayContaining([
-        "只读访问",
-        "请求批准",
-        "帮我批准",
-        "完全访问",
-      ]),
+      expect.arrayContaining(["只读访问", "请求批准", "帮我批准", "完全访问"]),
     );
     const selected = opts.find((o) => o.classList.contains("selected"));
     expect(selected?.textContent?.trim()).toBe("请求批准");
@@ -2941,9 +3038,7 @@ describe("SettingsView 默认权限", () => {
 
   it("切换默认权限后立即保存", async () => {
     const wrapper = mount(SettingsView);
-    await wrapper
-      .find("button.default-permission-select")
-      .trigger("click");
+    await wrapper.find("button.default-permission-select").trigger("click");
     await nextTick();
     const target = Array.from(
       document.body.querySelectorAll<HTMLElement>(".app-select-option"),
@@ -3221,7 +3316,10 @@ describe("SettingsView 插件管理", () => {
               name: "browser",
               installed: true,
               enabled: true,
-              interface: { displayName: "Browser", shortDescription: "浏览器控制" },
+              interface: {
+                displayName: "Browser",
+                shortDescription: "浏览器控制",
+              },
             },
             {
               id: "pdf",
@@ -3282,7 +3380,10 @@ describe("SettingsView 插件管理", () => {
               installed: true,
               enabled: true,
               version: "1.2.0",
-              interface: { displayName: "Browser", shortDescription: "浏览器控制" },
+              interface: {
+                displayName: "Browser",
+                shortDescription: "浏览器控制",
+              },
             },
             {
               id: "pdf",
@@ -3376,7 +3477,7 @@ describe("SettingsView 插件管理", () => {
     // 默认停在「个性化」分区，插件分区 v-show 隐藏、offsetHeight 恒为 0：
     // 隐藏期测量无效，列表不应写入 max-height（修复前此处会因 h=0 被清空且不再重算）
     const list = wrapper.find(".installed-plugin-list");
-    expect((list.attributes("style") ?? "")).not.toContain("max-height");
+    expect(list.attributes("style") ?? "").not.toContain("max-height");
 
     const heightSpy = vi
       .spyOn(HTMLElement.prototype, "offsetHeight", "get")
@@ -3390,9 +3491,7 @@ describe("SettingsView 插件管理", () => {
       await navItem!.trigger("click");
       await flushPromises();
       await nextTick();
-      expect((list.attributes("style") ?? "")).toContain(
-        "max-height: 150px",
-      );
+      expect(list.attributes("style") ?? "").toContain("max-height: 150px");
     } finally {
       heightSpy.mockRestore();
     }
@@ -3475,7 +3574,9 @@ describe("SettingsView 插件管理", () => {
     });
     wrapper = mount(SettingsView);
     await flushPromises();
-    expect(wrapper.find(".plugin-load-error").text()).toContain("git clone 失败");
+    expect(wrapper.find(".plugin-load-error").text()).toContain(
+      "git clone 失败",
+    );
   });
 
   it("带本地路径的市场插件安装传 marketplacePath", async () => {
@@ -3570,7 +3671,8 @@ describe("SettingsView 插件管理", () => {
       mockedInvoke.mock.calls.filter(
         ([cmd, args]) =>
           cmd === "codex_rpc" &&
-          (args as { method?: string } | undefined)?.method === "plugin/install",
+          (args as { method?: string } | undefined)?.method ===
+            "plugin/install",
       );
     expect(installCalls()).toHaveLength(0);
 
@@ -3612,7 +3714,8 @@ describe("SettingsView 插件管理", () => {
       mockedInvoke.mock.calls.some(
         ([cmd, args]) =>
           cmd === "codex_rpc" &&
-          (args as { method?: string } | undefined)?.method === "plugin/install",
+          (args as { method?: string } | undefined)?.method ===
+            "plugin/install",
       ),
     ).toBe(false);
   });
@@ -3642,7 +3745,8 @@ describe("SettingsView 插件管理", () => {
       mockedInvoke.mock.calls.some(
         ([cmd, args]) =>
           cmd === "codex_rpc" &&
-          (args as { method?: string } | undefined)?.method === "plugin/install",
+          (args as { method?: string } | undefined)?.method ===
+            "plugin/install",
       ),
     ).toBe(false);
   });
@@ -3980,9 +4084,7 @@ describe("SettingsView 插件管理", () => {
     expect(
       wrapper.find(".plugin-market-add input").attributes("placeholder"),
     ).toBe("Git URL 或本地绝对路径");
-    await wrapper
-      .find(".plugin-market-add input")
-      .setValue("owner/repo");
+    await wrapper.find(".plugin-market-add input").setValue("owner/repo");
     await wrapper.find(".plugin-market-add .btn").trigger("click");
     await flushPromises();
     expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
@@ -4016,7 +4118,9 @@ describe("SettingsView 插件管理", () => {
     await flushPromises();
     await wrapper.find(".plugin-marketplace-head").trigger("click");
     expect(wrapper.text()).toContain("管理员已禁用");
-    expect(wrapper.find(".plugin-install-btn").attributes("disabled")).toBeDefined();
+    expect(
+      wrapper.find(".plugin-install-btn").attributes("disabled"),
+    ).toBeDefined();
   });
 
   it("插件带远程图标时渲染 img 且 src 正确", async () => {
@@ -4207,7 +4311,8 @@ describe("SettingsView 按钮图标", () => {
           ],
         };
       }
-      if (cmd === "model_config_read") return Promise.resolve(sampleModelConfig);
+      if (cmd === "model_config_read")
+        return Promise.resolve(sampleModelConfig);
       if (cmd === "custom_instructions_read")
         return Promise.resolve(sampleAgentsState);
       if (cmd === "codex_rpc" && args?.method === "config/read") {

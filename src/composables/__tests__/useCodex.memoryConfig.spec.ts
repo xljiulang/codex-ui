@@ -68,7 +68,8 @@ describe("useCodex/memoryConfig", () => {
     await saveMemoryConfig({ enable: true, allowToolGenerate: true });
     const batch = mockedInvoke.mock.calls.find(
       ([, args]) =>
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+        "config/batchWrite",
     );
     expect(batch).toBeTruthy();
     const params = (batch![1] as { params: unknown }).params as {
@@ -104,7 +105,8 @@ describe("useCodex/memoryConfig", () => {
     await saveMemoryConfig({ enable: false, allowToolGenerate: false });
     const batch = mockedInvoke.mock.calls.find(
       ([, args]) =>
-        (args as { method?: string } | undefined)?.method === "config/batchWrite",
+        (args as { method?: string } | undefined)?.method ===
+        "config/batchWrite",
     );
     const params = (batch![1] as { params: unknown }).params as {
       edits: { keyPath: string; value: Record<string, unknown> }[];

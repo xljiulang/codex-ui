@@ -7,7 +7,6 @@ import { activeSessionTab } from "./sessionState";
 import { store } from "./store";
 import type { SessionTab } from "./types";
 
-
 export function isActiveItem(item: ThreadItem): boolean {
   return (
     item.streaming === true ||
@@ -17,14 +16,12 @@ export function isActiveItem(item: ThreadItem): boolean {
   );
 }
 
-
 export function bumpActive(threadId: string, delta: number) {
   store.activeWorkByThread[threadId] = Math.max(
     0,
     (store.activeWorkByThread[threadId] ?? 0) + delta,
   );
 }
-
 
 export function upsertItem(threadId: string, item: ThreadItem) {
   const arr = (store.itemsByThread[threadId] ??= []);
@@ -48,8 +45,10 @@ export function upsertItem(threadId: string, item: ThreadItem) {
   store.itemsRev++;
 }
 
-
-export function findItem(threadId: string, itemId: string): ThreadItem | undefined {
+export function findItem(
+  threadId: string,
+  itemId: string,
+): ThreadItem | undefined {
   return (store.itemsByThread[threadId] ?? []).find((x) => x.id === itemId);
 }
 
@@ -65,7 +64,6 @@ export function getOrCreateItem(
   upsertItem(threadId, created);
   return created;
 }
-
 
 export function flattenTurns(turns?: Turn[]): ThreadItem[] {
   if (!turns) return [];
@@ -87,15 +85,15 @@ export function flattenTurns(turns?: Turn[]): ThreadItem[] {
   return out;
 }
 
-
 interface TurnsListPage {
   data: Turn[];
   nextCursor: string | null;
 }
 
-
 /** 用 thread/turns/list(itemsView=full) 拉取历史的完整工具/命令项 */
-export async function loadFullItems(threadId: string): Promise<ThreadItem[] | null> {
+export async function loadFullItems(
+  threadId: string,
+): Promise<ThreadItem[] | null> {
   const turns: Turn[] = [];
   let cursor: string | null = null;
   try {
@@ -124,7 +122,6 @@ export async function loadFullItems(threadId: string): Promise<ThreadItem[] | nu
   return flattenTurns(turns);
 }
 
-
 /**
  * 会话工作区解析（所有入口共用，避免优先级不一致）：
  * 有会话时以会话工作区为准（忽略残留的 newSessionWorkspace），无会话（未打开/创建任何
@@ -135,10 +132,11 @@ export async function loadFullItems(threadId: string): Promise<ThreadItem[] | nu
 export function resolveSessionWorkspace(tab?: SessionTab): string {
   const session = tab ?? activeSessionTab();
   if (!session) return "";
-  const cwd = session.threadId ? session.workspace : session.newSessionWorkspace;
+  const cwd = session.threadId
+    ? session.workspace
+    : session.newSessionWorkspace;
   return cwd?.trim() || "";
 }
-
 
 /**
  * 当前工作区：由活动编辑器标签决定（文件/diff/预览/终端标签由 EditorPane 写入

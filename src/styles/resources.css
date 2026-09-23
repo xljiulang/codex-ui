@@ -9,7 +9,9 @@
   border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color var(--ease), border-color var(--ease);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease);
   position: relative;
 }
 
@@ -72,7 +74,9 @@
   color: var(--accent);
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--ease), background-color var(--ease);
+  transition:
+    opacity var(--ease),
+    background-color var(--ease);
   z-index: 1;
 }
 

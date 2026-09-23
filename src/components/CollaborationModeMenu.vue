@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { activeSessionTab } from "../composables/useCodex";
-import { COLLABORATION_MODES, type CollaborationMode } from "../lib/collaborationModes";
+import {
+  COLLABORATION_MODES,
+  type CollaborationMode,
+} from "../lib/collaborationModes";
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -31,7 +34,11 @@ function choose(id: CollaborationMode["id"]) {
         <div class="mode-label">{{ m.label }}</div>
         <div class="mode-desc">{{ m.desc }}</div>
       </span>
-      <span v-if="activeSessionTab()?.collaborationMode === m.id" class="mode-check">✓</span>
+      <span
+        v-if="activeSessionTab()?.collaborationMode === m.id"
+        class="mode-check"
+        >✓</span
+      >
     </button>
   </div>
 </template>

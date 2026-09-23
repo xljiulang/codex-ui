@@ -1,19 +1,21 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::io::Read;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::codex::app_server::app_exe_dir;
+use crate::codex::file_icon::{icon_data_uri, icon_data_uri_for_ext, DEFAULT_ICON_SIZE};
+use crate::codex::path_util::{
+    clean_path, is_inside_path, norm_key, rel_path_of as shared_rel_path_of,
+};
+use crate::codex::util::{resolve_workspace_dir, spawn_blocking_timeout, BlockingError};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use crate::codex::app_server::app_exe_dir;
-use crate::codex::path_util::{clean_path, is_inside_path, norm_key, rel_path_of as shared_rel_path_of};
-use crate::codex::file_icon::{DEFAULT_ICON_SIZE, icon_data_uri, icon_data_uri_for_ext};
-use crate::codex::util::{BlockingError, resolve_workspace_dir, spawn_blocking_timeout};
 
 /// 会话资源条目（camelCase 序列化，供前端直接使用）
 #[derive(Debug, Clone, Serialize)]
@@ -167,7 +169,11 @@ fn entry_from_path(root: &Path, path: &Path) -> Result<FsEntry, String> {
         size: if is_dir { None } else { Some(meta.len()) },
         modified_at_ms: ts_ms(meta.modified().ok()),
         created_at_ms: ts_ms(meta.created().ok()),
-        child_count: if is_dir { Some(visible_child_count(path)) } else { None },
+        child_count: if is_dir {
+            Some(visible_child_count(path))
+        } else {
+            None
+        },
     })
 }
 
@@ -189,8 +195,8 @@ fn list_impl(root: &Path, dir: &Path) -> Result<Vec<FsEntry>, String> {
         return Err(format!("不是目录: {}", clean_path(dir)));
     }
     let mut entries = Vec::new();
-    let rd = std::fs::read_dir(&dir_c)
-        .map_err(|e| format!("读取目录失败 {}: {e}", clean_path(dir)))?;
+    let rd =
+        std::fs::read_dir(&dir_c).map_err(|e| format!("读取目录失败 {}: {e}", clean_path(dir)))?;
     for item in rd.flatten() {
         let path = item.path();
         let name = item.file_name().to_string_lossy().into_owned();
@@ -370,12 +376,7 @@ fn parse_rg_json(stdout: &str, root: &Path, limit: usize) -> Vec<RgHit> {
 }
 
 /// 执行一次 rg 内容搜索；rg 缺失/执行失败/超时均由调用方转为静默空结果。
-fn search_rg_impl(
-    root: &Path,
-    query: &str,
-    limit: usize,
-    rg: Option<&Path>,
-) -> RgSearchResult {
+fn search_rg_impl(root: &Path, query: &str, limit: usize, rg: Option<&Path>) -> RgSearchResult {
     let q = query.trim();
     let Some(rg) = rg else {
         return RgSearchResult {
@@ -446,11 +447,9 @@ fn delete_impl(root: &Path, path: &Path) -> Result<(), String> {
     let meta = std::fs::symlink_metadata(&c)
         .map_err(|e| format!("读取元信息失败 {}: {e}", clean_path(&c)))?;
     if meta.file_type().is_dir() {
-        std::fs::remove_dir_all(&c)
-            .map_err(|e| format!("删除目录失败 {}: {e}", clean_path(&c)))?;
+        std::fs::remove_dir_all(&c).map_err(|e| format!("删除目录失败 {}: {e}", clean_path(&c)))?;
     } else {
-        std::fs::remove_file(&c)
-            .map_err(|e| format!("删除文件失败 {}: {e}", clean_path(&c)))?;
+        std::fs::remove_file(&c).map_err(|e| format!("删除文件失败 {}: {e}", clean_path(&c)))?;
     }
     Ok(())
 }
@@ -461,8 +460,8 @@ fn copy_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     if meta.file_type().is_dir() {
         std::fs::create_dir_all(dst)
             .map_err(|e| format!("创建目录失败 {}: {e}", clean_path(dst)))?;
-        let rd = std::fs::read_dir(src)
-            .map_err(|e| format!("读取目录失败 {}: {e}", clean_path(src)))?;
+        let rd =
+            std::fs::read_dir(src).map_err(|e| format!("读取目录失败 {}: {e}", clean_path(src)))?;
         for item in rd.flatten() {
             copy_recursive(&item.path(), &dst.join(item.file_name()))?;
         }
@@ -506,7 +505,10 @@ fn paste_impl(root: &Path, dest_dir: &Path, sources: &[String]) -> Result<Vec<Fs
             .canonicalize()
             .map_err(|e| format!("无法访问源 {}: {e}", clean_path(&src_p)))?;
         if is_inside_path(&src_c, &dest_c) {
-            return Err(format!("不能把「{}」粘贴到自身或子目录", clean_path(&src_c)));
+            return Err(format!(
+                "不能把「{}」粘贴到自身或子目录",
+                clean_path(&src_c)
+            ));
         }
         let name = src_c
             .file_name()
@@ -722,8 +724,8 @@ fn read_impl(root: &Path, path: &Path) -> Result<TextFileContent, String> {
     if meta.len() > MAX_EDIT_BYTES {
         return Err("文件过大，暂不支持编辑".into());
     }
-    let bytes = std::fs::read(&target)
-        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    let bytes =
+        std::fs::read(&target).map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
     let (content, valid_utf8) = match String::from_utf8(bytes) {
         Ok(s) => (s, true),
         Err(e) => (String::from_utf8_lossy(e.as_bytes()).into_owned(), false),
@@ -958,10 +960,13 @@ fn read_bytes_impl(root: &Path, path: &Path, max_bytes: u64) -> Result<Vec<u8>, 
         return Err(format!("不是文件: {}", clean_path(&target)));
     }
     if meta.len() > max_bytes {
-        return Err(format!("文件过大，暂不支持预览（上限 {} MiB）", max_bytes / (1024 * 1024)));
+        return Err(format!(
+            "文件过大，暂不支持预览（上限 {} MiB）",
+            max_bytes / (1024 * 1024)
+        ));
     }
-    let bytes = std::fs::read(&target)
-        .map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
+    let bytes =
+        std::fs::read(&target).map_err(|e| format!("无法读取文件 {}: {e}", clean_path(&target)))?;
     Ok(bytes)
 }
 
@@ -999,7 +1004,9 @@ fn icons_impl(root: &Path, requests: &[IconRequest], size: u32) -> Vec<IconResul
                 .ok()
                 // SHGetFileInfo 无法处理 canonicalize 的 \\?\ 前缀路径，先清洗为标准路径
                 .and_then(|p| {
-                    icon_data_uri(Path::new(&clean_path(&p)), size).ok().flatten()
+                    icon_data_uri(Path::new(&clean_path(&p)), size)
+                        .ok()
+                        .flatten()
                 });
             IconResult {
                 path: r.path.clone(),
@@ -1017,7 +1024,11 @@ pub async fn session_fs_icons(
 ) -> Result<Vec<IconResult>, String> {
     run_blocking(60, move || {
         let root_p = resolve_workspace_dir(&workspace)?;
-        Ok(icons_impl(&root_p, &requests, size.unwrap_or(DEFAULT_ICON_SIZE)))
+        Ok(icons_impl(
+            &root_p,
+            &requests,
+            size.unwrap_or(DEFAULT_ICON_SIZE),
+        ))
     })
     .await
 }
@@ -1051,9 +1062,7 @@ pub async fn session_fs_icon_for_ext(ext: String) -> Result<Option<String>, Stri
 
 fn path_under_dot_dir(root: &Path, p: &Path) -> bool {
     shared_rel_path_of(root, p)
-        .map(|rel| {
-            rel.split('/').any(is_noise_dir)
-        })
+        .map(|rel| rel.split('/').any(is_noise_dir))
         .unwrap_or(false)
 }
 
@@ -1136,11 +1145,15 @@ pub async fn session_fs_watch_start(
         }
     });
 
-    state.0.lock().map_err(|e| e.to_string())?.replace(WatchHandle {
-        _watcher: watcher,
-        _sender: tx,
-        root: root_c,
-    });
+    state
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .replace(WatchHandle {
+            _watcher: watcher,
+            _sender: tx,
+            root: root_c,
+        });
     Ok(())
 }
 
@@ -1183,13 +1196,11 @@ mod tests {
         ];
         let out = icons_impl(&root, &req, 16);
         assert_eq!(out.len(), 2);
-        assert!(
-            out[0]
-                .data_uri
-                .as_deref()
-                .unwrap_or("")
-                .starts_with("data:image/png;base64,")
-        );
+        assert!(out[0]
+            .data_uri
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("data:image/png;base64,"));
         assert!(out[1].data_uri.is_none());
         let _ = tmp;
     }
@@ -1199,11 +1210,10 @@ mod tests {
     fn icon_for_ext_returns_txt_system_icon() {
         // 不存在的路径仍按扩展名返回系统 TXT 图标
         let uri = icon_for_ext_impl(".txt").unwrap();
-        assert!(
-            uri.as_deref()
-                .unwrap_or("")
-                .starts_with("data:image/png;base64,")
-        );
+        assert!(uri
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("data:image/png;base64,"));
     }
 
     #[test]
@@ -1253,10 +1263,7 @@ mod tests {
 
         let e1 = create_file_impl(&root, &dir).unwrap();
         assert_eq!(e1.name, "新建文本文件.txt");
-        assert_eq!(
-            std::fs::read(dir.join("新建文本文件.txt")).unwrap(),
-            b""
-        );
+        assert_eq!(std::fs::read(dir.join("新建文本文件.txt")).unwrap(), b"");
 
         // 同名冲突 → (2)、(3)、(4) 递增
         let e2 = create_file_impl(&root, &dir).unwrap();
@@ -1527,9 +1534,22 @@ mod tests {
         std::fs::create_dir_all(root.join("src").join("nested")).unwrap();
         assert!(path_under_dot_dir(&root, &root.join(".git").join("index")));
         assert!(path_under_dot_dir(&root, &root.join(".vs").join("x")));
-        assert!(path_under_dot_dir(&root, &root.join("node_modules").join("pkg").join("index.js")));
-        assert!(path_under_dot_dir(&root, &root.join("src").join("nested").join("node_modules").join("a.js")));
-        assert!(!path_under_dot_dir(&root, &root.join("src").join("nested").join("a.js")));
+        assert!(path_under_dot_dir(
+            &root,
+            &root.join("node_modules").join("pkg").join("index.js")
+        ));
+        assert!(path_under_dot_dir(
+            &root,
+            &root
+                .join("src")
+                .join("nested")
+                .join("node_modules")
+                .join("a.js")
+        ));
+        assert!(!path_under_dot_dir(
+            &root,
+            &root.join("src").join("nested").join("a.js")
+        ));
         assert!(!path_under_dot_dir(&root, &root.join("a.txt")));
     }
 
@@ -1559,16 +1579,29 @@ mod tests {
         // 复制目录到另一目录
         let e = copy_impl(&root, &root.join("src"), &root.join("node_modules")).unwrap();
         assert!(e.is_dir);
-        assert!(root.join("node_modules").join("src").join("main.ts").exists());
+        assert!(root
+            .join("node_modules")
+            .join("src")
+            .join("main.ts")
+            .exists());
         // 防止复制到自身
         assert!(copy_impl(&root, &root.join("src"), &root.join("src")).is_err());
         // paste 支持外部源（此处用同一 root 内文件模拟）
-        let created = paste_impl(&root, &root.join("src"), &[root.join("b.txt").to_string_lossy().into_owned()])
-            .unwrap();
+        let created = paste_impl(
+            &root,
+            &root.join("src"),
+            &[root.join("b.txt").to_string_lossy().into_owned()],
+        )
+        .unwrap();
         assert_eq!(created.len(), 1);
         assert!(root.join("src").join("b.txt").exists());
         // 防止粘贴到自身
-        assert!(paste_impl(&root, &root.join("src"), &[root.join("src").to_string_lossy().into_owned()]).is_err());
+        assert!(paste_impl(
+            &root,
+            &root.join("src"),
+            &[root.join("src").to_string_lossy().into_owned()]
+        )
+        .is_err());
     }
 
     #[test]
@@ -1623,7 +1656,11 @@ mod tests {
         // 目录移动到另一目录（递归）
         let e = move_impl(&root, &root.join("src"), &root.join("node_modules")).unwrap();
         assert!(e.is_dir);
-        assert!(root.join("node_modules").join("src").join("main.ts").exists());
+        assert!(root
+            .join("node_modules")
+            .join("src")
+            .join("main.ts")
+            .exists());
         assert!(!root.join("src").exists());
 
         // 移动到自身所在目录（目标已存在）
@@ -1784,22 +1821,23 @@ mod tests {
         // 正常写入：base64 解码后覆盖原文件
         let payload = [0x50u8, 0x4b, 0x03, 0x04, 0x14, 0x00]; // PK\x03\x04
         std::fs::write(root.join("doc.docx"), b"old").unwrap();
-        let e =
-            write_bytes_impl(&root, &root.join("doc.docx"), &STANDARD.encode(payload), 1024)
-                .unwrap();
+        let e = write_bytes_impl(
+            &root,
+            &root.join("doc.docx"),
+            &STANDARD.encode(payload),
+            1024,
+        )
+        .unwrap();
         assert_eq!(e.name, "doc.docx");
         assert_eq!(std::fs::read(root.join("doc.docx")).unwrap(), payload);
         // 目录拒绝
         assert!(
-            write_bytes_impl(&root, &root.join("src"), &STANDARD.encode(payload), 1024)
-                .is_err()
+            write_bytes_impl(&root, &root.join("src"), &STANDARD.encode(payload), 1024).is_err()
         );
         // 越界拒绝
         let outside = tmp.path().parent().unwrap().join("outside.docx");
         std::fs::write(&outside, b"x").unwrap();
-        assert!(
-            write_bytes_impl(&root, &outside, &STANDARD.encode(payload), 1024).is_err()
-        );
+        assert!(write_bytes_impl(&root, &outside, &STANDARD.encode(payload), 1024).is_err());
         let _ = std::fs::remove_file(&outside);
         // 非法 base64 拒绝
         let err =

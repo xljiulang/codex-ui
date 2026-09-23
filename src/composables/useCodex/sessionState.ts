@@ -11,15 +11,12 @@ import { store } from "./store";
 import { setToast } from "./toast";
 import type { SessionTab } from "./types";
 
-
 let sessionTabSeq = 0;
-
 
 /** 会话标签唯一 id：线程绑定前/后均稳定（多标签下编辑器标签 key 不变） */
 function nextSessionTabId(): string {
   return `session-${Date.now()}-${++sessionTabSeq}`;
 }
-
 
 /** 新对话（未绑定线程）标签的默认状态 */
 export function freshSessionTab(): SessionTab {
@@ -61,33 +58,29 @@ export function freshSessionTab(): SessionTab {
   } as SessionTab);
 }
 
-
 /** 按线程查找已打开的会话标签（唯一性约束：至多一个） */
 export function findSessionTabByThread(
   threadId: string | null | undefined,
 ): SessionTab | undefined {
   if (!threadId) return undefined;
   return tabs.find(
-    (t): t is SessionTab => t.kind === TabKind.Session && t.threadId === threadId,
+    (t): t is SessionTab =>
+      t.kind === TabKind.Session && t.threadId === threadId,
   );
 }
-
 
 /** 该线程是否已作为会话标签打开 */
 export function isThreadOpen(threadId: string): boolean {
   return !!findSessionTabByThread(threadId);
 }
 
-
 /** 该线程的会话标签是否正在后台/前台运行回合 */
 export function isThreadRunning(threadId: string): boolean {
   return !!findSessionTabByThread(threadId)?.turnActive;
 }
 
-
 /** live 字段当前投影的会话标签 id（活动标签为会话时随切换更新；文件/终端活动时保持最近会话） */
 let activeSessionTabId: string | null = null;
-
 
 /** 当前激活的会话标签（无则 null）：优先当前显示标签，否则最近投影的会话 */
 export function activeSessionTab(): SessionTab | null {
@@ -98,12 +91,10 @@ export function activeSessionTab(): SessionTab | null {
   return s && s.kind === TabKind.Session ? s : null;
 }
 
-
 /** 统一列表中的会话标签集合（事件路由/批量处理用） */
 export function allSessionTabs(): SessionTab[] {
   return tabs.filter((t): t is SessionTab => t.kind === TabKind.Session);
 }
-
 
 /**
  * 会话标签显示标题：仅取标题内容（名称/摘要，无线程的新对话兜底“新建会话”）。
@@ -116,7 +107,6 @@ export function sessionTabTitle(tab: SessionTab): string {
   return tab.name || (summary ? threadTitle(summary) : "新建会话");
 }
 
-
 /** 乐观复位被停止/关闭的标签回合状态（interrupt 异步完成前先复位展示） */
 export function markSessionTabStopped(tab: SessionTab | null | undefined) {
   if (!tab) return;
@@ -127,7 +117,6 @@ export function markSessionTabStopped(tab: SessionTab | null | undefined) {
   tab.goalStatus = null;
   tab.goalArmed = false;
 }
-
 
 /**
  * 当前显示标签为会话时维护 activeSessionTabId（最近会话回退）；
@@ -144,13 +133,11 @@ function trackActiveSessionTabId() {
   }
 }
 
-
 // 活动标签变化（切换/关闭）时更新最近会话标签 id；flush sync 保证切换后立即可用
 watch(activeTab, () => trackActiveSessionTabId(), {
   immediate: true,
   flush: "sync",
 });
-
 
 /**
  * 无条件移除会话标签（线程不存在等异常路径）：处理活动切换、最近会话回退与缓存清理。
@@ -165,7 +152,8 @@ export function dropSessionTab(tab: SessionTab) {
   if (wasActive) {
     const next = sessions[sidx + 1] ?? sessions[sidx - 1] ?? null;
     if (next) activateTab(next.id);
-    else if (tabs.length > 0) activateTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
+    else if (tabs.length > 0)
+      activateTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
     else activeTabId.value = "";
   }
   if (
@@ -275,8 +263,8 @@ export async function saveSessionState(
     await invoke("sessions_update", {
       threadId: tab.threadId,
       permissionMode: tab.permissionMode,
-      model: resolved ? resolved.model ?? null : tab.model,
-      effort: resolved ? resolved.effort ?? null : tab.effort,
+      model: resolved ? (resolved.model ?? null) : tab.model,
+      effort: resolved ? (resolved.effort ?? null) : tab.effort,
     });
   } catch {
     // 写失败不阻断 UI（下次变更或会话打开会再尝试）
@@ -311,7 +299,8 @@ export function applyResumedSettings(tab: SessionTab, res: unknown): void {
     }
   }
   if (!modelRejected && "reasoningEffort" in r) {
-    const effort = typeof r.reasoningEffort === "string" ? r.reasoningEffort : null;
+    const effort =
+      typeof r.reasoningEffort === "string" ? r.reasoningEffort : null;
     if (effort !== tab.effort) {
       tab.effort = effort;
       changed = true;
@@ -328,7 +317,6 @@ export async function removeSessionState(threadId: string): Promise<void> {
     // 清空失败静默（记录残留无害）
   }
 }
-
 
 /** 仅测试用：清空会话标签状态 */
 export function __resetSessionTabsForTest() {

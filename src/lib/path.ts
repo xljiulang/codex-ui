@@ -24,7 +24,10 @@ export function normalizeFsPath(p: string): string {
 
 /** 比较/键形态：统一反斜杠、去尾分隔符（含盘符根）、小写 */
 export function normalizePathKey(p: string): string {
-  return stripWindowsVerbatim(p).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return stripWindowsVerbatim(p)
+    .replace(/\//g, "\\")
+    .replace(/\\+$/, "")
+    .toLowerCase();
 }
 
 /** 路径相等（Windows 大小写不敏感，正/反斜杠等价） */

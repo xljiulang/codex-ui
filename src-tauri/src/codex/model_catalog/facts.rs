@@ -3,10 +3,10 @@
 //! 数据源只负责「提取 → 记录」，覆盖逻辑集中在 [`ModelFacts::merge_from`]，
 //! 因此新增数据源不需要改动渲染器。
 
-use std::collections::BTreeMap;
+use super::matching::MatchKind;
 use serde::Serialize;
 use serde_json::Value;
-use super::matching::MatchKind;
+use std::collections::BTreeMap;
 
 /// 匹配准确度优先于来源权威性，相似度仅用于模糊命中。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -18,7 +18,11 @@ pub struct FieldQuality {
 
 impl From<u8> for FieldQuality {
     fn from(authority: u8) -> Self {
-        Self { reliability: 4, authority, similarity: 1000 }
+        Self {
+            reliability: 4,
+            authority,
+            similarity: 1000,
+        }
     }
 }
 
@@ -36,16 +40,29 @@ pub struct FieldProvenance {
 }
 
 impl FieldProvenance {
-    pub fn new(source: &'static str, matched_id: &str, kind: MatchKind, quality: FieldQuality) -> Self {
+    pub fn new(
+        source: &'static str,
+        matched_id: &str,
+        kind: MatchKind,
+        quality: FieldQuality,
+    ) -> Self {
         Self {
-            source, matched_id: matched_id.to_string(), match_kind: kind,
-            provider_id: None, value: Value::Null, quality,
+            source,
+            matched_id: matched_id.to_string(),
+            match_kind: kind,
+            provider_id: None,
+            value: Value::Null,
+            quality,
             reason: "按匹配准确度、来源权威性和相似度自动选取".to_string(),
         }
     }
 
     fn stable_key(&self) -> (&str, &str, &str) {
-        (self.source, &self.matched_id, self.provider_id.as_deref().unwrap_or(""))
+        (
+            self.source,
+            &self.matched_id,
+            self.provider_id.as_deref().unwrap_or(""),
+        )
     }
 }
 
@@ -77,7 +94,12 @@ pub struct ModelFacts {
 
 impl ModelFacts {
     /// 按来源质量逐字段合并：低质量源只补空缺，不覆盖高质量值。
-    pub fn merge_from(&mut self, source: &'static str, quality: impl Into<FieldQuality>, other: ModelFacts) {
+    pub fn merge_from(
+        &mut self,
+        source: &'static str,
+        quality: impl Into<FieldQuality>,
+        other: ModelFacts,
+    ) {
         let quality = quality.into();
         self.warnings.extend(other.warnings.iter().cloned());
         macro_rules! merge_fields {
@@ -147,14 +169,30 @@ impl ModelFacts {
                 }
             )+};
         }
-        resolve!(context_window, max_context_window, input_token_limit, input_modalities,
-            reasoning_levels, default_reasoning_level, description, supports_reasoning,
-            support_verbosity, supports_search_tool, supports_tool_calls);
+        resolve!(
+            context_window,
+            max_context_window,
+            input_token_limit,
+            input_modalities,
+            reasoning_levels,
+            default_reasoning_level,
+            description,
+            supports_reasoning,
+            support_verbosity,
+            supports_search_tool,
+            supports_tool_calls
+        );
         result
     }
 
     /// 给每个有值字段附上此次模型匹配身份，保留来源内部的 provider 证据。
-    pub fn attach_match(&mut self, source: &'static str, id: &str, kind: MatchKind, quality: FieldQuality) {
+    pub fn attach_match(
+        &mut self,
+        source: &'static str,
+        id: &str,
+        kind: MatchKind,
+        quality: FieldQuality,
+    ) {
         macro_rules! attach {
             ($($field:ident),+ $(,)?) => {$(
                 if let Some(value) = &self.$field {
@@ -166,9 +204,19 @@ impl ModelFacts {
                 }
             )+};
         }
-        attach!(context_window, max_context_window, input_token_limit, input_modalities,
-            reasoning_levels, default_reasoning_level, description, supports_reasoning,
-            support_verbosity, supports_search_tool, supports_tool_calls);
+        attach!(
+            context_window,
+            max_context_window,
+            input_token_limit,
+            input_modalities,
+            reasoning_levels,
+            default_reasoning_level,
+            description,
+            supports_reasoning,
+            support_verbosity,
+            supports_search_tool,
+            supports_tool_calls
+        );
     }
 
     /// 该源是否为这个字段提供了当前值（供测试断言）。
@@ -196,15 +244,27 @@ mod tests {
 
     #[test]
     fn accuracy_beats_source_and_absent_values_do_not_clear() {
-        let exact = FieldQuality { reliability: 4, authority: 20, similarity: 1000 };
-        let fuzzy = FieldQuality { reliability: 1, authority: 30, similarity: 900 };
+        let exact = FieldQuality {
+            reliability: 4,
+            authority: 20,
+            similarity: 1000,
+        };
+        let fuzzy = FieldQuality {
+            reliability: 1,
+            authority: 30,
+            similarity: 900,
+        };
         let accurate = ModelFacts {
-            context_window: Some(128_000), supports_tool_calls: Some(false),
-            reasoning_levels: Some(vec![]), ..ModelFacts::default()
+            context_window: Some(128_000),
+            supports_tool_calls: Some(false),
+            reasoning_levels: Some(vec![]),
+            ..ModelFacts::default()
         };
         let approximate = ModelFacts {
-            context_window: Some(1_000_000), supports_tool_calls: Some(true),
-            reasoning_levels: Some(vec!["high".into()]), description: Some("补缺".into()),
+            context_window: Some(1_000_000),
+            supports_tool_calls: Some(true),
+            reasoning_levels: Some(vec!["high".into()]),
+            description: Some("补缺".into()),
             ..ModelFacts::default()
         };
         let mut forward = ModelFacts::default();
@@ -225,24 +285,46 @@ mod tests {
     #[test]
     fn same_tier_conflicts_are_unknown_and_array_order_is_not_a_conflict() {
         let origin = |provider: &str| {
-            let mut origin = FieldProvenance::new("models_dev", "model", MatchKind::Exact, 1.into());
+            let mut origin =
+                FieldProvenance::new("models_dev", "model", MatchKind::Exact, 1.into());
             origin.provider_id = Some(provider.to_string());
             origin
         };
         let records = vec![
-            (ModelFacts { context_window: Some(100),
-                reasoning_levels: Some(vec!["low".into(), "high".into()]),
-                supports_tool_calls: Some(true), ..ModelFacts::default() }, origin("a")),
-            (ModelFacts { context_window: Some(200),
-                reasoning_levels: Some(vec!["high".into(), "low".into()]),
-                supports_tool_calls: Some(true), ..ModelFacts::default() }, origin("b")),
+            (
+                ModelFacts {
+                    context_window: Some(100),
+                    reasoning_levels: Some(vec!["low".into(), "high".into()]),
+                    supports_tool_calls: Some(true),
+                    ..ModelFacts::default()
+                },
+                origin("a"),
+            ),
+            (
+                ModelFacts {
+                    context_window: Some(200),
+                    reasoning_levels: Some(vec!["high".into(), "low".into()]),
+                    supports_tool_calls: Some(true),
+                    ..ModelFacts::default()
+                },
+                origin("b"),
+            ),
         ];
         let facts = ModelFacts::resolve_records(&records);
         assert_eq!(facts.context_window, None);
         assert_eq!(facts.supports_tool_calls, Some(true));
-        assert_eq!(facts.reasoning_levels, Some(vec!["low".into(), "high".into()]));
-        assert!(facts.warnings.iter().any(|warning| warning.contains("context_window")));
-        assert_eq!(facts, ModelFacts::resolve_records(&records.into_iter().rev().collect::<Vec<_>>()));
+        assert_eq!(
+            facts.reasoning_levels,
+            Some(vec!["low".into(), "high".into()])
+        );
+        assert!(facts
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("context_window")));
+        assert_eq!(
+            facts,
+            ModelFacts::resolve_records(&records.into_iter().rev().collect::<Vec<_>>())
+        );
     }
 
     fn facts(context_window: i64, description: &str) -> ModelFacts {

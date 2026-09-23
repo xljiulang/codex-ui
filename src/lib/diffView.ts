@@ -36,7 +36,10 @@ export function canHighlightDiffRows(
 }
 
 /** 按渲染上限裁剪行数组：返回可见行与被省略的行数 */
-export function sliceDiffRows<T>(rows: T[]): { visible: T[]; truncated: number } {
+export function sliceDiffRows<T>(rows: T[]): {
+  visible: T[];
+  truncated: number;
+} {
   if (rows.length <= DIFF_MAX_RENDER_ROWS) {
     return { visible: rows, truncated: 0 };
   }

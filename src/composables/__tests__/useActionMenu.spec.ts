@@ -32,13 +32,13 @@ describe("useActionMenu 操作右键菜单", () => {
 
   it("Escape 关闭菜单并返回 true；无菜单时返回 false", () => {
     const m = useActionMenu();
-    expect(
-      m.onKeydown(new KeyboardEvent("keydown", { key: "Escape" })),
-    ).toBe(false);
+    expect(m.onKeydown(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(
+      false,
+    );
     openMenu(m);
-    expect(
-      m.onKeydown(new KeyboardEvent("keydown", { key: "Escape" })),
-    ).toBe(true);
+    expect(m.onKeydown(new KeyboardEvent("keydown", { key: "Escape" }))).toBe(
+      true,
+    );
     expect(m.ctxMenu.value).toBeNull();
   });
 

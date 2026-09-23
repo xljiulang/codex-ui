@@ -2685,7 +2685,11 @@ fn patch_zen_request_body_appends_teaching_to_existing_system_message() {
     });
     patch_zen_request_body(&mut body);
     let messages = body["messages"].as_array().unwrap();
-    assert_eq!(messages.len(), 1, "应并入已有 system 消息、不新增消息：{body}");
+    assert_eq!(
+        messages.len(),
+        1,
+        "应并入已有 system 消息、不新增消息：{body}"
+    );
     let inst = messages[0]["content"].as_str().unwrap();
     assert!(
         inst.starts_with("原有教学内容"),
@@ -2727,7 +2731,11 @@ fn patch_zen_request_body_inserts_system_message_before_user_message() {
     });
     patch_zen_request_body(&mut body);
     let messages = body["messages"].as_array().unwrap();
-    assert_eq!(messages.len(), 2, "应插一条 system 消息、不动原有消息：{body}");
+    assert_eq!(
+        messages.len(),
+        2,
+        "应插一条 system 消息、不动原有消息：{body}"
+    );
     assert_eq!(messages[0]["role"], "system");
     assert!(messages[0]["content"]
         .as_str()
@@ -2746,7 +2754,11 @@ fn patch_zen_request_body_inserts_when_leading_system_content_is_not_text() {
     });
     patch_zen_request_body(&mut body);
     let messages = body["messages"].as_array().unwrap();
-    assert_eq!(messages.len(), 2, "分片 system 消息无法追加，应另插一条：{body}");
+    assert_eq!(
+        messages.len(),
+        2,
+        "分片 system 消息无法追加，应另插一条：{body}"
+    );
     assert_eq!(messages[0]["role"], "system");
     assert!(messages[0]["content"]
         .as_str()

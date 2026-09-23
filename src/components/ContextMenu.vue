@@ -20,7 +20,10 @@ const emit = defineEmits<{ close: [] }>();
       class="ctx-menu-item popup-menu-item"
       :class="{ danger: it.danger }"
       :disabled="disabled"
-      @click="it.action(); emit('close')"
+      @click="
+        it.action();
+        emit('close');
+      "
     >
       <img
         v-if="it.img"

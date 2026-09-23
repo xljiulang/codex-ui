@@ -35,7 +35,12 @@ export {
   revealInTree,
   toggleDir,
 } from "./tree";
-export { clearSearch, onSearchInput, runSearchNow, searchSnippet } from "./search";
+export {
+  clearSearch,
+  onSearchInput,
+  runSearchNow,
+  searchSnippet,
+} from "./search";
 export {
   copyEntry,
   createFolder,

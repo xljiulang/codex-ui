@@ -54,8 +54,18 @@ const settingsSections: SettingsSection[] = [
   { id: "personalization", label: "个性化", icon: ICON_PALETTE },
   { id: "basic", label: "基础设置", icon: ICON_TUNE },
   { id: "global-instructions", label: "全局指令", icon: ICON_CHECKLIST },
-  { id: "model-snapshot", label: "模型快照", icon: ICON_SNAPSHOT, stroke: true },
-  { id: "model-config", label: "模型配置", icon: ICON_MODEL_CUBE, stroke: true },
+  {
+    id: "model-snapshot",
+    label: "模型快照",
+    icon: ICON_SNAPSHOT,
+    stroke: true,
+  },
+  {
+    id: "model-config",
+    label: "模型配置",
+    icon: ICON_MODEL_CUBE,
+    stroke: true,
+  },
   { id: "dynamic-tools", label: "动态工具", icon: ICON_TOOL },
   { id: "skills", label: "技能管理", icon: ICON_SKILL },
   { id: "mcp", label: "MCP管理", icon: ICON_MCP },
@@ -77,18 +87,16 @@ function onNavKeydown(e: KeyboardEvent) {
   const idx = settingsSections.findIndex((s) => s.id === activeSection.value);
   const delta = e.key === "ArrowDown" ? 1 : -1;
   activeSection.value =
-    settingsSections[(idx + delta + settingsSections.length) % settingsSections.length].id;
+    settingsSections[
+      (idx + delta + settingsSections.length) % settingsSections.length
+    ].id;
 }
 </script>
 
 <template>
   <div class="settings-page">
     <div class="settings-page-body">
-      <nav
-        class="settings-nav"
-        aria-label="设置分类"
-        @keydown="onNavKeydown"
-      >
+      <nav class="settings-nav" aria-label="设置分类" @keydown="onNavKeydown">
         <button
           v-for="s in settingsSections"
           :key="s.id"
@@ -123,7 +131,9 @@ function onNavKeydown(e: KeyboardEvent) {
           :reload-token="modelConfigReloadToken"
         />
 
-        <GlobalInstructionsSection :active="activeSection === 'global-instructions'" />
+        <GlobalInstructionsSection
+          :active="activeSection === 'global-instructions'"
+        />
 
         <BasicSection :active="activeSection === 'basic'" />
 
@@ -140,7 +150,6 @@ function onNavKeydown(e: KeyboardEvent) {
         <CompatProxySection :active="activeSection === 'compat-proxy'" />
 
         <AboutSection :active="activeSection === 'about'" />
-
       </div>
     </div>
   </div>
@@ -194,7 +203,9 @@ function onNavKeydown(e: KeyboardEvent) {
   font-size: var(--font-md);
   text-align: left;
   cursor: pointer;
-  transition: background var(--ease), color var(--ease);
+  transition:
+    background var(--ease),
+    color var(--ease);
 }
 
 .settings-nav-item::before {

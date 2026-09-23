@@ -25,7 +25,12 @@ describe("useTooltip 全局 tooltip 状态", () => {
     showTooltip("提示内容", rect);
     expect(tooltip.visible).toBe(true);
     expect(tooltip.text).toBe("提示内容");
-    expect(tooltip.anchor).toEqual({ left: 10, top: 20, width: 30, height: 40 });
+    expect(tooltip.anchor).toEqual({
+      left: 10,
+      top: 20,
+      width: 30,
+      height: 40,
+    });
     expect(tooltip.anchorEl).toBeNull();
   });
 
@@ -64,7 +69,9 @@ describe("useTooltip 全局 tooltip 状态", () => {
     const rect = { left: 0, top: 0, width: 10, height: 10 } as DOMRect;
     showTooltip("锚点提示", rect, el);
     expect(tooltip.visible).toBe(true);
-    window.dispatchEvent(new MouseEvent("mousemove", { clientX: 500, clientY: 500 }));
+    window.dispatchEvent(
+      new MouseEvent("mousemove", { clientX: 500, clientY: 500 }),
+    );
     vi.advanceTimersByTime(60);
     expect(tooltip.visible).toBe(false);
     expect(tooltip.anchorEl).toBeNull();

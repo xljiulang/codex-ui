@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useCtrlWheelZoom } from "../composables/useCtrlWheelZoom";
@@ -304,11 +311,9 @@ function fitWidth() {
 }
 
 // 切换标签或外部刷新替换 pdfData：重新加载文档；缩放变化：重渲染视口附近页面
-watch(
-  [() => props.tab, () => props.tab.pdfData],
-  () => void load(),
-  { immediate: true },
-);
+watch([() => props.tab, () => props.tab.pdfData], () => void load(), {
+  immediate: true,
+});
 watch(zoom, () => renderVisiblePages());
 
 // 窗口尺寸变化：适应宽度基准随容器宽度重算并重渲染

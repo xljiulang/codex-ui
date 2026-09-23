@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use super::{FullEntryMatch, FullEntrySource};
 #[cfg(test)]
 use crate::codex::model_catalog::codex_models;
-use crate::codex::model_catalog::matching::{MatchKind, normalize_model_key, namespaces_conflict};
+use crate::codex::model_catalog::matching::{namespaces_conflict, normalize_model_key, MatchKind};
 
 const OFFICIAL_MODELS_JSON: &str = include_str!("../../../../resources/official-models.json");
 
@@ -45,10 +45,15 @@ impl OfficialModelSource {
 
     fn normalized_entries(&self, query: &str) -> Vec<&Value> {
         let key = normalize_model_key(query);
-        self.entries.iter().filter(|entry| {
-            let slug = entry["slug"].as_str().unwrap_or("");
-            !key.is_empty() && !namespaces_conflict(query, slug) && normalize_model_key(slug) == key
-        }).collect()
+        self.entries
+            .iter()
+            .filter(|entry| {
+                let slug = entry["slug"].as_str().unwrap_or("");
+                !key.is_empty()
+                    && !namespaces_conflict(query, slug)
+                    && normalize_model_key(slug) == key
+            })
+            .collect()
     }
 }
 
@@ -64,12 +69,17 @@ impl FullEntrySource for OfficialModelSource {
         if query.is_empty() {
             return None;
         }
-        let (entry, kind) = if let Some(entry) = self.entries.iter()
-            .find(|entry| entry["slug"].as_str() == Some(query)) {
+        let (entry, kind) = if let Some(entry) = self
+            .entries
+            .iter()
+            .find(|entry| entry["slug"].as_str() == Some(query))
+        {
             (entry, MatchKind::Exact)
         } else {
             let normalized = self.normalized_entries(query);
-            if normalized.len() != 1 { return None; }
+            if normalized.len() != 1 {
+                return None;
+            }
             (normalized[0], MatchKind::Normalized)
         };
 
@@ -91,10 +101,15 @@ impl FullEntrySource for OfficialModelSource {
     }
 
     fn warnings(&self, model_id: &str) -> Vec<String> {
-        let exact = self.entries.iter().any(|entry| entry["slug"].as_str() == Some(model_id.trim()));
+        let exact = self
+            .entries
+            .iter()
+            .any(|entry| entry["slug"].as_str() == Some(model_id.trim()));
         if !exact && self.normalized_entries(model_id).len() > 1 {
             vec!["官方条目规范化匹配存在歧义，已自动改用字段来源".to_string()]
-        } else { Vec::new() }
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -104,7 +119,8 @@ fn official_pool(snapshot: &[Value]) -> Vec<Value> {
     let mut entries = Vec::new();
     // 与模板基底共用同一份进程内快照：不重复解析、也不再起子进程
     for entry in snapshot
-        .iter().cloned()
+        .iter()
+        .cloned()
         .chain(bundled_entries().iter().cloned())
     {
         let slug = entry
@@ -167,7 +183,9 @@ mod tests {
             assert_eq!(source.warnings("GPT-TEST").len(), 1);
         }
         let source = OfficialModelSource::from_snapshot(
-            &[gpt_entry("vendor/model-v5")], "https://relay.example.com");
+            &[gpt_entry("vendor/model-v5")],
+            "https://relay.example.com",
+        );
         assert!(source.full_entry("other/model-v5").is_none());
     }
 
@@ -204,8 +222,12 @@ mod tests {
                 .and_then(Value::as_str)
                 .is_some());
         }
-        assert!(entries.iter().any(|entry| entry["slug"] == json!("deepseek-flash")));
-        assert!(entries.iter().any(|entry| entry["slug"] == json!("deepseek-v4-pro")));
+        assert!(entries
+            .iter()
+            .any(|entry| entry["slug"] == json!("deepseek-flash")));
+        assert!(entries
+            .iter()
+            .any(|entry| entry["slug"] == json!("deepseek-v4-pro")));
     }
 
     #[test]
@@ -284,7 +306,9 @@ mod tests {
     fn official_host_detection_ignores_lookalike_domains() {
         assert!(is_official_openai_host("https://api.openai.com/v1"));
         assert!(is_official_openai_host("https://chatgpt.com/backend-api"));
-        assert!(!is_official_openai_host("https://openai.com.evil.example/v1"));
+        assert!(!is_official_openai_host(
+            "https://openai.com.evil.example/v1"
+        ));
         assert!(!is_official_openai_host("https://relay.example.com/v1"));
         assert!(!is_official_openai_host(""));
     }

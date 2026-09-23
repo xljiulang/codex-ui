@@ -44,7 +44,10 @@ pub(crate) fn parse(value: Option<&str>) -> EnvFlag {
 
 /// 读取 `CODEXUI_<SUFFIX>` 并解析：真值 → true，其余（含未设置、假值、无法识别）→ false。
 pub(crate) fn flag(suffix: &str) -> bool {
-    matches!(parse(std::env::var(full_name(suffix).as_str()).ok().as_deref()), EnvFlag::On)
+    matches!(
+        parse(std::env::var(full_name(suffix).as_str()).ok().as_deref()),
+        EnvFlag::On
+    )
 }
 
 /// `CODEXUI_<SUFFIX>` 的取值无法识别时返回原值（未设置、空、真/假值都返回 None），供记 warning。

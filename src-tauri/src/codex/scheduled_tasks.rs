@@ -15,18 +15,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local, TimeZone};
-use cron::Schedule as CronSchedule;
-use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
 use crate::codex::app_server::CodexServer;
 use crate::codex::notifications;
 use crate::codex::session_state::SessionStateStore;
 use crate::codex::settings;
 use crate::codex::util::cached_default_model;
+use chrono::{DateTime, Local, TimeZone};
+use cron::Schedule as CronSchedule;
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter};
 
 /// 前端事件名：任务每次变更全量推送快照。
 pub const SCHEDULED_TASKS_EVENT: &str = "scheduled-tasks/event";
@@ -333,8 +333,8 @@ pub struct ScheduledTaskStore {
 impl ScheduledTaskStore {
     /// 打开（不存在则创建）应用自有数据库并幂等建表；随后清理僵尸 running 记录。
     pub fn open(app_dir: &Path) -> Result<Self, String> {
-        let conn =
-            Connection::open(scheduled_db_path(app_dir)).map_err(|e| format!("打开定时任务库失败：{e}"))?;
+        let conn = Connection::open(scheduled_db_path(app_dir))
+            .map_err(|e| format!("打开定时任务库失败：{e}"))?;
         conn.busy_timeout(Duration::from_secs(3))
             .map_err(|e| format!("设置定时任务库忙等待失败：{e}"))?;
         conn.pragma_update(None, "journal_mode", "WAL")
@@ -366,8 +366,12 @@ impl ScheduledTaskStore {
 
     pub fn get(&self, id: &str) -> Option<ScheduledTask> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        conn.query_row("SELECT * FROM scheduled_tasks WHERE id = ?1", [id], row_to_task)
-            .ok()
+        conn.query_row(
+            "SELECT * FROM scheduled_tasks WHERE id = ?1",
+            [id],
+            row_to_task,
+        )
+        .ok()
     }
 
     /// 创建任务：校验 cron（合法 + 最小颗粒度），归一化忙碌策略，计算初始 next_run。
@@ -448,8 +452,11 @@ impl ScheduledTaskStore {
             [thread_id],
         )
         .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM scheduled_tasks WHERE thread_id = ?1", [thread_id])
-            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM scheduled_tasks WHERE thread_id = ?1",
+            [thread_id],
+        )
+        .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(ids)
     }
@@ -499,8 +506,12 @@ impl ScheduledTaskStore {
         if n == 0 {
             return Err("定时任务不存在".to_string());
         }
-        conn.query_row("SELECT * FROM scheduled_tasks WHERE id = ?1", [id], row_to_task)
-            .map_err(|e| e.to_string())
+        conn.query_row(
+            "SELECT * FROM scheduled_tasks WHERE id = ?1",
+            [id],
+            row_to_task,
+        )
+        .map_err(|e| e.to_string())
     }
 
     pub fn set_next_run(&self, id: &str, next_run: Option<i64>) -> Result<(), String> {
@@ -774,7 +785,9 @@ impl TaskScheduler {
                 .cloned()
                 .unwrap_or_default();
             let pick = list.iter().find(|m| {
-                m.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false)
+                m.get("isDefault")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false)
                     && !m.get("hidden").and_then(|x| x.as_bool()).unwrap_or(false)
             });
             let pick = pick.or_else(|| {
@@ -807,9 +820,9 @@ impl TaskScheduler {
         {
             let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             g.deferred.retain(|id| {
-                tasks
-                    .iter()
-                    .any(|t| &t.id == id && t.enabled && t.next_run.map(|nr| nr <= now).unwrap_or(false))
+                tasks.iter().any(|t| {
+                    &t.id == id && t.enabled && t.next_run.map(|nr| nr <= now).unwrap_or(false)
+                })
             });
         }
 
@@ -861,9 +874,12 @@ impl TaskScheduler {
                     }
                 }
                 FireAction::Skip => {
-                    let _ = self
-                        .store
-                        .record_event_run(&task.id, now, "skipped", Some("会话正忙，按任务策略跳过"));
+                    let _ = self.store.record_event_run(
+                        &task.id,
+                        now,
+                        "skipped",
+                        Some("会话正忙，按任务策略跳过"),
+                    );
                     self.advance(task, now);
                     self.emit_tasks(Some(&task.id));
                 }
@@ -887,9 +903,9 @@ impl TaskScheduler {
             expired
         };
         for (task_id, run_id) in expired {
-            let _ = self
-                .store
-                .finish_run(run_id, "failed", None, None, Some("执行超时（30 分钟）"));
+            let _ =
+                self.store
+                    .finish_run(run_id, "failed", None, None, Some("执行超时（30 分钟）"));
             self.notify_finished(&task_id, "failed", None, None, Some("执行超时（30 分钟）"));
             self.emit_tasks(Some(&task_id));
         }
@@ -928,7 +944,12 @@ impl TaskScheduler {
                 Ok(m) => m,
                 Err(e) => {
                     self.release_thread(&task.thread_id);
-                    if let Some(run_id) = self.store.start_run(&task.id, started_at, None).ok().flatten() {
+                    if let Some(run_id) = self
+                        .store
+                        .start_run(&task.id, started_at, None)
+                        .ok()
+                        .flatten()
+                    {
                         let _ = self.store.finish_run(
                             run_id,
                             "failed",
@@ -968,7 +989,12 @@ impl TaskScheduler {
                     let _ = self.store.mark_done(&task.id);
                 }
             }
-            if let Some(run_id) = self.store.start_run(&task.id, started_at, None).ok().flatten() {
+            if let Some(run_id) = self
+                .store
+                .start_run(&task.id, started_at, None)
+                .ok()
+                .flatten()
+            {
                 let err_text = if not_found {
                     "绑定的会话已删除".to_string()
                 } else {
@@ -1042,10 +1068,19 @@ impl TaskScheduler {
             }
             Err(e) => {
                 self.release_thread(&task.thread_id);
-                if let Some(run_id) = self.store.start_run(&task.id, started_at, None).ok().flatten() {
-                    let _ = self
-                        .store
-                        .finish_run(run_id, "failed", None, None, Some(&format!("启动回合失败：{e}")));
+                if let Some(run_id) = self
+                    .store
+                    .start_run(&task.id, started_at, None)
+                    .ok()
+                    .flatten()
+                {
+                    let _ = self.store.finish_run(
+                        run_id,
+                        "failed",
+                        None,
+                        None,
+                        Some(&format!("启动回合失败：{e}")),
+                    );
                     self.notify_finished(
                         &task.id,
                         "failed",
@@ -1080,7 +1115,10 @@ impl TaskScheduler {
     }
 
     async fn on_notification(&self, method: &str, params: &Value) {
-        let thread_id = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+        let thread_id = params
+            .get("threadId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         match method {
             "turn/started" => {
                 if !thread_id.is_empty() {
@@ -1113,7 +1151,7 @@ impl TaskScheduler {
                     g.running.iter().find_map(|(id, r)| {
                         (r.thread_id == thread_id
                             && (turn_id.is_empty() || r.turn_id.is_empty() || r.turn_id == turn_id))
-                        .then(|| id.clone())
+                            .then(|| id.clone())
                     })
                 };
                 let Some(task_id) = matched else { return };
@@ -1346,36 +1384,24 @@ mod tests {
             next_run: Some(due + 100),
             ..task("skip")
         };
-        assert_eq!(
-            decide_first_tick(due, &not_due),
-            FirstTickAction::Idle
-        );
+        assert_eq!(decide_first_tick(due, &not_due), FirstTickAction::Idle);
         // 停用 / 已归档 → Idle
         let disabled = ScheduledTask {
             enabled: false,
             ..task("defer")
         };
-        assert_eq!(
-            decide_first_tick(due + 1, &disabled),
-            FirstTickAction::Idle
-        );
+        assert_eq!(decide_first_tick(due + 1, &disabled), FirstTickAction::Idle);
         let done = ScheduledTask {
             done: true,
             ..task("skip")
         };
-        assert_eq!(
-            decide_first_tick(due + 1, &done),
-            FirstTickAction::Idle
-        );
+        assert_eq!(decide_first_tick(due + 1, &done), FirstTickAction::Idle);
         // next_run 缺失（无可触发时刻）→ Idle
         let no_next = ScheduledTask {
             next_run: None,
             ..task("skip")
         };
-        assert_eq!(
-            decide_first_tick(due, &no_next),
-            FirstTickAction::Idle
-        );
+        assert_eq!(decide_first_tick(due, &no_next), FirstTickAction::Idle);
     }
 
     #[test]
@@ -1438,11 +1464,13 @@ mod tests {
 
         assert!(store.add("", "p", "0 0 9 * * *", "t1", "defer").is_err());
         assert!(store.add("n", "", "0 0 9 * * *", "t1", "defer").is_err());
-        assert!(store
-            .add("n", "p", "* * * * * *", "t1", "defer")
-            .is_err());
-        let t1 = store.add("每日总结", "总结提交", "0 0 9 * * *", "t1", "defer").unwrap();
-        let t2 = store.add("临时", "做点事", "0 0 12 * * *", "t2", "skip").unwrap();
+        assert!(store.add("n", "p", "* * * * * *", "t1", "defer").is_err());
+        let t1 = store
+            .add("每日总结", "总结提交", "0 0 9 * * *", "t1", "defer")
+            .unwrap();
+        let t2 = store
+            .add("临时", "做点事", "0 0 12 * * *", "t2", "skip")
+            .unwrap();
         assert_eq!(t1.busy_policy, "defer");
         assert_eq!(t2.busy_policy, "skip");
         assert!(t1.enabled && !t1.done);
@@ -1451,15 +1479,17 @@ mod tests {
         assert_eq!(store.get(&t1.id).unwrap().name, "每日总结");
 
         // 执行记录：running → success；任务删除后 start_run 返回 None
-        let run1 = store.start_run(&t1.id, 100, Some("turn-1")).unwrap().unwrap();
-        assert!(store
-            .start_run("task-gone", 100, None)
+        let run1 = store
+            .start_run(&t1.id, 100, Some("turn-1"))
             .unwrap()
-            .is_none());
+            .unwrap();
+        assert!(store.start_run("task-gone", 100, None).unwrap().is_none());
         store
             .finish_run(run1, "success", Some(1500), Some("已完成总结"), None)
             .unwrap();
-        store.record_event_run(&t1.id, 200, "skipped", Some("会话正忙")).unwrap();
+        store
+            .record_event_run(&t1.id, 200, "skipped", Some("会话正忙"))
+            .unwrap();
         let runs = store.list_runs(&t1.id, 20, 0).unwrap();
         assert_eq!(runs.len(), 2);
         // 倒序：后插入的在前
@@ -1475,7 +1505,9 @@ mod tests {
 
         // 删会话级联删任务与记录
         let run2 = store.start_run(&t2.id, 300, None).unwrap().unwrap();
-        store.finish_run(run2, "failed", None, None, Some("出错")).unwrap();
+        store
+            .finish_run(run2, "failed", None, None, Some("出错"))
+            .unwrap();
         let removed = store.remove_by_thread("t2").unwrap();
         assert_eq!(removed, vec![t2.id.clone()]);
         assert!(store.list().is_empty());
@@ -1489,7 +1521,10 @@ mod tests {
         let task_id = {
             let store = ScheduledTaskStore::open(dir.path()).unwrap();
             let t = store.add("n", "p", "0 0 9 * * *", "t1", "defer").unwrap();
-            store.start_run(&t.id, 100, Some("turn-x")).unwrap().unwrap();
+            store
+                .start_run(&t.id, 100, Some("turn-x"))
+                .unwrap()
+                .unwrap();
             assert_eq!(store.list_runs(&t.id, 20, 0).unwrap()[0].status, "running");
             t.id
         };

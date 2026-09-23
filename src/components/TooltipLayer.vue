@@ -6,7 +6,8 @@ const el = ref<HTMLElement | null>(null);
 
 // 锚定在目标元素上方居中；上方放不下则放到下方，并收进视口
 watch(
-  () => [tooltip.visible, tooltip.text, tooltip.anchor, tooltip.placement] as const,
+  () =>
+    [tooltip.visible, tooltip.text, tooltip.anchor, tooltip.placement] as const,
   () => {
     if (!tooltip.visible || !tooltip.anchor) return;
     const anchor = tooltip.anchor;

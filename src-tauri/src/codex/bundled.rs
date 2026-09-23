@@ -16,7 +16,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::codex::app_server::{CodexServer, app_exe_dir};
+use crate::codex::app_server::{app_exe_dir, CodexServer};
 use crate::codex::model_config;
 use crate::codex::runtime_download;
 
@@ -116,7 +116,8 @@ pub(crate) fn bootstrap_one(spec: &BundleSpec, archive_dir: &Path) -> BootOutcom
         };
         match read_installed_app_version(&target) {
             Some(installed)
-                if runtime_download::compare_versions(&installed, &archive_version) != Ordering::Less =>
+                if runtime_download::compare_versions(&installed, &archive_version)
+                    != Ordering::Less =>
             {
                 return BootOutcome::AlreadyPresent;
             }
@@ -286,7 +287,10 @@ pub(crate) async fn bootstrap(server: Arc<CodexServer>) {
                         server
                             .push_log(
                                 "info",
-                                format!("openai-bundled 已按归档更新到新版本：{}", target.display()),
+                                format!(
+                                    "openai-bundled 已按归档更新到新版本：{}",
+                                    target.display()
+                                ),
                             )
                             .await;
                     }
@@ -306,9 +310,11 @@ pub(crate) async fn bootstrap(server: Arc<CodexServer>) {
     tauri::async_runtime::spawn(async move {
         match runtime_boot(server2.as_ref()).await {
             Ok(msg) => server2.push_log("info", msg).await,
-            Err(e) => server2
-                .push_log("warn", format!("codex-primary-runtime 处理失败：{e}"))
-                .await,
+            Err(e) => {
+                server2
+                    .push_log("warn", format!("codex-primary-runtime 处理失败：{e}"))
+                    .await
+            }
         }
         server2.runtime_mark_done();
     });
@@ -332,10 +338,13 @@ async fn runtime_boot(server: &CodexServer) -> Result<String, String> {
             return Ok("codex 运行时已是最新，无需下载".to_string());
         }
         _ => {
-            let reason = runtime_download::runtime_reason(&target)
-                .unwrap_or_else(|| "未知".to_string());
+            let reason =
+                runtime_download::runtime_reason(&target).unwrap_or_else(|| "未知".to_string());
             server
-                .push_log("info", format!("需要下载/升级 codex-primary-runtime：{reason}"))
+                .push_log(
+                    "info",
+                    format!("需要下载/升级 codex-primary-runtime：{reason}"),
+                )
                 .await;
         }
     }
@@ -410,9 +419,7 @@ pub(crate) fn extract_tar(archive: &Path, dest: &Path) -> Result<(), String> {
         Box::new(xz2::read::XzDecoder::new(br))
     };
     let mut ar = tar::Archive::new(reader);
-    let entries = ar
-        .entries()
-        .map_err(|e| format!("读取归档条目失败: {e}"))?;
+    let entries = ar.entries().map_err(|e| format!("读取归档条目失败: {e}"))?;
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("读取归档条目失败: {e}"))?;
         let path = entry
@@ -516,7 +523,9 @@ mod tests {
     #[test]
     fn path_is_safe_rejects_traversal_and_absolute() {
         assert!(path_is_safe(Path::new("a/b/c")));
-        assert!(path_is_safe(Path::new("openai-bundled/.materialization-key")));
+        assert!(path_is_safe(Path::new(
+            "openai-bundled/.materialization-key"
+        )));
         assert!(!path_is_safe(Path::new("../evil")));
         assert!(!path_is_safe(Path::new("a/../../b")));
         assert!(!path_is_safe(Path::new("/absolute")));
@@ -573,7 +582,9 @@ mod tests {
 
     #[test]
     fn path_is_safe_guard_rejects_traversal_for_archive_entry() {
-        assert!(path_is_safe(Path::new("codex-primary-runtime/runtime.json")));
+        assert!(path_is_safe(Path::new(
+            "codex-primary-runtime/runtime.json"
+        )));
         assert!(!path_is_safe(Path::new("codex-primary-runtime/../../evil")));
     }
 
@@ -666,7 +677,10 @@ mod tests {
             &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
         );
         let spec = spec_for(&dest);
-        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::AlreadyPresent);
+        assert_eq!(
+            bootstrap_one(&spec, dir.path()),
+            BootOutcome::AlreadyPresent
+        );
         // 版本一致时不覆盖
         assert_eq!(
             fs::read_to_string(dest.join("openai-bundled/.materialization-key")).unwrap(),
@@ -772,7 +786,10 @@ mod tests {
             &[(".materialization-key", r#"{"appVersion":"26.730.61309"}"#)],
         );
         let spec = spec_for(&dest);
-        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::AlreadyPresent);
+        assert_eq!(
+            bootstrap_one(&spec, dir.path()),
+            BootOutcome::AlreadyPresent
+        );
         // 磁盘版本更高，不被降级覆盖
         assert_eq!(
             fs::read_to_string(dest.join("openai-bundled/.materialization-key")).unwrap(),
@@ -792,7 +809,10 @@ mod tests {
         .unwrap();
         // 归档缺失：目标存在 → AlreadyPresent，不动目标
         let spec = spec_for(&dest);
-        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::AlreadyPresent);
+        assert_eq!(
+            bootstrap_one(&spec, dir.path()),
+            BootOutcome::AlreadyPresent
+        );
         assert!(dest.join("openai-bundled/.materialization-key").is_file());
     }
 
@@ -801,7 +821,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let dest = dir.path().join("dest");
         let spec = spec_for(&dest);
-        assert_eq!(bootstrap_one(&spec, dir.path()), BootOutcome::ArchiveMissing);
+        assert_eq!(
+            bootstrap_one(&spec, dir.path()),
+            BootOutcome::ArchiveMissing
+        );
         assert!(!dest.join("openai-bundled").exists());
     }
 
@@ -811,7 +834,10 @@ mod tests {
         let dest = dir.path().join("dest");
         fs::write(dir.path().join("openai-bundled.tar.gz"), b"not an archive").unwrap();
         let spec = spec_for(&dest);
-        assert!(matches!(bootstrap_one(&spec, dir.path()), BootOutcome::Failed(_)));
+        assert!(matches!(
+            bootstrap_one(&spec, dir.path()),
+            BootOutcome::Failed(_)
+        ));
         assert!(!dest.join("openai-bundled").exists());
     }
 

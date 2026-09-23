@@ -172,8 +172,9 @@ describe("getUserMessageSummary / enrichUserMessage", () => {
     const content = [textItem("请看看 **这个** 文件")];
     const raw = item(content);
     expect(getUserMessageSummary(raw)).toEqual(summarizeUserMessage(content));
-    expect(getUserMessageSummary({ id: "a1", type: "agentMessage" } as ThreadItem))
-      .toMatchObject({ text: "", navText: "" });
+    expect(
+      getUserMessageSummary({ id: "a1", type: "agentMessage" } as ThreadItem),
+    ).toMatchObject({ text: "", navText: "" });
   });
 
   it("enrichUserMessage 为 userMessage 写 derived，非用户消息不动", () => {

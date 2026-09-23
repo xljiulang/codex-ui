@@ -97,6 +97,8 @@ describe("editorTheme 搜索面板与选区", () => {
         "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection"
       ];
     expect(sel.color).toBe("var(--text-bright)");
-    expect(sel.backgroundColor).toBe("rgba(var(--accent-rgb), 0.30) !important");
+    expect(sel.backgroundColor).toBe(
+      "rgba(var(--accent-rgb), 0.30) !important",
+    );
   });
 });

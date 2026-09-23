@@ -193,7 +193,9 @@ onBeforeUnmount(() => {
   color: var(--text-bright);
   opacity: 0;
   transform: translateY(4px);
-  transition: opacity var(--ease), transform var(--ease);
+  transition:
+    opacity var(--ease),
+    transform var(--ease);
   pointer-events: none;
   word-break: break-word;
 }

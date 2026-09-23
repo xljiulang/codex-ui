@@ -80,7 +80,10 @@ function fileTab(id: string): FileEditorTab {
   return t;
 }
 
-function mountView(tab: FileEditorTab): { view: EditorView; host: HTMLDivElement } {
+function mountView(tab: FileEditorTab): {
+  view: EditorView;
+  host: HTMLDivElement;
+} {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const view = new EditorView({ state: tab.editorState!, parent: host });
@@ -227,7 +230,10 @@ describe("useEditorTabs 标签状态", () => {
     expect(tabs.some((t) => t.id === tab.id)).toBe(true);
 
     await saveTabAndClose(tab.id);
-    expect(mockedInvoke).toHaveBeenCalledWith("session_fs_write", expect.anything());
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "session_fs_write",
+      expect.anything(),
+    );
     expect(tabs.some((t) => t.id === tab.id)).toBe(false);
     expect(pendingCloseId.value).toBeNull();
     view.destroy();
@@ -581,9 +587,7 @@ describe("useEditorTabs 标签状态", () => {
       diff: "",
       workspace: root,
     });
-    const diffTab = tabs.find(
-      (t): t is DiffEditorTab => t.kind === "diff",
-    )!;
+    const diffTab = tabs.find((t): t is DiffEditorTab => t.kind === "diff")!;
     expect(mockedInvoke).toHaveBeenCalledWith("git_changes_diff", {
       workspace: root,
       path: "b.txt",
@@ -608,9 +612,7 @@ describe("useEditorTabs 标签状态", () => {
       diff: "",
       workspace: root,
     });
-    const diffTab = tabs.find(
-      (t): t is DiffEditorTab => t.kind === "diff",
-    )!;
+    const diffTab = tabs.find((t): t is DiffEditorTab => t.kind === "diff")!;
     expect(diffTab.loading).toBe(false);
     expect(diffTab.error).toBe("");
     expect(diffTab.rows).toEqual([]);
@@ -667,7 +669,9 @@ describe("useEditorTabs 标签状态", () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
         expect(args).toEqual({ workspace: root, path: "doc.pdf" });
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -707,7 +711,9 @@ describe("useEditorTabs 标签状态", () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
         expect(args).toEqual({ workspace: root, path: "book.xlsx" });
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -731,7 +737,9 @@ describe("useEditorTabs 标签状态", () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
         expect(args).toEqual({ workspace: root, path: "doc.docx" });
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -754,7 +762,9 @@ describe("useEditorTabs 标签状态", () => {
     mockedInvoke.mockImplementation((cmd, args) => {
       if (cmd === "session_fs_read_bytes") {
         expect(args).toEqual({ workspace: root, path: "deck.pptx" });
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -776,7 +786,9 @@ describe("useEditorTabs 标签状态", () => {
   it("XLSX 预览重复打开：去重并激活原标签", async () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_read_bytes") {
-        return Promise.resolve(new Uint8Array([104, 101, 108, 108, 111]).buffer);
+        return Promise.resolve(
+          new Uint8Array([104, 101, 108, 108, 111]).buffer,
+        );
       }
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
@@ -928,9 +940,7 @@ describe("useEditorTabs 标签状态", () => {
 
     await openTerminalTab(root);
     expect(tabs).toHaveLength(1);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t).toBeTruthy();
     expect(t!.workspace).toBe(root);
     expect(t!.title).toBe("终端 (cmd)");
@@ -953,9 +963,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t!.title).toBe("终端 (PowerShell)");
     store.settings.terminal_shell = "cmd";
   });
@@ -968,9 +976,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root, "cmd");
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t!.title).toBe("终端 (cmd)");
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_spawn", {
       id: t!.id,
@@ -988,9 +994,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root, "powershell");
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t!.title).toBe("终端 (PowerShell)");
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_spawn", {
       id: t!.id,
@@ -1006,13 +1010,12 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t).toBeTruthy();
     expect(mockedEnsureTerminalListeners).toHaveBeenCalledTimes(1);
     expect(mockedAttachTerminal).toHaveBeenCalledWith(t!.id);
-    const orderEnsure = mockedEnsureTerminalListeners.mock.invocationCallOrder[0];
+    const orderEnsure =
+      mockedEnsureTerminalListeners.mock.invocationCallOrder[0];
     const orderAttach = mockedAttachTerminal.mock.invocationCallOrder[0];
     const orderSpawn = mockedInvoke.mock.invocationCallOrder[0];
     expect(orderEnsure).toBeLessThan(orderSpawn);
@@ -1039,9 +1042,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t!.loading).toBe(false);
     expect(t!.error).toContain("spawn boom");
   });
@@ -1054,9 +1055,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     closeTab(t!.id);
     expect(pendingCloseId.value).toBeNull();
     expect(mockedInvoke).toHaveBeenCalledWith("terminal_kill", {
@@ -1073,9 +1072,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     closeTab(t!.id);
     expect(mockedReleaseTerminal).toHaveBeenCalledWith(t!.id);
   });
@@ -1088,9 +1085,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    )!;
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal")!;
     t.busy = true;
 
     const pending = closeTab(t.id);
@@ -1112,9 +1107,7 @@ describe("useEditorTabs 标签状态", () => {
     });
 
     await openTerminalTab(root);
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    )!;
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal")!;
     t.busy = true;
 
     const pending = closeTab(t.id);
@@ -1165,13 +1158,9 @@ describe("useEditorTabs 标签状态", () => {
 
     await openFileTab(root, "a.txt");
     await openTerminalTab(root);
-    const f = tabs.find(
-      (x): x is FileEditorTab => x.kind === "file",
-    )!;
+    const f = tabs.find((x): x is FileEditorTab => x.kind === "file")!;
     f.dirty = true;
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    )!;
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal")!;
     t.busy = true;
 
     const skipped = await closeAllTabs();
@@ -1214,9 +1203,7 @@ describe("useEditorTabs 标签状态", () => {
     const pending = openTerminalTab(root);
     // openTerminalTab 现在先 await 事件桥监听再 spawn，需让微任务队列推进一次
     await Promise.resolve();
-    const t = tabs.find(
-      (x): x is TerminalEditorTab => x.kind === "terminal",
-    );
+    const t = tabs.find((x): x is TerminalEditorTab => x.kind === "terminal");
     expect(t).toBeTruthy();
     closeTab(t!.id);
     resolveSpawn({});
@@ -1305,16 +1292,17 @@ describe("closeAnyTab 统一关闭入口", () => {
       return Promise.reject(new Error(`unexpected ${cmd}`));
     });
     await openFileTab(root, "a.txt");
-    const f = tabs.find(
-      (x): x is FileEditorTab => x.kind === TabKind.File,
-    )!;
+    const f = tabs.find((x): x is FileEditorTab => x.kind === TabKind.File)!;
     f.dirty = true;
     await closeAnyTab(f);
     expect(pendingCloseId.value).toBe(f.id);
     expect(tabs.some((x) => x.id === f.id)).toBe(true);
   });
 
-  function makeSessionTab(id: string, over: Partial<SessionTab> = {}): SessionTab {
+  function makeSessionTab(
+    id: string,
+    over: Partial<SessionTab> = {},
+  ): SessionTab {
     return {
       id,
       kind: "session",

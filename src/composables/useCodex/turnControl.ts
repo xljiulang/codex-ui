@@ -1,7 +1,11 @@
 // useCodex 拆分模块：回合控制（原 useCodex.ts 的一部分，纯移动，行为不变）
 import { invoke } from "@tauri-apps/api/core";
 import { buildTurnInput } from "../../lib/mention";
-import { toApprovalPolicy, toApprovalsReviewer, toSandboxPolicy } from "../../lib/permissions";
+import {
+  toApprovalPolicy,
+  toApprovalsReviewer,
+  toSandboxPolicy,
+} from "../../lib/permissions";
 import { extractErrorMessage } from "../../lib/serverMessages";
 import { sessionLog } from "../../lib/sessionLog";
 import type { UserInput } from "../../lib/types";
@@ -18,7 +22,6 @@ import { isThreadNotFound } from "./threads";
 import { setToast, toastError } from "./toast";
 import { notifySessionError } from "./sessionNotify";
 import type { SessionTab } from "./types";
-
 
 /**
  * 组装 turn/start 参数：权限/沙箱/模型/推理强度/协作模式按发送目标标签（session）取值。
@@ -39,7 +42,8 @@ export function buildTurnParams(
     clientUserMessageId: clientId,
   };
   // 权限模式随每一轮发送（协议：本回合及后续回合生效），空闲期切换后立即生效
-  const permission = session?.permissionMode ?? store.settings.default_permission;
+  const permission =
+    session?.permissionMode ?? store.settings.default_permission;
   params.approvalPolicy = toApprovalPolicy(permission);
   params.sandboxPolicy = toSandboxPolicy(permission);
   const reviewer = toApprovalsReviewer(permission);
@@ -92,7 +96,6 @@ function buildUserTurn(
   return { clientId, input, params };
 }
 
-
 /** 按标签发送回合（后台标签的队列消息等用）：状态写入目标标签记录，不触碰活动标签 */
 export async function startTurnForTab(
   tab: SessionTab,
@@ -119,12 +122,7 @@ export async function startTurnForTab(
   }
   try {
     // 参数构建失败（如无可用模型）时走统一错误路径，toast 提示并中止发送
-    const { params } = buildUserTurn(
-      threadId,
-      prompt,
-      attachments,
-      tab,
-    );
+    const { params } = buildUserTurn(threadId, prompt, attachments, tab);
     // 待挂载目标：先挂载再启动回合，失败清空该标签目标状态
     if (tab.goalText && !tab.goalStatus) {
       try {
@@ -137,8 +135,14 @@ export async function startTurnForTab(
         setToast(toastError(e));
       }
     }
-    const collabMode = (params.collaborationMode as { mode?: string } | undefined)?.mode ?? null;
-    sessionLog("info", threadId, "turn-start-mode", `collaborationMode.mode=${collabMode ?? "?"}`);
+    const collabMode =
+      (params.collaborationMode as { mode?: string } | undefined)?.mode ?? null;
+    sessionLog(
+      "info",
+      threadId,
+      "turn-start-mode",
+      `collaborationMode.mode=${collabMode ?? "?"}`,
+    );
     const res = await invoke<{ turn?: { id?: string } }>("turn_start", {
       params,
     });
@@ -158,7 +162,6 @@ export async function startTurnForTab(
     tab.turnActive = false;
   }
 }
-
 
 export async function startTurn(prompt: string, attachments: UserInput[]) {
   const tab = activeSessionTab();
@@ -186,12 +189,7 @@ export async function startTurn(prompt: string, attachments: UserInput[]) {
   try {
     // 与 VS Code Codex 扩展一致：文件引用序列化成文本段落，作为单条 text 输入；
     // 参数构建失败（如无可用模型）时走统一错误路径，toast 提示并中止发送
-    const { params } = buildUserTurn(
-      threadId,
-      prompt,
-      attachments,
-      tab,
-    );
+    const { params } = buildUserTurn(threadId, prompt, attachments, tab);
     // 待挂载目标（勾选后首条消息即目标）：先挂载再启动回合，服务端按目标线程自动续跑；
     // 挂载失败清空本地目标状态（toast 已由 setGoal 提示），不阻塞回合
     if (tab?.goalText && !tab.goalStatus) {
@@ -202,9 +200,17 @@ export async function startTurn(prompt: string, attachments: UserInput[]) {
         tab.goalArmed = false;
       }
     }
-    const collabMode = (params.collaborationMode as { mode?: string } | undefined)?.mode ?? null;
-    sessionLog("info", threadId, "turn-start-mode", `collaborationMode.mode=${collabMode ?? "?"}`);
-    const res = await invoke<{ turn?: { id?: string } }>("turn_start", { params });
+    const collabMode =
+      (params.collaborationMode as { mode?: string } | undefined)?.mode ?? null;
+    sessionLog(
+      "info",
+      threadId,
+      "turn-start-mode",
+      `collaborationMode.mode=${collabMode ?? "?"}`,
+    );
+    const res = await invoke<{ turn?: { id?: string } }>("turn_start", {
+      params,
+    });
     if (tab) {
       // 回合状态写活动标签（tab 是唯一事实源）
       tab.turnActive = true;
@@ -224,7 +230,6 @@ export async function startTurn(prompt: string, attachments: UserInput[]) {
   }
 }
 
-
 /** 向进行中的回合追加输入（“调整方向”），协议 turn/steer */
 export async function steerTurn(prompt: string, attachments: UserInput[]) {
   const tab = activeSessionTab();
@@ -236,12 +241,7 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
   }
   const built = (() => {
     try {
-      return buildUserTurn(
-        threadId,
-        prompt,
-        attachments,
-        tab,
-      );
+      return buildUserTurn(threadId, prompt, attachments, tab);
     } catch (e) {
       setToast(toastError(e));
       return null;
@@ -288,7 +288,6 @@ export async function steerTurn(prompt: string, attachments: UserInput[]) {
     setToast(toastError(e));
   }
 }
-
 
 /** 标准停止回合：与停止按钮一致，线程有活跃目标时先清目标再 turn/interrupt；
  * 可显式传入线程/回合 id（切换会话时用），缺省时操作当前会话。 */
@@ -348,7 +347,6 @@ export async function interrupt(
   }
 }
 
-
 /** 为当前线程挂载目标（thread/goal/set）；目标设置成功后由服务端自动续跑回合 */
 export async function setGoal(objective: string): Promise<boolean> {
   const text = objective.trim();
@@ -377,7 +375,6 @@ export async function setGoal(objective: string): Promise<boolean> {
     return false;
   }
 }
-
 
 export async function clearGoal(threadId?: string | null) {
   const active = activeSessionTab();

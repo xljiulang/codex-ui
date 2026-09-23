@@ -34,7 +34,11 @@ onBeforeUnmount(() => {
         <button class="btn" @click="settleConfirm(false)">
           {{ store.confirm.cancelLabel ?? "取消" }}
         </button>
-        <button ref="confirmBtn" class="btn danger" @click="settleConfirm(true)">
+        <button
+          ref="confirmBtn"
+          class="btn danger"
+          @click="settleConfirm(true)"
+        >
           {{ store.confirm.confirmLabel ?? "确认" }}
         </button>
       </div>

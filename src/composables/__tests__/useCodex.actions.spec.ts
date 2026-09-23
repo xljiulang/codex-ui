@@ -1,12 +1,30 @@
-import { deleteThread, forkThread, newEmptySession, openSession, openNewSession, pickAndOpenNewSession, sendPrompt } from "../useCodex/actions";
-import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
+import {
+  deleteThread,
+  forkThread,
+  newEmptySession,
+  openSession,
+  openNewSession,
+  pickAndOpenNewSession,
+  sendPrompt,
+} from "../useCodex/actions";
+import {
+  __resetSessionTabsForTest,
+  activeSessionTab,
+} from "../useCodex/sessionState";
 import { store } from "../useCodex/store";
 import {
   activeTabId,
   openSettingsTab,
   SETTINGS_TAB_ID,
 } from "../useEditorTabs";
-import { DEFAULT_MODEL, makeSessionTab, PLUGINS_RESPONSE, resetUseCodexState, SKILLS_RESPONSE, tabs } from "./useCodexTestHarness";
+import {
+  DEFAULT_MODEL,
+  makeSessionTab,
+  PLUGINS_RESPONSE,
+  resetUseCodexState,
+  SKILLS_RESPONSE,
+  tabs,
+} from "./useCodexTestHarness";
 import { flushPromises } from "@vue/test-utils";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -58,7 +76,6 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     store.threads = [];
   });
 
-
   it("新建会话后窗口标题跟随会话标签标题", async () => {
     await newEmptySession("D:/projects/B");
     expect(activeSessionTab()?.newSessionWorkspace).toBe("D:/projects/B");
@@ -66,7 +83,6 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     expect(mockWin.setTitle).toHaveBeenCalledWith("新建会话");
   });
 });
-
 
 describe("forkThread 会话分叉", () => {
   beforeEach(() => {
@@ -199,7 +215,6 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     store.threads = [];
   });
 
-
   it("切换会话标签时窗口标题跟随新 tab 标题", async () => {
     await newEmptySession();
     const first = activeTabId.value;
@@ -238,11 +253,8 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("新建会话发送首条消息：标题先取消息内容并标记首条消息名", async () => {
-    tabs.push(
-      makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }),
-    );
+    tabs.push(makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }));
     activeTabId.value = "s1";
     store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
@@ -280,9 +292,7 @@ describe("会话标签状态与事件路由", () => {
   });
 
   it("新建会话回填 thread_start 返回的模型/强度（优先于本地默认解析）", async () => {
-    tabs.push(
-      makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }),
-    );
+    tabs.push(makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }));
     activeTabId.value = "s1";
     store.workspace = "D:/repo";
     store.models = [
@@ -316,9 +326,7 @@ describe("会话标签状态与事件路由", () => {
   });
 
   it("新建会话短首条消息：thread_list 未返回时也即时同步历史面板", async () => {
-    tabs.push(
-      makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }),
-    );
+    tabs.push(makeSessionTab("s1", null, { newSessionWorkspace: "D:/repo" }));
     activeTabId.value = "s1";
     store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string, args?: unknown) => {
@@ -382,8 +390,11 @@ describe("会话标签状态与事件路由", () => {
     );
     expect(startCall).toBeTruthy();
     expect(
-      (startCall![1] as { params?: { approvalPolicy?: string; sandbox?: string } })
-        .params,
+      (
+        startCall![1] as {
+          params?: { approvalPolicy?: string; sandbox?: string };
+        }
+      ).params,
     ).toMatchObject({
       approvalPolicy: "never",
       sandbox: "read-only",
@@ -398,7 +409,6 @@ describe("会话标签状态与事件路由", () => {
     store.interactions = [];
     store.threads = [];
   });
-
 
   it("deleteThread：删除唯一标签后允许 0 标签并复位 live 字段", async () => {
     tabs.push(makeSessionTab("s1", "t1"));
@@ -441,7 +451,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("pickAndOpenNewSession：弹目录选择（初始为 workspace），选中后新建会话", async () => {
     store.workspace = "D:/repo";
     mockedInvoke.mockImplementation((cmd: string) => {
@@ -469,7 +478,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("pickAndOpenNewSession：有会话时初始目录为线程 cwd", async () => {
     __resetSessionTabsForTest();
     tabs.push(makeSessionTab("s1", "t1", { workspace: "D:/session" }));
@@ -491,7 +499,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("pickAndOpenNewSession：取消选择不新建", async () => {
     store.workspace = "D:/repo";
     mockedInvoke.mockResolvedValue(null);
@@ -507,7 +514,6 @@ describe("会话标签状态与事件路由", () => {
     store.interactions = [];
     store.threads = [];
   });
-
 
   it("pickAndOpenNewSession：选择器打开期间防重入", async () => {
     let resolveDir!: (v: string | null) => void;
@@ -675,7 +681,6 @@ describe("新建会话挂载目标", () => {
     expect(activeSessionTab()?.goalStatus).toBeNull();
     expect(store.toast).toContain("挂载失败");
   });
-
 });
 
 describe("模型不可用时的发送路径", () => {
@@ -702,7 +707,10 @@ describe("模型不可用时的发送路径", () => {
     await sendPrompt("你好");
 
     expect(store.toast).toContain("当前没有可用模型");
-    expect(mockedInvoke).not.toHaveBeenCalledWith("turn_start", expect.anything());
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "turn_start",
+      expect.anything(),
+    );
     expect(activeSessionTab()?.turnActive).toBe(false);
     expect(store.itemsByThread["t1"] ?? []).toHaveLength(0);
   });

@@ -8,12 +8,7 @@ import {
   type SearchSnippet,
 } from "../../lib/sessionFs";
 import { normalizePathKey } from "../../lib/path";
-import {
-  searchResults,
-  searchSnippets,
-  searching,
-  searchTerm,
-} from "./state";
+import { searchResults, searchSnippets, searching, searchTerm } from "./state";
 
 const SEARCH_LIMIT = 200;
 const RG_SEARCH_LIMIT = 100;

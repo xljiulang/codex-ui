@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { TurnPlan } from "../composables/useCodex/types";
-import { ICON_ARROW_DOWN, ICON_ARROW_RIGHT, ICON_CHECKLIST } from "../lib/icons";
+import {
+  ICON_ARROW_DOWN,
+  ICON_ARROW_RIGHT,
+  ICON_CHECKLIST,
+} from "../lib/icons";
 
 const props = defineProps<{ plan: TurnPlan }>();
 
@@ -26,7 +30,11 @@ const sub = computed(() => {
         :aria-expanded="open"
         @click="open = !open"
       >
-        <svg class="assistant-card-arrow" viewBox="0 0 24 24" aria-hidden="true">
+        <svg
+          class="assistant-card-arrow"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
           <path :d="open ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
         </svg>
         <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -52,7 +60,11 @@ const sub = computed(() => {
           }"
         >
           <span class="plan-step-icon">{{
-            s.status === "completed" ? "☑" : s.status === "inProgress" ? "◐" : "☐"
+            s.status === "completed"
+              ? "☑"
+              : s.status === "inProgress"
+                ? "◐"
+                : "☐"
           }}</span>
           <span class="plan-step-text">{{ s.step }}</span>
         </div>

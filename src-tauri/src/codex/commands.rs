@@ -1,23 +1,25 @@
-use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
-use crate::codex::app_server::{CodexServer, apply_codex_env, find_codex_sync};
+use crate::codex::app_server::{apply_codex_env, find_codex_sync, CodexServer};
+use crate::codex::compat_proxy;
 use crate::codex::custom_instructions;
-use crate::codex::model_config;
-use crate::codex::path_util::clean_path;
 use crate::codex::model_catalog;
+use crate::codex::model_config;
 use crate::codex::notifications;
-use crate::codex::scheduled_tasks::{self, ScheduledTask, ScheduledTaskStore, TaskScheduler, TaskRunRecord};
+use crate::codex::path_util::clean_path;
+use crate::codex::scheduled_tasks::{
+    self, ScheduledTask, ScheduledTaskStore, TaskRunRecord, TaskScheduler,
+};
 use crate::codex::session_state::{SessionState, SessionStateStore};
 use crate::codex::settings::{self, AppSettings};
 use crate::codex::skills;
 use crate::codex::wechat_bridge::WeChatBridge;
 use crate::codex::wechat_client;
-use crate::codex::compat_proxy;
 
 type Server = Arc<CodexServer>;
 
@@ -188,7 +190,9 @@ pub async fn thread_list(
     if let Some(w) = cwd {
         params.insert("cwd".into(), json!(w));
     }
-    server.request("thread/list", Value::Object(params), None).await
+    server
+        .request("thread/list", Value::Object(params), None)
+        .await
 }
 
 rpc_passthrough!(thread_start, "thread/start", Some(Duration::from_secs(60)));
@@ -208,7 +212,11 @@ pub async fn thread_read(
         .await
 }
 
-rpc_passthrough!(thread_resume, "thread/resume", Some(Duration::from_secs(60)));
+rpc_passthrough!(
+    thread_resume,
+    "thread/resume",
+    Some(Duration::from_secs(60))
+);
 
 rpc_passthrough!(thread_fork, "thread/fork", Some(Duration::from_secs(60)));
 
@@ -286,20 +294,14 @@ pub async fn goal_set(
 }
 
 #[tauri::command]
-pub async fn goal_get(
-    server: State<'_, Server>,
-    thread_id: String,
-) -> Result<Value, String> {
+pub async fn goal_get(server: State<'_, Server>, thread_id: String) -> Result<Value, String> {
     server
         .request("thread/goal/get", json!({ "threadId": thread_id }), None)
         .await
 }
 
 #[tauri::command]
-pub async fn goal_clear(
-    server: State<'_, Server>,
-    thread_id: String,
-) -> Result<Value, String> {
+pub async fn goal_clear(server: State<'_, Server>, thread_id: String) -> Result<Value, String> {
     server
         .request("thread/goal/clear", json!({ "threadId": thread_id }), None)
         .await
@@ -336,7 +338,9 @@ pub fn auth_login(app: AppHandle) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn scheduled_tasks_list(store: State<'_, TaskStore>) -> Result<Vec<ScheduledTask>, String> {
+pub async fn scheduled_tasks_list(
+    store: State<'_, TaskStore>,
+) -> Result<Vec<ScheduledTask>, String> {
     Ok(store.list())
 }
 
@@ -417,7 +421,10 @@ pub async fn scheduled_task_update(
 }
 
 #[tauri::command]
-pub async fn scheduled_task_run_now(scheduler: State<'_, Scheduler>, id: String) -> Result<(), String> {
+pub async fn scheduled_task_run_now(
+    scheduler: State<'_, Scheduler>,
+    id: String,
+) -> Result<(), String> {
     scheduler.run_now(&id)
 }
 
@@ -428,7 +435,11 @@ pub async fn scheduled_task_runs(
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<TaskRunRecord>, String> {
-    store.list_runs(&task_id, limit.unwrap_or(20).clamp(1, 100), offset.unwrap_or(0).max(0))
+    store.list_runs(
+        &task_id,
+        limit.unwrap_or(20).clamp(1, 100),
+        offset.unwrap_or(0).max(0),
+    )
 }
 
 /// 会话错误通知节流器（进程级，见 `notifications::ToastThrottle`）。
@@ -717,7 +728,9 @@ pub async fn pick_directory(
     tokio::task::spawn_blocking(move || {
         // 锁在阻塞任务内获取并持有到对话框关闭：与 git_op_lock 同模式，
         // 保证排队等待的后续调用在对话框真正关闭前不会并发弹窗。
-        let _guard = pick_directory_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = pick_directory_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let mut dialog = rfd::FileDialog::new();
         if let Some(t) = title.as_deref().filter(|t| !t.is_empty()) {
             dialog = dialog.set_title(t);
@@ -761,12 +774,11 @@ pub async fn pick_codex_file(initial_dir: Option<String>) -> Result<Option<Strin
 
 /// 图片扩展名白名单（来自粘贴文件名/剪贴板类型）
 fn image_extension(name: &str) -> Result<String, String> {
-    let ext = name
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp") {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
+    ) {
         Ok(ext)
     } else {
         Err(format!("不支持的图片格式: {name}"))
@@ -790,16 +802,10 @@ fn paste_image_dir() -> std::path::PathBuf {
 }
 
 /// 把字节写入指定目录，返回绝对路径
-fn save_bytes_to_dir(
-    dir: &std::path::Path,
-    name: &str,
-    bytes: &[u8],
-) -> Result<String, String> {
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("创建目录失败 {}: {e}", dir.display()))?;
+fn save_bytes_to_dir(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Result<String, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("创建目录失败 {}: {e}", dir.display()))?;
     let path = dir.join(name);
-    std::fs::write(&path, bytes)
-        .map_err(|e| format!("写入图片失败 {}: {e}", path.display()))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("写入图片失败 {}: {e}", path.display()))?;
     Ok(clean_path(&path))
 }
 
@@ -984,10 +990,8 @@ pub async fn clipboard_write_image(source: String) -> Result<(), String> {
         clipboard_win::raw::set(clipboard_win::formats::CF_DIB, &dib)
             .map_err(|e| format!("写入剪贴板图像失败: {e}"))?;
         // 追加 CF_BITMAP，兼容只认 HBITMAP 的老程序（失败不阻断，DIB 已在剪贴板里）
-        let _ = clipboard_win::raw::set_bitmap_with(
-            &dib_to_bmp(&dib),
-            clipboard_win::options::NoClear,
-        );
+        let _ =
+            clipboard_win::raw::set_bitmap_with(&dib_to_bmp(&dib), clipboard_win::options::NoClear);
         Ok(())
     })
     .await
@@ -1132,8 +1136,7 @@ mod tests {
         use base64::Engine as _;
         // data URL（base64）
         let payload = base64::engine::general_purpose::STANDARD.encode(b"png-bytes");
-        let bytes =
-            image_bytes_from_source(&format!("data:image/png;base64,{payload}")).unwrap();
+        let bytes = image_bytes_from_source(&format!("data:image/png;base64,{payload}")).unwrap();
         assert_eq!(bytes, b"png-bytes");
         // 本地路径
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1151,9 +1154,11 @@ mod tests {
             .unwrap_err()
             .contains("仅支持 base64"));
         assert!(image_bytes_from_source("  ").unwrap_err().contains("为空"));
-        assert!(image_bytes_from_source(&dir.path().join("missing.png").to_string_lossy())
-            .unwrap_err()
-            .contains("读取图片失败"));
+        assert!(
+            image_bytes_from_source(&dir.path().join("missing.png").to_string_lossy())
+                .unwrap_err()
+                .contains("读取图片失败")
+        );
     }
 
     #[test]
@@ -1167,8 +1172,16 @@ mod tests {
         assert_eq!(u32_at(0), 40, "biSize");
         assert_eq!(i32_at(4), 2, "biWidth");
         assert_eq!(i32_at(8), -1, "biHeight 负值 = 自顶向下");
-        assert_eq!(u16::from_le_bytes(dib[12..14].try_into().unwrap()), 1, "biPlanes");
-        assert_eq!(u16::from_le_bytes(dib[14..16].try_into().unwrap()), 32, "biBitCount");
+        assert_eq!(
+            u16::from_le_bytes(dib[12..14].try_into().unwrap()),
+            1,
+            "biPlanes"
+        );
+        assert_eq!(
+            u16::from_le_bytes(dib[14..16].try_into().unwrap()),
+            32,
+            "biBitCount"
+        );
         assert_eq!(u32_at(16), 0, "biCompression = BI_RGB");
         assert_eq!(u32_at(20), 2 * 1 * 4, "biSizeImage");
         // 像素：BGR 顺序 + alpha 置 255

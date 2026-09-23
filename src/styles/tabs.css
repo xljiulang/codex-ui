@@ -93,8 +93,11 @@
   font-family: inherit;
   font-size: var(--font-md);
   cursor: pointer;
-  transition: background-color var(--ease), color var(--ease),
-    border-color var(--ease), box-shadow var(--ease);
+  transition:
+    background-color var(--ease),
+    color var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease);
 }
 
 .editor-tab:focus-visible {
@@ -594,7 +597,9 @@
   caret-color: CanvasText;
   z-index: 0;
   --min-font-size: 1;
-  --text-scale-factor: calc(var(--total-scale-factor, 1) * var(--min-font-size));
+  --text-scale-factor: calc(
+    var(--total-scale-factor, 1) * var(--min-font-size)
+  );
   --min-font-size-inv: calc(1 / var(--min-font-size));
   user-select: text;
 }

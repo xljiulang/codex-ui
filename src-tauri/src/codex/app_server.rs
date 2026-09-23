@@ -5,21 +5,21 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{Mutex, Notify, broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, Mutex, Notify};
 
 use crate::codex::bundled;
-use crate::codex::env_flags;
-use crate::codex::path_util::clean_path;
-use crate::codex::model_config;
-use crate::codex::logs_guard;
-use crate::codex::settings::{self, AppSettings};
-use crate::codex::session_log::SessionLog;
 use crate::codex::compat_proxy::{self, CompatProxyHandle};
-use crate::codex::compat_trace::{TraceSink, CompatTrace};
+use crate::codex::compat_trace::{CompatTrace, TraceSink};
+use crate::codex::env_flags;
+use crate::codex::logs_guard;
+use crate::codex::model_config;
+use crate::codex::path_util::clean_path;
+use crate::codex::session_log::SessionLog;
+use crate::codex::settings::{self, AppSettings};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_LOG_LINES: usize = 500;
@@ -142,11 +142,7 @@ fn compat_trace_from(dir: Option<PathBuf>, enabled: bool) -> Option<Arc<CompatTr
 
 impl CodexServer {
     pub fn new(app: AppHandle, workspace: PathBuf) -> Self {
-        let logs_dir = app
-            .path()
-            .app_data_dir()
-            .ok()
-            .map(|d| d.join("logs"));
+        let logs_dir = app.path().app_data_dir().ok().map(|d| d.join("logs"));
         let log = logs_dir
             .as_ref()
             .map(|d| Arc::new(SessionLog::new(d.clone())));
@@ -328,11 +324,7 @@ impl CodexServer {
             bundled::bootstrap(boot).await;
         });
         // 按保存设置启动兼容代理（app-server 解码前确保端口可用；失败仅记日志不阻断）。
-        let app_dir = self
-            .app
-            .path()
-            .app_data_dir()
-            .unwrap_or_default();
+        let app_dir = self.app.path().app_data_dir().unwrap_or_default();
         let settings = settings::load(&app_dir);
         let status = self
             .apply_compat_proxy(
@@ -348,15 +340,13 @@ impl CodexServer {
                 self.push_log("warn", format!("兼容代理未启动：{e}")).await;
             }
         } else {
-            self.push_log(
-                "info",
-                format!("兼容代理已启动，端口 {}", status.port),
-            )
-            .await;
+            self.push_log("info", format!("兼容代理已启动，端口 {}", status.port))
+                .await;
         }
         while !self.shared.stop.load(Ordering::SeqCst) {
             if let Err(e) = self.spawn_and_read().await {
-                self.push_log("error", format!("codex app-server 错误: {e}")).await;
+                self.push_log("error", format!("codex app-server 错误: {e}"))
+                    .await;
             }
             self.mark_disconnected().await;
             self.emit_status().await;
@@ -434,7 +424,10 @@ impl CodexServer {
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("启动 codex app-server 失败: {e}"))?;
-        let stdin = child.stdin.take().ok_or_else(|| "无法获取 stdin".to_string())?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "无法获取 stdin".to_string())?;
         let stdout = child
             .stdout
             .take()
@@ -643,10 +636,7 @@ impl CodexServer {
                             }
                         } else {
                             server
-                                .push_log(
-                                    "warn",
-                                    format!("添加内置插件市场 {name} 失败：{e}"),
-                                )
+                                .push_log("warn", format!("添加内置插件市场 {name} 失败：{e}"))
                                 .await;
                         }
                     }
@@ -834,13 +824,10 @@ impl CodexServer {
                         message: "codex app-server 未连接，正在重连，请稍候".into(),
                     });
                 }
-                let stdin = inner
-                    .stdin
-                    .as_mut()
-                    .ok_or_else(|| RpcError {
-                        code: None,
-                        message: "codex app-server stdin 不可用".to_string(),
-                    })?;
+                let stdin = inner.stdin.as_mut().ok_or_else(|| RpcError {
+                    code: None,
+                    message: "codex app-server stdin 不可用".to_string(),
+                })?;
                 let line = format!("{}\n", msg);
                 stdin
                     .write_all(line.as_bytes())
@@ -968,7 +955,10 @@ impl CodexServer {
             Ok(Some(db)) => {
                 self.push_log(
                     "info",
-                    format!("已为 codex 日志库 {DB_NAME} 应用阻断触发器：{}", db.display()),
+                    format!(
+                        "已为 codex 日志库 {DB_NAME} 应用阻断触发器：{}",
+                        db.display()
+                    ),
                 )
                 .await;
             }
@@ -1018,7 +1008,8 @@ impl CodexServer {
         let codex = match self.resolve_codex().await {
             Ok(p) => p,
             Err(e) => {
-                self.push_log("warn", format!("探测 codex 版本失败：{e}")).await;
+                self.push_log("warn", format!("探测 codex 版本失败：{e}"))
+                    .await;
                 return;
             }
         };
@@ -1033,23 +1024,20 @@ impl CodexServer {
         }
         apply_codex_env(cmd.as_std_mut());
         let output = match cmd.spawn() {
-            Ok(child) => match tokio::time::timeout(
-                Duration::from_secs(5),
-                child.wait_with_output(),
-            )
-            .await
-            {
-                Ok(Ok(o)) => o,
-                Ok(Err(e)) => {
-                    self.push_log("warn", format!("执行 codex --version 失败: {e}"))
-                        .await;
-                    return;
+            Ok(child) => {
+                match tokio::time::timeout(Duration::from_secs(5), child.wait_with_output()).await {
+                    Ok(Ok(o)) => o,
+                    Ok(Err(e)) => {
+                        self.push_log("warn", format!("执行 codex --version 失败: {e}"))
+                            .await;
+                        return;
+                    }
+                    Err(_) => {
+                        self.push_log("warn", "探测 codex 版本超时".into()).await;
+                        return;
+                    }
                 }
-                Err(_) => {
-                    self.push_log("warn", "探测 codex 版本超时".into()).await;
-                    return;
-                }
-            },
+            }
             Err(e) => {
                 self.push_log("warn", format!("启动 codex --version 失败: {e}"))
                     .await;
@@ -1190,7 +1178,13 @@ fn auto_reply_for(method: &str, now_unix_secs: i64) -> Option<Value> {
 /// 在 npm 前缀目录下按嵌套/扁平布局找 @openai 平台包里的真实 codex.exe（x64/arm64）
 fn npm_codex_exe(prefix: &Path) -> Option<PathBuf> {
     const LAYOUTS: [&[&str]; 2] = [
-        &["node_modules", "@openai", "codex", "node_modules", "@openai"],
+        &[
+            "node_modules",
+            "@openai",
+            "codex",
+            "node_modules",
+            "@openai",
+        ],
         &["node_modules", "@openai"],
     ];
     const TARGETS: [&[&str]; 2] = [
@@ -1225,7 +1219,10 @@ fn npm_codex_exe(prefix: &Path) -> Option<PathBuf> {
 
 /// 应用自身目录：运行中可执行文件（current_exe）所在目录。
 pub(crate) fn app_exe_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(Path::to_path_buf)
 }
 
 /// codex-cli 0.149 保留名市场的、codex 认可的 canonical 来源路径（纯函数，便于测试）。
@@ -1271,7 +1268,9 @@ fn resolve_bundled_marketplace_source(name: &str) -> Result<String, String> {
         return Err(format!("未知内置市场名：{name}"));
     };
     if !target.is_dir() {
-        return Err(format!("内置市场 {name} 的来源未就绪（归档未随包提供或解压失败），跳过"));
+        return Err(format!(
+            "内置市场 {name} 的来源未就绪（归档未随包提供或解压失败），跳过"
+        ));
     }
     Ok(clean_path(&target))
 }
@@ -1354,11 +1353,7 @@ pub(crate) fn prepend_bin_and_runtime_path(
 }
 
 /// apply_codex_env 的纯函数变体：app_dir/userprofile 显式传入，便于测试。
-fn apply_codex_env_in(
-    cmd: &mut std::process::Command,
-    app_dir: &Path,
-    userprofile: &Path,
-) {
+fn apply_codex_env_in(cmd: &mut std::process::Command, app_dir: &Path, userprofile: &Path) {
     let existing = std::env::var("PATH").unwrap_or_default();
     if let Some(joined) = prepend_bin_and_runtime_path(&existing, app_dir, userprofile) {
         cmd.env("PATH", joined);
@@ -1711,7 +1706,12 @@ mod tests {
         // 且保留原 PATH；不设置 CODEX_HOME
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
-        let old = tmp.path().join("old").join("bin").to_string_lossy().into_owned();
+        let old = tmp
+            .path()
+            .join("old")
+            .join("bin")
+            .to_string_lossy()
+            .into_owned();
         with_envs(&[("PATH", Some(&old))], || {
             let mut cmd = std::process::Command::new("codex");
             apply_codex_env_in(&mut cmd, tmp.path(), tmp.path());
@@ -1867,11 +1867,7 @@ mod tests {
     fn prepend_bin_and_runtime_path_prepends_bin_then_runtime() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("bin")).unwrap();
-        let existing = std::env::join_paths([
-            tmp.path().join("a"),
-            tmp.path().join("b"),
-        ])
-        .unwrap();
+        let existing = std::env::join_paths([tmp.path().join("a"), tmp.path().join("b")]).unwrap();
 
         // bin 在最前，三条 runtime 目录随后，原 PATH 保留
         let joined =
@@ -1885,14 +1881,12 @@ mod tests {
 
         // bin 缺失且 userprofile 为空：无可前插项 → None（保持原 PATH）
         let tmp2 = tempfile::tempdir().unwrap();
-        assert!(
-            prepend_bin_and_runtime_path(
-                &existing.to_string_lossy(),
-                tmp2.path(),
-                Path::new(""),
-            )
-            .is_none()
-        );
+        assert!(prepend_bin_and_runtime_path(
+            &existing.to_string_lossy(),
+            tmp2.path(),
+            Path::new(""),
+        )
+        .is_none());
 
         // bin 缺失但 userprofile 非空：仍前插三条依赖目录（不检查存在性）
         let joined2 =
@@ -1968,10 +1962,7 @@ mod tests {
         let ext_root = tmp.path().join(".vscode").join("extensions");
         let old_dir = ext_root.join("openai.chatgpt-1.0.0-win32-x64");
         let new_dir = ext_root.join("openai.chatgpt-2.0.0");
-        let old = old_dir
-            .join("bin")
-            .join("windows-x86_64")
-            .join("codex.exe");
+        let old = old_dir.join("bin").join("windows-x86_64").join("codex.exe");
         let new = new_dir.join("bin").join("win32-x64").join("codex.exe");
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::create_dir_all(new.parent().unwrap()).unwrap();
@@ -2030,10 +2021,7 @@ mod tests {
         let home2_s = home2.path().to_string_lossy().into_owned();
         let bin_s = bin.to_string_lossy().into_owned();
         with_envs(
-            &[
-                ("CODEX_HOME", Some(&home2_s)),
-                ("CODEX_BIN", Some(&bin_s)),
-            ],
+            &[("CODEX_HOME", Some(&home2_s)), ("CODEX_BIN", Some(&bin_s))],
             || {
                 assert_eq!(find_codex_sync(&settings).unwrap(), bin);
             },

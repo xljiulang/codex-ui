@@ -65,7 +65,12 @@ function dirNodes(
   const nodes: GitTreeNode[] = [];
   for (const name of [...acc.dirs.keys()].sort((a, b) => a.localeCompare(b))) {
     const childRel = relPath ? `${relPath}/${name}` : name;
-    const children = dirNodes(acc.dirs.get(name)!, childRel, depth + 1, collapsedDirs);
+    const children = dirNodes(
+      acc.dirs.get(name)!,
+      childRel,
+      depth + 1,
+      collapsedDirs,
+    );
     const childCount = children.reduce(
       (n, c) => n + (c.kind === "dir" ? c.childCount : 1),
       0,
@@ -92,9 +97,7 @@ function dirNodes(
       children,
     });
   }
-  const files = acc.files
-    .slice()
-    .sort((a, b) => a.path.localeCompare(b.path));
+  const files = acc.files.slice().sort((a, b) => a.path.localeCompare(b.path));
   for (const f of files) {
     nodes.push({
       kind: "file",

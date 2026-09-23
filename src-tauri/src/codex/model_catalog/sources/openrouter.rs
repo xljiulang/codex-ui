@@ -8,12 +8,13 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use super::{FactMatch, FactSource, write_atomic};
+use super::{write_atomic, FactMatch, FactSource};
 use crate::codex::model_catalog::facts::ModelFacts;
 use crate::codex::model_catalog::matching::{Candidate, CandidateStore};
 
 const OPENROUTER_MODELS_URL: &str = "https://openrouter.ai/api/v1/models";
-const BUNDLED_OPENROUTER_MODELS: &str = include_str!("../../../../resources/openrouter-models.json");
+const BUNDLED_OPENROUTER_MODELS: &str =
+    include_str!("../../../../resources/openrouter-models.json");
 
 pub struct OpenRouterSource {
     store: CandidateStore,
@@ -105,10 +106,7 @@ fn build_store(models: Vec<Value>) -> CandidateStore {
                     aliases.push(alias_target.to_string());
                 }
                 let release = model.get("created").and_then(Value::as_i64);
-                Some((
-                    Candidate::new(id.clone(), aliases, release, id),
-                    model,
-                ))
+                Some((Candidate::new(id.clone(), aliases, release, id), model))
             })
             .collect(),
     )
@@ -140,9 +138,8 @@ fn facts_from_model(model: &Value) -> ModelFacts {
     // 缺失该参数即明确不支持。
     if let Some(parameters) = supported_parameters(model) {
         facts.support_verbosity = Some(parameters.contains("verbosity"));
-        facts.supports_search_tool = Some(
-            parameters.contains("web_search_options") || parameters.contains("web_search"),
-        );
+        facts.supports_search_tool =
+            Some(parameters.contains("web_search_options") || parameters.contains("web_search"));
         facts.supports_tool_calls = Some(parameters.contains("tools"));
     }
     facts
@@ -152,7 +149,9 @@ fn input_modalities(model: &Value) -> Option<Vec<String>> {
     let items = model
         .pointer("/architecture/input_modalities")
         .and_then(Value::as_array)?;
-    if !items.iter().all(Value::is_string) { return None; }
+    if !items.iter().all(Value::is_string) {
+        return None;
+    }
     let mut modalities = Vec::new();
     for item in items {
         let Some(modality) = item.as_str().map(|value| value.trim().to_ascii_lowercase()) else {
@@ -173,7 +172,9 @@ fn reasoning_levels(model: &Value) -> Option<Vec<String>> {
     let items = model
         .pointer("/reasoning/supported_efforts")
         .and_then(Value::as_array)?;
-    if !items.iter().all(Value::is_string) { return None; }
+    if !items.iter().all(Value::is_string) {
+        return None;
+    }
     let mut levels: Vec<String> = items
         .iter()
         .filter_map(Value::as_str)
@@ -208,8 +209,12 @@ fn reasoning_present(model: &Value) -> Option<bool> {
 }
 
 fn supported_parameters(model: &Value) -> Option<HashSet<String>> {
-    let items = model.get("supported_parameters").and_then(Value::as_array)?;
-    if !items.iter().all(Value::is_string) { return None; }
+    let items = model
+        .get("supported_parameters")
+        .and_then(Value::as_array)?;
+    if !items.iter().all(Value::is_string) {
+        return None;
+    }
     Some(
         items
             .iter()
@@ -315,8 +320,14 @@ mod tests {
         let facts = source.extract("vendor/model-x").unwrap().facts;
         assert_eq!(facts.context_window, Some(128_000));
         assert_eq!(facts.max_context_window, Some(128_000));
-        assert_eq!(facts.input_modalities, Some(vec!["text".into(), "image".into()]));
-        assert_eq!(facts.reasoning_levels, Some(vec!["low".into(), "high".into()]));
+        assert_eq!(
+            facts.input_modalities,
+            Some(vec!["text".into(), "image".into()])
+        );
+        assert_eq!(
+            facts.reasoning_levels,
+            Some(vec!["low".into(), "high".into()])
+        );
         assert_eq!(facts.default_reasoning_level.as_deref(), Some("high"));
         assert_eq!(facts.supports_reasoning, Some(true));
         assert_eq!(facts.description.as_deref(), Some("描述"));
@@ -332,7 +343,10 @@ mod tests {
             "reasoning": { "supported_efforts": [] }
         }));
         assert_eq!(facts.reasoning_levels, Some(vec![]));
-        assert_eq!(facts_from_model(&json!({"id":"model"})).reasoning_levels, None);
+        assert_eq!(
+            facts_from_model(&json!({"id":"model"})).reasoning_levels,
+            None
+        );
         let invalid = facts_from_model(&json!({
             "supported_parameters":[1], "reasoning":{"supported_efforts":[1]},
             "architecture":{"input_modalities":[1]}

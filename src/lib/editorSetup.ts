@@ -45,10 +45,7 @@ import { sql } from "@codemirror/lang-sql";
 import { xml } from "@codemirror/lang-xml";
 import { yaml } from "@codemirror/lang-yaml";
 
-import {
-  csharp,
-  kotlin,
-} from "@codemirror/legacy-modes/mode/clike";
+import { csharp, kotlin } from "@codemirror/legacy-modes/mode/clike";
 import { diff } from "@codemirror/legacy-modes/mode/diff";
 import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { properties } from "@codemirror/legacy-modes/mode/properties";
@@ -59,19 +56,40 @@ import { shell } from "@codemirror/legacy-modes/mode/shell";
 export const editorHighlightStyle = HighlightStyle.define([
   { tag: tags.comment, color: "var(--syntax-comment)" },
   {
-    tag: [tags.keyword, tags.modifier, tags.controlKeyword, tags.operatorKeyword],
+    tag: [
+      tags.keyword,
+      tags.modifier,
+      tags.controlKeyword,
+      tags.operatorKeyword,
+    ],
     color: "var(--syntax-keyword)",
   },
   {
-    tag: [tags.string, tags.special(tags.string), tags.regexp, tags.attributeValue],
+    tag: [
+      tags.string,
+      tags.special(tags.string),
+      tags.regexp,
+      tags.attributeValue,
+    ],
     color: "var(--syntax-string)",
   },
   {
-    tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null, tags.meta],
+    tag: [
+      tags.number,
+      tags.integer,
+      tags.float,
+      tags.bool,
+      tags.null,
+      tags.meta,
+    ],
     color: "var(--syntax-number)",
   },
   {
-    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.labelName],
+    tag: [
+      tags.function(tags.variableName),
+      tags.function(tags.propertyName),
+      tags.labelName,
+    ],
     color: "var(--syntax-function)",
   },
   {
@@ -127,12 +145,13 @@ export const editorThemeSpec = {
     backgroundColor: "rgba(var(--accent-rgb), 0.09)",
     color: "var(--text-dim)",
   },
-  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-    // !important 压过 CodeMirror 基础主题 &dark 聚焦选区规则（.cm-selectionBackground 背景 #222），
-    // 保证浅色主题下选区为浅蓝底深字；颜色用 --text-bright，随主题在深浅间切换
-    backgroundColor: "rgba(var(--accent-rgb), 0.30) !important",
-    color: "var(--text-bright)",
-  },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection":
+    {
+      // !important 压过 CodeMirror 基础主题 &dark 聚焦选区规则（.cm-selectionBackground 背景 #222），
+      // 保证浅色主题下选区为浅蓝底深字；颜色用 --text-bright，随主题在深浅间切换
+      backgroundColor: "rgba(var(--accent-rgb), 0.30) !important",
+      color: "var(--text-bright)",
+    },
   ".cm-cursor, .cm-dropCursor": {
     borderLeftColor: "var(--accent)",
   },
@@ -310,10 +329,13 @@ export function buildEditorExtensions(
       autocomplete: "off",
     }),
     keymap.of([
-      { key: "Mod-s", run: () => {
-        opts.onSave();
-        return true;
-      } },
+      {
+        key: "Mod-s",
+        run: () => {
+          opts.onSave();
+          return true;
+        },
+      },
       indentWithTab,
       ...defaultKeymap,
       ...historyKeymap,
@@ -349,7 +371,9 @@ export function createEditorState(
     extensions,
   };
   if (selection) {
-    opts.selection = EditorSelection.cursor(posAtLineCol(doc, selection.line, selection.col));
+    opts.selection = EditorSelection.cursor(
+      posAtLineCol(doc, selection.line, selection.col),
+    );
   }
   return EditorState.create(opts);
 }

@@ -73,10 +73,7 @@ defineEmits<{
         >
           {{ row.name }}
         </span>
-        <span
-          class="git-status-icon"
-          :class="`git-status-${row.file.status}`"
-        >
+        <span class="git-status-icon" :class="`git-status-${row.file.status}`">
           {{ gitStatusLetter(row.file.status) }}
         </span>
       </template>

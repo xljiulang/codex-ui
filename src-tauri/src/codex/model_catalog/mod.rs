@@ -26,10 +26,10 @@ use serde_json::{json, Value};
 use facts::{FieldProvenance, FieldQuality, ModelFacts, Provenance};
 use sources::{FactMatch, FactSource, FullEntryMatch, FullEntrySource};
 
-/// 启动时后台刷新各字段源的运行时缓存；失败静默。
-pub use sources::refresh_caches as refresh_source_caches;
 /// 启动时后台导出本机 codex 自带的官方条目；失败保留旧缓存。
 pub use codex_models::refresh_codex_models;
+/// 启动时后台刷新各字段源的运行时缓存；失败静默。
+pub use sources::refresh_caches as refresh_source_caches;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -107,10 +107,14 @@ fn build_catalog_result(
     let mut models: Vec<ModelCatalogModelOption> = Vec::with_capacity(ids.len());
     let mut seen = HashSet::new();
     for id in ids {
-        if !seen.insert(id.clone()) { continue; }
+        if !seen.insert(id.clone()) {
+            continue;
+        }
         let display_name = template::display_name_from_slug(id);
-        let mut warnings: Vec<String> = full_entry_sources.iter()
-            .flat_map(|source| source.warnings(id)).collect();
+        let mut warnings: Vec<String> = full_entry_sources
+            .iter()
+            .flat_map(|source| source.warnings(id))
+            .collect();
 
         if let Some((source_id, matched)) = lookup_full_entry(&full_entry_sources, id) {
             let source_evidence = full_entry_evidence(source_id, &matched);
@@ -124,7 +128,12 @@ fn build_catalog_result(
             if let Some(object) = entry.as_object() {
                 for key in validation::OUTPUT_FIELDS {
                     if let Some(value) = object.get(*key) {
-                        let mut origin = FieldProvenance::new(source_id, &matched.matched_id, matched.kind, FieldQuality::from(100));
+                        let mut origin = FieldProvenance::new(
+                            source_id,
+                            &matched.matched_id,
+                            matched.kind,
+                            FieldQuality::from(100),
+                        );
                         origin.value = value.clone();
                         origin.reason = "完整条目复用".to_string();
                         provenance.insert(*key, origin);
@@ -137,7 +146,10 @@ fn build_catalog_result(
                     entries.push(entry);
                     ModelCatalogModelStatus::Ready
                 }
-                Err(error) => { warnings.push(error); ModelCatalogModelStatus::Invalid }
+                Err(error) => {
+                    warnings.push(error);
+                    ModelCatalogModelStatus::Invalid
+                }
             };
             models.push(ModelCatalogModelOption {
                 id: id.clone(),
@@ -167,7 +179,11 @@ fn build_catalog_result(
         }
 
         warnings.append(&mut collected.facts.warnings);
-        if collected.sources.iter().any(|source| source.match_kind == "fuzzy") {
+        if collected
+            .sources
+            .iter()
+            .any(|source| source.match_kind == "fuzzy")
+        {
             warnings.push("部分资料继承自近似模型，未验证目标服务实际能力".to_string());
         }
         validation::reconcile_facts(&mut collected.facts, &mut warnings);
@@ -185,7 +201,10 @@ fn build_catalog_result(
                     entries.push(entry);
                     ModelCatalogModelStatus::Ready
                 }
-                Err(error) => { warnings.push(error); ModelCatalogModelStatus::Invalid }
+                Err(error) => {
+                    warnings.push(error);
+                    ModelCatalogModelStatus::Invalid
+                }
             }
         };
         models.push(ModelCatalogModelOption {
@@ -211,7 +230,10 @@ fn build_catalog_result(
         .iter()
         .filter(|model| model.status == ModelCatalogModelStatus::Unmatched)
         .count();
-    let invalid = models.iter().filter(|model| model.status == ModelCatalogModelStatus::Invalid).count();
+    let invalid = models
+        .iter()
+        .filter(|model| model.status == ModelCatalogModelStatus::Invalid)
+        .count();
     let catalog = serde_json::to_string_pretty(&json!({ "models": entries }))
         .map_err(|e| format!("生成模型目录 JSON 失败: {e}"))?;
     Ok(ModelCatalogGenerateResult {
@@ -230,9 +252,11 @@ fn lookup_full_entry(
     sources: &[Box<dyn FullEntrySource>],
     model_id: &str,
 ) -> Option<(&'static str, FullEntryMatch)> {
-    sources
-        .iter()
-        .find_map(|source| source.full_entry(model_id).map(|entry| (source.id(), entry)))
+    sources.iter().find_map(|source| {
+        source
+            .full_entry(model_id)
+            .map(|entry| (source.id(), entry))
+    })
 }
 
 /// 覆盖身份、顺序与推理摘要策略：`slug` 用提供方原始 id，`priority` 按候选原顺序。
@@ -272,12 +296,10 @@ fn collect_facts(model_id: &str, sources: &[Box<dyn FactSource>]) -> CollectedFa
     for source in sources {
         if let Some(mut matched) = source.extract(model_id) {
             let quality = matched.quality(source.quality_base());
-            matched.facts.attach_match(source.id(), &matched.matched_id, matched.kind, quality);
-            facts.merge_from(
-                source.id(),
-                quality,
-                matched.facts.clone(),
-            );
+            matched
+                .facts
+                .attach_match(source.id(), &matched.matched_id, matched.kind, quality);
+            facts.merge_from(source.id(), quality, matched.facts.clone());
             evidence.push(fact_evidence(source.id(), &matched));
         }
     }
@@ -309,8 +331,12 @@ fn fact_evidence(source: &'static str, matched: &FactMatch) -> ModelCatalogSourc
 }
 
 fn incompatible_reason(facts: &ModelFacts) -> Option<String> {
-    let reliable = |field| facts.provenance.get(field)
-        .is_none_or(|origin| origin.match_kind != matching::MatchKind::Fuzzy);
+    let reliable = |field| {
+        facts
+            .provenance
+            .get(field)
+            .is_none_or(|origin| origin.match_kind != matching::MatchKind::Fuzzy)
+    };
     if facts.supports_tool_calls == Some(false) && reliable("supports_tool_calls") {
         return Some("上游明确标记 tool_call=false，不兼容 Codex 工具调用".to_string());
     }
@@ -407,41 +433,64 @@ mod tests {
 
     fn write_source_fixture(dir: &Path, openrouter: Value, models_dev: Value) {
         std::fs::create_dir_all(dir.join("cache")).unwrap();
-        std::fs::write(dir.join("cache/openrouter-models.json"), openrouter.to_string()).unwrap();
+        std::fs::write(
+            dir.join("cache/openrouter-models.json"),
+            openrouter.to_string(),
+        )
+        .unwrap();
         std::fs::write(dir.join("cache/models-dev.json"), models_dev.to_string()).unwrap();
     }
 
     #[test]
     fn precise_source_wins_over_fuzzy_source_per_field() {
         let dir = tempdir().unwrap();
-        write_source_fixture(dir.path(),
+        write_source_fixture(
+            dir.path(),
             json!({"data":[{"id":"review-model-v5","context_length":128000,
                 "supported_parameters":["tools"],"reasoning":{"supported_efforts":[]}}]}),
             json!({"providers":{"relay":{"models":{"review-model-v4":{
                 "limit":{"context":1000000},"tool_call":false,
                 "description":"继承描述","reasoning_options":[{"type":"effort","values":["high"]}]
-            }}}}}));
-        let result = build_catalog_result(&["review-model-v5".into()], dir.path(), "https://relay.example.com").unwrap();
+            }}}}}),
+        );
+        let result = build_catalog_result(
+            &["review-model-v5".into()],
+            dir.path(),
+            "https://relay.example.com",
+        )
+        .unwrap();
         assert_eq!(result.ready, 1);
         let entry = catalog_entry(&result, "review-model-v5");
         assert_eq!(entry["context_window"], json!(128000));
         assert_eq!(entry["supported_reasoning_levels"], json!([]));
         assert_eq!(entry["description"], json!("继承描述"));
-        assert_eq!(result.models[0].field_provenance["context_window"].source, "openrouter");
-        assert_eq!(result.models[0].field_provenance["description"].source, "models_dev");
-        assert!(result.models[0].warnings.iter().any(|warning| warning.contains("近似")));
+        assert_eq!(
+            result.models[0].field_provenance["context_window"].source,
+            "openrouter"
+        );
+        assert_eq!(
+            result.models[0].field_provenance["description"].source,
+            "models_dev"
+        );
+        assert!(result.models[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("近似")));
     }
 
     #[test]
     fn reused_official_entry_enables_reasoning_summary() {
         let dir = tempdir().unwrap();
-        codex_models::write_export_for_test(dir.path(), vec![json!({
-            "slug":"gpt-5.6-luna",
-            "model_messages":{"instructions_template":"test"},
-            "supported_reasoning_levels":[{"effort":"low","description":"low"}],
-            "default_reasoning_summary":"none",
-            "supports_reasoning_summary_parameter": false
-        })]);
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![json!({
+                "slug":"gpt-5.6-luna",
+                "model_messages":{"instructions_template":"test"},
+                "supported_reasoning_levels":[{"effort":"low","description":"low"}],
+                "default_reasoning_summary":"none",
+                "supports_reasoning_summary_parameter": false
+            })],
+        );
         let result = build_catalog_result(
             &["gpt-5.6-luna".into()],
             dir.path(),
@@ -457,60 +506,106 @@ mod tests {
     #[test]
     fn response_keeps_source_badges_but_hides_field_provenance() {
         let dir = tempdir().unwrap();
-        write_source_fixture(dir.path(),
+        write_source_fixture(
+            dir.path(),
             json!({"data":[{"id":"review-model-v5","context_length":128000,
                 "supported_parameters":["tools"]}]}),
-            json!({"providers":{"relay":{"models":{"zzzzzzz":{"tool_call":true}}}}}));
-        let result = build_catalog_result(&["review-model-v5".into()], dir.path(), "https://relay.example.com").unwrap();
+            json!({"providers":{"relay":{"models":{"zzzzzzz":{"tool_call":true}}}}}),
+        );
+        let result = build_catalog_result(
+            &["review-model-v5".into()],
+            dir.path(),
+            "https://relay.example.com",
+        )
+        .unwrap();
         // 候选行来源徽章仍需要 sources[]；字段来源面板已下线，故不再发给前端
         let payload = serde_json::to_value(&result).unwrap();
         let option = &payload["models"][0];
         assert!(option.get("sources").is_some(), "来源徽章数据必须保留");
-        assert!(option.get("field_provenance").is_none(), "参数来源面板已下线");
-        assert!(result.models[0].field_provenance.contains_key("context_window"));
+        assert!(
+            option.get("field_provenance").is_none(),
+            "参数来源面板已下线"
+        );
+        assert!(result.models[0]
+            .field_provenance
+            .contains_key("context_window"));
     }
 
     #[test]
     fn upstream_status_is_ignored_for_exact_and_fuzzy_matches() {
         let dir = tempdir().unwrap();
-        write_source_fixture(dir.path(),
+        write_source_fixture(
+            dir.path(),
             json!({"data":[
                 {"id":"review-model-v4","status":" DEPRECATED ","supported_parameters":["tools"]},
                 {"id":"other-ready","status":" BETA ","supported_parameters":["tools"]}
             ]}),
-            json!({"providers":{"relay":{"models":{"zzzzzzz":{"tool_call":true}}}}}));
+            json!({"providers":{"relay":{"models":{"zzzzzzz":{"tool_call":true}}}}}),
+        );
         let result = build_catalog_result(
-            &["review-model-v4".into(), "review-model-v5".into(), "other-ready".into()],
-            dir.path(), "https://relay.example.com").unwrap();
+            &[
+                "review-model-v4".into(),
+                "review-model-v5".into(),
+                "other-ready".into(),
+            ],
+            dir.path(),
+            "https://relay.example.com",
+        )
+        .unwrap();
         // 第三方资料的 status 不再参与任何判定：精确命中的 deprecated / beta 与模糊继承的 v5 都可生成
         assert_eq!(result.ready, 3);
         for model in &result.models {
-            assert_eq!(model.status, ModelCatalogModelStatus::Ready, "{:?}", model.warnings);
+            assert_eq!(
+                model.status,
+                ModelCatalogModelStatus::Ready,
+                "{:?}",
+                model.warnings
+            );
             assert!(model.selectable, "{:?}", model.warnings);
-            assert!(!model.warnings.iter().any(|warning| {
-                warning.contains("deprecated") || warning.contains("beta")
-            }), "{:?}", model.warnings);
+            assert!(
+                !model
+                    .warnings
+                    .iter()
+                    .any(|warning| { warning.contains("deprecated") || warning.contains("beta") }),
+                "{:?}",
+                model.warnings
+            );
         }
-        assert!(catalog_entry(&result, "review-model-v4").get("status").is_none());
+        assert!(catalog_entry(&result, "review-model-v4")
+            .get("status")
+            .is_none());
     }
 
     #[test]
     fn invalid_entry_is_isolated_and_priorities_remain_contiguous() {
         let dir = tempdir().unwrap();
-        codex_models::write_export_for_test(dir.path(), vec![
-            json!({"slug":"invalid-model","model_messages":{"instructions_template":"test"},
+        codex_models::write_export_for_test(
+            dir.path(),
+            vec![
+                json!({"slug":"invalid-model","model_messages":{"instructions_template":"test"},
                 "context_window":0}),
-            json!({"slug":"valid-model","model_messages":{"instructions_template":"test"}}),
-        ]);
+                json!({"slug":"valid-model","model_messages":{"instructions_template":"test"}}),
+            ],
+        );
         let result = build_catalog_result(
-            &["invalid-model".into(), "valid-model".into(), "valid-model".into()],
-            dir.path(), "https://relay.example.com").unwrap();
+            &[
+                "invalid-model".into(),
+                "valid-model".into(),
+                "valid-model".into(),
+            ],
+            dir.path(),
+            "https://relay.example.com",
+        )
+        .unwrap();
         assert_eq!(result.invalid, 1);
         assert_eq!(result.ready, 1);
         assert_eq!(result.total, 2);
         assert!(!result.models[0].selectable);
         assert_eq!(catalog_entry(&result, "valid-model")["priority"], json!(1));
-        assert_eq!(result.total, result.ready + result.incompatible + result.unmatched + result.invalid);
+        assert_eq!(
+            result.total,
+            result.ready + result.incompatible + result.unmatched + result.invalid
+        );
     }
 
     /// 测试用第三个字段源：证明新增数据源只需实现 trait，无需改动管线代码。
@@ -556,9 +651,7 @@ mod tests {
 
     /// 模板持有的精简提示词：未命中完整条目源的条目两个提示词字段都取这个值。
     fn template_prompt(dir: &Path) -> String {
-        template::effective_template(dir)
-            .unwrap()
-            .entry["model_messages"]["instructions_template"]
+        template::effective_template(dir).unwrap().entry["model_messages"]["instructions_template"]
             .as_str()
             .unwrap()
             .to_string()
@@ -578,8 +671,14 @@ mod tests {
         assert_eq!(model.status, ModelCatalogModelStatus::Ready);
         assert!(has_source(model, "models_dev"));
         assert!(has_source(model, "openrouter"));
-        assert!(model.warnings.iter().all(|warning| warning.contains("输入上限")),
-            "普通来源差异不应逐项告警：{:?}", model.warnings);
+        assert!(
+            model
+                .warnings
+                .iter()
+                .all(|warning| warning.contains("输入上限")),
+            "普通来源差异不应逐项告警：{:?}",
+            model.warnings
+        );
     }
 
     #[test]
@@ -712,7 +811,11 @@ mod tests {
             eprintln!("skip: 未设置 CODEX_BIN");
             return;
         };
-        let ids = ["deepseek-flash".to_string(), "big-pickle".to_string(), "gpt-5.7".to_string()];
+        let ids = [
+            "deepseek-flash".to_string(),
+            "big-pickle".to_string(),
+            "gpt-5.7".to_string(),
+        ];
 
         // 1) 无导出：兜底基底 + 模板覆盖
         let fallback_dir = tempdir().unwrap();
@@ -730,12 +833,18 @@ mod tests {
         std::fs::write(&cache, &exported.stdout).unwrap();
         let exported_value: Value = serde_json::from_slice(&exported.stdout).unwrap();
         let mut runtime_ids = ids.to_vec();
-        runtime_ids.push(exported_value["models"][0]["slug"].as_str().unwrap().to_string());
+        runtime_ids.push(
+            exported_value["models"][0]["slug"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
         assert_catalog_accepted_by_codex(&codex, export_dir.path(), &runtime_ids);
 
         // 3) 精确来源胜过模糊来源、同级冲突补缺、自定义档位与 audio 的真实解析。
         let fixture_dir = tempdir().unwrap();
-        write_source_fixture(fixture_dir.path(),
+        write_source_fixture(
+            fixture_dir.path(),
             json!({"data":[
                 {"id":"review-audio-v1","context_length":32000,"supported_parameters":["tools"],
                  "architecture":{"input_modalities":["text","audio"]},
@@ -748,19 +857,33 @@ mod tests {
                     "review-conflict-v1":{"limit":{"context":100},"tool_call":true}
                 }},
                 "beta":{"models":{"review-conflict-v1":{"limit":{"context":200},"tool_call":true}}}
-            }}));
-        let fixture_ids = ["review-audio-v1".to_string(), "review-conflict-v1".to_string()];
-        let fixture_result = build_catalog_result(&fixture_ids, fixture_dir.path(), "https://relay.example.com").unwrap();
-        assert_eq!(catalog_entry(&fixture_result, "review-audio-v1")["context_window"], json!(32000));
-        assert_eq!(catalog_entry(&fixture_result, "review-conflict-v1")["context_window"], json!(64000));
+            }}),
+        );
+        let fixture_ids = [
+            "review-audio-v1".to_string(),
+            "review-conflict-v1".to_string(),
+        ];
+        let fixture_result = build_catalog_result(
+            &fixture_ids,
+            fixture_dir.path(),
+            "https://relay.example.com",
+        )
+        .unwrap();
+        assert_eq!(
+            catalog_entry(&fixture_result, "review-audio-v1")["context_window"],
+            json!(32000)
+        );
+        assert_eq!(
+            catalog_entry(&fixture_result, "review-conflict-v1")["context_window"],
+            json!(64000)
+        );
         assert_catalog_accepted_by_codex(&codex, fixture_dir.path(), &fixture_ids);
     }
 
     /// 用给定 app_dir 生成目录，塞进临时 `CODEX_HOME` 交给真实 codex 解析，
     /// 并断言生成的模型都在结果里（缺任何必需字段都会让整份目录解析失败）。
     fn assert_catalog_accepted_by_codex(codex: &str, app_dir: &Path, ids: &[String]) {
-        let result =
-            build_catalog_result(ids, app_dir, "https://relay.example.com/v1").unwrap();
+        let result = build_catalog_result(ids, app_dir, "https://relay.example.com/v1").unwrap();
         assert_eq!(result.ready, ids.len());
 
         let home = tempdir().unwrap();
@@ -791,10 +914,21 @@ mod tests {
         for id in ids {
             assert!(slugs.contains(&id.as_str()), "缺少 {id}，实际：{slugs:?}");
             let expected = catalog_entry(&result, id);
-            let actual = value["models"].as_array().unwrap().iter()
-                .find(|entry| entry["slug"].as_str() == Some(id.as_str())).unwrap();
-            for key in ["slug", "priority", "context_window", "max_context_window",
-                "input_modalities", "supported_reasoning_levels", "default_reasoning_level"] {
+            let actual = value["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["slug"].as_str() == Some(id.as_str()))
+                .unwrap();
+            for key in [
+                "slug",
+                "priority",
+                "context_window",
+                "max_context_window",
+                "input_modalities",
+                "supported_reasoning_levels",
+                "default_reasoning_level",
+            ] {
                 assert_eq!(actual[key], expected[key], "{id} 的 {key} 加载后发生变化");
             }
         }
@@ -852,10 +986,7 @@ mod tests {
             // default_reasoning_summary 由复用策略覆盖为 auto（推理条目打开摘要）
             if matches!(
                 key.as_str(),
-                "slug"
-                    | "priority"
-                    | "prefer_websockets"
-                    | "default_reasoning_summary"
+                "slug" | "priority" | "prefer_websockets" | "default_reasoning_summary"
             ) {
                 continue;
             }
@@ -1059,7 +1190,9 @@ mod tests {
             supports_tool_calls: Some(false),
             ..ModelFacts::default()
         };
-        assert!(incompatible_reason(&no_tools).unwrap().contains("tool_call=false"));
+        assert!(incompatible_reason(&no_tools)
+            .unwrap()
+            .contains("tool_call=false"));
     }
 
     #[test]

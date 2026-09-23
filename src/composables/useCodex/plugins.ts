@@ -50,9 +50,7 @@ interface PluginInstallResponse {
 }
 
 /** 拉取插件目录：全部已配置带本地路径的市场（local）+ OpenAI 官方垂直目录（vertical） */
-export async function loadPluginCatalog(
-  force = false,
-): Promise<{
+export async function loadPluginCatalog(force = false): Promise<{
   marketplaces: PluginMarketplaceInfo[];
   marketplaceLoadErrors: PluginMarketplaceLoadError[];
 }> {
@@ -90,12 +88,10 @@ export async function loadPluginCatalog(
       })),
     }),
   );
-  const marketplaceLoadErrors = (res?.marketplaceLoadErrors ?? []).map(
-    (e) => ({
-      name: e.name ?? "",
-      error: e.error ?? "",
-    }),
-  );
+  const marketplaceLoadErrors = (res?.marketplaceLoadErrors ?? []).map((e) => ({
+    name: e.name ?? "",
+    error: e.error ?? "",
+  }));
   return { marketplaces, marketplaceLoadErrors };
 }
 

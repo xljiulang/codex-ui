@@ -16,7 +16,9 @@ export const WARM_MAX_MS = 8000;
  * 连续 WARM_QUIET_MS 无子树变化 **且** 待渲染 Markdown 队列已清空才算稳定。
  * 返回 stable=false 表示等待到 WARM_MAX_MS 上限仍未稳定（调用方不应据此认定布局已定）。
  */
-export function waitForRenderQuiet(el: HTMLElement): Promise<{ stable: boolean }> {
+export function waitForRenderQuiet(
+  el: HTMLElement,
+): Promise<{ stable: boolean }> {
   return new Promise((resolve) => {
     let observer: MutationObserver | undefined;
     let settled = false;

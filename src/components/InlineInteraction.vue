@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { respondInteraction, store } from "../composables/useCodex";
 import { focusComposer } from "../lib/composerFocus";
 import { list, obj, permText, str } from "../lib/interaction";
@@ -14,7 +21,9 @@ const props = withDefaults(
 const current = computed<PendingInteraction | undefined>(
   () => props.interactions[0],
 );
-const params = computed(() => (current.value?.params ?? {}) as Record<string, unknown>);
+const params = computed(
+  () => (current.value?.params ?? {}) as Record<string, unknown>,
+);
 const bubbleEl = ref<HTMLElement | null>(null);
 
 const V2_APPROVAL_METHODS = [
@@ -37,11 +46,14 @@ const isCommandApproval = computed(
 );
 const isOtherApproval = computed(
   () =>
-    !isCommandApproval.value &&
-    (isV2Approval.value || isLegacyApproval.value),
+    !isCommandApproval.value && (isV2Approval.value || isLegacyApproval.value),
 );
-const isUserInput = computed(() => current.value?.method === "item/tool/requestUserInput");
-const isElicitation = computed(() => current.value?.method === "mcpServer/elicitation/request");
+const isUserInput = computed(
+  () => current.value?.method === "item/tool/requestUserInput",
+);
+const isElicitation = computed(
+  () => current.value?.method === "mcpServer/elicitation/request",
+);
 const isPermissionsApproval = computed(
   () => current.value?.method === "item/permissions/requestApproval",
 );
@@ -63,7 +75,11 @@ watch(current, () => {
 
 function onKeydown(e: KeyboardEvent) {
   // Escape：仅对提问/表单类执行“取消”，审批必须明确选择
-  if (e.key === "Escape" && current.value && (isUserInput.value || isElicitation.value)) {
+  if (
+    e.key === "Escape" &&
+    current.value &&
+    (isUserInput.value || isElicitation.value)
+  ) {
     reject();
   }
 }
@@ -149,7 +165,10 @@ function reject() {
   if (!current.value) return;
   if (isElicitation.value) {
     // 协议：elicitation 应答为 { action: "decline"|"cancel", content: null }
-    void respondInteraction(current.value, { action: "decline", content: null });
+    void respondInteraction(current.value, {
+      action: "decline",
+      content: null,
+    });
     return;
   }
   if (isPermissionsApproval.value) {
@@ -218,9 +237,7 @@ function onElicitationSubmit(content: Record<string, unknown> | null) {
             <details class="approval-details">
               <summary>详细信息</summary>
               <div class="approval-meta">
-                <div v-if="params.cwd">
-                  <b>工作目录：</b>{{ params.cwd }}
-                </div>
+                <div v-if="params.cwd"><b>工作目录：</b>{{ params.cwd }}</div>
                 <div v-if="commandActions().length">
                   <b>操作：</b>{{ commandActions().join("；") }}
                 </div>
@@ -245,7 +262,10 @@ function onElicitationSubmit(content: Record<string, unknown> | null) {
                 {{ params.reason ?? "是否允许此操作？" }}
               </div>
             </div>
-            <details v-if="params.grantRoot || params.permissions" class="approval-details">
+            <details
+              v-if="params.grantRoot || params.permissions"
+              class="approval-details"
+            >
               <summary>详细信息</summary>
               <div class="approval-meta">
                 <div v-if="params.grantRoot">
@@ -279,10 +299,18 @@ function onElicitationSubmit(content: Record<string, unknown> | null) {
       </div>
 
       <div v-if="!isUserInput && !isElicitation" class="interaction-foot">
-        <button v-if="hasDecision('acceptWithExecpolicyAmendment')" class="btn" @click="approveWithRule()">
+        <button
+          v-if="hasDecision('acceptWithExecpolicyAmendment')"
+          class="btn"
+          @click="approveWithRule()"
+        >
           批准并记住此规则
         </button>
-        <button v-if="hasDecision('acceptForSession')" class="btn" @click="approveSession()">
+        <button
+          v-if="hasDecision('acceptForSession')"
+          class="btn"
+          @click="approveSession()"
+        >
           本次会话批准
         </button>
         <button class="btn danger" @click="reject()">拒绝</button>

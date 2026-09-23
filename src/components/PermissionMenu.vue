@@ -37,7 +37,11 @@ function choose(id: PermissionId) {
         <div class="mode-label">{{ m.label }}</div>
         <div class="mode-desc">{{ m.desc }}</div>
       </span>
-      <span v-if="activeSessionTab()?.permissionMode === m.id" class="mode-check">✓</span>
+      <span
+        v-if="activeSessionTab()?.permissionMode === m.id"
+        class="mode-check"
+        >✓</span
+      >
     </button>
   </div>
 </template>

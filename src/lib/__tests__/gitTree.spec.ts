@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { GitFile } from "../gitChanges";
 import { buildGitTree, flattenRows } from "../gitTree";
 
-function file(
-  path: string,
-  overrides: Partial<GitFile> = {},
-): GitFile {
+function file(path: string, overrides: Partial<GitFile> = {}): GitFile {
   return {
     path,
     status: "modified",

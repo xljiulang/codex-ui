@@ -80,14 +80,22 @@ describe("useGitFileActions 右键菜单", () => {
 
   it("modified 文件：更改区含暂存，暂存区含取消暂存，均含撤消", () => {
     const { captured, actions } = setup();
-    actions.openFileCtx("changes", fileNode("a.txt", "modified").file, mockEvent());
+    actions.openFileCtx(
+      "changes",
+      fileNode("a.txt", "modified").file,
+      mockEvent(),
+    );
     expect(captured[0].map((i) => i.label)).toEqual([
       "打开",
       "暂存",
       "撤消更改",
     ]);
 
-    actions.openFileCtx("staged", fileNode("a.txt", "modified", true).file, mockEvent());
+    actions.openFileCtx(
+      "staged",
+      fileNode("a.txt", "modified", true).file,
+      mockEvent(),
+    );
     expect(captured[1].map((i) => i.label)).toEqual([
       "打开",
       "取消暂存",
@@ -97,7 +105,11 @@ describe("useGitFileActions 右键菜单", () => {
 
   it("untracked 含暂存/忽略/删除，added 含取消暂存/删除", () => {
     const { captured, actions } = setup();
-    actions.openFileCtx("changes", fileNode("b.txt", "untracked").file, mockEvent());
+    actions.openFileCtx(
+      "changes",
+      fileNode("b.txt", "untracked").file,
+      mockEvent(),
+    );
     expect(captured[0].map((i) => i.label)).toEqual([
       "打开",
       "暂存",
@@ -105,7 +117,11 @@ describe("useGitFileActions 右键菜单", () => {
       "删除文件",
     ]);
 
-    actions.openFileCtx("staged", fileNode("c.txt", "added", true).file, mockEvent());
+    actions.openFileCtx(
+      "staged",
+      fileNode("c.txt", "added", true).file,
+      mockEvent(),
+    );
     expect(captured[1].map((i) => i.label)).toEqual([
       "打开",
       "取消暂存",
@@ -115,7 +131,11 @@ describe("useGitFileActions 右键菜单", () => {
 
   it("conflicted 仅保留打开；目录菜单按分区聚合", () => {
     const { captured, actions } = setup();
-    actions.openFileCtx("changes", fileNode("x.txt", "conflicted").file, mockEvent());
+    actions.openFileCtx(
+      "changes",
+      fileNode("x.txt", "conflicted").file,
+      mockEvent(),
+    );
     expect(captured[0].map((i) => i.label)).toEqual(["打开"]);
 
     actions.openDirCtx("changes", dirNode({ hasUntracked: true }), mockEvent());

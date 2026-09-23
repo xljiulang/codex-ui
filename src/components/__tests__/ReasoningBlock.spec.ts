@@ -6,7 +6,10 @@ import type { ThreadItem } from "../../lib/types";
 import { ICON_ARROW_DOWN, ICON_ARROW_RIGHT, ICON_THINK } from "../../lib/icons";
 
 function reasoningItem(lines: number, streaming = true): ThreadItem {
-  const content = Array.from({ length: lines }, (_, i) => `第 ${i + 1} 行思考内容`);
+  const content = Array.from(
+    { length: lines },
+    (_, i) => `第 ${i + 1} 行思考内容`,
+  );
   return {
     id: "r1",
     type: "reasoning",
@@ -32,9 +35,9 @@ describe("ReasoningBlock 完整展示", () => {
     });
     await flushPromises();
     // 默认折叠，点击后展开
-    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
-      "false",
-    );
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("false");
     await wrapper.find(".assistant-card-toggle").trigger("click");
     const content = wrapper.find(".reasoning-content");
     expect(content.classes()).not.toContain("capped");
@@ -48,17 +51,17 @@ describe("ReasoningBlock 完整展示", () => {
     });
     await flushPromises();
     // 非流式时默认折叠
-    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
-      "false",
-    );
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("false");
     // 折叠/展开指示与会话分组同款
     expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
       ICON_ARROW_RIGHT,
     );
     await wrapper.find(".assistant-card-toggle").trigger("click");
-    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
-      "true",
-    );
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("true");
     expect(wrapper.find(".assistant-card-arrow path").attributes("d")).toBe(
       ICON_ARROW_DOWN,
     );
@@ -91,9 +94,9 @@ describe("ReasoningBlock 完整展示", () => {
     expect(preview.exists()).toBe(true);
     expect(preview.text()).toBe("第 3 行思考内容");
     await preview.trigger("click");
-    expect(wrapper.find(".assistant-card-toggle").attributes("aria-expanded")).toBe(
-      "true",
-    );
+    expect(
+      wrapper.find(".assistant-card-toggle").attributes("aria-expanded"),
+    ).toBe("true");
     expect(wrapper.find(".reasoning-content").text()).toContain(
       "第 3 行思考内容",
     );
@@ -140,8 +143,14 @@ describe("ReasoningBlock 完整展示", () => {
     // jsdom 无布局：默认 0/0 视为未溢出
     expect(el.classList.contains("is-clipped")).toBe(false);
 
-    Object.defineProperty(el, "scrollWidth", { value: 420, configurable: true });
-    Object.defineProperty(el, "clientWidth", { value: 100, configurable: true });
+    Object.defineProperty(el, "scrollWidth", {
+      value: 420,
+      configurable: true,
+    });
+    Object.defineProperty(el, "clientWidth", {
+      value: 100,
+      configurable: true,
+    });
     Object.defineProperty(el, "scrollLeft", {
       value: 0,
       writable: true,

@@ -4,24 +4,20 @@ import type { ThreadItem, ThreadSummary } from "../../lib/types";
 import { activeSessionTab } from "./sessionState";
 import { store } from "./store";
 
-
 export function permissionChip(): string {
   return permissionMode(
     activeSessionTab()?.permissionMode ?? "ask-for-approval",
   ).chip;
 }
 
-
 export function currentItems(): ThreadItem[] {
   const tid = activeSessionTab()?.threadId;
   return tid ? (store.itemsByThread[tid] ?? []) : [];
 }
 
-
 export function threadTitle(t: ThreadSummary): string {
   return t.name || t.preview || "新会话";
 }
-
 
 export function currentOriginLabel(): string {
   if (activeSessionTab()?.origin === "history") return "历史会话";

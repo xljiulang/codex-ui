@@ -114,16 +114,10 @@ async function ensureBridgeProcessesStopped(): Promise<boolean> {
   }
 }
 
-async function doInstall(
-  mp: PluginMarketplaceInfo,
-  plugin: PluginCatalogItem,
-) {
+async function doInstall(mp: PluginMarketplaceInfo, plugin: PluginCatalogItem) {
   if (pluginState.busy[plugin.id]) return;
   // 仅 chrome 桥接插件做预检：它的缓存目录会被桥接进程锁住（os error 5）
-  if (
-    isChromeBridgePlugin(plugin) &&
-    !(await ensureBridgeProcessesStopped())
-  ) {
+  if (isChromeBridgePlugin(plugin) && !(await ensureBridgeProcessesStopped())) {
     return;
   }
   pluginState.busy[plugin.id] = true;
@@ -325,9 +319,7 @@ function pluginInitial(p: PluginCatalogItem): string {
 <template>
   <section v-show="active" class="settings-section settings-section-plugins">
     <h2 class="settings-section-title">插件管理</h2>
-    <p class="settings-section-desc">
-      插件市场目录与本地安装管理
-    </p>
+    <p class="settings-section-desc">插件市场目录与本地安装管理</p>
     <div class="model-config-card">
       <div class="model-config-card-head">
         <h3>已安装插件</h3>
@@ -381,10 +373,7 @@ function pluginInitial(p: PluginCatalogItem): string {
               </span>
               <span class="plugin-status">{{ statusLabel(p) }}</span>
               <span class="plugin-source">来源：{{ mp.displayName }}</span>
-              <span
-                v-if="p.disabledReason"
-                class="plugin-disabled-reason"
-              >
+              <span v-if="p.disabledReason" class="plugin-disabled-reason">
                 {{ p.disabledReason }}
               </span>
             </div>

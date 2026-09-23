@@ -35,7 +35,7 @@ pub(crate) fn apply_round_corners(win: &tauri::WebviewWindow) {
     use std::mem::size_of;
 
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWM_WINDOW_CORNER_PREFERENCE, DWMWA_WINDOW_CORNER_PREFERENCE,
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWM_WINDOW_CORNER_PREFERENCE,
     };
 
     // Tauri 依赖 windows 0.61，本项目 windows crate 为 0.62；

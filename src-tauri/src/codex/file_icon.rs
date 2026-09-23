@@ -21,9 +21,7 @@ static ICON_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(windows)]
 pub fn icon_data_uri(path: &Path, size: u32) -> Result<Option<String>, String> {
     let size = if size == 0 { DEFAULT_ICON_SIZE } else { size };
-    let _guard = ICON_LOCK
-        .lock()
-        .map_err(|_| "图标提取锁异常".to_string())?;
+    let _guard = ICON_LOCK.lock().map_err(|_| "图标提取锁异常".to_string())?;
     unsafe { icon_data_uri_impl(path, size, false) }
 }
 
@@ -38,9 +36,7 @@ pub fn icon_data_uri(_path: &Path, _size: u32) -> Result<Option<String>, String>
 pub fn icon_data_uri_for_ext(ext: &str, size: u32) -> Result<Option<String>, String> {
     let probe = format!("__codex_icon_probe{ext}");
     let size = if size == 0 { DEFAULT_ICON_SIZE } else { size };
-    let _guard = ICON_LOCK
-        .lock()
-        .map_err(|_| "图标提取锁异常".to_string())?;
+    let _guard = ICON_LOCK.lock().map_err(|_| "图标提取锁异常".to_string())?;
     unsafe { icon_data_uri_impl(Path::new(&probe), size, true) }
 }
 
@@ -124,7 +120,7 @@ unsafe fn icon_to_data_uri(
     icon: windows::Win32::UI::WindowsAndMessaging::HICON,
     target: u32,
 ) -> Result<Option<String>, String> {
-    use windows::Win32::Graphics::Gdi::{BITMAP, DeleteObject, GetObjectW, HGDIOBJ};
+    use windows::Win32::Graphics::Gdi::{DeleteObject, GetObjectW, BITMAP, HGDIOBJ};
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
 
     let mut ii = ICONINFO::default();
@@ -171,8 +167,8 @@ unsafe fn read_dib_bitmap(
     use std::mem::size_of;
 
     use windows::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DeleteDC, DIB_RGB_COLORS,
-        GetDIBits, RGBQUAD,
+        CreateCompatibleDC, DeleteDC, GetDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+        DIB_RGB_COLORS, RGBQUAD,
     };
 
     let mut bmi = BITMAPINFO {
@@ -224,10 +220,10 @@ unsafe fn draw_icon_composited(
     use std::mem::size_of;
 
     use windows::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DeleteDC,
-        DeleteObject, DIB_RGB_COLORS, HGDIOBJ, RGBQUAD, SelectObject,
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, RGBQUAD,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{DI_NORMAL, DrawIconEx};
+    use windows::Win32::UI::WindowsAndMessaging::{DrawIconEx, DI_NORMAL};
 
     let hdc = CreateCompatibleDC(None);
     if hdc.is_invalid() {
@@ -254,7 +250,17 @@ unsafe fn draw_icon_composited(
         }
     };
     let old = SelectObject(hdc, HGDIOBJ(hbmp.0));
-    let drawn = DrawIconEx(hdc, 0, 0, icon, target as i32, target as i32, 0, None, DI_NORMAL);
+    let drawn = DrawIconEx(
+        hdc,
+        0,
+        0,
+        icon,
+        target as i32,
+        target as i32,
+        0,
+        None,
+        DI_NORMAL,
+    );
     // 必须先读 DIB 内存再释放位图对象（DeleteObject 后 bits 即失效）
     let mut rgba: Option<image::RgbaImage> = None;
     if drawn.is_ok() && !bits.is_null() {
@@ -324,9 +330,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let f = tmp.path().join("sample.rs");
         std::fs::write(&f, "fn main() {}").unwrap();
-        let uri = icon_data_uri(&f, 16)
-            .unwrap()
-            .expect("应取到文件类型图标");
+        let uri = icon_data_uri(&f, 16).unwrap().expect("应取到文件类型图标");
         assert!(uri.starts_with("data:image/png;base64,"));
         assert!(png_magic(&uri));
     }

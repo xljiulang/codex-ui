@@ -49,7 +49,9 @@ function errText(e: unknown): string {
 }
 
 /** 处理 `item/tool/call`：读取/执行后用 `interaction_respond` 应答，不进交互气泡 */
-export async function handleDynamicToolCall(p: DynamicToolPayload): Promise<void> {
+export async function handleDynamicToolCall(
+  p: DynamicToolPayload,
+): Promise<void> {
   const interaction: PendingInteraction = {
     requestId: p.requestId,
     method: "item/tool/call",
@@ -87,7 +89,9 @@ export async function handleDynamicToolCall(p: DynamicToolPayload): Promise<void
     case CODEXUI_TOOL_COMPACT_CONTEXT: {
       if (!threadId) {
         await respondInteraction(interaction, {
-          contentItems: [{ type: "inputText", text: "压缩失败：缺少 threadId" }],
+          contentItems: [
+            { type: "inputText", text: "压缩失败：缺少 threadId" },
+          ],
           success: false,
         });
         break;
@@ -103,7 +107,9 @@ export async function handleDynamicToolCall(p: DynamicToolPayload): Promise<void
         });
       } catch (e) {
         await respondInteraction(interaction, {
-          contentItems: [{ type: "inputText", text: `压缩失败：${errText(e)}` }],
+          contentItems: [
+            { type: "inputText", text: `压缩失败：${errText(e)}` },
+          ],
           success: false,
         });
       }
@@ -115,7 +121,9 @@ export async function handleDynamicToolCall(p: DynamicToolPayload): Promise<void
     }
     default:
       await respondInteraction(interaction, {
-        contentItems: [{ type: "inputText", text: `未知的 codexui 工具：${tool || "(空)"}` }],
+        contentItems: [
+          { type: "inputText", text: `未知的 codexui 工具：${tool || "(空)"}` },
+        ],
         success: false,
       });
   }

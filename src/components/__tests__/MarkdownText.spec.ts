@@ -129,7 +129,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(null);
     });
@@ -157,7 +161,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(null);
     });
@@ -247,7 +255,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(null);
     });
@@ -278,7 +290,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(null);
     });
@@ -323,7 +339,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(null);
     });
@@ -349,7 +369,11 @@ describe("MarkdownText 流式渲染与代码高亮", () => {
     mockedInvoke.mockImplementation((cmd) => {
       if (cmd === "session_fs_probe_text") return Promise.resolve(true);
       if (cmd === "session_fs_read") {
-        return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+        return Promise.resolve({
+          content: "hello",
+          validUtf8: true,
+          byteSize: 5,
+        });
       }
       return Promise.resolve(null);
     });

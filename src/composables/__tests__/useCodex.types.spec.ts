@@ -55,11 +55,13 @@ describe("toastError 错误提示提取", () => {
         },
       }),
     ).toBe("上下文超出窗口，已自动压缩并移除最早的历史内容");
+    expect(toastError("Server overloaded; retry later.")).toBe(
+      "服务过载，请稍后重试",
+    );
     expect(
-      toastError("Server overloaded; retry later."),
-    ).toBe("服务过载，请稍后重试");
-    expect(
-      toastError("cannot resume running thread thr_1 with history while it is already running"),
+      toastError(
+        "cannot resume running thread thr_1 with history while it is already running",
+      ),
     ).toBe("该会话正被占用（已有回合在运行或其它进程持有），请稍后再试");
   });
 });

@@ -392,10 +392,7 @@ mod tests {
             ..AppSettings::default()
         };
         save(dir.path(), &s).unwrap();
-        assert_eq!(
-            load(dir.path()).last_session_id.as_deref(),
-            Some("thr-abc")
-        );
+        assert_eq!(load(dir.path()).last_session_id.as_deref(), Some("thr-abc"));
 
         let s = AppSettings::default();
         save(dir.path(), &s).unwrap();

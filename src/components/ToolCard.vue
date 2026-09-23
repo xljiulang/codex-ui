@@ -39,7 +39,12 @@ const type = computed(() => props.item.type);
 
 const running = computed(() => {
   const s = props.item.status;
-  return s === "in_progress" || s === "inProgress" || s === "pending" || s === "started";
+  return (
+    s === "in_progress" ||
+    s === "inProgress" ||
+    s === "pending" ||
+    s === "started"
+  );
 });
 
 const startedAt = computed(() =>
@@ -50,12 +55,15 @@ const startedAt = computed(() =>
 const { elapsed } = useElapsed(startedAt.value);
 
 const durationMs = computed(() =>
-  typeof props.item.durationMs === "number" ? (props.item.durationMs as number) : null,
+  typeof props.item.durationMs === "number"
+    ? (props.item.durationMs as number)
+    : null,
 );
 
 const timeLabel = computed(() => {
   if (running.value) return formatElapsed(elapsed.value);
-  if (durationMs.value != null) return `耗时 ${formatDuration(durationMs.value)}`;
+  if (durationMs.value != null)
+    return `耗时 ${formatDuration(durationMs.value)}`;
   return "";
 });
 
@@ -74,7 +82,8 @@ const statusClass = computed(() => {
   if (running.value) return "running";
   if (statusLabel.value === "成功") return "ok";
   if (statusLabel.value === "失败") return "fail";
-  if (statusLabel.value === "已拒绝" || statusLabel.value === "已取消") return "declined";
+  if (statusLabel.value === "已拒绝" || statusLabel.value === "已取消")
+    return "declined";
   return "";
 });
 
@@ -130,8 +139,7 @@ const icon = computed(() => {
 const commandActions = computed(
   () =>
     (props.item.commandActions as
-      | { command?: string; type?: string }[]
-      | undefined) ?? [],
+      { command?: string; type?: string }[] | undefined) ?? [],
 );
 
 const commandText = computed(() => {
@@ -172,7 +180,10 @@ const { ref: cappedOutput, truncated: outputTruncated } = useTailWindow(
   () => props.item,
 );
 const hasOutput = computed(() => cappedOutput.value.trim().length > 0);
-const { ref: shownOutput, flush: flushOutput } = useThrottledRef(cappedOutput, 80);
+const { ref: shownOutput, flush: flushOutput } = useThrottledRef(
+  cappedOutput,
+  80,
+);
 watch(
   () => props.item.status,
   () => {
@@ -254,7 +265,8 @@ const resultText = computed(() => {
   );
   const raw: unknown[] | null | undefined = isDynamic
     ? props.item.contentItems
-    : (props.item.result as { content?: unknown[] } | null | undefined)?.content;
+    : (props.item.result as { content?: unknown[] } | null | undefined)
+        ?.content;
   if (!raw || raw.length === 0) return "";
   return raw
     .map((c) => {
@@ -279,7 +291,7 @@ const errorText = computed(() => {
 
 const mcpProgressText = computed(() =>
   isThreadItemType<McpToolCallItem>(props.item, "mcpToolCall")
-    ? props.item.progressText ?? ""
+    ? (props.item.progressText ?? "")
     : "",
 );
 const mcpProgressPercent = computed(() =>
@@ -288,7 +300,6 @@ const mcpProgressPercent = computed(() =>
     ? props.item.progressPercent
     : null,
 );
-
 </script>
 
 <template>
@@ -305,7 +316,11 @@ const mcpProgressPercent = computed(() =>
         :aria-expanded="expanded"
         @click="expanded = !expanded"
       >
-        <svg class="assistant-card-arrow" viewBox="0 0 24 24" aria-hidden="true">
+        <svg
+          class="assistant-card-arrow"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
           <path :d="expanded ? ICON_ARROW_DOWN : ICON_ARROW_RIGHT" />
         </svg>
         <svg class="assistant-card-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -335,94 +350,97 @@ const mcpProgressPercent = computed(() =>
     <Transition name="assistant-card-body">
       <div v-if="expanded" class="assistant-card-body">
         <template v-if="type === 'commandExecution'">
-        <div class="tool-command">
-          <span class="tool-command-text">{{ commandText }}</span>
-        </div>
-        <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
-        <div v-if="outputTruncated" class="tool-output-cap">
-          输出过长，仅显示末尾 {{ OUTPUT_LINE_CAP }} 行
-        </div>
-        <div
-          v-if="hasOutput"
-          ref="outputRoot"
-          class="tool-output"
-          :class="{ collapsed: !outputExpanded }"
-        ></div>
-        <div
-          v-if="!outputExpanded && hasOutput"
-          class="tool-toggle"
-          @click="outputExpanded = true"
-        >
-          展开完整输出
-        </div>
-        <div
-          v-if="outputExpanded && hasOutput"
-          class="tool-toggle"
-          @click="outputExpanded = false"
-        >
-          收起输出
-        </div>
-        <div
-          v-if="item.exitCode != null && item.status === 'failed'"
-          class="tool-meta"
-          style="color: var(--red)"
-        >
-          退出码：{{ item.exitCode }}
-        </div>
-      </template>
-
-      <template v-else-if="type === 'mcpToolCall' || type === 'dynamicToolCall'">
-        <div v-if="mcpProgressText" class="tool-meta">
-          进度：{{ mcpProgressText }}
-        </div>
-        <div v-if="mcpProgressPercent !== null" class="tool-progress">
+          <div class="tool-command">
+            <span class="tool-command-text">{{ commandText }}</span>
+          </div>
+          <div v-if="item.cwd" class="tool-meta">工作目录：{{ item.cwd }}</div>
+          <div v-if="outputTruncated" class="tool-output-cap">
+            输出过长，仅显示末尾 {{ OUTPUT_LINE_CAP }} 行
+          </div>
           <div
-            class="tool-progress-fill"
-            :style="{
-              width: Math.min(100, Math.max(0, mcpProgressPercent)) + '%',
-            }"
+            v-if="hasOutput"
+            ref="outputRoot"
+            class="tool-output"
+            :class="{ collapsed: !outputExpanded }"
           ></div>
-        </div>
-        <div v-if="argsJson" class="tool-json">{{ argsJson }}</div>
-        <div v-if="resultText" class="tool-output">{{ resultText }}</div>
-        <div v-if="errorText" class="tool-meta" style="color: var(--red)">
-          {{ errorText }}
-        </div>
-      </template>
+          <div
+            v-if="!outputExpanded && hasOutput"
+            class="tool-toggle"
+            @click="outputExpanded = true"
+          >
+            展开完整输出
+          </div>
+          <div
+            v-if="outputExpanded && hasOutput"
+            class="tool-toggle"
+            @click="outputExpanded = false"
+          >
+            收起输出
+          </div>
+          <div
+            v-if="item.exitCode != null && item.status === 'failed'"
+            class="tool-meta"
+            style="color: var(--red)"
+          >
+            退出码：{{ item.exitCode }}
+          </div>
+        </template>
 
-      <template v-else-if="type === 'collabAgentToolCall'">
-        <div class="tool-meta">协作工具：{{ item.tool }}</div>
-        <div v-if="item.prompt" class="tool-meta">提示：{{ item.prompt }}</div>
-        <div v-if="item.model" class="tool-meta">模型：{{ item.model }}</div>
-        <div
-          v-if="item.agentsStates && Object.keys(item.agentsStates).length"
-          class="tool-json"
+        <template
+          v-else-if="type === 'mcpToolCall' || type === 'dynamicToolCall'"
         >
-          {{ JSON.stringify(item.agentsStates, null, 2) }}
-        </div>
-      </template>
+          <div v-if="mcpProgressText" class="tool-meta">
+            进度：{{ mcpProgressText }}
+          </div>
+          <div v-if="mcpProgressPercent !== null" class="tool-progress">
+            <div
+              class="tool-progress-fill"
+              :style="{
+                width: Math.min(100, Math.max(0, mcpProgressPercent)) + '%',
+              }"
+            ></div>
+          </div>
+          <div v-if="argsJson" class="tool-json">{{ argsJson }}</div>
+          <div v-if="resultText" class="tool-output">{{ resultText }}</div>
+          <div v-if="errorText" class="tool-meta" style="color: var(--red)">
+            {{ errorText }}
+          </div>
+        </template>
 
-      <FileChangeCard
-        v-else-if="item.type === 'fileChange'"
-        :item="item as FileChangeItem"
-        :expanded="expanded"
-      />
-      <TodoListCard
-        v-else-if="item.type === 'todoList'"
-        :item="item as TodoListItem"
-      />
-      <WebSearchCard
-        v-else-if="item.type === 'webSearch'"
-        :item="item as WebSearchItem"
-      />
-      <ImageGenerationCard
-        v-else-if="item.type === 'imageGeneration'"
-        :item="item as ImageGenerationItem"
-      />
+        <template v-else-if="type === 'collabAgentToolCall'">
+          <div class="tool-meta">协作工具：{{ item.tool }}</div>
+          <div v-if="item.prompt" class="tool-meta">
+            提示：{{ item.prompt }}
+          </div>
+          <div v-if="item.model" class="tool-meta">模型：{{ item.model }}</div>
+          <div
+            v-if="item.agentsStates && Object.keys(item.agentsStates).length"
+            class="tool-json"
+          >
+            {{ JSON.stringify(item.agentsStates, null, 2) }}
+          </div>
+        </template>
+
+        <FileChangeCard
+          v-else-if="item.type === 'fileChange'"
+          :item="item as FileChangeItem"
+          :expanded="expanded"
+        />
+        <TodoListCard
+          v-else-if="item.type === 'todoList'"
+          :item="item as TodoListItem"
+        />
+        <WebSearchCard
+          v-else-if="item.type === 'webSearch'"
+          :item="item as WebSearchItem"
+        />
+        <ImageGenerationCard
+          v-else-if="item.type === 'imageGeneration'"
+          :item="item as ImageGenerationItem"
+        />
       </div>
     </Transition>
   </div>
-
 </template>
 
 <style scoped>

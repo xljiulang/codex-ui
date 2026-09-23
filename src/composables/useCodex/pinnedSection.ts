@@ -3,7 +3,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ThreadSummary } from "../../lib/types";
 
-
 /** 内置 “Pinned” 分区名（可用 threadSection/list 发现） */
 const PINNED_SECTION_NAME = "Pinned";
 
@@ -12,12 +11,10 @@ const FALLBACK_PINNED_SECTION_ID = "01984de2-8f74-7c91-a3b2-5c5e937cf318";
 
 let pinnedSectionIdCache: string | null = null;
 
-
 /** 仅测试用：重置置顶分区 id 缓存 */
 export function __resetPinnedSectionForTest() {
   pinnedSectionIdCache = null;
 }
-
 
 /** 线程是否置顶：优先看服务端返回的 section 是否指向内置 Pinned 分区 */
 function isPinnedThread(t: ThreadSummary): boolean {
@@ -31,12 +28,10 @@ function isPinnedThread(t: ThreadSummary): boolean {
   );
 }
 
-
 /** 把服务端 section 状态物化为 isPinned 字段，供现有 UI 与排序直接使用 */
 function normalizeThreadPins(list: ThreadSummary[]): ThreadSummary[] {
   return list.map((t) => ({ ...t, isPinned: isPinnedThread(t) }));
 }
-
 
 /** 固定优先，再按最近时间降序 */
 export function sortThreads(list: ThreadSummary[]): ThreadSummary[] {
@@ -47,7 +42,6 @@ export function sortThreads(list: ThreadSummary[]): ThreadSummary[] {
     return br - ar;
   });
 }
-
 
 /** 获取当前 codex 的内置 Pinned 分区 id（首次调用后缓存；失败返回 null 以便重试） */
 export async function getPinnedSectionId(): Promise<string | null> {

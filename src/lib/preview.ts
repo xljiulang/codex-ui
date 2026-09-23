@@ -1,13 +1,7 @@
 /** 特殊文件类型预览：扩展名识别与字节解码（PDF / 图像 / 视频 / 音频 / 表格 / DOCX / PPTX） */
 
 export type PreviewType =
-  | "pdf"
-  | "image"
-  | "video"
-  | "audio"
-  | "xlsx"
-  | "docx"
-  | "pptx";
+  "pdf" | "image" | "video" | "audio" | "xlsx" | "docx" | "pptx";
 
 const PDF_EXT = "pdf";
 const DOCX_EXT = "docx";

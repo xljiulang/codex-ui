@@ -79,8 +79,8 @@ pub fn resolve_workspace_dir(workspace: &str) -> Result<PathBuf, String> {
     if !p.is_absolute() {
         return Err("工作目录必须为绝对路径".into());
     }
-    let meta = std::fs::metadata(&p)
-        .map_err(|e| format!("无法访问工作目录 {}: {e}", clean_path(&p)))?;
+    let meta =
+        std::fs::metadata(&p).map_err(|e| format!("无法访问工作目录 {}: {e}", clean_path(&p)))?;
     if !meta.is_dir() {
         return Err(format!("工作目录不是目录: {}", clean_path(&p)));
     }

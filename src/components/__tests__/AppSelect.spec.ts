@@ -91,9 +91,7 @@ describe("AppSelect 自绘下拉", () => {
     await wrapper.find("button.app-select").trigger("click");
     await nextTick();
     expect(menuEl()).toBeTruthy();
-    document.body.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true }),
-    );
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     await nextTick();
     expect(menuEl()).toBeNull();
     wrapper.unmount();

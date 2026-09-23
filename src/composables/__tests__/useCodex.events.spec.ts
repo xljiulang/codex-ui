@@ -1,12 +1,27 @@
-import { dismissPlanPrompt, executePlan, exitPlanMode } from "../useCodex/actions";
+import {
+  dismissPlanPrompt,
+  executePlan,
+  exitPlanMode,
+} from "../useCodex/actions";
 import { handleDynamicToolCall } from "../useCodex/dynamicToolCall";
 import { disposeEvents, wireEvents } from "../useCodex/events";
-import { __resetSessionTabsForTest, activeSessionTab } from "../useCodex/sessionState";
+import {
+  __resetSessionTabsForTest,
+  activeSessionTab,
+} from "../useCodex/sessionState";
 import { backgroundThreadIds, store } from "../useCodex/store";
 import { autoTitleThread } from "../useCodex/threads";
 import type { SessionTab } from "../useCodex/types";
 import { activeTabId } from "../useEditorTabs";
-import { capturedListeners, DEFAULT_MODEL, fireListen, makeSessionTab, mockListenCapture, resetUseCodexState, tabs } from "./useCodexTestHarness";
+import {
+  capturedListeners,
+  DEFAULT_MODEL,
+  fireListen,
+  makeSessionTab,
+  mockListenCapture,
+  resetUseCodexState,
+  tabs,
+} from "./useCodexTestHarness";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -83,9 +98,7 @@ describe("codex/message 事件 toast 本地化", () => {
       message:
         "Context window exceeded while compacting; removing oldest history item. Error: oops",
     });
-    expect(store.toast).toBe(
-      "上下文超出窗口，已自动压缩并移除最早的历史内容",
-    );
+    expect(store.toast).toBe("上下文超出窗口，已自动压缩并移除最早的历史内容");
   });
 
   it("error 消息：codexErrorInfo 结构化映射优先", async () => {
@@ -238,7 +251,10 @@ describe("会话错误/交互在窗口未聚焦时转 Windows 通知", () => {
       turn: {
         id: "turn-1",
         status: "failed",
-        error: { message: "stream disconnected before completion", codexErrorInfo: "httpConnectionFailed" },
+        error: {
+          message: "stream disconnected before completion",
+          codexErrorInfo: "httpConnectionFailed",
+        },
       },
     });
     expect(notifyArgs()).toEqual({
@@ -541,49 +557,50 @@ describe("主窗口标题跟随活动 tab 标题", () => {
     store.threads = [];
   });
 
-
   it("thread/name/updated 更新会话标签名并更新窗口标题", async () => {
     disposeEvents();
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
     mockListenCapture();
     mockedInvoke.mockResolvedValue(undefined);
     __resetSessionTabsForTest();
-    tabs.push(reactive({
-      id: "s1",
-      kind: "session",
-      title: "",
-      icon: "session",
-      threadId: "t1",
-      name: "",
-      nameIsFirstMessage: false,
-      permissionMode: "ask-for-approval",
-      collaborationMode: "default",
-      model: null,
-      effort: null,
-      plugins: { plugins: [], loaded: false },
-      skills: { skills: [], loaded: false },
-      creatingSession: false,
-      draftJson: JSON.stringify({ type: "doc", content: [] }),
-      draftAttachments: [],
-      draftRefs: {},
-      origin: "history",
-      workspace: "D:/repo",
-      resumedThreadId: null,
-      turnActive: false,
-      currentTurnId: null,
-      turnInterrupted: false,
-      goalText: null,
-      goalStatus: null,
-      goalArmed: false,
-      threadTokenUsage: null,
-      followupQueue: [],
-      attachments: [],
-      planPrompt: null,
-      plan: null,
-      loading: false,
-      newSessionWorkspace: null,
-      interactions: [],
-    }));
+    tabs.push(
+      reactive({
+        id: "s1",
+        kind: "session",
+        title: "",
+        icon: "session",
+        threadId: "t1",
+        name: "",
+        nameIsFirstMessage: false,
+        permissionMode: "ask-for-approval",
+        collaborationMode: "default",
+        model: null,
+        effort: null,
+        plugins: { plugins: [], loaded: false },
+        skills: { skills: [], loaded: false },
+        creatingSession: false,
+        draftJson: JSON.stringify({ type: "doc", content: [] }),
+        draftAttachments: [],
+        draftRefs: {},
+        origin: "history",
+        workspace: "D:/repo",
+        resumedThreadId: null,
+        turnActive: false,
+        currentTurnId: null,
+        turnInterrupted: false,
+        goalText: null,
+        goalStatus: null,
+        goalArmed: false,
+        threadTokenUsage: null,
+        followupQueue: [],
+        attachments: [],
+        planPrompt: null,
+        plan: null,
+        loading: false,
+        newSessionWorkspace: null,
+        interactions: [],
+      }),
+    );
     activeTabId.value = "s1";
     await wireEvents();
     fireListen("thread/name/updated", {
@@ -633,7 +650,6 @@ describe("会话标签状态与事件路由", () => {
     store.interactions = [];
     store.threads = [];
   });
-
 
   it("interaction:request 按 threadId 路由到对应标签，resolved 移除", async () => {
     disposeEvents();
@@ -826,7 +842,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("后台标签 turn/completed：只更新该标签，不触碰活动标签", async () => {
     disposeEvents();
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
@@ -837,9 +852,7 @@ describe("会话标签状态与事件路由", () => {
       }
       return Promise.resolve(undefined);
     });
-    tabs.push(
-      makeSessionTab("s1", "t1", { turnActive: true }),
-    );
+    tabs.push(makeSessionTab("s1", "t1", { turnActive: true }));
     tabs.push(
       makeSessionTab("s2", "t2", {
         turnActive: true,
@@ -867,7 +880,6 @@ describe("会话标签状态与事件路由", () => {
     store.threads = [];
   });
 
-
   it("后台标签 turn/completed：处理该标签的队列消息，不触碰活动标签", async () => {
     disposeEvents();
     for (const k of Object.keys(capturedListeners)) delete capturedListeners[k];
@@ -882,9 +894,7 @@ describe("会话标签状态与事件路由", () => {
       return Promise.resolve(undefined);
     });
     store.models = [DEFAULT_MODEL];
-    tabs.push(
-      makeSessionTab("s1", "t1", { turnActive: true }),
-    );
+    tabs.push(makeSessionTab("s1", "t1", { turnActive: true }));
     tabs.push(
       makeSessionTab("s2", "t2", {
         turnActive: true,
@@ -1177,7 +1187,10 @@ describe("旧会话 turn 事件不串扰新会话", () => {
   });
 });
 describe("后台临时线程 delta 事件隔离", () => {
-  const LONG_TEXT = "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(2);
+  const LONG_TEXT =
+    "这是一个非常长的用户消息，用来验证标题总结功能能否正常触发和写回。".repeat(
+      2,
+    );
 
   beforeEach(() => {
     disposeEvents();
@@ -1200,7 +1213,8 @@ describe("后台临时线程 delta 事件隔离", () => {
 
   it("命令输出/思考/文件变更 delta 不进入全局状态", async () => {
     mockedInvoke.mockImplementation((cmd: string) => {
-      if (cmd === "thread_start") return Promise.resolve({ thread: { id: "helper1" } });
+      if (cmd === "thread_start")
+        return Promise.resolve({ thread: { id: "helper1" } });
       if (cmd === "turn_start") return Promise.resolve({ turn: { id: "ht1" } });
       return Promise.resolve(undefined);
     });
@@ -1261,17 +1275,25 @@ describe("计划完成确认弹窗", () => {
   it("计划模式回合正常完成且含 plan 内容 → 弹出计划确认", async () => {
     await wireEvents();
     store.itemsByThread["t1"] = [
-      { id: "p1", type: "plan", text: "# 修复方案\n1. 改代码", status: "completed" },
+      {
+        id: "p1",
+        type: "plan",
+        text: "# 修复方案\n1. 改代码",
+        status: "completed",
+      },
     ];
 
     fireListen("turn/completed", {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(activeSessionTab()?.planPrompt).not.toBeNull(), {
-      timeout: 3000,
-      interval: 20,
-    });
+    await vi.waitFor(
+      () => expect(activeSessionTab()?.planPrompt).not.toBeNull(),
+      {
+        timeout: 3000,
+        interval: 20,
+      },
+    );
 
     expect(activeSessionTab()?.planPrompt).toEqual({
       threadId: "t1",
@@ -1291,10 +1313,13 @@ describe("计划完成确认弹窗", () => {
       threadId: "t1",
       turn: { id: "turn-1", status: "completed" },
     });
-    await vi.waitFor(() => expect(activeSessionTab()?.planPrompt?.planText).toBe("新计划"), {
-      timeout: 3000,
-      interval: 20,
-    });
+    await vi.waitFor(
+      () => expect(activeSessionTab()?.planPrompt?.planText).toBe("新计划"),
+      {
+        timeout: 3000,
+        interval: 20,
+      },
+    );
   });
 
   it("第二轮评估未产出 plan：不再弹旧计划（回归：跨回合误扫）", async () => {
@@ -1497,7 +1522,9 @@ describe("计划完成确认弹窗", () => {
     expect(activeSessionTab()?.planPrompt).toBeNull();
     // 目标勾选被消费：目标=合成消息（含计划全文）
     expect(activeSessionTab()?.goalArmed).toBe(false);
-    expect(activeSessionTab()?.goalText).toBe("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤");
+    expect(activeSessionTab()?.goalText).toBe(
+      "PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤",
+    );
     expect(activeSessionTab()?.goalStatus).toBe("active"); // 随 startTurn 已挂载
     expect(mockedInvoke).toHaveBeenCalledWith("goal_set", {
       threadId: "t1",
@@ -1516,16 +1543,26 @@ describe("计划完成确认弹窗", () => {
       }),
     );
     const input = params.input as { type: string; text: string }[];
-    expect(input[0].text.startsWith("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤")).toBe(true);
+    expect(
+      input[0].text.startsWith("PLEASE IMPLEMENT THIS PLAN:\n# 修复\n1. 步骤"),
+    ).toBe(true);
   });
 
   it("dismissPlanPrompt 保持计划模式、exitPlanMode 切回执行", () => {
-    tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+    tabs[0].planPrompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 计划",
+    };
     dismissPlanPrompt();
     expect(activeSessionTab()?.planPrompt).toBeNull();
     expect(activeSessionTab()?.collaborationMode).toBe("plan");
 
-    tabs[0].planPrompt = { threadId: "t1", turnId: "turn-1", planText: "# 计划" };
+    tabs[0].planPrompt = {
+      threadId: "t1",
+      turnId: "turn-1",
+      planText: "# 计划",
+    };
     exitPlanMode();
     expect(activeSessionTab()?.planPrompt).toBeNull();
     expect(activeSessionTab()?.collaborationMode).toBe("default");

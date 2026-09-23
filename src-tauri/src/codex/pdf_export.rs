@@ -378,8 +378,12 @@ mod tests {
 
     #[test]
     fn print_navigation_uri_is_recognized() {
-        assert!(is_print_export_navigation("http://print-export.localhost/e1"));
-        assert!(is_print_export_navigation("https://print-export.localhost/e1"));
+        assert!(is_print_export_navigation(
+            "http://print-export.localhost/e1"
+        ));
+        assert!(is_print_export_navigation(
+            "https://print-export.localhost/e1"
+        ));
         assert!(is_print_export_navigation("print-export://localhost/e1"));
         assert!(!is_print_export_navigation("http://example.com/e1"));
         assert!(!is_print_export_navigation(""));

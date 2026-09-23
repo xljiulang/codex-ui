@@ -61,7 +61,10 @@ mod tests {
         let state = read_state_in(dir.path()).unwrap();
         assert!(state.exists);
         assert_eq!(state.content, "");
-        assert_eq!(state.agents_path, agents_md_path_in(dir.path()).to_string_lossy());
+        assert_eq!(
+            state.agents_path,
+            agents_md_path_in(dir.path()).to_string_lossy()
+        );
         assert_eq!(
             fs::read_to_string(agents_md_path_in(dir.path())).unwrap(),
             ""
@@ -88,7 +91,10 @@ mod tests {
         let base = TempDir::new().unwrap();
         let home = base.path().join("nested").join(".codex");
         save_in(&home, "hello").unwrap();
-        assert_eq!(fs::read_to_string(agents_md_path_in(&home)).unwrap(), "hello");
+        assert_eq!(
+            fs::read_to_string(agents_md_path_in(&home)).unwrap(),
+            "hello"
+        );
     }
 
     #[test]

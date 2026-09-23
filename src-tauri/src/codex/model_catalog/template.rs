@@ -242,7 +242,8 @@ pub fn render(
             .input_token_limit
             .filter(|input_limit| *input_limit > 0 && *input_limit < context_window)
         {
-            let percent = ((i128::from(input_limit) * 100) / i128::from(context_window)).clamp(1, 95) as i64;
+            let percent =
+                ((i128::from(input_limit) * 100) / i128::from(context_window)).clamp(1, 95) as i64;
             entry.insert(
                 "effective_context_window_percent".to_string(),
                 json!(percent),
@@ -256,7 +257,10 @@ pub fn render(
 
     // 输入模态：同时决定图片细节能力（纯文本模型不应声称支持 image detail original）。
     // 空数组是显式声明（"没有可用输入模态"），因此**不**回退模板的 `["text"]`。
-    let modalities = facts.input_modalities.as_deref().map(normalize_modalities)
+    let modalities = facts
+        .input_modalities
+        .as_deref()
+        .map(normalize_modalities)
         .unwrap_or_else(|| vec!["text".to_string()]);
     entry.insert(
         "supports_image_detail_original".to_string(),
@@ -410,7 +414,10 @@ mod tests {
         assert_eq!(overrides["web_search_tool_type"], json!("text"));
         assert_eq!(overrides["use_responses_lite"], json!(false));
         assert_eq!(overrides["tool_mode"], Value::Null);
-        assert_eq!(overrides["truncation_policy"], json!({"mode":"tokens","limit":10000}));
+        assert_eq!(
+            overrides["truncation_policy"],
+            json!({"mode":"tokens","limit":10000})
+        );
         assert_eq!(overrides["multi_agent_version"], json!("v2"));
         assert_eq!(overrides["comp_hash"], json!("3000"));
         assert_eq!(overrides["minimal_client_version"], json!("0.144.0"));
@@ -575,7 +582,10 @@ mod tests {
     #[test]
     fn render_writes_only_source_levels_with_base_descriptions() {
         // 字段源不给档位：生成条目写空数组（不继承模板/基底的档位）
-        assert_eq!(rendered(ModelFacts::default())["supported_reasoning_levels"], json!([]));
+        assert_eq!(
+            rendered(ModelFacts::default())["supported_reasoning_levels"],
+            json!([])
+        );
 
         let facts = ModelFacts {
             reasoning_levels: Some(vec!["low".to_string(), "turbo".to_string()]),
@@ -605,7 +615,10 @@ mod tests {
         assert_eq!(entry["context_window"], json!(1_000_000));
         assert_eq!(entry["max_context_window"], json!(1_000_000));
         assert_eq!(entry["prefer_websockets"], json!(false));
-        assert_eq!(entry["truncation_policy"], json!({"mode":"tokens","limit":10000}));
+        assert_eq!(
+            entry["truncation_policy"],
+            json!({"mode":"tokens","limit":10000})
+        );
         assert_eq!(entry["multi_agent_version"], json!("v2"));
         assert_eq!(entry["comp_hash"], json!("3000"));
     }
@@ -623,7 +636,11 @@ mod tests {
     #[test]
     fn render_links_image_detail_original_to_modalities() {
         let facts = ModelFacts {
-            input_modalities: Some(vec!["image".to_string(), "text".to_string(), "video".to_string()]),
+            input_modalities: Some(vec![
+                "image".to_string(),
+                "text".to_string(),
+                "video".to_string(),
+            ]),
             ..ModelFacts::default()
         };
         let entry = rendered(facts);
@@ -633,7 +650,10 @@ mod tests {
 
     #[test]
     fn explicit_empty_modalities_do_not_inherit_template_text() {
-        let entry = rendered(ModelFacts { input_modalities: Some(vec![]), ..ModelFacts::default() });
+        let entry = rendered(ModelFacts {
+            input_modalities: Some(vec![]),
+            ..ModelFacts::default()
+        });
         assert_eq!(entry["input_modalities"], json!([]));
         assert_eq!(entry["supports_image_detail_original"], json!(false));
     }
@@ -658,10 +678,7 @@ mod tests {
             json!("Fast responses with lighter reasoning")
         );
         assert_eq!(levels[1]["effort"], json!("turbo"));
-        assert_eq!(
-            levels[1]["description"],
-            json!("turbo reasoning effort")
-        );
+        assert_eq!(levels[1]["description"], json!("turbo reasoning effort"));
         // 不删键：无默认档位时写 null
         assert_eq!(entry["default_reasoning_level"], Value::Null);
         // 有推理档位即请求摘要；且不写会挡掉摘要请求的旧字段

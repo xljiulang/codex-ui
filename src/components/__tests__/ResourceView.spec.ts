@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return {
     ...mod,
     refreshThreads: vi.fn(),
@@ -159,7 +160,8 @@ function mockFs() {
     }
     if (cmd === "session_fs_search") {
       const query = (args as { query?: string }).query ?? "";
-      if (query.toLowerCase().includes("main")) return Promise.resolve([mainTs]);
+      if (query.toLowerCase().includes("main"))
+        return Promise.resolve([mainTs]);
       if (query.toLowerCase().includes("src")) return Promise.resolve([srcDir]);
       if (query.toLowerCase().includes("doc")) return Promise.resolve([docPdf]);
       return Promise.resolve([]);
@@ -182,9 +184,14 @@ function mockFs() {
       return Promise.resolve(new Uint8Array([37, 80, 68, 70, 45, 49]).buffer);
     }
     if (cmd === "session_fs_read") {
-      return Promise.resolve({ content: "hello", validUtf8: true, byteSize: 5 });
+      return Promise.resolve({
+        content: "hello",
+        validUtf8: true,
+        byteSize: 5,
+      });
     }
-    if (cmd === "session_fs_rename") return Promise.resolve({ ...aTxt, name: "b.txt" });
+    if (cmd === "session_fs_rename")
+      return Promise.resolve({ ...aTxt, name: "b.txt" });
     if (cmd === "session_fs_create_dir") {
       createdFolder = {
         name: "新建文件夹",
@@ -213,10 +220,7 @@ function mockFs() {
     }
     if (cmd === "session_fs_delete") return Promise.resolve(undefined);
     if (cmd === "session_fs_paste") return Promise.resolve([mainTs]);
-    if (
-      cmd === "session_fs_watch_start" ||
-      cmd === "session_fs_watch_stop"
-    ) {
+    if (cmd === "session_fs_watch_start" || cmd === "session_fs_watch_stop") {
       return Promise.resolve(undefined);
     }
     return Promise.resolve(undefined);
@@ -248,11 +252,7 @@ async function mountPanel(active = true) {
   return wrapper;
 }
 
-async function openRowCtx(
-  wrapper: VueWrapper,
-  selector: string,
-  index = 0,
-) {
+async function openRowCtx(wrapper: VueWrapper, selector: string, index = 0) {
   await wrapper.findAll(selector)[index].trigger("contextmenu", {
     clientX: 200,
     clientY: 200,
@@ -457,7 +457,11 @@ describe("ResourceView 文件树", () => {
 
     const row = wrapper
       .findAll(".resource-row")
-      .find((r) => (r.attributes("data-fs-path") ?? "").toLowerCase() === canonical.toLowerCase());
+      .find(
+        (r) =>
+          (r.attributes("data-fs-path") ?? "").toLowerCase() ===
+          canonical.toLowerCase(),
+      );
     expect(row?.exists()).toBe(true);
     expect(row?.classes()).toContain("active");
     // selectedPath 被校正为树的规范路径（大小写以磁盘为准）
@@ -567,8 +571,12 @@ describe("ResourceView 文件树", () => {
   it("工作目录为空时显示暂无工作目录且不调用 startup_workspace", async () => {
     store.workspace = "";
     const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-empty-title").text()).toContain("无法获取资源树");
-    expect(wrapper.find(".resource-empty-desc").text()).toContain("暂无工作目录");
+    expect(wrapper.find(".resource-empty-title").text()).toContain(
+      "无法获取资源树",
+    );
+    expect(wrapper.find(".resource-empty-desc").text()).toContain(
+      "暂无工作目录",
+    );
     expect(mockedInvoke).not.toHaveBeenCalledWith("startup_workspace");
     // 空态下不显示搜索/显示态头部（对齐 Git 面板）
     expect(wrapper.find(".panel-head").exists()).toBe(false);
@@ -584,8 +592,12 @@ describe("ResourceView 文件树", () => {
       return base(cmd, args);
     });
     const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-empty-title").text()).toContain("无法获取资源树");
-    expect(wrapper.find(".resource-empty-desc").text()).toContain("模拟加载失败");
+    expect(wrapper.find(".resource-empty-title").text()).toContain(
+      "无法获取资源树",
+    );
+    expect(wrapper.find(".resource-empty-desc").text()).toContain(
+      "模拟加载失败",
+    );
     wrapper.unmount();
   });
 
@@ -650,7 +662,10 @@ describe("ResourceView 文件树", () => {
       if (cmd === "session_fs_icons") {
         const req = (args as { requests: { path: string }[] }).requests;
         return Promise.resolve(
-          req.map((r) => ({ path: r.path, dataUri: "data:image/png;base64,ICON" })),
+          req.map((r) => ({
+            path: r.path,
+            dataUri: "data:image/png;base64,ICON",
+          })),
         );
       }
       return base(cmd, args);
@@ -659,7 +674,9 @@ describe("ResourceView 文件树", () => {
     await flushPromises();
 
     // .txt 行复用「新建文本文件」菜单预取的系统 .txt 图标缓存
-    const txtImg = wrapper.find(".resource-row.resource-file .resource-icon-img");
+    const txtImg = wrapper.find(
+      ".resource-row.resource-file .resource-icon-img",
+    );
     expect(txtImg.exists()).toBe(true);
     expect(txtImg.attributes("src")).toBe("data:image/png;base64,TXTICON");
 
@@ -691,7 +708,9 @@ describe("ResourceView 文件树", () => {
   it("文件右键菜单项与顺序", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-file");
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).toEqual([
       "打开",
       "复制",
@@ -728,7 +747,9 @@ describe("ResourceView 文件树", () => {
       .find((w) => w.text().includes("pic.png"));
     expect(picRow).toBeTruthy();
     await picRow!.trigger("contextmenu", { clientX: 200, clientY: 200 });
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels[0]).toBe("打开");
     wrapper.unmount();
   });
@@ -889,7 +910,9 @@ describe("ResourceView 文件树", () => {
   it("目录右键菜单项与顺序", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-dir");
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).toEqual([
       "新建文本文件",
       "新建文件夹",
@@ -907,7 +930,9 @@ describe("ResourceView 文件树", () => {
   it("根节点右键菜单不含新建会话，保留粘贴、在此打开终端与在资源管理器中打开", async () => {
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-root");
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).toEqual([
       "新建文本文件",
       "新建文件夹",
@@ -952,7 +977,9 @@ describe("ResourceView 文件树", () => {
     const wrapper = await mountPanel();
     // 目录右键菜单不含附件项
     await openRowCtx(wrapper, ".resource-row.resource-dir");
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).not.toContain("添加为会话附件");
     // 文件右键菜单不含附件项
     await openRowCtx(wrapper, ".resource-row.resource-file");
@@ -1145,7 +1172,9 @@ describe("ResourceView 文件树", () => {
     clipboardFiles = [];
     const wrapper = await mountPanel();
     await openRowCtx(wrapper, ".resource-row.resource-dir");
-    const labels = wrapper.findAll(".ctx-menu-item").map((b) => b.text().trim());
+    const labels = wrapper
+      .findAll(".ctx-menu-item")
+      .map((b) => b.text().trim());
     expect(labels).not.toContain("粘贴");
     expect(labels[0]).toBe("新建文本文件");
     wrapper.unmount();
@@ -1218,8 +1247,13 @@ describe("ResourceView 文件树", () => {
     await openRowCtx(wrapper, ".resource-row.resource-file");
     await clickCtxItem(wrapper, "删除");
     expect(wrapper.find(".modal-mask").exists()).toBe(true);
-    expect(wrapper.text()).toContain("确定删除文件「a.txt」吗？此操作不可恢复。");
-    expect(mockedInvoke).not.toHaveBeenCalledWith("session_fs_delete", expect.anything());
+    expect(wrapper.text()).toContain(
+      "确定删除文件「a.txt」吗？此操作不可恢复。",
+    );
+    expect(mockedInvoke).not.toHaveBeenCalledWith(
+      "session_fs_delete",
+      expect.anything(),
+    );
 
     const del = wrapper
       .findAll(".modal-foot .btn")
@@ -1261,10 +1295,12 @@ describe("ResourceView 文件树", () => {
     expect(toggle.find("path").attributes("d")).toBe(ICON_TIME);
     expect(toggle.find(".panel-view-toggle-glyph").exists()).toBe(false);
     // 默认时间态：文件行只留相对时间（不掺大小），目录行只留项数徽章
-    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
-      "5 分",
-    );
-    expect(wrapper.find(".resource-row.resource-dir .resource-side").text()).toBe("1");
+    expect(
+      wrapper.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("5 分");
+    expect(
+      wrapper.find(".resource-row.resource-dir .resource-side").text(),
+    ).toBe("1");
     wrapper.unmount();
   });
 
@@ -1276,38 +1312,42 @@ describe("ResourceView 文件树", () => {
     expect(glyph.exists()).toBe(true);
     expect(glyph.text()).toBe("Aa");
     expect(wrapper.find(".panel-view-toggle svg").exists()).toBe(false);
-    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
-      "1.5 KB",
-    );
+    expect(
+      wrapper.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("1.5 KB");
     // 目录行不受显示态影响
-    expect(wrapper.find(".resource-row.resource-dir .resource-side").text()).toBe("1");
+    expect(
+      wrapper.find(".resource-row.resource-dir .resource-side").text(),
+    ).toBe("1");
     await wrapper.find(".panel-view-toggle").trigger("click");
-    expect(wrapper.find(".panel-view-toggle path").attributes("d")).toBe(ICON_TIME);
-    expect(wrapper.find(".panel-view-toggle-glyph").exists()).toBe(false);
-    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe(
-      "5 分",
+    expect(wrapper.find(".panel-view-toggle path").attributes("d")).toBe(
+      ICON_TIME,
     );
+    expect(wrapper.find(".panel-view-toggle-glyph").exists()).toBe(false);
+    expect(
+      wrapper.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("5 分");
     wrapper.unmount();
   });
 
   it("显示态为内存偏好：重新挂载保留，测试重置后回到默认时间态", async () => {
     const first = await mountPanel();
     await first.find(".panel-view-toggle").trigger("click");
-    expect(first.find(".resource-row.resource-file .resource-side").text()).toBe(
-      "1.5 KB",
-    );
+    expect(
+      first.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("1.5 KB");
     first.unmount();
     // 面板重挂载（切 Tab 场景）后仍为大小态
     const second = await mountPanel();
-    expect(second.find(".resource-row.resource-file .resource-side").text()).toBe(
-      "1.5 KB",
-    );
+    expect(
+      second.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("1.5 KB");
     second.unmount();
     __resetSessionFsForTest();
     const third = await mountPanel();
-    expect(third.find(".resource-row.resource-file .resource-side").text()).toBe(
-      "5 分",
-    );
+    expect(
+      third.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("5 分");
     third.unmount();
   });
 
@@ -1324,7 +1364,9 @@ describe("ResourceView 文件树", () => {
       return base(cmd, args);
     });
     const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-row.resource-file .resource-side").text()).toBe("");
+    expect(
+      wrapper.find(".resource-row.resource-file .resource-side").text(),
+    ).toBe("");
     wrapper.unmount();
   });
 
@@ -1386,23 +1428,25 @@ describe("ResourceView 文件树", () => {
 
   it("行悬停 @：目录行与非根文件行均渲染，根行不渲染", async () => {
     const wrapper = await mountPanel();
-    expect(wrapper.find(".resource-root .resource-attach").exists()).toBe(false);
+    expect(wrapper.find(".resource-root .resource-attach").exists()).toBe(
+      false,
+    );
     // 标记类与实际渲染一致：根行不含 resource-attachable，非根行含之
-    expect(
-      wrapper.find(".resource-root").classes(),
-    ).not.toContain("resource-attachable");
+    expect(wrapper.find(".resource-root").classes()).not.toContain(
+      "resource-attachable",
+    );
     expect(
       wrapper.find(".resource-row.resource-dir .resource-attach").exists(),
     ).toBe(true);
-    expect(
-      wrapper.find(".resource-row.resource-dir").classes(),
-    ).toContain("resource-attachable");
+    expect(wrapper.find(".resource-row.resource-dir").classes()).toContain(
+      "resource-attachable",
+    );
     expect(
       wrapper.find(".resource-row.resource-file .resource-attach").exists(),
     ).toBe(true);
-    expect(
-      wrapper.find(".resource-row.resource-file").classes(),
-    ).toContain("resource-attachable");
+    expect(wrapper.find(".resource-row.resource-file").classes()).toContain(
+      "resource-attachable",
+    );
     wrapper.unmount();
   });
 
@@ -1517,9 +1561,9 @@ describe("ResourceView 文件树", () => {
     ).toBe("");
     expect(wrapper.find(".resource-result").exists()).toBe(false);
     expect(wrapper.text()).toContain("main.ts");
-    expect(
-      wrapper.find(".resource-row.resource-dir.active").exists(),
-    ).toBe(true);
+    expect(wrapper.find(".resource-row.resource-dir.active").exists()).toBe(
+      true,
+    );
     wrapper.unmount();
   });
 
@@ -1582,10 +1626,7 @@ describe("ResourceView 工作区切换", () => {
         });
       }
       if (cmd === "session_fs_list") return Promise.resolve([]);
-      if (
-        cmd === "session_fs_watch_start" ||
-        cmd === "session_fs_watch_stop"
-      ) {
+      if (cmd === "session_fs_watch_start" || cmd === "session_fs_watch_stop") {
         return Promise.resolve(undefined);
       }
       return Promise.resolve(undefined);

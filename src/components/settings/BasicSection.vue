@@ -10,10 +10,7 @@ import {
   store,
   toastError,
 } from "../../composables/useCodex";
-import {
-  ICON_DELETE,
-  ICON_FOLDER_OPEN,
-} from "../../lib/icons";
+import { ICON_DELETE, ICON_FOLDER_OPEN } from "../../lib/icons";
 import { PERMISSION_MODES } from "../../lib/permissions";
 import type {
   AppSettings,
@@ -215,17 +212,25 @@ watch(
         <div class="setting-row memory-row">
           <div class="memory-row-main">
             <div class="memory-row-title">启用本地记忆</div>
-            <div class="memory-row-desc">根据此电脑上的聊天创建记忆，并用于个性化此电脑上的未来聊天</div>
+            <div class="memory-row-desc">
+              根据此电脑上的聊天创建记忆，并用于个性化此电脑上的未来聊天
+            </div>
           </div>
           <label class="switch">
-            <input type="checkbox" v-model="memEnable" @change="saveMemorySection()" />
+            <input
+              type="checkbox"
+              v-model="memEnable"
+              @change="saveMemorySection()"
+            />
             <span class="switch-track"></span>
           </label>
         </div>
         <div class="setting-row memory-row">
           <div class="memory-row-main">
             <div class="memory-row-title">允许基于工具辅助聊天生成本地记忆</div>
-            <div class="memory-row-desc">从使用过 MCP 工具或网页搜索的聊天生成记忆</div>
+            <div class="memory-row-desc">
+              从使用过 MCP 工具或网页搜索的聊天生成记忆
+            </div>
           </div>
           <label class="switch">
             <input

@@ -17,10 +17,7 @@ import {
 } from "../../lib/gitChanges";
 import type { PreviewType } from "../../lib/preview";
 import type { DiffRow, TerminalShell } from "../../lib/types";
-import {
-  attachTerminal,
-  ensureTerminalListeners,
-} from "../useTerminalEvents";
+import { attachTerminal, ensureTerminalListeners } from "../useTerminalEvents";
 import { TabIcon, TabKind } from "../../lib/tabs";
 import { activateTab, activeTabId, insertTab, tabs } from "../useTabs";
 import { store } from "../useCodex/store";
@@ -113,11 +110,13 @@ export async function buildFileEditorState(
   validUtf8: boolean,
   selection?: { line: number; col: number },
 ): Promise<EditorState> {
-  const [{ buildEditorExtensions, createEditorState, languageForPath }, { Compartment }] =
-    await Promise.all([
-      import("../../lib/editorSetup"),
-      import("@codemirror/state"),
-    ]);
+  const [
+    { buildEditorExtensions, createEditorState, languageForPath },
+    { Compartment },
+  ] = await Promise.all([
+    import("../../lib/editorSetup"),
+    import("@codemirror/state"),
+  ]);
   const wrapCompartment = tab.wrapCompartment ?? new Compartment();
   if (!tab.wrapCompartment) {
     tab.wrapCompartment = markRaw(wrapCompartment);

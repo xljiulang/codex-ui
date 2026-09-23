@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import ContextMenu from "./ContextMenu.vue";
 import ModalDialog from "./ModalDialog.vue";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
-  setToast,
-  workspace,
-} from "../composables/useCodex";
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import { setToast, workspace } from "../composables/useCodex";
 import { revealGitFile } from "../composables/useGitChanges";
 import { useActionMenu } from "../composables/useActionMenu";
 import { useResourceDragDrop } from "../composables/useResourceDragDrop";
@@ -64,10 +68,7 @@ import {
   ICON_FOLDER_OPEN,
   ICON_TIME,
 } from "../lib/icons";
-import {
-  activeTab,
-  activeTabId,
-} from "../composables/useEditorTabs";
+import { activeTab, activeTabId } from "../composables/useEditorTabs";
 import { TabKind } from "../lib/tabs";
 
 const props = defineProps<{ active: boolean }>();
@@ -75,9 +76,7 @@ const props = defineProps<{ active: boolean }>();
 /** 是否正在显示活动会话标签：仅会话视图可见时提供「添加为会话附件」入口，
  *  避免附件进入隐藏/非活动会话的输入区（文件/diff/预览/终端标签激活时隐藏） */
 const hasActiveSessionTab = computed(
-  () =>
-    activeTabId.value !== "" &&
-    activeTab.value?.kind === TabKind.Session,
+  () => activeTabId.value !== "" && activeTab.value?.kind === TabKind.Session,
 );
 
 /** 是否有可浏览的资源内容：仅当存在工作区且有根树（或处于搜索态）时显示搜索/显示态控件，
@@ -111,10 +110,7 @@ const {
   deleteLabel,
 } = useResourceDialogs();
 // 右键菜单构建（根/目录/文件）
-const {
-  openRootMenu,
-  openEntryMenu,
-} = useResourceMenus({
+const { openRootMenu, openEntryMenu } = useResourceMenus({
   openCtx,
   rootEntry,
   hasActiveSessionTab,
@@ -287,7 +283,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("click", onWindowClick);
   window.removeEventListener("scroll", onWindowScroll, true);
 });
-
 </script>
 
 <template>
@@ -323,11 +318,9 @@ onBeforeUnmount(() => {
           >
             <path :d="ICON_TIME" />
           </svg>
-          <span
-            v-else
-            class="panel-view-toggle-glyph"
-            aria-hidden="true"
-          >Aa</span>
+          <span v-else class="panel-view-toggle-glyph" aria-hidden="true"
+            >Aa</span
+          >
         </button>
       </div>
     </div>
@@ -375,7 +368,8 @@ onBeforeUnmount(() => {
             <span
               v-if="searchSnippetLabel(entry)"
               class="resource-search-snippet"
-            >{{ searchSnippetLabel(entry) }}</span>
+              >{{ searchSnippetLabel(entry) }}</span
+            >
           </span>
         </div>
         <div v-if="!searching && !searchResults.length" class="menu-note">
@@ -407,7 +401,9 @@ onBeforeUnmount(() => {
           v-tooltip="row.kind === 'root' ? row.entry.path : undefined"
           @click="onTreeRowClick(row)"
           @contextmenu="onRowContext(row, $event)"
-          @pointerdown="row.kind !== 'root' && onRowPointerDown(row.entry, $event)"
+          @pointerdown="
+            row.kind !== 'root' && onRowPointerDown(row.entry, $event)
+          "
         >
           <svg
             v-if="row.kind !== 'file'"
@@ -458,16 +454,14 @@ onBeforeUnmount(() => {
             </template>
           </span>
           <span class="resource-side">
-            <span
-              v-if="row.kind !== 'file'"
-              class="resource-count"
-            >{{ row.entry.childCount ?? 0 }}</span>
-            <span
-              v-else
-              class="resource-meta"
-            >{{ fileSideMode === "time"
-              ? formatFileTime(row.entry.modifiedAtMs)
-              : formatFileSize(row.entry.size) }}</span>
+            <span v-if="row.kind !== 'file'" class="resource-count">{{
+              row.entry.childCount ?? 0
+            }}</span>
+            <span v-else class="resource-meta">{{
+              fileSideMode === "time"
+                ? formatFileTime(row.entry.modifiedAtMs)
+                : formatFileSize(row.entry.size)
+            }}</span>
           </span>
         </div>
         <div v-if="loadingRoot && !rootEntry" class="menu-note">加载中…</div>
@@ -532,9 +526,11 @@ onBeforeUnmount(() => {
       <div class="resource-prop">
         <span class="resource-prop-key">大小</span>
         <span class="resource-prop-value">
-          {{ propsEntry.isDir
-            ? (propsEntry.childCount ?? 0) + " 项"
-            : formatFileSize(propsEntry.size) || "-" }}
+          {{
+            propsEntry.isDir
+              ? (propsEntry.childCount ?? 0) + " 项"
+              : formatFileSize(propsEntry.size) || "-"
+          }}
         </span>
       </div>
       <div class="resource-prop">

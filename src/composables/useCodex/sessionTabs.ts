@@ -3,11 +3,14 @@ import { TabKind } from "../../lib/tabs";
 import type { UserInput } from "../../lib/types";
 import { activeTabId, activateTab, tabs } from "../useTabs";
 import { askConfirm } from "./confirm";
-import { activeSessionTab, allSessionTabs, markSessionTabStopped } from "./sessionState";
+import {
+  activeSessionTab,
+  allSessionTabs,
+  markSessionTabStopped,
+} from "./sessionState";
 import { store } from "./store";
 import { interrupt } from "./turnControl";
 import type { SessionTab } from "./types";
-
 
 /**
  * ComposerBar 注册的“添加为会话附件”处理器：tabId → handler。
@@ -15,7 +18,6 @@ import type { SessionTab } from "./types";
  * 附件路由到当前活动的会话输入区，而不是最后挂载的那个。
  */
 const composerAddHandlers = new Map<string, (a: UserInput) => void>();
-
 
 /** ComposerBar 挂载/创建编辑器后注册本会话标签的附件处理器 */
 export function registerComposerAddHandler(
@@ -25,12 +27,10 @@ export function registerComposerAddHandler(
   composerAddHandlers.set(tabId, fn);
 }
 
-
 /** ComposerBar 卸载时注销，避免路由到已关闭会话 */
 export function unregisterComposerAddHandler(tabId: string) {
   composerAddHandlers.delete(tabId);
 }
-
 
 /**
  * 资源面板“添加为会话附件”路由：按当前活动会话标签 id 查找其 ComposerBar
@@ -45,7 +45,6 @@ export function addAttachmentToActiveSession(a: UserInput): boolean {
   return true;
 }
 
-
 /**
  * 切换到指定会话标签：统一列表内按 id 激活（live 字段由投影 watch 同步）。
  * 会话多开：切换不确认、不中断后台回合。
@@ -59,7 +58,6 @@ export async function switchSessionTab(id: string): Promise<boolean> {
   activateTab(id);
   return true;
 }
-
 
 /**
  * 关闭会话标签：运行中的会话先确认并中断（多开时仅关闭才停止）；关闭活动标签时
@@ -88,7 +86,8 @@ export async function closeSessionTab(id: string): Promise<void> {
     // 相邻会话标签（sessions 为移除前快照：同位置或前一个）；无会话时视图切到剩余标签
     const next = sessions[sidx + 1] ?? sessions[sidx - 1] ?? null;
     if (next) activateTab(next.id);
-    else if (tabs.length > 0) activateTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
+    else if (tabs.length > 0)
+      activateTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
     else activeTabId.value = "";
   }
   // 释放该线程的本地消息缓存（无其它标签引用时）
@@ -100,7 +99,6 @@ export async function closeSessionTab(id: string): Promise<void> {
     delete store.activeWorkByThread[tab.threadId];
   }
 }
-
 
 /**
  * 关闭全部会话标签（“关闭所有标签”用）：运行中的跳过并计数；

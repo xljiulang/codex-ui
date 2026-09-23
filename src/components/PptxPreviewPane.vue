@@ -51,7 +51,9 @@ function zoomOut() {
 /** 适应宽度：wrapper 自然宽（pptx-preview 生成的 .pptx-preview-wrapper）与容器宽求比值 */
 function fitWidth() {
   const host = stage.value;
-  const wrapper = sizer.value?.querySelector<HTMLElement>(".pptx-preview-wrapper");
+  const wrapper = sizer.value?.querySelector<HTMLElement>(
+    ".pptx-preview-wrapper",
+  );
   const natural = wrapper?.offsetWidth ?? BASE_W;
   if (!host || natural <= 0 || host.clientWidth <= 0) return;
   zoom.value = Math.min(
@@ -100,10 +102,7 @@ async function load() {
 // 挂载后首次渲染（此时 stage 已挂载、pptxData 已就绪）；
 // 切换预览标签或外部刷新替换 pptxData：重新渲染演示文稿
 onMounted(() => void load());
-watch(
-  [() => props.tab, () => props.tab.pptxData],
-  () => void load(),
-);
+watch([() => props.tab, () => props.tab.pptxData], () => void load());
 
 onBeforeUnmount(() => {
   renderSeq++;

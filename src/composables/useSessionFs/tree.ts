@@ -4,11 +4,7 @@ import { setToast, toastError, workspace } from "../useCodex";
 import { activeTab } from "../useEditorTabs";
 import { TabKind } from "../../lib/tabs";
 import { relPathOf } from "../../lib/format";
-import {
-  isPathUnderRoot,
-  joinFsPath,
-  type FsEntry,
-} from "../../lib/sessionFs";
+import { isPathUnderRoot, joinFsPath, type FsEntry } from "../../lib/sessionFs";
 import { normalizeFsPath, pathEquals } from "../../lib/path";
 import {
   childrenByPath,

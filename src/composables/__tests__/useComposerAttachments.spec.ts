@@ -21,7 +21,11 @@ function setup() {
   const rowAttachments = ref<UserInput[]>([]);
   const syncAttachments = vi.fn();
   const rootRef = ref<HTMLElement | null>(null);
-  const att = useComposerAttachments({ rowAttachments, syncAttachments, rootRef });
+  const att = useComposerAttachments({
+    rowAttachments,
+    syncAttachments,
+    rootRef,
+  });
   return { rowAttachments, syncAttachments, att };
 }
 
@@ -150,10 +154,7 @@ describe("useComposerAttachments 粘贴", () => {
       rowAttachments.value
         .filter((a): a is UserInput & { path: string } => "path" in a)
         .map((a) => a.path),
-    ).toEqual([
-      "D:/x/a.ts",
-      "D:/x/b.pdf",
-    ]);
+    ).toEqual(["D:/x/a.ts", "D:/x/b.pdf"]);
     expect(syncAttachments).toHaveBeenCalled();
 
     // 清理：注销避免影响后续用例

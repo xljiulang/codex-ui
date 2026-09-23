@@ -31,9 +31,17 @@ npm run test:rust              # Rust 单元测试（cargo test --lib）
 npm run test:rust:integration  # 真实 app-server 集成测试（需 $env:CODEX_BIN='codex'）
 npm run test:all               # 单测 + 类型 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
 npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，详见 README）
+
+npm run format                 # 格式化前端（Prettier）+ Rust（cargo fmt）
+npm run format:check           # 仅检查格式是否符合（不写盘），CI/提交前用
 ```
 
 修改后至少运行对应层级测试：涉及前端跑 `test:unit` + `test:typecheck`，涉及 Rust 跑 `test:rust`。
+
+**代码改完必须运行格式化**：`npm run format`（前端 `.ts`/`.vue`/`.css` 与根目录 `*.ts`/`*.json` 走 Prettier，
+Rust 走 `cargo fmt`）。只涉及其中一侧时可单独运行 `npx prettier --write <文件>` 或
+`cargo fmt --manifest-path src-tauri/Cargo.toml`。提交前用 `npm run format:check` 确认无遗漏——
+该命令全绿是提交的前提，避免把格式化噪音混进功能提交。
 
 ## 架构速览
 
@@ -57,6 +65,7 @@ npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，
 - **Windows 路径**：比较/相对化必须走 `src/lib/path.ts` 的共享方法（`pathEquals` / `isPathUnderRoot` / `relPathOf`，Map/Set 键统一经 `normalizeFsPath` / `normalizePathKey`）；后端对外绝对路径统一反斜杠（`path_util::clean_path`）。
 - **会话状态隔离**：会话级字段只读写会话标签对象（`tab.*`），不落全局 `store.*`；回合事件按 `threadId` 路由归属，禁止用 `activeSessionTab()` 给缺失身份的事件兜底。已移除的 store 字段清单与正确写法见 docs/前端模块地图.md。
 - **语言与风格**：UI 文案、注释、文档用中文；LF 行尾（`.gitattributes`）；TypeScript `strict`（含 `noUnusedLocals` / `noUnusedParameters`）。
+- **格式化（强制）**：改完代码**必须**跑 `npm run format` 再提交（前端 Prettier 走根目录 `.prettierrc.json`——2 空格/双引号/分号/尾逗号 all/箭头带括号/printWidth 80；Rust 走 `src-tauri/.rustfmt.toml`——edition 2021/max_width 100）。提交前 `npm run format:check` 必须全绿。**不要手工调整格式**：换行、缩进、`use` 排序、引号、尾逗号一律交给工具，避免与工具输出反复拉锯。仅当格式化确实无法表达意图时（如刻意对齐的表格型注释）才手工干预，并在该处写明原因。
 - **不提交**：`dist/`、`coverage/`、`src-tauri/target`、`src-tauri/gen`、`node_modules`、日志（已在 `.gitignore`）。
 - **codex 协议**：验证基线 codex-cli 0.154.0（兼容 0.149.0+，启动时探测版本、仅低版本警告）；后端只实现所需字段，未知通知忽略并记日志，前端无需交互的服务端反向请求由后端在 `app_server.rs` 直接应答；协议变更后用 `codex app-server generate-ts --experimental` 重新生成绑定核对（详见 README 与 docs/app-server.md §1.1）。
 - **修改功能流程**：前端改动通常联动「组件 + 对应 composable + 必要时后端命令」；涉及用户可见行为时同步更新 [README.md](README.md) 与 [docs/变更记录.md](docs/变更记录.md)。

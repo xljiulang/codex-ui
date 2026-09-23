@@ -4,10 +4,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import AppHeader from "../AppHeader.vue";
 import { tooltipDirective } from "../../directives/tooltip";
 import { activeSessionTab, store } from "../../composables/useCodex";
-import {
-  ICON_LAYOUT_SIDE,
-  ICON_LAYOUT_SIDE_HIDDEN,
-} from "../../lib/icons";
+import { ICON_LAYOUT_SIDE, ICON_LAYOUT_SIDE_HIDDEN } from "../../lib/icons";
 import {
   activateTab,
   activeTabId,
@@ -140,9 +137,7 @@ describe("AppHeader 标题栏与窗口控制", () => {
     h.win.isMaximized.mockResolvedValue(true);
     const wrapper = mountHeader();
     await flushPromises();
-    const maxBtn = wrapper.find(
-      '.header-actions button[aria-label="还原"]',
-    );
+    const maxBtn = wrapper.find('.header-actions button[aria-label="还原"]');
     expect(maxBtn.exists()).toBe(true);
   });
 

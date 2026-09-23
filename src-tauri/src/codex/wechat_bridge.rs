@@ -285,7 +285,9 @@ fn build_turn_input(text: Option<&str>, images: &[String], files: &[String]) -> 
     let body = match (text, section.is_empty()) {
         // 有文件：文件段 + `## My request:` + 用户文本（无文字时用占位说明）
         (Some(t), false) => Some(format!("{section}\n{MY_REQUEST_MARKER}\n{t}")),
-        (None, false) => Some(format!("{section}\n{MY_REQUEST_MARKER}\n{BARE_ATTACHMENT_NOTE}")),
+        (None, false) => Some(format!(
+            "{section}\n{MY_REQUEST_MARKER}\n{BARE_ATTACHMENT_NOTE}"
+        )),
         // 无文件：有文本就原样发，纯图片不带文本项
         (Some(t), true) => Some(t.to_string()),
         (None, true) => None,
@@ -552,7 +554,9 @@ impl WeChatBridge {
     }
 
     async fn log(&self, level: &str, line: String) {
-        self.server.push_log(level, format!("[wechat] {line}")).await;
+        self.server
+            .push_log(level, format!("[wechat] {line}"))
+            .await;
     }
 
     fn next_message_id(&self) -> String {
@@ -589,7 +593,8 @@ impl WeChatBridge {
         }
         self.ensure_client().await;
         let accounts = self.client.accounts();
-        self.handle_wechat_event(WechatEvent::Accounts(accounts)).await;
+        self.handle_wechat_event(WechatEvent::Accounts(accounts))
+            .await;
     }
 
     /// 停止全部接收器并清空运行态（退出前调用）。绑定持久化数据保留。
@@ -716,7 +721,8 @@ impl WeChatBridge {
         }
         // 解绑后同步映射：该账号后续附件不再下载（媒体目录不再新增文件）。
         self.sync_client_bindings().await;
-        self.log("info", format!("已解除会话 {thread_id} 的微信绑定")).await;
+        self.log("info", format!("已解除会话 {thread_id} 的微信绑定"))
+            .await;
         self.emit_state().await;
         Ok(())
     }
@@ -788,7 +794,8 @@ impl WeChatBridge {
                                     g.conn = "starting";
                                     g.detail = None;
                                     g.started_accounts.insert(start_account.clone());
-                                    g.account_conn.insert(start_account.clone(), "starting".into());
+                                    g.account_conn
+                                        .insert(start_account.clone(), "starting".into());
                                     // 新绑定重新获得一次自动重启机会。
                                     g.restart_attempts.remove(&start_account);
                                 }
@@ -838,10 +845,9 @@ impl WeChatBridge {
             } => {
                 {
                     let mut g = self.inner.lock().await;
-                    if g.bindings
-                        .iter()
-                        .any(|b| b.get("accountId").and_then(|v| v.as_str()) == Some(account_id.as_str()))
-                    {
+                    if g.bindings.iter().any(|b| {
+                        b.get("accountId").and_then(|v| v.as_str()) == Some(account_id.as_str())
+                    }) {
                         g.account_conn.insert(account_id.clone(), status.clone());
                     }
                     // 桥级连接取「最优」状态：任一 connected → connected；否则有过期 →
@@ -874,7 +880,8 @@ impl WeChatBridge {
                 media_error,
             } => {
                 if let Some(err) = media_error.as_deref() {
-                    self.log("warn", format!("微信附件接收失败（{from}）: {err}")).await;
+                    self.log("warn", format!("微信附件接收失败（{from}）: {err}"))
+                        .await;
                 }
                 let thread_id = {
                     let g = self.inner.lock().await;
@@ -924,7 +931,9 @@ impl WeChatBridge {
                         .bindings
                         .iter()
                         .filter_map(|b| {
-                            b.get("accountId").and_then(|v| v.as_str()).map(str::to_string)
+                            b.get("accountId")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string)
                         })
                         .collect();
                     for acct in &list {
@@ -940,13 +949,15 @@ impl WeChatBridge {
                     }
                 }
                 for id in started {
-                    self.log("info", format!("已自动恢复消息接收（{id}）")).await;
+                    self.log("info", format!("已自动恢复消息接收（{id}）"))
+                        .await;
                     self.client.start_receiver(id).await;
                 }
                 self.emit_state().await;
             }
             WechatEvent::Error { message, kind } => {
-                self.log("warn", format!("微信协议错误（{kind}）: {message}")).await;
+                self.log("warn", format!("微信协议错误（{kind}）: {message}"))
+                    .await;
                 let mut g = self.inner.lock().await;
                 g.detail = Some(message);
                 // 扫码绑定流程中的错误（pending 非空）：清掉待绑定目标与二维码，
@@ -1203,12 +1214,17 @@ impl WeChatBridge {
     /// 发送“正在输入”状态（best-effort：失败仅告警，绝不阻断回合）。
     async fn set_typing(&self, account_id: &str, peer: &str, status: i32) {
         if let Err(e) = self.client.send_typing(account_id, peer, status).await {
-            self.log("warn", format!("发送 typing 状态给 {peer} 失败: {e}")).await;
+            self.log("warn", format!("发送 typing 状态给 {peer} 失败: {e}"))
+                .await;
         }
     }
 
     /// 启动周期续发“正在输入”的后台任务（首次发送 8s 后开始；靠 abort 停止）。
-    fn spawn_typing_refresh(self: &Arc<Self>, account_id: &str, peer: &str) -> tauri::async_runtime::JoinHandle<()> {
+    fn spawn_typing_refresh(
+        self: &Arc<Self>,
+        account_id: &str,
+        peer: &str,
+    ) -> tauri::async_runtime::JoinHandle<()> {
         let this = Arc::clone(self);
         let account_id = account_id.to_string();
         let peer = peer.to_string();
@@ -1294,7 +1310,9 @@ impl WeChatBridge {
                 let waiter = {
                     let mut g = self.inner.lock().await;
                     match g.active.get_mut(tid) {
-                        Some(turn) if is_this_turn_completion(tid, &turn_id, tid, &turn.turn_id) => {
+                        Some(turn)
+                            if is_this_turn_completion(tid, &turn_id, tid, &turn.turn_id) =>
+                        {
                             turn.done.take()
                         }
                         _ => None,
@@ -1445,7 +1463,11 @@ impl WeChatBridge {
                 // 绑定线程已被删除（外部删除/清理）：自动解除该会话的微信绑定并停止接收，
                 // 不回自动重建（绑定语义下新线程不具原身份）。
                 if is_thread_not_found(&fail) {
-                    self.log("info", format!("会话 {thread_id} 已不存在，自动解除微信绑定")).await;
+                    self.log(
+                        "info",
+                        format!("会话 {thread_id} 已不存在，自动解除微信绑定"),
+                    )
+                    .await;
                     let _ = self.unbind(&thread_id).await;
                     Err((
                         account,
@@ -1606,15 +1628,20 @@ impl WeChatBridge {
                 .server
                 .request("model/list", json!({}), Some(Duration::from_secs(30)))
                 .await?;
-            let list = resp.get("data").and_then(|d| d.as_array()).cloned().unwrap_or_default();
+            let list = resp
+                .get("data")
+                .and_then(|d| d.as_array())
+                .cloned()
+                .unwrap_or_default();
             let pick = list.iter().find(|m| {
-                m.get("isDefault").and_then(|x| x.as_bool()).unwrap_or(false)
+                m.get("isDefault")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false)
                     && !m.get("hidden").and_then(|x| x.as_bool()).unwrap_or(false)
             });
             let pick = pick.or_else(|| {
-                list.iter().find(|m| {
-                    !m.get("hidden").and_then(|x| x.as_bool()).unwrap_or(true)
-                })
+                list.iter()
+                    .find(|m| !m.get("hidden").and_then(|x| x.as_bool()).unwrap_or(true))
             });
             pick.and_then(|m| m.get("model").and_then(|x| x.as_str()))
                 .map(str::to_string)
@@ -1634,11 +1661,19 @@ mod tests {
     fn account_is_startable_matrix() {
         // 已配置且未过期 → 可启动
         assert!(account_is_startable(&json!({ "configured": true })));
-        assert!(account_is_startable(&json!({ "configured": true, "status": "connected" })));
-        assert!(account_is_startable(&json!({ "configured": true, "status": "disconnected" })));
+        assert!(account_is_startable(
+            &json!({ "configured": true, "status": "connected" })
+        ));
+        assert!(account_is_startable(
+            &json!({ "configured": true, "status": "disconnected" })
+        ));
         // session_expired 或未配置 → 不可启动
-        assert!(!account_is_startable(&json!({ "configured": true, "status": "session_expired" })));
-        assert!(!account_is_startable(&json!({ "configured": false, "status": "connected" })));
+        assert!(!account_is_startable(
+            &json!({ "configured": true, "status": "session_expired" })
+        ));
+        assert!(!account_is_startable(
+            &json!({ "configured": false, "status": "connected" })
+        ));
     }
 
     #[test]
@@ -1750,7 +1785,10 @@ mod tests {
         assert_eq!(v["effort"], "high");
         assert_eq!(v["collaborationMode"]["mode"], "default");
         assert_eq!(v["collaborationMode"]["settings"]["model"], "gpt-x");
-        assert_eq!(v["collaborationMode"]["settings"]["reasoning_effort"], "high");
+        assert_eq!(
+            v["collaborationMode"]["settings"]["reasoning_effort"],
+            "high"
+        );
     }
 
     #[test]
@@ -1767,7 +1805,10 @@ mod tests {
             "danger-full-access 变体不应带 networkAccess"
         );
         assert_eq!(v["effort"], serde_json::Value::Null);
-        assert_eq!(v["collaborationMode"]["settings"]["reasoning_effort"], serde_json::Value::Null);
+        assert_eq!(
+            v["collaborationMode"]["settings"]["reasoning_effort"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -1797,7 +1838,10 @@ mod tests {
             body.starts_with(&format!("\n{FILE_MENTION_HEADING}")),
             "文本应以文件段开头: {body}"
         );
-        assert!(body.contains("## 预算表.xlsx: C:/tmp/wechat/media/t-1/预算表.xlsx"), "{body}");
+        assert!(
+            body.contains("## 预算表.xlsx: C:/tmp/wechat/media/t-1/预算表.xlsx"),
+            "{body}"
+        );
         assert!(
             body.contains("## wechat-video-1.mp4: C:/tmp/wechat/media/t-1/wechat-video-1.mp4"),
             "{body}"
@@ -1811,7 +1855,10 @@ mod tests {
         assert_eq!(input.len(), 1, "只有 text 项");
         assert_eq!(input[0]["type"], "text");
         let body = input[0]["text"].as_str().unwrap();
-        assert!(body.contains("## 预算表.xlsx: C:/tmp/wechat/media/t-1/预算表.xlsx"), "{body}");
+        assert!(
+            body.contains("## 预算表.xlsx: C:/tmp/wechat/media/t-1/预算表.xlsx"),
+            "{body}"
+        );
         assert!(body.contains(MY_REQUEST_MARKER), "{body}");
         assert!(body.ends_with(BARE_ATTACHMENT_NOTE), "{body}");
 
@@ -1888,8 +1935,14 @@ mod tests {
             ],
             "nextCursor": null,
         });
-        assert_eq!(extract_turn_agent_text(&resp, "turn-a").as_deref(), Some("  hello  "));
-        assert_eq!(extract_turn_agent_text(&resp, "turn-b").as_deref(), Some("other"));
+        assert_eq!(
+            extract_turn_agent_text(&resp, "turn-a").as_deref(),
+            Some("  hello  ")
+        );
+        assert_eq!(
+            extract_turn_agent_text(&resp, "turn-b").as_deref(),
+            Some("other")
+        );
         assert!(extract_turn_agent_text(&resp, "turn-none").is_none());
         assert!(extract_turn_agent_text(&json!(null), "x").is_none());
         let all_empty = json!({
@@ -1900,8 +1953,14 @@ mod tests {
 
     #[test]
     fn final_reply_text_prefers_captured_then_fetched_else_fallback() {
-        assert_eq!(final_reply_text(" hi ", "completed", Some("x".into())), "hi");
-        assert_eq!(final_reply_text("", "completed", Some(" 回查文本 ".into())), "回查文本");
+        assert_eq!(
+            final_reply_text(" hi ", "completed", Some("x".into())),
+            "hi"
+        );
+        assert_eq!(
+            final_reply_text("", "completed", Some(" 回查文本 ".into())),
+            "回查文本"
+        );
         assert!(!final_reply_text("", "completed", None).contains("执行失败"));
         assert!(final_reply_text("", "completed", Some(String::new())).contains("没有输出"));
         assert!(final_reply_text("", "failed", Some(String::new())).contains("failed"));

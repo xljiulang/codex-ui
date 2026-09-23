@@ -206,11 +206,11 @@ function plainTextBeforeCaret(): string {
 function updateMentionFromCaret() {
   const textBefore = plainTextBeforeCaret();
   const m = matchMentionToken(textBefore);
-    mention.value = m;
-    if (!m) {
-      resetFileSearch(true);
-      return;
-    }
+  mention.value = m;
+  if (!m) {
+    resetFileSearch(true);
+    return;
+  }
   if (m.kind === "@") scheduleFileSearch(m.token);
 }
 
@@ -441,7 +441,11 @@ function submit(invertFollowup = false) {
     .filter((a): a is UserInput => !!a);
   // 目标 flag：仅默认模式（非计划）下首条消息消费勾选，目标=该消息纯文本；
   // 计划模式消息不消费，arm 保持（“执行计划”按钮另行以计划内容挂载目标）
-  if (props.tab.goalArmed && props.tab.collaborationMode !== "plan" && plainText.trim()) {
+  if (
+    props.tab.goalArmed &&
+    props.tab.collaborationMode !== "plan" &&
+    plainText.trim()
+  ) {
     props.tab.goalText = plainText.trim();
     props.tab.goalArmed = false;
     props.tab.goalStatus = null;
@@ -485,7 +489,6 @@ function collaborationModeLabel(): string {
   if (props.tab.collaborationMode === "plan") return "计划模式";
   return "默认模式";
 }
-
 </script>
 
 <template>
@@ -499,7 +502,9 @@ function collaborationModeLabel(): string {
   >
     <div
       class="composer-input-row"
-      :style="composerHeight ? { '--composer-h': `${composerHeight}px` } : undefined"
+      :style="
+        composerHeight ? { '--composer-h': `${composerHeight}px` } : undefined
+      "
     >
       <div
         class="composer-resize-handle"
@@ -511,7 +516,11 @@ function collaborationModeLabel(): string {
       </div>
       <div class="composer-card">
         <div class="menu-anchor input-anchor">
-          <EditorContent :editor="editor" class="rich-editor" @contextmenu.prevent />
+          <EditorContent
+            :editor="editor"
+            class="rich-editor"
+            @contextmenu.prevent
+          />
           <MentionMenu
             ref="mentionMenu"
             v-if="mention"
@@ -557,10 +566,13 @@ function collaborationModeLabel(): string {
                 </svg>
                 {{ collaborationModeLabel() }}
                 <svg viewBox="0 0 16 16">
-                <path :d="ICON_CHEVRON_DOWN" />
+                  <path :d="ICON_CHEVRON_DOWN" />
                 </svg>
               </button>
-              <CollaborationModeMenu v-if="collabOpen" @close="collabOpen = false" />
+              <CollaborationModeMenu
+                v-if="collabOpen"
+                @close="collabOpen = false"
+              />
             </div>
             <div class="menu-anchor">
               <GoalChip :tab="tab" />
@@ -569,10 +581,7 @@ function collaborationModeLabel(): string {
           <div class="composer-right">
             <ContextUsageMenu :tab="tab" />
             <div class="menu-anchor">
-              <button
-                class="model-chip"
-                @click="toggleMenu('model')"
-              >
+              <button class="model-chip" @click="toggleMenu('model')">
                 <svg class="model-chip-icon" viewBox="0 0 24 24">
                   <path :d="ICON_MODEL_CUBE" />
                 </svg>
@@ -638,12 +647,7 @@ function collaborationModeLabel(): string {
 
     <Teleport to="body">
       <div
-        v-if="
-          permOpen ||
-          collabOpen ||
-          modelOpen ||
-          mention
-        "
+        v-if="permOpen || collabOpen || modelOpen || mention"
         class="menu-backdrop"
         @click="closeMenus()"
       ></div>

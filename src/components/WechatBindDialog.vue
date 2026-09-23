@@ -38,7 +38,8 @@ const stateLabel = computed(() => {
     session_expired: "会话过期，请重新扫码",
     error: "异常",
   };
-  const conn = binding.value?.connection ?? store.wechat?.connection ?? "offline";
+  const conn =
+    binding.value?.connection ?? store.wechat?.connection ?? "offline";
   return labels[conn] ?? "未连接";
 });
 
@@ -51,7 +52,10 @@ watch(
     }
     try {
       const QRCode = await import("qrcode");
-      qrDataUrl.value = await QRCode.toDataURL(content, { width: 220, margin: 1 });
+      qrDataUrl.value = await QRCode.toDataURL(content, {
+        width: 220,
+        margin: 1,
+      });
     } catch {
       qrDataUrl.value = "";
     }
@@ -130,7 +134,11 @@ async function onUnbind() {
         <div class="wechat-bound-note">
           该会话已绑定微信账号，绑定账号本人的消息将路由到此会话执行。
         </div>
-        <button type="button" class="btn danger wechat-unbind-btn" @click="onUnbind">
+        <button
+          type="button"
+          class="btn danger wechat-unbind-btn"
+          @click="onUnbind"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path :d="ICON_DELETE" />
           </svg>
@@ -148,7 +156,10 @@ async function onUnbind() {
             请使用要绑定的微信扫码并确认授权（二维码约 8 分钟内有效）
           </p>
         </div>
-        <div v-else-if="isPending && store.wechat?.detail" class="wechat-detail">
+        <div
+          v-else-if="isPending && store.wechat?.detail"
+          class="wechat-detail"
+        >
           {{ store.wechat.detail }}
           <button
             type="button"

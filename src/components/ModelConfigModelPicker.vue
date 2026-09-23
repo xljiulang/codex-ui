@@ -71,7 +71,11 @@ onBeforeUnmount(() => {
       @click="openMenu"
       @input="onInput"
     />
-    <div v-if="open" class="popup-menu model-config-model-picker-menu" @click.stop>
+    <div
+      v-if="open"
+      class="popup-menu model-config-model-picker-menu"
+      @click.stop
+    >
       <div
         v-if="options.length"
         class="question-options"

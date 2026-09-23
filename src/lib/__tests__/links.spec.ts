@@ -90,10 +90,7 @@ describe("localPathFromHref 链接分类", () => {
 
   it("plugin:// URI 不作为本地路径", () => {
     expect(
-      localPathFromHref(
-        "plugin://documents@openai-primary-runtime",
-        "D:/repo",
-      ),
+      localPathFromHref("plugin://documents@openai-primary-runtime", "D:/repo"),
     ).toBeNull();
   });
 });

@@ -1,9 +1,11 @@
 import { ref, type Ref } from "vue";
 
 /** @ / $ 提及弹层触发状态 */
-export type ComposerMention =
-  | { kind: "@" | "$"; token: string; start: number }
-  | null;
+export type ComposerMention = {
+  kind: "@" | "$";
+  token: string;
+  start: number;
+} | null;
 
 export type ComposerMenu = "perm" | "collab" | "model";
 
@@ -17,7 +19,11 @@ export function useComposerMenus(options: { mention: Ref<ComposerMention> }) {
   const modelOpen = ref(false);
 
   function menuRef(which: ComposerMenu) {
-    return which === "perm" ? permOpen : which === "collab" ? collabOpen : modelOpen;
+    return which === "perm"
+      ? permOpen
+      : which === "collab"
+        ? collabOpen
+        : modelOpen;
   }
 
   function closeAll() {

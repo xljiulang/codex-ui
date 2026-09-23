@@ -8,7 +8,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("../../composables/useCodex", async (importOriginal) => {
-  const mod = await importOriginal<typeof import("../../composables/useCodex")>();
+  const mod =
+    await importOriginal<typeof import("../../composables/useCodex")>();
   return { ...mod, sendPrompt: vi.fn() };
 });
 
@@ -130,8 +131,7 @@ function mockRpc(withFileResults: boolean) {
 const waitSearch = () => new Promise((r) => setTimeout(r, 320));
 
 function getEditor(): any {
-  const ed = (window as unknown as Record<string, unknown>)
-    .__CODEX_UI_EDITOR__;
+  const ed = (window as unknown as Record<string, unknown>).__CODEX_UI_EDITOR__;
   if (!ed) throw new Error("编辑器实例未暴露");
   return ed;
 }
@@ -201,7 +201,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     const tab = defaultTab();
     wrapper = mount(ComposerBar, { props: { tab } });
     await flushPromises();
-    expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(false);
+    expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(
+      false,
+    );
 
     tab.threadTokenUsage = {
       contextUsed: 5000,
@@ -210,7 +212,9 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
       output: 34000,
     };
     await flushPromises();
-    expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(true);
+    expect(wrapper.find(".composer-right .ctx-ring-anchor").exists()).toBe(
+      true,
+    );
     // 圆环位于模型选择按钮之前
     const rightHtml = wrapper.find(".composer-right").element.innerHTML;
     expect(rightHtml.indexOf("ctx-ring-anchor")).toBeLessThan(
@@ -349,7 +353,10 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
       .findAll(".attachment-chip")
       .map((x) => x.text().replace("×", "").trim());
     expect(rowTexts).toEqual(["@a.cs"]);
-    expect(activeSessionTab()?.attachments.map((a) => a.type)).toEqual(["skill", "mention"]);
+    expect(activeSessionTab()?.attachments.map((a) => a.type)).toEqual([
+      "skill",
+      "mention",
+    ]);
   });
 
   it("发送时把内联引用写入 activeSessionTab()?.attachments 并调用 sendPrompt", async () => {
@@ -586,8 +593,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await flushPromises(); // 等 TipTap 创建 .ProseMirror
     const transform = getEditor().view.props.transformPastedHTML as
-      | ((html: string) => string)
-      | undefined;
+      ((html: string) => string) | undefined;
     expect(transform).toBeTypeOf("function");
 
     expect(transform?.('<a href="https://a.b">文档</a>')).toBe(
@@ -666,9 +672,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
       return {};
     });
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
-    await pasteItems([
-      makeFileItem("huge.png", "image/png", 21 * 1024 * 1024),
-    ]);
+    await pasteItems([makeFileItem("huge.png", "image/png", 21 * 1024 * 1024)]);
 
     expect(store.toast).toContain("图片过大");
     expect(activeSessionTab()?.attachments).toEqual([]);
@@ -681,9 +685,7 @@ describe("ComposerBar 粘贴图片/文件", () => {
   it("纯文本粘贴：走默认行为，不触发附件逻辑", async () => {
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
     await flushPromises();
-    const dt = makeDataTransfer([
-      { kind: "string", type: "text/plain" },
-    ]);
+    const dt = makeDataTransfer([{ kind: "string", type: "text/plain" }]);
     const ev = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(ev, "clipboardData", { value: dt });
     wrapper.find(".ProseMirror").element.dispatchEvent(ev);
@@ -768,7 +770,9 @@ describe("ComposerBar 拖放图片/文件", () => {
   it("拖入带路径的图片：直接用原路径生成 localImage 附件", async () => {
     mockedInvoke.mockResolvedValue({});
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
-    await dropAndFlush([makeDropFile("shot.png", "image/png", 8, "D:/repo/shot.png")]);
+    await dropAndFlush([
+      makeDropFile("shot.png", "image/png", 8, "D:/repo/shot.png"),
+    ]);
 
     expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/shot.png" },
@@ -795,7 +799,9 @@ describe("ComposerBar 拖放图片/文件", () => {
   it("拖入带路径的非图片：生成 mention 附件", async () => {
     mockedInvoke.mockResolvedValue({});
     wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
-    await dropAndFlush([makeDropFile("a.txt", "text/plain", 8, "D:/repo/a.txt")]);
+    await dropAndFlush([
+      makeDropFile("a.txt", "text/plain", 8, "D:/repo/a.txt"),
+    ]);
 
     expect(activeSessionTab()?.attachments).toEqual([
       { type: "mention", name: "a.txt", path: "D:/repo/a.txt" },
@@ -913,15 +919,11 @@ describe("ComposerBar 输入框高度拖拽调节", () => {
     expect(rowStyle()).toBe("");
 
     await dragTo(100);
-    const h1 = Number(
-      /--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
-    );
+    const h1 = Number(/--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0");
     expect(h1).toBeGreaterThanOrEqual(100);
 
     await dragTo(50);
-    const h2 = Number(
-      /--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0",
-    );
+    const h2 = Number(/--composer-h:\s*(\d+)px/.exec(rowStyle())?.[1] ?? "0");
     // 第二次拖拽以当前高度为基准继续增长
     expect(h2).toBeGreaterThan(h1);
   });
@@ -950,9 +952,7 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     description: "最新模型",
     hidden: false,
     isDefault: true,
-    supportedReasoningEfforts: [
-      { reasoningEffort: "high", description: "高" },
-    ],
+    supportedReasoningEfforts: [{ reasoningEffort: "high", description: "高" }],
     defaultReasoningEffort: "high",
   };
 
@@ -1045,12 +1045,16 @@ describe("ComposerBar 模型按钮与弹出层", () => {
     wrapper = mount(ComposerBar, { props: { tab } });
     await wrapper.find(".perm-chip").trigger("click");
     await flushPromises();
-    expect(wrapper.find(".popup-menu").text()).toContain("应如何批准 Codex 操作？");
+    expect(wrapper.find(".popup-menu").text()).toContain(
+      "应如何批准 Codex 操作？",
+    );
 
     await wrapper.find(".collab-chip").trigger("click");
     await flushPromises();
     expect(wrapper.find(".popup-menu").text()).toContain("协作模式");
-    expect(wrapper.find(".popup-menu").text()).not.toContain("应如何批准 Codex 操作？");
+    expect(wrapper.find(".popup-menu").text()).not.toContain(
+      "应如何批准 Codex 操作？",
+    );
 
     await wrapper.find(".model-chip").trigger("click");
     await flushPromises();
@@ -1172,9 +1176,9 @@ describe("ComposerBar 任务目标芯片", () => {
     expect(armedBadge.text()).toBe("");
     expect(wrapper.find(".goal-icon-btn.status-active").exists()).toBe(false);
     expect(
-      (wrapper.find(".goal-icon-btn").element as HTMLButtonElement).getAttribute(
-        "aria-pressed",
-      ),
+      (
+        wrapper.find(".goal-icon-btn").element as HTMLButtonElement
+      ).getAttribute("aria-pressed"),
     ).toBe("true");
     expect(wrapper.find(".goal-menu").exists()).toBe(false);
   });
@@ -1287,7 +1291,6 @@ describe("ComposerBar 任务目标芯片", () => {
     expect(mockedSendPrompt).toHaveBeenCalled();
     expect(mockedSendPrompt.mock.calls[0][0]).toContain("a.cs");
   });
-
 });
 
 describe("ComposerBar 权限与草稿会话私有", () => {

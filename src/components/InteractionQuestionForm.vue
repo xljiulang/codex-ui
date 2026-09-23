@@ -22,9 +22,7 @@ const otherInputs = reactive<Record<string, string>>({});
 
 // 分步提问：一次只展示一道题
 const qIndex = ref(0);
-const currentQuestion = computed(
-  () => questions.value[qIndex.value] ?? null,
-);
+const currentQuestion = computed(() => questions.value[qIndex.value] ?? null);
 const hasMultipleQuestions = computed(() => questions.value.length > 1);
 const isLastQuestion = computed(
   () => qIndex.value >= questions.value.length - 1,
@@ -45,7 +43,9 @@ function submitUserInput() {
     const id = str(q.id);
     const selected = selectedOptions[id];
     const value =
-      q.isOther && selected === "__other__" ? (otherInputs[id] ?? "") : (selected ?? "");
+      q.isOther && selected === "__other__"
+        ? (otherInputs[id] ?? "")
+        : (selected ?? "");
     answers[id] = { answers: [value] };
   }
   emit("submit", answers);
@@ -64,9 +64,8 @@ function submitUserInput() {
   </div>
   <div v-if="currentQuestion" class="question-row">
     <div class="question-text">
-      {{ currentQuestion.header ? `${str(currentQuestion.header)}：` : "" }}{{
-        str(currentQuestion.question)
-      }}
+      {{ currentQuestion.header ? `${str(currentQuestion.header)}：` : ""
+      }}{{ str(currentQuestion.question) }}
     </div>
     <div
       v-if="
@@ -82,7 +81,9 @@ function submitUserInput() {
         }[]"
         :key="opt.label"
         class="option-btn"
-        :class="{ selected: selectedOptions[str(currentQuestion.id)] === opt.label }"
+        :class="{
+          selected: selectedOptions[str(currentQuestion.id)] === opt.label,
+        }"
         @click="selectedOptions[str(currentQuestion.id)] = opt.label"
       >
         {{ opt.label }}
@@ -90,7 +91,9 @@ function submitUserInput() {
       <button
         v-if="currentQuestion.isOther"
         class="option-btn"
-        :class="{ selected: selectedOptions[str(currentQuestion.id)] === '__other__' }"
+        :class="{
+          selected: selectedOptions[str(currentQuestion.id)] === '__other__',
+        }"
         @click="selectedOptions[str(currentQuestion.id)] = '__other__'"
       >
         其他…
@@ -112,11 +115,19 @@ function submitUserInput() {
   <div class="interaction-foot">
     <button class="btn" @click="emit('cancel')">取消</button>
     <template v-if="hasMultipleQuestions">
-      <button class="btn" :disabled="qIndex === 0" @click="prevQuestion()">上一题</button>
-      <button v-if="!isLastQuestion" class="btn primary" @click="nextQuestion()">
+      <button class="btn" :disabled="qIndex === 0" @click="prevQuestion()">
+        上一题
+      </button>
+      <button
+        v-if="!isLastQuestion"
+        class="btn primary"
+        @click="nextQuestion()"
+      >
         下一题
       </button>
-      <button v-else class="btn primary" @click="submitUserInput()">提交</button>
+      <button v-else class="btn primary" @click="submitUserInput()">
+        提交
+      </button>
     </template>
     <button v-else class="btn primary" @click="submitUserInput()">提交</button>
   </div>

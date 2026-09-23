@@ -23,13 +23,17 @@ const ZEN_DOCS_URL = "https://opencode.ai/zen";
 /** 本地代理运行状态（由 compat_proxy_status 驱动；未获取时默认停止） */
 const status = ref<CompatProxyStatus>({ running: false, port: DEFAULT_PORT });
 /** 端口输入（本地缓冲，保存时写回） */
-const portInput = ref<string>(String(store.settings.compat_proxy_port ?? DEFAULT_PORT));
+const portInput = ref<string>(
+  String(store.settings.compat_proxy_port ?? DEFAULT_PORT),
+);
 /** API 请求地址输入（本地缓冲，保存时写回；空回退默认） */
 const apiUrlInput = ref<string>(
   store.settings.compat_proxy_base_url ?? DEFAULT_BASE_URL,
 );
 /** 回合收尾约束和助推（本地缓冲，保存时写回；缺省开启） */
-const nudgeEnabled = ref<boolean>(store.settings.compat_proxy_nudge_enabled ?? true);
+const nudgeEnabled = ref<boolean>(
+  store.settings.compat_proxy_nudge_enabled ?? true,
+);
 /** OpenCode 客户端身份（本地缓冲，保存时写回；缺省开启） */
 const identityEnabled = ref<boolean>(
   store.settings.compat_proxy_identity_enabled ?? true,
@@ -127,7 +131,10 @@ onBeforeUnmount(refresh);
 </script>
 
 <template>
-  <section v-show="active" class="settings-section settings-section-compat-proxy">
+  <section
+    v-show="active"
+    class="settings-section settings-section-compat-proxy"
+  >
     <h2 class="settings-section-title">兼容代理</h2>
     <p class="settings-section-desc">
       在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions
@@ -153,7 +160,11 @@ onBeforeUnmount(refresh);
                   : 'is-stopped'
               "
             >
-              {{ (store.settings.compat_proxy_enabled ?? false) ? "已启动" : "已停止" }}
+              {{
+                (store.settings.compat_proxy_enabled ?? false)
+                  ? "已启动"
+                  : "已停止"
+              }}
             </span>
             <code
               v-if="store.settings.compat_proxy_enabled ?? false"
@@ -202,9 +213,7 @@ onBeforeUnmount(refresh);
             class="compat-proxy-url-input"
             :value="apiUrlInput"
             placeholder="https://opencode.ai/zen/v1"
-            @input="
-              apiUrlInput = ($event.target as HTMLInputElement).value
-            "
+            @input="apiUrlInput = ($event.target as HTMLInputElement).value"
           />
         </div>
 
@@ -299,7 +308,9 @@ onBeforeUnmount(refresh);
   cursor: pointer;
   -webkit-user-select: text;
   user-select: text;
-  transition: border-color var(--ease), color var(--ease);
+  transition:
+    border-color var(--ease),
+    color var(--ease);
 }
 .compat-proxy-base-url-capsule:hover {
   border-color: var(--accent-dim);

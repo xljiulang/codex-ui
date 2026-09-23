@@ -16,9 +16,7 @@ export const THEMES: ThemeOption[] = [
 
 const THEME_KEY = "codex-ui-theme";
 
-export function normalizeTheme(
-  theme: string | null | undefined,
-): ThemeId {
+export function normalizeTheme(theme: string | null | undefined): ThemeId {
   return THEMES.some((t) => t.id === theme) ? (theme as ThemeId) : "blue";
 }
 
