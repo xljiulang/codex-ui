@@ -292,7 +292,6 @@ describe("SessionView 右键菜单", () => {
       detail: null,
       qrContent: null,
       pendingThreadId: null,
-      queued: 0,
       busy: false,
       bindings: [
         { threadId: "t1", accountId: "bot-1", connection: "connected" },

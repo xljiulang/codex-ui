@@ -58,6 +58,9 @@ struct Shared {
     /// 服务器通知广播口：除转发前端外，微信桥等 Rust 内部订阅者据此感知
     /// thread/turn 事件（容量有限，滞后订阅者按 Lagged 自行容错）。
     tap: broadcast::Sender<(String, Value)>,
+    /// 连接状态广播口（true=已连接 / false=已断开）：供微信桥在断线瞬间停止
+    /// 「正在输入」续发等与连接强相关的副作用（滞后订阅者按 Lagged 自行容错）。
+    conn: broadcast::Sender<bool>,
 }
 
 /// 后台完成信号：`wait` 会阻塞到 `mark_done` 被调用，避免市场登记在
@@ -179,6 +182,7 @@ impl CodexServer {
                 bundled: DoneState::new(),
                 runtime: DoneState::new(),
                 tap: broadcast::channel(256).0,
+                conn: broadcast::channel(16).0,
             }),
             next_id: AtomicU64::new(0),
             workspace,
@@ -194,6 +198,11 @@ impl CodexServer {
     /// 当前仅微信桥使用；迟到导致 Lagged 时由订阅方自行跳过补齐。
     pub fn subscribe_notifications(&self) -> broadcast::Receiver<(String, Value)> {
         self.shared.tap.subscribe()
+    }
+
+    /// 订阅 app-server 连接状态（true=握手完成可用 / false=断开重连中）。
+    pub fn subscribe_connection(&self) -> broadcast::Receiver<bool> {
+        self.shared.conn.subscribe()
     }
 
     /// 后台解压完成信号：向等待方广播（供 `bundled::bootstrap` 调用）。
@@ -520,6 +529,7 @@ impl CodexServer {
             inner.ready = true;
             inner.codex_path = Some(codex.clone());
         }
+        let _ = self.shared.conn.send(true);
         self.push_log(
             "info",
             format!(
@@ -991,6 +1001,7 @@ impl CodexServer {
                 }));
             }
         }
+        let _ = self.shared.conn.send(false);
         self.push_log("warn", "codex app-server 已断开，正在重连…".into())
             .await;
     }

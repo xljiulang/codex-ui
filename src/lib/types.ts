@@ -277,7 +277,7 @@ export interface WeChatSnapshot {
   detail?: string | null;
   qrContent?: string | null;
   pendingThreadId?: string | null;
-  queued: number;
+  /** 是否存在任一进行中的 Codex 回合（微信通道无队列，回合中消息走 turn/steer 并入） */
   busy: boolean;
   bindings: WeChatBindingInfo[];
 }

@@ -55,7 +55,6 @@ describe("WechatBindDialog", () => {
       detail: null,
       qrContent: null,
       pendingThreadId: null,
-      queued: 0,
       busy: false,
       bindings: [
         { threadId: "t1", accountId: "bot-1", connection: "connected" },
@@ -69,7 +68,6 @@ describe("WechatBindDialog", () => {
         detail: null,
         qrContent: null,
         pendingThreadId: null,
-        queued: 0,
         busy: false,
         bindings: [],
       };
@@ -92,7 +90,6 @@ describe("WechatBindDialog", () => {
       detail: null,
       qrContent: "http://weixin/abc",
       pendingThreadId: "t1",
-      queued: 0,
       busy: false,
       bindings: [],
     };
@@ -111,7 +108,6 @@ describe("WechatBindDialog", () => {
       detail: null,
       qrContent: null,
       pendingThreadId: "t1",
-      queued: 0,
       busy: false,
       bindings: [],
     };
@@ -127,7 +123,6 @@ describe("WechatBindDialog", () => {
       detail: null,
       qrContent: "http://weixin/abc",
       pendingThreadId: "t9",
-      queued: 0,
       busy: false,
       bindings: [],
     };
@@ -155,7 +150,6 @@ describe("WechatBindDialog", () => {
       detail: null,
       qrContent: "http://weixin/abc",
       pendingThreadId: "t1",
-      queued: 0,
       busy: false,
       bindings: [],
     };

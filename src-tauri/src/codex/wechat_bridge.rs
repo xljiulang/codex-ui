@@ -4,7 +4,7 @@
 //! 微信协议（ilink bot API）由纯 Rust 的 wechat_client 承担，事件经 mpsc 推送本模块
 //! 消费（语义对齐原 Node sidecar 的 stdio 事件，前端 wechat/event 协议不变）。
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -12,19 +12,23 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{mpsc, Mutex, Notify};
-use tokio::time::timeout;
+use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use crate::codex::app_server::CodexServer;
 use crate::codex::session_state::{SessionStateStore, WechatBinding};
 use crate::codex::wechat_client::{WechatClient, WechatEvent};
 
-/// 排队入站消息上限；溢出立即回忙碌提示且该条丢弃。
-const QUEUE_LIMIT: usize = 16;
 /// 回复超长时按可见字符数切分发送。
 const REPLY_CHUNK_CHARS: usize = 1800;
 /// “正在输入”状态周期续发间隔（秒）。
 const TYPING_INTERVAL_SECS: u64 = 8;
+/// steer 撞上「回合尚未被服务端标记为可转向」窗口时的短重试次数与间隔
+/// （与前端 steerTurn 同款：`turn/start` 响应早于 `turn/started`）。
+const STEER_RETRY_ATTEMPTS: u32 = 5;
+const STEER_RETRY_DELAY_MS: u64 = 400;
+/// `turn/start` 响应未带回合 id（防御性分支）时，短等 `turn/started` 回填的次数与间隔。
+const STEER_TURN_ID_WAIT_ATTEMPTS: u32 = 10;
+const STEER_TURN_ID_WAIT_STEP_MS: u64 = 300;
 /// 把回合产物整理为回复文本：无文本/非正常结束给出对应中文兜底提示。
 fn normalize_turn_text(text: &str, status: &str) -> String {
     let trimmed = text.trim();
@@ -72,8 +76,6 @@ fn final_reply_text(captured: &str, status: &str, fetched: Option<String>) -> St
     }
     normalize_turn_text(captured, status)
 }
-/// 单个 Codex 回合最长等待时间；超时按失败回复，避免整条队列卡死。
-const TURN_TIMEOUT_SECS: u64 = 600;
 /// 前端事件名：状态每次变化全量推送快照。
 pub const WECHAT_EVENT: &str = "wechat/event";
 
@@ -97,9 +99,27 @@ struct InboundMessage {
 // 纯函数工具（单元测试覆盖）
 // ---------------------------------------------------------------------------
 
-/// 溢出判定：仅当「已有回合执行中 且 队列达到上限」时丢弃新消息。
-fn queue_overflow(active_busy: bool, queued_len: usize) -> bool {
-    active_busy && queued_len >= QUEUE_LIMIT
+/// steer 失败分类：决定「另开新回合」还是「回失败提示」。
+#[derive(Debug, PartialEq, Eq)]
+enum SteerOutcome {
+    /// 服务端没有可转向的活动回合（回合已结束 / 尚未标记为可转向）→ 另开新回合。
+    NoActiveTurn,
+    /// 当前回合类型不支持转向（review / 手动 compact 等）→ 回失败提示，不另开回合。
+    NotSteerable,
+    /// 其它错误（连接中断等）→ 回失败提示，不另开回合。
+    Other,
+}
+
+/// 错误文案归类：`no active turn` 视为「回合不在」，`not steerable` 视为「不可转向」。
+fn classify_steer_error(err: &str) -> SteerOutcome {
+    let e = err.to_ascii_lowercase();
+    if e.contains("no active turn") {
+        SteerOutcome::NoActiveTurn
+    } else if e.contains("not steerable") || e.contains("activeturnnotsteerable") {
+        SteerOutcome::NotSteerable
+    } else {
+        SteerOutcome::Other
+    }
 }
 
 /// 「thread not found」判定：codex 删除线程后 turn/start 的稳定错误文案。
@@ -261,6 +281,24 @@ fn build_turn_params(
     })
 }
 
+/// turn/steer 参数：把一条消息并入指定回合（`expectedTurnId` 前置校验）。
+/// 与前端 `steerTurn` 同形，输入构造复用 `build_turn_input`。
+fn build_steer_params(
+    thread_id: &str,
+    text: Option<&str>,
+    images: &[String],
+    files: &[String],
+    client_message_id: &str,
+    expected_turn_id: &str,
+) -> Value {
+    json!({
+        "threadId": thread_id,
+        "input": build_turn_input(text, images, files),
+        "clientUserMessageId": client_message_id,
+        "expectedTurnId": expected_turn_id,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // 桥本体状态
 // ---------------------------------------------------------------------------
@@ -282,21 +320,17 @@ struct BridgeInner {
     started_accounts: HashSet<String>,
     /// 各绑定账号的连接状态（offline/starting/connected/session_expired/error）。
     account_conn: HashMap<String, String>,
-    queue: VecDeque<InboundMessage>,
-    /// 同一发送者连续溢出只回一次忙碌提示的去重集合（收到其新消息时解除）。
-    overflow_notified: HashSet<String>,
-    /// 当前正在执行 Codex 回合的线程 id；None 表示空闲。
-    active_thread: Option<String>,
+    /// 各线程进行中的 Codex 回合（键=threadId）；无条目表示该线程空闲。
+    /// 线程之间并行，互不阻塞；同线程靠 `thread_locks` 串行化。
+    active: HashMap<String, ActiveTurn>,
+    /// 线程级串行锁：同线程的入站消息按到达顺序执行「转向或开新回合」。
+    thread_locks: HashMap<String, Arc<Mutex<()>>>,
     /// 各线程最近完成的 agentMessage 文本（订阅任务收集，回合完成后取走）。
     pending_reply: HashMap<String, String>,
     /// 默认模型缓存：None 未解析过；Some(..) 已解析一次（成功/失败皆缓存）。
     default_model: Option<Result<String, String>>,
-    /// 后台循环（泵/订阅）是否已启动（桥生命周期内仅启动一次）。
+    /// 后台订阅（通知 / 连接状态）是否已启动（桥生命周期内仅启动一次）。
     pumps_started: bool,
-    /// 出队唤醒信号接收端（首启被泵任务取走）。
-    job_rx: Option<mpsc::UnboundedReceiver<()>>,
-    /// 回合完成信号接收端（首启被泵任务取走）。
-    done_rx: Option<mpsc::UnboundedReceiver<(String, String, String)>>,
     /// 已记过首次忽略日志的「账号|发送者」键（进程内去重，防日志刷屏）。
     ignored_logged: HashSet<String>,
 }
@@ -313,14 +347,11 @@ impl Default for BridgeInner {
             bindings: Vec::new(),
             started_accounts: HashSet::new(),
             account_conn: HashMap::new(),
-            queue: VecDeque::new(),
-            overflow_notified: HashSet::new(),
-            active_thread: None,
+            active: HashMap::new(),
+            thread_locks: HashMap::new(),
             pending_reply: HashMap::new(),
             default_model: None,
             pumps_started: false,
-            job_rx: None,
-            done_rx: None,
             ignored_logged: HashSet::new(),
         }
     }
@@ -336,19 +367,23 @@ pub struct WeChatBridge {
     /// 当前扫码登录的取消信号（共享；notify_waiters 不残留 permit）。
     login_cancel: Arc<Notify>,
     inner: Mutex<BridgeInner>,
-    job_tx: mpsc::UnboundedSender<()>,
-    done_tx: mpsc::UnboundedSender<(String, String, String)>,
     seq: AtomicU64,
 }
 
+/// 一次已发起的 Codex 回合（键为 threadId）。
 struct ActiveTurn {
-    thread_id: String,
     turn_id: String,
-    account_id: String,
-    peer: String,
-    deadline: std::time::Instant,
-    /// 周期续发“正在输入”的后台任务；回合结束/失败/超时时 abort。
+    /// 完成信号投递口：通知订阅在匹配的 `turn/completed` 到达时 take 并投递。
+    /// 等待方永久等待（不设时间上限）；仅通道被丢弃（回合被清理）时才提前退出。
+    done: Option<oneshot::Sender<Completion>>,
+    /// 周期续发“正在输入”的后台任务；回合结束/失败/连接断开时 abort。
     typing_task: Option<tauri::async_runtime::JoinHandle<()>>,
+}
+
+/// 回合完成信号：`turn/completed` 的回合 id 与结束状态。
+struct Completion {
+    turn_id: String,
+    status: String,
 }
 
 impl WeChatBridge {
@@ -359,8 +394,6 @@ impl WeChatBridge {
         store: Arc<SessionStateStore>,
     ) -> Arc<Self> {
         let root = app_dir.join("wechat");
-        let (job_tx, job_rx) = mpsc::unbounded_channel();
-        let (done_tx, done_rx) = mpsc::unbounded_channel();
         let (wechat_tx, mut wechat_rx) = mpsc::unbounded_channel();
         let client = WechatClient::new(root.clone(), wechat_tx);
         let bridge = Arc::new(Self {
@@ -369,13 +402,7 @@ impl WeChatBridge {
             store,
             client,
             login_cancel: Arc::new(Notify::new()),
-            inner: Mutex::new(BridgeInner {
-                job_rx: Some(job_rx),
-                done_rx: Some(done_rx),
-                ..Default::default()
-            }),
-            job_tx,
-            done_tx,
+            inner: Mutex::new(BridgeInner::default()),
             seq: AtomicU64::new(0),
         });
         // 协议事件循环：消费 wechat_client 的 mpsc 事件（语义对齐原 sidecar stdio 事件）。
@@ -454,8 +481,7 @@ impl WeChatBridge {
             "detail": inner.detail,
             "qrContent": inner.qr_content,
             "pendingThreadId": inner.pending_bind,
-            "queued": inner.queue.len(),
-            "busy": inner.active_thread.is_some(),
+            "busy": !inner.active.is_empty(),
             "bindings": bindings,
         })
     }
@@ -489,21 +515,18 @@ impl WeChatBridge {
         format!("wechat-{ms}-{n}")
     }
 
-    /// 启用微信协议客户端（客户端对象常驻，此方法仅翻转 running 标记并启动泵）。
+    /// 启用微信协议客户端（客户端对象常驻，此方法仅翻转 running 标记并启动订阅）。
     async fn ensure_client(self: &Arc<Self>) {
-        {
+        let pumps_first = {
             let mut g = self.inner.lock().await;
             g.alive = true;
             let pumps_first = !g.pumps_started;
             g.pumps_started = true;
-            if pumps_first {
-                let job_rx = g.job_rx.take();
-                let done_rx = g.done_rx.take();
-                self.spawn_notification_subscription();
-                if let (Some(job_rx), Some(done_rx)) = (job_rx, done_rx) {
-                    tauri::async_runtime::spawn(Self::pump_loop(self.clone(), job_rx, done_rx));
-                }
-            }
+            pumps_first
+        };
+        if pumps_first {
+            self.spawn_notification_subscription();
+            self.spawn_connection_watch();
         }
     }
 
@@ -532,9 +555,12 @@ impl WeChatBridge {
         g.pending_login_id = None;
         g.started_accounts.clear();
         g.account_conn.clear();
-        g.queue.clear();
-        g.overflow_notified.clear();
-        g.active_thread = None;
+        for (_, t) in g.active.drain() {
+            if let Some(task) = t.typing_task {
+                task.abort();
+            }
+        }
+        g.pending_reply.clear();
     }
 
     // -- 命令面（供 Tauri command 调用） ------------------------------------
@@ -826,15 +852,14 @@ impl WeChatBridge {
                     }
                     return;
                 }
-                self.enqueue_inbound(InboundMessage {
+                self.dispatch_inbound(InboundMessage {
                     account_id,
                     thread_id,
                     from,
                     text,
                     images,
                     files,
-                })
-                .await;
+                });
             }
             WechatEvent::Accounts(list) => {
                 // 重启复登：对所有已绑定且可启动的账号逐个恢复接收。
@@ -881,30 +906,155 @@ impl WeChatBridge {
         }
     }
 
-    /// 入站文本消息入队（绑定路由已通过）；满队时立即回一次忙碌提示并丢弃该条。
-    async fn enqueue_inbound(self: &Arc<Self>, msg: InboundMessage) {
-        let mut g = self.inner.lock().await;
-        if !g.alive {
-            return; // 客户端未启用，静默丢弃（重启后新消息自然流入）
-        }
-        g.overflow_notified.remove(&msg.from);
-        let full = queue_overflow(g.active_thread.is_some(), g.queue.len());
-        if full {
-            let peer = msg.from.clone();
-            let account = msg.account_id.clone();
-            if g.overflow_notified.insert(peer.clone()) {
-                drop(g);
-                self.send_reply_now(&account, &peer, "处理队列已满，稍后再试。")
-                    .await;
-            }
-            return;
-        }
-        g.queue.push_back(msg);
-        drop(g);
-        let _ = self.job_tx.send(());
+    /// 入站消息分派：同线程串行、线程间并行（一个长回合不再挡住其它绑定会话）。
+    /// 立即返回，实际处理在独立任务里排队等该线程的串行锁。
+    fn dispatch_inbound(self: &Arc<Self>, msg: InboundMessage) {
+        let this = Arc::clone(self);
+        tauri::async_runtime::spawn(async move { this.handle_inbound(msg).await });
     }
 
-    /// 绕过队列的即时回复（忙碌提示 / 失败提示等系统文案）。
+    /// 取该线程的串行锁（懒创建）：同线程的「转向 / 开新回合」按到达顺序执行。
+    async fn thread_lock(self: &Arc<Self>, thread_id: &str) -> Arc<Mutex<()>> {
+        let mut g = self.inner.lock().await;
+        g.thread_locks
+            .entry(thread_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// 处理一条入站消息：该线程有进行中回合则 steer 并入，否则开新回合。
+    async fn handle_inbound(self: &Arc<Self>, msg: InboundMessage) {
+        if !self.inner.lock().await.alive {
+            return; // 客户端未启用，静默丢弃（重启后新消息自然流入）
+        }
+        let lock = self.thread_lock(&msg.thread_id).await;
+        let _guard = lock.lock().await;
+        // 持锁期间该线程不会有人在建回合，因此取到的 turn_id 要么为空（无回合）、
+        // 要么是已完成 turn/start 的真实 id。
+        let active = self.active_turn_id(&msg.thread_id).await;
+        // `turn/steer` 的 `expectedTurnId` 是协议必填项：id 未知时（turn/start 响应
+        // 未带 id 的防御性分支）短等由 `turn/started` 回填。
+        let active = match active {
+            Some(None) => self.wait_turn_id(&msg.thread_id).await,
+            other => other,
+        };
+        match active {
+            Some(Some(id)) => self.steer_or_restart(&msg, &id).await,
+            // 回合已在等待期间结束（或从未开始）：按普通消息另开新回合。
+            None => {
+                if let Err((account, peer, fail)) = self.begin_turn(msg).await {
+                    self.send_reply_now(&account, &peer, &fail).await;
+                }
+            }
+            // 仍在回合中但 id 始终未知：不另开回合（避免同线程并发两个回合），如实回提示。
+            Some(None) => {
+                self.send_reply_now(
+                    &msg.account_id,
+                    &msg.from,
+                    "⚠️ 执行失败：无法确认当前回合，请稍后重试",
+                )
+                .await;
+            }
+        }
+    }
+
+    /// 该线程是否有进行中回合：`None` = 空闲；`Some(None)` = 有回合但 turn_id 未知；
+    /// `Some(Some(id))` = 有回合且 id 已确定。
+    async fn active_turn_id(&self, thread_id: &str) -> Option<Option<String>> {
+        self.inner
+            .lock()
+            .await
+            .active
+            .get(thread_id)
+            .map(|t| (!t.turn_id.is_empty()).then(|| t.turn_id.clone()))
+    }
+
+    /// 短等 turn_id 由 `turn/started` 回填；语义与 `active_turn_id` 一致。
+    async fn wait_turn_id(&self, thread_id: &str) -> Option<Option<String>> {
+        for _ in 0..STEER_TURN_ID_WAIT_ATTEMPTS {
+            tokio::time::sleep(Duration::from_millis(STEER_TURN_ID_WAIT_STEP_MS)).await;
+            match self.active_turn_id(thread_id).await {
+                Some(Some(id)) => return Some(Some(id)),
+                Some(None) => continue,
+                None => return None, // 回合已结束/被清理：交给上层另开新回合
+            }
+        }
+        Some(None)
+    }
+
+    /// 把消息并入该线程进行中的回合：steer 撞上「尚未可转向」窗口时短重试；
+    /// 确认无活动回合则另开新回合；不可转向（review/compact）或其它错误回失败提示。
+    async fn steer_or_restart(self: &Arc<Self>, msg: &InboundMessage, turn_id: &str) {
+        let mut outcome = SteerOutcome::NoActiveTurn;
+        let mut last_err = String::new();
+        for attempt in 0..STEER_RETRY_ATTEMPTS {
+            match self.steer_turn(msg, turn_id).await {
+                Ok(()) => return, // 成功并入当前回合：静默，不回执
+                Err((SteerOutcome::NoActiveTurn, _)) => {
+                    outcome = SteerOutcome::NoActiveTurn;
+                    last_err = "未找到可转向的活动回合".into();
+                    // 服务端在 turn/start 响应与 turn/started 之间可能尚未把回合标记为
+                    // 可转向；短暂重试几次，避免消息因竞态被判成「回合已结束」。
+                    if attempt + 1 < STEER_RETRY_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(STEER_RETRY_DELAY_MS)).await;
+                        continue;
+                    }
+                }
+                Err((kind, err)) => {
+                    outcome = kind;
+                    last_err = err;
+                }
+            }
+            break;
+        }
+        match outcome {
+            // 回合确已结束（或竞态未命中）：按普通消息另开新回合。
+            SteerOutcome::NoActiveTurn => {
+                if let Err((account, peer, fail)) = self.begin_turn(msg.clone()).await {
+                    self.send_reply_now(&account, &peer, &fail).await;
+                }
+            }
+            _ => {
+                self.log(
+                    "warn",
+                    format!("转向失败（会话 {}）: {last_err}", msg.thread_id),
+                )
+                .await;
+                self.send_reply_now(
+                    &msg.account_id,
+                    &msg.from,
+                    &format!("⚠️ 执行失败：{last_err}"),
+                )
+                .await;
+            }
+        }
+    }
+
+    /// 调 `turn/steer` 把消息并入指定回合；失败按可恢复性分类返回。
+    async fn steer_turn(
+        self: &Arc<Self>,
+        msg: &InboundMessage,
+        expected_turn_id: &str,
+    ) -> Result<(), (SteerOutcome, String)> {
+        let params = build_steer_params(
+            &msg.thread_id,
+            msg.text.as_deref(),
+            &msg.images,
+            &msg.files,
+            &self.next_message_id(),
+            expected_turn_id,
+        );
+        match self
+            .server
+            .request("turn/steer", params, Some(Duration::from_secs(60)))
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(e) => Err((classify_steer_error(&e), e)),
+        }
+    }
+
+    /// 即时系统回复（失败提示等文案，不经回合编排直接发出）。
     async fn send_reply_now(self: &Arc<Self>, account_id: &str, peer: &str, text: &str) {
         for chunk in chunk_text(text, REPLY_CHUNK_CHARS) {
             if let Err(e) = self.client.send_text(account_id, peer, &chunk).await {
@@ -935,56 +1085,15 @@ impl WeChatBridge {
 
     // -- Codex 回合编排 ------------------------------------------------------
 
-    /// 订阅 codex 服务器通知：收集 agentMessage 文本并在 turn/completed 时唤醒泵。
+    /// 订阅 codex 服务器通知：收集 agentMessage 文本，并把 turn/completed 投递给
+    /// 等待该线程回合的完成 waiter。不设时间上限——只有 waiter 本身被清理才会提前结束。
     fn spawn_notification_subscription(self: &Arc<Self>) {
         let mut rx = self.server.subscribe_notifications();
         let this = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok((method, params)) => {
-                        match method.as_str() {
-                            "item/completed" => {
-                                let is_agent = params.pointer("/item/type").and_then(|t| t.as_str())
-                                    == Some("agentMessage");
-                                if !is_agent {
-                                    continue;
-                                }
-                                if let (Some(tid), Some(text)) = (
-                                    params.get("threadId").and_then(|x| x.as_str()),
-                                    params.pointer("/item/text").and_then(|x| x.as_str()),
-                                ) {
-                                    if text.is_empty() {
-                                        continue;
-                                    }
-                                    // 同回合可能多条 agentMessage：保留最后一条完整文本。
-                                    this.inner
-                                        .lock()
-                                        .await
-                                        .pending_reply
-                                        .insert(tid.to_string(), text.to_string());
-                                }
-                            }
-                            "turn/completed" => {
-                                if let Some(tid) = params.get("threadId").and_then(|x| x.as_str()) {
-                                    let status = params
-                                        .pointer("/turn/status")
-                                        .and_then(|x| x.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    // 取真实 turn_id，泵仅按 (threadId, turnId) 双匹配才能结束当前回合，
-                                    // 避免同线程上残留的旧完成信号误判新回合。
-                                    let turn_id = params
-                                        .pointer("/turn/id")
-                                        .and_then(|x| x.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let _ = this.done_tx.send((tid.to_string(), turn_id, status));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                    Ok((method, params)) => this.on_server_notification(&method, &params).await,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         this.log("warn", format!("通知订阅滞后，跳过 {n} 条")).await;
                     }
@@ -994,109 +1103,181 @@ impl WeChatBridge {
         });
     }
 
-    /// 核心串行泵：出队 → 在绑定线程上发起回合 → 等完成 → 回复 → 下一条。
-    async fn pump_loop(
-        self: Arc<Self>,
-        mut wake: mpsc::UnboundedReceiver<()>,
-        mut done: mpsc::UnboundedReceiver<(String, String, String)>,
-    ) {
-        let mut current: Option<ActiveTurn> = None;
-        loop {
-            // 空闲则先尝试取队首。
-            if current.is_none() {
-                let job = self.inner.lock().await.queue.pop_front();
-                if let Some(job) = job {
-                    match self.begin_turn(job).await {
-                        Ok(t) => current = Some(t),
-                        Err((account, peer, fail_text)) => {
-                            self.send_reply_now(&account, &peer, &fail_text).await;
-                        }
+    /// 单条服务器通知的处理：收集回复文本 / 投递回合完成信号。
+    async fn on_server_notification(self: &Arc<Self>, method: &str, params: &Value) {
+        match method {
+            "item/completed" => {
+                let is_agent =
+                    params.pointer("/item/type").and_then(|t| t.as_str()) == Some("agentMessage");
+                if !is_agent {
+                    return;
+                }
+                if let (Some(tid), Some(text)) = (
+                    params.get("threadId").and_then(|x| x.as_str()),
+                    params.pointer("/item/text").and_then(|x| x.as_str()),
+                ) {
+                    if text.is_empty() {
+                        return;
                     }
-                    continue;
+                    // 同回合可能多条 agentMessage：保留最后一条完整文本。
+                    self.inner
+                        .lock()
+                        .await
+                        .pending_reply
+                        .insert(tid.to_string(), text.to_string());
                 }
             }
-            if let Some(mut c) = current.take() {
-                let remaining = c
-                    .deadline
-                    .checked_duration_since(std::time::Instant::now())
-                    .unwrap_or_default();
-                match timeout(remaining, done.recv()).await {
-                    Err(_elapsed) => {
-                        // 超时：清理槽位并回复失败提示。
-                        self.inner.lock().await.pending_reply.remove(&c.thread_id);
-                        let task = c.typing_task.take();
-                        self.finish_active(
-                            &c.account_id,
-                            &c.peer,
-                            task,
-                            "⚠️ 执行失败：等待 Codex 回合超时",
-                        )
-                            .await;
-                    }
-                    Ok(None) => {
-                        // 完成通道关闭（应用退出）：停止周期任务。
-                        if let Some(t) = c.typing_task.take() {
-                            t.abort();
+            "turn/completed" => {
+                let Some(tid) = params.get("threadId").and_then(|x| x.as_str()) else {
+                    return;
+                };
+                let status = params
+                    .pointer("/turn/status")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                // 取真实 turn_id：仅当线程与回合 id 都匹配才结束当前回合，
+                // 避免同线程上残留的旧完成信号（后台压缩/重连遗留）误判新回合。
+                let turn_id = params
+                    .pointer("/turn/id")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let waiter = {
+                    let mut g = self.inner.lock().await;
+                    match g.active.get_mut(tid) {
+                        Some(turn) if is_this_turn_completion(tid, &turn_id, tid, &turn.turn_id) => {
+                            turn.done.take()
                         }
-                        break;
+                        _ => None,
                     }
-                    Ok(Some((tid, turn_id, status))) => {
-                        // 仅当线程与回合 id 都匹配才视为本回合完成；
-                        // 同线程残留的旧完成信号（后台压缩/重连遗留）不结束当前回合。
-                        if !is_this_turn_completion(&tid, &turn_id, &c.thread_id, &c.turn_id) {
-                            current = Some(c); // 非本回合完成信号：放回继续等本回合
-                            continue;
-                        }
-                        let captured = self
-                            .inner
-                            .lock()
+                };
+                if let Some(tx) = waiter {
+                    let _ = tx.send(Completion { turn_id, status });
+                }
+            }
+            "turn/started" => {
+                // turn/start 响应偶发未带 id 时，用本通知回填，保证后续 steer 可用。
+                let (Some(tid), Some(turn_id)) = (
+                    params.get("threadId").and_then(|x| x.as_str()),
+                    params.pointer("/turn/id").and_then(|x| x.as_str()),
+                ) else {
+                    return;
+                };
+                let mut g = self.inner.lock().await;
+                if let Some(turn) = g.active.get_mut(tid) {
+                    if turn.turn_id.is_empty() {
+                        turn.turn_id = turn_id.to_string();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 订阅 app-server 连接状态：断开瞬间停掉所有线程的「正在输入」续发
+    /// （不再显示闪烁），但回合本身继续无限等待，不回复、不重试。
+    fn spawn_connection_watch(self: &Arc<Self>) {
+        let mut rx = self.server.subscribe_connection();
+        let this = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(true) => {}
+                    Ok(false) => this.abort_all_typing().await,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        // 滞后可能漏掉断开事件：按当前连接状态兜底判定一次。
+                        let connected = this
+                            .server
+                            .status()
                             .await
-                            .pending_reply
-                            .remove(&c.thread_id)
-                            .unwrap_or_default();
-                        // 通知订阅可能漏抓 item/completed(agentMessage)：为空时回查线程取回复文本兜底。
-                        let final_text = if captured.trim().is_empty() {
-                            let fetched = self
-                                .fetch_turn_agent_text(&c.thread_id, &turn_id)
-                                .await;
-                            let got = fetched.as_deref().map_or(false, |s| !s.trim().is_empty());
-                            if got {
-                                self.log(
-                                    "info",
-                                    format!("回合 {tid} 通知漏抓，已回查取到回复文本"),
-                                )
-                                .await;
-                            } else {
-                                self.log(
-                                    "warn",
-                                    format!(
-                                        "回合 {tid} 结束状态={status} 未捕获到 agentMessage 文本"
-                                    ),
-                                )
-                                .await;
-                            }
-                            final_reply_text(&captured, &status, fetched)
-                        } else {
-                            final_reply_text(&captured, &status, None)
-                        };
-                        let task = c.typing_task.take();
-                        self.finish_active(&c.account_id, &c.peer, task, &final_text).await;
+                            .get("connected")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if !connected {
+                            this.abort_all_typing().await;
+                        }
                     }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
-            } else {
-                // 队列空且无进行中回合：停到下一条入站唤醒。
-                if wake.recv().await.is_none() {
-                    break;
-                }
+            }
+        });
+    }
+
+    /// 停掉所有进行中回合的「正在输入」续发任务（回合本身不受影响）。
+    async fn abort_all_typing(&self) {
+        let mut g = self.inner.lock().await;
+        for turn in g.active.values_mut() {
+            if let Some(task) = turn.typing_task.take() {
+                task.abort();
             }
         }
+    }
+
+    /// 等待单个回合完成并回复：无限等（无超时兜底），仅在 waiter 被清理时退出。
+    async fn await_turn_completion(
+        self: Arc<Self>,
+        thread_id: String,
+        account_id: String,
+        peer: String,
+        done: oneshot::Receiver<Completion>,
+    ) {
+        let Ok(completion) = done.await else {
+            // 完成通道被丢弃（应用退出 / 回合被清理）：不回复。
+            return;
+        };
+        let (turn_id, task) = {
+            let mut g = self.inner.lock().await;
+            let removed = g.active.remove(&thread_id);
+            let turn_id = removed
+                .as_ref()
+                .map(|t| t.turn_id.clone())
+                .unwrap_or_else(|| completion.turn_id.clone());
+            (turn_id, removed.and_then(|t| t.typing_task))
+        };
+        if let Some(t) = task {
+            t.abort();
+        }
+        let captured = self
+            .inner
+            .lock()
+            .await
+            .pending_reply
+            .remove(&thread_id)
+            .unwrap_or_default();
+        // 通知订阅可能漏抓 item/completed(agentMessage)：为空时回查线程取回复文本兜底。
+        let final_text = if captured.trim().is_empty() {
+            let fetched = self.fetch_turn_agent_text(&thread_id, &turn_id).await;
+            let got = fetched.as_deref().is_some_and(|s| !s.trim().is_empty());
+            if got {
+                self.log(
+                    "info",
+                    format!("回合 {thread_id} 通知漏抓，已回查取到回复文本"),
+                )
+                .await;
+            } else {
+                self.log(
+                    "warn",
+                    format!(
+                        "回合 {thread_id} 结束状态={} 未捕获到 agentMessage 文本",
+                        completion.status
+                    ),
+                )
+                .await;
+            }
+            final_reply_text(&captured, &completion.status, fetched)
+        } else {
+            final_reply_text(&captured, &completion.status, None)
+        };
+        self.send_reply_now(&account_id, &peer, &final_text).await;
+        self.set_typing(&account_id, &peer, 2).await;
     }
 
     /// 回合开始：在绑定线程上发起 turn/start；失败时返回 (账号, 联系人, 失败文案)。
     async fn begin_turn(
         self: &Arc<Self>,
         job: InboundMessage,
-    ) -> Result<ActiveTurn, (String, String, String)> {
+    ) -> Result<(), (String, String, String)> {
         let peer = job.from.clone();
         let account = job.account_id.clone();
         let thread_id = job.thread_id.clone();
@@ -1111,7 +1292,7 @@ impl WeChatBridge {
             )
             .await
         {
-            Ok(t) => Ok(t),
+            Ok(()) => Ok(()),
             Err((p, fail)) => {
                 // 绑定线程已被删除（外部删除/清理）：自动解除该会话的微信绑定并停止接收，
                 // 不回自动重建（绑定语义下新线程不具原身份）。
@@ -1130,7 +1311,8 @@ impl WeChatBridge {
         }
     }
 
-    /// 在确认的线程上发起回合：设置活动线程 → 恢复(激活)线程 → 解析默认模型 → 组装参数 → turn/start。
+    /// 在确认的线程上发起回合：恢复(激活)线程 → 解析默认模型 → 组装参数 → turn/start
+    /// → 登记完成 waiter 并交给独立任务等待/回复。
     /// 失败返回 (peer, 已格式化文案)；该文案用于识别「thread not found」以触发解绑。
     async fn run_turn_on_thread(
         self: &Arc<Self>,
@@ -1140,13 +1322,9 @@ impl WeChatBridge {
         text: Option<&str>,
         images: &[String],
         files: &[String],
-    ) -> Result<ActiveTurn, (String, String)> {
-        {
-            let mut g = self.inner.lock().await;
-            g.active_thread = Some(thread_id.to_string());
-            // 纠偏：清除上一轮积存的回复文本，避免本轮无 agentMessage 时复用旧回复。
-            g.pending_reply.remove(thread_id);
-        }
+    ) -> Result<(), (String, String)> {
+        // 纠偏：清除上一轮积存的回复文本，避免本轮无 agentMessage 时复用旧回复。
+        self.inner.lock().await.pending_reply.remove(thread_id);
         // 先 thread/resume 激活线程：codex 的 turn/start 只对已 resume 的线程可寻址，
         // 否则会对存在于会话库的线程误报 thread not found（前端发送前也是先 resume）。
         // 仅当 resume 也报 thread not found 时才判定线程确实缺失。
@@ -1159,7 +1337,6 @@ impl WeChatBridge {
             )
             .await
         {
-            self.clear_active(thread_id).await;
             return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
         }
         // 与定时任务 execute 一致：优先使用会话保存的 model，缺省才回退默认模型。
@@ -1176,7 +1353,6 @@ impl WeChatBridge {
             },
         };
         if model.is_empty() {
-            self.clear_active(thread_id).await;
             return Err((
                 peer.to_string(),
                 "⚠️ 执行失败：无法解析默认模型（检查 codex 登录与模型列表）".into(),
@@ -1208,27 +1384,35 @@ impl WeChatBridge {
             Err(e) => {
                 typing_task.abort();
                 self.set_typing(account_id, peer, 2).await;
-                self.clear_active(thread_id).await;
                 return Err((peer.to_string(), format!("⚠️ 执行失败：{e}")));
             }
         };
-        Ok(ActiveTurn {
-            thread_id: thread_id.to_string(),
-            turn_id,
-            account_id: account_id.to_string(),
-            peer: peer.to_string(),
-            deadline: std::time::Instant::now() + Duration::from_secs(TURN_TIMEOUT_SECS),
-            typing_task: Some(typing_task),
-        })
-    }
-
-    async fn clear_active(&self, thread_id: &str) {
-        let mut g = self.inner.lock().await;
-        g.pending_reply.remove(thread_id);
-        if g.active_thread.as_deref() == Some(thread_id) {
-            g.active_thread = None;
-            g.overflow_notified.clear();
+        // 登记完成 waiter：turn/start 返回后已知真实 turn_id，此后到达的完成通知
+        // 才会被 `on_server_notification` 投递（turn/start 响应必然早于该回合任何通知）。
+        let (done_tx, done_rx) = oneshot::channel();
+        let stale = self.inner.lock().await.active.insert(
+            thread_id.to_string(),
+            ActiveTurn {
+                turn_id,
+                done: Some(done_tx),
+                typing_task: Some(typing_task),
+            },
+        );
+        if let Some(stale) = stale {
+            // 覆盖了一条旧回合（旧完成信号永不到达时的自愈路径）：停掉它遗留的
+            // 续发任务、丢弃其完成口（旧 waiter 因此退出且不回复）。
+            if let Some(t) = stale.typing_task {
+                t.abort();
+            }
         }
+        tauri::async_runtime::spawn(Self::await_turn_completion(
+            Arc::clone(self),
+            thread_id.to_string(),
+            account_id.to_string(),
+            peer.to_string(),
+            done_rx,
+        ));
+        Ok(())
     }
 
     /// 回查线程：取指定回合的最后一条非空 `agentMessage` 文本（best-effort，失败返回 None）。
@@ -1257,27 +1441,6 @@ impl WeChatBridge {
             }
         }
         None
-    }
-
-    /// 回复联系人并把状态推进到空闲（触发下一条处理）。
-    async fn finish_active(
-        self: &Arc<Self>,
-        account_id: &str,
-        peer: &str,
-        typing_task: Option<tauri::async_runtime::JoinHandle<()>>,
-        text: &str,
-    ) {
-        if let Some(t) = typing_task {
-            t.abort();
-        }
-        {
-            let mut g = self.inner.lock().await;
-            g.active_thread = None;
-            g.overflow_notified.clear();
-        }
-        self.send_reply_now(account_id, peer, text).await;
-        self.set_typing(account_id, peer, 2).await;
-        let _ = self.job_tx.send(());
     }
 
     /// 默认模型解析（进程内缓存）：isDefault 优先，其次首个非 hidden。
@@ -1356,10 +1519,54 @@ mod tests {
     }
 
     #[test]
-    fn queue_overflow_only_when_busy_at_limit() {
-        assert!(!queue_overflow(false, QUEUE_LIMIT));
-        assert!(!queue_overflow(true, QUEUE_LIMIT - 1));
-        assert!(queue_overflow(true, QUEUE_LIMIT));
+    fn steer_error_classification() {
+        // 回合不在（尚未可转向 / 已结束）：应另开新回合
+        assert_eq!(
+            classify_steer_error("no active turn to steer"),
+            SteerOutcome::NoActiveTurn
+        );
+        assert_eq!(
+            classify_steer_error("No Active Turn"),
+            SteerOutcome::NoActiveTurn
+        );
+        // 不可转向的回合类型（review / 手动 compact）：应回失败提示，不另开回合
+        assert_eq!(
+            classify_steer_error("active turn not steerable"),
+            SteerOutcome::NotSteerable
+        );
+        assert_eq!(
+            classify_steer_error("activeTurnNotSteerable { turnKind: review }"),
+            SteerOutcome::NotSteerable
+        );
+        // 其它错误（连接中断等）：回失败提示
+        assert_eq!(
+            classify_steer_error("codex app-server 未连接，正在重连，请稍候"),
+            SteerOutcome::Other
+        );
+        assert_eq!(classify_steer_error(""), SteerOutcome::Other);
+    }
+
+    #[test]
+    fn steer_params_carry_expected_turn_and_input() {
+        let images = vec!["C:\\tmp\\a.png".to_string()];
+        let v = build_steer_params(
+            "t-1",
+            Some("补充要求"),
+            &images,
+            &[],
+            "wechat-1-0",
+            "turn-9",
+        );
+        assert_eq!(v["threadId"], "t-1");
+        assert_eq!(v["expectedTurnId"], "turn-9");
+        assert_eq!(v["clientUserMessageId"], "wechat-1-0");
+        assert_eq!(v["input"][0]["type"], "localImage");
+        assert_eq!(v["input"][0]["path"], "C:/tmp/a.png");
+        assert_eq!(v["input"][1]["type"], "text");
+        assert_eq!(v["input"][1]["text"], "补充要求");
+        // steer 不携带权限/模型字段（沿用回合既有设置）
+        assert!(v.get("sandboxPolicy").is_none());
+        assert!(v.get("model").is_none());
     }
 
     #[test]

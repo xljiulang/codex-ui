@@ -563,7 +563,6 @@ describe("EditorPane 左侧多标签编辑区", () => {
       detail: null,
       qrContent: null,
       pendingThreadId: null,
-      queued: 0,
       busy: false,
       bindings: [
         { threadId: "t1", accountId: "bot-1", connection: "connected" },
