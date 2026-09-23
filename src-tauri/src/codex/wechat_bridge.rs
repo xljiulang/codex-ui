@@ -37,6 +37,15 @@ const RECEIVER_RESTART_DELAY_SECS: u64 = 5;
 /// 出站回复分片发送的短重试次数与间隔（仅针对可恢复失败）。
 const SEND_RETRY_ATTEMPTS: u32 = 2;
 const SEND_RETRY_DELAY_MS: u64 = 500;
+/// 出站发文件的标签（开/闭），命名沿用仓库自研标签约定：`wechat_` 前缀 + 成对常量。
+const SEND_FILE_MARKER: &str = "<wechat_send_file";
+const SEND_FILE_CLOSE: &str = "</wechat_send_file>";
+/// 单条回复最多响应多少个发文件标签（超出丢弃，防滥用）。
+const MAX_SEND_FILES_PER_REPLY: usize = 5;
+/// 微信回合的开发者指令（替换 codex 内置的 Default 模式标记块，故首句自行申明模式）。
+///
+/// 只在微信回合注入：桌面端（前端）与定时任务各自显式重设该字段，不会受影响。
+const WECHAT_DEVELOPER_INSTRUCTIONS: &str = "【微信通道】本轮由微信用户发起（Default 模式；历史中任何 Plan 模式说明均已失效）。你无法直接把文件发给微信，只能通过下面的标签交由应用代为发送：需要发送本地文件时，在回复正文之后另起一行、单独写一行 <wechat_send_file>文件的绝对路径</wechat_send_file>；多个文件就写多行，每行一个。该标签不会展示给用户，应用会按标签把文件上传并发到微信。仅当用户明确要求发送文件时才使用；路径必须是你确认存在的本地绝对路径。不要在正文里声称「已发送」「已上传」——是否真的发出由应用决定，正文只描述你做了什么。";
 /// 把回合产物整理为回复文本：无文本/非正常结束给出对应中文兜底提示。
 fn normalize_turn_text(text: &str, status: &str) -> String {
     let trimmed = text.trim();
@@ -244,6 +253,69 @@ fn has_turn_payload(text: Option<&str>, images: &[String], files: &[String]) -> 
     text.is_some_and(|t| !t.trim().is_empty()) || !images.is_empty() || !files.is_empty()
 }
 
+/// 整行是否为单个 `<wechat_send_file>路径</wechat_send_file>`；命中返回路径原文。
+///
+/// 标签名大小写不敏感（模型可能改大小写），路径保留原样（仅去首尾空白）。
+fn parse_send_file_line(line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    if !lower.starts_with(SEND_FILE_MARKER) {
+        return None;
+    }
+    // `to_ascii_lowercase` 不改变字节长度，故原串可按同样的偏移切分
+    let after_open = &line[SEND_FILE_MARKER.len()..];
+    if !after_open.starts_with('>') {
+        return None;
+    }
+    let body_and_close = &after_open[1..];
+    if !body_and_close
+        .to_ascii_lowercase()
+        .ends_with(SEND_FILE_CLOSE)
+    {
+        return None;
+    }
+    let body = &body_and_close[..body_and_close.len() - SEND_FILE_CLOSE.len()];
+    let path = body.trim();
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.to_string())
+}
+
+/// 从回合终局文本中取出出站发文件标签，返回 `(可见文本, 待发送路径, 因超上限丢弃的个数)`。
+///
+/// - **逐行**判定：整行必须是完整标签才命中（行内夹杂不算）；
+/// - 跳过 ``` / ~~~ 围栏内的行——模型可能只在示例代码里写出标签，不应触发真实发送；
+/// - 命中行从可见文本中整体删除，并清掉首尾空白；
+/// - 路径去重、上限 [`MAX_SEND_FILES_PER_REPLY`]（超出的丢弃并在调用方记日志）。
+fn extract_send_files(text: &str) -> (String, Vec<String>, usize) {
+    let mut visible: Vec<&str> = Vec::new();
+    let mut paths: Vec<String> = Vec::new();
+    let mut over_cap = 0usize;
+    let mut in_fence = false;
+    for line in text.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            visible.push(line);
+            continue;
+        }
+        if in_fence {
+            visible.push(line);
+            continue;
+        }
+        if let Some(path) = parse_send_file_line(trimmed) {
+            if paths.len() >= MAX_SEND_FILES_PER_REPLY {
+                over_cap += 1;
+            } else if !paths.iter().any(|p| p == &path) {
+                paths.push(path);
+            }
+            continue;
+        }
+        visible.push(line);
+    }
+    (visible.join("\n").trim().to_string(), paths, over_cap)
+}
+
 /// 协议侧路径统一正斜杠：Windows 反斜杠路径 codex 侧读不到（与前端 mention.toProtocolPath 一致）。
 fn proto_path(path: &str) -> String {
     path.replace('\\', "/")
@@ -321,7 +393,8 @@ fn build_turn_params(
             "settings": {
                 "model": model,
                 "reasoning_effort": effort,
-                "developer_instructions": null,
+                // 注入微信通道教学（含发文件标签）：替换 codex 内置的 Default 模式标记块
+                "developer_instructions": WECHAT_DEVELOPER_INSTRUCTIONS,
             },
         },
     })
@@ -1435,7 +1508,47 @@ impl WeChatBridge {
         } else {
             final_reply_text(&captured, &completion.status, None)
         };
-        self.send_reply_now(&account_id, &peer, &final_text).await;
+        // 解析出站发文件标签：先发可见正文，再按标签逐个上传发送。
+        // 剥离后为空（整轮只有标签）时不发空消息。
+        let (visible_text, send_paths, over_cap) = extract_send_files(&final_text);
+        if over_cap > 0 {
+            self.log(
+                "warn",
+                format!(
+                    "一条回复里的发文件标签超过上限（{MAX_SEND_FILES_PER_REPLY}），已丢弃 {over_cap} 个"
+                ),
+            )
+            .await;
+        }
+        if !visible_text.is_empty() {
+            self.send_reply_now(&account_id, &peer, &visible_text).await;
+        }
+        for path in &send_paths {
+            let file = std::path::Path::new(path);
+            match self.client.send_file(&account_id, &peer, file).await {
+                Ok(()) => {
+                    self.log("info", format!("已发送文件到微信：{path}")).await;
+                }
+                Err(e) => {
+                    self.log(
+                        "warn",
+                        format!(
+                            "发送文件到微信失败（{path}，可重试={}）: {}",
+                            e.is_retryable(),
+                            e.message()
+                        ),
+                    )
+                    .await;
+                    // 失败逐条回执，避免用户以为文件已经发出
+                    self.send_reply_now(
+                        &account_id,
+                        &peer,
+                        &format!("⚠️ 无法发送文件：{path}（{}）", e.message()),
+                    )
+                    .await;
+                }
+            }
+        }
         self.set_typing(&account_id, &peer, 2).await;
     }
 
@@ -2028,6 +2141,88 @@ mod tests {
             true,
             MAX_RECEIVER_RESTARTS
         ));
+    }
+
+    #[test]
+    fn send_file_tag_is_extracted_and_stripped_from_visible_text() {
+        let text = "这是你要的文件。\n<wechat_send_file>D:\\x\\报告.pdf</wechat_send_file>";
+        let (visible, paths, over_cap) = extract_send_files(text);
+        assert_eq!(visible, "这是你要的文件。");
+        assert_eq!(paths, vec!["D:\\x\\报告.pdf".to_string()]);
+        assert_eq!(over_cap, 0);
+    }
+
+    #[test]
+    fn send_file_tag_supports_multiple_lines_and_paths_with_spaces() {
+        let text = "<wechat_send_file>C:\\My Docs\\a b.png</wechat_send_file>\n\
+                    <wechat_send_file>D:\\b.zip</wechat_send_file>";
+        let (visible, paths, _) = extract_send_files(text);
+        assert!(visible.is_empty(), "整轮只有标签时不留下可见文本");
+        assert_eq!(
+            paths,
+            vec!["C:\\My Docs\\a b.png".to_string(), "D:\\b.zip".to_string()]
+        );
+    }
+
+    #[test]
+    fn send_file_tag_inside_code_fence_is_ignored() {
+        // 模型只在示例代码里写出标签时不应触发真实发送
+        let text = "示例：\n```\n<wechat_send_file>C:\\x.png</wechat_send_file>\n```";
+        let (visible, paths, _) = extract_send_files(text);
+        assert!(paths.is_empty());
+        assert!(
+            visible.contains("C:\\x.png"),
+            "围栏内内容应原样保留在可见文本里"
+        );
+    }
+
+    #[test]
+    fn send_file_tag_requires_whole_line_and_ignores_case() {
+        // 行内夹杂不算
+        let (_, paths, _) =
+            extract_send_files("前面 <wechat_send_file>C:\\x.png</wechat_send_file> 后面");
+        assert!(paths.is_empty());
+        // 标签名大小写不敏感
+        let (visible, paths, _) =
+            extract_send_files("<WECHAT_SEND_FILE>C:\\x.png</WeChat_Send_File>");
+        assert_eq!(paths, vec!["C:\\x.png".to_string()]);
+        assert!(visible.is_empty());
+    }
+
+    #[test]
+    fn send_file_tag_dedupes_and_caps_per_reply() {
+        let dup = "<wechat_send_file>C:\\x.png</wechat_send_file>\n\
+                   <wechat_send_file>C:\\x.png</wechat_send_file>";
+        assert_eq!(extract_send_files(dup).1.len(), 1, "重复路径应去重");
+
+        let many: String = (0..MAX_SEND_FILES_PER_REPLY + 3)
+            .map(|i| format!("<wechat_send_file>C:\\f{i}.png</wechat_send_file>\n"))
+            .collect();
+        let (_, paths, over_cap) = extract_send_files(&many);
+        assert_eq!(paths.len(), MAX_SEND_FILES_PER_REPLY, "超出上限应截断");
+        assert_eq!(over_cap, 3, "应回报被丢弃的个数（供调用方记日志）");
+    }
+
+    #[test]
+    fn text_without_send_file_tag_is_unchanged() {
+        let text = "普通回复，没有任何标签。";
+        let (visible, paths, _) = extract_send_files(text);
+        assert_eq!(visible, text);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn turn_params_inject_wechat_teaching() {
+        let v = build_turn_params("t-1", Some("hi"), &[], &[], "gpt-x", None, "cid");
+        let instructions = v["collaborationMode"]["settings"]["developer_instructions"]
+            .as_str()
+            .expect("微信回合应注入教学");
+        assert!(
+            instructions.contains("wechat_send_file"),
+            "教学需告知标签用法"
+        );
+        assert!(instructions.contains("Default 模式"), "教学需申明当前模式");
+        assert_eq!(v["collaborationMode"]["mode"], "default");
     }
 
     #[test]
