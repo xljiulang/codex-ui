@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 use crate::codex::app_server::CodexServer;
 use crate::codex::session_state::{SessionStateStore, WechatBinding};
+use crate::codex::util::cached_default_model;
 use crate::codex::wechat_client::{WechatClient, WechatEvent};
 
 /// 回复超长时按可见字符数切分发送。
@@ -29,6 +30,13 @@ const STEER_RETRY_DELAY_MS: u64 = 400;
 /// `turn/start` 响应未带回合 id（防御性分支）时，短等 `turn/started` 回填的次数与间隔。
 const STEER_TURN_ID_WAIT_ATTEMPTS: u32 = 10;
 const STEER_TURN_ID_WAIT_STEP_MS: u64 = 300;
+/// 接收器可恢复退出后的自动重启次数上限（每个账号，绑定成功/解绑时清零）。
+const MAX_RECEIVER_RESTARTS: u32 = 1;
+/// 接收器自动重启前的延迟（秒）：给平台侧留出恢复时间，避免立刻重试又失败。
+const RECEIVER_RESTART_DELAY_SECS: u64 = 5;
+/// 出站回复分片发送的短重试次数与间隔（仅针对可恢复失败）。
+const SEND_RETRY_ATTEMPTS: u32 = 2;
+const SEND_RETRY_DELAY_MS: u64 = 500;
 /// 把回合产物整理为回复文本：无文本/非正常结束给出对应中文兜底提示。
 fn normalize_turn_text(text: &str, status: &str) -> String {
     let trimmed = text.trim();
@@ -144,10 +152,46 @@ fn is_this_turn_completion(
     !exact_turn || turn_id == current_turn
 }
 
+/// 一条 `item/completed`(agentMessage) 的文本是否应计入当前回合的待发回复（纯函数）。
+///
+/// `current_turn` 是该线程进行中回合的 turn id（`None` = 该线程无进行中回合）。
+/// 两道判定合并在这一处：
+/// - 无进行中回合（含桌面端聊天的非绑定线程）→ 不收集，避免 `pending_reply` 对全量线程
+///   无界累积（订阅是全局的，只要存在任一绑定就会订阅所有线程通知）；
+/// - 有回合但条目属于**上一回合**（后台压缩/重连遗留的迟到通知）→ 不收集，否则会把旧文本
+///   当作本轮回复发给微信；判据与 `turn/completed` 同口径（双方非空才精确匹配，
+///   条目缺 turnId 时按线程兜底）。
+fn accepts_pending_reply(current_turn: Option<&str>, item_turn: &str) -> bool {
+    let Some(current_turn) = current_turn else {
+        return false;
+    };
+    let exact_turn = !current_turn.is_empty() && !item_turn.is_empty();
+    !exact_turn || item_turn == current_turn
+}
+
 /// accounts 快照中的账号是否可自动启动接收：已配置且未过期（session_expired 跳过）。
 fn account_is_startable(a: &Value) -> bool {
     a.get("configured").and_then(|c| c.as_bool()) == Some(true)
         && a.get("status").and_then(|s| s.as_str()) != Some("session_expired")
+}
+
+/// 接收器退出后是否应自动重启（纯函数）。
+///
+/// - `cancel`：主动停止（解绑/退出登录/应用退出），不重启；
+/// - `session_expired`：会话过期需人工重新扫码，自动重试只会反复失败，不重启；
+/// - 其它可恢复退出：账号仍绑定且未过期、且未用满重启额度时才重启。
+///
+/// 重启额度按账号累计，由调用方在绑定成功与解绑时清零。
+fn should_restart_receiver(
+    reason: &str,
+    still_bound: bool,
+    startable: bool,
+    attempts: u32,
+) -> bool {
+    if reason == "cancel" || reason == "session_expired" {
+        return false;
+    }
+    still_bound && startable && attempts < MAX_RECEIVER_RESTARTS
 }
 
 /// 绑定是否冲突：同一线程或同一微信账号已被占用（双向唯一）。
@@ -318,6 +362,9 @@ struct BridgeInner {
     bindings: Vec<Value>,
     /// 已启动过接收器的账号（防止重复启动）。
     started_accounts: HashSet<String>,
+    /// 各账号的接收器自动重启次数（受 [`MAX_RECEIVER_RESTARTS`] 约束；
+    /// 绑定成功与解绑时清零，避免「一次故障永久用光重启额度」）。
+    restart_attempts: HashMap<String, u32>,
     /// 各绑定账号的连接状态（offline/starting/connected/session_expired/error）。
     account_conn: HashMap<String, String>,
     /// 各线程进行中的 Codex 回合（键=threadId）；无条目表示该线程空闲。
@@ -327,8 +374,9 @@ struct BridgeInner {
     thread_locks: HashMap<String, Arc<Mutex<()>>>,
     /// 各线程最近完成的 agentMessage 文本（订阅任务收集，回合完成后取走）。
     pending_reply: HashMap<String, String>,
-    /// 默认模型缓存：None 未解析过；Some(..) 已解析一次（成功/失败皆缓存）。
-    default_model: Option<Result<String, String>>,
+    /// 默认模型缓存：None 未解析过；成功结果永久命中，失败结果按
+    /// `util::DEFAULT_MODEL_FAILURE_TTL_SECS` 过期重试（避免瞬时故障被永久固化）。
+    default_model: Option<(Result<String, String>, Instant)>,
     /// 后台订阅（通知 / 连接状态）是否已启动（桥生命周期内仅启动一次）。
     pumps_started: bool,
     /// 已记过首次忽略日志的「账号|发送者」键（进程内去重，防日志刷屏）。
@@ -346,6 +394,7 @@ impl Default for BridgeInner {
             pending_login_id: None,
             bindings: Vec::new(),
             started_accounts: HashSet::new(),
+            restart_attempts: HashMap::new(),
             account_conn: HashMap::new(),
             active: HashMap::new(),
             thread_locks: HashMap::new(),
@@ -555,6 +604,7 @@ impl WeChatBridge {
         g.pending_login_id = None;
         g.started_accounts.clear();
         g.account_conn.clear();
+        g.restart_attempts.clear();
         for (_, t) in g.active.drain() {
             if let Some(task) = t.typing_task {
                 task.abort();
@@ -648,6 +698,8 @@ impl WeChatBridge {
             if !account_id.is_empty() {
                 g.started_accounts.remove(&account_id);
                 g.account_conn.remove(&account_id);
+                // 解绑即释放重启额度：下次绑定重新获得一次自动重启机会。
+                g.restart_attempts.remove(&account_id);
             }
             if g.pending_bind.as_deref() == Some(thread_id) {
                 g.pending_bind = None;
@@ -737,6 +789,8 @@ impl WeChatBridge {
                                     g.detail = None;
                                     g.started_accounts.insert(start_account.clone());
                                     g.account_conn.insert(start_account.clone(), "starting".into());
+                                    // 新绑定重新获得一次自动重启机会。
+                                    g.restart_attempts.remove(&start_account);
                                 }
                                 if let Err(e) =
                                     self.store.set_wechat(&thread_id, Some(stored_binding))
@@ -903,6 +957,9 @@ impl WeChatBridge {
                     g.qr_content = None;
                 }
             }
+            WechatEvent::ReceiverStopped { account_id, reason } => {
+                self.handle_receiver_stopped(&account_id, &reason).await;
+            }
         }
     }
 
@@ -911,6 +968,53 @@ impl WeChatBridge {
     fn dispatch_inbound(self: &Arc<Self>, msg: InboundMessage) {
         let this = Arc::clone(self);
         tauri::async_runtime::spawn(async move { this.handle_inbound(msg).await });
+    }
+
+    /// 接收器退出后的自愈：可恢复退出时延迟重启一次（README 承诺的「静默重启」）。
+    ///
+    /// `cancel`（主动停止，含解绑/退出登录/应用退出）与 `session_expired`（需重新扫码）
+    /// 不重启；其余退出在账号仍绑定、未过期且未用满重启额度时延迟后重启。
+    async fn handle_receiver_stopped(self: &Arc<Self>, account_id: &str, reason: &str) {
+        let (still_bound, attempts) = {
+            let g = self.inner.lock().await;
+            let bound = g
+                .bindings
+                .iter()
+                .any(|b| b.get("accountId").and_then(|v| v.as_str()) == Some(account_id));
+            (
+                bound,
+                g.restart_attempts.get(account_id).copied().unwrap_or(0),
+            )
+        };
+        // accounts() 是同步快照（读磁盘状态），不持 inner 锁调用以免无谓串行化。
+        let startable = self.client.accounts().iter().any(|a| {
+            a.get("id").and_then(|v| v.as_str()) == Some(account_id) && account_is_startable(a)
+        });
+        if !should_restart_receiver(reason, still_bound, startable, attempts) {
+            self.log(
+                "info",
+                format!("接收器已停止（账号 {account_id}，原因 {reason}），不自动重启"),
+            )
+            .await;
+            return;
+        }
+        {
+            let mut g = self.inner.lock().await;
+            *g.restart_attempts
+                .entry(account_id.to_string())
+                .or_insert(0) += 1;
+        }
+        self.log(
+            "warn",
+            format!("接收器意外停止（账号 {account_id}，原因 {reason}），{RECEIVER_RESTART_DELAY_SECS} 秒后自动重启一次"),
+        )
+        .await;
+        let this = Arc::clone(self);
+        let account = account_id.to_string();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(RECEIVER_RESTART_DELAY_SECS)).await;
+            this.client.start_receiver(account).await;
+        });
     }
 
     /// 取该线程的串行锁（懒创建）：同线程的「转向 / 开新回合」按到达顺序执行。
@@ -1055,10 +1159,43 @@ impl WeChatBridge {
     }
 
     /// 即时系统回复（失败提示等文案，不经回合编排直接发出）。
+    ///
+    /// 长回复按 [`REPLY_CHUNK_CHARS`] 切分逐段发送；**可恢复失败短重试**
+    /// （[`SEND_RETRY_ATTEMPTS`] 次、间隔 [`SEND_RETRY_DELAY_MS`]），避免网络抖动导致
+    /// 微信侧收到缺段的回复且用户无感。确定性失败（会话过期/未连接/窗口过期）不重试。
     async fn send_reply_now(self: &Arc<Self>, account_id: &str, peer: &str, text: &str) {
-        for chunk in chunk_text(text, REPLY_CHUNK_CHARS) {
-            if let Err(e) = self.client.send_text(account_id, peer, &chunk).await {
-                self.log("warn", format!("回复 {peer} 失败: {e}")).await;
+        let chunks = chunk_text(text, REPLY_CHUNK_CHARS);
+        let total = chunks.len();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let mut last = None;
+            for attempt in 0..=SEND_RETRY_ATTEMPTS {
+                match self.client.send_text(account_id, peer, chunk).await {
+                    Ok(()) => {
+                        last = None;
+                        break;
+                    }
+                    Err(e) => {
+                        let retryable = e.is_retryable();
+                        last = Some(e);
+                        if !retryable || attempt == SEND_RETRY_ATTEMPTS {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(SEND_RETRY_DELAY_MS)).await;
+                    }
+                }
+            }
+            if let Some(e) = last {
+                // 带分片序号：多段回复缺段时便于定位是哪一段没发出去。
+                self.log(
+                    "warn",
+                    format!(
+                        "回复 {peer} 失败（第 {}/{total} 段，可重试={}）: {}",
+                        i + 1,
+                        e.is_retryable(),
+                        e.message()
+                    ),
+                )
+                .await;
             }
         }
     }
@@ -1119,12 +1256,23 @@ impl WeChatBridge {
                     if text.is_empty() {
                         return;
                     }
-                    // 同回合可能多条 agentMessage：保留最后一条完整文本。
-                    self.inner
-                        .lock()
-                        .await
-                        .pending_reply
-                        .insert(tid.to_string(), text.to_string());
+                    // 协议在 item/completed 上同时下发 threadId 与 turnId（docs/app-server.md）。
+                    let item_turn = params.get("turnId").and_then(|x| x.as_str()).unwrap_or("");
+                    // 先克隆出当前回合 turn id 释放不可变借用，再取可变借用插入（避免借用冲突）。
+                    let current_turn = {
+                        let g = self.inner.lock().await;
+                        g.active.get(tid).map(|t| t.turn_id.clone())
+                    };
+                    // 仅收集属于「该线程进行中回合」的文本：既避免非绑定线程无界累积，
+                    // 也避免旧回合的迟到通知污染本轮回复。
+                    if accepts_pending_reply(current_turn.as_deref(), item_turn) {
+                        // 同回合可能多条 agentMessage：保留最后一条完整文本。
+                        self.inner
+                            .lock()
+                            .await
+                            .pending_reply
+                            .insert(tid.to_string(), text.to_string());
+                    }
                 }
             }
             "turn/completed" => {
@@ -1444,12 +1592,14 @@ impl WeChatBridge {
     }
 
     /// 默认模型解析（进程内缓存）：isDefault 优先，其次首个非 hidden。
+    /// 命中判定见 [`cached_default_model`]：成功永久缓存，失败仅缓存 60 秒。
     async fn resolve_default_model(self: &Arc<Self>) -> Result<String, String> {
-        {
-            let cached = self.inner.lock().await.default_model.clone();
-            if let Some(res) = cached {
-                return res;
-            }
+        let cached = {
+            let g = self.inner.lock().await;
+            cached_default_model(&g.default_model, Instant::now())
+        };
+        if let Some(res) = cached {
+            return res;
         }
         let res = (|| async {
             let resp = self
@@ -1471,7 +1621,7 @@ impl WeChatBridge {
                 .ok_or_else(|| "模型列表为空".to_string())
         })()
         .await;
-        self.inner.lock().await.default_model = Some(res.clone());
+        self.inner.lock().await.default_model = Some((res.clone(), Instant::now()));
         res
     }
 }
@@ -1775,6 +1925,50 @@ mod tests {
         assert!(is_this_turn_completion("t-1", "", "t-1", "turn-2"));
         // 两者都非空且不相等 → 不命中
         assert!(!is_this_turn_completion("t-1", "turn-a", "t-1", "turn-b"));
+    }
+
+    #[test]
+    fn pending_reply_requires_an_active_turn_on_that_thread() {
+        // 非活动线程（含桌面端聊天的非绑定线程）→ 不收集，避免 pending_reply 无界累积
+        assert!(!accepts_pending_reply(None, "turn-1"));
+        assert!(!accepts_pending_reply(None, ""));
+    }
+
+    #[test]
+    fn pending_reply_rejects_stale_turn_on_same_thread() {
+        // 同线程但条目属于上一回合（后台压缩/重连遗留的迟到通知）→ 不收集，
+        // 否则旧文本会被当成本轮回复发给微信
+        assert!(!accepts_pending_reply(Some("turn-2"), "turn-old"));
+        // 匹配当前回合 → 收集
+        assert!(accepts_pending_reply(Some("turn-2"), "turn-2"));
+    }
+
+    #[test]
+    fn pending_reply_falls_back_to_thread_when_ids_missing() {
+        // 条目缺 turnId → 按线程兜底收集（避免漏抓回复）
+        assert!(accepts_pending_reply(Some("turn-2"), ""));
+        // 当前回合 turn id 缺省 → 同样按线程兜底
+        assert!(accepts_pending_reply(Some(""), "turn-x"));
+    }
+
+    #[test]
+    fn receiver_restart_policy_matrix() {
+        // 主动停止（解绑/退出登录/应用退出）→ 永不重启
+        assert!(!should_restart_receiver("cancel", true, true, 0));
+        // 会话过期 → 需人工重新扫码，自动重试只会反复失败
+        assert!(!should_restart_receiver("session_expired", true, true, 0));
+        // 可恢复退出：仍绑定 + 未过期 + 未用满额度 → 重启
+        assert!(should_restart_receiver("account_missing", true, true, 0));
+        assert!(should_restart_receiver("getupdates_error", true, true, 0));
+        // 任一条件不满足 → 不重启
+        assert!(!should_restart_receiver("account_missing", false, true, 0));
+        assert!(!should_restart_receiver("account_missing", true, false, 0));
+        assert!(!should_restart_receiver(
+            "account_missing",
+            true,
+            true,
+            MAX_RECEIVER_RESTARTS
+        ));
     }
 
     #[test]

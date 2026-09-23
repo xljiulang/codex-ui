@@ -5,7 +5,7 @@
 //! 协议下载并 AES-128-ECB 解密后落盘（其它媒体仍忽略，媒体上传不在范围内）。
 //! 事件经 mpsc 推送给桥（WechatEvent），语义对齐原 sidecar 的 stdio 事件。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -54,6 +54,10 @@ const MAX_FILES_PER_MESSAGE: usize = 4;
 const MAX_VIDEOS_PER_MESSAGE: usize = 2;
 /// 附件存放目录名（位于 wechannel-data 下，与 wechat-channel 的原布局一致）。
 const MEDIA_DIR_NAME: &str = "media";
+
+/// 入站 `message_id` 去重环上限（进程内）：作为 sync-buf 之外的第二道防线，
+/// 覆盖 `save_sync_buf` 写盘失败后平台按空 buf 重放队列（会重复执行回合）的场景。
+const INBOUND_DEDUP_CAPACITY: usize = 500;
 /// 附件文件名净化后的最大字符数（含扩展名）。
 const MAX_FILE_NAME_CHARS: usize = 120;
 /// 落盘时保留的解密头部字节数（供图片魔数探测）。
@@ -841,7 +845,18 @@ fn load_reply_context(root: &Path, account_id: &str) -> HashMap<String, Value> {
 }
 
 fn save_reply_context(root: &Path, account_id: &str, map: &HashMap<String, Value>) {
-    let obj = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Value>();
+    // 写入前剪掉已过期的对端记录：被动窗口（24h）外的条目对回复没有意义，
+    // 不清理会随着历史对端数量持续累积（整表每次重写的体积也随之增长）。
+    let now = now_ms();
+    let obj = map
+        .iter()
+        .filter(|(_, v)| {
+            v.get("expiresAt")
+                .and_then(|e| e.as_u64())
+                .is_none_or(|expires_at| expires_at > now)
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect::<Value>();
     let _ = write_json(&reply_context_path(root, account_id), &obj);
 }
 
@@ -909,6 +924,31 @@ pub fn accounts_snapshot(root: &Path) -> Vec<Value> {
 // ---------------------------------------------------------------------------
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// 出站发送失败的可恢复性：桥据此决定是否值得重试（纯分类，便于单测）。
+///
+/// `Fatal` 是确定性失败（会话过期、账号未连接、缺少 24 小时被动窗口上下文）——
+/// 重试只会立刻拿到同样的错误，且会拖长整条回复的发送时间；
+/// `Retryable` 是瞬时失败（网络错误、超时、上游非致命错误）——短重试有机会补齐缺失分片。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WechatSendFailure {
+    Fatal(String),
+    Retryable(String),
+}
+
+impl WechatSendFailure {
+    /// 是否值得重试。
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, Self::Retryable(_))
+    }
+
+    /// 失败原因文本（用于日志与提示）。
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Fatal(m) | Self::Retryable(m) => m,
+        }
+    }
+}
 
 /// 附件下载流：按块产出原始字节（`Err` 表示读取中断）；解密与落盘在调用方流式完成。
 pub type AttachmentStream = Pin<Box<dyn futures_util::Stream<Item = Result<Vec<u8>, String>> + Send>>;
@@ -1186,6 +1226,13 @@ pub enum WechatEvent {
         message: String,
         kind: String,
     },
+    /// 单账号接收循环已退出（`reason`：cancel｜session_expired｜account_missing）。
+    /// 桥据此决定是否需要重启接收（可恢复退出自动重启一次，过期退出等重新扫码）。
+    /// 仅供桥内部消费，不影响前端 `wechat/event` 快照形状。
+    ReceiverStopped {
+        account_id: String,
+        reason: String,
+    },
     Accounts(Vec<Value>),
 }
 
@@ -1388,23 +1435,21 @@ impl<A: WechatApi + 'static> WechatClient<A> {
 
     /// 启动指定账号的消息接收（长轮询任务，幂等）。
     pub async fn start_receiver(&self, account_id: String) {
+        let cancel = Arc::new(Notify::new());
         {
             let mut map = self.receivers.lock().await;
             if map.contains_key(&account_id) {
                 return;
             }
-            map.insert(account_id.clone(), Arc::new(Notify::new()));
+            map.insert(account_id.clone(), cancel.clone());
         }
         let api = self.api.clone();
         let tx = self.tx.clone();
         let root = self.root.clone();
         let bound_threads = self.bound_threads.clone();
-        let cancel = {
-            let map = self.receivers.lock().await;
-            map.get(&account_id).cloned().unwrap()
-        };
+        let receivers = self.receivers.clone();
         tokio::spawn(async move {
-            run_receiver(api, tx, root, account_id, cancel, bound_threads).await;
+            run_receiver(api, tx, root, account_id, cancel, bound_threads, receivers).await;
         });
     }
 
@@ -1429,8 +1474,16 @@ impl<A: WechatApi + 'static> WechatClient<A> {
     }
 
     /// 发送文本：校验会话连接与 contextToken（24h 被动窗口）后调用 sendmessage。
-    pub async fn send_text(&self, account_id: &str, to: &str, text: &str) -> Result<(), String> {
-        let account = load_account(&self.root, account_id).ok_or_else(|| "账号不存在".to_string())?;
+    /// 失败按可恢复性分类（[`WechatSendFailure`]）：确定性失败不重试，瞬时失败可短重试。
+    pub async fn send_text(
+        &self,
+        account_id: &str,
+        to: &str,
+        text: &str,
+    ) -> Result<(), WechatSendFailure> {
+        use WechatSendFailure::{Fatal, Retryable};
+        let account =
+            load_account(&self.root, account_id).ok_or_else(|| Fatal("账号不存在".to_string()))?;
         let token = account
             .get("token")
             .and_then(|v| v.as_str())
@@ -1444,13 +1497,13 @@ impl<A: WechatApi + 'static> WechatClient<A> {
         let session = load_session_status(&self.root, account_id);
         let status = session.get("status").and_then(|v| v.as_str()).unwrap_or("");
         if status == "session_expired" {
-            return Err("微信会话已过期，请重新扫码".into());
+            return Err(Fatal("微信会话已过期，请重新扫码".into()));
         }
         if status != "connected" {
-            return Err("微信账号未连接".into());
+            return Err(Fatal("微信账号未连接".into()));
         }
         let ctx = get_context_token(&self.root, account_id, to)
-            .ok_or_else(|| "缺少回复上下文（24 小时被动窗口已过期）".to_string())?;
+            .ok_or_else(|| Fatal("缺少回复上下文（24 小时被动窗口已过期）".to_string()))?;
         let body = json!({
             "msg": {
                 "from_user_id": "",
@@ -1463,7 +1516,12 @@ impl<A: WechatApi + 'static> WechatClient<A> {
             },
             "base_info": build_base_info(),
         });
-        let resp = self.api.send_message(&base_url, &token, body).await?;
+        // 网络错误/超时：瞬时失败，短重试有机会补齐（长回复按分片发送，缺一段用户无感）。
+        let resp = self
+            .api
+            .send_message(&base_url, &token, body)
+            .await
+            .map_err(Retryable)?;
         if is_api_error(&resp) {
             if is_session_expired_payload(&resp) {
                 let msg = resp
@@ -1484,14 +1542,15 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                     error_code: resp.get("errcode").and_then(|v| v.as_i64()),
                     error_message: Some(msg),
                 });
-                return Err("微信会话已过期，请重新扫码".into());
+                return Err(Fatal("微信会话已过期，请重新扫码".into()));
             }
             let msg = resp
                 .get("errmsg")
                 .and_then(|v| v.as_str())
                 .unwrap_or("发送失败")
                 .to_string();
-            return Err(msg);
+            // 上游返回的业务错误：非过期类多为瞬时（频控/内部错误），值得重试一次。
+            return Err(Retryable(msg));
         }
         Ok(())
     }
@@ -1615,12 +1674,14 @@ async fn run_receiver<A: WechatApi>(
     account_id: String,
     cancel: Arc<Notify>,
     bound_threads: Arc<Mutex<HashMap<String, String>>>,
+    receivers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
 ) {
     let Some(account) = load_account(&root, &account_id) else {
         let _ = tx.send(WechatEvent::Error {
             message: format!("账号 {account_id} 不存在，无法接收"),
             kind: "receiver".into(),
         });
+        finish_receiver(&tx, &receivers, &account_id, &cancel, "account_missing").await;
         return;
     };
     let token = account
@@ -1644,6 +1705,7 @@ async fn run_receiver<A: WechatApi>(
 
     let mut buf = load_sync_buf(&root, &account_id);
     let mut failures = 0u32;
+    let mut dedup = InboundDedup::new();
     loop {
         tokio::select! {
             _ = cancel.notified() => {
@@ -1654,6 +1716,7 @@ async fn run_receiver<A: WechatApi>(
                     error_code: None,
                     error_message: None,
                 });
+                finish_receiver(&tx, &receivers, &account_id, &cancel, "cancel").await;
                 return;
             }
             r = api.get_updates(&base_url, &token, &buf, LONG_POLL_TIMEOUT.as_millis() as u64) => {
@@ -1669,6 +1732,7 @@ async fn run_receiver<A: WechatApi>(
                                     error_code: resp.get("errcode").and_then(|v| v.as_i64()),
                                     error_message: Some(msg),
                                 });
+                                finish_receiver(&tx, &receivers, &account_id, &cancel, "session_expired").await;
                                 return;
                             }
                             failures += 1;
@@ -1688,8 +1752,14 @@ async fn run_receiver<A: WechatApi>(
                                 let to = raw.get("to_user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                 let ts = raw.get("create_time_ms").and_then(|v| v.as_u64()).unwrap_or(now_ms());
                                 let ctx = raw.get("context_token").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let message_id = raw.get("message_id").and_then(|v| v.as_str());
+                                // 去重：平台在 sync-buf 写盘失败后可能重放队列，重复驱动回合
+                                // （微信回合是「完全访问」，重复执行代价高）。命中即跳过该条。
+                                if !dedup.accept(message_id) {
+                                    continue;
+                                }
                                 if !from.is_empty() && !ctx.is_empty() {
-                                    set_context_token(&root, &account_id, &from, &ctx, raw.get("message_id").and_then(|v| v.as_str()));
+                                    set_context_token(&root, &account_id, &from, &ctx, message_id);
                                 }
                                 let items = raw.get("item_list");
                                 let text = items.and_then(extract_message_text);
@@ -1807,10 +1877,73 @@ fn retry_delay(failures: u32) -> Duration {
     }
 }
 
+/// 入站消息去重环（进程内，FIFO 上限 [`INBOUND_DEDUP_CAPACITY`]）。
+///
+/// `message_id` 已见过 → 返回 `false`（调用方跳过该条）；否则登记并返回 `true`，
+/// 超出上限时淘汰最旧的一条。空 id 不做去重（无 id 时无法判断重复，宁可放行）。
+struct InboundDedup {
+    seen: HashSet<String>,
+    order: VecDeque<String>,
+}
+
+impl InboundDedup {
+    fn new() -> Self {
+        Self {
+            seen: HashSet::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    /// 是否应处理该条消息（首次出现为 true，重复/空 id 为 false）。
+    fn accept(&mut self, message_id: Option<&str>) -> bool {
+        let Some(id) = message_id.map(str::trim).filter(|s| !s.is_empty()) else {
+            return true;
+        };
+        if self.seen.contains(id) {
+            return false;
+        }
+        self.seen.insert(id.to_string());
+        self.order.push_back(id.to_string());
+        while self.order.len() > INBOUND_DEDUP_CAPACITY {
+            if let Some(old) = self.order.pop_front() {
+                self.seen.remove(&old);
+            }
+        }
+        true
+    }
+}
+
 async fn sleep_or_cancel(cancel: &Notify, dur: Duration) {
     tokio::select! {
         _ = cancel.notified() => {}
         _ = tokio::time::sleep(dur) => {}
+    }
+}
+
+/// 接收循环退出收尾：广播 [`WechatEvent::ReceiverStopped`] 并清理 `receivers` 表中的自身条目。
+///
+/// 清理是必需的——`start_receiver` 以「表中已有该账号」作为幂等短路条件，残留条目会让后续
+/// 任何重启尝试静默失效（账号因 `session_expired` 退出后重新扫码也无法恢复接收）。
+///
+/// 仅当表中仍是本次运行注册的那个 `Notify` 时才删除（`Arc::ptr_eq`）：否则会把
+/// 「stop_receiver 已清、随后 start_receiver 又注册」的新条目误删。
+async fn finish_receiver(
+    tx: &mpsc::UnboundedSender<WechatEvent>,
+    receivers: &Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    account_id: &str,
+    cancel: &Arc<Notify>,
+    reason: &str,
+) {
+    let _ = tx.send(WechatEvent::ReceiverStopped {
+        account_id: account_id.to_string(),
+        reason: reason.to_string(),
+    });
+    let mut map = receivers.lock().await;
+    let mine = map
+        .get(account_id)
+        .is_some_and(|n| Arc::ptr_eq(n, cancel));
+    if mine {
+        map.remove(account_id);
     }
 }
 
@@ -2409,6 +2542,11 @@ mod tests {
         let thread_id = "01a0a2c4-2702-7bf0-9f61-9f280145e222";
         let mut bindings = HashMap::new();
         bindings.insert("bot-1".to_string(), thread_id.to_string());
+        // receivers 表预置本次的 Notify：验证退出时会清理自身条目
+        let receivers = Arc::new(Mutex::new(HashMap::from([(
+            "bot-1".to_string(),
+            cancel.clone(),
+        )])));
         let handle = tokio::spawn(run_receiver(
             Arc::new(MediaApi {
                 ciphers,
@@ -2420,6 +2558,7 @@ mod tests {
             "bot-1".into(),
             cancel.clone(),
             Arc::new(Mutex::new(bindings)),
+            receivers.clone(),
         ));
         let got = loop {
             match rx.recv().await {
@@ -2431,7 +2570,16 @@ mod tests {
             }
         };
         cancel.notify_one();
-        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("接收器应在收到取消信号后退出")
+            .expect("接收器任务不应 panic");
+        // 退出时必须清掉 receivers 表中的自身条目，否则 start_receiver 的幂等短路
+        // 会让该账号再也无法重启接收（账号过期后重新扫码也收不到消息）。
+        assert!(
+            receivers.lock().await.is_empty(),
+            "接收器退出后应清理 receivers 表中的自身条目"
+        );
 
         let (text, images, files, media_error) = got;
         assert!(text.is_none(), "纯附件消息不应有文本");
@@ -2559,6 +2707,7 @@ mod tests {
             cancel.clone(),
             // 空映射：该账号没有绑定会话
             Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
         ));
         let got = loop {
             match rx.recv().await {
@@ -2618,6 +2767,11 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let cancel = Arc::new(Notify::new());
         let api = Arc::new(ExpiredApi);
+        // receivers 表预置本次的 Notify：验证过期退出会清理自身条目
+        let receivers = Arc::new(Mutex::new(HashMap::from([(
+            "bot-1".to_string(),
+            cancel.clone(),
+        )])));
         run_receiver(
             api,
             tx,
@@ -2625,17 +2779,28 @@ mod tests {
             "bot-1".into(),
             cancel,
             Arc::new(Mutex::new(HashMap::new())),
+            receivers.clone(),
         )
         .await;
         let mut expired = false;
+        let mut stopped_reason = None;
         while let Ok(ev) = rx.try_recv() {
-            if let WechatEvent::SessionStatus { status, .. } = ev {
-                if status == "session_expired" {
+            match ev {
+                WechatEvent::SessionStatus { status, .. } if status == "session_expired" => {
                     expired = true;
                 }
+                WechatEvent::ReceiverStopped { reason, .. } => stopped_reason = Some(reason),
+                _ => {}
             }
         }
         assert!(expired);
+        // 过期退出需上报原因，桥据此判定「不自动重启、等重新扫码」
+        assert_eq!(stopped_reason.as_deref(), Some("session_expired"));
+        // 退出必须清表：否则账号重新扫码后 start_receiver 会被幂等短路拦住、再也收不到消息
+        assert!(
+            receivers.lock().await.is_empty(),
+            "过期退出后应清理 receivers 表中的自身条目"
+        );
         assert_eq!(
             load_session_status(&root, "bot-1").get("status").and_then(|v| v.as_str()),
             Some("session_expired")
@@ -2726,5 +2891,145 @@ mod tests {
         save_session_status(&root, "bot-1", "disconnected", None, None);
         client.send_typing("bot-1", "u-1", 1).await.unwrap();
         assert_eq!(*stc.lock().unwrap(), 2); // 未新增请求
+    }
+
+    #[test]
+    fn inbound_dedup_accepts_once_per_message_id() {
+        let mut dedup = InboundDedup::new();
+        assert!(dedup.accept(Some("m-1")));
+        // 同一 id 重复投递（平台按空 buf 重放队列）→ 只处理一次
+        assert!(!dedup.accept(Some("m-1")));
+        // 不同 id 正常放行
+        assert!(dedup.accept(Some("m-2")));
+        // 空 id / 缺失 id：无法判断重复，宁可放行
+        assert!(dedup.accept(None));
+        assert!(dedup.accept(Some("")));
+        assert!(dedup.accept(Some("   ")));
+    }
+
+    #[test]
+    fn inbound_dedup_evicts_oldest_beyond_capacity() {
+        let mut dedup = InboundDedup::new();
+        for i in 0..INBOUND_DEDUP_CAPACITY {
+            assert!(dedup.accept(Some(&format!("m-{i}"))));
+        }
+        // 环刚好装满：最早的 id 仍在环内，视为已见
+        assert!(!dedup.accept(Some("m-0")));
+        // 再塞一条把最旧的（m-0）挤出环，容量保持不变
+        assert!(dedup.accept(Some("m-new")));
+        assert_eq!(dedup.order.len(), INBOUND_DEDUP_CAPACITY);
+        assert_eq!(dedup.seen.len(), INBOUND_DEDUP_CAPACITY);
+        // m-0 已被淘汰 → 视为新消息放行；重新登记又会挤掉下一条（m-1）
+        assert!(dedup.accept(Some("m-0")));
+        assert!(dedup.accept(Some("m-1")));
+        // 仍在环内的 id 依旧是重复消息
+        assert!(!dedup.accept(Some("m-3")));
+        assert!(!dedup.accept(Some("m-new")));
+    }
+
+    #[test]
+    fn send_failure_classification_is_retryable_only_for_transient() {
+        // 确定性失败：重试只会立刻拿到同样错误，且拖长整条回复的发送时间
+        assert!(!WechatSendFailure::Fatal("微信账号未连接".into()).is_retryable());
+        assert!(!WechatSendFailure::Fatal("缺少回复上下文".into()).is_retryable());
+        // 瞬时失败：值得短重试
+        assert!(WechatSendFailure::Retryable("connection reset".into()).is_retryable());
+        // 文案透传（用于日志与提示）
+        assert_eq!(
+            WechatSendFailure::Fatal("会话已过期".into()).message(),
+            "会话已过期"
+        );
+        assert_eq!(
+            WechatSendFailure::Retryable("timeout".into()).message(),
+            "timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_text_returns_fatal_for_disconnected_account() {
+        struct NoopApi;
+        impl WechatApi for NoopApi {
+            fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn get_updates(&self, _b: &str, _t: &str, _buf: &str, _to: u64) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn send_message(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                panic!("未连接账号不应发出 sendmessage 请求");
+            }
+            fn get_config(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn send_typing(&self, _b: &str, _t: &str, _body: Value) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn download_stream(&self, _url: &str, _timeout: Duration)
+                -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                Box::pin(async { Err("未实现".to_string()) })
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let client = WechatClient::with_api(root.clone(), tx, NoopApi);
+
+        // 未连接 → Fatal（桥不重试）
+        save_session_status(&root, "bot-1", "disconnected", None, None);
+        let err = client.send_text("bot-1", "u-1", "hi").await.unwrap_err();
+        assert!(!err.is_retryable(), "未连接属确定性失败，不应重试");
+
+        // 会话过期 → Fatal
+        save_session_status(&root, "bot-1", "session_expired", None, None);
+        let err = client.send_text("bot-1", "u-1", "hi").await.unwrap_err();
+        assert!(!err.is_retryable(), "会话过期属确定性失败，不应重试");
+
+        // 已连接但缺 contextToken（24 小时窗口过期）→ Fatal
+        save_session_status(&root, "bot-1", "connected", None, None);
+        let err = client.send_text("bot-1", "u-1", "hi").await.unwrap_err();
+        assert!(!err.is_retryable(), "缺回复上下文属确定性失败，不应重试");
+    }
+
+    #[tokio::test]
+    async fn reply_context_prunes_expired_entries_on_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let now = now_ms();
+        // 直接构造一份「一条已过期 + 一条仍有效」的表，模拟跨过 24 小时窗口后的磁盘状态
+        let mut map = HashMap::new();
+        map.insert(
+            "u-stale".to_string(),
+            json!({
+                "peerId": "u-stale",
+                "contextToken": "old",
+                "lastInboundAt": 1,
+                "expiresAt": now.saturating_sub(1),
+            }),
+        );
+        map.insert(
+            "u-live".to_string(),
+            json!({
+                "peerId": "u-live",
+                "contextToken": "new",
+                "lastInboundAt": now,
+                "expiresAt": now + REPLY_WINDOW_MS,
+            }),
+        );
+        save_reply_context(&root, "bot-1", &map);
+
+        // 写盘后过期条目应被剔除，仍有效的条目保留
+        let reloaded = load_reply_context(&root, "bot-1");
+        assert!(!reloaded.contains_key("u-stale"), "过期条目应被剪掉");
+        assert!(reloaded.contains_key("u-live"), "未过期条目应保留");
+        assert_eq!(
+            get_context_token(&root, "bot-1", "u-live").as_deref(),
+            Some("new")
+        );
+        assert!(get_context_token(&root, "bot-1", "u-stale").is_none());
     }
 }

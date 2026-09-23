@@ -5,9 +5,36 @@
 
 use std::fmt;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::codex::path_util::clean_path;
+
+/// 默认模型缓存中「失败结果」的重试 TTL（秒）。
+///
+/// 成功结果永久命中（模型列表不频繁变化）；失败结果只保留这么久，过期即重新解析，
+/// 避免「首次解析恰好撞上 app-server 未就绪/重连」这一瞬时故障被永久固化，
+/// 让后续所有缺省模型解析都拿到同一个失败结果。
+pub const DEFAULT_MODEL_FAILURE_TTL_SECS: u64 = 60;
+
+/// 默认模型缓存的命中判定（纯函数，便于单测）：
+/// - 未解析过 → `None`（需重新解析）
+/// - 成功结果 → 永久命中
+/// - 失败结果 → 仅在 [`DEFAULT_MODEL_FAILURE_TTL_SECS`] 内命中，过期后重新解析
+///
+/// 用 `saturating_duration_since` 比较（系统时钟回退时不会 panic，按「未过期」处理）。
+pub fn cached_default_model(
+    entry: &Option<(Result<String, String>, Instant)>,
+    now: Instant,
+) -> Option<Result<String, String>> {
+    let (res, at) = entry.as_ref()?;
+    match res {
+        Ok(_) => Some(res.clone()),
+        Err(_) => {
+            let age = now.saturating_duration_since(*at);
+            (age < Duration::from_secs(DEFAULT_MODEL_FAILURE_TTL_SECS)).then(|| res.clone())
+        }
+    }
+}
 
 /// `spawn_blocking` + 超时的失败原因；闭包自身的 `Err` 会原样透传，不落在这里。
 #[derive(Debug)]
@@ -117,5 +144,53 @@ mod tests {
         let _ = std::fs::remove_file(&file);
 
         assert!(resolve_workspace_dir(std::env::temp_dir().to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn cached_default_model_misses_when_never_resolved() {
+        assert_eq!(cached_default_model(&None, Instant::now()), None);
+    }
+
+    #[test]
+    fn cached_default_model_success_hits_at_any_age() {
+        let now = Instant::now();
+        let long_after = now + Duration::from_secs(24 * 60 * 60);
+        let entry = Some((Ok("gpt-x".to_string()), now));
+        assert_eq!(
+            cached_default_model(&entry, now),
+            Some(Ok("gpt-x".to_string()))
+        );
+        // 成功结果不做 TTL：再久也是命中
+        assert_eq!(
+            cached_default_model(&entry, long_after),
+            Some(Ok("gpt-x".to_string()))
+        );
+    }
+
+    #[test]
+    fn cached_default_model_failure_expires_after_ttl() {
+        let now = Instant::now();
+        let entry = Some((Err("模型列表为空".to_string()), now));
+        // TTL 内：命中失败结果（避免瞬时故障触发重试风暴）
+        assert_eq!(
+            cached_default_model(&entry, now + Duration::from_secs(1)),
+            Some(Err("模型列表为空".to_string()))
+        );
+        // 边界：恰好等于 TTL 视为过期
+        assert_eq!(
+            cached_default_model(
+                &entry,
+                now + Duration::from_secs(DEFAULT_MODEL_FAILURE_TTL_SECS)
+            ),
+            None
+        );
+        // 超出 TTL：重新解析（错误不再被永久固化）
+        assert_eq!(
+            cached_default_model(
+                &entry,
+                now + Duration::from_secs(DEFAULT_MODEL_FAILURE_TTL_SECS + 1)
+            ),
+            None
+        );
     }
 }

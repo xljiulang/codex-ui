@@ -26,6 +26,7 @@ use crate::codex::app_server::CodexServer;
 use crate::codex::notifications;
 use crate::codex::session_state::SessionStateStore;
 use crate::codex::settings;
+use crate::codex::util::cached_default_model;
 
 /// 前端事件名：任务每次变更全量推送快照。
 pub const SCHEDULED_TASKS_EVENT: &str = "scheduled-tasks/event";
@@ -638,7 +639,9 @@ struct SchedulerInner {
     /// 默认 `false`（`#[derive(Default)]`），由 [`TaskScheduler::start`] 在启动
     /// 第一个 tick 前同步置为 `true`；tick 首轮消费后随即复位，仅生效一次。
     first_tick: bool,
-    default_model: Option<Result<String, String>>,
+    /// 默认模型缓存：None 未解析过；成功结果永久命中，失败结果按
+    /// `util::DEFAULT_MODEL_FAILURE_TTL_SECS` 过期重试（避免瞬时故障被永久固化）。
+    default_model: Option<(Result<String, String>, Instant)>,
 }
 
 /// 定时任务调度器：tick 循环 + 通知订阅泵 + 回合执行。
@@ -751,12 +754,14 @@ impl TaskScheduler {
     }
 
     /// 默认模型解析（进程内缓存）：isDefault 优先，其次首个非 hidden（微信桥同款）。
+    /// 命中判定见 [`cached_default_model`]：成功永久缓存，失败仅缓存 60 秒。
     async fn resolve_default_model(&self) -> Result<String, String> {
-        {
+        let cached = {
             let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(res) = &g.default_model {
-                return res.clone();
-            }
+            cached_default_model(&g.default_model, Instant::now())
+        };
+        if let Some(res) = cached {
+            return res;
         }
         let res = async {
             let resp = self
@@ -784,7 +789,7 @@ impl TaskScheduler {
         self.inner
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .default_model = Some(res.clone());
+            .default_model = Some((res.clone(), Instant::now()));
         res
     }
 
