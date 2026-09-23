@@ -144,6 +144,40 @@ pub fn extract_message_text(item_list: &Value) -> Option<String> {
     None
 }
 
+/// 入站消息 id：协议声明为数字（`message_id?: number`），实际需兼容字符串形态。
+///
+/// 此前的实现按字符串读取（`as_str()`），导致数字型 id 一律读不到（返回 None）——
+/// 依赖它的入站去重环因此在真实流量上从未生效。数字统一转十进制字符串后返回。
+fn message_id_of(message: &Value) -> Option<String> {
+    match message.get("message_id") {
+        Some(Value::String(s)) => {
+            let trimmed = s.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        Some(Value::Number(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// 展开「候选 item」：每个 item 之后追加其 `ref_msg.message_item`（**仅一层，不递归**）。
+///
+/// 用户引用一条含附件（图片/文件/视频）的消息转发时，附件挂在这层嵌套里；
+/// 只解一层既覆盖该场景，又避免递归展开带来的配额混乱与无界遍历。
+/// 文本提取**不走**本函数（被引用消息的正文是上下文，不是本轮指令）。
+fn candidate_items(item_list: Option<&Value>) -> Vec<&Value> {
+    let Some(list) = item_list.and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(list.len());
+    for item in list {
+        out.push(item);
+        if let Some(nested) = item.pointer("/ref_msg/message_item") {
+            out.push(nested);
+        }
+    }
+    out
+}
+
 /// 入站图片引用：CDN 下载参数 + AES 密钥原文。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InboundImage {
@@ -155,11 +189,8 @@ pub struct InboundImage {
 
 /// 从消息 item_list 提取入站图片：IMAGE（type=2）且带 CDN 下载参数，最多 `MAX_IMAGES_PER_MESSAGE` 张。
 pub fn extract_message_images(item_list: &Value) -> Vec<InboundImage> {
-    let Some(list) = item_list.as_array() else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    for item in list {
+    for item in candidate_items(Some(item_list)) {
         if out.len() >= MAX_IMAGES_PER_MESSAGE {
             break;
         }
@@ -212,11 +243,8 @@ fn extract_media_refs(
     item_key: &str,
     max: usize,
 ) -> Vec<InboundFile> {
-    let Some(list) = item_list.as_array() else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    for item in list {
+    for item in candidate_items(Some(item_list)) {
         if out.len() >= max {
             break;
         }
@@ -272,19 +300,15 @@ pub fn cdn_download_url(encrypt_query_param: &str) -> String {
 
 /// item_list 中可下载图片项的数量（与 `extract_message_images` 的口径一致，用于判断是否溢出上限）。
 fn count_image_items(item_list: Option<&Value>) -> usize {
-    item_list
-        .and_then(|v| v.as_array())
-        .map(|list| {
-            list.iter()
-                .filter(|i| {
-                    i.get("type").and_then(|v| v.as_i64()) == Some(2)
-                        && i.pointer("/image_item/media/encrypt_query_param")
-                            .and_then(|v| v.as_str())
-                            .is_some_and(|s| !s.trim().is_empty())
-                })
-                .count()
+    candidate_items(item_list)
+        .into_iter()
+        .filter(|i| {
+            i.get("type").and_then(|v| v.as_i64()) == Some(2)
+                && i.pointer("/image_item/media/encrypt_query_param")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| !s.trim().is_empty())
         })
-        .unwrap_or(0)
+        .count()
 }
 
 /// 解析 AES-128 密钥：支持 32 字符 hex、base64(16 字节原文)、base64(32 字符 hex 串) 三种形态。
@@ -1803,14 +1827,22 @@ async fn run_receiver<A: WechatApi>(
                                 let to = raw.get("to_user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                 let ts = raw.get("create_time_ms").and_then(|v| v.as_u64()).unwrap_or(now_ms());
                                 let ctx = raw.get("context_token").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let message_id = raw.get("message_id").and_then(|v| v.as_str());
+                                // 协议里 message_id 是数字；按「字符串或数字」读取，否则读不到
+                                // 数字型 id，去重环会因恒为 None 而形同虚设。
+                                let message_id = message_id_of(raw);
                                 // 去重：平台在 sync-buf 写盘失败后可能重放队列，重复驱动回合
                                 // （微信回合是「完全访问」，重复执行代价高）。命中即跳过该条。
-                                if !dedup.accept(message_id) {
+                                if !dedup.accept(message_id.as_deref()) {
                                     continue;
                                 }
                                 if !from.is_empty() && !ctx.is_empty() {
-                                    set_context_token(&root, &account_id, &from, &ctx, message_id);
+                                    set_context_token(
+                                        &root,
+                                        &account_id,
+                                        &from,
+                                        &ctx,
+                                        message_id.as_deref(),
+                                    );
                                 }
                                 let items = raw.get("item_list");
                                 let text = items.and_then(extract_message_text);
@@ -2207,6 +2239,176 @@ mod tests {
 
         assert!(extract_message_files(&json!(null)).is_empty());
         assert!(extract_message_videos(&json!([])).is_empty());
+    }
+
+    #[test]
+    fn message_id_accepts_number_and_string_forms() {
+        // 协议声明 message_id 为数字——按字符串读会一律返回 None（去重因此失效）
+        assert_eq!(
+            message_id_of(&json!({ "message_id": 1790180059616i64 })).as_deref(),
+            Some("1790180059616")
+        );
+        assert_eq!(
+            message_id_of(&json!({ "message_id": "m-1" })).as_deref(),
+            Some("m-1")
+        );
+        assert_eq!(
+            message_id_of(&json!({ "message_id": "  m-2  " })).as_deref(),
+            Some("m-2"),
+            "字符串应 trim"
+        );
+        // 缺失 / 空 / 空白 → None（调用方按「无法判断重复」放行）
+        assert_eq!(message_id_of(&json!({})), None);
+        assert_eq!(message_id_of(&json!({ "message_id": "" })), None);
+        assert_eq!(message_id_of(&json!({ "message_id": "   " })), None);
+        assert_eq!(message_id_of(&json!({ "message_id": null })), None);
+        // 非字符串非数字 → None（不 panic、不误当 id）
+        assert_eq!(message_id_of(&json!({ "message_id": { "a": 1 } })), None);
+        assert_eq!(message_id_of(&json!({ "message_id": [1, 2] })), None);
+    }
+
+    #[test]
+    fn ref_msg_attachments_are_extracted_one_level_only() {
+        // 引用一条含图片 + 文件的消息转发：两层附件都应被提取
+        let quoted = json!([
+            {
+                "type": 1,
+                "text_item": { "text": "外层文字" },
+                "ref_msg": {
+                    "title": "摘要",
+                    "message_item": {
+                        "type": 2,
+                        "image_item": { "media": { "encrypt_query_param": "REF-IMG", "aes_key": "QUJD" } },
+                    },
+                },
+            },
+            {
+                "type": 4,
+                "file_item": {
+                    "file_name": "外层.xlsx",
+                    "media": { "encrypt_query_param": "OUT-FILE", "aes_key": "QUJD" },
+                },
+                "ref_msg": {
+                    "message_item": {
+                        "type": 4,
+                        "file_item": {
+                            "file_name": "被引用.pdf",
+                            "media": { "encrypt_query_param": "REF-FILE", "aes_key": "QUJD" },
+                        },
+                    },
+                },
+            },
+        ]);
+
+        let imgs = extract_message_images(&quoted);
+        assert_eq!(imgs.len(), 1, "被引用消息里的图片应被提取");
+        assert_eq!(imgs[0].encrypt_query_param, "REF-IMG");
+
+        let files = extract_message_files(&quoted);
+        assert_eq!(files.len(), 2, "外层与引用的文件都应被提取");
+        assert_eq!(files[0].encrypt_query_param, "OUT-FILE");
+        assert_eq!(
+            files[1].encrypt_query_param, "REF-FILE",
+            "引用里的文件排在自身之后"
+        );
+        assert_eq!(files[1].file_name.as_deref(), Some("被引用.pdf"));
+    }
+
+    #[test]
+    fn ref_msg_is_not_traversed_recursively() {
+        // 引用里再引用（两层）：只解一层，深层附件不应被提取，避免无限遍历
+        let deep = json!([
+            {
+                "ref_msg": {
+                    "message_item": {
+                        "ref_msg": {
+                            "message_item": {
+                                "type": 2,
+                                "image_item": { "media": { "encrypt_query_param": "DEEP" } },
+                            },
+                        },
+                    },
+                },
+            },
+        ]);
+        assert!(
+            extract_message_images(&deep).is_empty(),
+            "两层嵌套不应被提取（只解一层）"
+        );
+    }
+
+    #[test]
+    fn ref_msg_attachments_share_message_quota() {
+        // 外层 3 张 + 引用 3 张：配额共享，仍只取前 MAX_IMAGES_PER_MESSAGE 张
+        let mut items: Vec<Value> = (0..3)
+            .map(|i| json!({ "type": 2, "image_item": { "media": { "encrypt_query_param": format!("OUT-{i}") } } }))
+            .collect();
+        items.push(json!({
+            "ref_msg": {
+                "message_item": {
+                    "type": 2,
+                    "image_item": { "media": { "encrypt_query_param": "REF-0" } },
+                },
+            },
+        }));
+        // 再补两张引用图片，凑满 6 张
+        items.push(json!({
+            "ref_msg": {
+                "message_item": {
+                    "type": 2,
+                    "image_item": { "media": { "encrypt_query_param": "REF-1" } },
+                },
+            },
+        }));
+        items.push(json!({
+            "ref_msg": {
+                "message_item": {
+                    "type": 2,
+                    "image_item": { "media": { "encrypt_query_param": "REF-2" } },
+                },
+            },
+        }));
+        let list = Value::Array(items);
+
+        let imgs = extract_message_images(&list);
+        assert_eq!(imgs.len(), MAX_IMAGES_PER_MESSAGE, "配额应共享");
+        assert_eq!(imgs[0].encrypt_query_param, "OUT-0");
+        assert_eq!(
+            imgs[MAX_IMAGES_PER_MESSAGE - 1].encrypt_query_param,
+            "REF-0",
+            "第 4 张应来自引用"
+        );
+        // 溢出计数同样覆盖引用：用于「超过 N 张，多余的已忽略」提示
+        assert_eq!(count_image_items(Some(&list)), 6);
+    }
+
+    #[test]
+    fn text_extraction_ignores_quoted_body() {
+        // 被引用消息的正文是上下文，不是本轮指令——不应被当成用户输入
+        let only_quoted = json!([
+            {
+                "type": 0,
+                "ref_msg": {
+                    "message_item": { "type": 1, "text_item": { "text": "被引用的文字" } },
+                },
+            },
+        ]);
+        assert!(extract_message_text(&only_quoted).is_none());
+
+        // 外层有文字时取外层；引用文字不参与
+        let outer_text = json!([
+            {
+                "type": 1,
+                "text_item": { "text": " 本轮指令 " },
+                "ref_msg": {
+                    "message_item": { "type": 1, "text_item": { "text": "被引用的文字" } },
+                },
+            },
+        ]);
+        assert_eq!(
+            extract_message_text(&outer_text).as_deref(),
+            Some("本轮指令")
+        );
     }
 
     #[test]
@@ -3190,6 +3392,133 @@ mod tests {
         // 仍在环内的 id 依旧是重复消息
         assert!(!dedup.accept(Some("m-3")));
         assert!(!dedup.accept(Some("m-new")));
+    }
+
+    /// 端到端：平台用**数字** `message_id` 重放同一条消息时，只应驱动一次回合。
+    /// 此前的实现按字符串读取 id（`as_str()`），数字一律读成 None → 去重形同虚设。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn receiver_dedups_replayed_numeric_message_id() {
+        struct ReplayApi {
+            calls: Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl WechatApi for ReplayApi {
+            fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "status": "wait" })) })
+            }
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                _buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                // 前两次返回同一条（数字 id）消息，模拟 sync-buf 写盘失败后的队列重放；
+                // 之后返回空并短睡，避免把长轮询循环变成忙循环。
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    if n < 2 {
+                        Ok(json!({
+                            "ret": 0,
+                            "get_updates_buf": "b1",
+                            "msgs": [{
+                                "from_user_id": "u-1",
+                                "to_user_id": "bot-1",
+                                "create_time_ms": 1,
+                                "context_token": "ctx-1",
+                                "message_id": 1790180059616i64,
+                                "item_list": [{ "type": 1, "text_item": { "text": "hi" } }],
+                            }],
+                        }))
+                    } else {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        Ok(json!({ "ret": 0, "get_updates_buf": "b1", "msgs": [] }))
+                    }
+                })
+            }
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn download_stream(
+                &self,
+                _url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                Box::pin(async { Err("本用例不涉及附件下载".to_string()) })
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let cancel = Arc::new(Notify::new());
+        let mut bindings = HashMap::new();
+        bindings.insert("bot-1".to_string(), "t-1".to_string());
+        let handle = tokio::spawn(run_receiver(
+            Arc::new(ReplayApi {
+                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            }),
+            tx,
+            root.clone(),
+            "bot-1".into(),
+            cancel.clone(),
+            Arc::new(Mutex::new(bindings)),
+            Arc::new(Mutex::new(HashMap::new())),
+        ));
+
+        // 第一条消息应当到达
+        let first = loop {
+            match rx.recv().await {
+                Some(WechatEvent::Message { text, .. }) => break text,
+                Some(_) => continue,
+                None => panic!("事件通道提前关闭"),
+            }
+        };
+        assert_eq!(first.as_deref(), Some("hi"));
+
+        // 重放的第二条（同数字 id）应被去重拦下：在窗口内不应再出现 Message 事件
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(400);
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(left, rx.recv()).await {
+                Ok(Some(WechatEvent::Message { text, .. })) => {
+                    panic!("重复的数字 message_id 未被去重，收到第二条消息: {text:?}")
+                }
+                Ok(Some(_)) => continue,
+                Ok(None) => panic!("事件通道提前关闭"),
+                Err(_) => break, // 超时：窗口内没有第二条消息 → 去重生效
+            }
+        }
+
+        cancel.notify_one();
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     }
 
     #[test]
