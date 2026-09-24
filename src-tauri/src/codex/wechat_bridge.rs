@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 
 use crate::codex::app_server::{BackendToolHandler, CodexServer};
 use crate::codex::session_state::{SessionStateStore, WechatBinding};
@@ -209,6 +209,11 @@ fn binding_conflict(bindings: &[Value], thread_id: &str, account_id: &str) -> bo
         b.get("threadId").and_then(|v| v.as_str()) == Some(thread_id)
             || b.get("accountId").and_then(|v| v.as_str()) == Some(account_id)
     })
+}
+
+/// 仅接受当前扫码登录任务发出的事件。
+fn is_current_login(pending_login_id: Option<&str>, event_login_id: &str) -> bool {
+    pending_login_id == Some(event_login_id)
 }
 
 /// 按「账号 + 本人」路由：消息所属账号命中绑定，且发送者就是绑定账号本人（谁扫谁白）。
@@ -579,8 +584,10 @@ struct BridgeInner {
     qr_content: Option<String>,
     /// 登录中的绑定目标线程 id（模态框扫码绑定流程的待落盘状态）。
     pending_bind: Option<String>,
-    /// 当前 pending 登录的关联 id（用于过滤被接管/取消后的陈旧 login_result）。
+    /// 当前 pending 登录的关联 id（用于过滤被接管/取消后的陈旧事件）。
     pending_login_id: Option<String>,
+    /// 当前登录任务专属的取消发送端；每次扫码创建新 watch 通道。
+    login_cancel: Option<watch::Sender<bool>>,
     /// 当前生效的「会话 ↔ 微信账号」绑定（内存镜像，变更即落盘 bindings.json）。
     bindings: Vec<Value>,
     /// 已启动过接收器的账号（防止重复启动）。
@@ -615,6 +622,7 @@ impl Default for BridgeInner {
             qr_content: None,
             pending_bind: None,
             pending_login_id: None,
+            login_cancel: None,
             bindings: Vec::new(),
             started_accounts: HashSet::new(),
             restart_attempts: HashMap::new(),
@@ -638,8 +646,6 @@ pub struct WeChatBridge {
     store: Arc<SessionStateStore>,
     /// 纯 Rust 微信协议客户端（登录/接收/发送/存储）。
     client: WechatClient,
-    /// 当前扫码登录的取消信号（共享；notify_waiters 不残留 permit）。
-    login_cancel: Arc<Notify>,
     inner: Mutex<BridgeInner>,
     seq: AtomicU64,
 }
@@ -676,7 +682,6 @@ impl WeChatBridge {
             app_dir,
             store,
             client,
-            login_cancel: Arc::new(Notify::new()),
             inner: Mutex::new(BridgeInner::default()),
             seq: AtomicU64::new(0),
         });
@@ -831,6 +836,9 @@ impl WeChatBridge {
         g.qr_content = None;
         g.pending_bind = None;
         g.pending_login_id = None;
+        if let Some(cancel) = g.login_cancel.take() {
+            cancel.send_replace(true);
+        }
         g.started_accounts.clear();
         g.account_conn.clear();
         g.restart_attempts.clear();
@@ -870,34 +878,37 @@ impl WeChatBridge {
             }
         }
         self.ensure_client().await;
-        // 取消上一个在途登录（若有），避免残留 QR/结果干扰本次绑定。
-        self.login_cancel.notify_waiters();
         let login_id = self.next_message_id();
+        let (cancel_tx, cancel_rx) = watch::channel(false);
         {
             let mut g = self.inner.lock().await;
+            // 取消上一个在途登录（若有）；watch 状态会保留取消信号，即使旧任务尚未
+            // 开始等待也不会丢失。
+            if let Some(cancel) = g.login_cancel.take() {
+                cancel.send_replace(true);
+            }
             g.pending_bind = Some(thread_id.to_string());
             g.pending_login_id = Some(login_id.clone());
+            g.login_cancel = Some(cancel_tx);
             g.qr_content = None;
             g.detail = None;
             g.conn = "starting";
         }
         self.emit_state().await;
-        self.client.start_login(login_id, self.login_cancel.clone());
+        self.client.start_login(login_id, cancel_rx);
         Ok(())
     }
 
     /// 取消当前扫码绑定（弹窗关闭时调用）：取消在途登录并清待绑定目标（幂等）。
     pub async fn cancel_bind(self: &Arc<Self>) {
-        let had_pending = {
-            let g = self.inner.lock().await;
-            g.pending_bind.is_some() || g.pending_login_id.is_some()
-        };
-        if !had_pending {
-            return;
-        }
-        self.login_cancel.notify_waiters();
         {
             let mut g = self.inner.lock().await;
+            if g.pending_bind.is_none() && g.pending_login_id.is_none() {
+                return;
+            }
+            if let Some(cancel) = g.login_cancel.take() {
+                cancel.send_replace(true);
+            }
             g.pending_bind = None;
             g.pending_login_id = None;
             g.qr_content = None;
@@ -955,8 +966,11 @@ impl WeChatBridge {
 
     async fn handle_wechat_event(self: &Arc<Self>, ev: WechatEvent) {
         match ev {
-            WechatEvent::Qr(url) => {
+            WechatEvent::Qr { login_id, url } => {
                 let mut g = self.inner.lock().await;
+                if !is_current_login(g.pending_login_id.as_deref(), &login_id) {
+                    return;
+                }
                 g.qr_content = Some(url);
                 g.conn = "awaiting_qr";
                 g.detail = None;
@@ -969,20 +983,23 @@ impl WeChatBridge {
                 message,
                 account_id,
                 user_id,
+                credentials,
             } => {
                 // 仅处理当前 pending 登录的结果；被接管/取消的陈旧结果直接忽略。
-                {
-                    let g = self.inner.lock().await;
-                    if g.pending_login_id.as_deref() != Some(login_id.as_str()) {
+                let pending_bind = {
+                    let mut g = self.inner.lock().await;
+                    if !is_current_login(g.pending_login_id.as_deref(), &login_id) {
                         return;
                     }
-                }
+                    let pending_bind = g.pending_bind.clone();
+                    g.pending_bind = None;
+                    g.pending_login_id = None;
+                    g.login_cancel = None;
+                    pending_bind
+                };
                 if success {
-                    // 注意：锁必须取到局部变量后立即释放，不能写进 match scrutinee——
-                    // 临时锁会存活到整个 match 结束，分支内再次 lock 会自锁卡死事件循环。
-                    let pending_bind = self.inner.lock().await.pending_bind.clone();
-                    match (pending_bind, account_id, user_id) {
-                        (Some(thread_id), Some(account), Some(user_id)) => {
+                    match (pending_bind, account_id, user_id, credentials) {
+                        (Some(thread_id), Some(account), Some(user_id), Some(credentials)) => {
                             let start_account = account.clone();
                             let conflict = {
                                 let g = self.inner.lock().await;
@@ -992,6 +1009,7 @@ impl WeChatBridge {
                                 self.set_error("绑定冲突：该会话或该微信账号已被绑定".into())
                                     .await;
                             } else {
+                                self.client.persist_login(&account, &user_id, credentials);
                                 let bound_at = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
                                     .map(|d| d.as_millis())
@@ -1012,8 +1030,6 @@ impl WeChatBridge {
                                 {
                                     let mut g = self.inner.lock().await;
                                     g.bindings.push(binding);
-                                    g.pending_bind = None;
-                                    g.pending_login_id = None;
                                     g.qr_content = None;
                                     g.conn = "starting";
                                     g.detail = None;
@@ -1041,7 +1057,7 @@ impl WeChatBridge {
                         _ => {
                             self.log(
                                 "warn",
-                                "收到未预期的登录成功（缺少待绑定会话或账号信息）".into(),
+                                "收到未预期的登录成功（缺少待绑定会话、账号或凭据）".into(),
                             )
                             .await;
                             self.emit_state().await;
@@ -1058,6 +1074,7 @@ impl WeChatBridge {
                     // 失败后清掉待绑定目标，允许用户重新发起扫码。
                     g.pending_bind = None;
                     g.pending_login_id = None;
+                    g.login_cancel = None;
                 }
                 self.emit_state().await;
             }
@@ -1913,6 +1930,13 @@ mod tests {
         assert!(binding_conflict(list, "t-1", "bot-2"));
         assert!(binding_conflict(list, "t-2", "bot-1"));
         assert!(!binding_conflict(list, "t-2", "bot-2"));
+    }
+
+    #[test]
+    fn stale_login_events_are_rejected_after_cancel_or_replacement() {
+        assert!(is_current_login(Some("login-2"), "login-2"));
+        assert!(!is_current_login(None, "login-1"));
+        assert!(!is_current_login(Some("login-2"), "login-1"));
     }
 
     #[test]

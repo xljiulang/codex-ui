@@ -1,11 +1,12 @@
 //! 微信 ilink bot 协议客户端（纯 Rust，替代 Node sidecar）。
 //!
-//! 实现文本收发链路的完整协议：二维码登录、getUpdates 长轮询、sendmessage、
-//! contextToken 管理、账号/会话/同步缓冲/回复上下文的文件存储；入站图片按微信 CDN
-//! 协议下载并 AES-128-ECB 解密后落盘（其它媒体仍忽略，媒体上传不在范围内）。
+//! 实现二维码登录、getUpdates 长轮询、文本与媒体消息收发、contextToken 管理，以及
+//! 账号/会话/同步缓冲/回复上下文的文件存储；图片、文件和视频按微信 CDN 协议流式
+//! 下载并 AES-128-ECB 解密，出站媒体加密后上传。
 //! 事件经 mpsc 推送给桥（WechatEvent），语义对齐原 sidecar 的 stdio 事件。
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,9 +15,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use futures_util::Future;
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{mpsc, watch, Mutex, Notify};
 
 /// 默认 API 基地址（与 wechat-channel 一致）。
 pub const DEFAULT_BASE_URL: &str = "https://ilinkai.weixin.qq.com";
@@ -1547,15 +1547,18 @@ fn urlencode(s: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// 桥消费的事件（语义对齐原 sidecar 事件）。
-#[derive(Debug, Clone)]
 pub enum WechatEvent {
-    Qr(String),
+    Qr {
+        login_id: String,
+        url: String,
+    },
     LoginResult {
         login_id: String,
         success: bool,
         message: String,
         account_id: Option<String>,
         user_id: Option<String>,
+        credentials: Option<LoginCredentials>,
     },
     Message {
         account_id: String,
@@ -1589,6 +1592,38 @@ pub enum WechatEvent {
         reason: String,
     },
     Accounts(Vec<Value>),
+}
+
+/// 登录成功后交由桥接层确认归属，再持久化的凭据。
+///
+/// 不实现 `Debug`，避免意外日志输出访问令牌。
+pub struct LoginCredentials {
+    pub token: String,
+    pub base_url: String,
+}
+
+/// 等待本次扫码登录被取消。`watch` 会保留最新值，因此取消先于任务首次轮询时也不会丢失。
+async fn wait_for_login_cancel(cancel: &mut watch::Receiver<bool>) {
+    loop {
+        if *cancel.borrow_and_update() {
+            return;
+        }
+        if cancel.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+/// 等待一次登录 API 请求或取消信号；取消优先，确保已取消任务不再发布事件或提交结果。
+async fn cancellable_login_request<T>(
+    cancel: &mut watch::Receiver<bool>,
+    request: impl Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        _ = wait_for_login_cancel(cancel) => None,
+        result = request => Some(result),
+    }
 }
 
 /// 一次出站媒体上传+发送所需的参数（避免函数签名过长）。
@@ -1645,13 +1680,28 @@ impl<A: WechatApi + 'static> WechatClient<A> {
         accounts_snapshot(&self.root)
     }
 
+    /// 持久化由当前有效登录绑定所确认的凭据。
+    pub fn persist_login(&self, account_id: &str, user_id: &str, credentials: LoginCredentials) {
+        save_account(
+            &self.root,
+            account_id,
+            &credentials.token,
+            &credentials.base_url,
+            user_id,
+        );
+    }
+
     /// 发起二维码登录（结果与二维码经事件推送，可用 cancel 取消）。
-    pub fn start_login(&self, login_id: String, cancel: Arc<Notify>) {
+    pub fn start_login(&self, login_id: String, mut cancel: watch::Receiver<bool>) {
         let api = self.api.clone();
         let tx = self.tx.clone();
-        let root = self.root.clone();
         tokio::spawn(async move {
-            let qr_res = api.get_qr_code(DEFAULT_BASE_URL, BOT_TYPE).await;
+            let Some(qr_res) =
+                cancellable_login_request(&mut cancel, api.get_qr_code(DEFAULT_BASE_URL, BOT_TYPE))
+                    .await
+            else {
+                return;
+            };
             let qr = match qr_res {
                 Ok(v) => v,
                 Err(e) => {
@@ -1661,6 +1711,7 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                         message: e,
                         account_id: None,
                         user_id: None,
+                        credentials: None,
                     });
                     return;
                 }
@@ -1682,10 +1733,14 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                     message: "未获取到二维码".into(),
                     account_id: None,
                     user_id: None,
+                    credentials: None,
                 });
                 return;
             }
-            let _ = tx.send(WechatEvent::Qr(url));
+            let _ = tx.send(WechatEvent::Qr {
+                login_id: login_id.clone(),
+                url,
+            });
             let deadline = now_ms() + LOGIN_TIMEOUT.as_millis() as u64;
             let mut refreshes = 0u32;
             loop {
@@ -1696,23 +1751,17 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                         message: "登录超时，请重试。".into(),
                         account_id: None,
                         user_id: None,
+                        credentials: None,
                     });
                     return;
                 }
-                let poll = api.poll_qr_status(DEFAULT_BASE_URL, &qrcode);
-                tokio::pin!(poll);
-                let status = tokio::select! {
-                    _ = cancel.notified() => {
-                        let _ = tx.send(WechatEvent::LoginResult {
-                            login_id,
-                            success: false,
-                            message: "登录已取消".into(),
-                            account_id: None,
-                            user_id: None,
-                        });
-                        return;
-                    }
-                    r = &mut poll => r,
+                let Some(status) = cancellable_login_request(
+                    &mut cancel,
+                    api.poll_qr_status(DEFAULT_BASE_URL, &qrcode),
+                )
+                .await
+                else {
+                    return;
                 };
                 let st = match status {
                     Ok(v) => v,
@@ -1723,6 +1772,7 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                             message: e,
                             account_id: None,
                             user_id: None,
+                            credentials: None,
                         });
                         return;
                     }
@@ -1756,16 +1806,20 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                                 message: "登录确认但缺少账号信息".into(),
                                 account_id: None,
                                 user_id: None,
+                                credentials: None,
                             });
                             return;
                         }
-                        save_account(&root, &bot_id, &bot_token, &base_url, &user_id);
                         let _ = tx.send(WechatEvent::LoginResult {
                             login_id,
                             success: true,
                             message: "与微信连接成功！".into(),
                             account_id: Some(bot_id),
                             user_id: Some(user_id),
+                            credentials: Some(LoginCredentials {
+                                token: bot_token,
+                                base_url,
+                            }),
                         });
                         return;
                     }
@@ -1778,10 +1832,19 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                                 message: "登录超时：二维码多次过期，请重新开始登录流程。".into(),
                                 account_id: None,
                                 user_id: None,
+                                credentials: None,
                             });
                             return;
                         }
-                        match api.get_qr_code(DEFAULT_BASE_URL, BOT_TYPE).await {
+                        let Some(refresh) = cancellable_login_request(
+                            &mut cancel,
+                            api.get_qr_code(DEFAULT_BASE_URL, BOT_TYPE),
+                        )
+                        .await
+                        else {
+                            return;
+                        };
+                        match refresh {
                             Ok(nq) => {
                                 let new_url = nq
                                     .get("qrcode_img_content")
@@ -1794,7 +1857,10 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                                     .unwrap_or("")
                                     .to_string();
                                 if !new_url.is_empty() {
-                                    let _ = tx.send(WechatEvent::Qr(new_url));
+                                    let _ = tx.send(WechatEvent::Qr {
+                                        login_id: login_id.clone(),
+                                        url: new_url,
+                                    });
                                 }
                                 if new_code.is_empty() {
                                     let _ = tx.send(WechatEvent::LoginResult {
@@ -1803,6 +1869,7 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                                         message: "刷新二维码失败".into(),
                                         account_id: None,
                                         user_id: None,
+                                        credentials: None,
                                     });
                                     return;
                                 }
@@ -1816,6 +1883,7 @@ impl<A: WechatApi + 'static> WechatClient<A> {
                                     message: format!("刷新二维码失败: {e}"),
                                     account_id: None,
                                     user_id: None,
+                                    credentials: None,
                                 });
                                 return;
                             }
@@ -2608,21 +2676,42 @@ mod tests {
         assert!(!CHANNEL_VERSION.trim().is_empty());
     }
 
+    #[derive(Default)]
+    struct LoginApiGate {
+        started: Notify,
+        release: Notify,
+    }
+
+    #[derive(Default)]
     struct MockApi {
-        // 简单固定响应
+        // 可选门闩用于验证扫码请求等待期间取消不会丢失。
+        qr_gate: Option<Arc<LoginApiGate>>,
+        poll_gate: Option<Arc<LoginApiGate>>,
     }
 
     impl WechatApi for MockApi {
         unsupported_media_api!();
         fn get_qr_code(&self, _base: &str, _bot: &str) -> BoxFuture<'_, Result<Value, String>> {
-            Box::pin(async { Ok(json!({ "qrcode": "QR-1", "qrcode_img_content": "http://qr/1" })) })
+            let gate = self.qr_gate.clone();
+            Box::pin(async move {
+                if let Some(gate) = gate {
+                    gate.started.notify_one();
+                    gate.release.notified().await;
+                }
+                Ok(json!({ "qrcode": "QR-1", "qrcode_img_content": "http://qr/1" }))
+            })
         }
         fn poll_qr_status(
             &self,
             _base: &str,
             _qrcode: &str,
         ) -> BoxFuture<'_, Result<Value, String>> {
-            Box::pin(async {
+            let gate = self.poll_gate.clone();
+            Box::pin(async move {
+                if let Some(gate) = gate {
+                    gate.started.notify_one();
+                    gate.release.notified().await;
+                }
                 Ok(json!({
                     "status": "confirmed",
                     "ilink_bot_id": "bot-1@im.bot",
@@ -3819,21 +3908,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let client = WechatClient::with_api(root, tx, MockApi {});
-        client.start_login("L1".into(), Arc::new(Notify::new()));
+        let client = WechatClient::with_api(root, tx, MockApi::default());
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        client.start_login("L1".into(), cancel_rx);
         let mut qr_seen = false;
         let mut ok = false;
         let mut acc = None;
+        let mut credentials = None;
         while let Some(ev) = rx.recv().await {
             match ev {
-                WechatEvent::Qr(_) => qr_seen = true,
+                WechatEvent::Qr { login_id, .. } => {
+                    assert_eq!(login_id, "L1");
+                    qr_seen = true;
+                }
                 WechatEvent::LoginResult {
                     success,
                     account_id,
+                    credentials: result_credentials,
                     ..
                 } => {
                     ok = success;
                     acc = account_id;
+                    credentials = result_credentials;
                     break;
                 }
                 _ => {}
@@ -3842,6 +3938,102 @@ mod tests {
         assert!(qr_seen);
         assert!(ok);
         assert_eq!(acc.as_deref(), Some("bot-1@im.bot"));
+        assert!(client.accounts().is_empty(), "凭据应等待桥接层确认后再落盘");
+        client.persist_login(
+            acc.as_deref().unwrap(),
+            "u-1@im.wechat",
+            credentials.expect("登录成功应携带待提交凭据"),
+        );
+        assert_eq!(client.accounts().len(), 1);
+        drop(cancel_tx);
+    }
+
+    #[tokio::test]
+    async fn cancel_during_qr_request_is_not_lost() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let gate = Arc::new(LoginApiGate::default());
+        let client = WechatClient::with_api(
+            root,
+            tx,
+            MockApi {
+                qr_gate: Some(gate.clone()),
+                poll_gate: None,
+            },
+        );
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        client.start_login("L-qr".into(), cancel_rx);
+
+        gate.started.notified().await;
+        cancel_tx.send_replace(true);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), rx.recv())
+                .await
+                .is_err(),
+            "取消后的旧登录不应再发布二维码或结果"
+        );
+        assert!(client.accounts().is_empty());
+
+        // 旧任务被取消后立刻重开：只有新登录 id 的二维码和结果应继续流动。
+        gate.release.notify_one();
+        let (_new_cancel_tx, new_cancel_rx) = watch::channel(false);
+        client.start_login("L-new".into(), new_cancel_rx);
+        let mut new_qr_seen = false;
+        let mut new_login_succeeded = false;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                WechatEvent::Qr { login_id, .. } => {
+                    assert_eq!(login_id, "L-new");
+                    new_qr_seen = true;
+                }
+                WechatEvent::LoginResult {
+                    login_id, success, ..
+                } => {
+                    assert_eq!(login_id, "L-new");
+                    new_login_succeeded = success;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(new_qr_seen);
+        assert!(new_login_succeeded);
+        assert!(client.accounts().is_empty(), "仅客户端确认不能提交登录凭据");
+    }
+
+    #[tokio::test]
+    async fn cancel_during_qr_poll_is_not_lost() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let gate = Arc::new(LoginApiGate::default());
+        let client = WechatClient::with_api(
+            root,
+            tx,
+            MockApi {
+                qr_gate: None,
+                poll_gate: Some(gate.clone()),
+            },
+        );
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        client.start_login("L-poll".into(), cancel_rx);
+
+        assert!(matches!(
+            rx.recv().await,
+            Some(WechatEvent::Qr { login_id, .. }) if login_id == "L-poll"
+        ));
+        gate.started.notified().await;
+        cancel_tx.send_replace(true);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), rx.recv())
+                .await
+                .is_err(),
+            "取消后的轮询不应再发布登录结果"
+        );
+        assert!(client.accounts().is_empty());
     }
 
     #[tokio::test]
@@ -4594,7 +4786,7 @@ mod tests {
         save_session_status(&root, "bot-1", "connected", None, None);
         set_context_token(&root, "bot-1", "u-1", "ctx-1", None);
         let (tx, _rx) = mpsc::unbounded_channel();
-        let client = WechatClient::with_api(root.clone(), tx, MockApi {});
+        let client = WechatClient::with_api(root.clone(), tx, MockApi::default());
 
         // 不存在
         let missing = dir.path().join("nope.png");
