@@ -4445,14 +4445,7 @@ mod tests {
         };
         assert_eq!(body["rawfilemd5"], expect_md5);
 
-        // 上传的密文应能用上报的密钥解回明文
-        let key: [u8; 16] = {
-            let mut k = [0u8; 16];
-            for (i, b) in k.iter_mut().enumerate() {
-                *b = u8::from_str_radix(&aes_hex[i * 2..i * 2 + 2], 16).unwrap();
-            }
-            k
-        };
+        // 上传的密文应能用上报的密钥（hex）解回明文
         let uploaded = cipher.lock().unwrap().clone();
         let mut decryptor = EcbStreamDecryptor::new(&aes_hex).unwrap();
         let mut decrypted = decryptor.push(&uploaded).unwrap();

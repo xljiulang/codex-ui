@@ -5,6 +5,7 @@ export const CODEXUI_DYNAMIC_NAMESPACE = "codexui";
 export const CODEXUI_TOOL_GET_USAGE = "get_usage";
 export const CODEXUI_TOOL_COMPACT_CONTEXT = "compact_context";
 export const CODEXUI_TOOL_ADD_SCHEDULED_TASK = "add_scheduled_task";
+export const CODEXUI_TOOL_SEND_FILE_TO_WECHAT = "send_file_to_wechat";
 
 /** 与协议 `DynamicToolFunctionSpec` 对齐的最小结构（字段名以 generate-ts 绑定为准） */
 export interface DynamicToolFunctionSpec {
@@ -23,14 +24,15 @@ export interface DynamicToolNamespaceSpec {
   tools: DynamicToolFunctionSpec[];
 }
 
-/** 由 codex-ui 在 `thread/start` 时注入的动态工具（单一 `codexui` 命名空间，v1 三条） */
+/** 由 codex-ui 在 `thread/start` 时注入的动态工具（单一 `codexui` 命名空间，v1 四条） */
 // 注意：app-server 要求 inputSchema 是 JSON Schema 的 `type: "object"`（空对象 `{}` 会被拒，
 // 报 "schema must be a JSON Schema of type object, got type: null"）；无参工具用空 properties。
 export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
   {
     type: "namespace",
     name: CODEXUI_DYNAMIC_NAMESPACE,
-    description: "codex-ui 管理工具：查询用量、压缩上下文、创建定时任务",
+    description:
+      "codex-ui 管理工具：查询用量、压缩上下文、创建定时任务、把文件发送到微信",
     tools: [
       {
         type: "function",
@@ -72,6 +74,25 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
             },
           },
           required: ["name", "prompt", "cron"],
+        },
+      },
+      {
+        type: "function",
+        name: CODEXUI_TOOL_SEND_FILE_TO_WECHAT,
+        description:
+          "把本机文件发送到已绑定的微信账号（该会话需已绑定微信，否则调用会失败）。" +
+          "paths 是要发送文件的绝对路径数组，单次最多 5 个；" +
+          "仅在用户明确要求发送文件时调用。",
+        inputSchema: {
+          type: "object",
+          properties: {
+            paths: {
+              type: "array",
+              items: { type: "string" },
+              description: "文件绝对路径（单次最多 5 个）",
+            },
+          },
+          required: ["paths"],
         },
       },
     ],

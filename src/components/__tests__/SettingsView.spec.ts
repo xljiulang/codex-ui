@@ -1550,7 +1550,7 @@ describe("SettingsView 动态工具", () => {
     store.settings.dynamic_tools_disabled = [];
   });
 
-  it("导航位于模型配置与技能管理之间，渲染标题与三个工具行", async () => {
+  it("导航位于模型配置与技能管理之间，渲染标题与四个工具行", async () => {
     const wrapper = mount(SettingsView);
     await flushPromises();
     const nav = wrapper.findAll(".settings-nav-item");
@@ -1567,11 +1567,12 @@ describe("SettingsView 动态工具", () => {
     expect(wrapper.text()).toContain("动态工具");
     expect(wrapper.text()).toContain("禁用后新会话不再注入");
     const rows = wrapper.findAll(".dynamic-tool-row");
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     expect(rows[0].text()).toContain("codexui_get_usage");
     expect(rows[0].text()).toContain("查询当前会话的 token 消耗");
     expect(rows[1].text()).toContain("codexui_compact_context");
     expect(rows[2].text()).toContain("codexui_add_scheduled_task");
+    expect(rows[3].text()).toContain("codexui_send_file_to_wechat");
   });
 
   it("切换开关写入 dynamic_tools_disabled（禁用后不再注入）", async () => {

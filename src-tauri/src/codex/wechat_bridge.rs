@@ -5,7 +5,9 @@
 //! 消费（语义对齐原 Node sidecar 的 stdio 事件，前端 wechat/event 协议不变）。
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -14,7 +16,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
-use crate::codex::app_server::CodexServer;
+use crate::codex::app_server::{BackendToolHandler, CodexServer};
 use crate::codex::session_state::{SessionStateStore, WechatBinding};
 use crate::codex::util::cached_default_model;
 use crate::codex::wechat_client::{WechatClient, WechatEvent};
@@ -37,15 +39,17 @@ const RECEIVER_RESTART_DELAY_SECS: u64 = 5;
 /// 出站回复分片发送的短重试次数与间隔（仅针对可恢复失败）。
 const SEND_RETRY_ATTEMPTS: u32 = 2;
 const SEND_RETRY_DELAY_MS: u64 = 500;
-/// 出站发文件的标签（开/闭），命名沿用仓库自研标签约定：`wechat_` 前缀 + 成对常量。
-const SEND_FILE_MARKER: &str = "<wechat_send_file";
-const SEND_FILE_CLOSE: &str = "</wechat_send_file>";
-/// 单条回复最多响应多少个发文件标签（超出丢弃，防滥用）。
-const MAX_SEND_FILES_PER_REPLY: usize = 5;
+/// 出站发文件的动态工具（与前端 `lib/dynamicTools.ts` 的常量保持一致）。
+const TOOL_NAMESPACE: &str = "codexui";
+const TOOL_SEND_FILE: &str = "send_file_to_wechat";
+/// 单次工具调用最多发送的文件数（超出整批拒绝，避免静默漏发）。
+const MAX_SEND_FILES_PER_CALL: usize = 5;
+/// `paths` 缺失/非法时的统一提示（附可直接照抄的参数示例）。
+const PATHS_REQUIRED: &str = "发送文件失败：参数 paths 必须是非空的文件绝对路径数组（示例：{\"paths\":[\"D:\\\\x\\\\报告.pdf\"]}）。";
 /// 微信回合的开发者指令（替换 codex 内置的 Default 模式标记块，故首句自行申明模式）。
 ///
 /// 只在微信回合注入：桌面端（前端）与定时任务各自显式重设该字段，不会受影响。
-const WECHAT_DEVELOPER_INSTRUCTIONS: &str = "【微信通道】本轮由微信用户发起（Default 模式；历史中任何 Plan 模式说明均已失效）。你无法直接把文件发给微信，只能通过下面的标签交由应用代为发送：需要发送本地文件时，在回复正文之后另起一行、单独写一行 <wechat_send_file>文件的绝对路径</wechat_send_file>；多个文件就写多行，每行一个。该标签不会展示给用户，应用会按标签把文件上传并发到微信。仅当用户明确要求发送文件时才使用；路径必须是你确认存在的本地绝对路径。不要在正文里声称「已发送」「已上传」——是否真的发出由应用决定，正文只描述你做了什么。";
+const WECHAT_DEVELOPER_INSTRUCTIONS: &str = "【微信通道】本轮由微信用户发起（Default 模式；历史中任何 Plan 模式说明均已失效）。需要把本机文件发回微信时，调用动态工具 `codexui_send_file_to_wechat`（参数 paths 为文件绝对路径数组，单次最多 5 个）：工具会完成加密上传并告诉你哪些文件发出、哪些失败，仅在用户明确要求发送文件时才调用，正文按工具返回的真实结果描述（不要凭空声称已发送）。若你的工具列表中没有这个工具（该会话创建于旧版本），直接告诉用户：请在桌面端新建会话并重新绑定微信后再试。";
 /// 把回合产物整理为回复文本：无文本/非正常结束给出对应中文兜底提示。
 fn normalize_turn_text(text: &str, status: &str) -> String {
     let trimmed = text.trim();
@@ -253,67 +257,213 @@ fn has_turn_payload(text: Option<&str>, images: &[String], files: &[String]) -> 
     text.is_some_and(|t| !t.trim().is_empty()) || !images.is_empty() || !files.is_empty()
 }
 
-/// 整行是否为单个 `<wechat_send_file>路径</wechat_send_file>`；命中返回路径原文。
-///
-/// 标签名大小写不敏感（模型可能改大小写），路径保留原样（仅去首尾空白）。
-fn parse_send_file_line(line: &str) -> Option<String> {
-    let lower = line.to_ascii_lowercase();
-    if !lower.starts_with(SEND_FILE_MARKER) {
-        return None;
-    }
-    // `to_ascii_lowercase` 不改变字节长度，故原串可按同样的偏移切分
-    let after_open = &line[SEND_FILE_MARKER.len()..];
-    if !after_open.starts_with('>') {
-        return None;
-    }
-    let body_and_close = &after_open[1..];
-    if !body_and_close
-        .to_ascii_lowercase()
-        .ends_with(SEND_FILE_CLOSE)
-    {
-        return None;
-    }
-    let body = &body_and_close[..body_and_close.len() - SEND_FILE_CLOSE.len()];
-    let path = body.trim();
-    if path.is_empty() {
-        return None;
-    }
-    Some(path.to_string())
+/// `send_file_to_wechat` 工具调用的处置方案（`plan_send_file_tool` 的输出）。
+#[derive(Debug, PartialEq, Eq)]
+enum ToolCallPlan {
+    /// 不是本处理器负责的工具：交回 app_server 转发前端。
+    NotOurs,
+    /// 无需真发文件，直接把文案与成功标志回给模型。
+    Reply { text: String, success: bool },
+    /// 需要真正发送：`account_id` / `peer` 取自该线程的微信绑定。
+    Send {
+        account_id: String,
+        peer: String,
+        paths: Vec<String>,
+    },
 }
 
-/// 从回合终局文本中取出出站发文件标签，返回 `(可见文本, 待发送路径, 因超上限丢弃的个数)`。
-///
-/// - **逐行**判定：整行必须是完整标签才命中（行内夹杂不算）；
-/// - 跳过 ``` / ~~~ 围栏内的行——模型可能只在示例代码里写出标签，不应触发真实发送；
-/// - 命中行从可见文本中整体删除，并清掉首尾空白；
-/// - 路径去重、上限 [`MAX_SEND_FILES_PER_REPLY`]（超出的丢弃并在调用方记日志）。
-fn extract_send_files(text: &str) -> (String, Vec<String>, usize) {
-    let mut visible: Vec<&str> = Vec::new();
-    let mut paths: Vec<String> = Vec::new();
-    let mut over_cap = 0usize;
-    let mut in_fence = false;
-    for line in text.split('\n') {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            in_fence = !in_fence;
-            visible.push(line);
-            continue;
-        }
-        if in_fence {
-            visible.push(line);
-            continue;
-        }
-        if let Some(path) = parse_send_file_line(trimmed) {
-            if paths.len() >= MAX_SEND_FILES_PER_REPLY {
-                over_cap += 1;
-            } else if !paths.iter().any(|p| p == &path) {
-                paths.push(path);
-            }
-            continue;
-        }
-        visible.push(line);
+/// 失败文案的统一构造（`success=false`）。
+fn tool_failure(text: impl Into<String>) -> ToolCallPlan {
+    ToolCallPlan::Reply {
+        text: text.into(),
+        success: false,
     }
-    (visible.join("\n").trim().to_string(), paths, over_cap)
+}
+
+/// 设置里的禁用键形如 `namespace.tool`（与前端 `dynamicToolKey` 同形）。
+fn is_send_file_tool_disabled(disabled: &[String]) -> bool {
+    let key = format!("{TOOL_NAMESPACE}.{TOOL_SEND_FILE}");
+    disabled.iter().any(|d| d == &key)
+}
+
+/// 解析 `paths`：字符串数组（也容忍模型直接给单个字符串）；空/非法/超上限一律整体失败。
+fn parse_tool_paths(arguments: Option<&Value>) -> Result<Vec<String>, String> {
+    let items: Vec<String> = match arguments.and_then(|a| a.get("paths")) {
+        Some(Value::Array(list)) => {
+            let mut out = Vec::with_capacity(list.len());
+            for item in list {
+                let path = item.as_str().map(str::trim).unwrap_or("");
+                if path.is_empty() {
+                    return Err(PATHS_REQUIRED.to_string());
+                }
+                out.push(path.to_string());
+            }
+            out
+        }
+        Some(Value::String(single)) if !single.trim().is_empty() => {
+            vec![single.trim().to_string()]
+        }
+        _ => return Err(PATHS_REQUIRED.to_string()),
+    };
+    if items.is_empty() {
+        return Err(PATHS_REQUIRED.to_string());
+    }
+    if items.len() > MAX_SEND_FILES_PER_CALL {
+        return Err(format!(
+            "发送文件失败：单次最多发送 {MAX_SEND_FILES_PER_CALL} 个文件（收到 {} 个），请分批调用。",
+            items.len()
+        ));
+    }
+    Ok(items)
+}
+
+/// 该线程的微信绑定收件人：`accountId`（绑定账号）+ `userId`（扫码本人）。
+fn binding_target(bindings: &[Value], thread_id: &str) -> Option<(String, String)> {
+    let binding = bindings
+        .iter()
+        .find(|b| b.get("threadId").and_then(|v| v.as_str()) == Some(thread_id))?;
+    let account_id = binding
+        .get("accountId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let peer = binding
+        .get("userId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if account_id.is_empty() || peer.is_empty() {
+        return None;
+    }
+    Some((account_id.to_string(), peer.to_string()))
+}
+
+/// 判定一次 `item/tool/call` 的处置方案（纯函数：参数解析、禁用检查、绑定解析都在这里）。
+fn plan_send_file_tool(params: &Value, disabled: &[String], bindings: &[Value]) -> ToolCallPlan {
+    if params.get("namespace").and_then(|v| v.as_str()) != Some(TOOL_NAMESPACE)
+        || params.get("tool").and_then(|v| v.as_str()) != Some(TOOL_SEND_FILE)
+    {
+        return ToolCallPlan::NotOurs;
+    }
+    if is_send_file_tool_disabled(disabled) {
+        return tool_failure("该动态工具已被禁用");
+    }
+    let thread_id = params
+        .get("threadId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if thread_id.is_empty() {
+        return tool_failure("发送文件失败：调用缺少 threadId");
+    }
+    let paths = match parse_tool_paths(params.get("arguments")) {
+        Ok(paths) => paths,
+        Err(e) => return tool_failure(e),
+    };
+    let Some((account_id, peer)) = binding_target(bindings, thread_id) else {
+        return tool_failure(
+            "发送文件失败：该会话未绑定微信账号。请在桌面端右键会话「微信接入」扫码绑定后重试。",
+        );
+    };
+    ToolCallPlan::Send {
+        account_id,
+        peer,
+        paths,
+    }
+}
+
+/// 取路径的文件名（用于结果文案，避免长路径刷屏）。
+fn file_name_of(path: &str) -> String {
+    path.rsplit(['\\', '/'])
+        .find(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// 组装工具结果文案与成功标志：全成功 → `已发送 N 个文件到微信：a、b`（true）；
+/// 有失败 → `已发送 1/2 个文件到微信：a；失败：b（原因）`（false）。
+fn compose_send_report(sent: &[String], failed: &[(String, String)]) -> (String, bool) {
+    let names = sent
+        .iter()
+        .map(|p| file_name_of(p))
+        .collect::<Vec<_>>()
+        .join("、");
+    if failed.is_empty() {
+        return (format!("已发送 {} 个文件到微信：{names}", sent.len()), true);
+    }
+    let detail = failed
+        .iter()
+        .map(|(path, err)| format!("{}（{err}）", file_name_of(path)))
+        .collect::<Vec<_>>()
+        .join("、");
+    if sent.is_empty() {
+        return (format!("发送文件失败：{detail}"), false);
+    }
+    (
+        format!(
+            "已发送 {}/{} 个文件到微信：{names}；失败：{detail}",
+            sent.len(),
+            sent.len() + failed.len()
+        ),
+        false,
+    )
+}
+
+/// 后端直答的动态工具：`codexui.send_file_to_wechat`。
+///
+/// 由 `lib.rs` 在桥创建后注册到 app-server 层——微信回合可能在窗口隐藏/无人值守时发生，
+/// 文件发送不该依赖前端 webview 是否存活；不是本工具负责的调用返回 `None`，照旧转发前端。
+impl BackendToolHandler for WeChatBridge {
+    fn handle<'a>(
+        &'a self,
+        params: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Option<Result<String, String>>> + Send + 'a>> {
+        Box::pin(async move {
+            let disabled = crate::codex::settings::load(&self.app_dir).dynamic_tools_disabled;
+            let bindings = self.inner.lock().await.bindings.clone();
+            match plan_send_file_tool(params, &disabled, &bindings) {
+                ToolCallPlan::NotOurs => None,
+                ToolCallPlan::Reply { text, success } => {
+                    Some(if success { Ok(text) } else { Err(text) })
+                }
+                ToolCallPlan::Send {
+                    account_id,
+                    peer,
+                    paths,
+                } => {
+                    let mut sent: Vec<String> = Vec::new();
+                    let mut failed: Vec<(String, String)> = Vec::new();
+                    for path in paths {
+                        let target = std::path::Path::new(&path);
+                        if !target.is_absolute() {
+                            failed.push((path, "必须是绝对路径".to_string()));
+                            continue;
+                        }
+                        match self.client.send_file(&account_id, &peer, target).await {
+                            Ok(()) => {
+                                self.log("info", format!("已发送文件到微信：{path}")).await;
+                                sent.push(path);
+                            }
+                            Err(e) => {
+                                self.log(
+                                    "warn",
+                                    format!(
+                                        "发送文件到微信失败（{path}，可重试={}）: {}",
+                                        e.is_retryable(),
+                                        e.message()
+                                    ),
+                                )
+                                .await;
+                                failed.push((path, e.message().to_string()));
+                            }
+                        }
+                    }
+                    let (text, success) = compose_send_report(&sent, &failed);
+                    Some(if success { Ok(text) } else { Err(text) })
+                }
+            }
+        })
+    }
 }
 
 /// 协议侧路径统一正斜杠：Windows 反斜杠路径 codex 侧读不到（与前端 mention.toProtocolPath 一致）。
@@ -484,6 +634,8 @@ impl Default for BridgeInner {
 pub struct WeChatBridge {
     app: AppHandle,
     server: Arc<CodexServer>,
+    /// 应用数据目录（微信数据在 `app_dir/wechat`；工具处理器据此读设置里的禁用列表）。
+    app_dir: PathBuf,
     /// 统一会话状态存储（微信绑定写入 wechat 子字段）。
     store: Arc<SessionStateStore>,
     /// 纯 Rust 微信协议客户端（登录/接收/发送/存储）。
@@ -523,6 +675,7 @@ impl WeChatBridge {
         let bridge = Arc::new(Self {
             app,
             server,
+            app_dir,
             store,
             client,
             login_cancel: Arc::new(Notify::new()),
@@ -1508,46 +1661,10 @@ impl WeChatBridge {
         } else {
             final_reply_text(&captured, &completion.status, None)
         };
-        // 解析出站发文件标签：先发可见正文，再按标签逐个上传发送。
-        // 剥离后为空（整轮只有标签）时不发空消息。
-        let (visible_text, send_paths, over_cap) = extract_send_files(&final_text);
-        if over_cap > 0 {
-            self.log(
-                "warn",
-                format!(
-                    "一条回复里的发文件标签超过上限（{MAX_SEND_FILES_PER_REPLY}），已丢弃 {over_cap} 个"
-                ),
-            )
-            .await;
-        }
-        if !visible_text.is_empty() {
-            self.send_reply_now(&account_id, &peer, &visible_text).await;
-        }
-        for path in &send_paths {
-            let file = std::path::Path::new(path);
-            match self.client.send_file(&account_id, &peer, file).await {
-                Ok(()) => {
-                    self.log("info", format!("已发送文件到微信：{path}")).await;
-                }
-                Err(e) => {
-                    self.log(
-                        "warn",
-                        format!(
-                            "发送文件到微信失败（{path}，可重试={}）: {}",
-                            e.is_retryable(),
-                            e.message()
-                        ),
-                    )
-                    .await;
-                    // 失败逐条回执，避免用户以为文件已经发出
-                    self.send_reply_now(
-                        &account_id,
-                        &peer,
-                        &format!("⚠️ 无法发送文件：{path}（{}）", e.message()),
-                    )
-                    .await;
-                }
-            }
+        // 出站发文件由动态工具 `codexui_send_file_to_wechat` 在回合内完成（结果直接回给模型），
+        // 这里只负责把回合文本作为回复发出。
+        if !final_text.is_empty() {
+            self.send_reply_now(&account_id, &peer, &final_text).await;
         }
         self.set_typing(&account_id, &peer, 2).await;
     }
@@ -2143,72 +2260,141 @@ mod tests {
         ));
     }
 
+    /// `paths` 参数的合法/非法形态（纯函数，不触网）。
     #[test]
-    fn send_file_tag_is_extracted_and_stripped_from_visible_text() {
-        let text = "这是你要的文件。\n<wechat_send_file>D:\\x\\报告.pdf</wechat_send_file>";
-        let (visible, paths, over_cap) = extract_send_files(text);
-        assert_eq!(visible, "这是你要的文件。");
-        assert_eq!(paths, vec!["D:\\x\\报告.pdf".to_string()]);
-        assert_eq!(over_cap, 0);
-    }
-
-    #[test]
-    fn send_file_tag_supports_multiple_lines_and_paths_with_spaces() {
-        let text = "<wechat_send_file>C:\\My Docs\\a b.png</wechat_send_file>\n\
-                    <wechat_send_file>D:\\b.zip</wechat_send_file>";
-        let (visible, paths, _) = extract_send_files(text);
-        assert!(visible.is_empty(), "整轮只有标签时不留下可见文本");
+    fn send_file_tool_parses_paths_arguments() {
+        let parse = |v: Value| parse_tool_paths(Some(&v));
         assert_eq!(
-            paths,
-            vec!["C:\\My Docs\\a b.png".to_string(), "D:\\b.zip".to_string()]
+            parse(json!({ "paths": ["D:\\a.md", "D:\\b.pdf"] })).unwrap(),
+            vec!["D:\\a.md".to_string(), "D:\\b.pdf".to_string()]
         );
-    }
-
-    #[test]
-    fn send_file_tag_inside_code_fence_is_ignored() {
-        // 模型只在示例代码里写出标签时不应触发真实发送
-        let text = "示例：\n```\n<wechat_send_file>C:\\x.png</wechat_send_file>\n```";
-        let (visible, paths, _) = extract_send_files(text);
-        assert!(paths.is_empty());
-        assert!(
-            visible.contains("C:\\x.png"),
-            "围栏内内容应原样保留在可见文本里"
+        // 单个字符串：模型偶尔不套数组，宽容接受
+        assert_eq!(
+            parse(json!({ "paths": "D:\\a.md" })).unwrap(),
+            vec!["D:\\a.md".to_string()]
         );
-    }
-
-    #[test]
-    fn send_file_tag_requires_whole_line_and_ignores_case() {
-        // 行内夹杂不算
-        let (_, paths, _) =
-            extract_send_files("前面 <wechat_send_file>C:\\x.png</wechat_send_file> 后面");
-        assert!(paths.is_empty());
-        // 标签名大小写不敏感
-        let (visible, paths, _) =
-            extract_send_files("<WECHAT_SEND_FILE>C:\\x.png</WeChat_Send_File>");
-        assert_eq!(paths, vec!["C:\\x.png".to_string()]);
-        assert!(visible.is_empty());
-    }
-
-    #[test]
-    fn send_file_tag_dedupes_and_caps_per_reply() {
-        let dup = "<wechat_send_file>C:\\x.png</wechat_send_file>\n\
-                   <wechat_send_file>C:\\x.png</wechat_send_file>";
-        assert_eq!(extract_send_files(dup).1.len(), 1, "重复路径应去重");
-
-        let many: String = (0..MAX_SEND_FILES_PER_REPLY + 3)
-            .map(|i| format!("<wechat_send_file>C:\\f{i}.png</wechat_send_file>\n"))
+        // 路径两侧空白去除
+        assert_eq!(
+            parse(json!({ "paths": ["  D:\\a.md  "] })).unwrap(),
+            vec!["D:\\a.md".to_string()]
+        );
+        for bad in [
+            json!({}),
+            json!({ "paths": [] }),
+            json!({ "paths": ["   "] }),
+            json!({ "paths": [1] }),
+            json!({ "paths": null }),
+        ] {
+            assert!(parse(bad.clone()).is_err(), "应拒绝: {bad}");
+        }
+        // 超上限整批拒绝（不截断，避免静默漏发）
+        let many: Vec<String> = (0..MAX_SEND_FILES_PER_CALL + 1)
+            .map(|i| format!("D:\\f{i}.png"))
             .collect();
-        let (_, paths, over_cap) = extract_send_files(&many);
-        assert_eq!(paths.len(), MAX_SEND_FILES_PER_REPLY, "超出上限应截断");
-        assert_eq!(over_cap, 3, "应回报被丢弃的个数（供调用方记日志）");
+        let err = parse(json!({ "paths": many })).unwrap_err();
+        assert!(err.contains("最多发送 5 个"), "{err}");
     }
 
+    /// 命名空间/工具名判别、禁用检查、绑定解析。
     #[test]
-    fn text_without_send_file_tag_is_unchanged() {
-        let text = "普通回复，没有任何标签。";
-        let (visible, paths, _) = extract_send_files(text);
-        assert_eq!(visible, text);
-        assert!(paths.is_empty());
+    fn send_file_tool_plans_by_namespace_disabled_and_binding() {
+        let bindings = vec![json!({ "threadId": "t-1", "accountId": "bot-1", "userId": "wx-1" })];
+        let call = |thread: &str| {
+            json!({
+                "namespace": TOOL_NAMESPACE,
+                "tool": TOOL_SEND_FILE,
+                "threadId": thread,
+                "arguments": { "paths": ["D:\\a.md"] },
+            })
+        };
+
+        // 不是本处理器负责的工具 → 交前端
+        assert_eq!(
+            plan_send_file_tool(
+                &json!({ "namespace": "codexui", "tool": "get_usage" }),
+                &[],
+                &bindings
+            ),
+            ToolCallPlan::NotOurs
+        );
+        assert_eq!(
+            plan_send_file_tool(
+                &json!({ "namespace": "other", "tool": TOOL_SEND_FILE }),
+                &[],
+                &bindings
+            ),
+            ToolCallPlan::NotOurs
+        );
+
+        // 命中且已绑定 → 待发送（收件人取自绑定）
+        assert_eq!(
+            plan_send_file_tool(&call("t-1"), &[], &bindings),
+            ToolCallPlan::Send {
+                account_id: "bot-1".to_string(),
+                peer: "wx-1".to_string(),
+                paths: vec!["D:\\a.md".to_string()],
+            }
+        );
+
+        // 设置里被禁用 → 失败（与前端 handleDynamicToolCall 语义一致）
+        assert_eq!(
+            plan_send_file_tool(
+                &call("t-1"),
+                &["codexui.send_file_to_wechat".to_string()],
+                &bindings
+            ),
+            ToolCallPlan::Reply {
+                text: "该动态工具已被禁用".to_string(),
+                success: false,
+            }
+        );
+
+        // 未绑定微信 → 失败并给出绑定指引
+        match plan_send_file_tool(&call("t-2"), &[], &bindings) {
+            ToolCallPlan::Reply { text, success } => {
+                assert!(!success);
+                assert!(text.contains("未绑定微信"), "{text}");
+            }
+            other => panic!("未绑定应回失败文案: {other:?}"),
+        }
+
+        // 缺 threadId
+        match plan_send_file_tool(
+            &json!({ "namespace": TOOL_NAMESPACE, "tool": TOOL_SEND_FILE, "arguments": { "paths": ["D:\\a.md"] } }),
+            &[],
+            &bindings,
+        ) {
+            ToolCallPlan::Reply { text, .. } => assert!(text.contains("threadId"), "{text}"),
+            other => panic!("缺 threadId 应回失败文案: {other:?}"),
+        }
+    }
+
+    /// 结果文案与成功标志。
+    #[test]
+    fn send_file_report_text_and_success_flag() {
+        let (text, success) = compose_send_report(
+            &["D:\\x\\a.md".to_string(), "D:\\y\\b.pdf".to_string()],
+            &[],
+        );
+        assert!(success);
+        assert_eq!(text, "已发送 2 个文件到微信：a.md、b.pdf");
+
+        let (text, success) = compose_send_report(
+            &["D:\\x\\a.md".to_string()],
+            &[("D:\\y\\b.pdf".to_string(), "文件过大".to_string())],
+        );
+        assert!(!success);
+        assert_eq!(
+            text,
+            "已发送 1/2 个文件到微信：a.md；失败：b.pdf（文件过大）"
+        );
+
+        let (text, success) = compose_send_report(
+            &[],
+            &[("D:\\x\\a.md".to_string(), "文件不存在".to_string())],
+        );
+        assert!(!success);
+        assert_eq!(text, "发送文件失败：a.md（文件不存在）");
     }
 
     #[test]
@@ -2218,8 +2404,12 @@ mod tests {
             .as_str()
             .expect("微信回合应注入教学");
         assert!(
-            instructions.contains("wechat_send_file"),
-            "教学需告知标签用法"
+            instructions.contains("codexui_send_file_to_wechat"),
+            "教学需告知动态工具用法"
+        );
+        assert!(
+            !instructions.contains("<wechat_send_file"),
+            "标签方案已删除，教学里不应再出现标签"
         );
         assert!(instructions.contains("Default 模式"), "教学需申明当前模式");
         assert_eq!(v["collaborationMode"]["mode"], "default");

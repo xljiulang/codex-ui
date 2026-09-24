@@ -501,6 +501,9 @@ pub fn run() {
                 session_store,
             );
             app.manage(wechat.clone());
+            // 让后端自己应答 `codexui.send_file_to_wechat` 动态工具调用：微信回合可能在窗口
+            // 隐藏/无人值守时发生，文件发送不应依赖前端 webview 是否存活。
+            server_handle.set_backend_tool_handler(wechat.clone());
             let wechat_boot = wechat.clone();
             tauri::async_runtime::spawn(async move {
                 wechat_boot.autostart().await;

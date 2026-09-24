@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -48,6 +50,20 @@ pub struct CodexServer {
     /// 「线程 id → 协作模式」协议登记表：由本层登记（`turn/start` 参数与
     /// `thread/settings/updated` 通知），供兼容代理精确判定协作模式，不再只靠关键词猜。
     thread_modes: Arc<compat_proxy::ThreadModeRegistry>,
+    /// 后端自答的动态工具处理器（启动时注册一次）。未注册时 `item/tool/call` 全部转发前端。
+    backend_tools: RwLock<Option<Arc<dyn BackendToolHandler>>>,
+}
+
+/// 由后端（而非前端）直接应答的动态工具调用。
+///
+/// `handle` 返回 `None` 表示「不是本处理器负责的工具」，该调用照旧按 `interaction:request`
+/// 转发前端；`Some(Ok(text))` / `Some(Err(text))` 分别对应工具结果的 `success: true` / `false`
+/// （文本即 `contentItems` 里的 `inputText`）。
+pub trait BackendToolHandler: Send + Sync {
+    fn handle<'a>(
+        &'a self,
+        params: &'a Value,
+    ) -> Pin<Box<dyn Future<Output = Option<Result<String, String>>> + Send + 'a>>;
 }
 
 struct Shared {
@@ -187,7 +203,20 @@ impl CodexServer {
             codex_log,
             compat_trace,
             thread_modes: Arc::new(compat_proxy::ThreadModeRegistry::default()),
+            backend_tools: RwLock::new(None),
         }
+    }
+
+    /// 注册后端自答的动态工具处理器（桥等 Rust 侧组件在启动时调用一次）。
+    pub fn set_backend_tool_handler(&self, handler: Arc<dyn BackendToolHandler>) {
+        if let Ok(mut slot) = self.backend_tools.write() {
+            *slot = Some(handler);
+        }
+    }
+
+    /// 取出当前注册的后端自答处理器（克隆句柄后立即释放读锁，避免跨 await 持锁）。
+    fn backend_tool_handler(&self) -> Option<Arc<dyn BackendToolHandler>> {
+        self.backend_tools.read().ok().and_then(|slot| slot.clone())
     }
 
     /// 订阅 app-server 的全部服务器通知（method, params）。
@@ -680,6 +709,29 @@ impl CodexServer {
                 let method = v["method"].as_str().unwrap_or("unknown");
                 let params = v.get("params").cloned().unwrap_or(Value::Null);
                 self.log_event("server-request", method, &params);
+
+                // 后端自答的动态工具（微信「发送文件到微信」）：由 Rust 直接执行并应答，
+                // 不依赖前端窗口是否存活；返回 None（不是它负责的工具）才继续走下面的转发。
+                if method == "item/tool/call" {
+                    if let Some(handler) = self.backend_tool_handler() {
+                        if let Some(outcome) = handler.handle(&params).await {
+                            let (text, success) = match outcome {
+                                Ok(text) => (text, true),
+                                Err(text) => (text, false),
+                            };
+                            let reply = json!({
+                                "contentItems": [{ "type": "inputText", "text": text }],
+                                "success": success,
+                            });
+                            let request_id = id.clone().unwrap();
+                            if let Err(e) = self.send_response(&request_id, reply).await {
+                                self.push_log("warn", format!("动态工具应答失败: {e}"))
+                                    .await;
+                            }
+                            return;
+                        }
+                    }
+                }
 
                 // 前端不需要交互的服务端请求由后端直接应答（如 currentTime/read），
                 // 避免其在 codex 侧挂起至超时；其余照常转发前端。

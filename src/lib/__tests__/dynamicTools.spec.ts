@@ -5,6 +5,7 @@ import {
   CODEXUI_TOOL_ADD_SCHEDULED_TASK,
   CODEXUI_TOOL_COMPACT_CONTEXT,
   CODEXUI_TOOL_GET_USAGE,
+  CODEXUI_TOOL_SEND_FILE_TO_WECHAT,
   buildInjectedDynamicTools,
   dynamicToolDisplay,
   dynamicToolKey,
@@ -35,13 +36,14 @@ describe("codexui 动态工具定义", () => {
     expect(RESERVED_NAMESPACES.has(CODEXUI_DYNAMIC_NAMESPACE)).toBe(false);
   });
 
-  it("包含 get_usage / compact_context / add_scheduled_task 三条 function 工具且字段合法", () => {
+  it("包含 get_usage / compact_context / add_scheduled_task / send_file_to_wechat 四条 function 工具且字段合法", () => {
     const names = CODEXUI_DYNAMIC_TOOLS.flatMap((ns) =>
       ns.tools.map((t) => t.name),
     );
     expect(names).toContain(CODEXUI_TOOL_GET_USAGE);
     expect(names).toContain(CODEXUI_TOOL_COMPACT_CONTEXT);
     expect(names).toContain(CODEXUI_TOOL_ADD_SCHEDULED_TASK);
+    expect(names).toContain(CODEXUI_TOOL_SEND_FILE_TO_WECHAT);
     for (const ns of CODEXUI_DYNAMIC_TOOLS) {
       expect(ns.type).toBe("namespace");
       expect(ns.name).toBe(CODEXUI_DYNAMIC_NAMESPACE);
@@ -66,6 +68,13 @@ describe("codexui 动态工具定义", () => {
       required: string[];
     };
     expect(add.required).toEqual(["name", "prompt", "cron"]);
+    const send = tool(CODEXUI_TOOL_SEND_FILE_TO_WECHAT).inputSchema as {
+      required: string[];
+      properties: { paths: { type: string; items: { type: string } } };
+    };
+    expect(send.required).toEqual(["paths"]);
+    expect(send.properties.paths.type).toBe("array");
+    expect(send.properties.paths.items.type).toBe("string");
   });
 });
 
@@ -82,6 +91,7 @@ describe("codexui 动态工具注入过滤", () => {
     const keys = rows.map((r) => r.key);
     expect(keys).toContain("codexui.get_usage");
     expect(keys).toContain("codexui.compact_context");
+    expect(keys).toContain("codexui.send_file_to_wechat");
     expect(rows.find((r) => r.tool === "get_usage")?.display).toBe(
       "codexui_get_usage",
     );
@@ -100,6 +110,7 @@ describe("codexui 动态工具注入过滤", () => {
     expect(names).toEqual([
       CODEXUI_TOOL_COMPACT_CONTEXT,
       CODEXUI_TOOL_ADD_SCHEDULED_TASK,
+      CODEXUI_TOOL_SEND_FILE_TO_WECHAT,
     ]);
   });
 
@@ -108,6 +119,7 @@ describe("codexui 动态工具注入过滤", () => {
       "codexui.get_usage",
       "codexui.compact_context",
       "codexui.add_scheduled_task",
+      "codexui.send_file_to_wechat",
     ]);
     expect(result).toEqual([]);
   });
