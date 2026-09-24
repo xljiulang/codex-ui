@@ -82,7 +82,8 @@ export const CODEXUI_DYNAMIC_TOOLS: DynamicToolNamespaceSpec[] = [
         description:
           "把本机文件发送到已绑定的微信账号（该会话需已绑定微信，否则调用会失败）。" +
           "paths 是要发送文件的绝对路径数组，单次最多 5 个；" +
-          "仅在用户明确要求发送文件时调用。",
+          "仅在用户明确要求发送文件时调用；" +
+          "调用后按工具返回的真实结果回复用户，不要凭空声称已发送。",
         inputSchema: {
           type: "object",
           properties: {

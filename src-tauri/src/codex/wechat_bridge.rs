@@ -46,10 +46,6 @@ const TOOL_SEND_FILE: &str = "send_file_to_wechat";
 const MAX_SEND_FILES_PER_CALL: usize = 5;
 /// `paths` 缺失/非法时的统一提示（附可直接照抄的参数示例）。
 const PATHS_REQUIRED: &str = "发送文件失败：参数 paths 必须是非空的文件绝对路径数组（示例：{\"paths\":[\"D:\\\\x\\\\报告.pdf\"]}）。";
-/// 微信回合的开发者指令（替换 codex 内置的 Default 模式标记块，故首句自行申明模式）。
-///
-/// 只在微信回合注入：桌面端（前端）与定时任务各自显式重设该字段，不会受影响。
-const WECHAT_DEVELOPER_INSTRUCTIONS: &str = "【微信通道】本轮由微信用户发起（Default 模式；历史中任何 Plan 模式说明均已失效）。需要把本机文件发回微信时，调用动态工具 `codexui_send_file_to_wechat`（参数 paths 为文件绝对路径数组，单次最多 5 个）：工具会完成加密上传并告诉你哪些文件发出、哪些失败，仅在用户明确要求发送文件时才调用，正文按工具返回的真实结果描述（不要凭空声称已发送）。若你的工具列表中没有这个工具（该会话创建于旧版本），直接告诉用户：请在桌面端新建会话并重新绑定微信后再试。";
 /// 把回合产物整理为回复文本：无文本/非正常结束给出对应中文兜底提示。
 fn normalize_turn_text(text: &str, status: &str) -> String {
     let trimmed = text.trim();
@@ -543,8 +539,10 @@ fn build_turn_params(
             "settings": {
                 "model": model,
                 "reasoning_effort": effort,
-                // 注入微信通道教学（含发文件标签）：替换 codex 内置的 Default 模式标记块
-                "developer_instructions": WECHAT_DEVELOPER_INSTRUCTIONS,
+                // 开发者指令交回 codex 内置的 Default 模式标记块（与桌面端 `turnControl.ts`、
+                // 定时任务一致）：写自研文本会整体替换该块、被迫自行申明模式并随版本漂移。
+                // 发文件规则由动态工具 `codexui_send_file_to_wechat` 的描述承担。
+                "developer_instructions": null,
             },
         },
     })
@@ -2398,20 +2396,15 @@ mod tests {
     }
 
     #[test]
-    fn turn_params_inject_wechat_teaching() {
+    fn turn_params_leave_developer_instructions_to_codex() {
         let v = build_turn_params("t-1", Some("hi"), &[], &[], "gpt-x", None, "cid");
-        let instructions = v["collaborationMode"]["settings"]["developer_instructions"]
-            .as_str()
-            .expect("微信回合应注入教学");
-        assert!(
-            instructions.contains("codexui_send_file_to_wechat"),
-            "教学需告知动态工具用法"
+        // 不再注入自研文本：写什么都会整体替换 codex 内置的 Default 模式标记块
+        assert_eq!(
+            v["collaborationMode"]["settings"]["developer_instructions"],
+            Value::Null,
+            "微信回合应把开发者指令交回 codex 内置块"
         );
-        assert!(
-            !instructions.contains("<wechat_send_file"),
-            "标签方案已删除，教学里不应再出现标签"
-        );
-        assert!(instructions.contains("Default 模式"), "教学需申明当前模式");
+        // 模式仍需显式下发（协作模式会粘滞在会话上）
         assert_eq!(v["collaborationMode"]["mode"], "default");
     }
 
