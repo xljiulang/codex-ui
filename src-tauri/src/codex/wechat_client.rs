@@ -317,7 +317,9 @@ pub fn cdn_upload_url(upload_param: &str, filekey: &str) -> String {
 
 /// 组装出站媒体消息 item（image / video / file 三种形状）。
 ///
-/// `aes_key` 在 JSON 里是 base64（与下载侧 `media.aes_key` 口径一致）；
+/// `aes_key` 在 JSON 里是 **base64(32 字符 hex 串)**，与官方实现一致，也是微信端唯一认得
+/// 的形态；填 base64(16 字节密钥原文) 会让接收端下载停在「下载中 0%」或下完仍是密文
+/// （2026-09-24 真机 A/B 实测：只有改成 base64(hex) 后接收端才能下载并还原明文）。
 /// 大小字段按参考实现：图片用密文大小、视频用密文大小、文件用**明文**大小的字符串。
 pub fn build_media_item(
     kind: OutboundMediaKind,
@@ -329,7 +331,7 @@ pub fn build_media_item(
 ) -> Value {
     let media = json!({
         "encrypt_query_param": download_param,
-        "aes_key": BASE64.encode(aes_key),
+        "aes_key": BASE64.encode(hex_lower(aes_key).as_bytes()),
         "encrypt_type": 1,
     });
     let key = kind.item_key();
@@ -685,6 +687,11 @@ pub fn outbound_media_kind(path: &str) -> OutboundMediaKind {
 /// PKCS7 填充后的密文大小：`((raw / 16) + 1) * 16`。
 fn padded_size(raw: u64) -> u64 {
     (raw / 16 + 1) * 16
+}
+
+/// 小写 hex 串：出站 `getuploadurl` 的 `aeskey` 字段与消息项 `aes_key` 载荷共用同一形态。
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// 随机 AES-128 密钥（操作系统熵源）。
@@ -2073,7 +2080,7 @@ impl<A: WechatApi + 'static> WechatClient<A> {
             "filesize": req.cipher_size,
             // 不需要缩略图上传 URL：跳过缩略图生成与上传（参考实现同样传 true）
             "no_need_thumb": true,
-            "aeskey": req.aes_key.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            "aeskey": hex_lower(req.aes_key),
             "base_info": build_base_info(),
         });
         let resp = self
@@ -2081,13 +2088,27 @@ impl<A: WechatApi + 'static> WechatClient<A> {
             .get_upload_url(base_url, token, upload_body)
             .await
             .map_err(|e| Retryable(format!("申请上传地址失败: {e}")))?;
-        let upload_param = resp
-            .get("upload_param")
+        // 平台按上报的 `channel_version` 决定返回形态：旧版给 `upload_param`（与 filekey 自己拼
+        // URL），新版给带 `taskid` 的完整 `upload_full_url`——后者必须原样使用，自己拼会丢 taskid。
+        let upload_url = match resp
+            .get("upload_full_url")
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| Retryable("上传地址响应缺少 upload_param".to_string()))?;
-        let upload_url = cdn_upload_url(upload_param, req.filekey);
+        {
+            Some(full_url) => full_url.to_string(),
+            None => {
+                let upload_param = resp
+                    .get("upload_param")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| {
+                        Retryable("上传地址响应缺少 upload_full_url / upload_param".to_string())
+                    })?;
+                cdn_upload_url(upload_param, req.filekey)
+            }
+        };
 
         // 上传密文：4xx 致命不重试；5xx / 网络错误重试
         let mut download_param: Option<String> = None;
@@ -4222,7 +4243,11 @@ mod tests {
         assert_eq!(img["type"], 2);
         assert_eq!(img["image_item"]["media"]["encrypt_query_param"], "DL");
         assert_eq!(img["image_item"]["media"]["encrypt_type"], 1);
-        assert_eq!(img["image_item"]["media"]["aes_key"], BASE64.encode(key));
+        assert_eq!(
+            img["image_item"]["media"]["aes_key"],
+            BASE64.encode(hex_lower(&key)),
+            "aes_key 必须是 base64(hex 串)，不是 base64(密钥原文)"
+        );
         assert_eq!(img["image_item"]["mid_size"], 32, "图片用密文大小");
 
         let video = build_media_item(OutboundMediaKind::Video, "DL", &key, 32, 20, "a.mp4");
@@ -4444,9 +4469,9 @@ mod tests {
         assert_eq!(msg["context_token"], "ctx-1");
         let item = &msg["item_list"][0];
         assert_eq!(item["type"], 2);
-        // 媒体项填上传响应头 `x-encrypted-param`（DL-1，与参考实现一致）：
+        // 媒体项填上传响应头 `x-encrypted-param`（DL-1，与官方实现一致）：
         // 真机实测这一项决定消息能否在微信里显示；上传参数 UP-1 虽能取回对象，
-        // 但用它填消息会导致消息不显示，故二者当前无法兼得。
+        // 但用它填消息会导致消息不显示。
         assert_eq!(
             item["image_item"]["media"]["encrypt_query_param"], "DL-1",
             "媒体项应使用上传响应头参数"
@@ -4454,12 +4479,117 @@ mod tests {
         assert_eq!(item["image_item"]["media"]["encrypt_type"], 1);
         assert_eq!(
             item["image_item"]["media"]["aes_key"],
-            BASE64.encode(key),
-            "item 里的 aes_key 应为 base64"
+            BASE64.encode(aes_hex.as_bytes()),
+            "item 里的 aes_key 应为 base64(hex 串)"
         );
         assert_eq!(
             item["image_item"]["mid_size"],
             padded_size(plain.len() as u64)
+        );
+    }
+
+    /// 平台返回带 `taskid` 的完整上传地址时必须原样使用——自己用 `upload_param` 拼 URL 会丢
+    /// taskid，上传虽返回 200，但接收端取不回对象（2026-09-24 真机实测：用完整地址上传后
+    /// 接收端才能下载成功）。
+    #[tokio::test]
+    async fn send_file_prefers_upload_full_url() {
+        const FULL_URL: &str =
+            "https://novac2c.cdn.weixin.qq.com/c2c/upload?encrypted_query_param=P&filekey=F&taskid=T";
+
+        struct FullUrlApi {
+            posts: Arc<std::sync::Mutex<Vec<String>>>,
+        }
+        impl WechatApi for FullUrlApi {
+            fn get_qr_code(&self, _b: &str, _t: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn poll_qr_status(&self, _b: &str, _q: &str) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn get_updates(
+                &self,
+                _b: &str,
+                _t: &str,
+                _buf: &str,
+                _to: u64,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn send_message(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({ "ret": 0 })) })
+            }
+            fn get_config(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn send_typing(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                Box::pin(async { Ok(json!({})) })
+            }
+            fn get_upload_url(
+                &self,
+                _b: &str,
+                _t: &str,
+                _body: Value,
+            ) -> BoxFuture<'_, Result<Value, String>> {
+                // 只给完整地址、不带 upload_param：自拼 URL 的分支会因此报错
+                Box::pin(async { Ok(json!({ "ret": 0, "upload_full_url": FULL_URL })) })
+            }
+            fn upload_to_cdn(
+                &self,
+                url: &str,
+                _path: PathBuf,
+                _len: u64,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, CdnUploadOutcome> {
+                self.posts.lock().unwrap().push(url.to_string());
+                Box::pin(async { CdnUploadOutcome::Ok("DL-1".to_string()) })
+            }
+            fn download_stream(
+                &self,
+                _url: &str,
+                _timeout: Duration,
+            ) -> BoxFuture<'_, Result<AttachmentStream, String>> {
+                Box::pin(async { Err("本用例不涉及下载".to_string()) })
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        save_account(&root, "bot-1", "tok", DEFAULT_BASE_URL, "u-1");
+        save_session_status(&root, "bot-1", "connected", None, None);
+        set_context_token(&root, "bot-1", "u-1", "ctx-1", None);
+        let src = dir.path().join("report.txt");
+        std::fs::write(&src, b"hello").unwrap();
+
+        let posts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let client = WechatClient::with_api(
+            root.clone(),
+            tx,
+            FullUrlApi {
+                posts: posts.clone(),
+            },
+        );
+        client.send_file("bot-1", "u-1", &src).await.unwrap();
+
+        assert_eq!(
+            posts.lock().unwrap().clone(),
+            vec![FULL_URL.to_string()],
+            "应把 upload_full_url 原样作为上传地址"
         );
     }
 
