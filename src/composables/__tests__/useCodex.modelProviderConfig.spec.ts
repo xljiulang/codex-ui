@@ -79,7 +79,6 @@ describe("useCodex/modelProviderConfig", () => {
         },
         {
           model_reasoning_summary: "auto",
-          personality: "pragmatic",
           model_verbosity: "low",
         },
       ),
@@ -88,7 +87,6 @@ describe("useCodex/modelProviderConfig", () => {
     expect(s.model).toBe("gpt-x");
     expect(s.model_reasoning_effort).toBe("high");
     expect(s.model_reasoning_summary).toBe("auto");
-    expect(s.personality).toBe("pragmatic");
     expect(s.model_verbosity).toBe("low");
     expect(s.model_provider).toBe("deepseek");
     expect(s.preferred_auth_method).toBe("apikey");
@@ -160,7 +158,6 @@ describe("useCodex/modelProviderConfig", () => {
       model: "gpt-x",
       model_reasoning_effort: "high",
       model_reasoning_summary: "auto",
-      personality: "pragmatic",
       model_verbosity: "low",
       model_provider: "deepseek",
       preferred_auth_method: "apikey",
@@ -208,11 +205,6 @@ describe("useCodex/modelProviderConfig", () => {
             mergeStrategy: "replace",
           },
           {
-            keyPath: "personality",
-            value: "pragmatic",
-            mergeStrategy: "replace",
-          },
-          {
             keyPath: "model_verbosity",
             value: "low",
             mergeStrategy: "replace",
@@ -249,7 +241,6 @@ describe("useCodex/modelProviderConfig", () => {
       model: "",
       model_reasoning_effort: "",
       model_reasoning_summary: "",
-      personality: "",
       model_verbosity: "",
       model_provider: "a",
       preferred_auth_method: "",
@@ -284,30 +275,25 @@ describe("useCodex/modelProviderConfig", () => {
       value: null,
       mergeStrategy: "replace",
     });
-    // 空串 personality / model_verbosity 写 null（codex 删除该键，回退内置默认）
+    // 空串 model_verbosity 写 null（codex 删除该键，回退内置默认）
     expect(edits[5]).toEqual({
-      keyPath: "personality",
-      value: null,
-      mergeStrategy: "replace",
-    });
-    expect(edits[6]).toEqual({
       keyPath: "model_verbosity",
       value: null,
       mergeStrategy: "replace",
     });
     // 空串 preferred_auth_method / forced_login_method 写 null（codex 删除该键，回退默认）
-    expect(edits[7]).toEqual({
+    expect(edits[6]).toEqual({
       keyPath: "preferred_auth_method",
       value: null,
       mergeStrategy: "replace",
     });
-    expect(edits[8]).toEqual({
+    expect(edits[7]).toEqual({
       keyPath: "forced_login_method",
       value: null,
       mergeStrategy: "replace",
     });
     // 空目录内容 → model_catalog_json 写 null（codex 删除该键）
-    expect(edits[9]).toEqual({
+    expect(edits[8]).toEqual({
       keyPath: "model_catalog_json",
       value: null,
       mergeStrategy: "replace",
@@ -319,7 +305,6 @@ describe("useCodex/modelProviderConfig", () => {
       model: "x",
       model_reasoning_effort: "",
       model_reasoning_summary: "",
-      personality: "",
       model_verbosity: "",
       model_provider: "",
       preferred_auth_method: "",
@@ -353,7 +338,6 @@ describe("useCodex/modelProviderConfig", () => {
       model: "",
       model_reasoning_effort: "",
       model_reasoning_summary: "",
-      personality: "",
       model_verbosity: "",
       model_provider: "",
       preferred_auth_method: "",
@@ -393,7 +377,6 @@ describe("useCodex/modelProviderConfig", () => {
         model: "m",
         model_reasoning_effort: "",
         model_reasoning_summary: "",
-        personality: "",
         model_verbosity: "",
         model_provider: "",
         preferred_auth_method: "",

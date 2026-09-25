@@ -34,8 +34,6 @@ pub struct ModelSnapshot {
     #[serde(default)]
     pub model_reasoning_summary: String,
     #[serde(default)]
-    pub personality: String,
-    #[serde(default)]
     pub model_verbosity: String,
     #[serde(default)]
     pub model_provider: String,
@@ -253,7 +251,6 @@ fn current_snapshot(home: &Path) -> Result<ModelSnapshot, String> {
         model: doc_string(&doc, "model"),
         model_reasoning_effort: doc_string(&doc, "model_reasoning_effort"),
         model_reasoning_summary: doc_string(&doc, "model_reasoning_summary"),
-        personality: doc_string(&doc, "personality"),
         model_verbosity: doc_string(&doc, "model_verbosity"),
         model_provider: doc_string(&doc, "model_provider"),
         preferred_auth_method: doc_string(&doc, "preferred_auth_method"),
@@ -349,7 +346,6 @@ fn apply_model_fields(
         "model_reasoning_summary",
         &snapshot.model_reasoning_summary,
     );
-    set_or_remove(doc, "personality", &snapshot.personality);
     set_or_remove(doc, "model_verbosity", &snapshot.model_verbosity);
     set_or_remove(doc, "model_provider", &snapshot.model_provider);
     set_or_remove(
@@ -616,7 +612,6 @@ mod tests {
             model: "deepseek-v4-flash".into(),
             model_reasoning_effort: "high".into(),
             model_reasoning_summary: "auto".into(),
-            personality: "pragmatic".into(),
             model_verbosity: "low".into(),
             model_provider: "deepseek".into(),
             preferred_auth_method: "apikey".into(),

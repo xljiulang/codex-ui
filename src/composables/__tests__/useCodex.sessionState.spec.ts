@@ -7,6 +7,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { DEFAULT_MODEL, makeSessionTab } from "./useCodexTestHarness";
 import {
+  applyResumedCollaborationMode,
   applyResumedSettings,
   hydrateSessionState,
   removeSessionState,
@@ -261,5 +262,43 @@ describe("useCodex 会话状态持久化", () => {
     expect(tab.model).toBe(DEFAULT_MODEL.model);
     expect(tab.effort).toBeNull();
     expect(store.toast).toContain("已回退");
+  });
+
+  // 0.156.0 起 thread/resume 响应带 collaborationMode（服务端持久化的权威模式）
+  it("applyResumedCollaborationMode：plan / default 写入标签", () => {
+    const plan = makeSessionTab("s1", "t1");
+    applyResumedCollaborationMode(plan, {
+      collaborationMode: { mode: "plan" },
+    });
+    expect(plan.collaborationMode).toBe("plan");
+
+    const back = makeSessionTab("s2", "t2", { collaborationMode: "plan" });
+    applyResumedCollaborationMode(back, {
+      collaborationMode: { mode: "default" },
+    });
+    expect(back.collaborationMode).toBe("default");
+  });
+
+  it("applyResumedCollaborationMode：字段缺失 / 非法取值 / 非对象一律不动", () => {
+    // 0.149–0.155 的 resume 没有该字段
+    const legacy = makeSessionTab("s1", "t1", { collaborationMode: "plan" });
+    applyResumedCollaborationMode(legacy, { model: "gpt-x" });
+    expect(legacy.collaborationMode).toBe("plan");
+
+    const unknown = makeSessionTab("s2", "t2", { collaborationMode: "plan" });
+    applyResumedCollaborationMode(unknown, {
+      collaborationMode: { mode: "chatty" },
+    });
+    expect(unknown.collaborationMode).toBe("plan");
+
+    const nullMode = makeSessionTab("s3", "t3", { collaborationMode: "plan" });
+    applyResumedCollaborationMode(nullMode, { collaborationMode: null });
+    expect(nullMode.collaborationMode).toBe("plan");
+
+    const notObject = makeSessionTab("s4", "t4", { collaborationMode: "plan" });
+    applyResumedCollaborationMode(notObject, "nope");
+    applyResumedCollaborationMode(notObject, null);
+    applyResumedCollaborationMode(notObject, undefined);
+    expect(notObject.collaborationMode).toBe("plan");
   });
 });

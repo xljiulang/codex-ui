@@ -60,7 +60,6 @@ const modelConfig = reactive({
   model: "",
   model_reasoning_effort: "",
   model_reasoning_summary: "",
-  personality: "",
   model_verbosity: "",
   model_provider: "",
   preferred_auth_method: "",
@@ -90,15 +89,6 @@ const REASONING_SUMMARY_OPTIONS: AppSelectOption[] = [
   { value: "concise", label: "concise（简洁）" },
   { value: "detailed", label: "detailed（详细）" },
   { value: "none", label: "none（关闭）" },
-];
-
-/** config.toml `personality` 支持的档位（codex-cli Personality）。
- *  friendly 亲和（默认，较啰嗦）、pragmatic 务实简洁、none 无人格；省输出 token 选 pragmatic。 */
-const PERSONALITY_OPTIONS: AppSelectOption[] = [
-  { value: "", label: "默认（不写入）" },
-  { value: "friendly", label: "friendly（亲和）" },
-  { value: "pragmatic", label: "pragmatic（务实简洁）" },
-  { value: "none", label: "none（无人格）" },
 ];
 
 /** config.toml `model_verbosity` 支持的档位（GPT-5 系输出详细程度）。
@@ -243,7 +233,6 @@ function applyProvidersCard(pc: ModelProviderConfigState) {
   modelConfig.model = pc.model;
   modelConfig.model_reasoning_effort = pc.model_reasoning_effort;
   modelConfig.model_reasoning_summary = pc.model_reasoning_summary;
-  modelConfig.personality = pc.personality;
   modelConfig.model_verbosity = pc.model_verbosity;
   modelConfig.model_provider = pc.model_provider;
   modelConfig.preferred_auth_method = pc.preferred_auth_method;
@@ -648,7 +637,6 @@ async function saveModelConfig() {
       model: modelConfig.model.trim(),
       model_reasoning_effort: modelConfig.model_reasoning_effort.trim(),
       model_reasoning_summary: modelConfig.model_reasoning_summary,
-      personality: modelConfig.personality,
       model_verbosity: modelConfig.model_verbosity,
       model_provider: modelConfig.model_provider,
       preferred_auth_method: modelConfig.preferred_auth_method.trim(),
@@ -925,17 +913,6 @@ function openModelConfigFile() {
             v-model="modelConfig.forced_login_method"
             :disabled="modelConfig.loading"
             :options="forcedAuthOptions"
-          />
-        </div>
-        <div class="setting-row">
-          <label for="model-config-ui-personality"
-            >personality（回复风格）</label
-          >
-          <AppSelect
-            id="model-config-ui-personality"
-            v-model="modelConfig.personality"
-            :disabled="modelConfig.loading"
-            :options="PERSONALITY_OPTIONS"
           />
         </div>
         <div class="setting-row">

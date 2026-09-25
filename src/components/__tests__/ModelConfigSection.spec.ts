@@ -30,7 +30,7 @@ const mockedInvoke = vi.mocked(invoke);
 const mockedLoad = vi.mocked(loadModelProviderConfig);
 const mockedSave = vi.mocked(saveModelProviderConfig);
 
-/** model_config_read 返回的最小骨架（本测试只关注 personality/model_verbosity 展示与保存） */
+/** model_config_read 返回的最小骨架（本测试只关注推理摘要/model_verbosity 展示与保存） */
 function modelConfigReadResult() {
   return {
     config_path: "C:\\Users\\t\\.codex\\config.toml",
@@ -58,7 +58,6 @@ function providerConfigState(
     model: "gpt-5.2",
     model_reasoning_effort: "medium",
     model_reasoning_summary: "",
-    personality: "",
     model_verbosity: "",
     model_provider: "",
     preferred_auth_method: "",
@@ -78,7 +77,7 @@ async function mountSection() {
   // 等待 onMounted 异步加载完成
   await vi.waitFor(() => expect(mockedLoad).toHaveBeenCalled());
   await vi.waitFor(() =>
-    expect(wrapper.find("#model-config-ui-personality").exists()).toBe(true),
+    expect(wrapper.find("#model-config-ui-verbosity").exists()).toBe(true),
   );
   return wrapper;
 }
@@ -89,12 +88,11 @@ beforeEach(() => {
   mockedInvoke.mockResolvedValue(modelConfigReadResult());
 });
 
-describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", () => {
-  it("渲染推理摘要、personality、model_verbosity 三个下拉并回显已配置值", async () => {
+describe("ModelConfigSection 推理摘要与输出详细程度", () => {
+  it("渲染推理摘要、model_verbosity 下拉并回显已配置值", async () => {
     mockedLoad.mockResolvedValue(
       providerConfigState({
         model_reasoning_summary: "auto",
-        personality: "pragmatic",
         model_verbosity: "low",
       }),
     );
@@ -104,21 +102,21 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
     expect(labels).toContain("model_reasoning_effort（推理强度）");
     expect(labels).toContain("preferred_auth_method（优先认证方式）");
     expect(labels).toContain("forced_login_method（强制登录方式）");
-    expect(labels).toContain("personality（回复风格）");
     expect(labels).toContain("model_reasoning_summary（推理摘要）");
     expect(labels).toContain("model_verbosity（输出详细程度）");
-    // 顺序：effort → 推理摘要 → 优先认证 → 强制登录 → personality → verbosity
+    // codex 已废弃 personality（0.156.0 起不再影响风格），设置页不再提供该下拉
+    expect(labels).not.toContain("personality（回复风格）");
+    expect(wrapper.find("#model-config-ui-personality").exists()).toBe(false);
+    // 顺序：effort → 推理摘要 → 优先认证 → 强制登录 → verbosity
     const iEffort = labels.indexOf("model_reasoning_effort（推理强度）");
     const iAuth = labels.indexOf("preferred_auth_method（优先认证方式）");
     const iForced = labels.indexOf("forced_login_method（强制登录方式）");
-    const iPersonality = labels.indexOf("personality（回复风格）");
     const iSummary = labels.indexOf("model_reasoning_summary（推理摘要）");
     const iVerbosity = labels.indexOf("model_verbosity（输出详细程度）");
     expect(iSummary).toBeGreaterThan(iEffort);
     expect(iAuth).toBeGreaterThan(iSummary);
     expect(iForced).toBeGreaterThan(iAuth);
-    expect(iPersonality).toBeGreaterThan(iForced);
-    expect(iVerbosity).toBeGreaterThan(iPersonality);
+    expect(iVerbosity).toBeGreaterThan(iForced);
     // 推理强度与推理摘要相邻（两个一起改好操作）
     const uiFieldIds = wrapper
       .findAll("label[for^='model-config-ui-']")
@@ -127,8 +125,6 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
       "model-config-ui-reasoning-summary",
     );
     // AppSelect 触发按钮显示选中项 label
-    const personalitySelect = wrapper.find("#model-config-ui-personality");
-    expect(personalitySelect.text()).toContain("pragmatic（务实简洁）");
     const summarySelect = wrapper.find("#model-config-ui-reasoning-summary");
     expect(summarySelect.text()).toContain("auto（自动）");
     const verbositySelect = wrapper.find("#model-config-ui-verbosity");
@@ -141,9 +137,6 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
     expect(wrapper.find("#model-config-ui-reasoning-summary").text()).toContain(
       "默认（不写入）",
     );
-    expect(wrapper.find("#model-config-ui-personality").text()).toContain(
-      "默认（不写入）",
-    );
     expect(wrapper.find("#model-config-ui-verbosity").text()).toContain(
       "默认（不写入）",
     );
@@ -153,7 +146,6 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
     mockedLoad.mockResolvedValue(
       providerConfigState({
         model_reasoning_summary: "auto",
-        personality: "pragmatic",
         model_verbosity: "low",
       }),
     );
@@ -162,7 +154,6 @@ describe("ModelConfigSection 推理摘要 / 回复风格与输出详细程度", 
     await vi.waitFor(() => expect(mockedSave).toHaveBeenCalled());
     const input = mockedSave.mock.calls[0]![0];
     expect(input.model_reasoning_summary).toBe("auto");
-    expect(input.personality).toBe("pragmatic");
     expect(input.model_verbosity).toBe("low");
   });
 });

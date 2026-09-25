@@ -38,6 +38,7 @@ export {
 export {
   __resetSessionTabsForTest,
   activeSessionTab,
+  applyResumedCollaborationMode,
   applyResumedSettings,
   findSessionTabByThread,
   hydrateSessionState,
@@ -85,9 +86,12 @@ export {
   saveMcpServers,
 } from "./mcp";
 export {
+  loadMemoryStatus,
   loadMemoryConfig,
+  MEMORY_V2_MIN_THREADS,
   saveMemoryConfig,
   type MemoryConfigState,
+  type MemoryV2Status,
 } from "./memoryConfig";
 export {
   ensureWeChatEvents,

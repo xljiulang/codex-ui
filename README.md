@@ -308,7 +308,7 @@
 - **独立 Tab**：模型快照从「模型配置」Tab 里的首张卡片独立为左侧导航分类，位置在「模型配置」之前（区标题「模型快照」，卡片小标题「已保存快照」）；还原快照仍会自动重读「模型配置」Tab 的卡片内容。
 - 在 `CODEX_HOME/codex-ui/<名称>.json` 保存单个 JSON 模型快照，不再使用独立快照目录；旧的 `<名称>/` 配置快照目录会保留在磁盘但不列出。
 - 快照包含：
-  - 模型相关字段（`model`、`model_reasoning_effort`、`model_reasoning_summary`、`personality`、`model_verbosity`、`model_provider`、`preferred_auth_method`、`forced_login_method`）
+  - 模型相关字段（`model`、`model_reasoning_effort`、`model_reasoning_summary`、`model_verbosity`、`model_provider`、`preferred_auth_method`、`forced_login_method`）
   - 全部提供方原始配置
   - `model_catalog_json` 字段及模型目录文件的 JSON 内容。
 - 提供方密钥也会写入，分享前请确认。
@@ -326,10 +326,10 @@
 - **模型目录 `model_catalog_json` 路径自动管理**：无需手填，按 config 实际值解析、未配置时默认 `CODEX_HOME/models.json` 绝对路径；保存时校验目录 JSON 结构，目录为空则删除该配置键。
 - 目录编辑框不可拖拽缩放；模型目录标题本身即文件链接（悬停显示完整路径），文件存在时可点击在编辑器中打开，文件不存在时标题置灰、tooltip 提示保存时将新建。
 - **模型名称输入框点击展开全量候选**：由目录 `slug`（缺失回退 `id`）解析、不按已填值过滤，点选即回填。
-- 回复风格 `personality`（friendly / pragmatic / none）、推理摘要 `model_reasoning_summary`（auto / concise / detailed / none）
-  与输出详细程度 `model_verbosity`（low / medium / high）均支持默认不写入，
+- 推理摘要 `model_reasoning_summary`（auto / concise / detailed / none）与输出详细程度 `model_verbosity`（low / medium / high）均支持默认不写入，
   随配置经 `config/batchWrite` 保存（**GPT 系只返回加密推理 + 摘要，把「推理摘要」设为 auto 才有「思考过程」内容**）。
-- **标量字段顺序**：`model → 推理强度 → 推理摘要 → 认证方式 → 强制登录 → personality → verbosity`——「推理强度」与「推理摘要」相邻，两个一起调整时不必来回找。
+- **标量字段顺序**：`model → 推理强度 → 推理摘要 → 认证方式 → 强制登录 → verbosity`——「推理强度」与「推理摘要」相邻，两个一起调整时不必来回找。
+- **已移除 `personality`（回复风格）**：codex-cli 0.156.0 起 `friendly` / `pragmatic` 不再选择任何风格（协议侧该字段与 `Model.supportsPersonality` 一并标注废弃），设置页不再提供该下拉；config.toml 里遗留的 `personality` 键不会被清理，对 0.156+ 无影响。
 - **推理强度的空档位语义**：目录里的 `supported_reasoning_levels` 为空表示"未知"而不是"明确无档位"——会话里切到这类模型
   （如 Zen 的 `big-pickle`）**保留当前推理强度**，新建会话则沿用提供方的 `model_reasoning_effort` 作默认强度；
   只有模型明确声明了档位且不含当前值才回落默认，避免静默变成 `none`、整轮不请求推理。
@@ -544,6 +544,7 @@
 - **根因（0.154.0 实测抓包）**：请求的 `tools` 数组里**没有** `update_plan`（只有 `exec_command` / `write_stdin` / goal 三件套 / 若干命名空间工具 / `web_search` 等），但同一请求的 `instructions` 里仍有两处承诺它存在（`## Planning` 段与文末 ``## `update_plan` `` 整节），计划模式还多一段 `## Plan Mode vs update_plan tool`——属 codex 侧「提示词承诺了一个未注册的工具」。
 - **代理侧不做特例、也无法适配**：代理原样翻译转发客户端的工具声明；codex 的工具注册表在回合开始时即固定，代理无法让 codex 接受一个它没注册的工具（替模型吞掉调用、自行合成工具结果会让计划不再显示在应用里，语义也脏）。同一现象在不走 Zen 的 provider 上同样复现，与 Zen 无关。
 - **当前处理**：不改代码 / 提示词，作为已知问题记录；完整取证（mock 抓包命令、rollout 次数统计）与两个未实施的备选方案见 [docs/变更记录.md](docs/变更记录.md) 2026-09-17 条目。
+- **版本范围（2026-09-25 复核）**：该不一致出现在 **0.149–0.154**；0.155/0.156 的内置模型目录已完全不含 `update_plan` 与 `## Planning` 段（0.154 有 18 处、0.156.1 为 0），属 codex 侧随版本自行消失，无需本项目改动。
 
 ### 兼容代理诊断日志（内容级，默认关闭，用 `CODEXUI_COMPAT_TRACE` 开启）
 
@@ -637,7 +638,7 @@ codex-ui.exe（Tauri 2 窗口）
 - Windows 10/11（自带 WebView2）
 - Rust stable-msvc（rustup）+ VS C++ 构建工具
 - Node.js 18+（仅开发/构建需要；运行端不需要）
-- `codex` CLI（可在设置页指定路径；验证基线 codex-cli 0.154.0（兼容 0.149.0+））
+- `codex` CLI（可在设置页指定路径；验证基线 codex-cli 0.156.1（兼容 0.149.0+））
 - 全部 Git 功能需要系统已安装 **Git**（启动时探测 `git --version` 并缓存；未安装时功能禁用/报错并提示安装）
 
 ## 开发
@@ -692,6 +693,17 @@ build-installer.bat $env:USERPROFILE\Downloads\codex-ui.exe  # 指定下载下�
 产物同样是 `setup\output\codex-ui-win-x64.exe`。该脚本只调 Inno Setup（`setup\setup.iss`），要求 `setup\codex-ui.exe`、`setup\bin`、`setup\marketplaces` 已就位；`setup\codex-ui.exe` 缺失时脚本会提示从 Actions 下载 artifact 或改跑 `build-release.bat`。
 
 > exe 内的版本号来自 `src-tauri/Cargo.toml`（与 `tauri.conf.json` 中的 `version` 一致），安装包版本号由 Inno Setup 从 exe 自身读取，与 tag 无关。
+
+### 更新 `setup\bin` 内置二进制
+
+安装包随包分发 `setup\bin` 下的 codex 主程序与 3 个 helper（`codex-code-mode-host` / `codex-command-runner` / `codex-windows-sandbox-setup`）以及 `rg.exe`。这些 `.exe` 被 `.gitignore` 忽略、不进版本库，入库的是下载脚本与钉死的 sha256 校验值：
+
+```powershell
+npm run setup-bin            # 按脚本顶部版本号下载 → 校验 sha256 → 覆盖 setup\bin
+npm run setup-bin -- --check # 只校验现值（不联网），打包前自检用
+```
+
+脚本（`scripts/update-setup-bin.mjs`）内置目标版本的下载地址与哈希（当前 codex 0.156.1 + ripgrep 15.2.0），任一文件校验不符即整体中止、不改动 `setup\bin`。更新后需重跑 `build-installer.bat`（或 `build-release.bat`）才会把新二进制打进安装包。脚本只手动执行，不接入构建流程——离线打包不受影响。
 
 ## 测试
 
@@ -783,7 +795,7 @@ codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下�
   回复为最终 agent 文本，超长自动分段（约 1800 字/条）。
 - **回复保留 Markdown 原文**：Codex 回复按原始 Markdown 直接发送（协议由 Rust 内置实现，不做任何剥离），由微信端/ClawBot 侧负责渲染；忙碌/失败等系统提示仍为纯文本。
 - **出站发文件（动态工具 `codexui_send_file_to_wechat`）**：让 Codex 把本地文件发回来（例如「把 `D:\x\报告.pdf` 发给我」）时，模型调用该工具（参数 `paths` 为文件绝对路径数组，单次最多 5 个），应用完成加密上传后发一条媒体消息（图片/视频按扩展名走对应类型，其余按文件），并把**真实结果**（哪些发出、哪些失败及原因）回给模型，由模型据实回复用户。单个文件明文上限 200 MB；路径不存在/是目录/超限、会话未绑定微信或工具被禁用时返回失败文案。工具在**绑定微信的会话的任何回合**都可用（含桌面回合），由后端 Rust 直接应答执行，不依赖窗口是否存活。
-  **生效范围仅限新建会话**：`dynamicTools` 只能在 `thread/start` 注册（0.154.0 依然如此，`thread/resume`/`fork`/`turn/start` 都没有该字段），因此只有本次改动**之后新建**的会话带这个工具；老会话与分叉线程在微信里要发文件，需新建会话并重新扫码绑定。旧的 `<wechat_send_file>` 标签方案已删除。
+  **生效范围仅限新建会话**：`dynamicTools` 只能在 `thread/start` 注册（0.156.1 依然如此，`thread/resume`/`fork`/`turn/start`/`thread/settings/update` 都没有该字段），因此只有本次改动**之后新建**的会话带这个工具；老会话与分叉线程在微信里要发文件，需新建会话并重新扫码绑定。旧的 `<wechat_send_file>` 标签方案已删除。
   **微信回合不再注入自研开发者指令**：`collaborationMode.settings.developer_instructions` 传 `null`（与桌面端、定时任务一致），「当前是 Default 模式 / 历史 Plan 块失效」由 codex 内置块负责；发文件规则全部来自上面的工具描述，因此老会话既没有工具、也不会有「请新建会话重新绑定」之类的兜底提示（模型只会如实回「发不了」）。
   **接收端可正常下载并打开（2026-09-24 真机验证）**。两个必须遵守的协议细节：① 媒体项的 `aes_key` 必须是 **base64(32 字符 hex 串)**（44 字符）——填 base64(16 字节密钥原文)（24 字符）会让接收端停在「下载中 0%」，或偶发下完却仍是密文，这是此前该功能不可用的真正原因；② 上传地址优先用 `getuploadurl` 返回的 `upload_full_url`（平台上报较新 `channel_version` 时会返回，内含 `taskid`，必须原样使用），没有该字段时才回退「`upload_param` + `filekey` 自拼」。
 - **回复兜底**：若回合正常结束却没捕获到助手文本（通知订阅偶发丢消息），会自动回查该回合的最终 `agentMessage` 文本作为回复；完成信号按「线程 + 回合 id」精确匹配，避免同线程残留的旧完成信号（后台压缩/重连遗留）误判新回合导致误报无输出；确无文本才返回中性提示（不再误报「执行失败：回合异常结束」）。
@@ -807,12 +819,13 @@ codex-ui 自有环境变量统一使用 **`CODEXUI_` 前缀**，后接大写下�
 
 ### 版本兼容与协议核对
 
-当前版本**验证基线 codex-cli 0.154.0**（兼容 0.149.0+）。应用启动时会探测 `codex --version`：
+当前版本**验证基线 codex-cli 0.156.1**（兼容 0.149.0+）。应用启动时会探测 `codex --version`：
 版本**低于 0.149.0** 时在状态栏提示“未适配”、但照常运行；0.149.0 及更高版本不提示。
 高版本不警告意味着未来 codex 协议变化时应用可能静默异常，升级 codex 后请留意功能是否正常。
-0.154.0 相对 0.149.0 的协议差异核对见 [docs/app-server.md](docs/app-server.md) §1.1
-（`ServerRequest` 无变化，新增方法与通知均为可选、不使用即不受影响）。
-**已知不一致（0.154.0）**：base instructions 仍教模型使用 `update_plan`，但请求的 `tools` 里已无该工具，模型调用会被 codex 拒为 `unsupported call: update_plan`（表现为模型说「工具 update_plan 不可用」，默认/计划模式皆然）；不影响应用功能，详见「兼容代理」小节的同名条目与 `docs/变更记录.md`。
+协议差异核对见 [docs/app-server.md](docs/app-server.md)：§1.1 为 0.149.0 → 0.154.0，§1.2 为 0.154.0 → 0.156.1
+（`ServerRequest` 两次复核均无变化；0.156.0 起移除 `thread/rollback`，本项目未调用，其余新增面不使用即不受影响）。
+0.156.1 已实际采用的两项新增能力：打开历史会话时用 `thread/resume` 返回的 `collaborationMode` 回填协作模式（0.154 及更早没有该字段，缺失时保持本地值），设置页「基础设置」用 `memory/status` 显示记忆 v2 就绪度（老版本 codex 报错时整行隐藏）。
+**已知不一致（0.149–0.154）**：这些版本的 base instructions 仍教模型使用 `update_plan`，但请求的 `tools` 里已无该工具，模型调用会被 codex 拒为 `unsupported call: update_plan`（表现为模型说「工具 update_plan 不可用」，默认/计划模式皆然）。0.155/0.156 的内置指令已不再包含 `update_plan`，属 codex 侧自行消失的历史问题；详见「兼容代理」小节的同名条目与 `docs/变更记录.md`。
 
 以 `codex app-server generate-ts --experimental` 输出的协议绑定为参考。后端只实现本项目所需字段，未知通知忽略并记录日志。codex CLI 升级后如协议变化，可重新生成绑定核对：
 

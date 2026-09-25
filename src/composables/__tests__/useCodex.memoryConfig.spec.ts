@@ -1,4 +1,9 @@
-import { loadMemoryConfig, saveMemoryConfig } from "../useCodex/memoryConfig";
+import {
+  loadMemoryConfig,
+  loadMemoryStatus,
+  MEMORY_V2_MIN_THREADS,
+  saveMemoryConfig,
+} from "../useCodex/memoryConfig";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -117,5 +122,43 @@ describe("useCodex/memoryConfig", () => {
     expect(memories?.value.use_memories).toBe(false);
     expect(memories?.value.generate_memories).toBe(false);
     expect(memories?.value.disable_on_external_context).toBe(true);
+  });
+
+  // memory/status 是 codex-cli 0.156.0 新增的实验方法
+  it("loadMemoryStatus 归一化 v2 计数与就绪标记，并带上门槛参数", async () => {
+    mockedInvoke.mockResolvedValue({
+      v2ConsolidatedThreads: 7,
+      v2Ready: false,
+    });
+    expect(await loadMemoryStatus()).toEqual({
+      consolidatedThreads: 7,
+      ready: false,
+    });
+    expect(mockedInvoke).toHaveBeenCalledWith("codex_rpc", {
+      method: "memory/status",
+      params: { minConsolidatedThreads: MEMORY_V2_MIN_THREADS },
+    });
+  });
+
+  it("loadMemoryStatus 缺字段时回落零值，v2Ready 非 true 即未就绪", async () => {
+    mockedInvoke.mockResolvedValue({});
+    expect(await loadMemoryStatus()).toEqual({
+      consolidatedThreads: 0,
+      ready: false,
+    });
+  });
+
+  it("loadMemoryStatus 老版本 codex（unknown variant）返回 null 供整行隐藏", async () => {
+    mockedInvoke.mockRejectedValueOnce(
+      new Error(
+        "Invalid request: unknown variant `memory/status`, expected one of `initialize`",
+      ),
+    );
+    expect(await loadMemoryStatus()).toBeNull();
+  });
+
+  it("loadMemoryStatus 响应非对象时返回 null", async () => {
+    mockedInvoke.mockResolvedValue(null);
+    expect(await loadMemoryStatus()).toBeNull();
   });
 });

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import {
   askConfirm,
   loadMemoryConfig,
+  loadMemoryStatus,
+  MEMORY_V2_MIN_THREADS,
   saveMemoryConfig,
   saveSettings,
   setToast,
@@ -90,6 +92,15 @@ async function clearCodexPath() {
 
 const memEnable = ref(false);
 const memAllowTool = ref(false);
+/** 记忆 v2 状态：null 表示当前 codex 不支持 `memory/status`（整行隐藏） */
+const memV2 = ref<{ consolidatedThreads: number; ready: boolean } | null>(null);
+
+/** 记忆 v2 状态文案（就绪 / 未达门槛的进度） */
+const memV2Text = computed(() => {
+  if (!memV2.value) return "";
+  if (memV2.value.ready) return "记忆 v2 已就绪";
+  return `记忆 v2：已整合 ${memV2.value.consolidatedThreads} 条会话（达到 ${MEMORY_V2_MIN_THREADS} 条后启用）`;
+});
 
 /** 读取 codex 配置回填记忆开关（进入「基础设置」标签时） */
 async function loadMemorySection() {
@@ -100,6 +111,8 @@ async function loadMemorySection() {
   } catch (e) {
     setToast(toastError(e));
   }
+  // 状态行独立取值：不支持该方法的老版本 codex 返回 null，仅隐藏该行
+  memV2.value = await loadMemoryStatus();
 }
 
 /** 任一记忆开关变更：写回 codex 配置 */
@@ -125,6 +138,8 @@ async function resetMemory() {
   try {
     await invoke("codex_rpc", { method: "memory/reset", params: null });
     setToast("记忆已删除");
+    // 已整合计数随之归零，刷新状态行
+    memV2.value = await loadMemoryStatus();
   } catch (e) {
     setToast(toastError(e));
   }
@@ -257,6 +272,12 @@ watch(
               <path :d="ICON_DELETE" />
             </svg>
           </button>
+        </div>
+        <div v-if="memV2" class="setting-row memory-row">
+          <div class="memory-row-main">
+            <div class="memory-row-title">记忆 v2 状态</div>
+            <div class="memory-row-desc">{{ memV2Text }}</div>
+          </div>
         </div>
       </div>
     </div>

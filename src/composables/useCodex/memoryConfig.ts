@@ -71,3 +71,43 @@ function asObj(v: unknown): Record<string, unknown> {
     ? { ...(v as Record<string, unknown>) }
     : {};
 }
+
+/** 记忆 v2 就绪状态（app-server 0.156.0+ 的 `memory/status`） */
+export interface MemoryV2Status {
+  /** 已整合的会话数（达到 `MEMORY_V2_MIN_THREADS` 才就绪） */
+  consolidatedThreads: number;
+  /** v2 是否已就绪 */
+  ready: boolean;
+}
+
+/** `memory/status` 的就绪门槛（服务端默认值；小于该值 v2 未启用）。 */
+export const MEMORY_V2_MIN_THREADS = 20;
+
+/**
+ * 读取记忆 v2 状态（只读展示用）。
+ *
+ * `memory/status` 是 codex-cli 0.156.0 新增的实验方法：老版本会回
+ * `unknown variant` 之类的错误，此时返回 null，由调用方整行隐藏。
+ */
+export async function loadMemoryStatus(): Promise<MemoryV2Status | null> {
+  try {
+    const res = await invoke<{
+      v2ConsolidatedThreads?: unknown;
+      v2Ready?: unknown;
+    }>("codex_rpc", {
+      method: "memory/status",
+      params: { minConsolidatedThreads: MEMORY_V2_MIN_THREADS },
+    });
+    if (!res || typeof res !== "object") return null;
+    return {
+      consolidatedThreads:
+        typeof res.v2ConsolidatedThreads === "number"
+          ? res.v2ConsolidatedThreads
+          : 0,
+      ready: res.v2Ready === true,
+    };
+  } catch {
+    // 老版本 codex 没有该方法：静默隐藏状态行
+    return null;
+  }
+}

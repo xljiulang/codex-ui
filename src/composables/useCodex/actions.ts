@@ -28,6 +28,7 @@ import {
 import {
   activeSessionTab,
   allSessionTabs,
+  applyResumedCollaborationMode,
   applyResumedSettings,
   dropSessionTab,
   findSessionTabByThread,
@@ -456,6 +457,8 @@ async function loadThreadInto(
       try {
         const res = await invoke("thread_resume", { params: { threadId } });
         applyResumedSettings(tab, res);
+        // 0.156.0+ 的 resume 带协作模式（权威值）；打开会话时以它为准
+        applyResumedCollaborationMode(tab, res);
         tab.resumedThreadId = threadId;
       } catch (e) {
         if (isThreadNotFound(e)) throw e; // 交给外层“会话已不存在”分支处理

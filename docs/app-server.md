@@ -2,6 +2,7 @@
 
 > 本文档的协议盘点基于本机 `codex.exe`（**codex-cli 0.149.0**，2026-08-23）实测生成：`codex app-server generate-ts --experimental` 与 `codex app-server generate-json-schema --experimental` 的产物，以及官方 `openai/codex` 仓库 `codex-rs/app-server/README.md` 的协议说明。
 > 2026-09-15 已用本机 **codex-cli 0.154.0** 重新生成上述绑定复核，差异与结论见 §1.1：客户端请求/通知为纯增量，`ServerRequest` 集合与既有字段无破坏性变更；下文各表仍按 0.149.0 基线盘点，其中的数量统计同理。
+> 2026-09-25 已用本机 **codex-cli 0.156.1** 再次生成绑定复核，差异与结论见 §1.2：**首次出现方法移除**（`thread/rollback`），但本项目未调用；下文各表仍按 0.149.0 基线盘点，只有被 0.156 影响的两处（`thread/rollback`、`Thread.turns`）就地标注。
 > 协议为实验性（`[experimental]`），随 codex 版本演进；生成产物与运行版本一一对应，升级 codex 后应重新生成并核对。
 
 ---
@@ -35,6 +36,43 @@
 既有代码实际调用的全部方法在 0.154.0 中均存在（无方法被移除），新增面均为「不使用即不受影响」的可选能力，因此升级到 0.154.0 无需改动既有协议调用。
 
 唯一需要补齐的行为：`currentTime/read` 是本项目**此前未实现应答**的服务端请求（用户开启 `[features.current_time_reminder] clock_source = "external"` 时到期发出）。它要求客户端回 `{ "currentTimeAt": <整秒 Unix 时间戳> }`；不应答会让 codex 侧按 1s 轮询干等 10s 后终止该回合。codex-ui 已在后端自动应答（见第 6.6 节）。
+
+### 1.2 版本差异（0.154.0 → 0.156.1）
+
+用本机 codex-cli 0.156.1 重新生成绑定，与 0.154.0 的产物逐文件比对（`generate-ts --experimental`：847 → 867 个文件）：
+
+| 面 | 0.154.0 | 0.156.1 | 结论 |
+|---|---|---|---|
+| `ServerRequest`（服务端反向请求） | 11 | 11 | **集合与文件内容完全一致**（生成产物字节相同），无需改动应答逻辑 |
+| `ClientRequest`（客户端请求） | 162 | 167 | 新增 `memory/status`、`rollout/compress`、`thread/attachment/{add,list,remove}`、`userVerification/cancel`；**移除 `thread/rollback`** |
+| `ServerNotification` | 83 | 84 | 新增 `thread/attachment/updated` |
+
+**唯一的破坏性变更**是 `thread/rollback` 被删除（0.156.0 起）。本项目从未调用该方法（仅 `src/lib/serverMessages.ts` 保留一条 `rollback` 报错文案映射），因此既有调用零破坏。
+
+本项目**实际采用**的两项新增能力：
+
+| 能力 | 说明 |
+|---|---|
+| `thread/resume` 响应新增 `collaborationMode` | `CollaborationMode | null`，注释写明「older server 可能省略」。打开历史会话时以它为准回填协作模式，替代仅靠请求体反推（见 README）。**0.154.0 及更早的 resume 没有该字段**，缺失时必须保持本地值不动 |
+| `memory/status` | 入参 `minConsolidatedThreads`（默认 20，范围 1..=4096），返回 `{ v2ConsolidatedThreads, v2Ready }`。0.154.0 会报 `-32600 unknown variant`，需静默降级；实验方法，未声明 `capabilities.experimentalApi` 时报 `requires experimentalApi capability` |
+
+### 1.3 0.156 新增但本项目未接的协议面
+
+以下能力在 0.156.1 已存在，本项目暂不使用（不需要即无影响），登记备查：
+
+| 协议面 | 用途 | 未接原因 |
+|---|---|---|
+| `thread/attachment/{add,list,remove}` + `thread/attachment/updated` | 线程级持久化附件（`{id, attachmentType, identityKey, payload}`，add 幂等返回 `created`/`existing`） | 官方在推「先上传附件、再按 id 引用」的会话附件模型；本项目的 `@` 引用走文本路径 + 自研 `useSessionFs` 文件树，暂无需求 |
+| 图片按 `file_id` 引用（`UserInput.image.fileId`、`ContentItem`/`FunctionCallOutputContentItem` 的 `{ image_url } \| { file_id }`） | 引用已上传附件中的图片 | 依赖上面的附件上传链路；本项目图片继续走 `localImage` 本地路径 |
+| `rollout/compress` | 触发 rollout 后台压缩（响应仅确认「已受理」，非完成） | 服务端内部维护流程，客户端无需干预 |
+| `userVerification/cancel` | 取消本连接发出的原生验证 RPC（Touch ID / Windows Hello 等） | 本项目未接 `userVerification/*` 系列 |
+| `disabledPluginIds`（`ThreadStartParams` / `ThreadSettingsUpdateParams` / `TurnStartParams` 入参；`ThreadSettings` / start/resume/fork 响应） | 保存线程级禁用的插件列表 | 注释写明「Does not yet filter plugin capabilities」，服务端尚未真正生效，等其落地后再接 |
+| `ConfigRequirements` 新增 `modelProvider` / `modelProviders` / `allowedLoginMethods`；新增类型 `ForcedLoginMethod`、`WorkspaceRouting`、`AccountRoutingOverride` | 托管策略：强制提供方、登录方式白名单、账号后端路由 | 企业托管场景，本项目的设置页直接写用户层 config，不做策略展示 |
+| `Model.availableAccessPrograms`（`ModelAccessPrograms`） | 模型发现返回的调用方可选访问计划（如 cyber） | 与 Daybreak / 网络安全场景绑定，本项目不涉及 |
+| `ThreadItem.mcpToolCall.mcpAppUi`（`McpAppUi` / `McpAppDisplayMode`） | MCP App 的 UI 资源与展示模式（`inline` / `fullscreen`）；原 `mcpAppResourceUri` 降级为兼容字段 | 需要 MCP App 渲染容器，本项目只展示 MCP 工具调用结果 |
+| `ConfigRequirements.allowedWindowsSandboxImplementations` 改用 `WindowsSandboxImplementation`（`elevated` \| `unelevated` \| `mxc`） | Windows 沙箱实现档位新增 `mxc` | 托管策略字段；本项目不改沙箱实现 |
+| `PluginDetail.onboardingSkill`、`McpServerStatus.serverCapabilities`、`FeedbackUploadResponse.promptHash`、`UserVerificationEnrollResponse.{algorithm,publicKey}`、`ThreadSettingsUpdateParams.disabledPluginIds` 等零散字段 | 插件引导技能、MCP 服务端能力快照、上传提示词哈希、凭据公钥元数据 | 展示型信息，本项目当前 UI 未使用 |
+| Release 资产新增 `codex-windows-sandbox-service.exe` | Windows 沙箱服务 | 不在 npm 包内、`install.ps1` 不引用；实测平铺 `bin` 布局（本安装包形态）不需要它，故不随包分发 |
 
 ## 2. 启动与传输
 
@@ -221,7 +259,7 @@ type InitializeResponse = {
 | `thread/settings/update` | `v2/ThreadSettingsUpdateParams` | 排队修改已加载线程的“下一回合”设置（实验；变化时发 `thread/settings/updated`） |
 | `thread/compact/start` | `v2/ThreadCompactStartParams` | 触发上下文压缩，进度走标准 turn/item 通知 |
 | `thread/inject_items` | `v2/ThreadInjectItemsParams` | 向已加载线程追加原始 Responses API 条目（不进模型可见历史前不开新回合） |
-| `thread/rollback` | `v2/ThreadRollbackParams` | 丢弃最近 N 回合（**已弃用，即将移除**；分页线程不支持） |
+| ~~`thread/rollback`~~ | `v2/ThreadRollbackParams` | 丢弃最近 N 回合。**0.156.0 起已从协议移除**（0.149–0.155 仍存在，分页线程不支持）；本项目未调用，列表仅作历史记录 |
 | `thread/shellCommand` | `v2/ThreadShellCommandParams` | 以“!”方式在会话内运行命令（不受线程沙箱约束，全访问） |
 | `thread/backgroundTerminals/clean` | `v2/ThreadBackgroundTerminalsCleanParams` | 清理会话全部后台终端（实验） |
 | `thread/backgroundTerminals/list` | `v2/ThreadBackgroundTerminalsListParams` | 列出会话运行中的后台终端（实验） |
@@ -237,6 +275,7 @@ type InitializeResponse = {
 | `thread/goal/get` | `v2/ThreadGoalGetParams` | 读取线程目标；无目标返回 `goal: null` |
 | `thread/goal/clear` | `v2/ThreadGoalClearParams` | 清除线程目标，状态变化时发 `thread/goal/cleared` |
 | `thread/memoryMode/set` | `v2/ThreadMemoryModeSetParams` | 设置线程记忆资格 `"enabled"` / `"disabled"`（实验） |
+| `memory/status` | `v2/MemoryStatusParams` | 读取记忆 v2 就绪度（**0.156.0 新增**，实验）：入参 `minConsolidatedThreads`（默认 20，范围 1..=4096），返回 `{ v2ConsolidatedThreads, v2Ready }`。设置页「基础设置」用它在本地记忆区显示一行只读状态；老版本 codex 报 `unknown variant` 时该行隐藏 |
 | `memory/reset` | `undefined` | 清空 `CODEX_HOME/memories` 并重置 sqlite 记忆阶段数据（实验），保留线程记忆模式 |
 
 ### 5.3 回合（turn）
@@ -647,7 +686,7 @@ type Thread = {
   agentRole: string | null;
   gitInfo: GitInfo | null;
   name: string | null;
-  turns: Array<Turn>;            // 仅 resume/rollback/fork/read(includeTurns) 等应答填充
+  turns: Array<Turn>;            // 仅 resume/fork/read(includeTurns) 等应答填充（rollback 已于 0.156.0 移除）
 };
 ```
 
@@ -756,7 +795,7 @@ type ThreadSourceKind = "cli" | "vscode" | "exec" | "appServer" | "subAgent"
 |---|---|
 | `-32001` `"Server overloaded; retry later."` | 请求入口饱和，可重试（指数退避 + 抖动） |
 | `-32600` | 分页线程独占写冲突：另一进程持有线程时，`thread/resume`/`thread/archive`/`thread/delete` 失败；旧版本以「unknown variant」形式报方法未知（两种形态均出现） |
-| `-32601` | 方法不存在；或分页线程存储不支持某能力（如 item 分页、paginated 历史下 thread/rollback） |
+| `-32601` | 方法不存在；或分页线程存储不支持某能力（如 item 分页）；0.156.0 起 `thread/rollback` 本身已移除，调用会落到此错误 |
 | `"Not initialized"` | 连接未完成 initialize 就调用其它方法 |
 | `"Already initialized"` | 同连接重复 initialize |
 | `<descriptor> requires experimentalApi capability` | 未开启实验 API 却调用实验方法/字段/枚举变体（descriptor 形如 `mock/experimentalMethod`、`thread/start.mockExperimentalField`、`askForApproval.granular`） |
@@ -876,5 +915,5 @@ codex app-server generate-json-schema --experimental --out <DIR>
 ## 参考
 
 - 官方 README：`openai/codex` → `codex-rs/app-server/README.md`（0.154.0 起另有 `codex-rs/app-server-client/README.md` 描述进程内客户端；仓库 tag 与 CLI 版本不完全对齐，勿直接按 tag 推算方法集合）
-- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（本文件盘点为 codex-cli 0.149.0，2026-09-15 已用 0.154.0 复核，见 §1.1）
+- 生成绑定：`codex app-server generate-ts --experimental` / `generate-json-schema --experimental`（本文件盘点为 codex-cli 0.149.0；2026-09-15 已用 0.154.0 复核见 §1.1，2026-09-25 已用 0.156.1 复核见 §1.2）
 - 本地实测：`src-tauri/tests/app_server_integration.rs`、`docs/协议盘点.md`

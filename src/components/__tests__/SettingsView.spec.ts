@@ -3219,6 +3219,54 @@ describe("SettingsView 基础设置", () => {
       params: null,
     });
   });
+
+  /** 记忆 v2 状态行：命中含「记忆 v2 状态」标题的那一行 */
+  function memV2Row(w: ReturnType<typeof mount>) {
+    return w
+      .findAll(".settings-section-basic .memory-row")
+      .find((r) => r.text().includes("记忆 v2 状态"));
+  }
+
+  /** 让 memory/status 返回指定状态（其余 RPC 仍返回 {}） */
+  function mockMemoryStatus(status: unknown) {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "memory/status") {
+        return status;
+      }
+      return {};
+    });
+  }
+
+  it("记忆 v2 未就绪：显示已整合计数与门槛", async () => {
+    mockMemoryStatus({ v2ConsolidatedThreads: 3, v2Ready: false });
+    wrapper = mount(SettingsView);
+    await openMemory(wrapper);
+    await flushPromises();
+    expect(memV2Row(wrapper)?.text()).toContain(
+      "记忆 v2：已整合 3 条会话（达到 20 条后启用）",
+    );
+  });
+
+  it("记忆 v2 就绪：显示已就绪", async () => {
+    mockMemoryStatus({ v2ConsolidatedThreads: 25, v2Ready: true });
+    wrapper = mount(SettingsView);
+    await openMemory(wrapper);
+    await flushPromises();
+    expect(memV2Row(wrapper)?.text()).toContain("记忆 v2 已就绪");
+  });
+
+  it("老版本 codex（memory/status 报错）：整行隐藏", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "memory/status") {
+        throw new Error("unknown variant `memory/status`");
+      }
+      return {};
+    });
+    wrapper = mount(SettingsView);
+    await openMemory(wrapper);
+    await flushPromises();
+    expect(memV2Row(wrapper)).toBeUndefined();
+  });
 });
 
 describe("SettingsView 终端 Shell", () => {

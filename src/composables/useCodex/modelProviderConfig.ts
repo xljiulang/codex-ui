@@ -22,8 +22,6 @@ export interface ModelProviderConfigState {
   model_reasoning_effort: string;
   /** 推理摘要 model_reasoning_summary（auto/concise/detailed/none），空串表示未配置 */
   model_reasoning_summary: string;
-  /** 回复风格 personality（friendly/pragmatic/none），空串表示未配置 */
-  personality: string;
   /** 输出详细程度 model_verbosity（low/medium/high），空串表示未配置 */
   model_verbosity: string;
   model_provider: string;
@@ -65,7 +63,6 @@ export async function loadModelProviderConfig(): Promise<ModelProviderConfigStat
     model: str(cfg.model),
     model_reasoning_effort: str(cfg.model_reasoning_effort),
     model_reasoning_summary: str(cfg.model_reasoning_summary),
-    personality: str(cfg.personality),
     model_verbosity: str(cfg.model_verbosity),
     model_provider: str(cfg.model_provider),
     preferred_auth_method: str(cfg.preferred_auth_method),
@@ -159,12 +156,7 @@ export async function saveModelProviderConfig(
           mergeStrategy: "replace",
         },
         {
-          // personality / model_verbosity：空串写 null 让 codex 删除该键（回退内置默认）
-          keyPath: "personality",
-          value: edit.personality.trim() || null,
-          mergeStrategy: "replace",
-        },
-        {
+          // model_verbosity：空串写 null 让 codex 删除该键（回退内置默认）
           keyPath: "model_verbosity",
           value: edit.model_verbosity.trim() || null,
           mergeStrategy: "replace",

@@ -14,6 +14,7 @@
     "test:rust": "cargo test --lib --manifest-path src-tauri/Cargo.toml",
     "test:rust:integration": "cargo test --manifest-path src-tauri/Cargo.toml --test app_server_integration",
     "test:e2e": "node scripts/run-e2e.mjs",
+    "setup-bin": "node scripts/update-setup-bin.mjs",
     "test:all": "npm run test:unit && npm run test:typecheck && npm run test:rust && npm run test:rust:integration",
     "format": "prettier --write \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml",
     "format:check": "prettier --check \"src/**/*.{ts,vue,css}\" \"*.{ts,json}\" && cargo fmt --manifest-path src-tauri/Cargo.toml --check",

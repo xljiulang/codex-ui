@@ -10,6 +10,7 @@ import { threadTitle } from "./selectors";
 import { store } from "./store";
 import { setToast } from "./toast";
 import type { SessionTab } from "./types";
+import { sessionLog } from "../../lib/sessionLog";
 
 let sessionTabSeq = 0;
 
@@ -307,6 +308,35 @@ export function applyResumedSettings(tab: SessionTab, res: unknown): void {
     }
   }
   if (changed) void saveSessionState(tab);
+}
+
+/**
+ * 用 thread/resume 返回的 `collaborationMode.mode` 回填标签的协作模式。
+ *
+ * codex-cli 0.156.0 起 `thread/resume` 响应带 `collaborationMode`（此前版本没有该字段），
+ * 它是服务端持久化的权威模式，可避免仅靠请求体反推导致的偏差。
+ * 字段缺失（0.149–0.155）或取值不是 `plan`/`default` 时静默不动。
+ *
+ * 只在「打开会话」路径调用：`startTurn` / `startTurnForTab` / `ensureThreadResumed`
+ * 的 resume 发生在用户已在本地点选模式之后，套用服务端值会覆盖用户刚做的选择。
+ */
+export function applyResumedCollaborationMode(
+  tab: SessionTab,
+  res: unknown,
+): void {
+  if (!res || typeof res !== "object") return;
+  const mode = (res as { collaborationMode?: { mode?: unknown } })
+    .collaborationMode?.mode;
+  if (mode !== "plan" && mode !== "default") return;
+  if (tab.collaborationMode === mode) return;
+  const prev = tab.collaborationMode;
+  tab.collaborationMode = mode;
+  void sessionLog(
+    "info",
+    tab.threadId,
+    "resume-task-mode",
+    `prev=${prev} -> server=${mode}`,
+  );
 }
 
 /** 删除会话时清空其统一状态记录。 */
