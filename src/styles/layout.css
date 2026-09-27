@@ -270,18 +270,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.session-folder .folder-count {
-  flex-shrink: 0;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  color: var(--text-faint);
-  background: var(--bg-active);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px var(--space-3);
-  min-width: 22px;
-  text-align: center;
-}
 .session-item.folder-item {
   margin-left: var(--space-6);
 }

@@ -92,7 +92,9 @@ describe("CompatProxySection", () => {
     const wrapper = mountSection();
     const badge = wrapper.find(".compat-proxy-status-badge");
     expect(badge.text()).toBe("已停止");
-    expect(badge.classes()).toContain("is-stopped");
+    // 统一胶囊徽章：基类 + 语义档（已停止属正常态 → 中性）
+    expect(badge.classes()).toContain("badge");
+    expect(badge.classes()).toContain("badge-neutral");
     expect(wrapper.find(".compat-proxy-base-url-capsule").exists()).toBe(false);
   });
 
@@ -101,7 +103,8 @@ describe("CompatProxySection", () => {
     const wrapper = mountSection();
     const badge = wrapper.find(".compat-proxy-status-badge");
     expect(badge.text()).toBe("已启动");
-    expect(badge.classes()).toContain("is-running");
+    expect(badge.classes()).toContain("badge");
+    expect(badge.classes()).toContain("badge-accent");
     const capsule = wrapper.find(".compat-proxy-base-url-capsule");
     expect(capsule.exists()).toBe(true);
     expect(capsule.text()).toContain("http://127.0.0.1:18080/zen/v1");

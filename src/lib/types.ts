@@ -372,6 +372,12 @@ export interface McpEnvEntry {
   value: string;
 }
 
+/** MCP 服务器未在界面建模的配置键（只读展示，值统一渲染为文本） */
+export interface McpExtraEntry {
+  key: string;
+  value: string;
+}
+
 /** 单个 MCP 服务器条目（env 用有序键值对，便于 UI 增删） */
 export interface McpServerInfo {
   /** [mcp_servers.<name>] 表名标识 */
@@ -390,6 +396,14 @@ export interface McpServerInfo {
   bearer_token_env_var: string;
   /** 工具暴露面排除清单（omit_tools_from），直接暴露面：direct/deferred/code_mode */
   omit_tools_from?: string[];
+  /** 是否启用该服务器（enabled）；仅显式 false 表示禁用，缺失/true 均视为启用 */
+  enabled?: boolean;
+  /** 工具审批模式（default_tools_approval_mode）；空串表示不写入该键 */
+  default_tools_approval_mode?: string;
+  /** 工具黑名单（disabled_tools）：名单内工具不注册给模型；空数组表示不写入该键 */
+  disabled_tools?: string[];
+  /** 未在界面建模的配置键（只读展示；保存时原样保留） */
+  extra?: McpExtraEntry[];
 }
 
 /** mcpServerStatus/list 返回的认证状态（McpAuthStatus） */

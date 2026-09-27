@@ -52,7 +52,12 @@ describe("GitRemotesSection", () => {
     const rows = wrapper.findAll(".git-remote-row");
     expect(rows).toHaveLength(2);
     expect(rows[0].find(".git-remote-name").text()).toContain("origin");
-    expect(rows[0].find(".git-remote-badge").exists()).toBe(true);
+    // 当前远端徽章走统一胶囊基类（强调档）
+    const badge = rows[0].find(".git-remote-badge");
+    expect(badge.exists()).toBe(true);
+    expect(badge.classes()).toEqual(
+      expect.arrayContaining(["badge", "badge-accent"]),
+    );
     expect(rows[1].find(".git-remote-url").text()).toContain(
       "example.com/u.git",
     );

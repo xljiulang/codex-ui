@@ -43,6 +43,15 @@ const MCP_OMIT_OPTIONS = [
   { value: "code_mode", label: "代码模式" },
 ] as const;
 
+/** default_tools_approval_mode 可选审批模式（AppToolApproval）；「默认（不写入）」保存时删除该键 */
+const MCP_APPROVAL_MODE_OPTIONS: AppSelectOption[] = [
+  { value: "", label: "默认（不写入，等同 auto）" },
+  { value: "auto", label: "auto（仅破坏性、开放世界工具需批准）" },
+  { value: "prompt", label: "prompt（每次调用都确认）" },
+  { value: "writes", label: "writes（非只读工具需批准）" },
+  { value: "approve", label: "approve（全部免审批，直接调用）" },
+];
+
 /** MCP 新增/编辑表单状态（editingIndex < 0 表示新增） */
 const mcpForm = reactive({
   open: false,
@@ -58,6 +67,12 @@ const mcpForm = reactive({
   headers: [] as McpEnvEntry[],
   bearer_token_env_var: "",
   omit_tools_from: [] as string[],
+  /** enabled：默认启用；取消勾选保存为 enabled = false */
+  enabled: true,
+  /** default_tools_approval_mode：空串表示不写入 */
+  default_tools_approval_mode: "",
+  /** disabled_tools：逗号或空白分隔的工具名文本 */
+  disabled_tools_text: "",
 });
 
 const mcpFormErrors = reactive({
@@ -106,6 +121,9 @@ function openAddMcp() {
   mcpForm.headers = [];
   mcpForm.bearer_token_env_var = "";
   mcpForm.omit_tools_from = ["deferred"];
+  mcpForm.enabled = true;
+  mcpForm.default_tools_approval_mode = "";
+  mcpForm.disabled_tools_text = "";
   clearMcpFormErrors();
 }
 
@@ -125,6 +143,9 @@ function openEditMcp(index: number) {
   mcpForm.headers = (s.headers ?? []).map((e) => ({ ...e }));
   mcpForm.bearer_token_env_var = s.bearer_token_env_var ?? "";
   mcpForm.omit_tools_from = [...(s.omit_tools_from ?? [])];
+  mcpForm.enabled = s.enabled !== false;
+  mcpForm.default_tools_approval_mode = s.default_tools_approval_mode ?? "";
+  mcpForm.disabled_tools_text = (s.disabled_tools ?? []).join(", ");
   clearMcpFormErrors();
 }
 
@@ -146,6 +167,16 @@ function addMcpHeaderRow() {
 
 function removeMcpHeaderRow(index: number) {
   mcpForm.headers.splice(index, 1);
+}
+
+/** 解析 disabled_tools 文本：逗号或空白分隔，trim 去空、去重保序 */
+function parseToolNameText(text: string): string[] {
+  const names: string[] = [];
+  for (const raw of text.split(/[\s,]+/)) {
+    const name = raw.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
 }
 
 /** 提交 MCP 表单：校验后更新本地列表并立即落盘 */
@@ -214,6 +245,9 @@ async function confirmMcpForm() {
       : [],
     bearer_token_env_var: isHttp ? mcpForm.bearer_token_env_var.trim() : "",
     omit_tools_from: [...mcpForm.omit_tools_from],
+    enabled: mcpForm.enabled,
+    default_tools_approval_mode: mcpForm.default_tools_approval_mode,
+    disabled_tools: parseToolNameText(mcpForm.disabled_tools_text),
   };
   const isNew = mcpForm.editingIndex < 0;
   if (isNew) {
@@ -331,12 +365,28 @@ function openMcpDetail(index: number) {
           <div class="mcp-server-info">
             <span class="mcp-server-name">{{ s.name }}</span>
             <div class="mcp-server-meta">
-              <span class="mcp-server-type">{{
+              <span class="badge badge-accent mcp-server-type">{{
                 s.url.trim() ? "http" : "stdio"
               }}</span>
               <span
+                v-if="s.enabled === false"
+                class="badge badge-warn mcp-server-disabled"
+                v-tooltip="'enabled = false，codex 不会启动该服务器'"
+              >
+                已禁用
+              </span>
+              <span
+                v-if="s.default_tools_approval_mode"
+                class="badge badge-accent mcp-server-approval"
+                v-tooltip="
+                  `default_tools_approval_mode: ${s.default_tools_approval_mode}`
+                "
+              >
+                approval: {{ s.default_tools_approval_mode }}
+              </span>
+              <span
                 v-if="s.omit_tools_from?.length"
-                class="mcp-server-omit"
+                class="badge badge-neutral mcp-server-omit"
                 v-tooltip="`omit_tools_from: ${s.omit_tools_from.join(', ')}`"
               >
                 omit: {{ s.omit_tools_from.join("/") }}
@@ -421,6 +471,51 @@ function openMcpDetail(index: number) {
               v-model="mcpForm.transport"
               :options="transportOptions"
             />
+          </div>
+          <!-- 复用 omit 行的自定义复选框样式（同为「复选 + 说明」结构） -->
+          <div class="setting-row mcp-omit-row">
+            <label for="mcp-form-enabled">enabled（启用该服务器）</label>
+            <div class="mcp-omit-options">
+              <label class="mcp-omit-option">
+                <input
+                  id="mcp-form-enabled"
+                  v-model="mcpForm.enabled"
+                  type="checkbox"
+                />
+                <span class="mcp-omit-value">enabled</span>
+                <span class="mcp-omit-desc">
+                  默认启用；取消勾选保存为 enabled = false，codex
+                  不再启动该服务器
+                </span>
+              </label>
+            </div>
+          </div>
+          <div class="setting-row">
+            <label for="mcp-form-approval-mode">
+              default_tools_approval_mode（工具审批模式）
+            </label>
+            <AppSelect
+              id="mcp-form-approval-mode"
+              v-model="mcpForm.default_tools_approval_mode"
+              :options="MCP_APPROVAL_MODE_OPTIONS"
+            />
+            <p class="mcp-form-hint">
+              approve 表示该服务器工具不再进入审批与自动评审流程，请谨慎使用。
+            </p>
+          </div>
+          <div class="setting-row">
+            <label>disabled_tools（工具黑名单）</label>
+            <input
+              v-model="mcpForm.disabled_tools_text"
+              type="text"
+              placeholder="如 write_file, delete_file（逗号或空格分隔）"
+            />
+            <p class="mcp-form-hint">
+              填写的工具名不会注册给模型；留空表示不限制（不写入该键）。
+            </p>
+            <p class="mcp-form-hint">
+              用 MCP 原始工具名，精确匹配、区分大小写、不支持通配。
+            </p>
           </div>
           <div class="setting-row mcp-omit-row">
             <label>omit_tools_from（工具暴露面）</label>
@@ -623,8 +718,11 @@ function openMcpDetail(index: number) {
 </template>
 
 <style scoped>
-.mcp-server-omit {
-  white-space: nowrap;
+/** 表单内提示文案（审批模式 / 工具黑名单） */
+.mcp-form-hint {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--text-faint);
 }
 
 /* MCP 管理 */

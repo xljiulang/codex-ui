@@ -153,11 +153,11 @@ onBeforeUnmount(refresh);
           <h3>兼容代理服务</h3>
           <div class="compat-proxy-head-status">
             <span
-              class="compat-proxy-status-badge"
+              class="badge compat-proxy-status-badge"
               :class="
                 (store.settings.compat_proxy_enabled ?? false)
-                  ? 'is-running'
-                  : 'is-stopped'
+                  ? 'badge-accent'
+                  : 'badge-neutral'
               "
             >
               {{
@@ -273,25 +273,6 @@ onBeforeUnmount(refresh);
   flex-wrap: wrap;
   gap: var(--space-2);
   min-width: 0;
-}
-.compat-proxy-status-badge {
-  padding: 2px var(--space-3);
-  border-radius: 999px;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1.4;
-  border: 1px solid transparent;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.compat-proxy-status-badge.is-running {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.compat-proxy-status-badge.is-stopped {
-  color: var(--text-faint);
-  background: var(--bg-input);
-  border-color: var(--border);
 }
 /* base_url 值胶囊：可点击复制（鼠标手型 + 悬停高亮 + 键盘可达） */
 .compat-proxy-base-url-capsule {

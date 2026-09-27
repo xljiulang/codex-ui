@@ -61,6 +61,10 @@ describe("useCodex/mcp", () => {
         headers: [],
         bearer_token_env_var: "",
         omit_tools_from: [],
+        enabled: true,
+        default_tools_approval_mode: "",
+        disabled_tools: [],
+        extra: [{ key: "environment_id", value: "local" }],
       },
       {
         name: "remote",
@@ -71,6 +75,10 @@ describe("useCodex/mcp", () => {
         headers: [{ key: "Authorization", value: "Bearer x" }],
         bearer_token_env_var: "MY_TOKEN",
         omit_tools_from: [],
+        enabled: true,
+        default_tools_approval_mode: "",
+        disabled_tools: [],
+        extra: [{ key: "environment_id", value: "local" }],
       },
     ]);
     expect(raw.fs).toEqual({
@@ -134,7 +142,6 @@ describe("useCodex/mcp", () => {
                 args: ["-y", "server-fs"],
                 env: { API_KEY: "sk-2" },
                 environment_id: "local",
-                enabled: true,
               },
             },
             mergeStrategy: "replace",
@@ -377,6 +384,255 @@ describe("useCodex/mcp", () => {
       custom: 2,
     });
     expect(value["http-x"].cwd).toBeUndefined();
+  });
+
+  it("loadMcpServers 归一化 enabled：仅显式 false 为禁用", async () => {
+    mockedInvoke.mockResolvedValueOnce({
+      config: {},
+      layers: [
+        {
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
+          version: "sha256:abc",
+          config: {
+            mcp_servers: {
+              off: { command: "ca", enabled: false },
+              on: { command: "cb", enabled: true },
+              missing: { command: "cc" },
+              weird: { command: "cd", enabled: "no" },
+            },
+          },
+          disabledReason: null,
+        },
+      ],
+    });
+    const { servers } = await loadMcpServers();
+    expect(servers.map((s) => s.enabled)).toEqual([false, true, true, true]);
+  });
+
+  it("loadMcpServers 归一化 default_tools_approval_mode：仅保留合法枚举，其余为空串", async () => {
+    mockedInvoke.mockResolvedValueOnce({
+      config: {},
+      layers: [
+        {
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
+          version: "sha256:abc",
+          config: {
+            mcp_servers: {
+              a: { command: "ca", default_tools_approval_mode: "approve" },
+              b: { command: "cb", default_tools_approval_mode: "writes" },
+              c: { command: "cc", default_tools_approval_mode: "auto" },
+              d: { command: "cd", default_tools_approval_mode: "bogus" },
+              e: { command: "ce", default_tools_approval_mode: 1 },
+              f: { command: "cf" },
+            },
+          },
+          disabledReason: null,
+        },
+      ],
+    });
+    const { servers } = await loadMcpServers();
+    expect(servers.map((s) => s.default_tools_approval_mode)).toEqual([
+      "approve",
+      "writes",
+      "auto",
+      "",
+      "",
+      "",
+    ]);
+  });
+
+  it("loadMcpServers 归一化 disabled_tools：数组/单字符串、trim、去重、过滤非法项", async () => {
+    mockedInvoke.mockResolvedValueOnce({
+      config: {},
+      layers: [
+        {
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
+          version: "sha256:abc",
+          config: {
+            mcp_servers: {
+              a: {
+                command: "ca",
+                disabled_tools: ["write", "read", "write", "  del  ", 7, "  "],
+              },
+              b: { command: "cb", disabled_tools: "write" },
+              c: { command: "cc", disabled_tools: [] },
+              d: { command: "cd" },
+            },
+          },
+          disabledReason: null,
+        },
+      ],
+    });
+    const { servers } = await loadMcpServers();
+    expect(servers.find((s) => s.name === "a")?.disabled_tools).toEqual([
+      "write",
+      "read",
+      "del",
+    ]);
+    expect(servers.find((s) => s.name === "b")?.disabled_tools).toEqual([
+      "write",
+    ]);
+    expect(servers.find((s) => s.name === "c")?.disabled_tools).toEqual([]);
+    expect(servers.find((s) => s.name === "d")?.disabled_tools).toEqual([]);
+  });
+
+  it("loadMcpServers 生成 extra：剔除建模键、按 key 排序、非字符串 JSON 化、bearer_token 掩码", async () => {
+    mockedInvoke.mockResolvedValueOnce({
+      config: {},
+      layers: [
+        {
+          name: {
+            type: "user",
+            file: "C:/x/.codex/config.toml",
+            profile: null,
+          },
+          version: "sha256:abc",
+          config: {
+            mcp_servers: {
+              probe: {
+                command: "npx",
+                args: ["-y", "srv"],
+                cwd: "C:/work",
+                env: { A: "1" },
+                http_headers: { X: "1" },
+                url: "",
+                bearer_token_env_var: "TOKEN",
+                omit_tools_from: ["deferred"],
+                enabled: false,
+                default_tools_approval_mode: "approve",
+                disabled_tools: ["write"],
+                // 以下均为界面未建模的键，应进入 extra
+                bearer_token: "sk-secret",
+                enabled_tools: ["read"],
+                env_vars: ["FOO"],
+                required: false,
+                startup_timeout_sec: 12,
+                tools: { read: { approval_mode: "approve" } },
+              },
+            },
+          },
+          disabledReason: null,
+        },
+      ],
+    });
+    const { servers } = await loadMcpServers();
+    expect(servers[0].extra).toEqual([
+      { key: "bearer_token", value: "••••" },
+      { key: "enabled_tools", value: '["read"]' },
+      { key: "env_vars", value: '["FOO"]' },
+      { key: "required", value: "false" },
+      { key: "startup_timeout_sec", value: "12" },
+      { key: "tools", value: '{"read":{"approval_mode":"approve"}}' },
+    ]);
+  });
+
+  it("saveMcpServers 写审批模式与 enabled：空值/enabled=true 删除键，false 写入", async () => {
+    await saveMcpServers(
+      [
+        {
+          name: "a",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          default_tools_approval_mode: "approve",
+          enabled: true,
+        },
+        {
+          name: "b",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          default_tools_approval_mode: "",
+          enabled: false,
+        },
+        {
+          name: "c",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          default_tools_approval_mode: "bogus",
+        },
+      ],
+      {
+        a: { command: "old", enabled: true },
+        b: { command: "old", default_tools_approval_mode: "prompt" },
+      },
+    );
+    const value = (
+      mockedInvoke.mock.calls[0][1] as {
+        params: { edits: { value: Record<string, Record<string, unknown>> }[] };
+      }
+    ).params.edits[0].value;
+    expect(value.a).toEqual({
+      command: "npx",
+      default_tools_approval_mode: "approve",
+    });
+    expect(value.b).toEqual({ command: "npx", enabled: false });
+    expect(value.c).toEqual({ command: "npx" });
+  });
+
+  it("saveMcpServers disabled_tools 空删键不写空数组，并原样保留手写 enabled_tools", async () => {
+    await saveMcpServers(
+      [
+        {
+          name: "deny",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          disabled_tools: ["write", "write", " read ", ""],
+        },
+        {
+          name: "empty",
+          command: "npx",
+          args: [],
+          env: [],
+          url: "",
+          headers: [],
+          bearer_token_env_var: "",
+          disabled_tools: [],
+        },
+      ],
+      {
+        deny: { command: "old", enabled_tools: ["read"] },
+        empty: { command: "old", disabled_tools: ["write"] },
+      },
+    );
+    const value = (
+      mockedInvoke.mock.calls[0][1] as {
+        params: { edits: { value: Record<string, Record<string, unknown>> }[] };
+      }
+    ).params.edits[0].value;
+    expect(value.deny).toEqual({
+      command: "npx",
+      enabled_tools: ["read"],
+      disabled_tools: ["write", "read"],
+    });
+    expect(value.empty).toEqual({ command: "npx" });
+    expect(value.empty.disabled_tools).toBeUndefined();
   });
 
   it("loadMcpServerStatus 命中时返回归一化详情并调用 full 列表", async () => {

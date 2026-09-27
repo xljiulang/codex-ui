@@ -938,38 +938,59 @@
   font-size: var(--font-md);
   border-radius: var(--radius);
 }
-/* 统一胶囊徽章基类：尺寸/字号/内边距恒定，语义色由修饰类控制 */
-.plugin-status,
-.model-provider-wire,
-.mcp-server-type,
-.git-remote-badge,
-.git-remote-branch-badge,
-.plugin-version,
-.plugin-source,
-.mcp-server-omit {
+/* ===== 统一胶囊徽章 =====
+   一个基类 + 五档语义修饰类；尺寸/形状只在这里定义一次。
+   站点类（.plugin-status / .mcp-server-type / .sched-chip 等）只作为选择器与
+   站点行为钩子保留，不再承载颜色与几何；新增徽章一律复用本基类，不要自建胶囊。 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
   font-size: var(--font-xs);
   font-weight: 600;
   line-height: 1;
+  /* 纵向不对称是刻意的**光学居中补偿**，不要「修」回对称：
+     Segoe UI 的 ascent+descent 大于 1em，line-height:1 时基线落在行盒中线下方，
+     小写文本视觉重心因此偏低（实测 8× 采样：纯小写偏下 1.62px）。基线相对行盒
+     中心的偏移只由字体度量决定，改行高或对称内边距都无效，只能靠底部多留 2px
+     把文字上提——补偿后纯小写偏差降到 0.62px，胶囊总高仍为 14px。 */
+  padding: 0 var(--space-2) 2px;
+  border: 1px solid transparent;
   border-radius: 999px;
-  flex-shrink: 0;
-  padding: 1px var(--space-2);
 }
-/* 强调语义：状态/传输类型/提供方接线等强调徽章 */
-.plugin-status,
-.model-provider-wire,
-.mcp-server-type,
-.git-remote-badge,
-.git-remote-branch-badge {
+/* 强调：状态、传输类型、提供方接线、审批模式等 */
+.badge-accent {
   color: var(--accent);
   background: var(--accent-soft);
 }
-/* 版本号 / 来源市场：中性胶囊（等宽描边风格），复用统一基类 */
-.plugin-version,
-.plugin-source,
-.mcp-server-omit {
+/* 中性：版本号、来源、暴露面、下一轮、会话名、已停止等 */
+.badge-neutral {
   color: var(--text-dim);
   background: var(--bg-input);
-  border: 1px solid var(--border);
+  border-color: var(--border);
+}
+/* 成功：任务运行成功等 */
+.badge-success {
+  color: var(--green);
+  background: rgba(var(--green-rgb), 0.14);
+}
+/* 警示：已禁用等需要提醒但不致命的状态 */
+.badge-warn {
+  color: var(--yellow);
+  background: rgba(var(--yellow-rgb), 0.14);
+}
+/* 危险：任务运行失败等 */
+.badge-danger {
+  color: var(--red);
+  background: rgba(var(--red-rgb), 0.13);
+}
+/* 数量徽章：纯数字居中，等宽最小尺寸 */
+.badge-count {
+  min-width: 22px;
+  /* 只改横向：纵向沿用 .badge 的光学居中补偿（shorthand 会把纵向重置回对称） */
+  padding-inline: var(--space-3);
+  text-align: center;
 }
 /* 列表项首统一图标容器：技能 / 动态工具 / MCP 线性图标与插件品牌图共用。
    浅色圆角小方块，线性图标以 currentColor 着色（text-dim），插件图片/首字母仍放容器内。 */

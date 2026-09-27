@@ -387,11 +387,6 @@
   white-space: nowrap;
 }
 
-.git-remote-branch-badge,
-.git-remote-badge {
-  padding: 2px var(--space-1);
-}
-
 .git-remote-branch-delete {
   flex-shrink: 0;
   width: 20px;

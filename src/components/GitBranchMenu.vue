@@ -383,7 +383,9 @@ onBeforeUnmount(() => {
           @click="checkoutRemoteBranch(rb)"
         >
           <span class="git-remote-branch-name">{{ rb }}</span>
-          <span v-if="rb === currentUpstream" class="git-remote-branch-badge"
+          <span
+            v-if="rb === currentUpstream"
+            class="badge badge-accent git-remote-branch-badge"
             >上游</span
           >
           <button

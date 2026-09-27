@@ -10,6 +10,7 @@ import {
 import { copyText } from "../../lib/clipboard";
 import type {
   McpAuthStatus,
+  McpExtraEntry,
   McpServerDetail,
   McpServerInfo,
   McpToolDetail,
@@ -42,6 +43,10 @@ const mcpDetail = reactive({
   argsText: "",
   cwd: "",
   url: "",
+  /** default_tools_approval_mode 显式值；空串表示未设置（codex 默认 auto） */
+  approvalMode: "",
+  /** 未在界面建模的配置键（只读展示，来自 McpServerInfo.extra） */
+  extra: [] as McpExtraEntry[],
   loading: false,
   notFound: false,
   detail: null as McpServerDetail | null,
@@ -106,6 +111,8 @@ async function openMcpDetail(s: McpServerInfo) {
   mcpDetail.argsText = (s.args ?? []).join(" ");
   mcpDetail.cwd = s.cwd ?? "";
   mcpDetail.url = s.url;
+  mcpDetail.approvalMode = s.default_tools_approval_mode ?? "";
+  mcpDetail.extra = [...(s.extra ?? [])];
   mcpDetail.detail = null;
   mcpDetail.notFound = false;
   mcpDetail.startup = "";
@@ -310,7 +317,30 @@ function mcpDetailAuthLabel(): string {
                   {{ mcpDetailAuthLabel() }}
                 </span>
               </div>
+              <div class="mcp-detail-field">
+                <span class="mcp-detail-field-label">工具审批模式</span>
+                <span class="mcp-detail-field-value">
+                  {{ mcpDetail.approvalMode || "auto（默认）" }}
+                </span>
+              </div>
             </div>
+            <template v-if="mcpDetail.extra.length">
+              <h4 class="mcp-detail-group-title">其他配置</h4>
+              <div class="mcp-detail-fields">
+                <div
+                  v-for="entry in mcpDetail.extra"
+                  :key="entry.key"
+                  class="mcp-detail-field"
+                >
+                  <span class="mcp-detail-field-label mono">
+                    {{ entry.key }}
+                  </span>
+                  <span class="mcp-detail-field-value mono">
+                    {{ entry.value }}
+                  </span>
+                </div>
+              </div>
+            </template>
           </section>
 
           <section
@@ -530,6 +560,11 @@ function mcpDetailAuthLabel(): string {
 .mcp-detail-field-label {
   flex: 0 0 92px;
   color: var(--text-faint);
+}
+
+.mcp-detail-field-label.mono {
+  font-family: var(--mono);
+  word-break: break-all;
 }
 
 .mcp-detail-field-value {

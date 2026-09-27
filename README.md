@@ -378,8 +378,11 @@
 
 ### MCP 管理（设置页「MCP 管理」Tab）
 
-- 配置 stdio / Streamable HTTP 服务器（名称、command/cwd/args 或 url、env/http_headers、Bearer 令牌环境变量、`omit_tools_from` 工具暴露面）；
-- 每行「信息」图标打开详情弹窗（标题即服务器名），按「服务器信息 / 工具 / 资源」Tab 展示 codex 实际连接的能力——服务器信息含传输类型、启动命令/url、`serverInfo` 标题/版本/描述/网站与认证状态；
+- 配置 stdio / Streamable HTTP 服务器（名称、command/cwd/args 或 url、env/http_headers、Bearer 令牌环境变量、`omit_tools_from` 工具暴露面、`enabled` 启用开关、`default_tools_approval_mode` 工具审批模式、`disabled_tools` 工具黑名单）；
+- 工具审批模式可选 `auto` / `prompt` / `writes` / `approve`（默认不写入，等同 `auto`）：`approve` 表示该服务器工具不再进入审批与自动评审流程，界面上有明确警示；工具黑名单按 MCP 原始工具名精确匹配（区分大小写、不支持通配），留空即不写入该键；
+- 列表行的四项元信息（传输类型、`enabled = false` 时的「已禁用」、显式设置的 `approval: <模式>`、`omit: a/b`）统一渲染为胶囊徽章（与插件管理、定时任务、兼容代理等处同一套全局样式），配色分别为强调 / 警示 / 强调 / 中性；
+- 每行「信息」图标打开详情弹窗（标题即服务器名），按「服务器信息 / 工具 / 资源」Tab 展示 codex 实际连接的能力——服务器信息含传输类型、启动命令/url、`serverInfo` 标题/版本/描述/网站、认证状态与生效的工具审批模式；
+- 服务器信息 Tab 末尾的「其他配置」只读列出界面未建模的键（`enabled_tools`、`tools.*.approval_mode`、超时类等手写配置，密钥值掩码），便于确认手写配置是否生效；
 - 工具含名称、描述与可折叠输入参数 JSON；
 - 资源与资源模板含 URI/描述/mimeType（资源 URI 可一键复制）；
 - 服务器就绪后自动刷新能力清单。

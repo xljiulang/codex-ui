@@ -124,7 +124,9 @@ async function removeRemote(remote: GitRemote) {
         <span class="git-remote-main">
           <span class="git-remote-name">
             {{ r.name }}
-            <span v-if="r.name === currentRemote" class="git-remote-badge"
+            <span
+              v-if="r.name === currentRemote"
+              class="badge badge-accent git-remote-badge"
               >当前</span
             >
           </span>

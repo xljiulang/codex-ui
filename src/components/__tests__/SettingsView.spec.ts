@@ -2681,6 +2681,210 @@ describe("SettingsView 技能管理 / MCP 管理", () => {
     ).length;
     expect(after).toBe(before + 1);
   });
+
+  /** 用自定义 [mcp_servers.*] 覆盖 config/read 应答 */
+  function stubMcpServers(mcpServers: Record<string, unknown>) {
+    const baseImpl = mockedInvoke.getMockImplementation()!;
+    mockedInvoke.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "codex_rpc" && args?.method === "config/read")
+        return Promise.resolve({
+          config: {},
+          layers: [
+            {
+              name: {
+                type: "user",
+                file: "C:/x/.codex/config.toml",
+                profile: null,
+              },
+              version: "x",
+              config: { mcp_servers: mcpServers },
+              disabledReason: null,
+            },
+          ],
+        });
+      return baseImpl(cmd, args);
+    });
+  }
+
+  it("新增 MCP 表单渲染 enabled / 审批模式 / 工具黑名单，默认启用且审批为不写入", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    expect(
+      (wrapper.find("#mcp-form-enabled").element as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(
+      wrapper.find("#mcp-form-approval-mode .app-select-label").text().trim(),
+    ).toBe("默认（不写入，等同 auto）");
+    expect(
+      (
+        wrapper.find('.mcp-server-form input[placeholder^="如 write_file"]')
+          .element as HTMLInputElement
+      ).value,
+    ).toBe("");
+    expect(wrapper.find(".mcp-server-form").text()).toContain(
+      "approve 表示该服务器工具不再进入审批与自动评审流程",
+    );
+    expect(wrapper.find(".mcp-server-form").text()).toContain(
+      "用 MCP 原始工具名，精确匹配、区分大小写、不支持通配",
+    );
+  });
+
+  it("MCP 保存审批模式 / 工具黑名单 / 禁用开关", async () => {
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper.find(".mcp-config-add-btn").trigger("click");
+    await flushPromises();
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 filesystem"]')
+      .setValue("strict");
+    await wrapper
+      .find('.mcp-server-form input[placeholder="如 npx"]')
+      .setValue("npx");
+    await wrapper.find("#mcp-form-enabled").setValue(false);
+    await pickAppSelect(
+      wrapper,
+      "mcp-form-approval-mode",
+      "approve（全部免审批，直接调用）",
+    );
+    await wrapper
+      .find('.mcp-server-form input[placeholder^="如 write_file"]')
+      .setValue("write_file, delete_file write_file");
+    await wrapper.find(".mcp-form-submit").trigger("click");
+    await flushPromises();
+    const batchWriteCall = mockedInvoke.mock.calls.find(
+      ([name, args]) =>
+        name === "codex_rpc" &&
+        (args as { method?: string } | undefined)?.method ===
+          "config/batchWrite",
+    ) as [
+      string,
+      {
+        params: { edits: { value: Record<string, Record<string, unknown>> }[] };
+      },
+    ];
+    expect(batchWriteCall[1].params.edits[0].value.strict).toEqual({
+      command: "npx",
+      omit_tools_from: ["deferred"],
+      default_tools_approval_mode: "approve",
+      disabled_tools: ["write_file", "delete_file"],
+      enabled: false,
+    });
+  });
+
+  it("MCP 列表徽章：enabled=false 显示已禁用，显式审批模式显示 approval", async () => {
+    stubMcpServers({
+      off: {
+        command: "npx",
+        enabled: false,
+        default_tools_approval_mode: "approve",
+        omit_tools_from: ["deferred"],
+      },
+      plain: { command: "npx" },
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll(".mcp-server-row");
+    expect(rows[0].find(".mcp-server-disabled").text()).toBe("已禁用");
+    expect(rows[0].find(".mcp-server-approval").text()).toBe(
+      "approval: approve",
+    );
+    // 四项 meta 复用全局统一胶囊徽章：基类 .badge + 各自语义档
+    for (const [cls, semantic] of [
+      [".mcp-server-type", "badge-accent"],
+      [".mcp-server-disabled", "badge-warn"],
+      [".mcp-server-approval", "badge-accent"],
+      [".mcp-server-omit", "badge-neutral"],
+    ] as const) {
+      expect(rows[0].find(cls).classes()).toContain("badge");
+      expect(rows[0].find(cls).classes()).toContain(semantic);
+    }
+    expect(rows[0].find(".mcp-server-omit").text()).toBe("omit: deferred");
+    expect(rows[1].find(".mcp-server-disabled").exists()).toBe(false);
+    expect(rows[1].find(".mcp-server-approval").exists()).toBe(false);
+  });
+
+  it("MCP 详情弹窗展示工具审批模式与其他配置", async () => {
+    stubMcpStatus();
+    stubMcpServers({
+      filesystem: {
+        command: "npx",
+        args: ["-y", "mcp-server-filesystem"],
+        default_tools_approval_mode: "writes",
+        enabled_tools: ["read_file"],
+        startup_timeout_sec: 12,
+        bearer_token: "sk-secret",
+      },
+    });
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-info")
+      .trigger("click");
+    await flushPromises();
+    const panes = wrapper.findAll(".mcp-detail-fields");
+    expect(panes[0].text()).toContain("工具审批模式");
+    expect(panes[0].text()).toContain("writes");
+    // 资源 Tab 也有 group 标题（v-show 常驻 DOM），这里只在服务器信息 Tab 内查找
+    const extra = wrapper
+      .findAll(".mcp-detail-pane")[0]
+      .find(".mcp-detail-group-title");
+    expect(extra.text()).toBe("其他配置");
+    const extraText = panes[1].text();
+    expect(extraText).toContain("enabled_tools");
+    expect(extraText).toContain("startup_timeout_sec");
+    expect(extraText).toContain("12");
+    expect(extraText).toContain("bearer_token");
+    expect(extraText).toContain("••••");
+    expect(extraText).not.toContain("sk-secret");
+  });
+
+  it("MCP 详情弹窗无未建模键时不渲染其他配置", async () => {
+    stubMcpStatus();
+    const wrapper = mount(SettingsView);
+    await flushPromises();
+    await wrapper
+      .findAll(".settings-nav-item")
+      .find((i) => i.text().includes("MCP管理"))!
+      .trigger("click");
+    await flushPromises();
+    await wrapper
+      .findAll(".mcp-server-row")[0]
+      .find(".mcp-row-info")
+      .trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll(".mcp-detail-fields")).toHaveLength(1);
+    expect(
+      wrapper
+        .findAll(".mcp-detail-pane")[0]
+        .find(".mcp-detail-group-title")
+        .exists(),
+    ).toBe(false);
+    // 未设置审批模式时展示 codex 默认值
+    expect(wrapper.find(".mcp-detail-fields").text()).toContain("auto（默认）");
+  });
 });
 
 describe("SettingsView 设置标签行为", () => {
@@ -3406,6 +3610,10 @@ describe("SettingsView 插件管理", () => {
     // 头部（市场名/插件数量）始终可见
     expect(mps[0].find(".plugin-marketplace-count").text()).toBe("2");
     expect(mps[1].find(".plugin-marketplace-count").text()).toBe("1");
+    // 数量徽章走统一胶囊基类（中性 + 数量变体）
+    expect(mps[0].find(".plugin-marketplace-count").classes()).toEqual(
+      expect.arrayContaining(["badge", "badge-neutral", "badge-count"]),
+    );
     // 展开后可见插件名与状态
     await mps[0].find(".plugin-marketplace-head").trigger("click");
     await mps[1].find(".plugin-marketplace-head").trigger("click");
@@ -3414,6 +3622,14 @@ describe("SettingsView 插件管理", () => {
     expect(wrapper.text()).toContain("Gmail");
     expect(wrapper.text()).toContain("已启用");
     expect(wrapper.text()).toContain("未安装");
+    // 状态徽章为强调档，版本/来源为中性档
+    const statusBadges = mps[0].findAll(".plugin-status");
+    expect(statusBadges.length).toBeGreaterThan(0);
+    for (const b of statusBadges) {
+      expect(b.classes()).toEqual(
+        expect.arrayContaining(["badge", "badge-accent"]),
+      );
+    }
   });
 
   it("已安装插件卡片仅汇总 installed 插件并显示来源市场", async () => {
@@ -3469,6 +3685,15 @@ describe("SettingsView 插件管理", () => {
     expect(rows[0].text()).toContain("Browser");
     expect(rows[0].text()).toContain("1.2.0");
     expect(rows[0].text()).toContain("来源：openai-bundled");
+    // 统一胶囊徽章：状态为强调档，版本号与来源市场为中性档
+    expect(rows[0].find(".plugin-status").classes()).toEqual(
+      expect.arrayContaining(["badge", "badge-accent"]),
+    );
+    for (const cls of [".plugin-version", ".plugin-source"]) {
+      expect(rows[0].find(cls).classes()).toEqual(
+        expect.arrayContaining(["badge", "badge-neutral"]),
+      );
+    }
     expect(rows[1].text()).toContain("Gmail");
     expect(rows[1].text()).toContain("来源：openai-curated");
     // 未安装的 PDF 不出现在已安装卡片

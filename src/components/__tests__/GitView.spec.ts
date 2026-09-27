@@ -2375,7 +2375,11 @@ describe("GitView 远端管理", () => {
       rootPath,
     );
     expect(wrapper.find(".git-remote-name").text()).toContain("origin");
-    expect(wrapper.find(".git-remote-badge").exists()).toBe(true);
+    const remoteBadge = wrapper.find(".git-remote-badge");
+    expect(remoteBadge.exists()).toBe(true);
+    expect(remoteBadge.classes()).toEqual(
+      expect.arrayContaining(["badge", "badge-accent"]),
+    );
     expect(wrapper.find(".git-remote-url").text()).toContain(
       "github.com/x/y.git",
     );

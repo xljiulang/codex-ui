@@ -327,7 +327,9 @@ onBeforeUnmount(() => {
             </svg>
           </span>
           <span class="folder-name">{{ row.group.label }}</span>
-          <span class="folder-count">{{ row.group.threads.length }}</span>
+          <span class="badge badge-neutral badge-count folder-count">{{
+            row.group.threads.length
+          }}</span>
         </div>
         <div
           v-else

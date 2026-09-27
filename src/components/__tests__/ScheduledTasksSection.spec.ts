@@ -107,7 +107,12 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     // prompt 常驻于标题与徽章之间，展开前即可见
     expect(wrapper.find(".sched-prompt-desc").text()).toBe("总结昨天的提交");
     expect(wrapper.find(".sched-prompt").exists()).toBe(false);
-    expect(wrapper.find(".sched-run-status").classes()).toContain("st-success");
+    const runStatus = wrapper.find(".sched-run-status");
+    expect(runStatus.classes()).toContain("st-success");
+    // 统一胶囊徽章：运行成功 = 成功档（st-* 仅作状态钩子）
+    expect(runStatus.classes()).toEqual(
+      expect.arrayContaining(["badge", "badge-success"]),
+    );
     expect(wrapper.text()).toContain("已完成总结");
     // 点击结果摘要展开全文
     await wrapper.find(".sched-run-result").trigger("click");
@@ -119,7 +124,11 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     const wrapper = mount(ScheduledTasksSection);
     // 忙时策略为纯展示胶囊，不再是图标切换按钮
     expect(wrapper.find(".sched-policy-btn").exists()).toBe(false);
-    expect(wrapper.find(".sched-busy-badge").text()).toBe("忙时顺延");
+    const busyBadge = wrapper.find(".sched-busy-badge");
+    expect(busyBadge.text()).toBe("忙时顺延");
+    expect(busyBadge.classes()).toEqual(
+      expect.arrayContaining(["badge", "badge-neutral"]),
+    );
     const actionBtns = wrapper.findAll(".model-provider-actions .btn-icon");
     expect(actionBtns.map((b) => b.attributes("aria-label"))).toEqual([
       "立即执行",
@@ -135,12 +144,51 @@ describe("ScheduledTasksSection 定时任务管理区块", () => {
     const badges = wrapper.findAll(".sched-badges > span");
     expect(badges[0]!.classes()).toContain("sched-session");
     expect(badges[1]!.classes()).toContain("sched-busy-badge");
+    // 四个行内徽章（会话/cron/下一轮/忙时策略）统一走中性档 + 数量外的基类
+    for (const [cls, semantic] of [
+      [".sched-session", "badge-neutral"],
+      [".sched-busy-badge", "badge-neutral"],
+      [".sched-chip", "badge-neutral"],
+      [".sched-next", "badge-neutral"],
+    ] as const) {
+      expect(wrapper.find(cls).classes()).toEqual(
+        expect.arrayContaining(["badge", semantic]),
+      );
+    }
   });
 
   it("忙时策略跳过态显示「忙时跳过」胶囊", async () => {
     store.scheduledTasks = [{ ...activeTask, busyPolicy: "skip" }];
     const wrapper = mount(ScheduledTasksSection);
     expect(wrapper.find(".sched-busy-badge").text()).toBe("忙时跳过");
+  });
+
+  it("运行结果徽章按状态映射语义档（进行中/成功/失败/已跳过/已错过）", async () => {
+    store.scheduledTasks = [{ ...activeTask }];
+    mockedRuns.mockResolvedValue([
+      { id: 1, taskId: "task-1", startedAt: now, status: "running" },
+      { id: 2, taskId: "task-1", startedAt: now, status: "success" },
+      { id: 3, taskId: "task-1", startedAt: now, status: "failed" },
+      { id: 4, taskId: "task-1", startedAt: now, status: "skipped" },
+      { id: 5, taskId: "task-1", startedAt: now, status: "missed" },
+    ]);
+    const wrapper = mount(ScheduledTasksSection);
+    await wrapper.find(".sched-task-main").trigger("click");
+    await nextTick();
+    const expected = [
+      ["st-running", "badge-accent"],
+      ["st-success", "badge-success"],
+      ["st-failed", "badge-danger"],
+      ["st-skipped", "badge-neutral"],
+      ["st-missed", "badge-neutral"],
+    ] as const;
+    const statuses = wrapper.findAll(".sched-run-status");
+    expect(statuses.length).toBe(expected.length);
+    statuses.forEach((el, i) => {
+      expect(el.classes()).toContain("badge");
+      expect(el.classes()).toContain(expected[i]![0]);
+      expect(el.classes()).toContain(expected[i]![1]);
+    });
   });
 
   it("点击编辑打开弹窗并预填，保存调用 updateScheduledTask", async () => {

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   McpAuthStatus,
   McpEnvEntry,
+  McpExtraEntry,
   McpResourceDetail,
   McpResourceTemplateDetail,
   McpServerDetail,
@@ -29,6 +30,28 @@ type RawMcpServer = Record<string, unknown>;
 
 /** omit_tools_from 合法暴露面（ToolExposureSurface） */
 const MCP_OMIT_TOOLS = new Set(["direct", "deferred", "code_mode"]);
+
+/** default_tools_approval_mode 合法取值（AppToolApproval） */
+const MCP_APPROVAL_MODES = new Set(["auto", "prompt", "writes", "approve"]);
+
+/** 密钥类键在「其他配置」中掩码展示（避免把明文令牌显示在界面上） */
+const MCP_MASKED_KEYS = new Set(["bearer_token"]);
+const MCP_MASKED_TEXT = "••••";
+
+/** 界面已建模的键：保存时由 UI 决定写入或删除，其余键归入「其他配置」只读展示 */
+const MCP_MODELED_KEYS = new Set([
+  "command",
+  "args",
+  "env",
+  "cwd",
+  "http_headers",
+  "url",
+  "bearer_token_env_var",
+  "omit_tools_from",
+  "enabled",
+  "default_tools_approval_mode",
+  "disabled_tools",
+]);
 
 /** mcpServerStatus/list 原始条目（取 codex 协议子集） */
 interface RawMcpServerStatus {
@@ -115,6 +138,10 @@ export async function loadMcpServers(): Promise<{
       headers: kvEntries(t.http_headers),
       bearer_token_env_var: str(t.bearer_token_env_var),
       omit_tools_from: omitList(t.omit_tools_from),
+      enabled: t.enabled !== false,
+      default_tools_approval_mode: approvalMode(t.default_tools_approval_mode),
+      disabled_tools: toolNameList(t.disabled_tools),
+      extra: extraEntries(t),
     });
   }
   return { servers, raw: { ...rawMap } };
@@ -251,6 +278,21 @@ export async function saveMcpServers(
       .filter((x) => MCP_OMIT_TOOLS.has(x));
     if (omits.length) base.omit_tools_from = Array.from(new Set(omits));
     else delete base.omit_tools_from;
+    // 审批模式 / 工具黑名单 / 启用开关同样与 transport 无关：
+    // 空值删除键交回 codex 默认（approval 默认 auto、enabled 默认 true）
+    const approval = (s.default_tools_approval_mode ?? "").trim();
+    if (MCP_APPROVAL_MODES.has(approval)) {
+      base.default_tools_approval_mode = approval;
+    } else {
+      delete base.default_tools_approval_mode;
+    }
+    // 绝不写空数组：codex 里 enabled_tools = [] 表示「一个工具都不注册」，
+    // disabled_tools = [] 虽等价于不限制，但空值一律删除键，保持配置干净
+    const deny = toolNameList(s.disabled_tools);
+    if (deny.length) base.disabled_tools = deny;
+    else delete base.disabled_tools;
+    if (s.enabled === false) base.enabled = false;
+    else delete base.enabled;
     merged[s.name.trim()] = base;
   }
   await invoke("codex_rpc", {
@@ -309,4 +351,47 @@ function omitList(v: unknown): string[] {
   }
   if (typeof v === "string" && MCP_OMIT_TOOLS.has(v)) return [v];
   return [];
+}
+
+/** 归一化 default_tools_approval_mode：仅保留合法枚举值，其余（含非字符串）→ ""（不写入） */
+function approvalMode(v: unknown): string {
+  return typeof v === "string" && MCP_APPROVAL_MODES.has(v) ? v : "";
+}
+
+/** 归一化工具名列表（disabled_tools）：支持数组或单字符串，trim 去空去重保序；缺失/非法 → [] */
+function toolNameList(v: unknown): string[] {
+  const names: string[] = [];
+  for (const item of Array.isArray(v) ? v : [v]) {
+    if (typeof item !== "string") continue;
+    const name = item.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+/** 汇总界面未建模的配置键：按 key 排序，值统一渲染为文本（密钥掩码） */
+function extraEntries(raw: RawMcpServer): McpExtraEntry[] {
+  const entries: McpExtraEntry[] = [];
+  for (const key of Object.keys(raw).sort()) {
+    if (MCP_MODELED_KEYS.has(key)) continue;
+    entries.push({ key, value: extraValueText(key, raw[key]) });
+  }
+  return entries;
+}
+
+/** 「其他配置」的值渲染：字符串原样（密钥掩码），标量直转，其余 JSON 化 */
+function extraValueText(key: string, value: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value === "string") {
+    return MCP_MASKED_KEYS.has(key) ? MCP_MASKED_TEXT : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === "string" ? text : String(value);
+  } catch {
+    return String(value);
+  }
 }

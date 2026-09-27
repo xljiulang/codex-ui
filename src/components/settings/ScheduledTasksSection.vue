@@ -105,6 +105,19 @@ const RUN_STATUS_LABELS: Record<TaskRunStatus, string> = {
   missed: "已错过",
 };
 
+/** 运行结果的语义徽章档位（颜色由全局 .badge-* 承担；st-<status> 仅作状态钩子） */
+const RUN_STATUS_BADGES: Record<TaskRunStatus, string> = {
+  running: "badge-accent",
+  success: "badge-success",
+  failed: "badge-danger",
+  skipped: "badge-neutral",
+  missed: "badge-neutral",
+};
+
+function runStatusBadgeClass(status: TaskRunStatus): string {
+  return RUN_STATUS_BADGES[status] ?? "badge-neutral";
+}
+
 function fmtDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const s = Math.round(ms / 1000);
@@ -312,29 +325,24 @@ function toggleResult(runId: number) {
                   <span class="sched-prompt-desc">{{ row.task.prompt }}</span>
                   <span class="sched-badges">
                     <span
-                      class="sched-session"
+                      class="badge badge-neutral sched-session"
                       role="button"
                       :aria-label="`打开会话（${threadLabel(row.task.threadId)}）`"
                       @click.stop="openSession(row.task.threadId)"
                     >
                       {{ threadLabel(row.task.threadId) }}
                     </span>
-                    <span
-                      class="sched-busy-badge"
-                      :class="
-                        row.task.busyPolicy === 'skip'
-                          ? 'badge-skip'
-                          : 'badge-defer'
-                      "
-                    >
+                    <span class="badge badge-neutral sched-busy-badge">
                       {{
                         row.task.busyPolicy === "skip" ? "忙时跳过" : "忙时顺延"
                       }}
                     </span>
-                    <span class="sched-chip">{{
+                    <span class="badge badge-neutral sched-chip">{{
                       describeSchedule(row.task.cron)
                     }}</span>
-                    <span class="sched-next">{{ nextRunLabel(row.task) }}</span>
+                    <span class="badge badge-neutral sched-next">{{
+                      nextRunLabel(row.task)
+                    }}</span>
                   </span>
                 </span>
               </button>
@@ -385,7 +393,10 @@ function toggleResult(runId: number) {
                   class="sched-run"
                 >
                   <div class="sched-run-line">
-                    <span class="sched-run-status" :class="`st-${r.status}`">
+                    <span
+                      class="badge sched-run-status"
+                      :class="[`st-${r.status}`, runStatusBadgeClass(r.status)]"
+                    >
                       {{ RUN_STATUS_LABELS[r.status] ?? r.status }}
                     </span>
                     <span class="sched-run-time">{{
@@ -571,41 +582,8 @@ function toggleResult(runId: number) {
   white-space: nowrap;
 }
 
-.sched-chip {
-  padding: 2px var(--space-2);
-  border-radius: 999px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.sched-next {
-  padding: 2px var(--space-2);
-  border-radius: 999px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
-/* 绑定会话：可点击胶囊（保留打开会话语义），hover 下划线提示 */
+/* 绑定会话：可点击胶囊（几何/配色见全局 .badge，这里只留可点击与截断行为） */
 .sched-session {
-  padding: 2px var(--space-2);
-  border-radius: 999px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-dim);
-  white-space: nowrap;
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -627,32 +605,6 @@ function toggleResult(runId: number) {
 .sched-row-btn {
   min-height: var(--ctrl-h-xs);
   font-size: var(--font-xs);
-}
-
-/* 忙时策略胶囊（纯展示，不可点击）：顺延用强调色，跳过用中性色 */
-.sched-busy-badge {
-  padding: 2px var(--space-2);
-  border-radius: 999px;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.sched-busy-badge.badge-defer {
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-}
-
-.sched-busy-badge.badge-skip {
-  color: var(--text-dim);
-  background: var(--bg-input);
-  border: 1px solid var(--border);
 }
 
 /* 编辑定时任务弹窗表单：去卡片装饰，字段纵排，分隔线分隔 */
@@ -725,34 +677,6 @@ function toggleResult(runId: number) {
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-}
-
-.sched-run-status {
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-xs);
-  white-space: nowrap;
-}
-
-.sched-run-status.st-running {
-  background: rgba(var(--accent-rgb), 0.15);
-  color: var(--accent);
-}
-
-.sched-run-status.st-success {
-  background: rgba(var(--green-rgb), 0.14);
-  color: var(--green);
-}
-
-.sched-run-status.st-failed {
-  background: rgba(var(--red-rgb), 0.14);
-  color: var(--red);
-}
-
-.sched-run-status.st-skipped,
-.sched-run-status.st-missed {
-  background: rgba(var(--overlay-rgb), 0.08);
-  color: var(--text-faint);
 }
 
 .sched-run-time {

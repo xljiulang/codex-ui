@@ -764,9 +764,11 @@ function openModelConfigFile() {
               >
             </span>
             <span class="model-provider-key">{{ p.key }}</span>
-            <span v-if="p.wire_api" class="model-provider-wire">{{
-              p.wire_api
-            }}</span>
+            <span
+              v-if="p.wire_api"
+              class="badge badge-accent model-provider-wire"
+              >{{ p.wire_api }}</span
+            >
           </label>
           <div class="model-provider-actions">
             <!-- 仅当前选中的提供方行显示：能力不足直接不渲染（不用禁用态说明原因） -->
@@ -1285,10 +1287,6 @@ function openModelConfigFile() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.model-provider-wire {
-  padding: 1px var(--space-2);
 }
 
 .model-providers-empty {

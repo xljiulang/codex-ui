@@ -368,11 +368,15 @@ function pluginInitial(p: PluginCatalogItem): string {
               {{ p.description }}
             </div>
             <div class="plugin-meta">
-              <span v-if="p.version" class="plugin-version">
+              <span v-if="p.version" class="badge badge-neutral plugin-version">
                 {{ p.version }}
               </span>
-              <span class="plugin-status">{{ statusLabel(p) }}</span>
-              <span class="plugin-source">来源：{{ mp.displayName }}</span>
+              <span class="badge badge-accent plugin-status">
+                {{ statusLabel(p) }}
+              </span>
+              <span class="badge badge-neutral plugin-source">
+                来源：{{ mp.displayName }}
+              </span>
               <span v-if="p.disabledReason" class="plugin-disabled-reason">
                 {{ p.disabledReason }}
               </span>
@@ -482,7 +486,7 @@ function pluginInitial(p: PluginCatalogItem): string {
             </span>
             <span class="plugin-marketplace-name">{{ mp.displayName }}</span>
             <span
-              class="plugin-marketplace-count"
+              class="badge badge-neutral badge-count plugin-marketplace-count"
               v-tooltip="`${mp.plugins.length} 个插件`"
             >
               {{ mp.plugins.length }}
@@ -529,10 +533,15 @@ function pluginInitial(p: PluginCatalogItem): string {
                     {{ p.description }}
                   </div>
                   <div class="plugin-meta">
-                    <span v-if="p.version" class="plugin-version">
+                    <span
+                      v-if="p.version"
+                      class="badge badge-neutral plugin-version"
+                    >
                       {{ p.version }}
                     </span>
-                    <span class="plugin-status">{{ statusLabel(p) }}</span>
+                    <span class="badge badge-accent plugin-status">
+                      {{ statusLabel(p) }}
+                    </span>
                     <span
                       v-if="p.disabledReason"
                       class="plugin-disabled-reason"
@@ -689,22 +698,10 @@ function pluginInitial(p: PluginCatalogItem): string {
   fill: currentColor;
 }
 
-/* 数量徽章：扁胶囊风格同会话目录行 .folder-count（中性色描边），尺寸略放大一档，
-   推到行尾、位于「移除市场」图标之前 */
+/* 数量徽章：几何与配色由全局 .badge/.badge-neutral/.badge-count 提供，
+   这里只保留站点布局（推到行尾、位于「移除市场」图标之前） */
 .plugin-marketplace-count {
   margin-left: auto;
-  min-width: 26px;
-  padding: 3px var(--space-4);
-  box-sizing: border-box;
-  text-align: center;
-  font-size: var(--font-sm);
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-faint);
-  background: var(--bg-active);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  flex-shrink: 0;
 }
 
 .plugin-list {
