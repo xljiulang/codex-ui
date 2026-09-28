@@ -26,10 +26,11 @@ build-release.bat              # 发布打包（Inno Setup）→ setup\output\co
 npm test                       # 前端单元测试（等价 npm run test:unit）
 npm run test:unit              # vitest 单测
 npm run test:typecheck         # vue-tsc 类型检查
+npm run test:scripts           # scripts/ 脚本单测（node:test，本地假服务器，不联网）
 npm run test:coverage          # 单测 + 覆盖率，门槛 lines≥80 / functions≥75 / statements≥75 / branches≥70
 npm run test:rust              # Rust 单元测试（cargo test --lib）
 npm run test:rust:integration  # 真实 app-server 集成测试（需 $env:CODEX_BIN='codex'）
-npm run test:all               # 单测 + 类型 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
+npm run test:all               # 单测 + 类型 + 脚本 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
 npm run test:e2e               # E2E 编排（需 release 构建与 codex CLI，详见 README）
 
 npm run format                 # 格式化前端（Prettier）+ Rust（cargo fmt）

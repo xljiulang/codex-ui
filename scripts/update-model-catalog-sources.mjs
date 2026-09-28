@@ -18,6 +18,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readText } from "./lib/http.mjs";
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RESOURCES = join(ROOT, "src-tauri", "resources");
 
@@ -80,11 +82,17 @@ const runAll = args.size === 0;
 const shouldRun = (flag) => runAll || args.has(flag);
 
 async function fetchJson(url) {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) {
-    throw new Error(`请求失败 ${response.status} ${response.statusText}: ${url}`);
+  // 经 `scripts/lib/http.mjs` 取：有 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY 就走代理，
+  // NO_PROXY 命中则直连（Node 的 fetch 默认不认这些环境变量）。
+  const response = await readText(url, {
+    headers: { Accept: "application/json" },
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(
+      `请求失败 ${response.status} ${response.statusText}: ${url}`,
+    );
   }
-  return response.text();
+  return response.text;
 }
 
 async function writeResource(name, text) {

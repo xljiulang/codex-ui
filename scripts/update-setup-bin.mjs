@@ -10,9 +10,12 @@
 // 组成：codex 主程序 + 3 个 helper 取自 openai/codex 的 Release 资产；rg.exe 取自
 // BurntSushi/ripgrep 的官方预编译包（与 codex npm 包内 `codex-path/rg.exe` 字节相同，
 // 但只需下载约 1.7 MB，不必拉整个 codex-package 压缩包）。
+//
+// 下载走 `scripts/lib/http.mjs`：有 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY（含小写变体）
+// 就经 CONNECT 隧道，命中 NO_PROXY 则直连——Node 的 fetch 默认不认这些环境变量。
 
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -26,8 +29,9 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+
+import { downloadToFile } from "./lib/http.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BIN_DIR = join(ROOT, "setup", "bin");
@@ -86,23 +90,38 @@ const checkOnly = process.argv.slice(2).includes("--check");
 /** 下载重试次数：GitHub 大文件偶发中途断开，重试即可（每次重下同一文件）。 */
 const DOWNLOAD_ATTEMPTS = 3;
 
-/** 逐个流式下载到目标路径（大文件不整块读入内存），失败按次数重试。 */
+/** 路由的可读描述，用于下载日志与失败信息。 */
+function routeLabel(route) {
+  return route.proxy ? `经代理 ${route.proxy}` : "直连";
+}
+
+/**
+ * 逐个流式下载到目标路径（大文件不整块读入内存），失败按次数重试。
+ *
+ * 走不走代理由 `scripts/lib/http.mjs` 按 HTTP(S)_PROXY / ALL_PROXY 与 NO_PROXY
+ * 决定（Node 的 fetch 默认不认这些变量，配了代理会退化成正直连、非常慢），
+ * 每次尝试都把实际路由打进日志。
+ */
 async function download(url, dest) {
   for (let attempt = 1; ; attempt += 1) {
-    console.log(`下载 ${url}（第 ${attempt}/${DOWNLOAD_ATTEMPTS} 次）`);
+    let route = null;
     try {
-      const response = await fetch(url, { redirect: "follow" });
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
-      }
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(dest));
+      await downloadToFile(url, dest, {
+        onRoute: (info) => {
+          route = info;
+          console.log(
+            `下载 ${url}（${routeLabel(info)}，第 ${attempt}/${DOWNLOAD_ATTEMPTS} 次）`,
+          );
+        },
+      });
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await rm(dest, { force: true });
       if (attempt >= DOWNLOAD_ATTEMPTS) {
+        const via = route ? `，${routeLabel(route)}` : "";
         throw new Error(
-          `下载失败（已重试 ${DOWNLOAD_ATTEMPTS} 次）: ${url} — ${message}`,
+          `下载失败（已重试 ${DOWNLOAD_ATTEMPTS} 次）${via}: ${url} — ${message}`,
         );
       }
       console.warn(`下载中断，重试：${message}`);

@@ -708,18 +708,21 @@ npm run setup-bin -- --check # 只校验现值（不联网），打包前自检�
 
 脚本（`scripts/update-setup-bin.mjs`）内置目标版本的下载地址与哈希（当前 codex 0.156.1 + ripgrep 15.2.0），任一文件校验不符即整体中止、不改动 `setup\bin`。更新后需重跑 `build-installer.bat`（或 `build-release.bat`）才会把新二进制打进安装包。脚本只手动执行，不接入构建流程——离线打包不受影响。
 
+下载走 `scripts/lib/http.mjs` 的代理感知链路（与 `update-model-catalog-sources.mjs` 共用）：设置 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（大小写皆可）时按目标协议经 CONNECT 隧道下载，命中 `NO_PROXY` 则直连；未设置时与直连行为一致。不读 Windows 注册表里的系统代理设置，需要走代理请设上述环境变量。每条下载日志都会标出实际路由（`直连` / `经代理 <地址>`），便于确认是否走对。
+
 ## 测试
 
 ```powershell
 npm test                                   # 前端单元测试（vitest，等价 npm run test:unit）
 npm run test:typecheck                     # vue-tsc 类型检查
+npm run test:scripts                       # scripts/ 下的脚本单测（node:test，本地假服务器，不联网）
 npm run test:coverage                      # 前端单测 + 覆盖率（v8；门槛 lines≥80 / functions≥75 / statements≥75 / branches≥70）
 npm run test:rust                          # Rust 单元测试（cargo test --lib）
 $env:CODEX_BIN='codex'; npm run test:rust:integration
                                            # Rust 真实 app-server 集成测试（握手/回合、置顶、目标全生命周期、记忆模式、线程设置同步、回合列表 full、会话搜索）
                                            # CODEX_BIN 可填裸命令名（npm 的 .cmd/.ps1 shim 会自动解析为真实 codex.exe）
                                            # 或 codex.exe 完整路径；未设置 CODEX_BIN 时集成用例自动跳过
-npm run test:all                           # 单元 + 类型 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
+npm run test:all                           # 单元 + 类型 + 脚本 + Rust（未设置 CODEX_BIN 时集成用例自动跳过）
 npm run test:e2e                           # E2E 一键编排（见下）
 ```
 
