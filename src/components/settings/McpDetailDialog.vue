@@ -601,6 +601,8 @@ function mcpDetailAuthLabel(): string {
   align-items: baseline;
   flex-wrap: wrap;
   gap: var(--space-2);
+  /* 工具名与工具标题放开选中（全局 body 默认 user-select: none） */
+  user-select: text;
 }
 
 .mcp-detail-tool-name {
