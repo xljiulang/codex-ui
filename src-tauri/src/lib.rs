@@ -274,6 +274,7 @@ pub fn run() {
             codex::git::git_changes_stage_all,
             codex::git::git_changes_unstage_all,
             codex::git::git_changes_restore,
+            codex::git::git_changes_restore_many,
             codex::git::git_changes_delete,
             codex::git::git_changes_ignore,
             codex::git::git_changes_watch_start,
@@ -323,6 +324,11 @@ pub fn run() {
         .setup(|app| {
             // 启动时探测一次系统 git 并缓存（`git --version`），后续全部 git 功能复用该结果
             codex::git::probe_git_at_startup();
+
+            // 索引占用重试日志写入应用日志目录（目录不可用时静默跳过）
+            if let Ok(dir) = app.path().app_data_dir() {
+                codex::git::init_log(dir.join("logs"));
+            }
 
             // 启动时后台刷新各模型元数据源缓存（OpenRouter / models.dev）；
             // 失败不影响启动，生成时回退内置资源。

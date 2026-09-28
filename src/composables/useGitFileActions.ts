@@ -1,7 +1,11 @@
 import { ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm, setToast, toastError } from "./useCodex";
-import { markGitStatusFresh, setGitOpInFlight } from "./useGitChanges";
+import {
+  markGitStatusFresh,
+  refreshGitChanges,
+  setGitOpInFlight,
+} from "./useGitChanges";
 import type { ActionMenuItem } from "./useActionMenu";
 import type { GitFile, GitStatus } from "../lib/gitChanges";
 import type { GitDirNode } from "../lib/gitTree";
@@ -19,8 +23,9 @@ export type GitSection = "changes" | "staged";
 
 /**
  * Git 变更文件操作与右键菜单：
- * 单路径操作（暂存/取消暂存/忽略/撤消/删除）、全量操作（全部暂存/取消暂存），
- * 以及文件/目录行的右键菜单构建；成功后回写 gitStatus。
+ * 单路径操作（暂存/取消暂存/忽略/撤消/删除）、批量操作（分区级撤消，一次调用）、
+ * 全量操作（全部暂存/取消暂存），以及文件/目录行的右键菜单构建；
+ * 成功后回写 gitStatus，失败则提示并刷新状态（失败可能已部分改动工作区）。
  */
 export function useGitFileActions(options: {
   gitStatus: Ref<GitStatus | null>;
@@ -44,6 +49,28 @@ export function useGitFileActions(options: {
       markGitStatusFresh();
     } catch (e) {
       setToast(toastError(e));
+      // 失败可能已部分改动工作区：刷新一次，避免面板停留在过期状态
+      await refreshGitChanges();
+    } finally {
+      setGitOpInFlight(false);
+      gitActionBusy.value = false;
+    }
+  }
+
+  /** 批量文件操作（分区级撤销）：一次调用处理多个路径，成功后回写 gitStatus */
+  async function runGitOpMany(cmd: string, paths: string[]) {
+    if (gitActionBusy.value || !paths.length) return;
+    const root = options.gitStatus.value?.repoWorkspace;
+    if (!root) return;
+    gitActionBusy.value = true;
+    try {
+      setGitOpInFlight(true);
+      const st = await invoke<GitStatus>(cmd, { workspace: root, paths });
+      options.gitStatus.value = st;
+      markGitStatusFresh();
+    } catch (e) {
+      setToast(toastError(e));
+      await refreshGitChanges();
     } finally {
       setGitOpInFlight(false);
       gitActionBusy.value = false;
@@ -63,6 +90,7 @@ export function useGitFileActions(options: {
       markGitStatusFresh();
     } catch (e) {
       setToast(toastError(e));
+      await refreshGitChanges();
     } finally {
       setGitOpInFlight(false);
       gitActionBusy.value = false;
@@ -159,9 +187,10 @@ export function useGitFileActions(options: {
       confirmLabel: "撤消更改",
     });
     if (!ok) return;
-    for (const file of files) {
-      await runGitOp("git_changes_restore", file.path);
-    }
+    await runGitOpMany(
+      "git_changes_restore_many",
+      files.map((file) => file.path),
+    );
   }
 
   /** 分区标题右键菜单：全部暂存/取消暂存 + 分区级撤消更改（空分区不弹） */

@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::codex::diff::DiffRow;
 use crate::codex::path_util::{clean_path, norm_key, rel_path_of as shared_rel_path_of};
 use crate::codex::session_fs::looks_text;
+use crate::codex::session_log::SessionLog;
 use crate::codex::util::{spawn_blocking_timeout, BlockingError};
 
 /// 单文件大小上限（diff 等全量读入内存的操作），超过直接报错
@@ -21,6 +22,11 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 /// 避免频繁创建 git 子进程。
 const WATCH_DEBOUNCE_MS: u64 = 300;
 
+/// 写命令命中索引占用（其它进程持有 `.git/index` 或其锁文件）时的重试预算：
+/// 总尝试次数与每次失败后的等待毫秒数。索引竞争通常毫秒级，短退避即可自愈。
+const GIT_INDEX_RETRY_ATTEMPTS: u32 = 4;
+const GIT_INDEX_RETRY_BACKOFF_MS: [u64; 3] = [120, 300, 600];
+
 /// 串行化所有 git 操作：git 子进程会写索引锁文件，并发写会互相覆盖。
 /// 锁在 spawn_blocking 任务内部获取并持有到任务真正结束，超时后任务继续执行时
 /// 后续操作也会排队等待，避免与后台仍在运行的 git 操作并发读写仓库。
@@ -28,6 +34,9 @@ static GIT_OP_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// 启动时探测并缓存的系统 git 可执行文件路径（None 表示未安装）
 static GIT_BIN: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// 应用日志句柄（`logs/session-*.log`）：启动时注入；未注入时日志调用静默跳过。
+static GIT_LOG: OnceLock<Arc<SessionLog>> = OnceLock::new();
 
 fn git_op_lock() -> &'static Mutex<()> {
     GIT_OP_LOCK.get_or_init(|| Mutex::new(()))
@@ -288,6 +297,31 @@ pub fn probe_git_at_startup() -> bool {
     ok
 }
 
+/// 注入应用日志目录（`<app_data_dir>/logs`），供索引占用重试记录使用；
+/// 启动后调用一次，重复调用忽略（未注入时所有日志调用静默跳过）。
+pub fn init_log(logs_dir: PathBuf) {
+    let _ = GIT_LOG.set(Arc::new(SessionLog::new(logs_dir)));
+}
+
+/// 记一条索引占用重试日志（写盘失败静默；只记命令名与重试参数，不记路径）。
+/// `wait_ms=0` 表示重试预算已耗尽、直接失败（不再等待）。
+fn log_index_retry(cmd: &str, attempt: u32, kind: &str, wait_ms: u64) {
+    let Some(log) = GIT_LOG.get() else {
+        return;
+    };
+    log.write(
+        "warn",
+        None,
+        "git.index_retry",
+        &[
+            ("cmd".to_string(), cmd.to_string()),
+            ("attempt".to_string(), attempt.to_string()),
+            ("kind".to_string(), kind.to_string()),
+            ("wait_ms".to_string(), wait_ms.to_string()),
+        ],
+    );
+}
+
 /// 返回缓存（或惰性探测）到的 git 可执行文件路径
 fn git_bin() -> Result<&'static Path, GitError> {
     if GIT_BIN.get().is_none() {
@@ -327,6 +361,8 @@ fn git_output(
 
 /// 执行 git 子命令并返回原始字节 stdout（内容判定用；lossy 转换会破坏
 /// 非法 UTF-8 的探测，不能用于判定文件是否为文本）。
+/// `GIT_OPTIONAL_LOCKS=0`：只读命令（status/diff/log 等）不再顺带刷新并写回索引，
+/// 既减少索引写入次数，也避免与其它进程争用 `.git/index`；写命令的强制锁不受影响。
 fn git_output_raw(
     git_bin: &Path,
     root: &str,
@@ -339,6 +375,7 @@ fn git_output_raw(
         .env("LANG", "C")
         .env("LC_ALL", "C")
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .output()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -357,6 +394,92 @@ fn git_output_raw(
     ))
 }
 
+/// 把文本压成「仅小写字母数字」再匹配，兼容 git 的 `new index file` /
+/// `new_index file` 等不同写法（以及不同 git 版本的大小写差异）。
+fn compact_alnum(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// 索引占用特征判定，命中返回日志用的种类：
+/// - `index-write`：写新索引失败（其它进程持有 `.git/index`，重命名被拒）；
+/// - `index-lock`：`.git/index.lock` 已存在（另一个 git 正在写，或锁文件残留）。
+/// 未命中返回 None（其它错误不重试）。
+fn index_contention_kind(combined: &str) -> Option<&'static str> {
+    let c = compact_alnum(combined);
+    if c.contains("unabletowritenewindexfile") {
+        return Some("index-write");
+    }
+    if c.contains("indexlock") {
+        return Some("index-lock");
+    }
+    None
+}
+
+/// 取错误输出的首个非空行（附加在中文提示后便于排查）
+fn first_error_line(combined: &str) -> String {
+    combined
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// 索引占用失败的中文提示（未命中返回 None）；各失败文案映射函数优先调用它。
+fn index_busy_message(combined: &str) -> Option<String> {
+    let kind = index_contention_kind(combined)?;
+    let hint = if kind == "index-lock" {
+        format!(
+            "Git 索引锁被占用（已自动重试 {GIT_INDEX_RETRY_ATTEMPTS} 次）：可能有另一个 Git 进程正在操作该仓库。\
+             请稍后重试；若反复出现，确认没有 Git 进程运行后删除 .git/index.lock。"
+        )
+    } else {
+        format!(
+            "Git 索引被其它进程占用，写入失败（已自动重试 {GIT_INDEX_RETRY_ATTEMPTS} 次）。\
+             可能是编辑器、终端、杀毒软件或另一个 Git 命令正在使用该仓库，请稍后重试。"
+        )
+    };
+    let raw = first_error_line(combined);
+    Some(if raw.is_empty() {
+        hint
+    } else {
+        format!("{hint}（{raw}）")
+    })
+}
+
+/// 执行会写索引的 git 子命令：命中索引占用特征时按 [`GIT_INDEX_RETRY_BACKOFF_MS`]
+/// 退避重试，最多 [`GIT_INDEX_RETRY_ATTEMPTS`] 次；其它失败一次即返回最后一次结果。
+/// 每次重试前与预算耗尽时各记一条 `git.index_retry`（耗尽那条 `wait_ms=0`）。
+/// 调用方需持有 `GIT_OP_LOCK`（本函数只处理进程外的索引竞争）。
+fn git_output_write(
+    git_bin: &Path,
+    root: &str,
+    args: &[&str],
+) -> Result<(i32, String, String), GitError> {
+    let cmd = args.first().copied().unwrap_or("");
+    let mut attempt: u32 = 1;
+    loop {
+        let (code, stdout, stderr) = git_output(git_bin, root, args)?;
+        if code == 0 {
+            return Ok((code, stdout, stderr));
+        }
+        let combined = format!("{stdout}\n{stderr}");
+        let Some(kind) = index_contention_kind(&combined) else {
+            return Ok((code, stdout, stderr));
+        };
+        let Some(&wait_ms) = GIT_INDEX_RETRY_BACKOFF_MS.get(attempt as usize - 1) else {
+            log_index_retry(cmd, attempt, kind, 0);
+            return Ok((code, stdout, stderr));
+        };
+        log_index_retry(cmd, attempt, kind, wait_ms);
+        std::thread::sleep(Duration::from_millis(wait_ms));
+        attempt += 1;
+    }
+}
+
 /// 执行 git 子命令并校验退出码：成功返回 stdout，失败经 `map_error` 映射为中文提示
 fn git_run_mapped(
     git_bin: &Path,
@@ -364,7 +487,7 @@ fn git_run_mapped(
     args: &[&str],
     map_error: impl Fn(&str) -> String,
 ) -> Result<String, GitError> {
-    let (code, stdout, stderr) = git_output(git_bin, root, args)?;
+    let (code, stdout, stderr) = git_output_write(git_bin, root, args)?;
     if code != 0 {
         let combined = format!("{stdout}\n{stderr}");
         return Err(git_err(map_error(&combined)));
@@ -849,7 +972,7 @@ fn git_switch(root: &str, name: &str) -> Result<GitStatus, GitError> {
     if !git_ref_exists_with(&git_bin, root, &format!("refs/heads/{name}"))? {
         return Err(git_err(format!("分支 {name} 不存在")));
     }
-    let (code, stdout, stderr) = git_output(&git_bin, root, &["switch", name])?;
+    let (code, stdout, stderr) = git_output_write(&git_bin, root, &["switch", name])?;
     if code != 0 {
         return Err(git_err(switch_failure_message(
             &format!("{stdout}\n{stderr}"),
@@ -886,6 +1009,9 @@ fn extract_listed_paths(combined: &str) -> String {
 
 /// 切换分支失败提示映射
 fn switch_failure_message(combined: &str, name: &str) -> String {
+    if let Some(msg) = index_busy_message(combined) {
+        return msg;
+    }
     let c = combined.to_lowercase();
     if c.contains("your local changes to the following files would be overwritten") {
         format!(
@@ -1005,6 +1131,9 @@ fn git_unstage(root: &str, rel: &str) -> Result<GitStatus, GitError> {
             root,
             &["restore", "--staged", "--", &rel],
             |combined| {
+                if let Some(msg) = index_busy_message(combined) {
+                    return msg;
+                }
                 let trimmed = combined.trim();
                 if trimmed.is_empty() {
                     "取消暂存失败".to_string()
@@ -1020,6 +1149,9 @@ fn git_unstage(root: &str, rel: &str) -> Result<GitStatus, GitError> {
             root,
             &["rm", "--cached", "-f", "-q", "--", &rel],
             |combined| {
+                if let Some(msg) = index_busy_message(combined) {
+                    return msg;
+                }
                 let trimmed = combined.trim();
                 if trimmed.is_empty() {
                     "取消暂存失败".to_string()
@@ -1038,6 +1170,9 @@ fn git_unstage_all(root: &str) -> Result<GitStatus, GitError> {
     git_rev_parse_with(&git_bin, root)?;
     if git_head_exists_with(&git_bin, root)? {
         git_run_mapped(&git_bin, root, &["reset", "-q"], |combined| {
+            if let Some(msg) = index_busy_message(combined) {
+                return msg;
+            }
             let trimmed = combined.trim();
             if trimmed.is_empty() {
                 "取消暂存失败".to_string()
@@ -1051,6 +1186,9 @@ fn git_unstage_all(root: &str) -> Result<GitStatus, GitError> {
             root,
             &["rm", "--cached", "-r", "-q", "--", "."],
             |combined| {
+                if let Some(msg) = index_busy_message(combined) {
+                    return msg;
+                }
                 let trimmed = combined.trim();
                 if trimmed.is_empty() {
                     "取消暂存失败".to_string()
@@ -1099,9 +1237,9 @@ fn git_restore_one_with(
     Ok(())
 }
 
-/// 把未跟踪路径按累计长度分块，生成多组 `git clean -f -q -- <paths...>` 参数，
-/// 避免一次性拼出超长命令行超出 Windows 限制。
-fn git_clean_chunks(paths: &[String]) -> Vec<Vec<&str>> {
+/// 把路径按累计长度分块（Windows 命令行上限约 32k 字符，留出余量），
+/// 供 `git clean` / `git restore` 的批量 pathspec 共用。
+fn path_chunks(paths: &[String]) -> Vec<Vec<&str>> {
     let mut chunks: Vec<Vec<&str>> = Vec::new();
     let mut cur: Vec<&str> = Vec::new();
     let mut cur_len = 0usize;
@@ -1118,6 +1256,11 @@ fn git_clean_chunks(paths: &[String]) -> Vec<Vec<&str>> {
         chunks.push(cur);
     }
     chunks
+}
+
+/// 生成多组 `git clean -f -q -- <paths...>` 参数
+fn git_clean_chunks(paths: &[String]) -> Vec<Vec<&str>> {
+    path_chunks(paths)
         .into_iter()
         .map(|mut c| {
             let mut args = vec!["clean", "-f", "-q", "--"];
@@ -1125,6 +1268,41 @@ fn git_clean_chunks(paths: &[String]) -> Vec<Vec<&str>> {
             args
         })
         .collect()
+}
+
+/// 生成多组 `git restore --staged --worktree -- <pathspec...>` 参数
+fn git_restore_chunks(specs: &[String]) -> Vec<Vec<&str>> {
+    path_chunks(specs)
+        .into_iter()
+        .map(|mut c| {
+            let mut args = vec!["restore", "--staged", "--worktree", "--"];
+            args.append(&mut c);
+            args
+        })
+        .collect()
+}
+
+/// 还原「已跟踪侧 + 未跟踪侧」两组路径（两侧均可为多路径）：
+/// 已跟踪侧按长度分块 `git restore --staged --worktree`（丢弃暂存 + 工作区改动），
+/// 未跟踪侧分批 `git clean -f -q` 并逐级清理空目录。
+/// 已跟踪侧 pathspec 由调用方给出：文件/批量传文件路径，目录传目录路径。
+fn git_restore_groups(
+    git_bin: &Path,
+    workdir: &Path,
+    root: &str,
+    tracked_specs: &[String],
+    untracked_paths: &[String],
+) -> Result<(), GitError> {
+    for args in git_restore_chunks(tracked_specs) {
+        git_run_mapped(git_bin, root, &args, git_restore_failure_message)?;
+    }
+    for args in git_clean_chunks(untracked_paths) {
+        git_run_mapped(git_bin, root, &args, git_clean_failure_message)?;
+    }
+    for p in untracked_paths {
+        remove_empty_parents(workdir, &workdir.join(p));
+    }
+    Ok(())
 }
 
 /// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）。
@@ -1146,25 +1324,66 @@ fn git_restore_with(git_bin: &Path, root: &str, rel: &str) -> Result<GitStatus, 
                 has_tracked = true;
             }
         }
-        if has_tracked {
-            // 目录 pathspec 一次调用：幂等、git 原子解析递归路径，规避逐文件 pathspec 错位
-            git_run_mapped(
-                git_bin,
-                root,
-                &["restore", "--staged", "--worktree", "--", &rel],
-                git_restore_failure_message,
-            )?;
-        }
-        for args in git_clean_chunks(&untracked_paths) {
-            git_run_mapped(git_bin, root, &args, git_clean_failure_message)?;
-        }
-        for p in &untracked_paths {
-            remove_empty_parents(workdir, &workdir.join(p));
-        }
+        // 目录 pathspec 一次调用：幂等、git 原子解析递归路径，规避逐文件 pathspec 错位
+        let tracked_specs: Vec<String> = if has_tracked {
+            vec![rel.clone()]
+        } else {
+            Vec::new()
+        };
+        git_restore_groups(git_bin, workdir, root, &tracked_specs, &untracked_paths)?;
     } else {
         git_restore_one_with(git_bin, workdir, root, &rel)?;
     }
     git_status_with(git_bin, root)
+}
+
+/// 批量还原（分区级「撤消更改」）：与单文件/目录同语义
+/// （已跟踪丢弃暂存 + 工作区改动，未跟踪删除）。
+/// 输入路径先按一次状态快照分类：未跟踪 → 清理；其余 → 已跟踪还原；
+/// 不在快照中的路径（已撤销/不存在）直接忽略，避免一个陈旧路径让整批失败。
+fn git_restore_many(root: &str, paths: &[String]) -> Result<GitStatus, GitError> {
+    let git_bin = git_bin()?;
+    let mut rels: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for p in paths {
+        let rel = validate_rel_path(p)?;
+        if seen.insert(rel.to_lowercase()) {
+            rels.push(rel);
+        }
+    }
+    let repo = git_rev_parse_with(&git_bin, root)?;
+    if rels.is_empty() {
+        return git_status_with(&git_bin, root);
+    }
+    let st = git_status_with(&git_bin, root)?;
+    let untracked: HashSet<String> = st
+        .files
+        .iter()
+        .filter(|f| f.status == FileStatus::Untracked)
+        .map(|f| f.path.to_lowercase())
+        .collect();
+    let changed: HashSet<String> = st.files.iter().map(|f| f.path.to_lowercase()).collect();
+    let mut tracked_paths: Vec<String> = Vec::new();
+    let mut untracked_paths: Vec<String> = Vec::new();
+    for rel in rels {
+        let key = rel.to_lowercase();
+        if !changed.contains(&key) {
+            continue;
+        }
+        if untracked.contains(&key) {
+            untracked_paths.push(rel);
+        } else {
+            tracked_paths.push(rel);
+        }
+    }
+    git_restore_groups(
+        &git_bin,
+        &repo.workdir,
+        root,
+        &tracked_paths,
+        &untracked_paths,
+    )?;
+    git_status_with(&git_bin, root)
 }
 
 /// 还原：支持文件或目录；目录 = 其下所有变更文件丢弃（已跟踪恢复 HEAD，未跟踪删除）
@@ -1234,6 +1453,9 @@ fn git_ignore(root: &str, rel: &str) -> Result<GitStatus, GitError> {
 
 /// `git add` 失败提示映射
 fn git_add_failure_message(combined: &str) -> String {
+    if let Some(msg) = index_busy_message(combined) {
+        return msg;
+    }
     let trimmed = combined.trim();
     if trimmed.is_empty() {
         "git add 失败".to_string()
@@ -1244,6 +1466,9 @@ fn git_add_failure_message(combined: &str) -> String {
 
 /// `git restore` 失败提示映射
 fn git_restore_failure_message(combined: &str) -> String {
+    if let Some(msg) = index_busy_message(combined) {
+        return msg;
+    }
     let c = combined.to_lowercase();
     if c.contains("did not match") || c.contains("pathspec") {
         "文件不在仓库中，无法还原".to_string()
@@ -1259,6 +1484,9 @@ fn git_restore_failure_message(combined: &str) -> String {
 
 /// `git clean` 失败提示映射
 fn git_clean_failure_message(combined: &str) -> String {
+    if let Some(msg) = index_busy_message(combined) {
+        return msg;
+    }
     let c = combined.to_lowercase();
     if c.contains("cannot clean") || c.contains("not remove") {
         "无法删除未跟踪文件".to_string()
@@ -1274,6 +1502,9 @@ fn git_clean_failure_message(combined: &str) -> String {
 
 /// `git rm` 失败提示映射
 fn git_rm_failure_message(combined: &str) -> String {
+    if let Some(msg) = index_busy_message(combined) {
+        return msg;
+    }
     let trimmed = combined.trim();
     if trimmed.is_empty() {
         "git rm 失败".to_string()
@@ -1305,7 +1536,7 @@ fn git_commit(root: &str, message: &str) -> Result<GitStatus, GitError> {
     if code == 0 {
         return Err(git_err("没有已暂存的更改，请先暂存文件"));
     }
-    let (code, stdout, stderr) = git_output(&git_bin, root, &["commit", "-m", message])?;
+    let (code, stdout, stderr) = git_output_write(&git_bin, root, &["commit", "-m", message])?;
     if code != 0 {
         let combined = format!("{stdout}\n{stderr}");
         let c = combined.to_lowercase();
@@ -1324,6 +1555,9 @@ fn git_commit(root: &str, message: &str) -> Result<GitStatus, GitError> {
 
 /// 提交失败提示映射
 fn commit_failure_message(combined: &str) -> String {
+    if let Some(msg) = index_busy_message(combined) {
+        return msg;
+    }
     let trimmed = combined.trim();
     if trimmed.is_empty() {
         "提交失败".to_string()
@@ -2567,6 +2801,15 @@ pub async fn git_changes_unstage_all(workspace: String) -> Result<GitStatus, Git
 #[tauri::command]
 pub async fn git_changes_restore(workspace: String, path: String) -> Result<GitStatus, GitError> {
     run_blocking(move || git_restore(&workspace, &path)).await
+}
+
+/// 批量撤消更改（分区级右键菜单）：一次调用丢弃多个文件，索引写入次数由 N 降到约 1 次
+#[tauri::command]
+pub async fn git_changes_restore_many(
+    workspace: String,
+    paths: Vec<String>,
+) -> Result<GitStatus, GitError> {
+    run_blocking(move || git_restore_many(&workspace, &paths)).await
 }
 
 #[tauri::command]
@@ -3971,6 +4214,200 @@ mod tests {
         assert_eq!(st.files.len(), 2);
         assert!(st.files.iter().all(|f| f.status == FileStatus::Untracked));
         assert!(!root.join("c.txt").exists());
+    }
+
+    /// 索引占用特征判定：覆盖 git 的两种用词（`new index file` / `new_index file`）
+    /// 与 `index.lock` 已存在，且不误伤 pathspec 等其它失败。
+    #[test]
+    fn index_contention_detection_matches_git_wording() {
+        assert_eq!(
+            index_contention_kind("fatal: unable to write new index file"),
+            Some("index-write")
+        );
+        assert_eq!(
+            index_contention_kind("fatal: unable to write new_index file"),
+            Some("index-write")
+        );
+        assert_eq!(
+            index_contention_kind("fatal: Unable to create 'C:/r/.git/index.lock': File exists."),
+            Some("index-lock")
+        );
+        assert_eq!(
+            index_contention_kind("fatal: pathspec 'x' did not match any files"),
+            None
+        );
+
+        let write_msg = index_busy_message("fatal: unable to write new index file").unwrap();
+        assert!(
+            write_msg.contains("索引被其它进程占用") && write_msg.contains("已自动重试"),
+            "actual: {write_msg}"
+        );
+        // 原始英文首行保留在提示末尾，便于排查
+        assert!(
+            write_msg.contains("fatal: unable to write new index file"),
+            "actual: {write_msg}"
+        );
+        let lock_msg =
+            index_busy_message("fatal: Unable to create 'C:/r/.git/index.lock': File exists.")
+                .unwrap();
+        assert!(
+            lock_msg.contains("索引锁被占用") && lock_msg.contains(".git/index.lock"),
+            "actual: {lock_msg}"
+        );
+        assert!(index_busy_message("fatal: bad revision 'x'").is_none());
+    }
+
+    /// 索引被外部句柄短暂占用（Rust 打开的句柄不共享删除，等价于杀毒/编辑器持有）
+    /// 时应自动重试并成功——即截图里 `unable to write new index file` 的自愈路径。
+    #[test]
+    fn restore_retries_when_index_briefly_locked() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+
+        // 先持锁再起释放线程：保证第一次 git restore 一定撞在占用窗口内
+        let index = root.join(".git").join("index");
+        let handle = std::fs::File::open(&index).unwrap();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(250));
+            drop(handle);
+        });
+        let st = git_restore(root.to_str().unwrap(), "a.txt").unwrap();
+        releaser.join().unwrap();
+
+        assert!(st.files.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\n"
+        );
+    }
+
+    /// 索引被持续占用（超过重试预算）时返回中文提示，并保留 git 原始英文首行
+    #[test]
+    fn restore_reports_index_busy_after_retries_exhausted() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+
+        let index = root.join(".git").join("index");
+        let handle = std::fs::File::open(&index).unwrap();
+        let err = git_restore(root.to_str().unwrap(), "a.txt").unwrap_err();
+        drop(handle);
+
+        assert!(
+            err.message.contains("索引被其它进程占用") && err.message.contains("已自动重试 4 次"),
+            "actual: {}",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains("fatal: unable to write new index file"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    /// 残留/占用中的 `.git/index.lock`：重试耗尽后给出可行动的指引
+    #[test]
+    fn restore_reports_index_lock_hint() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+
+        let lock = root.join(".git").join("index.lock");
+        std::fs::write(&lock, "").unwrap();
+        let err = git_restore(root.to_str().unwrap(), "a.txt").unwrap_err();
+        let _ = std::fs::remove_file(&lock);
+
+        assert!(
+            err.message.contains("索引锁被占用") && err.message.contains("index.lock"),
+            "actual: {}",
+            err.message
+        );
+    }
+
+    /// 批量还原：已跟踪改动 + 未跟踪新增一次撤销，索引写入合并为少数几次
+    #[test]
+    fn restore_many_discards_tracked_and_untracked() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        // 同时暂存一份改动，验证「含已暂存内容」的双侧语义
+        assert_eq!(git(root, &["add", "a.txt"]).0, 0);
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
+        std::fs::write(root.join("b.txt"), "new\n").unwrap();
+
+        let paths = vec!["a.txt".to_string(), "b.txt".to_string()];
+        let st = git_restore_many(root.to_str().unwrap(), &paths).unwrap();
+
+        assert!(st.files.is_empty(), "actual: {:?}", st.files);
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "one\n"
+        );
+        assert!(!root.join("b.txt").exists());
+    }
+
+    /// 批量还原：已撤销/不存在的路径直接忽略，不因陈旧路径整批失败
+    #[test]
+    fn restore_many_ignores_paths_missing_from_status() {
+        if !git_available() {
+            eprintln!("skip: 未安装 git");
+            return;
+        }
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        init_committed_repo(root);
+
+        let paths = vec!["a.txt".to_string(), "ghost.txt".to_string()];
+        let st = git_restore_many(root.to_str().unwrap(), &paths).unwrap();
+        assert!(st.files.is_empty(), "actual: {:?}", st.files);
+
+        // 空列表同样只返回最新状态
+        let st = git_restore_many(root.to_str().unwrap(), &[]).unwrap();
+        assert!(st.files.is_empty());
+    }
+
+    /// 批量还原：非法路径与单文件一致地拒绝
+    #[test]
+    fn restore_many_rejects_unsafe_paths() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let _ = git_init(root.to_str().unwrap()).unwrap();
+
+        let err = git_restore_many(root.to_str().unwrap(), &["a/../b".to_string()]).unwrap_err();
+        assert!(
+            err.message.contains("路径不合法"),
+            "actual: {}",
+            err.message
+        );
+        assert!(git_restore_many(root.to_str().unwrap(), &[".git/config".to_string()]).is_err());
     }
 
     #[test]

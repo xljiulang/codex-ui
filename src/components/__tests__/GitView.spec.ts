@@ -1159,6 +1159,7 @@ describe("GitView 变更文件右键菜单", () => {
         cmd === "git_changes_stage" ||
         cmd === "git_changes_unstage" ||
         cmd === "git_changes_restore" ||
+        cmd === "git_changes_restore_many" ||
         cmd === "git_changes_delete" ||
         cmd === "git_changes_ignore" ||
         cmd === "git_changes_watch_start" ||
@@ -1264,7 +1265,7 @@ describe("GitView 变更文件右键菜单", () => {
     wrapper.unmount();
   });
 
-  it("更改区标题撤消更改：确认后逐文件调用 restore", async () => {
+  it("更改区标题撤消更改：确认后一次批量调用 restore_many", async () => {
     mockFileRepo(okStatus);
     const wrapper = mountGitView({ props: { active: true } });
     await flushPromises();
@@ -1278,14 +1279,18 @@ describe("GitView 变更文件右键菜单", () => {
     expect(store.confirm?.message).toContain("「更改」分区 2 个文件");
     settleConfirm(true);
     await flushPromises();
-    const paths = mockedInvoke.mock.calls
-      .filter(([cmd]) => cmd === "git_changes_restore")
-      .map(([, args]) => (args as { path: string }).path);
-    expect(paths).toEqual(["a.txt", "b.txt"]);
+    const calls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "git_changes_restore_many",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({
+      workspace: rootPath,
+      paths: ["a.txt", "b.txt"],
+    });
     wrapper.unmount();
   });
 
-  it("暂存更改区标题撤消更改：确认后逐文件调用 restore", async () => {
+  it("暂存更改区标题撤消更改：确认后一次批量调用 restore_many", async () => {
     mockFileRepo({
       ...okStatus,
       files: [
@@ -1303,10 +1308,11 @@ describe("GitView 变更文件右键菜单", () => {
     expect(store.confirm?.message).toContain("「暂存更改」分区 1 个文件");
     settleConfirm(true);
     await flushPromises();
-    const paths = mockedInvoke.mock.calls
-      .filter(([cmd]) => cmd === "git_changes_restore")
-      .map(([, args]) => (args as { path: string }).path);
-    expect(paths).toEqual(["a.txt"]);
+    const calls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "git_changes_restore_many",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({ workspace: rootPath, paths: ["a.txt"] });
     wrapper.unmount();
   });
 
@@ -1542,6 +1548,7 @@ describe("GitView 变更文件树形目录", () => {
         cmd === "git_changes_stage" ||
         cmd === "git_changes_unstage" ||
         cmd === "git_changes_restore" ||
+        cmd === "git_changes_restore_many" ||
         cmd === "git_changes_ignore" ||
         cmd === "git_changes_watch_start" ||
         cmd === "git_changes_watch_stop"

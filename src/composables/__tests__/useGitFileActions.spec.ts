@@ -9,13 +9,19 @@ vi.mock("../useCodex", async (importOriginal) => {
   const mod = await importOriginal<typeof import("../useCodex")>();
   return { ...mod, askConfirm: vi.fn(), setToast: vi.fn() };
 });
+vi.mock("../useGitChanges", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../useGitChanges")>();
+  return { ...mod, refreshGitChanges: vi.fn().mockResolvedValue(undefined) };
+});
 
 import { invoke } from "@tauri-apps/api/core";
 import { askConfirm } from "../useCodex";
+import { refreshGitChanges } from "../useGitChanges";
 import { useGitFileActions } from "../useGitFileActions";
 
 const mockedInvoke = vi.mocked(invoke);
 const mockedAskConfirm = vi.mocked(askConfirm);
+const mockedRefresh = vi.mocked(refreshGitChanges);
 
 const okStatus: GitStatus = {
   repoWorkspace: "D:\\repo",
@@ -225,6 +231,7 @@ describe("useGitFileActions 分区菜单与分区撤销", () => {
   beforeEach(() => {
     mockedInvoke.mockReset();
     mockedAskConfirm.mockReset();
+    mockedRefresh.mockClear();
   });
 
   it("openSectionCtx：更改区为暂存/撤消更改，暂存区为取消暂存/撤消更改，空分区不弹", () => {
@@ -242,7 +249,7 @@ describe("useGitFileActions 分区菜单与分区撤销", () => {
     expect(captured[1].map((i) => i.label)).toEqual(["取消暂存", "撤消更改"]);
   });
 
-  it("restoreSection：未确认不执行，确认后逐文件调用 restore", async () => {
+  it("restoreSection：未确认不执行，确认后一次批量调用 restore_many", async () => {
     const { gitStatus, actions } = setup();
     gitStatus.value = changesStatus;
 
@@ -256,9 +263,24 @@ describe("useGitFileActions 分区菜单与分区撤销", () => {
     expect(mockedAskConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ title: "撤消更改", confirmLabel: "撤消更改" }),
     );
-    const paths = mockedInvoke.mock.calls
-      .filter(([cmd]) => cmd === "git_changes_restore")
-      .map(([, args]) => (args as { path: string }).path);
-    expect(paths).toEqual(["a.txt", "b.txt"]);
+    const calls = mockedInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "git_changes_restore_many",
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual({
+      workspace: "D:\\repo",
+      paths: ["a.txt", "b.txt"],
+    });
+  });
+
+  it("restoreSection：命令失败后刷新状态，避免面板停留在过期数据", async () => {
+    const { gitStatus, actions } = setup();
+    gitStatus.value = changesStatus;
+    mockedAskConfirm.mockResolvedValueOnce(true);
+    mockedInvoke.mockRejectedValueOnce(new Error("git 索引被占用"));
+
+    await actions.restoreSection("changes");
+
+    expect(mockedRefresh).toHaveBeenCalledTimes(1);
   });
 });
