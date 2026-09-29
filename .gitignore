@@ -12,3 +12,6 @@ src-tauri/gen
 /setup/bin/*.exe 
 /setup/output/*.exe
 /setup/*.exe
+# 随包内置的 VC++ 运行库（app-local）需要入库；此处反忽略，避免被全局
+# 或本地的 *.dll 规则吞掉（见 setup/setup.iss 与 README「VC++ 运行库」）。
+!/setup/redist/x64/*.dll

@@ -639,6 +639,7 @@ codex-ui.exe（Tauri 2 窗口）
 ## 环境要求
 
 - Windows 10/11（自带 WebView2）
+- 安装版自带 VC++ 运行库（`vcruntime140.dll` / `vcruntime140_1.dll` 随包内置，见「构建」），**无需预装**；只有不走安装包、直接运行散装 `codex-ui.exe` 时，才需要系统已安装「Microsoft Visual C++ 2015-2022 运行库」
 - Rust stable-msvc（rustup）+ VS C++ 构建工具
 - Node.js 18+（仅开发/构建需要；运行端不需要）
 - `codex` CLI（可在设置页指定路径；验证基线 codex-cli 0.156.1（兼容 0.149.0+））
@@ -675,6 +676,15 @@ build-release.bat
 > `codex-primary-runtime` 不再随包，改由 codex-ui 启动后按需从 CDN 下载 `.tar.gz`（约 478MB、支持断点续传）到 `%USERPROFILE%\.cache\codex-runtimes` 并解压，
 > 仅当 `runtime.json` 缺失或其 `bundleVersion` 旧于 `26.819.11345` 才下载。
 > 因此安装包体积变小，但首次启用 `openai-primary-runtime` 依赖网络；下载/解压失败时该市场不注册、下次启动重试。
+
+### VC++ 运行库（`setup\redist\x64`）
+
+`codex-ui.exe` 由 MSVC 动态 CRT 链接，导入 `VCRUNTIME140.dll` 与 `VCRUNTIME140_1.dll`（`bin\` 下的 codex 主程序与 helper、`rg.exe` 均为静态 CRT，不需要）；Windows 10/11 自带的是 UCRT（`api-ms-win-crt-*`），不含这两个 DLL。安装包把两者**随包安装到 `{app}`**，靠 Windows「应用目录优先」的加载顺序命中，因此：不需要预装运行库、不需要管理员权限（保持 `PrivilegesRequired=lowest` 的每用户安装），也不会像 `vc_redist.x64.exe` 那样额外增加约 25 MB 与一次系统级安装。
+
+- 文件入库在 `setup\redist\x64\`（`vcruntime140.dll`、`vcruntime140_1.dll`，当前 FileVersion 14.51.36247.0），`setup\setup.iss` 用**显式 `Source`** 引用，缺失时 Inno Setup 直接编译报错；卸载时随 `{app}` 一并删除。仓库 `.gitignore` 用 `!/setup/redist/x64/*.dll` 反忽略这两个 DLL，避免被全局/本地 `*.dll` 规则吞掉（加文件时用 `git add --dry-run` 或 `git status` 确认没被忽略）。
+- 来源：装有 VS 的机器上 `%VCToolsRedistDir%` 对应目录的 `x64\Microsoft.VC*.CRT\`（当前为 `...\VC\Redist\MSVC\14.51.36231\x64\Microsoft.VC145.CRT\`），属微软可再分发的运行库文件（随 VS 授权条款分发）。**只取所需的两个 DLL**：目前 `codex-ui.exe` 的 vcruntime 导入符号已被它们全部覆盖，不必整包拷 `Microsoft.VC*.CRT` 的其余文件。
+- 升级：换 VS 工具链后按同路径替换这两个 DLL 并更新本节的版本号；若将来 `codex-ui.exe` 新增 `msvcp140*` 等依赖，CI 的「检查 VC 运行库依赖」步骤会失败并提示补件。
+- 目录按 `x64\` 分层，为将来原生 arm64 构建预留（当前 exe 为 x64，在 arm64 上以仿真运行，同样用这两个 x64 DLL）。
 
 ### 用 GitHub Actions 构建 release（推荐）
 
@@ -871,6 +881,7 @@ codex app-server generate-ts --out <dir> --experimental
 - **本地图片不显示**：确认构建启用了 `protocol-asset` 特性且 `tauri.conf.json` 配置了 `assetProtocol`。
 - **继续历史会话报 `invalid_request_error: you passed .`**：旧版会向服务端发送空模型；更新到最新版本（修复后自动回退到默认模型）。
 - **提示“未检测到系统 git”**：全部 Git 功能依赖系统 Git；请安装 Git（git-scm.com）或将其加入 PATH，安装后重启应用（启动探测失败后整个会话视为未安装）。
+- **提示缺少 `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll`**：用安装版（`setup\output\codex-ui-win-x64.exe`）安装即可，两个 DLL 会装到程序目录，无需预装任何运行库。若你是直接运行散装的 `codex-ui.exe`（不走安装包），请先安装「Microsoft Visual C++ 2015-2022 运行库（x64）」，或改用安装包。
 - **拉取提示“本地与远端已分叉”**：拉取采用快进优先（`--ff-only`），分叉时不自动合并；请先提交本地改动，再在 GitView 分支管理中合并远端分支后重新拉取。
 - **撤销更改偶发报 `fatal: unable to write new index file`**：不是仓库损坏，而是 `.git/index` 被其它进程占用（同仓库里正在跑 git 的 codex 会话、编辑器/终端、杀毒实时扫描等），git 无法把新索引重命名覆盖旧文件。应用已在暂存/取消暂存/撤消/删除/提交/切换分支等写操作上**自动退避重试 4 次（120/300/600 ms）**，通常无感；仍失败时才提示，附 git 原始英文首行，并按「索引被占用」或「`.git/index.lock` 被占用」给出对应处置建议（后者确认没有 Git 进程在跑后手动删除 `index.lock`，应用不会自动删）。重试过程记入 `logs\session-*.log` 的 `git.index_retry` 事件。
 - **右键菜单里的“刷新”**：已用自定义右键菜单取代默认菜单，页面不会被意外重载。

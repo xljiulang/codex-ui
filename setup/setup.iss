@@ -44,6 +44,13 @@ Name: chinese; MessagesFile: compiler:Languages\ChineseSimplified.isl
 
 [Files]
 Source: .\codex-ui.exe; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
+; VC++ 运行库（app-local）：codex-ui.exe 导入 VCRUNTIME140.dll / VCRUNTIME140_1.dll
+; （bin\ 下的 codex 四件套与 rg.exe 均为静态 CRT，不需要）。放进 {app} 后由 Windows
+; 「应用目录优先」的加载顺序命中，从而不必预装运行库、也不必跑需要管理员的 vc_redist.exe。
+; 这两个 DLL 入库在 setup\redist\x64（见 README「构建」），显式列出保证缺失时编译直接失败。
+; 来源：%VCToolsRedistDir% 对应的 Microsoft.VC*.CRT\x64（当前 14.51.36247.0）。
+Source: .\redist\x64\vcruntime140.dll; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
+Source: .\redist\x64\vcruntime140_1.dll; DestDir: {app}; Flags: ignoreversion overwritereadonly replacesameversion
 ; 必需：Codex 主程序 + Windows 沙箱助手（缺失任一则 Inno Setup 编译报错，避免静默发布缺件安装包）
 Source: .\bin\codex.exe; DestDir: {app}\bin; Flags: ignoreversion overwritereadonly replacesameversion
 Source: .\bin\codex-code-mode-host.exe; DestDir: {app}\bin; Flags: ignoreversion overwritereadonly replacesameversion
