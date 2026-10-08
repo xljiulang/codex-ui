@@ -1592,6 +1592,10 @@ describe("GitView 变更文件树形目录", () => {
     // 分区徽章：更改总数 4（每个文件计一次），暂存数 1
     expect(heads[0].find(".git-section-count").text()).toBe("4");
     expect(heads[1].find(".git-section-count").text()).toBe("1");
+    // 数量徽章走共享数量胶囊（与会话目录/资源树同款）
+    expect(heads[0].find(".git-section-count").classes()).toContain(
+      "count-pill",
+    );
     // 徽章位于 .git-section-actions 内
     const actions0 = heads[0].find(".git-section-actions");
     expect(actions0.exists()).toBe(true);

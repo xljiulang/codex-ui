@@ -449,7 +449,7 @@ function toggleDirRow(node: GitDirNode) {
           @toggle="toggleSection('changes')"
           @contextmenu="openSectionCtx('changes', $event)"
         >
-          <span v-if="changeCount > 0" class="git-section-count">{{
+          <span v-if="changeCount > 0" class="git-section-count count-pill">{{
             changeCount
           }}</span>
         </GitSectionHead>
@@ -477,7 +477,7 @@ function toggleDirRow(node: GitDirNode) {
           @toggle="toggleSection('staged')"
           @contextmenu="openSectionCtx('staged', $event)"
         >
-          <span v-if="stagedCount > 0" class="git-section-count">{{
+          <span v-if="stagedCount > 0" class="git-section-count count-pill">{{
             stagedCount
           }}</span>
         </GitSectionHead>

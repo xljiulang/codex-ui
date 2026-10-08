@@ -454,9 +454,11 @@ onBeforeUnmount(() => {
             </template>
           </span>
           <span class="resource-side">
-            <span v-if="row.kind !== 'file'" class="resource-count">{{
-              row.entry.childCount ?? 0
-            }}</span>
+            <span
+              v-if="row.kind !== 'file'"
+              class="resource-count count-pill"
+              >{{ row.entry.childCount ?? 0 }}</span
+            >
             <span v-else class="resource-meta">{{
               fileSideMode === "time"
                 ? formatFileTime(row.entry.modifiedAtMs)

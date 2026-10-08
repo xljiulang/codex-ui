@@ -1301,6 +1301,10 @@ describe("ResourceView 文件树", () => {
     expect(
       wrapper.find(".resource-row.resource-dir .resource-side").text(),
     ).toBe("1");
+    // 目录项数徽章走共享数量胶囊（与会话目录/Git 分区标题同款）
+    expect(
+      wrapper.find(".resource-row.resource-dir .resource-count").classes(),
+    ).toContain("count-pill");
     wrapper.unmount();
   });
 

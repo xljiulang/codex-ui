@@ -480,10 +480,16 @@ describe("SessionView 目录分组", () => {
     expect(folders[0].find(".folder-count").text()).toBe("2");
     expect(folders[1].find(".folder-name").text()).toBe("codex-proxy");
     expect(folders[1].find(".folder-count").text()).toBe("1");
-    // 数量徽章走统一胶囊基类（中性 + 数量变体）
+    // 数量徽章走共享数量胶囊（与资源树/Git 分区标题同款），不再走状态徽章 .badge 家族
     expect(folders[0].find(".folder-count").classes()).toEqual(
-      expect.arrayContaining(["badge", "badge-neutral", "badge-count"]),
+      expect.arrayContaining(["folder-count", "count-pill"]),
     );
+    expect(
+      folders[0]
+        .find(".folder-count")
+        .classes()
+        .some((c) => c.startsWith("badge")),
+    ).toBe(false);
     // 目录默认全部收起（展开仅由用户操作或启动恢复驱动）
     expect(folders[0].classes()).toContain("collapsed");
     expect(folders[1].classes()).toContain("collapsed");

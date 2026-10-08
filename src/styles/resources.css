@@ -162,19 +162,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.resource-count {
-  flex-shrink: 0;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  color: var(--text-faint);
-  background: var(--bg-active);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px var(--space-3);
-  min-width: 22px;
-  text-align: center;
-}
-
 /* 树内拖拽移动：合法目标目录高亮 */
 .resource-row.resource-drop-target {
   background: rgba(var(--accent-rgb), 0.12);

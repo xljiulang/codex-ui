@@ -741,20 +741,6 @@
   color: var(--accent);
 }
 
-/* Git 分区标题数量徽章（更改 / 暂存更改）：与资源管理器 .resource-count 同款外观 */
-.git-section-count {
-  flex-shrink: 0;
-  font-size: var(--font-xs);
-  font-weight: 600;
-  color: var(--text-faint);
-  background: var(--bg-active);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px var(--space-3);
-  min-width: 22px;
-  text-align: center;
-}
-
 .git-section-empty {
   padding: var(--space-6) var(--space-5);
   /* 缩进由 .git-section-body 统一承接（分区标题为根） */

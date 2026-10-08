@@ -992,6 +992,24 @@
   padding-inline: var(--space-3);
   text-align: center;
 }
+/* ===== 统一数量胶囊 =====
+   与状态徽章 .badge 并列的第二个胶囊家族：不承载状态语义，只显示「项数」。
+   资源树目录（.resource-count）、会话目录分组（.folder-count）、Git 分区标题
+   （.git-section-count）三处共用本类，外观以资源树原款为准（text-faint 文字 /
+   bg-active 底色 / 描边扁胶囊）；三处的站点类只作稳定选择器与站点行为钩子，
+   不得再承载颜色与几何，改外观一律改这里。 */
+.count-pill {
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px var(--space-3);
+  min-width: 22px;
+  text-align: center;
+}
 /* 列表项首统一图标容器：技能 / 动态工具 / MCP 线性图标与插件品牌图共用。
    浅色圆角小方块，线性图标以 currentColor 着色（text-dim），插件图片/首字母仍放容器内。 */
 .row-icon {

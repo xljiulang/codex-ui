@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
             </svg>
           </span>
           <span class="folder-name">{{ row.group.label }}</span>
-          <span class="badge badge-neutral badge-count folder-count">{{
+          <span class="folder-count count-pill">{{
             row.group.threads.length
           }}</span>
         </div>
