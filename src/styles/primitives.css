@@ -992,6 +992,21 @@
   padding-inline: var(--space-3);
   text-align: center;
 }
+/* 设置页徽章：比全局基线大一档（--font-sm 字号 / 18px 高），只作用于设置页。
+   设置页容器 .settings-page 定义在 src/components/SettingsView.vue 的 scoped 样式里；
+   设置页内弹窗走 ModalDialog（原地渲染、未 Teleport），因此同样命中本规则。
+   总高 = 1 描边 + 0.5 上内边距 + 14 行盒 + 1.5 下内边距 + 1 描边 = 18px；上下内边距
+   刻意不对称，因为 Segoe UI 的 ascent 远大于 descent，纯纵向居中会让文字整体偏低。
+   Blink 8× 实测（同一 18px 胶囊、墨迹中心与胶囊中心的偏差）：0.5/1.5 下小写含降部
+   偏下 0.69px、小写无降部偏上 0.50px、数字与中文偏上 0.38px，全部在 1px 内；
+   沿用基类 0/2 会让数字与中文偏上 0.88px（即放大前「中文贴顶、底部空一条」的观感），
+   对称 1/1 会让含降部的小写偏下 1.19px。
+   数量徽章 .badge-count 是例外，仍走全局基线，不随设置页放大。 */
+.settings-page .badge:not(.badge-count) {
+  font-size: var(--font-sm);
+  line-height: 14px;
+  padding: 0.5px var(--space-3) 1.5px;
+}
 /* ===== 统一数量胶囊 =====
    与状态徽章 .badge 并列的第二个胶囊家族：不承载状态语义，只显示「项数」。
    资源树目录（.resource-count）、会话目录分组（.folder-count）、Git 分区标题
