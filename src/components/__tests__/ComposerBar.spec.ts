@@ -290,6 +290,27 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     ]);
   });
 
+  it("@ 菜单再次选中同一文件：不新增附件并提示已在附件中", async () => {
+    mockRpc(true);
+    const tab = defaultTab();
+    await ensureThreadPlugins(tab);
+    wrapper = mount(ComposerBar, { props: { tab } });
+    await typeInEditor("@a");
+    await waitSearch();
+    await clickMenuRow("a.cs");
+    expect(wrapper.findAll(".attachment-chip").length).toBe(1);
+
+    store.toast = "";
+    await typeInEditor("看 @a");
+    await waitSearch();
+    await clickMenuRow("a.cs");
+    expect(wrapper.findAll(".attachment-chip").length).toBe(1);
+    expect(activeSessionTab()?.attachments).toEqual([
+      { type: "mention", name: "a.cs", path: "D:/repo/src/a.cs" },
+    ]);
+    expect(store.toast).toBe("「a.cs」已在附件中");
+  });
+
   it("选中插件生成 @ 前缀 chip 与 source=plugin 附件", async () => {
     const tab = defaultTab();
     await ensureThreadPlugins(tab);
@@ -403,6 +424,27 @@ describe("ComposerBar TipTap 富文本编辑器", () => {
     expect(activeSessionTab()?.attachments).toEqual([
       { type: "localImage", path: "D:/repo/pic.png" },
     ]);
+  });
+
+  it("文件选择器返回含重复路径：去重后只入一条", async () => {
+    mockedInvoke.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "pick_files") return ["D:/repo/pic.png", "d:/repo/PIC.PNG"];
+      if (cmd === "codex_rpc") {
+        if (args?.method === "plugin/list") return PLUGINS_RESPONSE;
+        if (args?.method === "skills/list") return SKILLS_RESPONSE;
+      }
+      return {};
+    });
+    wrapper = mount(ComposerBar, { props: { tab: defaultTab() } });
+    await typeInEditor("@");
+    await flushPromises();
+    await wrapper.find(".ProseMirror").trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(wrapper.findAll(".attachment-chip").length).toBe(1);
+    expect(activeSessionTab()?.attachments).toEqual([
+      { type: "localImage", path: "D:/repo/pic.png" },
+    ]);
+    expect(store.toast).toBe("「PIC.PNG」已在附件中");
   });
 
   it("@ 菜单打开时 Enter 选中高亮行而不是发送", async () => {
@@ -1568,5 +1610,44 @@ describe("ComposerBar 多会话附件路由（资源面板 @ 入口）", () => {
     expect(addAttachmentToActiveSession(a)).toBe(false);
     expect(activeSessionTab()?.attachments).toEqual([]);
     expect(tabA.draftAttachments).toEqual([]);
+  });
+
+  it("重复添加同一文件：仅保留一条 chip 并提示已在附件中", async () => {
+    const tabA = makeTab("tab-a");
+    tabs.push(tabA);
+    activeTabId.value = "tab-a";
+    wrapperA = mount(ComposerBar, { props: { tab: tabA, active: true } });
+    await flushPromises();
+
+    const a = makeAttachment("a.txt", "D:/repo/a.txt");
+    expect(addAttachmentToActiveSession(a)).toBe(true);
+    await flushPromises();
+    expect(wrapperA.findAll(".attachment-chip")).toHaveLength(1);
+
+    store.toast = "";
+    expect(addAttachmentToActiveSession(a)).toBe(true);
+    await flushPromises();
+    expect(wrapperA.findAll(".attachment-chip")).toHaveLength(1);
+    expect(tabA.draftAttachments).toEqual([a]);
+    expect(store.toast).toBe("「a.txt」已在附件中");
+  });
+
+  it("同一文件不同写法（大小写/斜杠）再次添加：判为重复", async () => {
+    const tabA = makeTab("tab-a");
+    tabs.push(tabA);
+    activeTabId.value = "tab-a";
+    wrapperA = mount(ComposerBar, { props: { tab: tabA, active: true } });
+    await flushPromises();
+
+    expect(
+      addAttachmentToActiveSession(makeAttachment("a.txt", "D:\\repo\\a.txt")),
+    ).toBe(true);
+    await flushPromises();
+    store.toast = "";
+    addAttachmentToActiveSession(makeAttachment("a.txt", "d:/repo/A.TXT"));
+    await flushPromises();
+    expect(wrapperA.findAll(".attachment-chip")).toHaveLength(1);
+    expect(tabA.draftAttachments).toHaveLength(1);
+    expect(store.toast).toContain("已在附件中");
   });
 });

@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 import { invoke } from "@tauri-apps/api/core";
 import { store } from "../useCodex";
 import {
+  addAsAttachment,
   __resetSessionFsForTest,
   childrenByPath,
   copyEntry,
@@ -37,9 +38,12 @@ import {
 } from "../useSessionFs";
 import {
   __resetEditorTabsForTest,
+  activeTabId,
   tabs,
   type FileEditorTab,
 } from "../useEditorTabs";
+import { __resetSessionTabsForTest } from "../useCodex/sessionState";
+import { makeSessionTab } from "./useCodexTestHarness";
 import type { FsEntry } from "../../lib/sessionFs";
 
 const mockedInvoke = vi.mocked(invoke);
@@ -941,5 +945,52 @@ describe("useSessionFs 目录剪枝（loadDir/refreshAll 失败静默）", () =>
     expect(childrenByPath[okDir]).toBeDefined();
     expect(expanded.has(okDir)).toBe(true);
     expect(store.toast).toBe("");
+  });
+});
+
+describe("addAsAttachment 会话附件去重", () => {
+  beforeEach(() => {
+    __resetSessionTabsForTest();
+    __resetSessionFsForTest();
+    store.workspace = root;
+    store.toast = "";
+    mockedInvoke.mockClear();
+    mockedInvoke.mockResolvedValue([]);
+  });
+
+  /**
+   * 无注册 handler（ComposerBar 未挂载）时走兜底 push 分支：
+   * 兜底同样按规范化路径判重，重复添加同一文件只保留一条并提示。
+   */
+  it("无 handler 兜底：连续添加同一文件只入一条，第二次提示已在附件中", () => {
+    const tab = makeSessionTab("s1", null);
+    tabs.push(tab);
+    activeTabId.value = "s1";
+
+    const entry = file("a.txt", "a.txt");
+    addAsAttachment(entry);
+    expect(tab.attachments).toHaveLength(1);
+    expect(store.toast).toBe("已添加「a.txt」为会话附件");
+
+    store.toast = "";
+    addAsAttachment(file("a.txt", "a.txt", false));
+    expect(tab.attachments).toHaveLength(1);
+    expect(store.toast).toBe("「a.txt」已在附件中");
+  });
+
+  it("无 handler 兜底：同文件不同写法（大小写/斜杠）判为重复", () => {
+    const tab = makeSessionTab("s1", null);
+    tabs.push(tab);
+    activeTabId.value = "s1";
+
+    addAsAttachment(file("a.txt", "a.txt"));
+    store.toast = "";
+    // 同一逻辑路径的另一种写法：正斜杠 + 大写
+    addAsAttachment({
+      ...file("a.txt", "a.txt"),
+      path: root.replace("\\", "/") + "/A.TXT",
+    });
+    expect(tab.attachments).toHaveLength(1);
+    expect(store.toast).toBe("「a.txt」已在附件中");
   });
 });

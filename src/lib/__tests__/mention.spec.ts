@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachmentDisplayName,
+  attachmentKey,
   baseName,
   buildTurnInput,
+  duplicateAttachmentMessage,
   fileMentionSection,
+  hasAttachment,
   isImagePath,
   matchMentionToken,
   parseFileMentionSection,
@@ -353,5 +357,62 @@ describe("toUserAttachment / isImagePath / baseName", () => {
   it("baseName 兼容两种分隔符", () => {
     expect(baseName("D:\\a\\b\\c.md")).toBe("c.md");
     expect(baseName("/a/b/c.md")).toBe("c.md");
+  });
+});
+
+describe("附件判重（attachmentKey / hasAttachment）", () => {
+  function mention(name: string, path: string): UserInput {
+    return { type: "mention", name, path };
+  }
+
+  it("同一文件的大小写/斜杠/尾分隔符差异不产生新键", () => {
+    expect(attachmentKey(mention("a.cs", "D:\\Repo\\A.CS"))).toBe(
+      attachmentKey(mention("a.cs", "d:/repo/a.cs")),
+    );
+    expect(attachmentKey(mention("a.cs", "D:\\repo\\a.cs\\"))).toBe(
+      attachmentKey(mention("a.cs", "D:\\repo\\a.cs")),
+    );
+  });
+
+  it("mention 与 localImage 同路径互通判重", () => {
+    const list = [mention("a.png", "D:\\repo\\a.png")];
+    expect(
+      hasAttachment(list, { type: "localImage", path: "d:/repo/A.PNG" }),
+    ).toBe(true);
+  });
+
+  it("不同路径不判重，空路径不参与判重", () => {
+    const list = [mention("a.cs", "D:\\repo\\a.cs")];
+    expect(hasAttachment(list, mention("b.cs", "D:\\repo\\b.cs"))).toBe(false);
+    expect(hasAttachment(list, { type: "localImage", path: "" })).toBe(false);
+    expect(attachmentKey(mention("a.cs", ""))).toBeNull();
+  });
+
+  it("插件/技能项不参与判重", () => {
+    const list: UserInput[] = [
+      { type: "mention", name: "a.cs", path: "D:\\repo\\a.cs" },
+    ];
+    const skill: UserInput = {
+      type: "skill",
+      name: "a.cs",
+      path: "C:/x/SKILL.md",
+    };
+    expect(attachmentKey(skill)).toBeNull();
+    expect(hasAttachment(list, skill)).toBe(false);
+  });
+
+  it("attachmentDisplayName：mention 取 name，localImage 取路径末段", () => {
+    expect(attachmentDisplayName(mention("a.cs", "D:\\repo\\a.cs"))).toBe(
+      "a.cs",
+    );
+    expect(
+      attachmentDisplayName({
+        type: "localImage",
+        path: "D:\\tmp\\pasted.png",
+      }),
+    ).toBe("pasted.png");
+    expect(duplicateAttachmentMessage(mention("a.cs", "D:\\repo\\a.cs"))).toBe(
+      "「a.cs」已在附件中",
+    );
   });
 });

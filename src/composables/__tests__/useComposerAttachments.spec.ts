@@ -26,7 +26,24 @@ function setup() {
     syncAttachments,
     rootRef,
   });
-  return { rowAttachments, syncAttachments, att };
+  return { rowAttachments, syncAttachments, rootRef, att };
+}
+
+/** 供 drop 用例复用的可见输入区矩形（宽高均 > 0 才会被命中） */
+function visibleEl(): HTMLElement {
+  return {
+    getBoundingClientRect: () => ({
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 200,
+      width: 400,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  } as unknown as HTMLElement;
 }
 
 function pasteEvent(files: File[]): ClipboardEvent {
@@ -193,6 +210,76 @@ describe("useComposerAttachments 粘贴", () => {
     hit!.setDragging(true);
     expect(att.dragging.value).toBe(true);
 
+    att.unregisterTarget();
+  });
+
+  it("同一图片路径再次粘贴：拦截并提示，列表仍只有一条", async () => {
+    const { rowAttachments, att } = setup();
+    mockedInvoke.mockResolvedValue(["D:\\x\\a.png"]);
+    att.handlePasteDom(pasteEvent([file("a.png", "image/png")]));
+    await flushPromises();
+    expect(rowAttachments.value).toHaveLength(1);
+
+    mockedToast.mockClear();
+    att.handlePasteDom(pasteEvent([file("a.png", "image/png")]));
+    await flushPromises();
+    expect(rowAttachments.value).toHaveLength(1);
+    expect(mockedToast).toHaveBeenCalledWith("「a.png」已在附件中");
+  });
+
+  it("同文件不同写法（大小写/斜杠）粘贴：判为重复", async () => {
+    const { rowAttachments, att } = setup();
+    mockedInvoke.mockResolvedValueOnce(["D:\\X\\A.PNG"]);
+    att.handlePasteDom(pasteEvent([file("a.png", "image/png")]));
+    await flushPromises();
+
+    mockedToast.mockClear();
+    mockedInvoke.mockResolvedValueOnce(["d:/x/a.png"]);
+    att.handlePasteDom(pasteEvent([file("a.png", "image/png")]));
+    await flushPromises();
+    expect(rowAttachments.value).toHaveLength(1);
+    expect(mockedToast).toHaveBeenCalledWith("「a.png」已在附件中");
+  });
+
+  it("同一批次拖放含重复路径：只入一条，且新增项仍触发同步", async () => {
+    const { rowAttachments, syncAttachments, rootRef, att } = setup();
+    rootRef.value = visibleEl();
+    att.registerTarget();
+
+    const hit = findDropTarget(100, 100);
+    hit!.onDropPaths(["D:\\x\\a.ts", "d:/x/A.ts", "D:\\x\\b.ts"]);
+    await flushPromises();
+
+    expect(
+      rowAttachments.value
+        .filter((a): a is UserInput & { path: string } => "path" in a)
+        .map((a) => a.path),
+    ).toEqual(["D:/x/a.ts", "D:/x/b.ts"]);
+    // 提示用被拦截那一条自身的名称
+    expect(mockedToast).toHaveBeenCalledWith("「A.ts」已在附件中");
+    expect(syncAttachments).toHaveBeenCalled();
+    att.unregisterTarget();
+  });
+
+  it("拖放的全部路径都已存在：不新增、不触发同步", async () => {
+    const { rowAttachments, syncAttachments, rootRef, att } = setup();
+    rowAttachments.value.push({
+      type: "mention",
+      name: "a.ts",
+      path: "D:/x/a.ts",
+    });
+    syncAttachments.mockClear();
+
+    rootRef.value = visibleEl();
+    att.registerTarget();
+
+    const hit = findDropTarget(100, 100);
+    hit!.onDropPaths(["D:\\x\\a.ts"]);
+    await flushPromises();
+
+    expect(rowAttachments.value).toHaveLength(1);
+    expect(mockedToast).toHaveBeenCalledWith("「a.ts」已在附件中");
+    expect(syncAttachments).not.toHaveBeenCalled();
     att.unregisterTarget();
   });
 });

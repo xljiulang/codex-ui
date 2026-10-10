@@ -7,7 +7,11 @@ import {
   workspace,
 } from "../useCodex";
 import { openFileTab, openPreviewTab } from "../useEditorTabs";
-import { toUserAttachment } from "../../lib/mention";
+import {
+  duplicateAttachmentMessage,
+  hasAttachment,
+  toUserAttachment,
+} from "../../lib/mention";
 import { pathBaseName } from "../../lib/format";
 import { previewTypeForName } from "../../lib/preview";
 import { dirNameOf, isPathUnderRoot, type FsEntry } from "../../lib/sessionFs";
@@ -150,11 +154,20 @@ export async function openPathInApp(path: string): Promise<boolean> {
   }
 }
 
-/** 添加为会话附件：路由到当前活动会话的 ComposerBar；异常态兜底 push 活动标签附件 */
+/**
+ * 添加为会话附件：同一文件在当前待发送附件里只允许出现一次。
+ * 已存在则提示并直接返回；未命中则路由到当前活动会话的 ComposerBar，
+ * 异常态（handler 缺失）兜底 push 活动标签附件（兜底前同样判重）。
+ */
 export function addAsAttachment(entry: FsEntry) {
   const a = toUserAttachment(entry.name, entry.path);
+  const tab = activeSessionTab();
+  if (tab && hasAttachment(tab.attachments, a)) {
+    setToast(duplicateAttachmentMessage(a));
+    return;
+  }
   if (!addAttachmentToActiveSession(a)) {
-    activeSessionTab()?.attachments.push(a);
+    if (tab && !hasAttachment(tab.attachments, a)) tab.attachments.push(a);
   }
   setToast(`已添加「${entry.name}」为会话附件`);
 }

@@ -33,7 +33,9 @@ import type { UserInput } from "../lib/types";
 import { assetUrl } from "../lib/asset";
 import {
   baseName,
+  duplicateAttachmentMessage,
   fileMentionSection,
+  hasAttachment,
   matchMentionToken,
   MY_REQUEST_MARKER,
   toUserAttachment,
@@ -182,12 +184,31 @@ function exposeEditor() {
 function registerAddAttachment() {
   if (!props.tab) return;
   registerComposerAddHandler(props.tab.id, (a: UserInput) => {
-    rowAttachments.value.push(a);
-    syncAttachments();
-    // 同步进标签草稿：切走/恢复时附件不被草稿恢复覆盖
-    props.tab.draftAttachments = [...rowAttachments.value];
+    if (addRowAttachments([a]) === 0) return;
     void nextTick(() => editor.value?.commands.focus());
   });
+}
+
+/**
+ * 附件入区统一入口：同一文件（按规范化路径判重）在待发送列表里只保留一条，
+ * 重复项拦截并 toast 提示；返回实际新增数量（0 表示全部命中重复）。
+ * 仅在确有新增时同步 store 镜像与标签草稿。
+ */
+function addRowAttachments(items: UserInput[]): number {
+  let added = 0;
+  for (const a of items) {
+    if (hasAttachment(rowAttachments.value, a)) {
+      setToast(duplicateAttachmentMessage(a));
+      continue;
+    }
+    rowAttachments.value.push(a);
+    added++;
+  }
+  if (!added) return 0;
+  syncAttachments();
+  // 同步进标签草稿：切走/恢复时附件不被草稿恢复覆盖
+  if (props.tab) props.tab.draftAttachments = [...rowAttachments.value];
+  return added;
 }
 
 function currentRuns(): EditorRun[] {
@@ -252,8 +273,7 @@ function onSelectFile(a: UserInput) {
   if (a.type === "mention" || a.type === "localImage") {
     ed.chain().focus().deleteRange({ from, to: caretPos }).run();
     closeMentionMenu();
-    rowAttachments.value.push(a);
-    syncAttachments();
+    addRowAttachments([a]);
     void nextTick(() => ed.commands.focus());
     return;
   }
@@ -298,11 +318,7 @@ async function pickAndAdd(picker: () => Promise<string[] | string | null>) {
   try {
     const picked = await picker();
     const list = Array.isArray(picked) ? picked : picked ? [picked] : [];
-    for (const p of list) {
-      const a = toUserAttachment(baseName(p), p);
-      rowAttachments.value.push(a);
-    }
-    syncAttachments();
+    addRowAttachments(list.map((p) => toUserAttachment(baseName(p), p)));
   } catch (e) {
     setToast(toastError(e));
   } finally {

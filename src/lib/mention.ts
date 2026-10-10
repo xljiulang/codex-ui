@@ -1,3 +1,4 @@
+import { normalizePathKey } from "./path";
 import type { UserInput } from "./types";
 
 export interface MentionToken {
@@ -184,4 +185,34 @@ export function stripMentionContext(text: string): string {
 
 export function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
+}
+
+/**
+ * 附件的判重键：仅文件与图片（mention / localImage）按规范化路径判重
+ * （大小写、正/反斜杠、尾分隔符不敏感）；空路径与插件/技能（skill，
+ * 属于编辑器内联 chip 而非行附件）返回 null，表示不参与判重。
+ */
+export function attachmentKey(a: UserInput): string | null {
+  if (a.type !== "mention" && a.type !== "localImage") return null;
+  const key = normalizePathKey(a.path);
+  return key || null;
+}
+
+/** 附件列表中是否已存在同一文件（按 attachmentKey 判定；无键项一律视为不存在） */
+export function hasAttachment(list: UserInput[], a: UserInput): boolean {
+  const key = attachmentKey(a);
+  if (!key) return false;
+  return list.some((item) => attachmentKey(item) === key);
+}
+
+/** 附件展示名：mention/skill 用名称，localImage 用路径末段 */
+export function attachmentDisplayName(a: UserInput): string {
+  if (a.type === "mention" || a.type === "skill") return a.name;
+  if (a.type !== "localImage") return "";
+  return baseName(a.path) || a.path;
+}
+
+/** 重复添加同一附件时的统一提示文案（各入口共用，避免文案漂移） */
+export function duplicateAttachmentMessage(a: UserInput): string {
+  return `「${attachmentDisplayName(a)}」已在附件中`;
 }

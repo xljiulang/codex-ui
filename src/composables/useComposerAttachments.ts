@@ -1,7 +1,12 @@
 import { nextTick, onBeforeUnmount, ref, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { setToast, toastError } from "./useCodex";
-import { baseName, toUserAttachment } from "../lib/mention";
+import {
+  baseName,
+  duplicateAttachmentMessage,
+  hasAttachment,
+  toUserAttachment,
+} from "../lib/mention";
 import type { UserInput } from "../lib/types";
 import {
   registerDropTarget,
@@ -23,6 +28,19 @@ export function useComposerAttachments(options: {
   rootRef: Ref<HTMLElement | null>;
 }) {
   const dragging = ref(false);
+
+  /**
+   * 附件入区统一入口：同一文件（按规范化路径判重）在待发送列表里只保留一条，
+   * 重复项直接拦截并 toast 提示；返回是否真的新增。
+   */
+  function tryPush(a: UserInput): boolean {
+    if (hasAttachment(options.rowAttachments.value, a)) {
+      setToast(duplicateAttachmentMessage(a));
+      return false;
+    }
+    options.rowAttachments.value.push(a);
+    return true;
+  }
 
   /** 从剪贴板 MIME/文件名推断图片扩展名（白名单与后端 save_pasted_image 一致） */
   function imageExtFromType(type: string, fallbackName: string): string {
@@ -56,8 +74,7 @@ export function useComposerAttachments(options: {
       const orig = originalByBase.get(name.toLowerCase());
       if (f.type.startsWith("image/")) {
         if (orig) {
-          options.rowAttachments.value.push(toUserAttachment(name, orig));
-          added++;
+          if (tryPush(toUserAttachment(name, orig))) added++;
           continue;
         }
         if (f.size > MAX_PASTED_IMAGE_BYTES) {
@@ -70,17 +87,12 @@ export function useComposerAttachments(options: {
             bytes: Array.from(bytes),
             name: `pasted.${imageExtFromType(f.type, name)}`,
           });
-          options.rowAttachments.value.push({
-            type: "localImage",
-            path: saved,
-          });
-          added++;
+          if (tryPush({ type: "localImage", path: saved })) added++;
         } catch (e) {
           setToast(toastError(e));
         }
       } else if (orig) {
-        options.rowAttachments.value.push(toUserAttachment(name, orig));
-        added++;
+        if (tryPush(toUserAttachment(name, orig))) added++;
       } else {
         setToast(`暂不支持该${source}（无法获取原始路径）: ${name}`);
       }
@@ -123,10 +135,7 @@ export function useComposerAttachments(options: {
   async function addDroppedPaths(paths: string[]) {
     let added = 0;
     for (const path of paths) {
-      options.rowAttachments.value.push(
-        toUserAttachment(baseName(path) || "dropped", path),
-      );
-      added++;
+      if (tryPush(toUserAttachment(baseName(path) || "dropped", path))) added++;
     }
     if (added) {
       options.syncAttachments();
