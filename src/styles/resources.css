@@ -9,24 +9,10 @@
   border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
-  transition:
-    background-color var(--ease),
-    border-color var(--ease);
   position: relative;
 }
 
-.resource-row:hover {
-  background: var(--bg-hover);
-  border-color: var(--border);
-}
-
-/* 统一选中态：会话/资源/Git 变更文件共用（原 Git 面板样式） */
-.git-tree-row.selected,
-.session-item.active,
-.resource-row.active {
-  background: var(--accent-soft);
-  border-color: rgba(var(--accent-rgb), 0.35);
-}
+/* hover / 选中 / 按下：统一在 primitives.css 的「交互态配方」一处定义 */
 
 .resource-root {
   font-weight: 600;

@@ -701,13 +701,20 @@
   border-radius: var(--radius);
   transition:
     background-color var(--ease),
-    border-color var(--ease);
+    border-color var(--ease),
+    color var(--ease),
+    transform var(--ease);
 }
 
 .git-section-head:hover {
   color: var(--accent);
   background: var(--bg-hover);
-  border-color: var(--border-light);
+  border-color: var(--border);
+}
+
+.git-section-head:active {
+  background: var(--bg-active);
+  transform: translateY(var(--press-shift));
 }
 
 /* 分区内容子容器：分区标题为真根，内容统一挂在其下并整体右移缩进 */
@@ -957,17 +964,10 @@
   border-radius: var(--radius);
   cursor: pointer;
   border: 1px solid transparent;
-  transition:
-    background-color var(--ease),
-    border-color var(--ease);
 }
 
-.git-tree-row:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-light);
-}
-
-/* 选中态样式统一在 resources.css（.git-tree-row.selected 与历史/资源行共用） */
+/* hover / 选中 / 按下：统一在 primitives.css 的「交互态配方」一处定义
+   （原来 hover 用 --border-light、选中态写在 resources.css，两处不一致，现已收敛） */
 
 .git-dir-arrow {
   flex-shrink: 0;

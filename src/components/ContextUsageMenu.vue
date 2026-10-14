@@ -325,7 +325,8 @@ const totalRows = computed<UsageRow[]>(() => {
 
 .ctx-ring-pct {
   position: absolute;
-  font-size: 10px;
+  /* 圆环中心百分比：全仓最小字号，归到 --font-xs（10px）保持原尺寸 */
+  font-size: var(--font-xs);
   font-weight: 700;
   color: var(--accent);
   font-variant-numeric: tabular-nums;

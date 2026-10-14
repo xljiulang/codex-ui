@@ -406,12 +406,12 @@ const rawJson = computed(() => JSON.stringify(props.item, null, 2));
 
 .msg-user .bubble {
   max-width: 86%;
-  background: rgba(var(--accent-rgb), 0.1);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
   color: var(--text-bright);
   box-shadow:
     var(--inset-shadow),
-    0 2px 12px rgba(var(--accent-rgb), 0.13);
+    0 1px 3px rgba(var(--accent-rgb), 0.1);
   padding: var(--space-3) var(--space-5);
   border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm)
     var(--radius-lg);

@@ -3,6 +3,53 @@
  * 全局级联顺序：紧跟 theme.css 之后（index.css 中先于功能域文件）。
  * 全局 scoped 化的组件专属规则不在此列（见各组件 <style scoped>）。
  */
+
+/* ===== 交互态配方（唯一定义处） =====
+ * 行类选择项（会话/资源/Git 变更文件/设置导航）与菜单项共用同一套 hover / 选中 / 按下配方，
+ * 避免各文件各写一份导致「同类行不同反馈」。定义在 primitives.css（先于 layout/git/resources 加载），
+ * 因此下列文件的同名规则已删除，本处即唯一来源；新增同类行请直接复用这些类名。
+ *   悬停：--bg-hover 底 + --border 描边
+ *   选中：--accent-soft 底 + accent 描边（资源/Git/会话三处原为同一份，此处收敛）
+ *   按下：底色再降一档（--bg-active）并轻微下沉
+ */
+.session-item,
+.resource-row,
+.git-tree-row {
+  transition:
+    background-color var(--ease),
+    border-color var(--ease),
+    transform var(--ease);
+}
+
+.session-item:hover,
+.resource-row:hover,
+.git-tree-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+/* 统一选中态：会话/资源/Git 变更文件共用 */
+.git-tree-row.selected,
+.session-item.active,
+.resource-row.active {
+  background: var(--accent-soft);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+.session-item:active,
+.resource-row:active,
+.git-tree-row:active {
+  background: var(--bg-active);
+  transform: translateY(var(--press-shift));
+}
+
+/* 菜单项按下态：与行类共用同一套按下反馈（底色+下沉） */
+.menu-item:not(:disabled):active,
+.option-btn:not(:disabled):active,
+.mode-menu-item:not(:disabled):active {
+  background: var(--bg-active);
+}
+
 /* 消息容器：MessageItem / InlineInteraction / PlanPromptBubble 共用 */
 .msg {
   margin-bottom: var(--space-8);
@@ -353,8 +400,11 @@
   color: var(--text);
 }
 .popup-menu-item:hover {
-  background: rgba(var(--accent-rgb), 0.1);
+  background: var(--accent-soft);
   color: var(--text-bright);
+}
+.popup-menu-item:not(:disabled):active {
+  background: var(--bg-active);
 }
 @keyframes menu-in {
   from {
@@ -532,10 +582,18 @@
   border: 1px solid var(--border-light);
   color: var(--text-bright);
   background: var(--chip-bg);
+  transition:
+    background-color var(--ease),
+    border-color var(--ease),
+    box-shadow var(--ease),
+    transform var(--ease);
 }
 .btn:hover {
   border-color: var(--text-dim);
   background: var(--chip-bg-hover);
+}
+.btn:not(:disabled):active {
+  transform: translateY(var(--press-shift));
 }
 .btn.primary {
   background: var(--btn-primary-grad);
@@ -581,10 +639,17 @@
   border-radius: var(--radius);
   color: var(--text-dim);
   position: relative;
+  transition:
+    background-color var(--ease),
+    color var(--ease),
+    transform var(--ease);
 }
 .icon-btn:hover {
   background: var(--bg-hover);
   color: var(--text-bright);
+}
+.icon-btn:not(:disabled):active {
+  transform: translateY(var(--press-shift));
 }
 .icon-btn.active {
   color: var(--accent);
@@ -612,7 +677,7 @@
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  padding: var(--space-3) 11px;
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius);
   border: 1px solid var(--border-light);
   font-size: var(--font-md);
@@ -624,7 +689,8 @@
   transition:
     border-color var(--ease),
     background-color var(--ease),
-    box-shadow var(--ease);
+    box-shadow var(--ease),
+    transform var(--ease);
 }
 .option-btn::before {
   content: "";
@@ -640,7 +706,10 @@
 .option-btn.selected {
   border-color: var(--accent-dim);
   color: var(--text-bright);
-  background: rgba(var(--accent-rgb), 0.06);
+  background: var(--accent-soft);
+}
+.option-btn:active {
+  transform: translateY(var(--press-shift));
 }
 .option-btn.selected::before {
   border-color: var(--accent);
@@ -770,10 +839,13 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-5) var(--space-6);
-  transition: border-color var(--ease);
+  transition:
+    border-color var(--ease),
+    background-color var(--ease);
 }
 .setting-row:hover {
   border-color: var(--border-light);
+  background: rgba(var(--overlay-rgb), 0.035);
 }
 /* 卡片内的常规设置行：去边框去底色，仅保留分隔线与悬停底色 */
 .model-config-card > .settings > .setting-row:not(.model-config-row-error),
@@ -784,7 +856,8 @@
   border: none;
   border-radius: 0;
   padding: var(--space-5) 0;
-  border-bottom: 1px solid rgba(var(--border-rgb), 0.45);
+  /* 卡片内行分隔线统一走 --border（发丝线唯一来源），不再自定 alpha */
+  border-bottom: 1px solid var(--border);
 }
 .model-config-card
   > .settings
@@ -793,7 +866,7 @@
 .model-provider-form > .setting-row:not(.model-config-row-error):hover,
 .mcp-server-form > .setting-row:not(.model-config-row-error):hover {
   background: rgba(var(--overlay-rgb), 0.025);
-  border-bottom-color: rgba(var(--border-rgb), 0.7);
+  border-bottom-color: var(--border-light);
 }
 .model-config-card
   > .settings
@@ -892,12 +965,15 @@
   min-width: 0;
 }
 .settings-nav-item.active {
-  background: rgba(var(--accent-rgb), 0.1);
+  background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
 .settings-nav-item.active::before {
   height: 16px;
+}
+.settings-nav-item:active {
+  background: var(--bg-active);
 }
 .settings-section {
   display: flex;
@@ -1048,7 +1124,8 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  font-size: 16px;
+  /* 插件名首字母占位字形：按容器等比放大，归到 --font-xl（16px）保持原尺寸 */
+  font-size: var(--font-xl);
   font-weight: 600;
   color: var(--text-dim);
   user-select: none;
@@ -1419,7 +1496,7 @@ button.skill-row-main:hover .skill-name {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid rgba(var(--border-rgb), 0.45);
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
 .model-catalog-picker-row:last-child {
@@ -1522,8 +1599,23 @@ button.skill-row-main:hover .skill-name {
   border: none;
   border-radius: 0;
   padding: var(--space-4) 0;
-  border-bottom: 1px solid rgba(var(--border-rgb), 0.45);
+  border-bottom: 1px solid var(--border);
 }
 .sched-edit-form .setting-row:last-child {
   border-bottom: none;
+}
+
+/* ===== 动效降级（无障碍） =====
+ * 系统「减少动态效果」开启时，退出全部过渡与动画（含加载旋转/呼吸点/脉冲），
+ * 只保留瞬时状态切换。放在 primitives.css 末尾：作为全局兜底，
+ * 靠 !important 覆盖各组件自带的 transition/animation 声明。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

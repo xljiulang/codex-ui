@@ -28,8 +28,8 @@
   align-self: center;
   flex-shrink: 0;
   border-radius: var(--radius);
-  background: rgba(var(--accent-rgb), 0.1);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
   box-shadow:
     var(--inset-shadow),
     0 2px 10px rgba(var(--accent-rgb), 0.16);
@@ -47,6 +47,7 @@
 }
 .brand-name {
   font-size: var(--font-lg);
+  /* 品牌字重 800：全应用唯一一处，标题/强调统一 700，品牌标识单独保留 */
   font-weight: 800;
   line-height: 1;
   color: var(--text-bright);
@@ -283,14 +284,8 @@
   cursor: pointer;
   position: relative;
   border: 1px solid transparent;
-  transition:
-    background-color var(--ease),
-    border-color var(--ease);
 }
-.session-item:hover {
-  background: var(--bg-hover);
-  border-color: var(--border);
-}
+/* hover / 选中 / 按下：统一在 primitives.css 的「交互态配方」一处定义 */
 /* 历史会话行：会话 Logo（与标签栏「+」新建会话同款，按行高缩放） */
 .session-icon {
   flex-shrink: 0;
@@ -344,20 +339,20 @@
 .wechat-bind-dialog {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-4);
 }
 .wechat-bind-dialog .wechat-status-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 .wechat-bind-dialog .wechat-state-badge {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
+  padding: var(--space-1) var(--space-4);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--font-md);
   background: var(--bg-input);
   color: var(--text-dim);
 }
@@ -377,15 +372,15 @@
 .wechat-bind-dialog .wechat-detail,
 .wechat-bind-dialog .wechat-account {
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--font-md);
   word-break: break-all;
 }
 .wechat-bind-dialog .wechat-qr-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 12px 0 4px;
+  gap: var(--space-3);
+  padding: var(--space-5) 0 var(--space-1);
 }
 .wechat-bind-dialog .wechat-qr-wrap img {
   width: 220px;
@@ -397,14 +392,14 @@
 }
 .wechat-bind-dialog .wechat-qr-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
   text-align: center;
 }
 .wechat-bind-dialog .wechat-unbound-hint,
 .wechat-bind-dialog .wechat-bound-note {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text-dim);
   line-height: 1.6;
 }
@@ -415,7 +410,7 @@
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .wechat-bind-dialog .wechat-unbind-btn svg {
   width: 14px;
@@ -488,11 +483,13 @@
   color: var(--text-dim);
   background: transparent;
   border: none;
+  /* 激活下划线统一 2px（原为 2px，这里只是显式注明；颜色统一 --accent） */
   border-bottom: 2px solid transparent;
   cursor: pointer;
   transition:
     color var(--ease),
-    border-color var(--ease);
+    border-color var(--ease),
+    background-color var(--ease);
 }
 .panel-tab svg {
   flex-shrink: 0;
@@ -523,6 +520,10 @@
 }
 .panel-tab:hover {
   color: var(--text-bright);
+  background: var(--bg-hover);
+}
+.panel-tab:active {
+  background: var(--bg-active);
 }
 .panel-tab.active {
   color: var(--accent);

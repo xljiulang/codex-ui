@@ -309,8 +309,8 @@ onBeforeUnmount(() => {
   /* 计时数字等宽，逐 100ms 刷新时宽度不抖动 */
   font-variant-numeric: tabular-nums;
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.08);
-  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
   box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.14);
   margin-top: var(--space-4);
 }

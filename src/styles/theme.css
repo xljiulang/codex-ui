@@ -28,6 +28,10 @@
   --ctrl-h-md: 32px;
   /* 面板头部高度 */
   --head-h: 48px;
+  /* 视觉层级参考（供调色与后续新增表面取值时对齐，三主题结构一致）：
+     页底 bg < 页脚 footer < 面板 panel < 顶栏/弹窗 chrome < 卡片 card
+     < 输入/芯片 field < 表头等分区条 strip < 交互悬停 hover < 交互选中 active。
+     深色主题层级越高越亮，浅色主题层级越高越白（field/strip 为「内凹」故略深于 card）。 */
   /* 间距刻度：space-N = N*2px 的阶梯（4/6/8/10/12/14/16/20/24） */
   --space-1: 4px;
   --space-2: 6px;
@@ -40,15 +44,23 @@
   --space-12: 24px;
   /* 语义色 */
   --on-accent: #ffffff;
+  /* accent 透明度语义档（与主题无关的 alpha 语义，三主题共用同一档位）：
+     line=描边、soft-hover=悬停底色。原先各文件直接写裸 rgba()，同一语义出现
+     0.09/0.10/0.15 等多种取值，收敛为这两个令牌 + 各主题自有的 --accent-soft（静息底色）。 */
+  --accent-line: rgba(var(--accent-rgb), 0.28);
+  --accent-soft-hover: rgba(var(--accent-rgb), 0.15);
   --yellow-soft: rgba(229, 214, 160, 0.14);
   --neutral-soft: rgba(127, 127, 127, 0.08);
   --neutral-soft-hover: rgba(127, 127, 127, 0.13);
   /* 文档类预览底色恒为白（PDF/XLSX/二维码等真实文档表面） */
   --doc-bg: #ffffff;
   /* 玻璃模糊强度：浅色主题下饱和度降为 1.1（见 light 主题覆盖） */
-  /* 动效时长 */
+  /* 动效时长：ease=微交互（hover/按下/描边）、ease-slow=面板与浮层出现、ease-enter=位移入场 */
   --ease: 0.15s ease;
   --ease-slow: 0.2s ease;
+  --ease-enter: 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* 按下态下沉位移：全应用统一，避免各处自定 1px/2px 不一致 */
+  --press-shift: 1px;
   /* 状态透明度 */
   --opacity-disabled: 0.45;
   --opacity-busy: 0.75;
@@ -84,8 +96,12 @@
 
   --text: #c6cdd8;
   --text-bright: #eef2f8;
-  --text-dim: #8b95a7;
-  --text-faint: #76819a;
+  /* dim/faint 各提亮一档：原 #76819a（faint）在悬停表面（#1e2530）上仅 3.95:1，
+     提亮到 #8d98af；dim 同步提到 #9aa4b5 以维持约 4 个 L* 的档差。
+     提亮后 faint 在「页底~选中」全部表面上均 ≥4.5:1（最低 4.61），
+     次级文字不再出现「鼠标悬停即低于 AA」的情况。 */
+  --text-dim: #9aa4b5;
+  --text-faint: #8d98af;
 
   /* 主色：蓝色 */
   --accent: #4da6ff;
@@ -113,25 +129,27 @@
   --code-float-bg: rgba(255, 255, 255, 0.07);
   --code-float-bg-hover: rgba(255, 255, 255, 0.12);
 
-  /* 表面纯色（扁平，靠 1px 描边与层级色差区分） */
+  /* 表面纯色（扁平，靠 1px 描边与层级色差区分）。
+   * 同层取同值：顶栏/弹窗/菜单/浮层实底共用 chrome 档，
+   * 工具卡与输入卡共用 card 档，diff/表格表头共用 strip 档。 */
   --header-bg: #171d27;
   --panel-bg: #151a21;
   --footer-bg: #12171e;
-  --diff-head-bg: #1a212b;
-  --tool-card-bg: #181e28;
-  --composer-bg: #1a2029;
+  --diff-head-bg: #1c232e;
+  --tool-card-bg: #19202a;
+  --composer-bg: #19202a;
   --editor-menu-bg: #1e2530;
-  --modal-bg: #171d26;
+  --modal-bg: #171d27;
   --chip-bg: #1b212a;
-  --chip-bg-hover: #232b37;
+  --chip-bg-hover: #1e2530;
   --table-head-bg: #1c232e;
   --reasoning-bg: rgba(var(--purple-rgb), 0.05);
 
   --panel-rgb: 21, 26, 33;
   --glass-rgb: 38, 48, 61;
   --input-rgb: 27, 33, 42;
-  --menu-bg: #171d26;
-  --tooltip-bg: #1c222c;
+  --menu-bg: #171d27;
+  --tooltip-bg: #1c232e;
 
   /* 终端质感：代码块与命令输出（深色容器、浅色文字） */
   --console-bg: rgba(10, 14, 19, 0.92);
@@ -177,12 +195,14 @@
   --diff-add-text: #9fe3d4;
 
   --overlay-rgb: 255, 255, 255;
-  /* 光影体系：层级阴影（双层环境光+聚光）+ 玻璃面 + 表面渐变 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18), 0 1px 1px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.22), 0 10px 28px rgba(0, 0, 0, 0.14);
-  --shadow-lg: 0 4px 14px rgba(0, 0, 0, 0.28), 0 18px 48px rgba(0, 0, 0, 0.2);
+  /* 光影体系：统一「近距环境光 + 远距聚光」双层配方（三主题同结构，仅不透明度不同）。
+   * 压低不透明度，让浮层靠边界与层级色差区分而非靠重阴影，观感更克制；
+   * 主按钮/选中态仍走 --shadow-accent 与 --btn-glow。 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.16), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.16), 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.2), 0 16px 40px rgba(0, 0, 0, 0.16);
   --shadow-hover:
-    0 4px 12px rgba(0, 0, 0, 0.24), 0 12px 32px rgba(0, 0, 0, 0.16);
+    0 3px 10px rgba(0, 0, 0, 0.18), 0 10px 28px rgba(0, 0, 0, 0.13);
   --shadow-accent:
     0 0 0 1px rgba(var(--accent-rgb), 0.16),
     0 4px 18px rgba(var(--accent-rgb), 0.3);
@@ -192,7 +212,7 @@
   --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --inset-shadow-md:
     inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 0 28px rgba(0, 0, 0, 0.05);
-  --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.28), 0 14px 36px rgba(0, 0, 0, 0.18);
+  --doc-shadow: 0 2px 8px rgba(0, 0, 0, 0.22), 0 12px 32px rgba(0, 0, 0, 0.15);
   /* 玻璃面：半透明底色 + 模糊，应用于头部/composer/菜单/弹窗 */
   --glass-bg: rgba(38, 48, 61, 0.68);
   --glass-border: rgba(151, 167, 190, 0.18);
@@ -250,8 +270,10 @@
 
   --text: #c9c7d6;
   --text-bright: #f1effc;
-  --text-dim: #9492a6;
-  --text-faint: #868399;
+  /* 同 blue：faint 原 #868399 在悬停表面（#1d1f2b）上 4.46:1，提亮到 #92909f；
+     dim 同步提亮到 #a09db1 以维持约 5 个 L* 的档差。全部表面最低 4.61:1。 */
+  --text-dim: #a09db1;
+  --text-faint: #92909f;
 
   --accent: #a78bfa;
   --accent-dim: #7b5df0;
@@ -277,24 +299,25 @@
   --code-float-bg: rgba(255, 255, 255, 0.07);
   --code-float-bg-hover: rgba(255, 255, 255, 0.12);
 
+  /* 表面纯色：同层取同值（与 blue 同一套层级归属） */
   --header-bg: #14151d;
   --panel-bg: #12131a;
   --footer-bg: #0e0f15;
-  --diff-head-bg: #16171f;
-  --tool-card-bg: #151620;
+  --diff-head-bg: #191b25;
+  --tool-card-bg: #161721;
   --composer-bg: #161721;
-  --editor-menu-bg: #1a1b26;
-  --modal-bg: #13141c;
+  --editor-menu-bg: #1d1f2b;
+  --modal-bg: #14151d;
   --chip-bg: #181a23;
-  --chip-bg-hover: #1f2130;
-  --table-head-bg: #171823;
+  --chip-bg-hover: #1d1f2b;
+  --table-head-bg: #191b25;
   --reasoning-bg: rgba(var(--purple-rgb), 0.06);
 
   --panel-rgb: 18, 19, 27;
   --glass-rgb: 32, 33, 46;
   --input-rgb: 24, 25, 35;
-  --menu-bg: #13141c;
-  --tooltip-bg: #181925;
+  --menu-bg: #14151d;
+  --tooltip-bg: #191b25;
 
   --console-bg: rgba(9, 10, 15, 0.92);
   --console-bg-deep: rgba(12, 13, 20, 0.9);
@@ -339,12 +362,12 @@
   --diff-add-text: #8fe6c8;
 
   --overlay-rgb: 255, 255, 255;
-  /* 光影体系（曜黑更深邃：阴影略重、氛围光略强） */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22), 0 1px 1px rgba(0, 0, 0, 0.12);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.26), 0 10px 28px rgba(0, 0, 0, 0.17);
-  --shadow-lg: 0 4px 14px rgba(0, 0, 0, 0.32), 0 18px 48px rgba(0, 0, 0, 0.24);
+  /* 光影体系（曜黑画布更暗，阴影略深一档；结构与 blue 完全一致） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.24), 0 16px 40px rgba(0, 0, 0, 0.2);
   --shadow-hover:
-    0 4px 12px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.19);
+    0 3px 10px rgba(0, 0, 0, 0.22), 0 10px 28px rgba(0, 0, 0, 0.16);
   --shadow-accent:
     0 0 0 1px rgba(var(--accent-rgb), 0.18),
     0 4px 18px rgba(var(--accent-rgb), 0.34);
@@ -354,7 +377,7 @@
   --inset-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
   --inset-shadow-md:
     inset 0 1px 0 rgba(255, 255, 255, 0.04), inset 0 0 28px rgba(0, 0, 0, 0.06);
-  --doc-shadow: 0 2px 10px rgba(0, 0, 0, 0.32), 0 14px 36px rgba(0, 0, 0, 0.22);
+  --doc-shadow: 0 2px 8px rgba(0, 0, 0, 0.26), 0 12px 32px rgba(0, 0, 0, 0.18);
   --glass-bg: rgba(32, 33, 46, 0.7);
   --glass-border: rgba(173, 168, 212, 0.18);
   --float-bg: rgba(19, 20, 28, 0.85);
@@ -398,7 +421,9 @@
   /* 内容承载面（终端/编辑器/预览/卡片）：更实一档，保证可读 */
   --app-content-tint: rgba(244, 246, 251, 0.58);
   --bg-panel: #ffffff;
-  --bg-input: #ffffff;
+  /* 输入面与芯片面同属「内凹 field 档」，取同值：白卡内的输入框不再与卡面同色
+     （蓝夜/曜黑两套主题里 --bg-input 与 --chip-bg 本就同值，浅色主题此处补齐） */
+  --bg-input: #f6f8fc;
   --bg-hover: #e9edf4;
   --bg-active: #dfe5ee;
 
@@ -408,8 +433,12 @@
 
   --text: #3e4756;
   --text-bright: #151b26;
-  --text-dim: #626e7d;
-  --text-faint: #5f6b7a;
+  /* 同 blue/dark：浅色下提亮方向的等价做法是加深。faint 原 #5f6b7a 在悬停表面
+     （#e9edf4）上 4.62:1、在选中表面（#dfe5ee）上 4.28:1，加深到 #5b6776；
+     dim 原 #626e7d 反之比 faint 更浅，加深到 #566270 使 dim 真正暗于 faint。
+     加深后 faint 全部表面 ≥4.55:1（最低 4.55），层级方向与深色主题一致。 */
+  --text-dim: #566270;
+  --text-faint: #5b6776;
 
   --accent: #2563eb;
   --accent-dim: #1d5fc4;
@@ -435,22 +464,25 @@
   --code-float-bg: rgba(255, 255, 255, 0.9);
   --code-float-bg-hover: #ffffff;
 
+  /* 表面纯色：浅色主题下「抬升面」为纯白、「内凹面」略压暗。
+   * input/chip 从纯白改为 #f6f8fc，否则白卡内的输入框与卡面同色、
+   * 只能靠 1px 描边辨认（原实现即有此问题）。 */
   --header-bg: #ffffff;
   --panel-bg: #ffffff;
   --footer-bg: #f8fafd;
-  --diff-head-bg: #f0f3f9;
+  --diff-head-bg: #f1f4f9;
   --tool-card-bg: #ffffff;
   --composer-bg: #ffffff;
   --editor-menu-bg: #f3f6fb;
   --modal-bg: #ffffff;
-  --chip-bg: #ffffff;
-  --chip-bg-hover: #eef1f7;
-  --table-head-bg: #eef1f7;
+  --chip-bg: #f6f8fc;
+  --chip-bg-hover: #e9edf4;
+  --table-head-bg: #f1f4f9;
   --reasoning-bg: rgba(var(--purple-rgb), 0.05);
 
   --panel-rgb: 255, 255, 255;
   --glass-rgb: 255, 255, 255;
-  --input-rgb: 255, 255, 255;
+  --input-rgb: 246, 248, 252;
   --menu-bg: #ffffff;
   --tooltip-bg: #ffffff;
 
@@ -499,15 +531,15 @@
   --diff-add-text: #0e7a58;
 
   --overlay-rgb: 25, 35, 52;
-  /* 光影体系（晨光：低透明冷灰阴影，保持通透明亮） */
+  /* 光影体系（晨光：低透明冷灰阴影，结构与 blue/dark 一致；保持通透明亮） */
   --shadow-sm:
-    0 1px 2px rgba(30, 40, 60, 0.06), 0 1px 1px rgba(30, 40, 60, 0.04);
+    0 1px 2px rgba(30, 40, 60, 0.06), 0 1px 3px rgba(30, 40, 60, 0.05);
   --shadow-md:
-    0 2px 8px rgba(30, 40, 60, 0.08), 0 10px 28px rgba(30, 40, 60, 0.07);
+    0 2px 6px rgba(30, 40, 60, 0.07), 0 8px 24px rgba(30, 40, 60, 0.07);
   --shadow-lg:
-    0 4px 14px rgba(30, 40, 60, 0.1), 0 18px 44px rgba(30, 40, 60, 0.09);
+    0 4px 12px rgba(30, 40, 60, 0.09), 0 16px 40px rgba(30, 40, 60, 0.09);
   --shadow-hover:
-    0 4px 12px rgba(30, 40, 60, 0.1), 0 12px 30px rgba(30, 40, 60, 0.08);
+    0 3px 10px rgba(30, 40, 60, 0.09), 0 10px 28px rgba(30, 40, 60, 0.08);
   --shadow-accent:
     0 0 0 1px rgba(var(--accent-rgb), 0.14),
     0 4px 18px rgba(var(--accent-rgb), 0.18);
@@ -519,7 +551,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.8),
     inset 0 0 24px rgba(255, 255, 255, 0.5);
   --doc-shadow:
-    0 2px 8px rgba(30, 40, 60, 0.12), 0 14px 32px rgba(30, 40, 60, 0.1);
+    0 2px 8px rgba(30, 40, 60, 0.11), 0 12px 30px rgba(30, 40, 60, 0.09);
   --glass-bg: rgba(255, 255, 255, 0.72);
   --glass-border: rgba(60, 76, 101, 0.16);
   --float-bg: rgba(255, 255, 255, 0.88);
@@ -598,16 +630,35 @@ button {
     opacity var(--ease);
 }
 
-button:focus-visible,
-a:focus-visible,
-select:focus-visible,
-.option-btn:focus-visible,
-.mode-menu-item:focus-visible,
-.menu-item:focus-visible,
-.tool-toggle:focus-visible {
+/* 全局键盘焦点环：凡可聚焦的交互元素共享同一套可见焦点，
+   键盘 Tab 走到哪都一致（原先只白名单了 8 个选择器，行/标签/图标按钮漏网）。
+   焦点环用 outline 而非 box-shadow，避免被各组件自有阴影覆盖。
+   输入类控件（input/textarea/select）已由下方 `:focus` 的边框+光晕表达焦点，
+   故从本规则排除，避免「描边 + 光晕」两层重复。 */
+:where(
+  a[href],
+  button,
+  summary,
+  [tabindex]:not([tabindex="-1"]),
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"]
+):focus-visible {
   outline: 2px solid var(--accent-glow);
   outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.14);
+}
+
+/* 鼠标按下态：统一「再降一档底色 + 轻微下沉」，覆盖按钮/菜单项/可点行。 */
+:where(
+    button,
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    .menu-item,
+    .option-btn
+  ):not(:disabled):active {
+  transform: translateY(var(--press-shift));
 }
 
 button:disabled {

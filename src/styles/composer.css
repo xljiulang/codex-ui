@@ -147,18 +147,27 @@ body.resizing-composer {
 .perm-chip,
 .collab-chip,
 .model-chip {
-  padding: 0 11px;
+  padding: 0 var(--space-4);
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  transition:
+    border-color var(--ease),
+    background-color var(--ease),
+    transform var(--ease);
 }
 .perm-chip:hover:not(:disabled),
 .collab-chip:hover:not(:disabled),
 .model-chip:hover:not(:disabled) {
   border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.15);
+  background: var(--accent-soft-hover);
+}
+.perm-chip:not(:disabled):active,
+.collab-chip:not(:disabled):active,
+.model-chip:not(:disabled):active {
+  transform: translateY(var(--press-shift));
 }
 .perm-chip svg {
   width: 13px;
@@ -186,20 +195,24 @@ body.resizing-composer {
   transition:
     border-color var(--ease),
     background-color var(--ease),
-    box-shadow var(--ease);
+    box-shadow var(--ease),
+    transform var(--ease);
 }
 .goal-chip:hover {
   border-color: var(--text-faint);
   background: var(--neutral-soft-hover);
 }
+.goal-chip:active {
+  transform: translateY(var(--press-shift));
+}
 .goal-chip.has-goal {
   color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.09);
-  border-color: rgba(var(--accent-rgb), 0.28);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
 }
 .goal-chip.has-goal:hover {
   border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.15);
+  background: var(--accent-soft-hover);
 }
 /* 无边框图标按钮基类 */
 .text-editor-icon-btn,
@@ -261,20 +274,21 @@ body.resizing-composer {
 .send-btn {
   height: 30px;
   padding: 0 18px;
-  gap: 6px;
+  gap: var(--space-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
+  /* 原为 12.5px（全仓唯一的小数级字号），归到 --font-md（12px）以对齐字阶令牌 */
+  font-size: var(--font-md);
   font-weight: 700;
   background: var(--btn-primary-grad);
   color: var(--on-accent);
   box-shadow: var(--btn-glow);
   transition:
-    transform 0.15s ease,
-    box-shadow 0.15s ease,
-    filter 0.15s ease;
+    transform var(--ease),
+    box-shadow var(--ease),
+    filter var(--ease);
 }
 .send-btn svg {
   width: 13px;
