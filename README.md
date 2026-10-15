@@ -435,6 +435,11 @@
   - 身份开关开启时按 **Responses 形状**补门禁：`tools` 不足 5 个合格声明时在末尾补 6 个内置工具（`{type:"function", name, description:"这是弃用的工具，请勿调用", parameters:<真实 schema>, strict:false}`），并把「弃用工具声明」教学并入顶层 `instructions`（幂等）；补完仍不足时记 `compat_proxy.zen_tools gate_tools=N required=5`；
   - 实测 codex 的 `namespace` 工具与 `store` / `include` / `prompt_cache_key` / `reasoning` / `text` 字段上游都原样接受，因此**不做任何其它改写**：不展开命名空间（codex-ui 动态工具分组在上游侧保持原样，模型能否调用由上游决定）、不净化历史、不改 `stream`；身份开关关闭时一个字段都不动；
   - **翻译专属能力在这条路径上不参与**：收尾契约教学、口嗨续跑、收尾标签剥离、历史净化、畸形工具调用保护、usage 明细映射、命名空间展开都不生效 —— 开着「回合收尾约束和助推」时记 `compat_proxy.nudge_skipped 原因=responses_protocol`，避免"看着开了实际没生效"；
+- **直通路径的 custom 工具双向转换（apply_patch）**：上游 `/responses` **拒收 `type:"custom"` 的工具**（实测 `400 invalid_request_error: \`custom\` tools are not supported on this endpoint`），而 codex 的模型目录字段 `apply_patch_tool_type` **只有 `freeform` 一个合法取值**（`codex debug models` 实测报 `unknown variant 'function', expected 'freeform'`），因此 codex 必然把 apply_patch 声明成 custom —— 这层转换只能由代理做：
+  - **请求侧**（不受「OpenCode 客户端身份」开关影响，协议兼容而非伪装）：把每个 `custom` 工具改写成**同名 function**（单 `input` 字符串参数 + 描述里补上补丁语法规范、丢弃 grammar）；同名以客户端已声明的 function 为准，无名条目丢弃；诊断 `compat_proxy.responses_custom_tools count=N names=…`；
+  - **响应侧**：把上游的 `function_call` 回译成 codex 认的 `custom_tool_call`（`response.output_item.added/done` 的 item 类型改写、增量事件改名为 `response.custom_tool_call_input.delta/.done`、`arguments` 换成解码后的 `input`、`response.completed/output[]` 同步改写）；**其余帧逐字透传**，没有 custom 工具的请求完全不改写；
+  - **畸形保护**：被转换的调用若最终 `input` 为空，抑制该调用（不发 added/delta/done）并在收尾改发 `response.failed`，同时记 `compat_proxy.malformed_tool_call` —— 与翻译路径同一口径，避免半截调用进会话；
+  - 历史与工具结果**无需改写**：上游接受历史里的 `custom_tool_call` / `custom_tool_call_output`（实测 200）；
 - **流式健壮性**：
   - ① 上游返回的工具调用参数被截断/非法（或工具名为空）时，整轮**不发出任何 function_call**、改发 `response.failed`（codex 以明确失败结束，不再静默按完成收尾），并记 `compat_proxy.malformed_tool_call`；
   - ② 上游随流下发的 `error` 与读取中断同样转成 `response.failed`，不再"按完成收尾"；

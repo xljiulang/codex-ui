@@ -3592,3 +3592,224 @@ async fn responses_passthrough_skips_gate_patch_when_identity_off() {
         "身份开关关闭时请求体应逐字原样转发（不含任何补丁与教学）"
     );
 }
+
+// ---------- 直通路径的 custom 工具双向转换（apply_patch）----------
+
+/// 一段含 `apply_patch` 函数调用的 Responses SSE：形状逐字取自真机抓包
+/// （上游对「被声明成 function 的 apply_patch」就是吐这套 `function_call` 事件）。
+fn responses_tool_call_frames(arguments: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&sse_event(
+        "response.created",
+        &json!({
+            "type": "response.created", "sequence_number": 0,
+            "response": { "id": "resp_mock", "object": "response", "model": "m", "output": [] }
+        }),
+    ));
+    out.push_str(&sse_event(
+        "response.output_item.added",
+        &json!({
+            "type": "response.output_item.added", "sequence_number": 1, "output_index": 0,
+            "item": { "id": "fc_test", "type": "function_call", "status": "in_progress",
+                      "name": "apply_patch", "call_id": "call_test", "arguments": "" }
+        }),
+    ));
+    out.push_str(&sse_event(
+        "response.function_call_arguments.delta",
+        &json!({
+            "type": "response.function_call_arguments.delta", "sequence_number": 2,
+            "output_index": 0, "item_id": "fc_test", "delta": arguments
+        }),
+    ));
+    out.push_str(&sse_event(
+        "response.function_call_arguments.done",
+        &json!({
+            "type": "response.function_call_arguments.done", "sequence_number": 3,
+            "output_index": 0, "item_id": "fc_test", "name": "apply_patch",
+            "arguments": arguments
+        }),
+    ));
+    out.push_str(&sse_event(
+        "response.output_item.done",
+        &json!({
+            "type": "response.output_item.done", "sequence_number": 4, "output_index": 0,
+            "item": { "id": "fc_test", "type": "function_call", "status": "completed",
+                      "name": "apply_patch", "call_id": "call_test", "arguments": arguments }
+        }),
+    ));
+    out.push_str(&sse_event(
+        "response.completed",
+        &json!({
+            "type": "response.completed", "sequence_number": 5,
+            "response": { "id": "resp_mock", "object": "response", "model": "m", "output": [
+                { "id": "fc_test", "type": "function_call", "status": "completed",
+                  "name": "apply_patch", "call_id": "call_test", "arguments": arguments }
+            ] }
+        }),
+    ));
+    out
+}
+
+/// 起一个「Responses 原生 + 工具调用」的 mock 上游（base 带 `/v1` 前缀）：记录请求体，
+/// 并按给定参数文本回一段含 `function_call` 的 Responses SSE。
+async fn spawn_mock_responses_tool_call(
+    arguments: &'static str,
+) -> (String, Arc<AsyncMutex<Option<Value>>>) {
+    let seen: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
+    let slot = seen.clone();
+    let app = Router::new().route(
+        "/v1/responses",
+        axum::routing::post(move |Json(body): Json<Value>| {
+            let slot = slot.clone();
+            async move {
+                *slot.lock().await = Some(body);
+                Response::builder()
+                    .header(header::CONTENT_TYPE, "text/event-stream")
+                    .body(Body::from(responses_tool_call_frames(arguments)))
+                    .unwrap()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{addr}/v1"), seen)
+}
+
+/// 带一个 custom 工具（apply_patch，与 codex 的声明一致）的 Responses 请求。
+fn custom_tool_probe_request(model: &str) -> Value {
+    let mut req = protocol_probe_request(model);
+    req["tools"].as_array_mut().unwrap().push(json!({
+        "type": "custom",
+        "name": "apply_patch",
+        "description": "The `apply_patch` tool can be used to edit files. \
+            This is a FREEFORM tool, so do not wrap the patch in JSON.",
+        "format": { "type": "grammar", "syntax": "lark", "definition": "start: ..." }
+    }));
+    req
+}
+
+/// 直通路径的完整双向转换：请求把 custom 改写成同名 function（含补丁语法、无 grammar），
+/// 响应把 `function_call` 回译成 codex 认的 `custom_tool_call`（`input` 为解码后的补丁原文）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_passthrough_converts_custom_tools_both_ways() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let arguments = json!({
+        "input": "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch"
+    })
+    .to_string();
+    // 静态字符串：mock 需要 'static
+    let arguments: &'static str = Box::leak(arguments.into_boxed_str());
+    let (upstream, seen) = spawn_mock_responses_tool_call(arguments).await;
+    let state = proxy_state(upstream, log);
+    assert!(learn_protocol(
+        &state,
+        Some("muse-spark-mock"),
+        ModelProtocol::Responses
+    ));
+
+    let resp = call_responses_entry(state, custom_tool_probe_request("muse-spark-mock")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = body_text(resp).await;
+    // 响应侧：codex 认的自定义工具调用形态 + 解码后的补丁原文；不再有 function_call / arguments
+    assert!(text.contains("\"type\":\"custom_tool_call\""), "{text}");
+    assert!(
+        text.contains("event: response.custom_tool_call_input.delta")
+            && text.contains("event: response.custom_tool_call_input.done"),
+        "{text}"
+    );
+    assert!(text.contains("*** Begin Patch"), "{text}");
+    assert!(!text.contains("function_call_arguments"), "{text}");
+    assert!(!text.contains("\"function_call\""), "{text}");
+
+    // 请求侧：custom → 同名 function，带单 input 参数与补丁语法，且不再下发 grammar
+    let sent = seen.lock().await.clone().expect("mock 应收到请求");
+    let apply_patch = sent["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "apply_patch")
+        .expect("实发请求体里应有 apply_patch");
+    assert_eq!(apply_patch["type"], "function", "{sent}");
+    assert_eq!(
+        apply_patch["parameters"]["properties"]["input"]["type"],
+        "string"
+    );
+    assert_eq!(apply_patch["parameters"]["required"][0], "input");
+    assert!(apply_patch.get("format").is_none(), "{sent}");
+    assert!(apply_patch["description"]
+        .as_str()
+        .is_some_and(|desc| desc.contains("*** Begin Patch") && !desc.contains("FREEFORM")));
+
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=compat_proxy.responses_custom_tools")
+            && joined.contains("names=apply_patch"),
+        "{joined}"
+    );
+}
+
+/// 对照：请求里没有 custom 工具时，请求体与上游 SSE 都逐字透传（不做任何改写）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_passthrough_stays_verbatim_without_custom_tools() {
+    let arguments = json!({ "input": "patch" }).to_string();
+    let arguments: &'static str = Box::leak(arguments.into_boxed_str());
+    let (upstream, seen) = spawn_mock_responses_tool_call(arguments).await;
+    let state = proxy_state(upstream, None);
+    assert!(learn_protocol(&state, Some("m"), ModelProtocol::Responses));
+
+    // 控制组请求不带 custom 工具，但 mock 仍会吐一个 apply_patch 调用：
+    // 没有转换集合时整条响应流应逐字透传（包括 function_call 形态）
+    let request = protocol_probe_request("m");
+    let resp = call_responses_entry(state, request.clone()).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = body_text(resp).await;
+    assert_eq!(
+        text,
+        responses_tool_call_frames(arguments),
+        "响应应逐字透传"
+    );
+    assert!(text.contains("\"function_call\""), "{text}");
+
+    // 请求体只多了门禁补丁（身份开关开启），工具声明保持 function，不出现 custom
+    let sent = seen.lock().await.clone().expect("mock 应收到请求");
+    assert!(
+        sent["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["type"] != "custom"),
+        "{sent}"
+    );
+}
+
+/// 被转换的 custom 调用若参数为空：不发工具调用，整轮以 `response.failed` 结束。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_passthrough_fails_turn_on_empty_custom_arguments() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let (upstream, _) = spawn_mock_responses_tool_call("").await;
+    let state = proxy_state(upstream, log);
+    assert!(learn_protocol(
+        &state,
+        Some("muse-spark-mock"),
+        ModelProtocol::Responses
+    ));
+
+    let resp = call_responses_entry(state, custom_tool_probe_request("muse-spark-mock")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = body_text(resp).await;
+    assert!(text.contains("event: response.failed"), "{text}");
+    assert!(text.contains(CODE_MALFORMED_TOOL_CALL), "{text}");
+    assert!(!text.contains("custom_tool_call"), "{text}");
+
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=compat_proxy.malformed_tool_call")
+            && joined.contains("name=apply_patch"),
+        "{joined}"
+    );
+}

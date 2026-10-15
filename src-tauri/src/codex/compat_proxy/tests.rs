@@ -3364,3 +3364,254 @@ fn protocol_cache_learns_per_model() {
     assert_eq!(resolve_protocol(&state, None).0, ModelProtocol::Chat);
     assert_eq!(resolve_protocol(&state, Some("   ")).0, ModelProtocol::Chat);
 }
+
+// ---------- 直通路径的 custom 工具双向转换 ----------
+
+/// codex 对 freeform 模型的 `apply_patch` 声明原文（与真机一致：带 grammar、描述里劝模型别包 JSON）。
+fn custom_apply_patch_tool() -> Value {
+    json!({
+        "type": "custom",
+        "name": "apply_patch",
+        "description": "The `apply_patch` tool can be used to edit files. \
+            This is a FREEFORM tool, so do not wrap the patch in JSON.",
+        "format": { "type": "grammar", "syntax": "lark", "definition": "start: ..." }
+    })
+}
+
+#[test]
+fn normalize_responses_tools_converts_custom_to_function() {
+    let mut body = json!({
+        "model": "m",
+        "tools": [
+            { "type": "function", "name": "shell",
+              "parameters": { "type": "object", "properties": { "command": { "type": "string" } } } },
+            custom_apply_patch_tool(),
+            { "type": "namespace", "name": "codexui", "tools": [] },
+            custom_apply_patch_tool(),
+            { "type": "custom", "description": "无名条目" }
+        ]
+    });
+    let converted = normalize_responses_tools(&mut body);
+    assert_eq!(converted, vec!["apply_patch"], "只转第一个同名 custom");
+    let tools = body["tools"].as_array().unwrap();
+    // 5 个原始条目：重复的 custom 与无名 custom 都被丢弃 → 3 个
+    assert_eq!(tools.len(), 3, "重复/无名 custom 应被丢弃：{body}");
+    // 顺序不变：function shell 在前、namespace 保留、custom 原位变成 function
+    assert_eq!(tools[0]["name"], "shell");
+    assert_eq!(tools[1]["type"], "function");
+    assert_eq!(tools[1]["name"], "apply_patch");
+    assert_eq!(tools[1]["strict"], false);
+    assert_eq!(tools[2]["type"], "namespace");
+    // 描述换成函数形态口径：不再有 FREEFORM 误导，且补上补丁语法规范
+    let desc = tools[1]["description"].as_str().unwrap();
+    assert!(
+        !desc.contains("FREEFORM") && !desc.contains("do not wrap"),
+        "{desc}"
+    );
+    assert!(
+        desc.contains("*** Begin Patch") && desc.contains("*** End Patch"),
+        "{desc}"
+    );
+    assert!(
+        desc.contains("Never write `@@ some description @@`"),
+        "{desc}"
+    );
+    // 单 input 字符串参数；grammar 不下发
+    assert_eq!(
+        tools[1]["parameters"]["properties"]["input"]["type"],
+        "string"
+    );
+    assert_eq!(tools[1]["parameters"]["required"][0], "input");
+    assert!(tools[1].get("format").is_none(), "{body}");
+}
+
+#[test]
+fn normalize_responses_tools_keeps_plain_bodies_untouched() {
+    // 没有 tools / 只有 function 工具 / tools 不是数组：返回空集合且不改动请求体
+    for mut body in [
+        json!({ "model": "m" }),
+        json!({ "model": "m", "tools": [] }),
+        json!({ "model": "m", "tools": { "oops": true } }),
+        json!({ "model": "m", "tools": [
+            { "type": "function", "name": "shell", "parameters": { "type": "object" } }
+        ] }),
+    ] {
+        let before = body.clone();
+        let converted = normalize_responses_tools(&mut body);
+        assert!(converted.is_empty(), "{converted:?}");
+        assert_eq!(body, before, "没有 custom 工具时不该改动请求体");
+    }
+}
+
+/// 真机抓到的上游函数调用事件（apply_patch 被声明成 function 后上游就吐这套形状）。
+fn captured_function_call_frames(arguments: &str) -> Vec<(String, Value)> {
+    vec![
+        (
+            "response.output_item.added".into(),
+            json!({
+                "type": "response.output_item.added", "sequence_number": 10, "output_index": 2,
+                "item": { "id": "fc_test", "type": "function_call", "status": "in_progress",
+                          "name": "apply_patch", "call_id": "call_test", "arguments": "" }
+            }),
+        ),
+        (
+            "response.function_call_arguments.delta".into(),
+            json!({
+                "type": "response.function_call_arguments.delta", "sequence_number": 11,
+                "output_index": 2, "item_id": "fc_test", "delta": arguments
+            }),
+        ),
+        (
+            "response.function_call_arguments.done".into(),
+            json!({
+                "type": "response.function_call_arguments.done", "sequence_number": 12,
+                "output_index": 2, "item_id": "fc_test", "name": "apply_patch",
+                "arguments": arguments
+            }),
+        ),
+        (
+            "response.output_item.done".into(),
+            json!({
+                "type": "response.output_item.done", "sequence_number": 13, "output_index": 2,
+                "item": { "id": "fc_test", "type": "function_call", "status": "completed",
+                          "name": "apply_patch", "call_id": "call_test", "arguments": arguments }
+            }),
+        ),
+        (
+            "response.completed".into(),
+            json!({
+                "type": "response.completed", "sequence_number": 14,
+                "response": { "id": "resp_test", "object": "response", "model": "m", "output": [
+                    { "id": "msg_1", "type": "message", "role": "assistant",
+                      "content": [{ "type": "output_text", "text": "改好了" }] },
+                    { "id": "fc_test", "type": "function_call", "status": "completed",
+                      "name": "apply_patch", "call_id": "call_test", "arguments": arguments }
+                ] }
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn rewrite_responses_frame_rewrites_converted_custom_call() {
+    let patch = "*** Begin Patch\n*** Add File: a.txt\n+hi\n*** End Patch";
+    let arguments = json!({ "input": patch }).to_string();
+    let mut st = ResponsesToolRewrite::new(vec!["apply_patch".to_string()]);
+    let mut out = String::new();
+    let frames = captured_function_call_frames(&arguments);
+    for (event, data) in frames.iter().take(4) {
+        let frame = sse_event(event, data);
+        out.push_str(&String::from_utf8_lossy(&rewrite_responses_frame(
+            frame.as_bytes(),
+            &mut st,
+            &None,
+        )));
+    }
+    // 收敛后一次下发：custom_tool_call 的 added（input 空）+ input.delta/done（解码后的补丁原文）
+    assert!(out.contains("response.output_item.added"), "{out}");
+    assert!(out.contains("\"type\":\"custom_tool_call\""), "{out}");
+    assert!(
+        out.contains("response.custom_tool_call_input.delta"),
+        "{out}"
+    );
+    assert!(
+        out.contains("response.custom_tool_call_input.done"),
+        "{out}"
+    );
+    assert!(out.contains("*** Begin Patch"), "{out}");
+    assert!(!out.contains("function_call_arguments"), "{out}");
+    assert!(!out.contains("\"function_call\""), "{out}");
+    // 增量碎片不下发（被挂起），只在收敛时按完整文本给一次
+    assert_eq!(
+        out.matches("event: response.custom_tool_call_input.delta")
+            .count(),
+        1,
+        "增量只下一次（事件名 + data.type 各出现一次，故按 event 行计）：{out}"
+    );
+
+    // 收尾事件：output[] 里的 function_call 也改写，其余 item 原样
+    let (event, data) = frames.last().unwrap();
+    let tail = String::from_utf8_lossy(&rewrite_responses_frame(
+        sse_event(event, data).as_bytes(),
+        &mut st,
+        &None,
+    ))
+    .to_string();
+    assert!(tail.contains("event: response.completed"), "{tail}");
+    assert!(tail.contains("\"type\":\"custom_tool_call\""), "{tail}");
+    assert!(tail.contains("改好了"), "非工具 item 应原样保留：{tail}");
+    assert!(!tail.contains("\"arguments\""), "{tail}");
+}
+
+#[test]
+fn rewrite_responses_frame_passes_unrelated_frames_through() {
+    let mut st = ResponsesToolRewrite::new(vec!["apply_patch".to_string()]);
+    // 非 custom 的 function_call：逐字透传
+    let frame = sse_event(
+        "response.output_item.added",
+        &json!({
+            "type": "response.output_item.added", "output_index": 0,
+            "item": { "id": "fc_other", "type": "function_call", "name": "shell",
+                      "call_id": "call_other", "arguments": "" }
+        }),
+    );
+    assert_eq!(
+        rewrite_responses_frame(frame.as_bytes(), &mut st, &None),
+        frame.as_bytes()
+    );
+    // 消息增量、非 SSE 片段、非法 JSON 都原样返回
+    for raw in [
+        sse_event(
+            "response.output_text.delta",
+            &json!({ "type": "response.output_text.delta", "delta": "hi" }),
+        ),
+        "not sse at all\n\n".to_string(),
+        "event: response.completed\ndata: {oops}\n\n".to_string(),
+    ] {
+        assert_eq!(
+            rewrite_responses_frame(raw.as_bytes(), &mut st, &None),
+            raw.as_bytes()
+        );
+    }
+    // 没有 custom 工具时整条路径都不改写
+    let mut plain = ResponsesToolRewrite::new(Vec::new());
+    let frame = sse_event(
+        "response.output_item.added",
+        &json!({
+            "type": "response.output_item.added",
+            "item": { "id": "fc_test", "type": "function_call", "name": "apply_patch" }
+        }),
+    );
+    assert_eq!(
+        rewrite_responses_frame(frame.as_bytes(), &mut plain, &None),
+        frame.as_bytes()
+    );
+}
+
+#[test]
+fn rewrite_responses_frame_fails_the_turn_on_empty_custom_input() {
+    let mut st = ResponsesToolRewrite::new(vec!["apply_patch".to_string()]);
+    let mut out = String::new();
+    for (event, data) in captured_function_call_frames("").iter().take(4) {
+        out.push_str(&String::from_utf8_lossy(&rewrite_responses_frame(
+            sse_event(event, data).as_bytes(),
+            &mut st,
+            &None,
+        )));
+    }
+    assert!(out.is_empty(), "空参数调用不该下发任何帧：{out}");
+    let (event, data) = captured_function_call_frames("").pop().unwrap();
+    let tail = String::from_utf8_lossy(&rewrite_responses_frame(
+        sse_event(&event, &data).as_bytes(),
+        &mut st,
+        &None,
+    ))
+    .to_string();
+    assert!(tail.contains("event: response.failed"), "{tail}");
+    assert!(tail.contains(CODE_MALFORMED_TOOL_CALL), "{tail}");
+    assert!(
+        !tail.contains("custom_tool_call"),
+        "失败轮不应带工具调用：{tail}"
+    );
+    assert!(!tail.contains("\"function_call\""), "{tail}");
+}

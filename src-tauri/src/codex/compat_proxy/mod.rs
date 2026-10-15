@@ -21,6 +21,7 @@ use axum::response::Response;
 use axum::Json;
 use axum::Router;
 use futures_util::stream::{self, StreamExt};
+use futures_util::Stream;
 use serde_json::{json, Map, Value};
 use tokio::task::AbortHandle;
 
@@ -1392,6 +1393,387 @@ fn protocol_unsupported_outcome(
     }
 }
 
+/// 直通路径的响应侧回译状态：把「被 [`normalize_responses_tools`] 转成 function 的 custom 工具」
+/// 调用还原成 codex 认的 `custom_tool_call`（`added`/`done` 两处必须一致，否则 codex 侧 item
+/// 对不上）。只有本次请求确实含 custom 工具时才启用，其余请求完全逐字透传。
+struct ResponsesToolRewrite {
+    /// 本次请求里由 `custom` 转成 `function` 的工具名。
+    customs: HashSet<String>,
+    /// 挂起中的调用：等收敛（item.done）后再决定整组下发还是抑制。
+    pending: HashMap<String, PendingCall>,
+    /// 被判定畸形、整体抑制的 `item_id`（收尾时从 `output[]` 里剔除）。
+    malformed_ids: HashSet<String>,
+    /// 本次流里是否出现过畸形调用（收尾改发 `response.failed`）。
+    malformed: bool,
+}
+
+/// 一个挂起中的 custom 调用。
+struct PendingCall {
+    /// 已改写成 `custom_tool_call` 的 `response.output_item.added` 帧原文。
+    added: String,
+    /// 该调用的 `output_index`（合成增量/完成事件要用）。
+    out_index: Option<u64>,
+    /// 该调用的 `call_id`（合成 item 用）。
+    call_id: String,
+    /// 工具名。
+    name: String,
+    /// 上游累积的参数文本（来自 `.done` 事件或 item 自身）。
+    arguments: String,
+}
+
+impl ResponsesToolRewrite {
+    /// 由请求侧转换出的工具名集合构造；空集合表示本次不需要任何改写。
+    fn new(customs: Vec<String>) -> Self {
+        Self {
+            customs: customs.into_iter().collect(),
+            pending: HashMap::new(),
+            malformed_ids: HashSet::new(),
+            malformed: false,
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        !self.customs.is_empty()
+    }
+
+    /// 收敛一个挂起调用：返回要下发给 codex 的帧文本（`added` + 一次性 `input.delta` +
+    /// `input.done` + 改写后的 `item.done`）。参数为空或不可用时记畸形、返回空串（整组抑制）。
+    ///
+    /// `item_done` 为 `Some` 表示由上游的 `response.output_item.done` 触发（可用它兜底取参数）。
+    fn finish_call(&mut self, item_id: &str, item_done: Option<&Value>, log: &ZenLog) -> String {
+        let Some(mut call) = self.pending.remove(item_id) else {
+            return String::new();
+        };
+        if call.arguments.is_empty() {
+            if let Some(arguments) = item_done
+                .and_then(|item| item.get("arguments"))
+                .and_then(Value::as_str)
+            {
+                call.arguments = arguments.to_string();
+            }
+        }
+        let input = custom_tool_input(&call.arguments);
+        if input.trim().is_empty() {
+            self.malformed = true;
+            self.malformed_ids.insert(item_id.to_string());
+            log_at(
+                log,
+                "warn",
+                "compat_proxy.malformed_tool_call",
+                &[
+                    ("name", call.name.clone()),
+                    ("call_id", call.call_id.clone()),
+                    ("args_len", call.arguments.chars().count().to_string()),
+                    ("preview", truncate_chars(call.arguments.trim(), 200)),
+                    (
+                        "reason",
+                        "自定义工具（已按函数形态声明）返回的调用内容为空，已阻止该调用进入会话"
+                            .to_string(),
+                    ),
+                ],
+            );
+            return String::new();
+        }
+        let mut out = call.added;
+        out.push_str(&sse_event(
+            "response.custom_tool_call_input.delta",
+            &json!({
+                "type": "response.custom_tool_call_input.delta",
+                "item_id": item_id,
+                "output_index": call.out_index,
+                "delta": input
+            }),
+        ));
+        out.push_str(&sse_event(
+            "response.custom_tool_call_input.done",
+            &json!({
+                "type": "response.custom_tool_call_input.done",
+                "item_id": item_id,
+                "output_index": call.out_index,
+                "input": input
+            }),
+        ));
+        out.push_str(&sse_event(
+            "response.output_item.done",
+            &json!({
+                "type": "response.output_item.done",
+                "output_index": call.out_index,
+                "item": {
+                    "id": item_id,
+                    "type": "custom_tool_call",
+                    "status": "completed",
+                    "call_id": call.call_id,
+                    "name": call.name,
+                    "input": input
+                }
+            }),
+        ));
+        out
+    }
+}
+
+/// SSE 帧边界：返回「含分隔空行」的字节长度（`\n\n` 或 `\r\n\r\n`）；未收全一帧时返回 None。
+fn sse_frame_end(buf: &[u8]) -> Option<usize> {
+    for index in 0..buf.len() {
+        if buf[index] == b'\n' && buf.get(index + 1) == Some(&b'\n') {
+            return Some(index + 2);
+        }
+        if buf[index..].starts_with(b"\r\n\r\n") {
+            return Some(index + 4);
+        }
+    }
+    None
+}
+
+/// 从一帧 SSE 文本里取 `(event 名, data 原文)`；缺 data 行时返回 None。
+fn parse_sse_frame(text: &str) -> Option<(&str, &str)> {
+    let mut event = "";
+    let mut data: Option<&str> = None;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("event:") {
+            event = rest.trim();
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            data = Some(rest.trim());
+        }
+    }
+    data.map(|data| (event, data))
+}
+
+/// 改写一帧上游 Responses SSE。返回要发给 codex 的字节：
+/// - 与 custom 回译无关（或不是 SSE/不是 JSON）的帧**逐字**返回；
+/// - 挂起中（等收敛）或被抑制的帧返回空；
+/// - 收敛时可以返回多帧拼接。
+fn rewrite_responses_frame(frame: &[u8], st: &mut ResponsesToolRewrite, log: &ZenLog) -> Vec<u8> {
+    if !st.enabled() {
+        return frame.to_vec();
+    }
+    let Ok(text) = std::str::from_utf8(frame) else {
+        return frame.to_vec();
+    };
+    let Some((event, data_text)) = parse_sse_frame(text) else {
+        return frame.to_vec();
+    };
+    let Ok(data) = serde_json::from_str::<Value>(data_text) else {
+        return frame.to_vec();
+    };
+    let kind = data
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or(event)
+        .to_string();
+    match kind.as_str() {
+        "response.output_item.added" => {
+            let Some(item) = data.get("item") else {
+                return frame.to_vec();
+            };
+            let name = item.get("name").and_then(Value::as_str).unwrap_or("");
+            if item.get("type").and_then(Value::as_str) != Some("function_call")
+                || !st.customs.contains(name)
+            {
+                return frame.to_vec();
+            }
+            let Some(item_id) = item.get("id").and_then(Value::as_str) else {
+                return frame.to_vec();
+            };
+            let mut rewritten = data.clone();
+            let mut input = String::new();
+            if let Some(obj) = rewritten.get_mut("item").and_then(Value::as_object_mut) {
+                if let Some(arguments) = obj.get("arguments").and_then(Value::as_str) {
+                    input = custom_tool_input(arguments);
+                }
+                obj.insert("type".to_string(), json!("custom_tool_call"));
+                obj.remove("arguments");
+                obj.insert("input".to_string(), json!(input));
+            }
+            st.pending.insert(
+                item_id.to_string(),
+                PendingCall {
+                    added: sse_event("response.output_item.added", &rewritten),
+                    out_index: rewritten.get("output_index").and_then(Value::as_u64),
+                    call_id: item
+                        .get("call_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    name: name.to_string(),
+                    arguments: String::new(),
+                },
+            );
+            Vec::new()
+        }
+        "response.function_call_arguments.delta" => {
+            let Some(item_id) = data.get("item_id").and_then(Value::as_str) else {
+                return frame.to_vec();
+            };
+            if st.pending.contains_key(item_id) {
+                // 挂起：增量在收敛时按解码后的完整文本一次性下发，避免转义碎片
+                Vec::new()
+            } else {
+                frame.to_vec()
+            }
+        }
+        "response.function_call_arguments.done" => {
+            let Some(item_id) = data.get("item_id").and_then(Value::as_str) else {
+                return frame.to_vec();
+            };
+            match st.pending.get_mut(item_id) {
+                Some(call) => {
+                    if let Some(arguments) = data.get("arguments").and_then(Value::as_str) {
+                        call.arguments = arguments.to_string();
+                    }
+                    Vec::new()
+                }
+                None => frame.to_vec(),
+            }
+        }
+        "response.output_item.done" => {
+            let Some(item) = data.get("item") else {
+                return frame.to_vec();
+            };
+            let Some(item_id) = item.get("id").and_then(Value::as_str) else {
+                return frame.to_vec();
+            };
+            if !st.pending.contains_key(item_id) {
+                return frame.to_vec();
+            }
+            st.finish_call(item_id, Some(item), log).into_bytes()
+        }
+        "response.completed" | "response.incomplete" | "response.failed" => {
+            // 上游提前终止：把还挂着的调用按现状收尾（空参数按畸形抑制）
+            let pending: Vec<String> = st.pending.keys().cloned().collect();
+            let mut out = String::new();
+            for item_id in pending {
+                out.push_str(&st.finish_call(&item_id, None, log));
+            }
+            let mut rewritten = data.clone();
+            if let Some(items) = rewritten
+                .get_mut("response")
+                .and_then(|response| response.get_mut("output"))
+                .and_then(Value::as_array_mut)
+            {
+                for item in items.iter_mut() {
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    if item.get("type").and_then(Value::as_str) != Some("function_call")
+                        || !st.customs.contains(&name)
+                    {
+                        continue;
+                    }
+                    let arguments = item
+                        .get("arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let input = custom_tool_input(&arguments);
+                    if let Some(obj) = item.as_object_mut() {
+                        obj.insert("type".to_string(), json!("custom_tool_call"));
+                        obj.remove("arguments");
+                        obj.insert("input".to_string(), json!(input));
+                    }
+                }
+                let malformed_ids = st.malformed_ids.clone();
+                items.retain(|item| {
+                    !item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| malformed_ids.contains(id))
+                });
+            }
+            if st.malformed {
+                // 畸形调用：整轮判失败（与翻译路径口径一致），不让半截调用进会话
+                let response = rewritten
+                    .get("response")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                let failed = json!({
+                    "type": "response.failed",
+                    "response": {
+                        "id": response.get("id").cloned().unwrap_or(Value::Null),
+                        "object": "response",
+                        "created_at": unix_now(),
+                        "status": "failed",
+                        "model": response.get("model").cloned().unwrap_or(Value::Null),
+                        "output": [],
+                        "error": {
+                            "code": CODE_MALFORMED_TOOL_CALL,
+                            "message": "上游模型返回的工具调用参数不可用，已阻止该调用进入会话；请重试本轮"
+                        }
+                    }
+                });
+                out.push_str(&sse_event("response.failed", &failed));
+                return out.into_bytes();
+            }
+            out.push_str(&sse_event(&kind, &rewritten));
+            out.into_bytes()
+        }
+        _ => frame.to_vec(),
+    }
+}
+
+/// 把上游 SSE 字节流按帧改写后下发（只在本次请求含 custom 工具时使用）。
+fn rewrite_responses_stream(
+    stream: impl Stream<Item = Result<axum::body::Bytes, reqwest::Error>> + Send + 'static,
+    state: ResponsesToolRewrite,
+    log: ZenLog,
+) -> impl Stream<Item = Result<axum::body::Bytes, std::io::Error>> + Send + 'static {
+    /// 上游字节流（装箱固定，`unfold` 的 carry 需要可移动）
+    type Inner = std::pin::Pin<
+        Box<dyn Stream<Item = Result<axum::body::Bytes, reqwest::Error>> + Send + 'static>,
+    >;
+    struct Carry {
+        inner: Inner,
+        buf: Vec<u8>,
+        state: ResponsesToolRewrite,
+        log: ZenLog,
+        ended: bool,
+    }
+    stream::unfold(
+        Carry {
+            inner: Box::pin(stream),
+            buf: Vec::new(),
+            state,
+            log,
+            ended: false,
+        },
+        |mut carry| async move {
+            loop {
+                if let Some(end) = sse_frame_end(&carry.buf) {
+                    let frame: Vec<u8> = carry.buf.drain(..end).collect();
+                    let out = rewrite_responses_frame(&frame, &mut carry.state, &carry.log);
+                    if out.is_empty() {
+                        continue;
+                    }
+                    return Some((Ok(axum::body::Bytes::from(out)), carry));
+                }
+                if carry.ended {
+                    if carry.buf.is_empty() {
+                        return None;
+                    }
+                    let tail: Vec<u8> = std::mem::take(&mut carry.buf);
+                    let out = rewrite_responses_frame(&tail, &mut carry.state, &carry.log);
+                    if out.is_empty() {
+                        return None;
+                    }
+                    return Some((Ok(axum::body::Bytes::from(out)), carry));
+                }
+                match carry.inner.next().await {
+                    Some(Ok(chunk)) => carry.buf.extend_from_slice(&chunk),
+                    Some(Err(e)) => {
+                        return Some((
+                            Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+                            carry,
+                        ));
+                    }
+                    None => carry.ended = true,
+                }
+            }
+        },
+    )
+}
+
 /// Responses 直通路径：按身份开关补门禁后把请求体发给上游**同一路径**，上游 SSE 逐字回传。
 ///
 /// 与翻译路径的差异（有意为之）：不注入收尾契约、不做口嗨续跑/标签剥离/历史净化/
@@ -1419,6 +1801,21 @@ async fn handle_responses_passthrough(
         );
     }
     let mut body = req.clone();
+    // 上游 `/responses` 拒收 `custom` 工具（codex 的 apply_patch 只能这样声明）：
+    // 先归一化成同名 function，响应侧再回译成 `custom_tool_call`（见 ResponsesToolRewrite）。
+    // 与「OpenCode 客户端身份」开关无关——这是协议兼容，不是伪装。
+    let custom_tools = normalize_responses_tools(&mut body);
+    if !custom_tools.is_empty() {
+        log_at(
+            &state.log,
+            "info",
+            "compat_proxy.responses_custom_tools",
+            &[
+                ("count", custom_tools.len().to_string()),
+                ("names", custom_tools.join(",")),
+            ],
+        );
+    }
     if state.opencode_identity {
         patch_responses_gate(&mut body);
         // 与翻译路径同一道门禁口径：合格工具不足时上游必然 403，提前记一条便于定位
@@ -1444,7 +1841,18 @@ async fn handle_responses_passthrough(
             ));
         }
     };
-    let response = forward_passthrough(state, Method::POST, uri, headers, Body::from(bytes)).await;
+    let response = if custom_tools.is_empty() {
+        forward_passthrough(state, Method::POST, uri, headers, Body::from(bytes)).await
+    } else {
+        forward_passthrough_rewriting(
+            state,
+            uri,
+            headers,
+            bytes,
+            ResponsesToolRewrite::new(custom_tools),
+        )
+        .await
+    };
     if response.status().is_success() {
         return ProtocolOutcome::Response(response);
     }
@@ -1472,6 +1880,56 @@ async fn handle_responses_passthrough(
             .body(Body::from(text))
             .unwrap_or_else(|_| error_json(StatusCode::BAD_GATEWAY, "上游错误响应构造失败".into())),
     )
+}
+
+/// 与 [`forward_passthrough`] 相同，但 2xx 响应体交给 [`rewrite_responses_stream`] 改写
+/// （把 custom 工具调用的 `function_call` 回译成 `custom_tool_call`）；非 2xx 原样透传，
+/// 由调用方读错误体判断协议/门禁。
+async fn forward_passthrough_rewriting(
+    state: &ProxyState,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: Vec<u8>,
+    rewrite: ResponsesToolRewrite,
+) -> Response {
+    let url = match passthrough_url(&state.base_url, uri) {
+        Ok(url) => url,
+        Err(e) => {
+            log_passthrough(state, &Method::POST, uri.path(), "error");
+            return error_json(StatusCode::BAD_GATEWAY, e);
+        }
+    };
+    let rq = http_client()
+        .request(to_reqwest_method(&Method::POST), url)
+        .headers(forwarded_request_headers(headers, state))
+        .body(body);
+    match rq.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            log_passthrough(
+                state,
+                &Method::POST,
+                uri.path(),
+                &status.as_u16().to_string(),
+            );
+            if !status.is_success() {
+                return passthrough_response(resp).await;
+            }
+            let out_headers = forwarded_response_headers(resp.headers());
+            let mut builder = Response::builder().status(status);
+            for (name, value) in out_headers.iter() {
+                builder = builder.header(name.clone(), value.clone());
+            }
+            let stream = rewrite_responses_stream(resp.bytes_stream(), rewrite, state.log.clone());
+            builder.body(Body::from_stream(stream)).unwrap_or_else(|_| {
+                error_json(StatusCode::INTERNAL_SERVER_ERROR, "响应构造失败".into())
+            })
+        }
+        Err(e) => {
+            log_passthrough(state, &Method::POST, uri.path(), "error");
+            error_json(StatusCode::BAD_GATEWAY, format!("上游请求失败：{e}"))
+        }
+    }
 }
 
 /// 透传核心（便于单测）：构造上游 URL、转发请求并流式回传响应。
@@ -1999,6 +2457,58 @@ fn inject_fake_tools_instruction(body: &mut Value, text: &str) {
             }
         }
     }
+}
+
+/// Responses 直通路径的**工具归一化**：把 `type:"custom"`（codex 的 `apply_patch` 只能这样声明）
+/// 改写成同名 `function`（单个 `input` 字符串参数 + 补丁语法说明），返回被转换的名字集合。
+///
+/// 为什么必须转：上游 `/responses` 明确拒收 `custom` 工具（实测 `400 invalid_request_error:
+/// \`custom\` tools are not supported on this endpoint`），而 codex 的模型目录字段
+/// `apply_patch_tool_type` **只有 `freeform` 一个合法取值**（`codex debug models` 实测报告
+/// `unknown variant 'function', expected 'freeform'`），所以 codex 永远会声明成 custom ——
+/// 这层转换只能由代理做。
+///
+/// 契约：保持原有顺序；同名时以客户端已声明的非 custom 工具为准（不覆盖）；重复的 custom 只转第一个；
+/// 没有 `name` 的 custom 条目直接丢弃（无法作为函数声明）。`tools` 缺失或不是数组时原样返回空集合。
+fn normalize_responses_tools(body: &mut Value) -> Vec<String> {
+    let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
+        return Vec::new();
+    };
+    // 已被非 custom 工具占用的名字（含 function / namespace 等），custom 版本不再重复声明
+    let mut seen: HashSet<String> = tools
+        .iter()
+        .filter(|tool| tool.get("type").and_then(Value::as_str) != Some("custom"))
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let mut out: Vec<Value> = Vec::with_capacity(tools.len());
+    let mut converted: Vec<String> = Vec::new();
+    for tool in tools {
+        if tool.get("type").and_then(Value::as_str) != Some("custom") {
+            out.push(tool);
+            continue;
+        }
+        let Some(name) = tool.get("name").and_then(Value::as_str).map(str::to_string) else {
+            continue;
+        };
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let raw_desc = tool
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        out.push(json!({
+            "type": "function",
+            "name": name,
+            "description": custom_tool_description(raw_desc, &name),
+            "parameters": custom_tool_parameters(),
+            "strict": false
+        }));
+        converted.push(name);
+    }
+    body["tools"] = Value::Array(out);
+    converted
 }
 
 /// Responses 的 `tool_choice` → chat 形态：字符串直接透传，
