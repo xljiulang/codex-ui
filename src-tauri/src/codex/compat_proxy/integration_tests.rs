@@ -2465,6 +2465,18 @@ async fn zen_body_patch_reaches_upstream_request_body() {
         got.body["tools"][1]["function"]["description"],
         ZEN_FAKE_TOOL_DESCRIPTION
     );
+    // 门禁口径：补出来的假工具必须带非空 parameters.properties，否则整批都不计数
+    assert!(
+        count_gate_tools(&got.body) >= ZEN_MIN_GATE_TOOLS,
+        "实发请求体里合格工具不足门禁下限：{}",
+        got.body
+    );
+    assert_eq!(
+        got.body["tools"][1]["function"]["parameters"]["required"],
+        json!(["command"]),
+        "bash 假工具应带真实报文的参数 schema：{}",
+        got.body
+    );
     // 该请求非流式、无 instructions → 没有 system 消息，教学另起一条放在最前
     assert!(
         got.body.get("instructions").is_none(),
@@ -2480,6 +2492,104 @@ async fn zen_body_patch_reaches_upstream_request_body() {
     assert!(
         system.contains("弃用工具声明") && system.contains("bash、edit、glob、grep、read、write"),
         "system 消息应带列出全部 6 个假工具的弃用教学：{system}"
+    );
+}
+
+/// 门禁要求上游请求体 `stream: true`：客户端要非流式时不改转发语义，但要留一条
+/// 可解释「上游必然 403」的告警。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn zen_non_stream_request_logs_stream_required_warning() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+    let base_url = spawn_mock_zen(rec.clone()).await;
+
+    let req = json!({ "model": "m", "input": "hi", "stream": false });
+    let state = proxy_state(base_url, log);
+    let resp = forward(&req, &HeaderMap::new(), false, &state, "req_test")
+        .await
+        .expect("forward 应成功");
+    assert!(resp.status.is_success());
+
+    let got = rec.lock().await.clone().expect("mock 应已收到请求");
+    assert_eq!(got.body["stream"], false, "转发语义不变：仍是非流式");
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=compat_proxy.zen_stream_required"),
+        "非流式应记门禁告警：{joined}"
+    );
+    assert!(
+        !joined.contains("event=compat_proxy.zen_tools"),
+        "本请求合格工具够数，不该记工具告警：{joined}"
+    );
+}
+
+/// 门禁最低 5 个合格工具（名字在名单内 + `parameters.properties` 非空）：客户端自己
+/// 声明了空 parameters 的同名工具时补丁不覆盖，合格数可能掉到 5 以下 —— 此时记 warn
+/// 暴露问题（该请求注定被上游 403）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gate_tool_shortage_is_logged() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+    let base_url = spawn_mock_zen(rec.clone()).await;
+
+    // 客户端占了 5 个门禁名字但 properties 为空 → 只有补出来的 write 算合格
+    let empty = json!({ "type": "object", "properties": {} });
+    let tools: Vec<Value> = ["bash", "edit", "glob", "grep", "read"]
+        .iter()
+        .map(|name| json!({ "type": "function", "name": name, "parameters": empty }))
+        .collect();
+    let req = json!({ "model": "m", "input": "hi", "stream": true, "tools": tools });
+    let state = proxy_state(base_url, log);
+    let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
+        .await
+        .expect("forward 应成功");
+    assert!(resp.status.is_success());
+
+    let got = rec.lock().await.clone().expect("mock 应已收到请求");
+    assert_eq!(
+        count_gate_tools(&got.body),
+        1,
+        "只有补出来的 write 合格：{}",
+        got.body
+    );
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=compat_proxy.zen_tools")
+            && joined.contains("gate_tools=1")
+            && joined.contains(&format!("required={ZEN_MIN_GATE_TOOLS}")),
+        "合格数不足应记 warn：{joined}"
+    );
+}
+
+/// 合格工具够数时不写工具告警（避免每轮都产生无用日志）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gate_tool_sufficiency_is_not_logged() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let rec: Arc<AsyncMutex<Option<Received>>> = Arc::new(AsyncMutex::new(None));
+    let base_url = spawn_mock_zen(rec.clone()).await;
+
+    let req = json!({ "model": "m", "input": "hi", "stream": true });
+    let state = proxy_state(base_url, log);
+    let resp = forward(&req, &HeaderMap::new(), true, &state, "req_test")
+        .await
+        .expect("forward 应成功");
+    assert!(resp.status.is_success());
+
+    let got = rec.lock().await.clone().expect("mock 应已收到请求");
+    assert_eq!(
+        count_gate_tools(&got.body),
+        ZEN_REQUIRED_TOOL_NAMES.len(),
+        "补出来的 6 个假工具应全部合格：{}",
+        got.body
+    );
+    let joined = read_session_log(&dir);
+    assert!(
+        !joined.contains("event=compat_proxy.zen_tools")
+            && !joined.contains("event=compat_proxy.zen_stream_required"),
+        "合格且流式时不该有门禁告警：{joined}"
     );
 }
 

@@ -16,7 +16,7 @@ import { openDocsUrl } from "../../lib/links";
 defineProps<{ active: boolean }>();
 
 const DEFAULT_PORT = 18080;
-const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
+const DEFAULT_BASE_URL = "https://opencode.ai/inference/v1";
 /** 顶部说明里「Zen 免费模型」的文档地址（浏览器打开） */
 const ZEN_DOCS_URL = "https://opencode.ai/zen";
 
@@ -212,7 +212,7 @@ onBeforeUnmount(refresh);
             type="text"
             class="compat-proxy-url-input"
             :value="apiUrlInput"
-            placeholder="https://opencode.ai/zen/v1"
+            placeholder="https://opencode.ai/inference/v1"
             @input="apiUrlInput = ($event.target as HTMLInputElement).value"
           />
         </div>

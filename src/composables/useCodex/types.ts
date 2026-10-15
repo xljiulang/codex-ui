@@ -19,7 +19,7 @@ export const defaultSettings = (): AppSettings => ({
   last_session_id: null,
   compat_proxy_enabled: false,
   compat_proxy_port: 18080,
-  compat_proxy_base_url: "https://opencode.ai/zen/v1",
+  compat_proxy_base_url: "https://opencode.ai/inference/v1",
   compat_proxy_nudge_enabled: true,
   compat_proxy_identity_enabled: true,
   error_notify_enabled: true,

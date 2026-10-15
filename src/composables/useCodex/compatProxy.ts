@@ -11,7 +11,7 @@ export interface CompatProxyStatus {
 }
 
 const DEFAULT_PORT = 18080;
-const DEFAULT_BASE_URL = "https://opencode.ai/zen/v1";
+const DEFAULT_BASE_URL = "https://opencode.ai/inference/v1";
 
 /** 应用本地代理所需的全部参数（两个行为开关缺省按开启）。 */
 export interface CompatProxyOptions {

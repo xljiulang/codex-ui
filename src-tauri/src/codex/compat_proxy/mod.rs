@@ -21,7 +21,7 @@ use axum::response::Response;
 use axum::Json;
 use axum::Router;
 use futures_util::stream::{self, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::task::AbortHandle;
 
 use crate::codex::compat_trace::{TraceCall, TraceSink};
@@ -33,13 +33,30 @@ pub(crate) const DEFAULT_COMPAT_PROXY_PORT: u16 = 18080;
 const OPENCODE_CLIENT: &str = "desktop";
 const OPENCODE_PROJECT: &str = "global";
 /// OpenCode Zen 默认上游 base URL（可在设置页修改，空/非法时回退此值）。
-pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "https://opencode.ai/zen/v1";
+///
+/// 2026-10-15 起上游把免费层门禁挪到了 `/inference/v1`：同一份请求打老的
+/// `https://opencode.ai/zen/v1` 会被恒定拒绝（实测连 opencode 客户端报文逐字回放也是
+/// `403 FreeTierError`），只有 `/inference/v1` 能通过，故默认值随之迁移。
+/// 已保存过旧值的用户不会被自动改写，需在设置页手改成 `/inference/v1`。
+pub(crate) const DEFAULT_COMPAT_BASE_URL: &str = "https://opencode.ai/inference/v1";
 /// OpenCode 免费层的**请求体门禁**要求请求里出现这些工具名（opencode 客户端的内置工具）：
 /// 只在 `tools` 里补声明、不提供任何实现，模型真去调用时由 codex 侧以 `unsupported call`
-/// 裁决（代理不做特例过滤）。门禁只校验名字，不看描述与参数。
+/// 裁决（代理不做特例过滤）。
 const ZEN_REQUIRED_TOOL_NAMES: [&str; 6] = ["bash", "edit", "glob", "grep", "read", "write"];
-/// 上述假工具的描述：门禁只看名字，这段文案负责劝模型别真调用。
+/// 免费层门禁的合格工具条数下限：`tools` 里至少要有这么多个「名字在
+/// [`ZEN_REQUIRED_TOOL_NAMES`] 内、且 `parameters.properties` 非空对象」的声明，
+/// 否则上游以同一条 `403 FreeTierError` 拒绝（2026-10-15 实测：1~4 个一律 403、
+/// 5 个起放行；名字换成 task/todowrite 等其它内置名或 `foo1..foo6` 都不计数）。
+const ZEN_MIN_GATE_TOOLS: usize = 5;
+/// 上述假工具的描述：门禁不看描述，这段文案负责劝模型别真调用。
 const ZEN_FAKE_TOOL_DESCRIPTION: &str = "这是弃用的工具，请勿调用";
+/// 6 个内置工具的真实 `parameters` schema（逐字取自 opencode 客户端的真实请求报文）。
+///
+/// 为什么不能再用空 schema：门禁除了看名字，还要求 `parameters.properties` 是**非空对象**
+/// —— 空的 `{"type":"object","properties":{}}` 一律不计入 [`ZEN_MIN_GATE_TOOLS`]，
+/// 于是 6 个假工具全都不合格、请求必然 403（2026-10-15 实测）。schema 具体字段内容不参与
+/// 判定，但用真实报文最稳妥（上游若哪天校验更深一层也仍然一致）。
+const ZEN_TOOL_SCHEMAS_JSON: &str = include_str!("../../../resources/opencode_tools.json");
 /// 门禁要求的 `max_tokens`（与 `messages` 同级）：入站请求没有自己的输出预算时补上这个值。
 /// 与 [`ZEN_REQUIRED_TOOL_NAMES`] 同受「OpenCode 客户端身份」开关约束：开关开启时对
 /// **所有上游**都补，关闭时一个字段都不补（见 [`ProxyState::opencode_identity`]）。
@@ -506,7 +523,7 @@ pub(crate) struct CompatProxyConfig {
     /// 上游 base_url（已归一化：去空白与末尾 `/`）。
     pub base_url: String,
     /// 「OpenCode 客户端身份」开关：勾选即**无条件**按 opencode 客户端发请求——
-    /// 识别头/UA 与免费层请求体门禁字段（`max_tokens` + 内置工具名）一并生效，
+    /// 识别头/UA 与免费层请求体门禁字段（`max_tokens` + 内置工具声明）一并生效，
     /// 不再判断上游 host；取消勾选则两者一起停用。
     pub opencode_identity: bool,
     /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
@@ -700,8 +717,9 @@ struct ProxyState {
     /// （DeepSeek 思考模式）。默认关闭，收到明确报错后学习并粘滞到本代理实例结束。
     requires_reasoning_rc: Arc<AtomicBool>,
     /// 「OpenCode 客户端身份」开关：是否按 opencode 客户端发请求。开启时既发
-    /// opencode 形状的识别头与 UA，也补免费层请求体门禁字段（`max_tokens` + 内置工具名，
-    /// 见 [`patch_zen_request_body`]）——**不看上游 host，对所有上游一视同仁**；
+    /// opencode 形状的识别头与 UA，也补免费层请求体门禁字段（`max_tokens` + 6 个内置
+    /// 工具声明，每个带非空参数 schema，见 [`patch_zen_request_body`]）——
+    /// **不看上游 host，对所有上游一视同仁**；
     /// 关闭时两者一起停用，请求体保持原样。
     opencode_identity: bool,
     /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
@@ -1509,6 +1527,11 @@ fn zen_max_tokens_field(req: &Value) -> Option<OptionalField> {
 /// 顺序不变，同名时以客户端声明为准（不覆盖）；入站请求原本没有 `tools` 时，数组只含这
 /// 几个假工具。幂等：重复调用不会叠加。
 ///
+/// 每个假工具带**非空** `parameters`（取自 [`ZEN_TOOL_SCHEMAS_JSON`]）：门禁要求
+/// `parameters.properties` 非空才算合格（见 [`ZEN_MIN_GATE_TOOLS`]），空 schema 会让
+/// 整批假工具都不计数、请求被上游 403 拒掉。描述仍是 [`ZEN_FAKE_TOOL_DESCRIPTION`]，
+/// 负责劝模型别真调用这些没有实现的工具。
+///
 /// 补完工具后另把「弃用工具声明」教学写进 `messages`（见 [`inject_fake_tools_instruction`]）：
 /// 上游是 chat/completions，没有 `instructions` 字段，教学只能走消息列表。
 fn patch_zen_request_body(body: &mut Value) {
@@ -1536,7 +1559,7 @@ fn patch_zen_request_body(body: &mut Value) {
             "function": {
                 "name": name,
                 "description": ZEN_FAKE_TOOL_DESCRIPTION,
-                "parameters": { "type": "object", "properties": {} }
+                "parameters": zen_tool_parameters(name)
             }
         }));
     }
@@ -1545,6 +1568,47 @@ fn patch_zen_request_body(body: &mut Value) {
     if let Some(text) = fake_tools_instruction(&added) {
         inject_fake_tools_instruction(body, &text);
     }
+}
+
+/// 门禁要用的假工具 `parameters`：按工具名取自 [`ZEN_TOOL_SCHEMAS_JSON`]（OnceLock 缓存，
+/// 只解析一次）。资源缺失/非法/少了某个名字时退化为占位 schema —— 门禁只看
+/// `parameters.properties` 是否非空，因此兜底也不会让请求被判不合格。
+fn zen_tool_parameters(name: &str) -> Value {
+    static SCHEMAS: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
+    let schemas = SCHEMAS.get_or_init(|| {
+        serde_json::from_str::<Value>(ZEN_TOOL_SCHEMAS_JSON)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default()
+    });
+    schemas
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| json!({ "type": "object", "properties": { "x": { "type": "string" } } }))
+}
+
+/// 统计请求体 `tools` 里「名字在 [`ZEN_REQUIRED_TOOL_NAMES`] 内、且
+/// `function.parameters.properties` 是非空对象」的条数——免费层门禁按这个数判定
+/// （≥ [`ZEN_MIN_GATE_TOOLS`] 才放行）。纯函数，便于单测。
+fn count_gate_tools(body: &Value) -> usize {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter(|tool| {
+                    let name = tool.pointer("/function/name").and_then(Value::as_str);
+                    let is_gate_name =
+                        name.is_some_and(|name| ZEN_REQUIRED_TOOL_NAMES.contains(&name));
+                    let has_properties = tool
+                        .pointer("/function/parameters/properties")
+                        .and_then(Value::as_object)
+                        .is_some_and(|properties| !properties.is_empty());
+                    is_gate_name && has_properties
+                })
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 /// 根据实际追加的工具名列表动态生成弃用教学文本；列表为空时返回 None。
@@ -1955,6 +2019,17 @@ async fn forward(
             optional.push(field);
         }
     }
+    // 免费层门禁要求上游请求体的 `stream` 为 true（2026-10-15 实测：同形状请求把
+    // `stream` 改成 false 立刻 403）。客户端要非流式时不改变转发语义，只记一条 warn，
+    // 好让上游随后返回的那条 403 有明确解释。
+    if state.opencode_identity && !want_stream {
+        log_at(
+            &state.log,
+            "warn",
+            "compat_proxy.zen_stream_required",
+            &[("call_id", call_id.to_string())],
+        );
+    }
     let mut dropped: Vec<&'static str> = Vec::new();
     let mut reasoning_rc = state.requires_reasoning_rc.load(Ordering::Relaxed);
     let mut reasoning_rc_change: Option<ReasoningRcChange> = None;
@@ -1971,6 +2046,21 @@ async fn forward(
         // 与上面的 `max_tokens` 完全同源，同样只看「OpenCode 客户端身份」开关。
         if state.opencode_identity {
             patch_zen_request_body(&mut body);
+            // 门禁按「合格工具条数」判定（见 [`ZEN_MIN_GATE_TOOLS`]）：不足时上游必然 403，
+            // 提前记一条诊断，避免以后上游再变时只能对着一条 403 猜。
+            let gate_tools = count_gate_tools(&body);
+            if gate_tools < ZEN_MIN_GATE_TOOLS {
+                log_at(
+                    &state.log,
+                    "warn",
+                    "compat_proxy.zen_tools",
+                    &[
+                        ("gate_tools", gate_tools.to_string()),
+                        ("required", ZEN_MIN_GATE_TOOLS.to_string()),
+                        ("call_id", call_id.to_string()),
+                    ],
+                );
+            }
         }
         for field in optional.iter() {
             if dropped.contains(&field.key) {

@@ -107,14 +107,16 @@ describe("CompatProxySection", () => {
     expect(badge.classes()).toContain("badge-accent");
     const capsule = wrapper.find(".compat-proxy-base-url-capsule");
     expect(capsule.exists()).toBe(true);
-    expect(capsule.text()).toContain("http://127.0.0.1:18080/zen/v1");
+    expect(capsule.text()).toContain("http://127.0.0.1:18080/inference/v1");
   });
 
   it("点击胶囊复制 base_url 并提示", async () => {
     store.settings.compat_proxy_enabled = true;
     const wrapper = mountSection();
     await wrapper.find(".compat-proxy-base-url-capsule").trigger("click");
-    expect(mockCopyText).toHaveBeenCalledWith("http://127.0.0.1:18080/zen/v1");
+    expect(mockCopyText).toHaveBeenCalledWith(
+      "http://127.0.0.1:18080/inference/v1",
+    );
     expect(mockedToast).toHaveBeenCalledWith("已复制 base_url");
   });
 
@@ -129,9 +131,9 @@ describe("CompatProxySection", () => {
   it("本地 provider 的 base_url 提示跟随上游地址的路径", async () => {
     store.settings.compat_proxy_enabled = true;
     const wrapper = mountSection();
-    // 默认上游 https://opencode.ai/zen/v1 → 本机地址 + /zen/v1
+    // 默认上游 https://opencode.ai/inference/v1 → 本机地址 + /inference/v1
     const value = () => wrapper.find(".compat-proxy-base-url-capsule");
-    expect(value().text()).toContain("http://127.0.0.1:18080/zen/v1");
+    expect(value().text()).toContain("http://127.0.0.1:18080/inference/v1");
     const urlInput = wrapper.find("input[type='text']");
     await urlInput.setValue("https://api.deepseek.com/");
     expect(value().text()).toContain("http://127.0.0.1:18080");
@@ -194,7 +196,7 @@ describe("CompatProxySection", () => {
       {
         enabled: false,
         port: 18080,
-        baseUrl: "https://opencode.ai/zen/v1",
+        baseUrl: "https://opencode.ai/inference/v1",
         nudgeEnabled: false,
         identityEnabled: false,
       },
@@ -226,7 +228,7 @@ describe("CompatProxySection", () => {
     expect(mockedToggle).toHaveBeenCalledWith({
       enabled: true,
       port: 18080,
-      baseUrl: "https://opencode.ai/zen/v1",
+      baseUrl: "https://opencode.ai/inference/v1",
       nudgeEnabled: true,
       identityEnabled: true,
     });

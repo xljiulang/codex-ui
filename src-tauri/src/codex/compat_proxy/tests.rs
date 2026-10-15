@@ -2587,11 +2587,18 @@ fn patch_zen_request_body_appends_missing_required_tools() {
         assert_eq!(tool["type"], "function");
         assert_eq!(tool["function"]["name"], name);
         assert_eq!(tool["function"]["description"], ZEN_FAKE_TOOL_DESCRIPTION);
-        assert_eq!(
-            tool["function"]["parameters"],
-            json!({ "type": "object", "properties": {} })
+        assert_eq!(tool["function"]["parameters"], zen_tool_parameters(name));
+        // 门禁要求 properties 非空（见 ZEN_MIN_GATE_TOOLS）：逐条兜一道
+        let properties = tool["function"]["parameters"]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("假工具必须带对象形态的 properties：{tool}"));
+        assert!(
+            !properties.is_empty(),
+            "假工具 properties 不能为空（否则不计入门禁）：{tool}"
         );
     }
+    // 6 个合格工具 ≥ 门禁下限（上游据此判定「像 opencode 客户端」）
+    assert_eq!(count_gate_tools(&body), ZEN_REQUIRED_TOOL_NAMES.len());
     // 6 个工具全部追加 → 教学并入 messages：原本没有 system 消息，新建一条放在最前
     assert_eq!(body["messages"][0]["role"], "system");
     let inst = body["messages"][0]["content"].as_str().unwrap().to_string();
@@ -2660,6 +2667,88 @@ fn patch_zen_request_body_appends_missing_required_tools() {
         !inst.contains("bash、edit"),
         "教学不应重复列出 bash：{inst}"
     );
+}
+
+#[test]
+fn zen_tool_schemas_cover_gate_names_with_non_empty_properties() {
+    // 资源文件必须恰好覆盖 6 个门禁工具名，且每个 schema 的 properties 非空 —— 任一缺失
+    // 都会让补丁产出的工具不计入门禁（上游 403），故在这里钉死。
+    let schemas: Value = serde_json::from_str(ZEN_TOOL_SCHEMAS_JSON).expect("资源必须是合法 JSON");
+    let schemas = schemas.as_object().expect("资源顶层必须是对象");
+    assert_eq!(
+        schemas.len(),
+        ZEN_REQUIRED_TOOL_NAMES.len(),
+        "资源应恰好覆盖 6 个门禁工具：{:?}",
+        schemas.keys().collect::<Vec<_>>()
+    );
+    for name in ZEN_REQUIRED_TOOL_NAMES {
+        let schema = schemas
+            .get(name)
+            .unwrap_or_else(|| panic!("资源缺 {name} 的 parameters"));
+        let properties = schema["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{name} 的 properties 必须是对象：{schema}"));
+        assert!(!properties.is_empty(), "{name} 的 properties 不能为空");
+    }
+    // 逐个核对真实报文的代表字段（防以后手改资源时写错结构）
+    assert_eq!(zen_tool_parameters("bash")["required"], json!(["command"]));
+    assert!(zen_tool_parameters("bash")["properties"]["workdir"].is_object());
+    assert!(zen_tool_parameters("read")["properties"]["offset"].is_object());
+    assert!(zen_tool_parameters("write")["properties"]["content"].is_object());
+}
+
+#[test]
+fn count_gate_tools_follows_upstream_gate_rule() {
+    let tool = |name: &str, parameters: Value| json!({ "type": "function", "function": { "name": name, "parameters": parameters } });
+    let empty = json!({ "type": "object", "properties": {} });
+    let dummy = json!({ "type": "object", "properties": { "x": { "type": "string" } } });
+    let no_properties = json!({ "type": "object" });
+
+    // 空 properties / 缺 properties 都不算合格（现有实现的坑就在这）
+    assert_eq!(
+        count_gate_tools(&json!({ "tools": [
+            tool("bash", empty.clone()), tool("edit", no_properties.clone()),
+            tool("glob", empty.clone()), tool("grep", empty.clone()),
+            tool("read", empty.clone()), tool("write", empty.clone())
+        ] })),
+        0
+    );
+    // 名字不在门禁名单里（task 等其它内置名、foo1 这类杂名）一律不计
+    assert_eq!(
+        count_gate_tools(&json!({ "tools": [
+            tool("task", dummy.clone()), tool("todowrite", dummy.clone()),
+            tool("webfetch", dummy.clone()), tool("websearch", dummy.clone()),
+            tool("foo1", dummy.clone())
+        ] })),
+        0
+    );
+    // 4 个合格不够（实测 4 个仍 403）、非门禁名不凑数
+    assert_eq!(
+        count_gate_tools(&json!({ "tools": [
+            tool("bash", dummy.clone()), tool("edit", dummy.clone()),
+            tool("glob", dummy.clone()), tool("grep", dummy.clone()),
+            tool("foo1", dummy.clone())
+        ] })),
+        4
+    );
+    // 5~6 个合格 = 达到下限
+    let five = json!({ "tools": [
+        tool("bash", dummy.clone()), tool("edit", dummy.clone()),
+        tool("glob", dummy.clone()), tool("grep", dummy.clone()),
+        tool("read", dummy.clone())
+    ] });
+    assert_eq!(count_gate_tools(&five), ZEN_MIN_GATE_TOOLS);
+    assert_eq!(
+        count_gate_tools(&json!({ "tools": [
+            tool("bash", dummy.clone()), tool("edit", dummy.clone()),
+            tool("glob", dummy.clone()), tool("grep", dummy.clone()),
+            tool("read", dummy.clone()), tool("write", dummy.clone())
+        ] })),
+        ZEN_REQUIRED_TOOL_NAMES.len()
+    );
+    // 没有 tools / tools 不是数组：0
+    assert_eq!(count_gate_tools(&json!({ "model": "m" })), 0);
+    assert_eq!(count_gate_tools(&json!({ "tools": {} })), 0);
 }
 
 #[test]
