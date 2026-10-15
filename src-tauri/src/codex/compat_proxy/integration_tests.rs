@@ -307,6 +307,7 @@ async fn passthrough_forwards_models_and_post_body() {
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         session_map: Arc::new(SessionMap::default()),
+        protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     };
     let mut headers = HeaderMap::new();
@@ -367,6 +368,7 @@ async fn passthrough_prefers_client_session_header() {
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         session_map: Arc::new(SessionMap::default()),
+        protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     };
     let mut headers = HeaderMap::new();
@@ -686,6 +688,7 @@ fn nudge_probe_state(upstream: &str, log: ZenLog) -> ProxyState {
         opencode_identity: true,
         nudge_enabled: true,
         session_map: Arc::new(SessionMap::default()),
+        protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
 }
@@ -1798,6 +1801,7 @@ fn proxy_state_traced(base_url: String, log: ZenLog, trace: TraceSink) -> ProxyS
         trace,
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         session_map: Arc::new(SessionMap::default()),
+        protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
 }
@@ -2201,6 +2205,7 @@ async fn learns_and_retries_reasoning_content_requirement() {
         trace: TraceSink::disabled(),
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         session_map: Arc::new(SessionMap::default()),
+        protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     };
     let probe = |state: ProxyState| async move {
@@ -3265,5 +3270,325 @@ async fn nudge_switch_off_skips_injection_and_keeps_tags() {
     assert!(
         !joined.contains("event=compat_proxy.nudge_injected"),
         "关闭时不应有注入事件：{joined}"
+    );
+}
+
+// ---------- 自动协议判定（Responses 入口）----------
+
+/// 协议分流 mock 的应答方式。
+#[derive(Clone, Copy)]
+enum ProtocolReply {
+    /// 回上游的「这个模型不支持该协议」400（与线上错误体一致）。
+    Unsupported,
+    /// 回 429（非协议类错误，用于验证不会触发换协议）。
+    TooManyRequests,
+    /// 回成功（chat 侧给 chat SSE、responses 侧给 Responses SSE）。
+    Ok,
+}
+
+/// 上游「协议不支持」错误响应（逐字对齐线上错误体）。
+fn protocol_unsupported_response() -> Response {
+    Response::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "type": "error",
+                "error": {
+                    "type": "ModelProtocolUnsupported",
+                    "message": "Model does not support this protocol."
+                }
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+/// 一段 SSE 响应（分片逐条下发）。
+fn sse_stream_response(lines: &[String]) -> Response {
+    let chunks: Vec<Result<axum::body::Bytes, std::io::Error>> = lines
+        .iter()
+        .map(|line| Ok(axum::body::Bytes::from(line.clone())))
+        .collect();
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .body(Body::from_stream(stream::iter(chunks)))
+        .unwrap()
+}
+
+/// 一段 Responses 原生 SSE（codex 需要的三个最小事件）。
+fn responses_sse_reply(text: &str) -> Vec<String> {
+    vec![
+        format!(
+            "event: response.created\ndata: {}\n\n",
+            json!({
+                "type": "response.created", "sequence_number": 0,
+                "response": { "id": "resp_mock", "object": "response", "status": "in_progress" }
+            })
+        ),
+        format!(
+            "event: response.output_text.delta\ndata: {}\n\n",
+            json!({ "type": "response.output_text.delta", "sequence_number": 1, "delta": text })
+        ),
+        format!(
+            "event: response.completed\ndata: {}\n\n",
+            json!({
+                "type": "response.completed", "sequence_number": 2,
+                "response": { "id": "resp_mock", "object": "response", "status": "completed" }
+            })
+        ),
+    ]
+}
+
+/// 起一个「按协议分流」的 mock 上游（base 带 `/v1` 前缀）：`/v1/chat/completions` 与
+/// `/v1/responses` 各自按配置应答，并记录命中的协议序列与最后一次 `/v1/responses` 的请求体
+/// （用于验证自动换协议与 Responses 门禁补丁）。
+async fn spawn_mock_protocol_split(
+    chat: ProtocolReply,
+    responses: ProtocolReply,
+) -> (
+    String,
+    Arc<AsyncMutex<Vec<&'static str>>>,
+    Arc<AsyncMutex<Option<Value>>>,
+) {
+    let hits: Arc<AsyncMutex<Vec<&'static str>>> = Arc::new(AsyncMutex::new(Vec::new()));
+    let seen_responses: Arc<AsyncMutex<Option<Value>>> = Arc::new(AsyncMutex::new(None));
+    let chat_hits = hits.clone();
+    let responses_hits = hits.clone();
+    let responses_body = seen_responses.clone();
+
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            axum::routing::post(move || {
+                let hits = chat_hits.clone();
+                async move {
+                    hits.lock().await.push("chat");
+                    match chat {
+                        ProtocolReply::Unsupported => protocol_unsupported_response(),
+                        ProtocolReply::TooManyRequests => too_many_requests_response(),
+                        ProtocolReply::Ok => sse_stream_response(&sse_text_reply("chat mock 回复")),
+                    }
+                }
+            }),
+        )
+        .route(
+            "/v1/responses",
+            axum::routing::post(move |Json(body): Json<Value>| {
+                let hits = responses_hits.clone();
+                let slot = responses_body.clone();
+                async move {
+                    hits.lock().await.push("responses");
+                    *slot.lock().await = Some(body);
+                    match responses {
+                        ProtocolReply::Unsupported => protocol_unsupported_response(),
+                        ProtocolReply::TooManyRequests => too_many_requests_response(),
+                        ProtocolReply::Ok => {
+                            sse_stream_response(&responses_sse_reply("responses mock 回复"))
+                        }
+                    }
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{addr}/v1"), hits, seen_responses)
+}
+
+/// 上游 429 错误响应。
+fn too_many_requests_response() -> Response {
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({ "error": { "type": "server_error", "message": "rate limited" } }).to_string(),
+        ))
+        .unwrap()
+}
+
+/// 走一次 Responses 入口（base 带 `/v1` → 入口 `/v1/responses`）。
+async fn call_responses_entry(state: ProxyState, body: Value) -> Response {
+    let uri: Uri = "/v1/responses".parse().unwrap();
+    // 真实客户端会带 JSON 头；直通路径逐字转发入站头，缺了它 mock 侧的 Json 提取器会回 415
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers.insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer public"),
+    );
+    handle_any(
+        State(state),
+        Method::POST,
+        OriginalUri(uri),
+        headers,
+        Body::from(body.to_string()),
+    )
+    .await
+}
+
+/// 协议探测请求：客户端只声明一个自己的工具（名字不在门禁名单里），并带 `stream:true`。
+fn protocol_probe_request(model: &str) -> Value {
+    json!({
+        "model": model,
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": "hi" }]
+        }],
+        "stream": true,
+        "tools": [{
+            "type": "function",
+            "name": "shell",
+            "parameters": {
+                "type": "object",
+                "properties": { "command": { "type": "string" } },
+                "required": ["command"]
+            }
+        }]
+    })
+}
+
+/// 自动换协议（chat → responses）：上游说 chat 不支持时改走 Responses 直通重发，客户端只看到
+/// 一次成功响应；学到的协议按模型粘滞，第二次请求不再试探 chat。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn protocol_auto_switches_chat_to_responses_and_sticks() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let (upstream, hits, seen) =
+        spawn_mock_protocol_split(ProtocolReply::Unsupported, ProtocolReply::Ok).await;
+    let state = proxy_state(upstream, log);
+
+    let resp = call_responses_entry(state.clone(), protocol_probe_request("muse-spark-mock")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = body_text(resp).await;
+    assert!(
+        text.contains("response.output_text.delta") && text.contains("responses mock 回复"),
+        "客户端应拿到上游 Responses 原样流：{text}"
+    );
+    assert_eq!(
+        *hits.lock().await,
+        vec!["chat", "responses"],
+        "首次应先用 chat 试探、被拒后改走 responses"
+    );
+
+    // 实发 Responses 请求体：补足门禁工具（Responses 形状）+ 教学并入 instructions；
+    // 客户端自己的工具与其它字段逐字保留
+    let sent = seen
+        .lock()
+        .await
+        .clone()
+        .expect("mock 应收到 responses 请求");
+    assert!(
+        count_gate_tools(&sent) >= ZEN_MIN_GATE_TOOLS,
+        "补丁后合格工具应达标：{sent}"
+    );
+    assert_eq!(sent["tools"][0]["name"], "shell", "{sent}");
+    assert!(sent["instructions"]
+        .as_str()
+        .is_some_and(|text| text.contains("弃用工具声明")));
+    assert_eq!(sent["input"][0]["content"][0]["text"], "hi", "{sent}");
+
+    // 第二次同模型：直接 responses（学到即粘滞）
+    hits.lock().await.clear();
+    let resp = call_responses_entry(state, protocol_probe_request("muse-spark-mock")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(
+        *hits.lock().await,
+        vec!["responses"],
+        "学到的协议应粘滞到本代理实例结束"
+    );
+
+    // 日志：每请求记协议、学到时记 protocol_switched、直通时助推不生效记 nudge_skipped
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=compat_proxy.protocol_switched")
+            && joined.contains("to=responses")
+            && joined.contains("model=muse-spark-mock"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("event=compat_proxy.protocol") && joined.contains("reason=learned"),
+        "{joined}"
+    );
+    assert!(
+        joined.contains("event=compat_proxy.nudge_skipped")
+            && joined.contains("原因=responses_protocol"),
+        "{joined}"
+    );
+}
+
+/// 反向：已学到 responses 的模型若被上游判「不支持 responses」，自动改回 chat 翻译。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn protocol_auto_switches_responses_back_to_chat() {
+    let (upstream, hits, _) =
+        spawn_mock_protocol_split(ProtocolReply::Ok, ProtocolReply::Unsupported).await;
+    // 只测协议切换：关掉助推，避免「纯文本收尾」触发续跑把命中次数带偏
+    let mut state = proxy_state(upstream, None);
+    state.nudge_enabled = false;
+    // 先按「已学到 responses」起跑，模拟上一次请求学到的结论
+    assert!(learn_protocol(
+        &state,
+        Some("muse-spark-mock"),
+        ModelProtocol::Responses
+    ));
+
+    let resp = call_responses_entry(state, protocol_probe_request("muse-spark-mock")).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let text = body_text(resp).await;
+    assert!(
+        text.contains("response.output_text.delta") && text.contains("chat mock 回复"),
+        "应改回 chat 翻译并翻回 Responses 流：{text}"
+    );
+    assert_eq!(
+        *hits.lock().await,
+        vec!["responses", "chat"],
+        "应先按学到的 responses 发、被拒后改回 chat"
+    );
+}
+
+/// 非协议类 4xx（429/403 等）不触发换协议、也不写记忆。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn protocol_auto_ignores_other_4xx() {
+    let (upstream, hits, _) =
+        spawn_mock_protocol_split(ProtocolReply::TooManyRequests, ProtocolReply::Ok).await;
+    let state = proxy_state(upstream, None);
+
+    for _ in 0..2 {
+        let resp = call_responses_entry(state.clone(), protocol_probe_request("m")).await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+    assert_eq!(
+        *hits.lock().await,
+        vec!["chat", "chat"],
+        "非协议错误不该改判、也不该写记忆"
+    );
+}
+
+/// 身份开关关闭时直通路径一个字段都不动（不补门禁、不写教学）。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_passthrough_skips_gate_patch_when_identity_off() {
+    let (upstream, _, seen) =
+        spawn_mock_protocol_split(ProtocolReply::Unsupported, ProtocolReply::Ok).await;
+    let mut state = proxy_state(upstream, None);
+    state.opencode_identity = false;
+    assert!(learn_protocol(&state, Some("m"), ModelProtocol::Responses));
+
+    let request = protocol_probe_request("m");
+    let resp = call_responses_entry(state, request.clone()).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    let sent = seen
+        .lock()
+        .await
+        .clone()
+        .expect("mock 应收到 responses 请求");
+    assert_eq!(
+        sent, request,
+        "身份开关关闭时请求体应逐字原样转发（不含任何补丁与教学）"
     );
 }

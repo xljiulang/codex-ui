@@ -36,6 +36,7 @@ pub(crate) fn test_proxy_state(
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         opencode_identity: true,
         nudge_enabled: true,
+        protocols: protocol_cache(),
         modes: Arc::new(ThreadModeRegistry::default()),
     }
 }

@@ -145,7 +145,8 @@ onBeforeUnmount(refresh);
         v-tooltip="'Zen 免费模型文档（浏览器打开）'"
         @click.prevent="openDocsUrl(ZEN_DOCS_URL)"
         >Zen 免费模型</a
-      >）
+      >）；上游只支持 Responses 协议的模型（如 Zen 的 Muse Spark / GPT-5.x
+      系）会自动按原协议转发，此时回合助推等翻译能力不适用
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">

@@ -3187,3 +3187,180 @@ fn reasoning_text_and_summary_fields_are_understood() {
     assert!(joined.contains("来自 text"));
     assert!(joined.contains("来自 summary"));
 }
+
+// ---------- 自动协议判定：错误标记 / Responses 门禁补丁 / 协议记忆 ----------
+
+#[test]
+fn protocol_markers_match_only_the_upstream_protocol_error() {
+    assert!(is_protocol_unsupported(
+        r#"{"type":"error","error":{"type":"ModelProtocolUnsupported","message":"Model does not support this protocol."}}"#
+    ));
+    assert!(is_protocol_unsupported(
+        "ModelProtocolUnsupported: this model does not support this protocol"
+    ));
+    // 非协议类错误不许命中，否则鉴权/限流/地区限制会被误判成协议问题
+    assert!(!is_protocol_unsupported(
+        r#"{"type":"error","error":{"type":"AuthError","message":"Missing API key."}}"#
+    ));
+    assert!(!is_protocol_unsupported(
+        r#"{"type":"error","error":{"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode"}}"#
+    ));
+    assert!(!is_protocol_unsupported(
+        r#"{"error":{"message":"Model access is disabled"}}"#
+    ));
+    assert!(!is_protocol_unsupported(""));
+}
+
+#[test]
+fn patch_responses_gate_adds_enough_gate_tools_and_merges_instructions() {
+    let mut body = json!({
+        "model": "m",
+        "instructions": "原有指令",
+        "input": [{ "role": "user", "content": "hi" }],
+        "tools": [
+            { "type": "function", "name": "shell",
+              "parameters": { "type": "object", "properties": { "cmd": { "type": "string" } } } },
+            { "type": "namespace", "name": "codexui", "tools": [] }
+        ],
+        "store": false
+    });
+    patch_responses_gate(&mut body);
+    // 补出来的是 Responses 形状：名字与 parameters 在顶层、带 strict:false、描述是弃用文案
+    let tools = body["tools"].as_array().unwrap();
+    assert_eq!(
+        tools.len(),
+        2 + ZEN_REQUIRED_TOOL_NAMES.len(),
+        "只追加缺失的 6 个名字：{body}"
+    );
+    for (tool, name) in tools[2..].iter().zip(ZEN_REQUIRED_TOOL_NAMES) {
+        assert_eq!(tool["type"], "function");
+        assert_eq!(tool["name"], name);
+        assert_eq!(tool["description"], ZEN_FAKE_TOOL_DESCRIPTION);
+        assert_eq!(tool["strict"], false);
+        assert_eq!(tool["parameters"], zen_tool_parameters(name));
+        assert!(tool["parameters"]["properties"]
+            .as_object()
+            .is_some_and(|properties| !properties.is_empty()));
+    }
+    assert!(count_gate_tools(&body) >= ZEN_MIN_GATE_TOOLS);
+    // 客户端已有的工具与其余字段一个都不动
+    assert_eq!(tools[0]["name"], "shell");
+    assert_eq!(tools[1]["type"], "namespace");
+    assert_eq!(body["store"], false);
+    assert_eq!(body["input"][0]["content"], "hi");
+    // 教学并入 instructions 末尾，原有内容仍是前缀
+    let instructions = body["instructions"].as_str().unwrap();
+    assert!(instructions.starts_with("原有指令\n\n"), "{instructions}");
+    assert!(instructions.contains("弃用工具声明"), "{instructions}");
+    assert!(
+        instructions.contains("bash、edit、glob、grep、read、write"),
+        "{instructions}"
+    );
+    // 幂等：重复调用不叠加工具、不重复追加教学
+    let once = body.clone();
+    patch_responses_gate(&mut body);
+    assert_eq!(body, once);
+}
+
+#[test]
+fn patch_responses_gate_keeps_client_declared_names_and_creates_instructions() {
+    // 客户端已声明 6 个同名工具（带非空 schema）→ 一个都不补、不写教学
+    let tools: Vec<Value> = ZEN_REQUIRED_TOOL_NAMES
+        .iter()
+        .map(|name| {
+            json!({
+                "type": "function", "name": name,
+                "parameters": { "type": "object", "properties": { "x": { "type": "string" } } }
+            })
+        })
+        .collect();
+    let mut body = json!({ "model": "m", "tools": tools });
+    patch_responses_gate(&mut body);
+    assert_eq!(
+        body["tools"].as_array().unwrap().len(),
+        ZEN_REQUIRED_TOOL_NAMES.len()
+    );
+    assert!(
+        body.get("instructions").is_none(),
+        "没补工具就不该写教学：{body}"
+    );
+    assert_eq!(count_gate_tools(&body), ZEN_REQUIRED_TOOL_NAMES.len());
+
+    // 只缺一个 → 只补一个，教学只列这一个；没有 instructions 时新建
+    let mut body = json!({
+        "model": "m",
+        "tools": [{ "type": "function", "name": "bash",
+                    "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } }]
+    });
+    patch_responses_gate(&mut body);
+    let names: Vec<&str> = body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), ZEN_REQUIRED_TOOL_NAMES.len(), "{names:?}");
+    let instructions = body["instructions"].as_str().unwrap();
+    assert!(
+        instructions.contains("edit、glob、grep、read、write"),
+        "{instructions}"
+    );
+    assert!(
+        !instructions.contains("bash、edit"),
+        "教学不应重复列出已存在的 bash：{instructions}"
+    );
+}
+
+#[test]
+fn count_gate_tools_accepts_both_tool_shapes() {
+    // chat 形状（function 包装）与 Responses 形状（顶层）都算数，混用也对；
+    // 空 properties / 缺 properties 一律不计
+    let body = json!({ "tools": [
+        { "type": "function", "function": { "name": "bash",
+          "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } } },
+        { "type": "function", "name": "edit",
+          "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } },
+        { "type": "function", "name": "glob",
+          "parameters": { "type": "object", "properties": {} } },
+        { "type": "function", "name": "grep", "parameters": { "type": "object" } },
+        { "type": "function", "name": "read",
+          "parameters": { "type": "object", "properties": { "x": { "type": "string" } } } }
+    ] });
+    assert_eq!(count_gate_tools(&body), 3, "{body}");
+}
+
+#[test]
+fn protocol_cache_learns_per_model() {
+    let state = test_proxy_state(
+        "ses_test",
+        "http://127.0.0.1:1/v1",
+        None,
+        TraceSink::disabled(),
+    );
+    // 默认 chat（reason=default）
+    assert_eq!(resolve_protocol(&state, Some("m1")).0, ModelProtocol::Chat);
+    assert_eq!(resolve_protocol(&state, Some("m1")).1, "default");
+    // 学到 responses 后按模型隔离粘滞
+    assert!(learn_protocol(&state, Some("m1"), ModelProtocol::Responses));
+    assert_eq!(
+        resolve_protocol(&state, Some("m1")),
+        (ModelProtocol::Responses, "learned")
+    );
+    assert_eq!(resolve_protocol(&state, Some("m2")).0, ModelProtocol::Chat);
+    // 重复写同值不算变化
+    assert!(!learn_protocol(
+        &state,
+        Some("m1"),
+        ModelProtocol::Responses
+    ));
+    assert!(learn_protocol(&state, Some("m1"), ModelProtocol::Chat));
+    // 没有 model id（缺失/空白）：不写记忆，永远按 chat
+    assert!(!learn_protocol(&state, None, ModelProtocol::Responses));
+    assert!(!learn_protocol(
+        &state,
+        Some("   "),
+        ModelProtocol::Responses
+    ));
+    assert_eq!(resolve_protocol(&state, None).0, ModelProtocol::Chat);
+    assert_eq!(resolve_protocol(&state, Some("   ")).0, ModelProtocol::Chat);
+}

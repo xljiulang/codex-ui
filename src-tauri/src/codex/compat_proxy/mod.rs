@@ -87,6 +87,8 @@ const USAGE_GRACE: Duration = Duration::from_secs(3);
 const DELTA_KEY_LIMIT: usize = 16;
 /// 翻译分支的请求体上限：长会话实测已近 1MB，axum 默认 2MB 会撞 413。
 const RESPONSES_BODY_LIMIT: usize = 64 * 1024 * 1024;
+/// 直通分支判定「协议不支持」时要读的上游错误体上限（错误体很小；超限按普通错误原样回）。
+const PASSTHROUGH_ERROR_BODY_LIMIT: usize = 1024 * 1024;
 /// 端口刚被上一实例释放时的绑定重试次数与间隔（同端口换上游会立即重启代理）。
 const BIND_RETRY: u32 = 20;
 const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(50);
@@ -638,6 +640,7 @@ pub(crate) async fn start(
         requires_reasoning_rc: Arc::new(AtomicBool::new(false)),
         opencode_identity: config.opencode_identity,
         nudge_enabled: config.nudge_enabled,
+        protocols: protocol_cache(),
         modes,
     });
     let task = tokio::spawn(async move {
@@ -724,8 +727,72 @@ struct ProxyState {
     opencode_identity: bool,
     /// 「回合收尾约束和助推」开关：是否启用口嗨检测 + 自动续跑（含首轮教学与标签剥离）。
     nudge_enabled: bool,
+    /// 上游模型协议记忆（key = model id）：默认按 [`ModelProtocol::Chat`] 翻译，上游以
+    /// 「协议不支持」拒绝后改判 [`ModelProtocol::Responses`] 直通并**粘滞**到本代理实例结束
+    /// （重启后重学一次，最多多打一次不会计费的 400 往返），见 [`handle_responses_auto`]。
+    protocols: ProtocolCache,
     /// 协作模式登记表（key = codex 线程 id）：由 app-server 侧登记，代理解析模式时优先查它。
     modes: Arc<ThreadModeRegistry>,
+}
+
+/// 上游支持的请求协议：`chat` 走 Responses→Chat 翻译，`responses` 按原协议直通。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelProtocol {
+    Chat,
+    Responses,
+}
+
+/// 模型协议记忆表（key = model id）。
+type ProtocolCache = Arc<Mutex<HashMap<String, ModelProtocol>>>;
+
+/// 新建空的模型协议记忆表（代理实例级；测试与 [`start`] 共用）。
+fn protocol_cache() -> ProtocolCache {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+/// 日志口径的协议名。
+fn protocol_label(protocol: ModelProtocol) -> &'static str {
+    match protocol {
+        ModelProtocol::Chat => "chat",
+        ModelProtocol::Responses => "responses",
+    }
+}
+
+/// 上游「这个模型不支持当前协议」的错误标记（两个方向都返回这条 4xx，见
+/// `ModelProtocolUnsupported`）：命中即改判另一条协议重发一次。
+const PROTOCOL_UNSUPPORTED_NEEDLES: [&str; 2] =
+    ["modelprotocolunsupported", "does not support this protocol"];
+
+/// 上游错误体是否在说「本模型不支持这个协议」。
+fn is_protocol_unsupported(text: &str) -> bool {
+    mentions_field(text, &PROTOCOL_UNSUPPORTED_NEEDLES)
+}
+
+/// 取本次入站请求该用的上游协议：默认 chat，学到过就按记忆；返回值第二项是日志口径的来源。
+fn resolve_protocol(state: &ProxyState, model: Option<&str>) -> (ModelProtocol, &'static str) {
+    let Some(model) = model.filter(|model| !model.trim().is_empty()) else {
+        return (ModelProtocol::Chat, "default");
+    };
+    let learned = state
+        .protocols
+        .lock()
+        .ok()
+        .and_then(|protocols| protocols.get(model).copied());
+    match learned {
+        Some(protocol) => (protocol, "learned"),
+        None => (ModelProtocol::Chat, "default"),
+    }
+}
+
+/// 记住某模型的上游协议；返回是否真的发生了变化（没有 model id 时不记）。
+fn learn_protocol(state: &ProxyState, model: Option<&str>, protocol: ModelProtocol) -> bool {
+    let Some(model) = model.filter(|model| !model.trim().is_empty()) else {
+        return false;
+    };
+    match state.protocols.lock() {
+        Ok(mut protocols) => protocols.insert(model.to_string(), protocol) != Some(protocol),
+        Err(_) => false,
+    }
 }
 
 /// 写一条 compat_proxy 诊断日志；句柄为 None 或写盘失败时静默忽略。
@@ -1002,7 +1069,7 @@ async fn handle_any(
 ) -> Response {
     let expected = responses_path(&state.base_url);
     if method == Method::POST && uri.path() == expected {
-        return handle_responses(&state, &headers, body).await;
+        return handle_responses_auto(&state, &headers, &uri, body).await;
     }
     // 客户端把 `/responses` 打到了别的路径：本地 provider 的 base_url 路径与上游不一致。
     if uri.path().ends_with("/responses") {
@@ -1020,8 +1087,27 @@ async fn handle_any(
     forward_passthrough(&state, method, &uri, &headers, body).await
 }
 
-/// 把请求体读成 JSON 后交给翻译路径；读取或解析失败时返回明确错误。
-async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -> Response {
+/// 一条协议路径的处理结果：正常响应，或「上游说本模型不支持该协议」——后者供
+/// [`handle_responses_auto`] 改判另一条协议重发一次，不直接回给客户端。
+enum ProtocolOutcome {
+    Response(Response),
+    Unsupported { detail: String },
+}
+
+/// Responses 入口：**自动判定上游协议**。
+///
+/// 默认按 chat 翻译（历史行为）；上游以「协议不支持」拒绝时改判 Responses 直通并**只重发一次**
+/// 另一条路径（判据见 [`is_protocol_unsupported`]），学到的结论按 model id 粘滞到本代理实例
+/// 结束（重启后重学，最多多一次不会计费的上游 400）。其它 4xx（鉴权/限流/地区限制等）
+/// 一律不改判、不写记忆。
+///
+/// 读取或解析请求体失败时返回明确错误。
+async fn handle_responses_auto(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    body: Body,
+) -> Response {
     let bytes = match axum::body::to_bytes(body, RESPONSES_BODY_LIMIT).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -1031,12 +1117,87 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
             );
         }
     };
-    let mut req: Value = match serde_json::from_slice(&bytes) {
+    let req: Value = match serde_json::from_slice(&bytes) {
         Ok(req) => req,
         Err(e) => {
             return error_json(StatusCode::BAD_REQUEST, format!("请求体不是合法 JSON：{e}"));
         }
     };
+    let model = req.get("model").and_then(Value::as_str).map(str::to_string);
+    let (protocol, reason) = resolve_protocol(state, model.as_deref());
+    log_at(
+        &state.log,
+        "info",
+        "compat_proxy.protocol",
+        &[
+            ("model", model.clone().unwrap_or_default()),
+            ("protocol", protocol_label(protocol).to_string()),
+            ("reason", reason.to_string()),
+        ],
+    );
+    match protocol {
+        ModelProtocol::Chat => match handle_translated_responses(state, headers, &req).await {
+            ProtocolOutcome::Response(response) => response,
+            ProtocolOutcome::Unsupported { detail } => {
+                note_protocol_switch(state, model.as_deref(), ModelProtocol::Responses, &detail);
+                settle_protocol_outcome(
+                    handle_responses_passthrough(state, headers, uri, &req).await,
+                )
+            }
+        },
+        ModelProtocol::Responses => {
+            match handle_responses_passthrough(state, headers, uri, &req).await {
+                ProtocolOutcome::Response(response) => response,
+                ProtocolOutcome::Unsupported { detail } => {
+                    note_protocol_switch(state, model.as_deref(), ModelProtocol::Chat, &detail);
+                    settle_protocol_outcome(handle_translated_responses(state, headers, &req).await)
+                }
+            }
+        }
+    }
+}
+
+/// 两条协议都被上游拒绝（罕见：该模型的协议既不是 chat 也不是 responses）时收尾：
+/// 原样回最后一条上游错误，不再来回切换。
+fn settle_protocol_outcome(outcome: ProtocolOutcome) -> Response {
+    match outcome {
+        ProtocolOutcome::Response(response) => response,
+        ProtocolOutcome::Unsupported { detail } => Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(detail))
+            .unwrap_or_else(|_| error_json(StatusCode::BAD_REQUEST, "上游不支持该模型协议".into())),
+    }
+}
+
+/// 改判某模型的上游协议并记一条 warn（结论粘滞到本代理实例结束）。
+fn note_protocol_switch(
+    state: &ProxyState,
+    model: Option<&str>,
+    protocol: ModelProtocol,
+    detail: &str,
+) {
+    let changed = learn_protocol(state, model, protocol);
+    log_at(
+        &state.log,
+        "warn",
+        "compat_proxy.protocol_switched",
+        &[
+            ("model", model.unwrap_or_default().to_string()),
+            ("to", protocol_label(protocol).to_string()),
+            ("changed", changed.to_string()),
+            ("detail", detail.to_string()),
+        ],
+    );
+}
+
+/// 翻译路径：把 Responses 请求翻译成 chat/completions 发给上游（历史实现，行为不变）。
+async fn handle_translated_responses(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    req: &Value,
+) -> ProtocolOutcome {
+    let mut req = req.clone();
     let want_stream = req.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     // 本次入站请求的稳定标识：贯穿内容日志文件名与 session 日志行。
     let call_id = opencode_id("req", false);
@@ -1153,32 +1314,53 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
             }
             match forwarded.payload {
                 ForwardPayload::Text(text) => {
-                    proxy_error_text(status, &text, &state.log, forwarded.trace)
+                    // 上游说「不支持这个协议」→ 不当作终局错误回给客户端，改判另一条协议重发
+                    if !status.is_success() && is_protocol_unsupported(&text) {
+                        return protocol_unsupported_outcome(status, &text, forwarded.trace);
+                    }
+                    ProtocolOutcome::Response(proxy_error_text(
+                        status,
+                        &text,
+                        &state.log,
+                        forwarded.trace,
+                    ))
                 }
                 ForwardPayload::Live(resp) => {
                     if !status.is_success() {
-                        return proxy_error_response(status, resp, &state.log, forwarded.trace)
-                            .await;
+                        let text = resp.text().await.unwrap_or_default();
+                        if is_protocol_unsupported(&text) {
+                            return protocol_unsupported_outcome(status, &text, forwarded.trace);
+                        }
+                        return ProtocolOutcome::Response(proxy_error_text(
+                            status,
+                            &text,
+                            &state.log,
+                            forwarded.trace,
+                        ));
                     }
                     if want_stream {
-                        proxy_stream_response(
-                            state.clone(),
-                            headers.clone(),
-                            call_id.clone(),
-                            req,
-                            resp,
-                            forwarded.trace,
+                        ProtocolOutcome::Response(
+                            proxy_stream_response(
+                                state.clone(),
+                                headers.clone(),
+                                call_id.clone(),
+                                req,
+                                resp,
+                                forwarded.trace,
+                            )
+                            .await,
                         )
-                        .await
                     } else {
-                        proxy_json_response(
-                            req,
-                            resp,
-                            &state.log,
-                            state.nudge_enabled,
-                            forwarded.trace,
+                        ProtocolOutcome::Response(
+                            proxy_json_response(
+                                req,
+                                resp,
+                                &state.log,
+                                state.nudge_enabled,
+                                forwarded.trace,
+                            )
+                            .await,
                         )
-                        .await
                     }
                 }
             }
@@ -1190,9 +1372,106 @@ async fn handle_responses(state: &ProxyState, headers: &HeaderMap, body: Body) -
                 "compat_proxy.forward_error",
                 &[("url", base_url), ("error", msg.clone())],
             );
-            error_json(status, msg)
+            ProtocolOutcome::Response(error_json(status, msg))
         }
     }
+}
+
+/// 上游以「协议不支持」拒绝时：把原文写进内容日志（随后会换协议重发），并返回可换协议的信号。
+fn protocol_unsupported_outcome(
+    status: StatusCode,
+    text: &str,
+    mut call: TraceCall,
+) -> ProtocolOutcome {
+    call.note("upstream_status", status.as_u16().to_string());
+    call.write_response_text("response.txt", text);
+    call.note("protocol_unsupported", "true");
+    call.finish();
+    ProtocolOutcome::Unsupported {
+        detail: text.chars().take(200).collect(),
+    }
+}
+
+/// Responses 直通路径：按身份开关补门禁后把请求体发给上游**同一路径**，上游 SSE 逐字回传。
+///
+/// 与翻译路径的差异（有意为之）：不注入收尾契约、不做口嗨续跑/标签剥离/历史净化/
+/// 畸形工具调用保护/usage 明细映射/命名空间展开 —— 这条路径只服务「上游只认 Responses 协议」
+/// 的模型，codex 要的就是上游原生 Responses 流（实测 codex 的 `namespace` 工具与
+/// `store`/`include`/`reasoning`/`text` 字段上游都原样接受，不需要任何改写）。
+async fn handle_responses_passthrough(
+    state: &ProxyState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    req: &Value,
+) -> ProtocolOutcome {
+    // 「回合收尾约束和助推」在这条路径上不生效（整条口嗨判定/续跑/标签剥离都在翻译管线里）：
+    // 开着时记一条，避免"看着开了实际没生效"
+    if state.nudge_enabled {
+        log_at(
+            &state.log,
+            "info",
+            "compat_proxy.nudge_skipped",
+            &[
+                ("原因", "responses_protocol".to_string()),
+                ("轮次", "1".to_string()),
+                ("说明", NUDGE_SKIP_NOTE_RESPONSES_PROTOCOL.to_string()),
+            ],
+        );
+    }
+    let mut body = req.clone();
+    if state.opencode_identity {
+        patch_responses_gate(&mut body);
+        // 与翻译路径同一道门禁口径：合格工具不足时上游必然 403，提前记一条便于定位
+        let gate_tools = count_gate_tools(&body);
+        if gate_tools < ZEN_MIN_GATE_TOOLS {
+            log_at(
+                &state.log,
+                "warn",
+                "compat_proxy.zen_tools",
+                &[
+                    ("gate_tools", gate_tools.to_string()),
+                    ("required", ZEN_MIN_GATE_TOOLS.to_string()),
+                ],
+            );
+        }
+    }
+    let bytes = match serde_json::to_vec(&body) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return ProtocolOutcome::Response(error_json(
+                StatusCode::BAD_REQUEST,
+                format!("请求体序列化失败：{e}"),
+            ));
+        }
+    };
+    let response = forward_passthrough(state, Method::POST, uri, headers, Body::from(bytes)).await;
+    if response.status().is_success() {
+        return ProtocolOutcome::Response(response);
+    }
+    // 非 2xx：错误体很小，读出来判断是否「协议不支持」；不是的话按原状态码与原文回给客户端
+    let status = response.status();
+    let text = match axum::body::to_bytes(response.into_body(), PASSTHROUGH_ERROR_BODY_LIMIT).await
+    {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+        Err(e) => {
+            return ProtocolOutcome::Response(error_json(
+                StatusCode::BAD_GATEWAY,
+                format!("读取上游错误响应失败：{e}"),
+            ));
+        }
+    };
+    if is_protocol_unsupported(&text) {
+        return ProtocolOutcome::Unsupported {
+            detail: text.chars().take(200).collect(),
+        };
+    }
+    ProtocolOutcome::Response(
+        Response::builder()
+            .status(status)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(text))
+            .unwrap_or_else(|_| error_json(StatusCode::BAD_GATEWAY, "上游错误响应构造失败".into())),
+    )
 }
 
 /// 透传核心（便于单测）：构造上游 URL、转发请求并流式回传响应。
@@ -1587,9 +1866,69 @@ fn zen_tool_parameters(name: &str) -> Value {
         .unwrap_or_else(|| json!({ "type": "object", "properties": { "x": { "type": "string" } } }))
 }
 
+/// Responses 形状的门禁补丁（仅「OpenCode 客户端身份」开启时调用）：`tools` 里补缺失的
+/// [`ZEN_REQUIRED_TOOL_NAMES`] 声明（Responses 形状：`name`/`parameters` 在顶层，
+/// 带 `strict:false`，描述仍是弃用文案），并把「弃用工具声明」教学并入顶层 `instructions`。
+///
+/// 门禁口径与 chat 侧完全一致（名字在名单内 + `parameters.properties` 非空，≥
+/// [`ZEN_MIN_GATE_TOOLS`] 个）—— 不做这一步的话，codex 自己的工具名（`shell`/`apply_patch`/
+/// namespace 工具）一个都不合格，免费层会直接 403（2026-10-15 实测）。
+///
+/// 除 `tools` 与 `instructions` 外**一个字段都不动**：namespace 工具与 `store`/`include`/
+/// `prompt_cache_key`/`reasoning`/`text` 等实测都被上游原样接受，直通模式不做任何改写。
+/// 幂等：重复调用不叠加（同名以客户端声明为准，不改写客户端已有的工具）。
+fn patch_responses_gate(body: &mut Value) {
+    let existing = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    // Responses 侧工具名就是 `tools[i].name`（没有 chat 那层 `function` 包装）
+    let mut seen: HashSet<String> = existing
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let mut tools = existing;
+    let mut added: Vec<&str> = Vec::new();
+    for name in ZEN_REQUIRED_TOOL_NAMES {
+        if !seen.insert(name.to_string()) {
+            continue;
+        }
+        added.push(name);
+        tools.push(json!({
+            "type": "function",
+            "name": name,
+            "description": ZEN_FAKE_TOOL_DESCRIPTION,
+            "parameters": zen_tool_parameters(name),
+            "strict": false
+        }));
+    }
+    body["tools"] = Value::Array(tools);
+    if let Some(text) = fake_tools_instruction(&added) {
+        merge_responses_instructions(body, &text);
+    }
+}
+
+/// 把弃用工具教学并入 Responses 顶层 `instructions`（**不是** `messages`：Responses 协议里
+/// 开发者指令就在这个字段）。已有字符串则追加到末尾、缺失则新建；已含该文本时跳过（幂等）。
+fn merge_responses_instructions(body: &mut Value, text: &str) {
+    match body.get("instructions").and_then(Value::as_str) {
+        Some(existing) if existing.contains(text) => {}
+        Some(existing) => {
+            body["instructions"] = Value::String(format!("{existing}\n\n{text}"));
+        }
+        // 缺失或不是字符串（非标准形态）：直接覆盖成教学文本，保证模型能看到
+        None => body["instructions"] = Value::String(text.to_string()),
+    }
+}
+
 /// 统计请求体 `tools` 里「名字在 [`ZEN_REQUIRED_TOOL_NAMES`] 内、且
-/// `function.parameters.properties` 是非空对象」的条数——免费层门禁按这个数判定
+/// `parameters.properties` 是非空对象」的条数——免费层门禁按这个数判定
 /// （≥ [`ZEN_MIN_GATE_TOOLS`] 才放行）。纯函数，便于单测。
+///
+/// 同时认两种工具形状：chat 的 `function.name` / `function.parameters.properties`，
+/// 以及 Responses 的顶层 `name` / `parameters.properties`。
 fn count_gate_tools(body: &Value) -> usize {
     body.get("tools")
         .and_then(Value::as_array)
@@ -1597,11 +1936,15 @@ fn count_gate_tools(body: &Value) -> usize {
             tools
                 .iter()
                 .filter(|tool| {
-                    let name = tool.pointer("/function/name").and_then(Value::as_str);
+                    let name = tool
+                        .pointer("/function/name")
+                        .and_then(Value::as_str)
+                        .or_else(|| tool.get("name").and_then(Value::as_str));
                     let is_gate_name =
                         name.is_some_and(|name| ZEN_REQUIRED_TOOL_NAMES.contains(&name));
                     let has_properties = tool
                         .pointer("/function/parameters/properties")
+                        .or_else(|| tool.pointer("/parameters/properties"))
                         .and_then(Value::as_object)
                         .is_some_and(|properties| !properties.is_empty());
                     is_gate_name && has_properties
@@ -2868,6 +3211,9 @@ fn nudge_injected_note(plan_mode: bool) -> &'static str {
 const NUDGE_SKIP_NOTE_TITLE_TASK: &str = "会话标题线程，整轮放行";
 /// `compat_proxy.nudge_skipped` 里「回合收尾约束和助推」开关关闭时的中文 `说明`。
 const NUDGE_SKIP_NOTE_DISABLED: &str = "回合收尾约束和助推已关闭，不注入也不催办";
+/// `compat_proxy.nudge_skipped` 里走 Responses 直通（上游只认该协议）时的中文 `说明`。
+const NUDGE_SKIP_NOTE_RESPONSES_PROTOCOL: &str =
+    "该模型只支持 Responses 协议，本请求按原协议直通（收尾教学/续跑/标签剥离等翻译管线能力不参与）";
 
 /// 日志用：本次流里被结构剥离掉的标签载荷（标签不再下发，这里是唯一回看入口）。
 fn tag_payload(st: &StreamState) -> String {
@@ -3125,16 +3471,6 @@ fn held_prefix_len(hay: &str) -> usize {
 }
 
 /// 上游非 2xx：透传状态码与错误体。
-async fn proxy_error_response(
-    status: StatusCode,
-    resp: reqwest::Response,
-    log: &Option<Arc<SessionLog>>,
-    call: TraceCall,
-) -> Response {
-    let text = resp.text().await.unwrap_or_default();
-    proxy_error_text(status, &text, log, call)
-}
-
 /// 上游非 2xx 且错误体已读出：透传状态码与错误体。
 fn proxy_error_text(
     status: StatusCode,
