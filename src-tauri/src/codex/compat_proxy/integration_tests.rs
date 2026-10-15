@@ -3813,3 +3813,106 @@ async fn responses_passthrough_fails_turn_on_empty_custom_arguments() {
         "{joined}"
     );
 }
+
+// ---------- 直通路径的历史净化：无 encrypted_content 的 reasoning item 剥 id ----------
+
+/// 在探测请求上追加一段 codex 形状的历史：`reasoning`（可选加密）+ 一条用户消息。
+fn reasoning_history_request(model: &str, reasoning: Value) -> Value {
+    let mut req = protocol_probe_request(model);
+    req["input"] = json!([
+        { "role": "user", "content": [{ "type": "input_text", "text": "先看看这个文件" }] },
+        reasoning,
+        { "role": "assistant", "content": [{ "type": "output_text", "text": "好的" }] },
+        { "role": "user", "content": [{ "type": "input_text", "text": "继续" }] }
+    ]);
+    req
+}
+
+/// 翻译路径合成的思维链 item（有 id、无 encrypted_content）经直通路径 → 上游收到的 item 里
+/// **没有 id**，`summary` 仍在，并记 `reasoning_ids_stripped`。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_passthrough_strips_synthetic_reasoning_ids() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let (upstream, hits, seen) =
+        spawn_mock_protocol_split(ProtocolReply::Ok, ProtocolReply::Ok).await;
+    let state = proxy_state(upstream, log);
+    assert!(learn_protocol(
+        &state,
+        Some("muse-spark-mock"),
+        ModelProtocol::Responses
+    ));
+
+    let request = reasoning_history_request(
+        "muse-spark-mock",
+        json!({
+            "type": "reasoning",
+            "id": "rs_1792051783_2",
+            "summary": [{ "type": "summary_text", "text": "我在想怎么改这个文件" }]
+        }),
+    );
+    let resp = call_responses_entry(state, request).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(*hits.lock().await, vec!["responses"], "应直接走直通");
+
+    let sent = seen
+        .lock()
+        .await
+        .clone()
+        .expect("mock 应收到 responses 请求");
+    let reasoning = &sent["input"][1];
+    assert_eq!(reasoning["type"], "reasoning", "{sent}");
+    assert!(
+        reasoning.get("id").is_none(),
+        "无 encrypted_content 的思维链 id 必须剥掉：{sent}"
+    );
+    assert_eq!(
+        reasoning["summary"][0]["text"], "我在想怎么改这个文件",
+        "summary 必须逐字保留：{sent}"
+    );
+
+    let joined = read_session_log(&dir);
+    assert!(
+        joined.contains("event=compat_proxy.reasoning_ids_stripped") && joined.contains("count=1"),
+        "{joined}"
+    );
+}
+
+/// 带 `encrypted_content` 的思维链 item（上游来的）→ id 原样保留、不记剥除日志。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn responses_passthrough_keeps_encrypted_reasoning_ids() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let log = Some(Arc::new(SessionLog::new(dir.path().to_path_buf())));
+    let (upstream, _, seen) = spawn_mock_protocol_split(ProtocolReply::Ok, ProtocolReply::Ok).await;
+    let state = proxy_state(upstream, log);
+    assert!(learn_protocol(
+        &state,
+        Some("muse-spark-mock"),
+        ModelProtocol::Responses
+    ));
+
+    let request = reasoning_history_request(
+        "muse-spark-mock",
+        json!({
+            "type": "reasoning",
+            "id": "rs_upstream:rs_1",
+            "summary": [],
+            "encrypted_content": "Q-PaDgHrx6P9dr0TGE"
+        }),
+    );
+    let resp = call_responses_entry(state, request).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let sent = seen
+        .lock()
+        .await
+        .clone()
+        .expect("mock 应收到 responses 请求");
+    assert_eq!(sent["input"][1]["id"], "rs_upstream:rs_1", "{sent}");
+    assert_eq!(sent["input"][1]["encrypted_content"], "Q-PaDgHrx6P9dr0TGE");
+    let joined = read_session_log(&dir);
+    assert!(
+        !joined.contains("event=compat_proxy.reasoning_ids_stripped"),
+        "没有可剥的 item 时不该记日志：{joined}"
+    );
+}

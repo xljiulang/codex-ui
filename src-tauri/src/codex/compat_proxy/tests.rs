@@ -3615,3 +3615,79 @@ fn rewrite_responses_frame_fails_the_turn_on_empty_custom_input() {
     );
     assert!(!tail.contains("\"function_call\""), "{tail}");
 }
+
+// ---------- 直通路径的历史净化：无 encrypted_content 的 reasoning item 剥 id ----------
+
+#[test]
+fn sanitize_responses_reasoning_items_strips_only_coreless_ids() {
+    let mut body = json!({
+        "model": "m",
+        "input": [
+            { "role": "user", "content": "hi" },
+            // 翻译路径合成的思维链 item：有 id、没 encrypted_content → 剥 id，summary 保留
+            { "type": "reasoning", "id": "rs_1792051783_2",
+              "summary": [{ "type": "summary_text", "text": "我在想怎么改" }] },
+            // 上游来的思维链 item：带 encrypted_content → 一个字段都不动
+            { "type": "reasoning", "id": "rs_upstream:rs_1", "summary": [],
+              "encrypted_content": "Q-PaDgHrx6P9dr0TGE" },
+            { "role": "assistant", "id": "msg_1792051783_4",
+              "content": [{ "type": "output_text", "text": "好的" }] },
+            { "type": "function_call", "id": "fc_1792051783_3", "call_id": "call_1",
+              "name": "shell", "arguments": "{}" },
+            { "type": "custom_tool_call", "id": "ctc_1792051783_5", "call_id": "call_2",
+              "name": "apply_patch", "input": "*** Begin Patch\n*** End Patch" }
+        ]
+    });
+    assert_eq!(sanitize_responses_reasoning_items(&mut body), 1);
+    let input = body["input"].as_array().unwrap();
+    // 合成的思维链：id 没了、summary 与 type 逐字保留
+    assert!(input[1].get("id").is_none(), "{}", input[1]);
+    assert_eq!(input[1]["type"], "reasoning");
+    assert_eq!(
+        input[1]["summary"][0]["text"], "我在想怎么改",
+        "{}",
+        input[1]
+    );
+    // 上游的思维链：带 encrypted_content，原样保留 id
+    assert_eq!(input[2]["id"], "rs_upstream:rs_1");
+    assert_eq!(input[2]["encrypted_content"], "Q-PaDgHrx6P9dr0TGE");
+    // 其它 item 的合成 id 一律不动（实测上游无害）
+    assert_eq!(input[3]["id"], "msg_1792051783_4");
+    assert_eq!(input[4]["id"], "fc_1792051783_3");
+    assert_eq!(input[5]["id"], "ctc_1792051783_5");
+}
+
+#[test]
+fn sanitize_responses_reasoning_items_keeps_plain_bodies_untouched() {
+    for mut body in [
+        json!({ "model": "m" }),
+        json!({ "model": "m", "input": [] }),
+        json!({ "model": "m", "input": { "oops": true } }),
+        json!({ "model": "m", "input": [{ "role": "user", "content": "hi" }] }),
+    ] {
+        let before = body.clone();
+        assert_eq!(sanitize_responses_reasoning_items(&mut body), 0);
+        assert_eq!(body, before, "没有需要剥的 item 时不该改动请求体");
+    }
+}
+
+#[test]
+fn sanitize_responses_reasoning_items_handles_empty_and_null_encrypted() {
+    let mut body = json!({
+        "model": "m",
+        "input": [
+            { "type": "reasoning", "id": "rs_a", "encrypted_content": "" },
+            { "type": "reasoning", "id": "rs_b", "encrypted_content": null },
+            { "type": "reasoning", "id": "rs_c" },
+            { "type": "reasoning", "encrypted_content": "  " },
+            { "type": "reasoning", "id": "rs_keep", "encrypted_content": "blob" }
+        ]
+    });
+    // 空串 / null / 缺失都算「没有加密思维链」→ 剥 id；空白串：id 本来就没有，不计入
+    assert_eq!(sanitize_responses_reasoning_items(&mut body), 3);
+    let input = body["input"].as_array().unwrap();
+    assert!(input[0].get("id").is_none());
+    assert!(input[1].get("id").is_none());
+    assert!(input[2].get("id").is_none());
+    assert_eq!(input[4]["id"], "rs_keep", "带加密内容的 id 必须保留");
+}

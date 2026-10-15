@@ -1816,6 +1816,17 @@ async fn handle_responses_passthrough(
             ],
         );
     }
+    // 历史里的思维链 item：翻译路径合成的那种「有 id、没 encrypted_content」上游会按 id 查而拒，
+    // 统一把这类 item 的 id 剥掉（只留 summary）。同样与身份开关无关：协议兼容而非伪装。
+    let stripped = sanitize_responses_reasoning_items(&mut body);
+    if stripped > 0 {
+        log_at(
+            &state.log,
+            "info",
+            "compat_proxy.reasoning_ids_stripped",
+            &[("count", stripped.to_string())],
+        );
+    }
     if state.opencode_identity {
         patch_responses_gate(&mut body);
         // 与翻译路径同一道门禁口径：合格工具不足时上游必然 403，提前记一条便于定位
@@ -2509,6 +2520,43 @@ fn normalize_responses_tools(body: &mut Value) -> Vec<String> {
     }
     body["tools"] = Value::Array(out);
     converted
+}
+
+/// 直通路径的**历史净化**：把 `input[]` 里「没有 `encrypted_content` 的 `reasoning` item」的
+/// `id` 字段删掉（`summary` 等其余字段逐字保留），返回被剥的条数。
+///
+/// 为什么必须剥：翻译路径产出的思维链 item 是 `gen_id("rs")` 合成的 id + 只有 `summary`
+/// （chat 侧没有可回传的加密思维链），而上游 `/responses` 对这类 item **按 id 查**——
+/// 带上查不到的 id 会被拒（`Referenced reasoning item … was not found or has expired.`）。
+/// 2026-10-15 实测：同一份历史里，带 `encrypted_content` 的 item 无论 id 是否存在都 200、
+/// 只有 summary + 未知 id 是 400、只有 summary 且无 id 是 200。codex 默认
+/// `disable_response_storage = true`（`store:false`），id 本来就不可解析，因此
+/// 「剥 id 留 summary」是无损的最小修法。其它 item 的合成 id 无关痛痒
+/// （`message` / `custom_tool_call` 实测 200，`function_call` 只校验调用与结果的配对）。
+fn sanitize_responses_reasoning_items(body: &mut Value) -> usize {
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    let mut stripped = 0usize;
+    for item in input.iter_mut() {
+        if item.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        let has_encrypted = item
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| !content.trim().is_empty());
+        if has_encrypted {
+            continue;
+        }
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.remove("id").is_some() {
+            stripped += 1;
+        }
+    }
+    stripped
 }
 
 /// Responses 的 `tool_choice` → chat 形态：字符串直接透传，
