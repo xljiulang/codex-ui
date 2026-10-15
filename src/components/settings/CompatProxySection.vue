@@ -137,16 +137,16 @@ onBeforeUnmount(refresh);
   >
     <h2 class="settings-section-title">兼容代理</h2>
     <p class="settings-section-desc">
-      在本地开放一个 Responses API 端点，把请求翻译为 Chat Completions
-      转发到任意 OpenAI 兼容上游（默认 OpenCode
+      本地开放 Responses API 端点，翻译为 Chat Completions 后转发到任意 OpenAI
+      兼容上游（默认 OpenCode
       <a
         class="compat-proxy-docs-link"
         :href="ZEN_DOCS_URL"
         v-tooltip="'Zen 免费模型文档（浏览器打开）'"
         @click.prevent="openDocsUrl(ZEN_DOCS_URL)"
         >Zen 免费模型</a
-      >）；上游只支持 Responses 协议的模型（如 Zen 的 Muse Spark / GPT-5.x
-      系）会自动按原协议转发，此时回合助推等翻译能力不适用
+      >）；仅支持 Responses
+      协议的上游按原协议直接转发，此时回合助推等翻译能力不适用
     </p>
     <div class="model-config-card">
       <div class="model-config-card-head">
